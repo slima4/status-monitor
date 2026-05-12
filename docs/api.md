@@ -1,0 +1,87 @@
+# REST API
+
+Mounted under `/api/v1` on the configured API bind. JSON in, JSON out. No authentication in v1 — bind to loopback or front it with a reverse proxy you trust.
+
+## Endpoints
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `POST` | `/api/v1/targets` | create one target |
+| `POST` | `/api/v1/targets/bulk` | bulk-create up to 10,000 targets |
+| `GET` | `/api/v1/targets` | list targets (`limit`, `offset`, `tag`, `enabled` query params) |
+| `GET` | `/api/v1/targets/{id}` | get one target |
+| `PATCH` | `/api/v1/targets/{id}` | update name, check spec, interval, enabled, tags |
+| `DELETE` | `/api/v1/targets/{id}` | delete a target |
+| `GET` | `/api/v1/targets/{id}/results` | recent check results (`from`, `to`, `limit`) |
+| `GET` | `/api/v1/targets/{id}/uptime` | uptime summary over a range |
+| `GET` | `/healthz` | liveness — always 200 once the process is up |
+| `GET` | `/readyz` | readiness — pings the target store; 503 if unreachable |
+
+## Check specs
+
+Tagged enum, `type` discriminator.
+
+### HTTP
+
+```jsonc
+{
+  "type": "http",
+  "url": "https://example.com/healthz",
+  "method": "GET",
+  "timeout": 5000,                              // ms, total request budget
+  "follow_redirects": false,
+  "max_redirects": 0,
+  "expected_status": { "kind": "exact", "value": 200 },
+  "expected_body_contains": null,               // optional substring match
+  "headers": {},
+  "body": null,
+  "verify_tls": true,
+  "basic_auth": null,                           // ["user", "pass"] or null
+  "bearer_token": null
+}
+```
+
+`expected_status` variants:
+
+```jsonc
+{ "kind": "exact", "value": 200 }
+{ "kind": "range", "value": { "min": 200, "max": 299 } }
+{ "kind": "one_of", "value": [200, 204] }
+```
+
+### TCP
+
+```jsonc
+{ "type": "tcp", "host": "db.internal", "port": 5432, "timeout": 2000 }
+```
+
+## Target payload
+
+```jsonc
+{
+  "name": "internal-api",
+  "check": { /* check spec */ },
+  "interval": 30,             // seconds between ticks; min 10 (DB CHECK constraint)
+  "enabled": true,
+  "tags": ["prod", "tier1"]
+}
+```
+
+Server returns the full `Target` including `id` (UUIDv7), `created_at`, `updated_at`.
+
+## Results query
+
+`GET /api/v1/targets/{id}/results?from=2026-05-12T00:00:00Z&to=2026-05-12T23:59:59Z&limit=100`
+
+- `from` / `to` default to the last 24 h
+- `limit` capped at 10,000 server-side
+
+Returns an array of `CheckResult` ordered by `timestamp DESC`.
+
+## Uptime query
+
+`GET /api/v1/targets/{id}/uptime?from=…&to=…`
+
+```jsonc
+{ "total": 8640, "up": 8635, "down": 0, "degraded": 0, "error": 5, "uptime_pct": 99.94 }
+```

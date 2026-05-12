@@ -47,7 +47,7 @@ fn build_one(
     resolver: Arc<HickoryDnsResolver>,
     verify_tls: bool,
 ) -> Result<reqwest::Client> {
-    let client = reqwest::Client::builder()
+    let mut builder = reqwest::Client::builder()
         .pool_max_idle_per_host(http_cfg.pool_max_idle_per_host)
         .pool_idle_timeout(Duration::from_secs(http_cfg.pool_idle_timeout_secs))
         .tcp_keepalive(Duration::from_secs(http_cfg.tcp_keepalive_secs))
@@ -65,8 +65,10 @@ fn build_one(
         .gzip(true)
         .brotli(true)
         .redirect(reqwest::redirect::Policy::none())
-        .user_agent(&http_cfg.user_agent)
-        .build()
-        .context("failed to build HTTP client")?;
+        .user_agent(&http_cfg.user_agent);
+    if http_cfg.http2_prior_knowledge {
+        builder = builder.http2_prior_knowledge();
+    }
+    let client = builder.build().context("failed to build HTTP client")?;
     Ok(client)
 }

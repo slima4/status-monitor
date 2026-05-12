@@ -82,6 +82,7 @@ fn build_clients_with(dns_cfg: DnsConfig) -> status_monitor::error::Result<HttpC
         http2_keep_alive_timeout_secs: 10,
         http2_keep_alive_while_idle: true,
         user_agent: "StatusMonitor/test".into(),
+        http2_prior_knowledge: false,
     };
     let checker_cfg = CheckerConfig {
         max_concurrent_checks: 100,

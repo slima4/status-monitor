@@ -52,6 +52,8 @@ pub struct HttpClientConfig {
     pub http2_keep_alive_timeout_secs: u64,
     pub http2_keep_alive_while_idle: bool,
     pub user_agent: String,
+    #[serde(default)]
+    pub http2_prior_knowledge: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
