@@ -1,8 +1,12 @@
 # status-monitor
 
+[![docs](https://github.com/slima4/status-monitor/actions/workflows/docs.yml/badge.svg)](https://github.com/slima4/status-monitor/actions/workflows/docs.yml)
+
 Async Rust service that runs HTTP and TCP health checks against a configurable set of targets, applies per-host circuit breaking, batches results, and ships them to durable storage. Targets persist in PostgreSQL; check results land in ClickHouse for high-cardinality time-series queries. Exposes a REST API for target CRUD and result queries plus Prometheus metrics on a separate port.
 
 Built on Rust 1.95 (edition 2024), Tokio, Axum, reqwest, sqlx, and the official `clickhouse` crate. Designed for low-overhead checks at ~50k concurrent in-flight.
+
+**Full docs: <https://slima4.github.io/status-monitor/>**
 
 ## Quick start
 
@@ -65,6 +69,17 @@ cargo run --release
 ```
 
 ## Docs
+
+Hosted at <https://slima4.github.io/status-monitor/> (rendered with `mdbook` via GitHub Actions, deployed on every push to `main`).
+
+Build and preview locally:
+
+```bash
+cargo install mdbook mdbook-linkcheck2
+mdbook serve --open
+```
+
+Sources under [`docs/`](docs/) — readable directly on GitHub too:
 
 | File | Covers |
 |---|---|

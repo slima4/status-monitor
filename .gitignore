@@ -2,6 +2,9 @@
 **/*.rs.bk
 *.pdb
 
+# mdBook build output
+/book
+
 # Editor
 .vscode/
 .idea/

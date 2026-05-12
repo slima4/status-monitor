@@ -1,0 +1,27 @@
+[book]
+title = "status-monitor"
+description = "Async Rust health-check service — architecture, API, configuration, metrics, deployment."
+authors = ["status-monitor authors"]
+language = "en"
+src = "docs"
+
+[output.html]
+default-theme = "rust"
+preferred-dark-theme = "navy"
+git-repository-url = "https://github.com/slima4/status-monitor"
+edit-url-template = "https://github.com/slima4/status-monitor/edit/main/{path}"
+site-url = "/status-monitor/"
+
+[output.html.search]
+enable = true
+limit-results = 30
+use-boolean-and = true
+
+[output.html.fold]
+enable = true
+level = 1
+
+[output.linkcheck2]
+follow-web-links = false
+traverse-parent-directories = false
+warning-policy = "error"
