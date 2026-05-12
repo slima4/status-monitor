@@ -1,19 +1,22 @@
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::Context;
 use hickory_resolver::config::{NameServerConfig, ResolverConfig, ResolverOpts};
 use hickory_resolver::lookup_ip::LookupIp;
 use hickory_resolver::net::runtime::TokioRuntimeProvider;
 use hickory_resolver::{Resolver, TokioResolver};
+use metrics::{Histogram, histogram};
 use reqwest::dns::{Addrs, Name, Resolve, Resolving};
 
 use crate::config::DnsConfig;
 use crate::error::Result;
+use crate::observability::metrics::names;
 
 pub struct HickoryDnsResolver {
     inner: Arc<TokioResolver>,
+    dns_ms: Histogram,
 }
 
 impl HickoryDnsResolver {
@@ -48,6 +51,7 @@ impl HickoryDnsResolver {
 
         Ok(Self {
             inner: Arc::new(resolver),
+            dns_ms: histogram!(names::CHECK_DNS_MS),
         })
     }
 }
@@ -55,9 +59,12 @@ impl HickoryDnsResolver {
 impl Resolve for HickoryDnsResolver {
     fn resolve(&self, name: Name) -> Resolving {
         let resolver = self.inner.clone();
+        let dns_ms = self.dns_ms.clone();
         Box::pin(async move {
             let host = name.as_str().to_owned();
+            let start = Instant::now();
             let lookup: LookupIp = resolver.lookup_ip(host).await?;
+            dns_ms.record(start.elapsed().as_millis() as f64);
             let ips: Vec<SocketAddr> = lookup.iter().map(|ip| SocketAddr::new(ip, 0)).collect();
             let addrs: Addrs = Box::new(ips.into_iter());
             Ok(addrs)

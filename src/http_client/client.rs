@@ -2,15 +2,18 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context;
+use metrics::{Histogram, histogram};
 
 use crate::config::{CheckerConfig, DnsConfig, HttpClientConfig};
 use crate::error::Result;
 use crate::http_client::dns::HickoryDnsResolver;
+use crate::observability::metrics::names;
 
 #[derive(Clone)]
 pub struct HttpClients {
     verifying: reqwest::Client,
     insecure: reqwest::Client,
+    pub(crate) ttfb_ms: Histogram,
 }
 
 impl HttpClients {
@@ -34,6 +37,7 @@ pub fn build_clients(
     Ok(HttpClients {
         verifying,
         insecure,
+        ttfb_ms: histogram!(names::CHECK_TTFB_MS),
     })
 }
 

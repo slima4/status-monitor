@@ -45,18 +45,23 @@ pub async fn execute_http_check(
             );
         }
     };
+    let ttfb_elapsed_ms = start.elapsed().as_millis();
+    clients.ttfb_ms.record(ttfb_elapsed_ms as f64);
+    let ttfb_ms = ttfb_elapsed_ms.min(u16::MAX as u128) as u16;
 
     let status_code = response.status().as_u16();
     let bytes = match response.bytes().await {
         Ok(b) => b,
         Err(err) => {
             let elapsed = start.elapsed().as_millis() as u32;
-            return CheckResult::error_with_elapsed(
+            let mut r = CheckResult::error_with_elapsed(
                 target_id,
                 started_at,
                 elapsed,
                 classify_reqwest_error(&err),
             );
+            r.ttfb_ms = Some(ttfb_ms);
+            return r;
         }
     };
     let size = bytes.len() as u32;
@@ -89,7 +94,7 @@ pub async fn execute_http_check(
         dns_ms: None,
         connect_ms: None,
         tls_ms: None,
-        ttfb_ms: None,
+        ttfb_ms: Some(ttfb_ms),
         response_code: Some(status_code),
         response_size: Some(size),
         error,

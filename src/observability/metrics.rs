@@ -53,6 +53,14 @@ fn register_descriptions() {
         "Total check duration in milliseconds"
     );
     describe_histogram!(
+        "status_monitor_check_dns_ms",
+        "DNS resolution latency in milliseconds"
+    );
+    describe_histogram!(
+        "status_monitor_check_ttfb_ms",
+        "HTTP time-to-first-byte in milliseconds"
+    );
+    describe_histogram!(
         "status_monitor_storage_batch_size",
         "Result batch size at flush time"
     );
@@ -86,6 +94,8 @@ pub mod names {
     pub const STORAGE_WRITES: &str = "status_monitor_storage_writes_total";
     pub const STORAGE_DROPPED: &str = "status_monitor_storage_dropped_results_total";
     pub const CHECK_DURATION_MS: &str = "status_monitor_check_duration_ms";
+    pub const CHECK_DNS_MS: &str = "status_monitor_check_dns_ms";
+    pub const CHECK_TTFB_MS: &str = "status_monitor_check_ttfb_ms";
     pub const STORAGE_BATCH_SIZE: &str = "status_monitor_storage_batch_size";
     pub const STORAGE_WRITE_DURATION_MS: &str = "status_monitor_storage_write_duration_ms";
     pub const TARGETS_TOTAL: &str = "status_monitor_targets_total";
