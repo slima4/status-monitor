@@ -24,6 +24,7 @@ impl CheckTask {
 
 pub struct WorkerPool {
     semaphore: Arc<Semaphore>,
+    max_concurrent: usize,
     http_client: reqwest::Client,
     breakers: Arc<DashMap<String, Arc<CircuitBreaker>>>,
     breaker_cfg: CircuitBreakerConfig,
@@ -39,6 +40,7 @@ impl WorkerPool {
     ) -> Self {
         Self {
             semaphore: Arc::new(Semaphore::new(max_concurrent)),
+            max_concurrent,
             http_client,
             breakers: Arc::new(DashMap::new()),
             breaker_cfg,
@@ -46,8 +48,17 @@ impl WorkerPool {
         }
     }
 
+    pub fn max_concurrent(&self) -> usize {
+        self.max_concurrent
+    }
+
     pub fn available_permits(&self) -> usize {
         self.semaphore.available_permits()
+    }
+
+    pub fn in_flight(&self) -> usize {
+        self.max_concurrent
+            .saturating_sub(self.semaphore.available_permits())
     }
 
     pub fn open_breakers(&self) -> usize {

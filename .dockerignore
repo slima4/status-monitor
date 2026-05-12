@@ -9,5 +9,4 @@ CLAUDE.md
 claude.md
 .claude/
 *.md
-benches/
 tests/

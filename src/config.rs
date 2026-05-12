@@ -108,6 +108,12 @@ pub struct ObservabilityConfig {
     pub metrics_enabled: bool,
     pub tracing_enabled: bool,
     pub otlp_endpoint: String,
+    #[serde(default = "default_gauge_sample_interval_ms")]
+    pub gauge_sample_interval_ms: u64,
+}
+
+fn default_gauge_sample_interval_ms() -> u64 {
+    1000
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]

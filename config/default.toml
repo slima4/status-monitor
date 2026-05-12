@@ -60,3 +60,4 @@ log_format = "json"
 metrics_enabled = true
 tracing_enabled = false
 otlp_endpoint = "http://localhost:4317"
+gauge_sample_interval_ms = 1000

@@ -1,11 +1,18 @@
 use std::sync::atomic::{AtomicI64, AtomicU8, AtomicU32, Ordering};
 
 use chrono::Utc;
+use metrics::counter;
 
 use crate::config::CircuitBreakerConfig;
 use crate::domain::CheckStatus;
+use crate::observability::metrics::names;
 
 pub const CIRCUIT_OPEN_REASON: &str = "circuit_open";
+
+fn record_transition(from: BreakerState, to: BreakerState) {
+    counter!(names::BREAKER_STATE_CHANGES, "from" => from.as_label(), "to" => to.as_label())
+        .increment(1);
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -21,6 +28,14 @@ impl BreakerState {
             1 => Self::Open,
             2 => Self::HalfOpen,
             _ => Self::Closed,
+        }
+    }
+
+    fn as_label(self) -> &'static str {
+        match self {
+            Self::Closed => "closed",
+            Self::Open => "open",
+            Self::HalfOpen => "half_open",
         }
     }
 }
@@ -83,6 +98,7 @@ impl CircuitBreaker {
         {
             self.success_count.store(0, Ordering::Release);
             self.half_open_in_flight.store(0, Ordering::Release);
+            record_transition(BreakerState::Open, BreakerState::HalfOpen);
         }
     }
 
@@ -132,6 +148,10 @@ impl CircuitBreaker {
     }
 
     fn trip_open(&self) {
+        let prev = BreakerState::from_u8(self.state.load(Ordering::Acquire));
+        if prev == BreakerState::Open {
+            return;
+        }
         self.state
             .store(BreakerState::Open as u8, Ordering::Release);
         self.opened_at
@@ -139,14 +159,20 @@ impl CircuitBreaker {
         self.failure_count.store(0, Ordering::Release);
         self.success_count.store(0, Ordering::Release);
         self.half_open_in_flight.store(0, Ordering::Release);
+        record_transition(prev, BreakerState::Open);
     }
 
     fn close(&self) {
+        let prev = BreakerState::from_u8(self.state.load(Ordering::Acquire));
+        if prev == BreakerState::Closed {
+            return;
+        }
         self.state
             .store(BreakerState::Closed as u8, Ordering::Release);
         self.failure_count.store(0, Ordering::Release);
         self.success_count.store(0, Ordering::Release);
         self.half_open_in_flight.store(0, Ordering::Release);
+        record_transition(prev, BreakerState::Closed);
     }
 }
 

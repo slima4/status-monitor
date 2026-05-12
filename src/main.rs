@@ -53,10 +53,14 @@ async fn main() -> Result<()> {
         cfg.checker.max_concurrent_checks,
         http_client,
         cfg.circuit_breaker,
-        result_tx,
+        result_tx.clone(),
     ));
     let registry = Arc::new(TargetRegistry::new(target_store.clone()));
-    let scheduler = Arc::new(Scheduler::new(registry, pool, cfg.scheduler.clone()));
+    let scheduler = Arc::new(Scheduler::new(
+        registry.clone(),
+        pool.clone(),
+        cfg.scheduler.clone(),
+    ));
 
     let batcher_cfg = BatcherConfig {
         batch_size: cfg.storage.clickhouse.batch_size.max(1),
@@ -78,6 +82,17 @@ async fn main() -> Result<()> {
         let token = root.clone();
         tokio::spawn(async move { batcher.run(token).await })
     };
+    // Floor at 100ms to keep a misconfigured 0 / sub-tick value from spinning.
+    let sample_interval =
+        Duration::from_millis(cfg.observability.gauge_sample_interval_ms.max(100));
+    let sampler_handle: JoinHandle<()> = status_monitor::observability::sampler::spawn(
+        pool.clone(),
+        registry.clone(),
+        &result_tx,
+        sample_interval,
+        root.clone(),
+    );
+    drop(result_tx);
 
     let state = AppState::new(cfg, target_store, results_store);
     let router = build_router(state);
@@ -98,7 +113,7 @@ async fn main() -> Result<()> {
 
     tracing::info!("draining background tasks");
     let drain = async {
-        let _ = tokio::join!(scheduler_handle, batcher_handle);
+        let _ = tokio::join!(scheduler_handle, batcher_handle, sampler_handle);
     };
     if timeout(SHUTDOWN_DEADLINE, drain).await.is_err() {
         tracing::warn!(

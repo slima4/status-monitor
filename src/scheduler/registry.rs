@@ -33,6 +33,14 @@ impl TargetRegistry {
         }
     }
 
+    pub fn len(&self) -> usize {
+        self.targets.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.targets.is_empty()
+    }
+
     pub async fn refresh(&self) -> Result<RegistryDiff> {
         let fresh = self.store.list_enabled().await?;
         let mut diff = RegistryDiff::default();

@@ -11,6 +11,7 @@ RUN apt-get update && \
 
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
+COPY benches ./benches
 COPY migrations ./migrations
 COPY config ./config
 
