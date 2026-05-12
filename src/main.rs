@@ -1,15 +1,26 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use status_monitor::{
     api::build_router,
     app::AppState,
     config::AppConfig,
     error::{AppError, Result},
+    http_client::client::build_client,
     observability,
-    storage::{InMemorySink, InMemoryTargetStore},
+    pipeline::{BatcherConfig, ResultBatcher},
+    scheduler::{Scheduler, TargetRegistry},
+    storage::{InMemorySink, InMemoryTargetStore, ResultSink, ResultsStore, TargetStore},
+    worker::WorkerPool,
 };
 use tokio::net::TcpListener;
 use tokio::signal;
+use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
+use tokio::time::timeout;
+use tokio_util::sync::CancellationToken;
+
+const SHUTDOWN_DEADLINE: Duration = Duration::from_secs(10);
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -30,25 +41,78 @@ async fn main() -> Result<()> {
     );
 
     let api_bind = cfg.server.api_bind.clone();
-    let target_store = Arc::new(InMemoryTargetStore::new());
-    let results_store = Arc::new(InMemorySink::new());
+    let target_store: Arc<dyn TargetStore> = Arc::new(InMemoryTargetStore::new());
+    let in_memory_sink = Arc::new(InMemorySink::new());
+    let result_sink: Arc<dyn ResultSink> = in_memory_sink.clone();
+    let results_store: Arc<dyn ResultsStore> = in_memory_sink;
+
+    let http_client = build_client(&cfg.http_client, &cfg.checker, &cfg.dns)?;
+
+    let (result_tx, result_rx) = mpsc::channel(cfg.storage.clickhouse.buffer_size.max(1024));
+    let pool = Arc::new(WorkerPool::new(
+        cfg.checker.max_concurrent_checks,
+        http_client,
+        cfg.circuit_breaker,
+        result_tx,
+    ));
+    let registry = Arc::new(TargetRegistry::new(target_store.clone()));
+    let scheduler = Arc::new(Scheduler::new(registry, pool, cfg.scheduler.clone()));
+
+    let batcher_cfg = BatcherConfig {
+        batch_size: cfg.storage.clickhouse.batch_size.max(1),
+        batch_timeout: Duration::from_millis(cfg.storage.clickhouse.batch_timeout_ms),
+    };
+    let batcher = ResultBatcher::new(result_rx, result_sink, batcher_cfg);
+
+    let root = CancellationToken::new();
+    let scheduler_handle: JoinHandle<()> = {
+        let scheduler = scheduler.clone();
+        let token = root.clone();
+        tokio::spawn(async move {
+            if let Err(err) = scheduler.run(token).await {
+                tracing::error!(?err, "scheduler exited with error");
+            }
+        })
+    };
+    let batcher_handle: JoinHandle<()> = {
+        let token = root.clone();
+        tokio::spawn(async move { batcher.run(token).await })
+    };
+
     let state = AppState::new(cfg, target_store, results_store);
     let router = build_router(state);
 
     let listener = TcpListener::bind(&api_bind).await.map_err(AppError::Io)?;
     tracing::info!(addr = %api_bind, "api listening");
 
-    axum::serve(listener, router)
-        .with_graceful_shutdown(shutdown_signal())
-        .await
-        .map_err(AppError::Io)?;
+    let signal_token = root.clone();
+    let serve = axum::serve(listener, router).with_graceful_shutdown(async move {
+        wait_for_signal().await;
+        signal_token.cancel();
+    });
+
+    if let Err(err) = serve.await {
+        tracing::error!(?err, "api server error");
+        root.cancel();
+    }
+
+    tracing::info!("draining background tasks");
+    let drain = async {
+        let _ = tokio::join!(scheduler_handle, batcher_handle);
+    };
+    if timeout(SHUTDOWN_DEADLINE, drain).await.is_err() {
+        tracing::warn!(
+            deadline_secs = SHUTDOWN_DEADLINE.as_secs(),
+            "shutdown deadline exceeded, dropping in-flight work"
+        );
+    }
 
     let _ = metrics_handle;
     tracing::info!("shutdown complete");
     Ok(())
 }
 
-async fn shutdown_signal() {
+async fn wait_for_signal() {
     let ctrl_c = async {
         signal::ctrl_c()
             .await

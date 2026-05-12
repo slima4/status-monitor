@@ -77,6 +77,9 @@ url = { version = "2.5", features = ["serde"] }
 async-trait = "0.1"
 fastrand = "2"
 
+[dev-dependencies]
+criterion = { version = "0.8", features = ["async_tokio"] }
+
 [profile.release]
 opt-level = 3
 lto = "fat"
@@ -88,3 +91,11 @@ strip = true
 inherits = "release"
 debug = true
 strip = false
+
+[[bench]]
+name = "circuit_breaker"
+harness = false
+
+[[bench]]
+name = "batcher_flush"
+harness = false

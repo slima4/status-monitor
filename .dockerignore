@@ -1,0 +1,13 @@
+target/
+.git/
+.gitignore
+.dockerignore
+Dockerfile
+docker-compose.yml
+specs/
+CLAUDE.md
+claude.md
+.claude/
+*.md
+benches/
+tests/
