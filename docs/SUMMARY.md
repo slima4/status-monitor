@@ -8,4 +8,5 @@
 - [Metrics & tracing](metrics.md)
 - [Deployment](deployment.md)
 - [Load test](loadtest.md)
+- [Benchmarks](benchmarks.md)
 - [Troubleshooting](troubleshooting.md)

@@ -1,8 +1,25 @@
 # Load test
 
+End-to-end harness. Spawns workers driving the production check executor against in-process mock servers. Different from the [micro-benchmarks](benchmarks.md), which measure single-call cost via Criterion.
+
 ```bash
 cargo run --release --bin loadtest
 ```
+
+## Linux verification (Docker)
+
+50k concurrent runs need Linux kernel knobs that macOS doesn't expose. The compose stack ships a `loadtest` profile that runs the binary inside a Linux container with the required sysctls and ulimits:
+
+```bash
+docker compose --profile loadtest build loadtest
+docker compose --profile loadtest run --rm loadtest
+
+# override on the fly
+docker compose --profile loadtest run --rm \
+  -e CONCURRENCY=100000 -e DURATION_SECS=60 loadtest
+```
+
+The container sets `net.core.somaxconn=8192`, `net.ipv4.tcp_tw_reuse=1`, `net.ipv4.ip_local_port_range=10000 65535`, and `nofile=1048576` — none require `--privileged` since these sysctls are namespaced.
 
 ## Env
 

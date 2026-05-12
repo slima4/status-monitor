@@ -81,7 +81,8 @@ Sources under [`docs/`](docs/) — readable directly on GitHub too:
 | [docs/configuration.md](docs/configuration.md) | `default.toml` reference, env override scheme, tuning notes |
 | [docs/metrics.md](docs/metrics.md) | Prometheus series, OpenTelemetry tracing, planned-but-not-emitted series |
 | [docs/deployment.md](docs/deployment.md) | Docker, bind addresses, migrations, sizing, graceful shutdown |
-| [docs/loadtest.md](docs/loadtest.md) | `bin/loadtest` envs, macOS gotchas, HTTP/1 vs h2c trade-off |
+| [docs/loadtest.md](docs/loadtest.md) | `bin/loadtest` envs, macOS gotchas, HTTP/1 vs h2c trade-off, Linux container path |
+| [docs/benchmarks.md](docs/benchmarks.md) | Criterion micro-benchmarks, single-core throughput, profile breakdown |
 | [docs/troubleshooting.md](docs/troubleshooting.md) | common failures and how to read them off metrics |
 
 ## Development
