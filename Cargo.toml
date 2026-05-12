@@ -103,3 +103,7 @@ harness = false
 [[bench]]
 name = "batcher_flush"
 harness = false
+
+[[bench]]
+name = "http_client"
+harness = false
