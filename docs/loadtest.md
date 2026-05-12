@@ -57,9 +57,11 @@ For 50k-concurrency runs use `HTTP2=1` to fold many streams onto a few TCP conne
 
 | Config | Result |
 |---|---|
-| `CONCURRENCY=50000 MOCK_PORTS=16 RAMP_SECS=10 HTTP2=1 DURATION_SECS=300` | **93,350 rps · 100% success · 28.1M checks · p99 1.8 s** |
+| `CONCURRENCY=50000 MOCK_PORTS=16 RAMP_SECS=10 HTTP2=1 DURATION_SECS=300` | **93,350 rps · 100% success · 28.1M checks · p99 1.8 s · 933 MiB RSS peak** |
 
 The 50k-concurrent acceptance run requires Linux kernel knobs (somaxconn, tw_reuse, ip_local_port_range) — see the Docker section above. Pure-Linux numbers will be higher than VM-on-Mac (~30% hypervisor overhead).
+
+RSS stays under 1 GiB under sustained 50k-worker load — sampled with `docker stats` at 5 s intervals during a 300 s run. Peak hit 933 MiB after warm-up; steady state held there. The bound comes from per-worker task state plus the shared connection pool, not unbounded result buffering (batcher drains every 5 s).
 
 ## HTTP/1 vs h2c trade-off
 
