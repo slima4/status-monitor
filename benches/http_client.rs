@@ -37,6 +37,9 @@ struct Fixture {
     client_rt: Runtime,
     clients: HttpClients,
     check: HttpCheck,
+    // Hoisted out of the iter — target_id is fixed per-target in prod,
+    // so paying Uuid::now_v7's getentropy syscall per call would skew the bench.
+    target_id: Uuid,
 }
 
 fn fixture_one_core() -> &'static Fixture {
@@ -48,6 +51,7 @@ fn fixture_one_core() -> &'static Fixture {
             check: default_check(addr),
             clients: build_test_clients(),
             client_rt: rt,
+            target_id: Uuid::now_v7(),
         }
     })
 }
@@ -61,6 +65,7 @@ fn fixture_two_cores() -> &'static Fixture {
             check: default_check(addr),
             clients: build_test_clients(),
             client_rt,
+            target_id: Uuid::now_v7(),
         }
     })
 }
@@ -148,7 +153,7 @@ fn bench_single(c: &mut Criterion) {
         let f = fixture(cores);
         group.bench_function(cores.tag(), |b| {
             b.to_async(&f.client_rt)
-                .iter(|| async { execute_http_check(Uuid::now_v7(), &f.check, &f.clients).await });
+                .iter(|| async { execute_http_check(f.target_id, &f.check, &f.clients).await });
         });
     }
     group.finish();
@@ -170,7 +175,7 @@ fn bench_throughput(c: &mut Criterion) {
             group.bench_with_input(id, &concurrency, |b, &n| {
                 b.to_async(&f.client_rt).iter(|| async {
                     let futs =
-                        (0..n).map(|_| execute_http_check(Uuid::now_v7(), &f.check, &f.clients));
+                        (0..n).map(|_| execute_http_check(f.target_id, &f.check, &f.clients));
                     join_all(futs).await
                 });
             });
