@@ -4,15 +4,15 @@ use uuid::Uuid;
 
 use crate::security::{Cipher, is_envelope};
 
-/// JSON paths inside `check_spec` that hold credential material. Walked at the storage
-/// boundary to wrap/unwrap an envelope around plaintext values.
-const CREDENTIAL_PATHS: &[&[&str]] = &[&["http", "basic_auth"], &["http", "bearer_token"]];
+/// JSON pointer paths inside `check_spec` that hold credential material. Walked
+/// at the storage boundary to wrap/unwrap an envelope around plaintext values.
+const CREDENTIAL_PATHS: &[&str] = &["/http/basic_auth", "/http/bearer_token"];
 
 const ENC_KEY: &str = "$enc";
 
 pub fn encrypt_in_place(value: &mut Value, cipher: &Cipher) -> anyhow::Result<()> {
     for path in CREDENTIAL_PATHS {
-        let Some(slot) = descend_mut(value, path) else {
+        let Some(slot) = value.pointer_mut(path) else {
             continue;
         };
         if is_already_envelope(slot) || slot.is_null() {
@@ -33,7 +33,7 @@ pub fn encrypt_in_place(value: &mut Value, cipher: &Cipher) -> anyhow::Result<()
 
 pub fn decrypt_in_place(value: &mut Value, cipher: &Cipher, target_id: Uuid) -> anyhow::Result<()> {
     for path in CREDENTIAL_PATHS {
-        let Some(slot) = descend_mut(value, path) else {
+        let Some(slot) = value.pointer_mut(path) else {
             continue;
         };
         let Some(envelope) = extract_envelope(slot) else {
@@ -46,19 +46,11 @@ pub fn decrypt_in_place(value: &mut Value, cipher: &Cipher, target_id: Uuid) -> 
             serde_json::from_slice(&plaintext).context("decoding decrypted credential payload")?;
         tracing::debug!(
             target_id = %target_id,
-            field = %path.join("."),
+            field = %path,
             "credential decrypted"
         );
     }
     Ok(())
-}
-
-fn descend_mut<'a>(root: &'a mut Value, path: &[&str]) -> Option<&'a mut Value> {
-    let mut node = root;
-    for key in path {
-        node = node.as_object_mut()?.get_mut(*key)?;
-    }
-    Some(node)
 }
 
 fn is_already_envelope(v: &Value) -> bool {

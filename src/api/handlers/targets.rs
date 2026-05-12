@@ -7,31 +7,15 @@ use serde::Deserialize;
 use url::Host;
 use uuid::Uuid;
 
+use crate::api::redaction::{REDACTED, Redacted};
 use crate::app::AppState;
-use crate::domain::{CheckSpec, NewTarget, Target, TargetUpdate};
+use crate::domain::{NewTarget, Target, TargetUpdate};
 use crate::error::{AppError, Result};
 use crate::security::SsrfGuard;
 use crate::storage::TargetFilter;
 
 const BULK_MAX: usize = 10_000;
 const ALLOWED_SCHEMES: &[&str] = &["http", "https"];
-
-/// Wire-level placeholder substituted for populated credentials in API responses.
-/// Re-submitting it on `PATCH` is rejected so a `GET → PATCH` round-trip cannot
-/// silently overwrite the real value with the sentinel.
-const REDACTED: &str = "***";
-
-fn redact_secrets(check: &mut CheckSpec) {
-    if let CheckSpec::Http(http) = check {
-        if let Some((u, p)) = http.basic_auth.as_mut() {
-            *u = REDACTED.to_string();
-            *p = REDACTED.to_string();
-        }
-        if let Some(token) = http.bearer_token.as_mut() {
-            *token = REDACTED.to_string();
-        }
-    }
-}
 
 #[derive(Debug, Deserialize)]
 pub struct ListQuery {
@@ -56,20 +40,13 @@ impl From<ListQuery> for TargetFilter {
 pub async fn list(
     State(state): State<AppState>,
     Query(query): Query<ListQuery>,
-) -> Result<Json<Vec<Target>>> {
-    let mut items = state.target_store.list(query.into()).await?;
-    for t in &mut items {
-        redact_secrets(&mut t.check);
-    }
-    Ok(Json(items))
+) -> Result<Redacted<Vec<Target>>> {
+    Ok(Redacted::new(state.target_store.list(query.into()).await?))
 }
 
-pub async fn get(State(state): State<AppState>, Path(id): Path<Uuid>) -> Result<Json<Target>> {
+pub async fn get(State(state): State<AppState>, Path(id): Path<Uuid>) -> Result<Redacted<Target>> {
     match state.target_store.get(id).await? {
-        Some(mut t) => {
-            redact_secrets(&mut t.check);
-            Ok(Json(t))
-        }
+        Some(t) => Ok(Redacted::new(t)),
         None => Err(AppError::NotFound("target not found".into())),
     }
 }
@@ -77,27 +54,23 @@ pub async fn get(State(state): State<AppState>, Path(id): Path<Uuid>) -> Result<
 pub async fn create(
     State(state): State<AppState>,
     Json(new): Json<NewTarget>,
-) -> Result<(StatusCode, Json<Target>)> {
+) -> Result<(StatusCode, Redacted<Target>)> {
     let guard = ssrf_guard(&state);
     validate_new_target(&new, &guard)?;
-    let mut t = state.target_store.create(new).await?;
-    redact_secrets(&mut t.check);
-    Ok((StatusCode::CREATED, Json(t)))
+    let t = state.target_store.create(new).await?;
+    Ok((StatusCode::CREATED, Redacted::new(t)))
 }
 
 pub async fn update(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
     Json(update): Json<TargetUpdate>,
-) -> Result<Json<Target>> {
+) -> Result<Redacted<Target>> {
     if let Some(check) = &update.check {
         validate_check(check, &ssrf_guard(&state))?;
     }
     match state.target_store.update(id, update).await? {
-        Some(mut t) => {
-            redact_secrets(&mut t.check);
-            Ok(Json(t))
-        }
+        Some(t) => Ok(Redacted::new(t)),
         None => Err(AppError::NotFound("target not found".into())),
     }
 }
@@ -113,7 +86,7 @@ pub async fn delete(State(state): State<AppState>, Path(id): Path<Uuid>) -> Resu
 pub async fn bulk_create(
     State(state): State<AppState>,
     Json(items): Json<Vec<NewTarget>>,
-) -> Result<(StatusCode, Json<Vec<Target>>)> {
+) -> Result<(StatusCode, Redacted<Vec<Target>>)> {
     if items.is_empty() {
         return Err(AppError::BadRequest("empty bulk payload".into()));
     }
@@ -127,11 +100,8 @@ pub async fn bulk_create(
     for new in &items {
         validate_new_target(new, &guard)?;
     }
-    let mut out = state.target_store.bulk_create(items).await?;
-    for t in &mut out {
-        redact_secrets(&mut t.check);
-    }
-    Ok((StatusCode::CREATED, Json(out)))
+    let out = state.target_store.bulk_create(items).await?;
+    Ok((StatusCode::CREATED, Redacted::new(out)))
 }
 
 fn ssrf_guard(state: &AppState) -> SsrfGuard {

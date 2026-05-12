@@ -247,9 +247,9 @@ async fn ssrf_rejects_tcp_loopback_literal() {
     assert_eq!(post_target(payload).await, StatusCode::BAD_REQUEST);
 }
 
-fn http_with_basic_auth() -> Value {
-    json!({
-        "name": "with-basic",
+fn http_with_auth(name: &str, auth_field: &str, auth_value: Value) -> Value {
+    let mut payload = json!({
+        "name": name,
         "check": {
             "type": "http",
             "url": "http://example.com/",
@@ -259,32 +259,21 @@ fn http_with_basic_auth() -> Value {
             "max_redirects": 0,
             "expected_status": { "kind": "exact", "value": 200 },
             "headers": {},
-            "verify_tls": true,
-            "basic_auth": ["alice", "s3cret"]
+            "verify_tls": true
         },
         "interval": 60,
         "tags": []
-    })
+    });
+    payload["check"][auth_field] = auth_value;
+    payload
+}
+
+fn http_with_basic_auth() -> Value {
+    http_with_auth("with-basic", "basic_auth", json!(["alice", "s3cret"]))
 }
 
 fn http_with_bearer() -> Value {
-    json!({
-        "name": "with-bearer",
-        "check": {
-            "type": "http",
-            "url": "http://example.com/",
-            "method": "GET",
-            "timeout": 5000,
-            "follow_redirects": false,
-            "max_redirects": 0,
-            "expected_status": { "kind": "exact", "value": 200 },
-            "headers": {},
-            "verify_tls": true,
-            "bearer_token": "tok.en.value"
-        },
-        "interval": 60,
-        "tags": []
-    })
+    http_with_auth("with-bearer", "bearer_token", json!("tok.en.value"))
 }
 
 async fn post_and_body(app: axum::Router, payload: Value) -> Value {
