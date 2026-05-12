@@ -53,6 +53,29 @@ pub async fn spawn_self_signed_tls_router(router: Router) -> SocketAddr {
 }
 
 pub fn test_client() -> HttpClients {
+    build_clients_with(default_dns()).unwrap()
+}
+
+pub fn test_client_with_failing_dns() -> HttpClients {
+    build_clients_with(DnsConfig {
+        cache_size: 1024,
+        positive_ttl_secs: 30,
+        negative_ttl_secs: 5,
+        servers: vec!["127.0.0.1:9".into()],
+    })
+    .unwrap()
+}
+
+fn default_dns() -> DnsConfig {
+    DnsConfig {
+        cache_size: 1024,
+        positive_ttl_secs: 30,
+        negative_ttl_secs: 5,
+        servers: vec!["1.1.1.1".into()],
+    }
+}
+
+fn build_clients_with(dns_cfg: DnsConfig) -> status_monitor::error::Result<HttpClients> {
     let http_cfg = HttpClientConfig {
         pool_max_idle_per_host: 10,
         pool_idle_timeout_secs: 30,
@@ -68,13 +91,7 @@ pub fn test_client() -> HttpClients {
         connect_timeout_ms: 2_000,
         default_check_interval_secs: 60,
     };
-    let dns_cfg = DnsConfig {
-        cache_size: 1024,
-        positive_ttl_secs: 30,
-        negative_ttl_secs: 5,
-        servers: vec!["1.1.1.1".into()],
-    };
-    build_clients(&http_cfg, &checker_cfg, &dns_cfg).unwrap()
+    build_clients(&http_cfg, &checker_cfg, &dns_cfg)
 }
 
 pub fn default_http_check(url: Url, expected: ExpectedStatus) -> HttpCheck {

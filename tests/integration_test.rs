@@ -1,6 +1,7 @@
 mod common;
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::Router;
 use axum::http::StatusCode;
@@ -11,7 +12,7 @@ use status_monitor::worker::execute_http_check;
 use url::Url;
 use uuid::Uuid;
 
-use crate::common::{default_http_check, spawn_router, test_client};
+use crate::common::{default_http_check, spawn_router, test_client, test_client_with_failing_dns};
 
 #[tokio::test]
 async fn http_check_returns_up_on_200() {
@@ -89,6 +90,48 @@ async fn http_check_connection_refused_is_error() {
 
     assert_eq!(result.status, CheckStatus::Error);
     assert!(result.error.is_some());
+}
+
+#[tokio::test]
+async fn http_check_dns_failure_is_error() {
+    let client = test_client_with_failing_dns();
+    let url = Url::parse("http://nonexistent.invalid./").unwrap();
+    let mut check = default_http_check(url, ExpectedStatus::Exact(200));
+    check.timeout = Duration::from_millis(500);
+
+    let result = execute_http_check(Uuid::now_v7(), &check, &client).await;
+
+    assert_eq!(result.status, CheckStatus::Error);
+    assert!(result.error.is_some());
+    assert!(result.response_code.is_none());
+}
+
+#[tokio::test]
+async fn http_check_total_timeout_is_error() {
+    let app = Router::new().route(
+        "/slow",
+        get(|| async {
+            tokio::time::sleep(Duration::from_secs(2)).await;
+            "late"
+        }),
+    );
+    let addr = spawn_router(app).await;
+
+    let client = test_client();
+    let url = Url::parse(&format!("http://{addr}/slow")).unwrap();
+    let mut check = default_http_check(url, ExpectedStatus::Exact(200));
+    check.timeout = Duration::from_millis(150);
+
+    let started = std::time::Instant::now();
+    let result = execute_http_check(Uuid::now_v7(), &check, &client).await;
+    let elapsed = started.elapsed();
+
+    assert_eq!(result.status, CheckStatus::Error);
+    assert_eq!(result.error.as_deref(), Some("timeout"));
+    assert!(
+        elapsed < Duration::from_secs(1),
+        "timeout not enforced: elapsed {elapsed:?}"
+    );
 }
 
 #[tokio::test]

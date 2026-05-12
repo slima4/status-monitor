@@ -8,8 +8,9 @@ use axum::Router;
 use axum::http::StatusCode;
 use axum::routing::get;
 use status_monitor::domain::CheckStatus;
+use status_monitor::pipeline::{BatcherConfig, ResultBatcher};
 use status_monitor::scheduler::{Scheduler, TargetRegistry};
-use status_monitor::storage::InMemoryTargetStore;
+use status_monitor::storage::{InMemorySink, InMemoryTargetStore};
 use status_monitor::worker::WorkerPool;
 use status_monitor::worker::circuit_breaker::CIRCUIT_OPEN_REASON;
 use tokio::sync::mpsc;
@@ -102,6 +103,54 @@ async fn scheduler_picks_up_new_targets_on_refresh() {
     handle.await.unwrap().unwrap();
     assert!(got, "no result after adding target");
     assert!(counter.load(Ordering::Relaxed) >= 1);
+}
+
+#[tokio::test]
+async fn shutdown_drains_in_flight_results() {
+    let (addr, counter) = spawn_counting_mock().await;
+    let store = Arc::new(InMemoryTargetStore::from_vec(vec![http_target(
+        addr, "/ping", 100,
+    )]));
+    let registry = Arc::new(TargetRegistry::new(store));
+    let (tx, rx) = mpsc::channel(64);
+    let sink = Arc::new(InMemorySink::new());
+
+    let pool = Arc::new(WorkerPool::new(
+        50,
+        test_client(),
+        breaker_cfg(),
+        tx.clone(),
+    ));
+    let scheduler = Arc::new(Scheduler::new(registry, pool, scheduler_cfg(30)));
+    let batcher = ResultBatcher::new(
+        rx,
+        sink.clone(),
+        BatcherConfig {
+            batch_size: 1000,
+            batch_timeout: Duration::from_secs(60),
+        },
+    );
+    let shutdown = CancellationToken::new();
+    let scheduler_handle = tokio::spawn(scheduler.run(shutdown.clone()));
+    let batcher_handle = tokio::spawn(batcher.run(shutdown.clone()));
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+    while tokio::time::Instant::now() < deadline && counter.load(Ordering::Relaxed) < 1 {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(counter.load(Ordering::Relaxed) >= 1, "no checks ran");
+    assert_eq!(sink.len(), 0, "batcher should not have flushed yet");
+
+    shutdown.cancel();
+    drop(tx);
+    scheduler_handle.await.unwrap().unwrap();
+    batcher_handle.await.unwrap();
+
+    assert!(
+        !sink.is_empty(),
+        "shutdown should drain in-flight results, got {}",
+        sink.len()
+    );
 }
 
 #[tokio::test]
