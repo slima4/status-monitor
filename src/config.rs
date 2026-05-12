@@ -17,6 +17,7 @@ pub struct AppConfig {
     pub checker: CheckerConfig,
     pub http_client: HttpClientConfig,
     pub dns: DnsConfig,
+    pub security: SecurityConfig,
     pub circuit_breaker: CircuitBreakerConfig,
     pub storage: StorageConfig,
     pub scheduler: SchedulerConfig,
@@ -62,6 +63,11 @@ pub struct DnsConfig {
     pub positive_ttl_secs: u64,
     pub negative_ttl_secs: u64,
     pub servers: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+pub struct SecurityConfig {
+    pub allow_private_targets: bool,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize)]

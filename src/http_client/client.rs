@@ -14,12 +14,13 @@ use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use rustls::{DigitallySignedStruct, SignatureScheme};
 use tokio_rustls::TlsConnector;
 
-use crate::config::{CheckerConfig, DnsConfig, HttpClientConfig};
+use crate::config::{CheckerConfig, DnsConfig, HttpClientConfig, SecurityConfig};
 use crate::error::Result;
 use crate::http_client::connector::{ConnectorInner, PhaseConnector};
 use crate::http_client::dns::HickoryDnsResolver;
 use crate::http_client::pool_stats::PoolStats;
 use crate::observability::metrics::names;
+use crate::security::SsrfGuard;
 
 pub type ReqBody = Full<Bytes>;
 pub type HyperHttpClient = HyperClient<PhaseConnector, ReqBody>;
@@ -31,6 +32,8 @@ pub struct HttpClients {
     pub(crate) pool_stats: Arc<PoolStats>,
     pub(crate) ttfb_ms: Histogram,
     pub(crate) user_agent: Arc<str>,
+    pub(crate) resolver: Arc<HickoryDnsResolver>,
+    pub(crate) ssrf_guard: SsrfGuard,
 }
 
 impl HttpClients {
@@ -49,38 +52,39 @@ impl HttpClients {
     pub fn user_agent(&self) -> &str {
         &self.user_agent
     }
+
+    pub fn resolver(&self) -> &Arc<HickoryDnsResolver> {
+        &self.resolver
+    }
+
+    pub fn ssrf_guard(&self) -> SsrfGuard {
+        self.ssrf_guard
+    }
 }
 
 pub fn build_clients(
     http_cfg: &HttpClientConfig,
     checker_cfg: &CheckerConfig,
     dns_cfg: &DnsConfig,
+    security_cfg: &SecurityConfig,
 ) -> Result<HttpClients> {
     install_default_crypto_provider();
 
     let resolver = Arc::new(HickoryDnsResolver::new(dns_cfg)?);
     let pool_stats = PoolStats::new();
+    let ssrf_guard = SsrfGuard::new(security_cfg.allow_private_targets);
     let connect_ms = histogram!(names::CHECK_CONNECT_MS);
     let tls_ms = histogram!(names::CHECK_TLS_MS);
 
-    let verifying = build_one(
-        http_cfg,
-        checker_cfg,
-        resolver.clone(),
-        pool_stats.clone(),
-        connect_ms.clone(),
-        tls_ms.clone(),
-        true,
-    )?;
-    let insecure = build_one(
-        http_cfg,
-        checker_cfg,
-        resolver,
-        pool_stats.clone(),
+    let shared = SharedConnect {
+        resolver: resolver.clone(),
+        pool_stats: pool_stats.clone(),
+        ssrf_guard,
         connect_ms,
         tls_ms,
-        false,
-    )?;
+    };
+    let verifying = build_one(http_cfg, checker_cfg, &shared, true)?;
+    let insecure = build_one(http_cfg, checker_cfg, &shared, false)?;
 
     Ok(HttpClients {
         verifying: Arc::new(verifying),
@@ -88,27 +92,35 @@ pub fn build_clients(
         pool_stats,
         ttfb_ms: histogram!(names::CHECK_TTFB_MS),
         user_agent: Arc::from(http_cfg.user_agent.as_str()),
+        resolver,
+        ssrf_guard,
     })
+}
+
+struct SharedConnect {
+    resolver: Arc<HickoryDnsResolver>,
+    pool_stats: Arc<PoolStats>,
+    ssrf_guard: SsrfGuard,
+    connect_ms: Histogram,
+    tls_ms: Histogram,
 }
 
 fn build_one(
     http_cfg: &HttpClientConfig,
     checker_cfg: &CheckerConfig,
-    resolver: Arc<HickoryDnsResolver>,
-    pool_stats: Arc<PoolStats>,
-    connect_ms: Histogram,
-    tls_ms: Histogram,
+    shared: &SharedConnect,
     verify_tls: bool,
 ) -> Result<HyperHttpClient> {
     let tls_config = build_tls_config(verify_tls, http_cfg.http2_prior_knowledge)?;
     let tls_connector = Arc::new(TlsConnector::from(Arc::new(tls_config)));
 
     let inner = Arc::new(ConnectorInner {
-        resolver,
+        resolver: shared.resolver.clone(),
         tls: tls_connector,
-        pool_stats,
-        connect_ms,
-        tls_ms,
+        pool_stats: shared.pool_stats.clone(),
+        ssrf_guard: shared.ssrf_guard,
+        connect_ms: shared.connect_ms.clone(),
+        tls_ms: shared.tls_ms.clone(),
         connect_timeout: Duration::from_millis(checker_cfg.connect_timeout_ms),
         tcp_keepalive: Some(Duration::from_secs(http_cfg.tcp_keepalive_secs))
             .filter(|d| !d.is_zero()),

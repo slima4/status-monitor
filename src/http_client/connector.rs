@@ -18,11 +18,13 @@ use tower::Service;
 
 use crate::http_client::dns::HickoryDnsResolver;
 use crate::http_client::pool_stats::{AliveGuard, PoolStats};
+use crate::security::SsrfGuard;
 
 pub(crate) struct ConnectorInner {
     pub(crate) resolver: Arc<HickoryDnsResolver>,
     pub(crate) tls: Arc<TlsConnector>,
     pub(crate) pool_stats: Arc<PoolStats>,
+    pub(crate) ssrf_guard: SsrfGuard,
     pub(crate) connect_ms: Histogram,
     pub(crate) tls_ms: Histogram,
     pub(crate) connect_timeout: Duration,
@@ -93,11 +95,12 @@ async fn connect_tcp(inner: &ConnectorInner, host: &str, port: u16) -> io::Resul
         .await
         .map_err(io::Error::other)?
         .into_iter()
+        .filter(|ip| inner.ssrf_guard.allow(*ip))
         .map(|ip| SocketAddr::new(ip, port))
         .collect();
 
     if addrs.is_empty() {
-        return Err(io::Error::other(format!("no addresses for {host}")));
+        return Err(io::Error::other(format!("no allowed addresses for {host}")));
     }
 
     let tcp_start = Instant::now();

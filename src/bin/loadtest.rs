@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use axum::Router;
 use axum::routing::get;
 use parking_lot::Mutex;
-use status_monitor::config::{CheckerConfig, DnsConfig, HttpClientConfig};
+use status_monitor::config::{CheckerConfig, DnsConfig, HttpClientConfig, SecurityConfig};
 use status_monitor::domain::{ExpectedStatus, HttpCheck, HttpMethod};
 use status_monitor::http_client::build_clients;
 use status_monitor::worker::execute_http_check;
@@ -88,7 +88,11 @@ async fn main() {
         negative_ttl_secs: 60,
         servers: vec![],
     };
-    let clients = build_clients(&http_cfg, &checker_cfg, &dns_cfg).expect("build clients");
+    let security_cfg = SecurityConfig {
+        allow_private_targets: true,
+    };
+    let clients =
+        build_clients(&http_cfg, &checker_cfg, &dns_cfg, &security_cfg).expect("build clients");
 
     let checks: Vec<Arc<HttpCheck>> = mock_addrs
         .iter()
@@ -218,7 +222,7 @@ async fn main() {
     );
     println!("errors: {}", total - success);
     let mut kinds: Vec<_> = error_counts.into_iter().collect();
-    kinds.sort_by(|a, b| b.1.cmp(&a.1));
+    kinds.sort_by_key(|(_, count)| std::cmp::Reverse(*count));
     for (kind, count) in kinds.iter().take(10) {
         println!("  {kind}: {count}");
     }

@@ -7,5 +7,6 @@ pub mod http_client;
 pub mod observability;
 pub mod pipeline;
 pub mod scheduler;
+pub mod security;
 pub mod storage;
 pub mod worker;

@@ -27,6 +27,14 @@ Look at `status_monitor_check_errors_total{kind}` filtered by host to find the f
 
 Set `verify_tls: false` on the offending target. The check executor picks between a verifying and a non-verifying hyper-util client based on the flag — both share the same DNS cache and connection-pool sizing.
 
+## `400 Bad Request` on POST /targets — `target address ... is in a blocked range`
+
+SSRF guard rejected the target. The URL or TCP host resolves to a private / loopback / link-local / reserved IP. Verify the resolved address is what you expect. To monitor private infrastructure deliberately, set `security.allow_private_targets = true` and ensure network segmentation prevents abuse.
+
+## Check fails with `all resolved addresses for 'host' are in blocked ranges`
+
+DNS returned only private IPs for a target the API previously accepted (hostname literal). Either the record changed or DNS rebinding is in play. The connect-time guard refuses to continue. Either fix DNS or, deliberately, enable `security.allow_private_targets`.
+
 ## ClickHouse insert fails with `SchemaMismatch`
 
 Almost always a Row-derive mismatch on UUID, Enum8, or DateTime64 column types:

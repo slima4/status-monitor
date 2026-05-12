@@ -69,6 +69,14 @@ Tagged enum, `type` discriminator.
 
 Server returns the full `Target` including `id` (UUIDv7), `created_at`, `updated_at`.
 
+### Validation errors
+
+`POST` and `PUT` return `400 Bad Request` for:
+
+- Unsupported URL scheme (`url scheme '...' not allowed` — only `http` and `https`)
+- Missing URL host, empty TCP host, or TCP port `0`
+- **SSRF guard** — `target address ... is in a blocked range`. Triggered when the URL or TCP host is an IP literal that resolves to loopback / private / link-local / reserved space (see [Configuration → `security.allow_private_targets`](configuration.md)). Hostname literals are checked again at connect time after DNS resolution, so DNS rebinding cannot bypass the guard.
+
 ## Results query
 
 `GET /api/v1/targets/{id}/results?from=2026-05-12T00:00:00Z&to=2026-05-12T23:59:59Z&limit=100`

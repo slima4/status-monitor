@@ -8,6 +8,7 @@ use axum::Router;
 use chrono::Utc;
 use status_monitor::config::{
     CheckerConfig, CircuitBreakerConfig, DnsConfig, HttpClientConfig, SchedulerConfig,
+    SecurityConfig,
 };
 use status_monitor::domain::{CheckSpec, ExpectedStatus, HttpCheck, HttpMethod, Target};
 use status_monitor::http_client::{HttpClients, build_clients};
@@ -90,7 +91,10 @@ fn build_clients_with(dns_cfg: DnsConfig) -> status_monitor::error::Result<HttpC
         connect_timeout_ms: 2_000,
         default_check_interval_secs: 60,
     };
-    build_clients(&http_cfg, &checker_cfg, &dns_cfg)
+    let security_cfg = SecurityConfig {
+        allow_private_targets: true,
+    };
+    build_clients(&http_cfg, &checker_cfg, &dns_cfg, &security_cfg)
 }
 
 pub fn default_http_check(url: Url, expected: ExpectedStatus) -> HttpCheck {

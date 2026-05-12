@@ -29,6 +29,10 @@ positive_ttl_secs = 300
 negative_ttl_secs = 60
 servers = ["1.1.1.1:53", "8.8.8.8:53"]
 
+[security]
+# SSRF guard — see docs/configuration.md.
+allow_private_targets = false
+
 [circuit_breaker]
 failure_threshold = 5
 success_threshold = 2

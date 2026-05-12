@@ -8,7 +8,7 @@ use axum::Router;
 use axum::routing::get;
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use futures::future::join_all;
-use status_monitor::config::{CheckerConfig, DnsConfig, HttpClientConfig};
+use status_monitor::config::{CheckerConfig, DnsConfig, HttpClientConfig, SecurityConfig};
 use status_monitor::domain::{ExpectedStatus, HttpCheck, HttpMethod};
 use status_monitor::http_client::{HttpClients, build_clients};
 use status_monitor::worker::execute_http_check;
@@ -143,7 +143,10 @@ fn build_test_clients() -> HttpClients {
         negative_ttl_secs: 5,
         servers: vec!["1.1.1.1".into()],
     };
-    build_clients(&http_cfg, &checker_cfg, &dns_cfg).unwrap()
+    let security_cfg = SecurityConfig {
+        allow_private_targets: true,
+    };
+    build_clients(&http_cfg, &checker_cfg, &dns_cfg, &security_cfg).unwrap()
 }
 
 fn bench_single(c: &mut Criterion) {

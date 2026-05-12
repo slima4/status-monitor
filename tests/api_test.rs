@@ -154,3 +154,95 @@ async fn bulk_create_rejects_empty() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 }
+
+fn ssrf_payload(url: &str) -> Value {
+    json!({
+        "name": "ssrf-attempt",
+        "check": {
+            "type": "http",
+            "url": url,
+            "method": "GET",
+            "timeout": 5000,
+            "follow_redirects": false,
+            "max_redirects": 0,
+            "expected_status": { "kind": "exact", "value": 200 },
+            "headers": {},
+            "verify_tls": true
+        },
+        "interval": 60,
+        "tags": []
+    })
+}
+
+async fn post_target(payload: Value) -> StatusCode {
+    app()
+        .oneshot(
+            Request::post("/api/v1/targets")
+                .header("content-type", "application/json")
+                .body(Body::from(payload.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+        .status()
+}
+
+#[tokio::test]
+async fn ssrf_rejects_loopback_ipv4_literal() {
+    assert_eq!(
+        post_target(ssrf_payload("http://127.0.0.1/")).await,
+        StatusCode::BAD_REQUEST
+    );
+}
+
+#[tokio::test]
+async fn ssrf_rejects_aws_metadata_literal() {
+    assert_eq!(
+        post_target(ssrf_payload("http://169.254.169.254/latest/meta-data/")).await,
+        StatusCode::BAD_REQUEST
+    );
+}
+
+#[tokio::test]
+async fn ssrf_rejects_private_rfc1918_literal() {
+    assert_eq!(
+        post_target(ssrf_payload("http://10.0.0.1/")).await,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        post_target(ssrf_payload("http://192.168.1.1/")).await,
+        StatusCode::BAD_REQUEST
+    );
+}
+
+#[tokio::test]
+async fn ssrf_rejects_loopback_ipv6_literal() {
+    assert_eq!(
+        post_target(ssrf_payload("http://[::1]/")).await,
+        StatusCode::BAD_REQUEST
+    );
+}
+
+#[tokio::test]
+async fn ssrf_allows_public_hostname() {
+    assert_eq!(
+        post_target(ssrf_payload("http://example.com/")).await,
+        StatusCode::CREATED
+    );
+}
+
+#[tokio::test]
+async fn ssrf_rejects_tcp_loopback_literal() {
+    let payload = json!({
+        "name": "tcp-loopback",
+        "check": {
+            "type": "tcp",
+            "host": "127.0.0.1",
+            "port": 22,
+            "timeout": 5000
+        },
+        "interval": 60,
+        "tags": []
+    });
+    assert_eq!(post_target(payload).await, StatusCode::BAD_REQUEST);
+}

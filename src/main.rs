@@ -59,7 +59,7 @@ async fn main() -> Result<()> {
     let results_store: Arc<dyn ResultsStore> =
         Arc::new(ClickhouseResultsStore::from_client(clickhouse_client));
 
-    let http_clients = build_clients(&cfg.http_client, &cfg.checker, &cfg.dns)?;
+    let http_clients = build_clients(&cfg.http_client, &cfg.checker, &cfg.dns, &cfg.security)?;
     let http_pool_stats = http_clients.pool_stats().clone();
 
     let (result_tx, result_rx) = mpsc::channel(cfg.storage.clickhouse.buffer_size.max(1024));

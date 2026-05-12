@@ -14,6 +14,6 @@ use crate::http_client::HttpClients;
 pub async fn execute(target_id: Uuid, spec: &CheckSpec, clients: &HttpClients) -> CheckResult {
     match spec {
         CheckSpec::Http(http) => execute_http_check(target_id, http, clients).await,
-        CheckSpec::Tcp(tcp) => tcp_check::execute_tcp_check(target_id, tcp).await,
+        CheckSpec::Tcp(tcp) => tcp_check::execute_tcp_check(target_id, tcp, clients).await,
     }
 }
