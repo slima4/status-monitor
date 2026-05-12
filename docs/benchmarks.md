@@ -1,10 +1,12 @@
 # Benchmarks
 
-Criterion micro-benchmarks under `benches/`. Measure `execute_http_check` end-to-end through the same `reqwest` client path the service uses in production.
+Criterion micro-benchmarks under `benches/`. Measure `execute_http_check` end-to-end through the same `hyper-util` client path the service uses in production.
 
 ```bash
 cargo bench --bench http_client
 ```
+
+> **Note.** The throughput tables and profile breakdown below were captured against the previous `reqwest`-based HTTP stack. The client has since been swapped for a custom `hyper-util` + `tokio-rustls` connector (see `src/http_client/connector.rs`). Numbers are kept for historical reference; a re-bench is pending.
 
 ## What the bench measures
 
@@ -20,7 +22,7 @@ Each variant runs under two pinned topologies:
 
 Pinning makes results reproducible across machines: no `num_cpus()` drift.
 
-## Single-core results
+## Single-core results (historical — reqwest path)
 
 M-class Mac, loopback h2c, mock returns `200 ok`:
 
@@ -36,7 +38,7 @@ M-class Mac, loopback h2c, mock returns `200 ok`:
 
 Saturation reached by `c=1000`. Larger concurrency = more wall time, same rps — bottleneck shifts to in-thread cooperative scheduling, not parallelism.
 
-## Two-core reference
+## Two-core reference (historical — reqwest path)
 
 For comparison only — production CPU budget should be sized off `1c`.
 
@@ -51,11 +53,11 @@ Second core gains ~25% over `1c`. Single-check latency is *slower* on `2c` (53 �
 
 ## Where the cycles go
 
-Profile (samply, 15 s sample at `2c/c_10000`):
+Historical snapshot (samply, 15 s sample at `2c/c_10000`, reqwest path). The largest reqwest-specific cost — 7.5% on `url::parse` inside `reqwest::redirect::TowerRedirectPolicy` — was removed by the hyper-util migration.
 
 | % of client thread | Cost | Notes |
 |---|---|---|
-| 7.5% | `url::parse` via `reqwest::redirect::TowerRedirectPolicy` | URL re-parsed per request even with `redirect::Policy::none()` |
+| 7.5% | `url::parse` via `reqwest::redirect::TowerRedirectPolicy` | URL re-parsed per request even with `redirect::Policy::none()` — removed post-migration |
 | 6.5% | `kevent` syscall | tokio io driver poll — inherent |
 | 6.3% | `_platform_memmove` | h2 frame buffer copies — inherent |
 | 5.0% | `mach_absolute_time` | tokio timer + criterion clock |
@@ -63,8 +65,6 @@ Profile (samply, 15 s sample at `2c/c_10000`):
 | 1.5% | `h2::HeaderBlock::into_encoding` | HPACK encode |
 | 1.5% | `pthread_mutex_lock` | hyper pool mutex |
 | ~10% combined | h2 stream bookkeeping (pop/unlink/clone) | inherent to multiplexing |
-
-The 7.5% on URL parsing inside reqwest's redirect middleware is the largest avoidable cost. Reaching it requires bypassing reqwest's middleware stack — out of scope for v1, tracked in deferred work.
 
 ## Methodology notes
 

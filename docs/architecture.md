@@ -18,7 +18,7 @@ src/
 ├── config.rs        typed configuration + env override loader
 ├── domain/          Target, CheckSpec, CheckResult and friends
 ├── error.rs         AppError + IntoResponse
-├── http_client/     tuned reqwest client + hickory resolver
+├── http_client/     custom hyper-util client + phase-timing connector + hickory resolver
 ├── observability/   tracing + Prometheus + OTLP setup
 ├── pipeline/        result batcher
 ├── scheduler/       target registry + per-target tick loop
@@ -47,7 +47,7 @@ src/
                          ▼
                 ┌────────────────┐
                 │ WorkerPool     │  semaphore-bounded, circuit-breaker-gated
-                │  ├── http_check (reqwest + hickory DNS)
+                │  ├── http_check (hyper-util + hickory DNS)
                 │  └── tcp_check  (tokio::net::TcpStream)
                 └────────┬───────┘
                          │ CheckResult on mpsc channel
@@ -65,11 +65,11 @@ src/
 ## Key design choices
 
 - **Two storage backends.** Targets are low-cardinality, mutated by API operations → relational (Postgres) is the right fit. Results are append-only, high-cardinality, queried by time range → columnar (ClickHouse) keeps queries fast at 90-day retention.
-- **One HTTP client, two TLS modes.** `HttpClients` holds a verifying and an insecure reqwest client sharing a single DNS cache. Per-target `verify_tls` flag picks at dispatch time. Avoids per-target client construction.
+- **One HTTP client, two TLS modes.** `HttpClients` holds two `hyper_util::client::legacy::Client`s — verifying and insecure — wired around a custom `PhaseConnector` (`src/http_client/connector.rs`). The connector times TCP connect + TLS handshake separately and wraps every connection IO in a `TrackedStream` whose `Drop` decrements `PoolStats.alive`. Per-target `verify_tls` flag picks at dispatch time; both clients share the DNS cache and the same `PoolStats`.
 - **Per-host circuit breakers.** Failing hosts open their breaker quickly; subsequent checks fail fast with `error=circuit_open` without consuming a worker slot. Half-open probes after `open_duration_secs`.
 - **Bounded result channel.** The mpsc between worker pool and batcher has a fixed buffer (`storage.clickhouse.buffer_size`). When full, the worker increments `storage_dropped_total{reason="queue_full"}` and drops the result. Back-pressure is explicit, not hidden.
 - **Idempotent migrations.** Postgres uses `sqlx::migrate!` (tracked in `_sqlx_migrations`). ClickHouse migrations are bare `CREATE TABLE IF NOT EXISTS` statements run at startup. No external migrator.
-- **Shared DNS cache.** A single hickory resolver instance serves both reqwest clients; lookups cache per RFC TTL plus configurable bounds. Per-resolution latency is recorded into `check_dns_ms`.
+- **Shared DNS cache.** A single hickory resolver instance is invoked directly by `PhaseConnector::call`; lookups cache per RFC TTL plus configurable bounds. Per-resolution latency is recorded into `check_dns_ms`.
 - **Cancellation tokens for shutdown.** The root token is cloned to scheduler, batcher, sampler, and graceful axum shutdown. SIGINT/SIGTERM cancels root; subsystems drain in `tokio::join!`.
 
 ## Concurrency model

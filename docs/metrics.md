@@ -10,7 +10,11 @@ Prometheus exposition on `metrics_bind` (default `127.0.0.1:9090/metrics`).
 | `status_monitor_check_errors_total{kind}` | counter | error breakdown (`timeout` / `connect` / `circuit_open` / `request` / `body` / `transport`) |
 | `status_monitor_check_duration_ms` | histogram | per-check wall time |
 | `status_monitor_check_dns_ms` | histogram | DNS resolution latency (recorded in the hickory wrapper) |
+| `status_monitor_check_connect_ms` | histogram | TCP connect latency (recorded only when a new connection is established) |
+| `status_monitor_check_tls_ms` | histogram | TLS handshake latency (recorded only when a new HTTPS connection is established) |
 | `status_monitor_check_ttfb_ms` | histogram | time-to-first-byte across the response start |
+| `status_monitor_http_pool_idle_connections` | gauge | connections held in the pool but not currently serving a request (sampled) |
+| `status_monitor_http_pool_active_connections` | gauge | connections currently serving an in-flight request (sampled) |
 | `status_monitor_storage_writes_total{store,result}` | counter | batcher flush outcomes |
 | `status_monitor_storage_batch_size` | histogram | flush batch sizes |
 | `status_monitor_storage_write_duration_ms` | histogram | flush durations |
@@ -33,13 +37,8 @@ Spans are emitted around:
 - ClickHouse batch flush
 - Postgres target store ops
 
-## Not yet emitted (planned)
+## HTTP connection phase timings + pool gauges
 
-The following metrics need a custom hyper connector to expose; current `reqwest` 0.13 has no public hook for them:
+`check_connect_ms` and `check_tls_ms` are recorded inside `PhaseConnector::call`, which means they fire only when a new connection is established — pooled-connection requests do not produce samples. That's correct semantics: phase timings reflect "establish a connection" cost, not the cost of reusing one.
 
-- `status_monitor_check_connect_ms` — TCP connect latency
-- `status_monitor_check_tls_ms` — TLS handshake latency
-- `status_monitor_http_pool_idle_connections` — pool idle gauge
-- `status_monitor_http_pool_active_connections` — pool active gauge
-
-Tracked in deferred work; out of scope for v1.
+`http_pool_active_connections` counts in-flight requests via a per-request `ActiveGuard`. `http_pool_idle_connections` is computed as `alive − active`, saturating at zero. Under HTTP/2 a single connection serves many concurrent streams, so `active` can exceed `alive`; idle clamps to zero rather than emit a negative gauge.

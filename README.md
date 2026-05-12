@@ -4,7 +4,7 @@
 
 Async Rust service that runs HTTP and TCP health checks against a configurable set of targets, applies per-host circuit breaking, batches results, and ships them to durable storage. Targets persist in PostgreSQL; check results land in ClickHouse for high-cardinality time-series queries. Exposes a REST API for target CRUD and result queries plus Prometheus metrics on a separate port.
 
-Built on Rust 1.95 (edition 2024), Tokio, Axum, reqwest, sqlx, and the official `clickhouse` crate. Designed for low-overhead checks at ~50k concurrent in-flight.
+Built on Rust 1.95 (edition 2024), Tokio, Axum, hyper-util (custom phase-timing connector + tokio-rustls), sqlx, and the official `clickhouse` crate. Designed for low-overhead checks at ~50k concurrent in-flight.
 
 **Full docs: <https://slima4.github.io/status-monitor/>**
 
@@ -79,7 +79,7 @@ Sources under [`docs/`](docs/) — readable directly on GitHub too:
 | [docs/architecture.md](docs/architecture.md) | goals, module layout, data flow, key design choices, concurrency model |
 | [docs/api.md](docs/api.md) | REST endpoints, check-spec payload shapes, result + uptime queries |
 | [docs/configuration.md](docs/configuration.md) | `default.toml` reference, env override scheme, tuning notes |
-| [docs/metrics.md](docs/metrics.md) | Prometheus series, OpenTelemetry tracing, planned-but-not-emitted series |
+| [docs/metrics.md](docs/metrics.md) | Prometheus series (incl. connect / TLS / pool gauges), OpenTelemetry tracing |
 | [docs/deployment.md](docs/deployment.md) | Docker, bind addresses, migrations, sizing, graceful shutdown |
 | [docs/loadtest.md](docs/loadtest.md) | `bin/loadtest` envs, macOS gotchas, HTTP/1 vs h2c trade-off, Linux container path |
 | [docs/benchmarks.md](docs/benchmarks.md) | Criterion micro-benchmarks, single-core throughput, profile breakdown |

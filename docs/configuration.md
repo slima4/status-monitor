@@ -15,7 +15,7 @@ Override `STATUS_MONITOR_CONFIG_PATH` to point at an alternate base config file.
 | `checker` | `max_concurrent_checks` | global concurrency cap enforced by worker pool semaphore |
 | `checker` | `default_timeout_ms`, `connect_timeout_ms` | client-side timeouts applied to outbound checks |
 | `checker` | `default_check_interval_secs` | fallback interval when target spec omits it |
-| `http_client` | pool / keep-alive settings | reqwest tuning forwarded to the shared clients |
+| `http_client` | pool / keep-alive settings | hyper-util Client + connector tuning forwarded to the shared clients |
 | `http_client` | `http2_prior_knowledge` | when `true`, client speaks h2c upfront. Default `false`. Used by the loadtest harness |
 | `dns` | `cache_size`, `positive_ttl_secs`, `negative_ttl_secs`, `servers` | hickory resolver — point at internal resolvers when needed |
 | `circuit_breaker` | `failure_threshold`, `success_threshold`, `open_duration_secs`, `half_open_max_calls` | per-host breaker state machine |
@@ -28,7 +28,7 @@ Override `STATUS_MONITOR_CONFIG_PATH` to point at an alternate base config file.
 
 ## Tuning notes
 
-- **`max_concurrent_checks`** caps simultaneous in-flight checks. Per-check memory is small (a tokio task plus a reqwest request), so the practical ceiling is set by file descriptors and ephemeral ports rather than RAM.
+- **`max_concurrent_checks`** caps simultaneous in-flight checks. Per-check memory is small (a tokio task plus an in-flight hyper request), so the practical ceiling is set by file descriptors and ephemeral ports rather than RAM.
 - **`storage.clickhouse.buffer_size`** is the mpsc capacity between worker pool and batcher. Sized for ~1 s of bursts at peak RPS. Drops increment `storage_dropped_total{reason="queue_full"}` — that metric is your back-pressure signal.
 - **`storage.clickhouse.batch_size` vs `batch_timeout_ms`** trade tail latency for throughput. `1000 / 500ms` is a good starting point at ~20k rps.
 - **`scheduler.jitter_pct`** prevents synchronized fleet-wide ticks. Default 10% is enough to spread N targets across an interval without making individual schedules unpredictable.

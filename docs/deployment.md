@@ -12,7 +12,7 @@ STATUS_MONITOR_STORAGE__CLICKHOUSE__PASSWORD: monitor
 STATUS_MONITOR_OBSERVABILITY__LOG_FORMAT: json
 ```
 
-The runtime image is `gcr.io/distroless/static-debian12:nonroot` for a minimal attack surface, no shell, and no glibc. Built from a static musl binary via `rust:1-alpine`. Final image is **19.3 MB** — both `status-monitor` and `loadtest` binaries fit in the same image.
+The runtime image is `gcr.io/distroless/static-debian12:nonroot` for a minimal attack surface, no shell, and no glibc. Built from a static musl binary via `rust:1-alpine`. Final image is **16 MB** — both `status-monitor` and `loadtest` binaries fit in the same image.
 
 ## Bind addresses
 
@@ -36,7 +36,7 @@ No external migrator. The app owns its schema lifecycle symmetrically.
 ## Resource sizing
 
 - `checker.max_concurrent_checks` caps simultaneous in-flight checks
-- Per-check memory: small (a tokio task + reqwest request + bookkeeping)
+- Per-check memory: small (a tokio task + an in-flight hyper request + bookkeeping)
 - The practical ceiling is set by file descriptors and ephemeral ports, not RAM
 - At 50k concurrent checks against external targets, RSS sits around 200-400 MB depending on response sizes
 

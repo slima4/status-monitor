@@ -25,7 +25,7 @@ Look at `status_monitor_check_errors_total{kind}` filtered by host to find the f
 
 ## TLS errors against internal hosts
 
-Set `verify_tls: false` on the offending target. The check executor picks between a verifying and a non-verifying reqwest client based on the flag — both share the same DNS cache and pool sizing.
+Set `verify_tls: false` on the offending target. The check executor picks between a verifying and a non-verifying hyper-util client based on the flag — both share the same DNS cache and connection-pool sizing.
 
 ## ClickHouse insert fails with `SchemaMismatch`
 

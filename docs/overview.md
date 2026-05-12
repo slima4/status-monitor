@@ -2,7 +2,7 @@
 
 Async Rust service that runs HTTP and TCP health checks against a configurable set of targets, applies per-host circuit breaking, batches results, and ships them to durable storage. Targets persist in PostgreSQL; check results land in ClickHouse for high-cardinality time-series queries. Exposes a REST API for target CRUD and result queries plus Prometheus metrics on a separate port.
 
-Built on Rust 1.95 (edition 2024), Tokio, Axum, reqwest, sqlx, and the official `clickhouse` crate. Designed for low-overhead checks at ~50k concurrent in-flight.
+Built on Rust 1.95 (edition 2024), Tokio, Axum, hyper-util (custom phase-timing connector + tokio-rustls), sqlx, and the official `clickhouse` crate. Designed for low-overhead checks at ~50k concurrent in-flight.
 
 ## Where to start
 
