@@ -58,10 +58,8 @@ pub fn test_client() -> HttpClients {
 
 pub fn test_client_with_failing_dns() -> HttpClients {
     build_clients_with(DnsConfig {
-        cache_size: 1024,
-        positive_ttl_secs: 30,
-        negative_ttl_secs: 5,
         servers: vec!["127.0.0.1:9".into()],
+        ..default_dns()
     })
     .unwrap()
 }

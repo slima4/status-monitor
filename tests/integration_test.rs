@@ -99,11 +99,17 @@ async fn http_check_dns_failure_is_error() {
     let mut check = default_http_check(url, ExpectedStatus::Exact(200));
     check.timeout = Duration::from_millis(500);
 
+    let started = std::time::Instant::now();
     let result = execute_http_check(Uuid::now_v7(), &check, &client).await;
+    let elapsed = started.elapsed();
 
     assert_eq!(result.status, CheckStatus::Error);
     assert!(result.error.is_some());
     assert!(result.response_code.is_none());
+    assert!(
+        elapsed < Duration::from_secs(1),
+        "dns resolution should not escape request timeout: elapsed {elapsed:?}"
+    );
 }
 
 #[tokio::test]
@@ -129,7 +135,7 @@ async fn http_check_total_timeout_is_error() {
     assert_eq!(result.status, CheckStatus::Error);
     assert_eq!(result.error.as_deref(), Some("timeout"));
     assert!(
-        elapsed < Duration::from_secs(1),
+        elapsed < Duration::from_millis(500),
         "timeout not enforced: elapsed {elapsed:?}"
     );
 }

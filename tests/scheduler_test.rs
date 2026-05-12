@@ -143,8 +143,15 @@ async fn shutdown_drains_in_flight_results() {
 
     shutdown.cancel();
     drop(tx);
-    scheduler_handle.await.unwrap().unwrap();
-    batcher_handle.await.unwrap();
+    tokio::time::timeout(Duration::from_secs(5), scheduler_handle)
+        .await
+        .expect("scheduler did not exit")
+        .unwrap()
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(5), batcher_handle)
+        .await
+        .expect("batcher did not exit")
+        .unwrap();
 
     assert!(
         !sink.is_empty(),
