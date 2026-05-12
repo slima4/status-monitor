@@ -1,0 +1,60 @@
+[server]
+api_bind = "0.0.0.0:8080"
+metrics_bind = "0.0.0.0:9090"
+
+[runtime]
+worker_threads = 0              # 0 = auto (num_cpus)
+max_blocking_threads = 16
+
+[checker]
+max_concurrent_checks = 50000
+default_timeout_ms = 10000
+connect_timeout_ms = 5000
+default_check_interval_secs = 120
+
+[http_client]
+pool_max_idle_per_host = 100
+pool_idle_timeout_secs = 90
+tcp_keepalive_secs = 60
+http2_keep_alive_interval_secs = 30
+http2_keep_alive_timeout_secs = 10
+http2_keep_alive_while_idle = true
+user_agent = "StatusMonitor/1.0"
+
+[dns]
+cache_size = 50000
+positive_ttl_secs = 300
+negative_ttl_secs = 60
+servers = ["1.1.1.1:53", "8.8.8.8:53"]
+
+[circuit_breaker]
+failure_threshold = 5
+success_threshold = 2
+open_duration_secs = 60
+half_open_max_calls = 3
+
+[storage.postgres]
+url = "postgres://monitor:monitor@localhost:5432/monitor"
+max_connections = 10
+min_connections = 2
+acquire_timeout_secs = 10
+
+[storage.clickhouse]
+url = "http://localhost:8123"
+database = "monitor"
+user = "default"
+password = ""
+batch_size = 1000
+batch_timeout_ms = 500
+buffer_size = 100000
+
+[scheduler]
+target_refresh_interval_secs = 30
+jitter_pct = 10
+
+[observability]
+log_level = "info"
+log_format = "json"
+metrics_enabled = true
+tracing_enabled = false
+otlp_endpoint = "http://localhost:4317"
