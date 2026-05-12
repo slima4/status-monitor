@@ -6,7 +6,7 @@ use status_monitor::{
     app::AppState,
     config::AppConfig,
     error::{AppError, Result},
-    http_client::client::build_client,
+    http_client::client::build_clients,
     observability,
     pipeline::{BatcherConfig, ResultBatcher},
     scheduler::{Scheduler, TargetRegistry},
@@ -46,12 +46,12 @@ async fn main() -> Result<()> {
     let result_sink: Arc<dyn ResultSink> = in_memory_sink.clone();
     let results_store: Arc<dyn ResultsStore> = in_memory_sink;
 
-    let http_client = build_client(&cfg.http_client, &cfg.checker, &cfg.dns)?;
+    let http_clients = build_clients(&cfg.http_client, &cfg.checker, &cfg.dns)?;
 
     let (result_tx, result_rx) = mpsc::channel(cfg.storage.clickhouse.buffer_size.max(1024));
     let pool = Arc::new(WorkerPool::new(
         cfg.checker.max_concurrent_checks,
-        http_client,
+        http_clients,
         cfg.circuit_breaker,
         result_tx.clone(),
     ));

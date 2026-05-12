@@ -1,5 +1,5 @@
 pub mod client;
 pub mod dns;
 
-pub use client::build_client;
+pub use client::{HttpClients, build_clients};
 pub use dns::HickoryDnsResolver;

@@ -10,7 +10,7 @@ use axum::routing::get;
 use parking_lot::Mutex;
 use status_monitor::config::{CheckerConfig, DnsConfig, HttpClientConfig};
 use status_monitor::domain::{ExpectedStatus, HttpCheck, HttpMethod};
-use status_monitor::http_client::build_client;
+use status_monitor::http_client::build_clients;
 use status_monitor::worker::execute_http_check;
 use tokio::net::TcpListener;
 use tokio::task::JoinSet;
@@ -78,7 +78,7 @@ async fn main() {
         negative_ttl_secs: 60,
         servers: vec![],
     };
-    let client = build_client(&http_cfg, &checker_cfg, &dns_cfg).expect("build client");
+    let clients = build_clients(&http_cfg, &checker_cfg, &dns_cfg).expect("build clients");
 
     let url = Url::parse(&format!("http://{mock_addr}/ok")).expect("parse url");
     let check = Arc::new(HttpCheck {
@@ -105,7 +105,7 @@ async fn main() {
 
     let mut set: JoinSet<()> = JoinSet::new();
     for _ in 0..args.concurrency {
-        let client = client.clone();
+        let clients = clients.clone();
         let check = check.clone();
         let total = total.clone();
         let success = success.clone();
@@ -113,7 +113,7 @@ async fn main() {
         set.spawn(async move {
             let mut local: Vec<u32> = Vec::with_capacity(LATENCY_BATCH);
             while Instant::now() < deadline {
-                let r = execute_http_check(target_id, &check, &client).await;
+                let r = execute_http_check(target_id, &check, &clients).await;
                 total.fetch_add(1, Ordering::Relaxed);
                 if matches!(
                     r.status,

@@ -9,14 +9,11 @@ pub use pool::{CheckTask, WorkerPool};
 use uuid::Uuid;
 
 use crate::domain::{CheckResult, CheckSpec};
+use crate::http_client::HttpClients;
 
-pub async fn execute(
-    target_id: Uuid,
-    spec: &CheckSpec,
-    http_client: &reqwest::Client,
-) -> CheckResult {
+pub async fn execute(target_id: Uuid, spec: &CheckSpec, clients: &HttpClients) -> CheckResult {
     match spec {
-        CheckSpec::Http(http) => execute_http_check(target_id, http, http_client).await,
+        CheckSpec::Http(http) => execute_http_check(target_id, http, clients).await,
         CheckSpec::Tcp(tcp) => tcp_check::execute_tcp_check(target_id, tcp).await,
     }
 }

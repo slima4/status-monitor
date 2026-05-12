@@ -6,6 +6,7 @@ use tokio::sync::{Semaphore, mpsc};
 
 use crate::config::CircuitBreakerConfig;
 use crate::domain::{CheckResult, CheckSpec, Target};
+use crate::http_client::HttpClients;
 use crate::observability::metrics::names;
 use crate::worker::circuit_breaker::{CIRCUIT_OPEN_REASON, CircuitBreaker};
 
@@ -25,7 +26,7 @@ impl CheckTask {
 pub struct WorkerPool {
     semaphore: Arc<Semaphore>,
     max_concurrent: usize,
-    http_client: reqwest::Client,
+    http_clients: Arc<HttpClients>,
     breakers: Arc<DashMap<String, Arc<CircuitBreaker>>>,
     breaker_cfg: CircuitBreakerConfig,
     result_tx: mpsc::Sender<CheckResult>,
@@ -34,14 +35,14 @@ pub struct WorkerPool {
 impl WorkerPool {
     pub fn new(
         max_concurrent: usize,
-        http_client: reqwest::Client,
+        http_clients: HttpClients,
         breaker_cfg: CircuitBreakerConfig,
         result_tx: mpsc::Sender<CheckResult>,
     ) -> Self {
         Self {
             semaphore: Arc::new(Semaphore::new(max_concurrent)),
             max_concurrent,
-            http_client,
+            http_clients: Arc::new(http_clients),
             breakers: Arc::new(DashMap::new()),
             breaker_cfg,
             result_tx,
@@ -79,7 +80,7 @@ impl WorkerPool {
             }
         };
 
-        let client = self.http_client.clone();
+        let clients = self.http_clients.clone();
         let breakers = self.breakers.clone();
         let breaker_cfg = self.breaker_cfg;
         let result_tx = self.result_tx.clone();
@@ -95,7 +96,7 @@ impl WorkerPool {
                 return;
             }
 
-            let result = crate::worker::execute(task.target.id, &task.target.check, &client).await;
+            let result = crate::worker::execute(task.target.id, &task.target.check, &clients).await;
             breaker.record(result.status);
             record_metrics(&result);
             if let Err(err) = result_tx.try_send(result) {

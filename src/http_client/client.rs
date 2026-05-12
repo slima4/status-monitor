@@ -7,13 +7,42 @@ use crate::config::{CheckerConfig, DnsConfig, HttpClientConfig};
 use crate::error::Result;
 use crate::http_client::dns::HickoryDnsResolver;
 
-pub fn build_client(
+#[derive(Clone)]
+pub struct HttpClients {
+    verifying: reqwest::Client,
+    insecure: reqwest::Client,
+}
+
+impl HttpClients {
+    pub fn pick(&self, verify_tls: bool) -> &reqwest::Client {
+        if verify_tls {
+            &self.verifying
+        } else {
+            &self.insecure
+        }
+    }
+}
+
+pub fn build_clients(
     http_cfg: &HttpClientConfig,
     checker_cfg: &CheckerConfig,
     dns_cfg: &DnsConfig,
-) -> Result<reqwest::Client> {
+) -> Result<HttpClients> {
     let resolver = Arc::new(HickoryDnsResolver::new(dns_cfg)?);
+    let verifying = build_one(http_cfg, checker_cfg, resolver.clone(), true)?;
+    let insecure = build_one(http_cfg, checker_cfg, resolver, false)?;
+    Ok(HttpClients {
+        verifying,
+        insecure,
+    })
+}
 
+fn build_one(
+    http_cfg: &HttpClientConfig,
+    checker_cfg: &CheckerConfig,
+    resolver: Arc<HickoryDnsResolver>,
+    verify_tls: bool,
+) -> Result<reqwest::Client> {
     let client = reqwest::Client::builder()
         .pool_max_idle_per_host(http_cfg.pool_max_idle_per_host)
         .pool_idle_timeout(Duration::from_secs(http_cfg.pool_idle_timeout_secs))
@@ -25,6 +54,7 @@ pub fn build_client(
         .http2_keep_alive_while_idle(http_cfg.http2_keep_alive_while_idle)
         .use_rustls_tls()
         .https_only(false)
+        .danger_accept_invalid_certs(!verify_tls)
         .dns_resolver(resolver)
         .connect_timeout(Duration::from_millis(checker_cfg.connect_timeout_ms))
         .timeout(Duration::from_millis(checker_cfg.default_timeout_ms))
@@ -34,6 +64,5 @@ pub fn build_client(
         .user_agent(&http_cfg.user_agent)
         .build()
         .context("failed to build HTTP client")?;
-
     Ok(client)
 }

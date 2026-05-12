@@ -10,7 +10,7 @@ use status_monitor::config::{
     CheckerConfig, CircuitBreakerConfig, DnsConfig, HttpClientConfig, SchedulerConfig,
 };
 use status_monitor::domain::{CheckSpec, ExpectedStatus, HttpCheck, HttpMethod, Target};
-use status_monitor::http_client::build_client;
+use status_monitor::http_client::{HttpClients, build_clients};
 use url::Url;
 use uuid::Uuid;
 
@@ -23,7 +23,36 @@ pub async fn spawn_router(router: Router) -> SocketAddr {
     addr
 }
 
-pub fn test_client() -> reqwest::Client {
+pub async fn spawn_self_signed_tls_router(router: Router) -> SocketAddr {
+    use axum_server::tls_rustls::RustlsConfig;
+    use rcgen::generate_simple_self_signed;
+
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
+    let cert = generate_simple_self_signed(vec!["localhost".into()]).expect("gen cert");
+    let cfg = RustlsConfig::from_pem(
+        cert.cert.pem().into_bytes(),
+        cert.signing_key.serialize_pem().into_bytes(),
+    )
+    .await
+    .expect("rustls config");
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    listener.set_nonblocking(true).expect("nonblocking");
+    let addr = listener.local_addr().expect("local_addr");
+
+    tokio::spawn(async move {
+        axum_server::from_tcp_rustls(listener, cfg)
+            .expect("rustls server")
+            .serve(router.into_make_service())
+            .await
+            .expect("serve");
+    });
+
+    addr
+}
+
+pub fn test_client() -> HttpClients {
     let http_cfg = HttpClientConfig {
         pool_max_idle_per_host: 10,
         pool_idle_timeout_secs: 30,
@@ -45,7 +74,7 @@ pub fn test_client() -> reqwest::Client {
         negative_ttl_secs: 5,
         servers: vec!["1.1.1.1".into()],
     };
-    build_client(&http_cfg, &checker_cfg, &dns_cfg).unwrap()
+    build_clients(&http_cfg, &checker_cfg, &dns_cfg).unwrap()
 }
 
 pub fn default_http_check(url: Url, expected: ExpectedStatus) -> HttpCheck {

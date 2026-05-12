@@ -44,9 +44,6 @@ pub struct HttpCheck {
     pub expected_body_contains: Option<String>,
     pub headers: HashMap<String, String>,
     pub body: Option<String>,
-    // Reserved: a per-target opt-out of TLS verification is accepted in the schema
-    // but not yet enforced by the shared HTTP client. The global client always
-    // verifies TLS until per-target client cloning lands.
     pub verify_tls: bool,
     pub basic_auth: Option<(String, String)>,
     pub bearer_token: Option<String>,

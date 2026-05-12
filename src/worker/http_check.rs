@@ -5,16 +5,18 @@ use reqwest::Method;
 use uuid::Uuid;
 
 use crate::domain::{CheckResult, CheckStatus, ExpectedStatus, HttpCheck, HttpMethod};
+use crate::http_client::HttpClients;
 
 pub async fn execute_http_check(
     target_id: Uuid,
     check: &HttpCheck,
-    client: &reqwest::Client,
+    clients: &HttpClients,
 ) -> CheckResult {
     let started_at = Utc::now();
     let start = Instant::now();
 
-    let mut req = client
+    let mut req = clients
+        .pick(check.verify_tls)
         .request(map_method(check.method), check.url.clone())
         .timeout(check.timeout);
 
