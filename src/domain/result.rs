@@ -62,4 +62,22 @@ impl CheckStatus {
             Self::Error => "error",
         }
     }
+
+    pub const fn as_enum8(self) -> i8 {
+        match self {
+            Self::Up => 1,
+            Self::Down => 2,
+            Self::Degraded => 3,
+            Self::Error => 4,
+        }
+    }
+
+    pub const fn from_enum8(v: i8) -> Self {
+        match v {
+            1 => Self::Up,
+            2 => Self::Down,
+            3 => Self::Degraded,
+            _ => Self::Error,
+        }
+    }
 }

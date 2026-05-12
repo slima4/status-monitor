@@ -10,7 +10,10 @@ use status_monitor::{
     observability,
     pipeline::{BatcherConfig, ResultBatcher},
     scheduler::{Scheduler, TargetRegistry},
-    storage::{InMemorySink, InMemoryTargetStore, ResultSink, ResultsStore, TargetStore},
+    storage::{
+        self, ClickhouseResultSink, ClickhouseResultsStore, PostgresTargetStore, ResultSink,
+        ResultsStore, TargetStore,
+    },
     worker::WorkerPool,
 };
 use tokio::net::TcpListener;
@@ -41,10 +44,20 @@ async fn main() -> Result<()> {
     );
 
     let api_bind = cfg.server.api_bind.clone();
-    let target_store: Arc<dyn TargetStore> = Arc::new(InMemoryTargetStore::new());
-    let in_memory_sink = Arc::new(InMemorySink::new());
-    let result_sink: Arc<dyn ResultSink> = in_memory_sink.clone();
-    let results_store: Arc<dyn ResultsStore> = in_memory_sink;
+    let target_store: Arc<dyn TargetStore> =
+        Arc::new(PostgresTargetStore::connect(&cfg.storage.postgres).await?);
+
+    tracing::info!(
+        url = %cfg.storage.clickhouse.url,
+        database = %cfg.storage.clickhouse.database,
+        "connecting to clickhouse"
+    );
+    let clickhouse_client = storage::build_client(&cfg.storage.clickhouse);
+    storage::migrate(&clickhouse_client).await?;
+    let result_sink: Arc<dyn ResultSink> =
+        Arc::new(ClickhouseResultSink::from_client(clickhouse_client.clone()));
+    let results_store: Arc<dyn ResultsStore> =
+        Arc::new(ClickhouseResultsStore::from_client(clickhouse_client));
 
     let http_clients = build_clients(&cfg.http_client, &cfg.checker, &cfg.dns)?;
 

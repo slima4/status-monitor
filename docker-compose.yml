@@ -9,7 +9,6 @@ services:
       - "5432:5432"
     volumes:
       - pg_data:/var/lib/postgresql/data
-      - ./migrations/postgres:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U monitor"]
       interval: 5s
@@ -20,12 +19,13 @@ services:
     image: clickhouse/clickhouse-server:25.8
     environment:
       CLICKHOUSE_DB: monitor
+      CLICKHOUSE_USER: monitor
+      CLICKHOUSE_PASSWORD: monitor
     ports:
       - "8123:8123"
       - "9000:9000"
     volumes:
       - ch_data:/var/lib/clickhouse
-      - ./migrations/clickhouse:/docker-entrypoint-initdb.d:ro
     ulimits:
       nofile:
         soft: 262144
@@ -42,6 +42,8 @@ services:
     environment:
       STATUS_MONITOR_STORAGE__POSTGRES__URL: postgres://monitor:monitor@postgres:5432/monitor
       STATUS_MONITOR_STORAGE__CLICKHOUSE__URL: http://clickhouse:8123
+      STATUS_MONITOR_STORAGE__CLICKHOUSE__USER: monitor
+      STATUS_MONITOR_STORAGE__CLICKHOUSE__PASSWORD: monitor
       STATUS_MONITOR_OBSERVABILITY__LOG_FORMAT: json
     ports:
       - "8080:8080"

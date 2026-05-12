@@ -18,6 +18,11 @@ pub struct PostgresTargetStore {
 
 impl PostgresTargetStore {
     pub async fn connect(cfg: &PostgresConfig) -> Result<Self> {
+        tracing::info!(
+            max_connections = cfg.max_connections,
+            min_connections = cfg.min_connections,
+            "connecting to postgres"
+        );
         let pool = PgPoolOptions::new()
             .max_connections(cfg.max_connections)
             .min_connections(cfg.min_connections)
@@ -25,6 +30,12 @@ impl PostgresTargetStore {
             .connect(&cfg.url)
             .await
             .context("failed to connect to postgres")?;
+        tracing::info!("running postgres migrations");
+        sqlx::migrate!("./migrations/postgres")
+            .run(&pool)
+            .await
+            .context("postgres migrations")?;
+        tracing::info!("postgres ready");
         Ok(Self { pool })
     }
 

@@ -44,8 +44,8 @@ acquire_timeout_secs = 10
 [storage.clickhouse]
 url = "http://localhost:8123"
 database = "monitor"
-user = "default"
-password = ""
+user = "monitor"
+password = "monitor"
 batch_size = 1000
 batch_timeout_ms = 500
 buffer_size = 100000

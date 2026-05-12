@@ -1,4 +1,4 @@
-CREATE TABLE check_results (
+CREATE TABLE IF NOT EXISTS check_results (
     target_id UUID,
     timestamp DateTime64(3, 'UTC') CODEC(Delta, ZSTD(1)),
     status Enum8('up' = 1, 'down' = 2, 'degraded' = 3, 'error' = 4),
@@ -16,7 +16,7 @@ ORDER BY (target_id, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 90 DAY
 SETTINGS index_granularity = 8192;
 
-CREATE MATERIALIZED VIEW check_results_1m
+CREATE MATERIALIZED VIEW IF NOT EXISTS check_results_1m
 ENGINE = AggregatingMergeTree
 PARTITION BY toYYYYMMDD(minute)
 ORDER BY (target_id, minute)
