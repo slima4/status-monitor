@@ -3,15 +3,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Connection pool counters.
 ///
-/// `alive` is incremented when the custom connector successfully establishes a new connection
-/// and decremented when the connection IO is dropped. `active_requests` is held by an
-/// [`ActiveGuard`] for the lifetime of an in-flight HTTP request — at zero open requests,
-/// every alive connection is idle.
-///
-/// `idle ≈ alive - active_requests`. The approximation is exact for HTTP/1 (one request per
-/// connection at a time); on HTTP/2 a single connection can serve many concurrent streams so
-/// `active_requests` may exceed `alive` and `idle()` clamps to zero. Document this behaviour
-/// rather than emit nonsense.
+/// `alive` tracks live connections owned by the custom connector — incremented on a
+/// successful new connection and decremented when the connection IO is dropped.
+/// `active_requests` tracks in-flight HTTP requests via [`ActiveGuard`]. On HTTP/2 a
+/// single connection can serve many concurrent streams, so `active_requests` may exceed
+/// `alive` and [`idle`](Self::idle) saturates at zero rather than emit a negative gauge.
 #[derive(Default)]
 pub struct PoolStats {
     pub alive: AtomicU64,

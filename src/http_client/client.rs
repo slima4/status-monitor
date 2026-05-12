@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use http_body_util::Full;
 use hyper::body::Bytes;
+use hyper_rustls::ConfigBuilderExt;
 use hyper_util::client::legacy::Client as HyperClient;
 use hyper_util::rt::{TokioExecutor, TokioTimer};
 use metrics::{Histogram, histogram};
@@ -10,12 +11,12 @@ use rustls::ClientConfig;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::crypto::CryptoProvider;
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
-use rustls::{DigitallySignedStruct, RootCertStore, SignatureScheme};
+use rustls::{DigitallySignedStruct, SignatureScheme};
 use tokio_rustls::TlsConnector;
 
 use crate::config::{CheckerConfig, DnsConfig, HttpClientConfig};
 use crate::error::Result;
-use crate::http_client::connector::PhaseConnector;
+use crate::http_client::connector::{ConnectorInner, PhaseConnector};
 use crate::http_client::dns::HickoryDnsResolver;
 use crate::http_client::pool_stats::PoolStats;
 use crate::observability::metrics::names;
@@ -102,7 +103,7 @@ fn build_one(
     let tls_config = build_tls_config(verify_tls, http_cfg.http2_prior_knowledge)?;
     let tls_connector = Arc::new(TlsConnector::from(Arc::new(tls_config)));
 
-    let connector = PhaseConnector {
+    let inner = Arc::new(ConnectorInner {
         resolver,
         tls: tls_connector,
         pool_stats,
@@ -112,7 +113,8 @@ fn build_one(
         tcp_keepalive: Some(Duration::from_secs(http_cfg.tcp_keepalive_secs))
             .filter(|d| !d.is_zero()),
         tcp_nodelay: true,
-    };
+    });
+    let connector = PhaseConnector { inner };
 
     let mut builder = HyperClient::builder(TokioExecutor::new());
     builder
@@ -132,19 +134,14 @@ fn build_one(
 }
 
 fn build_tls_config(verify: bool, h2_prior_knowledge: bool) -> Result<ClientConfig> {
-    let mut roots = RootCertStore::empty();
-    let native = rustls_native_certs::load_native_certs();
-    for cert in native.certs {
-        let _ = roots.add(cert);
-    }
-    if roots.is_empty() {
-        roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-    }
-
+    let builder = ClientConfig::builder();
     let mut cfg = if verify {
-        ClientConfig::builder()
-            .with_root_certificates(roots)
-            .with_no_client_auth()
+        match builder.with_native_roots() {
+            Ok(b) => b.with_no_client_auth(),
+            Err(_) => ClientConfig::builder()
+                .with_webpki_roots()
+                .with_no_client_auth(),
+        }
     } else {
         ClientConfig::builder()
             .dangerous()
@@ -152,12 +149,11 @@ fn build_tls_config(verify: bool, h2_prior_knowledge: bool) -> Result<ClientConf
             .with_no_client_auth()
     };
 
-    if h2_prior_knowledge {
-        // Force h2 ALPN; plain TLS handshake otherwise advertises both.
-        cfg.alpn_protocols = vec![b"h2".to_vec()];
+    cfg.alpn_protocols = if h2_prior_knowledge {
+        vec![b"h2".to_vec()]
     } else {
-        cfg.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
-    }
+        vec![b"h2".to_vec(), b"http/1.1".to_vec()]
+    };
     Ok(cfg)
 }
 

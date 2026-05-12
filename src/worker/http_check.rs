@@ -1,11 +1,14 @@
+use std::error::Error as _;
 use std::time::Instant;
 
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use bytes::Bytes;
 use chrono::Utc;
 use flate2::read::GzDecoder;
 use http_body_util::{BodyExt, Full};
 use hyper::body::Bytes as HBytes;
-use hyper::header::{ACCEPT_ENCODING, AUTHORIZATION, HOST, HeaderName, HeaderValue, USER_AGENT};
+use hyper::header::{ACCEPT_ENCODING, AUTHORIZATION, HeaderName, HeaderValue, USER_AGENT};
 use hyper::{Method, Request, Uri};
 use uuid::Uuid;
 
@@ -35,17 +38,14 @@ pub async fn execute_http_check(
         }
     };
 
-    let body = check.body.clone().unwrap_or_default();
-    let body_bytes: HBytes = HBytes::from(body.into_bytes());
+    let body_bytes: HBytes = match &check.body {
+        Some(b) => HBytes::from(b.clone().into_bytes()),
+        None => HBytes::new(),
+    };
 
     let mut builder = Request::builder()
         .method(map_method(check.method))
-        .uri(&uri);
-
-    if let Some(host_hdr) = host_header(&uri) {
-        builder = builder.header(HOST, host_hdr);
-    }
-    builder = builder
+        .uri(&uri)
         .header(USER_AGENT, clients.user_agent())
         .header(ACCEPT_ENCODING, "gzip, br");
 
@@ -55,8 +55,7 @@ pub async fn execute_http_check(
         }
     }
     if let Some((user, pass)) = &check.basic_auth {
-        let raw = format!("{user}:{pass}");
-        let encoded = base64_encode(raw.as_bytes());
+        let encoded = BASE64_STANDARD.encode(format!("{user}:{pass}"));
         if let Ok(val) = HeaderValue::try_from(format!("Basic {encoded}")) {
             builder = builder.header(AUTHORIZATION, val);
         }
@@ -125,12 +124,12 @@ pub async fn execute_http_check(
             return r;
         }
         Ok(Ok(c)) => c,
-        Ok(Err(err)) => {
+        Ok(Err(_)) => {
             let mut r = CheckResult::error_with_elapsed(
                 target_id,
                 started_at,
                 start.elapsed().as_millis() as u32,
-                format!("body read failed: {err}"),
+                "body",
             );
             r.ttfb_ms = Some(ttfb_ms);
             return r;
@@ -140,12 +139,12 @@ pub async fn execute_http_check(
     let raw = collected.to_bytes();
     let decoded = match decode_body(&raw, content_encoding.as_deref()) {
         Ok(b) => b,
-        Err(err) => {
+        Err(_) => {
             let mut r = CheckResult::error_with_elapsed(
                 target_id,
                 started_at,
                 start.elapsed().as_millis() as u32,
-                format!("decode failed: {err}"),
+                "decode",
             );
             r.ttfb_ms = Some(ttfb_ms);
             return r;
@@ -192,29 +191,19 @@ pub async fn execute_http_check(
 fn decode_body(raw: &HBytes, encoding: Option<&str>) -> std::io::Result<Bytes> {
     use std::io::Read;
     match encoding {
+        // Typical gzip/brotli ratios on text are 3-5×; pre-size larger to avoid
+        // re-allocation in the decoder loop.
         Some("gzip") => {
-            let mut decoder = GzDecoder::new(raw.as_ref());
-            let mut out = Vec::with_capacity(raw.len());
-            decoder.read_to_end(&mut out)?;
+            let mut out = Vec::with_capacity(raw.len().saturating_mul(4));
+            GzDecoder::new(raw.as_ref()).read_to_end(&mut out)?;
             Ok(Bytes::from(out))
         }
         Some("br") => {
-            let mut out = Vec::with_capacity(raw.len());
-            let mut decoder = brotli::Decompressor::new(raw.as_ref(), 4096);
-            decoder.read_to_end(&mut out)?;
+            let mut out = Vec::with_capacity(raw.len().saturating_mul(4));
+            brotli::Decompressor::new(raw.as_ref(), 4096).read_to_end(&mut out)?;
             Ok(Bytes::from(out))
         }
         _ => Ok(raw.clone()),
-    }
-}
-
-fn host_header(uri: &Uri) -> Option<String> {
-    let host = uri.host()?;
-    let scheme = uri.scheme_str().unwrap_or("http");
-    let default_port = if scheme == "https" { 443 } else { 80 };
-    match uri.port_u16() {
-        Some(p) if p != default_port => Some(format!("{host}:{p}")),
-        _ => Some(host.to_string()),
     }
 }
 
@@ -240,32 +229,17 @@ fn match_status(code: u16, expected: &ExpectedStatus) -> bool {
 
 fn classify_hyper_error(err: &hyper_util::client::legacy::Error) -> &'static str {
     if err.is_connect() {
-        "connect"
+        // Source chain often carries an io::Error or our own "tcp connect timeout".
+        let msg = err
+            .source()
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| err.to_string());
+        if msg.contains("tcp connect timeout") || msg.to_lowercase().contains("timeout") {
+            "timeout"
+        } else {
+            "connect"
+        }
     } else {
         "transport"
     }
-}
-
-fn base64_encode(input: &[u8]) -> String {
-    const ALPHA: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
-    for chunk in input.chunks(3) {
-        let b0 = chunk[0];
-        let b1 = if chunk.len() > 1 { chunk[1] } else { 0 };
-        let b2 = if chunk.len() > 2 { chunk[2] } else { 0 };
-        let n = (u32::from(b0) << 16) | (u32::from(b1) << 8) | u32::from(b2);
-        out.push(ALPHA[((n >> 18) & 0x3f) as usize] as char);
-        out.push(ALPHA[((n >> 12) & 0x3f) as usize] as char);
-        if chunk.len() > 1 {
-            out.push(ALPHA[((n >> 6) & 0x3f) as usize] as char);
-        } else {
-            out.push('=');
-        }
-        if chunk.len() > 2 {
-            out.push(ALPHA[(n & 0x3f) as usize] as char);
-        } else {
-            out.push('=');
-        }
-    }
-    out
 }

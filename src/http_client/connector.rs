@@ -19,16 +19,20 @@ use tower::Service;
 use crate::http_client::dns::HickoryDnsResolver;
 use crate::http_client::pool_stats::{AliveGuard, PoolStats};
 
+pub(crate) struct ConnectorInner {
+    pub(crate) resolver: Arc<HickoryDnsResolver>,
+    pub(crate) tls: Arc<TlsConnector>,
+    pub(crate) pool_stats: Arc<PoolStats>,
+    pub(crate) connect_ms: Histogram,
+    pub(crate) tls_ms: Histogram,
+    pub(crate) connect_timeout: Duration,
+    pub(crate) tcp_keepalive: Option<Duration>,
+    pub(crate) tcp_nodelay: bool,
+}
+
 #[derive(Clone)]
 pub struct PhaseConnector {
-    pub resolver: Arc<HickoryDnsResolver>,
-    pub tls: Arc<TlsConnector>,
-    pub pool_stats: Arc<PoolStats>,
-    pub connect_ms: Histogram,
-    pub tls_ms: Histogram,
-    pub connect_timeout: Duration,
-    pub tcp_keepalive: Option<Duration>,
-    pub tcp_nodelay: bool,
+    pub(crate) inner: Arc<ConnectorInner>,
 }
 
 impl Service<Uri> for PhaseConnector {
@@ -41,15 +45,7 @@ impl Service<Uri> for PhaseConnector {
     }
 
     fn call(&mut self, dst: Uri) -> Self::Future {
-        let resolver = self.resolver.clone();
-        let tls = self.tls.clone();
-        let pool_stats = self.pool_stats.clone();
-        let connect_ms = self.connect_ms.clone();
-        let tls_ms = self.tls_ms.clone();
-        let connect_timeout = self.connect_timeout;
-        let tcp_keepalive = self.tcp_keepalive;
-        let tcp_nodelay = self.tcp_nodelay;
-
+        let inner = self.inner.clone();
         Box::pin(async move {
             let host = dst
                 .host()
@@ -59,29 +55,20 @@ impl Service<Uri> for PhaseConnector {
             let is_https = scheme == "https";
             let port = dst.port_u16().unwrap_or(if is_https { 443 } else { 80 });
 
-            let stream = connect_tcp(
-                &resolver,
-                &host,
-                port,
-                connect_timeout,
-                tcp_keepalive,
-                tcp_nodelay,
-                &connect_ms,
-            )
-            .await?;
+            let stream = connect_tcp(&inner, &host, port).await?;
 
-            let inner = if is_https {
+            let payload = if is_https {
                 let tls_start = Instant::now();
-                let server_name = ServerName::try_from(host.clone())
+                let server_name = ServerName::try_from(host)
                     .map_err(|e| io::Error::other(format!("invalid server name: {e}")))?;
-                let tls_stream = tls.connect(server_name, stream).await?;
-                tls_ms.record(tls_start.elapsed().as_millis() as f64);
+                let tls_stream = inner.tls.connect(server_name, stream).await?;
+                inner.tls_ms.record(tls_start.elapsed().as_millis() as f64);
                 MaybeTls::Tls(Box::new(tls_stream))
             } else {
                 MaybeTls::Plain(stream)
             };
 
-            let alpn_h2 = match &inner {
+            let alpn_h2 = match &payload {
                 MaybeTls::Tls(s) => {
                     let (_io, conn): (&TcpStream, &rustls::ClientConnection) = s.get_ref();
                     conn.alpn_protocol() == Some(b"h2")
@@ -90,8 +77,8 @@ impl Service<Uri> for PhaseConnector {
             };
 
             let tracked = TrackedStream {
-                inner,
-                _guard: AliveGuard::new(pool_stats),
+                inner: payload,
+                _guard: AliveGuard::new(inner.pool_stats.clone()),
                 alpn_h2,
             };
             Ok(TokioIo::new(tracked))
@@ -99,16 +86,9 @@ impl Service<Uri> for PhaseConnector {
     }
 }
 
-async fn connect_tcp(
-    resolver: &HickoryDnsResolver,
-    host: &str,
-    port: u16,
-    connect_timeout: Duration,
-    keepalive: Option<Duration>,
-    nodelay: bool,
-    connect_ms: &Histogram,
-) -> io::Result<TcpStream> {
-    let addrs: Vec<SocketAddr> = resolver
+async fn connect_tcp(inner: &ConnectorInner, host: &str, port: u16) -> io::Result<TcpStream> {
+    let addrs: Vec<SocketAddr> = inner
+        .resolver
         .resolve_addrs(host)
         .await
         .map_err(io::Error::other)?
@@ -121,7 +101,7 @@ async fn connect_tcp(
     }
 
     let tcp_start = Instant::now();
-    let stream = tokio::time::timeout(connect_timeout, async {
+    let stream = tokio::time::timeout(inner.connect_timeout, async {
         let mut last_err: Option<io::Error> = None;
         for addr in &addrs {
             match TcpStream::connect(addr).await {
@@ -134,14 +114,15 @@ async fn connect_tcp(
     .await
     .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "tcp connect timeout"))??;
 
-    connect_ms.record(tcp_start.elapsed().as_millis() as f64);
-    if nodelay {
+    inner
+        .connect_ms
+        .record(tcp_start.elapsed().as_millis() as f64);
+    if inner.tcp_nodelay {
         let _ = stream.set_nodelay(true);
     }
-    if let Some(d) = keepalive {
+    if let Some(d) = inner.tcp_keepalive {
         let sock = socket2::SockRef::from(&stream);
-        let mut ka = socket2::TcpKeepalive::new().with_time(d);
-        ka = ka.with_interval(d);
+        let ka = socket2::TcpKeepalive::new().with_time(d).with_interval(d);
         let _ = sock.set_tcp_keepalive(&ka);
     }
     Ok(stream)
@@ -165,16 +146,24 @@ impl Connection for TrackedStream {
     }
 }
 
+// Box<TlsStream<_>> and TcpStream are both Unpin, so Pin::new(&mut ...) works
+// directly on either arm without needing a unifying trait object.
+macro_rules! delegate_io {
+    ($self:ident.$method:ident($($arg:expr),*)) => {
+        match &mut $self.inner {
+            MaybeTls::Plain(s) => Pin::new(s).$method($($arg),*),
+            MaybeTls::Tls(s) => Pin::new(s).$method($($arg),*),
+        }
+    };
+}
+
 impl AsyncRead for TrackedStream {
     fn poll_read(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         buf: &mut ReadBuf<'_>,
     ) -> Poll<io::Result<()>> {
-        match &mut self.inner {
-            MaybeTls::Plain(s) => Pin::new(s).poll_read(cx, buf),
-            MaybeTls::Tls(s) => Pin::new(s.as_mut()).poll_read(cx, buf),
-        }
+        delegate_io!(self.poll_read(cx, buf))
     }
 }
 
@@ -184,24 +173,15 @@ impl AsyncWrite for TrackedStream {
         cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<io::Result<usize>> {
-        match &mut self.inner {
-            MaybeTls::Plain(s) => Pin::new(s).poll_write(cx, buf),
-            MaybeTls::Tls(s) => Pin::new(s.as_mut()).poll_write(cx, buf),
-        }
+        delegate_io!(self.poll_write(cx, buf))
     }
 
     fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        match &mut self.inner {
-            MaybeTls::Plain(s) => Pin::new(s).poll_flush(cx),
-            MaybeTls::Tls(s) => Pin::new(s.as_mut()).poll_flush(cx),
-        }
+        delegate_io!(self.poll_flush(cx))
     }
 
     fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        match &mut self.inner {
-            MaybeTls::Plain(s) => Pin::new(s).poll_shutdown(cx),
-            MaybeTls::Tls(s) => Pin::new(s.as_mut()).poll_shutdown(cx),
-        }
+        delegate_io!(self.poll_shutdown(cx))
     }
 
     fn is_write_vectored(&self) -> bool {
@@ -216,9 +196,6 @@ impl AsyncWrite for TrackedStream {
         cx: &mut Context<'_>,
         bufs: &[io::IoSlice<'_>],
     ) -> Poll<io::Result<usize>> {
-        match &mut self.inner {
-            MaybeTls::Plain(s) => Pin::new(s).poll_write_vectored(cx, bufs),
-            MaybeTls::Tls(s) => Pin::new(s.as_mut()).poll_write_vectored(cx, bufs),
-        }
+        delegate_io!(self.poll_write_vectored(cx, bufs))
     }
 }
