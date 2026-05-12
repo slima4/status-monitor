@@ -1,13 +1,12 @@
 # syntax=docker/dockerfile:1.7
 
-FROM rust:1.95-bookworm AS builder
+# Alpine builder = musl libc native → static binaries without crt-static gymnastics.
+FROM rust:1-alpine AS builder
 WORKDIR /usr/src/status-monitor
 
 ENV CARGO_TERM_COLOR=never
 
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends pkg-config ca-certificates && \
-    rm -rf /var/lib/apt/lists/*
+RUN apk add --no-cache musl-dev pkgconfig
 
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
@@ -18,14 +17,17 @@ COPY config ./config
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/src/status-monitor/target \
     cargo build --release --bins && \
-    cp target/release/status-monitor /usr/local/bin/status-monitor && \
-    cp target/release/loadtest /usr/local/bin/loadtest
+    mkdir -p /out && \
+    cp target/release/status-monitor /out/status-monitor && \
+    cp target/release/loadtest /out/loadtest
 
-FROM gcr.io/distroless/cc-debian12:nonroot
+# distroless-static is ~2 MB and ships ca-certificates + /etc/passwd → enough for
+# a static Rust binary that talks HTTPS via rustls-native-certs.
+FROM gcr.io/distroless/static-debian12:nonroot
 WORKDIR /app
 
-COPY --from=builder /usr/local/bin/status-monitor /usr/local/bin/status-monitor
-COPY --from=builder /usr/local/bin/loadtest /usr/local/bin/loadtest
+COPY --from=builder /out/status-monitor /usr/local/bin/status-monitor
+COPY --from=builder /out/loadtest /usr/local/bin/loadtest
 COPY --from=builder /usr/src/status-monitor/config /app/config
 COPY --from=builder /usr/src/status-monitor/migrations /app/migrations
 

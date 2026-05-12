@@ -12,7 +12,7 @@ STATUS_MONITOR_STORAGE__CLICKHOUSE__PASSWORD: monitor
 STATUS_MONITOR_OBSERVABILITY__LOG_FORMAT: json
 ```
 
-The runtime image is `gcr.io/distroless/cc-debian12:nonroot` for a minimal attack surface. Current size ~44 MB; reducing to <30 MB via musl + `distroless/static` is tracked work.
+The runtime image is `gcr.io/distroless/static-debian12:nonroot` for a minimal attack surface, no shell, and no glibc. Built from a static musl binary via `rust:1-alpine`. Final image is **19.3 MB** — both `status-monitor` and `loadtest` binaries fit in the same image.
 
 ## Bind addresses
 
