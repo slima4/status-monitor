@@ -51,7 +51,7 @@ For 50k-concurrency runs use `HTTP2=1` to fold many streams onto a few TCP conne
 | Config | Result |
 |---|---|
 | `CONCURRENCY=12000 MOCK_PORTS=24 RAMP_SECS=10 DURATION_SECS=300` (HTTP/1) | 27,894 rps · 99.79% success · p99 2.7 s |
-| `CONCURRENCY=50000 MOCK_PORTS=8 RAMP_SECS=10 HTTP2=1 DURATION_SECS=300` | **131,209 rps · 100% success · 39.4M checks · p99 769 ms** |
+| `CONCURRENCY=50000 MOCK_PORTS=8 RAMP_SECS=10 HTTP2=1 DURATION_SECS=300` | **151,614 rps · 100% success · 45.5M checks · p99 579 ms** |
 
 ### Linux container (Docker Desktop VM on Mac)
 
