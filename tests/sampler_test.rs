@@ -3,6 +3,7 @@ mod common;
 use std::sync::Arc;
 use std::time::Duration;
 
+use status_monitor::http_client::PoolStats;
 use status_monitor::observability::sampler;
 use status_monitor::scheduler::TargetRegistry;
 use status_monitor::storage::InMemoryTargetStore;
@@ -40,6 +41,7 @@ async fn sampler_runs_and_shuts_down() {
     let h = sampler::spawn(
         pool,
         registry,
+        PoolStats::new(),
         &tx,
         Duration::from_millis(20),
         shutdown.clone(),

@@ -60,6 +60,7 @@ async fn main() -> Result<()> {
         Arc::new(ClickhouseResultsStore::from_client(clickhouse_client));
 
     let http_clients = build_clients(&cfg.http_client, &cfg.checker, &cfg.dns)?;
+    let http_pool_stats = http_clients.pool_stats().clone();
 
     let (result_tx, result_rx) = mpsc::channel(cfg.storage.clickhouse.buffer_size.max(1024));
     let pool = Arc::new(WorkerPool::new(
@@ -101,6 +102,7 @@ async fn main() -> Result<()> {
     let sampler_handle: JoinHandle<()> = status_monitor::observability::sampler::spawn(
         pool.clone(),
         registry.clone(),
+        http_pool_stats,
         &result_tx,
         sample_interval,
         root.clone(),

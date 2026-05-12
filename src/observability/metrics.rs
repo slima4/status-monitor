@@ -57,8 +57,24 @@ fn register_descriptions() {
         "DNS resolution latency in milliseconds"
     );
     describe_histogram!(
+        "status_monitor_check_connect_ms",
+        "TCP connect latency in milliseconds (recorded only when a new connection is established)"
+    );
+    describe_histogram!(
+        "status_monitor_check_tls_ms",
+        "TLS handshake latency in milliseconds (recorded only when a new HTTPS connection is established)"
+    );
+    describe_histogram!(
         "status_monitor_check_ttfb_ms",
         "HTTP time-to-first-byte in milliseconds"
+    );
+    describe_gauge!(
+        "status_monitor_http_pool_idle_connections",
+        "Connections held in the HTTP connection pool but not currently serving a request"
+    );
+    describe_gauge!(
+        "status_monitor_http_pool_active_connections",
+        "Connections currently serving an in-flight HTTP request"
     );
     describe_histogram!(
         "status_monitor_storage_batch_size",
@@ -95,7 +111,11 @@ pub mod names {
     pub const STORAGE_DROPPED: &str = "status_monitor_storage_dropped_results_total";
     pub const CHECK_DURATION_MS: &str = "status_monitor_check_duration_ms";
     pub const CHECK_DNS_MS: &str = "status_monitor_check_dns_ms";
+    pub const CHECK_CONNECT_MS: &str = "status_monitor_check_connect_ms";
+    pub const CHECK_TLS_MS: &str = "status_monitor_check_tls_ms";
     pub const CHECK_TTFB_MS: &str = "status_monitor_check_ttfb_ms";
+    pub const HTTP_POOL_IDLE: &str = "status_monitor_http_pool_idle_connections";
+    pub const HTTP_POOL_ACTIVE: &str = "status_monitor_http_pool_active_connections";
     pub const STORAGE_BATCH_SIZE: &str = "status_monitor_storage_batch_size";
     pub const STORAGE_WRITE_DURATION_MS: &str = "status_monitor_storage_write_duration_ms";
     pub const TARGETS_TOTAL: &str = "status_monitor_targets_total";

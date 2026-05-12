@@ -8,6 +8,7 @@ use tokio::time::{MissedTickBehavior, interval};
 use tokio_util::sync::CancellationToken;
 
 use crate::domain::CheckResult;
+use crate::http_client::PoolStats;
 use crate::observability::metrics::names;
 use crate::scheduler::TargetRegistry;
 use crate::worker::WorkerPool;
@@ -15,6 +16,7 @@ use crate::worker::WorkerPool;
 pub fn spawn(
     pool: Arc<WorkerPool>,
     registry: Arc<TargetRegistry>,
+    http_pool: Arc<PoolStats>,
     result_tx: &mpsc::Sender<CheckResult>,
     sample_interval: Duration,
     shutdown: CancellationToken,
@@ -27,6 +29,7 @@ pub fn spawn(
     tokio::spawn(run(
         pool,
         registry,
+        http_pool,
         tx,
         queue_capacity,
         sample_interval,
@@ -37,6 +40,7 @@ pub fn spawn(
 async fn run(
     pool: Arc<WorkerPool>,
     registry: Arc<TargetRegistry>,
+    http_pool: Arc<PoolStats>,
     result_tx: mpsc::WeakSender<CheckResult>,
     queue_capacity: usize,
     sample_interval: Duration,
@@ -49,6 +53,8 @@ async fn run(
     let g_breakers_open = gauge!(names::BREAKERS_OPEN);
     let g_targets = gauge!(names::TARGETS_TOTAL);
     let g_queue_depth = gauge!(names::RESULT_QUEUE_DEPTH);
+    let g_pool_idle = gauge!(names::HTTP_POOL_IDLE);
+    let g_pool_active = gauge!(names::HTTP_POOL_ACTIVE);
 
     loop {
         tokio::select! {
@@ -62,6 +68,8 @@ async fn run(
                     None => 0,
                 };
                 g_queue_depth.set(depth as f64);
+                g_pool_idle.set(http_pool.idle() as f64);
+                g_pool_active.set(http_pool.active() as f64);
             }
         }
     }

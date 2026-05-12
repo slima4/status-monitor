@@ -1,4 +1,4 @@
-use std::net::{IpAddr, SocketAddr};
+use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -8,7 +8,6 @@ use hickory_resolver::lookup_ip::LookupIp;
 use hickory_resolver::net::runtime::TokioRuntimeProvider;
 use hickory_resolver::{Resolver, TokioResolver};
 use metrics::{Histogram, histogram};
-use reqwest::dns::{Addrs, Name, Resolve, Resolving};
 
 use crate::config::DnsConfig;
 use crate::error::Result;
@@ -54,20 +53,14 @@ impl HickoryDnsResolver {
             dns_ms: histogram!(names::CHECK_DNS_MS),
         })
     }
-}
 
-impl Resolve for HickoryDnsResolver {
-    fn resolve(&self, name: Name) -> Resolving {
-        let resolver = self.inner.clone();
-        let dns_ms = self.dns_ms.clone();
-        Box::pin(async move {
-            let host = name.as_str().to_owned();
-            let start = Instant::now();
-            let lookup: LookupIp = resolver.lookup_ip(host).await?;
-            dns_ms.record(start.elapsed().as_millis() as f64);
-            let ips: Vec<SocketAddr> = lookup.iter().map(|ip| SocketAddr::new(ip, 0)).collect();
-            let addrs: Addrs = Box::new(ips.into_iter());
-            Ok(addrs)
-        })
+    pub async fn resolve_addrs(&self, host: &str) -> anyhow::Result<Vec<IpAddr>> {
+        if let Ok(ip) = host.parse::<IpAddr>() {
+            return Ok(vec![ip]);
+        }
+        let start = Instant::now();
+        let lookup: LookupIp = self.inner.lookup_ip(host).await?;
+        self.dns_ms.record(start.elapsed().as_millis() as f64);
+        Ok(lookup.iter().collect())
     }
 }

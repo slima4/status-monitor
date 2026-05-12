@@ -10,23 +10,21 @@ tokio = { version = "1.52", features = ["full"] }
 tokio-util = "0.7"
 futures = "0.3"
 
-# HTTP client
-reqwest = { version = "0.13", default-features = false, features = [
-    "rustls",
-    "rustls-native-certs",
-    "http2",
-    "gzip",
-    "brotli",
-    "stream",
-    "hickory-dns",
-] }
+# HTTP client (custom hyper-util stack for connect/tls timing + pool gauges)
 hyper = { version = "1.9", features = ["client", "http1", "http2"] }
 hyper-util = { version = "0.1", features = ["full"] }
+http-body-util = "0.1"
+http-body = "1"
+bytes = "1"
+flate2 = "1"
+brotli = "8"
+socket2 = "0.6"
 
 # TLS
 rustls = "0.23"
 rustls-native-certs = "0.8"
 webpki-roots = "1.0"
+tokio-rustls = "0.26"
 
 # DNS (custom caching resolver)
 hickory-resolver = { version = "0.26", features = ["tls-ring", "tokio"] }
