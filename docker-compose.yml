@@ -49,6 +49,33 @@ services:
       - "8080:8080"
       - "9090:9090"
 
+  # Mock-server + client live in the same process; nothing external is needed.
+  # Linux container exposes the kernel knobs macOS loopback can't (ephemeral
+  # range, somaxconn, tw_reuse), unlocking the §10.7 50k-concurrent acceptance.
+  # Run: docker compose --profile loadtest run --rm loadtest
+  loadtest:
+    profiles: ["loadtest"]
+    build:
+      context: .
+    entrypoint: ["/usr/local/bin/loadtest"]
+    environment:
+      CONCURRENCY: "50000"
+      DURATION_SECS: "300"
+      TIMEOUT_MS: "5000"
+      MOCK_PORTS: "16"
+      RAMP_SECS: "10"
+      HTTP2: "1"
+      RUST_LOG: "info"
+    ulimits:
+      nofile:
+        soft: 1048576
+        hard: 1048576
+    sysctls:
+      net.core.somaxconn: "8192"
+      net.ipv4.tcp_tw_reuse: "1"
+      net.ipv4.ip_local_port_range: "10000 65535"
+      net.ipv4.tcp_fin_timeout: "15"
+
 volumes:
   pg_data:
   ch_data:

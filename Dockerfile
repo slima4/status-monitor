@@ -17,13 +17,15 @@ COPY config ./config
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/src/status-monitor/target \
-    cargo build --release --bin status-monitor && \
-    cp target/release/status-monitor /usr/local/bin/status-monitor
+    cargo build --release --bins && \
+    cp target/release/status-monitor /usr/local/bin/status-monitor && \
+    cp target/release/loadtest /usr/local/bin/loadtest
 
 FROM gcr.io/distroless/cc-debian12:nonroot
 WORKDIR /app
 
 COPY --from=builder /usr/local/bin/status-monitor /usr/local/bin/status-monitor
+COPY --from=builder /usr/local/bin/loadtest /usr/local/bin/loadtest
 COPY --from=builder /usr/src/status-monitor/config /app/config
 COPY --from=builder /usr/src/status-monitor/migrations /app/migrations
 
