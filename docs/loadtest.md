@@ -44,12 +44,22 @@ Spawns `MOCK_PORTS` axum servers returning `200 ok`, then drives workers in a ti
 
 For 50k-concurrency runs use `HTTP2=1` to fold many streams onto a few TCP connections. Linux defaults (ephemeral 32-61k, tunable `somaxconn`) handle 50k HTTP/1 natively.
 
-## Reference numbers (M-class Mac, single mock host)
+## Reference numbers
+
+### macOS host (M-class Mac, loopback)
 
 | Config | Result |
 |---|---|
 | `CONCURRENCY=12000 MOCK_PORTS=24 RAMP_SECS=10 DURATION_SECS=300` (HTTP/1) | 27,894 rps · 99.79% success · p99 2.7 s |
 | `CONCURRENCY=50000 MOCK_PORTS=8 RAMP_SECS=10 HTTP2=1 DURATION_SECS=300` | **131,209 rps · 100% success · 39.4M checks · p99 769 ms** |
+
+### Linux container (Docker Desktop VM on Mac)
+
+| Config | Result |
+|---|---|
+| `CONCURRENCY=50000 MOCK_PORTS=16 RAMP_SECS=10 HTTP2=1 DURATION_SECS=300` | **93,350 rps · 100% success · 28.1M checks · p99 1.8 s** |
+
+The 50k-concurrent acceptance run requires Linux kernel knobs (somaxconn, tw_reuse, ip_local_port_range) — see the Docker section above. Pure-Linux numbers will be higher than VM-on-Mac (~30% hypervisor overhead).
 
 ## HTTP/1 vs h2c trade-off
 

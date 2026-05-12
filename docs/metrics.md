@@ -35,7 +35,7 @@ Spans are emitted around:
 
 ## Not yet emitted (planned)
 
-The following SPEC §6.11 metrics need a custom hyper connector to expose; current `reqwest` 0.13 has no public hook for them:
+The following metrics need a custom hyper connector to expose; current `reqwest` 0.13 has no public hook for them:
 
 - `status_monitor_check_connect_ms` — TCP connect latency
 - `status_monitor_check_tls_ms` — TLS handshake latency
