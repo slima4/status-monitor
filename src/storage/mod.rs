@@ -1,6 +1,7 @@
 pub mod clickhouse;
 pub mod memory;
 pub mod postgres;
+pub mod postgres_secrets;
 pub mod traits;
 
 pub use clickhouse::{ClickhouseResultSink, ClickhouseResultsStore, build_client, migrate};

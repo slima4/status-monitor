@@ -41,6 +41,10 @@ Tagged enum, `type` discriminator.
 }
 ```
 
+#### Credential redaction
+
+`GET`, `POST`, `PATCH`, and `bulk` responses replace populated `basic_auth` / `bearer_token` fields with the sentinel `"***"`. A `null` field stays `null`, so clients can distinguish "auth is configured" from "no auth". When you `PATCH` a target's `check`, you must re-supply the real credential — a body that contains `"***"` is rejected with `400 Bad Request`. If you only need to change other fields (`name`, `tags`, `enabled`, `interval`), omit `check` from the `PATCH` body. Encryption at rest is gated on [`security.credentials_kek_base64`](configuration.md); the redaction behavior applies in either mode.
+
 `expected_status` variants:
 
 ```jsonc
@@ -76,6 +80,7 @@ Server returns the full `Target` including `id` (UUIDv7), `created_at`, `updated
 - Unsupported URL scheme (`url scheme '...' not allowed` — only `http` and `https`)
 - Missing URL host, empty TCP host, or TCP port `0`
 - **SSRF guard** — `target address ... is in a blocked range`. Triggered when the URL or TCP host is an IP literal that resolves to loopback / private / link-local / reserved space (see [Configuration → `security.allow_private_targets`](configuration.md)). Hostname literals are checked again at connect time after DNS resolution, so DNS rebinding cannot bypass the guard.
+- **Redaction sentinel** — `basic_auth contains redaction sentinel — re-supply the real credential` or the equivalent for `bearer_token`. Rejected to prevent a `GET` → `PATCH` round-trip from silently overwriting the stored credential with `"***"`.
 
 ## Results query
 

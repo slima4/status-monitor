@@ -8,13 +8,30 @@ use url::Host;
 use uuid::Uuid;
 
 use crate::app::AppState;
-use crate::domain::{NewTarget, Target, TargetUpdate};
+use crate::domain::{CheckSpec, NewTarget, Target, TargetUpdate};
 use crate::error::{AppError, Result};
 use crate::security::SsrfGuard;
 use crate::storage::TargetFilter;
 
 const BULK_MAX: usize = 10_000;
 const ALLOWED_SCHEMES: &[&str] = &["http", "https"];
+
+/// Wire-level placeholder substituted for populated credentials in API responses.
+/// Re-submitting it on `PATCH` is rejected so a `GET → PATCH` round-trip cannot
+/// silently overwrite the real value with the sentinel.
+const REDACTED: &str = "***";
+
+fn redact_secrets(check: &mut CheckSpec) {
+    if let CheckSpec::Http(http) = check {
+        if let Some((u, p)) = http.basic_auth.as_mut() {
+            *u = REDACTED.to_string();
+            *p = REDACTED.to_string();
+        }
+        if let Some(token) = http.bearer_token.as_mut() {
+            *token = REDACTED.to_string();
+        }
+    }
+}
 
 #[derive(Debug, Deserialize)]
 pub struct ListQuery {
@@ -40,13 +57,19 @@ pub async fn list(
     State(state): State<AppState>,
     Query(query): Query<ListQuery>,
 ) -> Result<Json<Vec<Target>>> {
-    let items = state.target_store.list(query.into()).await?;
+    let mut items = state.target_store.list(query.into()).await?;
+    for t in &mut items {
+        redact_secrets(&mut t.check);
+    }
     Ok(Json(items))
 }
 
 pub async fn get(State(state): State<AppState>, Path(id): Path<Uuid>) -> Result<Json<Target>> {
     match state.target_store.get(id).await? {
-        Some(t) => Ok(Json(t)),
+        Some(mut t) => {
+            redact_secrets(&mut t.check);
+            Ok(Json(t))
+        }
         None => Err(AppError::NotFound("target not found".into())),
     }
 }
@@ -57,7 +80,8 @@ pub async fn create(
 ) -> Result<(StatusCode, Json<Target>)> {
     let guard = ssrf_guard(&state);
     validate_new_target(&new, &guard)?;
-    let t = state.target_store.create(new).await?;
+    let mut t = state.target_store.create(new).await?;
+    redact_secrets(&mut t.check);
     Ok((StatusCode::CREATED, Json(t)))
 }
 
@@ -70,7 +94,10 @@ pub async fn update(
         validate_check(check, &ssrf_guard(&state))?;
     }
     match state.target_store.update(id, update).await? {
-        Some(t) => Ok(Json(t)),
+        Some(mut t) => {
+            redact_secrets(&mut t.check);
+            Ok(Json(t))
+        }
         None => Err(AppError::NotFound("target not found".into())),
     }
 }
@@ -100,7 +127,10 @@ pub async fn bulk_create(
     for new in &items {
         validate_new_target(new, &guard)?;
     }
-    let out = state.target_store.bulk_create(items).await?;
+    let mut out = state.target_store.bulk_create(items).await?;
+    for t in &mut out {
+        redact_secrets(&mut t.check);
+    }
     Ok((StatusCode::CREATED, Json(out)))
 }
 
@@ -121,6 +151,19 @@ fn validate_check(check: &crate::domain::CheckSpec, guard: &SsrfGuard) -> Result
                 return Err(AppError::BadRequest(format!(
                     "url scheme '{scheme}' not allowed"
                 )));
+            }
+            if let Some((u, p)) = &http.basic_auth
+                && (u == REDACTED || p == REDACTED)
+            {
+                return Err(AppError::BadRequest(
+                    "basic_auth contains redaction sentinel — re-supply the real credential".into(),
+                ));
+            }
+            if http.bearer_token.as_deref() == Some(REDACTED) {
+                return Err(AppError::BadRequest(
+                    "bearer_token contains redaction sentinel — re-supply the real credential"
+                        .into(),
+                ));
             }
             match http.url.host() {
                 Some(Host::Ipv4(v4)) => check_ip(IpAddr::V4(v4), guard)?,

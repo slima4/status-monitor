@@ -35,6 +35,21 @@ SSRF guard rejected the target. The URL or TCP host resolves to a private / loop
 
 DNS returned only private IPs for a target the API previously accepted (hostname literal). Either the record changed or DNS rebinding is in play. The connect-time guard refuses to continue. Either fix DNS or, deliberately, enable `security.allow_private_targets`.
 
+## `credential decryption failed` errors in logs
+
+The KEK loaded at startup can no longer decrypt rows written with a different KEK. Either `security.credentials_kek_base64` was rotated without re-encrypting existing rows, or the wrong key was supplied. Compare the configured KEK against the one used to write the affected targets — there is no automatic rotation. Recovery options:
+
+- Restore the original KEK.
+- Delete and re-create the affected targets (the row decrypts cleanly when overwritten via `PATCH` or `POST` under the new key).
+
+## Startup fails with `invalid credentials_kek_base64`
+
+The supplied key is not 32 bytes after base64 decode, or the string is not valid base64. Generate a fresh key with `openssl rand -base64 32`. URL-safe and standard base64 both decode.
+
+## `400 Bad Request` on PATCH /targets/{id} — `basic_auth contains redaction sentinel`
+
+A client read the target back (where credentials are returned as `"***"`) and `PATCH`ed the full `check` body without re-supplying the real credential. Either send the real value, or omit `check` entirely from the `PATCH` body if only other fields are changing.
+
 ## ClickHouse insert fails with `SchemaMismatch`
 
 Almost always a Row-derive mismatch on UUID, Enum8, or DateTime64 column types:

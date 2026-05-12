@@ -10,6 +10,7 @@ use status_monitor::{
     observability,
     pipeline::{BatcherConfig, ResultBatcher},
     scheduler::{Scheduler, TargetRegistry},
+    security::Cipher,
     storage::{
         self, ClickhouseResultSink, ClickhouseResultsStore, PostgresTargetStore, ResultSink,
         ResultsStore, TargetStore,
@@ -44,8 +45,19 @@ async fn main() -> Result<()> {
     );
 
     let api_bind = cfg.server.api_bind.clone();
+    let cipher = match cfg.security.kek() {
+        Some(kek) => Some(Arc::new(Cipher::from_base64(kek).map_err(|e| {
+            AppError::Other(anyhow::anyhow!("invalid credentials_kek_base64: {e}"))
+        })?)),
+        None => {
+            tracing::warn!(
+                "credentials_kek_base64 unset — basic_auth/bearer_token will be stored in plaintext"
+            );
+            None
+        }
+    };
     let target_store: Arc<dyn TargetStore> =
-        Arc::new(PostgresTargetStore::connect(&cfg.storage.postgres).await?);
+        Arc::new(PostgresTargetStore::connect(&cfg.storage.postgres, cipher.clone()).await?);
 
     tracing::info!(
         url = %cfg.storage.clickhouse.url,

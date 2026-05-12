@@ -65,9 +65,19 @@ pub struct DnsConfig {
     pub servers: Vec<String>,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SecurityConfig {
     pub allow_private_targets: bool,
+    #[serde(default)]
+    pub credentials_kek_base64: String,
+}
+
+impl SecurityConfig {
+    /// Returns Some(trimmed KEK string) if a non-empty value is configured, None otherwise.
+    pub fn kek(&self) -> Option<&str> {
+        let t = self.credentials_kek_base64.trim();
+        (!t.is_empty()).then_some(t)
+    }
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize)]

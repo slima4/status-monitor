@@ -20,6 +20,7 @@ flate2 = "1"
 brotli = "8"
 socket2 = "0.6"
 base64 = "0.22"
+aes-gcm = "0.10"
 hyper-rustls = { version = "0.27", default-features = false, features = ["http1", "http2", "native-tokio", "ring", "rustls-native-certs", "webpki-tokio"] }
 
 # TLS

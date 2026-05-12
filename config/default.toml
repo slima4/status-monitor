@@ -32,6 +32,9 @@ servers = ["1.1.1.1:53", "8.8.8.8:53"]
 [security]
 # SSRF guard — see docs/configuration.md.
 allow_private_targets = false
+# 32-byte KEK base64 (`openssl rand -base64 32`). When empty, basic_auth and
+# bearer_token are stored plaintext in check_spec — dev-only.
+credentials_kek_base64 = ""
 
 [circuit_breaker]
 failure_threshold = 5

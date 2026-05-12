@@ -246,3 +246,100 @@ async fn ssrf_rejects_tcp_loopback_literal() {
     });
     assert_eq!(post_target(payload).await, StatusCode::BAD_REQUEST);
 }
+
+fn http_with_basic_auth() -> Value {
+    json!({
+        "name": "with-basic",
+        "check": {
+            "type": "http",
+            "url": "http://example.com/",
+            "method": "GET",
+            "timeout": 5000,
+            "follow_redirects": false,
+            "max_redirects": 0,
+            "expected_status": { "kind": "exact", "value": 200 },
+            "headers": {},
+            "verify_tls": true,
+            "basic_auth": ["alice", "s3cret"]
+        },
+        "interval": 60,
+        "tags": []
+    })
+}
+
+fn http_with_bearer() -> Value {
+    json!({
+        "name": "with-bearer",
+        "check": {
+            "type": "http",
+            "url": "http://example.com/",
+            "method": "GET",
+            "timeout": 5000,
+            "follow_redirects": false,
+            "max_redirects": 0,
+            "expected_status": { "kind": "exact", "value": 200 },
+            "headers": {},
+            "verify_tls": true,
+            "bearer_token": "tok.en.value"
+        },
+        "interval": 60,
+        "tags": []
+    })
+}
+
+async fn post_and_body(app: axum::Router, payload: Value) -> Value {
+    let resp = app
+        .oneshot(
+            Request::post("/api/v1/targets")
+                .header("content-type", "application/json")
+                .body(Body::from(payload.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    body_json(resp).await
+}
+
+#[tokio::test]
+async fn redacts_basic_auth_in_create_response() {
+    let body = post_and_body(app(), http_with_basic_auth()).await;
+    assert_eq!(body["check"]["basic_auth"], json!(["***", "***"]));
+}
+
+#[tokio::test]
+async fn redacts_bearer_token_in_create_response() {
+    let body = post_and_body(app(), http_with_bearer()).await;
+    assert_eq!(body["check"]["bearer_token"], json!("***"));
+}
+
+#[tokio::test]
+async fn redacts_basic_auth_in_get_response() {
+    let app = app();
+    let created = post_and_body(app.clone(), http_with_basic_auth()).await;
+    let id = created["id"].as_str().unwrap();
+    let resp = app
+        .oneshot(
+            Request::get(format!("/api/v1/targets/{id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = body_json(resp).await;
+    assert_eq!(body["check"]["basic_auth"], json!(["***", "***"]));
+}
+
+#[tokio::test]
+async fn rejects_redaction_sentinel_in_basic_auth() {
+    let mut payload = http_with_basic_auth();
+    payload["check"]["basic_auth"] = json!(["***", "***"]);
+    assert_eq!(post_target(payload).await, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn rejects_redaction_sentinel_in_bearer_token() {
+    let mut payload = http_with_bearer();
+    payload["check"]["bearer_token"] = json!("***");
+    assert_eq!(post_target(payload).await, StatusCode::BAD_REQUEST);
+}
