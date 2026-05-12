@@ -39,7 +39,7 @@ pub async fn execute_http_check(
                 target_id,
                 started_at,
                 elapsed,
-                err.to_string(),
+                classify_reqwest_error(&err),
             );
         }
     };
@@ -53,7 +53,7 @@ pub async fn execute_http_check(
                 target_id,
                 started_at,
                 elapsed,
-                err.to_string(),
+                classify_reqwest_error(&err),
             );
         }
     };
@@ -111,5 +111,21 @@ fn match_status(code: u16, expected: &ExpectedStatus) -> bool {
         ExpectedStatus::Exact(c) => code == *c,
         ExpectedStatus::Range { min, max } => code >= *min && code <= *max,
         ExpectedStatus::OneOf(list) => list.contains(&code),
+    }
+}
+
+fn classify_reqwest_error(err: &reqwest::Error) -> &'static str {
+    if err.is_timeout() {
+        "timeout"
+    } else if err.is_connect() {
+        "connect"
+    } else if err.is_request() {
+        "request"
+    } else if err.is_body() {
+        "body"
+    } else if err.is_decode() {
+        "decode"
+    } else {
+        "transport"
     }
 }

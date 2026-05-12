@@ -52,3 +52,14 @@ pub enum CheckStatus {
     Degraded,
     Error,
 }
+
+impl CheckStatus {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Up => "up",
+            Self::Down => "down",
+            Self::Degraded => "degraded",
+            Self::Error => "error",
+        }
+    }
+}

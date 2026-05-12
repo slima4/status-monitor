@@ -25,7 +25,7 @@ pub enum HttpMethod {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
 pub enum ExpectedStatus {
     Exact(u16),
     Range { min: u16, max: u16 },
@@ -44,6 +44,9 @@ pub struct HttpCheck {
     pub expected_body_contains: Option<String>,
     pub headers: HashMap<String, String>,
     pub body: Option<String>,
+    // Reserved: a per-target opt-out of TLS verification is accepted in the schema
+    // but not yet enforced by the shared HTTP client. The global client always
+    // verifies TLS until per-target client cloning lands.
     pub verify_tls: bool,
     pub basic_auth: Option<(String, String)>,
     pub bearer_token: Option<String>,

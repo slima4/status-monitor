@@ -348,6 +348,7 @@ dependencies = [
  "bnum",
  "bstr",
  "bytes",
+ "chrono",
  "cityhash-rs",
  "clickhouse-macros",
  "clickhouse-types",
@@ -366,6 +367,7 @@ dependencies = [
  "tokio",
  "tracing",
  "url",
+ "uuid",
 ]
 
 [[package]]
