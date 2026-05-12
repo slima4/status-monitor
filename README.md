@@ -70,14 +70,7 @@ cargo run --release
 
 ## Docs
 
-Hosted at <https://slima4.github.io/status-monitor/> (rendered with `mdbook` via GitHub Actions, deployed on every push to `main`).
-
-Build and preview locally:
-
-```bash
-cargo install mdbook mdbook-linkcheck2
-mdbook serve --open
-```
+Hosted: <https://slima4.github.io/status-monitor/>
 
 Sources under [`docs/`](docs/) — readable directly on GitHub too:
 
