@@ -26,6 +26,8 @@ struct Args {
     concurrency: usize,
     duration_secs: u64,
     timeout_ms: u64,
+    mock_ports: usize,
+    ramp_secs: u64,
 }
 
 impl Args {
@@ -33,10 +35,14 @@ impl Args {
         let concurrency = env_parse("CONCURRENCY", 50_000usize).max(1);
         let duration_secs = env_parse("DURATION_SECS", 30u64);
         let timeout_ms = env_parse("TIMEOUT_MS", 5_000u64);
+        let mock_ports = env_parse("MOCK_PORTS", 16usize).max(1);
+        let ramp_secs = env_parse("RAMP_SECS", 2u64);
         Self {
             concurrency,
             duration_secs,
             timeout_ms,
+            mock_ports,
+            ramp_secs,
         }
     }
 }
@@ -53,8 +59,8 @@ async fn main() {
     let args = Args::parse();
     println!("loadtest config: {args:?}");
 
-    let mock_addr = spawn_mock_server().await;
-    println!("mock server: http://{mock_addr}");
+    let mock_addrs = spawn_mock_servers(args.mock_ports).await;
+    println!("mock servers ({}): {mock_addrs:?}", mock_addrs.len());
 
     let http_cfg = HttpClientConfig {
         pool_max_idle_per_host: 1024,
@@ -80,38 +86,52 @@ async fn main() {
     };
     let clients = build_clients(&http_cfg, &checker_cfg, &dns_cfg).expect("build clients");
 
-    let url = Url::parse(&format!("http://{mock_addr}/ok")).expect("parse url");
-    let check = Arc::new(HttpCheck {
-        url,
-        method: HttpMethod::Get,
-        timeout: Duration::from_millis(args.timeout_ms),
-        follow_redirects: false,
-        max_redirects: 0,
-        expected_status: ExpectedStatus::Exact(200),
-        expected_body_contains: None,
-        headers: HashMap::new(),
-        body: None,
-        verify_tls: true,
-        basic_auth: None,
-        bearer_token: None,
-    });
+    let checks: Vec<Arc<HttpCheck>> = mock_addrs
+        .iter()
+        .map(|addr| {
+            let url = Url::parse(&format!("http://{addr}/ok")).expect("parse url");
+            Arc::new(HttpCheck {
+                url,
+                method: HttpMethod::Get,
+                timeout: Duration::from_millis(args.timeout_ms),
+                follow_redirects: false,
+                max_redirects: 0,
+                expected_status: ExpectedStatus::Exact(200),
+                expected_body_contains: None,
+                headers: HashMap::new(),
+                body: None,
+                verify_tls: true,
+                basic_auth: None,
+                bearer_token: None,
+            })
+        })
+        .collect();
 
     let target_id = Uuid::now_v7();
     let total = Arc::new(AtomicU64::new(0));
     let success = Arc::new(AtomicU64::new(0));
+    let error_counts: Arc<Mutex<HashMap<String, u64>>> = Arc::new(Mutex::new(HashMap::new()));
     let latencies: Arc<Mutex<Vec<u32>>> = Arc::new(Mutex::new(Vec::new()));
     let start = Instant::now();
     let deadline = start + Duration::from_secs(args.duration_secs);
 
+    let ramp = Duration::from_secs(args.ramp_secs);
+    let stagger_ns = (ramp.as_nanos() / args.concurrency.max(1) as u128) as u64;
     let mut set: JoinSet<()> = JoinSet::new();
-    for _ in 0..args.concurrency {
+    for i in 0..args.concurrency {
         let clients = clients.clone();
-        let check = check.clone();
+        let check = checks[i % checks.len()].clone();
         let total = total.clone();
         let success = success.clone();
+        let error_counts = error_counts.clone();
         let latencies = latencies.clone();
+        let start_delay = Duration::from_nanos(stagger_ns.saturating_mul(i as u64));
         set.spawn(async move {
-            let mut local: Vec<u32> = Vec::with_capacity(LATENCY_BATCH);
+            if !start_delay.is_zero() {
+                sleep(start_delay).await;
+            }
+            let mut local_latencies: Vec<u32> = Vec::with_capacity(LATENCY_BATCH);
+            let mut local_errors: HashMap<String, u64> = HashMap::new();
             while Instant::now() < deadline {
                 let r = execute_http_check(target_id, &check, &clients).await;
                 total.fetch_add(1, Ordering::Relaxed);
@@ -121,14 +141,22 @@ async fn main() {
                         | status_monitor::domain::CheckStatus::Degraded
                 ) {
                     success.fetch_add(1, Ordering::Relaxed);
+                } else if let Some(err) = r.error.as_deref() {
+                    *local_errors.entry(err.to_string()).or_insert(0) += 1;
                 }
-                local.push(r.duration_ms);
-                if local.len() == LATENCY_BATCH {
-                    latencies.lock().extend(local.drain(..));
+                local_latencies.push(r.duration_ms);
+                if local_latencies.len() == LATENCY_BATCH {
+                    latencies.lock().extend(local_latencies.drain(..));
                 }
             }
-            if !local.is_empty() {
-                latencies.lock().extend(local);
+            if !local_latencies.is_empty() {
+                latencies.lock().extend(local_latencies);
+            }
+            if !local_errors.is_empty() {
+                let mut shared = error_counts.lock();
+                for (k, v) in local_errors {
+                    *shared.entry(k).or_insert(0) += v;
+                }
             }
         });
     }
@@ -177,6 +205,7 @@ async fn main() {
     let p95 = p(0.95);
     let p99 = p(0.99);
 
+    let error_counts = std::mem::take(&mut *error_counts.lock());
     println!("---");
     println!("total checks: {total}");
     println!(
@@ -184,6 +213,11 @@ async fn main() {
         success as f64 * 100.0 / total.max(1) as f64
     );
     println!("errors: {}", total - success);
+    let mut kinds: Vec<_> = error_counts.into_iter().collect();
+    kinds.sort_by(|a, b| b.1.cmp(&a.1));
+    for (kind, count) in kinds.iter().take(10) {
+        println!("  {kind}: {count}");
+    }
     println!("elapsed s: {elapsed:.2}");
     println!("rps: {rps:.0}");
     println!("p50 ms: {p50}");
@@ -191,12 +225,17 @@ async fn main() {
     println!("p99 ms: {p99}");
 }
 
-async fn spawn_mock_server() -> SocketAddr {
+async fn spawn_mock_servers(n: usize) -> Vec<SocketAddr> {
     let app = Router::new().route("/ok", get(|| async { "ok" }));
-    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind mock");
-    let addr = listener.local_addr().expect("local_addr");
-    tokio::spawn(async move {
-        let _ = axum::serve(listener, app).await;
-    });
-    addr
+    let mut out = Vec::with_capacity(n);
+    for _ in 0..n {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind mock");
+        let addr = listener.local_addr().expect("local_addr");
+        let app = app.clone();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        out.push(addr);
+    }
+    out
 }
