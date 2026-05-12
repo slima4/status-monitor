@@ -96,3 +96,11 @@ cargo test
 cargo test --release
 cargo bench
 ```
+
+Postgres-backed tests (e.g. `bulk_create_with_ragged_tags`) are `#[ignore]`'d by default. Bring up the compose stack and opt in:
+
+```bash
+docker compose up -d postgres
+DATABASE_URL=postgres://monitor:monitor@127.0.0.1:5432/monitor \
+  cargo test -- --ignored
+```

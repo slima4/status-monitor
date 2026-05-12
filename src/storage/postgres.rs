@@ -5,6 +5,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
+use sqlx::types::Json;
 use uuid::Uuid;
 
 use crate::config::PostgresConfig;
@@ -199,28 +200,48 @@ impl TargetStore for PostgresTargetStore {
     }
 
     async fn bulk_create(&self, items: Vec<NewTarget>) -> Result<Vec<Target>> {
-        let mut tx = self.pool.begin().await.context("begin tx")?;
-        let mut created = Vec::with_capacity(items.len());
-        for new in items {
-            let check_json =
-                serde_json::to_value(&new.check).context("encoding check_spec JSON")?;
-            let row: TargetRow = sqlx::query_as::<_, TargetRow>(
-                r#"INSERT INTO targets (name, check_spec, interval_secs, enabled, tags)
-                   VALUES ($1, $2, $3, $4, $5)
-                   RETURNING id, name, check_spec, interval_secs, enabled, tags, created_at, updated_at"#,
-            )
-            .bind(&new.name)
-            .bind(check_json)
-            .bind(new.interval.as_secs() as i32)
-            .bind(new.enabled)
-            .bind(&new.tags)
-            .fetch_one(&mut *tx)
-            .await
-            .context("bulk insert target")?;
-            created.push(row.try_into()?);
+        if items.is_empty() {
+            return Ok(Vec::new());
         }
-        tx.commit().await.context("commit bulk tx")?;
-        Ok(created)
+
+        let len = items.len();
+        let mut names: Vec<String> = Vec::with_capacity(len);
+        // sqlx::types::Json<T> serializes straight to wire bytes at encode time,
+        // skipping the intermediate `serde_json::Value` tree (real win on the
+        // nested CheckSpec / per-row tags Vec).
+        let mut check_specs: Vec<Json<CheckSpec>> = Vec::with_capacity(len);
+        let mut intervals: Vec<i32> = Vec::with_capacity(len);
+        let mut enabled: Vec<bool> = Vec::with_capacity(len);
+        // Postgres rejects ragged 2-D arrays (text[][] must be rectangular), so
+        // pass per-row tag lists as jsonb and unpack on the server side.
+        let mut tags_json: Vec<Json<Vec<String>>> = Vec::with_capacity(len);
+
+        for new in items {
+            names.push(new.name);
+            check_specs.push(Json(new.check));
+            intervals.push(new.interval.as_secs() as i32);
+            enabled.push(new.enabled);
+            tags_json.push(Json(new.tags));
+        }
+
+        let rows: Vec<TargetRow> = sqlx::query_as::<_, TargetRow>(
+            r#"INSERT INTO targets (name, check_spec, interval_secs, enabled, tags)
+               SELECT u.name, u.check_spec, u.interval_secs, u.enabled,
+                      ARRAY(SELECT jsonb_array_elements_text(u.tags))
+               FROM UNNEST($1::text[], $2::jsonb[], $3::int4[], $4::bool[], $5::jsonb[])
+                    AS u(name, check_spec, interval_secs, enabled, tags)
+               RETURNING id, name, check_spec, interval_secs, enabled, tags, created_at, updated_at"#,
+        )
+        .bind(&names)
+        .bind(&check_specs)
+        .bind(&intervals)
+        .bind(&enabled)
+        .bind(&tags_json)
+        .fetch_all(&self.pool)
+        .await
+        .context("bulk insert targets")?;
+
+        rows_to_targets(rows)
     }
 
     async fn list_updated_since(&self, since: DateTime<Utc>) -> Result<Vec<Target>> {

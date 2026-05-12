@@ -39,6 +39,7 @@ sqlx = { version = "0.8", features = [
     "chrono",
     "json",
     "migrate",
+    "macros",
 ] }
 
 # ClickHouse for time-series results (optional but recommended)
