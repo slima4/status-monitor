@@ -162,7 +162,7 @@ fn bench_throughput(c: &mut Criterion) {
         for &concurrency in &[100usize, 1_000, 10_000, 50_000] {
             group.throughput(Throughput::Elements(concurrency as u64));
             group.measurement_time(Duration::from_secs(if concurrency >= 10_000 {
-                30
+                45
             } else {
                 10
             }));
