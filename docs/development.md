@@ -174,9 +174,9 @@ Same commands work against `compose.dev.yml`; the service names are identical.
 ## Tailwind / web UI
 
 `build.rs` runs `./bin/tailwindcss --minify` before each `cargo build`. First
-build fetches the standalone CLI (~30 MB) via
-[`scripts/fetch-tailwind.sh`](../scripts/fetch-tailwind.sh); subsequent builds
-reuse it. Add a new utility class anywhere under `templates/` and the next
+build fetches the standalone CLI (~30 MB) via `scripts/fetch-tailwind.sh`;
+subsequent builds reuse it. Add a new utility class anywhere under
+`templates/` and the next
 build picks it up via the `@source` directive in `static/css/input.css`.
 
 ## Troubleshooting
