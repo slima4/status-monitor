@@ -1,13 +1,12 @@
-use std::net::SocketAddr;
 use std::time::Instant;
 
 use chrono::Utc;
-use tokio::net::TcpStream;
 use tokio::time::timeout;
 use uuid::Uuid;
 
 use crate::domain::{CheckResult, CheckStatus, TcpCheck};
 use crate::http_client::HttpClients;
+use crate::worker::connect_via_guard;
 
 pub async fn execute_tcp_check(
     target_id: Uuid,
@@ -17,7 +16,11 @@ pub async fn execute_tcp_check(
     let started_at = Utc::now();
     let start = Instant::now();
 
-    let outcome = timeout(check.timeout, connect_via_guard(check, clients)).await;
+    let outcome = timeout(
+        check.timeout,
+        connect_via_guard(&check.host, check.port, clients),
+    )
+    .await;
     let duration_ms = start.elapsed().as_millis() as u32;
 
     match outcome {
@@ -48,29 +51,5 @@ pub async fn execute_tcp_check(
             error: Some(err.to_string()),
         },
         Err(_) => CheckResult::error_with_elapsed(target_id, started_at, duration_ms, "timeout"),
-    }
-}
-
-async fn connect_via_guard(check: &TcpCheck, clients: &HttpClients) -> anyhow::Result<TcpStream> {
-    let guard = clients.ssrf_guard();
-    let mut last_err: Option<std::io::Error> = None;
-    let mut tried = false;
-    for ip in clients.resolver().resolve_addrs(&check.host).await? {
-        if !guard.allow(ip) {
-            continue;
-        }
-        tried = true;
-        match TcpStream::connect(SocketAddr::new(ip, check.port)).await {
-            Ok(s) => return Ok(s),
-            Err(e) => last_err = Some(e),
-        }
-    }
-    if let Some(e) = last_err {
-        return Err(e.into());
-    }
-    if tried {
-        Err(anyhow::anyhow!("no addresses for {}", check.host))
-    } else {
-        Err(anyhow::anyhow!("no allowed addresses for {}", check.host))
     }
 }

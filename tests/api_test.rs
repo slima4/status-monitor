@@ -348,6 +348,62 @@ async fn accepts_verify_tls_true_with_credentials_over_https() {
     assert_eq!(post_target(payload).await, StatusCode::CREATED);
 }
 
+fn tls_cert_payload(host: &str, warn: u32, critical: u32) -> Value {
+    json!({
+        "name": "cert-check",
+        "check": {
+            "type": "tls_cert",
+            "host": host,
+            "port": 443,
+            "warn_days": warn,
+            "critical_days": critical,
+            "timeout": 5000
+        },
+        "interval": 86400,
+        "tags": []
+    })
+}
+
+#[tokio::test]
+async fn create_tls_cert_target() {
+    let resp = app()
+        .oneshot(
+            Request::post("/api/v1/targets")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    tls_cert_payload("example.com", 14, 7).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let body = body_json(resp).await;
+    assert_eq!(body["check"]["type"], "tls_cert");
+    assert_eq!(body["check"]["host"], "example.com");
+}
+
+#[tokio::test]
+async fn create_tls_cert_rejects_warn_le_critical() {
+    assert_eq!(
+        post_target(tls_cert_payload("example.com", 5, 7)).await,
+        StatusCode::BAD_REQUEST
+    );
+}
+
+#[tokio::test]
+async fn create_tls_cert_rejects_port_zero() {
+    let mut payload = tls_cert_payload("example.com", 14, 7);
+    payload["check"]["port"] = json!(0);
+    assert_eq!(post_target(payload).await, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn create_tls_cert_rejects_loopback_ipv4_literal() {
+    let payload = tls_cert_payload("127.0.0.1", 14, 7);
+    assert_eq!(post_target(payload).await, StatusCode::BAD_REQUEST);
+}
+
 fn target_payload_with_alerts(alerts: Value) -> Value {
     json!({
         "name": "with-alerts",

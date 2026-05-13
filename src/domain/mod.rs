@@ -4,6 +4,6 @@ pub mod result;
 pub mod target;
 
 pub use alert::{AlertChannel, AlertChannelConfig, TargetAlerts};
-pub use check::{CheckSpec, ExpectedStatus, HttpCheck, HttpMethod, TcpCheck};
+pub use check::{CheckSpec, ExpectedStatus, HttpCheck, HttpMethod, TcpCheck, TlsCertCheck};
 pub use result::{CheckResult, CheckStatus};
 pub use target::{NewTarget, Target, TargetUpdate};

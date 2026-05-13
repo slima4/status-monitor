@@ -212,6 +212,27 @@ fn validate_check(check: &crate::domain::CheckSpec, guard: &SsrfGuard) -> Result
                 check_ip(ip, guard)?;
             }
         }
+        CheckSpec::TlsCert(cert) => {
+            if cert.host.is_empty() {
+                return Err(AppError::BadRequest("tls_cert host required".into()));
+            }
+            if cert.port == 0 {
+                return Err(AppError::BadRequest("tls_cert port must be > 0".into()));
+            }
+            if cert.warn_days <= cert.critical_days {
+                return Err(AppError::BadRequest(
+                    "tls_cert warn_days must be > critical_days".into(),
+                ));
+            }
+            let host = cert
+                .host
+                .strip_prefix('[')
+                .and_then(|s| s.strip_suffix(']'))
+                .unwrap_or(&cert.host);
+            if let Ok(ip) = host.parse::<IpAddr>() {
+                check_ip(ip, guard)?;
+            }
+        }
     }
     Ok(())
 }

@@ -175,8 +175,11 @@ pub(crate) fn install_default_crypto_provider() {
     }
 }
 
+/// Accepts every chain. Used by the `verify_tls = false` HTTP client path and
+/// by the TLS-cert-expiry check (which must read expired/self-signed leaves to
+/// report `Down: expired` rather than a generic handshake failure).
 #[derive(Debug)]
-struct NoVerify;
+pub(crate) struct NoVerify;
 
 impl ServerCertVerifier for NoVerify {
     fn verify_server_cert(

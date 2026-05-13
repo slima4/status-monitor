@@ -80,6 +80,7 @@ url = { version = "2.5", features = ["serde"] }
 async-trait = "0.1"
 fastrand = "2"
 lettre = { version = "0.11.21", default-features = false, features = ["smtp-transport", "builder", "pool", "tokio1-rustls-tls"] }
+x509-parser = "0.18.1"
 
 [dev-dependencies]
 criterion = { version = "0.8", features = ["async_tokio"] }
@@ -87,6 +88,7 @@ axum-server = { version = "0.8", features = ["tls-rustls-no-provider"] }
 rcgen = "0.14"
 rustls-pemfile = "2"
 tokio-rustls = "0.26"
+time = "0.3.47"
 
 [profile.release]
 opt-level = 3

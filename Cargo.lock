@@ -3624,6 +3624,7 @@ dependencies = [
  "socket2",
  "sqlx",
  "thiserror 2.0.18",
+ "time",
  "tokio",
  "tokio-rustls",
  "tokio-util",
@@ -3637,6 +3638,7 @@ dependencies = [
  "url",
  "uuid",
  "webpki-roots 1.0.7",
+ "x509-parser",
 ]
 
 [[package]]

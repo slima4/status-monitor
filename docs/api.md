@@ -59,6 +59,29 @@ Tagged enum, `type` discriminator.
 { "type": "tcp", "host": "db.internal", "port": 5432, "timeout": 2000 }
 ```
 
+### TLS certificate expiry
+
+```jsonc
+{
+  "type": "tls_cert",
+  "host": "example.com",
+  "port": 443,
+  "server_name": null,         // optional SNI override; defaults to `host`
+  "warn_days": 14,
+  "critical_days": 7,
+  "timeout": 5000
+}
+```
+
+Opens a TCP connection, performs a TLS handshake against the host (accepting any presented chain so that expired or self-signed certs can still be inspected), and parses the leaf certificate's `notAfter`. Status mapping:
+
+- `days_remaining < 0` (expired) → `down`
+- `days_remaining < critical_days` → `down`
+- `days_remaining < warn_days` → `degraded`
+- otherwise → `up`
+
+`error` carries a JSON document with `days_remaining`, `not_after`, `subject_common_name`, `issuer_common_name`. A handshake failure (plain-TCP host, network error) returns `error` status with the underlying message. `warn_days` must be strictly greater than `critical_days`. Recommended `interval >= 3600` — every probe opens a fresh TLS connection.
+
 ## Target payload
 
 ```jsonc
@@ -105,7 +128,8 @@ The state machine is fire-once + recovery: while a target is in the `alerting` s
 `POST` and `PUT` return `400 Bad Request` for:
 
 - Unsupported URL scheme (`url scheme '...' not allowed` — only `http` and `https`)
-- Missing URL host, empty TCP host, or TCP port `0`
+- Missing URL host, empty TCP host, or TCP/TLS port `0`
+- `tls_cert warn_days must be > critical_days`
 - **SSRF guard** — `target address ... is in a blocked range`. Triggered when the URL or TCP host is an IP literal that resolves to loopback / private / link-local / reserved space (see [Configuration → `security.allow_private_targets`](configuration.md)). Hostname literals are checked again at connect time after DNS resolution, so DNS rebinding cannot bypass the guard.
 - **Redaction sentinel** — `basic_auth contains redaction sentinel — re-supply the real credential` or the equivalent for `bearer_token`. Rejected to prevent a `GET` → `PATCH` round-trip from silently overwriting the stored credential with `"***"`.
 - **TLS verification + credentials** — `verify_tls = false cannot be combined with basic_auth or bearer_token over https`. When verification is disabled any host presenting a forged certificate can collect the stored credential on every check interval. Set `verify_tls = true` (recommended) or remove the credential from the target.

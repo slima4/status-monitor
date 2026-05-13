@@ -20,6 +20,7 @@ impl CheckTask {
         match &self.target.check {
             CheckSpec::Http(http) => http.url.host_str().unwrap_or("unknown"),
             CheckSpec::Tcp(tcp) => &tcp.host,
+            CheckSpec::TlsCert(cert) => &cert.host,
         }
     }
 }

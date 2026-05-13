@@ -10,6 +10,7 @@ use url::Url;
 pub enum CheckSpec {
     Http(HttpCheck),
     Tcp(TcpCheck),
+    TlsCert(TlsCertCheck),
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -53,6 +54,20 @@ pub struct HttpCheck {
 pub struct TcpCheck {
     pub host: String,
     pub port: u16,
+    #[serde(with = "duration_ms")]
+    pub timeout: Duration,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TlsCertCheck {
+    pub host: String,
+    pub port: u16,
+    /// SNI to send if different from `host` (e.g. when the cert is served
+    /// against a virtual host name).
+    #[serde(default)]
+    pub server_name: Option<String>,
+    pub warn_days: u32,
+    pub critical_days: u32,
     #[serde(with = "duration_ms")]
     pub timeout: Duration,
 }
