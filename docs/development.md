@@ -13,7 +13,8 @@ Local setup for iterating on the service. For production deployment see
 | | First build | Incremental | Notes |
 |---|---|---|---|
 | Host workflow | ~2 min | **~3 s** | `cargo run` natively; only deps in Docker. Best for iteration. |
-| Docker workflow | ~5 min | ~30 s | Rebuilds image. Matches the prod build. Use for CI-shaped smoke tests. |
+| Docker dev (cargo-watch) | ~3 min | ~3 s | Source bind-mounted, rebuilds happen inside the container with a cached `target/`. Live reload. |
+| Docker prod-shape | ~5 min | ~30 s | Rebuilds image. Matches the prod build. Use for CI-shaped smoke tests. |
 
 ### Host workflow (recommended for day-to-day)
 
@@ -44,7 +45,32 @@ Wipe data too:
 docker compose -f compose.dev.yml down -v
 ```
 
-### Docker workflow (full stack in containers)
+### Docker dev workflow (live reload inside a container)
+
+Runs the binary inside a container that bind-mounts the repo and re-runs
+`cargo run` via [`cargo-watch`](https://crates.io/crates/cargo-watch) on every
+source change. The compiled `target/` and the linux Tailwind CLI live in named
+volumes, so they persist across restarts and don't clash with the host build.
+
+```bash
+docker compose -f compose.dev.yml --profile dev-app up -d --build
+docker compose -f compose.dev.yml logs -f status-monitor
+```
+
+First run takes ~3 min (toolchain + cargo-watch install + cold build + Tailwind
+fetch). After that, edits to `src/`, `templates/`, or `static/css/input.css`
+trigger an incremental rebuild + restart inside the container, typically
+under 5 s.
+
+Don't combine this with `cargo run` on the host — both bind 8080.
+
+Stop just the app (keep pg + ch up):
+
+```bash
+docker compose -f compose.dev.yml stop status-monitor
+```
+
+### Docker prod-shape workflow (full stack via Dockerfile)
 
 ```bash
 docker compose up -d --build status-monitor

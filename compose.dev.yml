@@ -1,9 +1,15 @@
-# Dev dependencies only. Bring up postgres + clickhouse on host ports, then
-# run the binary natively with `cargo run`. Defaults in config/default.toml
-# already point at localhost:5432 and localhost:8123, so no extra env needed.
+# Dev stack. Two modes:
 #
-#   docker compose -f compose.dev.yml up -d
-#   cargo run --bin status-monitor
+# 1. Native binary (default — fastest, ~3 s incremental):
+#       docker compose -f compose.dev.yml up -d
+#       cargo run --bin status-monitor
+#    config/default.toml already points at localhost:5432 and localhost:8123.
+#
+# 2. status-monitor inside docker with live reload (cargo-watch, ~3 s after
+#    the first warm-up; rebuilds happen in-container against a cached target/):
+#       docker compose -f compose.dev.yml --profile dev-app up -d --build
+#       docker compose -f compose.dev.yml logs -f status-monitor
+#    Don't run both modes at once — port 8080 will conflict.
 #
 # Tear down (keeps volumes):
 #   docker compose -f compose.dev.yml down
@@ -42,6 +48,40 @@ services:
         soft: 262144
         hard: 262144
 
+  # Live-reload container. Opt in via `--profile dev-app`. Bind-mounts the
+  # repo so `cargo watch` sees host edits; named volumes for target/, the
+  # cargo registry, and bin/ so build artefacts and the linux Tailwind CLI
+  # never collide with host (macOS) equivalents.
+  status-monitor:
+    profiles: ["dev-app"]
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    depends_on:
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_started
+    environment:
+      STATUS_MONITOR_STORAGE__POSTGRES__URL: postgres://monitor:monitor@postgres:5432/monitor
+      STATUS_MONITOR_STORAGE__CLICKHOUSE__URL: http://clickhouse:8123
+      STATUS_MONITOR_STORAGE__CLICKHOUSE__USER: monitor
+      STATUS_MONITOR_STORAGE__CLICKHOUSE__PASSWORD: monitor
+      STATUS_MONITOR_OBSERVABILITY__LOG_FORMAT: json
+      STATUS_MONITOR_OBSERVABILITY__LOG_LEVEL: "status_monitor=debug,sqlx=warn,hyper=warn,tower_http=info,info"
+    volumes:
+      - .:/usr/src/status-monitor
+      - cargo_registry_dev:/usr/local/cargo/registry
+      - target_cache_dev:/usr/src/status-monitor/target
+      # Mask host bin/ so build.rs fetches the linux/alpine tailwindcss.
+      - tailwind_bin_dev:/usr/src/status-monitor/bin
+    ports:
+      - "8080:8080"
+      - "9090:9090"
+
 volumes:
   pg_data_dev:
   ch_data_dev:
+  cargo_registry_dev:
+  target_cache_dev:
+  tailwind_bin_dev:

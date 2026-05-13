@@ -1,0 +1,29 @@
+# syntax=docker/dockerfile:1.7
+#
+# Development image: rust toolchain + cargo-watch. The source tree is bind-
+# mounted at runtime (see compose.dev.yml), so this image holds only the
+# toolchain and tooling. Builds happen against a named target/ volume so they
+# persist across container restarts.
+
+FROM rust:1-alpine
+
+WORKDIR /usr/src/status-monitor
+
+ENV CARGO_TERM_COLOR=never \
+    CARGO_INCREMENTAL=1
+
+# `bash` is required by scripts/fetch-tailwind.sh; `curl` for build.rs to fetch
+# the Tailwind CLI on first build; `musl-dev` + `pkgconfig` for native crates.
+RUN apk add --no-cache musl-dev pkgconfig curl bash
+
+# Pre-install cargo-watch into the image so `cargo run` doesn't get blocked on
+# a network install when the container first starts.
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    cargo install cargo-watch --locked --version ^8
+
+EXPOSE 8080 9090
+
+# cargo-watch re-runs on src/templates/static/migrations changes. The
+# `-i bin/` rule avoids restart loops when build.rs writes tailwindcss into
+# bin/ on first run.
+CMD ["cargo", "watch", "-i", "bin/*", "-i", "static/css/app.css", "-x", "run --bin status-monitor"]
