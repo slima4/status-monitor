@@ -9,6 +9,7 @@
 - [Configuration](configuration.md)
 - [Metrics & tracing](metrics.md)
 - [Deployment](deployment.md)
+- [Development](development.md)
 - [Load test](loadtest.md)
 - [Benchmarks](benchmarks.md)
 - [Troubleshooting](troubleshooting.md)

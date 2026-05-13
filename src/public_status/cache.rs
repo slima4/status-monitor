@@ -64,7 +64,7 @@ impl PageCache {
                         last_good.store(Some(arc.clone()));
                         Ok::<_, String>(arc)
                     }
-                    Err(e) => Err(format!("{e}")),
+                    Err(e) => Err(format!("{e:#}")),
                 }
             })
             .await;
@@ -75,7 +75,13 @@ impl PageCache {
                     tracing::warn!(error = %e, "public_status compute failed; serving stale");
                     Ok(stale)
                 }
-                None => Err(PageCacheError::Unavailable),
+                None => {
+                    tracing::error!(
+                        error = %e,
+                        "public_status compute failed and no last-good snapshot; returning Unavailable"
+                    );
+                    Err(PageCacheError::Unavailable)
+                }
             },
         }
     }

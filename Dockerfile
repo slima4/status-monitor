@@ -1,21 +1,38 @@
 # syntax=docker/dockerfile:1.7
 
 # Alpine builder = musl libc native → static binaries without crt-static gymnastics.
-FROM rust:1-alpine AS builder
+# cargo-chef splits dependency compile (slow, rarely invalidated) from app compile
+# (fast, invalidated on every src change). Unchanged-deps rebuilds drop from ~5min
+# to ~30s.
+FROM rust:1-alpine AS chef
 WORKDIR /usr/src/status-monitor
-
 ENV CARGO_TERM_COLOR=never
-
 # `curl` is needed at build time: utoipa-swagger-ui's build script shells out to
 # it to fetch the Swagger UI assets bundle.
 RUN apk add --no-cache musl-dev pkgconfig curl
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    cargo install cargo-chef --locked --version ^0.1
 
+FROM chef AS planner
+COPY Cargo.toml Cargo.lock ./
+COPY src ./src
+COPY benches ./benches
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM chef AS builder
+COPY --from=planner /usr/src/status-monitor/recipe.json recipe.json
+# Cook dependencies only — this layer caches as long as Cargo.toml/lock + the
+# bench/bin shape don't change.
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/src/status-monitor/target \
+    cargo chef cook --release --recipe-path recipe.json
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
 COPY benches ./benches
 COPY migrations ./migrations
 COPY config ./config
-
+COPY static ./static
+COPY templates ./templates
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/src/status-monitor/target \
     cargo build --release --bins && \

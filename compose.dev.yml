@@ -1,0 +1,47 @@
+# Dev dependencies only. Bring up postgres + clickhouse on host ports, then
+# run the binary natively with `cargo run`. Defaults in config/default.toml
+# already point at localhost:5432 and localhost:8123, so no extra env needed.
+#
+#   docker compose -f compose.dev.yml up -d
+#   cargo run --bin status-monitor
+#
+# Tear down (keeps volumes):
+#   docker compose -f compose.dev.yml down
+# Tear down + wipe data:
+#   docker compose -f compose.dev.yml down -v
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: monitor
+      POSTGRES_PASSWORD: monitor
+      POSTGRES_DB: monitor
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data_dev:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U monitor"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:25.8
+    environment:
+      CLICKHOUSE_DB: monitor
+      CLICKHOUSE_USER: monitor
+      CLICKHOUSE_PASSWORD: monitor
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    volumes:
+      - ch_data_dev:/var/lib/clickhouse
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+
+volumes:
+  pg_data_dev:
+  ch_data_dev:

@@ -115,6 +115,7 @@ Sources under [`docs/`](docs/) — readable directly on GitHub too:
 | [docs/configuration.md](docs/configuration.md) | `default.toml` reference, env override scheme, tuning notes |
 | [docs/metrics.md](docs/metrics.md) | Prometheus series (incl. connect / TLS / pool gauges), OpenTelemetry tracing |
 | [docs/deployment.md](docs/deployment.md) | Docker, bind addresses, migrations, sizing, graceful shutdown |
+| [docs/development.md](docs/development.md) | local dev: host vs. docker workflow, cargo-chef rebuilds, log level, seed target |
 | [docs/loadtest.md](docs/loadtest.md) | `bin/loadtest` envs, macOS gotchas, HTTP/1 vs h2c trade-off, Linux container path |
 | [docs/benchmarks.md](docs/benchmarks.md) | Criterion micro-benchmarks, single-core throughput, profile breakdown |
 | [docs/troubleshooting.md](docs/troubleshooting.md) | common failures and how to read them off metrics |
@@ -188,20 +189,11 @@ cargo test --test web_e2e_test  # e2e
 
 ## Development
 
-Requires Rust 1.95+ (edition 2024). Install via `rustup`.
+Requires Rust 1.95+ (edition 2024). Install via `rustup`. Fast dev loop runs the binary natively against Dockerised Postgres + ClickHouse:
 
 ```bash
-cargo fmt --check
-cargo clippy --all-targets -- -D warnings
-cargo test
-cargo test --release
-cargo bench
+docker compose -f compose.dev.yml up -d
+cargo run --bin status-monitor
 ```
 
-Postgres-backed tests (e.g. `bulk_create_with_ragged_tags`) are `#[ignore]`'d by default. Bring up the compose stack and opt in:
-
-```bash
-docker compose up -d postgres
-DATABASE_URL=postgres://monitor:monitor@127.0.0.1:5432/monitor \
-  cargo test -- --ignored
-```
+See [docs/development.md](docs/development.md) for the host vs. docker workflow, log level overrides, seeding a target, and tests.
