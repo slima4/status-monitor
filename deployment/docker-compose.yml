@@ -1,0 +1,137 @@
+# Production stack for status-monitor
+#
+# Layout:
+#   Internet → Caddy (TLS + basic auth) → status-monitor (no public ports)
+#                                       → PostgreSQL  (no public ports)
+#                                       → ClickHouse  (no public ports)
+#
+# Only Caddy publishes ports to the host. Everything else is reachable only
+# on the internal docker network. This is the single most important
+# defense-in-depth property: even if your basic auth password leaks, the
+# databases are not exposed.
+#
+# Required env vars in .env (see .env.example):
+#   STATUS_MONITOR_DOMAIN, STATUS_MONITOR_ACME_EMAIL, STATUS_MONITOR_ADMIN_HASH,
+#   POSTGRES_PASSWORD, CLICKHOUSE_PASSWORD, STATUS_MONITOR_CREDENTIALS_KEK_BASE64
+
+name: status-monitor
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"   # HTTP/3
+    environment:
+      STATUS_MONITOR_DOMAIN: ${STATUS_MONITOR_DOMAIN}
+      STATUS_MONITOR_ACME_EMAIL: ${STATUS_MONITOR_ACME_EMAIL}
+      STATUS_MONITOR_ADMIN_HASH: ${STATUS_MONITOR_ADMIN_HASH}
+      # STATUS_MONITOR_OPERATOR_HASH: ${STATUS_MONITOR_OPERATOR_HASH}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data           # certs + keys — back this up!
+      - caddy_config:/config
+      - caddy_logs:/var/log/caddy
+    depends_on:
+      status-monitor:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  status-monitor:
+    # Build from repo root by default; override with a pre-built image by setting
+    # STATUS_MONITOR_IMAGE=ghcr.io/you/status-monitor:v1.2.3 in .env.
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: ${STATUS_MONITOR_IMAGE:-status-monitor:latest}
+    restart: unless-stopped
+    # No `ports:` — only reachable via the internal network.
+    expose:
+      - "8080"   # API + UI
+      - "9090"   # Prometheus metrics (scrape on internal network only)
+    environment:
+      STATUS_MONITOR_STORAGE__POSTGRES__URL: postgres://monitor:${POSTGRES_PASSWORD}@postgres:5432/monitor
+      STATUS_MONITOR_STORAGE__CLICKHOUSE__URL: http://clickhouse:8123
+      STATUS_MONITOR_STORAGE__CLICKHOUSE__USER: default
+      STATUS_MONITOR_STORAGE__CLICKHOUSE__PASSWORD: ${CLICKHOUSE_PASSWORD}
+      STATUS_MONITOR_STORAGE__CLICKHOUSE__DATABASE: monitor
+      STATUS_MONITOR_SECURITY__CREDENTIALS_KEK_BASE64: ${STATUS_MONITOR_CREDENTIALS_KEK_BASE64}
+      STATUS_MONITOR_OBSERVABILITY__LOG_FORMAT: json
+      RUST_LOG: ${RUST_LOG:-info}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    # No container-level healthcheck: the runtime image is distroless
+    # (no shell, no wget, no curl). Caddy probes /readyz actively via
+    # `health_uri` in the reverse_proxy block — see Caddyfile.
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    expose:
+      - "5432"
+    environment:
+      POSTGRES_USER: monitor
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: monitor
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U monitor -d monitor"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:25.8
+    restart: unless-stopped
+    expose:
+      - "8123"   # HTTP
+      - "9000"   # native protocol
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    environment:
+      CLICKHOUSE_DB: monitor
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      # Constrain RAM — see ./clickhouse-config.xml
+      - ./clickhouse-config.xml:/etc/clickhouse-server/config.d/custom.xml:ro
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8123/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Optional: uncomment to enable internal Prometheus scraping
+  # prometheus:
+  #   image: prom/prometheus:latest
+  #   restart: unless-stopped
+  #   expose:
+  #     - "9091"
+  #   volumes:
+  #     - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+  #     - prometheus_data:/prometheus
+  #   command:
+  #     - '--config.file=/etc/prometheus/prometheus.yml'
+  #     - '--storage.tsdb.retention.time=30d'
+
+volumes:
+  caddy_data:
+  caddy_config:
+  caddy_logs:
+  postgres_data:
+  clickhouse_data:
+  # prometheus_data:

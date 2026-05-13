@@ -1,0 +1,31 @@
+<?xml version="1.0"?>
+<!--
+  ClickHouse production config for status-monitor.
+
+  Target: deploy on a 4 GB RAM VM with PostgreSQL + Caddy + status-monitor.
+  Default ClickHouse will easily consume 8+ GB; these settings cap it
+  around 2 GB so the rest of the stack has room to breathe.
+
+  If you have a larger host (8 GB+), you can remove this file or relax
+  max_server_memory_usage upward. Re-evaluate after the fleet exceeds
+  10M check results per day.
+-->
+<clickhouse>
+    <!-- Hard cap on total server memory. 2 GB is enough for ~50M rows/day. -->
+    <max_server_memory_usage>2000000000</max_server_memory_usage>
+
+    <!-- Mark cache: ClickHouse indexes. 512 MB is generous for our schema. -->
+    <mark_cache_size>536870912</mark_cache_size>
+
+    <!-- Uncompressed cache: disable. Our queries hit the same data once,
+         caching uncompressed blocks just wastes RAM. -->
+    <uncompressed_cache_size>0</uncompressed_cache_size>
+
+    <!-- Per-query memory limit. Keeps one bad query from eating everything. -->
+    <max_memory_usage>1500000000</max_memory_usage>
+
+    <!-- Background merge/mutation workers. Default is half of CPU count;
+         on a 4 vCPU host this is plenty without starving the foreground. -->
+    <background_pool_size>4</background_pool_size>
+    <background_merges_mutations_concurrency_ratio>2</background_merges_mutations_concurrency_ratio>
+</clickhouse>

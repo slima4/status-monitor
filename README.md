@@ -79,6 +79,10 @@ Scrape metrics:
 curl http://127.0.0.1:9090/metrics
 ```
 
+### Production deployment
+
+For a production deployment with TLS, basic auth, and proper hardening (Caddy edge, Postgres + ClickHouse internal-only, ClickHouse memory cap), see [`deployment/README.md`](deployment/README.md) or [`docs/deployment.md`](docs/deployment.md). Local dev (above) is fine for evaluation; do not expose it to the internet.
+
 ### Local build
 
 ```bash

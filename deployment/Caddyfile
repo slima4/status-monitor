@@ -1,0 +1,130 @@
+# Caddyfile — Production reverse proxy for status-monitor
+#
+# What this does:
+#   - Automatic HTTPS via Let's Encrypt (HTTP/2 and HTTP/3)
+#   - Basic auth on UI and API
+#   - Public health probes (no auth) at /healthz and /readyz
+#   - Hides /metrics from the public internet (still scrapeable internally)
+#   - Security headers (HSTS, X-Frame-Options, etc.)
+#   - JSON access logs with rotation
+#
+# Required environment variables (see .env.example):
+#   STATUS_MONITOR_DOMAIN       — e.g., status.example.com
+#   STATUS_MONITOR_ACME_EMAIL   — for Let's Encrypt notifications
+#   STATUS_MONITOR_ADMIN_HASH   — bcrypt hash for admin user
+#
+# Optional:
+#   STATUS_MONITOR_OPERATOR_HASH — additional user (uncomment block below)
+{
+	email {$STATUS_MONITOR_ACME_EMAIL}
+
+	# Uncomment ONLY while testing — uses Let's Encrypt staging CA so you
+	# don't hit production rate limits. Staging certs are NOT browser-trusted.
+	# acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+
+	# Hide Caddy version in error responses
+	servers {
+		trusted_proxies static private_ranges
+	}
+}
+
+{$STATUS_MONITOR_DOMAIN} {
+	encode gzip zstd
+
+	# ─── Public health endpoints (no auth) ──────────────────────────────
+	# Deliberately public so uptime monitors, load balancers, and
+	# orchestrators (k8s probes, Render health checks, etc.) can hit them
+	# without credentials.
+	@health path /healthz /readyz
+	handle @health {
+		reverse_proxy status-monitor:8080
+	}
+
+	# ─── Block Prometheus metrics from the public internet ──────────────
+	# status-monitor exposes /metrics on :9090 (separate port). The metrics
+	# endpoint should be scraped on the internal docker network, never
+	# from the internet. If something hits /metrics on the public port,
+	# return 404 so a misconfigured Prometheus or curious attacker can't
+	# enumerate your fleet.
+	@metrics path /metrics /metrics/*
+	handle @metrics {
+		respond "Not Found" 404
+	}
+
+	# ─── Everything else requires basic auth ────────────────────────────
+	basic_auth {
+		admin {$STATUS_MONITOR_ADMIN_HASH}
+
+		# Add more users by setting STATUS_MONITOR_OPERATOR_HASH in .env
+		# and uncommenting the line below. (basic_auth has no role
+		# separation — all users get the same access.)
+		# operator {$STATUS_MONITOR_OPERATOR_HASH}
+	}
+
+	# ─── Security headers ───────────────────────────────────────────────
+	header {
+		# HSTS — 1 year, include subdomains, preload-ready
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+
+		# Prevent MIME-type sniffing
+		X-Content-Type-Options "nosniff"
+
+		# No framing (defends against clickjacking)
+		X-Frame-Options "DENY"
+
+		# Limit referrer leakage to external sites
+		Referrer-Policy "strict-origin-when-cross-origin"
+
+		# Restrict powerful browser features by default
+		Permissions-Policy "geolocation=(), microphone=(), camera=(), payment=()"
+
+		# Remove server identification
+		-Server
+		-X-Powered-By
+	}
+
+	# ─── Access logs ────────────────────────────────────────────────────
+	# Skip health endpoints — otherwise every Caddy probe (every 30s) plus
+	# external uptime checks flood the log with ~3k+ lines/day of noise.
+	log_skip @health
+	log {
+		output file /var/log/caddy/access.log {
+			roll_size 100MiB
+			roll_keep 7
+			roll_keep_for 720h
+		}
+		format json
+	}
+
+	# ─── Reverse proxy to the Rust service ──────────────────────────────
+	reverse_proxy status-monitor:8080 {
+		# Caddy already forwards X-Forwarded-{For,Proto,Host} by default;
+		# X-Real-IP is the only one we have to set explicitly.
+		header_up X-Real-IP {remote_host}
+
+		# Active health check. The runtime image is distroless (no shell,
+		# no wget) so the Docker healthcheck would have nothing to call —
+		# Caddy probes /healthz directly instead. /healthz is process
+		# liveness only; /readyz hits the database, which would add ~3k
+		# pointless DB roundtrips per day at this interval. With a single
+		# replica a failed probe returns 502 until /healthz recovers —
+		# the right signal for an external uptime probe.
+		health_uri /healthz
+		health_interval 30s
+		health_timeout 3s
+
+		# Timeouts — long enough for slow ClickHouse aggregation queries
+		# but bounded so we don't hold connections forever
+		transport http {
+			dial_timeout 5s
+			response_header_timeout 30s
+			read_buffer 64KB
+			write_buffer 64KB
+		}
+	}
+}
+
+# Optional: redirect www → apex
+# www.{$STATUS_MONITOR_DOMAIN} {
+#     redir https://{$STATUS_MONITOR_DOMAIN}{uri} permanent
+# }

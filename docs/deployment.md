@@ -1,5 +1,31 @@
 # Deployment
 
+## Production deployment with Caddy + basic auth
+
+For real-world operation, use the production stack under `deployment/` in the repo. It puts a Caddy reverse proxy in front of the Rust service with:
+
+- Automatic TLS via Let's Encrypt (HTTP/2 and HTTP/3 on by default)
+- Basic auth on the UI and API
+- Postgres and ClickHouse on the internal docker network — **no published ports**
+- ClickHouse memory-capped at ~2 GB (see `deployment/clickhouse-config.xml`)
+
+Setup:
+
+```bash
+cd deployment
+cp .env.example .env
+$EDITOR .env            # set domain, ACME email, bcrypt hash, DB passwords, KEK
+docker compose up -d
+```
+
+`deployment/README.md` is the authoritative source for setup, user management, password rotation, backups, and troubleshooting.
+
+### Authentication boundary
+
+v1 has **no built-in auth** in the Rust service. The Caddy reverse proxy is the authentication boundary for the UI and API. `/healthz` and `/readyz` are intentionally exposed without auth so uptime probes, load balancers, and orchestrators can hit them. `/metrics` on the public domain returns 404 — scrape it on the internal docker network instead.
+
+If native auth (session cookies, API tokens) is added later, the Caddy basic-auth layer can stay in place during the transition.
+
 ## Docker
 
 `docker compose up -d` brings up Postgres 17, ClickHouse 25.8, and the monitor on the same network. Compose env vars wire the monitor to the stack:
@@ -24,7 +50,7 @@ STATUS_MONITOR_SERVER__METRICS_BIND=0.0.0.0:9090 \
 ./status-monitor
 ```
 
-There is no built-in auth on the API port. Front it with a proxy or keep it on a private network.
+There is no built-in auth on the API port. Front it with a proxy or keep it on a private network. The ready-made Caddy stack under [`deployment/`](#production-deployment-with-caddy--basic-auth) does this for you.
 
 ## Migrations
 
