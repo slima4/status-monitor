@@ -1,0 +1,83 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - "book.toml"
+      - "*.md"
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - "book.toml"
+      - "*.md"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: short
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.95"
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: fetch tailwind cli
+        run: scripts/fetch-tailwind.sh
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --all-targets -- -D warnings
+
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: monitor
+          POSTGRES_PASSWORD: monitor
+          POSTGRES_DB: monitor
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U monitor"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      clickhouse:
+        image: clickhouse/clickhouse-server:25.8
+        env:
+          CLICKHOUSE_DB: monitor
+          CLICKHOUSE_USER: monitor
+          CLICKHOUSE_PASSWORD: monitor
+        ports:
+          - 8123:8123
+          - 9000:9000
+        options: >-
+          --health-cmd "wget -q --spider http://localhost:8123/ping || exit 1"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://monitor:monitor@127.0.0.1:5432/monitor
+      CLICKHOUSE_URL: http://127.0.0.1:8123
+      CLICKHOUSE_USER: monitor
+      CLICKHOUSE_PASSWORD: monitor
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.95"
+      - uses: Swatinem/rust-cache@v2
+      - name: fetch tailwind cli
+        run: scripts/fetch-tailwind.sh
+      - name: unit + non-network integration tests
+        run: cargo test --workspace --locked
+      - name: pg + ch backed integration tests
+        run: cargo test --workspace --locked -- --include-ignored

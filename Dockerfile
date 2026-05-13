@@ -9,9 +9,9 @@ WORKDIR /usr/src/status-monitor
 ENV CARGO_TERM_COLOR=never
 # `curl` is needed at build time: utoipa-swagger-ui's build script shells out
 # to it to fetch the Swagger UI assets bundle. `bash` runs scripts/fetch-
-# tailwind.sh. `gcompat` provides the glibc loader so the upstream Tailwind
-# standalone CLI (glibc-linked) executes on Alpine.
-RUN apk add --no-cache musl-dev pkgconfig curl bash gcompat
+# tailwind.sh (which detects musl libc and downloads the matching upstream
+# asset, so no glibc shim is required).
+RUN apk add --no-cache musl-dev pkgconfig curl bash
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo install cargo-chef --locked --version ^0.1
 

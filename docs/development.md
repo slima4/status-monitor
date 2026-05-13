@@ -7,6 +7,9 @@ Local setup for iterating on the service. For production deployment see
 
 - Rust 1.95+ (edition 2024) via `rustup`
 - Docker + Docker Compose (for Postgres + ClickHouse)
+- Optional: [`just`](https://github.com/casey/just) (`brew install just`) — every
+  workflow below has a one-word `just` recipe equivalent. Run `just` to list
+  them.
 
 ## Two workflows
 
