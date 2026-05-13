@@ -6,7 +6,9 @@ WORKDIR /usr/src/status-monitor
 
 ENV CARGO_TERM_COLOR=never
 
-RUN apk add --no-cache musl-dev pkgconfig
+# `curl` is needed at build time: utoipa-swagger-ui's build script shells out to
+# it to fetch the Swagger UI assets bundle.
+RUN apk add --no-cache musl-dev pkgconfig curl
 
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
