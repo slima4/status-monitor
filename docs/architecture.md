@@ -32,8 +32,23 @@ src/
 ├── pipeline/        result batcher
 ├── scheduler/       target registry + per-target tick loop
 ├── storage/         Postgres (targets) + ClickHouse (results) + in-memory test doubles
+├── web/             askama 0.16 + askama_web HTML routes (dashboard, targets, forms, error pages)
+│   ├── routes.rs      Router<AppState> merged into the main router in main.rs
+│   ├── assets.rs      rust-embed handler for /static/* with cache-control
+│   ├── auth.rs        session cookie scaffolding (v1.1 — no-op today)
+│   ├── error.rs       AppError → HTML error page mapper (not the JSON envelope)
+│   └── views/         one module per page (dashboard, targets_list, targets_detail, targets_form)
 └── worker/          worker pool + circuit breaker + check executors
+
+templates/           askama HTML (compiled into the binary)
+└── ... base.html, dashboard{,/region}.html, targets/{list,detail,form}.html, error/{404,500,503}.html
+
+static/              rust-embed bundle
+├── css/             Tailwind 4 build output (built by build.rs)
+└── js/              HTMX 2 + json-enc + ECharts 6 + tiny UI/chart modules under ui/ and charts/
 ```
+
+The web layer is a thin server-rendered surface on top of the existing JSON API: every UI mutation hits `/api/v1/*` (forms post JSON, list/detail uses HTMX swaps of partials). See [`ui.md`](ui.md) for operator-level details.
 
 ## Data flow
 
