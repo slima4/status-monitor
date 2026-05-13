@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use dashmap::DashMap;
 use metrics::{counter, histogram};
@@ -47,6 +48,7 @@ pub fn host_for_spec(spec: &CheckSpec) -> String {
 pub struct ResultFanout {
     storage: mpsc::Sender<CheckResult>,
     alerts: Option<mpsc::Sender<AlertSignal>>,
+    storage_dropped: Arc<AtomicU64>,
 }
 
 impl ResultFanout {
@@ -54,11 +56,28 @@ impl ResultFanout {
         storage: mpsc::Sender<CheckResult>,
         alerts: Option<mpsc::Sender<AlertSignal>>,
     ) -> Self {
-        Self { storage, alerts }
+        Self {
+            storage,
+            alerts,
+            storage_dropped: Arc::new(AtomicU64::new(0)),
+        }
     }
 
     pub fn storage_only(storage: mpsc::Sender<CheckResult>) -> Self {
         Self::new(storage, None)
+    }
+
+    pub fn queue_depth(&self) -> u64 {
+        let max = self.storage.max_capacity();
+        max.saturating_sub(self.storage.capacity()) as u64
+    }
+
+    pub fn dropped(&self) -> u64 {
+        self.storage_dropped.load(Ordering::Relaxed)
+    }
+
+    pub fn note_storage_dropped(&self) {
+        self.storage_dropped.fetch_add(1, Ordering::Relaxed);
     }
 
     fn dispatch(&self, target: Arc<Target>, result: CheckResult) {
@@ -75,6 +94,7 @@ impl ResultFanout {
         if let Err(err) = self.storage.try_send(result) {
             tracing::warn!(?err, "result channel full or closed");
             counter!(names::STORAGE_DROPPED, "reason" => "queue_full").increment(1);
+            self.note_storage_dropped();
         }
     }
 }
@@ -125,6 +145,14 @@ impl WorkerPool {
             .count()
     }
 
+    pub fn result_queue_depth(&self) -> u64 {
+        self.fanout.queue_depth()
+    }
+
+    pub fn dropped_results(&self) -> u64 {
+        self.fanout.dropped()
+    }
+
     pub fn http_clients(&self) -> Arc<HttpClients> {
         self.http_clients.clone()
     }
@@ -159,6 +187,7 @@ impl WorkerPool {
             Err(_) => {
                 tracing::debug!(target_id = %task.target.id, "worker pool saturated, dropping task");
                 counter!(names::STORAGE_DROPPED, "reason" => "pool_saturated").increment(1);
+                self.fanout.note_storage_dropped();
                 return;
             }
         };

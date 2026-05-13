@@ -175,6 +175,115 @@ async fn coalescing_separates_runs_split_by_an_up_check() {
 }
 
 #[tokio::test]
+async fn openapi_json_carries_charset_suffix() {
+    let resp = app()
+        .oneshot(
+            Request::get("/api/openapi.json")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let ct = resp
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    assert_eq!(ct, "application/json; charset=utf-8");
+}
+
+#[tokio::test]
+async fn post_target_returns_location_header() {
+    let app = app();
+    let payload = json!({
+        "name": "loc-test",
+        "check": {
+            "type": "http",
+            "url": "http://example.com",
+            "method": "GET",
+            "timeout": 5000,
+            "follow_redirects": false,
+            "max_redirects": 0,
+            "expected_status": { "kind": "exact", "value": 200 },
+            "headers": {},
+            "verify_tls": true
+        },
+        "interval": 60
+    });
+    let resp = app
+        .oneshot(
+            Request::post("/api/v1/targets")
+                .header("content-type", "application/json")
+                .body(Body::from(payload.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let location = resp
+        .headers()
+        .get("location")
+        .and_then(|v| v.to_str().ok())
+        .expect("Location header on 201")
+        .to_string();
+    let cache_control = resp
+        .headers()
+        .get("cache-control")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_string();
+    let v = body_json(resp).await;
+    let id = v["id"].as_str().unwrap();
+    assert_eq!(location, format!("/api/v1/targets/{id}"));
+    assert_eq!(cache_control, "no-store");
+}
+
+#[tokio::test]
+async fn cache_control_set_per_route_kind() {
+    let app = app();
+
+    let dash = app
+        .clone()
+        .oneshot(
+            Request::get("/api/v1/dashboard/summary")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(dash.status(), StatusCode::OK);
+    assert_eq!(
+        dash.headers().get("cache-control").unwrap(),
+        "private, max-age=5"
+    );
+
+    let list = app
+        .clone()
+        .oneshot(
+            Request::get("/api/v1/targets")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(list.status(), StatusCode::OK);
+    assert_eq!(
+        list.headers().get("cache-control").unwrap(),
+        "private, max-age=10"
+    );
+
+    let health = app
+        .oneshot(Request::get("/healthz").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert!(
+        health.headers().get("cache-control").is_none(),
+        "health endpoints should not pin Cache-Control"
+    );
+}
+
+#[tokio::test]
 async fn check_now_force_bypasses_breaker() {
     // Use a TCP check pointing at a guaranteed-closed loopback port so the
     // worker returns an error; repeating it trips the breaker (threshold 2 in

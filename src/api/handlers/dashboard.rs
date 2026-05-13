@@ -65,14 +65,14 @@ pub async fn dashboard_summary(
             incidents,
         },
         system: SystemSummary {
-            in_flight_checks: state.worker_pool.in_flight() as u32,
-            // Channel depth lives in the sampler; expose 0 here until we
-            // thread the sender (or a shared atomic) into AppState.
-            result_queue_depth: 0,
-            // Cumulative since process start; reset on restart. Spec field
-            // name keeps `_last_5m` for shape compatibility.
-            dropped_results_last_5m: 0,
-            circuit_breakers_open: state.worker_pool.open_breakers() as u32,
+            in_flight_checks: u32::try_from(state.worker_pool.in_flight()).unwrap_or(u32::MAX),
+            result_queue_depth: u32::try_from(state.worker_pool.result_queue_depth())
+                .unwrap_or(u32::MAX),
+            // Cumulative since process start; the field name keeps `_last_5m`
+            // for response-shape stability.
+            dropped_results_last_5m: state.worker_pool.dropped_results(),
+            circuit_breakers_open: u32::try_from(state.worker_pool.open_breakers())
+                .unwrap_or(u32::MAX),
         },
     };
 

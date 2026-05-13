@@ -6,6 +6,14 @@ OpenAPI 3.1 document at `GET /api/openapi.json`; Swagger UI at `GET /docs`.
 
 All responses use `Content-Type: application/json; charset=utf-8`.
 
+### Response headers
+
+- `POST /api/v1/targets` (201) sets `Location: /api/v1/targets/{id}` so clients can follow up without re-deriving the path.
+- `Cache-Control` is stamped on every `/api/v1/*` response:
+  - mutations (POST / PATCH / DELETE) → `no-store`
+  - `/api/v1/dashboard/summary` → `private, max-age=5` (matches the server-side cache)
+  - all other reads → `private, max-age=10`
+
 ## Endpoints
 
 | Method | Path | Purpose |

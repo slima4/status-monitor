@@ -86,8 +86,9 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
         .route("/healthz", get(handlers::health::healthz))
         .route("/readyz", get(handlers::health::readyz))
         .nest("/api/v1", v1)
-        .layer(from_fn(api_middleware::json_charset))
         .merge(SwaggerUi::new("/docs").url("/api/openapi.json", ApiDoc::openapi()))
+        .layer(from_fn(api_middleware::cache_control))
+        .layer(from_fn(api_middleware::json_charset))
         .with_state(state)
 }
 

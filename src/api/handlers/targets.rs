@@ -2,7 +2,8 @@ use std::net::IpAddr;
 
 use axum::Json;
 use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderValue, StatusCode, header};
+use axum::response::AppendHeaders;
 use serde::Deserialize;
 use url::Host;
 use utoipa::IntoParams;
@@ -163,11 +164,22 @@ pub async fn get(State(state): State<AppState>, Path(id): Path<Uuid>) -> Result<
 pub async fn create(
     State(state): State<AppState>,
     Json(new): Json<NewTarget>,
-) -> Result<(StatusCode, Redacted<Target>)> {
+) -> Result<(
+    StatusCode,
+    AppendHeaders<[(axum::http::HeaderName, HeaderValue); 1]>,
+    Redacted<Target>,
+)> {
     let guard = ssrf_guard(&state);
     validate_new_target(&new, &guard)?;
     let t = state.target_store.create(new).await?;
-    Ok((StatusCode::CREATED, Redacted::new(t)))
+    // UUID hex is always ASCII-safe → infallible.
+    let location = HeaderValue::from_str(&format!("/api/v1/targets/{}", t.id))
+        .expect("uuid produces ascii-only path");
+    Ok((
+        StatusCode::CREATED,
+        AppendHeaders([(header::LOCATION, location)]),
+        Redacted::new(t),
+    ))
 }
 
 #[utoipa::path(
