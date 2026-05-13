@@ -16,6 +16,7 @@ use status_monitor::{
         self, ClickhouseResultSink, ClickhouseResultsStore, PostgresTargetStore, ResultSink,
         ResultsStore, TargetStore,
     },
+    web,
     worker::{ResultFanout, WorkerPool},
 };
 use tokio::net::TcpListener;
@@ -149,7 +150,7 @@ async fn main() -> Result<()> {
         http_clients.clone(),
         pool.clone(),
     );
-    let router = build_router(state, root.clone());
+    let router = build_router(state.clone(), root.clone()).merge(web::routes().with_state(state));
 
     let listener = TcpListener::bind(&api_bind).await.map_err(AppError::Io)?;
     tracing::info!(addr = %api_bind, "api listening");

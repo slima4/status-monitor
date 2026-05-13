@@ -63,8 +63,17 @@ metrics-exporter-prometheus = "0.18"
 # Web framework for API + metrics endpoint
 axum = "0.8"
 tower = "0.5"
-tower-http = { version = "0.6", features = ["trace", "compression-gzip", "cors"] }
+tower-http = { version = "0.6", features = ["trace", "compression-gzip", "cors", "fs", "set-header"] }
 tower_governor = { version = "0.8", default-features = false, features = ["axum"] }
+tower-cookies = "0.11"
+
+# Server-rendered web UI (askama templates + askama_web axum bridge)
+askama = { version = "0.16", features = ["serde_json"] }
+askama_web = { version = "0.16", features = ["axum-0.8"] }
+
+# Embed static assets into the release binary
+rust-embed = { version = "8.11", features = ["axum"] }
+mime_guess = "2"
 
 # Utilities
 uuid = { version = "1.23", features = ["v7", "serde"] }
@@ -84,6 +93,7 @@ x509-parser = "0.18.1"
 
 # OpenAPI schema derivation
 utoipa = { version = "5.5", features = ["axum_extras", "chrono", "uuid", "url"] }
+utoipa-axum = "0.2"
 utoipa-swagger-ui = { version = "9", features = ["axum"] }
 
 [dev-dependencies]

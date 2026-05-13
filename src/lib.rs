@@ -11,4 +11,5 @@ pub mod pipeline;
 pub mod scheduler;
 pub mod security;
 pub mod storage;
+pub mod web;
 pub mod worker;
