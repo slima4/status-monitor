@@ -4,16 +4,18 @@ use std::time::Duration;
 use axum::Router;
 use axum::body::Body;
 use axum::extract::DefaultBodyLimit;
+use axum::http::{HeaderValue, Method, header};
 use axum::routing::{get, post};
 use tokio::time::{MissedTickBehavior, interval};
 use tokio_util::sync::CancellationToken;
 use tower_governor::GovernorLayer;
 use tower_governor::governor::GovernorConfigBuilder;
 use tower_governor::key_extractor::PeerIpKeyExtractor;
+use tower_http::cors::{AllowOrigin, CorsLayer};
 
 use crate::api::handlers;
 use crate::app::AppState;
-use crate::config::RateLimitConfig;
+use crate::config::{CorsConfig, RateLimitConfig};
 
 type RateLimitLayer = GovernorLayer<PeerIpKeyExtractor, governor::middleware::NoOpMiddleware, Body>;
 
@@ -46,6 +48,9 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
         .merge(bulk);
 
     if let Some(layer) = rate_limit_layer(&state.cfg.api.rate_limit, shutdown) {
+        v1 = v1.layer(layer);
+    }
+    if let Some(layer) = cors_layer(&state.cfg.api.cors) {
         v1 = v1.layer(layer);
     }
 
@@ -82,4 +87,52 @@ fn rate_limit_layer(cfg: &RateLimitConfig, shutdown: CancellationToken) -> Optio
         }
     });
     Some(GovernorLayer::new(conf))
+}
+
+/// Builds a CORS layer when `api.cors.enabled = true`. Wildcard origins are
+/// only honored via `allow_any_origin`; literal `"*"` inside `allowed_origins`
+/// fails the process at startup so misconfiguration cannot silently open the
+/// API to any browser.
+fn cors_layer(cfg: &CorsConfig) -> Option<CorsLayer> {
+    if !cfg.enabled {
+        return None;
+    }
+    let origin = if cfg.allow_any_origin {
+        assert!(
+            cfg.allowed_origins.is_empty(),
+            "api.cors.allow_any_origin = true is mutually exclusive with allowed_origins"
+        );
+        AllowOrigin::any()
+    } else {
+        assert!(
+            !cfg.allowed_origins.is_empty(),
+            "api.cors.enabled = true requires allowed_origins or allow_any_origin"
+        );
+        let parsed: Vec<HeaderValue> = cfg
+            .allowed_origins
+            .iter()
+            .map(|o| {
+                assert!(
+                    !o.contains('*'),
+                    "api.cors.allowed_origins entry '{o}' contains '*'; set allow_any_origin = true instead"
+                );
+                HeaderValue::from_str(o).expect("invalid api.cors.allowed_origins entry")
+            })
+            .collect();
+        AllowOrigin::list(parsed)
+    };
+    let methods: Vec<Method> = cfg
+        .allowed_methods
+        .iter()
+        .map(|m| {
+            m.parse::<Method>()
+                .expect("invalid api.cors.allowed_methods entry")
+        })
+        .collect();
+    Some(
+        CorsLayer::new()
+            .allow_origin(origin)
+            .allow_methods(methods)
+            .allow_headers([header::CONTENT_TYPE]),
+    )
 }

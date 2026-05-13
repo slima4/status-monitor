@@ -75,3 +75,12 @@ gauge_sample_interval_ms = 1000
 enabled = false
 per_second = 50
 burst = 100
+
+[api.cors]
+# Browser CORS for /api/v1/*. Disabled by default. When enabled, every entry in
+# `allowed_origins` must be a full origin (scheme://host[:port]); wildcards are
+# only honored when `allow_any_origin = true`.
+enabled = false
+allowed_origins = []
+allowed_methods = ["GET", "POST", "PATCH", "DELETE"]
+allow_any_origin = false

@@ -1,22 +1,13 @@
 mod common;
 
-use std::sync::Arc;
-
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
+use common::build_test_app;
 use serde_json::{Value, json};
-use status_monitor::api::build_router;
-use status_monitor::app::AppState;
-use status_monitor::config::AppConfig;
-use status_monitor::storage::{InMemorySink, InMemoryTargetStore};
 use tower::ServiceExt;
 
 fn app() -> axum::Router {
-    let cfg = AppConfig::load().expect("config");
-    let target_store = Arc::new(InMemoryTargetStore::new());
-    let results_store = Arc::new(InMemorySink::new());
-    let state = AppState::new(cfg, target_store, results_store);
-    build_router(state, tokio_util::sync::CancellationToken::new())
+    build_test_app(|_| {})
 }
 
 async fn body_json(resp: axum::http::Response<Body>) -> Value {

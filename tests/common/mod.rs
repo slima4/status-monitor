@@ -2,18 +2,38 @@
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Router;
 use chrono::Utc;
+use status_monitor::api::build_router;
+use status_monitor::app::AppState;
 use status_monitor::config::{
-    CheckerConfig, CircuitBreakerConfig, DnsConfig, HttpClientConfig, SchedulerConfig,
+    AppConfig, CheckerConfig, CircuitBreakerConfig, DnsConfig, HttpClientConfig, SchedulerConfig,
     SecurityConfig,
 };
 use status_monitor::domain::{CheckSpec, ExpectedStatus, HttpCheck, HttpMethod, Target};
 use status_monitor::http_client::{HttpClients, build_clients};
+use status_monitor::storage::{InMemorySink, InMemoryTargetStore};
+use tokio_util::sync::CancellationToken;
 use url::Url;
 use uuid::Uuid;
+
+/// Builds a test router with an InMemory store backend, applying `mutate` to
+/// the loaded config before constructing `AppState`. The cancellation token is
+/// freshly created and never fires — background tasks (rate-limit GC) leak
+/// until the test binary exits, which is fine for short-lived tests.
+pub fn build_test_app(mutate: impl FnOnce(&mut AppConfig)) -> Router {
+    let mut cfg = AppConfig::load().expect("config");
+    mutate(&mut cfg);
+    let state = AppState::new(
+        cfg,
+        Arc::new(InMemoryTargetStore::new()),
+        Arc::new(InMemorySink::new()),
+    );
+    build_router(state, CancellationToken::new())
+}
 
 pub async fn spawn_router(router: Router) -> SocketAddr {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

@@ -86,6 +86,10 @@ Server returns the full `Target` including `id` (UUIDv7), `created_at`, `updated
 
 When [`api.rate_limit.enabled = true`](configuration.md), `/api/v1/*` enforces a per-peer-IP token bucket. Excess requests get `429 Too Many Requests` with a `Retry-After` header (seconds until the next token is available). `/healthz` and `/readyz` are never throttled. The default config disables this layer — front the service with a reverse proxy that rate-limits instead, since the peer IP is the proxy in that topology.
 
+## CORS
+
+Disabled by default. When [`api.cors.enabled = true`](configuration.md), `/api/v1/*` answers preflight `OPTIONS` with `Access-Control-Allow-Origin` (matching `allowed_origins` or `*` when `allow_any_origin = true`), `Access-Control-Allow-Methods` (the configured list), and `Access-Control-Allow-Headers: content-type`. `/healthz` and `/readyz` carry no CORS headers regardless.
+
 ## Results query
 
 `GET /api/v1/targets/{id}/results?from=2026-05-12T00:00:00Z&to=2026-05-12T23:59:59Z&limit=100`

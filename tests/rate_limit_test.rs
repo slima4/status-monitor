@@ -1,26 +1,16 @@
 mod common;
 
 use std::net::SocketAddr;
-use std::sync::Arc;
 
 use axum::body::Body;
 use axum::extract::ConnectInfo;
 use axum::http::{Request, StatusCode};
-use status_monitor::api::build_router;
-use status_monitor::app::AppState;
-use status_monitor::config::{AppConfig, RateLimitConfig};
-use status_monitor::storage::{InMemorySink, InMemoryTargetStore};
+use common::build_test_app;
+use status_monitor::config::RateLimitConfig;
 use tower::ServiceExt;
 
 fn app_with_rate_limit(rl: RateLimitConfig) -> axum::Router {
-    let mut cfg = AppConfig::load().expect("config");
-    cfg.api.rate_limit = rl;
-    let state = AppState::new(
-        cfg,
-        Arc::new(InMemoryTargetStore::new()),
-        Arc::new(InMemorySink::new()),
-    );
-    build_router(state, tokio_util::sync::CancellationToken::new())
+    build_test_app(|cfg| cfg.api.rate_limit = rl)
 }
 
 fn request_with_peer(peer: SocketAddr) -> Request<Body> {
