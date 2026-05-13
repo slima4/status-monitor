@@ -4,15 +4,17 @@
 //! builds the page payload from PostgreSQL and ClickHouse.
 
 pub mod aggregator;
+pub mod badge;
 pub mod cache;
 pub mod incident_writer;
 pub mod overall_status;
 pub mod source;
+pub mod xml;
 
 pub use aggregator::{AggregatorConfig, LiveAggregator};
 pub use cache::{PageCache, PageCacheError, PageData};
 pub use incident_writer::{
-    IncidentStore, IncidentWriter, IncidentWriterConfig, InMemoryIncidentStore, NewOpenIncident,
+    InMemoryIncidentStore, IncidentStore, IncidentWriter, IncidentWriterConfig, NewOpenIncident,
     OpenIncident, PgIncidentStore,
 };
 pub use overall_status::{

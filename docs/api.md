@@ -73,6 +73,7 @@ sensitive target fields (`url`, `headers`, `basic_auth`, `bearer_token`).
 | `GET` | `/api/public/v1/incidents/{id}` | one public incident with its update timeline |
 | `GET` | `/api/public/v1/incidents.rss` | RSS 2.0 feed of recent incidents |
 | `GET` | `/api/public/v1/maintenance` | active + upcoming maintenance windows |
+| `GET` | `/api/public/v1/badge.svg` | embeddable SVG status badge (overall, or `?component={id}`) |
 
 See [Public status page](public-status.md) for the operator workflow and
 the per-target fields (`public_status`, `public_name`, `public_description`,

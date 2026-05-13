@@ -27,14 +27,28 @@ use crate::domain::{
     ComponentHistoryResponse, PublicIncident, PublicMaintenanceList, PublicStatusPage,
 };
 use crate::public_status::IncidentListQuery;
+use crate::public_status::badge::{component_badge, overall_badge, render_badge};
 
-const RSS_CONTENT_TYPE: HeaderValue = HeaderValue::from_static("application/rss+xml; charset=utf-8");
+const RSS_CONTENT_TYPE: HeaderValue =
+    HeaderValue::from_static("application/rss+xml; charset=utf-8");
+const SVG_CONTENT_TYPE: HeaderValue = HeaderValue::from_static("image/svg+xml; charset=utf-8");
 
 #[derive(Debug, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct HistoryQuery {
     /// Number of days (1..=365, default 90).
     pub days: Option<u32>,
+}
+
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct BadgeQuery {
+    /// Optional public component id. When omitted, the badge reflects the
+    /// overall page state.
+    pub component: Option<Uuid>,
+    /// Reserved for future visual styles. Only `flat` is accepted in v1;
+    /// any other value returns 400.
+    pub style: Option<String>,
 }
 
 #[derive(Debug, Deserialize, IntoParams)]
@@ -165,10 +179,18 @@ pub async fn public_incident(
             content_type = "application/rss+xml"),
     ),
 )]
-pub async fn public_incidents_rss(State(state): State<AppState>) -> Result<Response, PublicAppError> {
+pub async fn public_incidents_rss(
+    State(state): State<AppState>,
+) -> Result<Response, PublicAppError> {
     let base_url = format!(
         "http://{}",
-        state.cfg.server.api_bind.split(':').next().unwrap_or("localhost")
+        state
+            .cfg
+            .server
+            .api_bind
+            .split(':')
+            .next()
+            .unwrap_or("localhost")
     );
     let body = state.public_source.incidents_rss(&base_url).await?;
     let mut resp = (StatusCode::OK, body).into_response();
@@ -196,4 +218,61 @@ pub async fn public_maintenance(
 ) -> Result<Json<PublicMaintenanceList>, PublicAppError> {
     let m = state.public_source.maintenance().await?;
     Ok(Json(m))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/public/v1/badge.svg",
+    tag = "public_status",
+    summary = "Embeddable SVG status badge",
+    description = "Returns a shields.io-style flat SVG badge for the overall \
+                   page or a single public component. Reuses the cached page \
+                   payload, so the badge is consistent with the /status view \
+                   within the 10-second cache window. Returns 404 if the \
+                   `component` id is unknown or its target is not public.",
+    security(),
+    params(BadgeQuery),
+    responses(
+        (status = 200, description = "SVG document",
+            content_type = "image/svg+xml"),
+        (status = 400, body = PublicApiError, description = "Unsupported style"),
+        (status = 404, body = PublicApiError, description = "Component not public or not found"),
+        (status = 503, body = PublicApiError, description = "Upstream data unavailable"),
+    ),
+)]
+pub async fn public_badge(
+    State(state): State<AppState>,
+    Query(q): Query<BadgeQuery>,
+) -> Result<Response, PublicAppError> {
+    if let Some(style) = q.style.as_deref()
+        && style != "flat"
+    {
+        return Err(PublicAppError::BadRequest(
+            "Unsupported style. Only 'flat' is recognised.",
+        ));
+    }
+
+    let page = state.public_source.page().await?;
+    let (label, status_text, color) = match q.component {
+        Some(id) => {
+            let comp = page
+                .groups
+                .iter()
+                .flat_map(|g| &g.components)
+                .find(|c| c.id == id)
+                .ok_or(PublicAppError::NotFound)?;
+            let (text, color) = component_badge(comp.current_status);
+            (comp.name.as_str(), text, color)
+        }
+        None => {
+            let (text, color) = overall_badge(page.overall.state);
+            (page.site_name.as_str(), text, color)
+        }
+    };
+    let svg = render_badge(label, status_text, color);
+
+    let mut resp = (StatusCode::OK, svg).into_response();
+    resp.headers_mut()
+        .insert(header::CONTENT_TYPE, SVG_CONTENT_TYPE);
+    Ok(resp)
 }

@@ -185,7 +185,9 @@ pub fn json_request(method: &str, path: &str, body: Value) -> Request<Body> {
         .method(method)
         .uri(path)
         .header("content-type", "application/json")
-        .body(Body::from(serde_json::to_vec(&body).expect("serialize JSON body")))
+        .body(Body::from(
+            serde_json::to_vec(&body).expect("serialize JSON body"),
+        ))
         .expect("build request")
 }
 
@@ -330,5 +332,64 @@ pub fn scheduler_cfg(refresh_secs: u64) -> SchedulerConfig {
     SchedulerConfig {
         target_refresh_interval_secs: refresh_secs,
         jitter_pct: 0,
+    }
+}
+
+/// `PublicSource` whose every method returns `PublicAppError::Unavailable`.
+/// Useful for asserting the 503 path on public endpoints without standing up
+/// a real aggregator.
+pub struct UnavailablePublicSource;
+
+#[async_trait::async_trait]
+impl PublicSource for UnavailablePublicSource {
+    async fn page(
+        &self,
+    ) -> Result<
+        Arc<status_monitor::domain::PublicStatusPage>,
+        status_monitor::api::public_error::PublicAppError,
+    > {
+        Err(status_monitor::api::public_error::PublicAppError::Unavailable)
+    }
+    async fn component_history(
+        &self,
+        _id: Uuid,
+        _days: u32,
+    ) -> Result<
+        status_monitor::domain::ComponentHistoryResponse,
+        status_monitor::api::public_error::PublicAppError,
+    > {
+        Err(status_monitor::api::public_error::PublicAppError::Unavailable)
+    }
+    async fn list_incidents(
+        &self,
+        _q: status_monitor::public_status::IncidentListQuery,
+    ) -> Result<
+        status_monitor::api::PageEnvelope<status_monitor::domain::PublicIncident>,
+        status_monitor::api::public_error::PublicAppError,
+    > {
+        Err(status_monitor::api::public_error::PublicAppError::Unavailable)
+    }
+    async fn incident_by_id(
+        &self,
+        _id: Uuid,
+    ) -> Result<
+        status_monitor::domain::PublicIncident,
+        status_monitor::api::public_error::PublicAppError,
+    > {
+        Err(status_monitor::api::public_error::PublicAppError::Unavailable)
+    }
+    async fn maintenance(
+        &self,
+    ) -> Result<
+        status_monitor::domain::PublicMaintenanceList,
+        status_monitor::api::public_error::PublicAppError,
+    > {
+        Err(status_monitor::api::public_error::PublicAppError::Unavailable)
+    }
+    async fn incidents_rss(
+        &self,
+        _base_url: &str,
+    ) -> Result<String, status_monitor::api::public_error::PublicAppError> {
+        Err(status_monitor::api::public_error::PublicAppError::Unavailable)
     }
 }

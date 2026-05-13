@@ -191,6 +191,24 @@ If you'd rather not maintain a custom Caddy image, comment out the
 serves; you just lose per-IP throttling. Putting Cloudflare in front of
 Caddy is the other option.
 
+## Embeddable status badge
+
+`GET /api/public/v1/badge.svg` returns a shields.io-style SVG badge that
+operators can embed in README files or external dashboards. Two modes:
+
+```markdown
+<!-- Overall page status -->
+![status](https://status.example.com/api/public/v1/badge.svg)
+
+<!-- Single component -->
+![api status](https://status.example.com/api/public/v1/badge.svg?component=<uuid>)
+```
+
+The badge reuses the cached page payload, so it tracks the `/status`
+view inside the 10-second cache window. Unknown component ids return
+`404` with the public error envelope; only `style=flat` is recognised
+(others return `400`).
+
 ## Common questions
 
 **Can I have a component that's public but doesn't trigger incidents?**

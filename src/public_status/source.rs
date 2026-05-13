@@ -22,6 +22,7 @@ use crate::domain::{
 
 use super::aggregator::LiveAggregator;
 use super::cache::{PageCache, PageCacheError};
+use super::xml::xml_escape;
 
 #[derive(Debug, Clone, Copy)]
 pub struct IncidentListQuery {
@@ -208,10 +209,7 @@ impl PublicSource for LivePublicSource {
 }
 
 impl LivePublicSource {
-    async fn hydrate(
-        &self,
-        rows: Vec<IncidentRow>,
-    ) -> Result<Vec<PublicIncident>, PublicAppError> {
+    async fn hydrate(&self, rows: Vec<IncidentRow>) -> Result<Vec<PublicIncident>, PublicAppError> {
         if rows.is_empty() {
             return Ok(Vec::new());
         }
@@ -245,9 +243,10 @@ impl LivePublicSource {
                     .last()
                     .map(|u| u.phase)
                     .unwrap_or(IncidentStatusPhase::Investigating);
-                let title = r.public_title.clone().unwrap_or_else(|| {
-                    format!("{} {}", r.component_name, r.status_at_start)
-                });
+                let title = r
+                    .public_title
+                    .clone()
+                    .unwrap_or_else(|| format!("{} {}", r.component_name, r.status_at_start));
                 PublicIncident {
                     id: r.id,
                     component_id: r.target_id,
@@ -314,20 +313,14 @@ pub fn build_rss(site_name: &str, base_url: &str, items: &[PublicIncident]) -> S
             .join(" \n");
         out.push_str("<item>");
         out.push_str(&format!("<title>{}</title>", xml_escape(&i.title)));
-        out.push_str(&format!(
-            "<guid isPermaLink=\"false\">{}</guid>",
-            i.id
-        ));
+        out.push_str(&format!("<guid isPermaLink=\"false\">{}</guid>", i.id));
         out.push_str(&format!(
             "<link>{}/status/incidents/{}</link>",
             xml_escape(base_url),
             i.id
         ));
         out.push_str(&format!("<pubDate>{pub_date}</pubDate>"));
-        out.push_str(&format!(
-            "<description>{}</description>",
-            xml_escape(&body)
-        ));
+        out.push_str(&format!("<description>{}</description>", xml_escape(&body)));
         out.push_str("</item>");
     }
     out.push_str("</channel></rss>");
@@ -342,19 +335,6 @@ fn phase_label(p: IncidentStatusPhase) -> &'static str {
         IncidentStatusPhase::Resolved => "resolved",
         IncidentStatusPhase::Postmortem => "postmortem",
     }
-}
-
-fn xml_escape(s: &str) -> String {
-    s.chars()
-        .map(|c| match c {
-            '<' => "&lt;".to_string(),
-            '>' => "&gt;".to_string(),
-            '&' => "&amp;".to_string(),
-            '"' => "&quot;".to_string(),
-            '\'' => "&apos;".to_string(),
-            c => c.to_string(),
-        })
-        .collect()
 }
 
 /// A `PublicSource` that returns an empty page and `NotFound` for everything
@@ -430,11 +410,6 @@ impl PublicSource for NoopPublicSource {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn xml_escape_handles_metacharacters() {
-        assert_eq!(xml_escape("a<b&c>d\"e'f"), "a&lt;b&amp;c&gt;d&quot;e&apos;f");
-    }
 
     #[test]
     fn rss_skeleton_well_formed_with_no_items() {

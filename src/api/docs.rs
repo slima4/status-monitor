@@ -10,9 +10,9 @@ use crate::api::types::{
     TestResponse,
 };
 use crate::domain::{
-    AlertChannel, AlertChannelConfig, CheckResult, CheckSpec, CheckStatus, ComponentHistoryResponse,
-    DayState, DomainExpiryCheck, ExpectedStatus, HttpCheck, HttpMethod, Incident,
-    IncidentNarrationUpdate, IncidentSeverity, IncidentStatusPhase, MaintenanceFilter,
+    AlertChannel, AlertChannelConfig, CheckResult, CheckSpec, CheckStatus,
+    ComponentHistoryResponse, DayState, DomainExpiryCheck, ExpectedStatus, HttpCheck, HttpMethod,
+    Incident, IncidentNarrationUpdate, IncidentSeverity, IncidentStatusPhase, MaintenanceFilter,
     MaintenanceWindow, MaintenanceWindowUpdate, NewIncidentUpdate, NewMaintenanceWindow, NewTarget,
     OverallState, OverallStatus, PublicComponent, PublicComponentGroup, PublicComponentStatus,
     PublicIncident, PublicIncidentUpdate, PublicMaintenance, PublicMaintenanceList,
@@ -53,6 +53,7 @@ use crate::storage::UptimeStats;
         handlers::public::public_incident,
         handlers::public::public_incidents_rss,
         handlers::public::public_maintenance,
+        handlers::public::public_badge,
         handlers::maintenance::create_maintenance,
         handlers::maintenance::list_maintenance,
         handlers::maintenance::get_maintenance,

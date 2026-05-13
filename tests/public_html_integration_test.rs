@@ -235,41 +235,12 @@ impl PublicSource for MaintenanceDominatesSource {
     }
 }
 
-/// Always errors with `Unavailable` — exercises the cache-miss/degraded path.
-/// All six methods are exercised across two tests, so none can be unimplemented.
-struct UnavailableSource;
-
-#[async_trait]
-impl PublicSource for UnavailableSource {
-    async fn page(&self) -> Result<Arc<PublicStatusPage>, PublicAppError> {
-        Err(PublicAppError::Unavailable)
-    }
-    async fn component_history(
-        &self,
-        _id: Uuid,
-        _days: u32,
-    ) -> Result<ComponentHistoryResponse, PublicAppError> {
-        Err(PublicAppError::Unavailable)
-    }
-    async fn list_incidents(
-        &self,
-        _q: IncidentListQuery,
-    ) -> Result<PageEnvelope<PublicIncident>, PublicAppError> {
-        Err(PublicAppError::Unavailable)
-    }
-    async fn incident_by_id(&self, _id: Uuid) -> Result<PublicIncident, PublicAppError> {
-        Err(PublicAppError::Unavailable)
-    }
-    async fn maintenance(&self) -> Result<PublicMaintenanceList, PublicAppError> {
-        Err(PublicAppError::Unavailable)
-    }
-    async fn incidents_rss(&self, _base_url: &str) -> Result<String, PublicAppError> {
-        Err(PublicAppError::Unavailable)
-    }
-}
+use common::UnavailablePublicSource as UnavailableSource;
 
 async fn body_text(resp: axum::http::Response<Body>) -> String {
-    let bytes = axum::body::to_bytes(resp.into_body(), 8 << 20).await.unwrap();
+    let bytes = axum::body::to_bytes(resp.into_body(), 8 << 20)
+        .await
+        .unwrap();
     String::from_utf8(bytes.to_vec()).unwrap()
 }
 

@@ -16,8 +16,8 @@ use tower_http::cors::{AllowOrigin, CorsLayer};
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
-use crate::api::{ApiDoc, idempotency, middleware as api_middleware};
 use crate::api::handlers;
+use crate::api::{ApiDoc, idempotency, middleware as api_middleware};
 use crate::app::AppState;
 use crate::config::{CorsConfig, RateLimitConfig};
 
@@ -32,10 +32,7 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
 
     let bulk = Router::new()
         .route("/targets/bulk", post(handlers::targets::bulk_create))
-        .route(
-            "/targets/bulk-action",
-            post(handlers::targets::bulk_action),
-        )
+        .route("/targets/bulk-action", post(handlers::targets::bulk_action))
         .layer(from_fn_with_state(
             state.idempotency.clone(),
             idempotency::middleware,
@@ -132,6 +129,7 @@ fn build_public_router() -> Router<AppState> {
             get(handlers::public::public_incidents_rss),
         )
         .route("/maintenance", get(handlers::public::public_maintenance))
+        .route("/badge.svg", get(handlers::public::public_badge))
         .layer(from_fn(api_middleware::public_cache_control))
 }
 
