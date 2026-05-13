@@ -135,6 +135,17 @@ fn validate_check(check: &crate::domain::CheckSpec, guard: &SsrfGuard) -> Result
                         .into(),
                 ));
             }
+            // Plain http already sends creds in the clear, so this rule only
+            // protects the https + forged-cert MITM path that bypasses the
+            // confidentiality the operator was relying on.
+            if !http.verify_tls
+                && scheme == "https"
+                && (http.basic_auth.is_some() || http.bearer_token.is_some())
+            {
+                return Err(AppError::BadRequest(
+                    "verify_tls = false cannot be combined with basic_auth or bearer_token over https — credentials would be exposed to any host presenting a forged certificate".into(),
+                ));
+            }
             match http.url.host() {
                 Some(Host::Ipv4(v4)) => check_ip(IpAddr::V4(v4), guard)?,
                 Some(Host::Ipv6(v6)) => check_ip(IpAddr::V6(v6), guard)?,

@@ -105,7 +105,41 @@ fn is_blocked_v6(ip: Ipv6Addr) -> bool {
     if seg[0] == 0x0100 && seg[1] == 0 && seg[2] == 0 && seg[3] == 0 {
         return true;
     }
+    // IPv6 transition mechanisms can embed IPv4 inside the v6 address. A
+    // public-looking v6 address may carry a private v4 inside it that would
+    // otherwise reach internal infrastructure through a translator.
+    if let Some(embedded) = extract_6to4(&seg).or_else(|| extract_nat64(&seg))
+        && is_blocked_v4(embedded)
+    {
+        return true;
+    }
     false
+}
+
+/// 6to4 (RFC 3056) encodes an IPv4 address into the second and third 16-bit
+/// segments of a `2002::/16` address.
+fn extract_6to4(seg: &[u16; 8]) -> Option<Ipv4Addr> {
+    (seg[0] == 0x2002).then(|| {
+        Ipv4Addr::new(
+            (seg[1] >> 8) as u8,
+            (seg[1] & 0xff) as u8,
+            (seg[2] >> 8) as u8,
+            (seg[2] & 0xff) as u8,
+        )
+    })
+}
+
+/// NAT64 well-known prefix `64:ff9b::/96` (RFC 6052) carries the embedded
+/// IPv4 in the final two 16-bit segments.
+fn extract_nat64(seg: &[u16; 8]) -> Option<Ipv4Addr> {
+    (seg[0] == 0x0064 && seg[1] == 0xff9b && seg[2..6].iter().all(|s| *s == 0)).then(|| {
+        Ipv4Addr::new(
+            (seg[6] >> 8) as u8,
+            (seg[6] & 0xff) as u8,
+            (seg[7] >> 8) as u8,
+            (seg[7] & 0xff) as u8,
+        )
+    })
 }
 
 #[cfg(test)]
@@ -188,6 +222,38 @@ mod tests {
     fn blocks_ipv6_documentation_and_discard() {
         assert!(blocked("2001:db8::1"));
         assert!(blocked("100::1"));
+    }
+
+    #[test]
+    fn blocks_6to4_carrying_private_ipv4() {
+        // 2002:0a00:0001:: → embedded 10.0.0.1
+        assert!(blocked("2002:0a00:0001::"));
+        // 2002:7f00:0001:: → embedded 127.0.0.1
+        assert!(blocked("2002:7f00:0001::"));
+        // 2002:a9fe:a9fe:: → embedded 169.254.169.254 (AWS metadata)
+        assert!(blocked("2002:a9fe:a9fe::"));
+    }
+
+    #[test]
+    fn allows_6to4_carrying_public_ipv4() {
+        // 2002:0101:0101:: → embedded 1.1.1.1
+        assert!(!blocked("2002:0101:0101::"));
+    }
+
+    #[test]
+    fn blocks_nat64_carrying_private_ipv4() {
+        // 64:ff9b::a00:1 → embedded 10.0.0.1
+        assert!(blocked("64:ff9b::a00:1"));
+        // 64:ff9b::7f00:1 → embedded 127.0.0.1
+        assert!(blocked("64:ff9b::7f00:1"));
+        // 64:ff9b::a9fe:a9fe → embedded 169.254.169.254
+        assert!(blocked("64:ff9b::a9fe:a9fe"));
+    }
+
+    #[test]
+    fn allows_nat64_carrying_public_ipv4() {
+        // 64:ff9b::0101:0101 → embedded 1.1.1.1
+        assert!(!blocked("64:ff9b::0101:0101"));
     }
 
     #[test]

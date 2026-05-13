@@ -323,3 +323,48 @@ async fn rejects_redaction_sentinel_in_bearer_token() {
     payload["check"]["bearer_token"] = json!("***");
     assert_eq!(post_target(payload).await, StatusCode::BAD_REQUEST);
 }
+
+#[tokio::test]
+async fn rejects_verify_tls_false_with_basic_auth_over_https() {
+    let mut payload = http_with_basic_auth();
+    payload["check"]["url"] = json!("https://example.com/");
+    payload["check"]["verify_tls"] = json!(false);
+    assert_eq!(post_target(payload).await, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn rejects_verify_tls_false_with_bearer_over_https() {
+    let mut payload = http_with_bearer();
+    payload["check"]["url"] = json!("https://example.com/");
+    payload["check"]["verify_tls"] = json!(false);
+    assert_eq!(post_target(payload).await, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn accepts_verify_tls_true_with_credentials_over_https() {
+    let mut payload = http_with_basic_auth();
+    payload["check"]["url"] = json!("https://example.com/");
+    payload["check"]["verify_tls"] = json!(true);
+    assert_eq!(post_target(payload).await, StatusCode::CREATED);
+}
+
+#[tokio::test]
+async fn accepts_verify_tls_false_without_credentials() {
+    let payload = json!({
+        "name": "no-creds-self-signed",
+        "check": {
+            "type": "http",
+            "url": "https://example.com/",
+            "method": "GET",
+            "timeout": 5000,
+            "follow_redirects": false,
+            "max_redirects": 0,
+            "expected_status": { "kind": "exact", "value": 200 },
+            "headers": {},
+            "verify_tls": false
+        },
+        "interval": 60,
+        "tags": []
+    });
+    assert_eq!(post_target(payload).await, StatusCode::CREATED);
+}
