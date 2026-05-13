@@ -50,6 +50,10 @@ The supplied key is not 32 bytes after base64 decode, or the string is not valid
 
 A client read the target back (where credentials are returned as `"***"`) and `PATCH`ed the full `check` body without re-supplying the real credential. Either send the real value, or omit `check` entirely from the `PATCH` body if only other fields are changing.
 
+## `429 Too Many Requests` on `/api/v1/*`
+
+Per-IP rate limiter is active and the bucket is empty. Read the `Retry-After` header for the wait time, or raise `api.rate_limit.{per_second, burst}`. If every client appears to share one bucket, the service is sitting behind a reverse proxy and the peer IP is the proxy — disable the in-app limiter (`api.rate_limit.enabled = false`) and let the proxy enforce per-client limits instead.
+
 ## ClickHouse insert fails with `SchemaMismatch`
 
 Almost always a Row-derive mismatch on UUID, Enum8, or DateTime64 column types:

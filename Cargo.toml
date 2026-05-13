@@ -64,6 +64,7 @@ metrics-exporter-prometheus = "0.18"
 axum = "0.8"
 tower = "0.5"
 tower-http = { version = "0.6", features = ["trace", "compression-gzip"] }
+tower_governor = { version = "0.8", default-features = false, features = ["axum"] }
 
 # Utilities
 uuid = { version = "1.23", features = ["v7", "serde"] }

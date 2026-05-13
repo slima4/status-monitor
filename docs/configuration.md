@@ -27,6 +27,7 @@ Override `STATUS_MONITOR_CONFIG_PATH` to point at an alternate base config file.
 | `observability` | `log_level`, `log_format` | tracing-subscriber filter + JSON vs pretty output |
 | `observability` | `metrics_enabled`, `gauge_sample_interval_ms` | Prometheus exporter toggle and sampler cadence |
 | `observability` | `tracing_enabled`, `otlp_endpoint` | OpenTelemetry export over OTLP/gRPC |
+| `api.rate_limit` | `enabled`, `per_second`, `burst` | per-IP token-bucket rate limiter on `/api/v1/*`. Disabled by default |
 
 ## Tuning notes
 
@@ -44,3 +45,4 @@ Override `STATUS_MONITOR_CONFIG_PATH` to point at an alternate base config file.
   - Multicast, broadcast, unspecified, reserved-for-future-use
   The guard runs both at API submission (rejects IP-literal URLs synchronously) and after DNS resolution at connect time (catches DNS rebinding). Flip to `true` for internal monitoring where private targets are the goal — operators are then responsible for network segmentation.
 - **`security.credentials_kek_base64`** enables AES-256-GCM encryption of HTTP `basic_auth` and `bearer_token` values inside the `targets.check_spec` JSONB column. Generate with `openssl rand -base64 32`. Each write produces a fresh 12-byte random nonce; the on-disk shape is `{"$enc":"v1:<nonce>:<ciphertext>"}`. When the key is unset the service logs a startup warning and stores credentials plaintext (dev-friendly upgrade path — existing plaintext rows continue to read after a key is provisioned). Rotation and KMS integration are out of scope for the current version; treat the KEK as long-lived and protect it via your secret-management of choice (env file with restricted mode, container secret, etc.). A malformed KEK fails the process at startup.
+- **`api.rate_limit`** applies a per-peer-IP token bucket only to `/api/v1/*` routes (`/healthz` and `/readyz` are excluded so liveness probes never see `429`). `per_second` is the refill rate; `burst` is the bucket capacity. Excess requests get `429 Too Many Requests` with a `Retry-After` header. The bucket key is the TCP peer IP — when the service sits behind a reverse proxy, every client appears as the proxy IP, so prefer doing rate limiting at the proxy in that topology. Disabled by default; leave it off and let your reverse proxy enforce limits unless you bind the API directly to the internet.

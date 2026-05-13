@@ -16,7 +16,7 @@ fn app() -> axum::Router {
     let target_store = Arc::new(InMemoryTargetStore::new());
     let results_store = Arc::new(InMemorySink::new());
     let state = AppState::new(cfg, target_store, results_store);
-    build_router(state)
+    build_router(state, tokio_util::sync::CancellationToken::new())
 }
 
 async fn body_json(resp: axum::http::Response<Body>) -> Value {

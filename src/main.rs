@@ -122,13 +122,17 @@ async fn main() -> Result<()> {
     drop(result_tx);
 
     let state = AppState::new(cfg, target_store, results_store);
-    let router = build_router(state);
+    let router = build_router(state, root.clone());
 
     let listener = TcpListener::bind(&api_bind).await.map_err(AppError::Io)?;
     tracing::info!(addr = %api_bind, "api listening");
 
     let signal_token = root.clone();
-    let serve = axum::serve(listener, router).with_graceful_shutdown(async move {
+    let serve = axum::serve(
+        listener,
+        router.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .with_graceful_shutdown(async move {
         wait_for_signal().await;
         signal_token.cancel();
     });

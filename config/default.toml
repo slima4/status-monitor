@@ -68,3 +68,10 @@ metrics_enabled = true
 tracing_enabled = false
 otlp_endpoint = "http://localhost:4317"
 gauge_sample_interval_ms = 1000
+
+[api.rate_limit]
+# Per-IP token bucket on /api/v1/*. Disabled by default — operators front the
+# service with a reverse proxy if they bind beyond loopback.
+enabled = false
+per_second = 50
+burst = 100

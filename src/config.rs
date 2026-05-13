@@ -22,6 +22,32 @@ pub struct AppConfig {
     pub storage: StorageConfig,
     pub scheduler: SchedulerConfig,
     pub observability: ObservabilityConfig,
+    #[serde(default)]
+    pub api: ApiConfig,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct ApiConfig {
+    #[serde(default)]
+    pub rate_limit: RateLimitConfig,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+#[serde(default)]
+pub struct RateLimitConfig {
+    pub enabled: bool,
+    pub per_second: u32,
+    pub burst: u32,
+}
+
+impl Default for RateLimitConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            per_second: 50,
+            burst: 100,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
