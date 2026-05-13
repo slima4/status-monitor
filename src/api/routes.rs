@@ -72,6 +72,25 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
             "/dashboard/summary",
             get(handlers::dashboard::dashboard_summary),
         )
+        .route(
+            "/maintenance",
+            get(handlers::maintenance::list_maintenance)
+                .post(handlers::maintenance::create_maintenance),
+        )
+        .route(
+            "/maintenance/{id}",
+            get(handlers::maintenance::get_maintenance)
+                .patch(handlers::maintenance::update_maintenance)
+                .delete(handlers::maintenance::delete_maintenance),
+        )
+        .route(
+            "/incidents/{id}",
+            axum::routing::patch(handlers::incidents::update_incident_narration),
+        )
+        .route(
+            "/incidents/{id}/updates",
+            post(handlers::incidents::post_incident_update),
+        )
         .layer(DefaultBodyLimit::max(SINGLE_BODY_LIMIT))
         .merge(bulk);
 

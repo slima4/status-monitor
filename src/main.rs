@@ -19,8 +19,9 @@ use status_monitor::{
     scheduler::{Scheduler, TargetRegistry},
     security::Cipher,
     storage::{
-        self, ClickhouseResultSink, ClickhouseResultsStore, PostgresTargetStore, ResultSink,
-        ResultsStore, TargetStore,
+        self, ClickhouseResultSink, ClickhouseResultsStore, IncidentNarrationStore,
+        MaintenanceStore, PgIncidentNarrationStore, PgMaintenanceStore, PostgresTargetStore,
+        ResultSink, ResultsStore, TargetStore,
     },
     web,
     worker::{ResultFanout, WorkerPool},
@@ -166,6 +167,7 @@ async fn main() -> Result<()> {
         aggregator_cfg.site_name.clone(),
     ));
 
+    let pg_pool_for_stores = pg_pool.clone();
     let incident_writer = Arc::new(IncidentWriter::new(
         target_store.clone(),
         results_store.clone(),
@@ -178,6 +180,11 @@ async fn main() -> Result<()> {
         tokio::spawn(async move { writer.run(token).await })
     };
 
+    let maintenance_store: Arc<dyn MaintenanceStore> =
+        Arc::new(PgMaintenanceStore::new(pg_pool_for_stores.clone()));
+    let incident_narration_store: Arc<dyn IncidentNarrationStore> =
+        Arc::new(PgIncidentNarrationStore::new(pg_pool_for_stores));
+
     let state = AppState::new(
         cfg,
         target_store,
@@ -186,6 +193,8 @@ async fn main() -> Result<()> {
         http_clients.clone(),
         pool.clone(),
         public_source,
+        maintenance_store,
+        incident_narration_store,
     );
     let router = build_router(state.clone(), root.clone()).merge(web::routes().with_state(state));
 

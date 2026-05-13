@@ -352,7 +352,7 @@ impl LiveAggregator {
                     .filter(|u| u.incident_id == r.id)
                     .map(|u| PublicIncidentUpdate {
                         posted_at: u.posted_at,
-                        phase: parse_phase(&u.phase),
+                        phase: IncidentStatusPhase::from_db_str(&u.phase),
                         message: u.message.clone(),
                     })
                     .collect();
@@ -370,7 +370,7 @@ impl LiveAggregator {
                     title,
                     started_at: r.started_at,
                     ended_at: r.ended_at,
-                    severity: parse_severity(&r.severity),
+                    severity: IncidentSeverity::from_db_str(&r.severity),
                     status_phase,
                     updates: my_updates,
                 }
@@ -571,25 +571,6 @@ struct RecentCountRow {
 }
 
 // ── helpers ─────────────────────────────────────────────────────────────────
-
-fn parse_severity(s: &str) -> IncidentSeverity {
-    match s {
-        "minor" => IncidentSeverity::Minor,
-        "critical" => IncidentSeverity::Critical,
-        _ => IncidentSeverity::Major,
-    }
-}
-
-fn parse_phase(s: &str) -> IncidentStatusPhase {
-    match s {
-        "investigating" => IncidentStatusPhase::Investigating,
-        "identified" => IncidentStatusPhase::Identified,
-        "monitoring" => IncidentStatusPhase::Monitoring,
-        "resolved" => IncidentStatusPhase::Resolved,
-        "postmortem" => IncidentStatusPhase::Postmortem,
-        _ => IncidentStatusPhase::Investigating,
-    }
-}
 
 fn ts_to_datetime(secs: i64) -> DateTime<Utc> {
     chrono::DateTime::<Utc>::from_timestamp(secs, 0).unwrap_or_else(Utc::now)

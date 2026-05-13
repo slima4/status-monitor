@@ -66,8 +66,45 @@ async fn openapi_doc_lists_every_documented_path() {
         "/api/v1/targets/{id}/incidents",
         "/api/v1/tags",
         "/api/v1/dashboard/summary",
+        "/api/v1/maintenance",
+        "/api/v1/maintenance/{id}",
+        "/api/v1/incidents/{id}",
+        "/api/v1/incidents/{id}/updates",
+        "/api/public/v1/status",
+        "/api/public/v1/components/{id}/history",
+        "/api/public/v1/incidents",
+        "/api/public/v1/incidents/{id}",
+        "/api/public/v1/incidents.rss",
+        "/api/public/v1/maintenance",
     ] {
         assert!(paths.contains_key(expected), "missing path {expected}");
+    }
+}
+
+#[tokio::test]
+async fn public_endpoints_have_empty_security() {
+    let resp = app()
+        .oneshot(
+            Request::get("/api/openapi.json")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let doc = body_json(resp).await;
+    for path in [
+        "/api/public/v1/status",
+        "/api/public/v1/components/{id}/history",
+        "/api/public/v1/incidents",
+        "/api/public/v1/incidents/{id}",
+        "/api/public/v1/incidents.rss",
+        "/api/public/v1/maintenance",
+    ] {
+        let security = &doc["paths"][path]["get"]["security"];
+        assert!(
+            security.is_array() && security.as_array().unwrap().is_empty(),
+            "{path}: security should be [] (no auth); got {security}",
+        );
     }
 }
 

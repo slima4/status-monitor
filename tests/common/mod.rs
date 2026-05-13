@@ -6,7 +6,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Router;
+use axum::body::Body;
+use axum::http::Request;
 use chrono::Utc;
+use serde_json::Value;
 use status_monitor::api::build_router;
 use status_monitor::app::AppState;
 use status_monitor::config::{
@@ -16,7 +19,10 @@ use status_monitor::config::{
 use status_monitor::domain::{CheckSpec, ExpectedStatus, HttpCheck, HttpMethod, Target};
 use status_monitor::http_client::{HttpClients, build_clients};
 use status_monitor::public_status::{NoopPublicSource, PublicSource};
-use status_monitor::storage::{InMemorySink, InMemoryTargetStore, ResultSink, ResultsStore};
+use status_monitor::storage::{
+    InMemoryIncidentNarrationStore, InMemoryMaintenanceStore, InMemorySink, InMemoryTargetStore,
+    IncidentNarrationStore, MaintenanceStore, ResultSink, ResultsStore,
+};
 use status_monitor::worker::{ResultFanout, WorkerPool};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -29,6 +35,43 @@ use uuid::Uuid;
 /// until the test binary exits, which is fine for short-lived tests.
 pub fn build_test_app(mutate: impl FnOnce(&mut AppConfig)) -> Router {
     build_test_app_inner(mutate, false)
+}
+
+/// Like `build_test_app` but also returns the in-memory narration store so
+/// tests can seed incidents directly. Maintenance routes still go through HTTP.
+pub fn build_test_app_with_seedable_incidents(
+    mutate: impl FnOnce(&mut AppConfig),
+) -> (Router, Arc<InMemoryIncidentNarrationStore>) {
+    let mut cfg = AppConfig::load().expect("config");
+    mutate(&mut cfg);
+    let target_store = Arc::new(InMemoryTargetStore::new());
+    let sink = Arc::new(InMemorySink::new());
+    let results_store: Arc<dyn ResultsStore> = sink.clone();
+    let result_sink: Arc<dyn ResultSink> = sink;
+    let http_clients = Arc::new(test_client());
+    let (tx, _rx) = mpsc::channel(1024);
+    let pool = Arc::new(WorkerPool::new(
+        cfg.checker.max_concurrent_checks.max(1),
+        (*http_clients).clone(),
+        cfg.circuit_breaker,
+        ResultFanout::storage_only(tx),
+    ));
+    let public_source = Arc::new(NoopPublicSource::default());
+    let maintenance_store: Arc<dyn MaintenanceStore> = Arc::new(InMemoryMaintenanceStore::new());
+    let narration = Arc::new(InMemoryIncidentNarrationStore::new());
+    let incident_narration_store: Arc<dyn IncidentNarrationStore> = narration.clone();
+    let state = AppState::new(
+        cfg,
+        target_store,
+        results_store,
+        result_sink,
+        http_clients,
+        pool,
+        public_source,
+        maintenance_store,
+        incident_narration_store,
+    );
+    (build_router(state, CancellationToken::new()), narration)
 }
 
 /// Like `build_test_app` but accepts a custom `PublicSource` so contract tests
@@ -51,6 +94,9 @@ pub fn build_test_app_with_public_source(
         cfg.circuit_breaker,
         ResultFanout::storage_only(tx),
     ));
+    let maintenance_store: Arc<dyn MaintenanceStore> = Arc::new(InMemoryMaintenanceStore::new());
+    let incident_narration_store: Arc<dyn IncidentNarrationStore> =
+        Arc::new(InMemoryIncidentNarrationStore::new());
     let state = AppState::new(
         cfg,
         target_store,
@@ -59,6 +105,8 @@ pub fn build_test_app_with_public_source(
         http_clients,
         pool,
         public_source,
+        maintenance_store,
+        incident_narration_store,
     );
     build_router(state, CancellationToken::new())
 }
@@ -85,6 +133,9 @@ fn build_test_app_inner(mutate: impl FnOnce(&mut AppConfig), with_web: bool) -> 
         ResultFanout::storage_only(tx),
     ));
     let public_source = Arc::new(NoopPublicSource::default());
+    let maintenance_store: Arc<dyn MaintenanceStore> = Arc::new(InMemoryMaintenanceStore::new());
+    let incident_narration_store: Arc<dyn IncidentNarrationStore> =
+        Arc::new(InMemoryIncidentNarrationStore::new());
     let state = AppState::new(
         cfg,
         target_store,
@@ -93,6 +144,8 @@ fn build_test_app_inner(mutate: impl FnOnce(&mut AppConfig), with_web: bool) -> 
         http_clients,
         pool,
         public_source,
+        maintenance_store,
+        incident_narration_store,
     );
     let api = build_router(state.clone(), CancellationToken::new());
     if with_web {
@@ -100,6 +153,26 @@ fn build_test_app_inner(mutate: impl FnOnce(&mut AppConfig), with_web: bool) -> 
     } else {
         api
     }
+}
+
+/// Builds a JSON request with `Content-Type: application/json`. Panics on
+/// serialization failure — tests pass `serde_json::Value` literals so the
+/// only way this fails is a typo in the test fixture.
+pub fn json_request(method: &str, path: &str, body: Value) -> Request<Body> {
+    Request::builder()
+        .method(method)
+        .uri(path)
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_vec(&body).expect("serialize JSON body")))
+        .expect("build request")
+}
+
+/// Decodes the response body as JSON. Panics on non-JSON payloads.
+pub async fn body_json(resp: axum::http::Response<Body>) -> Value {
+    let bytes = axum::body::to_bytes(resp.into_body(), 8 << 20)
+        .await
+        .expect("collect body");
+    serde_json::from_slice(&bytes).expect("valid json")
 }
 
 pub async fn spawn_router(router: Router) -> SocketAddr {

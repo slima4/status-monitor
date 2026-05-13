@@ -68,6 +68,27 @@ pub enum IncidentSeverity {
     Critical,
 }
 
+impl IncidentSeverity {
+    /// Stable string used in the Postgres `severity` CHECK constraint and the
+    /// JSON wire form. Unknown DB values fall back to `Major` (defensive
+    /// against migrations / corruption — never panics on parse).
+    pub fn as_db_str(self) -> &'static str {
+        match self {
+            Self::Minor => "minor",
+            Self::Major => "major",
+            Self::Critical => "critical",
+        }
+    }
+
+    pub fn from_db_str(s: &str) -> Self {
+        match s {
+            "minor" => Self::Minor,
+            "critical" => Self::Critical,
+            _ => Self::Major,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum IncidentStatusPhase {
@@ -76,6 +97,31 @@ pub enum IncidentStatusPhase {
     Monitoring,
     Resolved,
     Postmortem,
+}
+
+impl IncidentStatusPhase {
+    /// Stable string used in the Postgres `phase` CHECK constraint and the
+    /// JSON wire form. Unknown DB values fall back to `Investigating` so a
+    /// migration / corruption never panics a read path.
+    pub fn as_db_str(self) -> &'static str {
+        match self {
+            Self::Investigating => "investigating",
+            Self::Identified => "identified",
+            Self::Monitoring => "monitoring",
+            Self::Resolved => "resolved",
+            Self::Postmortem => "postmortem",
+        }
+    }
+
+    pub fn from_db_str(s: &str) -> Self {
+        match s {
+            "identified" => Self::Identified,
+            "monitoring" => Self::Monitoring,
+            "resolved" => Self::Resolved,
+            "postmortem" => Self::Postmortem,
+            _ => Self::Investigating,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]

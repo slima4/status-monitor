@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
@@ -33,14 +33,48 @@ pub struct Incident {
     #[schema(nullable = true)]
     pub public_description: Option<String>,
     #[serde(default)]
+    #[schema(nullable = true)]
+    pub created_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    #[schema(nullable = true)]
+    pub updated_at: Option<DateTime<Utc>>,
+    #[serde(default)]
     pub updates: Vec<PublicIncidentUpdate>,
 }
 
+/// Operator-narration patch.
+///
+/// `public_title` and `public_description` use a "double-Option" pattern so
+/// callers can distinguish three cases:
+///  * field omitted entirely → leave the stored value unchanged
+///  * field present with JSON `null` → clear the stored value
+///  * field present with a string → set the stored value to that string
+///
+/// utoipa renders both layers as nullable; the wire shape is identical to a
+/// plain `Option<String>` to clients.
 #[derive(Debug, Clone, Default, Deserialize, ToSchema)]
 pub struct IncidentNarrationUpdate {
-    pub public_title: Option<String>,
-    pub public_description: Option<String>,
+    #[serde(default, deserialize_with = "double_option")]
+    #[schema(nullable = true, value_type = Option<String>)]
+    pub public_title: Option<Option<String>>,
+    #[serde(default, deserialize_with = "double_option")]
+    #[schema(nullable = true, value_type = Option<String>)]
+    pub public_description: Option<Option<String>>,
+    #[serde(default)]
     pub severity: Option<IncidentSeverity>,
+}
+
+/// Lifts the inner `Option<T>` into a `Some(Option<T>)` so missing fields stay
+/// `None` (via `#[serde(default)]`) while explicit JSON `null` becomes
+/// `Some(None)` (the "clear" intent). Without this, serde's default treats
+/// both as `None`, making it impossible to distinguish "leave alone" from
+/// "clear to null" on PATCH.
+fn double_option<'de, T, D>(d: D) -> std::result::Result<Option<Option<T>>, D::Error>
+where
+    T: Deserialize<'de>,
+    D: Deserializer<'de>,
+{
+    Option::<T>::deserialize(d).map(Some)
 }
 
 #[derive(Debug, Clone, Deserialize, ToSchema)]
@@ -85,6 +119,8 @@ where
                     severity: IncidentSeverity::default(),
                     public_title: None,
                     public_description: None,
+                    created_at: None,
+                    updated_at: None,
                     updates: Vec::new(),
                 });
             }

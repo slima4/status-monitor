@@ -236,7 +236,7 @@ impl LivePublicSource {
                     .filter(|u| u.incident_id == r.id)
                     .map(|u| PublicIncidentUpdate {
                         posted_at: u.posted_at,
-                        phase: parse_phase(&u.phase),
+                        phase: IncidentStatusPhase::from_db_str(&u.phase),
                         message: u.message.clone(),
                     })
                     .collect();
@@ -255,7 +255,7 @@ impl LivePublicSource {
                     title,
                     started_at: r.started_at,
                     ended_at: r.ended_at,
-                    severity: parse_severity(&r.severity),
+                    severity: IncidentSeverity::from_db_str(&r.severity),
                     status_phase,
                     updates: my_updates,
                 }
@@ -284,25 +284,6 @@ struct UpdateRow {
     posted_at: DateTime<Utc>,
     phase: String,
     message: String,
-}
-
-fn parse_severity(s: &str) -> IncidentSeverity {
-    match s {
-        "minor" => IncidentSeverity::Minor,
-        "critical" => IncidentSeverity::Critical,
-        _ => IncidentSeverity::Major,
-    }
-}
-
-fn parse_phase(s: &str) -> IncidentStatusPhase {
-    match s {
-        "investigating" => IncidentStatusPhase::Investigating,
-        "identified" => IncidentStatusPhase::Identified,
-        "monitoring" => IncidentStatusPhase::Monitoring,
-        "resolved" => IncidentStatusPhase::Resolved,
-        "postmortem" => IncidentStatusPhase::Postmortem,
-        _ => IncidentStatusPhase::Investigating,
-    }
 }
 
 /// Minimal RSS 2.0 builder — keeps us free of an extra crate just to emit

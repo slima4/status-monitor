@@ -12,10 +12,11 @@ use crate::api::types::{
 use crate::domain::{
     AlertChannel, AlertChannelConfig, CheckResult, CheckSpec, CheckStatus, ComponentHistoryResponse,
     DayState, DomainExpiryCheck, ExpectedStatus, HttpCheck, HttpMethod, Incident,
-    IncidentSeverity, IncidentStatusPhase, NewTarget, OverallState, OverallStatus, PublicComponent,
-    PublicComponentGroup, PublicComponentStatus, PublicIncident, PublicIncidentUpdate,
-    PublicMaintenance, PublicMaintenanceList, PublicStatusPage, Target, TargetAlerts,
-    TargetUpdate, TcpCheck, TlsCertCheck,
+    IncidentNarrationUpdate, IncidentSeverity, IncidentStatusPhase, MaintenanceFilter,
+    MaintenanceWindow, MaintenanceWindowUpdate, NewIncidentUpdate, NewMaintenanceWindow, NewTarget,
+    OverallState, OverallStatus, PublicComponent, PublicComponentGroup, PublicComponentStatus,
+    PublicIncident, PublicIncidentUpdate, PublicMaintenance, PublicMaintenanceList,
+    PublicStatusPage, Target, TargetAlerts, TargetUpdate, TcpCheck, TlsCertCheck,
 };
 use crate::storage::UptimeStats;
 
@@ -52,6 +53,13 @@ use crate::storage::UptimeStats;
         handlers::public::public_incident,
         handlers::public::public_incidents_rss,
         handlers::public::public_maintenance,
+        handlers::maintenance::create_maintenance,
+        handlers::maintenance::list_maintenance,
+        handlers::maintenance::get_maintenance,
+        handlers::maintenance::update_maintenance,
+        handlers::maintenance::delete_maintenance,
+        handlers::incidents::update_incident_narration,
+        handlers::incidents::post_incident_update,
     ),
     components(
         schemas(
@@ -108,6 +116,13 @@ use crate::storage::UptimeStats;
             PublicMaintenanceList,
             ComponentHistoryResponse,
             PageEnvelope<PublicIncident>,
+            NewMaintenanceWindow,
+            MaintenanceWindowUpdate,
+            MaintenanceWindow,
+            MaintenanceFilter,
+            PageEnvelope<MaintenanceWindow>,
+            IncidentNarrationUpdate,
+            NewIncidentUpdate,
         ),
     ),
     tags(
@@ -117,6 +132,8 @@ use crate::storage::UptimeStats;
         (name = "tags",          description = "Tag inventory"),
         (name = "dashboard",     description = "Fleet-wide aggregated views"),
         (name = "public_status", description = "Public, unauthenticated status page surface"),
+        (name = "maintenance",   description = "Scheduled maintenance windows (operator)"),
+        (name = "incidents",     description = "Incident narration and timeline (operator)"),
     ),
 )]
 pub struct ApiDoc;

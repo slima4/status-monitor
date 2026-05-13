@@ -75,4 +75,17 @@ pub mod codes {
     pub const DEPENDENCY_DOWN: &str = "DEPENDENCY_DOWN";
     pub const RATE_LIMITED: &str = "RATE_LIMITED";
     pub const INTERNAL: &str = "INTERNAL";
+    // Maintenance + incident narration (operator surface).
+    pub const INVALID_TIME_RANGE: &str = "INVALID_TIME_RANGE";
+    pub const INVALID_COMPONENT_ID: &str = "INVALID_COMPONENT_ID";
+    pub const INVALID_DURATION: &str = "INVALID_DURATION";
+    pub const EMPTY_TITLE: &str = "EMPTY_TITLE";
+    pub const TITLE_TOO_LONG: &str = "TITLE_TOO_LONG";
+    pub const DESCRIPTION_TOO_LONG: &str = "DESCRIPTION_TOO_LONG";
+    pub const EMPTY_MESSAGE: &str = "EMPTY_MESSAGE";
+    pub const MESSAGE_TOO_LONG: &str = "MESSAGE_TOO_LONG";
+    pub const INVALID_PHASE: &str = "INVALID_PHASE";
+    pub const MAINTENANCE_COMPLETED: &str = "MAINTENANCE_COMPLETED";
+    pub const MAINTENANCE_NOT_FOUND: &str = "MAINTENANCE_NOT_FOUND";
+    pub const INCIDENT_NOT_FOUND: &str = "INCIDENT_NOT_FOUND";
 }

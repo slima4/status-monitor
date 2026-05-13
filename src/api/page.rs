@@ -3,7 +3,7 @@ use utoipa::ToSchema;
 
 use crate::api::redaction::RedactInPlace;
 use crate::api::types::TagCount;
-use crate::domain::{CheckResult, Incident, PublicIncident, Target};
+use crate::domain::{CheckResult, Incident, MaintenanceWindow, PublicIncident, Target};
 
 /// Standard envelope returned by every paginated list endpoint.
 ///
@@ -50,3 +50,4 @@ pub type PageOfCheckResult = PageEnvelope<CheckResult>;
 pub type PageOfIncident = PageEnvelope<Incident>;
 pub type PageOfTagCount = PageEnvelope<TagCount>;
 pub type PageOfPublicIncident = PageEnvelope<PublicIncident>;
+pub type PageOfMaintenanceWindow = PageEnvelope<MaintenanceWindow>;

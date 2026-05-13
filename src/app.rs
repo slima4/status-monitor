@@ -8,7 +8,9 @@ use crate::api::types::DashboardSummary;
 use crate::config::AppConfig;
 use crate::http_client::HttpClients;
 use crate::public_status::PublicSource;
-use crate::storage::{ResultSink, ResultsStore, TargetStore};
+use crate::storage::{
+    IncidentNarrationStore, MaintenanceStore, ResultSink, ResultsStore, TargetStore,
+};
 use crate::worker::WorkerPool;
 
 /// Snapshot of the dashboard summary plus the wall-clock instant it was built.
@@ -28,9 +30,12 @@ pub struct AppState {
     pub dashboard_cache: DashboardCache,
     pub idempotency: Arc<IdempotencyCache>,
     pub public_source: Arc<dyn PublicSource>,
+    pub maintenance_store: Arc<dyn MaintenanceStore>,
+    pub incident_narration_store: Arc<dyn IncidentNarrationStore>,
 }
 
 impl AppState {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         cfg: AppConfig,
         target_store: Arc<dyn TargetStore>,
@@ -39,6 +44,8 @@ impl AppState {
         http_clients: Arc<HttpClients>,
         worker_pool: Arc<WorkerPool>,
         public_source: Arc<dyn PublicSource>,
+        maintenance_store: Arc<dyn MaintenanceStore>,
+        incident_narration_store: Arc<dyn IncidentNarrationStore>,
     ) -> Self {
         Self {
             cfg: Arc::new(cfg),
@@ -50,6 +57,8 @@ impl AppState {
             dashboard_cache: Arc::new(Mutex::new(None)),
             idempotency: Arc::new(IdempotencyCache::new()),
             public_source,
+            maintenance_store,
+            incident_narration_store,
         }
     }
 }
