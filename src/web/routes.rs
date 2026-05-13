@@ -15,6 +15,7 @@ pub fn routes() -> Router<AppState> {
         .route("/targets/{id}", get(views::targets_detail::index))
         .route("/targets/{id}/edit", get(views::targets_form::edit_form))
         .route("/web/targets/list", get(views::targets_list::list_partial))
+        .route("/web/partials/dashboard", get(views::dashboard::region))
         .route("/static/{*path}", get(assets::serve))
         .fallback(error::not_found)
         .layer(CookieManagerLayer::new())
