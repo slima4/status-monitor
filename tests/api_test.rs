@@ -404,6 +404,67 @@ async fn create_tls_cert_rejects_loopback_ipv4_literal() {
     assert_eq!(post_target(payload).await, StatusCode::BAD_REQUEST);
 }
 
+fn domain_expiry_payload(domain: &str, warn: u32, critical: u32) -> Value {
+    json!({
+        "name": "domain-check",
+        "check": {
+            "type": "domain_expiry",
+            "domain": domain,
+            "warn_days": warn,
+            "critical_days": critical,
+            "timeout": 10000
+        },
+        "interval": 86400,
+        "tags": []
+    })
+}
+
+#[tokio::test]
+async fn create_domain_expiry_target() {
+    let resp = app()
+        .oneshot(
+            Request::post("/api/v1/targets")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    domain_expiry_payload("example.com", 30, 7).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let body = body_json(resp).await;
+    assert_eq!(body["check"]["type"], "domain_expiry");
+    assert_eq!(body["check"]["domain"], "example.com");
+}
+
+#[tokio::test]
+async fn create_domain_expiry_rejects_bare_label() {
+    assert_eq!(
+        post_target(domain_expiry_payload("example", 30, 7)).await,
+        StatusCode::BAD_REQUEST
+    );
+}
+
+#[tokio::test]
+async fn create_domain_expiry_rejects_degenerate_dot_inputs() {
+    for bad in [".", ".a", "a.", "..", " "] {
+        assert_eq!(
+            post_target(domain_expiry_payload(bad, 30, 7)).await,
+            StatusCode::BAD_REQUEST,
+            "expected 400 for {bad:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn create_domain_expiry_rejects_warn_le_critical() {
+    assert_eq!(
+        post_target(domain_expiry_payload("example.com", 7, 7)).await,
+        StatusCode::BAD_REQUEST
+    );
+}
+
 fn target_payload_with_alerts(alerts: Value) -> Value {
     json!({
         "name": "with-alerts",

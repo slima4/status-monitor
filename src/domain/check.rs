@@ -11,6 +11,7 @@ pub enum CheckSpec {
     Http(HttpCheck),
     Tcp(TcpCheck),
     TlsCert(TlsCertCheck),
+    DomainExpiry(DomainExpiryCheck),
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -66,6 +67,15 @@ pub struct TlsCertCheck {
     /// against a virtual host name).
     #[serde(default)]
     pub server_name: Option<String>,
+    pub warn_days: u32,
+    pub critical_days: u32,
+    #[serde(with = "duration_ms")]
+    pub timeout: Duration,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DomainExpiryCheck {
+    pub domain: String,
     pub warn_days: u32,
     pub critical_days: u32,
     #[serde(with = "duration_ms")]

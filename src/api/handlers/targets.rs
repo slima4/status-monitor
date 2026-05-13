@@ -233,6 +233,28 @@ fn validate_check(check: &crate::domain::CheckSpec, guard: &SsrfGuard) -> Result
                 check_ip(ip, guard)?;
             }
         }
+        CheckSpec::DomainExpiry(d) => {
+            if d.domain.is_empty() {
+                return Err(AppError::BadRequest("domain_expiry domain required".into()));
+            }
+            // Require at least one non-empty label on each side of the final
+            // dot — rejects degenerate inputs like ".", ".a", "a." that would
+            // pass a naive `.contains('.')` gate.
+            let well_formed = d
+                .domain
+                .rsplit_once('.')
+                .is_some_and(|(label, tld)| !label.is_empty() && !tld.is_empty());
+            if !well_formed {
+                return Err(AppError::BadRequest(
+                    "domain_expiry domain must be of the form 'name.tld'".into(),
+                ));
+            }
+            if d.warn_days <= d.critical_days {
+                return Err(AppError::BadRequest(
+                    "domain_expiry warn_days must be > critical_days".into(),
+                ));
+            }
+        }
     }
     Ok(())
 }

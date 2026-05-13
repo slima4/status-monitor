@@ -118,13 +118,7 @@ fn classify_leaf(leaf: &CertificateDer<'_>, check: &TlsCertCheck) -> anyhow::Res
     let subject_cn = first_cn(parsed.subject()).unwrap_or_else(|| "<no CN>".into());
     let issuer_cn = first_cn(parsed.issuer()).unwrap_or_else(|| "<no CN>".into());
 
-    let status = if days_remaining < i64::from(check.critical_days) {
-        CheckStatus::Down
-    } else if days_remaining < i64::from(check.warn_days) {
-        CheckStatus::Degraded
-    } else {
-        CheckStatus::Up
-    };
+    let status = crate::worker::classify_days(days_remaining, check.warn_days, check.critical_days);
 
     #[derive(Serialize)]
     struct Details<'a> {

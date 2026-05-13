@@ -4,12 +4,12 @@ use url::Url;
 
 use crate::domain::AlertChannel;
 use crate::error::Result;
+use crate::http_outbound::{OutboundHttpClient, post_json};
 use crate::notifier::Notifier;
 use crate::notifier::event::{AlertEvent, AlertKind};
-use crate::notifier::transport::{NotifyHttpClient, post_json};
 
 pub struct SlackNotifier {
-    client: NotifyHttpClient,
+    client: OutboundHttpClient,
     webhook_url: Url,
 }
 
@@ -19,7 +19,7 @@ struct SlackPayload<'a> {
 }
 
 impl SlackNotifier {
-    pub fn new(client: NotifyHttpClient, webhook_url: Url) -> Self {
+    pub fn new(client: OutboundHttpClient, webhook_url: Url) -> Self {
         Self {
             client,
             webhook_url,

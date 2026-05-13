@@ -82,6 +82,22 @@ Opens a TCP connection, performs a TLS handshake against the host (accepting any
 
 `error` carries a JSON document with `days_remaining`, `not_after`, `subject_common_name`, `issuer_common_name`. A handshake failure (plain-TCP host, network error) returns `error` status with the underlying message. `warn_days` must be strictly greater than `critical_days`. Recommended `interval >= 3600` — every probe opens a fresh TLS connection.
 
+### Domain expiration
+
+```jsonc
+{
+  "type": "domain_expiry",
+  "domain": "example.com",
+  "warn_days": 30,
+  "critical_days": 7,
+  "timeout": 10000
+}
+```
+
+Queries the [IANA RDAP bootstrap registry](https://data.iana.org/rdap/dns.json) to find the authoritative RDAP server for the domain's TLD, then fetches `/domain/<domain>` and reads the `events[?eventAction == "expiration"]` entry. Status mapping is the same as TLS cert: `< critical_days` → `down`, `< warn_days` → `degraded`, else `up`. Non-`up` results carry a JSON `error` body with `domain`, `days_remaining`, `expiration_date`, and (when present) `registrar`.
+
+The bootstrap registry is fetched lazily on the first lookup and cached for the lifetime of the process. The SSRF guard does not apply — the check's network destination is an IANA-published RDAP server, not the user-supplied domain. Recommended `interval >= 21600` (6 h); RDAP servers rate-limit clients. `warn_days` must be strictly greater than `critical_days`.
+
 ## Target payload
 
 ```jsonc
@@ -130,6 +146,8 @@ The state machine is fire-once + recovery: while a target is in the `alerting` s
 - Unsupported URL scheme (`url scheme '...' not allowed` — only `http` and `https`)
 - Missing URL host, empty TCP host, or TCP/TLS port `0`
 - `tls_cert warn_days must be > critical_days`
+- `domain_expiry domain must contain a TLD label` (no dot in `domain`)
+- `domain_expiry warn_days must be > critical_days`
 - **SSRF guard** — `target address ... is in a blocked range`. Triggered when the URL or TCP host is an IP literal that resolves to loopback / private / link-local / reserved space (see [Configuration → `security.allow_private_targets`](configuration.md)). Hostname literals are checked again at connect time after DNS resolution, so DNS rebinding cannot bypass the guard.
 - **Redaction sentinel** — `basic_auth contains redaction sentinel — re-supply the real credential` or the equivalent for `bearer_token`. Rejected to prevent a `GET` → `PATCH` round-trip from silently overwriting the stored credential with `"***"`.
 - **TLS verification + credentials** — `verify_tls = false cannot be combined with basic_auth or bearer_token over https`. When verification is disabled any host presenting a forged certificate can collect the stored credential on every check interval. Set `verify_tls = true` (recommended) or remove the credential from the target.

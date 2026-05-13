@@ -16,11 +16,19 @@ pub struct CheckTask {
 }
 
 impl CheckTask {
-    pub fn host(&self) -> &str {
+    pub fn host(&self) -> String {
         match &self.target.check {
-            CheckSpec::Http(http) => http.url.host_str().unwrap_or("unknown"),
-            CheckSpec::Tcp(tcp) => &tcp.host,
-            CheckSpec::TlsCert(cert) => &cert.host,
+            CheckSpec::Http(http) => http.url.host_str().unwrap_or("unknown").to_owned(),
+            CheckSpec::Tcp(tcp) => tcp.host.clone(),
+            CheckSpec::TlsCert(cert) => cert.host.clone(),
+            // Group circuit-breaker state by TLD so a flaky registry doesn't
+            // trip the breaker for unrelated TLDs. The "rdap:" prefix keeps
+            // the key out of the same namespace as HTTP/TCP hosts (a literal
+            // host of "com" would otherwise collide with .com domain checks).
+            CheckSpec::DomainExpiry(d) => {
+                let tld = d.domain.rsplit('.').next().unwrap_or("unknown");
+                format!("rdap:{tld}")
+            }
         }
     }
 }
@@ -129,7 +137,7 @@ impl WorkerPool {
 
         tokio::spawn(async move {
             let _permit = permit;
-            let breaker = get_or_init_breaker(&breakers, task.host(), breaker_cfg);
+            let breaker = get_or_init_breaker(&breakers, &task.host(), breaker_cfg);
 
             if !breaker.allow() {
                 counter!(names::CHECK_ERRORS, "kind" => "circuit_open").increment(1);

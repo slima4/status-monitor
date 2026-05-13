@@ -3,17 +3,17 @@ use url::Url;
 
 use crate::domain::AlertChannel;
 use crate::error::Result;
+use crate::http_outbound::{OutboundHttpClient, post_json};
 use crate::notifier::Notifier;
 use crate::notifier::event::AlertEvent;
-use crate::notifier::transport::{NotifyHttpClient, post_json};
 
 pub struct WebhookNotifier {
-    client: NotifyHttpClient,
+    client: OutboundHttpClient,
     url: Url,
 }
 
 impl WebhookNotifier {
-    pub fn new(client: NotifyHttpClient, url: Url) -> Self {
+    pub fn new(client: OutboundHttpClient, url: Url) -> Self {
         Self { client, url }
     }
 }
