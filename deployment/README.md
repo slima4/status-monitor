@@ -10,7 +10,9 @@ PostgreSQL, and ClickHouse.
 |---|---|
 | TLS certificates | Automatic via Let's Encrypt — no manual renewal |
 | HTTP/2 + HTTP/3 | Enabled by default in Caddy |
-| Authentication | Basic auth at the proxy layer (UI + API) |
+| Authentication | Basic auth at the proxy layer (UI + operator API) |
+| Public status surface | `/status`, `/status/*`, `/api/public/*`, `/static/*` exposed without auth |
+| Public rate limit | Per-IP 60 req/min on the public surface (requires custom Caddy image — see below) |
 | Public health probes | `/healthz` and `/readyz` exposed without auth |
 | Metrics scraping | Internal-only — `/metrics` returns 404 publicly |
 | Security headers | HSTS, X-Frame-Options, Referrer-Policy, etc. |
@@ -28,6 +30,40 @@ PostgreSQL, and ClickHouse.
 - ~4 GB RAM and 20 GB disk
 
 ## First-time setup
+
+### Custom Caddy image (one-time)
+
+The Caddyfile uses `rate_limit` to throttle the public status surface, which
+needs the [`caddy-ratelimit`](https://github.com/mholt/caddy-ratelimit) plugin
+that the stock `caddy:2-alpine` image doesn't ship. Build a custom image
+once and tag it `custom-caddy:2`:
+
+```bash
+docker build -t custom-caddy:2 - <<'EOF'
+FROM caddy:2-builder AS builder
+RUN xcaddy build \
+    --with github.com/mholt/caddy-ratelimit
+
+FROM caddy:2-alpine
+COPY --from=builder /usr/bin/caddy /usr/bin/caddy
+EOF
+```
+
+Then point `docker-compose.yml` at it by changing the `caddy` service's
+`image:` from `caddy:2-alpine` to `custom-caddy:2`, or set it once via
+`.env`:
+
+```
+CADDY_IMAGE=custom-caddy:2
+```
+
+…and replace `image: caddy:2-alpine` with `image: ${CADDY_IMAGE:-caddy:2-alpine}`
+in `docker-compose.yml`.
+
+**If you don't want a custom build:** comment out the `rate_limit { … }` block
+inside `handle @public { … }` in `Caddyfile`. The public surface still works;
+you just lose per-IP throttling. Alternatively, terminate at Cloudflare or an
+nginx reverse proxy with `limit_req` in front and leave Caddy alone.
 
 ### 1. Clone and enter the deployment directory
 
@@ -292,8 +328,9 @@ This deployment is right-sized for **single-tenant, small-team operator use**:
   Cloud, Altinity) — but you lose the "single VM, $20/month" property.
 - **No SSO.** Basic auth is the current auth boundary. Native session
   cookies or API tokens are not part of this stack.
-- **No rate limiting.** Add `caddy-ratelimit` plugin if you expose this
-  service to untrusted networks.
+- **Rate limiting only on the public surface.** The operator UI/API has no
+  per-IP throttle — basic auth is the gate. Add `caddy-ratelimit` zones to
+  the auth-gated `reverse_proxy` block if you need it.
 - **No WAF / DDoS protection.** Front this with Cloudflare (free tier) if
   you need that — Caddy's basic_auth is not designed to absorb
   credential-stuffing attacks at scale.

@@ -51,6 +51,37 @@
 		respond "Not Found" 404
 	}
 
+	# ─── Public status surface (no auth) ────────────────────────────────
+	# The HTML status page, public JSON API, and shared static assets are
+	# unauthenticated by design. `handle` short-circuits the basic_auth
+	# directive below — only requests that match no `handle` block fall
+	# through to the auth-gated reverse_proxy.
+	#
+	# /static/* is public so the page's CSS/JS load without credentials;
+	# the bundled assets carry no secrets.
+	#
+	# rate_limit requires the caddy-ratelimit plugin
+	# (https://github.com/mholt/caddy-ratelimit). Build a custom Caddy
+	# image — see deployment/README.md → "Custom Caddy image".
+	@public path /status /status/* /api/public/* /robots.txt /favicon.ico /static/*
+	handle @public {
+		rate_limit {
+			zone public_status {
+				key {remote_host}
+				events 60
+				window 1m
+			}
+		}
+		header Cache-Control "public, max-age=10, stale-while-revalidate=30"
+		reverse_proxy status-monitor:8080 {
+			header_up X-Real-IP {remote_host}
+			transport http {
+				dial_timeout 5s
+				response_header_timeout 30s
+			}
+		}
+	}
+
 	# ─── Everything else requires basic auth ────────────────────────────
 	basic_auth {
 		admin {$STATUS_MONITOR_ADMIN_HASH}
