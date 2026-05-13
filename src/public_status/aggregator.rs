@@ -400,14 +400,14 @@ impl LiveAggregator {
                         countMerge(total_checks) AS total,
                         countIfMerge(up_checks) AS up_
                     FROM {CH_MV}
-                    WHERE has(?, target_id)
+                    WHERE has(arrayMap(x -> toUUID(x), ?), target_id)
                       AND minute >= fromUnixTimestamp64Milli(?)
                       AND minute < fromUnixTimestamp64Milli(?)
                     GROUP BY target_id, minute
                 )
                 SELECT
                     target_id,
-                    day,
+                    toInt64(toUnixTimestamp(day)) AS day,
                     maxIf(toUInt8(total > 0 AND (total - up_) * 2 >= total), total > 0) AS any_major,
                     maxIf(toUInt8(total > 0 AND (total - up_) > 0), total > 0) AS any_failure,
                     sum(total) AS day_total
@@ -418,7 +418,7 @@ impl LiveAggregator {
                         countMerge(total_checks) AS total,
                         countIfMerge(up_checks) AS up_
                     FROM {CH_MV}
-                    WHERE has(?, target_id)
+                    WHERE has(arrayMap(x -> toUUID(x), ?), target_id)
                       AND minute >= fromUnixTimestamp64Milli(?)
                       AND minute < fromUnixTimestamp64Milli(?)
                     GROUP BY target_id, minute
@@ -485,7 +485,7 @@ impl LiveAggregator {
                        countIf(status = 'degraded') AS degraded_,
                        countIf(status = 'error')    AS error_
                    FROM {CH_TABLE}
-                   WHERE has(?, target_id)
+                   WHERE has(arrayMap(x -> toUUID(x), ?), target_id)
                      AND timestamp >= fromUnixTimestamp64Milli(?)
                      AND timestamp <  fromUnixTimestamp64Milli(?)
                    GROUP BY target_id"#

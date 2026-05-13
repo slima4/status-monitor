@@ -10,6 +10,8 @@ use axum::body::Body;
 use axum::http::Request;
 use chrono::Utc;
 use serde_json::Value;
+use sqlx::PgPool;
+use sqlx::postgres::PgPoolOptions;
 use status_monitor::api::build_router;
 use status_monitor::app::AppState;
 use status_monitor::config::{
@@ -392,4 +394,45 @@ impl PublicSource for UnavailablePublicSource {
     ) -> Result<String, status_monitor::api::public_error::PublicAppError> {
         Err(status_monitor::api::public_error::PublicAppError::Unavailable)
     }
+}
+
+// ── Live-store helpers (Postgres + ClickHouse) ──────────────────────────────
+//
+// Both return `None` when the corresponding env var is unset, so callers can
+// gate `#[ignore]` integration tests cleanly:
+//
+//     let Some(pool) = common::pg_pool_from_env().await else { return };
+//
+// Migrations run idempotently on every call. Tests share the dev database; use
+// fresh UUIDs per test to avoid cross-test interference.
+
+pub async fn pg_pool_from_env() -> Option<PgPool> {
+    let url = std::env::var("DATABASE_URL").ok()?;
+    let pool = PgPoolOptions::new()
+        .max_connections(4)
+        .acquire_timeout(Duration::from_secs(5))
+        .connect(&url)
+        .await
+        .expect("connect to postgres");
+    sqlx::migrate!("./migrations/postgres")
+        .run(&pool)
+        .await
+        .expect("run pg migrations");
+    Some(pool)
+}
+
+pub async fn ch_client_from_env() -> Option<clickhouse::Client> {
+    let url = std::env::var("CLICKHOUSE_URL").ok()?;
+    let user = std::env::var("CLICKHOUSE_USER").unwrap_or_else(|_| "monitor".into());
+    let password = std::env::var("CLICKHOUSE_PASSWORD").unwrap_or_else(|_| "monitor".into());
+    let database = std::env::var("CLICKHOUSE_DATABASE").unwrap_or_else(|_| "monitor".into());
+    let client = clickhouse::Client::default()
+        .with_url(&url)
+        .with_database(&database)
+        .with_user(&user)
+        .with_password(&password);
+    status_monitor::storage::migrate(&client)
+        .await
+        .expect("run ch migrations");
+    Some(client)
 }

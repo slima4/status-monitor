@@ -50,7 +50,7 @@ impl PageCache {
     where
         F: FnOnce() -> Fut,
         Fut: Future<Output = Result<PageData, E>>,
-        E: std::fmt::Display,
+        E: std::fmt::Display + std::fmt::Debug,
     {
         // Wrap the user closure so try_get_with sees `Result<Arc<PageData>, String>`.
         // try_get_with does NOT cache the error — successive callers re-run `f`.
@@ -64,7 +64,10 @@ impl PageCache {
                         last_good.store(Some(arc.clone()));
                         Ok::<_, String>(arc)
                     }
-                    Err(e) => Err(format!("{e:#}")),
+                    // {:#} prints the anyhow chain via each link's Display.
+                    // Some upstream errors (clickhouse-rs) have terse Display
+                    // impls, so append Debug so we never log an empty cause.
+                    Err(e) => Err(format!("{e:#} | dbg={e:?}")),
                 }
             })
             .await;
