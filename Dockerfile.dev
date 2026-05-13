@@ -13,8 +13,10 @@ ENV CARGO_TERM_COLOR=never \
     CARGO_INCREMENTAL=1
 
 # `bash` is required by scripts/fetch-tailwind.sh; `curl` for build.rs to fetch
-# the Tailwind CLI on first build; `musl-dev` + `pkgconfig` for native crates.
-RUN apk add --no-cache musl-dev pkgconfig curl bash
+# the Tailwind CLI on first build; `musl-dev` + `pkgconfig` for native crates;
+# `gcompat` provides the glibc loader so the upstream Tailwind standalone CLI
+# (glibc-linked) executes on Alpine without ENOENT on /lib64/ld-linux-*.
+RUN apk add --no-cache musl-dev pkgconfig curl bash gcompat
 
 # Pre-install cargo-watch into the image so `cargo run` doesn't get blocked on
 # a network install when the container first starts.

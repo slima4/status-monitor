@@ -69,6 +69,8 @@ services:
       STATUS_MONITOR_STORAGE__CLICKHOUSE__PASSWORD: monitor
       STATUS_MONITOR_OBSERVABILITY__LOG_FORMAT: json
       STATUS_MONITOR_OBSERVABILITY__LOG_LEVEL: "status_monitor=debug,sqlx=warn,hyper=warn,tower_http=info,info"
+      STATUS_MONITOR_SERVER__API_BIND: "0.0.0.0:8080"
+      STATUS_MONITOR_SERVER__METRICS_BIND: "0.0.0.0:9090"
     volumes:
       - .:/usr/src/status-monitor
       - cargo_registry_dev:/usr/local/cargo/registry

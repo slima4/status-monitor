@@ -19,11 +19,19 @@ fi
 uname_s="$(uname -s)"
 uname_m="$(uname -m)"
 
+# Detect musl libc (Alpine, etc.) so we pick the matching upstream asset.
+# The non-musl Linux build is glibc-linked and won't run on Alpine even with
+# gcompat present (Tailwind/Bun's link layout is sensitive to it).
+libc_suffix=""
+if [[ "$uname_s" == "Linux" ]] && (ldd --version 2>&1 || true) | grep -qi musl; then
+    libc_suffix="-musl"
+fi
+
 case "$uname_s-$uname_m" in
     Darwin-arm64)   asset="tailwindcss-macos-arm64" ;;
     Darwin-x86_64)  asset="tailwindcss-macos-x64" ;;
-    Linux-aarch64)  asset="tailwindcss-linux-arm64" ;;
-    Linux-x86_64)   asset="tailwindcss-linux-x64" ;;
+    Linux-aarch64)  asset="tailwindcss-linux-arm64${libc_suffix}" ;;
+    Linux-x86_64)   asset="tailwindcss-linux-x64${libc_suffix}" ;;
     *) echo "unsupported platform: $uname_s-$uname_m" >&2; exit 1 ;;
 esac
 
