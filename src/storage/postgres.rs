@@ -9,6 +9,7 @@ use sqlx::postgres::PgPoolOptions;
 use sqlx::types::Json;
 use uuid::Uuid;
 
+use crate::api::types::{TagCount, TargetsSummary};
 use crate::config::PostgresConfig;
 use crate::domain::{CheckSpec, NewTarget, Target, TargetAlerts, TargetUpdate};
 use crate::error::Result;
@@ -121,6 +122,20 @@ impl TargetStore for PostgresTargetStore {
         .await
         .context("query targets")?;
         self.rows_to_targets(rows)
+    }
+
+    async fn count(&self, filter: TargetFilter) -> Result<u64> {
+        let row: (i64,) = sqlx::query_as(
+            r#"SELECT count(*) FROM targets
+               WHERE ($1::bool IS NULL OR enabled = $1)
+                 AND ($2::text IS NULL OR $2 = ANY(tags))"#,
+        )
+        .bind(filter.enabled)
+        .bind(filter.tag)
+        .fetch_one(&self.pool)
+        .await
+        .context("count targets")?;
+        Ok(row.0.max(0) as u64)
     }
 
     async fn list_enabled(&self) -> Result<Vec<Target>> {
@@ -303,6 +318,137 @@ impl TargetStore for PostgresTargetStore {
         .await
         .context("query targets updated since")?;
         self.rows_to_targets(rows)
+    }
+
+    async fn list_tags(&self, prefix: Option<String>, limit: usize) -> Result<Vec<TagCount>> {
+        let prefix_pat = prefix.as_deref().map(|p| format!("{p}%"));
+        let rows: Vec<(String, i64)> = sqlx::query_as(
+            r#"SELECT tag, count(*) AS c
+               FROM targets, unnest(tags) AS tag
+               WHERE ($1::text IS NULL OR tag LIKE $1)
+               GROUP BY tag
+               ORDER BY c DESC, tag ASC
+               LIMIT $2"#,
+        )
+        .bind(prefix_pat)
+        .bind(limit as i64)
+        .fetch_all(&self.pool)
+        .await
+        .context("aggregate tag counts")?;
+        Ok(rows
+            .into_iter()
+            .map(|(name, c)| TagCount {
+                name,
+                count: c.max(0) as u64,
+            })
+            .collect())
+    }
+
+    async fn count_tags(&self, prefix: Option<String>) -> Result<u64> {
+        let prefix_pat = prefix.as_deref().map(|p| format!("{p}%"));
+        let row: (i64,) = sqlx::query_as(
+            r#"SELECT count(DISTINCT tag)
+               FROM targets, unnest(tags) AS tag
+               WHERE ($1::text IS NULL OR tag LIKE $1)"#,
+        )
+        .bind(prefix_pat)
+        .fetch_one(&self.pool)
+        .await
+        .context("count distinct tags")?;
+        Ok(row.0.max(0) as u64)
+    }
+
+    async fn summary(&self) -> Result<TargetsSummary> {
+        let row: (i64, i64) = sqlx::query_as(
+            r#"SELECT count(*) FILTER (WHERE TRUE),
+                      count(*) FILTER (WHERE enabled)
+               FROM targets"#,
+        )
+        .fetch_one(&self.pool)
+        .await
+        .context("targets summary")?;
+        let total = row.0.max(0) as u64;
+        let enabled = row.1.max(0) as u64;
+        Ok(TargetsSummary {
+            total,
+            enabled,
+            disabled: total - enabled,
+        })
+    }
+
+    async fn set_enabled(&self, ids: &[Uuid], enabled: bool) -> Result<Vec<Uuid>> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let rows: Vec<(Uuid,)> = sqlx::query_as(
+            r#"UPDATE targets SET enabled = $2, updated_at = now()
+               WHERE id = ANY($1) RETURNING id"#,
+        )
+        .bind(ids)
+        .bind(enabled)
+        .fetch_all(&self.pool)
+        .await
+        .context("bulk set_enabled")?;
+        Ok(rows.into_iter().map(|(id,)| id).collect())
+    }
+
+    async fn delete_bulk(&self, ids: &[Uuid]) -> Result<Vec<Uuid>> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let rows: Vec<(Uuid,)> = sqlx::query_as(
+            r#"DELETE FROM targets WHERE id = ANY($1) RETURNING id"#,
+        )
+        .bind(ids)
+        .fetch_all(&self.pool)
+        .await
+        .context("bulk delete")?;
+        Ok(rows.into_iter().map(|(id,)| id).collect())
+    }
+
+    async fn add_tags(&self, ids: &[Uuid], tags: &[String]) -> Result<Vec<Uuid>> {
+        if ids.is_empty() || tags.is_empty() {
+            return Ok(Vec::new());
+        }
+        let rows: Vec<(Uuid,)> = sqlx::query_as(
+            r#"UPDATE targets
+               SET tags = (
+                 SELECT array_agg(DISTINCT t)
+                 FROM unnest(tags || $2) AS t
+               ),
+               updated_at = now()
+               WHERE id = ANY($1)
+               RETURNING id"#,
+        )
+        .bind(ids)
+        .bind(tags)
+        .fetch_all(&self.pool)
+        .await
+        .context("bulk add_tags")?;
+        Ok(rows.into_iter().map(|(id,)| id).collect())
+    }
+
+    async fn remove_tags(&self, ids: &[Uuid], tags: &[String]) -> Result<Vec<Uuid>> {
+        if ids.is_empty() || tags.is_empty() {
+            return Ok(Vec::new());
+        }
+        let rows: Vec<(Uuid,)> = sqlx::query_as(
+            r#"UPDATE targets
+               SET tags = COALESCE((
+                 SELECT array_agg(t)
+                 FROM unnest(tags) AS t
+                 WHERE NOT (t = ANY($2))
+               ), ARRAY[]::text[]),
+               updated_at = now()
+               WHERE id = ANY($1)
+               RETURNING id"#,
+        )
+        .bind(ids)
+        .bind(tags)
+        .fetch_all(&self.pool)
+        .await
+        .context("bulk remove_tags")?;
+        Ok(rows.into_iter().map(|(id,)| id).collect())
     }
 
     async fn ping(&self) -> Result<()> {

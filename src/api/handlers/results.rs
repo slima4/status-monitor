@@ -2,30 +2,56 @@ use axum::Json;
 use axum::extract::{Path, Query, State};
 use chrono::{DateTime, Duration, Utc};
 use serde::Deserialize;
+use utoipa::IntoParams;
 use uuid::Uuid;
 
+use crate::api::ApiError;
+use crate::api::error::codes;
+use crate::api::page::{PageEnvelope, PageOfCheckResult, PageOfIncident};
 use crate::app::AppState;
-use crate::domain::CheckResult;
-use crate::error::Result;
+use crate::error::{AppError, Result};
 use crate::storage::{TimeRange, UptimeStats};
 
 const RESULTS_LIMIT_DEFAULT: usize = 1_000;
 const RESULTS_LIMIT_MAX: usize = 10_000;
+const INCIDENTS_LIMIT_DEFAULT: usize = 100;
+const INCIDENTS_LIMIT_MAX: usize = 1_000;
 
-#[derive(Debug, Deserialize)]
+/// Resolves optional `from`/`to` query params to a validated `TimeRange`,
+/// defaulting to a 24-hour window ending at `now`. Returns `BAD_TIME_RANGE`
+/// when `to <= from`.
+pub(crate) fn resolve_range(
+    from: Option<DateTime<Utc>>,
+    to: Option<DateTime<Utc>>,
+) -> Result<TimeRange> {
+    let to = to.unwrap_or_else(Utc::now);
+    let from = from.unwrap_or_else(|| to - Duration::try_hours(24).unwrap_or_default());
+    if to <= from {
+        return Err(AppError::bad_request(
+            codes::BAD_TIME_RANGE,
+            "'to' must be strictly greater than 'from'",
+        ));
+    }
+    Ok(TimeRange { from, to })
+}
+
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct RangeQuery {
+    /// Inclusive lower bound (default: now-24h).
     pub from: Option<DateTime<Utc>>,
+    /// Exclusive upper bound (default: now).
     pub to: Option<DateTime<Utc>>,
+    /// Page size (default 1000, max 10000).
     pub limit: Option<usize>,
+    /// Page offset (default 0).
+    #[serde(default)]
+    pub offset: usize,
 }
 
 impl RangeQuery {
-    fn resolve(&self) -> TimeRange {
-        let to = self.to.unwrap_or_else(Utc::now);
-        let from = self
-            .from
-            .unwrap_or_else(|| to - Duration::try_hours(24).unwrap_or_default());
-        TimeRange { from, to }
+    fn resolve(&self) -> Result<TimeRange> {
+        resolve_range(self.from, self.to)
     }
 
     fn limit(&self) -> usize {
@@ -35,23 +61,141 @@ impl RangeQuery {
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/targets/{id}/results",
+    tag = "results",
+    summary = "Query check results for a target",
+    params(
+        ("id" = Uuid, Path, description = "Target id"),
+        RangeQuery,
+    ),
+    responses(
+        (status = 200, body = PageOfCheckResult, example = json!({
+            "items": [{
+                "target_id": "01h7m8z4n6v0e1m7v7y6x8x8x8",
+                "timestamp": "2026-05-13T12:00:00.000Z",
+                "status": "up",
+                "duration_ms": 142
+            }],
+            "total": 1, "limit": 1000, "offset": 0
+        })),
+        (status = 400, description = "Bad time range or filter", body = ApiError),
+        (status = 404, description = "Target not found", body = ApiError),
+    ),
+)]
 pub async fn list_results(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
     Query(q): Query<RangeQuery>,
-) -> Result<Json<Vec<CheckResult>>> {
-    let range = q.resolve();
+) -> Result<Json<PageOfCheckResult>> {
+    let range = q.resolve()?;
     let limit = q.limit();
-    let out = state.results_store.list_results(id, range, limit).await?;
-    Ok(Json(out))
+    let offset = q.offset;
+    let (items, total) = tokio::try_join!(
+        state.results_store.list_results(id, range, limit, offset),
+        state.results_store.count_results(id, range),
+    )?;
+    Ok(Json(PageEnvelope::new(
+        items,
+        total,
+        limit as u32,
+        offset as u32,
+    )))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/targets/{id}/uptime",
+    tag = "results",
+    summary = "Uptime stats for a target over a time range",
+    description = "Counts per-status check totals and computes uptime percentage.",
+    params(
+        ("id" = Uuid, Path),
+        ("from" = Option<DateTime<Utc>>, Query, description = "Inclusive lower bound (default: now-24h)"),
+        ("to" = Option<DateTime<Utc>>, Query, description = "Exclusive upper bound (default: now)"),
+    ),
+    responses(
+        (status = 200, body = UptimeStats, example = json!({
+            "total": 1440, "up": 1437, "down": 2, "degraded": 1, "error": 0, "uptime_pct": 99.79
+        })),
+        (status = 400, body = ApiError),
+        (status = 404, body = ApiError),
+    ),
+)]
 pub async fn uptime(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
     Query(q): Query<RangeQuery>,
 ) -> Result<Json<UptimeStats>> {
-    let range = q.resolve();
+    let range = q.resolve()?;
     let stats = state.results_store.uptime(id, range).await?;
     Ok(Json(stats))
+}
+
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct IncidentsQuery {
+    pub from: Option<DateTime<Utc>>,
+    pub to: Option<DateTime<Utc>>,
+    pub limit: Option<usize>,
+    #[serde(default)]
+    pub offset: usize,
+    /// If true, return only currently-active incidents.
+    #[serde(default)]
+    pub ongoing_only: bool,
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/targets/{id}/incidents",
+    tag = "results",
+    summary = "List incidents (coalesced down/error periods) for a target",
+    description = "An incident is a contiguous period of `down` or `error` status. Two consecutive bad checks separated by one `up` count as separate incidents. Ongoing incidents have `ended_at: null`.",
+    params(
+        ("id" = Uuid, Path),
+        IncidentsQuery,
+    ),
+    responses(
+        (status = 200, body = PageOfIncident, example = json!({
+            "items": [{
+                "id": "01h7m8z4n6v0e1m7v7y6x8x8x8",
+                "target_id": "01h7m8z4n6v0e1m7v7y6x8x8x8",
+                "started_at": "2026-05-13T11:30:00.000Z",
+                "ended_at": "2026-05-13T11:35:00.000Z",
+                "status": "down",
+                "duration_secs": 300,
+                "check_count": 5,
+                "error_sample": "connection refused"
+            }],
+            "total": 1, "limit": 100, "offset": 0
+        })),
+        (status = 400, body = ApiError),
+        (status = 404, body = ApiError),
+    ),
+)]
+pub async fn list_incidents(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    Query(q): Query<IncidentsQuery>,
+) -> Result<Json<PageOfIncident>> {
+    let range = resolve_range(q.from, q.to)?;
+    let limit = q
+        .limit
+        .unwrap_or(INCIDENTS_LIMIT_DEFAULT)
+        .min(INCIDENTS_LIMIT_MAX);
+    let (items, total) = tokio::try_join!(
+        state
+            .results_store
+            .list_incidents(id, range, q.ongoing_only, limit, q.offset),
+        state
+            .results_store
+            .count_incidents(id, range, q.ongoing_only),
+    )?;
+    Ok(Json(PageEnvelope::new(
+        items,
+        total,
+        limit as u32,
+        q.offset as u32,
+    )))
 }

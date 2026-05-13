@@ -15,7 +15,9 @@ use status_monitor::config::{
 };
 use status_monitor::domain::{CheckSpec, ExpectedStatus, HttpCheck, HttpMethod, Target};
 use status_monitor::http_client::{HttpClients, build_clients};
-use status_monitor::storage::{InMemorySink, InMemoryTargetStore};
+use status_monitor::storage::{InMemorySink, InMemoryTargetStore, ResultSink, ResultsStore};
+use status_monitor::worker::{ResultFanout, WorkerPool};
+use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use url::Url;
 use uuid::Uuid;
@@ -27,10 +29,25 @@ use uuid::Uuid;
 pub fn build_test_app(mutate: impl FnOnce(&mut AppConfig)) -> Router {
     let mut cfg = AppConfig::load().expect("config");
     mutate(&mut cfg);
+    let target_store = Arc::new(InMemoryTargetStore::new());
+    let sink = Arc::new(InMemorySink::new());
+    let results_store: Arc<dyn ResultsStore> = sink.clone();
+    let result_sink: Arc<dyn ResultSink> = sink;
+    let http_clients = Arc::new(test_client());
+    let (tx, _rx) = mpsc::channel(1024);
+    let pool = Arc::new(WorkerPool::new(
+        cfg.checker.max_concurrent_checks.max(1),
+        (*http_clients).clone(),
+        cfg.circuit_breaker,
+        ResultFanout::storage_only(tx),
+    ));
     let state = AppState::new(
         cfg,
-        Arc::new(InMemoryTargetStore::new()),
-        Arc::new(InMemorySink::new()),
+        target_store,
+        results_store,
+        result_sink,
+        http_clients,
+        pool,
     );
     build_router(state, CancellationToken::new())
 }

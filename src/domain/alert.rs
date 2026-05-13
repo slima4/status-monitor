@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum AlertChannel {
     Slack,
@@ -20,8 +21,9 @@ impl AlertChannel {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 pub struct AlertChannelConfig {
+    #[schema(minimum = 1)]
     pub after_failures: u32,
     #[serde(default = "default_notify_recovery")]
     pub notify_recovery: bool,
@@ -35,8 +37,9 @@ fn default_notify_recovery() -> bool {
     true
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(transparent)]
+#[schema(value_type = std::collections::HashMap<String, AlertChannelConfig>)]
 pub struct TargetAlerts(pub HashMap<AlertChannel, AlertChannelConfig>);
 
 impl TargetAlerts {

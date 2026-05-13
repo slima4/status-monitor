@@ -31,14 +31,17 @@ pub fn build_notifiers(cfg: &NotificationsConfig) -> Result<Vec<Arc<dyn Notifier
     let mut http_client: Option<OutboundHttpClient> = None;
     if cfg.slack.enabled {
         if cfg.slack.webhook_url.is_empty() {
-            return Err(AppError::BadRequest(
-                "notifications.slack.enabled = true requires webhook_url".into(),
+            return Err(AppError::bad_request(
+                crate::api::codes::INVALID_CONFIG,
+                "notifications.slack.enabled = true requires webhook_url",
             ));
         }
-        let url =
-            cfg.slack.webhook_url.parse::<url::Url>().map_err(|e| {
-                AppError::BadRequest(format!("notifications.slack.webhook_url: {e}"))
-            })?;
+        let url = cfg.slack.webhook_url.parse::<url::Url>().map_err(|e| {
+            AppError::bad_request(
+                crate::api::codes::INVALID_CONFIG,
+                format!("notifications.slack.webhook_url: {e}"),
+            )
+        })?;
         let client = http_client
             .get_or_insert_with(build_outbound_client)
             .clone();
@@ -46,15 +49,17 @@ pub fn build_notifiers(cfg: &NotificationsConfig) -> Result<Vec<Arc<dyn Notifier
     }
     if cfg.webhook.enabled {
         if cfg.webhook.url.is_empty() {
-            return Err(AppError::BadRequest(
-                "notifications.webhook.enabled = true requires url".into(),
+            return Err(AppError::bad_request(
+                crate::api::codes::INVALID_CONFIG,
+                "notifications.webhook.enabled = true requires url",
             ));
         }
-        let url = cfg
-            .webhook
-            .url
-            .parse::<url::Url>()
-            .map_err(|e| AppError::BadRequest(format!("notifications.webhook.url: {e}")))?;
+        let url = cfg.webhook.url.parse::<url::Url>().map_err(|e| {
+            AppError::bad_request(
+                crate::api::codes::INVALID_CONFIG,
+                format!("notifications.webhook.url: {e}"),
+            )
+        })?;
         let client = http_client
             .get_or_insert_with(build_outbound_client)
             .clone();
@@ -64,13 +69,15 @@ pub fn build_notifiers(cfg: &NotificationsConfig) -> Result<Vec<Arc<dyn Notifier
         // Plaintext SMTP carries the password in the clear during AUTH. Disallow
         // any auth setup that would leak the password over a non-TLS link.
         if !cfg.email.smtp_password.is_empty() && cfg.email.smtp_port == 25 && !cfg.email.starttls {
-            return Err(AppError::BadRequest(
-                "notifications.email: smtp_password is set but smtp_port=25 with starttls=false would leak the password in cleartext".into(),
+            return Err(AppError::bad_request(
+                crate::api::codes::INVALID_CONFIG,
+                "notifications.email: smtp_password is set but smtp_port=25 with starttls=false would leak the password in cleartext",
             ));
         }
         if cfg.email.smtp_host.is_empty() || cfg.email.from.is_empty() {
-            return Err(AppError::BadRequest(
-                "notifications.email.enabled = true requires smtp_host and from".into(),
+            return Err(AppError::bad_request(
+                crate::api::codes::INVALID_CONFIG,
+                "notifications.email.enabled = true requires smtp_host and from",
             ));
         }
         out.push(Arc::new(EmailNotifier::new(&cfg.email)?) as Arc<dyn Notifier>);

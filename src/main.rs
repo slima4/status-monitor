@@ -69,10 +69,16 @@ async fn main() -> Result<()> {
     storage::migrate(&clickhouse_client).await?;
     let result_sink: Arc<dyn ResultSink> =
         Arc::new(ClickhouseResultSink::from_client(clickhouse_client.clone()));
+    let result_sink_for_state = result_sink.clone();
     let results_store: Arc<dyn ResultsStore> =
         Arc::new(ClickhouseResultsStore::from_client(clickhouse_client));
 
-    let http_clients = build_clients(&cfg.http_client, &cfg.checker, &cfg.dns, &cfg.security)?;
+    let http_clients = Arc::new(build_clients(
+        &cfg.http_client,
+        &cfg.checker,
+        &cfg.dns,
+        &cfg.security,
+    )?);
     let http_pool_stats = http_clients.pool_stats().clone();
 
     let (result_tx, result_rx) = mpsc::channel(cfg.storage.clickhouse.buffer_size.max(1024));
@@ -86,7 +92,7 @@ async fn main() -> Result<()> {
     let fanout = ResultFanout::new(result_tx.clone(), alert_tx);
     let pool = Arc::new(WorkerPool::new(
         cfg.checker.max_concurrent_checks,
-        http_clients,
+        (*http_clients).clone(),
         cfg.circuit_breaker,
         fanout,
     ));
@@ -135,7 +141,14 @@ async fn main() -> Result<()> {
     );
     drop(result_tx);
 
-    let state = AppState::new(cfg, target_store, results_store);
+    let state = AppState::new(
+        cfg,
+        target_store,
+        results_store,
+        result_sink_for_state,
+        http_clients.clone(),
+        pool.clone(),
+    );
     let router = build_router(state, root.clone());
 
     let listener = TcpListener::bind(&api_bind).await.map_err(AppError::Io)?;

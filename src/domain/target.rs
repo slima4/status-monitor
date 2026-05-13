@@ -2,17 +2,20 @@ use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 use uuid::Uuid;
 
 use super::alert::TargetAlerts;
 use super::check::CheckSpec;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct Target {
     pub id: Uuid,
     pub name: String,
     pub check: CheckSpec,
+    /// Check interval in seconds.
     #[serde(with = "duration_secs")]
+    #[schema(value_type = u64, example = 60, minimum = 10)]
     pub interval: Duration,
     pub enabled: bool,
     pub tags: Vec<String>,
@@ -22,11 +25,13 @@ pub struct Target {
     pub updated_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct NewTarget {
     pub name: String,
     pub check: CheckSpec,
+    /// Check interval in seconds.
     #[serde(with = "duration_secs")]
+    #[schema(value_type = u64, example = 60, minimum = 10)]
     pub interval: Duration,
     #[serde(default = "default_true")]
     pub enabled: bool,
@@ -36,11 +41,13 @@ pub struct NewTarget {
     pub alerts: TargetAlerts,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
 pub struct TargetUpdate {
     pub name: Option<String>,
     pub check: Option<CheckSpec>,
+    /// Check interval in seconds.
     #[serde(default, with = "duration_secs_opt")]
+    #[schema(value_type = Option<u64>)]
     pub interval: Option<Duration>,
     pub enabled: Option<bool>,
     pub tags: Option<Vec<String>>,

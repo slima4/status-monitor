@@ -18,10 +18,12 @@ pub struct EmailNotifier {
 
 impl EmailNotifier {
     pub fn new(cfg: &EmailConfig) -> Result<Self> {
-        let from: Mailbox = cfg
-            .from
-            .parse()
-            .map_err(|e| AppError::BadRequest(format!("notifications.email.from: {e}")))?;
+        let from: Mailbox = cfg.from.parse().map_err(|e| {
+            AppError::bad_request(
+                crate::api::codes::INVALID_CONFIG,
+                format!("notifications.email.from: {e}"),
+            )
+        })?;
 
         let mut builder = if cfg.starttls {
             AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&cfg.smtp_host)
@@ -77,15 +79,19 @@ impl Notifier for EmailNotifier {
 
     async fn notify(&self, event: &AlertEvent) -> Result<()> {
         if event.recipients.is_empty() {
-            return Err(AppError::BadRequest(
-                "email notifier invoked with empty recipients".into(),
+            return Err(AppError::bad_request(
+                crate::api::codes::INVALID_CONFIG,
+                "email notifier invoked with empty recipients",
             ));
         }
         let (subject, body) = Self::render(event);
         for to in &event.recipients {
-            let to_mbox: Mailbox = to
-                .parse()
-                .map_err(|e| AppError::BadRequest(format!("email recipient '{to}': {e}")))?;
+            let to_mbox: Mailbox = to.parse().map_err(|e| {
+                AppError::bad_request(
+                    crate::api::codes::INVALID_CONFIG,
+                    format!("email recipient '{to}': {e}"),
+                )
+            })?;
             let msg = Message::builder()
                 .from(self.from.clone())
                 .to(to_mbox)

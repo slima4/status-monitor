@@ -3,8 +3,9 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use url::Url;
+use utoipa::ToSchema;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 #[allow(clippy::large_enum_variant)]
 pub enum CheckSpec {
@@ -14,7 +15,7 @@ pub enum CheckSpec {
     DomainExpiry(DomainExpiryCheck),
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum HttpMethod {
     Get,
@@ -26,59 +27,84 @@ pub enum HttpMethod {
     Options,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(tag = "kind", content = "value", rename_all = "snake_case")]
 pub enum ExpectedStatus {
     Exact(u16),
-    Range { min: u16, max: u16 },
+    Range {
+        #[schema(minimum = 100, maximum = 599)]
+        min: u16,
+        #[schema(minimum = 100, maximum = 599)]
+        max: u16,
+    },
     OneOf(Vec<u16>),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct HttpCheck {
+    #[schema(value_type = String, format = "uri", example = "https://example.com/healthz")]
     pub url: Url,
     pub method: HttpMethod,
+    /// Request timeout in milliseconds.
     #[serde(with = "duration_ms")]
+    #[schema(value_type = u64, minimum = 100, maximum = 60000, example = 5000)]
     pub timeout: Duration,
     pub follow_redirects: bool,
+    #[schema(maximum = 10)]
     pub max_redirects: u8,
     pub expected_status: ExpectedStatus,
+    #[schema(nullable = true)]
     pub expected_body_contains: Option<String>,
     pub headers: HashMap<String, String>,
+    #[schema(nullable = true)]
     pub body: Option<String>,
     pub verify_tls: bool,
+    /// On read, returns `["***","***"]` if set. On write, send real values or omit the field.
+    #[schema(value_type = Option<[String; 2]>, nullable = true)]
     pub basic_auth: Option<(String, String)>,
+    /// On read, returns `"***"` if set. On write, send real value or omit the field.
+    #[schema(nullable = true)]
     pub bearer_token: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct TcpCheck {
+    #[schema(example = "db.example.com")]
     pub host: String,
+    #[schema(minimum = 1, maximum = 65535, example = 5432)]
     pub port: u16,
+    /// Connect timeout in milliseconds.
     #[serde(with = "duration_ms")]
+    #[schema(value_type = u64, minimum = 100, maximum = 60000, example = 3000)]
     pub timeout: Duration,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct TlsCertCheck {
     pub host: String,
+    #[schema(minimum = 1, maximum = 65535)]
     pub port: u16,
     /// SNI to send if different from `host` (e.g. when the cert is served
     /// against a virtual host name).
     #[serde(default)]
+    #[schema(nullable = true)]
     pub server_name: Option<String>,
     pub warn_days: u32,
     pub critical_days: u32,
+    /// Connect timeout in milliseconds.
     #[serde(with = "duration_ms")]
+    #[schema(value_type = u64)]
     pub timeout: Duration,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct DomainExpiryCheck {
     pub domain: String,
     pub warn_days: u32,
     pub critical_days: u32,
+    /// Query timeout in milliseconds.
     #[serde(with = "duration_ms")]
+    #[schema(value_type = u64)]
     pub timeout: Duration,
 }
 

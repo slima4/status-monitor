@@ -2,20 +2,32 @@
 
 Mounted under `/api/v1` on the configured API bind. JSON in, JSON out. No authentication in v1 — bind to loopback or front it with a reverse proxy you trust.
 
+OpenAPI 3.1 document at `GET /api/openapi.json`; Swagger UI at `GET /docs`.
+
+All responses use `Content-Type: application/json; charset=utf-8`.
+
 ## Endpoints
 
 | Method | Path | Purpose |
 |--------|------|---------|
 | `POST` | `/api/v1/targets` | create one target |
 | `POST` | `/api/v1/targets/bulk` | bulk-create up to 10,000 targets |
-| `GET` | `/api/v1/targets` | list targets (`limit`, `offset`, `tag`, `enabled` query params) |
+| `POST` | `/api/v1/targets/bulk-action` | enable / disable / delete / tag-add / tag-remove on many ids |
+| `POST` | `/api/v1/targets/test` | run a one-shot check against a `CheckSpec` without persisting |
+| `POST` | `/api/v1/targets/{id}/check-now` | run an immediate check using the target's stored credentials |
+| `GET` | `/api/v1/targets` | list targets (`limit`, `offset`, `tag`, `enabled`, `q`) — paginated |
 | `GET` | `/api/v1/targets/{id}` | get one target |
 | `PATCH` | `/api/v1/targets/{id}` | update name, check spec, interval, enabled, tags |
 | `DELETE` | `/api/v1/targets/{id}` | delete a target |
-| `GET` | `/api/v1/targets/{id}/results` | recent check results (`from`, `to`, `limit`) |
+| `GET` | `/api/v1/targets/{id}/results` | recent check results (`from`, `to`, `limit`, `offset`) — paginated |
 | `GET` | `/api/v1/targets/{id}/uptime` | uptime summary over a range |
+| `GET` | `/api/v1/targets/{id}/incidents` | coalesced incident periods (`from`, `to`, `ongoing_only`) — paginated |
+| `GET` | `/api/v1/tags` | tag inventory with target counts (`q` prefix) — paginated |
+| `GET` | `/api/v1/dashboard/summary` | fleet-wide rollup (5-second in-process cache) |
 | `GET` | `/healthz` | liveness — always 200 once the process is up |
 | `GET` | `/readyz` | readiness — pings the target store; 503 if unreachable |
+| `GET` | `/api/openapi.json` | OpenAPI 3.1 document |
+| `GET` | `/docs` | Swagger UI |
 
 ## Check specs
 
@@ -160,14 +172,45 @@ When [`api.rate_limit.enabled = true`](configuration.md), `/api/v1/*` enforces a
 
 Disabled by default. When [`api.cors.enabled = true`](configuration.md), `/api/v1/*` answers preflight `OPTIONS` with `Access-Control-Allow-Origin` (matching `allowed_origins` or `*` when `allow_any_origin = true`), `Access-Control-Allow-Methods` (the configured list), and `Access-Control-Allow-Headers: content-type`. `/healthz` and `/readyz` carry no CORS headers regardless.
 
+## Error envelope
+
+Every 4xx and 5xx response uses one wire shape:
+
+```jsonc
+{
+  "error": {
+    "code": "INVALID_URL_SCHEME",
+    "message": "url scheme 'ftp' not allowed",
+    "field": "check.url",
+    "details": null,
+    "trace_id": null
+  }
+}
+```
+
+- `code` is stable, machine-readable, UPPER_SNAKE_CASE. Never repurposed once published.
+- `field` is a JSON pointer to the offending input for 400s; `null` for non-field errors.
+- `details` carries optional structured context (e.g., `{ "range": "127.0.0.0/8" }` for SSRF rejections).
+- `trace_id` is the W3C `traceparent` when tracing is enabled.
+
+Common codes: `INVALID_URL_SCHEME`, `INVALID_URL_FORMAT`, `SSRF_BLOCKED`, `INVALID_INTERVAL`, `INVALID_TIMEOUT`, `INVALID_TCP_PORT`, `INVALID_TCP_HOST`, `INVALID_STATUS_RANGE`, `INVALID_TLS_CERT_PARAMS`, `INVALID_DOMAIN_PARAMS`, `INVALID_TLS_CRED_COMBO`, `INVALID_ALERT_CONFIG`, `REDACTION_SENTINEL`, `BULK_EMPTY`, `BULK_TOO_LARGE`, `BAD_TIME_RANGE`, `TARGET_NOT_FOUND`, `CIRCUIT_OPEN`, `DEPENDENCY_DOWN`, `INTERNAL`.
+
+## Pagination envelope
+
+Every list endpoint returns:
+
+```jsonc
+{ "items": [ /* ... */ ], "total": 1240, "limit": 50, "offset": 0 }
+```
+
+`limit` defaults to 50 for `/targets` and `/tags`, 1000 for `/results`, 100 for `/incidents`. `limit` is silently capped server-side (10,000 for results, 1,000 for incidents/tags). `total` reflects rows matching the filters, ignoring `limit`/`offset`.
+
 ## Results query
 
-`GET /api/v1/targets/{id}/results?from=2026-05-12T00:00:00Z&to=2026-05-12T23:59:59Z&limit=100`
+`GET /api/v1/targets/{id}/results?from=2026-05-12T00:00:00Z&to=2026-05-12T23:59:59Z&limit=100&offset=0`
 
-- `from` / `to` default to the last 24 h
-- `limit` capped at 10,000 server-side
-
-Returns an array of `CheckResult` ordered by `timestamp DESC`.
+- `from` / `to` default to the last 24 h; `to` must be strictly greater than `from` (400 `BAD_TIME_RANGE` otherwise).
+- Returns a `PageEnvelope` of `CheckResult` ordered by `timestamp DESC`.
 
 ## Uptime query
 
@@ -175,4 +218,80 @@ Returns an array of `CheckResult` ordered by `timestamp DESC`.
 
 ```jsonc
 { "total": 8640, "up": 8635, "down": 0, "degraded": 0, "error": 5, "uptime_pct": 99.94 }
+```
+
+## Incidents query
+
+`GET /api/v1/targets/{id}/incidents?from=…&to=…&ongoing_only=false&limit=100&offset=0`
+
+Returns coalesced down / error periods. A contiguous run of bad statuses becomes one incident; an `up` result between two bad runs splits them. Ongoing incidents return `ended_at: null` and `duration_secs: null`.
+
+```jsonc
+{
+  "items": [
+    {
+      "id": "01h7m8z4n6v0e1m7v7y6x8x8x8",
+      "target_id": "01h7m...",
+      "started_at": "2026-05-13T11:30:00.000Z",
+      "ended_at":   "2026-05-13T11:35:00.000Z",
+      "status":     "down",
+      "duration_secs": 300,
+      "check_count": 5,
+      "error_sample": "connection refused"
+    }
+  ],
+  "total": 1, "limit": 100, "offset": 0
+}
+```
+
+## Tags inventory
+
+`GET /api/v1/tags?q=prod&limit=100`
+
+Returns every tag currently in use across all targets (enabled or disabled), with target count, sorted by descending count then alphabetical. `q` is a prefix filter for autocomplete.
+
+```jsonc
+{ "items": [ { "name": "prod", "count": 12 }, { "name": "staging", "count": 4 } ],
+  "total": 2, "limit": 100, "offset": 0 }
+```
+
+## Dashboard summary
+
+`GET /api/v1/dashboard/summary` — fleet-wide rollup cached in-process for 5 seconds.
+
+```jsonc
+{
+  "targets":        { "total": 42, "enabled": 40, "disabled": 2 },
+  "current_status": { "up": 38, "down": 1, "degraded": 1, "error": 0, "unknown": 2 },
+  "last_24h":       { "checks_total": 50400, "checks_up": 50360, "uptime_pct": 99.92, "incidents": 3 },
+  "system":         { "in_flight_checks": 5, "result_queue_depth": 12, "dropped_results_last_5m": 0, "circuit_breakers_open": 0 }
+}
+```
+
+## On-demand operations
+
+- **`POST /api/v1/targets/test`** — runs one check against a raw `CheckSpec`, no persistence. Same SSRF / URL-scheme / port validation as `POST /targets`. Returns `TestResponse { result, matched_expectations, warnings }`.
+- **`POST /api/v1/targets/{id}/check-now`** — runs one check against an existing target using its stored credentials. Result is persisted. Honors the per-host circuit breaker; returns `422 CIRCUIT_OPEN` when the breaker is open. Pass `?force=true` to bypass.
+- **`POST /api/v1/targets/bulk-action`** — apply one action atomically to up to 10,000 ids. Partial failure allowed; the response lists `succeeded` and `failed` separately, with per-id `code` + `message`.
+
+```jsonc
+{
+  "ids": ["01h7m...", "01h7n..."],
+  "action": { "type": "disable" }
+  // alternatives: { "type": "enable" }, { "type": "delete" },
+  //   { "type": "tag_add",    "tags": ["frozen"] },
+  //   { "type": "tag_remove", "tags": ["frozen"] }
+}
+```
+
+## Idempotency
+
+`POST /api/v1/targets/bulk` and `POST /api/v1/targets/bulk-action` accept an optional `Idempotency-Key` header. The server stores the response for 24 hours keyed by `(header value, body hash)`. A retry with the same key and body returns the original response without re-executing. A retry with the same key but a different body executes normally — the body hash is part of the cache key. The cache is in-process; entries are lost on restart.
+
+```http
+POST /api/v1/targets/bulk-action HTTP/1.1
+Idempotency-Key: 01h7m8z4n6v0e1m7v7y6x8x8x8
+Content-Type: application/json
+
+{ "ids": ["..."], "action": { "type": "disable" } }
 ```

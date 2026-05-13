@@ -7,7 +7,7 @@ pub mod tcp_check;
 pub mod tls_cert;
 
 pub use http_check::execute_http_check;
-pub use pool::{CheckTask, ResultFanout, WorkerPool};
+pub use pool::{CheckTask, ResultFanout, WorkerPool, host_for_spec};
 
 use std::net::SocketAddr;
 

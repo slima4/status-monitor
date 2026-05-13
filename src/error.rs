@@ -1,8 +1,9 @@
 use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use serde::Serialize;
 use thiserror::Error;
+
+use crate::api::error::{ApiError, ApiErrorBody, codes};
 
 pub type Result<T, E = AppError> = std::result::Result<T, E>;
 
@@ -21,41 +22,136 @@ pub enum AppError {
         source: std::net::AddrParseError,
     },
 
-    #[error("{0}")]
-    NotFound(String),
+    #[error("{message}")]
+    NotFound {
+        code: &'static str,
+        message: String,
+    },
 
-    #[error("{0}")]
-    BadRequest(String),
+    #[error("{message}")]
+    BadRequest {
+        code: &'static str,
+        message: String,
+        field: Option<String>,
+    },
 
-    #[error("{0}")]
-    PayloadTooLarge(String),
+    #[error("{message}")]
+    PayloadTooLarge {
+        code: &'static str,
+        message: String,
+    },
 
-    #[error("{0}")]
-    Conflict(String),
+    #[error("{message}")]
+    Conflict {
+        code: &'static str,
+        message: String,
+    },
+
+    #[error("{message}")]
+    Unprocessable {
+        code: &'static str,
+        message: String,
+    },
 
     #[error("{0}")]
     Other(#[from] anyhow::Error),
 }
 
-#[derive(Serialize)]
-struct ErrorBody {
-    error: &'static str,
+impl AppError {
+    pub fn bad_request(code: &'static str, message: impl Into<String>) -> Self {
+        Self::BadRequest {
+            code,
+            message: message.into(),
+            field: None,
+        }
+    }
+
+    pub fn bad_request_field(
+        code: &'static str,
+        message: impl Into<String>,
+        field: impl Into<String>,
+    ) -> Self {
+        Self::BadRequest {
+            code,
+            message: message.into(),
+            field: Some(field.into()),
+        }
+    }
+
+    pub fn not_found(code: &'static str, message: impl Into<String>) -> Self {
+        Self::NotFound {
+            code,
+            message: message.into(),
+        }
+    }
+
+    pub fn conflict(code: &'static str, message: impl Into<String>) -> Self {
+        Self::Conflict {
+            code,
+            message: message.into(),
+        }
+    }
+
+    pub fn payload_too_large(code: &'static str, message: impl Into<String>) -> Self {
+        Self::PayloadTooLarge {
+            code,
+            message: message.into(),
+        }
+    }
+
+    pub fn unprocessable(code: &'static str, message: impl Into<String>) -> Self {
+        Self::Unprocessable {
+            code,
+            message: message.into(),
+        }
+    }
 }
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
-        let (status, message): (StatusCode, &'static str) = match &self {
-            AppError::NotFound(_) => (StatusCode::NOT_FOUND, "not found"),
-            AppError::BadRequest(_) => (StatusCode::BAD_REQUEST, "bad request"),
-            AppError::PayloadTooLarge(_) => (StatusCode::PAYLOAD_TOO_LARGE, "payload too large"),
-            AppError::Conflict(_) => (StatusCode::CONFLICT, "conflict"),
-            _ => (StatusCode::INTERNAL_SERVER_ERROR, "internal error"),
+        let (status, body) = match self {
+            AppError::NotFound { code, message } => {
+                (StatusCode::NOT_FOUND, ApiErrorBody::new(code, message))
+            }
+            AppError::BadRequest {
+                code,
+                message,
+                field,
+            } => (
+                StatusCode::BAD_REQUEST,
+                ApiErrorBody {
+                    code,
+                    message,
+                    field,
+                    details: None,
+                    trace_id: None,
+                },
+            ),
+            AppError::PayloadTooLarge { code, message } => (
+                StatusCode::PAYLOAD_TOO_LARGE,
+                ApiErrorBody::new(code, message),
+            ),
+            AppError::Conflict { code, message } => {
+                (StatusCode::CONFLICT, ApiErrorBody::new(code, message))
+            }
+            AppError::Unprocessable { code, message } => (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                ApiErrorBody::new(code, message),
+            ),
+            ref err @ (AppError::Config(_)
+            | AppError::Io(_)
+            | AppError::BindAddr { .. }
+            | AppError::Other(_)) => {
+                tracing::error!(error = %err, "request failed");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    ApiErrorBody::new(codes::INTERNAL, "internal error"),
+                )
+            }
         };
-        if status.is_server_error() {
-            tracing::error!(error = %self, "request failed");
-        } else {
-            tracing::debug!(error = %self, status = %status, "request rejected");
+        if status.is_client_error() {
+            tracing::debug!(code = body.code, status = %status, "request rejected");
         }
-        (status, Json(ErrorBody { error: message })).into_response()
+        (status, Json(ApiError { error: body })).into_response()
     }
 }

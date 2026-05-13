@@ -4,12 +4,14 @@ use dashmap::DashMap;
 use metrics::{counter, histogram};
 use tokio::sync::{Semaphore, mpsc};
 
+use uuid::Uuid;
+
 use crate::config::CircuitBreakerConfig;
 use crate::domain::{CheckResult, CheckSpec, Target};
 use crate::http_client::HttpClients;
 use crate::notifier::event::AlertSignal;
 use crate::observability::metrics::names;
-use crate::worker::circuit_breaker::{CIRCUIT_OPEN_REASON, CircuitBreaker};
+use crate::worker::circuit_breaker::{BreakerState, CIRCUIT_OPEN_REASON, CircuitBreaker};
 
 pub struct CheckTask {
     pub target: Arc<Target>,
@@ -17,18 +19,23 @@ pub struct CheckTask {
 
 impl CheckTask {
     pub fn host(&self) -> String {
-        match &self.target.check {
-            CheckSpec::Http(http) => http.url.host_str().unwrap_or("unknown").to_owned(),
-            CheckSpec::Tcp(tcp) => tcp.host.clone(),
-            CheckSpec::TlsCert(cert) => cert.host.clone(),
-            // Group circuit-breaker state by TLD so a flaky registry doesn't
-            // trip the breaker for unrelated TLDs. The "rdap:" prefix keeps
-            // the key out of the same namespace as HTTP/TCP hosts (a literal
-            // host of "com" would otherwise collide with .com domain checks).
-            CheckSpec::DomainExpiry(d) => {
-                let tld = d.domain.rsplit('.').next().unwrap_or("unknown");
-                format!("rdap:{tld}")
-            }
+        host_for_spec(&self.target.check)
+    }
+}
+
+/// Canonical circuit-breaker key for a CheckSpec. Shared between the scheduler
+/// fan-out (CheckTask::host) and the on-demand `check-now` handler so both
+/// paths share the same per-host breaker.
+pub fn host_for_spec(spec: &CheckSpec) -> String {
+    match spec {
+        CheckSpec::Http(http) => http.url.host_str().unwrap_or("unknown").to_owned(),
+        CheckSpec::Tcp(tcp) => tcp.host.clone(),
+        CheckSpec::TlsCert(cert) => cert.host.clone(),
+        // Group circuit-breaker state by TLD so a flaky registry doesn't
+        // trip the breaker for unrelated TLDs.
+        CheckSpec::DomainExpiry(d) => {
+            let tld = d.domain.rsplit('.').next().unwrap_or("unknown");
+            format!("rdap:{tld}")
         }
     }
 }
@@ -112,11 +119,38 @@ impl WorkerPool {
     }
 
     pub fn open_breakers(&self) -> usize {
-        use crate::worker::circuit_breaker::BreakerState;
         self.breakers
             .iter()
             .filter(|e| e.value().state() == BreakerState::Open)
             .count()
+    }
+
+    pub fn http_clients(&self) -> Arc<HttpClients> {
+        self.http_clients.clone()
+    }
+
+    pub fn breaker_for(&self, host: &str) -> Arc<CircuitBreaker> {
+        get_or_init_breaker(&self.breakers, host, self.breaker_cfg)
+    }
+
+    /// Runs a one-off check against `target` honoring the per-host circuit
+    /// breaker. Returns `None` if the breaker is open and `force` is false.
+    /// Result is recorded on the breaker but NOT dispatched through the
+    /// pool's fanout — caller decides whether to persist.
+    pub async fn run_once(
+        &self,
+        target_id: Uuid,
+        spec: &CheckSpec,
+        host: &str,
+        force: bool,
+    ) -> Option<CheckResult> {
+        let breaker = self.breaker_for(host);
+        if !force && breaker.state() == BreakerState::Open && !breaker.allow() {
+            return None;
+        }
+        let result = crate::worker::execute(target_id, spec, &self.http_clients).await;
+        breaker.record(result.status);
+        Some(result)
     }
 
     pub fn dispatch(&self, task: CheckTask) {

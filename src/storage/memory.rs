@@ -3,7 +3,10 @@ use chrono::{DateTime, Utc};
 use parking_lot::Mutex;
 use uuid::Uuid;
 
-use crate::domain::{CheckResult, NewTarget, Target, TargetUpdate};
+use crate::api::types::{StatusBreakdown, TagCount, TargetsSummary};
+use crate::domain::{
+    CheckResult, CheckStatus, Incident, NewTarget, Target, TargetUpdate, coalesce_incidents,
+};
 use crate::error::Result;
 use crate::storage::traits::{
     ResultSink, ResultsStore, TargetFilter, TargetStore, TimeRange, UptimeStats,
@@ -47,6 +50,7 @@ impl ResultsStore for InMemorySink {
         target_id: Uuid,
         range: TimeRange,
         limit: usize,
+        offset: usize,
     ) -> Result<Vec<CheckResult>> {
         let guard = self.results.lock();
         let mut out: Vec<CheckResult> = guard
@@ -57,10 +61,22 @@ impl ResultsStore for InMemorySink {
             .cloned()
             .collect();
         out.sort_by_key(|r| std::cmp::Reverse(r.timestamp));
-        if out.len() > limit {
-            out.truncate(limit);
+        let mut paged: Vec<CheckResult> = out.into_iter().skip(offset).collect();
+        if paged.len() > limit {
+            paged.truncate(limit);
         }
-        Ok(out)
+        Ok(paged)
+    }
+
+    async fn count_results(&self, target_id: Uuid, range: TimeRange) -> Result<u64> {
+        Ok(self
+            .results
+            .lock()
+            .iter()
+            .filter(|r| {
+                r.target_id == target_id && r.timestamp >= range.from && r.timestamp < range.to
+            })
+            .count() as u64)
     }
 
     async fn uptime(&self, target_id: Uuid, range: TimeRange) -> Result<UptimeStats> {
@@ -74,6 +90,118 @@ impl ResultsStore for InMemorySink {
             .collect();
         Ok(UptimeStats::from_results(&filtered))
     }
+
+    async fn list_incidents(
+        &self,
+        target_id: Uuid,
+        range: TimeRange,
+        ongoing_only: bool,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<Incident>> {
+        let mut incidents = coalesce_for_target(&self.snapshot(), target_id, range);
+        if ongoing_only {
+            incidents.retain(|i| i.ended_at.is_none());
+        }
+        incidents.sort_by_key(|i| std::cmp::Reverse(i.started_at));
+        let paged: Vec<Incident> = incidents.into_iter().skip(offset).take(limit).collect();
+        Ok(paged)
+    }
+
+    async fn count_incidents(
+        &self,
+        target_id: Uuid,
+        range: TimeRange,
+        ongoing_only: bool,
+    ) -> Result<u64> {
+        let mut incidents = coalesce_for_target(&self.snapshot(), target_id, range);
+        if ongoing_only {
+            incidents.retain(|i| i.ended_at.is_none());
+        }
+        Ok(incidents.len() as u64)
+    }
+
+    async fn current_status_breakdown(&self, range: TimeRange) -> Result<StatusBreakdown> {
+        let guard = self.results.lock();
+        let mut latest: std::collections::HashMap<Uuid, &CheckResult> =
+            std::collections::HashMap::new();
+        for r in guard.iter() {
+            if r.timestamp < range.from || r.timestamp >= range.to {
+                continue;
+            }
+            latest
+                .entry(r.target_id)
+                .and_modify(|cur| {
+                    if r.timestamp > cur.timestamp {
+                        *cur = r;
+                    }
+                })
+                .or_insert(r);
+        }
+        let mut out = StatusBreakdown::default();
+        for r in latest.values() {
+            match r.status {
+                CheckStatus::Up => out.up += 1,
+                CheckStatus::Down => out.down += 1,
+                CheckStatus::Degraded => out.degraded += 1,
+                CheckStatus::Error => out.error += 1,
+            }
+        }
+        Ok(out)
+    }
+
+    async fn last_n_summary(&self, range: TimeRange) -> Result<(u64, u64, u64)> {
+        let guard = self.results.lock();
+        let mut total = 0u64;
+        let mut up = 0u64;
+        let mut by_target: std::collections::HashMap<Uuid, Vec<&CheckResult>> =
+            std::collections::HashMap::new();
+        for r in guard.iter() {
+            if r.timestamp < range.from || r.timestamp >= range.to {
+                continue;
+            }
+            total += 1;
+            if r.status == CheckStatus::Up {
+                up += 1;
+            }
+            by_target.entry(r.target_id).or_default().push(r);
+        }
+        let mut incidents = 0u64;
+        for results in by_target.values_mut() {
+            results.sort_by_key(|r| r.timestamp);
+            let mut in_incident = false;
+            for r in results.iter() {
+                let bad = matches!(r.status, CheckStatus::Down | CheckStatus::Error);
+                if bad && !in_incident {
+                    incidents += 1;
+                    in_incident = true;
+                } else if !bad {
+                    in_incident = false;
+                }
+            }
+        }
+        Ok((total, up, incidents))
+    }
+}
+
+fn coalesce_for_target(
+    all: &[CheckResult],
+    target_id: Uuid,
+    range: TimeRange,
+) -> Vec<Incident> {
+    let mut filtered: Vec<&CheckResult> = all
+        .iter()
+        .filter(|r| {
+            r.target_id == target_id && r.timestamp >= range.from && r.timestamp < range.to
+        })
+        .collect();
+    filtered.sort_by_key(|r| r.timestamp);
+    coalesce_incidents(
+        target_id,
+        filtered
+            .into_iter()
+            .map(|r| (r.timestamp, r.status, r.error.clone())),
+    )
 }
 
 #[derive(Default)]
@@ -129,6 +257,19 @@ impl TargetStore for InMemoryTargetStore {
             .cloned()
             .collect();
         Ok(collected)
+    }
+
+    async fn count(&self, filter: TargetFilter) -> Result<u64> {
+        let guard = self.targets.lock();
+        let n = guard
+            .iter()
+            .filter(|t| filter.enabled.map(|e| t.enabled == e).unwrap_or(true))
+            .filter(|t| match &filter.tag {
+                Some(tag) => t.tags.iter().any(|x| x == tag),
+                None => true,
+            })
+            .count();
+        Ok(n as u64)
     }
 
     async fn list_enabled(&self) -> Result<Vec<Target>> {
@@ -201,6 +342,111 @@ impl TargetStore for InMemoryTargetStore {
             .filter(|t| t.updated_at > since)
             .cloned()
             .collect())
+    }
+
+    async fn list_tags(&self, prefix: Option<String>, limit: usize) -> Result<Vec<TagCount>> {
+        let mut counts: std::collections::HashMap<String, u64> =
+            std::collections::HashMap::new();
+        for t in self.targets.lock().iter() {
+            for tag in &t.tags {
+                if let Some(pfx) = prefix.as_deref()
+                    && !tag.starts_with(pfx)
+                {
+                    continue;
+                }
+                *counts.entry(tag.clone()).or_default() += 1;
+            }
+        }
+        let mut out: Vec<TagCount> = counts
+            .into_iter()
+            .map(|(name, count)| TagCount { name, count })
+            .collect();
+        out.sort_by(|a, b| b.count.cmp(&a.count).then(a.name.cmp(&b.name)));
+        out.truncate(limit);
+        Ok(out)
+    }
+
+    async fn count_tags(&self, prefix: Option<String>) -> Result<u64> {
+        let mut seen = std::collections::HashSet::new();
+        for t in self.targets.lock().iter() {
+            for tag in &t.tags {
+                if let Some(pfx) = prefix.as_deref()
+                    && !tag.starts_with(pfx)
+                {
+                    continue;
+                }
+                seen.insert(tag.clone());
+            }
+        }
+        Ok(seen.len() as u64)
+    }
+
+    async fn summary(&self) -> Result<TargetsSummary> {
+        let guard = self.targets.lock();
+        let total = guard.len() as u64;
+        let enabled = guard.iter().filter(|t| t.enabled).count() as u64;
+        Ok(TargetsSummary {
+            total,
+            enabled,
+            disabled: total - enabled,
+        })
+    }
+
+    async fn set_enabled(&self, ids: &[Uuid], enabled: bool) -> Result<Vec<Uuid>> {
+        let mut guard = self.targets.lock();
+        let now = Utc::now();
+        let mut hit = Vec::new();
+        for t in guard.iter_mut() {
+            if ids.contains(&t.id) {
+                t.enabled = enabled;
+                t.updated_at = now;
+                hit.push(t.id);
+            }
+        }
+        Ok(hit)
+    }
+
+    async fn delete_bulk(&self, ids: &[Uuid]) -> Result<Vec<Uuid>> {
+        let mut guard = self.targets.lock();
+        let hit: Vec<Uuid> = guard
+            .iter()
+            .filter(|t| ids.contains(&t.id))
+            .map(|t| t.id)
+            .collect();
+        guard.retain(|t| !ids.contains(&t.id));
+        Ok(hit)
+    }
+
+    async fn add_tags(&self, ids: &[Uuid], tags: &[String]) -> Result<Vec<Uuid>> {
+        let mut guard = self.targets.lock();
+        let now = Utc::now();
+        let mut hit = Vec::new();
+        for t in guard.iter_mut() {
+            if ids.contains(&t.id) {
+                for tag in tags {
+                    if !t.tags.iter().any(|x| x == tag) {
+                        t.tags.push(tag.clone());
+                    }
+                }
+                t.updated_at = now;
+                hit.push(t.id);
+            }
+        }
+        Ok(hit)
+    }
+
+    async fn remove_tags(&self, ids: &[Uuid], tags: &[String]) -> Result<Vec<Uuid>> {
+        let mut guard = self.targets.lock();
+        let now = Utc::now();
+        let mut hit = Vec::new();
+        for t in guard.iter_mut() {
+            if ids.contains(&t.id) {
+                t.tags.retain(|x| !tags.contains(x));
+                t.updated_at = now;
+                hit.push(t.id);
+            }
+        }
+        Ok(hit)
     }
 
     async fn ping(&self) -> Result<()> {

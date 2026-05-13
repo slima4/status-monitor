@@ -5,6 +5,7 @@ use axum::Router;
 use axum::body::Body;
 use axum::extract::DefaultBodyLimit;
 use axum::http::{HeaderValue, Method, header};
+use axum::middleware::{from_fn, from_fn_with_state};
 use axum::routing::{get, post};
 use tokio::time::{MissedTickBehavior, interval};
 use tokio_util::sync::CancellationToken;
@@ -12,7 +13,10 @@ use tower_governor::GovernorLayer;
 use tower_governor::governor::GovernorConfigBuilder;
 use tower_governor::key_extractor::PeerIpKeyExtractor;
 use tower_http::cors::{AllowOrigin, CorsLayer};
+use utoipa::OpenApi;
+use utoipa_swagger_ui::SwaggerUi;
 
+use crate::api::{ApiDoc, idempotency, middleware as api_middleware};
 use crate::api::handlers;
 use crate::app::AppState;
 use crate::config::{CorsConfig, RateLimitConfig};
@@ -24,8 +28,18 @@ const BULK_BODY_LIMIT: usize = 8 * 1024 * 1024;
 const RATE_LIMIT_GC_INTERVAL: Duration = Duration::from_secs(60);
 
 pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
+    idempotency::spawn_pruner(state.idempotency.clone(), shutdown.clone());
+
     let bulk = Router::new()
         .route("/targets/bulk", post(handlers::targets::bulk_create))
+        .route(
+            "/targets/bulk-action",
+            post(handlers::targets::bulk_action),
+        )
+        .layer(from_fn_with_state(
+            state.idempotency.clone(),
+            idempotency::middleware,
+        ))
         .layer(DefaultBodyLimit::max(BULK_BODY_LIMIT));
 
     let mut v1 = Router::new()
@@ -39,11 +53,25 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
                 .patch(handlers::targets::update)
                 .delete(handlers::targets::delete),
         )
+        .route("/targets/test", post(handlers::targets::test_check))
+        .route(
+            "/targets/{id}/check-now",
+            post(handlers::targets::check_now),
+        )
         .route(
             "/targets/{id}/results",
             get(handlers::results::list_results),
         )
         .route("/targets/{id}/uptime", get(handlers::results::uptime))
+        .route(
+            "/targets/{id}/incidents",
+            get(handlers::results::list_incidents),
+        )
+        .route("/tags", get(handlers::tags::list_tags))
+        .route(
+            "/dashboard/summary",
+            get(handlers::dashboard::dashboard_summary),
+        )
         .layer(DefaultBodyLimit::max(SINGLE_BODY_LIMIT))
         .merge(bulk);
 
@@ -58,6 +86,8 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
         .route("/healthz", get(handlers::health::healthz))
         .route("/readyz", get(handlers::health::readyz))
         .nest("/api/v1", v1)
+        .layer(from_fn(api_middleware::json_charset))
+        .merge(SwaggerUi::new("/docs").url("/api/openapi.json", ApiDoc::openapi()))
         .with_state(state)
 }
 
