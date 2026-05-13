@@ -30,6 +30,11 @@ fn make(name: &str, tags: Vec<String>) -> NewTarget {
         enabled: true,
         tags,
         alerts: Default::default(),
+        public_status: false,
+        public_name: None,
+        public_description: None,
+        public_group: None,
+        public_sort_order: 0,
     }
 }
 
@@ -80,6 +85,11 @@ async fn credentials_stored_as_ciphertext_envelope(pool: PgPool) {
         enabled: true,
         tags: vec![],
         alerts: Default::default(),
+        public_status: false,
+        public_name: None,
+        public_description: None,
+        public_group: None,
+        public_sort_order: 0,
     };
 
     let created = store.create(new).await.expect("create");

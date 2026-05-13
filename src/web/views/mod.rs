@@ -1,4 +1,5 @@
 pub mod dashboard;
+pub mod public_status;
 pub mod targets_detail;
 pub mod targets_form;
 pub mod targets_list;
@@ -21,4 +22,10 @@ pub(crate) fn describe_check(spec: &CheckSpec) -> (&'static str, String) {
 
 pub(crate) fn fmt_ts(t: DateTime<Utc>) -> String {
     t.to_rfc3339_opts(SecondsFormat::Secs, true)
+}
+
+/// Human-readable wall-clock UTC string, e.g. "2026-05-13 12:34 UTC".
+/// Pair with `fmt_ts` (ISO 8601) for `<time datetime>` round-trips.
+pub(crate) fn fmt_human(t: DateTime<Utc>) -> String {
+    t.format("%Y-%m-%d %H:%M UTC").to_string()
 }

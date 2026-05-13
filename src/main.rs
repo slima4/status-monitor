@@ -1,6 +1,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use std::time::Duration as StdDuration;
+
 use status_monitor::{
     api::build_router,
     app::AppState,
@@ -10,6 +12,10 @@ use status_monitor::{
     notifier::{Notifier, build_notifiers, engine::AlertEngine},
     observability,
     pipeline::{BatcherConfig, ResultBatcher},
+    public_status::{
+        AggregatorConfig, IncidentWriter, IncidentWriterConfig, LiveAggregator, LivePublicSource,
+        PageCache, PgIncidentStore, PublicSource,
+    },
     scheduler::{Scheduler, TargetRegistry},
     security::Cipher,
     storage::{
@@ -58,8 +64,9 @@ async fn main() -> Result<()> {
             None
         }
     };
-    let target_store: Arc<dyn TargetStore> =
-        Arc::new(PostgresTargetStore::connect(&cfg.storage.postgres, cipher.clone()).await?);
+    let pg_store = PostgresTargetStore::connect(&cfg.storage.postgres, cipher.clone()).await?;
+    let pg_pool = pg_store.pool().clone();
+    let target_store: Arc<dyn TargetStore> = Arc::new(pg_store);
 
     tracing::info!(
         url = %cfg.storage.clickhouse.url,
@@ -71,6 +78,7 @@ async fn main() -> Result<()> {
     let result_sink: Arc<dyn ResultSink> =
         Arc::new(ClickhouseResultSink::from_client(clickhouse_client.clone()));
     let result_sink_for_state = result_sink.clone();
+    let ch_client_for_public = clickhouse_client.clone();
     let results_store: Arc<dyn ResultsStore> =
         Arc::new(ClickhouseResultsStore::from_client(clickhouse_client));
 
@@ -142,6 +150,34 @@ async fn main() -> Result<()> {
     );
     drop(result_tx);
 
+    let aggregator_cfg = AggregatorConfig::default();
+    let cache_ttl = StdDuration::from_secs(10);
+    let aggregator = Arc::new(LiveAggregator::new(
+        pg_pool.clone(),
+        ch_client_for_public,
+        target_store.clone(),
+        aggregator_cfg.clone(),
+    ));
+    let public_cache = PageCache::new(cache_ttl);
+    let public_source: Arc<dyn PublicSource> = Arc::new(LivePublicSource::new(
+        aggregator,
+        public_cache,
+        pg_pool.clone(),
+        aggregator_cfg.site_name.clone(),
+    ));
+
+    let incident_writer = Arc::new(IncidentWriter::new(
+        target_store.clone(),
+        results_store.clone(),
+        Arc::new(PgIncidentStore::new(pg_pool)),
+        IncidentWriterConfig::default(),
+    ));
+    let incident_writer_handle: JoinHandle<()> = {
+        let writer = incident_writer.clone();
+        let token = root.clone();
+        tokio::spawn(async move { writer.run(token).await })
+    };
+
     let state = AppState::new(
         cfg,
         target_store,
@@ -149,6 +185,7 @@ async fn main() -> Result<()> {
         result_sink_for_state,
         http_clients.clone(),
         pool.clone(),
+        public_source,
     );
     let router = build_router(state.clone(), root.clone()).merge(web::routes().with_state(state));
 
@@ -172,7 +209,12 @@ async fn main() -> Result<()> {
 
     tracing::info!("draining background tasks");
     let drain = async {
-        let _ = tokio::join!(scheduler_handle, batcher_handle, sampler_handle);
+        let _ = tokio::join!(
+            scheduler_handle,
+            batcher_handle,
+            sampler_handle,
+            incident_writer_handle,
+        );
         if let Some(h) = alert_engine_handle {
             let _ = h.await;
         }

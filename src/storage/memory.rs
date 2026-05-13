@@ -234,6 +234,11 @@ impl InMemoryTargetStore {
             enabled: new.enabled,
             tags: new.tags,
             alerts: new.alerts,
+            public_status: new.public_status,
+            public_name: new.public_name,
+            public_description: new.public_description,
+            public_group: new.public_group,
+            public_sort_order: new.public_sort_order,
             created_at: now,
             updated_at: now,
         }
@@ -311,6 +316,24 @@ impl TargetStore for InMemoryTargetStore {
         }
         if let Some(tags) = update.tags {
             t.tags = tags;
+        }
+        if let Some(alerts) = update.alerts {
+            t.alerts = alerts;
+        }
+        if let Some(v) = update.public_status {
+            t.public_status = v;
+        }
+        if let Some(v) = update.public_name {
+            t.public_name = Some(v);
+        }
+        if let Some(v) = update.public_description {
+            t.public_description = Some(v);
+        }
+        if let Some(v) = update.public_group {
+            t.public_group = Some(v);
+        }
+        if let Some(v) = update.public_sort_order {
+            t.public_sort_order = v;
         }
         t.updated_at = Utc::now();
         Ok(Some(t.clone()))

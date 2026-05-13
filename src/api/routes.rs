@@ -82,14 +82,38 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
         v1 = v1.layer(layer);
     }
 
+    let public_v1 = build_public_router();
+
     Router::new()
         .route("/healthz", get(handlers::health::healthz))
         .route("/readyz", get(handlers::health::readyz))
         .nest("/api/v1", v1)
+        .nest("/api/public/v1", public_v1)
         .merge(SwaggerUi::new("/docs").url("/api/openapi.json", ApiDoc::openapi()))
         .layer(from_fn(api_middleware::cache_control))
         .layer(from_fn(api_middleware::json_charset))
         .with_state(state)
+}
+
+/// Builds the public, unauthenticated `/api/public/v1/*` router. Lives in its
+/// own function and is composed via `nest` so future operator-side
+/// middlewares (auth, idempotency, etc.) added to the operator router cannot
+/// accidentally cover the public surface.
+fn build_public_router() -> Router<AppState> {
+    Router::new()
+        .route("/status", get(handlers::public::public_status))
+        .route(
+            "/components/{id}/history",
+            get(handlers::public::component_history),
+        )
+        .route("/incidents", get(handlers::public::public_incidents))
+        .route("/incidents/{id}", get(handlers::public::public_incident))
+        .route(
+            "/incidents.rss",
+            get(handlers::public::public_incidents_rss),
+        )
+        .route("/maintenance", get(handlers::public::public_maintenance))
+        .layer(from_fn(api_middleware::public_cache_control))
 }
 
 /// Builds a per-IP token-bucket layer for `/api/v1/*` when enabled. The

@@ -78,6 +78,11 @@ impl PostgresTargetStore {
             enabled: row.enabled,
             tags: row.tags,
             alerts,
+            public_status: row.public_status,
+            public_name: row.public_name,
+            public_description: row.public_description,
+            public_group: row.public_group,
+            public_sort_order: row.public_sort_order,
             created_at: row.created_at,
             updated_at: row.updated_at,
         })
@@ -97,9 +102,15 @@ struct TargetRow {
     enabled: bool,
     tags: Vec<String>,
     alerts: serde_json::Value,
+    public_status: bool,
+    public_name: Option<String>,
+    public_description: Option<String>,
+    public_group: Option<String>,
+    public_sort_order: i32,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
 }
+
 
 #[async_trait]
 impl TargetStore for PostgresTargetStore {
@@ -107,7 +118,9 @@ impl TargetStore for PostgresTargetStore {
         let limit = filter.limit.unwrap_or(100).min(10_000) as i64;
         let offset = filter.offset as i64;
         let rows: Vec<TargetRow> = sqlx::query_as::<_, TargetRow>(
-            r#"SELECT id, name, check_spec, interval_secs, enabled, tags, alerts, created_at, updated_at
+            r#"SELECT id, name, check_spec, interval_secs, enabled, tags, alerts,
+                      public_status, public_name, public_description, public_group, public_sort_order,
+                      created_at, updated_at
                FROM targets
                WHERE ($1::bool IS NULL OR enabled = $1)
                  AND ($2::text IS NULL OR $2 = ANY(tags))
@@ -140,7 +153,9 @@ impl TargetStore for PostgresTargetStore {
 
     async fn list_enabled(&self) -> Result<Vec<Target>> {
         let rows: Vec<TargetRow> = sqlx::query_as::<_, TargetRow>(
-            r#"SELECT id, name, check_spec, interval_secs, enabled, tags, alerts, created_at, updated_at
+            r#"SELECT id, name, check_spec, interval_secs, enabled, tags, alerts,
+                      public_status, public_name, public_description, public_group, public_sort_order,
+                      created_at, updated_at
                FROM targets
                WHERE enabled = true"#,
         )
@@ -152,7 +167,9 @@ impl TargetStore for PostgresTargetStore {
 
     async fn get(&self, id: Uuid) -> Result<Option<Target>> {
         let row: Option<TargetRow> = sqlx::query_as::<_, TargetRow>(
-            r#"SELECT id, name, check_spec, interval_secs, enabled, tags, alerts, created_at, updated_at
+            r#"SELECT id, name, check_spec, interval_secs, enabled, tags, alerts,
+                      public_status, public_name, public_description, public_group, public_sort_order,
+                      created_at, updated_at
                FROM targets WHERE id = $1"#,
         )
         .bind(id)
@@ -169,9 +186,12 @@ impl TargetStore for PostgresTargetStore {
         let check_json = self.encode_check(&new.check)?;
         let alerts_json = serde_json::to_value(&new.alerts).context("encoding alerts JSON")?;
         let row: TargetRow = sqlx::query_as::<_, TargetRow>(
-            r#"INSERT INTO targets (name, check_spec, interval_secs, enabled, tags, alerts)
-               VALUES ($1, $2, $3, $4, $5, $6)
-               RETURNING id, name, check_spec, interval_secs, enabled, tags, alerts, created_at, updated_at"#,
+            r#"INSERT INTO targets (name, check_spec, interval_secs, enabled, tags, alerts,
+                                    public_status, public_name, public_description, public_group, public_sort_order)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+               RETURNING id, name, check_spec, interval_secs, enabled, tags, alerts,
+                      public_status, public_name, public_description, public_group, public_sort_order,
+                      created_at, updated_at"#,
         )
         .bind(&new.name)
         .bind(check_json)
@@ -179,6 +199,11 @@ impl TargetStore for PostgresTargetStore {
         .bind(new.enabled)
         .bind(&new.tags)
         .bind(alerts_json)
+        .bind(new.public_status)
+        .bind(&new.public_name)
+        .bind(&new.public_description)
+        .bind(&new.public_group)
+        .bind(new.public_sort_order)
         .fetch_one(&self.pool)
         .await
         .context("insert target")?;
@@ -206,9 +231,16 @@ impl TargetStore for PostgresTargetStore {
                  enabled = COALESCE($5, enabled),
                  tags = COALESCE($6, tags),
                  alerts = COALESCE($7, alerts),
+                 public_status = COALESCE($8, public_status),
+                 public_name = COALESCE($9, public_name),
+                 public_description = COALESCE($10, public_description),
+                 public_group = COALESCE($11, public_group),
+                 public_sort_order = COALESCE($12, public_sort_order),
                  updated_at = now()
                WHERE id = $1
-               RETURNING id, name, check_spec, interval_secs, enabled, tags, alerts, created_at, updated_at"#,
+               RETURNING id, name, check_spec, interval_secs, enabled, tags, alerts,
+                      public_status, public_name, public_description, public_group, public_sort_order,
+                      created_at, updated_at"#,
         )
         .bind(id)
         .bind(update.name)
@@ -217,6 +249,11 @@ impl TargetStore for PostgresTargetStore {
         .bind(update.enabled)
         .bind(update.tags)
         .bind(alerts_json)
+        .bind(update.public_status)
+        .bind(update.public_name)
+        .bind(update.public_description)
+        .bind(update.public_group)
+        .bind(update.public_sort_order)
         .fetch_optional(&self.pool)
         .await
         .context("update target")?;
@@ -240,13 +277,19 @@ impl TargetStore for PostgresTargetStore {
             return Ok(Vec::new());
         }
 
-        const SQL: &str = r#"INSERT INTO targets (name, check_spec, interval_secs, enabled, tags, alerts)
+        const SQL: &str = r#"INSERT INTO targets (name, check_spec, interval_secs, enabled, tags, alerts,
+                                    public_status, public_name, public_description, public_group, public_sort_order)
                SELECT u.name, u.check_spec, u.interval_secs, u.enabled,
                       ARRAY(SELECT jsonb_array_elements_text(u.tags)),
-                      u.alerts
-               FROM UNNEST($1::text[], $2::jsonb[], $3::int4[], $4::bool[], $5::jsonb[], $6::jsonb[])
-                    AS u(name, check_spec, interval_secs, enabled, tags, alerts)
-               RETURNING id, name, check_spec, interval_secs, enabled, tags, alerts, created_at, updated_at"#;
+                      u.alerts,
+                      u.public_status, u.public_name, u.public_description, u.public_group, u.public_sort_order
+               FROM UNNEST($1::text[], $2::jsonb[], $3::int4[], $4::bool[], $5::jsonb[], $6::jsonb[],
+                           $7::bool[], $8::text[], $9::text[], $10::text[], $11::int4[])
+                    AS u(name, check_spec, interval_secs, enabled, tags, alerts,
+                         public_status, public_name, public_description, public_group, public_sort_order)
+               RETURNING id, name, check_spec, interval_secs, enabled, tags, alerts,
+                      public_status, public_name, public_description, public_group, public_sort_order,
+                      created_at, updated_at"#;
 
         let len = items.len();
         let mut names: Vec<String> = Vec::with_capacity(len);
@@ -256,6 +299,11 @@ impl TargetStore for PostgresTargetStore {
         // pass per-row tag lists as jsonb and unpack on the server side.
         let mut tags_json: Vec<Json<Vec<String>>> = Vec::with_capacity(len);
         let mut alerts_json: Vec<Json<TargetAlerts>> = Vec::with_capacity(len);
+        let mut public_status: Vec<bool> = Vec::with_capacity(len);
+        let mut public_name: Vec<Option<String>> = Vec::with_capacity(len);
+        let mut public_description: Vec<Option<String>> = Vec::with_capacity(len);
+        let mut public_group: Vec<Option<String>> = Vec::with_capacity(len);
+        let mut public_sort_order: Vec<i32> = Vec::with_capacity(len);
 
         let rows: Vec<TargetRow> = if let Some(cipher) = &self.cipher {
             // Cipher path: walk each CheckSpec via serde_json::Value so credential
@@ -270,6 +318,11 @@ impl TargetStore for PostgresTargetStore {
                 enabled.push(new.enabled);
                 tags_json.push(Json(new.tags));
                 alerts_json.push(Json(new.alerts));
+                public_status.push(new.public_status);
+                public_name.push(new.public_name);
+                public_description.push(new.public_description);
+                public_group.push(new.public_group);
+                public_sort_order.push(new.public_sort_order);
             }
             sqlx::query_as::<_, TargetRow>(SQL)
                 .bind(&names)
@@ -278,6 +331,11 @@ impl TargetStore for PostgresTargetStore {
                 .bind(&enabled)
                 .bind(&tags_json)
                 .bind(&alerts_json)
+                .bind(&public_status)
+                .bind(&public_name)
+                .bind(&public_description)
+                .bind(&public_group)
+                .bind(&public_sort_order)
                 .fetch_all(&self.pool)
                 .await
                 .context("bulk insert targets")?
@@ -292,6 +350,11 @@ impl TargetStore for PostgresTargetStore {
                 enabled.push(new.enabled);
                 tags_json.push(Json(new.tags));
                 alerts_json.push(Json(new.alerts));
+                public_status.push(new.public_status);
+                public_name.push(new.public_name);
+                public_description.push(new.public_description);
+                public_group.push(new.public_group);
+                public_sort_order.push(new.public_sort_order);
             }
             sqlx::query_as::<_, TargetRow>(SQL)
                 .bind(&names)
@@ -300,6 +363,11 @@ impl TargetStore for PostgresTargetStore {
                 .bind(&enabled)
                 .bind(&tags_json)
                 .bind(&alerts_json)
+                .bind(&public_status)
+                .bind(&public_name)
+                .bind(&public_description)
+                .bind(&public_group)
+                .bind(&public_sort_order)
                 .fetch_all(&self.pool)
                 .await
                 .context("bulk insert targets")?
@@ -310,7 +378,9 @@ impl TargetStore for PostgresTargetStore {
 
     async fn list_updated_since(&self, since: DateTime<Utc>) -> Result<Vec<Target>> {
         let rows: Vec<TargetRow> = sqlx::query_as::<_, TargetRow>(
-            r#"SELECT id, name, check_spec, interval_secs, enabled, tags, alerts, created_at, updated_at
+            r#"SELECT id, name, check_spec, interval_secs, enabled, tags, alerts,
+                      public_status, public_name, public_description, public_group, public_sort_order,
+                      created_at, updated_at
                FROM targets WHERE updated_at > $1"#,
         )
         .bind(since)

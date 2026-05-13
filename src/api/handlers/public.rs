@@ -1,0 +1,199 @@
+//! Public, unauthenticated handlers for the status page surface.
+//!
+//! Every handler in this module:
+//!  * declares `security()` empty so OpenAPI documents the path as
+//!    unauthenticated and any future in-process auth middleware that scans
+//!    the doc skips it,
+//!  * returns the narrow `PublicApiError` envelope on failure (never
+//!    `ApiError`, which carries internal context),
+//!  * relies on the routing layer to stamp the `Cache-Control:
+//!    public, max-age=10, stale-while-revalidate=30` header.
+
+use std::sync::Arc;
+
+use axum::Json;
+use axum::extract::{Path, Query, State};
+use axum::http::{HeaderValue, StatusCode, header};
+use axum::response::{IntoResponse, Response};
+use serde::Deserialize;
+use utoipa::IntoParams;
+use uuid::Uuid;
+
+use crate::api::PageEnvelope;
+use crate::api::page::PageOfPublicIncident;
+use crate::api::public_error::{PublicApiError, PublicAppError};
+use crate::app::AppState;
+use crate::domain::{
+    ComponentHistoryResponse, PublicIncident, PublicMaintenanceList, PublicStatusPage,
+};
+use crate::public_status::IncidentListQuery;
+
+const RSS_CONTENT_TYPE: HeaderValue = HeaderValue::from_static("application/rss+xml; charset=utf-8");
+
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct HistoryQuery {
+    /// Number of days (1..=365, default 90).
+    pub days: Option<u32>,
+}
+
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct IncidentsQuery {
+    /// Page size (default 25, max 100).
+    pub limit: Option<u32>,
+    /// Page offset.
+    pub offset: Option<u32>,
+    /// If true, return only incidents whose `ended_at` is null.
+    pub ongoing_only: Option<bool>,
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/public/v1/status",
+    tag = "public_status",
+    summary = "Public status page payload",
+    description = "Returns the full public-facing status snapshot: overall \
+                   state, per-component current status and 90-day history, \
+                   active and recent incidents, scheduled maintenance. \
+                   Cached in-process for 10 seconds.",
+    security(),
+    responses(
+        (status = 200, body = PublicStatusPage),
+        (status = 429, body = PublicApiError, description = "Rate limited (Caddy edge)"),
+        (status = 503, body = PublicApiError, description = "Upstream data unavailable"),
+    ),
+)]
+pub async fn public_status(
+    State(state): State<AppState>,
+) -> Result<Json<PublicStatusPage>, PublicAppError> {
+    let page = state.public_source.page().await?;
+    Ok(Json(Arc::unwrap_or_clone(page)))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/public/v1/components/{id}/history",
+    tag = "public_status",
+    summary = "Daily history strip for a single public component",
+    description = "Returns one DayState per day for the requested window, \
+                   oldest first. Caps at 365 days; defaults to 90. Returns \
+                   404 if the component does not exist or is not public.",
+    security(),
+    params(
+        ("id" = Uuid, Path, description = "Public component id"),
+        HistoryQuery,
+    ),
+    responses(
+        (status = 200, body = ComponentHistoryResponse),
+        (status = 400, body = PublicApiError, description = "days out of range"),
+        (status = 404, body = PublicApiError, description = "Component not public or not found"),
+    ),
+)]
+pub async fn component_history(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    Query(q): Query<HistoryQuery>,
+) -> Result<Json<ComponentHistoryResponse>, PublicAppError> {
+    let days = q.days.unwrap_or(90);
+    let res = state.public_source.component_history(id, days).await?;
+    Ok(Json(res))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/public/v1/incidents",
+    tag = "public_status",
+    summary = "Public incident list (last 90 days, paginated)",
+    description = "Lists incidents for components that have public_status = true. \
+                   Sorted by started_at descending. Capped at 90 days lookback.",
+    security(),
+    params(IncidentsQuery),
+    responses(
+        (status = 200, body = PageOfPublicIncident),
+        (status = 400, body = PublicApiError),
+    ),
+)]
+pub async fn public_incidents(
+    State(state): State<AppState>,
+    Query(q): Query<IncidentsQuery>,
+) -> Result<Json<PageEnvelope<PublicIncident>>, PublicAppError> {
+    let query = IncidentListQuery {
+        limit: q.limit.unwrap_or(25).clamp(1, 100),
+        offset: q.offset.unwrap_or(0),
+        ongoing_only: q.ongoing_only.unwrap_or(false),
+    };
+    let page = state.public_source.list_incidents(query).await?;
+    Ok(Json(page))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/public/v1/incidents/{id}",
+    tag = "public_status",
+    summary = "Single public incident with full update timeline",
+    description = "Returns the incident only if its component has \
+                   public_status = true at request time. Returns 404 \
+                   otherwise — never confirms existence of non-public incidents.",
+    security(),
+    params(("id" = Uuid, Path)),
+    responses(
+        (status = 200, body = PublicIncident),
+        (status = 404, body = PublicApiError,
+            description = "Incident not found OR component not public"),
+    ),
+)]
+pub async fn public_incident(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<PublicIncident>, PublicAppError> {
+    let inc = state.public_source.incident_by_id(id).await?;
+    Ok(Json(inc))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/public/v1/incidents.rss",
+    tag = "public_status",
+    summary = "RSS 2.0 feed of public incidents",
+    description = "Most recent 50 incidents from public components. Item \
+                   title is the incident title; item description is the \
+                   concatenated update messages.",
+    security(),
+    responses(
+        (status = 200, description = "RSS 2.0 XML document",
+            content_type = "application/rss+xml"),
+    ),
+)]
+pub async fn public_incidents_rss(State(state): State<AppState>) -> Result<Response, PublicAppError> {
+    let base_url = format!(
+        "http://{}",
+        state.cfg.server.api_bind.split(':').next().unwrap_or("localhost")
+    );
+    let body = state.public_source.incidents_rss(&base_url).await?;
+    let mut resp = (StatusCode::OK, body).into_response();
+    resp.headers_mut()
+        .insert(header::CONTENT_TYPE, RSS_CONTENT_TYPE);
+    Ok(resp)
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/public/v1/maintenance",
+    tag = "public_status",
+    summary = "Active and upcoming maintenance windows",
+    description = "Returns active windows (now between starts_at and ends_at) \
+                   plus upcoming windows within the next 7 days, sorted by \
+                   starts_at ascending. Only includes windows that affect \
+                   at least one public component.",
+    security(),
+    responses(
+        (status = 200, body = PublicMaintenanceList),
+    ),
+)]
+pub async fn public_maintenance(
+    State(state): State<AppState>,
+) -> Result<Json<PublicMaintenanceList>, PublicAppError> {
+    let m = state.public_source.maintenance().await?;
+    Ok(Json(m))
+}

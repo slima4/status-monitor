@@ -1,0 +1,198 @@
+{# Auto-refreshing public status region.
+   Self-rearms via hx-swap="outerHTML" — each replacement still carries the
+   every-30s trigger. Works without JavaScript: the trigger is purely an
+   enhancement, and full HTTP refresh produces the same content. #}
+<div id="status-region"
+     hx-get="/status?fragment=1"
+     hx-trigger="every 30s"
+     hx-swap="outerHTML"
+     class="space-y-6">
+
+    {# --- Overall status banner ---
+       Scoped aria-live so the announcement is just "<state> <label>",
+       not the full component+incident subtree on every 30s tick. #}
+    <section aria-labelledby="overall-heading"
+             role="status"
+             aria-live="polite"
+             class="rounded-lg border-2 p-5 {{ view.overall_class }}">
+        <h1 id="overall-heading" class="flex items-center gap-3 text-2xl font-semibold">
+            <span aria-hidden="true">{{ view.overall_icon }}</span>
+            <span>{{ view.overall_label }}</span>
+            <span class="sr-only">— {{ view.overall_aria }}</span>
+        </h1>
+        <p class="mt-2 text-sm">
+            Last checked
+            <time datetime="{{ view.generated_iso }}" data-tz>{{ view.generated_human }}</time>
+        </p>
+    </section>
+
+    {# --- Active incidents --- #}
+    {% if view.has_active_incident %}
+    <section aria-labelledby="active-incidents-heading"
+             class="rounded-lg border border-amber-200 bg-amber-50 p-4">
+        <h2 id="active-incidents-heading" class="text-lg font-semibold text-amber-900">
+            Active incident{% if view.active_incidents.len() != 1 %}s{% endif %}
+        </h2>
+        <ul class="mt-3 space-y-3">
+            {% for inc in view.active_incidents %}
+            <li>
+                <article class="space-y-1">
+                    <div class="flex flex-wrap items-center gap-2">
+                        <a href="{{ inc.permalink }}"
+                           class="font-medium text-amber-900 hover:underline">{{ inc.header.title }}</a>
+                        <span class="rounded px-2 py-0.5 text-xs font-medium {{ inc.header.severity_class }}">{{ inc.header.severity_label }}</span>
+                        <span class="rounded px-2 py-0.5 text-xs font-medium {{ inc.header.phase_class }}">{{ inc.header.phase_label }}</span>
+                    </div>
+                    <p class="text-sm text-slate-700">
+                        Started
+                        <time datetime="{{ inc.header.started_iso }}" data-tz>{{ inc.header.started_human }}</time>
+                        — {{ inc.header.duration_human }} ago — {{ inc.header.component_name }}
+                    </p>
+                    {% match inc.latest_message %}
+                        {% when Some with (msg) %}
+                            <p class="rounded bg-white/70 px-3 py-2 text-sm italic text-slate-700">“{{ msg }}”</p>
+                        {% when None %}
+                    {% endmatch %}
+                    <p>
+                        <a href="{{ inc.permalink }}" class="text-sm text-slate-600 hover:text-slate-900">View incident →</a>
+                    </p>
+                </article>
+            </li>
+            {% endfor %}
+        </ul>
+    </section>
+    {% endif %}
+
+    {# --- Maintenance --- #}
+    {% if view.has_maintenance %}
+    <section aria-labelledby="maintenance-heading"
+             class="rounded-lg border border-sky-200 bg-sky-50 p-4">
+        <h2 id="maintenance-heading" class="text-lg font-semibold text-sky-900">Scheduled maintenance</h2>
+        {% if !view.active_maintenance.is_empty() %}
+        <h3 class="mt-2 text-sm font-medium text-sky-900">In progress</h3>
+        <ul class="mt-1 space-y-2">
+            {% for m in view.active_maintenance %}
+            <li class="text-sm">
+                <p class="font-medium text-sky-900">{{ m.title }}</p>
+                <p class="text-slate-700">
+                    <time datetime="{{ m.starts_iso }}" data-tz>{{ m.starts_human }}</time>
+                    –
+                    <time datetime="{{ m.ends_iso }}" data-tz>{{ m.ends_human }}</time>
+                    {% if !m.affects.is_empty() %} · affects {{ m.affects }}{% endif %}
+                </p>
+                {% match m.description %}
+                    {% when Some with (d) %}<p class="text-slate-600">{{ d }}</p>{% when None %}
+                {% endmatch %}
+            </li>
+            {% endfor %}
+        </ul>
+        {% endif %}
+        {% if !view.upcoming_maintenance.is_empty() %}
+        <h3 class="mt-3 text-sm font-medium text-sky-900">Upcoming</h3>
+        <ul class="mt-1 space-y-2">
+            {% for m in view.upcoming_maintenance %}
+            <li class="text-sm">
+                <p class="font-medium text-sky-900">{{ m.title }}</p>
+                <p class="text-slate-700">
+                    Starts
+                    <time datetime="{{ m.starts_iso }}" data-tz>{{ m.starts_human }}</time>
+                    {% match m.starts_in_human %}
+                        {% when Some with (s) %} (in {{ s }}){% when None %}
+                    {% endmatch %}
+                    — ends
+                    <time datetime="{{ m.ends_iso }}" data-tz>{{ m.ends_human }}</time>
+                    {% if !m.affects.is_empty() %} · affects {{ m.affects }}{% endif %}
+                </p>
+                {% match m.description %}
+                    {% when Some with (d) %}<p class="text-slate-600">{{ d }}</p>{% when None %}
+                {% endmatch %}
+            </li>
+            {% endfor %}
+        </ul>
+        {% endif %}
+    </section>
+    {% endif %}
+
+    {# --- Components by group --- #}
+    {% if view.has_components %}
+        {% for group in view.groups %}
+        <section aria-labelledby="group-{{ loop.index }}-heading"
+                 class="space-y-3">
+            <h2 id="group-{{ loop.index }}-heading"
+                class="border-b pb-1 text-sm font-semibold uppercase tracking-wide text-slate-600">{{ group.heading }}</h2>
+            <ul class="space-y-3">
+                {% for c in group.components %}
+                <li class="rounded-lg border bg-white p-4">
+                    <div class="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                            <p class="flex items-center gap-2">
+                                <span aria-hidden="true" class="{{ c.status_class }}">{{ c.status_icon }}</span>
+                                <span class="font-medium">{{ c.name }}</span>
+                                <span class="text-sm {{ c.status_class }}">{{ c.status_label }}</span>
+                            </p>
+                            {% match c.description %}
+                                {% when Some with (d) %}<p class="mt-0.5 text-xs text-slate-500">{{ d }}</p>{% when None %}
+                            {% endmatch %}
+                        </div>
+                        <div class="text-right text-xs text-slate-500">
+                            <p><span class="font-mono text-sm text-slate-700">{{ c.uptime_pct }}%</span> uptime</p>
+                            <p>{{ c.history_summary }}</p>
+                        </div>
+                    </div>
+                    <div class="mt-3 grid grid-flow-col grid-rows-1 gap-px"
+                         role="img"
+                         aria-label="Daily status history for {{ c.name }}, last 90 days, oldest first.">
+                        {% for day in c.history %}
+                        <span class="h-6 w-1.5 rounded-sm {{ day.class }}"
+                              title="{{ day.label }} · {{ day.days_ago }}d ago"
+                              aria-hidden="true"></span>
+                        {% endfor %}
+                    </div>
+                </li>
+                {% endfor %}
+            </ul>
+        </section>
+        {% endfor %}
+    {% else %}
+        <section class="rounded-lg border bg-white p-6 text-sm text-slate-500">
+            No public components have been configured yet.
+        </section>
+    {% endif %}
+
+    {# --- Recent incidents --- #}
+    {% if !view.recent_incidents.is_empty() %}
+    <section aria-labelledby="recent-incidents-heading" class="space-y-3">
+        <h2 id="recent-incidents-heading"
+            class="border-b pb-1 text-sm font-semibold uppercase tracking-wide text-slate-600">Recent incidents (30 days)</h2>
+        <ul class="divide-y rounded-lg border bg-white">
+            {% for inc in view.recent_incidents %}
+            <li class="p-4">
+                <article class="space-y-1">
+                    <div class="flex flex-wrap items-center gap-2">
+                        <a href="{{ inc.permalink }}"
+                           class="font-medium text-slate-900 hover:underline">{{ inc.header.title }}</a>
+                        <span class="rounded px-2 py-0.5 text-xs font-medium {{ inc.header.severity_class }}">{{ inc.header.severity_label }}</span>
+                        <span class="rounded px-2 py-0.5 text-xs font-medium {{ inc.header.phase_class }}">{{ inc.header.phase_label }}</span>
+                        {% if inc.header.ongoing %}
+                            <span class="rounded bg-rose-100 px-2 py-0.5 text-xs font-medium text-rose-800">Ongoing</span>
+                        {% endif %}
+                    </div>
+                    <p class="text-xs text-slate-500">
+                        {{ inc.header.component_name }} ·
+                        <time datetime="{{ inc.header.started_iso }}" data-tz>{{ inc.header.started_human }}</time>
+                        · {{ inc.header.duration_human }}
+                        {% match inc.ended_human %}
+                            {% when Some with (_) %} (resolved){% when None %}
+                        {% endmatch %}
+                    </p>
+                    {% match inc.latest_message %}
+                        {% when Some with (msg) %}<p class="text-sm text-slate-700">{{ msg }}</p>{% when None %}
+                    {% endmatch %}
+                </article>
+            </li>
+            {% endfor %}
+        </ul>
+    </section>
+    {% endif %}
+
+</div>

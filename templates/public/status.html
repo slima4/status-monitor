@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ view.site_title }}</title>
+    <meta name="description" content="{{ view.meta_description }}">
+    <meta name="robots" content="index,follow">
+    <meta property="og:title" content="{{ view.site_title }}">
+    <meta property="og:description" content="{{ view.meta_description }}">
+    <meta property="og:type" content="website">
+    <meta name="twitter:card" content="summary">
+    <link rel="icon" type="image/svg+xml" href="/static/img/favicon.svg">
+    <link rel="alternate" type="application/rss+xml" title="Incidents (RSS)" href="{{ view.rss_url }}">
+    <link rel="stylesheet" href="/static/css/app.css">
+    <script defer src="/static/js/htmx.min.js"></script>
+    <script defer src="/static/js/public/tz.js"></script>
+</head>
+<body class="bg-slate-50 text-slate-900 antialiased">
+    <a href="#main-content"
+       class="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:rounded focus:bg-white focus:px-3 focus:py-2 focus:text-sm focus:ring-2 focus:ring-slate-700">
+        Skip to main content
+    </a>
+    <header class="border-b bg-white">
+        <div class="container mx-auto flex items-center justify-between px-4 py-4">
+            <a href="/status" class="text-lg font-semibold tracking-tight">{{ view.site_name }}</a>
+            <a href="{{ view.rss_url }}" class="text-sm text-slate-500 hover:text-slate-700"
+               aria-label="Subscribe to incident updates via RSS">Subscribe (RSS)</a>
+        </div>
+    </header>
+
+    <main id="main-content" tabindex="-1" class="container mx-auto px-4 py-6">
+        {% include "public/region.html" %}
+    </main>
+
+    <footer class="container mx-auto px-4 py-6 text-xs text-slate-400">
+        Powered by status-monitor ·
+        <a href="{{ view.rss_url }}" class="hover:text-slate-600">RSS</a> ·
+        Updated <time datetime="{{ view.generated_iso }}" data-tz>{{ view.generated_human }}</time>
+    </footer>
+</body>
+</html>

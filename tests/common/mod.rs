@@ -15,6 +15,7 @@ use status_monitor::config::{
 };
 use status_monitor::domain::{CheckSpec, ExpectedStatus, HttpCheck, HttpMethod, Target};
 use status_monitor::http_client::{HttpClients, build_clients};
+use status_monitor::public_status::{NoopPublicSource, PublicSource};
 use status_monitor::storage::{InMemorySink, InMemoryTargetStore, ResultSink, ResultsStore};
 use status_monitor::worker::{ResultFanout, WorkerPool};
 use tokio::sync::mpsc;
@@ -28,6 +29,38 @@ use uuid::Uuid;
 /// until the test binary exits, which is fine for short-lived tests.
 pub fn build_test_app(mutate: impl FnOnce(&mut AppConfig)) -> Router {
     build_test_app_inner(mutate, false)
+}
+
+/// Like `build_test_app` but accepts a custom `PublicSource` so contract tests
+/// can drive the public surface deterministically without Postgres/ClickHouse.
+pub fn build_test_app_with_public_source(
+    mutate: impl FnOnce(&mut AppConfig),
+    public_source: Arc<dyn PublicSource>,
+) -> Router {
+    let mut cfg = AppConfig::load().expect("config");
+    mutate(&mut cfg);
+    let target_store = Arc::new(InMemoryTargetStore::new());
+    let sink = Arc::new(InMemorySink::new());
+    let results_store: Arc<dyn ResultsStore> = sink.clone();
+    let result_sink: Arc<dyn ResultSink> = sink;
+    let http_clients = Arc::new(test_client());
+    let (tx, _rx) = mpsc::channel(1024);
+    let pool = Arc::new(WorkerPool::new(
+        cfg.checker.max_concurrent_checks.max(1),
+        (*http_clients).clone(),
+        cfg.circuit_breaker,
+        ResultFanout::storage_only(tx),
+    ));
+    let state = AppState::new(
+        cfg,
+        target_store,
+        results_store,
+        result_sink,
+        http_clients,
+        pool,
+        public_source,
+    );
+    build_router(state, CancellationToken::new())
 }
 
 /// Same as [`build_test_app`] but additionally merges `web::routes()` so the
@@ -51,6 +84,7 @@ fn build_test_app_inner(mutate: impl FnOnce(&mut AppConfig), with_web: bool) -> 
         cfg.circuit_breaker,
         ResultFanout::storage_only(tx),
     ));
+    let public_source = Arc::new(NoopPublicSource::default());
     let state = AppState::new(
         cfg,
         target_store,
@@ -58,6 +92,7 @@ fn build_test_app_inner(mutate: impl FnOnce(&mut AppConfig), with_web: bool) -> 
         result_sink,
         http_clients,
         pool,
+        public_source,
     );
     let api = build_router(state.clone(), CancellationToken::new());
     if with_web {
@@ -177,6 +212,11 @@ pub fn http_target(addr: SocketAddr, path: &str, interval_ms: u64) -> Target {
         enabled: true,
         tags: vec![],
         alerts: status_monitor::domain::TargetAlerts::default(),
+        public_status: false,
+        public_name: None,
+        public_description: None,
+        public_group: None,
+        public_sort_order: 0,
         created_at: Utc::now(),
         updated_at: Utc::now(),
     }

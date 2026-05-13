@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
+use super::public::{IncidentSeverity, IncidentStatusPhase, PublicIncidentUpdate};
 use super::result::CheckStatus;
 
 /// A contiguous period during which a target was `down` or `error`. Two
@@ -22,6 +23,31 @@ pub struct Incident {
     pub check_count: u64,
     #[schema(nullable = true)]
     pub error_sample: Option<String>,
+    #[serde(default)]
+    #[schema(default = "major")]
+    pub severity: IncidentSeverity,
+    #[serde(default)]
+    #[schema(nullable = true)]
+    pub public_title: Option<String>,
+    #[serde(default)]
+    #[schema(nullable = true)]
+    pub public_description: Option<String>,
+    #[serde(default)]
+    pub updates: Vec<PublicIncidentUpdate>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, ToSchema)]
+pub struct IncidentNarrationUpdate {
+    pub public_title: Option<String>,
+    pub public_description: Option<String>,
+    pub severity: Option<IncidentSeverity>,
+}
+
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub struct NewIncidentUpdate {
+    pub phase: IncidentStatusPhase,
+    #[schema(min_length = 1, max_length = 2000)]
+    pub message: String,
 }
 
 /// Coalesces an ordered (ascending by timestamp) stream of check observations
@@ -56,6 +82,10 @@ where
                     duration_secs: None,
                     check_count: 1,
                     error_sample: error,
+                    severity: IncidentSeverity::default(),
+                    public_title: None,
+                    public_description: None,
+                    updates: Vec::new(),
                 });
             }
         } else if let Some(inc) = current.take() {

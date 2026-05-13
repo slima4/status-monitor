@@ -182,6 +182,11 @@ mod tests {
             enabled: true,
             tags: vec![],
             alerts,
+            public_status: false,
+            public_name: None,
+            public_description: None,
+            public_group: None,
+            public_sort_order: 0,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         })

@@ -8,6 +8,8 @@ const JSON_WITH_CHARSET: HeaderValue = HeaderValue::from_static("application/jso
 const NO_STORE: HeaderValue = HeaderValue::from_static("no-store");
 const DASHBOARD_CACHE: HeaderValue = HeaderValue::from_static("private, max-age=5");
 const READ_CACHE: HeaderValue = HeaderValue::from_static("private, max-age=10");
+const PUBLIC_CACHE: HeaderValue =
+    HeaderValue::from_static("public, max-age=10, stale-while-revalidate=30");
 
 /// Rewrites bare `application/json` Content-Type headers to include
 /// `charset=utf-8`. axum's `Json` extractor emits the bare form; downstream
@@ -56,3 +58,14 @@ fn cache_control_for(method: &Method, path: &str) -> Option<HeaderValue> {
 
 /// Kept in sync with the route declaration in `routes.rs`.
 const DASHBOARD_PATH: &str = "/api/v1/dashboard/summary";
+
+/// Cache-Control middleware applied only to the public-status surface.
+/// Sets `public, max-age=10, stale-while-revalidate=30` unless the handler
+/// already emitted its own value.
+pub async fn public_cache_control(req: Request, next: Next) -> Response {
+    let mut resp = next.run(req).await;
+    if !resp.headers().contains_key(CACHE_CONTROL) {
+        resp.headers_mut().insert(CACHE_CONTROL, PUBLIC_CACHE);
+    }
+    resp
+}

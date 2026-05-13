@@ -8,6 +8,7 @@ pub mod http_outbound;
 pub mod notifier;
 pub mod observability;
 pub mod pipeline;
+pub mod public_status;
 pub mod scheduler;
 pub mod security;
 pub mod storage;

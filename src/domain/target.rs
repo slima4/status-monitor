@@ -21,6 +21,26 @@ pub struct Target {
     pub tags: Vec<String>,
     #[serde(default)]
     pub alerts: TargetAlerts,
+    /// Whether this target appears on the public status page.
+    #[serde(default)]
+    #[schema(example = false, default = false)]
+    pub public_status: bool,
+    /// Public display name; falls back to `name` if null.
+    #[serde(default)]
+    #[schema(example = "API", nullable = true)]
+    pub public_name: Option<String>,
+    /// Short description shown under the component name on the public page.
+    #[serde(default)]
+    #[schema(example = "Primary REST endpoint", nullable = true, max_length = 200)]
+    pub public_description: Option<String>,
+    /// Optional grouping on the public page.
+    #[serde(default)]
+    #[schema(example = "API", nullable = true, max_length = 50)]
+    pub public_group: Option<String>,
+    /// Sort order within a group. Lower renders first.
+    #[serde(default)]
+    #[schema(example = 0, default = 0)]
+    pub public_sort_order: i32,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -39,6 +59,21 @@ pub struct NewTarget {
     pub tags: Vec<String>,
     #[serde(default)]
     pub alerts: TargetAlerts,
+    #[serde(default)]
+    #[schema(example = false, default = false)]
+    pub public_status: bool,
+    #[serde(default)]
+    #[schema(nullable = true)]
+    pub public_name: Option<String>,
+    #[serde(default)]
+    #[schema(nullable = true, max_length = 200)]
+    pub public_description: Option<String>,
+    #[serde(default)]
+    #[schema(nullable = true, max_length = 50)]
+    pub public_group: Option<String>,
+    #[serde(default)]
+    #[schema(default = 0)]
+    pub public_sort_order: i32,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
@@ -52,6 +87,11 @@ pub struct TargetUpdate {
     pub enabled: Option<bool>,
     pub tags: Option<Vec<String>>,
     pub alerts: Option<TargetAlerts>,
+    pub public_status: Option<bool>,
+    pub public_name: Option<String>,
+    pub public_description: Option<String>,
+    pub public_group: Option<String>,
+    pub public_sort_order: Option<i32>,
 }
 
 fn default_true() -> bool {

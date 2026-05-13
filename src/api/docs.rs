@@ -3,14 +3,18 @@ use utoipa::OpenApi;
 use crate::api::error::{ApiError, ApiErrorBody};
 use crate::api::handlers;
 use crate::api::page::PageEnvelope;
+use crate::api::public_error::{PublicApiError, PublicApiErrorBody};
 use crate::api::types::{
     BulkAction, BulkActionFailure, BulkActionRequest, BulkActionResponse, DashboardSummary,
     Last24hSummary, StatusBreakdown, SystemSummary, TagCount, TargetsSummary, TestRequest,
     TestResponse,
 };
 use crate::domain::{
-    AlertChannel, AlertChannelConfig, CheckResult, CheckSpec, CheckStatus, DomainExpiryCheck,
-    ExpectedStatus, HttpCheck, HttpMethod, Incident, NewTarget, Target, TargetAlerts,
+    AlertChannel, AlertChannelConfig, CheckResult, CheckSpec, CheckStatus, ComponentHistoryResponse,
+    DayState, DomainExpiryCheck, ExpectedStatus, HttpCheck, HttpMethod, Incident,
+    IncidentSeverity, IncidentStatusPhase, NewTarget, OverallState, OverallStatus, PublicComponent,
+    PublicComponentGroup, PublicComponentStatus, PublicIncident, PublicIncidentUpdate,
+    PublicMaintenance, PublicMaintenanceList, PublicStatusPage, Target, TargetAlerts,
     TargetUpdate, TcpCheck, TlsCertCheck,
 };
 use crate::storage::UptimeStats;
@@ -42,6 +46,12 @@ use crate::storage::UptimeStats;
         handlers::results::list_incidents,
         handlers::tags::list_tags,
         handlers::dashboard::dashboard_summary,
+        handlers::public::public_status,
+        handlers::public::component_history,
+        handlers::public::public_incidents,
+        handlers::public::public_incident,
+        handlers::public::public_incidents_rss,
+        handlers::public::public_maintenance,
     ),
     components(
         schemas(
@@ -81,14 +91,32 @@ use crate::storage::UptimeStats;
             PageEnvelope<CheckResult>,
             PageEnvelope<Incident>,
             PageEnvelope<TagCount>,
+            PublicApiError,
+            PublicApiErrorBody,
+            PublicStatusPage,
+            OverallStatus,
+            OverallState,
+            PublicComponentGroup,
+            PublicComponent,
+            PublicComponentStatus,
+            DayState,
+            PublicIncident,
+            PublicIncidentUpdate,
+            IncidentSeverity,
+            IncidentStatusPhase,
+            PublicMaintenance,
+            PublicMaintenanceList,
+            ComponentHistoryResponse,
+            PageEnvelope<PublicIncident>,
         ),
     ),
     tags(
-        (name = "health",    description = "Liveness and readiness probes"),
-        (name = "targets",   description = "Target CRUD and operations"),
-        (name = "results",   description = "Check results, uptime, incidents"),
-        (name = "tags",      description = "Tag inventory"),
-        (name = "dashboard", description = "Fleet-wide aggregated views"),
+        (name = "health",        description = "Liveness and readiness probes"),
+        (name = "targets",       description = "Target CRUD and operations"),
+        (name = "results",       description = "Check results, uptime, incidents"),
+        (name = "tags",          description = "Tag inventory"),
+        (name = "dashboard",     description = "Fleet-wide aggregated views"),
+        (name = "public_status", description = "Public, unauthenticated status page surface"),
     ),
 )]
 pub struct ApiDoc;

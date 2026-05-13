@@ -7,6 +7,7 @@ use crate::api::IdempotencyCache;
 use crate::api::types::DashboardSummary;
 use crate::config::AppConfig;
 use crate::http_client::HttpClients;
+use crate::public_status::PublicSource;
 use crate::storage::{ResultSink, ResultsStore, TargetStore};
 use crate::worker::WorkerPool;
 
@@ -26,6 +27,7 @@ pub struct AppState {
     pub worker_pool: Arc<WorkerPool>,
     pub dashboard_cache: DashboardCache,
     pub idempotency: Arc<IdempotencyCache>,
+    pub public_source: Arc<dyn PublicSource>,
 }
 
 impl AppState {
@@ -36,6 +38,7 @@ impl AppState {
         result_sink: Arc<dyn ResultSink>,
         http_clients: Arc<HttpClients>,
         worker_pool: Arc<WorkerPool>,
+        public_source: Arc<dyn PublicSource>,
     ) -> Self {
         Self {
             cfg: Arc::new(cfg),
@@ -46,6 +49,7 @@ impl AppState {
             worker_pool,
             dashboard_cache: Arc::new(Mutex::new(None)),
             idempotency: Arc::new(IdempotencyCache::new()),
+            public_source,
         }
     }
 }
