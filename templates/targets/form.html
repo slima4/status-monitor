@@ -15,6 +15,7 @@
         data-action="{{ form.action }}"
         data-method="{{ form.submit_method }}"
         data-mode="{{ form.mode }}"
+        novalidate
         class="space-y-6">
 
     <div id="form-errors" role="alert" aria-live="polite"
@@ -190,13 +191,14 @@
       <legend class="px-1 text-sm font-medium">TCP check</legend>
       <label class="block">
         <span class="text-xs text-slate-500">Host</span>
-        <input name="tcp_host" type="text" value="{{ form.tcp.host }}"
+        <input name="tcp_host" type="text" value="{{ form.tcp.host }}" placeholder="example.com"
                class="mt-1 w-full rounded border px-2 py-1 font-mono">
       </label>
       <div class="flex flex-wrap gap-3">
         <label class="block w-40">
           <span class="text-xs text-slate-500">Port</span>
-          <input name="tcp_port" type="number" min="1" max="65535" value="{{ form.tcp.port }}"
+          <input name="tcp_port" type="number" min="1" max="65535" placeholder="5432"
+                 {% if form.tcp.port > 0 %}value="{{ form.tcp.port }}"{% endif %}
                  class="mt-1 w-full rounded border px-2 py-1">
         </label>
         <label class="block w-40">
