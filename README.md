@@ -2,11 +2,36 @@
 
 [![docs](https://github.com/slima4/status-monitor/actions/workflows/docs.yml/badge.svg)](https://github.com/slima4/status-monitor/actions/workflows/docs.yml)
 
-Async Rust service that runs HTTP and TCP health checks against a configurable set of targets, applies per-host circuit breaking, batches results, and ships them to durable storage. Targets persist in PostgreSQL; check results land in ClickHouse for high-cardinality time-series queries. Exposes a REST API for target CRUD and result queries plus Prometheus metrics on a separate port.
+Async Rust service that runs HTTP, TCP, TLS-certificate-expiry, and domain-expiry health checks against a configurable set of targets, applies per-host circuit breaking, batches results, and ships them to durable storage. Targets persist in PostgreSQL; check results land in ClickHouse for high-cardinality time-series queries. Exposes a REST API for target CRUD and result queries plus Prometheus metrics on a separate port.
 
 Built on Rust 1.95 (edition 2024), Tokio, Axum, hyper-util (custom phase-timing connector + tokio-rustls), sqlx, and the official `clickhouse` crate. Designed for low-overhead checks at ~50k concurrent in-flight.
 
 **Full docs: <https://slima4.github.io/status-monitor/>**
+
+## Check types
+
+| Type | Purpose |
+|---|---|
+| `http` | request a URL, match status / body / latency |
+| `tcp` | open a TCP socket within a timeout |
+| `tls_cert` | open TLS, parse leaf cert, alert before `notAfter` |
+| `domain_expiry` | query RDAP, alert before the domain's `expiration` event |
+
+`tls_cert` and `domain_expiry` use `warn_days` / `critical_days` thresholds, default to running daily, and surface `days_remaining` plus registrar / cert subject in the result payload. See [docs/api.md](docs/api.md) for the full payload shapes.
+
+## Alerting
+
+Targets opt into per-channel notifications by adding an `alerts` block:
+
+```jsonc
+"alerts": {
+  "slack":   { "after_failures": 3 },
+  "webhook": { "after_failures": 6 },
+  "email":   { "after_failures": 5, "to": ["ops@example.com"] }
+}
+```
+
+Fire-once + recovery semantics. Transport credentials (Slack webhook URL, generic webhook URL, SMTP) are configured globally under `[notifications.*]`. See [docs/api.md](docs/api.md) and [docs/configuration.md](docs/configuration.md) for the full contract.
 
 ## Quick start
 
