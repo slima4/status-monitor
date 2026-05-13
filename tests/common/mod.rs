@@ -80,6 +80,23 @@ pub fn build_test_app_with_public_source(
     mutate: impl FnOnce(&mut AppConfig),
     public_source: Arc<dyn PublicSource>,
 ) -> Router {
+    build_test_app_with_public_source_inner(mutate, public_source, false)
+}
+
+/// Same as [`build_test_app_with_public_source`] but additionally merges
+/// `web::routes()` so the HTML `/status` page is reachable.
+pub fn build_test_app_with_web_and_public_source(
+    mutate: impl FnOnce(&mut AppConfig),
+    public_source: Arc<dyn PublicSource>,
+) -> Router {
+    build_test_app_with_public_source_inner(mutate, public_source, true)
+}
+
+fn build_test_app_with_public_source_inner(
+    mutate: impl FnOnce(&mut AppConfig),
+    public_source: Arc<dyn PublicSource>,
+    with_web: bool,
+) -> Router {
     let mut cfg = AppConfig::load().expect("config");
     mutate(&mut cfg);
     let target_store = Arc::new(InMemoryTargetStore::new());
@@ -108,7 +125,12 @@ pub fn build_test_app_with_public_source(
         maintenance_store,
         incident_narration_store,
     );
-    build_router(state, CancellationToken::new())
+    let api = build_router(state.clone(), CancellationToken::new());
+    if with_web {
+        api.merge(status_monitor::web::routes().with_state(state))
+    } else {
+        api
+    }
 }
 
 /// Same as [`build_test_app`] but additionally merges `web::routes()` so the

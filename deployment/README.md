@@ -315,6 +315,37 @@ default, which is enough for ~50M rows/day. If you run on a larger host
 to raise `max_server_memory_usage` and `max_memory_usage`, or delete the
 file entirely to use ClickHouse defaults.
 
+## Lighthouse audit (public status page)
+
+The public `/status` page targets a Lighthouse accessibility score ≥ 95.
+Run the audit against a live deployment — Lighthouse needs a real
+HTTP origin, not an in-process router. There is no Rust harness for this;
+use the `lighthouse` Node CLI on any workstation:
+
+```bash
+# One-shot install + run; outputs JSON + HTML reports
+npx -y lighthouse@12 https://your-domain.example.com/status \
+    --only-categories=accessibility,performance,best-practices,seo \
+    --output=json,html \
+    --output-path=./lighthouse-status \
+    --chrome-flags="--headless=new --no-sandbox" \
+    --quiet
+```
+
+Capture the four category scores from `lighthouse-status.report.json`:
+
+```bash
+jq '.categories | to_entries[] | "\(.key): \(.value.score * 100)"' \
+    lighthouse-status.report.json
+```
+
+Re-run after any template, CSS, or `static/js/public/*` change. The page
+ships with HTMX + ~35 lines of timezone JS — under 30 KB gzipped — so
+the performance category typically lands in the high 90s on a wired
+connection. If accessibility drops below 95, the report's `audits`
+section lists the failing rules with element selectors; the public
+templates live in `templates/public/`.
+
 ## What's intentionally NOT here
 
 This deployment is right-sized for **single-tenant, small-team operator use**:

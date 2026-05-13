@@ -2884,6 +2884,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "quick-xml"
+version = "0.40.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b7315c86b26aaef0321fba33c9dcc160da659c6a9d278f0f6a5656d6561c03b"
+dependencies = [
+ "memchr",
+]
+
+[[package]]
 name = "quote"
 version = "1.0.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3825,6 +3834,7 @@ dependencies = [
  "opentelemetry 0.32.0",
  "opentelemetry_sdk",
  "parking_lot",
+ "quick-xml",
  "rcgen",
  "rust-embed",
  "rustls",
