@@ -144,6 +144,7 @@ pub fn http_target(addr: SocketAddr, path: &str, interval_ms: u64) -> Target {
         interval: Duration::from_millis(interval_ms),
         enabled: true,
         tags: vec![],
+        alerts: status_monitor::domain::TargetAlerts::default(),
         created_at: Utc::now(),
         updated_at: Utc::now(),
     }

@@ -7,6 +7,7 @@ use status_monitor::{
     config::AppConfig,
     error::{AppError, Result},
     http_client::client::build_clients,
+    notifier::{Notifier, build_notifiers, engine::AlertEngine},
     observability,
     pipeline::{BatcherConfig, ResultBatcher},
     scheduler::{Scheduler, TargetRegistry},
@@ -15,7 +16,7 @@ use status_monitor::{
         self, ClickhouseResultSink, ClickhouseResultsStore, PostgresTargetStore, ResultSink,
         ResultsStore, TargetStore,
     },
-    worker::WorkerPool,
+    worker::{ResultFanout, WorkerPool},
 };
 use tokio::net::TcpListener;
 use tokio::signal;
@@ -75,11 +76,19 @@ async fn main() -> Result<()> {
     let http_pool_stats = http_clients.pool_stats().clone();
 
     let (result_tx, result_rx) = mpsc::channel(cfg.storage.clickhouse.buffer_size.max(1024));
+    let notifiers: Vec<Arc<dyn Notifier>> = build_notifiers(&cfg.notifications)?;
+    let (alert_tx, alert_rx) = if notifiers.is_empty() {
+        (None, None)
+    } else {
+        let (tx, rx) = mpsc::channel(cfg.storage.clickhouse.buffer_size.max(1024));
+        (Some(tx), Some(rx))
+    };
+    let fanout = ResultFanout::new(result_tx.clone(), alert_tx);
     let pool = Arc::new(WorkerPool::new(
         cfg.checker.max_concurrent_checks,
         http_clients,
         cfg.circuit_breaker,
-        result_tx.clone(),
+        fanout,
     ));
     let registry = Arc::new(TargetRegistry::new(target_store.clone()));
     let scheduler = Arc::new(Scheduler::new(
@@ -108,6 +117,11 @@ async fn main() -> Result<()> {
         let token = root.clone();
         tokio::spawn(async move { batcher.run(token).await })
     };
+    let alert_engine_handle: Option<JoinHandle<()>> = alert_rx.map(|rx| {
+        let token = root.clone();
+        let engine = AlertEngine::new(rx, notifiers);
+        tokio::spawn(async move { engine.run(token).await })
+    });
     // Floor at 100ms to keep a misconfigured 0 / sub-tick value from spinning.
     let sample_interval =
         Duration::from_millis(cfg.observability.gauge_sample_interval_ms.max(100));
@@ -145,6 +159,9 @@ async fn main() -> Result<()> {
     tracing::info!("draining background tasks");
     let drain = async {
         let _ = tokio::join!(scheduler_handle, batcher_handle, sampler_handle);
+        if let Some(h) = alert_engine_handle {
+            let _ = h.await;
+        }
     };
     if timeout(SHUTDOWN_DEADLINE, drain).await.is_err() {
         tracing::warn!(

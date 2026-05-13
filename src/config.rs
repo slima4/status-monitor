@@ -24,6 +24,58 @@ pub struct AppConfig {
     pub observability: ObservabilityConfig,
     #[serde(default)]
     pub api: ApiConfig,
+    #[serde(default)]
+    pub notifications: NotificationsConfig,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct NotificationsConfig {
+    #[serde(default)]
+    pub slack: SlackConfig,
+    #[serde(default)]
+    pub webhook: WebhookConfig,
+    #[serde(default)]
+    pub email: EmailConfig,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(default)]
+pub struct SlackConfig {
+    pub enabled: bool,
+    pub webhook_url: String,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(default)]
+pub struct WebhookConfig {
+    pub enabled: bool,
+    pub url: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct EmailConfig {
+    pub enabled: bool,
+    pub smtp_host: String,
+    pub smtp_port: u16,
+    pub smtp_user: String,
+    pub smtp_password: String,
+    pub from: String,
+    pub starttls: bool,
+}
+
+impl Default for EmailConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            smtp_host: String::new(),
+            smtp_port: 587,
+            smtp_user: String::new(),
+            smtp_password: String::new(),
+            from: String::new(),
+            starttls: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]

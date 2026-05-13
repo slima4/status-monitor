@@ -7,7 +7,7 @@ use status_monitor::http_client::PoolStats;
 use status_monitor::observability::sampler;
 use status_monitor::scheduler::TargetRegistry;
 use status_monitor::storage::InMemoryTargetStore;
-use status_monitor::worker::WorkerPool;
+use status_monitor::worker::{ResultFanout, WorkerPool};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -29,7 +29,7 @@ async fn sampler_runs_and_shuts_down() {
         16,
         test_client(),
         breaker_cfg(),
-        tx.clone(),
+        ResultFanout::storage_only(tx.clone()),
     ));
 
     assert_eq!(pool.max_concurrent(), 16);

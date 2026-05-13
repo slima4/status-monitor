@@ -76,6 +76,28 @@ enabled = false
 per_second = 50
 burst = 100
 
+# Outbound notification channels. Per-target opt-in via the target's `alerts`
+# field references the channel by key; entries here only define transport
+# credentials. Channels marked `enabled = false` cause target opt-ins to no-op.
+[notifications.slack]
+enabled = false
+webhook_url = ""
+
+[notifications.webhook]
+enabled = false
+url = ""
+
+[notifications.email]
+enabled = false
+smtp_host = ""
+smtp_port = 587
+smtp_user = ""
+smtp_password = ""
+from = ""
+# When true, opens a plain TCP connection and upgrades to TLS via STARTTLS.
+# When false, opens an implicit-TLS connection on smtp_port (typically 465).
+starttls = true
+
 [api.cors]
 # Browser CORS for /api/v1/*. Disabled by default. When enabled, every entry in
 # `allowed_origins` must be a full origin (scheme://host[:port]); wildcards are

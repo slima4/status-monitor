@@ -10,7 +10,7 @@ use sqlx::types::Json;
 use uuid::Uuid;
 
 use crate::config::PostgresConfig;
-use crate::domain::{CheckSpec, NewTarget, Target, TargetUpdate};
+use crate::domain::{CheckSpec, NewTarget, Target, TargetAlerts, TargetUpdate};
 use crate::error::Result;
 use crate::security::Cipher;
 use crate::storage::postgres_secrets::{decrypt_in_place, encrypt_in_place};
@@ -67,6 +67,8 @@ impl PostgresTargetStore {
         }
         let check: CheckSpec =
             serde_json::from_value(check_json).context("decoding check_spec JSON")?;
+        let alerts: TargetAlerts =
+            serde_json::from_value(row.alerts).context("decoding alerts JSON")?;
         Ok(Target {
             id: row.id,
             name: row.name,
@@ -74,6 +76,7 @@ impl PostgresTargetStore {
             interval: Duration::from_secs(row.interval_secs.max(0) as u64),
             enabled: row.enabled,
             tags: row.tags,
+            alerts,
             created_at: row.created_at,
             updated_at: row.updated_at,
         })
@@ -92,6 +95,7 @@ struct TargetRow {
     interval_secs: i32,
     enabled: bool,
     tags: Vec<String>,
+    alerts: serde_json::Value,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
 }
@@ -102,7 +106,7 @@ impl TargetStore for PostgresTargetStore {
         let limit = filter.limit.unwrap_or(100).min(10_000) as i64;
         let offset = filter.offset as i64;
         let rows: Vec<TargetRow> = sqlx::query_as::<_, TargetRow>(
-            r#"SELECT id, name, check_spec, interval_secs, enabled, tags, created_at, updated_at
+            r#"SELECT id, name, check_spec, interval_secs, enabled, tags, alerts, created_at, updated_at
                FROM targets
                WHERE ($1::bool IS NULL OR enabled = $1)
                  AND ($2::text IS NULL OR $2 = ANY(tags))
@@ -121,7 +125,7 @@ impl TargetStore for PostgresTargetStore {
 
     async fn list_enabled(&self) -> Result<Vec<Target>> {
         let rows: Vec<TargetRow> = sqlx::query_as::<_, TargetRow>(
-            r#"SELECT id, name, check_spec, interval_secs, enabled, tags, created_at, updated_at
+            r#"SELECT id, name, check_spec, interval_secs, enabled, tags, alerts, created_at, updated_at
                FROM targets
                WHERE enabled = true"#,
         )
@@ -133,7 +137,7 @@ impl TargetStore for PostgresTargetStore {
 
     async fn get(&self, id: Uuid) -> Result<Option<Target>> {
         let row: Option<TargetRow> = sqlx::query_as::<_, TargetRow>(
-            r#"SELECT id, name, check_spec, interval_secs, enabled, tags, created_at, updated_at
+            r#"SELECT id, name, check_spec, interval_secs, enabled, tags, alerts, created_at, updated_at
                FROM targets WHERE id = $1"#,
         )
         .bind(id)
@@ -148,16 +152,18 @@ impl TargetStore for PostgresTargetStore {
 
     async fn create(&self, new: NewTarget) -> Result<Target> {
         let check_json = self.encode_check(&new.check)?;
+        let alerts_json = serde_json::to_value(&new.alerts).context("encoding alerts JSON")?;
         let row: TargetRow = sqlx::query_as::<_, TargetRow>(
-            r#"INSERT INTO targets (name, check_spec, interval_secs, enabled, tags)
-               VALUES ($1, $2, $3, $4, $5)
-               RETURNING id, name, check_spec, interval_secs, enabled, tags, created_at, updated_at"#,
+            r#"INSERT INTO targets (name, check_spec, interval_secs, enabled, tags, alerts)
+               VALUES ($1, $2, $3, $4, $5, $6)
+               RETURNING id, name, check_spec, interval_secs, enabled, tags, alerts, created_at, updated_at"#,
         )
         .bind(&new.name)
         .bind(check_json)
         .bind(new.interval.as_secs() as i32)
         .bind(new.enabled)
         .bind(&new.tags)
+        .bind(alerts_json)
         .fetch_one(&self.pool)
         .await
         .context("insert target")?;
@@ -171,6 +177,11 @@ impl TargetStore for PostgresTargetStore {
             .map(|c| self.encode_check(c))
             .transpose()?;
         let interval_secs = update.interval.map(|d| d.as_secs() as i32);
+        let alerts_json = update
+            .alerts
+            .as_ref()
+            .map(|a| serde_json::to_value(a).context("encoding alerts JSON"))
+            .transpose()?;
 
         let row: Option<TargetRow> = sqlx::query_as::<_, TargetRow>(
             r#"UPDATE targets SET
@@ -179,9 +190,10 @@ impl TargetStore for PostgresTargetStore {
                  interval_secs = COALESCE($4, interval_secs),
                  enabled = COALESCE($5, enabled),
                  tags = COALESCE($6, tags),
+                 alerts = COALESCE($7, alerts),
                  updated_at = now()
                WHERE id = $1
-               RETURNING id, name, check_spec, interval_secs, enabled, tags, created_at, updated_at"#,
+               RETURNING id, name, check_spec, interval_secs, enabled, tags, alerts, created_at, updated_at"#,
         )
         .bind(id)
         .bind(update.name)
@@ -189,6 +201,7 @@ impl TargetStore for PostgresTargetStore {
         .bind(interval_secs)
         .bind(update.enabled)
         .bind(update.tags)
+        .bind(alerts_json)
         .fetch_optional(&self.pool)
         .await
         .context("update target")?;
@@ -212,12 +225,13 @@ impl TargetStore for PostgresTargetStore {
             return Ok(Vec::new());
         }
 
-        const SQL: &str = r#"INSERT INTO targets (name, check_spec, interval_secs, enabled, tags)
+        const SQL: &str = r#"INSERT INTO targets (name, check_spec, interval_secs, enabled, tags, alerts)
                SELECT u.name, u.check_spec, u.interval_secs, u.enabled,
-                      ARRAY(SELECT jsonb_array_elements_text(u.tags))
-               FROM UNNEST($1::text[], $2::jsonb[], $3::int4[], $4::bool[], $5::jsonb[])
-                    AS u(name, check_spec, interval_secs, enabled, tags)
-               RETURNING id, name, check_spec, interval_secs, enabled, tags, created_at, updated_at"#;
+                      ARRAY(SELECT jsonb_array_elements_text(u.tags)),
+                      u.alerts
+               FROM UNNEST($1::text[], $2::jsonb[], $3::int4[], $4::bool[], $5::jsonb[], $6::jsonb[])
+                    AS u(name, check_spec, interval_secs, enabled, tags, alerts)
+               RETURNING id, name, check_spec, interval_secs, enabled, tags, alerts, created_at, updated_at"#;
 
         let len = items.len();
         let mut names: Vec<String> = Vec::with_capacity(len);
@@ -226,6 +240,7 @@ impl TargetStore for PostgresTargetStore {
         // Postgres rejects ragged 2-D arrays (text[][] must be rectangular), so
         // pass per-row tag lists as jsonb and unpack on the server side.
         let mut tags_json: Vec<Json<Vec<String>>> = Vec::with_capacity(len);
+        let mut alerts_json: Vec<Json<TargetAlerts>> = Vec::with_capacity(len);
 
         let rows: Vec<TargetRow> = if let Some(cipher) = &self.cipher {
             // Cipher path: walk each CheckSpec via serde_json::Value so credential
@@ -239,6 +254,7 @@ impl TargetStore for PostgresTargetStore {
                 intervals.push(new.interval.as_secs() as i32);
                 enabled.push(new.enabled);
                 tags_json.push(Json(new.tags));
+                alerts_json.push(Json(new.alerts));
             }
             sqlx::query_as::<_, TargetRow>(SQL)
                 .bind(&names)
@@ -246,6 +262,7 @@ impl TargetStore for PostgresTargetStore {
                 .bind(&intervals)
                 .bind(&enabled)
                 .bind(&tags_json)
+                .bind(&alerts_json)
                 .fetch_all(&self.pool)
                 .await
                 .context("bulk insert targets")?
@@ -259,6 +276,7 @@ impl TargetStore for PostgresTargetStore {
                 intervals.push(new.interval.as_secs() as i32);
                 enabled.push(new.enabled);
                 tags_json.push(Json(new.tags));
+                alerts_json.push(Json(new.alerts));
             }
             sqlx::query_as::<_, TargetRow>(SQL)
                 .bind(&names)
@@ -266,6 +284,7 @@ impl TargetStore for PostgresTargetStore {
                 .bind(&intervals)
                 .bind(&enabled)
                 .bind(&tags_json)
+                .bind(&alerts_json)
                 .fetch_all(&self.pool)
                 .await
                 .context("bulk insert targets")?
@@ -276,7 +295,7 @@ impl TargetStore for PostgresTargetStore {
 
     async fn list_updated_since(&self, since: DateTime<Utc>) -> Result<Vec<Target>> {
         let rows: Vec<TargetRow> = sqlx::query_as::<_, TargetRow>(
-            r#"SELECT id, name, check_spec, interval_secs, enabled, tags, created_at, updated_at
+            r#"SELECT id, name, check_spec, interval_secs, enabled, tags, alerts, created_at, updated_at
                FROM targets WHERE updated_at > $1"#,
         )
         .bind(since)

@@ -11,8 +11,8 @@ use status_monitor::domain::CheckStatus;
 use status_monitor::pipeline::{BatcherConfig, ResultBatcher};
 use status_monitor::scheduler::{Scheduler, TargetRegistry};
 use status_monitor::storage::{InMemorySink, InMemoryTargetStore};
-use status_monitor::worker::WorkerPool;
 use status_monitor::worker::circuit_breaker::CIRCUIT_OPEN_REASON;
+use status_monitor::worker::{ResultFanout, WorkerPool};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -51,7 +51,12 @@ async fn scheduler_runs_target_periodically() {
     let registry = Arc::new(TargetRegistry::new(store));
     let (tx, mut rx) = mpsc::channel(64);
 
-    let pool = Arc::new(WorkerPool::new(50, test_client(), breaker_cfg(), tx));
+    let pool = Arc::new(WorkerPool::new(
+        50,
+        test_client(),
+        breaker_cfg(),
+        ResultFanout::storage_only(tx),
+    ));
     let scheduler = Arc::new(Scheduler::new(registry, pool, scheduler_cfg(30)));
     let shutdown = CancellationToken::new();
     let handle = tokio::spawn(scheduler.clone().run(shutdown.clone()));
@@ -81,7 +86,12 @@ async fn scheduler_picks_up_new_targets_on_refresh() {
     let registry = Arc::new(TargetRegistry::new(store.clone()));
     let (tx, mut rx) = mpsc::channel(64);
 
-    let pool = Arc::new(WorkerPool::new(50, test_client(), breaker_cfg(), tx));
+    let pool = Arc::new(WorkerPool::new(
+        50,
+        test_client(),
+        breaker_cfg(),
+        ResultFanout::storage_only(tx),
+    ));
     let scheduler = Arc::new(Scheduler::new(registry, pool, scheduler_cfg(1)));
     let shutdown = CancellationToken::new();
     let handle = tokio::spawn(scheduler.clone().run(shutdown.clone()));
@@ -119,7 +129,7 @@ async fn shutdown_drains_in_flight_results() {
         50,
         test_client(),
         breaker_cfg(),
-        tx.clone(),
+        ResultFanout::storage_only(tx.clone()),
     ));
     let scheduler = Arc::new(Scheduler::new(registry, pool, scheduler_cfg(30)));
     let batcher = ResultBatcher::new(
@@ -169,7 +179,12 @@ async fn worker_pool_breaker_opens_after_failures() {
     let registry = Arc::new(TargetRegistry::new(store));
     let (tx, mut rx) = mpsc::channel(64);
 
-    let pool = Arc::new(WorkerPool::new(50, test_client(), breaker_cfg(), tx));
+    let pool = Arc::new(WorkerPool::new(
+        50,
+        test_client(),
+        breaker_cfg(),
+        ResultFanout::storage_only(tx),
+    ));
     let scheduler = Arc::new(Scheduler::new(registry, pool.clone(), scheduler_cfg(30)));
     let shutdown = CancellationToken::new();
     let handle = tokio::spawn(scheduler.run(shutdown.clone()));

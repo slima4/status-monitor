@@ -4,7 +4,7 @@ pub mod pool;
 pub mod tcp_check;
 
 pub use http_check::execute_http_check;
-pub use pool::{CheckTask, WorkerPool};
+pub use pool::{CheckTask, ResultFanout, WorkerPool};
 
 use uuid::Uuid;
 

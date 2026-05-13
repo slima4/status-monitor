@@ -1,0 +1,65 @@
+use async_trait::async_trait;
+use serde::Serialize;
+use url::Url;
+
+use crate::domain::AlertChannel;
+use crate::error::Result;
+use crate::notifier::Notifier;
+use crate::notifier::event::{AlertEvent, AlertKind};
+use crate::notifier::transport::{NotifyHttpClient, post_json};
+
+pub struct SlackNotifier {
+    client: NotifyHttpClient,
+    webhook_url: Url,
+}
+
+#[derive(Serialize)]
+struct SlackPayload<'a> {
+    text: &'a str,
+}
+
+impl SlackNotifier {
+    pub fn new(client: NotifyHttpClient, webhook_url: Url) -> Self {
+        Self {
+            client,
+            webhook_url,
+        }
+    }
+
+    fn render(event: &AlertEvent) -> String {
+        match event.kind {
+            AlertKind::Down => format!(
+                ":rotating_light: *{name}* is DOWN ({failures} consecutive failures, status={status}{err})",
+                name = event.target_name,
+                failures = event.consecutive_failures,
+                status = event.last_status.as_str(),
+                err = event
+                    .last_error
+                    .as_deref()
+                    .map(|e| format!(": {e}"))
+                    .unwrap_or_default()
+            ),
+            AlertKind::Recovered => format!(
+                ":white_check_mark: *{name}* has RECOVERED",
+                name = event.target_name
+            ),
+        }
+    }
+}
+
+#[async_trait]
+impl Notifier for SlackNotifier {
+    fn channel(&self) -> AlertChannel {
+        AlertChannel::Slack
+    }
+
+    async fn notify(&self, event: &AlertEvent) -> Result<()> {
+        let text = Self::render(event);
+        post_json(
+            &self.client,
+            &self.webhook_url,
+            &SlackPayload { text: &text },
+        )
+        .await
+    }
+}

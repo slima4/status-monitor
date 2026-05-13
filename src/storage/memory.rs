@@ -105,6 +105,7 @@ impl InMemoryTargetStore {
             interval: new.interval,
             enabled: new.enabled,
             tags: new.tags,
+            alerts: new.alerts,
             created_at: now,
             updated_at: now,
         }

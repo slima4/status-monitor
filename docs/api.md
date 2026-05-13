@@ -67,11 +67,38 @@ Tagged enum, `type` discriminator.
   "check": { /* check spec */ },
   "interval": 30,             // seconds between ticks; min 10 (DB CHECK constraint)
   "enabled": true,
-  "tags": ["prod", "tier1"]
+  "tags": ["prod", "tier1"],
+  "alerts": { /* optional, see below */ }
 }
 ```
 
 Server returns the full `Target` including `id` (UUIDv7), `created_at`, `updated_at`.
+
+### Alert config
+
+`alerts` is an optional map keyed by channel name. Presence of a channel key opts the target in; omitting the field disables alerting for that target. Channel-specific transport credentials live in [`notifications.*`](configuration.md) — a target opting into a globally-disabled channel logs a debug message and produces no notifications.
+
+```jsonc
+"alerts": {
+  "slack":   { "after_failures": 3, "notify_recovery": true },
+  "webhook": { "after_failures": 6, "notify_recovery": true },
+  "email":   { "after_failures": 5, "notify_recovery": false, "to": ["ops@example.com"] }
+}
+```
+
+- `after_failures` — number of consecutive non-`up` results before the channel fires a `down` notification. Reset to zero on the next `up` result. Must be `>= 1`.
+- `notify_recovery` — when `true` (default), an `up` result following a fired `down` emits a `recovered` notification. When `false`, recovery is silent.
+- `to` — required for `email`; must contain at least one address. Other channels do not accept this field.
+
+The state machine is fire-once + recovery: while a target is in the `alerting` state, repeat failures do not re-fire. Counters are kept in memory and reset on process restart — after a restart, a target that was already alerting will re-fire when its threshold is next reached.
+
+### Alert validation errors
+
+`POST` and `PATCH` return `400 Bad Request` for:
+
+- `alerts.<channel>: after_failures must be >= 1`
+- `alerts.email: 'to' must contain at least one recipient`
+- `alerts.email: '<addr>' is not a valid email address` (must contain `@`; full RFC 5321 validation happens at send time)
 
 ### Validation errors
 

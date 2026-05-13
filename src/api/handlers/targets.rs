@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use crate::api::redaction::{REDACTED, Redacted};
 use crate::app::AppState;
-use crate::domain::{NewTarget, Target, TargetUpdate};
+use crate::domain::{AlertChannel, NewTarget, Target, TargetAlerts, TargetUpdate};
 use crate::error::{AppError, Result};
 use crate::security::SsrfGuard;
 use crate::storage::TargetFilter;
@@ -69,6 +69,9 @@ pub async fn update(
     if let Some(check) = &update.check {
         validate_check(check, &ssrf_guard(&state))?;
     }
+    if let Some(alerts) = &update.alerts {
+        validate_alerts(alerts)?;
+    }
     match state.target_store.update(id, update).await? {
         Some(t) => Ok(Redacted::new(t)),
         None => Err(AppError::NotFound("target not found".into())),
@@ -109,7 +112,44 @@ fn ssrf_guard(state: &AppState) -> SsrfGuard {
 }
 
 fn validate_new_target(new: &NewTarget, guard: &SsrfGuard) -> Result<()> {
-    validate_check(&new.check, guard)
+    validate_check(&new.check, guard)?;
+    validate_alerts(&new.alerts)
+}
+
+fn validate_alerts(alerts: &TargetAlerts) -> Result<()> {
+    for (channel, cfg) in alerts.iter() {
+        if cfg.after_failures == 0 {
+            return Err(AppError::BadRequest(format!(
+                "alerts.{}: after_failures must be >= 1",
+                channel.as_str()
+            )));
+        }
+        match channel {
+            AlertChannel::Email => {
+                if cfg.to.is_empty() {
+                    return Err(AppError::BadRequest(
+                        "alerts.email: 'to' must contain at least one recipient".into(),
+                    ));
+                }
+                for addr in &cfg.to {
+                    if !addr.contains('@') {
+                        return Err(AppError::BadRequest(format!(
+                            "alerts.email: '{addr}' is not a valid email address"
+                        )));
+                    }
+                }
+            }
+            _ => {
+                if !cfg.to.is_empty() {
+                    return Err(AppError::BadRequest(format!(
+                        "alerts.{}: 'to' is only valid for the email channel",
+                        channel.as_str()
+                    )));
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 fn validate_check(check: &crate::domain::CheckSpec, guard: &SsrfGuard) -> Result<()> {

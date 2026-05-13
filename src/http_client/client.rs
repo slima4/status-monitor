@@ -169,7 +169,7 @@ fn build_tls_config(verify: bool, h2_prior_knowledge: bool) -> Result<ClientConf
     Ok(cfg)
 }
 
-fn install_default_crypto_provider() {
+pub(crate) fn install_default_crypto_provider() {
     if CryptoProvider::get_default().is_none() {
         let _ = rustls::crypto::ring::default_provider().install_default();
     }

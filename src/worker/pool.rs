@@ -7,6 +7,7 @@ use tokio::sync::{Semaphore, mpsc};
 use crate::config::CircuitBreakerConfig;
 use crate::domain::{CheckResult, CheckSpec, Target};
 use crate::http_client::HttpClients;
+use crate::notifier::event::AlertSignal;
 use crate::observability::metrics::names;
 use crate::worker::circuit_breaker::{CIRCUIT_OPEN_REASON, CircuitBreaker};
 
@@ -23,13 +24,52 @@ impl CheckTask {
     }
 }
 
+/// Fan-out for completed CheckResults: every result goes to the storage mpsc;
+/// when alerts are configured a parallel mpsc forwards (target, result) pairs
+/// to the alert engine. Both downstreams own independent back-pressure budgets.
+#[derive(Clone)]
+pub struct ResultFanout {
+    storage: mpsc::Sender<CheckResult>,
+    alerts: Option<mpsc::Sender<AlertSignal>>,
+}
+
+impl ResultFanout {
+    pub fn new(
+        storage: mpsc::Sender<CheckResult>,
+        alerts: Option<mpsc::Sender<AlertSignal>>,
+    ) -> Self {
+        Self { storage, alerts }
+    }
+
+    pub fn storage_only(storage: mpsc::Sender<CheckResult>) -> Self {
+        Self::new(storage, None)
+    }
+
+    fn dispatch(&self, target: Arc<Target>, result: CheckResult) {
+        if let Some(tx) = &self.alerts {
+            // Only clone when an alert downstream is attached.
+            let signal = AlertSignal {
+                target,
+                result: result.clone(),
+            };
+            if tx.try_send(signal).is_err() {
+                counter!(names::ALERTS_DROPPED, "reason" => "queue_full").increment(1);
+            }
+        }
+        if let Err(err) = self.storage.try_send(result) {
+            tracing::warn!(?err, "result channel full or closed");
+            counter!(names::STORAGE_DROPPED, "reason" => "queue_full").increment(1);
+        }
+    }
+}
+
 pub struct WorkerPool {
     semaphore: Arc<Semaphore>,
     max_concurrent: usize,
     http_clients: Arc<HttpClients>,
     breakers: Arc<DashMap<String, Arc<CircuitBreaker>>>,
     breaker_cfg: CircuitBreakerConfig,
-    result_tx: mpsc::Sender<CheckResult>,
+    fanout: ResultFanout,
 }
 
 impl WorkerPool {
@@ -37,7 +77,7 @@ impl WorkerPool {
         max_concurrent: usize,
         http_clients: HttpClients,
         breaker_cfg: CircuitBreakerConfig,
-        result_tx: mpsc::Sender<CheckResult>,
+        fanout: ResultFanout,
     ) -> Self {
         Self {
             semaphore: Arc::new(Semaphore::new(max_concurrent)),
@@ -45,7 +85,7 @@ impl WorkerPool {
             http_clients: Arc::new(http_clients),
             breakers: Arc::new(DashMap::new()),
             breaker_cfg,
-            result_tx,
+            fanout,
         }
     }
 
@@ -83,7 +123,8 @@ impl WorkerPool {
         let clients = self.http_clients.clone();
         let breakers = self.breakers.clone();
         let breaker_cfg = self.breaker_cfg;
-        let result_tx = self.result_tx.clone();
+        let fanout = self.fanout.clone();
+        let target = task.target.clone();
 
         tokio::spawn(async move {
             let _permit = permit;
@@ -92,17 +133,14 @@ impl WorkerPool {
             if !breaker.allow() {
                 counter!(names::CHECK_ERRORS, "kind" => "circuit_open").increment(1);
                 let result = CheckResult::error(task.target.id, CIRCUIT_OPEN_REASON);
-                let _ = result_tx.try_send(result);
+                fanout.dispatch(target, result);
                 return;
             }
 
             let result = crate::worker::execute(task.target.id, &task.target.check, &clients).await;
             breaker.record(result.status);
             record_metrics(&result);
-            if let Err(err) = result_tx.try_send(result) {
-                tracing::warn!(?err, "result channel full or closed");
-                counter!(names::STORAGE_DROPPED, "reason" => "queue_full").increment(1);
-            }
+            fanout.dispatch(target, result);
         });
     }
 }

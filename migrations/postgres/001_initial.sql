@@ -5,6 +5,7 @@ CREATE TABLE targets (
     interval_secs INTEGER NOT NULL CHECK (interval_secs >= 10),
     enabled BOOLEAN NOT NULL DEFAULT true,
     tags TEXT[] NOT NULL DEFAULT '{}',
+    alerts JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );

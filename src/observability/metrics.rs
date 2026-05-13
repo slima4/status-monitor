@@ -101,6 +101,18 @@ fn register_descriptions() {
         "status_monitor_circuit_breakers_open",
         "Number of circuit breakers currently in the Open state"
     );
+    describe_counter!(
+        "status_monitor_notifications_total",
+        "Alert notifications dispatched, labelled by channel and kind"
+    );
+    describe_counter!(
+        "status_monitor_notifications_failures_total",
+        "Alert notification dispatches that returned an error, labelled by channel"
+    );
+    describe_counter!(
+        "status_monitor_alerts_dropped_total",
+        "Alert signals dropped before reaching the engine, labelled by reason"
+    );
 }
 
 pub mod names {
@@ -122,4 +134,7 @@ pub mod names {
     pub const WORKERS_IN_FLIGHT: &str = "status_monitor_workers_in_flight";
     pub const RESULT_QUEUE_DEPTH: &str = "status_monitor_result_queue_depth";
     pub const BREAKERS_OPEN: &str = "status_monitor_circuit_breakers_open";
+    pub const NOTIFICATIONS_TOTAL: &str = "status_monitor_notifications_total";
+    pub const NOTIFICATIONS_FAILURES: &str = "status_monitor_notifications_failures_total";
+    pub const ALERTS_DROPPED: &str = "status_monitor_alerts_dropped_total";
 }

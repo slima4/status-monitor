@@ -348,6 +348,119 @@ async fn accepts_verify_tls_true_with_credentials_over_https() {
     assert_eq!(post_target(payload).await, StatusCode::CREATED);
 }
 
+fn target_payload_with_alerts(alerts: Value) -> Value {
+    json!({
+        "name": "with-alerts",
+        "check": {
+            "type": "http",
+            "url": "http://example.com",
+            "method": "GET",
+            "timeout": 5000,
+            "follow_redirects": false,
+            "max_redirects": 0,
+            "expected_status": { "kind": "exact", "value": 200 },
+            "headers": {},
+            "verify_tls": true
+        },
+        "interval": 60,
+        "tags": [],
+        "alerts": alerts
+    })
+}
+
+#[tokio::test]
+async fn create_target_with_alerts_round_trips() {
+    let app = app();
+    let payload = target_payload_with_alerts(json!({
+        "slack": { "after_failures": 3 },
+        "webhook": { "after_failures": 6, "notify_recovery": false }
+    }));
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::post("/api/v1/targets")
+                .header("content-type", "application/json")
+                .body(Body::from(payload.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let body = body_json(resp).await;
+    assert_eq!(body["alerts"]["slack"]["after_failures"], 3);
+    assert_eq!(body["alerts"]["webhook"]["notify_recovery"], false);
+    let id = body["id"].as_str().unwrap();
+
+    let resp = app
+        .oneshot(
+            Request::get(format!("/api/v1/targets/{id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let got = body_json(resp).await;
+    assert_eq!(got["alerts"]["slack"]["after_failures"], 3);
+}
+
+#[tokio::test]
+async fn create_target_without_alerts_defaults_empty() {
+    let resp = app()
+        .oneshot(
+            Request::post("/api/v1/targets")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "name": "no-alerts",
+                        "check": {
+                            "type": "http",
+                            "url": "http://example.com",
+                            "method": "GET",
+                            "timeout": 5000,
+                            "follow_redirects": false,
+                            "max_redirects": 0,
+                            "expected_status": { "kind": "exact", "value": 200 },
+                            "headers": {},
+                            "verify_tls": true
+                        },
+                        "interval": 60,
+                        "tags": []
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let body = body_json(resp).await;
+    assert_eq!(body["alerts"], json!({}));
+}
+
+#[tokio::test]
+async fn rejects_alerts_email_with_empty_recipients() {
+    let payload = target_payload_with_alerts(json!({
+        "email": { "after_failures": 3, "to": [] }
+    }));
+    assert_eq!(post_target(payload).await, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn rejects_alerts_with_zero_after_failures() {
+    let payload = target_payload_with_alerts(json!({
+        "slack": { "after_failures": 0 }
+    }));
+    assert_eq!(post_target(payload).await, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn rejects_alerts_email_with_malformed_address() {
+    let payload = target_payload_with_alerts(json!({
+        "email": { "after_failures": 3, "to": ["not-an-email"] }
+    }));
+    assert_eq!(post_target(payload).await, StatusCode::BAD_REQUEST);
+}
+
 #[tokio::test]
 async fn accepts_verify_tls_false_without_credentials() {
     let payload = json!({

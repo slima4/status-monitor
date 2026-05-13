@@ -4,6 +4,7 @@ pub mod config;
 pub mod domain;
 pub mod error;
 pub mod http_client;
+pub mod notifier;
 pub mod observability;
 pub mod pipeline;
 pub mod scheduler;

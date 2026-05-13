@@ -4,6 +4,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use super::alert::TargetAlerts;
 use super::check::CheckSpec;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -15,6 +16,8 @@ pub struct Target {
     pub interval: Duration,
     pub enabled: bool,
     pub tags: Vec<String>,
+    #[serde(default)]
+    pub alerts: TargetAlerts,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -29,6 +32,8 @@ pub struct NewTarget {
     pub enabled: bool,
     #[serde(default)]
     pub tags: Vec<String>,
+    #[serde(default)]
+    pub alerts: TargetAlerts,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -39,6 +44,7 @@ pub struct TargetUpdate {
     pub interval: Option<Duration>,
     pub enabled: Option<bool>,
     pub tags: Option<Vec<String>>,
+    pub alerts: Option<TargetAlerts>,
 }
 
 fn default_true() -> bool {
