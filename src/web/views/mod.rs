@@ -1,5 +1,6 @@
 pub mod dashboard;
 pub mod targets_detail;
+pub mod targets_form;
 pub mod targets_list;
 
 use chrono::{DateTime, SecondsFormat, Utc};
