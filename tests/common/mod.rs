@@ -27,6 +27,16 @@ use uuid::Uuid;
 /// freshly created and never fires — background tasks (rate-limit GC) leak
 /// until the test binary exits, which is fine for short-lived tests.
 pub fn build_test_app(mutate: impl FnOnce(&mut AppConfig)) -> Router {
+    build_test_app_inner(mutate, false)
+}
+
+/// Same as [`build_test_app`] but additionally merges `web::routes()` so the
+/// HTML UI is reachable. Mirrors the composition in `src/main.rs`.
+pub fn build_test_app_with_web(mutate: impl FnOnce(&mut AppConfig)) -> Router {
+    build_test_app_inner(mutate, true)
+}
+
+fn build_test_app_inner(mutate: impl FnOnce(&mut AppConfig), with_web: bool) -> Router {
     let mut cfg = AppConfig::load().expect("config");
     mutate(&mut cfg);
     let target_store = Arc::new(InMemoryTargetStore::new());
@@ -49,7 +59,12 @@ pub fn build_test_app(mutate: impl FnOnce(&mut AppConfig)) -> Router {
         http_clients,
         pool,
     );
-    build_router(state, CancellationToken::new())
+    let api = build_router(state.clone(), CancellationToken::new());
+    if with_web {
+        api.merge(status_monitor::web::routes().with_state(state))
+    } else {
+        api
+    }
 }
 
 pub async fn spawn_router(router: Router) -> SocketAddr {

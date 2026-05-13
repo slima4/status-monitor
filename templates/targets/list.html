@@ -8,16 +8,20 @@
   </header>
 
   <form id="targets-filter"
+        role="search"
+        aria-label="Filter targets"
         hx-get="/web/targets/list"
         hx-target="#target-rows"
         hx-swap="outerHTML"
         hx-push-url="true"
         hx-trigger="change, keyup delay:300ms from:input[name='q']"
         class="flex flex-wrap items-center gap-3 rounded border bg-white px-3 py-2 text-sm">
-    <input type="search" name="q" value="{{ q }}" placeholder="Search by name (client-side)"
+    <label class="sr-only" for="targets-search">Search by name</label>
+    <input id="targets-search" type="search" name="q" value="{{ q }}" placeholder="Search by name (client-side)"
            data-client-filter
            class="rounded border px-2 py-1 text-sm w-64">
-    <input type="text" name="tag" value="{{ tag }}" placeholder="Filter by tag"
+    <label class="sr-only" for="targets-tag">Filter by tag</label>
+    <input id="targets-tag" type="text" name="tag" value="{{ tag }}" placeholder="Filter by tag"
            class="rounded border px-2 py-1 text-sm w-44">
     <label class="flex items-center gap-1 text-slate-600">
       <span>Enabled</span>
@@ -27,23 +31,24 @@
         <option value="false"{% if enabled == Some(false) %} selected{% endif %}>disabled</option>
       </select>
     </label>
-    <span class="ml-auto text-xs text-slate-500" aria-live="polite">
+    <span role="status" class="ml-auto text-xs text-slate-500">
       <span class="htmx-indicator" id="filter-indicator">Loading…</span>
     </span>
   </form>
 
-  <div class="overflow-hidden rounded border bg-white">
+  <div class="overflow-x-auto rounded border bg-white">
     <table class="min-w-full text-sm">
+      <caption class="sr-only">Monitored targets with status, configuration, and recent activity.</caption>
       <thead class="border-b bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
         <tr>
-          <th class="px-3 py-2">Status</th>
-          <th class="px-3 py-2">Name</th>
-          <th class="px-3 py-2">Type</th>
-          <th class="px-3 py-2">Address</th>
-          <th class="px-3 py-2">Interval</th>
-          <th class="px-3 py-2">Tags</th>
-          <th class="px-3 py-2">Last result</th>
-          <th class="px-3 py-2 text-right">Actions</th>
+          <th scope="col" class="px-3 py-2">Status</th>
+          <th scope="col" class="px-3 py-2">Name</th>
+          <th scope="col" class="px-3 py-2">Type</th>
+          <th scope="col" class="px-3 py-2">Address</th>
+          <th scope="col" class="px-3 py-2">Interval</th>
+          <th scope="col" class="px-3 py-2">Tags</th>
+          <th scope="col" class="px-3 py-2">Last result</th>
+          <th scope="col" class="px-3 py-2 text-right">Actions</th>
         </tr>
       </thead>
       {% include "targets/partials/list_body.html" %}

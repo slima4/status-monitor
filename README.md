@@ -114,6 +114,73 @@ Sources under [`docs/`](docs/) — readable directly on GitHub too:
 | [docs/benchmarks.md](docs/benchmarks.md) | Criterion micro-benchmarks, single-core throughput, profile breakdown |
 | [docs/troubleshooting.md](docs/troubleshooting.md) | common failures and how to read them off metrics |
 
+## Web UI
+
+The single binary serves both the `/api/v1/*` JSON surface and a
+server-rendered HTML UI at `/`. The UI is built from:
+
+- **askama 0.16 + askama_web 0.16** — compile-time HTML templates under
+  [`templates/`](templates/). Type mismatches fail `cargo build`.
+- **HTMX 2.0.9 + json-enc** — bundled under
+  [`static/js/`](static/js/). Powers partial swaps (filter, paginate,
+  delete) and JSON form submission. No SPA framework.
+- **Tailwind CSS 4** — CSS-first config in
+  [`static/css/input.css`](static/css/input.css) (`@source`, `@theme`,
+  `@layer components`). No `tailwind.config.js`.
+- **ECharts 6** — lazy-loaded from page-level `<script>` tags, only
+  where charts exist (dashboard, target detail).
+
+### How the build runs
+
+[`build.rs`](build.rs) shells out to `./bin/tailwindcss --minify` before
+each `cargo build`. The Tailwind standalone CLI is fetched on first
+build by [`scripts/fetch-tailwind.sh`](scripts/fetch-tailwind.sh) (~30
+MB; not committed). After `cargo build --release` you have one
+~23 MB executable with every template, every CSS byte, and every
+vendored JS file embedded via `rust-embed`.
+
+### Routes
+
+| Path | Owner |
+|---|---|
+| `GET /` | dashboard (auto-refreshes via HTMX every 5 s) |
+| `GET /targets` | targets list + filters |
+| `GET /targets/{id}` | target detail with charts and time-range nav |
+| `GET /targets/new`, `/targets/{id}/edit` | forms posting JSON to `/api/v1/targets` |
+| `GET /web/targets/list` | tbody fragment for filter/paginate swaps |
+| `GET /web/partials/dashboard` | chrome-free fragment for the 5 s refresh region |
+| `GET /docs` | Swagger UI generated from `/api/openapi.json` |
+| `GET /static/*` | embedded assets (`css/`, `js/`, `img/`) |
+
+Every UI mutation hits an existing `/api/v1/*` endpoint — there are no
+`/web/*` write routes, which keeps the API the single source of truth
+and makes a future SvelteKit port a templates-only rewrite.
+
+### Adding a new page
+
+1. Add a template under `templates/` (extend `base.html`).
+2. Add a `#[derive(Template, WebTemplate)]` struct and handler in
+   `src/web/views/`.
+3. Register the route in `src/web/routes.rs`.
+4. Tailwind picks up new utility classes automatically via the
+   `@source "../../templates/**/*.html"` directive.
+
+### UI tests
+
+- **Unit (render):** every view in `src/web/views/` ships a `#[test]`
+  that renders the template with a fixtures struct and asserts on the
+  output (presence of the HTMX hooks, redaction sentinels, table
+  scaffolding).
+- **End-to-end:** [`tests/web_e2e_test.rs`](tests/web_e2e_test.rs)
+  drives the merged API+web router via `tower::ServiceExt::oneshot`,
+  covering dashboard / list / detail / forms / 404 paths and
+  verifying credential redaction never leaks real values into HTML.
+
+```bash
+cargo test --lib web::          # unit render tests
+cargo test --test web_e2e_test  # e2e
+```
+
 ## Development
 
 Requires Rust 1.95+ (edition 2024). Install via `rustup`.

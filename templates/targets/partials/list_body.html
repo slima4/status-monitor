@@ -28,11 +28,13 @@
       {% if row.last_at != "" %}{{ row.last_at }}{% else %}—{% endif %}
     </td>
     <td class="px-3 py-2 text-right">
-      <button hx-delete="/api/v1/targets/{{ row.id }}"
+      <button type="button"
+              hx-delete="/api/v1/targets/{{ row.id }}"
               hx-confirm="Delete target {{ row.name }}?"
               hx-target="closest tr"
               hx-swap="outerHTML swap:300ms"
-              class="text-xs text-red-600 hover:text-red-800">Delete</button>
+              aria-label="Delete target {{ row.name }}"
+              class="rounded text-xs text-red-600 hover:text-red-800 focus-visible:ring-red-500">Delete</button>
     </td>
   </tr>
   {% endfor %}

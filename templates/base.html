@@ -11,15 +11,21 @@
     {% block head %}{% endblock %}
 </head>
 <body class="bg-slate-50 text-slate-900 antialiased">
+    <a href="#main-content"
+       class="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:rounded focus:bg-white focus:px-3 focus:py-2 focus:text-sm focus:ring-2 focus:ring-slate-700">
+        Skip to main content
+    </a>
     <header class="border-b bg-white">
-        <nav class="container mx-auto flex items-center gap-6 px-4 py-3">
+        <nav aria-label="Primary" class="container mx-auto flex items-center gap-6 px-4 py-3">
             <a href="/" class="font-semibold tracking-tight">Status Monitor</a>
-            <a href="/" class="text-sm{% if active_tab == "dashboard" %} font-medium text-slate-900{% else %} text-slate-500 hover:text-slate-700{% endif %}">Dashboard</a>
-            <a href="/targets" class="text-sm{% if active_tab == "targets" %} font-medium text-slate-900{% else %} text-slate-500 hover:text-slate-700{% endif %}">Targets</a>
+            <a href="/"{% if active_tab == "dashboard" %} aria-current="page"{% endif %}
+               class="text-sm{% if active_tab == "dashboard" %} font-medium text-slate-900{% else %} text-slate-500 hover:text-slate-700{% endif %}">Dashboard</a>
+            <a href="/targets"{% if active_tab == "targets" %} aria-current="page"{% endif %}
+               class="text-sm{% if active_tab == "targets" %} font-medium text-slate-900{% else %} text-slate-500 hover:text-slate-700{% endif %}">Targets</a>
             <a href="/docs" class="ml-auto text-sm text-slate-500 hover:text-slate-700">API docs</a>
         </nav>
     </header>
-    <main class="container mx-auto px-4 py-6">
+    <main id="main-content" tabindex="-1" class="container mx-auto px-4 py-6">
         {% block content %}{% endblock %}
     </main>
     <footer class="container mx-auto px-4 py-4 text-xs text-slate-400">

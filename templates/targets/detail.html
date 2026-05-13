@@ -31,7 +31,8 @@
                 hx-delete="/api/v1/targets/{{ id }}"
                 hx-confirm="Delete target {{ name }}?"
                 hx-on::after-request="if (event.detail.successful) window.location='/targets'"
-                class="rounded border border-red-200 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50">
+                aria-label="Delete target {{ name }}"
+                class="rounded border border-red-200 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 focus-visible:ring-red-500">
           Delete
         </button>
       </span>
@@ -97,13 +98,14 @@
       <span class="text-xs text-slate-500">Showing {{ results.len() }} of {{ results_total }}</span>
     </header>
     <table class="min-w-full text-sm">
+      <caption class="sr-only">Recent check results for {{ name }}</caption>
       <thead class="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
         <tr>
-          <th class="px-3 py-2">Timestamp</th>
-          <th class="px-3 py-2">Status</th>
-          <th class="px-3 py-2">Duration</th>
-          <th class="px-3 py-2">Code</th>
-          <th class="px-3 py-2">Error</th>
+          <th scope="col" class="px-3 py-2">Timestamp</th>
+          <th scope="col" class="px-3 py-2">Status</th>
+          <th scope="col" class="px-3 py-2">Duration</th>
+          <th scope="col" class="px-3 py-2">Code</th>
+          <th scope="col" class="px-3 py-2">Error</th>
         </tr>
       </thead>
       <tbody>

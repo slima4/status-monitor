@@ -17,3 +17,11 @@
         @apply inline-flex items-center px-2 py-0.5 rounded text-xs font-medium;
     }
 }
+
+@layer base {
+    /* Visible focus rings on every interactive element — never disable
+       outline; WCAG 2.2 requires a 3:1 contrast focus indicator. */
+    :where(button, [role="button"], a, input, select, textarea, summary):focus-visible {
+        @apply outline-none ring-2 ring-slate-500 ring-offset-1;
+    }
+}
