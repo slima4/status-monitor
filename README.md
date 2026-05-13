@@ -19,6 +19,10 @@ Built on Rust 1.95 (edition 2024), Tokio, Axum, hyper-util (custom phase-timing 
 
 `tls_cert` and `domain_expiry` use `warn_days` / `critical_days` thresholds, default to running daily, and surface `days_remaining` plus registrar / cert subject in the result payload. See [docs/api.md](docs/api.md) for the full payload shapes.
 
+## Public status page
+
+A customer-facing `/status` page (HTML + JSON + RSS 2.0) is built into the binary. Per-target opt-in via `public_status`; the page bypasses basic auth at the Caddy layer with a per-IP rate limit, caches for 10 s in-process, and degrades gracefully if ClickHouse is unreachable. Operators narrate incidents (`PATCH /api/v1/incidents/{id}`, `POST /api/v1/incidents/{id}/updates`) and schedule maintenance windows (`POST /api/v1/maintenance`). See [docs/public-status.md](docs/public-status.md).
+
 ## Alerting
 
 Targets opt into per-channel notifications by adding an `alerts` block:
@@ -107,6 +111,7 @@ Sources under [`docs/`](docs/) — readable directly on GitHub too:
 |---|---|
 | [docs/architecture.md](docs/architecture.md) | goals, module layout, data flow, key design choices, concurrency model |
 | [docs/api.md](docs/api.md) | REST endpoints, check-spec payload shapes, result + uptime queries |
+| [docs/public-status.md](docs/public-status.md) | operator guide to the public `/status` page: enable components, narrate incidents, schedule maintenance |
 | [docs/configuration.md](docs/configuration.md) | `default.toml` reference, env override scheme, tuning notes |
 | [docs/metrics.md](docs/metrics.md) | Prometheus series (incl. connect / TLS / pool gauges), OpenTelemetry tracing |
 | [docs/deployment.md](docs/deployment.md) | Docker, bind addresses, migrations, sizing, graceful shutdown |

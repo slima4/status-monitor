@@ -24,7 +24,27 @@ docker compose up -d
 
 v1 has **no built-in auth** in the Rust service. The Caddy reverse proxy is the authentication boundary for the UI and API. `/healthz` and `/readyz` are intentionally exposed without auth so uptime probes, load balancers, and orchestrators can hit them. `/metrics` on the public domain returns 404 — scrape it on the internal docker network instead.
 
+The public status page (`/status`, `/status/*`, `/api/public/*`, `/static/*`, `/robots.txt`, `/favicon.ico`) is **also unauthenticated by design** — see [Public status surface](#public-status-surface) below.
+
 If native auth (session cookies, API tokens) is added later, the Caddy basic-auth layer can stay in place during the transition.
+
+### Public status surface
+
+The Caddyfile carries an `@public` matcher that short-circuits `basic_auth` for the public status paths and adds a per-IP rate limit (60 req/min) via the [`caddy-ratelimit`](https://github.com/mholt/caddy-ratelimit) plugin. The stock `caddy:2-alpine` image doesn't include that plugin, so the production deployment uses a custom `custom-caddy:2` image built with `xcaddy`:
+
+```bash
+docker build -t custom-caddy:2 - <<'EOF'
+FROM caddy:2-builder AS builder
+RUN xcaddy build --with github.com/mholt/caddy-ratelimit
+
+FROM caddy:2-alpine
+COPY --from=builder /usr/bin/caddy /usr/bin/caddy
+EOF
+```
+
+Then point the `caddy` service in `deployment/docker-compose.yml` at `custom-caddy:2`. Full procedure (including the opt-out path that drops the rate-limit block) is in [`deployment/README.md`](https://github.com/slima4/status-monitor/tree/main/deployment).
+
+For the operator workflow (enabling components, narrating incidents, scheduling maintenance) see [Public status page](public-status.md).
 
 ## Docker
 

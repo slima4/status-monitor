@@ -5,6 +5,7 @@
 - [Architecture](architecture.md)
 - [REST API](api.md)
 - [Web UI](ui.md)
+- [Public status page](public-status.md)
 - [Configuration](configuration.md)
 - [Metrics & tracing](metrics.md)
 - [Deployment](deployment.md)

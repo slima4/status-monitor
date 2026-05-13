@@ -33,6 +33,20 @@ Override `STATUS_MONITOR_CONFIG_PATH` to point at an alternate base config file.
 | `notifications.webhook` | `enabled`, `url` | Generic HTTP POST transport — receives the raw `AlertEvent` JSON. Per-target opt-in via target's `alerts.webhook` |
 | `notifications.email` | `enabled`, `smtp_host`, `smtp_port`, `smtp_user`, `smtp_password`, `from`, `starttls` | SMTP transport via lettre. Per-target opt-in via target's `alerts.email` (recipients carried per target) |
 
+## Public status page
+
+The public `/status` page has **no global TOML block** in v1 — page cache TTL (10 s), history-strip length (90 days), and recent-incidents horizon (30 days) are hard-coded defaults in `src/public_status/aggregator.rs`. What controls the public surface is per-target:
+
+| Target field | Purpose |
+|---|---|
+| `public_status` | when `true`, the target is published as a component on `/status` |
+| `public_name` | display name (falls back to operator-side `name`) |
+| `public_description` | optional one-liner |
+| `public_group` | optional group label; ungrouped components render last |
+| `public_sort_order` | ASC integer sort within a group |
+
+See [Public status page](public-status.md) for the operator workflow.
+
 ## Tuning notes
 
 - **`max_concurrent_checks`** caps simultaneous in-flight checks. Per-check memory is small (a tokio task plus an in-flight hyper request), so the practical ceiling is set by file descriptors and ephemeral ports rather than RAM.

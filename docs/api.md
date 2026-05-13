@@ -37,6 +37,47 @@ All responses use `Content-Type: application/json; charset=utf-8`.
 | `GET` | `/api/openapi.json` | OpenAPI 3.1 document |
 | `GET` | `/docs` | Swagger UI |
 
+### Operator endpoints (maintenance + incident narration)
+
+These mutate the public surface; they live under the same auth boundary as
+`/api/v1/targets`. Operator workflow + validation rules in
+[Public status page](public-status.md).
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `POST` | `/api/v1/maintenance` | schedule a maintenance window |
+| `GET` | `/api/v1/maintenance` | list windows (`status=active\|upcoming\|past\|all`, paginated) |
+| `GET` | `/api/v1/maintenance/{id}` | get one window |
+| `PATCH` | `/api/v1/maintenance/{id}` | edit title / description / time range / components (rejected after `ends_at`) |
+| `DELETE` | `/api/v1/maintenance/{id}` | cancel a window |
+| `PATCH` | `/api/v1/incidents/{id}` | update narration: `public_title`, `public_description`, `severity` (JSON `null` clears, omit to leave alone) |
+| `POST` | `/api/v1/incidents/{id}/updates` | append a status update — `phase` ∈ `investigating`/`identified`/`monitoring`/`resolved`/`postmortem`, `message` ≤ 2 000 chars |
+
+### Public status endpoints
+
+Unauthenticated; mounted at `/api/public/v1/*` and bypassed at Caddy via the
+`@public` matcher (see [Deployment](deployment.md#public-status-surface)).
+Each response carries `Cache-Control: public, max-age=10,
+stale-while-revalidate=30`. Targets with `public_status = false` are
+invisible on every public surface — direct lookups return 404 and they
+never appear in any list. Wire types literally cannot serialise
+sensitive target fields (`url`, `headers`, `basic_auth`, `bearer_token`).
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/status` | server-rendered HTML status page (`?fragment=1` returns the dynamic region only) |
+| `GET` | `/status/incidents/{id}` | per-incident detail page |
+| `GET` | `/api/public/v1/status` | the same data as `/status` in JSON |
+| `GET` | `/api/public/v1/components/{id}/history` | per-component 90-day history (`days` query, default 90, max 90) |
+| `GET` | `/api/public/v1/incidents` | recent public incidents (paginated) |
+| `GET` | `/api/public/v1/incidents/{id}` | one public incident with its update timeline |
+| `GET` | `/api/public/v1/incidents.rss` | RSS 2.0 feed of recent incidents |
+| `GET` | `/api/public/v1/maintenance` | active + upcoming maintenance windows |
+
+See [Public status page](public-status.md) for the operator workflow and
+the per-target fields (`public_status`, `public_name`, `public_description`,
+`public_group`, `public_sort_order`) that drive what's published.
+
 ## Check specs
 
 Tagged enum, `type` discriminator.
