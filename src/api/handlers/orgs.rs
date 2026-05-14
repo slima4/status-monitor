@@ -138,8 +138,7 @@ pub async fn create_org(
     let name = trim_name(&req.name)?;
 
     let limit = state.cfg.tenancy.free_tier_owner_org_limit;
-    let Some(org) =
-        orgs_store::create_org_with_owner(pool, user, &slug, &name, limit).await?
+    let Some(org) = orgs_store::create_org_with_owner(pool, user, &slug, &name, limit).await?
     else {
         return Err(AppError::conflict(
             codes::SLUG_TAKEN,
@@ -148,8 +147,8 @@ pub async fn create_org(
     };
     let mut view: OrgView = org.into();
     view.role = Some(Role::Owner);
-    let location = HeaderValue::from_str(&format!("/api/v1/orgs/{}", view.id))
-        .expect("uuid is ascii");
+    let location =
+        HeaderValue::from_str(&format!("/api/v1/orgs/{}", view.id)).expect("uuid is ascii");
     Ok((
         StatusCode::CREATED,
         AppendHeaders([(header::LOCATION, location)]),
@@ -230,7 +229,10 @@ pub async fn get_org(
     let org_id = OrgId(id);
     let active = orgs_store::is_active_member(pool, user, org_id).await?;
     if !active {
-        return Err(AppError::not_found(codes::ORG_NOT_FOUND, "organisation not found"));
+        return Err(AppError::not_found(
+            codes::ORG_NOT_FOUND,
+            "organisation not found",
+        ));
     }
     let org = orgs_store::get_org(pool, org_id)
         .await?
@@ -295,7 +297,10 @@ pub async fn delete_org(
     let org_id = OrgId(id);
     require_owner(pool, user, org_id).await?;
     if !orgs_store::soft_delete_org(pool, org_id, user).await? {
-        return Err(AppError::not_found(codes::ORG_NOT_FOUND, "organisation not found"));
+        return Err(AppError::not_found(
+            codes::ORG_NOT_FOUND,
+            "organisation not found",
+        ));
     }
     Ok(StatusCode::NO_CONTENT)
 }
@@ -329,9 +334,9 @@ pub async fn restore_org(
     // race with a concurrent re-delete or get a stale read.
     match orgs_store::restore_org(pool, org_id, user, grace).await? {
         orgs_store::RestoreOutcome::Restored(org) => Ok(Json(org.into())),
-        orgs_store::RestoreOutcome::NotFound | orgs_store::RestoreOutcome::NotDeleted => {
-            Err(AppError::not_found(codes::ORG_NOT_FOUND, "organisation not found"))
-        }
+        orgs_store::RestoreOutcome::NotFound | orgs_store::RestoreOutcome::NotDeleted => Err(
+            AppError::not_found(codes::ORG_NOT_FOUND, "organisation not found"),
+        ),
         orgs_store::RestoreOutcome::WindowExpired => Err(AppError::unprocessable(
             codes::RESTORE_WINDOW_EXPIRED,
             "restore window has expired",

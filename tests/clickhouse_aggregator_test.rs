@@ -32,9 +32,7 @@ use status_monitor::domain::{
 };
 use status_monitor::public_status::{AggregatorConfig, LiveAggregator};
 use status_monitor::storage::ensure_default_org;
-use status_monitor::storage::{
-    ClickhouseResultSink, PostgresTargetStore, ResultSink, TargetStore,
-};
+use status_monitor::storage::{ClickhouseResultSink, PostgresTargetStore, ResultSink, TargetStore};
 use url::Url;
 use uuid::Uuid;
 

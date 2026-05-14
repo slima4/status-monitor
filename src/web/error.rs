@@ -26,11 +26,7 @@ pub struct UnavailablePage {
 }
 
 pub async fn not_found() -> Response {
-    (
-        StatusCode::NOT_FOUND,
-        NotFoundPage { active_tab: "" },
-    )
-        .into_response()
+    (StatusCode::NOT_FOUND, NotFoundPage { active_tab: "" }).into_response()
 }
 
 /// Wrapper that re-renders `AppError` as an HTML error page instead of
@@ -48,11 +44,9 @@ impl<E: Into<AppError>> From<E> for WebError {
 impl IntoResponse for WebError {
     fn into_response(self) -> Response {
         match self.0 {
-            AppError::NotFound { .. } => (
-                StatusCode::NOT_FOUND,
-                NotFoundPage { active_tab: "" },
-            )
-                .into_response(),
+            AppError::NotFound { .. } => {
+                (StatusCode::NOT_FOUND, NotFoundPage { active_tab: "" }).into_response()
+            }
             AppError::BadRequest { .. }
             | AppError::Conflict { .. }
             | AppError::Unprocessable { .. }
@@ -69,11 +63,9 @@ impl IntoResponse for WebError {
                 InternalErrorPage { active_tab: "" },
             )
                 .into_response(),
-            AppError::Forbidden => (
-                StatusCode::FORBIDDEN,
-                NotFoundPage { active_tab: "" },
-            )
-                .into_response(),
+            AppError::Forbidden => {
+                (StatusCode::FORBIDDEN, NotFoundPage { active_tab: "" }).into_response()
+            }
             ref err @ (AppError::Config(_)
             | AppError::Io(_)
             | AppError::BindAddr { .. }

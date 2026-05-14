@@ -51,10 +51,7 @@ pub struct IncidentDetailPage {
     pub rss_url: &'static str,
 }
 
-pub async fn index(
-    State(state): State<AppState>,
-    Query(params): Query<StatusParams>,
-) -> Response {
+pub async fn index(State(state): State<AppState>, Query(params): Query<StatusParams>) -> Response {
     let page = match state.public_source.page().await {
         Ok(p) => p,
         Err(err) => return render_public_error(err),
@@ -95,16 +92,12 @@ pub async fn incident(State(state): State<AppState>, Path(id): Path<Uuid>) -> Re
 /// avoids leaking the JSON envelope into the browser.
 fn render_public_error(err: PublicAppError) -> Response {
     match err {
-        PublicAppError::NotFound => (
-            StatusCode::NOT_FOUND,
-            NotFoundPage { active_tab: "" },
-        )
-            .into_response(),
-        PublicAppError::InvalidDays | PublicAppError::BadRequest(_) => (
-            StatusCode::BAD_REQUEST,
-            NotFoundPage { active_tab: "" },
-        )
-            .into_response(),
+        PublicAppError::NotFound => {
+            (StatusCode::NOT_FOUND, NotFoundPage { active_tab: "" }).into_response()
+        }
+        PublicAppError::InvalidDays | PublicAppError::BadRequest(_) => {
+            (StatusCode::BAD_REQUEST, NotFoundPage { active_tab: "" }).into_response()
+        }
         PublicAppError::Unavailable => (
             StatusCode::SERVICE_UNAVAILABLE,
             UnavailablePage { active_tab: "" },
@@ -732,4 +725,3 @@ mod tests {
         assert!(html.contains("Rolled back the deploy."));
     }
 }
-

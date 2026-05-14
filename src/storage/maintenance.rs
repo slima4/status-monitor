@@ -150,7 +150,9 @@ impl MaintenanceStore for PgMaintenanceStore {
             .await
             .map_err(|e| anyhow::anyhow!("insert components: {e}"))?;
         }
-        tx.commit().await.map_err(|e| anyhow::anyhow!("commit: {e}"))?;
+        tx.commit()
+            .await
+            .map_err(|e| anyhow::anyhow!("commit: {e}"))?;
         Ok(row.into_window(new.component_ids))
     }
 
@@ -244,11 +246,11 @@ impl MaintenanceStore for PgMaintenanceStore {
                 r#"DELETE FROM maintenance_window_components
                    WHERE maintenance_id = $1 AND org_id = $2"#,
             )
-                .bind(row.id)
-                .bind(self.org_id())
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| anyhow::anyhow!("delete components: {e}"))?;
+            .bind(row.id)
+            .bind(self.org_id())
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| anyhow::anyhow!("delete components: {e}"))?;
             if !ids.is_empty() {
                 // Drops any input UUID that doesn't belong to the same org as
                 // the parent window — see the matching comment in `create`.
@@ -267,7 +269,9 @@ impl MaintenanceStore for PgMaintenanceStore {
                 .map_err(|e| anyhow::anyhow!("insert components: {e}"))?;
             }
         }
-        tx.commit().await.map_err(|e| anyhow::anyhow!("commit: {e}"))?;
+        tx.commit()
+            .await
+            .map_err(|e| anyhow::anyhow!("commit: {e}"))?;
         let components = load_components(&self.pool, row.id, self.org_id()).await?;
         Ok(Some(row.into_window(components)))
     }
@@ -287,14 +291,13 @@ impl MaintenanceStore for PgMaintenanceStore {
         if ids.is_empty() {
             return Ok(Vec::new());
         }
-        let rows: Vec<(Uuid,)> = sqlx::query_as(
-            r#"SELECT id FROM targets WHERE id = ANY($1::uuid[]) AND org_id = $2"#,
-        )
-        .bind(ids)
-        .bind(self.org_id())
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| anyhow::anyhow!("existing_target_ids: {e}"))?;
+        let rows: Vec<(Uuid,)> =
+            sqlx::query_as(r#"SELECT id FROM targets WHERE id = ANY($1::uuid[]) AND org_id = $2"#)
+                .bind(ids)
+                .bind(self.org_id())
+                .fetch_all(&self.pool)
+                .await
+                .map_err(|e| anyhow::anyhow!("existing_target_ids: {e}"))?;
         Ok(rows.into_iter().map(|r| r.0).collect())
     }
 }
@@ -409,11 +412,20 @@ impl MaintenanceStore for InMemoryMaintenanceStore {
     async fn count(&self, filter: MaintenanceFilter) -> Result<u64> {
         let now = Utc::now();
         let g = self.inner.lock();
-        Ok(g.windows.iter().filter(|w| match_filter(w, filter, now)).count() as u64)
+        Ok(g.windows
+            .iter()
+            .filter(|w| match_filter(w, filter, now))
+            .count() as u64)
     }
 
     async fn get(&self, id: Uuid) -> Result<Option<MaintenanceWindow>> {
-        Ok(self.inner.lock().windows.iter().find(|w| w.id == id).cloned())
+        Ok(self
+            .inner
+            .lock()
+            .windows
+            .iter()
+            .find(|w| w.id == id)
+            .cloned())
     }
 
     async fn update(

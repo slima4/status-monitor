@@ -124,7 +124,8 @@ pub async fn middleware(
     let resp_bytes = match axum::body::to_bytes(resp_body, MAX_BODY).await {
         Ok(b) => b,
         Err(_) => {
-            return (StatusCode::INTERNAL_SERVER_ERROR, "response body too large").into_response_local();
+            return (StatusCode::INTERNAL_SERVER_ERROR, "response body too large")
+                .into_response_local();
         }
     };
     let content_type = resp_parts

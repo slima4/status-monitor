@@ -184,16 +184,10 @@ impl ResultsStore for InMemorySink {
     }
 }
 
-fn coalesce_for_target(
-    all: &[CheckResult],
-    target_id: Uuid,
-    range: TimeRange,
-) -> Vec<Incident> {
+fn coalesce_for_target(all: &[CheckResult], target_id: Uuid, range: TimeRange) -> Vec<Incident> {
     let mut filtered: Vec<&CheckResult> = all
         .iter()
-        .filter(|r| {
-            r.target_id == target_id && r.timestamp >= range.from && r.timestamp < range.to
-        })
+        .filter(|r| r.target_id == target_id && r.timestamp >= range.from && r.timestamp < range.to)
         .collect();
     filtered.sort_by_key(|r| r.timestamp);
     coalesce_incidents(
@@ -358,8 +352,7 @@ impl TargetStore for InMemoryTargetStore {
     }
 
     async fn list_tags(&self, prefix: Option<String>, limit: usize) -> Result<Vec<TagCount>> {
-        let mut counts: std::collections::HashMap<String, u64> =
-            std::collections::HashMap::new();
+        let mut counts: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
         for t in self.targets.lock().iter() {
             for tag in &t.tags {
                 if let Some(pfx) = prefix.as_deref()

@@ -23,10 +23,7 @@ pub enum AppError {
     },
 
     #[error("{message}")]
-    NotFound {
-        code: &'static str,
-        message: String,
-    },
+    NotFound { code: &'static str, message: String },
 
     #[error("{message}")]
     BadRequest {
@@ -36,22 +33,13 @@ pub enum AppError {
     },
 
     #[error("{message}")]
-    PayloadTooLarge {
-        code: &'static str,
-        message: String,
-    },
+    PayloadTooLarge { code: &'static str, message: String },
 
     #[error("{message}")]
-    Conflict {
-        code: &'static str,
-        message: String,
-    },
+    Conflict { code: &'static str, message: String },
 
     #[error("{message}")]
-    Unprocessable {
-        code: &'static str,
-        message: String,
-    },
+    Unprocessable { code: &'static str, message: String },
 
     #[error("authentication required")]
     Unauthorized,

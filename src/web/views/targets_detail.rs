@@ -171,10 +171,7 @@ impl From<CheckResult> for ResultRow {
             timestamp: fmt_ts(r.timestamp),
             status: r.status.as_str(),
             duration_ms: r.duration_ms,
-            response_code: r
-                .response_code
-                .map(|c| c.to_string())
-                .unwrap_or_default(),
+            response_code: r.response_code.map(|c| c.to_string()).unwrap_or_default(),
             error: r.error.unwrap_or_default(),
         }
     }

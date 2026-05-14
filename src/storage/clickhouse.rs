@@ -111,7 +111,10 @@ pub struct ClickhouseResultSink {
 
 impl ClickhouseResultSink {
     pub fn from_client(client: Client, default_org_id: OrgId) -> Self {
-        Self { client, default_org_id }
+        Self {
+            client,
+            default_org_id,
+        }
     }
 
     async fn write_once(
@@ -208,7 +211,10 @@ pub struct ClickhouseResultsStore {
 
 impl ClickhouseResultsStore {
     pub fn from_client(client: Client, default_org_id: OrgId) -> Self {
-        Self { client, default_org_id }
+        Self {
+            client,
+            default_org_id,
+        }
     }
 
     /// Narrow projection: only the four columns incident coalescing needs.
@@ -468,8 +474,7 @@ impl ResultsStore for ClickhouseResultsStore {
                 _ => {
                     if let Some(t) = current_target.take() {
                         incidents +=
-                            coalesce_from_incident_rows(t, std::mem::take(&mut group)).len()
-                                as u64;
+                            coalesce_from_incident_rows(t, std::mem::take(&mut group)).len() as u64;
                     }
                     current_target = Some(row.target_id);
                     group.push(row);

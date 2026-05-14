@@ -23,13 +23,11 @@ use uuid::Uuid;
 
 async fn make_user(pool: &PgPool) -> UserId {
     let email = format!("apitest-{}@example.test", Uuid::now_v7());
-    let (id,): (Uuid,) = sqlx::query_as(
-        r#"INSERT INTO users (email) VALUES ($1) RETURNING id"#,
-    )
-    .bind(&email)
-    .fetch_one(pool)
-    .await
-    .expect("seed user");
+    let (id,): (Uuid,) = sqlx::query_as(r#"INSERT INTO users (email) VALUES ($1) RETURNING id"#)
+        .bind(&email)
+        .fetch_one(pool)
+        .await
+        .expect("seed user");
     UserId(id)
 }
 
@@ -83,8 +81,7 @@ async fn create_then_list_then_delete_round_trip() {
         return;
     };
     let user = make_user(&pool).await;
-    let (router, _) =
-        build_test_app_with_pg(pool.clone(), |cfg| cfg.tenancy.enabled = true).await;
+    let (router, _) = build_test_app_with_pg(pool.clone(), |cfg| cfg.tenancy.enabled = true).await;
     let router = app_with_session(router, user);
 
     let slug = unique_slug("api");
@@ -171,8 +168,7 @@ async fn create_org_with_taken_slug_returns_409() {
         return;
     };
     let user = make_user(&pool).await;
-    let (router, _) =
-        build_test_app_with_pg(pool.clone(), |cfg| cfg.tenancy.enabled = true).await;
+    let (router, _) = build_test_app_with_pg(pool.clone(), |cfg| cfg.tenancy.enabled = true).await;
     let router = app_with_session(router, user);
 
     let slug = unique_slug("dup");
@@ -216,8 +212,7 @@ async fn create_org_with_reserved_slug_returns_400() {
         return;
     };
     let user = make_user(&pool).await;
-    let (router, _) =
-        build_test_app_with_pg(pool.clone(), |cfg| cfg.tenancy.enabled = true).await;
+    let (router, _) = build_test_app_with_pg(pool.clone(), |cfg| cfg.tenancy.enabled = true).await;
     let router = app_with_session(router, user);
 
     let resp = router
@@ -245,8 +240,7 @@ async fn check_slug_endpoint_returns_availability() {
         return;
     };
     let user = make_user(&pool).await;
-    let (router, _) =
-        build_test_app_with_pg(pool.clone(), |cfg| cfg.tenancy.enabled = true).await;
+    let (router, _) = build_test_app_with_pg(pool.clone(), |cfg| cfg.tenancy.enabled = true).await;
     let router = app_with_session(router, user);
 
     let slug = unique_slug("chk");
@@ -288,8 +282,7 @@ async fn non_owner_cannot_delete_or_update() {
     };
     let owner = make_user(&pool).await;
     let other = make_user(&pool).await;
-    let (router, _) =
-        build_test_app_with_pg(pool.clone(), |cfg| cfg.tenancy.enabled = true).await;
+    let (router, _) = build_test_app_with_pg(pool.clone(), |cfg| cfg.tenancy.enabled = true).await;
     let owner_router = app_with_session(router.clone(), owner);
     let other_router = app_with_session(router, other);
 

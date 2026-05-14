@@ -8,9 +8,7 @@ use crate::domain::reserved_slugs::is_reserved;
 
 /// Strongly-typed organisation id. Wrapping `Uuid` blocks the easy mistake of
 /// passing a `UserId` where an `OrgId` is expected.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type, ToSchema,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type, ToSchema)]
 #[serde(transparent)]
 #[sqlx(transparent)]
 #[schema(value_type = String, format = "uuid")]

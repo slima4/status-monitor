@@ -49,9 +49,7 @@ async fn openapi_doc_lists_every_documented_path() {
         .await
         .unwrap();
     let doc = body_json(resp).await;
-    let paths = doc["paths"]
-        .as_object()
-        .expect("paths object present");
+    let paths = doc["paths"].as_object().expect("paths object present");
     for expected in [
         "/healthz",
         "/readyz",

@@ -169,7 +169,10 @@ impl IncidentWriter {
                 let id = self.incident_store.insert_open(new).await?;
                 tracing::info!(target_id = %target.id, incident_id = %id, "incident opened");
             }
-            Action::Close { incident_id, ended_at } => {
+            Action::Close {
+                incident_id,
+                ended_at,
+            } => {
                 self.incident_store.close(incident_id, ended_at).await?;
                 tracing::info!(target_id = %target.id, incident_id = %incident_id, "incident closed");
             }
@@ -207,11 +210,7 @@ impl PartialEq for NewOpenIncident {
 /// `Action::Open` it returns assumes the caller has just verified there is
 /// no open incident — running again after the write naturally falls through
 /// to `Action::None` because the open incident is now present.
-pub fn decide(
-    open: Option<&OpenIncident>,
-    results: &[CheckResult],
-    flap_threshold: u32,
-) -> Action {
+pub fn decide(open: Option<&OpenIncident>, results: &[CheckResult], flap_threshold: u32) -> Action {
     if results.is_empty() {
         return Action::None;
     }
@@ -244,9 +243,7 @@ pub fn decide(
                     started_at: first.timestamp,
                     status_at_start: first.status,
                     check_count: tail_bad.len() as u32,
-                    error_sample: tail_bad
-                        .iter()
-                        .find_map(|r| r.error.clone()),
+                    error_sample: tail_bad.iter().find_map(|r| r.error.clone()),
                 });
             }
             Action::None
@@ -286,7 +283,10 @@ pub struct PgIncidentStore {
 
 impl PgIncidentStore {
     pub fn new(pool: PgPool, default_org_id: OrgId) -> Self {
-        Self { pool, default_org_id }
+        Self {
+            pool,
+            default_org_id,
+        }
     }
 }
 
@@ -582,7 +582,10 @@ mod tests {
             result(target, ts(base, 90), CheckStatus::Up),
         ];
         match decide(Some(&open), &results, 2) {
-            Action::Close { incident_id, ended_at } => {
+            Action::Close {
+                incident_id,
+                ended_at,
+            } => {
                 assert_eq!(incident_id, open.id);
                 assert_eq!(ended_at, ts(base, 60));
             }
@@ -716,8 +719,16 @@ mod tests {
         seed_results(
             &sink,
             vec![
-                result(target_id, now - ChronoDuration::seconds(60), CheckStatus::Down),
-                result(target_id, now - ChronoDuration::seconds(30), CheckStatus::Up),
+                result(
+                    target_id,
+                    now - ChronoDuration::seconds(60),
+                    CheckStatus::Down,
+                ),
+                result(
+                    target_id,
+                    now - ChronoDuration::seconds(30),
+                    CheckStatus::Up,
+                ),
             ],
         )
         .await;
@@ -739,8 +750,16 @@ mod tests {
         seed_results(
             &sink,
             vec![
-                result(target_id, now - ChronoDuration::seconds(60), CheckStatus::Down),
-                result(target_id, now - ChronoDuration::seconds(30), CheckStatus::Down),
+                result(
+                    target_id,
+                    now - ChronoDuration::seconds(60),
+                    CheckStatus::Down,
+                ),
+                result(
+                    target_id,
+                    now - ChronoDuration::seconds(30),
+                    CheckStatus::Down,
+                ),
             ],
         )
         .await;
@@ -770,8 +789,16 @@ mod tests {
         seed_results(
             &sink,
             vec![
-                result(target_id, now - ChronoDuration::seconds(120), CheckStatus::Down),
-                result(target_id, now - ChronoDuration::seconds(90), CheckStatus::Down),
+                result(
+                    target_id,
+                    now - ChronoDuration::seconds(120),
+                    CheckStatus::Down,
+                ),
+                result(
+                    target_id,
+                    now - ChronoDuration::seconds(90),
+                    CheckStatus::Down,
+                ),
             ],
         )
         .await;
@@ -786,8 +813,16 @@ mod tests {
         seed_results(
             &sink,
             vec![
-                result(target_id, now - ChronoDuration::seconds(60), CheckStatus::Up),
-                result(target_id, now - ChronoDuration::seconds(30), CheckStatus::Up),
+                result(
+                    target_id,
+                    now - ChronoDuration::seconds(60),
+                    CheckStatus::Up,
+                ),
+                result(
+                    target_id,
+                    now - ChronoDuration::seconds(30),
+                    CheckStatus::Up,
+                ),
             ],
         )
         .await;
@@ -810,8 +845,16 @@ mod tests {
         seed_results(
             &sink,
             vec![
-                result(target_id, now - ChronoDuration::seconds(60), CheckStatus::Down),
-                result(target_id, now - ChronoDuration::seconds(30), CheckStatus::Down),
+                result(
+                    target_id,
+                    now - ChronoDuration::seconds(60),
+                    CheckStatus::Down,
+                ),
+                result(
+                    target_id,
+                    now - ChronoDuration::seconds(30),
+                    CheckStatus::Down,
+                ),
             ],
         )
         .await;
@@ -835,8 +878,16 @@ mod tests {
         seed_results(
             &sink,
             vec![
-                result(target_id, now - ChronoDuration::seconds(120), CheckStatus::Down),
-                result(target_id, now - ChronoDuration::seconds(90), CheckStatus::Down),
+                result(
+                    target_id,
+                    now - ChronoDuration::seconds(120),
+                    CheckStatus::Down,
+                ),
+                result(
+                    target_id,
+                    now - ChronoDuration::seconds(90),
+                    CheckStatus::Down,
+                ),
             ],
         )
         .await;
@@ -846,8 +897,16 @@ mod tests {
         seed_results(
             &sink,
             vec![
-                result(target_id, now - ChronoDuration::seconds(60), CheckStatus::Up),
-                result(target_id, now - ChronoDuration::seconds(30), CheckStatus::Up),
+                result(
+                    target_id,
+                    now - ChronoDuration::seconds(60),
+                    CheckStatus::Up,
+                ),
+                result(
+                    target_id,
+                    now - ChronoDuration::seconds(30),
+                    CheckStatus::Up,
+                ),
             ],
         )
         .await;

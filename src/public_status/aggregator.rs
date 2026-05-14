@@ -16,8 +16,8 @@ use sqlx::{FromRow, PgPool};
 use uuid::Uuid;
 
 use crate::domain::{
-    CheckStatus, ComponentHistoryResponse, DayState, IncidentSeverity, IncidentStatusPhase,
-    OrgId, PublicComponent, PublicComponentGroup, PublicComponentStatus, PublicIncident,
+    CheckStatus, ComponentHistoryResponse, DayState, IncidentSeverity, IncidentStatusPhase, OrgId,
+    PublicComponent, PublicComponentGroup, PublicComponentStatus, PublicIncident,
     PublicIncidentUpdate, PublicMaintenance, PublicStatusPage, Target,
 };
 use crate::error::Result;
@@ -124,7 +124,9 @@ impl LiveAggregator {
 
         // Sort within group: by sort_order ASC, then name ASC.
         public_components.sort_by(|a, b| {
-            a.0.cmp(&b.0).then(a.1.cmp(&b.1)).then(a.2.name.cmp(&b.2.name))
+            a.0.cmp(&b.0)
+                .then(a.1.cmp(&b.1))
+                .then(a.2.name.cmp(&b.2.name))
         });
 
         // Ungrouped (None) renders last; sort_by above puts None first because
@@ -375,7 +377,11 @@ impl LiveAggregator {
                     .map(|u| u.phase)
                     .unwrap_or(IncidentStatusPhase::Investigating);
                 let title = r.public_title.clone().unwrap_or_else(|| {
-                    format!("{} {}", r.component_name, r.status_at_start.replace('_', " "))
+                    format!(
+                        "{} {}",
+                        r.component_name,
+                        r.status_at_start.replace('_', " ")
+                    )
                 });
                 PublicIncident {
                     id: r.id,
@@ -458,7 +464,10 @@ impl LiveAggregator {
         let mut out: Vec<(Uuid, Vec<DayState>)> = Vec::with_capacity(component_ids.len());
         for id in component_ids {
             let mut strip = vec![DayState::NoData; self.cfg.history_days as usize];
-            for r in rows.iter().filter(|r| r.target_id == *id && r.day_total > 0) {
+            for r in rows
+                .iter()
+                .filter(|r| r.target_id == *id && r.day_total > 0)
+            {
                 let day = ts_to_datetime(r.day);
                 let idx = days_ago_index(day, now, self.cfg.history_days);
                 if let Some(i) = idx {

@@ -62,7 +62,11 @@ where
         // Until the auth backend lands, the only way to populate a session is
         // for a test middleware (or future auth layer) to insert one into the
         // request extensions. Absence = anonymous.
-        Ok(parts.extensions.get::<Session>().cloned().unwrap_or_default())
+        Ok(parts
+            .extensions
+            .get::<Session>()
+            .cloned()
+            .unwrap_or_default())
     }
 }
 

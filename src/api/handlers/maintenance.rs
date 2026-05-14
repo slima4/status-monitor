@@ -164,13 +164,9 @@ pub async fn update_maintenance(
     // the data loss is just "a successful edit on a just-now-completed
     // window"; the next refresh will show the completed state. Worth
     // documenting; not worth a transaction on this low-traffic operator path.
-    let existing = state
-        .maintenance_store
-        .get(id)
-        .await?
-        .ok_or_else(|| {
-            AppError::not_found(codes::MAINTENANCE_NOT_FOUND, "maintenance window not found")
-        })?;
+    let existing = state.maintenance_store.get(id).await?.ok_or_else(|| {
+        AppError::not_found(codes::MAINTENANCE_NOT_FOUND, "maintenance window not found")
+    })?;
     if existing.ends_at <= Utc::now() {
         return Err(AppError::unprocessable(
             codes::MAINTENANCE_COMPLETED,

@@ -2,6 +2,10 @@ use utoipa::OpenApi;
 
 use crate::api::error::{ApiError, ApiErrorBody};
 use crate::api::handlers;
+use crate::api::handlers::orgs::{
+    CheckSlugResponse, CreateOrgRequest, MemberView as OrgMemberView, OrgView,
+    SwitchActiveOrgRequest, UpdateOrgRequest,
+};
 use crate::api::page::PageEnvelope;
 use crate::api::public_error::{PublicApiError, PublicApiErrorBody};
 use crate::api::types::{
@@ -9,6 +13,7 @@ use crate::api::types::{
     Last24hSummary, StatusBreakdown, SystemSummary, TagCount, TargetsSummary, TestRequest,
     TestResponse,
 };
+use crate::domain::Role;
 use crate::domain::{
     AlertChannel, AlertChannelConfig, CheckResult, CheckSpec, CheckStatus,
     ComponentHistoryResponse, DayState, DomainExpiryCheck, ExpectedStatus, HttpCheck, HttpMethod,
@@ -18,11 +23,6 @@ use crate::domain::{
     PublicIncident, PublicIncidentUpdate, PublicMaintenance, PublicMaintenanceList,
     PublicStatusPage, Target, TargetAlerts, TargetUpdate, TcpCheck, TlsCertCheck,
 };
-use crate::api::handlers::orgs::{
-    CheckSlugResponse, CreateOrgRequest, MemberView as OrgMemberView, OrgView,
-    SwitchActiveOrgRequest, UpdateOrgRequest,
-};
-use crate::domain::Role;
 use crate::storage::UptimeStats;
 
 #[derive(OpenApi)]

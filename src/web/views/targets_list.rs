@@ -129,10 +129,7 @@ async fn fetch_rows(
     let filter = TargetFilter {
         limit: Some(limit),
         offset,
-        tag: params
-            .tag
-            .clone()
-            .filter(|s| !s.is_empty()),
+        tag: params.tag.clone().filter(|s| !s.is_empty()),
         enabled: params.enabled,
     };
 

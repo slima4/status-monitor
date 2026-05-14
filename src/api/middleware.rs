@@ -1,6 +1,6 @@
 use axum::extract::Request;
-use axum::http::{HeaderValue, Method};
 use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE};
+use axum::http::{HeaderValue, Method};
 use axum::middleware::Next;
 use axum::response::Response;
 

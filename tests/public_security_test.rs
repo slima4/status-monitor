@@ -35,7 +35,9 @@ const PUBLIC_PATHS: &[&str] = &[
 ];
 
 async fn body_text(resp: axum::http::Response<Body>) -> String {
-    let bytes = axum::body::to_bytes(resp.into_body(), 8 << 20).await.unwrap();
+    let bytes = axum::body::to_bytes(resp.into_body(), 8 << 20)
+        .await
+        .unwrap();
     String::from_utf8_lossy(&bytes).into_owned()
 }
 

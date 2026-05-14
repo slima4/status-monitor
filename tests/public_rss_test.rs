@@ -201,7 +201,10 @@ fn parse(xml: &str) -> ParsedRss {
 }
 
 fn item_text<'a>(block: &'a [(String, String)], tag: &str) -> Option<&'a str> {
-    block.iter().find(|(t, _)| t == tag).map(|(_, v)| v.as_str())
+    block
+        .iter()
+        .find(|(t, _)| t == tag)
+        .map(|(_, v)| v.as_str())
 }
 
 #[tokio::test]

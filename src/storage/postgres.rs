@@ -54,7 +54,11 @@ impl PostgresTargetStore {
     }
 
     pub fn from_pool(pool: PgPool, cipher: Option<Arc<Cipher>>, default_org_id: OrgId) -> Self {
-        Self { pool, cipher, default_org_id }
+        Self {
+            pool,
+            cipher,
+            default_org_id,
+        }
     }
 
     fn org_id(&self) -> Uuid {
@@ -129,7 +133,6 @@ pub(crate) fn decode_target_row(row: TargetRow, cipher: Option<&Cipher>) -> Resu
         updated_at: row.updated_at,
     })
 }
-
 
 #[async_trait]
 impl TargetStore for PostgresTargetStore {

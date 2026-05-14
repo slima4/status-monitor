@@ -34,10 +34,7 @@ pub struct PageCache {
 impl PageCache {
     pub fn new(ttl: Duration) -> Self {
         Self {
-            inner: Cache::builder()
-                .max_capacity(1)
-                .time_to_live(ttl)
-                .build(),
+            inner: Cache::builder().max_capacity(1).time_to_live(ttl).build(),
             last_good: Arc::new(ArcSwapOption::empty()),
         }
     }
@@ -150,7 +147,11 @@ mod tests {
                 .await
                 .expect("ok");
         }
-        assert_eq!(calls.load(Ordering::SeqCst), 1, "compute deduplicated by TTL");
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "compute deduplicated by TTL"
+        );
     }
 
     #[tokio::test]
@@ -182,7 +183,11 @@ mod tests {
             }
             last = Some(got);
         }
-        assert_eq!(calls.load(Ordering::SeqCst), 1, "single-flight collapsed concurrent calls");
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "single-flight collapsed concurrent calls"
+        );
     }
 
     #[tokio::test]
@@ -199,9 +204,7 @@ mod tests {
 
         // 3) Fail the recompute — must serve stale, not error.
         let stale = cache
-            .get_or_compute(|| async {
-                Err::<PageData, _>(std::io::Error::other("ch down"))
-            })
+            .get_or_compute(|| async { Err::<PageData, _>(std::io::Error::other("ch down")) })
             .await
             .expect("served stale");
         assert_eq!(stale.site_name, "good");
@@ -211,9 +214,7 @@ mod tests {
     async fn unavailable_when_first_compute_fails_with_no_stale() {
         let cache = PageCache::new(Duration::from_secs(10));
         let err = cache
-            .get_or_compute(|| async {
-                Err::<PageData, _>(std::io::Error::other("ch down"))
-            })
+            .get_or_compute(|| async { Err::<PageData, _>(std::io::Error::other("ch down")) })
             .await
             .expect_err("no stale, propagates");
         matches!(err, PageCacheError::Unavailable);

@@ -28,9 +28,7 @@ const CACHE_TTL: StdDuration = StdDuration::from_secs(5);
         (status = 503, body = ApiError, description = "One or more data sources unavailable"),
     ),
 )]
-pub async fn dashboard_summary(
-    State(state): State<AppState>,
-) -> Result<Json<DashboardSummary>> {
+pub async fn dashboard_summary(State(state): State<AppState>) -> Result<Json<DashboardSummary>> {
     if let Some((built, snapshot)) = state.dashboard_cache.lock().clone()
         && built.elapsed() < CACHE_TTL
     {

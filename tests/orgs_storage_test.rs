@@ -9,22 +9,20 @@ mod common;
 use status_monitor::domain::{OrgId, Role, UserId};
 use status_monitor::storage::orgs as orgs_store;
 use status_monitor::storage::{
-    RemoveOutcome, RestoreOutcome, create_org_with_owner, ensure_default_org,
-    is_active_member, is_owner, list_deleted_orgs_deleted_by, list_members,
-    list_orgs_for_user, owner_org_count, personal_org_for_user, remove_member, restore_org,
-    slug_is_available, soft_delete_org, update_org_name,
+    RemoveOutcome, RestoreOutcome, create_org_with_owner, ensure_default_org, is_active_member,
+    is_owner, list_deleted_orgs_deleted_by, list_members, list_orgs_for_user, owner_org_count,
+    personal_org_for_user, remove_member, restore_org, slug_is_available, soft_delete_org,
+    update_org_name,
 };
 use uuid::Uuid;
 
 async fn make_user(pool: &sqlx::PgPool) -> UserId {
     let email = format!("u-{}@test.example", Uuid::now_v7());
-    let (id,): (Uuid,) = sqlx::query_as(
-        r#"INSERT INTO users (email) VALUES ($1) RETURNING id"#,
-    )
-    .bind(&email)
-    .fetch_one(pool)
-    .await
-    .expect("insert user");
+    let (id,): (Uuid,) = sqlx::query_as(r#"INSERT INTO users (email) VALUES ($1) RETURNING id"#)
+        .bind(&email)
+        .fetch_one(pool)
+        .await
+        .expect("insert user");
     UserId(id)
 }
 
@@ -119,9 +117,16 @@ async fn list_orgs_excludes_soft_deleted_and_update_name_works() {
         .unwrap();
 
     let listed = list_orgs_for_user(&pool, user).await.unwrap();
-    assert!(listed.iter().any(|o| o.org.id == org.id && o.role == Role::Owner));
+    assert!(
+        listed
+            .iter()
+            .any(|o| o.org.id == org.id && o.role == Role::Owner)
+    );
 
-    let renamed = update_org_name(&pool, org.id, "New name").await.unwrap().unwrap();
+    let renamed = update_org_name(&pool, org.id, "New name")
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(renamed.name, "New name");
 
     assert!(soft_delete_org(&pool, org.id, user).await.unwrap());

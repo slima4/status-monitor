@@ -234,7 +234,9 @@ impl IncidentNarrationStore for PgIncidentNarrationStore {
                 .await
                 .map_err(|e| anyhow::anyhow!("append_update bump parent: {e}"))?;
         }
-        tx.commit().await.map_err(|e| anyhow::anyhow!("commit: {e}"))?;
+        tx.commit()
+            .await
+            .map_err(|e| anyhow::anyhow!("commit: {e}"))?;
         Ok(row.map(|(posted_at, phase, message)| PublicIncidentUpdate {
             posted_at,
             phase: IncidentStatusPhase::from_db_str(&phase),

@@ -173,7 +173,12 @@ mod tests {
     use super::*;
 
     fn c(up: u32, down: u32, degraded: u32, error: u32) -> Counters {
-        Counters { up, down, degraded, error }
+        Counters {
+            up,
+            down,
+            degraded,
+            error,
+        }
     }
 
     // ── component_status truth table ────────────────────────────────────────
@@ -384,11 +389,26 @@ mod tests {
 
     #[test]
     fn overall_labels_match_expected_strings() {
-        assert_eq!(overall_label(OverallState::Operational), "All Systems Operational");
-        assert_eq!(overall_label(OverallState::Maintenance), "Maintenance in progress");
-        assert_eq!(overall_label(OverallState::MinorDisruption), "Minor Service Disruption");
-        assert_eq!(overall_label(OverallState::PartialOutage), "Partial System Outage");
-        assert_eq!(overall_label(OverallState::MajorOutage), "Major System Outage");
+        assert_eq!(
+            overall_label(OverallState::Operational),
+            "All Systems Operational"
+        );
+        assert_eq!(
+            overall_label(OverallState::Maintenance),
+            "Maintenance in progress"
+        );
+        assert_eq!(
+            overall_label(OverallState::MinorDisruption),
+            "Minor Service Disruption"
+        );
+        assert_eq!(
+            overall_label(OverallState::PartialOutage),
+            "Partial System Outage"
+        );
+        assert_eq!(
+            overall_label(OverallState::MajorOutage),
+            "Major System Outage"
+        );
     }
 
     // ── day_state truth table ───────────────────────────────────────────────

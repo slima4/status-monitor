@@ -19,7 +19,11 @@ impl AuthFieldState {
     }
 
     pub fn bearer_initial_mode(&self) -> &'static str {
-        if self.has_bearer { "redacted" } else { "create" }
+        if self.has_bearer {
+            "redacted"
+        } else {
+            "create"
+        }
     }
 }
 
@@ -122,10 +126,7 @@ pub async fn new_form() -> FormPage {
     }
 }
 
-pub async fn edit_form(
-    State(state): State<AppState>,
-    Path(id): Path<Uuid>,
-) -> WebResult<FormPage> {
+pub async fn edit_form(State(state): State<AppState>, Path(id): Path<Uuid>) -> WebResult<FormPage> {
     let target = state
         .target_store
         .get(id)
@@ -188,14 +189,10 @@ fn http_fields_from(h: crate::domain::HttpCheck) -> HttpFields {
             200,
             200,
             299,
-            v.iter()
-                .map(u16::to_string)
-                .collect::<Vec<_>>()
-                .join(", "),
+            v.iter().map(u16::to_string).collect::<Vec<_>>().join(", "),
         ),
     };
-    let headers_json =
-        serde_json::to_string_pretty(&h.headers).unwrap_or_else(|_| "{}".into());
+    let headers_json = serde_json::to_string_pretty(&h.headers).unwrap_or_else(|_| "{}".into());
     HttpFields {
         url: h.url.to_string(),
         method: http_method_str(h.method),
@@ -211,7 +208,10 @@ fn http_fields_from(h: crate::domain::HttpCheck) -> HttpFields {
         headers_json,
         body: h.body.unwrap_or_default(),
         verify_tls: h.verify_tls,
-        auth: AuthFieldState { has_basic, has_bearer },
+        auth: AuthFieldState {
+            has_basic,
+            has_bearer,
+        },
     }
 }
 

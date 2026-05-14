@@ -21,11 +21,7 @@ fn valid_window() -> Value {
 async fn create_maintenance_returns_201_and_location() {
     let app = build_test_app(|_| {});
     let resp = app
-        .oneshot(json_request(
-            "POST",
-            "/api/v1/maintenance",
-            valid_window(),
-        ))
+        .oneshot(json_request("POST", "/api/v1/maintenance", valid_window()))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::CREATED);
@@ -107,11 +103,7 @@ async fn list_maintenance_paginates_and_filters() {
     for _ in 0..3 {
         let _ = app
             .clone()
-            .oneshot(json_request(
-                "POST",
-                "/api/v1/maintenance",
-                valid_window(),
-            ))
+            .oneshot(json_request("POST", "/api/v1/maintenance", valid_window()))
             .await
             .unwrap();
     }
@@ -152,11 +144,7 @@ async fn delete_maintenance_round_trip() {
     let app = build_test_app(|_| {});
     let create = app
         .clone()
-        .oneshot(json_request(
-            "POST",
-            "/api/v1/maintenance",
-            valid_window(),
-        ))
+        .oneshot(json_request("POST", "/api/v1/maintenance", valid_window()))
         .await
         .unwrap();
     let id = body_json(create).await["id"].as_str().unwrap().to_string();
@@ -191,11 +179,7 @@ async fn update_maintenance_changes_title() {
     let app = build_test_app(|_| {});
     let create = app
         .clone()
-        .oneshot(json_request(
-            "POST",
-            "/api/v1/maintenance",
-            valid_window(),
-        ))
+        .oneshot(json_request("POST", "/api/v1/maintenance", valid_window()))
         .await
         .unwrap();
     let id = body_json(create).await["id"].as_str().unwrap().to_string();

@@ -26,7 +26,9 @@ async fn store_with_default_org(
     pool: PgPool,
     cipher: Option<Arc<Cipher>>,
 ) -> (PostgresTargetStore, status_monitor::domain::OrgId) {
-    let org_id = ensure_default_org(&pool, "default").await.expect("default org");
+    let org_id = ensure_default_org(&pool, "default")
+        .await
+        .expect("default org");
     let store = PostgresTargetStore::from_pool(pool, cipher, org_id);
     (store, org_id)
 }

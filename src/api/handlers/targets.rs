@@ -44,9 +44,7 @@ pub struct ListQuery {
 
 impl ListQuery {
     fn effective_limit(&self) -> usize {
-        self.limit
-            .unwrap_or(LIST_LIMIT_DEFAULT)
-            .min(LIST_LIMIT_MAX)
+        self.limit.unwrap_or(LIST_LIMIT_DEFAULT).min(LIST_LIMIT_MAX)
     }
 
     fn to_filter(&self) -> TargetFilter {
@@ -270,7 +268,10 @@ pub async fn bulk_create(
     Json(items): Json<Vec<NewTarget>>,
 ) -> Result<(StatusCode, Redacted<Vec<Target>>)> {
     if items.is_empty() {
-        return Err(AppError::bad_request(codes::BULK_EMPTY, "empty bulk payload"));
+        return Err(AppError::bad_request(
+            codes::BULK_EMPTY,
+            "empty bulk payload",
+        ));
     }
     if items.len() > BULK_MAX {
         return Err(AppError::payload_too_large(
@@ -442,9 +443,11 @@ pub async fn check_now(
     Path(id): Path<Uuid>,
     Query(q): Query<CheckNowQuery>,
 ) -> Result<Json<CheckResult>> {
-    let target = state.target_store.get(id).await?.ok_or_else(|| {
-        AppError::not_found(codes::TARGET_NOT_FOUND, "target not found")
-    })?;
+    let target = state
+        .target_store
+        .get(id)
+        .await?
+        .ok_or_else(|| AppError::not_found(codes::TARGET_NOT_FOUND, "target not found"))?;
     let host = host_for_spec(&target.check);
     let result = state
         .worker_pool
@@ -670,7 +673,7 @@ fn validate_check(check: &crate::domain::CheckSpec, guard: &SsrfGuard) -> Result
 }
 
 fn check_ip(ip: IpAddr, guard: &SsrfGuard) -> Result<()> {
-    guard
-        .check(ip)
-        .map_err(|err| AppError::bad_request_field(codes::SSRF_BLOCKED, err.to_string(), "check.url"))
+    guard.check(ip).map_err(|err| {
+        AppError::bad_request_field(codes::SSRF_BLOCKED, err.to_string(), "check.url")
+    })
 }

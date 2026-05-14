@@ -9,9 +9,7 @@ use serde_json::Value;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::domain::{
-    Membership, OrgId, Organization, PERSONAL_SLUG_LIKE_PATTERN, Role, UserId,
-};
+use crate::domain::{Membership, OrgId, Organization, PERSONAL_SLUG_LIKE_PATTERN, Role, UserId};
 use crate::error::{AppError, Result};
 
 /// Find-or-create the default org at startup. Returns the persisted UUID so
@@ -92,13 +90,12 @@ pub async fn personal_org_for_user(pool: &PgPool, user: UserId) -> Result<Option
 /// `organizations` holds it, including soft-deleted ones. Mirrors the unique
 /// index behaviour so a "check-slug" API answer and the actual insert agree.
 pub async fn slug_is_available(pool: &PgPool, slug: &str) -> Result<bool> {
-    let (exists,): (bool,) = sqlx::query_as(
-        r#"SELECT EXISTS (SELECT 1 FROM organizations WHERE slug = $1)"#,
-    )
-    .bind(slug)
-    .fetch_one(pool)
-    .await
-    .context("slug_is_available")?;
+    let (exists,): (bool,) =
+        sqlx::query_as(r#"SELECT EXISTS (SELECT 1 FROM organizations WHERE slug = $1)"#)
+            .bind(slug)
+            .fetch_one(pool)
+            .await
+            .context("slug_is_available")?;
     Ok(!exists)
 }
 
@@ -160,9 +157,15 @@ pub async fn create_org_with_owner(
         ));
     }
 
-    record_audit_tx(&mut tx, OrgId(org_row.id), Some(user), "org.created", Value::Null)
-        .await
-        .context("create_org_with_owner: audit")?;
+    record_audit_tx(
+        &mut tx,
+        OrgId(org_row.id),
+        Some(user),
+        "org.created",
+        Value::Null,
+    )
+    .await
+    .context("create_org_with_owner: audit")?;
 
     tx.commit().await.context("create_org_with_owner: commit")?;
     Ok(Some(org_row.into_org()))
@@ -489,14 +492,12 @@ pub async fn remove_member(pool: &PgPool, org: OrgId, user: UserId) -> Result<Re
             return Ok(RemoveOutcome::LastOwner);
         }
     }
-    sqlx::query(
-        r#"DELETE FROM memberships WHERE org_id = $1 AND user_id = $2"#,
-    )
-    .bind(org.0)
-    .bind(user.0)
-    .execute(&mut *tx)
-    .await
-    .context("remove_member: delete")?;
+    sqlx::query(r#"DELETE FROM memberships WHERE org_id = $1 AND user_id = $2"#)
+        .bind(org.0)
+        .bind(user.0)
+        .execute(&mut *tx)
+        .await
+        .context("remove_member: delete")?;
     tx.commit().await.context("remove_member: commit")?;
     Ok(RemoveOutcome::Removed)
 }

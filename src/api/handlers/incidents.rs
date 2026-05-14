@@ -94,8 +94,7 @@ pub async fn post_incident_update(
         .append_update(id, new, None)
         .await?
         .ok_or_else(|| AppError::not_found(codes::INCIDENT_NOT_FOUND, "incident not found"))?;
-    let location =
-        HeaderValue::from_str(&format!("/api/v1/incidents/{id}")).expect("uuid ascii");
+    let location = HeaderValue::from_str(&format!("/api/v1/incidents/{id}")).expect("uuid ascii");
     Ok((
         StatusCode::CREATED,
         AppendHeaders([(header::LOCATION, location)]),

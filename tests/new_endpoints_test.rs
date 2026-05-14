@@ -129,7 +129,12 @@ async fn bulk_action_tag_add_then_remove() {
         .await
         .unwrap();
     let v = body_json(resp).await;
-    let tags: Vec<&str> = v["tags"].as_array().unwrap().iter().filter_map(|t| t.as_str()).collect();
+    let tags: Vec<&str> = v["tags"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|t| t.as_str())
+        .collect();
     assert!(tags.contains(&"fresh"));
 
     let remove = json!({
@@ -157,7 +162,12 @@ async fn bulk_action_tag_add_then_remove() {
         .await
         .unwrap();
     let v = body_json(resp).await;
-    let tags: Vec<&str> = v["tags"].as_array().unwrap().iter().filter_map(|t| t.as_str()).collect();
+    let tags: Vec<&str> = v["tags"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|t| t.as_str())
+        .collect();
     assert!(!tags.contains(&"fresh"));
 }
 

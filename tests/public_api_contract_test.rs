@@ -346,7 +346,9 @@ async fn public_endpoints_set_public_cache_headers() {
             .unwrap()
             .to_owned();
         assert!(
-            cc.contains("public") && cc.contains("max-age=10") && cc.contains("stale-while-revalidate=30"),
+            cc.contains("public")
+                && cc.contains("max-age=10")
+                && cc.contains("stale-while-revalidate=30"),
             "path {path} cache-control: {cc}"
         );
     }
@@ -465,8 +467,7 @@ async fn openapi_marks_public_paths_as_unauthenticated() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
-    let doc: serde_json::Value =
-        serde_json::from_str(&body_string(resp).await).unwrap();
+    let doc: serde_json::Value = serde_json::from_str(&body_string(resp).await).unwrap();
     for path in [
         "/api/public/v1/status",
         "/api/public/v1/components/{id}/history",

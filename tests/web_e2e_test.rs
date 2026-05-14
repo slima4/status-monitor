@@ -196,7 +196,10 @@ async fn target_detail_renders_charts_and_range_nav() {
     assert!(html.contains("detail-target"));
     assert!(html.contains(r#"aria-label="Time range""#));
     for key in ["1h", "24h", "7d", "30d"] {
-        assert!(html.contains(&format!("?range={key}")), "missing range {key}");
+        assert!(
+            html.contains(&format!("?range={key}")),
+            "missing range {key}"
+        );
     }
     assert!(html.contains(r#"id="latency-chart""#));
     assert!(html.contains(r#"id="breakdown-chart""#));
@@ -250,5 +253,8 @@ async fn static_assets_served_with_immutable_cache() {
         .get(header::CACHE_CONTROL)
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
-    assert!(cc.contains("immutable"), "css missing immutable cache: {cc}");
+    assert!(
+        cc.contains("immutable"),
+        "css missing immutable cache: {cc}"
+    );
 }

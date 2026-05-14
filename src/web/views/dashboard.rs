@@ -26,13 +26,20 @@ pub struct DashboardRegion {
 pub async fn index(State(state): State<AppState>) -> WebResult<DashboardPage> {
     let summary = load_summary(state).await?;
     let uptime_pct = format!("{:.2}", summary.last_24h.uptime_pct);
-    Ok(DashboardPage { active_tab: "dashboard", summary, uptime_pct })
+    Ok(DashboardPage {
+        active_tab: "dashboard",
+        summary,
+        uptime_pct,
+    })
 }
 
 pub async fn region(State(state): State<AppState>) -> WebResult<DashboardRegion> {
     let summary = load_summary(state).await?;
     let uptime_pct = format!("{:.2}", summary.last_24h.uptime_pct);
-    Ok(DashboardRegion { summary, uptime_pct })
+    Ok(DashboardRegion {
+        summary,
+        uptime_pct,
+    })
 }
 
 // Bridge into the API handler so the 5-second `state.dashboard_cache`
@@ -49,9 +56,17 @@ mod tests {
 
     fn sample_summary() -> DashboardSummary {
         DashboardSummary {
-            targets: TargetsSummary { total: 42, enabled: 40, disabled: 2 },
+            targets: TargetsSummary {
+                total: 42,
+                enabled: 40,
+                disabled: 2,
+            },
             current_status: StatusBreakdown {
-                up: 38, down: 1, degraded: 1, error: 0, unknown: 2,
+                up: 38,
+                down: 1,
+                degraded: 1,
+                error: 0,
+                unknown: 2,
             },
             last_24h: Last24hSummary {
                 checks_total: 50_400,
@@ -71,13 +86,20 @@ mod tests {
     fn sample_page() -> DashboardPage {
         let summary = sample_summary();
         let uptime_pct = format!("{:.2}", summary.last_24h.uptime_pct);
-        DashboardPage { active_tab: "dashboard", summary, uptime_pct }
+        DashboardPage {
+            active_tab: "dashboard",
+            summary,
+            uptime_pct,
+        }
     }
 
     fn sample_region() -> DashboardRegion {
         let summary = sample_summary();
         let uptime_pct = format!("{:.2}", summary.last_24h.uptime_pct);
-        DashboardRegion { summary, uptime_pct }
+        DashboardRegion {
+            summary,
+            uptime_pct,
+        }
     }
 
     #[test]

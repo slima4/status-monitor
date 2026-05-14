@@ -170,8 +170,15 @@ async fn coalescing_separates_runs_split_by_an_up_check() {
         .list_incidents(target_id, range, false, 100, 0)
         .await
         .unwrap();
-    assert_eq!(incidents.len(), 2, "expected two incidents, got {incidents:?}");
-    assert!(incidents.iter().any(|i| i.ended_at.is_none()), "trailing run still ongoing");
+    assert_eq!(
+        incidents.len(),
+        2,
+        "expected two incidents, got {incidents:?}"
+    );
+    assert!(
+        incidents.iter().any(|i| i.ended_at.is_none()),
+        "trailing run still ongoing"
+    );
 }
 
 #[tokio::test]
@@ -260,11 +267,7 @@ async fn cache_control_set_per_route_kind() {
 
     let list = app
         .clone()
-        .oneshot(
-            Request::get("/api/v1/targets")
-                .body(Body::empty())
-                .unwrap(),
-        )
+        .oneshot(Request::get("/api/v1/targets").body(Body::empty()).unwrap())
         .await
         .unwrap();
     assert_eq!(list.status(), StatusCode::OK);
