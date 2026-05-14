@@ -267,3 +267,73 @@ async fn enqueue_is_dedup_on_conflict() {
         .await
         .unwrap();
 }
+
+/// Simulates the worker dying after the PG cascade transaction commits but
+/// before `drain_clickhouse_purge_queue` finishes. State on disk is "org gone
+/// from PG, queue row pending, CH-side mutation never issued". The next
+/// `purge_tick` must complete the job — cascade finds nothing new, drain
+/// processes the pending row and marks it complete.
+#[tokio::test]
+#[ignore]
+async fn purge_resilient_to_kill_between_pg_cascade_and_ch_drain() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let Some(ch) = common::ch_client_from_env().await else {
+        return;
+    };
+    let user = make_user(&pool).await;
+    let org = create_org_with_owner(&pool, user, &unique_slug("kill"), "n", 3)
+        .await
+        .unwrap()
+        .unwrap();
+    soft_delete_org(&pool, org.id, user).await.unwrap();
+    backdate_delete(&pool, org.id, 40).await;
+
+    // Tick 1: cascade + drain both run. We then reset the queue row to pending
+    // to emulate a SIGKILL between the PG commit and the CH ALTER. The PG side
+    // already committed and stays cascaded.
+    let stats = purge_tick(&pool, &ch, 30).await.unwrap();
+    assert!(stats.cascaded >= 1, "first tick cascades");
+    let (org_exists,): (bool,) =
+        sqlx::query_as("SELECT EXISTS (SELECT 1 FROM organizations WHERE id = $1)")
+            .bind(org.id.0)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(!org_exists, "PG cascade ran");
+
+    sqlx::query("UPDATE clickhouse_purge_queue SET completed_at = NULL WHERE org_id = $1")
+        .bind(org.id.0)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // Tick 2: cascade has nothing left, but drain recovers the half-finished
+    // work and marks the queue row complete.
+    let stats = purge_tick(&pool, &ch, 30).await.unwrap();
+    assert_eq!(stats.cascaded, 0, "no past-grace orgs remain");
+    assert!(stats.drained >= 1, "next tick drains the pending queue row");
+
+    let (completed,): (Option<chrono::DateTime<chrono::Utc>>,) =
+        sqlx::query_as("SELECT completed_at FROM clickhouse_purge_queue WHERE org_id = $1")
+            .bind(org.id.0)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(
+        completed.is_some(),
+        "queue row marked complete after recovery"
+    );
+
+    sqlx::query("DELETE FROM clickhouse_purge_queue WHERE org_id = $1")
+        .bind(org.id.0)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM users WHERE id = $1")
+        .bind(user.0)
+        .execute(&pool)
+        .await
+        .unwrap();
+}

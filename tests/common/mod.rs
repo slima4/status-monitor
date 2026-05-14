@@ -40,6 +40,33 @@ pub fn test_org_id() -> OrgId {
     OrgId(Uuid::from_u128(0x0000_0000_0000_0000_0000_0000_0000_0001))
 }
 
+/// Self-host (`tenancy.enabled = false`) vs SaaS (`tenancy.enabled = true`)
+/// runtime modes. Integration tests parameterise over this with `rstest`
+/// so both modes are exercised against the same router/handlers.
+#[derive(Clone, Copy, Debug)]
+pub enum TenancyMode {
+    SelfHost,
+    Saas,
+}
+
+impl TenancyMode {
+    /// Apply the mode to a freshly loaded [`AppConfig`]. SaaS mode also flips
+    /// `public_routes_enabled = true` so non-gating tests aren't blocked by
+    /// the public-routes guard.
+    pub fn apply(self, cfg: &mut AppConfig) {
+        match self {
+            TenancyMode::SelfHost => {
+                cfg.tenancy.enabled = false;
+                cfg.tenancy.public_routes_enabled = false;
+            }
+            TenancyMode::Saas => {
+                cfg.tenancy.enabled = true;
+                cfg.tenancy.public_routes_enabled = true;
+            }
+        }
+    }
+}
+
 /// Builds a test router with an InMemory store backend, applying `mutate` to
 /// the loaded config before constructing `AppState`. The cancellation token is
 /// freshly created and never fires — background tasks (rate-limit GC) leak

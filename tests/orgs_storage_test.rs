@@ -281,6 +281,115 @@ async fn ensure_default_org_idempotent_and_personal_org_lookup_returns_none() {
         .unwrap();
 }
 
+/// 50 simultaneous create-org attempts for one user with `owner_limit = 3`
+/// must produce exactly 3 winners. The cap is enforced by the count-subquery
+/// inside the membership INSERT, so MVCC row-level locking on
+/// `(user_id, org_id)` PK serialises the writes — no row needs to know about
+/// any other attempt's outcome.
+#[tokio::test]
+#[ignore]
+async fn owner_limit_holds_under_50_concurrent_creates() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let user = make_user(&pool).await;
+
+    let limit: u32 = 3;
+    let attempts: usize = 50;
+    let mut tasks = Vec::with_capacity(attempts);
+    for i in 0..attempts {
+        let pool = pool.clone();
+        let slug = unique_slug(&format!("race-{i:02}"));
+        tasks.push(tokio::spawn(async move {
+            create_org_with_owner(&pool, user, &slug, "n", limit).await
+        }));
+    }
+
+    let mut created = 0u32;
+    let mut over_limit = 0u32;
+    for t in tasks {
+        match t.await.unwrap() {
+            Ok(Some(_)) => created += 1,
+            Ok(None) => {} // slug collision shouldn't happen with unique slugs
+            Err(e) if format!("{e:?}").contains("OWNER_ORG_LIMIT") => over_limit += 1,
+            Err(e) => panic!("unexpected error: {e:?}"),
+        }
+    }
+
+    assert_eq!(created, limit, "exactly `limit` should win");
+    assert_eq!(
+        over_limit,
+        u32::try_from(attempts).unwrap() - limit,
+        "every loser should report OWNER_ORG_LIMIT"
+    );
+    assert_eq!(owner_org_count(&pool, user).await.unwrap(), limit);
+
+    sqlx::query("DELETE FROM users WHERE id = $1")
+        .bind(user.0)
+        .execute(&pool)
+        .await
+        .unwrap();
+}
+
+/// Models the signup retry loop: user_a holds the generated slug X, user_b
+/// then collides on X and must succeed on the next `generate_personal_slug`
+/// draw. Uses an explicit fixed slug for user_a instead of reseeding
+/// `fastrand`'s thread-local RNG — seed pollution would leak into sibling
+/// tests sharing the test binary's threads.
+#[tokio::test]
+#[ignore]
+async fn personal_org_collision_retry_succeeds() {
+    use status_monitor::domain::generate_personal_slug;
+
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let user_a = make_user(&pool).await;
+    let user_b = make_user(&pool).await;
+
+    // Fixed slug shaped like a real personal slug, distinct enough that two
+    // concurrent test runs won't collide.
+    let suffix = &Uuid::new_v4().simple().to_string()[..6];
+    let collided = format!("personal-fixed-test-{suffix}");
+    let _ = create_org_with_owner(&pool, user_a, &collided, "A", 3)
+        .await
+        .unwrap()
+        .expect("first user takes the slug");
+
+    // user_b tries the same slug and collides.
+    let none = create_org_with_owner(&pool, user_b, &collided, "B", 3)
+        .await
+        .unwrap();
+    assert!(none.is_none(), "expected slug-collision None");
+
+    // Retry: a fresh draw from the generator yields a distinct slug user_b
+    // can claim. Five attempts mirror the signup transaction's retry budget.
+    let mut succeeded = false;
+    for _ in 0..5 {
+        let retry_slug = generate_personal_slug();
+        if retry_slug == collided {
+            continue;
+        }
+        if let Some(o) = create_org_with_owner(&pool, user_b, &retry_slug, "B", 3)
+            .await
+            .unwrap()
+        {
+            assert_eq!(o.slug, retry_slug.to_ascii_lowercase());
+            succeeded = true;
+            break;
+        }
+    }
+    assert!(succeeded, "retry should win within 5 attempts");
+
+    for u in [user_a, user_b] {
+        sqlx::query("DELETE FROM users WHERE id = $1")
+            .bind(u.0)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+}
+
 // Silence unused-import warnings when none of the live-PG tests run because
 // `DATABASE_URL` is unset (every body early-returns).
 #[allow(dead_code, unused_imports)]
