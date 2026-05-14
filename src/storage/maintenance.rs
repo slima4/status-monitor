@@ -11,7 +11,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::domain::{
-    MaintenanceFilter, MaintenanceWindow, MaintenanceWindowUpdate, NewMaintenanceWindow,
+    MaintenanceFilter, MaintenanceWindow, MaintenanceWindowUpdate, NewMaintenanceWindow, OrgId,
 };
 use crate::error::Result;
 
@@ -50,11 +50,12 @@ pub trait MaintenanceStore: Send + Sync {
 
 pub struct PgMaintenanceStore {
     pool: PgPool,
+    default_org_id: OrgId,
 }
 
 impl PgMaintenanceStore {
-    pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+    pub fn new(pool: PgPool, default_org_id: OrgId) -> Self {
+        Self { pool, default_org_id }
     }
 }
 
@@ -106,10 +107,11 @@ impl MaintenanceStore for PgMaintenanceStore {
             .map_err(|e| anyhow::anyhow!("begin: {e}"))?;
         let row: MaintenanceRow = sqlx::query_as(
             r#"INSERT INTO maintenance_windows
-                   (title, description, starts_at, ends_at)
-               VALUES ($1, $2, $3, $4)
+                   (org_id, title, description, starts_at, ends_at)
+               VALUES ($1, $2, $3, $4, $5)
                RETURNING id, title, description, starts_at, ends_at, created_at, updated_at"#,
         )
+        .bind(self.default_org_id.0)
         .bind(&new.title)
         .bind(&new.description)
         .bind(new.starts_at)
@@ -118,9 +120,15 @@ impl MaintenanceStore for PgMaintenanceStore {
         .await
         .map_err(|e| anyhow::anyhow!("insert maintenance: {e}"))?;
         if !new.component_ids.is_empty() {
+            // Pull org_id from the parent so it stays in lockstep even if a
+            // future caller passes a wrong default_org_id; the trigger is the
+            // belt, this is the suspenders.
             sqlx::query(
-                r#"INSERT INTO maintenance_window_components (maintenance_id, target_id)
-                   SELECT $1, * FROM UNNEST($2::uuid[])"#,
+                r#"INSERT INTO maintenance_window_components (org_id, maintenance_id, target_id)
+                   SELECT mw.org_id, mw.id, t.target_id
+                   FROM maintenance_windows mw
+                   CROSS JOIN UNNEST($2::uuid[]) AS t(target_id)
+                   WHERE mw.id = $1"#,
             )
             .bind(row.id)
             .bind(&new.component_ids)
@@ -221,8 +229,11 @@ impl MaintenanceStore for PgMaintenanceStore {
                 .map_err(|e| anyhow::anyhow!("delete components: {e}"))?;
             if !ids.is_empty() {
                 sqlx::query(
-                    r#"INSERT INTO maintenance_window_components (maintenance_id, target_id)
-                       SELECT $1, * FROM UNNEST($2::uuid[])"#,
+                    r#"INSERT INTO maintenance_window_components (org_id, maintenance_id, target_id)
+                       SELECT mw.org_id, mw.id, t.target_id
+                       FROM maintenance_windows mw
+                       CROSS JOIN UNNEST($2::uuid[]) AS t(target_id)
+                       WHERE mw.id = $1"#,
                 )
                 .bind(row.id)
                 .bind(ids)

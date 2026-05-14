@@ -192,10 +192,13 @@ impl IncidentNarrationStore for PgIncidentNarrationStore {
             .begin()
             .await
             .map_err(|e| anyhow::anyhow!("begin: {e}"))?;
+        // org_id is denormalised onto incident_updates and is also enforced by
+        // the trg_incident_updates_org_match trigger — pulling it from the
+        // parent incident here keeps the trigger satisfied even if a future
+        // caller passes a wrong default_org_id.
         let row: Option<(DateTime<Utc>, String, String)> = sqlx::query_as(
-            r#"INSERT INTO incident_updates (incident_id, phase, message, author)
-               SELECT $1, $2, $3, $4
-               WHERE EXISTS (SELECT 1 FROM incidents WHERE id = $1)
+            r#"INSERT INTO incident_updates (org_id, incident_id, phase, message, author)
+               SELECT i.org_id, $1, $2, $3, $4 FROM incidents i WHERE i.id = $1
                RETURNING posted_at, phase, message"#,
         )
         .bind(incident_id)

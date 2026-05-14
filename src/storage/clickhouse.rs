@@ -10,27 +10,85 @@ use uuid::Uuid;
 
 use crate::api::types::StatusBreakdown;
 use crate::config::ClickhouseConfig;
-use crate::domain::{CheckResult, CheckStatus, Incident, coalesce_incidents};
+use crate::domain::{CheckResult, CheckStatus, Incident, OrgId, coalesce_incidents};
 use crate::error::Result;
 use crate::storage::traits::{ResultSink, ResultsStore, TimeRange, UptimeStats};
 
 const TABLE: &str = "check_results";
 
-const MIGRATION_SQL: &str = include_str!("../../migrations/clickhouse/001_initial.sql");
+/// Ordered list of migrations. Each entry is `(filename, sql)`. Filename is
+/// recorded in `schema_migrations` after apply so we never re-run a migration
+/// that has already executed on this database — important for DROP/CREATE
+/// migrations that would otherwise destroy data on every startup.
+///
+/// Constraints (we don't validate these; just don't break them):
+/// - Migration SQL is split on `;`, so no `;` inside string literals or
+///   comments. CREATE FUNCTION bodies, multi-line strings, etc. won't survive.
+/// - The runner is not concurrent-safe: `schema_migrations` is `TinyLog`
+///   which has no atomic CAS. Two processes racing through their first boot
+///   could both observe an empty applied set and both run DROP/CREATE.
+///   Single-binary deployments stay safe; for multi-replica, take a
+///   pg_advisory_lock around the call before this lands in production.
+const MIGRATIONS: &[(&str, &str)] = &[
+    (
+        "001_initial.sql",
+        include_str!("../../migrations/clickhouse/001_initial.sql"),
+    ),
+    (
+        "002_multitenancy.sql",
+        include_str!("../../migrations/clickhouse/002_multitenancy.sql"),
+    ),
+];
 
 pub async fn migrate(client: &Client) -> Result<()> {
     tracing::info!("running clickhouse migrations");
-    for stmt in MIGRATION_SQL.split(';') {
-        let trimmed = stmt.trim();
-        if trimmed.is_empty() {
+
+    client
+        .query(
+            "CREATE TABLE IF NOT EXISTS schema_migrations (\
+                 filename String, \
+                 applied_at DateTime64(3, 'UTC') DEFAULT now64(3) \
+             ) ENGINE = TinyLog",
+        )
+        .execute()
+        .await
+        .context("create schema_migrations")?;
+
+    #[derive(Row, Deserialize)]
+    struct AppliedRow {
+        filename: String,
+    }
+    let applied: Vec<AppliedRow> = client
+        .query("SELECT filename FROM schema_migrations")
+        .fetch_all::<AppliedRow>()
+        .await
+        .context("read schema_migrations")?;
+
+    for (name, sql) in MIGRATIONS {
+        if applied.iter().any(|f| f.filename == *name) {
+            tracing::debug!(migration = name, "clickhouse migration already applied");
             continue;
         }
+        tracing::info!(migration = name, "applying clickhouse migration");
+        for stmt in sql.split(';') {
+            let trimmed = stmt.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            client
+                .query(trimmed)
+                .execute()
+                .await
+                .with_context(|| format!("clickhouse migration {name}"))?;
+        }
         client
-            .query(trimmed)
+            .query("INSERT INTO schema_migrations (filename) VALUES (?)")
+            .bind(*name)
             .execute()
             .await
-            .context("clickhouse migration statement")?;
+            .with_context(|| format!("record clickhouse migration {name}"))?;
     }
+
     tracing::info!("clickhouse ready");
     Ok(())
 }
@@ -48,11 +106,12 @@ pub fn build_client(cfg: &ClickhouseConfig) -> Client {
 
 pub struct ClickhouseResultSink {
     client: Client,
+    default_org_id: OrgId,
 }
 
 impl ClickhouseResultSink {
-    pub fn from_client(client: Client) -> Self {
-        Self { client }
+    pub fn from_client(client: Client, default_org_id: OrgId) -> Self {
+        Self { client, default_org_id }
     }
 
     async fn write_once(
@@ -73,7 +132,10 @@ impl ResultSink for ClickhouseResultSink {
         if results.is_empty() {
             return Ok(());
         }
-        let rows: Vec<CheckResultRow<'_>> = results.iter().map(CheckResultRow::from).collect();
+        let rows: Vec<CheckResultRow<'_>> = results
+            .iter()
+            .map(|r| CheckResultRow::from_result(r, self.default_org_id))
+            .collect();
 
         let backoff = ExponentialBackoffBuilder::new()
             .with_initial_interval(Duration::from_millis(100))
@@ -105,6 +167,8 @@ impl ResultSink for ClickhouseResultSink {
 #[derive(Debug, Row, Serialize)]
 struct CheckResultRow<'a> {
     #[serde(with = "clickhouse::serde::uuid")]
+    org_id: Uuid,
+    #[serde(with = "clickhouse::serde::uuid")]
     target_id: Uuid,
     timestamp: i64,
     status: i8,
@@ -118,9 +182,10 @@ struct CheckResultRow<'a> {
     error: Option<&'a str>,
 }
 
-impl<'a> From<&'a CheckResult> for CheckResultRow<'a> {
-    fn from(r: &'a CheckResult) -> Self {
+impl<'a> CheckResultRow<'a> {
+    fn from_result(r: &'a CheckResult, org_id: OrgId) -> Self {
         Self {
+            org_id: org_id.0,
             target_id: r.target_id,
             timestamp: r.timestamp.timestamp_millis(),
             status: r.status.as_enum8(),
@@ -138,16 +203,19 @@ impl<'a> From<&'a CheckResult> for CheckResultRow<'a> {
 
 pub struct ClickhouseResultsStore {
     client: Client,
+    default_org_id: OrgId,
 }
 
 impl ClickhouseResultsStore {
-    pub fn from_client(client: Client) -> Self {
-        Self { client }
+    pub fn from_client(client: Client, default_org_id: OrgId) -> Self {
+        Self { client, default_org_id }
     }
 
     /// Narrow projection: only the four columns incident coalescing needs.
     /// Avoids paying for `response_code`/`response_size`/timing fields when
-    /// the caller only wants to detect bad-status runs.
+    /// the caller only wants to detect bad-status runs. `org_id` is the
+    /// leading sort key — filtering on it is mandatory or the query degrades
+    /// to a full scan.
     async fn fetch_incident_rows(
         &self,
         target_id: Uuid,
@@ -157,11 +225,12 @@ impl ClickhouseResultsStore {
             .client
             .query(&format!(
                 "SELECT target_id, timestamp, status, error FROM {TABLE} \
-                 WHERE target_id = ? \
+                 WHERE org_id = ? AND target_id = ? \
                  AND timestamp >= fromUnixTimestamp64Milli(?) \
                  AND timestamp < fromUnixTimestamp64Milli(?) \
                  ORDER BY timestamp ASC"
             ))
+            .bind(self.default_org_id.0)
             .bind(target_id)
             .bind(range.from.timestamp_millis())
             .bind(range.to.timestamp_millis())
@@ -246,11 +315,12 @@ impl ResultsStore for ClickhouseResultsStore {
             .query(&format!(
                 "SELECT target_id, timestamp, status, duration_ms, dns_ms, connect_ms, tls_ms, \
                  ttfb_ms, response_code, response_size, error FROM {TABLE} \
-                 WHERE target_id = ? \
+                 WHERE org_id = ? AND target_id = ? \
                  AND timestamp >= fromUnixTimestamp64Milli(?) \
                  AND timestamp < fromUnixTimestamp64Milli(?) \
                  ORDER BY timestamp DESC LIMIT ? OFFSET ?"
             ))
+            .bind(self.default_org_id.0)
             .bind(target_id)
             .bind(range.from.timestamp_millis())
             .bind(range.to.timestamp_millis())
@@ -271,10 +341,11 @@ impl ResultsStore for ClickhouseResultsStore {
             .client
             .query(&format!(
                 "SELECT count() AS n FROM {TABLE} \
-                 WHERE target_id = ? \
+                 WHERE org_id = ? AND target_id = ? \
                  AND timestamp >= fromUnixTimestamp64Milli(?) \
                  AND timestamp < fromUnixTimestamp64Milli(?)"
             ))
+            .bind(self.default_org_id.0)
             .bind(target_id)
             .bind(range.from.timestamp_millis())
             .bind(range.to.timestamp_millis())
@@ -325,10 +396,12 @@ impl ResultsStore for ClickhouseResultsStore {
             .query(&format!(
                 "SELECT argMax(status, timestamp) AS status \
                  FROM {TABLE} \
-                 WHERE timestamp >= fromUnixTimestamp64Milli(?) \
+                 WHERE org_id = ? \
+                 AND timestamp >= fromUnixTimestamp64Milli(?) \
                  AND timestamp < fromUnixTimestamp64Milli(?) \
                  GROUP BY target_id"
             ))
+            .bind(self.default_org_id.0)
             .bind(range.from.timestamp_millis())
             .bind(range.to.timestamp_millis())
             .fetch_all::<Latest>()
@@ -357,9 +430,11 @@ impl ResultsStore for ClickhouseResultsStore {
             .query(&format!(
                 "SELECT count() AS total, countIf(status = 'up') AS up \
                  FROM {TABLE} \
-                 WHERE timestamp >= fromUnixTimestamp64Milli(?) \
+                 WHERE org_id = ? \
+                 AND timestamp >= fromUnixTimestamp64Milli(?) \
                  AND timestamp < fromUnixTimestamp64Milli(?)"
             ))
+            .bind(self.default_org_id.0)
             .bind(range.from.timestamp_millis())
             .bind(range.to.timestamp_millis())
             .fetch_one::<Counts>()
@@ -372,10 +447,12 @@ impl ResultsStore for ClickhouseResultsStore {
             .client
             .query(&format!(
                 "SELECT target_id, timestamp, status, error FROM {TABLE} \
-                 WHERE timestamp >= fromUnixTimestamp64Milli(?) \
+                 WHERE org_id = ? \
+                 AND timestamp >= fromUnixTimestamp64Milli(?) \
                  AND timestamp < fromUnixTimestamp64Milli(?) \
                  ORDER BY target_id ASC, timestamp ASC"
             ))
+            .bind(self.default_org_id.0)
             .bind(range.from.timestamp_millis())
             .bind(range.to.timestamp_millis())
             .fetch_all::<IncidentRow>()
@@ -423,10 +500,11 @@ impl ResultsStore for ClickhouseResultsStore {
                    countIf(status = 'degraded') AS degraded, \
                    countIf(status = 'error') AS error \
                  FROM {TABLE} \
-                 WHERE target_id = ? \
+                 WHERE org_id = ? AND target_id = ? \
                  AND timestamp >= fromUnixTimestamp64Milli(?) \
                  AND timestamp < fromUnixTimestamp64Milli(?)"
             ))
+            .bind(self.default_org_id.0)
             .bind(target_id)
             .bind(range.from.timestamp_millis())
             .bind(range.to.timestamp_millis())

@@ -1,0 +1,155 @@
+//! Word lists for generating personal-org slugs:
+//! `personal-{adjective}-{noun}-{6-char-base32}`.
+//!
+//! Both lists are short, family-friendly, and ASCII-only. Combined with a
+//! 6-character base32 suffix they yield ~10⁹ combinations per (adj, noun)
+//! pair — collision-proof at any plausible signup rate. The validator's
+//! reserved-slug check is exact-match, so the bare prefix `personal` is
+//! reserved but generated slugs (which always include the random suffix)
+//! pass through.
+
+pub const ADJECTIVES: &[&str] = &[
+    "agile", "alert", "amber", "ancient", "ardent", "arctic", "ashen", "autumn",
+    "balmy", "bashful", "beaming", "bitter", "blissful", "bold", "bouncy", "brave",
+    "breezy", "bright", "brisk", "bronze", "brown", "bubbly", "burly", "busy",
+    "calm", "candid", "cheery", "chilly", "chrome", "cinder", "citrus", "civic",
+    "classic", "clever", "cloudy", "cobalt", "cool", "copper", "cosmic", "cosy",
+    "courtly", "crimson", "crisp", "crystal", "curious", "daring", "dawn", "deep",
+    "dizzy", "dreamy", "dusky", "dusty", "eager", "early", "earnest", "earthen",
+    "ebony", "echoing", "elder", "electric", "elegant", "ember", "emerald", "endless",
+    "epic", "even", "fabled", "fair", "fancy", "feisty", "fierce", "fiery",
+    "fleet", "fluffy", "foggy", "forest", "frosty", "fuzzy", "gallant", "gentle",
+    "gilded", "glassy", "gleaming", "gleeful", "glowing", "golden", "graceful", "grand",
+    "grassy", "great", "happy", "hardy", "hazy", "hearty", "hidden", "honest",
+    "honey", "humble", "icy", "indigo", "inky", "iron", "ivory", "jade",
+    "jolly", "joyful", "keen", "kind", "lakeside", "late", "lavender", "lazy",
+    "leafy", "lemon", "lilac", "lively", "lone", "loud", "loyal", "lucid",
+    "lucky", "lunar", "lush", "magenta", "majestic", "mango", "maple", "marble",
+    "meadow", "merry", "mighty", "milky", "mint", "misty", "modern", "morning",
+    "mossy", "mystic", "neat", "neon", "nimble", "noble", "north", "olive",
+    "open", "orange", "patient", "peach", "pearl", "peaceful", "pebble", "pixel",
+    "placid", "plucky", "polar", "polite", "prairie", "proud", "purple", "quick",
+    "quiet", "radiant", "rapid", "rare", "raven", "regal", "remote", "rich",
+    "ripe", "river", "robust", "rosy", "round", "rugged", "ruby", "rustic",
+    "sage", "salty", "sandy", "sapphire", "savvy", "scarlet", "secret", "serene",
+    "shadow", "shiny", "silent", "silver", "sleek", "smart", "smoky", "smooth",
+    "snowy", "solar", "solid", "soothing", "sparkling", "spicy", "spry", "stalwart",
+    "starry", "steady", "stellar", "stoic", "stormy", "strong", "subtle", "sunny",
+    "sunset", "supple", "swift", "tame", "tangy", "tart", "teal", "tender",
+    "thrifty", "tidal", "tidy", "timber", "tiny", "topaz", "trusty", "tundra",
+    "twilight", "umber", "valiant", "velvet", "verdant", "vibrant", "vintage", "violet",
+    "vivid", "warm", "watery", "wavy", "whimsical", "wild", "windy", "winter",
+    "wise", "witty", "wooded", "woolly", "woven", "young", "zealous", "zen",
+];
+
+pub const NOUNS: &[&str] = &[
+    "acorn", "alder", "apple", "ash", "aspen", "atlas", "badger", "bay",
+    "beach", "beacon", "bear", "beaver", "beech", "berry", "birch", "bison",
+    "blossom", "blueprint", "boat", "branch", "breeze", "brook", "bud", "bumblebee",
+    "burrow", "butterfly", "cabin", "cactus", "campfire", "canal", "canary", "candle",
+    "canyon", "cape", "caribou", "castle", "cavern", "cedar", "chalet", "chasm",
+    "chestnut", "cliff", "clipper", "cloud", "clover", "coast", "cocoa", "comet",
+    "compass", "coral", "cottage", "cove", "cricket", "crocus", "crystal", "cypress",
+    "daisy", "dahlia", "dawn", "deer", "delta", "desert", "dewdrop", "dolphin",
+    "dove", "dragonfly", "dune", "dusk", "eagle", "echo", "elm", "ember",
+    "estuary", "fable", "falcon", "feather", "fern", "finch", "fir", "fjord",
+    "fleet", "flint", "flower", "forest", "fox", "frog", "frost", "galaxy",
+    "garden", "geyser", "glacier", "glade", "glen", "glow", "gorge", "gosling",
+    "grove", "gull", "hamlet", "harbor", "harvest", "hawk", "hazel", "heather",
+    "heron", "highland", "hill", "horizon", "hummingbird", "iceberg", "iris", "isle",
+    "ivy", "jasmine", "journey", "junction", "juniper", "kestrel", "kettle", "kite",
+    "lagoon", "lake", "lantern", "larch", "lark", "leaf", "ledge", "lichen",
+    "lighthouse", "lily", "linden", "lion", "lookout", "lotus", "lynx", "magpie",
+    "mango", "mantle", "maple", "marble", "marigold", "marsh", "meadow", "mesa",
+    "meteor", "mist", "moat", "monolith", "moon", "moor", "moss", "mountain",
+    "mulberry", "nebula", "nectar", "nettle", "newt", "north", "oak", "oasis",
+    "obelisk", "ocean", "olive", "opal", "orbit", "orca", "orchard", "orchid",
+    "osprey", "otter", "outpost", "owl", "palm", "pasture", "peach", "pebble",
+    "pelican", "petal", "pier", "pine", "pinnacle", "pioneer", "piper", "plateau",
+    "plover", "pollen", "pond", "poppy", "porch", "prairie", "puffin", "pumpkin",
+    "quail", "quartz", "rabbit", "raccoon", "rain", "rapid", "raven", "reed",
+    "reef", "ridge", "river", "robin", "rose", "rowan", "salmon", "sand",
+    "sapling", "sapphire", "savannah", "seal", "seashell", "sequoia", "shore",
+    "silver", "skylark", "sparrow", "spire", "spring", "spruce", "starling", "stone",
+    "stream", "summit", "sunflower", "surf", "swallow", "sycamore", "tangerine", "thistle",
+    "thunder", "tide", "topaz", "torch", "tower", "trail", "tundra", "turtle",
+    "twig", "valley", "vapor", "vine", "vineyard", "violet", "volcano", "warbler",
+    "waterfall", "wave", "whale", "whisper", "wildflower", "willow", "wisp", "wolf",
+    "woodpecker", "wren", "yarrow", "yew", "zenith", "zephyr",
+];
+
+/// 6-character Crockford-style base32 alphabet (no I, L, O, U to dodge OCR/typo
+/// confusion with 1, 0). Stays URL-safe and case-insensitive.
+const BASE32: &[u8; 32] = b"0123456789abcdefghjkmnpqrstvwxyz";
+
+/// Max combined `{adj}-{noun}` length so the full slug fits the 30-char DB
+/// limit: `personal-` (9) + adj + `-` (1) + noun + `-` (1) + suffix (6) = 17 +
+/// adj + noun. With adj + noun ≤ 13 (each word ≤ 6 chars) the slug tops out at
+/// 30. The richer master lists keep longer words for future use; only this
+/// subset is sampled for slug generation.
+const MAX_WORD_LEN: usize = 6;
+
+static SHORT_ADJECTIVES: std::sync::LazyLock<Vec<&'static str>> =
+    std::sync::LazyLock::new(|| {
+        ADJECTIVES
+            .iter()
+            .copied()
+            .filter(|w| w.len() <= MAX_WORD_LEN)
+            .collect()
+    });
+
+static SHORT_NOUNS: std::sync::LazyLock<Vec<&'static str>> = std::sync::LazyLock::new(|| {
+    NOUNS
+        .iter()
+        .copied()
+        .filter(|w| w.len() <= MAX_WORD_LEN)
+        .collect()
+});
+
+/// Generate one `personal-{adj}-{noun}-{6-char}` slug. The 6-char suffix uses
+/// `fastrand`'s per-thread RNG — uniform enough for collision avoidance but
+/// not a cryptographic source, which is fine since slugs are public. Caller
+/// wraps in a retry-with-rollback loop for the rare collision tail.
+pub fn generate_personal_slug() -> String {
+    let adj = SHORT_ADJECTIVES[fastrand::usize(..SHORT_ADJECTIVES.len())];
+    let noun = SHORT_NOUNS[fastrand::usize(..SHORT_NOUNS.len())];
+    let mut suffix = String::with_capacity(6);
+    for _ in 0..6 {
+        suffix.push(BASE32[fastrand::usize(..BASE32.len())] as char);
+    }
+    let out = format!("personal-{adj}-{noun}-{suffix}");
+    debug_assert!(out.len() <= 30, "personal slug overflow: {out}");
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lists_are_sized() {
+        assert!(ADJECTIVES.len() >= 200, "got {}", ADJECTIVES.len());
+        assert!(NOUNS.len() >= 200, "got {}", NOUNS.len());
+    }
+
+    #[test]
+    fn words_are_lowercase_ascii() {
+        for w in ADJECTIVES.iter().chain(NOUNS) {
+            assert!(
+                w.chars().all(|c| c.is_ascii_lowercase() || c == '-'),
+                "non-ASCII or uppercase: {w}"
+            );
+        }
+    }
+
+    #[test]
+    fn generated_slug_passes_validator() {
+        for _ in 0..1000 {
+            let s = generate_personal_slug();
+            assert!(s.starts_with("personal-"), "{s}");
+            assert!(s.len() <= 30, "slug {s} exceeds 30 chars");
+            crate::domain::org::validate_slug(&s)
+                .unwrap_or_else(|e| panic!("generated slug {s} failed validation: {e}"));
+        }
+    }
+}

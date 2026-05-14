@@ -1,0 +1,68 @@
+CREATE EXTENSION IF NOT EXISTS citext;
+
+CREATE TABLE organizations (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    slug        CITEXT NOT NULL UNIQUE,
+    name        TEXT NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at  TIMESTAMPTZ,
+
+    CONSTRAINT slug_format CHECK (
+        slug ~ '^[a-z][a-z0-9-]{1,28}[a-z0-9]$'
+        AND slug NOT LIKE '%--%'
+    )
+);
+
+CREATE INDEX idx_organizations_active
+    ON organizations(slug)
+    WHERE deleted_at IS NULL;
+
+CREATE INDEX idx_organizations_pending_purge
+    ON organizations(deleted_at)
+    WHERE deleted_at IS NOT NULL;
+
+CREATE TABLE users (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    email           CITEXT NOT NULL UNIQUE,
+    display_name    TEXT,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at      TIMESTAMPTZ
+);
+
+CREATE INDEX idx_users_active ON users(email) WHERE deleted_at IS NULL;
+
+CREATE TABLE memberships (
+    user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    org_id      UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    role        TEXT NOT NULL CHECK (role IN ('owner', 'member')),
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (user_id, org_id)
+);
+
+CREATE INDEX idx_memberships_org ON memberships(org_id);
+CREATE INDEX idx_memberships_user ON memberships(user_id);
+
+CREATE TABLE org_audit_log (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    org_id      UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    actor_id    UUID REFERENCES users(id) ON DELETE SET NULL,
+    action      TEXT NOT NULL,
+    metadata    JSONB NOT NULL DEFAULT '{}'::jsonb,
+    occurred_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_audit_log_org_time ON org_audit_log(org_id, occurred_at DESC);
+
+CREATE TABLE clickhouse_purge_queue (
+    org_id       UUID PRIMARY KEY,
+    queued_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    attempts     INTEGER NOT NULL DEFAULT 0,
+    last_error   TEXT,
+    completed_at TIMESTAMPTZ
+);
+
+CREATE INDEX idx_clickhouse_purge_pending
+    ON clickhouse_purge_queue(queued_at)
+    WHERE completed_at IS NULL;

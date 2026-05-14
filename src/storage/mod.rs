@@ -2,11 +2,13 @@ pub mod clickhouse;
 pub mod incidents;
 pub mod maintenance;
 pub mod memory;
+pub mod orgs;
 pub mod postgres;
 pub mod postgres_secrets;
 pub mod traits;
 
 pub use clickhouse::{ClickhouseResultSink, ClickhouseResultsStore, build_client, migrate};
+pub use orgs::ensure_default_org;
 pub use incidents::{
     InMemoryIncidentNarrationStore, IncidentNarrationStore, PgIncidentNarrationStore,
 };

@@ -11,7 +11,7 @@ use base64::Engine;
 use sqlx::PgPool;
 use status_monitor::domain::{CheckSpec, ExpectedStatus, NewTarget};
 use status_monitor::security::Cipher;
-use status_monitor::storage::{PostgresTargetStore, TargetStore};
+use status_monitor::storage::{PostgresTargetStore, TargetStore, ensure_default_org};
 use url::Url;
 
 use crate::common::default_http_check;
@@ -19,6 +19,16 @@ use crate::common::default_http_check;
 fn test_cipher() -> Arc<Cipher> {
     let kek = base64::engine::general_purpose::STANDARD.encode([7u8; 32]);
     Arc::new(Cipher::from_base64(&kek).unwrap())
+}
+
+/// Provision a default org and return a store stamped to write under it.
+async fn store_with_default_org(
+    pool: PgPool,
+    cipher: Option<Arc<Cipher>>,
+) -> (PostgresTargetStore, status_monitor::domain::OrgId) {
+    let org_id = ensure_default_org(&pool, "default").await.expect("default org");
+    let store = PostgresTargetStore::from_pool(pool, cipher, org_id);
+    (store, org_id)
 }
 
 fn make(name: &str, tags: Vec<String>) -> NewTarget {
@@ -41,7 +51,7 @@ fn make(name: &str, tags: Vec<String>) -> NewTarget {
 #[sqlx::test(migrations = "./migrations/postgres")]
 #[ignore = "requires DATABASE_URL — run via DATABASE_URL=... cargo test -- --ignored"]
 async fn bulk_create_with_ragged_tags(pool: PgPool) {
-    let store = PostgresTargetStore::from_pool(pool, None);
+    let (store, _org) = store_with_default_org(pool, None).await;
     let items = vec![
         make("t1", vec!["a".into(), "b".into()]),
         make("t2", vec![]),
@@ -65,7 +75,7 @@ async fn bulk_create_with_ragged_tags(pool: PgPool) {
 #[sqlx::test(migrations = "./migrations/postgres")]
 #[ignore = "requires DATABASE_URL — run via DATABASE_URL=... cargo test -- --ignored"]
 async fn bulk_create_empty_is_noop(pool: PgPool) {
-    let store = PostgresTargetStore::from_pool(pool, None);
+    let (store, _org) = store_with_default_org(pool, None).await;
     let result = store.bulk_create(vec![]).await.expect("empty bulk ok");
     assert!(result.is_empty());
 }
@@ -73,7 +83,7 @@ async fn bulk_create_empty_is_noop(pool: PgPool) {
 #[sqlx::test(migrations = "./migrations/postgres")]
 #[ignore = "requires DATABASE_URL — run via DATABASE_URL=... cargo test -- --ignored"]
 async fn credentials_stored_as_ciphertext_envelope(pool: PgPool) {
-    let store = PostgresTargetStore::from_pool(pool.clone(), Some(test_cipher()));
+    let (store, _org) = store_with_default_org(pool.clone(), Some(test_cipher())).await;
     let url = Url::parse("https://example.com/").unwrap();
     let mut http = default_http_check(url, ExpectedStatus::Exact(200));
     http.basic_auth = Some(("alice".into(), "s3cret".into()));
@@ -126,7 +136,7 @@ async fn credentials_stored_as_ciphertext_envelope(pool: PgPool) {
 #[sqlx::test(migrations = "./migrations/postgres")]
 #[ignore = "requires DATABASE_URL — run via DATABASE_URL=... cargo test -- --ignored"]
 async fn no_credentials_no_envelope(pool: PgPool) {
-    let store = PostgresTargetStore::from_pool(pool.clone(), Some(test_cipher()));
+    let (store, _org) = store_with_default_org(pool.clone(), Some(test_cipher())).await;
     let new = make("plain", vec![]);
     let created = store.create(new).await.expect("create");
 
@@ -159,18 +169,22 @@ async fn legacy_plaintext_row_decrypts_passthrough(pool: PgPool) {
         "basic_auth": ["legacy", "old-pass"],
         "bearer_token": null
     });
+    let org_id = ensure_default_org(&pool, "default")
+        .await
+        .expect("default org");
     let id = uuid::Uuid::now_v7();
     sqlx::query(
-        "INSERT INTO targets (id, name, check_spec, interval_secs, enabled, tags) \
-         VALUES ($1, 'legacy', $2, 30, true, ARRAY[]::text[])",
+        "INSERT INTO targets (id, org_id, name, check_spec, interval_secs, enabled, tags) \
+         VALUES ($1, $2, 'legacy', $3, 30, true, ARRAY[]::text[])",
     )
     .bind(id)
+    .bind(org_id.0)
     .bind(check_json)
     .execute(&pool)
     .await
     .expect("insert legacy row");
 
-    let store = PostgresTargetStore::from_pool(pool, Some(test_cipher()));
+    let store = PostgresTargetStore::from_pool(pool, Some(test_cipher()), org_id);
     let fetched = store.get(id).await.expect("get").expect("present");
     match fetched.check {
         CheckSpec::Http(h) => {

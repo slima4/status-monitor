@@ -21,7 +21,7 @@ use status_monitor::{
     storage::{
         self, ClickhouseResultSink, ClickhouseResultsStore, IncidentNarrationStore,
         MaintenanceStore, PgIncidentNarrationStore, PgMaintenanceStore, PostgresTargetStore,
-        ResultSink, ResultsStore, TargetStore,
+        ResultSink, ResultsStore, TargetStore, ensure_default_org,
     },
     web,
     worker::{ResultFanout, WorkerPool},
@@ -65,9 +65,20 @@ async fn main() -> Result<()> {
             None
         }
     };
-    let pg_store = PostgresTargetStore::connect(&cfg.storage.postgres, cipher.clone()).await?;
-    let pg_pool = pg_store.pool().clone();
-    let target_store: Arc<dyn TargetStore> = Arc::new(pg_store);
+    // Open the pool + run migrations first so `ensure_default_org` can write,
+    // then construct the store stamped with the resolved org id.
+    let pg_pool = PostgresTargetStore::connect_pool(&cfg.storage.postgres).await?;
+    let default_org_id = ensure_default_org(&pg_pool, &cfg.tenancy.default_org_slug).await?;
+    tracing::info!(
+        org_id = %default_org_id,
+        slug = %cfg.tenancy.default_org_slug,
+        "default org ready"
+    );
+    let target_store: Arc<dyn TargetStore> = Arc::new(PostgresTargetStore::from_pool(
+        pg_pool.clone(),
+        cipher.clone(),
+        default_org_id,
+    ));
 
     tracing::info!(
         url = %cfg.storage.clickhouse.url,
@@ -76,12 +87,16 @@ async fn main() -> Result<()> {
     );
     let clickhouse_client = storage::build_client(&cfg.storage.clickhouse);
     storage::migrate(&clickhouse_client).await?;
-    let result_sink: Arc<dyn ResultSink> =
-        Arc::new(ClickhouseResultSink::from_client(clickhouse_client.clone()));
+    let result_sink: Arc<dyn ResultSink> = Arc::new(ClickhouseResultSink::from_client(
+        clickhouse_client.clone(),
+        default_org_id,
+    ));
     let result_sink_for_state = result_sink.clone();
     let ch_client_for_public = clickhouse_client.clone();
-    let results_store: Arc<dyn ResultsStore> =
-        Arc::new(ClickhouseResultsStore::from_client(clickhouse_client));
+    let results_store: Arc<dyn ResultsStore> = Arc::new(ClickhouseResultsStore::from_client(
+        clickhouse_client,
+        default_org_id,
+    ));
 
     let http_clients = Arc::new(build_clients(
         &cfg.http_client,
@@ -158,6 +173,7 @@ async fn main() -> Result<()> {
         ch_client_for_public,
         target_store.clone(),
         aggregator_cfg.clone(),
+        default_org_id,
     ));
     let public_cache = PageCache::new(cache_ttl);
     let public_source: Arc<dyn PublicSource> = Arc::new(LivePublicSource::new(
@@ -171,7 +187,7 @@ async fn main() -> Result<()> {
     let incident_writer = Arc::new(IncidentWriter::new(
         target_store.clone(),
         results_store.clone(),
-        Arc::new(PgIncidentStore::new(pg_pool)),
+        Arc::new(PgIncidentStore::new(pg_pool, default_org_id)),
         IncidentWriterConfig::default(),
     ));
     let incident_writer_handle: JoinHandle<()> = {
@@ -180,8 +196,10 @@ async fn main() -> Result<()> {
         tokio::spawn(async move { writer.run(token).await })
     };
 
-    let maintenance_store: Arc<dyn MaintenanceStore> =
-        Arc::new(PgMaintenanceStore::new(pg_pool_for_stores.clone()));
+    let maintenance_store: Arc<dyn MaintenanceStore> = Arc::new(PgMaintenanceStore::new(
+        pg_pool_for_stores.clone(),
+        default_org_id,
+    ));
     let incident_narration_store: Arc<dyn IncidentNarrationStore> =
         Arc::new(PgIncidentNarrationStore::new(pg_pool_for_stores));
 
@@ -195,6 +213,7 @@ async fn main() -> Result<()> {
         public_source,
         maintenance_store,
         incident_narration_store,
+        default_org_id,
     );
     let router = build_router(state.clone(), root.clone()).merge(web::routes().with_state(state));
 

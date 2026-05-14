@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use crate::api::types::{TagCount, TargetsSummary};
 use crate::config::PostgresConfig;
-use crate::domain::{CheckSpec, NewTarget, Target, TargetAlerts, TargetUpdate};
+use crate::domain::{CheckSpec, NewTarget, OrgId, Target, TargetAlerts, TargetUpdate};
 use crate::error::Result;
 use crate::security::Cipher;
 use crate::storage::postgres_secrets::{decrypt_in_place, encrypt_in_place};
@@ -20,10 +20,15 @@ use crate::storage::traits::{TargetFilter, TargetStore};
 pub struct PostgresTargetStore {
     pool: PgPool,
     cipher: Option<Arc<Cipher>>,
+    /// Org id every insert is stamped with. Phase 2 will replace this with an
+    /// `OrgId` parameter on each trait method.
+    default_org_id: OrgId,
 }
 
 impl PostgresTargetStore {
-    pub async fn connect(cfg: &PostgresConfig, cipher: Option<Arc<Cipher>>) -> Result<Self> {
+    /// Open the pool and run Postgres migrations. Returns just the pool so
+    /// startup can provision the default org before constructing the store.
+    pub async fn connect_pool(cfg: &PostgresConfig) -> Result<PgPool> {
         tracing::info!(
             max_connections = cfg.max_connections,
             min_connections = cfg.min_connections,
@@ -42,11 +47,15 @@ impl PostgresTargetStore {
             .await
             .context("postgres migrations")?;
         tracing::info!("postgres ready");
-        Ok(Self { pool, cipher })
+        Ok(pool)
     }
 
-    pub fn from_pool(pool: PgPool, cipher: Option<Arc<Cipher>>) -> Self {
-        Self { pool, cipher }
+    pub fn from_pool(pool: PgPool, cipher: Option<Arc<Cipher>>, default_org_id: OrgId) -> Self {
+        Self { pool, cipher, default_org_id }
+    }
+
+    fn org_id(&self) -> Uuid {
+        self.default_org_id.0
     }
 
     pub fn pool(&self) -> &PgPool {
@@ -186,13 +195,14 @@ impl TargetStore for PostgresTargetStore {
         let check_json = self.encode_check(&new.check)?;
         let alerts_json = serde_json::to_value(&new.alerts).context("encoding alerts JSON")?;
         let row: TargetRow = sqlx::query_as::<_, TargetRow>(
-            r#"INSERT INTO targets (name, check_spec, interval_secs, enabled, tags, alerts,
+            r#"INSERT INTO targets (org_id, name, check_spec, interval_secs, enabled, tags, alerts,
                                     public_status, public_name, public_description, public_group, public_sort_order)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
                RETURNING id, name, check_spec, interval_secs, enabled, tags, alerts,
                       public_status, public_name, public_description, public_group, public_sort_order,
                       created_at, updated_at"#,
         )
+        .bind(self.org_id())
         .bind(&new.name)
         .bind(check_json)
         .bind(new.interval.as_secs() as i32)
@@ -277,9 +287,9 @@ impl TargetStore for PostgresTargetStore {
             return Ok(Vec::new());
         }
 
-        const SQL: &str = r#"INSERT INTO targets (name, check_spec, interval_secs, enabled, tags, alerts,
+        const SQL: &str = r#"INSERT INTO targets (org_id, name, check_spec, interval_secs, enabled, tags, alerts,
                                     public_status, public_name, public_description, public_group, public_sort_order)
-               SELECT u.name, u.check_spec, u.interval_secs, u.enabled,
+               SELECT $12, u.name, u.check_spec, u.interval_secs, u.enabled,
                       ARRAY(SELECT jsonb_array_elements_text(u.tags)),
                       u.alerts,
                       u.public_status, u.public_name, u.public_description, u.public_group, u.public_sort_order
@@ -336,6 +346,7 @@ impl TargetStore for PostgresTargetStore {
                 .bind(&public_description)
                 .bind(&public_group)
                 .bind(&public_sort_order)
+                .bind(self.org_id())
                 .fetch_all(&self.pool)
                 .await
                 .context("bulk insert targets")?
@@ -368,6 +379,7 @@ impl TargetStore for PostgresTargetStore {
                 .bind(&public_description)
                 .bind(&public_group)
                 .bind(&public_sort_order)
+                .bind(self.org_id())
                 .fetch_all(&self.pool)
                 .await
                 .context("bulk insert targets")?

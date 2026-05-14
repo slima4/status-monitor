@@ -6,6 +6,7 @@ use parking_lot::Mutex;
 use crate::api::IdempotencyCache;
 use crate::api::types::DashboardSummary;
 use crate::config::AppConfig;
+use crate::domain::OrgId;
 use crate::http_client::HttpClients;
 use crate::public_status::PublicSource;
 use crate::storage::{
@@ -32,6 +33,10 @@ pub struct AppState {
     pub public_source: Arc<dyn PublicSource>,
     pub maintenance_store: Arc<dyn MaintenanceStore>,
     pub incident_narration_store: Arc<dyn IncidentNarrationStore>,
+    /// Org id used in self-host mode and as the implicit org for every write
+    /// path until the repository pattern threads `OrgId` through call sites in
+    /// Phase 2. Provisioned at startup by `ensure_default_org`.
+    pub default_org_id: OrgId,
 }
 
 impl AppState {
@@ -46,6 +51,7 @@ impl AppState {
         public_source: Arc<dyn PublicSource>,
         maintenance_store: Arc<dyn MaintenanceStore>,
         incident_narration_store: Arc<dyn IncidentNarrationStore>,
+        default_org_id: OrgId,
     ) -> Self {
         Self {
             cfg: Arc::new(cfg),
@@ -59,6 +65,7 @@ impl AppState {
             public_source,
             maintenance_store,
             incident_narration_store,
+            default_org_id,
         }
     }
 }

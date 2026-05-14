@@ -106,3 +106,19 @@ enabled = false
 allowed_origins = []
 allowed_methods = ["GET", "POST", "PATCH", "DELETE"]
 allow_any_origin = false
+
+[tenancy]
+# false = single-tenant self-host (default org owns all data).
+# true  = multi-tenant SaaS (org resolved from authenticated session).
+enabled = false
+# Slug used to find or create the default org at startup. The id is generated
+# by Postgres and persisted; only the slug is configurable.
+default_org_slug = "default"
+# When `enabled = true`, the public status routes only respond if this is also
+# true. Self-hosters get the public page (one org); SaaS gets it only after
+# per-org status page routing lands.
+public_routes_enabled = false
+# Free-tier cap on orgs a single user can own.
+free_tier_owner_org_limit = 3
+# Grace period before soft-deleted orgs are purged.
+deletion_grace_period_days = 30

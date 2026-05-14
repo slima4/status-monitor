@@ -1,0 +1,155 @@
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use sqlx::Type;
+use uuid::Uuid;
+
+use crate::domain::reserved_slugs::is_reserved;
+
+/// Strongly-typed organisation id. Wrapping `Uuid` blocks the easy mistake of
+/// passing a `UserId` where an `OrgId` is expected.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type,
+)]
+#[serde(transparent)]
+#[sqlx(transparent)]
+pub struct OrgId(pub Uuid);
+
+impl std::fmt::Display for OrgId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Organization {
+    pub id: OrgId,
+    pub slug: String,
+    pub name: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub deleted_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SlugError {
+    TooShort,
+    TooLong,
+    InvalidChar,
+    LeadingDigitOrHyphen,
+    TrailingHyphen,
+    ConsecutiveHyphens,
+    Reserved,
+}
+
+impl std::fmt::Display for SlugError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            Self::TooShort => "slug must be at least 3 characters",
+            Self::TooLong => "slug must be at most 30 characters",
+            Self::InvalidChar => "slug may only contain lowercase letters, digits, and hyphens",
+            Self::LeadingDigitOrHyphen => "slug must start with a letter",
+            Self::TrailingHyphen => "slug must not end with a hyphen",
+            Self::ConsecutiveHyphens => "slug must not contain consecutive hyphens",
+            Self::Reserved => "slug is reserved",
+        };
+        f.write_str(s)
+    }
+}
+
+impl std::error::Error for SlugError {}
+
+/// Validate a slug per §4.5: 3-30 chars, [a-z0-9-], leading letter, no trailing
+/// hyphen, no consecutive hyphens, not in reserved list (exact match).
+pub fn validate_slug(slug: &str) -> Result<(), SlugError> {
+    let len = slug.len();
+    if len < 3 {
+        return Err(SlugError::TooShort);
+    }
+    if len > 30 {
+        return Err(SlugError::TooLong);
+    }
+    let bytes = slug.as_bytes();
+    if !bytes[0].is_ascii_lowercase() {
+        return Err(SlugError::LeadingDigitOrHyphen);
+    }
+    let last = bytes[len - 1];
+    if !(last.is_ascii_lowercase() || last.is_ascii_digit()) {
+        return Err(SlugError::TrailingHyphen);
+    }
+    for &b in bytes {
+        let ok = b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-';
+        if !ok {
+            return Err(SlugError::InvalidChar);
+        }
+    }
+    if slug.contains("--") {
+        return Err(SlugError::ConsecutiveHyphens);
+    }
+    // Exact-match reserved check — auto-generated `personal-*` slugs pass
+    // because only the bare word `personal` is in the list.
+    if is_reserved(slug) {
+        return Err(SlugError::Reserved);
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn accepts_basic_slug() {
+        assert!(validate_slug("acme").is_ok());
+        assert!(validate_slug("acme-corp").is_ok());
+        assert!(validate_slug("a1b").is_ok());
+    }
+
+    #[test]
+    fn rejects_too_short() {
+        assert_eq!(validate_slug("ab"), Err(SlugError::TooShort));
+    }
+
+    #[test]
+    fn rejects_too_long() {
+        let s = "a".repeat(31);
+        assert_eq!(validate_slug(&s), Err(SlugError::TooLong));
+    }
+
+    #[test]
+    fn rejects_leading_digit() {
+        assert_eq!(validate_slug("1abc"), Err(SlugError::LeadingDigitOrHyphen));
+    }
+
+    #[test]
+    fn rejects_leading_hyphen() {
+        assert_eq!(validate_slug("-abc"), Err(SlugError::LeadingDigitOrHyphen));
+    }
+
+    #[test]
+    fn rejects_trailing_hyphen() {
+        assert_eq!(validate_slug("abc-"), Err(SlugError::TrailingHyphen));
+    }
+
+    #[test]
+    fn rejects_uppercase() {
+        assert_eq!(validate_slug("Abc"), Err(SlugError::LeadingDigitOrHyphen));
+        assert_eq!(validate_slug("aBc"), Err(SlugError::InvalidChar));
+    }
+
+    #[test]
+    fn rejects_consecutive_hyphens() {
+        assert_eq!(validate_slug("ab--cd"), Err(SlugError::ConsecutiveHyphens));
+    }
+
+    #[test]
+    fn rejects_reserved_exact() {
+        assert_eq!(validate_slug("admin"), Err(SlugError::Reserved));
+        assert_eq!(validate_slug("personal"), Err(SlugError::Reserved));
+    }
+
+    #[test]
+    fn accepts_personal_prefixed_slug() {
+        // Auto-generated personal slugs must pass — reserved check is exact-match.
+        assert!(validate_slug("personal-happy-fox-3a9k7m").is_ok());
+    }
+}

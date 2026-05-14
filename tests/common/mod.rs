@@ -18,7 +18,7 @@ use status_monitor::config::{
     AppConfig, CheckerConfig, CircuitBreakerConfig, DnsConfig, HttpClientConfig, SchedulerConfig,
     SecurityConfig,
 };
-use status_monitor::domain::{CheckSpec, ExpectedStatus, HttpCheck, HttpMethod, Target};
+use status_monitor::domain::{CheckSpec, ExpectedStatus, HttpCheck, HttpMethod, OrgId, Target};
 use status_monitor::http_client::{HttpClients, build_clients};
 use status_monitor::public_status::{NoopPublicSource, PublicSource};
 use status_monitor::storage::{
@@ -30,6 +30,15 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use url::Url;
 use uuid::Uuid;
+
+/// Fixed org id used in every `build_test_app*` helper. Tests run with
+/// in-memory stores that don't enforce the FK to `organizations`, so the
+/// value just needs to be stable. Live-DB integration tests must NOT reuse
+/// this id — they provision their own org via `storage::ensure_default_org`
+/// so the FK on tenant tables resolves.
+pub fn test_org_id() -> OrgId {
+    OrgId(Uuid::from_u128(0x0000_0000_0000_0000_0000_0000_0000_0001))
+}
 
 /// Builds a test router with an InMemory store backend, applying `mutate` to
 /// the loaded config before constructing `AppState`. The cancellation token is
@@ -72,6 +81,7 @@ pub fn build_test_app_with_seedable_incidents(
         public_source,
         maintenance_store,
         incident_narration_store,
+        test_org_id(),
     );
     (build_router(state, CancellationToken::new()), narration)
 }
@@ -126,6 +136,7 @@ fn build_test_app_with_public_source_inner(
         public_source,
         maintenance_store,
         incident_narration_store,
+        test_org_id(),
     );
     let api = build_router(state.clone(), CancellationToken::new());
     if with_web {
@@ -170,6 +181,7 @@ fn build_test_app_inner(mutate: impl FnOnce(&mut AppConfig), with_web: bool) -> 
         public_source,
         maintenance_store,
         incident_narration_store,
+        test_org_id(),
     );
     let api = build_router(state.clone(), CancellationToken::new());
     if with_web {

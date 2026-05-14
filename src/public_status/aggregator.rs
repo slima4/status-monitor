@@ -17,7 +17,7 @@ use uuid::Uuid;
 
 use crate::domain::{
     CheckStatus, ComponentHistoryResponse, DayState, IncidentSeverity, IncidentStatusPhase,
-    PublicComponent, PublicComponentGroup, PublicComponentStatus, PublicIncident,
+    OrgId, PublicComponent, PublicComponentGroup, PublicComponentStatus, PublicIncident,
     PublicIncidentUpdate, PublicMaintenance, PublicStatusPage, Target,
 };
 use crate::error::Result;
@@ -57,6 +57,7 @@ pub struct LiveAggregator {
     ch: ClickhouseClient,
     target_store: Arc<dyn TargetStore>,
     cfg: AggregatorConfig,
+    default_org_id: OrgId,
 }
 
 impl LiveAggregator {
@@ -65,12 +66,14 @@ impl LiveAggregator {
         ch: ClickhouseClient,
         target_store: Arc<dyn TargetStore>,
         cfg: AggregatorConfig,
+        default_org_id: OrgId,
     ) -> Self {
         Self {
             pg,
             ch,
             target_store,
             cfg,
+            default_org_id,
         }
     }
 
@@ -400,7 +403,8 @@ impl LiveAggregator {
                         countMerge(total_checks) AS total,
                         countIfMerge(up_checks) AS up_
                     FROM {CH_MV}
-                    WHERE has(arrayMap(x -> toUUID(x), ?), target_id)
+                    WHERE org_id = ?
+                      AND has(arrayMap(x -> toUUID(x), ?), target_id)
                       AND minute >= fromUnixTimestamp64Milli(?)
                       AND minute < fromUnixTimestamp64Milli(?)
                     GROUP BY target_id, minute
@@ -418,7 +422,8 @@ impl LiveAggregator {
                         countMerge(total_checks) AS total,
                         countIfMerge(up_checks) AS up_
                     FROM {CH_MV}
-                    WHERE has(arrayMap(x -> toUUID(x), ?), target_id)
+                    WHERE org_id = ?
+                      AND has(arrayMap(x -> toUUID(x), ?), target_id)
                       AND minute >= fromUnixTimestamp64Milli(?)
                       AND minute < fromUnixTimestamp64Milli(?)
                     GROUP BY target_id, minute
@@ -426,9 +431,11 @@ impl LiveAggregator {
                 GROUP BY target_id, day
                 ORDER BY target_id, day"#
             ))
+            .bind(self.default_org_id.0)
             .bind(component_ids)
             .bind(from.timestamp_millis())
             .bind(now.timestamp_millis())
+            .bind(self.default_org_id.0)
             .bind(component_ids)
             .bind(from.timestamp_millis())
             .bind(now.timestamp_millis())
@@ -485,11 +492,13 @@ impl LiveAggregator {
                        countIf(status = 'degraded') AS degraded_,
                        countIf(status = 'error')    AS error_
                    FROM {CH_TABLE}
-                   WHERE has(arrayMap(x -> toUUID(x), ?), target_id)
+                   WHERE org_id = ?
+                     AND has(arrayMap(x -> toUUID(x), ?), target_id)
                      AND timestamp >= fromUnixTimestamp64Milli(?)
                      AND timestamp <  fromUnixTimestamp64Milli(?)
                    GROUP BY target_id"#
             ))
+            .bind(self.default_org_id.0)
             .bind(component_ids)
             .bind(from.timestamp_millis())
             .bind(now.timestamp_millis())

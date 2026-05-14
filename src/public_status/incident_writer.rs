@@ -27,7 +27,7 @@ use tokio::time::{MissedTickBehavior, interval};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use crate::domain::{CheckResult, CheckStatus, Target};
+use crate::domain::{CheckResult, CheckStatus, OrgId, Target};
 use crate::error::Result;
 use crate::storage::{ResultsStore, TargetFilter, TargetStore, TimeRange};
 
@@ -276,11 +276,12 @@ fn trailing_up_run(results: &[CheckResult]) -> &[CheckResult] {
 
 pub struct PgIncidentStore {
     pool: PgPool,
+    default_org_id: OrgId,
 }
 
 impl PgIncidentStore {
-    pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+    pub fn new(pool: PgPool, default_org_id: OrgId) -> Self {
+        Self { pool, default_org_id }
     }
 }
 
@@ -316,8 +317,8 @@ impl IncidentStore for PgIncidentStore {
         // Defensive: avoid two open incidents per target if a competing
         // writer raced us (single-process today, but cheap).
         let row: (Uuid,) = sqlx::query_as(
-            r#"INSERT INTO incidents (target_id, started_at, status_at_start, check_count, error_sample)
-               SELECT $1, $2, $3, $4, $5
+            r#"INSERT INTO incidents (org_id, target_id, started_at, status_at_start, check_count, error_sample)
+               SELECT $6, $1, $2, $3, $4, $5
                WHERE NOT EXISTS (
                    SELECT 1 FROM incidents
                    WHERE target_id = $1 AND ended_at IS NULL
@@ -329,6 +330,7 @@ impl IncidentStore for PgIncidentStore {
         .bind(status_at_start)
         .bind(new.check_count as i32)
         .bind(new.error_sample)
+        .bind(self.default_org_id.0)
         .fetch_one(&self.pool)
         .await
         .context("incident insert_open")?;

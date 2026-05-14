@@ -31,6 +31,7 @@ use status_monitor::domain::{
     CheckResult, CheckSpec, CheckStatus, ExpectedStatus, NewTarget, PublicComponentStatus,
 };
 use status_monitor::public_status::{AggregatorConfig, LiveAggregator};
+use status_monitor::storage::ensure_default_org;
 use status_monitor::storage::{
     ClickhouseResultSink, PostgresTargetStore, ResultSink, TargetStore,
 };
@@ -119,8 +120,11 @@ async fn build_round_trips_seeded_data() {
 
     purge_prefix(&pool, "agg-test-").await;
 
+    let org_id = ensure_default_org(&pool, "default")
+        .await
+        .expect("default org");
     let unique = format!("agg-test-{}", Uuid::now_v7());
-    let store = Arc::new(PostgresTargetStore::from_pool(pool.clone(), None));
+    let store = Arc::new(PostgresTargetStore::from_pool(pool.clone(), None, org_id));
     let target = store
         .create(public_target(&unique))
         .await
@@ -129,7 +133,7 @@ async fn build_round_trips_seeded_data() {
     let pool_for_cleanup = pool.clone();
 
     with_cleanup(&pool_for_cleanup, target_id, async move {
-        let sink = ClickhouseResultSink::from_client(ch.clone());
+        let sink = ClickhouseResultSink::from_client(ch.clone(), org_id);
         let now = Utc::now();
         let rows: Vec<CheckResult> = (0..5)
             .map(|i| ok_result(target_id, now - chrono::Duration::seconds(i * 30)))
@@ -149,6 +153,7 @@ async fn build_round_trips_seeded_data() {
             ch,
             store.clone() as Arc<dyn TargetStore>,
             AggregatorConfig::default(),
+            org_id,
         );
         let page = agg.build().await.expect("aggregator build");
 
@@ -183,8 +188,11 @@ async fn component_history_returns_strip_for_public_target() {
 
     purge_prefix(&pool, "hist-test-").await;
 
+    let org_id = ensure_default_org(&pool, "default")
+        .await
+        .expect("default org");
     let unique = format!("hist-test-{}", Uuid::now_v7());
-    let store = Arc::new(PostgresTargetStore::from_pool(pool.clone(), None));
+    let store = Arc::new(PostgresTargetStore::from_pool(pool.clone(), None, org_id));
     let target = store
         .create(public_target(&unique))
         .await
@@ -193,7 +201,7 @@ async fn component_history_returns_strip_for_public_target() {
     let pool_for_cleanup = pool.clone();
 
     with_cleanup(&pool_for_cleanup, target_id, async move {
-        let sink = ClickhouseResultSink::from_client(ch.clone());
+        let sink = ClickhouseResultSink::from_client(ch.clone(), org_id);
         let now = Utc::now();
         sink.write_batch(&[ok_result(target_id, now)])
             .await
@@ -208,6 +216,7 @@ async fn component_history_returns_strip_for_public_target() {
             ch,
             store as Arc<dyn TargetStore>,
             AggregatorConfig::default(),
+            org_id,
         );
         let resp = agg
             .component_history(target_id, 7)
