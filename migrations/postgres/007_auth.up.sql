@@ -72,7 +72,10 @@ CREATE INDEX idx_api_tokens_prefix ON api_tokens(token_prefix);
 
 -- Single-use org invitations. CITEXT email matches users.email so a
 -- mixed-case invite and a verified-lowercase OAuth login resolve to the same
--- recipient.
+-- recipient. `token_prefix` is the indexed lookup key: the redeem path
+-- narrows by prefix (96 bits of entropy in the first 16 base64url chars) and
+-- then argon2-verifies the survivor. Without it, redeem would argon2-hash
+-- every pending row — a CPU DoS at any meaningful pending count.
 CREATE TABLE invitations (
     id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     org_id       UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
@@ -80,6 +83,7 @@ CREATE TABLE invitations (
     email        CITEXT NOT NULL,
     role         TEXT NOT NULL CHECK (role IN ('owner', 'member')),
     token_hash   TEXT NOT NULL,
+    token_prefix TEXT NOT NULL,
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
     expires_at   TIMESTAMPTZ NOT NULL,
     accepted_at  TIMESTAMPTZ,
@@ -91,24 +95,31 @@ CREATE INDEX idx_invitations_org_pending
 CREATE INDEX idx_invitations_email_pending
     ON invitations(email)
     WHERE accepted_at IS NULL AND declined_at IS NULL;
+CREATE INDEX idx_invitations_token_prefix
+    ON invitations(token_prefix);
 
--- Magic-link token rows. Schema lands now so the email enum is stable; the
--- request/verify endpoints are gated by `auth.enabled_methods` config and are
--- inert until that includes "magic_link".
+-- Magic-link token rows. The request/verify endpoints are gated by
+-- `auth.enabled_methods`; until "magic_link" is listed the routes 404 and no
+-- rows are ever inserted. `token_prefix` mirrors the invitations pattern:
+-- redeem narrows by indexed prefix and argon2-verifies the survivor.
 CREATE TABLE magic_link_tokens (
-    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    email       CITEXT NOT NULL,
-    token_hash  TEXT NOT NULL,
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    expires_at  TIMESTAMPTZ NOT NULL,
-    used_at     TIMESTAMPTZ,
-    ip_hash     TEXT
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    email        CITEXT NOT NULL,
+    token_hash   TEXT NOT NULL,
+    token_prefix TEXT NOT NULL,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at   TIMESTAMPTZ NOT NULL,
+    used_at      TIMESTAMPTZ,
+    ip_hash      TEXT
 );
 CREATE INDEX idx_magic_link_tokens_unused
     ON magic_link_tokens(email)
     WHERE used_at IS NULL;
 CREATE INDEX idx_magic_link_tokens_expires
     ON magic_link_tokens(expires_at);
+CREATE INDEX idx_magic_link_tokens_prefix
+    ON magic_link_tokens(token_prefix)
+    WHERE used_at IS NULL;
 
 -- Audit of every authentication attempt — successes for the user's "recent
 -- activity" page, failures for credential-stuffing detection.
