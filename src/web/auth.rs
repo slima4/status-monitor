@@ -58,8 +58,36 @@ where
 {
     type Rejection = Infallible;
 
-    async fn from_request_parts(_parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
-        Ok(Self::default())
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        // Until the auth backend lands, the only way to populate a session is
+        // for a test middleware (or future auth layer) to insert one into the
+        // request extensions. Absence = anonymous.
+        Ok(parts.extensions.get::<Session>().cloned().unwrap_or_default())
+    }
+}
+
+/// Caller identity extracted from the session. Returns 401 when no user is
+/// attached. Handlers that need both the active org and the caller (e.g.
+/// "remove member") use [`CurrentOrg`] and [`CurrentUser`] together — though
+/// most org-management routes operate on an explicit `:id` path parameter and
+/// only need the caller.
+#[derive(Debug, Clone, Copy)]
+pub struct CurrentUser(pub UserId);
+
+impl<S> FromRequestParts<S> for CurrentUser
+where
+    S: Send + Sync,
+{
+    type Rejection = AppError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self> {
+        let session = Session::from_request_parts(parts, state)
+            .await
+            .expect("Session extractor is infallible");
+        session
+            .user_id()
+            .map(CurrentUser)
+            .ok_or(AppError::Unauthorized)
     }
 }
 

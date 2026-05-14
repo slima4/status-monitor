@@ -2,6 +2,7 @@ pub mod dashboard;
 pub mod health;
 pub mod incidents;
 pub mod maintenance;
+pub mod orgs;
 pub mod public;
 pub mod results;
 pub mod tags;

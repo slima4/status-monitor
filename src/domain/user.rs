@@ -1,15 +1,17 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::Type;
+use utoipa::ToSchema;
 use uuid::Uuid;
 
 /// Strongly-typed user id. Wrapping `Uuid` prevents accidentally passing a
 /// `UserId` where an `OrgId` is expected (or vice versa).
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type,
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type, ToSchema,
 )]
 #[serde(transparent)]
 #[sqlx(transparent)]
+#[schema(value_type = String, format = "uuid")]
 pub struct UserId(pub Uuid);
 
 impl std::fmt::Display for UserId {

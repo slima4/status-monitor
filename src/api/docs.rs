@@ -18,6 +18,11 @@ use crate::domain::{
     PublicIncident, PublicIncidentUpdate, PublicMaintenance, PublicMaintenanceList,
     PublicStatusPage, Target, TargetAlerts, TargetUpdate, TcpCheck, TlsCertCheck,
 };
+use crate::api::handlers::orgs::{
+    CheckSlugResponse, CreateOrgRequest, MemberView as OrgMemberView, OrgView,
+    SwitchActiveOrgRequest, UpdateOrgRequest,
+};
+use crate::domain::Role;
 use crate::storage::UptimeStats;
 
 #[derive(OpenApi)]
@@ -61,6 +66,17 @@ use crate::storage::UptimeStats;
         handlers::maintenance::delete_maintenance,
         handlers::incidents::update_incident_narration,
         handlers::incidents::post_incident_update,
+        handlers::orgs::create_org,
+        handlers::orgs::list_my_orgs,
+        handlers::orgs::list_my_deleted_orgs,
+        handlers::orgs::get_org,
+        handlers::orgs::update_org,
+        handlers::orgs::delete_org,
+        handlers::orgs::restore_org,
+        handlers::orgs::check_slug,
+        handlers::orgs::list_org_members,
+        handlers::orgs::remove_org_member,
+        handlers::orgs::switch_active_org,
     ),
     components(
         schemas(
@@ -124,6 +140,13 @@ use crate::storage::UptimeStats;
             PageEnvelope<MaintenanceWindow>,
             IncidentNarrationUpdate,
             NewIncidentUpdate,
+            CreateOrgRequest,
+            UpdateOrgRequest,
+            OrgView,
+            OrgMemberView,
+            CheckSlugResponse,
+            SwitchActiveOrgRequest,
+            Role,
         ),
     ),
     tags(
@@ -135,6 +158,7 @@ use crate::storage::UptimeStats;
         (name = "public_status", description = "Public, unauthenticated status page surface"),
         (name = "maintenance",   description = "Scheduled maintenance windows (operator)"),
         (name = "incidents",     description = "Incident narration and timeline (operator)"),
+        (name = "orgs",          description = "Organisation management and membership"),
     ),
 )]
 pub struct ApiDoc;

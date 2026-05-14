@@ -10,4 +10,5 @@ pub mod error;
 pub mod routes;
 pub mod views;
 
+pub use auth::{CurrentOrg, CurrentUser, Session, User};
 pub use routes::routes;

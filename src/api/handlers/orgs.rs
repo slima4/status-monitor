@@ -1,0 +1,520 @@
+//! Org-management endpoints (`POST/GET/PATCH/DELETE /api/v1/orgs/...`).
+//!
+//! Every route here operates on an *explicit* `:id` path parameter, not on
+//! `CurrentOrg`. That's intentional: a user with multiple memberships often
+//! needs to act on an org other than their active one (look at someone else's
+//! membership list, restore an org they soft-deleted yesterday), so binding
+//! the route to the active org would be wrong. Access control is therefore
+//! per-handler: each route extracts the caller via [`CurrentUser`] and then
+//! consults [`storage::orgs`] to decide whether the caller is a member /
+//! owner / deleter of the path-id org.
+
+use axum::Json;
+use axum::extract::{Path, Query, State};
+use axum::http::{HeaderValue, StatusCode, header};
+use axum::response::AppendHeaders;
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use utoipa::{IntoParams, ToSchema};
+use uuid::Uuid;
+
+use crate::api::ApiError;
+use crate::api::error::codes;
+use crate::app::AppState;
+use crate::domain::{OrgId, Organization, Role, UserId, validate_slug};
+use crate::error::{AppError, Result};
+use crate::storage::orgs as orgs_store;
+use crate::web::CurrentUser;
+
+// ── DTOs ────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct CreateOrgRequest {
+    /// 3-30 chars, `[a-z0-9-]`, leading letter, no trailing hyphen, no double
+    /// hyphens, not in the reserved list.
+    pub slug: String,
+    pub name: String,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct UpdateOrgRequest {
+    pub name: String,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct OrgView {
+    pub id: OrgId,
+    pub slug: String,
+    pub name: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deleted_at: Option<DateTime<Utc>>,
+    /// Caller's role on this org; omitted on payloads where the caller is not
+    /// guaranteed to be a member (e.g. the deleted-orgs list).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub role: Option<Role>,
+}
+
+impl From<Organization> for OrgView {
+    fn from(o: Organization) -> Self {
+        Self {
+            id: o.id,
+            slug: o.slug,
+            name: o.name,
+            created_at: o.created_at,
+            updated_at: o.updated_at,
+            deleted_at: o.deleted_at,
+            role: None,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct MemberView {
+    pub user_id: UserId,
+    pub email: String,
+    pub role: Role,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct CheckSlugResponse {
+    pub available: bool,
+    /// When `available = false`, why — `taken`, `invalid`, etc. Keeps the
+    /// signup form able to show a precise message without a separate validate
+    /// endpoint.
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct CheckSlugQuery {
+    pub slug: String,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct SwitchActiveOrgRequest {
+    pub org_id: OrgId,
+}
+
+// ── Handlers ────────────────────────────────────────────────────────────────
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/orgs",
+    tag = "orgs",
+    summary = "Create an organisation owned by the caller",
+    request_body = CreateOrgRequest,
+    responses(
+        (status = 201, body = OrgView,
+            headers(("Location" = String))),
+        (status = 400, body = ApiError,
+            description = "Slug failed validation (charset, length, reserved)"),
+        (status = 409, body = ApiError,
+            description = "Slug already taken (including by a soft-deleted org)"),
+        (status = 422, body = ApiError,
+            description = "Caller has reached the free-tier owner-org limit"),
+    ),
+)]
+pub async fn create_org(
+    State(state): State<AppState>,
+    CurrentUser(user): CurrentUser,
+    Json(req): Json<CreateOrgRequest>,
+) -> Result<(
+    StatusCode,
+    AppendHeaders<[(axum::http::HeaderName, HeaderValue); 1]>,
+    Json<OrgView>,
+)> {
+    let pool = require_db(&state)?;
+    let slug = req.slug.trim().to_ascii_lowercase();
+    if let Err(e) = validate_slug(&slug) {
+        return Err(AppError::bad_request_field(
+            codes::SLUG_INVALID,
+            e.to_string(),
+            "slug",
+        ));
+    }
+    let name = trim_name(&req.name)?;
+
+    let limit = state.cfg.tenancy.free_tier_owner_org_limit;
+    let Some(org) =
+        orgs_store::create_org_with_owner(pool, user, &slug, &name, limit).await?
+    else {
+        return Err(AppError::conflict(
+            codes::SLUG_TAKEN,
+            "slug is already in use",
+        ));
+    };
+    let mut view: OrgView = org.into();
+    view.role = Some(Role::Owner);
+    let location = HeaderValue::from_str(&format!("/api/v1/orgs/{}", view.id))
+        .expect("uuid is ascii");
+    Ok((
+        StatusCode::CREATED,
+        AppendHeaders([(header::LOCATION, location)]),
+        Json(view),
+    ))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/orgs",
+    tag = "orgs",
+    summary = "List the caller's active organisations",
+    description = "Returns active (non-soft-deleted) orgs the caller is a \
+                   member of. Soft-deleted orgs the caller has restore rights \
+                   on live at `/api/v1/me/deleted-orgs`.",
+    responses(
+        (status = 200, body = Vec<OrgView>),
+        (status = 401, body = ApiError),
+    ),
+)]
+pub async fn list_my_orgs(
+    State(state): State<AppState>,
+    CurrentUser(user): CurrentUser,
+) -> Result<Json<Vec<OrgView>>> {
+    let pool = require_db(&state)?;
+    let rows = orgs_store::list_orgs_for_user(pool, user).await?;
+    Ok(Json(
+        rows.into_iter()
+            .map(|r| {
+                let mut v: OrgView = r.org.into();
+                v.role = Some(r.role);
+                v
+            })
+            .collect(),
+    ))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/me/deleted-orgs",
+    tag = "orgs",
+    summary = "List the caller's soft-deleted organisations eligible for restore",
+    description = "Orgs the caller was the deleter of, still inside the \
+                   restore grace window. Past the window the org is purged and \
+                   no longer appears.",
+    responses(
+        (status = 200, body = Vec<OrgView>),
+        (status = 401, body = ApiError),
+    ),
+)]
+pub async fn list_my_deleted_orgs(
+    State(state): State<AppState>,
+    CurrentUser(user): CurrentUser,
+) -> Result<Json<Vec<OrgView>>> {
+    let pool = require_db(&state)?;
+    let rows = orgs_store::list_deleted_orgs_deleted_by(pool, user).await?;
+    Ok(Json(rows.into_iter().map(OrgView::from).collect()))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/orgs/{id}",
+    tag = "orgs",
+    summary = "Get one organisation (member-only)",
+    params(("id" = Uuid, Path)),
+    responses(
+        (status = 200, body = OrgView),
+        (status = 401, body = ApiError),
+        (status = 404, body = ApiError),
+    ),
+)]
+pub async fn get_org(
+    State(state): State<AppState>,
+    CurrentUser(user): CurrentUser,
+    Path(id): Path<Uuid>,
+) -> Result<Json<OrgView>> {
+    let pool = require_db(&state)?;
+    let org_id = OrgId(id);
+    let active = orgs_store::is_active_member(pool, user, org_id).await?;
+    if !active {
+        return Err(AppError::not_found(codes::ORG_NOT_FOUND, "organisation not found"));
+    }
+    let org = orgs_store::get_org(pool, org_id)
+        .await?
+        .ok_or_else(|| AppError::not_found(codes::ORG_NOT_FOUND, "organisation not found"))?;
+    Ok(Json(org.into()))
+}
+
+#[utoipa::path(
+    patch,
+    path = "/api/v1/orgs/{id}",
+    tag = "orgs",
+    summary = "Update an organisation (owner-only)",
+    description = "Currently only `name` is mutable.",
+    params(("id" = Uuid, Path)),
+    request_body = UpdateOrgRequest,
+    responses(
+        (status = 200, body = OrgView),
+        (status = 400, body = ApiError),
+        (status = 401, body = ApiError),
+        (status = 403, body = ApiError),
+        (status = 404, body = ApiError),
+    ),
+)]
+pub async fn update_org(
+    State(state): State<AppState>,
+    CurrentUser(user): CurrentUser,
+    Path(id): Path<Uuid>,
+    Json(req): Json<UpdateOrgRequest>,
+) -> Result<Json<OrgView>> {
+    let pool = require_db(&state)?;
+    let org_id = OrgId(id);
+    let name = trim_name(&req.name)?;
+    require_owner(pool, user, org_id).await?;
+    let updated = orgs_store::update_org_name(pool, org_id, &name)
+        .await?
+        .ok_or_else(|| AppError::not_found(codes::ORG_NOT_FOUND, "organisation not found"))?;
+    Ok(Json(updated.into()))
+}
+
+#[utoipa::path(
+    delete,
+    path = "/api/v1/orgs/{id}",
+    tag = "orgs",
+    summary = "Soft-delete an organisation (owner-only)",
+    description = "The row stays in place for the configured grace period so \
+                   the slug remains held and the deleter can restore. After \
+                   the grace period a daily worker purges it for good.",
+    params(("id" = Uuid, Path)),
+    responses(
+        (status = 204, description = "Deleted"),
+        (status = 401, body = ApiError),
+        (status = 403, body = ApiError),
+        (status = 404, body = ApiError),
+    ),
+)]
+pub async fn delete_org(
+    State(state): State<AppState>,
+    CurrentUser(user): CurrentUser,
+    Path(id): Path<Uuid>,
+) -> Result<StatusCode> {
+    let pool = require_db(&state)?;
+    let org_id = OrgId(id);
+    require_owner(pool, user, org_id).await?;
+    if !orgs_store::soft_delete_org(pool, org_id, user).await? {
+        return Err(AppError::not_found(codes::ORG_NOT_FOUND, "organisation not found"));
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/orgs/{id}/restore",
+    tag = "orgs",
+    summary = "Restore a soft-deleted organisation (deleter-only, within grace window)",
+    params(("id" = Uuid, Path)),
+    responses(
+        (status = 200, body = OrgView),
+        (status = 401, body = ApiError),
+        (status = 404, body = ApiError,
+            description = "Org doesn't exist, isn't soft-deleted, or caller \
+                           isn't the deleter (cloaked as 404 — never confirm \
+                           existence to a non-deleter)"),
+        (status = 422, body = ApiError, description = "Past the restore grace window"),
+    ),
+)]
+pub async fn restore_org(
+    State(state): State<AppState>,
+    CurrentUser(user): CurrentUser,
+    Path(id): Path<Uuid>,
+) -> Result<Json<OrgView>> {
+    let pool = require_db(&state)?;
+    let org_id = OrgId(id);
+    let grace = state.cfg.tenancy.deletion_grace_period_days;
+    // The storage call performs the deleter check + grace check + UPDATE in
+    // one transaction and returns the restored row, so the handler doesn't
+    // race with a concurrent re-delete or get a stale read.
+    match orgs_store::restore_org(pool, org_id, user, grace).await? {
+        orgs_store::RestoreOutcome::Restored(org) => Ok(Json(org.into())),
+        orgs_store::RestoreOutcome::NotFound | orgs_store::RestoreOutcome::NotDeleted => {
+            Err(AppError::not_found(codes::ORG_NOT_FOUND, "organisation not found"))
+        }
+        orgs_store::RestoreOutcome::WindowExpired => Err(AppError::unprocessable(
+            codes::RESTORE_WINDOW_EXPIRED,
+            "restore window has expired",
+        )),
+    }
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/orgs/check-slug",
+    tag = "orgs",
+    summary = "Check whether a slug is available for signup",
+    params(CheckSlugQuery),
+    responses(
+        (status = 200, body = CheckSlugResponse),
+    ),
+)]
+pub async fn check_slug(
+    State(state): State<AppState>,
+    Query(q): Query<CheckSlugQuery>,
+) -> Result<Json<CheckSlugResponse>> {
+    let pool = require_db(&state)?;
+    let normalised = q.slug.trim().to_ascii_lowercase();
+    if let Err(e) = validate_slug(&normalised) {
+        return Ok(Json(CheckSlugResponse {
+            available: false,
+            reason: Some(e.to_string()),
+        }));
+    }
+    let free = orgs_store::slug_is_available(pool, &normalised).await?;
+    Ok(Json(CheckSlugResponse {
+        available: free,
+        reason: (!free).then(|| "slug is already in use".into()),
+    }))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/orgs/{id}/members",
+    tag = "orgs",
+    summary = "List the members of an organisation (owner-only)",
+    params(("id" = Uuid, Path)),
+    responses(
+        (status = 200, body = Vec<MemberView>),
+        (status = 401, body = ApiError),
+        (status = 403, body = ApiError),
+        (status = 404, body = ApiError),
+    ),
+)]
+pub async fn list_org_members(
+    State(state): State<AppState>,
+    CurrentUser(user): CurrentUser,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Vec<MemberView>>> {
+    let pool = require_db(&state)?;
+    let org_id = OrgId(id);
+    require_owner(pool, user, org_id).await?;
+    let members = orgs_store::list_members(pool, org_id).await?;
+    Ok(Json(
+        members
+            .into_iter()
+            .map(|m| MemberView {
+                user_id: m.membership.user_id,
+                email: m.email,
+                role: m.membership.role,
+                created_at: m.membership.created_at,
+            })
+            .collect(),
+    ))
+}
+
+#[utoipa::path(
+    delete,
+    path = "/api/v1/orgs/{id}/members/{user_id}",
+    tag = "orgs",
+    summary = "Remove a member from an organisation (owner-only)",
+    description = "Refuses to remove the org's only owner; the caller must \
+                   demote, transfer, or delete the org instead.",
+    params(("id" = Uuid, Path), ("user_id" = Uuid, Path)),
+    responses(
+        (status = 204, description = "Removed"),
+        (status = 401, body = ApiError),
+        (status = 403, body = ApiError),
+        (status = 404, body = ApiError),
+        (status = 409, body = ApiError, description = "Cannot remove the last owner"),
+    ),
+)]
+pub async fn remove_org_member(
+    State(state): State<AppState>,
+    CurrentUser(user): CurrentUser,
+    Path((id, target_user_id)): Path<(Uuid, Uuid)>,
+) -> Result<StatusCode> {
+    let pool = require_db(&state)?;
+    let org_id = OrgId(id);
+    let target = UserId(target_user_id);
+    require_owner(pool, user, org_id).await?;
+    match orgs_store::remove_member(pool, org_id, target).await? {
+        orgs_store::RemoveOutcome::Removed => Ok(StatusCode::NO_CONTENT),
+        orgs_store::RemoveOutcome::NotFound => Err(AppError::not_found(
+            codes::MEMBER_NOT_FOUND,
+            "member not found",
+        )),
+        orgs_store::RemoveOutcome::LastOwner => Err(AppError::conflict(
+            codes::LAST_OWNER,
+            "cannot remove the last owner of an organisation",
+        )),
+    }
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/me/active-org",
+    tag = "orgs",
+    summary = "Switch the caller's active organisation",
+    description = "Verifies active membership in the requested org and \
+                   updates the session-side `active_org_id`. The real \
+                   session-mutation path lands with the auth spec; today this \
+                   route validates the request and lets the auth layer wire \
+                   the persistence.",
+    request_body = SwitchActiveOrgRequest,
+    responses(
+        (status = 204, description = "Active org switched"),
+        (status = 401, body = ApiError),
+        (status = 403, body = ApiError),
+        (status = 404, body = ApiError),
+    ),
+)]
+pub async fn switch_active_org(
+    State(state): State<AppState>,
+    CurrentUser(user): CurrentUser,
+    Json(req): Json<SwitchActiveOrgRequest>,
+) -> Result<StatusCode> {
+    let pool = require_db(&state)?;
+    if !orgs_store::is_active_member(pool, user, req.org_id).await? {
+        return Err(AppError::Forbidden);
+    }
+    // Session mutation belongs to the auth spec — once sessions are
+    // persisted, this handler will rotate `active_org_id` on the stored
+    // session. Until then the membership check is the meaningful work and
+    // a 204 communicates "your request was valid".
+    Ok(StatusCode::NO_CONTENT)
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
+fn require_db(state: &AppState) -> Result<&sqlx::PgPool> {
+    state.db.as_ref().ok_or_else(|| {
+        AppError::Other(anyhow::anyhow!(
+            "org management requires a postgres pool — AppState.db is None"
+        ))
+    })
+}
+
+async fn require_owner(pool: &sqlx::PgPool, user: UserId, org: OrgId) -> Result<()> {
+    // One round-trip: returns role + active-or-not. Cloak any non-active
+    // membership as 404; a member who isn't an owner gets 403.
+    match orgs_store::membership_status(pool, user, org).await? {
+        orgs_store::MembershipStatus::Owner => Ok(()),
+        orgs_store::MembershipStatus::Member => Err(AppError::Forbidden),
+        orgs_store::MembershipStatus::None => Err(AppError::not_found(
+            codes::ORG_NOT_FOUND,
+            "organisation not found",
+        )),
+    }
+}
+
+const MAX_ORG_NAME: usize = 120;
+
+fn trim_name(raw: &str) -> Result<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err(AppError::bad_request_field(
+            codes::EMPTY_NAME,
+            "name must not be empty",
+            "name",
+        ));
+    }
+    if trimmed.chars().count() > MAX_ORG_NAME {
+        return Err(AppError::bad_request_field(
+            codes::TITLE_TOO_LONG,
+            format!("name must be at most {MAX_ORG_NAME} characters"),
+            "name",
+        ));
+    }
+    Ok(trimmed.to_owned())
+}

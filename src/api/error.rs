@@ -90,4 +90,14 @@ pub mod codes {
     pub const MAINTENANCE_COMPLETED: &str = "MAINTENANCE_COMPLETED";
     pub const MAINTENANCE_NOT_FOUND: &str = "MAINTENANCE_NOT_FOUND";
     pub const INCIDENT_NOT_FOUND: &str = "INCIDENT_NOT_FOUND";
+    // Org management.
+    pub const ORG_NOT_FOUND: &str = "ORG_NOT_FOUND";
+    pub const ORG_DELETED: &str = "ORG_DELETED";
+    pub const SLUG_TAKEN: &str = "SLUG_TAKEN";
+    pub const SLUG_INVALID: &str = "SLUG_INVALID";
+    pub const OWNER_ORG_LIMIT: &str = "OWNER_ORG_LIMIT";
+    pub const NOT_AN_OWNER: &str = "NOT_AN_OWNER";
+    pub const MEMBER_NOT_FOUND: &str = "MEMBER_NOT_FOUND";
+    pub const LAST_OWNER: &str = "LAST_OWNER";
+    pub const RESTORE_WINDOW_EXPIRED: &str = "RESTORE_WINDOW_EXPIRED";
 }

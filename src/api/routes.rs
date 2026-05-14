@@ -88,6 +88,38 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
             "/incidents/{id}/updates",
             post(handlers::incidents::post_incident_update),
         )
+        .route(
+            "/orgs",
+            get(handlers::orgs::list_my_orgs).post(handlers::orgs::create_org),
+        )
+        .route("/orgs/check-slug", get(handlers::orgs::check_slug))
+        .route(
+            "/orgs/{id}",
+            get(handlers::orgs::get_org)
+                .patch(handlers::orgs::update_org)
+                .delete(handlers::orgs::delete_org),
+        )
+        .route(
+            "/orgs/{id}/restore",
+            post(handlers::orgs::restore_org),
+        )
+        .route(
+            "/orgs/{id}/members",
+            get(handlers::orgs::list_org_members),
+        )
+        .route(
+            "/orgs/{id}/members/{user_id}",
+            axum::routing::delete(handlers::orgs::remove_org_member),
+        )
+        .route("/me/orgs", get(handlers::orgs::list_my_orgs))
+        .route(
+            "/me/deleted-orgs",
+            get(handlers::orgs::list_my_deleted_orgs),
+        )
+        .route(
+            "/me/active-org",
+            post(handlers::orgs::switch_active_org),
+        )
         .layer(DefaultBodyLimit::max(SINGLE_BODY_LIMIT))
         .merge(bulk);
 

@@ -164,6 +164,64 @@ fn build_test_app_inner(mutate: impl FnOnce(&mut AppConfig), with_web: bool) -> 
     }
 }
 
+/// Build a router backed by InMemory tenant stores but with a real Postgres
+/// pool wired into `AppState.db`. Org-management routes need the pool. The
+/// `mutate` hook also enables tenancy and flips any other knobs the caller
+/// wants. Returns the router plus the `default_org_id` provisioned via
+/// `ensure_default_org`.
+pub async fn build_test_app_with_pg(
+    pool: PgPool,
+    mutate: impl FnOnce(&mut AppConfig),
+) -> (Router, OrgId) {
+    let mut cfg = AppConfig::load().expect("config");
+    mutate(&mut cfg);
+    let default_org_id = status_monitor::storage::ensure_default_org(&pool, "default")
+        .await
+        .expect("ensure default org");
+    let target_store = Arc::new(InMemoryTargetStore::new());
+    let sink = Arc::new(InMemorySink::new());
+    let results_store: Arc<dyn ResultsStore> = sink.clone();
+    let result_sink: Arc<dyn ResultSink> = sink;
+    let http_clients = Arc::new(test_client());
+    let (tx, _rx) = mpsc::channel(1024);
+    let pool_arc = Arc::new(WorkerPool::new(
+        cfg.checker.max_concurrent_checks.max(1),
+        (*http_clients).clone(),
+        cfg.circuit_breaker,
+        ResultFanout::storage_only(tx),
+    ));
+    let public_source = Arc::new(NoopPublicSource::default());
+    let maintenance_store: Arc<dyn MaintenanceStore> = Arc::new(InMemoryMaintenanceStore::new());
+    let incident_narration_store: Arc<dyn IncidentNarrationStore> =
+        Arc::new(InMemoryIncidentNarrationStore::new());
+    let state = AppState::new(
+        cfg,
+        Some(pool),
+        target_store,
+        results_store,
+        result_sink,
+        http_clients,
+        pool_arc,
+        public_source,
+        maintenance_store,
+        incident_narration_store,
+        default_org_id,
+    );
+    (
+        build_router(state, CancellationToken::new()),
+        default_org_id,
+    )
+}
+
+/// Layer that stamps the provided `Session` onto every request's extensions.
+/// `Session::from_request_parts` reads from the extensions when present, so
+/// tests can drive authenticated routes without the real auth backend.
+pub fn session_layer(
+    session: status_monitor::web::Session,
+) -> axum::Extension<status_monitor::web::Session> {
+    axum::Extension(session)
+}
+
 /// Shared `AppState` builder used by the router helpers above and by tests
 /// that need to exercise an extractor directly without going through HTTP.
 /// In-memory stores, no Postgres pool (`db: None`); callers that require a
