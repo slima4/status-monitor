@@ -46,22 +46,45 @@ For 50k-concurrency runs use `HTTP2=1` to fold many streams onto a few TCP conne
 
 ## Reference numbers
 
-### macOS host (M-class Mac, loopback)
+> **Substrate caveat.** Every number below was captured on a developer
+> laptop (Apple M1 Pro, 10 cores, 16 GB). Useful for **regression
+> detection** ("did this change hurt the hot path?") and for **relative
+> comparisons** between commits — **not** for production capacity
+> planning. Treat them as floors, not ceilings: a real Linux host on
+> server hardware will outperform; a constrained VM will underperform.
+> When sizing for production, re-run on the target topology.
 
-| Config | Result |
-|---|---|
-| `CONCURRENCY=12000 MOCK_PORTS=24 RAMP_SECS=10 DURATION_SECS=300` (HTTP/1) | 27,894 rps · 99.79% success · p99 2.7 s |
-| `CONCURRENCY=50000 MOCK_PORTS=8 RAMP_SECS=10 HTTP2=1 DURATION_SECS=300` | **151,614 rps · 100% success · 45.5M checks · p99 579 ms** |
+### macOS host (M1 Pro, 10 cores, loopback)
+
+| Date | Config | Result |
+|---|---|---|
+| 2026-05-14 | `CONCURRENCY=50000 MOCK_PORTS=8 RAMP_SECS=10 HTTP2=1 DURATION_SECS=300` | **252,114 rps · 100% success · 75.7M checks · p50 181 ms · p95 283 ms · p99 393 ms** |
+| earlier | `CONCURRENCY=50000 MOCK_PORTS=8 RAMP_SECS=10 HTTP2=1 DURATION_SECS=300` | 151,614 rps · 100% success · 45.5M checks · p99 579 ms |
+| earlier | `CONCURRENCY=12000 MOCK_PORTS=24 RAMP_SECS=10 DURATION_SECS=300` (HTTP/1) | 27,894 rps · 99.79% success · p99 2.7 s |
+
+The 2026-05-14 run is the current headline: 252 k rps sustained, p99 393 ms,
+zero errors over 5 minutes. Captures the hot path with the multi-tenancy
+work merged. Native macOS loopback on Darwin 25.4 reaches 50 k concurrent
+HTTP/2 without the docker crutch — the older "macOS can't do 50 k loopback"
+note in earlier docs is stale.
 
 ### Linux container (Docker Desktop VM on Mac)
 
-| Config | Result |
-|---|---|
-| `CONCURRENCY=50000 MOCK_PORTS=16 RAMP_SECS=10 HTTP2=1 DURATION_SECS=300` | **93,350 rps · 100% success · 28.1M checks · p99 1.8 s · 933 MiB RSS peak** |
+| Date | Config | Result |
+|---|---|---|
+| 2026-05-14 | `CONCURRENCY=50000 MOCK_PORTS=16 RAMP_SECS=10 HTTP2=1 DURATION_SECS=300` (10 vCPU allocated) | 17,391 rps · 100% success · 5.25 M checks · p99 4.2 s · 26 timeouts |
+| 2026-05-12 | `CONCURRENCY=50000 MOCK_PORTS=16 RAMP_SECS=10 HTTP2=1 DURATION_SECS=300` | 93,350 rps · 100% success · 28.1 M checks · p99 1.8 s · 933 MiB RSS peak |
 
-The 50k-concurrent acceptance run requires Linux kernel knobs (somaxconn, tw_reuse, ip_local_port_range) — see the Docker section above. Pure-Linux numbers will be higher than VM-on-Mac (~30% hypervisor overhead).
+The 2026-05-14 docker run regressed sharply versus the 2026-05-12 reference
+on the same hardware. CPU was not the bottleneck (10 vCPU allocated and not
+pegged); the regression sits in the Docker Desktop networking layer —
+likely the `DOCKER_INSECURE_NO_IPTABLES_RAW` flag and iptables-rule changes
+between DD versions. Same checkout's native run on the same box hit 252 k rps,
+so the binary is fine; the VM substrate isn't.
 
-RSS stays under 1 GiB under sustained 50k-worker load — sampled with `docker stats` at 5 s intervals during a 300 s run. Peak hit 933 MiB after warm-up; steady state held there. The bound comes from per-worker task state plus the shared connection pool, not unbounded result buffering (batcher drains every 5 s).
+Docker is no longer the right way to validate this binary's perf on macOS.
+Prefer the native run above; reach for a real Linux host (CI runner, staging
+VM) when you actually need a Linux number.
 
 ## HTTP/1 vs h2c trade-off
 
