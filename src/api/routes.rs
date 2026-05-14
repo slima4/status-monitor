@@ -105,6 +105,12 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
             "/orgs/{id}/members/{user_id}",
             axum::routing::delete(handlers::orgs::remove_org_member),
         )
+        .route("/me", get(handlers::me::me))
+        .route("/me/sessions", get(handlers::me::list_sessions))
+        .route(
+            "/me/sessions/{id}",
+            axum::routing::delete(handlers::me::revoke_session),
+        )
         .route("/me/orgs", get(handlers::orgs::list_my_orgs))
         .route(
             "/me/deleted-orgs",
@@ -121,9 +127,19 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
         v1 = v1.layer(layer);
     }
 
+    let auth_routes = Router::new()
+        .route("/auth/github/login", get(handlers::auth::github_login))
+        .route(
+            "/auth/github/callback",
+            get(handlers::auth::github_callback),
+        )
+        .route("/auth/logout", post(handlers::auth::logout))
+        .route("/auth/logout-all", post(handlers::auth::logout_all));
+
     let mut root = Router::new()
         .route("/healthz", get(handlers::health::healthz))
         .route("/readyz", get(handlers::health::readyz))
+        .merge(auth_routes)
         .nest("/api/v1", v1);
 
     if public_routes_active(&state.cfg) {
@@ -133,6 +149,7 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
     root.merge(SwaggerUi::new("/docs").url("/api/openapi.json", ApiDoc::openapi()))
         .layer(from_fn(api_middleware::cache_control))
         .layer(from_fn(api_middleware::json_charset))
+        .layer(tower_cookies::CookieManagerLayer::new())
         .with_state(state)
 }
 

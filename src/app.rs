@@ -6,9 +6,12 @@ use sqlx::PgPool;
 
 use crate::api::IdempotencyCache;
 use crate::api::types::DashboardSummary;
+use crate::auth::session::{LastUsedDebounce, build_debounce_cache};
 use crate::config::AppConfig;
 use crate::domain::OrgId;
+use crate::email::EmailSender;
 use crate::http_client::HttpClients;
+use crate::http_outbound::OutboundHttpClient;
 use crate::public_status::PublicSource;
 use crate::storage::{
     IncidentNarrationStore, MaintenanceStore, ResultSink, ResultsStore, TargetStore,
@@ -62,6 +65,15 @@ pub struct AppState {
     /// path until the repository pattern threads `OrgId` through call sites in
     /// Phase 2. Provisioned at startup by `ensure_default_org`.
     pub default_org_id: OrgId,
+    /// Debounce cache for `sessions.last_used_at` writes — see
+    /// `auth::session::touch_last_used_debounced`.
+    pub session_debounce: Arc<LastUsedDebounce>,
+    /// Shared outbound HTTPS client used by GitHub OAuth + transactional
+    /// email. Not the per-target check client.
+    pub outbound_http: OutboundHttpClient,
+    /// Transactional email sender (invitations, magic-link). Provider selected
+    /// by `email.provider`.
+    pub email_sender: Arc<dyn EmailSender>,
 }
 
 impl AppState {
@@ -78,6 +90,8 @@ impl AppState {
         maintenance_store: Arc<dyn MaintenanceStore>,
         incident_narration_store: Arc<dyn IncidentNarrationStore>,
         default_org_id: OrgId,
+        outbound_http: OutboundHttpClient,
+        email_sender: Arc<dyn EmailSender>,
     ) -> Self {
         Self {
             cfg: Arc::new(cfg),
@@ -93,6 +107,9 @@ impl AppState {
             maintenance_store,
             incident_narration_store,
             default_org_id,
+            session_debounce: Arc::new(build_debounce_cache()),
+            outbound_http,
+            email_sender,
         }
     }
 }

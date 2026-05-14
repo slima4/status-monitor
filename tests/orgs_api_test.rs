@@ -47,6 +47,7 @@ fn app_with_session(router: Router, user: UserId) -> Router {
             email: format!("u-{}@example.test", user.0),
         }),
         active_org_id: None,
+        session_id: None,
     }))
 }
 

@@ -100,4 +100,7 @@ pub mod codes {
     pub const MEMBER_NOT_FOUND: &str = "MEMBER_NOT_FOUND";
     pub const LAST_OWNER: &str = "LAST_OWNER";
     pub const RESTORE_WINDOW_EXPIRED: &str = "RESTORE_WINDOW_EXPIRED";
+    // Auth.
+    pub const INVALID_STATE: &str = "INVALID_STATE";
+    pub const SESSION_NOT_FOUND: &str = "SESSION_NOT_FOUND";
 }

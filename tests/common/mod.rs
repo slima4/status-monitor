@@ -16,10 +16,12 @@ use status_monitor::api::build_router;
 use status_monitor::app::AppState;
 use status_monitor::config::{
     AppConfig, CheckerConfig, CircuitBreakerConfig, DnsConfig, HttpClientConfig, SchedulerConfig,
-    SecurityConfig,
+    SecurityConfig, TransactionalEmailConfig,
 };
 use status_monitor::domain::{CheckSpec, ExpectedStatus, HttpCheck, HttpMethod, OrgId, Target};
+use status_monitor::email::{EmailSender, build_email_sender};
 use status_monitor::http_client::{HttpClients, build_clients};
+use status_monitor::http_outbound::{OutboundHttpClient, build_outbound_client};
 use status_monitor::public_status::{NoopPublicSource, PublicSource};
 use status_monitor::storage::{
     InMemoryIncidentNarrationStore, InMemoryMaintenanceStore, InMemorySink, InMemoryTargetStore,
@@ -30,6 +32,19 @@ use tokio::sync::{Mutex, mpsc};
 use tokio_util::sync::CancellationToken;
 use url::Url;
 use uuid::Uuid;
+
+/// Outbound HTTP client + in-memory email sender shared by every test
+/// `AppState` builder. The "memory" provider buffers sends so tests can
+/// assert against them.
+pub fn build_test_outbound_and_email() -> (OutboundHttpClient, Arc<dyn EmailSender>) {
+    let http = build_outbound_client();
+    let cfg = TransactionalEmailConfig {
+        provider: "memory".into(),
+        ..Default::default()
+    };
+    let sender = build_email_sender(&cfg, &http).expect("memory email sender");
+    (http, sender)
+}
 
 /// Fixed org id used in every `build_test_app*` helper. Tests run with
 /// in-memory stores that don't enforce the FK to `organizations`, so the
@@ -110,6 +125,8 @@ pub fn build_test_app_with_seedable_incidents(
         maintenance_store,
         incident_narration_store,
         test_org_id(),
+        build_test_outbound_and_email().0,
+        build_test_outbound_and_email().1,
     );
     (build_router(state, CancellationToken::new()), narration)
 }
@@ -166,6 +183,8 @@ fn build_test_app_with_public_source_inner(
         maintenance_store,
         incident_narration_store,
         test_org_id(),
+        build_test_outbound_and_email().0,
+        build_test_outbound_and_email().1,
     );
     let api = build_router(state.clone(), CancellationToken::new());
     if with_web {
@@ -233,6 +252,8 @@ pub async fn build_test_app_with_pg(
         maintenance_store,
         incident_narration_store,
         default_org_id,
+        build_test_outbound_and_email().0,
+        build_test_outbound_and_email().1,
     );
     (
         build_router(state, CancellationToken::new()),
@@ -284,6 +305,8 @@ pub fn build_test_app_state(mutate: impl FnOnce(&mut AppConfig)) -> AppState {
         maintenance_store,
         incident_narration_store,
         test_org_id(),
+        build_test_outbound_and_email().0,
+        build_test_outbound_and_email().1,
     )
 }
 

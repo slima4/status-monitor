@@ -99,6 +99,14 @@ x509-parser = "0.18.1"
 # Secret-string wrapper for in-memory API keys / OAuth client secrets.
 secrecy = { version = "0.10", features = ["serde"] }
 
+# Auth crypto: SHA-256 for fingerprint hashing (IP / user-agent / session-id
+# salting), OsRng-backed random for session ids + OAuth state.
+sha2 = "0.11.0-rc.3"
+rand = "0.10"
+# Constant-time byte comparison for secret material (OAuth state, magic-link
+# tokens, invitation tokens — see §7.3).
+subtle = "2.6"
+
 # OpenAPI schema derivation
 utoipa = { version = "5.5", features = ["axum_extras", "chrono", "uuid", "url"] }
 utoipa-axum = "0.2"

@@ -1,4 +1,4 @@
-//! Request → org resolution.
+//! Request → org resolution + cookie-backed session lookup.
 //!
 //! [`CurrentOrg`] is the only extractor that hands a handler an `OrgId`.
 //! Combined with the org-scoped repositories in `src/storage/`, this is what
@@ -6,24 +6,24 @@
 //! incident: the repos require an `OrgId`, and the only place to obtain one
 //! inside a request is this extractor.
 //!
-//! Two resolution modes:
+//! Resolution order for [`Session`]:
 //!
-//! * `tenancy.enabled = false` (self-host) — every request resolves to
-//!   `AppState::default_org_id`. No session inspection, no DB read.
-//! * `tenancy.enabled = true`  (SaaS) — reads `Session::active_org_id`. If the
-//!   user is not (or no longer) an active member of that org → 403. If no
-//!   active org is selected, falls back to the user's personal org. The
-//!   `Session` extractor itself is still a stub — wiring real sessions
-//!   belongs to the auth spec, not this one.
+//! 1. If an explicit `Session` is in request extensions (test fixtures
+//!    stamp one via `from_fn`), use it as-is.
+//! 2. Else, if a session cookie is present, look it up in `sessions`.
+//!    A live row applies idle + absolute timeouts and lazily refreshes
+//!    `last_used_at` (debounced per [`auth::session`]).
+//! 3. Else, return an empty session (anonymous).
 //!
-//! Membership and personal-org SQL lives in [`crate::storage::orgs`], the
-//! single owner of access to the `organizations` and `memberships` tables.
+//! Membership and personal-org SQL lives in [`crate::storage::orgs`].
 
 use axum::extract::{FromRef, FromRequestParts};
 use axum::http::request::Parts;
 use std::convert::Infallible;
+use tower_cookies::Cookies;
 
 use crate::app::AppState;
+use crate::auth::session as session_store;
 use crate::domain::{OrgId, UserId};
 use crate::error::{AppError, Result};
 use crate::storage::orgs::{is_active_member, personal_org_for_user};
@@ -34,16 +34,18 @@ pub struct User {
     pub email: String,
 }
 
-/// Authenticated session. The auth backend is not yet wired; for now this
-/// extractor always yields an empty session, so [`CurrentOrg`] falls through
-/// to the default-org path when tenancy is disabled. Once `AUTH-spec.md`
-/// lands, this becomes a real cookie / token lookup.
+/// Authenticated session. The cookie-backed extractor populates this from the
+/// `sessions` table; tests can short-circuit by stamping one into request
+/// extensions ahead of the extractor.
 #[derive(Debug, Default, Clone)]
 pub struct Session {
     pub user: Option<User>,
-    /// Org actively selected by the user via the org picker. `None` means
-    /// "fall back to my personal org".
+    /// Active org selected by the user via the org picker, or set by signup.
+    /// `None` means "fall back to my personal org".
     pub active_org_id: Option<OrgId>,
+    /// Present iff this Session was constructed by the cookie path. Handlers
+    /// that need to destroy or rotate the session (logout) reach for this.
+    pub session_id: Option<String>,
 }
 
 impl Session {
@@ -55,32 +57,86 @@ impl Session {
 impl<S> FromRequestParts<S> for Session
 where
     S: Send + Sync,
+    AppState: FromRef<S>,
 {
     type Rejection = Infallible;
 
-    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
-        // Until the auth backend lands, the only way to populate a session is
-        // for a test middleware (or future auth layer) to insert one into the
-        // request extensions. Absence = anonymous.
-        Ok(parts
-            .extensions
-            .get::<Session>()
-            .cloned()
-            .unwrap_or_default())
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        if let Some(injected) = parts.extensions.get::<Session>().cloned() {
+            return Ok(injected);
+        }
+
+        let app_state = AppState::from_ref(state);
+        if !app_state.cfg.tenancy.enabled {
+            return Ok(Session::default());
+        }
+        let Some(pool) = app_state.db.as_ref() else {
+            return Ok(Session::default());
+        };
+        let Some(cookies) = parts.extensions.get::<Cookies>().cloned() else {
+            return Ok(Session::default());
+        };
+        let cookie_name = app_state.cfg.auth.session.cookie_name.as_str();
+        let Some(cookie_val) = cookies.get(cookie_name).map(|c| c.value().to_string()) else {
+            return Ok(Session::default());
+        };
+
+        match session_store::lookup(pool, &app_state.cfg.auth.session, &cookie_val).await {
+            Ok(session_store::LookupOutcome::Active(row)) => {
+                if let Err(err) = session_store::touch_last_used_debounced(
+                    pool,
+                    &app_state.session_debounce,
+                    &row.id,
+                )
+                .await
+                {
+                    tracing::warn!(error = %err, "touch_last_used_debounced failed");
+                }
+                let user = load_user(pool, row.user_id).await;
+                Ok(Session {
+                    user,
+                    active_org_id: row.active_org_id,
+                    session_id: Some(row.id),
+                })
+            }
+            Ok(session_store::LookupOutcome::Expired) => {
+                cookies.remove(
+                    tower_cookies::Cookie::build((cookie_name.to_string(), String::new()))
+                        .path("/")
+                        .build(),
+                );
+                Ok(Session::default())
+            }
+            Ok(session_store::LookupOutcome::Missing) => Ok(Session::default()),
+            Err(err) => {
+                tracing::warn!(error = %err, "session lookup failed");
+                Ok(Session::default())
+            }
+        }
     }
 }
 
+async fn load_user(pool: &sqlx::PgPool, user_id: UserId) -> Option<User> {
+    let row: Option<(String,)> =
+        sqlx::query_as("SELECT email::text FROM users WHERE id = $1 AND deleted_at IS NULL")
+            .bind(user_id.0)
+            .fetch_optional(pool)
+            .await
+            .ok()
+            .flatten();
+    row.map(|(email,)| User { id: user_id, email })
+}
+
 /// Caller identity extracted from the session. Returns 401 when no user is
-/// attached. Handlers that need both the active org and the caller (e.g.
-/// "remove member") use [`CurrentOrg`] and [`CurrentUser`] together — though
-/// most org-management routes operate on an explicit `:id` path parameter and
-/// only need the caller.
+/// attached. Handlers that need both the active org and the caller use
+/// [`CurrentOrg`] and [`CurrentUser`] together.
 #[derive(Debug, Clone, Copy)]
 pub struct CurrentUser(pub UserId);
 
 impl<S> FromRequestParts<S> for CurrentUser
 where
     S: Send + Sync,
+    AppState: FromRef<S>,
 {
     type Rejection = AppError;
 

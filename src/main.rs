@@ -224,6 +224,19 @@ async fn main() -> Result<()> {
         PgIncidentNarrationStore::new(pg_pool_for_stores.clone(), default_org_id),
     );
 
+    let outbound_http = status_monitor::http_outbound::build_outbound_client();
+    let email_sender = status_monitor::email::build_email_sender(&cfg.email, &outbound_http)
+        .map_err(|e| AppError::Other(anyhow::anyhow!("build_email_sender: {e}")))?;
+
+    if cfg.tenancy.enabled {
+        status_monitor::auth::ensure_fingerprint_salt(
+            &pg_pool_for_stores,
+            &cfg.auth.fingerprint_salt,
+        )
+        .await
+        .map_err(|e| AppError::Other(anyhow::anyhow!("auth salt guard: {e}")))?;
+    }
+
     let state = AppState::new(
         cfg,
         Some(pg_pool_for_stores),
@@ -236,6 +249,8 @@ async fn main() -> Result<()> {
         maintenance_store,
         incident_narration_store,
         default_org_id,
+        outbound_http,
+        email_sender,
     );
     let router =
         build_router(state.clone(), root.clone()).merge(web::routes(&state.cfg).with_state(state));
