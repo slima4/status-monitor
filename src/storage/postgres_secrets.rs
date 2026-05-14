@@ -4,9 +4,11 @@ use uuid::Uuid;
 
 use crate::security::{Cipher, is_envelope};
 
-/// JSON pointer paths inside `check_spec` that hold credential material. Walked
-/// at the storage boundary to wrap/unwrap an envelope around plaintext values.
-const CREDENTIAL_PATHS: &[&str] = &["/http/basic_auth", "/http/bearer_token"];
+/// JSON pointer paths inside `check_spec` that hold credential material.
+/// `CheckSpec` uses `#[serde(tag = "type")]`, so the variant's fields are
+/// inlined at the JSON root rather than nested under `"http"`. The pointer
+/// lookups silently no-op on non-http checks because the field isn't present.
+const CREDENTIAL_PATHS: &[&str] = &["/basic_auth", "/bearer_token"];
 
 const ENC_KEY: &str = "$enc";
 
@@ -79,52 +81,51 @@ mod tests {
     fn encrypt_then_decrypt_round_trips_basic_auth() {
         let id = Uuid::nil();
         let c = cipher();
-        let mut v =
-            json!({"type":"http","http":{"basic_auth":["alice","s3cret"],"bearer_token":null}});
+        let mut v = json!({"type":"http","basic_auth":["alice","s3cret"],"bearer_token":null});
         encrypt_in_place(&mut v, &c).unwrap();
-        let enc = v.pointer("/http/basic_auth/$enc").and_then(Value::as_str);
+        let enc = v.pointer("/basic_auth/$enc").and_then(Value::as_str);
         assert!(enc.is_some_and(|s| s.starts_with("v1:")));
         decrypt_in_place(&mut v, &c, id).unwrap();
-        assert_eq!(v["http"]["basic_auth"], json!(["alice", "s3cret"]));
+        assert_eq!(v["basic_auth"], json!(["alice", "s3cret"]));
     }
 
     #[test]
     fn encrypt_then_decrypt_round_trips_bearer_token() {
         let id = Uuid::nil();
         let c = cipher();
-        let mut v = json!({"type":"http","http":{"basic_auth":null,"bearer_token":"abc.def.ghi"}});
+        let mut v = json!({"type":"http","basic_auth":null,"bearer_token":"abc.def.ghi"});
         encrypt_in_place(&mut v, &c).unwrap();
-        assert!(v["http"]["bearer_token"]["$enc"].is_string());
+        assert!(v["bearer_token"]["$enc"].is_string());
         decrypt_in_place(&mut v, &c, id).unwrap();
-        assert_eq!(v["http"]["bearer_token"], json!("abc.def.ghi"));
+        assert_eq!(v["bearer_token"], json!("abc.def.ghi"));
     }
 
     #[test]
     fn legacy_plaintext_passes_through_decrypt() {
         let id = Uuid::nil();
         let c = cipher();
-        let mut v = json!({"type":"http","http":{"basic_auth":["a","b"]}});
+        let mut v = json!({"type":"http","basic_auth":["a","b"]});
         decrypt_in_place(&mut v, &c, id).unwrap();
-        assert_eq!(v["http"]["basic_auth"], json!(["a", "b"]));
+        assert_eq!(v["basic_auth"], json!(["a", "b"]));
     }
 
     #[test]
     fn null_credential_skips_encryption() {
         let c = cipher();
-        let mut v = json!({"type":"http","http":{"basic_auth":null,"bearer_token":null}});
+        let mut v = json!({"type":"http","basic_auth":null,"bearer_token":null});
         encrypt_in_place(&mut v, &c).unwrap();
-        assert!(v["http"]["basic_auth"].is_null());
-        assert!(v["http"]["bearer_token"].is_null());
+        assert!(v["basic_auth"].is_null());
+        assert!(v["bearer_token"].is_null());
     }
 
     #[test]
     fn already_encrypted_does_not_double_wrap() {
         let c = cipher();
-        let mut v = json!({"type":"http","http":{"basic_auth":["a","b"]}});
+        let mut v = json!({"type":"http","basic_auth":["a","b"]});
         encrypt_in_place(&mut v, &c).unwrap();
-        let first = v["http"]["basic_auth"].clone();
+        let first = v["basic_auth"].clone();
         encrypt_in_place(&mut v, &c).unwrap();
-        assert_eq!(v["http"]["basic_auth"], first);
+        assert_eq!(v["basic_auth"], first);
     }
 
     #[test]
@@ -132,26 +133,26 @@ mod tests {
         let c = cipher();
         let mut v = json!({
             "type":"http",
-            "http":{"url":"https://x.test","method":"GET","headers":{"X":"y"}}
+            "url":"https://x.test","method":"GET","headers":{"X":"y"}
         });
         encrypt_in_place(&mut v, &c).unwrap();
-        assert_eq!(v["http"]["url"], json!("https://x.test"));
-        assert_eq!(v["http"]["headers"]["X"], json!("y"));
+        assert_eq!(v["url"], json!("https://x.test"));
+        assert_eq!(v["headers"]["X"], json!("y"));
     }
 
     #[test]
     fn tcp_check_no_credentials_path() {
         let c = cipher();
-        let mut v = json!({"type":"tcp","tcp":{"host":"x","port":80}});
+        let mut v = json!({"type":"tcp","host":"x","port":80});
         encrypt_in_place(&mut v, &c).unwrap();
-        assert_eq!(v["tcp"]["host"], json!("x"));
+        assert_eq!(v["host"], json!("x"));
     }
 
     #[test]
     fn decrypt_fails_with_wrong_kek() {
         let a = cipher();
         let b = Cipher::from_base64(&STANDARD.encode([99u8; 32])).unwrap();
-        let mut v = json!({"type":"http","http":{"basic_auth":["u","p"]}});
+        let mut v = json!({"type":"http","basic_auth":["u","p"]});
         encrypt_in_place(&mut v, &a).unwrap();
         assert!(decrypt_in_place(&mut v, &b, Uuid::nil()).is_err());
     }
