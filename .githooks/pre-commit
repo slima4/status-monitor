@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Cheap checks that mirror the `lint` job in .github/workflows/ci.yml.
+# Clippy and the test suite are intentionally left to CI / `just ci` —
+# both are too slow to run on every commit.
+#
+# Install: `just install-hooks` (or `git config core.hooksPath .githooks`).
+# Bypass for an emergency commit: `git commit --no-verify`.
+
+set -euo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
+
+fail=0
+run() {
+  local label=$1
+  shift
+  printf '\033[1;34m• %s\033[0m\n' "$label"
+  if ! "$@"; then
+    printf '\033[1;31m✗ %s failed\033[0m\n' "$label"
+    fail=1
+  fi
+}
+
+run "cargo fmt --check" cargo fmt --all -- --check
+
+if command -v ast-grep >/dev/null 2>&1; then
+  run "tenant-isolation scan" scripts/check_tenant_isolation.sh
+else
+  printf '\033[1;33m• tenant-isolation scan skipped (ast-grep not installed; brew install ast-grep)\033[0m\n'
+fi
+
+exit "$fail"

@@ -70,6 +70,12 @@ clippy:
 # Run everything CI runs.
 ci: fmt-check clippy test
 
+# Point git at the in-repo hook directory (.githooks/) for this clone.
+# Runs cargo fmt --check + scripts/check_tenant_isolation.sh on every commit.
+install-hooks:
+    git config core.hooksPath .githooks
+    @echo "pre-commit installed → .githooks/pre-commit (bypass with --no-verify)"
+
 # ── Database probes ─────────────────────────────────────────────────────────
 
 psql:
