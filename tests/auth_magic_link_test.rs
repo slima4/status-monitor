@@ -204,3 +204,110 @@ async fn purge_old_removes_expired_and_old_used() {
 
     drop_pg(&name).await;
 }
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn earliest_in_window_picks_first_row_and_excludes_others() {
+    let Some((db, name)) = fresh_pg().await else {
+        return;
+    };
+    let pool = open_pool(&db).await;
+    MIGRATOR.run(&pool).await.unwrap();
+
+    // Two requests for the same email back-to-back.
+    let first = magic_link::create(&pool, "throttle@example.test", None, 15)
+        .await
+        .expect("first create");
+    let second = magic_link::create(&pool, "throttle@example.test", None, 15)
+        .await
+        .expect("second create");
+    assert_ne!(first.row.id, second.row.id);
+
+    // Inside the 60s window: first row wins for both spawn checks.
+    let winner = magic_link::earliest_in_window(&pool, "throttle@example.test", 60)
+        .await
+        .expect("earliest");
+    assert_eq!(winner, Some(first.row.id));
+
+    // A different email is not throttled.
+    let other = magic_link::create(&pool, "other@example.test", None, 15)
+        .await
+        .expect("other create");
+    let other_winner = magic_link::earliest_in_window(&pool, "other@example.test", 60)
+        .await
+        .expect("other earliest");
+    assert_eq!(other_winner, Some(other.row.id));
+
+    // window_seconds = 0 disables (operator escape hatch).
+    let disabled = magic_link::earliest_in_window(&pool, "throttle@example.test", 0)
+        .await
+        .expect("disabled");
+    assert!(disabled.is_none());
+
+    // Force the first row outside the window — the second now wins.
+    sqlx::query(
+        "UPDATE magic_link_tokens SET created_at = now() - INTERVAL '2 minutes' WHERE id = $1",
+    )
+    .bind(first.row.id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let post_expiry = magic_link::earliest_in_window(&pool, "throttle@example.test", 60)
+        .await
+        .expect("post expiry");
+    assert_eq!(post_expiry, Some(second.row.id));
+
+    // Mark second as used → no winner remains in the window.
+    sqlx::query("UPDATE magic_link_tokens SET used_at = now() WHERE id = $1")
+        .bind(second.row.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let after_use = magic_link::earliest_in_window(&pool, "throttle@example.test", 60)
+        .await
+        .expect("after use");
+    assert!(after_use.is_none());
+
+    drop_pg(&name).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn earliest_in_window_under_concurrent_inserts_picks_one_winner() {
+    // Locks the race contract that the spawn-based throttle relies on:
+    // two parallel INSERTs for the same email must resolve to exactly one
+    // winner under `earliest_in_window`. If the ORDER BY ever loses its
+    // total-order property, this test fails — the throttle's "one email
+    // per window" guarantee would break with it.
+    let Some((db, name)) = fresh_pg().await else {
+        return;
+    };
+    let pool = open_pool(&db).await;
+    MIGRATOR.run(&pool).await.unwrap();
+
+    let (a, b) = tokio::join!(
+        magic_link::create(&pool, "race@example.test", None, 15),
+        magic_link::create(&pool, "race@example.test", None, 15),
+    );
+    let a = a.expect("a create");
+    let b = b.expect("b create");
+    assert_ne!(a.row.id, b.row.id);
+
+    let winner = magic_link::earliest_in_window(&pool, "race@example.test", 60)
+        .await
+        .expect("earliest")
+        .expect("a winner exists");
+    assert!(
+        winner == a.row.id || winner == b.row.id,
+        "winner must be one of the two inserted rows"
+    );
+
+    // Every spawn would converge on the same winner — deterministic.
+    let again = magic_link::earliest_in_window(&pool, "race@example.test", 60)
+        .await
+        .expect("earliest again")
+        .expect("still a winner");
+    assert_eq!(winner, again, "winner must be stable across reads");
+
+    drop_pg(&name).await;
+}

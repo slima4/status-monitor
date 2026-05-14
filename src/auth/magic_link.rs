@@ -118,6 +118,38 @@ pub async fn consume(pool: &PgPool, raw_token: &str) -> Result<Option<MagicLinkR
     Ok(None)
 }
 
+/// Earliest unused row id for `email` whose `created_at` falls inside the
+/// last `window_seconds`. The throttle in `/auth/magic-link/request` runs
+/// this from inside `tokio::spawn` and only sends the email when the row it
+/// just inserted is the winner — so the response handler's timing never
+/// depends on rate-limit state (anti-enum), and concurrent requests for the
+/// same address resolve to exactly one outgoing email per window.
+///
+/// `window_seconds = 0` short-circuits to `Ok(None)` (rate-limit disabled).
+pub async fn earliest_in_window(
+    pool: &PgPool,
+    email: &str,
+    window_seconds: u32,
+) -> Result<Option<Uuid>> {
+    if window_seconds == 0 {
+        return Ok(None);
+    }
+    let row: Option<(Uuid,)> = sqlx::query_as(
+        "SELECT id FROM magic_link_tokens \
+         WHERE email = $1::citext \
+           AND used_at IS NULL \
+           AND created_at > now() - make_interval(secs => $2) \
+         ORDER BY created_at ASC, id ASC \
+         LIMIT 1",
+    )
+    .bind(email)
+    .bind(i32::try_from(window_seconds).unwrap_or(i32::MAX))
+    .fetch_optional(pool)
+    .await
+    .context("magic_link::earliest_in_window")?;
+    Ok(row.map(|(id,)| id))
+}
+
 /// Periodic cleanup. Drops rows whose `expires_at` is past, and used rows
 /// older than 7 days (a forensic window for "did this token get redeemed?").
 pub async fn purge_old(pool: &PgPool) -> sqlx::Result<u64> {

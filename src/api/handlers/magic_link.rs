@@ -7,7 +7,10 @@
 //!   argon2+INSERT work for every well-formed address regardless of whether a
 //!   user owns it. Malformed inputs short-circuit (they disclose only that the
 //!   string isn't an email shape — no signal about specific accounts). Email
-//!   delivery is spawned so SMTP latency doesn't leak via response time.
+//!   delivery and the per-email send throttle run inside `tokio::spawn` so
+//!   neither SMTP latency nor rate-limit state leaks via response time. The
+//!   throttle keeps a recipient's inbox to one link per
+//!   `auth.magic_link.rate_limit_seconds` regardless of source.
 //! - `GET  /auth/magic-link/verify?token=…` — atomically consumes the token,
 //!   destroys any pre-login session bound to the browser (fixation defence),
 //!   mints a fresh session cookie, and redirects to `/`.
@@ -78,9 +81,40 @@ pub async fn request(
             },
         };
         let sender = state.email_sender.clone();
-        // Spawn so SMTP duration doesn't leak via response time. The handler
-        // returns the anti-enum response immediately.
+        let throttle_pool = pool.clone();
+        let throttle_email = email.to_string();
+        let created_id = created.row.id;
+        let rate_limit = cfg.rate_limit_seconds;
+        // Spawn so SMTP duration doesn't leak via response time and so the
+        // per-email throttle below also runs off the response path. The
+        // handler returns the anti-enum response immediately.
         tokio::spawn(async move {
+            // Per-email send throttle: only the first row inserted inside the
+            // window for a given address actually mails the user. Later
+            // duplicates still INSERT in the handler (anti-enum work) but the
+            // throttle check here finds an earlier row and drops the send,
+            // bounding the recipient's inbox to one link per window
+            // regardless of how many sources hammer /request.
+            //
+            // Fail open on DB error — a transient hiccup must not silently
+            // swallow a legitimate sign-in attempt.
+            match magic_link::earliest_in_window(&throttle_pool, &throttle_email, rate_limit).await
+            {
+                Ok(Some(winner)) if winner != created_id => {
+                    tracing::info!(
+                        window_seconds = rate_limit,
+                        "magic_link: rate-limited, suppressing email"
+                    );
+                    return;
+                }
+                Ok(_) => {}
+                Err(err) => {
+                    tracing::warn!(
+                        error = %err,
+                        "magic_link: throttle check failed; sending anyway"
+                    );
+                }
+            }
             if let Err(err) = sender.send(outgoing).await {
                 tracing::warn!(error = %err, "magic_link: email send failed (background)");
             }

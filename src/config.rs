@@ -182,9 +182,10 @@ impl Default for ApiTokensConfig {
 #[serde(default)]
 pub struct MagicLinkConfig {
     pub expiry_minutes: u32,
-    /// Reserved for per-email throttling on `/auth/magic-link/request`.
-    /// Currently parsed but not enforced — landing the gate logic without
-    /// dropping anti-enum constant-time properties needs its own design pass.
+    /// Per-email send throttle on `/auth/magic-link/request`: at most one
+    /// real email per address per window, regardless of source IP. Enforced
+    /// inside `tokio::spawn` so the response time stays anti-enum-safe.
+    /// Set to `0` to disable the throttle.
     pub rate_limit_seconds: u32,
 }
 

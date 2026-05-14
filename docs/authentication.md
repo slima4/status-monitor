@@ -128,6 +128,13 @@ same argon2id parameters as API tokens.
   factor of safety is in the token, not the params.
 - **Anti-enumeration.** Magic-link request and invitation lookup return
   the same response whether the underlying row exists.
+- **Per-email send throttle.** `auth.magic_link.rate_limit_seconds`
+  (default 60) caps a single address to one outgoing email per window
+  regardless of source IP. The check runs inside the spawned send
+  task so it never branches the response path. Concurrent requests for
+  the same address all still INSERT (preserving anti-enum work) but
+  only the earliest row in the window — ordered by `(created_at, id)`
+  — actually mails the user. Set to `0` to disable.
 
 ## Background workers
 

@@ -107,7 +107,7 @@ prefix_visible_chars = 16            # floor; lower values fail boot
 
 [auth.magic_link]
 expiry_minutes = 15
-rate_limit_seconds = 60                # reserved; per-email throttling lands in a follow-up
+rate_limit_seconds = 60                # per-email send throttle; 0 disables
 
 [email]
 provider = "log"                     # "resend" in prod, "log" in dev, "memory" in tests
