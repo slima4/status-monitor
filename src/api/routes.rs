@@ -121,17 +121,30 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
         v1 = v1.layer(layer);
     }
 
-    let public_v1 = build_public_router();
-
-    Router::new()
+    let mut root = Router::new()
         .route("/healthz", get(handlers::health::healthz))
         .route("/readyz", get(handlers::health::readyz))
-        .nest("/api/v1", v1)
-        .nest("/api/public/v1", public_v1)
-        .merge(SwaggerUi::new("/docs").url("/api/openapi.json", ApiDoc::openapi()))
+        .nest("/api/v1", v1);
+
+    if public_routes_active(&state.cfg) {
+        root = root.nest("/api/public/v1", build_public_router());
+    }
+
+    root.merge(SwaggerUi::new("/docs").url("/api/openapi.json", ApiDoc::openapi()))
         .layer(from_fn(api_middleware::cache_control))
         .layer(from_fn(api_middleware::json_charset))
         .with_state(state)
+}
+
+/// Whether the unauthenticated `/api/public/v1/*` and `/status` routes are
+/// served. Self-host mode (`tenancy.enabled = false`) always serves them —
+/// there is exactly one org and the page is its public face. SaaS mode
+/// (`tenancy.enabled = true`) requires the explicit `public_routes_enabled`
+/// flag, since per-org public-status routing lives in a separate spec. Until
+/// that lands the public surface would otherwise expose the default org's
+/// data to every SaaS tenant.
+pub fn public_routes_active(cfg: &crate::config::AppConfig) -> bool {
+    !cfg.tenancy.enabled || cfg.tenancy.public_routes_enabled
 }
 
 /// Builds the public, unauthenticated `/api/public/v1/*` router. Lives in its

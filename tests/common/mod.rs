@@ -142,7 +142,7 @@ fn build_test_app_with_public_source_inner(
     );
     let api = build_router(state.clone(), CancellationToken::new());
     if with_web {
-        api.merge(status_monitor::web::routes().with_state(state))
+        api.merge(status_monitor::web::routes(&state.cfg).with_state(state))
     } else {
         api
     }
@@ -158,7 +158,7 @@ fn build_test_app_inner(mutate: impl FnOnce(&mut AppConfig), with_web: bool) -> 
     let state = build_test_app_state(mutate);
     let api = build_router(state.clone(), CancellationToken::new());
     if with_web {
-        api.merge(status_monitor::web::routes().with_state(state))
+        api.merge(status_monitor::web::routes(&state.cfg).with_state(state))
     } else {
         api
     }

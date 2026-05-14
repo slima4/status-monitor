@@ -237,7 +237,8 @@ async fn main() -> Result<()> {
         incident_narration_store,
         default_org_id,
     );
-    let router = build_router(state.clone(), root.clone()).merge(web::routes().with_state(state));
+    let router = build_router(state.clone(), root.clone())
+        .merge(web::routes(&state.cfg).with_state(state));
 
     let listener = TcpListener::bind(&api_bind).await.map_err(AppError::Io)?;
     tracing::info!(addr = %api_bind, "api listening");

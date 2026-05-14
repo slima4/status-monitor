@@ -94,7 +94,10 @@ impl PublicSource for LivePublicSource {
         let agg = self.aggregator.clone();
         let res = self
             .cache
-            .get_or_compute(move || async move { agg.build().await })
+            .get_or_compute(
+                self.default_org_id,
+                move || async move { agg.build().await },
+            )
             .await;
         match res {
             Ok(page) => Ok(page),

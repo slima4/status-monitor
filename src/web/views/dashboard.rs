@@ -6,6 +6,7 @@ use axum::extract::State;
 use crate::api::handlers::dashboard::dashboard_summary;
 use crate::api::types::DashboardSummary;
 use crate::app::AppState;
+use crate::web::CurrentOrg;
 use crate::web::error::WebResult;
 
 #[derive(Template, WebTemplate)]
@@ -23,8 +24,8 @@ pub struct DashboardRegion {
     pub uptime_pct: String,
 }
 
-pub async fn index(State(state): State<AppState>) -> WebResult<DashboardPage> {
-    let summary = load_summary(state).await?;
+pub async fn index(State(state): State<AppState>, org: CurrentOrg) -> WebResult<DashboardPage> {
+    let summary = load_summary(state, org).await?;
     let uptime_pct = format!("{:.2}", summary.last_24h.uptime_pct);
     Ok(DashboardPage {
         active_tab: "dashboard",
@@ -33,8 +34,8 @@ pub async fn index(State(state): State<AppState>) -> WebResult<DashboardPage> {
     })
 }
 
-pub async fn region(State(state): State<AppState>) -> WebResult<DashboardRegion> {
-    let summary = load_summary(state).await?;
+pub async fn region(State(state): State<AppState>, org: CurrentOrg) -> WebResult<DashboardRegion> {
+    let summary = load_summary(state, org).await?;
     let uptime_pct = format!("{:.2}", summary.last_24h.uptime_pct);
     Ok(DashboardRegion {
         summary,
@@ -44,8 +45,11 @@ pub async fn region(State(state): State<AppState>) -> WebResult<DashboardRegion>
 
 // Bridge into the API handler so the 5-second `state.dashboard_cache`
 // stays shared between JSON callers and the web partial poll.
-async fn load_summary(state: AppState) -> Result<DashboardSummary, crate::error::AppError> {
-    let Json(summary) = dashboard_summary(State(state)).await?;
+async fn load_summary(
+    state: AppState,
+    org: CurrentOrg,
+) -> Result<DashboardSummary, crate::error::AppError> {
+    let Json(summary) = dashboard_summary(State(state), org).await?;
     Ok(summary)
 }
 

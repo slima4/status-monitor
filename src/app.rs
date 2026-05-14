@@ -1,7 +1,7 @@
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::Duration;
 
-use parking_lot::Mutex;
+use moka::sync::Cache;
 use sqlx::PgPool;
 
 use crate::api::IdempotencyCache;
@@ -15,9 +15,23 @@ use crate::storage::{
 };
 use crate::worker::WorkerPool;
 
-/// Snapshot of the dashboard summary plus the wall-clock instant it was built.
-/// Caches for 5 seconds to absorb operator-dashboard polling.
-pub type DashboardCache = Arc<Mutex<Option<(Instant, DashboardSummary)>>>;
+/// Per-org dashboard summary snapshot. Cached for 5 seconds to absorb the
+/// operator-dashboard polling cadence. Keyed by `OrgId` so a SaaS tenant's
+/// dashboard never reads another tenant's last build.
+pub type DashboardCache = Cache<OrgId, Arc<DashboardSummary>>;
+
+/// Builder for the 5-second per-org dashboard cache. The moka `sync::Cache`
+/// is cheap to clone (everything inside is `Arc`), so it lives in `AppState`
+/// directly rather than behind another `Arc`.
+fn build_dashboard_cache() -> DashboardCache {
+    Cache::builder()
+        .time_to_live(Duration::from_secs(5))
+        // 1024 distinct orgs holding a ~few-KB summary is bounded enough that
+        // a runaway cache won't eat the heap. Far above any realistic
+        // active-org-set in one process.
+        .max_capacity(1024)
+        .build()
+}
 
 /// Runtime handles required by API handlers — the storage layer plus enough
 /// scheduler/worker plumbing to support `test`, `check-now`, and the dashboard.
@@ -73,7 +87,7 @@ impl AppState {
             result_sink,
             http_clients,
             worker_pool,
-            dashboard_cache: Arc::new(Mutex::new(None)),
+            dashboard_cache: build_dashboard_cache(),
             idempotency: Arc::new(IdempotencyCache::new()),
             public_source,
             maintenance_store,

@@ -1,4 +1,4 @@
-use std::time::{Duration as StdDuration, Instant};
+use std::sync::Arc;
 
 use axum::Json;
 use axum::extract::State;
@@ -9,8 +9,7 @@ use crate::api::types::{DashboardSummary, Last24hSummary, SystemSummary};
 use crate::app::AppState;
 use crate::error::Result;
 use crate::storage::TimeRange;
-
-const CACHE_TTL: StdDuration = StdDuration::from_secs(5);
+use crate::web::CurrentOrg;
 
 #[utoipa::path(
     get,
@@ -28,11 +27,12 @@ const CACHE_TTL: StdDuration = StdDuration::from_secs(5);
         (status = 503, body = ApiError, description = "One or more data sources unavailable"),
     ),
 )]
-pub async fn dashboard_summary(State(state): State<AppState>) -> Result<Json<DashboardSummary>> {
-    if let Some((built, snapshot)) = state.dashboard_cache.lock().clone()
-        && built.elapsed() < CACHE_TTL
-    {
-        return Ok(Json(snapshot));
+pub async fn dashboard_summary(
+    State(state): State<AppState>,
+    CurrentOrg(org_id): CurrentOrg,
+) -> Result<Json<DashboardSummary>> {
+    if let Some(snapshot) = state.dashboard_cache.get(&org_id) {
+        return Ok(Json((*snapshot).clone()));
     }
 
     let now = Utc::now();
@@ -74,6 +74,8 @@ pub async fn dashboard_summary(State(state): State<AppState>) -> Result<Json<Das
         },
     };
 
-    *state.dashboard_cache.lock() = Some((Instant::now(), summary.clone()));
+    state
+        .dashboard_cache
+        .insert(org_id, Arc::new(summary.clone()));
     Ok(Json(summary))
 }
