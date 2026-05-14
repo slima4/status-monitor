@@ -2,8 +2,12 @@
 -- with org_id as the leading ORDER BY column so per-org queries hit the sparse
 -- primary index. Existing dev/test data is discarded.
 
-DROP VIEW IF EXISTS check_results_1m;
-DROP TABLE IF EXISTS check_results;
+-- SYNC forces synchronous removal under the Atomic database engine; without
+-- it the CREATE MATERIALIZED VIEW below races the catalog and resolves
+-- `check_results` against the in-flight tombstone instead of the new table
+-- (observed on CH 25.8 in CI).
+DROP VIEW IF EXISTS check_results_1m SYNC;
+DROP TABLE IF EXISTS check_results SYNC;
 
 CREATE TABLE check_results (
     org_id     UUID,

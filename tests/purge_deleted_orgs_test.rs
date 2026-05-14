@@ -55,10 +55,11 @@ async fn grace_window_blocks_purge() {
         .unwrap();
     soft_delete_org(&pool, org.id, user).await.unwrap();
 
-    // Inside grace (deleted ~now), tick should not cascade.
-    let stats = purge_tick(&pool, &ch, 30).await.unwrap();
-    assert_eq!(stats.cascaded, 0);
-    // Row still exists.
+    // Inside grace (deleted ~now), tick must not cascade THIS org. Other
+    // tests running in parallel may have backdated their own orgs and bumped
+    // `stats.cascaded`, so the per-tick total is racy — assert on the
+    // specific org instead.
+    let _ = purge_tick(&pool, &ch, 30).await.unwrap();
     let (exists,): (bool,) =
         sqlx::query_as("SELECT EXISTS (SELECT 1 FROM organizations WHERE id = $1)")
             .bind(org.id.0)
@@ -66,6 +67,13 @@ async fn grace_window_blocks_purge() {
             .await
             .unwrap();
     assert!(exists, "org should still exist inside grace window");
+    let (queued,): (bool,) =
+        sqlx::query_as("SELECT EXISTS (SELECT 1 FROM clickhouse_purge_queue WHERE org_id = $1)")
+            .bind(org.id.0)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(!queued, "no CH purge row should be enqueued inside grace");
 
     sqlx::query("DELETE FROM organizations WHERE id = $1")
         .bind(org.id.0)
@@ -154,9 +162,16 @@ async fn restore_cancels_purge() {
         .await
         .unwrap();
     // Even if we somehow had a past-grace timestamp, deleted_at IS NULL filter
-    // wins: the purge query never sees this row.
-    let stats = purge_tick(&pool, &ch, 30).await.unwrap();
-    assert_eq!(stats.cascaded, 0);
+    // wins: the purge query never sees this row. Parallel tests may bump the
+    // tick-wide `cascaded` total, so assert on THIS org specifically.
+    let _ = purge_tick(&pool, &ch, 30).await.unwrap();
+    let (exists,): (bool,) =
+        sqlx::query_as("SELECT EXISTS (SELECT 1 FROM organizations WHERE id = $1)")
+            .bind(org.id.0)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(exists, "restored org must survive the tick");
 
     sqlx::query("DELETE FROM organizations WHERE id = $1")
         .bind(org.id.0)
@@ -199,8 +214,20 @@ async fn drain_is_idempotent_on_repeat() {
         .unwrap();
     let drained = drain_clickhouse_purge_queue(&pool, &ch).await.unwrap();
     assert!(drained >= 1, "second drain should mark the row complete");
-    let drained_again = drain_clickhouse_purge_queue(&pool, &ch).await.unwrap();
-    assert_eq!(drained_again, 0, "third drain has nothing pending");
+    // Third drain doesn't double-process THIS org. The tick-wide count can
+    // be non-zero if a parallel test enqueued in the meantime — check on the
+    // specific queue row.
+    let _ = drain_clickhouse_purge_queue(&pool, &ch).await.unwrap();
+    let (completed,): (Option<chrono::DateTime<chrono::Utc>>,) =
+        sqlx::query_as("SELECT completed_at FROM clickhouse_purge_queue WHERE org_id = $1")
+            .bind(org.id.0)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(
+        completed.is_some(),
+        "queue row stays completed across drains"
+    );
 
     sqlx::query("DELETE FROM clickhouse_purge_queue WHERE org_id = $1")
         .bind(org.id.0)
@@ -309,11 +336,11 @@ async fn purge_resilient_to_kill_between_pg_cascade_and_ch_drain() {
         .await
         .unwrap();
 
-    // Tick 2: cascade has nothing left, but drain recovers the half-finished
-    // work and marks the queue row complete.
-    let stats = purge_tick(&pool, &ch, 30).await.unwrap();
-    assert_eq!(stats.cascaded, 0, "no past-grace orgs remain");
-    assert!(stats.drained >= 1, "next tick drains the pending queue row");
+    // Tick 2: drain recovers the half-finished work and marks the queue row
+    // complete. The tick-wide `cascaded`/`drained` totals can move because of
+    // parallel tests, so assert on the specific queue row below instead of
+    // pinning a literal count.
+    let _ = purge_tick(&pool, &ch, 30).await.unwrap();
 
     let (completed,): (Option<chrono::DateTime<chrono::Utc>>,) =
         sqlx::query_as("SELECT completed_at FROM clickhouse_purge_queue WHERE org_id = $1")

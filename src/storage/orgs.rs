@@ -115,6 +115,17 @@ pub async fn create_org_with_owner(
 ) -> Result<Option<Organization>> {
     let mut tx = pool.begin().await.context("create_org_with_owner: begin")?;
 
+    // Per-user advisory lock serialises concurrent owner-org creates for the
+    // same user. Without it the count-subquery + INSERT in the membership
+    // step races under READ COMMITTED — two transactions can both observe
+    // count < limit and both succeed, blowing past the cap. The lock is held
+    // for the duration of the transaction and released on commit/rollback.
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))")
+        .bind(user.0.to_string())
+        .execute(&mut *tx)
+        .await
+        .context("create_org_with_owner: advisory lock")?;
+
     let row: Option<OrgRow> = sqlx::query_as(
         r#"INSERT INTO organizations (slug, name)
            VALUES ($1, $2)
