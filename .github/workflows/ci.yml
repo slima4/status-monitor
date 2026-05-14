@@ -33,9 +33,17 @@ jobs:
         run: scripts/fetch-tailwind.sh
       - run: cargo fmt --all -- --check
       - run: cargo clippy --all-targets -- -D warnings
-      - uses: ast-grep/setup-ast-grep@v1
-        with:
-          version: 0.42.1
+      - name: install ast-grep
+        env:
+          AST_GREP_VERSION: "0.42.1"
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          curl -fsSL -o "$tmp/ast-grep.zip" \
+            "https://github.com/ast-grep/ast-grep/releases/download/${AST_GREP_VERSION}/app-x86_64-unknown-linux-gnu.zip"
+          unzip -q "$tmp/ast-grep.zip" -d "$tmp"
+          install -m 0755 "$tmp/ast-grep" /usr/local/bin/ast-grep
+          ast-grep --version
       - name: tenant-isolation check
         run: scripts/check_tenant_isolation.sh
 
