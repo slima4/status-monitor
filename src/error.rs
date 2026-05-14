@@ -53,6 +53,12 @@ pub enum AppError {
         message: String,
     },
 
+    #[error("authentication required")]
+    Unauthorized,
+
+    #[error("access denied")]
+    Forbidden,
+
     #[error("{0}")]
     Other(#[from] anyhow::Error),
 }
@@ -137,6 +143,14 @@ impl IntoResponse for AppError {
             AppError::Unprocessable { code, message } => (
                 StatusCode::UNPROCESSABLE_ENTITY,
                 ApiErrorBody::new(code, message),
+            ),
+            AppError::Unauthorized => (
+                StatusCode::UNAUTHORIZED,
+                ApiErrorBody::new(codes::UNAUTHORIZED, "authentication required"),
+            ),
+            AppError::Forbidden => (
+                StatusCode::FORBIDDEN,
+                ApiErrorBody::new(codes::FORBIDDEN, "access denied"),
             ),
             ref err @ (AppError::Config(_)
             | AppError::Io(_)

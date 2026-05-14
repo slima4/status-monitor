@@ -73,6 +73,7 @@ pub fn build_test_app_with_seedable_incidents(
     let incident_narration_store: Arc<dyn IncidentNarrationStore> = narration.clone();
     let state = AppState::new(
         cfg,
+        None,
         target_store,
         results_store,
         result_sink,
@@ -128,6 +129,7 @@ fn build_test_app_with_public_source_inner(
         Arc::new(InMemoryIncidentNarrationStore::new());
     let state = AppState::new(
         cfg,
+        None,
         target_store,
         results_store,
         result_sink,
@@ -153,6 +155,20 @@ pub fn build_test_app_with_web(mutate: impl FnOnce(&mut AppConfig)) -> Router {
 }
 
 fn build_test_app_inner(mutate: impl FnOnce(&mut AppConfig), with_web: bool) -> Router {
+    let state = build_test_app_state(mutate);
+    let api = build_router(state.clone(), CancellationToken::new());
+    if with_web {
+        api.merge(status_monitor::web::routes().with_state(state))
+    } else {
+        api
+    }
+}
+
+/// Shared `AppState` builder used by the router helpers above and by tests
+/// that need to exercise an extractor directly without going through HTTP.
+/// In-memory stores, no Postgres pool (`db: None`); callers that require a
+/// pool must build their own state.
+pub fn build_test_app_state(mutate: impl FnOnce(&mut AppConfig)) -> AppState {
     let mut cfg = AppConfig::load().expect("config");
     mutate(&mut cfg);
     let target_store = Arc::new(InMemoryTargetStore::new());
@@ -171,8 +187,9 @@ fn build_test_app_inner(mutate: impl FnOnce(&mut AppConfig), with_web: bool) -> 
     let maintenance_store: Arc<dyn MaintenanceStore> = Arc::new(InMemoryMaintenanceStore::new());
     let incident_narration_store: Arc<dyn IncidentNarrationStore> =
         Arc::new(InMemoryIncidentNarrationStore::new());
-    let state = AppState::new(
+    AppState::new(
         cfg,
+        None,
         target_store,
         results_store,
         result_sink,
@@ -182,13 +199,7 @@ fn build_test_app_inner(mutate: impl FnOnce(&mut AppConfig), with_web: bool) -> 
         maintenance_store,
         incident_narration_store,
         test_org_id(),
-    );
-    let api = build_router(state.clone(), CancellationToken::new());
-    if with_web {
-        api.merge(status_monitor::web::routes().with_state(state))
-    } else {
-        api
-    }
+    )
 }
 
 /// Builds a JSON request with `Content-Type: application/json`. Panics on

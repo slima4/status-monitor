@@ -204,11 +204,13 @@ async fn main() -> Result<()> {
         pg_pool_for_stores.clone(),
         default_org_id,
     ));
-    let incident_narration_store: Arc<dyn IncidentNarrationStore> =
-        Arc::new(PgIncidentNarrationStore::new(pg_pool_for_stores, default_org_id));
+    let incident_narration_store: Arc<dyn IncidentNarrationStore> = Arc::new(
+        PgIncidentNarrationStore::new(pg_pool_for_stores.clone(), default_org_id),
+    );
 
     let state = AppState::new(
         cfg,
+        Some(pg_pool_for_stores),
         target_store,
         results_store,
         result_sink_for_state,

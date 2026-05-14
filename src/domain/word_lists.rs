@@ -106,6 +106,21 @@ static SHORT_NOUNS: std::sync::LazyLock<Vec<&'static str>> = std::sync::LazyLock
         .collect()
 });
 
+/// Marker prefix for auto-generated personal-org slugs. Used by the signup
+/// transaction (to format the slug) and by `personal_org_for_user` (to recover
+/// it). The slug *validator* in `domain::org` allows arbitrary user-chosen
+/// slugs that happen to start with `personal-`, so prefix alone is not an
+/// identity proof — consumers must combine it with the full
+/// `{adj}-{noun}-{6char}` shape (see [`PERSONAL_SLUG_LIKE_PATTERN`]).
+pub const PERSONAL_SLUG_PREFIX: &str = "personal-";
+
+/// Postgres `LIKE` pattern that matches the *full* auto-generated personal
+/// slug shape `personal-{adj}-{noun}-{6char}`. `_` matches one character, so
+/// the six trailing underscores require a six-char suffix segment. Together
+/// with `role = 'owner'` this disambiguates real personal orgs from invited
+/// memberships to user-named orgs like `personal-team-x`.
+pub const PERSONAL_SLUG_LIKE_PATTERN: &str = "personal-%-%-______";
+
 /// Generate one `personal-{adj}-{noun}-{6-char}` slug. The 6-char suffix uses
 /// `fastrand`'s per-thread RNG — uniform enough for collision avoidance but
 /// not a cryptographic source, which is fine since slugs are public. Caller
@@ -117,7 +132,7 @@ pub fn generate_personal_slug() -> String {
     for _ in 0..6 {
         suffix.push(BASE32[fastrand::usize(..BASE32.len())] as char);
     }
-    let out = format!("personal-{adj}-{noun}-{suffix}");
+    let out = format!("{PERSONAL_SLUG_PREFIX}{adj}-{noun}-{suffix}");
     debug_assert!(out.len() <= 30, "personal slug overflow: {out}");
     out
 }

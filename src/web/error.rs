@@ -64,6 +64,16 @@ impl IntoResponse for WebError {
                 )
                     .into_response()
             }
+            AppError::Unauthorized => (
+                StatusCode::UNAUTHORIZED,
+                InternalErrorPage { active_tab: "" },
+            )
+                .into_response(),
+            AppError::Forbidden => (
+                StatusCode::FORBIDDEN,
+                NotFoundPage { active_tab: "" },
+            )
+                .into_response(),
             ref err @ (AppError::Config(_)
             | AppError::Io(_)
             | AppError::BindAddr { .. }

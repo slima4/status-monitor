@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use parking_lot::Mutex;
+use sqlx::PgPool;
 
 use crate::api::IdempotencyCache;
 use crate::api::types::DashboardSummary;
@@ -23,6 +24,16 @@ pub type DashboardCache = Arc<Mutex<Option<(Instant, DashboardSummary)>>>;
 #[derive(Clone)]
 pub struct AppState {
     pub cfg: Arc<AppConfig>,
+    /// Direct Postgres handle. Required by the `CurrentOrg` extractor (and
+    /// future auth helpers) which must read `organizations` / `memberships`
+    /// *outside* the tenant-scoped repositories. Org-scoped data access still
+    /// goes through the repositories on this state.
+    ///
+    /// `None` is permitted only for in-memory test fixtures that always run
+    /// with `tenancy.enabled = false`; the extractor short-circuits before it
+    /// would dereference the pool. Any SaaS-mode code path that observes
+    /// `None` here returns an internal error.
+    pub db: Option<PgPool>,
     pub target_store: Arc<dyn TargetStore>,
     pub results_store: Arc<dyn ResultsStore>,
     pub result_sink: Arc<dyn ResultSink>,
@@ -43,6 +54,7 @@ impl AppState {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         cfg: AppConfig,
+        db: Option<PgPool>,
         target_store: Arc<dyn TargetStore>,
         results_store: Arc<dyn ResultsStore>,
         result_sink: Arc<dyn ResultSink>,
@@ -55,6 +67,7 @@ impl AppState {
     ) -> Self {
         Self {
             cfg: Arc::new(cfg),
+            db,
             target_store,
             results_store,
             result_sink,

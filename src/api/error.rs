@@ -75,6 +75,8 @@ pub mod codes {
     pub const DEPENDENCY_DOWN: &str = "DEPENDENCY_DOWN";
     pub const RATE_LIMITED: &str = "RATE_LIMITED";
     pub const INTERNAL: &str = "INTERNAL";
+    pub const UNAUTHORIZED: &str = "UNAUTHORIZED";
+    pub const FORBIDDEN: &str = "FORBIDDEN";
     // Maintenance + incident narration (operator surface).
     pub const INVALID_TIME_RANGE: &str = "INVALID_TIME_RANGE";
     pub const INVALID_COMPONENT_ID: &str = "INVALID_COMPONENT_ID";

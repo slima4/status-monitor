@@ -10,7 +10,7 @@ pub mod traits;
 
 pub use admin::AdminRepo;
 pub use clickhouse::{ClickhouseResultSink, ClickhouseResultsStore, build_client, migrate};
-pub use orgs::ensure_default_org;
+pub use orgs::{ensure_default_org, is_active_member, personal_org_for_user};
 pub use incidents::{
     InMemoryIncidentNarrationStore, IncidentNarrationStore, PgIncidentNarrationStore,
 };
