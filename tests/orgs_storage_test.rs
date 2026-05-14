@@ -123,7 +123,7 @@ async fn list_orgs_excludes_soft_deleted_and_update_name_works() {
             .any(|o| o.org.id == org.id && o.role == Role::Owner)
     );
 
-    let renamed = update_org_name(&pool, org.id, "New name")
+    let renamed = update_org_name(&pool, org.id, user, "New name")
         .await
         .unwrap()
         .unwrap();
@@ -215,7 +215,7 @@ async fn remove_member_refuses_last_owner() {
         .unwrap()
         .unwrap();
 
-    let outcome = remove_member(&pool, org.id, user).await.unwrap();
+    let outcome = remove_member(&pool, org.id, user, user).await.unwrap();
     assert_eq!(outcome, RemoveOutcome::LastOwner);
     assert!(is_owner(&pool, user, org.id).await.unwrap(), "still owner");
 
@@ -247,7 +247,7 @@ async fn remove_member_succeeds_when_other_owners_exist() {
         .await
         .unwrap();
 
-    let outcome = remove_member(&pool, org.id, b).await.unwrap();
+    let outcome = remove_member(&pool, org.id, a, b).await.unwrap();
     assert_eq!(outcome, RemoveOutcome::Removed);
     let members = list_members(&pool, org.id).await.unwrap();
     assert_eq!(members.len(), 1);

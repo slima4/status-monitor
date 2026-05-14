@@ -304,11 +304,15 @@ pub enum MembershipStatus {
 
 /// Rename an org. Returns the updated row, `None` if the org doesn't exist or
 /// is soft-deleted (operations on deleted orgs are reserved to restore).
+/// Writes an `org.renamed` audit row in the same transaction so the renamer
+/// is recorded next to the change.
 pub async fn update_org_name(
     pool: &PgPool,
     org: OrgId,
+    actor: UserId,
     new_name: &str,
 ) -> Result<Option<Organization>> {
+    let mut tx = pool.begin().await.context("update_org_name: begin")?;
     let row: Option<OrgRow> = sqlx::query_as(
         r#"UPDATE organizations
            SET name = $2, updated_at = now()
@@ -317,10 +321,24 @@ pub async fn update_org_name(
     )
     .bind(org.0)
     .bind(new_name)
-    .fetch_optional(pool)
+    .fetch_optional(&mut *tx)
     .await
-    .context("update_org_name")?;
-    Ok(row.map(OrgRow::into_org))
+    .context("update_org_name: update")?;
+    let Some(row) = row else {
+        tx.rollback().await.ok();
+        return Ok(None);
+    };
+    record_audit_tx(
+        &mut tx,
+        org,
+        Some(actor),
+        "org.renamed",
+        serde_json::json!({ "name": row.name }),
+    )
+    .await
+    .context("update_org_name: audit")?;
+    tx.commit().await.context("update_org_name: commit")?;
+    Ok(Some(row.into_org()))
 }
 
 /// Soft-delete an org. No-op if already deleted; returns `true` only when the
@@ -461,9 +479,15 @@ pub async fn list_members(pool: &PgPool, org: OrgId) -> Result<Vec<MemberView>> 
 }
 
 /// Remove a member from an org. Refuses to remove the last owner (would leave
-/// the org headless). Returns the outcome so the handler can map to the right
-/// HTTP status.
-pub async fn remove_member(pool: &PgPool, org: OrgId, user: UserId) -> Result<RemoveOutcome> {
+/// the org headless). Writes a `member.removed` audit row with the removed
+/// user's id in metadata. Returns the outcome so the handler can map to the
+/// right HTTP status.
+pub async fn remove_member(
+    pool: &PgPool,
+    org: OrgId,
+    actor: UserId,
+    user: UserId,
+) -> Result<RemoveOutcome> {
     let mut tx = pool.begin().await.context("remove_member: begin")?;
     let row: Option<(String,)> = sqlx::query_as(
         r#"SELECT role FROM memberships
@@ -498,6 +522,15 @@ pub async fn remove_member(pool: &PgPool, org: OrgId, user: UserId) -> Result<Re
         .execute(&mut *tx)
         .await
         .context("remove_member: delete")?;
+    record_audit_tx(
+        &mut tx,
+        org,
+        Some(actor),
+        "member.removed",
+        serde_json::json!({ "user_id": user.0 }),
+    )
+    .await
+    .context("remove_member: audit")?;
     tx.commit().await.context("remove_member: commit")?;
     Ok(RemoveOutcome::Removed)
 }

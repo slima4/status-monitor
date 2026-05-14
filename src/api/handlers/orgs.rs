@@ -266,7 +266,7 @@ pub async fn update_org(
     let org_id = OrgId(id);
     let name = trim_name(&req.name)?;
     require_owner(pool, user, org_id).await?;
-    let updated = orgs_store::update_org_name(pool, org_id, &name)
+    let updated = orgs_store::update_org_name(pool, org_id, user, &name)
         .await?
         .ok_or_else(|| AppError::not_found(codes::ORG_NOT_FOUND, "organisation not found"))?;
     Ok(Json(updated.into()))
@@ -433,7 +433,7 @@ pub async fn remove_org_member(
     let org_id = OrgId(id);
     let target = UserId(target_user_id);
     require_owner(pool, user, org_id).await?;
-    match orgs_store::remove_member(pool, org_id, target).await? {
+    match orgs_store::remove_member(pool, org_id, user, target).await? {
         orgs_store::RemoveOutcome::Removed => Ok(StatusCode::NO_CONTENT),
         orgs_store::RemoveOutcome::NotFound => Err(AppError::not_found(
             codes::MEMBER_NOT_FOUND,

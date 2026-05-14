@@ -9,6 +9,7 @@ use status_monitor::{
     config::AppConfig,
     error::{AppError, Result},
     http_client::client::build_clients,
+    jobs::purge_deleted_orgs,
     notifier::{Notifier, build_notifiers, engine::AlertEngine},
     observability,
     pipeline::{BatcherConfig, ResultBatcher},
@@ -93,6 +94,7 @@ async fn main() -> Result<()> {
     ));
     let result_sink_for_state = result_sink.clone();
     let ch_client_for_public = clickhouse_client.clone();
+    let ch_client_for_purge = clickhouse_client.clone();
     let results_store: Arc<dyn ResultsStore> = Arc::new(ClickhouseResultsStore::from_client(
         clickhouse_client,
         default_org_id,
@@ -200,6 +202,20 @@ async fn main() -> Result<()> {
         tokio::spawn(async move { writer.run(token).await })
     };
 
+    let purge_handle: JoinHandle<()> = {
+        let pool = pg_pool_for_stores.clone();
+        let token = root.clone();
+        let interval = Duration::from_secs(cfg.tenancy.purge_interval_secs.max(1));
+        let grace_days = cfg.tenancy.deletion_grace_period_days;
+        tokio::spawn(purge_deleted_orgs::run(
+            pool,
+            ch_client_for_purge,
+            interval,
+            grace_days,
+            token,
+        ))
+    };
+
     let maintenance_store: Arc<dyn MaintenanceStore> = Arc::new(PgMaintenanceStore::new(
         pg_pool_for_stores.clone(),
         default_org_id,
@@ -248,6 +264,7 @@ async fn main() -> Result<()> {
             batcher_handle,
             sampler_handle,
             incident_writer_handle,
+            purge_handle,
         );
         if let Some(h) = alert_engine_handle {
             let _ = h.await;

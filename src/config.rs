@@ -49,6 +49,9 @@ pub struct TenancyConfig {
     pub free_tier_owner_org_limit: u32,
     /// Grace period before soft-deleted orgs are purged.
     pub deletion_grace_period_days: u32,
+    /// How often the purge worker wakes. Defaults to 24h; lower values are
+    /// only useful for tests that don't want to wait a day for a tick.
+    pub purge_interval_secs: u64,
 }
 
 impl Default for TenancyConfig {
@@ -59,6 +62,7 @@ impl Default for TenancyConfig {
             public_routes_enabled: false,
             free_tier_owner_org_limit: 3,
             deletion_grace_period_days: 30,
+            purge_interval_secs: 24 * 60 * 60,
         }
     }
 }
