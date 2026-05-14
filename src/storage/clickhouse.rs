@@ -22,8 +22,10 @@ const TABLE: &str = "check_results";
 /// migrations that would otherwise destroy data on every startup.
 ///
 /// Constraints (we don't validate these; just don't break them):
-/// - Migration SQL is split on `;`, so no `;` inside string literals or
-///   comments. CREATE FUNCTION bodies, multi-line strings, etc. won't survive.
+/// - The splitter is comment-aware (`--` line comments are stripped before
+///   splitting on `;`) but has no string-literal tracker — so no `;` inside
+///   string literals. CREATE FUNCTION bodies, multi-line strings, etc. won't
+///   survive.
 /// - The runner is not concurrent-safe: `schema_migrations` is `TinyLog`
 ///   which has no atomic CAS. Two processes racing through their first boot
 ///   could both observe an empty applied set and both run DROP/CREATE.
@@ -70,13 +72,9 @@ pub async fn migrate(client: &Client) -> Result<()> {
             continue;
         }
         tracing::info!(migration = name, "applying clickhouse migration");
-        for stmt in sql.split(';') {
-            let trimmed = stmt.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
+        for stmt in split_statements(sql) {
             client
-                .query(trimmed)
+                .query(&stmt)
                 .execute()
                 .await
                 .with_context(|| format!("clickhouse migration {name}"))?;
@@ -91,6 +89,28 @@ pub async fn migrate(client: &Client) -> Result<()> {
 
     tracing::info!("clickhouse ready");
     Ok(())
+}
+
+/// Split a migration source into executable statements. Strips `--` line
+/// comments first so a stray `;` inside a comment doesn't produce a chunk
+/// that ClickHouse rejects as "Empty query". No string-literal tracking: a
+/// migration that needs a literal `;` inside quotes must split into multiple
+/// files (or extend this helper).
+fn split_statements(sql: &str) -> Vec<String> {
+    let stripped: String = sql
+        .lines()
+        .map(|line| match line.find("--") {
+            Some(i) => &line[..i],
+            None => line,
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    stripped
+        .split(';')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+        .collect()
 }
 
 pub fn build_client(cfg: &ClickhouseConfig) -> Client {
@@ -532,5 +552,38 @@ impl ResultsStore for ClickhouseResultsStore {
             error: row.error,
             uptime_pct,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::split_statements;
+
+    #[test]
+    fn split_strips_line_comments_before_splitting() {
+        // A stray `;` inside a `--` comment used to produce an empty-query
+        // chunk that ClickHouse rejected with SYNTAX_ERROR code 62. Regression
+        // guard: the splitter must drop the comment text first.
+        let sql = "-- prelude with a semi; in it\n\
+                   CREATE TABLE foo (x UInt8) ENGINE = TinyLog;\n\
+                   -- another; with a semi\n\
+                   DROP TABLE foo;";
+        let stmts = split_statements(sql);
+        assert_eq!(stmts.len(), 2);
+        assert!(stmts[0].contains("CREATE TABLE foo"));
+        assert!(stmts[1].contains("DROP TABLE foo"));
+    }
+
+    #[test]
+    fn split_discards_trailing_blank_chunk() {
+        let stmts = split_statements("SELECT 1;\n");
+        assert_eq!(stmts.len(), 1);
+        assert_eq!(stmts[0], "SELECT 1");
+    }
+
+    #[test]
+    fn split_preserves_inline_comment_after_statement() {
+        let stmts = split_statements("SELECT 1; -- trailing\nSELECT 2;");
+        assert_eq!(stmts, vec!["SELECT 1", "SELECT 2"]);
     }
 }
