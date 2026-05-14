@@ -20,7 +20,25 @@ pub fn routes(cfg: &AppConfig) -> Router<AppState> {
         .route("/targets/{id}", get(views::targets_detail::index))
         .route("/targets/{id}/edit", get(views::targets_form::edit_form))
         .route("/web/targets/list", get(views::targets_list::list_partial))
-        .route("/web/partials/dashboard", get(views::dashboard::region));
+        .route("/web/partials/dashboard", get(views::dashboard::region))
+        .route("/login", get(views::auth::login))
+        .route("/onboarding/org", get(views::auth::onboarding_org))
+        .route(
+            "/settings/sessions",
+            get(views::auth::settings::sessions_page),
+        )
+        .route(
+            "/settings/api-tokens",
+            get(views::auth::settings::api_tokens_page),
+        )
+        .route(
+            "/web/partials/settings/sessions",
+            get(views::auth::settings::sessions_partial),
+        )
+        .route(
+            "/web/partials/settings/api-tokens",
+            get(views::auth::settings::api_tokens_partial),
+        );
 
     if public_routes_active(cfg) {
         r = r.route("/status", get(views::public_status::index)).route(

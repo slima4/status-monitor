@@ -17,7 +17,7 @@ use sqlx::{Connection, Executor, PgConnection};
 use status_monitor::auth::{
     fingerprint, github,
     login_audit::{self, LoginAttempt, LoginMethod},
-    oauth_state, session as session_store,
+    oauth_state, oauth_state_cleanup, session as session_store,
 };
 use status_monitor::config::SessionConfig;
 use status_monitor::domain::UserId;
@@ -447,6 +447,86 @@ async fn login_audit_records_success_and_failure() {
             .await
             .unwrap();
     assert_eq!(recent_fail_ip.as_deref(), Some("iph"));
+
+    pool.close().await;
+    drop_pg(&name).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn oauth_state_cleanup_purges_only_expired_rows() {
+    let Some((db_url, name)) = fresh_pg().await else {
+        return;
+    };
+    let pool = open_pool(&db_url).await;
+    MIGRATOR.run(&pool).await.expect("migrate");
+
+    sqlx::query(
+        "INSERT INTO oauth_states (state, provider, expires_at) VALUES \
+         ($1, 'github', now() - INTERVAL '15 minutes'), \
+         ($2, 'github', now() - INTERVAL '1 second'), \
+         ($3, 'github', now() + INTERVAL '5 minutes')",
+    )
+    .bind("expired-old")
+    .bind("expired-recent")
+    .bind("still-valid")
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let removed = oauth_state_cleanup::purge_expired(&pool).await.unwrap();
+    assert_eq!(removed, 2, "exactly the two expired rows should be purged");
+
+    let (still,): (i64,) = sqlx::query_as("SELECT count(*) FROM oauth_states WHERE state = $1")
+        .bind("still-valid")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(still, 1, "valid future-expiry row must survive");
+
+    pool.close().await;
+    drop_pg(&name).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn session_fixation_pattern_destroys_pre_login_session() {
+    // Mirrors what github_callback now does: read the pre-login cookie value,
+    // destroy that session before minting a new one. We exercise the helpers
+    // directly because the full callback path needs a GitHub mock.
+    let Some((db_url, name)) = fresh_pg().await else {
+        return;
+    };
+    let pool = open_pool(&db_url).await;
+    MIGRATOR.run(&pool).await.expect("migrate");
+
+    let (user_id,): (Uuid,) = sqlx::query_as("INSERT INTO users (email) VALUES ($1) RETURNING id")
+        .bind(format!("fix-{}@example.test", Uuid::now_v7()))
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let user = UserId(user_id);
+    let cfg = SessionConfig::default();
+
+    // Pre-login session (attacker-supplied or stale).
+    let pre = session_store::create(&pool, &cfg, user, None, None, None)
+        .await
+        .unwrap();
+
+    // Callback: destroy the cookie's session id, then mint a fresh one.
+    let removed = session_store::destroy(&pool, &pre.id).await.unwrap();
+    assert_eq!(removed, 1, "pre-login session must be destroyed");
+
+    let post = session_store::create(&pool, &cfg, user, None, None, None)
+        .await
+        .unwrap();
+    assert_ne!(pre.id, post.id, "regenerated id must differ");
+
+    let pre_lookup = session_store::lookup(&pool, &cfg, &pre.id).await.unwrap();
+    assert!(
+        matches!(pre_lookup, session_store::LookupOutcome::Missing),
+        "old session must not be revivable"
+    );
 
     pool.close().await;
     drop_pg(&name).await;

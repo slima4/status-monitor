@@ -16,7 +16,6 @@
 //! list means updating the table in the spec AND swapping the extractor.
 
 use axum::extract::{FromRef, FromRequestParts, Request, State};
-use axum::http::header::AUTHORIZATION;
 use axum::http::request::Parts;
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
@@ -28,19 +27,12 @@ use crate::app::AppState;
 use crate::auth::api_tokens;
 use crate::error::{AppError, Result};
 
-use super::{AuthContext, CurrentUser};
+use super::{AuthContext, CurrentUser, bearer_from_headers};
 
 /// Middleware entry point. Mount on the API router so it runs ahead of any
 /// `FromRequestParts` impl that reads `AuthContext`.
 pub async fn middleware(State(state): State<AppState>, mut req: Request, next: Next) -> Response {
-    let raw = req
-        .headers()
-        .get(AUTHORIZATION)
-        .and_then(|h| h.to_str().ok())
-        .and_then(|s| s.strip_prefix("Bearer "))
-        .map(str::trim);
-
-    let Some(raw) = raw else {
+    let Some(raw) = bearer_from_headers(req.headers()) else {
         return next.run(req).await;
     };
     if !raw.starts_with(api_tokens::TOKEN_PREFIX) {

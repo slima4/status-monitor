@@ -254,6 +254,9 @@ async fn main() -> Result<()> {
         ))
     };
 
+    let oauth_state_cleanup_handle: JoinHandle<()> =
+        status_monitor::auth::oauth_state_cleanup::spawn(pg_pool_for_stores.clone(), root.clone());
+
     let state = AppState::new(
         cfg,
         Some(pg_pool_for_stores),
@@ -299,6 +302,7 @@ async fn main() -> Result<()> {
             incident_writer_handle,
             purge_handle,
             invitation_purge_handle,
+            oauth_state_cleanup_handle,
         );
         if let Some(h) = alert_engine_handle {
             let _ = h.await;

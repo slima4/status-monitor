@@ -19,7 +19,7 @@ use crate::auth::{
     fingerprint, github,
     login_audit::{self, LoginAttempt, LoginMethod},
     oauth_state, session as session_store,
-    url::url_encode,
+    url::{safe_redirect_target, url_encode},
 };
 use crate::error::{AppError, Result};
 use crate::web::CurrentUser;
@@ -53,20 +53,6 @@ pub async fn github_login(
     oauth_state::insert(pool, &s, "github", redirect_after, q.invitation.as_deref()).await?;
     let url = github::authorize_url(cfg, &s);
     Ok(Redirect::to(&url))
-}
-
-/// Same-origin path predicate. Accepts `/foo`, `/foo/bar`, `/`; rejects
-/// `//evil.test`, `/\evil.test`, `https://evil.test`, the empty string.
-fn safe_redirect_target(raw: &str) -> Option<&str> {
-    let s = raw.trim();
-    if !s.starts_with('/') {
-        return None;
-    }
-    let rest = &s[1..];
-    if rest.starts_with('/') || rest.starts_with('\\') {
-        return None;
-    }
-    Some(s)
 }
 
 #[derive(Debug, Deserialize)]
@@ -136,6 +122,17 @@ pub async fn github_callback(
             tracing::warn!(error = %e, "github_callback: phase C failed");
             e
         })?;
+
+    // Session fixation: drop any pre-login session bound to this browser
+    // before minting the new one. Without this an attacker who pre-seeded a
+    // cookie inherits the just-authenticated session (AUTH §7.2).
+    let cookie_name = state.cfg.auth.session.cookie_name.as_str();
+    if let Some(prev) = cookies.get(cookie_name).map(|c| c.value().to_string())
+        && !prev.is_empty()
+        && let Err(err) = session_store::destroy(pool, &prev).await
+    {
+        tracing::warn!(error = %err, "session fixation: pre-login destroy failed");
+    }
 
     let session_row = session_store::create(
         pool,

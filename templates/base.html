@@ -10,7 +10,8 @@
     <script defer src="/static/js/json-enc.js"></script>
     {% block head %}{% endblock %}
 </head>
-<body class="bg-slate-50 text-slate-900 antialiased">
+<body class="bg-slate-50 text-slate-900 antialiased"
+      hx-headers='{"X-Requested-With":"status-monitor"}'>
     <a href="#main-content"
        class="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:rounded focus:bg-white focus:px-3 focus:py-2 focus:text-sm focus:ring-2 focus:ring-slate-700">
         Skip to main content
@@ -18,11 +19,26 @@
     <header class="border-b bg-white">
         <nav aria-label="Primary" class="container mx-auto flex items-center gap-6 px-4 py-3">
             <a href="/" class="font-semibold tracking-tight">Status Monitor</a>
+            {% if active_tab != "login" && active_tab != "onboarding" %}
             <a href="/"{% if active_tab == "dashboard" %} aria-current="page"{% endif %}
                class="text-sm{% if active_tab == "dashboard" %} font-medium text-slate-900{% else %} text-slate-500 hover:text-slate-700{% endif %}">Dashboard</a>
             <a href="/targets"{% if active_tab == "targets" %} aria-current="page"{% endif %}
                class="text-sm{% if active_tab == "targets" %} font-medium text-slate-900{% else %} text-slate-500 hover:text-slate-700{% endif %}">Targets</a>
+            <a href="/docs" class="text-sm text-slate-500 hover:text-slate-700">API docs</a>
+            <div class="ml-auto flex items-center gap-4">
+              <a href="/settings/api-tokens"{% if active_tab == "settings" %} aria-current="page"{% endif %}
+                 class="text-sm{% if active_tab == "settings" %} font-medium text-slate-900{% else %} text-slate-500 hover:text-slate-700{% endif %}">Settings</a>
+              <button type="button"
+                      hx-post="/auth/logout"
+                      hx-headers='{"X-Requested-With":"status-monitor"}'
+                      hx-on::after-request="window.location.href='/login'"
+                      class="rounded border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100">
+                Log out
+              </button>
+            </div>
+            {% else %}
             <a href="/docs" class="ml-auto text-sm text-slate-500 hover:text-slate-700">API docs</a>
+            {% endif %}
         </nav>
     </header>
     <main id="main-content" tabindex="-1" class="container mx-auto px-4 py-6">

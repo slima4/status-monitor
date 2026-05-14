@@ -13,6 +13,7 @@ pub mod invitations;
 pub mod invitations_cleanup;
 pub mod login_audit;
 pub mod oauth_state;
+pub mod oauth_state_cleanup;
 pub mod session;
 pub mod token_hash;
 pub mod url;

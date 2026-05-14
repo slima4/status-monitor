@@ -1,3 +1,4 @@
+pub mod auth;
 pub mod dashboard;
 pub mod public_status;
 pub mod targets_detail;

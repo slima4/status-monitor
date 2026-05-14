@@ -118,4 +118,6 @@ pub mod codes {
     pub const INVITATIONS_LIMIT: &str = "INVITATIONS_LIMIT";
     pub const INVALID_ROLE: &str = "INVALID_ROLE";
     pub const INVALID_EMAIL: &str = "INVALID_EMAIL";
+    pub const CSRF_PROTECTION: &str = "CSRF_PROTECTION";
+    pub const FINGERPRINT_SALT_ROTATED: &str = "FINGERPRINT_SALT_ROTATED";
 }

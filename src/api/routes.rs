@@ -171,6 +171,10 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
     root.merge(SwaggerUi::new("/docs").url("/api/openapi.json", ApiDoc::openapi()))
         .layer(from_fn(api_middleware::cache_control))
         .layer(from_fn(api_middleware::json_charset))
+        .layer(from_fn_with_state(
+            state.clone(),
+            crate::web::auth::csrf::middleware,
+        ))
         .layer(tower_cookies::CookieManagerLayer::new())
         .with_state(state)
 }

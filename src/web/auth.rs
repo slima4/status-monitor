@@ -17,6 +17,19 @@
 //! inside a request is this extractor.
 
 pub mod api_token;
+pub mod csrf;
+
+/// `Authorization: Bearer <raw>` → trimmed `<raw>`, or `None` for anything
+/// else. Used by both the API-token middleware (to decide whether to look the
+/// token up) and the CSRF guard (to know a request is Bearer-authenticated and
+/// therefore exempt from the cookie-targeted CSRF rule).
+pub fn bearer_from_headers(headers: &axum::http::HeaderMap) -> Option<&str> {
+    headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|h| h.to_str().ok())
+        .and_then(|s| s.strip_prefix("Bearer "))
+        .map(str::trim)
+}
 
 use axum::extract::{FromRef, FromRequestParts};
 use axum::http::HeaderName;

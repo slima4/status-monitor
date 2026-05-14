@@ -1,0 +1,32 @@
+<table class="w-full text-left text-sm">
+  <thead class="bg-slate-50 text-xs uppercase text-slate-500">
+    <tr>
+      <th class="px-4 py-2">Name</th>
+      <th class="px-4 py-2">Prefix</th>
+      <th class="px-4 py-2">Created</th>
+      <th class="px-4 py-2">Last used</th>
+      <th class="px-4 py-2"></th>
+    </tr>
+  </thead>
+  <tbody class="divide-y">
+    {% for t in tokens %}
+    <tr>
+      <td class="px-4 py-2 align-top text-slate-700">{{ t.name }}</td>
+      <td class="px-4 py-2 align-top font-mono text-xs text-slate-500">{{ t.prefix }}…</td>
+      <td class="px-4 py-2 align-top text-slate-700">{{ t.created }}</td>
+      <td class="px-4 py-2 align-top text-slate-700">{{ t.last_used }}</td>
+      <td class="px-4 py-2 text-right">
+        <button type="button"
+                hx-delete="/api/v1/me/api-tokens/{{ t.id }}"
+                hx-headers='{"X-Requested-With":"status-monitor"}'
+                hx-confirm="Revoke this token? Existing callers using it will start receiving 401."
+                hx-on::after-request="if(event.detail.successful){htmx.trigger('body','tokens:refresh')}"
+                class="text-xs font-medium text-rose-700 hover:underline">Revoke</button>
+      </td>
+    </tr>
+    {% endfor %}
+    {% if tokens.is_empty() %}
+    <tr><td colspan="5" class="px-4 py-3 text-sm text-slate-500">No tokens yet.</td></tr>
+    {% endif %}
+  </tbody>
+</table>

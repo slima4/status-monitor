@@ -1,0 +1,37 @@
+<table class="w-full text-left text-sm">
+  <thead class="bg-slate-50 text-xs uppercase text-slate-500">
+    <tr>
+      <th class="px-4 py-2">Created</th>
+      <th class="px-4 py-2">Last used</th>
+      <th class="px-4 py-2">Expires</th>
+      <th class="px-4 py-2">IP hash</th>
+      <th class="px-4 py-2"></th>
+    </tr>
+  </thead>
+  <tbody class="divide-y">
+    {% for s in sessions %}
+    <tr>
+      <td class="px-4 py-2 align-top text-slate-700">{{ s.created }}</td>
+      <td class="px-4 py-2 align-top text-slate-700">{{ s.last_used }}</td>
+      <td class="px-4 py-2 align-top text-slate-700">{{ s.expires }}</td>
+      <td class="px-4 py-2 align-top font-mono text-xs text-slate-500">{{ s.ip_short }}</td>
+      <td class="px-4 py-2 text-right">
+        {% if s.is_current %}
+        <span class="rounded bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">This device</span>
+        {% else %}
+        <button type="button"
+                hx-delete="/api/v1/me/sessions/{{ s.id }}"
+                hx-headers='{"X-Requested-With":"status-monitor"}'
+                hx-target="#sessions-list"
+                hx-swap="innerHTML"
+                hx-on::after-request="if(event.detail.successful){htmx.trigger('body','sessions:refresh')}"
+                class="text-xs font-medium text-rose-700 hover:underline">Revoke</button>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+    {% if sessions.is_empty() %}
+    <tr><td colspan="5" class="px-4 py-3 text-sm text-slate-500">No active sessions.</td></tr>
+    {% endif %}
+  </tbody>
+</table>
