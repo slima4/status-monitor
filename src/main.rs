@@ -14,7 +14,7 @@ use status_monitor::{
     observability,
     pipeline::{BatcherConfig, ResultBatcher},
     public_status::{
-        AggregatorConfig, IncidentWriter, IncidentWriterConfig, LiveAggregator, LivePublicSource,
+        AggregatorConfig, IncidentWriter, IncidentWriterConfig, OrgAggregator, OrgPublicSource,
         PageCache, PgIncidentStore, PublicSource,
     },
     scheduler::{Scheduler, TargetRegistry},
@@ -40,6 +40,7 @@ const SHUTDOWN_DEADLINE: Duration = Duration::from_secs(10);
 async fn main() -> Result<()> {
     let cfg = AppConfig::load()?;
     observability::tracing::init(&cfg.observability);
+    status_monitor::app::assert_per_org_status_config(&cfg);
 
     let metrics_handle = if cfg.observability.metrics_enabled {
         Some(observability::metrics::init(&cfg.server.metrics_bind)?)
@@ -173,19 +174,17 @@ async fn main() -> Result<()> {
 
     let aggregator_cfg = AggregatorConfig::default();
     let cache_ttl = StdDuration::from_secs(10);
-    let aggregator = Arc::new(LiveAggregator::new(
+    let aggregator = Arc::new(OrgAggregator::new(
         pg_pool.clone(),
         ch_client_for_public,
         target_store.clone(),
         aggregator_cfg.clone(),
-        default_org_id,
     ));
     let public_cache = PageCache::new(cache_ttl);
-    let public_source: Arc<dyn PublicSource> = Arc::new(LivePublicSource::new(
+    let public_source: Arc<dyn PublicSource> = Arc::new(OrgPublicSource::new(
         aggregator,
         public_cache,
         pg_pool.clone(),
-        default_org_id,
         aggregator_cfg.site_name.clone(),
     ));
 

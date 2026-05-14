@@ -656,10 +656,21 @@ pub async fn add_member(
     Ok(AddMemberOutcome::Added)
 }
 
-/// Resolve an org slug to its id. Active orgs only (`deleted_at IS NULL`).
+/// AUTHENTICATED-PATH ONLY. Resolves an org slug to its id for callers that
+/// have already proved identity (API token, session). Filters
+/// `deleted_at IS NULL` and nothing else — callers must layer additional
+/// access control (e.g. [`is_active_member`]) before they trust the result.
+///
 /// Used by the API-token request path: tokens carry no active-org state, so
 /// `X-Status-Monitor-Org: <slug>` is the only way the handler learns which
 /// org to scope to.
+///
+/// Do NOT call this from any unauthenticated path. For
+/// `*.status.{base_domain}` lookups use [`find_public_status_org_by_slug`]
+/// instead — that helper additionally filters `public_status_enabled = true`
+/// and returns a [`PublicStatusOrg`] newtype the operator path can't accept.
+/// Substituting the two would expose every org's public surface regardless
+/// of opt-in.
 pub async fn find_id_by_slug(pool: &PgPool, slug: &str) -> Result<Option<OrgId>> {
     let row: Option<(Uuid,)> =
         sqlx::query_as("SELECT id FROM organizations WHERE slug = $1 AND deleted_at IS NULL")
@@ -668,6 +679,41 @@ pub async fn find_id_by_slug(pool: &PgPool, slug: &str) -> Result<Option<OrgId>>
             .await
             .context("find_id_by_slug")?;
     Ok(row.map(|(o,)| OrgId(o)))
+}
+
+/// Newtype returned by [`find_public_status_org_by_slug`]. Wraps
+/// [`Organization`] so the type system distinguishes "an org row resolved
+/// through the unauthenticated public-status path" from one resolved through
+/// the operator / API-token path. The two paths have **opposite** security
+/// envelopes and must never share lookup helpers — the wrapper is the
+/// compile-time fence that keeps them separate.
+#[derive(Debug, Clone)]
+pub struct PublicStatusOrg(pub Organization);
+
+/// PUBLIC-STATUS PATH ONLY. Resolves an org slug to a [`PublicStatusOrg`] for
+/// the unauthenticated `*.status.{base_domain}` surface. Filters
+/// `public_status_enabled = true AND deleted_at IS NULL` — if either
+/// predicate fails the row is invisible (the handler maps `None` to 404).
+///
+/// The newtype return makes it a compile error to feed the result into
+/// operator-side code paths.
+pub async fn find_public_status_org_by_slug(
+    pool: &PgPool,
+    slug: &str,
+) -> Result<Option<PublicStatusOrg>> {
+    let row: Option<OrgRow> = sqlx::query_as(
+        r#"SELECT id, slug::text AS slug, name, created_at, updated_at, deleted_at
+           FROM organizations
+           WHERE slug = $1
+             AND public_status_enabled = true
+             AND deleted_at IS NULL
+           -- SAFE: public-page lookup is intentionally not org_id-scoped"#,
+    )
+    .bind(slug)
+    .fetch_optional(pool)
+    .await
+    .context("find_public_status_org_by_slug")?;
+    Ok(row.map(|r| PublicStatusOrg(r.into_org())))
 }
 
 /// Look up a user's id by email (CITEXT). Drives the invitation flow's

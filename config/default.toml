@@ -114,14 +114,25 @@ enabled = false
 # Slug used to find or create the default org at startup. The id is generated
 # by Postgres and persisted; only the slug is configurable.
 default_org_slug = "default"
-# When `enabled = true`, the public status routes only respond if this is also
-# true. Self-hosters get the public page (one org); SaaS gets it only after
-# per-org status page routing lands.
-public_routes_enabled = false
+# Path-based public surface (`/status`, `/api/public/v1/*` on the operator
+# host). Defaults to `!tenancy.enabled` — self-host serves the single org's
+# status page at the operator host; SaaS does not (it would expose the
+# default org's data to every tenant). Leave commented to use the default.
+# path_based_public_routes = true
+# Wildcard subdomain public surface (`*.status.{public_status.base_domain}`).
+# Defaults to false. Set true together with `tenancy.enabled = true` and a
+# well-formed `public_status.base_domain` to serve per-org status pages.
+# subdomain_public_routes = false
 # Free-tier cap on orgs a single user can own.
 free_tier_owner_org_limit = 3
 # Grace period before soft-deleted orgs are purged.
 deletion_grace_period_days = 30
+
+# Per-org public status page surface. Phase-1 expands this block; for now
+# only `base_domain` is consumed (by the startup assertion that refuses to
+# boot subdomain routing without a real domain).
+[public_status]
+base_domain = ""
 
 # Transactional product email (org invitations, magic-link sign-in). Distinct
 # from [notifications.email], which is the outage-alert SMTP channel.

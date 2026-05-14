@@ -83,6 +83,57 @@ pub struct AppState {
     pub email_sender: Arc<dyn EmailSender>,
 }
 
+/// Run unconditionally at boot after config parse. Encodes the per-org
+/// public-surface and cookie-scope invariants in code so a misconfig is
+/// loud and immediate, not a silent runtime data leak. The two functions it
+/// calls are kept separate so cookie-scope can be exercised in isolation by
+/// tests.
+pub fn assert_per_org_status_config(cfg: &AppConfig) {
+    if cfg.tenancy.subdomain_public_routes && !cfg.tenancy.enabled {
+        panic!("tenancy.subdomain_public_routes = true requires tenancy.enabled = true");
+    }
+    if cfg.tenancy.enabled && cfg.tenancy.path_based_public_routes {
+        panic!(
+            "tenancy.path_based_public_routes = true with tenancy.enabled = true \
+             would serve the default org's data to every SaaS tenant. \
+             Use tenancy.subdomain_public_routes = true instead."
+        );
+    }
+    if cfg.tenancy.subdomain_public_routes {
+        let bd = cfg.public_status.base_domain.as_str();
+        if bd.is_empty() || !bd.contains('.') {
+            panic!(
+                "public_status.base_domain = {bd:?} is empty or missing a dot; \
+                 subdomain routing cannot work safely"
+            );
+        }
+    }
+    assert_cookie_scope_safe(cfg);
+}
+
+/// Refuses to boot when `auth.session.cookie_domain` overlaps the per-org
+/// status subdomain. Without this, a single config edit on the operator
+/// host can leak `_sm_session` to every tenant's status page.
+pub fn assert_cookie_scope_safe(cfg: &AppConfig) {
+    let cookie_domain = cfg.auth.session.cookie_domain.as_str();
+    if cookie_domain.is_empty() {
+        return;
+    }
+    if !cfg.tenancy.enabled || !cfg.tenancy.subdomain_public_routes {
+        return;
+    }
+    let base = cfg.public_status.base_domain.as_str();
+    let cd = cookie_domain.trim_start_matches('.');
+    if base == cd || base.ends_with(&format!(".{cd}")) {
+        panic!(
+            "auth.session.cookie_domain={cookie_domain:?} overlaps the \
+             status-page wildcard *.status.{base}. Operator session cookies \
+             would leak to every tenant's status page. Either unset \
+             cookie_domain, or move the status surface to a different parent zone."
+        );
+    }
+}
+
 impl AppState {
     /// Borrow the Postgres pool, or return an internal error. Centralises
     /// the "tenancy enabled but db is None" cloak so every handler doesn't

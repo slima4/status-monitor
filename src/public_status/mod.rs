@@ -11,7 +11,7 @@ pub mod overall_status;
 pub mod source;
 pub mod xml;
 
-pub use aggregator::{AggregatorConfig, LiveAggregator};
+pub use aggregator::{AggregatorConfig, OrgAggregator};
 pub use cache::{PageCache, PageCacheError, PageData};
 pub use incident_writer::{
     InMemoryIncidentStore, IncidentStore, IncidentWriter, IncidentWriterConfig, NewOpenIncident,
@@ -20,4 +20,4 @@ pub use incident_writer::{
 pub use overall_status::{
     Counters, component_status, day_state, overall_label, overall_state, overall_status,
 };
-pub use source::{IncidentListQuery, LivePublicSource, NoopPublicSource, PublicSource};
+pub use source::{IncidentListQuery, NoopPublicSource, OrgPublicSource, PublicSource};

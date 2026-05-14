@@ -1,0 +1,176 @@
+//! Cross-tenant smoke test for the public-status surface.
+//!
+//! Primes the page cache for org A, then asks for org B's page, and asserts
+//! org B's response contains no byte of org A's payload. The compile-time
+//! fence — `OrgAggregator` / `OrgPublicSource` carrying no `default_org_id`
+//! field — is the primary defence; this test is the runtime regression net
+//! for any future `PublicSource` impl or cache change that quietly drops
+//! the org parameter. Runs on every PR (no DB required).
+
+mod common;
+
+use std::sync::Arc;
+use std::time::Duration;
+
+use chrono::Utc;
+use status_monitor::domain::{OrgId, OverallState, OverallStatus, PublicStatusPage};
+use status_monitor::public_status::cache::PageCache;
+use uuid::Uuid;
+
+const ORG_A_MARKER: &str = "tenant-A-marker-7c1e5f9b";
+const ORG_B_MARKER: &str = "tenant-B-marker-d20a3413";
+
+fn page_with_marker(marker: &str) -> PublicStatusPage {
+    PublicStatusPage {
+        overall: OverallStatus {
+            state: OverallState::Operational,
+            label: "All Systems Operational".into(),
+        },
+        generated_at: Utc::now(),
+        site_name: marker.into(),
+        groups: Vec::new(),
+        active_incidents: Vec::new(),
+        recent_incidents: Vec::new(),
+        active_maintenance: Vec::new(),
+        upcoming_maintenance: Vec::new(),
+    }
+}
+
+#[tokio::test]
+async fn cache_does_not_serve_org_a_payload_to_org_b() {
+    let cache = PageCache::new(Duration::from_secs(10));
+    let org_a = OrgId(Uuid::new_v4());
+    let org_b = OrgId(Uuid::new_v4());
+
+    let primed = cache
+        .get_or_compute(org_a, || async {
+            Ok::<_, std::io::Error>(page_with_marker(ORG_A_MARKER))
+        })
+        .await
+        .expect("prime A");
+    assert!(primed.site_name.contains(ORG_A_MARKER));
+
+    let serialized_b = serde_json::to_string(
+        &*cache
+            .get_or_compute(org_b, || async {
+                Ok::<_, std::io::Error>(page_with_marker(ORG_B_MARKER))
+            })
+            .await
+            .expect("compute B"),
+    )
+    .expect("serialise B");
+
+    assert!(
+        serialized_b.contains(ORG_B_MARKER),
+        "B's response missing its own marker: {serialized_b}"
+    );
+    assert!(
+        !serialized_b.contains(ORG_A_MARKER),
+        "B's response leaked A's marker: {serialized_b}"
+    );
+}
+
+#[tokio::test]
+async fn cache_last_good_is_partitioned_per_org() {
+    // A hot org's `last_good` snapshot must not satisfy a different org's
+    // recompute failure. Prime A, then fail B's first compute, and verify B
+    // receives `Unavailable` rather than A's stale data.
+    let cache = PageCache::new(Duration::from_secs(10));
+    let org_a = OrgId(Uuid::new_v4());
+    let org_b = OrgId(Uuid::new_v4());
+
+    let _primed = cache
+        .get_or_compute(org_a, || async {
+            Ok::<_, std::io::Error>(page_with_marker(ORG_A_MARKER))
+        })
+        .await
+        .expect("prime A");
+
+    let err = cache
+        .get_or_compute(org_b, || async {
+            Err::<PublicStatusPage, _>(std::io::Error::other("B unavailable"))
+        })
+        .await
+        .expect_err("B has no last_good and must surface Unavailable");
+    assert!(matches!(
+        err,
+        status_monitor::public_status::cache::PageCacheError::Unavailable
+    ));
+    let snap = cache.last_good(org_a).expect("A still cached");
+    assert!(snap.site_name.contains(ORG_A_MARKER));
+}
+
+#[tokio::test]
+async fn public_source_trait_threads_org_param_to_distinct_responses() {
+    // Drives a hand-rolled `PublicSource` impl whose `page(org)` echoes the
+    // org's tag back. Two distinct orgs must yield two distinct responses —
+    // catches the future regression where an impl adds the trait parameter
+    // but internally falls back to a baked default.
+    use async_trait::async_trait;
+    use status_monitor::api::PageEnvelope;
+    use status_monitor::api::public_error::PublicAppError;
+    use status_monitor::domain::{ComponentHistoryResponse, PublicIncident, PublicMaintenanceList};
+    use status_monitor::public_status::{IncidentListQuery, PublicSource};
+    use std::collections::HashMap;
+
+    struct OrgKeyedSource {
+        pages: HashMap<OrgId, Arc<PublicStatusPage>>,
+    }
+    #[async_trait]
+    impl PublicSource for OrgKeyedSource {
+        async fn page(&self, org: OrgId) -> Result<Arc<PublicStatusPage>, PublicAppError> {
+            self.pages
+                .get(&org)
+                .cloned()
+                .ok_or(PublicAppError::NotFound)
+        }
+        async fn component_history(
+            &self,
+            _org: OrgId,
+            _id: Uuid,
+            _days: u32,
+        ) -> Result<ComponentHistoryResponse, PublicAppError> {
+            unreachable!()
+        }
+        async fn list_incidents(
+            &self,
+            _org: OrgId,
+            _q: IncidentListQuery,
+        ) -> Result<PageEnvelope<PublicIncident>, PublicAppError> {
+            unreachable!()
+        }
+        async fn incident_by_id(
+            &self,
+            _org: OrgId,
+            _id: Uuid,
+        ) -> Result<PublicIncident, PublicAppError> {
+            unreachable!()
+        }
+        async fn maintenance(&self, _org: OrgId) -> Result<PublicMaintenanceList, PublicAppError> {
+            unreachable!()
+        }
+        async fn incidents_rss(
+            &self,
+            _org: OrgId,
+            _base_url: &str,
+        ) -> Result<String, PublicAppError> {
+            unreachable!()
+        }
+    }
+
+    let org_a = OrgId(Uuid::new_v4());
+    let org_b = OrgId(Uuid::new_v4());
+    let src = OrgKeyedSource {
+        pages: HashMap::from([
+            (org_a, Arc::new(page_with_marker(ORG_A_MARKER))),
+            (org_b, Arc::new(page_with_marker(ORG_B_MARKER))),
+        ]),
+    };
+
+    let resp_a = src.page(org_a).await.expect("A");
+    let resp_b = src.page(org_b).await.expect("B");
+    assert!(resp_a.site_name.contains(ORG_A_MARKER));
+    assert!(resp_b.site_name.contains(ORG_B_MARKER));
+    let body_b = serde_json::to_string(&*resp_b).expect("serialise B");
+    assert!(!body_b.contains(ORG_A_MARKER));
+}

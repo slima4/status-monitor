@@ -25,7 +25,7 @@ use common::build_test_app_with_public_source;
 use status_monitor::api::PageEnvelope;
 use status_monitor::api::public_error::PublicAppError;
 use status_monitor::domain::{
-    ComponentHistoryResponse, IncidentSeverity, IncidentStatusPhase, PublicIncident,
+    ComponentHistoryResponse, IncidentSeverity, IncidentStatusPhase, OrgId, PublicIncident,
     PublicIncidentUpdate, PublicMaintenanceList, PublicStatusPage,
 };
 use status_monitor::public_status::{IncidentListQuery, PublicSource, source::build_rss};
@@ -43,11 +43,12 @@ struct TwoIncidentSource;
 
 #[async_trait]
 impl PublicSource for TwoIncidentSource {
-    async fn page(&self) -> Result<Arc<PublicStatusPage>, PublicAppError> {
+    async fn page(&self, _org: OrgId) -> Result<Arc<PublicStatusPage>, PublicAppError> {
         unimplemented!("not exercised by RSS test")
     }
     async fn component_history(
         &self,
+        _org: OrgId,
         _id: Uuid,
         _days: u32,
     ) -> Result<ComponentHistoryResponse, PublicAppError> {
@@ -55,6 +56,7 @@ impl PublicSource for TwoIncidentSource {
     }
     async fn list_incidents(
         &self,
+        _org: OrgId,
         q: IncidentListQuery,
     ) -> Result<PageEnvelope<PublicIncident>, PublicAppError> {
         let now = Utc::now();
@@ -88,15 +90,19 @@ impl PublicSource for TwoIncidentSource {
         ];
         Ok(PageEnvelope::new(items, 2, q.limit, q.offset))
     }
-    async fn incident_by_id(&self, _id: Uuid) -> Result<PublicIncident, PublicAppError> {
+    async fn incident_by_id(
+        &self,
+        _org: OrgId,
+        _id: Uuid,
+    ) -> Result<PublicIncident, PublicAppError> {
         unimplemented!("not exercised by RSS test")
     }
-    async fn maintenance(&self) -> Result<PublicMaintenanceList, PublicAppError> {
+    async fn maintenance(&self, _org: OrgId) -> Result<PublicMaintenanceList, PublicAppError> {
         unimplemented!("not exercised by RSS test")
     }
-    async fn incidents_rss(&self, base_url: &str) -> Result<String, PublicAppError> {
+    async fn incidents_rss(&self, org: OrgId, base_url: &str) -> Result<String, PublicAppError> {
         let items = self
-            .list_incidents(IncidentListQuery::default())
+            .list_incidents(org, IncidentListQuery::default())
             .await?
             .items;
         Ok(build_rss("status-monitor", base_url, &items))

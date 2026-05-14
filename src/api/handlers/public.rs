@@ -81,7 +81,7 @@ pub struct IncidentsQuery {
 pub async fn public_status(
     State(state): State<AppState>,
 ) -> Result<Json<PublicStatusPage>, PublicAppError> {
-    let page = state.public_source.page().await?;
+    let page = state.public_source.page(state.default_org_id).await?;
     Ok(Json(Arc::unwrap_or_clone(page)))
 }
 
@@ -110,7 +110,10 @@ pub async fn component_history(
     Query(q): Query<HistoryQuery>,
 ) -> Result<Json<ComponentHistoryResponse>, PublicAppError> {
     let days = q.days.unwrap_or(90);
-    let res = state.public_source.component_history(id, days).await?;
+    let res = state
+        .public_source
+        .component_history(state.default_org_id, id, days)
+        .await?;
     Ok(Json(res))
 }
 
@@ -137,7 +140,10 @@ pub async fn public_incidents(
         offset: q.offset.unwrap_or(0),
         ongoing_only: q.ongoing_only.unwrap_or(false),
     };
-    let page = state.public_source.list_incidents(query).await?;
+    let page = state
+        .public_source
+        .list_incidents(state.default_org_id, query)
+        .await?;
     Ok(Json(page))
 }
 
@@ -161,7 +167,10 @@ pub async fn public_incident(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<PublicIncident>, PublicAppError> {
-    let inc = state.public_source.incident_by_id(id).await?;
+    let inc = state
+        .public_source
+        .incident_by_id(state.default_org_id, id)
+        .await?;
     Ok(Json(inc))
 }
 
@@ -192,7 +201,10 @@ pub async fn public_incidents_rss(
             .next()
             .unwrap_or("localhost")
     );
-    let body = state.public_source.incidents_rss(&base_url).await?;
+    let body = state
+        .public_source
+        .incidents_rss(state.default_org_id, &base_url)
+        .await?;
     let mut resp = (StatusCode::OK, body).into_response();
     resp.headers_mut()
         .insert(header::CONTENT_TYPE, RSS_CONTENT_TYPE);
@@ -216,7 +228,10 @@ pub async fn public_incidents_rss(
 pub async fn public_maintenance(
     State(state): State<AppState>,
 ) -> Result<Json<PublicMaintenanceList>, PublicAppError> {
-    let m = state.public_source.maintenance().await?;
+    let m = state
+        .public_source
+        .maintenance(state.default_org_id)
+        .await?;
     Ok(Json(m))
 }
 
@@ -252,7 +267,7 @@ pub async fn public_badge(
         ));
     }
 
-    let page = state.public_source.page().await?;
+    let page = state.public_source.page(state.default_org_id).await?;
     let (label, status_text, color) = match q.component {
         Some(id) => {
             let comp = page

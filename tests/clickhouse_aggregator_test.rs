@@ -30,7 +30,7 @@ use sqlx::PgPool;
 use status_monitor::domain::{
     CheckResult, CheckSpec, CheckStatus, ExpectedStatus, NewTarget, PublicComponentStatus,
 };
-use status_monitor::public_status::{AggregatorConfig, LiveAggregator};
+use status_monitor::public_status::{AggregatorConfig, OrgAggregator};
 use status_monitor::storage::ensure_default_org;
 use status_monitor::storage::{ClickhouseResultSink, PostgresTargetStore, ResultSink, TargetStore};
 use url::Url;
@@ -146,14 +146,13 @@ async fn build_round_trips_seeded_data() {
             .await
             .expect("flush mv");
 
-        let agg = LiveAggregator::new(
+        let agg = OrgAggregator::new(
             pool,
             ch,
             store.clone() as Arc<dyn TargetStore>,
             AggregatorConfig::default(),
-            org_id,
         );
-        let page = agg.build().await.expect("aggregator build");
+        let page = agg.build(org_id).await.expect("aggregator build");
 
         let component = page
             .groups
@@ -209,15 +208,14 @@ async fn component_history_returns_strip_for_public_target() {
             .await
             .expect("flush mv");
 
-        let agg = LiveAggregator::new(
+        let agg = OrgAggregator::new(
             pool,
             ch,
             store as Arc<dyn TargetStore>,
             AggregatorConfig::default(),
-            org_id,
         );
         let resp = agg
-            .component_history(target_id, 7)
+            .component_history(org_id, target_id, 7)
             .await
             .expect("component_history succeeds");
         assert_eq!(resp.component_id, target_id);

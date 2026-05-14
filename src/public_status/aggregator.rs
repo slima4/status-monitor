@@ -52,35 +52,39 @@ impl Default for AggregatorConfig {
 const CH_TABLE: &str = "check_results";
 const CH_MV: &str = "check_results_1m";
 
-pub struct LiveAggregator {
+/// Per-org status-page aggregator. Carries no `org_id` of its own — every
+/// method takes the target org as its first parameter so the compiler refuses
+/// to compile a call site that forgot which tenant's page is being built.
+/// The earlier shape baked the default org into the struct, which let a
+/// cache-key change silently serve org A's data to org B once a tenant ran
+/// the same page-build path.
+pub struct OrgAggregator {
     pg: PgPool,
     ch: ClickhouseClient,
     target_store: Arc<dyn TargetStore>,
     cfg: AggregatorConfig,
-    default_org_id: OrgId,
 }
 
-impl LiveAggregator {
+impl OrgAggregator {
     pub fn new(
         pg: PgPool,
         ch: ClickhouseClient,
         target_store: Arc<dyn TargetStore>,
         cfg: AggregatorConfig,
-        default_org_id: OrgId,
     ) -> Self {
         Self {
             pg,
             ch,
             target_store,
             cfg,
-            default_org_id,
         }
     }
 
-    /// Builds a single `PublicStatusPage` snapshot. One call ↔ one render.
-    pub async fn build(&self) -> Result<PublicStatusPage> {
+    /// Builds a single `PublicStatusPage` snapshot for `org`. One call ↔ one
+    /// render.
+    pub async fn build(&self, org: OrgId) -> Result<PublicStatusPage> {
         let now = Utc::now();
-        let components = self.load_public_components().await?;
+        let components = self.load_public_components(org).await?;
         let component_ids: Vec<Uuid> = components.iter().map(|c| c.id).collect();
 
         let (
@@ -88,13 +92,13 @@ impl LiveAggregator {
             active_incidents,
             recent_incidents,
         ) = tokio::try_join!(
-            self.load_maintenance(now, &component_ids),
-            self.load_active_incidents(),
-            self.load_recent_incidents(now),
+            self.load_maintenance(org, now, &component_ids),
+            self.load_active_incidents(org),
+            self.load_recent_incidents(org, now),
         )?;
 
-        let history_by_target = self.load_history_strips(&component_ids, now).await?;
-        let recent_counters = self.load_recent_counters(&component_ids, now).await?;
+        let history_by_target = self.load_history_strips(org, &component_ids, now).await?;
+        let recent_counters = self.load_recent_counters(org, &component_ids, now).await?;
 
         let mut public_components: Vec<(Option<String>, i32, PublicComponent)> = components
             .iter()
@@ -177,7 +181,12 @@ impl LiveAggregator {
     }
 
     /// Per-component history endpoint (`GET /api/public/v1/components/{id}/history`).
-    pub async fn component_history(&self, id: Uuid, days: u32) -> Result<ComponentHistoryResponse> {
+    pub async fn component_history(
+        &self,
+        org: OrgId,
+        id: Uuid,
+        days: u32,
+    ) -> Result<ComponentHistoryResponse> {
         let now = Utc::now();
         let target = self
             .target_store
@@ -186,7 +195,7 @@ impl LiveAggregator {
             .filter(|t| t.public_status)
             .ok_or_else(|| anyhow::anyhow!("component not public or not found"))?;
 
-        let history_by_target = self.load_history_strips(&[id], now).await?;
+        let history_by_target = self.load_history_strips(org, &[id], now).await?;
         let history = history_by_target
             .into_iter()
             .find(|(target_id, _)| *target_id == id)
@@ -206,7 +215,12 @@ impl LiveAggregator {
 
     // ── private helpers ─────────────────────────────────────────────────────
 
-    async fn load_public_components(&self) -> Result<Vec<Target>> {
+    async fn load_public_components(&self, _org: OrgId) -> Result<Vec<Target>> {
+        // `target_store` is currently org-scoped at construction time, so
+        // the `_org` parameter is informational here. It's plumbed in so the
+        // signature matches the rest of the aggregator's threaded `org_id`
+        // shape; a later refactor will lift the store onto per-call org
+        // scoping and the underscore will go away.
         let all = self
             .target_store
             .list(crate::storage::TargetFilter {
@@ -221,6 +235,7 @@ impl LiveAggregator {
 
     async fn load_maintenance(
         &self,
+        org: OrgId,
         now: DateTime<Utc>,
         public_ids: &[Uuid],
     ) -> Result<(Vec<PublicMaintenance>, Vec<PublicMaintenance>, Vec<Uuid>)> {
@@ -242,14 +257,14 @@ impl LiveAggregator {
         )
         .bind(now)
         .bind(horizon_end)
-        .bind(self.default_org_id.0)
+        .bind(org.0)
         .fetch_all(&self.pg)
         .await
         .context("load maintenance windows")?;
 
         let public_set: std::collections::HashSet<Uuid> = public_ids.iter().copied().collect();
         let mut targets_by_id: std::collections::HashMap<Uuid, String> = Default::default();
-        for t in self.load_public_components_meta().await? {
+        for t in self.load_public_components_meta(org).await? {
             targets_by_id.insert(t.id, t.public_name.clone().unwrap_or(t.name));
         }
 
@@ -293,11 +308,11 @@ impl LiveAggregator {
     /// `public_status` flag; we re-pull because building both lists in one
     /// query would force a join graph that's awkward to express. Cached one
     /// layer up anyway.
-    async fn load_public_components_meta(&self) -> Result<Vec<Target>> {
-        self.load_public_components().await
+    async fn load_public_components_meta(&self, org: OrgId) -> Result<Vec<Target>> {
+        self.load_public_components(org).await
     }
 
-    async fn load_active_incidents(&self) -> Result<Vec<PublicIncident>> {
+    async fn load_active_incidents(&self, org: OrgId) -> Result<Vec<PublicIncident>> {
         let rows: Vec<IncidentRow> = sqlx::query_as::<_, IncidentRow>(
             r#"SELECT i.id, i.target_id,
                       COALESCE(t.public_name, t.name) AS component_name,
@@ -311,14 +326,18 @@ impl LiveAggregator {
                  AND t.public_status = true
                ORDER BY i.started_at DESC"#,
         )
-        .bind(self.default_org_id.0)
+        .bind(org.0)
         .fetch_all(&self.pg)
         .await
         .context("load active incidents")?;
-        self.hydrate_incidents(rows).await
+        self.hydrate_incidents(org, rows).await
     }
 
-    async fn load_recent_incidents(&self, now: DateTime<Utc>) -> Result<Vec<PublicIncident>> {
+    async fn load_recent_incidents(
+        &self,
+        org: OrgId,
+        now: DateTime<Utc>,
+    ) -> Result<Vec<PublicIncident>> {
         let since = now - ChronoDuration::days(self.cfg.recent_incidents_days as i64);
         let rows: Vec<IncidentRow> = sqlx::query_as::<_, IncidentRow>(
             r#"SELECT i.id, i.target_id,
@@ -336,14 +355,18 @@ impl LiveAggregator {
         )
         .bind(since)
         .bind(self.cfg.max_recent_incidents as i64)
-        .bind(self.default_org_id.0)
+        .bind(org.0)
         .fetch_all(&self.pg)
         .await
         .context("load recent incidents")?;
-        self.hydrate_incidents(rows).await
+        self.hydrate_incidents(org, rows).await
     }
 
-    async fn hydrate_incidents(&self, rows: Vec<IncidentRow>) -> Result<Vec<PublicIncident>> {
+    async fn hydrate_incidents(
+        &self,
+        org: OrgId,
+        rows: Vec<IncidentRow>,
+    ) -> Result<Vec<PublicIncident>> {
         if rows.is_empty() {
             return Ok(Vec::new());
         }
@@ -355,7 +378,7 @@ impl LiveAggregator {
                ORDER BY incident_id, posted_at ASC"#,
         )
         .bind(&ids)
-        .bind(self.default_org_id.0)
+        .bind(org.0)
         .fetch_all(&self.pg)
         .await
         .context("load incident updates")?;
@@ -403,6 +426,7 @@ impl LiveAggregator {
     /// `Vec<DayState>` per component, oldest-first, length = `history_days`.
     async fn load_history_strips(
         &self,
+        org: OrgId,
         component_ids: &[Uuid],
         now: DateTime<Utc>,
     ) -> Result<Vec<(Uuid, Vec<DayState>)>> {
@@ -448,11 +472,11 @@ impl LiveAggregator {
                 GROUP BY target_id, day
                 ORDER BY target_id, day"#
             ))
-            .bind(self.default_org_id.0)
+            .bind(org.0)
             .bind(component_ids)
             .bind(from.timestamp_millis())
             .bind(now.timestamp_millis())
-            .bind(self.default_org_id.0)
+            .bind(org.0)
             .bind(component_ids)
             .bind(from.timestamp_millis())
             .bind(now.timestamp_millis())
@@ -495,6 +519,7 @@ impl LiveAggregator {
     /// up/down/degraded/error breakdown needed by the component classifier.
     async fn load_recent_counters(
         &self,
+        org: OrgId,
         component_ids: &[Uuid],
         now: DateTime<Utc>,
     ) -> Result<Vec<(Uuid, Counters)>> {
@@ -518,7 +543,7 @@ impl LiveAggregator {
                      AND timestamp <  fromUnixTimestamp64Milli(?)
                    GROUP BY target_id"#
             ))
-            .bind(self.default_org_id.0)
+            .bind(org.0)
             .bind(component_ids)
             .bind(from.timestamp_millis())
             .bind(now.timestamp_millis())

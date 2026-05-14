@@ -22,7 +22,7 @@ use status_monitor::domain::{
     CheckResult, CheckSpec, CheckStatus, ExpectedStatus, HttpCheck, HttpMethod, NewTarget, OrgId,
     UserId,
 };
-use status_monitor::public_status::{AggregatorConfig, LiveAggregator};
+use status_monitor::public_status::{AggregatorConfig, OrgAggregator};
 use status_monitor::storage::{
     ClickhouseResultSink, PostgresTargetStore, ResultSink, TargetStore, create_org_with_owner,
 };
@@ -37,7 +37,7 @@ const RESULTS_PER_COMPONENT: usize = 60;
 struct Fixture {
     pool: PgPool,
     ch: clickhouse::Client,
-    aggregators: Vec<LiveAggregator>,
+    aggregators: Vec<OrgAggregator>,
     /// Owned by the fixture so the bench-loop tenants stay alive; PG cascades
     /// clear their data on Drop.
     user_ids: Vec<UserId>,
@@ -162,12 +162,11 @@ async fn build_fixture() -> Option<Fixture> {
                 .collect();
             sink.write_batch(&rows).await.expect("ch insert");
         }
-        aggregators.push(LiveAggregator::new(
+        aggregators.push(OrgAggregator::new(
             pool.clone(),
             ch.clone(),
             target_store,
             AggregatorConfig::default(),
-            org.id,
         ));
         user_ids.push(user);
         org_ids.push(org.id);
@@ -236,10 +235,11 @@ fn bench_public_status_build(c: &mut Criterion) {
     // first one (which may benefit from PG/CH page-cache warmup) or the last
     // (which may have a colder block cache).
     let middle = ORG_COUNT / 2;
+    let middle_org = fixture.org_ids[middle];
     group.bench_function("aggregator_build_50x50", |b| {
         b.to_async(&rt).iter(|| async {
             fixture.aggregators[middle]
-                .build()
+                .build(middle_org)
                 .await
                 .expect("aggregator build");
         });

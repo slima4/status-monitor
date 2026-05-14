@@ -20,7 +20,7 @@ use crate::domain::{
     PublicIncidentUpdate, PublicMaintenanceList, PublicStatusPage,
 };
 
-use super::aggregator::LiveAggregator;
+use super::aggregator::OrgAggregator;
 use super::cache::{PageCache, PageCacheError};
 use super::xml::xml_escape;
 
@@ -41,46 +41,50 @@ impl Default for IncidentListQuery {
     }
 }
 
+/// Per-org public-status data layer. Every method takes the target `OrgId`
+/// as its first parameter — there is no implicit default. The compiler
+/// refuses to compile a handler that forgot which tenant's data is being
+/// served, which is what prevents the cache from quietly serving one
+/// tenant's page to another.
 #[async_trait]
 pub trait PublicSource: Send + Sync {
-    async fn page(&self) -> Result<Arc<PublicStatusPage>, PublicAppError>;
+    async fn page(&self, org: OrgId) -> Result<Arc<PublicStatusPage>, PublicAppError>;
     async fn component_history(
         &self,
+        org: OrgId,
         id: Uuid,
         days: u32,
     ) -> Result<ComponentHistoryResponse, PublicAppError>;
     async fn list_incidents(
         &self,
+        org: OrgId,
         q: IncidentListQuery,
     ) -> Result<PageEnvelope<PublicIncident>, PublicAppError>;
-    async fn incident_by_id(&self, id: Uuid) -> Result<PublicIncident, PublicAppError>;
-    async fn maintenance(&self) -> Result<PublicMaintenanceList, PublicAppError>;
-    async fn incidents_rss(&self, base_url: &str) -> Result<String, PublicAppError>;
+    async fn incident_by_id(&self, org: OrgId, id: Uuid) -> Result<PublicIncident, PublicAppError>;
+    async fn maintenance(&self, org: OrgId) -> Result<PublicMaintenanceList, PublicAppError>;
+    async fn incidents_rss(&self, org: OrgId, base_url: &str) -> Result<String, PublicAppError>;
 }
 
-pub struct LivePublicSource {
-    aggregator: Arc<LiveAggregator>,
+pub struct OrgPublicSource {
+    aggregator: Arc<OrgAggregator>,
     cache: PageCache,
     pg: PgPool,
-    default_org_id: OrgId,
     rss_lookback_days: u32,
     rss_max_items: u32,
     site_name: String,
 }
 
-impl LivePublicSource {
+impl OrgPublicSource {
     pub fn new(
-        aggregator: Arc<LiveAggregator>,
+        aggregator: Arc<OrgAggregator>,
         cache: PageCache,
         pg: PgPool,
-        default_org_id: OrgId,
         site_name: impl Into<String>,
     ) -> Self {
         Self {
             aggregator,
             cache,
             pg,
-            default_org_id,
             rss_lookback_days: 90,
             rss_max_items: 50,
             site_name: site_name.into(),
@@ -89,15 +93,12 @@ impl LivePublicSource {
 }
 
 #[async_trait]
-impl PublicSource for LivePublicSource {
-    async fn page(&self) -> Result<Arc<PublicStatusPage>, PublicAppError> {
+impl PublicSource for OrgPublicSource {
+    async fn page(&self, org: OrgId) -> Result<Arc<PublicStatusPage>, PublicAppError> {
         let agg = self.aggregator.clone();
         let res = self
             .cache
-            .get_or_compute(
-                self.default_org_id,
-                move || async move { agg.build().await },
-            )
+            .get_or_compute(org, move || async move { agg.build(org).await })
             .await;
         match res {
             Ok(page) => Ok(page),
@@ -107,6 +108,7 @@ impl PublicSource for LivePublicSource {
 
     async fn component_history(
         &self,
+        org: OrgId,
         id: Uuid,
         days: u32,
     ) -> Result<ComponentHistoryResponse, PublicAppError> {
@@ -114,13 +116,14 @@ impl PublicSource for LivePublicSource {
             return Err(PublicAppError::InvalidDays);
         }
         self.aggregator
-            .component_history(id, days)
+            .component_history(org, id, days)
             .await
             .map_err(|_| PublicAppError::NotFound)
     }
 
     async fn list_incidents(
         &self,
+        org: OrgId,
         q: IncidentListQuery,
     ) -> Result<PageEnvelope<PublicIncident>, PublicAppError> {
         let since = Utc::now() - ChronoDuration::days(self.rss_lookback_days as i64);
@@ -147,7 +150,7 @@ impl PublicSource for LivePublicSource {
         .bind(ongoing_only)
         .bind(limit)
         .bind(offset)
-        .bind(self.default_org_id.0)
+        .bind(org.0)
         .fetch_all(&self.pg)
         .await
         .context("public list incidents")
@@ -165,13 +168,13 @@ impl PublicSource for LivePublicSource {
         )
         .bind(since)
         .bind(ongoing_only)
-        .bind(self.default_org_id.0)
+        .bind(org.0)
         .fetch_one(&self.pg)
         .await
         .context("public count incidents")
         .map_err(PublicAppError::Internal)?;
 
-        let incidents = self.hydrate(rows).await?;
+        let incidents = self.hydrate(org, rows).await?;
         Ok(PageEnvelope::new(
             incidents,
             total_row.0.max(0) as u64,
@@ -180,7 +183,7 @@ impl PublicSource for LivePublicSource {
         ))
     }
 
-    async fn incident_by_id(&self, id: Uuid) -> Result<PublicIncident, PublicAppError> {
+    async fn incident_by_id(&self, org: OrgId, id: Uuid) -> Result<PublicIncident, PublicAppError> {
         let row: Option<IncidentRow> = sqlx::query_as::<_, IncidentRow>(
             r#"SELECT i.id, i.target_id,
                       COALESCE(t.public_name, t.name) AS component_name,
@@ -194,38 +197,42 @@ impl PublicSource for LivePublicSource {
                  AND t.public_status = true"#,
         )
         .bind(id)
-        .bind(self.default_org_id.0)
+        .bind(org.0)
         .fetch_optional(&self.pg)
         .await
         .context("public get incident")
         .map_err(PublicAppError::Internal)?;
 
         let row = row.ok_or(PublicAppError::NotFound)?;
-        let mut hydrated = self.hydrate(vec![row]).await?;
+        let mut hydrated = self.hydrate(org, vec![row]).await?;
         hydrated.pop().ok_or(PublicAppError::NotFound)
     }
 
-    async fn maintenance(&self) -> Result<PublicMaintenanceList, PublicAppError> {
-        let page = self.page().await?;
+    async fn maintenance(&self, org: OrgId) -> Result<PublicMaintenanceList, PublicAppError> {
+        let page = self.page(org).await?;
         Ok(PublicMaintenanceList {
             active: page.active_maintenance.clone(),
             upcoming: page.upcoming_maintenance.clone(),
         })
     }
 
-    async fn incidents_rss(&self, base_url: &str) -> Result<String, PublicAppError> {
+    async fn incidents_rss(&self, org: OrgId, base_url: &str) -> Result<String, PublicAppError> {
         let q = IncidentListQuery {
             limit: self.rss_max_items,
             offset: 0,
             ongoing_only: false,
         };
-        let page = self.list_incidents(q).await?;
+        let page = self.list_incidents(org, q).await?;
         Ok(build_rss(&self.site_name, base_url, &page.items))
     }
 }
 
-impl LivePublicSource {
-    async fn hydrate(&self, rows: Vec<IncidentRow>) -> Result<Vec<PublicIncident>, PublicAppError> {
+impl OrgPublicSource {
+    async fn hydrate(
+        &self,
+        org: OrgId,
+        rows: Vec<IncidentRow>,
+    ) -> Result<Vec<PublicIncident>, PublicAppError> {
         if rows.is_empty() {
             return Ok(Vec::new());
         }
@@ -237,7 +244,7 @@ impl LivePublicSource {
                ORDER BY incident_id, posted_at ASC"#,
         )
         .bind(&ids)
-        .bind(self.default_org_id.0)
+        .bind(org.0)
         .fetch_all(&self.pg)
         .await
         .context("public list incident updates")
@@ -377,7 +384,7 @@ impl Default for NoopPublicSource {
 
 #[async_trait]
 impl PublicSource for NoopPublicSource {
-    async fn page(&self) -> Result<Arc<PublicStatusPage>, PublicAppError> {
+    async fn page(&self, _org: OrgId) -> Result<Arc<PublicStatusPage>, PublicAppError> {
         Ok(Arc::new(PublicStatusPage {
             overall: crate::domain::OverallStatus {
                 state: crate::domain::OverallState::Operational,
@@ -395,6 +402,7 @@ impl PublicSource for NoopPublicSource {
 
     async fn component_history(
         &self,
+        _org: OrgId,
         _id: Uuid,
         _days: u32,
     ) -> Result<ComponentHistoryResponse, PublicAppError> {
@@ -403,23 +411,28 @@ impl PublicSource for NoopPublicSource {
 
     async fn list_incidents(
         &self,
+        _org: OrgId,
         q: IncidentListQuery,
     ) -> Result<PageEnvelope<PublicIncident>, PublicAppError> {
         Ok(PageEnvelope::new(Vec::new(), 0, q.limit, q.offset))
     }
 
-    async fn incident_by_id(&self, _id: Uuid) -> Result<PublicIncident, PublicAppError> {
+    async fn incident_by_id(
+        &self,
+        _org: OrgId,
+        _id: Uuid,
+    ) -> Result<PublicIncident, PublicAppError> {
         Err(PublicAppError::NotFound)
     }
 
-    async fn maintenance(&self) -> Result<PublicMaintenanceList, PublicAppError> {
+    async fn maintenance(&self, _org: OrgId) -> Result<PublicMaintenanceList, PublicAppError> {
         Ok(PublicMaintenanceList {
             active: Vec::new(),
             upcoming: Vec::new(),
         })
     }
 
-    async fn incidents_rss(&self, base_url: &str) -> Result<String, PublicAppError> {
+    async fn incidents_rss(&self, _org: OrgId, base_url: &str) -> Result<String, PublicAppError> {
         Ok(build_rss(&self.site_name, base_url, &[]))
     }
 }

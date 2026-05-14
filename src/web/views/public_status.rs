@@ -52,7 +52,7 @@ pub struct IncidentDetailPage {
 }
 
 pub async fn index(State(state): State<AppState>, Query(params): Query<StatusParams>) -> Response {
-    let page = match state.public_source.page().await {
+    let page = match state.public_source.page(state.default_org_id).await {
         Ok(p) => p,
         Err(err) => return render_public_error(err),
     };
@@ -65,9 +65,10 @@ pub async fn index(State(state): State<AppState>, Query(params): Query<StatusPar
 }
 
 pub async fn incident(State(state): State<AppState>, Path(id): Path<Uuid>) -> Response {
+    let org = state.default_org_id;
     let (inc_res, page_res) = tokio::join!(
-        state.public_source.incident_by_id(id),
-        state.public_source.page(),
+        state.public_source.incident_by_id(org, id),
+        state.public_source.page(org),
     );
     let inc = match inc_res {
         Ok(i) => i,

@@ -23,7 +23,7 @@ use common::{UnavailablePublicSource, build_test_app_with_public_source};
 use status_monitor::api::PageEnvelope;
 use status_monitor::api::public_error::PublicAppError;
 use status_monitor::domain::{
-    ComponentHistoryResponse, DayState, OverallState, OverallStatus, PublicComponent,
+    ComponentHistoryResponse, DayState, OrgId, OverallState, OverallStatus, PublicComponent,
     PublicComponentGroup, PublicComponentStatus, PublicIncident, PublicMaintenanceList,
     PublicStatusPage,
 };
@@ -38,7 +38,7 @@ struct BadgeSource;
 
 #[async_trait]
 impl PublicSource for BadgeSource {
-    async fn page(&self) -> Result<Arc<PublicStatusPage>, PublicAppError> {
+    async fn page(&self, _org: OrgId) -> Result<Arc<PublicStatusPage>, PublicAppError> {
         let component = PublicComponent {
             id: known_component_id(),
             name: "API".into(),
@@ -65,6 +65,7 @@ impl PublicSource for BadgeSource {
     }
     async fn component_history(
         &self,
+        _org: OrgId,
         _id: Uuid,
         _days: u32,
     ) -> Result<ComponentHistoryResponse, PublicAppError> {
@@ -72,17 +73,22 @@ impl PublicSource for BadgeSource {
     }
     async fn list_incidents(
         &self,
+        _org: OrgId,
         _q: IncidentListQuery,
     ) -> Result<PageEnvelope<PublicIncident>, PublicAppError> {
         unimplemented!()
     }
-    async fn incident_by_id(&self, _id: Uuid) -> Result<PublicIncident, PublicAppError> {
+    async fn incident_by_id(
+        &self,
+        _org: OrgId,
+        _id: Uuid,
+    ) -> Result<PublicIncident, PublicAppError> {
         unimplemented!()
     }
-    async fn maintenance(&self) -> Result<PublicMaintenanceList, PublicAppError> {
+    async fn maintenance(&self, _org: OrgId) -> Result<PublicMaintenanceList, PublicAppError> {
         unimplemented!()
     }
-    async fn incidents_rss(&self, _base_url: &str) -> Result<String, PublicAppError> {
+    async fn incidents_rss(&self, _org: OrgId, _base_url: &str) -> Result<String, PublicAppError> {
         unimplemented!()
     }
 }

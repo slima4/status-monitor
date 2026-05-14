@@ -188,15 +188,16 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
         .with_state(state)
 }
 
-/// Whether the unauthenticated `/api/public/v1/*` and `/status` routes are
-/// served. Self-host mode (`tenancy.enabled = false`) always serves them —
-/// there is exactly one org and the page is its public face. SaaS mode
-/// (`tenancy.enabled = true`) requires the explicit `public_routes_enabled`
-/// flag, since per-org public-status routing lives in a separate spec. Until
-/// that lands the public surface would otherwise expose the default org's
-/// data to every SaaS tenant.
+/// Whether the path-based public surface (`/status` HTML page +
+/// `/api/public/v1/*` JSON) is mounted on the operator host. Driven by
+/// `tenancy.path_based_public_routes`, which defaults to `!tenancy.enabled`:
+/// self-host serves the single org's status page at the operator host; SaaS
+/// does not, because the path-based surface would expose the default org's
+/// data to every tenant. Per-org status pages land on
+/// `*.status.{public_status.base_domain}` via
+/// `tenancy.subdomain_public_routes` (wired in a later phase).
 pub fn public_routes_active(cfg: &crate::config::AppConfig) -> bool {
-    !cfg.tenancy.enabled || cfg.tenancy.public_routes_enabled
+    cfg.tenancy.path_based_public_routes
 }
 
 /// Whether the `auth.enabled_methods` config includes `"magic_link"`. Wires

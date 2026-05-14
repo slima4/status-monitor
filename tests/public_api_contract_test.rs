@@ -21,7 +21,7 @@ use uuid::Uuid;
 use status_monitor::api::PageEnvelope;
 use status_monitor::api::public_error::PublicAppError;
 use status_monitor::domain::{
-    ComponentHistoryResponse, DayState, IncidentSeverity, IncidentStatusPhase, OverallState,
+    ComponentHistoryResponse, DayState, IncidentSeverity, IncidentStatusPhase, OrgId, OverallState,
     OverallStatus, PublicComponent, PublicComponentGroup, PublicComponentStatus, PublicIncident,
     PublicIncidentUpdate, PublicMaintenance, PublicMaintenanceList, PublicStatusPage,
 };
@@ -62,7 +62,7 @@ struct FakePublicSource;
 
 #[async_trait]
 impl PublicSource for FakePublicSource {
-    async fn page(&self) -> Result<Arc<PublicStatusPage>, PublicAppError> {
+    async fn page(&self, _org: OrgId) -> Result<Arc<PublicStatusPage>, PublicAppError> {
         let component = PublicComponent {
             id: public_component_id(),
             name: PUBLIC_COMPONENT_NAME.into(),
@@ -113,6 +113,7 @@ impl PublicSource for FakePublicSource {
 
     async fn component_history(
         &self,
+        _org: OrgId,
         id: Uuid,
         days: u32,
     ) -> Result<ComponentHistoryResponse, PublicAppError> {
@@ -129,6 +130,7 @@ impl PublicSource for FakePublicSource {
 
     async fn list_incidents(
         &self,
+        _org: OrgId,
         q: IncidentListQuery,
     ) -> Result<PageEnvelope<PublicIncident>, PublicAppError> {
         let item = PublicIncident {
@@ -145,7 +147,11 @@ impl PublicSource for FakePublicSource {
         Ok(PageEnvelope::new(vec![item], 1, q.limit, q.offset))
     }
 
-    async fn incident_by_id(&self, id: Uuid) -> Result<PublicIncident, PublicAppError> {
+    async fn incident_by_id(
+        &self,
+        _org: OrgId,
+        id: Uuid,
+    ) -> Result<PublicIncident, PublicAppError> {
         if id != public_incident_id() {
             return Err(PublicAppError::NotFound);
         }
@@ -162,7 +168,7 @@ impl PublicSource for FakePublicSource {
         })
     }
 
-    async fn maintenance(&self) -> Result<PublicMaintenanceList, PublicAppError> {
+    async fn maintenance(&self, _org: OrgId) -> Result<PublicMaintenanceList, PublicAppError> {
         Ok(PublicMaintenanceList {
             active: Vec::new(),
             upcoming: vec![PublicMaintenance {
@@ -176,9 +182,9 @@ impl PublicSource for FakePublicSource {
         })
     }
 
-    async fn incidents_rss(&self, base_url: &str) -> Result<String, PublicAppError> {
+    async fn incidents_rss(&self, org: OrgId, base_url: &str) -> Result<String, PublicAppError> {
         let items = self
-            .list_incidents(IncidentListQuery::default())
+            .list_incidents(org, IncidentListQuery::default())
             .await?
             .items;
         Ok(status_monitor::public_status::source::build_rss(

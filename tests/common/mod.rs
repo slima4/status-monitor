@@ -66,17 +66,19 @@ pub enum TenancyMode {
 
 impl TenancyMode {
     /// Apply the mode to a freshly loaded [`AppConfig`]. SaaS mode also flips
-    /// `public_routes_enabled = true` so non-gating tests aren't blocked by
+    /// `subdomain_public_routes = true` so non-gating tests aren't blocked by
     /// the public-routes guard.
     pub fn apply(self, cfg: &mut AppConfig) {
         match self {
             TenancyMode::SelfHost => {
                 cfg.tenancy.enabled = false;
-                cfg.tenancy.public_routes_enabled = false;
+                cfg.tenancy.path_based_public_routes = true;
+                cfg.tenancy.subdomain_public_routes = false;
             }
             TenancyMode::Saas => {
                 cfg.tenancy.enabled = true;
-                cfg.tenancy.public_routes_enabled = true;
+                cfg.tenancy.path_based_public_routes = false;
+                cfg.tenancy.subdomain_public_routes = true;
             }
         }
     }
@@ -477,6 +479,7 @@ pub struct UnavailablePublicSource;
 impl PublicSource for UnavailablePublicSource {
     async fn page(
         &self,
+        _org: OrgId,
     ) -> Result<
         Arc<status_monitor::domain::PublicStatusPage>,
         status_monitor::api::public_error::PublicAppError,
@@ -485,6 +488,7 @@ impl PublicSource for UnavailablePublicSource {
     }
     async fn component_history(
         &self,
+        _org: OrgId,
         _id: Uuid,
         _days: u32,
     ) -> Result<
@@ -495,6 +499,7 @@ impl PublicSource for UnavailablePublicSource {
     }
     async fn list_incidents(
         &self,
+        _org: OrgId,
         _q: status_monitor::public_status::IncidentListQuery,
     ) -> Result<
         status_monitor::api::PageEnvelope<status_monitor::domain::PublicIncident>,
@@ -504,6 +509,7 @@ impl PublicSource for UnavailablePublicSource {
     }
     async fn incident_by_id(
         &self,
+        _org: OrgId,
         _id: Uuid,
     ) -> Result<
         status_monitor::domain::PublicIncident,
@@ -513,6 +519,7 @@ impl PublicSource for UnavailablePublicSource {
     }
     async fn maintenance(
         &self,
+        _org: OrgId,
     ) -> Result<
         status_monitor::domain::PublicMaintenanceList,
         status_monitor::api::public_error::PublicAppError,
@@ -521,6 +528,7 @@ impl PublicSource for UnavailablePublicSource {
     }
     async fn incidents_rss(
         &self,
+        _org: OrgId,
         _base_url: &str,
     ) -> Result<String, status_monitor::api::public_error::PublicAppError> {
         Err(status_monitor::api::public_error::PublicAppError::Unavailable)
