@@ -10,6 +10,15 @@ incident, and schedule a maintenance window. For the wire-level details
 of the underlying endpoints see [REST API](api.md#public-status-endpoints).
 For Caddy + the rate-limit plugin see [Deployment](deployment.md#public-status-surface).
 
+> **SaaS-mode operators read this first.** When `tenancy.enabled = true`, the
+> public status routes (`/status`, `/api/public/v1/*`) return 404 unless
+> `tenancy.public_routes_enabled = true` as well. The page is still a
+> single-aggregate view today — flipping it on in SaaS mode publishes every
+> tenant's "public" components together. Keep `public_routes_enabled = false`
+> until per-org status routing ships. Self-host mode (the default) is
+> unaffected — there's only one org, so there's nothing to leak. See
+> [Multi-tenancy mode](configuration.md#multi-tenancy-mode) for the matrix.
+
 ## What's published vs what's private
 
 By default every target is **private**. The aggregator filters at the SQL

@@ -31,7 +31,7 @@ All responses use `Content-Type: application/json; charset=utf-8`.
 | `GET` | `/api/v1/targets/{id}/uptime` | uptime summary over a range |
 | `GET` | `/api/v1/targets/{id}/incidents` | coalesced incident periods (`from`, `to`, `ongoing_only`) — paginated |
 | `GET` | `/api/v1/tags` | tag inventory with target counts (`q` prefix) — paginated |
-| `GET` | `/api/v1/dashboard/summary` | fleet-wide rollup (5-second in-process cache) |
+| `GET` | `/api/v1/dashboard/summary` | per-org rollup (5-second in-process cache, keyed by `OrgId`) |
 | `GET` | `/healthz` | liveness — always 200 once the process is up |
 | `GET` | `/readyz` | readiness — pings the target store; 503 if unreachable |
 | `GET` | `/api/openapi.json` | OpenAPI 3.1 document |
@@ -298,7 +298,7 @@ Returns coalesced down / error periods. A contiguous run of bad statuses becomes
 
 `GET /api/v1/tags?q=prod&limit=100`
 
-Returns every tag currently in use across all targets (enabled or disabled), with target count, sorted by descending count then alphabetical. `q` is a prefix filter for autocomplete.
+Returns every tag currently in use across the caller's targets (enabled or disabled), with target count, sorted by descending count then alphabetical. `q` is a prefix filter for autocomplete. Scoped to the active org — in SaaS mode another org's tags are invisible.
 
 ```jsonc
 { "items": [ { "name": "prod", "count": 12 }, { "name": "staging", "count": 4 } ],
@@ -307,7 +307,7 @@ Returns every tag currently in use across all targets (enabled or disabled), wit
 
 ## Dashboard summary
 
-`GET /api/v1/dashboard/summary` — fleet-wide rollup cached in-process for 5 seconds.
+`GET /api/v1/dashboard/summary` — per-org rollup cached in-process for 5 seconds (keyed by `OrgId`, so two tenants never share an entry).
 
 ```jsonc
 {

@@ -32,6 +32,38 @@ Override `STATUS_MONITOR_CONFIG_PATH` to point at an alternate base config file.
 | `notifications.slack` | `enabled`, `webhook_url` | Slack incoming-webhook transport. Per-target opt-in via target's `alerts.slack` |
 | `notifications.webhook` | `enabled`, `url` | Generic HTTP POST transport — receives the raw `AlertEvent` JSON. Per-target opt-in via target's `alerts.webhook` |
 | `notifications.email` | `enabled`, `smtp_host`, `smtp_port`, `smtp_user`, `smtp_password`, `from`, `starttls` | SMTP transport via lettre. Per-target opt-in via target's `alerts.email` (recipients carried per target) |
+| `tenancy` | `enabled`, `default_org_slug`, `public_routes_enabled`, `free_tier_owner_org_limit`, `deletion_grace_period_days`, `purge_interval_secs` | Self-host vs SaaS mode + org limits. See [Multi-tenancy mode](#multi-tenancy-mode) below and [docs/multi-tenancy.md](multi-tenancy.md) for the full model |
+
+## Multi-tenancy mode
+
+status-monitor ships from one binary in two modes:
+
+- `tenancy.enabled = false` (default) — **self-host**. The service provisions one org at startup (slug `tenancy.default_org_slug`, default `"default"`) and every request is implicitly scoped to it. No login flow, no orgs API in the user's face. This is the right mode for a team running their own monitoring.
+- `tenancy.enabled = true` — **SaaS**. The active org is resolved from the authenticated session. The real session backend (OAuth + password reset + invitations) is on the roadmap; until it lands a stub extractor returns 401 for unauthenticated traffic. Users create orgs through `/api/v1/orgs`, are subject to the three-org owner cap, and only see data tagged with their active `org_id`.
+
+Switching modes is a config flip plus restart; no schema change. The same migrations apply.
+
+### `public_routes_enabled` — the SaaS-mode gotcha
+
+The public status page (`/api/public/v1/status`, `/api/public/v1/badge.svg`, `/api/public/v1/incidents.rss`, `/status`, `/status/incidents/{id}`) is a **single-aggregate** view today: it renders one org's worth of components. Until per-org status routing ships, exposing those routes in SaaS mode would publish every tenant's "public" components to anonymous visitors as one big page.
+
+The hard rule the binary enforces:
+
+| Mode | `public_routes_enabled` | Public routes |
+|---|---|---|
+| Self-host (`tenancy.enabled = false`) | _ignored_ | mounted (one org → no leak) |
+| SaaS (`tenancy.enabled = true`) | `false` (default) | **404** |
+| SaaS (`tenancy.enabled = true`) | `true` | mounted — only flip this on after per-org routing is wired |
+
+If you flip `tenancy.enabled = true` for an existing self-host deployment, the public page disappears unless you also flip `public_routes_enabled`. That is intentional: until the per-slug router lands, leaving the page mounted is a data leak.
+
+### Org limits and the purge worker
+
+- `free_tier_owner_org_limit` (default `3`) caps how many orgs a single user can own. Soft-deleted orgs don't count. Enforced inside the membership `INSERT` so concurrent creates can't exceed the cap.
+- `deletion_grace_period_days` (default `30`) is how long a soft-deleted org's slug is held and how long the original deleter has to restore it.
+- `purge_interval_secs` (default `86400` = 24 h) is the background tick cadence for the soft-delete purge worker. Each tick cascades up to 10 past-grace orgs and drains any pending entries from `clickhouse_purge_queue` (the outbox between PG cascade and ClickHouse `ALTER TABLE DELETE`). See [Soft delete and the 30-day purge](multi-tenancy.md#soft-delete-and-the-30-day-purge) for the full implementation and failure-recovery guarantees.
+
+See [Multi-tenancy](multi-tenancy.md) for the full model, slug rules, and the storage-layer isolation invariants the CI checks enforce.
 
 ## Public status page
 
