@@ -29,6 +29,8 @@ jobs:
           toolchain: "1.95"
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: rust-1.95
       - name: fetch tailwind cli
         run: scripts/fetch-tailwind.sh
       - run: cargo fmt --all -- --check
@@ -49,6 +51,7 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    needs: lint
     services:
       postgres:
         image: postgres:17-alpine
@@ -88,6 +91,8 @@ jobs:
         with:
           toolchain: "1.95"
       - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: rust-1.95
       - name: fetch tailwind cli
         run: scripts/fetch-tailwind.sh
       - name: unit + non-network integration tests
