@@ -22,10 +22,13 @@ const TABLE: &str = "check_results";
 /// migrations that would otherwise destroy data on every startup.
 ///
 /// Constraints (we don't validate these; just don't break them):
-/// - The splitter is comment-aware (`--` line comments are stripped before
-///   splitting on `;`) but has no string-literal tracker — so no `;` inside
-///   string literals. CREATE FUNCTION bodies, multi-line strings, etc. won't
-///   survive.
+/// - The splitter strips `--` line comments before splitting on `;`, but has
+///   no string-literal or block-comment tracker. So a migration must not
+///   contain a `;` inside a string literal, a `--` inside a string literal,
+///   or a `/* … */` block comment containing either character. CREATE
+///   FUNCTION bodies, multi-line strings, etc. won't survive either. Today's
+///   migrations only quote short tokens (`'UTC'`, `'up'`) so the gap is
+///   theoretical; extend the splitter before relying on otherwise.
 /// - The runner is not concurrent-safe: `schema_migrations` is `TinyLog`
 ///   which has no atomic CAS. Two processes racing through their first boot
 ///   could both observe an empty applied set and both run DROP/CREATE.
