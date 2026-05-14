@@ -122,3 +122,57 @@ public_routes_enabled = false
 free_tier_owner_org_limit = 3
 # Grace period before soft-deleted orgs are purged.
 deletion_grace_period_days = 30
+
+# Transactional product email (org invitations, magic-link sign-in). Distinct
+# from [notifications.email], which is the outage-alert SMTP channel.
+[email]
+# "resend" | "log" | "memory". Dev default is "log" so `cargo run` works with
+# no external accounts — action URLs are printed to tracing.
+provider = "log"
+from_name = "Status Monitor"
+from_address = "no-reply@example.invalid"
+
+[email.resend]
+# From https://resend.com/api-keys. Required when provider = "resend".
+api_key = ""
+
+[auth]
+# Currently shipped sign-in methods. Add "magic_link" to enable magic-link
+# email login once the request/verify endpoints are wired.
+enabled_methods = ["github_oauth"]
+# Salt for hashing IPs / user-agents in login_attempts + sessions.
+# GENERATE WITH: openssl rand -base64 32
+# LOAD-BEARING: rotating this re-fragments anomaly-detection windows. The
+# startup guard refuses to boot on a mismatch unless
+# STATUS_MONITOR_AUTH_ACCEPT_SALT_ROTATION=1 is set.
+fingerprint_salt = ""
+
+[auth.session]
+idle_timeout_days = 30
+absolute_timeout_days = 90
+cookie_name = "_sm_session"
+cookie_secure = true
+cookie_domain = ""
+renew_on_use = true
+
+[auth.github]
+client_id = ""
+client_secret = ""
+redirect_url = ""
+scopes = ["user:email", "read:user"]
+http_connect_timeout_ms = 5000
+http_request_timeout_ms = 10000
+
+[auth.invitations]
+expiry_hours = 168
+max_pending_per_org = 50
+
+[auth.api_tokens]
+max_per_user = 25
+# Floor of 16 chars = 48 bits of entropy in the visible prefix (collision-safe
+# to ~16M tokens). Startup assertion refuses to boot below that.
+prefix_visible_chars = 16
+
+[auth.magic_link]
+expiry_minutes = 15
+rate_limit_seconds = 60

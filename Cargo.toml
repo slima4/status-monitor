@@ -96,6 +96,9 @@ arc-swap = "1"
 lettre = { version = "0.11.21", default-features = false, features = ["smtp-transport", "builder", "pool", "tokio1-rustls-tls"] }
 x509-parser = "0.18.1"
 
+# Secret-string wrapper for in-memory API keys / OAuth client secrets.
+secrecy = { version = "0.10", features = ["serde"] }
+
 # OpenAPI schema derivation
 utoipa = { version = "5.5", features = ["axum_extras", "chrono", "uuid", "url"] }
 utoipa-axum = "0.2"

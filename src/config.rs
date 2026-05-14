@@ -28,6 +28,164 @@ pub struct AppConfig {
     pub notifications: NotificationsConfig,
     #[serde(default)]
     pub tenancy: TenancyConfig,
+    #[serde(default)]
+    pub email: TransactionalEmailConfig,
+    #[serde(default)]
+    pub auth: AuthConfig,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct TransactionalEmailConfig {
+    /// Backend: "resend" (HTTP API), "log" (tracing only, dev default), or
+    /// "memory" (in-process buffer for tests).
+    pub provider: String,
+    pub from_name: String,
+    pub from_address: String,
+    pub resend: ResendConfig,
+}
+
+impl Default for TransactionalEmailConfig {
+    fn default() -> Self {
+        Self {
+            provider: "log".into(),
+            from_name: "Status Monitor".into(),
+            from_address: "no-reply@example.invalid".into(),
+            resend: ResendConfig::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(default)]
+pub struct ResendConfig {
+    pub api_key: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct AuthConfig {
+    pub enabled_methods: Vec<String>,
+    pub fingerprint_salt: String,
+    pub session: SessionConfig,
+    pub github: GithubOauthConfig,
+    pub invitations: InvitationsConfig,
+    pub api_tokens: ApiTokensConfig,
+    pub magic_link: MagicLinkConfig,
+}
+
+impl Default for AuthConfig {
+    fn default() -> Self {
+        Self {
+            enabled_methods: vec!["github_oauth".into()],
+            fingerprint_salt: String::new(),
+            session: SessionConfig::default(),
+            github: GithubOauthConfig::default(),
+            invitations: InvitationsConfig::default(),
+            api_tokens: ApiTokensConfig::default(),
+            magic_link: MagicLinkConfig::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct SessionConfig {
+    pub idle_timeout_days: u32,
+    pub absolute_timeout_days: u32,
+    pub cookie_name: String,
+    pub cookie_secure: bool,
+    pub cookie_domain: String,
+    pub renew_on_use: bool,
+}
+
+impl Default for SessionConfig {
+    fn default() -> Self {
+        Self {
+            idle_timeout_days: 30,
+            absolute_timeout_days: 90,
+            cookie_name: "_sm_session".into(),
+            cookie_secure: true,
+            cookie_domain: String::new(),
+            renew_on_use: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct GithubOauthConfig {
+    pub client_id: String,
+    pub client_secret: String,
+    pub redirect_url: String,
+    pub scopes: Vec<String>,
+    pub http_connect_timeout_ms: u64,
+    pub http_request_timeout_ms: u64,
+}
+
+impl Default for GithubOauthConfig {
+    fn default() -> Self {
+        Self {
+            client_id: String::new(),
+            client_secret: String::new(),
+            redirect_url: String::new(),
+            scopes: vec!["user:email".into(), "read:user".into()],
+            http_connect_timeout_ms: 5000,
+            http_request_timeout_ms: 10000,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct InvitationsConfig {
+    pub expiry_hours: u32,
+    pub max_pending_per_org: u32,
+}
+
+impl Default for InvitationsConfig {
+    fn default() -> Self {
+        Self {
+            expiry_hours: 168,
+            max_pending_per_org: 50,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct ApiTokensConfig {
+    pub max_per_user: u32,
+    /// First N chars of every token surfaced in UI + used as a lookup-narrowing
+    /// index. Single source of truth at INSERT and at lookup. Floor of 16 gives
+    /// 48 bits of entropy in the prefix (collision-safe to ~16M tokens); a
+    /// startup assertion refuses to boot below that.
+    pub prefix_visible_chars: u32,
+}
+
+impl Default for ApiTokensConfig {
+    fn default() -> Self {
+        Self {
+            max_per_user: 25,
+            prefix_visible_chars: 16,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct MagicLinkConfig {
+    pub expiry_minutes: u32,
+    pub rate_limit_seconds: u32,
+}
+
+impl Default for MagicLinkConfig {
+    fn default() -> Self {
+        Self {
+            expiry_minutes: 15,
+            rate_limit_seconds: 60,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
