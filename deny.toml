@@ -1,0 +1,86 @@
+# cargo-deny config — license / advisory / ban / source policy.
+# Schema reference: https://embarkstudios.github.io/cargo-deny/checks/index.html
+#
+# The CI workflow runs:
+#   cargo-deny check advisories bans licenses sources
+#
+# Local invocation: `cargo deny check`.
+
+[graph]
+all-features = false
+no-default-features = false
+
+[output]
+feature-depth = 1
+
+# ── Advisories: RustSec database lookup. ────────────────────────────────────
+[advisories]
+db-path = "~/.cargo/advisory-db"
+db-urls = ["https://github.com/rustsec/advisory-db"]
+# CI fails on any known vulnerability or unmaintained crate by default.
+# Each ignored advisory MUST carry a comment explaining (a) which crate it
+# affects, (b) why we can't migrate yet, and (c) when to revisit. Revisit
+# this list whenever a major dep bump lands.
+ignore = [
+    # `backoff` — unmaintained. Pulled in via opentelemetry-otlp's retry path;
+    # no first-party replacement upstream yet. Revisit on next opentelemetry
+    # bump.
+    "RUSTSEC-2025-0012",
+    # `instant` — unmaintained shim for wasm `Instant`. Transitive via
+    # `fastrand`/`parking_lot` test helpers. No action available; will drop
+    # out as those crates migrate to `web-time`.
+    "RUSTSEC-2024-0384",
+    # `paste` — author archived; transitive via `clickhouse` (polonius-the-crab)
+    # and `utoipa-axum`. No safe upgrade; replacements (`pastey`,
+    # `with_builtin_macros`) require upstream PRs. Revisit on clickhouse
+    # 0.16 / utoipa-axum 0.3.
+    "RUSTSEC-2024-0436",
+    # `rustls-pemfile` — archived in favour of `rustls-pki-types::pem`.
+    # Dev-dep-only (test cert helpers); harmless. Revisit when test deps
+    # migrate.
+    "RUSTSEC-2025-0134",
+]
+
+# ── Licenses: explicit allow-list. Anything outside the list fails CI. ──────
+[licenses]
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "Zlib",
+    "MPL-2.0",
+    "CDLA-Permissive-2.0",
+    "0BSD",
+    "BSL-1.0",
+    "OpenSSL",
+    "CC0-1.0",
+]
+confidence-threshold = 0.93
+exceptions = []
+
+# ── Bans: duplicate-version + crate-level deny. ─────────────────────────────
+[bans]
+# Two-major-versions-of-the-same-crate doubles binary size and slows
+# compile. Warn until duplicates are pruned; flip to "deny" later.
+multiple-versions = "warn"
+wildcards = "deny"
+highlight = "all"
+allow = []
+deny = []
+
+# Duplicates we can't easily resolve yet — keep the warning quiet so
+# real ones surface. Each entry should carry a comment explaining why.
+skip = []
+skip-tree = []
+
+# ── Sources: only crates.io + the listed git remotes. ───────────────────────
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

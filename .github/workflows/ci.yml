@@ -15,6 +15,15 @@ on:
       - "*.md"
   workflow_dispatch:
 
+# Cancel superseded runs on the same ref. A push that lands while the
+# previous one is still building (rebase, force-push, fast follow-ups)
+# kills the in-flight job rather than burning runner minutes on a stale
+# commit. `main` is left alone — every commit on it runs to completion
+# so the canonical history's status checks aren't truncated.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: short
@@ -48,6 +57,18 @@ jobs:
           ast-grep --version
       - name: tenant-isolation check
         run: scripts/check_tenant_isolation.sh
+
+  # License + advisory + ban + source audit. Independent of the build,
+  # uses its own cache, runs in parallel with `lint` and `test`. Pinned
+  # to a tagged release of the action so a compromised `main` on the
+  # action repo can't silently change scanning behaviour.
+  deny:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: EmbarkStudios/cargo-deny-action@v2.0.18
+        with:
+          command: check advisories bans licenses sources
 
   test:
     runs-on: ubuntu-latest
@@ -95,7 +116,13 @@ jobs:
           shared-key: rust-1.95
       - name: fetch tailwind cli
         run: scripts/fetch-tailwind.sh
+      - name: install cargo-nextest
+        uses: taiki-e/install-action@v2.77.7
+        with:
+          tool: cargo-nextest
       - name: unit + non-network integration tests
-        run: cargo test --workspace --locked
+        run: cargo nextest run --workspace --locked --no-fail-fast
       - name: pg + ch backed integration tests
-        run: cargo test --workspace --locked -- --include-ignored
+        run: cargo nextest run --workspace --locked --no-fail-fast --run-ignored=only
+      - name: doctests (nextest doesn't run them)
+        run: cargo test --workspace --locked --doc
