@@ -22,6 +22,7 @@ use uuid::Uuid;
 
 use crate::api::error::codes;
 use crate::app::AppState;
+use crate::auth::email_norm;
 use crate::auth::invitations as inv;
 use crate::auth::url::url_encode;
 use crate::domain::{OrgId, Role};
@@ -30,8 +31,6 @@ use crate::error::{AppError, Result};
 use crate::storage::orgs as orgs_store;
 use crate::web::CurrentUser;
 use crate::web::auth::api_token::VerifiedCurrentUser;
-
-const MAX_EMAIL_LEN: usize = 254;
 
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct CreateInvitationRequest {
@@ -282,15 +281,13 @@ fn parse_role(s: &str) -> Result<Role> {
 }
 
 fn validate_email(raw: &str) -> Result<&str> {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() || trimmed.len() > MAX_EMAIL_LEN || !trimmed.contains('@') {
-        return Err(AppError::bad_request_field(
+    email_norm::normalize(raw).ok_or_else(|| {
+        AppError::bad_request_field(
             codes::INVALID_EMAIL,
             "email must contain '@' and be 1-254 chars",
             "email",
-        ));
-    }
-    Ok(trimmed)
+        )
+    })
 }
 
 async fn inviter_display(pool: &sqlx::PgPool, user: crate::domain::UserId) -> Result<String> {

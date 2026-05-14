@@ -17,23 +17,13 @@
 //! partial indexes.
 
 use anyhow::Context;
-use base64::Engine;
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use chrono::{DateTime, Duration, Utc};
-use rand::TryRng;
-use rand::rngs::SysRng;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::auth::token_hash;
+use crate::auth::token_hash::{self, slice_prefix};
 use crate::domain::{OrgId, Role, UserId};
 use crate::error::{AppError, Result};
-
-/// Visible prefix length stored in `invitations.token_prefix`. 16 base64url
-/// chars = 96 bits of entropy — collisions are statistically irrelevant for
-/// the per-org cap; the prefix narrows the lookup to ~1 row and argon2
-/// disambiguates.
-pub const TOKEN_PREFIX_LEN: usize = 16;
 
 /// Hash-friendly invitation record. `token_hash` is the encoded argon2id
 /// PHC string; only the hash leaves this row.
@@ -59,19 +49,7 @@ pub struct CreatedInvitation {
     pub token: String,
 }
 
-/// Generate a fresh 32-byte token, base64url-no-pad encoded (43 chars).
-pub fn generate_raw_token() -> String {
-    let mut bytes = [0u8; 32];
-    SysRng
-        .try_fill_bytes(&mut bytes)
-        .expect("SysRng must succeed for invitation token");
-    URL_SAFE_NO_PAD.encode(bytes)
-}
-
-fn slice_prefix(raw: &str) -> &str {
-    let n = TOKEN_PREFIX_LEN.min(raw.len());
-    &raw[..n]
-}
+pub use crate::auth::token_hash::generate_raw_token;
 
 /// Number of pending invitations on the org. Caller compares to
 /// `max_pending_per_org` before INSERT to keep the table from being used as
@@ -321,11 +299,5 @@ mod tests {
         let t = generate_raw_token();
         assert_eq!(t.len(), 43);
         assert!(!t.contains('=') && !t.contains('+') && !t.contains('/'));
-    }
-
-    #[test]
-    fn slice_prefix_returns_first_16() {
-        let t = generate_raw_token();
-        assert_eq!(slice_prefix(&t).len(), TOKEN_PREFIX_LEN);
     }
 }

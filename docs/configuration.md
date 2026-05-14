@@ -33,6 +33,14 @@ Override `STATUS_MONITOR_CONFIG_PATH` to point at an alternate base config file.
 | `notifications.webhook` | `enabled`, `url` | Generic HTTP POST transport — receives the raw `AlertEvent` JSON. Per-target opt-in via target's `alerts.webhook` |
 | `notifications.email` | `enabled`, `smtp_host`, `smtp_port`, `smtp_user`, `smtp_password`, `from`, `starttls` | SMTP transport via lettre. Per-target opt-in via target's `alerts.email` (recipients carried per target) |
 | `tenancy` | `enabled`, `default_org_slug`, `public_routes_enabled`, `free_tier_owner_org_limit`, `deletion_grace_period_days`, `purge_interval_secs` | Self-host vs SaaS mode + org limits. See [Multi-tenancy mode](#multi-tenancy-mode) below and [docs/multi-tenancy.md](multi-tenancy.md) for the full model |
+| `auth` | `enabled_methods`, `fingerprint_salt`, `public_base_url` | Sign-in methods, HMAC salt for IP/UA hashes, base URL embedded in invitation + magic-link emails. See [Auth configuration](#auth-configuration) below |
+| `auth.session` | `idle_timeout_days`, `absolute_timeout_days`, `cookie_name`, `cookie_secure`, `cookie_domain`, `renew_on_use` | Session cookie shape + lifetime. `cookie_secure = true` in production |
+| `auth.github` | `client_id`, `client_secret`, `redirect_url`, `scopes`, `http_connect_timeout_ms`, `http_request_timeout_ms` | GitHub OAuth client. Empty client_id disables the GitHub button on `/login` |
+| `auth.api_tokens` | `max_per_user`, `prefix_visible_chars` | Cap per user, indexed prefix length for token lookup |
+| `auth.invitations` | `expiry_hours`, `max_pending_per_org` | Invitation lifetime and per-org pending cap |
+| `auth.magic_link` | `expiry_minutes`, `rate_limit_seconds` | Magic-link token lifetime. Routes only mount when `enabled_methods` includes `"magic_link"` |
+| `email` | `provider`, `from_name`, `from_address` | Transactional email backend. `provider` ∈ `"resend" \| "log" \| "memory"` |
+| `email.resend` | `api_key` | Required when `email.provider = "resend"` |
 
 ## Multi-tenancy mode
 
@@ -64,6 +72,61 @@ If you flip `tenancy.enabled = true` for an existing self-host deployment, the p
 - `purge_interval_secs` (default `86400` = 24 h) is the background tick cadence for the soft-delete purge worker. Each tick cascades up to 10 past-grace orgs and drains any pending entries from `clickhouse_purge_queue` (the outbox between PG cascade and ClickHouse `ALTER TABLE DELETE`). See [Soft delete and the 30-day purge](multi-tenancy.md#soft-delete-and-the-30-day-purge) for the full implementation and failure-recovery guarantees.
 
 See [Multi-tenancy](multi-tenancy.md) for the full model, slug rules, and the storage-layer isolation invariants the CI checks enforce.
+
+## Auth configuration
+
+```toml
+[auth]
+enabled_methods = ["github_oauth"]   # add "magic_link" to mount /auth/magic-link/*
+fingerprint_salt = ""                # HMAC salt for IP/UA hashes; rotate-aware
+public_base_url = "https://status.example.test"
+
+[auth.session]
+idle_timeout_days = 30
+absolute_timeout_days = 90
+cookie_name = "_sm_session"
+cookie_secure = true                 # set false only for plain-HTTP local dev
+cookie_domain = ""                   # empty = host-only cookie
+renew_on_use = true
+
+[auth.github]
+client_id = ""                       # from https://github.com/settings/developers
+client_secret = ""
+redirect_url = "https://status.example.test/auth/github/callback"
+scopes = ["user:email", "read:user"]
+http_connect_timeout_ms = 5000
+http_request_timeout_ms = 10000
+
+[auth.invitations]
+expiry_hours = 168                   # 7 days
+max_pending_per_org = 50
+
+[auth.api_tokens]
+max_per_user = 25
+prefix_visible_chars = 16            # floor; lower values fail boot
+
+[auth.magic_link]
+expiry_minutes = 15
+rate_limit_seconds = 60                # reserved; per-email throttling lands in a follow-up
+
+[email]
+provider = "log"                     # "resend" in prod, "log" in dev, "memory" in tests
+from_name = "Status Monitor"
+from_address = "no-reply@example.test"
+
+[email.resend]
+api_key = ""                         # required when provider = "resend"
+```
+
+The GitHub button on `/login` only renders when `auth.github.client_id`
+is set. `auth.enabled_methods` is additive: the GitHub path is always
+active in v1 (it's listed as `"github_oauth"` by default); adding
+`"magic_link"` mounts the magic-link request/verify endpoints.
+
+`auth.fingerprint_salt` is paired with the `auth_salt_history` table.
+Rotating the value mid-deployment refuses to boot unless the override
+env var documented in `docs/troubleshooting.md` is set — this is
+deliberate so audit-trail breakage is loud.
 
 ## Public status page
 

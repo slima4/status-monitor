@@ -182,6 +182,9 @@ impl Default for ApiTokensConfig {
 #[serde(default)]
 pub struct MagicLinkConfig {
     pub expiry_minutes: u32,
+    /// Reserved for per-email throttling on `/auth/magic-link/request`.
+    /// Currently parsed but not enforced — landing the gate logic without
+    /// dropping anti-enum constant-time properties needs its own design pass.
     pub rate_limit_seconds: u32,
 }
 

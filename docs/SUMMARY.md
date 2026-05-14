@@ -7,6 +7,7 @@
 - [Web UI](ui.md)
 - [Public status page](public-status.md)
 - [Multi-tenancy](multi-tenancy.md)
+- [Authentication](authentication.md)
 - [Configuration](configuration.md)
 - [Metrics & tracing](metrics.md)
 - [Deployment](deployment.md)

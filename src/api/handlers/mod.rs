@@ -4,6 +4,7 @@ pub mod dashboard;
 pub mod health;
 pub mod incidents;
 pub mod invitations;
+pub mod magic_link;
 pub mod maintenance;
 pub mod me;
 pub mod orgs;

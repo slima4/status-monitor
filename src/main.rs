@@ -257,6 +257,20 @@ async fn main() -> Result<()> {
     let oauth_state_cleanup_handle: JoinHandle<()> =
         status_monitor::auth::oauth_state_cleanup::spawn(pg_pool_for_stores.clone(), root.clone());
 
+    // Magic-link sweep only runs when the method is wired into the router.
+    // When disabled the routes 404, no rows are ever inserted, and the ticker
+    // would be dead weight.
+    let magic_link_cleanup_handle: Option<JoinHandle<()>> = cfg
+        .auth
+        .enabled_methods
+        .iter()
+        .any(|m| m == "magic_link")
+        .then(|| {
+            let pool = pg_pool_for_stores.clone();
+            let token = root.clone();
+            tokio::spawn(status_monitor::auth::magic_link_cleanup::run(pool, token))
+        });
+
     let state = AppState::new(
         cfg,
         Some(pg_pool_for_stores),
@@ -305,6 +319,9 @@ async fn main() -> Result<()> {
             oauth_state_cleanup_handle,
         );
         if let Some(h) = alert_engine_handle {
+            let _ = h.await;
+        }
+        if let Some(h) = magic_link_cleanup_handle {
             let _ = h.await;
         }
     };

@@ -7,11 +7,14 @@
 //! but their flows arrive in later phases.
 
 pub mod api_tokens;
+pub mod email_norm;
 pub mod fingerprint;
 pub mod github;
 pub mod invitations;
 pub mod invitations_cleanup;
 pub mod login_audit;
+pub mod magic_link;
+pub mod magic_link_cleanup;
 pub mod oauth_state;
 pub mod oauth_state_cleanup;
 pub mod session;

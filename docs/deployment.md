@@ -22,11 +22,56 @@ docker compose up -d
 
 ### Authentication boundary
 
-v1 has **no built-in auth** in the Rust service. The Caddy reverse proxy is the authentication boundary for the UI and API. `/healthz` and `/readyz` are intentionally exposed without auth so uptime probes, load balancers, and orchestrators can hit them. `/metrics` on the public domain returns 404 — scrape it on the internal docker network instead.
+The Rust service ships an in-binary auth stack (GitHub OAuth + opaque
+API tokens; magic-link sign-in is gated by config). In self-host mode
+(`tenancy.enabled = false`) the Caddy basic-auth layer is still the
+recommended boundary — the native auth is wired but a small team usually
+prefers the proxy. In SaaS mode (`tenancy.enabled = true`) the native
+auth is the only boundary; basic-auth in front would double-prompt.
 
-The public status page (`/status`, `/status/*`, `/api/public/*`, `/static/*`, `/robots.txt`, `/favicon.ico`) is **also unauthenticated by design** — see [Public status surface](#public-status-surface) below.
+`/healthz` and `/readyz` are intentionally exposed without auth so
+uptime probes, load balancers, and orchestrators can hit them.
+`/metrics` on the public domain returns 404 — scrape it on the internal
+docker network instead.
 
-If native auth (session cookies, API tokens) is added later, the Caddy basic-auth layer can stay in place during the transition.
+The public status page (`/status`, `/status/*`, `/api/public/*`,
+`/static/*`, `/robots.txt`, `/favicon.ico`) is **also unauthenticated by
+design** — see [Public status surface](#public-status-surface) below.
+
+See [Authentication](authentication.md) for the in-binary flow.
+
+### Email provider (Resend)
+
+Transactional email (invitations, magic-link sign-in) goes through the
+`EmailSender` trait. Production uses [Resend](https://resend.com); dev
+and test default to the `log` provider, which writes the action URL to
+the tracing log so you can copy-paste it into a browser.
+
+Setup:
+
+1. Create a Resend account and verify your sending domain. Resend will
+   give you DKIM and DMARC records to add to DNS.
+2. Generate an API key with `emails.send` permission only.
+3. Configure the service:
+
+   ```toml
+   [email]
+   provider = "resend"
+   from_name = "Acme Status"
+   from_address = "no-reply@status.acme.test"
+
+   [email.resend]
+   api_key = "re_…"
+   ```
+
+   Or via env: `STATUS_MONITOR_EMAIL__PROVIDER=resend`,
+   `STATUS_MONITOR_EMAIL__RESEND__API_KEY=re_…`.
+4. `auth.public_base_url` must be set to the externally-reachable origin
+   (e.g. `https://status.acme.test`); the value is embedded in the links
+   the recipient receives.
+
+The factory rejects boot when `provider = "resend"` is set without a
+non-empty API key — fail-fast over send-time surprise.
 
 ### Public status surface
 

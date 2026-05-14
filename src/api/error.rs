@@ -120,4 +120,6 @@ pub mod codes {
     pub const INVALID_EMAIL: &str = "INVALID_EMAIL";
     pub const CSRF_PROTECTION: &str = "CSRF_PROTECTION";
     pub const FINGERPRINT_SALT_ROTATED: &str = "FINGERPRINT_SALT_ROTATED";
+    // Magic-link sign-in (v1.1 — gated by auth.enabled_methods).
+    pub const MAGIC_LINK_INVALID: &str = "MAGIC_LINK_INVALID";
 }

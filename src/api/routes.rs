@@ -149,7 +149,7 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
         v1 = v1.layer(layer);
     }
 
-    let auth_routes = Router::new()
+    let mut auth_routes = Router::new()
         .route("/auth/github/login", get(handlers::auth::github_login))
         .route(
             "/auth/github/callback",
@@ -157,6 +157,15 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
         )
         .route("/auth/logout", post(handlers::auth::logout))
         .route("/auth/logout-all", post(handlers::auth::logout_all));
+
+    if magic_link_enabled(&state.cfg) {
+        auth_routes = auth_routes
+            .route(
+                "/auth/magic-link/request",
+                post(handlers::magic_link::request),
+            )
+            .route("/auth/magic-link/verify", get(handlers::magic_link::verify));
+    }
 
     let mut root = Router::new()
         .route("/healthz", get(handlers::health::healthz))
@@ -188,6 +197,14 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
 /// data to every SaaS tenant.
 pub fn public_routes_active(cfg: &crate::config::AppConfig) -> bool {
     !cfg.tenancy.enabled || cfg.tenancy.public_routes_enabled
+}
+
+/// Whether the `auth.enabled_methods` config includes `"magic_link"`. Wires
+/// the request/verify endpoints when true; otherwise the routes are absent
+/// and the surface 404s. The schema/templates exist either way — the
+/// `magic_link_tokens` table simply stays empty.
+pub fn magic_link_enabled(cfg: &crate::config::AppConfig) -> bool {
+    cfg.auth.enabled_methods.iter().any(|m| m == "magic_link")
 }
 
 /// Builds the public, unauthenticated `/api/public/v1/*` router. Lives in its

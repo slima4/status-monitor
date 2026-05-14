@@ -82,8 +82,9 @@ pub async fn github_callback(
 
     // Phase A: consume state. Single-use; expired or unknown → 400.
     let Some(consumed) = oauth_state::consume(pool, &q.state).await? else {
-        record_failure(
+        login_audit::record_failure_anon(
             pool,
+            LoginMethod::GithubOauth,
             ip_hash.as_deref(),
             ua_hash.as_deref(),
             "invalid_state",
@@ -101,8 +102,9 @@ pub async fn github_callback(
             Ok(id) => id,
             Err(err) => {
                 tracing::warn!(error = %err, "github_callback: phase B failed");
-                record_failure(
+                login_audit::record_failure_anon(
                     pool,
+                    LoginMethod::GithubOauth,
                     ip_hash.as_deref(),
                     ua_hash.as_deref(),
                     "github_upstream_failed",
@@ -212,24 +214,6 @@ pub async fn logout_all(
     }
     cookies.add(session_store::clear_cookie(&state.cfg.auth.session));
     Ok(Redirect::to("/login").into_response())
-}
-
-async fn record_failure(
-    pool: &sqlx::PgPool,
-    ip_hash: Option<&str>,
-    ua_hash: Option<&str>,
-    reason: &'static str,
-) {
-    let attempt = LoginAttempt {
-        user_id: None,
-        success: false,
-        ip_hash,
-        user_agent_hash: ua_hash,
-        failure_reason: Some(reason),
-    };
-    if let Err(err) = login_audit::record(pool, LoginMethod::GithubOauth, attempt).await {
-        tracing::warn!(error = %err, "login_audit record failure write failed");
-    }
 }
 
 // Silence dead-code on the imported error codes for the placeholder

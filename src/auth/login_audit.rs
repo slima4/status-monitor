@@ -36,6 +36,29 @@ pub struct LoginAttempt<'a> {
     pub failure_reason: Option<&'a str>,
 }
 
+/// Best-effort anonymous-failure write. Centralises the `LoginAttempt {
+/// success: false, user_id: None, … }` shape used by every callback's
+/// "couldn't identify the user" path. Errors are logged, not surfaced — a
+/// missed audit row must not break a downstream auth response.
+pub async fn record_failure_anon(
+    pool: &PgPool,
+    method: LoginMethod,
+    ip_hash: Option<&str>,
+    user_agent_hash: Option<&str>,
+    reason: &'static str,
+) {
+    let attempt = LoginAttempt {
+        user_id: None,
+        success: false,
+        ip_hash,
+        user_agent_hash,
+        failure_reason: Some(reason),
+    };
+    if let Err(err) = record(pool, method, attempt).await {
+        tracing::warn!(error = %err, method = %method.as_db_str(), reason, "login_audit anon failure write failed");
+    }
+}
+
 pub async fn record(pool: &PgPool, method: LoginMethod, attempt: LoginAttempt<'_>) -> Result<Uuid> {
     let (id,): (Uuid,) = sqlx::query_as(
         "INSERT INTO login_attempts \
