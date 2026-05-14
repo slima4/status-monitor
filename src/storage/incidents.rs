@@ -13,7 +13,7 @@ use uuid::Uuid;
 
 use crate::domain::{
     CheckStatus, Incident, IncidentNarrationUpdate, IncidentSeverity, IncidentStatusPhase,
-    NewIncidentUpdate, PublicIncidentUpdate,
+    NewIncidentUpdate, OrgId, PublicIncidentUpdate,
 };
 use crate::error::Result;
 
@@ -35,13 +35,24 @@ pub trait IncidentNarrationStore: Send + Sync {
 
 // ── Postgres impl ────────────────────────────────────────────────────────
 
+/// Org-scoped operator-side incident store. Every query binds
+/// `self.default_org_id` so an operator on one tenant cannot read or mutate
+/// incidents owned by another.
 pub struct PgIncidentNarrationStore {
     pool: PgPool,
+    default_org_id: OrgId,
 }
 
 impl PgIncidentNarrationStore {
-    pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+    pub fn new(pool: PgPool, default_org_id: OrgId) -> Self {
+        Self {
+            pool,
+            default_org_id,
+        }
+    }
+
+    fn org_id(&self) -> Uuid {
+        self.default_org_id.0
     }
 }
 
@@ -69,14 +80,15 @@ struct UpdateRow {
     message: String,
 }
 
-async fn load_with_updates(pool: &PgPool, id: Uuid) -> Result<Option<Incident>> {
+async fn load_with_updates(pool: &PgPool, id: Uuid, org_id: Uuid) -> Result<Option<Incident>> {
     let Some(row): Option<IncidentRow> = sqlx::query_as(
         r#"SELECT id, target_id, started_at, ended_at, severity, status_at_start,
                   check_count, error_sample, public_title, public_description,
                   duration_secs, created_at, updated_at
-           FROM incidents WHERE id = $1"#,
+           FROM incidents WHERE id = $1 AND org_id = $2"#,
     )
     .bind(id)
+    .bind(org_id)
     .fetch_optional(pool)
     .await
     .map_err(|e| anyhow::anyhow!("get incident: {e}"))?
@@ -86,10 +98,11 @@ async fn load_with_updates(pool: &PgPool, id: Uuid) -> Result<Option<Incident>> 
     let updates: Vec<UpdateRow> = sqlx::query_as(
         r#"SELECT posted_at, phase, message
            FROM incident_updates
-           WHERE incident_id = $1
+           WHERE incident_id = $1 AND org_id = $2
            ORDER BY posted_at ASC"#,
     )
     .bind(id)
+    .bind(org_id)
     .fetch_all(pool)
     .await
     .map_err(|e| anyhow::anyhow!("get incident updates: {e}"))?;
@@ -134,7 +147,7 @@ fn parse_status(s: &str) -> CheckStatus {
 #[async_trait]
 impl IncidentNarrationStore for PgIncidentNarrationStore {
     async fn get(&self, id: Uuid) -> Result<Option<Incident>> {
-        load_with_updates(&self.pool, id).await
+        load_with_updates(&self.pool, id, self.org_id()).await
     }
 
     async fn patch_narration(
@@ -149,7 +162,7 @@ impl IncidentNarrationStore for PgIncidentNarrationStore {
                    public_description = CASE WHEN $4::bool THEN $5 ELSE public_description END,
                    severity           = COALESCE($6, severity),
                    updated_at         = now()
-               WHERE id = $1
+               WHERE id = $1 AND org_id = $7
                RETURNING id, target_id, started_at, ended_at, severity, status_at_start,
                          check_count, error_sample, public_title, public_description,
                          duration_secs, created_at, updated_at"#,
@@ -160,6 +173,7 @@ impl IncidentNarrationStore for PgIncidentNarrationStore {
         .bind(update.public_description.is_some())
         .bind(update.public_description.clone().flatten())
         .bind(severity)
+        .bind(self.org_id())
         .fetch_optional(&self.pool)
         .await
         .map_err(|e| anyhow::anyhow!("patch_narration: {e}"))?;
@@ -167,10 +181,11 @@ impl IncidentNarrationStore for PgIncidentNarrationStore {
         let updates: Vec<UpdateRow> = sqlx::query_as(
             r#"SELECT posted_at, phase, message
                FROM incident_updates
-               WHERE incident_id = $1
+               WHERE incident_id = $1 AND org_id = $2
                ORDER BY posted_at ASC"#,
         )
         .bind(id)
+        .bind(self.org_id())
         .fetch_all(&self.pool)
         .await
         .map_err(|e| anyhow::anyhow!("get incident updates: {e}"))?;
@@ -192,25 +207,29 @@ impl IncidentNarrationStore for PgIncidentNarrationStore {
             .begin()
             .await
             .map_err(|e| anyhow::anyhow!("begin: {e}"))?;
-        // org_id is denormalised onto incident_updates and is also enforced by
-        // the trg_incident_updates_org_match trigger — pulling it from the
-        // parent incident here keeps the trigger satisfied even if a future
-        // caller passes a wrong default_org_id.
+        // org_id is denormalised onto incident_updates and enforced by the
+        // trg_incident_updates_org_match trigger. Filtering by the operator's
+        // own org_id here means an attempt to append to another tenant's
+        // incident yields a clean no-op instead of touching the parent row.
         let row: Option<(DateTime<Utc>, String, String)> = sqlx::query_as(
             r#"INSERT INTO incident_updates (org_id, incident_id, phase, message, author)
-               SELECT i.org_id, $1, $2, $3, $4 FROM incidents i WHERE i.id = $1
+               SELECT i.org_id, $1, $2, $3, $4
+               FROM incidents i
+               WHERE i.id = $1 AND i.org_id = $5
                RETURNING posted_at, phase, message"#,
         )
         .bind(incident_id)
         .bind(phase_db)
         .bind(&new.message)
         .bind(author)
+        .bind(self.org_id())
         .fetch_optional(&mut *tx)
         .await
         .map_err(|e| anyhow::anyhow!("append_update insert: {e}"))?;
         if row.is_some() {
-            sqlx::query(r#"UPDATE incidents SET updated_at = now() WHERE id = $1"#)
+            sqlx::query(r#"UPDATE incidents SET updated_at = now() WHERE id = $1 AND org_id = $2"#)
                 .bind(incident_id)
+                .bind(self.org_id())
                 .execute(&mut *tx)
                 .await
                 .map_err(|e| anyhow::anyhow!("append_update bump parent: {e}"))?;

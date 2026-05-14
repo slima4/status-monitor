@@ -25,7 +25,6 @@ pub trait TargetStore: Send + Sync {
     /// Total rows matching `filter` (ignoring `limit`/`offset`). Used to fill
     /// the `total` field of `PageEnvelope`.
     async fn count(&self, filter: TargetFilter) -> Result<u64>;
-    async fn list_enabled(&self) -> Result<Vec<Target>>;
     async fn get(&self, id: Uuid) -> Result<Option<Target>>;
     async fn create(&self, new: NewTarget) -> Result<Target>;
     async fn update(&self, id: Uuid, update: TargetUpdate) -> Result<Option<Target>>;

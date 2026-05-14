@@ -274,6 +274,11 @@ fn trailing_up_run(results: &[CheckResult]) -> &[CheckResult] {
 
 // ── PostgreSQL implementation ────────────────────────────────────────────────
 
+/// Org-scoped writer. The single-process materialiser today only services the
+/// default org (`tenancy.enabled = false`); a SaaS deployment that runs one
+/// materialiser across every tenant must either route each `CheckResult` to a
+/// per-org writer or replace this with an `AdminRepo`-style cross-org variant
+/// that derives `org_id` from the underlying target row.
 pub struct PgIncidentStore {
     pool: PgPool,
     default_org_id: OrgId,
@@ -297,10 +302,11 @@ impl IncidentStore for PgIncidentStore {
     async fn open_for_target(&self, target_id: Uuid) -> Result<Option<OpenIncident>> {
         let row: Option<OpenIncidentRow> = sqlx::query_as::<_, OpenIncidentRow>(
             r#"SELECT id, target_id, started_at FROM incidents
-               WHERE target_id = $1 AND ended_at IS NULL
+               WHERE target_id = $1 AND org_id = $2 AND ended_at IS NULL
                ORDER BY started_at DESC LIMIT 1"#,
         )
         .bind(target_id)
+        .bind(self.default_org_id.0)
         .fetch_optional(&self.pool)
         .await
         .context("incident open_for_target")?;
@@ -321,7 +327,7 @@ impl IncidentStore for PgIncidentStore {
                SELECT $6, $1, $2, $3, $4, $5
                WHERE NOT EXISTS (
                    SELECT 1 FROM incidents
-                   WHERE target_id = $1 AND ended_at IS NULL
+                   WHERE target_id = $1 AND org_id = $6 AND ended_at IS NULL
                )
                RETURNING id"#,
         )
@@ -343,10 +349,11 @@ impl IncidentStore for PgIncidentStore {
                SET ended_at = $2,
                    duration_secs = GREATEST(0, EXTRACT(EPOCH FROM ($2 - started_at))::int),
                    updated_at = now()
-               WHERE id = $1 AND ended_at IS NULL"#,
+               WHERE id = $1 AND org_id = $3 AND ended_at IS NULL"#,
         )
         .bind(incident_id)
         .bind(ended_at)
+        .bind(self.default_org_id.0)
         .execute(&self.pool)
         .await
         .context("incident close")?;

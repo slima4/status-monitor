@@ -17,11 +17,14 @@ use crate::security::Cipher;
 use crate::storage::postgres_secrets::{decrypt_in_place, encrypt_in_place};
 use crate::storage::traits::{TargetFilter, TargetStore};
 
+/// Org-scoped Postgres-backed target store. Every query binds
+/// `self.default_org_id` so reads, updates, and deletes are isolated to the
+/// owning organisation. Cross-tenant operations (e.g. scheduler-wide
+/// enumeration) go through `crate::storage::admin::AdminRepo`, never through
+/// this type.
 pub struct PostgresTargetStore {
     pool: PgPool,
     cipher: Option<Arc<Cipher>>,
-    /// Org id every insert is stamped with. Phase 2 will replace this with an
-    /// `OrgId` parameter on each trait method.
     default_org_id: OrgId,
 }
 
@@ -71,30 +74,7 @@ impl PostgresTargetStore {
     }
 
     fn decode_row(&self, row: TargetRow) -> Result<Target> {
-        let mut check_json = row.check_spec;
-        if let Some(cipher) = &self.cipher {
-            decrypt_in_place(&mut check_json, cipher, row.id)?;
-        }
-        let check: CheckSpec =
-            serde_json::from_value(check_json).context("decoding check_spec JSON")?;
-        let alerts: TargetAlerts =
-            serde_json::from_value(row.alerts).context("decoding alerts JSON")?;
-        Ok(Target {
-            id: row.id,
-            name: row.name,
-            check,
-            interval: Duration::from_secs(row.interval_secs.max(0) as u64),
-            enabled: row.enabled,
-            tags: row.tags,
-            alerts,
-            public_status: row.public_status,
-            public_name: row.public_name,
-            public_description: row.public_description,
-            public_group: row.public_group,
-            public_sort_order: row.public_sort_order,
-            created_at: row.created_at,
-            updated_at: row.updated_at,
-        })
+        decode_target_row(row, self.cipher.as_deref())
     }
 
     fn rows_to_targets(&self, rows: Vec<TargetRow>) -> Result<Vec<Target>> {
@@ -103,21 +83,51 @@ impl PostgresTargetStore {
 }
 
 #[derive(sqlx::FromRow)]
-struct TargetRow {
-    id: Uuid,
-    name: String,
-    check_spec: serde_json::Value,
-    interval_secs: i32,
-    enabled: bool,
-    tags: Vec<String>,
-    alerts: serde_json::Value,
-    public_status: bool,
-    public_name: Option<String>,
-    public_description: Option<String>,
-    public_group: Option<String>,
-    public_sort_order: i32,
-    created_at: DateTime<Utc>,
-    updated_at: DateTime<Utc>,
+pub(crate) struct TargetRow {
+    pub(crate) id: Uuid,
+    pub(crate) name: String,
+    pub(crate) check_spec: serde_json::Value,
+    pub(crate) interval_secs: i32,
+    pub(crate) enabled: bool,
+    pub(crate) tags: Vec<String>,
+    pub(crate) alerts: serde_json::Value,
+    pub(crate) public_status: bool,
+    pub(crate) public_name: Option<String>,
+    pub(crate) public_description: Option<String>,
+    pub(crate) public_group: Option<String>,
+    pub(crate) public_sort_order: i32,
+    pub(crate) created_at: DateTime<Utc>,
+    pub(crate) updated_at: DateTime<Utc>,
+}
+
+/// Build a `Target` from a row, decrypting `check_spec` if a cipher is
+/// configured. Shared between [`PostgresTargetStore`] (org-scoped reads) and
+/// [`crate::storage::AdminRepo`] (cross-tenant scheduler enumeration).
+pub(crate) fn decode_target_row(row: TargetRow, cipher: Option<&Cipher>) -> Result<Target> {
+    let mut check_json = row.check_spec;
+    if let Some(cipher) = cipher {
+        decrypt_in_place(&mut check_json, cipher, row.id)?;
+    }
+    let check: CheckSpec =
+        serde_json::from_value(check_json).context("decoding check_spec JSON")?;
+    let alerts: TargetAlerts =
+        serde_json::from_value(row.alerts).context("decoding alerts JSON")?;
+    Ok(Target {
+        id: row.id,
+        name: row.name,
+        check,
+        interval: Duration::from_secs(row.interval_secs.max(0) as u64),
+        enabled: row.enabled,
+        tags: row.tags,
+        alerts,
+        public_status: row.public_status,
+        public_name: row.public_name,
+        public_description: row.public_description,
+        public_group: row.public_group,
+        public_sort_order: row.public_sort_order,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+    })
 }
 
 
@@ -131,11 +141,13 @@ impl TargetStore for PostgresTargetStore {
                       public_status, public_name, public_description, public_group, public_sort_order,
                       created_at, updated_at
                FROM targets
-               WHERE ($1::bool IS NULL OR enabled = $1)
-                 AND ($2::text IS NULL OR $2 = ANY(tags))
+               WHERE org_id = $1
+                 AND ($2::bool IS NULL OR enabled = $2)
+                 AND ($3::text IS NULL OR $3 = ANY(tags))
                ORDER BY created_at DESC
-               LIMIT $3 OFFSET $4"#,
+               LIMIT $4 OFFSET $5"#,
         )
+        .bind(self.org_id())
         .bind(filter.enabled)
         .bind(filter.tag)
         .bind(limit)
@@ -149,9 +161,11 @@ impl TargetStore for PostgresTargetStore {
     async fn count(&self, filter: TargetFilter) -> Result<u64> {
         let row: (i64,) = sqlx::query_as(
             r#"SELECT count(*) FROM targets
-               WHERE ($1::bool IS NULL OR enabled = $1)
-                 AND ($2::text IS NULL OR $2 = ANY(tags))"#,
+               WHERE org_id = $1
+                 AND ($2::bool IS NULL OR enabled = $2)
+                 AND ($3::text IS NULL OR $3 = ANY(tags))"#,
         )
+        .bind(self.org_id())
         .bind(filter.enabled)
         .bind(filter.tag)
         .fetch_one(&self.pool)
@@ -160,28 +174,15 @@ impl TargetStore for PostgresTargetStore {
         Ok(row.0.max(0) as u64)
     }
 
-    async fn list_enabled(&self) -> Result<Vec<Target>> {
-        let rows: Vec<TargetRow> = sqlx::query_as::<_, TargetRow>(
-            r#"SELECT id, name, check_spec, interval_secs, enabled, tags, alerts,
-                      public_status, public_name, public_description, public_group, public_sort_order,
-                      created_at, updated_at
-               FROM targets
-               WHERE enabled = true"#,
-        )
-        .fetch_all(&self.pool)
-        .await
-        .context("query enabled targets")?;
-        self.rows_to_targets(rows)
-    }
-
     async fn get(&self, id: Uuid) -> Result<Option<Target>> {
         let row: Option<TargetRow> = sqlx::query_as::<_, TargetRow>(
             r#"SELECT id, name, check_spec, interval_secs, enabled, tags, alerts,
                       public_status, public_name, public_description, public_group, public_sort_order,
                       created_at, updated_at
-               FROM targets WHERE id = $1"#,
+               FROM targets WHERE id = $1 AND org_id = $2"#,
         )
         .bind(id)
+        .bind(self.org_id())
         .fetch_optional(&self.pool)
         .await
         .context("get target by id")?;
@@ -247,7 +248,7 @@ impl TargetStore for PostgresTargetStore {
                  public_group = COALESCE($11, public_group),
                  public_sort_order = COALESCE($12, public_sort_order),
                  updated_at = now()
-               WHERE id = $1
+               WHERE id = $1 AND org_id = $13
                RETURNING id, name, check_spec, interval_secs, enabled, tags, alerts,
                       public_status, public_name, public_description, public_group, public_sort_order,
                       created_at, updated_at"#,
@@ -264,6 +265,7 @@ impl TargetStore for PostgresTargetStore {
         .bind(update.public_description)
         .bind(update.public_group)
         .bind(update.public_sort_order)
+        .bind(self.org_id())
         .fetch_optional(&self.pool)
         .await
         .context("update target")?;
@@ -274,8 +276,9 @@ impl TargetStore for PostgresTargetStore {
     }
 
     async fn delete(&self, id: Uuid) -> Result<bool> {
-        let res = sqlx::query("DELETE FROM targets WHERE id = $1")
+        let res = sqlx::query("DELETE FROM targets WHERE id = $1 AND org_id = $2")
             .bind(id)
+            .bind(self.org_id())
             .execute(&self.pool)
             .await
             .context("delete target")?;
@@ -393,8 +396,9 @@ impl TargetStore for PostgresTargetStore {
             r#"SELECT id, name, check_spec, interval_secs, enabled, tags, alerts,
                       public_status, public_name, public_description, public_group, public_sort_order,
                       created_at, updated_at
-               FROM targets WHERE updated_at > $1"#,
+               FROM targets WHERE org_id = $1 AND updated_at > $2"#,
         )
+        .bind(self.org_id())
         .bind(since)
         .fetch_all(&self.pool)
         .await
@@ -407,11 +411,13 @@ impl TargetStore for PostgresTargetStore {
         let rows: Vec<(String, i64)> = sqlx::query_as(
             r#"SELECT tag, count(*) AS c
                FROM targets, unnest(tags) AS tag
-               WHERE ($1::text IS NULL OR tag LIKE $1)
+               WHERE org_id = $1
+                 AND ($2::text IS NULL OR tag LIKE $2)
                GROUP BY tag
                ORDER BY c DESC, tag ASC
-               LIMIT $2"#,
+               LIMIT $3"#,
         )
+        .bind(self.org_id())
         .bind(prefix_pat)
         .bind(limit as i64)
         .fetch_all(&self.pool)
@@ -431,8 +437,10 @@ impl TargetStore for PostgresTargetStore {
         let row: (i64,) = sqlx::query_as(
             r#"SELECT count(DISTINCT tag)
                FROM targets, unnest(tags) AS tag
-               WHERE ($1::text IS NULL OR tag LIKE $1)"#,
+               WHERE org_id = $1
+                 AND ($2::text IS NULL OR tag LIKE $2)"#,
         )
+        .bind(self.org_id())
         .bind(prefix_pat)
         .fetch_one(&self.pool)
         .await
@@ -444,8 +452,10 @@ impl TargetStore for PostgresTargetStore {
         let row: (i64, i64) = sqlx::query_as(
             r#"SELECT count(*) FILTER (WHERE TRUE),
                       count(*) FILTER (WHERE enabled)
-               FROM targets"#,
+               FROM targets
+               WHERE org_id = $1"#,
         )
+        .bind(self.org_id())
         .fetch_one(&self.pool)
         .await
         .context("targets summary")?;
@@ -464,10 +474,11 @@ impl TargetStore for PostgresTargetStore {
         }
         let rows: Vec<(Uuid,)> = sqlx::query_as(
             r#"UPDATE targets SET enabled = $2, updated_at = now()
-               WHERE id = ANY($1) RETURNING id"#,
+               WHERE id = ANY($1) AND org_id = $3 RETURNING id"#,
         )
         .bind(ids)
         .bind(enabled)
+        .bind(self.org_id())
         .fetch_all(&self.pool)
         .await
         .context("bulk set_enabled")?;
@@ -479,9 +490,10 @@ impl TargetStore for PostgresTargetStore {
             return Ok(Vec::new());
         }
         let rows: Vec<(Uuid,)> = sqlx::query_as(
-            r#"DELETE FROM targets WHERE id = ANY($1) RETURNING id"#,
+            r#"DELETE FROM targets WHERE id = ANY($1) AND org_id = $2 RETURNING id"#,
         )
         .bind(ids)
+        .bind(self.org_id())
         .fetch_all(&self.pool)
         .await
         .context("bulk delete")?;
@@ -499,11 +511,12 @@ impl TargetStore for PostgresTargetStore {
                  FROM unnest(tags || $2) AS t
                ),
                updated_at = now()
-               WHERE id = ANY($1)
+               WHERE id = ANY($1) AND org_id = $3
                RETURNING id"#,
         )
         .bind(ids)
         .bind(tags)
+        .bind(self.org_id())
         .fetch_all(&self.pool)
         .await
         .context("bulk add_tags")?;
@@ -522,11 +535,12 @@ impl TargetStore for PostgresTargetStore {
                  WHERE NOT (t = ANY($2))
                ), ARRAY[]::text[]),
                updated_at = now()
-               WHERE id = ANY($1)
+               WHERE id = ANY($1) AND org_id = $3
                RETURNING id"#,
         )
         .bind(ids)
         .bind(tags)
+        .bind(self.org_id())
         .fetch_all(&self.pool)
         .await
         .context("bulk remove_tags")?;

@@ -121,7 +121,10 @@ async fn main() -> Result<()> {
         cfg.circuit_breaker,
         fanout,
     ));
-    let registry = Arc::new(TargetRegistry::new(target_store.clone()));
+    let scheduler_source: Arc<dyn storage::admin::EnabledTargetSource> = Arc::new(
+        storage::admin::AdminRepo::new(pg_pool.clone(), cipher.clone(), "scheduler_refresh"),
+    );
+    let registry = Arc::new(TargetRegistry::new(scheduler_source));
     let scheduler = Arc::new(Scheduler::new(
         registry.clone(),
         pool.clone(),
@@ -180,6 +183,7 @@ async fn main() -> Result<()> {
         aggregator,
         public_cache,
         pg_pool.clone(),
+        default_org_id,
         aggregator_cfg.site_name.clone(),
     ));
 
@@ -201,7 +205,7 @@ async fn main() -> Result<()> {
         default_org_id,
     ));
     let incident_narration_store: Arc<dyn IncidentNarrationStore> =
-        Arc::new(PgIncidentNarrationStore::new(pg_pool_for_stores));
+        Arc::new(PgIncidentNarrationStore::new(pg_pool_for_stores, default_org_id));
 
     let state = AppState::new(
         cfg,

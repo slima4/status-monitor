@@ -1,0 +1,17 @@
+id: admin-repo-static-reason
+language: rust
+severity: error
+message: |-
+  `AdminRepo::new` must receive a string literal as its third argument
+  (the audit `reason`). A dynamic string would defeat the audit grep that
+  enumerates every cross-tenant entry point.
+note: |-
+  Allowed:    AdminRepo::new(pool, cipher, "scheduler_refresh")
+  Forbidden:  AdminRepo::new(pool, cipher, some_var)
+              AdminRepo::new(pool, cipher, format!("..."))
+rule:
+  pattern: AdminRepo::new($POOL, $CIPHER, $REASON)
+constraints:
+  REASON:
+    not:
+      kind: string_literal

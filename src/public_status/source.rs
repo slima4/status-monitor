@@ -16,7 +16,7 @@ use uuid::Uuid;
 use crate::api::PageEnvelope;
 use crate::api::public_error::PublicAppError;
 use crate::domain::{
-    ComponentHistoryResponse, IncidentSeverity, IncidentStatusPhase, PublicIncident,
+    ComponentHistoryResponse, IncidentSeverity, IncidentStatusPhase, OrgId, PublicIncident,
     PublicIncidentUpdate, PublicMaintenanceList, PublicStatusPage,
 };
 
@@ -62,6 +62,7 @@ pub struct LivePublicSource {
     aggregator: Arc<LiveAggregator>,
     cache: PageCache,
     pg: PgPool,
+    default_org_id: OrgId,
     rss_lookback_days: u32,
     rss_max_items: u32,
     site_name: String,
@@ -72,12 +73,14 @@ impl LivePublicSource {
         aggregator: Arc<LiveAggregator>,
         cache: PageCache,
         pg: PgPool,
+        default_org_id: OrgId,
         site_name: impl Into<String>,
     ) -> Self {
         Self {
             aggregator,
             cache,
             pg,
+            default_org_id,
             rss_lookback_days: 90,
             rss_max_items: 50,
             site_name: site_name.into(),
@@ -129,7 +132,9 @@ impl PublicSource for LivePublicSource {
                       i.public_title, i.public_description
                FROM incidents i
                JOIN targets t ON t.id = i.target_id
-               WHERE t.public_status = true
+               WHERE i.org_id = $5
+                 AND t.org_id = $5
+                 AND t.public_status = true
                  AND i.started_at >= $1
                  AND ($2 = false OR i.ended_at IS NULL)
                ORDER BY i.started_at DESC
@@ -139,6 +144,7 @@ impl PublicSource for LivePublicSource {
         .bind(ongoing_only)
         .bind(limit)
         .bind(offset)
+        .bind(self.default_org_id.0)
         .fetch_all(&self.pg)
         .await
         .context("public list incidents")
@@ -148,12 +154,15 @@ impl PublicSource for LivePublicSource {
             r#"SELECT count(*)
                FROM incidents i
                JOIN targets t ON t.id = i.target_id
-               WHERE t.public_status = true
+               WHERE i.org_id = $3
+                 AND t.org_id = $3
+                 AND t.public_status = true
                  AND i.started_at >= $1
                  AND ($2 = false OR i.ended_at IS NULL)"#,
         )
         .bind(since)
         .bind(ongoing_only)
+        .bind(self.default_org_id.0)
         .fetch_one(&self.pg)
         .await
         .context("public count incidents")
@@ -176,9 +185,13 @@ impl PublicSource for LivePublicSource {
                       i.public_title, i.public_description
                FROM incidents i
                JOIN targets t ON t.id = i.target_id
-               WHERE i.id = $1 AND t.public_status = true"#,
+               WHERE i.id = $1
+                 AND i.org_id = $2
+                 AND t.org_id = $2
+                 AND t.public_status = true"#,
         )
         .bind(id)
+        .bind(self.default_org_id.0)
         .fetch_optional(&self.pg)
         .await
         .context("public get incident")
@@ -217,10 +230,11 @@ impl LivePublicSource {
         let updates: Vec<UpdateRow> = sqlx::query_as::<_, UpdateRow>(
             r#"SELECT incident_id, posted_at, phase, message
                FROM incident_updates
-               WHERE incident_id = ANY($1)
+               WHERE incident_id = ANY($1) AND org_id = $2
                ORDER BY incident_id, posted_at ASC"#,
         )
         .bind(&ids)
+        .bind(self.default_org_id.0)
         .fetch_all(&self.pg)
         .await
         .context("public list incident updates")

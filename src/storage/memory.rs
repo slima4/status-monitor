@@ -277,16 +277,6 @@ impl TargetStore for InMemoryTargetStore {
         Ok(n as u64)
     }
 
-    async fn list_enabled(&self) -> Result<Vec<Target>> {
-        Ok(self
-            .targets
-            .lock()
-            .iter()
-            .filter(|t| t.enabled)
-            .cloned()
-            .collect())
-    }
-
     async fn get(&self, id: Uuid) -> Result<Option<Target>> {
         Ok(self.targets.lock().iter().find(|t| t.id == id).cloned())
     }
@@ -474,5 +464,18 @@ impl TargetStore for InMemoryTargetStore {
 
     async fn ping(&self) -> Result<()> {
         Ok(())
+    }
+}
+
+#[async_trait]
+impl crate::storage::admin::EnabledTargetSource for InMemoryTargetStore {
+    async fn list_all_enabled_targets(&self) -> Result<Vec<Target>> {
+        Ok(self
+            .targets
+            .lock()
+            .iter()
+            .filter(|t| t.enabled)
+            .cloned()
+            .collect())
     }
 }

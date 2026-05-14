@@ -1,0 +1,18 @@
+id: no-raw-tenant-sql
+language: rust
+severity: error
+message: |-
+  Tenant-table SQL must include `org_id` in its WHERE clause. Either bind
+  `self.org_id()` (org-scoped repo) or add this file to the AdminRepo
+  allow-list in scripts/check_tenant_isolation.sh.
+note: |-
+  Flagged tables: targets, incidents, incident_updates,
+  maintenance_windows, maintenance_window_components, memberships,
+  organizations, org_audit_log.
+rule:
+  any:
+    - kind: raw_string_literal
+    - kind: string_literal
+  regex: "(?is)\\b(FROM|UPDATE|INTO|DELETE\\s+FROM)\\s+(targets|incidents|incident_updates|maintenance_windows|maintenance_window_components|memberships|organizations|org_audit_log)\\b"
+  not:
+    regex: "(?i)\\borg_id\\b"

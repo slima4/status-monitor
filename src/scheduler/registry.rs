@@ -5,10 +5,10 @@ use uuid::Uuid;
 
 use crate::domain::Target;
 use crate::error::Result;
-use crate::storage::TargetStore;
+use crate::storage::admin::EnabledTargetSource;
 
 pub struct TargetRegistry {
-    store: Arc<dyn TargetStore>,
+    source: Arc<dyn EnabledTargetSource>,
     targets: DashMap<Uuid, Arc<Target>>,
 }
 
@@ -26,9 +26,9 @@ impl RegistryDiff {
 }
 
 impl TargetRegistry {
-    pub fn new(store: Arc<dyn TargetStore>) -> Self {
+    pub fn new(source: Arc<dyn EnabledTargetSource>) -> Self {
         Self {
-            store,
+            source,
             targets: DashMap::new(),
         }
     }
@@ -42,7 +42,7 @@ impl TargetRegistry {
     }
 
     pub async fn refresh(&self) -> Result<RegistryDiff> {
-        let fresh = self.store.list_enabled().await?;
+        let fresh = self.source.list_all_enabled_targets().await?;
         let mut diff = RegistryDiff::default();
         let mut seen = std::collections::HashSet::with_capacity(fresh.len());
 

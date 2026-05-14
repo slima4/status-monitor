@@ -48,6 +48,9 @@ pub trait MaintenanceStore: Send + Sync {
 
 // ── Postgres impl ────────────────────────────────────────────────────────
 
+/// Org-scoped Postgres-backed maintenance store. Every query binds
+/// `self.default_org_id` so callers in one tenant cannot read, mutate, or
+/// delete windows belonging to another.
 pub struct PgMaintenanceStore {
     pool: PgPool,
     default_org_id: OrgId,
@@ -55,7 +58,14 @@ pub struct PgMaintenanceStore {
 
 impl PgMaintenanceStore {
     pub fn new(pool: PgPool, default_org_id: OrgId) -> Self {
-        Self { pool, default_org_id }
+        Self {
+            pool,
+            default_org_id,
+        }
+    }
+
+    fn org_id(&self) -> Uuid {
+        self.default_org_id.0
     }
 }
 
@@ -85,12 +95,13 @@ impl MaintenanceRow {
     }
 }
 
-async fn load_components(pool: &PgPool, maintenance_id: Uuid) -> Result<Vec<Uuid>> {
+async fn load_components(pool: &PgPool, maintenance_id: Uuid, org_id: Uuid) -> Result<Vec<Uuid>> {
     let rows: Vec<(Uuid,)> = sqlx::query_as(
         r#"SELECT target_id FROM maintenance_window_components
-           WHERE maintenance_id = $1 ORDER BY target_id"#,
+           WHERE maintenance_id = $1 AND org_id = $2 ORDER BY target_id"#,
     )
     .bind(maintenance_id)
+    .bind(org_id)
     .fetch_all(pool)
     .await
     .map_err(|e| anyhow::anyhow!("load_components: {e}"))?;
@@ -120,14 +131,17 @@ impl MaintenanceStore for PgMaintenanceStore {
         .await
         .map_err(|e| anyhow::anyhow!("insert maintenance: {e}"))?;
         if !new.component_ids.is_empty() {
-            // Pull org_id from the parent so it stays in lockstep even if a
-            // future caller passes a wrong default_org_id; the trigger is the
-            // belt, this is the suspenders.
+            // The org-match trigger only validates child.org_id == parent.org_id,
+            // not that the referenced target belongs to the parent's org. The
+            // join on `targets t` filters out any UUID that belongs to a
+            // different tenant, so a caller passing another org's target id
+            // silently no-ops instead of inserting a cross-tenant reference.
             sqlx::query(
                 r#"INSERT INTO maintenance_window_components (org_id, maintenance_id, target_id)
-                   SELECT mw.org_id, mw.id, t.target_id
+                   SELECT mw.org_id, mw.id, t.id
                    FROM maintenance_windows mw
-                   CROSS JOIN UNNEST($2::uuid[]) AS t(target_id)
+                   CROSS JOIN UNNEST($2::uuid[]) AS u(target_id)
+                   JOIN targets t ON t.id = u.target_id AND t.org_id = mw.org_id
                    WHERE mw.id = $1"#,
             )
             .bind(row.id)
@@ -146,12 +160,13 @@ impl MaintenanceStore for PgMaintenanceStore {
             .bind(now)
             .bind(q.limit as i64)
             .bind(q.offset as i64)
+            .bind(self.org_id())
             .fetch_all(&self.pool)
             .await
             .map_err(|e| anyhow::anyhow!("list maintenance: {e}"))?;
         let mut out = Vec::with_capacity(rows.len());
         for row in rows {
-            let components = load_components(&self.pool, row.id).await?;
+            let components = load_components(&self.pool, row.id, self.org_id()).await?;
             out.push(row.into_window(components));
         }
         Ok(out)
@@ -161,6 +176,7 @@ impl MaintenanceStore for PgMaintenanceStore {
         let now = Utc::now();
         let (total,): (i64,) = sqlx::query_as(&count_sql(filter))
             .bind(now)
+            .bind(self.org_id())
             .fetch_one(&self.pool)
             .await
             .map_err(|e| anyhow::anyhow!("count maintenance: {e}"))?;
@@ -170,15 +186,16 @@ impl MaintenanceStore for PgMaintenanceStore {
     async fn get(&self, id: Uuid) -> Result<Option<MaintenanceWindow>> {
         let row: Option<MaintenanceRow> = sqlx::query_as(
             r#"SELECT id, title, description, starts_at, ends_at, created_at, updated_at
-               FROM maintenance_windows WHERE id = $1"#,
+               FROM maintenance_windows WHERE id = $1 AND org_id = $2"#,
         )
         .bind(id)
+        .bind(self.org_id())
         .fetch_optional(&self.pool)
         .await
         .map_err(|e| anyhow::anyhow!("get maintenance: {e}"))?;
         match row {
             Some(r) => {
-                let components = load_components(&self.pool, r.id).await?;
+                let components = load_components(&self.pool, r.id, self.org_id()).await?;
                 Ok(Some(r.into_window(components)))
             }
             None => Ok(None),
@@ -206,7 +223,7 @@ impl MaintenanceStore for PgMaintenanceStore {
                    starts_at   = COALESCE($4, starts_at),
                    ends_at     = COALESCE($5, ends_at),
                    updated_at  = now()
-               WHERE id = $1
+               WHERE id = $1 AND org_id = $6
                RETURNING id, title, description, starts_at, ends_at, created_at, updated_at"#,
         )
         .bind(id)
@@ -214,6 +231,7 @@ impl MaintenanceStore for PgMaintenanceStore {
         .bind(update.description.clone())
         .bind(update.starts_at)
         .bind(update.ends_at)
+        .bind(self.org_id())
         .fetch_optional(&mut *tx)
         .await
         .map_err(|e| anyhow::anyhow!("update maintenance: {e}"))?;
@@ -222,17 +240,24 @@ impl MaintenanceStore for PgMaintenanceStore {
             return Ok(None);
         };
         if let Some(ids) = update.component_ids.as_ref() {
-            sqlx::query(r#"DELETE FROM maintenance_window_components WHERE maintenance_id = $1"#)
+            sqlx::query(
+                r#"DELETE FROM maintenance_window_components
+                   WHERE maintenance_id = $1 AND org_id = $2"#,
+            )
                 .bind(row.id)
+                .bind(self.org_id())
                 .execute(&mut *tx)
                 .await
                 .map_err(|e| anyhow::anyhow!("delete components: {e}"))?;
             if !ids.is_empty() {
+                // Drops any input UUID that doesn't belong to the same org as
+                // the parent window — see the matching comment in `create`.
                 sqlx::query(
                     r#"INSERT INTO maintenance_window_components (org_id, maintenance_id, target_id)
-                       SELECT mw.org_id, mw.id, t.target_id
+                       SELECT mw.org_id, mw.id, t.id
                        FROM maintenance_windows mw
-                       CROSS JOIN UNNEST($2::uuid[]) AS t(target_id)
+                       CROSS JOIN UNNEST($2::uuid[]) AS u(target_id)
+                       JOIN targets t ON t.id = u.target_id AND t.org_id = mw.org_id
                        WHERE mw.id = $1"#,
                 )
                 .bind(row.id)
@@ -243,16 +268,18 @@ impl MaintenanceStore for PgMaintenanceStore {
             }
         }
         tx.commit().await.map_err(|e| anyhow::anyhow!("commit: {e}"))?;
-        let components = load_components(&self.pool, row.id).await?;
+        let components = load_components(&self.pool, row.id, self.org_id()).await?;
         Ok(Some(row.into_window(components)))
     }
 
     async fn delete(&self, id: Uuid) -> Result<bool> {
-        let result = sqlx::query(r#"DELETE FROM maintenance_windows WHERE id = $1"#)
-            .bind(id)
-            .execute(&self.pool)
-            .await
-            .map_err(|e| anyhow::anyhow!("delete maintenance: {e}"))?;
+        let result =
+            sqlx::query(r#"DELETE FROM maintenance_windows WHERE id = $1 AND org_id = $2"#)
+                .bind(id)
+                .bind(self.org_id())
+                .execute(&self.pool)
+                .await
+                .map_err(|e| anyhow::anyhow!("delete maintenance: {e}"))?;
         Ok(result.rows_affected() > 0)
     }
 
@@ -260,12 +287,14 @@ impl MaintenanceStore for PgMaintenanceStore {
         if ids.is_empty() {
             return Ok(Vec::new());
         }
-        let rows: Vec<(Uuid,)> =
-            sqlx::query_as(r#"SELECT id FROM targets WHERE id = ANY($1::uuid[])"#)
-                .bind(ids)
-                .fetch_all(&self.pool)
-                .await
-                .map_err(|e| anyhow::anyhow!("existing_target_ids: {e}"))?;
+        let rows: Vec<(Uuid,)> = sqlx::query_as(
+            r#"SELECT id FROM targets WHERE id = ANY($1::uuid[]) AND org_id = $2"#,
+        )
+        .bind(ids)
+        .bind(self.org_id())
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| anyhow::anyhow!("existing_target_ids: {e}"))?;
         Ok(rows.into_iter().map(|r| r.0).collect())
     }
 }
@@ -274,7 +303,7 @@ fn list_sql(filter: MaintenanceFilter) -> String {
     format!(
         r#"SELECT id, title, description, starts_at, ends_at, created_at, updated_at
            FROM maintenance_windows
-           WHERE {clause}
+           WHERE org_id = $4 AND ({clause})
            ORDER BY starts_at DESC
            LIMIT $2 OFFSET $3"#,
         clause = filter_clause(filter),
@@ -283,7 +312,8 @@ fn list_sql(filter: MaintenanceFilter) -> String {
 
 fn count_sql(filter: MaintenanceFilter) -> String {
     format!(
-        r#"SELECT count(*) FROM maintenance_windows WHERE {clause}"#,
+        r#"SELECT count(*) FROM maintenance_windows
+           WHERE org_id = $2 AND ({clause})"#,
         clause = filter_clause(filter),
     )
 }

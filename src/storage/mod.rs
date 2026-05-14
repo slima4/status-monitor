@@ -1,3 +1,4 @@
+pub mod admin;
 pub mod clickhouse;
 pub mod incidents;
 pub mod maintenance;
@@ -7,6 +8,7 @@ pub mod postgres;
 pub mod postgres_secrets;
 pub mod traits;
 
+pub use admin::AdminRepo;
 pub use clickhouse::{ClickhouseResultSink, ClickhouseResultsStore, build_client, migrate};
 pub use orgs::ensure_default_org;
 pub use incidents::{

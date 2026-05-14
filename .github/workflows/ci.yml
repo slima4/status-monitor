@@ -33,6 +33,11 @@ jobs:
         run: scripts/fetch-tailwind.sh
       - run: cargo fmt --all -- --check
       - run: cargo clippy --all-targets -- -D warnings
+      - uses: ast-grep/setup-ast-grep@v1
+        with:
+          version: 0.42.1
+      - name: tenant-isolation check
+        run: scripts/check_tenant_isolation.sh
 
   test:
     runs-on: ubuntu-latest

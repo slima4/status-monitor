@@ -232,13 +232,15 @@ impl LiveAggregator {
                       ) AS component_ids
                FROM maintenance_windows mw
                LEFT JOIN maintenance_window_components mwc ON mwc.maintenance_id = mw.id
-               WHERE mw.ends_at > $1
+               WHERE mw.org_id = $3
+                 AND mw.ends_at > $1
                  AND mw.starts_at < $2
                GROUP BY mw.id
                ORDER BY mw.starts_at ASC"#,
         )
         .bind(now)
         .bind(horizon_end)
+        .bind(self.default_org_id.0)
         .fetch_all(&self.pg)
         .await
         .context("load maintenance windows")?;
@@ -301,9 +303,13 @@ impl LiveAggregator {
                       i.public_title, i.public_description
                FROM incidents i
                JOIN targets t ON t.id = i.target_id
-               WHERE i.ended_at IS NULL AND t.public_status = true
+               WHERE i.org_id = $1
+                 AND t.org_id = $1
+                 AND i.ended_at IS NULL
+                 AND t.public_status = true
                ORDER BY i.started_at DESC"#,
         )
+        .bind(self.default_org_id.0)
         .fetch_all(&self.pg)
         .await
         .context("load active incidents")?;
@@ -319,12 +325,16 @@ impl LiveAggregator {
                       i.public_title, i.public_description
                FROM incidents i
                JOIN targets t ON t.id = i.target_id
-               WHERE i.started_at >= $1 AND t.public_status = true
+               WHERE i.org_id = $3
+                 AND t.org_id = $3
+                 AND i.started_at >= $1
+                 AND t.public_status = true
                ORDER BY i.started_at DESC
                LIMIT $2"#,
         )
         .bind(since)
         .bind(self.cfg.max_recent_incidents as i64)
+        .bind(self.default_org_id.0)
         .fetch_all(&self.pg)
         .await
         .context("load recent incidents")?;
@@ -339,10 +349,11 @@ impl LiveAggregator {
         let updates: Vec<IncidentUpdateRow> = sqlx::query_as::<_, IncidentUpdateRow>(
             r#"SELECT incident_id, posted_at, phase, message
                FROM incident_updates
-               WHERE incident_id = ANY($1)
+               WHERE incident_id = ANY($1) AND org_id = $2
                ORDER BY incident_id, posted_at ASC"#,
         )
         .bind(&ids)
+        .bind(self.default_org_id.0)
         .fetch_all(&self.pg)
         .await
         .context("load incident updates")?;
