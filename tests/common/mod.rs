@@ -26,7 +26,7 @@ use status_monitor::storage::{
     IncidentNarrationStore, MaintenanceStore, ResultSink, ResultsStore,
 };
 use status_monitor::worker::{ResultFanout, WorkerPool};
-use tokio::sync::mpsc;
+use tokio::sync::{Mutex, mpsc};
 use tokio_util::sync::CancellationToken;
 use url::Url;
 use uuid::Uuid;
@@ -426,8 +426,16 @@ impl PublicSource for UnavailablePublicSource {
 //
 //     let Some(pool) = common::pg_pool_from_env().await else { return };
 //
-// Migrations run idempotently on every call. Tests share the dev database; use
-// fresh UUIDs per test to avoid cross-test interference.
+// Migrations run **at most once per test binary**, guarded by an async
+// `Mutex<bool>` — two `#[tokio::test]` cases in the same binary call these
+// helpers concurrently, and the ClickHouse migration 002 drops + recreates
+// `check_results` non-idempotently, so an unguarded second call races with
+// the first's `CREATE MATERIALIZED VIEW … FROM check_results` and fails with
+// `UNKNOWN_TABLE`. Tests share the dev database; use fresh UUIDs per test to
+// avoid cross-test interference.
+
+static PG_MIGRATED: Mutex<bool> = Mutex::const_new(false);
+static CH_MIGRATED: Mutex<bool> = Mutex::const_new(false);
 
 pub async fn pg_pool_from_env() -> Option<PgPool> {
     let url = std::env::var("DATABASE_URL").ok()?;
@@ -437,10 +445,14 @@ pub async fn pg_pool_from_env() -> Option<PgPool> {
         .connect(&url)
         .await
         .expect("connect to postgres");
-    sqlx::migrate!("./migrations/postgres")
-        .run(&pool)
-        .await
-        .expect("run pg migrations");
+    let mut guard = PG_MIGRATED.lock().await;
+    if !*guard {
+        sqlx::migrate!("./migrations/postgres")
+            .run(&pool)
+            .await
+            .expect("run pg migrations");
+        *guard = true;
+    }
     Some(pool)
 }
 
@@ -454,8 +466,12 @@ pub async fn ch_client_from_env() -> Option<clickhouse::Client> {
         .with_database(&database)
         .with_user(&user)
         .with_password(&password);
-    status_monitor::storage::migrate(&client)
-        .await
-        .expect("run ch migrations");
+    let mut guard = CH_MIGRATED.lock().await;
+    if !*guard {
+        status_monitor::storage::migrate(&client)
+            .await
+            .expect("run ch migrations");
+        *guard = true;
+    }
     Some(client)
 }
