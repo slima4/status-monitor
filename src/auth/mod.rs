@@ -6,10 +6,15 @@
 //! schema in `007_auth.up.sql` and the `EmailSender` trait in `crate::email`
 //! but their flows arrive in later phases.
 
+pub mod api_tokens;
 pub mod fingerprint;
 pub mod github;
+pub mod invitations;
+pub mod invitations_cleanup;
 pub mod login_audit;
 pub mod oauth_state;
 pub mod session;
+pub mod token_hash;
+pub mod url;
 
 pub use fingerprint::{ensure_fingerprint_salt, hash_fingerprint};

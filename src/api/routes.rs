@@ -117,6 +117,28 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
             get(handlers::orgs::list_my_deleted_orgs),
         )
         .route("/me/active-org", post(handlers::orgs::switch_active_org))
+        .route(
+            "/me/api-tokens",
+            get(handlers::api_tokens::list).post(handlers::api_tokens::create),
+        )
+        .route(
+            "/me/api-tokens/{id}",
+            axum::routing::patch(handlers::api_tokens::rename).delete(handlers::api_tokens::revoke),
+        )
+        .route(
+            "/orgs/{id}/invitations",
+            get(handlers::invitations::list).post(handlers::invitations::create),
+        )
+        .route(
+            "/orgs/{id}/invitations/{invitation_id}",
+            axum::routing::delete(handlers::invitations::revoke),
+        )
+        .route("/invitations/accept", post(handlers::invitations::accept))
+        .route("/invitations/decline", post(handlers::invitations::decline))
+        .layer(from_fn_with_state(
+            state.clone(),
+            crate::web::auth::api_token::middleware,
+        ))
         .layer(DefaultBodyLimit::max(SINGLE_BODY_LIMIT))
         .merge(bulk);
 

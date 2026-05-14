@@ -1,0 +1,331 @@
+//! Organization invitations: token generation, persistence, accept/decline,
+//! cleanup. The flow is documented in AUTH §5.6.
+//!
+//! Tokens are 32 cryptographically random bytes presented as a 43-char
+//! base64url-no-pad string in the email link. Only the argon2id hash is
+//! persisted; presenting the raw token at the redeem endpoint is what
+//! proves possession.
+//!
+//! `token_prefix` (first [`TOKEN_PREFIX_LEN`] chars of the raw token) is
+//! stored alongside the hash and indexed. Lookup narrows the candidate set
+//! to ~1 row via the prefix and argon2-verifies the survivor — without it
+//! the redeem path is a CPU-amplification DoS at scale (50 verifies per
+//! org × N orgs).
+//!
+//! Invitations are single-use: the same row carries both `accepted_at` and
+//! `declined_at`; either being non-NULL takes the row out of the "pending"
+//! partial indexes.
+
+use anyhow::Context;
+use base64::Engine;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use chrono::{DateTime, Duration, Utc};
+use rand::TryRng;
+use rand::rngs::SysRng;
+use sqlx::PgPool;
+use uuid::Uuid;
+
+use crate::auth::token_hash;
+use crate::domain::{OrgId, Role, UserId};
+use crate::error::{AppError, Result};
+
+/// Visible prefix length stored in `invitations.token_prefix`. 16 base64url
+/// chars = 96 bits of entropy — collisions are statistically irrelevant for
+/// the per-org cap; the prefix narrows the lookup to ~1 row and argon2
+/// disambiguates.
+pub const TOKEN_PREFIX_LEN: usize = 16;
+
+/// Hash-friendly invitation record. `token_hash` is the encoded argon2id
+/// PHC string; only the hash leaves this row.
+#[derive(Debug, Clone)]
+pub struct InvitationRow {
+    pub id: Uuid,
+    pub org_id: OrgId,
+    pub inviter_id: UserId,
+    pub email: String,
+    pub role: Role,
+    pub created_at: DateTime<Utc>,
+    pub expires_at: DateTime<Utc>,
+    pub accepted_at: Option<DateTime<Utc>>,
+    pub declined_at: Option<DateTime<Utc>>,
+}
+
+/// Output of [`create`] — includes the raw token that must be embedded in the
+/// outgoing email. Never persisted, never recoverable after this call returns.
+#[derive(Debug, Clone)]
+pub struct CreatedInvitation {
+    pub row: InvitationRow,
+    /// Raw 43-char base64url token. Goes into the email link only.
+    pub token: String,
+}
+
+/// Generate a fresh 32-byte token, base64url-no-pad encoded (43 chars).
+pub fn generate_raw_token() -> String {
+    let mut bytes = [0u8; 32];
+    SysRng
+        .try_fill_bytes(&mut bytes)
+        .expect("SysRng must succeed for invitation token");
+    URL_SAFE_NO_PAD.encode(bytes)
+}
+
+fn slice_prefix(raw: &str) -> &str {
+    let n = TOKEN_PREFIX_LEN.min(raw.len());
+    &raw[..n]
+}
+
+/// Number of pending invitations on the org. Caller compares to
+/// `max_pending_per_org` before INSERT to keep the table from being used as
+/// a spam relay.
+pub async fn count_pending_for_org(pool: &PgPool, org: OrgId) -> Result<u32> {
+    let (n,): (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM invitations \
+         WHERE org_id = $1 AND accepted_at IS NULL AND declined_at IS NULL \
+         AND expires_at > now()",
+    )
+    .bind(org.0)
+    .fetch_one(pool)
+    .await
+    .context("invitations::count_pending_for_org")?;
+    Ok(u32::try_from(n).unwrap_or(u32::MAX))
+}
+
+/// Already-pending (non-accepted, non-declined, unexpired) invitation for the
+/// given (org, email) pair. CITEXT email comparison.
+pub async fn exists_pending_for_email(pool: &PgPool, org: OrgId, email: &str) -> Result<bool> {
+    let row: Option<(Uuid,)> = sqlx::query_as(
+        "SELECT id FROM invitations \
+         WHERE org_id = $1 AND email = $2::citext \
+         AND accepted_at IS NULL AND declined_at IS NULL \
+         AND expires_at > now() \
+         LIMIT 1",
+    )
+    .bind(org.0)
+    .bind(email)
+    .fetch_optional(pool)
+    .await
+    .context("invitations::exists_pending_for_email")?;
+    Ok(row.is_some())
+}
+
+/// Issue an invitation. Returns the row plus the raw token that the caller
+/// must embed in the outgoing email. Hash-only persistence — the raw value is
+/// never reachable again after this call.
+pub async fn create(
+    pool: &PgPool,
+    org: OrgId,
+    inviter: UserId,
+    email: &str,
+    role: Role,
+    expiry_hours: u32,
+) -> Result<CreatedInvitation> {
+    let raw = generate_raw_token();
+    let prefix = slice_prefix(&raw).to_string();
+    let hash = token_hash::hash(&raw)?;
+    let expires_at = Utc::now() + Duration::hours(i64::from(expiry_hours));
+
+    let row: (Uuid, DateTime<Utc>, DateTime<Utc>) = sqlx::query_as(
+        "INSERT INTO invitations \
+            (org_id, inviter_id, email, role, token_hash, token_prefix, expires_at) \
+         VALUES ($1, $2, $3::citext, $4, $5, $6, $7) \
+         RETURNING id, created_at, expires_at",
+    )
+    .bind(org.0)
+    .bind(inviter.0)
+    .bind(email)
+    .bind(role.as_db_str())
+    .bind(&hash)
+    .bind(&prefix)
+    .bind(expires_at)
+    .fetch_one(pool)
+    .await
+    .context("invitations::create")?;
+
+    Ok(CreatedInvitation {
+        row: InvitationRow {
+            id: row.0,
+            org_id: org,
+            inviter_id: inviter,
+            email: email.to_string(),
+            role,
+            created_at: row.1,
+            expires_at: row.2,
+            accepted_at: None,
+            declined_at: None,
+        },
+        token: raw,
+    })
+}
+
+/// Find the unique pending invitation that matches `raw_token`. Narrows the
+/// candidate set via the indexed `token_prefix` column (96-bit prefix
+/// entropy), then argon2-verifies the surviving rows.
+///
+/// Returns `None` for any of: nothing matched, expired, accepted/declined,
+/// row deleted. The handler must not distinguish these to the caller —
+/// "INVITATION_INVALID" covers them all (§7.7 anti-enumeration).
+pub async fn find_pending_by_token(
+    pool: &PgPool,
+    raw_token: &str,
+) -> Result<Option<InvitationRow>> {
+    let prefix = slice_prefix(raw_token);
+    let rows: Vec<RawRow> = sqlx::query_as(
+        "SELECT id, org_id, inviter_id, email::text AS email, role, token_hash, \
+                created_at, expires_at, accepted_at, declined_at \
+         FROM invitations \
+         WHERE token_prefix = $1 \
+         AND accepted_at IS NULL AND declined_at IS NULL \
+         AND expires_at > now()",
+    )
+    .bind(prefix)
+    .fetch_all(pool)
+    .await
+    .context("invitations::find_pending_by_token")?;
+
+    for r in rows {
+        if token_hash::verify(raw_token, &r.token_hash) {
+            return Ok(Some(InvitationRow {
+                id: r.id,
+                org_id: OrgId(r.org_id),
+                inviter_id: UserId(r.inviter_id),
+                email: r.email,
+                role: Role::from_db_str(&r.role).ok_or_else(|| {
+                    AppError::Other(anyhow::anyhow!(
+                        "invitation row {} has unknown role {}",
+                        r.id,
+                        r.role
+                    ))
+                })?,
+                created_at: r.created_at,
+                expires_at: r.expires_at,
+                accepted_at: r.accepted_at,
+                declined_at: r.declined_at,
+            }));
+        }
+    }
+    Ok(None)
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct RawRow {
+    id: Uuid,
+    org_id: Uuid,
+    inviter_id: Uuid,
+    email: String,
+    role: String,
+    token_hash: String,
+    created_at: DateTime<Utc>,
+    expires_at: DateTime<Utc>,
+    accepted_at: Option<DateTime<Utc>>,
+    declined_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct InvitationListing {
+    pub id: Uuid,
+    pub email: String,
+    pub role: String,
+    pub created_at: DateTime<Utc>,
+    pub expires_at: DateTime<Utc>,
+    pub accepted_at: Option<DateTime<Utc>>,
+    pub declined_at: Option<DateTime<Utc>>,
+}
+
+pub async fn list_pending_for_org(pool: &PgPool, org: OrgId) -> Result<Vec<InvitationListing>> {
+    let rows: Vec<InvitationListing> = sqlx::query_as(
+        "SELECT id, email::text AS email, role, created_at, expires_at, accepted_at, declined_at \
+         FROM invitations \
+         WHERE org_id = $1 \
+         AND accepted_at IS NULL AND declined_at IS NULL \
+         AND expires_at > now() \
+         ORDER BY created_at DESC",
+    )
+    .bind(org.0)
+    .fetch_all(pool)
+    .await
+    .context("invitations::list_pending_for_org")?;
+    Ok(rows)
+}
+
+/// Hard-delete a still-pending invitation by id. The (id, org_id) tuple is
+/// required so a sibling-org owner can't revoke another org's invitation.
+pub async fn revoke(pool: &PgPool, org: OrgId, id: Uuid) -> Result<bool> {
+    let res = sqlx::query(
+        "DELETE FROM invitations \
+         WHERE id = $1 AND org_id = $2 \
+         AND accepted_at IS NULL AND declined_at IS NULL",
+    )
+    .bind(id)
+    .bind(org.0)
+    .execute(pool)
+    .await
+    .context("invitations::revoke")?;
+    Ok(res.rows_affected() > 0)
+}
+
+/// Mark `accepted_at = now()`. Returns false if the row no longer qualified
+/// (already accepted, declined, expired, or deleted) — caller surfaces that
+/// as `INVITATION_INVALID`.
+pub async fn mark_accepted(pool: &PgPool, id: Uuid) -> Result<bool> {
+    let res = sqlx::query(
+        "UPDATE invitations SET accepted_at = now() \
+         WHERE id = $1 \
+         AND accepted_at IS NULL AND declined_at IS NULL \
+         AND expires_at > now()",
+    )
+    .bind(id)
+    .execute(pool)
+    .await
+    .context("invitations::mark_accepted")?;
+    Ok(res.rows_affected() > 0)
+}
+
+pub async fn mark_declined(pool: &PgPool, id: Uuid) -> Result<bool> {
+    let res = sqlx::query(
+        "UPDATE invitations SET declined_at = now() \
+         WHERE id = $1 \
+         AND accepted_at IS NULL AND declined_at IS NULL \
+         AND expires_at > now()",
+    )
+    .bind(id)
+    .execute(pool)
+    .await
+    .context("invitations::mark_declined")?;
+    Ok(res.rows_affected() > 0)
+}
+
+/// Periodic cleanup: drop rows expired more than `keep_history_days` days ago.
+/// Accepted/declined rows older than the same window are also pruned — the UI
+/// surfaces recent history only. Days are bound via `make_interval` so the
+/// query plan is stable and the bind avoids string concatenation.
+pub async fn purge_old(pool: &PgPool, keep_history_days: i64) -> Result<u64> {
+    let res = sqlx::query(
+        "DELETE FROM invitations \
+         WHERE (accepted_at IS NOT NULL AND accepted_at < now() - make_interval(days => $1)) \
+            OR (declined_at IS NOT NULL AND declined_at < now() - make_interval(days => $1)) \
+            OR (accepted_at IS NULL AND declined_at IS NULL \
+                AND expires_at < now() - make_interval(days => $1))",
+    )
+    .bind(i32::try_from(keep_history_days).unwrap_or(i32::MAX))
+    .execute(pool)
+    .await
+    .context("invitations::purge_old")?;
+    Ok(res.rows_affected())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn raw_token_is_43_chars_base64url_nopad() {
+        let t = generate_raw_token();
+        assert_eq!(t.len(), 43);
+        assert!(!t.contains('=') && !t.contains('+') && !t.contains('/'));
+    }
+
+    #[test]
+    fn slice_prefix_returns_first_16() {
+        let t = generate_raw_token();
+        assert_eq!(slice_prefix(&t).len(), TOKEN_PREFIX_LEN);
+    }
+}

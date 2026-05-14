@@ -6,6 +6,9 @@ use sqlx::PgPool;
 
 use crate::api::IdempotencyCache;
 use crate::api::types::DashboardSummary;
+use crate::auth::api_tokens::{
+    ApiTokenLastUsedDebounce, build_debounce_cache as build_api_token_debounce,
+};
 use crate::auth::session::{LastUsedDebounce, build_debounce_cache};
 use crate::config::AppConfig;
 use crate::domain::OrgId;
@@ -68,6 +71,10 @@ pub struct AppState {
     /// Debounce cache for `sessions.last_used_at` writes — see
     /// `auth::session::touch_last_used_debounced`.
     pub session_debounce: Arc<LastUsedDebounce>,
+    /// Debounce cache for `api_tokens.last_used_at` — same shape as
+    /// `session_debounce` so the Bearer middleware can lazily refresh
+    /// without N writes-per-second per token.
+    pub api_token_debounce: Arc<ApiTokenLastUsedDebounce>,
     /// Shared outbound HTTPS client used by GitHub OAuth + transactional
     /// email. Not the per-target check client.
     pub outbound_http: OutboundHttpClient,
@@ -77,6 +84,17 @@ pub struct AppState {
 }
 
 impl AppState {
+    /// Borrow the Postgres pool, or return an internal error. Centralises
+    /// the "tenancy enabled but db is None" cloak so every handler doesn't
+    /// rewrite the same anyhow string.
+    pub fn require_db(&self) -> crate::error::Result<&PgPool> {
+        self.db.as_ref().ok_or_else(|| {
+            crate::error::AppError::Other(anyhow::anyhow!(
+                "tenancy enabled but AppState.db is None"
+            ))
+        })
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         cfg: AppConfig,
@@ -108,6 +126,7 @@ impl AppState {
             incident_narration_store,
             default_org_id,
             session_debounce: Arc::new(build_debounce_cache()),
+            api_token_debounce: Arc::new(build_api_token_debounce()),
             outbound_http,
             email_sender,
         }

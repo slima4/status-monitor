@@ -63,7 +63,7 @@ impl IntoResponse for WebError {
                 InternalErrorPage { active_tab: "" },
             )
                 .into_response(),
-            AppError::Forbidden => {
+            AppError::Forbidden | AppError::ForbiddenCoded { .. } => {
                 (StatusCode::FORBIDDEN, NotFoundPage { active_tab: "" }).into_response()
             }
             ref err @ (AppError::Config(_)

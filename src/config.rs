@@ -67,6 +67,11 @@ pub struct ResendConfig {
 pub struct AuthConfig {
     pub enabled_methods: Vec<String>,
     pub fingerprint_salt: String,
+    /// External base URL (scheme + host + optional port) used to build links
+    /// the user sees in emails — invitation accept/decline, magic-link verify.
+    /// Trailing slashes are tolerated. Required in production; dev defaults to
+    /// `http://localhost:8080`.
+    pub public_base_url: String,
     pub session: SessionConfig,
     pub github: GithubOauthConfig,
     pub invitations: InvitationsConfig,
@@ -79,6 +84,7 @@ impl Default for AuthConfig {
         Self {
             enabled_methods: vec!["github_oauth".into()],
             fingerprint_salt: String::new(),
+            public_base_url: "http://localhost:8080".into(),
             session: SessionConfig::default(),
             github: GithubOauthConfig::default(),
             invitations: InvitationsConfig::default(),

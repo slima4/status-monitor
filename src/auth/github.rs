@@ -20,6 +20,7 @@ use serde_json::json;
 use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
+use crate::auth::url::url_encode;
 use crate::config::GithubOauthConfig;
 use crate::domain::{OrgId, UserId, generate_personal_slug};
 use crate::error::{AppError, Result};
@@ -337,11 +338,6 @@ async fn create_personal_org_in_tx(
     Err(AppError::Other(anyhow::anyhow!(
         "personal slug retries exhausted ({PERSONAL_SLUG_RETRIES}) — adjective/noun pool too small or RNG broken"
     )))
-}
-
-fn url_encode(s: &str) -> String {
-    use url::form_urlencoded::byte_serialize;
-    byte_serialize(s.as_bytes()).collect()
 }
 
 #[cfg(test)]

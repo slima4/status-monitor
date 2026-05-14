@@ -106,6 +106,9 @@ rand = "0.10"
 # Constant-time byte comparison for secret material (OAuth state, magic-link
 # tokens, invitation tokens — see §7.3).
 subtle = "2.6"
+# Argon2id password hashing for API tokens (§4.4) and invitation/magic-link
+# token verification.
+argon2 = "0.6.0-rc.8"
 
 # OpenAPI schema derivation
 utoipa = { version = "5.5", features = ["axum_extras", "chrono", "uuid", "url"] }

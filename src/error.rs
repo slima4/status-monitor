@@ -47,6 +47,12 @@ pub enum AppError {
     #[error("access denied")]
     Forbidden,
 
+    /// Coded forbidden — same HTTP 403 as [`Self::Forbidden`] but with a
+    /// stable error code and message so handlers can carry context (e.g.
+    /// `EMAIL_NOT_VERIFIED`).
+    #[error("{message}")]
+    ForbiddenCoded { code: &'static str, message: String },
+
     #[error("{0}")]
     Other(#[from] anyhow::Error),
 }
@@ -99,6 +105,13 @@ impl AppError {
             message: message.into(),
         }
     }
+
+    pub fn forbidden_code(code: &'static str, message: impl Into<String>) -> Self {
+        Self::ForbiddenCoded {
+            code,
+            message: message.into(),
+        }
+    }
 }
 
 impl IntoResponse for AppError {
@@ -140,6 +153,9 @@ impl IntoResponse for AppError {
                 StatusCode::FORBIDDEN,
                 ApiErrorBody::new(codes::FORBIDDEN, "access denied"),
             ),
+            AppError::ForbiddenCoded { code, message } => {
+                (StatusCode::FORBIDDEN, ApiErrorBody::new(code, message))
+            }
             ref err @ (AppError::Config(_)
             | AppError::Io(_)
             | AppError::BindAddr { .. }

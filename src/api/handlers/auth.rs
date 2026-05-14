@@ -19,6 +19,7 @@ use crate::auth::{
     fingerprint, github,
     login_audit::{self, LoginAttempt, LoginMethod},
     oauth_state, session as session_store,
+    url::url_encode,
 };
 use crate::error::{AppError, Result};
 use crate::web::CurrentUser;
@@ -232,11 +233,6 @@ async fn record_failure(
     if let Err(err) = login_audit::record(pool, LoginMethod::GithubOauth, attempt).await {
         tracing::warn!(error = %err, "login_audit record failure write failed");
     }
-}
-
-fn url_encode(s: &str) -> String {
-    use url::form_urlencoded::byte_serialize;
-    byte_serialize(s.as_bytes()).collect()
 }
 
 // Silence dead-code on the imported error codes for the placeholder

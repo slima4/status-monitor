@@ -599,6 +599,90 @@ pub enum RemoveOutcome {
     LastOwner,
 }
 
+/// Outcome of [`add_member`]. The invitation accept flow distinguishes
+/// "already a member" (no-op, succeed idempotently) from a fresh insert.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AddMemberOutcome {
+    Added,
+    AlreadyMember,
+}
+
+/// Add a user to an org with the given role. Single audit row per successful
+/// insert; idempotent — re-adding an existing member is a no-op.
+///
+/// This is the canonical site for invitation acceptance and any future flow
+/// that grants org access. Kept here (not in `auth::invitations`) so the
+/// `memberships` table has exactly one writer outside of org create/delete.
+///
+/// `actor` is the user the audit row should be attributed to. For
+/// self-redeem of an invitation pass `user`; for an owner-initiated add
+/// (future flow) pass the owner. Mirrors the `remove_member(actor, user)`
+/// signature so the audit log records *who* effected the change, not just
+/// *who* was changed.
+pub async fn add_member(
+    pool: &PgPool,
+    org: OrgId,
+    actor: UserId,
+    user: UserId,
+    role: Role,
+) -> Result<AddMemberOutcome> {
+    let mut tx = pool.begin().await.context("add_member: begin")?;
+    let inserted: Option<(Uuid,)> = sqlx::query_as(
+        r#"INSERT INTO memberships (user_id, org_id, role)
+           VALUES ($1, $2, $3)
+           ON CONFLICT (user_id, org_id) DO NOTHING
+           RETURNING org_id"#,
+    )
+    .bind(user.0)
+    .bind(org.0)
+    .bind(role.as_db_str())
+    .fetch_optional(&mut *tx)
+    .await
+    .context("add_member: insert")?;
+    if inserted.is_none() {
+        tx.rollback().await.ok();
+        return Ok(AddMemberOutcome::AlreadyMember);
+    }
+    record_audit_tx(
+        &mut tx,
+        org,
+        Some(actor),
+        "member.added",
+        serde_json::json!({ "user_id": user.0, "role": role.as_db_str() }),
+    )
+    .await
+    .context("add_member: audit")?;
+    tx.commit().await.context("add_member: commit")?;
+    Ok(AddMemberOutcome::Added)
+}
+
+/// Resolve an org slug to its id. Active orgs only (`deleted_at IS NULL`).
+/// Used by the API-token request path: tokens carry no active-org state, so
+/// `X-Status-Monitor-Org: <slug>` is the only way the handler learns which
+/// org to scope to.
+pub async fn find_id_by_slug(pool: &PgPool, slug: &str) -> Result<Option<OrgId>> {
+    let row: Option<(Uuid,)> =
+        sqlx::query_as("SELECT id FROM organizations WHERE slug = $1 AND deleted_at IS NULL")
+            .bind(slug)
+            .fetch_optional(pool)
+            .await
+            .context("find_id_by_slug")?;
+    Ok(row.map(|(o,)| OrgId(o)))
+}
+
+/// Look up a user's id by email (CITEXT). Drives the invitation flow's
+/// "is the recipient already a member here?" check before INSERT, and the
+/// "already-existing user redeems invitation" path on accept.
+pub async fn find_user_by_email(pool: &PgPool, email: &str) -> Result<Option<UserId>> {
+    let row: Option<(Uuid,)> =
+        sqlx::query_as("SELECT id FROM users WHERE email = $1::citext AND deleted_at IS NULL")
+            .bind(email)
+            .fetch_optional(pool)
+            .await
+            .context("find_user_by_email")?;
+    Ok(row.map(|(u,)| UserId(u)))
+}
+
 #[derive(Debug, Clone)]
 pub struct OrgWithRole {
     pub org: Organization,

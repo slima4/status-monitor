@@ -235,7 +235,24 @@ async fn main() -> Result<()> {
         )
         .await
         .map_err(|e| AppError::Other(anyhow::anyhow!("auth salt guard: {e}")))?;
+
+        let prefix_len = cfg.auth.api_tokens.prefix_visible_chars as usize;
+        if prefix_len < status_monitor::auth::api_tokens::MIN_PREFIX_VISIBLE_CHARS {
+            return Err(AppError::Other(anyhow::anyhow!(
+                "auth.api_tokens.prefix_visible_chars must be >= {} (got {prefix_len})",
+                status_monitor::auth::api_tokens::MIN_PREFIX_VISIBLE_CHARS
+            )));
+        }
     }
+
+    let invitation_purge_handle: JoinHandle<()> = {
+        let pool = pg_pool_for_stores.clone();
+        let token = root.clone();
+        let keep_days = i64::from(cfg.auth.invitations.expiry_hours / 24).max(1);
+        tokio::spawn(status_monitor::auth::invitations_cleanup::run(
+            pool, keep_days, token,
+        ))
+    };
 
     let state = AppState::new(
         cfg,
@@ -281,6 +298,7 @@ async fn main() -> Result<()> {
             sampler_handle,
             incident_writer_handle,
             purge_handle,
+            invitation_purge_handle,
         );
         if let Some(h) = alert_engine_handle {
             let _ = h.await;

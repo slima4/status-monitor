@@ -103,4 +103,19 @@ pub mod codes {
     // Auth.
     pub const INVALID_STATE: &str = "INVALID_STATE";
     pub const SESSION_NOT_FOUND: &str = "SESSION_NOT_FOUND";
+    pub const INVALID_TOKEN: &str = "INVALID_TOKEN";
+    pub const ORG_REQUIRED: &str = "ORG_REQUIRED";
+    pub const ORG_HEADER_INVALID: &str = "ORG_HEADER_INVALID";
+    pub const EMAIL_NOT_VERIFIED: &str = "EMAIL_NOT_VERIFIED";
+    pub const TOKEN_LIMIT: &str = "TOKEN_LIMIT";
+    pub const TOKEN_NAME_INVALID: &str = "TOKEN_NAME_INVALID";
+    pub const TOKEN_NOT_FOUND: &str = "TOKEN_NOT_FOUND";
+    // Invitations.
+    pub const ALREADY_MEMBER: &str = "ALREADY_MEMBER";
+    pub const ALREADY_INVITED: &str = "ALREADY_INVITED";
+    pub const INVITATION_INVALID: &str = "INVITATION_INVALID";
+    pub const INVITATION_EMAIL_MISMATCH: &str = "INVITATION_EMAIL_MISMATCH";
+    pub const INVITATIONS_LIMIT: &str = "INVITATIONS_LIMIT";
+    pub const INVALID_ROLE: &str = "INVALID_ROLE";
+    pub const INVALID_EMAIL: &str = "INVALID_EMAIL";
 }

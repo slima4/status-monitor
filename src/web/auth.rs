@@ -1,32 +1,41 @@
-//! Request → org resolution + cookie-backed session lookup.
+//! Request → org resolution + cookie- or token-backed authentication.
+//!
+//! Two auth paths feed the same extractor surface:
+//!
+//! 1. **Session cookie** — `_sm_session` resolved via [`crate::auth::session`].
+//!    Carries `active_org_id` and falls back to the user's personal org.
+//! 2. **API token** — `Authorization: Bearer sm_live_…` resolved by the
+//!    [`api_token`] middleware ahead of routing. The token carries no active
+//!    org, so handlers that need one must read an explicit org slug from the
+//!    `X-Status-Monitor-Org` header — otherwise [`CurrentOrg`] returns 400
+//!    `ORG_REQUIRED` (per AUTH §5.5).
 //!
 //! [`CurrentOrg`] is the only extractor that hands a handler an `OrgId`.
 //! Combined with the org-scoped repositories in `src/storage/`, this is what
 //! makes "forgetting to scope a query" a compile error rather than a security
 //! incident: the repos require an `OrgId`, and the only place to obtain one
 //! inside a request is this extractor.
-//!
-//! Resolution order for [`Session`]:
-//!
-//! 1. If an explicit `Session` is in request extensions (test fixtures
-//!    stamp one via `from_fn`), use it as-is.
-//! 2. Else, if a session cookie is present, look it up in `sessions`.
-//!    A live row applies idle + absolute timeouts and lazily refreshes
-//!    `last_used_at` (debounced per [`auth::session`]).
-//! 3. Else, return an empty session (anonymous).
-//!
-//! Membership and personal-org SQL lives in [`crate::storage::orgs`].
+
+pub mod api_token;
 
 use axum::extract::{FromRef, FromRequestParts};
+use axum::http::HeaderName;
 use axum::http::request::Parts;
 use std::convert::Infallible;
 use tower_cookies::Cookies;
+use uuid::Uuid;
 
+use crate::api::error::codes;
 use crate::app::AppState;
 use crate::auth::session as session_store;
 use crate::domain::{OrgId, UserId};
 use crate::error::{AppError, Result};
 use crate::storage::orgs::{is_active_member, personal_org_for_user};
+
+/// Custom header used by API-token clients to scope writes/reads to a specific
+/// org. Tokens carry no active-org state, so this header (or a future slug
+/// path param) is the only way the handler learns which org to read/write.
+pub const ORG_HEADER: HeaderName = HeaderName::from_static("x-status-monitor-org");
 
 #[derive(Debug, Clone)]
 pub struct User {
@@ -51,6 +60,33 @@ pub struct Session {
 impl Session {
     pub fn user_id(&self) -> Option<UserId> {
         self.user.as_ref().map(|u| u.id)
+    }
+}
+
+/// Result of authentication, populated either by the API-token middleware
+/// (Bearer path) or by the session extractor (cookie path). Lives in request
+/// extensions; [`CurrentUser`] and [`CurrentOrg`] read it.
+#[derive(Debug, Clone)]
+pub enum AuthContext {
+    /// Cookie-based browser session. Carries an `active_org_id` that the user
+    /// chose via the org picker; falls back to their personal org.
+    Session {
+        user_id: UserId,
+        session_id: String,
+        active_org_id: Option<OrgId>,
+    },
+    /// `Authorization: Bearer sm_live_…`. No active org — handlers reach for
+    /// `X-Status-Monitor-Org` (or a slug path param in future routes).
+    ApiToken { user_id: UserId, token_id: Uuid },
+}
+
+impl AuthContext {
+    pub fn user_id(&self) -> UserId {
+        match self {
+            AuthContext::Session { user_id, .. } | AuthContext::ApiToken { user_id, .. } => {
+                *user_id
+            }
+        }
     }
 }
 
@@ -127,9 +163,9 @@ async fn load_user(pool: &sqlx::PgPool, user_id: UserId) -> Option<User> {
     row.map(|(email,)| User { id: user_id, email })
 }
 
-/// Caller identity extracted from the session. Returns 401 when no user is
-/// attached. Handlers that need both the active org and the caller use
-/// [`CurrentOrg`] and [`CurrentUser`] together.
+/// Caller identity extracted from either a session cookie or an API token.
+/// Returns 401 if neither path produced a user. Handlers that need both the
+/// active org and the caller use [`CurrentOrg`] and [`CurrentUser`] together.
 #[derive(Debug, Clone, Copy)]
 pub struct CurrentUser(pub UserId);
 
@@ -141,6 +177,9 @@ where
     type Rejection = AppError;
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self> {
+        if let Some(ctx) = parts.extensions.get::<AuthContext>() {
+            return Ok(CurrentUser(ctx.user_id()));
+        }
         let session = Session::from_request_parts(parts, state)
             .await
             .expect("Session extractor is infallible");
@@ -171,6 +210,25 @@ where
             return Ok(CurrentOrg(app_state.default_org_id));
         }
 
+        // API-token path: tokens carry no active org. The caller MUST surface
+        // the org explicitly (slug header today; future slug-path routes can
+        // also feed this). Falling back to the personal org silently routes
+        // API-token writes into the wrong org (the data-misdirection bug
+        // called out in §5.5).
+        if let Some(AuthContext::ApiToken { user_id, .. }) = parts.extensions.get::<AuthContext>() {
+            let pool = app_state.db.as_ref().ok_or_else(|| {
+                AppError::Other(anyhow::anyhow!(
+                    "tenancy enabled but AppState.db is None — refusing to resolve org"
+                ))
+            })?;
+            let user_id = *user_id;
+            let org = explicit_org_from_header(parts, pool).await?;
+            if !is_active_member(pool, user_id, org).await? {
+                return Err(AppError::Forbidden);
+            }
+            return Ok(CurrentOrg(org));
+        }
+
         let session = Session::from_request_parts(parts, state)
             .await
             .expect("Session extractor is infallible");
@@ -194,4 +252,41 @@ where
             .ok_or(AppError::Forbidden)?;
         Ok(CurrentOrg(personal))
     }
+}
+
+/// Reads `X-Status-Monitor-Org` from the request headers and resolves it to
+/// an org id by slug. Returns `ORG_REQUIRED` when absent and
+/// `ORG_HEADER_INVALID` when the header value is malformed or names no org.
+async fn explicit_org_from_header(parts: &Parts, pool: &sqlx::PgPool) -> Result<OrgId> {
+    let raw = parts
+        .headers
+        .get(&ORG_HEADER)
+        .ok_or_else(|| {
+            AppError::bad_request(
+                codes::ORG_REQUIRED,
+                "API tokens must scope to an org via the X-Status-Monitor-Org header",
+            )
+        })?
+        .to_str()
+        .map_err(|_| {
+            AppError::bad_request(
+                codes::ORG_HEADER_INVALID,
+                "X-Status-Monitor-Org is not UTF-8",
+            )
+        })?
+        .trim();
+    if raw.is_empty() {
+        return Err(AppError::bad_request(
+            codes::ORG_HEADER_INVALID,
+            "X-Status-Monitor-Org is empty",
+        ));
+    }
+    crate::storage::orgs::find_id_by_slug(pool, raw)
+        .await?
+        .ok_or_else(|| {
+            AppError::bad_request(
+                codes::ORG_HEADER_INVALID,
+                "no organization matches X-Status-Monitor-Org",
+            )
+        })
 }
