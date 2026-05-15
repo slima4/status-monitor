@@ -232,8 +232,13 @@ pub async fn accept(
     }
 
     // Member cap, friendly pre-check: reject an over-cap accept *before*
-    // marking the invitation consumed, so the recipient can still be let in
-    // once a seat frees up rather than burning their token.
+    // marking the invitation consumed, so on the common (uncontended) path
+    // the recipient keeps their token and can be let in once a seat frees
+    // up. This cannot be a hard guarantee: `mark_accepted` must run before
+    // `add_member` (see the next comment), so a concurrent accept that
+    // slips past this lockless check and only trips the advisory-locked
+    // backstop below will still have consumed its token — a rare,
+    // boundary-only race, not the steady state.
     let plan = state.quotas.limit_for_org(row.org_id).await?;
     state
         .quotas
