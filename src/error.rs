@@ -41,6 +41,28 @@ pub enum AppError {
     #[error("{message}")]
     Unprocessable { code: &'static str, message: String },
 
+    /// A resource quota would be exceeded. Renders 422 with the stable
+    /// machine-readable `details` block (`quota`, `current`, `limit`,
+    /// `plan`) UI clients branch on. `code` is `QUOTA_EXCEEDED` or the
+    /// specific `MIN_CHECK_INTERVAL`.
+    #[error("{message}")]
+    QuotaExceeded {
+        code: &'static str,
+        message: String,
+        quota: &'static str,
+        current: i64,
+        limit: i64,
+        plan: String,
+    },
+
+    /// A rate limit was exceeded. Renders 429 with a `Retry-After` header
+    /// and a `details` block (`scope`, `retry_after_secs`).
+    #[error("rate limited on {scope}")]
+    RateLimited {
+        scope: String,
+        retry_after_secs: u32,
+    },
+
     #[error("authentication required")]
     Unauthorized,
 
@@ -112,10 +134,78 @@ impl AppError {
             message: message.into(),
         }
     }
+
+    /// Build a `QUOTA_EXCEEDED` 422 with the standard details block.
+    pub fn quota_exceeded(
+        quota: &'static str,
+        current: i64,
+        limit: i64,
+        plan: impl Into<String>,
+    ) -> Self {
+        let plan = plan.into();
+        Self::QuotaExceeded {
+            code: codes::QUOTA_EXCEEDED,
+            message: format!(
+                "{quota} limit reached: {current} of {limit} used on the {plan} plan."
+            ),
+            quota,
+            current,
+            limit,
+            plan,
+        }
+    }
+
+    /// Build the specific `MIN_CHECK_INTERVAL` 422 (requested interval below
+    /// the plan floor).
+    pub fn min_check_interval(requested: i64, minimum: i64, plan: impl Into<String>) -> Self {
+        let plan = plan.into();
+        Self::QuotaExceeded {
+            code: codes::MIN_CHECK_INTERVAL,
+            message: format!(
+                "check interval {requested}s is below the {minimum}s minimum on the {plan} plan."
+            ),
+            quota: "min_check_interval_secs",
+            current: requested,
+            limit: minimum,
+            plan,
+        }
+    }
 }
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
+        // Rate limiting needs a `Retry-After` header alongside the JSON body,
+        // so it can't go through the `(status, body)` tail used by the rest.
+        if let AppError::RateLimited {
+            scope,
+            retry_after_secs,
+        } = self
+        {
+            tracing::debug!(code = codes::RATE_LIMITED, %scope, "request rate-limited");
+            let body = ApiErrorBody {
+                code: codes::RATE_LIMITED,
+                message: format!(
+                    "Too many {scope} requests. Try again in {retry_after_secs} seconds."
+                ),
+                field: None,
+                details: Some(serde_json::json!({
+                    "scope": scope,
+                    "retry_after_secs": retry_after_secs,
+                })),
+                trace_id: None,
+            };
+            let mut resp = (
+                StatusCode::TOO_MANY_REQUESTS,
+                Json(ApiError { error: body }),
+            )
+                .into_response();
+            if let Ok(v) = axum::http::HeaderValue::from_str(&retry_after_secs.to_string()) {
+                resp.headers_mut()
+                    .insert(axum::http::header::RETRY_AFTER, v);
+            }
+            return resp;
+        }
+
         let (status, body) = match self {
             AppError::NotFound { code, message } => {
                 (StatusCode::NOT_FOUND, ApiErrorBody::new(code, message))
@@ -145,6 +235,31 @@ impl IntoResponse for AppError {
                 StatusCode::UNPROCESSABLE_ENTITY,
                 ApiErrorBody::new(code, message),
             ),
+            AppError::QuotaExceeded {
+                code,
+                message,
+                quota,
+                current,
+                limit,
+                plan,
+            } => (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                ApiErrorBody {
+                    code,
+                    message,
+                    field: None,
+                    details: Some(serde_json::json!({
+                        "quota": quota,
+                        "current": current,
+                        "limit": limit,
+                        "plan": plan,
+                    })),
+                    trace_id: None,
+                },
+            ),
+            // Handled above with a Retry-After header; unreachable here but
+            // the match must stay exhaustive.
+            AppError::RateLimited { .. } => unreachable!("RateLimited returns early"),
             AppError::Unauthorized => (
                 StatusCode::UNAUTHORIZED,
                 ApiErrorBody::new(codes::UNAUTHORIZED, "authentication required"),

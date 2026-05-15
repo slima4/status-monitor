@@ -69,12 +69,8 @@ tracing_enabled = false
 otlp_endpoint = "http://localhost:4317"
 gauge_sample_interval_ms = 1000
 
-[api.rate_limit]
-# Per-IP token bucket on /api/v1/*. Disabled by default — operators front the
-# service with a reverse proxy if they bind beyond loopback.
-enabled = false
-per_second = 50
-burst = 100
+# Per-IP API rate limiting is enforced by Caddy (see deployment/Caddyfile);
+# the in-process limiter is per-org / per-user — see [rate_limits] + plans.
 
 # Outbound notification channels. Per-target opt-in via the target's `alerts`
 # field references the channel by key; entries here only define transport
@@ -187,10 +183,10 @@ http_request_timeout_ms = 10000
 
 [auth.invitations]
 expiry_hours = 168
-max_pending_per_org = 50
+# Pending-invitation cap now lives in plans.max_pending_invitations.
 
 [auth.api_tokens]
-max_per_user = 25
+# Per-user token cap now lives in plans.max_api_tokens_per_user.
 # Floor of 16 chars = 48 bits of entropy in the visible prefix (collision-safe
 # to ~16M tokens). Startup assertion refuses to boot below that.
 prefix_visible_chars = 16
@@ -218,3 +214,16 @@ enabled = false
 # max_public_components = 10000
 # max_maintenance_windows = 1000
 # max_logo_size_bytes = 1048576
+
+[rate_limits]
+# Per-org / per-user limits come from the plans table. These mirror the
+# per-IP numbers Caddy enforces (here for ops parity) and the in-process
+# limiter-map janitor cadence.
+[rate_limits.per_ip]
+public_pages_per_min = 60
+auth_endpoints_per_min = 10
+org_creations_per_day = 3
+
+[rate_limits.janitor]
+cleanup_interval_hours = 6
+idle_threshold_hours = 24

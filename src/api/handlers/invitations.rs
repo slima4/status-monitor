@@ -84,7 +84,16 @@ pub async fn create(
     // Dedupe + pending-cap are enforced atomically inside `inv::create`
     // (one transaction, per-org advisory lock) — a pre-check here would
     // just be a racy duplicate of the real gate.
-    let max = state.cfg.auth.invitations.max_pending_per_org;
+    // Cap from the plan (single source of truth). `inv::create` enforces it
+    // atomically under the per-org advisory lock — same number, one gate.
+    let max = u32::try_from(
+        state
+            .quotas
+            .limit_for_org(org)
+            .await?
+            .max_pending_invitations,
+    )
+    .unwrap_or(u32::MAX);
     let expiry_hours = state.cfg.auth.invitations.expiry_hours;
     let created = inv::create(pool, org, user_id, email, role, expiry_hours, max).await?;
 

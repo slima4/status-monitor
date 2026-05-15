@@ -167,9 +167,19 @@ pub async fn create(
     AppendHeaders<[(axum::http::HeaderName, HeaderValue); 1]>,
     Redacted<Target>,
 )> {
+    let org = state.default_org_id;
+    let plan = state.quotas.limit_for_org(org).await?;
     let guard = ssrf_guard(&state);
-    validate_new_target(&new, &guard)?;
-    let t = state.target_store.create(new).await?;
+    validate_new_target(&new, &guard, i64::from(plan.min_check_interval_secs))?;
+    // Friendly pre-check; the store INSERT enforces the same cap atomically.
+    state.quotas.check_can_create_targets(org, None, 1).await?;
+    if new.public_status {
+        state.quotas.check_public_components(org, None, 1).await?;
+    }
+    let t = state
+        .target_store
+        .create(new, i64::from(plan.max_targets))
+        .await?;
     // UUID hex is always ASCII-safe → infallible.
     let location = HeaderValue::from_str(&format!("/api/v1/targets/{}", t.id))
         .expect("uuid produces ascii-only path");
@@ -209,6 +219,23 @@ pub async fn update(
     }
     if let Some(alerts) = &update.alerts {
         validate_alerts(alerts)?;
+    }
+    // The check-interval floor applies to PATCH too — otherwise a target
+    // created at the floor could be lowered below it, evading the plan.
+    if let Some(interval) = update.interval {
+        let min = state
+            .quotas
+            .limit_for_org(state.default_org_id)
+            .await?
+            .min_check_interval_secs;
+        let requested = interval.as_secs() as i64;
+        if requested < i64::from(min) {
+            return Err(AppError::min_check_interval(
+                requested,
+                i64::from(min),
+                "free",
+            ));
+        }
     }
     match state.target_store.update(id, update).await? {
         Some(t) => Ok(Redacted::new(t)),
@@ -279,11 +306,27 @@ pub async fn bulk_create(
             format!("bulk size {} exceeds max {BULK_MAX}", items.len()),
         ));
     }
+    let org = state.default_org_id;
+    let plan = state.quotas.limit_for_org(org).await?;
     let guard = ssrf_guard(&state);
     for new in &items {
-        validate_new_target(new, &guard)?;
+        validate_new_target(new, &guard, i64::from(plan.min_check_interval_secs))?;
     }
-    let out = state.target_store.bulk_create(items).await?;
+    let n = items.len() as i64;
+    // Quantity-aware friendly pre-check; the store INSERT re-enforces the
+    // same `current + n <= limit` bound atomically against a concurrent bulk.
+    state.quotas.check_can_create_targets(org, None, n).await?;
+    let public = items.iter().filter(|t| t.public_status).count() as i64;
+    if public > 0 {
+        state
+            .quotas
+            .check_public_components(org, None, public)
+            .await?;
+    }
+    let out = state
+        .target_store
+        .bulk_create(items, i64::from(plan.max_targets))
+        .await?;
     Ok((StatusCode::CREATED, Redacted::new(out)))
 }
 
@@ -472,7 +515,18 @@ fn ssrf_guard(state: &AppState) -> SsrfGuard {
     SsrfGuard::new(state.cfg.security.allow_private_targets)
 }
 
-fn validate_new_target(new: &NewTarget, guard: &SsrfGuard) -> Result<()> {
+/// Per-resource validation, including the plan's check-interval floor. Both
+/// `create` and `bulk_create` run this per item, so the floor is enforced by
+/// construction on every path rather than in one handler (I4).
+fn validate_new_target(new: &NewTarget, guard: &SsrfGuard, min_interval_secs: i64) -> Result<()> {
+    let requested = new.interval.as_secs() as i64;
+    if requested < min_interval_secs {
+        return Err(AppError::min_check_interval(
+            requested,
+            min_interval_secs,
+            "free",
+        ));
+    }
     validate_check(&new.check, guard)?;
     validate_alerts(&new.alerts)
 }

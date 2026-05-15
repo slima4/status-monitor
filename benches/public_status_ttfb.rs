@@ -154,7 +154,7 @@ async fn build_fixture() -> Option<Fixture> {
 
         for j in 0..COMPONENTS_PER_ORG {
             let t = target_store
-                .create(http_target(&format!("ttfb-{i}-{j}")))
+                .create(http_target(&format!("ttfb-{i}-{j}")), i64::MAX)
                 .await
                 .expect("create target");
             let rows: Vec<CheckResult> = (0..RESULTS_PER_COMPONENT)

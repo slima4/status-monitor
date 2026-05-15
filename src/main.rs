@@ -39,6 +39,9 @@ async fn main() -> Result<()> {
     let cfg = AppConfig::load()?;
     observability::tracing::init(&cfg.observability);
     status_monitor::app::assert_per_org_status_config(&cfg);
+    // A bad quota/rate/interval number is a clean startup config error,
+    // never a `.expect()` crash-loop in router/layer construction (I6).
+    cfg.validate_quotas_and_limits()?;
 
     let metrics_handle = if cfg.observability.metrics_enabled {
         Some(observability::metrics::init(&cfg.server.metrics_bind)?)

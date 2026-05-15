@@ -94,6 +94,42 @@ app.{$STATUS_MONITOR_DOMAIN} {
 		}
 	}
 
+	# ─── Per-IP limits on the abuse-sensitive endpoints ─────────────────
+	# Caddy owns the per-IP tier (it sees the real peer; the app keys on
+	# org/user, never the TCP peer). The app-side per-org/user limits live
+	# in the plans table. Distinct zone names — zones are process-global.
+	@auth path /auth/* /api/v1/me /api/v1/orgs/*/invitations/accept
+	handle @auth {
+		rate_limit {
+			zone auth_endpoints {
+				key {remote_host}
+				events 10
+				window 1m
+			}
+		}
+		reverse_proxy status-monitor:8080 {
+			header_up X-Real-IP {remote_host}
+		}
+	}
+
+	# Org creation — strict speedbump against naive mass-signup abuse.
+	@org_creation {
+		method POST
+		path /api/v1/orgs
+	}
+	handle @org_creation {
+		rate_limit {
+			zone org_creation {
+				key {remote_host}
+				events 3
+				window 24h
+			}
+		}
+		reverse_proxy status-monitor:8080 {
+			header_up X-Real-IP {remote_host}
+		}
+	}
+
 	# ─── Everything else requires basic auth ────────────────────────────
 	# Basic auth is the v1 edge boundary. When the Rust app runs in SaaS
 	# mode it enforces in-session auth itself; you may then drop this block

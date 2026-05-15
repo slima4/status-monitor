@@ -51,9 +51,9 @@ pub struct CreatedInvitation {
 
 pub use crate::auth::token_hash::generate_raw_token;
 
-/// Number of pending invitations on the org. Caller compares to
-/// `max_pending_per_org` before INSERT to keep the table from being used as
-/// a spam relay.
+/// Number of pending invitations on the org. The cap is enforced
+/// atomically inside `create` against the plan; this helper is read-only
+/// reporting.
 pub async fn count_pending_for_org(pool: &PgPool, org: OrgId) -> Result<u32> {
     let (n,): (i64,) = sqlx::query_as(
         "SELECT COUNT(*) FROM invitations \

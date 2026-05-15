@@ -86,7 +86,7 @@ async fn create_then_lookup_and_revoke_roundtrip() {
     MIGRATOR.run(&pool).await.unwrap();
 
     let user = seed_user(&pool).await;
-    let created = api_tokens::create(&pool, user, "CI", PREFIX_LEN)
+    let created = api_tokens::create(&pool, user, "CI", PREFIX_LEN, 1000)
         .await
         .expect("create");
     assert!(created.token.starts_with(api_tokens::TOKEN_PREFIX));
@@ -141,7 +141,7 @@ async fn forced_prefix_collision_still_finds_correct_token() {
     // Issue real token, then manually plant a sibling row with the same
     // prefix but a hash for "wrong" so the lookup must disambiguate by
     // argon2-verify, not by prefix alone.
-    let created = api_tokens::create(&pool, user, "real", PREFIX_LEN)
+    let created = api_tokens::create(&pool, user, "real", PREFIX_LEN, 1000)
         .await
         .unwrap();
     sqlx::query(
@@ -178,10 +178,10 @@ async fn count_for_user_grows_then_revoke_drops() {
     let user = seed_user(&pool).await;
     assert_eq!(api_tokens::count_for_user(&pool, user).await.unwrap(), 0);
 
-    let t1 = api_tokens::create(&pool, user, "t1", PREFIX_LEN)
+    let t1 = api_tokens::create(&pool, user, "t1", PREFIX_LEN, 1000)
         .await
         .unwrap();
-    let _t2 = api_tokens::create(&pool, user, "t2", PREFIX_LEN)
+    let _t2 = api_tokens::create(&pool, user, "t2", PREFIX_LEN, 1000)
         .await
         .unwrap();
     assert_eq!(api_tokens::count_for_user(&pool, user).await.unwrap(), 2);
@@ -207,7 +207,7 @@ async fn rename_only_succeeds_for_owner() {
 
     let owner = seed_user(&pool).await;
     let other = seed_user(&pool).await;
-    let tok = api_tokens::create(&pool, owner, "ci", PREFIX_LEN)
+    let tok = api_tokens::create(&pool, owner, "ci", PREFIX_LEN, 1000)
         .await
         .unwrap();
     let foreign = api_tokens::rename_for_user(&pool, other, tok.id, "stolen")
@@ -237,7 +237,7 @@ async fn expired_token_lookup_returns_invalid() {
     MIGRATOR.run(&pool).await.unwrap();
 
     let user = seed_user(&pool).await;
-    let tok = api_tokens::create(&pool, user, "expiring", PREFIX_LEN)
+    let tok = api_tokens::create(&pool, user, "expiring", PREFIX_LEN, 1000)
         .await
         .unwrap();
     sqlx::query("UPDATE api_tokens SET expires_at = now() - INTERVAL '1 minute' WHERE id = $1")

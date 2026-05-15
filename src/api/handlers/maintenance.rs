@@ -73,6 +73,13 @@ pub async fn create_maintenance(
     validation::validate_description(new.description.as_deref(), "description")?;
     validate_time_range(new.starts_at, new.ends_at)?;
     validate_component_ids(&state, &new.component_ids).await?;
+    // Handler-entry quota check (friendly 422). Maintenance windows are a
+    // singular, low-concurrency create — store-level atomic enforcement is a
+    // tracked follow-up; the headline atomic path is targets.
+    state
+        .quotas
+        .check_can_create_maintenance_window(state.default_org_id, None)
+        .await?;
     let mw = state.maintenance_store.create(new).await?;
     let location =
         HeaderValue::from_str(&format!("/api/v1/maintenance/{}", mw.id)).expect("uuid ascii");

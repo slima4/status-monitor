@@ -51,6 +51,8 @@ impl IntoResponse for WebError {
             AppError::BadRequest { .. }
             | AppError::Conflict { .. }
             | AppError::Unprocessable { .. }
+            | AppError::QuotaExceeded { .. }
+            | AppError::RateLimited { .. }
             | AppError::PayloadTooLarge { .. } => {
                 tracing::warn!(error = %self.0, "web handler rejected request");
                 (

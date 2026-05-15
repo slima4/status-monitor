@@ -26,10 +26,16 @@ pub trait TargetStore: Send + Sync {
     /// the `total` field of `PageEnvelope`.
     async fn count(&self, filter: TargetFilter) -> Result<u64>;
     async fn get(&self, id: Uuid) -> Result<Option<Target>>;
-    async fn create(&self, new: NewTarget) -> Result<Target>;
+    /// Create one target. `max_targets` is the plan cap; the INSERT is
+    /// guarded by `(count) + 1 <= max_targets` so the bound holds even
+    /// against a concurrent create (no check-then-act). Returns
+    /// `AppError::QuotaExceeded` when the cap is reached.
+    async fn create(&self, new: NewTarget, max_targets: i64) -> Result<Target>;
     async fn update(&self, id: Uuid, update: TargetUpdate) -> Result<Option<Target>>;
     async fn delete(&self, id: Uuid) -> Result<bool>;
-    async fn bulk_create(&self, items: Vec<NewTarget>) -> Result<Vec<Target>>;
+    /// Bulk create. Same atomic `(count) + items.len() <= max_targets`
+    /// bound; either all rows insert or none do (`AppError::QuotaExceeded`).
+    async fn bulk_create(&self, items: Vec<NewTarget>, max_targets: i64) -> Result<Vec<Target>>;
     async fn list_updated_since(&self, since: DateTime<Utc>) -> Result<Vec<Target>>;
     /// Aggregate tag inventory across all targets. `prefix` filters tag names
     /// for autocomplete; `limit` caps the number of returned rows. Sorted by

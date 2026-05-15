@@ -16,6 +16,7 @@ use crate::email::EmailSender;
 use crate::http_client::HttpClients;
 use crate::http_outbound::OutboundHttpClient;
 use crate::public_status::PublicSource;
+use crate::quotas::{QuotaService, RateLimitService};
 use crate::storage::{
     IncidentNarrationStore, MaintenanceStore, ResultSink, ResultsStore, TargetStore,
 };
@@ -81,6 +82,12 @@ pub struct AppState {
     /// Transactional email sender (invitations, magic-link). Provider selected
     /// by `email.provider`.
     pub email_sender: Arc<dyn EmailSender>,
+    /// Plan resolution + resource-quota checks. Built from `cfg` + `db` so
+    /// `AppState::new`'s signature (and every caller) stays unchanged.
+    pub quotas: Arc<QuotaService>,
+    /// Per-org / per-user request rate limiter. The idle-entry janitor is
+    /// spawned in `build_router` against the shutdown token.
+    pub rate_limits: Arc<RateLimitService>,
 }
 
 /// Run unconditionally at boot after config parse. Encodes the per-org
@@ -162,6 +169,8 @@ impl AppState {
         outbound_http: OutboundHttpClient,
         email_sender: Arc<dyn EmailSender>,
     ) -> Self {
+        let quotas = Arc::new(QuotaService::new(&cfg, db.clone()));
+        let rate_limits = Arc::new(RateLimitService::new());
         Self {
             cfg: Arc::new(cfg),
             db,
@@ -180,6 +189,8 @@ impl AppState {
             api_token_debounce: Arc::new(build_api_token_debounce()),
             outbound_http,
             email_sender,
+            quotas,
+            rate_limits,
         }
     }
 }

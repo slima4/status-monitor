@@ -161,12 +161,18 @@ async fn two_tenants_never_see_each_others_data() {
     // ── Targets ──────────────────────────────────────────────────────────
     let target_a = a
         .target_store
-        .create(target_named(&format!("a-target-{}", Uuid::now_v7())))
+        .create(
+            target_named(&format!("a-target-{}", Uuid::now_v7())),
+            i64::MAX,
+        )
         .await
         .expect("create target in a");
     let target_b = b
         .target_store
-        .create(target_named(&format!("b-target-{}", Uuid::now_v7())))
+        .create(
+            target_named(&format!("b-target-{}", Uuid::now_v7())),
+            i64::MAX,
+        )
         .await
         .expect("create target in b");
 

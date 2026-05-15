@@ -118,8 +118,9 @@ fn slice_prefix(raw: &str, prefix_visible_chars: usize) -> &str {
     &raw[..n]
 }
 
-/// Count of non-deleted tokens owned by `user`. Caller compares to
-/// `max_per_user` before INSERT.
+/// Count of non-deleted tokens owned by `user`. The per-user cap is
+/// enforced atomically inside `create` against the plan; this helper is
+/// read-only reporting.
 pub async fn count_for_user(pool: &PgPool, user: UserId) -> Result<u32> {
     let (n,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM api_tokens WHERE user_id = $1")
         .bind(user.0)
@@ -132,14 +133,43 @@ pub async fn count_for_user(pool: &PgPool, user: UserId) -> Result<u32> {
 /// Insert a freshly-issued token. Returns the raw token string — the only
 /// place the caller can ever see it. The persisted row holds the argon2id
 /// hash plus the visible prefix.
+/// `max_tokens` is the plan's `max_api_tokens_per_user`. A per-user
+/// advisory lock serialises concurrent creates for the same user so the
+/// count + INSERT cannot race (the same standard as the owner-org and
+/// invitation caps — not check-then-act). Argon2 runs only *after* the
+/// cheap cap reject so a blocked abuse path doesn't pay ~150 ms of CPU.
 pub async fn create(
     pool: &PgPool,
     user: UserId,
     name: &str,
     prefix_visible_chars: usize,
+    max_tokens: i64,
 ) -> Result<CreatedToken> {
     let raw = generate_raw();
     let prefix = slice_prefix(&raw, prefix_visible_chars).to_string();
+
+    let mut tx = pool.begin().await.context("api_tokens::create: begin")?;
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))")
+        .bind(user.0.to_string())
+        .execute(&mut *tx)
+        .await
+        .context("api_tokens::create: advisory lock")?;
+
+    let (current,): (i64,) = sqlx::query_as("SELECT count(*) FROM api_tokens WHERE user_id = $1")
+        .bind(user.0)
+        .fetch_one(&mut *tx)
+        .await
+        .context("api_tokens::create: count")?;
+    if current + 1 > max_tokens {
+        tx.rollback().await.ok();
+        return Err(crate::error::AppError::quota_exceeded(
+            "max_api_tokens_per_user",
+            current,
+            max_tokens,
+            "free",
+        ));
+    }
+
     let hash = token_hash::hash(&raw)?;
     let (id, created_at): (Uuid, DateTime<Utc>) = sqlx::query_as(
         "INSERT INTO api_tokens (user_id, name, token_hash, token_prefix) \
@@ -150,9 +180,10 @@ pub async fn create(
     .bind(name)
     .bind(&hash)
     .bind(&prefix)
-    .fetch_one(pool)
+    .fetch_one(&mut *tx)
     .await
     .context("api_tokens::create")?;
+    tx.commit().await.context("api_tokens::create: commit")?;
     Ok(CreatedToken {
         id,
         name: name.to_string(),
@@ -178,9 +209,9 @@ pub async fn list_for_user(pool: &PgPool, user: UserId) -> Result<Vec<ApiTokenLi
 }
 
 /// Look up a presented token. Strips the `sm_live_` prefix-check, derives the
-/// visible prefix per config, fetches candidate rows (bounded by
-/// `max_per_user`), and argon2-verifies each. Verification is constant-time;
-/// the loop runs at most `max_per_user` iterations.
+/// visible prefix per config, fetches candidate rows (bounded by the
+/// per-user token cap), and argon2-verifies each. Verification is
+/// constant-time; the loop runs at most that many iterations.
 pub async fn lookup_by_raw(
     pool: &PgPool,
     raw: &str,

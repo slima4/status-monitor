@@ -61,7 +61,7 @@ async fn bulk_create_with_ragged_tags(pool: PgPool) {
     ];
 
     let created = store
-        .bulk_create(items)
+        .bulk_create(items, i64::MAX)
         .await
         .expect("bulk_create succeeds");
 
@@ -78,7 +78,10 @@ async fn bulk_create_with_ragged_tags(pool: PgPool) {
 #[ignore = "requires DATABASE_URL — run via DATABASE_URL=... cargo test -- --ignored"]
 async fn bulk_create_empty_is_noop(pool: PgPool) {
     let (store, _org) = store_with_default_org(pool, None).await;
-    let result = store.bulk_create(vec![]).await.expect("empty bulk ok");
+    let result = store
+        .bulk_create(vec![], i64::MAX)
+        .await
+        .expect("empty bulk ok");
     assert!(result.is_empty());
 }
 
@@ -104,7 +107,7 @@ async fn credentials_stored_as_ciphertext_envelope(pool: PgPool) {
         public_sort_order: 0,
     };
 
-    let created = store.create(new).await.expect("create");
+    let created = store.create(new, i64::MAX).await.expect("create");
 
     // Round-trip via the store decrypts.
     let fetched = store.get(created.id).await.expect("get").expect("present");
@@ -140,7 +143,7 @@ async fn credentials_stored_as_ciphertext_envelope(pool: PgPool) {
 async fn no_credentials_no_envelope(pool: PgPool) {
     let (store, _org) = store_with_default_org(pool.clone(), Some(test_cipher())).await;
     let new = make("plain", vec![]);
-    let created = store.create(new).await.expect("create");
+    let created = store.create(new, i64::MAX).await.expect("create");
 
     let raw: (serde_json::Value,) = sqlx::query_as("SELECT check_spec FROM targets WHERE id = $1")
         .bind(created.id)

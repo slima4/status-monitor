@@ -25,7 +25,7 @@ use status_monitor::http_outbound::{OutboundHttpClient, build_outbound_client};
 use status_monitor::public_status::{NoopPublicSource, PublicSource};
 use status_monitor::storage::{
     InMemoryIncidentNarrationStore, InMemoryMaintenanceStore, InMemorySink, InMemoryTargetStore,
-    IncidentNarrationStore, MaintenanceStore, ResultSink, ResultsStore,
+    IncidentNarrationStore, MaintenanceStore, PostgresTargetStore, ResultSink, ResultsStore,
 };
 use status_monitor::worker::{ResultFanout, WorkerPool};
 use tokio::sync::{Mutex, mpsc};
@@ -227,6 +227,68 @@ pub async fn build_test_app_with_pg(
         .await
         .expect("ensure default org");
     let target_store = Arc::new(InMemoryTargetStore::new());
+    let sink = Arc::new(InMemorySink::new());
+    let results_store: Arc<dyn ResultsStore> = sink.clone();
+    let result_sink: Arc<dyn ResultSink> = sink;
+    let http_clients = Arc::new(test_client());
+    let (tx, _rx) = mpsc::channel(1024);
+    let pool_arc = Arc::new(WorkerPool::new(
+        cfg.checker.max_concurrent_checks.max(1),
+        (*http_clients).clone(),
+        cfg.circuit_breaker,
+        ResultFanout::storage_only(tx),
+    ));
+    let public_source = Arc::new(NoopPublicSource::default());
+    let maintenance_store: Arc<dyn MaintenanceStore> = Arc::new(InMemoryMaintenanceStore::new());
+    let incident_narration_store: Arc<dyn IncidentNarrationStore> =
+        Arc::new(InMemoryIncidentNarrationStore::new());
+    let state = AppState::new(
+        cfg,
+        Some(pool),
+        target_store,
+        results_store,
+        result_sink,
+        http_clients,
+        pool_arc,
+        public_source,
+        maintenance_store,
+        incident_narration_store,
+        default_org_id,
+        build_test_outbound_and_email().0,
+        build_test_outbound_and_email().1,
+    );
+    let api = build_router(state.clone(), CancellationToken::new());
+    let app = api.merge(status_monitor::web::routes(&state.cfg).with_state(state));
+    (app, default_org_id)
+}
+
+/// Like [`build_test_app_with_pg`] but the target store is the real
+/// `PostgresTargetStore` bound to a **freshly inserted org** (unique slug,
+/// `plan_id` defaulting to `free`). Quota counts (`QuotaService`) and the
+/// store's atomic count-in-INSERT both read the same `targets` table, and
+/// the unique org isolates parallel quota tests from each other. Used by
+/// the quota integration suite, which must exercise the production path.
+pub async fn build_test_app_with_pg_store(
+    pool: PgPool,
+    mutate: impl FnOnce(&mut AppConfig),
+) -> (Router, OrgId) {
+    let mut cfg = AppConfig::load().expect("config");
+    mutate(&mut cfg);
+    let slug = format!("qt{}", uuid::Uuid::now_v7().simple());
+    let slug = &slug[..slug.len().min(30)];
+    let (org_uuid,): (uuid::Uuid,) = sqlx::query_as(
+        "INSERT INTO organizations (slug, name) VALUES ($1, 'Quota Test') RETURNING id",
+    )
+    .bind(slug)
+    .fetch_one(&pool)
+    .await
+    .expect("insert quota-test org");
+    let default_org_id = OrgId(org_uuid);
+    let target_store = Arc::new(PostgresTargetStore::from_pool(
+        pool.clone(),
+        None,
+        default_org_id,
+    ));
     let sink = Arc::new(InMemorySink::new());
     let results_store: Arc<dyn ResultsStore> = sink.clone();
     let result_sink: Arc<dyn ResultSink> = sink;

@@ -74,6 +74,10 @@ pub mod codes {
     pub const CIRCUIT_OPEN: &str = "CIRCUIT_OPEN";
     pub const DEPENDENCY_DOWN: &str = "DEPENDENCY_DOWN";
     pub const RATE_LIMITED: &str = "RATE_LIMITED";
+    /// A resource quota would be exceeded; `details.quota` names which.
+    pub const QUOTA_EXCEEDED: &str = "QUOTA_EXCEEDED";
+    /// Requested check interval is below the plan minimum.
+    pub const MIN_CHECK_INTERVAL: &str = "MIN_CHECK_INTERVAL";
     pub const INTERNAL: &str = "INTERNAL";
     pub const UNAUTHORIZED: &str = "UNAUTHORIZED";
     pub const FORBIDDEN: &str = "FORBIDDEN";

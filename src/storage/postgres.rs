@@ -12,7 +12,7 @@ use uuid::Uuid;
 use crate::api::types::{TagCount, TargetsSummary};
 use crate::config::PostgresConfig;
 use crate::domain::{CheckSpec, NewTarget, OrgId, Target, TargetAlerts, TargetUpdate};
-use crate::error::Result;
+use crate::error::{AppError, Result};
 use crate::security::Cipher;
 use crate::storage::postgres_secrets::{decrypt_in_place, encrypt_in_place};
 use crate::storage::traits::{TargetFilter, TargetStore};
@@ -195,9 +195,34 @@ impl TargetStore for PostgresTargetStore {
         }
     }
 
-    async fn create(&self, new: NewTarget) -> Result<Target> {
+    async fn create(&self, new: NewTarget, max_targets: i64) -> Result<Target> {
         let check_json = self.encode_check(&new.check)?;
         let alerts_json = serde_json::to_value(&new.alerts).context("encoding alerts JSON")?;
+        // A per-org advisory lock held across count+INSERT in one tx. The
+        // count-in-INSERT predicate alone is NOT race-safe under READ
+        // COMMITTED — concurrent creators each see a snapshot count and all
+        // pass `+1 <= limit`, overshooting. This mirrors the owner-org and
+        // invitation caps: lock the subject, then count, then write.
+        let mut tx = self.pool.begin().await.context("create target: begin")?;
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))")
+            .bind(self.org_id().to_string())
+            .execute(&mut *tx)
+            .await
+            .context("create target: advisory lock")?;
+        let (current,): (i64,) = sqlx::query_as("SELECT count(*) FROM targets WHERE org_id = $1")
+            .bind(self.org_id())
+            .fetch_one(&mut *tx)
+            .await
+            .context("create target: count")?;
+        if current + 1 > max_targets {
+            tx.rollback().await.ok();
+            return Err(AppError::quota_exceeded(
+                "max_targets",
+                current,
+                max_targets,
+                "free",
+            ));
+        }
         let row: TargetRow = sqlx::query_as::<_, TargetRow>(
             r#"INSERT INTO targets (org_id, name, check_spec, interval_secs, enabled, tags, alerts,
                                     public_status, public_name, public_description, public_group, public_sort_order)
@@ -218,9 +243,10 @@ impl TargetStore for PostgresTargetStore {
         .bind(&new.public_description)
         .bind(&new.public_group)
         .bind(new.public_sort_order)
-        .fetch_one(&self.pool)
+        .fetch_one(&mut *tx)
         .await
         .context("insert target")?;
+        tx.commit().await.context("create target: commit")?;
         self.decode_row(row)
     }
 
@@ -288,11 +314,15 @@ impl TargetStore for PostgresTargetStore {
         Ok(res.rows_affected() > 0)
     }
 
-    async fn bulk_create(&self, items: Vec<NewTarget>) -> Result<Vec<Target>> {
+    async fn bulk_create(&self, items: Vec<NewTarget>, max_targets: i64) -> Result<Vec<Target>> {
         if items.is_empty() {
             return Ok(Vec::new());
         }
 
+        // Same lock-then-count-then-write pattern as the singular path:
+        // the per-org advisory lock makes the count accurate against a
+        // concurrent bulk (a count subquery alone is not race-safe under
+        // READ COMMITTED). All-or-nothing on the cap.
         const SQL: &str = r#"INSERT INTO targets (org_id, name, check_spec, interval_secs, enabled, tags, alerts,
                                     public_status, public_name, public_description, public_group, public_sort_order)
                SELECT $12, u.name, u.check_spec, u.interval_secs, u.enabled,
@@ -320,6 +350,27 @@ impl TargetStore for PostgresTargetStore {
         let mut public_description: Vec<Option<String>> = Vec::with_capacity(len);
         let mut public_group: Vec<Option<String>> = Vec::with_capacity(len);
         let mut public_sort_order: Vec<i32> = Vec::with_capacity(len);
+
+        let mut tx = self.pool.begin().await.context("bulk create: begin")?;
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))")
+            .bind(self.org_id().to_string())
+            .execute(&mut *tx)
+            .await
+            .context("bulk create: advisory lock")?;
+        let (current,): (i64,) = sqlx::query_as("SELECT count(*) FROM targets WHERE org_id = $1")
+            .bind(self.org_id())
+            .fetch_one(&mut *tx)
+            .await
+            .context("bulk create: count")?;
+        if current + len as i64 > max_targets {
+            tx.rollback().await.ok();
+            return Err(AppError::quota_exceeded(
+                "max_targets",
+                current,
+                max_targets,
+                "free",
+            ));
+        }
 
         let rows: Vec<TargetRow> = if let Some(cipher) = &self.cipher {
             // Cipher path: walk each CheckSpec via serde_json::Value so credential
@@ -353,7 +404,7 @@ impl TargetStore for PostgresTargetStore {
                 .bind(&public_group)
                 .bind(&public_sort_order)
                 .bind(self.org_id())
-                .fetch_all(&self.pool)
+                .fetch_all(&mut *tx)
                 .await
                 .context("bulk insert targets")?
         } else {
@@ -386,11 +437,12 @@ impl TargetStore for PostgresTargetStore {
                 .bind(&public_group)
                 .bind(&public_sort_order)
                 .bind(self.org_id())
-                .fetch_all(&self.pool)
+                .fetch_all(&mut *tx)
                 .await
                 .context("bulk insert targets")?
         };
 
+        tx.commit().await.context("bulk create: commit")?;
         self.rows_to_targets(rows)
     }
 

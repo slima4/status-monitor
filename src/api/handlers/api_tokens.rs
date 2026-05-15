@@ -64,16 +64,18 @@ pub async fn create(
 ) -> Result<(StatusCode, Json<NewApiTokenResponse>)> {
     let name = validate_name(&req.name)?;
     let pool = state.require_db()?;
-    let max = state.cfg.auth.api_tokens.max_per_user;
-    let existing = tokens::count_for_user(pool, user_id).await?;
-    if existing >= max {
-        return Err(AppError::conflict(
-            codes::TOKEN_LIMIT,
-            format!("token limit reached ({max})"),
-        ));
-    }
+    // Cap from the plan (single source of truth). Tokens are user-scoped,
+    // not org-scoped; the default org's plan governs the per-user cap.
+    let max_tokens = i64::from(
+        state
+            .quotas
+            .limit_for_org(state.default_org_id)
+            .await?
+            .max_api_tokens_per_user,
+    );
     let prefix_len = state.cfg.auth.api_tokens.prefix_visible_chars as usize;
-    let created = tokens::create(pool, user_id, name, prefix_len).await?;
+    // Atomic count-in-INSERT; no racy handler pre-check.
+    let created = tokens::create(pool, user_id, name, prefix_len, max_tokens).await?;
     Ok((
         StatusCode::CREATED,
         Json(NewApiTokenResponse {

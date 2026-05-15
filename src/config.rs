@@ -36,6 +36,8 @@ pub struct AppConfig {
     pub auth: AuthConfig,
     #[serde(default)]
     pub quotas: QuotasConfig,
+    #[serde(default)]
+    pub rate_limits: RateLimitsConfig,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -150,22 +152,21 @@ impl Default for GithubOauthConfig {
 #[serde(default)]
 pub struct InvitationsConfig {
     pub expiry_hours: u32,
-    pub max_pending_per_org: u32,
+    // The pending-invitation cap moved to `plans.max_pending_invitations`
+    // (one source of truth). A CI guard rejects re-reading the old key.
 }
 
 impl Default for InvitationsConfig {
     fn default() -> Self {
-        Self {
-            expiry_hours: 168,
-            max_pending_per_org: 50,
-        }
+        Self { expiry_hours: 168 }
     }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct ApiTokensConfig {
-    pub max_per_user: u32,
+    // The per-user token cap moved to `plans.max_api_tokens_per_user` (one
+    // source of truth). A CI guard rejects re-reading the old key.
     /// First N chars of every token surfaced in UI + used as a lookup-narrowing
     /// index. Single source of truth at INSERT and at lookup. Floor of 16 gives
     /// 48 bits of entropy in the prefix (collision-safe to ~16M tokens); a
@@ -176,7 +177,6 @@ pub struct ApiTokensConfig {
 impl Default for ApiTokensConfig {
     fn default() -> Self {
         Self {
-            max_per_user: 25,
             prefix_visible_chars: 16,
         }
     }
@@ -341,6 +341,53 @@ pub struct SelfHostOverrides {
     pub max_logo_size_bytes: Option<u32>,
 }
 
+/// `[rate_limits]`. Most numbers come from the `plans` table; these are the
+/// janitor cadence and the per-IP values Caddy enforces (kept here for
+/// reference / parity). Validated `>= 1` at load (I6).
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(default)]
+pub struct RateLimitsConfig {
+    pub per_ip: PerIpRateLimits,
+    pub janitor: RateLimitJanitorConfig,
+}
+
+/// Per-IP limits Caddy enforces. Mirrored here so docs/ops have one place to
+/// read the numbers; the app does not key on the TCP peer.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct PerIpRateLimits {
+    pub public_pages_per_min: u32,
+    pub auth_endpoints_per_min: u32,
+    pub org_creations_per_day: u32,
+}
+
+impl Default for PerIpRateLimits {
+    fn default() -> Self {
+        Self {
+            public_pages_per_min: 60,
+            auth_endpoints_per_min: 10,
+            org_creations_per_day: 3,
+        }
+    }
+}
+
+/// Idle-entry janitor cadence for the in-process rate-limit map.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct RateLimitJanitorConfig {
+    pub cleanup_interval_hours: u64,
+    pub idle_threshold_hours: u64,
+}
+
+impl Default for RateLimitJanitorConfig {
+    fn default() -> Self {
+        Self {
+            cleanup_interval_hours: 6,
+            idle_threshold_hours: 24,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct NotificationsConfig {
     #[serde(default)]
@@ -393,28 +440,12 @@ impl Default for EmailConfig {
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct ApiConfig {
-    #[serde(default)]
-    pub rate_limit: RateLimitConfig,
+    // Per-IP API rate limiting moved to Caddy (it sees the real peer); the
+    // in-process limiter is now per-org / per-user via [rate_limits] and the
+    // plans table. The old `api.rate_limit` (PeerIpKeyExtractor) layer is
+    // gone — behind a proxy it collapsed to one global bucket.
     #[serde(default)]
     pub cors: CorsConfig,
-}
-
-#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
-#[serde(default)]
-pub struct RateLimitConfig {
-    pub enabled: bool,
-    pub per_second: u32,
-    pub burst: u32,
-}
-
-impl Default for RateLimitConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            per_second: 50,
-            burst: 100,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -567,5 +598,77 @@ impl AppConfig {
 
         let cfg = builder.build()?;
         Ok(cfg.try_deserialize()?)
+    }
+
+    /// Reject `< 1` quota / rate / interval values at load with a
+    /// field-named error (I6). A bad number is a clean startup *config*
+    /// error, never a `.expect()` crash-loop in router/layer construction.
+    pub fn validate_quotas_and_limits(&self) -> Result<()> {
+        fn ge1_u64(v: u64, field: &str) -> Result<()> {
+            if v < 1 {
+                return Err(crate::error::AppError::Other(anyhow::anyhow!(
+                    "{field} must be >= 1 (got {v})"
+                )));
+            }
+            Ok(())
+        }
+        fn ge1_opt(v: Option<u32>, field: &str) -> Result<()> {
+            if let Some(x) = v
+                && x < 1
+            {
+                return Err(crate::error::AppError::Other(anyhow::anyhow!(
+                    "{field} must be >= 1 (got {x})"
+                )));
+            }
+            Ok(())
+        }
+        ge1_u64(
+            self.quotas.plan_cache_ttl_secs,
+            "quotas.plan_cache_ttl_secs",
+        )?;
+        ge1_u64(
+            self.quotas.usage_cache_ttl_secs,
+            "quotas.usage_cache_ttl_secs",
+        )?;
+        ge1_u64(
+            self.rate_limits.janitor.cleanup_interval_hours,
+            "rate_limits.janitor.cleanup_interval_hours",
+        )?;
+        ge1_u64(
+            self.rate_limits.janitor.idle_threshold_hours,
+            "rate_limits.janitor.idle_threshold_hours",
+        )?;
+        let o = &self.quotas.self_host_overrides;
+        ge1_opt(o.max_targets, "quotas.self_host_overrides.max_targets")?;
+        ge1_opt(
+            o.min_check_interval_secs,
+            "quotas.self_host_overrides.min_check_interval_secs",
+        )?;
+        ge1_opt(
+            o.retention_days,
+            "quotas.self_host_overrides.retention_days",
+        )?;
+        ge1_opt(o.max_members, "quotas.self_host_overrides.max_members")?;
+        ge1_opt(
+            o.max_pending_invitations,
+            "quotas.self_host_overrides.max_pending_invitations",
+        )?;
+        ge1_opt(
+            o.max_api_tokens_per_user,
+            "quotas.self_host_overrides.max_api_tokens_per_user",
+        )?;
+        ge1_opt(
+            o.max_public_components,
+            "quotas.self_host_overrides.max_public_components",
+        )?;
+        ge1_opt(
+            o.max_maintenance_windows,
+            "quotas.self_host_overrides.max_maintenance_windows",
+        )?;
+        ge1_opt(
+            o.max_logo_size_bytes,
+            "quotas.self_host_overrides.max_logo_size_bytes",
+        )?;
+        Ok(())
     }
 }

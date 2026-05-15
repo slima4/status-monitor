@@ -275,9 +275,20 @@ impl TargetStore for InMemoryTargetStore {
         Ok(self.targets.lock().iter().find(|t| t.id == id).cloned())
     }
 
-    async fn create(&self, new: NewTarget) -> Result<Target> {
+    async fn create(&self, new: NewTarget, max_targets: i64) -> Result<Target> {
+        let mut guard = self.targets.lock();
+        // Lock held across count + push, so this is atomic for the same
+        // reason the Postgres count-in-INSERT is.
+        if guard.len() as i64 + 1 > max_targets {
+            return Err(crate::error::AppError::quota_exceeded(
+                "max_targets",
+                guard.len() as i64,
+                max_targets,
+                "free",
+            ));
+        }
         let target = Self::materialize(new);
-        self.targets.lock().push(target.clone());
+        guard.push(target.clone());
         Ok(target)
     }
 
@@ -330,8 +341,16 @@ impl TargetStore for InMemoryTargetStore {
         Ok(guard.len() != before)
     }
 
-    async fn bulk_create(&self, items: Vec<NewTarget>) -> Result<Vec<Target>> {
+    async fn bulk_create(&self, items: Vec<NewTarget>, max_targets: i64) -> Result<Vec<Target>> {
         let mut guard = self.targets.lock();
+        if guard.len() as i64 + items.len() as i64 > max_targets {
+            return Err(crate::error::AppError::quota_exceeded(
+                "max_targets",
+                guard.len() as i64,
+                max_targets,
+                "free",
+            ));
+        }
         let mut created = Vec::with_capacity(items.len());
         for new in items {
             let target = Self::materialize(new);
