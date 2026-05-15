@@ -123,6 +123,25 @@ async fn seed_member(pool: &PgPool, org: OrgId) -> UserId {
     UserId(uid)
 }
 
+/// Insert a per-org `plan_overrides` row. `expired` backdates `expires_at`
+/// so the read path must treat the override as absent.
+async fn seed_override(pool: &PgPool, org: OrgId, json: &str, expired: bool) {
+    let exp = if expired {
+        "now() - interval '1 hour'"
+    } else {
+        "NULL"
+    };
+    sqlx::query(&format!(
+        "INSERT INTO plan_overrides (org_id, override_json, reason, expires_at) \
+         VALUES ($1, $2::jsonb, 'test', {exp})"
+    ))
+    .bind(org.0)
+    .bind(json)
+    .execute(pool)
+    .await
+    .expect("seed override");
+}
+
 fn target_payload(name: &str, interval: u64) -> Value {
     json!({
         "name": name,
@@ -587,6 +606,84 @@ async fn self_host_override_applies_only_in_single_tenant_mode() {
         svc.limit_for_org(org).await.unwrap().max_targets,
         5,
         "override must be ignored in SaaS mode"
+    );
+}
+
+// ── a per-org override replaces the named caps, others untouched ────
+#[tokio::test]
+async fn plan_override_replaces_named_caps() {
+    let Some(pool) = pg_pool_from_env().await else {
+        return;
+    };
+    let (_pid, org) = seed_org_on_plan(&pool, 5, 5, 10, 10).await;
+    seed_override(&pool, org, r#"{"max_targets": 50}"#, false).await;
+
+    let cfg = AppConfig::load().expect("config");
+    let svc = QuotaService::new(&cfg, Some(pool.clone()));
+    let plan = svc.limit_for_org(org).await.unwrap();
+    assert_eq!(plan.max_targets, 50, "override replaces the named cap");
+    assert_eq!(
+        plan.max_members, 5,
+        "an un-named cap keeps the plan default"
+    );
+}
+
+// ── an override past its expiry reverts to the plan default ─────────
+#[tokio::test]
+async fn expired_plan_override_reverts_to_plan_default() {
+    let Some(pool) = pg_pool_from_env().await else {
+        return;
+    };
+    let (_pid, org) = seed_org_on_plan(&pool, 5, 5, 10, 10).await;
+    seed_override(&pool, org, r#"{"max_targets": 50}"#, true).await;
+
+    let cfg = AppConfig::load().expect("config");
+    let svc = QuotaService::new(&cfg, Some(pool.clone()));
+    assert_eq!(
+        svc.limit_for_org(org).await.unwrap().max_targets,
+        5,
+        "an expired override must not apply"
+    );
+}
+
+// ── a malformed override row degrades to the plan default ───────────
+#[tokio::test]
+async fn malformed_plan_override_is_ignored() {
+    let Some(pool) = pg_pool_from_env().await else {
+        return;
+    };
+    let (_pid, org) = seed_org_on_plan(&pool, 5, 5, 10, 10).await;
+    // A non-numeric cap cannot deserialize into the optional-u32 shape;
+    // the lookup degrades to "no override" rather than failing the org.
+    seed_override(&pool, org, r#"{"max_targets": "lots"}"#, false).await;
+
+    let cfg = AppConfig::load().expect("config");
+    let svc = QuotaService::new(&cfg, Some(pool.clone()));
+    assert_eq!(
+        svc.limit_for_org(org).await.unwrap().max_targets,
+        5,
+        "a bad override row must not take the org's limits down"
+    );
+}
+
+// ── a typo'd override key is rejected, not silently no-op'd ─────────
+#[tokio::test]
+async fn unknown_override_key_is_rejected_not_silently_ignored() {
+    let Some(pool) = pg_pool_from_env().await else {
+        return;
+    };
+    let (_pid, org) = seed_org_on_plan(&pool, 5, 5, 10, 10).await;
+    // `max_target` (missing the plural) must not parse to "no caps set"
+    // and silently swallow an admin's intent — the whole row is rejected
+    // (logged) and the plan default stands.
+    seed_override(&pool, org, r#"{"max_target": 50}"#, false).await;
+
+    let cfg = AppConfig::load().expect("config");
+    let svc = QuotaService::new(&cfg, Some(pool.clone()));
+    assert_eq!(
+        svc.limit_for_org(org).await.unwrap().max_targets,
+        5,
+        "an unknown override key must not apply as a partial override"
     );
 }
 

@@ -1,8 +1,10 @@
 //! Plan resolution + resource-quota checks.
 //!
 //! `limit_for_org` is the single read path for an org's effective limits:
-//! plan row (cached) with the self-host overrides folded in when, and only
-//! when, `tenancy.enabled = false`. The `check_*` methods are the
+//! the plan row, with a per-org `plan_overrides` row folded in (cached; an
+//! expired override reverts to the plan default), then the self-host config
+//! knob folded in last when, and only when, `tenancy.enabled = false`. The
+//! `check_*` methods are the
 //! *friendly-error* fast path called at handler entry; the race-safe
 //! guarantee lives in the store INSERTs that take the same limit number
 //! (one source of truth). Every block is recorded to `quota_events`
@@ -13,6 +15,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use moka::future::Cache;
+use serde::Deserialize;
 use sqlx::PgPool;
 
 use crate::config::{AppConfig, SelfHostOverrides};
@@ -177,7 +180,16 @@ impl QuotaService {
                 .bind(org.0)
                 .fetch_one(&db2)
                 .await?;
-                Ok::<Arc<Plan>, sqlx::Error>(Arc::new(p.into()))
+                let mut plan: Plan = p.into();
+                // Per-org exception (beta customers, friends-of-the-
+                // project): a present, unexpired plan_overrides row
+                // replaces the named caps. Folded into the cached value, so
+                // the TTL bounds an override edit/expiry exactly as it
+                // bounds a plans-table edit (same staleness contract).
+                if let Some(ov) = plan_override(&db2, org).await? {
+                    plan = apply_overrides(&plan, &ov);
+                }
+                Ok::<Arc<Plan>, sqlx::Error>(Arc::new(plan))
             })
             .await
             .map_err(|e| match e.as_ref() {
@@ -191,7 +203,10 @@ impl QuotaService {
         // Ignored entirely in SaaS so a future reader can't be tempted to
         // honour them unconditionally.
         if !self.tenancy_enabled && self.self_host.enabled {
-            return Ok(Arc::new(apply_overrides(&plan, &self.self_host)));
+            return Ok(Arc::new(apply_overrides(
+                &plan,
+                &PlanOverrides::from(&self.self_host),
+            )));
         }
         Ok(plan)
     }
@@ -425,7 +440,45 @@ pub fn record_quota_event(
     });
 }
 
-fn apply_overrides(base: &Plan, ov: &SelfHostOverrides) -> Plan {
+/// The cap fields a limit override may set. Deserialized from a
+/// `plan_overrides.override_json` row; also the merge input for the
+/// self-host config knob (via `From`), so `apply_overrides` is the one
+/// merge for both. `deny_unknown_fields` so a typo'd admin key (`max_target`)
+/// is a loud parse error the caller logs and ignores, not a silent no-op.
+/// Deliberately has no `enabled` flag — whether an override applies is the
+/// caller's decision (a present unexpired row; or the self-host gate), never
+/// a property of the cap bag itself.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct PlanOverrides {
+    max_targets: Option<u32>,
+    min_check_interval_secs: Option<u32>,
+    retention_days: Option<u32>,
+    max_members: Option<u32>,
+    max_pending_invitations: Option<u32>,
+    max_api_tokens_per_user: Option<u32>,
+    max_public_components: Option<u32>,
+    max_maintenance_windows: Option<u32>,
+    max_logo_size_bytes: Option<u32>,
+}
+
+impl From<&SelfHostOverrides> for PlanOverrides {
+    fn from(o: &SelfHostOverrides) -> Self {
+        Self {
+            max_targets: o.max_targets,
+            min_check_interval_secs: o.min_check_interval_secs,
+            retention_days: o.retention_days,
+            max_members: o.max_members,
+            max_pending_invitations: o.max_pending_invitations,
+            max_api_tokens_per_user: o.max_api_tokens_per_user,
+            max_public_components: o.max_public_components,
+            max_maintenance_windows: o.max_maintenance_windows,
+            max_logo_size_bytes: o.max_logo_size_bytes,
+        }
+    }
+}
+
+fn apply_overrides(base: &Plan, ov: &PlanOverrides) -> Plan {
     let mut p = base.clone();
     let take = |v: Option<u32>, cur: i32| {
         v.map(|x| i32::try_from(x).unwrap_or(i32::MAX))
@@ -441,6 +494,31 @@ fn apply_overrides(base: &Plan, ov: &SelfHostOverrides) -> Plan {
     p.max_maintenance_windows = take(ov.max_maintenance_windows, p.max_maintenance_windows);
     p.max_logo_size_bytes = take(ov.max_logo_size_bytes, p.max_logo_size_bytes);
     p
+}
+
+/// Active per-org limit override, if any. Expired rows are filtered in SQL,
+/// so an override past its `expires_at` reverts to the plan default. A
+/// *query* error propagates (so the caller's cache does not memoize a
+/// degraded plan for the whole TTL on a transient DB blip — a healthy
+/// override must not be dropped by unrelated infra trouble). Only the
+/// benign cases are `Ok(None)`: no row, or a malformed `override_json`
+/// (logged) — a bad admin row must never take an org's limits down with it.
+async fn plan_override(db: &PgPool, org: OrgId) -> Result<Option<PlanOverrides>, sqlx::Error> {
+    let json: Option<serde_json::Value> = sqlx::query_scalar(
+        "SELECT override_json FROM plan_overrides \
+         WHERE org_id = $1 AND (expires_at IS NULL OR expires_at > now())",
+    )
+    .bind(org.0)
+    .fetch_optional(db)
+    .await?;
+    let Some(json) = json else { return Ok(None) };
+    match serde_json::from_value::<PlanOverrides>(json) {
+        Ok(ov) => Ok(Some(ov)),
+        Err(e) => {
+            tracing::warn!(error = %e, "plan_overrides override_json invalid; ignoring");
+            Ok(None)
+        }
+    }
 }
 
 /// Unlimited plan used when there is no `plans` table to consult (DB-less
