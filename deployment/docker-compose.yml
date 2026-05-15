@@ -80,6 +80,10 @@ services:
       STATUS_MONITOR_TENANCY__PATH_BASED_PUBLIC_ROUTES: ${STATUS_MONITOR_PATH_BASED_PUBLIC_ROUTES:-true}
       STATUS_MONITOR_TENANCY__SUBDOMAIN_PUBLIC_ROUTES: ${STATUS_MONITOR_SUBDOMAIN_PUBLIC_ROUTES:-false}
       STATUS_MONITOR_PUBLIC_STATUS__BASE_DOMAIN: ${STATUS_MONITOR_DOMAIN}
+      # Session-fingerprint salt. REQUIRED once tenancy is enabled (SaaS):
+      # the app refuses to boot with an empty salt. Empty in self-host is
+      # fine (the guard only fires when tenancy is on).
+      STATUS_MONITOR_AUTH__FINGERPRINT_SALT: ${STATUS_MONITOR_AUTH_FINGERPRINT_SALT:-}
       RUST_LOG: ${RUST_LOG:-info}
     depends_on:
       postgres:
