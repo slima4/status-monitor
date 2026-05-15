@@ -147,6 +147,14 @@ impl PageCache {
     pub fn for_test(ttl: Duration) -> Self {
         Self::build(1024, ttl, Duration::from_secs(3600))
     }
+
+    /// Live entry count of the `last_good` layer. moka evicts lazily, so the
+    /// pending-maintenance queue is drained first to make the count reflect
+    /// post-eviction reality, which the memory-bound assertions rely on.
+    pub fn last_good_len(&self) -> u64 {
+        self.last_good.run_pending_tasks();
+        self.last_good.entry_count()
+    }
 }
 
 #[cfg(test)]
@@ -339,5 +347,56 @@ mod tests {
             .await
             .expect("a recompute");
         assert_eq!(calls.load(Ordering::SeqCst), 1, "hot entry was invalidated");
+    }
+
+    // `last_good` must stay bounded under tenant churn: a storm that cycles
+    // far more orgs than capacity through a successful compute must not let
+    // the stale layer grow without limit.
+    #[tokio::test]
+    async fn last_good_stays_bounded_under_org_churn() {
+        // build() sizes last_good at 4× max_orgs, so cap here is 20.
+        let max_orgs = 5;
+        let cap = max_orgs * 4;
+        let cache = PageCache::build(max_orgs, Duration::from_secs(60), Duration::from_secs(3600));
+
+        // Well past the 20-entry cap is enough to prove the bound holds.
+        let churn = 100u64;
+        for _ in 0..churn {
+            let o = org();
+            cache
+                .get_or_compute(o, || async { Ok::<_, std::io::Error>(make_page("ok")) })
+                .await
+                .expect("compute ok");
+        }
+
+        let len = cache.last_good_len();
+        assert!(
+            len <= cap,
+            "last_good grew past its {cap}-entry bound: {len} after {churn} distinct orgs"
+        );
+    }
+
+    // Idle orgs must be reclaimed so a one-time traffic spike doesn't pin
+    // every org's snapshot in memory forever.
+    #[tokio::test]
+    async fn last_good_idle_evicts_after_ttl() {
+        let cache = PageCache::build(64, Duration::from_secs(60), Duration::from_millis(50));
+        let o = org();
+        cache
+            .get_or_compute(o, || async { Ok::<_, std::io::Error>(make_page("ok")) })
+            .await
+            .expect("compute ok");
+        assert_eq!(
+            cache.last_good_len(),
+            1,
+            "snapshot present right after seed"
+        );
+
+        tokio::time::sleep(Duration::from_millis(120)).await;
+        assert_eq!(
+            cache.last_good_len(),
+            0,
+            "idle snapshot must be evicted past last_good idle window"
+        );
     }
 }

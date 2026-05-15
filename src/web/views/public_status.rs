@@ -1022,4 +1022,21 @@ mod tests {
         assert!(!html.contains("display: none"));
         assert!(!html.contains("} body {"));
     }
+
+    #[test]
+    fn branding_defaults_when_all_fields_null() {
+        // With every override unset, the display name falls back to the org
+        // name and no logo image is emitted (the header shows text). The
+        // default colour and powered-by footer are covered by their own
+        // tests above; this one pins the resolved-name + no-logo path.
+        let view = build_view(&sample_page());
+        let branding = branding_with(PublicOrgBranding::default());
+        let html = StatusFullPage { view, branding }.render().unwrap();
+
+        assert!(html.contains("Acme Status"), "display name = org name");
+        assert!(
+            !html.contains("/status/branding/logo"),
+            "no logo img when path unset"
+        );
+    }
 }

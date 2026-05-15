@@ -89,6 +89,15 @@ EOF
 
 Then point the `caddy` service in `deployment/docker-compose.yml` at `custom-caddy:2`. Full procedure (including the opt-out path that drops the rate-limit block) is in [`deployment/README.md`](https://github.com/slima4/status-monitor/tree/main/deployment).
 
+#### Per-org subdomains (SaaS)
+
+When `tenancy.subdomain_public_routes = true`, each org's page is served at `{slug}.status.{public_status.base_domain}`. That needs:
+
+- a wildcard DNS record `*.status.{domain}` pointing at the host;
+- a **wildcard TLS cert** for `*.status.{domain}`. HTTP-01 can't validate a wildcard, so the custom Caddy image also bundles [`caddy-dns/hetzner`](https://github.com/caddy-dns/hetzner) and solves the ACME **DNS-01** challenge using a `HETZNER_DNS_API_TOKEN` (zone-edit scope) from `.env`.
+
+The wildcard means a new org's page works the moment its owner enables it — no per-org DNS or cert step. The end-to-end runbook (Hetzner zone setup, token scope, building the image, verifying the wildcard cert) is in [`deployment/README.md`](https://github.com/slima4/status-monitor/tree/main/deployment). The model — host routing, branding, opt-in gating, cookie scoping — is in [Per-org status pages](per-org-status.md).
+
 For the operator workflow (enabling components, narrating incidents, scheduling maintenance) see [Public status page](public-status.md).
 
 ## Docker

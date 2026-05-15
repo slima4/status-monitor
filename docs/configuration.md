@@ -32,7 +32,8 @@ Override `STATUS_MONITOR_CONFIG_PATH` to point at an alternate base config file.
 | `notifications.slack` | `enabled`, `webhook_url` | Slack incoming-webhook transport. Per-target opt-in via target's `alerts.slack` |
 | `notifications.webhook` | `enabled`, `url` | Generic HTTP POST transport — receives the raw `AlertEvent` JSON. Per-target opt-in via target's `alerts.webhook` |
 | `notifications.email` | `enabled`, `smtp_host`, `smtp_port`, `smtp_user`, `smtp_password`, `from`, `starttls` | SMTP transport via lettre. Per-target opt-in via target's `alerts.email` (recipients carried per target) |
-| `tenancy` | `enabled`, `default_org_slug`, `public_routes_enabled`, `free_tier_owner_org_limit`, `deletion_grace_period_days`, `purge_interval_secs` | Self-host vs SaaS mode + org limits. See [Multi-tenancy mode](#multi-tenancy-mode) below and [docs/multi-tenancy.md](multi-tenancy.md) for the full model |
+| `tenancy` | `enabled`, `default_org_slug`, `path_based_public_routes`, `subdomain_public_routes`, `free_tier_owner_org_limit`, `deletion_grace_period_days`, `purge_interval_secs` | Self-host vs SaaS mode + org limits. See [Multi-tenancy mode](#multi-tenancy-mode) below and [docs/multi-tenancy.md](multi-tenancy.md) for the full model |
+| `public_status` | `base_domain`, `cache_max_orgs`, `cache_ttl_secs`, `last_good_ttl_secs`, `logo_dir`, `max_logo_size_bytes`, `allowed_logo_mime_types`, `max_logo_dimension_px`, `default_brand_color`, `default_show_powered_by`, `public_per_ip_rate_limit_per_min` | Per-org public status pages at `{slug}.status.{base_domain}`. See [Public status page](#public-status-page) below and [Per-org status pages](per-org-status.md) |
 | `auth` | `enabled_methods`, `fingerprint_salt`, `public_base_url` | Sign-in methods, HMAC salt for IP/UA hashes, base URL embedded in invitation + magic-link emails. See [Auth configuration](#auth-configuration) below |
 | `auth.session` | `idle_timeout_days`, `absolute_timeout_days`, `cookie_name`, `cookie_secure`, `cookie_domain`, `renew_on_use` | Session cookie shape + lifetime. `cookie_secure = true` in production |
 | `auth.github` | `client_id`, `client_secret`, `redirect_url`, `scopes`, `http_connect_timeout_ms`, `http_request_timeout_ms` | GitHub OAuth client. Empty client_id disables the GitHub button on `/login` |
@@ -51,19 +52,39 @@ status-monitor ships from one binary in two modes:
 
 Switching modes is a config flip plus restart; no schema change. The same migrations apply.
 
-### `public_routes_enabled` — the SaaS-mode gotcha
+### Public surface: the two routing flags
 
-The public status page (`/api/public/v1/status`, `/api/public/v1/badge.svg`, `/api/public/v1/incidents.rss`, `/status`, `/status/incidents/{id}`) is a **single-aggregate** view today: it renders one org's worth of components. Until per-org status routing ships, exposing those routes in SaaS mode would publish every tenant's "public" components to anonymous visitors as one big page.
+The public status surface is gated by **two** independent flags. They are
+split because path-based and subdomain routing have opposite safety
+profiles in SaaS:
 
-The hard rule the binary enforces:
+- `tenancy.path_based_public_routes` — serve `/status` and
+  `/api/public/v1/*` on the operator host, scoped to a single org.
+  Defaults to `true`. Safe for self-host (one org, nothing to leak);
+  **must be set to `false` for SaaS**.
+- `tenancy.subdomain_public_routes` — serve one page per org at
+  `{slug}.status.{public_status.base_domain}`. Defaults to `false`;
+  requires `tenancy.enabled = true` and a well-formed `base_domain`.
 
-| Mode | `public_routes_enabled` | Public routes |
+| Mode | Recommended flags | Public surface |
 |---|---|---|
-| Self-host (`tenancy.enabled = false`) | _ignored_ | mounted (one org → no leak) |
-| SaaS (`tenancy.enabled = true`) | `false` (default) | **404** |
-| SaaS (`tenancy.enabled = true`) | `true` | mounted — only flip this on after per-org routing is wired |
+| Self-host (`tenancy.enabled = false`) | `path_based_public_routes = true` (default) | `/status` on the operator host (one org) |
+| SaaS (`tenancy.enabled = true`) | `subdomain_public_routes = true`, `path_based_public_routes = false` | `{slug}.status.{base_domain}` per org |
 
-If you flip `tenancy.enabled = true` for an existing self-host deployment, the public page disappears unless you also flip `public_routes_enabled`. That is intentional: until the per-slug router lands, leaving the page mounted is a data leak.
+The binary refuses to boot in the dangerous combinations:
+`subdomain_public_routes` without `tenancy.enabled`;
+`path_based_public_routes` **with** `tenancy.enabled` (it would publish
+the default org's data to every tenant); `subdomain_public_routes` with
+an empty or single-label `public_status.base_domain`; or an
+`auth.session.cookie_domain` that overlaps the status wildcard. Each is a
+loud panic at startup, not a silent runtime leak.
+
+Because `path_based_public_routes` defaults to `true`, flipping
+`tenancy.enabled = true` on an existing self-host deployment **fails to
+boot** until you also set `tenancy.path_based_public_routes = false` —
+this is the deliberate loud failure above, not a silent disable. Switch
+that deployment to subdomain routing. See
+[Per-org status pages](per-org-status.md) for the full model.
 
 ### Org limits and the purge worker
 
@@ -130,7 +151,37 @@ deliberate so audit-trail breakage is loud.
 
 ## Public status page
 
-The public `/status` page has **no global TOML block** in v1 — page cache TTL (10 s), history-strip length (90 days), and recent-incidents horizon (30 days) are hard-coded defaults in `src/public_status/aggregator.rs`. What controls the public surface is per-target:
+The `[public_status]` block configures the per-org public surface. It is
+load-bearing only when `tenancy.subdomain_public_routes = true`; the
+defaults are safe to leave untouched for self-host.
+
+```toml
+[public_status]
+base_domain = ""                       # REQUIRED when subdomain_public_routes = true
+cache_max_orgs = 1000                  # hot + last-good cache bound
+cache_ttl_secs = 10                    # per-org rendered-page TTL
+last_good_ttl_secs = 3600              # idle eviction for the stale-fallback layer
+logo_dir = "/var/lib/status-monitor/logos"
+max_logo_size_bytes = 204800           # 200 KB
+allowed_logo_mime_types = ["image/png", "image/jpeg", "image/webp"]
+max_logo_dimension_px = 1200           # larger uploads are downscaled
+default_brand_color = "#3b82f6"        # used when an org sets no colour
+default_show_powered_by = true
+public_per_ip_rate_limit_per_min = 60  # in-app limit behind the Caddy-side one
+```
+
+| Key | Purpose |
+|---|---|
+| `base_domain` | parent domain for `{slug}.status.{base_domain}`. Must be multi-label; boot fails on empty/single-label when subdomain routing is on |
+| `cache_max_orgs` / `cache_ttl_secs` | per-org page cache size and freshness window |
+| `last_good_ttl_secs` | how long an idle org's last-known-good snapshot is retained before eviction |
+| `logo_dir`, `max_logo_size_bytes`, `allowed_logo_mime_types`, `max_logo_dimension_px` | logo upload storage and limits |
+| `default_brand_color`, `default_show_powered_by` | fallbacks when an org leaves branding unset |
+| `public_per_ip_rate_limit_per_min` | second-layer rate limit behind the reverse proxy's |
+
+History-strip length (90 days) and the recent-incidents horizon (30 days)
+remain hard-coded defaults in `src/public_status/aggregator.rs`. What an
+org publishes is per-target:
 
 | Target field | Purpose |
 |---|---|
@@ -140,7 +191,8 @@ The public `/status` page has **no global TOML block** in v1 — page cache TTL 
 | `public_group` | optional group label; ungrouped components render last |
 | `public_sort_order` | ASC integer sort within a group |
 
-See [Public status page](public-status.md) for the operator workflow.
+See [Public status page](public-status.md) for the operator workflow and
+[Per-org status pages](per-org-status.md) for the SaaS subdomain model.
 
 ## Tuning notes
 
