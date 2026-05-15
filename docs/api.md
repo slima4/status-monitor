@@ -216,7 +216,7 @@ The state machine is fire-once + recovery: while a target is in the `alerting` s
 
 ## Rate limiting
 
-When [`api.rate_limit.enabled = true`](configuration.md), `/api/v1/*` enforces a per-peer-IP token bucket. Excess requests get `429 Too Many Requests` with a `Retry-After` header (seconds until the next token is available). `/healthz` and `/readyz` are never throttled. The default config disables this layer — front the service with a reverse proxy that rate-limits instead, since the peer IP is the proxy in that topology.
+`/api/v1/*` is rate-limited per authenticated subject — by `(org, category)` and by `(user, category)`, whichever trips first — with the per-minute budgets taken from the org's plan. Categories: `api_writes` (POST/PATCH/DELETE), `api_reads` (GET/HEAD/OPTIONS), `bulk_ops` (`/bulk*`), `test_now` (`/test`), `check_now` (`/check-now`). Exceeding a budget returns `429 Too Many Requests` with a `Retry-After` header (seconds until the next token) and `code: RATE_LIMITED`. `/healthz` and `/readyz` are never throttled. Unauthenticated and per-IP limiting is the reverse proxy's job (see [Deployment](deployment.md)). Full model: [Quotas & rate limits](quotas.md).
 
 ## CORS
 
@@ -244,6 +244,20 @@ Every 4xx and 5xx response uses one wire shape:
 - `trace_id` is the W3C `traceparent` when tracing is enabled.
 
 Common codes: `INVALID_URL_SCHEME`, `INVALID_URL_FORMAT`, `SSRF_BLOCKED`, `INVALID_INTERVAL`, `INVALID_TIMEOUT`, `INVALID_TCP_PORT`, `INVALID_TCP_HOST`, `INVALID_STATUS_RANGE`, `INVALID_TLS_CERT_PARAMS`, `INVALID_DOMAIN_PARAMS`, `INVALID_TLS_CRED_COMBO`, `INVALID_ALERT_CONFIG`, `REDACTION_SENTINEL`, `BULK_EMPTY`, `BULK_TOO_LARGE`, `BAD_TIME_RANGE`, `TARGET_NOT_FOUND`, `CIRCUIT_OPEN`, `DEPENDENCY_DOWN`, `INTERNAL`.
+
+### Quota, rate-limit and abuse codes
+
+| Code | HTTP | Meaning |
+|---|---|---|
+| `QUOTA_EXCEEDED` | 422 | A plan quota would be exceeded. `details` carries `quota` (e.g. `max_targets`, `max_members`, `max_public_components`), `current`, `limit`, `plan`. |
+| `MIN_CHECK_INTERVAL` | 422 | Requested check interval is below the plan minimum (enforced on create **and** PATCH, single and bulk). |
+| `INVITATIONS_LIMIT` | 409 | The org is at its pending-invitation cap. |
+| `RATE_LIMITED` | 429 | A per-minute rate budget was exceeded. `Retry-After` (seconds) is set; `details.scope` names the tier, e.g. `per_org_api_writes`. |
+| `ABUSE_BLOCKED` | 400 | Target blocked by abuse protection. `details.reason` explains. |
+| `URL_PATTERN_BLOCKED` | 400 | Target URL matched an abuse pattern (recon path). |
+| `DOMAIN_DENYLISTED` | 400 | Target domain (or a parent) is on the deny-list. |
+
+See [Quotas & rate limits](quotas.md) for the quota model, the per-minute categories, and the deny-list policy.
 
 ## Pagination envelope
 

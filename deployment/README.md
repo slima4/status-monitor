@@ -14,6 +14,8 @@ PostgreSQL, and ClickHouse.
 | Public status surface | Self-host: `/status` on `app.{domain}`. SaaS: each org at `{slug}.status.{domain}` (wildcard) |
 | TLS for status pages | Wildcard cert for `*.status.{domain}` via Let's Encrypt + Hetzner DNS-01 |
 | Public rate limit | Per-IP 60 req/min on the public surface (custom Caddy image, built automatically) |
+| Auth-endpoint rate limit | Per-IP 10 req/min on `/auth/*`, `/api/v1/me`, invitation accept |
+| Org-creation rate limit | Per-IP 3 per 24 h on `POST /api/v1/orgs` (signup-abuse speedbump) |
 | Public health probes | `/healthz` and `/readyz` exposed without auth |
 | Metrics scraping | Internal-only — `/metrics` returns 404 publicly |
 | Security headers | HSTS, X-Frame-Options, Referrer-Policy, etc. |
@@ -216,6 +218,30 @@ curl -H "Authorization: Basic $(echo -n admin:password | base64)" \
 
 If/when the service grows native auth (API tokens, session cookies), the
 basic auth layer at the Caddy edge can stay in place during the transition.
+
+### Per-IP rate limits (Caddy)
+
+The edge enforces three per-IP zones (keyed on `{remote_host}`) in
+`Caddyfile`, on top of the per-org / per-user budgets the app enforces from
+the org's plan (see [Quotas & rate limits](../docs/quotas.md)). Per-IP is
+the edge's job because behind the proxy the app sees only the proxy as the
+peer; the two tiers are complementary, not redundant.
+
+| Zone | Matches | Limit | Why |
+|---|---|---|---|
+| `status_path` | public status surface (`/status`, `/api/public/*`, assets) | 60 / 1 min | Cheap unauthenticated reads, bot-heavy |
+| `auth_endpoints` | `/auth/*`, `/api/v1/me`, `/api/v1/orgs/*/invitations/accept` | 10 / 1 min | Throttle credential stuffing / token probing |
+| `org_creation` | `POST /api/v1/orgs` | 3 / 24 h | Signup-abuse speedbump; with email verification, mass org creation needs many real mailboxes |
+
+These blocks already exist in the shipped `Caddyfile` — no manual step.
+Excess requests get `429 Too Many Requests`. IP rotation defeats per-IP
+limits by design; they are a speedbump, not a wall — the plan-driven
+app-side limiter is the real budget for authenticated traffic. After editing
+a zone, reload with no downtime:
+
+```bash
+docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile
+```
 
 ### Scraping metrics from Prometheus
 

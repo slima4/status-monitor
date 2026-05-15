@@ -10,6 +10,7 @@
 - [Multi-tenancy](multi-tenancy.md)
 - [Authentication](authentication.md)
 - [Configuration](configuration.md)
+- [Quotas & rate limits](quotas.md)
 - [Metrics & tracing](metrics.md)
 - [Deployment](deployment.md)
 - [Development](development.md)
