@@ -45,7 +45,7 @@ Fire-once + recovery semantics. Transport credentials (Slack webhook URL, generi
 docker compose up -d
 ```
 
-Brings up Postgres 17, ClickHouse 25.8, and the monitor. Migrations for both databases run at process startup — no init-script wiring, no external migrator.
+Brings up Postgres 17, ClickHouse 26.3, and the monitor. Migrations for both databases run at process startup — no init-script wiring, no external migrator.
 
 Create a target:
 

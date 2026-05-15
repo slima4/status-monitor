@@ -19,7 +19,7 @@ services:
       retries: 10
 
   clickhouse:
-    image: clickhouse/clickhouse-server:25.8
+    image: clickhouse/clickhouse-server:26.3
     environment:
       CLICKHOUSE_DB: monitor
       CLICKHOUSE_USER: monitor

@@ -5,7 +5,7 @@
 -- SYNC forces synchronous removal under the Atomic database engine. Without
 -- it the CREATE MATERIALIZED VIEW below races the catalog and resolves
 -- `check_results` against the in-flight tombstone instead of the new table
--- (observed on CH 25.8 in CI).
+-- (observed in CI).
 DROP VIEW IF EXISTS check_results_1m SYNC;
 DROP TABLE IF EXISTS check_results SYNC;
 

@@ -93,7 +93,7 @@ For the operator workflow (enabling components, narrating incidents, scheduling 
 
 ## Docker
 
-`docker compose up -d` brings up Postgres 17, ClickHouse 25.8, and the monitor on the same network. Compose env vars wire the monitor to the stack:
+`docker compose up -d` brings up Postgres 17, ClickHouse 26.3, and the monitor on the same network. Compose env vars wire the monitor to the stack:
 
 ```yaml
 STATUS_MONITOR_STORAGE__POSTGRES__URL: postgres://monitor:monitor@postgres:5432/monitor
