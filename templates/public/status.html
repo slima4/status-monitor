@@ -3,16 +3,21 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>{{ view.site_title }}</title>
-    <meta name="description" content="{{ view.meta_description }}">
+    <title>{{ branding.display_name }} Status</title>
+    <meta name="description" content="Live operational status for {{ branding.display_name }}">
     <meta name="robots" content="index,follow">
-    <meta property="og:title" content="{{ view.site_title }}">
-    <meta property="og:description" content="{{ view.meta_description }}">
+    <meta property="og:title" content="{{ branding.display_name }} Status">
+    <meta property="og:description" content="Live operational status for {{ branding.display_name }}">
     <meta property="og:type" content="website">
     <meta name="twitter:card" content="summary">
     <link rel="icon" type="image/svg+xml" href="/static/img/favicon.svg">
     <link rel="alternate" type="application/rss+xml" title="Incidents (RSS)" href="{{ view.rss_url }}">
     <link rel="stylesheet" href="/static/css/app.css">
+    <style>
+        /* `branding.brand_color` was re-validated by `safe_brand_color` and
+           is guaranteed to match ^#[0-9a-fA-F]{6}$ — safe to interpolate. */
+        :root { --brand-color: {{ branding.brand_color }}; }
+    </style>
     <script defer src="/static/js/htmx.min.js"></script>
     <script defer src="/static/js/public/tz.js"></script>
 </head>
@@ -21,20 +26,34 @@
        class="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:rounded focus:bg-white focus:px-3 focus:py-2 focus:text-sm focus:ring-2 focus:ring-slate-700">
         Skip to main content
     </a>
-    <header class="border-b bg-white">
+    <header class="border-b" style="background-color: var(--brand-color)">
         <div class="container mx-auto flex items-center justify-between px-4 py-4">
-            <a href="/status" class="text-lg font-semibold tracking-tight">{{ view.site_name }}</a>
-            <a href="{{ view.rss_url }}" class="text-sm text-slate-500 hover:text-slate-700"
+            <a href="/status" class="flex items-center gap-3 text-lg font-semibold tracking-tight text-white">
+                {% if let Some(logo) = branding.logo_url %}
+                    <img src="{{ logo }}" alt="{{ branding.display_name }}" class="h-8 w-auto">
+                {% else %}
+                    {{ branding.display_name }}
+                {% endif %}
+            </a>
+            <a href="{{ view.rss_url }}" class="text-sm text-white/80 hover:text-white"
                aria-label="Subscribe to incident updates via RSS">Subscribe (RSS)</a>
         </div>
     </header>
+
+    {% if let Some(about) = branding.about_html %}
+    <section class="border-b bg-white">
+        <div class="container mx-auto px-4 py-4 prose prose-sm max-w-none text-slate-600">
+            {{ about|safe }}
+        </div>
+    </section>
+    {% endif %}
 
     <main id="main-content" tabindex="-1" class="container mx-auto px-4 py-6">
         {% include "public/region.html" %}
     </main>
 
     <footer class="container mx-auto px-4 py-6 text-xs text-slate-400">
-        Powered by status-monitor ·
+        {% if branding.show_powered_by %}Powered by status-monitor · {% endif %}
         <a href="{{ view.rss_url }}" class="hover:text-slate-600">RSS</a> ·
         Updated <time datetime="{{ view.generated_iso }}" data-tz>{{ view.generated_human }}</time>
     </footer>

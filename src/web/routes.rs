@@ -42,10 +42,16 @@ pub fn routes(cfg: &AppConfig) -> Router<AppState> {
         );
 
     if public_routes_active(cfg) {
-        r = r.route("/status", get(views::public_status::index)).route(
-            "/status/incidents/{id}",
-            get(views::public_status::incident),
-        );
+        r = r
+            .route("/status", get(views::public_status::index))
+            .route(
+                "/status/incidents/{id}",
+                get(views::public_status::incident),
+            )
+            .route(
+                views::public_status::LOGO_ROUTE,
+                get(views::public_status::logo),
+            );
     }
 
     r.route("/static/{*path}", get(assets::serve))

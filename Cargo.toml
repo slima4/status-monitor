@@ -78,6 +78,12 @@ askama_web = { version = "0.16", features = ["axum-0.8"] }
 rust-embed = { version = "8.11", features = ["axum"] }
 mime_guess = "2"
 
+# Public-page `public_about`: parse markdown, then sanitise the HTML. The
+# parser output is never trusted — every byte passes through the ammonia
+# allowlist before it reaches a template.
+pulldown-cmark = { version = "0.13.3", default-features = false, features = ["html"] }
+ammonia = "4.1.2"
+
 # Utilities
 uuid = { version = "1.23", features = ["v7", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }

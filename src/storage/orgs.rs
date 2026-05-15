@@ -9,7 +9,9 @@ use serde_json::Value;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::domain::{Membership, OrgId, Organization, PERSONAL_SLUG_LIKE_PATTERN, Role, UserId};
+use crate::domain::{
+    Membership, OrgId, Organization, PERSONAL_SLUG_LIKE_PATTERN, PublicOrgBranding, Role, UserId,
+};
 use crate::error::{AppError, Result};
 
 /// Find-or-create the default org at startup. Returns the persisted UUID so
@@ -728,6 +730,52 @@ pub async fn find_public_status_org_by_slug(
     Ok(row.map(|r| PublicStatusOrg(r.into_org())))
 }
 
+/// Org name plus its operator-set public branding, as needed to render a
+/// status page. `name` is kept alongside so the renderer can fall back to it
+/// when `public_display_name` is unset.
+#[derive(Debug, Clone)]
+pub struct OrgBranding {
+    pub name: String,
+    pub branding: PublicOrgBranding,
+}
+
+/// PUBLIC-STATUS PATH ONLY. Loads an org's name + public branding by id.
+///
+/// The id is already resolved through the opt-in-filtered slug lookup
+/// ([`find_public_status_org_by_slug`]) or the boot default org, so this read
+/// is intentionally keyed by id rather than re-checking `public_status_enabled`
+/// — the surface that calls it is what gates visibility. `deleted_at` is still
+/// excluded so a tombstoned org renders nothing.
+pub async fn load_public_branding(pool: &PgPool, org: OrgId) -> Result<Option<OrgBranding>> {
+    let row: Option<BrandingRow> = sqlx::query_as(
+        r#"SELECT name,
+                  public_status_enabled,
+                  public_display_name,
+                  public_about,
+                  public_brand_color,
+                  public_logo_path,
+                  public_show_powered_by
+             FROM organizations
+            WHERE id = $1
+              AND deleted_at IS NULL"#,
+    )
+    .bind(org.0)
+    .fetch_optional(pool)
+    .await
+    .context("load_public_branding")?;
+    Ok(row.map(|r| OrgBranding {
+        name: r.name,
+        branding: PublicOrgBranding {
+            public_status_enabled: r.public_status_enabled,
+            public_display_name: r.public_display_name,
+            public_about: r.public_about,
+            public_brand_color: r.public_brand_color,
+            public_logo_path: r.public_logo_path,
+            public_show_powered_by: r.public_show_powered_by,
+        },
+    }))
+}
+
 /// Look up a user's id by email (CITEXT). Drives the invitation flow's
 /// "is the recipient already a member here?" check before INSERT, and the
 /// "already-existing user redeems invitation" path on accept.
@@ -772,6 +820,17 @@ async fn record_audit_tx(
     .await
     .context("record_audit_tx")?;
     Ok(())
+}
+
+#[derive(sqlx::FromRow)]
+struct BrandingRow {
+    name: String,
+    public_status_enabled: bool,
+    public_display_name: Option<String>,
+    public_about: Option<String>,
+    public_brand_color: Option<String>,
+    public_logo_path: Option<String>,
+    public_show_powered_by: Option<bool>,
 }
 
 #[derive(sqlx::FromRow)]
