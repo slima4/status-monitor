@@ -237,9 +237,22 @@ async fn unknown_web_path_returns_404_html() {
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }
 
+/// Cache-control is only `immutable` when the URL is version-pinned (`?v=`,
+/// the only form the `asset` filter emits). A bare URL — hand-typed or an
+/// old bookmark — gets a short revalidating cache so a content change can't
+/// be hidden for a year. This is the e2e mirror of the `web::assets` unit
+/// tests; the two must not disagree.
 #[tokio::test]
-async fn static_assets_served_with_immutable_cache() {
-    let resp = app()
+async fn static_assets_cache_control_is_honest() {
+    let cache_control = |resp: &axum::http::Response<Body>| {
+        resp.headers()
+            .get(header::CACHE_CONTROL)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_owned()
+    };
+
+    let bare = app()
         .oneshot(
             Request::get("/static/css/app.css")
                 .body(Body::empty())
@@ -247,14 +260,25 @@ async fn static_assets_served_with_immutable_cache() {
         )
         .await
         .unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
-    let cc = resp
-        .headers()
-        .get(header::CACHE_CONTROL)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
-    assert!(
-        cc.contains("immutable"),
-        "css missing immutable cache: {cc}"
+    assert_eq!(bare.status(), StatusCode::OK);
+    assert_eq!(
+        cache_control(&bare),
+        "public, max-age=300",
+        "bare asset URL must be short-lived, not immutable",
+    );
+
+    let versioned = app()
+        .oneshot(
+            Request::get("/static/css/app.css?v=deadbeef")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(versioned.status(), StatusCode::OK);
+    assert_eq!(
+        cache_control(&versioned),
+        "public, max-age=31536000, immutable",
+        "version-pinned asset URL must be immutable",
     );
 }
