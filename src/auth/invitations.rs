@@ -85,9 +85,16 @@ pub async fn exists_pending_for_email(pool: &PgPool, org: OrgId, email: &str) ->
     Ok(row.is_some())
 }
 
-/// Issue an invitation. Returns the row plus the raw token that the caller
-/// must embed in the outgoing email. Hash-only persistence — the raw value is
-/// never reachable again after this call.
+/// Issue an invitation, enforcing the per-email dedupe and the per-org
+/// pending cap **atomically**. A per-org advisory lock held for the
+/// transaction serialises concurrent invite creation for the same org, so
+/// the dedupe and count checks below cannot race their own INSERT — without
+/// it both are check-then-act under READ COMMITTED (two requests both see
+/// "no duplicate" / "count < max" and both insert, double-sending to one
+/// address and overshooting the cap). This mirrors the owner-org cap in
+/// `storage::orgs::create_org_with_owner`. `ALREADY_INVITED` /
+/// `INVITATIONS_LIMIT` are returned here rather than pre-checked in the
+/// handler so there is exactly one place the rule lives.
 pub async fn create(
     pool: &PgPool,
     org: OrgId,
@@ -95,11 +102,61 @@ pub async fn create(
     email: &str,
     role: Role,
     expiry_hours: u32,
+    max_pending: u32,
 ) -> Result<CreatedInvitation> {
     let raw = generate_raw_token();
     let prefix = slice_prefix(&raw).to_string();
-    let hash = token_hash::hash(&raw)?;
     let expires_at = Utc::now() + Duration::hours(i64::from(expiry_hours));
+
+    let mut tx = pool.begin().await.context("invitations::create: begin")?;
+
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))")
+        .bind(org.0.to_string())
+        .execute(&mut *tx)
+        .await
+        .context("invitations::create: advisory lock")?;
+
+    let duplicate: Option<(Uuid,)> = sqlx::query_as(
+        "SELECT id FROM invitations \
+         WHERE org_id = $1 AND email = $2::citext \
+         AND accepted_at IS NULL AND declined_at IS NULL \
+         AND expires_at > now() \
+         LIMIT 1",
+    )
+    .bind(org.0)
+    .bind(email)
+    .fetch_optional(&mut *tx)
+    .await
+    .context("invitations::create: dedupe")?;
+    if duplicate.is_some() {
+        tx.rollback().await.ok();
+        return Err(AppError::conflict(
+            crate::api::error::codes::ALREADY_INVITED,
+            "there is already a pending invitation for this email",
+        ));
+    }
+
+    let (pending,): (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM invitations \
+         WHERE org_id = $1 AND accepted_at IS NULL AND declined_at IS NULL \
+         AND expires_at > now()",
+    )
+    .bind(org.0)
+    .fetch_one(&mut *tx)
+    .await
+    .context("invitations::create: count pending")?;
+    if u32::try_from(pending).unwrap_or(u32::MAX) >= max_pending {
+        tx.rollback().await.ok();
+        return Err(AppError::conflict(
+            crate::api::error::codes::INVITATIONS_LIMIT,
+            format!("pending invitation limit reached ({max_pending})"),
+        ));
+    }
+
+    // Argon2 only after the cheap dedupe/cap rejects: hashing first would
+    // make every blocked abuse-path request pay ~150 ms of CPU for a token
+    // that's discarded — the exact cost the cap exists to bound.
+    let hash = token_hash::hash(&raw)?;
 
     let row: (Uuid, DateTime<Utc>, DateTime<Utc>) = sqlx::query_as(
         "INSERT INTO invitations \
@@ -114,9 +171,11 @@ pub async fn create(
     .bind(&hash)
     .bind(&prefix)
     .bind(expires_at)
-    .fetch_one(pool)
+    .fetch_one(&mut *tx)
     .await
-    .context("invitations::create")?;
+    .context("invitations::create: insert")?;
+
+    tx.commit().await.context("invitations::create: commit")?;
 
     Ok(CreatedInvitation {
         row: InvitationRow {

@@ -81,22 +81,12 @@ pub async fn create(
             "user is already a member of this org",
         ));
     }
-    if inv::exists_pending_for_email(pool, org, email).await? {
-        return Err(AppError::conflict(
-            codes::ALREADY_INVITED,
-            "there is already a pending invitation for this email",
-        ));
-    }
+    // Dedupe + pending-cap are enforced atomically inside `inv::create`
+    // (one transaction, per-org advisory lock) — a pre-check here would
+    // just be a racy duplicate of the real gate.
     let max = state.cfg.auth.invitations.max_pending_per_org;
-    if inv::count_pending_for_org(pool, org).await? >= max {
-        return Err(AppError::conflict(
-            codes::INVITATIONS_LIMIT,
-            format!("pending invitation limit reached ({max})"),
-        ));
-    }
-
     let expiry_hours = state.cfg.auth.invitations.expiry_hours;
-    let created = inv::create(pool, org, user_id, email, role, expiry_hours).await?;
+    let created = inv::create(pool, org, user_id, email, role, expiry_hours, max).await?;
 
     // Resolve inviter display + email for the outgoing message.
     let inviter = inviter_display(pool, user_id).await?;

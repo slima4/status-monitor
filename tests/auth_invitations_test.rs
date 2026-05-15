@@ -103,9 +103,17 @@ async fn create_lookup_accept_flow() {
     let owner = seed_user(&pool, "owner@example.test").await;
     let org = seed_org(&pool, owner).await;
 
-    let created = invitations::create(&pool, org, owner, "Alice@Example.test", Role::Member, 168)
-        .await
-        .expect("create");
+    let created = invitations::create(
+        &pool,
+        org,
+        owner,
+        "Alice@Example.test",
+        Role::Member,
+        168,
+        u32::MAX,
+    )
+    .await
+    .expect("create");
     assert!(!created.token.is_empty());
 
     // Find pending must locate exactly one row by raw token.
@@ -155,9 +163,17 @@ async fn decline_flow() {
 
     let owner = seed_user(&pool, "o@example.test").await;
     let org = seed_org(&pool, owner).await;
-    let inv = invitations::create(&pool, org, owner, "x@example.test", Role::Member, 168)
-        .await
-        .unwrap();
+    let inv = invitations::create(
+        &pool,
+        org,
+        owner,
+        "x@example.test",
+        Role::Member,
+        168,
+        u32::MAX,
+    )
+    .await
+    .unwrap();
 
     let declined = invitations::mark_declined(&pool, inv.row.id).await.unwrap();
     assert!(declined);
@@ -182,9 +198,17 @@ async fn expired_invitation_is_not_pending() {
 
     let owner = seed_user(&pool, "o2@example.test").await;
     let org = seed_org(&pool, owner).await;
-    let inv = invitations::create(&pool, org, owner, "y@example.test", Role::Member, 168)
-        .await
-        .unwrap();
+    let inv = invitations::create(
+        &pool,
+        org,
+        owner,
+        "y@example.test",
+        Role::Member,
+        168,
+        u32::MAX,
+    )
+    .await
+    .unwrap();
     sqlx::query("UPDATE invitations SET expires_at = now() - INTERVAL '1 hour' WHERE id = $1")
         .bind(inv.row.id)
         .execute(&pool)
@@ -215,9 +239,17 @@ async fn already_invited_blocks_second_pending() {
 
     let owner = seed_user(&pool, "o3@example.test").await;
     let org = seed_org(&pool, owner).await;
-    invitations::create(&pool, org, owner, "z@example.test", Role::Member, 168)
-        .await
-        .unwrap();
+    invitations::create(
+        &pool,
+        org,
+        owner,
+        "z@example.test",
+        Role::Member,
+        168,
+        u32::MAX,
+    )
+    .await
+    .unwrap();
     assert!(
         invitations::exists_pending_for_email(&pool, org, "Z@Example.test")
             .await
@@ -240,17 +272,39 @@ async fn purge_old_drops_settled_and_expired_rows() {
 
     let owner = seed_user(&pool, "o4@example.test").await;
     let org = seed_org(&pool, owner).await;
-    let old_accepted =
-        invitations::create(&pool, org, owner, "old1@example.test", Role::Member, 168)
-            .await
-            .unwrap();
-    let old_expired =
-        invitations::create(&pool, org, owner, "old2@example.test", Role::Member, 168)
-            .await
-            .unwrap();
-    let fresh = invitations::create(&pool, org, owner, "fresh@example.test", Role::Member, 168)
-        .await
-        .unwrap();
+    let old_accepted = invitations::create(
+        &pool,
+        org,
+        owner,
+        "old1@example.test",
+        Role::Member,
+        168,
+        u32::MAX,
+    )
+    .await
+    .unwrap();
+    let old_expired = invitations::create(
+        &pool,
+        org,
+        owner,
+        "old2@example.test",
+        Role::Member,
+        168,
+        u32::MAX,
+    )
+    .await
+    .unwrap();
+    let fresh = invitations::create(
+        &pool,
+        org,
+        owner,
+        "fresh@example.test",
+        Role::Member,
+        168,
+        u32::MAX,
+    )
+    .await
+    .unwrap();
 
     sqlx::query("UPDATE invitations SET accepted_at = now() - INTERVAL '90 days' WHERE id = $1")
         .bind(old_accepted.row.id)
