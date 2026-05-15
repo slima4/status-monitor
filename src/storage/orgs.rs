@@ -259,11 +259,17 @@ pub async fn owner_org_count(pool: &PgPool, user: UserId) -> Result<u32> {
     Ok(u32::try_from(count).unwrap_or(u32::MAX))
 }
 
+/// The one membership-count predicate. Shared so the cap enforced inside
+/// [`add_member`] and the number [`active_member_count`] reports (which feeds
+/// `/usage`) can never drift apart — "enforced == reported" is structural,
+/// not comment-enforced.
+pub(crate) const MEMBERSHIP_COUNT_SQL: &str = "SELECT count(*) FROM memberships WHERE org_id = $1";
+
 /// Number of members in an org. Same scope as [`list_members`] (memberships
 /// are hard-deleted on removal, so no soft-delete filter) — the usage view
 /// and the member list never disagree.
 pub async fn active_member_count(pool: &PgPool, org: OrgId) -> Result<u32> {
-    let (count,): (i64,) = sqlx::query_as("SELECT count(*) FROM memberships WHERE org_id = $1")
+    let (count,): (i64,) = sqlx::query_as(MEMBERSHIP_COUNT_SQL)
         .bind(org.0)
         .fetch_one(pool)
         .await
@@ -626,11 +632,18 @@ pub enum RemoveOutcome {
 }
 
 /// Outcome of [`add_member`]. The invitation accept flow distinguishes
-/// "already a member" (no-op, succeed idempotently) from a fresh insert.
+/// "already a member" (no-op, succeed idempotently) from a fresh insert,
+/// and from a rejection because the org is at its member cap.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AddMemberOutcome {
     Added,
     AlreadyMember,
+    /// The org already holds `limit` members; the row was not inserted.
+    /// `current` is the member count before this attempt.
+    LimitReached {
+        current: i64,
+        limit: i64,
+    },
 }
 
 /// Add a user to an org with the given role. Single audit row per successful
@@ -645,14 +658,27 @@ pub enum AddMemberOutcome {
 /// (future flow) pass the owner. Mirrors the `remove_member(actor, user)`
 /// signature so the audit log records *who* effected the change, not just
 /// *who* was changed.
+///
+/// `max_members` is the plan cap. It is enforced atomically here under a
+/// per-org advisory lock (same lock key as `invitations::create`, so an
+/// invite and an accept on the same org serialise): the row is inserted,
+/// then the post-insert count is taken inside the same transaction and the
+/// insert is rolled back if it crossed the cap. Re-adding an existing member
+/// stays a no-op and is never rejected by the cap.
 pub async fn add_member(
     pool: &PgPool,
     org: OrgId,
     actor: UserId,
     user: UserId,
     role: Role,
+    max_members: u32,
 ) -> Result<AddMemberOutcome> {
     let mut tx = pool.begin().await.context("add_member: begin")?;
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))")
+        .bind(org.0.to_string())
+        .execute(&mut *tx)
+        .await
+        .context("add_member: advisory lock")?;
     let inserted: Option<(Uuid,)> = sqlx::query_as(
         r#"INSERT INTO memberships (user_id, org_id, role)
            VALUES ($1, $2, $3)
@@ -668,6 +694,22 @@ pub async fn add_member(
     if inserted.is_none() {
         tx.rollback().await.ok();
         return Ok(AddMemberOutcome::AlreadyMember);
+    }
+    // Count *after* the insert (same predicate as `active_member_count`, so
+    // the enforced number equals the number `/usage` reports). If this fresh
+    // row crossed the cap, undo it — never let the org exceed `max_members`.
+    let (members,): (i64,) = sqlx::query_as(MEMBERSHIP_COUNT_SQL)
+        .bind(org.0)
+        .fetch_one(&mut *tx)
+        .await
+        .context("add_member: count members")?;
+    let limit = i64::from(max_members);
+    if members > limit {
+        tx.rollback().await.ok();
+        return Ok(AddMemberOutcome::LimitReached {
+            current: members - 1,
+            limit,
+        });
     }
     record_audit_tx(
         &mut tx,

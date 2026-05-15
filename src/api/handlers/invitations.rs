@@ -231,6 +231,15 @@ pub async fn accept(
         ));
     }
 
+    // Member cap, friendly pre-check: reject an over-cap accept *before*
+    // marking the invitation consumed, so the recipient can still be let in
+    // once a seat frees up rather than burning their token.
+    let plan = state.quotas.limit_for_org(row.org_id).await?;
+    state
+        .quotas
+        .check_can_add_member(row.org_id, Some(user_id))
+        .await?;
+
     // State transition first so the race-loser sees `INVITATION_INVALID`
     // BEFORE a membership row is inserted. Otherwise two parallel accepts
     // both pass find_pending_by_token, both call add_member (idempotent
@@ -242,8 +251,26 @@ pub async fn accept(
             "invitation is invalid or has expired",
         ));
     }
-    // actor = the redeeming user (self-onboard via invitation token).
-    orgs_store::add_member(pool, row.org_id, user_id, user_id, row.role).await?;
+    // actor = the redeeming user (self-onboard via invitation token). The
+    // advisory-locked count in add_member is the race-safe backstop on the
+    // same plan number; it only fires if a concurrent accept slipped past
+    // the pre-check above.
+    let max_members = u32::try_from(plan.max_members).unwrap_or(u32::MAX);
+    if let orgs_store::AddMemberOutcome::LimitReached { current, limit } =
+        orgs_store::add_member(pool, row.org_id, user_id, user_id, row.role, max_members).await?
+    {
+        // Same audit shape every quota block uses — go through the one place
+        // that owns it rather than re-assembling the event by hand.
+        state
+            .quotas
+            .record_block(row.org_id, Some(user_id), "max_members", current, limit);
+        return Err(AppError::quota_exceeded(
+            "max_members",
+            current,
+            limit,
+            plan.id.clone(),
+        ));
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -306,7 +333,7 @@ async fn inviter_display(pool: &sqlx::PgPool, user: crate::domain::UserId) -> Re
 
 fn action_url(state: &AppState, kind: &str, token: &str) -> String {
     let base = state.cfg.auth.public_base_url.trim_end_matches('/');
-    // Path mirrors AUTH §5.6: GET /invitations/accept?token=... for the
-    // landing page; the JSON endpoints accept the token in the body.
+    // GET /invitations/accept?token=... for the landing page; the JSON
+    // endpoints accept the token in the body.
     format!("{base}/invitations/{kind}?token={}", url_encode(token))
 }

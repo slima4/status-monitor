@@ -24,7 +24,7 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
 
     // Idle-entry janitor for the per-org/user limiter map. Co-located with
     // the limiter it sweeps and bound to the same shutdown token, so a
-    // refactor can't drop the sweep and leak the map (§4.5).
+    // refactor can't drop the sweep and leak the map.
     let j = &state.cfg.rate_limits.janitor;
     state.rate_limits.clone().spawn_janitor(
         Duration::from_secs(j.cleanup_interval_hours.saturating_mul(3600)),
@@ -35,6 +35,18 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
     let bulk = Router::new()
         .route("/targets/bulk", post(handlers::targets::bulk_create))
         .route("/targets/bulk-action", post(handlers::targets::bulk_action))
+        // `.merge`d below *after* v1's auth + rate-limit layers, so — like
+        // `logo` — these routes must carry their own copies or they ship
+        // unauthenticated and un-rate-limited (a bulk endpoint is the worst
+        // place to lose either). Same inner→outer order as the main stack:
+        // rate-limit added first (innermost) so auth runs before it and the
+        // limiter keys on the resolved org/user. Bulk keeps the large body
+        // limit; it must not inherit v1's 64 KiB single-item limit.
+        .layer(from_fn_with_state(state.clone(), rate_limit_middleware))
+        .layer(from_fn_with_state(
+            state.clone(),
+            crate::web::auth::api_token::middleware,
+        ))
         .layer(from_fn_with_state(
             state.idempotency.clone(),
             idempotency::middleware,

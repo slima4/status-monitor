@@ -4,7 +4,7 @@
 //! for the Bearer path) and resolves the subject via the same `CurrentUser`
 //! / `CurrentOrg` extractors the handlers use — no duplicated auth logic and
 //! no TCP-peer keying. Unauthenticated requests fall through untouched;
-//! Caddy applies the per-IP tier to those (§4.3).
+//! Caddy applies the per-IP tier to those.
 
 use axum::extract::{FromRequestParts, Request, State};
 use axum::http::{Method, request::Parts};
@@ -113,4 +113,53 @@ pub async fn rate_limit_middleware(
     }
 
     next.run(Request::from_parts(parts, body)).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::Request;
+
+    fn parts(method: &str, uri: &str) -> Parts {
+        Request::builder()
+            .method(method)
+            .uri(uri)
+            .body(())
+            .unwrap()
+            .into_parts()
+            .0
+    }
+
+    #[test]
+    fn categorize_maps_each_endpoint_to_its_bucket() {
+        use RateLimitCategory::*;
+        // The /bulk, /test, /check-now suffixes win over the method so a
+        // bursty POST /targets/bulk can't drain the steady api_writes budget.
+        assert_eq!(categorize(&parts("POST", "/api/v1/targets/bulk")), BulkOps);
+        assert_eq!(
+            categorize(&parts("POST", "/api/v1/targets/bulk-action")),
+            BulkOps
+        );
+        assert_eq!(
+            categorize(&parts("POST", "/api/v1/targets/abc/test")),
+            TestNow
+        );
+        assert_eq!(
+            categorize(&parts("POST", "/api/v1/targets/abc/check-now")),
+            CheckNow
+        );
+        // Method classifies everything else.
+        assert_eq!(categorize(&parts("GET", "/api/v1/targets")), ApiReads);
+        assert_eq!(categorize(&parts("HEAD", "/api/v1/targets")), ApiReads);
+        assert_eq!(categorize(&parts("OPTIONS", "/api/v1/targets")), ApiReads);
+        assert_eq!(categorize(&parts("POST", "/api/v1/targets")), ApiWrites);
+        assert_eq!(
+            categorize(&parts("PATCH", "/api/v1/targets/abc")),
+            ApiWrites
+        );
+        assert_eq!(
+            categorize(&parts("DELETE", "/api/v1/targets/abc")),
+            ApiWrites
+        );
+    }
 }

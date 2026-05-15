@@ -251,6 +251,27 @@ impl QuotaService {
         Ok(())
     }
 
+    /// Friendly pre-check for adding one member, so an over-cap invitation
+    /// accept fails with a clean 422 before the token is consumed. The
+    /// race-safe guarantee is the advisory-locked count inside
+    /// `orgs::add_member`, handed the same `max_members`.
+    pub async fn check_can_add_member(&self, org: OrgId, user: Option<UserId>) -> Result<()> {
+        let plan = self.limit_for_org(org).await?;
+        let Some(db) = &self.db else { return Ok(()) };
+        let limit = i64::from(plan.max_members);
+        let current = i64::from(crate::storage::orgs::active_member_count(db, org).await?);
+        if current + 1 > limit {
+            self.record_block(org, user, "max_members", current, limit);
+            return Err(AppError::quota_exceeded(
+                "max_members",
+                current,
+                limit,
+                plan.id.clone(),
+            ));
+        }
+        Ok(())
+    }
+
     /// `additional` is how many targets this request would newly flip public.
     pub async fn check_public_components(
         &self,

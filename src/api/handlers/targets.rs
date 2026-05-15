@@ -239,6 +239,18 @@ pub async fn update(
             ));
         }
     }
+    // Flipping a private target public consumes a public-components slot.
+    // create/bulk already gate this; the PATCH path must too, or the cap is
+    // trivially bypassed by creating private then editing public.
+    if update.public_status == Some(true)
+        && let Some(existing) = state.target_store.get(id).await?
+        && !existing.public_status
+    {
+        state
+            .quotas
+            .check_public_components(state.default_org_id, None, 1)
+            .await?;
+    }
     match state.target_store.update(id, update).await? {
         Some(t) => Ok(Redacted::new(t)),
         None => Err(AppError::not_found(

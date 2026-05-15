@@ -126,7 +126,7 @@ async fn create_lookup_accept_flow() {
 
     // Recipient signs up (CITEXT — lower-case in users table).
     let alice = seed_user(&pool, "alice@example.test").await;
-    let added = orgs_store::add_member(&pool, org, alice, alice, Role::Member)
+    let added = orgs_store::add_member(&pool, org, alice, alice, Role::Member, u32::MAX)
         .await
         .unwrap();
     assert_eq!(added, AddMemberOutcome::Added);
