@@ -12,15 +12,46 @@ domains:
   - { domain: "your-domain.com",        category: "own_instance" }
   - { domain: "status.your-domain.com", category: "own_instance" }
 
-  # Don't monitor competitors' monitoring services — configuring their
-  # status page as a target can form a monitoring-of-monitoring load
-  # amplification chain. Prevent the configuration entirely.
-  - { domain: "status.betterstack.com", category: "competitor" }
-  - { domain: "status.statuspage.io",   category: "competitor" }
-  - { domain: "status.cachet.io",       category: "competitor" }
-  - { domain: "instatus.com",           category: "competitor" }
+  # Don't monitor competitors' monitoring services — pointing a target at
+  # another monitor (or a status page it generates) forms a
+  # monitoring-of-monitoring load-amplification chain. Block the config.
+  #
+  # Dedicated uptime/monitoring SaaS: the whole apex is the product, so
+  # the bare domain is listed (also blocks app./api./status. subdomains).
+  - { domain: "betterstack.com",        category: "competitor" }
+  - { domain: "betteruptime.com",       category: "competitor" }
   - { domain: "uptimerobot.com",        category: "competitor" }
   - { domain: "pingdom.com",            category: "competitor" }
+  - { domain: "statuscake.com",         category: "competitor" }
+  - { domain: "uptime.com",             category: "competitor" }
+  - { domain: "site24x7.com",           category: "competitor" }
+  - { domain: "hyperping.com",          category: "competitor" }
+  - { domain: "hyperping.io",           category: "competitor" }
+  - { domain: "checklyhq.com",          category: "competitor" }
+  - { domain: "cronitor.io",            category: "competitor" }
+  - { domain: "healthchecks.io",        category: "competitor" }
+  - { domain: "updown.io",              category: "competitor" }
+  - { domain: "ohdear.app",             category: "competitor" }
+  - { domain: "oh-dear.com",            category: "competitor" }
+  - { domain: "nodeping.com",           category: "competitor" }
+  - { domain: "hund.io",                category: "competitor" }
+  - { domain: "statusgator.com",        category: "competitor" }
+  - { domain: "freshping.io",           category: "competitor" }
+  - { domain: "freshstatus.io",         category: "competitor" }
+  - { domain: "pingometer.com",         category: "competitor" }
+  - { domain: "robotalp.com",           category: "competitor" }
+  - { domain: "pulsetic.com",           category: "competitor" }
+
+  # Multi-tenant status-page hosts: the apex also serves thousands of
+  # customers' legitimate pages, so block only the provider's OWN status
+  # endpoint (narrow). Their customer pages are monitoring-of-monitoring
+  # too, but blocking the whole apex would over-block legit vendor checks.
+  - { domain: "status.statuspage.io",   category: "competitor" }
+  - { domain: "status.cachet.io",       category: "competitor" }
+  - { domain: "status.instatus.com",    category: "competitor" }
+  - { domain: "status.statuspal.io",    category: "competitor" }
+  - { domain: "status.io",              category: "competitor" }
+  - { domain: "status.sorryapp.com",    category: "competitor" }
 
   # Add abuse-reported domains here over time, e.g.:
   # - { domain: "evil.example",         category: "abuse_reported" }
