@@ -1,6 +1,7 @@
-//! Anti-abuse admission control: a compiled URL-pattern deny-list and a
-//! domain deny-list (loaded from a YAML file), checked at target-creation
-//! time so a denylisted target never enters the scheduler in the first place.
+//! Anti-abuse admission control: a compiled URL-pattern deny-list, a domain
+//! deny-list (YAML), and an optional hosts-format reputation feed, checked
+//! at target-creation time so a blocked target never enters the scheduler
+//! in the first place.
 //!
 //! Built once at startup from [`AbuseConfig`]. [`AbuseGuard::validate`] is the
 //! strict gate `main` runs at config-validation time: a malformed regex or
@@ -16,7 +17,6 @@ use std::sync::Arc;
 use arc_swap::ArcSwap;
 use regex::RegexSet;
 use serde::Deserialize;
-use url::Url;
 
 use crate::api::error::codes;
 use crate::config::AbuseConfig;
@@ -29,6 +29,7 @@ use crate::error::{AppError, Result};
 pub enum AbuseKind {
     UrlPattern,
     Domain,
+    Reputation,
 }
 
 /// A positive abuse match: the rule that fired and the offending detail
@@ -45,11 +46,13 @@ impl AbuseHit {
         match self.kind {
             AbuseKind::UrlPattern => "url_pattern",
             AbuseKind::Domain => "domain_denylist",
+            AbuseKind::Reputation => "reputation",
         }
     }
 
-    /// 400 error carrying the stable code. URL-pattern matches surface as
-    /// the generic `ABUSE_BLOCKED`; domain matches as `DOMAIN_DENYLISTED`.
+    /// 400 error carrying the stable code. URL-pattern and reputation
+    /// matches surface as the generic `ABUSE_BLOCKED`; static deny-list
+    /// matches as `DOMAIN_DENYLISTED`.
     pub fn into_app_error(self) -> AppError {
         let (code, msg) = match self.kind {
             AbuseKind::UrlPattern => (
@@ -59,6 +62,10 @@ impl AbuseHit {
             AbuseKind::Domain => (
                 codes::DOMAIN_DENYLISTED,
                 format!("target domain '{}' is on the deny-list", self.detail),
+            ),
+            AbuseKind::Reputation => (
+                codes::ABUSE_BLOCKED,
+                format!("target domain '{}' has a poor reputation", self.detail),
             ),
         };
         AppError::bad_request_field(code, msg, "check.url")
@@ -85,6 +92,9 @@ struct DenylistEntry {
 struct AbuseState {
     url_patterns: RegexSet,
     domain_denylist: HashSet<String>,
+    /// Hosts ingested from the optional reputation feed. Same parent-domain
+    /// match as the deny-list; separate set so a hit reports its own kind.
+    reputation: HashSet<String>,
 }
 
 pub struct AbuseGuard {
@@ -104,7 +114,7 @@ impl AbuseGuard {
                 ))
             })?;
         }
-        if let Some(raw) = read_denylist_file(&cfg.domain_denylist_path)? {
+        if let Some(raw) = read_optional_file(&cfg.domain_denylist_path)? {
             serde_norway::from_str::<DenylistFile>(&raw).map_err(|e| {
                 AppError::Other(anyhow::anyhow!(
                     "abuse.domain_denylist_path ({}): invalid YAML: {e}",
@@ -112,6 +122,10 @@ impl AbuseGuard {
                 ))
             })?;
         }
+        // The reputation feed is parsed leniently (no schema), so the only
+        // failure mode worth a hard startup error is "configured but
+        // unreadable" — surface that here rather than as a silent empty set.
+        read_optional_file(&cfg.reputation_source_path)?;
         Ok(())
     }
 
@@ -124,12 +138,12 @@ impl AbuseGuard {
         }
     }
 
-    /// Re-read the URL patterns and deny-list file and swap them in
-    /// atomically. The candidate config is validated first, so a malformed
-    /// edit (bad regex / unparseable YAML) is rejected here and the running
-    /// rules stay intact — a reload can only ever replace the live set with
-    /// a fully-good one, never degrade it. Triggered by SIGHUP from `main`
-    /// when `abuse.hot_reload_enabled`.
+    /// Re-read the URL patterns, deny-list file, and reputation feed and
+    /// swap them in atomically. The candidate config is validated first, so
+    /// a malformed edit (bad regex / unparseable YAML / unreadable feed) is
+    /// rejected here and the running rules stay intact — a reload can only
+    /// ever replace the live set with a fully-good one, never degrade it.
+    /// Triggered by SIGHUP from `main` when `abuse.hot_reload_enabled`.
     pub fn reload(&self, cfg: &AbuseConfig) -> Result<()> {
         Self::validate(cfg)?;
         self.state.store(Arc::new(Self::build_state(cfg)));
@@ -153,7 +167,7 @@ impl AbuseGuard {
         let url_patterns = RegexSet::new(valid.iter().map(|p| format!("(?i){p}")))
             .unwrap_or_else(|_| RegexSet::empty());
 
-        let domain_denylist = match read_denylist_file(&cfg.domain_denylist_path) {
+        let domain_denylist = match read_optional_file(&cfg.domain_denylist_path) {
             Ok(Some(raw)) => match serde_norway::from_str::<DenylistFile>(&raw) {
                 Ok(f) => f
                     .domains
@@ -179,26 +193,41 @@ impl AbuseGuard {
             }
         };
 
+        let reputation = match read_optional_file(&cfg.reputation_source_path) {
+            Ok(Some(raw)) => parse_reputation(&raw),
+            Ok(None) => {
+                if !cfg.reputation_source_path.trim().is_empty() {
+                    tracing::warn!(
+                        path = %cfg.reputation_source_path,
+                        "abuse reputation feed absent; reputation check off"
+                    );
+                }
+                HashSet::new()
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "abuse reputation feed read failed; reputation check off");
+                HashSet::new()
+            }
+        };
+
         AbuseState {
             url_patterns,
             domain_denylist,
+            reputation,
         }
     }
 
-    /// The reputation hook reserved for v1.x (domain-reputation API, abuse
-    /// list, etc.). The call site is wired; the implementation is empty.
-    fn reputation_check(&self, _url: &Url) -> Result<(), AbuseHit> {
-        Ok(())
-    }
-
     /// First abuse rule the check trips, if any. URL patterns apply to the
-    /// full HTTP URL; the domain deny-list (with parent-domain matching)
-    /// applies to every check kind's host/domain.
+    /// full HTTP URL; the domain deny-list and the reputation feed (both
+    /// with parent-domain matching) apply to every check kind's host. One
+    /// `ArcSwap` snapshot per call, so a concurrent reload is seen as
+    /// fully the old or fully the new set, never a half-updated mix.
     pub fn inspect(&self, check: &CheckSpec) -> Option<AbuseHit> {
-        // One snapshot per check: a concurrent reload swaps the whole set,
-        // so this check sees either fully the old or fully the new rules.
         let s = self.state.load();
-        match check {
+        // `host_str()` / `unbracket` keep an IPv6 literal as-is; that's
+        // fine — IP literals are never host-set entries (the SSRF guard
+        // governs them), so the domain/reputation lookups simply no-op.
+        let host = match check {
             CheckSpec::Http(h) => {
                 if let Some(i) = s.url_patterns.matches(h.url.as_str()).iter().next() {
                     return Some(AbuseHit {
@@ -206,32 +235,35 @@ impl AbuseGuard {
                         detail: format!("pattern #{i}"),
                     });
                 }
-                // `host_str()` keeps the `[ ]` on an IPv6 literal; that's
-                // fine — IP literals are never deny-list domain entries and
-                // are governed by the SSRF guard, so `domain_hit` no-ops.
-                if let Some(hit) = h.url.host_str().and_then(|host| s.domain_hit(host)) {
-                    return Some(hit);
-                }
-                self.reputation_check(&h.url).err()
+                h.url.host_str()?
             }
-            CheckSpec::Tcp(t) => s.domain_hit(crate::security::unbracket(&t.host)),
-            CheckSpec::TlsCert(c) => s.domain_hit(crate::security::unbracket(&c.host)),
-            CheckSpec::DomainExpiry(d) => s.domain_hit(&d.domain),
-        }
+            CheckSpec::Tcp(t) => crate::security::unbracket(&t.host),
+            CheckSpec::TlsCert(c) => crate::security::unbracket(&c.host),
+            CheckSpec::DomainExpiry(d) => d.domain.as_str(),
+        };
+        s.domain_hit(host).or_else(|| s.reputation_hit(host))
     }
 }
 
 impl AbuseState {
     fn domain_hit(&self, host: &str) -> Option<AbuseHit> {
-        if self.domain_denylist.is_empty() {
+        Self::match_in(&self.domain_denylist, host, AbuseKind::Domain)
+    }
+
+    fn reputation_hit(&self, host: &str) -> Option<AbuseHit> {
+        Self::match_in(&self.reputation, host, AbuseKind::Reputation)
+    }
+
+    /// `host` or any of its parent domains present in `set` → a hit of
+    /// `kind`. Empty set short-circuits so an unconfigured feed costs
+    /// nothing on the check path.
+    fn match_in(set: &HashSet<String>, host: &str, kind: AbuseKind) -> Option<AbuseHit> {
+        if set.is_empty() {
             return None;
         }
-        domain_and_parents(host).into_iter().find_map(|d| {
-            self.domain_denylist.contains(&d).then_some(AbuseHit {
-                kind: AbuseKind::Domain,
-                detail: d,
-            })
-        })
+        domain_and_parents(host)
+            .into_iter()
+            .find_map(|d| set.contains(&d).then_some(AbuseHit { kind, detail: d }))
     }
 }
 
@@ -249,9 +281,10 @@ fn domain_and_parents(host: &str) -> Vec<String> {
         .collect()
 }
 
-/// Reads the deny-list file. `Ok(None)` = file absent (not an error — a
-/// deployment may legitimately omit it); `Err` = present but unreadable.
-fn read_denylist_file(path: &str) -> Result<Option<String>> {
+/// Reads an optional abuse input file (deny-list or reputation feed).
+/// `Ok(None)` = path empty or file absent (not an error — a deployment may
+/// legitimately omit it); `Err` = present but unreadable.
+fn read_optional_file(path: &str) -> Result<Option<String>> {
     if path.trim().is_empty() {
         return Ok(None);
     }
@@ -259,9 +292,42 @@ fn read_denylist_file(path: &str) -> Result<Option<String>> {
         Ok(s) => Ok(Some(s)),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(e) => Err(AppError::Other(anyhow::anyhow!(
-            "abuse.domain_denylist_path ({path}): {e}"
+            "abuse: cannot read {path}: {e}"
         ))),
     }
+}
+
+/// Parse a hosts-format reputation feed into a host set. Tolerant by
+/// design: `#` comments and blanks are skipped, a `0.0.0.0`/`127.0.0.1`
+/// sink prefix is stripped, a bare `domain` per line is accepted, and
+/// non-domain junk (`localhost`, malformed) is dropped. A malformed feed
+/// yields a smaller set, never an error — reputation must never be the
+/// reason a deployment fails to boot.
+fn parse_reputation(raw: &str) -> HashSet<String> {
+    raw.lines()
+        .filter_map(|line| {
+            let line = line.split('#').next().unwrap_or("").trim();
+            if line.is_empty() {
+                return None;
+            }
+            let mut tok = line.split_whitespace();
+            let first = tok.next()?;
+            // hosts format prefixes the domain with a sink IP
+            // (`0.0.0.0 d`, `127.0.0.1 d`, or any other blocker IP a feed
+            // chooses); a feed may also list a bare domain per line. Strip
+            // a leading IP of either family rather than allow-list known
+            // sinks, so a non-StevenBlack feed isn't silently mis-parsed.
+            let domain = if first.parse::<std::net::IpAddr>().is_ok() {
+                tok.next()?
+            } else {
+                first
+            };
+            let d = domain.trim().trim_end_matches('.').to_lowercase();
+            // A registrable host has a dot; this also drops `localhost`
+            // and any IP-only line without a separate guard.
+            d.contains('.').then_some(d)
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -283,6 +349,17 @@ mod tests {
             state: ArcSwap::from_pointee(AbuseState {
                 url_patterns: RegexSet::new(patterns.iter().map(|p| format!("(?i){p}"))).unwrap(),
                 domain_denylist: domains.iter().map(|d| d.to_string()).collect(),
+                reputation: HashSet::new(),
+            }),
+        }
+    }
+
+    fn rep_guard(reputation: &[&str]) -> AbuseGuard {
+        AbuseGuard {
+            state: ArcSwap::from_pointee(AbuseState {
+                url_patterns: RegexSet::empty(),
+                domain_denylist: HashSet::new(),
+                reputation: reputation.iter().map(|d| d.to_string()).collect(),
             }),
         }
     }
@@ -367,6 +444,7 @@ mod tests {
         let cfg = AbuseConfig {
             url_patterns_denied: vec![],
             domain_denylist_path: path.to_string_lossy().into_owned(),
+            reputation_source_path: String::new(),
             hot_reload_enabled: true,
         };
         let g = AbuseGuard::from_config(&cfg);
@@ -392,6 +470,7 @@ mod tests {
         let bad = AbuseConfig {
             url_patterns_denied: vec!["(unclosed".to_string()],
             domain_denylist_path: String::new(),
+            reputation_source_path: String::new(),
             hot_reload_enabled: true,
         };
         assert!(g.reload(&bad).is_err(), "a bad config must be rejected");
@@ -399,5 +478,75 @@ mod tests {
             g.inspect(&http("https://blocked.example.com/")).is_some(),
             "the previous rules must stay intact after a rejected reload"
         );
+    }
+
+    #[test]
+    fn reputation_blocks_listed_host_and_its_subdomains() {
+        let g = rep_guard(&["ads.tracker.example"]);
+        let hit = g.inspect(&http("https://ads.tracker.example/x")).unwrap();
+        assert_eq!(hit.kind, AbuseKind::Reputation);
+        // Generic 400, distinct from the static deny-list's DOMAIN_DENYLISTED.
+        assert_eq!(hit.into_app_error_code(), codes::ABUSE_BLOCKED);
+        // Parent match: a subdomain of a listed host is blocked too.
+        assert!(
+            g.inspect(&http("https://eu.ads.tracker.example/"))
+                .is_some()
+        );
+        // A host that merely shares the registrable tail is not listed.
+        assert!(g.inspect(&http("https://tracker.example/")).is_none());
+        // Reputation also covers non-HTTP check kinds via the host.
+        use crate::domain::TcpCheck;
+        let tcp = CheckSpec::Tcp(TcpCheck {
+            host: "ads.tracker.example".into(),
+            port: 443,
+            timeout: std::time::Duration::from_secs(5),
+        });
+        assert!(g.inspect(&tcp).is_some());
+    }
+
+    #[test]
+    fn parse_reputation_reads_hosts_format_leniently() {
+        let raw = "\
+# a comment\n\
+\n\
+0.0.0.0 ad.doubleclick.net\n\
+127.0.0.1 tracker.example.com   # trailing comment\n\
+10.0.0.1 vendorsink.example\n\
+2606:4700:4700::1111 v6sink.example\n\
+bare-domain.example\n\
+0.0.0.0 localhost\n\
+0.0.0.0\n\
+not_a_domain\n";
+        let set = parse_reputation(raw);
+        assert!(set.contains("ad.doubleclick.net"));
+        assert!(set.contains("tracker.example.com"));
+        // Any sink IP, not just the StevenBlack 0.0.0.0/127.0.0.1.
+        assert!(set.contains("vendorsink.example"));
+        assert!(set.contains("v6sink.example"));
+        assert!(set.contains("bare-domain.example"));
+        // `localhost`, the bare sink line, and dot-less junk are dropped.
+        assert!(!set.contains("localhost"));
+        assert!(!set.contains("not_a_domain"));
+        assert_eq!(set.len(), 5);
+    }
+
+    #[test]
+    fn reload_refreshes_the_reputation_feed() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("reputation.hosts");
+        std::fs::write(&path, "0.0.0.0 old.bad.example\n").unwrap();
+        let cfg = AbuseConfig {
+            url_patterns_denied: vec![],
+            domain_denylist_path: String::new(),
+            reputation_source_path: path.to_string_lossy().into_owned(),
+            hot_reload_enabled: true,
+        };
+        let g = AbuseGuard::from_config(&cfg);
+        assert!(g.inspect(&http("https://old.bad.example/")).is_some());
+
+        std::fs::write(&path, "0.0.0.0 new.bad.example\n").unwrap();
+        g.reload(&cfg).expect("valid reload");
+        assert!(g.inspect(&http("https://new.bad.example/")).is_some());
+        assert!(g.inspect(&http("https://old.bad.example/")).is_none());
     }
 }

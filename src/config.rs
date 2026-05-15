@@ -405,6 +405,10 @@ impl Default for RateLimitJanitorConfig {
 pub struct AbuseConfig {
     pub url_patterns_denied: Vec<String>,
     pub domain_denylist_path: String,
+    /// Optional hosts-format reputation feed (e.g. a StevenBlack/hosts
+    /// mirror). Empty = the reputation check is off. Read locally at
+    /// startup and on the SIGHUP reload — never fetched on the check path.
+    pub reputation_source_path: String,
     pub hot_reload_enabled: bool,
 }
 
@@ -413,6 +417,7 @@ impl Default for AbuseConfig {
         Self {
             url_patterns_denied: default_url_patterns(),
             domain_denylist_path: "config/abuse_denylist.yaml".into(),
+            reputation_source_path: String::new(),
             hot_reload_enabled: false,
         }
     }
