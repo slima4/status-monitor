@@ -7,8 +7,10 @@
 pub mod assets;
 pub mod auth;
 pub mod error;
+pub mod host;
 pub mod routes;
 pub mod views;
 
 pub use auth::{CurrentOrg, CurrentUser, Session, User};
+pub use host::{StatusPageHost, StatusPageOrg, extract_status_slug};
 pub use routes::routes;

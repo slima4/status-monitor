@@ -1,8 +1,6 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use std::time::Duration as StdDuration;
-
 use status_monitor::{
     api::build_router,
     app::AppState,
@@ -173,14 +171,14 @@ async fn main() -> Result<()> {
     drop(result_tx);
 
     let aggregator_cfg = AggregatorConfig::default();
-    let cache_ttl = StdDuration::from_secs(10);
     let aggregator = Arc::new(OrgAggregator::new(
         pg_pool.clone(),
         ch_client_for_public,
         target_store.clone(),
         aggregator_cfg.clone(),
     ));
-    let public_cache = PageCache::new(cache_ttl);
+    let public_cache = PageCache::new(&cfg.public_status);
+    let purge_cache = public_cache.clone();
     let public_source: Arc<dyn PublicSource> = Arc::new(OrgPublicSource::new(
         aggregator,
         public_cache,
@@ -211,6 +209,7 @@ async fn main() -> Result<()> {
             ch_client_for_purge,
             interval,
             grace_days,
+            purge_cache,
             token,
         ))
     };

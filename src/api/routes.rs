@@ -188,16 +188,29 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
         .with_state(state)
 }
 
-/// Whether the path-based public surface (`/status` HTML page +
-/// `/api/public/v1/*` JSON) is mounted on the operator host. Driven by
-/// `tenancy.path_based_public_routes`, which defaults to `!tenancy.enabled`:
-/// self-host serves the single org's status page at the operator host; SaaS
-/// does not, because the path-based surface would expose the default org's
-/// data to every tenant. Per-org status pages land on
-/// `*.status.{public_status.base_domain}` via
-/// `tenancy.subdomain_public_routes` (wired in a later phase).
-pub fn public_routes_active(cfg: &crate::config::AppConfig) -> bool {
+/// Path-based public surface (`/status` HTML + `/api/public/v1/*` JSON on the
+/// operator host, scoped to the default org). Defaults to `!tenancy.enabled`:
+/// self-host serves its single org here; SaaS forces it off (a startup
+/// assertion refuses to boot with this and `tenancy.enabled` both true) so it
+/// can't leak the default org to every tenant.
+pub fn path_based_public_routes_enabled(cfg: &crate::config::AppConfig) -> bool {
     cfg.tenancy.path_based_public_routes
+}
+
+/// Per-org subdomain surface (`*.status.{public_status.base_domain}`, org
+/// resolved from the `Host` header). Requires `tenancy.enabled` — a startup
+/// assertion refuses to boot if `subdomain_public_routes` is set without it.
+pub fn subdomain_public_routes_enabled(cfg: &crate::config::AppConfig) -> bool {
+    cfg.tenancy.enabled && cfg.tenancy.subdomain_public_routes
+}
+
+/// Whether *any* public surface is mounted. The two surfaces are mutually
+/// exclusive in practice (the startup assertions forbid path-based + SaaS,
+/// and subdomain needs SaaS), so the shared handlers resolve the org via the
+/// host-aware [`crate::web::host::StatusPageOrg`] extractor and only one
+/// surface is ever live per deployment.
+pub fn public_routes_active(cfg: &crate::config::AppConfig) -> bool {
+    path_based_public_routes_enabled(cfg) || subdomain_public_routes_enabled(cfg)
 }
 
 /// Whether the `auth.enabled_methods` config includes `"magic_link"`. Wires

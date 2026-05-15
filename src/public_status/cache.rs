@@ -1,22 +1,27 @@
 //! Per-org cache for the public status page payload.
 //!
-//! Each `OrgId` gets its own TTL + single-flight slot in the moka cache, plus
-//! its own `ArcSwap<PageData>` last-known-good fallback. Cross-tenant
-//! isolation: an org's compute failure cannot serve another org's stale data,
-//! and a hot org's recompute can't block another org's request.
+//! Two bounded `moka` layers per process:
+//!  * `inner` — hot cache. TTL eviction + capacity-bounded LRU + single-flight
+//!    (`try_get_with` collapses concurrent misses for one org into one
+//!    compute).
+//!  * `last_good` — last-known-good fallback. Survives `inner`'s TTL eviction
+//!    so a transient ClickHouse/Postgres hiccup keeps the page up with stale
+//!    data instead of 5xx-ing anonymous callers. Bounded by capacity *and*
+//!    idle eviction so a churned/deleted tenant the purge worker has not yet
+//!    reached cannot keep its snapshot resident forever.
 //!
-//! Failure handling matches the pre-Phase-6 single-org shape: a transient
-//! ClickHouse/Postgres failure never surfaces a 5xx to anonymous callers —
-//! the page stays up with stale data via the per-org `last_good`.
+//! Cross-tenant isolation: each `OrgId` has its own slot in both layers, so an
+//! org's compute failure can never serve another org's stale data, and a hot
+//! org's recompute can't block another org's request.
 
 use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
-use arc_swap::ArcSwap;
-use dashmap::DashMap;
-use moka::future::Cache;
+use moka::future::Cache as FutureCache;
+use moka::sync::Cache as SyncCache;
 
+use crate::config::PublicStatusConfig;
 use crate::domain::{OrgId, PublicStatusPage};
 
 pub type PageData = PublicStatusPage;
@@ -28,26 +33,38 @@ pub enum PageCacheError {
     Unavailable,
 }
 
-/// In-process per-org cache for `PageData`. Cheap to clone (everything inside
-/// is `Arc`-shaped).
+/// In-process per-org cache for `PageData`. Cheap to clone — both `moka`
+/// handles are `Arc`-backed internally.
 #[derive(Clone)]
 pub struct PageCache {
-    inner: Cache<OrgId, Arc<PageData>>,
-    last_good: Arc<DashMap<OrgId, Arc<ArcSwap<PageData>>>>,
+    inner: FutureCache<OrgId, Arc<PageData>>,
+    last_good: SyncCache<OrgId, Arc<PageData>>,
 }
 
 impl PageCache {
-    pub fn new(ttl: Duration) -> Self {
+    /// Production constructor. Sizes both layers from `[public_status]`:
+    /// `inner` holds `cache_max_orgs` entries for `cache_ttl_secs`;
+    /// `last_good` holds 4× that (so a brief storm cycling many orgs through
+    /// `inner` still finds a stale snapshot) and idle-evicts after
+    /// `last_good_ttl_secs` to cap the heap under tenant churn.
+    pub fn new(cfg: &PublicStatusConfig) -> Self {
+        Self::build(
+            u64::from(cfg.cache_max_orgs),
+            Duration::from_secs(cfg.cache_ttl_secs),
+            Duration::from_secs(cfg.last_good_ttl_secs),
+        )
+    }
+
+    fn build(max_orgs: u64, ttl: Duration, last_good_idle: Duration) -> Self {
         Self {
-            // 1024 active orgs is well above any realistic working set. moka
-            // evicts LRU when full; an evicted entry forces the next caller
-            // to recompute (acceptable — the request that triggered eviction
-            // was for a different org anyway).
-            inner: Cache::builder()
-                .max_capacity(1024)
+            inner: FutureCache::builder()
+                .max_capacity(max_orgs)
                 .time_to_live(ttl)
                 .build(),
-            last_good: Arc::new(DashMap::new()),
+            last_good: SyncCache::builder()
+                .max_capacity(max_orgs.saturating_mul(4))
+                .time_to_idle(last_good_idle)
+                .build(),
         }
     }
 
@@ -67,8 +84,6 @@ impl PageCache {
         Fut: Future<Output = Result<PageData, E>>,
         E: std::fmt::Display + std::fmt::Debug,
     {
-        // Clone the per-org last_good slot up front so the moka closure can
-        // capture it. DashMap entries are inserted lazily on first success.
         let last_good = self.last_good.clone();
         let res = self
             .inner
@@ -76,10 +91,7 @@ impl PageCache {
                 match f().await {
                     Ok(page) => {
                         let arc = Arc::new(page);
-                        last_good
-                            .entry(org)
-                            .or_insert_with(|| Arc::new(ArcSwap::from(arc.clone())))
-                            .store(arc.clone());
+                        last_good.insert(org, arc.clone());
                         Ok::<_, String>(arc)
                     }
                     // {:#} prints the anyhow chain via each link's Display.
@@ -91,7 +103,7 @@ impl PageCache {
             .await;
         match res {
             Ok(page) => Ok(page),
-            Err(e) => match self.last_good.get(&org).map(|s| s.load_full()) {
+            Err(e) => match self.last_good.get(&org) {
                 Some(stale) => {
                     tracing::warn!(%org, error = %e, "public_status compute failed; serving stale");
                     Ok(stale)
@@ -108,10 +120,32 @@ impl PageCache {
         }
     }
 
+    /// Drop both layers for `org`. Called by the purge worker once an org's
+    /// rows are gone, so the `last_good` snapshot can't outlive the data
+    /// behind it. (When a status-page settings surface lands it should call
+    /// this on a `public_status_enabled` → `false` flip too, so a disabled
+    /// org stops serving a cached page before TTL expiry; until then the
+    /// extractor's `public_status_enabled = true` filter is the gate and the
+    /// stale window is bounded by `cache_ttl_secs` / `last_good_ttl_secs`.)
+    pub async fn invalidate(&self, org: OrgId) {
+        self.inner.invalidate(&org).await;
+        self.last_good.invalidate(&org);
+    }
+
     /// Snapshot of the last successful compute for `org`, if any. Useful for
     /// tests and for surfacing "data is N seconds old" banners.
     pub fn last_good(&self, org: OrgId) -> Option<Arc<PageData>> {
-        self.last_good.get(&org).map(|s| s.load_full())
+        self.last_good.get(&org)
+    }
+}
+
+#[cfg(test)]
+impl PageCache {
+    /// Test constructor with a caller-chosen hot TTL (sub-second precision the
+    /// seconds-granularity config can't express) and a long `last_good` idle
+    /// window so fallback assertions aren't racing eviction.
+    pub fn for_test(ttl: Duration) -> Self {
+        Self::build(1024, ttl, Duration::from_secs(3600))
     }
 }
 
@@ -148,7 +182,7 @@ mod tests {
 
     #[tokio::test]
     async fn returns_arc_pagedata_on_first_compute() {
-        let cache = PageCache::new(Duration::from_secs(10));
+        let cache = PageCache::for_test(Duration::from_secs(10));
         let o = org();
         let page = cache
             .get_or_compute(o, || async { Ok::<_, std::io::Error>(make_page("ok")) })
@@ -161,7 +195,7 @@ mod tests {
 
     #[tokio::test]
     async fn second_call_within_ttl_does_not_recompute() {
-        let cache = PageCache::new(Duration::from_secs(10));
+        let cache = PageCache::for_test(Duration::from_secs(10));
         let o = org();
         let calls = Arc::new(AtomicUsize::new(0));
         for _ in 0..5 {
@@ -183,7 +217,7 @@ mod tests {
 
     #[tokio::test]
     async fn single_flight_under_concurrency_same_org() {
-        let cache = PageCache::new(Duration::from_secs(10));
+        let cache = PageCache::for_test(Duration::from_secs(10));
         let o = org();
         let calls = Arc::new(AtomicUsize::new(0));
         let mut handles = Vec::new();
@@ -220,7 +254,7 @@ mod tests {
     async fn distinct_orgs_have_independent_caches_and_stale_fallbacks() {
         // Org A succeeds and seeds its last_good. Org B fails on first compute
         // — must NOT serve A's stale data, must return Unavailable.
-        let cache = PageCache::new(Duration::from_secs(10));
+        let cache = PageCache::for_test(Duration::from_secs(10));
         let a = org();
         let b = org();
         let _ = cache
@@ -242,7 +276,7 @@ mod tests {
 
     #[tokio::test]
     async fn serves_stale_when_compute_fails_after_initial_success() {
-        let cache = PageCache::new(Duration::from_millis(50));
+        let cache = PageCache::for_test(Duration::from_millis(50));
         let o = org();
         let _good = cache
             .get_or_compute(o, || async { Ok::<_, std::io::Error>(make_page("good")) })
@@ -260,7 +294,7 @@ mod tests {
 
     #[tokio::test]
     async fn unavailable_when_first_compute_fails_with_no_stale() {
-        let cache = PageCache::new(Duration::from_secs(10));
+        let cache = PageCache::for_test(Duration::from_secs(10));
         let o = org();
         let err = cache
             .get_or_compute(o, || async {
@@ -268,6 +302,42 @@ mod tests {
             })
             .await
             .expect_err("no stale, propagates");
-        matches!(err, PageCacheError::Unavailable);
+        assert!(matches!(err, PageCacheError::Unavailable));
+    }
+
+    #[tokio::test]
+    async fn invalidate_drops_both_layers_for_one_org_only() {
+        let cache = PageCache::for_test(Duration::from_secs(10));
+        let a = org();
+        let b = org();
+        cache
+            .get_or_compute(a, || async { Ok::<_, std::io::Error>(make_page("a")) })
+            .await
+            .expect("a ok");
+        cache
+            .get_or_compute(b, || async { Ok::<_, std::io::Error>(make_page("b")) })
+            .await
+            .expect("b ok");
+
+        cache.invalidate(a).await;
+        // moka's sync cache applies invalidation synchronously for the keyed
+        // form, so A's snapshot is gone immediately.
+        assert!(cache.last_good(a).is_none(), "A snapshot dropped");
+        assert!(
+            cache.last_good(b).is_some(),
+            "B snapshot survives A's invalidation"
+        );
+
+        // A's next compute must run fresh (hot entry was dropped too).
+        let calls = Arc::new(AtomicUsize::new(0));
+        let c = calls.clone();
+        cache
+            .get_or_compute(a, || async move {
+                c.fetch_add(1, Ordering::SeqCst);
+                Ok::<_, std::io::Error>(make_page("a2"))
+            })
+            .await
+            .expect("a recompute");
+        assert_eq!(calls.load(Ordering::SeqCst), 1, "hot entry was invalidated");
     }
 }

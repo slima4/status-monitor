@@ -7,7 +7,7 @@
 use askama::Template;
 use askama_web::WebTemplate;
 use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use serde::Deserialize;
@@ -21,6 +21,7 @@ use crate::domain::{
     PublicMaintenance, PublicStatusPage,
 };
 use crate::web::error::{NotFoundPage, UnavailablePage};
+use crate::web::host::resolve_status_page_org;
 use crate::web::views::{fmt_human, fmt_ts};
 
 #[derive(Debug, Default, Deserialize)]
@@ -51,8 +52,16 @@ pub struct IncidentDetailPage {
     pub rss_url: &'static str,
 }
 
-pub async fn index(State(state): State<AppState>, Query(params): Query<StatusParams>) -> Response {
-    let page = match state.public_source.page(state.default_org_id).await {
+pub async fn index(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(params): Query<StatusParams>,
+) -> Response {
+    let org = match resolve_status_page_org(&state, &headers).await {
+        Ok(o) => o,
+        Err(err) => return render_public_error(err),
+    };
+    let page = match state.public_source.page(org).await {
         Ok(p) => p,
         Err(err) => return render_public_error(err),
     };
@@ -64,8 +73,15 @@ pub async fn index(State(state): State<AppState>, Query(params): Query<StatusPar
     }
 }
 
-pub async fn incident(State(state): State<AppState>, Path(id): Path<Uuid>) -> Response {
-    let org = state.default_org_id;
+pub async fn incident(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+) -> Response {
+    let org = match resolve_status_page_org(&state, &headers).await {
+        Ok(o) => o,
+        Err(err) => return render_public_error(err),
+    };
     let (inc_res, page_res) = tokio::join!(
         state.public_source.incident_by_id(org, id),
         state.public_source.page(org),

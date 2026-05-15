@@ -34,7 +34,9 @@ use tokio::time::MissedTickBehavior;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
+use crate::domain::OrgId;
 use crate::error::Result;
+use crate::public_status::PageCache;
 
 /// Hard cap on orgs processed per tick. Small enough that a stuck ClickHouse
 /// can't accumulate a huge backlog between alerts; large enough that a normal
@@ -56,6 +58,7 @@ pub async fn run(
     ch: ChClient,
     interval: Duration,
     grace_days: u32,
+    cache: PageCache,
     shutdown: CancellationToken,
 ) {
     let mut ticker = tokio::time::interval(interval);
@@ -69,7 +72,7 @@ pub async fn run(
                 return;
             }
             _ = ticker.tick() => {
-                match purge_tick(&pool, &ch, grace_days).await {
+                match purge_tick(&pool, &ch, grace_days, &cache).await {
                     Ok(stats) => tracing::info!(
                         cascaded = stats.cascaded,
                         drained = stats.drained,
@@ -85,8 +88,13 @@ pub async fn run(
 /// Run one full purge cycle: cascade PG-side deletes for past-grace orgs,
 /// then drain whatever pending CH purges exist (including ones enqueued on
 /// previous ticks that didn't succeed).
-pub async fn purge_tick(pool: &PgPool, ch: &ChClient, grace_days: u32) -> Result<PurgeStats> {
-    let cascaded = cascade_past_grace(pool, grace_days).await?;
+pub async fn purge_tick(
+    pool: &PgPool,
+    ch: &ChClient,
+    grace_days: u32,
+    cache: &PageCache,
+) -> Result<PurgeStats> {
+    let cascaded = cascade_past_grace(pool, grace_days, cache).await?;
     let drained = drain_clickhouse_purge_queue(pool, ch).await?;
     Ok(PurgeStats { cascaded, drained })
 }
@@ -100,7 +108,7 @@ pub struct PurgeStats {
 /// PG-side step: pick orgs past the grace window, enqueue + cascade in one
 /// transaction per org. Returns the count actually cascaded so the caller can
 /// emit a metric.
-async fn cascade_past_grace(pool: &PgPool, grace_days: u32) -> Result<u32> {
+async fn cascade_past_grace(pool: &PgPool, grace_days: u32, cache: &PageCache) -> Result<u32> {
     let orgs: Vec<(Uuid,)> = sqlx::query_as(
         r#"SELECT id FROM organizations
            WHERE deleted_at IS NOT NULL
@@ -135,6 +143,9 @@ async fn cascade_past_grace(pool: &PgPool, grace_days: u32) -> Result<u32> {
             .context("purge: cascade delete")?;
 
         tx.commit().await.context("purge: commit cascade")?;
+        // Data is gone from Postgres now — drop any hot/last-good page so the
+        // public surface can't keep serving a snapshot of a purged org.
+        cache.invalidate(OrgId(org_id)).await;
         cascaded += 1;
         tracing::info!(%org_id, "org cascade-purged from postgres");
     }

@@ -10,9 +10,9 @@
 mod common;
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use chrono::Utc;
+use status_monitor::config::PublicStatusConfig;
 use status_monitor::domain::{OrgId, OverallState, OverallStatus, PublicStatusPage};
 use status_monitor::public_status::cache::PageCache;
 use uuid::Uuid;
@@ -38,7 +38,7 @@ fn page_with_marker(marker: &str) -> PublicStatusPage {
 
 #[tokio::test]
 async fn cache_does_not_serve_org_a_payload_to_org_b() {
-    let cache = PageCache::new(Duration::from_secs(10));
+    let cache = PageCache::new(&PublicStatusConfig::default());
     let org_a = OrgId(Uuid::new_v4());
     let org_b = OrgId(Uuid::new_v4());
 
@@ -75,7 +75,7 @@ async fn cache_last_good_is_partitioned_per_org() {
     // A hot org's `last_good` snapshot must not satisfy a different org's
     // recompute failure. Prime A, then fail B's first compute, and verify B
     // receives `Unavailable` rather than A's stale data.
-    let cache = PageCache::new(Duration::from_secs(10));
+    let cache = PageCache::new(&PublicStatusConfig::default());
     let org_a = OrgId(Uuid::new_v4());
     let org_b = OrgId(Uuid::new_v4());
 

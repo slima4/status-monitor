@@ -17,7 +17,10 @@ pub use page::{
     PageOfTarget,
 };
 pub use public_error::{PublicApiError, PublicApiErrorBody, PublicAppError};
-pub use routes::{build_router, public_routes_active};
+pub use routes::{
+    build_router, path_based_public_routes_enabled, public_routes_active,
+    subdomain_public_routes_enabled,
+};
 pub use types::{
     BulkAction, BulkActionFailure, BulkActionRequest, BulkActionResponse, DashboardSummary,
     Last24hSummary, StatusBreakdown, SystemSummary, TagCount, TargetsSummary, TestRequest,

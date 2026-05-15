@@ -10,8 +10,9 @@ use crate::web::{assets, error, views};
 /// Builds the UI router (`Router<AppState>`). Caller is responsible for
 /// merging into the main router and applying `with_state`. The public-status
 /// pages (`/status`, `/status/incidents/{id}`) are mounted only when
-/// [`public_routes_active`] is true; otherwise SaaS-mode tenants would all
-/// see the default org's status page (per-org routing is a follow-on spec).
+/// [`public_routes_active`] is true; the org they render is resolved
+/// per-request by the host-aware `StatusPageOrg` extractor (subdomain →
+/// that tenant; self-host → the default org).
 pub fn routes(cfg: &AppConfig) -> Router<AppState> {
     let mut r = Router::new()
         .route("/", get(views::dashboard::index))
