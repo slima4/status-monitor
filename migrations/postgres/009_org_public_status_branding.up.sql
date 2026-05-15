@@ -9,7 +9,13 @@ ALTER TABLE organizations
     ADD COLUMN public_about                TEXT,
     ADD COLUMN public_brand_color          TEXT,
     ADD COLUMN public_logo_path            TEXT,
-    ADD COLUMN public_show_powered_by      BOOLEAN NOT NULL DEFAULT true,
+    -- Nullable on purpose: the domain models this as Option<bool> where NULL
+    -- means "no operator override — fall back to config.default_show_powered_by
+    -- at read time", the same NULL-is-fallback contract every other public_*
+    -- column above uses. A NOT NULL DEFAULT here would make that tri-state
+    -- unrepresentable and turn a legitimate `None` write into a constraint
+    -- violation. For the default config NULL still resolves to `true`.
+    ADD COLUMN public_show_powered_by      BOOLEAN,
     ADD COLUMN public_custom_domain        TEXT UNIQUE,
     ADD COLUMN public_custom_domain_verified_at TIMESTAMPTZ;
 

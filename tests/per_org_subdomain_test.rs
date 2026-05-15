@@ -24,11 +24,21 @@ use status_monitor::storage::{create_org_with_owner, update_public_branding};
 use tower::ServiceExt;
 use uuid::Uuid;
 
-const BASE_DOMAIN: &str = "status.test.local";
+/// The `public_status.base_domain` config value — the part *after* the fixed
+/// `.status.` label. Status pages live at `{slug}.status.{BASE_DOMAIN}`; see
+/// [`status_host`], which is the only place that literal is spelled so a host
+/// can never silently drift from what the parser expects.
+const BASE_DOMAIN: &str = "test.local";
 
 fn unique_slug(prefix: &str) -> String {
     let id = Uuid::new_v4().simple().to_string();
     format!("{prefix}-{}", &id[id.len() - 8..])
+}
+
+/// Build the public-status `Host` for a slug, matching the production
+/// `{slug}.status.{base_domain}` contract the host parser enforces.
+fn status_host(slug: &str) -> String {
+    format!("{slug}.status.{BASE_DOMAIN}")
 }
 
 async fn make_user(pool: &sqlx::PgPool) -> UserId {
@@ -145,7 +155,7 @@ async fn subdomain_status_page_gates_on_enabled_and_slug_shape() {
 
     // Enabled slug: extractor admits the request and the page renders (200).
     // The blocked shapes below all 404, so 200-vs-404 isolates the gate.
-    let admitted = get_status(&app, Some(&format!("{on}.{BASE_DOMAIN}"))).await;
+    let admitted = get_status(&app, Some(&status_host(&on))).await;
     assert_eq!(
         admitted,
         StatusCode::OK,
@@ -154,13 +164,13 @@ async fn subdomain_status_page_gates_on_enabled_and_slug_shape() {
 
     // Every blocked shape collapses to 404 at the extractor.
     for (host, why) in [
-        (Some(format!("{off}.{BASE_DOMAIN}")), "disabled org"),
+        (Some(status_host(&off)), "disabled org"),
+        (Some(status_host(&unique_slug("ghost"))), "unknown slug"),
         (
-            Some(format!("{}.{BASE_DOMAIN}", unique_slug("ghost"))),
-            "unknown slug",
+            Some(format!("a.b.status.{BASE_DOMAIN}")),
+            "deeper subdomain",
         ),
-        (Some(format!("a.b.{BASE_DOMAIN}")), "deeper subdomain"),
-        (Some("status.test.local".to_string()), "no slug label"),
+        (Some(format!("status.{BASE_DOMAIN}")), "no slug label"),
     ] {
         assert_eq!(
             get_status(&app, host.as_deref()).await,
@@ -185,7 +195,7 @@ async fn disabling_via_operator_path_takes_the_page_offline() {
     let (org, user) = seed_org(&pool, &slug, true).await;
 
     let (app, _default) = common::build_test_app_with_pg(pool.clone(), saas_subdomain).await;
-    let host = format!("{slug}.{BASE_DOMAIN}");
+    let host = status_host(&slug);
 
     assert_eq!(
         get_status(&app, Some(&host)).await,

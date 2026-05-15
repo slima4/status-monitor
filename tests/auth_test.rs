@@ -247,8 +247,9 @@ async fn auth_tables_accept_representative_inserts() {
     .expect("insert api token");
 
     sqlx::query(
-        "INSERT INTO invitations (org_id, inviter_id, email, role, token_hash, expires_at) \
-         VALUES ($1, $2, $3, 'member', 'hash', $4)",
+        "INSERT INTO invitations \
+            (org_id, inviter_id, email, role, token_hash, token_prefix, expires_at) \
+         VALUES ($1, $2, $3, 'member', 'hash', '0123456789abcdef', $4)",
     )
     .bind(org_id)
     .bind(user_id)

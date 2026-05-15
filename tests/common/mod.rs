@@ -257,10 +257,9 @@ pub async fn build_test_app_with_pg(
         build_test_outbound_and_email().0,
         build_test_outbound_and_email().1,
     );
-    (
-        build_router(state, CancellationToken::new()),
-        default_org_id,
-    )
+    let api = build_router(state.clone(), CancellationToken::new());
+    let app = api.merge(status_monitor::web::routes(&state.cfg).with_state(state));
+    (app, default_org_id)
 }
 
 /// Layer that stamps the provided `Session` onto every request's extensions.
