@@ -256,12 +256,43 @@ pub struct PublicStatusConfig {
     /// `Host` headers ending in `.status.` and the slug extractor accepts
     /// attacker-supplied hosts.
     pub base_domain: String,
+
+    pub cache_max_orgs: u32,
+    pub cache_ttl_secs: u64,
+    /// Idle eviction caps memory when tenants churn faster than the purge
+    /// worker can reach them.
+    pub last_good_ttl_secs: u64,
+
+    pub logo_dir: String,
+    pub max_logo_size_bytes: u32,
+    pub allowed_logo_mime_types: Vec<String>,
+    pub max_logo_dimension_px: u32,
+
+    pub default_brand_color: String,
+    pub default_show_powered_by: bool,
+
+    /// Second line of defence behind the Caddy-side limit.
+    pub public_per_ip_rate_limit_per_min: u32,
 }
 
 impl Default for PublicStatusConfig {
     fn default() -> Self {
         Self {
             base_domain: String::new(),
+            cache_max_orgs: 1000,
+            cache_ttl_secs: 10,
+            last_good_ttl_secs: 3600,
+            logo_dir: "/var/lib/status-monitor/logos".into(),
+            max_logo_size_bytes: 204_800,
+            allowed_logo_mime_types: vec![
+                "image/png".into(),
+                "image/jpeg".into(),
+                "image/webp".into(),
+            ],
+            max_logo_dimension_px: 1200,
+            default_brand_color: "#3b82f6".into(),
+            default_show_powered_by: true,
+            public_per_ip_rate_limit_per_min: 60,
         }
     }
 }

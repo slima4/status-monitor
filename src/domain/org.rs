@@ -30,6 +30,67 @@ pub struct Organization {
     pub deleted_at: Option<DateTime<Utc>>,
 }
 
+/// Operator-controlled public-page branding. Optional fields fall back to
+/// `PublicStatusConfig` defaults when `None`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct PublicOrgBranding {
+    pub public_status_enabled: bool,
+    pub public_display_name: Option<String>,
+    pub public_about: Option<String>,
+    pub public_brand_color: Option<String>,
+    pub public_logo_path: Option<String>,
+    pub public_show_powered_by: Option<bool>,
+}
+
+/// Domain-layer mirror of the column CHECK constraints. Lets handlers map to
+/// a 422 with a helpful message instead of a generic constraint violation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BrandingError {
+    BrandColorFormat,
+    AboutTooLong,
+    DisplayNameLength,
+}
+
+impl std::fmt::Display for BrandingError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            Self::BrandColorFormat => "brand color must be a 6-digit hex like #3b82f6",
+            Self::AboutTooLong => "public about may be at most 500 characters",
+            Self::DisplayNameLength => "display name must be 1-80 characters",
+        };
+        f.write_str(s)
+    }
+}
+
+impl std::error::Error for BrandingError {}
+
+impl PublicOrgBranding {
+    pub fn validate(&self) -> Result<(), BrandingError> {
+        if let Some(c) = &self.public_brand_color
+            && !is_hex_color(c)
+        {
+            return Err(BrandingError::BrandColorFormat);
+        }
+        if let Some(a) = &self.public_about
+            && a.chars().count() > 500
+        {
+            return Err(BrandingError::AboutTooLong);
+        }
+        if let Some(n) = &self.public_display_name {
+            let len = n.chars().count();
+            if !(1..=80).contains(&len) {
+                return Err(BrandingError::DisplayNameLength);
+            }
+        }
+        Ok(())
+    }
+}
+
+fn is_hex_color(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    bytes.len() == 7 && bytes[0] == b'#' && bytes[1..].iter().all(|b| b.is_ascii_hexdigit())
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SlugError {
     TooShort,
@@ -151,5 +212,32 @@ mod tests {
     fn accepts_personal_prefixed_slug() {
         // Auto-generated personal slugs must pass — reserved check is exact-match.
         assert!(validate_slug("personal-happy-fox-3a9k7m").is_ok());
+    }
+
+    #[test]
+    fn branding_validate_rejects_bad_color() {
+        let mut b = PublicOrgBranding {
+            public_brand_color: Some("blue".into()),
+            ..PublicOrgBranding::default()
+        };
+        assert_eq!(b.validate(), Err(BrandingError::BrandColorFormat));
+        b.public_brand_color = Some("#zzzzzz".into());
+        assert_eq!(b.validate(), Err(BrandingError::BrandColorFormat));
+        b.public_brand_color = Some("#3b82f".into());
+        assert_eq!(b.validate(), Err(BrandingError::BrandColorFormat));
+    }
+
+    #[test]
+    fn branding_validate_rejects_long_about_and_name() {
+        let mut b = PublicOrgBranding {
+            public_about: Some("x".repeat(501)),
+            ..PublicOrgBranding::default()
+        };
+        assert_eq!(b.validate(), Err(BrandingError::AboutTooLong));
+        b.public_about = None;
+        b.public_display_name = Some(String::new());
+        assert_eq!(b.validate(), Err(BrandingError::DisplayNameLength));
+        b.public_display_name = Some("y".repeat(81));
+        assert_eq!(b.validate(), Err(BrandingError::DisplayNameLength));
     }
 }

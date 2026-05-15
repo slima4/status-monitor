@@ -128,11 +128,22 @@ free_tier_owner_org_limit = 3
 # Grace period before soft-deleted orgs are purged.
 deletion_grace_period_days = 30
 
-# Per-org public status page surface. Phase-1 expands this block; for now
-# only `base_domain` is consumed (by the startup assertion that refuses to
-# boot subdomain routing without a real domain).
+# `base_domain` is required when tenancy.subdomain_public_routes = true; the
+# startup assertion refuses to boot without it (would let the slug extractor
+# match arbitrary Host headers).
 [public_status]
 base_domain = ""
+cache_max_orgs = 1000
+cache_ttl_secs = 10
+last_good_ttl_secs = 3600
+logo_dir = "/var/lib/status-monitor/logos"
+max_logo_size_bytes = 204800
+allowed_logo_mime_types = ["image/png", "image/jpeg", "image/webp"]
+max_logo_dimension_px = 1200
+default_brand_color = "#3b82f6"
+default_show_powered_by = true
+# Second line of defence behind the Caddy-side limit.
+public_per_ip_rate_limit_per_min = 60
 
 # Transactional product email (org invitations, magic-link sign-in). Distinct
 # from [notifications.email], which is the outage-alert SMTP channel.

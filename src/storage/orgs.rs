@@ -19,17 +19,29 @@ use crate::error::{AppError, Result};
 /// `INSERT ... ON CONFLICT DO NOTHING` + `SELECT` shape that races on first
 /// boot.
 pub async fn ensure_default_org(pool: &PgPool, slug: &str) -> Result<OrgId> {
-    let row: (Uuid,) = sqlx::query_as(
-        r#"INSERT INTO organizations (slug, name)
-           VALUES ($1, 'Default')
-           ON CONFLICT (slug) DO UPDATE SET slug = EXCLUDED.slug
+    // `public_status_enabled = true` on first INSERT so a self-host `/status`
+    // page is reachable from the very first boot. `DO NOTHING` on conflict so
+    // an operator who later disables their public page through the UI keeps
+    // that choice across restarts.
+    let inserted: Option<(Uuid,)> = sqlx::query_as(
+        r#"INSERT INTO organizations (slug, name, public_status_enabled)
+           VALUES ($1, 'Default', true)
+           ON CONFLICT (slug) DO NOTHING
            RETURNING id"#,
     )
     .bind(slug)
-    .fetch_one(pool)
+    .fetch_optional(pool)
     .await
-    .context("ensure_default_org")?;
-    Ok(OrgId(row.0))
+    .context("ensure_default_org: insert")?;
+    if let Some((id,)) = inserted {
+        return Ok(OrgId(id));
+    }
+    let (id,): (Uuid,) = sqlx::query_as("SELECT id FROM organizations WHERE slug = $1")
+        .bind(slug)
+        .fetch_one(pool)
+        .await
+        .context("ensure_default_org: select")?;
+    Ok(OrgId(id))
 }
 
 /// Returns true iff `user` is a current member of `org` *and* `org` is not

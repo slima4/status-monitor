@@ -20,7 +20,7 @@ pub use maintenance::{
     MaintenanceFilter, MaintenanceWindow, MaintenanceWindowUpdate, NewMaintenanceWindow,
 };
 pub use membership::{Membership, Role};
-pub use org::{OrgId, Organization, SlugError, validate_slug};
+pub use org::{BrandingError, OrgId, Organization, PublicOrgBranding, SlugError, validate_slug};
 pub use public::{
     ComponentHistoryResponse, DayState, IncidentSeverity, IncidentStatusPhase, OverallState,
     OverallStatus, PublicComponent, PublicComponentGroup, PublicComponentStatus, PublicIncident,
