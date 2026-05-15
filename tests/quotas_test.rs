@@ -555,6 +555,41 @@ async fn plan_cache_holds_until_ttl_then_refreshes() {
     );
 }
 
+// ── self-host overrides replace plan defaults only in single-tenant ─
+#[tokio::test]
+async fn self_host_override_applies_only_in_single_tenant_mode() {
+    let Some(pool) = pg_pool_from_env().await else {
+        return;
+    };
+    // Plan default cap is 5; the operator override lifts it to 10_000.
+    let (_pid, org) = seed_org_on_plan(&pool, 5, 5, 10, 10).await;
+
+    let mut cfg = AppConfig::load().expect("config");
+    cfg.quotas.self_host_overrides.enabled = true;
+    cfg.quotas.self_host_overrides.max_targets = Some(10_000);
+
+    // Single-tenant: the override replaces the plan default, so a
+    // self-hoster who dialled the cap up gets the bigger number and can
+    // create well past the shipped 5-target default.
+    cfg.tenancy.enabled = false;
+    let svc = QuotaService::new(&cfg, Some(pool.clone()));
+    assert_eq!(
+        svc.limit_for_org(org).await.unwrap().max_targets,
+        10_000,
+        "override must replace the plan default when tenancy is off"
+    );
+
+    // Multi-tenant: the same override is ignored — every org is held to
+    // its plan, never to a process-wide knob a tenant could not set.
+    cfg.tenancy.enabled = true;
+    let svc = QuotaService::new(&cfg, Some(pool.clone()));
+    assert_eq!(
+        svc.limit_for_org(org).await.unwrap().max_targets,
+        5,
+        "override must be ignored in SaaS mode"
+    );
+}
+
 // ── the usage cache snapshots counts for its (short) TTL ────────────
 #[tokio::test]
 async fn usage_cache_holds_counts_until_ttl() {
