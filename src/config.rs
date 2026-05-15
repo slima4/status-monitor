@@ -393,8 +393,13 @@ impl Default for RateLimitJanitorConfig {
 /// `[abuse]`. URL-pattern deny-list (regex, case-insensitive) plus the path
 /// to the YAML domain deny-list. Patterns are validated at config load
 /// (`AbuseGuard::validate`) so a bad regex is a clean startup error, not a
-/// construction panic. `hot_reload_enabled` is reserved (false in v1; a
-/// restart picks up deny-list edits).
+/// construction panic. When `hot_reload_enabled`, SIGHUP re-reads the
+/// patterns and deny-list file and swaps them in atomically (a malformed
+/// edit is rejected and the running rules stay). When it is `false` no
+/// SIGHUP handler is installed, so a deny-list edit needs a restart **and**
+/// SIGHUP keeps its OS default of terminating the process immediately
+/// (no graceful drain) — use SIGTERM/SIGINT to stop the server in that
+/// mode, not SIGHUP.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct AbuseConfig {

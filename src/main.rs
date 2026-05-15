@@ -290,6 +290,14 @@ async fn main() -> Result<()> {
         outbound_http,
         email_sender,
     );
+    // Hot-reload the abuse deny-lists on SIGHUP when enabled (validate then
+    // atomic swap; a bad edit is rejected and the running rules stay).
+    let abuse_reload_handle: Option<JoinHandle<()>> = status_monitor::security::abuse_reload::spawn(
+        state.abuse.clone(),
+        state.cfg.clone(),
+        root.clone(),
+    );
+
     let router =
         build_router(state.clone(), root.clone()).merge(web::routes(&state.cfg).with_state(state));
 
@@ -326,6 +334,9 @@ async fn main() -> Result<()> {
             let _ = h.await;
         }
         if let Some(h) = magic_link_cleanup_handle {
+            let _ = h.await;
+        }
+        if let Some(h) = abuse_reload_handle {
             let _ = h.await;
         }
     };

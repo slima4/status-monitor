@@ -11,7 +11,9 @@
 //! the inputs good.
 
 use std::collections::HashSet;
+use std::sync::Arc;
 
+use arc_swap::ArcSwap;
 use regex::RegexSet;
 use serde::Deserialize;
 use url::Url;
@@ -76,9 +78,17 @@ struct DenylistEntry {
     domain: String,
 }
 
-pub struct AbuseGuard {
+/// The hot-swappable rule set. [`AbuseGuard::reload`] replaces it
+/// atomically; readers in [`AbuseGuard::inspect`] take a cheap `ArcSwap`
+/// snapshot, so a reload never blocks a scheduler check and an in-flight
+/// check always sees one consistent set (never a half-updated mix).
+struct AbuseState {
     url_patterns: RegexSet,
     domain_denylist: HashSet<String>,
+}
+
+pub struct AbuseGuard {
+    state: ArcSwap<AbuseState>,
 }
 
 impl AbuseGuard {
@@ -109,6 +119,24 @@ impl AbuseGuard {
     /// logged and skipped, a missing file is an empty deny-list with a warn.
     /// In practice [`Self::validate`] ran first, so these paths are unreached.
     pub fn from_config(cfg: &AbuseConfig) -> Self {
+        Self {
+            state: ArcSwap::from_pointee(Self::build_state(cfg)),
+        }
+    }
+
+    /// Re-read the URL patterns and deny-list file and swap them in
+    /// atomically. The candidate config is validated first, so a malformed
+    /// edit (bad regex / unparseable YAML) is rejected here and the running
+    /// rules stay intact — a reload can only ever replace the live set with
+    /// a fully-good one, never degrade it. Triggered by SIGHUP from `main`
+    /// when `abuse.hot_reload_enabled`.
+    pub fn reload(&self, cfg: &AbuseConfig) -> Result<()> {
+        Self::validate(cfg)?;
+        self.state.store(Arc::new(Self::build_state(cfg)));
+        Ok(())
+    }
+
+    fn build_state(cfg: &AbuseConfig) -> AbuseState {
         let valid: Vec<&String> = cfg
             .url_patterns_denied
             .iter()
@@ -151,7 +179,7 @@ impl AbuseGuard {
             }
         };
 
-        Self {
+        AbuseState {
             url_patterns,
             domain_denylist,
         }
@@ -167,9 +195,12 @@ impl AbuseGuard {
     /// full HTTP URL; the domain deny-list (with parent-domain matching)
     /// applies to every check kind's host/domain.
     pub fn inspect(&self, check: &CheckSpec) -> Option<AbuseHit> {
+        // One snapshot per check: a concurrent reload swaps the whole set,
+        // so this check sees either fully the old or fully the new rules.
+        let s = self.state.load();
         match check {
             CheckSpec::Http(h) => {
-                if let Some(i) = self.url_patterns.matches(h.url.as_str()).iter().next() {
+                if let Some(i) = s.url_patterns.matches(h.url.as_str()).iter().next() {
                     return Some(AbuseHit {
                         kind: AbuseKind::UrlPattern,
                         detail: format!("pattern #{i}"),
@@ -178,17 +209,19 @@ impl AbuseGuard {
                 // `host_str()` keeps the `[ ]` on an IPv6 literal; that's
                 // fine — IP literals are never deny-list domain entries and
                 // are governed by the SSRF guard, so `domain_hit` no-ops.
-                if let Some(hit) = h.url.host_str().and_then(|host| self.domain_hit(host)) {
+                if let Some(hit) = h.url.host_str().and_then(|host| s.domain_hit(host)) {
                     return Some(hit);
                 }
                 self.reputation_check(&h.url).err()
             }
-            CheckSpec::Tcp(t) => self.domain_hit(crate::security::unbracket(&t.host)),
-            CheckSpec::TlsCert(c) => self.domain_hit(crate::security::unbracket(&c.host)),
-            CheckSpec::DomainExpiry(d) => self.domain_hit(&d.domain),
+            CheckSpec::Tcp(t) => s.domain_hit(crate::security::unbracket(&t.host)),
+            CheckSpec::TlsCert(c) => s.domain_hit(crate::security::unbracket(&c.host)),
+            CheckSpec::DomainExpiry(d) => s.domain_hit(&d.domain),
         }
     }
+}
 
+impl AbuseState {
     fn domain_hit(&self, host: &str) -> Option<AbuseHit> {
         if self.domain_denylist.is_empty() {
             return None;
@@ -247,8 +280,10 @@ mod tests {
 
     fn guard(patterns: &[&str], domains: &[&str]) -> AbuseGuard {
         AbuseGuard {
-            url_patterns: RegexSet::new(patterns.iter().map(|p| format!("(?i){p}"))).unwrap(),
-            domain_denylist: domains.iter().map(|d| d.to_string()).collect(),
+            state: ArcSwap::from_pointee(AbuseState {
+                url_patterns: RegexSet::new(patterns.iter().map(|p| format!("(?i){p}"))).unwrap(),
+                domain_denylist: domains.iter().map(|d| d.to_string()).collect(),
+            }),
         }
     }
 
@@ -321,6 +356,48 @@ mod tests {
         assert!(
             g.inspect(&http("https://status.betterstack.com/"))
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn reload_swaps_in_the_new_denylist_atomically() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("denylist.yaml");
+        std::fs::write(&path, "domains:\n  - { domain: \"old.example.com\" }\n").unwrap();
+        let cfg = AbuseConfig {
+            url_patterns_denied: vec![],
+            domain_denylist_path: path.to_string_lossy().into_owned(),
+            hot_reload_enabled: true,
+        };
+        let g = AbuseGuard::from_config(&cfg);
+        assert!(g.inspect(&http("https://old.example.com/")).is_some());
+        assert!(g.inspect(&http("https://new.example.com/")).is_none());
+
+        // An operator edits the file, then SIGHUPs the process.
+        std::fs::write(&path, "domains:\n  - { domain: \"new.example.com\" }\n").unwrap();
+        g.reload(&cfg).expect("valid reload");
+
+        // The swap is total: the new rule is live, the dropped one is gone.
+        assert!(g.inspect(&http("https://new.example.com/")).is_some());
+        assert!(g.inspect(&http("https://old.example.com/")).is_none());
+        // `dir` drops here, removing the file even on an earlier panic.
+    }
+
+    #[test]
+    fn reload_rejects_a_bad_edit_and_keeps_the_running_rules() {
+        let g = guard(&[r"/\.git(/|$)"], &["blocked.example.com"]);
+        assert!(g.inspect(&http("https://blocked.example.com/")).is_some());
+
+        // A malformed regex must not take the live rules down with it.
+        let bad = AbuseConfig {
+            url_patterns_denied: vec!["(unclosed".to_string()],
+            domain_denylist_path: String::new(),
+            hot_reload_enabled: true,
+        };
+        assert!(g.reload(&bad).is_err(), "a bad config must be rejected");
+        assert!(
+            g.inspect(&http("https://blocked.example.com/")).is_some(),
+            "the previous rules must stay intact after a rejected reload"
         );
     }
 }
