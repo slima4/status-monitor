@@ -198,3 +198,23 @@ prefix_visible_chars = 16
 [auth.magic_link]
 expiry_minutes = 15
 rate_limit_seconds = 60
+
+[quotas]
+# Cache TTLs for plan / usage lookups (consumed in a later phase).
+plan_cache_ttl_secs = 300
+usage_cache_ttl_secs = 10
+
+# Self-host single-tenant limit overrides. Only applied when
+# tenancy.enabled = false; ignored in SaaS mode. Each cap is optional and
+# falls back to the plan default when unset. Uncomment to raise limits.
+[quotas.self_host_overrides]
+enabled = false
+# max_targets = 10000
+# min_check_interval_secs = 5
+# retention_days = 365
+# max_members = 100
+# max_pending_invitations = 100
+# max_api_tokens_per_user = 50
+# max_public_components = 10000
+# max_maintenance_windows = 1000
+# max_logo_size_bytes = 1048576

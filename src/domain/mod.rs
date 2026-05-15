@@ -5,6 +5,7 @@ pub mod maintenance;
 pub mod membership;
 pub mod org;
 pub mod public;
+pub mod quota;
 pub mod reserved_slugs;
 pub mod result;
 pub mod target;
@@ -26,6 +27,7 @@ pub use public::{
     OverallStatus, PublicComponent, PublicComponentGroup, PublicComponentStatus, PublicIncident,
     PublicIncidentUpdate, PublicMaintenance, PublicMaintenanceList, PublicStatusPage,
 };
+pub use quota::{Plan, PlanLimits, QuotaEvent};
 pub use reserved_slugs::is_reserved;
 pub use result::{CheckResult, CheckStatus};
 pub use target::{NewTarget, Target, TargetUpdate};

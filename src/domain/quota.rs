@@ -1,0 +1,107 @@
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
+use uuid::Uuid;
+
+use crate::domain::org::OrgId;
+use crate::domain::user::UserId;
+
+/// The `plans` model. Flat mirror of the table columns so call sites read
+/// `plan.max_targets` without an indirection. Integer columns are `i32` to
+/// mirror Postgres `INTEGER` faithfully; the non-zero / arithmetic-safe
+/// wrappers belong to the enforcement layer, not the row type. The storage
+/// layer owns the `sqlx::FromRow` mapping (a `PlanRow`) per the
+/// domain/storage split used elsewhere in this codebase.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct Plan {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+
+    // Resource quotas
+    pub max_targets: i32,
+    pub min_check_interval_secs: i32,
+    pub retention_days: i32,
+    pub max_members: i32,
+    pub max_pending_invitations: i32,
+    pub max_api_tokens_per_user: i32,
+    pub max_public_components: i32,
+    pub max_maintenance_windows: i32,
+    pub max_logo_size_bytes: i32,
+
+    // Per-org rate limits (per minute)
+    pub api_writes_per_minute: i32,
+    pub api_reads_per_minute: i32,
+    pub bulk_ops_per_minute: i32,
+    pub test_now_per_minute: i32,
+    pub check_now_per_minute: i32,
+
+    // Feature toggles
+    pub custom_domain_enabled: bool,
+    pub white_label_enabled: bool,
+    pub incident_narration_enabled: bool,
+
+    // Metadata
+    pub is_listed: bool,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl Plan {
+    /// The resource-quota subset. The override-merge and the usage endpoint
+    /// only care about these caps, not the rate-limit / metadata columns.
+    pub fn limits(&self) -> PlanLimits {
+        PlanLimits {
+            max_targets: self.max_targets,
+            min_check_interval_secs: self.min_check_interval_secs,
+            retention_days: self.retention_days,
+            max_members: self.max_members,
+            max_pending_invitations: self.max_pending_invitations,
+            max_api_tokens_per_user: self.max_api_tokens_per_user,
+            max_public_components: self.max_public_components,
+            max_maintenance_windows: self.max_maintenance_windows,
+            max_logo_size_bytes: self.max_logo_size_bytes,
+        }
+    }
+}
+
+/// The resource caps, grouped. Carrying these as one value keeps the future
+/// per-org override merge a single step instead of a dozen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct PlanLimits {
+    pub max_targets: i32,
+    pub min_check_interval_secs: i32,
+    pub retention_days: i32,
+    pub max_members: i32,
+    pub max_pending_invitations: i32,
+    pub max_api_tokens_per_user: i32,
+    pub max_public_components: i32,
+    pub max_maintenance_windows: i32,
+    pub max_logo_size_bytes: i32,
+}
+
+impl From<&Plan> for PlanLimits {
+    fn from(p: &Plan) -> Self {
+        p.limits()
+    }
+}
+
+/// The append-only `quota_events` audit model. `user_id` is nullable so the
+/// audit row survives user deletion (`ON DELETE SET NULL`); `org_id` is
+/// nullable for events with no owning org and is `ON DELETE CASCADE` (a
+/// hard-deleted org takes its quota events with it). The storage layer owns
+/// the `sqlx::FromRow` mapping per the domain/storage split.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QuotaEvent {
+    pub id: Uuid,
+    pub org_id: Option<OrgId>,
+    pub user_id: Option<UserId>,
+    /// `quota_exceeded` | `rate_limited` | `abuse_blocked`.
+    pub event: String,
+    /// Column name from `plans` or the rate-limit category; `None` for
+    /// events not tied to a single named quota.
+    pub quota_name: Option<String>,
+    pub details: serde_json::Value,
+    pub ip_hash: Option<String>,
+    pub occurred_at: DateTime<Utc>,
+}

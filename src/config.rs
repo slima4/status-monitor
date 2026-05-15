@@ -34,6 +34,8 @@ pub struct AppConfig {
     pub email: TransactionalEmailConfig,
     #[serde(default)]
     pub auth: AuthConfig,
+    #[serde(default)]
+    pub quotas: QuotasConfig,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -295,6 +297,48 @@ impl Default for PublicStatusConfig {
             public_per_ip_rate_limit_per_min: 60,
         }
     }
+}
+
+/// `[quotas]`. Cache TTLs for the (later) plan/usage lookups, plus the
+/// self-host-only limit overrides. Schema/config only in this phase — no
+/// code reads these values yet.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct QuotasConfig {
+    /// Plans change rarely; a few minutes of staleness is acceptable.
+    pub plan_cache_ttl_secs: u64,
+    /// Usage counts move fast under bursty creates; short TTL only.
+    pub usage_cache_ttl_secs: u64,
+    pub self_host_overrides: SelfHostOverrides,
+}
+
+impl Default for QuotasConfig {
+    fn default() -> Self {
+        Self {
+            plan_cache_ttl_secs: 300,
+            usage_cache_ttl_secs: 10,
+            self_host_overrides: SelfHostOverrides::default(),
+        }
+    }
+}
+
+/// Self-host single-tenant limit overrides. Only consulted when
+/// `tenancy.enabled = false`; ignored in SaaS mode. Every cap is optional —
+/// an unset field falls back to the plan default. Wiring happens in a later
+/// phase; this is the config surface only.
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(default)]
+pub struct SelfHostOverrides {
+    pub enabled: bool,
+    pub max_targets: Option<u32>,
+    pub min_check_interval_secs: Option<u32>,
+    pub retention_days: Option<u32>,
+    pub max_members: Option<u32>,
+    pub max_pending_invitations: Option<u32>,
+    pub max_api_tokens_per_user: Option<u32>,
+    pub max_public_components: Option<u32>,
+    pub max_maintenance_windows: Option<u32>,
+    pub max_logo_size_bytes: Option<u32>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
