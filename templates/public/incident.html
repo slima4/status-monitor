@@ -6,14 +6,14 @@
     <title>{{ incident.header.title }} · {{ branding.display_name }} Status</title>
     <meta name="description" content="Incident report for {{ incident.header.component_name }}: {{ incident.header.title }}.">
     <meta name="robots" content="index,follow">
-    <link rel="icon" type="image/svg+xml" href="/static/img/favicon.svg">
+    <link rel="icon" type="image/svg+xml" href="{{ "img/favicon.svg"|asset }}">
     <link rel="alternate" type="application/rss+xml" title="Incidents (RSS)" href="{{ rss_url }}">
-    <link rel="stylesheet" href="/static/css/app.css">
+    <link rel="stylesheet" href="{{ "css/app.css"|asset }}">
     <style>
         /* Re-validated by `safe_brand_color` — safe to interpolate. */
         :root { --brand-color: {{ branding.brand_color }}; }
     </style>
-    <script defer src="/static/js/public/tz.js"></script>
+    <script defer src="{{ "js/public/tz.js"|asset }}"></script>
 </head>
 <body class="bg-slate-50 text-slate-900 antialiased">
     <a href="#main-content"

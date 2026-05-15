@@ -9,6 +9,7 @@ use crate::app::AppState;
 use crate::domain::CheckResult;
 use crate::error::AppError;
 use crate::storage::{TimeRange, UptimeStats};
+use crate::web::assets::filters;
 use crate::web::error::WebResult;
 use crate::web::views::{describe_check, fmt_ts};
 

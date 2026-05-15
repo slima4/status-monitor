@@ -4,10 +4,10 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block title %}Status Monitor{% endblock %}</title>
-    <link rel="icon" type="image/svg+xml" href="/static/img/favicon.svg">
-    <link rel="stylesheet" href="/static/css/app.css">
-    <script defer src="/static/js/htmx.min.js"></script>
-    <script defer src="/static/js/json-enc.js"></script>
+    <link rel="icon" type="image/svg+xml" href="{{ "img/favicon.svg"|asset }}">
+    <link rel="stylesheet" href="{{ "css/app.css"|asset }}">
+    <script defer src="{{ "js/htmx.min.js"|asset }}"></script>
+    <script defer src="{{ "js/json-enc.js"|asset }}"></script>
     {% block head %}{% endblock %}
 </head>
 <body class="bg-slate-50 text-slate-900 antialiased"

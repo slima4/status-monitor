@@ -131,9 +131,9 @@
     </table>
   </section>
 
-  <script defer src="/static/js/echarts.min.js"></script>
-  <script type="module" src="/static/js/charts/latency.js"></script>
-  <script type="module" src="/static/js/charts/breakdown.js"></script>
+  <script defer src="{{ "js/echarts.min.js"|asset }}"></script>
+  <script type="module" src="{{ "js/charts/latency.js"|asset }}"></script>
+  <script type="module" src="{{ "js/charts/breakdown.js"|asset }}"></script>
 
   <details class="rounded border bg-white">
     <summary class="cursor-pointer px-4 py-2 text-sm font-medium text-slate-700">Configuration</summary>

@@ -23,6 +23,7 @@ use crate::app::AppState;
 use crate::auth::url::{safe_redirect_target, url_encode};
 use crate::error::AppError;
 use crate::storage::orgs::{get_org, personal_org_for_user};
+use crate::web::assets::filters;
 use crate::web::auth::Session;
 use crate::web::error::WebResult;
 
@@ -141,6 +142,7 @@ pub mod settings {
     use crate::app::AppState;
     use crate::auth::{api_tokens, session as session_store};
     use crate::error::AppError;
+    use crate::web::assets::filters;
     use crate::web::auth::{CurrentOrg, Session};
     use crate::web::error::WebResult;
     use crate::web::views::fmt_human;

@@ -8,6 +8,7 @@ use serde::Deserialize;
 use crate::app::AppState;
 use crate::domain::{CheckResult, Target};
 use crate::storage::{TargetFilter, TimeRange};
+use crate::web::assets::filters;
 use crate::web::error::WebResult;
 use crate::web::views::{describe_check, fmt_ts};
 

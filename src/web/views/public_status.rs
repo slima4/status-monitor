@@ -23,6 +23,7 @@ use crate::domain::{
 };
 use crate::public_status::{LocalDiskLogoStorage, LogoStorage};
 use crate::storage::orgs::{OrgBranding, load_public_branding};
+use crate::web::assets::filters;
 use crate::web::error::{NotFoundPage, UnavailablePage};
 use crate::web::host::resolve_status_page_org;
 use crate::web::views::{fmt_human, fmt_ts};

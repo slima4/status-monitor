@@ -7,6 +7,7 @@ use crate::api::handlers::dashboard::dashboard_summary;
 use crate::api::types::DashboardSummary;
 use crate::app::AppState;
 use crate::web::CurrentOrg;
+use crate::web::assets::filters;
 use crate::web::error::WebResult;
 
 #[derive(Template, WebTemplate)]

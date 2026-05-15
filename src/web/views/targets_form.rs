@@ -6,6 +6,7 @@ use uuid::Uuid;
 use crate::app::AppState;
 use crate::domain::{CheckSpec, ExpectedStatus, HttpMethod, Target};
 use crate::error::AppError;
+use crate::web::assets::filters;
 use crate::web::error::WebResult;
 
 pub struct AuthFieldState {

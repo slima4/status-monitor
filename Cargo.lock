@@ -4290,6 +4290,7 @@ dependencies = [
  "flate2",
  "futures",
  "governor",
+ "hex",
  "hickory-resolver",
  "http-body",
  "http-body-util",
