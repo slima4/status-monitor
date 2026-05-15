@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Usage · Status Monitor{% endblock %}
+{% block content %}
+<section class="space-y-6">
+  <header class="space-y-1">
+    <h1 class="text-2xl font-semibold tracking-tight">Usage &amp; quotas</h1>
+    <p class="text-sm text-slate-500">
+      Plan: <span class="font-medium text-slate-900">{{ plan_name }}</span>
+    </p>
+  </header>
+
+  <div class="space-y-4 rounded border bg-white p-5">
+    {% for b in bars %}
+    <div>
+      <div class="mb-1 flex items-baseline justify-between">
+        <span class="text-sm font-medium text-slate-700">{{ b.label }}</span>
+        <span class="text-sm tabular-nums text-slate-500">{{ b.current }} / {{ b.limit_display }}</span>
+      </div>
+      <div class="h-2 w-full overflow-hidden rounded bg-slate-200">
+        <div class="h-full rounded bg-emerald-500" style="width: {{ b.pct }}%"></div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <div class="grid gap-4 sm:grid-cols-2">
+    <div class="rounded border bg-white p-5">
+      <h2 class="mb-3 text-sm font-semibold tracking-tight">Policy</h2>
+      <dl class="space-y-1.5 text-sm text-slate-600">
+        <div class="flex justify-between"><dt>Minimum check interval</dt><dd class="tabular-nums">{{ min_check_interval_secs }} seconds</dd></div>
+        <div class="flex justify-between"><dt>Result retention</dt><dd class="tabular-nums">{{ retention_days }} days</dd></div>
+        <div class="flex justify-between"><dt>Maximum logo size</dt><dd class="tabular-nums">{{ max_logo_size_kb }} KB</dd></div>
+        <div class="flex justify-between"><dt>API tokens per user</dt><dd class="tabular-nums">{{ max_api_tokens_per_user }}</dd></div>
+      </dl>
+    </div>
+
+    <div class="rounded border bg-white p-5">
+      <h2 class="mb-3 text-sm font-semibold tracking-tight">Rate limits <span class="font-normal text-slate-400">(per minute)</span></h2>
+      <dl class="space-y-1.5 text-sm text-slate-600">
+        <div class="flex justify-between"><dt>API writes</dt><dd class="tabular-nums">{{ api_writes_per_minute }}</dd></div>
+        <div class="flex justify-between"><dt>API reads</dt><dd class="tabular-nums">{{ api_reads_per_minute }}</dd></div>
+        <div class="flex justify-between"><dt>Bulk ops</dt><dd class="tabular-nums">{{ bulk_ops_per_minute }}</dd></div>
+        <div class="flex justify-between"><dt>Test now</dt><dd class="tabular-nums">{{ test_now_per_minute }}</dd></div>
+        <div class="flex justify-between"><dt>Check now</dt><dd class="tabular-nums">{{ check_now_per_minute }}</dd></div>
+      </dl>
+    </div>
+  </div>
+
+  <p class="text-sm text-slate-500">
+    Need higher limits?
+    <a class="font-medium text-emerald-700 hover:text-emerald-800" href="mailto:upgrade@your-domain.com">Contact us</a>
+  </p>
+</section>
+{% endblock %}

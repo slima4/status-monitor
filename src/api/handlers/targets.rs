@@ -171,6 +171,7 @@ pub async fn create(
     let plan = state.quotas.limit_for_org(org).await?;
     let guard = ssrf_guard(&state);
     validate_new_target(&new, &guard, i64::from(plan.min_check_interval_secs))?;
+    check_abuse(&state, &new.check)?;
     // Friendly pre-check; the store INSERT enforces the same cap atomically.
     state.quotas.check_can_create_targets(org, None, 1).await?;
     if new.public_status {
@@ -216,6 +217,7 @@ pub async fn update(
 ) -> Result<Redacted<Target>> {
     if let Some(check) = &update.check {
         validate_check(check, &ssrf_guard(&state))?;
+        check_abuse(&state, check)?;
     }
     if let Some(alerts) = &update.alerts {
         validate_alerts(alerts)?;
@@ -311,6 +313,7 @@ pub async fn bulk_create(
     let guard = ssrf_guard(&state);
     for new in &items {
         validate_new_target(new, &guard, i64::from(plan.min_check_interval_secs))?;
+        check_abuse(&state, &new.check)?;
     }
     let n = items.len() as i64;
     // Quantity-aware friendly pre-check; the store INSERT re-enforces the
@@ -440,6 +443,7 @@ pub async fn test_check(
 ) -> Result<Json<TestResponse>> {
     let guard = ssrf_guard(&state);
     validate_check(&req.check, &guard)?;
+    check_abuse(&state, &req.check)?;
     let result = crate::worker::execute(Uuid::nil(), &req.check, &state.http_clients).await;
     let matched_expectations = matches!(result.status, crate::domain::CheckStatus::Up);
     Ok(Json(TestResponse {
@@ -513,6 +517,26 @@ pub async fn check_now(
 
 fn ssrf_guard(state: &AppState) -> SsrfGuard {
     SsrfGuard::new(state.cfg.security.allow_private_targets)
+}
+
+/// Abuse admission control for one user-supplied check. Every handler that
+/// accepts a `CheckSpec` (create, bulk per item, update, test) routes through
+/// this single chokepoint, so a denylisted URL/domain can never enter the
+/// store — and every block is audited fire-and-forget to `quota_events`.
+fn check_abuse(state: &AppState, check: &crate::domain::CheckSpec) -> Result<()> {
+    let Some(hit) = state.abuse.inspect(check) else {
+        return Ok(());
+    };
+    crate::quotas::service::record_quota_event(
+        state.db.clone(),
+        Some(state.default_org_id),
+        None,
+        "abuse_blocked",
+        Some(hit.quota_name()),
+        serde_json::json!({ "detail": hit.detail }),
+        None,
+    );
+    Err(hit.into_app_error())
 }
 
 /// Per-resource validation, including the plan's check-interval floor. Both
@@ -652,11 +676,7 @@ fn validate_check(check: &crate::domain::CheckSpec, guard: &SsrfGuard) -> Result
                     "check.port",
                 ));
             }
-            let host = tcp
-                .host
-                .strip_prefix('[')
-                .and_then(|s| s.strip_suffix(']'))
-                .unwrap_or(&tcp.host);
+            let host = crate::security::unbracket(&tcp.host);
             if let Ok(ip) = host.parse::<IpAddr>() {
                 check_ip(ip, guard)?;
             }
@@ -683,11 +703,7 @@ fn validate_check(check: &crate::domain::CheckSpec, guard: &SsrfGuard) -> Result
                     "check.warn_days",
                 ));
             }
-            let host = cert
-                .host
-                .strip_prefix('[')
-                .and_then(|s| s.strip_suffix(']'))
-                .unwrap_or(&cert.host);
+            let host = crate::security::unbracket(&cert.host);
             if let Ok(ip) = host.parse::<IpAddr>() {
                 check_ip(ip, guard)?;
             }

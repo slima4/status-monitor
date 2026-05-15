@@ -78,6 +78,12 @@ pub mod codes {
     pub const QUOTA_EXCEEDED: &str = "QUOTA_EXCEEDED";
     /// Requested check interval is below the plan minimum.
     pub const MIN_CHECK_INTERVAL: &str = "MIN_CHECK_INTERVAL";
+    /// Request blocked by abuse protection; `field` points at the target URL.
+    pub const ABUSE_BLOCKED: &str = "ABUSE_BLOCKED";
+    /// Specifically: target URL matched an abuse reconnaissance pattern.
+    pub const URL_PATTERN_BLOCKED: &str = "URL_PATTERN_BLOCKED";
+    /// Specifically: target domain (or a parent) is on the deny-list.
+    pub const DOMAIN_DENYLISTED: &str = "DOMAIN_DENYLISTED";
     pub const INTERNAL: &str = "INTERNAL";
     pub const UNAUTHORIZED: &str = "UNAUTHORIZED";
     pub const FORBIDDEN: &str = "FORBIDDEN";

@@ -42,6 +42,9 @@ async fn main() -> Result<()> {
     // A bad quota/rate/interval number is a clean startup config error,
     // never a `.expect()` crash-loop in router/layer construction (I6).
     cfg.validate_quotas_and_limits()?;
+    // Same contract for the abuse rules: a malformed URL-pattern regex or
+    // deny-list YAML fails fast here, not as a runtime panic.
+    status_monitor::security::AbuseGuard::validate(&cfg.abuse)?;
 
     let metrics_handle = if cfg.observability.metrics_enabled {
         Some(observability::metrics::init(&cfg.server.metrics_bind)?)

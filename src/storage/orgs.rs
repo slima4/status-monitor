@@ -259,6 +259,18 @@ pub async fn owner_org_count(pool: &PgPool, user: UserId) -> Result<u32> {
     Ok(u32::try_from(count).unwrap_or(u32::MAX))
 }
 
+/// Number of members in an org. Same scope as [`list_members`] (memberships
+/// are hard-deleted on removal, so no soft-delete filter) — the usage view
+/// and the member list never disagree.
+pub async fn active_member_count(pool: &PgPool, org: OrgId) -> Result<u32> {
+    let (count,): (i64,) = sqlx::query_as("SELECT count(*) FROM memberships WHERE org_id = $1")
+        .bind(org.0)
+        .fetch_one(pool)
+        .await
+        .context("active_member_count")?;
+    Ok(u32::try_from(count).unwrap_or(u32::MAX))
+}
+
 /// Find one org by id. Returns soft-deleted rows too — callers that need to
 /// hide them (most user-facing GETs) check `deleted_at` themselves.
 pub async fn get_org(pool: &PgPool, org: OrgId) -> Result<Option<Organization>> {

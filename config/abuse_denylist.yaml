@@ -1,0 +1,26 @@
+# Domains that cannot be used as monitoring targets.
+# Matching is case-insensitive and hierarchical: listing `example.com`
+# also blocks `status.example.com`, `eu.status.example.com`, etc.
+# Categories (informational only): own_instance, competitor,
+# known_phishing, known_malware, abuse_reported.
+#
+# Loaded once at startup. Edits require a restart in v1
+# (abuse.hot_reload_enabled is reserved for v1.x).
+
+domains:
+  # Don't monitor your own service (replace with your real domain).
+  - { domain: "your-domain.com",        category: "own_instance" }
+  - { domain: "status.your-domain.com", category: "own_instance" }
+
+  # Don't monitor competitors' monitoring services — configuring their
+  # status page as a target can form a monitoring-of-monitoring load
+  # amplification chain. Prevent the configuration entirely.
+  - { domain: "status.betterstack.com", category: "competitor" }
+  - { domain: "status.statuspage.io",   category: "competitor" }
+  - { domain: "status.cachet.io",       category: "competitor" }
+  - { domain: "instatus.com",           category: "competitor" }
+  - { domain: "uptimerobot.com",        category: "competitor" }
+  - { domain: "pingdom.com",            category: "competitor" }
+
+  # Add abuse-reported domains here over time, e.g.:
+  # - { domain: "evil.example",         category: "abuse_reported" }

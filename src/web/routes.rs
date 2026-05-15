@@ -36,6 +36,7 @@ pub fn routes(cfg: &AppConfig) -> Router<AppState> {
             "/settings/status-page",
             get(views::auth::settings::status_page),
         )
+        .route("/settings/usage", get(views::auth::settings::usage_page))
         .route(
             "/web/partials/settings/sessions",
             get(views::auth::settings::sessions_partial),

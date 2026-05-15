@@ -38,6 +38,8 @@ pub struct AppConfig {
     pub quotas: QuotasConfig,
     #[serde(default)]
     pub rate_limits: RateLimitsConfig,
+    #[serde(default)]
+    pub abuse: AbuseConfig,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -386,6 +388,47 @@ impl Default for RateLimitJanitorConfig {
             idle_threshold_hours: 24,
         }
     }
+}
+
+/// `[abuse]`. URL-pattern deny-list (regex, case-insensitive) plus the path
+/// to the YAML domain deny-list. Patterns are validated at config load
+/// (`AbuseGuard::validate`) so a bad regex is a clean startup error, not a
+/// construction panic. `hot_reload_enabled` is reserved (false in v1; a
+/// restart picks up deny-list edits).
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct AbuseConfig {
+    pub url_patterns_denied: Vec<String>,
+    pub domain_denylist_path: String,
+    pub hot_reload_enabled: bool,
+}
+
+impl Default for AbuseConfig {
+    fn default() -> Self {
+        Self {
+            url_patterns_denied: default_url_patterns(),
+            domain_denylist_path: "config/abuse_denylist.yaml".into(),
+            hot_reload_enabled: false,
+        }
+    }
+}
+
+/// Conservative reconnaissance / pen-test URL patterns. These match URLs that
+/// are virtually always attack probes, never legitimate monitoring targets.
+fn default_url_patterns() -> Vec<String> {
+    [
+        r"/\.git(/|$)",
+        r"/\.env(/|$)",
+        r"/phpmyadmin",
+        r"/wp-admin",
+        r"/wp-login",
+        r"/cgi-bin/",
+        r"/.well-known/security.txt",
+        r"\.(php|jsp|asp|aspx)\?",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect()
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]

@@ -17,6 +17,7 @@ use crate::http_client::HttpClients;
 use crate::http_outbound::OutboundHttpClient;
 use crate::public_status::PublicSource;
 use crate::quotas::{QuotaService, RateLimitService};
+use crate::security::AbuseGuard;
 use crate::storage::{
     IncidentNarrationStore, MaintenanceStore, ResultSink, ResultsStore, TargetStore,
 };
@@ -88,6 +89,9 @@ pub struct AppState {
     /// Per-org / per-user request rate limiter. The idle-entry janitor is
     /// spawned in `build_router` against the shutdown token.
     pub rate_limits: Arc<RateLimitService>,
+    /// Compiled URL-pattern + domain deny-list. Built once from `cfg.abuse`;
+    /// `main` validates the patterns/YAML first so this build is total.
+    pub abuse: Arc<AbuseGuard>,
 }
 
 /// Run unconditionally at boot after config parse. Encodes the per-org
@@ -171,6 +175,7 @@ impl AppState {
     ) -> Self {
         let quotas = Arc::new(QuotaService::new(&cfg, db.clone()));
         let rate_limits = Arc::new(RateLimitService::new());
+        let abuse = Arc::new(AbuseGuard::from_config(&cfg.abuse));
         Self {
             cfg: Arc::new(cfg),
             db,
@@ -191,6 +196,7 @@ impl AppState {
             email_sender,
             quotas,
             rate_limits,
+            abuse,
         }
     }
 }

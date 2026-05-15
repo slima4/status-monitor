@@ -122,12 +122,14 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
             "/orgs/{id}/status-page",
             get(handlers::status_page::get_settings).patch(handlers::status_page::update_settings),
         )
+        .route("/orgs/{id}/usage", get(handlers::usage::get_org_usage))
         .route("/orgs/{id}/members", get(handlers::orgs::list_org_members))
         .route(
             "/orgs/{id}/members/{user_id}",
             axum::routing::delete(handlers::orgs::remove_org_member),
         )
         .route("/me", get(handlers::me::me))
+        .route("/me/usage", get(handlers::usage::get_me_usage))
         .route("/me/sessions", get(handlers::me::list_sessions))
         .route(
             "/me/sessions/{id}",

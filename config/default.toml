@@ -227,3 +227,23 @@ org_creations_per_day = 3
 [rate_limits.janitor]
 cleanup_interval_hours = 6
 idle_threshold_hours = 24
+
+[abuse]
+# Case-insensitive regex patterns. A target URL matching any of these is
+# rejected at creation. Conservative: these are attack-recon paths, never
+# legitimate monitoring targets. A customer who genuinely needs one can ask
+# support for an exemption.
+url_patterns_denied = [
+    "/\\.git(/|$)",
+    "/\\.env(/|$)",
+    "/phpmyadmin",
+    "/wp-admin",
+    "/wp-login",
+    "/cgi-bin/",
+    "/.well-known/security.txt",
+    "\\.(php|jsp|asp|aspx)\\?",
+]
+# Domain deny-list (YAML). Loaded once at startup; edits need a restart
+# (hot_reload is reserved for v1.x).
+domain_denylist_path = "config/abuse_denylist.yaml"
+hot_reload_enabled = false

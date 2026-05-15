@@ -13,4 +13,5 @@ pub mod results;
 pub mod status_page;
 pub mod tags;
 pub mod targets;
+pub mod usage;
 pub mod validation;

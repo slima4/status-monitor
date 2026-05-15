@@ -33,6 +33,7 @@ const TAB_LOGIN: &str = "login";
 const TAB_ONBOARD: &str = "onboarding";
 const TAB_SETTINGS: &str = "settings";
 const TAB_STATUS_PAGE: &str = "status_page";
+const TAB_USAGE: &str = "usage";
 
 #[derive(Debug, Default, Deserialize)]
 pub struct LoginQuery {
@@ -147,7 +148,7 @@ pub mod settings {
     use crate::web::error::WebResult;
     use crate::web::views::fmt_human;
 
-    use super::{TAB_SETTINGS, TAB_STATUS_PAGE};
+    use super::{TAB_SETTINGS, TAB_STATUS_PAGE, TAB_USAGE};
 
     #[derive(Template, WebTemplate)]
     #[template(path = "settings/sessions.html")]
@@ -305,6 +306,109 @@ pub mod settings {
         .into_response())
     }
 
+    /// One progress-bar row. `pct` is pre-clamped 0–100 in Rust so the
+    /// template stays logic-free; `limit_display` shows ∞ for the synthetic
+    /// unlimited (self-host) plan instead of a meaningless 2.1-billion.
+    pub struct UsageBar {
+        pub label: &'static str,
+        pub current: i64,
+        pub limit_display: String,
+        pub pct: i64,
+    }
+
+    impl UsageBar {
+        fn new(label: &'static str, current: i64, limit: i32) -> Self {
+            let unlimited = limit == i32::MAX;
+            let limit = i64::from(limit);
+            let pct = if unlimited || limit <= 0 {
+                0
+            } else {
+                (current * 100 / limit).clamp(0, 100)
+            };
+            Self {
+                label,
+                current,
+                limit_display: if unlimited {
+                    "∞".to_string()
+                } else {
+                    limit.to_string()
+                },
+                pct,
+            }
+        }
+    }
+
+    #[derive(Template, WebTemplate)]
+    #[template(path = "settings/usage.html")]
+    pub struct UsagePage {
+        pub active_tab: &'static str,
+        pub plan_name: String,
+        pub bars: Vec<UsageBar>,
+        pub min_check_interval_secs: i32,
+        pub retention_days: i32,
+        pub max_logo_size_kb: i32,
+        pub max_api_tokens_per_user: i32,
+        pub api_writes_per_minute: i32,
+        pub api_reads_per_minute: i32,
+        pub bulk_ops_per_minute: i32,
+        pub test_now_per_minute: i32,
+        pub check_now_per_minute: i32,
+    }
+
+    /// `GET /settings/usage`. Auth/redirect behaviour mirrors
+    /// `/settings/status-page`: only an *unauthenticated* hit bounces to
+    /// login; the org resolves exactly as the API does, so the page and
+    /// `GET /api/v1/orgs/{id}/usage` always show the same numbers.
+    pub async fn usage_page(
+        State(state): State<AppState>,
+        org: Result<CurrentOrg, AppError>,
+    ) -> WebResult<Response> {
+        let CurrentOrg(org) = match org {
+            Ok(o) => o,
+            Err(AppError::Unauthorized) => {
+                return Ok(
+                    Redirect::to("/login?redirect_after=%2Fsettings%2Fusage").into_response()
+                );
+            }
+            Err(e) => return Err(e.into()),
+        };
+        let u = state.quotas.org_usage(org).await?;
+        let p = &u.plan;
+        Ok(UsagePage {
+            active_tab: TAB_USAGE,
+            plan_name: p.name.clone(),
+            bars: vec![
+                UsageBar::new("Targets", u.targets, p.max_targets),
+                UsageBar::new("Members", u.members, p.max_members),
+                UsageBar::new(
+                    "Public components",
+                    u.public_components,
+                    p.max_public_components,
+                ),
+                UsageBar::new(
+                    "Pending invitations",
+                    u.pending_invitations,
+                    p.max_pending_invitations,
+                ),
+                UsageBar::new(
+                    "Maintenance windows",
+                    u.maintenance_windows,
+                    p.max_maintenance_windows,
+                ),
+            ],
+            min_check_interval_secs: p.min_check_interval_secs,
+            retention_days: p.retention_days,
+            max_logo_size_kb: p.max_logo_size_bytes / 1024,
+            max_api_tokens_per_user: p.max_api_tokens_per_user,
+            api_writes_per_minute: p.api_writes_per_minute,
+            api_reads_per_minute: p.api_reads_per_minute,
+            bulk_ops_per_minute: p.bulk_ops_per_minute,
+            test_now_per_minute: p.test_now_per_minute,
+            check_now_per_minute: p.check_now_per_minute,
+        }
+        .into_response())
+    }
+
     fn short_hash(h: Option<&str>) -> String {
         match h {
             Some(s) if s.len() >= 12 => s[..12].to_string(),
@@ -316,6 +420,40 @@ pub mod settings {
     #[cfg(test)]
     mod tests {
         use super::*;
+
+        #[test]
+        fn usage_page_renders_progress_bars_and_contact_link() {
+            let html = UsagePage {
+                active_tab: super::super::TAB_USAGE,
+                plan_name: "Free".into(),
+                bars: vec![
+                    UsageBar::new("Targets", 7, 10),
+                    UsageBar::new("Members", 1, i32::MAX),
+                ],
+                min_check_interval_secs: 60,
+                retention_days: 30,
+                max_logo_size_kb: 200,
+                max_api_tokens_per_user: 5,
+                api_writes_per_minute: 600,
+                api_reads_per_minute: 6000,
+                bulk_ops_per_minute: 30,
+                test_now_per_minute: 60,
+                check_now_per_minute: 60,
+            }
+            .render()
+            .unwrap();
+            assert!(html.starts_with("<!doctype html>"));
+            assert!(html.contains("Plan:"));
+            assert!(html.contains("Free"));
+            // Bounded bar shows the count and a width proportional to usage.
+            assert!(html.contains("7 / 10"));
+            assert!(html.contains("width: 70%"));
+            // Unlimited (self-host) cap renders ∞, not i32::MAX, at 0%.
+            assert!(html.contains("1 / ∞"));
+            assert!(html.contains("width: 0%"));
+            assert!(html.contains("60 seconds"));
+            assert!(html.contains(r#"href="mailto:upgrade@your-domain.com""#));
+        }
 
         #[test]
         fn sessions_page_renders_chrome_and_partial_hook() {

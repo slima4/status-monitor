@@ -8,6 +8,7 @@
 //! (one source of truth). Every block is recorded to `quota_events`
 //! fire-and-forget.
 
+use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -19,11 +20,25 @@ use crate::domain::quota::Plan;
 use crate::domain::{OrgId, UserId};
 use crate::error::{AppError, Result};
 
-/// Cache-key tags for the (Phase-4) usage cache. Centralised so the
-/// invalidate-only contract has one vocabulary.
+/// Cache-key tags for the usage cache. One vocabulary, equal to the
+/// `plans` column names so the transparency endpoint, the UI, and any
+/// future invalidation hook all name a quota the same way.
 pub mod usage_keys {
     pub const TARGETS: &str = "max_targets";
+    pub const MEMBERS: &str = "max_members";
+    pub const PENDING_INVITATIONS: &str = "max_pending_invitations";
+    pub const PUBLIC_COMPONENTS: &str = "max_public_components";
+    pub const MAINTENANCE_WINDOWS: &str = "max_maintenance_windows";
 }
+
+/// The org-scoped count queries. Declared once and shared by the atomic
+/// friendly-check path *and* the usage snapshot so the number a customer is
+/// blocked at always equals the number the usage page shows (single source).
+const SQL_COUNT_TARGETS: &str = "SELECT count(*) FROM targets WHERE org_id = $1";
+const SQL_COUNT_PUBLIC_COMPONENTS: &str =
+    "SELECT count(*) FROM targets WHERE org_id = $1 AND public_status = true";
+const SQL_COUNT_MAINTENANCE_WINDOWS: &str =
+    "SELECT count(*) FROM maintenance_windows WHERE org_id = $1";
 
 /// Storage-layer row for `plans`. The domain `Plan` stays `sqlx`-free
 /// (per the domain/storage split); this is the only place that maps the
@@ -94,11 +109,22 @@ pub struct QuotaService {
     /// single `organizations ⋈ plans` query, so a steady-state cache hit is
     /// **zero** DB round-trips on the per-request hot path.
     plan_cache: Cache<OrgId, Arc<Plan>>,
-    /// Reserved for Phase-4 usage transparency. Invalidate-only per the
-    /// cache contract — nothing populates it yet, so a stale `+1`/`-1`
-    /// cannot drift a count.
-    #[allow(dead_code)]
+    /// `(org, quota_name)` → current count for the usage snapshot. TTL-only
+    /// and recompute-from-DB on miss; never incremented, so a write path that
+    /// forgets to adjust a counter cannot drift it (the cache contract).
     usage_cache: Cache<(OrgId, &'static str), u32>,
+}
+
+/// One org's plan plus its current resource counts. The handler shapes this
+/// into the public usage JSON; keeping the service free of the API DTO keeps
+/// the count logic in one place and the wire shape in the API layer.
+pub struct OrgUsage {
+    pub plan: Arc<Plan>,
+    pub targets: i64,
+    pub members: i64,
+    pub pending_invitations: i64,
+    pub public_components: i64,
+    pub maintenance_windows: i64,
 }
 
 impl QuotaService {
@@ -192,9 +218,7 @@ impl QuotaService {
     ) -> Result<()> {
         let plan = self.limit_for_org(org).await?;
         let limit = i64::from(plan.max_targets);
-        let current = self
-            .count("SELECT count(*) FROM targets WHERE org_id = $1", org)
-            .await?;
+        let current = self.count(SQL_COUNT_TARGETS, org).await?;
         if current + n > limit {
             self.record_block(org, user, "max_targets", current, limit);
             return Err(AppError::quota_exceeded(
@@ -214,12 +238,7 @@ impl QuotaService {
     ) -> Result<()> {
         let plan = self.limit_for_org(org).await?;
         let limit = i64::from(plan.max_maintenance_windows);
-        let current = self
-            .count(
-                "SELECT count(*) FROM maintenance_windows WHERE org_id = $1",
-                org,
-            )
-            .await?;
+        let current = self.count(SQL_COUNT_MAINTENANCE_WINDOWS, org).await?;
         if current + 1 > limit {
             self.record_block(org, user, "max_maintenance_windows", current, limit);
             return Err(AppError::quota_exceeded(
@@ -244,12 +263,7 @@ impl QuotaService {
         }
         let plan = self.limit_for_org(org).await?;
         let limit = i64::from(plan.max_public_components);
-        let current = self
-            .count(
-                "SELECT count(*) FROM targets WHERE org_id = $1 AND public_status = true",
-                org,
-            )
-            .await?;
+        let current = self.count(SQL_COUNT_PUBLIC_COMPONENTS, org).await?;
         if current + additional > limit {
             self.record_block(org, user, "max_public_components", current, limit);
             return Err(AppError::quota_exceeded(
@@ -260,6 +274,81 @@ impl QuotaService {
             ));
         }
         Ok(())
+    }
+
+    /// Read-through the usage cache for one `(org, quota_name)` count.
+    /// TTL-only and recompute-from-DB on miss — never an increment, so a path
+    /// that forgets to adjust a counter cannot drift it (the cache contract).
+    /// Two racing misses recompute the same idempotent `COUNT(*)`; harmless.
+    async fn cached_count<F>(&self, org: OrgId, key: &'static str, compute: F) -> Result<i64>
+    where
+        F: Future<Output = Result<i64>>,
+    {
+        if let Some(v) = self.usage_cache.get(&(org, key)).await {
+            return Ok(i64::from(v));
+        }
+        let n = compute.await?.max(0);
+        let stored = u32::try_from(n).unwrap_or(u32::MAX);
+        self.usage_cache.insert((org, key), stored).await;
+        Ok(i64::from(stored))
+    }
+
+    /// Plan + current counts for the usage endpoint / UI. Counts go through
+    /// the 10 s usage cache. Without a DB (in-memory fixtures) the counts are
+    /// zero against the synthetic unlimited plan.
+    pub async fn org_usage(&self, org: OrgId) -> Result<OrgUsage> {
+        let plan = self.limit_for_org(org).await?;
+        let Some(db) = &self.db else {
+            return Ok(OrgUsage {
+                plan,
+                targets: 0,
+                members: 0,
+                pending_invitations: 0,
+                public_components: 0,
+                maintenance_windows: 0,
+            });
+        };
+        let targets = self
+            .cached_count(org, usage_keys::TARGETS, self.count(SQL_COUNT_TARGETS, org))
+            .await?;
+        let members = self
+            .cached_count(org, usage_keys::MEMBERS, async {
+                crate::storage::orgs::active_member_count(db, org)
+                    .await
+                    .map(i64::from)
+            })
+            .await?;
+        // Reuse the invitation module's "pending" predicate so the usage view
+        // and the atomic invite-cap enforcer agree on what counts as pending.
+        let pending_invitations = self
+            .cached_count(org, usage_keys::PENDING_INVITATIONS, async {
+                crate::auth::invitations::count_pending_for_org(db, org)
+                    .await
+                    .map(i64::from)
+            })
+            .await?;
+        let public_components = self
+            .cached_count(
+                org,
+                usage_keys::PUBLIC_COMPONENTS,
+                self.count(SQL_COUNT_PUBLIC_COMPONENTS, org),
+            )
+            .await?;
+        let maintenance_windows = self
+            .cached_count(
+                org,
+                usage_keys::MAINTENANCE_WINDOWS,
+                self.count(SQL_COUNT_MAINTENANCE_WINDOWS, org),
+            )
+            .await?;
+        Ok(OrgUsage {
+            plan,
+            targets,
+            members,
+            pending_invitations,
+            public_components,
+            maintenance_windows,
+        })
     }
 
     /// Append a `quota_exceeded` audit row. Fire-and-forget: a failed insert
