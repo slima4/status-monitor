@@ -1,0 +1,16 @@
+# Custom Caddy image for status-monitor.
+#
+# The stock `caddy:2-alpine` ships neither plugin we need:
+#   * caddy-dns/hetzner    — DNS-01 solver, required for the wildcard
+#                            `*.status.{domain}` certificate
+#   * mholt/caddy-ratelimit — per-IP throttle on the public status surface
+#
+# docker-compose builds this automatically; no manual one-time step.
+
+FROM caddy:2-builder AS builder
+RUN xcaddy build \
+    --with github.com/caddy-dns/hetzner \
+    --with github.com/mholt/caddy-ratelimit
+
+FROM caddy:2-alpine
+COPY --from=builder /usr/bin/caddy /usr/bin/caddy

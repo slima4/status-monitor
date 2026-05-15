@@ -10,9 +10,10 @@ PostgreSQL, and ClickHouse.
 |---|---|
 | TLS certificates | Automatic via Let's Encrypt — no manual renewal |
 | HTTP/2 + HTTP/3 | Enabled by default in Caddy |
-| Authentication | Basic auth at the proxy layer (UI + operator API) |
-| Public status surface | `/status`, `/status/*`, `/api/public/*`, `/static/*` exposed without auth |
-| Public rate limit | Per-IP 60 req/min on the public surface (requires custom Caddy image — see below) |
+| Authentication | Basic auth at the proxy layer on `app.{domain}` (UI + operator API) |
+| Public status surface | Self-host: `/status` on `app.{domain}`. SaaS: each org at `{slug}.status.{domain}` (wildcard) |
+| TLS for status pages | Wildcard cert for `*.status.{domain}` via Let's Encrypt + Hetzner DNS-01 |
+| Public rate limit | Per-IP 60 req/min on the public surface (custom Caddy image, built automatically) |
 | Public health probes | `/healthz` and `/readyz` exposed without auth |
 | Metrics scraping | Internal-only — `/metrics` returns 404 publicly |
 | Security headers | HSTS, X-Frame-Options, Referrer-Policy, etc. |
@@ -25,45 +26,38 @@ PostgreSQL, and ClickHouse.
 
 - A Linux host (any cloud, any VPS, your own metal — Hetzner CX22 at €5/mo is fine)
 - Public IP with **ports 80 and 443 open**
-- A DNS A or AAAA record pointing at the host
 - Docker 24+ and `docker compose` v2
 - ~4 GB RAM and 20 GB disk
+- DNS hosted on **Hetzner DNS** (the wildcard cert uses its DNS-01 API):
+  - `app.{domain}` → A/AAAA to this host
+  - `*.status.{domain}` → A/AAAA to this host (SaaS mode; the wildcard
+    sends every `{slug}.status.{domain}` here and the app maps slug → org)
+  - A Hetzner DNS API token with zone-edit scope, from
+    <https://dns.hetzner.com/settings/api-token>, set as
+    `HETZNER_DNS_API_TOKEN` in `.env`
+
+  Self-host (single org) needs only the `app.{domain}` record and no DNS
+  token — the status page is served at `https://app.{domain}/status`.
 
 ## First-time setup
 
-### Custom Caddy image (one-time)
+### Custom Caddy image (automatic)
 
-The Caddyfile uses `rate_limit` to throttle the public status surface, which
-needs the [`caddy-ratelimit`](https://github.com/mholt/caddy-ratelimit) plugin
-that the stock `caddy:2-alpine` image doesn't ship. Build a custom image
-once and tag it `custom-caddy:2`:
+The stock `caddy:2-alpine` image lacks two plugins this deployment needs:
+
+- [`caddy-dns/hetzner`](https://github.com/caddy-dns/hetzner) — solves the
+  ACME DNS-01 challenge for the `*.status.{domain}` wildcard certificate
+  (HTTP-01 cannot validate a wildcard).
+- [`caddy-ratelimit`](https://github.com/mholt/caddy-ratelimit) — per-IP
+  throttle on the public status surface.
+
+`deployment/Dockerfile.caddy` bakes both in. `docker compose up -d` builds
+it automatically and tags it `status-monitor-caddy:2` — there is no manual
+one-time step. To rebuild after a Caddy or plugin bump:
 
 ```bash
-docker build -t custom-caddy:2 - <<'EOF'
-FROM caddy:2-builder AS builder
-RUN xcaddy build \
-    --with github.com/mholt/caddy-ratelimit
-
-FROM caddy:2-alpine
-COPY --from=builder /usr/bin/caddy /usr/bin/caddy
-EOF
+docker compose build caddy && docker compose up -d caddy
 ```
-
-Then point `docker-compose.yml` at it by changing the `caddy` service's
-`image:` from `caddy:2-alpine` to `custom-caddy:2`, or set it once via
-`.env`:
-
-```
-CADDY_IMAGE=custom-caddy:2
-```
-
-…and replace `image: caddy:2-alpine` with `image: ${CADDY_IMAGE:-caddy:2-alpine}`
-in `docker-compose.yml`.
-
-**If you don't want a custom build:** comment out the `rate_limit { … }` block
-inside `handle @public { … }` in `Caddyfile`. The public surface still works;
-you just lose per-IP throttling. Alternatively, terminate at Cloudflare or an
-nginx reverse proxy with `limit_req` in front and leave Caddy alone.
 
 ### 1. Clone and enter the deployment directory
 
@@ -126,12 +120,43 @@ docker compose logs -f caddy
 ```
 
 Watch the Caddy logs. On first start it will:
-1. Ask Let's Encrypt for a certificate (~30-60 seconds)
-2. Bind to ports 80 and 443
-3. Start proxying
+1. Issue the `app.{domain}` cert via HTTP-01 (~30-60 seconds)
+2. Issue the `*.status.{domain}` wildcard via the Hetzner DNS-01 challenge:
+   Caddy writes a `_acme-challenge.status.{domain}` TXT record through the
+   Hetzner API, Let's Encrypt validates it, the wildcard cert is issued —
+   **allow 60-90 seconds** for this one; renewals are silent.
+3. Bind to ports 80 and 443 and start proxying
 
 When you see `serving initial configuration`, visit
-`https://your-domain.example.com` — your browser will prompt for credentials.
+`https://app.{domain}` — your browser will prompt for credentials.
+
+#### Verify the wildcard cert (manual test)
+
+```bash
+# Operator cert
+echo | openssl s_client -connect app.example.com:443 2>/dev/null \
+    | openssl x509 -noout -subject
+
+# Wildcard cert — any slug, even one that doesn't exist as an org, must
+# present a *.status.example.com cert (the app returns 404 for unknown
+# slugs, but TLS is served by the wildcard regardless).
+echo | openssl s_client -servername anything.status.example.com \
+    -connect anything.status.example.com:443 2>/dev/null \
+    | openssl x509 -noout -subject
+# Expect: subject=CN=*.status.example.com
+```
+
+If the wildcard line fails, grep the logs for the DNS-01 exchange:
+
+```bash
+docker compose logs caddy | grep -i "acme\|dns\|hetzner\|challenge"
+```
+
+Common causes: token missing/insufficient scope, the domain's
+authoritative DNS is not Hetzner, or `STATUS_MONITOR_DOMAIN` still set to
+a sub-host (it must be the base domain, e.g. `example.com`). While
+debugging, switch to the staging CA (see "Testing the TLS flow" below) so
+you don't burn production rate limits.
 
 ## Operations
 
@@ -179,14 +204,14 @@ next request from clients using the old password fails with 401.
 ### Calling the API from scripts / CI
 
 ```bash
-curl -u admin:password https://status.example.com/api/v1/targets
+curl -u admin:password https://app.example.com/api/v1/targets
 ```
 
 Or with an explicit header:
 
 ```bash
 curl -H "Authorization: Basic $(echo -n admin:password | base64)" \
-     https://status.example.com/api/v1/targets
+     https://app.example.com/api/v1/targets
 ```
 
 If/when the service grows native auth (API tokens, session cookies), the
@@ -280,8 +305,11 @@ balancer (Caddy supports this with multiple upstreams).
 ## Troubleshooting
 
 **Certificate fails to provision**
-- DNS not propagated? `dig +short your-domain.example.com`
-- Ports 80/443 blocked? Test from another host: `curl -v http://your-domain.example.com`
+- DNS not propagated? `dig +short app.example.com` and
+  `dig +short anything.status.example.com` (the wildcard must resolve)
+- Wildcard cert stuck? Authoritative DNS must be Hetzner and the token
+  needs zone-edit scope — `docker compose logs caddy | grep -i hetzner`
+- Ports 80/443 blocked? Test from another host: `curl -v http://app.example.com`
 - Hit Let's Encrypt rate limit? Switch to staging (above) while you fix things
 - Cloud firewall rules? Check security groups / firewall settings
 
@@ -317,14 +345,16 @@ file entirely to use ClickHouse defaults.
 
 ## Lighthouse audit (public status page)
 
-The public `/status` page targets a Lighthouse accessibility score ≥ 95.
+The public status page targets a Lighthouse accessibility score ≥ 95.
 Run the audit against a live deployment — Lighthouse needs a real
 HTTP origin, not an in-process router. There is no Rust harness for this;
-use the `lighthouse` Node CLI on any workstation:
+use the `lighthouse` Node CLI on any workstation. Audit the URL your mode
+serves: self-host `https://app.example.com/status`, SaaS
+`https://{slug}.status.example.com`.
 
 ```bash
 # One-shot install + run; outputs JSON + HTML reports
-npx -y lighthouse@12 https://your-domain.example.com/status \
+npx -y lighthouse@12 https://app.example.com/status \
     --only-categories=accessibility,performance,best-practices,seo \
     --output=json,html \
     --output-path=./lighthouse-status \
@@ -374,7 +404,8 @@ monitored targets on a single host.
 
 | File | Purpose |
 |---|---|
-| `Caddyfile` | Caddy v2 reverse proxy config |
+| `Caddyfile` | Caddy v2 reverse proxy config (operator + wildcard status) |
+| `Dockerfile.caddy` | Custom Caddy image (Hetzner DNS-01 + rate-limit plugins) |
 | `docker-compose.yml` | Service definitions for the full stack |
 | `.env.example` | Template for `.env` (commit this; never commit `.env`) |
 | `README.md` | This file |

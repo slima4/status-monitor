@@ -12,13 +12,19 @@
 #
 # Required env vars in .env (see .env.example):
 #   STATUS_MONITOR_DOMAIN, STATUS_MONITOR_ACME_EMAIL, STATUS_MONITOR_ADMIN_HASH,
-#   POSTGRES_PASSWORD, CLICKHOUSE_PASSWORD, STATUS_MONITOR_CREDENTIALS_KEK_BASE64
+#   HETZNER_DNS_API_TOKEN, POSTGRES_PASSWORD, CLICKHOUSE_PASSWORD,
+#   STATUS_MONITOR_CREDENTIALS_KEK_BASE64
 
 name: status-monitor
 
 services:
   caddy:
-    image: caddy:2-alpine
+    # Custom image: stock caddy:2-alpine lacks the Hetzner DNS-01 solver
+    # (wildcard cert) and the rate-limit plugin. Built automatically.
+    build:
+      context: .
+      dockerfile: Dockerfile.caddy
+    image: status-monitor-caddy:2
     restart: unless-stopped
     ports:
       - "80:80"
@@ -28,6 +34,7 @@ services:
       STATUS_MONITOR_DOMAIN: ${STATUS_MONITOR_DOMAIN}
       STATUS_MONITOR_ACME_EMAIL: ${STATUS_MONITOR_ACME_EMAIL}
       STATUS_MONITOR_ADMIN_HASH: ${STATUS_MONITOR_ADMIN_HASH}
+      HETZNER_DNS_API_TOKEN: ${HETZNER_DNS_API_TOKEN}
       # STATUS_MONITOR_OPERATOR_HASH: ${STATUS_MONITOR_OPERATOR_HASH}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
@@ -63,6 +70,16 @@ services:
       STATUS_MONITOR_STORAGE__CLICKHOUSE__DATABASE: monitor
       STATUS_MONITOR_SECURITY__CREDENTIALS_KEK_BASE64: ${STATUS_MONITOR_CREDENTIALS_KEK_BASE64}
       STATUS_MONITOR_OBSERVABILITY__LOG_FORMAT: json
+      # Tenancy / public-status surface. Defaults are self-host (single org,
+      # /status on the operator host). For the SaaS wildcard surface set
+      # these in .env — see .env.example "Per-org status pages (SaaS)".
+      # base_domain reuses STATUS_MONITOR_DOMAIN (it must equal the Caddy
+      # base domain so {slug}.status.{domain} resolves); unused unless
+      # SUBDOMAIN_PUBLIC_ROUTES is true.
+      STATUS_MONITOR_TENANCY__ENABLED: ${STATUS_MONITOR_TENANCY_ENABLED:-false}
+      STATUS_MONITOR_TENANCY__PATH_BASED_PUBLIC_ROUTES: ${STATUS_MONITOR_PATH_BASED_PUBLIC_ROUTES:-true}
+      STATUS_MONITOR_TENANCY__SUBDOMAIN_PUBLIC_ROUTES: ${STATUS_MONITOR_SUBDOMAIN_PUBLIC_ROUTES:-false}
+      STATUS_MONITOR_PUBLIC_STATUS__BASE_DOMAIN: ${STATUS_MONITOR_DOMAIN}
       RUST_LOG: ${RUST_LOG:-info}
     depends_on:
       postgres:
@@ -70,7 +87,7 @@ services:
       clickhouse:
         condition: service_healthy
     # No container-level healthcheck: the runtime image is distroless
-    # (no shell, no wget, no curl). Caddy probes /readyz actively via
+    # (no shell, no wget, no curl). Caddy probes /healthz actively via
     # `health_uri` in the reverse_proxy block — see Caddyfile.
 
   postgres:

@@ -1,34 +1,52 @@
-# Caddyfile — Production reverse proxy for status-monitor
+# Caddyfile — Production reverse proxy for status-monitor (SaaS layout)
+#
+# Subdomain layout (STATUS_MONITOR_DOMAIN is the BASE domain, e.g. example.com):
+#   app.{domain}              → Operator UI + API (basic auth), plus the
+#                               single-org /status page in self-host mode
+#   *.status.{domain}         → Per-org public status pages (wildcard cert)
 #
 # What this does:
 #   - Automatic HTTPS via Let's Encrypt (HTTP/2 and HTTP/3)
-#   - Basic auth on UI and API
+#   - app.{domain} cert via HTTP-01; *.status.{domain} wildcard cert via
+#     Hetzner DNS-01 (scoped to that site — self-host needs no DNS token)
+#   - Basic auth on the operator surface (UI + API)
 #   - Public health probes (no auth) at /healthz and /readyz
 #   - Hides /metrics from the public internet (still scrapeable internally)
-#   - Security headers (HSTS, X-Frame-Options, etc.)
+#   - Per-IP rate limit on the public status surface
+#   - Security headers (HSTS, X-Frame-Options, CSP, etc.)
 #   - JSON access logs with rotation
 #
 # Required environment variables (see .env.example):
-#   STATUS_MONITOR_DOMAIN       — e.g., status.example.com
+#   STATUS_MONITOR_DOMAIN       — base domain, e.g. example.com
 #   STATUS_MONITOR_ACME_EMAIL   — for Let's Encrypt notifications
-#   STATUS_MONITOR_ADMIN_HASH   — bcrypt hash for admin user
+#   STATUS_MONITOR_ADMIN_HASH   — bcrypt hash for the admin user
+#
+# Required only for the *.status wildcard surface (SaaS):
+#   HETZNER_DNS_API_TOKEN       — zone-edit token for the DNS-01 challenge
 #
 # Optional:
 #   STATUS_MONITOR_OPERATOR_HASH — additional user (uncomment block below)
 {
 	email {$STATUS_MONITOR_ACME_EMAIL}
 
+	# No global `acme_dns`: that would force DNS-01 on app.{domain} too and
+	# make self-host depend on a Hetzner token it doesn't need. The DNS-01
+	# issuer is scoped into the *.status site block instead.
+
 	# Uncomment ONLY while testing — uses Let's Encrypt staging CA so you
 	# don't hit production rate limits. Staging certs are NOT browser-trusted.
 	# acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
 
-	# Hide Caddy version in error responses
+	# {remote_host} must be the real client IP for the public rate limiter.
 	servers {
 		trusted_proxies static private_ranges
 	}
 }
 
-{$STATUS_MONITOR_DOMAIN} {
+# ═══════════════════════════════════════════════════════════════════════
+# Operator UI + API
+# ═══════════════════════════════════════════════════════════════════════
+app.{$STATUS_MONITOR_DOMAIN} {
 	encode gzip zstd
 
 	# ─── Public health endpoints (no auth) ──────────────────────────────
@@ -41,32 +59,26 @@
 	}
 
 	# ─── Block Prometheus metrics from the public internet ──────────────
-	# status-monitor exposes /metrics on :9090 (separate port). The metrics
-	# endpoint should be scraped on the internal docker network, never
-	# from the internet. If something hits /metrics on the public port,
-	# return 404 so a misconfigured Prometheus or curious attacker can't
-	# enumerate your fleet.
+	# status-monitor exposes /metrics on :9090 (separate port), scraped on
+	# the internal docker network only. Return 404 so a misconfigured
+	# Prometheus or curious attacker can't enumerate your fleet.
 	@metrics path /metrics /metrics/*
 	handle @metrics {
 		respond "Not Found" 404
 	}
 
-	# ─── Public status surface (no auth) ────────────────────────────────
-	# The HTML status page, public JSON API, and shared static assets are
-	# unauthenticated by design. `handle` short-circuits the basic_auth
-	# directive below — only requests that match no `handle` block fall
-	# through to the auth-gated reverse_proxy.
-	#
-	# /static/* is public so the page's CSS/JS load without credentials;
-	# the bundled assets carry no secrets.
-	#
-	# rate_limit requires the caddy-ratelimit plugin
-	# (https://github.com/mholt/caddy-ratelimit). Build a custom Caddy
-	# image — see deployment/README.md → "Custom Caddy image".
+	# ─── Public status surface (self-host, no auth) ─────────────────────
+	# Self-host serves its single org's status page, public JSON API, and
+	# bundled assets here. `handle` short-circuits the basic_auth directive
+	# below — only requests matching no `handle` fall through to auth. In
+	# SaaS the Host is `app.{domain}` (no slug), so the app 404s these and
+	# the wildcard site is the real public surface — keeping this block is
+	# harmless there. Distinct rate-limit zone from the wildcard site (zone
+	# names are global to the Caddy process).
 	@public path /status /status/* /api/public/* /robots.txt /favicon.ico /static/*
 	handle @public {
 		rate_limit {
-			zone public_status {
+			zone status_path {
 				key {remote_host}
 				events 60
 				window 1m
@@ -83,6 +95,9 @@
 	}
 
 	# ─── Everything else requires basic auth ────────────────────────────
+	# Basic auth is the v1 edge boundary. When the Rust app runs in SaaS
+	# mode it enforces in-session auth itself; you may then drop this block
+	# — see README.md.
 	basic_auth {
 		admin {$STATUS_MONITOR_ADMIN_HASH}
 
@@ -94,22 +109,11 @@
 
 	# ─── Security headers ───────────────────────────────────────────────
 	header {
-		# HSTS — 1 year, include subdomains, preload-ready
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
-
-		# Prevent MIME-type sniffing
 		X-Content-Type-Options "nosniff"
-
-		# No framing (defends against clickjacking)
 		X-Frame-Options "DENY"
-
-		# Limit referrer leakage to external sites
 		Referrer-Policy "strict-origin-when-cross-origin"
-
-		# Restrict powerful browser features by default
 		Permissions-Policy "geolocation=(), microphone=(), camera=(), payment=()"
-
-		# Remove server identification
 		-Server
 		-X-Powered-By
 	}
@@ -119,7 +123,7 @@
 	# external uptime checks flood the log with ~3k+ lines/day of noise.
 	log_skip @health
 	log {
-		output file /var/log/caddy/access.log {
+		output file /var/log/caddy/access-app.log {
 			roll_size 100MiB
 			roll_keep 7
 			roll_keep_for 720h
@@ -145,7 +149,7 @@
 		health_timeout 3s
 
 		# Timeouts — long enough for slow ClickHouse aggregation queries
-		# but bounded so we don't hold connections forever
+		# but bounded so we don't hold connections forever.
 		transport http {
 			dial_timeout 5s
 			response_header_timeout 30s
@@ -155,7 +159,77 @@
 	}
 }
 
-# Optional: redirect www → apex
-# www.{$STATUS_MONITOR_DOMAIN} {
-#     redir https://{$STATUS_MONITOR_DOMAIN}{uri} permanent
+# ═══════════════════════════════════════════════════════════════════════
+# Public per-org status pages — wildcard
+# ═══════════════════════════════════════════════════════════════════════
+# Every {slug}.status.{domain} resolves here. The Rust app reads the
+# original Host header to map the slug → org; an unknown or opted-out slug
+# is a 404 from the app, never a cert error (the wildcard cert covers all).
+*.status.{$STATUS_MONITOR_DOMAIN} {
+	encode gzip zstd
+
+	# Wildcard cert via Hetzner DNS-01 (HTTP-01 can't validate a wildcard),
+	# scoped to this site only. First issuance: Caddy writes a
+	# `_acme-challenge.status.{domain}` TXT record through the Hetzner API,
+	# Let's Encrypt validates it, cert issued — allow 60-90s. Renewals are
+	# silent. self-host never reaches this site, so it needs no DNS token.
+	tls {
+		dns hetzner {$HETZNER_DNS_API_TOKEN}
+	}
+
+	# ─── Per-IP rate limit — public surface ─────────────────────────────
+	# Needs the caddy-ratelimit plugin (baked into Dockerfile.caddy).
+	rate_limit {
+		zone status_pages {
+			key {remote_host}
+			events 60
+			window 1m
+		}
+	}
+
+	# Public cache hints — the app also has its own short-TTL page cache.
+	header Cache-Control "public, max-age=10, stale-while-revalidate=30"
+
+	# Strict CSP for the public page.
+	header Content-Security-Policy "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'"
+
+	# No identifiable headers.
+	header {
+		-Server
+		-X-Powered-By
+	}
+
+	log {
+		output file /var/log/caddy/access-status.log {
+			roll_size 100MiB
+			roll_keep 7
+			roll_keep_for 720h
+		}
+		format json
+	}
+
+	# Forward the original Host so the Rust app can extract the slug.
+	reverse_proxy status-monitor:8080 {
+		header_up Host {host}
+		header_up X-Real-IP {remote_host}
+		health_uri /healthz
+		health_interval 30s
+		health_timeout 3s
+
+		# Public-page aggregation also hits ClickHouse — keep the same
+		# bounded-but-generous timeouts as the operator surface.
+		transport http {
+			dial_timeout 5s
+			response_header_timeout 30s
+			read_buffer 64KB
+			write_buffer 64KB
+		}
+	}
+}
+
+# ═══════════════════════════════════════════════════════════════════════
+# Apex redirect (optional) — send bare {domain} to the operator surface.
+# ═══════════════════════════════════════════════════════════════════════
+# {$STATUS_MONITOR_DOMAIN} {
+#     redir https://app.{$STATUS_MONITOR_DOMAIN}{uri} permanent
 # }
