@@ -28,13 +28,18 @@ const MAX_RESPONSE_BYTES: usize = 1 << 20;
 
 pub fn build_outbound_client() -> OutboundHttpClient {
     crate::http_client::client::install_default_crypto_provider();
-    let https = hyper_rustls::HttpsConnectorBuilder::new()
-        .with_native_roots()
-        .expect("loading native cert roots for outbound client")
-        .https_or_http()
-        .enable_http1()
-        .enable_http2()
-        .build();
+    // Native trust store first; fall back to the bundled webpki roots when
+    // it can't be read (an empty/broken store, or a macOS keychain I/O
+    // hiccup under load) rather than panicking the process. Mirrors the
+    // check-client TLS builder; outbound talks to public CAs either way.
+    let https = match hyper_rustls::HttpsConnectorBuilder::new().with_native_roots() {
+        Ok(b) => b,
+        Err(_) => hyper_rustls::HttpsConnectorBuilder::new().with_webpki_roots(),
+    }
+    .https_or_http()
+    .enable_http1()
+    .enable_http2()
+    .build();
     Client::builder(TokioExecutor::new()).build(https)
 }
 
