@@ -77,6 +77,10 @@ use crate::storage::UptimeStats;
         handlers::orgs::list_org_members,
         handlers::orgs::remove_org_member,
         handlers::orgs::switch_active_org,
+        handlers::status_page::get_settings,
+        handlers::status_page::update_settings,
+        handlers::status_page::upload_logo,
+        handlers::status_page::delete_logo,
     ),
     components(
         schemas(
@@ -146,6 +150,9 @@ use crate::storage::UptimeStats;
             OrgMemberView,
             CheckSlugResponse,
             SwitchActiveOrgRequest,
+            handlers::status_page::StatusPageSettings,
+            handlers::status_page::UpdateStatusPageRequest,
+            handlers::status_page::LogoResponse,
             Role,
         ),
     ),

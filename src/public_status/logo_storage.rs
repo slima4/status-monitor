@@ -31,6 +31,18 @@ impl LogoMime {
         })
     }
 
+    /// Maps a decoder-sniffed format to the allow-list. The upload path
+    /// sniffs bytes with `image::guess_format` and routes the result through
+    /// here so format identity stays owned by this one enum.
+    pub fn from_image_format(f: image::ImageFormat) -> Option<Self> {
+        Some(match f {
+            image::ImageFormat::Png => Self::Png,
+            image::ImageFormat::Jpeg => Self::Jpeg,
+            image::ImageFormat::WebP => Self::Webp,
+            _ => return None,
+        })
+    }
+
     pub fn from_extension(s: &str) -> Option<Self> {
         Some(match s {
             "png" => Self::Png,

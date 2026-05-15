@@ -490,7 +490,7 @@ fn require_db(state: &AppState) -> Result<&sqlx::PgPool> {
     })
 }
 
-async fn require_owner(pool: &sqlx::PgPool, user: UserId, org: OrgId) -> Result<()> {
+pub(crate) async fn require_owner(pool: &sqlx::PgPool, user: UserId, org: OrgId) -> Result<()> {
     // One round-trip: returns role + active-or-not. Cloak any non-active
     // membership as 404; a member who isn't an owner gets 403.
     match orgs_store::membership_status(pool, user, org).await? {

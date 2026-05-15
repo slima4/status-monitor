@@ -63,6 +63,12 @@ pub trait PublicSource: Send + Sync {
     async fn incident_by_id(&self, org: OrgId, id: Uuid) -> Result<PublicIncident, PublicAppError>;
     async fn maintenance(&self, org: OrgId) -> Result<PublicMaintenanceList, PublicAppError>;
     async fn incidents_rss(&self, org: OrgId, base_url: &str) -> Result<String, PublicAppError>;
+
+    /// Drop any cached page for `org`. The settings handler calls this when
+    /// `public_status_enabled` flips to `false` so the now-disabled org
+    /// can't keep serving a cached page past TTL. Default no-op: backends
+    /// without a cache (the test/noop source) have nothing to drop.
+    async fn invalidate(&self, _org: OrgId) {}
 }
 
 pub struct OrgPublicSource {
@@ -224,6 +230,10 @@ impl PublicSource for OrgPublicSource {
         };
         let page = self.list_incidents(org, q).await?;
         Ok(build_rss(&self.site_name, base_url, &page.items))
+    }
+
+    async fn invalidate(&self, org: OrgId) {
+        self.cache.invalidate(org).await;
     }
 }
 

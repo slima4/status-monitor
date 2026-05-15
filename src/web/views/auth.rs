@@ -31,6 +31,7 @@ use crate::web::error::WebResult;
 const TAB_LOGIN: &str = "login";
 const TAB_ONBOARD: &str = "onboarding";
 const TAB_SETTINGS: &str = "settings";
+const TAB_STATUS_PAGE: &str = "status_page";
 
 #[derive(Debug, Default, Deserialize)]
 pub struct LoginQuery {
@@ -134,13 +135,17 @@ pub mod settings {
     use axum::extract::State;
     use axum::response::{IntoResponse, Redirect, Response};
 
+    use crate::api::handlers::status_page::{
+        StatusPageSettings, build_settings, load_for_settings,
+    };
     use crate::app::AppState;
     use crate::auth::{api_tokens, session as session_store};
-    use crate::web::auth::Session;
+    use crate::error::AppError;
+    use crate::web::auth::{CurrentOrg, Session};
     use crate::web::error::WebResult;
     use crate::web::views::fmt_human;
 
-    use super::TAB_SETTINGS;
+    use super::{TAB_SETTINGS, TAB_STATUS_PAGE};
 
     #[derive(Template, WebTemplate)]
     #[template(path = "settings/sessions.html")]
@@ -250,6 +255,52 @@ pub mod settings {
             })
             .collect();
         Ok(TokensPartial { tokens }.into_response())
+    }
+
+    #[derive(Template, WebTemplate)]
+    #[template(path = "settings/status_page.html")]
+    pub struct StatusPageView {
+        pub active_tab: &'static str,
+        /// Drives the `hx-patch` / `hx-post` URLs in the form.
+        pub org_id: String,
+        /// Always populated (resolved override or configured default) so the
+        /// `<input type=color>` has a value even before the operator picks one.
+        pub brand_color_value: String,
+        pub s: StatusPageSettings,
+    }
+
+    /// `GET /settings/status-page`. Only an *unauthenticated* hit redirects to
+    /// login (matching the other settings pages); a Forbidden / DB error must
+    /// surface as itself, not a misleading login bounce or redirect loop.
+    /// `CurrentOrg` resolves the org exactly as the API does (active org, or
+    /// the default org in self-host), so the form acts on the same tenant.
+    pub async fn status_page(
+        State(state): State<AppState>,
+        org: Result<CurrentOrg, AppError>,
+    ) -> WebResult<Response> {
+        let CurrentOrg(org) = match org {
+            Ok(o) => o,
+            Err(AppError::Unauthorized) => {
+                return Ok(
+                    Redirect::to("/login?redirect_after=%2Fsettings%2Fstatus-page").into_response(),
+                );
+            }
+            Err(e) => return Err(e.into()),
+        };
+        let pool = state.require_db()?;
+        let ob = load_for_settings(pool, org).await?;
+        let s = build_settings(&state, &ob);
+        let brand_color_value = s
+            .public_brand_color
+            .clone()
+            .unwrap_or_else(|| state.cfg.public_status.default_brand_color.clone());
+        Ok(StatusPageView {
+            active_tab: TAB_STATUS_PAGE,
+            org_id: org.0.to_string(),
+            brand_color_value,
+            s,
+        }
+        .into_response())
     }
 
     fn short_hash(h: Option<&str>) -> String {

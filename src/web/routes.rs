@@ -33,6 +33,10 @@ pub fn routes(cfg: &AppConfig) -> Router<AppState> {
             get(views::auth::settings::api_tokens_page),
         )
         .route(
+            "/settings/status-page",
+            get(views::auth::settings::status_page),
+        )
+        .route(
             "/web/partials/settings/sessions",
             get(views::auth::settings::sessions_partial),
         )

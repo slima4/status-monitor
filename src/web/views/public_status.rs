@@ -300,14 +300,7 @@ pub struct BrandingView {
 
 impl BrandingView {
     fn from_org(o: &OrgBranding, cfg: &PublicStatusConfig) -> Self {
-        let display_name = o
-            .branding
-            .public_display_name
-            .as_deref()
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .unwrap_or(o.name.as_str())
-            .to_owned();
+        let display_name = o.resolved_display_name().to_owned();
         let about_html = o
             .branding
             .public_about
@@ -327,10 +320,7 @@ impl BrandingView {
                 .public_logo_path
                 .as_deref()
                 .map(|p| format!("{LOGO_ROUTE}?v={p}")),
-            show_powered_by: o
-                .branding
-                .public_show_powered_by
-                .unwrap_or(cfg.default_show_powered_by),
+            show_powered_by: o.branding.show_powered_by(cfg.default_show_powered_by),
         }
     }
 }
@@ -348,6 +338,7 @@ async fn resolve_branding(state: &AppState, org: OrgId, fallback_name: &str) -> 
     BrandingView::from_org(
         &OrgBranding {
             name: fallback_name.to_owned(),
+            slug: String::new(),
             branding: PublicOrgBranding::default(),
         },
         cfg,
@@ -747,6 +738,7 @@ mod tests {
         BrandingView::from_org(
             &OrgBranding {
                 name: "Acme".into(),
+                slug: "acme".into(),
                 branding: PublicOrgBranding::default(),
             },
             &PublicStatusConfig::default(),
@@ -936,6 +928,7 @@ mod tests {
         BrandingView::from_org(
             &OrgBranding {
                 name: "Acme".into(),
+                slug: "acme".into(),
                 branding: b,
             },
             &PublicStatusConfig::default(),

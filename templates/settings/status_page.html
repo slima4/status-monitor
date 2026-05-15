@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+{% block title %}Status page · Status Monitor{% endblock %}
+{% block content %}
+<section class="space-y-6">
+  <header class="space-y-1">
+    <h1 class="text-2xl font-semibold tracking-tight">Status page settings</h1>
+    <p class="text-sm text-slate-500">
+      Branding and visibility for your public status page. Logo, brand colour
+      and about text only — there is no per-page custom CSS.
+    </p>
+  </header>
+
+  {% if let Some(url) = s.status_url %}
+  <div class="flex flex-wrap items-center gap-3 rounded border bg-white p-4 text-sm">
+    <span class="text-slate-500">Your status page is at</span>
+    <a href="{{ url }}" target="_blank" rel="noopener"
+       class="font-medium text-slate-900 underline decoration-dotted">{{ url }} ↗</a>
+    {% if !s.public_status_enabled %}
+    <span class="rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">
+      Disabled — visitors get 404 until you enable it below
+    </span>
+    {% endif %}
+  </div>
+  {% else %}
+  <p class="rounded border border-amber-300 bg-amber-50 p-4 text-sm text-amber-800">
+    No public status surface is mounted on this deployment. Set
+    <code>tenancy.path_based_public_routes</code> (self-host) or
+    <code>tenancy.subdomain_public_routes</code> (SaaS) to expose it.
+  </p>
+  {% endif %}
+
+  <form id="status-page-form"
+        hx-patch="/api/v1/orgs/{{ org_id }}/status-page"
+        hx-ext="json-enc"
+        hx-headers='{"X-Requested-With":"status-monitor"}'
+        hx-target="#form-result"
+        hx-swap="innerHTML"
+        class="space-y-6 rounded border bg-white p-5">
+
+    <label class="flex items-start gap-3">
+      <input type="checkbox" name="public_status_enabled" class="mt-1"
+             {% if s.public_status_enabled %}checked{% endif %}>
+      <span>
+        <span class="text-sm font-medium">Enable public status page</span>
+        <span class="block text-xs text-slate-500">
+          The master switch. While off, the page returns 404.
+        </span>
+      </span>
+    </label>
+
+    <div class="space-y-1">
+      <label for="display-name" class="text-sm font-medium">Display name</label>
+      <input id="display-name" name="public_display_name" type="text" maxlength="80"
+             value="{% if let Some(v) = s.public_display_name %}{{ v }}{% endif %}"
+             placeholder="{{ s.display_name }}"
+             class="w-full rounded border px-3 py-1.5 text-sm">
+      <p class="text-xs text-slate-500">Shown in the page header. Blank uses the org name.</p>
+    </div>
+
+    <div class="space-y-1">
+      <label for="about" class="text-sm font-medium">About text</label>
+      <textarea id="about" name="public_about" rows="3" maxlength="500"
+                placeholder="Markdown supported (500 chars max)"
+                class="w-full rounded border px-3 py-1.5 text-sm font-mono">{% if let Some(v) = s.public_about %}{{ v }}{% endif %}</textarea>
+      <p class="text-xs text-slate-500">
+        Markdown is sanitised on save and on render — only basic formatting and links survive.
+      </p>
+    </div>
+
+    <div class="space-y-1">
+      <label for="brand-color" class="text-sm font-medium">Brand colour</label>
+      <div class="flex items-center gap-3">
+        <input id="brand-color" name="public_brand_color" type="color"
+               value="{{ brand_color_value }}"
+               class="h-9 w-12 cursor-pointer rounded border"
+               oninput="document.getElementById('brand-color-out').textContent = this.value">
+        <output id="brand-color-out" class="font-mono text-sm">{{ brand_color_value }}</output>
+      </div>
+      <p class="text-xs text-slate-500">Used for the header background.</p>
+    </div>
+
+    <label class="flex items-start gap-3">
+      <input type="checkbox" name="public_show_powered_by" class="mt-1"
+             {% if s.show_powered_by %}checked{% endif %}>
+      <span>
+        <span class="text-sm font-medium">Show "Powered by status-monitor"</span>
+        <span class="block text-xs text-slate-500">
+          Uncheck for a fully white-labelled footer.
+        </span>
+      </span>
+    </label>
+
+    <div class="flex items-center gap-3">
+      <button type="submit"
+              class="rounded bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700">
+        Save changes
+      </button>
+      <span id="form-result" aria-live="polite" class="text-sm"></span>
+    </div>
+  </form>
+
+  <div class="space-y-3 rounded border bg-white p-5">
+    <h2 class="text-sm font-semibold">Logo</h2>
+    <div id="logo-box" class="flex items-center gap-4">
+      {% if let Some(logo) = s.logo_url %}
+      <img src="{{ logo }}" alt="Current logo"
+           class="h-12 w-auto rounded border bg-slate-50 p-1">
+      <button type="button"
+              hx-delete="/api/v1/orgs/{{ org_id }}/status-page/logo"
+              hx-headers='{"X-Requested-With":"status-monitor"}'
+              hx-on::after-request="if(event.detail.successful) location.reload()"
+              class="rounded border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100">
+        Remove logo
+      </button>
+      {% else %}
+      <span class="text-sm text-slate-500">No logo uploaded.</span>
+      {% endif %}
+    </div>
+    <form hx-post="/api/v1/orgs/{{ org_id }}/status-page/logo"
+          hx-encoding="multipart/form-data"
+          hx-headers='{"X-Requested-With":"status-monitor"}'
+          hx-on::after-request="if(event.detail.successful) location.reload()"
+          class="flex flex-wrap items-center gap-2">
+      <input type="file" name="file" required
+             accept="image/png,image/jpeg,image/webp"
+             class="text-sm">
+      <button type="submit"
+              class="rounded border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-100">
+        Upload
+      </button>
+      <span class="text-xs text-slate-500">PNG / JPEG / WebP. Oversized images are downscaled.</span>
+    </form>
+  </div>
+
+  <script>
+    // json-enc drops unchecked checkboxes and stringifies values; the API
+    // expects real JSON booleans, so set them explicitly before encoding.
+    (function () {
+      const form = document.getElementById('status-page-form');
+      form.addEventListener('htmx:configRequest', (e) => {
+        e.detail.parameters['public_status_enabled'] =
+          form.querySelector('[name=public_status_enabled]').checked;
+        e.detail.parameters['public_show_powered_by'] =
+          form.querySelector('[name=public_show_powered_by]').checked;
+      });
+      form.addEventListener('htmx:afterRequest', (e) => {
+        const box = document.getElementById('form-result');
+        if (e.detail.successful) {
+          box.textContent = 'Saved.';
+          box.className = 'text-sm text-emerald-700';
+        } else {
+          let msg = 'Save failed.';
+          try { msg = JSON.parse(e.detail.xhr.responseText).error.message || msg; } catch (_) {}
+          box.textContent = msg;
+          box.className = 'text-sm text-rose-700';
+        }
+      });
+    })();
+  </script>
+</section>
+{% endblock %}

@@ -122,4 +122,10 @@ pub mod codes {
     pub const FINGERPRINT_SALT_ROTATED: &str = "FINGERPRINT_SALT_ROTATED";
     // Magic-link sign-in (v1.1 — gated by auth.enabled_methods).
     pub const MAGIC_LINK_INVALID: &str = "MAGIC_LINK_INVALID";
+    // Public status-page settings + logo upload.
+    pub const BRANDING_INVALID: &str = "BRANDING_INVALID";
+    pub const LOGO_MISSING: &str = "LOGO_MISSING";
+    pub const LOGO_TYPE_INVALID: &str = "LOGO_TYPE_INVALID";
+    pub const LOGO_TOO_LARGE: &str = "LOGO_TOO_LARGE";
+    pub const LOGO_DECODE_FAILED: &str = "LOGO_DECODE_FAILED";
 }

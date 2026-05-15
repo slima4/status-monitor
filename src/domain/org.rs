@@ -65,6 +65,12 @@ impl std::fmt::Display for BrandingError {
 impl std::error::Error for BrandingError {}
 
 impl PublicOrgBranding {
+    /// Resolve the footer toggle against the configured default. One place so
+    /// the operator preview and the live page can't disagree.
+    pub fn show_powered_by(&self, default: bool) -> bool {
+        self.public_show_powered_by.unwrap_or(default)
+    }
+
     pub fn validate(&self) -> Result<(), BrandingError> {
         if let Some(c) = &self.public_brand_color
             && !is_hex_color(c)

@@ -64,7 +64,7 @@ metrics = "0.24"
 metrics-exporter-prometheus = "0.18"
 
 # Web framework for API + metrics endpoint
-axum = "0.8"
+axum = { version = "0.8.9", features = ["multipart"] }
 tower = "0.5"
 tower-http = { version = "0.6", features = ["trace", "compression-gzip", "cors", "fs", "set-header"] }
 tower_governor = { version = "0.8", default-features = false, features = ["axum"] }
@@ -120,6 +120,7 @@ argon2 = "0.6.0-rc.8"
 utoipa = { version = "5.5", features = ["axum_extras", "chrono", "uuid", "url"] }
 utoipa-axum = "0.2"
 utoipa-swagger-ui = { version = "9", features = ["axum"] }
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "webp"] }
 
 [dev-dependencies]
 criterion = { version = "0.8", features = ["async_tokio"] }

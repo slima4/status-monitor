@@ -39,6 +39,22 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
         ))
         .layer(DefaultBodyLimit::max(BULK_BODY_LIMIT));
 
+    // Logo upload needs more than the 64 KiB JSON limit but far less than the
+    // bulk ceiling; size it from config plus headroom for multipart framing.
+    // Its own auth layer mirrors the owner-gated `/orgs/{id}` routes since
+    // `.merge` lands these routes outside the main v1 middleware stack.
+    let logo_body_limit = state.cfg.public_status.max_logo_size_bytes as usize + 64 * 1024;
+    let logo = Router::new()
+        .route(
+            "/orgs/{id}/status-page/logo",
+            post(handlers::status_page::upload_logo).delete(handlers::status_page::delete_logo),
+        )
+        .layer(from_fn_with_state(
+            state.clone(),
+            crate::web::auth::api_token::middleware,
+        ))
+        .layer(DefaultBodyLimit::max(logo_body_limit));
+
     let mut v1 = Router::new()
         .route(
             "/targets",
@@ -100,6 +116,10 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
                 .delete(handlers::orgs::delete_org),
         )
         .route("/orgs/{id}/restore", post(handlers::orgs::restore_org))
+        .route(
+            "/orgs/{id}/status-page",
+            get(handlers::status_page::get_settings).patch(handlers::status_page::update_settings),
+        )
         .route("/orgs/{id}/members", get(handlers::orgs::list_org_members))
         .route(
             "/orgs/{id}/members/{user_id}",
@@ -140,7 +160,8 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
             crate::web::auth::api_token::middleware,
         ))
         .layer(DefaultBodyLimit::max(SINGLE_BODY_LIMIT))
-        .merge(bulk);
+        .merge(bulk)
+        .merge(logo);
 
     if let Some(layer) = rate_limit_layer(&state.cfg.api.rate_limit, shutdown) {
         v1 = v1.layer(layer);

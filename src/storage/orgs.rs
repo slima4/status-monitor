@@ -730,13 +730,28 @@ pub async fn find_public_status_org_by_slug(
     Ok(row.map(|r| PublicStatusOrg(r.into_org())))
 }
 
-/// Org name plus its operator-set public branding, as needed to render a
-/// status page. `name` is kept alongside so the renderer can fall back to it
-/// when `public_display_name` is unset.
+/// Org name + slug + operator-set public branding, as needed to render a
+/// status page (the renderer falls back to `name` when `public_display_name`
+/// is unset) or to build its live URL (`slug`). One query feeds both the
+/// public render path and the operator settings surface.
 #[derive(Debug, Clone)]
 pub struct OrgBranding {
     pub name: String,
+    pub slug: String,
     pub branding: PublicOrgBranding,
+}
+
+impl OrgBranding {
+    /// Header name: the operator override if non-blank, else the org name.
+    /// Shared so the operator preview and the live page resolve identically.
+    pub fn resolved_display_name(&self) -> &str {
+        self.branding
+            .public_display_name
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or(self.name.as_str())
+    }
 }
 
 /// PUBLIC-STATUS PATH ONLY. Loads an org's name + public branding by id.
@@ -749,6 +764,7 @@ pub struct OrgBranding {
 pub async fn load_public_branding(pool: &PgPool, org: OrgId) -> Result<Option<OrgBranding>> {
     let row: Option<BrandingRow> = sqlx::query_as(
         r#"SELECT name,
+                  slug::text AS slug,
                   public_status_enabled,
                   public_display_name,
                   public_about,
@@ -765,6 +781,7 @@ pub async fn load_public_branding(pool: &PgPool, org: OrgId) -> Result<Option<Or
     .context("load_public_branding")?;
     Ok(row.map(|r| OrgBranding {
         name: r.name,
+        slug: r.slug,
         branding: PublicOrgBranding {
             public_status_enabled: r.public_status_enabled,
             public_display_name: r.public_display_name,
@@ -774,6 +791,116 @@ pub async fn load_public_branding(pool: &PgPool, org: OrgId) -> Result<Option<Or
             public_show_powered_by: r.public_show_powered_by,
         },
     }))
+}
+
+/// Overwrite an org's operator-set public-page branding (everything except
+/// the logo, which has its own upload/delete path). The full set is written
+/// in one statement — the settings form always submits every field, so a
+/// partial-merge layer would add complexity for no caller. Returns `false`
+/// when the org doesn't exist or is soft-deleted. Audit row is written in the
+/// same transaction so "who changed the public page" is answerable.
+pub async fn update_public_branding(
+    pool: &PgPool,
+    org: OrgId,
+    actor: UserId,
+    b: &PublicOrgBranding,
+) -> Result<bool> {
+    let mut tx = pool
+        .begin()
+        .await
+        .context("update_public_branding: begin")?;
+    let row: Option<(Uuid,)> = sqlx::query_as(
+        r#"UPDATE organizations
+           SET public_status_enabled = $2,
+               public_display_name    = $3,
+               public_about           = $4,
+               public_brand_color     = $5,
+               public_show_powered_by = $6,
+               updated_at             = now()
+           WHERE id = $1 AND deleted_at IS NULL
+           RETURNING id"#,
+    )
+    .bind(org.0)
+    .bind(b.public_status_enabled)
+    .bind(b.public_display_name.as_deref())
+    .bind(b.public_about.as_deref())
+    .bind(b.public_brand_color.as_deref())
+    .bind(b.public_show_powered_by)
+    .fetch_optional(&mut *tx)
+    .await
+    .context("update_public_branding: update")?;
+    if row.is_none() {
+        tx.rollback().await.ok();
+        return Ok(false);
+    }
+    record_audit_tx(
+        &mut tx,
+        org,
+        Some(actor),
+        "org.status_page_updated",
+        serde_json::json!({ "public_status_enabled": b.public_status_enabled }),
+    )
+    .await
+    .context("update_public_branding: audit")?;
+    tx.commit()
+        .await
+        .context("update_public_branding: commit")?;
+    Ok(true)
+}
+
+/// Point `public_logo_path` at `new` (or clear it with `None`) and return the
+/// path it held before, so the caller can delete the now-orphaned file. The
+/// swap + audit happen in one transaction; a missing/deleted org yields
+/// `Ok(None)` with no write.
+pub async fn set_public_logo_path(
+    pool: &PgPool,
+    org: OrgId,
+    actor: UserId,
+    new: Option<&str>,
+) -> Result<Option<String>> {
+    let mut tx = pool.begin().await.context("set_public_logo_path: begin")?;
+    // Lock + read the prior path first; the RETURNING of the UPDATE would
+    // already show the new value, and another writer must not interleave
+    // between the read and the swap.
+    let Some((prev,)): Option<(Option<String>,)> = sqlx::query_as(
+        r#"SELECT public_logo_path
+             FROM organizations
+            WHERE id = $1 AND deleted_at IS NULL
+            FOR UPDATE"#,
+    )
+    .bind(org.0)
+    .fetch_optional(&mut *tx)
+    .await
+    .context("set_public_logo_path: read prior")?
+    else {
+        tx.rollback().await.ok();
+        return Ok(None);
+    };
+    sqlx::query(
+        r#"UPDATE organizations
+           SET public_logo_path = $2, updated_at = now()
+           WHERE id = $1 AND deleted_at IS NULL"#,
+    )
+    .bind(org.0)
+    .bind(new)
+    .execute(&mut *tx)
+    .await
+    .context("set_public_logo_path: update")?;
+    record_audit_tx(
+        &mut tx,
+        org,
+        Some(actor),
+        if new.is_some() {
+            "org.logo_changed"
+        } else {
+            "org.logo_removed"
+        },
+        Value::Null,
+    )
+    .await
+    .context("set_public_logo_path: audit")?;
+    tx.commit().await.context("set_public_logo_path: commit")?;
+    Ok(prev)
 }
 
 /// Look up a user's id by email (CITEXT). Drives the invitation flow's
@@ -825,6 +952,7 @@ async fn record_audit_tx(
 #[derive(sqlx::FromRow)]
 struct BrandingRow {
     name: String,
+    slug: String,
     public_status_enabled: bool,
     public_display_name: Option<String>,
     public_about: Option<String>,

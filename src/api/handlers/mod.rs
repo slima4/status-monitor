@@ -10,6 +10,7 @@ pub mod me;
 pub mod orgs;
 pub mod public;
 pub mod results;
+pub mod status_page;
 pub mod tags;
 pub mod targets;
 pub mod validation;
