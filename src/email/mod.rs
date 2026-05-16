@@ -13,7 +13,7 @@ pub mod trait_def;
 
 use std::sync::Arc;
 
-use secrecy::SecretString;
+use secrecy::ExposeSecret;
 
 use crate::config::TransactionalEmailConfig;
 use crate::http_outbound::OutboundHttpClient;
@@ -35,13 +35,16 @@ pub fn build_email_sender(
 ) -> Result<Arc<dyn EmailSender>, EmailError> {
     match config.provider.as_str() {
         "resend" => {
-            if config.resend.api_key.trim().is_empty() {
+            if config.resend.api_key.expose_secret().trim().is_empty() {
                 return Err(EmailError::Config(
                     "email.resend.api_key is required when provider = \"resend\"".into(),
                 ));
             }
-            let key = SecretString::from(config.resend.api_key.clone());
-            let sender = ResendEmailSender::new(key, config.from_name.clone(), http.clone());
+            let sender = ResendEmailSender::new(
+                config.resend.api_key.clone(),
+                config.from_name.clone(),
+                http.clone(),
+            );
             Ok(Arc::new(sender) as Arc<dyn EmailSender>)
         }
         "log" => {
@@ -207,7 +210,7 @@ mod tests {
         let cfg = TransactionalEmailConfig {
             provider: "resend".into(),
             resend: crate::config::ResendConfig {
-                api_key: "re_test_key".into(),
+                api_key: secrecy::SecretString::from("re_test_key".to_string()),
             },
             ..Default::default()
         };

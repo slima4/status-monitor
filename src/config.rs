@@ -1,9 +1,34 @@
 use std::path::PathBuf;
 
 use config::{Config, Environment, File};
+use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
+
+/// Default for a secret-bearing config field: an empty secret. Used by
+/// `#[serde(default = "empty_secret")]` so a missing key deserialises to an
+/// empty value rather than failing.
+fn empty_secret() -> SecretString {
+    SecretString::from(String::new())
+}
+
+/// (De)serialisation for `SecretString` config fields. `secrecy` deliberately
+/// gives `SecretString` no `Serialize`, so `AppConfig`'s derive needs this:
+/// it reads a plain string in and writes a fixed placeholder out, ensuring a
+/// serialised config can never carry a real secret.
+mod secret_str {
+    use secrecy::SecretString;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(_v: &SecretString, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str("[redacted]")
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<SecretString, D::Error> {
+        Ok(SecretString::from(String::deserialize(d)?))
+    }
+}
 
 const ENV_PREFIX: &str = "STATUS_MONITOR";
 const ENV_SEPARATOR: &str = "__";
@@ -28,6 +53,8 @@ pub struct AppConfig {
     pub notifications: NotificationsConfig,
     #[serde(default)]
     pub tenancy: TenancyConfig,
+    #[serde(default)]
+    pub retention: RetentionConfig,
     #[serde(default)]
     pub public_status: PublicStatusConfig,
     #[serde(default)]
@@ -64,10 +91,19 @@ impl Default for TransactionalEmailConfig {
     }
 }
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct ResendConfig {
-    pub api_key: String,
+    #[serde(default = "empty_secret", with = "secret_str")]
+    pub api_key: SecretString,
+}
+
+impl Default for ResendConfig {
+    fn default() -> Self {
+        Self {
+            api_key: empty_secret(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -130,7 +166,8 @@ impl Default for SessionConfig {
 #[serde(default)]
 pub struct GithubOauthConfig {
     pub client_id: String,
-    pub client_secret: String,
+    #[serde(default = "empty_secret", with = "secret_str")]
+    pub client_secret: SecretString,
     pub redirect_url: String,
     pub scopes: Vec<String>,
     pub http_connect_timeout_ms: u64,
@@ -141,7 +178,7 @@ impl Default for GithubOauthConfig {
     fn default() -> Self {
         Self {
             client_id: String::new(),
-            client_secret: String::new(),
+            client_secret: empty_secret(),
             redirect_url: String::new(),
             scopes: vec!["user:email".into(), "read:user".into()],
             http_connect_timeout_ms: 5000,
@@ -229,11 +266,11 @@ pub struct TenancyConfig {
     pub subdomain_public_routes: bool,
     /// Free-tier cap on the number of orgs a single user can own.
     pub free_tier_owner_org_limit: u32,
-    /// Grace period before soft-deleted orgs are purged.
+    /// Grace period before soft-deleted orgs *and users* are purged. Single
+    /// source of truth for the recovery window: the daily retention job binds
+    /// this, and the Privacy Policy's "recoverable for 30 days" line is
+    /// asserted equal to it in tests.
     pub deletion_grace_period_days: u32,
-    /// How often the purge worker wakes. Defaults to 24h; lower values are
-    /// only useful for tests that don't want to wait a day for a tick.
-    pub purge_interval_secs: u64,
 }
 
 impl Default for TenancyConfig {
@@ -245,7 +282,42 @@ impl Default for TenancyConfig {
             subdomain_public_routes: false,
             free_tier_owner_org_limit: 3,
             deletion_grace_period_days: 30,
-            purge_interval_secs: 24 * 60 * 60,
+        }
+    }
+}
+
+/// Long-horizon data-retention windows for the daily purge job. Every field
+/// here is bound by `jobs::retention` — there are no decorative knobs. Windows
+/// that belong to a *different* cadence are intentionally absent and live with
+/// their owner: OAuth-state and magic-link tokens are swept by their own
+/// short-cadence security jobs; expired invitations by the invitations
+/// janitor; session idle/absolute timeouts come from `[auth.session]`;
+/// soft-deleted org/user grace from `tenancy.deletion_grace_period_days`;
+/// ClickHouse `check_results` by the table's own `TTL` (background merge),
+/// kept equal to `check_results_days` and asserted in tests; server/app log
+/// retention by the Docker log driver.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+#[serde(default)]
+pub struct RetentionConfig {
+    /// `check_results` ClickHouse TTL, in days. Not issued as a runtime
+    /// mutation — it mirrors the table `TTL` so the Privacy Policy, the
+    /// migration and this config agree on one number.
+    pub check_results_days: u32,
+    /// `login_attempts` rows older than this are deleted.
+    pub login_attempts_days: u32,
+    /// `quota_events` rows older than this are deleted.
+    pub quota_events_days: u32,
+    /// `org_audit_log` rows older than this are deleted.
+    pub audit_log_days: u32,
+}
+
+impl Default for RetentionConfig {
+    fn default() -> Self {
+        Self {
+            check_results_days: 30,
+            login_attempts_days: 180,
+            quota_events_days: 90,
+            audit_log_days: 730,
         }
     }
 }
@@ -488,7 +560,8 @@ pub struct EmailConfig {
     pub smtp_host: String,
     pub smtp_port: u16,
     pub smtp_user: String,
-    pub smtp_password: String,
+    #[serde(default = "empty_secret", with = "secret_str")]
+    pub smtp_password: SecretString,
     pub from: String,
     pub starttls: bool,
 }
@@ -500,7 +573,7 @@ impl Default for EmailConfig {
             smtp_host: String::new(),
             smtp_port: 587,
             smtp_user: String::new(),
-            smtp_password: String::new(),
+            smtp_password: empty_secret(),
             from: String::new(),
             starttls: true,
         }
@@ -575,14 +648,14 @@ pub struct DnsConfig {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SecurityConfig {
     pub allow_private_targets: bool,
-    #[serde(default)]
-    pub credentials_kek_base64: String,
+    #[serde(default = "empty_secret", with = "secret_str")]
+    pub credentials_kek_base64: SecretString,
 }
 
 impl SecurityConfig {
     /// Returns Some(trimmed KEK string) if a non-empty value is configured, None otherwise.
     pub fn kek(&self) -> Option<&str> {
-        let t = self.credentials_kek_base64.trim();
+        let t = self.credentials_kek_base64.expose_secret().trim();
         (!t.is_empty()).then_some(t)
     }
 }
@@ -614,7 +687,8 @@ pub struct ClickhouseConfig {
     pub url: String,
     pub database: String,
     pub user: String,
-    pub password: String,
+    #[serde(default = "empty_secret", with = "secret_str")]
+    pub password: SecretString,
     pub batch_size: usize,
     pub batch_timeout_ms: u64,
     pub buffer_size: usize,

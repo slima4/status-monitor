@@ -9,6 +9,7 @@ use axum::extract::{ConnectInfo, Query, State};
 use axum::http::HeaderMap;
 use axum::http::header::USER_AGENT;
 use axum::response::{IntoResponse, Redirect};
+use secrecy::ExposeSecret;
 use serde::Deserialize;
 use std::net::SocketAddr;
 use tower_cookies::Cookies;
@@ -40,7 +41,7 @@ pub async fn github_login(
         ))
     })?;
     let cfg = &state.cfg.auth.github;
-    if cfg.client_id.is_empty() || cfg.client_secret.is_empty() {
+    if cfg.client_id.is_empty() || cfg.client_secret.expose_secret().is_empty() {
         return Err(AppError::Other(anyhow::anyhow!(
             "github_login: auth.github.client_id/client_secret not configured"
         )));

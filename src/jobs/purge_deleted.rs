@@ -34,13 +34,9 @@
 //!  * `ALTER TABLE ... DELETE WHERE org_id = ?` is safe to repeat — a second
 //!    call on already-deleted rows is a no-op mutation.
 
-use std::time::Duration;
-
 use anyhow::Context;
 use clickhouse::Client as ChClient;
 use sqlx::PgPool;
-use tokio::time::MissedTickBehavior;
-use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::domain::OrgId;
@@ -56,50 +52,6 @@ const PURGE_BATCH_LIMIT: i64 = 10;
 /// but the server queues them serially, so going wider than this just trades
 /// PG round-trips for CH mutation backlog.
 const DRAIN_BATCH_LIMIT: i64 = 50;
-
-/// Background loop: tick the purge job on `interval`, exit on cancellation.
-/// First tick fires after one interval — startup time is when the rest of the
-/// app is warming caches and we don't want to compete for connection slots.
-/// `Skip` policy on the ticker prevents burst fires if the previous tick ran
-/// long.
-pub async fn run(
-    pool: PgPool,
-    ch: ChClient,
-    interval: Duration,
-    grace_days: u32,
-    cache: PageCache,
-    shutdown: CancellationToken,
-) {
-    let mut ticker = tokio::time::interval(interval);
-    ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
-    // Skip the immediate-fire that `interval` does on first poll.
-    ticker.tick().await;
-    loop {
-        tokio::select! {
-            _ = shutdown.cancelled() => {
-                tracing::info!("purge worker shutting down");
-                return;
-            }
-            _ = ticker.tick() => {
-                match purge_tick(&pool, &ch, grace_days, &cache).await {
-                    Ok(stats) => {
-                        metrics::counter!("purge_deleted_total", "kind" => "org")
-                            .increment(u64::from(stats.cascaded));
-                        metrics::counter!("purge_deleted_total", "kind" => "user")
-                            .increment(u64::from(stats.users));
-                        tracing::info!(
-                            orgs_purged = stats.cascaded,
-                            users_purged = stats.users,
-                            drained = stats.drained,
-                            "purge tick complete"
-                        );
-                    }
-                    Err(err) => tracing::error!(?err, "purge tick failed"),
-                }
-            }
-        }
-    }
-}
 
 /// Run one full purge cycle: cascade PG-side deletes for past-grace orgs,
 /// then drain whatever pending CH purges exist (including ones enqueued on

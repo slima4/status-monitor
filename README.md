@@ -120,6 +120,14 @@ Sources under [`docs/`](docs/) — readable directly on GitHub too:
 | [docs/benchmarks.md](docs/benchmarks.md) | Criterion micro-benchmarks, single-core throughput, profile breakdown |
 | [docs/troubleshooting.md](docs/troubleshooting.md) | common failures and how to read them off metrics |
 
+## Legal
+
+A running instance serves its policies at `/terms`, `/privacy`, `/cookies`,
+`/impressum`, `/abuse-policy`, `/security-policy`, and an RFC 9116
+`/.well-known/security.txt`. The source documents are in
+[`docs/legal/`](docs/legal/). GDPR self-service (data export, account
+deletion, recovery) lives under `/settings/account`.
+
 ## Web UI
 
 The single binary serves both the `/api/v1/*` JSON surface and a

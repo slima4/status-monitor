@@ -5,6 +5,7 @@ use async_trait::async_trait;
 use backoff::ExponentialBackoffBuilder;
 use chrono::{DateTime, TimeZone, Utc};
 use clickhouse::{Client, Row};
+use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -121,8 +122,8 @@ pub fn build_client(cfg: &ClickhouseConfig) -> Client {
         .with_url(&cfg.url)
         .with_database(&cfg.database)
         .with_user(&cfg.user);
-    if !cfg.password.is_empty() {
-        client = client.with_password(&cfg.password);
+    if !cfg.password.expose_secret().is_empty() {
+        client = client.with_password(cfg.password.expose_secret());
     }
     client
 }

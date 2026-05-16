@@ -3,3 +3,4 @@
 //! scheduler, manual invocation in tests).
 
 pub mod purge_deleted;
+pub mod retention;

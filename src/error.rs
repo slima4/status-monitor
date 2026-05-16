@@ -91,6 +91,15 @@ pub enum AppError {
     #[error("{message}")]
     ForbiddenCoded { code: &'static str, message: String },
 
+    /// Internal failure carrying a *private* log detail. The client gets a
+    /// generic 500 + stable `code`; `log` is written only to the error log
+    /// (the auth-isolated path) and never serialised into the response body.
+    /// This makes "attach context without leaking PII/secrets" the easy
+    /// default — callers put the identifying bit in `log`, not in a public
+    /// message.
+    #[error("internal error")]
+    Internal { code: &'static str, log: String },
+
     #[error("{0}")]
     Other(#[from] anyhow::Error),
 }
@@ -167,6 +176,16 @@ impl AppError {
         Self::Gone {
             code,
             message: message.into(),
+        }
+    }
+
+    /// 500 with a stable `code` and a private `log` line. Use this instead of
+    /// interpolating an email / URL / token into an `anyhow!` message: the
+    /// detail goes to the error log only, the body stays generic.
+    pub fn internal_with_context(code: &'static str, log: impl Into<String>) -> Self {
+        Self::Internal {
+            code,
+            log: log.into(),
         }
     }
 
@@ -322,6 +341,13 @@ impl IntoResponse for AppError {
             ),
             AppError::ForbiddenCoded { code, message } => {
                 (StatusCode::FORBIDDEN, ApiErrorBody::new(code, message))
+            }
+            AppError::Internal { code, log } => {
+                tracing::error!(error_code = code, detail = %log, "request failed");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    ApiErrorBody::new(code, "internal error"),
+                )
             }
             ref err @ (AppError::Config(_)
             | AppError::Io(_)

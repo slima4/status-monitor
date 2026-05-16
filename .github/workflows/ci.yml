@@ -116,6 +116,19 @@ jobs:
           shared-key: rust-1.95
       - name: fetch tailwind cli
         run: scripts/fetch-tailwind.sh
+      # The logging-privacy audit (tests/logging_audit_test.rs) shells out to
+      # ast-grep, so the test job needs it too — not just lint.
+      - name: install ast-grep
+        env:
+          AST_GREP_VERSION: "0.42.1"
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          curl -fsSL -o "$tmp/ast-grep.zip" \
+            "https://github.com/ast-grep/ast-grep/releases/download/${AST_GREP_VERSION}/app-x86_64-unknown-linux-gnu.zip"
+          unzip -q "$tmp/ast-grep.zip" -d "$tmp"
+          install -m 0755 "$tmp/ast-grep" /usr/local/bin/ast-grep
+          ast-grep --version
       - name: install cargo-nextest
         uses: taiki-e/install-action@v2.77.7
         with:

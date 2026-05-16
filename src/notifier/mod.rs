@@ -7,6 +7,7 @@ pub mod webhook;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use secrecy::ExposeSecret;
 
 use crate::config::NotificationsConfig;
 use crate::domain::AlertChannel;
@@ -68,7 +69,10 @@ pub fn build_notifiers(cfg: &NotificationsConfig) -> Result<Vec<Arc<dyn Notifier
     if cfg.email.enabled {
         // Plaintext SMTP carries the password in the clear during AUTH. Disallow
         // any auth setup that would leak the password over a non-TLS link.
-        if !cfg.email.smtp_password.is_empty() && cfg.email.smtp_port == 25 && !cfg.email.starttls {
+        if !cfg.email.smtp_password.expose_secret().is_empty()
+            && cfg.email.smtp_port == 25
+            && !cfg.email.starttls
+        {
             return Err(AppError::bad_request(
                 crate::api::codes::INVALID_CONFIG,
                 "notifications.email: smtp_password is set but smtp_port=25 with starttls=false would leak the password in cleartext",

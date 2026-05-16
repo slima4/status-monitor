@@ -17,6 +17,7 @@ use askama::Template;
 use askama_web::WebTemplate;
 use axum::extract::{Query, State};
 use axum::response::{IntoResponse, Redirect, Response};
+use secrecy::ExposeSecret;
 use serde::Deserialize;
 
 use crate::app::AppState;
@@ -56,7 +57,7 @@ pub struct LoginPage {
 
 pub async fn login(State(state): State<AppState>, Query(q): Query<LoginQuery>) -> LoginPage {
     let cfg = &state.cfg.auth.github;
-    let github_enabled = !cfg.client_id.is_empty() && !cfg.client_secret.is_empty();
+    let github_enabled = !cfg.client_id.is_empty() && !cfg.client_secret.expose_secret().is_empty();
 
     let mut params: Vec<(&str, String)> = Vec::new();
     if let Some(r) = q.redirect_after.as_deref().and_then(safe_redirect_target) {

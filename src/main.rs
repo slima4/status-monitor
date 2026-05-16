@@ -7,7 +7,7 @@ use status_monitor::{
     config::AppConfig,
     error::{AppError, Result},
     http_client::client::build_clients,
-    jobs::purge_deleted,
+    jobs::retention,
     notifier::{Notifier, build_notifiers, engine::AlertEngine},
     observability,
     pipeline::{BatcherConfig, ResultBatcher},
@@ -76,6 +76,7 @@ async fn main() -> Result<()> {
     let pg_pool = PostgresTargetStore::connect_pool(&cfg.storage.postgres).await?;
     let default_org_id = ensure_default_org(&pg_pool, &cfg.tenancy.default_org_slug).await?;
     tracing::info!(
+        // SAFE: operator's own default-org config, not a data subject's slug
         org_id = %default_org_id,
         slug = %cfg.tenancy.default_org_slug,
         "default org ready"
@@ -87,6 +88,8 @@ async fn main() -> Result<()> {
     ));
 
     tracing::info!(
+        // SAFE: operator infra endpoint (no credentials — password is a
+        // separate SecretString field), not user data
         url = %cfg.storage.clickhouse.url,
         database = %cfg.storage.clickhouse.database,
         "connecting to clickhouse"
@@ -208,12 +211,12 @@ async fn main() -> Result<()> {
     let purge_handle: JoinHandle<()> = {
         let pool = pg_pool_for_stores.clone();
         let token = root.clone();
-        let interval = Duration::from_secs(cfg.tenancy.purge_interval_secs.max(1));
         let grace_days = cfg.tenancy.deletion_grace_period_days;
-        tokio::spawn(purge_deleted::run(
+        tokio::spawn(retention::run(
             pool,
             ch_client_for_purge,
-            interval,
+            cfg.retention,
+            cfg.auth.session.clone(),
             grace_days,
             purge_cache,
             token,
@@ -302,7 +305,11 @@ async fn main() -> Result<()> {
         build_router(state.clone(), root.clone()).merge(web::routes(&state.cfg).with_state(state));
 
     let listener = TcpListener::bind(&api_bind).await.map_err(AppError::Io)?;
-    tracing::info!(addr = %api_bind, "api listening");
+    tracing::info!(
+        // SAFE: operator API bind address, not a peer/user IP
+        addr = %api_bind,
+        "api listening"
+    );
 
     let signal_token = root.clone();
     let serve = axum::serve(

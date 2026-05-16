@@ -20,7 +20,11 @@ pub fn init(bind: &str) -> Result<MetricsHandle> {
     register_descriptions();
     metrics::counter!("status_monitor_build_info", "version" => env!("CARGO_PKG_VERSION"))
         .absolute(1);
-    tracing::info!(addr = %addr, "metrics listening");
+    tracing::info!(
+        // SAFE: operator metrics bind address, not a peer/user IP
+        addr = %addr,
+        "metrics listening"
+    );
     Ok(MetricsHandle)
 }
 

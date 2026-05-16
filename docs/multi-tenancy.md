@@ -37,11 +37,13 @@ Deletion is two-phase to give operators a recovery window and to keep ClickHouse
 
 1. **Soft delete.** `DELETE /api/v1/orgs/{id}` flips `organizations.deleted_at = now()`. The org disappears from the user's switcher and every URL referencing it returns 404 — `is_active_member` short-circuits on `deleted_at IS NULL`.
 2. **Restore window.** The original deleter can call `POST /api/v1/orgs/{id}/restore` within `deletion_grace_period_days` (default 30); the slug stays held to prevent squatting during this window.
-3. **Purge.** A background worker (`src/jobs/purge_deleted.rs`) ticks every `purge_interval_secs` (default 24 h). Each tick:
+3. **Purge.** A daily job (`src/jobs/retention.rs`) runs at 03:00 UTC. It first runs the soft-delete purge (`src/jobs/purge_deleted.rs::purge_tick`):
    - Selects up to 10 orgs whose `deleted_at` is past the grace window.
    - **Per org, in one PG transaction:** insert into `clickhouse_purge_queue` (idempotent via `ON CONFLICT (org_id) DO NOTHING`), then `DELETE FROM organizations` — `ON DELETE CASCADE` empties every tenant table.
    - Drains pending queue rows by issuing `ALTER TABLE check_results DELETE WHERE org_id = ?` against ClickHouse for each. The mutation is idempotent; a process restart between halves replays cleanly.
    - Then hard-deletes up to 10 soft-deleted users past the grace window that hold no live (unexpired, unused) recovery token. The `users` `ON DELETE CASCADE` erases memberships, oauth_identities, api_tokens, invitations, sessions and recovery tokens; rows referencing the user as an actor (`login_attempts`, `org_audit_log`, `quota_events`, `plan_overrides`) are kept with the actor nulled.
+
+The same daily job then enforces long-horizon data retention from the `[retention]` config: it deletes `login_attempts`, `quota_events` and `org_audit_log` rows past their windows and reaps sessions that are absolute-expired **or** idle past `auth.session.idle_timeout_days`. ClickHouse `check_results` retention is the table's own `TTL` (background merge), kept equal to `retention.check_results_days`. Short-cadence security sweeps (OAuth-state, magic-link) keep their own faster loops — their frequency is the property.
 
 The outbox table is the load-bearing piece. A naive "DELETE in PG, then DELETE in CH" sequence leaves CH rows orphaned if the worker dies between calls — invisible to queries but on disk forever, breaking the "data fully erased within 30 days" privacy claim.
 

@@ -15,6 +15,7 @@ use http_body_util::{BodyExt, Full, Limited};
 use hyper::Request;
 use hyper::body::Bytes;
 use hyper::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE, USER_AGENT};
+use secrecy::ExposeSecret;
 use serde::Deserialize;
 use serde_json::json;
 use sqlx::{PgPool, Postgres, Transaction};
@@ -112,7 +113,7 @@ async fn exchange_code(
 ) -> Result<String> {
     let payload = serde_json::to_vec(&json!({
         "client_id": cfg.client_id,
-        "client_secret": cfg.client_secret,
+        "client_secret": cfg.client_secret.expose_secret(),
         "code": code,
         "redirect_uri": cfg.redirect_url,
     }))

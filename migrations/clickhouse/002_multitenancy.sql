@@ -25,13 +25,16 @@ CREATE TABLE check_results (
 ) ENGINE = MergeTree
 PARTITION BY (toYYYYMMDD(timestamp), org_id)
 ORDER BY (org_id, target_id, timestamp)
-TTL toDateTime(timestamp) + INTERVAL 90 DAY
+-- Kept equal to `[retention].check_results_days`; a test asserts the two
+-- agree so config, this TTL and the Privacy Policy can't drift.
+TTL toDateTime(timestamp) + INTERVAL 30 DAY
 SETTINGS index_granularity = 8192;
 
 CREATE MATERIALIZED VIEW check_results_1m
 ENGINE = AggregatingMergeTree
 PARTITION BY (toYYYYMMDD(minute), org_id)
 ORDER BY (org_id, target_id, minute)
+TTL toDateTime(minute) + INTERVAL 30 DAY
 AS SELECT
     org_id,
     target_id,

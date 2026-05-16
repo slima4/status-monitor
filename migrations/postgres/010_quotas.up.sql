@@ -97,3 +97,7 @@ CREATE INDEX idx_quota_events_org_time
 CREATE INDEX idx_quota_events_recent_abuse
     ON quota_events(occurred_at DESC, ip_hash)
     WHERE event = 'abuse_blocked';
+
+-- Full occurred_at index for the daily retention delete (the indexes above
+-- are partial / org_id-leading and can't serve an unfiltered range delete).
+CREATE INDEX idx_quota_events_occurred_at ON quota_events(occurred_at);

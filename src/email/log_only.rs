@@ -21,21 +21,122 @@ impl Default for LogOnlyEmailSender {
     }
 }
 
+/// Query parameters that carry an account-takeover credential. A 30-day
+/// recovery link, a magic-link or an invite token must never land in a
+/// 30-day-retained log, so the dev `log` provider truncates these to a short
+/// prefix before logging. The rendered body is never logged for the same
+/// reason — it embeds the same URL.
+const SENSITIVE_PARAMS: [&str; 4] = ["token", "state", "recovery", "code"];
+
+/// Truncate the value of any [`SENSITIVE_PARAMS`] query key to its first 6
+/// chars + `…`. Only matches a real query key (`?key=` / `&key=`); leaves the
+/// host/path intact so the dev still sees which flow fired.
+fn redact_sensitive_params(url: &str) -> String {
+    let mut out = url.to_string();
+    for key in SENSITIVE_PARAMS {
+        let mut from = 0;
+        while let Some(rel) = out[from..].find(key) {
+            let k = from + rel;
+            let pre_ok = k == 0 || matches!(out.as_bytes()[k - 1], b'?' | b'&');
+            let eq = k + key.len();
+            if pre_ok && out.as_bytes().get(eq) == Some(&b'=') {
+                let vstart = eq + 1;
+                let vend = out[vstart..]
+                    .find(|c: char| c == '&' || c.is_whitespace())
+                    .map_or(out.len(), |r| vstart + r);
+                if vend - vstart > 6 {
+                    let keep: String = out[vstart..vend].chars().take(6).collect();
+                    let replaced = format!("{keep}…");
+                    out.replace_range(vstart..vend, &replaced);
+                    from = vstart + replaced.len();
+                    continue;
+                }
+            }
+            from = k + key.len();
+        }
+    }
+    out
+}
+
+/// `jane@example.com` → `j***@example.com`. Keeps the domain (operationally
+/// useful) but not the identity.
+fn mask_email(addr: &str) -> String {
+    match addr.split_once('@') {
+        Some((local, domain)) => {
+            let first = local.chars().next().unwrap_or('*');
+            format!("{first}***@{domain}")
+        }
+        None => "***".to_string(),
+    }
+}
+
 #[async_trait]
 impl EmailSender for LogOnlyEmailSender {
     async fn send(&self, email: TransactionalEmail) -> EmailResult<MessageId> {
         let rendered = email.template.render(&self.site_name);
+        // Recipient masked; the rendered body is deliberately not logged.
+        let to = mask_email(&email.to.address);
         tracing::info!(
-            to = %email.to.address,
+            %to,
             subject = %rendered.subject,
             "📧 EMAIL (not actually sent — log-only mode)"
         );
-        tracing::debug!(text_body = %rendered.text_body);
 
         if let Some(url) = email.template.primary_url() {
-            tracing::info!("📧 Action URL: {url}");
+            // SAFE: redacted — token/state/recovery/code params truncated
+            tracing::info!(action_url = %redact_sensitive_params(url), "📧 Action URL");
         }
 
         Ok(MessageId(format!("log-only-{}", Uuid::now_v7())))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{mask_email, redact_sensitive_params};
+
+    #[test]
+    fn redacts_account_takeover_params_keeps_host_path() {
+        let url = "https://app.example.com/recover-account?token=abcdef1234567890&foo=bar";
+        let out = redact_sensitive_params(url);
+        assert!(out.starts_with("https://app.example.com/recover-account?token=abcdef…"));
+        assert!(out.contains("&foo=bar"), "non-sensitive params survive");
+        assert!(!out.contains("abcdef1234567890"), "raw token must be gone");
+    }
+
+    #[test]
+    fn redacts_state_and_recovery_and_first_param() {
+        let out =
+            redact_sensitive_params("https://h/v?state=longstatevalue&recovery=longrecoveryvalue");
+        assert!(out.contains("state=longst…"));
+        assert!(out.contains("recovery=longre…"));
+        assert!(!out.contains("longstatevalue"));
+        assert!(!out.contains("longrecoveryvalue"));
+    }
+
+    #[test]
+    fn short_value_and_substring_collisions_are_left_alone() {
+        // value <= 6 chars: nothing to gain truncating, left intact.
+        assert_eq!(
+            redact_sensitive_params("https://h/v?token=abc"),
+            "https://h/v?token=abc"
+        );
+        // `state` only as a substring of a path/param name, never a key.
+        let s = "https://h/realestate?next_thing=ok";
+        assert_eq!(redact_sensitive_params(s), s);
+    }
+
+    #[test]
+    fn multibyte_value_truncates_on_char_boundary() {
+        // 9 multibyte chars; must not panic and must drop the tail.
+        let out = redact_sensitive_params("https://h/v?token=日本語日本語日本語");
+        assert!(out.contains("token=日本語日本語…"));
+        assert!(!out.contains("日本語日本語日本語"));
+    }
+
+    #[test]
+    fn mask_email_keeps_domain_not_identity() {
+        assert_eq!(mask_email("jane.doe@example.com"), "j***@example.com");
+        assert_eq!(mask_email("no-at-sign"), "***");
     }
 }

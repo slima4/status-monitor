@@ -54,6 +54,9 @@ CREATE TABLE org_audit_log (
 );
 
 CREATE INDEX idx_audit_log_org_time ON org_audit_log(org_id, occurred_at DESC);
+-- org_id-leading index above can't serve the cross-tenant daily retention
+-- delete (`occurred_at < cutoff`, no org filter) — add a plain one.
+CREATE INDEX idx_org_audit_log_occurred_at ON org_audit_log(occurred_at);
 
 CREATE TABLE clickhouse_purge_queue (
     org_id       UUID PRIMARY KEY,

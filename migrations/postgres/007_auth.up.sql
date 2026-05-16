@@ -24,6 +24,9 @@ CREATE TABLE sessions (
 );
 CREATE INDEX idx_sessions_user    ON sessions(user_id);
 CREATE INDEX idx_sessions_expires ON sessions(expires_at);
+-- The daily retention sweep also reaps idle sessions (`last_used_at <
+-- now() - idle_timeout`); without this it seq-scans every night.
+CREATE INDEX idx_sessions_last_used_at ON sessions(last_used_at);
 
 -- Link rows: one (provider, provider_user_id) pair => one user. PK is the
 -- provider pair, NOT user_id, so one user can later own multiple identities
@@ -142,3 +145,7 @@ CREATE INDEX idx_login_attempts_user_time
 CREATE INDEX idx_login_attempts_recent_failures
     ON login_attempts(occurred_at DESC, ip_hash)
     WHERE success = false;
+-- Full (non-partial) occurred_at index for the daily retention delete: the
+-- partial index above only covers failures, so an unfiltered
+-- `occurred_at < cutoff` delete would otherwise seq-scan the whole table.
+CREATE INDEX idx_login_attempts_occurred_at ON login_attempts(occurred_at);

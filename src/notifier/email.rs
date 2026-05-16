@@ -4,6 +4,7 @@ use lettre::message::Mailbox;
 use lettre::transport::smtp::AsyncSmtpTransport;
 use lettre::transport::smtp::authentication::Credentials;
 use lettre::{AsyncTransport, Message, Tokio1Executor};
+use secrecy::ExposeSecret;
 
 use crate::config::EmailConfig;
 use crate::domain::AlertChannel;
@@ -37,7 +38,7 @@ impl EmailNotifier {
         if !cfg.smtp_user.is_empty() {
             builder = builder.credentials(Credentials::new(
                 cfg.smtp_user.clone(),
-                cfg.smtp_password.clone(),
+                cfg.smtp_password.expose_secret().to_owned(),
             ));
         }
 

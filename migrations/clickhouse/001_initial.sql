@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS check_results (
 ) ENGINE = MergeTree
 PARTITION BY toYYYYMMDD(timestamp)
 ORDER BY (target_id, timestamp)
-TTL toDateTime(timestamp) + INTERVAL 90 DAY
+TTL toDateTime(timestamp) + INTERVAL 30 DAY
 SETTINGS index_granularity = 8192;
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS check_results_1m

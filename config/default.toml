@@ -121,8 +121,25 @@ default_org_slug = "default"
 # subdomain_public_routes = false
 # Free-tier cap on orgs a single user can own.
 free_tier_owner_org_limit = 3
-# Grace period before soft-deleted orgs are purged.
+# Grace period before soft-deleted orgs *and users* are purged. Also the
+# account-recovery window; the Privacy Policy quotes this number.
 deletion_grace_period_days = 30
+
+# Long-horizon data retention for the daily purge job (runs 03:00 UTC). Every
+# key here is bound by the job — no decorative knobs. Windows on a different
+# cadence live with their owner and are deliberately NOT repeated here:
+#   - oauth_states / magic_link_tokens : own short-cadence security sweeps
+#   - expired invitations              : invitations janitor (auth.invitations)
+#   - session idle / absolute timeout  : [auth.session]
+#   - soft-deleted org/user grace      : tenancy.deletion_grace_period_days
+#   - check_results in ClickHouse      : the table's own TTL (background
+#                                        merge), kept == check_results_days
+#   - server / app log retention       : Docker log driver
+[retention]
+check_results_days = 30
+login_attempts_days = 180
+quota_events_days = 90
+audit_log_days = 730              # 2 years
 
 # `base_domain` is required when tenancy.subdomain_public_routes = true; the
 # startup assertion refuses to boot without it (would let the slug extractor
