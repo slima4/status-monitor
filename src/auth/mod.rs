@@ -6,6 +6,7 @@
 //! schema in `007_auth.up.sql` and the `EmailSender` trait in `crate::email`
 //! but their flows arrive in later phases.
 
+pub mod account;
 pub mod api_tokens;
 pub mod email_norm;
 pub mod fingerprint;
@@ -17,6 +18,7 @@ pub mod magic_link;
 pub mod magic_link_cleanup;
 pub mod oauth_state;
 pub mod oauth_state_cleanup;
+pub mod recovery;
 pub mod session;
 pub mod token_hash;
 pub mod url;

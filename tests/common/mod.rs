@@ -652,3 +652,54 @@ pub async fn ch_client_from_env() -> Option<clickhouse::Client> {
     }
     Some(client)
 }
+
+// Per-test throwaway database: `CREATE DATABASE <prefix>_<uuid>`, migrations
+// applied by the caller, dropped at the end. The isolation model used by the
+// auth / GDPR suites (distinct from the shared-DB `pg_pool_from_env`). Returns
+// `None` when `DATABASE_URL` is unset so `#[ignore]` tests no-op cleanly.
+pub async fn fresh_test_db(prefix: &str) -> Option<(String, String)> {
+    use sqlx::{Connection, Executor};
+    let raw = std::env::var("DATABASE_URL").ok()?;
+    let mut url = Url::parse(&raw).unwrap();
+    let test_db = format!("{prefix}_{}", Uuid::now_v7().simple());
+    url.set_path("/postgres");
+    let mut conn = sqlx::PgConnection::connect(url.as_str()).await.unwrap();
+    conn.execute(format!("CREATE DATABASE {test_db}").as_str())
+        .await
+        .unwrap();
+    let mut new_url = url.clone();
+    new_url.set_path(&format!("/{test_db}"));
+    Some((new_url.to_string(), test_db))
+}
+
+pub async fn drop_test_db(test_db: &str) {
+    use sqlx::{Connection, Executor};
+    let Ok(raw) = std::env::var("DATABASE_URL") else {
+        return;
+    };
+    let mut url = Url::parse(&raw).unwrap();
+    url.set_path("/postgres");
+    if let Ok(mut conn) = sqlx::PgConnection::connect(url.as_str()).await {
+        let _ = conn
+            .execute(
+                format!(
+                    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity \
+                     WHERE datname = '{test_db}' AND pid <> pg_backend_pid()"
+                )
+                .as_str(),
+            )
+            .await;
+        let _ = conn
+            .execute(format!("DROP DATABASE IF EXISTS {test_db}").as_str())
+            .await;
+    }
+}
+
+pub async fn open_test_pool(db_url: &str) -> PgPool {
+    PgPoolOptions::new()
+        .max_connections(4)
+        .acquire_timeout(Duration::from_secs(5))
+        .connect(db_url)
+        .await
+        .unwrap()
+}

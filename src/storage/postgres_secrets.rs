@@ -1,5 +1,8 @@
 use anyhow::Context;
+use chrono::{DateTime, Utc};
+use serde::Serialize;
 use serde_json::Value;
+use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::security::{Cipher, is_envelope};
@@ -53,6 +56,106 @@ pub fn decrypt_in_place(value: &mut Value, cipher: &Cipher, target_id: Uuid) -> 
         );
     }
     Ok(())
+}
+
+/// Overwrite every credential slot in a raw `check_spec` JSON value with the
+/// sentinel `"***"`. The exact inverse of [`decrypt_in_place`]'s intent: the
+/// GDPR data export must hand the user a copy of their config that proves a
+/// secret was set without disclosing it. Walks the same [`CREDENTIAL_PATHS`]
+/// pointer list (single owner) so a credential field added there is redacted
+/// here automatically, and works on either the encrypted envelope or the
+/// no-KEK plaintext-at-rest case because it never inspects the slot's shape.
+pub fn redact_credentials(value: &mut Value) {
+    for path in CREDENTIAL_PATHS {
+        let Some(slot) = value.pointer_mut(path) else {
+            continue;
+        };
+        if slot.is_null() {
+            continue;
+        }
+        *slot = Value::String("***".to_string());
+    }
+}
+
+/// The credential-bearing target columns exactly as they sit at rest. Maps a
+/// `targets` row via `sqlx::FromRow`; `check_spec` is whatever is stored — an
+/// `$enc` envelope or (no-KEK self-host) plaintext — and is the *only* path
+/// into [`RedactedTarget`], so it is structurally impossible to feed the
+/// export a decrypted value.
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct RawTargetRow {
+    pub id: Uuid,
+    pub name: String,
+    pub check_spec: Value,
+    pub interval_secs: i32,
+    pub enabled: bool,
+    pub tags: Vec<String>,
+    pub public_status: bool,
+    pub public_name: Option<String>,
+    pub public_description: Option<String>,
+    pub public_group: Option<String>,
+    pub public_sort_order: i32,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// A target row whose credentials have already been replaced with `"***"`.
+///
+/// Distinct from [`crate::domain::Target`] on purpose: the only constructor is
+/// [`RedactedTarget::from_row`], which calls [`redact_credentials`] and never
+/// has a [`Cipher`] in scope. Handing the GDPR export a decryptable `Target`
+/// (the normal `decrypt_in_place` read path) is therefore a *compile* error,
+/// not a redaction that someone forgot to apply. `check` stays a raw
+/// `serde_json::Value` so no `CheckSpec` deserialize can re-surface a cleared
+/// slot, and `deleted_at` is carried through so a still-within-grace target is
+/// honestly stamped (soft-deleted-but-not-purged scope).
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct RedactedTarget {
+    #[schema(value_type = String, format = "uuid")]
+    pub id: Uuid,
+    pub name: String,
+    /// `check_spec` with every [`CREDENTIAL_PATHS`] slot forced to `"***"`.
+    #[schema(value_type = Object)]
+    pub check: Value,
+    pub interval_secs: i32,
+    pub enabled: bool,
+    pub tags: Vec<String>,
+    pub public_status: bool,
+    pub public_name: Option<String>,
+    pub public_description: Option<String>,
+    pub public_group: Option<String>,
+    pub public_sort_order: i32,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    /// Non-null while the target is soft-deleted but not yet purged.
+    pub deleted_at: Option<DateTime<Utc>>,
+}
+
+impl RedactedTarget {
+    /// Redact the at-rest credential slots and stamp the target with the
+    /// lifecycle state that governs it (its owning org's `deleted_at`, since
+    /// targets carry no soft-delete column of their own). `check_spec` is
+    /// never decrypted.
+    pub fn from_row(row: RawTargetRow, deleted_at: Option<DateTime<Utc>>) -> Self {
+        let mut check = row.check_spec;
+        redact_credentials(&mut check);
+        Self {
+            id: row.id,
+            name: row.name,
+            check,
+            interval_secs: row.interval_secs,
+            enabled: row.enabled,
+            tags: row.tags,
+            public_status: row.public_status,
+            public_name: row.public_name,
+            public_description: row.public_description,
+            public_group: row.public_group,
+            public_sort_order: row.public_sort_order,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+            deleted_at,
+        }
+    }
 }
 
 fn is_already_envelope(v: &Value) -> bool {
@@ -146,6 +249,57 @@ mod tests {
         let mut v = json!({"type":"tcp","host":"x","port":80});
         encrypt_in_place(&mut v, &c).unwrap();
         assert_eq!(v["host"], json!("x"));
+    }
+
+    #[test]
+    fn redact_replaces_set_credentials_with_sentinel() {
+        let mut v = json!({"type":"http","basic_auth":["alice","s3cret"],"bearer_token":"abc.def"});
+        redact_credentials(&mut v);
+        assert_eq!(v["basic_auth"], json!("***"));
+        assert_eq!(v["bearer_token"], json!("***"));
+        assert_eq!(v["type"], json!("http"));
+    }
+
+    #[test]
+    fn redact_leaves_unset_credentials_null() {
+        let mut v = json!({"type":"http","basic_auth":null,"bearer_token":null});
+        redact_credentials(&mut v);
+        assert!(v["basic_auth"].is_null());
+        assert!(v["bearer_token"].is_null());
+    }
+
+    #[test]
+    fn redact_covers_encrypted_envelope_without_decrypting() {
+        let c = cipher();
+        let mut v = json!({"type":"http","basic_auth":["u","p"],"bearer_token":null});
+        encrypt_in_place(&mut v, &c).unwrap();
+        assert!(v["basic_auth"]["$enc"].is_string());
+        redact_credentials(&mut v);
+        // Envelope object is gone; the sentinel proves a value was set without
+        // disclosing the ciphertext.
+        assert_eq!(v["basic_auth"], json!("***"));
+    }
+
+    #[test]
+    fn redacted_target_from_row_clears_credentials() {
+        let row = RawTargetRow {
+            id: Uuid::nil(),
+            name: "t".into(),
+            check_spec: json!({"type":"http","basic_auth":["u","p"],"bearer_token":"tok"}),
+            interval_secs: 60,
+            enabled: true,
+            tags: vec![],
+            public_status: false,
+            public_name: None,
+            public_description: None,
+            public_group: None,
+            public_sort_order: 0,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        let rt = RedactedTarget::from_row(row, None);
+        assert_eq!(rt.check["basic_auth"], json!("***"));
+        assert_eq!(rt.check["bearer_token"], json!("***"));
     }
 
     #[test]

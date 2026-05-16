@@ -41,6 +41,22 @@ pub enum AppError {
     #[error("{message}")]
     Unprocessable { code: &'static str, message: String },
 
+    /// 422 with a structured `details` payload — e.g. account deletion
+    /// blocked because the caller solo-owns orgs that still have members
+    /// (`details.orgs` carries the offending slugs + ids).
+    #[error("{message}")]
+    UnprocessableDetails {
+        code: &'static str,
+        message: String,
+        details: serde_json::Value,
+    },
+
+    /// 410 Gone — the resource existed but is permanently gone. Used by
+    /// account recovery once the grace window has elapsed and the hard-purge
+    /// has run: the token verified, but there is nothing left to restore.
+    #[error("{message}")]
+    Gone { code: &'static str, message: String },
+
     /// A resource quota would be exceeded. Renders 422 with the stable
     /// machine-readable `details` block (`quota`, `current`, `limit`,
     /// `plan`) UI clients branch on. `code` is `QUOTA_EXCEEDED` or the
@@ -130,6 +146,25 @@ impl AppError {
 
     pub fn forbidden_code(code: &'static str, message: impl Into<String>) -> Self {
         Self::ForbiddenCoded {
+            code,
+            message: message.into(),
+        }
+    }
+
+    pub fn unprocessable_details(
+        code: &'static str,
+        message: impl Into<String>,
+        details: serde_json::Value,
+    ) -> Self {
+        Self::UnprocessableDetails {
+            code,
+            message: message.into(),
+            details,
+        }
+    }
+
+    pub fn gone(code: &'static str, message: impl Into<String>) -> Self {
+        Self::Gone {
             code,
             message: message.into(),
         }
@@ -235,6 +270,23 @@ impl IntoResponse for AppError {
                 StatusCode::UNPROCESSABLE_ENTITY,
                 ApiErrorBody::new(code, message),
             ),
+            AppError::UnprocessableDetails {
+                code,
+                message,
+                details,
+            } => (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                ApiErrorBody {
+                    code,
+                    message,
+                    field: None,
+                    details: Some(details),
+                    trace_id: None,
+                },
+            ),
+            AppError::Gone { code, message } => {
+                (StatusCode::GONE, ApiErrorBody::new(code, message))
+            }
             AppError::QuotaExceeded {
                 code,
                 message,

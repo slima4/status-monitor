@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 
+use crate::email::templates::{attr_escape, html_escape};
 use crate::email::trait_def::RenderedEmail;
 
 pub fn render(
@@ -57,23 +58,4 @@ pub fn render(
         text_body,
         html_body,
     }
-}
-
-fn html_escape(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
-    for ch in input.chars() {
-        match ch {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            '\'' => out.push_str("&#39;"),
-            _ => out.push(ch),
-        }
-    }
-    out
-}
-
-fn attr_escape(input: &str) -> String {
-    html_escape(input)
 }

@@ -45,12 +45,13 @@ impl<E: Into<AppError>> From<E> for WebError {
 impl IntoResponse for WebError {
     fn into_response(self) -> Response {
         match self.0 {
-            AppError::NotFound { .. } => {
+            AppError::NotFound { .. } | AppError::Gone { .. } => {
                 (StatusCode::NOT_FOUND, NotFoundPage { active_tab: "" }).into_response()
             }
             AppError::BadRequest { .. }
             | AppError::Conflict { .. }
             | AppError::Unprocessable { .. }
+            | AppError::UnprocessableDetails { .. }
             | AppError::QuotaExceeded { .. }
             | AppError::RateLimited { .. }
             | AppError::PayloadTooLarge { .. } => {

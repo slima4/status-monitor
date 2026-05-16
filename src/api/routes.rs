@@ -140,7 +140,15 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
             "/orgs/{id}/members/{user_id}",
             axum::routing::delete(handlers::orgs::remove_org_member),
         )
-        .route("/me", get(handlers::me::me))
+        .route(
+            "/me",
+            get(handlers::me::me).delete(handlers::account::delete_account),
+        )
+        .route("/me/data-export", get(handlers::account::data_export))
+        .route(
+            "/auth/recover-account",
+            post(handlers::account::recover_account),
+        )
         .route("/me/usage", get(handlers::usage::get_me_usage))
         .route("/me/sessions", get(handlers::me::list_sessions))
         .route(

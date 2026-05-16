@@ -1,3 +1,4 @@
+pub mod account;
 pub mod api_tokens;
 pub mod auth;
 pub mod dashboard;

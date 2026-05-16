@@ -982,7 +982,7 @@ pub struct MemberView {
     pub email: String,
 }
 
-async fn record_audit_tx(
+pub(crate) async fn record_audit_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     org: OrgId,
     actor: Option<UserId>,

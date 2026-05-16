@@ -83,6 +83,9 @@ use crate::storage::UptimeStats;
         handlers::status_page::update_settings,
         handlers::status_page::upload_logo,
         handlers::status_page::delete_logo,
+        handlers::account::data_export,
+        handlers::account::delete_account,
+        handlers::account::recover_account,
     ),
     components(
         schemas(
@@ -164,6 +167,23 @@ use crate::storage::UptimeStats;
             handlers::status_page::UpdateStatusPageRequest,
             handlers::status_page::LogoResponse,
             Role,
+            crate::storage::postgres_secrets::RedactedTarget,
+            handlers::account::UserDataExport,
+            handlers::account::UserExport,
+            handlers::account::OAuthIdentityExport,
+            handlers::account::SessionMetadata,
+            handlers::account::ApiTokenMetadata,
+            handlers::account::OwnedOrgExport,
+            handlers::account::OrgExport,
+            handlers::account::IncidentExport,
+            handlers::account::MaintenanceExport,
+            handlers::account::MemberMetadata,
+            handlers::account::MembershipExport,
+            handlers::account::LoginAttemptExport,
+            handlers::account::AuditEntryExport,
+            handlers::account::DeletionConfirmation,
+            handlers::account::RecoverRequest,
+            handlers::account::RecoveredAccount,
         ),
     ),
     tags(
@@ -176,6 +196,7 @@ use crate::storage::UptimeStats;
         (name = "maintenance",   description = "Scheduled maintenance windows (operator)"),
         (name = "incidents",     description = "Incident narration and timeline (operator)"),
         (name = "orgs",          description = "Organisation management and membership"),
+        (name = "account",       description = "GDPR data export, account deletion and recovery"),
     ),
 )]
 pub struct ApiDoc;
