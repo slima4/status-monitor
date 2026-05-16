@@ -8,7 +8,7 @@ mod common;
 
 use status_monitor::config::PublicStatusConfig;
 use status_monitor::domain::{OrgId, UserId};
-use status_monitor::jobs::purge_deleted_orgs::{drain_clickhouse_purge_queue, purge_tick};
+use status_monitor::jobs::purge_deleted::{drain_clickhouse_purge_queue, purge_tick};
 use status_monitor::public_status::PageCache;
 use status_monitor::storage::{create_org_with_owner, soft_delete_org};
 use uuid::Uuid;

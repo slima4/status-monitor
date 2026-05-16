@@ -2,4 +2,4 @@
 //! self-contained tick function; the runtime decides when to call it (daily
 //! scheduler, manual invocation in tests).
 
-pub mod purge_deleted_orgs;
+pub mod purge_deleted;

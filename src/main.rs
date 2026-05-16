@@ -7,7 +7,7 @@ use status_monitor::{
     config::AppConfig,
     error::{AppError, Result},
     http_client::client::build_clients,
-    jobs::purge_deleted_orgs,
+    jobs::purge_deleted,
     notifier::{Notifier, build_notifiers, engine::AlertEngine},
     observability,
     pipeline::{BatcherConfig, ResultBatcher},
@@ -210,7 +210,7 @@ async fn main() -> Result<()> {
         let token = root.clone();
         let interval = Duration::from_secs(cfg.tenancy.purge_interval_secs.max(1));
         let grace_days = cfg.tenancy.deletion_grace_period_days;
-        tokio::spawn(purge_deleted_orgs::run(
+        tokio::spawn(purge_deleted::run(
             pool,
             ch_client_for_purge,
             interval,

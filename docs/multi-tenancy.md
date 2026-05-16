@@ -37,10 +37,11 @@ Deletion is two-phase to give operators a recovery window and to keep ClickHouse
 
 1. **Soft delete.** `DELETE /api/v1/orgs/{id}` flips `organizations.deleted_at = now()`. The org disappears from the user's switcher and every URL referencing it returns 404 — `is_active_member` short-circuits on `deleted_at IS NULL`.
 2. **Restore window.** The original deleter can call `POST /api/v1/orgs/{id}/restore` within `deletion_grace_period_days` (default 30); the slug stays held to prevent squatting during this window.
-3. **Purge.** A background worker (`src/jobs/purge_deleted_orgs.rs`) ticks every `purge_interval_secs` (default 24 h). Each tick:
+3. **Purge.** A background worker (`src/jobs/purge_deleted.rs`) ticks every `purge_interval_secs` (default 24 h). Each tick:
    - Selects up to 10 orgs whose `deleted_at` is past the grace window.
    - **Per org, in one PG transaction:** insert into `clickhouse_purge_queue` (idempotent via `ON CONFLICT (org_id) DO NOTHING`), then `DELETE FROM organizations` — `ON DELETE CASCADE` empties every tenant table.
    - Drains pending queue rows by issuing `ALTER TABLE check_results DELETE WHERE org_id = ?` against ClickHouse for each. The mutation is idempotent; a process restart between halves replays cleanly.
+   - Then hard-deletes up to 10 soft-deleted users past the grace window that hold no live (unexpired, unused) recovery token. The `users` `ON DELETE CASCADE` erases memberships, oauth_identities, api_tokens, invitations, sessions and recovery tokens; rows referencing the user as an actor (`login_attempts`, `org_audit_log`, `quota_events`, `plan_overrides`) are kept with the actor nulled.
 
 The outbox table is the load-bearing piece. A naive "DELETE in PG, then DELETE in CH" sequence leaves CH rows orphaned if the worker dies between calls — invisible to queries but on disk forever, breaking the "data fully erased within 30 days" privacy claim.
 
@@ -66,7 +67,7 @@ The gate: when `tenancy.enabled = true`, the public-status routes only respond i
 
 These are checked in CI:
 
-- Every runtime SQL statement against a tenant table must include `org_id` in its `WHERE` clause. Enforced by `scripts/check_tenant_isolation.sh` via an `ast-grep` rule. The only allow-listed call sites are `src/storage/admin.rs` (`AdminRepo`, cross-tenant by design) and `src/storage/orgs.rs` (operates on the `organizations` table itself), plus `src/jobs/purge_deleted_orgs.rs` (drains soft-deleted orgs across tenants).
+- Every runtime SQL statement against a tenant table must include `org_id` in its `WHERE` clause. Enforced by `scripts/check_tenant_isolation.sh` via an `ast-grep` rule. The only allow-listed call sites are `src/storage/admin.rs` (`AdminRepo`, cross-tenant by design) and `src/storage/orgs.rs` (operates on the `organizations` table itself), plus `src/jobs/purge_deleted.rs` (drains soft-deleted orgs and users across tenants).
 - Every ClickHouse `SELECT … WHERE target_id = …` must have a sibling `org_id = ?` term. Enforced by `scripts/check_clickhouse_org_scope.sh`.
 - A Postgres trigger on every child table (`incident_updates`, `maintenance_window_components`) raises on `org_id` mismatch between child and parent rows.
 - An integration test (`tests/tenant_isolation_test.rs`) provisions two orgs and asserts every per-org store backed by Postgres or ClickHouse only sees its own org's rows.

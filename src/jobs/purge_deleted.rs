@@ -1,4 +1,13 @@
-//! Daily purge of soft-deleted orgs past their grace period.
+//! Daily purge of soft-deleted orgs and users past their grace period.
+//!
+//! Each tick runs the org cascade/outbox below, then a back-pressured
+//! hard-delete of soft-deleted users whose grace window has elapsed and who
+//! hold no live (unexpired, unused) recovery token. The user row's FK
+//! `ON DELETE CASCADE` erases memberships, oauth_identities, api_tokens,
+//! invitations, sessions and recovery tokens; rows that reference the user
+//! as an actor (`login_attempts`, `org_audit_log`, `quota_events`,
+//! `plan_overrides`) keep their rows with the actor nulled — audit
+//! survives, identity does not.
 //!
 //! Two-step outbox pattern across Postgres and ClickHouse. The naive shape
 //! ("DELETE in PG, then DELETE in CH") leaves orphan rows in ClickHouse if the
@@ -73,11 +82,18 @@ pub async fn run(
             }
             _ = ticker.tick() => {
                 match purge_tick(&pool, &ch, grace_days, &cache).await {
-                    Ok(stats) => tracing::info!(
-                        cascaded = stats.cascaded,
-                        drained = stats.drained,
-                        "purge tick complete"
-                    ),
+                    Ok(stats) => {
+                        metrics::counter!("purge_deleted_total", "kind" => "org")
+                            .increment(u64::from(stats.cascaded));
+                        metrics::counter!("purge_deleted_total", "kind" => "user")
+                            .increment(u64::from(stats.users));
+                        tracing::info!(
+                            orgs_purged = stats.cascaded,
+                            users_purged = stats.users,
+                            drained = stats.drained,
+                            "purge tick complete"
+                        );
+                    }
                     Err(err) => tracing::error!(?err, "purge tick failed"),
                 }
             }
@@ -96,13 +112,21 @@ pub async fn purge_tick(
 ) -> Result<PurgeStats> {
     let cascaded = cascade_past_grace(pool, grace_days, cache).await?;
     let drained = drain_clickhouse_purge_queue(pool, ch).await?;
-    Ok(PurgeStats { cascaded, drained })
+    // Users last: an org the user solo-owns may be cascaded above in the
+    // same tick, so the user purge runs against already-settled org state.
+    let users = purge_users_past_grace(pool, grace_days).await?;
+    Ok(PurgeStats {
+        cascaded,
+        drained,
+        users,
+    })
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct PurgeStats {
     pub cascaded: u32,
     pub drained: u32,
+    pub users: u32,
 }
 
 /// PG-side step: pick orgs past the grace window, enqueue + cascade in one
@@ -211,4 +235,42 @@ pub async fn drain_clickhouse_purge_queue(pool: &PgPool, ch: &ChClient) -> Resul
         }
     }
     Ok(drained)
+}
+
+/// Hard-delete soft-deleted users whose grace window has elapsed, skipping
+/// anyone who still holds a live (unexpired, unused) recovery token — the
+/// recovery window is enforced by this predicate, not by re-deriving the
+/// grace period in the recovery endpoint. Postgres has no `DELETE … LIMIT`,
+/// so the batch bound is a subquery; the same `PURGE_BATCH_LIMIT`
+/// back-pressure as the org cascade caps a runaway mass-deletion. The
+/// `users` FK cascade erases dependent rows; `login_attempts` /
+/// `org_audit_log` keep theirs with the actor nulled.
+pub async fn purge_users_past_grace(pool: &PgPool, grace_days: u32) -> Result<u32> {
+    let purged: Vec<(Uuid,)> = sqlx::query_as(
+        r#"DELETE FROM users
+           WHERE id IN (
+               SELECT id FROM users
+                WHERE deleted_at IS NOT NULL
+                  AND deleted_at < now() - ($1::int * INTERVAL '1 day')
+                  AND NOT EXISTS (
+                      SELECT 1 FROM user_recovery_tokens t
+                       WHERE t.user_id = users.id
+                         AND t.expires_at > now()
+                         AND t.used_at IS NULL
+                  )
+                ORDER BY deleted_at ASC
+                LIMIT $2
+           )
+           RETURNING id"#,
+    )
+    .bind(i64::from(grace_days))
+    .bind(PURGE_BATCH_LIMIT)
+    .fetch_all(pool)
+    .await
+    .context("purge: delete past-grace users")?;
+
+    for (id,) in &purged {
+        tracing::debug!(%id, "user hard-purged");
+    }
+    Ok(u32::try_from(purged.len()).unwrap_or(u32::MAX))
 }
