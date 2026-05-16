@@ -30,13 +30,16 @@ PostgreSQL, and ClickHouse.
 - Public IP with **ports 80 and 443 open**
 - Docker 24+ and `docker compose` v2
 - ~4 GB RAM and 20 GB disk
-- DNS hosted on **Hetzner DNS** (the wildcard cert uses its DNS-01 API):
+- DNS zone in the **Hetzner Console** (the wildcard cert uses the Hetzner
+  Cloud DNS-01 API):
   - `app.{domain}` → A/AAAA to this host
   - `*.status.{domain}` → A/AAAA to this host (SaaS mode; the wildcard
     sends every `{slug}.status.{domain}` here and the app maps slug → org)
-  - A Hetzner DNS API token with zone-edit scope, from
-    <https://dns.hetzner.com/settings/api-token>, set as
-    `HETZNER_DNS_API_TOKEN` in `.env`
+  - A **Hetzner Cloud API token** (Read & Write) from Hetzner Console →
+    your Project → Security → API Tokens, set as `HETZNER_DNS_API_TOKEN`
+    in `.env`. Tokens are project-scoped, so the DNS zone must be in the
+    same project (zone → Actions → Transfer to project). The legacy
+    `dns.hetzner.com` DNS Console and its API were retired 2026-05.
 
   Self-host (single org) needs only the `app.{domain}` record and no DNS
   token — the status page is served at `https://app.{domain}/status`.
@@ -47,9 +50,10 @@ PostgreSQL, and ClickHouse.
 
 The stock `caddy:2-alpine` image lacks two plugins this deployment needs:
 
-- [`caddy-dns/hetzner`](https://github.com/caddy-dns/hetzner) — solves the
-  ACME DNS-01 challenge for the `*.status.{domain}` wildcard certificate
-  (HTTP-01 cannot validate a wildcard).
+- [`caddy-dns/hetzner/v2`](https://github.com/caddy-dns/hetzner) — solves
+  the ACME DNS-01 challenge for the `*.status.{domain}` wildcard
+  certificate (HTTP-01 cannot validate a wildcard). v2 speaks the new
+  Hetzner Console Cloud DNS API; v1 spoke the retired legacy API.
 - [`caddy-ratelimit`](https://github.com/mholt/caddy-ratelimit) — per-IP
   throttle on the public status surface.
 
@@ -154,9 +158,10 @@ If the wildcard line fails, grep the logs for the DNS-01 exchange:
 docker compose logs caddy | grep -i "acme\|dns\|hetzner\|challenge"
 ```
 
-Common causes: token missing/insufficient scope, the domain's
-authoritative DNS is not Hetzner, or `STATUS_MONITOR_DOMAIN` still set to
-a sub-host (it must be the base domain, e.g. `example.com`). While
+Common causes: token missing or not Read & Write, the zone is not in the
+token's project, the domain's authoritative DNS is not the Hetzner
+Console, or `STATUS_MONITOR_DOMAIN` still set to a sub-host (it must be
+the base domain, e.g. `example.com`). While
 debugging, switch to the staging CA (see "Testing the TLS flow" below) so
 you don't burn production rate limits.
 
@@ -333,8 +338,9 @@ balancer (Caddy supports this with multiple upstreams).
 **Certificate fails to provision**
 - DNS not propagated? `dig +short app.example.com` and
   `dig +short anything.status.example.com` (the wildcard must resolve)
-- Wildcard cert stuck? Authoritative DNS must be Hetzner and the token
-  needs zone-edit scope — `docker compose logs caddy | grep -i hetzner`
+- Wildcard cert stuck? Authoritative DNS must be the Hetzner Console, the
+  token must be Read & Write, and the zone must be in that token's
+  project — `docker compose logs caddy | grep -i hetzner`
 - Ports 80/443 blocked? Test from another host: `curl -v http://app.example.com`
 - Hit Let's Encrypt rate limit? Switch to staging (above) while you fix things
 - Cloud firewall rules? Check security groups / firewall settings

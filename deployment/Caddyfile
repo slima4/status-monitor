@@ -206,11 +206,19 @@ app.{$STATUS_MONITOR_DOMAIN} {
 
 	# Wildcard cert via Hetzner DNS-01 (HTTP-01 can't validate a wildcard),
 	# scoped to this site only. First issuance: Caddy writes a
-	# `_acme-challenge.status.{domain}` TXT record through the Hetzner API,
-	# Let's Encrypt validates it, cert issued — allow 60-90s. Renewals are
-	# silent. self-host never reaches this site, so it needs no DNS token.
+	# `_acme-challenge.status.{domain}` TXT record through the Hetzner Cloud
+	# DNS API, Let's Encrypt validates it, cert issued — allow 60-90s.
+	# Renewals are silent. self-host never reaches this site, so it needs no
+	# DNS token. HETZNER_DNS_API_TOKEN is a Hetzner Cloud API token (project
+	# scoped, Read & Write) and the zone must be in that project.
 	tls {
 		dns hetzner {$HETZNER_DNS_API_TOKEN}
+		# The new Cloud DNS API can lag a few seconds before the TXT is
+		# visible to Let's Encrypt's resolvers; wait, then verify against
+		# public resolvers rather than Hetzner's own.
+		propagation_delay 30s
+		propagation_timeout 5m
+		resolvers 1.1.1.1 8.8.8.8
 	}
 
 	# ─── Per-IP rate limit — public surface ─────────────────────────────
