@@ -73,6 +73,10 @@ jobs:
           file: ./Dockerfile
           platforms: linux/amd64
           push: true
+          # AGPL-3.0 §13 source-offer identity baked into the binary.
+          build-args: |
+            SM_SOURCE_COMMIT=${{ github.sha }}
+            SM_SOURCE_URL=${{ github.server_url }}/${{ github.repository }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           # cargo-chef splits the slow dependency layer from the app layer;

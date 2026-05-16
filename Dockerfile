@@ -35,6 +35,22 @@ COPY migrations ./migrations
 COPY config ./config
 COPY static ./static
 COPY templates ./templates
+# build.rs runs scripts/fetch-tailwind.sh then bakes static/css/app.css.
+# legal.rs `include_str!`s the policy markdown + THIRD-PARTY-LICENSES.md at
+# compile time, so those files must be in the build context here (the
+# planner/cook stage stays deps-only — it never compiles the local crate).
+COPY build.rs ./
+COPY scripts ./scripts
+COPY docs/legal ./docs/legal
+COPY THIRD-PARTY-LICENSES.md ./
+# AGPL-3.0 §13: bake the exact source identity so the running binary's
+# footer offers the Corresponding Source. CI passes the commit/repo; an
+# empty default lets a bare `docker build` fall back to build.rs's git
+# probe (and to upstream) without failing.
+ARG SM_SOURCE_COMMIT=
+ARG SM_SOURCE_URL=
+ENV SM_SOURCE_COMMIT=${SM_SOURCE_COMMIT} \
+    SM_SOURCE_URL=${SM_SOURCE_URL}
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/src/status-monitor/target \
     cargo build --release --bins && \
