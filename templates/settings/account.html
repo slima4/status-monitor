@@ -1,0 +1,185 @@
+{% extends "base.html" %}
+{% block title %}Account · Status Monitor{% endblock %}
+{% block content %}
+<section class="space-y-8">
+  <header class="space-y-1">
+    <h1 class="text-2xl font-semibold tracking-tight">Account</h1>
+    <p class="text-sm text-slate-500">
+      Signed in as <span class="font-medium text-slate-700">{{ email }}</span>
+      (via {{ provider }})
+    </p>
+    <dl class="flex flex-wrap gap-x-8 gap-y-1 pt-1 text-sm text-slate-500">
+      <div><dt class="inline">Joined:</dt> <dd class="inline text-slate-700">{{ joined }}</dd></div>
+      <div><dt class="inline">Last sign-in:</dt> <dd class="inline text-slate-700">{{ last_seen }}</dd></div>
+    </dl>
+  </header>
+
+  <section class="space-y-4" aria-labelledby="privacy-heading">
+    <h2 id="privacy-heading" class="text-sm font-semibold uppercase tracking-wide text-slate-500">Privacy</h2>
+
+    <div class="space-y-2 rounded border bg-white p-4">
+      <a href="/api/v1/me/data-export" download rel="nofollow"
+         class="inline-block rounded border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-100">
+        Export my data
+      </a>
+      <p class="text-sm text-slate-500">
+        Download everything associated with your account as a JSON file:
+        profile, sign-in identities, owned organisations, targets (credentials
+        redacted), incidents, memberships and recent activity.
+      </p>
+    </div>
+
+    <div class="space-y-2 rounded border border-rose-200 bg-white p-4">
+      <button type="button"
+              hx-on:click="document.getElementById('delete-modal').showModal()"
+              class="inline-block rounded border border-rose-300 px-3 py-1.5 text-sm font-medium text-rose-700 hover:bg-rose-50">
+        Delete my account
+      </button>
+      <p class="text-sm text-slate-500">
+        Permanently delete your account and every organisation you solely own.
+        Recoverable for a grace period via a link emailed to you; permanent
+        after that.
+      </p>
+    </div>
+  </section>
+
+  <section class="space-y-4" aria-labelledby="sessions-heading">
+    <h2 id="sessions-heading" class="text-sm font-semibold uppercase tracking-wide text-slate-500">Sessions</h2>
+    {% include "settings/_sessions_block.html" %}
+  </section>
+</section>
+
+<dialog id="delete-modal"
+        class="w-full max-w-lg rounded-lg p-0 backdrop:bg-slate-900/40">
+  <div class="space-y-4 p-6">
+    <h2 class="text-lg font-semibold text-rose-700">Delete your account?</h2>
+    <p class="text-sm text-slate-600">
+      This deactivates your account immediately and schedules a permanent
+      purge after the recovery grace period. Sessions are signed out, API
+      tokens revoked, pending invitations withdrawn, and organisations you
+      solely own are scheduled for deletion too. A recovery link is emailed
+      to you in case you change your mind.
+    </p>
+
+    <div id="delete-blocking" class="hidden space-y-3 rounded border border-amber-300 bg-amber-50 p-3 text-sm">
+      <p class="font-medium text-amber-900">
+        You solely own organisations that still have other members. Transfer
+        ownership (promote another member to owner) or delete these
+        organisations first:
+      </p>
+      <ul id="delete-blocking-list" class="space-y-2"></ul>
+    </div>
+
+    <form method="dialog" class="contents">
+      <label class="block text-sm font-medium text-slate-700" for="delete-confirm-input">
+        Type <code class="rounded bg-slate-100 px-1">DELETE</code> to confirm
+      </label>
+      <input id="delete-confirm-input" type="text" autocomplete="off"
+             oninput="document.getElementById('confirm-delete').disabled = this.value !== 'DELETE'"
+             class="w-full rounded border px-3 py-2 text-sm focus:border-rose-600 focus:outline-none">
+
+      <p id="delete-result" class="text-sm" aria-live="polite"></p>
+
+      <div class="flex items-center justify-end gap-2 pt-2">
+        <button type="submit" value="cancel"
+                class="rounded border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-100">
+          Cancel
+        </button>
+        <button type="button" id="confirm-delete" disabled
+                hx-delete="/api/v1/me"
+                hx-swap="none"
+                class="rounded bg-rose-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50">
+          Delete my account
+        </button>
+      </div>
+    </form>
+  </div>
+</dialog>
+
+<script>
+  (function () {
+    const result = document.getElementById('delete-result');
+    const blocking = document.getElementById('delete-blocking');
+    const blockingList = document.getElementById('delete-blocking-list');
+
+    function parse(xhr) {
+      try { return JSON.parse(xhr.responseText); } catch (e) { return null; }
+    }
+
+    function renderBlocking(orgs) {
+      blockingList.textContent = '';
+      orgs.forEach((org) => {
+        const li = document.createElement('li');
+        li.className = 'flex items-center justify-between gap-3 rounded bg-white px-3 py-2';
+        li.dataset.orgId = org.id;
+
+        const name = document.createElement('span');
+        name.className = 'font-mono text-xs text-slate-700';
+        name.textContent = org.slug || org.id;
+        li.appendChild(name);
+
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'org-delete rounded border border-rose-300 px-2 py-1 text-xs font-medium text-rose-700 hover:bg-rose-50';
+        btn.textContent = 'Delete organisation';
+        btn.setAttribute('hx-delete', '/api/v1/orgs/' + org.id);
+        btn.setAttribute('hx-swap', 'none');
+        btn.setAttribute('hx-confirm', 'Permanently delete ' + (org.slug || 'this organisation') + '?');
+        li.appendChild(btn);
+
+        blockingList.appendChild(li);
+      });
+      blocking.classList.remove('hidden');
+      htmx.process(blockingList);
+    }
+
+    document.body.addEventListener('htmx:afterRequest', (ev) => {
+      const elt = ev.detail.elt;
+      if (!elt) return;
+
+      if (elt.id === 'confirm-delete') {
+        const xhr = ev.detail.xhr;
+        const body = parse(xhr) || {};
+
+        if (xhr.status === 200) {
+          const when = body.scheduled_purge_at
+            ? new Date(body.scheduled_purge_at).toUTCString() : 'the grace period';
+          const sent = body.recovery_token_sent_to_email || 'your email';
+          result.className = 'text-sm text-emerald-700';
+          result.textContent = 'Account scheduled for deletion. A recovery link '
+            + 'was sent to ' + sent + '. Permanent after ' + when + '. Signing out…';
+          document.getElementById('confirm-delete').disabled = true;
+          setTimeout(() => { window.location.href = '/login'; }, 4000);
+          return;
+        }
+
+        const err = body.error || {};
+        const blockingOrgs = xhr.status === 422 && Array.isArray(err.details && err.details.orgs)
+          ? err.details.orgs : null;
+        const alreadyDeleted = xhr.status === 409 || err.code === 'ACCOUNT_ALREADY_DELETED';
+
+        result.textContent = err.message || 'Something went wrong.';
+        if (blockingOrgs) {
+          renderBlocking(blockingOrgs);
+          result.className = 'text-sm text-amber-800';
+        } else if (alreadyDeleted) {
+          result.className = 'text-sm text-slate-600';
+        } else {
+          result.className = 'text-sm text-rose-700';
+        }
+        return;
+      }
+
+      if (elt.classList && elt.classList.contains('org-delete') && ev.detail.successful) {
+        const li = elt.closest('li');
+        if (li) li.remove();
+        if (!blockingList.children.length) {
+          blocking.classList.add('hidden');
+          result.className = 'text-sm text-emerald-700';
+          result.textContent = 'All blocking organisations cleared — you can delete your account now.';
+        }
+      }
+    });
+  })();
+</script>
+{% endblock %}

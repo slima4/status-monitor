@@ -34,6 +34,10 @@ const TAB_ONBOARD: &str = "onboarding";
 const TAB_SETTINGS: &str = "settings";
 const TAB_STATUS_PAGE: &str = "status_page";
 const TAB_USAGE: &str = "usage";
+const TAB_ACCOUNT: &str = "account";
+/// Suppresses the authenticated header nav (see base.html): a user reaching
+/// the recovery page is signed out by construction.
+const TAB_RECOVER: &str = "recover";
 
 #[derive(Debug, Default, Deserialize)]
 pub struct LoginQuery {
@@ -94,7 +98,7 @@ pub async fn onboarding_org(
     session: Session,
 ) -> WebResult<Response> {
     let Some(user) = session.user.clone() else {
-        return Ok(Redirect::to("/login?redirect_after=%2Fonboarding%2Forg").into_response());
+        return Ok(login_redirect("/onboarding/org").into_response());
     };
     let pool = state.require_db()?;
     let Some(org_id) = personal_org_for_user(pool, user.id).await? else {
@@ -116,6 +120,22 @@ pub async fn onboarding_org(
     .into_response())
 }
 
+/// First char upper-cased, the rest unchanged. Empty input → empty string.
+fn capitalize_first(s: &str) -> String {
+    let mut c = s.chars();
+    match c.next() {
+        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+        None => String::new(),
+    }
+}
+
+/// Redirect an unauthenticated visitor to `/login`, preserving where they
+/// were headed. `next` is the raw path (e.g. `/settings/account`); it is
+/// URL-encoded here so call sites never hand-roll `%2F` literals.
+fn login_redirect(next: &str) -> Redirect {
+    Redirect::to(&format!("/login?redirect_after={}", url_encode(next)))
+}
+
 /// Crude "Alice" from "alice@example.com" — fine for the welcome screen;
 /// we'll let the user pick their real display name in /settings later.
 fn display_name_for(email: &str) -> String {
@@ -124,10 +144,36 @@ fn display_name_for(email: &str) -> String {
         .split(&['.', '_', '-', '+'][..])
         .next()
         .unwrap_or(local);
-    let mut chars = first.chars();
-    match chars.next() {
-        Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
-        None => "There".to_string(),
+    let capitalized = capitalize_first(first);
+    if capitalized.is_empty() {
+        "There".to_string()
+    } else {
+        capitalized
+    }
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct RecoverQuery {
+    pub token: Option<String>,
+}
+
+#[derive(Template, WebTemplate)]
+#[template(path = "auth/recover_account.html")]
+pub struct RecoverAccountPage {
+    pub active_tab: &'static str,
+    /// Raw token from the email link; validity is decided by the API call the
+    /// page makes, not here. Empty ⇒ render the invalid-link state.
+    pub token: String,
+}
+
+/// `GET /recover-account?token=…`. Public (the user is signed out): renders a
+/// confirm card that POSTs the token to `/api/v1/auth/recover-account`. A
+/// blank token short-circuits to the invalid-link copy without an API round
+/// trip.
+pub async fn recover_account(Query(q): Query<RecoverQuery>) -> RecoverAccountPage {
+    RecoverAccountPage {
+        active_tab: TAB_RECOVER,
+        token: q.token.unwrap_or_default().trim().to_string(),
     }
 }
 
@@ -141,14 +187,14 @@ pub mod settings {
         StatusPageSettings, build_settings, load_for_settings,
     };
     use crate::app::AppState;
-    use crate::auth::{api_tokens, session as session_store};
+    use crate::auth::{account, api_tokens, session as session_store};
     use crate::error::AppError;
     use crate::web::assets::filters;
     use crate::web::auth::{CurrentOrg, Session};
     use crate::web::error::WebResult;
     use crate::web::views::fmt_human;
 
-    use super::{TAB_SETTINGS, TAB_STATUS_PAGE, TAB_USAGE};
+    use super::{TAB_ACCOUNT, TAB_SETTINGS, TAB_STATUS_PAGE, TAB_USAGE};
 
     #[derive(Template, WebTemplate)]
     #[template(path = "settings/sessions.html")]
@@ -193,7 +239,7 @@ pub mod settings {
 
     pub async fn sessions_page(session: Session) -> Response {
         if session.user.is_none() {
-            return Redirect::to("/login?redirect_after=%2Fsettings%2Fsessions").into_response();
+            return super::login_redirect("/settings/sessions").into_response();
         }
         SessionsPage {
             active_tab: TAB_SETTINGS,
@@ -203,12 +249,63 @@ pub mod settings {
 
     pub async fn api_tokens_page(session: Session) -> Response {
         if session.user.is_none() {
-            return Redirect::to("/login?redirect_after=%2Fsettings%2Fapi-tokens").into_response();
+            return super::login_redirect("/settings/api-tokens").into_response();
         }
         ApiTokensPage {
             active_tab: TAB_SETTINGS,
         }
         .into_response()
+    }
+
+    #[derive(Template, WebTemplate)]
+    #[template(path = "settings/account.html")]
+    pub struct AccountPage {
+        pub active_tab: &'static str,
+        pub email: String,
+        /// Identity provider label, e.g. `GitHub`, or `—` if none on file.
+        pub provider: String,
+        pub joined: String,
+        pub last_seen: String,
+    }
+
+    /// `GET /settings/account`. An unauthenticated hit redirects to login
+    /// (matching the other settings pages); a DB error surfaces as the 5xx
+    /// page. Export and delete are driven from the page against the API —
+    /// this handler only renders the chrome plus the read-only overview.
+    pub async fn account_page(
+        State(state): State<AppState>,
+        session: Session,
+    ) -> WebResult<Response> {
+        let Some(user) = session.user.clone() else {
+            return Ok(super::login_redirect("/settings/account").into_response());
+        };
+        let pool = state.require_db()?;
+        let (joined, provider, last_seen) = match account::account_facts(pool, user.id).await? {
+            Some(f) => (
+                fmt_human(f.created_at),
+                provider_label(f.provider.as_deref()),
+                f.last_login_at
+                    .map(fmt_human)
+                    .unwrap_or_else(|| "—".to_string()),
+            ),
+            None => ("—".to_string(), "—".to_string(), "—".to_string()),
+        };
+        Ok(AccountPage {
+            active_tab: TAB_ACCOUNT,
+            email: user.email,
+            provider,
+            joined,
+            last_seen,
+        }
+        .into_response())
+    }
+
+    fn provider_label(p: Option<&str>) -> String {
+        match p {
+            Some("github") => "GitHub".to_string(),
+            Some(other) if !other.is_empty() => super::capitalize_first(other),
+            _ => "—".to_string(),
+        }
     }
 
     pub async fn sessions_partial(
@@ -284,9 +381,7 @@ pub mod settings {
         let CurrentOrg(org) = match org {
             Ok(o) => o,
             Err(AppError::Unauthorized) => {
-                return Ok(
-                    Redirect::to("/login?redirect_after=%2Fsettings%2Fstatus-page").into_response(),
-                );
+                return Ok(super::login_redirect("/settings/status-page").into_response());
             }
             Err(e) => return Err(e.into()),
         };
@@ -366,9 +461,7 @@ pub mod settings {
         let CurrentOrg(org) = match org {
             Ok(o) => o,
             Err(AppError::Unauthorized) => {
-                return Ok(
-                    Redirect::to("/login?redirect_after=%2Fsettings%2Fusage").into_response()
-                );
+                return Ok(super::login_redirect("/settings/usage").into_response());
             }
             Err(e) => return Err(e.into()),
         };
@@ -453,6 +546,40 @@ pub mod settings {
             assert!(html.contains("width: 0%"));
             assert!(html.contains("60 seconds"));
             assert!(html.contains(r#"href="mailto:upgrade@your-domain.com""#));
+        }
+
+        #[test]
+        fn account_page_renders_privacy_and_sessions_sections() {
+            let html = AccountPage {
+                active_tab: super::super::TAB_ACCOUNT,
+                email: "alice@example.com".into(),
+                provider: "GitHub".into(),
+                joined: "2026-02-14 09:00 UTC".into(),
+                last_seen: "2026-05-16 12:00 UTC".into(),
+            }
+            .render()
+            .unwrap();
+            assert!(html.starts_with("<!doctype html>"));
+            assert!(html.contains("alice@example.com"));
+            assert!(html.contains("via GitHub"));
+            assert!(html.contains("2026-02-14 09:00 UTC"));
+            // Export is a real download link to the API, not an HTMX swap.
+            assert!(html.contains(r#"href="/api/v1/me/data-export""#));
+            assert!(html.contains("download"));
+            // Delete drives the modal, which DELETEs /api/v1/me.
+            assert!(html.contains(r#"id="delete-modal""#));
+            assert!(html.contains(r#"hx-delete="/api/v1/me""#));
+            // Sessions section reuses the shared partial loader (no dup logic).
+            assert!(html.contains(r#"hx-get="/web/partials/settings/sessions""#));
+            assert!(html.contains("logout-all"));
+        }
+
+        #[test]
+        fn provider_label_maps_known_and_unknown() {
+            assert_eq!(provider_label(Some("github")), "GitHub");
+            assert_eq!(provider_label(Some("gitlab")), "Gitlab");
+            assert_eq!(provider_label(Some("")), "—");
+            assert_eq!(provider_label(None), "—");
         }
 
         #[test]
@@ -590,6 +717,34 @@ mod tests {
         assert!(html.contains(r#"value="personal-quiet-koala""#));
         assert!(html.contains(r#"hx-patch="/api/v1/orgs/00000000-0000-0000-0000-000000000001""#));
         assert!(html.contains(r#""X-Requested-With":"status-monitor""#));
+    }
+
+    #[test]
+    fn recover_page_renders_confirm_when_token_present() {
+        let html = RecoverAccountPage {
+            active_tab: TAB_RECOVER,
+            token: "tok-abc".into(),
+        }
+        .render()
+        .unwrap();
+        assert!(html.contains("Recover your account"));
+        assert!(html.contains(r#"hx-post="/api/v1/auth/recover-account""#));
+        assert!(html.contains(r#"hx-ext="json-enc""#));
+        assert!(html.contains(r#"value="tok-abc""#));
+        // Signed-out page: the authenticated header nav must be suppressed.
+        assert!(!html.contains("Log out"));
+    }
+
+    #[test]
+    fn recover_page_blank_token_shows_invalid_state() {
+        let html = RecoverAccountPage {
+            active_tab: TAB_RECOVER,
+            token: String::new(),
+        }
+        .render()
+        .unwrap();
+        assert!(html.contains("Recovery link invalid"));
+        assert!(!html.contains("hx-post"));
     }
 
     #[test]

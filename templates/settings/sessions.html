@@ -9,21 +9,6 @@
     </p>
   </header>
 
-  <div id="sessions-list"
-       hx-get="/web/partials/settings/sessions"
-       hx-trigger="load, every 60s, sessions:refresh from:body"
-       hx-swap="innerHTML"
-       class="rounded border bg-white">
-    <p class="px-4 py-3 text-sm text-slate-500">Loading…</p>
-  </div>
-
-  <button type="button"
-          hx-post="/auth/logout-all"
-          hx-headers='{"X-Requested-With":"status-monitor"}'
-          hx-confirm="Log out of every session for this account?"
-          hx-on::after-request="window.location.href='/login'"
-          class="rounded border border-rose-300 px-3 py-1.5 text-sm font-medium text-rose-700 hover:bg-rose-50">
-    Log out everywhere
-  </button>
+  {% include "settings/_sessions_block.html" %}
 </section>
 {% endblock %}

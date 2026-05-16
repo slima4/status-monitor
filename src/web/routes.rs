@@ -23,7 +23,12 @@ pub fn routes(cfg: &AppConfig) -> Router<AppState> {
         .route("/web/targets/list", get(views::targets_list::list_partial))
         .route("/web/partials/dashboard", get(views::dashboard::region))
         .route("/login", get(views::auth::login))
+        .route("/recover-account", get(views::auth::recover_account))
         .route("/onboarding/org", get(views::auth::onboarding_org))
+        .route(
+            "/settings/account",
+            get(views::auth::settings::account_page),
+        )
         .route(
             "/settings/sessions",
             get(views::auth::settings::sessions_page),
