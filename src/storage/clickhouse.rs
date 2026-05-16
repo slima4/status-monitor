@@ -128,6 +128,27 @@ pub fn build_client(cfg: &ClickhouseConfig) -> Client {
     client
 }
 
+/// Unbounded live row count for one org in a single ClickHouse table. Used by
+/// the GDPR purge to prove an erasure actually landed (zero == erased), so it
+/// deliberately takes no time range — it must see *every* surviving row.
+/// `table` is always a fixed in-crate constant at the call sites, never user
+/// input, so the identifier interpolation is injection-free.
+pub(crate) async fn count_org_rows(client: &Client, table: &str, org_id: Uuid) -> Result<u64> {
+    #[derive(Row, Deserialize)]
+    struct CountRow {
+        n: u64,
+    }
+    let row: CountRow = client
+        .query(&format!(
+            "SELECT count() AS n FROM {table} WHERE org_id = ?"
+        ))
+        .bind(org_id)
+        .fetch_one::<CountRow>()
+        .await
+        .with_context(|| format!("clickhouse count_org_rows {table}"))?;
+    Ok(row.n)
+}
+
 pub struct ClickhouseResultSink {
     client: Client,
     default_org_id: OrgId,

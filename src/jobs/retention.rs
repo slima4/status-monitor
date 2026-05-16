@@ -34,7 +34,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::config::{RetentionConfig, SessionConfig};
 use crate::error::Result;
-use crate::jobs::purge_deleted::{self, PurgeStats};
+use crate::jobs::purge_deleted::{self, PurgeStats, QueueDepth};
 use crate::public_status::PageCache;
 
 /// `check_results` retention is the ClickHouse table `TTL`, so this job does
@@ -50,6 +50,7 @@ const RUN_HOUR_UTC: u32 = 3;
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct RetentionReport {
     pub purge: PurgeStats,
+    pub purge_queue: QueueDepth,
     pub login_attempts: u64,
     pub quota_events: u64,
     pub audit_log: u64,
@@ -116,6 +117,12 @@ fn emit_metrics(r: &RetentionReport) {
     metrics::counter!("retention_purged_rows_total", "table" => "org_audit_log")
         .increment(r.audit_log);
     metrics::counter!("retention_purged_rows_total", "table" => "sessions").increment(r.sessions);
+    // Gauges, not counters: depth/age describe a *current* backlog. A
+    // sustained non-zero pending count (or a climbing oldest-age) is the
+    // alert condition for a stuck ClickHouse erasure path.
+    metrics::gauge!("clickhouse_purge_queue_pending").set(r.purge_queue.pending as f64);
+    metrics::gauge!("clickhouse_purge_queue_oldest_age_seconds")
+        .set(r.purge_queue.oldest_age_secs as f64);
 }
 
 /// One full retention cycle. Public so tests drive it directly (small windows,
@@ -129,6 +136,7 @@ pub async fn purge_old_data(
     cache: &PageCache,
 ) -> Result<RetentionReport> {
     let purge = purge_deleted::purge_tick(pool, ch, grace_days, cache).await?;
+    let purge_queue = purge_deleted::purge_queue_depth(pool).await?;
 
     let login_attempts = delete_older_than(
         pool,
@@ -166,6 +174,7 @@ pub async fn purge_old_data(
 
     Ok(RetentionReport {
         purge,
+        purge_queue,
         login_attempts,
         quota_events,
         audit_log,

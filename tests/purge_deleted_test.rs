@@ -8,7 +8,9 @@ mod common;
 
 use status_monitor::config::PublicStatusConfig;
 use status_monitor::domain::{OrgId, UserId};
-use status_monitor::jobs::purge_deleted::{drain_clickhouse_purge_queue, purge_tick};
+use status_monitor::jobs::purge_deleted::{
+    drain_clickhouse_purge_queue, purge_queue_depth, purge_tick,
+};
 use status_monitor::public_status::PageCache;
 use status_monitor::storage::{create_org_with_owner, soft_delete_org};
 use uuid::Uuid;
@@ -293,6 +295,147 @@ async fn enqueue_is_dedup_on_conflict() {
         .await
         .unwrap();
     sqlx::query("DELETE FROM organizations WHERE id = $1")
+        .bind(org.id.0)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM users WHERE id = $1")
+        .bind(user.0)
+        .execute(&pool)
+        .await
+        .unwrap();
+}
+
+/// The drain must not settle a queue row on the mutation *ack* — it must
+/// settle only once a `count()` proves the org's CH rows are actually gone.
+/// Seeds a real `check_results` row, drains, then asserts both the queue row
+/// is complete AND zero rows survive in both tenant tables.
+#[tokio::test]
+#[ignore]
+async fn drain_erases_ch_rows_then_completes() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let Some(ch) = common::ch_client_from_env().await else {
+        return;
+    };
+    let user = make_user(&pool).await;
+    let org = create_org_with_owner(&pool, user, &unique_slug("erase"), "n", 3)
+        .await
+        .unwrap()
+        .unwrap();
+
+    // One real result row for this org; the MV propagates it to check_results_1m.
+    ch.query(
+        "INSERT INTO check_results (org_id, target_id, timestamp, status, duration_ms) \
+         VALUES (?, ?, fromUnixTimestamp64Milli(?), 'up', ?)",
+    )
+    .bind(org.id.0)
+    .bind(Uuid::now_v7())
+    .bind(chrono::Utc::now().timestamp_millis())
+    .bind(42u32)
+    .execute()
+    .await
+    .unwrap();
+
+    sqlx::query(
+        "INSERT INTO clickhouse_purge_queue (org_id) VALUES ($1) ON CONFLICT (org_id) DO NOTHING",
+    )
+    .bind(org.id.0)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let drained = drain_clickhouse_purge_queue(&pool, &ch).await.unwrap();
+    assert!(drained >= 1, "the seeded org should drain");
+
+    let (completed,): (Option<chrono::DateTime<chrono::Utc>>,) =
+        sqlx::query_as("SELECT completed_at FROM clickhouse_purge_queue WHERE org_id = $1")
+            .bind(org.id.0)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(
+        completed.is_some(),
+        "queue row settles only after erasure is verified"
+    );
+
+    for table in ["check_results", "check_results_1m"] {
+        let n: u64 = ch
+            .query(&format!("SELECT count() FROM {table} WHERE org_id = ?"))
+            .bind(org.id.0)
+            .fetch_one::<u64>()
+            .await
+            .unwrap();
+        assert_eq!(n, 0, "{table} must hold zero rows for the erased org");
+    }
+
+    sqlx::query("DELETE FROM clickhouse_purge_queue WHERE org_id = $1")
+        .bind(org.id.0)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM users WHERE id = $1")
+        .bind(user.0)
+        .execute(&pool)
+        .await
+        .unwrap();
+}
+
+/// `purge_queue_depth` powers the stuck-erasure alert. A pending row must be
+/// counted with a non-zero oldest-age; a completed row must not.
+#[tokio::test]
+#[ignore]
+async fn queue_depth_counts_pending_not_completed() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let user = make_user(&pool).await;
+    let org = create_org_with_owner(&pool, user, &unique_slug("depth"), "n", 3)
+        .await
+        .unwrap()
+        .unwrap();
+
+    // Backdated 3h and still pending → it must be the oldest entry (other
+    // tests enqueue at now()), so oldest_age tracks it.
+    sqlx::query(
+        "INSERT INTO clickhouse_purge_queue (org_id, queued_at) \
+         VALUES ($1, now() - INTERVAL '3 hours')",
+    )
+    .bind(org.id.0)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let d = purge_queue_depth(&pool).await.unwrap();
+    assert!(d.pending >= 1, "pending row must be counted");
+    assert!(
+        d.oldest_age_secs >= 3 * 3600 - 60,
+        "oldest age should reflect the 3h-old pending row, got {}",
+        d.oldest_age_secs
+    );
+
+    sqlx::query("UPDATE clickhouse_purge_queue SET completed_at = now() WHERE org_id = $1")
+        .bind(org.id.0)
+        .execute(&pool)
+        .await
+        .unwrap();
+    // Parallel tests perturb the global count, so assert on this org: a
+    // completed row must no longer be pending.
+    let (still_pending,): (bool,) = sqlx::query_as(
+        "SELECT EXISTS (SELECT 1 FROM clickhouse_purge_queue \
+         WHERE org_id = $1 AND completed_at IS NULL)",
+    )
+    .bind(org.id.0)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(
+        !still_pending,
+        "completing the row drops it from the pending depth"
+    );
+
+    sqlx::query("DELETE FROM clickhouse_purge_queue WHERE org_id = $1")
         .bind(org.id.0)
         .execute(&pool)
         .await

@@ -26,22 +26,33 @@
 //!  2. For each, runs a single PG transaction: insert into the queue (idem),
 //!     then `DELETE FROM organizations` which cascades to every tenant table.
 //!  3. Drains pending queue rows by issuing `ALTER ... DELETE` against
-//!     ClickHouse. ClickHouse mutations are async server-side; we mark the
-//!     queue row complete once the server accepts the mutation.
+//!     ClickHouse. The default mutation mode is async (accepted ≠ applied),
+//!     which would let GDPR erasure be reported "done" while bytes still sit
+//!     on disk. Two guards close that gap: the mutation runs with
+//!     `mutations_sync=2` so the call returns only once it is applied, and
+//!     the queue row is marked complete only after a `count()` confirms zero
+//!     rows remain for that org. The privacy guarantee is "rows gone", so we
+//!     assert exactly that rather than trusting the submit ack.
 //!
 //! Idempotency:
 //!  * `ON CONFLICT (org_id) DO NOTHING` on the queue insert.
 //!  * `ALTER TABLE ... DELETE WHERE org_id = ?` is safe to repeat — a second
-//!    call on already-deleted rows is a no-op mutation.
+//!    call on already-deleted rows is a no-op mutation. A row that already
+//!    has zero CH rows (replay after a PG-side crash) skips the ALTER
+//!    entirely and just settles the queue row.
 
-use anyhow::Context;
+use std::time::Duration;
+
+use anyhow::{Context, anyhow};
 use clickhouse::Client as ChClient;
+use futures::future::join_all;
 use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::domain::OrgId;
 use crate::error::Result;
 use crate::public_status::PageCache;
+use crate::storage::clickhouse::count_org_rows;
 
 /// Hard cap on orgs processed per tick. Small enough that a stuck ClickHouse
 /// can't accumulate a huge backlog between alerts; large enough that a normal
@@ -52,6 +63,17 @@ const PURGE_BATCH_LIMIT: i64 = 10;
 /// but the server queues them serially, so going wider than this just trades
 /// PG round-trips for CH mutation backlog.
 const DRAIN_BATCH_LIMIT: i64 = 50;
+
+/// Upper bound on one org's synchronous CH erasure (both tables + verify). A
+/// healthy single-org mutation is sub-second; this only bites when CH is
+/// stuck, in which case we abandon the row (left pending, retried next tick)
+/// rather than letting the daily job hang. Correctness is unaffected — a row
+/// is never marked complete until `count()` proves the data is gone.
+const DRAIN_ROW_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// The two ClickHouse tables that carry per-org check data. Erasure must clear
+/// both before a queue row may settle.
+const CH_TENANT_TABLES: [&str; 2] = ["check_results", "check_results_1m"];
 
 /// Run one full purge cycle: cascade PG-side deletes for past-grace orgs,
 /// then drain whatever pending CH purges exist (including ones enqueued on
@@ -128,10 +150,11 @@ async fn cascade_past_grace(pool: &PgPool, grace_days: u32, cache: &PageCache) -
     Ok(cascaded)
 }
 
-/// CH-side step: drain pending queue rows. Each row's two tables are deleted
-/// independently; if either fails, the queue row's `attempts` and `last_error`
-/// get incremented so the next tick retries. Successful drains record
-/// `completed_at`.
+/// CH-side step: drain pending queue rows. For each org the two tenant tables
+/// are erased with a synchronous mutation, then a `count()` confirms zero rows
+/// remain — only then is the queue row settled. Any error, timeout, or
+/// still-present rows leave the row pending with `attempts`/`last_error`
+/// bumped so the next tick retries.
 pub async fn drain_clickhouse_purge_queue(pool: &PgPool, ch: &ChClient) -> Result<u32> {
     let pending: Vec<(Uuid,)> = sqlx::query_as(
         r#"SELECT org_id FROM clickhouse_purge_queue
@@ -146,47 +169,137 @@ pub async fn drain_clickhouse_purge_queue(pool: &PgPool, ch: &ChClient) -> Resul
 
     let mut drained = 0u32;
     for (org_id,) in pending {
-        // Distinct tables, no shared server-side lock; run them in parallel
-        // and use `join!` (not `try_join!`) so we still capture both errors.
-        let (r1, r2) = tokio::join!(
-            ch.query("ALTER TABLE check_results DELETE WHERE org_id = ?")
-                .bind(org_id)
-                .execute(),
-            ch.query("ALTER TABLE check_results_1m DELETE WHERE org_id = ?")
-                .bind(org_id)
-                .execute(),
-        );
-        match (r1, r2) {
-            (Ok(_), Ok(_)) => {
-                sqlx::query(
-                    r#"UPDATE clickhouse_purge_queue
-                       SET completed_at = now()
-                       WHERE org_id = $1"#,
-                )
-                .bind(org_id)
-                .execute(pool)
-                .await
-                .context("purge: mark queue complete")?;
+        match tokio::time::timeout(DRAIN_ROW_TIMEOUT, erase_org_from_clickhouse(ch, org_id)).await {
+            Ok(Ok(())) => {
+                mark_queue_complete(pool, org_id).await?;
                 drained += 1;
                 tracing::info!(%org_id, "clickhouse purge complete");
             }
-            (e1, e2) => {
-                let err = format!("{:?} | {:?}", e1.err(), e2.err());
-                sqlx::query(
-                    r#"UPDATE clickhouse_purge_queue
-                       SET attempts = attempts + 1, last_error = $2
-                       WHERE org_id = $1"#,
-                )
-                .bind(org_id)
-                .bind(&err)
-                .execute(pool)
-                .await
-                .context("purge: mark queue attempt")?;
-                tracing::warn!(%org_id, %err, "clickhouse purge failed; will retry");
+            Ok(Err(err)) => {
+                let msg = format!("{err:?}");
+                mark_queue_attempt(pool, org_id, &msg).await?;
+                tracing::warn!(%org_id, err = %msg, "clickhouse purge failed; will retry");
+            }
+            Err(_) => {
+                let msg = format!("timed out after {}s", DRAIN_ROW_TIMEOUT.as_secs());
+                mark_queue_attempt(pool, org_id, &msg).await?;
+                tracing::warn!(%org_id, "clickhouse purge timed out; will retry");
             }
         }
     }
     Ok(drained)
+}
+
+/// Erase one org from every CH tenant table and prove it.
+///
+/// 1. Count first. If the org already has zero rows everywhere — a replay
+///    after a PG-side crash, or a row left pending by an earlier failed
+///    verify — settle without issuing any mutation. This is what keeps a
+///    stuck ClickHouse from accumulating one fresh no-op `ALTER` per table
+///    per daily tick on top of an already-jammed mutation queue.
+/// 2. Otherwise issue `ALTER … DELETE` per table with `mutations_sync=2`, so
+///    each call returns only once applied (single-node ⇒ "applied on this
+///    server").
+/// 3. Re-count. Zero is the authoritative gate — it, not the mutation ack,
+///    is what backs the "data fully erased" privacy claim, independent of
+///    mutation-mode semantics or server version.
+async fn erase_org_from_clickhouse(ch: &ChClient, org_id: Uuid) -> Result<()> {
+    if count_org_total(ch, org_id).await? == 0 {
+        return Ok(());
+    }
+
+    // Distinct tables, no shared server-side lock; run in parallel and
+    // collect every error rather than short-circuiting on the first.
+    let errs: Vec<String> =
+        join_all(CH_TENANT_TABLES.map(|t| async move { (t, alter_delete(ch, t, org_id).await) }))
+            .await
+            .into_iter()
+            .filter_map(|(t, r)| r.err().map(|e| format!("{t}: {e}")))
+            .collect();
+    if !errs.is_empty() {
+        return Err(anyhow!("alter delete: {}", errs.join(" | ")).into());
+    }
+
+    let remaining = count_org_total(ch, org_id).await?;
+    if remaining != 0 {
+        return Err(
+            anyhow!("mutation accepted but {remaining} row(s) still present for org").into(),
+        );
+    }
+    Ok(())
+}
+
+/// Total live rows for one org across every CH tenant table. Zero proves the
+/// org's check data is gone. Per-table counts run concurrently.
+async fn count_org_total(ch: &ChClient, org_id: Uuid) -> Result<u64> {
+    let counts = join_all(CH_TENANT_TABLES.map(|t| count_org_rows(ch, t, org_id))).await;
+    counts.into_iter().sum()
+}
+
+/// Synchronous `ALTER … DELETE` for one org. `table` is a fixed in-crate
+/// constant (never user input), so the format interpolation is injection-free.
+async fn alter_delete(
+    ch: &ChClient,
+    table: &str,
+    org_id: Uuid,
+) -> std::result::Result<(), clickhouse::error::Error> {
+    ch.query(&format!("ALTER TABLE {table} DELETE WHERE org_id = ?"))
+        .with_setting("mutations_sync", "2")
+        .bind(org_id)
+        .execute()
+        .await
+}
+
+async fn mark_queue_complete(pool: &PgPool, org_id: Uuid) -> Result<()> {
+    sqlx::query("UPDATE clickhouse_purge_queue SET completed_at = now() WHERE org_id = $1")
+        .bind(org_id)
+        .execute(pool)
+        .await
+        .context("purge: mark queue complete")?;
+    Ok(())
+}
+
+async fn mark_queue_attempt(pool: &PgPool, org_id: Uuid, err: &str) -> Result<()> {
+    sqlx::query(
+        "UPDATE clickhouse_purge_queue
+         SET attempts = attempts + 1, last_error = $2
+         WHERE org_id = $1",
+    )
+    .bind(org_id)
+    .bind(err)
+    .execute(pool)
+    .await
+    .context("purge: mark queue attempt")?;
+    Ok(())
+}
+
+/// Depth of the not-yet-drained CH purge queue, plus the age of its oldest
+/// entry. Surfaced as gauges so an alert can fire when erasure is stuck —
+/// a backlog that keeps growing means the "erased within 30 days" promise is
+/// at risk well before the window closes.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct QueueDepth {
+    pub pending: u64,
+    pub oldest_age_secs: i64,
+}
+
+pub async fn purge_queue_depth(pool: &PgPool) -> Result<QueueDepth> {
+    let (pending, oldest_age): (i64, Option<f64>) = sqlx::query_as(
+        r#"SELECT count(*)::bigint,
+                  EXTRACT(EPOCH FROM (now() - min(queued_at)))::float8
+           FROM clickhouse_purge_queue
+           WHERE completed_at IS NULL"#,
+    )
+    .fetch_one(pool)
+    .await
+    .context("purge: queue depth")?;
+    Ok(QueueDepth {
+        // `count(*)::bigint` is provably non-negative, so the conversion can't
+        // fail; saturate high (not 0) on the impossible path so a broken
+        // metric reads as "backlog", never as a false all-clear.
+        pending: u64::try_from(pending).unwrap_or(u64::MAX),
+        oldest_age_secs: oldest_age.unwrap_or(0.0) as i64,
+    })
 }
 
 /// Hard-delete soft-deleted users whose grace window has elapsed, skipping
