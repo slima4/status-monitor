@@ -58,12 +58,11 @@ fn watch_git_head() {
     if git.join("packed-refs").exists() {
         println!("cargo::rerun-if-changed=.git/packed-refs");
     }
-    if let Ok(h) = std::fs::read_to_string(&head) {
-        if let Some(rf) = h.strip_prefix("ref:").map(str::trim) {
-            if git.join(rf).exists() {
-                println!("cargo::rerun-if-changed=.git/{rf}");
-            }
-        }
+    if let Ok(h) = std::fs::read_to_string(&head)
+        && let Some(rf) = h.strip_prefix("ref:").map(str::trim)
+        && git.join(rf).exists()
+    {
+        println!("cargo::rerun-if-changed=.git/{rf}");
     }
 }
 
