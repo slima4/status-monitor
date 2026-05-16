@@ -30,3 +30,7 @@ claude.md
 .env
 *.local
 *.local.yml
+
+# SSH keys for server access (never commit)
+/hetzner
+/hetzner.pub

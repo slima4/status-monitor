@@ -1,0 +1,85 @@
+name: release-image
+
+# Build the status-monitor container image in CI and push it to the GitHub
+# Container Registry. Production pulls an immutable tag (sha-… or v…) and
+# never compiles Rust on the box — the build toolchain stays off prod.
+#
+# Tags produced (docker/metadata-action):
+#   - main                       (default-branch builds, mutable)
+#   - sha-<full-sha>             (immutable; pin prod to this)
+#   - latest                     (default-branch only)
+#   - <X.Y.Z> and <X.Y>          (only on v* git tags — release pins)
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+    # Image is unaffected by docs-only changes; the Dockerfile copies no
+    # docs into the build context. Mirrors ci.yml's ignore set.
+    paths-ignore:
+      - "docs/**"
+      - "book.toml"
+      - "*.md"
+  workflow_dispatch:
+
+# A fast follow-up push to main supersedes the in-flight image build for
+# that ref. main itself is not cancelled — every main commit yields its
+# own immutable sha- tag so a deploy can pin any of them.
+concurrency:
+  group: release-image-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write # push to GHCR via the job's GITHUB_TOKEN
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: derive image tags + labels
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=sha,format=long
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      # linux/amd64 only — the deploy host is x86_64. A single platform keeps
+      # the build a plain image manifest (no index) so `docker pull` on prod
+      # is unambiguous, and halves build time vs adding arm64.
+      - name: build & push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # cargo-chef splits the slow dependency layer from the app layer;
+          # the gha layer cache then makes unchanged-deps rebuilds cheap.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          # Skip the SLSA provenance attestation: it turns the push into a
+          # multi-manifest index, which complicates a single-arch prod pull
+          # for no benefit here.
+          provenance: false
