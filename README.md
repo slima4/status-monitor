@@ -205,3 +205,13 @@ cargo run --bin status-monitor
 ```
 
 See [docs/development.md](docs/development.md) for the host vs. docker workflow, log level overrides, seeding a target, and tests.
+
+## License
+
+status-monitor is licensed under [AGPL-3.0](LICENSE).
+
+See [LICENSING.md](LICENSING.md) for what this means in practice.
+
+If you'd like to contribute, see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+For security disclosures, see [SECURITY.md](SECURITY.md).
