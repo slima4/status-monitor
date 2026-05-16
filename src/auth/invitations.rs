@@ -1,5 +1,5 @@
 //! Organization invitations: token generation, persistence, accept/decline,
-//! cleanup. The flow is documented in AUTH §5.6.
+//! cleanup.
 //!
 //! Tokens are 32 cryptographically random bytes presented as a 43-char
 //! base64url-no-pad string in the email link. Only the argon2id hash is
@@ -24,6 +24,7 @@ use uuid::Uuid;
 use crate::auth::token_hash::{self, slice_prefix};
 use crate::domain::{OrgId, Role, UserId};
 use crate::error::{AppError, Result};
+use crate::storage::locks::{advisory_xact_lock, org_lock_key};
 
 /// Hash-friendly invitation record. `token_hash` is the encoded argon2id
 /// PHC string; only the hash leaves this row.
@@ -110,9 +111,7 @@ pub async fn create(
 
     let mut tx = pool.begin().await.context("invitations::create: begin")?;
 
-    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))")
-        .bind(org.0.to_string())
-        .execute(&mut *tx)
+    advisory_xact_lock(&mut *tx, &org_lock_key(org))
         .await
         .context("invitations::create: advisory lock")?;
 
@@ -199,7 +198,7 @@ pub async fn create(
 ///
 /// Returns `None` for any of: nothing matched, expired, accepted/declined,
 /// row deleted. The handler must not distinguish these to the caller —
-/// "INVITATION_INVALID" covers them all (§7.7 anti-enumeration).
+/// "INVITATION_INVALID" covers them all (anti-enumeration).
 pub async fn find_pending_by_token(
     pool: &PgPool,
     raw_token: &str,

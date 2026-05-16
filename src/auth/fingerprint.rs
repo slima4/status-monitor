@@ -5,7 +5,7 @@
 //! raw IPs around. The salt is **load-bearing for detection continuity** —
 //! rotating it produces different digests for the same source, silently
 //! splitting anomaly-windows across the rotation point. `ensure_fingerprint_salt`
-//! is the startup guard against accidental rotation (see AUTH §7.4).
+//! is the startup guard against accidental rotation.
 
 use anyhow::Context;
 use sha2::{Digest, Sha256};

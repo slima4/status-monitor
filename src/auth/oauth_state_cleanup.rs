@@ -1,6 +1,6 @@
 //! Periodic deletion of expired `oauth_states` rows.
 //!
-//! `oauth_states.expires_at` is 10 minutes from insert (AUTH §7.8). The
+//! `oauth_states.expires_at` is 10 minutes from insert. The
 //! callback's atomic DELETE-and-RETURN purges any row it successfully consumes,
 //! so a row only outlives its TTL when the user abandons the OAuth flow.
 //! Without this task the table accumulates stale rows forever — a slow,

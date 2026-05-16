@@ -12,7 +12,7 @@ use dashmap::DashMap;
 use tokio::time::{MissedTickBehavior, interval};
 use tokio_util::sync::CancellationToken;
 
-/// Per-spec §5.7: `POST /targets/bulk` and `POST /targets/bulk-action` accept
+/// `POST /targets/bulk` and `POST /targets/bulk-action` accept
 /// an optional `Idempotency-Key` header. The server replays the prior response
 /// for 24h when keyed by `(header value, body hash)`.
 pub const TTL: Duration = Duration::from_secs(24 * 3600);

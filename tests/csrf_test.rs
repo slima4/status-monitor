@@ -1,4 +1,4 @@
-//! CSRF guard tests (AUTH §7.1).
+//! CSRF guard tests.
 //!
 //! These check what the *middleware* does — not the full handler. A request
 //! that passes CSRF still typically fails downstream (401 / 400 / 404) because

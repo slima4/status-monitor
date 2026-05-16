@@ -1,5 +1,5 @@
-//! Coverage for the acceptance criteria listed in OPENAPI-spec.md §11 that
-//! aren't already exercised by the other integration tests in this directory.
+//! Coverage for acceptance criteria not already exercised by the other
+//! integration tests in this directory.
 
 mod common;
 

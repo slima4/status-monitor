@@ -14,13 +14,13 @@
 //! **Scope.** The harness fires concurrent in-process requests via
 //! `tower::ServiceExt::oneshot` against `NoopPublicSource`. That means it
 //! measures axum + askama render + tokio scheduling overhead — not the
-//! Postgres/ClickHouse path that PUBLIC-STATUS-spec §11.4 ultimately
-//! cares about. The §11.4 p99 budget must be validated end-to-end against
+//! Postgres/ClickHouse path that the production p99 budget ultimately
+//! cares about. That budget must be validated end-to-end against
 //! a deployed stack (e.g. `wrk` against the staging URL); the assertion here
 //! is a *regression canary* on the in-process fast path, not the
 //! production-budget gate.
 //!
-//! Traffic mix mirrors §11.4: 80 % `GET /status`, 20 %
+//! Traffic mix: 80 % `GET /status`, 20 %
 //! `GET /api/public/v1/status`. The harness asserts zero panics, zero
 //! transport errors, and a p99 ceiling drawn from `STATUS_LOAD_P99_MS`.
 

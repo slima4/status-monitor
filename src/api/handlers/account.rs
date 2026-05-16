@@ -25,7 +25,7 @@ use uuid::Uuid;
 use crate::api::error::ApiError;
 use crate::app::AppState;
 use crate::auth::login_audit::{self, LoginAttempt, LoginMethod};
-use crate::auth::url::url_encode;
+use crate::auth::url::token_link;
 use crate::auth::{account, fingerprint, session as session_store};
 use crate::domain::UserId;
 use crate::email::{EmailAddress, EmailTemplate, TransactionalEmail};
@@ -434,7 +434,11 @@ pub async fn delete_account(
     // Email post-commit: a mail failure must not roll back the deletion the
     // user asked for. The recovery row is already persisted (hashed); the raw
     // token lives only in this stack frame to build the link.
-    let recovery_url = build_recovery_url(&state, &outcome.recovery_token);
+    let recovery_url = token_link(
+        &state.cfg.auth.public_base_url,
+        "/recover-account",
+        &outcome.recovery_token,
+    );
     let outgoing = TransactionalEmail {
         from: EmailAddress::new(
             state.cfg.email.from_address.clone(),
@@ -558,11 +562,6 @@ pub async fn recover_account(
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-fn build_recovery_url(state: &AppState, token: &str) -> String {
-    let base = state.cfg.auth.public_base_url.trim_end_matches('/');
-    format!("{base}/recover-account?token={}", url_encode(token))
-}
 
 /// `jane@gmail.com` → `j*****@gmail.com`. Keeps the first local-part char and
 /// the full domain so the user can recognise which inbox to check without the

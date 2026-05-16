@@ -1,4 +1,4 @@
-//! Argon2id password-hash helpers shared by the API-token (`§4.4`) and the
+//! Argon2id password-hash helpers shared by the API-token and the
 //! invitation/magic-link token flows.
 //!
 //! Single owner of these primitives. If argon2 params ever need tuning

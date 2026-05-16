@@ -27,7 +27,7 @@ use tower_cookies::Cookies;
 use crate::app::AppState;
 use crate::auth::email_norm;
 use crate::auth::login_audit::{self, LoginAttempt, LoginMethod};
-use crate::auth::url::url_encode;
+use crate::auth::url::token_link;
 use crate::auth::{fingerprint, magic_link, session as session_store};
 use crate::email::{EmailAddress, EmailTemplate, TransactionalEmail};
 use crate::error::Result;
@@ -66,7 +66,11 @@ pub async fn request(
         // Expires in 15 minutes (default); cleanup task drops the residue.
         let created =
             magic_link::create(pool, email, ip_hash.as_deref(), cfg.expiry_minutes).await?;
-        let verify_url = build_verify_url(&state, &created.token);
+        let verify_url = token_link(
+            &state.cfg.auth.public_base_url,
+            "/auth/magic-link/verify",
+            &created.token,
+        );
 
         let outgoing = TransactionalEmail {
             from: EmailAddress::new(
@@ -218,9 +222,4 @@ pub async fn verify(
         session_row.id.clone(),
     ));
     Ok(Redirect::to("/").into_response())
-}
-
-fn build_verify_url(state: &AppState, token: &str) -> String {
-    let base = state.cfg.auth.public_base_url.trim_end_matches('/');
-    format!("{base}/auth/magic-link/verify?token={}", url_encode(token))
 }

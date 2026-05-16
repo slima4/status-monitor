@@ -24,7 +24,7 @@ use crate::api::error::codes;
 use crate::app::AppState;
 use crate::auth::email_norm;
 use crate::auth::invitations as inv;
-use crate::auth::url::url_encode;
+use crate::auth::url::token_link;
 use crate::domain::{OrgId, Role};
 use crate::email::{EmailAddress, EmailTemplate, TransactionalEmail};
 use crate::error::{AppError, Result};
@@ -336,9 +336,12 @@ async fn inviter_display(pool: &sqlx::PgPool, user: crate::domain::UserId) -> Re
     })
 }
 
+// GET /invitations/accept?token=... (or /decline) is the landing-page link;
+// the JSON endpoints accept the token in the body.
 fn action_url(state: &AppState, kind: &str, token: &str) -> String {
-    let base = state.cfg.auth.public_base_url.trim_end_matches('/');
-    // GET /invitations/accept?token=... for the landing page; the JSON
-    // endpoints accept the token in the body.
-    format!("{base}/invitations/{kind}?token={}", url_encode(token))
+    token_link(
+        &state.cfg.auth.public_base_url,
+        &format!("/invitations/{kind}"),
+        token,
+    )
 }

@@ -660,13 +660,15 @@ pub async fn ch_client_from_env() -> Option<clickhouse::Client> {
 pub async fn fresh_test_db(prefix: &str) -> Option<(String, String)> {
     use sqlx::{Connection, Executor};
     let raw = std::env::var("DATABASE_URL").ok()?;
-    let mut url = Url::parse(&raw).unwrap();
+    let mut url = Url::parse(&raw).expect("DATABASE_URL must be a valid URL");
     let test_db = format!("{prefix}_{}", Uuid::now_v7().simple());
     url.set_path("/postgres");
-    let mut conn = sqlx::PgConnection::connect(url.as_str()).await.unwrap();
+    let mut conn = sqlx::PgConnection::connect(url.as_str())
+        .await
+        .expect("fresh_test_db: connect to admin DB");
     conn.execute(format!("CREATE DATABASE {test_db}").as_str())
         .await
-        .unwrap();
+        .expect("fresh_test_db: CREATE DATABASE");
     let mut new_url = url.clone();
     new_url.set_path(&format!("/{test_db}"));
     Some((new_url.to_string(), test_db))
@@ -677,7 +679,7 @@ pub async fn drop_test_db(test_db: &str) {
     let Ok(raw) = std::env::var("DATABASE_URL") else {
         return;
     };
-    let mut url = Url::parse(&raw).unwrap();
+    let mut url = Url::parse(&raw).expect("DATABASE_URL must be a valid URL");
     url.set_path("/postgres");
     if let Ok(mut conn) = sqlx::PgConnection::connect(url.as_str()).await {
         let _ = conn
@@ -701,5 +703,5 @@ pub async fn open_test_pool(db_url: &str) -> PgPool {
         .acquire_timeout(Duration::from_secs(5))
         .connect(db_url)
         .await
-        .unwrap()
+        .expect("open_test_pool: connect to test DB")
 }

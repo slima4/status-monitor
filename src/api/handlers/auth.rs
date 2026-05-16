@@ -1,7 +1,7 @@
 //! `/auth/*` endpoints: GitHub OAuth login + callback, logout.
 //!
-//! Phase 2-3 wiring. The callback follows the strict three-phase rule from
-//! AUTH §5.1 — no DB transaction held across GitHub HTTP calls. New users get
+//! The callback follows a strict three-phase rule — no DB transaction held
+//! across GitHub HTTP calls. New users get
 //! a personal org auto-created in the same Phase C transaction that links
 //! their identity.
 
@@ -127,7 +127,7 @@ pub async fn github_callback(
 
     // Session fixation: drop any pre-login session bound to this browser
     // before minting the new one. Without this an attacker who pre-seeded a
-    // cookie inherits the just-authenticated session (AUTH §7.2).
+    // cookie inherits the just-authenticated session.
     let cookie_name = state.cfg.auth.session.cookie_name.as_str();
     if let Some(prev) = cookies.get(cookie_name).map(|c| c.value().to_string())
         && !prev.is_empty()

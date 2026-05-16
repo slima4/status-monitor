@@ -7,64 +7,25 @@
 
 mod common;
 
-use std::time::Duration;
-
-use sqlx::postgres::PgPoolOptions;
-use sqlx::{Connection, Executor, PgConnection};
 use status_monitor::auth::invitations;
 use status_monitor::domain::{OrgId, Role, UserId, generate_personal_slug};
 use status_monitor::storage::orgs::{
     self as orgs_store, AddMemberOutcome, create_personal_org_with_owner_in_tx,
 };
-use url::Url;
 use uuid::Uuid;
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations/postgres");
 
 async fn fresh_pg() -> Option<(String, String)> {
-    let raw = std::env::var("DATABASE_URL").ok()?;
-    let mut url = Url::parse(&raw).unwrap();
-    let test_db = format!("auth_inv_{}", Uuid::now_v7().simple());
-    url.set_path("/postgres");
-    let admin = url.clone();
-    let mut conn = PgConnection::connect(admin.as_str()).await.unwrap();
-    conn.execute(format!("CREATE DATABASE {test_db}").as_str())
-        .await
-        .unwrap();
-    let mut new_url = admin.clone();
-    new_url.set_path(&format!("/{test_db}"));
-    Some((new_url.to_string(), test_db))
+    common::fresh_test_db("auth_inv").await
 }
 
 async fn drop_pg(test_db: &str) {
-    let Ok(raw) = std::env::var("DATABASE_URL") else {
-        return;
-    };
-    let mut url = Url::parse(&raw).unwrap();
-    url.set_path("/postgres");
-    if let Ok(mut conn) = PgConnection::connect(url.as_str()).await {
-        let _ = conn
-            .execute(
-                format!(
-                    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity \
-                     WHERE datname = '{test_db}' AND pid <> pg_backend_pid()"
-                )
-                .as_str(),
-            )
-            .await;
-        let _ = conn
-            .execute(format!("DROP DATABASE IF EXISTS {test_db}").as_str())
-            .await;
-    }
+    common::drop_test_db(test_db).await;
 }
 
 async fn open_pool(db_url: &str) -> sqlx::PgPool {
-    PgPoolOptions::new()
-        .max_connections(4)
-        .acquire_timeout(Duration::from_secs(5))
-        .connect(db_url)
-        .await
-        .unwrap()
+    common::open_test_pool(db_url).await
 }
 
 async fn seed_user(pool: &sqlx::PgPool, email: &str) -> UserId {

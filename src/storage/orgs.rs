@@ -13,6 +13,7 @@ use crate::domain::{
     Membership, OrgId, Organization, PERSONAL_SLUG_LIKE_PATTERN, PublicOrgBranding, Role, UserId,
 };
 use crate::error::{AppError, Result};
+use crate::storage::locks::{advisory_xact_lock, org_lock_key, user_lock_key};
 
 /// Find-or-create the default org at startup. Returns the persisted UUID so
 /// callers don't need to know whether the row already existed. Using
@@ -134,9 +135,7 @@ pub async fn create_org_with_owner(
     // step races under READ COMMITTED — two transactions can both observe
     // count < limit and both succeed, blowing past the cap. The lock is held
     // for the duration of the transaction and released on commit/rollback.
-    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))")
-        .bind(user.0.to_string())
-        .execute(&mut *tx)
+    advisory_xact_lock(&mut *tx, &user_lock_key(user))
         .await
         .context("create_org_with_owner: advisory lock")?;
 
@@ -674,9 +673,7 @@ pub async fn add_member(
     max_members: u32,
 ) -> Result<AddMemberOutcome> {
     let mut tx = pool.begin().await.context("add_member: begin")?;
-    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))")
-        .bind(org.0.to_string())
-        .execute(&mut *tx)
+    advisory_xact_lock(&mut *tx, &org_lock_key(org))
         .await
         .context("add_member: advisory lock")?;
     let inserted: Option<(Uuid,)> = sqlx::query_as(

@@ -1,6 +1,7 @@
 pub mod admin;
 pub mod clickhouse;
 pub mod incidents;
+pub mod locks;
 pub mod maintenance;
 pub mod memory;
 pub mod orgs;

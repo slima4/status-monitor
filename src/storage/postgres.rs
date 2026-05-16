@@ -14,6 +14,7 @@ use crate::config::PostgresConfig;
 use crate::domain::{CheckSpec, NewTarget, OrgId, Target, TargetAlerts, TargetUpdate};
 use crate::error::{AppError, Result};
 use crate::security::Cipher;
+use crate::storage::locks::{advisory_xact_lock, org_lock_key};
 use crate::storage::postgres_secrets::{decrypt_in_place, encrypt_in_place};
 use crate::storage::traits::{TargetFilter, TargetStore};
 
@@ -204,9 +205,7 @@ impl TargetStore for PostgresTargetStore {
         // pass `+1 <= limit`, overshooting. This mirrors the owner-org and
         // invitation caps: lock the subject, then count, then write.
         let mut tx = self.pool.begin().await.context("create target: begin")?;
-        sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))")
-            .bind(self.org_id().to_string())
-            .execute(&mut *tx)
+        advisory_xact_lock(&mut *tx, &org_lock_key(OrgId(self.org_id())))
             .await
             .context("create target: advisory lock")?;
         let (current,): (i64,) = sqlx::query_as("SELECT count(*) FROM targets WHERE org_id = $1")
@@ -352,9 +351,7 @@ impl TargetStore for PostgresTargetStore {
         let mut public_sort_order: Vec<i32> = Vec::with_capacity(len);
 
         let mut tx = self.pool.begin().await.context("bulk create: begin")?;
-        sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))")
-            .bind(self.org_id().to_string())
-            .execute(&mut *tx)
+        advisory_xact_lock(&mut *tx, &org_lock_key(OrgId(self.org_id())))
             .await
             .context("bulk create: advisory lock")?;
         let (current,): (i64,) = sqlx::query_as("SELECT count(*) FROM targets WHERE org_id = $1")

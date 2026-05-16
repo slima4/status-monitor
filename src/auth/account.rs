@@ -22,6 +22,7 @@ use crate::api::error::codes;
 use crate::auth::recovery;
 use crate::domain::{OrgId, UserId};
 use crate::error::{AppError, Result};
+use crate::storage::locks::{advisory_xact_lock, org_lock_key, user_delete_lock_key};
 use crate::storage::orgs::record_audit_tx;
 
 /// One blocking org in an `OWNS_SHARED_ORGS` rejection.
@@ -60,11 +61,10 @@ pub async fn request_deletion(
 
     // Per-user lock: serialises a double-submit of the delete button and
     // pairs with the per-org locks below so membership is frozen across the
-    // blocking decision. Distinct namespace from the org-create per-user lock
-    // (`hashtextextended(<uuid>, 0)`), so the two never collide.
-    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))")
-        .bind(format!("user_delete:{}", user_id.0))
-        .execute(&mut *tx)
+    // blocking decision. `user_delete_lock_key` is a deliberately distinct
+    // namespace from `user_lock_key` (owner-org / API-token caps), so account
+    // deletion never contends with those — see `storage::locks`.
+    advisory_xact_lock(&mut *tx, &user_delete_lock_key(user_id))
         .await
         .context("delete_account: user advisory lock")?;
 
@@ -89,12 +89,10 @@ pub async fn request_deletion(
     .context("delete_account: select solo-owned orgs")?;
 
     for org_id in &candidate_ids {
-        // Same lock key as `orgs::add_member` (and `invitations::create`):
-        // hashtextextended(<org-uuid-text>, 0). Holding it means no member
-        // can be added to this org until our transaction ends.
-        sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))")
-            .bind(org_id.to_string())
-            .execute(&mut *tx)
+        // Same `org_lock_key` as `orgs::add_member` / `invitations::create`,
+        // so holding it means no member can be added to this org until our
+        // transaction ends.
+        advisory_xact_lock(&mut *tx, &org_lock_key(OrgId(*org_id)))
             .await
             .context("delete_account: org advisory lock")?;
     }

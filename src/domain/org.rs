@@ -125,7 +125,7 @@ impl std::fmt::Display for SlugError {
 
 impl std::error::Error for SlugError {}
 
-/// Validate a slug per §4.5: 3-30 chars, [a-z0-9-], leading letter, no trailing
+/// Validate a slug: 3-30 chars, [a-z0-9-], leading letter, no trailing
 /// hyphen, no consecutive hyphens, not in reserved list (exact match).
 pub fn validate_slug(slug: &str) -> Result<(), SlugError> {
     let len = slug.len();

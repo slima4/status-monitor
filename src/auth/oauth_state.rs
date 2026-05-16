@@ -55,7 +55,7 @@ pub async fn insert(
 
 /// DELETE-and-RETURN. Returns `None` when the state never existed or has
 /// expired. The callback maps that to `INVALID_STATE` without distinguishing
-/// the two cases (anti-enumeration; see AUTH §7.8).
+/// the two cases (anti-enumeration).
 pub async fn consume(pool: &PgPool, state: &str) -> Result<Option<ConsumedState>> {
     let row: Option<(String, Option<String>, Option<String>)> = sqlx::query_as(
         "DELETE FROM oauth_states \

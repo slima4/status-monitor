@@ -28,6 +28,7 @@ use crate::auth::session::LAST_USED_DEBOUNCE_SECS;
 use crate::auth::token_hash;
 use crate::domain::UserId;
 use crate::error::Result;
+use crate::storage::locks::{advisory_xact_lock, user_lock_key};
 
 /// Public prefix that triggers Bearer authentication. Both halves are checked:
 /// `Authorization: Bearer <s>` with `s.starts_with(TOKEN_PREFIX)` routes to
@@ -149,9 +150,7 @@ pub async fn create(
     let prefix = slice_prefix(&raw, prefix_visible_chars).to_string();
 
     let mut tx = pool.begin().await.context("api_tokens::create: begin")?;
-    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))")
-        .bind(user.0.to_string())
-        .execute(&mut *tx)
+    advisory_xact_lock(&mut *tx, &user_lock_key(user))
         .await
         .context("api_tokens::create: advisory lock")?;
 

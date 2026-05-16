@@ -2,7 +2,7 @@
 //!
 //! The raw token is returned exactly once (on create); subsequent reads only
 //! ever expose the visible prefix. Creation requires a verified email
-//! (`VerifiedCurrentUser`) per AUTH §5.4 — a compromised unverified account
+//! (`VerifiedCurrentUser`) — a compromised unverified account
 //! could otherwise exfiltrate via a fresh API token without ever proving
 //! mailbox control.
 

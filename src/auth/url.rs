@@ -28,9 +28,30 @@ pub fn safe_redirect_target(raw: &str) -> Option<&str> {
     Some(s)
 }
 
+/// Build a tokenised action link `<base><path>?token=<urlencoded>`. `base` is
+/// the configured public base URL (trailing slash tolerated); `path` is an
+/// absolute path beginning with `/`. Single owner so the magic-link,
+/// invitation, and account-recovery links all trim and encode identically.
+pub fn token_link(base: &str, path: &str, token: &str) -> String {
+    let base = base.trim_end_matches('/');
+    format!("{base}{path}?token={}", url_encode(token))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn token_link_trims_base_and_encodes_token() {
+        assert_eq!(
+            token_link("https://x.test/", "/recover-account", "a b/c"),
+            "https://x.test/recover-account?token=a+b%2Fc"
+        );
+        assert_eq!(
+            token_link("https://x.test", "/auth/magic-link/verify", "tok"),
+            "https://x.test/auth/magic-link/verify?token=tok"
+        );
+    }
 
     #[test]
     fn safe_redirect_target_accepts_same_origin_paths() {

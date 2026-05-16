@@ -12,8 +12,8 @@
 //! an error — the cookie path may still succeed.
 //!
 //! [`VerifiedCurrentUser`] is the type-level constraint required by
-//! verification-sensitive endpoints (AUTH §5.4). Adding a new endpoint to that
-//! list means updating the table in the spec AND swapping the extractor.
+//! verification-sensitive endpoints. Adding a new endpoint to that list means
+//! swapping the extractor as well.
 
 use axum::extract::{FromRef, FromRequestParts, Request, State};
 use axum::http::request::Parts;

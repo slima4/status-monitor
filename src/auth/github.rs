@@ -1,4 +1,4 @@
-//! GitHub OAuth callback orchestration. Strict three-phase shape per AUTH §5.1:
+//! GitHub OAuth callback orchestration. Strict three-phase shape:
 //!
 //! 1. **Phase A** — consume `oauth_states` row in one statement, no upstream
 //!    calls yet.
@@ -249,7 +249,7 @@ pub async fn upsert_identity_and_personal_org(
     // CITEXT cast is load-bearing: sqlx binds `&str` as TEXT, which selects
     // the case-sensitive `text = text` operator. The `::citext` cast forces
     // the case-insensitive CITEXT operator so "Bob@Example.test" matches
-    // "bob@example.test" (the cross-flow consistency property in §4.8).
+    // "bob@example.test" (the cross-flow email-consistency property).
     let by_email: Option<(Uuid,)> =
         sqlx::query_as("SELECT id FROM users WHERE email = $1::citext AND deleted_at IS NULL")
             .bind(email)

@@ -8,7 +8,7 @@
 //!    [`api_token`] middleware ahead of routing. The token carries no active
 //!    org, so handlers that need one must read an explicit org slug from the
 //!    `X-Status-Monitor-Org` header — otherwise [`CurrentOrg`] returns 400
-//!    `ORG_REQUIRED` (per AUTH §5.5).
+//!    `ORG_REQUIRED`.
 //!
 //! [`CurrentOrg`] is the only extractor that hands a handler an `OrgId`.
 //! Combined with the org-scoped repositories in `src/storage/`, this is what
@@ -226,8 +226,7 @@ where
         // API-token path: tokens carry no active org. The caller MUST surface
         // the org explicitly (slug header today; future slug-path routes can
         // also feed this). Falling back to the personal org silently routes
-        // API-token writes into the wrong org (the data-misdirection bug
-        // called out in §5.5).
+        // API-token writes into the wrong org (the data-misdirection bug).
         if let Some(AuthContext::ApiToken { user_id, .. }) = parts.extensions.get::<AuthContext>() {
             let pool = app_state.db.as_ref().ok_or_else(|| {
                 AppError::Other(anyhow::anyhow!(

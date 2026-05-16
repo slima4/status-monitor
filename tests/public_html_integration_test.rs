@@ -116,7 +116,7 @@ impl PublicSource for PublishedSource {
 }
 
 /// Source whose components have `DayState::NoData` for every history cell —
-/// models "ClickHouse reachable but returns no data" (§11.2). Page-level
+/// models "ClickHouse reachable but returns no data". Page-level
 /// status still resolves to operational because no component reports an
 /// outage.
 struct EmptyDataSource;
@@ -181,7 +181,7 @@ impl PublicSource for EmptyDataSource {
 /// Source where a maintenance window overlaps a would-be major outage on the
 /// same component. Per the truth table in `overall_status::day_state`,
 /// maintenance dominates outage; the rendered banner + day cell must reflect
-/// `Maintenance`, not `MajorOutage`. Acceptance #10 / §11.2 bullet 5.
+/// `Maintenance`, not `MajorOutage`.
 struct MaintenanceDominatesSource;
 
 #[async_trait]
@@ -343,7 +343,7 @@ async fn status_fragment_returns_region_without_doctype() {
     assert!(html.contains(r#"hx-trigger="every 30s""#));
 }
 
-// ── §11.2: ClickHouse reachable, no history data ──────────────────────────
+// ── ClickHouse reachable, no history data ─────────────────────────────────
 
 #[tokio::test]
 async fn status_page_renders_when_components_have_no_history_data() {
@@ -360,7 +360,7 @@ async fn status_page_renders_when_components_have_no_history_data() {
     assert!(html.contains("All Systems Operational"));
 }
 
-// ── §11.2 / acceptance #10: maintenance dominates outage ──────────────────
+// ── maintenance dominates outage ──────────────────────────────────────────
 
 #[tokio::test]
 async fn status_page_classifies_as_maintenance_when_window_covers_outage() {

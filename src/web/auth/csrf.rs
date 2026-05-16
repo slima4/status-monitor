@@ -1,6 +1,6 @@
 //! CSRF guard for state-changing requests on the cookie-authenticated paths.
 //!
-//! Rule (AUTH §7.1):
+//! Rule:
 //! - GET / HEAD / OPTIONS pass through.
 //! - Bearer-token requests pass through (cross-origin Authorization headers
 //!   are not auto-attached by browsers, so no CSRF surface).

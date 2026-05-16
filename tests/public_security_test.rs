@@ -65,7 +65,7 @@ async fn public_responses_never_set_cookie() {
 
 #[tokio::test]
 async fn public_responses_omit_no_store_cache_directive() {
-    // §11.3: `no-store` would defeat CDN caching of the public surface. Assert
+    // `no-store` would defeat CDN caching of the public surface. Assert
     // it is absent on every public response. A 5xx regression on these paths
     // is itself a bug — fail loudly instead of skipping.
     let app = build_test_app_with_web(|_| {});
