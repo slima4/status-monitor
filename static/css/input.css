@@ -16,6 +16,56 @@
     .status-badge {
         @apply inline-flex items-center px-2 py-0.5 rounded text-xs font-medium;
     }
+
+    /* Trusted first-party legal/policy markdown rendered to HTML. Preflight
+       strips heading/list defaults, so the document needs its own type
+       scale — there is no @tailwindcss/typography plugin in this build. */
+    .legal-doc {
+        @apply text-sm leading-relaxed text-slate-700;
+    }
+    .legal-doc h1 {
+        @apply mt-0 mb-4 text-2xl font-semibold tracking-tight text-slate-900;
+    }
+    .legal-doc h2 {
+        @apply mt-8 mb-3 text-lg font-semibold text-slate-900;
+    }
+    .legal-doc h3 {
+        @apply mt-6 mb-2 text-base font-semibold text-slate-900;
+    }
+    .legal-doc p {
+        @apply my-3;
+    }
+    .legal-doc ul {
+        @apply my-3 list-disc pl-6;
+    }
+    .legal-doc ol {
+        @apply my-3 list-decimal pl-6;
+    }
+    .legal-doc li {
+        @apply my-1;
+    }
+    .legal-doc a {
+        @apply text-brand-500 underline decoration-dotted hover:text-brand-900;
+    }
+    .legal-doc strong {
+        @apply font-semibold text-slate-900;
+    }
+    .legal-doc code {
+        @apply rounded bg-slate-100 px-1 py-0.5 font-mono text-xs;
+    }
+    .legal-doc hr {
+        @apply my-6 border-slate-200;
+    }
+    .legal-doc table {
+        @apply my-4 w-full border-collapse text-left text-xs;
+    }
+    .legal-doc th,
+    .legal-doc td {
+        @apply border border-slate-200 px-3 py-1.5 align-top;
+    }
+    .legal-doc th {
+        @apply bg-slate-50 font-semibold text-slate-900;
+    }
 }
 
 @layer base {

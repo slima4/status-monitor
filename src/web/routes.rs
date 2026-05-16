@@ -49,7 +49,14 @@ pub fn routes(cfg: &AppConfig) -> Router<AppState> {
         .route(
             "/web/partials/settings/api-tokens",
             get(views::auth::settings::api_tokens_partial),
-        );
+        )
+        .route("/terms", get(views::legal::terms))
+        .route("/privacy", get(views::legal::privacy))
+        .route("/cookies", get(views::legal::cookies))
+        .route("/impressum", get(views::legal::impressum))
+        .route("/abuse-policy", get(views::legal::abuse_policy))
+        .route("/security-policy", get(views::legal::security_policy))
+        .route("/.well-known/security.txt", get(views::legal::security_txt));
 
     if public_routes_active(cfg) {
         r = r

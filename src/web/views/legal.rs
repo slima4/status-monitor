@@ -1,0 +1,103 @@
+//! Public legal & policy pages: `/terms`, `/privacy`, `/cookies`,
+//! `/impressum`, `/abuse-policy`, `/security-policy`, plus the RFC 9116
+//! `/.well-known/security.txt`.
+//!
+//! The markdown is first-party content compiled into the binary with
+//! `include_str!` and rendered to HTML once on first request. It is
+//! *trusted* author content — unlike user-supplied `public_about`, it is
+//! deliberately not run through ammonia, so headings and tables survive.
+//!
+//! These pages render in their own minimal layout (no operator nav): they
+//! are reached from the footer by signed-out visitors as often as by
+//! operators, and they set no cookies.
+
+use std::sync::LazyLock;
+
+use askama::Template;
+use askama_web::WebTemplate;
+use axum::http::header;
+use axum::response::IntoResponse;
+
+use crate::web::assets::filters;
+
+/// Renders trusted markdown to HTML. Tables are enabled (the Privacy
+/// Policy and data inventory use them); everything else is CommonMark.
+fn render(markdown: &str) -> String {
+    let mut opts = pulldown_cmark::Options::empty();
+    opts.insert(pulldown_cmark::Options::ENABLE_TABLES);
+    let parser = pulldown_cmark::Parser::new_ext(markdown, opts);
+    let mut html = String::new();
+    pulldown_cmark::html::push_html(&mut html, parser);
+    html
+}
+
+#[derive(Template, WebTemplate)]
+#[template(path = "legal.html")]
+pub struct LegalPage {
+    title: &'static str,
+    /// Pre-rendered, trusted HTML. The only `|safe` value on the page.
+    body: &'static str,
+}
+
+/// Binds one markdown file to a route handler. The rendered HTML is built
+/// once (`LazyLock`) and borrowed for the program's lifetime.
+macro_rules! legal_page {
+    ($html:ident, $handler:ident, $title:literal, $file:literal) => {
+        static $html: LazyLock<String> = LazyLock::new(|| render(include_str!($file)));
+
+        pub async fn $handler() -> LegalPage {
+            LegalPage {
+                title: $title,
+                body: $html.as_str(),
+            }
+        }
+    };
+}
+
+legal_page!(
+    TERMS,
+    terms,
+    "Terms of Service",
+    "../../../docs/legal/terms.md"
+);
+legal_page!(
+    PRIVACY,
+    privacy,
+    "Privacy Policy",
+    "../../../docs/legal/privacy.md"
+);
+legal_page!(
+    COOKIES,
+    cookies,
+    "Cookie Policy",
+    "../../../docs/legal/cookies.md"
+);
+legal_page!(
+    IMPRESSUM,
+    impressum,
+    "Impressum",
+    "../../../docs/legal/impressum.md"
+);
+legal_page!(
+    ABUSE,
+    abuse_policy,
+    "Abuse Policy",
+    "../../../docs/legal/abuse-policy.md"
+);
+legal_page!(
+    SECURITY,
+    security_policy,
+    "Security Policy",
+    "../../../docs/legal/security-policy.md"
+);
+
+/// `GET /.well-known/security.txt` (RFC 9116) — the canonical path. The
+/// bytes come from the one file under `static/`; it is also in the embedded
+/// asset bundle, but only this route is advertised, and `text/plain` here is
+/// explicit rather than mime-guessed.
+pub async fn security_txt() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
+        include_str!("../../../static/.well-known/security.txt"),
+    )
+}

@@ -339,3 +339,94 @@ async fn settings_account_redirects_to_login_when_unauthenticated() {
         .unwrap_or("");
     assert!(loc.starts_with("/login"), "redirect target was {loc}");
 }
+
+/// Every legal/policy page is public, renders the trusted markdown into the
+/// `.legal-doc` shell, and never exposes the authenticated operator nav.
+#[tokio::test]
+async fn legal_pages_render_public_without_auth_nav() {
+    let cases = [
+        ("/terms", "Terms of Service"),
+        ("/privacy", "Privacy Policy"),
+        ("/cookies", "Cookie Policy"),
+        ("/impressum", "Impressum"),
+        ("/abuse-policy", "Abuse Policy"),
+        ("/security-policy", "Security Policy"),
+    ];
+    for (path, heading) in cases {
+        let resp = app()
+            .oneshot(Request::get(path).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK, "{path} should be 200");
+        assert!(
+            html_ct(&resp).starts_with("text/html"),
+            "{path} should be HTML"
+        );
+        let body = body_text(resp).await;
+        assert!(
+            body.contains(&format!("<h1>{heading}</h1>")),
+            "{path} should render the markdown H1 {heading:?}"
+        );
+        assert!(
+            body.contains(r#"<article class="legal-doc">"#),
+            "{path} should use the legal-doc shell"
+        );
+        // Standalone layout: no operator nav, no logout button.
+        assert!(
+            !body.contains("hx-post=\"/auth/logout\""),
+            "{path} must not expose the authenticated nav"
+        );
+        // Footer cross-links to the sibling policies.
+        assert!(
+            body.contains(r#"href="/privacy""#) && body.contains(r#"href="/security-policy""#),
+            "{path} should carry the legal footer links"
+        );
+    }
+}
+
+/// The Privacy Policy uses Markdown tables; table rendering must be on.
+#[tokio::test]
+async fn privacy_policy_renders_markdown_tables() {
+    let resp = app()
+        .oneshot(Request::get("/privacy").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let body = body_text(resp).await;
+    assert!(
+        body.contains("<table>") && body.contains("Lawful basis"),
+        "privacy policy should render its data table"
+    );
+}
+
+/// RFC 9116: served at the well-known path, `text/plain`, with the
+/// mandatory `Contact` and `Expires` fields.
+#[tokio::test]
+async fn security_txt_served_per_rfc9116() {
+    let resp = app()
+        .oneshot(
+            Request::get("/.well-known/security.txt")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let ct = resp
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    assert!(
+        ct.starts_with("text/plain"),
+        "security.txt must be text/plain, got {ct}"
+    );
+    let body = body_text(resp).await;
+    assert!(
+        body.contains("Contact: mailto:slima4.u8@gmail.com"),
+        "security.txt needs a Contact field"
+    );
+    assert!(
+        body.contains("Expires: 2027-12-31T23:59:59.000Z"),
+        "security.txt needs an Expires field"
+    );
+}

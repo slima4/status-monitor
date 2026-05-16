@@ -345,7 +345,7 @@ pub async fn recover(pool: &PgPool, raw_token: &str) -> Result<RecoverOutcome> {
 /// Read-only header facts for the account settings page. `provider` and
 /// `last_login_at` are the most-recent `oauth_identities` sign-in; `None`
 /// fields mean the user has no identity row yet (degraded, not an error).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, sqlx::FromRow)]
 pub struct AccountFacts {
     pub created_at: DateTime<Utc>,
     pub provider: Option<String>,
@@ -356,7 +356,7 @@ pub struct AccountFacts {
 /// identity row — provider and last-sign-in come from the same scan rather
 /// than two correlated subqueries. Excludes soft-deleted users.
 pub async fn account_facts(pool: &PgPool, user_id: UserId) -> Result<Option<AccountFacts>> {
-    let row: Option<(DateTime<Utc>, Option<String>, Option<DateTime<Utc>>)> = sqlx::query_as(
+    Ok(sqlx::query_as::<_, AccountFacts>(
         "SELECT u.created_at, oi.provider, oi.last_login_at \
            FROM users u \
            LEFT JOIN LATERAL ( \
@@ -368,14 +368,7 @@ pub async fn account_facts(pool: &PgPool, user_id: UserId) -> Result<Option<Acco
     .bind(user_id.0)
     .fetch_optional(pool)
     .await
-    .context("account_facts: query")?;
-    Ok(
-        row.map(|(created_at, provider, last_login_at)| AccountFacts {
-            created_at,
-            provider,
-            last_login_at,
-        }),
-    )
+    .context("account_facts: query")?)
 }
 
 fn is_unique_violation(e: &sqlx::Error) -> bool {
