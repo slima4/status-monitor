@@ -8,6 +8,19 @@
     <link rel="stylesheet" href="{{ "css/app.css"|asset }}">
     <script defer src="{{ "js/htmx.min.js"|asset }}"></script>
     <script defer src="{{ "js/json-enc.js"|asset }}"></script>
+    <script>
+      // Shared API-response readers for inline page scripts. Defined here
+      // (not deferred) so they exist before any per-page content script
+      // runs. smJson - parsed body or null; smErrMsg - error.message or the
+      // given fallback.
+      window.smJson = function (xhr) {
+        try { return JSON.parse(xhr.responseText); } catch (e) { return null; }
+      };
+      window.smErrMsg = function (xhr, fallback) {
+        const b = window.smJson(xhr);
+        return (b && b.error && b.error.message) || fallback;
+      };
+    </script>
     {% block head %}{% endblock %}
 </head>
 <body class="bg-slate-50 text-slate-900 antialiased"

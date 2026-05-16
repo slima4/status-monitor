@@ -53,11 +53,9 @@
           setTimeout(() => { window.location.href = '/'; }, 1200);
           return;
         }
-        let body = {};
-        try { body = JSON.parse(xhr.responseText) || {}; } catch (e) { /* ignore */ }
         out.className = 'text-sm text-rose-700';
-        out.textContent = (body.error && body.error.message)
-          || FALLBACKS[xhr.status] || 'Could not recover the account. Please try again.';
+        out.textContent = window.smErrMsg(xhr,
+          FALLBACKS[xhr.status] || 'Could not recover the account. Please try again.');
       });
     })();
   </script>

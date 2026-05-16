@@ -102,10 +102,6 @@
     const blocking = document.getElementById('delete-blocking');
     const blockingList = document.getElementById('delete-blocking-list');
 
-    function parse(xhr) {
-      try { return JSON.parse(xhr.responseText); } catch (e) { return null; }
-    }
-
     function renderBlocking(orgs) {
       blockingList.textContent = '';
       orgs.forEach((org) => {
@@ -139,7 +135,7 @@
 
       if (elt.id === 'confirm-delete') {
         const xhr = ev.detail.xhr;
-        const body = parse(xhr) || {};
+        const body = window.smJson(xhr) || {};
 
         if (xhr.status === 200) {
           const when = body.scheduled_purge_at

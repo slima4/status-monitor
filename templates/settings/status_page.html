@@ -149,9 +149,7 @@
           box.textContent = 'Saved.';
           box.className = 'text-sm text-emerald-700';
         } else {
-          let msg = 'Save failed.';
-          try { msg = JSON.parse(e.detail.xhr.responseText).error.message || msg; } catch (_) {}
-          box.textContent = msg;
+          box.textContent = window.smErrMsg(e.detail.xhr, 'Save failed.');
           box.className = 'text-sm text-rose-700';
         }
       });
