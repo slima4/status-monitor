@@ -56,6 +56,7 @@ pub fn routes(cfg: &AppConfig) -> Router<AppState> {
         .route("/impressum", get(views::legal::impressum))
         .route("/abuse-policy", get(views::legal::abuse_policy))
         .route("/security-policy", get(views::legal::security_policy))
+        .route("/licenses", get(views::legal::licenses))
         .route("/.well-known/security.txt", get(views::legal::security_txt));
 
     if public_routes_active(cfg) {

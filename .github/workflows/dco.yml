@@ -1,0 +1,75 @@
+name: dco
+
+# Developer Certificate of Origin enforcement. CONTRIBUTING.md states
+# "PRs without DCO sign-off cannot be merged" — this is the mechanism that
+# makes that true. Deliberately NOT path-filtered: a docs-only or
+# whitespace-only commit still needs a sign-off, so this must run on every
+# pull request regardless of which files changed.
+#
+# Implemented as plain git + bash rather than a third-party action so there
+# is no external action repo to trust or pin.
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dco:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # Need the full PR commit range, not a shallow tip.
+          fetch-depth: 0
+      - name: verify every commit is signed off
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          fail=0
+          # --no-merges: a merge commit a contributor never authored should
+          # not need their sign-off.
+          commits="$(git rev-list --no-merges "${BASE_SHA}..${HEAD_SHA}")"
+          if [ -z "$commits" ]; then
+            echo "No non-merge commits to check."
+            exit 0
+          fi
+          for sha in $commits; do
+            author_email="$(git show -s --format='%ae' "$sha" | tr '[:upper:]' '[:lower:]')"
+            subject="$(git show -s --format='%s' "$sha")"
+            # A DCO sign-off is a trailer line. The email it carries must
+            # match the commit author (the canonical DCO-bot rule).
+            signoffs="$(git show -s --format='%B' "$sha" \
+              | grep -iE '^Signed-off-by: .+ <.+@.+>' || true)"
+            if [ -z "$signoffs" ]; then
+              echo "::error::Commit $sha (\"$subject\") has no Signed-off-by line."
+              echo "  Fix: git rebase --signoff ${BASE_SHA} && git push --force-with-lease"
+              fail=1
+              continue
+            fi
+            matched=0
+            while IFS= read -r line; do
+              so_email="$(printf '%s' "$line" \
+                | sed -nE 's/^Signed-off-by: .+ <(.+)>.*/\1/p' \
+                | tr '[:upper:]' '[:lower:]')"
+              if [ "$so_email" = "$author_email" ]; then
+                matched=1
+                break
+              fi
+            done <<< "$signoffs"
+            if [ "$matched" -ne 1 ]; then
+              echo "::error::Commit $sha (\"$subject\") sign-off does not match author <$author_email>."
+              fail=1
+            fi
+          done
+          if [ "$fail" -ne 0 ]; then
+            echo ""
+            echo "DCO check failed. See CONTRIBUTING.md — commit with 'git commit -s'."
+            exit 1
+          fi
+          echo "All commits carry a matching Signed-off-by. ✅"

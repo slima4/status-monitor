@@ -56,6 +56,8 @@
         {% if branding.show_powered_by %}Powered by status-monitor · {% endif %}
         <a href="{{ view.rss_url }}" class="hover:text-slate-600">RSS</a> ·
         Updated <time datetime="{{ view.generated_iso }}" data-tz>{{ view.generated_human }}</time>
+        · <a href="/licenses" class="hover:text-slate-600">Licenses</a>
+        · {% include "_source.html" %}
     </footer>
 </body>
 </html>

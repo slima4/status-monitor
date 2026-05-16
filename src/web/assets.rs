@@ -100,6 +100,31 @@ pub mod filters {
     pub fn asset(value: &str, _: &dyn askama::Values) -> askama::Result<String> {
         Ok(super::url(value))
     }
+
+    /// AGPL-3.0 §13 source offer. `build.rs` bakes the repository URL and
+    /// build commit in via `rustc-env`. `source_url` deep-links to the
+    /// exact source the running binary was built from — `…/tree/<commit>`
+    /// when the commit is known, the repo root otherwise (an empty commit
+    /// is the "no git context" signal, so no sentinel string is shared
+    /// across the build/render boundary). `source_commit` is the short SHA
+    /// for display, empty when unknown. The footer renders both so every
+    /// network user is offered the Corresponding Source. The piped value is
+    /// unused — invoked as `{{ ""|source_url }}`.
+    static SOURCE_URL: std::sync::LazyLock<String> =
+        std::sync::LazyLock::new(|| match env!("SM_SOURCE_COMMIT") {
+            "" => env!("SM_SOURCE_URL").to_string(),
+            commit => format!("{}/tree/{commit}", env!("SM_SOURCE_URL")),
+        });
+
+    #[askama::filter_fn]
+    pub fn source_url(_: &str, _: &dyn askama::Values) -> askama::Result<&'static str> {
+        Ok(SOURCE_URL.as_str())
+    }
+
+    #[askama::filter_fn]
+    pub fn source_commit(_: &str, _: &dyn askama::Values) -> askama::Result<&'static str> {
+        Ok(env!("SM_SOURCE_COMMIT"))
+    }
 }
 
 #[cfg(test)]

@@ -1,0 +1,9 @@
+{# Shared footer tail: legal/policy links + third-party license bundle +
+   the AGPL-3.0 §13 source offer. Included by the operator UI (base.html)
+   and the standalone policy layout (legal.html). The public status page
+   has a deliberately distinct minimal footer and does not use this. #}
+{% include "_legal_links.html" %}
+<span class="mx-1">·</span>
+<a href="/licenses" class="hover:text-slate-600">Licenses</a>
+<span class="mx-1">·</span>
+{% include "_source.html" %}

@@ -29,10 +29,13 @@ NOT apply to internal-only deployments inside your organization.
 - **Trust through transparency** — the hosted service runs the same 
       code you can read on GitHub
 
-AGPL-3.0 is the same license used by 
-[openstatus](https://github.com/openstatusHQ/openstatus), 
-[Cal.com](https://github.com/calcom/cal.com), and 
-[Plausible Analytics](https://github.com/plausible/analytics).
+## Third-party components
+
+The binary embeds a few third-party assets (charting/JS libraries, 
+generated CSS). Their licenses and attributions are reproduced in 
+[THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md) and served by a 
+running instance at `/licenses`. All Rust dependencies are constrained 
+to an AGPL-compatible license allow-list enforced in CI.
 
 ## Commercial licensing
 

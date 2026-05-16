@@ -90,6 +90,15 @@ legal_page!(
     "Security Policy",
     "../../../docs/legal/security-policy.md"
 );
+// AGPL-3.0 / Apache-2.0 / MIT / 0BSD redistribution: the binary embeds
+// third-party assets, so their attributions travel with it and are served
+// here. Reuses the same trusted-markdown path as the policy pages.
+legal_page!(
+    LICENSES,
+    licenses,
+    "Third-Party Licenses",
+    "../../../THIRD-PARTY-LICENSES.md"
+);
 
 /// `GET /.well-known/security.txt` (RFC 9116) — the canonical path. The
 /// bytes come from the one file under `static/`; it is also in the embedded

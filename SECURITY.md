@@ -20,8 +20,9 @@ vulnerabilities.
 - Initial assessment: within 7 days
 - Fix timeline depends on severity
 
-See the full [Security Policy](https://docs.status-monitor.example.com/security-policy) 
-for severity definitions and coordinated disclosure terms.
+See the full [Security Policy](docs/legal/security-policy.md) for 
+severity definitions, scope, and coordinated disclosure terms. A 
+running instance also serves it at `/security-policy`.
 
 ## Safe harbor
 

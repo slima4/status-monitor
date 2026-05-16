@@ -62,6 +62,11 @@ allow = [
 ]
 confidence-threshold = 0.93
 exceptions = []
+# The allow-list governs *dependencies*. The workspace crate itself is
+# AGPL-3.0-or-later and `publish = false`; `private.ignore` skips
+# unpublished workspace members so our own copyleft license is not graded
+# against the (permissive) dependency policy.
+private = { ignore = true }
 
 # ── Bans: duplicate-version + crate-level deny. ─────────────────────────────
 [bans]
