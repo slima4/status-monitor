@@ -7,8 +7,8 @@
 
 mod common;
 
+use common::make_user;
 use status_monitor::config::{PublicStatusConfig, RetentionConfig, SessionConfig, TenancyConfig};
-use status_monitor::domain::UserId;
 use status_monitor::jobs::retention::purge_old_data;
 use status_monitor::public_status::PageCache;
 use status_monitor::storage::create_org_with_owner;
@@ -16,16 +16,6 @@ use uuid::Uuid;
 
 fn cache() -> PageCache {
     PageCache::new(&PublicStatusConfig::default())
-}
-
-async fn make_user(pool: &sqlx::PgPool) -> UserId {
-    let email = format!("u-{}@retention.example", Uuid::now_v7());
-    let (id,): (Uuid,) = sqlx::query_as("INSERT INTO users (email) VALUES ($1) RETURNING id")
-        .bind(&email)
-        .fetch_one(pool)
-        .await
-        .expect("insert user");
-    UserId(id)
 }
 
 async fn scalar_i64(pool: &sqlx::PgPool, sql: &str, marker: &str) -> i64 {
@@ -48,7 +38,7 @@ async fn purges_past_window_and_keeps_fresh_rows() {
     };
 
     let marker = format!("ret-{}", Uuid::new_v4().simple());
-    let user = make_user(&pool).await;
+    let user = make_user(&pool, "retention").await;
     let slug = format!("retn-{}", &Uuid::new_v4().simple().to_string()[..6]);
     let org = create_org_with_owner(&pool, user, &slug, "Retention Test", 100)
         .await

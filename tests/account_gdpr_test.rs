@@ -10,17 +10,15 @@
 
 mod common;
 
-use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use common::{
-    body_json, build_test_app_with_pg, drop_test_db, fresh_test_db, open_test_pool, session_layer,
+    body_json, build_test_app_with_pg, drop_test_db, fresh_test_db, open_test_pool, with_session,
 };
 use serde_json::json;
 use status_monitor::api::error::codes;
 use status_monitor::auth::account;
 use status_monitor::error::AppError;
-use status_monitor::web::{Session, User};
 use tower::ServiceExt;
 use uuid::Uuid;
 
@@ -323,17 +321,6 @@ async fn recovery_returns_410_when_row_already_restored() {
 // data export: redaction + cross-user exclusion
 // ---------------------------------------------------------------------------
 
-fn app_with_session(router: Router, user: Uuid) -> Router {
-    router.layer(session_layer(Session {
-        user: Some(User {
-            id: status_monitor::domain::UserId(user),
-            email: format!("u-{user}@example.test"),
-        }),
-        active_org_id: None,
-        session_id: None,
-    }))
-}
-
 #[tokio::test]
 #[ignore = "requires DATABASE_URL"]
 async fn data_export_redacts_credentials_and_excludes_other_emails() {
@@ -368,7 +355,7 @@ async fn data_export_redacts_credentials_and_excludes_other_emails() {
     .unwrap();
 
     let (router, _) = build_test_app_with_pg(pool.clone(), |cfg| cfg.tenancy.enabled = true).await;
-    let router = app_with_session(router, owner);
+    let router = with_session(router, status_monitor::domain::UserId(owner), None, None);
 
     let resp = router
         .oneshot(

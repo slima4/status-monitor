@@ -8,9 +8,8 @@
 
 mod common;
 
+use common::make_user;
 use status_monitor::auth::api_tokens;
-use status_monitor::domain::UserId;
-use uuid::Uuid;
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations/postgres");
 
@@ -26,15 +25,6 @@ async fn open_pool(db_url: &str) -> sqlx::PgPool {
     common::open_test_pool(db_url).await
 }
 
-async fn seed_user(pool: &sqlx::PgPool) -> UserId {
-    let (id,): (Uuid,) = sqlx::query_as("INSERT INTO users (email) VALUES ($1) RETURNING id")
-        .bind(format!("u-{}@example.test", Uuid::now_v7()))
-        .fetch_one(pool)
-        .await
-        .unwrap();
-    UserId(id)
-}
-
 const PREFIX_LEN: usize = 16;
 
 #[tokio::test]
@@ -46,7 +36,7 @@ async fn create_then_lookup_and_revoke_roundtrip() {
     let pool = open_pool(&db).await;
     MIGRATOR.run(&pool).await.unwrap();
 
-    let user = seed_user(&pool).await;
+    let user = make_user(&pool, "u").await;
     let created = api_tokens::create(&pool, user, "CI", PREFIX_LEN, 1000)
         .await
         .expect("create");
@@ -98,7 +88,7 @@ async fn forced_prefix_collision_still_finds_correct_token() {
     let pool = open_pool(&db).await;
     MIGRATOR.run(&pool).await.unwrap();
 
-    let user = seed_user(&pool).await;
+    let user = make_user(&pool, "u").await;
     // Issue real token, then manually plant a sibling row with the same
     // prefix but a hash for "wrong" so the lookup must disambiguate by
     // argon2-verify, not by prefix alone.
@@ -136,7 +126,7 @@ async fn count_for_user_grows_then_revoke_drops() {
     let pool = open_pool(&db).await;
     MIGRATOR.run(&pool).await.unwrap();
 
-    let user = seed_user(&pool).await;
+    let user = make_user(&pool, "u").await;
     assert_eq!(api_tokens::count_for_user(&pool, user).await.unwrap(), 0);
 
     let t1 = api_tokens::create(&pool, user, "t1", PREFIX_LEN, 1000)
@@ -166,8 +156,8 @@ async fn rename_only_succeeds_for_owner() {
     let pool = open_pool(&db).await;
     MIGRATOR.run(&pool).await.unwrap();
 
-    let owner = seed_user(&pool).await;
-    let other = seed_user(&pool).await;
+    let owner = make_user(&pool, "u").await;
+    let other = make_user(&pool, "u").await;
     let tok = api_tokens::create(&pool, owner, "ci", PREFIX_LEN, 1000)
         .await
         .unwrap();
@@ -197,7 +187,7 @@ async fn expired_token_lookup_returns_invalid() {
     let pool = open_pool(&db).await;
     MIGRATOR.run(&pool).await.unwrap();
 
-    let user = seed_user(&pool).await;
+    let user = make_user(&pool, "u").await;
     let tok = api_tokens::create(&pool, user, "expiring", PREFIX_LEN, 1000)
         .await
         .unwrap();

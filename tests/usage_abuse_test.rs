@@ -10,13 +10,11 @@ mod common;
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use common::{body_json, build_test_app_with_pg_store, pg_pool_from_env, session_layer};
+use common::{body_json, build_test_app_with_pg_store, make_user, pg_pool_from_env, with_session};
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use status_monitor::domain::{OrgId, UserId};
-use status_monitor::web::{Session, User};
 use tower::ServiceExt;
-use uuid::Uuid;
 
 fn http_target(name: &str, url: &str) -> Value {
     json!({
@@ -68,30 +66,14 @@ async fn wait_for_abuse_rows(pool: &PgPool, more_than: i64) -> bool {
 }
 
 async fn make_owner(pool: &PgPool, org: OrgId) -> UserId {
-    let email = format!("usage-{}@example.test", Uuid::now_v7());
-    let (id,): (Uuid,) = sqlx::query_as("INSERT INTO users (email) VALUES ($1) RETURNING id")
-        .bind(&email)
-        .fetch_one(pool)
-        .await
-        .expect("seed user");
+    let user = make_user(pool, "usage").await;
     sqlx::query("INSERT INTO memberships (user_id, org_id, role) VALUES ($1, $2, 'owner')")
-        .bind(id)
+        .bind(user.0)
         .bind(org.0)
         .execute(pool)
         .await
         .expect("seed owner membership");
-    UserId(id)
-}
-
-fn with_session(router: Router, user: UserId) -> Router {
-    router.layer(session_layer(Session {
-        user: Some(User {
-            id: user,
-            email: format!("u-{}@example.test", user.0),
-        }),
-        active_org_id: None,
-        session_id: None,
-    }))
+    user
 }
 
 /// The shipped `config/default.toml` `[abuse].url_patterns_denied` and the
@@ -167,7 +149,7 @@ async fn org_usage_reports_accurate_counts_and_limits() {
     };
     let (app, org) = build_test_app_with_pg_store(pool.clone(), |_| {}).await;
     let user = make_owner(&pool, org).await;
-    let app = with_session(app, user);
+    let app = with_session(app, user, None, None);
 
     assert_eq!(
         post_target(&app, "t1", "https://example.com/a")
@@ -214,16 +196,8 @@ async fn org_usage_requires_membership() {
     };
     let (app, org) = build_test_app_with_pg_store(pool.clone(), |_| {}).await;
     // A user who is NOT a member of `org`.
-    let stranger = {
-        let email = format!("stranger-{}@example.test", Uuid::now_v7());
-        let (id,): (Uuid,) = sqlx::query_as("INSERT INTO users (email) VALUES ($1) RETURNING id")
-            .bind(&email)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-        UserId(id)
-    };
-    let app = with_session(app, stranger);
+    let stranger = make_user(&pool, "stranger").await;
+    let app = with_session(app, stranger, None, None);
     let resp = app
         .oneshot(
             Request::get(format!("/api/v1/orgs/{}/usage", org.0))
@@ -244,7 +218,7 @@ async fn me_usage_reports_tokens_and_owned_orgs() {
     };
     let (app, org) = build_test_app_with_pg_store(pool.clone(), |_| {}).await;
     let user = make_owner(&pool, org).await;
-    let app = with_session(app, user);
+    let app = with_session(app, user, None, None);
 
     let resp = app
         .oneshot(

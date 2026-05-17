@@ -7,22 +7,13 @@
 
 mod common;
 
+use common::{make_user, unique_slug};
 use status_monitor::domain::{OrgId, UserId};
 use status_monitor::jobs::purge_deleted::purge_users_past_grace;
 use status_monitor::storage::create_org_with_owner;
 use uuid::Uuid;
 
 const GRACE: u32 = 30;
-
-async fn make_user(pool: &sqlx::PgPool) -> UserId {
-    let email = format!("u-{}@purge.example", Uuid::now_v7());
-    let (id,): (Uuid,) = sqlx::query_as("INSERT INTO users (email) VALUES ($1) RETURNING id")
-        .bind(&email)
-        .fetch_one(pool)
-        .await
-        .expect("insert user");
-    UserId(id)
-}
 
 /// Backdate `deleted_at` so the grace check fires without sleeping.
 async fn soft_delete_backdated(pool: &sqlx::PgPool, user: UserId, days_ago: i64) {
@@ -92,11 +83,6 @@ async fn cleanup_org(pool: &sqlx::PgPool, org: OrgId) {
         .await;
 }
 
-fn unique_slug(prefix: &str) -> String {
-    let id = Uuid::new_v4().simple().to_string();
-    format!("{prefix}-{}", &id[id.len() - 6..])
-}
-
 /// T2 — the partial unique index allows at most one active (unused)
 /// recovery token per user; a second deletion attempt must collide.
 #[tokio::test]
@@ -105,7 +91,7 @@ async fn second_active_recovery_token_violates_unique() {
     let Some(pool) = common::pg_pool_from_env().await else {
         return;
     };
-    let user = make_user(&pool).await;
+    let user = make_user(&pool, "purge-user").await;
 
     insert_recovery(&pool, user, 1, false)
         .await
@@ -129,7 +115,7 @@ async fn user_within_grace_is_kept() {
     let Some(pool) = common::pg_pool_from_env().await else {
         return;
     };
-    let user = make_user(&pool).await;
+    let user = make_user(&pool, "purge-user").await;
     soft_delete_backdated(&pool, user, 29).await;
 
     purge_users_past_grace(&pool, GRACE).await.unwrap();
@@ -150,7 +136,7 @@ async fn user_past_grace_is_purged() {
     let Some(pool) = common::pg_pool_from_env().await else {
         return;
     };
-    let user = make_user(&pool).await;
+    let user = make_user(&pool, "purge-user").await;
     soft_delete_backdated(&pool, user, 365).await;
 
     // Count is racy on the shared DB (a parallel test's batch call may grab
@@ -174,7 +160,7 @@ async fn recovered_user_is_not_purged() {
     // deleted_at IS NULL throughout, so no concurrent purge tick can ever
     // consider this user eligible (testing the predicate, not a NOT-NULL
     // window that another test's batch call could race into).
-    let user = make_user(&pool).await;
+    let user = make_user(&pool, "purge-user").await;
     insert_recovery(&pool, user, -1, true).await.unwrap(); // expired + used
 
     purge_users_past_grace(&pool, GRACE).await.unwrap();
@@ -194,7 +180,7 @@ async fn two_delete_recover_cycles_purge_correctly() {
     let Some(pool) = common::pg_pool_from_env().await else {
         return;
     };
-    let user = make_user(&pool).await;
+    let user = make_user(&pool, "purge-user").await;
     // Cycle 1: token issued then used (recovered).
     insert_recovery(&pool, user, -36, true).await.unwrap();
     // Cycle 2: soft-deleted again, token issued but now expired and unused.
@@ -223,7 +209,7 @@ async fn fk_cascade_leaves_no_orphans() {
     let Some(pool) = common::pg_pool_from_env().await else {
         return;
     };
-    let user = make_user(&pool).await;
+    let user = make_user(&pool, "purge-user").await;
     let org = create_org_with_owner(&pool, user, &unique_slug("casc"), "n", 3)
         .await
         .unwrap()
@@ -321,7 +307,7 @@ async fn audit_rows_survive_with_nulled_actor() {
     let Some(pool) = common::pg_pool_from_env().await else {
         return;
     };
-    let user = make_user(&pool).await;
+    let user = make_user(&pool, "purge-user").await;
     let org = create_org_with_owner(&pool, user, &unique_slug("aud"), "n", 3)
         .await
         .unwrap()

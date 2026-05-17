@@ -6,8 +6,9 @@
 
 mod common;
 
+use common::{make_user, unique_slug};
 use status_monitor::config::PublicStatusConfig;
-use status_monitor::domain::{OrgId, UserId};
+use status_monitor::domain::OrgId;
 use status_monitor::jobs::purge_deleted::{
     drain_clickhouse_purge_queue, purge_queue_depth, purge_tick,
 };
@@ -20,22 +21,6 @@ use uuid::Uuid;
 /// cache is a no-op, so a throwaway instance keeps the call sites terse.
 fn test_cache() -> PageCache {
     PageCache::new(&PublicStatusConfig::default())
-}
-
-async fn make_user(pool: &sqlx::PgPool) -> UserId {
-    let email = format!("u-{}@test.example", Uuid::now_v7());
-    let (id,): (Uuid,) = sqlx::query_as(r#"INSERT INTO users (email) VALUES ($1) RETURNING id"#)
-        .bind(&email)
-        .fetch_one(pool)
-        .await
-        .expect("insert user");
-    UserId(id)
-}
-
-fn unique_slug(prefix: &str) -> String {
-    let id = Uuid::new_v4().simple().to_string();
-    let suffix = &id[id.len() - 6..];
-    format!("{prefix}-{suffix}")
 }
 
 /// Backdate `deleted_at` so the row is past the grace window without sleeping.
@@ -59,7 +44,7 @@ async fn grace_window_blocks_purge() {
     let Some(ch) = common::ch_client_from_env().await else {
         return;
     };
-    let user = make_user(&pool).await;
+    let user = make_user(&pool, "purge").await;
     let org = create_org_with_owner(&pool, user, &unique_slug("grace"), "n", 3)
         .await
         .unwrap()
@@ -107,7 +92,7 @@ async fn past_grace_cascades_and_enqueues_ch() {
     let Some(ch) = common::ch_client_from_env().await else {
         return;
     };
-    let user = make_user(&pool).await;
+    let user = make_user(&pool, "purge").await;
     let org = create_org_with_owner(&pool, user, &unique_slug("past"), "n", 3)
         .await
         .unwrap()
@@ -160,7 +145,7 @@ async fn restore_cancels_purge() {
     let Some(ch) = common::ch_client_from_env().await else {
         return;
     };
-    let user = make_user(&pool).await;
+    let user = make_user(&pool, "purge").await;
     let org = create_org_with_owner(&pool, user, &unique_slug("cncl"), "n", 3)
         .await
         .unwrap()
@@ -207,7 +192,7 @@ async fn drain_is_idempotent_on_repeat() {
     let Some(ch) = common::ch_client_from_env().await else {
         return;
     };
-    let user = make_user(&pool).await;
+    let user = make_user(&pool, "purge").await;
     let org = create_org_with_owner(&pool, user, &unique_slug("drn"), "n", 3)
         .await
         .unwrap()
@@ -260,7 +245,7 @@ async fn enqueue_is_dedup_on_conflict() {
     let Some(pool) = common::pg_pool_from_env().await else {
         return;
     };
-    let user = make_user(&pool).await;
+    let user = make_user(&pool, "purge").await;
     let org = create_org_with_owner(&pool, user, &unique_slug("dup"), "n", 3)
         .await
         .unwrap()
@@ -319,7 +304,7 @@ async fn drain_erases_ch_rows_then_completes() {
     let Some(ch) = common::ch_client_from_env().await else {
         return;
     };
-    let user = make_user(&pool).await;
+    let user = make_user(&pool, "purge").await;
     let org = create_org_with_owner(&pool, user, &unique_slug("erase"), "n", 3)
         .await
         .unwrap()
@@ -390,7 +375,7 @@ async fn queue_depth_counts_pending_not_completed() {
     let Some(pool) = common::pg_pool_from_env().await else {
         return;
     };
-    let user = make_user(&pool).await;
+    let user = make_user(&pool, "purge").await;
     let org = create_org_with_owner(&pool, user, &unique_slug("depth"), "n", 3)
         .await
         .unwrap()
@@ -461,7 +446,7 @@ async fn purge_resilient_to_kill_between_pg_cascade_and_ch_drain() {
     let Some(ch) = common::ch_client_from_env().await else {
         return;
     };
-    let user = make_user(&pool).await;
+    let user = make_user(&pool, "purge").await;
     let org = create_org_with_owner(&pool, user, &unique_slug("kill"), "n", 3)
         .await
         .unwrap()

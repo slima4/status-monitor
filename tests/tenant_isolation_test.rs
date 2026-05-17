@@ -25,22 +25,7 @@ use status_monitor::storage::{
 use url::Url;
 use uuid::Uuid;
 
-use crate::common::default_http_check;
-
-async fn make_user(pool: &PgPool) -> UserId {
-    let email = format!("isol-{}@test.example", Uuid::now_v7());
-    let (id,): (Uuid,) = sqlx::query_as(r#"INSERT INTO users (email) VALUES ($1) RETURNING id"#)
-        .bind(&email)
-        .fetch_one(pool)
-        .await
-        .expect("insert user");
-    UserId(id)
-}
-
-fn unique_slug(prefix: &str) -> String {
-    let id = Uuid::new_v4().simple().to_string();
-    format!("{prefix}-{}", &id[id.len() - 6..])
-}
+use crate::common::{default_http_check, make_user, unique_slug};
 
 fn target_named(name: &str) -> NewTarget {
     let url = Url::parse("https://example.com/").unwrap();
@@ -91,7 +76,7 @@ struct Tenant {
 }
 
 async fn provision_tenant(pool: &PgPool, ch: &clickhouse::Client, label: &str) -> Tenant {
-    let user = make_user(pool).await;
+    let user = make_user(pool, "isol").await;
     let org = create_org_with_owner(pool, user, &unique_slug(label), label, 3)
         .await
         .unwrap()

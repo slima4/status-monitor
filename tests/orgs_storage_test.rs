@@ -6,7 +6,8 @@
 
 mod common;
 
-use status_monitor::domain::{OrgId, Role, UserId};
+use common::{make_user, unique_slug};
+use status_monitor::domain::{OrgId, Role};
 use status_monitor::storage::orgs as orgs_store;
 use status_monitor::storage::{
     RemoveOutcome, RestoreOutcome, create_org_with_owner, ensure_default_org, is_active_member,
@@ -16,31 +17,13 @@ use status_monitor::storage::{
 };
 use uuid::Uuid;
 
-async fn make_user(pool: &sqlx::PgPool) -> UserId {
-    let email = format!("u-{}@test.example", Uuid::now_v7());
-    let (id,): (Uuid,) = sqlx::query_as(r#"INSERT INTO users (email) VALUES ($1) RETURNING id"#)
-        .bind(&email)
-        .fetch_one(pool)
-        .await
-        .expect("insert user");
-    UserId(id)
-}
-
-fn unique_slug(prefix: &str) -> String {
-    // Take the tail of v4 (pure-random) hex so two slugs minted in the same
-    // millisecond don't collide — v7's leading bytes are the timestamp.
-    let id = Uuid::new_v4().simple().to_string();
-    let suffix = &id[id.len() - 6..];
-    format!("{prefix}-{suffix}")
-}
-
 #[tokio::test]
 #[ignore]
 async fn create_org_and_slug_check_round_trip() {
     let Some(pool) = common::pg_pool_from_env().await else {
         return;
     };
-    let user = make_user(&pool).await;
+    let user = make_user(&pool, "orgs").await;
     let slug = unique_slug("acme");
 
     assert!(slug_is_available(&pool, &slug).await.unwrap());
@@ -75,7 +58,7 @@ async fn owner_org_limit_is_atomic() {
     let Some(pool) = common::pg_pool_from_env().await else {
         return;
     };
-    let user = make_user(&pool).await;
+    let user = make_user(&pool, "orgs").await;
     // Limit 2 — first two creates succeed, third fails with OWNER_ORG_LIMIT.
     let s1 = unique_slug("lim");
     let s2 = unique_slug("lim");
@@ -109,7 +92,7 @@ async fn list_orgs_excludes_soft_deleted_and_update_name_works() {
     let Some(pool) = common::pg_pool_from_env().await else {
         return;
     };
-    let user = make_user(&pool).await;
+    let user = make_user(&pool, "orgs").await;
     let slug = unique_slug("list");
     let org = create_org_with_owner(&pool, user, &slug, "Old name", 3)
         .await
@@ -149,7 +132,7 @@ async fn restore_org_inside_window_succeeds() {
     let Some(pool) = common::pg_pool_from_env().await else {
         return;
     };
-    let user = make_user(&pool).await;
+    let user = make_user(&pool, "orgs").await;
     let slug = unique_slug("rest");
     let org = create_org_with_owner(&pool, user, &slug, "n", 3)
         .await
@@ -178,7 +161,7 @@ async fn restore_org_outside_window_refuses() {
     let Some(pool) = common::pg_pool_from_env().await else {
         return;
     };
-    let user = make_user(&pool).await;
+    let user = make_user(&pool, "orgs").await;
     let slug = unique_slug("expr");
     let org = create_org_with_owner(&pool, user, &slug, "n", 3)
         .await
@@ -208,7 +191,7 @@ async fn remove_member_refuses_last_owner() {
     let Some(pool) = common::pg_pool_from_env().await else {
         return;
     };
-    let user = make_user(&pool).await;
+    let user = make_user(&pool, "orgs").await;
     let slug = unique_slug("solo");
     let org = create_org_with_owner(&pool, user, &slug, "Solo", 3)
         .await
@@ -232,8 +215,8 @@ async fn remove_member_succeeds_when_other_owners_exist() {
     let Some(pool) = common::pg_pool_from_env().await else {
         return;
     };
-    let a = make_user(&pool).await;
-    let b = make_user(&pool).await;
+    let a = make_user(&pool, "orgs").await;
+    let b = make_user(&pool, "orgs").await;
     let slug = unique_slug("pair");
     let org = create_org_with_owner(&pool, a, &slug, "Pair", 3)
         .await
@@ -271,7 +254,7 @@ async fn ensure_default_org_idempotent_and_personal_org_lookup_returns_none() {
     assert_eq!(first, second);
 
     // A brand-new user has no personal org until signup auto-creates one.
-    let user = make_user(&pool).await;
+    let user = make_user(&pool, "orgs").await;
     assert!(personal_org_for_user(&pool, user).await.unwrap().is_none());
 
     sqlx::query("DELETE FROM users WHERE id = $1")
@@ -292,7 +275,7 @@ async fn owner_limit_holds_under_50_concurrent_creates() {
     let Some(pool) = common::pg_pool_from_env().await else {
         return;
     };
-    let user = make_user(&pool).await;
+    let user = make_user(&pool, "orgs").await;
 
     let limit: u32 = 3;
     let attempts: usize = 50;
@@ -344,8 +327,8 @@ async fn personal_org_collision_retry_succeeds() {
     let Some(pool) = common::pg_pool_from_env().await else {
         return;
     };
-    let user_a = make_user(&pool).await;
-    let user_b = make_user(&pool).await;
+    let user_a = make_user(&pool, "orgs").await;
+    let user_b = make_user(&pool, "orgs").await;
 
     // Fixed slug shaped like a real personal slug, distinct enough that two
     // concurrent test runs won't collide.

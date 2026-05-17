@@ -10,26 +10,13 @@
 
 mod common;
 
-use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use common::{body_json, build_test_app_with_pg, session_layer};
+use common::{body_json, build_test_app_with_pg, make_user, unique_slug, with_session};
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use status_monitor::domain::UserId;
-use status_monitor::web::{Session, User};
 use tower::ServiceExt;
-use uuid::Uuid;
-
-async fn make_user(pool: &PgPool) -> UserId {
-    let email = format!("apitest-{}@example.test", Uuid::now_v7());
-    let (id,): (Uuid,) = sqlx::query_as(r#"INSERT INTO users (email) VALUES ($1) RETURNING id"#)
-        .bind(&email)
-        .fetch_one(pool)
-        .await
-        .expect("seed user");
-    UserId(id)
-}
 
 fn cleanup_user(pool: PgPool, user: UserId) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
@@ -38,22 +25,6 @@ fn cleanup_user(pool: PgPool, user: UserId) -> tokio::task::JoinHandle<()> {
             .execute(&pool)
             .await;
     })
-}
-
-fn app_with_session(router: Router, user: UserId) -> Router {
-    router.layer(session_layer(Session {
-        user: Some(User {
-            id: user,
-            email: format!("u-{}@example.test", user.0),
-        }),
-        active_org_id: None,
-        session_id: None,
-    }))
-}
-
-fn unique_slug(prefix: &str) -> String {
-    let id = Uuid::new_v4().simple().to_string();
-    format!("{prefix}-{}", &id[id.len() - 6..])
 }
 
 async fn read_value(resp: axum::http::Response<Body>) -> Value {
@@ -81,9 +52,9 @@ async fn create_then_list_then_delete_round_trip() {
     let Some(pool) = common::pg_pool_from_env().await else {
         return;
     };
-    let user = make_user(&pool).await;
+    let user = make_user(&pool, "orgs-api").await;
     let (router, _) = build_test_app_with_pg(pool.clone(), |cfg| cfg.tenancy.enabled = true).await;
-    let router = app_with_session(router, user);
+    let router = with_session(router, user, None, None);
 
     let slug = unique_slug("api");
     let create = router
@@ -168,9 +139,9 @@ async fn create_org_with_taken_slug_returns_409() {
     let Some(pool) = common::pg_pool_from_env().await else {
         return;
     };
-    let user = make_user(&pool).await;
+    let user = make_user(&pool, "orgs-api").await;
     let (router, _) = build_test_app_with_pg(pool.clone(), |cfg| cfg.tenancy.enabled = true).await;
-    let router = app_with_session(router, user);
+    let router = with_session(router, user, None, None);
 
     let slug = unique_slug("dup");
     let first = router
@@ -212,9 +183,9 @@ async fn create_org_with_reserved_slug_returns_400() {
     let Some(pool) = common::pg_pool_from_env().await else {
         return;
     };
-    let user = make_user(&pool).await;
+    let user = make_user(&pool, "orgs-api").await;
     let (router, _) = build_test_app_with_pg(pool.clone(), |cfg| cfg.tenancy.enabled = true).await;
-    let router = app_with_session(router, user);
+    let router = with_session(router, user, None, None);
 
     let resp = router
         .oneshot(
@@ -240,9 +211,9 @@ async fn check_slug_endpoint_returns_availability() {
     let Some(pool) = common::pg_pool_from_env().await else {
         return;
     };
-    let user = make_user(&pool).await;
+    let user = make_user(&pool, "orgs-api").await;
     let (router, _) = build_test_app_with_pg(pool.clone(), |cfg| cfg.tenancy.enabled = true).await;
-    let router = app_with_session(router, user);
+    let router = with_session(router, user, None, None);
 
     let slug = unique_slug("chk");
     let resp = router
@@ -281,11 +252,11 @@ async fn non_owner_cannot_delete_or_update() {
     let Some(pool) = common::pg_pool_from_env().await else {
         return;
     };
-    let owner = make_user(&pool).await;
-    let other = make_user(&pool).await;
+    let owner = make_user(&pool, "orgs-api").await;
+    let other = make_user(&pool, "orgs-api").await;
     let (router, _) = build_test_app_with_pg(pool.clone(), |cfg| cfg.tenancy.enabled = true).await;
-    let owner_router = app_with_session(router.clone(), owner);
-    let other_router = app_with_session(router, other);
+    let owner_router = with_session(router.clone(), owner, None, None);
+    let other_router = with_session(router, other, None, None);
 
     let slug = unique_slug("priv");
     let create = owner_router

@@ -15,7 +15,7 @@ use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use axum::response::IntoResponse;
-use common::{body_json, build_test_app_with_pg_store, pg_pool_from_env};
+use common::{body_json, build_test_app_with_pg_store, make_user, pg_pool_from_env};
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use status_monitor::config::AppConfig;
@@ -830,18 +830,9 @@ async fn member_cap_is_enforced_atomically() {
     cfg.quotas.plan_cache_ttl_secs = 1;
     let svc = QuotaService::new(&cfg, Some(pool.clone()));
 
-    let make_user = |pool: PgPool| async move {
-        let email = format!("c-{}@example.test", Uuid::now_v7());
-        let (id,): (Uuid,) = sqlx::query_as("INSERT INTO users (email) VALUES ($1) RETURNING id")
-            .bind(&email)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-        UserId(id)
-    };
-    let u1 = make_user(pool.clone()).await;
-    let u2 = make_user(pool.clone()).await;
-    let u3 = make_user(pool.clone()).await;
+    let u1 = make_user(&pool, "c").await;
+    let u2 = make_user(&pool, "c").await;
+    let u3 = make_user(&pool, "c").await;
 
     assert!(svc.check_can_add_member(org, Some(u1)).await.is_ok());
     assert_eq!(

@@ -15,29 +15,13 @@ use std::time::Duration;
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use common::{build_saas_router_with_pg_targets, default_http_check, session_layer};
-use sqlx::PgPool;
-use status_monitor::domain::{CheckSpec, ExpectedStatus, NewTarget, OrgId, UserId};
+use common::{
+    build_saas_router_with_pg_targets, default_http_check, make_user, unique_slug, with_session,
+};
+use status_monitor::domain::{CheckSpec, ExpectedStatus, NewTarget};
 use status_monitor::storage::{PostgresTargetStore, TargetStore, create_org_with_owner};
-use status_monitor::web::{Session, User};
 use tower::ServiceExt;
 use url::Url;
-use uuid::Uuid;
-
-async fn make_user(pool: &PgPool) -> UserId {
-    let email = format!("idor-{}@test.example", Uuid::now_v7());
-    let (id,): (Uuid,) = sqlx::query_as(r#"INSERT INTO users (email) VALUES ($1) RETURNING id"#)
-        .bind(&email)
-        .fetch_one(pool)
-        .await
-        .expect("insert user");
-    UserId(id)
-}
-
-fn unique_slug(prefix: &str) -> String {
-    let id = Uuid::new_v4().simple().to_string();
-    format!("{prefix}-{}", &id[id.len() - 6..])
-}
 
 fn a_target() -> NewTarget {
     let url = Url::parse("https://example.com/").unwrap();
@@ -56,20 +40,6 @@ fn a_target() -> NewTarget {
     }
 }
 
-/// Stamp a session whose active org is `org` and whose user is `user`. The
-/// `CurrentOrg` extractor verifies `user` is an active member of `org`, so
-/// the user must be that org's owner (which `create_org_with_owner` makes).
-fn as_member(router: Router, user: UserId, org: OrgId) -> Router {
-    router.layer(session_layer(Session {
-        user: Some(User {
-            id: user,
-            email: format!("u-{}@test.example", user.0),
-        }),
-        active_org_id: Some(org),
-        session_id: Some("idor-test".into()),
-    }))
-}
-
 async fn status_of(router: &Router, path: &str) -> StatusCode {
     router
         .clone()
@@ -86,8 +56,8 @@ async fn logged_in_operator_cannot_read_another_orgs_target() {
         return;
     };
 
-    let user_a = make_user(&pool).await;
-    let user_b = make_user(&pool).await;
+    let user_a = make_user(&pool, "idor").await;
+    let user_b = make_user(&pool, "idor").await;
     let org_a = create_org_with_owner(&pool, user_a, &unique_slug("idor-a"), "A", 3)
         .await
         .unwrap()
@@ -112,8 +82,8 @@ async fn logged_in_operator_cannot_read_another_orgs_target() {
         .expect("create B's target");
 
     let router = build_saas_router_with_pg_targets(pool.clone()).await;
-    let a = as_member(router.clone(), user_a, org_a);
-    let b = as_member(router, user_b, org_b);
+    let a = with_session(router.clone(), user_a, Some(org_a), Some("idor-test"));
+    let b = with_session(router, user_b, Some(org_b), Some("idor-test"));
 
     // ── A may read its own target on every per-target surface ────────────
     for path in [

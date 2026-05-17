@@ -18,11 +18,11 @@ mod common;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
+use common::{make_user, unique_slug};
 use status_monitor::domain::{OrgId, PublicOrgBranding, UserId};
 use status_monitor::storage::orgs::{find_id_by_slug, find_public_status_org_by_slug};
 use status_monitor::storage::{create_org_with_owner, update_public_branding};
 use tower::ServiceExt;
-use uuid::Uuid;
 
 /// The `public_status.base_domain` config value — the part *after* the fixed
 /// `.status.` label. Status pages live at `{slug}.status.{BASE_DOMAIN}`; see
@@ -30,32 +30,17 @@ use uuid::Uuid;
 /// can never silently drift from what the parser expects.
 const BASE_DOMAIN: &str = "test.local";
 
-fn unique_slug(prefix: &str) -> String {
-    let id = Uuid::new_v4().simple().to_string();
-    format!("{prefix}-{}", &id[id.len() - 8..])
-}
-
 /// Build the public-status `Host` for a slug, matching the production
 /// `{slug}.status.{base_domain}` contract the host parser enforces.
 fn status_host(slug: &str) -> String {
     format!("{slug}.status.{BASE_DOMAIN}")
 }
 
-async fn make_user(pool: &sqlx::PgPool) -> UserId {
-    let email = format!("u-{}@test.example", Uuid::now_v7());
-    let (id,): (Uuid,) = sqlx::query_as("INSERT INTO users (email) VALUES ($1) RETURNING id")
-        .bind(&email)
-        .fetch_one(pool)
-        .await
-        .expect("insert user");
-    UserId(id)
-}
-
 /// Create an org owned by a fresh user and set its public-status opt-in
 /// through the same storage call the operator endpoint uses. Returns the
 /// org plus its owner so callers can flip the opt-in again later.
 async fn seed_org(pool: &sqlx::PgPool, slug: &str, enabled: bool) -> (OrgId, UserId) {
-    let user = make_user(pool).await;
+    let user = make_user(pool, "subdomain").await;
     let org = create_org_with_owner(pool, user, slug, slug, 100)
         .await
         .expect("create org")

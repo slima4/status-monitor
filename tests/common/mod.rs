@@ -352,6 +352,47 @@ pub fn session_layer(
     axum::Extension(session)
 }
 
+/// Insert a fresh user with a unique email and return its id. `prefix` only
+/// disambiguates the email in shared-DB logs — uniqueness comes from the
+/// `Uuid::now_v7()` suffix, so concurrent suites never collide.
+pub async fn make_user(pool: &PgPool, prefix: &str) -> status_monitor::domain::UserId {
+    let email = format!("{prefix}-{}@test.example", Uuid::now_v7());
+    let (id,): (Uuid,) = sqlx::query_as("INSERT INTO users (email) VALUES ($1) RETURNING id")
+        .bind(&email)
+        .fetch_one(pool)
+        .await
+        .expect("insert user");
+    status_monitor::domain::UserId(id)
+}
+
+/// `{prefix}-{8 hex}` — the tail of a v4 (pure-random) UUID, so two slugs
+/// minted in the same millisecond can't collide (v7's leading bytes are the
+/// timestamp). Stays within the 30-char slug limit for the short test prefixes.
+pub fn unique_slug(prefix: &str) -> String {
+    let id = Uuid::new_v4().simple().to_string();
+    format!("{prefix}-{}", &id[id.len() - 8..])
+}
+
+/// Stamp a session onto `router`. `org` becomes `active_org_id` (the
+/// `CurrentOrg` extractor verifies `user` is an active member of it);
+/// `session_id` sets the session id. Supersedes the per-file `as_member` /
+/// `app_with_session` / `with_session` copies.
+pub fn with_session(
+    router: Router,
+    user: status_monitor::domain::UserId,
+    org: Option<OrgId>,
+    session_id: Option<&str>,
+) -> Router {
+    router.layer(session_layer(status_monitor::web::Session {
+        user: Some(status_monitor::web::User {
+            id: user,
+            email: format!("u-{}@test.example", user.0),
+        }),
+        active_org_id: org,
+        session_id: session_id.map(str::to_owned),
+    }))
+}
+
 /// Shared `AppState` builder used by the router helpers above and by tests
 /// that need to exercise an extractor directly without going through HTTP.
 /// In-memory stores, no Postgres pool (`db: None`); callers that require a
