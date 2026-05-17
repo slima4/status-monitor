@@ -5,15 +5,13 @@ use serde_json::Value;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
-use crate::security::{Cipher, is_envelope};
+use crate::security::{Cipher, ENC_KEY, is_envelope, wrap_envelope};
 
 /// JSON pointer paths inside `check_spec` that hold credential material.
 /// `CheckSpec` uses `#[serde(tag = "type")]`, so the variant's fields are
 /// inlined at the JSON root rather than nested under `"http"`. The pointer
 /// lookups silently no-op on non-http checks because the field isn't present.
 const CREDENTIAL_PATHS: &[&str] = &["/basic_auth", "/bearer_token"];
-
-const ENC_KEY: &str = "$enc";
 
 pub fn encrypt_in_place(value: &mut Value, cipher: &Cipher) -> anyhow::Result<()> {
     for path in CREDENTIAL_PATHS {
@@ -27,11 +25,7 @@ pub fn encrypt_in_place(value: &mut Value, cipher: &Cipher) -> anyhow::Result<()
         let envelope = cipher
             .encrypt(&plaintext)
             .map_err(|e| anyhow::anyhow!("credential encryption failed: {e}"))?;
-        *slot = Value::Object(
-            [(ENC_KEY.to_string(), Value::String(envelope))]
-                .into_iter()
-                .collect(),
-        );
+        *slot = wrap_envelope(envelope);
     }
     Ok(())
 }

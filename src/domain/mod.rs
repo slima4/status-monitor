@@ -3,6 +3,7 @@ pub mod check;
 pub mod incident;
 pub mod maintenance;
 pub mod membership;
+pub mod notification_channel;
 pub mod org;
 pub mod public;
 pub mod quota;
@@ -21,6 +22,10 @@ pub use maintenance::{
     MaintenanceFilter, MaintenanceWindow, MaintenanceWindowUpdate, NewMaintenanceWindow,
 };
 pub use membership::{Membership, Role};
+pub use notification_channel::{
+    ChannelConfig, ChannelKind, NewNotificationChannel, NotificationChannel,
+    NotificationChannelUpdate, validate_channel_name,
+};
 pub use org::{BrandingError, OrgId, Organization, PublicOrgBranding, SlugError, validate_slug};
 pub use public::{
     ComponentHistoryResponse, DayState, IncidentSeverity, IncidentStatusPhase, OverallState,

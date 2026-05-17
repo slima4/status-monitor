@@ -99,6 +99,30 @@ pub fn is_envelope(s: &str) -> bool {
     s.starts_with("v1:")
 }
 
+/// JSON key under which a sealed value is stored at rest. Single owner so the
+/// targets-credential path and the notification-channel path can never drift
+/// to different sentinels (a comment used to be the only thing keeping them
+/// equal).
+pub const ENC_KEY: &str = "$enc";
+
+/// Wrap a v1 envelope as the canonical sealed JSON object `{"$enc": env}`.
+pub fn wrap_envelope(env: String) -> serde_json::Value {
+    serde_json::Value::Object(
+        [(ENC_KEY.to_string(), serde_json::Value::String(env))]
+            .into_iter()
+            .collect(),
+    )
+}
+
+/// The envelope string out of a sealed value, gated on the v1 prefix so a
+/// plaintext object that merely has an `$enc` key isn't misread as sealed.
+pub fn envelope_str(v: &serde_json::Value) -> Option<&str> {
+    v.as_object()?
+        .get(ENC_KEY)?
+        .as_str()
+        .filter(|s| is_envelope(s))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

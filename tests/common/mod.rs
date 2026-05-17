@@ -24,8 +24,9 @@ use status_monitor::http_client::{HttpClients, build_clients};
 use status_monitor::http_outbound::{OutboundHttpClient, build_outbound_client};
 use status_monitor::public_status::{NoopPublicSource, PublicSource};
 use status_monitor::storage::{
-    InMemoryIncidentNarrationStore, InMemoryMaintenanceStore, InMemorySink, InMemoryTargetStore,
-    IncidentNarrationStore, MaintenanceStore, PostgresTargetStore, ResultSink, ResultsStore,
+    InMemoryIncidentNarrationStore, InMemoryMaintenanceStore, InMemoryNotificationChannelStore,
+    InMemorySink, InMemoryTargetStore, IncidentNarrationStore, MaintenanceStore,
+    NotificationChannelStore, PostgresTargetStore, ResultSink, ResultsStore,
 };
 use status_monitor::worker::{ResultFanout, WorkerPool};
 use tokio::sync::{Mutex, mpsc};
@@ -115,6 +116,8 @@ pub fn build_test_app_with_seedable_incidents(
     let maintenance_store: Arc<dyn MaintenanceStore> = Arc::new(InMemoryMaintenanceStore::new());
     let narration = Arc::new(InMemoryIncidentNarrationStore::new());
     let incident_narration_store: Arc<dyn IncidentNarrationStore> = narration.clone();
+    let notification_channel_store: Arc<dyn NotificationChannelStore> =
+        Arc::new(InMemoryNotificationChannelStore::new());
     let state = AppState::new(
         cfg,
         None,
@@ -125,6 +128,7 @@ pub fn build_test_app_with_seedable_incidents(
         pool,
         public_source,
         maintenance_store,
+        notification_channel_store,
         incident_narration_store,
         test_org_id(),
         build_test_outbound_and_email().0,
@@ -173,6 +177,8 @@ fn build_test_app_with_public_source_inner(
     let maintenance_store: Arc<dyn MaintenanceStore> = Arc::new(InMemoryMaintenanceStore::new());
     let incident_narration_store: Arc<dyn IncidentNarrationStore> =
         Arc::new(InMemoryIncidentNarrationStore::new());
+    let notification_channel_store: Arc<dyn NotificationChannelStore> =
+        Arc::new(InMemoryNotificationChannelStore::new());
     let state = AppState::new(
         cfg,
         None,
@@ -183,6 +189,7 @@ fn build_test_app_with_public_source_inner(
         pool,
         public_source,
         maintenance_store,
+        notification_channel_store,
         incident_narration_store,
         test_org_id(),
         build_test_outbound_and_email().0,
@@ -242,6 +249,8 @@ pub async fn build_test_app_with_pg(
     let maintenance_store: Arc<dyn MaintenanceStore> = Arc::new(InMemoryMaintenanceStore::new());
     let incident_narration_store: Arc<dyn IncidentNarrationStore> =
         Arc::new(InMemoryIncidentNarrationStore::new());
+    let notification_channel_store: Arc<dyn NotificationChannelStore> =
+        Arc::new(InMemoryNotificationChannelStore::new());
     let state = AppState::new(
         cfg,
         Some(pool),
@@ -252,6 +261,7 @@ pub async fn build_test_app_with_pg(
         pool_arc,
         public_source,
         maintenance_store,
+        notification_channel_store,
         incident_narration_store,
         default_org_id,
         build_test_outbound_and_email().0,
@@ -324,6 +334,8 @@ fn assemble_pg_router(pool: PgPool, cfg: AppConfig, default_org_id: OrgId) -> Ro
     let maintenance_store: Arc<dyn MaintenanceStore> = Arc::new(InMemoryMaintenanceStore::new());
     let incident_narration_store: Arc<dyn IncidentNarrationStore> =
         Arc::new(InMemoryIncidentNarrationStore::new());
+    let notification_channel_store: Arc<dyn NotificationChannelStore> =
+        Arc::new(InMemoryNotificationChannelStore::new());
     let state = AppState::new(
         cfg,
         Some(pool),
@@ -334,6 +346,7 @@ fn assemble_pg_router(pool: PgPool, cfg: AppConfig, default_org_id: OrgId) -> Ro
         pool_arc,
         public_source,
         maintenance_store,
+        notification_channel_store,
         incident_narration_store,
         default_org_id,
         build_test_outbound_and_email().0,
@@ -416,6 +429,8 @@ pub fn build_test_app_state(mutate: impl FnOnce(&mut AppConfig)) -> AppState {
     let maintenance_store: Arc<dyn MaintenanceStore> = Arc::new(InMemoryMaintenanceStore::new());
     let incident_narration_store: Arc<dyn IncidentNarrationStore> =
         Arc::new(InMemoryIncidentNarrationStore::new());
+    let notification_channel_store: Arc<dyn NotificationChannelStore> =
+        Arc::new(InMemoryNotificationChannelStore::new());
     AppState::new(
         cfg,
         None,
@@ -426,6 +441,7 @@ pub fn build_test_app_state(mutate: impl FnOnce(&mut AppConfig)) -> AppState {
         pool,
         public_source,
         maintenance_store,
+        notification_channel_store,
         incident_narration_store,
         test_org_id(),
         build_test_outbound_and_email().0,

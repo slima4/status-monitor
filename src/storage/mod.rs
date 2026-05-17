@@ -4,6 +4,7 @@ pub mod incidents;
 pub mod locks;
 pub mod maintenance;
 pub mod memory;
+pub mod notification_channels;
 pub mod orgs;
 pub mod postgres;
 pub mod postgres_secrets;
@@ -18,6 +19,9 @@ pub use maintenance::{
     InMemoryMaintenanceStore, MaintenanceListQuery, MaintenanceStore, PgMaintenanceStore,
 };
 pub use memory::{InMemorySink, InMemoryTargetStore};
+pub use notification_channels::{
+    InMemoryNotificationChannelStore, NotificationChannelStore, PgNotificationChannelStore,
+};
 pub use orgs::{
     MemberView, MembershipStatus, OrgBranding, OrgWithRole, PublicStatusOrg, RemoveOutcome,
     RestoreOutcome, create_org_with_owner, ensure_default_org, find_public_status_org_by_slug,

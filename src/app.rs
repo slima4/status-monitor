@@ -19,7 +19,8 @@ use crate::public_status::PublicSource;
 use crate::quotas::{QuotaService, RateLimitService};
 use crate::security::AbuseGuard;
 use crate::storage::{
-    IncidentNarrationStore, MaintenanceStore, ResultSink, ResultsStore, TargetStore,
+    IncidentNarrationStore, MaintenanceStore, NotificationChannelStore, ResultSink, ResultsStore,
+    TargetStore,
 };
 use crate::worker::WorkerPool;
 
@@ -65,6 +66,7 @@ pub struct AppState {
     pub idempotency: Arc<IdempotencyCache>,
     pub public_source: Arc<dyn PublicSource>,
     pub maintenance_store: Arc<dyn MaintenanceStore>,
+    pub notification_channel_store: Arc<dyn NotificationChannelStore>,
     pub incident_narration_store: Arc<dyn IncidentNarrationStore>,
     /// Org id used in self-host mode and as the implicit org for every write
     /// path until the repository pattern threads `OrgId` through call sites in
@@ -168,6 +170,7 @@ impl AppState {
         worker_pool: Arc<WorkerPool>,
         public_source: Arc<dyn PublicSource>,
         maintenance_store: Arc<dyn MaintenanceStore>,
+        notification_channel_store: Arc<dyn NotificationChannelStore>,
         incident_narration_store: Arc<dyn IncidentNarrationStore>,
         default_org_id: OrgId,
         outbound_http: OutboundHttpClient,
@@ -188,6 +191,7 @@ impl AppState {
             idempotency: Arc::new(IdempotencyCache::new()),
             public_source,
             maintenance_store,
+            notification_channel_store,
             incident_narration_store,
             default_org_id,
             session_debounce: Arc::new(build_debounce_cache()),

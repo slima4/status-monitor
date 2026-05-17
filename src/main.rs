@@ -19,8 +19,9 @@ use status_monitor::{
     security::Cipher,
     storage::{
         self, ClickhouseResultSink, ClickhouseResultsStore, IncidentNarrationStore,
-        MaintenanceStore, PgIncidentNarrationStore, PgMaintenanceStore, PostgresTargetStore,
-        ResultSink, ResultsStore, TargetStore, ensure_default_org,
+        MaintenanceStore, NotificationChannelStore, PgIncidentNarrationStore, PgMaintenanceStore,
+        PgNotificationChannelStore, PostgresTargetStore, ResultSink, ResultsStore, TargetStore,
+        ensure_default_org,
     },
     web,
     worker::{ResultFanout, WorkerPool},
@@ -228,6 +229,9 @@ async fn main() -> Result<()> {
     let incident_narration_store: Arc<dyn IncidentNarrationStore> = Arc::new(
         PgIncidentNarrationStore::new(pg_pool_for_stores.clone(), default_org_id),
     );
+    let notification_channel_store: Arc<dyn NotificationChannelStore> = Arc::new(
+        PgNotificationChannelStore::new(pg_pool_for_stores.clone(), default_org_id, cipher.clone()),
+    );
 
     let outbound_http = status_monitor::http_outbound::build_outbound_client();
     let email_sender = status_monitor::email::build_email_sender(&cfg.email, &outbound_http)
@@ -286,6 +290,7 @@ async fn main() -> Result<()> {
         pool.clone(),
         public_source,
         maintenance_store,
+        notification_channel_store,
         incident_narration_store,
         default_org_id,
         outbound_http,
