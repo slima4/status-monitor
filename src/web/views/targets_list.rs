@@ -41,6 +41,7 @@ pub struct TargetRow {
     pub tags: Vec<String>,
     pub last_status: &'static str,
     pub last_at: String,
+    pub last_error: String,
 }
 
 #[derive(Template, WebTemplate)]
@@ -183,7 +184,11 @@ fn make_row(t: Target, last: Option<CheckResult>) -> TargetRow {
         enabled: t.enabled,
         tags: t.tags,
         last_status: last.as_ref().map(|r| r.status.as_str()).unwrap_or(""),
-        last_at: last.map(|r| fmt_ts(r.timestamp)).unwrap_or_default(),
+        last_at: last
+            .as_ref()
+            .map(|r| fmt_ts(r.timestamp))
+            .unwrap_or_default(),
+        last_error: last.and_then(|r| r.error).unwrap_or_default(),
     }
 }
 
@@ -202,6 +207,7 @@ mod tests {
             tags: vec!["prod".into()],
             last_status: "up",
             last_at: "2026-05-13T12:00:00Z".into(),
+            last_error: String::new(),
         }
     }
 
@@ -262,5 +268,44 @@ mod tests {
         };
         let html = partial.render().unwrap();
         assert!(html.contains("No targets match"));
+    }
+
+    #[test]
+    fn last_error_is_surfaced_with_full_text_in_title() {
+        let mut row = sample_row("api");
+        row.last_status = "down";
+        row.last_error = "connect timeout after 5000ms".into();
+        let partial = ListBodyPartial {
+            rows: vec![row],
+            total: 1,
+            limit: 50,
+            offset: 0,
+            q: String::new(),
+            tag: String::new(),
+            enabled: None,
+            prev_offset: None,
+            next_offset: None,
+        };
+        let html = partial.render().unwrap();
+        // Full message present and also in the tooltip for the truncated cell.
+        assert!(html.contains("connect timeout after 5000ms"));
+        assert!(html.contains(r#"title="connect timeout after 5000ms""#));
+    }
+
+    #[test]
+    fn no_error_div_when_last_error_empty() {
+        let partial = ListBodyPartial {
+            rows: vec![sample_row("api")],
+            total: 1,
+            limit: 50,
+            offset: 0,
+            q: String::new(),
+            tag: String::new(),
+            enabled: None,
+            prev_offset: None,
+            next_offset: None,
+        };
+        let html = partial.render().unwrap();
+        assert!(!html.contains("max-w-xs truncate"));
     }
 }
