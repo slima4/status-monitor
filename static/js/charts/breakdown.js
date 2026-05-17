@@ -4,11 +4,11 @@ const PHASES = [
     { key: "dns_ms", name: "DNS", color: "#a78bfa" },
     { key: "connect_ms", name: "Connect", color: "#60a5fa" },
     { key: "tls_ms", name: "TLS", color: "#34d399" },
-    { key: "ttfb_ms", name: "TTFB", color: "#fbbf24" },
-    { key: "app_ms", name: "App", color: "#fb7185" },
+    { key: "ttfb_ms", name: "Server response", color: "#fbbf24" },
+    { key: "app_ms", name: "Processing", color: "#fb7185" },
 ];
 
-// API exposes dns/connect/tls/ttfb; remaining time = app processing.
+// API exposes dns/connect/tls/ttfb; remaining time = server processing.
 function appPhase(r) {
     const sum = (r.dns_ms || 0) + (r.connect_ms || 0) + (r.tls_ms || 0) + (r.ttfb_ms || 0);
     return Math.max(0, (r.duration_ms || 0) - sum);

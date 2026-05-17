@@ -39,10 +39,13 @@
           <input name="interval_s" type="number" min="10" required value="{{ form.interval_s }}"
                  class="mt-1 w-40 rounded border px-2 py-1">
         </label>
-        <label class="inline-flex items-center gap-2">
-          <input name="enabled" type="checkbox"{% if form.enabled %} checked{% endif %}>
-          <span class="text-sm">Enabled</span>
-        </label>
+        <div>
+          <label class="inline-flex items-center gap-2">
+            <input name="enabled" type="checkbox"{% if form.enabled %} checked{% endif %}>
+            <span class="text-sm">Enabled</span>
+          </label>
+          <p class="mt-1 text-xs text-slate-500">When off, the target is saved but not checked or alerted on.</p>
+        </div>
       </div>
     </fieldset>
 

@@ -28,6 +28,9 @@
       {% if row.last_at != "" %}{{ row.last_at }}{% else %}—{% endif %}
     </td>
     <td class="px-3 py-2 text-right">
+      <a href="/targets/{{ row.id }}/edit"
+         aria-label="Edit target {{ row.name }}"
+         class="mr-3 rounded text-xs text-slate-600 hover:text-slate-900">Edit</a>
       <button type="button"
               hx-delete="/api/v1/targets/{{ row.id }}"
               hx-confirm="Delete target {{ row.name }}?"

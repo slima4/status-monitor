@@ -585,9 +585,13 @@ pub fn breaker_cfg() -> CircuitBreakerConfig {
 }
 
 pub fn scheduler_cfg(refresh_secs: u64) -> SchedulerConfig {
+    scheduler_cfg_jittered(refresh_secs, 0)
+}
+
+pub fn scheduler_cfg_jittered(refresh_secs: u64, jitter_pct: u8) -> SchedulerConfig {
     SchedulerConfig {
         target_refresh_interval_secs: refresh_secs,
-        jitter_pct: 0,
+        jitter_pct,
     }
 }
 

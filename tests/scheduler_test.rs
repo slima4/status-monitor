@@ -16,7 +16,9 @@ use status_monitor::worker::{ResultFanout, WorkerPool};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use crate::common::{breaker_cfg, http_target, scheduler_cfg, spawn_router, test_client};
+use crate::common::{
+    breaker_cfg, http_target, scheduler_cfg, scheduler_cfg_jittered, spawn_router, test_client,
+};
 
 async fn spawn_counting_mock() -> (std::net::SocketAddr, Arc<AtomicU32>) {
     let counter = Arc::new(AtomicU32::new(0));
@@ -77,6 +79,67 @@ async fn scheduler_runs_target_periodically() {
 
     assert!(received >= 3, "expected ≥3 results, got {received}");
     assert!(counter.load(Ordering::Relaxed) >= 3);
+}
+
+// Coverage smoke for the jittered code path: every other scheduler test uses
+// `scheduler_cfg(_)`, which hard-codes jitter_pct = 0, so the phase-offset
+// branch of `run_target_loop` had zero coverage and could regress to a panic
+// or a stall unnoticed. This asserts only what is non-flaky at wall-clock
+// resolution: with jitter enabled the target still checks promptly and keeps
+// producing results. It deliberately does NOT assert cadence steadiness — the
+// fixed-cadence-vs-drift invariant is locked structurally by the `jitter()`
+// unit tests (bounded, one-time offset), not by timing assertions here.
+#[tokio::test]
+async fn scheduler_runs_jittered_target() {
+    let (addr, counter) = spawn_counting_mock().await;
+    let interval = Duration::from_millis(300);
+    let store = Arc::new(InMemoryTargetStore::from_vec(vec![http_target(
+        addr,
+        "/ping",
+        interval.as_millis() as u64,
+    )]));
+    let registry = Arc::new(TargetRegistry::new(store));
+    let (tx, mut rx) = mpsc::channel(64);
+
+    let pool = Arc::new(WorkerPool::new(
+        50,
+        test_client(),
+        breaker_cfg(),
+        ResultFanout::storage_only(tx),
+    ));
+    let scheduler = Arc::new(Scheduler::new(
+        registry,
+        pool,
+        scheduler_cfg_jittered(30, 50),
+    ));
+    let shutdown = CancellationToken::new();
+    let start = tokio::time::Instant::now();
+    let handle = tokio::spawn(scheduler.clone().run(shutdown.clone()));
+
+    let mut received = 0;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(4);
+    while tokio::time::Instant::now() < deadline && received < 3 {
+        if let Ok(Some(r)) = tokio::time::timeout(Duration::from_secs(2), rx.recv()).await {
+            assert_eq!(r.status, CheckStatus::Up);
+            received += 1;
+        }
+    }
+    let elapsed = start.elapsed();
+    shutdown.cancel();
+    handle.await.unwrap().unwrap();
+
+    assert!(received >= 3, "expected ≥3 results, got {received}");
+    // First check is immediate, the rest one interval apart: 3 results must
+    // arrive well inside a window that a stalled/never-firing loop would miss.
+    assert!(
+        elapsed < interval * 8,
+        "3 jittered checks took {elapsed:?}, expected < {:?}",
+        interval * 8,
+    );
+    assert!(
+        counter.load(Ordering::Relaxed) >= 3,
+        "mock should have served ≥3 pings"
+    );
 }
 
 #[tokio::test]

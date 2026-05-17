@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use dashmap::DashMap;
 use tokio::task::JoinHandle;
-use tokio::time::{Instant, MissedTickBehavior, interval_at, sleep};
+use tokio::time::{Instant, MissedTickBehavior, interval_at};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
@@ -117,34 +117,29 @@ async fn run_target_loop(
     shutdown: CancellationToken,
 ) {
     let base = target.interval;
-    if !sleep_or_cancel(jitter(base, jitter_pct), &shutdown).await {
-        return;
-    }
 
-    let mut tick = interval_at(Instant::now() + base, base);
-    tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
-
+    // Check immediately so a freshly-scheduled target reports up/down right
+    // away instead of staying blank until the first interval elapses.
     dispatch(&pool, &target);
+
+    // Validation enforces a per-plan interval floor (>= 1s), so a zero
+    // interval — which would panic `interval_at` — is structurally impossible.
+    debug_assert!(!base.is_zero(), "target interval must be non-zero");
+
+    // Jitter is a one-time phase offset: it spreads targets across the window
+    // (thundering-herd protection) while the fixed-cadence timer keeps every
+    // subsequent tick on a steady schedule. Re-drawing jitter each cycle is
+    // what made the observed interval visibly drift.
+    let start = Instant::now() + base + jitter(base, jitter_pct);
+    let mut tick = interval_at(start, base);
+    tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
     loop {
         tokio::select! {
             _ = shutdown.cancelled() => return,
             _ = tick.tick() => {}
         }
-        if !sleep_or_cancel(jitter(base, jitter_pct), &shutdown).await {
-            return;
-        }
         dispatch(&pool, &target);
-    }
-}
-
-async fn sleep_or_cancel(duration: Duration, shutdown: &CancellationToken) -> bool {
-    if duration.is_zero() {
-        return !shutdown.is_cancelled();
-    }
-    tokio::select! {
-        _ = shutdown.cancelled() => false,
-        _ = sleep(duration) => true,
     }
 }
 
@@ -164,4 +159,54 @@ fn jitter(base: Duration, jitter_pct: u8) -> Duration {
     }
     let drawn = Duration::from_millis(fastrand::u64(0..=span));
     drawn.min(base / 2)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::jitter;
+    use std::time::Duration;
+
+    #[test]
+    fn jitter_is_zero_when_pct_zero() {
+        assert_eq!(jitter(Duration::from_secs(60), 0), Duration::ZERO);
+    }
+
+    #[test]
+    fn jitter_is_zero_when_base_zero() {
+        assert_eq!(jitter(Duration::ZERO, 50), Duration::ZERO);
+    }
+
+    #[test]
+    fn jitter_is_zero_when_span_rounds_down_to_zero() {
+        // 5ms * 10% = 0ms span → no usable spread, must collapse to zero
+        // rather than panic on `fastrand::u64(0..=0)`.
+        assert_eq!(jitter(Duration::from_millis(5), 10), Duration::ZERO);
+    }
+
+    #[test]
+    fn jitter_offset_stays_within_span() {
+        // The phase offset must never exceed the span (pct of base), and must
+        // actually spread (not silently collapse to zero — that would defeat
+        // thundering-herd protection). Sample heavily since the draw is random.
+        let base = Duration::from_millis(1000);
+        let pct = 10u8;
+        let span = Duration::from_millis(base.as_millis() as u64 * pct as u64 / 100);
+        let mut max_seen = Duration::ZERO;
+        for _ in 0..10_000 {
+            let j = jitter(base, pct);
+            assert!(j <= span, "{j:?} exceeded span {span:?}");
+            max_seen = max_seen.max(j);
+        }
+        assert!(max_seen > Duration::ZERO, "jitter never produced a spread");
+    }
+
+    #[test]
+    fn jitter_offset_is_clamped_to_half_base_for_large_pct() {
+        // pct=100 ⇒ span=base, so only the `.min(base / 2)` clamp keeps the
+        // offset from pushing the timer's first tick past a whole period.
+        let base = Duration::from_millis(200);
+        for _ in 0..10_000 {
+            assert!(jitter(base, 100) <= base / 2);
+        }
+    }
 }

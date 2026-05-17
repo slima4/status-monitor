@@ -1,4 +1,5 @@
 use std::net::IpAddr;
+use std::sync::Arc;
 
 use axum::Json;
 use axum::extract::{Path, Query, State};
@@ -24,7 +25,7 @@ use crate::error::{AppError, Result};
 use crate::security::SsrfGuard;
 use crate::storage::TargetFilter;
 use crate::web::CurrentOrg;
-use crate::worker::host_for_spec;
+use crate::worker::{CheckTask, host_for_spec};
 
 const BULK_MAX: usize = 10_000;
 const LIST_LIMIT_DEFAULT: usize = 50;
@@ -189,6 +190,7 @@ pub async fn create(
         .target_store
         .create(org, new, i64::from(plan.max_targets))
         .await?;
+    dispatch_first_check(&state, &t);
     // UUID hex is always ASCII-safe → infallible.
     let location = HeaderValue::from_str(&format!("/api/v1/targets/{}", t.id))
         .expect("uuid produces ascii-only path");
@@ -538,6 +540,21 @@ pub async fn check_now(
         .write_batch(std::slice::from_ref(&result))
         .await?;
     Ok(Json(result))
+}
+
+/// Dispatch one immediate check for a just-created target so the UI shows a
+/// status within seconds instead of waiting up to a full registry-refresh
+/// interval for the scheduler to pick the target up. Runs through the normal
+/// worker pool — semaphore-bounded and persisted via the same fan-out as
+/// scheduled checks — so if the pool is saturated the check is dropped and
+/// the scheduler's own pickup covers it.
+fn dispatch_first_check(state: &AppState, target: &Target) {
+    if !target.enabled {
+        return;
+    }
+    state.worker_pool.dispatch(CheckTask {
+        target: Arc::new(target.clone()),
+    });
 }
 
 fn ssrf_guard(state: &AppState) -> SsrfGuard {
