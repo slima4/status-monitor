@@ -52,20 +52,23 @@ backup_clickhouse() {
   mkdir -p "$dir"; chmod 700 "$dir"
   # One schema file + one gzipped Native data file per table. Native is the
   # most faithful round-trip format; restore replays CREATE then INSERT.
+  # `mapfile` (not a `while read` loop): the in-loop `docker compose exec -T`
+  # inherits the loop's stdin and would swallow the remaining table list,
+  # silently backing up only the first table.
   local tables
-  tables="$(docker compose exec -T clickhouse \
+  mapfile -t tables < <(docker compose exec -T clickhouse \
     clickhouse-client --password "$pw" \
-    --query "SELECT name FROM system.tables WHERE database='monitor' AND engine NOT LIKE '%View%'")"
-  [ -n "$tables" ] || die "no tables found in clickhouse db 'monitor'"
+    --query "SELECT name FROM system.tables WHERE database='monitor' AND engine NOT LIKE '%View%'")
+  [ "${#tables[@]}" -gt 0 ] || die "no tables found in clickhouse db 'monitor'"
   local t
-  while IFS= read -r t; do
+  for t in "${tables[@]}"; do
     [ -n "$t" ] || continue
     docker compose exec -T clickhouse clickhouse-client --password "$pw" \
       --query "SHOW CREATE TABLE monitor.\`$t\`" > "$dir/$t.schema.sql"
     docker compose exec -T clickhouse clickhouse-client --password "$pw" \
       --query "SELECT * FROM monitor.\`$t\` FORMAT Native" | gzip -c > "$dir/$t.native.gz"
     log "clickhouse table $t ok ($(du -h "$dir/$t.native.gz" | cut -f1))"
-  done <<< "$tables"
+  done
   tar -C "$BACKUP_ROOT/clickhouse" -czf "$dir.tgz" "$(basename "$dir")"
   rm -rf "$dir"
   chmod 600 "$dir.tgz"
