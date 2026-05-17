@@ -133,16 +133,10 @@
   </div>
 
   <script>
-    // json-enc drops unchecked checkboxes and stringifies values; the API
-    // expects real JSON booleans, so set them explicitly before encoding.
+    // The API tolerates the checkbox encoding json-enc produces (string
+    // "on" / omitted); no request rewriting needed — just surface the result.
     (function () {
       const form = document.getElementById('status-page-form');
-      form.addEventListener('htmx:configRequest', (e) => {
-        e.detail.parameters['public_status_enabled'] =
-          form.querySelector('[name=public_status_enabled]').checked;
-        e.detail.parameters['public_show_powered_by'] =
-          form.querySelector('[name=public_show_powered_by]').checked;
-      });
       form.addEventListener('htmx:afterRequest', (e) => {
         const box = document.getElementById('form-result');
         if (e.detail.successful) {

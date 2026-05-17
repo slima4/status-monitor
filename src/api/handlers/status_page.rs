@@ -55,6 +55,11 @@ pub struct StatusPageSettings {
 
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct UpdateStatusPageRequest {
+    /// Accepts a real JSON bool (API clients) or an HTML-checkbox encoding
+    /// (the settings form posts via htmx `json-enc`, which sends a checked
+    /// box as the string `"on"` and omits an unchecked one). Absent = off.
+    #[serde(default, deserialize_with = "de_checkbox_bool")]
+    #[schema(value_type = bool)]
     pub public_status_enabled: bool,
     /// Empty/blank is normalised to `null` (fall back to the org name).
     #[serde(default)]
@@ -63,7 +68,32 @@ pub struct UpdateStatusPageRequest {
     pub public_about: Option<String>,
     #[serde(default)]
     pub public_brand_color: Option<String>,
+    #[serde(default, deserialize_with = "de_checkbox_bool")]
+    #[schema(value_type = bool)]
     pub public_show_powered_by: bool,
+}
+
+/// Deserialize a checkbox-or-bool field. A JSON `true`/`false` passes through
+/// unchanged; a string is truthy for the conventional HTML/htmx encodings
+/// (`"on"`, `"true"`, `"1"`, `"yes"`); a number is truthy when non-zero. Any
+/// other value — `null`, array, object, an unrecognised string — is `false`,
+/// so a present-but-empty field never 422s. Field *absence* is handled by
+/// `#[serde(default)]` (an unchecked checkbox is simply omitted).
+fn de_checkbox_bool<'de, D>(deserializer: D) -> std::result::Result<bool, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(match serde_json::Value::deserialize(deserializer)? {
+        serde_json::Value::Bool(b) => b,
+        serde_json::Value::String(s) => {
+            matches!(
+                s.trim().to_ascii_lowercase().as_str(),
+                "on" | "true" | "1" | "yes"
+            )
+        }
+        serde_json::Value::Number(n) => n.as_f64().is_some_and(|f| f != 0.0),
+        _ => false,
+    })
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -377,6 +407,45 @@ mod tests {
         assert_eq!(normalise_opt(Some(String::new())), None);
         assert_eq!(normalise_opt(None), None);
         assert_eq!(normalise_opt(Some("  hi ".into())), Some("hi".into()));
+    }
+
+    #[test]
+    fn update_request_accepts_json_bool_and_html_checkbox() {
+        // API client: real JSON booleans round-trip unchanged.
+        let r: UpdateStatusPageRequest = serde_json::from_str(
+            r#"{"public_status_enabled":true,"public_show_powered_by":false}"#,
+        )
+        .unwrap();
+        assert!(r.public_status_enabled);
+        assert!(!r.public_show_powered_by);
+
+        // htmx json-enc: a checked box arrives as the string "on".
+        let r: UpdateStatusPageRequest =
+            serde_json::from_str(r#"{"public_status_enabled":"on"}"#).unwrap();
+        assert!(r.public_status_enabled);
+        // An unchecked box is omitted entirely → default false (not a 422).
+        assert!(!r.public_show_powered_by);
+
+        // Both fields omitted (was a required field before the fix) → false,
+        // never a deserialize 422.
+        let r: UpdateStatusPageRequest = serde_json::from_str("{}").unwrap();
+        assert!(!r.public_status_enabled);
+        assert!(!r.public_show_powered_by);
+
+        // Explicit string falsey values, numbers, and null all coerce to
+        // false rather than erroring.
+        let r: UpdateStatusPageRequest = serde_json::from_str(
+            r#"{"public_status_enabled":"false","public_show_powered_by":""}"#,
+        )
+        .unwrap();
+        assert!(!r.public_status_enabled);
+        assert!(!r.public_show_powered_by);
+
+        let r: UpdateStatusPageRequest =
+            serde_json::from_str(r#"{"public_status_enabled":1,"public_show_powered_by":null}"#)
+                .unwrap();
+        assert!(r.public_status_enabled);
+        assert!(!r.public_show_powered_by);
     }
 
     #[test]
