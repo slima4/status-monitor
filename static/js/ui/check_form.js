@@ -35,6 +35,7 @@
                 headers: {
                     "Content-Type": "application/json",
                     "Accept": "application/json",
+                    "X-Requested-With": "status-monitor",
                 },
                 body: JSON.stringify(built.payload),
             });
