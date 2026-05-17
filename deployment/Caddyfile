@@ -9,7 +9,7 @@
 #   - Automatic HTTPS via Let's Encrypt (HTTP/2 and HTTP/3)
 #   - app.{domain} cert via HTTP-01; *.status.{domain} wildcard cert via
 #     Hetzner DNS-01 (scoped to that site — self-host needs no DNS token)
-#   - Basic auth on the operator surface (UI + API)
+#   - Operator UI + API behind the app's GitHub OAuth session (no edge auth)
 #   - Public health probes (no auth) at /healthz and /readyz
 #   - Hides /metrics from the public internet (still scrapeable internally)
 #   - Per-IP rate limit on the public status surface
@@ -19,13 +19,9 @@
 # Required environment variables (see .env.example):
 #   STATUS_MONITOR_DOMAIN       — base domain, e.g. example.com
 #   STATUS_MONITOR_ACME_EMAIL   — for Let's Encrypt notifications
-#   STATUS_MONITOR_ADMIN_HASH   — bcrypt hash for the admin user
 #
 # Required only for the *.status wildcard surface (SaaS):
 #   HETZNER_DNS_API_TOKEN       — zone-edit token for the DNS-01 challenge
-#
-# Optional:
-#   STATUS_MONITOR_OPERATOR_HASH — additional user (uncomment block below)
 {
 	email {$STATUS_MONITOR_ACME_EMAIL}
 
@@ -130,18 +126,17 @@ app.{$STATUS_MONITOR_DOMAIN} {
 		}
 	}
 
-	# ─── Everything else requires basic auth ────────────────────────────
-	# Basic auth is the v1 edge boundary. When the Rust app runs in SaaS
-	# mode it enforces in-session auth itself; you may then drop this block
-	# — see README.md.
-	basic_auth {
-		admin {$STATUS_MONITOR_ADMIN_HASH}
-
-		# Add more users by setting STATUS_MONITOR_OPERATOR_HASH in .env
-		# and uncommenting the line below. (basic_auth has no role
-		# separation — all users get the same access.)
-		# operator {$STATUS_MONITOR_OPERATOR_HASH}
-	}
+	# ─── Operator surface: app-enforced session auth (SaaS) ─────────────
+	# No edge basic_auth. The health/metrics/public handle blocks above
+	# are terminal; every other (operator) request falls through to the
+	# catch-all reverse_proxy below. In SaaS the Rust app session-gates
+	# those routes itself (GitHub OAuth → signed cookie); an edge
+	# basic_auth would double-prompt and break the app's OAuth round-trip.
+	#
+	# SELF-HOST CAVEAT: with tenancy disabled the app does NOT authenticate
+	# the operator UI/API (single implicit org, no login). This Caddyfile
+	# is the SaaS layout; do not expose a self-host operator surface to the
+	# public internet without adding your own gate.
 
 	# ─── Security headers ───────────────────────────────────────────────
 	header {

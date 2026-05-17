@@ -1,19 +1,20 @@
 # Production stack for status-monitor
 #
 # Layout:
-#   Internet → Caddy (TLS + basic auth) → status-monitor (no public ports)
-#                                       → PostgreSQL  (no public ports)
-#                                       → ClickHouse  (no public ports)
+#   Internet → Caddy (TLS, rate-limit) → status-monitor (no public ports)
+#                                      → PostgreSQL  (no public ports)
+#                                      → ClickHouse  (no public ports)
 #
-# Only Caddy publishes ports to the host. Everything else is reachable only
+# In SaaS, authentication is enforced by the app (GitHub OAuth session), not
+# at the edge (self-host has no operator auth of its own — keep it private).
+# Only Caddy publishes ports to the host; everything else is reachable only
 # on the internal docker network. This is the single most important
-# defense-in-depth property: even if your basic auth password leaks, the
-# databases are not exposed.
+# defense-in-depth property: even if a session is compromised, the databases
+# are never exposed.
 #
 # Required env vars in .env (see .env.example):
-#   STATUS_MONITOR_DOMAIN, STATUS_MONITOR_ACME_EMAIL, STATUS_MONITOR_ADMIN_HASH,
-#   HETZNER_DNS_API_TOKEN, POSTGRES_PASSWORD, CLICKHOUSE_PASSWORD,
-#   STATUS_MONITOR_CREDENTIALS_KEK_BASE64
+#   STATUS_MONITOR_DOMAIN, STATUS_MONITOR_ACME_EMAIL, HETZNER_DNS_API_TOKEN,
+#   POSTGRES_PASSWORD, CLICKHOUSE_PASSWORD, STATUS_MONITOR_CREDENTIALS_KEK_BASE64
 
 name: status-monitor
 
@@ -33,9 +34,7 @@ services:
     environment:
       STATUS_MONITOR_DOMAIN: ${STATUS_MONITOR_DOMAIN}
       STATUS_MONITOR_ACME_EMAIL: ${STATUS_MONITOR_ACME_EMAIL}
-      STATUS_MONITOR_ADMIN_HASH: ${STATUS_MONITOR_ADMIN_HASH}
       HETZNER_DNS_API_TOKEN: ${HETZNER_DNS_API_TOKEN}
-      # STATUS_MONITOR_OPERATOR_HASH: ${STATUS_MONITOR_OPERATOR_HASH}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data           # certs + keys — back this up!
@@ -45,7 +44,10 @@ services:
       status-monitor:
         condition: service_started
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost/healthz"]
+      # Caddy's admin API (plaintext, container-localhost, always up while
+      # Caddy runs). Probing the public :80 instead would 308→https and
+      # then fail TLS — there is no cert for the "localhost" SNI.
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:2019/config/"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -84,6 +86,15 @@ services:
       # the app refuses to boot with an empty salt. Empty in self-host is
       # fine (the guard only fires when tenancy is on).
       STATUS_MONITOR_AUTH__FINGERPRINT_SALT: ${STATUS_MONITOR_AUTH_FINGERPRINT_SALT:-}
+      # GitHub OAuth — the operator login method (the app owns auth; there is
+      # no edge basic_auth). client_id is public; client_secret is a secret.
+      # redirect_url must exactly match the OAuth App's callback URL;
+      # public_base_url is the external origin used to build OAuth/redirect
+      # and emailed links.
+      STATUS_MONITOR_AUTH__GITHUB__CLIENT_ID: ${STATUS_MONITOR_AUTH_GITHUB_CLIENT_ID:-}
+      STATUS_MONITOR_AUTH__GITHUB__CLIENT_SECRET: ${STATUS_MONITOR_AUTH_GITHUB_CLIENT_SECRET:-}
+      STATUS_MONITOR_AUTH__GITHUB__REDIRECT_URL: ${STATUS_MONITOR_AUTH_GITHUB_REDIRECT_URL:-}
+      STATUS_MONITOR_AUTH__PUBLIC_BASE_URL: ${STATUS_MONITOR_AUTH_PUBLIC_BASE_URL:-}
       RUST_LOG: ${RUST_LOG:-info}
     depends_on:
       postgres:
