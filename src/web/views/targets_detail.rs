@@ -9,6 +9,7 @@ use crate::app::AppState;
 use crate::domain::CheckResult;
 use crate::error::AppError;
 use crate::storage::{TimeRange, UptimeStats};
+use crate::web::AuthedBrowser;
 use crate::web::assets::filters;
 use crate::web::error::WebResult;
 use crate::web::views::{describe_check, fmt_ts};
@@ -85,6 +86,7 @@ pub struct RangeOption {
 }
 
 pub async fn index(
+    _auth: AuthedBrowser,
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
     Query(params): Query<DetailParams>,

@@ -8,6 +8,7 @@ use serde::Deserialize;
 use crate::app::AppState;
 use crate::domain::{CheckResult, Target};
 use crate::storage::{TargetFilter, TimeRange};
+use crate::web::AuthedBrowser;
 use crate::web::assets::filters;
 use crate::web::error::WebResult;
 use crate::web::views::{describe_check, fmt_ts};
@@ -72,6 +73,7 @@ pub struct ListBodyPartial {
 }
 
 pub async fn index(
+    _auth: AuthedBrowser,
     State(state): State<AppState>,
     Query(params): Query<ListParams>,
 ) -> WebResult<ListPage> {
@@ -92,6 +94,7 @@ pub async fn index(
 }
 
 pub async fn list_partial(
+    _auth: AuthedBrowser,
     State(state): State<AppState>,
     Query(params): Query<ListParams>,
 ) -> WebResult<ListBodyPartial> {

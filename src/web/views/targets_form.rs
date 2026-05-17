@@ -6,6 +6,7 @@ use uuid::Uuid;
 use crate::app::AppState;
 use crate::domain::{CheckSpec, ExpectedStatus, HttpMethod, Target};
 use crate::error::AppError;
+use crate::web::AuthedBrowser;
 use crate::web::assets::filters;
 use crate::web::error::WebResult;
 
@@ -108,7 +109,7 @@ pub struct FormPage {
     pub form: FormModel,
 }
 
-pub async fn new_form() -> FormPage {
+pub async fn new_form(_auth: AuthedBrowser) -> FormPage {
     FormPage {
         active_tab: "targets",
         form: FormModel {
@@ -127,7 +128,11 @@ pub async fn new_form() -> FormPage {
     }
 }
 
-pub async fn edit_form(State(state): State<AppState>, Path(id): Path<Uuid>) -> WebResult<FormPage> {
+pub async fn edit_form(
+    _auth: AuthedBrowser,
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> WebResult<FormPage> {
     let target = state
         .target_store
         .get(id)
@@ -235,7 +240,7 @@ mod tests {
 
     #[tokio::test]
     async fn new_form_renders_empty_create() {
-        let page = new_form().await;
+        let page = new_form(AuthedBrowser).await;
         let html = page.render().unwrap();
         assert!(html.starts_with("<!doctype html>"));
         assert!(html.contains("New target"));

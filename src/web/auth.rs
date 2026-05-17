@@ -34,9 +34,12 @@ pub fn bearer_from_headers(headers: &axum::http::HeaderMap) -> Option<&str> {
 use axum::extract::{FromRef, FromRequestParts};
 use axum::http::HeaderName;
 use axum::http::request::Parts;
+use axum::response::{IntoResponse, Redirect, Response};
 use std::convert::Infallible;
 use tower_cookies::Cookies;
 use uuid::Uuid;
+
+use crate::auth::url::url_encode;
 
 use crate::api::error::codes;
 use crate::app::AppState;
@@ -263,6 +266,55 @@ where
             .await?
             .ok_or(AppError::Forbidden)?;
         Ok(CurrentOrg(personal))
+    }
+}
+
+/// Redirect an unauthenticated visitor to `/login`, preserving where they
+/// were headed. `next` is the raw path; it is URL-encoded here so call
+/// sites never hand-roll `%2F` literals. Lives with the auth extractors
+/// (not in the view layer) so the gate and the views can both reach it
+/// without inverting the layering.
+pub(crate) fn login_redirect(next: &str) -> Redirect {
+    Redirect::to(&format!("/login?redirect_after={}", url_encode(next)))
+}
+
+/// Operator-UI gate for the server-rendered HTML pages. Resolves the cookie
+/// [`Session`]; an unauthenticated browser is redirected to `/login` instead
+/// of being served operator data — unlike [`CurrentUser`], whose 401 JSON
+/// envelope is wrong for a page navigation. Carries no payload: adding it as
+/// a handler parameter *is* the auth boundary, the same type-as-boundary rule
+/// the API extractors follow (see the module docs).
+///
+/// `!tenancy.enabled` (self-host) is a pass-through — consistent with
+/// [`Session`]/[`CurrentOrg`]. Self-host has **no operator authentication of
+/// its own**: it relies on the deployment not exposing the operator surface
+/// (see `deployment/`). This gate only protects the SaaS operator UI.
+#[derive(Debug, Clone, Copy)]
+pub struct AuthedBrowser;
+
+impl<S> FromRequestParts<S> for AuthedBrowser
+where
+    S: Send + Sync,
+    AppState: FromRef<S>,
+{
+    type Rejection = Response;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &S,
+    ) -> std::result::Result<Self, Self::Rejection> {
+        let app_state = AppState::from_ref(state);
+        if !app_state.cfg.tenancy.enabled {
+            return Ok(AuthedBrowser);
+        }
+        let session = Session::from_request_parts(parts, state)
+            .await
+            .expect("Session extractor is infallible");
+        if session.user_id().is_some() {
+            Ok(AuthedBrowser)
+        } else {
+            Err(login_redirect(parts.uri.path()).into_response())
+        }
     }
 }
 

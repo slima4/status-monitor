@@ -99,7 +99,7 @@ pub async fn onboarding_org(
     session: Session,
 ) -> WebResult<Response> {
     let Some(user) = session.user.clone() else {
-        return Ok(login_redirect("/onboarding/org").into_response());
+        return Ok(crate::web::auth::login_redirect("/onboarding/org").into_response());
     };
     let pool = state.require_db()?;
     let Some(org_id) = personal_org_for_user(pool, user.id).await? else {
@@ -128,13 +128,6 @@ fn capitalize_first(s: &str) -> String {
         Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
         None => String::new(),
     }
-}
-
-/// Redirect an unauthenticated visitor to `/login`, preserving where they
-/// were headed. `next` is the raw path (e.g. `/settings/account`); it is
-/// URL-encoded here so call sites never hand-roll `%2F` literals.
-fn login_redirect(next: &str) -> Redirect {
-    Redirect::to(&format!("/login?redirect_after={}", url_encode(next)))
 }
 
 /// Crude "Alice" from "alice@example.com" — fine for the welcome screen;
@@ -240,7 +233,7 @@ pub mod settings {
 
     pub async fn sessions_page(session: Session) -> Response {
         if session.user.is_none() {
-            return super::login_redirect("/settings/sessions").into_response();
+            return crate::web::auth::login_redirect("/settings/sessions").into_response();
         }
         SessionsPage {
             active_tab: TAB_SETTINGS,
@@ -250,7 +243,7 @@ pub mod settings {
 
     pub async fn api_tokens_page(session: Session) -> Response {
         if session.user.is_none() {
-            return super::login_redirect("/settings/api-tokens").into_response();
+            return crate::web::auth::login_redirect("/settings/api-tokens").into_response();
         }
         ApiTokensPage {
             active_tab: TAB_SETTINGS,
@@ -278,7 +271,7 @@ pub mod settings {
         session: Session,
     ) -> WebResult<Response> {
         let Some(user) = session.user.clone() else {
-            return Ok(super::login_redirect("/settings/account").into_response());
+            return Ok(crate::web::auth::login_redirect("/settings/account").into_response());
         };
         let pool = state.require_db()?;
         let (joined, provider, last_seen) = match account::account_facts(pool, user.id).await? {
@@ -382,7 +375,9 @@ pub mod settings {
         let CurrentOrg(org) = match org {
             Ok(o) => o,
             Err(AppError::Unauthorized) => {
-                return Ok(super::login_redirect("/settings/status-page").into_response());
+                return Ok(
+                    crate::web::auth::login_redirect("/settings/status-page").into_response()
+                );
             }
             Err(e) => return Err(e.into()),
         };
@@ -462,7 +457,7 @@ pub mod settings {
         let CurrentOrg(org) = match org {
             Ok(o) => o,
             Err(AppError::Unauthorized) => {
-                return Ok(super::login_redirect("/settings/usage").into_response());
+                return Ok(crate::web::auth::login_redirect("/settings/usage").into_response());
             }
             Err(e) => return Err(e.into()),
         };

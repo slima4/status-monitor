@@ -340,6 +340,44 @@ async fn settings_account_redirects_to_login_when_unauthenticated() {
     assert!(loc.starts_with("/login"), "redirect target was {loc}");
 }
 
+/// Operator HTML pages must redirect an anonymous browser to `/login` in
+/// SaaS mode — the `AuthedBrowser` gate. Without `tenancy.enabled = true`
+/// the gate is a deliberate pass-through (self-host has no login surface),
+/// so this asserts the security property only where it actually applies.
+#[tokio::test]
+async fn operator_pages_redirect_to_login_when_unauthenticated_saas() {
+    let app = build_test_app_with_web(|cfg| cfg.tenancy.enabled = true);
+    for path in [
+        "/",
+        "/targets",
+        "/targets/new",
+        "/targets/00000000-0000-0000-0000-000000000000",
+        "/targets/00000000-0000-0000-0000-000000000000/edit",
+        "/web/targets/list",
+        "/web/partials/dashboard",
+    ] {
+        let resp = app
+            .clone()
+            .oneshot(Request::get(path).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert!(
+            resp.status().is_redirection(),
+            "unauthenticated {path} must redirect, got {}",
+            resp.status()
+        );
+        let loc = resp
+            .headers()
+            .get(header::LOCATION)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        assert!(
+            loc.starts_with("/login"),
+            "{path} redirect target was {loc}"
+        );
+    }
+}
+
 /// Every legal/policy page is public, renders the trusted markdown into the
 /// `.legal-doc` shell, and never exposes the authenticated operator nav.
 #[tokio::test]

@@ -6,9 +6,9 @@ use axum::extract::State;
 use crate::api::handlers::dashboard::dashboard_summary;
 use crate::api::types::DashboardSummary;
 use crate::app::AppState;
-use crate::web::CurrentOrg;
 use crate::web::assets::filters;
 use crate::web::error::WebResult;
+use crate::web::{AuthedBrowser, CurrentOrg};
 
 #[derive(Template, WebTemplate)]
 #[template(path = "dashboard.html")]
@@ -25,7 +25,11 @@ pub struct DashboardRegion {
     pub uptime_pct: String,
 }
 
-pub async fn index(State(state): State<AppState>, org: CurrentOrg) -> WebResult<DashboardPage> {
+pub async fn index(
+    _auth: AuthedBrowser,
+    State(state): State<AppState>,
+    org: CurrentOrg,
+) -> WebResult<DashboardPage> {
     let summary = load_summary(state, org).await?;
     let uptime_pct = format!("{:.2}", summary.last_24h.uptime_pct);
     Ok(DashboardPage {
@@ -35,7 +39,11 @@ pub async fn index(State(state): State<AppState>, org: CurrentOrg) -> WebResult<
     })
 }
 
-pub async fn region(State(state): State<AppState>, org: CurrentOrg) -> WebResult<DashboardRegion> {
+pub async fn region(
+    _auth: AuthedBrowser,
+    State(state): State<AppState>,
+    org: CurrentOrg,
+) -> WebResult<DashboardRegion> {
     let summary = load_summary(state, org).await?;
     let uptime_pct = format!("{:.2}", summary.last_24h.uptime_pct);
     Ok(DashboardRegion {
