@@ -86,10 +86,8 @@ fn time_range_around_now() -> TimeRange {
 struct Tenant {
     user: UserId,
     org: OrgId,
-    target_store: PostgresTargetStore,
     maintenance_store: PgMaintenanceStore,
     result_sink: ClickhouseResultSink,
-    results_store: ClickhouseResultsStore,
 }
 
 async fn provision_tenant(pool: &PgPool, ch: &clickhouse::Client, label: &str) -> Tenant {
@@ -98,17 +96,18 @@ async fn provision_tenant(pool: &PgPool, ch: &clickhouse::Client, label: &str) -
         .await
         .unwrap()
         .expect("provision org");
-    let target_store = PostgresTargetStore::from_pool(pool.clone(), None, org.id);
+    // `maintenance_store` and the write-side `result_sink` are still
+    // org-stamped at construction; the read repos under test
+    // (`PostgresTargetStore` / `ClickhouseResultsStore`) take `org` per call
+    // and are shared, so a single store queried with the wrong org must
+    // return nothing.
     let maintenance_store = PgMaintenanceStore::new(pool.clone(), org.id);
     let result_sink = ClickhouseResultSink::from_client(ch.clone(), org.id);
-    let results_store = ClickhouseResultsStore::from_client(ch.clone(), org.id);
     Tenant {
         user,
         org: org.id,
-        target_store,
         maintenance_store,
         result_sink,
-        results_store,
     }
 }
 
@@ -158,26 +157,39 @@ async fn two_tenants_never_see_each_others_data() {
     let a = provision_tenant(&pool, &ch, "tenant-a").await;
     let b = provision_tenant(&pool, &ch, "tenant-b").await;
 
+    // One shared store per backend. Isolation must come from the `org`
+    // argument, not from a per-tenant construction — that is exactly the
+    // production shape now (`AppState` holds one store; the request supplies
+    // the org via `CurrentOrg`).
+    let target_store = PostgresTargetStore::from_pool(pool.clone(), None);
+    let results_store = ClickhouseResultsStore::from_client(ch.clone());
+
     // ── Targets ──────────────────────────────────────────────────────────
-    let target_a = a
-        .target_store
+    let target_a = target_store
         .create(
+            a.org,
             target_named(&format!("a-target-{}", Uuid::now_v7())),
             i64::MAX,
         )
         .await
         .expect("create target in a");
-    let target_b = b
-        .target_store
+    let target_b = target_store
         .create(
+            b.org,
             target_named(&format!("b-target-{}", Uuid::now_v7())),
             i64::MAX,
         )
         .await
         .expect("create target in b");
 
-    let a_list = a.target_store.list(TargetFilter::default()).await.unwrap();
-    let b_list = b.target_store.list(TargetFilter::default()).await.unwrap();
+    let a_list = target_store
+        .list(a.org, TargetFilter::default())
+        .await
+        .unwrap();
+    let b_list = target_store
+        .list(b.org, TargetFilter::default())
+        .await
+        .unwrap();
     assert!(
         a_list.iter().any(|t| t.id == target_a.id),
         "tenant a sees its own target"
@@ -197,11 +209,19 @@ async fn two_tenants_never_see_each_others_data() {
 
     // Get-by-id across tenants resolves to None.
     assert!(
-        a.target_store.get(target_b.id).await.unwrap().is_none(),
+        target_store
+            .get(a.org, target_b.id)
+            .await
+            .unwrap()
+            .is_none(),
         "tenant a get of b's target id must be None"
     );
     assert!(
-        b.target_store.get(target_a.id).await.unwrap().is_none(),
+        target_store
+            .get(b.org, target_a.id)
+            .await
+            .unwrap()
+            .is_none(),
         "tenant b get of a's target id must be None"
     );
 
@@ -250,31 +270,27 @@ async fn two_tenants_never_see_each_others_data() {
         .expect("ch insert b");
 
     let range = time_range_around_now();
-    // A's store filters by org_a → sees a row for target_a.
-    let a_results = a
-        .results_store
-        .list_results(target_a.id, range, 10, 0)
+    // Queried with org_a → sees a row for target_a.
+    let a_results = results_store
+        .list_results(a.org, target_a.id, range, 10, 0)
         .await
         .unwrap();
     assert!(
         !a_results.is_empty(),
-        "tenant a results_store must see its own row"
+        "results_store under org A must see A's own row"
     );
-    // A queries b's target id under its own org_id → 0 rows (org_id filter
-    // wins over target_id match, since CH rows tagged with org_b are
-    // invisible to a's store).
-    let cross = a
-        .results_store
-        .list_results(target_b.id, range, 10, 0)
+    // Same store, b's target id, but org_a → 0 rows (org_id filter wins over
+    // target_id match: CH rows tagged with org_b are invisible under org_a).
+    let cross = results_store
+        .list_results(a.org, target_b.id, range, 10, 0)
         .await
         .unwrap();
     assert!(
         cross.is_empty(),
-        "tenant a results_store must not return rows tagged with b's org"
+        "results_store under org A must not return rows tagged with B's org"
     );
-    let cross_count = a
-        .results_store
-        .count_results(target_b.id, range)
+    let cross_count = results_store
+        .count_results(a.org, target_b.id, range)
         .await
         .unwrap();
     assert_eq!(cross_count, 0, "count must also enforce org_id filter");

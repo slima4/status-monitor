@@ -249,17 +249,18 @@ impl<'a> CheckResultRow<'a> {
     }
 }
 
+/// Org-scoped read side of the ClickHouse results table. Holds no ambient
+/// org; every query binds the `org` the caller resolved from the request, so
+/// a `target_id` guessed from another tenant returns zero rows. `org_id` is
+/// also the leading sort key — filtering on it is mandatory for performance,
+/// not only isolation.
 pub struct ClickhouseResultsStore {
     client: Client,
-    default_org_id: OrgId,
 }
 
 impl ClickhouseResultsStore {
-    pub fn from_client(client: Client, default_org_id: OrgId) -> Self {
-        Self {
-            client,
-            default_org_id,
-        }
+    pub fn from_client(client: Client) -> Self {
+        Self { client }
     }
 
     /// Narrow projection: only the four columns incident coalescing needs.
@@ -269,6 +270,7 @@ impl ClickhouseResultsStore {
     /// to a full scan.
     async fn fetch_incident_rows(
         &self,
+        org: OrgId,
         target_id: Uuid,
         range: TimeRange,
     ) -> Result<Vec<IncidentRow>> {
@@ -281,7 +283,7 @@ impl ClickhouseResultsStore {
                  AND timestamp < fromUnixTimestamp64Milli(?) \
                  ORDER BY timestamp ASC"
             ))
-            .bind(self.default_org_id.0)
+            .bind(org.0)
             .bind(target_id)
             .bind(range.from.timestamp_millis())
             .bind(range.to.timestamp_millis())
@@ -354,6 +356,7 @@ fn row_to_result(row: OwnedResultRow) -> CheckResult {
 impl ResultsStore for ClickhouseResultsStore {
     async fn list_results(
         &self,
+        org: OrgId,
         target_id: Uuid,
         range: TimeRange,
         limit: usize,
@@ -371,7 +374,7 @@ impl ResultsStore for ClickhouseResultsStore {
                  AND timestamp < fromUnixTimestamp64Milli(?) \
                  ORDER BY timestamp DESC LIMIT ? OFFSET ?"
             ))
-            .bind(self.default_org_id.0)
+            .bind(org.0)
             .bind(target_id)
             .bind(range.from.timestamp_millis())
             .bind(range.to.timestamp_millis())
@@ -383,7 +386,7 @@ impl ResultsStore for ClickhouseResultsStore {
         Ok(rows.into_iter().map(row_to_result).collect())
     }
 
-    async fn count_results(&self, target_id: Uuid, range: TimeRange) -> Result<u64> {
+    async fn count_results(&self, org: OrgId, target_id: Uuid, range: TimeRange) -> Result<u64> {
         #[derive(Row, Deserialize)]
         struct CountRow {
             n: u64,
@@ -396,7 +399,7 @@ impl ResultsStore for ClickhouseResultsStore {
                  AND timestamp >= fromUnixTimestamp64Milli(?) \
                  AND timestamp < fromUnixTimestamp64Milli(?)"
             ))
-            .bind(self.default_org_id.0)
+            .bind(org.0)
             .bind(target_id)
             .bind(range.from.timestamp_millis())
             .bind(range.to.timestamp_millis())
@@ -408,13 +411,14 @@ impl ResultsStore for ClickhouseResultsStore {
 
     async fn list_incidents(
         &self,
+        org: OrgId,
         target_id: Uuid,
         range: TimeRange,
         ongoing_only: bool,
         limit: usize,
         offset: usize,
     ) -> Result<Vec<Incident>> {
-        let rows = self.fetch_incident_rows(target_id, range).await?;
+        let rows = self.fetch_incident_rows(org, target_id, range).await?;
         let mut incidents = coalesce_from_incident_rows(target_id, rows);
         if ongoing_only {
             incidents.retain(|i| i.ended_at.is_none());
@@ -425,11 +429,12 @@ impl ResultsStore for ClickhouseResultsStore {
 
     async fn count_incidents(
         &self,
+        org: OrgId,
         target_id: Uuid,
         range: TimeRange,
         ongoing_only: bool,
     ) -> Result<u64> {
-        let rows = self.fetch_incident_rows(target_id, range).await?;
+        let rows = self.fetch_incident_rows(org, target_id, range).await?;
         let mut incidents = coalesce_from_incident_rows(target_id, rows);
         if ongoing_only {
             incidents.retain(|i| i.ended_at.is_none());
@@ -437,7 +442,11 @@ impl ResultsStore for ClickhouseResultsStore {
         Ok(incidents.len() as u64)
     }
 
-    async fn current_status_breakdown(&self, range: TimeRange) -> Result<StatusBreakdown> {
+    async fn current_status_breakdown(
+        &self,
+        org: OrgId,
+        range: TimeRange,
+    ) -> Result<StatusBreakdown> {
         #[derive(Row, Deserialize)]
         struct Latest {
             status: i8,
@@ -452,7 +461,7 @@ impl ResultsStore for ClickhouseResultsStore {
                  AND timestamp < fromUnixTimestamp64Milli(?) \
                  GROUP BY target_id"
             ))
-            .bind(self.default_org_id.0)
+            .bind(org.0)
             .bind(range.from.timestamp_millis())
             .bind(range.to.timestamp_millis())
             .fetch_all::<Latest>()
@@ -470,7 +479,7 @@ impl ResultsStore for ClickhouseResultsStore {
         Ok(out)
     }
 
-    async fn last_n_summary(&self, range: TimeRange) -> Result<(u64, u64, u64)> {
+    async fn last_n_summary(&self, org: OrgId, range: TimeRange) -> Result<(u64, u64, u64)> {
         #[derive(Row, Deserialize)]
         struct Counts {
             total: u64,
@@ -485,7 +494,7 @@ impl ResultsStore for ClickhouseResultsStore {
                  AND timestamp >= fromUnixTimestamp64Milli(?) \
                  AND timestamp < fromUnixTimestamp64Milli(?)"
             ))
-            .bind(self.default_org_id.0)
+            .bind(org.0)
             .bind(range.from.timestamp_millis())
             .bind(range.to.timestamp_millis())
             .fetch_one::<Counts>()
@@ -503,7 +512,7 @@ impl ResultsStore for ClickhouseResultsStore {
                  AND timestamp < fromUnixTimestamp64Milli(?) \
                  ORDER BY target_id ASC, timestamp ASC"
             ))
-            .bind(self.default_org_id.0)
+            .bind(org.0)
             .bind(range.from.timestamp_millis())
             .bind(range.to.timestamp_millis())
             .fetch_all::<IncidentRow>()
@@ -532,7 +541,7 @@ impl ResultsStore for ClickhouseResultsStore {
         Ok((counts.total, counts.up, incidents))
     }
 
-    async fn uptime(&self, target_id: Uuid, range: TimeRange) -> Result<UptimeStats> {
+    async fn uptime(&self, org: OrgId, target_id: Uuid, range: TimeRange) -> Result<UptimeStats> {
         #[derive(Row, Deserialize)]
         struct CountsRow {
             up: u64,
@@ -554,7 +563,7 @@ impl ResultsStore for ClickhouseResultsStore {
                  AND timestamp >= fromUnixTimestamp64Milli(?) \
                  AND timestamp < fromUnixTimestamp64Milli(?)"
             ))
-            .bind(self.default_org_id.0)
+            .bind(org.0)
             .bind(target_id)
             .bind(range.from.timestamp_millis())
             .bind(range.to.timestamp_millis())

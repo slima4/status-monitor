@@ -284,11 +284,31 @@ pub async fn build_test_app_with_pg_store(
     .await
     .expect("insert quota-test org");
     let default_org_id = OrgId(org_uuid);
-    let target_store = Arc::new(PostgresTargetStore::from_pool(
-        pool.clone(),
-        None,
-        default_org_id,
-    ));
+    let app = assemble_pg_router(pool, cfg, default_org_id);
+    (app, default_org_id)
+}
+
+/// SaaS router backed by the **real** `PostgresTargetStore` (no ambient org —
+/// every query is scoped by the request's `CurrentOrg`) plus an in-memory
+/// results sink. Unlike [`build_test_app_with_pg_store`] this provisions no
+/// org: the caller creates as many orgs as the test needs and drives requests
+/// with per-org `session_layer`s. This is the harness for cross-tenant IDOR
+/// regression — two orgs, one target each, one shared store.
+pub async fn build_saas_router_with_pg_targets(pool: PgPool) -> Router {
+    let mut cfg = AppConfig::load().expect("config");
+    cfg.tenancy.enabled = true;
+    cfg.tenancy.path_based_public_routes = false;
+    cfg.tenancy.subdomain_public_routes = true;
+    // `default_org_id` is the self-host fallback only; SaaS resolves the org
+    // per request from the session, so the value here is never read.
+    assemble_pg_router(pool, cfg, test_org_id())
+}
+
+/// Shared tail of the PG-target-store router builders: real
+/// `PostgresTargetStore` + in-memory everything else, wired into the API +
+/// web router. Callers own the org/tenancy prelude that precedes this.
+fn assemble_pg_router(pool: PgPool, cfg: AppConfig, default_org_id: OrgId) -> Router {
+    let target_store = Arc::new(PostgresTargetStore::from_pool(pool.clone(), None));
     let sink = Arc::new(InMemorySink::new());
     let results_store: Arc<dyn ResultsStore> = sink.clone();
     let result_sink: Arc<dyn ResultSink> = sink;
@@ -320,8 +340,7 @@ pub async fn build_test_app_with_pg_store(
         build_test_outbound_and_email().1,
     );
     let api = build_router(state.clone(), CancellationToken::new());
-    let app = api.merge(status_monitor::web::routes(&state.cfg).with_state(state));
-    (app, default_org_id)
+    api.merge(status_monitor::web::routes(&state.cfg).with_state(state))
 }
 
 /// Layer that stamps the provided `Session` onto every request's extensions.

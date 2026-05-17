@@ -84,7 +84,6 @@ async fn main() -> Result<()> {
     let target_store: Arc<dyn TargetStore> = Arc::new(PostgresTargetStore::from_pool(
         pg_pool.clone(),
         cipher.clone(),
-        default_org_id,
     ));
 
     tracing::info!(
@@ -103,10 +102,8 @@ async fn main() -> Result<()> {
     let result_sink_for_state = result_sink.clone();
     let ch_client_for_public = clickhouse_client.clone();
     let ch_client_for_purge = clickhouse_client.clone();
-    let results_store: Arc<dyn ResultsStore> = Arc::new(ClickhouseResultsStore::from_client(
-        clickhouse_client,
-        default_org_id,
-    ));
+    let results_store: Arc<dyn ResultsStore> =
+        Arc::new(ClickhouseResultsStore::from_client(clickhouse_client));
 
     let http_clients = Arc::new(build_clients(
         &cfg.http_client,
@@ -200,6 +197,7 @@ async fn main() -> Result<()> {
         target_store.clone(),
         results_store.clone(),
         Arc::new(PgIncidentStore::new(pg_pool, default_org_id)),
+        default_org_id,
         IncidentWriterConfig::default(),
     ));
     let incident_writer_handle: JoinHandle<()> = {

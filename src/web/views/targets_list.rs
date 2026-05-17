@@ -6,12 +6,12 @@ use futures::future::join_all;
 use serde::Deserialize;
 
 use crate::app::AppState;
-use crate::domain::{CheckResult, Target};
+use crate::domain::{CheckResult, OrgId, Target};
 use crate::storage::{TargetFilter, TimeRange};
-use crate::web::AuthedBrowser;
 use crate::web::assets::filters;
 use crate::web::error::WebResult;
 use crate::web::views::{describe_check, fmt_ts};
+use crate::web::{AuthedBrowser, CurrentOrg};
 
 const DEFAULT_LIMIT: usize = 50;
 const MAX_LIMIT: usize = 200;
@@ -74,10 +74,11 @@ pub struct ListBodyPartial {
 
 pub async fn index(
     _auth: AuthedBrowser,
+    CurrentOrg(org): CurrentOrg,
     State(state): State<AppState>,
     Query(params): Query<ListParams>,
 ) -> WebResult<ListPage> {
-    let (rows, total, limit, offset) = fetch_rows(&state, &params).await?;
+    let (rows, total, limit, offset) = fetch_rows(&state, org, &params).await?;
     let (prev_offset, next_offset) = pagination_offsets(offset, limit, rows.len(), total);
     Ok(ListPage {
         active_tab: "targets",
@@ -95,10 +96,11 @@ pub async fn index(
 
 pub async fn list_partial(
     _auth: AuthedBrowser,
+    CurrentOrg(org): CurrentOrg,
     State(state): State<AppState>,
     Query(params): Query<ListParams>,
 ) -> WebResult<ListBodyPartial> {
-    let (rows, total, limit, offset) = fetch_rows(&state, &params).await?;
+    let (rows, total, limit, offset) = fetch_rows(&state, org, &params).await?;
     let (prev_offset, next_offset) = pagination_offsets(offset, limit, rows.len(), total);
     Ok(ListBodyPartial {
         rows,
@@ -126,6 +128,7 @@ fn pagination_offsets(
 
 async fn fetch_rows(
     state: &AppState,
+    org: OrgId,
     params: &ListParams,
 ) -> Result<(Vec<TargetRow>, u64, usize, usize), crate::error::AppError> {
     let limit = params.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
@@ -138,8 +141,8 @@ async fn fetch_rows(
     };
 
     let (targets, total) = tokio::try_join!(
-        state.target_store.list(filter.clone()),
-        state.target_store.count(filter),
+        state.target_store.list(org, filter.clone()),
+        state.target_store.count(org, filter),
     )?;
 
     let now = Utc::now();
@@ -152,7 +155,7 @@ async fn fetch_rows(
         let id = t.id;
         async move {
             store
-                .list_results(id, range, 1, 0)
+                .list_results(org, id, range, 1, 0)
                 .await
                 .ok()
                 .and_then(|mut v| v.pop())

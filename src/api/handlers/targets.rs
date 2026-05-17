@@ -17,10 +17,13 @@ use crate::api::types::{
     BulkAction, BulkActionFailure, BulkActionRequest, BulkActionResponse, TestRequest, TestResponse,
 };
 use crate::app::AppState;
-use crate::domain::{AlertChannel, CheckResult, NewTarget, Target, TargetAlerts, TargetUpdate};
+use crate::domain::{
+    AlertChannel, CheckResult, NewTarget, OrgId, Target, TargetAlerts, TargetUpdate,
+};
 use crate::error::{AppError, Result};
 use crate::security::SsrfGuard;
 use crate::storage::TargetFilter;
+use crate::web::CurrentOrg;
 use crate::worker::host_for_spec;
 
 const BULK_MAX: usize = 10_000;
@@ -82,14 +85,15 @@ impl ListQuery {
 )]
 pub async fn list(
     State(state): State<AppState>,
+    CurrentOrg(org): CurrentOrg,
     Query(query): Query<ListQuery>,
 ) -> Result<Redacted<PageOfTarget>> {
     let limit = query.effective_limit();
     let offset = query.offset;
     let filter = query.to_filter();
     let (items, total) = tokio::try_join!(
-        state.target_store.list(filter.clone()),
-        state.target_store.count(filter),
+        state.target_store.list(org, filter.clone()),
+        state.target_store.count(org, filter),
     )?;
     Ok(Redacted::new(PageEnvelope::new(
         items,
@@ -119,8 +123,12 @@ pub async fn list(
         })),
     ),
 )]
-pub async fn get(State(state): State<AppState>, Path(id): Path<Uuid>) -> Result<Redacted<Target>> {
-    match state.target_store.get(id).await? {
+pub async fn get(
+    State(state): State<AppState>,
+    CurrentOrg(org): CurrentOrg,
+    Path(id): Path<Uuid>,
+) -> Result<Redacted<Target>> {
+    match state.target_store.get(org, id).await? {
         Some(t) => Ok(Redacted::new(t)),
         None => Err(AppError::not_found(
             codes::TARGET_NOT_FOUND,
@@ -161,17 +169,17 @@ pub async fn get(State(state): State<AppState>, Path(id): Path<Uuid>) -> Result<
 )]
 pub async fn create(
     State(state): State<AppState>,
+    CurrentOrg(org): CurrentOrg,
     Json(new): Json<NewTarget>,
 ) -> Result<(
     StatusCode,
     AppendHeaders<[(axum::http::HeaderName, HeaderValue); 1]>,
     Redacted<Target>,
 )> {
-    let org = state.default_org_id;
     let plan = state.quotas.limit_for_org(org).await?;
     let guard = ssrf_guard(&state);
     validate_new_target(&new, &guard, i64::from(plan.min_check_interval_secs))?;
-    check_abuse(&state, &new.check)?;
+    check_abuse(&state, org, &new.check)?;
     // Friendly pre-check; the store INSERT enforces the same cap atomically.
     state.quotas.check_can_create_targets(org, None, 1).await?;
     if new.public_status {
@@ -179,7 +187,7 @@ pub async fn create(
     }
     let t = state
         .target_store
-        .create(new, i64::from(plan.max_targets))
+        .create(org, new, i64::from(plan.max_targets))
         .await?;
     // UUID hex is always ASCII-safe → infallible.
     let location = HeaderValue::from_str(&format!("/api/v1/targets/{}", t.id))
@@ -212,12 +220,13 @@ pub async fn create(
 )]
 pub async fn update(
     State(state): State<AppState>,
+    CurrentOrg(org): CurrentOrg,
     Path(id): Path<Uuid>,
     Json(update): Json<TargetUpdate>,
 ) -> Result<Redacted<Target>> {
     if let Some(check) = &update.check {
         validate_check(check, &ssrf_guard(&state))?;
-        check_abuse(&state, check)?;
+        check_abuse(&state, org, check)?;
     }
     if let Some(alerts) = &update.alerts {
         validate_alerts(alerts)?;
@@ -227,7 +236,7 @@ pub async fn update(
     if let Some(interval) = update.interval {
         let min = state
             .quotas
-            .limit_for_org(state.default_org_id)
+            .limit_for_org(org)
             .await?
             .min_check_interval_secs;
         let requested = interval.as_secs() as i64;
@@ -243,15 +252,12 @@ pub async fn update(
     // create/bulk already gate this; the PATCH path must too, or the cap is
     // trivially bypassed by creating private then editing public.
     if update.public_status == Some(true)
-        && let Some(existing) = state.target_store.get(id).await?
+        && let Some(existing) = state.target_store.get(org, id).await?
         && !existing.public_status
     {
-        state
-            .quotas
-            .check_public_components(state.default_org_id, None, 1)
-            .await?;
+        state.quotas.check_public_components(org, None, 1).await?;
     }
-    match state.target_store.update(id, update).await? {
+    match state.target_store.update(org, id, update).await? {
         Some(t) => Ok(Redacted::new(t)),
         None => Err(AppError::not_found(
             codes::TARGET_NOT_FOUND,
@@ -274,8 +280,12 @@ pub async fn update(
         })),
     ),
 )]
-pub async fn delete(State(state): State<AppState>, Path(id): Path<Uuid>) -> Result<StatusCode> {
-    if state.target_store.delete(id).await? {
+pub async fn delete(
+    State(state): State<AppState>,
+    CurrentOrg(org): CurrentOrg,
+    Path(id): Path<Uuid>,
+) -> Result<StatusCode> {
+    if state.target_store.delete(org, id).await? {
         Ok(StatusCode::NO_CONTENT)
     } else {
         Err(AppError::not_found(
@@ -306,6 +316,7 @@ pub async fn delete(State(state): State<AppState>, Path(id): Path<Uuid>) -> Resu
 )]
 pub async fn bulk_create(
     State(state): State<AppState>,
+    CurrentOrg(org): CurrentOrg,
     Json(items): Json<Vec<NewTarget>>,
 ) -> Result<(StatusCode, Redacted<Vec<Target>>)> {
     if items.is_empty() {
@@ -320,12 +331,11 @@ pub async fn bulk_create(
             format!("bulk size {} exceeds max {BULK_MAX}", items.len()),
         ));
     }
-    let org = state.default_org_id;
     let plan = state.quotas.limit_for_org(org).await?;
     let guard = ssrf_guard(&state);
     for new in &items {
         validate_new_target(new, &guard, i64::from(plan.min_check_interval_secs))?;
-        check_abuse(&state, &new.check)?;
+        check_abuse(&state, org, &new.check)?;
     }
     let n = items.len() as i64;
     // Quantity-aware friendly pre-check; the store INSERT re-enforces the
@@ -340,7 +350,7 @@ pub async fn bulk_create(
     }
     let out = state
         .target_store
-        .bulk_create(items, i64::from(plan.max_targets))
+        .bulk_create(org, items, i64::from(plan.max_targets))
         .await?;
     Ok((StatusCode::CREATED, Redacted::new(out)))
 }
@@ -366,6 +376,7 @@ pub async fn bulk_create(
 )]
 pub async fn bulk_action(
     State(state): State<AppState>,
+    CurrentOrg(org): CurrentOrg,
     Json(req): Json<BulkActionRequest>,
 ) -> Result<Json<BulkActionResponse>> {
     if req.ids.is_empty() {
@@ -382,9 +393,9 @@ pub async fn bulk_action(
     }
 
     let succeeded = match &req.action {
-        BulkAction::Enable => state.target_store.set_enabled(&req.ids, true).await?,
-        BulkAction::Disable => state.target_store.set_enabled(&req.ids, false).await?,
-        BulkAction::Delete => state.target_store.delete_bulk(&req.ids).await?,
+        BulkAction::Enable => state.target_store.set_enabled(org, &req.ids, true).await?,
+        BulkAction::Disable => state.target_store.set_enabled(org, &req.ids, false).await?,
+        BulkAction::Delete => state.target_store.delete_bulk(org, &req.ids).await?,
         BulkAction::TagAdd { tags } => {
             if tags.is_empty() {
                 return Err(AppError::bad_request_field(
@@ -393,7 +404,7 @@ pub async fn bulk_action(
                     "action.tags",
                 ));
             }
-            state.target_store.add_tags(&req.ids, tags).await?
+            state.target_store.add_tags(org, &req.ids, tags).await?
         }
         BulkAction::TagRemove { tags } => {
             if tags.is_empty() {
@@ -403,7 +414,7 @@ pub async fn bulk_action(
                     "action.tags",
                 ));
             }
-            state.target_store.remove_tags(&req.ids, tags).await?
+            state.target_store.remove_tags(org, &req.ids, tags).await?
         }
     };
 
@@ -451,11 +462,12 @@ pub async fn bulk_action(
 )]
 pub async fn test_check(
     State(state): State<AppState>,
+    CurrentOrg(org): CurrentOrg,
     Json(req): Json<TestRequest>,
 ) -> Result<Json<TestResponse>> {
     let guard = ssrf_guard(&state);
     validate_check(&req.check, &guard)?;
-    check_abuse(&state, &req.check)?;
+    check_abuse(&state, org, &req.check)?;
     let result = crate::worker::execute(Uuid::nil(), &req.check, &state.http_clients).await;
     let matched_expectations = matches!(result.status, crate::domain::CheckStatus::Up);
     Ok(Json(TestResponse {
@@ -499,12 +511,13 @@ pub struct CheckNowQuery {
 )]
 pub async fn check_now(
     State(state): State<AppState>,
+    CurrentOrg(org): CurrentOrg,
     Path(id): Path<Uuid>,
     Query(q): Query<CheckNowQuery>,
 ) -> Result<Json<CheckResult>> {
     let target = state
         .target_store
-        .get(id)
+        .get(org, id)
         .await?
         .ok_or_else(|| AppError::not_found(codes::TARGET_NOT_FOUND, "target not found"))?;
     let host = host_for_spec(&target.check);
@@ -535,13 +548,13 @@ fn ssrf_guard(state: &AppState) -> SsrfGuard {
 /// accepts a `CheckSpec` (create, bulk per item, update, test) routes through
 /// this single chokepoint, so a denylisted URL/domain can never enter the
 /// store — and every block is audited fire-and-forget to `quota_events`.
-fn check_abuse(state: &AppState, check: &crate::domain::CheckSpec) -> Result<()> {
+fn check_abuse(state: &AppState, org: OrgId, check: &crate::domain::CheckSpec) -> Result<()> {
     let Some(hit) = state.abuse.inspect(check) else {
         return Ok(());
     };
     crate::quotas::service::record_quota_event(
         state.db.clone(),
-        Some(state.default_org_id),
+        Some(org),
         None,
         "abuse_blocked",
         Some(hit.quota_name()),

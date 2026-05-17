@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use crate::api::types::{StatusBreakdown, TagCount, TargetsSummary};
 use crate::domain::{
-    CheckResult, CheckStatus, Incident, NewTarget, Target, TargetUpdate, coalesce_incidents,
+    CheckResult, CheckStatus, Incident, NewTarget, OrgId, Target, TargetUpdate, coalesce_incidents,
 };
 use crate::error::Result;
 use crate::storage::traits::{
@@ -43,10 +43,17 @@ impl ResultSink for InMemorySink {
     }
 }
 
+// Single-org test fixture. The `org` parameter exists to satisfy the
+// org-scoped trait (and to type-check the call sites that thread
+// `CurrentOrg`), but is intentionally not used for filtering: these stores
+// only ever hold one tenant's data under `tenancy.enabled = false`. Real
+// cross-tenant isolation lives in the Postgres/ClickHouse impls and is
+// covered by the SaaS two-org integration tests.
 #[async_trait]
 impl ResultsStore for InMemorySink {
     async fn list_results(
         &self,
+        _org: OrgId,
         target_id: Uuid,
         range: TimeRange,
         limit: usize,
@@ -68,7 +75,7 @@ impl ResultsStore for InMemorySink {
         Ok(paged)
     }
 
-    async fn count_results(&self, target_id: Uuid, range: TimeRange) -> Result<u64> {
+    async fn count_results(&self, _org: OrgId, target_id: Uuid, range: TimeRange) -> Result<u64> {
         Ok(self
             .results
             .lock()
@@ -79,7 +86,7 @@ impl ResultsStore for InMemorySink {
             .count() as u64)
     }
 
-    async fn uptime(&self, target_id: Uuid, range: TimeRange) -> Result<UptimeStats> {
+    async fn uptime(&self, _org: OrgId, target_id: Uuid, range: TimeRange) -> Result<UptimeStats> {
         let guard = self.results.lock();
         let filtered: Vec<CheckResult> = guard
             .iter()
@@ -93,6 +100,7 @@ impl ResultsStore for InMemorySink {
 
     async fn list_incidents(
         &self,
+        _org: OrgId,
         target_id: Uuid,
         range: TimeRange,
         ongoing_only: bool,
@@ -110,6 +118,7 @@ impl ResultsStore for InMemorySink {
 
     async fn count_incidents(
         &self,
+        _org: OrgId,
         target_id: Uuid,
         range: TimeRange,
         ongoing_only: bool,
@@ -121,7 +130,11 @@ impl ResultsStore for InMemorySink {
         Ok(incidents.len() as u64)
     }
 
-    async fn current_status_breakdown(&self, range: TimeRange) -> Result<StatusBreakdown> {
+    async fn current_status_breakdown(
+        &self,
+        _org: OrgId,
+        range: TimeRange,
+    ) -> Result<StatusBreakdown> {
         let guard = self.results.lock();
         let mut latest: std::collections::HashMap<Uuid, &CheckResult> =
             std::collections::HashMap::new();
@@ -150,7 +163,7 @@ impl ResultsStore for InMemorySink {
         Ok(out)
     }
 
-    async fn last_n_summary(&self, range: TimeRange) -> Result<(u64, u64, u64)> {
+    async fn last_n_summary(&self, _org: OrgId, range: TimeRange) -> Result<(u64, u64, u64)> {
         let guard = self.results.lock();
         let mut total = 0u64;
         let mut up = 0u64;
@@ -239,9 +252,12 @@ impl InMemoryTargetStore {
     }
 }
 
+// Single-org test fixture — see the note on the `ResultsStore` impl above.
+// The `org` parameter is accepted to satisfy the trait but not used for
+// filtering.
 #[async_trait]
 impl TargetStore for InMemoryTargetStore {
-    async fn list(&self, filter: TargetFilter) -> Result<Vec<Target>> {
+    async fn list(&self, _org: OrgId, filter: TargetFilter) -> Result<Vec<Target>> {
         let limit = filter.limit.unwrap_or(100).min(10_000);
         let guard = self.targets.lock();
         let collected: Vec<Target> = guard
@@ -258,7 +274,7 @@ impl TargetStore for InMemoryTargetStore {
         Ok(collected)
     }
 
-    async fn count(&self, filter: TargetFilter) -> Result<u64> {
+    async fn count(&self, _org: OrgId, filter: TargetFilter) -> Result<u64> {
         let guard = self.targets.lock();
         let n = guard
             .iter()
@@ -271,11 +287,11 @@ impl TargetStore for InMemoryTargetStore {
         Ok(n as u64)
     }
 
-    async fn get(&self, id: Uuid) -> Result<Option<Target>> {
+    async fn get(&self, _org: OrgId, id: Uuid) -> Result<Option<Target>> {
         Ok(self.targets.lock().iter().find(|t| t.id == id).cloned())
     }
 
-    async fn create(&self, new: NewTarget, max_targets: i64) -> Result<Target> {
+    async fn create(&self, _org: OrgId, new: NewTarget, max_targets: i64) -> Result<Target> {
         let mut guard = self.targets.lock();
         // Lock held across count + push, so this is atomic for the same
         // reason the Postgres count-in-INSERT is.
@@ -292,7 +308,7 @@ impl TargetStore for InMemoryTargetStore {
         Ok(target)
     }
 
-    async fn update(&self, id: Uuid, update: TargetUpdate) -> Result<Option<Target>> {
+    async fn update(&self, _org: OrgId, id: Uuid, update: TargetUpdate) -> Result<Option<Target>> {
         let mut guard = self.targets.lock();
         let Some(t) = guard.iter_mut().find(|t| t.id == id) else {
             return Ok(None);
@@ -334,14 +350,19 @@ impl TargetStore for InMemoryTargetStore {
         Ok(Some(t.clone()))
     }
 
-    async fn delete(&self, id: Uuid) -> Result<bool> {
+    async fn delete(&self, _org: OrgId, id: Uuid) -> Result<bool> {
         let mut guard = self.targets.lock();
         let before = guard.len();
         guard.retain(|t| t.id != id);
         Ok(guard.len() != before)
     }
 
-    async fn bulk_create(&self, items: Vec<NewTarget>, max_targets: i64) -> Result<Vec<Target>> {
+    async fn bulk_create(
+        &self,
+        _org: OrgId,
+        items: Vec<NewTarget>,
+        max_targets: i64,
+    ) -> Result<Vec<Target>> {
         let mut guard = self.targets.lock();
         if guard.len() as i64 + items.len() as i64 > max_targets {
             return Err(crate::error::AppError::quota_exceeded(
@@ -360,7 +381,7 @@ impl TargetStore for InMemoryTargetStore {
         Ok(created)
     }
 
-    async fn list_updated_since(&self, since: DateTime<Utc>) -> Result<Vec<Target>> {
+    async fn list_updated_since(&self, _org: OrgId, since: DateTime<Utc>) -> Result<Vec<Target>> {
         Ok(self
             .targets
             .lock()
@@ -370,7 +391,12 @@ impl TargetStore for InMemoryTargetStore {
             .collect())
     }
 
-    async fn list_tags(&self, prefix: Option<String>, limit: usize) -> Result<Vec<TagCount>> {
+    async fn list_tags(
+        &self,
+        _org: OrgId,
+        prefix: Option<String>,
+        limit: usize,
+    ) -> Result<Vec<TagCount>> {
         let mut counts: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
         for t in self.targets.lock().iter() {
             for tag in &t.tags {
@@ -391,7 +417,7 @@ impl TargetStore for InMemoryTargetStore {
         Ok(out)
     }
 
-    async fn count_tags(&self, prefix: Option<String>) -> Result<u64> {
+    async fn count_tags(&self, _org: OrgId, prefix: Option<String>) -> Result<u64> {
         let mut seen = std::collections::HashSet::new();
         for t in self.targets.lock().iter() {
             for tag in &t.tags {
@@ -406,7 +432,7 @@ impl TargetStore for InMemoryTargetStore {
         Ok(seen.len() as u64)
     }
 
-    async fn summary(&self) -> Result<TargetsSummary> {
+    async fn summary(&self, _org: OrgId) -> Result<TargetsSummary> {
         let guard = self.targets.lock();
         let total = guard.len() as u64;
         let enabled = guard.iter().filter(|t| t.enabled).count() as u64;
@@ -417,7 +443,7 @@ impl TargetStore for InMemoryTargetStore {
         })
     }
 
-    async fn set_enabled(&self, ids: &[Uuid], enabled: bool) -> Result<Vec<Uuid>> {
+    async fn set_enabled(&self, _org: OrgId, ids: &[Uuid], enabled: bool) -> Result<Vec<Uuid>> {
         let mut guard = self.targets.lock();
         let now = Utc::now();
         let mut hit = Vec::new();
@@ -431,7 +457,7 @@ impl TargetStore for InMemoryTargetStore {
         Ok(hit)
     }
 
-    async fn delete_bulk(&self, ids: &[Uuid]) -> Result<Vec<Uuid>> {
+    async fn delete_bulk(&self, _org: OrgId, ids: &[Uuid]) -> Result<Vec<Uuid>> {
         let mut guard = self.targets.lock();
         let hit: Vec<Uuid> = guard
             .iter()
@@ -442,7 +468,7 @@ impl TargetStore for InMemoryTargetStore {
         Ok(hit)
     }
 
-    async fn add_tags(&self, ids: &[Uuid], tags: &[String]) -> Result<Vec<Uuid>> {
+    async fn add_tags(&self, _org: OrgId, ids: &[Uuid], tags: &[String]) -> Result<Vec<Uuid>> {
         let mut guard = self.targets.lock();
         let now = Utc::now();
         let mut hit = Vec::new();
@@ -460,7 +486,7 @@ impl TargetStore for InMemoryTargetStore {
         Ok(hit)
     }
 
-    async fn remove_tags(&self, ids: &[Uuid], tags: &[String]) -> Result<Vec<Uuid>> {
+    async fn remove_tags(&self, _org: OrgId, ids: &[Uuid], tags: &[String]) -> Result<Vec<Uuid>> {
         let mut guard = self.targets.lock();
         let now = Utc::now();
         let mut hit = Vec::new();

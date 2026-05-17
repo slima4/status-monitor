@@ -86,6 +86,10 @@ pub struct IncidentWriter {
     target_store: Arc<dyn TargetStore>,
     results_store: Arc<dyn ResultsStore>,
     incident_store: Arc<dyn IncidentStore>,
+    /// The single org this materialiser services (see the module-level note
+    /// on the cross-org limitation). Threaded into every org-scoped store
+    /// call so the writer never reaches across tenants.
+    org: OrgId,
     cfg: IncidentWriterConfig,
 }
 
@@ -94,12 +98,14 @@ impl IncidentWriter {
         target_store: Arc<dyn TargetStore>,
         results_store: Arc<dyn ResultsStore>,
         incident_store: Arc<dyn IncidentStore>,
+        org: OrgId,
         cfg: IncidentWriterConfig,
     ) -> Self {
         Self {
             target_store,
             results_store,
             incident_store,
+            org,
             cfg,
         }
     }
@@ -144,12 +150,15 @@ impl IncidentWriter {
     async fn list_public_targets(&self) -> Result<Vec<Target>> {
         let targets = self
             .target_store
-            .list(TargetFilter {
-                limit: Some(10_000),
-                offset: 0,
-                tag: None,
-                enabled: None,
-            })
+            .list(
+                self.org,
+                TargetFilter {
+                    limit: Some(10_000),
+                    offset: 0,
+                    tag: None,
+                    enabled: None,
+                },
+            )
             .await?;
         Ok(targets.into_iter().filter(|t| t.public_status).collect())
     }
@@ -157,7 +166,7 @@ impl IncidentWriter {
     async fn process_target(&self, target: &Target, range: TimeRange) -> Result<()> {
         let mut results = self
             .results_store
-            .list_results(target.id, range, self.cfg.max_results_per_tick, 0)
+            .list_results(self.org, target.id, range, self.cfg.max_results_per_tick, 0)
             .await?;
         // Storage returns DESC by timestamp; algorithm operates on ASC.
         results.sort_by_key(|r| r.timestamp);
@@ -704,6 +713,7 @@ mod tests {
             targets as Arc<dyn TargetStore>,
             sink as Arc<dyn crate::storage::ResultsStore>,
             incidents as Arc<dyn IncidentStore>,
+            OrgId(Uuid::nil()),
             cfg,
         )
     }

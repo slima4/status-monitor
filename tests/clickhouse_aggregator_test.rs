@@ -122,9 +122,9 @@ async fn build_round_trips_seeded_data() {
         .await
         .expect("default org");
     let unique = format!("agg-test-{}", Uuid::now_v7());
-    let store = Arc::new(PostgresTargetStore::from_pool(pool.clone(), None, org_id));
+    let store = Arc::new(PostgresTargetStore::from_pool(pool.clone(), None));
     let target = store
-        .create(public_target(&unique), i64::MAX)
+        .create(org_id, public_target(&unique), i64::MAX)
         .await
         .expect("create public target");
     let target_id = target.id;
@@ -189,9 +189,9 @@ async fn component_history_returns_strip_for_public_target() {
         .await
         .expect("default org");
     let unique = format!("hist-test-{}", Uuid::now_v7());
-    let store = Arc::new(PostgresTargetStore::from_pool(pool.clone(), None, org_id));
+    let store = Arc::new(PostgresTargetStore::from_pool(pool.clone(), None));
     let target = store
-        .create(public_target(&unique), i64::MAX)
+        .create(org_id, public_target(&unique), i64::MAX)
         .await
         .expect("create public target");
     let target_id = target.id;

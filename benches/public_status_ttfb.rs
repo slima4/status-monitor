@@ -148,13 +148,13 @@ async fn build_fixture() -> Option<Fixture> {
             .await
             .expect("create org")
             .expect("slug fresh");
-        let target_store = Arc::new(PostgresTargetStore::from_pool(pool.clone(), None, org.id))
-            as Arc<dyn TargetStore>;
+        let target_store =
+            Arc::new(PostgresTargetStore::from_pool(pool.clone(), None)) as Arc<dyn TargetStore>;
         let sink = ClickhouseResultSink::from_client(ch.clone(), org.id);
 
         for j in 0..COMPONENTS_PER_ORG {
             let t = target_store
-                .create(http_target(&format!("ttfb-{i}-{j}")), i64::MAX)
+                .create(org.id, http_target(&format!("ttfb-{i}-{j}")), i64::MAX)
                 .await
                 .expect("create target");
             let rows: Vec<CheckResult> = (0..RESULTS_PER_COMPONENT)

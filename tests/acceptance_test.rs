@@ -167,7 +167,7 @@ async fn coalescing_separates_runs_split_by_an_up_check() {
     };
     let store: Arc<dyn ResultsStore> = sink;
     let incidents = store
-        .list_incidents(target_id, range, false, 100, 0)
+        .list_incidents(common::test_org_id(), target_id, range, false, 100, 0)
         .await
         .unwrap();
     assert_eq!(

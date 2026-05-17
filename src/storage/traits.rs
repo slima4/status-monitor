@@ -3,7 +3,7 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use crate::api::types::{StatusBreakdown, TagCount, TargetsSummary};
-use crate::domain::{CheckResult, CheckStatus, Incident, NewTarget, Target, TargetUpdate};
+use crate::domain::{CheckResult, CheckStatus, Incident, NewTarget, OrgId, Target, TargetUpdate};
 use crate::error::Result;
 
 #[async_trait]
@@ -19,40 +19,57 @@ pub struct TargetFilter {
     pub enabled: Option<bool>,
 }
 
+/// Operator-facing target repository. Every method is scoped to a single
+/// `org`: the caller resolves it from the request (`CurrentOrg`) and the
+/// implementation refuses to touch any other tenant's rows. The `org`
+/// parameter is non-optional precisely so "forgot to scope" is a compile
+/// error, not a cross-tenant data leak. Scheduler-wide (cross-org)
+/// enumeration is a different trait — see `storage::admin::AdminRepo`.
 #[async_trait]
 pub trait TargetStore: Send + Sync {
-    async fn list(&self, filter: TargetFilter) -> Result<Vec<Target>>;
+    async fn list(&self, org: OrgId, filter: TargetFilter) -> Result<Vec<Target>>;
     /// Total rows matching `filter` (ignoring `limit`/`offset`). Used to fill
     /// the `total` field of `PageEnvelope`.
-    async fn count(&self, filter: TargetFilter) -> Result<u64>;
-    async fn get(&self, id: Uuid) -> Result<Option<Target>>;
+    async fn count(&self, org: OrgId, filter: TargetFilter) -> Result<u64>;
+    async fn get(&self, org: OrgId, id: Uuid) -> Result<Option<Target>>;
     /// Create one target. `max_targets` is the plan cap; the INSERT is
     /// guarded by `(count) + 1 <= max_targets` so the bound holds even
     /// against a concurrent create (no check-then-act). Returns
     /// `AppError::QuotaExceeded` when the cap is reached.
-    async fn create(&self, new: NewTarget, max_targets: i64) -> Result<Target>;
-    async fn update(&self, id: Uuid, update: TargetUpdate) -> Result<Option<Target>>;
-    async fn delete(&self, id: Uuid) -> Result<bool>;
+    async fn create(&self, org: OrgId, new: NewTarget, max_targets: i64) -> Result<Target>;
+    async fn update(&self, org: OrgId, id: Uuid, update: TargetUpdate) -> Result<Option<Target>>;
+    async fn delete(&self, org: OrgId, id: Uuid) -> Result<bool>;
     /// Bulk create. Same atomic `(count) + items.len() <= max_targets`
     /// bound; either all rows insert or none do (`AppError::QuotaExceeded`).
-    async fn bulk_create(&self, items: Vec<NewTarget>, max_targets: i64) -> Result<Vec<Target>>;
-    async fn list_updated_since(&self, since: DateTime<Utc>) -> Result<Vec<Target>>;
+    async fn bulk_create(
+        &self,
+        org: OrgId,
+        items: Vec<NewTarget>,
+        max_targets: i64,
+    ) -> Result<Vec<Target>>;
+    async fn list_updated_since(&self, org: OrgId, since: DateTime<Utc>) -> Result<Vec<Target>>;
     /// Aggregate tag inventory across all targets. `prefix` filters tag names
     /// for autocomplete; `limit` caps the number of returned rows. Sorted by
     /// descending count, then alphabetical.
-    async fn list_tags(&self, prefix: Option<String>, limit: usize) -> Result<Vec<TagCount>>;
+    async fn list_tags(
+        &self,
+        org: OrgId,
+        prefix: Option<String>,
+        limit: usize,
+    ) -> Result<Vec<TagCount>>;
     /// Total number of distinct tags matching `prefix`.
-    async fn count_tags(&self, prefix: Option<String>) -> Result<u64>;
+    async fn count_tags(&self, org: OrgId, prefix: Option<String>) -> Result<u64>;
     /// Totals + enabled/disabled split for the dashboard.
-    async fn summary(&self) -> Result<TargetsSummary>;
+    async fn summary(&self, org: OrgId) -> Result<TargetsSummary>;
     /// Atomically enable or disable each id; returns the set that existed.
-    async fn set_enabled(&self, ids: &[Uuid], enabled: bool) -> Result<Vec<Uuid>>;
+    async fn set_enabled(&self, org: OrgId, ids: &[Uuid], enabled: bool) -> Result<Vec<Uuid>>;
     /// Atomically delete each id; returns the set that existed.
-    async fn delete_bulk(&self, ids: &[Uuid]) -> Result<Vec<Uuid>>;
+    async fn delete_bulk(&self, org: OrgId, ids: &[Uuid]) -> Result<Vec<Uuid>>;
     /// Adds `tags` to every named target; returns the set that existed.
-    async fn add_tags(&self, ids: &[Uuid], tags: &[String]) -> Result<Vec<Uuid>>;
+    async fn add_tags(&self, org: OrgId, ids: &[Uuid], tags: &[String]) -> Result<Vec<Uuid>>;
     /// Removes `tags` from every named target; returns the set that existed.
-    async fn remove_tags(&self, ids: &[Uuid], tags: &[String]) -> Result<Vec<Uuid>>;
+    async fn remove_tags(&self, org: OrgId, ids: &[Uuid], tags: &[String]) -> Result<Vec<Uuid>>;
+    /// Liveness probe for `/readyz` — connection-level, not tenant data.
     async fn ping(&self) -> Result<()>;
 }
 
@@ -92,10 +109,16 @@ impl UptimeStats {
     }
 }
 
+/// Operator-facing results repository. Org-scoped on every method for the
+/// same reason as [`TargetStore`]: the `org` is resolved from the request and
+/// the implementation never returns another tenant's check history. A bare
+/// `target_id` is not enough — a UUID guessed from another org must resolve to
+/// zero rows, not that org's data.
 #[async_trait]
 pub trait ResultsStore: Send + Sync {
     async fn list_results(
         &self,
+        org: OrgId,
         target_id: Uuid,
         range: TimeRange,
         limit: usize,
@@ -103,12 +126,13 @@ pub trait ResultsStore: Send + Sync {
     ) -> Result<Vec<CheckResult>>;
     /// Total rows for `target_id` in `range`. Used to fill the `total` field
     /// of `PageEnvelope`.
-    async fn count_results(&self, target_id: Uuid, range: TimeRange) -> Result<u64>;
-    async fn uptime(&self, target_id: Uuid, range: TimeRange) -> Result<UptimeStats>;
+    async fn count_results(&self, org: OrgId, target_id: Uuid, range: TimeRange) -> Result<u64>;
+    async fn uptime(&self, org: OrgId, target_id: Uuid, range: TimeRange) -> Result<UptimeStats>;
     /// Coalesce consecutive `down`/`error` results in `range` into incidents.
     /// `ongoing_only` filters out incidents that have already ended.
     async fn list_incidents(
         &self,
+        org: OrgId,
         target_id: Uuid,
         range: TimeRange,
         ongoing_only: bool,
@@ -117,6 +141,7 @@ pub trait ResultsStore: Send + Sync {
     ) -> Result<Vec<Incident>>;
     async fn count_incidents(
         &self,
+        org: OrgId,
         target_id: Uuid,
         range: TimeRange,
         ongoing_only: bool,
@@ -124,8 +149,12 @@ pub trait ResultsStore: Send + Sync {
     /// Per-status breakdown using each target's most recent observation in
     /// `range`. Targets with no observations in the range are omitted from
     /// the counts.
-    async fn current_status_breakdown(&self, range: TimeRange) -> Result<StatusBreakdown>;
+    async fn current_status_breakdown(
+        &self,
+        org: OrgId,
+        range: TimeRange,
+    ) -> Result<StatusBreakdown>;
     /// Aggregate uptime and incident count across all targets in `range`.
     /// Returns `(checks_total, checks_up, incident_count)`.
-    async fn last_n_summary(&self, range: TimeRange) -> Result<(u64, u64, u64)>;
+    async fn last_n_summary(&self, org: OrgId, range: TimeRange) -> Result<(u64, u64, u64)>;
 }

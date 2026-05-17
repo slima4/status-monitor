@@ -7,6 +7,7 @@ use crate::api::ApiError;
 use crate::api::page::{PageEnvelope, PageOfTagCount};
 use crate::app::AppState;
 use crate::error::Result;
+use crate::web::CurrentOrg;
 
 const TAGS_LIMIT_DEFAULT: usize = 100;
 const TAGS_LIMIT_MAX: usize = 1_000;
@@ -37,12 +38,13 @@ pub struct TagsQuery {
 )]
 pub async fn list_tags(
     State(state): State<AppState>,
+    CurrentOrg(org): CurrentOrg,
     Query(q): Query<TagsQuery>,
 ) -> Result<Json<PageOfTagCount>> {
     let limit = q.limit.unwrap_or(TAGS_LIMIT_DEFAULT).min(TAGS_LIMIT_MAX);
     let (items, total) = tokio::try_join!(
-        state.target_store.list_tags(q.q.clone(), limit),
-        state.target_store.count_tags(q.q.clone()),
+        state.target_store.list_tags(org, q.q.clone(), limit),
+        state.target_store.count_tags(org, q.q.clone()),
     )?;
     Ok(Json(PageEnvelope::new(items, total, limit as u32, 0)))
 }

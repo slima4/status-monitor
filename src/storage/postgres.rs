@@ -18,15 +18,16 @@ use crate::storage::locks::{advisory_xact_lock, org_lock_key};
 use crate::storage::postgres_secrets::{decrypt_in_place, encrypt_in_place};
 use crate::storage::traits::{TargetFilter, TargetStore};
 
-/// Org-scoped Postgres-backed target store. Every query binds
-/// `self.default_org_id` so reads, updates, and deletes are isolated to the
-/// owning organisation. Cross-tenant operations (e.g. scheduler-wide
+/// Org-scoped Postgres-backed target store. Every query binds the `org`
+/// passed by the caller (resolved from the request's `CurrentOrg`) so reads,
+/// updates, and deletes are isolated to that organisation. The store holds no
+/// ambient org of its own — a missing scope is a compile error, not a silent
+/// cross-tenant read. Cross-tenant operations (e.g. scheduler-wide
 /// enumeration) go through `crate::storage::admin::AdminRepo`, never through
 /// this type.
 pub struct PostgresTargetStore {
     pool: PgPool,
     cipher: Option<Arc<Cipher>>,
-    default_org_id: OrgId,
 }
 
 impl PostgresTargetStore {
@@ -54,16 +55,8 @@ impl PostgresTargetStore {
         Ok(pool)
     }
 
-    pub fn from_pool(pool: PgPool, cipher: Option<Arc<Cipher>>, default_org_id: OrgId) -> Self {
-        Self {
-            pool,
-            cipher,
-            default_org_id,
-        }
-    }
-
-    fn org_id(&self) -> Uuid {
-        self.default_org_id.0
+    pub fn from_pool(pool: PgPool, cipher: Option<Arc<Cipher>>) -> Self {
+        Self { pool, cipher }
     }
 
     pub fn pool(&self) -> &PgPool {
@@ -137,7 +130,7 @@ pub(crate) fn decode_target_row(row: TargetRow, cipher: Option<&Cipher>) -> Resu
 
 #[async_trait]
 impl TargetStore for PostgresTargetStore {
-    async fn list(&self, filter: TargetFilter) -> Result<Vec<Target>> {
+    async fn list(&self, org: OrgId, filter: TargetFilter) -> Result<Vec<Target>> {
         let limit = filter.limit.unwrap_or(100).min(10_000) as i64;
         let offset = filter.offset as i64;
         let rows: Vec<TargetRow> = sqlx::query_as::<_, TargetRow>(
@@ -151,7 +144,7 @@ impl TargetStore for PostgresTargetStore {
                ORDER BY created_at DESC
                LIMIT $4 OFFSET $5"#,
         )
-        .bind(self.org_id())
+        .bind(org.0)
         .bind(filter.enabled)
         .bind(filter.tag)
         .bind(limit)
@@ -162,14 +155,14 @@ impl TargetStore for PostgresTargetStore {
         self.rows_to_targets(rows)
     }
 
-    async fn count(&self, filter: TargetFilter) -> Result<u64> {
+    async fn count(&self, org: OrgId, filter: TargetFilter) -> Result<u64> {
         let row: (i64,) = sqlx::query_as(
             r#"SELECT count(*) FROM targets
                WHERE org_id = $1
                  AND ($2::bool IS NULL OR enabled = $2)
                  AND ($3::text IS NULL OR $3 = ANY(tags))"#,
         )
-        .bind(self.org_id())
+        .bind(org.0)
         .bind(filter.enabled)
         .bind(filter.tag)
         .fetch_one(&self.pool)
@@ -178,7 +171,7 @@ impl TargetStore for PostgresTargetStore {
         Ok(row.0.max(0) as u64)
     }
 
-    async fn get(&self, id: Uuid) -> Result<Option<Target>> {
+    async fn get(&self, org: OrgId, id: Uuid) -> Result<Option<Target>> {
         let row: Option<TargetRow> = sqlx::query_as::<_, TargetRow>(
             r#"SELECT id, name, check_spec, interval_secs, enabled, tags, alerts,
                       public_status, public_name, public_description, public_group, public_sort_order,
@@ -186,7 +179,7 @@ impl TargetStore for PostgresTargetStore {
                FROM targets WHERE id = $1 AND org_id = $2"#,
         )
         .bind(id)
-        .bind(self.org_id())
+        .bind(org.0)
         .fetch_optional(&self.pool)
         .await
         .context("get target by id")?;
@@ -196,7 +189,7 @@ impl TargetStore for PostgresTargetStore {
         }
     }
 
-    async fn create(&self, new: NewTarget, max_targets: i64) -> Result<Target> {
+    async fn create(&self, org: OrgId, new: NewTarget, max_targets: i64) -> Result<Target> {
         let check_json = self.encode_check(&new.check)?;
         let alerts_json = serde_json::to_value(&new.alerts).context("encoding alerts JSON")?;
         // A per-org advisory lock held across count+INSERT in one tx. The
@@ -205,11 +198,11 @@ impl TargetStore for PostgresTargetStore {
         // pass `+1 <= limit`, overshooting. This mirrors the owner-org and
         // invitation caps: lock the subject, then count, then write.
         let mut tx = self.pool.begin().await.context("create target: begin")?;
-        advisory_xact_lock(&mut *tx, &org_lock_key(OrgId(self.org_id())))
+        advisory_xact_lock(&mut *tx, &org_lock_key(org))
             .await
             .context("create target: advisory lock")?;
         let (current,): (i64,) = sqlx::query_as("SELECT count(*) FROM targets WHERE org_id = $1")
-            .bind(self.org_id())
+            .bind(org.0)
             .fetch_one(&mut *tx)
             .await
             .context("create target: count")?;
@@ -230,7 +223,7 @@ impl TargetStore for PostgresTargetStore {
                       public_status, public_name, public_description, public_group, public_sort_order,
                       created_at, updated_at"#,
         )
-        .bind(self.org_id())
+        .bind(org.0)
         .bind(&new.name)
         .bind(check_json)
         .bind(new.interval.as_secs() as i32)
@@ -249,7 +242,7 @@ impl TargetStore for PostgresTargetStore {
         self.decode_row(row)
     }
 
-    async fn update(&self, id: Uuid, update: TargetUpdate) -> Result<Option<Target>> {
+    async fn update(&self, org: OrgId, id: Uuid, update: TargetUpdate) -> Result<Option<Target>> {
         let check_json = update
             .check
             .as_ref()
@@ -293,7 +286,7 @@ impl TargetStore for PostgresTargetStore {
         .bind(update.public_description)
         .bind(update.public_group)
         .bind(update.public_sort_order)
-        .bind(self.org_id())
+        .bind(org.0)
         .fetch_optional(&self.pool)
         .await
         .context("update target")?;
@@ -303,17 +296,22 @@ impl TargetStore for PostgresTargetStore {
         }
     }
 
-    async fn delete(&self, id: Uuid) -> Result<bool> {
+    async fn delete(&self, org: OrgId, id: Uuid) -> Result<bool> {
         let res = sqlx::query("DELETE FROM targets WHERE id = $1 AND org_id = $2")
             .bind(id)
-            .bind(self.org_id())
+            .bind(org.0)
             .execute(&self.pool)
             .await
             .context("delete target")?;
         Ok(res.rows_affected() > 0)
     }
 
-    async fn bulk_create(&self, items: Vec<NewTarget>, max_targets: i64) -> Result<Vec<Target>> {
+    async fn bulk_create(
+        &self,
+        org: OrgId,
+        items: Vec<NewTarget>,
+        max_targets: i64,
+    ) -> Result<Vec<Target>> {
         if items.is_empty() {
             return Ok(Vec::new());
         }
@@ -351,11 +349,11 @@ impl TargetStore for PostgresTargetStore {
         let mut public_sort_order: Vec<i32> = Vec::with_capacity(len);
 
         let mut tx = self.pool.begin().await.context("bulk create: begin")?;
-        advisory_xact_lock(&mut *tx, &org_lock_key(OrgId(self.org_id())))
+        advisory_xact_lock(&mut *tx, &org_lock_key(org))
             .await
             .context("bulk create: advisory lock")?;
         let (current,): (i64,) = sqlx::query_as("SELECT count(*) FROM targets WHERE org_id = $1")
-            .bind(self.org_id())
+            .bind(org.0)
             .fetch_one(&mut *tx)
             .await
             .context("bulk create: count")?;
@@ -400,7 +398,7 @@ impl TargetStore for PostgresTargetStore {
                 .bind(&public_description)
                 .bind(&public_group)
                 .bind(&public_sort_order)
-                .bind(self.org_id())
+                .bind(org.0)
                 .fetch_all(&mut *tx)
                 .await
                 .context("bulk insert targets")?
@@ -433,7 +431,7 @@ impl TargetStore for PostgresTargetStore {
                 .bind(&public_description)
                 .bind(&public_group)
                 .bind(&public_sort_order)
-                .bind(self.org_id())
+                .bind(org.0)
                 .fetch_all(&mut *tx)
                 .await
                 .context("bulk insert targets")?
@@ -443,14 +441,14 @@ impl TargetStore for PostgresTargetStore {
         self.rows_to_targets(rows)
     }
 
-    async fn list_updated_since(&self, since: DateTime<Utc>) -> Result<Vec<Target>> {
+    async fn list_updated_since(&self, org: OrgId, since: DateTime<Utc>) -> Result<Vec<Target>> {
         let rows: Vec<TargetRow> = sqlx::query_as::<_, TargetRow>(
             r#"SELECT id, name, check_spec, interval_secs, enabled, tags, alerts,
                       public_status, public_name, public_description, public_group, public_sort_order,
                       created_at, updated_at
                FROM targets WHERE org_id = $1 AND updated_at > $2"#,
         )
-        .bind(self.org_id())
+        .bind(org.0)
         .bind(since)
         .fetch_all(&self.pool)
         .await
@@ -458,7 +456,12 @@ impl TargetStore for PostgresTargetStore {
         self.rows_to_targets(rows)
     }
 
-    async fn list_tags(&self, prefix: Option<String>, limit: usize) -> Result<Vec<TagCount>> {
+    async fn list_tags(
+        &self,
+        org: OrgId,
+        prefix: Option<String>,
+        limit: usize,
+    ) -> Result<Vec<TagCount>> {
         let prefix_pat = prefix.as_deref().map(|p| format!("{p}%"));
         let rows: Vec<(String, i64)> = sqlx::query_as(
             r#"SELECT tag, count(*) AS c
@@ -469,7 +472,7 @@ impl TargetStore for PostgresTargetStore {
                ORDER BY c DESC, tag ASC
                LIMIT $3"#,
         )
-        .bind(self.org_id())
+        .bind(org.0)
         .bind(prefix_pat)
         .bind(limit as i64)
         .fetch_all(&self.pool)
@@ -484,7 +487,7 @@ impl TargetStore for PostgresTargetStore {
             .collect())
     }
 
-    async fn count_tags(&self, prefix: Option<String>) -> Result<u64> {
+    async fn count_tags(&self, org: OrgId, prefix: Option<String>) -> Result<u64> {
         let prefix_pat = prefix.as_deref().map(|p| format!("{p}%"));
         let row: (i64,) = sqlx::query_as(
             r#"SELECT count(DISTINCT tag)
@@ -492,7 +495,7 @@ impl TargetStore for PostgresTargetStore {
                WHERE org_id = $1
                  AND ($2::text IS NULL OR tag LIKE $2)"#,
         )
-        .bind(self.org_id())
+        .bind(org.0)
         .bind(prefix_pat)
         .fetch_one(&self.pool)
         .await
@@ -500,14 +503,14 @@ impl TargetStore for PostgresTargetStore {
         Ok(row.0.max(0) as u64)
     }
 
-    async fn summary(&self) -> Result<TargetsSummary> {
+    async fn summary(&self, org: OrgId) -> Result<TargetsSummary> {
         let row: (i64, i64) = sqlx::query_as(
             r#"SELECT count(*) FILTER (WHERE TRUE),
                       count(*) FILTER (WHERE enabled)
                FROM targets
                WHERE org_id = $1"#,
         )
-        .bind(self.org_id())
+        .bind(org.0)
         .fetch_one(&self.pool)
         .await
         .context("targets summary")?;
@@ -520,7 +523,7 @@ impl TargetStore for PostgresTargetStore {
         })
     }
 
-    async fn set_enabled(&self, ids: &[Uuid], enabled: bool) -> Result<Vec<Uuid>> {
+    async fn set_enabled(&self, org: OrgId, ids: &[Uuid], enabled: bool) -> Result<Vec<Uuid>> {
         if ids.is_empty() {
             return Ok(Vec::new());
         }
@@ -530,14 +533,14 @@ impl TargetStore for PostgresTargetStore {
         )
         .bind(ids)
         .bind(enabled)
-        .bind(self.org_id())
+        .bind(org.0)
         .fetch_all(&self.pool)
         .await
         .context("bulk set_enabled")?;
         Ok(rows.into_iter().map(|(id,)| id).collect())
     }
 
-    async fn delete_bulk(&self, ids: &[Uuid]) -> Result<Vec<Uuid>> {
+    async fn delete_bulk(&self, org: OrgId, ids: &[Uuid]) -> Result<Vec<Uuid>> {
         if ids.is_empty() {
             return Ok(Vec::new());
         }
@@ -545,14 +548,14 @@ impl TargetStore for PostgresTargetStore {
             r#"DELETE FROM targets WHERE id = ANY($1) AND org_id = $2 RETURNING id"#,
         )
         .bind(ids)
-        .bind(self.org_id())
+        .bind(org.0)
         .fetch_all(&self.pool)
         .await
         .context("bulk delete")?;
         Ok(rows.into_iter().map(|(id,)| id).collect())
     }
 
-    async fn add_tags(&self, ids: &[Uuid], tags: &[String]) -> Result<Vec<Uuid>> {
+    async fn add_tags(&self, org: OrgId, ids: &[Uuid], tags: &[String]) -> Result<Vec<Uuid>> {
         if ids.is_empty() || tags.is_empty() {
             return Ok(Vec::new());
         }
@@ -568,14 +571,14 @@ impl TargetStore for PostgresTargetStore {
         )
         .bind(ids)
         .bind(tags)
-        .bind(self.org_id())
+        .bind(org.0)
         .fetch_all(&self.pool)
         .await
         .context("bulk add_tags")?;
         Ok(rows.into_iter().map(|(id,)| id).collect())
     }
 
-    async fn remove_tags(&self, ids: &[Uuid], tags: &[String]) -> Result<Vec<Uuid>> {
+    async fn remove_tags(&self, org: OrgId, ids: &[Uuid], tags: &[String]) -> Result<Vec<Uuid>> {
         if ids.is_empty() || tags.is_empty() {
             return Ok(Vec::new());
         }
@@ -592,7 +595,7 @@ impl TargetStore for PostgresTargetStore {
         )
         .bind(ids)
         .bind(tags)
-        .bind(self.org_id())
+        .bind(org.0)
         .fetch_all(&self.pool)
         .await
         .context("bulk remove_tags")?;

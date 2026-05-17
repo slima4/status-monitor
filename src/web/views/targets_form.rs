@@ -6,9 +6,9 @@ use uuid::Uuid;
 use crate::app::AppState;
 use crate::domain::{CheckSpec, ExpectedStatus, HttpMethod, Target};
 use crate::error::AppError;
-use crate::web::AuthedBrowser;
 use crate::web::assets::filters;
 use crate::web::error::WebResult;
+use crate::web::{AuthedBrowser, CurrentOrg};
 
 pub struct AuthFieldState {
     pub has_basic: bool,
@@ -130,12 +130,13 @@ pub async fn new_form(_auth: AuthedBrowser) -> FormPage {
 
 pub async fn edit_form(
     _auth: AuthedBrowser,
+    CurrentOrg(org): CurrentOrg,
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> WebResult<FormPage> {
     let target = state
         .target_store
-        .get(id)
+        .get(org, id)
         .await?
         .ok_or_else(|| AppError::not_found("TARGET_NOT_FOUND", "target not found"))?;
     Ok(FormPage {

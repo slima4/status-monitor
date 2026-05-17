@@ -2,9 +2,9 @@ id: no-raw-tenant-sql
 language: rust
 severity: error
 message: |-
-  Tenant-table SQL must include `org_id` in its WHERE clause. Either bind
-  `self.org_id()` (org-scoped repo) or add this file to the AdminRepo
-  allow-list in scripts/check_tenant_isolation.sh.
+  Tenant-table SQL must include `org_id` in its WHERE clause. Bind the
+  per-call `org` (resolved from the request's `CurrentOrg`) or add this file
+  to the AdminRepo allow-list in scripts/check_tenant_isolation.sh.
 note: |-
   Flagged tables: targets, incidents, incident_updates,
   maintenance_windows, maintenance_window_components, memberships,

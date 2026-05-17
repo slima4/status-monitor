@@ -9,10 +9,10 @@ use crate::app::AppState;
 use crate::domain::CheckResult;
 use crate::error::AppError;
 use crate::storage::{TimeRange, UptimeStats};
-use crate::web::AuthedBrowser;
 use crate::web::assets::filters;
 use crate::web::error::WebResult;
 use crate::web::views::{describe_check, fmt_ts};
+use crate::web::{AuthedBrowser, CurrentOrg};
 
 const RESULTS_PAGE_LIMIT: usize = 200;
 const RANGE_KEYS: [&str; 4] = ["1h", "24h", "7d", "30d"];
@@ -87,13 +87,14 @@ pub struct RangeOption {
 
 pub async fn index(
     _auth: AuthedBrowser,
+    CurrentOrg(org): CurrentOrg,
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
     Query(params): Query<DetailParams>,
 ) -> WebResult<DetailPage> {
     let target = state
         .target_store
-        .get(id)
+        .get(org, id)
         .await?
         .ok_or_else(|| AppError::not_found("TARGET_NOT_FOUND", "target not found"))?;
 
@@ -102,11 +103,13 @@ pub async fn index(
     let time_range = TimeRange { from, to };
 
     let (uptime, results, results_total) = tokio::try_join!(
-        state.results_store.uptime(target.id, time_range),
+        state.results_store.uptime(org, target.id, time_range),
         state
             .results_store
-            .list_results(target.id, time_range, RESULTS_PAGE_LIMIT, 0),
-        state.results_store.count_results(target.id, time_range),
+            .list_results(org, target.id, time_range, RESULTS_PAGE_LIMIT, 0),
+        state
+            .results_store
+            .count_results(org, target.id, time_range),
     )?;
 
     let last_status = results.first().map(|r| r.status.as_str()).unwrap_or("");

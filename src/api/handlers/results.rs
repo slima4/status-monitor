@@ -11,6 +11,16 @@ use crate::api::page::{PageEnvelope, PageOfCheckResult, PageOfIncident};
 use crate::app::AppState;
 use crate::error::{AppError, Result};
 use crate::storage::{TimeRange, UptimeStats};
+use crate::web::CurrentOrg;
+
+/// 404 used when a target id is absent from the caller's org. Returned only
+/// after the org-scoped `get` resolves to `None`, so a foreign tenant's UUID
+/// is indistinguishable from a non-existent one — no empty-vs-populated
+/// oracle. The `get` is issued concurrently with the (already org-scoped)
+/// results query so the cloak costs no extra round-trip on the hot path.
+fn target_not_found() -> AppError {
+    AppError::not_found(codes::TARGET_NOT_FOUND, "target not found")
+}
 
 const RESULTS_LIMIT_DEFAULT: usize = 1_000;
 const RESULTS_LIMIT_MAX: usize = 10_000;
@@ -86,16 +96,26 @@ impl RangeQuery {
 )]
 pub async fn list_results(
     State(state): State<AppState>,
+    CurrentOrg(org): CurrentOrg,
     Path(id): Path<Uuid>,
     Query(q): Query<RangeQuery>,
 ) -> Result<Json<PageOfCheckResult>> {
     let range = q.resolve()?;
     let limit = q.limit();
     let offset = q.offset;
-    let (items, total) = tokio::try_join!(
-        state.results_store.list_results(id, range, limit, offset),
-        state.results_store.count_results(id, range),
+    // The org-scoped `get` rides alongside the (also org-scoped) results
+    // queries: a foreign/unknown id still 404s, but the cloak adds no serial
+    // round-trip. Results are discarded unless the target resolves.
+    let (target, items, total) = tokio::try_join!(
+        state.target_store.get(org, id),
+        state
+            .results_store
+            .list_results(org, id, range, limit, offset),
+        state.results_store.count_results(org, id, range),
     )?;
+    if target.is_none() {
+        return Err(target_not_found());
+    }
     Ok(Json(PageEnvelope::new(
         items,
         total,
@@ -125,11 +145,18 @@ pub async fn list_results(
 )]
 pub async fn uptime(
     State(state): State<AppState>,
+    CurrentOrg(org): CurrentOrg,
     Path(id): Path<Uuid>,
     Query(q): Query<RangeQuery>,
 ) -> Result<Json<UptimeStats>> {
     let range = q.resolve()?;
-    let stats = state.results_store.uptime(id, range).await?;
+    let (target, stats) = tokio::try_join!(
+        state.target_store.get(org, id),
+        state.results_store.uptime(org, id, range),
+    )?;
+    if target.is_none() {
+        return Err(target_not_found());
+    }
     Ok(Json(stats))
 }
 
@@ -176,6 +203,7 @@ pub struct IncidentsQuery {
 )]
 pub async fn list_incidents(
     State(state): State<AppState>,
+    CurrentOrg(org): CurrentOrg,
     Path(id): Path<Uuid>,
     Query(q): Query<IncidentsQuery>,
 ) -> Result<Json<PageOfIncident>> {
@@ -184,14 +212,18 @@ pub async fn list_incidents(
         .limit
         .unwrap_or(INCIDENTS_LIMIT_DEFAULT)
         .min(INCIDENTS_LIMIT_MAX);
-    let (items, total) = tokio::try_join!(
+    let (target, items, total) = tokio::try_join!(
+        state.target_store.get(org, id),
         state
             .results_store
-            .list_incidents(id, range, q.ongoing_only, limit, q.offset),
+            .list_incidents(org, id, range, q.ongoing_only, limit, q.offset),
         state
             .results_store
-            .count_incidents(id, range, q.ongoing_only),
+            .count_incidents(org, id, range, q.ongoing_only),
     )?;
+    if target.is_none() {
+        return Err(target_not_found());
+    }
     Ok(Json(PageEnvelope::new(
         items,
         total,

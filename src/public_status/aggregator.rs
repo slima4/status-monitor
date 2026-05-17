@@ -190,7 +190,7 @@ impl OrgAggregator {
         let now = Utc::now();
         let target = self
             .target_store
-            .get(id)
+            .get(org, id)
             .await?
             .filter(|t| t.public_status)
             .ok_or_else(|| anyhow::anyhow!("component not public or not found"))?;
@@ -215,20 +215,18 @@ impl OrgAggregator {
 
     // ── private helpers ─────────────────────────────────────────────────────
 
-    async fn load_public_components(&self, _org: OrgId) -> Result<Vec<Target>> {
-        // `target_store` is currently org-scoped at construction time, so
-        // the `_org` parameter is informational here. It's plumbed in so the
-        // signature matches the rest of the aggregator's threaded `org_id`
-        // shape; a later refactor will lift the store onto per-call org
-        // scoping and the underscore will go away.
+    async fn load_public_components(&self, org: OrgId) -> Result<Vec<Target>> {
         let all = self
             .target_store
-            .list(crate::storage::TargetFilter {
-                limit: Some(10_000),
-                offset: 0,
-                tag: None,
-                enabled: None,
-            })
+            .list(
+                org,
+                crate::storage::TargetFilter {
+                    limit: Some(10_000),
+                    offset: 0,
+                    tag: None,
+                    enabled: None,
+                },
+            )
             .await?;
         Ok(all.into_iter().filter(|t| t.public_status).collect())
     }
