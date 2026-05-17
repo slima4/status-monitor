@@ -19,16 +19,19 @@ async fn status(app: axum::Router, path: &str) -> StatusCode {
     resp.status()
 }
 
-/// Targets list is a tenant-scoped endpoint. In both modes the in-memory
-/// store starts empty so the response is `200 OK` with `[]` — the handler
-/// must not 404 just because tenancy is on.
+/// Targets list is a tenant-scoped endpoint. Self-host resolves the org from
+/// the default and returns `200 OK` with `[]` (the empty in-memory store);
+/// SaaS rejects an anonymous request with 401 — the store is org-scoped, so a
+/// caller with no authenticated org cannot enumerate another tenant's targets.
+/// Pinning the exact status per mode catches a regression where the route
+/// silently 404s/500s in one mode that an `assert_ne!(404)` would miss.
 #[rstest]
-#[case::self_host(TenancyMode::SelfHost)]
-#[case::saas(TenancyMode::Saas)]
+#[case::self_host(TenancyMode::SelfHost, StatusCode::OK)]
+#[case::saas(TenancyMode::Saas, StatusCode::UNAUTHORIZED)]
 #[tokio::test]
-async fn list_targets_works_in_both_modes(#[case] mode: TenancyMode) {
+async fn list_targets_works_in_both_modes(#[case] mode: TenancyMode, #[case] expected: StatusCode) {
     let app = build_test_app(|cfg| mode.apply(cfg));
-    assert_eq!(status(app, "/api/v1/targets").await, StatusCode::OK);
+    assert_eq!(status(app, "/api/v1/targets").await, expected);
 }
 
 /// Dashboard summary is mounted in both modes. Self-host resolves the org
