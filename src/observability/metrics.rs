@@ -40,6 +40,11 @@ fn register_descriptions() {
         "Total check errors, labelled by kind"
     );
     describe_counter!(
+        "status_monitor_check_redirects_total",
+        "HTTP redirect hops, labelled by outcome \
+         (followed | limit_exceeded | invalid_location | blocked_scheme)"
+    );
+    describe_counter!(
         "status_monitor_circuit_breaker_state_changes_total",
         "Circuit breaker state transitions"
     );
@@ -122,6 +127,7 @@ fn register_descriptions() {
 pub mod names {
     pub const CHECKS_TOTAL: &str = "status_monitor_checks_total";
     pub const CHECK_ERRORS: &str = "status_monitor_checks_errors_total";
+    pub const CHECK_REDIRECTS: &str = "status_monitor_check_redirects_total";
     pub const BREAKER_STATE_CHANGES: &str = "status_monitor_circuit_breaker_state_changes_total";
     pub const STORAGE_WRITES: &str = "status_monitor_storage_writes_total";
     pub const STORAGE_DROPPED: &str = "status_monitor_storage_dropped_results_total";

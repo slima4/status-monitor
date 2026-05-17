@@ -156,3 +156,171 @@ async fn in_memory_sink_collects_results() {
     assert_eq!(sink.len(), 1);
     assert_eq!(sink.snapshot()[0].status, CheckStatus::Up);
 }
+
+// ── Redirect following (regression: apex domains 301 to www/https) ──────────
+
+use axum::http::header::LOCATION;
+use axum::response::IntoResponse;
+
+fn moved(code: StatusCode, to: &'static str) -> impl IntoResponse {
+    (code, [(LOCATION, to)])
+}
+
+#[tokio::test]
+async fn http_check_follows_redirect_to_up() {
+    let app = Router::new()
+        .route(
+            "/",
+            get(|| async { moved(StatusCode::MOVED_PERMANENTLY, "/health") }),
+        )
+        .route("/health", get(|| async { "pong" }));
+    let addr = spawn_router(app).await;
+
+    let client = test_client();
+    let url = Url::parse(&format!("http://{addr}/")).unwrap();
+    let mut check = default_http_check(url, ExpectedStatus::Exact(200));
+    check.follow_redirects = true;
+    check.max_redirects = 5;
+
+    let result = execute_http_check(Uuid::now_v7(), &check, &client).await;
+
+    assert_eq!(result.status, CheckStatus::Up);
+    assert_eq!(result.response_code, Some(200));
+    assert!(result.error.is_none());
+}
+
+#[tokio::test]
+async fn http_check_redirect_not_followed_is_down() {
+    let app = Router::new().route(
+        "/",
+        get(|| async { moved(StatusCode::MOVED_PERMANENTLY, "/health") }),
+    );
+    let addr = spawn_router(app).await;
+
+    let client = test_client();
+    let url = Url::parse(&format!("http://{addr}/")).unwrap();
+    // default_http_check leaves follow_redirects = false.
+    let check = default_http_check(url, ExpectedStatus::Exact(200));
+
+    let result = execute_http_check(Uuid::now_v7(), &check, &client).await;
+
+    assert_eq!(result.status, CheckStatus::Down);
+    assert_eq!(result.response_code, Some(301));
+    assert_eq!(result.error.as_deref(), Some("unexpected status 301"));
+}
+
+#[tokio::test]
+async fn http_check_follows_redirect_chain_within_budget() {
+    let app = Router::new()
+        .route("/a", get(|| async { moved(StatusCode::FOUND, "/b") }))
+        .route(
+            "/b",
+            get(|| async { moved(StatusCode::SEE_OTHER, "/health") }),
+        )
+        .route("/health", get(|| async { "pong" }));
+    let addr = spawn_router(app).await;
+
+    let client = test_client();
+    let url = Url::parse(&format!("http://{addr}/a")).unwrap();
+    let mut check = default_http_check(url, ExpectedStatus::Exact(200));
+    check.follow_redirects = true;
+    check.max_redirects = 5;
+
+    let result = execute_http_check(Uuid::now_v7(), &check, &client).await;
+
+    assert_eq!(result.status, CheckStatus::Up);
+    assert_eq!(result.response_code, Some(200));
+}
+
+#[tokio::test]
+async fn http_check_redirect_loop_hits_budget() {
+    let app = Router::new().route("/loop", get(|| async { moved(StatusCode::FOUND, "/loop") }));
+    let addr = spawn_router(app).await;
+
+    let client = test_client();
+    let url = Url::parse(&format!("http://{addr}/loop")).unwrap();
+    let mut check = default_http_check(url, ExpectedStatus::Exact(200));
+    check.follow_redirects = true;
+    check.max_redirects = 2;
+
+    let result = execute_http_check(Uuid::now_v7(), &check, &client).await;
+
+    assert_eq!(result.status, CheckStatus::Error);
+    assert_eq!(result.error.as_deref(), Some("too many redirects"));
+}
+
+#[tokio::test]
+async fn http_check_307_preserves_method_and_body() {
+    use axum::routing::post;
+
+    let app = Router::new()
+        .route(
+            "/start",
+            post(|| async { moved(StatusCode::TEMPORARY_REDIRECT, "/echo") }),
+        )
+        // GET would 405 here — proving the hop stayed POST.
+        .route(
+            "/echo",
+            post(|body: String| async move { format!("echo:{body}") }),
+        );
+    let addr = spawn_router(app).await;
+
+    let client = test_client();
+    let url = Url::parse(&format!("http://{addr}/start")).unwrap();
+    let mut check = default_http_check(url, ExpectedStatus::Exact(200));
+    check.method = status_monitor::domain::HttpMethod::Post;
+    check.body = Some("ping".to_string());
+    check.expected_body_contains = Some("echo:ping".to_string());
+    check.follow_redirects = true;
+    check.max_redirects = 5;
+
+    let result = execute_http_check(Uuid::now_v7(), &check, &client).await;
+
+    assert_eq!(result.status, CheckStatus::Up, "307 must keep POST + body");
+    assert_eq!(result.response_code, Some(200));
+}
+
+#[tokio::test]
+async fn http_check_strips_credentials_cross_origin() {
+    use axum::http::HeaderMap;
+
+    // Foreign origin: 200 only when NO Authorization header arrived.
+    let foreign = Router::new().route(
+        "/secure",
+        get(|headers: HeaderMap| async move {
+            if headers.contains_key(axum::http::header::AUTHORIZATION) {
+                (StatusCode::UNAUTHORIZED, "leaked")
+            } else {
+                (StatusCode::OK, "clean")
+            }
+        }),
+    );
+    let foreign_addr = spawn_router(foreign).await;
+
+    let origin = Router::new().route(
+        "/",
+        get(move || async move {
+            moved(
+                StatusCode::FOUND,
+                Box::leak(format!("http://{foreign_addr}/secure").into_boxed_str()),
+            )
+        }),
+    );
+    let origin_addr = spawn_router(origin).await;
+
+    let client = test_client();
+    let url = Url::parse(&format!("http://{origin_addr}/")).unwrap();
+    let mut check = default_http_check(url, ExpectedStatus::Exact(200));
+    check.bearer_token = Some("super-secret".to_string());
+    check.expected_body_contains = Some("clean".to_string());
+    check.follow_redirects = true;
+    check.max_redirects = 5;
+
+    let result = execute_http_check(Uuid::now_v7(), &check, &client).await;
+
+    assert_eq!(
+        result.status,
+        CheckStatus::Up,
+        "bearer token must not cross to a foreign origin"
+    );
+}

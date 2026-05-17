@@ -149,8 +149,8 @@ pub async fn get(
             "url": "https://example.com/healthz",
             "method": "GET",
             "timeout": 5000,
-            "follow_redirects": false,
-            "max_redirects": 0,
+            "follow_redirects": true,
+            "max_redirects": 5,
             "expected_status": {"kind": "exact", "value": 200},
             "headers": {},
             "verify_tls": true

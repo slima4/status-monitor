@@ -53,8 +53,11 @@ impl Default for HttpFields {
             url: String::new(),
             method: "GET",
             timeout_ms: 5_000,
-            follow_redirects: false,
-            max_redirects: 0,
+            // Follow by default: most real targets (apex domains, http→https)
+            // 301 to a canonical host, and a fresh monitor pointed at them
+            // should report Up, not Down on the redirect.
+            follow_redirects: true,
+            max_redirects: 5,
             expected_kind: "exact",
             expected_exact: 200,
             expected_range_min: 200,
