@@ -1,10 +1,10 @@
 {% extends "base.html" %}
-{% block title %}Targets · Status Monitor{% endblock %}
+{% block title %}Monitors · Status Monitor{% endblock %}
 {% block content %}
 <section class="space-y-4">
   <header class="flex items-center justify-between">
-    <h1 class="text-2xl font-semibold tracking-tight">Targets</h1>
-    <a href="/targets/new" class="rounded bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700">New target</a>
+    <h1 class="text-2xl font-semibold tracking-tight">Monitors</h1>
+    <a href="/targets/new" class="rounded bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700">New monitor</a>
   </header>
 
   <form id="targets-filter"
@@ -38,7 +38,7 @@
 
   <div class="overflow-x-auto rounded border bg-white">
     <table class="min-w-full text-sm">
-      <caption class="sr-only">Monitored targets with status, configuration, and recent activity.</caption>
+      <caption class="sr-only">Monitors with status, configuration, and recent activity.</caption>
       <thead class="border-b bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
         <tr>
           <th scope="col" class="px-3 py-2">Status</th>

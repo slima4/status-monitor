@@ -10,7 +10,7 @@ use crate::domain::{CheckResult, OrgId, Target};
 use crate::storage::{TargetFilter, TimeRange};
 use crate::web::assets::filters;
 use crate::web::error::WebResult;
-use crate::web::views::{describe_check, fmt_ts};
+use crate::web::views::{describe_check, fmt_human};
 use crate::web::{AuthedBrowser, CurrentOrg};
 
 const DEFAULT_LIMIT: usize = 50;
@@ -186,7 +186,7 @@ fn make_row(t: Target, last: Option<CheckResult>) -> TargetRow {
         last_status: last.as_ref().map(|r| r.status.as_str()).unwrap_or(""),
         last_at: last
             .as_ref()
-            .map(|r| fmt_ts(r.timestamp))
+            .map(|r| fmt_human(r.timestamp))
             .unwrap_or_default(),
         last_error: last.and_then(|r| r.error).unwrap_or_default(),
     }
@@ -227,7 +227,7 @@ mod tests {
         };
         let html = page.render().unwrap();
         assert!(html.starts_with("<!doctype html>"));
-        assert!(html.contains("Targets"));
+        assert!(html.contains("Monitors"));
         assert!(html.contains("api"));
         assert!(html.contains(r#"hx-get="/web/targets/list""#));
     }
@@ -267,7 +267,7 @@ mod tests {
             next_offset: None,
         };
         let html = partial.render().unwrap();
-        assert!(html.contains("No targets match"));
+        assert!(html.contains("No monitors match"));
     }
 
     #[test]

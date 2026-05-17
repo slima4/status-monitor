@@ -108,7 +108,7 @@ async fn targets_list_renders_filters_and_table_chrome() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     let html = body_text(resp).await;
-    assert!(html.contains("Targets"));
+    assert!(html.contains("Monitors"));
     assert!(html.contains(r#"id="targets-filter""#));
     assert!(html.contains(r#"hx-get="/web/targets/list""#));
     assert!(html.contains(r#"id="target-rows""#));
@@ -140,7 +140,7 @@ async fn new_target_form_renders_create_mode() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     let html = body_text(resp).await;
-    assert!(html.contains("New target"));
+    assert!(html.contains("New monitor"));
     assert!(html.contains(r#"data-action="/api/v1/targets""#));
     assert!(html.contains(r#"data-method="POST""#));
     assert!(html.contains(r#"data-mode="create""#));

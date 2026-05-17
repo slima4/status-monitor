@@ -8,9 +8,9 @@
      aria-live="polite"
      class="space-y-6">
 
-  <section class="grid gap-4 md:grid-cols-4">
+  <section class="grid gap-4 md:grid-cols-2">
     <div class="rounded border bg-white p-4">
-      <p class="text-xs uppercase tracking-wide text-slate-500">Targets</p>
+      <p class="text-xs uppercase tracking-wide text-slate-500">Monitors</p>
       <p class="mt-1 text-2xl font-semibold">{{ summary.targets.total }}</p>
       <p class="text-xs text-slate-500">
         {{ summary.targets.enabled }} enabled · {{ summary.targets.disabled }} disabled
@@ -23,19 +23,9 @@
         {{ summary.last_24h.checks_up }} / {{ summary.last_24h.checks_total }} checks
       </p>
     </div>
-    <div class="rounded border bg-white p-4">
-      <p class="text-xs uppercase tracking-wide text-slate-500">In-flight</p>
-      <p class="mt-1 text-2xl font-semibold">{{ summary.system.in_flight_checks }}</p>
-      <p class="text-xs text-slate-500">workers busy</p>
-    </div>
-    <div class="rounded border bg-white p-4">
-      <p class="text-xs uppercase tracking-wide text-slate-500">Queue depth</p>
-      <p class="mt-1 text-2xl font-semibold">{{ summary.system.result_queue_depth }}</p>
-      <p class="text-xs text-slate-500">results pending write</p>
-    </div>
   </section>
 
-  <section class="grid gap-4 md:grid-cols-2">
+  <section class="grid gap-4">
     <div class="rounded border bg-white p-4">
       <h2 class="text-sm font-medium text-slate-700">Current status</h2>
       <dl class="mt-2 grid grid-cols-5 gap-2 text-center text-sm">
@@ -61,20 +51,6 @@
         </div>
       </dl>
       <p class="mt-3 text-xs text-slate-500">Incidents (24h): {{ summary.last_24h.incidents }}</p>
-    </div>
-
-    <div class="rounded border bg-white p-4">
-      <h2 class="text-sm font-medium text-slate-700">System health</h2>
-      <dl class="mt-2 grid grid-cols-2 gap-y-1 text-sm">
-        <dt class="text-slate-500">In-flight checks</dt>
-        <dd class="text-right font-mono">{{ summary.system.in_flight_checks }}</dd>
-        <dt class="text-slate-500">Result queue depth</dt>
-        <dd class="text-right font-mono">{{ summary.system.result_queue_depth }}</dd>
-        <dt class="text-slate-500">Dropped results</dt>
-        <dd class="text-right font-mono">{{ summary.system.dropped_results_last_5m }}</dd>
-        <dt class="text-slate-500">Breakers open</dt>
-        <dd class="text-right font-mono">{{ summary.system.circuit_breakers_open }}</dd>
-      </dl>
     </div>
   </section>
 </div>

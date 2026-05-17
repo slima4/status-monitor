@@ -1,10 +1,11 @@
 {% extends "base.html" %}
-{% block title %}{% if form.mode == "create" %}New target{% else %}Edit target{% endif %} · Status Monitor{% endblock %}
+{% block title %}{% if form.mode == "create" %}New monitor{% else %}Edit monitor{% endif %} · Status Monitor{% endblock %}
 {% block content %}
 <section class="space-y-6">
   <header class="space-y-1">
+    <a href="/targets" class="inline-block text-sm text-slate-500 hover:text-slate-700">← Monitors</a>
     <h1 class="text-2xl font-semibold tracking-tight">
-      {% if form.mode == "create" %}New target{% else %}Edit {{ form.name }}{% endif %}
+      {% if form.mode == "create" %}New monitor{% else %}Edit {{ form.name }}{% endif %}
     </h1>
     <p class="text-sm text-slate-500">
       Submits JSON to <code class="font-mono">{{ form.submit_method }} {{ form.action }}</code>. Validation runs on the API.
@@ -44,7 +45,7 @@
             <input name="enabled" type="checkbox"{% if form.enabled %} checked{% endif %}>
             <span class="text-sm">Enabled</span>
           </label>
-          <p class="mt-1 text-xs text-slate-500">When off, the target is saved but not checked or alerted on.</p>
+          <p class="mt-1 text-xs text-slate-500">When off, the monitor is saved but not checked or alerted on.</p>
         </div>
       </div>
     </fieldset>

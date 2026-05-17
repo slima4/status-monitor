@@ -1,6 +1,7 @@
 use askama::Template;
 use askama_web::WebTemplate;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
+use serde::Deserialize;
 use uuid::Uuid;
 
 use crate::app::AppState;
@@ -112,23 +113,58 @@ pub struct FormPage {
     pub form: FormModel,
 }
 
-pub async fn new_form(_auth: AuthedBrowser) -> FormPage {
-    FormPage {
-        active_tab: "targets",
-        form: FormModel {
-            mode: "create",
-            id: String::new(),
-            action: "/api/v1/targets".into(),
-            submit_method: "POST",
-            name: String::new(),
-            interval_s: 60,
-            enabled: true,
-            tags_csv: String::new(),
-            check_type: "http",
-            http: HttpFields::default(),
-            tcp: TcpFields::default(),
-        },
+#[derive(Debug, Default, Deserialize)]
+pub struct NewParams {
+    /// When set, prefill the create form from an existing monitor (the
+    /// "Copy" action on the list) so similar monitors can be added fast.
+    #[serde(default)]
+    pub from: Option<Uuid>,
+}
+
+/// Whether `form_from_target` produces an edit form (PATCH the same monitor)
+/// or a copy (POST a new monitor seeded from an existing one).
+enum FormKind {
+    Edit,
+    Copy,
+}
+
+fn empty_create_form() -> FormModel {
+    FormModel {
+        mode: "create",
+        id: String::new(),
+        action: "/api/v1/targets".into(),
+        submit_method: "POST",
+        name: String::new(),
+        interval_s: 60,
+        enabled: true,
+        tags_csv: String::new(),
+        check_type: "http",
+        http: HttpFields::default(),
+        tcp: TcpFields::default(),
     }
+}
+
+pub async fn new_form(
+    _auth: AuthedBrowser,
+    CurrentOrg(org): CurrentOrg,
+    State(state): State<AppState>,
+    Query(params): Query<NewParams>,
+) -> WebResult<FormPage> {
+    let form = match params.from {
+        Some(id) => {
+            let target = state
+                .target_store
+                .get(org, id)
+                .await?
+                .ok_or_else(|| AppError::not_found("TARGET_NOT_FOUND", "monitor not found"))?;
+            form_from_target(target, FormKind::Copy)?
+        }
+        None => empty_create_form(),
+    };
+    Ok(FormPage {
+        active_tab: "targets",
+        form,
+    })
 }
 
 pub async fn edit_form(
@@ -141,17 +177,15 @@ pub async fn edit_form(
         .target_store
         .get(org, id)
         .await?
-        .ok_or_else(|| AppError::not_found("TARGET_NOT_FOUND", "target not found"))?;
+        .ok_or_else(|| AppError::not_found("TARGET_NOT_FOUND", "monitor not found"))?;
     Ok(FormPage {
         active_tab: "targets",
-        form: build_edit_form(target)?,
+        form: form_from_target(target, FormKind::Edit)?,
     })
 }
 
-fn build_edit_form(t: Target) -> Result<FormModel, AppError> {
+fn form_from_target(t: Target, kind: FormKind) -> Result<FormModel, AppError> {
     let tags_csv = t.tags.join(", ");
-    let action = format!("/api/v1/targets/{}", t.id);
-    let id = t.id.to_string();
 
     let (check_type, http, tcp) = match t.check {
         CheckSpec::Http(h) => ("http", http_fields_from(h), TcpFields::default()),
@@ -173,12 +207,29 @@ fn build_edit_form(t: Target) -> Result<FormModel, AppError> {
         }
     };
 
+    let (mode, id, action, submit_method, name) = match kind {
+        FormKind::Edit => (
+            "edit",
+            t.id.to_string(),
+            format!("/api/v1/targets/{}", t.id),
+            "PATCH",
+            t.name,
+        ),
+        FormKind::Copy => (
+            "create",
+            String::new(),
+            "/api/v1/targets".into(),
+            "POST",
+            format!("{} (copy)", t.name),
+        ),
+    };
+
     Ok(FormModel {
-        mode: "edit",
+        mode,
         id,
         action,
-        submit_method: "PATCH",
-        name: t.name,
+        submit_method,
+        name,
         interval_s: t.interval.as_secs(),
         enabled: t.enabled,
         tags_csv,
@@ -242,12 +293,15 @@ mod tests {
     use super::*;
     use crate::api::redaction::REDACTED;
 
-    #[tokio::test]
-    async fn new_form_renders_empty_create() {
-        let page = new_form(AuthedBrowser).await;
+    #[test]
+    fn new_form_renders_empty_create() {
+        let page = FormPage {
+            active_tab: "targets",
+            form: empty_create_form(),
+        };
         let html = page.render().unwrap();
         assert!(html.starts_with("<!doctype html>"));
-        assert!(html.contains("New target"));
+        assert!(html.contains("New monitor"));
         assert!(html.contains(r#"data-action="/api/v1/targets""#));
         assert!(html.contains(r#"data-method="POST""#));
         assert!(html.contains(r#"data-mode="create""#));
@@ -290,7 +344,7 @@ mod tests {
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
-        let form = build_edit_form(t).unwrap();
+        let form = form_from_target(t, FormKind::Edit).unwrap();
         assert!(form.http.auth.has_basic);
         assert!(form.http.auth.has_bearer);
         assert_eq!(form.submit_method, "PATCH");
@@ -328,7 +382,7 @@ mod tests {
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
-        let form = build_edit_form(t).unwrap();
+        let form = form_from_target(t, FormKind::Edit).unwrap();
         assert_eq!(form.check_type, "tcp");
         assert_eq!(form.tcp.host, "db.example.com");
         assert_eq!(form.tcp.port, 5432);
@@ -366,10 +420,47 @@ mod tests {
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
-        match build_edit_form(t) {
+        match form_from_target(t, FormKind::Edit) {
             Err(AppError::Unprocessable { .. }) => {}
             Ok(_) => panic!("expected Unprocessable"),
             Err(other) => panic!("expected Unprocessable, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn copy_form_seeds_create_from_existing() {
+        use crate::domain::TcpCheck;
+        use std::time::Duration;
+        let t = Target {
+            id: uuid::Uuid::nil(),
+            name: "db".into(),
+            check: CheckSpec::Tcp(TcpCheck {
+                host: "db.example.com".into(),
+                port: 5432,
+                timeout: Duration::from_millis(2_500),
+            }),
+            interval: Duration::from_secs(30),
+            enabled: true,
+            tags: vec!["prod".into()],
+            alerts: Default::default(),
+            public_status: false,
+            public_name: None,
+            public_description: None,
+            public_group: None,
+            public_sort_order: 0,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+        let form = form_from_target(t, FormKind::Copy).unwrap();
+        assert_eq!(form.mode, "create");
+        assert_eq!(form.submit_method, "POST");
+        assert_eq!(form.action, "/api/v1/targets");
+        assert!(form.id.is_empty());
+        assert_eq!(form.name, "db (copy)");
+        // Check config carried over so the copy is a real duplicate.
+        assert_eq!(form.check_type, "tcp");
+        assert_eq!(form.tcp.host, "db.example.com");
+        assert_eq!(form.tcp.port, 5432);
+        assert_eq!(form.tags_csv, "prod");
     }
 }

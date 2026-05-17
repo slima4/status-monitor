@@ -11,7 +11,7 @@ use crate::error::AppError;
 use crate::storage::{TimeRange, UptimeStats};
 use crate::web::assets::filters;
 use crate::web::error::WebResult;
-use crate::web::views::{describe_check, fmt_ts};
+use crate::web::views::{describe_check, fmt_human, fmt_ts};
 use crate::web::{AuthedBrowser, CurrentOrg};
 
 const RESULTS_PAGE_LIMIT: usize = 200;
@@ -56,6 +56,8 @@ pub struct DetailPage {
     pub range_options: Vec<RangeOption>,
     pub from_iso: String,
     pub to_iso: String,
+    pub from_human: String,
+    pub to_human: String,
 }
 
 pub struct UptimeStatsView {
@@ -96,7 +98,7 @@ pub async fn index(
         .target_store
         .get(org, id)
         .await?
-        .ok_or_else(|| AppError::not_found("TARGET_NOT_FOUND", "target not found"))?;
+        .ok_or_else(|| AppError::not_found("TARGET_NOT_FOUND", "monitor not found"))?;
 
     let range_key = resolve_range_key(params.range.as_deref());
     let (from, to) = resolve_window(range_key, params.from, params.to);
@@ -136,6 +138,8 @@ pub async fn index(
         range_options: build_range_options(range_key),
         from_iso: fmt_ts(from),
         to_iso: fmt_ts(to),
+        from_human: fmt_human(from),
+        to_human: fmt_human(to),
     })
 }
 
@@ -174,7 +178,7 @@ fn build_range_options(active: &'static str) -> Vec<RangeOption> {
 impl From<CheckResult> for ResultRow {
     fn from(r: CheckResult) -> Self {
         Self {
-            timestamp: fmt_ts(r.timestamp),
+            timestamp: fmt_human(r.timestamp),
             status: r.status.as_str(),
             duration_ms: r.duration_ms,
             response_code: r.response_code.map(|c| c.to_string()).unwrap_or_default(),
@@ -219,6 +223,8 @@ mod tests {
             range_options: build_range_options("24h"),
             from_iso: "2026-05-12T12:00:00Z".into(),
             to_iso: "2026-05-13T12:00:00Z".into(),
+            from_human: "2026-05-12 12:00 UTC".into(),
+            to_human: "2026-05-13 12:00 UTC".into(),
         }
     }
 
