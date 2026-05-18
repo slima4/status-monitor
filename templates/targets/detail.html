@@ -5,7 +5,7 @@
   <header class="space-y-2">
     <a href="/targets" class="inline-block text-sm text-slate-500 hover:text-slate-700">← Monitors</a>
     <div class="flex flex-wrap items-center gap-3">
-      <h1 class="text-3xl font-bold tracking-tight text-slate-900">{{ name }}</h1>
+      <h1 class="page-title">{{ name }}</h1>
       {% if last_status == "up" %}
         <span class="status-badge status-badge--up">up</span>
       {% else if last_status == "down" %}
