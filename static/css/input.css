@@ -113,6 +113,14 @@
     .btn-ghost          { @apply rounded-xl border-2 border-slate-200 hover:bg-slate-100; }
     .btn-ghost--danger  { @apply border-red-200 text-red-600 hover:bg-red-50; }
 
+    /* App-shell nav (base.html), the chrome on every authenticated page.
+       `--active` only swaps weight/colour for the current tab; no hover
+       shift on the active item (it's already where you are). One source
+       so the shell follows the same restyle edit as everything else. */
+    .nav-brand          { @apply font-semibold tracking-tight; }
+    .nav-link           { @apply text-sm text-slate-500 hover:text-slate-700; }
+    .nav-link--active   { @apply font-medium text-slate-900 hover:text-slate-900; }
+
     /* Status pill for the landing trust strip. `--ok` / `--warn` only swap
        the fill; the ink edge + chunky radius are shared so the cartoon
        language stays consistent whatever the backend state. */

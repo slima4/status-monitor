@@ -31,34 +31,34 @@
     </a>
     <header class="border-b bg-white">
         <nav aria-label="Primary" class="container mx-auto flex items-center gap-6 px-4 py-3">
-            <a href="/" class="font-semibold tracking-tight">Status Monitor</a>
+            <a href="/" class="nav-brand">Status Monitor</a>
             {% if active_tab != "login" && active_tab != "onboarding" && active_tab != "recover" %}
             <a href="/"{% if active_tab == "dashboard" %} aria-current="page"{% endif %}
-               class="text-sm{% if active_tab == "dashboard" %} font-medium text-slate-900{% else %} text-slate-500 hover:text-slate-700{% endif %}">Dashboard</a>
+               class="nav-link{% if active_tab == "dashboard" %} nav-link--active{% endif %}">Dashboard</a>
             <a href="/targets"{% if active_tab == "targets" %} aria-current="page"{% endif %}
-               class="text-sm{% if active_tab == "targets" %} font-medium text-slate-900{% else %} text-slate-500 hover:text-slate-700{% endif %}">Monitors</a>
-            <a href="/docs" class="text-sm text-slate-500 hover:text-slate-700">API docs</a>
+               class="nav-link{% if active_tab == "targets" %} nav-link--active{% endif %}">Monitors</a>
+            <a href="/docs" class="nav-link">API docs</a>
             <div class="ml-auto flex items-center gap-4">
               <a href="/settings/account"{% if active_tab == "account" %} aria-current="page"{% endif %}
-                 class="text-sm{% if active_tab == "account" %} font-medium text-slate-900{% else %} text-slate-500 hover:text-slate-700{% endif %}">Account</a>
+                 class="nav-link{% if active_tab == "account" %} nav-link--active{% endif %}">Account</a>
               <a href="/settings/usage"{% if active_tab == "usage" %} aria-current="page"{% endif %}
-                 class="text-sm{% if active_tab == "usage" %} font-medium text-slate-900{% else %} text-slate-500 hover:text-slate-700{% endif %}">Usage</a>
+                 class="nav-link{% if active_tab == "usage" %} nav-link--active{% endif %}">Usage</a>
               <a href="/settings/status-page"{% if active_tab == "status_page" %} aria-current="page"{% endif %}
-                 class="text-sm{% if active_tab == "status_page" %} font-medium text-slate-900{% else %} text-slate-500 hover:text-slate-700{% endif %}">Status page</a>
+                 class="nav-link{% if active_tab == "status_page" %} nav-link--active{% endif %}">Status page</a>
               <a href="/settings/notifications"{% if active_tab == "notifications" %} aria-current="page"{% endif %}
-                 class="text-sm{% if active_tab == "notifications" %} font-medium text-slate-900{% else %} text-slate-500 hover:text-slate-700{% endif %}">Notifications</a>
+                 class="nav-link{% if active_tab == "notifications" %} nav-link--active{% endif %}">Notifications</a>
               <a href="/settings/api-tokens"{% if active_tab == "settings" %} aria-current="page"{% endif %}
-                 class="text-sm{% if active_tab == "settings" %} font-medium text-slate-900{% else %} text-slate-500 hover:text-slate-700{% endif %}">Settings</a>
+                 class="nav-link{% if active_tab == "settings" %} nav-link--active{% endif %}">Settings</a>
               <button type="button"
                       hx-post="/auth/logout"
                       hx-headers='{"X-Requested-With":"status-monitor"}'
                       hx-on::after-request="window.location.href='/login'"
-                      class="rounded border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100">
+                      class="btn-ghost px-2.5 py-1 text-xs font-medium text-slate-700">
                 Log out
               </button>
             </div>
             {% else %}
-            <a href="/docs" class="ml-auto text-sm text-slate-500 hover:text-slate-700">API docs</a>
+            <a href="/docs" class="nav-link ml-auto">API docs</a>
             {% endif %}
         </nav>
     </header>

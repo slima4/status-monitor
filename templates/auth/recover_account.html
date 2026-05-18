@@ -12,7 +12,7 @@
     </p>
   </header>
   <a href="/login"
-     class="sticker-btn inline-block bg-slate-900 px-4 py-2 text-sm font-medium text-white transition-transform hover:-translate-y-0.5 hover:bg-slate-700">
+     class="sticker-btn sticker-btn--primary inline-block px-4 py-2 text-sm font-medium transition-transform hover:-translate-y-0.5">
     Go to sign in
   </a>
   {% else %}
@@ -30,7 +30,7 @@
         hx-swap="none">
     <input type="hidden" name="token" value="{{ token }}">
     <button type="submit"
-            class="sticker-btn bg-slate-900 px-4 py-2 text-sm font-medium text-white transition-transform hover:-translate-y-0.5 hover:bg-slate-700">
+            class="sticker-btn sticker-btn--primary px-4 py-2 text-sm font-medium transition-transform hover:-translate-y-0.5">
       Restore my account
     </button>
   </form>
