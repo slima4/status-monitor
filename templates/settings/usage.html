@@ -3,13 +3,13 @@
 {% block content %}
 <section class="space-y-6">
   <header class="space-y-1">
-    <h1 class="text-2xl font-semibold tracking-tight">Usage &amp; quotas</h1>
+    <h1 class="page-title">Usage &amp; quotas</h1>
     <p class="text-sm text-slate-500">
       Plan: <span class="font-medium text-slate-900">{{ plan_name }}</span>
     </p>
   </header>
 
-  <div class="space-y-4 rounded border bg-white p-5">
+  <div class="sticker-card space-y-4 p-5">
     {% for b in bars %}
     <div>
       <div class="mb-1 flex items-baseline justify-between">
@@ -24,8 +24,8 @@
   </div>
 
   <div class="grid gap-4 sm:grid-cols-2">
-    <div class="rounded border bg-white p-5">
-      <h2 class="mb-3 text-sm font-semibold tracking-tight">Policy</h2>
+    <div class="sticker-card p-5">
+      <h2 class="panel-label mb-3">Policy</h2>
       <dl class="space-y-1.5 text-sm text-slate-600">
         <div class="flex justify-between"><dt>Minimum check interval</dt><dd class="tabular-nums">{{ min_check_interval_secs }} seconds</dd></div>
         <div class="flex justify-between"><dt>Result retention</dt><dd class="tabular-nums">{{ retention_days }} days</dd></div>
@@ -34,8 +34,8 @@
       </dl>
     </div>
 
-    <div class="rounded border bg-white p-5">
-      <h2 class="mb-3 text-sm font-semibold tracking-tight">Rate limits <span class="font-normal text-slate-400">(per minute)</span></h2>
+    <div class="sticker-card p-5">
+      <h2 class="panel-label mb-3">Rate limits <span class="font-normal normal-case text-slate-400">(per minute)</span></h2>
       <dl class="space-y-1.5 text-sm text-slate-600">
         <div class="flex justify-between"><dt>API writes</dt><dd class="tabular-nums">{{ api_writes_per_minute }}</dd></div>
         <div class="flex justify-between"><dt>API reads</dt><dd class="tabular-nums">{{ api_reads_per_minute }}</dd></div>

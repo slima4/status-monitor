@@ -17,7 +17,7 @@
       <td class="px-4 py-2 align-top font-mono text-xs text-slate-500">{{ s.ip_short }}</td>
       <td class="px-4 py-2 text-right">
         {% if s.is_current %}
-        <span class="rounded bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">This device</span>
+        <span class="status-badge status-badge--up">This device</span>
         {% else %}
         <button type="button"
                 hx-delete="/api/v1/me/sessions/{{ s.id }}"

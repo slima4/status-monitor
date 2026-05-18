@@ -3,7 +3,7 @@
 {% block content %}
 <section class="space-y-6">
   <header class="space-y-1">
-    <h1 class="text-2xl font-semibold tracking-tight">API tokens</h1>
+    <h1 class="page-title">API tokens</h1>
     <p class="text-sm text-slate-500">
       Bearer tokens for scripting against <code>/api/v1/*</code>. The full token
       is shown <strong>once</strong> when you create it — store it now.
@@ -16,13 +16,13 @@
         hx-headers='{"X-Requested-With":"status-monitor"}'
         hx-target="#token-result"
         hx-swap="innerHTML"
-        class="flex flex-wrap items-center gap-2 rounded border bg-white p-4">
+        class="sticker-card flex flex-wrap items-center gap-2 p-4">
     <label class="sr-only" for="token-name">Token name</label>
     <input id="token-name" name="name" type="text" required minlength="1" maxlength="80"
            placeholder="CI deploy, my laptop, …"
            class="flex-1 rounded border px-3 py-1.5 text-sm">
     <button type="submit"
-            class="rounded bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700">
+            class="sticker-btn sticker-btn--primary px-3 py-1.5 text-sm font-medium">
       Create token
     </button>
   </form>
@@ -33,7 +33,7 @@
        hx-get="/web/partials/settings/api-tokens"
        hx-trigger="load, every 60s, tokens:refresh from:body"
        hx-swap="innerHTML"
-       class="rounded border bg-white">
+       class="sticker-card overflow-hidden">
     <p class="px-4 py-3 text-sm text-slate-500">Loading…</p>
   </div>
 

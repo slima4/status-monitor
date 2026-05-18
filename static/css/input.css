@@ -100,6 +100,11 @@
         border-color: var(--color-ink);
         box-shadow: 4px 4px 0 0 var(--color-ink);
     }
+    /* Fill for a raised sticker control. One modifier per intent so the
+       brand/destructive colour is named once, never re-typed per call site
+       (mirrors .btn-ghost--danger). Padding/size stays at the call site. */
+    .sticker-btn--primary { @apply bg-emerald-600 text-white hover:bg-emerald-700; }
+    .sticker-btn--danger  { @apply bg-rose-600    text-white hover:bg-rose-700;   }
 
     /* Flat secondary control (Edit/Cancel/toggle…) — the quiet sibling of
        .sticker-btn: same chunky radius + 2px edge, no ink, no raised
@@ -163,12 +168,13 @@
     .stat-tile--muted .stat-tile__label { @apply text-slate-400; }
     .stat-tile--muted .stat-tile__value { @apply text-slate-300; }
 
-    /* Monitor status badge fills. The base `.status-badge` (shape only)
-       lives in the earlier components block; these modifiers are the single
-       source for the *monitor* status palette — every list/detail/result
-       row picks one by meaning, so green/red never drifts vs emerald/rose
-       again. (Settings + public-status chips still inline their own pairs;
-       folded in when those surfaces are restyled.) Mirrors .stat-tile--. */
+    /* Status badge fills. The base `.status-badge` (shape only) lives in
+       the earlier components block; these modifiers are the single source
+       for the internal-app status palette — every Monitors row and Settings
+       chip picks one by meaning, so green/red never drifts vs emerald/rose
+       again. (The public status page is intentionally separate: it's a
+       flat, brand-themed surface with its own view-supplied palette, not
+       this cartoon one.) Mirrors .stat-tile--. */
     .status-badge--up       { @apply bg-emerald-100 text-emerald-800; }
     .status-badge--down     { @apply bg-rose-100    text-rose-800;    }
     .status-badge--degraded { @apply bg-amber-100   text-amber-800;   }
@@ -176,6 +182,12 @@
     .status-badge--none     { @apply bg-slate-100   text-slate-500;   }
     .status-badge--disabled { @apply bg-slate-200   text-slate-700;   }
     .status-badge--tag      { @apply bg-slate-100   text-slate-700;   }
+
+    /* One 90-day history cell on the public status page. Shape only — the
+       per-day state colour is the view-supplied class (public's own flat
+       palette, not the cartoon .status-badge system). Defined once so the
+       static prefix isn't repeated 90×/component in every 30s fragment. */
+    .day-cell { @apply h-9 rounded-sm; }
 
     /* Live "we never stop checking" heartbeat. The EKG path is drawn with a
        long dash that scrolls left → reads as a continuous monitor sweep,

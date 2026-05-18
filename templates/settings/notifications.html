@@ -4,7 +4,7 @@
 <section class="space-y-6">
   <header class="flex flex-wrap items-start justify-between gap-3">
     <div class="space-y-1">
-      <h1 class="text-2xl font-semibold tracking-tight">Notification channels</h1>
+      <h1 class="page-title">Notification channels</h1>
       <p class="text-sm text-slate-500">
         Slack, generic webhook or Telegram destinations. Bind them to monitors
         from the monitor's <em>Alerts</em> section to get Down / Recovered
@@ -12,7 +12,7 @@
       </p>
     </div>
     <a href="/settings/notifications/new"
-       class="rounded bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700">
+       class="sticker-btn sticker-btn--primary px-3 py-1.5 text-sm font-medium">
       Add channel
     </a>
   </header>
@@ -21,7 +21,7 @@
        hx-get="/web/partials/settings/notifications"
        hx-trigger="load, every 60s, channels:refresh from:body"
        hx-swap="innerHTML"
-       class="rounded border bg-white">
+       class="sticker-card overflow-hidden">
     <p class="px-4 py-3 text-sm text-slate-500">Loading…</p>
   </div>
 

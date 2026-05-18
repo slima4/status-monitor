@@ -3,7 +3,7 @@
 {% block content %}
 <section class="space-y-6">
   <header class="space-y-1">
-    <h1 class="text-2xl font-semibold tracking-tight">Status page settings</h1>
+    <h1 class="page-title">Status page settings</h1>
     <p class="text-sm text-slate-500">
       Branding and visibility for your public status page. Logo, brand colour
       and about text only — there is no per-page custom CSS.
@@ -11,12 +11,12 @@
   </header>
 
   {% if let Some(url) = s.status_url %}
-  <div class="flex flex-wrap items-center gap-3 rounded border bg-white p-4 text-sm">
+  <div class="sticker-card flex flex-wrap items-center gap-3 p-4 text-sm">
     <span class="text-slate-500">Your status page is at</span>
     <a href="{{ url }}" target="_blank" rel="noopener"
        class="font-medium text-slate-900 underline decoration-dotted">{{ url }} ↗</a>
     {% if !s.public_status_enabled %}
-    <span class="rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">
+    <span class="status-badge status-badge--degraded">
       Disabled — visitors get 404 until you enable it below
     </span>
     {% endif %}
@@ -35,7 +35,7 @@
         hx-headers='{"X-Requested-With":"status-monitor"}'
         hx-target="#form-result"
         hx-swap="innerHTML"
-        class="space-y-6 rounded border bg-white p-5">
+        class="sticker-card space-y-6 p-5">
 
     <label class="flex items-start gap-3">
       <input type="checkbox" name="public_status_enabled" class="mt-1"
@@ -92,15 +92,15 @@
 
     <div class="flex items-center gap-3">
       <button type="submit"
-              class="rounded bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700">
+              class="sticker-btn sticker-btn--primary px-3 py-1.5 text-sm font-medium">
         Save changes
       </button>
       <span id="form-result" aria-live="polite" class="text-sm"></span>
     </div>
   </form>
 
-  <div class="space-y-3 rounded border bg-white p-5">
-    <h2 class="text-sm font-semibold">Logo</h2>
+  <div class="sticker-card space-y-3 p-5">
+    <h2 class="panel-label">Logo</h2>
     <div id="logo-box" class="flex items-center gap-4">
       {% if let Some(logo) = s.logo_url %}
       <img src="{{ logo }}" alt="Current logo"
@@ -109,7 +109,7 @@
               hx-delete="/api/v1/orgs/{{ org_id }}/status-page/logo"
               hx-headers='{"X-Requested-With":"status-monitor"}'
               hx-on::after-request="if(event.detail.successful) location.reload()"
-              class="rounded border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100">
+              class="btn-ghost px-2.5 py-1 text-xs font-medium text-slate-700">
         Remove logo
       </button>
       {% else %}
@@ -125,7 +125,7 @@
              accept="image/png,image/jpeg,image/webp"
              class="text-sm">
       <button type="submit"
-              class="rounded border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-100">
+              class="btn-ghost px-3 py-1.5 text-sm font-medium text-slate-700">
         Upload
       </button>
       <span class="text-xs text-slate-500">PNG / JPEG / WebP. Oversized images are downscaled.</span>

@@ -13,13 +13,13 @@
     <tr>
       <td class="px-4 py-2 align-top text-slate-700">{{ c.name }}</td>
       <td class="px-4 py-2 align-top">
-        <span class="rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600">{{ c.kind }}</span>
+        <span class="status-badge status-badge--tag">{{ c.kind }}</span>
       </td>
       <td class="px-4 py-2 align-top">
         {% if c.enabled %}
-        <span class="text-xs font-medium text-emerald-700">Enabled</span>
+        <span class="status-badge status-badge--up">Enabled</span>
         {% else %}
-        <span class="text-xs font-medium text-slate-400">Disabled</span>
+        <span class="status-badge status-badge--disabled">Disabled</span>
         {% endif %}
       </td>
       <td class="px-4 py-2 align-top text-slate-700">{{ c.created }}</td>

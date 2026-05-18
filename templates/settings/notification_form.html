@@ -4,7 +4,7 @@
 <section class="space-y-6">
   <header class="space-y-1">
     <a href="/settings/notifications" class="inline-block text-sm text-slate-500 hover:text-slate-700">← Notification channels</a>
-    <h1 class="text-2xl font-semibold tracking-tight">
+    <h1 class="page-title">
       {% if form.mode == "create" %}New notification channel{% else %}Edit {{ form.name }}{% endif %}
     </h1>
     <p class="text-sm text-slate-500">
@@ -22,7 +22,7 @@
     <div id="form-errors" role="alert" aria-live="polite"
          class="hidden rounded border border-red-300 bg-red-50 p-3 text-sm text-red-800"></div>
 
-    <fieldset class="space-y-3 rounded border bg-white p-4">
+    <fieldset class="sticker-card space-y-3 p-5">
       <legend class="px-1 text-sm font-medium">Basic</legend>
       <label class="block">
         <span class="text-xs text-slate-500">Name</span>
@@ -46,7 +46,7 @@
       </div>
     </fieldset>
 
-    <fieldset class="space-y-3 rounded border bg-white p-4" data-config>
+    <fieldset class="sticker-card space-y-3 p-5" data-config>
       <legend class="px-1 text-sm font-medium">Transport</legend>
 
       {% if form.mode != "create" %}
@@ -101,11 +101,11 @@
 
     <div class="flex gap-3">
       <button type="submit"
-              class="rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700">
+              class="sticker-btn sticker-btn--primary px-4 py-2 text-sm font-medium">
         {% if form.mode == "create" %}Create{% else %}Save changes{% endif %}
       </button>
       <a href="/settings/notifications"
-         class="rounded border px-4 py-2 text-sm hover:bg-slate-100">Cancel</a>
+         class="btn-ghost px-4 py-2 text-sm">Cancel</a>
     </div>
   </form>
 </section>
