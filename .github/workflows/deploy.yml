@@ -22,6 +22,12 @@ name: deploy
 #   DEPLOY_KNOWN_HOSTS  pinned host key line(s) from `ssh-keyscan <host>`
 #                       — pins the server identity so the run cannot be MITM'd
 #                       (no StrictHostKeyChecking=off anywhere below)
+#
+# Optional repo secrets — when all three are set, the deploy upserts them
+# into the server .env and brings up the metrics sidecar; unset = skipped:
+#   GRAFANA_CLOUD_PROM_URL   Grafana Cloud remote_write endpoint
+#   GRAFANA_CLOUD_PROM_USER  Grafana Cloud numeric instance id
+#   GRAFANA_CLOUD_API_TOKEN  token scoped metrics:write (sensitive)
 
 on:
   workflow_dispatch:
@@ -104,9 +110,19 @@ jobs:
           # Lowercase only the repo (GHCR requires it); OCI tags are
           # case-sensitive so the tag is passed through verbatim.
           NEW_IMAGE="$(echo "${REGISTRY}/${IMAGE_NAME}" | tr '[:upper:]' '[:lower:]'):${IMAGE_TAG}"
+          # Grafana Cloud metrics creds (optional). Inlined into the remote
+          # command env like NEW_IMAGE — GitHub masks registered secret
+          # values in the run log; no `set -x` is enabled around them. Unset
+          # secrets pass through as empty and the remote skips the whole
+          # block. The token is written to the server .env (same trust tier
+          # as the KEK already there), never committed.
           ssh -T -i ~/.ssh/id_deploy -o IdentitiesOnly=yes \
               "${DEPLOY_USER}@${DEPLOY_HOST}" \
-              "NEW_IMAGE='${NEW_IMAGE}' REMIGRATE='${REMIGRATE}' HEAD_SHA='${HEAD_SHA}' bash -s" <<'REMOTE'
+              "NEW_IMAGE='${NEW_IMAGE}' REMIGRATE='${REMIGRATE}' HEAD_SHA='${HEAD_SHA}' \
+               GRAFANA_CLOUD_PROM_URL='${{ secrets.GRAFANA_CLOUD_PROM_URL }}' \
+               GRAFANA_CLOUD_PROM_USER='${{ secrets.GRAFANA_CLOUD_PROM_USER }}' \
+               GRAFANA_CLOUD_API_TOKEN='${{ secrets.GRAFANA_CLOUD_API_TOKEN }}' \
+               bash -s" <<'REMOTE'
           set -euo pipefail
 
           # Fail closed: only the two known values are accepted; anything else
@@ -150,6 +166,56 @@ jobs:
           # Keep the 10 most recent backups; prune the rest so deploys don't litter.
           ls -1t .env.bak.* 2>/dev/null | tail -n +11 | xargs -r rm -f
 
+          # --- managed Grafana Cloud metrics env (optional) -----------------
+          # Same write contract as the image bump: cp backup FIRST, then a
+          # single awk pass reprints EVERY line (never grep -v | append |
+          # mv), replacing each managed key in place or appending it if
+          # absent. Values arrive via the remote environment (awk ENVIRON
+          # / printenv) so they are byte-exact (slash/equals/plus safe) and
+          # never enter argv or a `set -x` trace; the run log masks the
+          # registered secrets. The whole block is skipped unless all three
+          # are set (a half-config must not write empty keys or start a
+          # crash-looping sidecar). NOTE: a secret value containing a
+          # single quote would break the ssh-arg quoting above — Grafana
+          # tokens/URL/id never contain one (same assumption as NEW_IMAGE).
+          if [ -n "${GRAFANA_CLOUD_PROM_URL:-}" ] \
+             && [ -n "${GRAFANA_CLOUD_PROM_USER:-}" ] \
+             && [ -n "${GRAFANA_CLOUD_API_TOKEN:-}" ]; then
+            cp .env ".env.bak.$(date +%s).grafana"
+            # NR (record count) is trailing-newline-agnostic, unlike wc -l:
+            # a .env without a final newline must not false-abort the roll.
+            before=$(awk 'END { print NR }' .env)
+            awk '
+              BEGIN {
+                m["GRAFANA_CLOUD_PROM_URL"]  = ENVIRON["GRAFANA_CLOUD_PROM_URL"]
+                m["GRAFANA_CLOUD_PROM_USER"] = ENVIRON["GRAFANA_CLOUD_PROM_USER"]
+                m["GRAFANA_CLOUD_API_TOKEN"] = ENVIRON["GRAFANA_CLOUD_API_TOKEN"]
+              }
+              {
+                for (k in m) if ($0 ~ ("^" k "=")) { print k "=" m[k]; seen[k] = 1; next }
+                print
+              }
+              END { for (k in m) if (!seen[k]) print k "=" m[k] }
+            ' .env > .env.next
+            mv .env.next .env
+            after=$(awk 'END { print NR }' .env)
+            # 0..+3 lines may be appended (keys absent before); anything
+            # outside that means the reprint dropped/duplicated a line.
+            if [ "$after" -lt "$before" ] || [ "$after" -gt "$((before + 3))" ]; then
+              echo "::error::.env line count out of range after grafana upsert (${before} -> ${after})"
+              exit 1
+            fi
+            # Authoritative check: each key present EXACTLY once with the
+            # exact value (catches a missed append or a stray duplicate
+            # that the coarse line-count bound could mask).
+            for k in GRAFANA_CLOUD_PROM_URL GRAFANA_CLOUD_PROM_USER GRAFANA_CLOUD_API_TOKEN; do
+              n=$(grep -cxF "${k}=$(printenv "$k")" .env || true)
+              [ "$n" = 1 ] || { echo "::error::${k} not written exactly once to .env (count=${n})"; exit 1; }
+            done
+            # No prune here — the image-bump prune above already bounds
+            # .env.bak.* to the 10 newest each deploy.
+          fi
+
           # --- pull the new image FIRST -------------------------------------
           # Slow, network-fragile step. Do it while the OLD container still
           # serves: if the ssh session dies here the site stays up on the old
@@ -171,6 +237,20 @@ jobs:
           # Scope the recreate to the app so a compose change never silently
           # recreates postgres/caddy as a side effect of the roll.
           docker compose up -d --no-build status-monitor
+
+          # Metrics sidecar: profile-gated, scoped to `alloy` so the app /
+          # postgres / caddy are never recreated as a side effect. Same
+          # all-three-creds gate as the .env upsert. --force-recreate so a
+          # credential rotation in this deploy actually takes effect
+          # (without it `up -d` keeps the old container + stale env); it
+          # recreates ONLY alloy — a few seconds of metrics gap, no app
+          # impact.
+          if [ -n "${GRAFANA_CLOUD_PROM_URL:-}" ] \
+             && [ -n "${GRAFANA_CLOUD_PROM_USER:-}" ] \
+             && [ -n "${GRAFANA_CLOUD_API_TOKEN:-}" ]; then
+            docker compose --profile metrics up -d --no-build --force-recreate alloy
+          fi
+
           docker compose ps
           REMOTE
 
