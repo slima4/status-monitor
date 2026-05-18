@@ -248,16 +248,49 @@ a zone, reload with no downtime:
 docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile
 ```
 
-### Scraping metrics from Prometheus
+### Metrics
 
-Metrics are at `http://status-monitor:9090/metrics` on the **internal docker
-network**. The simplest setup: add a Prometheus service to the same
-docker-compose stack. The compose file has a commented-out example you can
-uncomment.
+The in-binary Prometheus endpoint is at `http://status-monitor:9090/metrics`
+on the **internal docker network**. It has no auth, so it is never
+published to the host (`expose`, not `ports`) and must never be served on
+the public domain. The service binds it on `0.0.0.0:9090` *inside* the
+container (`STATUS_MONITOR_SERVER__METRICS_BIND` in `docker-compose.yml`)
+so a sidecar container can reach it over the internal network.
 
-If you must scrape from outside the host, use a separate Caddy site with
-its own basic_auth and an aggressive IP allowlist — never expose `/metrics`
-on the public domain.
+#### Ship to Grafana Cloud (optional)
+
+A Grafana Alloy sidecar can scrape that endpoint and remote-write it to
+Grafana Cloud. It is **off by default** and only starts under the
+`metrics` compose profile.
+
+1. In Grafana Cloud, create an access-policy token scoped to
+   `metrics:write`, and note your Prometheus remote-write URL and numeric
+   instance id (Connections → Prometheus).
+2. Set `GRAFANA_CLOUD_PROM_URL`, `GRAFANA_CLOUD_PROM_USER`,
+   `GRAFANA_CLOUD_API_TOKEN` in `.env` (see `.env.example`). The token is
+   a secret: it stays in `.env` (gitignored), is passed only via the
+   container environment, and is redacted by Alloy from its own config
+   endpoint. Nothing secret is written into `config.alloy`.
+3. Start (or restart) the stack with the profile:
+
+   ```bash
+   docker compose --profile metrics up -d
+   ```
+
+4. Verify within ~15 s (one scrape interval): in Grafana Cloud Explore,
+   `up{job="status-monitor"}` should be `1`, and the `status_monitor_*`
+   series should appear. For the full view, import the dashboard against
+   the Grafana Cloud Prometheus datasource — import steps and the
+   datasource binding are in `dashboards/grafana/README.md`.
+
+The sidecar is decoupled: if Alloy is stopped or fails, the service and
+its `/metrics` endpoint are unaffected — only remote shipping pauses
+(Alloy resumes from its on-disk WAL on restart). Scraping with your own
+Prometheus instead of Alloy also works — point it at
+`status-monitor:9090` on the internal network. Never expose `/metrics`
+on the public domain; if you must scrape from off-host, front it with a
+separate Caddy site carrying its own basic_auth and a strict IP
+allowlist.
 
 ## Testing the TLS flow without rate-limit pain
 
@@ -439,5 +472,6 @@ monitored targets on a single host.
 | `Caddyfile` | Caddy v2 reverse proxy config (operator + wildcard status) |
 | `Dockerfile.caddy` | Custom Caddy image (Hetzner DNS-01 + rate-limit plugins) |
 | `docker-compose.yml` | Service definitions for the full stack |
+| `config.alloy` | Grafana Alloy config for the optional `metrics` profile (scrape + remote-write to Grafana Cloud) |
 | `.env.example` | Template for `.env` (commit this; never commit `.env`) |
 | `README.md` | This file |

@@ -1,0 +1,47 @@
+// Grafana Alloy — ship status-monitor metrics to Grafana Cloud.
+//
+// This runs as an opt-in sidecar in docker-compose.yml under the
+// "metrics" profile. The default `docker compose up -d` does NOT start
+// it; enable with `docker compose --profile metrics up -d`.
+//
+// Credentials come only from the container environment (set in .env,
+// which is gitignored). Nothing secret is written in this file. The
+// `password` argument is a secret-typed value, so Alloy redacts it from
+// its own /-/config endpoint and UI.
+
+// Scrape the in-binary Prometheus endpoint over the internal docker
+// network. The service binds metrics on 0.0.0.0:9090 inside the
+// container (set via STATUS_MONITOR_SERVER__METRICS_BIND in compose) so
+// a separate container can reach it; the port is never published to the
+// host.
+prometheus.scrape "status_monitor" {
+  targets = [{
+    __address__ = "status-monitor:9090",
+  }]
+  forward_to      = [prometheus.remote_write.grafana_cloud.receiver]
+  job_name        = "status-monitor"
+  scrape_interval = "15s"
+}
+
+// Remote-write to Grafana Cloud Prometheus. URL and credentials are
+// environment-specific and supplied via the container env:
+//   GRAFANA_CLOUD_PROM_URL   e.g. https://prometheus-prod-XX-<zone>.grafana.net/api/prom/push
+//   GRAFANA_CLOUD_PROM_USER  the numeric instance / stack id
+//   GRAFANA_CLOUD_API_TOKEN  an access policy token with metrics:write
+prometheus.remote_write "grafana_cloud" {
+  endpoint {
+    url = sys.env("GRAFANA_CLOUD_PROM_URL")
+
+    basic_auth {
+      username = sys.env("GRAFANA_CLOUD_PROM_USER")
+      password = sys.env("GRAFANA_CLOUD_API_TOKEN")
+    }
+  }
+
+  // Identify this sender so multiple instances don't collide in Grafana
+  // Cloud. Driven by GRAFANA_CLOUD_INSTANCE (set per host in .env);
+  // falls back to a sane default when unset.
+  external_labels = {
+    instance = coalesce(sys.env("GRAFANA_CLOUD_INSTANCE"), "status-monitor"),
+  }
+}

@@ -74,6 +74,12 @@ services:
       STATUS_MONITOR_STORAGE__CLICKHOUSE__DATABASE: monitor
       STATUS_MONITOR_SECURITY__CREDENTIALS_KEK_BASE64: ${STATUS_MONITOR_CREDENTIALS_KEK_BASE64}
       STATUS_MONITOR_OBSERVABILITY__LOG_FORMAT: json
+      # Bind metrics on all interfaces *inside* the container so the
+      # optional Alloy sidecar (a separate container) can scrape it over
+      # the internal docker network. Still never published to the host:
+      # there is no `ports:` mapping for 9090, only `expose`. /metrics
+      # has no auth, so it must stay internal-only.
+      STATUS_MONITOR_SERVER__METRICS_BIND: 0.0.0.0:9090
       # Tenancy / public-status surface. Defaults are self-host (single org,
       # /status on the operator host). For the SaaS wildcard surface set
       # these in .env — see .env.example "Per-org status pages (SaaS)".
@@ -149,18 +155,35 @@ services:
       timeout: 5s
       retries: 5
 
-  # Optional: uncomment to enable internal Prometheus scraping
-  # prometheus:
-  #   image: prom/prometheus:latest
-  #   restart: unless-stopped
-  #   expose:
-  #     - "9091"
-  #   volumes:
-  #     - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
-  #     - prometheus_data:/prometheus
-  #   command:
-  #     - '--config.file=/etc/prometheus/prometheus.yml'
-  #     - '--storage.tsdb.retention.time=30d'
+  # Optional: ship metrics to Grafana Cloud via a Grafana Alloy sidecar.
+  # Off by default — only starts under the "metrics" profile:
+  #   docker compose --profile metrics up -d
+  # Requires GRAFANA_CLOUD_PROM_URL / _PROM_USER / _API_TOKEN in .env.
+  # Scrapes status-monitor:9090 on the internal network and remote-writes
+  # to Grafana Cloud; nothing new is exposed to the host.
+  alloy:
+    # Pinned for reproducible production deploys; bump deliberately.
+    image: grafana/alloy:v1.16.1
+    restart: unless-stopped
+    profiles: ["metrics"]
+    command:
+      - run
+      - --disable-reporting
+      - --storage.path=/var/lib/alloy/data
+      - /etc/alloy/config.alloy
+    environment:
+      GRAFANA_CLOUD_PROM_URL: ${GRAFANA_CLOUD_PROM_URL}
+      GRAFANA_CLOUD_PROM_USER: ${GRAFANA_CLOUD_PROM_USER}
+      GRAFANA_CLOUD_API_TOKEN: ${GRAFANA_CLOUD_API_TOKEN}
+      # Distinguishes this sender in Grafana Cloud; set per host if you
+      # run more than one so series don't collide.
+      GRAFANA_CLOUD_INSTANCE: ${GRAFANA_CLOUD_INSTANCE:-status-monitor}
+    volumes:
+      - ./config.alloy:/etc/alloy/config.alloy:ro
+      - alloy_data:/var/lib/alloy/data
+    depends_on:
+      status-monitor:
+        condition: service_started
 
 volumes:
   caddy_data:
@@ -168,4 +191,4 @@ volumes:
   caddy_logs:
   postgres_data:
   clickhouse_data:
-  # prometheus_data:
+  alloy_data:

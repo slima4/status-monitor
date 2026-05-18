@@ -128,6 +128,18 @@ STATUS_MONITOR_SERVER__METRICS_BIND=0.0.0.0:9090 \
 
 There is no built-in auth on the API port. Front it with a proxy or keep it on a private network. The ready-made Caddy stack under [`deployment/`](#production-deployment-with-caddy--basic-auth) does this for you.
 
+## Metrics shipping (Grafana Cloud)
+
+The Prometheus `/metrics` endpoint can be shipped to Grafana Cloud by a
+Grafana Alloy sidecar. It is **opt-in**: the compose stack only starts it
+under the `metrics` profile (`docker compose --profile metrics up -d`),
+so the default deployment is unchanged. Credentials are read from `.env`
+(gitignored) and never written into `deployment/config.alloy`.
+
+`deployment/README.md` ("Metrics") is the authoritative setup, including
+how to obtain the Grafana Cloud URL/token, the internal-network bind, the
+ready-made dashboard, and how to verify ingestion.
+
 ## Migrations
 
 - Postgres: `migrations/postgres/*.sql`, applied at startup via `sqlx::migrate!` (tracked in `_sqlx_migrations`)
@@ -141,6 +153,7 @@ No external migrator. The app owns its schema lifecycle symmetrically.
 - Per-check memory: small (a tokio task + an in-flight hyper request + bookkeeping)
 - The practical ceiling is set by file descriptors and ephemeral ports, not RAM
 - At 50k concurrent checks against external targets, RSS sits around 200-400 MB depending on response sizes
+- The optional `metrics` profile adds a Grafana Alloy container (~100 MB RSS plus a small bounded remote-write WAL volume) — account for it when sizing the host if you enable it
 
 ## Graceful shutdown
 
