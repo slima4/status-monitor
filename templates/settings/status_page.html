@@ -136,10 +136,15 @@
     <div class="space-y-1">
       <h2 class="panel-label">Public components</h2>
       <p class="text-sm text-slate-500">
-        Choose which monitors appear on the public page, rename them for
-        visitors, group them, and drag to reorder. Changes save automatically.
-        A blank public name shows the real monitor name.
+        Each monitor can appear on your public status page as a component.
+        Changes save automatically.
       </p>
+      <ul class="space-y-1 text-xs text-slate-500">
+        <li><strong class="font-medium text-slate-600">Public</strong> — show this monitor on the public page (off keeps it and its incidents private).</li>
+        <li><strong class="font-medium text-slate-600">Public name</strong> — what visitors see. Leave blank to show the monitor's real name.</li>
+        <li><strong class="font-medium text-slate-600">Group</strong> — optional heading that buckets components into sections on the page (e.g. “API”, “Web”). Blank components appear under “Ungrouped”.</li>
+        <li><strong class="font-medium text-slate-600">Reorder</strong> — drag the ⠿ handle (or focus it and press ↑/↓) to set the order shown publicly.</li>
+      </ul>
     </div>
     <div id="status-components"
          hx-get="/web/partials/settings/status-page/components"

@@ -9,28 +9,32 @@
 {% else %}
 <div class="hidden bg-slate-50 px-4 py-2 text-xs uppercase tracking-wide text-slate-500 sm:grid sm:grid-cols-[1.5rem_1fr_4rem_1fr_1fr] sm:gap-3">
   <span aria-hidden="true"></span>
-  <span>Monitor</span>
-  <span>Public</span>
-  <span>Public name</span>
-  <span>Group</span>
+  <span title="The monitor's real (operator-only) name.">Monitor</span>
+  <span title="Show this monitor on the public status page.">Public</span>
+  <span title="Name shown to visitors. Blank = the real monitor name.">Public name</span>
+  <span title="Section heading on the page. Blank = Ungrouped.">Group</span>
 </div>
 <div id="components-rows" class="divide-y divide-slate-100">
   {% for row in rows %}
   <div data-component-row data-id="{{ row.id }}" draggable="true"
        class="grid grid-cols-1 gap-2 px-4 py-3 sm:grid-cols-[1.5rem_1fr_4rem_1fr_1fr] sm:items-center sm:gap-3">
     <button type="button" data-drag-handle aria-label="Reorder {{ row.name }}"
+            title="Drag to reorder, or focus and press ↑/↓"
             class="cursor-move select-none text-slate-400 hover:text-slate-600">⠿</button>
-    <span class="truncate font-medium text-slate-700" title="{{ row.name }}">{{ row.name }}</span>
+    <span class="truncate font-medium text-slate-700" title="Real monitor name: {{ row.name }}">{{ row.name }}</span>
     <label class="inline-flex items-center gap-2">
       <input type="checkbox" data-field="public_status"{% if row.public_status %} checked{% endif %}
-             aria-label="Show {{ row.name }} on the public status page">
+             aria-label="Show {{ row.name }} on the public status page"
+             title="Show this monitor on the public status page">
       <span class="text-xs text-slate-500 sm:hidden">Show publicly</span>
     </label>
     <input type="text" data-field="public_name" value="{{ row.public_name }}" maxlength="100"
            placeholder="{{ row.name }}" aria-label="Public name for {{ row.name }}"
+           title="Name shown to visitors. Blank shows the real monitor name ({{ row.name }})."
            class="w-full rounded border px-2 py-1 text-sm">
     <input type="text" data-field="public_group" value="{{ row.public_group }}" maxlength="100"
            placeholder="Ungrouped" aria-label="Group for {{ row.name }}"
+           title="Section heading on the public page. Blank = shown under “Ungrouped”."
            class="w-full rounded border px-2 py-1 text-sm">
   </div>
   {% endfor %}
