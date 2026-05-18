@@ -132,6 +132,25 @@
     </form>
   </div>
 
+  <div class="space-y-3">
+    <div class="space-y-1">
+      <h2 class="panel-label">Public components</h2>
+      <p class="text-sm text-slate-500">
+        Choose which monitors appear on the public page, rename them for
+        visitors, group them, and drag to reorder. Changes save automatically.
+        A blank public name shows the real monitor name.
+      </p>
+    </div>
+    <div id="status-components"
+         hx-get="/web/partials/settings/status-page/components"
+         hx-trigger="load"
+         hx-swap="innerHTML"
+         class="sticker-card overflow-hidden">
+      <p class="px-4 py-3 text-sm text-slate-500">Loading…</p>
+    </div>
+  </div>
+
+  <script defer src="{{ "js/ui/status_components.js"|asset }}"></script>
   <script>
     // The API tolerates the checkbox encoding json-enc produces (string
     // "on" / omitted); no request rewriting needed — just surface the result.

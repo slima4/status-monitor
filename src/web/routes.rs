@@ -66,6 +66,10 @@ pub fn routes(cfg: &AppConfig) -> Router<AppState> {
             "/web/partials/settings/api-tokens",
             get(views::auth::settings::api_tokens_partial),
         )
+        .route(
+            "/web/partials/settings/status-page/components",
+            get(views::auth::settings::status_page_components_partial),
+        )
         .route("/terms", get(views::legal::terms))
         .route("/privacy", get(views::legal::privacy))
         .route("/cookies", get(views::legal::cookies))

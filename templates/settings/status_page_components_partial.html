@@ -1,0 +1,39 @@
+{# Curation rows for the public status page. Every monitor in the org is
+   listed; the toggle flips public exposure, the inputs are the public
+   overlay, and the drag handle reorders. status_components.js autosaves
+   each change via PATCH /api/v1/targets/{id} and persists the drag order. #}
+{% if rows.is_empty() %}
+<p class="px-4 py-6 text-center text-sm text-slate-500">
+  No monitors yet. <a href="/targets/new" class="underline">Create one</a> first.
+</p>
+{% else %}
+<div class="hidden bg-slate-50 px-4 py-2 text-xs uppercase tracking-wide text-slate-500 sm:grid sm:grid-cols-[1.5rem_1fr_4rem_1fr_1fr] sm:gap-3">
+  <span class="sr-only">Reorder</span>
+  <span>Monitor</span>
+  <span>Public</span>
+  <span>Public name</span>
+  <span>Group</span>
+</div>
+<div id="components-rows" class="divide-y divide-slate-100">
+  {% for row in rows %}
+  <div data-component-row data-id="{{ row.id }}" draggable="true"
+       class="grid grid-cols-1 gap-2 px-4 py-3 sm:grid-cols-[1.5rem_1fr_4rem_1fr_1fr] sm:items-center sm:gap-3">
+    <button type="button" data-drag-handle aria-label="Reorder {{ row.name }}"
+            class="cursor-move select-none text-slate-400 hover:text-slate-600">⠿</button>
+    <span class="truncate font-medium text-slate-700" title="{{ row.name }}">{{ row.name }}</span>
+    <label class="inline-flex items-center gap-2">
+      <input type="checkbox" data-field="public_status"{% if row.public_status %} checked{% endif %}
+             aria-label="Show {{ row.name }} on the public status page">
+      <span class="text-xs text-slate-500 sm:hidden">Show publicly</span>
+    </label>
+    <input type="text" data-field="public_name" value="{{ row.public_name }}" maxlength="100"
+           placeholder="{{ row.name }}" aria-label="Public name for {{ row.name }}"
+           class="w-full rounded border px-2 py-1 text-sm">
+    <input type="text" data-field="public_group" value="{{ row.public_group }}" maxlength="100"
+           placeholder="Ungrouped" aria-label="Group for {{ row.name }}"
+           class="w-full rounded border px-2 py-1 text-sm">
+  </div>
+  {% endfor %}
+</div>
+<p id="components-status" class="px-4 py-2 text-xs text-slate-400" aria-live="polite"></p>
+{% endif %}

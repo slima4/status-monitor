@@ -229,6 +229,7 @@ pub mod settings {
     use crate::app::AppState;
     use crate::auth::{account, api_tokens, session as session_store};
     use crate::error::AppError;
+    use crate::storage::TargetFilter;
     use crate::web::assets::filters;
     use crate::web::auth::{CurrentOrg, Session};
     use crate::web::error::WebResult;
@@ -436,6 +437,67 @@ pub mod settings {
             s,
         }
         .into_response())
+    }
+
+    /// One monitor as a candidate public component. `name` is the real
+    /// (operator-only) monitor name; the public page shows `public_name`
+    /// when set and the real name otherwise — the template warns about
+    /// that fallback so internal naming isn't leaked unintentionally.
+    pub struct StatusComponentRow {
+        pub id: String,
+        pub name: String,
+        pub public_status: bool,
+        pub public_name: String,
+        pub public_group: String,
+    }
+
+    #[derive(Template, WebTemplate)]
+    #[template(path = "settings/status_page_components_partial.html")]
+    pub struct StatusComponentsPartial {
+        pub rows: Vec<StatusComponentRow>,
+    }
+
+    /// `GET /web/partials/settings/status-page/components`. Every monitor in
+    /// the org: public ones first in the public page's own order (group →
+    /// sort key → name, matching the aggregator), private ones after by
+    /// name. Both are listed together — the row toggle flips exposure;
+    /// `PATCH /api/v1/targets/{id}` (same auth as the API) saves each edit.
+    pub async fn status_page_components_partial(
+        State(state): State<AppState>,
+        org: Result<CurrentOrg, AppError>,
+    ) -> WebResult<Response> {
+        let org = match resolve_org(org, "/settings/status-page") {
+            Ok(o) => o,
+            Err(resp) => return Ok(*resp),
+        };
+        let filter = TargetFilter {
+            limit: None,
+            offset: 0,
+            tag: None,
+            enabled: None,
+        };
+        let mut targets = state.target_store.list(org, filter).await?;
+        // Public first, then within public the aggregator's exact order
+        // (group → sort_order → name) so this list matches the live page;
+        // private monitors trail, by name.
+        targets.sort_by(|a, b| {
+            (!a.public_status)
+                .cmp(&!b.public_status)
+                .then_with(|| a.public_group.cmp(&b.public_group))
+                .then_with(|| a.public_sort_order.cmp(&b.public_sort_order))
+                .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+        });
+        let rows = targets
+            .into_iter()
+            .map(|t| StatusComponentRow {
+                id: t.id.to_string(),
+                name: t.name,
+                public_status: t.public_status,
+                public_name: t.public_name.unwrap_or_default(),
+                public_group: t.public_group.unwrap_or_default(),
+            })
+            .collect();
+        Ok(StatusComponentsPartial { rows }.into_response())
     }
 
     /// One progress-bar row. `pct` is pre-clamped 0–100 in Rust so the

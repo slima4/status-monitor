@@ -264,12 +264,12 @@ impl TargetStore for PostgresTargetStore {
                  tags = COALESCE($6, tags),
                  alerts = COALESCE($7, alerts),
                  public_status = COALESCE($8, public_status),
-                 public_name = COALESCE($9, public_name),
-                 public_description = COALESCE($10, public_description),
-                 public_group = COALESCE($11, public_group),
-                 public_sort_order = COALESCE($12, public_sort_order),
+                 public_name = CASE WHEN $9::bool THEN $10 ELSE public_name END,
+                 public_description = CASE WHEN $11::bool THEN $12 ELSE public_description END,
+                 public_group = CASE WHEN $13::bool THEN $14 ELSE public_group END,
+                 public_sort_order = COALESCE($15, public_sort_order),
                  updated_at = now()
-               WHERE id = $1 AND org_id = $13
+               WHERE id = $1 AND org_id = $16
                RETURNING id, name, check_spec, interval_secs, enabled, tags, alerts,
                       public_status, public_name, public_description, public_group, public_sort_order,
                       created_at, updated_at"#,
@@ -282,9 +282,12 @@ impl TargetStore for PostgresTargetStore {
         .bind(update.tags)
         .bind(alerts_json)
         .bind(update.public_status)
-        .bind(update.public_name)
-        .bind(update.public_description)
-        .bind(update.public_group)
+        .bind(update.public_name.is_some())
+        .bind(update.public_name.clone().flatten())
+        .bind(update.public_description.is_some())
+        .bind(update.public_description.clone().flatten())
+        .bind(update.public_group.is_some())
+        .bind(update.public_group.clone().flatten())
         .bind(update.public_sort_order)
         .bind(org.0)
         .fetch_optional(&self.pool)

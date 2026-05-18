@@ -334,14 +334,16 @@ impl TargetStore for InMemoryTargetStore {
         if let Some(v) = update.public_status {
             t.public_status = v;
         }
+        // Option<Option<String>>: outer Some = field present (inner None
+        // clears); outer None = omitted, leave the stored value unchanged.
         if let Some(v) = update.public_name {
-            t.public_name = Some(v);
+            t.public_name = v;
         }
         if let Some(v) = update.public_description {
-            t.public_description = Some(v);
+            t.public_description = v;
         }
         if let Some(v) = update.public_group {
-            t.public_group = Some(v);
+            t.public_group = v;
         }
         if let Some(v) = update.public_sort_order {
             t.public_sort_order = v;

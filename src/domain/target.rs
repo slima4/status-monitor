@@ -88,10 +88,31 @@ pub struct TargetUpdate {
     pub tags: Option<Vec<String>>,
     pub alerts: Option<TargetAlerts>,
     pub public_status: Option<bool>,
-    pub public_name: Option<String>,
-    pub public_description: Option<String>,
-    pub public_group: Option<String>,
+    // Double-Option so PATCH can tell "field omitted → keep" from "field
+    // present as null → clear back to the real monitor name/no group".
+    // A plain Option collapses both to None, making un-set impossible.
+    // Wire shape is identical to Option<String> for clients.
+    #[serde(default, deserialize_with = "double_option")]
+    #[schema(nullable = true, value_type = Option<String>)]
+    pub public_name: Option<Option<String>>,
+    #[serde(default, deserialize_with = "double_option")]
+    #[schema(nullable = true, value_type = Option<String>)]
+    pub public_description: Option<Option<String>>,
+    #[serde(default, deserialize_with = "double_option")]
+    #[schema(nullable = true, value_type = Option<String>)]
+    pub public_group: Option<Option<String>>,
     pub public_sort_order: Option<i32>,
+}
+
+/// Lifts the inner `Option<T>` into `Some(Option<T>)` so a missing field
+/// stays `None` (via `#[serde(default)]` = "leave unchanged") while an
+/// explicit JSON `null` becomes `Some(None)` (the "clear" intent).
+fn double_option<'de, T, D>(d: D) -> std::result::Result<Option<Option<T>>, D::Error>
+where
+    T: Deserialize<'de>,
+    D: serde::Deserializer<'de>,
+{
+    Option::<T>::deserialize(d).map(Some)
 }
 
 fn default_true() -> bool {
