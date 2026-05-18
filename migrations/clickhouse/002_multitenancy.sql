@@ -6,10 +6,19 @@
 -- it the CREATE MATERIALIZED VIEW below races the catalog and resolves
 -- `check_results` against the in-flight tombstone instead of the new table
 -- (observed in CI).
+-- IF NOT EXISTS on the recreates keeps this migration safe when several
+-- processes run it concurrently against a shared database (the test
+-- suite: parallel nextest binaries, per-process migration guard, no
+-- cross-process lock). The DROPs are unconditional IF EXISTS and still
+-- re-run per racer (resetting any stale single-tenant table); only the
+-- CREATEs become idempotent, so a racer whose CREATE finds the table
+-- another runner just made no longer aborts with TABLE_ALREADY_EXISTS.
+-- The cross-process churn (DROP+CREATE per racer) is bounded and the
+-- data loss is intended pre-launch (see header).
 DROP VIEW IF EXISTS check_results_1m SYNC;
 DROP TABLE IF EXISTS check_results SYNC;
 
-CREATE TABLE check_results (
+CREATE TABLE IF NOT EXISTS check_results (
     org_id     UUID,
     target_id  UUID,
     timestamp  DateTime64(3, 'UTC') CODEC(Delta, ZSTD(1)),
@@ -30,7 +39,7 @@ ORDER BY (org_id, target_id, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 30 DAY
 SETTINGS index_granularity = 8192;
 
-CREATE MATERIALIZED VIEW check_results_1m
+CREATE MATERIALIZED VIEW IF NOT EXISTS check_results_1m
 ENGINE = AggregatingMergeTree
 PARTITION BY (toYYYYMMDD(minute), org_id)
 ORDER BY (org_id, target_id, minute)
