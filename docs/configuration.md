@@ -26,7 +26,7 @@ Override `STATUS_MONITOR_CONFIG_PATH` to point at an alternate base config file.
 | `scheduler` | `target_refresh_interval_secs`, `jitter_pct` | how often the registry is reconciled against Postgres, and how much jitter is applied to each target's tick |
 | `observability` | `log_level`, `log_format` | tracing-subscriber filter + JSON vs pretty output |
 | `observability` | `metrics_enabled`, `gauge_sample_interval_ms` | Prometheus exporter toggle and sampler cadence |
-| `observability` | `tracing_enabled`, `otlp_endpoint` | OpenTelemetry export over OTLP/gRPC |
+| `observability` | `tracing_enabled`, `otlp_endpoint` | Reserved for OpenTelemetry trace export — **not yet implemented**; setting `tracing_enabled = true` has no effect today |
 | `api.rate_limit` | `enabled`, `per_second`, `burst` | per-IP token-bucket rate limiter on `/api/v1/*`. Disabled by default |
 | `api.cors` | `enabled`, `allowed_origins`, `allowed_methods`, `allow_any_origin` | browser CORS for `/api/v1/*`. Disabled by default. Wildcard only via `allow_any_origin = true` |
 | _notification channels_ | — | Not a config block. Channels are **per-org runtime resources** managed via the [`/api/v1/notification-channels` API](api.md#notification-channels); secrets are sealed at rest with the credentials KEK |
