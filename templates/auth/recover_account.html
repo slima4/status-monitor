@@ -1,10 +1,10 @@
 {% extends "base.html" %}
 {% block title %}Recover account · Status Monitor{% endblock %}
 {% block content %}
-<section class="mx-auto max-w-md space-y-6 rounded border bg-white p-8 shadow-sm">
+<section class="mx-auto max-w-md space-y-6 sticker-card p-8">
   {% if token.is_empty() %}
   <header class="space-y-1">
-    <h1 class="text-2xl font-semibold tracking-tight">Recovery link invalid</h1>
+    <h1 class="text-3xl font-bold tracking-tight text-slate-900">Recovery link invalid</h1>
     <p class="text-sm text-slate-500">
       This recovery link is missing its token or has already been used. If your
       account is still within its grace period, request a fresh link by signing
@@ -12,12 +12,12 @@
     </p>
   </header>
   <a href="/login"
-     class="inline-block rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700">
+     class="sticker-btn inline-block bg-slate-900 px-4 py-2 text-sm font-medium text-white transition-transform hover:-translate-y-0.5 hover:bg-slate-700">
     Go to sign in
   </a>
   {% else %}
   <header class="space-y-1">
-    <h1 class="text-2xl font-semibold tracking-tight">Recover your account</h1>
+    <h1 class="text-3xl font-bold tracking-tight text-slate-900">Recover your account</h1>
     <p class="text-sm text-slate-500">
       Your account is scheduled for deletion. Restore it now to cancel the
       purge and sign back in.
@@ -30,7 +30,7 @@
         hx-swap="none">
     <input type="hidden" name="token" value="{{ token }}">
     <button type="submit"
-            class="rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700">
+            class="sticker-btn bg-slate-900 px-4 py-2 text-sm font-medium text-white transition-transform hover:-translate-y-0.5 hover:bg-slate-700">
       Restore my account
     </button>
   </form>
