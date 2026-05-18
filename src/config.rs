@@ -667,7 +667,11 @@ fn default_gauge_sample_interval_ms() -> u64 {
 }
 
 fn default_trace_sample_ratio() -> f64 {
-    0.05
+    // Capture every trace by default: request volume is low and a head
+    // sample rate that drops 95% of an already-sparse stream leaves the
+    // trace view effectively empty. Lower this once volume justifies the
+    // ingest cost.
+    1.0
 }
 
 /// OTLP trace export to Grafana Cloud (or any OTLP/HTTP collector).

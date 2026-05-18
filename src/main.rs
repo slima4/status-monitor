@@ -32,6 +32,7 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
+use tower_http::trace::{DefaultOnResponse, TraceLayer};
 
 const SHUTDOWN_DEADLINE: Duration = Duration::from_secs(10);
 
@@ -310,8 +311,33 @@ async fn main() -> Result<()> {
         root.clone(),
     );
 
-    let router =
-        build_router(state.clone(), root.clone()).merge(web::routes(&state.cfg).with_state(state));
+    // One span per HTTP request — the unit the OTLP layer exports; with
+    // no instrumented span there is nothing to trace. DEBUG level so the
+    // span is recorded only when the filter is at least debug.
+    let router = build_router(state.clone(), root.clone())
+        .merge(web::routes(&state.cfg).with_state(state))
+        .layer(
+            TraceLayer::new_for_http()
+                .make_span_with(|req: &axum::extract::Request| {
+                    let path = req.uri().path();
+                    // Caddy active-health and the deploy gate poll these
+                    // on a tight loop forever; a span per probe at full
+                    // sampling is pure noise with no diagnostic value.
+                    if path == "/healthz" || path == "/readyz" {
+                        return tracing::Span::none();
+                    }
+                    // Path only, never the query string: /auth/* carries
+                    // single-use magic-link tokens and the OAuth
+                    // code/state, which must not reach stdout logs or the
+                    // exported span.
+                    tracing::debug_span!(
+                        "http.request",
+                        method = %req.method(),
+                        path = %path,
+                    )
+                })
+                .on_response(DefaultOnResponse::new().level(tracing::Level::DEBUG)),
+        );
 
     let listener = TcpListener::bind(&api_bind).await.map_err(AppError::Io)?;
     tracing::info!(

@@ -127,6 +127,7 @@ jobs:
                GRAFANA_OTLP_ENDPOINT='${{ secrets.GRAFANA_OTLP_ENDPOINT }}' \
                GRAFANA_OTLP_INSTANCE_ID='${{ secrets.GRAFANA_OTLP_INSTANCE_ID }}' \
                GRAFANA_OTLP_API_TOKEN='${{ secrets.GRAFANA_OTLP_API_TOKEN }}' \
+               RUST_LOG='${{ vars.RUST_LOG }}' \
                bash -s" <<'REMOTE'
           set -euo pipefail
 
@@ -264,6 +265,36 @@ jobs:
               n=$(grep -cxF "${k}=true" .env || true)
               [ "$n" = 1 ] || { echo "::error::${k} not written exactly once to .env (count=${n})"; exit 1; }
             done
+          fi
+
+          # --- managed RUST_LOG (optional) ----------------------------------
+          # Non-secret log/trace filter, sourced from the repo *variable*
+          # RUST_LOG (vars, not secrets). Same write contract as the blocks
+          # above: cp backup FIRST, single awk reprint (never grep -v |
+          # append | mv), ENVIRON value, line-count bound, exactly-once
+          # verify. Skipped when the variable is unset so the compose
+          # `${RUST_LOG:-debug}` fallback governs; setting it lets an
+          # operator retune verbosity with only a redeploy (no rebuild).
+          if [ -n "${RUST_LOG:-}" ]; then
+            cp .env ".env.bak.$(date +%s).rustlog"
+            before=$(awk 'END { print NR }' .env)
+            awk '
+              BEGIN { m["RUST_LOG"] = ENVIRON["RUST_LOG"] }
+              {
+                for (k in m) if ($0 ~ ("^" k "=")) { print k "=" m[k]; seen[k] = 1; next }
+                print
+              }
+              END { for (k in m) if (!seen[k]) print k "=" m[k] }
+            ' .env > .env.next
+            mv .env.next .env
+            after=$(awk 'END { print NR }' .env)
+            # 0..+1: appended only if RUST_LOG was absent before.
+            if [ "$after" -lt "$before" ] || [ "$after" -gt "$((before + 1))" ]; then
+              echo "::error::.env line count out of range after rustlog upsert (${before} -> ${after})"
+              exit 1
+            fi
+            n=$(grep -cxF "RUST_LOG=$(printenv RUST_LOG)" .env || true)
+            [ "$n" = 1 ] || { echo "::error::RUST_LOG not written exactly once to .env (count=${n})"; exit 1; }
           fi
 
           # --- pull the new image FIRST -------------------------------------

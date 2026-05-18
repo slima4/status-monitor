@@ -62,6 +62,9 @@ target_refresh_interval_secs = 30
 jitter_pct = 10
 
 [observability]
+# Fallback only — tracing reads RUST_LOG first, and the container
+# always sets it (compose default `debug`). This governs a bare
+# `cargo run` with no RUST_LOG; keep it conservative.
 log_level = "info"
 log_format = "json"
 metrics_enabled = true
@@ -77,7 +80,8 @@ enabled = false
 otlp_endpoint = ""           # base, no /v1/traces suffix; e.g.
                              # https://otlp-gateway-<zone>.grafana.net/otlp
 instance_id = ""             # Grafana Cloud numeric instance / stack id
-trace_sample_ratio = 0.05    # head sampling under a parent-based sampler
+trace_sample_ratio = 1.0     # parent-based head sampling; 1.0 = keep all
+                             # (low volume — lower when traffic grows)
 
 # Per-IP API rate limiting is enforced by Caddy (see deployment/Caddyfile);
 # the in-process limiter is per-org / per-user — see [rate_limits] + plans.

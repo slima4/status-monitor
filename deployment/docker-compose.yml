@@ -112,7 +112,12 @@ services:
       STATUS_MONITOR_AUTH__GITHUB__CLIENT_SECRET: ${STATUS_MONITOR_AUTH_GITHUB_CLIENT_SECRET:-}
       STATUS_MONITOR_AUTH__GITHUB__REDIRECT_URL: ${STATUS_MONITOR_AUTH_GITHUB_REDIRECT_URL:-}
       STATUS_MONITOR_AUTH__PUBLIC_BASE_URL: ${STATUS_MONITOR_AUTH_PUBLIC_BASE_URL:-}
-      RUST_LOG: ${RUST_LOG:-info}
+      # Effective trace/log filter. tracing reads RUST_LOG before the
+      # config file, so this is the authoritative knob; it must be at
+      # least `debug` for HTTP request spans (hence OTLP traces) to be
+      # recorded. Deploy-managed: deploy.yml upserts RUST_LOG from the
+      # repo variable, falling back to `debug` here when unset.
+      RUST_LOG: ${RUST_LOG:-debug}
     depends_on:
       postgres:
         condition: service_healthy
