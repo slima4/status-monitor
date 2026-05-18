@@ -38,7 +38,12 @@ const SHUTDOWN_DEADLINE: Duration = Duration::from_secs(10);
 #[tokio::main]
 async fn main() -> Result<()> {
     let cfg = AppConfig::load()?;
-    observability::tracing::init(&cfg.observability);
+    // Inconsistent trace-export config (missing endpoint/credentials,
+    // out-of-range sample ratio) is a clean startup error — validated
+    // BEFORE tracing::init builds the exporter, so a bad value never
+    // reaches the sampler/transport.
+    cfg.validate_observability()?;
+    let tracing_guard = observability::tracing::init(&cfg.observability);
     status_monitor::app::assert_per_org_status_config(&cfg);
     // A bad quota/rate/interval number is a clean startup config error,
     // never a `.expect()` crash-loop in router/layer construction (I6).
@@ -359,6 +364,9 @@ async fn main() -> Result<()> {
     }
 
     let _ = metrics_handle;
+    // Flush and stop the OTLP batch exporter last, after the subscriber
+    // has captured the final shutdown spans/logs.
+    tracing_guard.shutdown();
     tracing::info!("shutdown complete");
     Ok(())
 }

@@ -26,7 +26,8 @@ Override `STATUS_MONITOR_CONFIG_PATH` to point at an alternate base config file.
 | `scheduler` | `target_refresh_interval_secs`, `jitter_pct` | how often the registry is reconciled against Postgres, and how much jitter is applied to each target's tick |
 | `observability` | `log_level`, `log_format` | tracing-subscriber filter + JSON vs pretty output |
 | `observability` | `metrics_enabled`, `gauge_sample_interval_ms` | Prometheus exporter toggle and sampler cadence |
-| `observability` | `tracing_enabled`, `otlp_endpoint` | Reserved for OpenTelemetry trace export — **not yet implemented**; setting `tracing_enabled = true` has no effect today |
+| `observability` | `tracing_enabled` | Master on/off for OTLP trace export. Export is active only when this **and** `observability.grafana.enabled` are true |
+| `observability.grafana` | `enabled`, `otlp_endpoint`, `instance_id`, `api_key`, `trace_sample_ratio` | OTLP/HTTP trace export to Grafana Cloud / any OTLP collector. `api_key` is env-only. See [Trace export](#trace-export) below |
 | `api.rate_limit` | `enabled`, `per_second`, `burst` | per-IP token-bucket rate limiter on `/api/v1/*`. Disabled by default |
 | `api.cors` | `enabled`, `allowed_origins`, `allowed_methods`, `allow_any_origin` | browser CORS for `/api/v1/*`. Disabled by default. Wildcard only via `allow_any_origin = true` |
 | _notification channels_ | — | Not a config block. Channels are **per-org runtime resources** managed via the [`/api/v1/notification-channels` API](api.md#notification-channels); secrets are sealed at rest with the credentials KEK |
@@ -194,6 +195,42 @@ org publishes is per-target:
 
 See [Public status page](public-status.md) for the operator workflow and
 [Per-org status pages](per-org-status.md) for the SaaS subdomain model.
+
+## Trace export
+
+OpenTelemetry spans are exported over OTLP/HTTP (protobuf) when **both**
+`observability.tracing_enabled` and `observability.grafana.enabled` are
+`true`. Disabled by default and zero-cost when off.
+
+```toml
+[observability]
+tracing_enabled = false                # master on/off for trace export
+
+[observability.grafana]
+enabled = false                        # second switch; both must be true
+otlp_endpoint = ""                     # OTLP base, no /v1/traces suffix; e.g.
+                                       # https://otlp-gateway-<zone>.grafana.net/otlp
+instance_id = ""                       # Grafana Cloud numeric instance / stack id
+trace_sample_ratio = 0.05              # parent-based head sampling, [0.0, 1.0]
+# api_key                              # NEVER in TOML — env var only (below)
+```
+
+| Key | Purpose |
+|---|---|
+| `tracing_enabled` | master switch; with `grafana.enabled` gates all export |
+| `grafana.enabled` | second switch (kept separate so the block is inert until explicitly turned on) |
+| `grafana.otlp_endpoint` | OTLP/HTTP **base** URL; the service appends `/v1/traces` (a value already ending in it is left as-is). Empty fails boot when export is on |
+| `grafana.instance_id` | basic-auth username (Grafana Cloud instance id). Empty fails boot when export is on |
+| `grafana.api_key` | basic-auth password. **Env-only**: `STATUS_MONITOR_OBSERVABILITY__GRAFANA__API_KEY`. Never read from a config file; redacted in any serialised config |
+| `grafana.trace_sample_ratio` | head sampling ratio under a parent-based sampler. Must be in `[0.0, 1.0]` or boot fails |
+
+Auth is `Authorization: Basic base64(instance_id:api_key)`. Resource
+attributes `service.name = status-monitor` and `service.version` are
+attached. The batch exporter is flushed and stopped on graceful
+shutdown. A transport build failure logs a warning and the service
+continues without traces — telemetry never takes down monitoring.
+Inconsistent settings (export on with a missing endpoint / instance /
+key, or an out-of-range ratio) are a clean startup config error.
 
 ## Tuning notes
 

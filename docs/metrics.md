@@ -48,12 +48,32 @@ operator metrics, not per-tenant.
 
 ## OpenTelemetry tracing
 
-Not yet implemented. The `observability.tracing_enabled` and OTLP
-endpoint settings are reserved and currently no spans are exported —
-setting `tracing_enabled = true` has no effect today. OTLP trace export
-to an OpenTelemetry collector (Grafana Cloud Tempo, Jaeger, etc.) is on
-the roadmap; this section will document the live behaviour once it
-lands.
+Spans are exported over OTLP/HTTP (protobuf) when **both**
+`observability.tracing_enabled` and `observability.grafana.enabled` are
+`true`. The exporter targets `observability.grafana.otlp_endpoint`
+(the OTLP base; `/v1/traces` is appended) and authenticates with
+`Authorization: Basic base64(instance_id:api_key)`. The destination is
+any OTLP/HTTP collector — Grafana Cloud Tempo, Jaeger, an OpenTelemetry
+Collector, etc.
+
+- `api_key` is read only from
+  `STATUS_MONITOR_OBSERVABILITY__GRAFANA__API_KEY` — never from a file.
+- Sampling is parent-based over a head ratio
+  (`grafana.trace_sample_ratio`, default `0.05`); a sampled parent keeps
+  its children.
+- Resource attributes: `service.name = status-monitor`,
+  `service.version` = the build version.
+- Disabled by default and **zero-cost when off**: no exporter is built,
+  no network egress, no per-check overhead.
+- A batch exporter ships spans in the background; it is flushed and
+  stopped on graceful shutdown so the final spans are not lost. A
+  transport build failure logs a warning and the service continues
+  without traces — telemetry never takes down monitoring.
+
+Inconsistent settings (export on but endpoint/instance/key missing, or
+a sample ratio outside `[0.0, 1.0]`) fail fast at startup as a config
+error, not a runtime surprise. See
+[Configuration](configuration.md) for the keys and env overrides.
 
 ## HTTP connection phase timings + pool gauges
 

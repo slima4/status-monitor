@@ -57,9 +57,14 @@ toml = "1.1"
 # Observability
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+# tracing-opentelemetry 0.32 bridges the opentelemetry 0.31 line — the
+# otel crates MUST stay on 0.31 to match it (0.32 otel breaks the
+# SdkTracer: Tracer impl the layer needs).
 tracing-opentelemetry = "0.32"
-opentelemetry = "0.32"
-opentelemetry_sdk = { version = "0.32", features = ["rt-tokio"] }
+opentelemetry = "0.31"
+opentelemetry_sdk = { version = "0.31", features = ["rt-tokio"] }
+# OTLP/HTTP protobuf exporter only (reqwest + rustls). No tonic/gRPC.
+opentelemetry-otlp = { version = "0.31", default-features = false, features = ["http-proto", "trace", "reqwest-client", "reqwest-rustls"] }
 metrics = "0.24"
 metrics-exporter-prometheus = "0.18"
 

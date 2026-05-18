@@ -66,8 +66,18 @@ log_level = "info"
 log_format = "json"
 metrics_enabled = true
 tracing_enabled = false
-otlp_endpoint = "http://localhost:4317"
 gauge_sample_interval_ms = 1000
+
+# OTLP trace export to Grafana Cloud (or any OTLP/HTTP collector).
+# Active only when observability.tracing_enabled AND grafana.enabled are
+# both true. api_key is NEVER set here — supply it via the env var
+# STATUS_MONITOR_OBSERVABILITY__GRAFANA__API_KEY.
+[observability.grafana]
+enabled = false
+otlp_endpoint = ""           # base, no /v1/traces suffix; e.g.
+                             # https://otlp-gateway-<zone>.grafana.net/otlp
+instance_id = ""             # Grafana Cloud numeric instance / stack id
+trace_sample_ratio = 0.05    # head sampling under a parent-based sampler
 
 # Per-IP API rate limiting is enforced by Caddy (see deployment/Caddyfile);
 # the in-process limiter is per-org / per-user — see [rate_limits] + plans.

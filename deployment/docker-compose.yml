@@ -80,6 +80,15 @@ services:
       # there is no `ports:` mapping for 9090, only `expose`. /metrics
       # has no auth, so it must stay internal-only.
       STATUS_MONITOR_SERVER__METRICS_BIND: 0.0.0.0:9090
+      # Optional in-app OTLP trace export to Grafana Cloud (or any OTLP
+      # collector). Off unless all of these are set in .env. Distinct
+      # from the Alloy metrics path above — traces go straight from the
+      # app to the OTLP gateway. The API token is a secret (env only).
+      STATUS_MONITOR_OBSERVABILITY__TRACING_ENABLED: ${STATUS_MONITOR_TRACING_ENABLED:-false}
+      STATUS_MONITOR_OBSERVABILITY__GRAFANA__ENABLED: ${GRAFANA_OTLP_ENABLED:-false}
+      STATUS_MONITOR_OBSERVABILITY__GRAFANA__OTLP_ENDPOINT: ${GRAFANA_OTLP_ENDPOINT:-}
+      STATUS_MONITOR_OBSERVABILITY__GRAFANA__INSTANCE_ID: ${GRAFANA_OTLP_INSTANCE_ID:-}
+      STATUS_MONITOR_OBSERVABILITY__GRAFANA__API_KEY: ${GRAFANA_OTLP_API_TOKEN:-}
       # Tenancy / public-status surface. Defaults are self-host (single org,
       # /status on the operator host). For the SaaS wildcard surface set
       # these in .env — see .env.example "Per-org status pages (SaaS)".

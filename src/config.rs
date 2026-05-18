@@ -653,14 +653,55 @@ pub struct ObservabilityConfig {
     pub log_level: String,
     pub log_format: LogFormat,
     pub metrics_enabled: bool,
+    /// Master on/off for OpenTelemetry trace export. Export is active
+    /// only when this AND `grafana.enabled` are true.
     pub tracing_enabled: bool,
-    pub otlp_endpoint: String,
+    #[serde(default)]
+    pub grafana: GrafanaConfig,
     #[serde(default = "default_gauge_sample_interval_ms")]
     pub gauge_sample_interval_ms: u64,
 }
 
 fn default_gauge_sample_interval_ms() -> u64 {
     1000
+}
+
+fn default_trace_sample_ratio() -> f64 {
+    0.05
+}
+
+/// OTLP trace export to Grafana Cloud (or any OTLP/HTTP collector).
+/// Credentials never live in TOML — `api_key` is sourced only from
+/// `STATUS_MONITOR_OBSERVABILITY__GRAFANA__API_KEY`.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct GrafanaConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    /// OTLP/HTTP base, no signal suffix (e.g.
+    /// `https://otlp-gateway-<zone>.grafana.net/otlp`). The service
+    /// appends `/v1/traces` (a value already ending in it is left as-is).
+    #[serde(default)]
+    pub otlp_endpoint: String,
+    /// Grafana Cloud numeric instance / stack id (basic-auth username).
+    #[serde(default)]
+    pub instance_id: String,
+    #[serde(default = "empty_secret", with = "secret_str")]
+    pub api_key: SecretString,
+    /// Head sampling ratio applied under a parent-based sampler.
+    #[serde(default = "default_trace_sample_ratio")]
+    pub trace_sample_ratio: f64,
+}
+
+impl Default for GrafanaConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            otlp_endpoint: String::new(),
+            instance_id: String::new(),
+            api_key: empty_secret(),
+            trace_sample_ratio: default_trace_sample_ratio(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
@@ -764,6 +805,41 @@ impl AppConfig {
             o.max_logo_size_bytes,
             "quotas.self_host_overrides.max_logo_size_bytes",
         )?;
+        Ok(())
+    }
+
+    /// Trace-export config is a clean startup error when inconsistent,
+    /// never a runtime panic. Credentials are required only when export
+    /// is actually active (`tracing_enabled` AND `grafana.enabled`); the
+    /// sample ratio is always range-checked.
+    pub fn validate_observability(&self) -> Result<()> {
+        fn err(msg: String) -> crate::error::AppError {
+            crate::error::AppError::Other(anyhow::anyhow!(msg))
+        }
+        let g = &self.observability.grafana;
+        let r = g.trace_sample_ratio;
+        if !(0.0..=1.0).contains(&r) {
+            return Err(err(format!(
+                "observability.grafana.trace_sample_ratio must be in [0.0, 1.0] (got {r})"
+            )));
+        }
+        if self.observability.tracing_enabled && g.enabled {
+            if g.otlp_endpoint.trim().is_empty() {
+                return Err(err(
+                    "observability.grafana.otlp_endpoint is required when tracing_enabled and grafana.enabled are true".into(),
+                ));
+            }
+            if g.instance_id.trim().is_empty() {
+                return Err(err(
+                    "observability.grafana.instance_id is required when tracing_enabled and grafana.enabled are true".into(),
+                ));
+            }
+            if g.api_key.expose_secret().trim().is_empty() {
+                return Err(err(
+                    "STATUS_MONITOR_OBSERVABILITY__GRAFANA__API_KEY is required when tracing_enabled and grafana.enabled are true".into(),
+                ));
+            }
+        }
         Ok(())
     }
 }

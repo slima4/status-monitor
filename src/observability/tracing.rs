@@ -1,15 +1,122 @@
-use tracing_subscriber::{EnvFilter, fmt, prelude::*};
+use std::collections::HashMap;
 
-use crate::config::{LogFormat, ObservabilityConfig};
+use base64::{Engine as _, engine::general_purpose::STANDARD};
+use opentelemetry::trace::TracerProvider as _;
+use opentelemetry_otlp::{Protocol, SpanExporter, WithExportConfig, WithHttpConfig};
+use opentelemetry_sdk::Resource;
+use opentelemetry_sdk::trace::{Sampler, SdkTracerProvider};
+use secrecy::ExposeSecret;
+use tracing_subscriber::{EnvFilter, Layer, fmt, prelude::*};
 
-pub fn init(cfg: &ObservabilityConfig) {
+use crate::config::{GrafanaConfig, LogFormat, ObservabilityConfig};
+
+/// Held by `main` for the process lifetime. On shutdown it flushes and
+/// stops the OTLP batch exporter so in-flight spans are not lost. A
+/// no-op when trace export is disabled.
+#[must_use]
+pub struct TracingGuard {
+    provider: Option<SdkTracerProvider>,
+}
+
+impl TracingGuard {
+    pub fn shutdown(self) {
+        if let Some(provider) = self.provider {
+            if let Err(err) = provider.force_flush() {
+                tracing::warn!(?err, "otlp span flush failed on shutdown");
+            }
+            if let Err(err) = provider.shutdown() {
+                tracing::warn!(?err, "otlp tracer provider shutdown failed");
+            }
+        }
+    }
+}
+
+pub fn init(cfg: &ObservabilityConfig) -> TracingGuard {
     let filter =
         EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(&cfg.log_level));
 
-    let registry = tracing_subscriber::registry().with(filter);
+    let fmt_layer = match cfg.log_format {
+        LogFormat::Json => fmt::layer().json().boxed(),
+        LogFormat::Pretty => fmt::layer().pretty().boxed(),
+    };
 
-    match cfg.log_format {
-        LogFormat::Json => registry.with(fmt::layer().json()).init(),
-        LogFormat::Pretty => registry.with(fmt::layer().pretty()).init(),
-    }
+    // Export only when both switches are on. A build failure here must
+    // never take down monitoring — log to stderr (the subscriber is not
+    // installed yet) and continue without the OTLP layer. Empty/missing
+    // credentials are already rejected at config validation, so a
+    // failure at this point is a transport/runtime problem, not config.
+    let (otel_layer, provider) = if cfg.tracing_enabled && cfg.grafana.enabled {
+        match build_tracer_provider(&cfg.grafana) {
+            Ok(provider) => {
+                let tracer = provider.tracer("status-monitor");
+                opentelemetry::global::set_text_map_propagator(
+                    opentelemetry_sdk::propagation::TraceContextPropagator::new(),
+                );
+                (
+                    Some(tracing_opentelemetry::layer().with_tracer(tracer)),
+                    Some(provider),
+                )
+            }
+            Err(err) => {
+                eprintln!("otlp trace export disabled: {err:#}");
+                (None, None)
+            }
+        }
+    } else {
+        (None, None)
+    };
+
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(fmt_layer)
+        .with(otel_layer)
+        .init();
+
+    TracingGuard { provider }
+}
+
+fn build_tracer_provider(g: &GrafanaConfig) -> anyhow::Result<SdkTracerProvider> {
+    // Basic base64(instance_id:api_key) — the Grafana Cloud OTLP gateway
+    // auth. The token stays inside the SecretString until this point and
+    // is never logged.
+    let credentials = format!("{}:{}", g.instance_id, g.api_key.expose_secret());
+    let authorization = format!("Basic {}", STANDARD.encode(credentials));
+
+    // opentelemetry-otlp uses a programmatically-set HTTP endpoint
+    // verbatim — it does NOT append the signal path (that only happens
+    // for the OTEL_EXPORTER_OTLP_ENDPOINT env var). The operator config
+    // is the OTLP base, so append `/v1/traces` here. Tolerate an
+    // already-suffixed value so a full URL also works.
+    let base = g.otlp_endpoint.trim_end_matches('/');
+    let endpoint = if base.ends_with("/v1/traces") {
+        base.to_string()
+    } else {
+        format!("{base}/v1/traces")
+    };
+
+    let exporter = SpanExporter::builder()
+        .with_http()
+        .with_endpoint(endpoint)
+        .with_protocol(Protocol::HttpBinary)
+        .with_headers(HashMap::from([(
+            "authorization".to_string(),
+            authorization,
+        )]))
+        .build()?;
+
+    let resource = Resource::builder()
+        .with_service_name("status-monitor")
+        .with_attribute(opentelemetry::KeyValue::new(
+            "service.version",
+            env!("CARGO_PKG_VERSION"),
+        ))
+        .build();
+
+    let sampler = Sampler::ParentBased(Box::new(Sampler::TraceIdRatioBased(g.trace_sample_ratio)));
+
+    Ok(SdkTracerProvider::builder()
+        .with_resource(resource)
+        .with_sampler(sampler)
+        .with_batch_exporter(exporter)
+        .build())
 }
