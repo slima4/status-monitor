@@ -1,3 +1,4 @@
+{%- import "public/_incident_chips.html" as chips -%}
 <!doctype html>
 <html lang="en">
 <head>
@@ -20,8 +21,8 @@
        class="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:rounded focus:bg-white focus:px-3 focus:py-2 focus:text-sm focus:ring-2 focus:ring-slate-700">
         Skip to main content
     </a>
-    <header class="border-b" style="background-color: var(--brand-color)">
-        <div class="container mx-auto flex items-center justify-between px-4 py-4">
+    <header class="shadow-sm" style="background-color: var(--brand-color)">
+        <div class="mx-auto flex max-w-3xl items-center justify-between px-4 py-5">
             <a href="/status" class="flex items-center gap-3 text-lg font-semibold tracking-tight text-white">
                 {% if let Some(logo) = branding.logo_url %}
                     <img src="{{ logo }}" alt="{{ branding.display_name }}" class="h-8 w-auto">
@@ -34,19 +35,18 @@
         </div>
     </header>
 
-    <main id="main-content" tabindex="-1" class="container mx-auto max-w-3xl px-4 py-6">
+    <main id="main-content" tabindex="-1" class="mx-auto max-w-3xl px-4 py-10">
         <p class="text-sm">
             <a href="/status" class="text-slate-500 hover:text-slate-700">← Back to status</a>
         </p>
 
-        <article class="mt-3 space-y-4">
+        <article class="mt-4 space-y-5">
             <header class="space-y-2">
-                <h1 class="text-2xl font-semibold tracking-tight">{{ incident.header.title }}</h1>
+                <h1 class="text-2xl font-semibold tracking-tight sm:text-3xl">{{ incident.header.title }}</h1>
                 <p class="flex flex-wrap items-center gap-2 text-sm">
-                    <span class="rounded px-2 py-0.5 text-xs font-medium {{ incident.header.severity_class }}">{{ incident.header.severity_label }}</span>
-                    <span class="rounded px-2 py-0.5 text-xs font-medium {{ incident.header.phase_class }}">{{ incident.header.phase_label }}</span>
+                    {% call chips::sevphase(incident.header) %}{% endcall %}
                     {% if incident.header.ongoing %}
-                        <span class="rounded bg-rose-100 px-2 py-0.5 text-xs font-medium text-rose-800">Ongoing</span>
+                        <span class="rounded-full bg-rose-100 px-2 py-0.5 text-xs font-medium text-rose-800">Ongoing</span>
                     {% endif %}
                     <span class="text-slate-600">· {{ incident.header.component_name }}</span>
                 </p>
@@ -64,17 +64,17 @@
             </header>
 
             <section aria-labelledby="updates-heading" class="space-y-3">
-                <h2 id="updates-heading" class="border-b pb-1 text-sm font-semibold uppercase tracking-wide text-slate-600">Updates</h2>
+                <h2 id="updates-heading" class="text-sm font-semibold uppercase tracking-wide text-slate-500">Updates</h2>
                 {% if incident.updates.is_empty() %}
-                    <p class="rounded border bg-white p-4 text-sm text-slate-500">
+                    <p class="rounded-2xl border border-slate-200 bg-white p-5 text-sm text-slate-500">
                         No operator updates have been posted for this incident yet.
                     </p>
                 {% else %}
                     <ol class="space-y-3">
                         {% for u in incident.updates %}
-                        <li class="rounded border bg-white p-4">
+                        <li class="rounded-2xl border border-slate-200 bg-white p-5">
                             <div class="flex flex-wrap items-center gap-2 text-xs">
-                                <span class="rounded px-2 py-0.5 font-medium {{ u.phase_class }}">{{ u.phase_label }}</span>
+                                <span class="rounded-full px-2 py-0.5 font-medium {{ u.phase_class }}">{{ u.phase_label }}</span>
                                 <time datetime="{{ u.posted_iso }}" data-tz class="text-slate-500">{{ u.posted_human }}</time>
                             </div>
                             <p class="mt-2 whitespace-pre-line text-sm text-slate-800">{{ u.message }}</p>
@@ -86,7 +86,7 @@
         </article>
     </main>
 
-    <footer class="container mx-auto px-4 py-6 text-xs text-slate-400">
+    <footer class="mx-auto max-w-3xl px-4 py-8 text-xs text-slate-400">
         {% if branding.show_powered_by %}Powered by status-monitor · {% endif %}
         <a href="{{ rss_url }}" class="hover:text-slate-600">RSS</a> ·
         Updated <time datetime="{{ generated_iso }}" data-tz>{{ generated_human }}</time>

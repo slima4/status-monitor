@@ -26,8 +26,8 @@
        class="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:rounded focus:bg-white focus:px-3 focus:py-2 focus:text-sm focus:ring-2 focus:ring-slate-700">
         Skip to main content
     </a>
-    <header class="border-b" style="background-color: var(--brand-color)">
-        <div class="container mx-auto flex items-center justify-between px-4 py-4">
+    <header class="shadow-sm" style="background-color: var(--brand-color)">
+        <div class="mx-auto flex max-w-3xl items-center justify-between px-4 py-5">
             <a href="/status" class="flex items-center gap-3 text-lg font-semibold tracking-tight text-white">
                 {% if let Some(logo) = branding.logo_url %}
                     <img src="{{ logo }}" alt="{{ branding.display_name }}" class="h-8 w-auto">
@@ -41,18 +41,18 @@
     </header>
 
     {% if let Some(about) = branding.about_html %}
-    <section class="border-b bg-white">
-        <div class="container mx-auto px-4 py-4 prose prose-sm max-w-none text-slate-600">
+    <section class="border-b border-slate-200 bg-white">
+        <div class="mx-auto max-w-3xl px-4 py-4 prose prose-sm text-slate-600">
             {{ about|safe }}
         </div>
     </section>
     {% endif %}
 
-    <main id="main-content" tabindex="-1" class="container mx-auto px-4 py-6">
+    <main id="main-content" tabindex="-1" class="mx-auto max-w-3xl px-4 py-10">
         {% include "public/region.html" %}
     </main>
 
-    <footer class="container mx-auto px-4 py-6 text-xs text-slate-400">
+    <footer class="mx-auto max-w-3xl px-4 py-8 text-xs text-slate-400">
         {% if branding.show_powered_by %}Powered by status-monitor · {% endif %}
         <a href="{{ view.rss_url }}" class="hover:text-slate-600">RSS</a> ·
         Updated <time datetime="{{ view.generated_iso }}" data-tz>{{ view.generated_human }}</time>
