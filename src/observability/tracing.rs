@@ -72,6 +72,28 @@ pub fn init(cfg: &ObservabilityConfig) -> TracingGuard {
         .with(otel_layer)
         .init();
 
+    // The subscriber is installed now, so this is the first point a
+    // structured log can record the trace-export decision. Without it the
+    // only signal is silence, which is indistinguishable from a disabled
+    // exporter — mirror the "metrics listening" line so the boot log
+    // states plainly whether spans are leaving the process.
+    if provider.is_some() {
+        tracing::info!(
+            endpoint = %cfg.grafana.otlp_endpoint,
+            sample_ratio = cfg.grafana.trace_sample_ratio,
+            "otlp trace export enabled"
+        );
+    } else if cfg.tracing_enabled && cfg.grafana.enabled {
+        // build_tracer_provider failed; the pre-subscriber eprintln
+        // already carried the cause. Restate it through the subscriber so
+        // it is not lost among the structured stdout.
+        tracing::warn!("otlp trace export requested but exporter build failed");
+    } else {
+        tracing::debug!(
+            "otlp trace export disabled (tracing_enabled and grafana.enabled not both set)"
+        );
+    }
+
     TracingGuard { provider }
 }
 
