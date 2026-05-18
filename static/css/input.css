@@ -113,6 +113,44 @@
     .sticker-pill--warn    { @apply bg-amber-100  text-amber-900;  }
     .sticker-pill--neutral { @apply bg-white      text-slate-700; }
 
+    /* Semantic layer: templates name meaning, never appearance. Restyle =
+       edit these rules, no template touched. State is one `--modifier`. */
+
+    /* Uppercase section/eyebrow label — one definition app-wide so the
+       type scale stays in lockstep (also used for KPI-card labels). */
+    .panel-label { @apply text-xs font-semibold uppercase tracking-wide text-slate-500; }
+
+    /* Big single-number KPI value (Monitors, Uptime, …). */
+    .kpi-value { @apply mt-2 text-4xl font-bold tabular-nums text-slate-900; }
+    .kpi-value--ok { @apply text-emerald-700; }
+
+    /* Inline metric emphasis (e.g. an incident count): loud when it
+       matters, quiet when zero. Same semantic-modifier idea as the tiles
+       so no template hard-codes a colour. */
+    .metric-alert { @apply font-semibold text-rose-700; }
+    .metric-quiet { @apply font-semibold text-slate-400; }
+
+    /* Status count tile. Colour is chosen by meaning via one modifier;
+       --muted lets a zero problem-counter recede so a non-zero one pops. */
+    .stat-tile        { @apply rounded-xl border-2 py-3 text-center; }
+    .stat-tile__label { @apply text-[11px] font-semibold uppercase tracking-wide; }
+    .stat-tile__value { @apply mt-1 text-2xl font-bold tabular-nums; }
+    .stat-tile--ok    { @apply border-emerald-200 bg-emerald-50; }
+    .stat-tile--ok    .stat-tile__label,
+    .stat-tile--ok    .stat-tile__value { @apply text-emerald-700; }
+    .stat-tile--bad   { @apply border-rose-300 bg-rose-50; }
+    .stat-tile--bad   .stat-tile__label,
+    .stat-tile--bad   .stat-tile__value { @apply text-rose-700; }
+    .stat-tile--warn  { @apply border-amber-300 bg-amber-50; }
+    .stat-tile--warn  .stat-tile__label,
+    .stat-tile--warn  .stat-tile__value { @apply text-amber-700; }
+    .stat-tile--info  { @apply border-slate-300 bg-slate-50; }
+    .stat-tile--info  .stat-tile__label { @apply text-slate-500; }
+    .stat-tile--info  .stat-tile__value { @apply text-slate-600; }
+    .stat-tile--muted { @apply border-slate-200; }
+    .stat-tile--muted .stat-tile__label { @apply text-slate-400; }
+    .stat-tile--muted .stat-tile__value { @apply text-slate-300; }
+
     /* Live "we never stop checking" heartbeat. The EKG path is drawn with a
        long dash that scrolls left → reads as a continuous monitor sweep,
        not a one-shot animation. CSS-only: zero JS, zero image bytes — the

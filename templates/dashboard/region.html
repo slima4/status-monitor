@@ -8,49 +8,57 @@
      aria-live="polite"
      class="space-y-6">
 
-  <section class="grid gap-4 md:grid-cols-2">
-    <div class="rounded border bg-white p-4">
-      <p class="text-xs uppercase tracking-wide text-slate-500">Monitors</p>
-      <p class="mt-1 text-2xl font-semibold">{{ summary.targets.total }}</p>
-      <p class="text-xs text-slate-500">
+  <section class="grid gap-5 md:grid-cols-2">
+    <div class="sticker-card p-5">
+      <p class="panel-label">Monitors</p>
+      <p class="kpi-value">{{ summary.targets.total }}</p>
+      <p class="mt-1 text-xs text-slate-500">
         {{ summary.targets.enabled }} enabled · {{ summary.targets.disabled }} disabled
       </p>
     </div>
-    <div class="rounded border bg-white p-4">
-      <p class="text-xs uppercase tracking-wide text-slate-500">Uptime (24h)</p>
-      <p class="mt-1 text-2xl font-semibold text-green-700">{{ uptime_pct }}%</p>
-      <p class="text-xs text-slate-500">
+    <div class="sticker-card p-5">
+      <p class="panel-label">Uptime (24h)</p>
+      <p class="kpi-value kpi-value--ok">{{ uptime_pct }}%</p>
+      <p class="mt-1 text-xs text-slate-500">
         {{ summary.last_24h.checks_up }} / {{ summary.last_24h.checks_total }} checks
       </p>
     </div>
   </section>
 
   <section class="grid gap-4">
-    <div class="rounded border bg-white p-4">
-      <h2 class="text-sm font-medium text-slate-700">Current status</h2>
-      <dl class="mt-2 grid grid-cols-5 gap-2 text-center text-sm">
-        <div>
-          <dt class="text-xs uppercase text-slate-500">Up</dt>
-          <dd class="font-semibold text-green-700">{{ summary.current_status.up }}</dd>
+    <div class="sticker-card p-5">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <h2 class="panel-label">Current status</h2>
+        <span class="text-xs text-slate-500">Incidents (24h):
+          <span class="{% if summary.last_24h.incidents > 0 %}metric-alert{% else %}metric-quiet{% endif %}">{{ summary.last_24h.incidents }}</span>
+        </span>
+      </div>
+      {# A zero problem-counter uses --muted so it recedes; a non-zero one
+         pops in its semantic colour. "Up" is the inverse: zero up *with
+         monitors present* is the most alarming state, so it must not stay
+         green — gate it like the others. #}
+      <dl class="mt-4 grid grid-cols-5 gap-3">
+        <div class="stat-tile {% if summary.current_status.up > 0 %}stat-tile--ok{% else if summary.targets.total > 0 %}stat-tile--bad{% else %}stat-tile--muted{% endif %}">
+          <dt class="stat-tile__label">Up</dt>
+          <dd class="stat-tile__value">{{ summary.current_status.up }}</dd>
         </div>
-        <div>
-          <dt class="text-xs uppercase text-slate-500">Down</dt>
-          <dd class="font-semibold text-red-700">{{ summary.current_status.down }}</dd>
+        <div class="stat-tile {% if summary.current_status.down > 0 %}stat-tile--bad{% else %}stat-tile--muted{% endif %}">
+          <dt class="stat-tile__label">Down</dt>
+          <dd class="stat-tile__value">{{ summary.current_status.down }}</dd>
         </div>
-        <div>
-          <dt class="text-xs uppercase text-slate-500">Degraded</dt>
-          <dd class="font-semibold text-amber-700">{{ summary.current_status.degraded }}</dd>
+        <div class="stat-tile {% if summary.current_status.degraded > 0 %}stat-tile--warn{% else %}stat-tile--muted{% endif %}">
+          <dt class="stat-tile__label">Degraded</dt>
+          <dd class="stat-tile__value">{{ summary.current_status.degraded }}</dd>
         </div>
-        <div>
-          <dt class="text-xs uppercase text-slate-500">Error</dt>
-          <dd class="font-semibold text-rose-700">{{ summary.current_status.error }}</dd>
+        <div class="stat-tile {% if summary.current_status.error > 0 %}stat-tile--bad{% else %}stat-tile--muted{% endif %}">
+          <dt class="stat-tile__label">Error</dt>
+          <dd class="stat-tile__value">{{ summary.current_status.error }}</dd>
         </div>
-        <div>
-          <dt class="text-xs uppercase text-slate-500">Unknown</dt>
-          <dd class="font-semibold text-slate-500">{{ summary.current_status.unknown }}</dd>
+        <div class="stat-tile {% if summary.current_status.unknown > 0 %}stat-tile--info{% else %}stat-tile--muted{% endif %}">
+          <dt class="stat-tile__label">Unknown</dt>
+          <dd class="stat-tile__value">{{ summary.current_status.unknown }}</dd>
         </div>
       </dl>
-      <p class="mt-3 text-xs text-slate-500">Incidents (24h): {{ summary.last_24h.incidents }}</p>
     </div>
   </section>
 </div>

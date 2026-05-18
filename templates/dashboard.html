@@ -2,25 +2,33 @@
 {% block title %}Dashboard · Status Monitor{% endblock %}
 {% block content %}
 <section class="space-y-6">
-  <header class="space-y-1">
-    <h1 class="text-2xl font-semibold tracking-tight">Dashboard</h1>
+  <header class="space-y-2">
+    <div class="flex flex-wrap items-center gap-3">
+      <h1 class="text-3xl font-bold tracking-tight text-slate-900">Dashboard</h1>
+      {# Cadence chip — states a fact (refresh interval), not health. A
+         green status pill here would assert a signal it doesn't have; the
+         real health is in the tiles below and the login readiness pill. #}
+      <span class="sticker-pill sticker-pill--neutral">
+        <span class="font-mono">refresh · 5s</span>
+      </span>
+    </div>
     <p class="text-sm text-slate-500">Live fleet snapshot. Auto-refreshes every 5 seconds.</p>
   </header>
 
   {% include "dashboard/region.html" %}
 
-  <section class="grid gap-4 md:grid-cols-2">
-    <div class="rounded border bg-white p-4">
-      <h2 class="text-sm font-medium text-slate-700">Status distribution</h2>
+  <section class="grid gap-5 md:grid-cols-2">
+    <div class="sticker-card p-5">
+      <h2 class="panel-label">Status distribution</h2>
       <div id="status-donut"
-           class="mt-3 h-64 w-full"
+           class="mt-4 h-64 w-full"
            data-endpoint="/api/v1/dashboard/summary"
            aria-label="Donut chart of monitor status distribution"></div>
     </div>
-    <div class="rounded border bg-white p-4">
-      <h2 class="text-sm font-medium text-slate-700">Last 24h checks</h2>
+    <div class="sticker-card p-5">
+      <h2 class="panel-label">Last 24h checks</h2>
       <div id="last24h-bar"
-           class="mt-3 h-64 w-full"
+           class="mt-4 h-64 w-full"
            data-endpoint="/api/v1/dashboard/summary"
            aria-label="Bar chart of up vs not-up checks in the last 24 hours"></div>
     </div>
