@@ -374,7 +374,7 @@ pub mod settings {
     ) -> WebResult<Response> {
         let org = match resolve_org(org, "/settings/status-page") {
             Ok(o) => o,
-            Err(resp) => return Ok(resp),
+            Err(resp) => return Ok(*resp),
         };
         let pool = state.require_db()?;
         let ob = load_for_settings(pool, org).await?;
@@ -451,7 +451,7 @@ pub mod settings {
     ) -> WebResult<Response> {
         let org = match resolve_org(org, "/settings/usage") {
             Ok(o) => o,
-            Err(resp) => return Ok(resp),
+            Err(resp) => return Ok(*resp),
         };
         let u = state.quotas.org_usage(org).await?;
         let p = &u.plan;

@@ -97,7 +97,7 @@ pub async fn index(org: Result<CurrentOrg, AppError>) -> Response {
             active_tab: TAB_NOTIFICATIONS,
         }
         .into_response(),
-        Err(resp) => resp,
+        Err(resp) => *resp,
     }
 }
 
@@ -107,7 +107,7 @@ pub async fn list_partial(
 ) -> WebResult<Response> {
     let org = match resolve_org(org, "/settings/notifications") {
         Ok(o) => o,
-        Err(resp) => return Ok(resp),
+        Err(resp) => return Ok(*resp),
     };
     let channels = state
         .notification_channel_store
@@ -132,7 +132,7 @@ pub async fn new_form(org: Result<CurrentOrg, AppError>) -> Response {
             form: empty_create_form(),
         }
         .into_response(),
-        Err(resp) => resp,
+        Err(resp) => *resp,
     }
 }
 
@@ -143,7 +143,7 @@ pub async fn edit_form(
 ) -> WebResult<Response> {
     let org = match resolve_org(org, &format!("/settings/notifications/{id}/edit")) {
         Ok(o) => o,
-        Err(resp) => return Ok(resp),
+        Err(resp) => return Ok(*resp),
     };
     let channel = state
         .notification_channel_store

@@ -23,13 +23,13 @@ use crate::web::error::WebError;
 pub(crate) fn resolve_org(
     org: Result<CurrentOrg, AppError>,
     redirect_to: &str,
-) -> Result<OrgId, Response> {
+) -> Result<OrgId, Box<Response>> {
     match org {
         Ok(CurrentOrg(o)) => Ok(o),
-        Err(AppError::Unauthorized) => {
-            Err(crate::web::auth::login_redirect(redirect_to).into_response())
-        }
-        Err(e) => Err(WebError::from(e).into_response()),
+        Err(AppError::Unauthorized) => Err(Box::new(
+            crate::web::auth::login_redirect(redirect_to).into_response(),
+        )),
+        Err(e) => Err(Box::new(WebError::from(e).into_response())),
     }
 }
 
