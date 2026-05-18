@@ -126,6 +126,30 @@ app.{$STATUS_MONITOR_DOMAIN} {
 		}
 	}
 
+	# ─── Login page — defense-in-depth speedbump ────────────────────────
+	# /login is public + unauthenticated. The app already collapses its
+	# readiness probe to <=1 PG ping / 5s and 500ms-bounds it, so this zone
+	# is purely an edge cap so an anonymous flood can't turn the catch-all
+	# proxy into an amplifier (it otherwise has no rate limit). The OAuth
+	# round-trip itself (/auth/*) is covered by @auth above; this is just
+	# the page render. Generous (public-surface tier, not the credential
+	# tier) so shared-NAT humans are never throttled — only a flood orders
+	# of magnitude higher trips it. Terminal handle: keeps /login off the
+	# unlimited catch-all. Zone names are process-global.
+	@login path /login
+	handle @login {
+		rate_limit {
+			zone login_page {
+				key {remote_host}
+				events 60
+				window 1m
+			}
+		}
+		reverse_proxy status-monitor:8080 {
+			header_up X-Real-IP {remote_host}
+		}
+	}
+
 	# ─── Operator surface: app-enforced session auth (SaaS) ─────────────
 	# No edge basic_auth. The health/metrics/public handle blocks above
 	# are terminal; every other (operator) request falls through to the
