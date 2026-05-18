@@ -1,0 +1,52 @@
+{# Login/landing mascot. Inline SVG (no extra request) + CSS classes only;
+   motion is guarded by prefers-reduced-motion in app.css. role="img" +
+   aria-label expose it as one labelled graphic — internals are decorative
+   and intentionally have no separate descriptions. #}
+<svg viewBox="0 0 260 230" class="h-auto w-full max-w-xs"
+     role="img"
+     aria-label="Status Monitor mascot: a friendly monitoring tower watching a steady heartbeat."
+     xmlns="http://www.w3.org/2000/svg">
+  <title>Status Monitor</title>
+
+  {# antenna + breathing status dot — the "actively watching" cue #}
+  <line x1="130" y1="58" x2="130" y2="30"
+        stroke="var(--color-ink)" stroke-width="5" stroke-linecap="round"/>
+  <circle class="sm-pulse" cx="130" cy="24" r="9"
+          fill="var(--color-brand-500)" stroke="var(--color-ink)" stroke-width="4"/>
+
+  {# tower body #}
+  <rect x="38" y="58" width="184" height="146" rx="26"
+        fill="#ffffff" stroke="var(--color-ink)" stroke-width="6"/>
+
+  {# screen / face #}
+  <rect x="62" y="80" width="136" height="80" rx="14"
+        fill="var(--color-brand-50)" stroke="var(--color-ink)" stroke-width="5"/>
+
+  {# friendly eyes + smile #}
+  <circle cx="104" cy="112" r="9" fill="var(--color-ink)"/>
+  <circle cx="156" cy="112" r="9" fill="var(--color-ink)"/>
+  <circle cx="107" cy="109" r="3" fill="#ffffff"/>
+  <circle cx="159" cy="109" r="3" fill="#ffffff"/>
+  <path d="M112 134 q18 16 36 0"
+        fill="none" stroke="var(--color-ink)" stroke-width="5"
+        stroke-linecap="round"/>
+
+  {# live heartbeat sweeping across the chest — clipped to the screen so
+     the trace scrolls in and out rather than overrunning the body. #}
+  <clipPath id="sm-ekg-clip">
+    <rect x="64" y="168" width="132" height="30" rx="8"/>
+  </clipPath>
+  <rect x="64" y="168" width="132" height="30" rx="8"
+        fill="#ffffff" stroke="var(--color-ink)" stroke-width="4"/>
+  <g clip-path="url(#sm-ekg-clip)">
+    <polyline class="sm-ekg-line"
+      points="56,183 86,183 96,172 106,194 118,176 128,183 168,183
+              178,172 188,194 200,176 210,183 250,183"/>
+  </g>
+
+  {# little feet — pure cartoon charm #}
+  <line x1="92"  y1="204" x2="92"  y2="216"
+        stroke="var(--color-ink)" stroke-width="6" stroke-linecap="round"/>
+  <line x1="168" y1="204" x2="168" y2="216"
+        stroke="var(--color-ink)" stroke-width="6" stroke-linecap="round"/>
+</svg>

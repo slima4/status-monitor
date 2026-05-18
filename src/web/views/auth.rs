@@ -53,6 +53,9 @@ pub struct LoginPage {
     pub github_enabled: bool,
     pub github_url: String,
     pub invitation_hint: Option<String>,
+    /// Cached, timeout-bounded `target_store.ping()` — same dependency check
+    /// as `/readyz`, non-sensitive (no tenant scope). See [`login_ready`].
+    pub ready: bool,
 }
 
 pub async fn login(State(state): State<AppState>, Query(q): Query<LoginQuery>) -> LoginPage {
@@ -82,7 +85,50 @@ pub async fn login(State(state): State<AppState>, Query(q): Query<LoginQuery>) -
         github_enabled,
         github_url,
         invitation_hint: q.invitation,
+        ready: login_ready(&state).await,
     }
+}
+
+/// Process-global cached readiness for the (public, unauthenticated) login
+/// pill. `/login` is internet-facing and unthrottled at the edge for an
+/// anonymous visitor, so probing PG on *every* hit turns a cheap GET into a
+/// pool-acquire amplification lever against a small connection pool. One PG
+/// pool ⇒ readiness is process-wide, so a short TTL collapses a flood into
+/// ≤1 probe per [`READINESS_TTL_MS`], and the probe is timeout-bounded so a
+/// saturated/slow backend degrades the pill instead of hanging the page an
+/// operator needs most exactly when the backend is unwell.
+async fn login_ready(state: &AppState) -> bool {
+    static CACHE: std::sync::OnceLock<ReadinessCache> = std::sync::OnceLock::new();
+    static MONO_START: std::sync::LazyLock<std::time::Instant> =
+        std::sync::LazyLock::new(std::time::Instant::now);
+    const READINESS_TTL_MS: u64 = 5_000;
+    const PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(500);
+
+    struct ReadinessCache {
+        ready: std::sync::atomic::AtomicBool,
+        // 0 = never probed (forces a first probe); else ms since MONO_START.
+        checked_at_ms: std::sync::atomic::AtomicU64,
+    }
+    use std::sync::atomic::Ordering::Relaxed;
+
+    let cache = CACHE.get_or_init(|| ReadinessCache {
+        ready: std::sync::atomic::AtomicBool::new(false),
+        checked_at_ms: std::sync::atomic::AtomicU64::new(0),
+    });
+    let now = (MONO_START.elapsed().as_millis() as u64).max(1);
+    let last = cache.checked_at_ms.load(Relaxed);
+    if last != 0 && now.saturating_sub(last) < READINESS_TTL_MS {
+        return cache.ready.load(Relaxed);
+    }
+
+    // A few requests may race here at expiry and each probe once — bounded
+    // by TTL, not per-request, which is the property that matters.
+    let ready = tokio::time::timeout(PROBE_TIMEOUT, state.target_store.ping())
+        .await
+        .is_ok_and(|r| r.is_ok());
+    cache.ready.store(ready, Relaxed);
+    cache.checked_at_ms.store(now, Relaxed);
+    ready
 }
 
 #[derive(Template, WebTemplate)]
@@ -657,6 +703,7 @@ mod tests {
             github_enabled: true,
             github_url: "/auth/github/login".into(),
             invitation_hint: None,
+            ready: true,
         }
         .render()
         .unwrap();
@@ -675,6 +722,7 @@ mod tests {
             github_enabled: false,
             github_url: "/auth/github/login".into(),
             invitation_hint: None,
+            ready: true,
         }
         .render()
         .unwrap();
@@ -689,6 +737,7 @@ mod tests {
             github_enabled: true,
             github_url: "/auth/github/login?invitation=abc".into(),
             invitation_hint: Some("abc".into()),
+            ready: true,
         }
         .render()
         .unwrap();

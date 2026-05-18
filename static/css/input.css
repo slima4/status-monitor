@@ -8,6 +8,11 @@
     --color-brand-500: oklch(0.65 0.18 250);
     --color-brand-900: oklch(0.30 0.10 250);
 
+    /* Cartoon "ink": the single dark stroke every sticker edge + hard shadow
+       uses. Near-slate-900 but warmer than pure black — flat-cartoon, not
+       harsh. One token so the look stays consistent if it's ever retuned. */
+    --color-ink: oklch(0.27 0.04 256);
+
     --font-display: "Inter", system-ui, sans-serif;
     --font-mono:    "JetBrains Mono", ui-monospace, monospace;
 }
@@ -74,4 +79,66 @@
     :where(button, [role="button"], a, input, select, textarea, summary):focus-visible {
         @apply outline-none ring-2 ring-slate-500 ring-offset-1;
     }
+}
+
+@layer components {
+    /* Flat-cartoon "sticker": a panel that sits on the page like a vinyl
+       sticker — thick ink edge + a hard, un-blurred offset shadow (no soft
+       drop-blur). The shadow is plain CSS because it's an offset/colour
+       arbitrary value @apply can't express cleanly. */
+    .sticker-card {
+        @apply rounded-2xl border-2 bg-white;
+        border-color: var(--color-ink);
+        box-shadow: 6px 6px 0 0 var(--color-ink);
+    }
+
+    /* Same ink edge + hard offset shadow as .sticker-card, sized for a
+       control (smaller offset). Both share var(--color-ink) so the cartoon
+       shadow stays one retunable token — never re-state the offset inline. */
+    .sticker-btn {
+        @apply rounded-xl border-2;
+        border-color: var(--color-ink);
+        box-shadow: 4px 4px 0 0 var(--color-ink);
+    }
+
+    /* Status pill for the landing trust strip. `--ok` / `--warn` only swap
+       the fill; the ink edge + chunky radius are shared so the cartoon
+       language stays consistent whatever the backend state. */
+    .sticker-pill {
+        @apply inline-flex items-center gap-1.5 rounded-full border-2 px-3 py-1
+               text-xs font-semibold;
+        border-color: var(--color-ink);
+    }
+    .sticker-pill--ok      { @apply bg-emerald-100 text-emerald-900; }
+    .sticker-pill--warn    { @apply bg-amber-100  text-amber-900;  }
+    .sticker-pill--neutral { @apply bg-white      text-slate-700; }
+
+    /* Live "we never stop checking" heartbeat. The EKG path is drawn with a
+       long dash that scrolls left → reads as a continuous monitor sweep,
+       not a one-shot animation. CSS-only: zero JS, zero image bytes — the
+       performance promise the page makes, kept by the page itself. */
+    .sm-ekg-line {
+        stroke: var(--color-brand-500);
+        stroke-width: 2.5;
+        fill: none;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        stroke-dasharray: 16 220;
+        animation: sm-ekg 1.6s linear infinite;
+    }
+    /* Status dot on the mascot — a calm breathing pulse, not a flash. */
+    .sm-pulse { animation: sm-pulse 2.4s ease-in-out infinite; transform-origin: center; }
+}
+
+@keyframes sm-ekg   { to { stroke-dashoffset: -236; } }
+@keyframes sm-pulse {
+    0%, 100% { opacity: 1;   transform: scale(1);    }
+    50%      { opacity: .55; transform: scale(.78);  }
+}
+
+/* Motion is decoration here, never information — a reduced-motion visitor
+   still sees the full static EKG trace and a solid dot. WCAG 2.3.3. */
+@media (prefers-reduced-motion: reduce) {
+    .sm-ekg-line { animation: none; stroke-dasharray: none; }
+    .sm-pulse    { animation: none; }
 }

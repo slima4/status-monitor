@@ -125,6 +125,13 @@ pub mod filters {
     pub fn source_commit(_: &str, _: &dyn askama::Values) -> askama::Result<&'static str> {
         Ok(env!("SM_SOURCE_COMMIT"))
     }
+
+    /// Crate version baked at compile time. Public build string, safe to
+    /// show pre-auth — no host/tenant data. Invoked as `{{ ""|version }}`.
+    #[askama::filter_fn]
+    pub fn version(_: &str, _: &dyn askama::Values) -> askama::Result<&'static str> {
+        Ok(env!("CARGO_PKG_VERSION"))
+    }
 }
 
 #[cfg(test)]
