@@ -5,6 +5,22 @@ export function initChart(el) {
     return echarts.init(el, null, { renderer: "canvas" });
 }
 
+// Resolve a Tailwind theme token (`--color-*`, `--font-*`) to a concrete
+// value via a throwaway probe so charts share the CSS palette instead of
+// hardcoding hex. Tokens are oklch(); a raw oklch() canvas fillStyle fails
+// silently on older engines, so let the browser hand back rgb(). A missing
+// / mistyped token doesn't error — the invalid `var()` makes the probe
+// inherit the body value, so a typo ships a body-coloured chart, not a
+// crash. Call once per token (values are static; a theme swap reloads).
+export function resolveToken(name, prop = "color") {
+    const probe = document.createElement("span");
+    probe.style.cssText = `position:absolute;visibility:hidden;${prop}:var(${name})`;
+    document.body.appendChild(probe);
+    const value = getComputedStyle(probe)[prop];
+    probe.remove();
+    return value;
+}
+
 export async function fetchJson(url) {
     const res = await fetch(url, { headers: { Accept: "application/json" } });
     if (!res.ok) throw new Error(`${url} → ${res.status}`);
