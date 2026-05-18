@@ -42,7 +42,13 @@ in v1):
 
 ## Enabling a component
 
-PATCH the target with the new fields:
+The quickest path is the UI: **Settings → Status page → Public
+components**. Every monitor in the org is listed; flip **Public** on,
+optionally set a **Public name** (blank shows the real monitor name) and
+a **Group**, and drag the ⠿ handle (or focus it and press ↑/↓) to set
+the public order. Each edit autosaves via the PATCH endpoint below.
+
+For scripting, PATCH the target directly:
 
 ```bash
 curl -X PATCH http://127.0.0.1:8080/api/v1/targets/$ID \
@@ -55,6 +61,12 @@ curl -X PATCH http://127.0.0.1:8080/api/v1/targets/$ID \
     "public_sort_order": 10
   }'
 ```
+
+`public_name`, `public_description`, and `public_group` use the same
+three-state PATCH semantics as incident narration: **omit** the field to
+leave it unchanged, send a string to set it, or send JSON `null` to
+clear it back to the default (real monitor name / no group). Blanking
+the field in the UI sends `null` for you.
 
 The page is cached for 10 s in-process (moka single-flight, with an
 `ArcSwap` last-known-good fallback so transient ClickHouse failures
