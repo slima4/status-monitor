@@ -64,7 +64,11 @@ tracing-opentelemetry = "0.32"
 opentelemetry = "0.31"
 opentelemetry_sdk = { version = "0.31", features = ["rt-tokio"] }
 # OTLP/HTTP protobuf exporter only (reqwest + rustls). No tonic/gRPC.
-opentelemetry-otlp = { version = "0.31", default-features = false, features = ["http-proto", "trace", "reqwest-client", "reqwest-rustls"] }
+# Blocking reqwest client, NOT the async one: opentelemetry_sdk 0.31's
+# BatchSpanProcessor exports from a dedicated non-Tokio thread, so the
+# async client panics there ("no reactor running"). The blocking client
+# does sync HTTP on that thread — the pairing the SDK 0.31 expects.
+opentelemetry-otlp = { version = "0.31", default-features = false, features = ["http-proto", "trace", "reqwest-blocking-client", "reqwest-rustls"] }
 metrics = "0.24"
 metrics-exporter-prometheus = "0.18"
 
