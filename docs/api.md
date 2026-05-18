@@ -177,29 +177,30 @@ Server returns the full `Target` including `id` (UUIDv7), `created_at`, `updated
 
 ### Alert config
 
-`alerts` is an optional map keyed by channel name. Presence of a channel key opts the target in; omitting the field disables alerting for that target. Channel-specific transport credentials live in [`notifications.*`](configuration.md) — a target opting into a globally-disabled channel logs a debug message and produces no notifications.
+`alerts` is an optional array of channel bindings. Each binding references a
+notification channel by `channel_id` (see [Notification channels](#notification-channels)).
+An empty/omitted array disables alerting for that target.
 
 ```jsonc
-"alerts": {
-  "slack":   { "after_failures": 3, "notify_recovery": true },
-  "webhook": { "after_failures": 6, "notify_recovery": true },
-  "email":   { "after_failures": 5, "notify_recovery": false, "to": ["ops@example.com"] }
-}
+"alerts": [
+  { "channel_id": "0192a1ce-0000-7000-8000-000000000001", "after_failures": 3, "notify_recovery": true },
+  { "channel_id": "0192a1ce-0000-7000-8000-000000000002", "after_failures": 6, "notify_recovery": false }
+]
 ```
 
-- `after_failures` — number of consecutive non-`up` results before the channel fires a `down` notification. Reset to zero on the next `up` result. Must be `>= 1`.
+- `channel_id` — id of a notification channel owned by the **same org**. A binding to an unknown or another tenant's channel is rejected.
+- `after_failures` — consecutive non-`up` results before the binding fires a `down` notification. Reset to zero on the next `up`. Must be `>= 1`.
 - `notify_recovery` — when `true` (default), an `up` result following a fired `down` emits a `recovered` notification. When `false`, recovery is silent.
-- `to` — required for `email`; must contain at least one address. Other channels do not accept this field.
 
-The state machine is fire-once + recovery: while a target is in the `alerting` state, repeat failures do not re-fire. Counters are kept in memory and reset on process restart — after a restart, a target that was already alerting will re-fire when its threshold is next reached.
+The state machine is fire-once + recovery, tracked per `(target, channel)`: while in the `alerting` state, repeat failures do not re-fire. Counters are kept in memory and reset on process restart — after a restart, a target that was already alerting will re-fire when its threshold is next reached.
 
 ### Alert validation errors
 
-`POST` and `PATCH` return `400 Bad Request` for:
+`POST` and `PATCH` return `400 Bad Request` (`INVALID_ALERT_CONFIG`) for:
 
-- `alerts.<channel>: after_failures must be >= 1`
-- `alerts.email: 'to' must contain at least one recipient`
-- `alerts.email: '<addr>' is not a valid email address` (must contain `@`; full RFC 5321 validation happens at send time)
+- `after_failures must be >= 1`
+- a duplicate `channel_id` in the array
+- `notification channel <id> does not exist` — unknown id, or one owned by another org
 
 ### Validation errors
 
@@ -213,6 +214,43 @@ The state machine is fire-once + recovery: while a target is in the `alerting` s
 - **SSRF guard** — `target address ... is in a blocked range`. Triggered when the URL or TCP host is an IP literal that resolves to loopback / private / link-local / reserved space (see [Configuration → `security.allow_private_targets`](configuration.md)). Hostname literals are checked again at connect time after DNS resolution, so DNS rebinding cannot bypass the guard.
 - **Redaction sentinel** — `basic_auth contains redaction sentinel — re-supply the real credential` or the equivalent for `bearer_token`. Rejected to prevent a `GET` → `PATCH` round-trip from silently overwriting the stored credential with `"***"`.
 - **TLS verification + credentials** — `verify_tls = false cannot be combined with basic_auth or bearer_token over https`. When verification is disabled any host presenting a forged certificate can collect the stored credential on every check interval. Set `verify_tls = true` (recommended) or remove the credential from the target.
+
+## Notification channels
+
+Per-org delivery destinations that targets bind to via their `alerts` array.
+Org scoping is implicit in the caller's authenticated context — one tenant can
+never read, mutate, or test another's channels.
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/api/v1/notification-channels` | Create a channel (201 + `Location`) |
+| `GET` | `/api/v1/notification-channels` | List the org's channels |
+| `GET` | `/api/v1/notification-channels/{id}` | Get one |
+| `PATCH` | `/api/v1/notification-channels/{id}` | Partial update |
+| `DELETE` | `/api/v1/notification-channels/{id}` | Delete (204) |
+| `POST` | `/api/v1/notification-channels/{id}/test` | Send a synthetic test alert |
+
+```jsonc
+{
+  "name": "Ops Slack",
+  "enabled": true,
+  "config": { "type": "slack", "webhook_url": "https://hooks.slack.com/services/T/B/XXXX" }
+}
+```
+
+`config` is `type`-tagged. Supported transports:
+
+- `slack` — `{ "type": "slack", "webhook_url": "https://…" }` (incoming webhook; posts `{ "text": "…" }`)
+- `webhook` — `{ "type": "webhook", "url": "https://…", "headers": { … } }` (POSTs the raw `AlertEvent` JSON; optional custom headers)
+- `telegram` — `{ "type": "telegram", "bot_token": "…", "chat_id": "…" }`
+
+Behaviour:
+
+- **Secrets sealed at rest** with the credentials KEK; **never echoed back**. Every read path masks secret-bearing fields with `***` (the webhook URL is masked whole — it can carry a token; header *names* and `chat_id` are kept so the UI stays useful).
+- **Redaction-sentinel guard**: submitting a `config` that still contains `***` returns `400 REDACTION_SENTINEL`. Omit `config` on `PATCH` to keep the stored secret unchanged.
+- **Validation** (`400`): `webhook`/`slack` URLs must be `https`; `telegram` requires non-empty `bot_token` and `chat_id`; channel `name` is required and ≤ 100 chars.
+- **Quota**: capped per org by the plan's `max_notification_channels` (atomic, advisory-locked). A duplicate name within the org is `422 CHANNEL_NAME_TAKEN`; the cap is `422 CHANNEL_QUOTA_EXCEEDED`.
+- **Test send** delivers one clearly-labelled synthetic alert through the channel's transport (works on a disabled channel). A transport failure is `422 CHANNEL_TEST_FAILED`.
 
 ## Rate limiting
 
@@ -243,7 +281,7 @@ Every 4xx and 5xx response uses one wire shape:
 - `details` carries optional structured context (e.g., `{ "range": "127.0.0.0/8" }` for SSRF rejections).
 - `trace_id` is the W3C `traceparent` when tracing is enabled.
 
-Common codes: `INVALID_URL_SCHEME`, `INVALID_URL_FORMAT`, `SSRF_BLOCKED`, `INVALID_INTERVAL`, `INVALID_TIMEOUT`, `INVALID_TCP_PORT`, `INVALID_TCP_HOST`, `INVALID_STATUS_RANGE`, `INVALID_TLS_CERT_PARAMS`, `INVALID_DOMAIN_PARAMS`, `INVALID_TLS_CRED_COMBO`, `INVALID_ALERT_CONFIG`, `REDACTION_SENTINEL`, `BULK_EMPTY`, `BULK_TOO_LARGE`, `BAD_TIME_RANGE`, `TARGET_NOT_FOUND`, `CIRCUIT_OPEN`, `DEPENDENCY_DOWN`, `INTERNAL`.
+Common codes: `INVALID_URL_SCHEME`, `INVALID_URL_FORMAT`, `SSRF_BLOCKED`, `INVALID_INTERVAL`, `INVALID_TIMEOUT`, `INVALID_TCP_PORT`, `INVALID_TCP_HOST`, `INVALID_STATUS_RANGE`, `INVALID_TLS_CERT_PARAMS`, `INVALID_DOMAIN_PARAMS`, `INVALID_TLS_CRED_COMBO`, `INVALID_ALERT_CONFIG`, `REDACTION_SENTINEL`, `BULK_EMPTY`, `BULK_TOO_LARGE`, `BAD_TIME_RANGE`, `TARGET_NOT_FOUND`, `CHANNEL_NOT_FOUND`, `CHANNEL_NAME_TAKEN`, `CHANNEL_NAME_INVALID`, `CHANNEL_QUOTA_EXCEEDED`, `INVALID_CHANNEL_CONFIG`, `CHANNEL_TEST_FAILED`, `CIRCUIT_OPEN`, `DEPENDENCY_DOWN`, `INTERNAL`.
 
 ### Quota, rate-limit and abuse codes
 

@@ -3,19 +3,28 @@ use std::sync::Arc;
 use dashmap::DashMap;
 use uuid::Uuid;
 
-use crate::domain::Target;
+use crate::domain::{OrgId, Target};
 use crate::error::Result;
 use crate::storage::admin::EnabledTargetSource;
 
+/// A scheduled target plus its owning tenant. The `org_id` rides with the
+/// target through the scheduler→worker→alert path so channel resolution is
+/// tenant-scoped.
+#[derive(Debug, Clone)]
+pub struct ScheduledTarget {
+    pub org_id: OrgId,
+    pub target: Arc<Target>,
+}
+
 pub struct TargetRegistry {
     source: Arc<dyn EnabledTargetSource>,
-    targets: DashMap<Uuid, Arc<Target>>,
+    targets: DashMap<Uuid, ScheduledTarget>,
 }
 
 #[derive(Debug, Default, Clone)]
 pub struct RegistryDiff {
-    pub added: Vec<Arc<Target>>,
-    pub updated: Vec<Arc<Target>>,
+    pub added: Vec<ScheduledTarget>,
+    pub updated: Vec<ScheduledTarget>,
     pub removed: Vec<Uuid>,
 }
 
@@ -46,21 +55,24 @@ impl TargetRegistry {
         let mut diff = RegistryDiff::default();
         let mut seen = std::collections::HashSet::with_capacity(fresh.len());
 
-        for target in fresh {
+        for (org_id, target) in fresh {
             seen.insert(target.id);
             let id = target.id;
-            let arc = Arc::new(target);
+            let st = ScheduledTarget {
+                org_id,
+                target: Arc::new(target),
+            };
             match self.targets.get(&id) {
                 Some(existing) => {
-                    if existing.updated_at != arc.updated_at {
+                    if existing.target.updated_at != st.target.updated_at {
                         drop(existing);
-                        self.targets.insert(id, arc.clone());
-                        diff.updated.push(arc);
+                        self.targets.insert(id, st.clone());
+                        diff.updated.push(st);
                     }
                 }
                 None => {
-                    self.targets.insert(id, arc.clone());
-                    diff.added.push(arc);
+                    self.targets.insert(id, st.clone());
+                    diff.added.push(st);
                 }
             }
         }

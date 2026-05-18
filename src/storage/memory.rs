@@ -507,13 +507,19 @@ impl TargetStore for InMemoryTargetStore {
 
 #[async_trait]
 impl crate::storage::admin::EnabledTargetSource for InMemoryTargetStore {
-    async fn list_all_enabled_targets(&self) -> Result<Vec<Target>> {
+    /// Single-org test fixture: org is not modelled, so every enabled target
+    /// is tagged with the nil-UUID org. The alert fan-out is only ever wired
+    /// in production (`ResultFanout::new`); test routers use
+    /// `ResultFanout::storage_only`, so this sentinel never reaches a
+    /// channel resolution.
+    async fn list_all_enabled_targets(&self) -> Result<Vec<(OrgId, Target)>> {
+        let org = OrgId(uuid::Uuid::nil());
         Ok(self
             .targets
             .lock()
             .iter()
             .filter(|t| t.enabled)
-            .cloned()
+            .map(|t| (org, t.clone()))
             .collect())
     }
 }

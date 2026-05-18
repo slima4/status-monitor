@@ -25,17 +25,21 @@ A customer-facing `/status` page (HTML + JSON + RSS 2.0) is built into the binar
 
 ## Alerting
 
-Targets opt into per-channel notifications by adding an `alerts` block:
+Notification channels are per-org resources (Slack incoming webhook, generic
+HTTP webhook, Telegram bot) created via `/api/v1/notification-channels`.
+Transport secrets are sealed at rest and never echoed back. A target opts in
+by binding one or more channels in its `alerts` array:
 
 ```jsonc
-"alerts": {
-  "slack":   { "after_failures": 3 },
-  "webhook": { "after_failures": 6 },
-  "email":   { "after_failures": 5, "to": ["ops@example.com"] }
-}
+"alerts": [
+  { "channel_id": "0192…", "after_failures": 3 },
+  { "channel_id": "0193…", "after_failures": 6, "notify_recovery": false }
+]
 ```
 
-Fire-once + recovery semantics. Transport credentials (Slack webhook URL, generic webhook URL, SMTP) are configured globally under `[notifications.*]`. See [docs/api.md](docs/api.md) and [docs/configuration.md](docs/configuration.md) for the full contract.
+Fire-once + recovery semantics. Channels are tenant-isolated — a target can
+only bind a channel its own org owns. See [docs/api.md](docs/api.md) for the
+full contract.
 
 ## Quick start
 

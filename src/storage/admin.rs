@@ -21,25 +21,38 @@ use anyhow::Context;
 use async_trait::async_trait;
 use sqlx::PgPool;
 use std::sync::Arc;
+use uuid::Uuid;
 
-use crate::domain::Target;
+use crate::domain::{OrgId, Target};
 use crate::error::Result;
 use crate::security::Cipher;
 use crate::storage::postgres::{TargetRow, decode_target_row};
 
 /// Source of every enabled target across every organisation, for the
-/// scheduler's global registry. Implemented by [`AdminRepo`] (production) and
-/// by [`crate::storage::InMemoryTargetStore`] (single-org test fixtures).
+/// scheduler's global registry. Each target is paired with its owning
+/// [`OrgId`] so the scheduler→worker→alert path can resolve channels
+/// tenant-scoped (a target only ever reaches its own org's channels).
+/// Implemented by [`AdminRepo`] (production) and by
+/// [`crate::storage::InMemoryTargetStore`] (single-org test fixtures).
 #[async_trait]
 pub trait EnabledTargetSource: Send + Sync {
-    async fn list_all_enabled_targets(&self) -> Result<Vec<Target>>;
+    async fn list_all_enabled_targets(&self) -> Result<Vec<(OrgId, Target)>>;
 }
 
 #[async_trait]
 impl EnabledTargetSource for AdminRepo {
-    async fn list_all_enabled_targets(&self) -> Result<Vec<Target>> {
+    async fn list_all_enabled_targets(&self) -> Result<Vec<(OrgId, Target)>> {
         AdminRepo::list_all_enabled_targets(self).await
     }
+}
+
+/// `targets` row plus its `org_id`. Reuses [`TargetRow`] via `#[sqlx(flatten)]`
+/// so the column list stays single-sourced with the org-scoped store.
+#[derive(sqlx::FromRow)]
+struct OrgTargetRow {
+    org_id: Uuid,
+    #[sqlx(flatten)]
+    target: TargetRow,
 }
 
 pub struct AdminRepo {
@@ -73,9 +86,9 @@ impl AdminRepo {
     /// All enabled targets across every organisation. Used by the scheduler
     /// to materialise its global registry — checks must run for tenants the
     /// caller has no session for.
-    pub async fn list_all_enabled_targets(&self) -> Result<Vec<Target>> {
-        let rows: Vec<TargetRow> = sqlx::query_as::<_, TargetRow>(
-            r#"SELECT id, name, check_spec, interval_secs, enabled, tags, alerts,
+    pub async fn list_all_enabled_targets(&self) -> Result<Vec<(OrgId, Target)>> {
+        let rows: Vec<OrgTargetRow> = sqlx::query_as::<_, OrgTargetRow>(
+            r#"SELECT org_id, id, name, check_spec, interval_secs, enabled, tags, alerts,
                       public_status, public_name, public_description, public_group, public_sort_order,
                       created_at, updated_at
                FROM targets
@@ -85,7 +98,9 @@ impl AdminRepo {
         .await
         .context("admin: list all enabled targets")?;
         rows.into_iter()
-            .map(|r| decode_target_row(r, self.cipher.as_deref()))
+            .map(|r| {
+                decode_target_row(r.target, self.cipher.as_deref()).map(|t| (OrgId(r.org_id), t))
+            })
             .collect()
     }
 }

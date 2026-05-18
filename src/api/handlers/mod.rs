@@ -8,6 +8,7 @@ pub mod invitations;
 pub mod magic_link;
 pub mod maintenance;
 pub mod me;
+pub mod notification_channels;
 pub mod orgs;
 pub mod public;
 pub mod results;

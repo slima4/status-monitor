@@ -50,6 +50,7 @@ pub struct OrgQuotas {
     pub max_pending_invitations: QuotaUsage,
     pub max_public_components: QuotaUsage,
     pub max_maintenance_windows: QuotaUsage,
+    pub max_notification_channels: QuotaUsage,
 }
 
 /// Non-counted policy values (floors / ceilings, not "x of y").
@@ -139,6 +140,10 @@ pub async fn get_org_usage(
             max_maintenance_windows: QuotaUsage::new(
                 u.maintenance_windows,
                 p.max_maintenance_windows,
+            ),
+            max_notification_channels: QuotaUsage::new(
+                u.notification_channels,
+                p.max_notification_channels,
             ),
         },
         policy: UsagePolicy {

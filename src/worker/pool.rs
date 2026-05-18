@@ -8,7 +8,7 @@ use tokio::sync::{Semaphore, mpsc};
 use uuid::Uuid;
 
 use crate::config::CircuitBreakerConfig;
-use crate::domain::{CheckResult, CheckSpec, Target};
+use crate::domain::{CheckResult, CheckSpec, OrgId, Target};
 use crate::http_client::HttpClients;
 use crate::notifier::event::AlertSignal;
 use crate::observability::metrics::names;
@@ -16,6 +16,9 @@ use crate::worker::circuit_breaker::{BreakerState, CIRCUIT_OPEN_REASON, CircuitB
 
 pub struct CheckTask {
     pub target: Arc<Target>,
+    /// Owning tenant of `target`. Threaded so a check result fans out to the
+    /// alert engine with the org needed for tenant-scoped channel resolution.
+    pub org_id: OrgId,
 }
 
 impl CheckTask {
@@ -80,11 +83,12 @@ impl ResultFanout {
         self.storage_dropped.fetch_add(1, Ordering::Relaxed);
     }
 
-    fn dispatch(&self, target: Arc<Target>, result: CheckResult) {
+    fn dispatch(&self, target: Arc<Target>, org_id: OrgId, result: CheckResult) {
         if let Some(tx) = &self.alerts {
             // Only clone when an alert downstream is attached.
             let signal = AlertSignal {
                 target,
+                org_id,
                 result: result.clone(),
             };
             if tx.try_send(signal).is_err() {
@@ -197,6 +201,7 @@ impl WorkerPool {
         let breaker_cfg = self.breaker_cfg;
         let fanout = self.fanout.clone();
         let target = task.target.clone();
+        let org_id = task.org_id;
 
         tokio::spawn(async move {
             let _permit = permit;
@@ -205,14 +210,14 @@ impl WorkerPool {
             if !breaker.allow() {
                 counter!(names::CHECK_ERRORS, "kind" => "circuit_open").increment(1);
                 let result = CheckResult::error(task.target.id, CIRCUIT_OPEN_REASON);
-                fanout.dispatch(target, result);
+                fanout.dispatch(target, org_id, result);
                 return;
             }
 
             let result = crate::worker::execute(task.target.id, &task.target.check, &clients).await;
             breaker.record(result.status);
             record_metrics(&result);
-            fanout.dispatch(target, result);
+            fanout.dispatch(target, org_id, result);
         });
     }
 }

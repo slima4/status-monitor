@@ -119,7 +119,7 @@ async fn main() -> Result<()> {
     // path is always wired (no global enable gate). The engine resolves a
     // target's bound channels from this store per result.
     let notification_channel_store: Arc<dyn NotificationChannelStore> = Arc::new(
-        PgNotificationChannelStore::new(pg_pool.clone(), default_org_id, cipher.clone()),
+        PgNotificationChannelStore::new(pg_pool.clone(), cipher.clone()),
     );
     let (alert_tx, alert_rx) = mpsc::channel(cfg.storage.clickhouse.buffer_size.max(1024));
     let fanout = ResultFanout::new(result_tx.clone(), Some(alert_tx));

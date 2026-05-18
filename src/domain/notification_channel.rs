@@ -62,22 +62,43 @@ impl ChannelConfig {
         }
     }
 
-    /// JSON copy with every secret-bearing field masked, for API responses
-    /// and the edit form. Non-secret shape (kind, header *names*, chat id) is
-    /// kept so the UI can still show which channel this is.
-    pub fn redacted(&self) -> serde_json::Value {
+    /// Overwrite every secret-bearing field with [`MASK`] in place. Non-secret
+    /// routing shape (kind, header *names*, chat id) is kept so the UI can
+    /// still show which channel this is. The webhook URL itself can carry a
+    /// token (…/hooks/T/B/secret), so the whole value is masked.
+    ///
+    /// Single source of the masking policy: [`Self::redacted`] and the API
+    /// `RedactInPlace` impl both route through here, so a new secret field on
+    /// a variant is masked everywhere by editing one match arm.
+    pub fn redact_in_place(&mut self) {
         match self {
-            // The webhook URL itself can carry a token (…/hooks/T/B/secret),
-            // so mask the whole value, keep only header names.
-            Self::Webhook { headers, .. } => serde_json::json!({
-                "type": "webhook",
-                "url": MASK,
-                "headers": headers.keys().map(|k| (k.clone(), MASK)).collect::<BTreeMap<_, _>>(),
-            }),
-            Self::Slack { .. } => serde_json::json!({ "type": "slack", "webhook_url": MASK }),
-            Self::Telegram { chat_id, .. } => serde_json::json!({
-                "type": "telegram", "bot_token": MASK, "chat_id": chat_id,
-            }),
+            Self::Webhook { url, headers } => {
+                *url = MASK.to_string();
+                for v in headers.values_mut() {
+                    *v = MASK.to_string();
+                }
+            }
+            Self::Slack { webhook_url } => *webhook_url = MASK.to_string(),
+            Self::Telegram { bot_token, .. } => *bot_token = MASK.to_string(),
+        }
+    }
+
+    /// JSON copy with every secret-bearing field masked, for API responses
+    /// and the edit form.
+    pub fn redacted(&self) -> serde_json::Value {
+        let mut c = self.clone();
+        c.redact_in_place();
+        serde_json::to_value(&c).unwrap_or(serde_json::Value::Null)
+    }
+
+    /// True if any secret-bearing field still carries the redaction sentinel.
+    /// A `GET → PATCH` round-trip that re-submits a masked config must be
+    /// rejected, never written back as the literal `***`.
+    pub fn has_redaction_sentinel(&self) -> bool {
+        match self {
+            Self::Webhook { url, headers } => url == MASK || headers.values().any(|v| v == MASK),
+            Self::Slack { webhook_url } => webhook_url == MASK,
+            Self::Telegram { bot_token, .. } => bot_token == MASK,
         }
     }
 

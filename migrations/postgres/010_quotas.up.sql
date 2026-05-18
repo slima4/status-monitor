@@ -15,6 +15,7 @@ CREATE TABLE plans (
     max_api_tokens_per_user         INTEGER NOT NULL,
     max_public_components           INTEGER NOT NULL,
     max_maintenance_windows         INTEGER NOT NULL,
+    max_notification_channels       INTEGER NOT NULL,
     max_logo_size_bytes             INTEGER NOT NULL,
     -- Per-org rate limits (per minute)
     api_writes_per_minute           INTEGER NOT NULL,
@@ -39,7 +40,8 @@ INSERT INTO plans (
     id, name, description,
     max_targets, min_check_interval_secs, retention_days,
     max_members, max_pending_invitations, max_api_tokens_per_user,
-    max_public_components, max_maintenance_windows, max_logo_size_bytes,
+    max_public_components, max_maintenance_windows, max_notification_channels,
+    max_logo_size_bytes,
     api_writes_per_minute, api_reads_per_minute,
     bulk_ops_per_minute, test_now_per_minute, check_now_per_minute,
     incident_narration_enabled
@@ -47,7 +49,8 @@ INSERT INTO plans (
     'free', 'Free', 'Free tier for small teams and personal projects',
     10, 60, 30,
     5, 10, 5,
-    10, 20, 204800,
+    10, 20, 20,
+    204800,
     600, 6000,
     30, 60, 60,
     true

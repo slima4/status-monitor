@@ -21,6 +21,7 @@ enough to keep abuse on a small VM cheap.
 | `max_api_tokens_per_user` | 5 | API tokens a single user may hold |
 | `max_public_components` | 10 | Targets shown on the public status page |
 | `max_maintenance_windows` | 20 | Scheduled maintenance windows |
+| `max_notification_channels` | 20 | Notification channels (Slack/webhook/Telegram) in the org |
 | `max_logo_size_bytes` | 204800 | Status-page logo upload ceiling (200 KB) |
 
 | Rate budget (per minute) | Free | Category |

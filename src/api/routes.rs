@@ -111,6 +111,21 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
                 .delete(handlers::maintenance::delete_maintenance),
         )
         .route(
+            "/notification-channels",
+            get(handlers::notification_channels::list)
+                .post(handlers::notification_channels::create),
+        )
+        .route(
+            "/notification-channels/{id}",
+            get(handlers::notification_channels::get)
+                .patch(handlers::notification_channels::update)
+                .delete(handlers::notification_channels::delete),
+        )
+        .route(
+            "/notification-channels/{id}/test",
+            post(handlers::notification_channels::test_send),
+        )
+        .route(
             "/incidents/{id}",
             axum::routing::patch(handlers::incidents::update_incident_narration),
         )

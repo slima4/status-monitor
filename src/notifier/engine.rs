@@ -10,7 +10,7 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use crate::domain::{CheckStatus, NotificationChannel};
+use crate::domain::{CheckStatus, NotificationChannel, OrgId};
 use crate::notifier::build_notifier;
 use crate::notifier::event::{AlertEvent, AlertKind, AlertSignal};
 use crate::observability::metrics::names;
@@ -73,9 +73,10 @@ pub struct AlertEngine {
     channels: Arc<dyn NotificationChannelStore>,
     http: crate::http_outbound::OutboundHttpClient,
     state: Arc<Mutex<HashMap<(Uuid, Uuid), AlertState>>>,
-    /// `None` is cached too, so a binding to a deleted channel doesn't hammer
-    /// the store on every check.
-    cache: Cache<Uuid, Option<Arc<NotificationChannel>>>,
+    /// Keyed by `(org, channel_id)` so a tenant's binding can only ever hit
+    /// that tenant's channel. `None` is cached too, so a binding to a deleted
+    /// channel doesn't hammer the store on every check.
+    cache: Cache<(OrgId, Uuid), Option<Arc<NotificationChannel>>>,
 }
 
 impl AlertEngine {
@@ -113,14 +114,22 @@ impl AlertEngine {
     /// Resolve a bound channel id to its (org-scoped) channel. Cached for
     /// `CHANNEL_CACHE_TTL`; a store error is logged and treated as "absent"
     /// for this tick but not cached, so the next result retries.
-    async fn resolve(&self, channel_id: Uuid) -> Option<Arc<NotificationChannel>> {
-        if let Some(hit) = self.cache.get(&channel_id) {
+    async fn resolve(&self, org: OrgId, channel_id: Uuid) -> Option<Arc<NotificationChannel>> {
+        // Defense in depth: a nil org is the in-memory test fixture's
+        // unset-org sentinel, never a real tenant. Refuse to resolve it so a
+        // mis-wired alert fan-out can never cross-bind the nil org to a real
+        // channel, regardless of the prose invariant upstream.
+        debug_assert!(!org.0.is_nil(), "alert resolve called with nil org");
+        if org.0.is_nil() {
+            return None;
+        }
+        if let Some(hit) = self.cache.get(&(org, channel_id)) {
             return hit;
         }
-        match self.channels.get(channel_id).await {
+        match self.channels.get(org, channel_id).await {
             Ok(opt) => {
                 let val = opt.map(Arc::new);
-                self.cache.insert(channel_id, val.clone());
+                self.cache.insert((org, channel_id), val.clone());
                 val
             }
             Err(err) => {
@@ -135,9 +144,10 @@ impl AlertEngine {
         if target.alerts.is_empty() {
             return;
         }
+        let org = signal.org_id;
         let is_up = signal.result.status == CheckStatus::Up;
         for binding in target.alerts.iter() {
-            let Some(channel) = self.resolve(binding.channel_id).await else {
+            let Some(channel) = self.resolve(org, binding.channel_id).await else {
                 continue;
             };
             if !channel.enabled {
@@ -200,6 +210,10 @@ mod tests {
     use crate::domain::{ChannelConfig, NewNotificationChannel};
     use crate::storage::InMemoryNotificationChannelStore;
 
+    fn test_org() -> OrgId {
+        OrgId(Uuid::from_u128(0xA1))
+    }
+
     // ── Pure state machine (the valuable logic) ──────────────────────────
 
     /// Drive `decide` over a status sequence, collecting emitted events.
@@ -257,7 +271,7 @@ mod tests {
         let store: Arc<dyn NotificationChannelStore> =
             Arc::new(InMemoryNotificationChannelStore::new());
         let engine = engine_with(store);
-        assert!(engine.resolve(Uuid::now_v7()).await.is_none());
+        assert!(engine.resolve(test_org(), Uuid::now_v7()).await.is_none());
     }
 
     #[tokio::test]
@@ -266,6 +280,7 @@ mod tests {
             Arc::new(InMemoryNotificationChannelStore::new());
         let ch = store
             .create(
+                test_org(),
                 NewNotificationChannel {
                     name: "ops".into(),
                     config: ChannelConfig::Slack {
@@ -278,10 +293,10 @@ mod tests {
             .await
             .unwrap();
         let engine = engine_with(store.clone());
-        let got = engine.resolve(ch.id).await.expect("resolved");
+        let got = engine.resolve(test_org(), ch.id).await.expect("resolved");
         assert_eq!(got.name, "ops");
         // Second hit served from cache even after the row is deleted.
-        store.delete(ch.id).await.unwrap();
-        assert!(engine.resolve(ch.id).await.is_some());
+        store.delete(test_org(), ch.id).await.unwrap();
+        assert!(engine.resolve(test_org(), ch.id).await.is_some());
     }
 }

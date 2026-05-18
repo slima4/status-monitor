@@ -230,6 +230,7 @@ enabled = false
 # max_api_tokens_per_user = 50
 # max_public_components = 10000
 # max_maintenance_windows = 1000
+# max_notification_channels = 1000
 # max_logo_size_bytes = 1048576
 
 [rate_limits]

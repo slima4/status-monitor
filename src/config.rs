@@ -410,6 +410,7 @@ pub struct SelfHostOverrides {
     pub max_api_tokens_per_user: Option<u32>,
     pub max_public_components: Option<u32>,
     pub max_maintenance_windows: Option<u32>,
+    pub max_notification_channels: Option<u32>,
     pub max_logo_size_bytes: Option<u32>,
 }
 
@@ -754,6 +755,10 @@ impl AppConfig {
         ge1_opt(
             o.max_maintenance_windows,
             "quotas.self_host_overrides.max_maintenance_windows",
+        )?;
+        ge1_opt(
+            o.max_notification_channels,
+            "quotas.self_host_overrides.max_notification_channels",
         )?;
         ge1_opt(
             o.max_logo_size_bytes,

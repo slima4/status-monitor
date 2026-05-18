@@ -484,6 +484,11 @@ pub mod settings {
                     u.maintenance_windows,
                     p.max_maintenance_windows,
                 ),
+                UsageBar::new(
+                    "Notification channels",
+                    u.notification_channels,
+                    p.max_notification_channels,
+                ),
             ],
             min_check_interval_secs: p.min_check_interval_secs,
             retention_days: p.retention_days,

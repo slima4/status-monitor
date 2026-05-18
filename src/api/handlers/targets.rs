@@ -178,7 +178,7 @@ pub async fn create(
     let plan = state.quotas.limit_for_org(org).await?;
     let guard = ssrf_guard(&state);
     validate_new_target(&new, &guard, i64::from(plan.min_check_interval_secs))?;
-    verify_alert_channels(&state, &new.alerts).await?;
+    verify_alert_channels(&state, org, &new.alerts).await?;
     check_abuse(&state, org, &new.check)?;
     // Friendly pre-check; the store INSERT enforces the same cap atomically.
     state.quotas.check_can_create_targets(org, None, 1).await?;
@@ -189,7 +189,7 @@ pub async fn create(
         .target_store
         .create(org, new, i64::from(plan.max_targets))
         .await?;
-    dispatch_first_check(&state, &t);
+    dispatch_first_check(&state, org, &t);
     // UUID hex is always ASCII-safe → infallible.
     let location = HeaderValue::from_str(&format!("/api/v1/targets/{}", t.id))
         .expect("uuid produces ascii-only path");
@@ -231,7 +231,7 @@ pub async fn update(
     }
     if let Some(alerts) = &update.alerts {
         validate_alerts(alerts)?;
-        verify_alert_channels(&state, alerts).await?;
+        verify_alert_channels(&state, org, alerts).await?;
     }
     // The check-interval floor applies to PATCH too — otherwise a target
     // created at the floor could be lowered below it, evading the plan.
@@ -337,7 +337,7 @@ pub async fn bulk_create(
     let guard = ssrf_guard(&state);
     for new in &items {
         validate_new_target(new, &guard, i64::from(plan.min_check_interval_secs))?;
-        verify_alert_channels(&state, &new.alerts).await?;
+        verify_alert_channels(&state, org, &new.alerts).await?;
         check_abuse(&state, org, &new.check)?;
     }
     let n = items.len() as i64;
@@ -549,12 +549,13 @@ pub async fn check_now(
 /// worker pool — semaphore-bounded and persisted via the same fan-out as
 /// scheduled checks — so if the pool is saturated the check is dropped and
 /// the scheduler's own pickup covers it.
-fn dispatch_first_check(state: &AppState, target: &Target) {
+fn dispatch_first_check(state: &AppState, org: OrgId, target: &Target) {
     if !target.enabled {
         return;
     }
     state.worker_pool.dispatch(CheckTask {
         target: Arc::new(target.clone()),
+        org_id: org,
     });
 }
 
@@ -632,7 +633,7 @@ fn validate_alerts(alerts: &TargetAlerts) -> Result<()> {
 /// Reject a binding to a channel the caller's org doesn't own (the store is
 /// org-scoped, so a foreign or deleted id resolves to `None`). Closes the
 /// IDOR where a target could otherwise reference another tenant's channel.
-async fn verify_alert_channels(state: &AppState, alerts: &TargetAlerts) -> Result<()> {
+async fn verify_alert_channels(state: &AppState, org: OrgId, alerts: &TargetAlerts) -> Result<()> {
     if alerts.is_empty() {
         return Ok(());
     }
@@ -641,7 +642,7 @@ async fn verify_alert_channels(state: &AppState, alerts: &TargetAlerts) -> Resul
     let ids: Vec<uuid::Uuid> = alerts.iter().map(|b| b.channel_id).collect();
     let known = state
         .notification_channel_store
-        .existing_channel_ids(&ids)
+        .existing_channel_ids(org, &ids)
         .await?;
     if let Some(missing) = ids.iter().find(|id| !known.contains(id)) {
         return Err(AppError::bad_request_field(

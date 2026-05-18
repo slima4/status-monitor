@@ -2,7 +2,7 @@ use axum::Json;
 use axum::response::{IntoResponse, Response};
 use serde::Serialize;
 
-use crate::domain::{CheckSpec, Target};
+use crate::domain::{CheckSpec, NotificationChannel, Target};
 
 /// Wire-level placeholder substituted for populated credentials in API responses.
 /// Re-submitting it on `PATCH` is rejected so a `GET → PATCH` round-trip cannot
@@ -18,6 +18,12 @@ pub trait RedactInPlace {
 impl RedactInPlace for Target {
     fn redact_in_place(&mut self) {
         redact_check(&mut self.check);
+    }
+}
+
+impl RedactInPlace for NotificationChannel {
+    fn redact_in_place(&mut self) {
+        self.config.redact_in_place();
     }
 }
 

@@ -1,6 +1,8 @@
 //! Storage for per-org `notification_channels`.
 //!
-//! Org scoping is implicit (`default_org_id`), mirroring [`super::maintenance`].
+//! Every method is org-scoped (`org: OrgId`), mirroring [`super::TargetStore`]
+//! — NOT the `default_org_id`-pinned maintenance store, which is not
+//! SaaS-tenant-safe. One tenant can never read or mutate another's channels.
 //! The transport secrets in `config` are sealed at rest by the credentials
 //! KEK — the same `{"$enc":"v1:…"}` envelope convention used for
 //! `targets.check_spec` (see [`super::postgres_secrets`]) — and opened back to
@@ -16,6 +18,7 @@ use serde_json::Value;
 use sqlx::PgPool;
 use uuid::Uuid;
 
+use crate::api::error::codes;
 use crate::domain::{
     ChannelConfig, NewNotificationChannel, NotificationChannel, NotificationChannelUpdate, OrgId,
 };
@@ -64,50 +67,44 @@ fn open(value: Value, cipher: Option<&Cipher>) -> Result<ChannelConfig> {
 
 #[async_trait]
 pub trait NotificationChannelStore: Send + Sync {
-    /// Atomically capped at `max_channels` for the org. A breach returns
-    /// `CHANNEL_QUOTA_EXCEEDED`; a duplicate name `CHANNEL_NAME_TAKEN`.
+    /// Atomically capped at `max_channels` for `org`. A breach returns
+    /// `CHANNEL_QUOTA_EXCEEDED`; a duplicate name (within the org)
+    /// `CHANNEL_NAME_TAKEN`.
     async fn create(
         &self,
+        org: OrgId,
         new: NewNotificationChannel,
         max_channels: i64,
     ) -> Result<NotificationChannel>;
-    async fn list(&self) -> Result<Vec<NotificationChannel>>;
-    async fn count(&self) -> Result<u64>;
-    async fn get(&self, id: Uuid) -> Result<Option<NotificationChannel>>;
+    async fn list(&self, org: OrgId) -> Result<Vec<NotificationChannel>>;
+    async fn get(&self, org: OrgId, id: Uuid) -> Result<Option<NotificationChannel>>;
     async fn update(
         &self,
+        org: OrgId,
         id: Uuid,
         update: NotificationChannelUpdate,
     ) -> Result<Option<NotificationChannel>>;
-    async fn delete(&self, id: Uuid) -> Result<bool>;
-    /// Subset of `ids` that exist in this org. Mirrors
+    async fn delete(&self, org: OrgId, id: Uuid) -> Result<bool>;
+    /// Subset of `ids` that exist in `org`. Mirrors
     /// [`crate::storage::MaintenanceStore::existing_target_ids`] so the
     /// "ids belong to the caller's org" idiom is uniform — used to validate
-    /// target alert bindings in one query instead of N point lookups.
-    async fn existing_channel_ids(&self, ids: &[Uuid]) -> Result<Vec<Uuid>>;
+    /// target alert bindings in one query instead of N point lookups, and to
+    /// close the cross-tenant IDOR where a target binds another org's channel.
+    async fn existing_channel_ids(&self, org: OrgId, ids: &[Uuid]) -> Result<Vec<Uuid>>;
 }
 
 // ── Postgres impl ────────────────────────────────────────────────────────
 
-/// Org-scoped Postgres store. Every query binds `default_org_id` so one
-/// tenant can never read or mutate another's channels.
+/// Org-scoped Postgres store. Every query binds the caller-supplied `org` so
+/// one tenant can never read or mutate another's channels.
 pub struct PgNotificationChannelStore {
     pool: PgPool,
-    default_org_id: OrgId,
     cipher: Option<Arc<Cipher>>,
 }
 
 impl PgNotificationChannelStore {
-    pub fn new(pool: PgPool, default_org_id: OrgId, cipher: Option<Arc<Cipher>>) -> Self {
-        Self {
-            pool,
-            default_org_id,
-            cipher,
-        }
-    }
-
-    fn org_id(&self) -> Uuid {
-        self.default_org_id.0
+    pub fn new(pool: PgPool, cipher: Option<Arc<Cipher>>) -> Self {
+        Self { pool, cipher }
     }
 }
 
@@ -147,6 +144,7 @@ fn is_unique_violation(e: &sqlx::Error) -> bool {
 impl NotificationChannelStore for PgNotificationChannelStore {
     async fn create(
         &self,
+        org: OrgId,
         new: NewNotificationChannel,
         max_channels: i64,
     ) -> Result<NotificationChannel> {
@@ -161,7 +159,7 @@ impl NotificationChannelStore for PgNotificationChannelStore {
         // insert, overshooting the cap. A per-org advisory lock (the same key
         // every other org-cap writer uses) serialises them; it is held until
         // this transaction commits or rolls back.
-        advisory_xact_lock(&mut *tx, &org_lock_key(self.default_org_id))
+        advisory_xact_lock(&mut *tx, &org_lock_key(org))
             .await
             .map_err(|e| AppError::Other(anyhow!("advisory lock: {e}")))?;
         let row: Option<ChannelRow> = sqlx::query_as(
@@ -170,7 +168,7 @@ impl NotificationChannelStore for PgNotificationChannelStore {
                WHERE (SELECT count(*) FROM notification_channels WHERE org_id = $1) < $6
                RETURNING id, name, config, enabled, created_at, updated_at"#,
         )
-        .bind(self.org_id())
+        .bind(org.0)
         .bind(&new.name)
         .bind(new.config.kind().as_str())
         .bind(&sealed)
@@ -181,7 +179,7 @@ impl NotificationChannelStore for PgNotificationChannelStore {
         .map_err(|e| {
             if is_unique_violation(&e) {
                 AppError::unprocessable(
-                    "CHANNEL_NAME_TAKEN",
+                    codes::CHANNEL_NAME_TAKEN,
                     "a notification channel with this name already exists",
                 )
             } else {
@@ -191,7 +189,7 @@ impl NotificationChannelStore for PgNotificationChannelStore {
         let Some(row) = row else {
             tx.rollback().await.ok();
             return Err(AppError::unprocessable(
-                "CHANNEL_QUOTA_EXCEEDED",
+                codes::CHANNEL_QUOTA_EXCEEDED,
                 "notification channel limit reached for this plan",
             ));
         };
@@ -201,14 +199,14 @@ impl NotificationChannelStore for PgNotificationChannelStore {
         row.into_channel(self.cipher.as_deref())
     }
 
-    async fn list(&self) -> Result<Vec<NotificationChannel>> {
+    async fn list(&self, org: OrgId) -> Result<Vec<NotificationChannel>> {
         let rows: Vec<ChannelRow> = sqlx::query_as(
             r#"SELECT id, name, config, enabled, created_at, updated_at
                FROM notification_channels
                WHERE org_id = $1
                ORDER BY name"#,
         )
-        .bind(self.org_id())
+        .bind(org.0)
         .fetch_all(&self.pool)
         .await
         .map_err(|e| AppError::Other(anyhow!("list notification channels: {e}")))?;
@@ -217,23 +215,13 @@ impl NotificationChannelStore for PgNotificationChannelStore {
             .collect()
     }
 
-    async fn count(&self) -> Result<u64> {
-        let (total,): (i64,) =
-            sqlx::query_as(r#"SELECT count(*) FROM notification_channels WHERE org_id = $1"#)
-                .bind(self.org_id())
-                .fetch_one(&self.pool)
-                .await
-                .map_err(|e| AppError::Other(anyhow!("count notification channels: {e}")))?;
-        Ok(total.max(0) as u64)
-    }
-
-    async fn get(&self, id: Uuid) -> Result<Option<NotificationChannel>> {
+    async fn get(&self, org: OrgId, id: Uuid) -> Result<Option<NotificationChannel>> {
         let row: Option<ChannelRow> = sqlx::query_as(
             r#"SELECT id, name, config, enabled, created_at, updated_at
                FROM notification_channels WHERE id = $1 AND org_id = $2"#,
         )
         .bind(id)
-        .bind(self.org_id())
+        .bind(org.0)
         .fetch_optional(&self.pool)
         .await
         .map_err(|e| AppError::Other(anyhow!("get notification channel: {e}")))?;
@@ -243,6 +231,7 @@ impl NotificationChannelStore for PgNotificationChannelStore {
 
     async fn update(
         &self,
+        org: OrgId,
         id: Uuid,
         update: NotificationChannelUpdate,
     ) -> Result<Option<NotificationChannel>> {
@@ -269,13 +258,13 @@ impl NotificationChannelStore for PgNotificationChannelStore {
         .bind(kind)
         .bind(sealed)
         .bind(update.enabled)
-        .bind(self.org_id())
+        .bind(org.0)
         .fetch_optional(&self.pool)
         .await
         .map_err(|e| {
             if is_unique_violation(&e) {
                 AppError::unprocessable(
-                    "CHANNEL_NAME_TAKEN",
+                    codes::CHANNEL_NAME_TAKEN,
                     "a notification channel with this name already exists",
                 )
             } else {
@@ -286,18 +275,18 @@ impl NotificationChannelStore for PgNotificationChannelStore {
             .transpose()
     }
 
-    async fn delete(&self, id: Uuid) -> Result<bool> {
+    async fn delete(&self, org: OrgId, id: Uuid) -> Result<bool> {
         let result =
             sqlx::query(r#"DELETE FROM notification_channels WHERE id = $1 AND org_id = $2"#)
                 .bind(id)
-                .bind(self.org_id())
+                .bind(org.0)
                 .execute(&self.pool)
                 .await
                 .map_err(|e| AppError::Other(anyhow!("delete notification channel: {e}")))?;
         Ok(result.rows_affected() > 0)
     }
 
-    async fn existing_channel_ids(&self, ids: &[Uuid]) -> Result<Vec<Uuid>> {
+    async fn existing_channel_ids(&self, org: OrgId, ids: &[Uuid]) -> Result<Vec<Uuid>> {
         if ids.is_empty() {
             return Ok(Vec::new());
         }
@@ -306,7 +295,7 @@ impl NotificationChannelStore for PgNotificationChannelStore {
                WHERE id = ANY($1::uuid[]) AND org_id = $2"#,
         )
         .bind(ids)
-        .bind(self.org_id())
+        .bind(org.0)
         .fetch_all(&self.pool)
         .await
         .map_err(|e| AppError::Other(anyhow!("existing_channel_ids: {e}")))?;
@@ -316,9 +305,12 @@ impl NotificationChannelStore for PgNotificationChannelStore {
 
 // ── In-memory impl (tests) ──────────────────────────────────────────────
 
+/// Org-aware in-memory store: entries are tagged with their `OrgId` and every
+/// method filters on it, so cross-tenant isolation can be asserted without a
+/// Postgres backend.
 #[derive(Default)]
 pub struct InMemoryNotificationChannelStore {
-    inner: Mutex<Vec<NotificationChannel>>,
+    inner: Mutex<Vec<(OrgId, NotificationChannel)>>,
 }
 
 impl InMemoryNotificationChannelStore {
@@ -326,6 +318,7 @@ impl InMemoryNotificationChannelStore {
         Self::default()
     }
 
+    /// Total entries across every org (test introspection only).
     pub fn len(&self) -> usize {
         self.inner.lock().len()
     }
@@ -339,19 +332,20 @@ impl InMemoryNotificationChannelStore {
 impl NotificationChannelStore for InMemoryNotificationChannelStore {
     async fn create(
         &self,
+        org: OrgId,
         new: NewNotificationChannel,
         max_channels: i64,
     ) -> Result<NotificationChannel> {
         let mut g = self.inner.lock();
-        if g.iter().any(|c| c.name == new.name) {
+        if g.iter().any(|(o, c)| *o == org && c.name == new.name) {
             return Err(AppError::unprocessable(
-                "CHANNEL_NAME_TAKEN",
+                codes::CHANNEL_NAME_TAKEN,
                 "a notification channel with this name already exists",
             ));
         }
-        if g.len() as i64 >= max_channels {
+        if g.iter().filter(|(o, _)| *o == org).count() as i64 >= max_channels {
             return Err(AppError::unprocessable(
-                "CHANNEL_QUOTA_EXCEEDED",
+                codes::CHANNEL_QUOTA_EXCEEDED,
                 "notification channel limit reached for this plan",
             ));
         }
@@ -365,39 +359,48 @@ impl NotificationChannelStore for InMemoryNotificationChannelStore {
             created_at: now,
             updated_at: now,
         };
-        g.push(ch.clone());
+        g.push((org, ch.clone()));
         Ok(ch)
     }
 
-    async fn list(&self) -> Result<Vec<NotificationChannel>> {
-        let mut v = self.inner.lock().clone();
+    async fn list(&self, org: OrgId) -> Result<Vec<NotificationChannel>> {
+        let mut v: Vec<NotificationChannel> = self
+            .inner
+            .lock()
+            .iter()
+            .filter(|(o, _)| *o == org)
+            .map(|(_, c)| c.clone())
+            .collect();
         v.sort_by(|a, b| a.name.cmp(&b.name));
         Ok(v)
     }
 
-    async fn count(&self) -> Result<u64> {
-        Ok(self.inner.lock().len() as u64)
-    }
-
-    async fn get(&self, id: Uuid) -> Result<Option<NotificationChannel>> {
-        Ok(self.inner.lock().iter().find(|c| c.id == id).cloned())
+    async fn get(&self, org: OrgId, id: Uuid) -> Result<Option<NotificationChannel>> {
+        Ok(self
+            .inner
+            .lock()
+            .iter()
+            .find(|(o, c)| *o == org && c.id == id)
+            .map(|(_, c)| c.clone()))
     }
 
     async fn update(
         &self,
+        org: OrgId,
         id: Uuid,
         update: NotificationChannelUpdate,
     ) -> Result<Option<NotificationChannel>> {
         let mut g = self.inner.lock();
         if let Some(name) = &update.name
-            && g.iter().any(|c| c.id != id && &c.name == name)
+            && g.iter()
+                .any(|(o, c)| *o == org && c.id != id && &c.name == name)
         {
             return Err(AppError::unprocessable(
-                "CHANNEL_NAME_TAKEN",
+                codes::CHANNEL_NAME_TAKEN,
                 "a notification channel with this name already exists",
             ));
         }
-        let Some(ch) = g.iter_mut().find(|c| c.id == id) else {
+        let Some((_, ch)) = g.iter_mut().find(|(o, c)| *o == org && c.id == id) else {
             return Ok(None);
         };
         if let Some(name) = update.name {
@@ -414,19 +417,19 @@ impl NotificationChannelStore for InMemoryNotificationChannelStore {
         Ok(Some(ch.clone()))
     }
 
-    async fn delete(&self, id: Uuid) -> Result<bool> {
+    async fn delete(&self, org: OrgId, id: Uuid) -> Result<bool> {
         let mut g = self.inner.lock();
         let before = g.len();
-        g.retain(|c| c.id != id);
+        g.retain(|(o, c)| !(*o == org && c.id == id));
         Ok(g.len() < before)
     }
 
-    async fn existing_channel_ids(&self, ids: &[Uuid]) -> Result<Vec<Uuid>> {
+    async fn existing_channel_ids(&self, org: OrgId, ids: &[Uuid]) -> Result<Vec<Uuid>> {
         let g = self.inner.lock();
         Ok(ids
             .iter()
             .copied()
-            .filter(|id| g.iter().any(|c| c.id == *id))
+            .filter(|id| g.iter().any(|(o, c)| *o == org && c.id == *id))
             .collect())
     }
 }
@@ -435,6 +438,14 @@ impl NotificationChannelStore for InMemoryNotificationChannelStore {
 mod tests {
     use super::*;
     use std::collections::BTreeMap;
+
+    fn org() -> OrgId {
+        OrgId(Uuid::from_u128(0xA1))
+    }
+
+    fn other_org() -> OrgId {
+        OrgId(Uuid::from_u128(0xB2))
+    }
 
     fn slack(name: &str) -> NewNotificationChannel {
         NewNotificationChannel {
@@ -449,12 +460,13 @@ mod tests {
     #[tokio::test]
     async fn create_list_get_update_delete_roundtrip() {
         let store = InMemoryNotificationChannelStore::new();
-        let ch = store.create(slack("ops"), 10).await.unwrap();
-        assert_eq!(store.list().await.unwrap().len(), 1);
-        assert_eq!(store.get(ch.id).await.unwrap().unwrap().name, "ops");
+        let ch = store.create(org(), slack("ops"), 10).await.unwrap();
+        assert_eq!(store.list(org()).await.unwrap().len(), 1);
+        assert_eq!(store.get(org(), ch.id).await.unwrap().unwrap().name, "ops");
 
         let patched = store
             .update(
+                org(),
                 ch.id,
                 NotificationChannelUpdate {
                     enabled: Some(false),
@@ -466,18 +478,48 @@ mod tests {
             .unwrap();
         assert!(!patched.enabled);
 
-        assert!(store.delete(ch.id).await.unwrap());
+        assert!(store.delete(org(), ch.id).await.unwrap());
         assert!(store.is_empty());
     }
 
     #[tokio::test]
     async fn create_enforces_cap_and_unique_name() {
         let store = InMemoryNotificationChannelStore::new();
-        store.create(slack("a"), 1).await.unwrap();
-        let over = store.create(slack("b"), 1).await.unwrap_err();
+        store.create(org(), slack("a"), 1).await.unwrap();
+        let over = store.create(org(), slack("b"), 1).await.unwrap_err();
         assert!(matches!(over, AppError::Unprocessable { .. }));
-        let dup = store.create(slack("a"), 10).await.unwrap_err();
+        let dup = store.create(org(), slack("a"), 10).await.unwrap_err();
         assert!(matches!(dup, AppError::Unprocessable { .. }));
+    }
+
+    #[tokio::test]
+    async fn channels_are_isolated_per_org() {
+        let store = InMemoryNotificationChannelStore::new();
+        let a = store.create(org(), slack("ops"), 10).await.unwrap();
+        // Same name in a different org is allowed and invisible to org A.
+        store.create(other_org(), slack("ops"), 10).await.unwrap();
+
+        assert_eq!(store.list(org()).await.unwrap().len(), 1);
+        assert_eq!(store.list(other_org()).await.unwrap().len(), 1);
+        // org B cannot read, mutate, or delete org A's channel by id.
+        assert!(store.get(other_org(), a.id).await.unwrap().is_none());
+        assert!(
+            store
+                .update(other_org(), a.id, NotificationChannelUpdate::default())
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(!store.delete(other_org(), a.id).await.unwrap());
+        assert!(
+            store
+                .existing_channel_ids(other_org(), &[a.id])
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        // Still intact for the owning org.
+        assert!(store.get(org(), a.id).await.unwrap().is_some());
     }
 
     #[test]

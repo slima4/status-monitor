@@ -8,9 +8,8 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::config::SchedulerConfig;
-use crate::domain::Target;
 use crate::error::Result;
-use crate::scheduler::registry::TargetRegistry;
+use crate::scheduler::registry::{ScheduledTarget, TargetRegistry};
 use crate::worker::{CheckTask, WorkerPool};
 
 pub struct Scheduler {
@@ -74,27 +73,27 @@ impl Scheduler {
                 handle.cancel.cancel();
             }
         }
-        for target in diff.updated {
-            if let Some((_, handle)) = self.tasks.remove(&target.id) {
+        for st in diff.updated {
+            if let Some((_, handle)) = self.tasks.remove(&st.target.id) {
                 handle.cancel.cancel();
             }
-            self.spawn_target(target);
+            self.spawn_target(st);
         }
-        for target in diff.added {
-            self.spawn_target(target);
+        for st in diff.added {
+            self.spawn_target(st);
         }
         Ok(())
     }
 
-    fn spawn_target(&self, target: Arc<Target>) {
+    fn spawn_target(&self, st: ScheduledTarget) {
         let cancel = CancellationToken::new();
         let token = cancel.clone();
         let pool = self.pool.clone();
         let jitter_pct = self.cfg.jitter_pct;
-        let id = target.id;
+        let id = st.target.id;
 
         let handle = tokio::spawn(async move {
-            run_target_loop(target, pool, jitter_pct, token).await;
+            run_target_loop(st, pool, jitter_pct, token).await;
         });
         self.tasks.insert(id, TargetTaskHandle { cancel, handle });
     }
@@ -111,16 +110,16 @@ impl Scheduler {
 }
 
 async fn run_target_loop(
-    target: Arc<Target>,
+    st: ScheduledTarget,
     pool: Arc<WorkerPool>,
     jitter_pct: u8,
     shutdown: CancellationToken,
 ) {
-    let base = target.interval;
+    let base = st.target.interval;
 
     // Check immediately so a freshly-scheduled target reports up/down right
     // away instead of staying blank until the first interval elapses.
-    dispatch(&pool, &target);
+    dispatch(&pool, &st);
 
     // Validation enforces a per-plan interval floor (>= 1s), so a zero
     // interval — which would panic `interval_at` — is structurally impossible.
@@ -139,13 +138,14 @@ async fn run_target_loop(
             _ = shutdown.cancelled() => return,
             _ = tick.tick() => {}
         }
-        dispatch(&pool, &target);
+        dispatch(&pool, &st);
     }
 }
 
-fn dispatch(pool: &WorkerPool, target: &Arc<Target>) {
+fn dispatch(pool: &WorkerPool, st: &ScheduledTarget) {
     pool.dispatch(CheckTask {
-        target: target.clone(),
+        target: st.target.clone(),
+        org_id: st.org_id,
     });
 }
 

@@ -27,6 +27,7 @@ pub struct Plan {
     pub max_api_tokens_per_user: i32,
     pub max_public_components: i32,
     pub max_maintenance_windows: i32,
+    pub max_notification_channels: i32,
     pub max_logo_size_bytes: i32,
 
     // Per-org rate limits (per minute)
@@ -60,6 +61,7 @@ impl Plan {
             max_api_tokens_per_user: self.max_api_tokens_per_user,
             max_public_components: self.max_public_components,
             max_maintenance_windows: self.max_maintenance_windows,
+            max_notification_channels: self.max_notification_channels,
             max_logo_size_bytes: self.max_logo_size_bytes,
         }
     }
@@ -77,6 +79,7 @@ pub struct PlanLimits {
     pub max_api_tokens_per_user: i32,
     pub max_public_components: i32,
     pub max_maintenance_windows: i32,
+    pub max_notification_channels: i32,
     pub max_logo_size_bytes: i32,
 }
 

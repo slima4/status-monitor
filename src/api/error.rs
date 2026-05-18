@@ -100,6 +100,13 @@ pub mod codes {
     pub const MAINTENANCE_COMPLETED: &str = "MAINTENANCE_COMPLETED";
     pub const MAINTENANCE_NOT_FOUND: &str = "MAINTENANCE_NOT_FOUND";
     pub const INCIDENT_NOT_FOUND: &str = "INCIDENT_NOT_FOUND";
+    // Notification channels (operator surface).
+    pub const CHANNEL_NOT_FOUND: &str = "CHANNEL_NOT_FOUND";
+    pub const CHANNEL_NAME_TAKEN: &str = "CHANNEL_NAME_TAKEN";
+    pub const CHANNEL_NAME_INVALID: &str = "CHANNEL_NAME_INVALID";
+    pub const CHANNEL_QUOTA_EXCEEDED: &str = "CHANNEL_QUOTA_EXCEEDED";
+    pub const INVALID_CHANNEL_CONFIG: &str = "INVALID_CHANNEL_CONFIG";
+    pub const CHANNEL_TEST_FAILED: &str = "CHANNEL_TEST_FAILED";
     // Org management.
     pub const ORG_NOT_FOUND: &str = "ORG_NOT_FOUND";
     pub const ORG_DELETED: &str = "ORG_DELETED";

@@ -32,6 +32,7 @@ pub mod usage_keys {
     pub const PENDING_INVITATIONS: &str = "max_pending_invitations";
     pub const PUBLIC_COMPONENTS: &str = "max_public_components";
     pub const MAINTENANCE_WINDOWS: &str = "max_maintenance_windows";
+    pub const NOTIFICATION_CHANNELS: &str = "max_notification_channels";
 }
 
 /// The org-scoped count queries. Declared once and shared by the atomic
@@ -42,6 +43,8 @@ const SQL_COUNT_PUBLIC_COMPONENTS: &str =
     "SELECT count(*) FROM targets WHERE org_id = $1 AND public_status = true";
 const SQL_COUNT_MAINTENANCE_WINDOWS: &str =
     "SELECT count(*) FROM maintenance_windows WHERE org_id = $1";
+const SQL_COUNT_NOTIFICATION_CHANNELS: &str =
+    "SELECT count(*) FROM notification_channels WHERE org_id = $1";
 
 /// Storage-layer row for `plans`. The domain `Plan` stays `sqlx`-free
 /// (per the domain/storage split); this is the only place that maps the
@@ -59,6 +62,7 @@ struct PlanRow {
     max_api_tokens_per_user: i32,
     max_public_components: i32,
     max_maintenance_windows: i32,
+    max_notification_channels: i32,
     max_logo_size_bytes: i32,
     api_writes_per_minute: i32,
     api_reads_per_minute: i32,
@@ -87,6 +91,7 @@ impl From<PlanRow> for Plan {
             max_api_tokens_per_user: r.max_api_tokens_per_user,
             max_public_components: r.max_public_components,
             max_maintenance_windows: r.max_maintenance_windows,
+            max_notification_channels: r.max_notification_channels,
             max_logo_size_bytes: r.max_logo_size_bytes,
             api_writes_per_minute: r.api_writes_per_minute,
             api_reads_per_minute: r.api_reads_per_minute,
@@ -128,6 +133,7 @@ pub struct OrgUsage {
     pub pending_invitations: i64,
     pub public_components: i64,
     pub maintenance_windows: i64,
+    pub notification_channels: i64,
 }
 
 impl QuotaService {
@@ -168,7 +174,8 @@ impl QuotaService {
                      p.min_check_interval_secs, p.retention_days, p.max_members, \
                      p.max_pending_invitations, p.max_api_tokens_per_user, \
                      p.max_public_components, p.max_maintenance_windows, \
-                     p.max_logo_size_bytes, p.api_writes_per_minute, \
+                     p.max_notification_channels, p.max_logo_size_bytes, \
+                     p.api_writes_per_minute, \
                      p.api_reads_per_minute, p.bulk_ops_per_minute, \
                      p.test_now_per_minute, p.check_now_per_minute, \
                      p.custom_domain_enabled, p.white_label_enabled, \
@@ -266,6 +273,31 @@ impl QuotaService {
         Ok(())
     }
 
+    /// Friendly pre-check for one new notification channel. The race-safe
+    /// guarantee is the count-subquery + advisory lock inside
+    /// `NotificationChannelStore::create`, handed the same
+    /// `max_notification_channels`; this only produces the nice 422 on the
+    /// common (uncontended) path.
+    pub async fn check_can_create_notification_channel(
+        &self,
+        org: OrgId,
+        user: Option<UserId>,
+    ) -> Result<()> {
+        let plan = self.limit_for_org(org).await?;
+        let limit = i64::from(plan.max_notification_channels);
+        let current = self.count(SQL_COUNT_NOTIFICATION_CHANNELS, org).await?;
+        if current + 1 > limit {
+            self.record_block(org, user, "max_notification_channels", current, limit);
+            return Err(AppError::quota_exceeded(
+                "max_notification_channels",
+                current,
+                limit,
+                plan.id.clone(),
+            ));
+        }
+        Ok(())
+    }
+
     /// Friendly pre-check for adding one member, so an over-cap invitation
     /// accept fails with a clean 422 before the token is consumed. The
     /// race-safe guarantee is the advisory-locked count inside
@@ -342,6 +374,7 @@ impl QuotaService {
                 pending_invitations: 0,
                 public_components: 0,
                 maintenance_windows: 0,
+                notification_channels: 0,
             });
         };
         let targets = self
@@ -377,6 +410,13 @@ impl QuotaService {
                 self.count(SQL_COUNT_MAINTENANCE_WINDOWS, org),
             )
             .await?;
+        let notification_channels = self
+            .cached_count(
+                org,
+                usage_keys::NOTIFICATION_CHANNELS,
+                self.count(SQL_COUNT_NOTIFICATION_CHANNELS, org),
+            )
+            .await?;
         Ok(OrgUsage {
             plan,
             targets,
@@ -384,6 +424,7 @@ impl QuotaService {
             pending_invitations,
             public_components,
             maintenance_windows,
+            notification_channels,
         })
     }
 
@@ -459,6 +500,7 @@ struct PlanOverrides {
     max_api_tokens_per_user: Option<u32>,
     max_public_components: Option<u32>,
     max_maintenance_windows: Option<u32>,
+    max_notification_channels: Option<u32>,
     max_logo_size_bytes: Option<u32>,
 }
 
@@ -473,6 +515,7 @@ impl From<&SelfHostOverrides> for PlanOverrides {
             max_api_tokens_per_user: o.max_api_tokens_per_user,
             max_public_components: o.max_public_components,
             max_maintenance_windows: o.max_maintenance_windows,
+            max_notification_channels: o.max_notification_channels,
             max_logo_size_bytes: o.max_logo_size_bytes,
         }
     }
@@ -492,6 +535,7 @@ fn apply_overrides(base: &Plan, ov: &PlanOverrides) -> Plan {
     p.max_api_tokens_per_user = take(ov.max_api_tokens_per_user, p.max_api_tokens_per_user);
     p.max_public_components = take(ov.max_public_components, p.max_public_components);
     p.max_maintenance_windows = take(ov.max_maintenance_windows, p.max_maintenance_windows);
+    p.max_notification_channels = take(ov.max_notification_channels, p.max_notification_channels);
     p.max_logo_size_bytes = take(ov.max_logo_size_bytes, p.max_logo_size_bytes);
     p
 }
@@ -537,6 +581,7 @@ fn unlimited_plan() -> Plan {
         max_api_tokens_per_user: i32::MAX,
         max_public_components: i32::MAX,
         max_maintenance_windows: i32::MAX,
+        max_notification_channels: i32::MAX,
         max_logo_size_bytes: i32::MAX,
         api_writes_per_minute: i32::MAX,
         api_reads_per_minute: i32::MAX,

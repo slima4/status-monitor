@@ -4,14 +4,19 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 use uuid::Uuid;
 
-use crate::domain::{CheckResult, CheckStatus, Target};
+use crate::domain::{CheckResult, CheckStatus, OrgId, Target};
 
 /// Result-plus-target envelope produced by the worker pool and consumed by the
 /// alert engine. Lives here (next to AlertEvent) so the worker's fan-out
 /// dependency points into the notifier module, matching the producer→consumer
 /// data flow.
+///
+/// `org_id` is the owning tenant of `target`, threaded from the scheduler's
+/// cross-org enumeration so channel resolution stays org-scoped (a tenant's
+/// target can only ever resolve that tenant's channels).
 pub struct AlertSignal {
     pub target: Arc<Target>,
+    pub org_id: OrgId,
     pub result: CheckResult,
 }
 
