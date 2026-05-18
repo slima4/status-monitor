@@ -18,9 +18,7 @@ use crate::api::types::{
     BulkAction, BulkActionFailure, BulkActionRequest, BulkActionResponse, TestRequest, TestResponse,
 };
 use crate::app::AppState;
-use crate::domain::{
-    AlertChannel, CheckResult, NewTarget, OrgId, Target, TargetAlerts, TargetUpdate,
-};
+use crate::domain::{CheckResult, NewTarget, OrgId, Target, TargetAlerts, TargetUpdate};
 use crate::error::{AppError, Result};
 use crate::security::SsrfGuard;
 use crate::storage::TargetFilter;
@@ -180,6 +178,7 @@ pub async fn create(
     let plan = state.quotas.limit_for_org(org).await?;
     let guard = ssrf_guard(&state);
     validate_new_target(&new, &guard, i64::from(plan.min_check_interval_secs))?;
+    verify_alert_channels(&state, &new.alerts).await?;
     check_abuse(&state, org, &new.check)?;
     // Friendly pre-check; the store INSERT enforces the same cap atomically.
     state.quotas.check_can_create_targets(org, None, 1).await?;
@@ -232,6 +231,7 @@ pub async fn update(
     }
     if let Some(alerts) = &update.alerts {
         validate_alerts(alerts)?;
+        verify_alert_channels(&state, alerts).await?;
     }
     // The check-interval floor applies to PATCH too — otherwise a target
     // created at the floor could be lowered below it, evading the plan.
@@ -337,6 +337,7 @@ pub async fn bulk_create(
     let guard = ssrf_guard(&state);
     for new in &items {
         validate_new_target(new, &guard, i64::from(plan.min_check_interval_secs))?;
+        verify_alert_channels(&state, &new.alerts).await?;
         check_abuse(&state, org, &new.check)?;
     }
     let n = items.len() as i64;
@@ -597,47 +598,57 @@ fn validate_new_target(new: &NewTarget, guard: &SsrfGuard, min_interval_secs: i6
     validate_alerts(&new.alerts)
 }
 
+/// Structural-only (no I/O): each binding's `after_failures` floor. The bound
+/// `channel_id` is checked to exist in the caller's org by the async
+/// [`verify_alert_channels`] — kept separate so the sync per-item path
+/// (`validate_new_target`, also used by bulk) stays sync.
 fn validate_alerts(alerts: &TargetAlerts) -> Result<()> {
-    for (channel, cfg) in alerts.iter() {
-        if cfg.after_failures == 0 {
+    let mut seen = std::collections::HashSet::new();
+    for (i, b) in alerts.iter().enumerate() {
+        if b.after_failures == 0 {
             return Err(AppError::bad_request_field(
                 codes::INVALID_ALERT_CONFIG,
-                format!("alerts.{}: after_failures must be >= 1", channel.as_str()),
-                format!("alerts.{}.after_failures", channel.as_str()),
+                format!("alerts[{i}]: after_failures must be >= 1"),
+                format!("alerts[{i}].after_failures"),
             ));
         }
-        match channel {
-            AlertChannel::Email => {
-                if cfg.to.is_empty() {
-                    return Err(AppError::bad_request_field(
-                        codes::INVALID_ALERT_CONFIG,
-                        "alerts.email: 'to' must contain at least one recipient",
-                        "alerts.email.to",
-                    ));
-                }
-                for addr in &cfg.to {
-                    if !addr.contains('@') {
-                        return Err(AppError::bad_request_field(
-                            codes::INVALID_ALERT_CONFIG,
-                            format!("alerts.email: '{addr}' is not a valid email address"),
-                            "alerts.email.to",
-                        ));
-                    }
-                }
-            }
-            _ => {
-                if !cfg.to.is_empty() {
-                    return Err(AppError::bad_request_field(
-                        codes::INVALID_ALERT_CONFIG,
-                        format!(
-                            "alerts.{}: 'to' is only valid for the email channel",
-                            channel.as_str()
-                        ),
-                        format!("alerts.{}.to", channel.as_str()),
-                    ));
-                }
-            }
+        // Two bindings to the same channel share one engine AlertState, so
+        // the second would silently override the first's policy. Reject it
+        // for predictable behaviour.
+        if !seen.insert(b.channel_id) {
+            return Err(AppError::bad_request_field(
+                codes::INVALID_ALERT_CONFIG,
+                format!(
+                    "alerts[{i}]: duplicate binding for channel {}",
+                    b.channel_id
+                ),
+                format!("alerts[{i}].channel_id"),
+            ));
         }
+    }
+    Ok(())
+}
+
+/// Reject a binding to a channel the caller's org doesn't own (the store is
+/// org-scoped, so a foreign or deleted id resolves to `None`). Closes the
+/// IDOR where a target could otherwise reference another tenant's channel.
+async fn verify_alert_channels(state: &AppState, alerts: &TargetAlerts) -> Result<()> {
+    if alerts.is_empty() {
+        return Ok(());
+    }
+    // One batched org-scoped query (mirrors maintenance's
+    // `validate_component_ids`) instead of N point lookups.
+    let ids: Vec<uuid::Uuid> = alerts.iter().map(|b| b.channel_id).collect();
+    let known = state
+        .notification_channel_store
+        .existing_channel_ids(&ids)
+        .await?;
+    if let Some(missing) = ids.iter().find(|id| !known.contains(id)) {
+        return Err(AppError::bad_request_field(
+            codes::INVALID_ALERT_CONFIG,
+            format!("notification channel {missing} does not exist"),
+            "alerts.channel_id",
+        ));
     }
     Ok(())
 }

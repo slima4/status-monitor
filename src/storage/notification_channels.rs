@@ -80,6 +80,11 @@ pub trait NotificationChannelStore: Send + Sync {
         update: NotificationChannelUpdate,
     ) -> Result<Option<NotificationChannel>>;
     async fn delete(&self, id: Uuid) -> Result<bool>;
+    /// Subset of `ids` that exist in this org. Mirrors
+    /// [`crate::storage::MaintenanceStore::existing_target_ids`] so the
+    /// "ids belong to the caller's org" idiom is uniform — used to validate
+    /// target alert bindings in one query instead of N point lookups.
+    async fn existing_channel_ids(&self, ids: &[Uuid]) -> Result<Vec<Uuid>>;
 }
 
 // ── Postgres impl ────────────────────────────────────────────────────────
@@ -291,6 +296,22 @@ impl NotificationChannelStore for PgNotificationChannelStore {
                 .map_err(|e| AppError::Other(anyhow!("delete notification channel: {e}")))?;
         Ok(result.rows_affected() > 0)
     }
+
+    async fn existing_channel_ids(&self, ids: &[Uuid]) -> Result<Vec<Uuid>> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let rows: Vec<(Uuid,)> = sqlx::query_as(
+            r#"SELECT id FROM notification_channels
+               WHERE id = ANY($1::uuid[]) AND org_id = $2"#,
+        )
+        .bind(ids)
+        .bind(self.org_id())
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| AppError::Other(anyhow!("existing_channel_ids: {e}")))?;
+        Ok(rows.into_iter().map(|r| r.0).collect())
+    }
 }
 
 // ── In-memory impl (tests) ──────────────────────────────────────────────
@@ -398,6 +419,15 @@ impl NotificationChannelStore for InMemoryNotificationChannelStore {
         let before = g.len();
         g.retain(|c| c.id != id);
         Ok(g.len() < before)
+    }
+
+    async fn existing_channel_ids(&self, ids: &[Uuid]) -> Result<Vec<Uuid>> {
+        let g = self.inner.lock();
+        Ok(ids
+            .iter()
+            .copied()
+            .filter(|id| g.iter().any(|c| c.id == *id))
+            .collect())
     }
 }
 

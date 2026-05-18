@@ -48,9 +48,32 @@ pub async fn post_json<T: Serialize>(
     url: &Url,
     body: &T,
 ) -> Result<()> {
+    post_json_with_headers(client, url, body, &std::collections::BTreeMap::new()).await
+}
+
+/// Like [`post_json`] but adds caller-supplied request headers (generic
+/// webhook channels let users attach e.g. an `Authorization` header). A
+/// header whose name or value is not valid HTTP is skipped rather than
+/// failing the whole delivery — the receiver still gets the payload.
+pub async fn post_json_with_headers<T: Serialize>(
+    client: &OutboundHttpClient,
+    url: &Url,
+    body: &T,
+    headers: &std::collections::BTreeMap<String, String>,
+) -> Result<()> {
+    use hyper::header::{HeaderName, HeaderValue};
     let payload = serde_json::to_vec(body).context("serializing request payload")?;
-    let req = Request::post(url.as_str())
-        .header(CONTENT_TYPE, "application/json")
+    let mut builder = Request::post(url.as_str()).header(CONTENT_TYPE, "application/json");
+    for (k, v) in headers {
+        match (
+            HeaderName::from_bytes(k.as_bytes()),
+            HeaderValue::from_str(v),
+        ) {
+            (Ok(name), Ok(value)) => builder = builder.header(name, value),
+            _ => tracing::warn!(header = %k, "skipping invalid webhook header"),
+        }
+    }
+    let req = builder
         .body(Full::new(Bytes::from(payload)))
         .context("building request")?;
     let resp = client.request(req).await.context("sending request")?;

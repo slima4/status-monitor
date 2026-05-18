@@ -489,38 +489,15 @@ fn target_payload_with_alerts(alerts: Value) -> Value {
 }
 
 #[tokio::test]
-async fn create_target_with_alerts_round_trips() {
-    let app = app();
-    let payload = target_payload_with_alerts(json!({
-        "slack": { "after_failures": 3 },
-        "webhook": { "after_failures": 6, "notify_recovery": false }
-    }));
-    let resp = app
-        .clone()
-        .oneshot(
-            Request::post("/api/v1/targets")
-                .header("content-type", "application/json")
-                .body(Body::from(payload.to_string()))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), StatusCode::CREATED);
-    let body = body_json(resp).await;
-    assert_eq!(body["alerts"]["slack"]["after_failures"], 3);
-    assert_eq!(body["alerts"]["webhook"]["notify_recovery"], false);
-    let id = body["id"].as_str().unwrap();
-
-    let resp = app
-        .oneshot(
-            Request::get(format!("/api/v1/targets/{id}"))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    let got = body_json(resp).await;
-    assert_eq!(got["alerts"]["slack"]["after_failures"], 3);
+async fn rejects_alerts_binding_to_unknown_channel() {
+    // A binding must reference a channel the org owns. With no channel
+    // created, any channel_id is unknown → 400. (The positive round-trip,
+    // which needs the channel CRUD API to seed a real channel, is covered
+    // in the Phase 3 notification-channel suite.)
+    let payload = target_payload_with_alerts(json!([
+        { "channel_id": "00000000-0000-0000-0000-0000000000aa", "after_failures": 3 }
+    ]));
+    assert_eq!(post_target(payload).await, StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]
@@ -554,30 +531,16 @@ async fn create_target_without_alerts_defaults_empty() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::CREATED);
     let body = body_json(resp).await;
-    assert_eq!(body["alerts"], json!({}));
-}
-
-#[tokio::test]
-async fn rejects_alerts_email_with_empty_recipients() {
-    let payload = target_payload_with_alerts(json!({
-        "email": { "after_failures": 3, "to": [] }
-    }));
-    assert_eq!(post_target(payload).await, StatusCode::BAD_REQUEST);
+    assert_eq!(body["alerts"], json!([]));
 }
 
 #[tokio::test]
 async fn rejects_alerts_with_zero_after_failures() {
-    let payload = target_payload_with_alerts(json!({
-        "slack": { "after_failures": 0 }
-    }));
-    assert_eq!(post_target(payload).await, StatusCode::BAD_REQUEST);
-}
-
-#[tokio::test]
-async fn rejects_alerts_email_with_malformed_address() {
-    let payload = target_payload_with_alerts(json!({
-        "email": { "after_failures": 3, "to": ["not-an-email"] }
-    }));
+    // Structural check runs before channel resolution, so a bad
+    // after_failures is rejected regardless of channel existence.
+    let payload = target_payload_with_alerts(json!([
+        { "channel_id": "00000000-0000-0000-0000-0000000000aa", "after_failures": 0 }
+    ]));
     assert_eq!(post_target(payload).await, StatusCode::BAD_REQUEST);
 }
 

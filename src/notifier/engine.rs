@@ -1,17 +1,28 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use chrono::Utc;
 use metrics::counter;
+use moka::sync::Cache;
 use parking_lot::Mutex;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use crate::domain::{AlertChannel, CheckStatus};
-use crate::notifier::Notifier;
+use crate::domain::{CheckStatus, NotificationChannel};
+use crate::notifier::build_notifier;
 use crate::notifier::event::{AlertEvent, AlertKind, AlertSignal};
 use crate::observability::metrics::names;
+use crate::storage::NotificationChannelStore;
+
+/// How long a resolved (or absent) channel is cached. The alert path runs on
+/// every check result; without this each result would re-query every bound
+/// channel. Tradeoff to accept: an edit that *disables or deletes* a channel
+/// (e.g. revoking a leaked Slack webhook) still delivers to the old
+/// destination for up to this window, and a newly-created/re-enabled channel
+/// can take up to this long to start firing. 30s keeps both bounded.
+const CHANNEL_CACHE_TTL: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Default, Clone, Copy)]
 struct AlertState {
@@ -19,19 +30,69 @@ struct AlertState {
     alerting: bool,
 }
 
+/// Pure threshold/recovery decision. Extracted so the state machine is unit
+/// tested without a notifier or a store. Mutates `entry` and returns the
+/// event to emit (if any) plus the failure count to report on it.
+fn decide(
+    entry: &mut AlertState,
+    is_up: bool,
+    after: u32,
+    notify_recovery: bool,
+) -> (Option<AlertKind>, u32) {
+    match (is_up, entry.alerting) {
+        (true, true) => {
+            let prev_failures = entry.consecutive_non_up;
+            *entry = AlertState::default();
+            (
+                notify_recovery.then_some(AlertKind::Recovered),
+                prev_failures,
+            )
+        }
+        (true, false) => {
+            entry.consecutive_non_up = 0;
+            (None, 0)
+        }
+        (false, false) => {
+            entry.consecutive_non_up = entry.consecutive_non_up.saturating_add(1);
+            if entry.consecutive_non_up >= after.max(1) {
+                entry.alerting = true;
+                (Some(AlertKind::Down), entry.consecutive_non_up)
+            } else {
+                (None, 0)
+            }
+        }
+        (false, true) => {
+            entry.consecutive_non_up = entry.consecutive_non_up.saturating_add(1);
+            (None, 0)
+        }
+    }
+}
+
 pub struct AlertEngine {
     rx: mpsc::Receiver<AlertSignal>,
-    notifiers: HashMap<AlertChannel, Arc<dyn Notifier>>,
-    state: Arc<Mutex<HashMap<(Uuid, AlertChannel), AlertState>>>,
+    channels: Arc<dyn NotificationChannelStore>,
+    http: crate::http_outbound::OutboundHttpClient,
+    state: Arc<Mutex<HashMap<(Uuid, Uuid), AlertState>>>,
+    /// `None` is cached too, so a binding to a deleted channel doesn't hammer
+    /// the store on every check.
+    cache: Cache<Uuid, Option<Arc<NotificationChannel>>>,
 }
 
 impl AlertEngine {
-    pub fn new(rx: mpsc::Receiver<AlertSignal>, notifiers: Vec<Arc<dyn Notifier>>) -> Self {
-        let map = notifiers.into_iter().map(|n| (n.channel(), n)).collect();
+    pub fn new(
+        rx: mpsc::Receiver<AlertSignal>,
+        channels: Arc<dyn NotificationChannelStore>,
+        http: crate::http_outbound::OutboundHttpClient,
+    ) -> Self {
         Self {
             rx,
-            notifiers: map,
+            channels,
+            http,
             state: Arc::new(Mutex::new(HashMap::new())),
+            cache: Cache::builder()
+                .time_to_live(CHANNEL_CACHE_TTL)
+                .max_capacity(4096)
+                .build(),
         }
     }
 
@@ -49,80 +110,81 @@ impl AlertEngine {
         }
     }
 
+    /// Resolve a bound channel id to its (org-scoped) channel. Cached for
+    /// `CHANNEL_CACHE_TTL`; a store error is logged and treated as "absent"
+    /// for this tick but not cached, so the next result retries.
+    async fn resolve(&self, channel_id: Uuid) -> Option<Arc<NotificationChannel>> {
+        if let Some(hit) = self.cache.get(&channel_id) {
+            return hit;
+        }
+        match self.channels.get(channel_id).await {
+            Ok(opt) => {
+                let val = opt.map(Arc::new);
+                self.cache.insert(channel_id, val.clone());
+                val
+            }
+            Err(err) => {
+                tracing::warn!(%channel_id, error = %err, "resolving notification channel failed");
+                None
+            }
+        }
+    }
+
     async fn handle(&self, signal: AlertSignal) {
         let target = signal.target;
         if target.alerts.is_empty() {
             return;
         }
-        for (channel, cfg) in target.alerts.iter() {
-            let Some(notifier) = self.notifiers.get(channel) else {
-                tracing::debug!(
-                    target_id = %target.id,
-                    channel = channel.as_str(),
-                    "no globally-enabled notifier for channel; per-target opt-in ignored"
-                );
+        let is_up = signal.result.status == CheckStatus::Up;
+        for binding in target.alerts.iter() {
+            let Some(channel) = self.resolve(binding.channel_id).await else {
                 continue;
             };
-            let after = cfg.after_failures.max(1);
-            let key = (target.id, *channel);
+            if !channel.enabled {
+                continue;
+            }
             let (event_kind, failures_at_event) = {
                 let mut guard = self.state.lock();
-                let entry = guard.entry(key).or_default();
-                let is_up = signal.result.status == CheckStatus::Up;
-                match (is_up, entry.alerting) {
-                    (true, true) => {
-                        let prev_failures = entry.consecutive_non_up;
-                        *entry = AlertState::default();
-                        let kind = cfg.notify_recovery.then_some(AlertKind::Recovered);
-                        (kind, prev_failures)
-                    }
-                    (true, false) => {
-                        entry.consecutive_non_up = 0;
-                        (None, 0)
-                    }
-                    (false, false) => {
-                        entry.consecutive_non_up = entry.consecutive_non_up.saturating_add(1);
-                        if entry.consecutive_non_up >= after {
-                            entry.alerting = true;
-                            (Some(AlertKind::Down), entry.consecutive_non_up)
-                        } else {
-                            (None, 0)
-                        }
-                    }
-                    (false, true) => {
-                        entry.consecutive_non_up = entry.consecutive_non_up.saturating_add(1);
-                        (None, 0)
-                    }
-                }
+                let entry = guard.entry((target.id, binding.channel_id)).or_default();
+                decide(
+                    entry,
+                    is_up,
+                    binding.after_failures,
+                    binding.notify_recovery,
+                )
             };
-
             let Some(kind) = event_kind else { continue };
+
             let event = AlertEvent {
                 target_id: target.id,
                 target_name: target.name.clone(),
-                channel: *channel,
                 kind,
                 consecutive_failures: failures_at_event,
                 last_status: signal.result.status,
                 last_error: signal.result.error.clone(),
                 timestamp: Utc::now(),
-                recipients: cfg.to.clone(),
             };
+            let channel_label = channel.kind.as_str();
             counter!(
                 names::NOTIFICATIONS_TOTAL,
-                "channel" => channel.as_str(),
+                "channel" => channel_label,
                 "kind" => kind.as_str(),
             )
             .increment(1);
+            let notifier = match build_notifier(&channel.config, &self.http) {
+                Ok(n) => n,
+                Err(err) => {
+                    counter!(names::NOTIFICATIONS_FAILURES, "channel" => channel_label)
+                        .increment(1);
+                    tracing::warn!(target_id = %target.id, channel_id = %binding.channel_id, error = %err, "building notifier failed");
+                    continue;
+                }
+            };
             if let Err(err) = notifier.notify(&event).await {
-                counter!(
-                    names::NOTIFICATIONS_FAILURES,
-                    "channel" => channel.as_str(),
-                )
-                .increment(1);
+                counter!(names::NOTIFICATIONS_FAILURES, "channel" => channel_label).increment(1);
                 tracing::warn!(
                     target_id = %target.id,
-                    channel = channel.as_str(),
+                    channel_id = %binding.channel_id,
                     kind = kind.as_str(),
                     error = %err,
                     "notifier dispatch failed"
@@ -135,262 +197,91 @@ impl AlertEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{
-        AlertChannel, AlertChannelConfig, CheckResult, CheckSpec, CheckStatus, ExpectedStatus,
-        HttpCheck, HttpMethod, Target, TargetAlerts,
-    };
-    use std::collections::HashMap;
-    use std::time::Duration;
-    use url::Url;
+    use crate::domain::{ChannelConfig, NewNotificationChannel};
+    use crate::storage::InMemoryNotificationChannelStore;
 
-    struct StubNotifier {
-        channel: AlertChannel,
-        received: Arc<Mutex<Vec<AlertEvent>>>,
-    }
+    // ── Pure state machine (the valuable logic) ──────────────────────────
 
-    #[async_trait::async_trait]
-    impl Notifier for StubNotifier {
-        fn channel(&self) -> AlertChannel {
-            self.channel
+    /// Drive `decide` over a status sequence, collecting emitted events.
+    fn run_seq(after: u32, recovery: bool, ups: &[bool]) -> Vec<(AlertKind, u32)> {
+        let mut entry = AlertState::default();
+        let mut out = Vec::new();
+        for &is_up in ups {
+            if let (Some(kind), n) = decide(&mut entry, is_up, after, recovery) {
+                out.push((kind, n));
+            }
         }
-        async fn notify(&self, event: &AlertEvent) -> crate::error::Result<()> {
-            self.received.lock().push(event.clone());
-            Ok(())
-        }
+        out
     }
 
-    fn make_target(alerts: TargetAlerts) -> Arc<Target> {
-        let url = Url::parse("https://example.com/").unwrap();
-        Arc::new(Target {
-            id: Uuid::now_v7(),
-            name: "test".into(),
-            check: CheckSpec::Http(HttpCheck {
-                url,
-                method: HttpMethod::Get,
-                timeout: Duration::from_secs(5),
-                follow_redirects: false,
-                max_redirects: 0,
-                expected_status: ExpectedStatus::Exact(200),
-                expected_body_contains: None,
-                headers: HashMap::new(),
-                body: None,
-                verify_tls: true,
-                basic_auth: None,
-                bearer_token: None,
-            }),
-            interval: Duration::from_secs(60),
-            enabled: true,
-            tags: vec![],
-            alerts,
-            public_status: false,
-            public_name: None,
-            public_description: None,
-            public_group: None,
-            public_sort_order: 0,
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-        })
+    #[test]
+    fn fires_once_after_threshold_and_does_not_refire() {
+        let ev = run_seq(3, true, &[false, false, false, false, false, false, false]);
+        assert_eq!(ev, vec![(AlertKind::Down, 3)]);
     }
 
-    fn result(status: CheckStatus, target_id: Uuid) -> CheckResult {
-        CheckResult {
-            target_id,
-            timestamp: Utc::now(),
-            status,
-            duration_ms: 1,
-            dns_ms: None,
-            connect_ms: None,
-            tls_ms: None,
-            ttfb_ms: None,
-            response_code: None,
-            response_size: None,
-            error: None,
-        }
+    #[test]
+    fn emits_recovery_with_failure_count_then_resets() {
+        // 4 downs (fires at 2), then up → recovery reports 4, not 0.
+        let ev = run_seq(2, true, &[false, false, false, false, true]);
+        assert_eq!(ev, vec![(AlertKind::Down, 2), (AlertKind::Recovered, 4)]);
     }
 
-    fn build_engine(channel: AlertChannel) -> (AlertEngine, Arc<Mutex<Vec<AlertEvent>>>) {
-        let received = Arc::new(Mutex::new(Vec::new()));
-        let notifier = Arc::new(StubNotifier {
-            channel,
-            received: received.clone(),
-        });
-        let (_tx, rx) = mpsc::channel(16);
-        let engine = AlertEngine::new(rx, vec![notifier]);
-        (engine, received)
+    #[test]
+    fn no_recovery_event_when_disabled() {
+        let ev = run_seq(2, false, &[false, false, true]);
+        assert_eq!(ev, vec![(AlertKind::Down, 2)]);
     }
 
-    fn alerts_with(channel: AlertChannel, after: u32, recovery: bool) -> TargetAlerts {
-        let mut map = HashMap::new();
-        map.insert(
-            channel,
-            AlertChannelConfig {
-                after_failures: after,
-                notify_recovery: recovery,
-                to: vec![],
-            },
-        );
-        TargetAlerts(map)
+    #[test]
+    fn up_before_threshold_resets_counter() {
+        let ev = run_seq(3, true, &[false, false, true, false, false, true]);
+        assert!(ev.is_empty());
+    }
+
+    #[test]
+    fn after_zero_is_floored_to_one() {
+        let ev = run_seq(0, true, &[false]);
+        assert_eq!(ev, vec![(AlertKind::Down, 1)]);
+    }
+
+    // ── Channel resolution + cache ───────────────────────────────────────
+
+    fn engine_with(store: Arc<dyn NotificationChannelStore>) -> AlertEngine {
+        let (_tx, rx) = mpsc::channel(4);
+        AlertEngine::new(rx, store, crate::http_outbound::build_outbound_client())
     }
 
     #[tokio::test]
-    async fn fires_after_threshold() {
-        let (engine, received) = build_engine(AlertChannel::Slack);
-        let target = make_target(alerts_with(AlertChannel::Slack, 3, true));
-        for _ in 0..3 {
-            engine
-                .handle(AlertSignal {
-                    target: target.clone(),
-                    result: result(CheckStatus::Down, target.id),
-                })
-                .await;
-        }
-        assert_eq!(received.lock().len(), 1);
-        assert_eq!(received.lock()[0].kind, AlertKind::Down);
+    async fn resolve_returns_none_for_unknown_channel() {
+        let store: Arc<dyn NotificationChannelStore> =
+            Arc::new(InMemoryNotificationChannelStore::new());
+        let engine = engine_with(store);
+        assert!(engine.resolve(Uuid::now_v7()).await.is_none());
     }
 
     #[tokio::test]
-    async fn does_not_refire_while_alerting() {
-        let (engine, received) = build_engine(AlertChannel::Slack);
-        let target = make_target(alerts_with(AlertChannel::Slack, 3, true));
-        for _ in 0..7 {
-            engine
-                .handle(AlertSignal {
-                    target: target.clone(),
-                    result: result(CheckStatus::Down, target.id),
-                })
-                .await;
-        }
-        assert_eq!(received.lock().len(), 1);
-    }
-
-    #[tokio::test]
-    async fn emits_recovery_after_alert() {
-        let (engine, received) = build_engine(AlertChannel::Slack);
-        let target = make_target(alerts_with(AlertChannel::Slack, 2, true));
-        for _ in 0..4 {
-            engine
-                .handle(AlertSignal {
-                    target: target.clone(),
-                    result: result(CheckStatus::Down, target.id),
-                })
-                .await;
-        }
-        engine
-            .handle(AlertSignal {
-                target: target.clone(),
-                result: result(CheckStatus::Up, target.id),
-            })
-            .await;
-        let events = received.lock().clone();
-        assert_eq!(events.len(), 2);
-        assert_eq!(events[0].kind, AlertKind::Down);
-        assert_eq!(events[0].consecutive_failures, 2);
-        assert_eq!(events[1].kind, AlertKind::Recovered);
-        // Recovery event should report the failure count at which the alert fired,
-        // not zero — protects against a regression where `mem::take` clears the
-        // counter before the event is constructed.
-        assert_eq!(events[1].consecutive_failures, 4);
-    }
-
-    #[tokio::test]
-    async fn no_recovery_when_disabled() {
-        let (engine, received) = build_engine(AlertChannel::Slack);
-        let target = make_target(alerts_with(AlertChannel::Slack, 2, false));
-        for _ in 0..2 {
-            engine
-                .handle(AlertSignal {
-                    target: target.clone(),
-                    result: result(CheckStatus::Down, target.id),
-                })
-                .await;
-        }
-        engine
-            .handle(AlertSignal {
-                target: target.clone(),
-                result: result(CheckStatus::Up, target.id),
-            })
-            .await;
-        assert_eq!(received.lock().len(), 1);
-        assert_eq!(received.lock()[0].kind, AlertKind::Down);
-    }
-
-    #[tokio::test]
-    async fn resets_counter_on_up() {
-        let (engine, received) = build_engine(AlertChannel::Slack);
-        let target = make_target(alerts_with(AlertChannel::Slack, 3, true));
-        let sequence = [
-            CheckStatus::Down,
-            CheckStatus::Down,
-            CheckStatus::Up,
-            CheckStatus::Down,
-            CheckStatus::Down,
-            CheckStatus::Up,
-        ];
-        for s in sequence {
-            engine
-                .handle(AlertSignal {
-                    target: target.clone(),
-                    result: result(s, target.id),
-                })
-                .await;
-        }
-        assert!(received.lock().is_empty());
-    }
-
-    #[tokio::test]
-    async fn isolates_per_channel() {
-        let received_slack = Arc::new(Mutex::new(Vec::new()));
-        let received_web = Arc::new(Mutex::new(Vec::new()));
-        let slack = Arc::new(StubNotifier {
-            channel: AlertChannel::Slack,
-            received: received_slack.clone(),
-        });
-        let web = Arc::new(StubNotifier {
-            channel: AlertChannel::Webhook,
-            received: received_web.clone(),
-        });
-        let (_tx, rx) = mpsc::channel(16);
-        let engine = AlertEngine::new(rx, vec![slack, web]);
-        let mut map = HashMap::new();
-        map.insert(
-            AlertChannel::Slack,
-            AlertChannelConfig {
-                after_failures: 2,
-                notify_recovery: true,
-                to: vec![],
-            },
-        );
-        map.insert(
-            AlertChannel::Webhook,
-            AlertChannelConfig {
-                after_failures: 4,
-                notify_recovery: true,
-                to: vec![],
-            },
-        );
-        let target = make_target(TargetAlerts(map));
-        for _ in 0..2 {
-            engine
-                .handle(AlertSignal {
-                    target: target.clone(),
-                    result: result(CheckStatus::Down, target.id),
-                })
-                .await;
-        }
-        assert_eq!(received_slack.lock().len(), 1);
-        assert!(received_web.lock().is_empty());
-    }
-
-    #[tokio::test]
-    async fn unknown_channel_is_no_op() {
-        let (engine, received) = build_engine(AlertChannel::Slack);
-        let target = make_target(alerts_with(AlertChannel::Email, 1, true));
-        engine
-            .handle(AlertSignal {
-                target: target.clone(),
-                result: result(CheckStatus::Down, target.id),
-            })
-            .await;
-        assert!(received.lock().is_empty());
+    async fn resolve_finds_inserted_channel_and_caches_it() {
+        let store: Arc<dyn NotificationChannelStore> =
+            Arc::new(InMemoryNotificationChannelStore::new());
+        let ch = store
+            .create(
+                NewNotificationChannel {
+                    name: "ops".into(),
+                    config: ChannelConfig::Slack {
+                        webhook_url: "https://hooks.slack.com/x".into(),
+                    },
+                    enabled: true,
+                },
+                10,
+            )
+            .await
+            .unwrap();
+        let engine = engine_with(store.clone());
+        let got = engine.resolve(ch.id).await.expect("resolved");
+        assert_eq!(got.name, "ops");
+        // Second hit served from cache even after the row is deleted.
+        store.delete(ch.id).await.unwrap();
+        assert!(engine.resolve(ch.id).await.is_some());
     }
 }

@@ -13,7 +13,7 @@ pub mod target;
 pub mod user;
 pub mod word_lists;
 
-pub use alert::{AlertChannel, AlertChannelConfig, TargetAlerts};
+pub use alert::{AlertBinding, TargetAlerts};
 pub use check::{
     CheckSpec, DomainExpiryCheck, ExpectedStatus, HttpCheck, HttpMethod, TcpCheck, TlsCertCheck,
 };

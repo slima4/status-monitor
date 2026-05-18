@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 use uuid::Uuid;
 
-use crate::domain::{AlertChannel, CheckResult, CheckStatus, Target};
+use crate::domain::{CheckResult, CheckStatus, Target};
 
 /// Result-plus-target envelope produced by the worker pool and consumed by the
 /// alert engine. Lives here (next to AlertEvent) so the worker's fan-out
@@ -31,22 +31,17 @@ impl AlertKind {
     }
 }
 
+/// The payload handed to a notifier transport (and serialized as-is for the
+/// generic webhook channel). Channel identity is no longer carried here — the
+/// engine resolves the bound channel and picks the transport before building
+/// this event.
 #[derive(Debug, Clone, Serialize)]
 pub struct AlertEvent {
     pub target_id: Uuid,
     pub target_name: String,
-    #[serde(serialize_with = "serialize_channel")]
-    pub channel: AlertChannel,
     pub kind: AlertKind,
     pub consecutive_failures: u32,
     pub last_status: CheckStatus,
     pub last_error: Option<String>,
     pub timestamp: DateTime<Utc>,
-    /// Per-channel recipient list (empty for non-email channels).
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub recipients: Vec<String>,
-}
-
-fn serialize_channel<S: serde::Serializer>(c: &AlertChannel, s: S) -> Result<S::Ok, S::Error> {
-    s.serialize_str(c.as_str())
 }

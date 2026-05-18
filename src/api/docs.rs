@@ -15,13 +15,13 @@ use crate::api::types::{
 };
 use crate::domain::Role;
 use crate::domain::{
-    AlertChannel, AlertChannelConfig, CheckResult, CheckSpec, CheckStatus,
-    ComponentHistoryResponse, DayState, DomainExpiryCheck, ExpectedStatus, HttpCheck, HttpMethod,
-    Incident, IncidentNarrationUpdate, IncidentSeverity, IncidentStatusPhase, MaintenanceFilter,
-    MaintenanceWindow, MaintenanceWindowUpdate, NewIncidentUpdate, NewMaintenanceWindow, NewTarget,
-    OverallState, OverallStatus, PublicComponent, PublicComponentGroup, PublicComponentStatus,
-    PublicIncident, PublicIncidentUpdate, PublicMaintenance, PublicMaintenanceList,
-    PublicStatusPage, Target, TargetAlerts, TargetUpdate, TcpCheck, TlsCertCheck,
+    AlertBinding, CheckResult, CheckSpec, CheckStatus, ComponentHistoryResponse, DayState,
+    DomainExpiryCheck, ExpectedStatus, HttpCheck, HttpMethod, Incident, IncidentNarrationUpdate,
+    IncidentSeverity, IncidentStatusPhase, MaintenanceFilter, MaintenanceWindow,
+    MaintenanceWindowUpdate, NewIncidentUpdate, NewMaintenanceWindow, NewTarget, OverallState,
+    OverallStatus, PublicComponent, PublicComponentGroup, PublicComponentStatus, PublicIncident,
+    PublicIncidentUpdate, PublicMaintenance, PublicMaintenanceList, PublicStatusPage, Target,
+    TargetAlerts, TargetUpdate, TcpCheck, TlsCertCheck,
 };
 use crate::storage::UptimeStats;
 
@@ -106,8 +106,7 @@ use crate::storage::UptimeStats;
             CheckStatus,
             UptimeStats,
             Incident,
-            AlertChannel,
-            AlertChannelConfig,
+            AlertBinding,
             TargetAlerts,
             TagCount,
             DashboardSummary,

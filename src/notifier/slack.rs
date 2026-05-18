@@ -2,7 +2,6 @@ use async_trait::async_trait;
 use serde::Serialize;
 use url::Url;
 
-use crate::domain::AlertChannel;
 use crate::error::Result;
 use crate::http_outbound::{OutboundHttpClient, post_json};
 use crate::notifier::Notifier;
@@ -49,10 +48,6 @@ impl SlackNotifier {
 
 #[async_trait]
 impl Notifier for SlackNotifier {
-    fn channel(&self) -> AlertChannel {
-        AlertChannel::Slack
-    }
-
     async fn notify(&self, event: &AlertEvent) -> Result<()> {
         let text = Self::render(event);
         post_json(

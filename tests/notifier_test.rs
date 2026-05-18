@@ -10,10 +10,10 @@ use axum::routing::post;
 use chrono::Utc;
 use parking_lot::Mutex;
 use serde_json::Value;
-use status_monitor::config::{NotificationsConfig, SlackConfig, WebhookConfig};
-use status_monitor::domain::{AlertChannel, CheckStatus};
-use status_monitor::notifier::build_notifiers;
-use status_monitor::notifier::event::AlertEvent;
+use status_monitor::domain::{ChannelConfig, CheckStatus};
+use status_monitor::http_outbound::build_outbound_client;
+use status_monitor::notifier::build_notifier;
+use status_monitor::notifier::event::{AlertEvent, AlertKind};
 use uuid::Uuid;
 
 #[derive(Default, Clone)]
@@ -39,96 +39,89 @@ async fn capture(
     StatusCode::OK
 }
 
-fn make_event(channel: AlertChannel, target_id: Uuid) -> AlertEvent {
-    use status_monitor::notifier::event::AlertKind;
+fn make_event() -> AlertEvent {
     AlertEvent {
-        target_id,
+        target_id: Uuid::now_v7(),
         target_name: "demo".into(),
-        channel,
         kind: AlertKind::Down,
         consecutive_failures: 3,
         last_status: CheckStatus::Down,
         last_error: Some("500".into()),
         timestamp: Utc::now(),
-        recipients: vec![],
     }
 }
 
 #[tokio::test]
-async fn slack_notifier_posts_text_payload() {
+async fn slack_channel_posts_text_payload() {
     let (addr, store) = spawn_capture_server().await;
-    let cfg = NotificationsConfig {
-        slack: SlackConfig {
-            enabled: true,
-            webhook_url: format!("http://{addr}/hook"),
-        },
-        webhook: WebhookConfig::default(),
-        email: Default::default(),
+    let cfg = ChannelConfig::Slack {
+        webhook_url: format!("http://{addr}/hook"),
     };
-    let notifiers = build_notifiers(&cfg).expect("notifiers");
-    assert_eq!(notifiers.len(), 1);
-
-    let event = make_event(AlertChannel::Slack, Uuid::now_v7());
-    notifiers[0].notify(&event).await.expect("notify");
+    let notifier = build_notifier(&cfg, &build_outbound_client()).expect("notifier");
+    notifier.notify(&make_event()).await.expect("notify");
 
     let captured = store.lock().clone();
     assert_eq!(captured.len(), 1);
     let text = captured[0]
         .body
         .get("text")
-        .and_then(|v| v.as_str())
+        .and_then(Value::as_str)
         .unwrap();
     assert!(text.contains("DOWN"));
     assert!(text.contains("demo"));
 }
 
 #[tokio::test]
-async fn webhook_notifier_posts_event_payload() {
+async fn webhook_channel_posts_event_payload_with_custom_header() {
     let (addr, store) = spawn_capture_server().await;
-    let cfg = NotificationsConfig {
-        slack: SlackConfig::default(),
-        webhook: WebhookConfig {
-            enabled: true,
-            url: format!("http://{addr}/hook"),
-        },
-        email: Default::default(),
+    let cfg = ChannelConfig::Webhook {
+        url: format!("http://{addr}/hook"),
+        headers: std::collections::BTreeMap::from([("X-Test-Token".into(), "secret".into())]),
     };
-    let notifiers = build_notifiers(&cfg).expect("notifiers");
-    assert_eq!(notifiers.len(), 1);
-
-    let event = make_event(AlertChannel::Webhook, Uuid::now_v7());
-    notifiers[0].notify(&event).await.expect("notify");
+    let notifier = build_notifier(&cfg, &build_outbound_client()).expect("notifier");
+    notifier.notify(&make_event()).await.expect("notify");
 
     let captured = store.lock().clone();
     assert_eq!(captured.len(), 1);
     let body = &captured[0].body;
-    assert_eq!(body["channel"], "webhook");
+    // The event no longer carries a `channel` discriminator.
+    assert!(body.get("channel").is_none());
     assert_eq!(body["kind"], "down");
     assert_eq!(body["target_name"], "demo");
 }
 
 #[tokio::test]
-async fn build_notifiers_rejects_enabled_slack_without_url() {
-    let cfg = NotificationsConfig {
-        slack: SlackConfig {
-            enabled: true,
-            webhook_url: String::new(),
-        },
-        webhook: WebhookConfig::default(),
-        email: Default::default(),
-    };
-    assert!(build_notifiers(&cfg).is_err());
+async fn build_notifier_constructs_each_kind() {
+    let http = build_outbound_client();
+    assert!(
+        build_notifier(
+            &ChannelConfig::Telegram {
+                bot_token: "123:abc".into(),
+                chat_id: "-100".into(),
+            },
+            &http,
+        )
+        .is_ok()
+    );
+    assert!(
+        build_notifier(
+            &ChannelConfig::Slack {
+                webhook_url: "https://hooks.slack.com/x".into(),
+            },
+            &http,
+        )
+        .is_ok()
+    );
 }
 
 #[tokio::test]
-async fn build_notifiers_rejects_enabled_webhook_without_url() {
-    let cfg = NotificationsConfig {
-        slack: SlackConfig::default(),
-        webhook: WebhookConfig {
-            enabled: true,
-            url: String::new(),
+async fn build_notifier_rejects_unparseable_url() {
+    let http = build_outbound_client();
+    let err = build_notifier(
+        &ChannelConfig::Slack {
+            webhook_url: "not a url".into(),
         },
-        email: Default::default(),
-    };
-    assert!(build_notifiers(&cfg).is_err());
+        &http,
+    );
+    assert!(err.is_err());
 }

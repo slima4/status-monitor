@@ -8,7 +8,7 @@ use status_monitor::{
     error::{AppError, Result},
     http_client::client::build_clients,
     jobs::retention,
-    notifier::{Notifier, build_notifiers, engine::AlertEngine},
+    notifier::engine::AlertEngine,
     observability,
     pipeline::{BatcherConfig, ResultBatcher},
     public_status::{
@@ -115,14 +115,14 @@ async fn main() -> Result<()> {
     let http_pool_stats = http_clients.pool_stats().clone();
 
     let (result_tx, result_rx) = mpsc::channel(cfg.storage.clickhouse.buffer_size.max(1024));
-    let notifiers: Vec<Arc<dyn Notifier>> = build_notifiers(&cfg.notifications)?;
-    let (alert_tx, alert_rx) = if notifiers.is_empty() {
-        (None, None)
-    } else {
-        let (tx, rx) = mpsc::channel(cfg.storage.clickhouse.buffer_size.max(1024));
-        (Some(tx), Some(rx))
-    };
-    let fanout = ResultFanout::new(result_tx.clone(), alert_tx);
+    // Notification channels are per-org and edited at runtime, so the alert
+    // path is always wired (no global enable gate). The engine resolves a
+    // target's bound channels from this store per result.
+    let notification_channel_store: Arc<dyn NotificationChannelStore> = Arc::new(
+        PgNotificationChannelStore::new(pg_pool.clone(), default_org_id, cipher.clone()),
+    );
+    let (alert_tx, alert_rx) = mpsc::channel(cfg.storage.clickhouse.buffer_size.max(1024));
+    let fanout = ResultFanout::new(result_tx.clone(), Some(alert_tx));
     let pool = Arc::new(WorkerPool::new(
         cfg.checker.max_concurrent_checks,
         (*http_clients).clone(),
@@ -159,9 +159,13 @@ async fn main() -> Result<()> {
         let token = root.clone();
         tokio::spawn(async move { batcher.run(token).await })
     };
-    let alert_engine_handle: Option<JoinHandle<()>> = alert_rx.map(|rx| {
+    let alert_engine_handle: Option<JoinHandle<()>> = Some({
         let token = root.clone();
-        let engine = AlertEngine::new(rx, notifiers);
+        let engine = AlertEngine::new(
+            alert_rx,
+            notification_channel_store.clone(),
+            status_monitor::http_outbound::build_outbound_client(),
+        );
         tokio::spawn(async move { engine.run(token).await })
     });
     // Floor at 100ms to keep a misconfigured 0 / sub-tick value from spinning.
@@ -228,9 +232,6 @@ async fn main() -> Result<()> {
     ));
     let incident_narration_store: Arc<dyn IncidentNarrationStore> = Arc::new(
         PgIncidentNarrationStore::new(pg_pool_for_stores.clone(), default_org_id),
-    );
-    let notification_channel_store: Arc<dyn NotificationChannelStore> = Arc::new(
-        PgNotificationChannelStore::new(pg_pool_for_stores.clone(), default_org_id, cipher.clone()),
     );
 
     let outbound_http = status_monitor::http_outbound::build_outbound_client();

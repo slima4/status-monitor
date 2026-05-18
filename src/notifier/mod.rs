@@ -1,90 +1,52 @@
-pub mod email;
 pub mod engine;
 pub mod event;
 pub mod slack;
+pub mod telegram;
 pub mod webhook;
 
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use secrecy::ExposeSecret;
 
-use crate::config::NotificationsConfig;
-use crate::domain::AlertChannel;
-use crate::error::{AppError, Result};
-use crate::http_outbound::{OutboundHttpClient, build_outbound_client};
-use crate::notifier::email::EmailNotifier;
+use crate::domain::ChannelConfig;
+use crate::error::Result;
+use crate::http_outbound::OutboundHttpClient;
 use crate::notifier::event::AlertEvent;
 use crate::notifier::slack::SlackNotifier;
+use crate::notifier::telegram::TelegramNotifier;
 use crate::notifier::webhook::WebhookNotifier;
 
 #[async_trait]
 pub trait Notifier: Send + Sync {
-    fn channel(&self) -> AlertChannel;
     async fn notify(&self, event: &AlertEvent) -> Result<()>;
 }
 
-/// Builds the set of globally-enabled notifiers from config. Per-target opt-ins
-/// that reference a channel missing from this map are logged and dropped by the
-/// engine.
-pub fn build_notifiers(cfg: &NotificationsConfig) -> Result<Vec<Arc<dyn Notifier>>> {
-    let mut out: Vec<Arc<dyn Notifier>> = Vec::new();
-    let mut http_client: Option<OutboundHttpClient> = None;
-    if cfg.slack.enabled {
-        if cfg.slack.webhook_url.is_empty() {
-            return Err(AppError::bad_request(
+/// The single extensibility seam: map a stored [`ChannelConfig`] to its
+/// transport. Adding a channel type is one new arm here plus one `Notifier`
+/// impl. URLs were validated `https` on channel create; re-parsing here is a
+/// defence-in-depth guard, not the primary check.
+pub fn build_notifier(cfg: &ChannelConfig, http: &OutboundHttpClient) -> Result<Arc<dyn Notifier>> {
+    let parse = |s: &str| -> Result<url::Url> {
+        s.parse::<url::Url>().map_err(|e| {
+            crate::error::AppError::bad_request(
                 crate::api::codes::INVALID_CONFIG,
-                "notifications.slack.enabled = true requires webhook_url",
-            ));
-        }
-        let url = cfg.slack.webhook_url.parse::<url::Url>().map_err(|e| {
-            AppError::bad_request(
-                crate::api::codes::INVALID_CONFIG,
-                format!("notifications.slack.webhook_url: {e}"),
+                format!("notification channel URL is invalid: {e}"),
             )
-        })?;
-        let client = http_client
-            .get_or_insert_with(build_outbound_client)
-            .clone();
-        out.push(Arc::new(SlackNotifier::new(client, url)) as Arc<dyn Notifier>);
-    }
-    if cfg.webhook.enabled {
-        if cfg.webhook.url.is_empty() {
-            return Err(AppError::bad_request(
-                crate::api::codes::INVALID_CONFIG,
-                "notifications.webhook.enabled = true requires url",
-            ));
+        })
+    };
+    Ok(match cfg {
+        ChannelConfig::Webhook { url, headers } => Arc::new(WebhookNotifier::new(
+            http.clone(),
+            parse(url)?,
+            headers.clone(),
+        )) as Arc<dyn Notifier>,
+        ChannelConfig::Slack { webhook_url } => {
+            Arc::new(SlackNotifier::new(http.clone(), parse(webhook_url)?)) as Arc<dyn Notifier>
         }
-        let url = cfg.webhook.url.parse::<url::Url>().map_err(|e| {
-            AppError::bad_request(
-                crate::api::codes::INVALID_CONFIG,
-                format!("notifications.webhook.url: {e}"),
-            )
-        })?;
-        let client = http_client
-            .get_or_insert_with(build_outbound_client)
-            .clone();
-        out.push(Arc::new(WebhookNotifier::new(client, url)) as Arc<dyn Notifier>);
-    }
-    if cfg.email.enabled {
-        // Plaintext SMTP carries the password in the clear during AUTH. Disallow
-        // any auth setup that would leak the password over a non-TLS link.
-        if !cfg.email.smtp_password.expose_secret().is_empty()
-            && cfg.email.smtp_port == 25
-            && !cfg.email.starttls
-        {
-            return Err(AppError::bad_request(
-                crate::api::codes::INVALID_CONFIG,
-                "notifications.email: smtp_password is set but smtp_port=25 with starttls=false would leak the password in cleartext",
-            ));
-        }
-        if cfg.email.smtp_host.is_empty() || cfg.email.from.is_empty() {
-            return Err(AppError::bad_request(
-                crate::api::codes::INVALID_CONFIG,
-                "notifications.email.enabled = true requires smtp_host and from",
-            ));
-        }
-        out.push(Arc::new(EmailNotifier::new(&cfg.email)?) as Arc<dyn Notifier>);
-    }
-    Ok(out)
+        ChannelConfig::Telegram { bot_token, chat_id } => Arc::new(TelegramNotifier::new(
+            http.clone(),
+            bot_token,
+            chat_id.clone(),
+        )?) as Arc<dyn Notifier>,
+    })
 }

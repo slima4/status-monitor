@@ -16,7 +16,7 @@ CREATE TABLE targets (
     interval_secs   INTEGER NOT NULL CHECK (interval_secs >= 10),
     enabled         BOOLEAN NOT NULL DEFAULT true,
     tags            TEXT[] NOT NULL DEFAULT '{}',
-    alerts          JSONB NOT NULL DEFAULT '{}'::jsonb,
+    alerts          JSONB NOT NULL DEFAULT '[]'::jsonb,
     public_status        BOOLEAN NOT NULL DEFAULT false,
     public_name          TEXT,
     public_description   TEXT,
