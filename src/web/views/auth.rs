@@ -186,7 +186,7 @@ pub mod settings {
     use crate::web::assets::filters;
     use crate::web::auth::{CurrentOrg, Session};
     use crate::web::error::WebResult;
-    use crate::web::views::fmt_human;
+    use crate::web::views::{fmt_human, resolve_org};
 
     use super::{TAB_ACCOUNT, TAB_SETTINGS, TAB_STATUS_PAGE, TAB_USAGE};
 
@@ -372,14 +372,9 @@ pub mod settings {
         State(state): State<AppState>,
         org: Result<CurrentOrg, AppError>,
     ) -> WebResult<Response> {
-        let CurrentOrg(org) = match org {
+        let org = match resolve_org(org, "/settings/status-page") {
             Ok(o) => o,
-            Err(AppError::Unauthorized) => {
-                return Ok(
-                    crate::web::auth::login_redirect("/settings/status-page").into_response()
-                );
-            }
-            Err(e) => return Err(e.into()),
+            Err(resp) => return Ok(resp),
         };
         let pool = state.require_db()?;
         let ob = load_for_settings(pool, org).await?;
@@ -454,12 +449,9 @@ pub mod settings {
         State(state): State<AppState>,
         org: Result<CurrentOrg, AppError>,
     ) -> WebResult<Response> {
-        let CurrentOrg(org) = match org {
+        let org = match resolve_org(org, "/settings/usage") {
             Ok(o) => o,
-            Err(AppError::Unauthorized) => {
-                return Ok(crate::web::auth::login_redirect("/settings/usage").into_response());
-            }
-            Err(e) => return Err(e.into()),
+            Err(resp) => return Ok(resp),
         };
         let u = state.quotas.org_usage(org).await?;
         let p = &u.plan;

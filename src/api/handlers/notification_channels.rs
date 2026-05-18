@@ -1,10 +1,10 @@
 //! Operator endpoints for notification-channel CRUD + a send-test action.
 //!
-//! Standard `ApiError` envelope. Mounted under `/api/v1/notification-channels`
-//! so the existing auth boundary (basic auth at Caddy in v1) applies. Org
-//! scoping is implicit via the store (`default_org_id`), mirroring
-//! [`super::maintenance`]. Secrets are sealed at rest by the store and are
-//! never echoed back: every read path returns through [`Redacted`].
+//! Standard `ApiError` envelope. Mounted under `/api/v1/notification-channels`.
+//! Every handler resolves the caller's tenant via [`CurrentOrg`] and threads
+//! it into the store, so a channel is only ever visible to its owning org.
+//! Secrets are sealed at rest by the store and are never echoed back: every
+//! read path returns through [`Redacted`].
 
 use axum::Json;
 use axum::extract::{Path, State};

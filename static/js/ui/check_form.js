@@ -147,12 +147,28 @@
             .map(s => s.trim())
             .filter(Boolean);
 
+        const alerts = [];
+        for (const row of form.querySelectorAll("[data-channel-row]")) {
+            const cb = row.querySelector("[data-channel-select]");
+            if (!cb || !cb.checked) continue;
+            const after = parseInt(row.querySelector("[data-after-failures]").value, 10);
+            if (!Number.isInteger(after) || after < 1) {
+                return { error: `"After N failures" for channel must be a whole number ≥ 1.` };
+            }
+            alerts.push({
+                channel_id: cb.value,
+                after_failures: after,
+                notify_recovery: row.querySelector("[data-notify-recovery]").checked,
+            });
+        }
+
         const payload = {
             name: data.get("name"),
             interval: parseInt(data.get("interval_s"), 10),
             enabled: data.get("enabled") === "on",
             tags,
             check,
+            alerts,
         };
         return { payload };
     }
@@ -160,39 +176,27 @@
     function blankToNull(v) { return v && v.length > 0 ? v : null; }
 
     function clearErrors() {
-        const banner = document.getElementById("form-errors");
-        banner.innerHTML = "";
-        banner.classList.add("hidden");
-        document.querySelectorAll("[aria-invalid]").forEach(el => el.removeAttribute("aria-invalid"));
+        window.smClearFormErrors(document.getElementById("form-errors"));
     }
 
     function renderClientError(msg) {
-        const banner = document.getElementById("form-errors");
-        banner.textContent = msg;
-        banner.classList.remove("hidden");
+        window.smRenderClientError(document.getElementById("form-errors"), msg);
     }
 
     function renderApiError(json, status) {
-        const banner = document.getElementById("form-errors");
-        const err = (json && json.error) || {};
-        const code = err.code || `HTTP ${status}`;
-        let message = err.message || "Request rejected.";
-        if (err.code === "SSRF_BLOCKED") {
-            message = "This URL points to a private/internal range and is blocked. " +
-                      "If you need to monitor internal services, deploy a monitor instance inside that network.";
-        }
-        banner.innerHTML = `<strong>${escapeHtml(code)}</strong>: ${escapeHtml(message)}`;
-        if (err.field) {
-            banner.insertAdjacentHTML("beforeend", ` <span class="text-xs text-red-600">(field: ${escapeHtml(err.field)})</span>`);
-        }
-        banner.classList.remove("hidden");
-        banner.scrollIntoView({ block: "center", behavior: "smooth" });
-
-        const target = err.field ? fieldForApiPath(err.field) : null;
-        if (target) {
-            target.setAttribute("aria-invalid", "true");
-            target.focus({ preventScroll: true });
-        }
+        window.smRenderApiError(document.getElementById("form-errors"), json, status, {
+            messageFor: (err) => err.code === "SSRF_BLOCKED"
+                ? "This URL points to a private/internal range and is blocked. " +
+                  "If you need to monitor internal services, deploy a monitor instance inside that network."
+                : null,
+            onField: (field) => {
+                const target = fieldForApiPath(field);
+                if (target) {
+                    target.setAttribute("aria-invalid", "true");
+                    target.focus({ preventScroll: true });
+                }
+            },
+        });
     }
 
     const API_PATH_TO_FORM = {
@@ -214,15 +218,5 @@
         const name = API_PATH_TO_FORM[path];
         if (!name) return null;
         return form.querySelector(`[name="${name}"]`);
-    }
-
-    function escapeHtml(s) {
-        return String(s).replace(/[&<>"']/g, ch => ({
-            "&": "&amp;",
-            "<": "&lt;",
-            ">": "&gt;",
-            "\"": "&quot;",
-            "'": "&#39;",
-        }[ch]));
     }
 })();

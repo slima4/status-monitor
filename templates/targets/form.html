@@ -213,6 +213,42 @@
       </div>
     </fieldset>
 
+    <fieldset class="space-y-3 rounded border bg-white p-4">
+      <legend class="px-1 text-sm font-medium">Alerts</legend>
+      {% if form.channels.is_empty() %}
+      <p class="text-sm text-slate-500">
+        No notification channels yet.
+        <a href="/settings/notifications/new" class="underline">Add one</a>
+        to get Down / Recovered alerts for this monitor.
+      </p>
+      {% else %}
+      <p class="text-xs text-slate-500">
+        Pick channels to notify. Down fires after N consecutive non-up checks.
+      </p>
+      <div class="divide-y">
+        {% for c in form.channels %}
+        <div data-channel-row class="flex flex-wrap items-center gap-4 py-2">
+          <label class="inline-flex min-w-[14rem] items-center gap-2">
+            <input type="checkbox" data-channel-select value="{{ c.id }}"{% if c.selected %} checked{% endif %}>
+            <span class="text-sm">{{ c.name }}</span>
+            <span class="rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-500">{{ c.kind }}</span>
+          </label>
+          <label class="inline-flex items-center gap-1 text-xs text-slate-500">
+            After
+            <input type="number" data-after-failures min="1" max="100" value="{{ c.after_failures }}"
+                   class="w-16 rounded border px-2 py-1 text-sm">
+            failures
+          </label>
+          <label class="inline-flex items-center gap-1 text-xs text-slate-500">
+            <input type="checkbox" data-notify-recovery{% if c.notify_recovery %} checked{% endif %}>
+            Notify on recovery
+          </label>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </fieldset>
+
     <div class="flex gap-3">
       <button type="submit"
               class="rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700">
@@ -224,6 +260,7 @@
   </form>
 </section>
 
+<script defer src="{{ "js/ui/api_form.js"|asset }}"></script>
 <script defer src="{{ "js/ui/auth_field.js"|asset }}"></script>
 <script defer src="{{ "js/ui/check_form.js"|asset }}"></script>
 {% endblock %}

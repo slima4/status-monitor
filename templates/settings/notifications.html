@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Notification channels · Status Monitor{% endblock %}
+{% block content %}
+<section class="space-y-6">
+  <header class="flex flex-wrap items-start justify-between gap-3">
+    <div class="space-y-1">
+      <h1 class="text-2xl font-semibold tracking-tight">Notification channels</h1>
+      <p class="text-sm text-slate-500">
+        Slack, generic webhook or Telegram destinations. Bind them to monitors
+        from the monitor's <em>Alerts</em> section to get Down / Recovered
+        notifications.
+      </p>
+    </div>
+    <a href="/settings/notifications/new"
+       class="rounded bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700">
+      Add channel
+    </a>
+  </header>
+
+  <div id="channels-list"
+       hx-get="/web/partials/settings/notifications"
+       hx-trigger="load, every 60s, channels:refresh from:body"
+       hx-swap="innerHTML"
+       class="rounded border bg-white">
+    <p class="px-4 py-3 text-sm text-slate-500">Loading…</p>
+  </div>
+
+  <script>
+    // Send-test result: the API returns 200 {delivered:true} or a 4xx error
+    // envelope. Render the outcome into the row's result cell instead of
+    // letting HTMX swap anything.
+    window.smChannelTestResult = function (btn, ev) {
+      const cell = btn.parentElement.querySelector('[data-test-result]');
+      if (!cell) return;
+      if (ev.detail.successful) {
+        cell.textContent = '✓ sent';
+        cell.className = 'text-xs font-medium text-emerald-700';
+      } else {
+        cell.textContent = '✗ ' + window.smErrMsg(ev.detail.xhr, 'delivery failed');
+        cell.className = 'text-xs font-medium text-rose-700';
+      }
+    };
+  </script>
+</section>
+{% endblock %}

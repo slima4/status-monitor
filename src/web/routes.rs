@@ -43,6 +43,22 @@ pub fn routes(cfg: &AppConfig) -> Router<AppState> {
         )
         .route("/settings/usage", get(views::auth::settings::usage_page))
         .route(
+            "/settings/notifications",
+            get(views::notification_channels::index),
+        )
+        .route(
+            "/settings/notifications/new",
+            get(views::notification_channels::new_form),
+        )
+        .route(
+            "/settings/notifications/{id}/edit",
+            get(views::notification_channels::edit_form),
+        )
+        .route(
+            "/web/partials/settings/notifications",
+            get(views::notification_channels::list_partial),
+        )
+        .route(
             "/web/partials/settings/sessions",
             get(views::auth::settings::sessions_partial),
         )

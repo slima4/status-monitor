@@ -145,8 +145,9 @@ pub fn validate_channel_name(name: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Org scoping is implicit via the store (`default_org_id`), exactly like
-/// [`crate::domain::MaintenanceWindow`] — no `org_id` field on the wire type.
+/// No `org_id` on the wire type: the owning org is the caller's resolved
+/// tenant, threaded explicitly into every store call, never trusted from the
+/// request body.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct NotificationChannel {
     pub id: Uuid,

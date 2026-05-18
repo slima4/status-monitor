@@ -1,0 +1,51 @@
+<table class="w-full text-left text-sm">
+  <thead class="bg-slate-50 text-xs uppercase text-slate-500">
+    <tr>
+      <th class="px-4 py-2">Name</th>
+      <th class="px-4 py-2">Type</th>
+      <th class="px-4 py-2">Status</th>
+      <th class="px-4 py-2">Created</th>
+      <th class="px-4 py-2"></th>
+    </tr>
+  </thead>
+  <tbody class="divide-y">
+    {% for c in channels %}
+    <tr>
+      <td class="px-4 py-2 align-top text-slate-700">{{ c.name }}</td>
+      <td class="px-4 py-2 align-top">
+        <span class="rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600">{{ c.kind }}</span>
+      </td>
+      <td class="px-4 py-2 align-top">
+        {% if c.enabled %}
+        <span class="text-xs font-medium text-emerald-700">Enabled</span>
+        {% else %}
+        <span class="text-xs font-medium text-slate-400">Disabled</span>
+        {% endif %}
+      </td>
+      <td class="px-4 py-2 align-top text-slate-700">{{ c.created }}</td>
+      <td class="px-4 py-2">
+        <div class="flex items-center justify-end gap-3">
+          <span data-test-result class="text-xs"></span>
+          <button type="button"
+                  hx-post="/api/v1/notification-channels/{{ c.id }}/test"
+                  hx-headers='{"X-Requested-With":"status-monitor"}'
+                  hx-swap="none"
+                  hx-on::after-request="window.smChannelTestResult(this, event)"
+                  class="text-xs font-medium text-slate-600 hover:underline">Send test</button>
+          <a href="/settings/notifications/{{ c.id }}/edit"
+             class="text-xs font-medium text-slate-600 hover:underline">Edit</a>
+          <button type="button"
+                  hx-delete="/api/v1/notification-channels/{{ c.id }}"
+                  hx-headers='{"X-Requested-With":"status-monitor"}'
+                  hx-confirm="Delete this channel? Monitors bound to it stop alerting through it."
+                  hx-on::after-request="if(event.detail.successful){htmx.trigger('body','channels:refresh')}"
+                  class="text-xs font-medium text-rose-700 hover:underline">Delete</button>
+        </div>
+      </td>
+    </tr>
+    {% endfor %}
+    {% if channels.is_empty() %}
+    <tr><td colspan="5" class="px-4 py-3 text-sm text-slate-500">No notification channels yet.</td></tr>
+    {% endif %}
+  </tbody>
+</table>

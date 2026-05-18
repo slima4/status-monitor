@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use askama::Template;
 use askama_web::WebTemplate;
 use axum::extract::{Path, Query, State};
@@ -5,7 +7,7 @@ use serde::Deserialize;
 use uuid::Uuid;
 
 use crate::app::AppState;
-use crate::domain::{CheckSpec, ExpectedStatus, HttpMethod, Target};
+use crate::domain::{CheckSpec, ExpectedStatus, HttpMethod, OrgId, Target, TargetAlerts};
 use crate::error::AppError;
 use crate::web::assets::filters;
 use crate::web::error::WebResult;
@@ -92,6 +94,17 @@ impl Default for TcpFields {
     }
 }
 
+/// One row in the monitor form's Alerts section: an org channel plus whether
+/// this monitor binds to it and the per-binding firing policy.
+pub struct ChannelChoice {
+    pub id: String,
+    pub name: String,
+    pub kind: &'static str,
+    pub selected: bool,
+    pub after_failures: u32,
+    pub notify_recovery: bool,
+}
+
 pub struct FormModel {
     pub mode: &'static str,
     pub id: String,
@@ -104,6 +117,8 @@ pub struct FormModel {
     pub check_type: &'static str,
     pub http: HttpFields,
     pub tcp: TcpFields,
+    /// The org's notification channels, with this monitor's bindings prefilled.
+    pub channels: Vec<ChannelChoice>,
 }
 
 #[derive(Template, WebTemplate)]
@@ -141,7 +156,34 @@ fn empty_create_form() -> FormModel {
         check_type: "http",
         http: HttpFields::default(),
         tcp: TcpFields::default(),
+        channels: Vec::new(),
     }
+}
+
+/// The org's channels with `alerts` prefilled as the selected bindings.
+/// Unbound channels default to a sensible new-binding policy.
+async fn channel_choices(
+    state: &AppState,
+    org: OrgId,
+    alerts: &TargetAlerts,
+) -> Result<Vec<ChannelChoice>, AppError> {
+    let bound: HashMap<Uuid, &crate::domain::AlertBinding> =
+        alerts.iter().map(|b| (b.channel_id, b)).collect();
+    let channels = state.notification_channel_store.list(org).await?;
+    Ok(channels
+        .into_iter()
+        .map(|c| {
+            let b = bound.get(&c.id).copied();
+            ChannelChoice {
+                id: c.id.to_string(),
+                name: c.name,
+                kind: c.kind.as_str(),
+                selected: b.is_some(),
+                after_failures: b.map(|x| x.after_failures).unwrap_or(3),
+                notify_recovery: b.map(|x| x.notify_recovery).unwrap_or(true),
+            }
+        })
+        .collect())
 }
 
 pub async fn new_form(
@@ -150,17 +192,19 @@ pub async fn new_form(
     State(state): State<AppState>,
     Query(params): Query<NewParams>,
 ) -> WebResult<FormPage> {
-    let form = match params.from {
+    let (mut form, alerts) = match params.from {
         Some(id) => {
             let target = state
                 .target_store
                 .get(org, id)
                 .await?
                 .ok_or_else(|| AppError::not_found("TARGET_NOT_FOUND", "monitor not found"))?;
-            form_from_target(target, FormKind::Copy)?
+            let alerts = target.alerts.clone();
+            (form_from_target(target, FormKind::Copy)?, alerts)
         }
-        None => empty_create_form(),
+        None => (empty_create_form(), TargetAlerts::default()),
     };
+    form.channels = channel_choices(&state, org, &alerts).await?;
     Ok(FormPage {
         active_tab: "targets",
         form,
@@ -178,9 +222,12 @@ pub async fn edit_form(
         .get(org, id)
         .await?
         .ok_or_else(|| AppError::not_found("TARGET_NOT_FOUND", "monitor not found"))?;
+    let alerts = target.alerts.clone();
+    let mut form = form_from_target(target, FormKind::Edit)?;
+    form.channels = channel_choices(&state, org, &alerts).await?;
     Ok(FormPage {
         active_tab: "targets",
-        form: form_from_target(target, FormKind::Edit)?,
+        form,
     })
 }
 
@@ -236,6 +283,7 @@ fn form_from_target(t: Target, kind: FormKind) -> Result<FormModel, AppError> {
         check_type,
         http,
         tcp,
+        channels: Vec::new(),
     })
 }
 
