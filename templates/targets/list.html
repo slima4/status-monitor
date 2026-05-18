@@ -2,9 +2,9 @@
 {% block title %}Monitors · Status Monitor{% endblock %}
 {% block content %}
 <section class="space-y-4">
-  <header class="flex items-center justify-between">
-    <h1 class="text-2xl font-semibold tracking-tight">Monitors</h1>
-    <a href="/targets/new" class="rounded bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700">New monitor</a>
+  <header class="flex flex-wrap items-center justify-between gap-3">
+    <h1 class="text-3xl font-bold tracking-tight text-slate-900">Monitors</h1>
+    <a href="/targets/new" class="sticker-btn bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition-transform hover:-translate-y-0.5 hover:bg-emerald-700">New monitor</a>
   </header>
 
   <form id="targets-filter"
@@ -15,7 +15,7 @@
         hx-swap="outerHTML"
         hx-push-url="true"
         hx-trigger="change, keyup delay:300ms from:input[name='q']"
-        class="flex flex-wrap items-center gap-3 rounded border bg-white px-3 py-2 text-sm">
+        class="flex flex-wrap items-center gap-3 rounded-xl border-2 border-slate-200 bg-white px-3 py-2 text-sm">
     <label class="sr-only" for="targets-search">Search by name</label>
     <input id="targets-search" type="search" name="q" value="{{ q }}" placeholder="Search by name (client-side)"
            data-client-filter
@@ -36,7 +36,7 @@
     </span>
   </form>
 
-  <div class="overflow-x-auto rounded border bg-white">
+  <div class="overflow-x-auto sticker-card">
     <table class="min-w-full text-sm">
       <caption class="sr-only">Monitors with status, configuration, and recent activity.</caption>
       <thead class="border-b bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">

@@ -6,15 +6,15 @@
   <tr class="border-b last:border-0 transition-opacity" data-name="{{ row.name }}">
     <td class="px-3 py-2">
       {% if row.last_status == "up" %}
-        <span class="status-badge bg-green-100 text-green-800">up</span>
+        <span class="status-badge status-badge--up">up</span>
       {% else if row.last_status == "down" %}
-        <span class="status-badge bg-red-100 text-red-800">down</span>
+        <span class="status-badge status-badge--down">down</span>
       {% else if row.last_status == "degraded" %}
-        <span class="status-badge bg-amber-100 text-amber-800">degraded</span>
+        <span class="status-badge status-badge--degraded">degraded</span>
       {% else if row.last_status == "error" %}
-        <span class="status-badge bg-rose-100 text-rose-800">error</span>
+        <span class="status-badge status-badge--error">error</span>
       {% else %}
-        <span class="status-badge bg-slate-100 text-slate-500">—</span>
+        <span class="status-badge status-badge--none">—</span>
       {% endif %}
     </td>
     <td class="px-3 py-2"><a href="/targets/{{ row.id }}" class="font-medium text-slate-900 hover:underline">{{ row.name }}</a></td>
@@ -22,7 +22,7 @@
     <td class="px-3 py-2 font-mono text-xs text-slate-700">{{ row.address }}</td>
     <td class="px-3 py-2 text-slate-500">{{ row.interval_s }}s</td>
     <td class="px-3 py-2">
-      {% for tag in row.tags %}<span class="status-badge bg-slate-100 text-slate-700 mr-1">{{ tag }}</span>{% endfor %}
+      {% for tag in row.tags %}<span class="status-badge status-badge--tag mr-1">{{ tag }}</span>{% endfor %}
     </td>
     <td class="px-3 py-2 text-xs text-slate-500">
       {% if row.last_at != "" %}{{ row.last_at }}{% else %}—{% endif %}

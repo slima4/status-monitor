@@ -101,6 +101,13 @@
         box-shadow: 4px 4px 0 0 var(--color-ink);
     }
 
+    /* Flat secondary control (Edit/Cancel/toggle…) — the quiet sibling of
+       .sticker-btn: same chunky radius + 2px edge, no ink, no raised
+       shadow. `--danger` swaps the edge/text to the destructive ramp.
+       Padding/size stays at the call site (controls vary). */
+    .btn-ghost          { @apply rounded-xl border-2 border-slate-200 hover:bg-slate-100; }
+    .btn-ghost--danger  { @apply border-red-200 text-red-600 hover:bg-red-50; }
+
     /* Status pill for the landing trust strip. `--ok` / `--warn` only swap
        the fill; the ink edge + chunky radius are shared so the cartoon
        language stays consistent whatever the backend state. */
@@ -122,7 +129,8 @@
 
     /* Big single-number KPI value (Monitors, Uptime, …). */
     .kpi-value { @apply mt-2 text-4xl font-bold tabular-nums text-slate-900; }
-    .kpi-value--ok { @apply text-emerald-700; }
+    .kpi-value--ok  { @apply text-emerald-700; }
+    .kpi-value--bad { @apply text-rose-700; }
 
     /* Inline metric emphasis (e.g. an incident count): loud when it
        matters, quiet when zero. Same semantic-modifier idea as the tiles
@@ -150,6 +158,20 @@
     .stat-tile--muted { @apply border-slate-200; }
     .stat-tile--muted .stat-tile__label { @apply text-slate-400; }
     .stat-tile--muted .stat-tile__value { @apply text-slate-300; }
+
+    /* Monitor status badge fills. The base `.status-badge` (shape only)
+       lives in the earlier components block; these modifiers are the single
+       source for the *monitor* status palette — every list/detail/result
+       row picks one by meaning, so green/red never drifts vs emerald/rose
+       again. (Settings + public-status chips still inline their own pairs;
+       folded in when those surfaces are restyled.) Mirrors .stat-tile--. */
+    .status-badge--up       { @apply bg-emerald-100 text-emerald-800; }
+    .status-badge--down     { @apply bg-rose-100    text-rose-800;    }
+    .status-badge--degraded { @apply bg-amber-100   text-amber-800;   }
+    .status-badge--error    { @apply bg-red-100     text-red-800;     }
+    .status-badge--none     { @apply bg-slate-100   text-slate-500;   }
+    .status-badge--disabled { @apply bg-slate-200   text-slate-700;   }
+    .status-badge--tag      { @apply bg-slate-100   text-slate-700;   }
 
     /* Live "we never stop checking" heartbeat. The EKG path is drawn with a
        long dash that scrolls left → reads as a continuous monitor sweep,

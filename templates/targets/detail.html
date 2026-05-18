@@ -5,27 +5,27 @@
   <header class="space-y-2">
     <a href="/targets" class="inline-block text-sm text-slate-500 hover:text-slate-700">← Monitors</a>
     <div class="flex flex-wrap items-center gap-3">
-      <h1 class="text-2xl font-semibold tracking-tight">{{ name }}</h1>
+      <h1 class="text-3xl font-bold tracking-tight text-slate-900">{{ name }}</h1>
       {% if last_status == "up" %}
-        <span class="status-badge bg-green-100 text-green-800">up</span>
+        <span class="status-badge status-badge--up">up</span>
       {% else if last_status == "down" %}
-        <span class="status-badge bg-red-100 text-red-800">down</span>
+        <span class="status-badge status-badge--down">down</span>
       {% else if last_status == "degraded" %}
-        <span class="status-badge bg-amber-100 text-amber-800">degraded</span>
+        <span class="status-badge status-badge--degraded">degraded</span>
       {% else if last_status == "error" %}
-        <span class="status-badge bg-rose-100 text-rose-800">error</span>
+        <span class="status-badge status-badge--error">error</span>
       {% else %}
-        <span class="status-badge bg-slate-100 text-slate-500">no data</span>
+        <span class="status-badge status-badge--none">no data</span>
       {% endif %}
-      {% if !enabled %}<span class="status-badge bg-slate-200 text-slate-700">disabled</span>{% endif %}
+      {% if !enabled %}<span class="status-badge status-badge--disabled">disabled</span>{% endif %}
       <span class="ml-auto flex gap-2">
         <a href="/targets/{{ id }}/edit"
-           class="rounded border px-3 py-1.5 text-sm hover:bg-slate-100">Edit</a>
+           class="btn-ghost px-3 py-1.5 text-sm">Edit</a>
         <button type="button"
                 data-target-id="{{ id }}"
                 data-action="toggle-enabled"
                 data-current="{{ enabled }}"
-                class="rounded border px-3 py-1.5 text-sm hover:bg-slate-100">
+                class="btn-ghost px-3 py-1.5 text-sm">
           {% if enabled %}Disable{% else %}Enable{% endif %}
         </button>
         <button type="button"
@@ -33,7 +33,7 @@
                 hx-confirm="Delete monitor {{ name }}?"
                 hx-on::after-request="if (event.detail.successful) window.location='/targets'"
                 aria-label="Delete monitor {{ name }}"
-                class="rounded border border-red-200 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 focus-visible:ring-red-500">
+                class="btn-ghost btn-ghost--danger px-3 py-1.5 text-sm focus-visible:ring-red-500">
           Delete
         </button>
       </span>
@@ -44,58 +44,58 @@
       <span class="ml-2">interval {{ interval_s }}s</span>
     </p>
     <div>
-      {% for tag in tags %}<span class="status-badge bg-slate-100 text-slate-700 mr-1">{{ tag }}</span>{% endfor %}
+      {% for tag in tags %}<span class="status-badge status-badge--tag mr-1">{{ tag }}</span>{% endfor %}
     </div>
   </header>
 
   <nav class="flex items-center gap-1 text-sm" aria-label="Time range">
     {% for opt in range_options %}
     <a href="/targets/{{ id }}?range={{ opt.key }}"
-       class="rounded border px-3 py-1{% if opt.selected %} bg-slate-900 text-white border-slate-900{% else %} hover:bg-slate-100{% endif %}">{{ opt.key }}</a>
+       class="rounded-xl border-2 px-3 py-1{% if opt.selected %} border-slate-900 bg-slate-900 text-white{% else %} border-slate-200 hover:bg-slate-100{% endif %}">{{ opt.key }}</a>
     {% endfor %}
     <span class="ml-3 text-xs text-slate-500">{{ from_human }} → {{ to_human }}</span>
   </nav>
 
   <section class="grid gap-4 md:grid-cols-4">
-    <div class="rounded border bg-white p-4">
-      <p class="text-xs uppercase tracking-wide text-slate-500">Uptime</p>
-      <p class="mt-1 text-2xl font-semibold">{{ uptime.uptime_pct }}%</p>
-      <p class="text-xs text-slate-500">{{ uptime.total }} checks</p>
+    <div class="sticker-card p-5">
+      <p class="panel-label">Uptime</p>
+      <p class="kpi-value">{{ uptime.uptime_pct }}%</p>
+      <p class="mt-1 text-xs text-slate-500">{{ uptime.total }} checks</p>
     </div>
-    <div class="rounded border bg-white p-4">
-      <p class="text-xs uppercase tracking-wide text-slate-500">Up</p>
-      <p class="mt-1 text-2xl font-semibold text-green-700">{{ uptime.up }}</p>
+    <div class="sticker-card p-5">
+      <p class="panel-label">Up</p>
+      <p class="kpi-value kpi-value--ok">{{ uptime.up }}</p>
     </div>
-    <div class="rounded border bg-white p-4">
-      <p class="text-xs uppercase tracking-wide text-slate-500">Down</p>
-      <p class="mt-1 text-2xl font-semibold text-red-700">{{ uptime.down }}</p>
+    <div class="sticker-card p-5">
+      <p class="panel-label">Down</p>
+      <p class="kpi-value kpi-value--bad">{{ uptime.down }}</p>
     </div>
-    <div class="rounded border bg-white p-4">
-      <p class="text-xs uppercase tracking-wide text-slate-500">Errors</p>
-      <p class="mt-1 text-2xl font-semibold text-rose-700">{{ uptime.error }}</p>
+    <div class="sticker-card p-5">
+      <p class="panel-label">Errors</p>
+      <p class="kpi-value kpi-value--bad">{{ uptime.error }}</p>
     </div>
   </section>
 
   <section class="grid gap-4 lg:grid-cols-2">
-    <div class="rounded border bg-white p-4">
-      <h2 class="text-sm font-medium text-slate-700">Latency (p50/p95/p99)</h2>
+    <div class="sticker-card p-5">
+      <h2 class="panel-label">Latency (p50/p95/p99)</h2>
       <div id="latency-chart"
-           class="mt-3 h-64 w-full"
+           class="mt-4 h-64 w-full"
            data-endpoint="/api/v1/targets/{{ id }}/results?from={{ from_iso|urlencode }}&to={{ to_iso|urlencode }}&limit=500"
            aria-label="Latency p50/p95/p99 over time"></div>
     </div>
-    <div class="rounded border bg-white p-4">
-      <h2 class="text-sm font-medium text-slate-700">Latency breakdown</h2>
+    <div class="sticker-card p-5">
+      <h2 class="panel-label">Latency breakdown</h2>
       <div id="breakdown-chart"
-           class="mt-3 h-64 w-full"
+           class="mt-4 h-64 w-full"
            data-endpoint="/api/v1/targets/{{ id }}/results?from={{ from_iso|urlencode }}&to={{ to_iso|urlencode }}&limit=200"
            aria-label="Latency phase breakdown for the last 200 results"></div>
     </div>
   </section>
 
-  <section class="rounded border bg-white">
-    <header class="flex items-center justify-between border-b px-4 py-2">
-      <h2 class="text-sm font-medium text-slate-700">Recent results</h2>
+  <section class="sticker-card">
+    <header class="flex items-center justify-between border-b-2 border-slate-100 px-5 py-3">
+      <h2 class="panel-label">Recent results</h2>
       <span class="text-xs text-slate-500">Showing {{ results.len() }} of {{ results_total }}</span>
     </header>
     <table class="min-w-full text-sm">
@@ -117,10 +117,10 @@
         <tr class="border-b last:border-0">
           <td class="px-3 py-2 font-mono text-xs text-slate-600">{{ r.timestamp }}</td>
           <td class="px-3 py-2">
-            {% if r.status == "up" %}<span class="status-badge bg-green-100 text-green-800">up</span>
-            {% else if r.status == "down" %}<span class="status-badge bg-red-100 text-red-800">down</span>
-            {% else if r.status == "degraded" %}<span class="status-badge bg-amber-100 text-amber-800">degraded</span>
-            {% else %}<span class="status-badge bg-rose-100 text-rose-800">{{ r.status }}</span>{% endif %}
+            {% if r.status == "up" %}<span class="status-badge status-badge--up">up</span>
+            {% else if r.status == "down" %}<span class="status-badge status-badge--down">down</span>
+            {% else if r.status == "degraded" %}<span class="status-badge status-badge--degraded">degraded</span>
+            {% else %}<span class="status-badge status-badge--error">{{ r.status }}</span>{% endif %}
           </td>
           <td class="px-3 py-2 text-slate-700">{{ r.duration_ms }} ms</td>
           <td class="px-3 py-2 font-mono text-xs text-slate-700">{{ r.response_code }}</td>
@@ -136,9 +136,9 @@
   <script type="module" src="{{ "js/charts/latency.js"|asset }}"></script>
   <script type="module" src="{{ "js/charts/breakdown.js"|asset }}"></script>
 
-  <details class="rounded border bg-white">
-    <summary class="cursor-pointer px-4 py-2 text-sm font-medium text-slate-700">Configuration</summary>
-    <pre class="overflow-auto bg-slate-50 px-4 py-3 text-xs text-slate-700">{{ config_json }}</pre>
+  <details class="sticker-card">
+    <summary class="cursor-pointer px-5 py-3 text-sm font-medium text-slate-700">Configuration</summary>
+    <pre class="overflow-auto rounded-b-2xl bg-slate-50 px-5 py-3 text-xs text-slate-700">{{ config_json }}</pre>
   </details>
 </section>
 {% endblock %}

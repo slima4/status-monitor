@@ -4,7 +4,7 @@
 <section class="space-y-6">
   <header class="space-y-1">
     <a href="/targets" class="inline-block text-sm text-slate-500 hover:text-slate-700">← Monitors</a>
-    <h1 class="text-2xl font-semibold tracking-tight">
+    <h1 class="text-3xl font-bold tracking-tight text-slate-900">
       {% if form.mode == "create" %}New monitor{% else %}Edit {{ form.name }}{% endif %}
     </h1>
     <p class="text-sm text-slate-500">
@@ -20,9 +20,9 @@
         class="space-y-6">
 
     <div id="form-errors" role="alert" aria-live="polite"
-         class="hidden rounded border border-red-300 bg-red-50 p-3 text-sm text-red-800"></div>
+         class="hidden rounded-xl border-2 border-red-300 bg-red-50 p-3 text-sm text-red-800"></div>
 
-    <fieldset class="space-y-3 rounded border bg-white p-4">
+    <fieldset class="space-y-3 sticker-card p-5">
       <legend class="px-1 text-sm font-medium">Basic</legend>
       <label class="block">
         <span class="text-xs text-slate-500">Name</span>
@@ -50,7 +50,7 @@
       </div>
     </fieldset>
 
-    <fieldset class="space-y-3 rounded border bg-white p-4">
+    <fieldset class="space-y-3 sticker-card p-5">
       <legend class="px-1 text-sm font-medium">Check type</legend>
       <div class="flex gap-4">
         <label class="inline-flex items-center gap-2">
@@ -65,7 +65,7 @@
     </fieldset>
 
     <fieldset data-variant="http"
-              class="space-y-3 rounded border bg-white p-4{% if form.check_type != "http" %} hidden{% endif %}">
+              class="space-y-3 sticker-card p-5{% if form.check_type != "http" %} hidden{% endif %}">
       <legend class="px-1 text-sm font-medium">HTTP check</legend>
       <label class="block">
         <span class="text-xs text-slate-500">URL</span>
@@ -107,7 +107,7 @@
         </label>
       </div>
 
-      <fieldset class="space-y-2 rounded border p-3">
+      <fieldset class="space-y-2 rounded-xl border-2 border-slate-200 p-3">
         <legend class="px-1 text-xs text-slate-500">Expected status</legend>
         <div class="flex flex-wrap gap-4">
           <label class="inline-flex items-center gap-1">
@@ -156,7 +156,7 @@
         <textarea name="http_headers" rows="3" class="mt-1 w-full rounded border px-2 py-1 font-mono">{{ form.http.headers_json }}</textarea>
       </label>
 
-      <fieldset class="space-y-2 rounded border p-3"
+      <fieldset class="space-y-2 rounded-xl border-2 border-slate-200 p-3"
                 data-auth-field="basic"
                 data-initial-mode="{{ form.http.auth.basic_initial_mode() }}"
                 data-mode="{{ form.http.auth.basic_initial_mode() }}">
@@ -175,7 +175,7 @@
         </div>
       </fieldset>
 
-      <fieldset class="space-y-2 rounded border p-3"
+      <fieldset class="space-y-2 rounded-xl border-2 border-slate-200 p-3"
                 data-auth-field="bearer"
                 data-initial-mode="{{ form.http.auth.bearer_initial_mode() }}"
                 data-mode="{{ form.http.auth.bearer_initial_mode() }}">
@@ -191,7 +191,7 @@
     </fieldset>
 
     <fieldset data-variant="tcp"
-              class="space-y-3 rounded border bg-white p-4{% if form.check_type != "tcp" %} hidden{% endif %}">
+              class="space-y-3 sticker-card p-5{% if form.check_type != "tcp" %} hidden{% endif %}">
       <legend class="px-1 text-sm font-medium">TCP check</legend>
       <label class="block">
         <span class="text-xs text-slate-500">Host</span>
@@ -213,7 +213,7 @@
       </div>
     </fieldset>
 
-    <fieldset class="space-y-3 rounded border bg-white p-4">
+    <fieldset class="space-y-3 sticker-card p-5">
       <legend class="px-1 text-sm font-medium">Alerts</legend>
       {% if form.channels.is_empty() %}
       <p class="text-sm text-slate-500">
@@ -231,7 +231,7 @@
           <label class="inline-flex min-w-[14rem] items-center gap-2">
             <input type="checkbox" data-channel-select value="{{ c.id }}"{% if c.selected %} checked{% endif %}>
             <span class="text-sm">{{ c.name }}</span>
-            <span class="rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-500">{{ c.kind }}</span>
+            <span class="status-badge status-badge--tag">{{ c.kind }}</span>
           </label>
           <label class="inline-flex items-center gap-1 text-xs text-slate-500">
             After
@@ -251,11 +251,11 @@
 
     <div class="flex gap-3">
       <button type="submit"
-              class="rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700">
+              class="sticker-btn bg-slate-900 px-4 py-2 text-sm font-medium text-white transition-transform hover:-translate-y-0.5 hover:bg-slate-700">
         {% if form.mode == "create" %}Create{% else %}Save changes{% endif %}
       </button>
       <a href="{% if form.mode == "edit" %}/targets/{{ form.id }}{% else %}/targets{% endif %}"
-         class="rounded border px-4 py-2 text-sm hover:bg-slate-100">Cancel</a>
+         class="btn-ghost px-4 py-2 text-sm">Cancel</a>
     </div>
   </form>
 </section>
