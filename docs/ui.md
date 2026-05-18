@@ -21,9 +21,11 @@ After `cargo build --release` you have one ~23 MB executable that contains every
 | `GET /` | Dashboard. Auto-refreshing region polls `/web/partials/dashboard` every 5 s; donut + 24h bar pull from `/api/v1/dashboard/summary`. |
 | `GET /targets` | Targets list. Filter by name (client-side), tag, enabled. Row delete + paginate via HTMX. |
 | `GET /targets/{id}` | Target detail. Status badge, four time-range presets (1h/24h/7d/30d), uptime KPIs, latency p50/p95/p99 line, DNS/connect/TLS/TTFB stacked area, recent-results table, redacted JSON config. |
-| `GET /targets/new` | Create form. Posts JSON to `/api/v1/targets`. |
+| `GET /targets/new` | Create form. Posts JSON to `/api/v1/targets`. The Alerts section binds the org's notification channels (per-binding after-N-failures + notify-on-recovery). |
 | `GET /targets/{id}/edit` | Edit form. Same template as `new` but `data-mode="edit"`; credential fields land in `redacted` mode and the operator must explicitly toggle "Replace credentials" before new values are sent. |
 | `GET /web/targets/list` | HTMX partial (`<tbody>` fragment) for filter/paginate swaps on the targets list. |
+| `GET /settings/notifications` | Notification-channel list. Send-test / edit / delete are HTMX row actions against `/api/v1/notification-channels`; the table body polls `/web/partials/settings/notifications` every 60 s. |
+| `GET /settings/notifications/new`, `…/{id}/edit` | Channel create/edit form (Slack / generic webhook / Telegram). On edit the stored secret stays masked behind a "Replace transport config" toggle — leaving it off omits `config` from the PATCH, mirroring the target form's "Replace credentials" pattern. |
 | `GET /web/partials/dashboard` | HTMX partial — chrome-free dashboard region; self-rearms so each refresh still carries `hx-trigger="every 5s"`. |
 | `GET /docs` | Swagger UI generated from `/api/openapi.json`. |
 | `GET /static/{path}` | Embedded assets (`css/`, `js/`, `img/`). |

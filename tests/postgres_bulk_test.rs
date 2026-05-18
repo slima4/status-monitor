@@ -7,19 +7,13 @@ mod common;
 use std::sync::Arc;
 use std::time::Duration;
 
-use base64::Engine;
 use sqlx::PgPool;
 use status_monitor::domain::{CheckSpec, ExpectedStatus, NewTarget};
 use status_monitor::security::Cipher;
 use status_monitor::storage::{PostgresTargetStore, TargetStore, ensure_default_org};
 use url::Url;
 
-use crate::common::default_http_check;
-
-fn test_cipher() -> Arc<Cipher> {
-    let kek = base64::engine::general_purpose::STANDARD.encode([7u8; 32]);
-    Arc::new(Cipher::from_base64(&kek).unwrap())
-}
+use crate::common::{default_http_check, test_cipher};
 
 /// Provision a default org and return a store stamped to write under it.
 async fn store_with_default_org(

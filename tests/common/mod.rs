@@ -386,6 +386,15 @@ pub fn unique_slug(prefix: &str) -> String {
     format!("{prefix}-{}", &id[id.len() - 8..])
 }
 
+/// A deterministic 32-byte AES-256-GCM cipher for sealing secrets at rest in
+/// PG-backed tests. The fixed key makes the at-rest envelope reproducible;
+/// it never touches a real KEK.
+pub fn test_cipher() -> Arc<status_monitor::security::Cipher> {
+    use base64::Engine as _;
+    let kek = base64::engine::general_purpose::STANDARD.encode([7u8; 32]);
+    Arc::new(status_monitor::security::Cipher::from_base64(&kek).unwrap())
+}
+
 /// Stamp a session onto `router`. `org` becomes `active_org_id` (the
 /// `CurrentOrg` extractor verifies `user` is an active member of it);
 /// `session_id` sets the session id. Supersedes the per-file `as_member` /
