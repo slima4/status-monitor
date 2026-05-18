@@ -1,0 +1,198 @@
+name: deploy
+
+# Continuous deploy to production (Hetzner / uptimepage.dev).
+#
+# Two ways in:
+#   • automatic — chains off a successful `release-image` build on main, and
+#     only proceeds if the branch-push `ci` run is ALSO green for the same
+#     commit (enforced in the "ci gate" step). The auto path pins the remote
+#     working tree AND the image to that commit's sha, and never re-migrates
+#     (REMIGRATE is forced false) — so it is safe ONLY for new/additive
+#     migrations. A push that edits an already-applied migration in place
+#     (pre-launch policy) will NOT self-heal — run this workflow manually with
+#     remigrate=true to drop + rebuild the DB for that change.
+#   • manual — `workflow_dispatch`: pick any image tag and optionally the
+#     destructive remigrate. Manual runs skip the ci gate (human asserts it).
+#
+# Required repo secrets (Settings → Secrets → Actions; none committed):
+#   DEPLOY_SSH_KEY      private key for the deploy@ user (the gitignored
+#                       `hetzner` key — its contents, never committed)
+#   DEPLOY_HOST         deploy host (IP or DNS)
+#   DEPLOY_USER         ssh user (deploy)
+#   DEPLOY_KNOWN_HOSTS  pinned host key line(s) from `ssh-keyscan <host>`
+#                       — pins the server identity so the run cannot be MITM'd
+#                       (no StrictHostKeyChecking=off anywhere below)
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Image tag to deploy (e.g. sha-<full40>, v1.2.3, latest)"
+        required: true
+        type: string
+      remigrate:
+        description: "DESTRUCTIVE: drop + re-create the Postgres database, then let the app re-run all migrations from scratch. Wipes orgs/users/targets. Pre-launch only. ClickHouse is untouched."
+        required: true
+        type: boolean
+        default: false
+  workflow_run:
+    workflows: [release-image]
+    types: [completed]
+    branches: [main]
+
+# One deploy at a time — never let two runs race on the box / .env.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # Manual runs always proceed; auto runs only when the image build that
+    # triggered us actually succeeded (the ci-green gate is the next step).
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    permissions:
+      contents: read
+      actions: read # read ci.yml run conclusion for the gate
+    environment: production # attach required-reviewer / protection rules via the GitHub env
+    env:
+      # Auto path: deploy the exact commit that was built, never re-migrate.
+      # Manual path: operator-chosen tag + opt-in destructive remigrate.
+      IMAGE_TAG: ${{ inputs.image_tag || format('sha-{0}', github.event.workflow_run.head_sha) }}
+      REMIGRATE: ${{ inputs.remigrate || false }}
+      HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+      # Single source of truth, mirrored from release-image.yml.
+      REGISTRY: ghcr.io
+      IMAGE_NAME: ${{ github.repository }}
+    steps:
+      - name: ci gate
+        if: ${{ github.event_name == 'workflow_run' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [ -n "$HEAD_SHA" ] || { echo "::error::empty head_sha on auto path"; exit 1; }
+          # Assert the branch-PUSH ci run (the same event release-image gates
+          # on) is green for this exact commit — event=push so a weaker
+          # pull_request / dispatch ci run can't satisfy the gate. ci (~5-9m)
+          # normally concludes before release-image (~12-14m), so this usually
+          # passes on the first probe; poll a few times for a ci tail-run.
+          for i in $(seq 1 12); do
+            c=$(gh api \
+              "repos/${IMAGE_NAME}/actions/workflows/ci.yml/runs?head_sha=${HEAD_SHA}&branch=main&event=push&per_page=1" \
+              --jq '.workflow_runs[0] | (.status + ":" + (.conclusion // "null"))' 2>/dev/null || echo "none:null")
+            case "$c" in
+              completed:success) echo "ci green for ${HEAD_SHA}"; exit 0 ;;
+              completed:*)       echo "::error::ci not green for ${HEAD_SHA} (${c}) — blocking autodeploy"; exit 1 ;;
+              *)                 echo "ci not concluded yet (${c}); waiting…"; [ "$i" -lt 12 ] && sleep 30 ;;
+            esac
+          done
+          echo "::error::ci did not conclude for ${HEAD_SHA} within ~6m — blocking autodeploy"
+          exit 1
+
+      - name: load ssh key + pinned host key
+        run: |
+          install -m 700 -d ~/.ssh
+          install -m 600 /dev/stdin ~/.ssh/id_deploy <<< "${{ secrets.DEPLOY_SSH_KEY }}"
+          install -m 600 /dev/stdin ~/.ssh/known_hosts <<< "${{ secrets.DEPLOY_KNOWN_HOSTS }}"
+
+      - name: deploy over ssh
+        run: |
+          set -euo pipefail
+          # Lowercase only the repo (GHCR requires it); OCI tags are
+          # case-sensitive so the tag is passed through verbatim.
+          NEW_IMAGE="$(echo "${REGISTRY}/${IMAGE_NAME}" | tr '[:upper:]' '[:lower:]'):${IMAGE_TAG}"
+          ssh -T -i ~/.ssh/id_deploy -o IdentitiesOnly=yes \
+              "${DEPLOY_USER}@${DEPLOY_HOST}" \
+              "NEW_IMAGE='${NEW_IMAGE}' REMIGRATE='${REMIGRATE}' HEAD_SHA='${HEAD_SHA}' bash -s" <<'REMOTE'
+          set -euo pipefail
+
+          # Fail closed: only the two known values are accepted; anything else
+          # (a quoting change, a typo) aborts rather than silently skipping —
+          # or silently performing — the destructive path.
+          case "$REMIGRATE" in
+            true|false) ;;
+            *) echo "::error::REMIGRATE must be true|false, got '$REMIGRATE'"; exit 1 ;;
+          esac
+
+          cd /opt/status-monitor
+          if [ -n "$HEAD_SHA" ]; then
+            # Auto path: pin the working tree to the exact built commit so the
+            # on-disk compose/.env/migrations match the image. A later push
+            # landing on main mid-build must NOT skew this deploy.
+            git fetch --quiet origin "$HEAD_SHA"
+            git checkout --quiet --force "$HEAD_SHA"
+          else
+            # Manual path: operator-chosen tag; take tip of main.
+            git pull --ff-only
+          fi
+
+          cd deployment
+
+          # --- bump STATUS_MONITOR_IMAGE in .env -----------------------------
+          # cp backup FIRST; awk in-place rewrite (every line is reprinted, only
+          # the target key is substituted — never grep -v | append | mv); then
+          # verify the line count is unchanged and the key carries the new value.
+          cp .env ".env.bak.$(date +%s)"
+          before=$(wc -l < .env)
+          awk -v img="$NEW_IMAGE" '
+            /^STATUS_MONITOR_IMAGE=/ { print "STATUS_MONITOR_IMAGE=" img; seen=1; next }
+            { print }
+            END { if (!seen) exit 3 }
+          ' .env > .env.next
+          mv .env.next .env
+          after=$(wc -l < .env)
+          [ "$before" = "$after" ] || { echo "::error::.env line count changed $before -> $after"; exit 1; }
+          grep -qxF "STATUS_MONITOR_IMAGE=$NEW_IMAGE" .env \
+            || { echo "::error::STATUS_MONITOR_IMAGE not set to $NEW_IMAGE"; exit 1; }
+          # Keep the 10 most recent backups; prune the rest so deploys don't litter.
+          ls -1t .env.bak.* 2>/dev/null | tail -n +11 | xargs -r rm -f
+
+          # --- pull the new image FIRST -------------------------------------
+          # Slow, network-fragile step. Do it while the OLD container still
+          # serves: if the ssh session dies here the site stays up on the old
+          # image. (Pulling AFTER stop+drop once left prod 502 with an empty
+          # DB when a session truncated mid-pull.)
+          docker compose pull status-monitor
+
+          # --- optional destructive re-migrate (Postgres only) ---------------
+          # Now the cutover is fast: stop, drop, recreate, restart in seconds.
+          if [ "$REMIGRATE" = "true" ]; then
+            echo "remigrate: stopping app + dropping Postgres database 'monitor'"
+            docker compose stop status-monitor
+            docker compose exec -T postgres sh -c \
+              'PGPASSWORD="$POSTGRES_PASSWORD" psql -U monitor -d postgres -v ON_ERROR_STOP=1 \
+                 -c "DROP DATABASE IF EXISTS monitor WITH (FORCE);" \
+                 -c "CREATE DATABASE monitor OWNER monitor;"'
+          fi
+
+          # Scope the recreate to the app so a compose change never silently
+          # recreates postgres/caddy as a side effect of the roll.
+          docker compose up -d --no-build status-monitor
+          docker compose ps
+          REMOTE
+
+      - name: health gate
+        run: |
+          set -euo pipefail
+          # Probe /healthz through Caddy from the box (loopback via --resolve so
+          # the real cert for app.uptimepage.dev is validated, not bypassed)
+          # until the freshly booted app has applied migrations. Fail loud so a
+          # bad deploy is never silent.
+          ssh -T -i ~/.ssh/id_deploy -o IdentitiesOnly=yes \
+              "${DEPLOY_USER}@${DEPLOY_HOST}" bash -s <<'REMOTE'
+          set -euo pipefail
+          for i in $(seq 1 30); do
+            if curl -fsS --max-time 5 \
+                 --resolve app.uptimepage.dev:443:127.0.0.1 \
+                 https://app.uptimepage.dev/healthz >/dev/null 2>&1; then
+              echo "healthy after ${i} attempt(s)"; exit 0
+            fi
+            [ "$i" -lt 30 ] && sleep 5
+          done
+          echo "::error::app did not become healthy within ~150s"
+          cd /opt/status-monitor/deployment && docker compose logs --tail=80 status-monitor || true
+          exit 1
+          REMOTE
