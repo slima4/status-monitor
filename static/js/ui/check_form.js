@@ -22,6 +22,16 @@
         }
     });
 
+    form.addEventListener("click", (evt) => {
+        const btn = evt.target.closest("[data-interval-preset]");
+        if (!btn) return;
+        const input = document.getElementById("interval_s");
+        if (input) {
+            input.value = btn.dataset.intervalPreset;
+            input.focus({ preventScroll: true });
+        }
+    });
+
     form.addEventListener("submit", async (evt) => {
         evt.preventDefault();
         clearErrors();
@@ -162,9 +172,15 @@
             });
         }
 
+        const minInterval = Number(form.dataset.minInterval) || 60;
+        const interval = parseInt(data.get("interval_s"), 10);
+        if (!Number.isInteger(interval) || interval < minInterval) {
+            return { error: `Check interval must be at least ${minInterval} seconds.` };
+        }
+
         const payload = {
             name: data.get("name"),
-            interval: parseInt(data.get("interval_s"), 10),
+            interval,
             enabled: data.get("enabled") === "on",
             tags,
             check,

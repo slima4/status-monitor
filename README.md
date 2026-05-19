@@ -6,6 +6,8 @@ Async Rust service that runs HTTP, TCP, TLS-certificate-expiry, and domain-expir
 
 Built on Rust 1.95 (edition 2024), Tokio, Axum, hyper-util (custom phase-timing connector + tokio-rustls), sqlx, and the official `clickhouse` crate. Designed for low-overhead checks at ~50k concurrent in-flight.
 
+**Live service: <https://uptimepage.dev>** — hosted, free, sign in with GitHub.
+
 **Full docs: <https://slima4.github.io/status-monitor/>**
 
 ## Check types

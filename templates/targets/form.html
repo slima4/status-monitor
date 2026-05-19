@@ -16,6 +16,7 @@
         data-action="{{ form.action }}"
         data-method="{{ form.submit_method }}"
         data-mode="{{ form.mode }}"
+        data-min-interval="{{ form.min_interval_s }}"
         novalidate
         class="space-y-6">
 
@@ -35,11 +36,37 @@
                class="mt-1 w-full rounded border px-2 py-1">
       </label>
       <div class="flex flex-wrap items-end gap-4">
-        <label class="block">
-          <span class="text-xs text-slate-500">Interval (seconds)</span>
-          <input name="interval_s" type="number" min="10" required value="{{ form.interval_s }}"
-                 class="mt-1 w-40 rounded border px-2 py-1">
-        </label>
+        <div class="block">
+          <label for="interval_s" class="text-xs text-slate-500">Check interval</label>
+          <div class="mt-1 flex items-center gap-1.5">
+            <input id="interval_s" name="interval_s" type="number"
+                   min="{{ form.min_interval_s }}" step="10" required
+                   value="{{ form.interval_s }}"
+                   class="w-28 rounded border px-2 py-1">
+            <span class="text-xs text-slate-500">sec</span>
+            <span class="ml-2 flex flex-wrap gap-1" role="group" aria-label="Interval presets">
+              <button type="button" data-interval-preset="60" aria-label="Every 1 minute"
+                      class="rounded border px-2 py-1 text-xs hover:bg-slate-50">1m</button>
+              <button type="button" data-interval-preset="120" aria-label="Every 2 minutes"
+                      class="rounded border px-2 py-1 text-xs hover:bg-slate-50">2m</button>
+              <button type="button" data-interval-preset="300" aria-label="Every 5 minutes"
+                      class="rounded border px-2 py-1 text-xs hover:bg-slate-50">5m</button>
+              <button type="button" data-interval-preset="600" aria-label="Every 10 minutes"
+                      class="rounded border px-2 py-1 text-xs hover:bg-slate-50">10m</button>
+              <button type="button" data-interval-preset="900" aria-label="Every 15 minutes"
+                      class="rounded border px-2 py-1 text-xs hover:bg-slate-50">15m</button>
+              <button type="button" data-interval-preset="1800" aria-label="Every 30 minutes"
+                      class="rounded border px-2 py-1 text-xs hover:bg-slate-50">30m</button>
+              <button type="button" data-interval-preset="3600" aria-label="Every hour"
+                      class="rounded border px-2 py-1 text-xs hover:bg-slate-50">1h</button>
+            </span>
+          </div>
+          <p class="mt-1 text-xs text-slate-500">
+            Minimum {{ form.min_interval_s }}s — faster checks are rejected.
+            1–5&nbsp;min for critical production, 10–15&nbsp;min for internal
+            services, 30&nbsp;min–1&nbsp;h for low-priority or many monitors.
+          </p>
+        </div>
         <div>
           <label class="inline-flex items-center gap-2">
             <input name="enabled" type="checkbox"{% if form.enabled %} checked{% endif %}>

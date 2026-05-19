@@ -143,7 +143,7 @@ curl -sS -X POST http://localhost:8080/api/v1/targets \
               "timeout":5000,"follow_redirects":false,"max_redirects":0,
               "expected_status":{"kind":"exact","value":200},
               "headers":{},"verify_tls":true},
-    "interval": 30, "enabled": true, "tags": [],
+    "interval": 60, "enabled": true, "tags": [],
     "public_status": true
   }'
 ```

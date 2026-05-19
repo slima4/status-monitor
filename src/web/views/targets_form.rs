@@ -112,6 +112,9 @@ pub struct FormModel {
     pub submit_method: &'static str,
     pub name: String,
     pub interval_s: u64,
+    /// The org plan's `min_check_interval_secs`, surfaced so the form's
+    /// `min=`/JS guard mirror the same floor the API enforces (no magic 60).
+    pub min_interval_s: u64,
     pub enabled: bool,
     pub tags_csv: String,
     pub check_type: &'static str,
@@ -151,6 +154,7 @@ fn empty_create_form() -> FormModel {
         submit_method: "POST",
         name: String::new(),
         interval_s: 60,
+        min_interval_s: 60,
         enabled: true,
         tags_csv: String::new(),
         check_type: "http",
@@ -186,6 +190,16 @@ async fn channel_choices(
         .collect())
 }
 
+/// The org plan's check-interval floor, as the form needs it (u64 seconds).
+/// Same value the API enforces via `min_check_interval`, so the client
+/// `min=`/guard never disagree with the server.
+async fn plan_min_interval(state: &AppState, org: OrgId) -> Result<u64, AppError> {
+    let plan = state.quotas.limit_for_org(org).await?;
+    Ok(u64::try_from(plan.min_check_interval_secs)
+        .unwrap_or(60)
+        .max(1))
+}
+
 pub async fn new_form(
     _auth: AuthedBrowser,
     CurrentOrg(org): CurrentOrg,
@@ -205,6 +219,10 @@ pub async fn new_form(
         None => (empty_create_form(), TargetAlerts::default()),
     };
     form.channels = channel_choices(&state, org, &alerts).await?;
+    form.min_interval_s = plan_min_interval(&state, org).await?;
+    // A new monitor is prefilled with 60s; raise it if the plan floor is
+    // higher so the default the user sees would actually be accepted.
+    form.interval_s = form.interval_s.max(form.min_interval_s);
     Ok(FormPage {
         active_tab: "targets",
         form,
@@ -225,6 +243,9 @@ pub async fn edit_form(
     let alerts = target.alerts.clone();
     let mut form = form_from_target(target, FormKind::Edit)?;
     form.channels = channel_choices(&state, org, &alerts).await?;
+    // Edit keeps the saved interval as-is; if a plan floor rose past it the
+    // save will surface the API error rather than silently rewriting it.
+    form.min_interval_s = plan_min_interval(&state, org).await?;
     Ok(FormPage {
         active_tab: "targets",
         form,
@@ -278,6 +299,8 @@ fn form_from_target(t: Target, kind: FormKind) -> Result<FormModel, AppError> {
         submit_method,
         name,
         interval_s: t.interval.as_secs(),
+        // Overwritten by the handler with the org plan's real floor.
+        min_interval_s: 60,
         enabled: t.enabled,
         tags_csv,
         check_type,
@@ -354,6 +377,24 @@ mod tests {
         assert!(html.contains(r#"data-method="POST""#));
         assert!(html.contains(r#"data-mode="create""#));
         assert!(html.contains(r#"name="check_type" value="http""#));
+    }
+
+    #[test]
+    fn form_surfaces_plan_interval_floor_and_presets() {
+        let mut form = empty_create_form();
+        form.min_interval_s = 60;
+        let html = FormPage {
+            active_tab: "targets",
+            form,
+        }
+        .render()
+        .unwrap();
+        // Client mirror of the API floor (no hardcoded 60 in the markup).
+        assert!(html.contains(r#"data-min-interval="60""#));
+        assert!(html.contains(r#"min="60""#));
+        // Expanded preset range, smallest to largest.
+        assert!(html.contains(r#"data-interval-preset="60""#));
+        assert!(html.contains(r#"data-interval-preset="3600""#));
     }
 
     #[test]

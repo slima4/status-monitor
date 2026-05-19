@@ -14,7 +14,10 @@ use crate::web::error::WebResult;
 use crate::web::views::{describe_check, fmt_human, fmt_ts};
 use crate::web::{AuthedBrowser, CurrentOrg};
 
-const RESULTS_PAGE_LIMIT: usize = 200;
+// A raw row per check floods the page; the latency/breakdown charts above
+// already carry the trend. 60 ≈ the last hour at a 1-minute interval —
+// enough to eyeball recent behaviour, full history is the JSON API.
+const RESULTS_PAGE_LIMIT: usize = 60;
 const RANGE_KEYS: [&str; 4] = ["1h", "24h", "7d", "30d"];
 const DEFAULT_RANGE: &str = "24h";
 

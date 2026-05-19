@@ -166,7 +166,9 @@ The bootstrap registry is fetched lazily on the first lookup and cached for the 
 {
   "name": "internal-api",
   "check": { /* check spec */ },
-  "interval": 30,             // seconds between ticks; min 10 (DB CHECK constraint)
+  "interval": 60,             // seconds between ticks; floor is the plan's
+                              // min_check_interval_secs (free = 60); 10 is the
+                              // absolute DB CHECK hard floor
   "enabled": true,
   "tags": ["prod", "tier1"],
   "alerts": { /* optional, see below */ }
