@@ -1,0 +1,29 @@
+# Linker selection lives here (not in a justfile RUSTFLAGS export) so every
+# entrypoint — `just`, bare `cargo`, rust-analyzer, CI, Docker — shares ONE
+# build fingerprint. An env RUSTFLAGS that differs between `just` and bare
+# `cargo` silently double-builds `target/` (the exact thrash this is meant
+# to remove).
+#
+# Linux uses `mold` (CI installs it via rui314/setup-mold, the Dockerfiles
+# via `apk add mold`, local via `just setup`). A Linux build WITHOUT mold
+# fails with "linker `mold` not found" — run `just setup`.
+#
+# macOS is intentionally absent: Apple clang rejects `-fuse-ld=lld` /
+# `-fuse-ld=ld64.lld` as a name and needs the brew keg's *absolute* path,
+# which is machine-specific and can't be committed. For local lld on macOS
+# add to ~/.cargo/config.toml (machine-scoped, no fingerprint split since
+# rust-analyzer + cargo both read it):
+#   [target.aarch64-apple-darwin]
+#   rustflags = ["-Clink-arg=-fuse-ld=/opt/homebrew/bin/ld64.lld"]
+
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-Clink-arg=-fuse-ld=mold"]
+
+[target.x86_64-unknown-linux-musl]
+rustflags = ["-Clink-arg=-fuse-ld=mold"]
+
+[target.aarch64-unknown-linux-musl]
+rustflags = ["-Clink-arg=-fuse-ld=mold"]
+
+[target.aarch64-unknown-linux-gnu]
+rustflags = ["-Clink-arg=-fuse-ld=mold"]

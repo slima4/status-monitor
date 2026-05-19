@@ -31,15 +31,24 @@ env:
 jobs:
   lint:
     runs-on: ubuntu-latest
+    env:
+      # Linker comes from .cargo/config.toml (one fingerprint everywhere);
+      # sccache caches compilation, rust-cache keeps only the registry
+      # (cache-targets: false) so the two don't double-store target/.
+      RUSTC_WRAPPER: sccache
+      SCCACHE_GHA_ENABLED: "true"
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.95"
           components: rustfmt, clippy
+      - uses: rui314/setup-mold@v1
+      - uses: mozilla-actions/sccache-action@v0.0.9
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: rust-1.95
+          cache-targets: "false"
       - name: fetch tailwind cli
         run: scripts/fetch-tailwind.sh
       - run: cargo fmt --all -- --check
@@ -106,14 +115,19 @@ jobs:
       CLICKHOUSE_URL: http://127.0.0.1:8123
       CLICKHOUSE_USER: monitor
       CLICKHOUSE_PASSWORD: monitor
+      RUSTC_WRAPPER: sccache
+      SCCACHE_GHA_ENABLED: "true"
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.95"
+      - uses: rui314/setup-mold@v1
+      - uses: mozilla-actions/sccache-action@v0.0.9
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: rust-1.95
+          cache-targets: "false"
       - name: fetch tailwind cli
         run: scripts/fetch-tailwind.sh
       # The logging-privacy audit (tests/logging_audit_test.rs) shells out to

@@ -11,7 +11,13 @@ ENV CARGO_TERM_COLOR=never
 # to it to fetch the Swagger UI assets bundle. `bash` runs scripts/fetch-
 # tailwind.sh (which detects musl libc and downloads the matching upstream
 # asset, so no glibc shim is required).
-RUN apk add --no-cache musl-dev pkgconfig curl bash
+# `mold` = fast linker for the app/dep compile (cargo-chef already caches the
+# dep layer, so sccache would be redundant here — and its cache mount isn't
+# carried by `cache-to: type=gha`, so it'd be cold every CI run = pure tax).
+# RUSTFLAGS is set in the `chef` base so every descendant compile stage
+# inherits it (the build context doesn't COPY .cargo/).
+RUN apk add --no-cache musl-dev pkgconfig curl bash mold
+ENV RUSTFLAGS="-Clink-arg=-fuse-ld=mold"
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo install cargo-chef --locked --version ^0.1
 

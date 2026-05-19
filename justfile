@@ -3,9 +3,42 @@
 
 set shell := ["bash", "-cu"]
 
+# The linker lives in .cargo/config.toml (read by `just` AND bare `cargo` AND
+# rust-analyzer — one shared build fingerprint, no thrash). Only sccache is an
+# env wrapper, and it's set ONLY when present so a vanilla checkout still
+# builds (cargo treats an empty RUSTC_WRAPPER as unset). `just setup` installs
+# the toolset.
+export RUSTC_WRAPPER := `command -v sccache >/dev/null 2>&1 && echo sccache || true`
+
 # Default = list recipes.
 default:
     @just --list
+
+# Install the build accelerators: sccache + cargo-nextest, and the fast
+# linker (mold on Linux, lld on macOS). Idempotent.
+setup:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    command -v sccache       >/dev/null 2>&1 || cargo install --locked sccache
+    command -v cargo-nextest >/dev/null 2>&1 || cargo install --locked cargo-nextest
+    if [ "{{os()}}" = "macos" ]; then
+      brew list lld >/dev/null 2>&1 || brew install lld
+      cat <<'NOTE'
+    macOS lld is opt-in (its brew path is machine-specific, so it can't be
+    committed to .cargo/config.toml). For faster local links add to
+    ~/.cargo/config.toml:
+      [target.aarch64-apple-darwin]
+      rustflags = ["-Clink-arg=-fuse-ld=$(brew --prefix lld)/bin/ld64.lld"]
+    (substitute the real path; both cargo and rust-analyzer then share it.)
+    NOTE
+    elif command -v mold >/dev/null 2>&1; then
+      :
+    elif command -v apt-get >/dev/null 2>&1; then
+      sudo apt-get update -q && sudo apt-get install -y mold
+    else
+      echo "install 'mold' via your package manager (.cargo/config.toml needs it on Linux)"
+    fi
+    echo "setup done — RUSTC_WRAPPER=${RUSTC_WRAPPER:-<none>}; linker via .cargo/config.toml"
 
 # ── Local stack ─────────────────────────────────────────────────────────────
 
@@ -41,6 +74,13 @@ run:
 
 build:
     cargo build --release --bins
+
+# Compile gate — use instead of `cargo check`. `nextest run --no-run` builds
+# the test-profile artifacts, so the follow-up `just test` reuses them with
+# zero rebuild; `cargo check`'s metadata-only output does not satisfy a test
+# build, forcing a full recompile on the next `cargo test`.
+check:
+    cargo nextest run --workspace --no-run
 
 # Seed an authenticated owner session (SaaS-mode dev). Prints the cookie +
 # a curl snippet. Idempotent; needs the stack up.

@@ -1,0 +1,6 @@
+# Pin the toolchain for every entrypoint — bare `cargo`, `just`, IDE /
+# rust-analyzer, and CI all resolve 1.95. Without this only ad-hoc
+# `cargo +1.95 …` invocations were correct; the crate's rust-version gate
+# then failed any build on a machine whose `stable` predates 1.95.
+[toolchain]
+channel = "1.95"

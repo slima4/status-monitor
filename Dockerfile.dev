@@ -16,7 +16,9 @@ ENV CARGO_TERM_COLOR=never \
 # fetch the Tailwind CLI on first build; `musl-dev` + `pkgconfig` for native
 # crates. The fetch script picks the matching musl asset on Alpine, so no
 # glibc loader shim is needed.
-RUN apk add --no-cache musl-dev pkgconfig curl bash
+# `mold` (fast linker) + `sccache` (compile cache) cut cargo-watch rebuild
+# time; compose.dev.yml wires RUSTFLAGS/RUSTC_WRAPPER/SCCACHE_DIR to them.
+RUN apk add --no-cache musl-dev pkgconfig curl bash mold sccache
 
 # Pre-install cargo-watch into the image so `cargo run` doesn't get blocked on
 # a network install when the container first starts.

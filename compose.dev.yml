@@ -87,10 +87,16 @@ services:
       STATUS_MONITOR_OBSERVABILITY__LOG_LEVEL: "status_monitor=debug,sqlx=warn,hyper=warn,tower_http=info,info"
       STATUS_MONITOR_SERVER__API_BIND: "0.0.0.0:8080"
       STATUS_MONITOR_SERVER__METRICS_BIND: "0.0.0.0:9090"
+      # Faster cargo-watch rebuilds: mold (via the bind-mounted
+      # .cargo/config.toml musl target) + a persistent sccache volume.
+      # Dockerfile.dev apk-installs both.
+      RUSTC_WRAPPER: sccache
+      SCCACHE_DIR: /sccache
     volumes:
       - .:/usr/src/status-monitor
       - cargo_registry_dev:/usr/local/cargo/registry
       - target_cache_dev:/usr/src/status-monitor/target
+      - sccache_dev:/sccache
       # Mask host bin/ so build.rs fetches the linux/alpine tailwindcss.
       - tailwind_bin_dev:/usr/src/status-monitor/bin
     ports:
@@ -102,4 +108,5 @@ volumes:
   ch_data_dev:
   cargo_registry_dev:
   target_cache_dev:
+  sccache_dev:
   tailwind_bin_dev:
