@@ -13,6 +13,14 @@
        harsh. One token so the look stays consistent if it's ever retuned. */
     --color-ink: oklch(0.27 0.04 256);
 
+    /* Cartoon form-control knobs. The whole checkbox/radio look is these
+       three values + --color-ink — retune here, one place, no rule-body
+       or template edits. --control-offset doubles as the checked
+       "press-in" travel so it stays exactly the shadow distance. */
+    --control-size:   1.15rem;
+    --control-on:     var(--color-emerald-600); /* exact same source as .sticker-btn--primary's bg-emerald-600 */
+    --control-offset: 2px;
+
     --font-display: "Inter", system-ui, sans-serif;
     --font-mono:    "JetBrains Mono", ui-monospace, monospace;
 }
@@ -78,6 +86,87 @@
        outline; WCAG 2.2 requires a 3:1 contrast focus indicator. */
     :where(button, [role="button"], a, input, select, textarea, summary):focus-visible {
         @apply outline-none ring-2 ring-slate-500 ring-offset-1;
+    }
+
+    /* Cartoon checkbox / radio. Native controls ignore the sticker
+       language (ink edge + hard offset shadow) the rest of the UI speaks,
+       so restyle them once here — every template's box inherits it, no
+       per-template classes (semantic layer). Checked reuses the same
+       "pressed sticker" metaphor as .sticker-disclosure: it fills emerald
+       and rides onto its own shadow. */
+    input[type="checkbox"],
+    input[type="radio"] {
+        appearance: none;
+        -webkit-appearance: none;
+        flex-shrink: 0;
+        display: inline-grid;
+        place-content: center;
+        width: var(--control-size);
+        height: var(--control-size);
+        margin: 0;
+        vertical-align: middle;
+        cursor: pointer;
+        background-color: #fff;
+        border: 2px solid var(--color-ink);
+        box-shadow: var(--control-offset) var(--control-offset) 0 0 var(--color-ink);
+        transition: transform 120ms ease, box-shadow 120ms ease,
+                    background-color 120ms ease;
+    }
+    input[type="checkbox"] { border-radius: 5px; }
+    input[type="radio"]    { border-radius: 9999px; }
+
+    /* :not(:checked) so a checked box never re-grows a shadow on hover —
+       order-independent, mirrors the .sticker-disclosure :not([open]). */
+    input[type="checkbox"]:not(:checked):hover:not(:disabled),
+    input[type="radio"]:not(:checked):hover:not(:disabled) {
+        box-shadow: calc(var(--control-offset) + 1px)
+                    calc(var(--control-offset) + 1px) 0 0 var(--color-ink);
+    }
+
+    /* Checked = pressed sticker: emerald fill (same emerald-600 token as
+       .sticker-btn--primary) ridden onto the shadow, shadow gone. */
+    input[type="checkbox"]:checked,
+    input[type="radio"]:checked {
+        background-color: var(--control-on);
+        box-shadow: 0 0 0 0 var(--color-ink);
+        transform: translate(var(--control-offset), var(--control-offset));
+    }
+
+    input[type="checkbox"]::after {
+        content: "";
+        width: 0.32rem;
+        height: 0.6rem;
+        border: solid #fff;
+        border-width: 0 2.5px 2.5px 0;
+        transform: rotate(45deg) translateY(-1px);
+        opacity: 0;
+    }
+    input[type="checkbox"]:checked::after { opacity: 1; }
+    input[type="radio"]::after {
+        content: "";
+        width: 0.5rem;
+        height: 0.5rem;
+        border-radius: 9999px;
+        background-color: #fff;
+        opacity: 0;
+    }
+    input[type="radio"]:checked::after { opacity: 1; }
+
+    input[type="checkbox"]:disabled,
+    input[type="radio"]:disabled {
+        cursor: not-allowed;
+        opacity: 0.5;
+        box-shadow: none;
+    }
+
+    /* The global ring above is zero-specificity :where(); our control's
+       own box-shadow would eat it. Give these a real outline ring instead
+       (outline is independent of box-shadow) so keyboard focus stays
+       visible — WCAG 2.4.7. */
+    input[type="checkbox"]:focus-visible,
+    input[type="radio"]:focus-visible {
+        outline: 2px solid var(--color-brand-500);
+        outline-offset: 2px;
     }
 }
 
@@ -278,4 +367,6 @@
     .sticker-disclosure > summary,
     .sticker-disclosure__chevron,
     .sticker-disclosure__icon { transition: none; }
+    input[type="checkbox"],
+    input[type="radio"] { transition: none; }
 }
