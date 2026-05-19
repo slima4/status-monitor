@@ -32,11 +32,31 @@ logs:
 
 # ── Build / run ─────────────────────────────────────────────────────────────
 
+# Native run against `just up`. Debug-level by default for local dev;
+# export RUST_LOG to override. Mirrors the dev-app container's filter so
+# native and in-container logs match.
 run:
-    cargo run --bin status-monitor
+    RUST_LOG="${RUST_LOG:-status_monitor=debug,sqlx=warn,hyper=warn,tower_http=info,info}" \
+        cargo run --bin status-monitor
 
 build:
     cargo build --release --bins
+
+# Seed an authenticated owner session (SaaS-mode dev). Prints the cookie +
+# a curl snippet. Idempotent; needs the stack up.
+dev-login:
+    bash scripts/seed-dev-session.sh
+
+# Reset the dev Postgres DB (keeps ClickHouse + the warm build cache).
+# Use after editing a migration — pre-launch policy edits migrations in
+# place, which trips sqlx's "migration N modified" checksum guard.
+db-reset:
+    docker compose -f compose.dev.yml exec -T postgres \
+        psql -U monitor -d postgres \
+        -c "DROP DATABASE IF EXISTS monitor WITH (FORCE);" \
+        -c "CREATE DATABASE monitor OWNER monitor;"
+    docker compose -f compose.dev.yml restart status-monitor 2>/dev/null || true
+    @echo "DB reset. App reconnects + re-applies migrations on a fresh schema."
 
 # ── Tests ───────────────────────────────────────────────────────────────────
 
