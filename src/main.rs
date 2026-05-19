@@ -1,6 +1,10 @@
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+use axum::extract::Request;
+use axum::middleware::{self, Next};
+use axum::response::Response;
+use opentelemetry::trace::TraceContextExt;
 use status_monitor::{
     api::build_router,
     app::AppState,
@@ -33,8 +37,56 @@ use tokio::task::JoinHandle;
 use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 use tower_http::trace::{DefaultOnResponse, TraceLayer};
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 const SHUTDOWN_DEADLINE: Duration = Duration::from_secs(10);
+
+/// One INFO line per HTTP request for ops / Loki — method, path,
+/// status, latency, trace_id. Emitted at INFO and NOT coupled to the
+/// `http.request` span's level: it fires whenever the global filter
+/// admits INFO, regardless of whether that DEBUG span exists. Layered
+/// *inside* the span solely so the request's OTLP `trace_id` is in
+/// scope — emitting it on this line makes it the Loki→Tempo join key
+/// (a Loki derived field on `trace_id` pivots straight to the trace).
+///
+/// Caveat: `trace_id` is present only when the `http.request` span is
+/// actually recorded — i.e. `status_monitor` at DEBUG in the active
+/// filter. Under a bare `info` `RUST_LOG` the span is absent and
+/// `trace_id` is simply omitted (never a fake id) — the access line
+/// still logs, but the Loki→Tempo pivot silently goes dark. The deploy
+/// `RUST_LOG` variable must keep `status_monitor=debug`.
+async fn access_log(req: Request, next: Next) -> Response {
+    // Decide skip from the BORROWED path; only own method+path when
+    // we will actually log. Caddy active-health + the deploy gate poll
+    // /healthz//readyz forever — never allocate a String for them.
+    let p = req.uri().path();
+    let logged = (p != "/healthz" && p != "/readyz").then(|| {
+        // Path only, never the query string: /auth/* carries
+        // single-use magic-link tokens and the OAuth code/state,
+        // which must not reach stdout logs.
+        (req.method().clone(), req.uri().path().to_owned())
+    });
+    let start = Instant::now();
+    let resp = next.run(req).await;
+    if let Some((method, path)) = logged {
+        // The enclosing tower_http span carries the exported OTLP
+        // context — valid only when that span was recorded (see the
+        // caveat above); otherwise the field is omitted, never faked.
+        let ctx = tracing::Span::current().context();
+        let span = ctx.span();
+        let span_ctx = span.span_context();
+        let trace_id = span_ctx.is_valid().then(|| span_ctx.trace_id().to_string());
+        tracing::info!(
+            method = %method,
+            path = %path,
+            status = resp.status().as_u16(),
+            latency_ms = start.elapsed().as_millis() as u64,
+            trace_id = trace_id.as_deref(),
+            "http access"
+        );
+    }
+    resp
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -314,8 +366,14 @@ async fn main() -> Result<()> {
     // One span per HTTP request — the unit the OTLP layer exports; with
     // no instrumented span there is nothing to trace. DEBUG level so the
     // span is recorded only when the filter is at least debug.
+    //
+    // Layer order is load-bearing: with chained `Router::layer`, the
+    // LAST `.layer` is OUTERMOST. TraceLayer added last → it wraps and
+    // enters the `http.request` span before `access_log` runs, so
+    // `access_log` can read the request's OTLP trace_id (see its doc).
     let router = build_router(state.clone(), root.clone())
         .merge(web::routes(&state.cfg).with_state(state))
+        .layer(middleware::from_fn(access_log))
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(|req: &axum::extract::Request| {

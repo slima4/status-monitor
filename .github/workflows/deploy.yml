@@ -40,6 +40,10 @@ name: deploy
 #     GRAFANA_CLOUD_LOKI_URL    Loki push endpoint
 #     GRAFANA_CLOUD_LOKI_USER   Loki numeric instance id (≠ Prom id)
 #     (token: reuses GRAFANA_CLOUD_API_TOKEN, needs logs:write)
+#   Deploy annotation (best-effort marker on Grafana dashboards):
+#     GRAFANA_ANNOTATIONS_URL   https://<stack>.grafana.net/api/annotations
+#     GRAFANA_ANNOTATIONS_TOKEN Grafana service-account token with the
+#                               annotations:write role (NOT a glc_ token)
 # Non-secret repo variable: RUST_LOG (log/trace verbosity, redeploy
 # applies it with no rebuild).
 
@@ -447,3 +451,40 @@ jobs:
           cd /opt/status-monitor/deployment && docker compose logs --tail=80 status-monitor || true
           exit 1
           REMOTE
+
+      - name: annotate grafana (optional)
+        env:
+          ANNO_URL: ${{ secrets.GRAFANA_ANNOTATIONS_URL }}
+          ANNO_TOKEN: ${{ secrets.GRAFANA_ANNOTATIONS_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Drop a deploy marker on Grafana so a latency / error-rate
+          # shift can be read against "this is the commit that did it".
+          # Posted from the runner (Grafana HTTP API, not the box).
+          # Inert until both secrets are set — mirrors the metrics/Loki
+          # gates. NOTE: ANNO_TOKEN is a Grafana *service-account* token
+          # with the annotations:write role — NOT the glc_ ingest token
+          # (that one only writes Mimir/Loki/Tempo, not the Grafana API).
+          # No `if:` needed — a step runs only on prior success by default.
+          if [ -z "${ANNO_URL:-}" ] || [ -z "${ANNO_TOKEN:-}" ]; then
+            echo "grafana annotation skipped (secrets unset)"; exit 0
+          fi
+          ts=$(date +%s%3N)
+          # `|| true`: a transport failure (curl non-zero exit — DNS / TLS
+          # / connection, NOT an HTTP status) must not trip `set -e` and
+          # fail an otherwise-healthy deploy. This step is best-effort:
+          # it can warn, never fail the job.
+          code=$(curl -sS -o /tmp/anno.out -w '%{http_code}' \
+            -X POST "$ANNO_URL" \
+            -H "Authorization: Bearer ${ANNO_TOKEN}" \
+            -H 'Content-Type: application/json' \
+            --data "{\"time\":${ts},\"tags\":[\"deploy\",\"status-monitor\",\"prod\"],\"text\":\"deploy ${IMAGE_TAG}\"}" || true)
+          if [ -z "$code" ] || [ "$code" = 000 ]; then
+            echo "::warning::grafana annotation: curl transport failure (deploy unaffected)"
+            exit 0
+          fi
+          if [ "$code" = 200 ]; then
+            echo "grafana annotation posted (${IMAGE_TAG})"
+          else
+            echo "::warning::grafana annotation POST ${code}: $(head -c 300 /tmp/anno.out 2>/dev/null || true)"
+          fi
