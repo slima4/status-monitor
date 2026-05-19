@@ -54,10 +54,13 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
         .layer(DefaultBodyLimit::max(BULK_BODY_LIMIT));
 
     // Logo upload needs more than the 64 KiB JSON limit but far less than the
-    // bulk ceiling; size it from config plus headroom for multipart framing.
-    // Its own auth layer mirrors the owner-gated `/orgs/{id}` routes since
-    // `.merge` lands these routes outside the main v1 middleware stack.
-    let logo_body_limit = state.cfg.public_status.max_logo_size_bytes as usize + 64 * 1024;
+    // bulk ceiling. Generous headroom over `max_logo_size_bytes` (not just
+    // multipart framing) so an a-bit-too-large logo still reaches the handler
+    // and gets a clean `413 LOGO_TOO_LARGE` instead of the body layer aborting
+    // mid-parse and surfacing as an opaque `LOGO_MISSING`. Its own auth layer
+    // mirrors the owner-gated `/orgs/{id}` routes since `.merge` lands these
+    // routes outside the main v1 middleware stack.
+    let logo_body_limit = state.cfg.public_status.max_logo_size_bytes as usize + 1024 * 1024;
     let logo = Router::new()
         .route(
             "/orgs/{id}/status-page/logo",

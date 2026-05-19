@@ -164,9 +164,10 @@ cache_max_orgs = 1000                  # hot + last-good cache bound
 cache_ttl_secs = 10                    # per-org rendered-page TTL
 last_good_ttl_secs = 3600              # idle eviction for the stale-fallback layer
 logo_dir = "/var/lib/status-monitor/logos"
-max_logo_size_bytes = 204800           # 200 KB
+max_logo_size_bytes = 1048576          # 1 MiB byte ceiling (pre-decode)
 allowed_logo_mime_types = ["image/png", "image/jpeg", "image/webp"]
-max_logo_dimension_px = 1200           # larger uploads are downscaled
+max_logo_dimension_px = 1200           # larger uploads are downscaled; decode
+                                       # is also allocation-bounded (bomb guard)
 default_brand_color = "#3b82f6"        # used when an org sets no colour
 default_show_powered_by = true
 public_per_ip_rate_limit_per_min = 60  # in-app limit behind the Caddy-side one

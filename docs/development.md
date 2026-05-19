@@ -100,6 +100,38 @@ Browse:
 - `http://localhost:8080/status` — public status page
 - `http://localhost:8080/docs` — Swagger UI
 
+## Operator UI locally (SaaS mode)
+
+The `dev-app` container runs in **SaaS mode** (`tenancy.enabled=true`, mirrors
+the deployment). Self-host mode (`tenancy.enabled=false`) discards the session
+cookie before reading it, so the owner-gated operator APIs — status-page
+settings, members, invitations — return `401` and can't be exercised. The
+host workflow (`cargo run` against `config/default.toml`) is self-host unless
+you export the same env.
+
+Get an authenticated owner session without GitHub OAuth:
+
+```bash
+just up-app          # SaaS-mode stack; wait for "api listening"
+just dev-login       # seeds user+org+owner+session, prints the cookie
+```
+
+Then, in the browser devtools Console at `http://localhost:8080`:
+
+```js
+document.cookie = "_sm_session=devsession-localtest-0000000000; path=/";
+```
+
+Reload — you're the owner of "Dev Org". The public page is at
+`http://devorg.status.lvh.me:8080/status` (`*.lvh.me` resolves to
+`127.0.0.1`, no `/etc/hosts` edit). `just dev-login` also prints a `curl`
+snippet that passes the cookie directly, for API-only checks.
+
+After editing a migration in place (pre-launch policy), the dev DB trips
+sqlx's "migration N modified" checksum guard — `just db-reset` drops and
+recreates it (ClickHouse and the warm build cache are kept). `down -v` wipes
+the seeded session; re-run `just dev-login`.
+
 ## Seed a target
 
 ```bash
@@ -154,12 +186,22 @@ cargo bench
 ```
 
 Postgres-backed tests (e.g. `bulk_create_with_ragged_tags`) are `#[ignore]`'d
-by default. Bring up the compose stack and opt in:
+by default and no-op when `DATABASE_URL` is unset. Bring up the stack and opt
+in. Validate schema/migration changes against a throwaway DB, not the stale
+`monitor` one (the harness auto-applies migrations on first connect):
 
 ```bash
 docker compose -f compose.dev.yml up -d
-DATABASE_URL=postgres://monitor:monitor@127.0.0.1:5432/monitor \
+docker compose -f compose.dev.yml exec -T postgres createdb -U monitor ci_verify
+
+# Whole ignored suite (slow — builds every test binary):
+DATABASE_URL=postgres://monitor:monitor@127.0.0.1:5432/ci_verify \
   cargo test -- --ignored
+
+# One suite (fast — scope to a binary; bare `nextest run` rebuilds +
+# enumerates all ~48 test binaries and looks frozen for minutes):
+DATABASE_URL=postgres://monitor:monitor@127.0.0.1:5432/ci_verify \
+  cargo test --test status_page_settings_test -- --ignored --nocapture
 ```
 
 ## Database access

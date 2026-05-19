@@ -66,6 +66,26 @@ fn patch(org: &str, payload: Value) -> Request<Body> {
     json_request("PATCH", &format!("/api/v1/orgs/{org}/status-page"), payload)
 }
 
+const BOUNDARY: &str = "X-SP-BOUNDARY";
+
+/// A `multipart/form-data` body with a single `file` part holding `bytes`.
+fn logo_request(org: &str, bytes: &[u8]) -> Request<Body> {
+    let mut body = format!(
+        "--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"file\"; \
+         filename=\"l.png\"\r\nContent-Type: image/png\r\n\r\n"
+    )
+    .into_bytes();
+    body.extend_from_slice(bytes);
+    body.extend_from_slice(format!("\r\n--{BOUNDARY}--\r\n").as_bytes());
+    Request::post(format!("/api/v1/orgs/{org}/status-page/logo"))
+        .header(
+            "content-type",
+            format!("multipart/form-data; boundary={BOUNDARY}"),
+        )
+        .body(Body::from(body))
+        .unwrap()
+}
+
 // ── #26: a normal save succeeds and round-trips ─────────────────────────────
 
 #[tokio::test]
@@ -225,30 +245,10 @@ async fn logo_upload_then_branding_patch_keeps_logo() {
     };
     let (router, org) = owner_org(pool).await;
 
-    let boundary = "X-SP-BOUNDARY";
-    let mut multipart = Vec::new();
-    multipart.extend_from_slice(
-        format!(
-            "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; \
-             filename=\"l.png\"\r\nContent-Type: image/png\r\n\r\n"
-        )
-        .as_bytes(),
-    );
-    multipart.extend_from_slice(TINY_PNG);
-    multipart.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
-
     let (st, body) = read(
         router
             .clone()
-            .oneshot(
-                Request::post(format!("/api/v1/orgs/{org}/status-page/logo"))
-                    .header(
-                        "content-type",
-                        format!("multipart/form-data; boundary={boundary}"),
-                    )
-                    .body(Body::from(multipart))
-                    .unwrap(),
-            )
+            .oneshot(logo_request(&org, TINY_PNG))
             .await
             .unwrap(),
     )
@@ -287,4 +287,32 @@ async fn logo_upload_then_branding_patch_keeps_logo() {
         body["logo_url"].as_str().is_some_and(|u| !u.is_empty()),
         "logo survived the branding save: {body}"
     );
+}
+
+/// An over-cap logo must come back as a clean `413 LOGO_TOO_LARGE`, not the
+/// opaque `LOGO_MISSING` the body layer produced when its limit was only
+/// 64 KiB over `max_logo_size_bytes` (the bug behind the operator-reported
+/// "Error parsing multipart/form-data request").
+#[tokio::test]
+#[ignore]
+async fn oversize_logo_is_clean_413_not_opaque() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let (router, org) = owner_org(pool).await;
+
+    // 1.2 MiB: over the 1 MiB cap but under the route body limit, so it
+    // reaches the handler's own size check instead of being truncated.
+    let mut oversized = TINY_PNG.to_vec();
+    oversized.resize(1_258_291, 0);
+
+    let (st, body) = read(
+        router
+            .oneshot(logo_request(&org, &oversized))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(st, StatusCode::PAYLOAD_TOO_LARGE, "body: {body}");
+    assert_eq!(body["error"]["code"], "LOGO_TOO_LARGE");
 }

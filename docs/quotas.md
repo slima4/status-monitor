@@ -22,7 +22,7 @@ enough to keep abuse on a small VM cheap.
 | `max_public_components` | 10 | Targets shown on the public status page |
 | `max_maintenance_windows` | 20 | Scheduled maintenance windows |
 | `max_notification_channels` | 20 | Notification channels (Slack/webhook/Telegram) in the org |
-| `max_logo_size_bytes` | 204800 | Status-page logo upload ceiling (200 KB) |
+| `max_logo_size_bytes` | 1048576 | Status-page logo upload ceiling (1 MiB) |
 
 | Rate budget (per minute) | Free | Category |
 |---|---|---|

@@ -385,8 +385,29 @@ fn process_logo(raw: &[u8], max_dim: u32) -> Result<(LogoMime, Vec<u8>)> {
     let mime = LogoMime::from_image_format(fmt).ok_or_else(|| {
         AppError::bad_request(codes::LOGO_TYPE_INVALID, "logo must be PNG, JPEG, or WebP")
     })?;
-    let img = image::load_from_memory_with_format(raw, fmt)
-        .map_err(|_| AppError::bad_request(codes::LOGO_DECODE_FAILED, "could not decode image"))?;
+    // Decompression-bomb guard: bound the decoder's allocation and the
+    // canvas dimensions *before* the full decode. `load_from_memory` would
+    // happily allocate gigabytes for a tiny file that declares a 60000×60000
+    // canvas. The hard pixel ceiling is generous (real source art is far
+    // smaller, and oversized-but-honest images are downscaled below); the
+    // alloc cap is the actual DoS backstop. 10_000² × 4 B/px ≈ 400 MB >
+    // 128 MiB, so for any normal aspect ratio `max_alloc` is the binding
+    // gate; the pixel ceilings only catch pathological strips (e.g.
+    // 10001×1) — they are not independently tunable.
+    const HARD_DIM_PX: u32 = 10_000;
+    const MAX_DECODE_ALLOC: u64 = 128 * 1024 * 1024;
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(HARD_DIM_PX);
+    limits.max_image_height = Some(HARD_DIM_PX);
+    limits.max_alloc = Some(MAX_DECODE_ALLOC);
+    let mut reader = image::ImageReader::with_format(std::io::Cursor::new(raw), fmt);
+    reader.limits(limits);
+    let img = reader.decode().map_err(|_| {
+        AppError::bad_request(
+            codes::LOGO_DECODE_FAILED,
+            "could not decode image — malformed, or its dimensions exceed the limit",
+        )
+    })?;
     if img.width() <= max_dim && img.height() <= max_dim {
         return Ok((mime, raw.to_vec()));
     }
@@ -453,6 +474,23 @@ mod tests {
     fn process_logo_rejects_non_image() {
         let err = process_logo(b"<svg xmlns='http://www.w3.org/2000/svg'/>", 1200).unwrap_err();
         assert!(matches!(err, AppError::BadRequest { .. }));
+    }
+
+    #[test]
+    fn process_logo_rejects_oversized_canvas() {
+        // Decompression-bomb shape: cheap to encode (1px tall) but a width
+        // past the hard pixel ceiling. The decoder's `Limits` must reject it
+        // *before* materialising the canvas, not OOM.
+        let wide = image::RgbaImage::from_pixel(10_001, 1, image::Rgba([0, 0, 0, 255]));
+        let mut buf = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgba8(wide)
+            .write_to(&mut buf, image::ImageFormat::Png)
+            .unwrap();
+        let err = process_logo(&buf.into_inner(), 1200).unwrap_err();
+        assert!(
+            matches!(&err, AppError::BadRequest { code, .. } if *code == codes::LOGO_DECODE_FAILED),
+            "expected LOGO_DECODE_FAILED, got {err:?}"
+        );
     }
 
     #[test]

@@ -357,7 +357,7 @@ impl Default for PublicStatusConfig {
             cache_ttl_secs: 10,
             last_good_ttl_secs: 3600,
             logo_dir: "/var/lib/status-monitor/logos".into(),
-            max_logo_size_bytes: 204_800,
+            max_logo_size_bytes: 1_048_576,
             allowed_logo_mime_types: vec![
                 "image/png".into(),
                 "image/jpeg".into(),

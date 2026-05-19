@@ -398,6 +398,21 @@ pub mod settings {
         Ok(TokensPartial { tokens }.into_response())
     }
 
+    /// Compact binary-unit label for help text (e.g. `1 MB`, `512 KB`).
+    /// Floors to the largest whole unit; operator-set limits are expected
+    /// round, so the floor is exact in practice.
+    fn human_bytes(b: u64) -> String {
+        const KB: u64 = 1024;
+        const MB: u64 = 1024 * KB;
+        if b >= MB {
+            format!("{} MB", b / MB)
+        } else if b >= KB {
+            format!("{} KB", b / KB)
+        } else {
+            format!("{b} B")
+        }
+    }
+
     #[derive(Template, WebTemplate)]
     #[template(path = "settings/status_page.html")]
     pub struct StatusPageView {
@@ -407,6 +422,12 @@ pub mod settings {
         /// Always populated (resolved override or configured default) so the
         /// `<input type=color>` has a value even before the operator picks one.
         pub brand_color_value: String,
+        /// Logo upload limit, rendered as help text *and* read by the client
+        /// for a pre-flight `file.size` check — one source so the copy and the
+        /// enforced cap can't drift from `public_status.max_logo_size_bytes`.
+        pub max_logo_bytes: u64,
+        pub max_logo_label: String,
+        pub max_logo_dim_px: u32,
         pub s: StatusPageSettings,
     }
 
@@ -430,10 +451,14 @@ pub mod settings {
             .public_brand_color
             .clone()
             .unwrap_or_else(|| state.cfg.public_status.default_brand_color.clone());
+        let max_logo_bytes = u64::from(state.cfg.public_status.max_logo_size_bytes);
         Ok(StatusPageView {
             active_tab: TAB_STATUS_PAGE,
             org_id: org.0.to_string(),
             brand_color_value,
+            max_logo_bytes,
+            max_logo_label: human_bytes(max_logo_bytes),
+            max_logo_dim_px: state.cfg.public_status.max_logo_dimension_px,
             s,
         }
         .into_response())
@@ -540,7 +565,7 @@ pub mod settings {
         pub bars: Vec<UsageBar>,
         pub min_check_interval_secs: i32,
         pub retention_days: i32,
-        pub max_logo_size_kb: i32,
+        pub max_logo_size_label: String,
         pub max_api_tokens_per_user: i32,
         pub api_writes_per_minute: i32,
         pub api_reads_per_minute: i32,
@@ -592,7 +617,7 @@ pub mod settings {
             ],
             min_check_interval_secs: p.min_check_interval_secs,
             retention_days: p.retention_days,
-            max_logo_size_kb: p.max_logo_size_bytes / 1024,
+            max_logo_size_label: human_bytes(u64::try_from(p.max_logo_size_bytes).unwrap_or(0)),
             max_api_tokens_per_user: p.max_api_tokens_per_user,
             api_writes_per_minute: p.api_writes_per_minute,
             api_reads_per_minute: p.api_reads_per_minute,
@@ -626,7 +651,7 @@ pub mod settings {
                 ],
                 min_check_interval_secs: 60,
                 retention_days: 30,
-                max_logo_size_kb: 200,
+                max_logo_size_label: "1 MB".into(),
                 max_api_tokens_per_user: 5,
                 api_writes_per_minute: 600,
                 api_reads_per_minute: 6000,

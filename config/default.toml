@@ -164,7 +164,11 @@ cache_max_orgs = 1000
 cache_ttl_secs = 10
 last_good_ttl_secs = 3600
 logo_dir = "/var/lib/status-monitor/logos"
-max_logo_size_bytes = 204800
+# 1 MiB. Real logos (PNG/JPEG/WebP) routinely exceed 200 KB; the prior
+# 204800 cap rejected ordinary uploads. Decode is still bounded by a
+# dimension + allocation guard (see status_page::process_logo) so a large
+# byte budget is not a decompression-bomb vector.
+max_logo_size_bytes = 1048576
 allowed_logo_mime_types = ["image/png", "image/jpeg", "image/webp"]
 max_logo_dimension_px = 1200
 default_brand_color = "#3b82f6"

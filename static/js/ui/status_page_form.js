@@ -18,8 +18,10 @@
   const logoNone = document.getElementById("logo-none");
   const logoWrap = document.getElementById("logo-remove-wrap");
 
-  const PLACEHOLDER =
-    "PNG / JPEG / WebP. Oversized images are downscaled. Applied on save.";
+  // Enforced cap mirrors the server's `max_logo_size_bytes`; a pre-flight
+  // check gives instant feedback and skips a doomed upload round-trip.
+  const MAX_LOGO_BYTES = Number(form.dataset.maxLogoBytes) || 0;
+  const MAX_LOGO_LABEL = form.dataset.maxLogoLabel || "the limit";
   const HEADERS = { "Accept": "application/json", "X-Requested-With": "status-monitor" };
   // Thrown after a banner has been rendered, so the submit handler's catch
   // can tell a handled API rejection from a raw network failure.
@@ -52,14 +54,23 @@
 
   function resetFilePicker() {
     fileInput.value = "";
-    fileName.textContent = PLACEHOLDER;
+    fileName.textContent = "";
   }
 
   // A staged file and "remove" are mutually exclusive; picking one clears
-  // the other so the save intent is never ambiguous.
+  // the other so the save intent is never ambiguous. An over-cap file is
+  // rejected here so the operator isn't left waiting on a doomed upload.
   fileInput.addEventListener("change", () => {
     const f = fileInput.files[0];
-    fileName.textContent = f ? f.name : PLACEHOLDER;
+    if (f && MAX_LOGO_BYTES && f.size > MAX_LOGO_BYTES) {
+      resetFilePicker();
+      window.smRenderClientError(
+        banner,
+        `That image is larger than the ${MAX_LOGO_LABEL} logo limit.`,
+      );
+      return;
+    }
+    fileName.textContent = f ? f.name : "";
     if (f && removeBox) removeBox.checked = false;
   });
   if (removeBox) {

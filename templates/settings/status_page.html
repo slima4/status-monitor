@@ -31,6 +31,8 @@
 
   <form id="status-page-form"
         data-action="/api/v1/orgs/{{ org_id }}/status-page"
+        data-max-logo-bytes="{{ max_logo_bytes }}"
+        data-max-logo-label="{{ max_logo_label }}"
         novalidate
         class="space-y-6">
 
@@ -112,10 +114,12 @@
             <input id="logo-file" type="file" class="sr-only"
                    accept="image/png,image/jpeg,image/webp">
           </label>
-          <span id="logo-filename" class="text-xs text-slate-500">
-            PNG / JPEG / WebP. Oversized images are downscaled. Applied on save.
-          </span>
+          <span id="logo-filename" class="text-xs text-slate-500"></span>
         </div>
+        <p class="text-xs text-slate-500">
+          PNG, JPEG or WebP · max {{ max_logo_label }} · images wider or taller
+          than {{ max_logo_dim_px }}px are downscaled · applied on save.
+        </p>
         <label id="logo-remove-wrap"
                class="flex items-center gap-2 text-xs text-slate-600
                       {% if s.logo_url.is_none() %}hidden{% endif %}">

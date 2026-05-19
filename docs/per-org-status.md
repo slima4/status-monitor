@@ -75,7 +75,7 @@ Branding fields:
 | `public_display_name` | 1–80 chars | the org's name |
 | `public_brand_color` | `#RRGGBB` (6-digit hex) | `#3b82f6` |
 | `public_about` | Markdown, ≤ 500 chars, rendered to sanitised HTML | omitted |
-| logo | PNG / JPEG / WebP, ≤ 200 KB, ≤ 1200 px; larger images are downscaled | header shows the display name as text |
+| logo | PNG / JPEG / WebP, ≤ 1 MB, ≤ 1200 px; larger images are downscaled. Format is sniffed from the bytes (declared content-type ignored — a script/SVG can't masquerade as an image) and the decoder is allocation- and dimension-bounded against decompression bombs | header shows the display name as text |
 | `public_show_powered_by` | footer attribution toggle | on |
 
 The settings page shows a live link to the page so the owner can preview
