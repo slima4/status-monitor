@@ -331,8 +331,11 @@ resource "grafana_notification_policy" "root" {
       value = "warning"
     }
 
-    group_wait      = "5m"
-    group_interval  = "30m"
-    repeat_interval = "24h"
+    group_wait     = "5m"
+    group_interval = "30m"
+    # "1d", not "24h": Grafana canonicalizes durations >= a day to the
+    # day form server-side, so "24h" would diff back to "1d" on every
+    # plan (perpetual no-op drift). Write the canonical form.
+    repeat_interval = "1d"
   }
 }
