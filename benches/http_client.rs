@@ -156,8 +156,9 @@ fn bench_single(c: &mut Criterion) {
     for cores in [Cores::One, Cores::Two] {
         let f = fixture(cores);
         group.bench_function(cores.tag(), |b| {
-            b.to_async(&f.client_rt)
-                .iter(|| async { execute_http_check(f.target_id, &f.check, &f.clients).await });
+            b.to_async(&f.client_rt).iter(|| async {
+                execute_http_check(f.target_id, uuid::Uuid::nil(), &f.check, &f.clients).await
+            });
         });
     }
     group.finish();
@@ -178,8 +179,9 @@ fn bench_throughput(c: &mut Criterion) {
             let id = BenchmarkId::new(cores.tag(), format!("c_{concurrency}"));
             group.bench_with_input(id, &concurrency, |b, &n| {
                 b.to_async(&f.client_rt).iter(|| async {
-                    let futs =
-                        (0..n).map(|_| execute_http_check(f.target_id, &f.check, &f.clients));
+                    let futs = (0..n).map(|_| {
+                        execute_http_check(f.target_id, uuid::Uuid::nil(), &f.check, &f.clients)
+                    });
                     join_all(futs).await
                 });
             });

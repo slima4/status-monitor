@@ -20,6 +20,7 @@ static RDAP: OnceCell<RdapClient> = OnceCell::const_new();
 
 pub async fn execute_domain_expiry_check(
     target_id: Uuid,
+    org_id: Uuid,
     check: &DomainExpiryCheck,
 ) -> CheckResult {
     let started_at = Utc::now();
@@ -34,6 +35,7 @@ pub async fn execute_domain_expiry_check(
     match outcome {
         Ok(Ok(verdict)) => CheckResult {
             target_id,
+            org_id,
             timestamp: started_at,
             status: verdict.status,
             duration_ms,
@@ -50,6 +52,7 @@ pub async fn execute_domain_expiry_check(
         },
         Ok(Err(err)) => CheckResult {
             target_id,
+            org_id,
             timestamp: started_at,
             status: CheckStatus::Error,
             duration_ms,
@@ -61,7 +64,9 @@ pub async fn execute_domain_expiry_check(
             response_size: None,
             error: Some(err.to_string()),
         },
-        Err(_) => CheckResult::error_with_elapsed(target_id, started_at, duration_ms, "timeout"),
+        Err(_) => {
+            CheckResult::error_with_elapsed(target_id, org_id, started_at, duration_ms, "timeout")
+        }
     }
 }
 

@@ -13,6 +13,7 @@ fn sample_results(n: usize) -> Vec<CheckResult> {
     (0..n)
         .map(|i| CheckResult {
             target_id: target,
+            org_id: uuid::Uuid::nil(),
             timestamp: now,
             status: CheckStatus::Up,
             duration_ms: 25 + (i as u32 % 50),

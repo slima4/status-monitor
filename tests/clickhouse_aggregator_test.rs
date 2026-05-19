@@ -55,9 +55,10 @@ fn public_target(name: &str) -> NewTarget {
     }
 }
 
-fn ok_result(target_id: Uuid, ts: chrono::DateTime<Utc>) -> CheckResult {
+fn ok_result(target_id: Uuid, org_id: Uuid, ts: chrono::DateTime<Utc>) -> CheckResult {
     CheckResult {
         target_id,
+        org_id,
         timestamp: ts,
         status: CheckStatus::Up,
         duration_ms: 42,
@@ -131,10 +132,10 @@ async fn build_round_trips_seeded_data() {
     let pool_for_cleanup = pool.clone();
 
     with_cleanup(&pool_for_cleanup, target_id, async move {
-        let sink = ClickhouseResultSink::from_client(ch.clone(), org_id);
+        let sink = ClickhouseResultSink::from_client(ch.clone());
         let now = Utc::now();
         let rows: Vec<CheckResult> = (0..5)
-            .map(|i| ok_result(target_id, now - chrono::Duration::seconds(i * 30)))
+            .map(|i| ok_result(target_id, org_id.0, now - chrono::Duration::seconds(i * 30)))
             .collect();
         sink.write_batch(&rows).await.expect("ch insert");
 
@@ -198,9 +199,9 @@ async fn component_history_returns_strip_for_public_target() {
     let pool_for_cleanup = pool.clone();
 
     with_cleanup(&pool_for_cleanup, target_id, async move {
-        let sink = ClickhouseResultSink::from_client(ch.clone(), org_id);
+        let sink = ClickhouseResultSink::from_client(ch.clone());
         let now = Utc::now();
-        sink.write_batch(&[ok_result(target_id, now)])
+        sink.write_batch(&[ok_result(target_id, org_id.0, now)])
             .await
             .expect("ch insert");
         ch.query("OPTIMIZE TABLE check_results_1m FINAL")

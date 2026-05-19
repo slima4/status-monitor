@@ -142,6 +142,7 @@ async fn coalescing_separates_runs_split_by_an_up_check() {
     let base = Utc::now() - Duration::try_minutes(10).unwrap();
     let mk = |i: i64, st: CheckStatus| CheckResult {
         target_id,
+        org_id: uuid::Uuid::nil(),
         timestamp: base + Duration::try_seconds(i * 60).unwrap(),
         status: st,
         duration_ms: 10,

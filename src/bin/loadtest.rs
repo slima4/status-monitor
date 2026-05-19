@@ -142,7 +142,7 @@ async fn main() {
             let mut local_latencies: Vec<u32> = Vec::with_capacity(LATENCY_BATCH);
             let mut local_errors: HashMap<String, u64> = HashMap::new();
             while Instant::now() < deadline {
-                let r = execute_http_check(target_id, &check, &clients).await;
+                let r = execute_http_check(target_id, uuid::Uuid::nil(), &check, &clients).await;
                 total.fetch_add(1, Ordering::Relaxed);
                 if matches!(
                     r.status,

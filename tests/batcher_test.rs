@@ -12,6 +12,7 @@ use uuid::Uuid;
 fn sample_result() -> CheckResult {
     CheckResult {
         target_id: Uuid::now_v7(),
+        org_id: uuid::Uuid::nil(),
         timestamp: Utc::now(),
         status: CheckStatus::Up,
         duration_ms: 10,

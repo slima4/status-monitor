@@ -17,6 +17,7 @@ use crate::worker::connect_via_guard;
 
 pub async fn execute_tls_cert_check(
     target_id: Uuid,
+    org_id: Uuid,
     check: &TlsCertCheck,
     clients: &HttpClients,
 ) -> CheckResult {
@@ -29,6 +30,7 @@ pub async fn execute_tls_cert_check(
     match outcome {
         Ok(Ok(probe)) => CheckResult {
             target_id,
+            org_id,
             timestamp: started_at,
             status: probe.verdict.status,
             duration_ms,
@@ -49,6 +51,7 @@ pub async fn execute_tls_cert_check(
         },
         Ok(Err(err)) => CheckResult {
             target_id,
+            org_id,
             timestamp: started_at,
             status: CheckStatus::Error,
             duration_ms,
@@ -60,7 +63,9 @@ pub async fn execute_tls_cert_check(
             response_size: None,
             error: Some(err.to_string()),
         },
-        Err(_) => CheckResult::error_with_elapsed(target_id, started_at, duration_ms, "timeout"),
+        Err(_) => {
+            CheckResult::error_with_elapsed(target_id, org_id, started_at, duration_ms, "timeout")
+        }
     }
 }
 

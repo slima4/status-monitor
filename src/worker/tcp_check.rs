@@ -10,6 +10,7 @@ use crate::worker::connect_via_guard;
 
 pub async fn execute_tcp_check(
     target_id: Uuid,
+    org_id: Uuid,
     check: &TcpCheck,
     clients: &HttpClients,
 ) -> CheckResult {
@@ -26,6 +27,7 @@ pub async fn execute_tcp_check(
     match outcome {
         Ok(Ok(_stream)) => CheckResult {
             target_id,
+            org_id,
             timestamp: started_at,
             status: CheckStatus::Up,
             duration_ms,
@@ -39,6 +41,7 @@ pub async fn execute_tcp_check(
         },
         Ok(Err(err)) => CheckResult {
             target_id,
+            org_id,
             timestamp: started_at,
             status: CheckStatus::Down,
             duration_ms,
@@ -50,6 +53,8 @@ pub async fn execute_tcp_check(
             response_size: None,
             error: Some(err.to_string()),
         },
-        Err(_) => CheckResult::error_with_elapsed(target_id, started_at, duration_ms, "timeout"),
+        Err(_) => {
+            CheckResult::error_with_elapsed(target_id, org_id, started_at, duration_ms, "timeout")
+        }
     }
 }

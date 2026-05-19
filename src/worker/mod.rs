@@ -67,15 +67,20 @@ pub(crate) async fn connect_via_guard(
     }
 }
 
-pub async fn execute(target_id: Uuid, spec: &CheckSpec, clients: &HttpClients) -> CheckResult {
+pub async fn execute(
+    target_id: Uuid,
+    org_id: Uuid,
+    spec: &CheckSpec,
+    clients: &HttpClients,
+) -> CheckResult {
     match spec {
-        CheckSpec::Http(http) => execute_http_check(target_id, http, clients).await,
-        CheckSpec::Tcp(tcp) => tcp_check::execute_tcp_check(target_id, tcp, clients).await,
+        CheckSpec::Http(http) => execute_http_check(target_id, org_id, http, clients).await,
+        CheckSpec::Tcp(tcp) => tcp_check::execute_tcp_check(target_id, org_id, tcp, clients).await,
         CheckSpec::TlsCert(cert) => {
-            tls_cert::execute_tls_cert_check(target_id, cert, clients).await
+            tls_cert::execute_tls_cert_check(target_id, org_id, cert, clients).await
         }
         CheckSpec::DomainExpiry(domain) => {
-            domain_expiry::execute_domain_expiry_check(target_id, domain).await
+            domain_expiry::execute_domain_expiry_check(target_id, org_id, domain).await
         }
     }
 }

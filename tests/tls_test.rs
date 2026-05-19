@@ -21,7 +21,7 @@ async fn verify_tls_false_accepts_self_signed() {
     let mut check = default_http_check(url, ExpectedStatus::Exact(200));
     check.verify_tls = false;
 
-    let result = execute_http_check(Uuid::now_v7(), &check, &clients).await;
+    let result = execute_http_check(Uuid::now_v7(), uuid::Uuid::nil(), &check, &clients).await;
 
     assert_eq!(
         result.status,
@@ -41,7 +41,7 @@ async fn verify_tls_true_rejects_self_signed() {
     let mut check = default_http_check(url, ExpectedStatus::Exact(200));
     check.verify_tls = true;
 
-    let result = execute_http_check(Uuid::now_v7(), &check, &clients).await;
+    let result = execute_http_check(Uuid::now_v7(), uuid::Uuid::nil(), &check, &clients).await;
 
     assert_eq!(result.status, CheckStatus::Error);
     let err = result.error.expect("error message");

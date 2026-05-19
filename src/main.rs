@@ -154,10 +154,8 @@ async fn main() -> Result<()> {
     );
     let clickhouse_client = storage::build_client(&cfg.storage.clickhouse);
     storage::migrate(&clickhouse_client).await?;
-    let result_sink: Arc<dyn ResultSink> = Arc::new(ClickhouseResultSink::from_client(
-        clickhouse_client.clone(),
-        default_org_id,
-    ));
+    let result_sink: Arc<dyn ResultSink> =
+        Arc::new(ClickhouseResultSink::from_client(clickhouse_client.clone()));
     let result_sink_for_state = result_sink.clone();
     let ch_client_for_public = clickhouse_client.clone();
     let ch_client_for_purge = clickhouse_client.clone();

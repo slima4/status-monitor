@@ -27,6 +27,7 @@ const MAX_REDIRECT_HOPS: u8 = 10;
 
 pub async fn execute_http_check(
     target_id: Uuid,
+    org_id: Uuid,
     check: &HttpCheck,
     clients: &HttpClients,
 ) -> CheckResult {
@@ -53,6 +54,7 @@ pub async fn execute_http_check(
             Err(_) => {
                 return CheckResult::error_with_elapsed(
                     target_id,
+                    org_id,
                     started_at,
                     start.elapsed().as_millis() as u32,
                     "invalid url",
@@ -69,6 +71,7 @@ pub async fn execute_http_check(
             Err(err) => {
                 return CheckResult::error_with_elapsed(
                     target_id,
+                    org_id,
                     started_at,
                     start.elapsed().as_millis() as u32,
                     format!("request build failed: {err}"),
@@ -80,6 +83,7 @@ pub async fn execute_http_check(
         if remaining.is_zero() {
             return CheckResult::error_with_elapsed(
                 target_id,
+                org_id,
                 started_at,
                 start.elapsed().as_millis() as u32,
                 "timeout",
@@ -90,6 +94,7 @@ pub async fn execute_http_check(
             Err(_) => {
                 return CheckResult::error_with_elapsed(
                     target_id,
+                    org_id,
                     started_at,
                     start.elapsed().as_millis() as u32,
                     "timeout",
@@ -99,6 +104,7 @@ pub async fn execute_http_check(
             Ok(Err(err)) => {
                 return CheckResult::error_with_elapsed(
                     target_id,
+                    org_id,
                     started_at,
                     start.elapsed().as_millis() as u32,
                     classify_hyper_error(&err),
@@ -118,6 +124,7 @@ pub async fn execute_http_check(
                 );
                 return CheckResult::error_with_elapsed(
                     target_id,
+                    org_id,
                     started_at,
                     start.elapsed().as_millis() as u32,
                     "too many redirects",
@@ -140,6 +147,7 @@ pub async fn execute_http_check(
                     );
                     return CheckResult::error_with_elapsed(
                         target_id,
+                        org_id,
                         started_at,
                         start.elapsed().as_millis() as u32,
                         "invalid redirect location",
@@ -156,6 +164,7 @@ pub async fn execute_http_check(
                 );
                 return CheckResult::error_with_elapsed(
                     target_id,
+                    org_id,
                     started_at,
                     start.elapsed().as_millis() as u32,
                     "unsupported redirect scheme",
@@ -191,6 +200,7 @@ pub async fn execute_http_check(
 
         return finalize(
             target_id,
+            org_id,
             check,
             started_at,
             start,
@@ -206,6 +216,7 @@ pub async fn execute_http_check(
     // function total without an `unwrap`/`panic`.
     CheckResult::error_with_elapsed(
         target_id,
+        org_id,
         started_at,
         start.elapsed().as_millis() as u32,
         "too many redirects",
@@ -215,6 +226,7 @@ pub async fn execute_http_check(
 /// Collect, decode, and score the final (non-redirect) response.
 async fn finalize(
     target_id: Uuid,
+    org_id: Uuid,
     check: &HttpCheck,
     started_at: chrono::DateTime<Utc>,
     start: Instant,
@@ -238,6 +250,7 @@ async fn finalize(
         Err(_) => {
             let mut r = CheckResult::error_with_elapsed(
                 target_id,
+                org_id,
                 started_at,
                 start.elapsed().as_millis() as u32,
                 "body timeout",
@@ -249,6 +262,7 @@ async fn finalize(
         Ok(Err(_)) => {
             let mut r = CheckResult::error_with_elapsed(
                 target_id,
+                org_id,
                 started_at,
                 start.elapsed().as_millis() as u32,
                 "body",
@@ -264,6 +278,7 @@ async fn finalize(
         Err(_) => {
             let mut r = CheckResult::error_with_elapsed(
                 target_id,
+                org_id,
                 started_at,
                 start.elapsed().as_millis() as u32,
                 "decode",
@@ -297,6 +312,7 @@ async fn finalize(
 
     CheckResult {
         target_id,
+        org_id,
         timestamp: started_at,
         status,
         duration_ms,

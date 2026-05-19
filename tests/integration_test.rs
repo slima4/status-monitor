@@ -23,7 +23,7 @@ async fn http_check_returns_up_on_200() {
     let url = Url::parse(&format!("http://{addr}/health")).unwrap();
     let check = default_http_check(url, ExpectedStatus::Exact(200));
 
-    let result = execute_http_check(Uuid::now_v7(), &check, &client).await;
+    let result = execute_http_check(Uuid::now_v7(), uuid::Uuid::nil(), &check, &client).await;
 
     assert_eq!(result.status, CheckStatus::Up);
     assert_eq!(result.response_code, Some(200));
@@ -43,7 +43,7 @@ async fn http_check_returns_down_on_unexpected_status() {
     let url = Url::parse(&format!("http://{addr}/broken")).unwrap();
     let check = default_http_check(url, ExpectedStatus::Exact(200));
 
-    let result = execute_http_check(Uuid::now_v7(), &check, &client).await;
+    let result = execute_http_check(Uuid::now_v7(), uuid::Uuid::nil(), &check, &client).await;
 
     assert_eq!(result.status, CheckStatus::Down);
     assert_eq!(result.response_code, Some(500));
@@ -59,7 +59,7 @@ async fn http_check_status_range_matches() {
     let url = Url::parse(&format!("http://{addr}/")).unwrap();
     let check = default_http_check(url, ExpectedStatus::Range { min: 200, max: 299 });
 
-    let result = execute_http_check(Uuid::now_v7(), &check, &client).await;
+    let result = execute_http_check(Uuid::now_v7(), uuid::Uuid::nil(), &check, &client).await;
 
     assert_eq!(result.status, CheckStatus::Up);
     assert_eq!(result.response_code, Some(202));
@@ -75,7 +75,7 @@ async fn http_check_body_match_failure_is_down() {
     let mut check = default_http_check(url, ExpectedStatus::Exact(200));
     check.expected_body_contains = Some("goodbye".into());
 
-    let result = execute_http_check(Uuid::now_v7(), &check, &client).await;
+    let result = execute_http_check(Uuid::now_v7(), uuid::Uuid::nil(), &check, &client).await;
 
     assert_eq!(result.status, CheckStatus::Down);
 }
@@ -86,7 +86,7 @@ async fn http_check_connection_refused_is_error() {
     let url = Url::parse("http://127.0.0.1:1/").unwrap();
     let check = default_http_check(url, ExpectedStatus::Exact(200));
 
-    let result = execute_http_check(Uuid::now_v7(), &check, &client).await;
+    let result = execute_http_check(Uuid::now_v7(), uuid::Uuid::nil(), &check, &client).await;
 
     assert_eq!(result.status, CheckStatus::Error);
     assert!(result.error.is_some());
@@ -100,7 +100,7 @@ async fn http_check_dns_failure_is_error() {
     check.timeout = Duration::from_millis(500);
 
     let started = std::time::Instant::now();
-    let result = execute_http_check(Uuid::now_v7(), &check, &client).await;
+    let result = execute_http_check(Uuid::now_v7(), uuid::Uuid::nil(), &check, &client).await;
     let elapsed = started.elapsed();
 
     assert_eq!(result.status, CheckStatus::Error);
@@ -129,7 +129,7 @@ async fn http_check_total_timeout_is_error() {
     check.timeout = Duration::from_millis(150);
 
     let started = std::time::Instant::now();
-    let result = execute_http_check(Uuid::now_v7(), &check, &client).await;
+    let result = execute_http_check(Uuid::now_v7(), uuid::Uuid::nil(), &check, &client).await;
     let elapsed = started.elapsed();
 
     assert_eq!(result.status, CheckStatus::Error);
@@ -150,7 +150,7 @@ async fn in_memory_sink_collects_results() {
     let url = Url::parse(&format!("http://{addr}/")).unwrap();
     let check = default_http_check(url, ExpectedStatus::Exact(200));
 
-    let result = execute_http_check(Uuid::now_v7(), &check, &client).await;
+    let result = execute_http_check(Uuid::now_v7(), uuid::Uuid::nil(), &check, &client).await;
     sink.write_batch(&[result]).await.unwrap();
 
     assert_eq!(sink.len(), 1);
@@ -182,7 +182,7 @@ async fn http_check_follows_redirect_to_up() {
     check.follow_redirects = true;
     check.max_redirects = 5;
 
-    let result = execute_http_check(Uuid::now_v7(), &check, &client).await;
+    let result = execute_http_check(Uuid::now_v7(), uuid::Uuid::nil(), &check, &client).await;
 
     assert_eq!(result.status, CheckStatus::Up);
     assert_eq!(result.response_code, Some(200));
@@ -202,7 +202,7 @@ async fn http_check_redirect_not_followed_is_down() {
     // default_http_check leaves follow_redirects = false.
     let check = default_http_check(url, ExpectedStatus::Exact(200));
 
-    let result = execute_http_check(Uuid::now_v7(), &check, &client).await;
+    let result = execute_http_check(Uuid::now_v7(), uuid::Uuid::nil(), &check, &client).await;
 
     assert_eq!(result.status, CheckStatus::Down);
     assert_eq!(result.response_code, Some(301));
@@ -226,7 +226,7 @@ async fn http_check_follows_redirect_chain_within_budget() {
     check.follow_redirects = true;
     check.max_redirects = 5;
 
-    let result = execute_http_check(Uuid::now_v7(), &check, &client).await;
+    let result = execute_http_check(Uuid::now_v7(), uuid::Uuid::nil(), &check, &client).await;
 
     assert_eq!(result.status, CheckStatus::Up);
     assert_eq!(result.response_code, Some(200));
@@ -243,7 +243,7 @@ async fn http_check_redirect_loop_hits_budget() {
     check.follow_redirects = true;
     check.max_redirects = 2;
 
-    let result = execute_http_check(Uuid::now_v7(), &check, &client).await;
+    let result = execute_http_check(Uuid::now_v7(), uuid::Uuid::nil(), &check, &client).await;
 
     assert_eq!(result.status, CheckStatus::Error);
     assert_eq!(result.error.as_deref(), Some("too many redirects"));
@@ -274,7 +274,7 @@ async fn http_check_307_preserves_method_and_body() {
     check.follow_redirects = true;
     check.max_redirects = 5;
 
-    let result = execute_http_check(Uuid::now_v7(), &check, &client).await;
+    let result = execute_http_check(Uuid::now_v7(), uuid::Uuid::nil(), &check, &client).await;
 
     assert_eq!(result.status, CheckStatus::Up, "307 must keep POST + body");
     assert_eq!(result.response_code, Some(200));
@@ -316,11 +316,39 @@ async fn http_check_strips_credentials_cross_origin() {
     check.follow_redirects = true;
     check.max_redirects = 5;
 
-    let result = execute_http_check(Uuid::now_v7(), &check, &client).await;
+    let result = execute_http_check(Uuid::now_v7(), uuid::Uuid::nil(), &check, &client).await;
 
     assert_eq!(
         result.status,
         CheckStatus::Up,
         "bearer token must not cross to a foreign origin"
     );
+}
+
+/// Regression for the tenant-isolation write bug: `worker::execute` (and the
+/// per-protocol check fns it dispatches to) must stamp the *passed* org_id
+/// onto the produced `CheckResult`. The live-CH `tenant_isolation_test` also
+/// covers this but is `#[ignore]`d — this is the fast, CI-visible guard. A
+/// distinct non-nil org is used so it can't pass by coincidence with a
+/// defaulted/zeroed field.
+#[tokio::test]
+async fn execute_stamps_passed_org_id_on_result() {
+    let app = Router::new().route("/health", get(|| async { "pong" }));
+    let addr = spawn_router(app).await;
+
+    let client = test_client();
+    let url = Url::parse(&format!("http://{addr}/health")).unwrap();
+    let check = default_http_check(url, ExpectedStatus::Exact(200));
+    let spec = status_monitor::domain::CheckSpec::Http(check);
+
+    let target_id = Uuid::now_v7();
+    let org_id = Uuid::now_v7();
+    let result = status_monitor::worker::execute(target_id, org_id, &spec, &client).await;
+
+    assert_eq!(result.status, CheckStatus::Up);
+    assert_eq!(
+        result.org_id, org_id,
+        "worker::execute must thread the passed org_id onto the CheckResult"
+    );
+    assert_eq!(result.target_id, target_id);
 }

@@ -6,6 +6,10 @@ use uuid::Uuid;
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct CheckResult {
     pub target_id: Uuid,
+    /// Owning tenant of the target. Required (no default) so the type
+    /// system forces every result to carry the real org — a wrong/missing
+    /// org silently mis-files results under another tenant.
+    pub org_id: Uuid,
     pub timestamp: DateTime<Utc>,
     pub status: CheckStatus,
     pub duration_ms: u32,
@@ -19,18 +23,20 @@ pub struct CheckResult {
 }
 
 impl CheckResult {
-    pub fn error(target_id: Uuid, reason: impl Into<String>) -> Self {
-        Self::error_with_elapsed(target_id, Utc::now(), 0, reason)
+    pub fn error(target_id: Uuid, org_id: Uuid, reason: impl Into<String>) -> Self {
+        Self::error_with_elapsed(target_id, org_id, Utc::now(), 0, reason)
     }
 
     pub fn error_with_elapsed(
         target_id: Uuid,
+        org_id: Uuid,
         timestamp: DateTime<Utc>,
         duration_ms: u32,
         reason: impl Into<String>,
     ) -> Self {
         Self {
             target_id,
+            org_id,
             timestamp,
             status: CheckStatus::Error,
             duration_ms,

@@ -471,7 +471,7 @@ pub async fn test_check(
     let guard = ssrf_guard(&state);
     validate_check(&req.check, &guard)?;
     check_abuse(&state, org, &req.check)?;
-    let result = crate::worker::execute(Uuid::nil(), &req.check, &state.http_clients).await;
+    let result = crate::worker::execute(Uuid::nil(), org.0, &req.check, &state.http_clients).await;
     let matched_expectations = matches!(result.status, crate::domain::CheckStatus::Up);
     Ok(Json(TestResponse {
         matched_expectations,
@@ -526,7 +526,7 @@ pub async fn check_now(
     let host = host_for_spec(&target.check);
     let result = state
         .worker_pool
-        .run_once(target.id, &target.check, &host, q.force)
+        .run_once(target.id, org.0, &target.check, &host, q.force)
         .await
         .ok_or_else(|| {
             AppError::unprocessable(

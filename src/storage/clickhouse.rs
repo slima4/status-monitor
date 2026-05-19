@@ -151,15 +151,11 @@ pub(crate) async fn count_org_rows(client: &Client, table: &str, org_id: Uuid) -
 
 pub struct ClickhouseResultSink {
     client: Client,
-    default_org_id: OrgId,
 }
 
 impl ClickhouseResultSink {
-    pub fn from_client(client: Client, default_org_id: OrgId) -> Self {
-        Self {
-            client,
-            default_org_id,
-        }
+    pub fn from_client(client: Client) -> Self {
+        Self { client }
     }
 
     async fn write_once(
@@ -180,10 +176,8 @@ impl ResultSink for ClickhouseResultSink {
         if results.is_empty() {
             return Ok(());
         }
-        let rows: Vec<CheckResultRow<'_>> = results
-            .iter()
-            .map(|r| CheckResultRow::from_result(r, self.default_org_id))
-            .collect();
+        let rows: Vec<CheckResultRow<'_>> =
+            results.iter().map(CheckResultRow::from_result).collect();
 
         let backoff = ExponentialBackoffBuilder::new()
             .with_initial_interval(Duration::from_millis(100))
@@ -231,9 +225,9 @@ struct CheckResultRow<'a> {
 }
 
 impl<'a> CheckResultRow<'a> {
-    fn from_result(r: &'a CheckResult, org_id: OrgId) -> Self {
+    fn from_result(r: &'a CheckResult) -> Self {
         Self {
-            org_id: org_id.0,
+            org_id: r.org_id,
             target_id: r.target_id,
             timestamp: r.timestamp.timestamp_millis(),
             status: r.status.as_enum8(),
@@ -332,13 +326,14 @@ struct OwnedResultRow {
     error: Option<String>,
 }
 
-fn row_to_result(row: OwnedResultRow) -> CheckResult {
+fn row_to_result(row: OwnedResultRow, org_id: Uuid) -> CheckResult {
     let timestamp: DateTime<Utc> = Utc
         .timestamp_millis_opt(row.timestamp)
         .single()
         .unwrap_or_else(Utc::now);
     CheckResult {
         target_id: row.target_id,
+        org_id,
         timestamp,
         status: CheckStatus::from_enum8(row.status),
         duration_ms: row.duration_ms,
@@ -383,7 +378,7 @@ impl ResultsStore for ClickhouseResultsStore {
             .fetch_all::<OwnedResultRow>()
             .await
             .context("clickhouse list_results")?;
-        Ok(rows.into_iter().map(row_to_result).collect())
+        Ok(rows.into_iter().map(|r| row_to_result(r, org.0)).collect())
     }
 
     async fn count_results(&self, org: OrgId, target_id: Uuid, range: TimeRange) -> Result<u64> {

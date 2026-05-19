@@ -288,6 +288,7 @@ mod tests {
         use uuid::Uuid;
         let r = |s: CheckStatus| CheckResult {
             target_id: Uuid::nil(),
+            org_id: Uuid::nil(),
             timestamp: Utc::now(),
             status: s,
             duration_ms: 1,

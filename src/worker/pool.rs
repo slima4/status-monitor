@@ -172,6 +172,7 @@ impl WorkerPool {
     pub async fn run_once(
         &self,
         target_id: Uuid,
+        org_id: Uuid,
         spec: &CheckSpec,
         host: &str,
         force: bool,
@@ -180,7 +181,7 @@ impl WorkerPool {
         if !force && breaker.state() == BreakerState::Open && !breaker.allow() {
             return None;
         }
-        let result = crate::worker::execute(target_id, spec, &self.http_clients).await;
+        let result = crate::worker::execute(target_id, org_id, spec, &self.http_clients).await;
         breaker.record(result.status);
         Some(result)
     }
@@ -209,12 +210,14 @@ impl WorkerPool {
 
             if !breaker.allow() {
                 counter!(names::CHECK_ERRORS, "kind" => "circuit_open").increment(1);
-                let result = CheckResult::error(task.target.id, CIRCUIT_OPEN_REASON);
+                let result = CheckResult::error(task.target.id, org_id.0, CIRCUIT_OPEN_REASON);
                 fanout.dispatch(target, org_id, result);
                 return;
             }
 
-            let result = crate::worker::execute(task.target.id, &task.target.check, &clients).await;
+            let result =
+                crate::worker::execute(task.target.id, org_id.0, &task.target.check, &clients)
+                    .await;
             breaker.record(result.status);
             record_metrics(&result);
             fanout.dispatch(target, org_id, result);

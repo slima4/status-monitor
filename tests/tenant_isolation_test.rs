@@ -44,9 +44,10 @@ fn target_named(name: &str) -> NewTarget {
     }
 }
 
-fn ok_result(target_id: Uuid) -> CheckResult {
+fn ok_result(target_id: Uuid, org_id: Uuid) -> CheckResult {
     CheckResult {
         target_id,
+        org_id,
         timestamp: Utc::now(),
         status: CheckStatus::Up,
         duration_ms: 42,
@@ -72,27 +73,23 @@ struct Tenant {
     user: UserId,
     org: OrgId,
     maintenance_store: PgMaintenanceStore,
-    result_sink: ClickhouseResultSink,
 }
 
-async fn provision_tenant(pool: &PgPool, ch: &clickhouse::Client, label: &str) -> Tenant {
+async fn provision_tenant(pool: &PgPool, label: &str) -> Tenant {
     let user = make_user(pool, "isol").await;
     let org = create_org_with_owner(pool, user, &unique_slug(label), label, 3)
         .await
         .unwrap()
         .expect("provision org");
-    // `maintenance_store` and the write-side `result_sink` are still
-    // org-stamped at construction; the read repos under test
-    // (`PostgresTargetStore` / `ClickhouseResultsStore`) take `org` per call
-    // and are shared, so a single store queried with the wrong org must
-    // return nothing.
+    // `maintenance_store` is still org-stamped at construction; the read
+    // repos under test (`PostgresTargetStore` / `ClickhouseResultsStore`)
+    // and the result sink take `org` per call / per result and are shared,
+    // so a single store queried with the wrong org must return nothing.
     let maintenance_store = PgMaintenanceStore::new(pool.clone(), org.id);
-    let result_sink = ClickhouseResultSink::from_client(ch.clone(), org.id);
     Tenant {
         user,
         org: org.id,
         maintenance_store,
-        result_sink,
     }
 }
 
@@ -139,8 +136,8 @@ async fn two_tenants_never_see_each_others_data() {
         return;
     };
 
-    let a = provision_tenant(&pool, &ch, "tenant-a").await;
-    let b = provision_tenant(&pool, &ch, "tenant-b").await;
+    let a = provision_tenant(&pool, "tenant-a").await;
+    let b = provision_tenant(&pool, "tenant-b").await;
 
     // One shared store per backend. Isolation must come from the `org`
     // argument, not from a per-tenant construction — that is exactly the
@@ -148,6 +145,11 @@ async fn two_tenants_never_see_each_others_data() {
     // the org via `CurrentOrg`).
     let target_store = PostgresTargetStore::from_pool(pool.clone(), None);
     let results_store = ClickhouseResultsStore::from_client(ch.clone());
+    // ONE shared sink (production shape: `AppState` holds a single sink).
+    // Isolation must come from the per-result `org_id`, NOT from a
+    // per-tenant sink construction — a per-tenant sink masked the
+    // write-path org-stamping bug (results landed under default_org_id).
+    let result_sink = ClickhouseResultSink::from_client(ch.clone());
 
     // ── Targets ──────────────────────────────────────────────────────────
     let target_a = target_store
@@ -245,12 +247,14 @@ async fn two_tenants_never_see_each_others_data() {
     );
 
     // ── ClickHouse results ───────────────────────────────────────────────
-    a.result_sink
-        .write_batch(&[ok_result(target_a.id)])
+    // Both written through the SAME shared sink; isolation must come from
+    // the per-result org_id alone.
+    result_sink
+        .write_batch(&[ok_result(target_a.id, a.org.0)])
         .await
         .expect("ch insert a");
-    b.result_sink
-        .write_batch(&[ok_result(target_b.id)])
+    result_sink
+        .write_batch(&[ok_result(target_b.id, b.org.0)])
         .await
         .expect("ch insert b");
 
@@ -263,6 +267,19 @@ async fn two_tenants_never_see_each_others_data() {
     assert!(
         !a_results.is_empty(),
         "results_store under org A must see A's own row"
+    );
+    // Regression (the write-path bug): the persisted row must carry the
+    // TARGET's org, not a sink-construction default. A shared sink that
+    // stamped a default org would put A's result under the wrong tenant
+    // and this would fail.
+    assert!(
+        a_results.iter().any(|r| r.target_id == target_a.id),
+        "the row read back under org A must be the one written for target_a \
+         (not a stray) — proves the shared sink stamped A's org, not a default"
+    );
+    assert_eq!(
+        a_results[0].org_id, a.org.0,
+        "written result must be stamped with the target's own org"
     );
     // Same store, b's target id, but org_a → 0 rows (org_id filter wins over
     // target_id match: CH rows tagged with org_b are invisible under org_a).

@@ -62,8 +62,13 @@ fn make_check(addr: SocketAddr, warn: u32, critical: u32) -> TlsCertCheck {
 #[tokio::test]
 async fn tls_cert_check_returns_up_for_valid_cert() {
     let addr = spawn_tls_server_with_validity(60).await;
-    let result =
-        execute_tls_cert_check(Uuid::now_v7(), &make_check(addr, 14, 7), &test_client()).await;
+    let result = execute_tls_cert_check(
+        Uuid::now_v7(),
+        uuid::Uuid::nil(),
+        &make_check(addr, 14, 7),
+        &test_client(),
+    )
+    .await;
     assert_eq!(result.status, CheckStatus::Up, "error={:?}", result.error);
     // Up results carry no diagnostic body — matches the convention used by
     // tcp_check / http_check.
@@ -73,8 +78,13 @@ async fn tls_cert_check_returns_up_for_valid_cert() {
 #[tokio::test]
 async fn tls_cert_check_returns_degraded_under_warn_days() {
     let addr = spawn_tls_server_with_validity(10).await;
-    let result =
-        execute_tls_cert_check(Uuid::now_v7(), &make_check(addr, 14, 7), &test_client()).await;
+    let result = execute_tls_cert_check(
+        Uuid::now_v7(),
+        uuid::Uuid::nil(),
+        &make_check(addr, 14, 7),
+        &test_client(),
+    )
+    .await;
     assert_eq!(result.status, CheckStatus::Degraded);
     let body: serde_json::Value = serde_json::from_str(result.error.as_deref().unwrap()).unwrap();
     assert!(body["days_remaining"].as_i64().unwrap() < 14);
@@ -89,16 +99,26 @@ async fn tls_cert_check_returns_degraded_under_warn_days() {
 #[tokio::test]
 async fn tls_cert_check_returns_down_under_critical_days() {
     let addr = spawn_tls_server_with_validity(5).await;
-    let result =
-        execute_tls_cert_check(Uuid::now_v7(), &make_check(addr, 14, 7), &test_client()).await;
+    let result = execute_tls_cert_check(
+        Uuid::now_v7(),
+        uuid::Uuid::nil(),
+        &make_check(addr, 14, 7),
+        &test_client(),
+    )
+    .await;
     assert_eq!(result.status, CheckStatus::Down);
 }
 
 #[tokio::test]
 async fn tls_cert_check_returns_down_when_expired() {
     let addr = spawn_tls_server_with_validity(-1).await;
-    let result =
-        execute_tls_cert_check(Uuid::now_v7(), &make_check(addr, 14, 7), &test_client()).await;
+    let result = execute_tls_cert_check(
+        Uuid::now_v7(),
+        uuid::Uuid::nil(),
+        &make_check(addr, 14, 7),
+        &test_client(),
+    )
+    .await;
     assert_eq!(result.status, CheckStatus::Down);
     let body: serde_json::Value = serde_json::from_str(result.error.as_deref().unwrap()).unwrap();
     assert!(body["days_remaining"].as_i64().unwrap() < 0);
@@ -114,7 +134,12 @@ async fn tls_cert_check_handshake_failure_is_error() {
             let _ = listener.accept().await;
         }
     });
-    let result =
-        execute_tls_cert_check(Uuid::now_v7(), &make_check(addr, 14, 7), &test_client()).await;
+    let result = execute_tls_cert_check(
+        Uuid::now_v7(),
+        uuid::Uuid::nil(),
+        &make_check(addr, 14, 7),
+        &test_client(),
+    )
+    .await;
     assert_eq!(result.status, CheckStatus::Error);
 }

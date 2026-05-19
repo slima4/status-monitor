@@ -103,9 +103,10 @@ fn http_target(name: &str) -> NewTarget {
     }
 }
 
-fn ok_result(target_id: Uuid, secs_ago: i64) -> CheckResult {
+fn ok_result(target_id: Uuid, org_id: Uuid, secs_ago: i64) -> CheckResult {
     CheckResult {
         target_id,
+        org_id,
         timestamp: Utc::now() - chrono::Duration::seconds(secs_ago),
         status: CheckStatus::Up,
         duration_ms: 42,
@@ -150,7 +151,7 @@ async fn build_fixture() -> Option<Fixture> {
             .expect("slug fresh");
         let target_store =
             Arc::new(PostgresTargetStore::from_pool(pool.clone(), None)) as Arc<dyn TargetStore>;
-        let sink = ClickhouseResultSink::from_client(ch.clone(), org.id);
+        let sink = ClickhouseResultSink::from_client(ch.clone());
 
         for j in 0..COMPONENTS_PER_ORG {
             let t = target_store
@@ -158,7 +159,7 @@ async fn build_fixture() -> Option<Fixture> {
                 .await
                 .expect("create target");
             let rows: Vec<CheckResult> = (0..RESULTS_PER_COMPONENT)
-                .map(|k| ok_result(t.id, (k as i64) * 30))
+                .map(|k| ok_result(t.id, org.id.0, (k as i64) * 30))
                 .collect();
             sink.write_batch(&rows).await.expect("ch insert");
         }

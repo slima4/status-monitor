@@ -504,6 +504,7 @@ mod tests {
     fn result(target_id: Uuid, when: DateTime<Utc>, status: CheckStatus) -> CheckResult {
         CheckResult {
             target_id,
+            org_id: Uuid::nil(),
             timestamp: when,
             status,
             duration_ms: 1,
