@@ -20,6 +20,9 @@ claude.md
 # Local specs (not tracked in vcs)
 /specs/
 
+# Internal ops runbooks (local-only; operational notes, not shipped docs)
+/runbooks/
+
 # Tailwind standalone CLI (downloaded by scripts/fetch-tailwind.sh)
 /bin/tailwindcss
 

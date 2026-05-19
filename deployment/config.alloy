@@ -45,3 +45,77 @@ prometheus.remote_write "grafana_cloud" {
     instance = coalesce(sys.env("GRAFANA_CLOUD_INSTANCE"), "status-monitor"),
   }
 }
+
+// ---------------------------------------------------------------------
+// Logs → Grafana Cloud Loki (opt-in; INERT until the LOKI_* env is set).
+//
+// Tails the application container's stdout/stderr through the Docker
+// API and ships it to Grafana Cloud Loki. Container discovery needs the
+// Docker socket, mounted read-only into this sidecar in
+// docker-compose.yml. Only the status-monitor container is shipped — a
+// discovery.relabel `keep` drops postgres / clickhouse / caddy / alloy
+// so Loki ingest stays scoped and cheap.
+//
+// Inert by design: when GRAFANA_CLOUD_LOKI_URL is unset the write
+// endpoint resolves to an unreachable loopback placeholder, so the
+// pipeline just fails fast and drops batches (bounded retry/backoff).
+// The metrics pipeline above is a wholly independent graph and is never
+// affected. To activate: set the LOKI_* env (deploy-managed, same .env
+// contract as metrics) AND add the `logs:write` scope to the shared
+// access-policy token.
+//   GRAFANA_CLOUD_LOKI_URL   e.g. https://logs-prod-XX.grafana.net/loki/api/v1/push
+//   GRAFANA_CLOUD_LOKI_USER  the numeric Loki instance / stack id
+//   GRAFANA_CLOUD_API_TOKEN  the SAME token as metrics, with logs:write added
+
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+  // Containers don't churn on this single box — poll slowly so the
+  // (effectively host-root) Docker API call isn't made every 60s.
+  refresh_interval = "5m"
+}
+
+// Keep ONLY the app container (compose service label is exact and
+// survives a project/container rename); tidy the noisy docker meta
+// labels down to stable {container,job} before the logs are shipped.
+discovery.relabel "status_monitor_only" {
+  targets = discovery.docker.containers.targets
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    regex         = "status-monitor"
+    action        = "keep"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "container"
+  }
+
+  rule {
+    target_label = "job"
+    replacement  = "status-monitor"
+  }
+}
+
+loki.source.docker "status_monitor" {
+  host       = "unix:///var/run/docker.sock"
+  targets    = discovery.relabel.status_monitor_only.output
+  labels     = {}
+  forward_to = [loki.write.grafana_cloud.receiver]
+}
+
+loki.write "grafana_cloud" {
+  endpoint {
+    // Unreachable placeholder when unset → pipeline inert, metrics safe.
+    url = coalesce(sys.env("GRAFANA_CLOUD_LOKI_URL"), "http://127.0.0.1:1/loki/api/v1/push")
+
+    basic_auth {
+      username = coalesce(sys.env("GRAFANA_CLOUD_LOKI_USER"), "0")
+      password = coalesce(sys.env("GRAFANA_CLOUD_API_TOKEN"), "unset")
+    }
+  }
+
+  external_labels = {
+    instance = coalesce(sys.env("GRAFANA_CLOUD_INSTANCE"), "status-monitor"),
+  }
+}

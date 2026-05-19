@@ -189,12 +189,23 @@ services:
       GRAFANA_CLOUD_PROM_URL: ${GRAFANA_CLOUD_PROM_URL}
       GRAFANA_CLOUD_PROM_USER: ${GRAFANA_CLOUD_PROM_USER}
       GRAFANA_CLOUD_API_TOKEN: ${GRAFANA_CLOUD_API_TOKEN}
+      # Loki log shipping (optional). Empty default → config.alloy
+      # resolves an unreachable placeholder and the logs pipeline stays
+      # inert; metrics are unaffected. Token is reused from above.
+      GRAFANA_CLOUD_LOKI_URL: ${GRAFANA_CLOUD_LOKI_URL:-}
+      GRAFANA_CLOUD_LOKI_USER: ${GRAFANA_CLOUD_LOKI_USER:-}
       # Distinguishes this sender in Grafana Cloud; set per host if you
       # run more than one so series don't collide.
       GRAFANA_CLOUD_INSTANCE: ${GRAFANA_CLOUD_INSTANCE:-status-monitor}
     volumes:
       - ./config.alloy:/etc/alloy/config.alloy:ro
       - alloy_data:/var/lib/alloy/data
+      # Read-only Docker socket: container discovery for loki.source.docker
+      # (logs pipeline). SECURITY: `:ro` does NOT restrict the Docker API —
+      # socket access is effectively host-root. Accepted here (single
+      # operator-controlled box, pinned upstream Alloy image, metrics
+      # profile only). Rationale in runbooks/grafana-cloud.md.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     depends_on:
       status-monitor:
         condition: service_started

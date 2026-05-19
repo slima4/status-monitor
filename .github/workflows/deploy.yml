@@ -23,11 +23,25 @@ name: deploy
 #                       — pins the server identity so the run cannot be MITM'd
 #                       (no StrictHostKeyChecking=off anywhere below)
 #
-# Optional repo secrets — when all three are set, the deploy upserts them
-# into the server .env and brings up the metrics sidecar; unset = skipped:
-#   GRAFANA_CLOUD_PROM_URL   Grafana Cloud remote_write endpoint
-#   GRAFANA_CLOUD_PROM_USER  Grafana Cloud numeric instance id
-#   GRAFANA_CLOUD_API_TOKEN  token scoped metrics:write (sensitive)
+# Optional repo secrets — each group is upserted into the server .env
+# only when its values are all set; unset = that signal stays off.
+# One access-policy token (GRAFANA_CLOUD_API_TOKEN) backs all three
+# signals — it just needs the matching scopes (metrics:write +
+# traces:write + logs:write) on the policy.
+#   Metrics (Alloy sidecar → Grafana Cloud Prometheus):
+#     GRAFANA_CLOUD_PROM_URL    remote_write endpoint
+#     GRAFANA_CLOUD_PROM_USER   Prometheus numeric instance id
+#     GRAFANA_CLOUD_API_TOKEN   access-policy token (sensitive)
+#   Traces (in-app OTLP/HTTP → Grafana Cloud Tempo):
+#     GRAFANA_OTLP_ENDPOINT     OTLP gateway base url
+#     GRAFANA_OTLP_INSTANCE_ID  OTLP numeric instance id (≠ Prom id)
+#     GRAFANA_OTLP_API_TOKEN    access-policy token (sensitive)
+#   Logs (Alloy sidecar → Grafana Cloud Loki; rides the metrics sidecar):
+#     GRAFANA_CLOUD_LOKI_URL    Loki push endpoint
+#     GRAFANA_CLOUD_LOKI_USER   Loki numeric instance id (≠ Prom id)
+#     (token: reuses GRAFANA_CLOUD_API_TOKEN, needs logs:write)
+# Non-secret repo variable: RUST_LOG (log/trace verbosity, redeploy
+# applies it with no rebuild).
 
 on:
   workflow_dispatch:
@@ -98,6 +112,28 @@ jobs:
           echo "::error::ci did not conclude for ${HEAD_SHA} within ~6m — blocking autodeploy"
           exit 1
 
+      - name: validate image tag
+        run: |
+          set -euo pipefail
+          # The classic footgun: a SHORT git sha as image_tag. The .env
+          # image bump would write a tag GHCR never published; the pull
+          # 404s and the deploy aborts AFTER .env was already rewritten,
+          # leaving the box unable to recreate the app until that line is
+          # hand-fixed. release-image only ever publishes the full 40-hex
+          # sha-<40>. Non-sha tags (semver, latest) are unconstrained and
+          # pass through. The auto path's sha-<head_sha> is full-length,
+          # so this also fails closed if a runner ever yields a short sha.
+          [ -n "$IMAGE_TAG" ] || { echo "::error::image_tag resolved empty"; exit 1; }
+          case "$IMAGE_TAG" in
+            sha-*)
+              if ! printf '%s' "${IMAGE_TAG#sha-}" | grep -qiE '^[0-9a-f]{40}$'; then
+                echo "::error::image_tag '$IMAGE_TAG' is a short/invalid sha — it must be sha-<full 40-hex commit sha> (release-image publishes only that tag). Re-dispatch with the full sha."
+                exit 1
+              fi
+              ;;
+          esac
+          echo "image tag ok: $IMAGE_TAG"
+
       - name: load ssh key + pinned host key
         run: |
           install -m 700 -d ~/.ssh
@@ -114,10 +150,10 @@ jobs:
           # env like NEW_IMAGE — GitHub masks registered secret values in
           # the run log; no `set -x` is enabled around them. Unset secrets
           # pass through as empty and the remote skips the matching block.
-          # Two independent paths: the metrics trio drives the Alloy
-          # sidecar; the OTLP trio drives in-app trace export. Tokens are
-          # written to the server .env (same trust tier as the KEK already
-          # there), never committed.
+          # Independent signals: the metrics trio + Loki pair drive the
+          # Alloy sidecar; the OTLP trio drives in-app trace export.
+          # Tokens are written to the server .env (same trust tier as the
+          # KEK already there), never committed.
           ssh -T -i ~/.ssh/id_deploy -o IdentitiesOnly=yes \
               "${DEPLOY_USER}@${DEPLOY_HOST}" \
               "NEW_IMAGE='${NEW_IMAGE}' REMIGRATE='${REMIGRATE}' HEAD_SHA='${HEAD_SHA}' \
@@ -127,6 +163,8 @@ jobs:
                GRAFANA_OTLP_ENDPOINT='${{ secrets.GRAFANA_OTLP_ENDPOINT }}' \
                GRAFANA_OTLP_INSTANCE_ID='${{ secrets.GRAFANA_OTLP_INSTANCE_ID }}' \
                GRAFANA_OTLP_API_TOKEN='${{ secrets.GRAFANA_OTLP_API_TOKEN }}' \
+               GRAFANA_CLOUD_LOKI_URL='${{ secrets.GRAFANA_CLOUD_LOKI_URL }}' \
+               GRAFANA_CLOUD_LOKI_USER='${{ secrets.GRAFANA_CLOUD_LOKI_USER }}' \
                RUST_LOG='${{ vars.RUST_LOG }}' \
                bash -s" <<'REMOTE'
           set -euo pipefail
@@ -220,6 +258,45 @@ jobs:
             done
             # No prune here — the image-bump prune above already bounds
             # .env.bak.* to the 10 newest each deploy.
+          fi
+
+          # --- managed Grafana Cloud Loki env (optional) --------------------
+          # Logs ride the same Alloy sidecar as metrics. The access-policy
+          # token is shared (already upserted above as
+          # GRAFANA_CLOUD_API_TOKEN — it only needs logs:write added on
+          # the policy), so this block carries just the Loki URL + numeric
+          # instance id. Same write contract as the metrics block: cp
+          # backup FIRST, single awk reprint (never grep -v | append |
+          # mv), ENVIRON values, line-count bound, exactly-once verify.
+          # Gated on both being set; the Alloy logs pipeline stays inert
+          # (config.alloy resolves an unreachable placeholder URL) until
+          # they are, so a half-config never disturbs metrics.
+          if [ -n "${GRAFANA_CLOUD_LOKI_URL:-}" ] \
+             && [ -n "${GRAFANA_CLOUD_LOKI_USER:-}" ]; then
+            cp .env ".env.bak.$(date +%s).loki"
+            before=$(awk 'END { print NR }' .env)
+            awk '
+              BEGIN {
+                m["GRAFANA_CLOUD_LOKI_URL"]  = ENVIRON["GRAFANA_CLOUD_LOKI_URL"]
+                m["GRAFANA_CLOUD_LOKI_USER"] = ENVIRON["GRAFANA_CLOUD_LOKI_USER"]
+              }
+              {
+                for (k in m) if ($0 ~ ("^" k "=")) { print k "=" m[k]; seen[k] = 1; next }
+                print
+              }
+              END { for (k in m) if (!seen[k]) print k "=" m[k] }
+            ' .env > .env.next
+            mv .env.next .env
+            after=$(awk 'END { print NR }' .env)
+            # 0..+2 lines may be appended (both keys absent before).
+            if [ "$after" -lt "$before" ] || [ "$after" -gt "$((before + 2))" ]; then
+              echo "::error::.env line count out of range after loki upsert (${before} -> ${after})"
+              exit 1
+            fi
+            for k in GRAFANA_CLOUD_LOKI_URL GRAFANA_CLOUD_LOKI_USER; do
+              n=$(grep -cxF "${k}=$(printenv "$k")" .env || true)
+              [ "$n" = 1 ] || { echo "::error::${k} not written exactly once to .env (count=${n})"; exit 1; }
+            done
           fi
 
           # --- managed in-app OTLP trace env (optional) ---------------------
@@ -330,13 +407,15 @@ jobs:
             docker compose up -d --no-build status-monitor
           fi
 
-          # Metrics sidecar: profile-gated, scoped to `alloy` so the app /
-          # postgres / caddy are never recreated as a side effect. Same
-          # all-three-creds gate as the .env upsert. --force-recreate so a
-          # credential rotation in this deploy actually takes effect
-          # (without it `up -d` keeps the old container + stale env); it
-          # recreates ONLY alloy — a few seconds of metrics gap, no app
-          # impact.
+          # Metrics+logs sidecar: profile-gated, scoped to `alloy` so the
+          # app / postgres / caddy are never recreated as a side effect.
+          # Same all-three-metrics-creds gate as the .env upsert (logs ride
+          # this same container, so the metrics trio is the prerequisite —
+          # a Loki-only config never starts the sidecar). --force-recreate
+          # so a credential rotation OR a newly-set Loki pair in this
+          # deploy actually takes effect (without it `up -d` keeps the old
+          # container + stale env); it recreates ONLY alloy — a few seconds
+          # of metrics gap, no app impact.
           if [ -n "${GRAFANA_CLOUD_PROM_URL:-}" ] \
              && [ -n "${GRAFANA_CLOUD_PROM_USER:-}" ] \
              && [ -n "${GRAFANA_CLOUD_API_TOKEN:-}" ]; then
