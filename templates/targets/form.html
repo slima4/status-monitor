@@ -85,18 +85,19 @@
       </label>
     </fieldset>
 
-    <details class="group space-y-6"{% if form.mode == "edit" %} open{% endif %}>
-      <summary class="flex cursor-pointer select-none list-none items-center justify-between gap-3 rounded-xl border-2 border-slate-200 bg-white px-4 py-3 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 [&::-webkit-details-marker]:hidden">
+    <details class="sticker-disclosure space-y-6">
+      <summary>
         <span class="flex items-center gap-3">
-          <span class="grid h-8 w-8 place-items-center rounded-lg bg-slate-100 text-base text-slate-500">⚙</span>
+          <span class="sticker-disclosure__icon">⚙</span>
           <span class="flex flex-col text-left">
             <span class="text-sm font-semibold text-slate-700">Advanced settings</span>
             <span class="text-xs text-slate-500">Check type, request options, headers, auth, TLS — optional</span>
           </span>
         </span>
-        <span class="text-slate-400 transition-transform duration-200 group-open:rotate-180">▾</span>
+        <span class="sticker-disclosure__chevron">▾</span>
       </summary>
 
+    <div class="sticker-disclosure__body space-y-6">
     <fieldset class="space-y-3 sticker-card p-5">
       <legend class="px-1 text-sm font-medium">Check type</legend>
       <div class="flex gap-4">
@@ -255,6 +256,7 @@
         </label>
       </div>
     </fieldset>
+    </div>
     </details>
 
     <fieldset class="space-y-3 sticker-card p-5">
