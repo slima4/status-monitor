@@ -13,25 +13,13 @@ variable "grafana_auth" {
   sensitive   = true
 }
 
-# Grafana Cloud auto-provisions these datasources; names follow
-# grafanacloud-<stack-slug>-{prom,logs,traces}. Defaults match this
-# stack (slug 'slima4'); override per workspace if the slug differs.
+# Grafana Cloud auto-provisions this datasource; the name follows
+# grafanacloud-<stack-slug>-prom. Default matches this stack (slug
+# 'slima4'); override per workspace if the slug differs.
 variable "prometheus_datasource_name" {
   type        = string
   description = "Name of the Grafana Cloud Prometheus datasource"
   default     = "grafanacloud-slima4-prom"
-}
-
-variable "loki_datasource_name" {
-  type        = string
-  description = "Name of the Grafana Cloud Loki datasource (carries the trace_id derived field)"
-  default     = "grafanacloud-slima4-logs"
-}
-
-variable "tempo_datasource_name" {
-  type        = string
-  description = "Name of the Grafana Cloud Tempo datasource (derived-field link target)"
-  default     = "grafanacloud-slima4-traces"
 }
 
 variable "alert_email" {

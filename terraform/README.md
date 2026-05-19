@@ -21,16 +21,10 @@ State + secrets live in **HCP Terraform Cloud** — never in this repo.
   in, they cause perpetual plan drift). This JSON is the single source
   — the metric-name drift gate
   (`dashboards/grafana/check-metric-names.sh`) reads it from here.
-- `derived_field.tf` — the Loki→Tempo pivot: a `trace_id` derived
-  field on the Loki datasource linking the access-log
-  `"trace_id":"<hex>"` token to the matching Tempo trace. Layered onto
-  Loki's existing jsonData via `merge()` (read-back, not replace);
-  `grafana_data_source_config` manages only jsonData, never the
-  Cloud-owned connection/auth.
 
 Not yet in Terraform (still one-time UI / documented in
-`runbooks/grafana-cloud.md`): access policies/scopes, Synthetic
-Monitoring, deploy-annotation secrets.
+`runbooks/grafana-cloud.md`): the Loki→Tempo derived field, access
+policies/scopes, Synthetic Monitoring, deploy-annotation secrets.
 When one stabilises, add it as real HCL behind a
 `count = var.enable_x ? 1 : 0` toggle — not as commented-out source.
 
@@ -76,37 +70,24 @@ in-place updates — but any UI edit to notification policies is drift
 silently reverted on the next `apply`. `plan` renders a policy change
 as an in-place update, never a destroy; read it.
 
-**Apply** — the stack is bootstrapped; steady state is just:
+**Apply order** (gap-closer first):
 
 ```bash
-terraform plan        # read every line
+# 1. Alerts + notification — additive, low risk, closes the
+#    silent-data-loss gap.
+terraform apply \
+  -target=grafana_folder.obs \
+  -target=grafana_rule_group.pipeline \
+  -target=grafana_contact_point.default \
+  -target=grafana_notification_policy.root
+
+# 2. Steady state thereafter (no file() / no Cloud datasource
+#    takeover in this config, so a full apply is safe):
 terraform apply
 ```
 
-No resource here takes over a Grafana-Cloud-owned connection, so a
-full apply is safe. After a rule change, confirm in Grafana →
-Alerting → Alert rules that the rules evaluate; force a check failure
-to exercise the path.
-
-**One-time precheck before the FIRST `derived_field.tf` apply** — the
-merge reads Loki's jsonData back through `data.grafana_data_source`,
-which strips `httpHeaderName*` keys. Grafana Cloud's Loki uses
-basic-auth (not header-auth), so jsonData carries no header names and
-the merge is safe — but verify once:
-
-```bash
-terraform console <<<'data.grafana_data_source.loki.json_data_encoded'
-# expect no "httpHeaderName" — if present, STOP: the write-back would
-# drop the header binding and break Loki auth.
-```
-
-For the Loki→Tempo field, then: open a log line in Explore (Loki) and
-confirm the `trace_id` value links to Tempo. **The pivot is dark
-unless the deploy keeps `status_monitor=debug` in `RUST_LOG`** — the
-`trace_id` log field is only emitted while the `http.request` span is
-recorded; drop to bare `info` and the derived field silently no-ops
-(no error). If the jump stops working, check the `RUST_LOG` repo
-variable first.
+After step 1, confirm in Grafana → Alerting → Alert rules that both
+rules evaluate; force a check failure to exercise the path.
 
 ## Notes
 
@@ -115,19 +96,9 @@ variable first.
   surface here, not in prod.
 - Don't hand-edit these resources in the Grafana UI — Terraform is the
   source of truth; a UI edit is drift, reverted on next `apply`.
-- Datasources are looked up read-only (`data.grafana_data_source.*`)
-  and only Loki's *jsonData* is layered (`grafana_data_source_config`
-  merges a derived field in). The datasource *connections* —
-  url/access/basic-auth, all Grafana-Cloud-owned — are never managed
-  here, so no apply can break the prod metrics/logs/traces pipelines,
-  **with one caveat:** if the Loki ds ever authenticated via custom
-  HTTP headers (`httpHeaderName*` in jsonData), the read-back strips
-  those names and the write-back would drop them — hence the one-time
-  precheck above. Cloud Loki uses basic-auth, so this does not apply
-  in practice.
-- The Loki ds is Grafana-Cloud-auto-provisioned; Cloud may reconcile
-  it and drop `derivedFields` between applies. Benign — the next
-  `apply` re-adds it (read-only data source, no update loop); just
-  expect `plan` to occasionally show the field re-appearing.
+- Only `data.grafana_data_source.prometheus` is read; the live Loki /
+  Tempo / Prometheus *connections* are never managed here, so no
+  apply in this config can break the prod metrics/logs/traces
+  pipelines.
 - `.terraform/`, state, `*.tfvars`, `*override.tf` are gitignored
   (state is in TFC); `.terraform.lock.hcl` is committed.
