@@ -224,6 +224,9 @@ pub async fn execute_http_check(
 }
 
 /// Collect, decode, and score the final (non-redirect) response.
+// Private probe helper: the args are inherent (identity + check + timing
+// + response + clients); grouping them would only move the tuple around.
+#[allow(clippy::too_many_arguments)]
 async fn finalize(
     target_id: Uuid,
     org_id: Uuid,
