@@ -92,6 +92,11 @@ services:
       # Dockerfile.dev apk-installs both.
       RUSTC_WRAPPER: sccache
       SCCACHE_DIR: /sccache
+      # sccache refuses incremental compilation ("incremental compilation
+      # is prohibited"); cargo's dev profile defaults CARGO_INCREMENTAL=1,
+      # which aborts even `cargo metadata` -> cargo-watch never builds.
+      # sccache's cross-build cache replaces the incremental win anyway.
+      CARGO_INCREMENTAL: "0"
     volumes:
       - .:/usr/src/status-monitor
       - cargo_registry_dev:/usr/local/cargo/registry
