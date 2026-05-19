@@ -1,0 +1,28 @@
+<?xml version="1.0"?>
+<!--
+  Authoritative `default` user password for status-monitor.
+
+  The clickhouse image only seeds CLICKHOUSE_PASSWORD on the FIRST
+  volume init. A password added/changed after clickhouse_data already
+  existed never reaches the server, so the app gets 516
+  AUTHENTICATION_FAILED and every check result is silently dropped.
+  This users.d override sets the password from CLICKHOUSE_PASSWORD on
+  every boot via `from_env`, independent of the volume's init state.
+
+  `replace="replace"` discards the image-seeded `default` node entirely
+  and uses only this one — every child below is therefore load-bearing
+  (they mirror the upstream default user). `error_if_not_exists` makes
+  an unset CLICKHOUSE_PASSWORD fail the container closed rather than
+  silently restore a passwordless, network-reachable `default`.
+-->
+<clickhouse>
+  <users>
+    <default replace="replace">
+      <password from_env="CLICKHOUSE_PASSWORD" error_if_not_exists="true"/>
+      <networks><ip>::/0</ip></networks>
+      <profile>default</profile>
+      <quota>default</quota>
+      <access_management>1</access_management>
+    </default>
+  </users>
+</clickhouse>
