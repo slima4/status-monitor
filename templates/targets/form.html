@@ -28,13 +28,13 @@
       <label class="block">
         <span class="text-xs text-slate-500">Name</span>
         <input name="name" type="text" required value="{{ form.name }}"
-               class="mt-1 w-full rounded border px-2 py-1">
+               class="mt-1 w-full field">
       </label>
       <label data-variant="http"
              class="block{% if form.check_type != "http" %} hidden{% endif %}">
         <span class="text-xs text-slate-500">URL</span>
         <input name="http_url" type="url" value="{{ form.http.url }}"
-               class="mt-1 w-full rounded border px-2 py-1 font-mono">
+               class="mt-1 w-full field font-mono">
         <span class="mt-1 block text-xs text-slate-500">
           HTTP GET by default. Method, headers, auth, a TCP check and
           tags live under <em>Advanced settings</em>.
@@ -46,7 +46,7 @@
           <input id="interval_s" name="interval_s" type="number"
                  min="{{ form.min_interval_s }}" step="10" required
                  value="{{ form.interval_s }}"
-                 class="w-28 rounded border px-2 py-1">
+                 class="w-28 field">
           <span class="text-xs text-slate-500">sec</span>
           <span class="ml-2 flex flex-wrap gap-1" role="group" aria-label="Interval presets">
             <button type="button" data-interval-preset="60" aria-label="Every 1 minute"
@@ -81,7 +81,7 @@
       <label class="block">
         <span class="text-xs text-slate-500">Tags (comma-separated)</span>
         <input name="tags" type="text" value="{{ form.tags_csv }}"
-               class="mt-1 w-full rounded border px-2 py-1">
+               class="mt-1 w-full field">
       </label>
     </fieldset>
 
@@ -116,10 +116,10 @@
               class="space-y-3 sticker-card p-5{% if form.check_type != "http" %} hidden{% endif %}">
       <legend class="px-1 text-sm font-medium">HTTP check</legend>
       <p class="text-xs text-slate-500">URL is set in the Basic section above.</p>
-      <div class="flex flex-wrap gap-3">
-        <label class="block flex-1 min-w-[10rem]">
+      <div class="grid grid-cols-2 gap-4 sm:grid-cols-3">
+        <label class="block">
           <span class="text-xs text-slate-500">Method</span>
-          <select name="http_method" class="mt-1 w-full rounded border px-2 py-1">
+          <select name="http_method" class="mt-1 w-full field">
             <option value="GET"{% if form.http.method == "GET" %} selected{% endif %}>GET</option>
             <option value="HEAD"{% if form.http.method == "HEAD" %} selected{% endif %}>HEAD</option>
             <option value="POST"{% if form.http.method == "POST" %} selected{% endif %}>POST</option>
@@ -129,23 +129,23 @@
             <option value="OPTIONS"{% if form.http.method == "OPTIONS" %} selected{% endif %}>OPTIONS</option>
           </select>
         </label>
-        <label class="block w-40">
+        <label class="block">
           <span class="text-xs text-slate-500">Timeout (ms)</span>
           <input name="http_timeout_ms" type="number" min="100" max="60000" value="{{ form.http.timeout_ms }}"
-                 class="mt-1 w-full rounded border px-2 py-1">
+                 class="mt-1 w-full field">
+        </label>
+        <label class="block">
+          <span class="text-xs text-slate-500">Max redirects</span>
+          <input name="http_max_redirects" type="number" min="0" max="10" value="{{ form.http.max_redirects }}"
+                 class="mt-1 w-full field">
         </label>
       </div>
-      <div class="flex flex-wrap items-end gap-4">
+      <div class="flex flex-wrap items-center gap-x-6 gap-y-2">
         <label class="inline-flex items-center gap-2">
           <input name="http_follow_redirects" type="checkbox"{% if form.http.follow_redirects %} checked{% endif %}>
           <span class="text-sm">Follow redirects</span>
         </label>
-        <label class="block w-40">
-          <span class="text-xs text-slate-500">Max redirects</span>
-          <input name="http_max_redirects" type="number" min="0" max="10" value="{{ form.http.max_redirects }}"
-                 class="mt-1 w-full rounded border px-2 py-1">
-        </label>
-        <label class="inline-flex items-center gap-2 ml-auto">
+        <label class="inline-flex items-center gap-2">
           <input name="http_verify_tls" type="checkbox"{% if form.http.verify_tls %} checked{% endif %}>
           <span class="text-sm">Verify TLS</span>
         </label>
@@ -169,35 +169,35 @@
         </div>
         <div data-variant="expected-exact"{% if form.http.expected_kind != "exact" %} class="hidden"{% endif %}>
           <input name="expected_exact" type="number" min="100" max="599" value="{{ form.http.expected_exact }}"
-                 class="w-32 rounded border px-2 py-1">
+                 class="w-32 field">
         </div>
         <div data-variant="expected-range" class="flex items-center gap-2{% if form.http.expected_kind != "range" %} hidden{% endif %}">
           <input name="expected_range_min" type="number" min="100" max="599" value="{{ form.http.expected_range_min }}"
-                 class="w-24 rounded border px-2 py-1">
+                 class="w-24 field">
           <span class="text-slate-500">–</span>
           <input name="expected_range_max" type="number" min="100" max="599" value="{{ form.http.expected_range_max }}"
-                 class="w-24 rounded border px-2 py-1">
+                 class="w-24 field">
         </div>
         <div data-variant="expected-one-of"{% if form.http.expected_kind != "one_of" %} class="hidden"{% endif %}>
           <input name="expected_one_of" type="text" placeholder="200, 201, 204" value="{{ form.http.expected_one_of_csv }}"
-                 class="w-full rounded border px-2 py-1">
+                 class="w-full field">
         </div>
       </fieldset>
 
       <label class="block">
         <span class="text-xs text-slate-500">Expected body contains</span>
         <input name="http_expected_body_contains" type="text" value="{{ form.http.expected_body_contains }}"
-               class="mt-1 w-full rounded border px-2 py-1">
+               class="mt-1 w-full field">
       </label>
 
       <label class="block">
         <span class="text-xs text-slate-500">Request body</span>
-        <textarea name="http_body" rows="3" class="mt-1 w-full rounded border px-2 py-1 font-mono">{{ form.http.body }}</textarea>
+        <textarea name="http_body" rows="3" class="mt-1 w-full field font-mono">{{ form.http.body }}</textarea>
       </label>
 
       <label class="block">
         <span class="text-xs text-slate-500">Headers (JSON object)</span>
-        <textarea name="http_headers" rows="3" class="mt-1 w-full rounded border px-2 py-1 font-mono">{{ form.http.headers_json }}</textarea>
+        <textarea name="http_headers" rows="3" class="mt-1 w-full field font-mono">{{ form.http.headers_json }}</textarea>
       </label>
 
       <fieldset class="space-y-2 rounded-xl border-2 border-slate-200 p-3"
@@ -212,10 +212,10 @@
         <div class="grid grid-cols-2 gap-2">
           <input type="text" name="http_basic_user" placeholder="username"
                  value="{% if form.http.auth.has_basic %}***{% endif %}" disabled
-                 class="rounded border px-2 py-1 disabled:bg-slate-100 disabled:text-slate-400">
+                 class="field">
           <input type="password" name="http_basic_pass" placeholder="password"
                  value="{% if form.http.auth.has_basic %}***{% endif %}" disabled
-                 class="rounded border px-2 py-1 disabled:bg-slate-100 disabled:text-slate-400">
+                 class="field">
         </div>
       </fieldset>
 
@@ -230,7 +230,7 @@
         </label>
         <input type="password" name="http_bearer_token" placeholder="token"
                value="{% if form.http.auth.has_bearer %}***{% endif %}" disabled
-               class="w-full rounded border px-2 py-1 disabled:bg-slate-100 disabled:text-slate-400">
+               class="w-full field">
       </fieldset>
     </fieldset>
 
@@ -240,19 +240,19 @@
       <label class="block">
         <span class="text-xs text-slate-500">Host</span>
         <input name="tcp_host" type="text" value="{{ form.tcp.host }}" placeholder="example.com"
-               class="mt-1 w-full rounded border px-2 py-1 font-mono">
+               class="mt-1 w-full field font-mono">
       </label>
       <div class="flex flex-wrap gap-3">
         <label class="block w-40">
           <span class="text-xs text-slate-500">Port</span>
           <input name="tcp_port" type="number" min="1" max="65535" placeholder="5432"
                  {% if form.tcp.port > 0 %}value="{{ form.tcp.port }}"{% endif %}
-                 class="mt-1 w-full rounded border px-2 py-1">
+                 class="mt-1 w-full field">
         </label>
         <label class="block w-40">
           <span class="text-xs text-slate-500">Timeout (ms)</span>
           <input name="tcp_timeout_ms" type="number" min="100" max="60000" value="{{ form.tcp.timeout_ms }}"
-                 class="mt-1 w-full rounded border px-2 py-1">
+                 class="mt-1 w-full field">
         </label>
       </div>
     </fieldset>
@@ -282,7 +282,7 @@
           <label class="inline-flex items-center gap-1 text-xs text-slate-500">
             After
             <input type="number" data-after-failures min="1" max="100" value="{{ c.after_failures }}"
-                   class="w-16 rounded border px-2 py-1 text-sm">
+                   class="w-20 field text-sm">
             failures
           </label>
           <label class="inline-flex items-center gap-1 text-xs text-slate-500">

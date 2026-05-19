@@ -56,7 +56,7 @@
         <input id="display-name" name="public_display_name" type="text" maxlength="80"
                value="{% if let Some(v) = s.public_display_name %}{{ v }}{% endif %}"
                placeholder="{{ s.display_name }}"
-               class="w-full rounded border px-3 py-1.5 text-sm">
+               class="w-full field text-sm">
         <p class="text-xs text-slate-500">Shown in the page header. Blank uses the org name.</p>
       </div>
 
@@ -64,7 +64,7 @@
         <label for="about" class="text-sm font-medium">About text</label>
         <textarea id="about" name="public_about" rows="3" maxlength="500"
                   placeholder="Markdown supported (500 chars max)"
-                  class="w-full rounded border px-3 py-1.5 text-sm font-mono">{% if let Some(v) = s.public_about %}{{ v }}{% endif %}</textarea>
+                  class="w-full field text-sm font-mono">{% if let Some(v) = s.public_about %}{{ v }}{% endif %}</textarea>
         <p class="text-xs text-slate-500">
           Markdown is sanitised on save and on render — only basic formatting and links survive.
         </p>
@@ -75,7 +75,7 @@
         <div class="flex items-center gap-3">
           <input id="brand-color" name="public_brand_color" type="color"
                  value="{{ brand_color_value }}"
-                 class="h-9 w-12 cursor-pointer rounded border"
+                 class="h-9 w-12 cursor-pointer rounded-lg border-2 border-ink"
                  oninput="document.getElementById('brand-color-out').textContent = this.value">
           <output id="brand-color-out" class="font-mono text-sm">{{ brand_color_value }}</output>
         </div>
@@ -101,11 +101,11 @@
              a single place and never emits an empty `src` (a wasted request). #}
           {% if let Some(logo) = s.logo_url %}
           <img id="logo-current" src="{{ logo }}" alt="Current logo"
-               class="h-12 w-auto rounded border bg-slate-50 p-1">
+               class="h-12 w-auto rounded-lg border-2 border-ink bg-slate-50 p-1">
           <span id="logo-none" class="hidden text-sm text-slate-500">No logo uploaded.</span>
           {% else %}
           <img id="logo-current" alt="Current logo"
-               class="hidden h-12 w-auto rounded border bg-slate-50 p-1">
+               class="hidden h-12 w-auto rounded-lg border-2 border-ink bg-slate-50 p-1">
           <span id="logo-none" class="text-sm text-slate-500">No logo uploaded.</span>
           {% endif %}
 

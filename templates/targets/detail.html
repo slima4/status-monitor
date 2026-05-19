@@ -136,9 +136,20 @@
   <script type="module" src="{{ "js/charts/latency.js"|asset }}"></script>
   <script type="module" src="{{ "js/charts/breakdown.js"|asset }}"></script>
 
-  <details class="sticker-card">
-    <summary class="cursor-pointer px-5 py-3 text-sm font-medium text-slate-700">Configuration</summary>
-    <pre class="overflow-auto rounded-b-2xl bg-slate-50 px-5 py-3 text-xs text-slate-700">{{ config_json }}</pre>
+  <details class="sticker-disclosure space-y-6">
+    <summary>
+      <span class="flex items-center gap-3">
+        <span class="sticker-disclosure__icon">⚙</span>
+        <span class="flex flex-col text-left">
+          <span class="text-sm font-semibold text-slate-700">Configuration</span>
+          <span class="text-xs text-slate-500">Raw JSON this monitor runs with</span>
+        </span>
+      </span>
+      <span class="sticker-disclosure__chevron">▾</span>
+    </summary>
+    <div class="sticker-disclosure__body">
+      <pre class="sticker-card overflow-auto p-4 text-xs text-slate-700">{{ config_json }}</pre>
+    </div>
   </details>
 </section>
 {% endblock %}

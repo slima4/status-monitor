@@ -27,11 +27,11 @@
       <label class="block">
         <span class="text-xs text-slate-500">Name</span>
         <input name="name" type="text" required maxlength="100" value="{{ form.name }}"
-               class="mt-1 w-full rounded border px-2 py-1">
+               class="mt-1 w-full field">
       </label>
       <label class="block">
         <span class="text-xs text-slate-500">Type</span>
-        <select name="kind" data-kind class="mt-1 w-full rounded border px-2 py-1">
+        <select name="kind" data-kind class="mt-1 w-full field">
           <option value="slack"{% if form.kind == "slack" %} selected{% endif %}>Slack</option>
           <option value="webhook"{% if form.kind == "webhook" %} selected{% endif %}>Webhook</option>
           <option value="telegram"{% if form.kind == "telegram" %} selected{% endif %}>Telegram</option>
@@ -65,7 +65,7 @@
           <span class="text-xs text-slate-500">Slack incoming webhook URL</span>
           <input name="slack_webhook_url" type="url" value="{{ form.config.slack_webhook_url }}"
                  placeholder="https://hooks.slack.com/services/T000/B000/XXXX"
-                 class="mt-1 w-full rounded border px-2 py-1 font-mono">
+                 class="mt-1 w-full field font-mono">
         </label>
       </div>
 
@@ -74,12 +74,12 @@
           <span class="text-xs text-slate-500">Webhook URL</span>
           <input name="webhook_url" type="url" value="{{ form.config.webhook_url }}"
                  placeholder="https://example.com/hooks/alerts"
-                 class="mt-1 w-full rounded border px-2 py-1 font-mono">
+                 class="mt-1 w-full field font-mono">
         </label>
         <label class="block">
           <span class="text-xs text-slate-500">Headers (JSON object)</span>
           <textarea name="webhook_headers" rows="3"
-                    class="mt-1 w-full rounded border px-2 py-1 font-mono">{{ form.config.webhook_headers_json }}</textarea>
+                    class="mt-1 w-full field font-mono">{{ form.config.webhook_headers_json }}</textarea>
         </label>
       </div>
 
@@ -88,13 +88,13 @@
           <span class="text-xs text-slate-500">Bot token</span>
           <input name="telegram_bot_token" type="text" value="{{ form.config.telegram_bot_token }}"
                  placeholder="123456:ABC-DEF…"
-                 class="mt-1 w-full rounded border px-2 py-1 font-mono">
+                 class="mt-1 w-full field font-mono">
         </label>
         <label class="block">
           <span class="text-xs text-slate-500">Chat ID</span>
           <input name="telegram_chat_id" type="text" value="{{ form.config.telegram_chat_id }}"
                  placeholder="-1001234567890"
-                 class="mt-1 w-full rounded border px-2 py-1 font-mono">
+                 class="mt-1 w-full field font-mono">
         </label>
       </div>
     </fieldset>

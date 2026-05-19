@@ -82,10 +82,15 @@
 }
 
 @layer base {
-    /* Visible focus rings on every interactive element — never disable
-       outline; WCAG 2.2 requires a 3:1 contrast focus indicator. */
+    /* Visible focus ring on every interactive element. Must be a real
+       `outline`, not Tailwind `ring` (a box-shadow): the cartoon controls
+       (.sticker-btn, .sticker-disclosure summary, .field) own a box-shadow,
+       and this rule is zero-specificity :where(), so a ring box-shadow
+       loses to theirs and the indicator vanishes. outline is an
+       independent property — never eaten. WCAG 2.2 / 2.4.7 (≥3:1). */
     :where(button, [role="button"], a, input, select, textarea, summary):focus-visible {
-        @apply outline-none ring-2 ring-slate-500 ring-offset-1;
+        outline: 2px solid var(--color-brand-500);
+        outline-offset: 2px;
     }
 
     /* Cartoon checkbox / radio. Native controls ignore the sticker
@@ -158,16 +163,6 @@
         opacity: 0.5;
         box-shadow: none;
     }
-
-    /* The global ring above is zero-specificity :where(); our control's
-       own box-shadow would eat it. Give these a real outline ring instead
-       (outline is independent of box-shadow) so keyboard focus stays
-       visible — WCAG 2.4.7. */
-    input[type="checkbox"]:focus-visible,
-    input[type="radio"]:focus-visible {
-        outline: 2px solid var(--color-brand-500);
-        outline-offset: 2px;
-    }
 }
 
 @layer components {
@@ -201,6 +196,34 @@
        Padding/size stays at the call site (controls vary). */
     .btn-ghost          { @apply rounded-xl border-2 border-slate-200 hover:bg-slate-100; }
     .btn-ghost--danger  { @apply border-red-200 text-red-600 hover:bg-red-50; }
+
+    /* Cartoon text field — input / select / textarea. Same ink edge as
+       the sticker family + the small hard offset shadow checkbox/radio
+       use (--control-offset), so the whole form speaks one depth. Look
+       only: width / margin / font / mono stay call-site utilities (the
+       .sticker-card convention). Focus ring is the global outline rule
+       (a box-shadow ring here would be eaten by this shadow). */
+    .field {
+        @apply rounded-xl border-2 bg-white px-3 py-2;
+        border-color: var(--color-ink);
+        box-shadow: var(--control-offset) var(--control-offset) 0 0 var(--color-ink);
+    }
+    .field:disabled        { @apply cursor-not-allowed bg-slate-100 text-slate-400; }
+    .field::placeholder    { @apply text-slate-400; }
+    /* A native <select> uses the browser's own widget metrics and ignores
+       part of .field's padding, so it renders shorter than a sibling
+       <input>. appearance:none drops it onto the same box model (equal
+       height) and lets us draw a chevron that matches the cartoon look
+       instead of the off-style native arrow. */
+    select.field {
+        appearance: none;
+        -webkit-appearance: none;
+        padding-right: 2rem;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 1.5l5 5 5-5'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: right 0.7rem center;
+        background-size: 0.7rem;
+    }
 
     /* Cartoon disclosure. The <summary> is a sticker control — same ink
        edge + hard offset shadow as .sticker-btn. Clicking it physically

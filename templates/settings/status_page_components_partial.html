@@ -31,11 +31,11 @@
     <input type="text" data-field="public_name" value="{{ row.public_name }}" maxlength="100"
            placeholder="{{ row.name }}" aria-label="Public name for {{ row.name }}"
            title="Name shown to visitors. Blank shows the real monitor name ({{ row.name }})."
-           class="w-full rounded border px-2 py-1 text-sm">
+           class="w-full field text-sm">
     <input type="text" data-field="public_group" value="{{ row.public_group }}" maxlength="100"
            placeholder="Ungrouped" aria-label="Group for {{ row.name }}"
            title="Section heading on the public page. Blank = shown under “Ungrouped”."
-           class="w-full rounded border px-2 py-1 text-sm">
+           class="w-full field text-sm">
   </div>
   {% endfor %}
 </div>
