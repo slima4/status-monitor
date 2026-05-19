@@ -30,52 +30,72 @@
         <input name="name" type="text" required value="{{ form.name }}"
                class="mt-1 w-full rounded border px-2 py-1">
       </label>
+      <label data-variant="http"
+             class="block{% if form.check_type != "http" %} hidden{% endif %}">
+        <span class="text-xs text-slate-500">URL</span>
+        <input name="http_url" type="url" value="{{ form.http.url }}"
+               class="mt-1 w-full rounded border px-2 py-1 font-mono">
+        <span class="mt-1 block text-xs text-slate-500">
+          HTTP GET by default. Method, headers, auth, a TCP check and
+          tags live under <em>Advanced settings</em>.
+        </span>
+      </label>
+      <div class="block">
+        <label for="interval_s" class="text-xs text-slate-500">Check interval</label>
+        <div class="mt-1 flex items-center gap-1.5">
+          <input id="interval_s" name="interval_s" type="number"
+                 min="{{ form.min_interval_s }}" step="10" required
+                 value="{{ form.interval_s }}"
+                 class="w-28 rounded border px-2 py-1">
+          <span class="text-xs text-slate-500">sec</span>
+          <span class="ml-2 flex flex-wrap gap-1" role="group" aria-label="Interval presets">
+            <button type="button" data-interval-preset="60" aria-label="Every 1 minute"
+                    class="rounded border px-2 py-1 text-xs hover:bg-slate-50">1m</button>
+            <button type="button" data-interval-preset="120" aria-label="Every 2 minutes"
+                    class="rounded border px-2 py-1 text-xs hover:bg-slate-50">2m</button>
+            <button type="button" data-interval-preset="300" aria-label="Every 5 minutes"
+                    class="rounded border px-2 py-1 text-xs hover:bg-slate-50">5m</button>
+            <button type="button" data-interval-preset="600" aria-label="Every 10 minutes"
+                    class="rounded border px-2 py-1 text-xs hover:bg-slate-50">10m</button>
+            <button type="button" data-interval-preset="900" aria-label="Every 15 minutes"
+                    class="rounded border px-2 py-1 text-xs hover:bg-slate-50">15m</button>
+            <button type="button" data-interval-preset="1800" aria-label="Every 30 minutes"
+                    class="rounded border px-2 py-1 text-xs hover:bg-slate-50">30m</button>
+            <button type="button" data-interval-preset="3600" aria-label="Every hour"
+                    class="rounded border px-2 py-1 text-xs hover:bg-slate-50">1h</button>
+          </span>
+        </div>
+        <p class="mt-1 text-xs text-slate-500">
+          Minimum {{ form.min_interval_s }}s — faster checks are rejected.
+          1–5&nbsp;min for critical production, 10–15&nbsp;min for internal
+          services, 30&nbsp;min–1&nbsp;h for low-priority or many monitors.
+        </p>
+      </div>
+      <div>
+        <label class="inline-flex items-center gap-2">
+          <input name="enabled" type="checkbox"{% if form.enabled %} checked{% endif %}>
+          <span class="text-sm">Enabled</span>
+        </label>
+        <p class="mt-1 text-xs text-slate-500">When off, the monitor is saved but not checked or alerted on.</p>
+      </div>
       <label class="block">
         <span class="text-xs text-slate-500">Tags (comma-separated)</span>
         <input name="tags" type="text" value="{{ form.tags_csv }}"
                class="mt-1 w-full rounded border px-2 py-1">
       </label>
-      <div class="flex flex-wrap items-end gap-4">
-        <div class="block">
-          <label for="interval_s" class="text-xs text-slate-500">Check interval</label>
-          <div class="mt-1 flex items-center gap-1.5">
-            <input id="interval_s" name="interval_s" type="number"
-                   min="{{ form.min_interval_s }}" step="10" required
-                   value="{{ form.interval_s }}"
-                   class="w-28 rounded border px-2 py-1">
-            <span class="text-xs text-slate-500">sec</span>
-            <span class="ml-2 flex flex-wrap gap-1" role="group" aria-label="Interval presets">
-              <button type="button" data-interval-preset="60" aria-label="Every 1 minute"
-                      class="rounded border px-2 py-1 text-xs hover:bg-slate-50">1m</button>
-              <button type="button" data-interval-preset="120" aria-label="Every 2 minutes"
-                      class="rounded border px-2 py-1 text-xs hover:bg-slate-50">2m</button>
-              <button type="button" data-interval-preset="300" aria-label="Every 5 minutes"
-                      class="rounded border px-2 py-1 text-xs hover:bg-slate-50">5m</button>
-              <button type="button" data-interval-preset="600" aria-label="Every 10 minutes"
-                      class="rounded border px-2 py-1 text-xs hover:bg-slate-50">10m</button>
-              <button type="button" data-interval-preset="900" aria-label="Every 15 minutes"
-                      class="rounded border px-2 py-1 text-xs hover:bg-slate-50">15m</button>
-              <button type="button" data-interval-preset="1800" aria-label="Every 30 minutes"
-                      class="rounded border px-2 py-1 text-xs hover:bg-slate-50">30m</button>
-              <button type="button" data-interval-preset="3600" aria-label="Every hour"
-                      class="rounded border px-2 py-1 text-xs hover:bg-slate-50">1h</button>
-            </span>
-          </div>
-          <p class="mt-1 text-xs text-slate-500">
-            Minimum {{ form.min_interval_s }}s — faster checks are rejected.
-            1–5&nbsp;min for critical production, 10–15&nbsp;min for internal
-            services, 30&nbsp;min–1&nbsp;h for low-priority or many monitors.
-          </p>
-        </div>
-        <div>
-          <label class="inline-flex items-center gap-2">
-            <input name="enabled" type="checkbox"{% if form.enabled %} checked{% endif %}>
-            <span class="text-sm">Enabled</span>
-          </label>
-          <p class="mt-1 text-xs text-slate-500">When off, the monitor is saved but not checked or alerted on.</p>
-        </div>
-      </div>
     </fieldset>
+
+    <details class="group space-y-6"{% if form.mode == "edit" %} open{% endif %}>
+      <summary class="flex cursor-pointer select-none list-none items-center justify-between gap-3 rounded-xl border-2 border-slate-200 bg-white px-4 py-3 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 [&::-webkit-details-marker]:hidden">
+        <span class="flex items-center gap-3">
+          <span class="grid h-8 w-8 place-items-center rounded-lg bg-slate-100 text-base text-slate-500">⚙</span>
+          <span class="flex flex-col text-left">
+            <span class="text-sm font-semibold text-slate-700">Advanced settings</span>
+            <span class="text-xs text-slate-500">Check type, request options, headers, auth, TLS — optional</span>
+          </span>
+        </span>
+        <span class="text-slate-400 transition-transform duration-200 group-open:rotate-180">▾</span>
+      </summary>
 
     <fieldset class="space-y-3 sticker-card p-5">
       <legend class="px-1 text-sm font-medium">Check type</legend>
@@ -94,11 +114,7 @@
     <fieldset data-variant="http"
               class="space-y-3 sticker-card p-5{% if form.check_type != "http" %} hidden{% endif %}">
       <legend class="px-1 text-sm font-medium">HTTP check</legend>
-      <label class="block">
-        <span class="text-xs text-slate-500">URL</span>
-        <input name="http_url" type="url" value="{{ form.http.url }}"
-               class="mt-1 w-full rounded border px-2 py-1 font-mono">
-      </label>
+      <p class="text-xs text-slate-500">URL is set in the Basic section above.</p>
       <div class="flex flex-wrap gap-3">
         <label class="block flex-1 min-w-[10rem]">
           <span class="text-xs text-slate-500">Method</span>
@@ -239,9 +255,10 @@
         </label>
       </div>
     </fieldset>
+    </details>
 
     <fieldset class="space-y-3 sticker-card p-5">
-      <legend class="px-1 text-sm font-medium">Alerts</legend>
+      <legend class="px-1 text-sm font-medium">Notifications</legend>
       {% if form.channels.is_empty() %}
       <p class="text-sm text-slate-500">
         No notification channels yet.
