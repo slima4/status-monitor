@@ -37,3 +37,16 @@ claude.md
 # SSH keys for server access (never commit)
 /hetzner
 /hetzner.pub
+
+# Terraform — state lives in HCP Terraform Cloud, never the repo.
+# .terraform.lock.hcl IS committed (provider version pinning).
+terraform/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+# Terraform auto-merges override files — never let one carry inline creds.
+terraform/override.tf
+terraform/*_override.tf
+crash.log
+crash.*.log
