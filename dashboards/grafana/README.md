@@ -1,10 +1,16 @@
 # Grafana dashboards
 
-Provisionable dashboards for the `status_monitor_*` Prometheus series.
+Dashboards for the `status_monitor_*` Prometheus series.
+
+**Managed by Terraform** — `terraform/dashboard.tf` provisions the
+overview into Grafana Cloud as code (single source of truth; a UI edit
+is drift, reverted on next `apply`). This directory keeps the
+**metric-name drift gate** and these docs; the JSON itself now lives in
+the Terraform module so HCP remote-exec can `file()` it.
 
 | File | Datasource | Scope |
 |---|---|---|
-| `status-monitor-overview.json` | Prometheus | Operator metrics, single-instance. **No `org_id` label** — this is operator telemetry, not per-tenant uptime. |
+| `terraform/dashboards/status-monitor-overview.json` | Prometheus | Operator metrics, single-instance. **No `org_id` label** — this is operator telemetry, not per-tenant uptime. |
 
 ## Datasource contract
 
@@ -25,16 +31,21 @@ floor**, not the authoring version — it is intentionally low for
 portability. Do not bump it on every Grafana upgrade; Grafana
 auto-migrates `schemaVersion` forward on load.
 
+Prod is Terraform-driven; the sections below are fallbacks for a
+local/standalone Grafana that has no Terraform.
+
 ## Import — manual (UI)
 
 1. Grafana → Dashboards → New → Import.
-2. Upload `status-monitor-overview.json` (or paste its contents).
+2. Upload `terraform/dashboards/status-monitor-overview.json` (or paste
+   its contents).
 3. When prompted for `DS_PROMETHEUS`, pick the Prometheus datasource
    that scrapes `:9090/metrics`.
 
-## Import — provisioning (recommended for deploys)
+## Import — provisioning (local only)
 
-Mount this directory into Grafana and point a dashboard provider at it.
+Mount `terraform/dashboards/` into Grafana and point a dashboard
+provider at it.
 Add to Grafana's provisioning (`/etc/grafana/provisioning/dashboards/status-monitor.yaml`):
 
 ```yaml
@@ -67,9 +78,11 @@ committed to the repo.
 
 ## Updating the dashboards
 
-Every PromQL expression must reference a metric registered in
+Edit `terraform/dashboards/status-monitor-overview.json`. Every PromQL
+expression must reference a metric registered in
 `src/observability/metrics.rs` (`observability::metrics::names`) or
-sampled in `src/observability/sampler.rs`. After any edit run the gate:
+sampled in `src/observability/sampler.rs`. After any edit run the gate
+(it reads the JSON from the Terraform module):
 
 ```bash
 dashboards/grafana/check-metric-names.sh

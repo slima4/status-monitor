@@ -10,7 +10,7 @@ set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root="$(cd "$here/../.." && pwd)"
 
-dash="$here/status-monitor-overview.json"
+dash="$root/terraform/dashboards/status-monitor-overview.json"
 metrics_rs="$root/src/observability/metrics.rs"
 metrics_md="$root/docs/metrics.md"
 
