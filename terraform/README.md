@@ -23,10 +23,22 @@ State + secrets live in **HCP Terraform Cloud** — never in this repo.
   (`dashboards/grafana/check-metric-names.sh`) reads it from here.
 
 Not yet in Terraform (still one-time UI / documented in
-`runbooks/grafana-cloud.md`): the Loki→Tempo derived field, access
-policies/scopes, Synthetic Monitoring, deploy-annotation secrets.
-When one stabilises, add it as real HCL behind a
-`count = var.enable_x ? 1 : 0` toggle — not as commented-out source.
+`runbooks/grafana-cloud.md`): access policies/scopes, Synthetic
+Monitoring, deploy-annotation secrets. When one stabilises, add it as
+real HCL behind a `count = var.enable_x ? 1 : 0` toggle — not as
+commented-out source.
+
+**Loki→Tempo derived field — deliberately NOT here, and not doable
+on the Cloud stack.** Grafana-Cloud auto-provisioned datasources are
+`readOnly`: `grafana_data_source_config` → `403 "Cannot update
+read-only data source"`; the Correlations fallback is also dead (no
+`grafana_correlation` resource exists in the provider at any version,
+and the raw correlations API enforces the same read-only gate on the
+source ds — so the UI cannot do it either). The only working route is
+a *self-owned* editable Loki datasource (a 2nd ds + the Loki query
+token as a TFC secret) — judged not worth the duplicate-ds + secret
+cost; `trace_id` is in every access-log line regardless. Do not
+re-attempt the managed-ds path.
 
 ## One-time setup
 
