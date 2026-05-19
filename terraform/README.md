@@ -8,13 +8,14 @@ State + secrets live in **HCP Terraform Cloud** — never in this repo.
 - `alerts.tf` — `status-monitor` folder, the two pipeline-health alert
   rules (`StatusMonitorResultsLost`, `StatusMonitorPipelineStalled`),
   the default contact point, the root notification policy.
-- `dashboard.tf` — the repo dashboard
-  (`dashboards/grafana/status-monitor-overview.json`), adopting the
-  already-live one via an import block.
 
 Not yet in Terraform (still one-time UI / documented in
-`runbooks/grafana-cloud.md`): the Loki→Tempo derived field, access
-policies/scopes, Synthetic Monitoring, deploy-annotation secrets.
+`runbooks/grafana-cloud.md`): **the dashboard** (HCP remote-exec only
+uploads the `terraform/` dir, so it can't `file()` the repo's
+`dashboards/grafana/*.json` outside it — follow-up: relocate the JSON
+into the module, then re-add a `grafana_dashboard` resource), the
+Loki→Tempo derived field, access policies/scopes, Synthetic
+Monitoring, deploy-annotation secrets.
 When one stabilises, add it as real HCL behind a
 `count = var.enable_x ? 1 : 0` toggle — not as commented-out source.
 
@@ -70,14 +71,8 @@ terraform apply \
   -target=grafana_contact_point.default \
   -target=grafana_notification_policy.root
 
-# 2. Dashboard — adopts the live one. If plan says the import target
-#    is "not found", it was never uploaded: delete the import block in
-#    dashboard.tf, re-plan, apply. If it says the id is wrong, use
-#    "<folderUID>/status-monitor-overview".
-terraform apply -target=grafana_dashboard.overview
-
-# 3. Steady state thereafter (everything is in repo, no Cloud
-#    datasource takeover here, so a full apply is safe):
+# 2. Steady state thereafter (no file() / no Cloud datasource
+#    takeover in this config, so a full apply is safe):
 terraform apply
 ```
 

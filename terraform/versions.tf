@@ -8,7 +8,7 @@ terraform {
   required_version = ">= 1.9.0"
 
   cloud {
-    organization = "CHANGE_ME_TFC_ORG"
+    organization = "status-monitor"
 
     workspaces {
       name = "status-monitor-grafana"
