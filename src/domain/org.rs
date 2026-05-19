@@ -43,7 +43,8 @@ pub struct PublicOrgBranding {
 }
 
 /// Domain-layer mirror of the column CHECK constraints. Lets handlers map to
-/// a 422 with a helpful message instead of a generic constraint violation.
+/// a 400 that names the offending field, instead of a generic constraint
+/// violation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BrandingError {
     BrandColorFormat,
@@ -59,6 +60,19 @@ impl std::fmt::Display for BrandingError {
             Self::DisplayNameLength => "display name must be 1-80 characters",
         };
         f.write_str(s)
+    }
+}
+
+impl BrandingError {
+    /// The request/form field this error is about. Matches the JSON request
+    /// key and the settings-form input `name`, so the API can point the
+    /// browser straight at the offending control.
+    pub fn field(&self) -> &'static str {
+        match self {
+            Self::BrandColorFormat => "public_brand_color",
+            Self::AboutTooLong => "public_about",
+            Self::DisplayNameLength => "public_display_name",
+        }
     }
 }
 

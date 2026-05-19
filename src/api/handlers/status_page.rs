@@ -143,7 +143,8 @@ pub async fn get_settings(
         (status = 401, body = ApiError),
         (status = 403, body = ApiError),
         (status = 404, body = ApiError),
-        (status = 422, body = ApiError, description = "Branding failed validation"),
+        (status = 400, body = ApiError, description = "Branding failed validation; \
+                                                       `field` names the bad input"),
     ),
 )]
 pub async fn update_settings(
@@ -168,9 +169,9 @@ pub async fn update_settings(
         public_logo_path: None,
         public_show_powered_by: Some(req.public_show_powered_by),
     };
-    branding
-        .validate()
-        .map_err(|e| AppError::unprocessable(codes::BRANDING_INVALID, e.to_string()))?;
+    branding.validate().map_err(|e| {
+        AppError::bad_request_field(codes::BRANDING_INVALID, e.to_string(), e.field())
+    })?;
 
     if !orgs_store::update_public_branding(pool, org, user, &branding).await? {
         return Err(AppError::not_found(

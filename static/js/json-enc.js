@@ -1,38 +1,19 @@
-(function() {
-  let api
+// htmx 2 JSON request encoder.
+//
+// htmx 2 hands `encodeParameters` a values Proxy whose `toJSON` already maps
+// the form fields to a plain object, so the body is a one-line
+// `JSON.stringify` — no manual FormData walk, no `getExpressionVars`, no
+// `overrideMimeType` (all htmx-1-era shims). Duplicate field names are not
+// used by any form that opts into this extension.
+(function () {
   htmx.defineExtension('json-enc', {
-    init: function(apiRef) {
-      api = apiRef
-    },
-
-    onEvent: function(name, evt) {
+    onEvent: function (name, evt) {
       if (name === 'htmx:configRequest') {
-        evt.detail.headers['Content-Type'] = 'application/json'
+        evt.detail.headers['Content-Type'] = 'application/json';
       }
     },
-
-    encodeParameters: function(xhr, parameters, elt) {
-      xhr.overrideMimeType('text/json')
-
-      const object = {}
-      parameters.forEach(function(value, key) {
-        if (Object.hasOwn(object, key)) {
-          if (!Array.isArray(object[key])) {
-            object[key] = [object[key]]
-          }
-          object[key].push(value)
-        } else {
-          object[key] = value
-        }
-      })
-
-      const vals = api.getExpressionVars(elt)
-      Object.keys(object).forEach(function(key) {
-        // FormData encodes values as strings, restore hx-vals/hx-vars with their initial types
-        object[key] = Object.hasOwn(vals, key) ? vals[key] : object[key]
-      })
-
-      return (JSON.stringify(object))
-    }
-  })
-})()
+    encodeParameters: function (_xhr, parameters) {
+      return JSON.stringify(parameters);
+    },
+  });
+})();

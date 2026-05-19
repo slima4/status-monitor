@@ -30,107 +30,109 @@
   {% endif %}
 
   <form id="status-page-form"
-        hx-patch="/api/v1/orgs/{{ org_id }}/status-page"
-        hx-ext="json-enc"
-        hx-headers='{"X-Requested-With":"status-monitor"}'
-        hx-target="#form-result"
-        hx-swap="innerHTML"
-        class="sticker-card space-y-6 p-5">
+        data-action="/api/v1/orgs/{{ org_id }}/status-page"
+        novalidate
+        class="space-y-6">
 
-    <label class="flex items-start gap-3">
-      <input type="checkbox" name="public_status_enabled" class="mt-1"
-             {% if s.public_status_enabled %}checked{% endif %}>
-      <span>
-        <span class="text-sm font-medium">Enable public status page</span>
-        <span class="block text-xs text-slate-500">
-          The master switch. While off, the page returns 404.
+    <div id="form-errors" role="alert" aria-live="polite"
+         class="hidden rounded border border-red-300 bg-red-50 p-3 text-sm text-red-800"></div>
+
+    <div class="sticker-card space-y-6 p-5">
+      <label class="flex items-start gap-3">
+        <input type="checkbox" name="public_status_enabled" class="mt-1"
+               {% if s.public_status_enabled %}checked{% endif %}>
+        <span>
+          <span class="text-sm font-medium">Enable public status page</span>
+          <span class="block text-xs text-slate-500">
+            The master switch. While off, the page returns 404.
+          </span>
         </span>
-      </span>
-    </label>
+      </label>
 
-    <div class="space-y-1">
-      <label for="display-name" class="text-sm font-medium">Display name</label>
-      <input id="display-name" name="public_display_name" type="text" maxlength="80"
-             value="{% if let Some(v) = s.public_display_name %}{{ v }}{% endif %}"
-             placeholder="{{ s.display_name }}"
-             class="w-full rounded border px-3 py-1.5 text-sm">
-      <p class="text-xs text-slate-500">Shown in the page header. Blank uses the org name.</p>
-    </div>
-
-    <div class="space-y-1">
-      <label for="about" class="text-sm font-medium">About text</label>
-      <textarea id="about" name="public_about" rows="3" maxlength="500"
-                placeholder="Markdown supported (500 chars max)"
-                class="w-full rounded border px-3 py-1.5 text-sm font-mono">{% if let Some(v) = s.public_about %}{{ v }}{% endif %}</textarea>
-      <p class="text-xs text-slate-500">
-        Markdown is sanitised on save and on render — only basic formatting and links survive.
-      </p>
-    </div>
-
-    <div class="space-y-1">
-      <label for="brand-color" class="text-sm font-medium">Brand colour</label>
-      <div class="flex items-center gap-3">
-        <input id="brand-color" name="public_brand_color" type="color"
-               value="{{ brand_color_value }}"
-               class="h-9 w-12 cursor-pointer rounded border"
-               oninput="document.getElementById('brand-color-out').textContent = this.value">
-        <output id="brand-color-out" class="font-mono text-sm">{{ brand_color_value }}</output>
+      <div class="space-y-1">
+        <label for="display-name" class="text-sm font-medium">Display name</label>
+        <input id="display-name" name="public_display_name" type="text" maxlength="80"
+               value="{% if let Some(v) = s.public_display_name %}{{ v }}{% endif %}"
+               placeholder="{{ s.display_name }}"
+               class="w-full rounded border px-3 py-1.5 text-sm">
+        <p class="text-xs text-slate-500">Shown in the page header. Blank uses the org name.</p>
       </div>
-      <p class="text-xs text-slate-500">Used for the header background.</p>
-    </div>
 
-    <label class="flex items-start gap-3">
-      <input type="checkbox" name="public_show_powered_by" class="mt-1"
-             {% if s.show_powered_by %}checked{% endif %}>
-      <span>
-        <span class="text-sm font-medium">Show "Powered by status-monitor"</span>
-        <span class="block text-xs text-slate-500">
-          Uncheck for a fully white-labelled footer.
+      <div class="space-y-1">
+        <label for="about" class="text-sm font-medium">About text</label>
+        <textarea id="about" name="public_about" rows="3" maxlength="500"
+                  placeholder="Markdown supported (500 chars max)"
+                  class="w-full rounded border px-3 py-1.5 text-sm font-mono">{% if let Some(v) = s.public_about %}{{ v }}{% endif %}</textarea>
+        <p class="text-xs text-slate-500">
+          Markdown is sanitised on save and on render — only basic formatting and links survive.
+        </p>
+      </div>
+
+      <div class="space-y-1">
+        <label for="brand-color" class="text-sm font-medium">Brand colour</label>
+        <div class="flex items-center gap-3">
+          <input id="brand-color" name="public_brand_color" type="color"
+                 value="{{ brand_color_value }}"
+                 class="h-9 w-12 cursor-pointer rounded border"
+                 oninput="document.getElementById('brand-color-out').textContent = this.value">
+          <output id="brand-color-out" class="font-mono text-sm">{{ brand_color_value }}</output>
+        </div>
+        <p class="text-xs text-slate-500">Used for the header background.</p>
+      </div>
+
+      <label class="flex items-start gap-3">
+        <input type="checkbox" name="public_show_powered_by" class="mt-1"
+               {% if s.show_powered_by %}checked{% endif %}>
+        <span>
+          <span class="text-sm font-medium">Show "Powered by status-monitor"</span>
+          <span class="block text-xs text-slate-500">
+            Uncheck for a fully white-labelled footer.
+          </span>
         </span>
-      </span>
-    </label>
+      </label>
 
-    <div class="flex items-center gap-3">
-      <button type="submit"
-              class="sticker-btn sticker-btn--primary px-3 py-1.5 text-sm font-medium">
-        Save changes
-      </button>
-      <span id="form-result" aria-live="polite" class="text-sm"></span>
+      <div class="space-y-2 border-t pt-5">
+        <span class="text-sm font-medium">Logo</span>
+        <div id="logo-box" class="flex flex-wrap items-center gap-4">
+          {# Both states stay in the DOM so the post-save JS can flip them
+             without a full reload; one if/else keeps the has-logo decision in
+             a single place and never emits an empty `src` (a wasted request). #}
+          {% if let Some(logo) = s.logo_url %}
+          <img id="logo-current" src="{{ logo }}" alt="Current logo"
+               class="h-12 w-auto rounded border bg-slate-50 p-1">
+          <span id="logo-none" class="hidden text-sm text-slate-500">No logo uploaded.</span>
+          {% else %}
+          <img id="logo-current" alt="Current logo"
+               class="hidden h-12 w-auto rounded border bg-slate-50 p-1">
+          <span id="logo-none" class="text-sm text-slate-500">No logo uploaded.</span>
+          {% endif %}
+
+          <label class="btn-ghost cursor-pointer px-3 py-1.5 text-sm font-medium text-slate-700">
+            Choose image…
+            <input id="logo-file" type="file" class="sr-only"
+                   accept="image/png,image/jpeg,image/webp">
+          </label>
+          <span id="logo-filename" class="text-xs text-slate-500">
+            PNG / JPEG / WebP. Oversized images are downscaled. Applied on save.
+          </span>
+        </div>
+        <label id="logo-remove-wrap"
+               class="flex items-center gap-2 text-xs text-slate-600
+                      {% if s.logo_url.is_none() %}hidden{% endif %}">
+          <input type="checkbox" id="logo-remove">
+          Remove the current logo when I save
+        </label>
+      </div>
+
+      <div class="flex items-center gap-3">
+        <button type="submit"
+                class="sticker-btn sticker-btn--primary px-3 py-1.5 text-sm font-medium">
+          Save changes
+        </button>
+        <span id="form-result" aria-live="polite" class="text-sm"></span>
+      </div>
     </div>
   </form>
-
-  <div class="sticker-card space-y-3 p-5">
-    <h2 class="panel-label">Logo</h2>
-    <div id="logo-box" class="flex items-center gap-4">
-      {% if let Some(logo) = s.logo_url %}
-      <img src="{{ logo }}" alt="Current logo"
-           class="h-12 w-auto rounded border bg-slate-50 p-1">
-      <button type="button"
-              hx-delete="/api/v1/orgs/{{ org_id }}/status-page/logo"
-              hx-headers='{"X-Requested-With":"status-monitor"}'
-              hx-on::after-request="if(event.detail.successful) location.reload()"
-              class="btn-ghost px-2.5 py-1 text-xs font-medium text-slate-700">
-        Remove logo
-      </button>
-      {% else %}
-      <span class="text-sm text-slate-500">No logo uploaded.</span>
-      {% endif %}
-    </div>
-    <form hx-post="/api/v1/orgs/{{ org_id }}/status-page/logo"
-          hx-encoding="multipart/form-data"
-          hx-headers='{"X-Requested-With":"status-monitor"}'
-          hx-on::after-request="if(event.detail.successful) location.reload()"
-          class="flex flex-wrap items-center gap-2">
-      <input type="file" name="file" required
-             accept="image/png,image/jpeg,image/webp"
-             class="text-sm">
-      <button type="submit"
-              class="btn-ghost px-3 py-1.5 text-sm font-medium text-slate-700">
-        Upload
-      </button>
-      <span class="text-xs text-slate-500">PNG / JPEG / WebP. Oversized images are downscaled.</span>
-    </form>
-  </div>
 
   <div class="space-y-3">
     <div class="space-y-1">
@@ -156,22 +158,7 @@
   </div>
 
   <script defer src="{{ "js/ui/status_components.js"|asset }}"></script>
-  <script>
-    // The API tolerates the checkbox encoding json-enc produces (string
-    // "on" / omitted); no request rewriting needed — just surface the result.
-    (function () {
-      const form = document.getElementById('status-page-form');
-      form.addEventListener('htmx:afterRequest', (e) => {
-        const box = document.getElementById('form-result');
-        if (e.detail.successful) {
-          box.textContent = 'Saved.';
-          box.className = 'text-sm text-emerald-700';
-        } else {
-          box.textContent = window.smErrMsg(e.detail.xhr, 'Save failed.');
-          box.className = 'text-sm text-rose-700';
-        }
-      });
-    })();
-  </script>
+  <script defer src="{{ "js/ui/api_form.js"|asset }}"></script>
+  <script defer src="{{ "js/ui/status_page_form.js"|asset }}"></script>
 </section>
 {% endblock %}
