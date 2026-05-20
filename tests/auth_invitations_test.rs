@@ -8,9 +8,9 @@
 mod common;
 
 use status_monitor::auth::invitations;
-use status_monitor::domain::{OrgId, Role, UserId, generate_personal_slug};
+use status_monitor::domain::{OrgId, Role, UserId, generate_signup_slug};
 use status_monitor::storage::orgs::{
-    self as orgs_store, AddMemberOutcome, create_personal_org_with_owner_in_tx,
+    self as orgs_store, AddMemberOutcome, create_signup_org_with_owner_in_tx,
 };
 use uuid::Uuid;
 
@@ -40,8 +40,8 @@ async fn seed_user(pool: &sqlx::PgPool, email: &str) -> UserId {
 async fn seed_org(pool: &sqlx::PgPool, owner: UserId) -> OrgId {
     let mut tx = pool.begin().await.unwrap();
     let org = loop {
-        let slug = generate_personal_slug();
-        if let Some(o) = create_personal_org_with_owner_in_tx(&mut tx, owner, &slug, "T")
+        let slug = generate_signup_slug();
+        if let Some(o) = create_signup_org_with_owner_in_tx(&mut tx, owner, &slug, "T")
             .await
             .unwrap()
         {

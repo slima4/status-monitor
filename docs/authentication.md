@@ -40,7 +40,8 @@ The callback is split into three strict phases:
    `auth.github.http_connect_timeout_ms` and
    `auth.github.http_request_timeout_ms`.
 3. **Phase C** — a fresh transaction materialises the user + identity,
-   auto-creates a personal org if this is a new sign-up, and commits.
+   auto-creates a signup org if this is a new sign-up, resolves the user's
+   default org (oldest active membership) for the session row, and commits.
 
 After commit, the previous session cookie (if any) is destroyed for
 session-fixation defence, a fresh session row is INSERTed, the cookie is

@@ -10,9 +10,9 @@ use common::{make_user, unique_slug};
 use status_monitor::domain::{OrgId, Role};
 use status_monitor::storage::orgs as orgs_store;
 use status_monitor::storage::{
-    RemoveOutcome, RestoreOutcome, UpdateOrgOutcome, create_org_with_owner, ensure_default_org,
-    is_active_member, is_owner, list_deleted_orgs_deleted_by, list_members, list_orgs_for_user,
-    owner_org_count, personal_org_for_user, remove_member, restore_org, slug_is_available,
+    RemoveOutcome, RestoreOutcome, UpdateOrgOutcome, create_org_with_owner, default_org_for_user,
+    ensure_default_org, is_active_member, is_owner, list_deleted_orgs_deleted_by, list_members,
+    list_orgs_for_user, owner_org_count, remove_member, restore_org, slug_is_available,
     soft_delete_org, update_org_fields,
 };
 use uuid::Uuid;
@@ -248,7 +248,7 @@ async fn remove_member_succeeds_when_other_owners_exist() {
 
 #[tokio::test]
 #[ignore]
-async fn ensure_default_org_idempotent_and_personal_org_lookup_returns_none() {
+async fn ensure_default_org_idempotent_and_default_org_lookup_returns_none() {
     let Some(pool) = common::pg_pool_from_env().await else {
         return;
     };
@@ -256,9 +256,10 @@ async fn ensure_default_org_idempotent_and_personal_org_lookup_returns_none() {
     let second: OrgId = ensure_default_org(&pool, "default").await.unwrap();
     assert_eq!(first, second);
 
-    // A brand-new user has no personal org until signup auto-creates one.
+    // A brand-new user has no memberships → no default org until signup
+    // auto-creates one.
     let user = make_user(&pool, "orgs").await;
-    assert!(personal_org_for_user(&pool, user).await.unwrap().is_none());
+    assert!(default_org_for_user(&pool, user).await.unwrap().is_none());
 
     sqlx::query("DELETE FROM users WHERE id = $1")
         .bind(user.0)
@@ -318,14 +319,14 @@ async fn owner_limit_holds_under_50_concurrent_creates() {
 }
 
 /// Models the signup retry loop: user_a holds the generated slug X, user_b
-/// then collides on X and must succeed on the next `generate_personal_slug`
+/// then collides on X and must succeed on the next `generate_signup_slug`
 /// draw. Uses an explicit fixed slug for user_a instead of reseeding
 /// `fastrand`'s thread-local RNG — seed pollution would leak into sibling
 /// tests sharing the test binary's threads.
 #[tokio::test]
 #[ignore]
-async fn personal_org_collision_retry_succeeds() {
-    use status_monitor::domain::generate_personal_slug;
+async fn signup_org_collision_retry_succeeds() {
+    use status_monitor::domain::generate_signup_slug;
 
     let Some(pool) = common::pg_pool_from_env().await else {
         return;
@@ -333,10 +334,9 @@ async fn personal_org_collision_retry_succeeds() {
     let user_a = make_user(&pool, "orgs").await;
     let user_b = make_user(&pool, "orgs").await;
 
-    // Fixed slug shaped like a real personal slug, distinct enough that two
-    // concurrent test runs won't collide.
+    // Fixed slug distinct enough that two concurrent test runs won't collide.
     let suffix = &Uuid::new_v4().simple().to_string()[..6];
-    let collided = format!("personal-fixed-test-{suffix}");
+    let collided = format!("fixed-test-{suffix}");
     let _ = create_org_with_owner(&pool, user_a, &collided, "A", 3)
         .await
         .unwrap()
@@ -352,7 +352,7 @@ async fn personal_org_collision_retry_succeeds() {
     // can claim. Five attempts mirror the signup transaction's retry budget.
     let mut succeeded = false;
     for _ in 0..5 {
-        let retry_slug = generate_personal_slug();
+        let retry_slug = generate_signup_slug();
         if retry_slug == collided {
             continue;
         }

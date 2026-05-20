@@ -3,7 +3,7 @@
 //! Two auth paths feed the same extractor surface:
 //!
 //! 1. **Session cookie** — `_sm_session` resolved via [`crate::auth::session`].
-//!    Carries `active_org_id` and falls back to the user's personal org.
+//!    Carries `active_org_id` and falls back to the user's default org
 //! 2. **API token** — `Authorization: Bearer sm_live_…` resolved by the
 //!    [`api_token`] middleware ahead of routing. The token carries no active
 //!    org, so handlers that need one must read an explicit org slug from the
@@ -46,7 +46,7 @@ use crate::app::AppState;
 use crate::auth::session as session_store;
 use crate::domain::{OrgId, UserId};
 use crate::error::{AppError, Result};
-use crate::storage::orgs::{is_active_member, personal_org_for_user};
+use crate::storage::orgs::{default_org_for_user, is_active_member};
 
 /// Custom header used by API-token clients to scope writes/reads to a specific
 /// org. Tokens carry no active-org state, so this header (or a future slug
@@ -66,7 +66,7 @@ pub struct User {
 pub struct Session {
     pub user: Option<User>,
     /// Active org selected by the user via the org picker, or set by signup.
-    /// `None` means "fall back to my personal org".
+    /// `None` means "fall back to my default org" (oldest active membership).
     pub active_org_id: Option<OrgId>,
     /// Present iff this Session was constructed by the cookie path. Handlers
     /// that need to destroy or rotate the session (logout) reach for this.
@@ -85,7 +85,7 @@ impl Session {
 #[derive(Debug, Clone)]
 pub enum AuthContext {
     /// Cookie-based browser session. Carries an `active_org_id` that the user
-    /// chose via the org picker; falls back to their personal org.
+    /// chose via the org picker; falls back to their default org.
     Session {
         user_id: UserId,
         session_id: String,
@@ -228,7 +228,7 @@ where
 
         // API-token path: tokens carry no active org. The caller MUST surface
         // the org explicitly (slug header today; future slug-path routes can
-        // also feed this). Falling back to the personal org silently routes
+        // also feed this). Falling back to the default org silently routes
         // API-token writes into the wrong org (the data-misdirection bug).
         if let Some(AuthContext::ApiToken { user_id, .. }) = parts.extensions.get::<AuthContext>() {
             let pool = app_state.db.as_ref().ok_or_else(|| {
@@ -262,10 +262,10 @@ where
             return Ok(CurrentOrg(active));
         }
 
-        let personal = personal_org_for_user(pool, user_id)
+        let default = default_org_for_user(pool, user_id)
             .await?
             .ok_or(AppError::Forbidden)?;
-        Ok(CurrentOrg(personal))
+        Ok(CurrentOrg(default))
     }
 }
 

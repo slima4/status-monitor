@@ -25,7 +25,7 @@ Every tenant-scoped table (`targets`, `incidents`, `incident_updates`, `maintena
 
 Org slugs are case-insensitive (`CITEXT`), 3–30 characters, must start with a lowercase letter, and otherwise contain `[a-z0-9-]` only — no leading or trailing hyphen and no consecutive hyphens. A static reserved list (`api`, `admin`, `login`, …) is rejected at creation.
 
-Auto-generated **personal-org slugs** take the shape `personal-{adj}-{noun}-{6char}` from inline word lists in `src/domain/word_lists.rs`. `create_org_with_owner` returns `Ok(None)` on a slug collision so callers wrap the generate-and-insert pair in a 5-attempt retry loop; the birthday-paradox tail above 5 retries is astronomically small. The current binary exposes the helper but the wrapping signup transaction lands with the auth backend.
+The placeholder slug a brand-new user's first org gets at signup takes the shape `{adj}-{noun}-{6char}` from inline word lists in `src/domain/word_lists.rs`. The signup transaction returns `Ok(None)` on a slug collision so the caller wraps the generate-and-insert pair in a 5-attempt retry loop; the birthday-paradox tail above 5 retries is astronomically small. Users typically rename the slug after signup via the status-page settings.
 
 ### Three-org owner limit
 

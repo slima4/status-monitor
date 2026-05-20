@@ -4,7 +4,7 @@
 //!    calls yet.
 //! 2. **Phase B** — exchange `code` for an access token, fetch `/user` and
 //!    `/user/emails`. No DB connection held.
-//! 3. **Phase C** — find-or-create user + identity, auto-create personal org
+//! 3. **Phase C** — find-or-create user + identity, auto-create signup org
 //!    for new users, create the session, all inside a fresh tx.
 //!
 //! Audit writes happen post-commit on their own connection so they never
@@ -23,10 +23,10 @@ use uuid::Uuid;
 
 use crate::auth::url::url_encode;
 use crate::config::GithubOauthConfig;
-use crate::domain::{OrgId, UserId, generate_personal_slug};
+use crate::domain::{OrgId, UserId, generate_signup_slug};
 use crate::error::{AppError, Result};
 use crate::http_outbound::OutboundHttpClient;
-use crate::storage::orgs::create_personal_org_with_owner_in_tx;
+use crate::storage::orgs::{create_signup_org_with_owner_in_tx, default_org_for_user};
 
 const GH_TOKEN_URL: &str = "https://github.com/login/oauth/access_token";
 const GH_USER_URL: &str = "https://api.github.com/user";
@@ -34,9 +34,9 @@ const GH_EMAILS_URL: &str = "https://api.github.com/user/emails";
 const MAX_GH_RESPONSE_BYTES: usize = 256 * 1024;
 const UA: &str = "status-monitor/auth";
 
-/// Personal-org slug retry budget. `generate_personal_slug` collides at
-/// p≈1e-9 per pair; 5 retries covers the 99.9999... case without spinning.
-const PERSONAL_SLUG_RETRIES: u32 = 5;
+/// Signup-slug retry budget. `generate_signup_slug` collides at p≈1e-9 per
+/// pair; 5 retries covers the 99.9999... case without spinning.
+const SIGNUP_SLUG_RETRIES: u32 = 5;
 
 #[derive(Debug, Deserialize)]
 struct TokenResponse {
@@ -190,20 +190,24 @@ async fn fetch_body(http: &OutboundHttpClient, req: Request<Full<Bytes>>) -> Res
     Ok(collected)
 }
 
-/// Phase C result: the resolved user + whether a fresh personal org was
-/// created for them in this transaction (drives the redirect target).
+/// Phase C result: the resolved user + the org id their session should land
+/// on. `default_org_id` is the user's oldest active membership — for a
+/// brand-new user that's the just-created signup org; for an existing user
+/// it's whatever they already had. The callback stuffs this into
+/// `session.active_org_id` so the next request never falls through to the
+/// (now-deleted) slug-shape inference.
 #[derive(Debug, Clone)]
 pub struct ResolvedIdentity {
     pub user_id: UserId,
-    pub personal_org_id: Option<OrgId>,
+    pub default_org_id: Option<OrgId>,
     pub is_new_user: bool,
 }
 
 /// Phase C of the callback. Find-or-create the user, link the identity, and —
-/// for fresh users — create the personal org plus the owner membership. Caller
+/// for fresh users — create the signup org plus the owner membership. Caller
 /// is expected to immediately follow this with `session::create` on the same
 /// pool. All work runs inside one tx, no upstream calls.
-pub async fn upsert_identity_and_personal_org(
+pub async fn upsert_identity_and_signup_org(
     pool: &PgPool,
     identity: &GithubIdentity,
 ) -> Result<ResolvedIdentity> {
@@ -229,10 +233,11 @@ pub async fn upsert_identity_and_personal_org(
         .execute(&mut *tx)
         .await
         .context("phase C: bump last_login_at")?;
+        let default_org_id = default_org_for_user(pool, UserId(user_id)).await?;
         tx.commit().await.context("phase C: commit (existing)")?;
         return Ok(ResolvedIdentity {
             user_id: UserId(user_id),
-            personal_org_id: None,
+            default_org_id,
             is_new_user: false,
         });
     }
@@ -278,15 +283,16 @@ pub async fn upsert_identity_and_personal_org(
             .rows_affected() == 0 {
             // Already verified — no-op.
         }
+        let default_org_id = default_org_for_user(pool, UserId(user_id)).await?;
         tx.commit().await.context("phase C: commit (linked)")?;
         return Ok(ResolvedIdentity {
             user_id: UserId(user_id),
-            personal_org_id: None,
+            default_org_id,
             is_new_user: false,
         });
     }
 
-    // 3. Brand-new user. Insert user, identity, personal org + owner
+    // 3. Brand-new user. Insert user, identity, signup org + owner
     //    membership all in this tx so a rollback leaves zero orphans.
     let (new_user_id,): (Uuid,) = sqlx::query_as(
         "INSERT INTO users (email, display_name, email_verified_at) \
@@ -309,35 +315,35 @@ pub async fn upsert_identity_and_personal_org(
     .await
     .context("phase C: insert identity")?;
 
-    let org_id = create_personal_org_in_tx(&mut tx, UserId(new_user_id)).await?;
+    let org_id = create_signup_org_in_tx(&mut tx, UserId(new_user_id)).await?;
 
     tx.commit().await.context("phase C: commit (new user)")?;
     Ok(ResolvedIdentity {
         user_id: UserId(new_user_id),
-        personal_org_id: Some(org_id),
+        default_org_id: Some(org_id),
         is_new_user: true,
     })
 }
 
-/// Personal-org creation inside the signup tx. Delegates to
-/// [`create_personal_org_with_owner_in_tx`] — that helper is the single owner
+/// Signup-org creation inside the new-user tx. Delegates to
+/// [`create_signup_org_with_owner_in_tx`] — that helper is the single owner
 /// of writes to `organizations` / `memberships` / `org_audit_log`. The retry
 /// loop here only covers the rare slug collision from the adjective+noun+suffix
 /// RNG; the owner-limit bypass is documented there.
-async fn create_personal_org_in_tx(
+async fn create_signup_org_in_tx(
     tx: &mut Transaction<'_, Postgres>,
     user: UserId,
 ) -> Result<OrgId> {
-    for _ in 0..PERSONAL_SLUG_RETRIES {
-        let slug = generate_personal_slug();
+    for _ in 0..SIGNUP_SLUG_RETRIES {
+        let slug = generate_signup_slug();
         if let Some(org_id) =
-            create_personal_org_with_owner_in_tx(tx, user, &slug, "Personal").await?
+            create_signup_org_with_owner_in_tx(tx, user, &slug, "My status").await?
         {
             return Ok(org_id);
         }
     }
     Err(AppError::Other(anyhow::anyhow!(
-        "personal slug retries exhausted ({PERSONAL_SLUG_RETRIES}) — adjective/noun pool too small or RNG broken"
+        "signup slug retries exhausted ({SIGNUP_SLUG_RETRIES}) — adjective/noun pool too small or RNG broken"
     )))
 }
 

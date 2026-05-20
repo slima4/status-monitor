@@ -9,9 +9,9 @@
 //! invitation link survives the OAuth dance.
 //!
 //! `/onboarding/org`: brand-new users land here after their first OAuth login.
-//! The personal-org row already exists (created in Phase C of the callback);
+//! The signup org row already exists (created in Phase C of the callback);
 //! all this page does is invite them to rename it from the auto-generated
-//! `personal-{adj}-{noun}-{suffix}` slug-name to something they'll recognize.
+//! `{adj}-{noun}-{suffix}` slug to something they'll recognize.
 
 use askama::Template;
 use askama_web::WebTemplate;
@@ -23,7 +23,7 @@ use serde::Deserialize;
 use crate::app::AppState;
 use crate::auth::url::{safe_redirect_target, url_encode};
 use crate::error::AppError;
-use crate::storage::orgs::{get_org, personal_org_for_user};
+use crate::storage::orgs::{default_org_for_user, get_org};
 use crate::web::assets::filters;
 use crate::web::auth::Session;
 use crate::web::error::WebResult;
@@ -148,13 +148,14 @@ pub async fn onboarding_org(
         return Ok(crate::web::auth::login_redirect("/onboarding/org").into_response());
     };
     let pool = state.require_db()?;
-    let Some(org_id) = personal_org_for_user(pool, user.id).await? else {
-        // No personal org — drop the user back to the dashboard so they don't
-        // get stuck on a page that can't render.
+    let Some(org_id) = default_org_for_user(pool, user.id).await? else {
+        // No org at all (rare — invited-only with all invitations gone, or
+        // freshly-deleted last org). Drop to dashboard rather than render a
+        // page anchored on nothing.
         return Ok(Redirect::to("/").into_response());
     };
     let org = get_org(pool, org_id).await?.ok_or_else(|| {
-        AppError::Other(anyhow::anyhow!("personal org row missing for {org_id:?}"))
+        AppError::Other(anyhow::anyhow!("default org row missing for {org_id:?}"))
     })?;
 
     let display_name = display_name_for(&user.email);
@@ -859,12 +860,12 @@ mod tests {
             active_tab: TAB_ONBOARD,
             display_name: "Alice".into(),
             org_id: "00000000-0000-0000-0000-000000000001".into(),
-            current_name: "personal-quiet-koala".into(),
+            current_name: "quiet-koala-7m0tt1".into(),
         }
         .render()
         .unwrap();
         assert!(html.contains("Welcome, Alice"));
-        assert!(html.contains(r#"value="personal-quiet-koala""#));
+        assert!(html.contains(r#"value="quiet-koala-7m0tt1""#));
         assert!(html.contains(r#"hx-patch="/api/v1/orgs/00000000-0000-0000-0000-000000000001""#));
         assert!(html.contains(r#""X-Requested-With":"status-monitor""#));
     }

@@ -1,9 +1,10 @@
 //! `/auth/*` endpoints: GitHub OAuth login + callback, logout.
 //!
 //! The callback follows a strict three-phase rule — no DB transaction held
-//! across GitHub HTTP calls. New users get
-//! a personal org auto-created in the same Phase C transaction that links
-//! their identity.
+//! across GitHub HTTP calls. New users get a signup org auto-created in the
+//! same Phase C transaction that links their identity; the resolved default
+//! org id is stamped onto the new session row so the next request lands on
+//! a real org.
 
 use axum::extract::{ConnectInfo, Query, State};
 use axum::http::HeaderMap;
@@ -117,9 +118,10 @@ pub async fn github_callback(
             }
         };
 
-    // Phase C: materialise user + identity, auto-create personal org for new
-    // users. Fresh transaction; no upstream calls.
-    let resolved = github::upsert_identity_and_personal_org(pool, &identity)
+    // Phase C: materialise user + identity, auto-create signup org for new
+    // users, and resolve their default-org id for the session row. Fresh
+    // transaction; no upstream calls.
+    let resolved = github::upsert_identity_and_signup_org(pool, &identity)
         .await
         .map_err(|e| {
             tracing::warn!(error = %e, "github_callback: phase C failed");
@@ -141,7 +143,7 @@ pub async fn github_callback(
         pool,
         &state.cfg.auth.session,
         resolved.user_id,
-        resolved.personal_org_id,
+        resolved.default_org_id,
         ip_hash.as_deref(),
         ua_hash.as_deref(),
     )

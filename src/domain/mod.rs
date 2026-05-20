@@ -37,4 +37,4 @@ pub use reserved_slugs::is_reserved;
 pub use result::{CheckResult, CheckStatus};
 pub use target::{NewTarget, Target, TargetUpdate};
 pub use user::{User, UserId};
-pub use word_lists::{PERSONAL_SLUG_LIKE_PATTERN, PERSONAL_SLUG_PREFIX, generate_personal_slug};
+pub use word_lists::generate_signup_slug;

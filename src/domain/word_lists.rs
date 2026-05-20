@@ -1,12 +1,11 @@
-//! Word lists for generating personal-org slugs:
-//! `personal-{adjective}-{noun}-{6-char-base32}`.
+//! Word lists for generating the placeholder slug a brand-new user's first
+//! org gets at signup: `{adjective}-{noun}-{6-char-base32}`.
 //!
 //! Both lists are short, family-friendly, and ASCII-only. Combined with a
 //! 6-character base32 suffix they yield ~10⁹ combinations per (adj, noun)
 //! pair — collision-proof at any plausible signup rate. The validator's
-//! reserved-slug check is exact-match, so the bare prefix `personal` is
-//! reserved but generated slugs (which always include the random suffix)
-//! pass through.
+//! reserved-slug check is exact-match (single-word slugs only), so generated
+//! slugs (which always contain hyphens) cannot collide with reserved entries.
 
 pub const ADJECTIVES: &[&str] = &[
     "agile",
@@ -527,11 +526,11 @@ pub const NOUNS: &[&str] = &[
 /// confusion with 1, 0). Stays URL-safe and case-insensitive.
 const BASE32: &[u8; 32] = b"0123456789abcdefghjkmnpqrstvwxyz";
 
-/// Max combined `{adj}-{noun}` length so the full slug fits the 30-char DB
-/// limit: `personal-` (9) + adj + `-` (1) + noun + `-` (1) + suffix (6) = 17 +
-/// adj + noun. With adj + noun ≤ 13 (each word ≤ 6 chars) the slug tops out at
-/// 30. The richer master lists keep longer words for future use; only this
-/// subset is sampled for slug generation.
+/// Max length per `{adj}` and `{noun}` so the full slug fits the 30-char DB
+/// limit: adj + `-` (1) + noun + `-` (1) + suffix (6) = 8 + adj + noun.
+/// With each word ≤ 6 chars the slug tops out at 20, well under cap. The
+/// richer master lists keep longer words for future use; only this subset
+/// is sampled for slug generation.
 const MAX_WORD_LEN: usize = 6;
 
 static SHORT_ADJECTIVES: std::sync::LazyLock<Vec<&'static str>> = std::sync::LazyLock::new(|| {
@@ -550,34 +549,25 @@ static SHORT_NOUNS: std::sync::LazyLock<Vec<&'static str>> = std::sync::LazyLock
         .collect()
 });
 
-/// Marker prefix for auto-generated personal-org slugs. Used by the signup
-/// transaction (to format the slug) and by `personal_org_for_user` (to recover
-/// it). The slug *validator* in `domain::org` allows arbitrary user-chosen
-/// slugs that happen to start with `personal-`, so prefix alone is not an
-/// identity proof — consumers must combine it with the full
-/// `{adj}-{noun}-{6char}` shape (see [`PERSONAL_SLUG_LIKE_PATTERN`]).
-pub const PERSONAL_SLUG_PREFIX: &str = "personal-";
-
-/// Postgres `LIKE` pattern that matches the *full* auto-generated personal
-/// slug shape `personal-{adj}-{noun}-{6char}`. `_` matches one character, so
-/// the six trailing underscores require a six-char suffix segment. Together
-/// with `role = 'owner'` this disambiguates real personal orgs from invited
-/// memberships to user-named orgs like `personal-team-x`.
-pub const PERSONAL_SLUG_LIKE_PATTERN: &str = "personal-%-%-______";
-
-/// Generate one `personal-{adj}-{noun}-{6-char}` slug. The 6-char suffix uses
-/// `fastrand`'s per-thread RNG — uniform enough for collision avoidance but
-/// not a cryptographic source, which is fine since slugs are public. Caller
-/// wraps in a retry-with-rollback loop for the rare collision tail.
-pub fn generate_personal_slug() -> String {
+/// Generate a `{adj}-{noun}-{6-char}` placeholder slug for the first org a
+/// brand-new user gets at signup. The 6-char suffix uses `fastrand`'s
+/// per-thread RNG — uniform enough for collision avoidance but not a
+/// cryptographic source, which is fine since slugs are public. Caller wraps
+/// this in a retry-with-rollback loop for the rare collision tail.
+///
+/// The slug is a starting point, not an identity marker: the user is
+/// expected to rename it to whatever they like via the status-page settings
+/// form, and the codebase never infers "this org is a signup-default" from
+/// the slug's shape — see [`crate::storage::default_org_for_user`].
+pub fn generate_signup_slug() -> String {
     let adj = SHORT_ADJECTIVES[fastrand::usize(..SHORT_ADJECTIVES.len())];
     let noun = SHORT_NOUNS[fastrand::usize(..SHORT_NOUNS.len())];
     let mut suffix = String::with_capacity(6);
     for _ in 0..6 {
         suffix.push(BASE32[fastrand::usize(..BASE32.len())] as char);
     }
-    let out = format!("{PERSONAL_SLUG_PREFIX}{adj}-{noun}-{suffix}");
-    debug_assert!(out.len() <= 30, "personal slug overflow: {out}");
+    let out = format!("{adj}-{noun}-{suffix}");
+    debug_assert!(out.len() <= 30, "signup slug overflow: {out}");
     out
 }
 
@@ -604,9 +594,9 @@ mod tests {
     #[test]
     fn generated_slug_passes_validator() {
         for _ in 0..1000 {
-            let s = generate_personal_slug();
-            assert!(s.starts_with("personal-"), "{s}");
+            let s = generate_signup_slug();
             assert!(s.len() <= 30, "slug {s} exceeds 30 chars");
+            assert_eq!(s.matches('-').count(), 2, "expected adj-noun-suffix: {s}");
             crate::domain::org::validate_slug(&s)
                 .unwrap_or_else(|e| panic!("generated slug {s} failed validation: {e}"));
         }

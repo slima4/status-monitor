@@ -1,7 +1,7 @@
 //! Extractor unit tests for `CurrentOrg`. Covers the in-memory branches:
 //! self-host short-circuit, SaaS without a session, and the
 //! tenancy-enabled-but-no-db misconfiguration. SaaS branches that require a
-//! real Postgres (`is_active_member`, personal-org fallback) are exercised in
+//! real Postgres (`is_active_member`, default-org fallback) are exercised in
 //! the live-DB suite once the auth backend lands.
 
 mod common;
