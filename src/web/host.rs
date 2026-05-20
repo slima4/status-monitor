@@ -55,6 +55,12 @@ pub fn extract_status_slug<'a>(host: &'a str, base_domain: &str) -> Option<Statu
     if base_domain.is_empty() || !base_domain.contains('.') {
         return None;
     }
+    // FQDN form: RFC 1034 allows a trailing dot (`acme.example.com.`).
+    // Browsers strip it before display but a crafted curl/script can send
+    // it. Without this normalisation, the suffix match would fail and the
+    // request would fall through to the operator dashboard — exposing the
+    // operator surface on what looks like a tenant host.
+    let host = host.strip_suffix('.').unwrap_or(host);
     // Equivalent to stripping `".{base_domain}"` but without the per-request
     // `format!` allocation — this runs on every anonymous subdomain request.
     let slug = host.strip_suffix(base_domain)?.strip_suffix('.')?;
@@ -220,5 +226,23 @@ mod tests {
             extract_status_slug("acme.example.com:443", "example.com"),
             None
         );
+    }
+
+    #[test]
+    fn accepts_fqdn_trailing_dot() {
+        // RFC 1034 FQDN form; a crafted client can send the trailing dot.
+        // Without normalisation the suffix match misses and the request
+        // would otherwise fall through to the operator dashboard.
+        assert_eq!(
+            extract_status_slug("acme.example.com.", "example.com"),
+            Some(StatusPageHost { slug: "acme" })
+        );
+    }
+
+    #[test]
+    fn fqdn_bare_base_still_rejected() {
+        // Trailing dot on the base domain alone — must NOT collapse into a
+        // valid (empty-slug) parse.
+        assert_eq!(extract_status_slug("example.com.", "example.com"), None);
     }
 }
