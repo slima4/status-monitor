@@ -11,14 +11,49 @@
   </header>
 
   {% if let Some(url) = s.status_url %}
-  <div class="sticker-card flex flex-wrap items-center gap-3 p-4 text-sm">
-    <span class="text-slate-500">Your status page is at</span>
-    <a href="{{ url }}" target="_blank" rel="noopener"
-       class="font-medium text-slate-900 underline decoration-dotted">{{ url }} ↗</a>
-    {% if !s.public_status_enabled %}
-    <span class="status-badge status-badge--degraded">
-      Disabled — visitors get 404 until you enable it below
-    </span>
+  <div class="sticker-card space-y-3 p-4 text-sm">
+    <div class="flex flex-wrap items-center gap-3">
+      <span class="text-slate-500">Your status page is at</span>
+      <a href="{{ url }}" target="_blank" rel="noopener"
+         class="font-medium text-slate-900 underline decoration-dotted">{{ url }} ↗</a>
+      {% if !s.public_status_enabled %}
+      <span class="status-badge status-badge--degraded">
+        Disabled — visitors get 404 until you enable it below
+      </span>
+      {% endif %}
+    </div>
+
+    {% if let Some(suffix) = url_host_suffix %}
+    {# Hostname-mode only: a single-input rename actually maps to "change the
+       slug." Path mode keeps the slug deeper in the URL and is operator-set;
+       no UI here. #}
+    <form id="slug-form"
+          data-action="/api/v1/orgs/{{ org_id }}"
+          novalidate
+          class="space-y-2 border-t border-slate-200 pt-3">
+      <label for="slug-input" class="block text-sm font-medium">Change URL slug</label>
+      <div class="flex flex-wrap items-center gap-2">
+        <span class="text-slate-500">https://</span>
+        <input id="slug-input" name="slug" type="text"
+               value="{{ current_slug }}"
+               minlength="3" maxlength="30"
+               pattern="[a-z][a-z0-9-]*[a-z0-9]"
+               autocomplete="off" spellcheck="false"
+               class="field w-48 text-sm font-mono">
+        <span id="slug-suffix" class="text-slate-500 font-mono">{{ suffix }}/status</span>
+        <button type="submit"
+                class="sticker-btn sticker-btn--primary px-3 py-1.5 text-sm font-medium">
+          Save URL
+        </button>
+        <span id="slug-result" aria-live="polite" class="text-sm"></span>
+      </div>
+      <div id="slug-form-errors" role="alert" aria-live="polite"
+           class="hidden rounded border border-red-300 bg-red-50 p-3 text-xs text-red-800"></div>
+      <p class="text-xs text-slate-500">
+        3–30 lowercase letters, digits or hyphens; must start with a letter.
+        Renaming is a hard cutover — the old URL stops working immediately.
+      </p>
+    </form>
     {% endif %}
   </div>
   {% else %}
@@ -164,5 +199,6 @@
   <script defer src="{{ "js/ui/status_components.js"|asset }}"></script>
   <script defer src="{{ "js/ui/api_form.js"|asset }}"></script>
   <script defer src="{{ "js/ui/status_page_form.js"|asset }}"></script>
+  <script defer src="{{ "js/ui/status_slug_form.js"|asset }}"></script>
 </section>
 {% endblock %}

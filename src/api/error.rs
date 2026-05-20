@@ -112,6 +112,8 @@ pub mod codes {
     pub const ORG_DELETED: &str = "ORG_DELETED";
     pub const SLUG_TAKEN: &str = "SLUG_TAKEN";
     pub const SLUG_INVALID: &str = "SLUG_INVALID";
+    /// PATCH with no mutable field set — rejected so a no-op isn't silently 200.
+    pub const EMPTY_PATCH: &str = "EMPTY_PATCH";
     pub const OWNER_ORG_LIMIT: &str = "OWNER_ORG_LIMIT";
     pub const NOT_AN_OWNER: &str = "NOT_AN_OWNER";
     pub const MEMBER_NOT_FOUND: &str = "MEMBER_NOT_FOUND";

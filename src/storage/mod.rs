@@ -24,11 +24,12 @@ pub use notification_channels::{
 };
 pub use orgs::{
     MemberView, MembershipStatus, OrgBranding, OrgWithRole, PublicStatusOrg, RemoveOutcome,
-    RestoreOutcome, create_org_with_owner, ensure_default_org, find_public_status_org_by_slug,
-    get_org, is_active_member, is_owner, list_deleted_orgs_deleted_by, list_members,
-    list_orgs_for_user, load_public_branding, membership_status, owner_org_count,
-    personal_org_for_user, remove_member, restore_org, set_public_logo_path, slug_is_available,
-    soft_delete_org, update_org_name, update_public_branding,
+    RestoreOutcome, UpdateOrgOutcome, create_org_with_owner, ensure_default_org,
+    find_public_status_org_by_slug, get_org, is_active_member, is_owner,
+    list_deleted_orgs_deleted_by, list_members, list_orgs_for_user, load_public_branding,
+    membership_status, owner_org_count, personal_org_for_user, remove_member, restore_org,
+    set_public_logo_path, slug_is_available, soft_delete_org, update_org_fields,
+    update_public_branding,
 };
 pub use postgres::PostgresTargetStore;
 pub use traits::{ResultSink, ResultsStore, TargetFilter, TargetStore, TimeRange, UptimeStats};

@@ -390,43 +390,149 @@ pub enum MembershipStatus {
     None,
 }
 
-/// Rename an org. Returns the updated row, `None` if the org doesn't exist or
-/// is soft-deleted (operations on deleted orgs are reserved to restore).
-/// Writes an `org.renamed` audit row in the same transaction so the renamer
-/// is recorded next to the change.
-pub async fn update_org_name(
+/// Atomic, partial update of mutable org fields. Either or both of `new_name`
+/// / `new_slug` may be `None`; the caller must supply at least one (an
+/// all-`None` call is a logic error and rejected with a debug assertion).
+///
+/// Returns:
+///  * [`UpdateOrgOutcome::Updated`] with the post-update row — including the
+///    no-op case where the new value(s) equal the current ones. No audit row
+///    is written for a no-op so audit history stays meaningful.
+///  * [`UpdateOrgOutcome::NotFound`] if the org is missing or soft-deleted.
+///  * [`UpdateOrgOutcome::SlugTaken`] when `new_slug` collides with another
+///    row (including soft-deleted: slugs stay reserved through the grace
+///    window — the unique index doesn't exclude tombstones).
+///
+/// One transaction covers the row lock, the write, and one audit row per
+/// *actually-changed* field, so a combined `{name, slug}` PATCH can't leave
+/// the org half-updated. Sub-second-level row lock via `FOR UPDATE` in the
+/// CTE serialises concurrent renames of the same org.
+pub async fn update_org_fields(
     pool: &PgPool,
     org: OrgId,
     actor: UserId,
-    new_name: &str,
-) -> Result<Option<Organization>> {
-    let mut tx = pool.begin().await.context("update_org_name: begin")?;
-    let row: Option<OrgRow> = sqlx::query_as(
-        r#"UPDATE organizations
-           SET name = $2, updated_at = now()
-           WHERE id = $1 AND deleted_at IS NULL
-           RETURNING id, slug::text AS slug, name, created_at, updated_at, deleted_at"#,
+    new_name: Option<&str>,
+    new_slug: Option<&str>,
+) -> Result<UpdateOrgOutcome> {
+    debug_assert!(
+        new_name.is_some() || new_slug.is_some(),
+        "update_org_fields called with no mutable field; handler should reject empty PATCH"
+    );
+
+    let mut tx = pool.begin().await.context("update_org_fields: begin")?;
+
+    // One CTE+UPDATE: lock the row, read the prior (slug, name), write only
+    // the supplied fields (COALESCE keeps untouched columns), and return both
+    // pre- and post- values. `RETURNING` only fires when a row was updated,
+    // so missing/soft-deleted orgs yield `None` here → NotFound without a
+    // second round-trip.
+    let res: std::result::Result<Option<UpdateRow>, sqlx::Error> = sqlx::query_as(
+        r#"
+        WITH prev AS (
+            SELECT id, slug::text AS slug, name FROM organizations
+            WHERE id = $1 AND deleted_at IS NULL
+            FOR UPDATE
+        )
+        UPDATE organizations o
+           SET name       = COALESCE($2, o.name),
+               slug       = COALESCE($3::citext, o.slug),
+               updated_at = now()
+          FROM prev
+         WHERE o.id = prev.id
+        RETURNING o.id,
+                  o.slug::text AS slug,
+                  o.name,
+                  o.created_at,
+                  o.updated_at,
+                  o.deleted_at,
+                  prev.slug AS prev_slug,
+                  prev.name AS prev_name
+        "#,
     )
     .bind(org.0)
     .bind(new_name)
+    .bind(new_slug)
     .fetch_optional(&mut *tx)
-    .await
-    .context("update_org_name: update")?;
-    let Some(row) = row else {
-        tx.rollback().await.ok();
-        return Ok(None);
+    .await;
+    let row = match res {
+        Ok(Some(r)) => r,
+        Ok(None) => {
+            tx.rollback().await.ok();
+            return Ok(UpdateOrgOutcome::NotFound);
+        }
+        Err(e) if is_unique_violation(&e) => {
+            tx.rollback().await.ok();
+            return Ok(UpdateOrgOutcome::SlugTaken);
+        }
+        Err(e) => {
+            return Err(AppError::Other(
+                anyhow::Error::from(e).context("update_org_fields: update"),
+            ));
+        }
     };
-    record_audit_tx(
-        &mut tx,
-        org,
-        Some(actor),
-        "org.renamed",
-        serde_json::json!({ "name": row.name }),
-    )
-    .await
-    .context("update_org_name: audit")?;
-    tx.commit().await.context("update_org_name: commit")?;
-    Ok(Some(row.into_org()))
+
+    let slug_changed = row.slug != row.prev_slug;
+    let name_changed = row.name != row.prev_name;
+    if slug_changed {
+        record_audit_tx(
+            &mut tx,
+            org,
+            Some(actor),
+            "org.slug_changed",
+            serde_json::json!({ "from": row.prev_slug, "to": row.slug }),
+        )
+        .await
+        .context("update_org_fields: audit slug")?;
+    }
+    if name_changed {
+        record_audit_tx(
+            &mut tx,
+            org,
+            Some(actor),
+            "org.renamed",
+            serde_json::json!({ "name": row.name }),
+        )
+        .await
+        .context("update_org_fields: audit name")?;
+    }
+    tx.commit().await.context("update_org_fields: commit")?;
+    Ok(UpdateOrgOutcome::Updated(row.into_org()))
+}
+
+#[derive(Debug, Clone)]
+pub enum UpdateOrgOutcome {
+    Updated(Organization),
+    NotFound,
+    SlugTaken,
+}
+
+fn is_unique_violation(e: &sqlx::Error) -> bool {
+    matches!(e.as_database_error(), Some(db) if db.code().as_deref() == Some("23505"))
+}
+
+#[derive(sqlx::FromRow)]
+struct UpdateRow {
+    id: Uuid,
+    slug: String,
+    name: String,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
+    deleted_at: Option<DateTime<Utc>>,
+    prev_slug: String,
+    prev_name: String,
+}
+
+impl UpdateRow {
+    fn into_org(self) -> Organization {
+        Organization {
+            id: OrgId(self.id),
+            slug: self.slug,
+            name: self.name,
+            created_at: self.created_at,
+            updated_at: self.updated_at,
+            deleted_at: self.deleted_at,
+        }
+    }
 }
 
 /// Soft-delete an org. No-op if already deleted; returns `true` only when the

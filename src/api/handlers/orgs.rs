@@ -36,9 +36,18 @@ pub struct CreateOrgRequest {
     pub name: String,
 }
 
-#[derive(Debug, Deserialize, ToSchema)]
+/// Partial-update payload. Fields are optional; an absent field leaves the
+/// stored value alone. A request with neither field set is rejected so the
+/// caller learns the no-op was unintentional rather than silently 200-ing.
+#[derive(Debug, Default, Deserialize, ToSchema)]
 pub struct UpdateOrgRequest {
-    pub name: String,
+    #[serde(default)]
+    pub name: Option<String>,
+    /// New URL slug. Same shape rules as create (`validate_slug`). Renaming
+    /// is a hard cutover: the old slug becomes free for any new org (no
+    /// alias / redirect is kept).
+    #[serde(default)]
+    pub slug: Option<String>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -127,14 +136,7 @@ pub async fn create_org(
     Json<OrgView>,
 )> {
     let pool = require_db(&state)?;
-    let slug = req.slug.trim().to_ascii_lowercase();
-    if let Err(e) = validate_slug(&slug) {
-        return Err(AppError::bad_request_field(
-            codes::SLUG_INVALID,
-            e.to_string(),
-            "slug",
-        ));
-    }
+    let slug = normalize_slug(&req.slug)?;
     let name = trim_name(&req.name)?;
 
     let limit = state.cfg.tenancy.free_tier_owner_org_limit;
@@ -245,15 +247,19 @@ pub async fn get_org(
     path = "/api/v1/orgs/{id}",
     tag = "orgs",
     summary = "Update an organisation (owner-only)",
-    description = "Currently only `name` is mutable.",
+    description = "Partial update: any subset of `name` and `slug`. Renaming \
+                   the slug changes the public status-page URL (hard cutover \
+                   — the old slug becomes free, no redirect is kept).",
     params(("id" = Uuid, Path)),
     request_body = UpdateOrgRequest,
     responses(
         (status = 200, body = OrgView),
-        (status = 400, body = ApiError),
+        (status = 400, body = ApiError,
+            description = "No mutable field provided, name blank, or slug failed validation"),
         (status = 401, body = ApiError),
         (status = 403, body = ApiError),
         (status = 404, body = ApiError),
+        (status = 409, body = ApiError, description = "Slug is already in use"),
     ),
 )]
 pub async fn update_org(
@@ -264,12 +270,45 @@ pub async fn update_org(
 ) -> Result<Json<OrgView>> {
     let pool = require_db(&state)?;
     let org_id = OrgId(id);
-    let name = trim_name(&req.name)?;
+
+    let new_name = req.name.as_deref().map(trim_name).transpose()?;
+    let new_slug = req.slug.as_deref().map(normalize_slug).transpose()?;
+    if new_name.is_none() && new_slug.is_none() {
+        return Err(AppError::bad_request(
+            codes::EMPTY_PATCH,
+            "patch must include at least one of `name` or `slug`",
+        ));
+    }
+
     require_owner(pool, user, org_id).await?;
-    let updated = orgs_store::update_org_name(pool, org_id, user, &name)
-        .await?
-        .ok_or_else(|| AppError::not_found(codes::ORG_NOT_FOUND, "organisation not found"))?;
-    Ok(Json(updated.into()))
+
+    let outcome =
+        orgs_store::update_org_fields(pool, org_id, user, new_name.as_deref(), new_slug.as_deref())
+            .await?;
+    let org = match outcome {
+        orgs_store::UpdateOrgOutcome::Updated(o) => o,
+        orgs_store::UpdateOrgOutcome::NotFound => {
+            return Err(AppError::not_found(
+                codes::ORG_NOT_FOUND,
+                "organisation not found",
+            ));
+        }
+        orgs_store::UpdateOrgOutcome::SlugTaken => {
+            return Err(AppError::conflict(
+                codes::SLUG_TAKEN,
+                "slug is already in use",
+            ));
+        }
+    };
+
+    // Drop any cached public page when the slug changes — the cache is keyed
+    // by `OrgId`, but slug-derived URLs (e.g. the logo origin) are baked into
+    // the rendered snapshot. A no-op patch (same slug as before) skips this
+    // since the storage layer already short-circuits the audit write.
+    if new_slug.is_some() {
+        state.public_source.invalidate(org_id).await;
+    }
+    Ok(Json(org.into()))
 }
 
 #[utoipa::path(
@@ -504,6 +543,17 @@ pub(crate) async fn require_owner(pool: &sqlx::PgPool, user: UserId, org: OrgId)
 }
 
 const MAX_ORG_NAME: usize = 120;
+
+/// Normalise + validate a user-supplied slug exactly the way `create_org`
+/// does, so a PATCH-rejection on `slug` is indistinguishable from a
+/// create-rejection. Field is always reported as `"slug"` so the form can
+/// highlight the input.
+fn normalize_slug(raw: &str) -> Result<String> {
+    let s = raw.trim().to_ascii_lowercase();
+    validate_slug(&s)
+        .map_err(|e| AppError::bad_request_field(codes::SLUG_INVALID, e.to_string(), "slug"))?;
+    Ok(s)
+}
 
 fn trim_name(raw: &str) -> Result<String> {
     let trimmed = raw.trim();

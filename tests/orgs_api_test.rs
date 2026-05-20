@@ -293,3 +293,161 @@ async fn non_owner_cannot_delete_or_update() {
         .await
         .unwrap();
 }
+
+// ── slug rename via PATCH /api/v1/orgs/{id} ─────────────────────────────────
+
+async fn create_org_for_user(router: axum::Router, slug: &str, name: &str) -> (StatusCode, Value) {
+    let resp = router
+        .oneshot(
+            Request::post("/api/v1/orgs")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&json!({ "slug": slug, "name": name })).unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = resp.status();
+    (status, read_value(resp).await)
+}
+
+fn patch_org(id: &str, body: Value) -> Request<Body> {
+    Request::patch(format!("/api/v1/orgs/{id}"))
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap()
+}
+
+#[tokio::test]
+#[ignore]
+async fn patch_renames_slug_and_responds_with_new_view() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let user = make_user(&pool, "orgs-api").await;
+    let (router, _) = build_test_app_with_pg(pool.clone(), |cfg| cfg.tenancy.enabled = true).await;
+    let router = with_session(router, user, None, None);
+
+    let from = unique_slug("from");
+    let (st, body) = create_org_for_user(router.clone(), &from, "Co").await;
+    assert_eq!(st, StatusCode::CREATED);
+    let id = body["id"].as_str().unwrap().to_owned();
+
+    let to = unique_slug("to");
+    let resp = router
+        .clone()
+        .oneshot(patch_org(&id, json!({ "slug": to })))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let view = read_value(resp).await;
+    assert_eq!(view["slug"], to);
+    assert_eq!(view["id"], id);
+
+    cleanup_user(pool, user).await.unwrap();
+}
+
+#[tokio::test]
+#[ignore]
+async fn patch_slug_conflict_returns_409() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let user = make_user(&pool, "orgs-api").await;
+    let (router, _) = build_test_app_with_pg(pool.clone(), |cfg| cfg.tenancy.enabled = true).await;
+    let router = with_session(router, user, None, None);
+
+    let a = unique_slug("a");
+    let b = unique_slug("b");
+    let (_, _) = create_org_for_user(router.clone(), &a, "A").await;
+    let (_, mine) = create_org_for_user(router.clone(), &b, "B").await;
+    let id = mine["id"].as_str().unwrap().to_owned();
+
+    let resp = router
+        .oneshot(patch_org(&id, json!({ "slug": a })))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CONFLICT);
+    let body = read_value(resp).await;
+    assert_eq!(body["error"]["code"], "SLUG_TAKEN");
+
+    cleanup_user(pool, user).await.unwrap();
+}
+
+#[tokio::test]
+#[ignore]
+async fn patch_invalid_slug_returns_400_with_field() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let user = make_user(&pool, "orgs-api").await;
+    let (router, _) = build_test_app_with_pg(pool.clone(), |cfg| cfg.tenancy.enabled = true).await;
+    let router = with_session(router, user, None, None);
+
+    let slug = unique_slug("inv");
+    let (_, body) = create_org_for_user(router.clone(), &slug, "X").await;
+    let id = body["id"].as_str().unwrap().to_owned();
+
+    let resp = router
+        .clone()
+        .oneshot(patch_org(&id, json!({ "slug": "admin" }))) // reserved
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    let body = read_value(resp).await;
+    assert_eq!(body["error"]["code"], "SLUG_INVALID");
+    assert_eq!(body["error"]["field"], "slug");
+
+    cleanup_user(pool, user).await.unwrap();
+}
+
+#[tokio::test]
+#[ignore]
+async fn patch_empty_body_returns_400_empty_patch() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let user = make_user(&pool, "orgs-api").await;
+    let (router, _) = build_test_app_with_pg(pool.clone(), |cfg| cfg.tenancy.enabled = true).await;
+    let router = with_session(router, user, None, None);
+    let slug = unique_slug("e");
+    let (_, body) = create_org_for_user(router.clone(), &slug, "E").await;
+    let id = body["id"].as_str().unwrap().to_owned();
+
+    let resp = router.oneshot(patch_org(&id, json!({}))).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(read_value(resp).await["error"]["code"], "EMPTY_PATCH");
+
+    cleanup_user(pool, user).await.unwrap();
+}
+
+#[tokio::test]
+#[ignore]
+async fn patch_non_owner_member_gets_forbidden_on_slug_change() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let owner = make_user(&pool, "orgs-api").await;
+    let other = make_user(&pool, "orgs-api").await;
+    let (router, _) = build_test_app_with_pg(pool.clone(), |cfg| cfg.tenancy.enabled = true).await;
+    let owner_router = with_session(router.clone(), owner, None, None);
+    let other_router = with_session(router, other, None, None);
+
+    let slug = unique_slug("non");
+    let (_, body) = create_org_for_user(owner_router.clone(), &slug, "N").await;
+    let id = body["id"].as_str().unwrap().to_owned();
+
+    // Non-member sees 404 (cloak).
+    let resp = other_router
+        .oneshot(patch_org(&id, json!({ "slug": unique_slug("hi") })))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+
+    sqlx::query("DELETE FROM users WHERE id = ANY($1)")
+        .bind(&[owner.0, other.0][..])
+        .execute(&pool)
+        .await
+        .unwrap();
+}

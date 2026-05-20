@@ -10,10 +10,10 @@ use common::{make_user, unique_slug};
 use status_monitor::domain::{OrgId, Role};
 use status_monitor::storage::orgs as orgs_store;
 use status_monitor::storage::{
-    RemoveOutcome, RestoreOutcome, create_org_with_owner, ensure_default_org, is_active_member,
-    is_owner, list_deleted_orgs_deleted_by, list_members, list_orgs_for_user, owner_org_count,
-    personal_org_for_user, remove_member, restore_org, slug_is_available, soft_delete_org,
-    update_org_name,
+    RemoveOutcome, RestoreOutcome, UpdateOrgOutcome, create_org_with_owner, ensure_default_org,
+    is_active_member, is_owner, list_deleted_orgs_deleted_by, list_members, list_orgs_for_user,
+    owner_org_count, personal_org_for_user, remove_member, restore_org, slug_is_available,
+    soft_delete_org, update_org_fields,
 };
 use uuid::Uuid;
 
@@ -106,10 +106,13 @@ async fn list_orgs_excludes_soft_deleted_and_update_name_works() {
             .any(|o| o.org.id == org.id && o.role == Role::Owner)
     );
 
-    let renamed = update_org_name(&pool, org.id, user, "New name")
+    let renamed = match update_org_fields(&pool, org.id, user, Some("New name"), None)
         .await
         .unwrap()
-        .unwrap();
+    {
+        UpdateOrgOutcome::Updated(o) => o,
+        other => panic!("expected Updated, got {other:?}"),
+    };
     assert_eq!(renamed.name, "New name");
 
     assert!(soft_delete_org(&pool, org.id, user).await.unwrap());
@@ -371,6 +374,200 @@ async fn personal_org_collision_retry_succeeds() {
             .await
             .unwrap();
     }
+}
+
+#[tokio::test]
+#[ignore]
+async fn update_org_slug_happy_path_records_audit() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let user = make_user(&pool, "slug").await;
+    let from = unique_slug("from");
+    let org = create_org_with_owner(&pool, user, &from, "Co", 3)
+        .await
+        .unwrap()
+        .unwrap();
+    let to = unique_slug("to");
+
+    let outcome = update_org_fields(&pool, org.id, user, None, Some(&to))
+        .await
+        .unwrap();
+    let renamed = match outcome {
+        UpdateOrgOutcome::Updated(o) => o,
+        other => panic!("expected Updated, got {other:?}"),
+    };
+    assert_eq!(renamed.slug, to);
+    assert_eq!(renamed.id, org.id);
+    assert!(
+        slug_is_available(&pool, &from).await.unwrap(),
+        "old slug freed"
+    );
+    assert!(!slug_is_available(&pool, &to).await.unwrap());
+
+    let (action, meta): (String, serde_json::Value) = sqlx::query_as(
+        "SELECT action, metadata FROM org_audit_log \
+         WHERE org_id = $1 AND action = 'org.slug_changed' \
+         ORDER BY occurred_at DESC LIMIT 1",
+    )
+    .bind(org.id.0)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(action, "org.slug_changed");
+    assert_eq!(meta["from"], from);
+    assert_eq!(meta["to"], to);
+
+    sqlx::query("DELETE FROM users WHERE id = $1")
+        .bind(user.0)
+        .execute(&pool)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+#[ignore]
+async fn update_org_slug_same_slug_is_noop_updated() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let user = make_user(&pool, "slug").await;
+    let slug = unique_slug("same");
+    let org = create_org_with_owner(&pool, user, &slug, "Co", 3)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let outcome = update_org_fields(&pool, org.id, user, None, Some(&slug))
+        .await
+        .unwrap();
+    assert!(matches!(outcome, UpdateOrgOutcome::Updated(o) if o.slug == slug));
+
+    // No `org.slug_changed` audit row written for a no-op (combined fn only
+    // audits actually-changed fields).
+    let (count,): (i64,) = sqlx::query_as(
+        "SELECT count(*) FROM org_audit_log WHERE org_id = $1 AND action = 'org.slug_changed'",
+    )
+    .bind(org.id.0)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(count, 0, "no-op slug must not write audit");
+
+    sqlx::query("DELETE FROM users WHERE id = $1")
+        .bind(user.0)
+        .execute(&pool)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+#[ignore]
+async fn update_org_slug_conflict_returns_slug_taken() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let user = make_user(&pool, "slug").await;
+    let mine = unique_slug("mine");
+    let taken = unique_slug("taken");
+    create_org_with_owner(&pool, user, &taken, "T", 3)
+        .await
+        .unwrap()
+        .unwrap();
+    let org = create_org_with_owner(&pool, user, &mine, "M", 3)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let outcome = update_org_fields(&pool, org.id, user, None, Some(&taken))
+        .await
+        .unwrap();
+    assert!(matches!(outcome, UpdateOrgOutcome::SlugTaken));
+    // Original row's slug is unchanged.
+    let still = orgs_store::get_org(&pool, org.id).await.unwrap().unwrap();
+    assert_eq!(still.slug, mine);
+
+    sqlx::query("DELETE FROM users WHERE id = $1")
+        .bind(user.0)
+        .execute(&pool)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+#[ignore]
+async fn update_org_slug_not_found_on_missing_or_soft_deleted() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let user = make_user(&pool, "slug").await;
+    let target = unique_slug("x");
+    // Missing org.
+    let outcome = update_org_fields(&pool, OrgId(Uuid::now_v7()), user, None, Some(&target))
+        .await
+        .unwrap();
+    assert!(matches!(outcome, UpdateOrgOutcome::NotFound));
+
+    // Soft-deleted org.
+    let org = create_org_with_owner(&pool, user, &unique_slug("del"), "D", 3)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(soft_delete_org(&pool, org.id, user).await.unwrap());
+    let after = unique_slug("after");
+    let outcome = update_org_fields(&pool, org.id, user, None, Some(&after))
+        .await
+        .unwrap();
+    assert!(matches!(outcome, UpdateOrgOutcome::NotFound));
+
+    sqlx::query("DELETE FROM users WHERE id = $1")
+        .bind(user.0)
+        .execute(&pool)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+#[ignore]
+async fn update_org_fields_combined_name_and_slug_is_atomic() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let user = make_user(&pool, "slug").await;
+    let from = unique_slug("comb");
+    let org = create_org_with_owner(&pool, user, &from, "Old name", 3)
+        .await
+        .unwrap()
+        .unwrap();
+    let to = unique_slug("comb-new");
+
+    let outcome = update_org_fields(&pool, org.id, user, Some("New name"), Some(&to))
+        .await
+        .unwrap();
+    let updated = match outcome {
+        UpdateOrgOutcome::Updated(o) => o,
+        other => panic!("expected Updated, got {other:?}"),
+    };
+    assert_eq!(updated.name, "New name");
+    assert_eq!(updated.slug, to);
+
+    // Both audit rows written in the same tx.
+    let actions: Vec<(String,)> = sqlx::query_as(
+        "SELECT action FROM org_audit_log WHERE org_id = $1 AND action IN ('org.slug_changed', 'org.renamed')",
+    )
+    .bind(org.id.0)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    let names: std::collections::HashSet<_> = actions.into_iter().map(|(a,)| a).collect();
+    assert!(names.contains("org.slug_changed"));
+    assert!(names.contains("org.renamed"));
+
+    sqlx::query("DELETE FROM users WHERE id = $1")
+        .bind(user.0)
+        .execute(&pool)
+        .await
+        .unwrap();
 }
 
 // Silence unused-import warnings when none of the live-PG tests run because
