@@ -227,6 +227,11 @@ async fn root_on_non_subdomain_host_falls_through_to_dashboard() {
     for (host, why) in [
         (Some(BASE_DOMAIN.to_string()), "bare base domain"),
         (Some(format!("a.b.{BASE_DOMAIN}")), "deeper subdomain"),
+        (
+            Some(format!("app.{BASE_DOMAIN}")),
+            "operator subdomain (reserved)",
+        ),
+        (Some(format!("www.{BASE_DOMAIN}")), "reserved label"),
         (None, "missing Host header"),
     ] {
         assert_eq!(

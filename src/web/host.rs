@@ -125,9 +125,13 @@ where
 }
 
 /// True when the SaaS subdomain surface is live AND the request's `Host`
-/// parses as a `{slug}.{base_domain}` (so an opted-in org *might* answer).
+/// parses as a `{slug}.{base_domain}` for a label that no operator
+/// subdomain occupies (`app.{base_domain}`, `www.{base_domain}`, etc.).
 /// The `/` dispatcher uses this to choose between the operator dashboard
-/// and the per-org public page; the actual org lookup still happens through
+/// and the per-org public page. Reserved labels can't be claimed by an
+/// org at signup, so filtering them here keeps `app.{base_domain}` (and
+/// the other operator hosts) on the dashboard surface instead of 404'ing
+/// against an org that can't exist. The org lookup still happens through
 /// [`StatusPageOrg`], which 404s when the slug is unknown or opted out.
 pub fn is_subdomain_public_request(state: &AppState, headers: &HeaderMap) -> bool {
     if !subdomain_public_routes_enabled(&state.cfg) {
@@ -137,7 +141,10 @@ pub fn is_subdomain_public_request(state: &AppState, headers: &HeaderMap) -> boo
         return false;
     };
     let host = host.split(':').next().unwrap_or(host);
-    extract_status_slug(host, &state.cfg.public_status.base_domain).is_some()
+    let Some(parsed) = extract_status_slug(host, &state.cfg.public_status.base_domain) else {
+        return false;
+    };
+    !crate::domain::reserved_slugs::is_reserved(parsed.slug)
 }
 
 #[cfg(test)]
