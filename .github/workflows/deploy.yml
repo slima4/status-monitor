@@ -411,6 +411,20 @@ jobs:
             docker compose up -d --no-build status-monitor
           fi
 
+          # Caddy: bind-mounted Caddyfile. A `git checkout` of a deploy
+          # that edits the file leaves the running container reading the
+          # OLD inode (single-file bind mounts pin at mount time, and a
+          # `caddy reload` then sees "config is unchanged"). Detect drift
+          # by hashing the file on disk vs inside the container; recreate
+          # only when they differ. Quiet on no-op deploys; fixes the file
+          # without manual `docker compose restart caddy` when it changed.
+          host_hash=$(sha256sum Caddyfile 2>/dev/null | awk '{print $1}')
+          ctr_hash=$(docker compose exec -T caddy sha256sum /etc/caddy/Caddyfile 2>/dev/null | awk '{print $1}')
+          if [ -n "$host_hash" ] && [ "$host_hash" != "$ctr_hash" ]; then
+            echo "Caddyfile drift (host=${host_hash:0:12} ctr=${ctr_hash:0:12}); recreating caddy"
+            docker compose up -d --no-build --force-recreate caddy
+          fi
+
           # Metrics+logs sidecar: profile-gated, scoped to `alloy` so the
           # app / postgres / caddy are never recreated as a side effect.
           # Same all-three-metrics-creds gate as the .env upsert (logs ride
