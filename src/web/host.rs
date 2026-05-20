@@ -19,6 +19,22 @@ use crate::api::subdomain_public_routes_enabled;
 use crate::app::AppState;
 use crate::domain::OrgId;
 
+/// Subdomain labels that route to the operator surface (dashboard + auth +
+/// API) instead of the per-org public page. These are NOT the
+/// signup-collision list (`crate::domain::reserved_slugs`) — that list is
+/// much broader (~75 entries) and exists to keep an org from claiming a
+/// slug that *could* collide with any operator URL or namespace. Mixing
+/// the two here would route every reserved label (e.g. `acme`,
+/// `hetzner`, `gdpr`) to the operator login page, multiplying the
+/// operator surface across dozens of hosts and leaking the reserved list
+/// via response codes. Keep this set minimal — only labels actually
+/// served by the operator front door.
+const OPERATOR_LABELS: &[&str] = &["app"];
+
+fn is_operator_label(slug: &str) -> bool {
+    OPERATOR_LABELS.iter().any(|l| slug.eq_ignore_ascii_case(l))
+}
+
 /// Parsed `{slug}.{base_domain}` host. Borrows the slug out of the `Host`
 /// header so the common path allocates nothing.
 #[derive(Debug, PartialEq, Eq)]
@@ -125,14 +141,15 @@ where
 }
 
 /// True when the SaaS subdomain surface is live AND the request's `Host`
-/// parses as a `{slug}.{base_domain}` for a label that no operator
-/// subdomain occupies (`app.{base_domain}`, `www.{base_domain}`, etc.).
-/// The `/` dispatcher uses this to choose between the operator dashboard
-/// and the per-org public page. Reserved labels can't be claimed by an
-/// org at signup, so filtering them here keeps `app.{base_domain}` (and
-/// the other operator hosts) on the dashboard surface instead of 404'ing
-/// against an org that can't exist. The org lookup still happens through
-/// [`StatusPageOrg`], which 404s when the slug is unknown or opted out.
+/// parses as a non-operator `{slug}.{base_domain}`. The `/` dispatcher
+/// uses this to choose between the operator dashboard and the per-org
+/// public page. Only the operator label set ([`OPERATOR_LABELS`]) falls
+/// through to the dashboard; any other label — including signup-reserved
+/// ones like `acme` or `hetzner` — keeps the public dispatcher, which
+/// then 404s through [`StatusPageOrg`] when no opted-in org owns that
+/// slug. Routing the broader reserved list here would multiply the
+/// operator surface (login, API, settings) across dozens of hosts and
+/// leak the reserved set via response-code fingerprints.
 pub fn is_subdomain_public_request(state: &AppState, headers: &HeaderMap) -> bool {
     if !subdomain_public_routes_enabled(&state.cfg) {
         return false;
@@ -144,7 +161,7 @@ pub fn is_subdomain_public_request(state: &AppState, headers: &HeaderMap) -> boo
     let Some(parsed) = extract_status_slug(host, &state.cfg.public_status.base_domain) else {
         return false;
     };
-    !crate::domain::reserved_slugs::is_reserved(parsed.slug)
+    !is_operator_label(parsed.slug)
 }
 
 #[cfg(test)]

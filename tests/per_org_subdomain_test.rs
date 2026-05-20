@@ -213,31 +213,49 @@ async fn subdomain_root_serves_public_page() {
 
 #[tokio::test]
 #[ignore]
-async fn root_on_non_subdomain_host_falls_through_to_dashboard() {
-    // Hosts that don't parse as `{slug}.{base_domain}` (bare base, deeper
-    // subdomain, missing Host) must NOT be treated as the public surface —
-    // they should hit the operator dashboard. With no session cookie, that
-    // branch redirects to /login (303), proving the dispatcher reached the
-    // dashboard path and not `public_status::index` (which would 404).
+async fn root_routes_operator_host_to_dashboard_non_operator_slugs_to_404() {
+    // The two security-relevant branches:
+    //  * `app.{base_domain}` (operator label) → dashboard. No session cookie
+    //    → 303 to /login, proving the dispatcher reached the dashboard path.
+    //  * Slug-shaped non-operator labels (e.g. `www`, `hetzner`) → public
+    //    dispatcher → 404 via `StatusPageOrg` (no org owns the slug). This
+    //    is the load-bearing property: a phishing-style host that *looks*
+    //    like a tenant page (real cert, real domain) must NOT expose the
+    //    operator login surface.
+    //
+    // Malformed shapes (bare base, deeper subdomain, missing Host) all fail
+    // `extract_status_slug` and fall through to the dashboard branch (303).
+    // Acceptable: bare base isn't routable in prod (no apex A record), the
+    // deeper-subdomain shape isn't a useful phishing surface (no realistic
+    // single-label confusion target), and missing Host is an HTTP/1.0-style
+    // anomaly. The asserted property is "slug-shaped attacker-controlled
+    // labels don't get the operator surface."
     let Some(pool) = common::pg_pool_from_env().await else {
         return;
     };
     let (app, _default) = common::build_test_app_with_pg(pool, saas_subdomain).await;
 
+    assert_eq!(
+        get_path(&app, "/", Some(&format!("app.{BASE_DOMAIN}"))).await,
+        StatusCode::SEE_OTHER,
+        "operator host `app.{BASE_DOMAIN}` must reach the dashboard branch"
+    );
+
     for (host, why) in [
-        (Some(BASE_DOMAIN.to_string()), "bare base domain"),
-        (Some(format!("a.b.{BASE_DOMAIN}")), "deeper subdomain"),
         (
-            Some(format!("app.{BASE_DOMAIN}")),
-            "operator subdomain (reserved)",
+            format!("www.{BASE_DOMAIN}"),
+            "reserved label that isn't an operator subdomain",
         ),
-        (Some(format!("www.{BASE_DOMAIN}")), "reserved label"),
-        (None, "missing Host header"),
+        (format!("hetzner.{BASE_DOMAIN}"), "broader reserved label"),
+        (
+            format!("admin.{BASE_DOMAIN}"),
+            "phishing-bait label (admin)",
+        ),
     ] {
         assert_eq!(
-            get_path(&app, "/", host.as_deref()).await,
-            StatusCode::SEE_OTHER,
-            "operator-style `/` ({why}) must redirect to /login, not 404"
+            get_path(&app, "/", Some(&host)).await,
+            StatusCode::NOT_FOUND,
+            "non-operator slug-shaped `/` ({why}) must 404 via public dispatcher, not leak operator surface"
         );
     }
 }
