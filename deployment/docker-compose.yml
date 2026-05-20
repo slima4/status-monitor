@@ -93,8 +93,8 @@ services:
       # /status on the operator host). For the SaaS wildcard surface set
       # these in .env — see .env.example "Per-org status pages (SaaS)".
       # base_domain reuses STATUS_MONITOR_DOMAIN (it must equal the Caddy
-      # base domain so {slug}.status.{domain} resolves); unused unless
-      # SUBDOMAIN_PUBLIC_ROUTES is true.
+      # base domain so {slug}.{domain} resolves via the apex wildcard);
+      # unused unless SUBDOMAIN_PUBLIC_ROUTES is true.
       STATUS_MONITOR_TENANCY__ENABLED: ${STATUS_MONITOR_TENANCY_ENABLED:-false}
       STATUS_MONITOR_TENANCY__PATH_BASED_PUBLIC_ROUTES: ${STATUS_MONITOR_PATH_BASED_PUBLIC_ROUTES:-true}
       STATUS_MONITOR_TENANCY__SUBDOMAIN_PUBLIC_ROUTES: ${STATUS_MONITOR_SUBDOMAIN_PUBLIC_ROUTES:-false}

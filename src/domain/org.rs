@@ -180,8 +180,8 @@ mod tests {
 
     #[test]
     fn accepts_basic_slug() {
-        assert!(validate_slug("acme").is_ok());
         assert!(validate_slug("acme-corp").is_ok());
+        assert!(validate_slug("widgets").is_ok());
         assert!(validate_slug("a1b").is_ok());
     }
 

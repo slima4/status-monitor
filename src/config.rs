@@ -257,7 +257,7 @@ pub struct TenancyConfig {
     /// tenant. A startup assertion refuses to boot with this flag and
     /// `tenancy.enabled` both true.
     pub path_based_public_routes: bool,
-    /// Wildcard subdomain public surface (`*.status.{public_status.base_domain}`).
+    /// Wildcard subdomain public surface (`*.{public_status.base_domain}`).
     /// Defaults to `false`. Requires `tenancy.enabled = true` and a
     /// well-formed `public_status.base_domain`; a startup assertion refuses
     /// to boot otherwise.
@@ -323,12 +323,11 @@ impl Default for RetentionConfig {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct PublicStatusConfig {
-    /// Base domain for `*.status.{base_domain}` per-org status pages. Used
-    /// only when `tenancy.subdomain_public_routes = true`. A startup
-    /// assertion refuses to boot when this is empty or has no dot in that
-    /// mode — without that, `format!(".status.{}", "")` matches arbitrary
-    /// `Host` headers ending in `.status.` and the slug extractor accepts
-    /// attacker-supplied hosts.
+    /// Base domain for `*.{base_domain}` per-org status pages (apex-wildcard
+    /// shape). Used only when `tenancy.subdomain_public_routes = true`. A
+    /// startup assertion refuses to boot when this is empty or has no dot in
+    /// that mode — without that, the strip-suffix parser collapses to a bare
+    /// dot match and accepts arbitrary `Host` headers.
     pub base_domain: String,
 
     pub cache_max_orgs: u32,

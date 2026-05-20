@@ -140,9 +140,9 @@ pub fn assert_cookie_scope_safe(cfg: &AppConfig) {
     if base == cd || base.ends_with(&format!(".{cd}")) {
         panic!(
             "auth.session.cookie_domain={cookie_domain:?} overlaps the \
-             status-page wildcard *.status.{base}. Operator session cookies \
-             would leak to every tenant's status page. Either unset \
-             cookie_domain, or move the status surface to a different parent zone."
+             status-page wildcard *.{base}. Operator session cookies would \
+             leak to every tenant's status page. Either unset cookie_domain, \
+             or move the status surface to a different parent zone."
         );
     }
 }
@@ -241,7 +241,7 @@ mod tests {
         cfg.tenancy.enabled = true;
         cfg.tenancy.subdomain_public_routes = true;
         cfg.tenancy.path_based_public_routes = false;
-        cfg.public_status.base_domain = "status.example.com".into();
+        cfg.public_status.base_domain = "example.com".into();
         cfg.auth.session.cookie_domain = String::new();
         cfg
     }
@@ -300,8 +300,8 @@ mod tests {
 
     #[test]
     fn cookie_domain_overlapping_status_wildcard_panics() {
-        // `.example.com` is also sent to `*.status.example.com`, so the
-        // operator session would ride along to every tenant's page.
+        // `.example.com` is also sent to `*.example.com`, so the operator
+        // session would ride along to every tenant's page.
         let mut cfg = saas_subdomain_cfg();
         cfg.public_status.base_domain = "example.com".into();
         cfg.auth.session.cookie_domain = ".example.com".into();
@@ -311,8 +311,8 @@ mod tests {
     #[test]
     fn cookie_domain_equal_to_base_panics() {
         let mut cfg = saas_subdomain_cfg();
-        cfg.public_status.base_domain = "status.example.com".into();
-        cfg.auth.session.cookie_domain = "status.example.com".into();
+        cfg.public_status.base_domain = "example.com".into();
+        cfg.auth.session.cookie_domain = "example.com".into();
         assert_panics("overlaps the", move || assert_cookie_scope_safe(&cfg));
     }
 
@@ -329,7 +329,7 @@ mod tests {
     #[test]
     fn disjoint_cookie_domain_is_safe() {
         let mut cfg = saas_subdomain_cfg();
-        cfg.public_status.base_domain = "status.example.com".into();
+        cfg.public_status.base_domain = "example.com".into();
         cfg.auth.session.cookie_domain = ".other-zone.net".into();
         assert_cookie_scope_safe(&cfg);
     }

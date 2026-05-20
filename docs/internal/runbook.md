@@ -16,7 +16,7 @@ When you suspect production is down or degraded.
 # Public health check
 curl https://app.your-domain.com/healthz                  # expect 200 OK
 curl https://app.your-domain.com/readyz                   # expect 200 OK
-curl https://acme.status.your-domain.com/                 # expect 200, HTML
+curl https://acme.your-domain.com/                 # expect 200, HTML
 
 # Server is up?
 ssh your-server "uptime"
@@ -134,7 +134,7 @@ ssh your-server "cd /opt/status-monitor && docker compose exec caddy caddy reloa
 # Update .env, then restart caddy:
 ssh your-server "cd /opt/status-monitor && docker compose up -d caddy"
 # Verify the wildcard cert still works:
-curl https://acme.status.your-domain.com/
+curl https://acme.your-domain.com/
 # Once verified, revoke the old token in the Hetzner console
 ```
 

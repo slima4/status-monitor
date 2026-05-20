@@ -207,9 +207,9 @@ pub const RESERVED_SLUGS: &[&str] = &[
     "raygun",
     "appsignal",
     // ── Subdomain-safety additions ───────────────────────────────────────
-    // Keeps `*.status.{base_domain}` from colliding with system endpoints,
-    // brand pages, and sensitive workflows. `list_has_no_duplicates` gates
-    // future edits.
+    // Keeps `*.{base_domain}` from colliding with system endpoints, brand
+    // pages, and sensitive workflows. `list_has_no_duplicates` gates future
+    // edits.
 
     // System / infrastructure
     "account",
@@ -310,6 +310,7 @@ pub const RESERVED_SLUGS: &[&str] = &[
     // Auth / identity
     "authenticate",
     "captcha",
+    "cookie",
     "cookies",
     "credentials",
     "csrf",
@@ -507,6 +508,82 @@ pub const RESERVED_SLUGS: &[&str] = &[
     "verify",
     "verification",
     "verified",
+    // ── Apex-wildcard additions ──────────────────────────────────────────
+    // Flattening `{slug}.status.{base}` → `{slug}.{base}` collapses the
+    // operator and user surfaces under one parent label. Anything that ships
+    // (or could ship) as an apex-level operator subdomain must be unclaimable.
+    //
+    // ACME / CA / infra brands
+    "acme",
+    "caddy",
+    "hetzner",
+    "letsencrypt",
+    "lets-encrypt",
+    // k8s / probe shapes
+    "healthz",
+    "liveness",
+    "livez",
+    "metricz",
+    "readiness",
+    "readyz",
+    // Privacy / compliance landings
+    "ccpa",
+    "dpa",
+    "dpo",
+    "gdpr",
+    // Abuse / takedowns
+    "aup",
+    "copyright",
+    "dmca",
+    // Security disclosure
+    "cve",
+    "disclosure",
+    "security",
+    "transparency",
+    "vuln",
+    "vulnerability",
+    // Audit / compliance pages
+    "audit",
+    "auditlog",
+    "audit-log",
+    // Product surface
+    "incident",
+    "incidents",
+    "postmortem",
+    "postmortems",
+    // Ops references
+    "playbook",
+    "playbooks",
+    "runbook",
+    "runbooks",
+    // Reports
+    "report",
+    "reporting",
+    "reports",
+    // Marketing
+    "homepage",
+    "landing",
+    // Mobile-web alias
+    "m",
+    "mobile",
+    // Shortlink / tracking shorthand
+    "go",
+    "goto",
+    "r",
+    "redir",
+    "redirect",
+    "t",
+    "tr",
+    // Asset surfaces
+    "css",
+    "font",
+    "fonts",
+    "i",
+    "js",
+    // Cache ops
+    "clear",
+    "flush",
+    "purge",
 ];
 
 static SET: LazyLock<HashSet<&'static str>> =
@@ -531,7 +608,7 @@ mod tests {
 
     #[test]
     fn non_reserved_words_pass() {
-        assert!(!is_reserved("acme"));
+        assert!(!is_reserved("acme-corp"));
         assert!(!is_reserved("personal-fox-3a9k7m"));
     }
 
@@ -555,6 +632,17 @@ mod tests {
             "checkout",
             "production",
             "administrator",
+            // Apex-wildcard additions
+            "acme",
+            "hetzner",
+            "healthz",
+            "security",
+            "incident",
+            "homepage",
+            "redirect",
+            "js",
+            "purge",
+            "gdpr",
         ] {
             assert!(is_reserved(s), "missing reserved slug: {s}");
         }

@@ -16,7 +16,7 @@
 #   RESET_CH      1 = purge org's CH rows first (default: 0)
 #
 # Requires the stack already up. SaaS mode → page at
-# {slug}.status.{BASE_DOMAIN}; self-host → {BASE_DOMAIN}/status.
+# {slug}.{BASE_DOMAIN}; self-host → {BASE_DOMAIN}/status.
 set -euo pipefail
 
 SLUG="${SLUG:-default}"
@@ -115,6 +115,6 @@ SQL
 
 echo
 echo "Seeded org '${SLUG}' (id ${ORG})."
-echo "SaaS:      https://${SLUG}.status.${BASE_DOMAIN}/status"
+echo "SaaS:      https://${SLUG}.${BASE_DOMAIN}/status"
 echo "Self-host: https://app.${BASE_DOMAIN}/status"
 echo "(page cache TTL ~10s; wait a moment before the first load)"

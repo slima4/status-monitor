@@ -76,7 +76,7 @@ services:
       # Mirror SaaS: per-subdomain public pages. Path-based is forbidden under
       # tenancy (panics — would serve the default org to every tenant). lvh.me
       # is a public wildcard that resolves *.lvh.me -> 127.0.0.1, so
-      # {slug}.status.lvh.me:8080 hits the local stack with no /etc/hosts.
+      # {slug}.lvh.me:8080 hits the local stack with no /etc/hosts.
       STATUS_MONITOR_TENANCY__PATH_BASED_PUBLIC_ROUTES: "false"
       STATUS_MONITOR_TENANCY__SUBDOMAIN_PUBLIC_ROUTES: "true"
       STATUS_MONITOR_PUBLIC_STATUS__BASE_DOMAIN: "lvh.me"

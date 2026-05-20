@@ -3,12 +3,16 @@
 # Subdomain layout (STATUS_MONITOR_DOMAIN is the BASE domain, e.g. example.com):
 #   app.{domain}              → Operator UI + API (basic auth), plus the
 #                               single-org /status page in self-host mode
-#   *.status.{domain}         → Per-org public status pages (wildcard cert)
+#   *.{domain}                → Per-org public status pages (wildcard cert,
+#                               apex-wildcard shape — `acme.{domain}`, not
+#                               `acme.status.{domain}`)
 #
 # What this does:
 #   - Automatic HTTPS via Let's Encrypt (HTTP/2 and HTTP/3)
-#   - app.{domain} cert via HTTP-01; *.status.{domain} wildcard cert via
-#     Hetzner DNS-01 (scoped to that site — self-host needs no DNS token)
+#   - app.{domain} cert on its own block (per-host HTTP-01) — kept off the
+#     wildcard so a leak of the wildcard key never touches the operator host
+#   - *.{domain} wildcard cert via Hetzner DNS-01 (scoped to that site —
+#     self-host needs no DNS token)
 #   - Operator UI + API behind the app's GitHub OAuth session (no edge auth)
 #   - Public health probes (no auth) at /healthz and /readyz
 #   - Hides /metrics from the public internet (still scrapeable internally)
@@ -20,14 +24,16 @@
 #   STATUS_MONITOR_DOMAIN       — base domain, e.g. example.com
 #   STATUS_MONITOR_ACME_EMAIL   — for Let's Encrypt notifications
 #
-# Required only for the *.status wildcard surface (SaaS):
+# Required only for the *.{domain} wildcard surface (SaaS):
 #   HETZNER_DNS_API_TOKEN       — zone-edit token for the DNS-01 challenge
 {
 	email {$STATUS_MONITOR_ACME_EMAIL}
 
 	# No global `acme_dns`: that would force DNS-01 on app.{domain} too and
 	# make self-host depend on a Hetzner token it doesn't need. The DNS-01
-	# issuer is scoped into the *.status site block instead.
+	# issuer is scoped into the wildcard site block instead. Keeping
+	# app.{domain} on its own per-host cert also caps the blast radius of a
+	# wildcard-key leak (it doesn't cover the operator host).
 
 	# Uncomment ONLY while testing — uses Let's Encrypt staging CA so you
 	# don't hit production rate limits. Staging certs are NOT browser-trusted.
@@ -215,20 +221,23 @@ app.{$STATUS_MONITOR_DOMAIN} {
 }
 
 # ═══════════════════════════════════════════════════════════════════════
-# Public per-org status pages — wildcard
+# Public per-org status pages — apex wildcard
 # ═══════════════════════════════════════════════════════════════════════
-# Every {slug}.status.{domain} resolves here. The Rust app reads the
-# original Host header to map the slug → org; an unknown or opted-out slug
-# is a 404 from the app, never a cert error (the wildcard cert covers all).
-*.status.{$STATUS_MONITOR_DOMAIN} {
+# Every {slug}.{domain} resolves here EXCEPT app.{domain}, which Caddy
+# matches more-specific-first against the operator site block above (Caddy
+# routes the exact host before the wildcard, so the wildcard cert never
+# covers the operator host). The Rust app reads the original Host header to
+# map the slug → org; an unknown or opted-out slug is a 404 from the app,
+# never a cert error (the wildcard cert covers all valid labels).
+*.{$STATUS_MONITOR_DOMAIN} {
 	encode gzip zstd
 
 	# Wildcard cert via Hetzner DNS-01 (HTTP-01 can't validate a wildcard),
 	# scoped to this site only. First issuance: Caddy writes a
-	# `_acme-challenge.status.{domain}` TXT record through the Hetzner Cloud
-	# DNS API, Let's Encrypt validates it, cert issued — allow 60-90s.
-	# Renewals are silent. self-host never reaches this site, so it needs no
-	# DNS token. HETZNER_DNS_API_TOKEN is a Hetzner Cloud API token (project
+	# `_acme-challenge.{domain}` TXT record through the Hetzner Cloud DNS
+	# API, Let's Encrypt validates it, cert issued — allow 60-90s. Renewals
+	# are silent. self-host never reaches this site, so it needs no DNS
+	# token. HETZNER_DNS_API_TOKEN is a Hetzner Cloud API token (project
 	# scoped, Read & Write) and the zone must be in that project.
 	tls {
 		dns hetzner {$HETZNER_DNS_API_TOKEN}

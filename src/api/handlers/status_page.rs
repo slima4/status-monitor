@@ -338,7 +338,7 @@ fn logo_url(base: Option<&str>, path: &str) -> Option<String> {
 fn public_base(state: &AppState, slug: &str) -> Option<String> {
     if subdomain_public_routes_enabled(&state.cfg) {
         return Some(format!(
-            "https://{slug}.status.{}",
+            "https://{slug}.{}",
             state.cfg.public_status.base_domain
         ));
     }

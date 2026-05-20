@@ -1,8 +1,8 @@
 # Per-org status pages
 
 In SaaS mode every org gets its own public status page at
-`{slug}.status.{base_domain}` — `acme.status.example.com`,
-`globex.status.example.com`, and so on. Each page renders **only** that
+`{slug}.{base_domain}` — `acme.example.com`, `globex.example.com`, and
+so on (apex-wildcard shape). Each page renders **only** that
 org's published components, incidents, and maintenance, with that org's
 branding. It is opt-in: a new org's page is off until the owner turns it
 on.
@@ -18,7 +18,7 @@ For the wildcard cert and reverse-proxy setup see
 | Mode | Config | Public surface |
 |---|---|---|
 | Self-host | `tenancy.enabled = false` (default) | one org, served path-based at `/status` on the operator host |
-| SaaS | `tenancy.enabled = true` + `tenancy.subdomain_public_routes = true` | one page per org at `{slug}.status.{base_domain}` |
+| SaaS | `tenancy.enabled = true` + `tenancy.subdomain_public_routes = true` | one page per org at `{slug}.{base_domain}` |
 
 Self-host never pays the subdomain path: there is a single org, so the
 page is mounted on the operator host and `public_status_enabled` is set on
@@ -36,20 +36,23 @@ The org is resolved from the request `Host` header, not the path:
 
 | Host | Result |
 |---|---|
-| `acme.status.example.com`, org enabled | that org's page |
-| `acme.status.example.com`, org disabled or soft-deleted | **404** |
-| `nope.status.example.com`, no such slug | **404** |
-| `a.b.status.example.com` (extra label) | **404** |
-| `status.example.com` (no slug label) | **404** |
+| `acme.example.com`, org enabled | that org's page |
+| `acme.example.com`, org disabled or soft-deleted | **404** |
+| `nope.example.com`, no such slug | **404** |
+| `a.b.example.com` (extra label) | **404** |
+| `example.com` (no slug label, bare base) | **404** |
 | missing `Host` header | **404** |
 
 `base_domain` must be a multi-label domain (it needs at least one dot);
 the boot assertion refuses an empty or single-label value, because a
 loose base would let the slug extractor match arbitrary `Host` headers.
 
-The wildcard `*.status.{base_domain}` DNS record plus a wildcard TLS cert
+The apex wildcard `*.{base_domain}` DNS record plus a wildcard TLS cert
 (Let's Encrypt via the Hetzner DNS-01 challenge) means a new org's page
 works the instant the owner enables it — no per-org DNS or cert step.
+Operator subdomains (`app.{base_domain}`, `mail.{base_domain}`, etc.)
+use explicit DNS records that take precedence over the wildcard, and
+the operator host is kept on its own per-host cert.
 
 ## Enabling and branding an org's page
 
@@ -129,9 +132,8 @@ org has the same effect via the purge worker.
 - **Operator sessions never reach status subdomains.** The session
   cookie is host-only (`auth.session.cookie_domain = ""`), so the browser
   scopes it to the operator host and never sends it to
-  `*.status.{base_domain}`. The binary refuses to boot if
-  `cookie_domain` is set to a parent zone that would overlap the status
-  wildcard.
+  `*.{base_domain}`. The binary refuses to boot if `cookie_domain` is
+  set to a parent zone that would overlap the apex wildcard.
 - **No operator surface on the page.** The status page renders no
   operator UI, sets no cookies, and never echoes request auth headers.
 - **Tenant isolation.** A request for org B's host returns only org B's
@@ -145,11 +147,11 @@ and [Configuration → Multi-tenancy mode](configuration.md#multi-tenancy-mode).
 
 ## Coming in v1.1: custom domains
 
-v1 serves every org under the shared `*.status.{base_domain}` wildcard.
+v1 serves every org under the shared `*.{base_domain}` apex wildcard.
 v1.1 will let an org point its own hostname (e.g.
 `status.theirbrand.com`) at the service:
 
-- the org adds a `CNAME` to `{slug}.status.{base_domain}` and registers
+- the org adds a `CNAME` to `{slug}.{base_domain}` and registers
   the custom hostname on its settings page;
 - the reverse proxy issues a per-hostname certificate on demand (no
   wildcard for custom domains — each is a distinct name);

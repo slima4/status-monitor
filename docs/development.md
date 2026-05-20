@@ -123,7 +123,7 @@ document.cookie = "_sm_session=devsession-localtest-0000000000; path=/";
 ```
 
 Reload — you're the owner of "Dev Org". The public page is at
-`http://devorg.status.lvh.me:8080/status` (`*.lvh.me` resolves to
+`http://devorg.lvh.me:8080/status` (`*.lvh.me` resolves to
 `127.0.0.1`, no `/etc/hosts` edit). `just dev-login` also prints a `curl`
 snippet that passes the cookie directly, for API-only checks.
 

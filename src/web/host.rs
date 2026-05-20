@@ -2,7 +2,7 @@
 //!
 //! Two surfaces share one binary and one set of handlers:
 //!  * path-based (self-host) — every request resolves to the default org;
-//!  * subdomain (SaaS) — the org is taken from `{slug}.status.{base_domain}`.
+//!  * subdomain (SaaS) — the org is taken from `{slug}.{base_domain}`.
 //!
 //! `extract_status_slug` is the pure host parser; [`StatusPageOrg`] is the
 //! request extractor that picks the surface from config and yields the
@@ -19,33 +19,31 @@ use crate::api::subdomain_public_routes_enabled;
 use crate::app::AppState;
 use crate::domain::OrgId;
 
-/// Parsed `{slug}.status.{base_domain}` host. Borrows the slug out of the
-/// `Host` header so the common path allocates nothing.
+/// Parsed `{slug}.{base_domain}` host. Borrows the slug out of the `Host`
+/// header so the common path allocates nothing.
 #[derive(Debug, PartialEq, Eq)]
 pub struct StatusPageHost<'a> {
     pub slug: &'a str,
 }
 
 /// Pull the org slug out of a status-page host, or `None` if `host` is not a
-/// well-formed `{slug}.status.{base_domain}`.
+/// well-formed `{slug}.{base_domain}`.
 ///
 /// `base_domain` must be non-empty and contain a dot. Without that guard an
-/// empty/misconfigured base domain collapses the match suffix to `.status.`,
-/// and any host ending in `.status.` (`evil.status.`, `localhost.status.`)
-/// would parse as a valid slug. The boot-time config assertion normally
-/// prevents an empty base domain reaching here; this is the second layer of
-/// defence so a misconfigured dev/test rig can't extract slugs from arbitrary
-/// hosts.
+/// empty/misconfigured base domain collapses the match suffix to a single
+/// dot, and any host ending in `.` would parse as a valid slug. The boot-time
+/// config assertion normally prevents an empty base domain reaching here;
+/// this is the second layer of defence so a misconfigured dev/test rig can't
+/// extract slugs from arbitrary hosts.
 pub fn extract_status_slug<'a>(host: &'a str, base_domain: &str) -> Option<StatusPageHost<'a>> {
     if base_domain.is_empty() || !base_domain.contains('.') {
         return None;
     }
-    // Equivalent to stripping `".status.{base_domain}"` but without the
-    // per-request `format!` allocation — this runs on every anonymous
-    // subdomain request.
-    let slug = host.strip_suffix(base_domain)?.strip_suffix(".status.")?;
-    // Reject the bare `status.{base_domain}` (empty slug) and any deeper
-    // subdomain (a remaining dot means `a.b.status.{base_domain}`).
+    // Equivalent to stripping `".{base_domain}"` but without the per-request
+    // `format!` allocation — this runs on every anonymous subdomain request.
+    let slug = host.strip_suffix(base_domain)?.strip_suffix('.')?;
+    // Reject the bare `{base_domain}` (empty slug) and any deeper subdomain
+    // (a remaining dot means `a.b.{base_domain}`).
     if slug.is_empty() || slug.contains('.') {
         return None;
     }
@@ -133,53 +131,45 @@ mod tests {
     #[test]
     fn extracts_slug_from_well_formed_host() {
         assert_eq!(
-            extract_status_slug("acme.status.example.com", "example.com"),
+            extract_status_slug("acme.example.com", "example.com"),
             Some(StatusPageHost { slug: "acme" })
         );
     }
 
     #[test]
-    fn rejects_host_with_no_slug() {
-        assert_eq!(
-            extract_status_slug("status.example.com", "example.com"),
-            None
-        );
+    fn rejects_bare_base_domain() {
+        // The base domain itself (no slug label) must not parse as a slug.
+        assert_eq!(extract_status_slug("example.com", "example.com"), None);
     }
 
     #[test]
     fn rejects_empty_slug() {
-        assert_eq!(
-            extract_status_slug(".status.example.com", "example.com"),
-            None
-        );
+        assert_eq!(extract_status_slug(".example.com", "example.com"), None);
     }
 
     #[test]
-    fn rejects_non_status_host() {
-        assert_eq!(extract_status_slug("app.example.com", "example.com"), None);
+    fn rejects_non_matching_host() {
+        assert_eq!(extract_status_slug("acme.other.com", "example.com"), None);
     }
 
     #[test]
     fn rejects_deeper_subdomain() {
-        assert_eq!(
-            extract_status_slug("a.b.status.example.com", "example.com"),
-            None
-        );
+        assert_eq!(extract_status_slug("a.b.example.com", "example.com"), None);
     }
 
     #[test]
     fn empty_base_domain_matches_nothing() {
-        // An empty base domain must not turn `.status.` into a wildcard
+        // An empty base domain must not collapse the suffix into a wildcard
         // that accepts attacker-supplied hosts.
-        assert_eq!(extract_status_slug("foo.status.", ""), None);
-        assert_eq!(extract_status_slug("evil.status.", ""), None);
+        assert_eq!(extract_status_slug("foo.", ""), None);
+        assert_eq!(extract_status_slug("evil.", ""), None);
     }
 
     #[test]
     fn single_label_base_domain_rejected() {
-        // `local` has no dot — refuse so `foo.status.local` can't resolve in
-        // a misconfigured dev rig.
-        assert_eq!(extract_status_slug("foo.status.local", "local"), None);
+        // `local` has no dot — refuse so `foo.local` can't resolve in a
+        // misconfigured dev rig.
+        assert_eq!(extract_status_slug("foo.local", "local"), None);
     }
 
     #[test]
@@ -187,7 +177,7 @@ mod tests {
         // The extractor strips the port; the pure parser does not, so a
         // host carrying `:443` is (correctly) not a match here.
         assert_eq!(
-            extract_status_slug("acme.status.example.com:443", "example.com"),
+            extract_status_slug("acme.example.com:443", "example.com"),
             None
         );
     }

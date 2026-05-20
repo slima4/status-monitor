@@ -433,10 +433,10 @@ pub mod settings {
         pub s: StatusPageSettings,
         /// Current URL slug; pre-fills the rename input.
         pub current_slug: String,
-        /// What follows the slug in the public URL — `.status.{base}` in
-        /// SaaS subdomain mode, empty in path mode. Lets the form preview
-        /// the new URL as the operator types. `None` when no public surface
-        /// is mounted (no rename UI rendered then).
+        /// What follows the slug in the public URL — `.{base}` in SaaS
+        /// subdomain mode, empty in path mode. Lets the form preview the new
+        /// URL as the operator types. `None` when no public surface is
+        /// mounted (no rename UI rendered then).
         pub url_host_suffix: Option<String>,
     }
 
@@ -463,12 +463,12 @@ pub mod settings {
             .unwrap_or_else(|| state.cfg.public_status.default_brand_color.clone());
         let max_logo_bytes = u64::from(state.cfg.public_status.max_logo_size_bytes);
         // SaaS subdomain mode is the only shape where the slug is in the
-        // hostname (`{slug}.status.{base}`); path mode keeps the slug in the
-        // URL path, which isn't a single-input rename. We expose the suffix
-        // only in the subdomain case — the template hides the form otherwise.
+        // hostname (`{slug}.{base}`); path mode keeps the slug in the URL
+        // path, which isn't a single-input rename. We expose the suffix only
+        // in the subdomain case — the template hides the form otherwise.
         let url_host_suffix = subdomain_public_routes_enabled(&state.cfg).then(|| {
             format!(
-                ".status.{}",
+                ".{}",
                 state.cfg.public_status.base_domain.trim_start_matches('.')
             )
         });

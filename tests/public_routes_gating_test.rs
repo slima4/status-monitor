@@ -1,8 +1,8 @@
 //! Verifies the path-based public surface is gated by
 //! `tenancy.path_based_public_routes`. Self-host defaults to `true`; SaaS
-//! must keep it `false` and route per-org via `*.status.{base_domain}`
-//! instead (wired in a later phase). Mounting the path-based surface in
-//! SaaS would expose the default org's data to every tenant.
+//! must keep it `false` and route per-org via `*.{base_domain}` instead
+//! (apex-wildcard shape; wired in a later phase). Mounting the path-based
+//! surface in SaaS would expose the default org's data to every tenant.
 
 mod common;
 

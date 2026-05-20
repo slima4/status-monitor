@@ -35,7 +35,7 @@ be able to use the Service in that case.
 
 ## Public Status Pages
 
-The public per-organisation status pages (e.g., `acme.status.example.com`)
+The public per-organisation status pages (e.g., `acme.example.com`)
 do **not** set any cookies. They are fully anonymous.
 
 ## Contact

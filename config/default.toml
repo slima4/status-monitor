@@ -129,7 +129,7 @@ default_org_slug = "default"
 # status page at the operator host; SaaS does not (it would expose the
 # default org's data to every tenant). Leave commented to use the default.
 # path_based_public_routes = true
-# Wildcard subdomain public surface (`*.status.{public_status.base_domain}`).
+# Wildcard subdomain public surface (`*.{public_status.base_domain}`).
 # Defaults to false. Set true together with `tenancy.enabled = true` and a
 # well-formed `public_status.base_domain` to serve per-org status pages.
 # subdomain_public_routes = false

@@ -833,9 +833,9 @@ pub async fn add_member(
 /// org to scope to.
 ///
 /// Do NOT call this from any unauthenticated path. For
-/// `*.status.{base_domain}` lookups use [`find_public_status_org_by_slug`]
-/// instead — that helper additionally filters `public_status_enabled = true`
-/// and returns a [`PublicStatusOrg`] newtype the operator path can't accept.
+/// `*.{base_domain}` lookups use [`find_public_status_org_by_slug`] instead
+/// — that helper additionally filters `public_status_enabled = true` and
+/// returns a [`PublicStatusOrg`] newtype the operator path can't accept.
 /// Substituting the two would expose every org's public surface regardless
 /// of opt-in.
 pub async fn find_id_by_slug(pool: &PgPool, slug: &str) -> Result<Option<OrgId>> {
@@ -858,7 +858,7 @@ pub async fn find_id_by_slug(pool: &PgPool, slug: &str) -> Result<Option<OrgId>>
 pub struct PublicStatusOrg(pub Organization);
 
 /// PUBLIC-STATUS PATH ONLY. Resolves an org slug to a [`PublicStatusOrg`] for
-/// the unauthenticated `*.status.{base_domain}` surface. Filters
+/// the unauthenticated `*.{base_domain}` surface. Filters
 /// `public_status_enabled = true AND deleted_at IS NULL` — if either
 /// predicate fails the row is invisible (the handler maps `None` to 404).
 ///

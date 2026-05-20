@@ -11,8 +11,8 @@ PostgreSQL, and ClickHouse.
 | TLS certificates | Automatic via Let's Encrypt — no manual renewal |
 | HTTP/2 + HTTP/3 | Enabled by default in Caddy |
 | Authentication | Basic auth at the proxy layer on `app.{domain}` (UI + operator API) |
-| Public status surface | Self-host: `/status` on `app.{domain}`. SaaS: each org at `{slug}.status.{domain}` (wildcard) |
-| TLS for status pages | Wildcard cert for `*.status.{domain}` via Let's Encrypt + Hetzner DNS-01 |
+| Public status surface | Self-host: `/status` on `app.{domain}`. SaaS: each org at `{slug}.{domain}` (apex wildcard) |
+| TLS for status pages | Wildcard cert for `*.{domain}` via Let's Encrypt + Hetzner DNS-01; `app.{domain}` kept on its own per-host HTTP-01 cert |
 | Public rate limit | Per-IP 60 req/min on the public surface (custom Caddy image, built automatically) |
 | Auth-endpoint rate limit | Per-IP 10 req/min on `/auth/*`, `/api/v1/me`, invitation accept |
 | Org-creation rate limit | Per-IP 3 per 24 h on `POST /api/v1/orgs` (signup-abuse speedbump) |
@@ -32,9 +32,10 @@ PostgreSQL, and ClickHouse.
 - ~4 GB RAM and 20 GB disk
 - DNS zone in the **Hetzner Console** (the wildcard cert uses the Hetzner
   Cloud DNS-01 API):
-  - `app.{domain}` → A/AAAA to this host
-  - `*.status.{domain}` → A/AAAA to this host (SaaS mode; the wildcard
-    sends every `{slug}.status.{domain}` here and the app maps slug → org)
+  - `app.{domain}` → A/AAAA to this host (explicit record, beats the
+    wildcard for the operator host)
+  - `*.{domain}` → A/AAAA to this host (SaaS mode; the apex wildcard
+    sends every `{slug}.{domain}` here and the app maps slug → org)
   - A **Hetzner Cloud API token** (Read & Write) from Hetzner Console →
     your Project → Security → API Tokens, set as `HETZNER_DNS_API_TOKEN`
     in `.env`. Tokens are project-scoped, so the DNS zone must be in the
@@ -51,7 +52,7 @@ PostgreSQL, and ClickHouse.
 The stock `caddy:2-alpine` image lacks two plugins this deployment needs:
 
 - [`caddy-dns/hetzner/v2`](https://github.com/caddy-dns/hetzner) — solves
-  the ACME DNS-01 challenge for the `*.status.{domain}` wildcard
+  the ACME DNS-01 challenge for the `*.{domain}` apex wildcard
   certificate (HTTP-01 cannot validate a wildcard). v2 speaks the new
   Hetzner Console Cloud DNS API; v1 spoke the retired legacy API.
 - [`caddy-ratelimit`](https://github.com/mholt/caddy-ratelimit) — per-IP
@@ -127,8 +128,8 @@ docker compose logs -f caddy
 
 Watch the Caddy logs. On first start it will:
 1. Issue the `app.{domain}` cert via HTTP-01 (~30-60 seconds)
-2. Issue the `*.status.{domain}` wildcard via the Hetzner DNS-01 challenge:
-   Caddy writes a `_acme-challenge.status.{domain}` TXT record through the
+2. Issue the `*.{domain}` apex wildcard via the Hetzner DNS-01 challenge:
+   Caddy writes a `_acme-challenge.{domain}` TXT record through the
    Hetzner API, Let's Encrypt validates it, the wildcard cert is issued —
    **allow 60-90 seconds** for this one; renewals are silent.
 3. Bind to ports 80 and 443 and start proxying
@@ -144,12 +145,14 @@ echo | openssl s_client -connect app.example.com:443 2>/dev/null \
     | openssl x509 -noout -subject
 
 # Wildcard cert — any slug, even one that doesn't exist as an org, must
-# present a *.status.example.com cert (the app returns 404 for unknown
-# slugs, but TLS is served by the wildcard regardless).
-echo | openssl s_client -servername anything.status.example.com \
-    -connect anything.status.example.com:443 2>/dev/null \
+# present a *.example.com cert (the app returns 404 for unknown slugs,
+# but TLS is served by the wildcard regardless). Use a name that is NOT
+# `app.` so Caddy serves the wildcard block, not the per-host operator
+# cert.
+echo | openssl s_client -servername anything.example.com \
+    -connect anything.example.com:443 2>/dev/null \
     | openssl x509 -noout -subject
-# Expect: subject=CN=*.status.example.com
+# Expect: subject=CN=*.example.com
 ```
 
 If the wildcard line fails, grep the logs for the DNS-01 exchange:
@@ -370,7 +373,7 @@ balancer (Caddy supports this with multiple upstreams).
 
 **Certificate fails to provision**
 - DNS not propagated? `dig +short app.example.com` and
-  `dig +short anything.status.example.com` (the wildcard must resolve)
+  `dig +short anything.example.com` (the apex wildcard must resolve)
 - Wildcard cert stuck? Authoritative DNS must be the Hetzner Console, the
   token must be Read & Write, and the zone must be in that token's
   project — `docker compose logs caddy | grep -i hetzner`
@@ -415,7 +418,7 @@ Run the audit against a live deployment — Lighthouse needs a real
 HTTP origin, not an in-process router. There is no Rust harness for this;
 use the `lighthouse` Node CLI on any workstation. Audit the URL your mode
 serves: self-host `https://app.example.com/status`, SaaS
-`https://{slug}.status.example.com`.
+`https://{slug}.example.com`.
 
 ```bash
 # One-shot install + run; outputs JSON + HTML reports

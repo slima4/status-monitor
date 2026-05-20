@@ -33,7 +33,7 @@ Override `STATUS_MONITOR_CONFIG_PATH` to point at an alternate base config file.
 | _notification channels_ | — | Not a config block. Channels are **per-org runtime resources** managed via the [`/api/v1/notification-channels` API](api.md#notification-channels); secrets are sealed at rest with the credentials KEK |
 | `tenancy` | `enabled`, `default_org_slug`, `path_based_public_routes`, `subdomain_public_routes`, `free_tier_owner_org_limit`, `deletion_grace_period_days` | Self-host vs SaaS mode + org limits. See [Multi-tenancy mode](#multi-tenancy-mode) below and [docs/multi-tenancy.md](multi-tenancy.md) for the full model |
 | `retention` | `check_results_days`, `login_attempts_days`, `quota_events_days`, `audit_log_days` | Long-horizon data-retention windows for the daily 03:00-UTC purge job. Every key is bound by the job — no decorative knobs |
-| `public_status` | `base_domain`, `cache_max_orgs`, `cache_ttl_secs`, `last_good_ttl_secs`, `logo_dir`, `max_logo_size_bytes`, `allowed_logo_mime_types`, `max_logo_dimension_px`, `default_brand_color`, `default_show_powered_by`, `public_per_ip_rate_limit_per_min` | Per-org public status pages at `{slug}.status.{base_domain}`. See [Public status page](#public-status-page) below and [Per-org status pages](per-org-status.md) |
+| `public_status` | `base_domain`, `cache_max_orgs`, `cache_ttl_secs`, `last_good_ttl_secs`, `logo_dir`, `max_logo_size_bytes`, `allowed_logo_mime_types`, `max_logo_dimension_px`, `default_brand_color`, `default_show_powered_by`, `public_per_ip_rate_limit_per_min` | Per-org public status pages at `{slug}.{base_domain}`. See [Public status page](#public-status-page) below and [Per-org status pages](per-org-status.md) |
 | `auth` | `enabled_methods`, `fingerprint_salt`, `public_base_url` | Sign-in methods, HMAC salt for IP/UA hashes, base URL embedded in invitation + magic-link emails. See [Auth configuration](#auth-configuration) below |
 | `auth.session` | `idle_timeout_days`, `absolute_timeout_days`, `cookie_name`, `cookie_secure`, `cookie_domain`, `renew_on_use` | Session cookie shape + lifetime. `cookie_secure = true` in production |
 | `auth.github` | `client_id`, `client_secret`, `redirect_url`, `scopes`, `http_connect_timeout_ms`, `http_request_timeout_ms` | GitHub OAuth client. Empty client_id disables the GitHub button on `/login` |
@@ -63,13 +63,13 @@ profiles in SaaS:
   Defaults to `true`. Safe for self-host (one org, nothing to leak);
   **must be set to `false` for SaaS**.
 - `tenancy.subdomain_public_routes` — serve one page per org at
-  `{slug}.status.{public_status.base_domain}`. Defaults to `false`;
+  `{slug}.{public_status.base_domain}` (apex wildcard). Defaults to `false`;
   requires `tenancy.enabled = true` and a well-formed `base_domain`.
 
 | Mode | Recommended flags | Public surface |
 |---|---|---|
 | Self-host (`tenancy.enabled = false`) | `path_based_public_routes = true` (default) | `/status` on the operator host (one org) |
-| SaaS (`tenancy.enabled = true`) | `subdomain_public_routes = true`, `path_based_public_routes = false` | `{slug}.status.{base_domain}` per org |
+| SaaS (`tenancy.enabled = true`) | `subdomain_public_routes = true`, `path_based_public_routes = false` | `{slug}.{base_domain}` per org |
 
 The binary refuses to boot in the dangerous combinations:
 `subdomain_public_routes` without `tenancy.enabled`;
@@ -175,7 +175,7 @@ public_per_ip_rate_limit_per_min = 60  # in-app limit behind the Caddy-side one
 
 | Key | Purpose |
 |---|---|
-| `base_domain` | parent domain for `{slug}.status.{base_domain}`. Must be multi-label; boot fails on empty/single-label when subdomain routing is on |
+| `base_domain` | parent domain for `{slug}.{base_domain}`. Must be multi-label; boot fails on empty/single-label when subdomain routing is on |
 | `cache_max_orgs` / `cache_ttl_secs` | per-org page cache size and freshness window |
 | `last_good_ttl_secs` | how long an idle org's last-known-good snapshot is retained before eviction |
 | `logo_dir`, `max_logo_size_bytes`, `allowed_logo_mime_types`, `max_logo_dimension_px` | logo upload storage and limits |

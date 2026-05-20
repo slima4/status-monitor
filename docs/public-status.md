@@ -13,7 +13,7 @@ For Caddy + the rate-limit plugin see [Deployment](deployment.md#public-status-s
 > **SaaS-mode operators read this first.** This chapter describes the
 > page itself; the workflow is identical per org. In SaaS mode
 > (`tenancy.enabled = true`) each org gets its own page at
-> `{slug}.status.{base_domain}` — set `tenancy.subdomain_public_routes =
+> `{slug}.{base_domain}` — set `tenancy.subdomain_public_routes =
 > true` and leave `tenancy.path_based_public_routes` off. The path-based
 > `/status` surface is single-org and is for self-host only (the default).
 > See [Per-org status pages](per-org-status.md) for the routing, branding,

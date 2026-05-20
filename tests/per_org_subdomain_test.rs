@@ -1,5 +1,5 @@
 //! Live-PG end-to-end coverage for the per-org public status surface served
-//! at `{slug}.status.{base_domain}`. Skipped by default; runs under
+//! at `{slug}.{base_domain}`. Skipped by default; runs under
 //! `--include-ignored` once `DATABASE_URL` is set.
 //!
 //! Two layers of assertion:
@@ -24,16 +24,16 @@ use status_monitor::storage::orgs::{find_id_by_slug, find_public_status_org_by_s
 use status_monitor::storage::{create_org_with_owner, update_public_branding};
 use tower::ServiceExt;
 
-/// The `public_status.base_domain` config value — the part *after* the fixed
-/// `.status.` label. Status pages live at `{slug}.status.{BASE_DOMAIN}`; see
-/// [`status_host`], which is the only place that literal is spelled so a host
-/// can never silently drift from what the parser expects.
+/// The `public_status.base_domain` config value. Status pages live at
+/// `{slug}.{BASE_DOMAIN}` (apex-wildcard shape); see [`status_host`], the
+/// only place that contract is spelled so a host can never silently drift
+/// from what the parser expects.
 const BASE_DOMAIN: &str = "test.local";
 
 /// Build the public-status `Host` for a slug, matching the production
-/// `{slug}.status.{base_domain}` contract the host parser enforces.
+/// `{slug}.{base_domain}` contract the host parser enforces.
 fn status_host(slug: &str) -> String {
-    format!("{slug}.status.{BASE_DOMAIN}")
+    format!("{slug}.{BASE_DOMAIN}")
 }
 
 /// Create an org owned by a fresh user and set its public-status opt-in
@@ -151,11 +151,8 @@ async fn subdomain_status_page_gates_on_enabled_and_slug_shape() {
     for (host, why) in [
         (Some(status_host(&off)), "disabled org"),
         (Some(status_host(&unique_slug("ghost"))), "unknown slug"),
-        (
-            Some(format!("a.b.status.{BASE_DOMAIN}")),
-            "deeper subdomain",
-        ),
-        (Some(format!("status.{BASE_DOMAIN}")), "no slug label"),
+        (Some(format!("a.b.{BASE_DOMAIN}")), "deeper subdomain"),
+        (Some(BASE_DOMAIN.to_string()), "bare base domain"),
     ] {
         assert_eq!(
             get_status(&app, host.as_deref()).await,

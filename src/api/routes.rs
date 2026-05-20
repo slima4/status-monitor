@@ -261,9 +261,10 @@ pub fn path_based_public_routes_enabled(cfg: &crate::config::AppConfig) -> bool 
     cfg.tenancy.path_based_public_routes
 }
 
-/// Per-org subdomain surface (`*.status.{public_status.base_domain}`, org
-/// resolved from the `Host` header). Requires `tenancy.enabled` — a startup
-/// assertion refuses to boot if `subdomain_public_routes` is set without it.
+/// Per-org subdomain surface (`*.{public_status.base_domain}`, org resolved
+/// from the `Host` header — apex-wildcard shape). Requires `tenancy.enabled`
+/// — a startup assertion refuses to boot if `subdomain_public_routes` is set
+/// without it.
 pub fn subdomain_public_routes_enabled(cfg: &crate::config::AppConfig) -> bool {
     cfg.tenancy.enabled && cfg.tenancy.subdomain_public_routes
 }

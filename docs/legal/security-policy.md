@@ -51,7 +51,7 @@ welcome too.
 ## What's In Scope
 
 - The source code at https://github.com/slima4/status-monitor
-- The hosted Service (`*.status.example.com`, `app.example.com`)
+- The hosted Service (`app.example.com` and the public per-org pages at `*.example.com`)
 
 ## What's Out of Scope
 
