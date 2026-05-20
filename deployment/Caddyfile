@@ -300,8 +300,46 @@ app.{$STATUS_MONITOR_DOMAIN} {
 }
 
 # ═══════════════════════════════════════════════════════════════════════
-# Apex redirect (optional) — send bare {domain} to the operator surface.
+# Marketing site (apex + www) — same upstream, host routing in-app.
 # ═══════════════════════════════════════════════════════════════════════
-# {$STATUS_MONITOR_DOMAIN} {
-#     redir https://app.{$STATUS_MONITOR_DOMAIN}{uri} permanent
-# }
+# The bare {domain} and www.{domain} are served by the same status-monitor
+# container; the Rust dispatcher (web/host.rs::classify_host + the
+# RouteByHost service) hands marketing requests off inside the binary.
+# Two per-host HTTP-01 certs — kept off the *.{domain} wildcard so a
+# wildcard-key leak still doesn't touch the marketing surface or the
+# operator host.
+{$STATUS_MONITOR_DOMAIN}, www.{$STATUS_MONITOR_DOMAIN} {
+	encode gzip zstd
+
+	# Send the canonical-host signal to the dispatcher. Marketing reads
+	# the Host header to decide between landing and a tenant fall-through.
+	reverse_proxy status-monitor:8080 {
+		header_up Host {host}
+		header_up X-Forwarded-Proto {scheme}
+		header_up X-Forwarded-For {remote_host}
+
+		transport http {
+			dial_timeout 5s
+			response_header_timeout 30s
+		}
+	}
+
+	# Marketing surfaces are public, cacheable, JS-free; no edge auth.
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		# CSP for the marketing surface: same-origin static + JSON-LD
+		# inline blob only (no third-party JS until analytics is wired).
+		Content-Security-Policy "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; base-uri 'self'; form-action 'self'"
+		-Server
+	}
+
+	log {
+		output file /var/log/caddy/marketing.log {
+			roll_size 50mb
+			roll_keep 5
+		}
+		format json
+	}
+}

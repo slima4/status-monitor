@@ -1,0 +1,62 @@
+{% extends "marketing/base.html" %}
+{% block title %}Status Monitor — uptime that doesn’t blink{% endblock %}
+{% block description %}A Rust uptime monitor with asynchronous probe workers and a Postgres + ClickHouse pipeline. Designed to keep checking while everything else is on fire.{% endblock %}
+{% block head %}
+<script type="application/ld+json">{{ org_json_ld.as_str()|safe }}</script>
+<script type="application/ld+json">{{ website_json_ld.as_str()|safe }}</script>
+{% endblock %}
+{% block content %}
+<section class="mx-auto max-w-4xl space-y-10 text-center">
+    <header class="space-y-4">
+        <h1 class="page-title text-4xl sm:text-5xl">
+            Status monitoring that doesn’t blink.
+        </h1>
+        <p class="mx-auto max-w-2xl text-base text-slate-600 sm:text-lg">
+            A Rust core with asynchronous probe workers and a Postgres + ClickHouse pipeline —
+            built to keep checking while everything else is on fire.
+        </p>
+        <div class="flex flex-wrap items-center justify-center gap-3">
+            <a href="{{ app_url }}/login"
+               class="sticker-btn inline-flex items-center justify-center gap-2 bg-slate-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-slate-800">
+                Get started — sign in with GitHub
+            </a>
+            <a href="/blog" class="sticker-pill sticker-pill--neutral">
+                Read the blog →
+            </a>
+        </div>
+    </header>
+
+    <section class="grid gap-6 text-left sm:grid-cols-3">
+        <article class="sticker-card space-y-2 p-6">
+            <h2 class="text-lg font-semibold">Async by default</h2>
+            <p class="text-sm text-slate-600">
+                Tokio-driven probes; thousands of concurrent checks on a 5 USD box without saturating
+                a single core.
+            </p>
+        </article>
+        <article class="sticker-card space-y-2 p-6">
+            <h2 class="text-lg font-semibold">ClickHouse storage</h2>
+            <p class="text-sm text-slate-600">
+                Per-minute aggregates roll up to per-day buckets without a Postgres write path —
+                queries stay fast at any retention window.
+            </p>
+        </article>
+        <article class="sticker-card space-y-2 p-6">
+            <h2 class="text-lg font-semibold">Public status pages</h2>
+            <p class="text-sm text-slate-600">
+                A flat 90-day timeline, incident history, and scheduled maintenance — all on a
+                cacheable, JS-free render path.
+            </p>
+        </article>
+    </section>
+
+    <section class="sticker-card space-y-3 p-8 text-left">
+        <h2 class="text-2xl font-semibold">Built for operators, not dashboards</h2>
+        <ul class="space-y-2 text-sm text-slate-600">
+            <li>• Single binary — Rust + Axum + Askama, one process, one container.</li>
+            <li>• OpenTelemetry traces + Prometheus metrics + structured logs out of the box.</li>
+            <li>• Tenant-isolated by construction: every query is org-scoped.</li>
+        </ul>
+    </section>
+</section>
+{% endblock %}

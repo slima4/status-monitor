@@ -78,6 +78,12 @@ fn main() {
     println!("cargo::rerun-if-changed=static/css/input.css");
     println!("cargo::rerun-if-changed=src");
     println!("cargo::rerun-if-changed=scripts/fetch-tailwind.sh");
+    // `include_dir!` does NOT emit a watcher of its own. Without this
+    // an added blog post lands in main, a warm `cargo build` reuses the
+    // cached binary, and the new post 404s on a route that was already
+    // merged. Belt-and-braces — `src` above already covers it, but
+    // pinning the content tree makes the dependency explicit.
+    println!("cargo::rerun-if-changed=src/marketing/content");
 
     if !Path::new("bin/tailwindcss").exists() {
         let fetch = Command::new("scripts/fetch-tailwind.sh")

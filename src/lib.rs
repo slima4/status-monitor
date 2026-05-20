@@ -8,6 +8,7 @@ pub mod error;
 pub mod http_client;
 pub mod http_outbound;
 pub mod jobs;
+pub mod marketing;
 pub mod notifier;
 pub mod observability;
 pub mod pipeline;

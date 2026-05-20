@@ -1,0 +1,39 @@
+{% extends "marketing/base.html" %}
+{% block title %}Blog — Status Monitor{% endblock %}
+{% block description %}Field notes on Rust, async monitoring, and keeping production boring.{% endblock %}
+{% block content %}
+<section class="mx-auto max-w-3xl space-y-8">
+    <header class="space-y-2 text-center">
+        <h1 class="page-title">From the workshop</h1>
+        <p class="text-slate-600">Field notes on Rust, async monitoring, and keeping production boring.</p>
+    </header>
+    {% if posts.is_empty() %}
+    <p class="sticker-card p-8 text-center text-slate-500">No posts yet — check back soon.</p>
+    {% else %}
+    <ul class="space-y-4">
+        {% for p in posts %}
+        <li>
+            <article class="sticker-card space-y-2 p-6">
+                <header class="flex flex-wrap items-baseline justify-between gap-2">
+                    <h2 class="text-xl font-semibold">
+                        <a href="/blog/{{ p.slug }}" class="hover:underline">{{ p.title }}</a>
+                    </h2>
+                    <time datetime="{{ p.date }}" class="text-xs font-medium uppercase tracking-wide text-slate-500">{{ p.date }}</time>
+                </header>
+                {% if !p.excerpt.is_empty() %}
+                <p class="text-sm text-slate-600">{{ p.excerpt }}</p>
+                {% endif %}
+                {% if !p.tags.is_empty() %}
+                <ul class="flex flex-wrap gap-1.5 text-[11px]">
+                    {% for t in p.tags %}
+                    <li><span class="sticker-pill sticker-pill--neutral">{{ t }}</span></li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+            </article>
+        </li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+</section>
+{% endblock %}

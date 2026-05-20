@@ -20,9 +20,16 @@ use axum::response::IntoResponse;
 
 use crate::web::assets::filters;
 
-/// Renders trusted markdown to HTML. Tables are enabled (the Privacy
-/// Policy and data inventory use them); everything else is CommonMark.
-fn render(markdown: &str) -> String {
+/// Renders **trusted** markdown to HTML. This path is deliberately
+/// **unsanitised** — tables and the occasional raw `<a>` in the Privacy
+/// Policy must survive — and is safe **only** because every input is
+/// first-party Markdown shipped in the repo. The unusual symbol name
+/// is the visible mistake: anyone reusing this for third-party PR
+/// content (e.g. a blog post body) inherits the trust model and ships
+/// an XSS hole. Use the marketing blog's `render` (which goes through
+/// `ammonia::clean`) for any content that did not originate in this
+/// repo.
+fn render_trusted_unsanitised(markdown: &str) -> String {
     let mut opts = pulldown_cmark::Options::empty();
     opts.insert(pulldown_cmark::Options::ENABLE_TABLES);
     let parser = pulldown_cmark::Parser::new_ext(markdown, opts);
@@ -43,7 +50,8 @@ pub struct LegalPage {
 /// once (`LazyLock`) and borrowed for the program's lifetime.
 macro_rules! legal_page {
     ($html:ident, $handler:ident, $title:literal, $file:literal) => {
-        static $html: LazyLock<String> = LazyLock::new(|| render(include_str!($file)));
+        static $html: LazyLock<String> =
+            LazyLock::new(|| render_trusted_unsanitised(include_str!($file)));
 
         pub async fn $handler() -> LegalPage {
             LegalPage {

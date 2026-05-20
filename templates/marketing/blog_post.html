@@ -1,0 +1,30 @@
+{% extends "marketing/base.html" %}
+{% block title %}{{ title }} — Status Monitor{% endblock %}
+{% block description %}{{ og.description }}{% endblock %}
+{% block head %}
+<script type="application/ld+json">{{ json_ld.as_str()|safe }}</script>
+{% endblock %}
+{% block content %}
+<article class="prose mx-auto max-w-2xl space-y-6">
+    <header class="space-y-2 text-center">
+        <h1 class="page-title">{{ title }}</h1>
+        <p class="text-sm text-slate-500">
+            <time datetime="{{ date }}">{{ date }}</time>
+            {% if !tags.is_empty() %}
+            ·
+            {% for t in tags %}
+            <span class="sticker-pill sticker-pill--neutral">{{ t }}</span>
+            {% endfor %}
+            {% endif %}
+        </p>
+    </header>
+    <div class="sticker-card p-8">
+        <div class="prose prose-slate max-w-none">
+            {{ body_html|safe }}
+        </div>
+    </div>
+    <p class="text-center">
+        <a href="/blog" class="text-sm text-slate-500 hover:text-slate-700">← Back to all posts</a>
+    </p>
+</article>
+{% endblock %}

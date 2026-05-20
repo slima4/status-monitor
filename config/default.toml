@@ -308,3 +308,32 @@ reputation_source_path = ""
 # stay). When false, deny-list edits need a restart and SIGHUP keeps its OS
 # default of terminating the process — stop the server with SIGTERM/SIGINT.
 hot_reload_enabled = false
+
+[marketing]
+# When true, mounts the apex/`www` marketing site + blog. The dispatch
+# seam (web/host.rs + marketing/dispatch.rs) routes those hosts to the
+# marketing router; every other host stays on the app router. Leave
+# false for self-host: the apex is rarely served on a single-box deploy
+# and the boot-time invariants will refuse a half-set config.
+enabled = false
+
+# CTA + login link target on every marketing page. The marketing module
+# never imports app code — this is the only handle it has on the app
+# surface, so the extracted service points anywhere with one config
+# change. Must be a fully-qualified https URL with no trailing slash.
+app_url = ""
+
+# Fully-qualified canonical origin (scheme + host, no trailing slash)
+# used for <link rel="canonical">, OG/JSON-LD absolute URLs, and the
+# generated sitemap.
+canonical_origin = ""
+
+# Subdomain labels that must never alias a tenant slug. Asserted at boot
+# to be a subset of `domain::reserved_slugs::RESERVED_SLUGS`. The
+# dispatcher already routes apex/`www`/`app` explicitly; this list is a
+# belt-and-braces drift guard.
+reserved_subdomains = ["www", "app"]
+
+# Mount the /blog routes. The post sources live in
+# `src/marketing/content/blog/` and are compiled into the binary.
+blog_enabled = true

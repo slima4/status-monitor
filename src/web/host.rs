@@ -31,8 +31,90 @@ use crate::domain::OrgId;
 /// served by the operator front door.
 const OPERATOR_LABELS: &[&str] = &["app"];
 
+/// Marketing labels — apex (empty) and `www` route to the marketing site,
+/// not to a tenant. Kept tight (only `www`); deeper aliases would
+/// multiply marketing's surface and shadow tenant slugs.
+const MARKETING_LABELS: &[&str] = &["www"];
+
 fn is_operator_label(slug: &str) -> bool {
     OPERATOR_LABELS.iter().any(|l| slug.eq_ignore_ascii_case(l))
+}
+
+/// One source of truth for the production wire format. Constructed once
+/// at boot from `public_status.base_domain` and shared between
+/// [`extract_status_slug`] and [`classify_host`] so they cannot drift.
+/// Apex shape is flat (`{slug}.{base_domain}`) — there is no `.status.`
+/// infix; the FLATTEN-STATUS-HOST change already removed it.
+#[derive(Debug, Clone)]
+pub struct HostScheme {
+    pub base_domain: String,
+    pub apex: String,
+    pub www_host: String,
+    pub app_host: String,
+    /// `.{base_domain}` — what every tenant host ends with. Carries the
+    /// leading dot so a `strip_suffix` accepts only `{slug}.{base}`, not
+    /// the bare base.
+    pub tenant_suffix: String,
+}
+
+impl HostScheme {
+    /// Validates the base domain (non-empty, contains a dot) and derives
+    /// the apex / `www` / `app` / tenant-suffix triplet. Returns a
+    /// human-readable error suitable for a startup config error.
+    pub fn from_base_domain(base: &str) -> std::result::Result<Self, String> {
+        let trimmed = base.trim().to_ascii_lowercase();
+        if trimmed.is_empty() {
+            return Err("base_domain must not be empty".into());
+        }
+        if !trimmed.contains('.') {
+            return Err(format!("base_domain {trimmed:?} must contain a dot"));
+        }
+        Ok(Self {
+            apex: trimmed.clone(),
+            www_host: format!("www.{trimmed}"),
+            app_host: format!("app.{trimmed}"),
+            tenant_suffix: format!(".{trimmed}"),
+            base_domain: trimmed,
+        })
+    }
+}
+
+/// What kind of host arrived. The marketing dispatch seam routes
+/// `Marketing` (and `Unknown`, so garbage cannot fall through to a
+/// tenant) to the marketing router; `App` and `TenantPublic` go to the
+/// existing app router which already does per-host org resolution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HostClass {
+    Marketing,
+    App,
+    TenantPublic,
+    Unknown,
+}
+
+/// Classify a request's `Host` header against the production wire
+/// format. The caller strips the port; this is host-only.
+pub fn classify_host(host: &str, scheme: &HostScheme) -> HostClass {
+    let host = host.split(':').next().unwrap_or(host);
+    let host = host.strip_suffix('.').unwrap_or(host).to_ascii_lowercase();
+    if host == scheme.apex {
+        return HostClass::Marketing;
+    }
+    if host == scheme.app_host {
+        return HostClass::App;
+    }
+    if let Some(slug) = host.strip_suffix(&scheme.tenant_suffix) {
+        if slug.is_empty() || slug.contains('.') {
+            return HostClass::Unknown;
+        }
+        if MARKETING_LABELS.iter().any(|l| slug == *l) {
+            return HostClass::Marketing;
+        }
+        if is_operator_label(slug) {
+            return HostClass::App;
+        }
+        return HostClass::TenantPublic;
+    }
+    HostClass::Unknown
 }
 
 /// Parsed `{slug}.{base_domain}` host. Borrows the slug out of the `Host`
@@ -163,11 +245,10 @@ pub fn is_subdomain_public_request(state: &AppState, headers: &HeaderMap) -> boo
     let Some(host) = headers.get(HOST).and_then(|h| h.to_str().ok()) else {
         return false;
     };
-    let host = host.split(':').next().unwrap_or(host);
-    let Some(parsed) = extract_status_slug(host, &state.cfg.public_status.base_domain) else {
+    let Ok(scheme) = HostScheme::from_base_domain(&state.cfg.public_status.base_domain) else {
         return false;
     };
-    !is_operator_label(parsed.slug)
+    matches!(classify_host(host, &scheme), HostClass::TenantPublic)
 }
 
 #[cfg(test)]
@@ -244,5 +325,101 @@ mod tests {
         // Trailing dot on the base domain alone — must NOT collapse into a
         // valid (empty-slug) parse.
         assert_eq!(extract_status_slug("example.com.", "example.com"), None);
+    }
+
+    fn scheme() -> HostScheme {
+        HostScheme::from_base_domain("example.com").unwrap()
+    }
+
+    #[test]
+    fn classify_apex_is_marketing() {
+        assert_eq!(
+            classify_host("example.com", &scheme()),
+            HostClass::Marketing
+        );
+    }
+
+    #[test]
+    fn classify_www_is_marketing() {
+        assert_eq!(
+            classify_host("www.example.com", &scheme()),
+            HostClass::Marketing
+        );
+    }
+
+    #[test]
+    fn classify_app_is_app() {
+        assert_eq!(classify_host("app.example.com", &scheme()), HostClass::App);
+    }
+
+    #[test]
+    fn classify_tenant_slug_is_tenant_public() {
+        assert_eq!(
+            classify_host("acme.example.com", &scheme()),
+            HostClass::TenantPublic
+        );
+    }
+
+    #[test]
+    fn classify_strips_port() {
+        assert_eq!(
+            classify_host("example.com:8080", &scheme()),
+            HostClass::Marketing
+        );
+        assert_eq!(
+            classify_host("acme.example.com:443", &scheme()),
+            HostClass::TenantPublic
+        );
+    }
+
+    #[test]
+    fn classify_strips_trailing_dot() {
+        // FQDN form: a crafted curl can send `Host: acme.example.com.`.
+        // Must classify identically — otherwise the dispatcher would
+        // 404 a real tenant.
+        assert_eq!(
+            classify_host("acme.example.com.", &scheme()),
+            HostClass::TenantPublic
+        );
+        assert_eq!(classify_host("app.example.com.", &scheme()), HostClass::App);
+    }
+
+    #[test]
+    fn classify_is_case_insensitive() {
+        assert_eq!(
+            classify_host("ACME.Example.COM", &scheme()),
+            HostClass::TenantPublic
+        );
+    }
+
+    #[test]
+    fn classify_deeper_subdomain_is_unknown() {
+        // `a.b.example.com` must NOT alias a tenant slug; the dispatcher
+        // hands `Unknown` to marketing 404, never to a tenant.
+        assert_eq!(
+            classify_host("a.b.example.com", &scheme()),
+            HostClass::Unknown
+        );
+    }
+
+    #[test]
+    fn classify_unrelated_host_is_unknown() {
+        assert_eq!(
+            classify_host("acme.other.com", &scheme()),
+            HostClass::Unknown
+        );
+        assert_eq!(classify_host("garbage", &scheme()), HostClass::Unknown);
+    }
+
+    #[test]
+    fn classify_empty_host_is_unknown() {
+        assert_eq!(classify_host("", &scheme()), HostClass::Unknown);
+    }
+
+    #[test]
+    fn host_scheme_rejects_empty_or_single_label() {
+        assert!(HostScheme::from_base_domain("").is_err());
+        assert!(HostScheme::from_base_domain("   ").is_err());
+        assert!(HostScheme::from_base_domain("local").is_err());
     }
 }

@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}Status Monitor{% endblock %}</title>
+    <meta name="description" content="{% block description %}A Rust uptime monitor that keeps checking while everything else is on fire.{% endblock %}">
+    <link rel="canonical" href="{{ canonical_url }}">
+    <link rel="icon" type="image/svg+xml" href="{{ "img/favicon.svg"|asset }}">
+    <link rel="stylesheet" href="{{ "css/app.css"|asset }}">
+
+    {# OpenGraph + Twitter card #}
+    <meta property="og:type" content="{{ og.og_type }}">
+    <meta property="og:title" content="{{ og.title }}">
+    <meta property="og:description" content="{{ og.description }}">
+    <meta property="og:url" content="{{ og.url }}">
+    <meta property="og:image" content="{{ og.image }}">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="{{ og.title }}">
+    <meta name="twitter:description" content="{{ og.description }}">
+    <meta name="twitter:image" content="{{ og.image }}">
+
+    {% block head %}{% endblock %}
+</head>
+<body class="bg-slate-50 text-slate-900 antialiased">
+    <a href="#main-content"
+       class="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:rounded focus:bg-white focus:px-3 focus:py-2 focus:text-sm focus:ring-2 focus:ring-slate-700">
+        Skip to main content
+    </a>
+    <header class="border-b bg-white">
+        <nav aria-label="Primary" class="container mx-auto flex items-center gap-6 px-4 py-3">
+            <a href="/" class="nav-brand">Status Monitor</a>
+            <a href="/blog" class="nav-link">Blog</a>
+            <a href="{{ app_url }}/docs" class="nav-link">API docs</a>
+            <a href="{{ app_url }}/login" class="ml-auto sticker-btn bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800">
+                Sign in
+            </a>
+        </nav>
+    </header>
+    <main id="main-content" tabindex="-1" class="container mx-auto px-4 py-10">
+        {% block content %}{% endblock %}
+    </main>
+    <footer class="container mx-auto px-4 py-6 text-xs text-slate-500">
+        <div class="flex flex-wrap items-center gap-4">
+            <span>&copy; Status Monitor</span>
+            <a href="/blog" class="hover:text-slate-700">Blog</a>
+            <a href="{{ app_url }}/login" class="hover:text-slate-700">Sign in</a>
+            <a href="{{ app_url }}/privacy" class="hover:text-slate-700">Privacy</a>
+            <a href="{{ app_url }}/terms" class="hover:text-slate-700">Terms</a>
+            <span class="ml-auto font-mono text-slate-400">v{{ version }}</span>
+        </div>
+    </footer>
+</body>
+</html>

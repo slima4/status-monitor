@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use axum::Router;
 use axum::extract::Request;
 use axum::middleware::{self, Next};
 use axum::response::Response;
@@ -12,6 +13,7 @@ use status_monitor::{
     error::{AppError, Result},
     http_client::client::build_clients,
     jobs::retention,
+    marketing,
     notifier::engine::AlertEngine,
     observability,
     pipeline::{BatcherConfig, ResultBatcher},
@@ -104,6 +106,9 @@ async fn main() -> Result<()> {
     // Same contract for the abuse rules: a malformed URL-pattern regex or
     // deny-list YAML fails fast here, not as a runtime panic.
     status_monitor::security::AbuseGuard::validate(&cfg.abuse)?;
+    // Marketing host/URL/cookie invariants. Skipped wholesale when
+    // marketing.enabled = false (the default).
+    cfg.validate_marketing()?;
 
     let metrics_handle = if cfg.observability.metrics_enabled {
         Some(observability::metrics::init(&cfg.server.metrics_bind)?)
@@ -369,31 +374,57 @@ async fn main() -> Result<()> {
     // LAST `.layer` is OUTERMOST. TraceLayer added last → it wraps and
     // enters the `http.request` span before `access_log` runs, so
     // `access_log` can read the request's OTLP trace_id (see its doc).
-    let router = build_router(state.clone(), root.clone())
-        .merge(web::routes(state))
-        .layer(middleware::from_fn(access_log))
-        .layer(
-            TraceLayer::new_for_http()
-                .make_span_with(|req: &axum::extract::Request| {
-                    let path = req.uri().path();
-                    // Caddy active-health and the deploy gate poll these
-                    // on a tight loop forever; a span per probe at full
-                    // sampling is pure noise with no diagnostic value.
-                    if path == "/healthz" || path == "/readyz" {
-                        return tracing::Span::none();
-                    }
-                    // Path only, never the query string: /auth/* carries
-                    // single-use magic-link tokens and the OAuth
-                    // code/state, which must not reach stdout logs or the
-                    // exported span.
-                    tracing::debug_span!(
-                        "http.request",
-                        method = %req.method(),
-                        path = %path,
-                    )
-                })
-                .on_response(DefaultOnResponse::new().level(tracing::Level::DEBUG)),
-        );
+    let app_router = build_router(state.clone(), root.clone()).merge(web::routes(state.clone()));
+
+    // The single dispatch seam. When marketing is enabled, requests are
+    // routed to the marketing or app router by classified `Host`.
+    // Otherwise the app router serves everything as before.
+    let combined: Router = if state.cfg.marketing.enabled {
+        let scheme = status_monitor::web::host::HostScheme::from_base_domain(
+            &state.cfg.public_status.base_domain,
+        )
+        .map_err(|e| AppError::Other(anyhow::anyhow!("HostScheme: {e}")))?;
+        let marketing_cfg = marketing::MarketingCfg {
+            app_url: state.cfg.marketing.app_url.clone(),
+            canonical_origin: state.cfg.marketing.canonical_origin.clone(),
+            blog_enabled: state.cfg.marketing.blog_enabled,
+        };
+        // Pre-warm the in-memory post cache so the first /blog hit
+        // doesn't pay the parse cost.
+        let _ = marketing::blog::init();
+        let marketing_router = marketing::router(marketing_cfg);
+        let dispatch = marketing::RouteByHost {
+            scheme,
+            marketing: marketing_router,
+            app: app_router,
+        };
+        Router::new().fallback_service(dispatch)
+    } else {
+        app_router
+    };
+
+    let router = combined.layer(middleware::from_fn(access_log)).layer(
+        TraceLayer::new_for_http()
+            .make_span_with(|req: &axum::extract::Request| {
+                let path = req.uri().path();
+                // Caddy active-health and the deploy gate poll these
+                // on a tight loop forever; a span per probe at full
+                // sampling is pure noise with no diagnostic value.
+                if path == "/healthz" || path == "/readyz" {
+                    return tracing::Span::none();
+                }
+                // Path only, never the query string: /auth/* carries
+                // single-use magic-link tokens and the OAuth
+                // code/state, which must not reach stdout logs or the
+                // exported span.
+                tracing::debug_span!(
+                    "http.request",
+                    method = %req.method(),
+                    path = %path,
+                )
+            })
+            .on_response(DefaultOnResponse::new().level(tracing::Level::DEBUG)),
+    );
 
     let listener = TcpListener::bind(&api_bind).await.map_err(AppError::Io)?;
     tracing::info!(

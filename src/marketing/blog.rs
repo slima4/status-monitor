@@ -1,0 +1,319 @@
+//! Build-time compiled blog. Posts under `src/marketing/content/blog/`
+//! are read at compile time via `include_dir!`, parsed and rendered to
+//! sanitised HTML once at startup, and held in a `OnceLock<Vec<Post>>`
+//! along with their fully-rendered page bodies + ETags.
+//!
+//! The Markdown renderer is vendored locally on purpose — blog content
+//! arrives as third-party PR input, so every byte goes through
+//! `ammonia::clean` before reaching a template. The legal-page renderer
+//! is deliberately unsanitised (first-party tables) and must not be
+//! reused here.
+
+use std::collections::HashMap;
+use std::sync::{Arc, OnceLock};
+
+use askama::Template;
+use askama_web::WebTemplate;
+use axum::extract::{Path, State};
+use axum::http::HeaderMap;
+use axum::response::Response;
+use include_dir::{Dir, include_dir};
+use serde::Deserialize;
+
+use super::config::MarketingCfg;
+use super::pages::{CachedRender, body_etag, not_found, serve_cached};
+use super::seo::{JsonLd, OpenGraph, json_ld_blog_posting};
+use crate::web::assets::filters;
+
+const POST_CACHE_CONTROL: &str = "public, max-age=600, stale-while-revalidate=86400";
+const INDEX_CACHE_CONTROL: &str = "public, max-age=300, stale-while-revalidate=86400";
+
+static BLOG_DIR: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/src/marketing/content/blog");
+
+#[derive(Debug, Clone)]
+pub struct Post {
+    pub slug: String,
+    pub title: String,
+    pub date: String,
+    pub excerpt: String,
+    pub tags: Vec<String>,
+    pub draft: bool,
+    pub body_html: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct FrontMatter {
+    title: String,
+    date: String,
+    slug: Option<String>,
+    #[serde(default)]
+    excerpt: String,
+    #[serde(default)]
+    tags: Vec<String>,
+    #[serde(default)]
+    draft: bool,
+}
+
+static POSTS: OnceLock<Vec<Post>> = OnceLock::new();
+static RENDERED_INDEX: OnceLock<HashMap<String, CachedRender>> = OnceLock::new();
+static INDEX_CACHED: OnceLock<CachedRender> = OnceLock::new();
+
+/// Parse + render every published post once. Idempotent; the renders
+/// land in static caches the request handlers read directly.
+pub fn init() -> &'static [Post] {
+    POSTS.get_or_init(load_posts).as_slice()
+}
+
+pub fn all() -> &'static [Post] {
+    init()
+}
+
+pub fn list_published() -> Vec<&'static Post> {
+    let drafts_visible = cfg!(debug_assertions);
+    init()
+        .iter()
+        .filter(|p| drafts_visible || !p.draft)
+        .collect()
+}
+
+fn load_posts() -> Vec<Post> {
+    let mut out: Vec<Post> = Vec::new();
+    for f in BLOG_DIR.files() {
+        let path = f.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("md") {
+            continue;
+        }
+        let raw = match f.contents_utf8() {
+            Some(s) => s,
+            None => continue,
+        };
+        let stem = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("post")
+            .to_string();
+        match parse_post(raw, &stem) {
+            Ok(post) => out.push(post),
+            Err(e) => {
+                tracing::error!(file = %path.display(), error = %e, "blog post parse failed");
+            }
+        }
+    }
+    out.sort_by(|a, b| b.date.cmp(&a.date));
+    out
+}
+
+fn parse_post(raw: &str, stem: &str) -> anyhow::Result<Post> {
+    let (front, body) = split_front_matter(raw)
+        .ok_or_else(|| anyhow::anyhow!("missing TOML front-matter block"))?;
+    let fm: FrontMatter = toml::from_str(front)?;
+    Ok(Post {
+        slug: fm.slug.unwrap_or_else(|| stem.to_string()),
+        title: fm.title,
+        date: fm.date,
+        excerpt: fm.excerpt,
+        tags: fm.tags,
+        draft: fm.draft,
+        body_html: render(body),
+    })
+}
+
+fn split_front_matter(raw: &str) -> Option<(&str, &str)> {
+    let stripped = raw.strip_prefix("+++\n")?;
+    let end = stripped.find("\n+++\n")?;
+    let front = &stripped[..end];
+    let body = &stripped[end + "\n+++\n".len()..];
+    Some((front, body))
+}
+
+/// Sanitising Markdown render. CommonMark + tables → HTML → ammonia
+/// allowlist. Third-party PR content never reaches a browser as raw
+/// HTML; every `<script>`, `onerror=`, and `javascript:` href is
+/// dropped before the bytes leave this function.
+pub fn render(markdown: &str) -> String {
+    let mut opts = pulldown_cmark::Options::empty();
+    opts.insert(pulldown_cmark::Options::ENABLE_TABLES);
+    opts.insert(pulldown_cmark::Options::ENABLE_STRIKETHROUGH);
+    let parser = pulldown_cmark::Parser::new_ext(markdown, opts);
+    let mut html = String::new();
+    pulldown_cmark::html::push_html(&mut html, parser);
+    ammonia::Builder::default()
+        .link_rel(Some("noopener noreferrer"))
+        .clean(&html)
+        .to_string()
+}
+
+#[derive(Template, WebTemplate)]
+#[template(path = "marketing/blog_index.html")]
+struct BlogIndexPage {
+    canonical_url: String,
+    app_url: String,
+    og: OpenGraph,
+    posts: Vec<PostSummary>,
+    version: &'static str,
+}
+
+#[derive(Debug, Clone)]
+pub struct PostSummary {
+    pub slug: String,
+    pub title: String,
+    pub date: String,
+    pub excerpt: String,
+    pub tags: Vec<String>,
+}
+
+#[derive(Template, WebTemplate)]
+#[template(path = "marketing/blog_post.html")]
+struct BlogPostPage {
+    canonical_url: String,
+    app_url: String,
+    og: OpenGraph,
+    json_ld: JsonLd,
+    title: String,
+    date: String,
+    tags: Vec<String>,
+    body_html: String,
+    version: &'static str,
+}
+
+fn render_index(cfg: &MarketingCfg) -> CachedRender {
+    let canonical_url = format!("{}/blog", cfg.canonical_origin);
+    let og = OpenGraph::default_for("Status Monitor — Blog", &canonical_url);
+    let posts: Vec<PostSummary> = list_published()
+        .into_iter()
+        .map(|p| PostSummary {
+            slug: p.slug.clone(),
+            title: p.title.clone(),
+            date: p.date.clone(),
+            excerpt: p.excerpt.clone(),
+            tags: p.tags.clone(),
+        })
+        .collect();
+    let body = BlogIndexPage {
+        canonical_url,
+        app_url: cfg.app_url.clone(),
+        og,
+        posts,
+        version: env!("CARGO_PKG_VERSION"),
+    }
+    .render()
+    .unwrap_or_else(|e| format!("<!-- blog index render failed: {e} -->"));
+    let etag = body_etag(&body);
+    CachedRender { body, etag }
+}
+
+fn render_post(cfg: &MarketingCfg, post: &Post) -> CachedRender {
+    let canonical_url = format!("{}/blog/{}", cfg.canonical_origin, post.slug);
+    let og = OpenGraph::for_post(
+        &cfg.canonical_origin,
+        &post.title,
+        &post.excerpt,
+        &post.slug,
+    );
+    let json_ld = json_ld_blog_posting(
+        &cfg.canonical_origin,
+        &post.title,
+        &post.excerpt,
+        &post.slug,
+        &post.date,
+    );
+    let body = BlogPostPage {
+        canonical_url,
+        app_url: cfg.app_url.clone(),
+        og,
+        json_ld,
+        title: post.title.clone(),
+        date: post.date.clone(),
+        tags: post.tags.clone(),
+        body_html: post.body_html.clone(),
+        version: env!("CARGO_PKG_VERSION"),
+    }
+    .render()
+    .unwrap_or_else(|e| format!("<!-- blog post render failed: {e} -->"));
+    let etag = body_etag(&body);
+    CachedRender { body, etag }
+}
+
+pub async fn index(State(cfg): State<Arc<MarketingCfg>>, headers: HeaderMap) -> Response {
+    let cached = INDEX_CACHED.get_or_init(|| render_index(&cfg));
+    serve_cached(&headers, cached, INDEX_CACHE_CONTROL)
+}
+
+pub async fn post(
+    State(cfg): State<Arc<MarketingCfg>>,
+    Path(slug): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    let cache = RENDERED_INDEX.get_or_init(|| {
+        let cfg_ref = cfg.as_ref();
+        list_published()
+            .into_iter()
+            .map(|p| (p.slug.clone(), render_post(cfg_ref, p)))
+            .collect()
+    });
+    match cache.get(&slug) {
+        Some(cached) => serve_cached(&headers, cached, POST_CACHE_CONTROL),
+        None => not_found(State(cfg)).await,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn renderer_strips_script_tag() {
+        let html = render("<script>alert(1)</script>");
+        assert!(!html.contains("<script"), "got: {html}");
+        assert!(!html.to_lowercase().contains("alert"));
+    }
+
+    #[test]
+    fn renderer_strips_onerror() {
+        let html = render("![x](javascript:1)\n\n<img src=x onerror=alert(1)>");
+        assert!(!html.contains("onerror"), "got: {html}");
+        assert!(!html.contains("javascript:"), "got: {html}");
+    }
+
+    #[test]
+    fn renderer_strips_iframe_and_svg_onload() {
+        let html = render("<iframe src=//evil></iframe>\n<svg onload=alert(1)></svg>");
+        assert!(!html.contains("<iframe"), "got: {html}");
+        assert!(!html.contains("onload"), "got: {html}");
+    }
+
+    #[test]
+    fn renderer_keeps_safe_link() {
+        let html = render("[hi](https://example.com)");
+        assert!(html.contains("href=\"https://example.com"));
+        assert!(html.contains("rel=\"noopener noreferrer\""));
+    }
+
+    #[test]
+    fn split_front_matter_extracts_block() {
+        let raw = "+++\ntitle = \"x\"\ndate = \"2026-05-20\"\n+++\nbody\n";
+        let (front, body) = split_front_matter(raw).expect("front matter");
+        assert!(front.contains("title"));
+        assert!(body.starts_with("body"));
+    }
+
+    #[test]
+    fn parse_post_succeeds_on_minimal_doc() {
+        let raw = "+++\ntitle = \"Hi\"\ndate = \"2026-05-20\"\n+++\nbody\n";
+        let post = parse_post(raw, "hi").expect("parse");
+        assert_eq!(post.slug, "hi");
+        assert_eq!(post.title, "Hi");
+        assert!(!post.draft);
+    }
+
+    #[test]
+    fn posts_load_and_sort_by_date_desc() {
+        let posts = all();
+        if posts.is_empty() {
+            return;
+        }
+        for w in posts.windows(2) {
+            assert!(w[0].date >= w[1].date, "blog index must be date-desc");
+        }
+    }
+}

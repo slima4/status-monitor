@@ -65,6 +65,47 @@ pub struct AppConfig {
     pub rate_limits: RateLimitsConfig,
     #[serde(default)]
     pub abuse: AbuseConfig,
+    #[serde(default)]
+    pub marketing: MarketingConfig,
+}
+
+/// `[marketing]`. Optional apex/`www` marketing site + blog served from
+/// the same binary. Hard-isolated module — see `src/marketing/`. Disabled
+/// by default; when enabled, the dispatch seam routes the apex and `www`
+/// hosts to the marketing router and leaves every other host on the app
+/// router unchanged. Boot invariants live in `AppConfig::validate_marketing`.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct MarketingConfig {
+    pub enabled: bool,
+    /// CTA + login link target on every marketing page. The marketing
+    /// module never imports app code — this is the only handle it has on
+    /// the app surface, so the extracted service points anywhere with one
+    /// config change.
+    pub app_url: String,
+    /// Fully-qualified canonical origin (scheme + host, no trailing
+    /// slash). Used for `<link rel="canonical">`, OG / JSON-LD absolute
+    /// URLs, and the sitemap.
+    pub canonical_origin: String,
+    /// Belt-and-braces guard for subdomain labels that must never alias a
+    /// tenant slug (`www`, `app`). The dispatch seam already routes
+    /// apex/`www`/`app` explicitly; this list is asserted to be a subset
+    /// of `domain::reserved_slugs::RESERVED` at boot so the two lists
+    /// can't drift.
+    pub reserved_subdomains: Vec<String>,
+    pub blog_enabled: bool,
+}
+
+impl Default for MarketingConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            app_url: String::new(),
+            canonical_origin: String::new(),
+            reserved_subdomains: vec!["www".into(), "app".into()],
+            blog_enabled: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -808,6 +849,70 @@ impl AppConfig {
             o.max_logo_size_bytes,
             "quotas.self_host_overrides.max_logo_size_bytes",
         )?;
+        Ok(())
+    }
+
+    /// Marketing-site boot invariants. Cheap startup errors, never
+    /// panics in router construction. Skipped wholesale when
+    /// `marketing.enabled = false` so self-host deployments need not set
+    /// any of these.
+    pub fn validate_marketing(&self) -> Result<()> {
+        fn err(msg: String) -> crate::error::AppError {
+            crate::error::AppError::Other(anyhow::anyhow!(msg))
+        }
+        let m = &self.marketing;
+        if !m.enabled {
+            return Ok(());
+        }
+        let base = self.public_status.base_domain.trim();
+        if base.is_empty() || !base.contains('.') {
+            return Err(err(format!(
+                "marketing.enabled = true requires public_status.base_domain to be a non-empty FQDN (got {base:?})"
+            )));
+        }
+        for (field, value) in [
+            ("marketing.canonical_origin", m.canonical_origin.as_str()),
+            ("marketing.app_url", m.app_url.as_str()),
+        ] {
+            let v = value.trim();
+            if v.is_empty() {
+                return Err(err(format!(
+                    "{field} is required when marketing.enabled = true"
+                )));
+            }
+            if !v.starts_with("https://") {
+                return Err(err(format!("{field} must start with https:// (got {v:?})")));
+            }
+            if v.ends_with('/') {
+                return Err(err(format!(
+                    "{field} must not end with a trailing slash (got {v:?})"
+                )));
+            }
+        }
+        for sub in &m.reserved_subdomains {
+            let lower = sub.to_ascii_lowercase();
+            if !crate::domain::reserved_slugs::is_reserved(&lower) {
+                return Err(err(format!(
+                    "marketing.reserved_subdomains entry {sub:?} is not in \
+                     domain::reserved_slugs::RESERVED_SLUGS — keep the two lists aligned"
+                )));
+            }
+        }
+        // The session cookie must not be scoped to a parent zone that the
+        // marketing host inherits; otherwise the app's session ID rides
+        // along to the apex and the marketing CDN cache becomes Vary:
+        // Cookie. Host-only (empty Domain) is always safe.
+        let cd = self.auth.session.cookie_domain.trim();
+        if !cd.is_empty() {
+            let stripped = cd.trim_start_matches('.');
+            if stripped == base || base.ends_with(&format!(".{stripped}")) {
+                return Err(err(format!(
+                    "auth.session.cookie_domain={cd:?} overlaps marketing host {base:?}; \
+                     leave cookie_domain empty (host-only) so the apex marketing surface \
+                     is not Vary: Cookie"
+                )));
+            }
+        }
         Ok(())
     }
 
