@@ -240,6 +240,15 @@ async fn root_routes_operator_host_to_dashboard_non_operator_slugs_to_404() {
         StatusCode::SEE_OTHER,
         "operator host `app.{BASE_DOMAIN}` must reach the dashboard branch"
     );
+    // Case-insensitive match — Host headers are case-insensitive per RFC,
+    // and `is_operator_label` uses `eq_ignore_ascii_case`. A future
+    // "simplification" to `==` would fail this and route `APP.{base}` to
+    // the public dispatcher instead of the operator dashboard.
+    assert_eq!(
+        get_path(&app, "/", Some(&format!("APP.{BASE_DOMAIN}"))).await,
+        StatusCode::SEE_OTHER,
+        "uppercase `APP.{BASE_DOMAIN}` must match the operator label"
+    );
 
     for (host, why) in [
         (
