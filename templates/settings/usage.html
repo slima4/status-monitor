@@ -16,8 +16,8 @@
         <span class="text-sm font-medium text-slate-700">{{ b.label }}</span>
         <span class="text-sm tabular-nums text-slate-500">{{ b.current }} / {{ b.limit_display }}</span>
       </div>
-      <div class="h-2 w-full overflow-hidden rounded bg-slate-200">
-        <div class="h-full rounded bg-emerald-500" style="width: {{ b.pct }}%"></div>
+      <div class="usage-bar">
+        <div class="usage-bar__fill usage-bar__fill--ok" style="width: {{ b.pct }}%"></div>
       </div>
     </div>
     {% endfor %}
@@ -48,7 +48,7 @@
 
   <p class="text-sm text-slate-500">
     Need higher limits?
-    <a class="font-medium text-emerald-700 hover:text-emerald-800" href="mailto:upgrade@your-domain.com">Contact us</a>
+    <a class="font-medium text-brand-500 underline decoration-dotted hover:text-brand-900" href="mailto:upgrade@your-domain.com">Contact us</a>
   </p>
 </section>
 {% endblock %}

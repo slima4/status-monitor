@@ -31,15 +31,15 @@
                   hx-headers='{"X-Requested-With":"status-monitor"}'
                   hx-swap="none"
                   hx-on::after-request="window.smChannelTestResult(this, event)"
-                  class="text-xs font-medium text-slate-600 hover:underline">Send test</button>
+                  class="row-link">Send test</button>
           <a href="/settings/notifications/{{ c.id }}/edit"
-             class="text-xs font-medium text-slate-600 hover:underline">Edit</a>
+             class="row-link">Edit</a>
           <button type="button"
                   hx-delete="/api/v1/notification-channels/{{ c.id }}"
                   hx-headers='{"X-Requested-With":"status-monitor"}'
                   hx-confirm="Delete this channel? Monitors bound to it stop alerting through it."
                   hx-on::after-request="if(event.detail.successful){htmx.trigger('body','channels:refresh')}"
-                  class="text-xs font-medium text-rose-700 hover:underline">Delete</button>
+                  class="row-link row-link--danger">Delete</button>
         </div>
       </td>
     </tr>

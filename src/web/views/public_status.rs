@@ -606,31 +606,35 @@ fn build_maintenance(m: &PublicMaintenance, now: DateTime<Utc>) -> MaintenanceVi
 
 // --- Classifiers ---------------------------------------------------------
 
+// Iconography follows the design system: solid filled circle (U+25CF) for
+// go/no-go states (operational, major outage), gear (U+2699) for maintenance,
+// warning sign (U+26A0) for degraded / partial outage. No emoji — every glyph
+// here is a non-emoji Unicode symbol that inherits text colour via currentColor.
 fn overall_classes(s: OverallState) -> (&'static str, &'static str, &'static str) {
     match s {
         OverallState::Operational => (
             "border-emerald-200 bg-emerald-50 text-emerald-800",
-            "✓",
+            "\u{25CF}",
             "All systems operational",
         ),
         OverallState::Maintenance => (
             "border-sky-200 bg-sky-50 text-sky-800",
-            "🛠",
+            "\u{2699}\u{FE0E}",
             "Maintenance in progress",
         ),
         OverallState::MinorDisruption => (
             "border-amber-200 bg-amber-50 text-amber-900",
-            "⚠",
+            "\u{26A0}\u{FE0E}",
             "Minor service disruption",
         ),
         OverallState::PartialOutage => (
             "border-orange-200 bg-orange-50 text-orange-900",
-            "⚠",
+            "\u{26A0}\u{FE0E}",
             "Partial system outage",
         ),
         OverallState::MajorOutage => (
             "border-rose-200 bg-rose-50 text-rose-900",
-            "✗",
+            "\u{25CF}",
             "Major system outage",
         ),
     }
@@ -638,22 +642,24 @@ fn overall_classes(s: OverallState) -> (&'static str, &'static str, &'static str
 
 fn component_classes(s: PublicComponentStatus) -> (&'static str, &'static str, &'static str) {
     match s {
-        PublicComponentStatus::Operational => ("Operational", "text-emerald-700", "✓"),
-        PublicComponentStatus::Degraded => ("Degraded", "text-amber-700", "⚠"),
-        PublicComponentStatus::PartialOutage => ("Partial outage", "text-orange-700", "⚠"),
-        PublicComponentStatus::MajorOutage => ("Major outage", "text-rose-700", "✗"),
-        PublicComponentStatus::Maintenance => ("Maintenance", "text-sky-700", "🛠"),
+        PublicComponentStatus::Operational => ("Operational", "text-emerald-700", "\u{25CF}"),
+        PublicComponentStatus::Degraded => ("Degraded", "text-amber-700", "\u{26A0}\u{FE0E}"),
+        PublicComponentStatus::PartialOutage => {
+            ("Partial outage", "text-orange-700", "\u{26A0}\u{FE0E}")
+        }
+        PublicComponentStatus::MajorOutage => ("Major outage", "text-rose-700", "\u{25CF}"),
+        PublicComponentStatus::Maintenance => ("Maintenance", "text-sky-700", "\u{2699}\u{FE0E}"),
     }
 }
 
 fn day_classes(s: DayState) -> (&'static str, &'static str) {
     match s {
-        DayState::Operational => ("bg-emerald-500", "Operational"),
-        DayState::Degraded => ("bg-amber-400", "Degraded"),
-        DayState::PartialOutage => ("bg-orange-500", "Partial outage"),
-        DayState::MajorOutage => ("bg-rose-600", "Major outage"),
-        DayState::Maintenance => ("bg-sky-400", "Maintenance"),
-        DayState::NoData => ("bg-slate-200", "No data"),
+        DayState::Operational => ("day-cell--op", "Operational"),
+        DayState::Degraded => ("day-cell--deg", "Degraded"),
+        DayState::PartialOutage => ("day-cell--part", "Partial outage"),
+        DayState::MajorOutage => ("day-cell--maj", "Major outage"),
+        DayState::Maintenance => ("day-cell--mnt", "Maintenance"),
+        DayState::NoData => ("day-cell--none", "No data"),
     }
 }
 

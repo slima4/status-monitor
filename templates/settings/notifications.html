@@ -34,10 +34,10 @@
       if (!cell) return;
       if (ev.detail.successful) {
         cell.textContent = '✓ sent';
-        cell.className = 'text-xs font-medium text-emerald-700';
+        cell.className = 'flash-text flash-text--ok text-xs font-medium';
       } else {
         cell.textContent = '✗ ' + window.smErrMsg(ev.detail.xhr, 'delivery failed');
-        cell.className = 'text-xs font-medium text-rose-700';
+        cell.className = 'flash-text flash-text--bad text-xs font-medium';
       }
     };
   </script>

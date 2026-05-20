@@ -21,7 +21,7 @@
                 hx-headers='{"X-Requested-With":"status-monitor"}'
                 hx-confirm="Revoke this token? Existing callers using it will start receiving 401."
                 hx-on::after-request="if(event.detail.successful){htmx.trigger('body','tokens:refresh')}"
-                class="text-xs font-medium text-rose-700 hover:underline">Revoke</button>
+                class="row-link row-link--danger">Revoke</button>
       </td>
     </tr>
     {% endfor %}

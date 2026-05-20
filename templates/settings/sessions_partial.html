@@ -25,7 +25,7 @@
                 hx-target="#sessions-list"
                 hx-swap="innerHTML"
                 hx-on::after-request="if(event.detail.successful){htmx.trigger('body','sessions:refresh')}"
-                class="text-xs font-medium text-rose-700 hover:underline">Revoke</button>
+                class="row-link row-link--danger">Revoke</button>
         {% endif %}
       </td>
     </tr>

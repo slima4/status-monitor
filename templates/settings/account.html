@@ -61,8 +61,8 @@
       to you in case you change your mind.
     </p>
 
-    <div id="delete-blocking" class="hidden space-y-3 rounded border border-amber-300 bg-amber-50 p-3 text-sm">
-      <p class="font-medium text-amber-900">
+    <div id="delete-blocking" class="hidden alert-card alert-card--warn space-y-3">
+      <p class="font-medium">
         You solely own organisations that still have other members. Transfer
         ownership (promote another member to owner) or delete these
         organisations first:
@@ -141,7 +141,7 @@
           const when = body.scheduled_purge_at
             ? new Date(body.scheduled_purge_at).toUTCString() : 'the grace period';
           const sent = body.recovery_token_sent_to_email || 'your email';
-          result.className = 'text-sm text-emerald-700';
+          result.className = 'flash-text flash-text--ok';
           result.textContent = 'Account scheduled for deletion. A recovery link '
             + 'was sent to ' + sent + '. Permanent after ' + when + '. Signing out…';
           document.getElementById('confirm-delete').disabled = true;
@@ -157,11 +157,11 @@
         result.textContent = err.message || 'Something went wrong.';
         if (blockingOrgs) {
           renderBlocking(blockingOrgs);
-          result.className = 'text-sm text-amber-800';
+          result.className = 'flash-text flash-text--warn';
         } else if (alreadyDeleted) {
-          result.className = 'text-sm text-slate-600';
+          result.className = 'flash-text flash-text--muted';
         } else {
-          result.className = 'text-sm text-rose-700';
+          result.className = 'flash-text flash-text--bad';
         }
         return;
       }
@@ -171,7 +171,7 @@
         if (li) li.remove();
         if (!blockingList.children.length) {
           blocking.classList.add('hidden');
-          result.className = 'text-sm text-emerald-700';
+          result.className = 'flash-text flash-text--ok';
           result.textContent = 'All blocking organisations cleared — you can delete your account now.';
         }
       }

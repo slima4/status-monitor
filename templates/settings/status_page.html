@@ -48,7 +48,7 @@
         <span id="slug-result" aria-live="polite" class="text-sm"></span>
       </div>
       <div id="slug-form-errors" role="alert" aria-live="polite"
-           class="hidden rounded border border-red-300 bg-red-50 p-3 text-xs text-red-800"></div>
+           class="hidden alert-card alert-card--error text-xs"></div>
       <p class="text-xs text-slate-500">
         3–30 lowercase letters, digits or hyphens; must start with a letter.
         Renaming is a hard cutover — the old URL stops working immediately.
@@ -57,7 +57,7 @@
     {% endif %}
   </div>
   {% else %}
-  <p class="rounded border border-amber-300 bg-amber-50 p-4 text-sm text-amber-800">
+  <p class="alert-card alert-card--warn">
     No public status surface is mounted on this deployment. Set
     <code>tenancy.path_based_public_routes</code> (self-host) or
     <code>tenancy.subdomain_public_routes</code> (SaaS) to expose it.
@@ -72,7 +72,7 @@
         class="space-y-6">
 
     <div id="form-errors" role="alert" aria-live="polite"
-         class="hidden rounded border border-red-300 bg-red-50 p-3 text-sm text-red-800"></div>
+         class="hidden alert-card alert-card--error"></div>
 
     <div class="sticker-card space-y-6 p-5">
       <label class="flex items-start gap-3">

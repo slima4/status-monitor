@@ -48,12 +48,12 @@
         const xhr = ev.detail.xhr;
         const out = document.getElementById('recover-result');
         if (xhr.status === 200) {
-          out.className = 'text-sm text-emerald-700';
+          out.className = 'flash-text flash-text--ok';
           out.textContent = 'Account restored. Signing you in…';
           setTimeout(() => { window.location.href = '/'; }, 1200);
           return;
         }
-        out.className = 'text-sm text-rose-700';
+        out.className = 'flash-text flash-text--bad';
         out.textContent = window.smErrMsg(xhr,
           FALLBACKS[xhr.status] || 'Could not recover the account. Please try again.');
       });

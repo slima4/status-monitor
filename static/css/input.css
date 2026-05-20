@@ -353,6 +353,66 @@
        palette, not the cartoon .status-badge system). Defined once so the
        static prefix isn't repeated 90×/component in every 30s fragment. */
     .day-cell { @apply h-9 rounded-sm; }
+    .day-cell--op   { @apply bg-emerald-500; }
+    .day-cell--deg  { @apply bg-amber-400; }
+    .day-cell--part { @apply bg-orange-500; }
+    .day-cell--maj  { @apply bg-rose-600; }
+    .day-cell--mnt  { @apply bg-sky-400; }
+    .day-cell--none { @apply bg-slate-200; }
+
+    /* Small colour swatch used in the public status-page legend. Fills are
+       intentionally the same set the history strip uses (rendered via
+       .day-cell--* from day_classes() in public_status.rs) — the legend
+       names the same scale the bars paint. */
+    .legend-dot         { @apply inline-block h-2.5 w-2.5 rounded-sm; }
+    .legend-dot--op     { @apply bg-emerald-500; }
+    .legend-dot--deg    { @apply bg-amber-400; }
+    .legend-dot--part   { @apply bg-orange-500; }
+    .legend-dot--maj    { @apply bg-rose-600; }
+    .legend-dot--mnt    { @apply bg-sky-400; }
+    .legend-dot--none   { @apply bg-slate-200; }
+
+    /* Operator-surface inline alert / form banner. Same 2px ink-adjacent
+       depth as .stat-tile (colored edge + tinted fill, no sticker shadow):
+       severity reads from the colour, never from green/red hard-coded at
+       call sites. Use for form errors, configuration warnings, success
+       confirmations after a destructive action. */
+    .alert-card         { @apply rounded-xl border-2 p-3 text-sm; }
+    .alert-card--warn   { @apply border-amber-300   bg-amber-50   text-amber-800; }
+    .alert-card--error  { @apply border-red-300     bg-red-50     text-red-800; }
+    .alert-card--ok     { @apply border-emerald-300 bg-emerald-50 text-emerald-900; }
+    .alert-card--muted  { @apply border-slate-200   bg-slate-50   text-slate-600; }
+
+    /* Public-surface (flat) callout — same idea as .alert-card but with the
+       quiet 1px slate-family border the public page uses everywhere. The
+       sticker dialect doesn't bleed onto /status. */
+    .public-callout         { @apply rounded-2xl border p-5; }
+    .public-callout--warn   { @apply border-amber-200 bg-amber-50; }
+    .public-callout--info   { @apply border-sky-200   bg-sky-50;   }
+    .public-callout--neutral{ @apply border-slate-200 bg-white;    }
+
+    /* Small inline status line — for JS-set messages ("Saved", error toasts,
+       'sent' confirmations on row actions). Replaces ad-hoc text-emerald-700
+       et al. so the palette stays one source. */
+    .flash-text         { @apply text-sm; }
+    .flash-text--ok     { @apply text-emerald-700; }
+    .flash-text--bad    { @apply text-rose-700; }
+    .flash-text--warn   { @apply text-amber-800; }
+    .flash-text--muted  { @apply text-slate-600; }
+
+    /* Inline table-row action link. Tiny, weight 500, underline-on-hover —
+       same shape as `Edit / Copy / Revoke / Delete` cells. `--danger`
+       swaps to the destructive ramp. */
+    .row-link           { @apply text-xs font-medium text-slate-600 hover:underline hover:text-slate-900; }
+    .row-link--danger   { @apply text-rose-700 hover:text-rose-800; }
+
+    /* Usage / quota progress bar. Track is slate-200; fill is emerald.
+       Width comes from a `style="width: N%"` attribute at the call site.
+       (Threshold-driven --warn/--bad modifiers will land when a template
+       actually colours by % — not synthesised ahead of demand.) */
+    .usage-bar          { @apply h-2 w-full overflow-hidden rounded bg-slate-200; }
+    .usage-bar__fill    { @apply h-full rounded; }
+    .usage-bar__fill--ok    { @apply bg-emerald-500; }
 
     /* Live "we never stop checking" heartbeat. The EKG path is drawn with a
        long dash that scrolls left → reads as a continuous monitor sweep,

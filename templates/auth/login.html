@@ -57,14 +57,14 @@
       <span>Continue with GitHub</span>
     </a>
     {% else %}
-    <p class="rounded-xl border-2 border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
+    <p class="alert-card alert-card--warn">
       GitHub OAuth is not configured. Ask your operator to set <code>auth.github.client_id</code>
       and <code>auth.github.client_secret</code> in the server config.
     </p>
     {% endif %}
 
     {% if let Some(inv) = invitation_hint %}
-    <p class="rounded-xl border-2 border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
+    <p class="alert-card alert-card--muted text-xs">
       After signing in we&rsquo;ll bring you back to your invitation ({{ inv }}).
     </p>
     {% endif %}

@@ -20,7 +20,7 @@
     <label class="block text-sm font-medium" for="org-name">Organization name</label>
     <input id="org-name" name="name" type="text" value="{{ current_name }}"
            required minlength="1" maxlength="80"
-           class="w-full rounded-xl border-2 border-slate-200 px-3 py-2 text-sm focus:border-slate-700 focus:outline-none">
+           class="w-full field text-sm">
     <div class="flex items-center justify-between">
       <a href="/" class="text-sm text-slate-500 hover:text-slate-700">Skip for now</a>
       <button type="submit"
@@ -28,7 +28,7 @@
         Save and continue
       </button>
     </div>
-    <p id="onboard-status" class="text-sm text-emerald-700" aria-live="polite"></p>
+    <p id="onboard-status" class="flash-text flash-text--ok" aria-live="polite"></p>
   </form>
 
   <script>

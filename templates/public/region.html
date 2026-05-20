@@ -33,7 +33,7 @@
     {# --- Active incidents --- #}
     {% if view.has_active_incident %}
     <section aria-labelledby="active-incidents-heading"
-             class="rounded-2xl border border-amber-200 bg-amber-50 p-5">
+             class="public-callout public-callout--warn">
         <h2 id="active-incidents-heading" class="text-base font-semibold text-amber-900">
             Active incident{% if view.active_incidents.len() != 1 %}s{% endif %}
         </h2>
@@ -69,7 +69,7 @@
     {# --- Maintenance --- #}
     {% if view.has_maintenance %}
     <section aria-labelledby="maintenance-heading"
-             class="rounded-2xl border border-sky-200 bg-sky-50 p-5">
+             class="public-callout public-callout--info">
         <h2 id="maintenance-heading" class="text-base font-semibold text-sky-900">Scheduled maintenance</h2>
         {% if !view.active_maintenance.is_empty() %}
         <h3 class="mt-3 text-sm font-medium text-sky-900">In progress</h3>
@@ -122,19 +122,19 @@
            so a visitor can read a bar without hovering for the tooltip. #}
         <ul class="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-slate-500"
             aria-label="Status colour key">
-            <li class="flex items-center gap-1.5"><span class="h-2.5 w-2.5 rounded-sm bg-emerald-500"></span>Operational</li>
-            <li class="flex items-center gap-1.5"><span class="h-2.5 w-2.5 rounded-sm bg-amber-400"></span>Degraded</li>
-            <li class="flex items-center gap-1.5"><span class="h-2.5 w-2.5 rounded-sm bg-orange-500"></span>Partial outage</li>
-            <li class="flex items-center gap-1.5"><span class="h-2.5 w-2.5 rounded-sm bg-rose-600"></span>Major outage</li>
-            <li class="flex items-center gap-1.5"><span class="h-2.5 w-2.5 rounded-sm bg-sky-400"></span>Maintenance</li>
-            <li class="flex items-center gap-1.5"><span class="h-2.5 w-2.5 rounded-sm bg-slate-200"></span>No data</li>
+            <li class="flex items-center gap-1.5"><span class="legend-dot legend-dot--op"></span>Operational</li>
+            <li class="flex items-center gap-1.5"><span class="legend-dot legend-dot--deg"></span>Degraded</li>
+            <li class="flex items-center gap-1.5"><span class="legend-dot legend-dot--part"></span>Partial outage</li>
+            <li class="flex items-center gap-1.5"><span class="legend-dot legend-dot--maj"></span>Major outage</li>
+            <li class="flex items-center gap-1.5"><span class="legend-dot legend-dot--mnt"></span>Maintenance</li>
+            <li class="flex items-center gap-1.5"><span class="legend-dot legend-dot--none"></span>No data</li>
         </ul>
 
         {% for group in view.groups %}
         <section aria-labelledby="group-{{ loop.index }}-heading" class="space-y-3">
             <h2 id="group-{{ loop.index }}-heading"
                 class="text-sm font-semibold uppercase tracking-wide text-slate-500">{{ group.heading }}</h2>
-            <ul class="overflow-hidden rounded-2xl border border-slate-200 bg-white divide-y divide-slate-100">
+            <ul class="public-callout public-callout--neutral divide-y divide-slate-100 overflow-hidden p-0">
                 {% for c in group.components %}
                 <li class="p-5">
                     <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
@@ -167,7 +167,7 @@
         </section>
         {% endfor %}
     {% else %}
-        <section class="rounded-2xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500">
+        <section class="public-callout public-callout--neutral p-8 text-center text-sm text-slate-500">
             No public components have been configured yet.
         </section>
     {% endif %}
@@ -177,7 +177,7 @@
     <section aria-labelledby="recent-incidents-heading" class="space-y-3">
         <h2 id="recent-incidents-heading"
             class="text-sm font-semibold uppercase tracking-wide text-slate-500">Past incidents (30 days)</h2>
-        <ul class="divide-y divide-slate-100 overflow-hidden rounded-2xl border border-slate-200 bg-white">
+        <ul class="public-callout public-callout--neutral divide-y divide-slate-100 overflow-hidden p-0">
             {% for inc in view.recent_incidents %}
             <li class="p-5">
                 <article class="space-y-1.5">
@@ -186,7 +186,7 @@
                            class="font-medium text-slate-900 hover:underline">{{ inc.header.title }}</a>
                         {% call chips::sevphase(inc.header) %}{% endcall %}
                         {% if inc.header.ongoing %}
-                            <span class="rounded-full bg-rose-100 px-2 py-0.5 text-xs font-medium text-rose-800">Ongoing</span>
+                            <span class="status-badge status-badge--down">Ongoing</span>
                         {% endif %}
                     </div>
                     <p class="text-xs text-slate-500">

@@ -45,8 +45,8 @@
         const body = window.smJson(ev.detail.xhr);
         if (!body || !body.token) return; // unparseable: leave server response in place
         document.getElementById('token-result').innerHTML = `
-          <div class="rounded border border-emerald-300 bg-emerald-50 p-4 text-sm">
-            <p class="font-medium text-emerald-900">Token created — copy it now, you won't see it again.</p>
+          <div class="alert-card alert-card--ok">
+            <p class="font-medium">Token created — copy it now, you won't see it again.</p>
             <pre class="mt-2 overflow-x-auto rounded bg-white px-3 py-2 font-mono text-xs">${body.token}</pre>
           </div>`;
         document.getElementById('token-name').value = '';
