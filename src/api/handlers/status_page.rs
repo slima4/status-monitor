@@ -321,7 +321,19 @@ pub(crate) fn build_settings(state: &AppState, ob: &OrgBranding) -> StatusPageSe
             .public_logo_path
             .as_deref()
             .and_then(|p| logo_url(base.as_deref(), p)),
-        status_url: base.as_ref().map(|origin| format!("{origin}/status")),
+        status_url: base.as_ref().map(|origin| status_url(state, origin)),
+    }
+}
+
+/// Public URL shown to the operator. SaaS subdomain mode serves the page at
+/// the apex of `{slug}.{base_domain}` (industry parity); the path-based
+/// self-host surface keeps `/status` as the mount point.
+fn status_url(state: &AppState, origin: &str) -> String {
+    if subdomain_public_routes_enabled(&state.cfg) {
+        // origin is already `https://{slug}.{base_domain}` — apex.
+        origin.to_owned()
+    } else {
+        format!("{origin}/status")
     }
 }
 

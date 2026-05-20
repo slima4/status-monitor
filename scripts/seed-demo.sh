@@ -115,6 +115,6 @@ SQL
 
 echo
 echo "Seeded org '${SLUG}' (id ${ORG})."
-echo "SaaS:      https://${SLUG}.${BASE_DOMAIN}/status"
+echo "SaaS:      https://${SLUG}.${BASE_DOMAIN}/"
 echo "Self-host: https://app.${BASE_DOMAIN}/status"
 echo "(page cache TTL ~10s; wait a moment before the first load)"

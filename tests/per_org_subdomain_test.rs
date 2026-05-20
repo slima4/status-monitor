@@ -62,7 +62,12 @@ async fn set_enabled(pool: &sqlx::PgPool, org: OrgId, actor: UserId, enabled: bo
 
 /// `GET /status` against the SaaS-subdomain app with an explicit `Host`.
 async fn get_status(app: &axum::Router, host: Option<&str>) -> StatusCode {
-    let mut req = Request::builder().uri("/status");
+    get_path(app, "/status", host).await
+}
+
+/// `GET <path>` against the SaaS-subdomain app with an explicit `Host`.
+async fn get_path(app: &axum::Router, path: &str, host: Option<&str>) -> StatusCode {
+    let mut req = Request::builder().uri(path);
     if let Some(h) = host {
         req = req.header("host", h);
     }
@@ -165,6 +170,71 @@ async fn subdomain_status_page_gates_on_enabled_and_slug_shape() {
         StatusCode::NOT_FOUND,
         "missing Host header must 404"
     );
+}
+
+#[tokio::test]
+#[ignore]
+async fn subdomain_root_serves_public_page() {
+    // `/` on a `{slug}.{base_domain}` host renders the public page just like
+    // `/status` does — competitor parity (Statuspage/BetterStack/Instatus
+    // all serve at apex). The route stays at `/status`; the request URI is
+    // rewritten before the router matches.
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let slug = unique_slug("root");
+    seed_org(&pool, &slug, true).await;
+    let (app, _default) = common::build_test_app_with_pg(pool, saas_subdomain).await;
+
+    let host = status_host(&slug);
+    assert_eq!(
+        get_path(&app, "/", Some(&host)).await,
+        StatusCode::OK,
+        "subdomain `/` must serve the public page"
+    );
+    assert_eq!(
+        get_path(&app, "/?utm_source=email", Some(&host)).await,
+        StatusCode::OK,
+        "query string must survive the rewrite"
+    );
+    // Blocked host shapes don't trigger the rewrite — `/` falls through to
+    // the dashboard route, which requires auth and never returns 200 here.
+    assert_ne!(
+        get_path(&app, "/", Some(&format!("a.b.{BASE_DOMAIN}"))).await,
+        StatusCode::OK,
+        "deeper subdomain must NOT be treated as a public surface"
+    );
+    assert_ne!(
+        get_path(&app, "/", Some(BASE_DOMAIN)).await,
+        StatusCode::OK,
+        "bare base domain must NOT be treated as a public surface"
+    );
+}
+
+#[tokio::test]
+#[ignore]
+async fn root_on_non_subdomain_host_falls_through_to_dashboard() {
+    // Hosts that don't parse as `{slug}.{base_domain}` (bare base, deeper
+    // subdomain, missing Host) must NOT be treated as the public surface —
+    // they should hit the operator dashboard. With no session cookie, that
+    // branch redirects to /login (303), proving the dispatcher reached the
+    // dashboard path and not `public_status::index` (which would 404).
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let (app, _default) = common::build_test_app_with_pg(pool, saas_subdomain).await;
+
+    for (host, why) in [
+        (Some(BASE_DOMAIN.to_string()), "bare base domain"),
+        (Some(format!("a.b.{BASE_DOMAIN}")), "deeper subdomain"),
+        (None, "missing Host header"),
+    ] {
+        assert_eq!(
+            get_path(&app, "/", host.as_deref()).await,
+            StatusCode::SEE_OTHER,
+            "operator-style `/` ({why}) must redirect to /login, not 404"
+        );
+    }
 }
 
 #[tokio::test]

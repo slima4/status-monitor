@@ -124,6 +124,22 @@ where
     }
 }
 
+/// True when the SaaS subdomain surface is live AND the request's `Host`
+/// parses as a `{slug}.{base_domain}` (so an opted-in org *might* answer).
+/// The `/` dispatcher uses this to choose between the operator dashboard
+/// and the per-org public page; the actual org lookup still happens through
+/// [`StatusPageOrg`], which 404s when the slug is unknown or opted out.
+pub fn is_subdomain_public_request(state: &AppState, headers: &HeaderMap) -> bool {
+    if !subdomain_public_routes_enabled(&state.cfg) {
+        return false;
+    }
+    let Some(host) = headers.get(HOST).and_then(|h| h.to_str().ok()) else {
+        return false;
+    };
+    let host = host.split(':').next().unwrap_or(host);
+    extract_status_slug(host, &state.cfg.public_status.base_domain).is_some()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

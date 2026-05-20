@@ -1,13 +1,17 @@
 use askama::Template;
 use askama_web::WebTemplate;
 use axum::Json;
-use axum::extract::State;
+use axum::extract::{FromRequestParts, Query, State};
+use axum::http::request::Parts;
+use axum::response::{IntoResponse, Response};
 
 use crate::api::handlers::dashboard::dashboard_summary;
 use crate::api::types::DashboardSummary;
 use crate::app::AppState;
 use crate::web::assets::filters;
 use crate::web::error::WebResult;
+use crate::web::host::is_subdomain_public_request;
+use crate::web::views::public_status::{self, StatusParams};
 use crate::web::{AuthedBrowser, CurrentOrg};
 
 #[derive(Template, WebTemplate)]
@@ -23,6 +27,42 @@ pub struct DashboardPage {
 pub struct DashboardRegion {
     pub summary: DashboardSummary,
     pub uptime_pct: String,
+}
+
+/// `/` dispatcher: SaaS subdomain hosts (`{slug}.{base_domain}`) serve the
+/// per-org public status page at apex; every other host falls through to the
+/// operator dashboard. The branch lives here rather than as router-level
+/// middleware because axum's `Router::layer` runs *after* path matching —
+/// rewriting the URI in a layer would never re-route to `/status`. Single
+/// `/` handler picks the surface once.
+pub async fn root(state: State<AppState>, mut parts: Parts) -> Response {
+    let State(ref app_state) = state;
+    if is_subdomain_public_request(app_state, &parts.headers) {
+        // Preserve axum's standard `Query<T>` rejection — a malformed
+        // `?fragment=` value used to 400 via the framework extractor, so a
+        // bare `.unwrap_or(default)` here would silently turn invalid params
+        // into a 200.
+        let query = match Query::<StatusParams>::try_from_uri(&parts.uri) {
+            Ok(q) => q,
+            Err(rej) => return rej.into_response(),
+        };
+        return public_status::index(state, parts.headers, query).await;
+    }
+    // Operator / self-host dashboard. Run the same extractors `index` would
+    // have run via the router so their rejection paths (login redirect, org
+    // error envelope) are byte-identical to the previous direct mount.
+    let auth = match AuthedBrowser::from_request_parts(&mut parts, app_state).await {
+        Ok(a) => a,
+        Err(rej) => return rej.into_response(),
+    };
+    let org = match CurrentOrg::from_request_parts(&mut parts, app_state).await {
+        Ok(o) => o,
+        Err(rej) => return rej.into_response(),
+    };
+    match index(auth, state, org).await {
+        Ok(page) => page.into_response(),
+        Err(e) => e.into_response(),
+    }
 }
 
 pub async fn index(

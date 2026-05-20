@@ -370,7 +370,7 @@ async fn main() -> Result<()> {
     // enters the `http.request` span before `access_log` runs, so
     // `access_log` can read the request's OTLP trace_id (see its doc).
     let router = build_router(state.clone(), root.clone())
-        .merge(web::routes(&state.cfg).with_state(state))
+        .merge(web::routes(state))
         .layer(middleware::from_fn(access_log))
         .layer(
             TraceLayer::new_for_http()

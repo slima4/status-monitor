@@ -4,18 +4,20 @@ use tower_cookies::CookieManagerLayer;
 
 use crate::api::public_routes_active;
 use crate::app::AppState;
-use crate::config::AppConfig;
 use crate::web::{assets, error, views};
 
-/// Builds the UI router (`Router<AppState>`). Caller is responsible for
-/// merging into the main router and applying `with_state`. The public-status
-/// pages (`/status`, `/status/incidents/{id}`) are mounted only when
+/// Builds the UI router with state applied. The public-status pages
+/// (`/status`, `/status/incidents/{id}`) are mounted only when
 /// [`public_routes_active`] is true; the org they render is resolved
 /// per-request by the host-aware `StatusPageOrg` extractor (subdomain →
-/// that tenant; self-host → the default org).
-pub fn routes(cfg: &AppConfig) -> Router<AppState> {
+/// that tenant; self-host → the default org). `/` runs a host-aware
+/// dispatcher ([`views::dashboard::root`]) so on the SaaS subdomain
+/// surface each org's page lives at the apex of its host (industry
+/// parity); the operator dashboard keeps `/` on its own host.
+pub fn routes(state: AppState) -> Router {
+    let cfg = &state.cfg;
     let mut r = Router::new()
-        .route("/", get(views::dashboard::index))
+        .route("/", get(views::dashboard::root))
         .route("/targets", get(views::targets_list::index))
         .route("/targets/new", get(views::targets_form::new_form))
         .route("/targets/{id}", get(views::targets_detail::index))
@@ -95,4 +97,5 @@ pub fn routes(cfg: &AppConfig) -> Router<AppState> {
     r.route("/static/{*path}", get(assets::serve))
         .fallback(error::not_found)
         .layer(CookieManagerLayer::new())
+        .with_state(state)
 }

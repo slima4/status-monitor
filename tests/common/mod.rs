@@ -197,7 +197,7 @@ fn build_test_app_with_public_source_inner(
     );
     let api = build_router(state.clone(), CancellationToken::new());
     if with_web {
-        api.merge(status_monitor::web::routes(&state.cfg).with_state(state))
+        api.merge(status_monitor::web::routes(state))
     } else {
         api
     }
@@ -213,7 +213,7 @@ fn build_test_app_inner(mutate: impl FnOnce(&mut AppConfig), with_web: bool) -> 
     let state = build_test_app_state(mutate);
     let api = build_router(state.clone(), CancellationToken::new());
     if with_web {
-        api.merge(status_monitor::web::routes(&state.cfg).with_state(state))
+        api.merge(status_monitor::web::routes(state))
     } else {
         api
     }
@@ -268,7 +268,7 @@ pub async fn build_test_app_with_pg(
         build_test_outbound_and_email().1,
     );
     let api = build_router(state.clone(), CancellationToken::new());
-    let app = api.merge(status_monitor::web::routes(&state.cfg).with_state(state));
+    let app = api.merge(status_monitor::web::routes(state));
     (app, default_org_id)
 }
 
@@ -353,7 +353,7 @@ fn assemble_pg_router(pool: PgPool, cfg: AppConfig, default_org_id: OrgId) -> Ro
         build_test_outbound_and_email().1,
     );
     let api = build_router(state.clone(), CancellationToken::new());
-    api.merge(status_monitor::web::routes(&state.cfg).with_state(state))
+    api.merge(status_monitor::web::routes(state))
 }
 
 /// Layer that stamps the provided `Session` onto every request's extensions.
