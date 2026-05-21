@@ -29,10 +29,12 @@ use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::TcpStream;
 use tower::Service;
 
+use crate::net::happy_eyeballs;
 use crate::security::{SsrfError, SsrfGuard};
 
-/// Cap on a single TCP connect attempt. Without it, a webhook pointing at a
-/// non-routable public IP wedges per-worker for the OS default (~75 s on
+/// Overall budget for the connect race. Bounds the happy-eyeballs sweep
+/// across every resolved address — without it, a webhook pointing at a
+/// non-routable public IP wedges per-attempt for the OS default (~75 s on
 /// Linux, minutes on macOS) before the hyper client gives up and retries.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -142,29 +144,11 @@ impl Service<Uri> for SsrfHttpConnector {
                 .filter(|sa| allowed.contains(&sa.ip()))
                 .collect();
 
-            let mut first_err: Option<io::Error> = None;
-            for addr in &addrs {
-                let connect = TcpStream::connect(addr);
-                match tokio::time::timeout(CONNECT_TIMEOUT, connect).await {
-                    Ok(Ok(stream)) => return Ok(TokioIo::new(SsrfStream { inner: stream })),
-                    Ok(Err(e)) => {
-                        if first_err.is_none() {
-                            first_err = Some(e);
-                        }
-                    }
-                    Err(_) => {
-                        if first_err.is_none() {
-                            first_err = Some(io::Error::new(
-                                io::ErrorKind::TimedOut,
-                                format!(
-                                    "tcp connect to {addr} timed out after {CONNECT_TIMEOUT:?}"
-                                ),
-                            ));
-                        }
-                    }
-                }
-            }
-            Err(first_err.unwrap_or_else(|| io::Error::other("no addresses to connect")))
+            // Happy-Eyeballs v2 race (RFC 8305): try v6 and v4 in parallel
+            // with a 250 ms stagger so a single broken AAAA on a long-tail
+            // webhook target doesn't cost the full `CONNECT_TIMEOUT`.
+            let stream = happy_eyeballs::connect(addrs, CONNECT_TIMEOUT).await?;
+            Ok(TokioIo::new(SsrfStream { inner: stream }))
         })
     }
 }

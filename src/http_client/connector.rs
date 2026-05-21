@@ -103,19 +103,13 @@ async fn connect_tcp(inner: &ConnectorInner, host: &str, port: u16) -> io::Resul
         return Err(io::Error::other(format!("no allowed addresses for {host}")));
     }
 
+    // Happy-Eyeballs v2 (RFC 8305): race v6 and v4 with a 250 ms stagger.
+    // A broken AAAA on a long-tail user target otherwise costs the full
+    // `connect_timeout` per check, missing subsequent intervals.
+    // `happy_eyeballs::connect` bounds the overall sweep at the same budget
+    // we passed previously to `tokio::time::timeout`.
     let tcp_start = Instant::now();
-    let stream = tokio::time::timeout(inner.connect_timeout, async {
-        let mut last_err: Option<io::Error> = None;
-        for addr in &addrs {
-            match TcpStream::connect(addr).await {
-                Ok(s) => return Ok::<TcpStream, io::Error>(s),
-                Err(e) => last_err = Some(e),
-            }
-        }
-        Err(last_err.unwrap_or_else(|| io::Error::other("no addresses")))
-    })
-    .await
-    .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "tcp connect timeout"))??;
+    let stream = crate::net::happy_eyeballs::connect(addrs, inner.connect_timeout).await?;
 
     inner
         .connect_ms
