@@ -3,8 +3,8 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>{% block title %}Status Monitor{% endblock %}</title>
-    <meta name="description" content="{% block description %}A Rust uptime monitor that keeps checking while everything else is on fire.{% endblock %}">
+    <title>{% block title %}Uptimepage{% endblock %}</title>
+    <meta name="description" content="{% block description %}Uptime monitoring and public status pages that just work.{% endblock %}">
     <link rel="canonical" href="{{ canonical_url }}">
     <link rel="icon" type="image/svg+xml" href="{{ "img/favicon.svg"|asset }}">
     <link rel="stylesheet" href="{{ "css/app.css"|asset }}">
@@ -27,27 +27,55 @@
        class="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:rounded focus:bg-white focus:px-3 focus:py-2 focus:text-sm focus:ring-2 focus:ring-slate-700">
         Skip to main content
     </a>
+
     <header class="border-b bg-white">
         <nav aria-label="Primary" class="container mx-auto flex items-center gap-6 px-4 py-3">
-            <a href="/" class="nav-brand">Status Monitor</a>
-            <a href="/blog" class="nav-link">Blog</a>
-            <a href="{{ app_url }}/docs" class="nav-link">API docs</a>
-            <a href="{{ app_url }}/login" class="ml-auto sticker-btn bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800">
+            {% include "marketing/_brand_lockup.html" %}
+            <a href="/#features" class="nav-link hidden sm:inline">Features</a>
+            <a href="/#pricing" class="nav-link hidden sm:inline">Pricing</a>
+            <a href="/blog" class="nav-link hidden sm:inline">Blog</a>
+            <a href="{{ app_url }}/login"
+               class="ml-auto sticker-btn sticker-btn--primary inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold">
                 Sign in
             </a>
         </nav>
     </header>
-    <main id="main-content" tabindex="-1" class="container mx-auto px-4 py-10">
+
+    <main id="main-content" tabindex="-1" class="container mx-auto px-4 py-12 sm:py-16">
         {% block content %}{% endblock %}
     </main>
-    <footer class="container mx-auto px-4 py-6 text-xs text-slate-500">
-        <div class="flex flex-wrap items-center gap-4">
-            <span>&copy; Status Monitor</span>
-            <a href="/blog" class="hover:text-slate-700">Blog</a>
-            <a href="{{ app_url }}/login" class="hover:text-slate-700">Sign in</a>
-            <a href="{{ app_url }}/privacy" class="hover:text-slate-700">Privacy</a>
-            <a href="{{ app_url }}/terms" class="hover:text-slate-700">Terms</a>
-            <span class="ml-auto font-mono text-slate-400">v{{ version }}</span>
+
+    <footer class="border-t bg-white">
+        <div class="container mx-auto grid gap-8 px-4 py-12 sm:grid-cols-4">
+            <div class="space-y-3 sm:col-span-2">
+                {% include "marketing/_brand_lockup.html" %}
+                <p class="max-w-sm text-sm text-slate-600">
+                    Uptime monitoring and public status pages that just work.
+                </p>
+                <p class="text-xs text-slate-400">
+                    v{{ version }}
+                </p>
+            </div>
+
+            <div class="space-y-2 text-sm">
+                <p class="font-semibold text-slate-900">Product</p>
+                <a href="/#features" class="block text-slate-600 hover:text-slate-900">Features</a>
+                <a href="/#pricing" class="block text-slate-600 hover:text-slate-900">Pricing</a>
+                <a href="/blog" class="block text-slate-600 hover:text-slate-900">Blog</a>
+                <a href="{{ app_url }}/login" class="block text-slate-600 hover:text-slate-900">Sign in</a>
+            </div>
+
+            <div class="space-y-2 text-sm">
+                <p class="font-semibold text-slate-900">Company</p>
+                <a href="{{ app_url }}/privacy" class="block text-slate-600 hover:text-slate-900">Privacy</a>
+                <a href="{{ app_url }}/terms" class="block text-slate-600 hover:text-slate-900">Terms</a>
+                <a href="{{ app_url }}/security-policy" class="block text-slate-600 hover:text-slate-900">Security</a>
+            </div>
+        </div>
+        <div class="border-t border-slate-100">
+            <p class="container mx-auto px-4 py-4 text-xs text-slate-400">
+                &copy; Uptimepage. All rights reserved.
+            </p>
         </div>
     </footer>
 </body>

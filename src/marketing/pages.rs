@@ -16,7 +16,7 @@ use axum::response::{IntoResponse, Response};
 use crate::marketing::seo::{JsonLd, OpenGraph, json_ld_organization, json_ld_website};
 use crate::web::assets::filters;
 
-use super::config::MarketingCfg;
+use super::config::{BRAND, MarketingCfg};
 
 const PAGE_CACHE_CONTROL: &str = "public, max-age=300, stale-while-revalidate=86400";
 const NOT_FOUND_CACHE_CONTROL: &str = "public, max-age=300";
@@ -30,7 +30,16 @@ struct LandingPage {
     org_json_ld: JsonLd,
     website_json_ld: JsonLd,
     version: &'static str,
+    pricing_features: &'static [&'static str],
 }
+
+const PRICING_FEATURES: &[&str] = &[
+    "Unlimited monitors",
+    "Public status page",
+    "Slack, email & webhook alerts",
+    "Team members",
+    "No credit card",
+];
 
 #[derive(Template, WebTemplate)]
 #[template(path = "marketing/not_found.html")]
@@ -52,7 +61,10 @@ pub(crate) struct CachedRender {
 
 fn render_landing(cfg: &MarketingCfg) -> CachedRender {
     let canonical_url = cfg.canonical_origin.clone();
-    let og = OpenGraph::default_for("Status monitoring that doesn’t blink", &canonical_url);
+    let og = OpenGraph::default_for(
+        &format!("{BRAND} — uptime monitoring & public status pages"),
+        &canonical_url,
+    );
     let page = LandingPage {
         app_url: cfg.app_url.clone(),
         canonical_url,
@@ -60,6 +72,7 @@ fn render_landing(cfg: &MarketingCfg) -> CachedRender {
         website_json_ld: json_ld_website(&cfg.canonical_origin),
         og,
         version: env!("CARGO_PKG_VERSION"),
+        pricing_features: PRICING_FEATURES,
     };
     let body = page
         .render()

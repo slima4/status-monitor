@@ -87,6 +87,19 @@ pub async fn serve(Path(path): Path<String>, RawQuery(query): RawQuery) -> Respo
         .into_response()
 }
 
+/// Mount the fingerprinted static-asset route on the given router. Two
+/// callers need an identical declaration — the operator app router and
+/// the marketing router — and they must agree on the path and handler so
+/// `{{ "css/app.css"|asset }}` resolves on both hosts. Funnel both
+/// through here so the path can never drift.
+pub fn mount_static<S>(router: axum::Router<S>) -> axum::Router<S>
+where
+    S: Clone + Send + Sync + 'static,
+{
+    use axum::routing::get;
+    router.route("/static/{*path}", get(serve))
+}
+
 /// askama custom filters. A bare-identifier filter `{{ x|asset }}` resolves
 /// to the type `filters::asset` that `#[filter_fn]` generates, so each
 /// module that derives a template brings this into scope with

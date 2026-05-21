@@ -20,7 +20,7 @@ use axum::response::Response;
 use include_dir::{Dir, include_dir};
 use serde::Deserialize;
 
-use super::config::MarketingCfg;
+use super::config::{BRAND, MarketingCfg};
 use super::pages::{CachedRender, body_etag, not_found, serve_cached};
 use super::seo::{JsonLd, OpenGraph, json_ld_blog_posting};
 use crate::web::assets::filters;
@@ -178,7 +178,7 @@ struct BlogPostPage {
 
 fn render_index(cfg: &MarketingCfg) -> CachedRender {
     let canonical_url = format!("{}/blog", cfg.canonical_origin);
-    let og = OpenGraph::default_for("Status Monitor — Blog", &canonical_url);
+    let og = OpenGraph::default_for(&format!("{BRAND} — Blog"), &canonical_url);
     let posts: Vec<PostSummary> = list_published()
         .into_iter()
         .map(|p| PostSummary {

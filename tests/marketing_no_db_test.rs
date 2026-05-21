@@ -1,7 +1,7 @@
 //! The load-bearing decoupling check: every marketing route serves 2xx
 //! when no Postgres / ClickHouse handle is in scope. The marketing
-//! module takes its own `MarketingState` (not `AppState`), so this test
-//! constructs that state directly and exercises each route through the
+//! module takes its own `MarketingCfg` (not `AppState`), so this test
+//! constructs that config directly and exercises each route through the
 //! returned `axum::Router` — no pool, no client, no `AppState`.
 
 use axum::body::Body;
@@ -42,7 +42,7 @@ async fn get(path: &str) -> (StatusCode, String, axum::http::HeaderMap) {
 async fn landing_renders_without_db() {
     let (status, body, headers) = get("/").await;
     assert_eq!(status, StatusCode::OK);
-    assert!(body.contains("Status monitoring"));
+    assert!(body.contains("Uptimepage"));
     assert!(
         body.contains("https://app.uptimepage.dev/login"),
         "CTA should link to app_url"
@@ -72,7 +72,7 @@ async fn blog_index_renders_without_db() {
 async fn known_post_renders_without_db() {
     let (status, body, _) = get("/blog/boring-uptime").await;
     assert_eq!(status, StatusCode::OK);
-    assert!(body.contains("Why uptime monitoring should be boring"));
+    assert!(body.contains("Why your uptime monitor should be boring"));
 }
 
 #[tokio::test]
@@ -130,7 +130,7 @@ async fn sitemap_lists_blog_and_landing() {
 async fn llms_txt_renders() {
     let (status, body, _) = get("/llms.txt").await;
     assert_eq!(status, StatusCode::OK);
-    assert!(body.starts_with("# Status Monitor"));
+    assert!(body.starts_with("# Uptimepage"));
 }
 
 #[tokio::test]
@@ -154,6 +154,26 @@ async fn etag_is_stable_and_returns_304() {
         .await
         .expect("router call");
     assert_eq!(resp.status(), StatusCode::NOT_MODIFIED);
+}
+
+#[tokio::test]
+async fn marketing_serves_fingerprinted_assets() {
+    // The dispatcher routes the whole apex/www host to the marketing
+    // router, so marketing must own its own /static/{*path} route.
+    // Without it, every <link href="/static/css/app.css?v=...">
+    // emitted by a marketing template falls through to the marketing
+    // 404 — page renders unstyled.
+    let (status, _, headers) = get("/static/css/app.css").await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "static assets must be served on the marketing host"
+    );
+    let ct = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("");
+    assert!(ct.starts_with("text/css"), "got content-type {ct:?}");
 }
 
 #[tokio::test]

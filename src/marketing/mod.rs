@@ -7,7 +7,11 @@
 //! binary; extracting marketing to its own service is a copy + delete.
 //! No-DB on the marketing path is what makes that extraction trivial.
 //!
-//! Permitted shared deps: axum, askama, tower-http, the config crate.
+//! Permitted shared deps: axum, askama, tower-http, the config crate,
+//! and `crate::web::assets` (the fingerprinted-asset map + askama
+//! filter + `mount_static` helper). On extraction the assets module
+//! moves with the marketing site or is duplicated into the extracted
+//! service; either way the rebind is one path.
 //! The Markdown renderer is **vendored locally** (`blog::render`) —
 //! deliberately not the trusted-unsanitised legal renderer; blog
 //! content is third-party PR input and has a different trust model.
@@ -42,7 +46,13 @@ pub fn router(cfg: MarketingCfg) -> Router {
             .route("/blog", get(blog::index))
             .route("/blog/{slug}", get(blog::post));
     }
-    r.fallback(pages::not_found)
+    // The dispatcher routes the whole apex/www host to this router, so
+    // marketing must own a `/static/{*path}` route — otherwise every
+    // asset href emitted by a template falls through to the marketing
+    // 404. Funnelled through `mount_static` so the path + handler stay
+    // in lockstep with the operator-app declaration.
+    crate::web::assets::mount_static(r)
+        .fallback(pages::not_found)
         .layer(CompressionLayer::new())
         .with_state(state)
 }

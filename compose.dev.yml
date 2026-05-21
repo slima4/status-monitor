@@ -80,6 +80,14 @@ services:
       STATUS_MONITOR_TENANCY__PATH_BASED_PUBLIC_ROUTES: "false"
       STATUS_MONITOR_TENANCY__SUBDOMAIN_PUBLIC_ROUTES: "true"
       STATUS_MONITOR_PUBLIC_STATUS__BASE_DOMAIN: "lvh.me"
+      # Marketing site on apex (lvh.me) + www.lvh.me. Disabled in prod
+      # default; enabled here so visual changes can be inspected at
+      # http://lvh.me:8080. Canonical/app URLs point at the prod hosts
+      # because the validator requires https — the page renders fine,
+      # only the canonical/OG meta tags reference the prod URLs.
+      STATUS_MONITOR_MARKETING__ENABLED: "true"
+      STATUS_MONITOR_MARKETING__APP_URL: "https://app.uptimepage.dev"
+      STATUS_MONITOR_MARKETING__CANONICAL_ORIGIN: "https://uptimepage.dev"
       # Tenancy boot guards: ip/ua fingerprint salt is mandatory under SaaS.
       # Fixed dev-only value — never used outside the local stack.
       STATUS_MONITOR_AUTH__FINGERPRINT_SALT: "dev-only-fingerprint-salt-not-for-prod"

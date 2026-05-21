@@ -16,7 +16,7 @@ use axum::response::{IntoResponse, Response};
 use serde::Serialize;
 
 use super::blog::list_published;
-use super::config::MarketingCfg;
+use super::config::{BRAND, MarketingCfg, TAGLINE};
 
 const STATIC_CACHE_CONTROL: &str = "public, max-age=86400";
 
@@ -33,9 +33,7 @@ impl OpenGraph {
     pub fn default_for(title: &str, canonical_origin: &str) -> Self {
         Self {
             title: title.to_string(),
-            description:
-                "A Rust uptime monitor that keeps checking while everything else is on fire."
-                    .to_string(),
+            description: TAGLINE.to_string(),
             og_type: "website".to_string(),
             url: canonical_origin.to_string(),
             image: absolute_asset(canonical_origin, "/static/marketing/og.png"),
@@ -69,7 +67,7 @@ pub fn json_ld_organization(canonical_origin: &str) -> JsonLd {
     let payload = serde_json::json!({
         "@context": "https://schema.org",
         "@type": "Organization",
-        "name": "Status Monitor",
+        "name": BRAND,
         "url": canonical_origin,
         "logo": absolute_asset(canonical_origin, "/static/img/favicon.svg"),
     });
@@ -80,7 +78,7 @@ pub fn json_ld_website(canonical_origin: &str) -> JsonLd {
     let payload = serde_json::json!({
         "@context": "https://schema.org",
         "@type": "WebSite",
-        "name": "Status Monitor",
+        "name": BRAND,
         "url": canonical_origin,
     });
     JsonLd(payload.to_string())
@@ -103,7 +101,7 @@ pub fn json_ld_blog_posting(
         "mainEntityOfPage": url,
         "author": {
             "@type": "Organization",
-            "name": "Status Monitor",
+            "name": BRAND,
             "url": canonical_origin,
         },
     });
@@ -140,7 +138,9 @@ pub async fn sitemap_xml(State(cfg): State<Arc<MarketingCfg>>) -> Response {
 pub async fn llms_txt(State(cfg): State<Arc<MarketingCfg>>) -> Response {
     let body = LLMS_CACHED.get_or_init(|| {
         format!(
-            "# Status Monitor\n\n> A Rust uptime monitor with asynchronous probe workers and a Postgres + ClickHouse pipeline.\n\nHomepage: {origin}\nBlog: {origin}/blog\nApp: {app}\n",
+            "# {brand}\n\n> {tagline}\n\nHomepage: {origin}\nBlog: {origin}/blog\nApp: {app}\n",
+            brand = BRAND,
+            tagline = TAGLINE,
             origin = cfg.canonical_origin,
             app = cfg.app_url,
         )

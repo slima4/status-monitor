@@ -94,7 +94,7 @@ pub fn routes(state: AppState) -> Router {
             );
     }
 
-    r.route("/static/{*path}", get(assets::serve))
+    assets::mount_static(r)
         .fallback(error::not_found)
         .layer(CookieManagerLayer::new())
         .with_state(state)
