@@ -433,6 +433,103 @@ mod tests {
         assert_eq!(parse_host_shape("foo", ""), HostShape::Other);
     }
 
+    // ──────────────────────────────────────────────────────────────────
+    // Edge-case / adversarial input coverage. The parser is *shape-only*:
+    // it returns whatever non-empty, dot-free label sits in the slug
+    // position. Slug content (charset, length, reserved-ness) is the
+    // domain layer's job (`domain::org::validate_slug`) and the DB
+    // lookup's job. Documenting that boundary here so a future
+    // "harden the parser" instinct doesn't conflate the two layers.
+    // ──────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn host_shape_passes_through_unusual_slug_chars() {
+        // The extractor does not enforce the `[a-z0-9-]` slug shape;
+        // rejection happens at signup (`validate_slug`), not here. The
+        // parser's job is to not panic, not confuse the slug with the
+        // base-domain suffix, and not silently rewrite the input.
+        for slug in ["acme!", "acme$", "acme_under", "-leadhyphen", "1leaddigit"] {
+            let host = format!("{slug}.example.com");
+            assert_eq!(
+                parse_host_shape(&host, "example.com"),
+                HostShape::Subdomain(slug),
+                "weird slug `{slug}` must still parse as Subdomain"
+            );
+        }
+    }
+
+    #[test]
+    fn host_shape_passes_through_punycode() {
+        // IDN-encoded hosts are pure ASCII and parse normally. They will
+        // not match any stored slug (signup forbids `xn--…`), so the
+        // outcome is a 404 — but the parser must not bail out earlier.
+        assert_eq!(
+            parse_host_shape("xn--acme-1bb.example.com", "example.com"),
+            HostShape::Subdomain("xn--acme-1bb")
+        );
+    }
+
+    #[test]
+    fn host_shape_ipv6_bracketed_is_other() {
+        // `Host: [::1]:443` — `split(':').next()` lands on `"["`, which
+        // can never match the base. Must classify Other (→ marketing 404
+        // via the dispatcher), never Subdomain.
+        assert_eq!(
+            parse_host_shape("[::1]:443", "example.com"),
+            HostShape::Other
+        );
+        assert_eq!(
+            parse_host_shape("[2001:db8::1]:8080", "example.com"),
+            HostShape::Other
+        );
+    }
+
+    #[test]
+    fn host_shape_double_colon_keeps_first_authority() {
+        // `acme.example.com:443:80` is malformed but a crafted client may
+        // send it. `split(':').next()` returns `acme.example.com`, so the
+        // parser silently normalises to the valid form — same tenant the
+        // well-formed host would hit, no privilege escalation. Pinning
+        // the behaviour here so a future "stricter parser" change is a
+        // conscious decision, not an accident.
+        assert_eq!(
+            parse_host_shape("acme.example.com:443:80", "example.com"),
+            HostShape::Subdomain("acme")
+        );
+    }
+
+    #[test]
+    fn host_shape_combines_all_normalisations_for_subdomain() {
+        // Triple-stack: trailing dot + port + uppercase. `host_shape_apex`
+        // pins the Apex branch; this pins the Subdomain branch — different
+        // code paths through `parse_host_shape`, both must yield a slug
+        // free of case/dot/port artefacts so a downstream lowercase
+        // compare cannot 404 a real tenant.
+        assert_eq!(
+            parse_host_shape("ACME.EXAMPLE.COM.:443", "example.com"),
+            HostShape::Subdomain("ACME")
+        );
+    }
+
+    #[test]
+    fn classify_phishing_like_slug_is_tenant_not_operator() {
+        // `app-google.{base}`, `admin.{base}`, etc. LOOK operator-y but
+        // are tenant-shaped slugs. They must NOT alias the operator
+        // surface — they route to the public dispatcher and 404 unless
+        // an org owns them (signup blocks the reserved ones at create
+        // time). Mirrors the OPERATOR_LABELS-vs-reserved_slugs invariant
+        // (host.rs:32-36 docstring) at the test layer.
+        let s = scheme();
+        for slug in ["app-google", "admin", "support", "login"] {
+            let host = format!("{slug}.example.com");
+            assert_eq!(
+                classify_host(&host, &s),
+                HostClass::TenantPublic,
+                "{slug} must classify as tenant-public, not App"
+            );
+        }
+    }
+
     fn scheme() -> HostScheme {
         HostScheme::from_base_domain("example.com").unwrap()
     }
