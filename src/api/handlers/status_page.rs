@@ -181,9 +181,15 @@ pub async fn update_settings(
     }
 
     // Belt-and-braces: the extractor's `public_status_enabled = true` filter
-    // is the authoritative gate, but a cached page would otherwise keep
-    // serving until TTL after the operator disables the page.
-    if was_enabled && !req.public_status_enabled {
+    // is the authoritative gate, but a stale cache can outlive a flip in
+    // either direction. Disable→enable: an in-flight compute that started
+    // before the disable can write its pre-disable snapshot after the
+    // post-disable invalidate (single-flight via `try_get_with` has no
+    // post-completion recheck), so without a second invalidate on re-enable
+    // the next request serves the orphan snapshot for up to `cache_ttl_secs`.
+    // Enable→disable: the cache must drop so the next re-enable starts fresh.
+    // Drop on either transition; per-PATCH cost is negligible.
+    if was_enabled != req.public_status_enabled {
         state.public_source.invalidate(org).await;
     }
 

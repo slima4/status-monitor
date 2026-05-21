@@ -121,12 +121,9 @@ impl PageCache {
     }
 
     /// Drop both layers for `org`. Called by the purge worker once an org's
-    /// rows are gone, so the `last_good` snapshot can't outlive the data
-    /// behind it. (When a status-page settings surface lands it should call
-    /// this on a `public_status_enabled` → `false` flip too, so a disabled
-    /// org stops serving a cached page before TTL expiry; until then the
-    /// extractor's `public_status_enabled = true` filter is the gate and the
-    /// stale window is bounded by `cache_ttl_secs` / `last_good_ttl_secs`.)
+    /// rows are gone (so `last_good` can't outlive the data behind it) and
+    /// by the settings handler on a `public_status_enabled` flip in either
+    /// direction (so a stale snapshot can't survive a disable→enable cycle).
     pub async fn invalidate(&self, org: OrgId) {
         self.inner.invalidate(&org).await;
         self.last_good.invalidate(&org);
