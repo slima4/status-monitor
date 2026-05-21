@@ -197,6 +197,17 @@ async fn subdomain_root_serves_public_page() {
         StatusCode::OK,
         "query string must survive the rewrite"
     );
+    // RFC: hostnames are case-insensitive. Browsers always lowercase
+    // the authority, but a crafted client (curl `-H Host: …`,
+    // misconfigured proxy) can send mixed case. Stored slugs are
+    // always lowercase (`validate_slug`), so a case-sensitive resolver
+    // would 404 a legitimate tenant on `SLUG.{base}`.
+    let upper_host = host.to_ascii_uppercase();
+    assert_eq!(
+        get_path(&app, "/", Some(&upper_host)).await,
+        StatusCode::OK,
+        "uppercase Host `{upper_host}` must resolve the same tenant"
+    );
     // Blocked host shapes don't trigger the rewrite — `/` falls through to
     // the dashboard route, which requires auth and never returns 200 here.
     assert_ne!(

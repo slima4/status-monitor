@@ -229,6 +229,15 @@ pub async fn resolve_status_page_org(
         ))
     })?;
 
+    // Lowercase before the lookup. Hostnames are case-insensitive per
+    // RFC; mainstream browsers always lowercase, but a crafted client
+    // (curl with explicit `Host:`, misconfigured proxy, test rig) can
+    // send mixed case. Stored slugs are validated lowercase at create
+    // (see `domain::org::validate_slug`), so a case-sensitive compare
+    // here would 404 a legitimate tenant on `ACME.{base}` — matching
+    // the case-insensitivity already enforced by `parse_host_shape`.
+    let slug = parsed.slug.to_ascii_lowercase();
+
     // One indexed point lookup (partial index on slug WHERE
     // public_status_enabled) per subdomain request. Intentional: the host
     // determines the org, so resolution can't be hoisted out of the request.
@@ -240,7 +249,7 @@ pub async fn resolve_status_page_org(
     // and returns the `PublicStatusOrg` newtype the operator path can't
     // accept. Reusing the authenticated `find_id_by_slug` here would serve
     // every org's public page regardless of opt-in.
-    let org = crate::storage::orgs::find_public_status_org_by_slug(pool, parsed.slug)
+    let org = crate::storage::orgs::find_public_status_org_by_slug(pool, &slug)
         .await?
         .ok_or(PublicAppError::NotFound)?;
     Ok(org.0.id)
