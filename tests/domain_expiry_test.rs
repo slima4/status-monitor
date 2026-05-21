@@ -97,7 +97,7 @@ fn make_check(domain: &str, warn: u32, critical: u32) -> DomainExpiryCheck {
 
 fn client_for(addr: SocketAddr) -> RdapClient {
     RdapClient::with_bootstrap_url(
-        build_outbound_client(),
+        build_outbound_client(status_monitor::security::SsrfGuard::relaxed_for_tests()),
         format!("http://{addr}/bootstrap.json"),
     )
 }

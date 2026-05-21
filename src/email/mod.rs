@@ -175,7 +175,7 @@ mod tests {
             provider: "log".into(),
             ..Default::default()
         };
-        let http = build_outbound_client();
+        let http = build_outbound_client(crate::security::SsrfGuard::strict());
         let sender = build_email_sender(&cfg, &http).expect("build log sender");
         let _ = format!("{:p}", Arc::as_ptr(&sender));
     }
@@ -186,7 +186,7 @@ mod tests {
             provider: "memory".into(),
             ..Default::default()
         };
-        let http = build_outbound_client();
+        let http = build_outbound_client(crate::security::SsrfGuard::strict());
         let sender = build_email_sender(&cfg, &http).expect("build memory sender");
         let _ = sender;
     }
@@ -197,7 +197,7 @@ mod tests {
             provider: "resend".into(),
             ..Default::default()
         };
-        let http = build_outbound_client();
+        let http = build_outbound_client(crate::security::SsrfGuard::strict());
         match build_email_sender(&cfg, &http) {
             Err(EmailError::Config(_)) => {}
             Err(e) => panic!("wrong error variant: {e}"),
@@ -214,7 +214,7 @@ mod tests {
             },
             ..Default::default()
         };
-        let http = build_outbound_client();
+        let http = build_outbound_client(crate::security::SsrfGuard::strict());
         let sender = build_email_sender(&cfg, &http).expect("build resend sender");
         let _ = sender;
     }
@@ -225,7 +225,7 @@ mod tests {
             provider: "carrier_pigeon".into(),
             ..Default::default()
         };
-        let http = build_outbound_client();
+        let http = build_outbound_client(crate::security::SsrfGuard::strict());
         match build_email_sender(&cfg, &http) {
             Err(EmailError::Config(msg)) => assert!(msg.contains("carrier_pigeon")),
             Err(e) => panic!("wrong error variant: {e}"),

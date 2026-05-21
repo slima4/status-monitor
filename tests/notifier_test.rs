@@ -57,7 +57,11 @@ async fn slack_channel_posts_text_payload() {
     let cfg = ChannelConfig::Slack {
         webhook_url: format!("http://{addr}/hook"),
     };
-    let notifier = build_notifier(&cfg, &build_outbound_client()).expect("notifier");
+    let notifier = build_notifier(
+        &cfg,
+        &build_outbound_client(status_monitor::security::SsrfGuard::relaxed_for_tests()),
+    )
+    .expect("notifier");
     notifier.notify(&make_event()).await.expect("notify");
 
     let captured = store.lock().clone();
@@ -78,7 +82,11 @@ async fn webhook_channel_posts_event_payload_with_custom_header() {
         url: format!("http://{addr}/hook"),
         headers: std::collections::BTreeMap::from([("X-Test-Token".into(), "secret".into())]),
     };
-    let notifier = build_notifier(&cfg, &build_outbound_client()).expect("notifier");
+    let notifier = build_notifier(
+        &cfg,
+        &build_outbound_client(status_monitor::security::SsrfGuard::relaxed_for_tests()),
+    )
+    .expect("notifier");
     notifier.notify(&make_event()).await.expect("notify");
 
     let captured = store.lock().clone();
@@ -92,7 +100,7 @@ async fn webhook_channel_posts_event_payload_with_custom_header() {
 
 #[tokio::test]
 async fn build_notifier_constructs_each_kind() {
-    let http = build_outbound_client();
+    let http = build_outbound_client(status_monitor::security::SsrfGuard::relaxed_for_tests());
     assert!(
         build_notifier(
             &ChannelConfig::Telegram {
@@ -116,7 +124,7 @@ async fn build_notifier_constructs_each_kind() {
 
 #[tokio::test]
 async fn build_notifier_rejects_unparseable_url() {
-    let http = build_outbound_client();
+    let http = build_outbound_client(status_monitor::security::SsrfGuard::relaxed_for_tests());
     let err = build_notifier(
         &ChannelConfig::Slack {
             webhook_url: "not a url".into(),

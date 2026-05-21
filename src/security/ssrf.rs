@@ -20,6 +20,26 @@ impl SsrfGuard {
         Self { allow_private }
     }
 
+    /// Production default: block every non-public address (loopback, RFC1918,
+    /// link-local, ULA, cloud metadata, 6to4/NAT64 with embedded private v4).
+    pub fn strict() -> Self {
+        Self::new(false)
+    }
+
+    /// Test-only: allow every address, including loopback. Use from
+    /// integration tests that hit `127.0.0.1` listeners (mock SMTP, mock
+    /// webhook receiver, etc.). Never call from production code paths.
+    pub fn relaxed_for_tests() -> Self {
+        Self::new(true)
+    }
+
+    /// Build from the same `SecurityConfig` flag the check-path reads, so all
+    /// production paths agree on what "private" means without each call site
+    /// hard-coding the field name.
+    pub fn from_security_config(cfg: &crate::config::SecurityConfig) -> Self {
+        Self::new(cfg.allow_private_targets)
+    }
+
     /// Returns true if the address is permitted by this guard.
     pub fn allow(&self, ip: IpAddr) -> bool {
         self.allow_private || !is_blocked_ip(ip)

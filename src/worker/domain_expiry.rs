@@ -26,7 +26,13 @@ pub async fn execute_domain_expiry_check(
     let started_at = Utc::now();
     let start = Instant::now();
     let client = RDAP
-        .get_or_init(|| async { RdapClient::new(build_outbound_client()) })
+        .get_or_init(|| async {
+            // RDAP destinations are derived from the IANA bootstrap, not from
+            // user-supplied input, so the strict guard is the correct default —
+            // a registry that resolves to a private IP would be a rebinding
+            // attempt against an internal target via a third-party referrer.
+            RdapClient::new(build_outbound_client(crate::security::SsrfGuard::strict()))
+        })
         .await;
 
     let outcome = timeout(check.timeout, run_check(check, client)).await;

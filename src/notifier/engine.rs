@@ -263,7 +263,13 @@ mod tests {
 
     fn engine_with(store: Arc<dyn NotificationChannelStore>) -> AlertEngine {
         let (_tx, rx) = mpsc::channel(4);
-        AlertEngine::new(rx, store, crate::http_outbound::build_outbound_client())
+        AlertEngine::new(
+            rx,
+            store,
+            crate::http_outbound::build_outbound_client(
+                crate::security::SsrfGuard::relaxed_for_tests(),
+            ),
+        )
     }
 
     #[tokio::test]

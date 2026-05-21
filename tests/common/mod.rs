@@ -37,7 +37,9 @@ use uuid::Uuid;
 /// `AppState` builder. The "memory" provider buffers sends so tests can
 /// assert against them.
 pub fn build_test_outbound_and_email() -> (OutboundHttpClient, Arc<dyn EmailSender>) {
-    let http = build_outbound_client();
+    // Tests need to hit localhost listeners (mock email server, etc.), so the
+    // SSRF guard is relaxed — production callers pass the strict config.
+    let http = build_outbound_client(status_monitor::security::SsrfGuard::relaxed_for_tests());
     let cfg = TransactionalEmailConfig {
         provider: "memory".into(),
         ..Default::default()

@@ -224,7 +224,9 @@ async fn main() -> Result<()> {
         let engine = AlertEngine::new(
             alert_rx,
             notification_channel_store.clone(),
-            status_monitor::http_outbound::build_outbound_client(),
+            status_monitor::http_outbound::build_outbound_client(
+                status_monitor::security::SsrfGuard::from_security_config(&cfg.security),
+            ),
         );
         tokio::spawn(async move { engine.run(token).await })
     });
@@ -294,7 +296,9 @@ async fn main() -> Result<()> {
         PgIncidentNarrationStore::new(pg_pool_for_stores.clone(), default_org_id),
     );
 
-    let outbound_http = status_monitor::http_outbound::build_outbound_client();
+    let outbound_http = status_monitor::http_outbound::build_outbound_client(
+        status_monitor::security::SsrfGuard::from_security_config(&cfg.security),
+    );
     let email_sender = status_monitor::email::build_email_sender(&cfg.email, &outbound_http)
         .map_err(|e| AppError::Other(anyhow::anyhow!("build_email_sender: {e}")))?;
 

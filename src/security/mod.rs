@@ -1,10 +1,12 @@
 pub mod abuse;
 pub mod abuse_reload;
 pub mod crypto;
+pub mod outbound_connector;
 pub mod ssrf;
 
 pub use abuse::{AbuseGuard, AbuseHit, AbuseKind};
 pub use crypto::{Cipher, CryptoError, ENC_KEY, envelope_str, is_envelope, wrap_envelope};
+pub use outbound_connector::SsrfHttpConnector;
 pub use ssrf::{SsrfError, SsrfGuard, is_blocked_ip};
 
 /// Strip the surrounding `[ ]` of a bracketed IPv6 literal host. The SSRF IP
