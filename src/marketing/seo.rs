@@ -10,16 +10,19 @@ use std::borrow::Cow;
 use std::sync::{Arc, OnceLock};
 
 use axum::extract::State;
+use axum::http::HeaderValue;
 use axum::http::StatusCode;
 use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE};
 use axum::response::{IntoResponse, Response};
+use bytes::Bytes;
 use serde::Serialize;
 
 use super::blog::list_published;
 use super::config::{BRAND, MarketingCfg, TAGLINE};
 use super::legal;
+use super::pages::{APPLICATION_XML, TEXT_PLAIN};
 
-const STATIC_CACHE_CONTROL: &str = "public, max-age=86400";
+const STATIC_CACHE_CONTROL: HeaderValue = HeaderValue::from_static("public, max-age=86400");
 
 #[derive(Debug, Clone, Serialize)]
 pub struct OpenGraph {
@@ -109,44 +112,49 @@ pub fn json_ld_blog_posting(
     JsonLd(payload.to_string())
 }
 
-static ROBOTS_CACHED: OnceLock<String> = OnceLock::new();
-static SITEMAP_CACHED: OnceLock<String> = OnceLock::new();
-static LLMS_CACHED: OnceLock<String> = OnceLock::new();
+static ROBOTS_CACHED: OnceLock<Bytes> = OnceLock::new();
+static SITEMAP_CACHED: OnceLock<Bytes> = OnceLock::new();
+static LLMS_CACHED: OnceLock<Bytes> = OnceLock::new();
 
 pub async fn robots_txt(State(cfg): State<Arc<MarketingCfg>>) -> Response {
-    let body = ROBOTS_CACHED.get_or_init(|| {
-        format!(
-            "User-agent: *\nAllow: /\nSitemap: {origin}/sitemap.xml\n",
-            origin = cfg.canonical_origin
-        )
-    });
-    plain_text(body.clone(), STATIC_CACHE_CONTROL)
+    let body = ROBOTS_CACHED.get_or_init(|| build_robots(&cfg));
+    plain_text(body.clone(), TEXT_PLAIN)
 }
 
 pub async fn sitemap_xml(State(cfg): State<Arc<MarketingCfg>>) -> Response {
-    let body = SITEMAP_CACHED.get_or_init(|| build_sitemap(&cfg));
-    (
-        StatusCode::OK,
-        [
-            (CONTENT_TYPE, "application/xml; charset=utf-8".to_string()),
-            (CACHE_CONTROL, STATIC_CACHE_CONTROL.to_string()),
-        ],
-        body.clone(),
-    )
-        .into_response()
+    let body = SITEMAP_CACHED.get_or_init(|| Bytes::from(build_sitemap(&cfg)));
+    plain_text(body.clone(), APPLICATION_XML)
 }
 
 pub async fn llms_txt(State(cfg): State<Arc<MarketingCfg>>) -> Response {
-    let body = LLMS_CACHED.get_or_init(|| {
-        format!(
-            "# {brand}\n\n> {tagline}\n\nHomepage: {origin}\nBlog: {origin}/blog\nApp: {app}\n",
-            brand = BRAND,
-            tagline = TAGLINE,
-            origin = cfg.canonical_origin,
-            app = cfg.app_url,
-        )
-    });
-    plain_text(body.clone(), STATIC_CACHE_CONTROL)
+    let body = LLMS_CACHED.get_or_init(|| build_llms(&cfg));
+    plain_text(body.clone(), TEXT_PLAIN)
+}
+
+/// Warm the static text caches at boot. Sitemap is the only non-trivial
+/// one (iterates published posts + legal routes); robots/llms are cheap
+/// but kept here so every marketing cache lives behind one warmup call.
+pub(crate) fn warm(cfg: &MarketingCfg) {
+    ROBOTS_CACHED.get_or_init(|| build_robots(cfg));
+    SITEMAP_CACHED.get_or_init(|| Bytes::from(build_sitemap(cfg)));
+    LLMS_CACHED.get_or_init(|| build_llms(cfg));
+}
+
+fn build_robots(cfg: &MarketingCfg) -> Bytes {
+    Bytes::from(format!(
+        "User-agent: *\nAllow: /\nSitemap: {origin}/sitemap.xml\n",
+        origin = cfg.canonical_origin
+    ))
+}
+
+fn build_llms(cfg: &MarketingCfg) -> Bytes {
+    Bytes::from(format!(
+        "# {brand}\n\n> {tagline}\n\nHomepage: {origin}\nBlog: {origin}/blog\nApp: {app}\n",
+        brand = BRAND,
+        tagline = TAGLINE,
+        origin = cfg.canonical_origin,
+        app = cfg.app_url,
+    ))
 }
 
 fn build_sitemap(cfg: &MarketingCfg) -> String {
@@ -182,12 +190,12 @@ fn build_sitemap(cfg: &MarketingCfg) -> String {
     body
 }
 
-fn plain_text(body: String, cache_control: &'static str) -> Response {
+fn plain_text(body: Bytes, content_type: HeaderValue) -> Response {
     (
         StatusCode::OK,
         [
-            (CONTENT_TYPE, "text/plain; charset=utf-8".to_string()),
-            (CACHE_CONTROL, cache_control.to_string()),
+            (CONTENT_TYPE, content_type),
+            (CACHE_CONTROL, STATIC_CACHE_CONTROL),
         ],
         body,
     )

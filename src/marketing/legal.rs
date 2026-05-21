@@ -17,15 +17,17 @@ use askama_web::WebTemplate;
 use axum::Router;
 use axum::extract::State;
 use axum::http::HeaderMap;
+use axum::http::HeaderValue;
 use axum::response::Response;
 use axum::routing::get;
 
 use super::config::{BRAND, MarketingCfg};
-use super::pages::{CachedRender, body_etag, serve_cached};
+use super::pages::{CachedRender, cached_render, serve_cached};
 use super::seo::OpenGraph;
 use crate::web::assets::filters;
 
-const LEGAL_CACHE_CONTROL: &str = "public, max-age=86400, stale-while-revalidate=86400";
+const LEGAL_CACHE_CONTROL: HeaderValue =
+    HeaderValue::from_static("public, max-age=86400, stale-while-revalidate=86400");
 
 fn render_trusted_unsanitised(markdown: &str) -> String {
     let mut opts = pulldown_cmark::Options::empty();
@@ -121,10 +123,15 @@ fn render_all(cfg: &MarketingCfg) -> HashMap<&'static str, CachedRender> {
             let body = page
                 .render()
                 .unwrap_or_else(|e| format!("<!-- legal render failed: {e} -->"));
-            let etag = body_etag(&body);
-            (route.path, CachedRender { body, etag })
+            (route.path, cached_render(body))
         })
         .collect()
+}
+
+/// Warm the per-route render cache at boot so the first hit on any
+/// `/terms`-style URL doesn't pay markdown + askama + SHA-256.
+pub(crate) fn warm(cfg: &MarketingCfg) {
+    RENDERED.get_or_init(|| render_all(cfg));
 }
 
 async fn serve(
@@ -136,7 +143,7 @@ async fn serve(
     // `render_all` and `mount` both iterate `ROUTES`, so every mounted
     // path is guaranteed present in the map.
     let cached = map.get(route.path).expect("ROUTES drives render");
-    serve_cached(&headers, cached, LEGAL_CACHE_CONTROL)
+    serve_cached(&headers, cached, &LEGAL_CACHE_CONTROL)
 }
 
 /// Mount every entry in [`ROUTES`] on the given router. One source of

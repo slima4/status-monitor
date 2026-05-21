@@ -16,17 +16,20 @@ use askama::Template;
 use askama_web::WebTemplate;
 use axum::extract::{Path, State};
 use axum::http::HeaderMap;
+use axum::http::HeaderValue;
 use axum::response::Response;
 use include_dir::{Dir, include_dir};
 use serde::Deserialize;
 
 use super::config::{BRAND, MarketingCfg};
-use super::pages::{CachedRender, body_etag, not_found, serve_cached};
+use super::pages::{CachedRender, cached_render, not_found, serve_cached};
 use super::seo::{JsonLd, OpenGraph, json_ld_blog_posting};
 use crate::web::assets::filters;
 
-const POST_CACHE_CONTROL: &str = "public, max-age=600, stale-while-revalidate=86400";
-const INDEX_CACHE_CONTROL: &str = "public, max-age=300, stale-while-revalidate=86400";
+const POST_CACHE_CONTROL: HeaderValue =
+    HeaderValue::from_static("public, max-age=600, stale-while-revalidate=86400");
+const INDEX_CACHE_CONTROL: HeaderValue =
+    HeaderValue::from_static("public, max-age=300, stale-while-revalidate=86400");
 
 static BLOG_DIR: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/src/marketing/content/blog");
 
@@ -73,6 +76,22 @@ pub fn list_published() -> Vec<&'static Post> {
     init()
         .iter()
         .filter(|p| drafts_visible || !p.draft)
+        .collect()
+}
+
+/// Warm post-load + index + per-post render caches at boot. Cheap
+/// relative to the cold-first-request penalty (parse + sanitise +
+/// askama + SHA-256 on every published post).
+pub(crate) fn warm(cfg: &MarketingCfg) {
+    init();
+    INDEX_CACHED.get_or_init(|| render_index(cfg));
+    RENDERED_INDEX.get_or_init(|| build_post_index(cfg));
+}
+
+fn build_post_index(cfg: &MarketingCfg) -> HashMap<String, CachedRender> {
+    list_published()
+        .into_iter()
+        .map(|p| (p.slug.clone(), render_post(cfg, p)))
         .collect()
 }
 
@@ -198,8 +217,7 @@ fn render_index(cfg: &MarketingCfg) -> CachedRender {
     }
     .render()
     .unwrap_or_else(|e| format!("<!-- blog index render failed: {e} -->"));
-    let etag = body_etag(&body);
-    CachedRender { body, etag }
+    cached_render(body)
 }
 
 fn render_post(cfg: &MarketingCfg, post: &Post) -> CachedRender {
@@ -230,13 +248,12 @@ fn render_post(cfg: &MarketingCfg, post: &Post) -> CachedRender {
     }
     .render()
     .unwrap_or_else(|e| format!("<!-- blog post render failed: {e} -->"));
-    let etag = body_etag(&body);
-    CachedRender { body, etag }
+    cached_render(body)
 }
 
 pub async fn index(State(cfg): State<Arc<MarketingCfg>>, headers: HeaderMap) -> Response {
     let cached = INDEX_CACHED.get_or_init(|| render_index(&cfg));
-    serve_cached(&headers, cached, INDEX_CACHE_CONTROL)
+    serve_cached(&headers, cached, &INDEX_CACHE_CONTROL)
 }
 
 pub async fn post(
@@ -244,15 +261,9 @@ pub async fn post(
     Path(slug): Path<String>,
     headers: HeaderMap,
 ) -> Response {
-    let cache = RENDERED_INDEX.get_or_init(|| {
-        let cfg_ref = cfg.as_ref();
-        list_published()
-            .into_iter()
-            .map(|p| (p.slug.clone(), render_post(cfg_ref, p)))
-            .collect()
-    });
+    let cache = RENDERED_INDEX.get_or_init(|| build_post_index(&cfg));
     match cache.get(&slug) {
-        Some(cached) => serve_cached(&headers, cached, POST_CACHE_CONTROL),
+        Some(cached) => serve_cached(&headers, cached, &POST_CACHE_CONTROL),
         None => not_found(State(cfg)).await,
     }
 }

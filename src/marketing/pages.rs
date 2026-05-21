@@ -1,6 +1,7 @@
 //! Page handlers (landing + branded 404). Landing renders into a
-//! `OnceLock` at first hit, so every request after that serves the
-//! cached body + stable ETag with no askama work and no allocations.
+//! `OnceLock` at boot via [`init`], so every request after that serves
+//! the cached body + stable ETag with no askama work and no per-request
+//! allocations beyond cheap `Bytes` / `HeaderValue` clones.
 
 use std::sync::Arc;
 use std::sync::OnceLock;
@@ -9,17 +10,26 @@ use askama::Template;
 use askama_web::WebTemplate;
 use axum::extract::State;
 use axum::http::HeaderMap;
+use axum::http::HeaderValue;
 use axum::http::StatusCode;
 use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE, ETAG, IF_NONE_MATCH};
 use axum::response::{IntoResponse, Response};
+use bytes::Bytes;
 
 use crate::marketing::seo::{JsonLd, OpenGraph, json_ld_organization, json_ld_website};
 use crate::web::assets::filters;
 
 use super::config::{BRAND, MarketingCfg};
 
-const PAGE_CACHE_CONTROL: &str = "public, max-age=300, stale-while-revalidate=86400";
-const NOT_FOUND_CACHE_CONTROL: &str = "public, max-age=300";
+pub(super) const HTML_CONTENT_TYPE: HeaderValue =
+    HeaderValue::from_static("text/html; charset=utf-8");
+pub(super) const TEXT_PLAIN: HeaderValue = HeaderValue::from_static("text/plain; charset=utf-8");
+pub(super) const APPLICATION_XML: HeaderValue =
+    HeaderValue::from_static("application/xml; charset=utf-8");
+
+const PAGE_CACHE_CONTROL: HeaderValue =
+    HeaderValue::from_static("public, max-age=300, stale-while-revalidate=86400");
+const NOT_FOUND_CACHE_CONTROL: HeaderValue = HeaderValue::from_static("public, max-age=300");
 
 #[derive(Template, WebTemplate)]
 #[template(path = "marketing/landing.html")]
@@ -52,11 +62,14 @@ pub struct NotFoundPage {
 /// startup config — so re-rendering and re-hashing per request would
 /// burn ~80–150 µs for an identical response.
 static LANDING_CACHED: OnceLock<CachedRender> = OnceLock::new();
+static NF_CACHED: OnceLock<CachedRender> = OnceLock::new();
 
 #[derive(Clone)]
 pub(crate) struct CachedRender {
-    pub(crate) body: String,
-    pub(crate) etag: String,
+    // `Bytes` + `HeaderValue` so the hot-path clone is an `Arc` bump,
+    // not a heap copy of the rendered HTML.
+    pub(crate) body: Bytes,
+    pub(crate) etag: HeaderValue,
 }
 
 fn render_landing(cfg: &MarketingCfg) -> CachedRender {
@@ -77,36 +90,40 @@ fn render_landing(cfg: &MarketingCfg) -> CachedRender {
     let body = page
         .render()
         .unwrap_or_else(|e| format!("<!-- landing render failed: {e} -->"));
-    let etag = body_etag(&body);
-    CachedRender { body, etag }
+    cached_render(body)
+}
+
+fn render_not_found(cfg: &MarketingCfg) -> CachedRender {
+    let body = NotFoundPage {
+        canonical_url: cfg.canonical_origin.clone(),
+    }
+    .render()
+    .unwrap_or_else(|_| "Not Found".to_string());
+    cached_render(body)
 }
 
 pub async fn landing(State(cfg): State<Arc<MarketingCfg>>, headers: HeaderMap) -> Response {
     let cached = LANDING_CACHED.get_or_init(|| render_landing(&cfg));
-    serve_cached(&headers, cached, PAGE_CACHE_CONTROL)
+    serve_cached(&headers, cached, &PAGE_CACHE_CONTROL)
 }
 
 pub async fn not_found(State(cfg): State<Arc<MarketingCfg>>) -> Response {
-    static NF_CACHED: OnceLock<CachedRender> = OnceLock::new();
-    let cached = NF_CACHED.get_or_init(|| {
-        let body = NotFoundPage {
-            canonical_url: cfg.canonical_origin.clone(),
-        }
-        .render()
-        .unwrap_or_else(|_| "Not Found".to_string());
-        let etag = body_etag(&body);
-        CachedRender { body, etag }
-    });
+    let cached = NF_CACHED.get_or_init(|| render_not_found(&cfg));
     (
         StatusCode::NOT_FOUND,
         [
-            (CONTENT_TYPE, "text/html; charset=utf-8".to_string()),
-            (CACHE_CONTROL, NOT_FOUND_CACHE_CONTROL.to_string()),
+            (CONTENT_TYPE, HTML_CONTENT_TYPE),
+            (CACHE_CONTROL, NOT_FOUND_CACHE_CONTROL),
             (ETAG, cached.etag.clone()),
         ],
         cached.body.clone(),
     )
         .into_response()
+}
+
+pub(crate) fn warm(cfg: &MarketingCfg) {
+    LANDING_CACHED.get_or_init(|| render_landing(cfg));
+    NF_CACHED.get_or_init(|| render_not_found(cfg));
 }
 
 /// 200 + body OR 304 when the client's `If-None-Match` matches. ETag
@@ -115,18 +132,17 @@ pub async fn not_found(State(cfg): State<Arc<MarketingCfg>>) -> Response {
 pub(crate) fn serve_cached(
     headers: &HeaderMap,
     cached: &CachedRender,
-    cache_control: &'static str,
+    cache_control: &HeaderValue,
 ) -> Response {
     if headers
         .get(IF_NONE_MATCH)
-        .and_then(|v| v.to_str().ok())
-        .is_some_and(|v| v == cached.etag)
+        .is_some_and(|v| v == &cached.etag)
     {
         return (
             StatusCode::NOT_MODIFIED,
             [
                 (ETAG, cached.etag.clone()),
-                (CACHE_CONTROL, cache_control.to_string()),
+                (CACHE_CONTROL, cache_control.clone()),
             ],
         )
             .into_response();
@@ -134,8 +150,8 @@ pub(crate) fn serve_cached(
     (
         StatusCode::OK,
         [
-            (CONTENT_TYPE, "text/html; charset=utf-8".to_string()),
-            (CACHE_CONTROL, cache_control.to_string()),
+            (CONTENT_TYPE, HTML_CONTENT_TYPE),
+            (CACHE_CONTROL, cache_control.clone()),
             (ETAG, cached.etag.clone()),
         ],
         cached.body.clone(),
@@ -143,9 +159,19 @@ pub(crate) fn serve_cached(
         .into_response()
 }
 
-pub(crate) fn body_etag(body: &str) -> String {
+pub(crate) fn cached_render(body: String) -> CachedRender {
+    let etag = body_etag(&body);
+    CachedRender {
+        body: Bytes::from(body),
+        etag,
+    }
+}
+
+pub(crate) fn body_etag(body: &str) -> HeaderValue {
     use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
     hasher.update(body.as_bytes());
-    format!("\"{}\"", hex::encode(&hasher.finalize()[..16]))
+    let formatted = format!("\"{}\"", hex::encode(&hasher.finalize()[..16]));
+    // SHA-256 hex + quotes is pure ASCII, safe for HeaderValue.
+    HeaderValue::try_from(formatted).expect("ascii etag")
 }

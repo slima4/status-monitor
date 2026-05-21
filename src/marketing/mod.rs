@@ -35,8 +35,13 @@ pub use dispatch::RouteByHost;
 /// Build the marketing router. Takes its own config — no `AppState`,
 /// no pools. The `CompressionLayer` is scoped here so it never wraps
 /// `/healthz`/`/readyz` on the app surface.
+///
+/// Every page/blog/legal/seo cache is warmed here at boot via
+/// [`warm_caches`], so the first real request after startup never pays
+/// askama + SHA-256 + (for blog) markdown + ammonia on the hot path.
 pub fn router(cfg: MarketingCfg) -> Router {
     let state = Arc::new(cfg);
+    warm_caches(&state);
     let mut r = Router::new()
         .route("/", get(pages::landing))
         .route("/robots.txt", get(seo::robots_txt))
@@ -57,4 +62,17 @@ pub fn router(cfg: MarketingCfg) -> Router {
         .fallback(pages::not_found)
         .layer(CompressionLayer::new())
         .with_state(state)
+}
+
+/// Eagerly populate every `OnceLock` cache in the marketing module.
+/// Each callee is independently idempotent (`OnceLock::get_or_init` +
+/// `list_published()` auto-loads posts), so call order is irrelevant —
+/// no cross-module ordering contract to keep in lockstep with edits.
+fn warm_caches(state: &Arc<MarketingCfg>) {
+    pages::warm(state);
+    legal::warm(state);
+    if state.blog_enabled {
+        blog::warm(state);
+    }
+    seo::warm(state);
 }
