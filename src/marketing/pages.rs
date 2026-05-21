@@ -1,5 +1,5 @@
 //! Page handlers (landing + branded 404). Landing renders into a
-//! `OnceLock` at boot via [`init`], so every request after that serves
+//! `OnceLock` at boot via [`warm`], so every request after that serves
 //! the cached body + stable ETag with no askama work and no per-request
 //! allocations beyond cheap `Bytes` / `HeaderValue` clones.
 
