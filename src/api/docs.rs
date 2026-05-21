@@ -16,13 +16,14 @@ use crate::api::types::{
 use crate::domain::Role;
 use crate::domain::{
     AlertBinding, ChannelConfig, ChannelKind, CheckResult, CheckSpec, CheckStatus,
-    ComponentHistoryResponse, DayState, DomainExpiryCheck, ExpectedStatus, HttpCheck, HttpMethod,
-    Incident, IncidentNarrationUpdate, IncidentSeverity, IncidentStatusPhase, MaintenanceFilter,
-    MaintenanceWindow, MaintenanceWindowUpdate, NewIncidentUpdate, NewMaintenanceWindow,
-    NewNotificationChannel, NewTarget, NotificationChannel, NotificationChannelUpdate,
-    OverallState, OverallStatus, PublicComponent, PublicComponentGroup, PublicComponentStatus,
-    PublicIncident, PublicIncidentUpdate, PublicMaintenance, PublicMaintenanceList,
-    PublicStatusPage, Target, TargetAlerts, TargetUpdate, TcpCheck, TlsCertCheck,
+    ComponentHistoryResponse, DayState, DnsCheck, DnsRecordType, DomainExpiryCheck, ExpectedStatus,
+    HttpCheck, HttpMethod, Incident, IncidentNarrationUpdate, IncidentSeverity,
+    IncidentStatusPhase, MaintenanceFilter, MaintenanceWindow, MaintenanceWindowUpdate,
+    NewIncidentUpdate, NewMaintenanceWindow, NewNotificationChannel, NewTarget,
+    NotificationChannel, NotificationChannelUpdate, OverallState, OverallStatus, PublicComponent,
+    PublicComponentGroup, PublicComponentStatus, PublicIncident, PublicIncidentUpdate,
+    PublicMaintenance, PublicMaintenanceList, PublicStatusPage, Target, TargetAlerts, TargetUpdate,
+    TcpCheck, TlsCertCheck,
 };
 use crate::storage::UptimeStats;
 
@@ -30,7 +31,7 @@ use crate::storage::UptimeStats;
 #[openapi(
     info(
         title = "status-monitor",
-        description = "HTTP / TCP / TLS-cert / domain-expiry health-check service. \
+        description = "HTTP / TCP / TLS-cert / domain-expiry / DNS health-check service. \
                        Schedules checks against configured targets, stores results, \
                        exposes a REST API.",
         license(name = "MIT"),
@@ -107,6 +108,8 @@ use crate::storage::UptimeStats;
             TcpCheck,
             TlsCertCheck,
             DomainExpiryCheck,
+            DnsCheck,
+            DnsRecordType,
             HttpMethod,
             ExpectedStatus,
             CheckResult,

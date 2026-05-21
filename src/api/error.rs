@@ -60,6 +60,7 @@ pub mod codes {
     pub const INVALID_HTTP_METHOD: &str = "INVALID_HTTP_METHOD";
     pub const INVALID_TLS_CERT_PARAMS: &str = "INVALID_TLS_CERT_PARAMS";
     pub const INVALID_DOMAIN_PARAMS: &str = "INVALID_DOMAIN_PARAMS";
+    pub const INVALID_DNS_PARAMS: &str = "INVALID_DNS_PARAMS";
     pub const INVALID_TLS_CRED_COMBO: &str = "INVALID_TLS_CRED_COMBO";
     pub const INVALID_ALERT_CONFIG: &str = "INVALID_ALERT_CONFIG";
     pub const INVALID_CONFIG: &str = "INVALID_CONFIG";

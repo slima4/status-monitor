@@ -792,6 +792,30 @@ fn validate_check(check: &crate::domain::CheckSpec, guard: &SsrfGuard) -> Result
                 ));
             }
         }
+        CheckSpec::Dns(d) => {
+            if d.domain.is_empty() {
+                return Err(AppError::bad_request_field(
+                    codes::INVALID_DNS_PARAMS,
+                    "dns domain required",
+                    "check.domain",
+                ));
+            }
+            if let Some(resolver) = &d.resolver
+                && !resolver.is_empty()
+            {
+                let sock = crate::http_client::parse_resolver_addr(resolver).map_err(|_| {
+                    AppError::bad_request_field(
+                        codes::INVALID_DNS_PARAMS,
+                        format!("dns resolver '{resolver}' must be an IP or ip:port"),
+                        "check.resolver",
+                    )
+                })?;
+                // A custom resolver address is just another outbound
+                // target; reuse the SSRF guard so users can't aim the
+                // probe at an internal DNS server.
+                check_ip(sock.ip(), guard)?;
+            }
+        }
     }
     Ok(())
 }

@@ -109,6 +109,10 @@
           <input type="radio" name="check_type" value="tcp"{% if form.check_type == "tcp" %} checked{% endif %}>
           <span class="text-sm">TCP</span>
         </label>
+        <label class="inline-flex items-center gap-2">
+          <input type="radio" name="check_type" value="dns"{% if form.check_type == "dns" %} checked{% endif %}>
+          <span class="text-sm">DNS</span>
+        </label>
       </div>
     </fieldset>
 
@@ -252,6 +256,63 @@
         <label class="block w-40">
           <span class="text-xs text-slate-500">Timeout (ms)</span>
           <input name="tcp_timeout_ms" type="number" min="100" max="60000" value="{{ form.tcp.timeout_ms }}"
+                 class="mt-1 w-full field">
+        </label>
+      </div>
+    </fieldset>
+
+    <fieldset data-variant="dns"
+              class="space-y-3 sticker-card p-5{% if form.check_type != "dns" %} hidden{% endif %}">
+      <legend class="px-1 text-sm font-medium">DNS check</legend>
+      <p class="text-xs text-slate-500">
+        Resolves a record and (optionally) asserts a substring appears in
+        the answer. NXDOMAIN or an empty answer set fails the check;
+        records present without the expected substring report Degraded.
+      </p>
+      <div class="grid grid-cols-2 gap-4 sm:grid-cols-3">
+        <label class="block sm:col-span-2">
+          <span class="text-xs text-slate-500">Domain</span>
+          <input name="dns_domain" type="text" value="{{ form.dns.domain }}"
+                 placeholder="api.example.com"
+                 class="mt-1 w-full field font-mono">
+        </label>
+        <label class="block">
+          <span class="text-xs text-slate-500">Record type</span>
+          <select name="dns_record_type" class="mt-1 w-full field">
+            <option value="A"{% if form.dns.record_type == "A" %} selected{% endif %}>A</option>
+            <option value="AAAA"{% if form.dns.record_type == "AAAA" %} selected{% endif %}>AAAA</option>
+            <option value="CNAME"{% if form.dns.record_type == "CNAME" %} selected{% endif %}>CNAME</option>
+            <option value="MX"{% if form.dns.record_type == "MX" %} selected{% endif %}>MX</option>
+            <option value="NS"{% if form.dns.record_type == "NS" %} selected{% endif %}>NS</option>
+            <option value="TXT"{% if form.dns.record_type == "TXT" %} selected{% endif %}>TXT</option>
+            <option value="SOA"{% if form.dns.record_type == "SOA" %} selected{% endif %}>SOA</option>
+            <option value="PTR"{% if form.dns.record_type == "PTR" %} selected{% endif %}>PTR</option>
+            <option value="CAA"{% if form.dns.record_type == "CAA" %} selected{% endif %}>CAA</option>
+            <option value="SRV"{% if form.dns.record_type == "SRV" %} selected{% endif %}>SRV</option>
+          </select>
+        </label>
+      </div>
+      <label class="block">
+        <span class="text-xs text-slate-500">Expected to contain (optional)</span>
+        <input name="dns_expected_contains" type="text" value="{{ form.dns.expected_contains }}"
+               placeholder="192.0.2.1"
+               class="mt-1 w-full field font-mono">
+        <span class="mt-1 block text-xs text-slate-500">
+          Substring match against every answer value. Leave blank to
+          accept any non-empty answer.
+        </span>
+      </label>
+      <div class="flex flex-wrap gap-3">
+        <label class="block flex-1 min-w-48">
+          <span class="text-xs text-slate-500">Resolver (optional)</span>
+          <input name="dns_resolver" type="text" value="{{ form.dns.resolver }}"
+                 placeholder="1.1.1.1"
+                 class="mt-1 w-full field font-mono">
+        </label>
+        <label class="block w-40">
+          <span class="text-xs text-slate-500">Timeout (ms)</span>
+          <input name="dns_timeout_ms" type="number" min="100" max="60000"
+                 value="{{ form.dns.timeout_ms }}"
                  class="mt-1 w-full field">
         </label>
       </div>

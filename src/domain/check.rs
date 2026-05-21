@@ -13,6 +13,7 @@ pub enum CheckSpec {
     Tcp(TcpCheck),
     TlsCert(TlsCertCheck),
     DomainExpiry(DomainExpiryCheck),
+    Dns(DnsCheck),
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
@@ -105,6 +106,60 @@ pub struct DomainExpiryCheck {
     /// Query timeout in milliseconds.
     #[serde(with = "duration_ms")]
     #[schema(value_type = u64)]
+    pub timeout: Duration,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum DnsRecordType {
+    A,
+    Aaaa,
+    Cname,
+    Mx,
+    Ns,
+    Txt,
+    Soa,
+    Ptr,
+    Caa,
+    Srv,
+}
+
+impl DnsRecordType {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            DnsRecordType::A => "A",
+            DnsRecordType::Aaaa => "AAAA",
+            DnsRecordType::Cname => "CNAME",
+            DnsRecordType::Mx => "MX",
+            DnsRecordType::Ns => "NS",
+            DnsRecordType::Txt => "TXT",
+            DnsRecordType::Soa => "SOA",
+            DnsRecordType::Ptr => "PTR",
+            DnsRecordType::Caa => "CAA",
+            DnsRecordType::Srv => "SRV",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct DnsCheck {
+    /// Name to resolve (FQDN; trailing dot tolerated).
+    #[schema(example = "api.example.com")]
+    pub domain: String,
+    pub record_type: DnsRecordType,
+    /// Optional custom resolver as `ip` or `ip:port` (e.g. `1.1.1.1`,
+    /// `8.8.8.8:53`). `None` uses the process default resolver.
+    #[serde(default)]
+    #[schema(nullable = true, example = "1.1.1.1")]
+    pub resolver: Option<String>,
+    /// Optional substring that must appear in at least one answer value.
+    /// Empty answers, NXDOMAIN, or a missing substring all fail the check.
+    #[serde(default)]
+    #[schema(nullable = true, example = "192.0.2.1")]
+    pub expected_contains: Option<String>,
+    /// Query timeout in milliseconds.
+    #[serde(with = "duration_ms")]
+    #[schema(value_type = u64, minimum = 100, maximum = 60000, example = 3000)]
     pub timeout: Duration,
 }
 

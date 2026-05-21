@@ -240,6 +240,7 @@ impl AbuseGuard {
             CheckSpec::Tcp(t) => crate::security::unbracket(&t.host),
             CheckSpec::TlsCert(c) => crate::security::unbracket(&c.host),
             CheckSpec::DomainExpiry(d) => d.domain.as_str(),
+            CheckSpec::Dns(d) => d.domain.as_str(),
         };
         s.domain_hit(host).or_else(|| s.reputation_hit(host))
     }

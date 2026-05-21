@@ -11,7 +11,7 @@
     form.addEventListener("change", (evt) => {
         const t = evt.target;
         if (t.name === "check_type") {
-            document.querySelectorAll("[data-variant='http'], [data-variant='tcp']").forEach(el => {
+            document.querySelectorAll("[data-variant='http'], [data-variant='tcp'], [data-variant='dns']").forEach(el => {
                 el.classList.toggle("hidden", el.dataset.variant !== t.value);
             });
         } else if (t.matches("[data-expected-toggle]")) {
@@ -143,12 +143,21 @@
             if (bearerFs && bearerFs.dataset.mode === "replacing") {
                 check.bearer_token = data.get("http_bearer_token") || "";
             }
-        } else {
+        } else if (checkType === "tcp") {
             check = {
                 type: "tcp",
                 host: data.get("tcp_host"),
                 port: parseInt(data.get("tcp_port"), 10),
                 timeout: parseInt(data.get("tcp_timeout_ms"), 10),
+            };
+        } else {
+            check = {
+                type: "dns",
+                domain: data.get("dns_domain"),
+                record_type: data.get("dns_record_type"),
+                resolver: blankToNull(data.get("dns_resolver")),
+                expected_contains: blankToNull(data.get("dns_expected_contains")),
+                timeout: parseInt(data.get("dns_timeout_ms"), 10),
             };
         }
 
@@ -225,6 +234,10 @@
         "check.host": "tcp_host",
         "check.port": "tcp_port",
         "check.timeout": "http_timeout_ms",
+        "check.domain": "dns_domain",
+        "check.record_type": "dns_record_type",
+        "check.resolver": "dns_resolver",
+        "check.expected_contains": "dns_expected_contains",
         "interval": "interval_s",
         "name": "name",
         "tags": "tags",

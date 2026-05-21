@@ -1,4 +1,5 @@
 pub mod circuit_breaker;
+pub mod dns;
 pub mod domain_expiry;
 pub mod http_check;
 pub mod pool;
@@ -82,5 +83,6 @@ pub async fn execute(
         CheckSpec::DomainExpiry(domain) => {
             domain_expiry::execute_domain_expiry_check(target_id, org_id, domain).await
         }
+        CheckSpec::Dns(d) => dns::execute_dns_check(target_id, org_id, d, clients).await,
     }
 }

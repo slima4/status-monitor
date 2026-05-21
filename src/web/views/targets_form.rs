@@ -94,6 +94,26 @@ impl Default for TcpFields {
     }
 }
 
+pub struct DnsFields {
+    pub domain: String,
+    pub record_type: &'static str,
+    pub resolver: String,
+    pub expected_contains: String,
+    pub timeout_ms: u64,
+}
+
+impl Default for DnsFields {
+    fn default() -> Self {
+        Self {
+            domain: String::new(),
+            record_type: "A",
+            resolver: String::new(),
+            expected_contains: String::new(),
+            timeout_ms: 3_000,
+        }
+    }
+}
+
 /// One row in the monitor form's Alerts section: an org channel plus whether
 /// this monitor binds to it and the per-binding firing policy.
 pub struct ChannelChoice {
@@ -120,6 +140,7 @@ pub struct FormModel {
     pub check_type: &'static str,
     pub http: HttpFields,
     pub tcp: TcpFields,
+    pub dns: DnsFields,
     /// The org's notification channels, with this monitor's bindings prefilled.
     pub channels: Vec<ChannelChoice>,
 }
@@ -160,6 +181,7 @@ fn empty_create_form() -> FormModel {
         check_type: "http",
         http: HttpFields::default(),
         tcp: TcpFields::default(),
+        dns: DnsFields::default(),
         channels: Vec::new(),
     }
 }
@@ -255,8 +277,13 @@ pub async fn edit_form(
 fn form_from_target(t: Target, kind: FormKind) -> Result<FormModel, AppError> {
     let tags_csv = t.tags.join(", ");
 
-    let (check_type, http, tcp) = match t.check {
-        CheckSpec::Http(h) => ("http", http_fields_from(h), TcpFields::default()),
+    let (check_type, http, tcp, dns) = match t.check {
+        CheckSpec::Http(h) => (
+            "http",
+            http_fields_from(h),
+            TcpFields::default(),
+            DnsFields::default(),
+        ),
         CheckSpec::Tcp(c) => (
             "tcp",
             HttpFields::default(),
@@ -264,6 +291,19 @@ fn form_from_target(t: Target, kind: FormKind) -> Result<FormModel, AppError> {
                 host: c.host,
                 port: c.port,
                 timeout_ms: c.timeout.as_millis() as u64,
+            },
+            DnsFields::default(),
+        ),
+        CheckSpec::Dns(d) => (
+            "dns",
+            HttpFields::default(),
+            TcpFields::default(),
+            DnsFields {
+                domain: d.domain,
+                record_type: d.record_type.as_str(),
+                resolver: d.resolver.unwrap_or_default(),
+                expected_contains: d.expected_contains.unwrap_or_default(),
+                timeout_ms: d.timeout.as_millis() as u64,
             },
         ),
         CheckSpec::TlsCert(_) | CheckSpec::DomainExpiry(_) => {
@@ -306,6 +346,7 @@ fn form_from_target(t: Target, kind: FormKind) -> Result<FormModel, AppError> {
         check_type,
         http,
         tcp,
+        dns,
         channels: Vec::new(),
     })
 }
@@ -514,6 +555,52 @@ mod tests {
             Ok(_) => panic!("expected Unprocessable"),
             Err(other) => panic!("expected Unprocessable, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn edit_form_maps_dns_target_fields() {
+        use crate::domain::{DnsCheck, DnsRecordType};
+        use std::time::Duration;
+        let t = Target {
+            id: uuid::Uuid::nil(),
+            name: "dns".into(),
+            check: CheckSpec::Dns(DnsCheck {
+                domain: "api.example.com".into(),
+                record_type: DnsRecordType::Cname,
+                resolver: Some("1.1.1.1".into()),
+                expected_contains: Some("edge.cdn".into()),
+                timeout: Duration::from_millis(2_500),
+            }),
+            interval: Duration::from_secs(60),
+            enabled: true,
+            tags: vec![],
+            alerts: Default::default(),
+            public_status: false,
+            public_name: None,
+            public_description: None,
+            public_group: None,
+            public_sort_order: 0,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+        let form = form_from_target(t, FormKind::Edit).unwrap();
+        assert_eq!(form.check_type, "dns");
+        assert_eq!(form.dns.domain, "api.example.com");
+        assert_eq!(form.dns.record_type, "CNAME");
+        assert_eq!(form.dns.resolver, "1.1.1.1");
+        assert_eq!(form.dns.expected_contains, "edge.cdn");
+        assert_eq!(form.dns.timeout_ms, 2_500);
+        let html = FormPage {
+            active_tab: "targets",
+            form,
+        }
+        .render()
+        .unwrap();
+        assert!(html.contains(r#"name="check_type" value="dns""#));
+        assert!(html.contains(r#"value="CNAME" selected"#));
+        assert!(html.contains(r#"value="api.example.com""#));
+        assert!(html.contains(r#"value="edge.cdn""#));
+        assert!(html.contains(r#"value="1.1.1.1""#));
     }
 
     #[test]

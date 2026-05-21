@@ -15,7 +15,8 @@ pub mod word_lists;
 
 pub use alert::{AlertBinding, TargetAlerts};
 pub use check::{
-    CheckSpec, DomainExpiryCheck, ExpectedStatus, HttpCheck, HttpMethod, TcpCheck, TlsCertCheck,
+    CheckSpec, DnsCheck, DnsRecordType, DomainExpiryCheck, ExpectedStatus, HttpCheck, HttpMethod,
+    TcpCheck, TlsCertCheck,
 };
 pub use incident::{Incident, IncidentNarrationUpdate, NewIncidentUpdate, coalesce_incidents};
 pub use maintenance::{

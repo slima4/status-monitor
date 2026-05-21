@@ -41,6 +41,14 @@ pub fn host_for_spec(spec: &CheckSpec) -> String {
             let tld = d.domain.rsplit('.').next().unwrap_or("unknown");
             format!("rdap:{tld}")
         }
+        // Custom resolver → key by the resolver itself (one flaky DNS
+        // server shouldn't trip the breaker for unrelated targets that
+        // happen to share a name); default resolver → key by the queried
+        // name so a single broken domain doesn't trip the system breaker.
+        CheckSpec::Dns(d) => match &d.resolver {
+            Some(addr) => format!("dns:{addr}"),
+            None => format!("dns:{}", d.domain),
+        },
     }
 }
 
