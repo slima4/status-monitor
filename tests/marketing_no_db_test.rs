@@ -177,6 +177,46 @@ async fn marketing_serves_fingerprinted_assets() {
 }
 
 #[tokio::test]
+async fn legal_pages_render_without_db() {
+    for (path, expected_heading) in [
+        ("/terms", "Terms of Service"),
+        ("/privacy", "Privacy Policy"),
+        ("/cookies", "Cookie Policy"),
+        ("/impressum", "Impressum"),
+        ("/abuse-policy", "Abuse Policy"),
+        ("/security-policy", "Security Policy"),
+    ] {
+        let (status, body, headers) = get(path).await;
+        assert_eq!(status, StatusCode::OK, "{path}");
+        assert!(
+            body.contains(expected_heading),
+            "{path} missing heading {expected_heading:?}"
+        );
+        assert!(
+            headers.contains_key(header::ETAG),
+            "{path} must set a strong ETag"
+        );
+    }
+}
+
+#[tokio::test]
+async fn sitemap_lists_legal_routes() {
+    let (status, body, _) = get("/sitemap.xml").await;
+    assert_eq!(status, StatusCode::OK);
+    for path in [
+        "/terms",
+        "/privacy",
+        "/cookies",
+        "/impressum",
+        "/abuse-policy",
+        "/security-policy",
+    ] {
+        let loc = format!("<loc>https://uptimepage.dev{path}</loc>");
+        assert!(body.contains(&loc), "sitemap missing {loc}");
+    }
+}
+
+#[tokio::test]
 async fn cookie_does_not_change_response_body() {
     // Cookie isolation: marketing serves identical bytes whether or not
     // a `_sm_session` cookie tags along. No Vary: Cookie, no

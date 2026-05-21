@@ -1,0 +1,8 @@
+{% extends "marketing/base.html" %}
+{% block title %}{{ title }} — Uptimepage{% endblock %}
+{% block description %}{{ title }} for Uptimepage.{% endblock %}
+{% block content %}
+<article class="legal-doc mx-auto max-w-3xl space-y-4">
+    {{ body|safe }}
+</article>
+{% endblock %}

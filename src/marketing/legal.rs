@@ -1,0 +1,177 @@
+//! Public legal & policy pages on the marketing host:
+//! `/terms`, `/privacy`, `/cookies`, `/impressum`, `/abuse-policy`,
+//! `/security-policy`. Markdown sources under `docs/legal/` are
+//! compiled into the binary with `include_str!` and rendered to HTML
+//! once on first request, then memoised in a `OnceLock` per route.
+//!
+//! The renderer is deliberately **unsanitised** — first-party legal
+//! content uses tables and the occasional raw `<a>` that ammonia would
+//! strip. The blog renderer (third-party PR input) is a separate
+//! sanitised path and must not be reused here.
+
+use std::collections::HashMap;
+use std::sync::{Arc, LazyLock, OnceLock};
+
+use askama::Template;
+use askama_web::WebTemplate;
+use axum::Router;
+use axum::extract::State;
+use axum::http::HeaderMap;
+use axum::response::Response;
+use axum::routing::get;
+
+use super::config::{BRAND, MarketingCfg};
+use super::pages::{CachedRender, body_etag, serve_cached};
+use super::seo::OpenGraph;
+use crate::web::assets::filters;
+
+const LEGAL_CACHE_CONTROL: &str = "public, max-age=86400, stale-while-revalidate=86400";
+
+fn render_trusted_unsanitised(markdown: &str) -> String {
+    let mut opts = pulldown_cmark::Options::empty();
+    opts.insert(pulldown_cmark::Options::ENABLE_TABLES);
+    let parser = pulldown_cmark::Parser::new_ext(markdown, opts);
+    let mut html = String::new();
+    pulldown_cmark::html::push_html(&mut html, parser);
+    html
+}
+
+#[derive(Template, WebTemplate)]
+#[template(path = "marketing/legal.html")]
+struct LegalPage {
+    title: &'static str,
+    body: &'static str,
+    canonical_url: String,
+    og: OpenGraph,
+    app_url: String,
+    version: &'static str,
+}
+
+static TERMS: LazyLock<String> =
+    LazyLock::new(|| render_trusted_unsanitised(include_str!("../../docs/legal/terms.md")));
+static PRIVACY: LazyLock<String> =
+    LazyLock::new(|| render_trusted_unsanitised(include_str!("../../docs/legal/privacy.md")));
+static COOKIES: LazyLock<String> =
+    LazyLock::new(|| render_trusted_unsanitised(include_str!("../../docs/legal/cookies.md")));
+static IMPRESSUM: LazyLock<String> =
+    LazyLock::new(|| render_trusted_unsanitised(include_str!("../../docs/legal/impressum.md")));
+static ABUSE: LazyLock<String> =
+    LazyLock::new(|| render_trusted_unsanitised(include_str!("../../docs/legal/abuse-policy.md")));
+static SECURITY: LazyLock<String> = LazyLock::new(|| {
+    render_trusted_unsanitised(include_str!("../../docs/legal/security-policy.md"))
+});
+
+pub struct LegalRoute {
+    pub path: &'static str,
+    pub title: &'static str,
+    body: &'static LazyLock<String>,
+}
+
+/// Single source of truth for legal pages: router mount, renderer, and
+/// sitemap all iterate this slice. Add a 7th page → one entry.
+pub const ROUTES: &[LegalRoute] = &[
+    LegalRoute {
+        path: "/terms",
+        title: "Terms of Service",
+        body: &TERMS,
+    },
+    LegalRoute {
+        path: "/privacy",
+        title: "Privacy Policy",
+        body: &PRIVACY,
+    },
+    LegalRoute {
+        path: "/cookies",
+        title: "Cookie Policy",
+        body: &COOKIES,
+    },
+    LegalRoute {
+        path: "/impressum",
+        title: "Impressum",
+        body: &IMPRESSUM,
+    },
+    LegalRoute {
+        path: "/abuse-policy",
+        title: "Abuse Policy",
+        body: &ABUSE,
+    },
+    LegalRoute {
+        path: "/security-policy",
+        title: "Security Policy",
+        body: &SECURITY,
+    },
+];
+
+static RENDERED: OnceLock<HashMap<&'static str, CachedRender>> = OnceLock::new();
+
+fn render_all(cfg: &MarketingCfg) -> HashMap<&'static str, CachedRender> {
+    ROUTES
+        .iter()
+        .map(|route| {
+            let canonical_url = format!("{}{}", cfg.canonical_origin, route.path);
+            let og = OpenGraph::default_for(&format!("{} — {BRAND}", route.title), &canonical_url);
+            let page = LegalPage {
+                title: route.title,
+                body: route.body.as_str(),
+                canonical_url,
+                og,
+                app_url: cfg.app_url.clone(),
+                version: env!("CARGO_PKG_VERSION"),
+            };
+            let body = page
+                .render()
+                .unwrap_or_else(|e| format!("<!-- legal render failed: {e} -->"));
+            let etag = body_etag(&body);
+            (route.path, CachedRender { body, etag })
+        })
+        .collect()
+}
+
+async fn serve(
+    State(cfg): State<Arc<MarketingCfg>>,
+    headers: HeaderMap,
+    route: &'static LegalRoute,
+) -> Response {
+    let map = RENDERED.get_or_init(|| render_all(&cfg));
+    // `render_all` and `mount` both iterate `ROUTES`, so every mounted
+    // path is guaranteed present in the map.
+    let cached = map.get(route.path).expect("ROUTES drives render");
+    serve_cached(&headers, cached, LEGAL_CACHE_CONTROL)
+}
+
+/// Mount every entry in [`ROUTES`] on the given router. One source of
+/// truth — no per-route handler functions, no `match` arm, no macro
+/// invocations to keep in lockstep.
+pub fn mount(router: Router<Arc<MarketingCfg>>) -> Router<Arc<MarketingCfg>> {
+    let mut r = router;
+    for route in ROUTES {
+        r = r.route(
+            route.path,
+            get(move |state, headers| serve(state, headers, route)),
+        );
+    }
+    r
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_route_has_non_empty_body() {
+        for route in ROUTES {
+            assert!(
+                !route.body.is_empty(),
+                "{} rendered to empty html",
+                route.path
+            );
+        }
+    }
+
+    #[test]
+    fn trusted_renderer_preserves_tables() {
+        let md = "| a | b |\n|---|---|\n| 1 | 2 |\n";
+        let html = render_trusted_unsanitised(md);
+        assert!(html.contains("<table>"), "expected <table>, got {html}");
+    }
+}

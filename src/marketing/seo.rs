@@ -17,6 +17,7 @@ use serde::Serialize;
 
 use super::blog::list_published;
 use super::config::{BRAND, MarketingCfg, TAGLINE};
+use super::legal;
 
 const STATIC_CACHE_CONTROL: &str = "public, max-age=86400";
 
@@ -159,6 +160,9 @@ fn build_sitemap(cfg: &MarketingCfg) -> String {
                 Some(post.date.clone()),
             ));
         }
+    }
+    for route in legal::ROUTES {
+        urls.push((format!("{origin}{}", route.path), None));
     }
     let mut body = String::from(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n",

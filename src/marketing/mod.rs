@@ -19,6 +19,7 @@
 pub mod blog;
 pub mod config;
 pub mod dispatch;
+pub mod legal;
 pub mod pages;
 pub mod seo;
 
@@ -41,6 +42,7 @@ pub fn router(cfg: MarketingCfg) -> Router {
         .route("/robots.txt", get(seo::robots_txt))
         .route("/sitemap.xml", get(seo::sitemap_xml))
         .route("/llms.txt", get(seo::llms_txt));
+    r = legal::mount(r);
     if state.blog_enabled {
         r = r
             .route("/blog", get(blog::index))
