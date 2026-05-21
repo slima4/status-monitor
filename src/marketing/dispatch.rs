@@ -15,6 +15,7 @@ use axum::http::header::HOST;
 use axum::http::{Request, Response};
 use tower::Service;
 
+use crate::api::handlers::health::is_health_path;
 use crate::web::host::{HostClass, HostScheme, classify_host};
 
 /// Routes a request to one of two `axum::Router`s based on classified
@@ -46,8 +47,7 @@ impl Service<Request<Body>> for RouteByHost {
         // Probes use opaque Hosts (IP / container name → Unknown →
         // marketing 404 → upstream marked down). Path is the stable
         // signal; route health endpoints to the app regardless of Host.
-        let path = req.uri().path();
-        if path == "/healthz" || path == "/readyz" {
+        if is_health_path(req.uri().path()) {
             let mut svc = self.app.clone();
             return Box::pin(async move { svc.call(req).await });
         }

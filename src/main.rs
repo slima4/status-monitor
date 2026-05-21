@@ -8,6 +8,7 @@ use axum::response::Response;
 use opentelemetry::trace::TraceContextExt;
 use status_monitor::{
     api::build_router,
+    api::handlers::health::is_health_path,
     app::AppState,
     config::AppConfig,
     error::{AppError, Result},
@@ -60,9 +61,9 @@ const SHUTDOWN_DEADLINE: Duration = Duration::from_secs(10);
 async fn access_log(req: Request, next: Next) -> Response {
     // Decide skip from the BORROWED path; only own method+path when
     // we will actually log. Caddy active-health + the deploy gate poll
-    // /healthz//readyz forever — never allocate a String for them.
+    // the health endpoints forever — never allocate a String for them.
     let p = req.uri().path();
-    let logged = (p != "/healthz" && p != "/readyz").then(|| {
+    let logged = (!is_health_path(p)).then(|| {
         // Path only, never the query string: /auth/* carries
         // single-use magic-link tokens and the OAuth code/state,
         // which must not reach stdout logs.
@@ -410,7 +411,7 @@ async fn main() -> Result<()> {
                 // Caddy active-health and the deploy gate poll these
                 // on a tight loop forever; a span per probe at full
                 // sampling is pure noise with no diagnostic value.
-                if path == "/healthz" || path == "/readyz" {
+                if is_health_path(path) {
                     return tracing::Span::none();
                 }
                 // Path only, never the query string: /auth/* carries

@@ -13,6 +13,20 @@ pub struct HealthResponse {
     pub status: &'static str,
 }
 
+/// Probe endpoints that every health-conscious caller — Caddy active
+/// health check, Docker healthcheck, k8s probes, the trace-span skip,
+/// the access-log skip, the host-dispatch bypass — needs to recognise.
+/// One source of truth so a new probe path can never go silently
+/// undetected by one of the call sites (the 503 outage on 2026-05-21
+/// happened because the marketing dispatcher was missing this check).
+pub const HEALTH_PATHS: &[&str] = &["/healthz", "/readyz"];
+
+/// True when `path` is one of [`HEALTH_PATHS`]. Cheap `contains` over a
+/// 2-element slice — fine on the per-request hot path.
+pub fn is_health_path(path: &str) -> bool {
+    HEALTH_PATHS.contains(&path)
+}
+
 #[utoipa::path(
     get,
     path = "/healthz",
@@ -52,5 +66,26 @@ pub async fn readyz(State(state): State<AppState>) -> (StatusCode, Json<HealthRe
                 }),
             )
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn health_paths_match_route_mounts() {
+        // Lock the contract: the two probe endpoints recognised by the
+        // dispatch bypass, the access-log skip, and the trace-span skip
+        // are exactly the routes mounted in `api::routes`. A new probe
+        // route MUST be added here in lockstep — otherwise it would 503
+        // through Caddy's active health check the moment marketing is
+        // enabled (the bug from 2026-05-21).
+        assert!(is_health_path("/healthz"));
+        assert!(is_health_path("/readyz"));
+        assert!(!is_health_path("/health"));
+        assert!(!is_health_path("/healthz/extra"));
+        assert!(!is_health_path("/"));
+        assert!(!is_health_path(""));
     }
 }
