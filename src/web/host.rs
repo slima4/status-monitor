@@ -245,10 +245,20 @@ pub fn is_subdomain_public_request(state: &AppState, headers: &HeaderMap) -> boo
     let Some(host) = headers.get(HOST).and_then(|h| h.to_str().ok()) else {
         return false;
     };
-    let Ok(scheme) = HostScheme::from_base_domain(&state.cfg.public_status.base_domain) else {
+    // Strip port + trailing FQDN dot the same way `classify_host` does so
+    // `acme.example.com:443` and `acme.example.com.` route identically.
+    let host = host.split(':').next().unwrap_or(host);
+    let host = host.strip_suffix('.').unwrap_or(host).to_ascii_lowercase();
+    // Slug-shaped non-operator hosts (including `www` and any marketing
+    // label) belong on the public dispatcher — even when the upstream
+    // marketing router isn't wired up. Routing them to the operator `/`
+    // dashboard would expose the login surface on attacker-controlled
+    // labels (`admin.{base}`, `www.{base}`). When marketing IS enabled,
+    // `RouteByHost` intercepts those hosts before this code runs.
+    let Some(parsed) = extract_status_slug(&host, &state.cfg.public_status.base_domain) else {
         return false;
     };
-    matches!(classify_host(host, &scheme), HostClass::TenantPublic)
+    !is_operator_label(parsed.slug)
 }
 
 #[cfg(test)]
