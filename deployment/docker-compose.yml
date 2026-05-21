@@ -112,6 +112,13 @@ services:
       STATUS_MONITOR_AUTH__GITHUB__CLIENT_SECRET: ${STATUS_MONITOR_AUTH_GITHUB_CLIENT_SECRET:-}
       STATUS_MONITOR_AUTH__GITHUB__REDIRECT_URL: ${STATUS_MONITOR_AUTH_GITHUB_REDIRECT_URL:-}
       STATUS_MONITOR_AUTH__PUBLIC_BASE_URL: ${STATUS_MONITOR_AUTH_PUBLIC_BASE_URL:-}
+      # Marketing site (apex + www). Disabled by default — the binary
+      # serves only the operator + tenant surfaces unless this is true.
+      # RouteByHost dispatches `Marketing` hosts only when enabled here.
+      STATUS_MONITOR_MARKETING__ENABLED: ${STATUS_MONITOR_MARKETING__ENABLED:-false}
+      STATUS_MONITOR_MARKETING__APP_URL: ${STATUS_MONITOR_MARKETING__APP_URL:-}
+      STATUS_MONITOR_MARKETING__CANONICAL_ORIGIN: ${STATUS_MONITOR_MARKETING__CANONICAL_ORIGIN:-}
+      STATUS_MONITOR_MARKETING__BLOG_ENABLED: ${STATUS_MONITOR_MARKETING__BLOG_ENABLED:-false}
       # Effective trace/log filter. tracing reads RUST_LOG before the
       # config file, so this is the authoritative knob; it must be at
       # least `debug` for HTTP request spans (hence OTLP traces) to be
