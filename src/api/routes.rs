@@ -241,13 +241,14 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
         root = root.nest("/api/public/v1", build_public_router());
     }
 
+    // CSRF lives one layer up (router::build_app_router) so it wraps
+    // the api router AND the merged web::routes() together. Keeping it
+    // here would leave any future state-changing route on the web
+    // router silently un-protected — the same drift pattern that bit
+    // the health-path predicate before centralisation.
     root.merge(SwaggerUi::new("/docs").url("/api/openapi.json", ApiDoc::openapi()))
         .layer(from_fn(api_middleware::cache_control))
         .layer(from_fn(api_middleware::json_charset))
-        .layer(from_fn_with_state(
-            state.clone(),
-            crate::web::auth::csrf::middleware,
-        ))
         .layer(tower_cookies::CookieManagerLayer::new())
         .with_state(state)
 }

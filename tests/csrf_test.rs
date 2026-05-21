@@ -9,7 +9,7 @@ mod common;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode, request::Builder};
-use common::build_test_app;
+use common::{build_test_app, build_test_app_with_web};
 use tower::ServiceExt;
 
 const SESSION_COOKIE: &str = "_sm_session=fakesession";
@@ -145,6 +145,32 @@ async fn delete_with_cookie_and_no_xrw_header_is_rejected() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn web_router_post_with_cookie_is_csrf_protected() {
+    // Lock-in: CSRF wraps the *merged* router (api + web), not just
+    // the api half. `/` is a GET-only web route — a POST would 405,
+    // but the outer CSRF layer must catch missing X-Requested-With
+    // first and 403. If CSRF ever drifts back to api-only, this test
+    // returns 405 and fails — preventing the silent-miss drift the
+    // structural fix exists to prevent.
+    let app = build_test_app_with_web(|_| {});
+    let resp = app
+        .oneshot(
+            req("POST", "/")
+                .header("cookie", SESSION_COOKIE)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    let body = body_text(resp);
+    assert!(
+        body.contains("CSRF_PROTECTION"),
+        "web router POST must be CSRF-gated, got: {body}"
+    );
 }
 
 #[tokio::test]
