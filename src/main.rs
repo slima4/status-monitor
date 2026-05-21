@@ -7,7 +7,6 @@ use axum::middleware::{self, Next};
 use axum::response::Response;
 use opentelemetry::trace::TraceContextExt;
 use status_monitor::{
-    api::build_router,
     api::handlers::health::is_health_path,
     app::AppState,
     config::AppConfig,
@@ -30,7 +29,6 @@ use status_monitor::{
         PgNotificationChannelStore, PostgresTargetStore, ResultSink, ResultsStore, TargetStore,
         ensure_default_org,
     },
-    web,
     worker::{ResultFanout, WorkerPool},
 };
 use tokio::net::TcpListener;
@@ -375,7 +373,12 @@ async fn main() -> Result<()> {
     // LAST `.layer` is OUTERMOST. TraceLayer added last → it wraps and
     // enters the `http.request` span before `access_log` runs, so
     // `access_log` can read the request's OTLP trace_id (see its doc).
-    let app_router = build_router(state.clone(), root.clone()).merge(web::routes(state.clone()));
+    // Default-deny on tenant subdomain hosts: only the public-tenant
+    // allow-list (`/`, `/status*`, `/api/public/v1/*`, `/static/*`,
+    // security.txt) reaches a handler; everything else 404s before the
+    // operator UI, auth flows, and private API can leak surface on
+    // `{slug}.{base}`. No-op when SaaS subdomain mode is off.
+    let app_router = status_monitor::build_app_router(state.clone(), root.clone());
 
     // The single dispatch seam. When marketing is enabled, requests are
     // routed to the marketing or app router by classified `Host`.

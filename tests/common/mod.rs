@@ -12,7 +12,6 @@ use chrono::Utc;
 use serde_json::Value;
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
-use status_monitor::api::build_router;
 use status_monitor::app::AppState;
 use status_monitor::config::{
     AppConfig, CheckerConfig, CircuitBreakerConfig, DnsConfig, HttpClientConfig, SchedulerConfig,
@@ -134,7 +133,10 @@ pub fn build_test_app_with_seedable_incidents(
         build_test_outbound_and_email().0,
         build_test_outbound_and_email().1,
     );
-    (build_router(state, CancellationToken::new()), narration)
+    (
+        status_monitor::build_app_router_api_only(state, CancellationToken::new()),
+        narration,
+    )
 }
 
 /// Like `build_test_app` but accepts a custom `PublicSource` so contract tests
@@ -195,11 +197,10 @@ fn build_test_app_with_public_source_inner(
         build_test_outbound_and_email().0,
         build_test_outbound_and_email().1,
     );
-    let api = build_router(state.clone(), CancellationToken::new());
     if with_web {
-        api.merge(status_monitor::web::routes(state))
+        status_monitor::build_app_router(state, CancellationToken::new())
     } else {
-        api
+        status_monitor::build_app_router_api_only(state, CancellationToken::new())
     }
 }
 
@@ -211,11 +212,10 @@ pub fn build_test_app_with_web(mutate: impl FnOnce(&mut AppConfig)) -> Router {
 
 fn build_test_app_inner(mutate: impl FnOnce(&mut AppConfig), with_web: bool) -> Router {
     let state = build_test_app_state(mutate);
-    let api = build_router(state.clone(), CancellationToken::new());
     if with_web {
-        api.merge(status_monitor::web::routes(state))
+        status_monitor::build_app_router(state, CancellationToken::new())
     } else {
-        api
+        status_monitor::build_app_router_api_only(state, CancellationToken::new())
     }
 }
 
@@ -267,8 +267,7 @@ pub async fn build_test_app_with_pg(
         build_test_outbound_and_email().0,
         build_test_outbound_and_email().1,
     );
-    let api = build_router(state.clone(), CancellationToken::new());
-    let app = api.merge(status_monitor::web::routes(state));
+    let app = status_monitor::build_app_router(state, CancellationToken::new());
     (app, default_org_id)
 }
 
@@ -352,8 +351,7 @@ fn assemble_pg_router(pool: PgPool, cfg: AppConfig, default_org_id: OrgId) -> Ro
         build_test_outbound_and_email().0,
         build_test_outbound_and_email().1,
     );
-    let api = build_router(state.clone(), CancellationToken::new());
-    api.merge(status_monitor::web::routes(state))
+    status_monitor::build_app_router(state, CancellationToken::new())
 }
 
 /// Layer that stamps the provided `Session` onto every request's extensions.

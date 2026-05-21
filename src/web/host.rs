@@ -9,11 +9,15 @@
 //! `OrgId` the handler should serve. The host *determines the org*; the path
 //! *determines the resource* (the JSON paths are identical across surfaces).
 
-use axum::extract::{FromRef, FromRequestParts};
+use axum::extract::{FromRef, FromRequestParts, Request, State};
 use axum::http::HeaderMap;
+use axum::http::StatusCode;
 use axum::http::header::HOST;
 use axum::http::request::Parts;
+use axum::middleware::Next;
+use axum::response::{IntoResponse, Response};
 
+use crate::api::handlers::health::is_health_path;
 use crate::api::public_error::PublicAppError;
 use crate::api::subdomain_public_routes_enabled;
 use crate::app::AppState;
@@ -296,6 +300,54 @@ pub fn is_subdomain_public_request(state: &AppState, headers: &HeaderMap) -> boo
         HostShape::Subdomain(slug) => !is_operator_label(slug),
         _ => false,
     }
+}
+
+/// Exact paths the public tenant surface (`{slug}.{base_domain}`) is
+/// allowed to expose. Combined with [`PUBLIC_TENANT_PREFIXES`] this is
+/// the complete allow-list — every grep-able place a tenant-host route
+/// is whitelisted, so adding a new public-tenant route forces a visit
+/// here too. Mirrors the `HEALTH_PATHS` pattern in `api::handlers::health`.
+const PUBLIC_TENANT_EXACT: &[&str] = &["/", "/status", "/.well-known/security.txt"];
+
+/// Path prefixes the public tenant surface is allowed to expose. No
+/// `/robots.txt` or `/sitemap.xml` by design — tenant pages aren't
+/// crawl targets, and the public-status template emits its own meta.
+/// No general `/.well-known/*` — only `security.txt` is allow-listed,
+/// ACME challenges run on the apex/`app.{base}` host.
+const PUBLIC_TENANT_PREFIXES: &[&str] = &["/status/", "/api/public/v1/", "/static/"];
+
+fn is_public_tenant_path(path: &str) -> bool {
+    PUBLIC_TENANT_EXACT.contains(&path)
+        || PUBLIC_TENANT_PREFIXES.iter().any(|p| path.starts_with(p))
+}
+
+/// Default-deny middleware on tenant subdomain hosts (`{slug}.{base}`).
+/// Any request whose path isn't in the public-tenant allow-list (see
+/// [`PUBLIC_TENANT_EXACT`] + [`PUBLIC_TENANT_PREFIXES`]) returns 404 —
+/// otherwise `acme.{base}/login` would render the operator login form
+/// (a phishing-friendly clone), `/api/v1/*` would reveal 401s a probe
+/// can map, `/settings/*` would 302 to `/login` and leak the route's
+/// existence. The session cookie is host-scoped, so this is not a
+/// credential-hijack vector; the gate exists to keep the operator
+/// *surface* off tenant hosts.
+///
+/// Applies to the merged app router so it covers both the web UI and
+/// the JSON API. Health probes bypass unconditionally so a misrouted
+/// probe doesn't take the upstream down. No-op when SaaS subdomain
+/// mode is off — every request passes through unmodified.
+pub async fn tenant_host_isolation(
+    State(state): State<AppState>,
+    req: Request,
+    next: Next,
+) -> Response {
+    let path = req.uri().path();
+    if is_health_path(path) || !is_subdomain_public_request(&state, req.headers()) {
+        return next.run(req).await;
+    }
+    if !is_public_tenant_path(path) {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    next.run(req).await
 }
 
 #[cfg(test)]

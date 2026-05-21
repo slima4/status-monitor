@@ -224,6 +224,75 @@ async fn subdomain_root_serves_public_page() {
 
 #[tokio::test]
 #[ignore]
+async fn tenant_host_isolates_operator_surface() {
+    // Default-deny: a tenant subdomain (`{slug}.{base}`) must only
+    // serve the public-status allow-list. Operator UI (`/login`,
+    // `/recover-account`, `/onboarding/org`), auth flows
+    // (`/auth/github/*`), settings, targets, and the private API must
+    // 404 — not 302 to /login, not 401, not render the operator form
+    // (a phishing-friendly clone). The session cookie is host-scoped
+    // so this isn't a credential-hijack vector; it's a surface gate
+    // that keeps the operator UI single-host.
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let slug = unique_slug("isolate");
+    seed_org(&pool, &slug, true).await;
+    let (app, _default) = common::build_test_app_with_pg(pool, saas_subdomain).await;
+    let tenant_host = status_host(&slug);
+    let operator_host = format!("app.{BASE_DOMAIN}");
+
+    // Operator surface remains reachable on `app.{base}` — these
+    // assertions guard against the middleware over-firing.
+    assert_eq!(
+        get_path(&app, "/login", Some(&operator_host)).await,
+        StatusCode::OK,
+        "/login must still render on the operator host"
+    );
+
+    // All of these expose operator surface and MUST 404 on tenant hosts.
+    for path in [
+        "/login",
+        "/recover-account",
+        "/onboarding/org",
+        "/auth/github/login",
+        "/targets",
+        "/settings/account",
+        "/settings/sessions",
+        "/api/v1/targets",
+    ] {
+        assert_eq!(
+            get_path(&app, path, Some(&tenant_host)).await,
+            StatusCode::NOT_FOUND,
+            "{path} must 404 on tenant host (operator-surface leak)"
+        );
+    }
+
+    // Allow-list paths still resolve on tenant hosts. `/` rewrites to
+    // the public-status page; `/status` is the canonical public route.
+    assert_eq!(
+        get_path(&app, "/", Some(&tenant_host)).await,
+        StatusCode::OK,
+        "tenant host `/` must still serve the public page"
+    );
+    assert_eq!(
+        get_path(&app, "/status", Some(&tenant_host)).await,
+        StatusCode::OK,
+        "tenant host `/status` must still serve the public page"
+    );
+
+    // Health probes are exempt — Caddy active-health may carry an
+    // opaque Host that classifies as tenant, and 404ing it would mark
+    // the upstream down.
+    assert_eq!(
+        get_path(&app, "/healthz", Some(&tenant_host)).await,
+        StatusCode::OK,
+        "/healthz must bypass tenant isolation"
+    );
+}
+
+#[tokio::test]
+#[ignore]
 async fn root_routes_operator_host_to_dashboard_non_operator_slugs_to_404() {
     // The two security-relevant branches:
     //  * `app.{base_domain}` (operator label) → dashboard. No session cookie

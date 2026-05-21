@@ -14,8 +14,11 @@ pub mod observability;
 pub mod pipeline;
 pub mod public_status;
 pub mod quotas;
+pub mod router;
 pub mod scheduler;
 pub mod security;
 pub mod storage;
 pub mod web;
 pub mod worker;
+
+pub use router::{build_app_router, build_app_router_api_only};
