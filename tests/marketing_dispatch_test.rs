@@ -24,10 +24,14 @@ fn dispatch() -> RouteByHost {
 }
 
 async fn body_for(host: &str) -> (StatusCode, String) {
+    body_for_path("/", host).await
+}
+
+async fn body_for_path(path: &str, host: &str) -> (StatusCode, String) {
     let resp = dispatch()
         .oneshot(
             Request::builder()
-                .uri("/")
+                .uri(path)
                 .header(header::HOST, host)
                 .body(Body::empty())
                 .unwrap(),
@@ -93,4 +97,27 @@ async fn host_with_port_classifies_correctly() {
     assert_eq!(b, "marketing");
     let (_, b) = body_for("app.example.com:443").await;
     assert_eq!(b, "app");
+}
+
+#[tokio::test]
+async fn healthz_bypasses_classification() {
+    // `status-monitor:8080` classifies as Unknown — without the bypass
+    // Caddy's active health check would land on the marketing router
+    // (404) and mark the upstream down.
+    let (_, b) = body_for_path("/healthz", "status-monitor:8080").await;
+    assert_eq!(b, "app");
+}
+
+#[tokio::test]
+async fn readyz_bypasses_classification() {
+    let (_, b) = body_for_path("/readyz", "1.2.3.4").await;
+    assert_eq!(b, "app");
+}
+
+#[tokio::test]
+async fn non_health_path_on_unknown_host_still_goes_to_marketing() {
+    // The bypass is path-scoped — other paths on an Unknown host must
+    // still hand off to the marketing 404, not the app surface.
+    let (_, b) = body_for_path("/", "status-monitor:8080").await;
+    assert_eq!(b, "marketing");
 }

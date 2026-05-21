@@ -21,7 +21,10 @@ use crate::web::host::{HostClass, HostScheme, classify_host};
 /// `Host`. `Marketing` and `Unknown` go to the marketing router (so
 /// garbage hosts get a marketing 404 — they must NOT fall through to a
 /// tenant); `App` and `TenantPublic` go to the app router which already
-/// does per-host org resolution.
+/// does per-host org resolution. `/healthz` and `/readyz` short-circuit
+/// to the app router regardless of `Host` so opaque-Host probes (Caddy
+/// active health check, Docker healthcheck) can't mark the upstream
+/// down by hitting the marketing 404.
 #[derive(Clone)]
 pub struct RouteByHost {
     pub scheme: HostScheme,
@@ -40,6 +43,14 @@ impl Service<Request<Body>> for RouteByHost {
     }
 
     fn call(&mut self, req: Request<Body>) -> Self::Future {
+        // Probes use opaque Hosts (IP / container name → Unknown →
+        // marketing 404 → upstream marked down). Path is the stable
+        // signal; route health endpoints to the app regardless of Host.
+        let path = req.uri().path();
+        if path == "/healthz" || path == "/readyz" {
+            let mut svc = self.app.clone();
+            return Box::pin(async move { svc.call(req).await });
+        }
         let host = req
             .headers()
             .get(HOST)
