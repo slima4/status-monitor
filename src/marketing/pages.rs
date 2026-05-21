@@ -134,10 +134,7 @@ pub(crate) fn serve_cached(
     cached: &CachedRender,
     cache_control: &HeaderValue,
 ) -> Response {
-    if headers
-        .get(IF_NONE_MATCH)
-        .is_some_and(|v| v == &cached.etag)
-    {
+    if headers.get(IF_NONE_MATCH).is_some_and(|v| v == cached.etag) {
         return (
             StatusCode::NOT_MODIFIED,
             [

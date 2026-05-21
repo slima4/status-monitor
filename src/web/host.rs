@@ -106,7 +106,7 @@ pub fn classify_host(host: &str, scheme: &HostScheme) -> HostClass {
         if slug.is_empty() || slug.contains('.') {
             return HostClass::Unknown;
         }
-        if MARKETING_LABELS.iter().any(|l| slug == *l) {
+        if MARKETING_LABELS.contains(&slug) {
             return HostClass::Marketing;
         }
         if is_operator_label(slug) {
