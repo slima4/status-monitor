@@ -66,12 +66,12 @@ pub async fn list_sessions(
     let user = session.user.as_ref().ok_or(AppError::Unauthorized)?;
     let pool = state.db.as_ref().ok_or(AppError::Unauthorized)?;
     let rows = session_store::list_for_user(pool, user.id).await?;
-    let current = session.session_id.as_deref();
+    let current = session.session_id_hash.as_deref();
     Ok(Json(
         rows.into_iter()
             .map(|r| SessionView {
-                is_current: Some(r.id.as_str()) == current,
-                id: r.id,
+                is_current: Some(r.id_hash.as_str()) == current,
+                id: r.id_hash,
                 created_at: r.created_at,
                 last_used_at: r.last_used_at,
                 expires_at: r.expires_at,

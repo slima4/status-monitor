@@ -20,7 +20,7 @@
         <span class="status-badge status-badge--up">This device</span>
         {% else %}
         <button type="button"
-                hx-delete="/api/v1/me/sessions/{{ s.id }}"
+                hx-delete="/api/v1/me/sessions/{{ s.id_hash }}"
                 hx-headers='{"X-Requested-With":"status-monitor"}'
                 hx-target="#sessions-list"
                 hx-swap="innerHTML"

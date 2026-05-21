@@ -234,10 +234,10 @@ async fn fk_cascade_leaves_no_orphans() {
     .await
     .unwrap();
     sqlx::query(
-        "INSERT INTO sessions (id, user_id, expires_at) \
+        "INSERT INTO sessions (id_hash, user_id, expires_at) \
          VALUES ($1, $2, now() + INTERVAL '1 day')",
     )
-    .bind(format!("sess-{}", Uuid::new_v4().simple()))
+    .bind(format!("sess-hash-{}", Uuid::new_v4().simple()))
     .bind(user.0)
     .execute(&pool)
     .await

@@ -187,18 +187,43 @@ async fn session_create_lookup_destroy_round_trip() {
         .unwrap();
     let user = UserId(user_id);
     let cfg = SessionConfig::default();
-    let row = session_store::create(&pool, &cfg, user, None, Some("ip"), Some("ua"))
+    let created = session_store::create(&pool, &cfg, user, None, Some("ip"), Some("ua"))
         .await
         .expect("create");
-    assert_eq!(row.id.len(), 43);
+    assert_eq!(
+        created.cookie_token.len(),
+        43,
+        "cookie value is 43-char b64url"
+    );
+    assert_eq!(created.row.id.len(), 64, "id_hash is 64-char sha256 hex");
+    assert_ne!(
+        created.cookie_token, created.row.id,
+        "cookie value must not equal its DB hash"
+    );
 
-    let outcome = session_store::lookup(&pool, &cfg, &row.id).await.unwrap();
+    let outcome = session_store::lookup(&pool, &cfg, &created.cookie_token)
+        .await
+        .unwrap();
     assert!(matches!(outcome, session_store::LookupOutcome::Active(_)));
 
-    let removed = session_store::destroy(&pool, &row.id).await.unwrap();
+    // Sanity: presenting the hash as the cookie must NOT log in — only the raw
+    // pre-hash secret should match the row, otherwise hashing buys nothing.
+    let hash_as_cookie = session_store::lookup(&pool, &cfg, &created.row.id)
+        .await
+        .unwrap();
+    assert!(matches!(
+        hash_as_cookie,
+        session_store::LookupOutcome::Missing
+    ));
+
+    let removed = session_store::destroy(&pool, &created.cookie_token)
+        .await
+        .unwrap();
     assert_eq!(removed, 1);
 
-    let missing = session_store::lookup(&pool, &cfg, &row.id).await.unwrap();
+    let missing = session_store::lookup(&pool, &cfg, &created.cookie_token)
+        .await
+        .unwrap();
     assert!(matches!(missing, session_store::LookupOutcome::Missing));
 
     pool.close().await;
@@ -221,25 +246,30 @@ async fn session_lookup_destroys_idle_expired() {
         .unwrap();
     let user = UserId(user_id);
 
-    // Hand-craft a row whose last_used_at is older than 30 days but
-    // expires_at is still future, so idle-timeout fires.
-    let session_id = "idle-fake-id".to_string();
+    // Mint a real session, then backdate `last_used_at` past the idle window
+    // so lookup must reap it. Going through `create` keeps the test honest:
+    // a hand-crafted id would have to pre-hash the cookie value to match the
+    // new schema, and that's exactly the production codepath we want to
+    // exercise.
+    let cfg = SessionConfig::default();
+    let created = session_store::create(&pool, &cfg, user, None, None, None)
+        .await
+        .expect("create");
     sqlx::query(
-        "INSERT INTO sessions (id, user_id, last_used_at, expires_at) \
-         VALUES ($1, $2, now() - INTERVAL '40 days', now() + INTERVAL '50 days')",
+        "UPDATE sessions SET last_used_at = now() - INTERVAL '40 days' \
+         WHERE id_hash = $1",
     )
-    .bind(&session_id)
-    .bind(user.0)
+    .bind(&created.row.id)
     .execute(&pool)
     .await
     .unwrap();
 
-    let outcome = session_store::lookup(&pool, &SessionConfig::default(), &session_id)
+    let outcome = session_store::lookup(&pool, &cfg, &created.cookie_token)
         .await
         .unwrap();
     assert!(matches!(outcome, session_store::LookupOutcome::Expired));
-    let (rows,): (i64,) = sqlx::query_as("SELECT count(*) FROM sessions WHERE id = $1")
-        .bind(&session_id)
+    let (rows,): (i64,) = sqlx::query_as("SELECT count(*) FROM sessions WHERE id_hash = $1")
+        .bind(&created.row.id)
         .fetch_one(&pool)
         .await
         .unwrap();
@@ -265,28 +295,30 @@ async fn session_touch_debounced_writes_at_most_once_per_window() {
         .unwrap();
     let user = UserId(user_id);
     let cfg = SessionConfig::default();
-    let row = session_store::create(&pool, &cfg, user, None, None, None)
+    let created = session_store::create(&pool, &cfg, user, None, None, None)
         .await
         .expect("create");
 
     // Backdate last_used_at so the first touch produces a measurable bump.
-    sqlx::query("UPDATE sessions SET last_used_at = now() - INTERVAL '5 minutes' WHERE id = $1")
-        .bind(&row.id)
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        "UPDATE sessions SET last_used_at = now() - INTERVAL '5 minutes' WHERE id_hash = $1",
+    )
+    .bind(&created.row.id)
+    .execute(&pool)
+    .await
+    .unwrap();
 
     let debounce = session_store::build_debounce_cache();
     for _ in 0..5 {
-        session_store::touch_last_used_debounced(&pool, &debounce, &row.id)
+        session_store::touch_last_used_debounced(&pool, &debounce, &created.row.id)
             .await
             .unwrap();
     }
 
     // Within the window, exactly one UPDATE should have run.
     let (last_used,): (chrono::DateTime<Utc>,) =
-        sqlx::query_as("SELECT last_used_at FROM sessions WHERE id = $1")
-            .bind(&row.id)
+        sqlx::query_as("SELECT last_used_at FROM sessions WHERE id_hash = $1")
+            .bind(&created.row.id)
             .fetch_one(&pool)
             .await
             .unwrap();
@@ -475,15 +507,23 @@ async fn session_fixation_pattern_destroys_pre_login_session() {
         .unwrap();
 
     // Callback: destroy the cookie's session id, then mint a fresh one.
-    let removed = session_store::destroy(&pool, &pre.id).await.unwrap();
+    let removed = session_store::destroy(&pool, &pre.cookie_token)
+        .await
+        .unwrap();
     assert_eq!(removed, 1, "pre-login session must be destroyed");
 
     let post = session_store::create(&pool, &cfg, user, None, None, None)
         .await
         .unwrap();
-    assert_ne!(pre.id, post.id, "regenerated id must differ");
+    assert_ne!(
+        pre.cookie_token, post.cookie_token,
+        "regenerated cookie must differ"
+    );
+    assert_ne!(pre.row.id, post.row.id, "regenerated id_hash must differ");
 
-    let pre_lookup = session_store::lookup(&pool, &cfg, &pre.id).await.unwrap();
+    let pre_lookup = session_store::lookup(&pool, &cfg, &pre.cookie_token)
+        .await
+        .unwrap();
     assert!(
         matches!(pre_lookup, session_store::LookupOutcome::Missing),
         "old session must not be revivable"

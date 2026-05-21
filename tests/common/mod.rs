@@ -409,7 +409,7 @@ pub fn with_session(
             email: format!("u-{}@test.example", user.0),
         }),
         active_org_id: org,
-        session_id: session_id.map(str::to_owned),
+        session_id_hash: session_id.map(str::to_owned),
     }))
 }
 

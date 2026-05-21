@@ -9,11 +9,13 @@ ALTER TABLE users
     ADD COLUMN email_verified_at TIMESTAMPTZ,
     ADD COLUMN last_seen_at      TIMESTAMPTZ;
 
--- DB-backed sessions: cookie id => user + active org. Lookup happens on every
--- authenticated request; both an idle timeout and an absolute expiry are
--- checked.
+-- DB-backed sessions: cookie hash => user + active org. Lookup happens on
+-- every authenticated request; both an idle timeout and an absolute expiry
+-- are checked. `id_hash` is the SHA-256 of the cookie value (see
+-- `auth::session::hash_session_id`) — storing the raw cookie would let a
+-- `sessions`-table leak be replayed as live cookies.
 CREATE TABLE sessions (
-    id              TEXT PRIMARY KEY,
+    id_hash         TEXT PRIMARY KEY,
     user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     active_org_id   UUID REFERENCES organizations(id) ON DELETE SET NULL,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),

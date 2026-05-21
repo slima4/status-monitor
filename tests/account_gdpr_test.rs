@@ -144,9 +144,9 @@ async fn deletion_then_recovery_round_trip() {
     let uid = status_monitor::domain::UserId(user);
     let org = seed_org(&pool, "solo-org", user).await;
     sqlx::query(
-        "INSERT INTO sessions (id, user_id, expires_at) VALUES ($1, $2, now() + interval '1 day')",
+        "INSERT INTO sessions (id_hash, user_id, expires_at) VALUES ($1, $2, now() + interval '1 day')",
     )
-    .bind("sess-1")
+    .bind("sess-1-hash")
     .bind(user)
     .execute(&pool)
     .await

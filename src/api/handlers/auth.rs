@@ -139,7 +139,7 @@ pub async fn github_callback(
         tracing::warn!(error = %err, "session fixation: pre-login destroy failed");
     }
 
-    let session_row = session_store::create(
+    let created = session_store::create(
         pool,
         &state.cfg.auth.session,
         resolved.user_id,
@@ -168,7 +168,7 @@ pub async fn github_callback(
 
     cookies.add(session_store::build_cookie(
         &state.cfg.auth.session,
-        session_row.id.clone(),
+        created.cookie_token,
     ));
 
     let redirect = if resolved.is_new_user {

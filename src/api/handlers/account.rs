@@ -521,7 +521,7 @@ pub async fn recover_account(
         tracing::warn!(error = %err, "recover: pre-existing session destroy failed");
     }
 
-    let session_row = session_store::create(
+    let created = session_store::create(
         pool,
         &state.cfg.auth.session,
         outcome.user_id,
@@ -549,7 +549,7 @@ pub async fn recover_account(
 
     cookies.add(session_store::build_cookie(
         &state.cfg.auth.session,
-        session_row.id.clone(),
+        created.cookie_token,
     ));
 
     Ok(Json(RecoveredAccount {

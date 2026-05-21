@@ -89,7 +89,7 @@ async fn purges_past_window_and_keeps_fresh_rows() {
     // sessions: absolute-expired, idle-expired (alive absolute), and fresh.
     let sid = |k: &str| format!("{marker}-{k}");
     sqlx::query(
-        "INSERT INTO sessions (id, user_id, expires_at, last_used_at) \
+        "INSERT INTO sessions (id_hash, user_id, expires_at, last_used_at) \
          VALUES ($1, $2, now() - INTERVAL '1 day', now())",
     )
     .bind(sid("expired"))
@@ -98,7 +98,7 @@ async fn purges_past_window_and_keeps_fresh_rows() {
     .await
     .expect("insert expired session");
     sqlx::query(
-        "INSERT INTO sessions (id, user_id, expires_at, last_used_at) \
+        "INSERT INTO sessions (id_hash, user_id, expires_at, last_used_at) \
          VALUES ($1, $2, now() + INTERVAL '30 days', now() - INTERVAL '60 days')",
     )
     .bind(sid("idle"))
@@ -107,7 +107,7 @@ async fn purges_past_window_and_keeps_fresh_rows() {
     .await
     .expect("insert idle session");
     sqlx::query(
-        "INSERT INTO sessions (id, user_id, expires_at, last_used_at) \
+        "INSERT INTO sessions (id_hash, user_id, expires_at, last_used_at) \
          VALUES ($1, $2, now() + INTERVAL '30 days', now())",
     )
     .bind(sid("fresh"))
@@ -158,7 +158,7 @@ async fn purges_past_window_and_keeps_fresh_rows() {
     assert_eq!(
         scalar_i64(
             &pool,
-            "SELECT count(*) FROM sessions WHERE id LIKE $1 || '%'",
+            "SELECT count(*) FROM sessions WHERE id_hash LIKE $1 || '%'",
             &marker
         )
         .await,
@@ -171,7 +171,7 @@ async fn purges_past_window_and_keeps_fresh_rows() {
         .bind(&marker)
         .execute(&pool)
         .await;
-    let _ = sqlx::query("DELETE FROM sessions WHERE id LIKE $1 || '%'")
+    let _ = sqlx::query("DELETE FROM sessions WHERE id_hash LIKE $1 || '%'")
         .bind(&marker)
         .execute(&pool)
         .await;

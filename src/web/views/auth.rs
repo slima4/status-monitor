@@ -252,7 +252,9 @@ pub mod settings {
     }
 
     pub struct SessionRow {
-        pub id: String,
+        /// SHA-256 hex of the cookie. Surfaced into the revoke form URL —
+        /// safe because the cookie's 256-bit pre-image can't be derived.
+        pub id_hash: String,
         pub created: String,
         pub last_used: String,
         pub expires: String,
@@ -360,7 +362,7 @@ pub mod settings {
         };
         let pool = state.require_db()?;
         let rows = session_store::list_for_user(pool, user.id).await?;
-        let current = session.session_id.as_deref();
+        let current = session.session_id_hash.as_deref();
         let sessions = rows
             .into_iter()
             .map(|r| SessionRow {
@@ -368,8 +370,8 @@ pub mod settings {
                 created: fmt_human(r.created_at),
                 last_used: fmt_human(r.last_used_at),
                 expires: fmt_human(r.expires_at),
-                is_current: Some(r.id.as_str()) == current,
-                id: r.id,
+                is_current: Some(r.id_hash.as_str()) == current,
+                id_hash: r.id_hash,
             })
             .collect();
         Ok(SessionsPartial { sessions }.into_response())
@@ -767,7 +769,7 @@ pub mod settings {
         fn sessions_partial_marks_current_session() {
             let html = SessionsPartial {
                 sessions: vec![SessionRow {
-                    id: "abc".into(),
+                    id_hash: "abc".into(),
                     created: "now".into(),
                     last_used: "now".into(),
                     expires: "soon".into(),

@@ -68,9 +68,12 @@ pub struct Session {
     /// Active org selected by the user via the org picker, or set by signup.
     /// `None` means "fall back to my default org" (oldest active membership).
     pub active_org_id: Option<OrgId>,
-    /// Present iff this Session was constructed by the cookie path. Handlers
-    /// that need to destroy or rotate the session (logout) reach for this.
-    pub session_id: Option<String>,
+    /// SHA-256 hash of the cookie value (matches `sessions.id_hash`). Present
+    /// iff this Session was constructed by the cookie path. Compared with
+    /// `SessionListing.id_hash` to mark "this device" and used by targeted
+    /// revoke. Never the raw cookie — that only lives in the request's
+    /// `Set-Cookie` header.
+    pub session_id_hash: Option<String>,
 }
 
 impl Session {
@@ -88,7 +91,7 @@ pub enum AuthContext {
     /// chose via the org picker; falls back to their default org.
     Session {
         user_id: UserId,
-        session_id: String,
+        session_id_hash: String,
         active_org_id: Option<OrgId>,
     },
     /// `Authorization: Bearer sm_live_…`. No active org — handlers reach for
@@ -148,7 +151,7 @@ where
                 Ok(Session {
                     user,
                     active_org_id: row.active_org_id,
-                    session_id: Some(row.id),
+                    session_id_hash: Some(row.id),
                 })
             }
             Ok(session_store::LookupOutcome::Expired) => {

@@ -217,10 +217,10 @@ async fn auth_tables_accept_representative_inserts() {
             .get(0);
 
     sqlx::query(
-        "INSERT INTO sessions (id, user_id, active_org_id, expires_at) \
+        "INSERT INTO sessions (id_hash, user_id, active_org_id, expires_at) \
          VALUES ($1, $2, $3, $4)",
     )
-    .bind("sess-fake-id")
+    .bind("sess-fake-id-hash")
     .bind(user_id)
     .bind(org_id)
     .bind(Utc::now() + chrono::Duration::days(90))
