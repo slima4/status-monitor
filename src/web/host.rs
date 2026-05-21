@@ -91,30 +91,77 @@ pub enum HostClass {
     Unknown,
 }
 
-/// Classify a request's `Host` header against the production wire
-/// format. The caller strips the port; this is host-only.
-pub fn classify_host(host: &str, scheme: &HostScheme) -> HostClass {
+/// Pure structural decomposition of a `Host` header against `{base_domain}`.
+/// Single source of truth for shape rules (port strip, FQDN trailing dot,
+/// case-insensitive suffix match, single-label slug). Both the UI router
+/// taxonomy (`classify_host`) and the dispatch-policy predicates
+/// (`extract_status_slug`, `is_subdomain_public_request`) build on this so
+/// they can never drift on what "a tenant subdomain" means.
+///
+/// Borrows the slug out of the input — no allocation on the hot path.
+/// Case is preserved; consumers use `eq_ignore_ascii_case` for label
+/// comparisons.
+#[derive(Debug, PartialEq, Eq)]
+pub enum HostShape<'a> {
+    /// Host equals `base_domain` itself (the apex).
+    Apex,
+    /// Host matches `{slug}.{base_domain}` with a single, non-empty label.
+    Subdomain(&'a str),
+    /// Anything else — unrelated host, deeper subdomain, empty slug, or
+    /// malformed `base_domain`.
+    Other,
+}
+
+/// Strip port + FQDN trailing dot, then classify against `base_domain`
+/// with a case-insensitive byte compare. Returns borrowed views — no
+/// per-request allocation. Rejects an empty / single-label base domain
+/// so a misconfigured rig can't widen the suffix match.
+pub fn parse_host_shape<'a>(host: &'a str, base_domain: &str) -> HostShape<'a> {
+    if base_domain.is_empty() || !base_domain.contains('.') {
+        return HostShape::Other;
+    }
     let host = host.split(':').next().unwrap_or(host);
-    let host = host.strip_suffix('.').unwrap_or(host).to_ascii_lowercase();
-    if host == scheme.apex {
-        return HostClass::Marketing;
+    let host = host.strip_suffix('.').unwrap_or(host);
+    if host.eq_ignore_ascii_case(base_domain) {
+        return HostShape::Apex;
     }
-    if host == scheme.app_host {
-        return HostClass::App;
+    // Manual case-insensitive `.{base_domain}` suffix strip without
+    // allocating a lowercased copy.
+    let dot_base_len = base_domain.len() + 1;
+    if host.len() <= dot_base_len {
+        return HostShape::Other;
     }
-    if let Some(slug) = host.strip_suffix(&scheme.tenant_suffix) {
-        if slug.is_empty() || slug.contains('.') {
-            return HostClass::Unknown;
-        }
-        if MARKETING_LABELS.contains(&slug) {
-            return HostClass::Marketing;
-        }
-        if is_operator_label(slug) {
-            return HostClass::App;
-        }
-        return HostClass::TenantPublic;
+    let (head, tail) = host.split_at(host.len() - dot_base_len);
+    if !tail.starts_with('.') || !tail[1..].eq_ignore_ascii_case(base_domain) {
+        return HostShape::Other;
     }
-    HostClass::Unknown
+    if head.is_empty() || head.contains('.') {
+        return HostShape::Other;
+    }
+    HostShape::Subdomain(head)
+}
+
+/// Classify a request's `Host` header against the production wire
+/// format. Builds on [`parse_host_shape`] so shape rules stay in one
+/// place; this layer only maps `(Apex | Subdomain | Other)` plus the
+/// label sets to the router taxonomy.
+pub fn classify_host(host: &str, scheme: &HostScheme) -> HostClass {
+    match parse_host_shape(host, &scheme.base_domain) {
+        HostShape::Apex => HostClass::Marketing,
+        HostShape::Other => HostClass::Unknown,
+        HostShape::Subdomain(slug) => {
+            if MARKETING_LABELS
+                .iter()
+                .any(|l| slug.eq_ignore_ascii_case(l))
+            {
+                HostClass::Marketing
+            } else if is_operator_label(slug) {
+                HostClass::App
+            } else {
+                HostClass::TenantPublic
+            }
+        }
+    }
 }
 
 /// Parsed `{slug}.{base_domain}` host. Borrows the slug out of the `Host`
@@ -134,24 +181,10 @@ pub struct StatusPageHost<'a> {
 /// this is the second layer of defence so a misconfigured dev/test rig can't
 /// extract slugs from arbitrary hosts.
 pub fn extract_status_slug<'a>(host: &'a str, base_domain: &str) -> Option<StatusPageHost<'a>> {
-    if base_domain.is_empty() || !base_domain.contains('.') {
-        return None;
+    match parse_host_shape(host, base_domain) {
+        HostShape::Subdomain(slug) => Some(StatusPageHost { slug }),
+        _ => None,
     }
-    // FQDN form: RFC 1034 allows a trailing dot (`acme.example.com.`).
-    // Browsers strip it before display but a crafted curl/script can send
-    // it. Without this normalisation, the suffix match would fail and the
-    // request would fall through to the operator dashboard — exposing the
-    // operator surface on what looks like a tenant host.
-    let host = host.strip_suffix('.').unwrap_or(host);
-    // Equivalent to stripping `".{base_domain}"` but without the per-request
-    // `format!` allocation — this runs on every anonymous subdomain request.
-    let slug = host.strip_suffix(base_domain)?.strip_suffix('.')?;
-    // Reject the bare `{base_domain}` (empty slug) and any deeper subdomain
-    // (a remaining dot means `a.b.{base_domain}`).
-    if slug.is_empty() || slug.contains('.') {
-        return None;
-    }
-    Some(StatusPageHost { slug })
 }
 
 /// The org a public-status request should be served from. Construct only via
@@ -185,9 +218,8 @@ pub async fn resolve_status_page_org(
         .get(HOST)
         .and_then(|h| h.to_str().ok())
         .ok_or(PublicAppError::NotFound)?;
-    // Strip the port; `extract_status_slug` matches host names only.
-    let host = host.split(':').next().unwrap_or(host);
-
+    // `extract_status_slug` (via `parse_host_shape`) handles port + FQDN
+    // dot stripping centrally — no need to pre-normalise.
     let parsed = extract_status_slug(host, &state.cfg.public_status.base_domain)
         .ok_or(PublicAppError::NotFound)?;
 
@@ -245,20 +277,16 @@ pub fn is_subdomain_public_request(state: &AppState, headers: &HeaderMap) -> boo
     let Some(host) = headers.get(HOST).and_then(|h| h.to_str().ok()) else {
         return false;
     };
-    // Strip port + trailing FQDN dot the same way `classify_host` does so
-    // `acme.example.com:443` and `acme.example.com.` route identically.
-    let host = host.split(':').next().unwrap_or(host);
-    let host = host.strip_suffix('.').unwrap_or(host).to_ascii_lowercase();
     // Slug-shaped non-operator hosts (including `www` and any marketing
     // label) belong on the public dispatcher — even when the upstream
     // marketing router isn't wired up. Routing them to the operator `/`
     // dashboard would expose the login surface on attacker-controlled
     // labels (`admin.{base}`, `www.{base}`). When marketing IS enabled,
     // `RouteByHost` intercepts those hosts before this code runs.
-    let Some(parsed) = extract_status_slug(&host, &state.cfg.public_status.base_domain) else {
-        return false;
-    };
-    !is_operator_label(parsed.slug)
+    match parse_host_shape(host, &state.cfg.public_status.base_domain) {
+        HostShape::Subdomain(slug) => !is_operator_label(slug),
+        _ => false,
+    }
 }
 
 #[cfg(test)]
@@ -310,12 +338,25 @@ mod tests {
     }
 
     #[test]
-    fn caller_must_strip_port_before_calling() {
-        // The extractor strips the port; the pure parser does not, so a
-        // host carrying `:443` is (correctly) not a match here.
+    fn extract_strips_port() {
+        // `parse_host_shape` handles port stripping centrally, so the
+        // status-slug extractor inherits that and `acme.example.com:443`
+        // parses identically to the bare host.
         assert_eq!(
             extract_status_slug("acme.example.com:443", "example.com"),
-            None
+            Some(StatusPageHost { slug: "acme" })
+        );
+    }
+
+    #[test]
+    fn extract_is_case_insensitive_on_base_domain() {
+        // RFC: hostnames are case-insensitive. `parse_host_shape`
+        // compares the base-domain suffix with `eq_ignore_ascii_case`,
+        // so `ACME.EXAMPLE.COM` still parses. Slug case is preserved
+        // (downstream DB lookup decides how to fold it).
+        assert_eq!(
+            extract_status_slug("ACME.EXAMPLE.COM", "example.com"),
+            Some(StatusPageHost { slug: "ACME" })
         );
     }
 
@@ -335,6 +376,52 @@ mod tests {
         // Trailing dot on the base domain alone — must NOT collapse into a
         // valid (empty-slug) parse.
         assert_eq!(extract_status_slug("example.com.", "example.com"), None);
+    }
+
+    #[test]
+    fn host_shape_apex() {
+        assert_eq!(
+            parse_host_shape("example.com", "example.com"),
+            HostShape::Apex
+        );
+        // Trailing dot + port + uppercase all collapse to the same Apex
+        // verdict — that's the property both consumers depend on.
+        assert_eq!(
+            parse_host_shape("Example.COM.:443", "example.com"),
+            HostShape::Apex
+        );
+    }
+
+    #[test]
+    fn host_shape_subdomain_borrows_slug() {
+        assert_eq!(
+            parse_host_shape("acme.example.com", "example.com"),
+            HostShape::Subdomain("acme")
+        );
+    }
+
+    #[test]
+    fn host_shape_other_for_garbage() {
+        assert_eq!(parse_host_shape("", "example.com"), HostShape::Other);
+        assert_eq!(
+            parse_host_shape("acme.other.com", "example.com"),
+            HostShape::Other
+        );
+        assert_eq!(
+            parse_host_shape("a.b.example.com", "example.com"),
+            HostShape::Other
+        );
+        assert_eq!(
+            parse_host_shape(".example.com", "example.com"),
+            HostShape::Other
+        );
+    }
+
+    #[test]
+    fn host_shape_rejects_malformed_base_domain() {
+        // Empty / single-label bases must never widen the suffix match.
+        assert_eq!(parse_host_shape("foo.local", "local"), HostShape::Other);
+        assert_eq!(parse_host_shape("foo", ""), HostShape::Other);
     }
 
     fn scheme() -> HostScheme {
