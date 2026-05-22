@@ -1,0 +1,28 @@
+id: org-audit-single-writer
+language: rust
+severity: error
+message: |-
+  Only `storage::orgs::record_audit_tx` may write `org_audit_log`. The
+  table's compliance contract is "every row commits with its data
+  change"; any other writer (raw SQL, fire-and-forget tokio::spawn,
+  helper-of-a-helper) breaks the atomicity guarantee silently and shifts
+  hidden semantics into the table.
+note: |-
+  Allowed:    storage::orgs::record_audit_tx(&mut tx, ...)
+  Forbidden:  sqlx::query("INSERT INTO org_audit_log ...")
+              sqlx::query_as("... INSERT INTO org_audit_log RETURNING ...")
+  Best-effort observability events (rate-limit hits, quota blocks) go to
+  `quota_events` via `quotas::service::record_quota_event` instead — a
+  different table with a different durability contract by design.
+rule:
+  any:
+    - kind: raw_string_literal
+    - kind: string_literal
+  regex: "(?is)INSERT\\s+INTO\\s+org_audit_log\\b"
+  not:
+    inside:
+      kind: function_item
+      has:
+        field: name
+        regex: "^record_audit_tx$"
+      stopBy: end

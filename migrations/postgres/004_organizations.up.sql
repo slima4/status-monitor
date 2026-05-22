@@ -47,6 +47,9 @@ CREATE TABLE memberships (
 CREATE INDEX idx_memberships_org ON memberships(org_id);
 CREATE INDEX idx_memberships_user ON memberships(user_id);
 
+-- Compliance-grade audit trail. Every row is written in-transaction with
+-- its data change via `storage::orgs::record_audit_tx` (the single writer,
+-- fenced by `scripts/sg-rules/org_audit_single_writer.yml`).
 CREATE TABLE org_audit_log (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     org_id      UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,

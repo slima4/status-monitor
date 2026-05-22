@@ -97,8 +97,11 @@ CREATE TABLE plan_overrides (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Append-only audit of quota / rate-limit / abuse events. Retention is 90
--- days, purged by the existing daily job pattern in a later phase.
+-- Best-effort observability stream of quota / rate-limit / abuse events.
+-- Written fire-and-forget by `quotas::service::record_quota_event`; rows
+-- can be lost under DB pressure by design (a failed audit insert must
+-- never turn a clean 422 / 429 into a 500). Readers must treat this as a
+-- sample, not an authoritative trail.
 CREATE TABLE quota_events (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     org_id          UUID REFERENCES organizations(id) ON DELETE CASCADE,

@@ -435,8 +435,22 @@ impl QuotaService {
     }
 }
 
-/// Shared fire-and-forget writer used by quota checks and the rate-limit
-/// middleware. No-op without a DB.
+/// Append a best-effort row to `quota_events`.
+///
+/// Fire-and-forget by design: the rate-limit reject path is already-hot
+/// and already-degraded; a failing INSERT here must never escalate into
+/// the user's response. Callers therefore get no return value and the
+/// only failure handling is a `warn!` log line.
+///
+/// **Durability contract:** `quota_events` is the high-volume
+/// observability stream — rate-limit hits, quota blocks, abuse rejects.
+/// Under DB pressure (the exact condition rate-limit blocks happen
+/// most often) some rows can be lost. Readers must treat the table as a
+/// best-effort sample, never as an authoritative audit trail.
+///
+/// Compliance-grade audit (GDPR DSR, SOC2) goes to `org_audit_log` via
+/// [`crate::storage::orgs::record_audit_tx`] — a different table with a
+/// different durability contract, by design.
 pub fn record_quota_event(
     db: Option<PgPool>,
     org: Option<OrgId>,

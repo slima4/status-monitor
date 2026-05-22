@@ -1065,6 +1065,23 @@ pub struct MemberView {
     pub email: String,
 }
 
+/// Append an atomic row to the compliance-grade `org_audit_log`.
+///
+/// This is the **only** writer to `org_audit_log`. The `&mut Transaction`
+/// signature is load-bearing: the audit row commits with its data change,
+/// so a reader of the log reads exactly the state transitions that
+/// actually happened. The downstream contract — GDPR DSR exports, SOC2
+/// trails, "who renamed this org" queries — depends on every row being
+/// present and atomic with its mutation.
+///
+/// Do not call from `tokio::spawn`, do not fire-and-forget, do not write
+/// to `org_audit_log` from anywhere else. High-volume best-effort events
+/// (rate-limit hits, quota blocks) go to `quota_events` via
+/// [`crate::quotas::service::record_quota_event`] — a different table
+/// with a different durability contract, by design.
+///
+/// The single-writer invariant is fenced in
+/// `scripts/sg-rules/org_audit_single_writer.yml`.
 pub(crate) async fn record_audit_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     org: OrgId,
