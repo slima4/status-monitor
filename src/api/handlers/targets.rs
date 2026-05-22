@@ -233,6 +233,11 @@ pub async fn update(
         validate_alerts(alerts)?;
         verify_alert_channels(&state, org, alerts).await?;
     }
+    validate_public_target_field_updates(
+        update.public_name.as_ref(),
+        update.public_description.as_ref(),
+        update.public_group.as_ref(),
+    )?;
     // The check-interval floor applies to PATCH too — otherwise a target
     // created at the floor could be lowered below it, evading the plan.
     if let Some(interval) = update.interval {
@@ -596,7 +601,51 @@ fn validate_new_target(new: &NewTarget, guard: &SsrfGuard, min_interval_secs: i6
         ));
     }
     validate_check(&new.check, guard)?;
-    validate_alerts(&new.alerts)
+    validate_alerts(&new.alerts)?;
+    validate_public_target_fields(
+        new.public_name.as_deref(),
+        new.public_description.as_deref(),
+        new.public_group.as_deref(),
+    )
+}
+
+/// Length-cap the public_name / public_description / public_group columns
+/// that render onto the status page. The HTTP body limit (64 KiB single,
+/// 8 MiB bulk) stops a single giant blob, but without per-field caps an
+/// owner with a large `max_targets` quota could still bloat the rendered
+/// status page by stuffing every target with the largest blob the body
+/// limit allows.
+fn validate_public_target_fields(
+    name: Option<&str>,
+    description: Option<&str>,
+    group: Option<&str>,
+) -> Result<()> {
+    use crate::api::handlers::validation;
+    if let Some(n) = name {
+        validation::validate_title(n, "public_name")?;
+    }
+    validation::validate_description(description, "public_description")?;
+    if let Some(g) = group {
+        validation::check_length(g, "public_group", 50, codes::GROUP_TOO_LONG)?;
+    }
+    Ok(())
+}
+
+/// Update-path variant: extract the inner `&str` from `Option<&Option<String>>`
+/// (skipping clears and omissions) and run the same caps.
+fn validate_public_target_field_updates(
+    name: Option<&Option<String>>,
+    description: Option<&Option<String>>,
+    group: Option<&Option<String>>,
+) -> Result<()> {
+    validate_public_target_fields(unset(name), unset(description), unset(group))
+}
+
+/// `Some(Some(s)) → Some(s)`; otherwise `None`. PATCH bodies model
+/// "untouched" vs "clear to null" vs "set to value" with a double Option;
+/// validation only runs on the set case.
+fn unset(opt: Option<&Option<String>>) -> Option<&str> {
+    opt.and_then(|inner| inner.as_deref())
 }
 
 /// Structural-only (no I/O): each binding's `after_failures` floor. The bound
@@ -824,4 +873,67 @@ fn check_ip(ip: IpAddr, guard: &SsrfGuard) -> Result<()> {
     guard.check(ip).map_err(|err| {
         AppError::bad_request_field(codes::SSRF_BLOCKED, err.to_string(), "check.url")
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::api::handlers::validation::{MAX_DESCRIPTION, MAX_TITLE};
+
+    fn assert_bad_request_with_field(err: AppError, expected_field: &str) {
+        match err {
+            AppError::BadRequest { field: Some(f), .. } => assert_eq!(f, expected_field),
+            other => panic!("expected BadRequest with field={expected_field}, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn validate_public_target_fields_accepts_none() {
+        validate_public_target_fields(None, None, None).expect("all-None must pass");
+    }
+
+    #[test]
+    fn validate_public_target_fields_accepts_normal_values() {
+        validate_public_target_fields(Some("API"), Some("Public endpoint"), Some("Web"))
+            .expect("normal values must pass");
+    }
+
+    #[test]
+    fn validate_public_target_fields_rejects_oversized_name() {
+        let big = "x".repeat(MAX_TITLE + 1);
+        let err = validate_public_target_fields(Some(&big), None, None)
+            .expect_err("over-cap must reject");
+        assert_bad_request_with_field(err, "public_name");
+    }
+
+    #[test]
+    fn validate_public_target_fields_rejects_oversized_description() {
+        let big = "x".repeat(MAX_DESCRIPTION + 1);
+        let err = validate_public_target_fields(None, Some(&big), None)
+            .expect_err("over-cap must reject");
+        assert_bad_request_with_field(err, "public_description");
+    }
+
+    #[test]
+    fn validate_public_target_fields_rejects_oversized_group() {
+        let big = "x".repeat(51);
+        let err = validate_public_target_fields(None, None, Some(&big))
+            .expect_err("over-cap must reject");
+        assert_bad_request_with_field(err, "public_group");
+    }
+
+    #[test]
+    fn validate_public_target_field_updates_passes_clears() {
+        // Some(None) is a clear; no length check needed.
+        validate_public_target_field_updates(Some(&None), Some(&None), Some(&None))
+            .expect("clears must pass");
+    }
+
+    #[test]
+    fn validate_public_target_field_updates_rejects_oversized_set() {
+        let big = Some("x".repeat(MAX_DESCRIPTION + 1));
+        let err = validate_public_target_field_updates(None, Some(&big), None)
+            .expect_err("over-cap set must reject");
+        assert_bad_request_with_field(err, "public_description");
+    }
 }

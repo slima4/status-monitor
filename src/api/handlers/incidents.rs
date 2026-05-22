@@ -43,8 +43,11 @@ pub async fn update_incident_narration(
     Path(id): Path<Uuid>,
     Json(update): Json<IncidentNarrationUpdate>,
 ) -> Result<Json<Incident>> {
-    validate_optional_title(update.public_title.as_ref())?;
-    validate_optional_description(update.public_description.as_ref())?;
+    validation::validate_optional_title(update.public_title.as_ref(), "public_title")?;
+    validation::validate_optional_description(
+        update.public_description.as_ref(),
+        "public_description",
+    )?;
     match state
         .incident_narration_store
         .patch_narration(id, update)
@@ -102,35 +105,21 @@ pub async fn post_incident_update(
     ))
 }
 
-// ── Validation ──────────────────────────────────────────────────────────
-
-/// Double-Option-aware title validator: leaves missing and null fields alone,
-/// rejects whitespace as `EMPTY_TITLE`, length-checks present strings.
-/// Whitespace is *not* a clear request — callers should send JSON `null`.
-fn validate_optional_title(title: Option<&Option<String>>) -> Result<()> {
-    let Some(Some(t)) = title else { return Ok(()) };
-    validation::validate_title(t, "public_title")
-}
-
-fn validate_optional_description(desc: Option<&Option<String>>) -> Result<()> {
-    let Some(Some(d)) = desc else { return Ok(()) };
-    validation::validate_description(Some(d), "public_description")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use validation::{validate_optional_description, validate_optional_title};
 
     #[test]
     fn empty_title_rejected_only_when_explicit_value() {
         // null clears — allowed
-        assert!(validate_optional_title(Some(&None)).is_ok());
+        assert!(validate_optional_title(Some(&None), "public_title").is_ok());
         // missing — allowed
-        assert!(validate_optional_title(None).is_ok());
+        assert!(validate_optional_title(None, "public_title").is_ok());
         // whitespace — rejected
         let bad = Some("   ".to_string());
         assert!(matches!(
-            validate_optional_title(Some(&bad)),
+            validate_optional_title(Some(&bad), "public_title"),
             Err(AppError::BadRequest { code, .. }) if code == codes::EMPTY_TITLE
         ));
     }
@@ -139,8 +128,17 @@ mod tests {
     fn title_length_capped() {
         let bad = Some("x".repeat(validation::MAX_TITLE + 1));
         assert!(matches!(
-            validate_optional_title(Some(&bad)),
+            validate_optional_title(Some(&bad), "public_title"),
             Err(AppError::BadRequest { code, .. }) if code == codes::TITLE_TOO_LONG
+        ));
+    }
+
+    #[test]
+    fn description_length_capped() {
+        let bad = Some("x".repeat(validation::MAX_DESCRIPTION + 1));
+        assert!(matches!(
+            validate_optional_description(Some(&bad), "public_description"),
+            Err(AppError::BadRequest { code, .. }) if code == codes::DESCRIPTION_TOO_LONG
         ));
     }
 

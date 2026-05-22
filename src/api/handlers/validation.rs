@@ -79,6 +79,24 @@ pub fn validate_message(value: &str, field: &'static str) -> Result<()> {
     )
 }
 
+/// Double-Option-aware title validator: leaves missing and null PATCH fields
+/// alone, length-checks present strings. Whitespace is *not* a clear request
+/// — callers should send JSON `null`.
+pub fn validate_optional_title(title: Option<&Option<String>>, field: &'static str) -> Result<()> {
+    let Some(Some(t)) = title else { return Ok(()) };
+    validate_title(t, field)
+}
+
+/// Double-Option-aware description validator (allows empty values; only the
+/// length cap matters here).
+pub fn validate_optional_description(
+    desc: Option<&Option<String>>,
+    field: &'static str,
+) -> Result<()> {
+    let Some(Some(d)) = desc else { return Ok(()) };
+    validate_description(Some(d), field)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

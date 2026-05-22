@@ -96,6 +96,7 @@ pub mod codes {
     pub const EMPTY_TITLE: &str = "EMPTY_TITLE";
     pub const TITLE_TOO_LONG: &str = "TITLE_TOO_LONG";
     pub const DESCRIPTION_TOO_LONG: &str = "DESCRIPTION_TOO_LONG";
+    pub const GROUP_TOO_LONG: &str = "GROUP_TOO_LONG";
     pub const EMPTY_MESSAGE: &str = "EMPTY_MESSAGE";
     pub const MESSAGE_TOO_LONG: &str = "MESSAGE_TOO_LONG";
     pub const INVALID_PHASE: &str = "INVALID_PHASE";
