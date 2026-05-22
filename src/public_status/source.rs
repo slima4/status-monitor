@@ -416,6 +416,7 @@ impl PublicSource for NoopPublicSource {
             groups: Vec::new(),
             active_incidents: Vec::new(),
             recent_incidents: Vec::new(),
+            recent_incidents_has_more: false,
             active_maintenance: Vec::new(),
             upcoming_maintenance: Vec::new(),
         }))

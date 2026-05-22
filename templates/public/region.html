@@ -204,6 +204,13 @@
             </li>
             {% endfor %}
         </ul>
+        {% if view.recent_incidents_has_more %}
+        <p class="text-right text-sm">
+            <a href="/status/incidents" class="font-medium text-blue-600 hover:underline">
+                Older incidents →
+            </a>
+        </p>
+        {% endif %}
     </section>
     {% endif %}
 

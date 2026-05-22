@@ -172,6 +172,10 @@ pub struct PublicStatusPage {
     pub groups: Vec<PublicComponentGroup>,
     pub active_incidents: Vec<PublicIncident>,
     pub recent_incidents: Vec<PublicIncident>,
+    /// True when the org has more incidents past `recent_incidents` than
+    /// were rendered into this snapshot. Drives the "older incidents" link
+    /// on the public page → archive view.
+    pub recent_incidents_has_more: bool,
     pub active_maintenance: Vec<PublicMaintenance>,
     pub upcoming_maintenance: Vec<PublicMaintenance>,
 }

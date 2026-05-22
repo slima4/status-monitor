@@ -90,7 +90,7 @@ impl OrgAggregator {
         let (
             (active_maintenance, upcoming_maintenance, maintenance_by_target),
             active_incidents,
-            recent_incidents,
+            (recent_incidents, recent_incidents_has_more),
         ) = tokio::try_join!(
             self.load_maintenance(org, now, &component_ids),
             self.load_active_incidents(org),
@@ -175,6 +175,7 @@ impl OrgAggregator {
             groups,
             active_incidents,
             recent_incidents,
+            recent_incidents_has_more,
             active_maintenance,
             upcoming_maintenance,
         })
@@ -335,9 +336,12 @@ impl OrgAggregator {
         &self,
         org: OrgId,
         now: DateTime<Utc>,
-    ) -> Result<Vec<PublicIncident>> {
+    ) -> Result<(Vec<PublicIncident>, bool)> {
         let since = now - ChronoDuration::days(self.cfg.recent_incidents_days as i64);
-        let rows: Vec<IncidentRow> = sqlx::query_as::<_, IncidentRow>(
+        // Peek one past the render cap so the page can decide whether to
+        // render an "older incidents" link without a second `count(*)`.
+        let peek_limit = self.cfg.max_recent_incidents as i64 + 1;
+        let mut rows: Vec<IncidentRow> = sqlx::query_as::<_, IncidentRow>(
             r#"SELECT i.id, i.target_id,
                       COALESCE(t.public_name, t.name) AS component_name,
                       i.started_at, i.ended_at, i.severity, i.status_at_start,
@@ -348,16 +352,21 @@ impl OrgAggregator {
                  AND t.org_id = $3
                  AND i.started_at >= $1
                  AND t.public_status = true
-               ORDER BY i.started_at DESC
+               ORDER BY i.started_at DESC, i.id DESC
                LIMIT $2"#,
         )
         .bind(since)
-        .bind(self.cfg.max_recent_incidents as i64)
+        .bind(peek_limit)
         .bind(org.0)
         .fetch_all(&self.pg)
         .await
         .context("load recent incidents")?;
-        self.hydrate_incidents(org, rows).await
+        let has_more = rows.len() as u32 > self.cfg.max_recent_incidents;
+        if has_more {
+            rows.truncate(self.cfg.max_recent_incidents as usize);
+        }
+        let hydrated = self.hydrate_incidents(org, rows).await?;
+        Ok((hydrated, has_more))
     }
 
     async fn hydrate_incidents(

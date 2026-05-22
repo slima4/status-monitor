@@ -106,6 +106,7 @@ impl PublicSource for FakePublicSource {
             }],
             active_incidents: vec![incident.clone()],
             recent_incidents: vec![incident],
+            recent_incidents_has_more: false,
             active_maintenance: Vec::new(),
             upcoming_maintenance: vec![maintenance],
         }))

@@ -197,6 +197,9 @@ pub struct StatusView {
     pub groups: Vec<GroupView>,
     pub active_incidents: Vec<IncidentSummary>,
     pub recent_incidents: Vec<IncidentSummary>,
+    /// True when the org has more incidents past the rendered window. Drives
+    /// the "older incidents" archive link in the recent-incidents section.
+    pub recent_incidents_has_more: bool,
     pub active_maintenance: Vec<MaintenanceView>,
     pub upcoming_maintenance: Vec<MaintenanceView>,
     pub has_active_incident: bool,
@@ -434,6 +437,7 @@ fn build_view(page: &PublicStatusPage) -> StatusView {
         has_active_incident: !active.is_empty(),
         active_incidents: active,
         recent_incidents: recent,
+        recent_incidents_has_more: page.recent_incidents_has_more,
         has_maintenance: !active_m.is_empty() || !upcoming_m.is_empty(),
         active_maintenance: active_m,
         upcoming_maintenance: upcoming_m,
@@ -736,6 +740,7 @@ mod tests {
             }],
             active_incidents: vec![],
             recent_incidents: vec![],
+            recent_incidents_has_more: false,
             active_maintenance: vec![],
             upcoming_maintenance: vec![],
         }

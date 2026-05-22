@@ -80,6 +80,7 @@ impl PublicSource for PublishedSource {
             }],
             active_incidents: vec![incident.clone()],
             recent_incidents: vec![incident],
+            recent_incidents_has_more: false,
             active_maintenance: Vec::new(),
             upcoming_maintenance: Vec::new(),
         }))
@@ -144,6 +145,7 @@ impl PublicSource for EmptyDataSource {
             }],
             active_incidents: Vec::new(),
             recent_incidents: Vec::new(),
+            recent_incidents_has_more: false,
             active_maintenance: Vec::new(),
             upcoming_maintenance: Vec::new(),
         }))
@@ -219,6 +221,7 @@ impl PublicSource for MaintenanceDominatesSource {
             }],
             active_incidents: Vec::new(),
             recent_incidents: Vec::new(),
+            recent_incidents_has_more: false,
             active_maintenance: vec![maintenance],
             upcoming_maintenance: Vec::new(),
         }))
