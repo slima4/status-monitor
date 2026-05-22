@@ -571,5 +571,59 @@ fn trim_name(raw: &str) -> Result<String> {
             "name",
         ));
     }
+    // Reject control characters (incl. CR/LF/NUL). The org name flows into
+    // the invitation email subject; a CRLF here would let a hostile owner
+    // inject an SMTP header (Bcc, Reply-To) at the upstream provider's
+    // boundary, even though our outgoing JSON encodes them. Defense in
+    // depth at our validation layer, not at render time.
+    if trimmed.chars().any(|c| c.is_control()) {
+        return Err(AppError::bad_request_field(
+            codes::INVALID_NAME,
+            "name must not contain control characters",
+            "name",
+        ));
+    }
     Ok(trimmed.to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn assert_invalid_name(err: AppError) {
+        match err {
+            AppError::BadRequest { code, .. } => assert_eq!(code, codes::INVALID_NAME),
+            other => panic!("expected BadRequest(INVALID_NAME), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn trim_name_rejects_crlf() {
+        let err = trim_name("Acme\r\nBcc: a@b").expect_err("CRLF must reject");
+        assert_invalid_name(err);
+    }
+
+    #[test]
+    fn trim_name_rejects_lf_only() {
+        let err = trim_name("Acme\nX").expect_err("LF must reject");
+        assert_invalid_name(err);
+    }
+
+    #[test]
+    fn trim_name_rejects_nul() {
+        let err = trim_name("Acme\0evil").expect_err("NUL must reject");
+        assert_invalid_name(err);
+    }
+
+    #[test]
+    fn trim_name_rejects_tab() {
+        let err = trim_name("Acme\tInc").expect_err("tab must reject");
+        assert_invalid_name(err);
+    }
+
+    #[test]
+    fn trim_name_accepts_unicode_punctuation() {
+        // Em-dash, smart quotes, accented chars — all valid names.
+        trim_name("Acme — “Hello” café").expect("unicode punctuation must pass");
+    }
 }

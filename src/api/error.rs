@@ -65,6 +65,7 @@ pub mod codes {
     pub const INVALID_ALERT_CONFIG: &str = "INVALID_ALERT_CONFIG";
     pub const INVALID_CONFIG: &str = "INVALID_CONFIG";
     pub const EMPTY_NAME: &str = "EMPTY_NAME";
+    pub const INVALID_NAME: &str = "INVALID_NAME";
     pub const REDACTION_SENTINEL: &str = "REDACTION_SENTINEL";
     pub const BULK_EMPTY: &str = "BULK_EMPTY";
     pub const BULK_VALIDATION: &str = "BULK_VALIDATION";
