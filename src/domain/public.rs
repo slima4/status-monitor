@@ -69,6 +69,13 @@ pub enum IncidentSeverity {
 }
 
 impl IncidentSeverity {
+    /// Every variant in declaration order. Used by the enum-drift integration
+    /// test to compare against the live Postgres CHECK constraint; keep in
+    /// lockstep with the enum body. (Adding a variant without extending
+    /// `ALL` lets the drift test pass while the migration list silently
+    /// disagrees, so this list is itself a load-bearing invariant.)
+    pub const ALL: &'static [Self] = &[Self::Minor, Self::Major, Self::Critical];
+
     /// Stable string used in the Postgres `severity` CHECK constraint and the
     /// JSON wire form. Unknown DB values fall back to `Major` (defensive
     /// against migrations / corruption — never panics on parse).
@@ -100,6 +107,16 @@ pub enum IncidentStatusPhase {
 }
 
 impl IncidentStatusPhase {
+    /// Every variant in declaration order; see the matching comment on
+    /// `IncidentSeverity::ALL`.
+    pub const ALL: &'static [Self] = &[
+        Self::Investigating,
+        Self::Identified,
+        Self::Monitoring,
+        Self::Resolved,
+        Self::Postmortem,
+    ];
+
     /// Stable string used in the Postgres `phase` CHECK constraint and the
     /// JSON wire form. Unknown DB values fall back to `Investigating` so a
     /// migration / corruption never panics a read path.
