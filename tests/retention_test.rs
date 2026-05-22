@@ -216,7 +216,7 @@ fn windows_match_privacy_policy_and_clickhouse_ttl() {
         "Privacy Policy audit-log retention line changed"
     );
 
-    let migration = include_str!("../migrations/clickhouse/002_multitenancy.sql");
+    let migration = include_str!("../migrations/clickhouse/001_initial.sql");
     assert!(
         migration.contains(&format!("INTERVAL {} DAY", r.check_results_days)),
         "check_results ClickHouse TTL must equal retention.check_results_days"

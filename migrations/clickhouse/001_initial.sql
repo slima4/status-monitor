@@ -1,26 +1,38 @@
+-- ClickHouse v1 schema. Multitenant from the start: `org_id` leads the
+-- ORDER BY on every tenant table so per-org queries hit the sparse primary
+-- index. No DROP statements anywhere — every CREATE is `IF NOT EXISTS`, so a
+-- re-run on a populated database is a no-op and a process crash between the
+-- last CREATE and the `schema_migrations` INSERT can't destroy data on the
+-- next boot.
+
 CREATE TABLE IF NOT EXISTS check_results (
-    target_id UUID,
-    timestamp DateTime64(3, 'UTC') CODEC(Delta, ZSTD(1)),
-    status Enum8('up' = 1, 'down' = 2, 'degraded' = 3, 'error' = 4),
+    org_id     UUID,
+    target_id  UUID,
+    timestamp  DateTime64(3, 'UTC') CODEC(Delta, ZSTD(1)),
+    status     Enum8('up' = 1, 'down' = 2, 'degraded' = 3, 'error' = 4),
     duration_ms UInt32 CODEC(T64, ZSTD(1)),
-    dns_ms Nullable(UInt16),
-    connect_ms Nullable(UInt16),
-    tls_ms Nullable(UInt16),
-    ttfb_ms Nullable(UInt16),
+    dns_ms      Nullable(UInt16),
+    connect_ms  Nullable(UInt16),
+    tls_ms      Nullable(UInt16),
+    ttfb_ms     Nullable(UInt16),
     response_code Nullable(UInt16),
     response_size Nullable(UInt32),
-    error LowCardinality(Nullable(String))
+    error       LowCardinality(Nullable(String))
 ) ENGINE = MergeTree
-PARTITION BY toYYYYMMDD(timestamp)
-ORDER BY (target_id, timestamp)
+PARTITION BY (toYYYYMMDD(timestamp), org_id)
+ORDER BY (org_id, target_id, timestamp)
+-- Kept equal to `[retention].check_results_days`; a test asserts the two
+-- agree so config, this TTL and the Privacy Policy can't drift.
 TTL toDateTime(timestamp) + INTERVAL 30 DAY
 SETTINGS index_granularity = 8192;
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS check_results_1m
 ENGINE = AggregatingMergeTree
-PARTITION BY toYYYYMMDD(minute)
-ORDER BY (target_id, minute)
+PARTITION BY (toYYYYMMDD(minute), org_id)
+ORDER BY (org_id, target_id, minute)
+TTL toDateTime(minute) + INTERVAL 30 DAY
 AS SELECT
+    org_id,
     target_id,
     toStartOfMinute(timestamp) AS minute,
     countState() AS total_checks,
@@ -28,4 +40,4 @@ AS SELECT
     avgState(duration_ms) AS avg_duration_ms,
     quantileState(0.99)(duration_ms) AS p99_duration_ms
 FROM check_results
-GROUP BY target_id, minute;
+GROUP BY org_id, target_id, minute;

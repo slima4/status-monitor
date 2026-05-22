@@ -19,10 +19,18 @@ const TABLE: &str = "check_results";
 
 /// Ordered list of migrations. Each entry is `(filename, sql)`. Filename is
 /// recorded in `schema_migrations` after apply so we never re-run a migration
-/// that has already executed on this database — important for DROP/CREATE
-/// migrations that would otherwise destroy data on every startup.
+/// that has already executed on this database.
 ///
-/// Constraints (we don't validate these; just don't break them):
+/// Crash-atomicity discipline: every migration MUST be idempotent on re-run
+/// (i.e. only `CREATE … IF NOT EXISTS` / `ALTER … IF EXISTS`). ClickHouse has
+/// no transactions across DDL statements and `schema_migrations` is TinyLog
+/// (no atomic CAS), so the apply-then-record sequence is not crash-atomic:
+/// an OOM-kill between the last statement and the recording INSERT leaves
+/// the migration officially un-applied and the next boot re-runs it. A
+/// destructive statement (DROP/TRUNCATE) under those conditions wipes live
+/// data, which is why migrations contain none.
+///
+/// Splitter constraints (we don't validate these; just don't break them):
 /// - The splitter strips `--` line comments before splitting on `;`, but has
 ///   no string-literal or block-comment tracker. So a migration must not
 ///   contain a `;` inside a string literal, a `--` inside a string literal,
@@ -30,21 +38,15 @@ const TABLE: &str = "check_results";
 ///   FUNCTION bodies, multi-line strings, etc. won't survive either. Today's
 ///   migrations only quote short tokens (`'UTC'`, `'up'`) so the gap is
 ///   theoretical; extend the splitter before relying on otherwise.
-/// - The runner is not concurrent-safe: `schema_migrations` is `TinyLog`
-///   which has no atomic CAS. Two processes racing through their first boot
-///   could both observe an empty applied set and both run DROP/CREATE.
-///   Single-binary deployments stay safe; for multi-replica, take a
-///   pg_advisory_lock around the call before this lands in production.
-const MIGRATIONS: &[(&str, &str)] = &[
-    (
-        "001_initial.sql",
-        include_str!("../../migrations/clickhouse/001_initial.sql"),
-    ),
-    (
-        "002_multitenancy.sql",
-        include_str!("../../migrations/clickhouse/002_multitenancy.sql"),
-    ),
-];
+/// - The runner is not concurrent-safe: two processes racing through their
+///   first boot could both observe an empty applied set and both run the
+///   migration. With the IF NOT EXISTS discipline above this is harmless
+///   (second CREATE is a no-op); for multi-replica, take a pg_advisory_lock
+///   around the call.
+const MIGRATIONS: &[(&str, &str)] = &[(
+    "001_initial.sql",
+    include_str!("../../migrations/clickhouse/001_initial.sql"),
+)];
 
 pub async fn migrate(client: &Client) -> Result<()> {
     tracing::info!("running clickhouse migrations");
@@ -89,6 +91,25 @@ pub async fn migrate(client: &Client) -> Result<()> {
             .execute()
             .await
             .with_context(|| format!("record clickhouse migration {name}"))?;
+
+        // Fence: re-read schema_migrations and confirm the row landed. Without
+        // this an INSERT that the server accepted but failed to persist (TinyLog
+        // gives no fsync guarantee, a crash mid-flush can lose the row) would
+        // let the next boot re-run the migration. With the IF-NOT-EXISTS
+        // discipline above that is harmless today, but the fence costs one
+        // count query per migration and removes the silent footgun outright.
+        let CountRow { n } = client
+            .query("SELECT count() AS n FROM schema_migrations WHERE filename = ?")
+            .bind(*name)
+            .fetch_one::<CountRow>()
+            .await
+            .with_context(|| format!("verify clickhouse migration recorded {name}"))?;
+        if n == 0 {
+            return Err(anyhow::anyhow!(
+                "clickhouse migration {name} applied but not recorded in schema_migrations",
+            )
+            .into());
+        }
     }
 
     tracing::info!("clickhouse ready");
@@ -134,10 +155,6 @@ pub fn build_client(cfg: &ClickhouseConfig) -> Client {
 /// `table` is always a fixed in-crate constant at the call sites, never user
 /// input, so the identifier interpolation is injection-free.
 pub(crate) async fn count_org_rows(client: &Client, table: &str, org_id: Uuid) -> Result<u64> {
-    #[derive(Row, Deserialize)]
-    struct CountRow {
-        n: u64,
-    }
     let row: CountRow = client
         .query(&format!(
             "SELECT count() AS n FROM {table} WHERE org_id = ?"
@@ -147,6 +164,13 @@ pub(crate) async fn count_org_rows(client: &Client, table: &str, org_id: Uuid) -
         .await
         .with_context(|| format!("clickhouse count_org_rows {table}"))?;
     Ok(row.n)
+}
+
+/// Single-column scalar count row, shared by every `SELECT count() AS n …`
+/// call in this module so each callsite doesn't redefine its own struct.
+#[derive(Row, Deserialize)]
+struct CountRow {
+    n: u64,
 }
 
 pub struct ClickhouseResultSink {
