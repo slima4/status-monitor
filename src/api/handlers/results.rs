@@ -27,9 +27,17 @@ const RESULTS_LIMIT_MAX: usize = 10_000;
 const INCIDENTS_LIMIT_DEFAULT: usize = 100;
 const INCIDENTS_LIMIT_MAX: usize = 1_000;
 
+/// Hard cap on the requested `(to - from)` span. `fetch_incident_rows`
+/// materialises every row in the window into Rust memory for in-process
+/// coalescing (no SQL LIMIT) and is called twice per `/incidents` request —
+/// a 365-day window on a 10 s-interval target is ~3 M rows × 2 in RAM,
+/// trivially OOMs the 5$ host tier. 90 days matches the longest plan
+/// retention; callers needing deeper history page backwards via `to`.
+const MAX_RANGE_DAYS: i64 = 90;
+
 /// Resolves optional `from`/`to` query params to a validated `TimeRange`,
 /// defaulting to a 24-hour window ending at `now`. Returns `BAD_TIME_RANGE`
-/// when `to <= from`.
+/// when `to <= from` or when the requested span exceeds [`MAX_RANGE_DAYS`].
 pub(crate) fn resolve_range(
     from: Option<DateTime<Utc>>,
     to: Option<DateTime<Utc>>,
@@ -40,6 +48,13 @@ pub(crate) fn resolve_range(
         return Err(AppError::bad_request(
             codes::BAD_TIME_RANGE,
             "'to' must be strictly greater than 'from'",
+        ));
+    }
+    let max = Duration::try_days(MAX_RANGE_DAYS).unwrap_or_default();
+    if to - from > max {
+        return Err(AppError::bad_request(
+            codes::BAD_TIME_RANGE,
+            "time window exceeds maximum of 90 days; page backwards via 'to'",
         ));
     }
     Ok(TimeRange { from, to })
@@ -230,4 +245,66 @@ pub async fn list_incidents(
         limit as u32,
         q.offset as u32,
     )))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::TimeZone;
+
+    fn ts(year: i32, month: u32, day: u32) -> DateTime<Utc> {
+        Utc.with_ymd_and_hms(year, month, day, 0, 0, 0).unwrap()
+    }
+
+    fn assert_bad_range(err: AppError) -> String {
+        match err {
+            AppError::BadRequest { code, message, .. } => {
+                assert_eq!(code, codes::BAD_TIME_RANGE);
+                message
+            }
+            other => panic!("expected BadRequest, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_equal_from_and_to() {
+        let t = ts(2026, 5, 1);
+        let err = resolve_range(Some(t), Some(t)).expect_err("equal must reject");
+        assert_bad_range(err);
+    }
+
+    #[test]
+    fn rejects_from_after_to() {
+        let from = ts(2026, 5, 2);
+        let to = ts(2026, 5, 1);
+        let err = resolve_range(Some(from), Some(to)).expect_err("inverted must reject");
+        assert_bad_range(err);
+    }
+
+    #[test]
+    fn rejects_window_exceeding_max() {
+        let to = ts(2026, 5, 1);
+        let from = to - Duration::try_days(MAX_RANGE_DAYS + 1).unwrap();
+        let err = resolve_range(Some(from), Some(to)).expect_err("over-max must reject");
+        let msg = assert_bad_range(err);
+        assert!(
+            msg.contains("90 days"),
+            "message should name the limit, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn accepts_exactly_max_window() {
+        let to = ts(2026, 5, 1);
+        let from = to - Duration::try_days(MAX_RANGE_DAYS).unwrap();
+        let range = resolve_range(Some(from), Some(to)).expect("boundary must pass");
+        assert_eq!(range.from, from);
+        assert_eq!(range.to, to);
+    }
+
+    #[test]
+    fn defaults_to_last_24h_when_omitted() {
+        let range = resolve_range(None, None).expect("defaults must validate");
+        assert_eq!(range.to - range.from, Duration::try_hours(24).unwrap());
+    }
 }
