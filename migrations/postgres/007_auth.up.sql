@@ -46,9 +46,12 @@ CREATE INDEX idx_oauth_identities_user ON oauth_identities(user_id);
 
 -- Short-lived per-round-trip state for the OAuth dance. Single-use: the
 -- callback deletes-and-returns in one statement so concurrent callbacks
--- for the same state can't both proceed.
+-- for the same state can't both proceed. `state_hash` mirrors the
+-- `sessions.id_hash` pattern: a leak of this table (slow-query log,
+-- pg_stat_statements with literal capture, pg_dump) yields hashes, not
+-- replayable tokens.
 CREATE TABLE oauth_states (
-    state             TEXT PRIMARY KEY,
+    state_hash        TEXT PRIMARY KEY,
     provider          TEXT NOT NULL,
     redirect_after    TEXT,
     invitation_token  TEXT,

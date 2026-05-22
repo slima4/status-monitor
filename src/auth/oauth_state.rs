@@ -14,6 +14,11 @@ use crate::error::{AppError, Result};
 const STATE_BYTES: usize = 32;
 const STATE_EXPIRY_MINUTES: i64 = 10;
 
+/// SHA-256 hex of the raw state — see [`crate::auth::sha256_hex`].
+pub fn hash_state(raw: &str) -> String {
+    crate::auth::sha256_hex(raw)
+}
+
 #[derive(Debug, Clone)]
 pub struct ConsumedState {
     pub provider: String,
@@ -39,10 +44,10 @@ pub async fn insert(
 ) -> Result<DateTime<Utc>> {
     let expires_at = Utc::now() + Duration::minutes(STATE_EXPIRY_MINUTES);
     sqlx::query(
-        "INSERT INTO oauth_states (state, provider, redirect_after, invitation_token, expires_at) \
+        "INSERT INTO oauth_states (state_hash, provider, redirect_after, invitation_token, expires_at) \
          VALUES ($1, $2, $3, $4, $5)",
     )
-    .bind(state)
+    .bind(hash_state(state))
     .bind(provider)
     .bind(redirect_after)
     .bind(invitation_token)
@@ -59,10 +64,10 @@ pub async fn insert(
 pub async fn consume(pool: &PgPool, state: &str) -> Result<Option<ConsumedState>> {
     let row: Option<(String, Option<String>, Option<String>)> = sqlx::query_as(
         "DELETE FROM oauth_states \
-         WHERE state = $1 AND expires_at > now() \
+         WHERE state_hash = $1 AND expires_at > now() \
          RETURNING provider, redirect_after, invitation_token",
     )
-    .bind(state)
+    .bind(hash_state(state))
     .fetch_optional(pool)
     .await
     .map_err(|e| AppError::Other(anyhow::anyhow!("oauth_state::consume: {e}")))?;
@@ -98,5 +103,19 @@ mod tests {
         for _ in 0..1024 {
             assert!(seen.insert(generate_state()));
         }
+    }
+
+    #[test]
+    fn hash_state_is_deterministic_and_hex() {
+        let s = "test-state-value";
+        let a = hash_state(s);
+        assert_eq!(a, hash_state(s));
+        assert_eq!(a.len(), 64);
+        assert!(a.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn hash_state_separates_distinct_inputs() {
+        assert_ne!(hash_state("a"), hash_state("b"));
     }
 }

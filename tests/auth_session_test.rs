@@ -72,9 +72,9 @@ async fn oauth_state_consume_rejects_expired() {
     MIGRATOR.run(&pool).await.expect("migrate");
 
     sqlx::query(
-        "INSERT INTO oauth_states (state, provider, expires_at) VALUES ($1, 'github', now() - INTERVAL '1 minute')",
+        "INSERT INTO oauth_states (state_hash, provider, expires_at) VALUES ($1, 'github', now() - INTERVAL '1 minute')",
     )
-    .bind("expired-state")
+    .bind(oauth_state::hash_state("expired-state"))
     .execute(&pool)
     .await
     .expect("seed expired");
@@ -455,14 +455,14 @@ async fn oauth_state_cleanup_purges_only_expired_rows() {
     MIGRATOR.run(&pool).await.expect("migrate");
 
     sqlx::query(
-        "INSERT INTO oauth_states (state, provider, expires_at) VALUES \
+        "INSERT INTO oauth_states (state_hash, provider, expires_at) VALUES \
          ($1, 'github', now() - INTERVAL '15 minutes'), \
          ($2, 'github', now() - INTERVAL '1 second'), \
          ($3, 'github', now() + INTERVAL '5 minutes')",
     )
-    .bind("expired-old")
-    .bind("expired-recent")
-    .bind("still-valid")
+    .bind(oauth_state::hash_state("expired-old"))
+    .bind(oauth_state::hash_state("expired-recent"))
+    .bind(oauth_state::hash_state("still-valid"))
     .execute(&pool)
     .await
     .unwrap();
@@ -470,11 +470,12 @@ async fn oauth_state_cleanup_purges_only_expired_rows() {
     let removed = oauth_state_cleanup::purge_expired(&pool).await.unwrap();
     assert_eq!(removed, 2, "exactly the two expired rows should be purged");
 
-    let (still,): (i64,) = sqlx::query_as("SELECT count(*) FROM oauth_states WHERE state = $1")
-        .bind("still-valid")
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    let (still,): (i64,) =
+        sqlx::query_as("SELECT count(*) FROM oauth_states WHERE state_hash = $1")
+            .bind(oauth_state::hash_state("still-valid"))
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert_eq!(still, 1, "valid future-expiry row must survive");
 
     pool.close().await;

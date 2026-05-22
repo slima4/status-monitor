@@ -23,7 +23,6 @@ use chrono::{DateTime, Duration, Utc};
 use moka::sync::Cache;
 use rand::TryRng;
 use rand::rngs::SysRng;
-use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 use tower_cookies::cookie::{Cookie, SameSite};
 use uuid::Uuid;
@@ -95,14 +94,9 @@ pub fn generate_session_id() -> String {
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
 }
 
-/// SHA-256 hex of the raw cookie value. Collision-free at 256-bit input,
-/// constant-time enough for the threat model (a SQL-injection attacker who
-/// can already read `id_hash` doesn't need a timing oracle). Argon2 would
-/// burn ~50 ms per lookup for no extra protection — the input is already
-/// 256 bits of unguessable entropy.
+/// SHA-256 hex of the raw cookie value — see [`crate::auth::sha256_hex`].
 pub fn hash_session_id(raw: &str) -> String {
-    let digest = Sha256::digest(raw.as_bytes());
-    hex::encode(digest)
+    crate::auth::sha256_hex(raw)
 }
 
 /// INSERT a fresh session row. `expires_at` is `now() + absolute_timeout_days`.
