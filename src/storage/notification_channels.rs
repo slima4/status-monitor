@@ -45,23 +45,28 @@ fn seal(cfg: &ChannelConfig, cipher: Option<&Cipher>) -> Result<Value> {
     }
 }
 
-/// Inverse of [`seal`]. A sealed value with no KEK in scope is a loud error,
-/// never a silent plaintext fallthrough.
+/// Inverse of [`seal`]. Both mode mismatches — sealed row in no-KEK mode,
+/// plaintext row in KEK mode — are loud errors. The plaintext-in-KEK case
+/// closes the asymmetric gap a manual-INSERT path (test helper, ad-hoc SQL,
+/// future demo seam) would otherwise drive through silently, since the
+/// plaintext schema deserializes cleanly into `ChannelConfig` without it.
 fn open(value: Value, cipher: Option<&Cipher>) -> Result<ChannelConfig> {
-    if let Some(env) = envelope_str(&value) {
-        let c = cipher.ok_or_else(|| {
-            AppError::Other(anyhow!(
-                "notification channel is sealed but no credentials KEK is configured"
-            ))
-        })?;
-        let bytes = c
-            .decrypt(env)
-            .map_err(|e| AppError::Other(anyhow!("open channel config: {e}")))?;
-        serde_json::from_slice(&bytes)
-            .map_err(|e| AppError::Other(anyhow!("decode channel config: {e}")))
-    } else {
-        serde_json::from_value(value)
-            .map_err(|e| AppError::Other(anyhow!("decode channel config: {e}")))
+    match (cipher, envelope_str(&value)) {
+        (Some(c), Some(env)) => {
+            let bytes = c
+                .decrypt(env)
+                .map_err(|e| AppError::Other(anyhow!("open channel config: {e}")))?;
+            serde_json::from_slice(&bytes)
+                .map_err(|e| AppError::Other(anyhow!("decode channel config: {e}")))
+        }
+        (None, None) => serde_json::from_value(value)
+            .map_err(|e| AppError::Other(anyhow!("decode channel config: {e}"))),
+        (None, Some(_)) => Err(AppError::Other(anyhow!(
+            "notification channel is sealed but no credentials KEK is configured"
+        ))),
+        (Some(_), None) => Err(AppError::Other(anyhow!(
+            "notification channel is plaintext but a credentials KEK is configured — write path mismatch"
+        ))),
     }
 }
 
@@ -564,5 +569,22 @@ mod tests {
         )
         .unwrap();
         assert!(open(sealed, None).is_err());
+    }
+
+    #[test]
+    fn plaintext_value_with_kek_is_loud_error() {
+        use base64::Engine;
+        use base64::engine::general_purpose::STANDARD;
+        let c = Cipher::from_base64(&STANDARD.encode([7u8; 32])).unwrap();
+        // Simulates a manual-INSERT path (test helper, ad-hoc SQL, demo seam)
+        // that wrote a plaintext config into a KEK-mode deployment.
+        let plaintext = seal(
+            &ChannelConfig::Slack {
+                webhook_url: "https://hooks.slack.com/x".into(),
+            },
+            None,
+        )
+        .unwrap();
+        assert!(open(plaintext, Some(&c)).is_err());
     }
 }
