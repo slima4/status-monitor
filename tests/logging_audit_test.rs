@@ -1,4 +1,4 @@
-//! Privacy-friendly-logging audit (Pre-Mortem #12). Runs the structural,
+//! Privacy-friendly-logging audit. Runs the structural,
 //! value-aware `ast-grep` rule from a `#[test]` so CI fails on a hit, and
 //! "tests the test": deliberately non-compliant multi-line + local-binding
 //! fixtures MUST still be caught, so a future weakening of the pattern fails

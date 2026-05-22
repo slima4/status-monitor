@@ -8,7 +8,7 @@ message: |-
   is provably not data-subject data — put an inline `// SAFE: <reason>`
   comment *inside* the macro call.
 note: |-
-  Structural + value-aware (Pre-Mortem #12): matches a `tracing::$LEVEL!`
+  Structural + value-aware: matches a `tracing::$LEVEL!`
   call regardless of rustfmt line-splitting, and flags a `.ip()` /
   `.peer_addr()` / `.remote_addr()` call or an interpolated
   field/binding/format-placeholder named one of: email url slug token
