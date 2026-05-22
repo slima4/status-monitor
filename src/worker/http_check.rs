@@ -6,7 +6,7 @@ use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use bytes::Bytes;
 use chrono::Utc;
 use flate2::read::GzDecoder;
-use http_body_util::{BodyExt, Full};
+use http_body_util::{BodyExt, Full, Limited};
 use hyper::body::Bytes as HBytes;
 use hyper::header::{
     ACCEPT_ENCODING, AUTHORIZATION, HeaderName, HeaderValue, LOCATION, USER_AGENT,
@@ -24,6 +24,18 @@ use crate::observability::metrics::names;
 /// `maximum = 10`; that annotation is not validated server-side, so this
 /// runtime clamp is the actual enforcement of the bound.
 const MAX_REDIRECT_HOPS: u8 = 10;
+
+/// Cap on the raw HTTP response body the check will collect. Status pages —
+/// the dominant target shape — are usually well under 100 KiB; 1 MiB is the
+/// "huge response, but worth keeping the bytes" knee. Anything bigger is
+/// recorded as a `body` failure rather than allowed to allocate freely.
+const MAX_RAW_BODY_BYTES: usize = 1 << 20;
+
+/// Cap on decompressed body size. Bounds the gzip / brotli expansion ratio
+/// against a hostile target that returns a tiny compressed body that explodes
+/// on decode (a "zip bomb"). 8 MiB tolerates the ~8× expansion that real
+/// HTML/JSON pages hit; anything past that is a `decode` failure.
+const MAX_DECODED_BODY_BYTES: usize = 8 << 20;
 
 pub async fn execute_http_check(
     target_id: Uuid,
@@ -248,7 +260,10 @@ async fn finalize(
         .map(|s| s.to_ascii_lowercase());
 
     let body_remaining = check.timeout.saturating_sub(start.elapsed());
-    let body_fut = response.into_body().collect();
+    // Bound at the byte-budget *before* allocation: Limited streams frames
+    // and errors mid-read once the cap is exceeded, so an oversized response
+    // never sits fully in memory.
+    let body_fut = Limited::new(response.into_body(), MAX_RAW_BODY_BYTES).collect();
     let collected = match tokio::time::timeout(body_remaining, body_fut).await {
         Err(_) => {
             let mut r = CheckResult::error_with_elapsed(
@@ -406,22 +421,31 @@ fn is_redirect(code: u16) -> bool {
 }
 
 fn decode_body(raw: &HBytes, encoding: Option<&str>) -> std::io::Result<Bytes> {
-    use std::io::Read;
     match encoding {
-        // Typical gzip/brotli ratios on text are 3-5×; pre-size larger to avoid
-        // re-allocation in the decoder loop.
-        Some("gzip") => {
-            let mut out = Vec::with_capacity(raw.len().saturating_mul(4));
-            GzDecoder::new(raw.as_ref()).read_to_end(&mut out)?;
-            Ok(Bytes::from(out))
-        }
-        Some("br") => {
-            let mut out = Vec::with_capacity(raw.len().saturating_mul(4));
-            brotli::Decompressor::new(raw.as_ref(), 4096).read_to_end(&mut out)?;
-            Ok(Bytes::from(out))
-        }
+        // Typical gzip/brotli ratios on text are 3-5×; pre-size larger to
+        // avoid re-allocation in the decoder loop. Read +1 past the cap so a
+        // body that exactly *fills* the budget is still detected as "over"
+        // and rejected rather than silently truncated to a misleading length.
+        Some("gzip") => decode_capped(GzDecoder::new(raw.as_ref()), raw.len()),
+        Some("br") => decode_capped(brotli::Decompressor::new(raw.as_ref(), 4096), raw.len()),
         _ => Ok(raw.clone()),
     }
+}
+
+fn decode_capped<R: std::io::Read>(reader: R, raw_len: usize) -> std::io::Result<Bytes> {
+    use std::io::Read;
+    // Pre-size for the typical 4× expansion ratio without exceeding the cap.
+    let capacity = raw_len.saturating_mul(4).min(MAX_DECODED_BODY_BYTES);
+    let mut out = Vec::with_capacity(capacity);
+    reader
+        .take((MAX_DECODED_BODY_BYTES as u64) + 1)
+        .read_to_end(&mut out)?;
+    if out.len() > MAX_DECODED_BODY_BYTES {
+        return Err(std::io::Error::other(format!(
+            "decoded body exceeded {MAX_DECODED_BODY_BYTES} bytes"
+        )));
+    }
+    Ok(Bytes::from(out))
 }
 
 fn map_method(m: HttpMethod) -> Method {
@@ -512,5 +536,45 @@ mod tests {
         for c in [200, 204, 300, 304, 305, 400, 500] {
             assert!(!is_redirect(c));
         }
+    }
+
+    #[test]
+    fn decode_body_passes_through_when_no_encoding() {
+        let raw = HBytes::from_static(b"hello world");
+        let out = decode_body(&raw, None).expect("identity must succeed");
+        assert_eq!(out.as_ref(), b"hello world");
+    }
+
+    #[test]
+    fn decode_body_rejects_gzip_bomb_over_decoded_cap() {
+        use std::io::Write;
+        // Tiny on-wire payload that expands past MAX_DECODED_BODY_BYTES.
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::best());
+        let chunk = vec![0u8; 64 * 1024];
+        let mut written = 0usize;
+        while written <= MAX_DECODED_BODY_BYTES + chunk.len() {
+            encoder.write_all(&chunk).unwrap();
+            written += chunk.len();
+        }
+        let compressed = encoder.finish().unwrap();
+        let raw = HBytes::from(compressed);
+        let err = decode_body(&raw, Some("gzip")).expect_err("bomb must be rejected");
+        assert!(
+            err.to_string().contains("exceeded"),
+            "expected exceeded error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn decode_body_accepts_gzip_within_cap() {
+        use std::io::Write;
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::best());
+        encoder
+            .write_all(b"compressible compressible compressible")
+            .unwrap();
+        let compressed = encoder.finish().unwrap();
+        let raw = HBytes::from(compressed);
+        let out = decode_body(&raw, Some("gzip")).expect("small gzip must succeed");
+        assert!(out.starts_with(b"compressible"));
     }
 }
