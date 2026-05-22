@@ -27,7 +27,7 @@ pub async fn ensure_default_org(pool: &PgPool, slug: &str) -> Result<OrgId> {
     let inserted: Option<(Uuid,)> = sqlx::query_as(
         r#"INSERT INTO organizations (slug, name, public_status_enabled)
            VALUES ($1, 'Default', true)
-           ON CONFLICT (slug) DO NOTHING
+           ON CONFLICT (slug) WHERE deleted_at IS NULL DO NOTHING
            RETURNING id"#,
     )
     .bind(slug)
@@ -138,7 +138,7 @@ pub async fn create_org_with_owner(
     let row: Option<OrgRow> = sqlx::query_as(
         r#"INSERT INTO organizations (slug, name)
            VALUES ($1, $2)
-           ON CONFLICT (slug) DO NOTHING
+           ON CONFLICT (slug) WHERE deleted_at IS NULL DO NOTHING
            RETURNING id, slug::text AS slug, name, created_at, updated_at, deleted_at"#,
     )
     .bind(slug)
@@ -209,7 +209,7 @@ pub async fn create_signup_org_with_owner_in_tx(
 ) -> Result<Option<OrgId>> {
     let row: Option<(Uuid,)> = sqlx::query_as(
         "INSERT INTO organizations (slug, name) VALUES ($1, $2) \
-         ON CONFLICT (slug) DO NOTHING RETURNING id",
+         ON CONFLICT (slug) WHERE deleted_at IS NULL DO NOTHING RETURNING id",
     )
     .bind(slug)
     .bind(name)

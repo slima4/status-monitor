@@ -140,11 +140,11 @@ CREATE TABLE login_attempts (
 );
 CREATE INDEX idx_login_attempts_user_time
     ON login_attempts(user_id, occurred_at DESC);
--- Partial index restricted to failures. A recency window in the predicate
--- (now() - interval '7 days') is rejected by Postgres because now() is not
--- IMMUTABLE; callers add the time filter at query time and the planner still
--- uses the partial index for selectivity.
-CREATE INDEX idx_login_attempts_recent_failures
+-- Partial index restricted to failures. Postgres rejects `now() - interval
+-- '7 days'` in an index predicate (now() is not IMMUTABLE) so callers must
+-- supply the time window at query time; the planner still uses this for
+-- selectivity.
+CREATE INDEX idx_login_attempts_failures_by_ip
     ON login_attempts(occurred_at DESC, ip_hash)
     WHERE success = false;
 -- Full (non-partial) occurred_at index for the daily retention delete: the

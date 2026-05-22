@@ -31,11 +31,11 @@ pg() { docker exec -i "$PG_CONTAINER" psql -U monitor -d monitor -v ON_ERROR_STO
 pg <<SQL
 WITH u AS (
   INSERT INTO users (email) VALUES ('${EMAIL}')
-  ON CONFLICT (email) DO UPDATE SET email = EXCLUDED.email
+  ON CONFLICT (email) WHERE deleted_at IS NULL DO UPDATE SET email = EXCLUDED.email
   RETURNING id
 ), o AS (
   INSERT INTO organizations (slug, name) VALUES ('${SLUG}', '${ORG_NAME}')
-  ON CONFLICT (slug) DO UPDATE SET name = EXCLUDED.name
+  ON CONFLICT (slug) WHERE deleted_at IS NULL DO UPDATE SET name = EXCLUDED.name
   RETURNING id
 ), m AS (
   INSERT INTO memberships (user_id, org_id, role)

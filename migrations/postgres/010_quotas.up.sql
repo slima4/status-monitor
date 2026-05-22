@@ -56,13 +56,34 @@ INSERT INTO plans (
     true
 );
 
--- Every org references a plan. Existing rows backfill to 'free' via the
--- default; the FK makes removing or renaming a referenced plan impossible
--- (no silent data loss). The billing webhook flips this column in a later
--- phase.
+-- Every org references a plan. The FK + boot-check
+-- `assert_default_plan_present` + the immutability trigger below keep the
+-- literal 'free' default honest. The billing webhook flips this column in a
+-- later phase.
 ALTER TABLE organizations
     ADD COLUMN plan_id TEXT NOT NULL DEFAULT 'free' REFERENCES plans(id);
 CREATE INDEX idx_organizations_plan ON organizations(plan_id);
+
+-- Lock plans.id to be append-only. Renaming a plan's id would silently
+-- corrupt the `organizations.plan_id` literal default (new orgs would FK-
+-- violate on signup) and, without ON UPDATE CASCADE, leave every existing
+-- org's plan_id pointing at a vanished row. Rejecting the UPDATE at the
+-- source is the load-bearing invariant; rename through `plans.name`
+-- instead (display-only column).
+CREATE OR REPLACE FUNCTION reject_plan_id_change() RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.id IS DISTINCT FROM OLD.id THEN
+        RAISE EXCEPTION 'plans.id is immutable (attempted rename % -> %)', OLD.id, NEW.id
+            USING ERRCODE = '23514';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql
+SET search_path = pg_catalog, public;
+
+CREATE TRIGGER trg_plans_id_immutable
+    BEFORE UPDATE OF id ON plans
+    FOR EACH ROW EXECUTE FUNCTION reject_plan_id_change();
 
 -- Per-org non-standard limits (beta customers, friends-of-the-project).
 -- The table exists now; no read path consults it yet. When it does, it is a
@@ -92,12 +113,11 @@ CREATE TABLE quota_events (
 CREATE INDEX idx_quota_events_org_time
     ON quota_events(org_id, occurred_at DESC);
 
--- Partial index for abuse review. The recency window is intentionally NOT in
--- the predicate: now() is not IMMUTABLE so Postgres rejects it in an index
--- WHERE clause. Callers add the `occurred_at > now() - interval '30 days'`
--- filter at query time; the planner still uses this partial index for
--- selectivity. Same pattern as idx_login_attempts_recent_failures.
-CREATE INDEX idx_quota_events_recent_abuse
+-- Partial index for abuse review. Postgres rejects `now() - interval '30
+-- days'` in an index predicate (now() is not IMMUTABLE) so callers supply
+-- the time filter at query time. Same shape as
+-- idx_login_attempts_failures_by_ip.
+CREATE INDEX idx_quota_events_abuse_by_ip
     ON quota_events(occurred_at DESC, ip_hash)
     WHERE event = 'abuse_blocked';
 

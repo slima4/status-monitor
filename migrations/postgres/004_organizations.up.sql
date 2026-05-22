@@ -2,7 +2,9 @@ CREATE EXTENSION IF NOT EXISTS citext;
 
 CREATE TABLE organizations (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    slug        CITEXT NOT NULL UNIQUE,
+    -- Partial-UNIQUE via `idx_organizations_active` so a soft-deleted slug
+    -- frees up for re-signup. Full UNIQUE would pin it to the tombstone.
+    slug        CITEXT NOT NULL,
     name        TEXT NOT NULL,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -14,7 +16,7 @@ CREATE TABLE organizations (
     )
 );
 
-CREATE INDEX idx_organizations_active
+CREATE UNIQUE INDEX idx_organizations_active
     ON organizations(slug)
     WHERE deleted_at IS NULL;
 
@@ -24,14 +26,15 @@ CREATE INDEX idx_organizations_pending_purge
 
 CREATE TABLE users (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    email           CITEXT NOT NULL UNIQUE,
+    -- Partial-UNIQUE via `idx_users_active`; see `organizations.slug` above.
+    email           CITEXT NOT NULL,
     display_name    TEXT,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     deleted_at      TIMESTAMPTZ
 );
 
-CREATE INDEX idx_users_active ON users(email) WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX idx_users_active ON users(email) WHERE deleted_at IS NULL;
 
 CREATE TABLE memberships (
     user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,

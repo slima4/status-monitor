@@ -51,6 +51,7 @@ impl PostgresTargetStore {
             .run(&pool)
             .await
             .context("postgres migrations")?;
+        assert_default_plan_present(&pool).await?;
         tracing::info!("postgres ready");
         Ok(pool)
     }
@@ -78,6 +79,24 @@ impl PostgresTargetStore {
     fn rows_to_targets(&self, rows: Vec<TargetRow>) -> Result<Vec<Target>> {
         rows.into_iter().map(|r| self.decode_row(r)).collect()
     }
+}
+
+/// Refuse to boot if the literal `'free'` default referenced by
+/// `organizations.plan_id` has no matching row. Plan-id renames are blocked
+/// at the schema layer (BEFORE-UPDATE trigger on `plans`), so an absent row
+/// can only come from an operator-side `DELETE`.
+async fn assert_default_plan_present(pool: &PgPool) -> Result<()> {
+    let (exists,): (bool,) =
+        sqlx::query_as("SELECT EXISTS (SELECT 1 FROM plans WHERE id = 'free')")
+            .fetch_one(pool)
+            .await
+            .context("assert_default_plan_present: query")?;
+    if !exists {
+        return Err(AppError::Other(anyhow::anyhow!(
+            "plans.id = 'free' is missing — the literal `organizations.plan_id DEFAULT 'free'` would FK-violate on the next signup. Restore the row from the plans seed."
+        )));
+    }
+    Ok(())
 }
 
 #[derive(sqlx::FromRow)]
