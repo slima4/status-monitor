@@ -40,7 +40,6 @@ async fn owner_org(pool: PgPool) -> (axum::Router, String) {
     let user = make_user(&pool, "sp").await;
     let logo_dir = std::env::temp_dir().join(format!("sp-logo-{}", unique_slug("d")));
     let (router, _) = build_test_app_with_pg(pool, move |cfg| {
-        cfg.tenancy.enabled = true;
         cfg.public_status.logo_dir = logo_dir.to_string_lossy().into_owned();
     })
     .await;

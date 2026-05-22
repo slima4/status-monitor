@@ -2,12 +2,12 @@ mod common;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use common::build_test_app;
+use common::build_test_app_with_owner;
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
 fn app() -> axum::Router {
-    build_test_app(|_| {})
+    build_test_app_with_owner(|_| {})
 }
 
 async fn body_json(resp: axum::http::Response<Body>) -> Value {
@@ -223,7 +223,7 @@ async fn test_endpoint_rejects_ssrf_target() {
             "verify_tls": true
         }
     });
-    let app = build_test_app(|cfg| {
+    let app = build_test_app_with_owner(|cfg| {
         cfg.security.allow_private_targets = false;
     });
     let resp = app

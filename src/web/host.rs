@@ -215,7 +215,12 @@ pub async fn resolve_status_page_org(
     headers: &HeaderMap,
 ) -> Result<OrgId, PublicAppError> {
     if !subdomain_public_routes_enabled(&state.cfg) {
-        return Ok(state.default_org_id);
+        // Path-based public surface: there is no global "default org"
+        // baked into config. Look up the single live org on the box —
+        // works naturally for the self-host shape (one tenant, one page)
+        // and 404s if the deploy somehow has zero or multiple, which is
+        // exactly when path-based is the wrong surface anyway.
+        return resolve_single_org(state).await;
     }
 
     let host = headers
@@ -257,6 +262,28 @@ pub async fn resolve_status_page_org(
         .await?
         .ok_or(PublicAppError::NotFound)?;
     Ok(org.0.id)
+}
+
+/// Path-based fallback: returns the lone live org's id, or 404 if zero or
+/// multiple orgs exist. Self-host single-tenant deploys hit this path; SaaS
+/// deploys disable `path_based_public_routes` so this never fires there.
+///
+/// **Contract:** `state.db.is_some()` in every production code path. The
+/// `None` branch below is reachable ONLY from in-memory test fixtures, where
+/// `PublicSource` is mocked and ignores the returned org id. Returning the
+/// nil-UUID here keeps those fixtures rendering the same page they always
+/// did. Any future caller that would query a tenant-scoped table with the
+/// returned `OrgId` MUST also bail when `state.db.is_none()` — otherwise the
+/// nil sentinel would silently produce empty results in tests; today no such
+/// caller exists.
+async fn resolve_single_org(state: &AppState) -> Result<OrgId, PublicAppError> {
+    let Some(pool) = state.db.as_ref() else {
+        return Ok(OrgId(uuid::Uuid::nil()));
+    };
+    crate::storage::orgs::find_lone_active_org(pool)
+        .await
+        .map_err(|e| PublicAppError::Internal(anyhow::anyhow!("resolve_single_org: {e}")))?
+        .ok_or(PublicAppError::NotFound)
 }
 
 impl<S> FromRequestParts<S> for StatusPageOrg

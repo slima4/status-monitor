@@ -37,7 +37,7 @@ async fn unauthenticated_request_returns_401() {
     let Some(pool) = common::pg_pool_from_env().await else {
         return;
     };
-    let (router, _) = build_test_app_with_pg(pool, |cfg| cfg.tenancy.enabled = true).await;
+    let (router, _) = build_test_app_with_pg(pool, |_cfg| {}).await;
     // No session layer attached — Session::user is None → CurrentUser → 401.
     let resp = router
         .oneshot(Request::get("/api/v1/orgs").body(Body::empty()).unwrap())
@@ -53,7 +53,7 @@ async fn create_then_list_then_delete_round_trip() {
         return;
     };
     let user = make_user(&pool, "orgs-api").await;
-    let (router, _) = build_test_app_with_pg(pool.clone(), |cfg| cfg.tenancy.enabled = true).await;
+    let (router, _) = build_test_app_with_pg(pool.clone(), |_cfg| {}).await;
     let router = with_session(router, user, None, None);
 
     let slug = unique_slug("api");
@@ -140,7 +140,7 @@ async fn create_org_with_taken_slug_returns_409() {
         return;
     };
     let user = make_user(&pool, "orgs-api").await;
-    let (router, _) = build_test_app_with_pg(pool.clone(), |cfg| cfg.tenancy.enabled = true).await;
+    let (router, _) = build_test_app_with_pg(pool.clone(), |_cfg| {}).await;
     let router = with_session(router, user, None, None);
 
     let slug = unique_slug("dup");
@@ -184,7 +184,7 @@ async fn create_org_with_reserved_slug_returns_400() {
         return;
     };
     let user = make_user(&pool, "orgs-api").await;
-    let (router, _) = build_test_app_with_pg(pool.clone(), |cfg| cfg.tenancy.enabled = true).await;
+    let (router, _) = build_test_app_with_pg(pool.clone(), |_cfg| {}).await;
     let router = with_session(router, user, None, None);
 
     let resp = router
@@ -212,7 +212,7 @@ async fn check_slug_endpoint_returns_availability() {
         return;
     };
     let user = make_user(&pool, "orgs-api").await;
-    let (router, _) = build_test_app_with_pg(pool.clone(), |cfg| cfg.tenancy.enabled = true).await;
+    let (router, _) = build_test_app_with_pg(pool.clone(), |_cfg| {}).await;
     let router = with_session(router, user, None, None);
 
     let slug = unique_slug("chk");
@@ -254,7 +254,7 @@ async fn non_owner_cannot_delete_or_update() {
     };
     let owner = make_user(&pool, "orgs-api").await;
     let other = make_user(&pool, "orgs-api").await;
-    let (router, _) = build_test_app_with_pg(pool.clone(), |cfg| cfg.tenancy.enabled = true).await;
+    let (router, _) = build_test_app_with_pg(pool.clone(), |_cfg| {}).await;
     let owner_router = with_session(router.clone(), owner, None, None);
     let other_router = with_session(router, other, None, None);
 
@@ -326,7 +326,7 @@ async fn patch_renames_slug_and_responds_with_new_view() {
         return;
     };
     let user = make_user(&pool, "orgs-api").await;
-    let (router, _) = build_test_app_with_pg(pool.clone(), |cfg| cfg.tenancy.enabled = true).await;
+    let (router, _) = build_test_app_with_pg(pool.clone(), |_cfg| {}).await;
     let router = with_session(router, user, None, None);
 
     let from = unique_slug("from");
@@ -355,7 +355,7 @@ async fn patch_slug_conflict_returns_409() {
         return;
     };
     let user = make_user(&pool, "orgs-api").await;
-    let (router, _) = build_test_app_with_pg(pool.clone(), |cfg| cfg.tenancy.enabled = true).await;
+    let (router, _) = build_test_app_with_pg(pool.clone(), |_cfg| {}).await;
     let router = with_session(router, user, None, None);
 
     let a = unique_slug("a");
@@ -382,7 +382,7 @@ async fn patch_invalid_slug_returns_400_with_field() {
         return;
     };
     let user = make_user(&pool, "orgs-api").await;
-    let (router, _) = build_test_app_with_pg(pool.clone(), |cfg| cfg.tenancy.enabled = true).await;
+    let (router, _) = build_test_app_with_pg(pool.clone(), |_cfg| {}).await;
     let router = with_session(router, user, None, None);
 
     let slug = unique_slug("inv");
@@ -409,7 +409,7 @@ async fn patch_empty_body_returns_400_empty_patch() {
         return;
     };
     let user = make_user(&pool, "orgs-api").await;
-    let (router, _) = build_test_app_with_pg(pool.clone(), |cfg| cfg.tenancy.enabled = true).await;
+    let (router, _) = build_test_app_with_pg(pool.clone(), |_cfg| {}).await;
     let router = with_session(router, user, None, None);
     let slug = unique_slug("e");
     let (_, body) = create_org_for_user(router.clone(), &slug, "E").await;
@@ -430,7 +430,7 @@ async fn patch_non_owner_member_gets_forbidden_on_slug_change() {
     };
     let owner = make_user(&pool, "orgs-api").await;
     let other = make_user(&pool, "orgs-api").await;
-    let (router, _) = build_test_app_with_pg(pool.clone(), |cfg| cfg.tenancy.enabled = true).await;
+    let (router, _) = build_test_app_with_pg(pool.clone(), |_cfg| {}).await;
     let owner_router = with_session(router.clone(), owner, None, None);
     let other_router = with_session(router, other, None, None);
 

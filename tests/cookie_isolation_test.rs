@@ -30,7 +30,6 @@ use tower::ServiceExt;
 const BASE_DOMAIN: &str = "test.local";
 
 fn saas_subdomain(cfg: &mut status_monitor::config::AppConfig) {
-    cfg.tenancy.enabled = true;
     cfg.tenancy.subdomain_public_routes = true;
     cfg.tenancy.path_based_public_routes = false;
     cfg.public_status.base_domain = BASE_DOMAIN.into();

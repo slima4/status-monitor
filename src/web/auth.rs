@@ -46,7 +46,7 @@ use crate::app::AppState;
 use crate::auth::session as session_store;
 use crate::domain::{OrgId, UserId};
 use crate::error::{AppError, Result};
-use crate::storage::orgs::{default_org_for_user, is_active_member};
+use crate::storage::orgs::is_active_member;
 
 /// Custom header used by API-token clients to scope writes/reads to a specific
 /// org. Tokens carry no active-org state, so this header (or a future slug
@@ -122,9 +122,6 @@ where
         }
 
         let app_state = AppState::from_ref(state);
-        if !app_state.cfg.tenancy.enabled {
-            return Ok(Session::default());
-        }
         let Some(pool) = app_state.db.as_ref() else {
             return Ok(Session::default());
         };
@@ -225,20 +222,11 @@ where
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self> {
         let app_state = AppState::from_ref(state);
 
-        if !app_state.cfg.tenancy.enabled {
-            return Ok(CurrentOrg(app_state.default_org_id));
-        }
-
         // API-token path: tokens carry no active org. The caller MUST surface
-        // the org explicitly (slug header today; future slug-path routes can
-        // also feed this). Falling back to the default org silently routes
-        // API-token writes into the wrong org (the data-misdirection bug).
+        // the org explicitly via `X-Status-Monitor-Org`. No fallback exists;
+        // a missing/unknown header is a 400, not a silent default-org write.
         if let Some(AuthContext::ApiToken { user_id, .. }) = parts.extensions.get::<AuthContext>() {
-            let pool = app_state.db.as_ref().ok_or_else(|| {
-                AppError::Other(anyhow::anyhow!(
-                    "tenancy enabled but AppState.db is None — refusing to resolve org"
-                ))
-            })?;
+            let pool = app_state.require_db()?;
             let user_id = *user_id;
             let org = explicit_org_from_header(parts, pool).await?;
             if !is_active_member(pool, user_id, org).await? {
@@ -252,23 +240,23 @@ where
             .expect("Session extractor is infallible");
 
         let user_id = session.user_id().ok_or(AppError::Unauthorized)?;
-        let pool = app_state.db.as_ref().ok_or_else(|| {
-            AppError::Other(anyhow::anyhow!(
-                "tenancy enabled but AppState.db is None — refusing to resolve org"
-            ))
-        })?;
+        // Session must carry an active org. OAuth callback + signup stamp it
+        // on creation, so a healthy session always has it. A missing one is
+        // an unauthorised request, not a silent fallback to some default.
+        let active = session.active_org_id.ok_or(AppError::Unauthorized)?;
 
-        if let Some(active) = session.active_org_id {
-            if !is_active_member(pool, user_id, active).await? {
-                return Err(AppError::Forbidden);
-            }
+        // Test-only fixture path: in-memory stores carry no `organizations`
+        // table, so the membership check has nothing to verify against. The
+        // session was injected through `Extension<Session>` and IS the test's
+        // assertion. In production `db` is always `Some`, so this branch
+        // never fires there.
+        let Some(pool) = app_state.db.as_ref() else {
             return Ok(CurrentOrg(active));
+        };
+        if !is_active_member(pool, user_id, active).await? {
+            return Err(AppError::Forbidden);
         }
-
-        let default = default_org_for_user(pool, user_id)
-            .await?
-            .ok_or(AppError::Forbidden)?;
-        Ok(CurrentOrg(default))
+        Ok(CurrentOrg(active))
     }
 }
 
@@ -287,11 +275,6 @@ pub(crate) fn login_redirect(next: &str) -> Redirect {
 /// envelope is wrong for a page navigation. Carries no payload: adding it as
 /// a handler parameter *is* the auth boundary, the same type-as-boundary rule
 /// the API extractors follow (see the module docs).
-///
-/// `!tenancy.enabled` (self-host) is a pass-through — consistent with
-/// [`Session`]/[`CurrentOrg`]. Self-host has **no operator authentication of
-/// its own**: it relies on the deployment not exposing the operator surface
-/// (see `deployment/`). This gate only protects the SaaS operator UI.
 #[derive(Debug, Clone, Copy)]
 pub struct AuthedBrowser;
 
@@ -306,10 +289,6 @@ where
         parts: &mut Parts,
         state: &S,
     ) -> std::result::Result<Self, Self::Rejection> {
-        let app_state = AppState::from_ref(state);
-        if !app_state.cfg.tenancy.enabled {
-            return Ok(AuthedBrowser);
-        }
         let session = Session::from_request_parts(parts, state)
             .await
             .expect("Session extractor is infallible");

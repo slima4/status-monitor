@@ -8,12 +8,12 @@ mod common;
 use axum::Router;
 use axum::body::Body;
 use axum::http::StatusCode;
-use common::{body_json, build_test_app, json_request};
+use common::{body_json, build_test_app_with_owner, json_request};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
 fn app() -> Router {
-    build_test_app(|_| {})
+    build_test_app_with_owner(|_| {})
 }
 
 async fn send(app: &Router, method: &str, path: &str, body: Value) -> (StatusCode, Value) {

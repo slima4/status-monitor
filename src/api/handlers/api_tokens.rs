@@ -18,8 +18,8 @@ use crate::api::error::codes;
 use crate::app::AppState;
 use crate::auth::api_tokens as tokens;
 use crate::error::{AppError, Result};
-use crate::web::CurrentUser;
 use crate::web::auth::api_token::VerifiedCurrentUser;
+use crate::web::{CurrentOrg, CurrentUser};
 
 /// Max length of a token name. Anything longer is almost certainly an
 /// accident (or an attempt to fill the table with junk).
@@ -60,16 +60,17 @@ pub struct RenameApiTokenRequest {
 pub async fn create(
     State(state): State<AppState>,
     VerifiedCurrentUser(CurrentUser(user_id)): VerifiedCurrentUser,
+    CurrentOrg(org): CurrentOrg,
     Json(req): Json<NewApiTokenRequest>,
 ) -> Result<(StatusCode, Json<NewApiTokenResponse>)> {
     let name = validate_name(&req.name)?;
     let pool = state.require_db()?;
-    // Cap from the plan (single source of truth). Tokens are user-scoped,
-    // not org-scoped; the default org's plan governs the per-user cap.
+    // Tokens are user-scoped; the cap is read from the active org's plan so a
+    // user acting in two orgs sees each org's plan limit, not a single global.
     let max_tokens = i64::from(
         state
             .quotas
-            .limit_for_org(state.default_org_id)
+            .limit_for_org(org)
             .await?
             .max_api_tokens_per_user,
     );

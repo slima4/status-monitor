@@ -52,10 +52,9 @@ pub struct AppState {
     /// *outside* the tenant-scoped repositories. Org-scoped data access still
     /// goes through the repositories on this state.
     ///
-    /// `None` is permitted only for in-memory test fixtures that always run
-    /// with `tenancy.enabled = false`; the extractor short-circuits before it
-    /// would dereference the pool. Any SaaS-mode code path that observes
-    /// `None` here returns an internal error.
+    /// `None` is permitted only for in-memory test fixtures. Any production
+    /// code path that observes `None` here returns an internal error via
+    /// `require_db()`.
     pub db: Option<PgPool>,
     pub target_store: Arc<dyn TargetStore>,
     pub results_store: Arc<dyn ResultsStore>,
@@ -68,10 +67,6 @@ pub struct AppState {
     pub maintenance_store: Arc<dyn MaintenanceStore>,
     pub notification_channel_store: Arc<dyn NotificationChannelStore>,
     pub incident_narration_store: Arc<dyn IncidentNarrationStore>,
-    /// Org id used in self-host mode and as the implicit org for every write
-    /// path until the repository pattern threads `OrgId` through call sites in
-    /// Phase 2. Provisioned at startup by `ensure_default_org`.
-    pub default_org_id: OrgId,
     /// Debounce cache for `sessions.last_used_at` writes — see
     /// `auth::session::touch_last_used_debounced`.
     pub session_debounce: Arc<LastUsedDebounce>,
@@ -102,16 +97,6 @@ pub struct AppState {
 /// calls are kept separate so cookie-scope can be exercised in isolation by
 /// tests.
 pub fn assert_per_org_status_config(cfg: &AppConfig) {
-    if cfg.tenancy.subdomain_public_routes && !cfg.tenancy.enabled {
-        panic!("tenancy.subdomain_public_routes = true requires tenancy.enabled = true");
-    }
-    if cfg.tenancy.enabled && cfg.tenancy.path_based_public_routes {
-        panic!(
-            "tenancy.path_based_public_routes = true with tenancy.enabled = true \
-             would serve the default org's data to every SaaS tenant. \
-             Use tenancy.subdomain_public_routes = true instead."
-        );
-    }
     if cfg.tenancy.subdomain_public_routes {
         let bd = cfg.public_status.base_domain.as_str();
         if bd.is_empty() || !bd.contains('.') {
@@ -132,7 +117,7 @@ pub fn assert_cookie_scope_safe(cfg: &AppConfig) {
     if cookie_domain.is_empty() {
         return;
     }
-    if !cfg.tenancy.enabled || !cfg.tenancy.subdomain_public_routes {
+    if !cfg.tenancy.subdomain_public_routes {
         return;
     }
     let base = cfg.public_status.base_domain.as_str();
@@ -172,7 +157,6 @@ impl AppState {
         maintenance_store: Arc<dyn MaintenanceStore>,
         notification_channel_store: Arc<dyn NotificationChannelStore>,
         incident_narration_store: Arc<dyn IncidentNarrationStore>,
-        default_org_id: OrgId,
         outbound_http: OutboundHttpClient,
         email_sender: Arc<dyn EmailSender>,
     ) -> Self {
@@ -193,7 +177,6 @@ impl AppState {
             maintenance_store,
             notification_channel_store,
             incident_narration_store,
-            default_org_id,
             session_debounce: Arc::new(build_debounce_cache()),
             api_token_debounce: Arc::new(build_api_token_debounce()),
             outbound_http,
@@ -231,14 +214,13 @@ mod tests {
         );
     }
 
-    /// A valid SaaS-subdomain baseline: tenancy on, subdomain routes on,
-    /// path-based off, a two-label base domain, host-only cookies. Every
-    /// field the assertions read is set explicitly so env/toml overrides
-    /// can't make the tests non-deterministic. Each test then flips exactly
-    /// the field under test off this safe starting point.
+    /// A valid SaaS-subdomain baseline: subdomain routes on, path-based off,
+    /// a two-label base domain, host-only cookies. Every field the assertions
+    /// read is set explicitly so env/toml overrides can't make the tests
+    /// non-deterministic. Each test then flips exactly the field under test
+    /// off this safe starting point.
     fn saas_subdomain_cfg() -> AppConfig {
         let mut cfg = AppConfig::load().expect("config");
-        cfg.tenancy.enabled = true;
         cfg.tenancy.subdomain_public_routes = true;
         cfg.tenancy.path_based_public_routes = false;
         cfg.public_status.base_domain = "example.com".into();
@@ -247,37 +229,8 @@ mod tests {
     }
 
     #[test]
-    fn self_host_path_based_config_passes() {
-        let mut cfg = saas_subdomain_cfg();
-        cfg.tenancy.enabled = false;
-        cfg.tenancy.path_based_public_routes = true;
-        cfg.tenancy.subdomain_public_routes = false;
-        assert_per_org_status_config(&cfg);
-    }
-
-    #[test]
     fn valid_saas_subdomain_config_passes() {
         assert_per_org_status_config(&saas_subdomain_cfg());
-    }
-
-    #[test]
-    fn subdomain_routes_without_tenancy_panics() {
-        let mut cfg = saas_subdomain_cfg();
-        cfg.tenancy.enabled = false;
-        cfg.tenancy.subdomain_public_routes = true;
-        assert_panics("requires tenancy.enabled = true", move || {
-            assert_per_org_status_config(&cfg)
-        });
-    }
-
-    #[test]
-    fn path_based_routes_with_tenancy_panics() {
-        let mut cfg = saas_subdomain_cfg();
-        cfg.tenancy.path_based_public_routes = true;
-        assert_panics(
-            "path_based_public_routes = true with tenancy.enabled = true",
-            move || assert_per_org_status_config(&cfg),
-        );
     }
 
     #[test]

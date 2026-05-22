@@ -6,7 +6,6 @@ use status_monitor::config::AppConfig;
 
 fn valid_cfg() -> AppConfig {
     let mut cfg = AppConfig::load().expect("load");
-    cfg.tenancy.enabled = true;
     cfg.tenancy.subdomain_public_routes = true;
     cfg.tenancy.path_based_public_routes = false;
     cfg.public_status.base_domain = "example.com".into();

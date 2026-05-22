@@ -106,7 +106,7 @@ async fn upsert_creates_user_and_signup_org_for_new_identity() {
         .await
         .expect("upsert");
     assert!(resolved.is_new_user);
-    assert!(resolved.default_org_id.is_some());
+    assert!(resolved.signup_org_id.is_some());
 
     // CITEXT — invitation row with lower-case match should find this user.
     let (user_email,): (String,) = sqlx::query_as("SELECT email::text FROM users WHERE id = $1")
@@ -117,13 +117,13 @@ async fn upsert_creates_user_and_signup_org_for_new_identity() {
     assert_eq!(user_email.to_lowercase(), "alice@example.test");
 
     // Idempotent re-callback with same identity must NOT create a second
-    // user. Returns is_new_user=false; default_org_id resolves to the org
+    // user. Returns is_new_user=false; signup_org_id resolves to the org
     // the first call created.
     let again = github::upsert_identity_and_signup_org(&pool, &identity)
         .await
         .expect("re-upsert");
     assert!(!again.is_new_user);
-    assert_eq!(again.default_org_id, resolved.default_org_id);
+    assert_eq!(again.signup_org_id, resolved.signup_org_id);
     assert_eq!(again.user_id.0, resolved.user_id.0);
 
     pool.close().await;
@@ -155,8 +155,8 @@ async fn upsert_links_existing_user_on_email_match() {
         .await
         .expect("upsert");
     assert!(!resolved.is_new_user);
-    // Bob existed with no memberships → default_org_id is None.
-    assert!(resolved.default_org_id.is_none());
+    // Bob existed with no memberships → signup_org_id is None.
+    assert!(resolved.signup_org_id.is_none());
     assert_eq!(resolved.user_id.0, existing_id);
 
     // Identity link must have been inserted.

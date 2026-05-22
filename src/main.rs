@@ -27,7 +27,7 @@ use status_monitor::{
         self, ClickhouseResultSink, ClickhouseResultsStore, IncidentNarrationStore,
         MaintenanceStore, NotificationChannelStore, PgIncidentNarrationStore, PgMaintenanceStore,
         PgNotificationChannelStore, PostgresTargetStore, ResultSink, ResultsStore, TargetStore,
-        ensure_default_org,
+        admin::AdminRepo,
     },
     worker::{ResultFanout, WorkerPool},
 };
@@ -134,16 +134,7 @@ async fn main() -> Result<()> {
             None
         }
     };
-    // Open the pool + run migrations first so `ensure_default_org` can write,
-    // then construct the store stamped with the resolved org id.
     let pg_pool = PostgresTargetStore::connect_pool(&cfg.storage.postgres).await?;
-    let default_org_id = ensure_default_org(&pg_pool, &cfg.tenancy.default_org_slug).await?;
-    tracing::info!(
-        // SAFE: operator's own default-org config, not a data subject's slug
-        org_id = %default_org_id,
-        slug = %cfg.tenancy.default_org_slug,
-        "default org ready"
-    );
     let target_store: Arc<dyn TargetStore> = Arc::new(PostgresTargetStore::from_pool(
         pg_pool.clone(),
         cipher.clone(),
@@ -260,11 +251,15 @@ async fn main() -> Result<()> {
     ));
 
     let pg_pool_for_stores = pg_pool.clone();
+    let admin_repo_for_writer = Arc::new(AdminRepo::new(
+        pg_pool_for_stores.clone(),
+        cipher.clone(),
+        "incident_writer",
+    ));
     let incident_writer = Arc::new(IncidentWriter::new(
-        target_store.clone(),
+        admin_repo_for_writer,
         results_store.clone(),
         Arc::new(PgIncidentStore::new(pg_pool)),
-        default_org_id,
         IncidentWriterConfig::default(),
     ));
     let incident_writer_handle: JoinHandle<()> = {
@@ -299,21 +294,16 @@ async fn main() -> Result<()> {
     let email_sender = status_monitor::email::build_email_sender(&cfg.email, &outbound_http)
         .map_err(|e| AppError::Other(anyhow::anyhow!("build_email_sender: {e}")))?;
 
-    if cfg.tenancy.enabled {
-        status_monitor::auth::ensure_fingerprint_salt(
-            &pg_pool_for_stores,
-            &cfg.auth.fingerprint_salt,
-        )
+    status_monitor::auth::ensure_fingerprint_salt(&pg_pool_for_stores, &cfg.auth.fingerprint_salt)
         .await
         .map_err(|e| AppError::Other(anyhow::anyhow!("auth salt guard: {e}")))?;
 
-        let prefix_len = cfg.auth.api_tokens.prefix_visible_chars as usize;
-        if prefix_len < status_monitor::auth::api_tokens::MIN_PREFIX_VISIBLE_CHARS {
-            return Err(AppError::Other(anyhow::anyhow!(
-                "auth.api_tokens.prefix_visible_chars must be >= {} (got {prefix_len})",
-                status_monitor::auth::api_tokens::MIN_PREFIX_VISIBLE_CHARS
-            )));
-        }
+    let prefix_len = cfg.auth.api_tokens.prefix_visible_chars as usize;
+    if prefix_len < status_monitor::auth::api_tokens::MIN_PREFIX_VISIBLE_CHARS {
+        return Err(AppError::Other(anyhow::anyhow!(
+            "auth.api_tokens.prefix_visible_chars must be >= {} (got {prefix_len})",
+            status_monitor::auth::api_tokens::MIN_PREFIX_VISIBLE_CHARS
+        )));
     }
 
     let invitation_purge_handle: JoinHandle<()> = {
@@ -354,7 +344,6 @@ async fn main() -> Result<()> {
         maintenance_store,
         notification_channel_store,
         incident_narration_store,
-        default_org_id,
         outbound_http,
         email_sender,
     );

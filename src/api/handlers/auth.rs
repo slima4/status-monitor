@@ -156,7 +156,7 @@ pub async fn github_callback(
         pool,
         &state.cfg.auth.session,
         resolved.user_id,
-        resolved.default_org_id,
+        resolved.signup_org_id,
         ip_hash.as_deref(),
         ua_hash.as_deref(),
     )

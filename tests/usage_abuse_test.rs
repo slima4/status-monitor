@@ -10,7 +10,10 @@ mod common;
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use common::{body_json, build_test_app_with_pg_store, make_user, pg_pool_from_env, with_session};
+use common::{
+    body_json, build_test_app_with_pg_store, build_test_app_with_pg_store_anon, make_user,
+    pg_pool_from_env, with_session,
+};
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use status_monitor::domain::{OrgId, UserId};
@@ -74,6 +77,25 @@ async fn make_owner(pool: &PgPool, org: OrgId) -> UserId {
         .await
         .expect("seed owner membership");
     user
+}
+
+async fn make_signup_org(pool: &PgPool, user: UserId, prefix: &str) -> OrgId {
+    let slug = format!("{prefix}-{}", uuid::Uuid::now_v7().simple());
+    let slug = &slug[..slug.len().min(30)];
+    let (id,): (uuid::Uuid,) = sqlx::query_as(
+        "INSERT INTO organizations (slug, name) VALUES ($1, 'Stranger Org') RETURNING id",
+    )
+    .bind(slug)
+    .fetch_one(pool)
+    .await
+    .expect("insert stranger org");
+    sqlx::query("INSERT INTO memberships (user_id, org_id, role) VALUES ($1, $2, 'owner')")
+        .bind(user.0)
+        .bind(id)
+        .execute(pool)
+        .await
+        .expect("seed stranger owner membership");
+    OrgId(id)
 }
 
 /// The shipped `config/default.toml` `[abuse].url_patterns_denied` and the
@@ -147,9 +169,9 @@ async fn org_usage_reports_accurate_counts_and_limits() {
     let Some(pool) = pg_pool_from_env().await else {
         return;
     };
-    let (app, org) = build_test_app_with_pg_store(pool.clone(), |_| {}).await;
+    let (app, org) = build_test_app_with_pg_store_anon(pool.clone(), |_| {}).await;
     let user = make_owner(&pool, org).await;
-    let app = with_session(app, user, None, None);
+    let app = with_session(app, user, Some(org), None);
 
     assert_eq!(
         post_target(&app, "t1", "https://example.com/a")
@@ -194,10 +216,13 @@ async fn org_usage_requires_membership() {
     let Some(pool) = pg_pool_from_env().await else {
         return;
     };
-    let (app, org) = build_test_app_with_pg_store(pool.clone(), |_| {}).await;
-    // A user who is NOT a member of `org`.
+    let (app, org) = build_test_app_with_pg_store_anon(pool.clone(), |_| {}).await;
+    // A user who is NOT a member of `org` — but is a member of their own
+    // signup org. CurrentOrg requires an `active_org_id`; give them one
+    // they own so the request reaches the org-not-found gate we're testing.
     let stranger = make_user(&pool, "stranger").await;
-    let app = with_session(app, stranger, None, None);
+    let stranger_org = make_signup_org(&pool, stranger, "stranger-org").await;
+    let app = with_session(app, stranger, Some(stranger_org), None);
     let resp = app
         .oneshot(
             Request::get(format!("/api/v1/orgs/{}/usage", org.0))
@@ -218,7 +243,7 @@ async fn me_usage_reports_tokens_and_owned_orgs() {
     };
     let (app, org) = build_test_app_with_pg_store(pool.clone(), |_| {}).await;
     let user = make_owner(&pool, org).await;
-    let app = with_session(app, user, None, None);
+    let app = with_session(app, user, Some(org), None);
 
     let resp = app
         .oneshot(

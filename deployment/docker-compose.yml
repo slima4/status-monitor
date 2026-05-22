@@ -90,19 +90,17 @@ services:
       STATUS_MONITOR_OBSERVABILITY__GRAFANA__OTLP_ENDPOINT: ${GRAFANA_OTLP_ENDPOINT:-}
       STATUS_MONITOR_OBSERVABILITY__GRAFANA__INSTANCE_ID: ${GRAFANA_OTLP_INSTANCE_ID:-}
       STATUS_MONITOR_OBSERVABILITY__GRAFANA__API_KEY: ${GRAFANA_OTLP_API_TOKEN:-}
-      # Tenancy / public-status surface. Defaults are self-host (single org,
-      # /status on the operator host). For the SaaS wildcard surface set
-      # these in .env — see .env.example "Per-org status pages (SaaS)".
-      # base_domain reuses STATUS_MONITOR_DOMAIN (it must equal the Caddy
-      # base domain so {slug}.{domain} resolves via the apex wildcard);
-      # unused unless SUBDOMAIN_PUBLIC_ROUTES is true.
-      STATUS_MONITOR_TENANCY__ENABLED: ${STATUS_MONITOR_TENANCY_ENABLED:-false}
+      # Public-status surface routing. `path_based` serves `/status/<slug>` on
+      # the operator host. `subdomain` serves per-org pages on
+      # `{slug}.{public_status.base_domain}` (apex wildcard). base_domain
+      # reuses STATUS_MONITOR_DOMAIN so {slug}.{domain} resolves via the
+      # Caddy apex wildcard; only consulted when SUBDOMAIN_PUBLIC_ROUTES is
+      # true.
       STATUS_MONITOR_TENANCY__PATH_BASED_PUBLIC_ROUTES: ${STATUS_MONITOR_PATH_BASED_PUBLIC_ROUTES:-true}
       STATUS_MONITOR_TENANCY__SUBDOMAIN_PUBLIC_ROUTES: ${STATUS_MONITOR_SUBDOMAIN_PUBLIC_ROUTES:-false}
       STATUS_MONITOR_PUBLIC_STATUS__BASE_DOMAIN: ${STATUS_MONITOR_DOMAIN}
-      # Session-fingerprint salt. REQUIRED once tenancy is enabled (SaaS):
-      # the app refuses to boot with an empty salt. Empty in self-host is
-      # fine (the guard only fires when tenancy is on).
+      # Session-fingerprint salt. REQUIRED — boot refuses to start with an
+      # empty salt.
       STATUS_MONITOR_AUTH__FINGERPRINT_SALT: ${STATUS_MONITOR_AUTH_FINGERPRINT_SALT:-}
       # GitHub OAuth — the operator login method (the app owns auth; there is
       # no edge basic_auth). client_id is public; client_secret is a secret.

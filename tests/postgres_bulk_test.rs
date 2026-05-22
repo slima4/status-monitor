@@ -10,19 +10,29 @@ use std::time::Duration;
 use sqlx::PgPool;
 use status_monitor::domain::{CheckSpec, ExpectedStatus, NewTarget, TargetUpdate};
 use status_monitor::security::Cipher;
-use status_monitor::storage::{PostgresTargetStore, TargetStore, ensure_default_org};
+use status_monitor::storage::{PostgresTargetStore, TargetStore};
 use url::Url;
+use uuid::Uuid;
 
 use crate::common::{default_http_check, test_cipher};
 
-/// Provision a default org and return a store stamped to write under it.
+/// Provision a fresh org with a unique slug and return a store paired with
+/// the new org's id. Each test gets its own org so parallel test runs don't
+/// step on each other's `targets` rows.
 async fn store_with_default_org(
     pool: PgPool,
     cipher: Option<Arc<Cipher>>,
 ) -> (PostgresTargetStore, status_monitor::domain::OrgId) {
-    let org_id = ensure_default_org(&pool, "default")
-        .await
-        .expect("default org");
+    let slug = format!("bulk-{}", Uuid::now_v7().simple());
+    let slug = &slug[..slug.len().min(30)];
+    let (id,): (Uuid,) = sqlx::query_as(
+        "INSERT INTO organizations (slug, name) VALUES ($1, 'Bulk Test') RETURNING id",
+    )
+    .bind(slug)
+    .fetch_one(&pool)
+    .await
+    .expect("insert bulk-test org");
+    let org_id = status_monitor::domain::OrgId(id);
     let store = PostgresTargetStore::from_pool(pool, cipher);
     (store, org_id)
 }
@@ -241,9 +251,16 @@ async fn legacy_plaintext_row_decrypts_passthrough(pool: PgPool) {
         "basic_auth": ["legacy", "old-pass"],
         "bearer_token": null
     });
-    let org_id = ensure_default_org(&pool, "default")
-        .await
-        .expect("default org");
+    let slug = format!("bulk-{}", Uuid::now_v7().simple());
+    let slug = &slug[..slug.len().min(30)];
+    let (org_uuid,): (Uuid,) = sqlx::query_as(
+        "INSERT INTO organizations (slug, name) VALUES ($1, 'Bulk Test') RETURNING id",
+    )
+    .bind(slug)
+    .fetch_one(&pool)
+    .await
+    .expect("insert bulk-test org");
+    let org_id = status_monitor::domain::OrgId(org_uuid);
     let id = uuid::Uuid::now_v7();
     sqlx::query(
         "INSERT INTO targets (id, org_id, name, check_spec, interval_secs, enabled, tags) \

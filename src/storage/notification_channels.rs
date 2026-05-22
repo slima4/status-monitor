@@ -1,8 +1,7 @@
 //! Storage for per-org `notification_channels`.
 //!
-//! Every method is org-scoped (`org: OrgId`), mirroring [`super::TargetStore`]
-//! — NOT the `default_org_id`-pinned maintenance store, which is not
-//! SaaS-tenant-safe. One tenant can never read or mutate another's channels.
+//! Every method is org-scoped (`org: OrgId`), mirroring [`super::TargetStore`].
+//! One tenant can never read or mutate another's channels.
 //! The transport secrets in `config` are sealed at rest by the credentials
 //! KEK — the same `{"$enc":"v1:…"}` envelope convention used for
 //! `targets.check_spec` (see [`super::postgres_secrets`]) — and opened back to

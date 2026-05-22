@@ -20,9 +20,8 @@ async fn status(app: axum::Router, path: &str) -> StatusCode {
 }
 
 #[tokio::test]
-async fn self_host_mode_serves_path_based_public_routes() {
+async fn path_based_mode_serves_path_public_routes() {
     let app = build_test_app_with_web(|cfg| {
-        cfg.tenancy.enabled = false;
         cfg.tenancy.path_based_public_routes = true;
         cfg.tenancy.subdomain_public_routes = false;
     });
@@ -37,9 +36,8 @@ async fn self_host_mode_serves_path_based_public_routes() {
 }
 
 #[tokio::test]
-async fn saas_mode_with_path_based_off_404s_path_routes() {
+async fn subdomain_only_mode_404s_path_routes() {
     let app = build_test_app_with_web(|cfg| {
-        cfg.tenancy.enabled = true;
         cfg.tenancy.path_based_public_routes = false;
         cfg.tenancy.subdomain_public_routes = true;
     });

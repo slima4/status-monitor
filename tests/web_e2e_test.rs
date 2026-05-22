@@ -9,12 +9,12 @@ mod common;
 
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode, header};
-use common::build_test_app_with_web;
+use common::{build_test_app_with_web, build_test_app_with_web_and_owner};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
 fn app() -> axum::Router {
-    build_test_app_with_web(|_| {})
+    build_test_app_with_web_and_owner(|_| {})
 }
 
 async fn body_text(resp: axum::http::Response<Body>) -> String {
@@ -319,7 +319,7 @@ async fn recover_account_page_blank_token_shows_invalid() {
 
 #[tokio::test]
 async fn settings_account_redirects_to_login_when_unauthenticated() {
-    let resp = app()
+    let resp = build_test_app_with_web(|_| {})
         .oneshot(
             Request::get("/settings/account")
                 .body(Body::empty())
@@ -340,13 +340,12 @@ async fn settings_account_redirects_to_login_when_unauthenticated() {
     assert!(loc.starts_with("/login"), "redirect target was {loc}");
 }
 
-/// Operator HTML pages must redirect an anonymous browser to `/login` in
-/// SaaS mode — the `AuthedBrowser` gate. Without `tenancy.enabled = true`
-/// the gate is a deliberate pass-through (self-host has no login surface),
-/// so this asserts the security property only where it actually applies.
+/// Operator HTML pages must redirect an anonymous browser to `/login`.
+/// The `AuthedBrowser` gate is the single auth model — there is no
+/// no-auth pass-through anywhere in the binary.
 #[tokio::test]
 async fn operator_pages_redirect_to_login_when_unauthenticated_saas() {
-    let app = build_test_app_with_web(|cfg| cfg.tenancy.enabled = true);
+    let app = build_test_app_with_web(|_| {});
     for path in [
         "/",
         "/targets",

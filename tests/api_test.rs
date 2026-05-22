@@ -2,12 +2,12 @@ mod common;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use common::build_test_app;
+use common::build_test_app_with_owner;
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
 fn app() -> axum::Router {
-    build_test_app(|_| {})
+    build_test_app_with_owner(|_| {})
 }
 
 async fn body_json(resp: axum::http::Response<Body>) -> Value {

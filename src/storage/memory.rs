@@ -46,9 +46,9 @@ impl ResultSink for InMemorySink {
 // Single-org test fixture. The `org` parameter exists to satisfy the
 // org-scoped trait (and to type-check the call sites that thread
 // `CurrentOrg`), but is intentionally not used for filtering: these stores
-// only ever hold one tenant's data under `tenancy.enabled = false`. Real
-// cross-tenant isolation lives in the Postgres/ClickHouse impls and is
-// covered by the SaaS two-org integration tests.
+// only ever hold one tenant's data in tests. Real cross-tenant isolation
+// lives in the Postgres/ClickHouse impls and is covered by the two-org
+// integration tests.
 #[async_trait]
 impl ResultsStore for InMemorySink {
     async fn list_results(

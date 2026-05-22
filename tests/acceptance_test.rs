@@ -8,7 +8,7 @@ use std::sync::Arc;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use chrono::{Duration, Utc};
-use common::build_test_app;
+use common::build_test_app_with_owner;
 use serde_json::{Value, json};
 use status_monitor::domain::{CheckResult, CheckStatus};
 use status_monitor::storage::{InMemorySink, ResultSink, TimeRange};
@@ -16,7 +16,7 @@ use tower::ServiceExt;
 use uuid::Uuid;
 
 fn app() -> axum::Router {
-    build_test_app(|_| {})
+    build_test_app_with_owner(|_| {})
 }
 
 async fn body_json(resp: axum::http::Response<Body>) -> Value {
@@ -292,7 +292,7 @@ async fn check_now_force_bypasses_breaker() {
     // Use a TCP check pointing at a guaranteed-closed loopback port so the
     // worker returns an error; repeating it trips the breaker (threshold 2 in
     // default test config).
-    let app = build_test_app(|cfg| {
+    let app = build_test_app_with_owner(|cfg| {
         cfg.security.allow_private_targets = true;
         cfg.circuit_breaker.failure_threshold = 1;
         cfg.circuit_breaker.open_duration_secs = 60;

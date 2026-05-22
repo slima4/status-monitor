@@ -51,34 +51,62 @@ pub fn build_test_outbound_and_email() -> (OutboundHttpClient, Arc<dyn EmailSend
 /// Fixed org id used in every `build_test_app*` helper. Tests run with
 /// in-memory stores that don't enforce the FK to `organizations`, so the
 /// value just needs to be stable. Live-DB integration tests must NOT reuse
-/// this id — they provision their own org via `storage::ensure_default_org`
+/// this id — they provision their own org via `storage::create_org_with_owner`
 /// so the FK on tenant tables resolves.
 pub fn test_org_id() -> OrgId {
     OrgId(Uuid::from_u128(0x0000_0000_0000_0000_0000_0000_0000_0001))
 }
 
-/// Self-host (`tenancy.enabled = false`) vs SaaS (`tenancy.enabled = true`)
-/// runtime modes. Integration tests parameterise over this with `rstest`
-/// so both modes are exercised against the same router/handlers.
+/// Companion to [`test_org_id`] for in-memory routers that need to thread a
+/// stable owner identity through `with_session`. Same justification: the
+/// in-memory stores don't enforce FK to `users`, so any stable value works.
+pub fn test_user_id() -> status_monitor::domain::UserId {
+    status_monitor::domain::UserId(Uuid::from_u128(0x0000_0000_0000_0000_0000_0000_0000_0002))
+}
+
+/// One-line helper that wraps [`build_test_app`] with an owner session bound
+/// to [`test_user_id`] + [`test_org_id`]. Use this for tests that hit
+/// authenticated operator endpoints; for tests that probe the unauthenticated
+/// branch, use [`build_test_app`] directly without the session layer.
+pub fn build_test_app_with_owner(mutate: impl FnOnce(&mut AppConfig)) -> Router {
+    with_session(
+        build_test_app(mutate),
+        test_user_id(),
+        Some(test_org_id()),
+        Some("test-owner-session"),
+    )
+}
+
+/// Same as [`build_test_app_with_owner`] but for the router shape that
+/// mounts the operator web UI in addition to the API.
+pub fn build_test_app_with_web_and_owner(mutate: impl FnOnce(&mut AppConfig)) -> Router {
+    with_session(
+        build_test_app_with_web(mutate),
+        test_user_id(),
+        Some(test_org_id()),
+        Some("test-owner-session"),
+    )
+}
+
+/// Public-surface routing mode. Tests parameterise over this to exercise the
+/// path-based and subdomain dispatch arms; the binary itself runs SaaS-only
+/// (sessions required), so both modes share the same auth model.
 #[derive(Clone, Copy, Debug)]
 pub enum TenancyMode {
-    SelfHost,
-    Saas,
+    /// Path-based public status pages (`/status/<slug>`).
+    PathBased,
+    /// Per-org wildcard subdomain public status pages.
+    Subdomain,
 }
 
 impl TenancyMode {
-    /// Apply the mode to a freshly loaded [`AppConfig`]. SaaS mode also flips
-    /// `subdomain_public_routes = true` so non-gating tests aren't blocked by
-    /// the public-routes guard.
     pub fn apply(self, cfg: &mut AppConfig) {
         match self {
-            TenancyMode::SelfHost => {
-                cfg.tenancy.enabled = false;
+            TenancyMode::PathBased => {
                 cfg.tenancy.path_based_public_routes = true;
                 cfg.tenancy.subdomain_public_routes = false;
             }
-            TenancyMode::Saas => {
-                cfg.tenancy.enabled = true;
+            TenancyMode::Subdomain => {
                 cfg.tenancy.path_based_public_routes = false;
                 cfg.tenancy.subdomain_public_routes = true;
             }
@@ -131,14 +159,21 @@ pub fn build_test_app_with_seedable_incidents(
         maintenance_store,
         notification_channel_store,
         incident_narration_store,
-        test_org_id(),
         build_test_outbound_and_email().0,
         build_test_outbound_and_email().1,
     );
-    (
-        status_monitor::build_app_router_api_only(state, CancellationToken::new()),
-        narration,
-    )
+    let router = status_monitor::build_app_router_api_only(state, CancellationToken::new());
+    // Auto-attach an owner session so operator routes resolve a CurrentOrg.
+    // Tests that explicitly exercise the unauthenticated branch should
+    // construct the router via `build_test_app` and stamp their own session.
+    let user = status_monitor::domain::UserId(Uuid::from_u128(0xA6));
+    let router = with_session(
+        router,
+        user,
+        Some(test_org_id()),
+        Some("seedable-incidents"),
+    );
+    (router, narration)
 }
 
 /// Like `build_test_app` but accepts a custom `PublicSource` so contract tests
@@ -195,7 +230,6 @@ fn build_test_app_with_public_source_inner(
         maintenance_store,
         notification_channel_store,
         incident_narration_store,
-        test_org_id(),
         build_test_outbound_and_email().0,
         build_test_outbound_and_email().1,
     );
@@ -223,18 +257,25 @@ fn build_test_app_inner(mutate: impl FnOnce(&mut AppConfig), with_web: bool) -> 
 
 /// Build a router backed by InMemory tenant stores but with a real Postgres
 /// pool wired into `AppState.db`. Org-management routes need the pool. The
-/// `mutate` hook also enables tenancy and flips any other knobs the caller
-/// wants. Returns the router plus the `default_org_id` provisioned via
-/// `ensure_default_org`.
+/// `mutate` hook flips any knobs the caller wants. Returns the router plus
+/// a freshly-provisioned `OrgId` (unique slug) so tests can stamp a session
+/// on that org without colliding with parallel runs.
 pub async fn build_test_app_with_pg(
     pool: PgPool,
     mutate: impl FnOnce(&mut AppConfig),
 ) -> (Router, OrgId) {
     let mut cfg = AppConfig::load().expect("config");
     mutate(&mut cfg);
-    let default_org_id = status_monitor::storage::ensure_default_org(&pool, "default")
-        .await
-        .expect("ensure default org");
+    let slug = format!("test-{}", uuid::Uuid::now_v7().simple());
+    let slug = &slug[..slug.len().min(30)];
+    let (org_uuid,): (uuid::Uuid,) = sqlx::query_as(
+        "INSERT INTO organizations (slug, name) VALUES ($1, 'Test Org') RETURNING id",
+    )
+    .bind(slug)
+    .fetch_one(&pool)
+    .await
+    .expect("insert test org");
+    let provisioned_org = OrgId(org_uuid);
     let target_store = Arc::new(InMemoryTargetStore::new());
     let sink = Arc::new(InMemorySink::new());
     let results_store: Arc<dyn ResultsStore> = sink.clone();
@@ -265,21 +306,43 @@ pub async fn build_test_app_with_pg(
         maintenance_store,
         notification_channel_store,
         incident_narration_store,
-        default_org_id,
         build_test_outbound_and_email().0,
         build_test_outbound_and_email().1,
     );
     let app = status_monitor::build_app_router(state, CancellationToken::new());
-    (app, default_org_id)
+    (app, provisioned_org)
 }
 
 /// Like [`build_test_app_with_pg`] but the target store is the real
 /// `PostgresTargetStore` bound to a **freshly inserted org** (unique slug,
-/// `plan_id` defaulting to `free`). Quota counts (`QuotaService`) and the
+/// `plan_id` defaulting to `free`) with an owner user already attached as
+/// a session on the returned router. Quota counts (`QuotaService`) and the
 /// store's atomic count-in-INSERT both read the same `targets` table, and
 /// the unique org isolates parallel quota tests from each other. Used by
 /// the quota integration suite, which must exercise the production path.
+///
+/// Tests that need a different identity should call
+/// [`build_test_app_with_pg_store_anon`] and stamp their own session.
 pub async fn build_test_app_with_pg_store(
+    pool: PgPool,
+    mutate: impl FnOnce(&mut AppConfig),
+) -> (Router, OrgId) {
+    let (app, org) = build_test_app_with_pg_store_anon(pool.clone(), mutate).await;
+    let owner = make_user(&pool, "owner").await;
+    sqlx::query("INSERT INTO memberships (user_id, org_id, role) VALUES ($1, $2, 'owner')")
+        .bind(owner.0)
+        .bind(org.0)
+        .execute(&pool)
+        .await
+        .expect("seed owner membership");
+    let app = with_session(app, owner, Some(org), Some("default-owner-session"));
+    (app, org)
+}
+
+/// Same as [`build_test_app_with_pg_store`] but the returned router has no
+/// session layer attached. Use this when the test owns the auth identity —
+/// e.g. asserting 401 on anonymous requests or stamping a stranger session.
+pub async fn build_test_app_with_pg_store_anon(
     pool: PgPool,
     mutate: impl FnOnce(&mut AppConfig),
 ) -> (Router, OrgId) {
@@ -294,9 +357,9 @@ pub async fn build_test_app_with_pg_store(
     .fetch_one(&pool)
     .await
     .expect("insert quota-test org");
-    let default_org_id = OrgId(org_uuid);
-    let app = assemble_pg_router(pool, cfg, default_org_id);
-    (app, default_org_id)
+    let provisioned_org = OrgId(org_uuid);
+    let app = assemble_pg_router(pool, cfg);
+    (app, provisioned_org)
 }
 
 /// SaaS router backed by the **real** `PostgresTargetStore` (no ambient org —
@@ -307,18 +370,15 @@ pub async fn build_test_app_with_pg_store(
 /// regression — two orgs, one target each, one shared store.
 pub async fn build_saas_router_with_pg_targets(pool: PgPool) -> Router {
     let mut cfg = AppConfig::load().expect("config");
-    cfg.tenancy.enabled = true;
     cfg.tenancy.path_based_public_routes = false;
     cfg.tenancy.subdomain_public_routes = true;
-    // `default_org_id` is the self-host fallback only; SaaS resolves the org
-    // per request from the session, so the value here is never read.
-    assemble_pg_router(pool, cfg, test_org_id())
+    assemble_pg_router(pool, cfg)
 }
 
 /// Shared tail of the PG-target-store router builders: real
 /// `PostgresTargetStore` + in-memory everything else, wired into the API +
-/// web router. Callers own the org/tenancy prelude that precedes this.
-fn assemble_pg_router(pool: PgPool, cfg: AppConfig, default_org_id: OrgId) -> Router {
+/// web router. Callers own the tenancy prelude that precedes this.
+fn assemble_pg_router(pool: PgPool, cfg: AppConfig) -> Router {
     let target_store = Arc::new(PostgresTargetStore::from_pool(pool.clone(), None));
     let sink = Arc::new(InMemorySink::new());
     let results_store: Arc<dyn ResultsStore> = sink.clone();
@@ -349,7 +409,6 @@ fn assemble_pg_router(pool: PgPool, cfg: AppConfig, default_org_id: OrgId) -> Ro
         maintenance_store,
         notification_channel_store,
         incident_narration_store,
-        default_org_id,
         build_test_outbound_and_email().0,
         build_test_outbound_and_email().1,
     );
@@ -452,7 +511,6 @@ pub fn build_test_app_state(mutate: impl FnOnce(&mut AppConfig)) -> AppState {
         maintenance_store,
         notification_channel_store,
         incident_narration_store,
-        test_org_id(),
         build_test_outbound_and_email().0,
         build_test_outbound_and_email().1,
     )

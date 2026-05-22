@@ -2,10 +2,8 @@
 //!
 //! `limit_for_org` is the single read path for an org's effective limits:
 //! the plan row, with a per-org `plan_overrides` row folded in (cached; an
-//! expired override reverts to the plan default), then the self-host config
-//! knob folded in last when, and only when, `tenancy.enabled = false`. The
-//! `check_*` methods are the
-//! *friendly-error* fast path called at handler entry; the race-safe
+//! expired override reverts to the plan default). The `check_*` methods are
+//! the *friendly-error* fast path called at handler entry; the race-safe
 //! guarantee lives in the store INSERTs that take the same limit number
 //! (one source of truth). Every block is recorded to `quota_events`
 //! fire-and-forget.
@@ -18,7 +16,7 @@ use moka::future::Cache;
 use serde::Deserialize;
 use sqlx::PgPool;
 
-use crate::config::{AppConfig, SelfHostOverrides};
+use crate::config::AppConfig;
 use crate::domain::quota::Plan;
 use crate::domain::{OrgId, UserId};
 use crate::error::{AppError, Result};
@@ -111,8 +109,6 @@ impl From<PlanRow> for Plan {
 #[derive(Clone)]
 pub struct QuotaService {
     db: Option<PgPool>,
-    tenancy_enabled: bool,
-    self_host: SelfHostOverrides,
     /// Org → effective plan. Keyed by org (not plan id) and populated by a
     /// single `organizations ⋈ plans` query, so a steady-state cache hit is
     /// **zero** DB round-trips on the per-request hot path.
@@ -142,8 +138,6 @@ impl QuotaService {
         let usage_ttl = Duration::from_secs(cfg.quotas.usage_cache_ttl_secs.max(1));
         Self {
             db,
-            tenancy_enabled: cfg.tenancy.enabled,
-            self_host: cfg.quotas.self_host_overrides.clone(),
             plan_cache: Cache::builder()
                 .time_to_live(plan_ttl)
                 .max_capacity(64)
@@ -206,15 +200,6 @@ impl QuotaService {
                 _ => AppError::Other(anyhow::anyhow!("limit_for_org: {e}")),
             })?;
 
-        // Self-host single-tenant only: overrides replace the plan defaults.
-        // Ignored entirely in SaaS so a future reader can't be tempted to
-        // honour them unconditionally.
-        if !self.tenancy_enabled && self.self_host.enabled {
-            return Ok(Arc::new(apply_overrides(
-                &plan,
-                &PlanOverrides::from(&self.self_host),
-            )));
-        }
         Ok(plan)
     }
 
@@ -502,23 +487,6 @@ struct PlanOverrides {
     max_maintenance_windows: Option<u32>,
     max_notification_channels: Option<u32>,
     max_logo_size_bytes: Option<u32>,
-}
-
-impl From<&SelfHostOverrides> for PlanOverrides {
-    fn from(o: &SelfHostOverrides) -> Self {
-        Self {
-            max_targets: o.max_targets,
-            min_check_interval_secs: o.min_check_interval_secs,
-            retention_days: o.retention_days,
-            max_members: o.max_members,
-            max_pending_invitations: o.max_pending_invitations,
-            max_api_tokens_per_user: o.max_api_tokens_per_user,
-            max_public_components: o.max_public_components,
-            max_maintenance_windows: o.max_maintenance_windows,
-            max_notification_channels: o.max_notification_channels,
-            max_logo_size_bytes: o.max_logo_size_bytes,
-        }
-    }
 }
 
 fn apply_overrides(base: &Plan, ov: &PlanOverrides) -> Plan {

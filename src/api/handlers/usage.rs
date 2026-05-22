@@ -18,7 +18,7 @@ use crate::api::error::codes;
 use crate::app::AppState;
 use crate::domain::OrgId;
 use crate::error::{AppError, Result};
-use crate::web::auth::CurrentUser;
+use crate::web::auth::{CurrentOrg, CurrentUser};
 
 /// A single quota's `current` against its `limit`.
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -180,13 +180,15 @@ pub async fn get_org_usage(
 pub async fn get_me_usage(
     State(state): State<AppState>,
     CurrentUser(user): CurrentUser,
+    CurrentOrg(org): CurrentOrg,
 ) -> Result<Json<MeUsageResponse>> {
     let pool = state.require_db()?;
-    // Token cap is per-user but plan-scoped; resolve it from the same plan
-    // the token-create enforcer uses (the default org's plan).
+    // Token cap is per-user but plan-scoped: resolve it from the caller's
+    // active org's plan so the reported "limit" matches the cap the
+    // token-create enforcer would apply right now.
     let token_limit = state
         .quotas
-        .limit_for_org(state.default_org_id)
+        .limit_for_org(org)
         .await?
         .max_api_tokens_per_user;
     let api_tokens = crate::auth::api_tokens::count_for_user(pool, user).await?;

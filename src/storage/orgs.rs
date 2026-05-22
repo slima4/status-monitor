@@ -13,36 +13,21 @@ use crate::domain::{Membership, OrgId, Organization, PublicOrgBranding, Role, Us
 use crate::error::{AppError, Result};
 use crate::storage::locks::{advisory_xact_lock, org_lock_key, user_lock_key};
 
-/// Find-or-create the default org at startup. Returns the persisted UUID so
-/// callers don't need to know whether the row already existed. Using
-/// `ON CONFLICT (slug) DO UPDATE SET slug = EXCLUDED.slug` makes the statement
-/// always `RETURNING id`, dodging the alternative two-statement
-/// `INSERT ... ON CONFLICT DO NOTHING` + `SELECT` shape that races on first
-/// boot.
-pub async fn ensure_default_org(pool: &PgPool, slug: &str) -> Result<OrgId> {
-    // `public_status_enabled = true` on first INSERT so a self-host `/status`
-    // page is reachable from the very first boot. `DO NOTHING` on conflict so
-    // an operator who later disables their public page through the UI keeps
-    // that choice across restarts.
-    let inserted: Option<(Uuid,)> = sqlx::query_as(
-        r#"INSERT INTO organizations (slug, name, public_status_enabled)
-           VALUES ($1, 'Default', true)
-           ON CONFLICT (slug) WHERE deleted_at IS NULL DO NOTHING
-           RETURNING id"#,
-    )
-    .bind(slug)
-    .fetch_optional(pool)
-    .await
-    .context("ensure_default_org: insert")?;
-    if let Some((id,)) = inserted {
-        return Ok(OrgId(id));
+/// Returns the id of the single live (non-soft-deleted) organisation, or
+/// `None` if zero or more than one exist. Used by the path-based public
+/// surface to find "the lone tenant" on a self-host deploy — `Some(id)` only
+/// fires when the box has exactly one tenant, so multi-tenant SaaS deploys
+/// always see `None` and route via subdomain instead.
+pub async fn find_lone_active_org(pool: &PgPool) -> Result<Option<OrgId>> {
+    let rows: Vec<(Uuid,)> =
+        sqlx::query_as("SELECT id FROM organizations WHERE deleted_at IS NULL LIMIT 2")
+            .fetch_all(pool)
+            .await
+            .context("find_lone_active_org")?;
+    match rows.as_slice() {
+        [(id,)] => Ok(Some(OrgId(*id))),
+        _ => Ok(None),
     }
-    let (id,): (Uuid,) = sqlx::query_as("SELECT id FROM organizations WHERE slug = $1")
-        .bind(slug)
-        .fetch_one(pool)
-        .await
-        .context("ensure_default_org: select")?;
-    Ok(OrgId(id))
 }
 
 /// Returns true iff `user` is a current member of `org` *and* `org` is not

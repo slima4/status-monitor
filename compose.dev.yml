@@ -67,16 +67,10 @@ services:
       STATUS_MONITOR_STORAGE__CLICKHOUSE__URL: http://clickhouse:8123
       STATUS_MONITOR_STORAGE__CLICKHOUSE__USER: monitor
       STATUS_MONITOR_STORAGE__CLICKHOUSE__PASSWORD: monitor
-      # Dev mirrors the SaaS deployment: tenancy on, so the owner-gated
-      # operator APIs (status-page settings, members, …) behave as in prod.
-      # Self-host mode (tenancy off) bypasses the session entirely, so those
-      # writes 401 — not what we want to exercise locally. Seed a session
-      # with `just dev-login` (scripts/seed-dev-session.sh).
-      STATUS_MONITOR_TENANCY__ENABLED: "true"
-      # Mirror SaaS: per-subdomain public pages. Path-based is forbidden under
-      # tenancy (panics — would serve the default org to every tenant). lvh.me
-      # is a public wildcard that resolves *.lvh.me -> 127.0.0.1, so
-      # {slug}.lvh.me:8080 hits the local stack with no /etc/hosts.
+      # Dev mirrors the prod deployment: per-subdomain public pages.
+      # Seed a session with `just dev-login` (scripts/seed-dev-session.sh).
+      # lvh.me resolves *.lvh.me -> 127.0.0.1 so {slug}.lvh.me:8080 hits the
+      # local stack with no /etc/hosts surgery.
       STATUS_MONITOR_TENANCY__PATH_BASED_PUBLIC_ROUTES: "false"
       STATUS_MONITOR_TENANCY__SUBDOMAIN_PUBLIC_ROUTES: "true"
       STATUS_MONITOR_PUBLIC_STATUS__BASE_DOMAIN: "lvh.me"

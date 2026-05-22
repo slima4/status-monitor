@@ -192,15 +192,15 @@ async fn fetch_body(http: &OutboundHttpClient, req: Request<Full<Bytes>>) -> Res
 }
 
 /// Phase C result: the resolved user + the org id their session should land
-/// on. `default_org_id` is the user's oldest active membership — for a
+/// on. `signup_org_id` is the user's oldest active membership — for a
 /// brand-new user that's the just-created signup org; for an existing user
 /// it's whatever they already had. The callback stuffs this into
-/// `session.active_org_id` so the next request never falls through to the
-/// (now-deleted) slug-shape inference.
+/// `session.active_org_id` so every subsequent request resolves a real org
+/// without any global "default" fallback.
 #[derive(Debug, Clone)]
 pub struct ResolvedIdentity {
     pub user_id: UserId,
-    pub default_org_id: Option<OrgId>,
+    pub signup_org_id: Option<OrgId>,
     pub is_new_user: bool,
 }
 
@@ -247,11 +247,11 @@ pub async fn upsert_identity_and_signup_org(
         .execute(&mut *tx)
         .await
         .context("phase C: bump last_login_at")?;
-        let default_org_id = default_org_for_user(pool, UserId(user_id)).await?;
+        let signup_org_id = default_org_for_user(pool, UserId(user_id)).await?;
         tx.commit().await.context("phase C: commit (existing)")?;
         return Ok(ResolvedIdentity {
             user_id: UserId(user_id),
-            default_org_id,
+            signup_org_id,
             is_new_user: false,
         });
     }
@@ -297,11 +297,11 @@ pub async fn upsert_identity_and_signup_org(
             .rows_affected() == 0 {
             // Already verified — no-op.
         }
-        let default_org_id = default_org_for_user(pool, UserId(user_id)).await?;
+        let signup_org_id = default_org_for_user(pool, UserId(user_id)).await?;
         tx.commit().await.context("phase C: commit (linked)")?;
         return Ok(ResolvedIdentity {
             user_id: UserId(user_id),
-            default_org_id,
+            signup_org_id,
             is_new_user: false,
         });
     }
@@ -334,7 +334,7 @@ pub async fn upsert_identity_and_signup_org(
     tx.commit().await.context("phase C: commit (new user)")?;
     Ok(ResolvedIdentity {
         user_id: UserId(new_user_id),
-        default_org_id: Some(org_id),
+        signup_org_id: Some(org_id),
         is_new_user: true,
     })
 }

@@ -3,9 +3,13 @@ mod common;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use chrono::{Duration, Utc};
-use common::{body_json, build_test_app, json_request};
+use common::{body_json, build_test_app_with_owner, json_request};
 use serde_json::{Value, json};
 use tower::ServiceExt;
+
+fn make_app() -> axum::Router {
+    build_test_app_with_owner(|_| {})
+}
 
 fn valid_window() -> Value {
     json!({
@@ -19,7 +23,7 @@ fn valid_window() -> Value {
 
 #[tokio::test]
 async fn create_maintenance_returns_201_and_location() {
-    let app = build_test_app(|_| {});
+    let app = make_app();
     let resp = app
         .oneshot(json_request("POST", "/api/v1/maintenance", valid_window()))
         .await
@@ -40,7 +44,7 @@ async fn create_maintenance_returns_201_and_location() {
 
 #[tokio::test]
 async fn create_maintenance_rejects_empty_title() {
-    let app = build_test_app(|_| {});
+    let app = make_app();
     let mut body = valid_window();
     body["title"] = json!("   ");
     let resp = app
@@ -54,7 +58,7 @@ async fn create_maintenance_rejects_empty_title() {
 
 #[tokio::test]
 async fn create_maintenance_rejects_inverted_time_range() {
-    let app = build_test_app(|_| {});
+    let app = make_app();
     let mut body = valid_window();
     let s = body["starts_at"].clone();
     let e = body["ends_at"].clone();
@@ -70,7 +74,7 @@ async fn create_maintenance_rejects_inverted_time_range() {
 
 #[tokio::test]
 async fn create_maintenance_rejects_long_duration() {
-    let app = build_test_app(|_| {});
+    let app = make_app();
     let mut body = valid_window();
     body["ends_at"] = json!((Utc::now() + Duration::days(45)).to_rfc3339());
     let resp = app
@@ -83,7 +87,7 @@ async fn create_maintenance_rejects_long_duration() {
 
 #[tokio::test]
 async fn create_maintenance_rejects_unknown_component_ids() {
-    let app = build_test_app(|_| {});
+    let app = make_app();
     let mut body = valid_window();
     body["component_ids"] = json!(["00000000-0000-0000-0000-000000000001"]);
     let resp = app
@@ -99,7 +103,7 @@ async fn create_maintenance_rejects_unknown_component_ids() {
 
 #[tokio::test]
 async fn list_maintenance_paginates_and_filters() {
-    let app = build_test_app(|_| {});
+    let app = make_app();
     for _ in 0..3 {
         let _ = app
             .clone()
@@ -123,7 +127,7 @@ async fn list_maintenance_paginates_and_filters() {
 
 #[tokio::test]
 async fn get_unknown_maintenance_returns_404() {
-    let app = build_test_app(|_| {});
+    let app = make_app();
     let resp = app
         .oneshot(
             Request::get("/api/v1/maintenance/00000000-0000-0000-0000-000000000099")
@@ -141,7 +145,7 @@ async fn get_unknown_maintenance_returns_404() {
 
 #[tokio::test]
 async fn delete_maintenance_round_trip() {
-    let app = build_test_app(|_| {});
+    let app = make_app();
     let create = app
         .clone()
         .oneshot(json_request("POST", "/api/v1/maintenance", valid_window()))
@@ -176,7 +180,7 @@ async fn delete_maintenance_round_trip() {
 
 #[tokio::test]
 async fn update_maintenance_changes_title() {
-    let app = build_test_app(|_| {});
+    let app = make_app();
     let create = app
         .clone()
         .oneshot(json_request("POST", "/api/v1/maintenance", valid_window()))

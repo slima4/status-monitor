@@ -354,7 +354,7 @@ async fn data_export_redacts_credentials_and_excludes_other_emails() {
     .await
     .unwrap();
 
-    let (router, _) = build_test_app_with_pg(pool.clone(), |cfg| cfg.tenancy.enabled = true).await;
+    let (router, _) = build_test_app_with_pg(pool.clone(), |_cfg| {}).await;
     let router = with_session(router, status_monitor::domain::UserId(owner), None, None);
 
     let resp = router

@@ -31,12 +31,24 @@ use status_monitor::domain::{
     CheckResult, CheckSpec, CheckStatus, ExpectedStatus, NewTarget, PublicComponentStatus,
 };
 use status_monitor::public_status::{AggregatorConfig, OrgAggregator};
-use status_monitor::storage::ensure_default_org;
 use status_monitor::storage::{ClickhouseResultSink, PostgresTargetStore, ResultSink, TargetStore};
 use url::Url;
 use uuid::Uuid;
 
 use crate::common::default_http_check;
+
+async fn seed_org(pool: &sqlx::PgPool, prefix: &str) -> status_monitor::domain::OrgId {
+    let slug = format!("{prefix}-{}", Uuid::now_v7().simple());
+    let slug = &slug[..slug.len().min(30)];
+    let (id,): (Uuid,) = sqlx::query_as(
+        "INSERT INTO organizations (slug, name) VALUES ($1, 'Agg Test') RETURNING id",
+    )
+    .bind(slug)
+    .fetch_one(pool)
+    .await
+    .expect("insert agg-test org");
+    status_monitor::domain::OrgId(id)
+}
 
 fn public_target(name: &str) -> NewTarget {
     let url = Url::parse("https://example.com/").unwrap();
@@ -119,9 +131,7 @@ async fn build_round_trips_seeded_data() {
 
     purge_prefix(&pool, "agg-test-").await;
 
-    let org_id = ensure_default_org(&pool, "default")
-        .await
-        .expect("default org");
+    let org_id = seed_org(&pool, "agg-a").await;
     let unique = format!("agg-test-{}", Uuid::now_v7());
     let store = Arc::new(PostgresTargetStore::from_pool(pool.clone(), None));
     let target = store
@@ -186,9 +196,7 @@ async fn component_history_returns_strip_for_public_target() {
 
     purge_prefix(&pool, "hist-test-").await;
 
-    let org_id = ensure_default_org(&pool, "default")
-        .await
-        .expect("default org");
+    let org_id = seed_org(&pool, "agg-b").await;
     let unique = format!("hist-test-{}", Uuid::now_v7());
     let store = Arc::new(PostgresTargetStore::from_pool(pool.clone(), None));
     let target = store

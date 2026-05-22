@@ -11,9 +11,9 @@ use status_monitor::domain::{OrgId, Role};
 use status_monitor::storage::orgs as orgs_store;
 use status_monitor::storage::{
     RemoveOutcome, RestoreOutcome, UpdateOrgOutcome, create_org_with_owner, default_org_for_user,
-    ensure_default_org, is_active_member, is_owner, list_deleted_orgs_deleted_by, list_members,
-    list_orgs_for_user, owner_org_count, remove_member, restore_org, slug_is_available,
-    soft_delete_org, update_org_fields,
+    is_active_member, is_owner, list_deleted_orgs_deleted_by, list_members, list_orgs_for_user,
+    owner_org_count, remove_member, restore_org, slug_is_available, soft_delete_org,
+    update_org_fields,
 };
 use uuid::Uuid;
 
@@ -248,14 +248,10 @@ async fn remove_member_succeeds_when_other_owners_exist() {
 
 #[tokio::test]
 #[ignore]
-async fn ensure_default_org_idempotent_and_default_org_lookup_returns_none() {
+async fn default_org_lookup_returns_none_for_user_without_memberships() {
     let Some(pool) = common::pg_pool_from_env().await else {
         return;
     };
-    let first: OrgId = ensure_default_org(&pool, "default").await.unwrap();
-    let second: OrgId = ensure_default_org(&pool, "default").await.unwrap();
-    assert_eq!(first, second);
-
     // A brand-new user has no memberships → no default org until signup
     // auto-creates one.
     let user = make_user(&pool, "orgs").await;

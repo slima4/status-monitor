@@ -2,10 +2,11 @@
 //!
 //! Primes the page cache for org A, then asks for org B's page, and asserts
 //! org B's response contains no byte of org A's payload. The compile-time
-//! fence — `OrgAggregator` / `OrgPublicSource` carrying no `default_org_id`
-//! field — is the primary defence; this test is the runtime regression net
-//! for any future `PublicSource` impl or cache change that quietly drops
-//! the org parameter. Runs on every PR (no DB required).
+//! fence — `OrgAggregator` / `OrgPublicSource` taking `OrgId` per call, with
+//! no ambient org pinned at construction — is the primary defence; this
+//! test is the runtime regression net for any future `PublicSource` impl or
+//! cache change that quietly drops the org parameter. Runs on every PR
+//! (no DB required).
 
 mod common;
 

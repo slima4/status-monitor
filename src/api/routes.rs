@@ -253,21 +253,19 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
         .with_state(state)
 }
 
-/// Path-based public surface (`/status` HTML + `/api/public/v1/*` JSON on the
-/// operator host, scoped to the default org). Defaults to `!tenancy.enabled`:
-/// self-host serves its single org here; SaaS forces it off (a startup
-/// assertion refuses to boot with this and `tenancy.enabled` both true) so it
-/// can't leak the default org to every tenant.
+/// Path-based public surface (`/status/<slug>` HTML + `/api/public/v1/*` JSON
+/// on the operator host, org resolved from the slug). Set to `false` in
+/// SaaS-strict deployments that route every public surface through the
+/// per-org subdomain.
 pub fn path_based_public_routes_enabled(cfg: &crate::config::AppConfig) -> bool {
     cfg.tenancy.path_based_public_routes
 }
 
 /// Per-org subdomain surface (`*.{public_status.base_domain}`, org resolved
-/// from the `Host` header — apex-wildcard shape). Requires `tenancy.enabled`
-/// — a startup assertion refuses to boot if `subdomain_public_routes` is set
-/// without it.
+/// from the `Host` header — apex-wildcard shape). A startup assertion
+/// refuses to boot if this is set without a well-formed base domain.
 pub fn subdomain_public_routes_enabled(cfg: &crate::config::AppConfig) -> bool {
-    cfg.tenancy.enabled && cfg.tenancy.subdomain_public_routes
+    cfg.tenancy.subdomain_public_routes
 }
 
 /// Whether *any* public surface is mounted. The two surfaces are mutually

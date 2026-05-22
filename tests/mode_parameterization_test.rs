@@ -1,7 +1,6 @@
 //! Parameterised integration tests that run the same scenarios in both
-//! `tenancy.enabled = false` (self-host) and `tenancy.enabled = true` (SaaS)
-//! modes. Catches regressions where a handler implicitly relies on one mode
-//! and breaks the other.
+//! path-based and subdomain public-routing modes. Catches regressions where
+//! a handler implicitly relies on one mode and breaks the other.
 
 mod common;
 
@@ -19,43 +18,40 @@ async fn status(app: axum::Router, path: &str) -> StatusCode {
     resp.status()
 }
 
-/// Targets list is a tenant-scoped endpoint. Self-host resolves the org from
-/// the default and returns `200 OK` with `[]` (the empty in-memory store);
-/// SaaS rejects an anonymous request with 401 — the store is org-scoped, so a
-/// caller with no authenticated org cannot enumerate another tenant's targets.
-/// Pinning the exact status per mode catches a regression where the route
-/// silently 404s/500s in one mode that an `assert_ne!(404)` would miss.
+/// Targets list is a tenant-scoped endpoint. An anonymous request must always
+/// be rejected with 401 — the store is org-scoped, the binary is SaaS-only,
+/// and the public-routing mode (path vs subdomain) has nothing to do with the
+/// operator auth model.
 #[rstest]
-#[case::self_host(TenancyMode::SelfHost, StatusCode::OK)]
-#[case::saas(TenancyMode::Saas, StatusCode::UNAUTHORIZED)]
+#[case::path_based(TenancyMode::PathBased)]
+#[case::subdomain(TenancyMode::Subdomain)]
 #[tokio::test]
-async fn list_targets_works_in_both_modes(#[case] mode: TenancyMode, #[case] expected: StatusCode) {
+async fn list_targets_rejects_anonymous_in_both_modes(#[case] mode: TenancyMode) {
     let app = build_test_app(|cfg| mode.apply(cfg));
-    assert_eq!(status(app, "/api/v1/targets").await, expected);
+    assert_eq!(
+        status(app, "/api/v1/targets").await,
+        StatusCode::UNAUTHORIZED
+    );
 }
 
-/// Dashboard summary is mounted in both modes. Self-host resolves the org
-/// from the default and returns 200; SaaS rejects an anonymous request with
-/// 401 (auth lands in `AUTH-spec.md`). Pinning the *exact* status per mode
-/// catches the regression "the route is now silently 500ing in SaaS" that an
-/// `assert_ne!(404)` would miss.
+/// Dashboard summary is mounted in both modes. Anonymous → 401.
 #[rstest]
-#[case::self_host(TenancyMode::SelfHost, StatusCode::OK)]
-#[case::saas(TenancyMode::Saas, StatusCode::UNAUTHORIZED)]
+#[case::path_based(TenancyMode::PathBased)]
+#[case::subdomain(TenancyMode::Subdomain)]
 #[tokio::test]
-async fn dashboard_summary_status_per_mode(
-    #[case] mode: TenancyMode,
-    #[case] expected: StatusCode,
-) {
+async fn dashboard_summary_rejects_anonymous_in_both_modes(#[case] mode: TenancyMode) {
     let app = build_test_app(|cfg| mode.apply(cfg));
-    assert_eq!(status(app, "/api/v1/dashboard/summary").await, expected);
+    assert_eq!(
+        status(app, "/api/v1/dashboard/summary").await,
+        StatusCode::UNAUTHORIZED
+    );
 }
 
 /// Health/readiness probes are tenancy-agnostic. They must respond identically
-/// regardless of mode.
+/// regardless of public-routing mode.
 #[rstest]
-#[case::self_host(TenancyMode::SelfHost)]
-#[case::saas(TenancyMode::Saas)]
+#[case::path_based(TenancyMode::PathBased)]
+#[case::subdomain(TenancyMode::Subdomain)]
 #[tokio::test]
 async fn health_endpoints_respond_in_both_modes(#[case] mode: TenancyMode) {
     let app = build_test_app_with_web(|cfg| mode.apply(cfg));

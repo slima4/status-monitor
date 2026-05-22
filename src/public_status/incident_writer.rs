@@ -29,7 +29,9 @@ use uuid::Uuid;
 
 use crate::domain::{CheckResult, CheckStatus, OrgId, Target};
 use crate::error::Result;
-use crate::storage::{ResultsStore, TargetFilter, TargetStore, TimeRange};
+use crate::storage::ResultsStore;
+use crate::storage::admin::EnabledTargetSource;
+use crate::storage::traits::TimeRange;
 
 /// Persistence handle for the `incidents` table — abstracted so the writer
 /// can be unit-tested without a live database. Every method takes `org` so a
@@ -84,29 +86,27 @@ impl Default for IncidentWriterConfig {
 }
 
 pub struct IncidentWriter {
-    target_store: Arc<dyn TargetStore>,
+    /// Cross-org enumeration: returns every enabled target paired with its
+    /// `OrgId`, filtered to live (non-soft-deleted) organisations. The writer
+    /// never holds a single org — `EnabledTargetSource` is the only surface
+    /// it talks to for discovery.
+    targets: Arc<dyn EnabledTargetSource>,
     results_store: Arc<dyn ResultsStore>,
     incident_store: Arc<dyn IncidentStore>,
-    /// The single org this materialiser services (see the module-level note
-    /// on the cross-org limitation). Threaded into every org-scoped store
-    /// call so the writer never reaches across tenants.
-    org: OrgId,
     cfg: IncidentWriterConfig,
 }
 
 impl IncidentWriter {
     pub fn new(
-        target_store: Arc<dyn TargetStore>,
+        targets: Arc<dyn EnabledTargetSource>,
         results_store: Arc<dyn ResultsStore>,
         incident_store: Arc<dyn IncidentStore>,
-        org: OrgId,
         cfg: IncidentWriterConfig,
     ) -> Self {
         Self {
-            target_store,
+            targets,
             results_store,
             incident_store,
-            org,
             cfg,
         }
     }
@@ -133,63 +133,51 @@ impl IncidentWriter {
         }
     }
 
-    /// One iteration of the writer over every public component. Visible for
-    /// tests so they can drive a deterministic single tick without sleeping.
+    /// One iteration over every public component in every live org. Visible
+    /// for tests so they can drive a deterministic single tick without
+    /// sleeping. A per-target error logs and continues — one tenant's
+    /// failure must not stall every other tenant's materialisation.
     pub async fn tick_once(&self) -> Result<()> {
-        let public = self.list_public_targets().await?;
+        let all = self.targets.list_all_enabled_targets().await?;
         let now = Utc::now();
         let from = now - self.cfg.lookback;
         let range = TimeRange { from, to: now };
-        for t in public {
-            if let Err(err) = self.process_target(&t, range).await {
-                tracing::warn!(target_id = %t.id, error = %err, "incident_writer per-target failed");
+        for (org, target) in all.into_iter().filter(|(_, t)| t.public_status) {
+            if let Err(err) = self.process_target(org, &target, range).await {
+                tracing::warn!(
+                    %org,
+                    target_id = %target.id,
+                    error = %err,
+                    "incident_writer per-target failed"
+                );
             }
         }
         Ok(())
     }
 
-    async fn list_public_targets(&self) -> Result<Vec<Target>> {
-        let targets = self
-            .target_store
-            .list(
-                self.org,
-                TargetFilter {
-                    limit: Some(10_000),
-                    offset: 0,
-                    tag: None,
-                    enabled: None,
-                },
-            )
-            .await?;
-        Ok(targets.into_iter().filter(|t| t.public_status).collect())
-    }
-
-    async fn process_target(&self, target: &Target, range: TimeRange) -> Result<()> {
+    async fn process_target(&self, org: OrgId, target: &Target, range: TimeRange) -> Result<()> {
         let mut results = self
             .results_store
-            .list_results(self.org, target.id, range, self.cfg.max_results_per_tick, 0)
+            .list_results(org, target.id, range, self.cfg.max_results_per_tick, 0)
             .await?;
         // Storage returns DESC by timestamp; algorithm operates on ASC.
         results.sort_by_key(|r| r.timestamp);
 
-        let open = self
-            .incident_store
-            .open_for_target(self.org, target.id)
-            .await?;
+        let open = self.incident_store.open_for_target(org, target.id).await?;
         match decide(open.as_ref(), &results, self.cfg.flap_threshold) {
             Action::None => {}
             Action::Open(new) => {
-                let id = self.incident_store.insert_open(self.org, new).await?;
-                tracing::info!(target_id = %target.id, incident_id = %id, "incident opened");
+                let id = self.incident_store.insert_open(org, new).await?;
+                tracing::info!(%org, target_id = %target.id, incident_id = %id, "incident opened");
             }
             Action::Close {
                 incident_id,
                 ended_at,
             } => {
                 self.incident_store
-                    .close(self.org, incident_id, ended_at)
+                    .close(org, incident_id, ended_at)
                     .await?;
-                tracing::info!(target_id = %target.id, incident_id = %incident_id, "incident closed");
+                tracing::info!(%org, target_id = %target.id, incident_id = %incident_id, "incident closed");
             }
         }
         Ok(())
@@ -490,7 +478,8 @@ mod tests {
     use chrono::TimeZone;
 
     use crate::domain::{CheckSpec, ExpectedStatus, HttpCheck, HttpMethod, Target, TargetAlerts};
-    use crate::storage::{InMemorySink, InMemoryTargetStore, ResultSink, TargetStore};
+    use crate::storage::admin::EnabledTargetSource;
+    use crate::storage::{InMemorySink, InMemoryTargetStore, ResultSink};
 
     use super::*;
 
@@ -708,10 +697,9 @@ mod tests {
             max_results_per_tick: 10_000,
         };
         IncidentWriter::new(
-            targets as Arc<dyn TargetStore>,
+            targets as Arc<dyn EnabledTargetSource>,
             sink as Arc<dyn crate::storage::ResultsStore>,
             incidents as Arc<dyn IncidentStore>,
-            OrgId(Uuid::nil()),
             cfg,
         )
     }
