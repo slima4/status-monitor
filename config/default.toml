@@ -35,6 +35,13 @@ allow_private_targets = false
 # 32-byte KEK base64 (`openssl rand -base64 32`). When empty, basic_auth and
 # bearer_token are stored plaintext in check_spec — dev-only.
 credentials_kek_base64 = ""
+# CIDR ranges whose `X-Forwarded-For` is honoured for client-IP extraction.
+# Empty means "no reverse proxy — trust the TCP peer". Behind Caddy / nginx
+# / a CDN, set this to the proxy's address ranges (the docker bridge for
+# the in-stack Caddy, the CDN's documented IP set for a CDN). Forgetting
+# it collapses every `ip_hash` in the DB to the proxy's address — abuse
+# indexes useless, magic-link ip_hint shows the proxy.
+trusted_proxies = []
 
 [circuit_breaker]
 failure_threshold = 5

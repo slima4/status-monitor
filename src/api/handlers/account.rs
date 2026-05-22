@@ -11,13 +11,12 @@
 //! `Target` is a compile error, not a review miss.
 
 use axum::Json;
-use axum::extract::{ConnectInfo, State};
+use axum::extract::State;
 use axum::http::header::USER_AGENT;
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::net::SocketAddr;
 use tower_cookies::Cookies;
 use utoipa::ToSchema;
 use uuid::Uuid;
@@ -491,7 +490,7 @@ pub struct RecoveredAccount {
 )]
 pub async fn recover_account(
     State(state): State<AppState>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    crate::web::client_ip::ClientIp(client_ip): crate::web::client_ip::ClientIp,
     headers: HeaderMap,
     cookies: Cookies,
     Json(body): Json<RecoverRequest>,
@@ -503,7 +502,7 @@ pub async fn recover_account(
     // so a session minted here is valid (the load-bearing un-delete-before-
     // session order).
     let salt = state.cfg.auth.fingerprint_salt.as_str();
-    let ip_hash = fingerprint::hash_fingerprint(salt, &peer.ip().to_string());
+    let ip_hash = fingerprint::hash_fingerprint(salt, &client_ip.to_string());
     let ua_hash = fingerprint::hash_fingerprint(
         salt,
         headers

@@ -6,6 +6,7 @@
 
 pub mod assets;
 pub mod auth;
+pub mod client_ip;
 pub mod error;
 pub mod host;
 pub mod routes;

@@ -4479,6 +4479,7 @@ dependencies = [
  "hyper-util",
  "image",
  "include_dir",
+ "ipnet",
  "lettre",
  "metrics",
  "metrics-exporter-prometheus",

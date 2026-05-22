@@ -641,6 +641,15 @@ pub struct SecurityConfig {
     pub allow_private_targets: bool,
     #[serde(default = "empty_secret", with = "secret_str")]
     pub credentials_kek_base64: SecretString,
+    /// CIDR ranges whose `X-Forwarded-For` header is honoured for client-IP
+    /// extraction. The TCP peer's address is checked against this list; if
+    /// it matches, the rightmost untrusted hop in XFF wins. Anything else
+    /// falls back to the TCP peer (no spoofable header). Empty by default
+    /// — operators behind a reverse proxy (Caddy / nginx / a CDN) MUST set
+    /// this, otherwise every `ip_hash` written to the database collapses to
+    /// the proxy's address and IP-keyed abuse/audit signals are useless.
+    #[serde(default)]
+    pub trusted_proxies: Vec<ipnet::IpNet>,
 }
 
 impl SecurityConfig {
@@ -772,7 +781,8 @@ impl AppConfig {
                     .separator(ENV_SEPARATOR)
                     .try_parsing(true)
                     .list_separator(",")
-                    .with_list_parse_key("dns.servers"),
+                    .with_list_parse_key("dns.servers")
+                    .with_list_parse_key("security.trusted_proxies"),
             );
 
         let cfg = builder.build()?;

@@ -6,13 +6,12 @@
 //! org id is stamped onto the new session row so the next request lands on
 //! a real org.
 
-use axum::extract::{ConnectInfo, Query, State};
+use axum::extract::{Query, State};
 use axum::http::HeaderMap;
 use axum::http::header::USER_AGENT;
 use axum::response::{IntoResponse, Redirect};
 use secrecy::ExposeSecret;
 use serde::Deserialize;
-use std::net::SocketAddr;
 use tower_cookies::Cookies;
 
 use crate::api::error::codes;
@@ -80,7 +79,7 @@ pub struct CallbackQuery {
 pub async fn github_callback(
     State(state): State<AppState>,
     Query(q): Query<CallbackQuery>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    crate::web::client_ip::ClientIp(client_ip): crate::web::client_ip::ClientIp,
     headers: HeaderMap,
     cookies: Cookies,
 ) -> Result<axum::response::Response> {
@@ -89,7 +88,7 @@ pub async fn github_callback(
         .as_ref()
         .ok_or_else(|| AppError::Other(anyhow::anyhow!("github_callback: no Postgres pool")))?;
     let salt = state.cfg.auth.fingerprint_salt.as_str();
-    let ip_hash = fingerprint::hash_fingerprint(salt, &peer.ip().to_string());
+    let ip_hash = fingerprint::hash_fingerprint(salt, &client_ip.to_string());
     let ua_value = headers
         .get(USER_AGENT)
         .and_then(|v| v.to_str().ok())

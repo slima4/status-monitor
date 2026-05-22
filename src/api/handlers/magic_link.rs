@@ -16,12 +16,11 @@
 //!   mints a fresh session cookie, and redirects to `/`.
 
 use axum::Json;
-use axum::extract::{ConnectInfo, Query, State};
+use axum::extract::{Query, State};
 use axum::http::HeaderMap;
 use axum::http::header::USER_AGENT;
 use axum::response::{IntoResponse, Redirect, Response};
 use serde::Deserialize;
-use std::net::SocketAddr;
 use tower_cookies::Cookies;
 
 use crate::app::AppState;
@@ -51,12 +50,12 @@ pub struct RequestResponse {
 /// doesn't make the response observable.
 pub async fn request(
     State(state): State<AppState>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    crate::web::client_ip::ClientIp(client_ip): crate::web::client_ip::ClientIp,
     Json(body): Json<RequestBody>,
 ) -> Result<Json<RequestResponse>> {
     let pool = state.require_db()?;
     let salt = state.cfg.auth.fingerprint_salt.as_str();
-    let ip_hash = fingerprint::hash_fingerprint(salt, &peer.ip().to_string());
+    let ip_hash = fingerprint::hash_fingerprint(salt, &client_ip.to_string());
 
     if let Some(email) = email_norm::normalize(&body.email) {
         let cfg = &state.cfg.auth.magic_link;
@@ -81,7 +80,7 @@ pub async fn request(
             template: EmailTemplate::MagicLink {
                 url: verify_url,
                 expires_in_minutes: cfg.expiry_minutes,
-                ip_hint: Some(peer.ip().to_string()),
+                ip_hint: Some(client_ip.to_string()),
             },
         };
         let sender = state.email_sender.clone();
@@ -139,13 +138,13 @@ pub struct VerifyQuery {
 pub async fn verify(
     State(state): State<AppState>,
     Query(q): Query<VerifyQuery>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    crate::web::client_ip::ClientIp(client_ip): crate::web::client_ip::ClientIp,
     headers: HeaderMap,
     cookies: Cookies,
 ) -> Result<Response> {
     let pool = state.require_db()?;
     let salt = state.cfg.auth.fingerprint_salt.as_str();
-    let ip_hash = fingerprint::hash_fingerprint(salt, &peer.ip().to_string());
+    let ip_hash = fingerprint::hash_fingerprint(salt, &client_ip.to_string());
     let ua_hash = fingerprint::hash_fingerprint(
         salt,
         headers

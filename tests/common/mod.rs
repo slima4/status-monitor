@@ -559,6 +559,7 @@ fn build_clients_with(dns_cfg: DnsConfig) -> status_monitor::error::Result<HttpC
     let security_cfg = SecurityConfig {
         allow_private_targets: true,
         credentials_kek_base64: secrecy::SecretString::from(String::new()),
+        trusted_proxies: vec![],
     };
     build_clients(&http_cfg, &checker_cfg, &dns_cfg, &security_cfg)
 }
