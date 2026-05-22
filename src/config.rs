@@ -344,6 +344,13 @@ pub struct RetentionConfig {
     pub quota_events_days: u32,
     /// `org_audit_log` rows older than this are deleted.
     pub audit_log_days: u32,
+    /// Days after an API token's `expires_at` before its row is
+    /// hard-deleted. Live tokens never count against the per-user cap
+    /// (`api_tokens::count_for_user` filters by expiry) so the only purpose
+    /// of this window is to bound table growth and shrink the
+    /// rotation-pattern leak from a compromised user reading their own
+    /// `token_prefix` / `name` history.
+    pub api_tokens_post_expiry_days: u32,
 }
 
 impl Default for RetentionConfig {
@@ -352,6 +359,7 @@ impl Default for RetentionConfig {
             login_attempts_days: 180,
             quota_events_days: 90,
             audit_log_days: 730,
+            api_tokens_post_expiry_days: 30,
         }
     }
 }

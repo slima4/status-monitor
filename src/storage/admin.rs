@@ -83,16 +83,20 @@ impl AdminRepo {
         &self.pool
     }
 
-    /// All enabled targets across every organisation. Used by the scheduler
-    /// to materialise its global registry — checks must run for tenants the
-    /// caller has no session for.
+    /// All enabled targets across every *live* organisation. The
+    /// `organizations.deleted_at IS NULL` filter is load-bearing: a
+    /// soft-deleted org has signalled "stop monitoring me" and the 30-day
+    /// recovery grace window must not double as a 30-day stream of
+    /// post-deletion check writes, alert deliveries, and ClickHouse rows
+    /// the cascade purge then has to clear.
     pub async fn list_all_enabled_targets(&self) -> Result<Vec<(OrgId, Target)>> {
         let rows: Vec<OrgTargetRow> = sqlx::query_as::<_, OrgTargetRow>(
-            r#"SELECT org_id, id, name, check_spec, interval_secs, enabled, tags, alerts,
-                      public_status, public_name, public_description, public_group, public_sort_order,
-                      created_at, updated_at
-               FROM targets
-               WHERE enabled = true"#,
+            r#"SELECT t.org_id, t.id, t.name, t.check_spec, t.interval_secs, t.enabled, t.tags, t.alerts,
+                      t.public_status, t.public_name, t.public_description, t.public_group, t.public_sort_order,
+                      t.created_at, t.updated_at
+               FROM targets t
+               JOIN organizations o ON o.id = t.org_id
+               WHERE t.enabled = true AND o.deleted_at IS NULL"#,
         )
         .fetch_all(&self.pool)
         .await

@@ -119,15 +119,20 @@ fn slice_prefix(raw: &str, prefix_visible_chars: usize) -> &str {
     &raw[..n]
 }
 
-/// Count of non-deleted tokens owned by `user`. The per-user cap is
-/// enforced atomically inside `create` against the plan; this helper is
-/// read-only reporting.
+/// Count of *live* tokens owned by `user`. Excludes expired rows because
+/// they can't authenticate (`lookup_by_raw` skips them) and shouldn't
+/// occupy the per-user quota — without this filter a power user who
+/// rotates monthly hits the cap on year-old expired remnants. The cap in
+/// `create` uses the same filter so the read here matches the gate there.
 pub async fn count_for_user(pool: &PgPool, user: UserId) -> Result<u32> {
-    let (n,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM api_tokens WHERE user_id = $1")
-        .bind(user.0)
-        .fetch_one(pool)
-        .await
-        .context("api_tokens::count_for_user")?;
+    let (n,): (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM api_tokens \
+         WHERE user_id = $1 AND (expires_at IS NULL OR expires_at > now())",
+    )
+    .bind(user.0)
+    .fetch_one(pool)
+    .await
+    .context("api_tokens::count_for_user")?;
     Ok(u32::try_from(n).unwrap_or(u32::MAX))
 }
 
@@ -154,11 +159,14 @@ pub async fn create(
         .await
         .context("api_tokens::create: advisory lock")?;
 
-    let (current,): (i64,) = sqlx::query_as("SELECT count(*) FROM api_tokens WHERE user_id = $1")
-        .bind(user.0)
-        .fetch_one(&mut *tx)
-        .await
-        .context("api_tokens::create: count")?;
+    let (current,): (i64,) = sqlx::query_as(
+        "SELECT count(*) FROM api_tokens \
+         WHERE user_id = $1 AND (expires_at IS NULL OR expires_at > now())",
+    )
+    .bind(user.0)
+    .fetch_one(&mut *tx)
+    .await
+    .context("api_tokens::create: count")?;
     if current + 1 > max_tokens {
         tx.rollback().await.ok();
         return Err(crate::error::AppError::quota_exceeded(

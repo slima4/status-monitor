@@ -119,6 +119,41 @@ async fn forced_prefix_collision_still_finds_correct_token() {
 
 #[tokio::test]
 #[ignore = "requires DATABASE_URL"]
+async fn count_excludes_expired_tokens_so_quota_reflects_live_set_only() {
+    let Some((db, name)) = fresh_pg().await else {
+        return;
+    };
+    let pool = open_pool(&db).await;
+    MIGRATOR.run(&pool).await.unwrap();
+    let user = make_user(&pool, "u").await;
+
+    let t = api_tokens::create(&pool, user, "to-expire", PREFIX_LEN, 1000)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE api_tokens SET expires_at = now() - INTERVAL '1 hour' WHERE id = $1")
+        .bind(t.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        api_tokens::count_for_user(&pool, user).await.unwrap(),
+        0,
+        "expired token must not occupy the quota"
+    );
+
+    // Cap atomicity follows the same filter: with the cap at 1 and one
+    // expired row present, a new create must succeed (the cap looks at
+    // live tokens only).
+    let _live = api_tokens::create(&pool, user, "fresh", PREFIX_LEN, 1)
+        .await
+        .expect("expired tokens must not block a fresh create at cap=1");
+
+    pool.close().await;
+    drop_pg(&name).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
 async fn count_for_user_grows_then_revoke_drops() {
     let Some((db, name)) = fresh_pg().await else {
         return;

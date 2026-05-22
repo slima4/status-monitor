@@ -48,6 +48,7 @@ pub struct RetentionReport {
     pub quota_events: u64,
     pub audit_log: u64,
     pub sessions: u64,
+    pub api_tokens: u64,
 }
 
 /// Whole seconds from now until the next 03:00 UTC.
@@ -110,6 +111,8 @@ fn emit_metrics(r: &RetentionReport) {
     metrics::counter!("retention_purged_rows_total", "table" => "org_audit_log")
         .increment(r.audit_log);
     metrics::counter!("retention_purged_rows_total", "table" => "sessions").increment(r.sessions);
+    metrics::counter!("retention_purged_rows_total", "table" => "api_tokens")
+        .increment(r.api_tokens);
     // Gauges, not counters: depth/age describe a *current* backlog. A
     // sustained non-zero pending count (or a climbing oldest-age) is the
     // alert condition for a stuck ClickHouse erasure path.
@@ -158,6 +161,21 @@ pub async fn purge_old_data(
 
     let sessions = sweep_sessions(pool, session.idle_timeout_days).await?;
 
+    // Expired API tokens: hard-deleted after `api_tokens_post_expiry_days`.
+    // Live tokens never count against the per-user cap (filtered by
+    // `auth::api_tokens::count_for_user` / `::create`), so the only purpose
+    // is to bound table growth and shrink the rotation-pattern leak from a
+    // compromised user reading their own `token_prefix`/`name` history.
+    let api_tokens = delete_older_than(
+        pool,
+        "DELETE FROM api_tokens \
+         WHERE expires_at IS NOT NULL \
+           AND expires_at < now() - ($1::int * INTERVAL '1 day')",
+        retention.api_tokens_post_expiry_days,
+        "retention: api_tokens",
+    )
+    .await?;
+
     Ok(RetentionReport {
         purge,
         purge_queue,
@@ -165,6 +183,7 @@ pub async fn purge_old_data(
         quota_events,
         audit_log,
         sessions,
+        api_tokens,
     })
 }
 
