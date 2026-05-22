@@ -21,7 +21,7 @@ use crate::auth::{
     fingerprint, github,
     login_audit::{self, LoginAttempt, LoginMethod},
     oauth_state, session as session_store,
-    url::{safe_redirect_target, url_encode},
+    url::safe_redirect_target,
 };
 use crate::error::{AppError, Result};
 use crate::web::CurrentUser;
@@ -51,8 +51,22 @@ pub async fn github_login(
     // the callback redirects to `/`. Without this, `?redirect_after=https://evil.test`
     // turns a legit OAuth dance into an open-redirect into attacker territory.
     let redirect_after = q.redirect_after.as_deref().and_then(safe_redirect_target);
+
+    // Resolve the raw invitation token (if present) to its row id at this
+    // edge instead of storing the token at rest in `oauth_states`. The id
+    // alone isn't replayable — the accept handler still requires the
+    // caller's session-bound email to match the invitation row.
+    // Unknown / expired tokens fall through silently: the post-OAuth
+    // redirect lands at `/`, the operator can re-issue the invite.
+    let invitation_id = match q.invitation.as_deref() {
+        Some(raw) if !raw.is_empty() => crate::auth::invitations::find_pending_by_token(pool, raw)
+            .await?
+            .map(|r| r.id),
+        _ => None,
+    };
+
     let s = oauth_state::generate_state();
-    oauth_state::insert(pool, &s, "github", redirect_after, q.invitation.as_deref()).await?;
+    oauth_state::insert(pool, &s, "github", redirect_after, invitation_id).await?;
     let url = github::authorize_url(cfg, &s);
     Ok(Redirect::to(&url))
 }
@@ -173,8 +187,8 @@ pub async fn github_callback(
 
     let redirect = if resolved.is_new_user {
         "/onboarding/org".to_string()
-    } else if let Some(token) = consumed.invitation_token {
-        format!("/invitations/accept?token={}", url_encode(&token))
+    } else if let Some(invitation_id) = consumed.invitation_id {
+        format!("/invitations/accept?invitation={invitation_id}")
     } else {
         consumed
             .redirect_after

@@ -54,7 +54,11 @@ CREATE TABLE oauth_states (
     state_hash        TEXT PRIMARY KEY,
     provider          TEXT NOT NULL,
     redirect_after    TEXT,
-    invitation_token  TEXT,
+    -- Bare invitation id, not the raw token. The token would be a
+    -- replayable credential at rest (backup, slow-query log, pg_dump);
+    -- the id alone isn't — the accept handler still requires the
+    -- caller's session-bound email to match the invitation row's email.
+    invitation_id     UUID,
     created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
     expires_at        TIMESTAMPTZ NOT NULL
 );

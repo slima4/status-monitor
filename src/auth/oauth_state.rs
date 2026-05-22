@@ -8,6 +8,7 @@ use chrono::{DateTime, Duration, Utc};
 use rand::TryRng;
 use rand::rngs::SysRng;
 use sqlx::PgPool;
+use uuid::Uuid;
 
 use crate::error::{AppError, Result};
 
@@ -23,7 +24,7 @@ pub fn hash_state(raw: &str) -> String {
 pub struct ConsumedState {
     pub provider: String,
     pub redirect_after: Option<String>,
-    pub invitation_token: Option<String>,
+    pub invitation_id: Option<Uuid>,
 }
 
 /// 32 random bytes, base64url-no-pad. Caller stores via [`insert`].
@@ -40,17 +41,17 @@ pub async fn insert(
     state: &str,
     provider: &str,
     redirect_after: Option<&str>,
-    invitation_token: Option<&str>,
+    invitation_id: Option<Uuid>,
 ) -> Result<DateTime<Utc>> {
     let expires_at = Utc::now() + Duration::minutes(STATE_EXPIRY_MINUTES);
     sqlx::query(
-        "INSERT INTO oauth_states (state_hash, provider, redirect_after, invitation_token, expires_at) \
+        "INSERT INTO oauth_states (state_hash, provider, redirect_after, invitation_id, expires_at) \
          VALUES ($1, $2, $3, $4, $5)",
     )
     .bind(hash_state(state))
     .bind(provider)
     .bind(redirect_after)
-    .bind(invitation_token)
+    .bind(invitation_id)
     .bind(expires_at)
     .execute(pool)
     .await
@@ -62,22 +63,22 @@ pub async fn insert(
 /// expired. The callback maps that to `INVALID_STATE` without distinguishing
 /// the two cases (anti-enumeration).
 pub async fn consume(pool: &PgPool, state: &str) -> Result<Option<ConsumedState>> {
-    let row: Option<(String, Option<String>, Option<String>)> = sqlx::query_as(
+    let row: Option<(String, Option<String>, Option<Uuid>)> = sqlx::query_as(
         "DELETE FROM oauth_states \
          WHERE state_hash = $1 AND expires_at > now() \
-         RETURNING provider, redirect_after, invitation_token",
+         RETURNING provider, redirect_after, invitation_id",
     )
     .bind(hash_state(state))
     .fetch_optional(pool)
     .await
     .map_err(|e| AppError::Other(anyhow::anyhow!("oauth_state::consume: {e}")))?;
-    Ok(row.map(
-        |(provider, redirect_after, invitation_token)| ConsumedState {
+    Ok(
+        row.map(|(provider, redirect_after, invitation_id)| ConsumedState {
             provider,
             redirect_after,
-            invitation_token,
-        },
-    ))
+            invitation_id,
+        }),
+    )
 }
 
 fn base64url_no_pad(bytes: &[u8]) -> String {

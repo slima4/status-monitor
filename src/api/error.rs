@@ -157,6 +157,11 @@ pub mod codes {
     /// Recovery token verified but the account was already hard-purged — the
     /// 30-day window elapsed and the data is gone for good (410).
     pub const ACCOUNT_GONE: &str = "ACCOUNT_GONE";
+    /// A login (OAuth, magic-link, …) was attempted against a soft-deleted
+    /// account before the grace window elapsed. Surfaces to the operator
+    /// "use the recovery link from your deletion confirmation email"
+    /// instead of silently re-authenticating and faking the audit trail.
+    pub const ACCOUNT_IN_DELETION_GRACE: &str = "ACCOUNT_IN_DELETION_GRACE";
     // Public status-page settings + logo upload.
     pub const BRANDING_INVALID: &str = "BRANDING_INVALID";
     pub const LOGO_MISSING: &str = "LOGO_MISSING";

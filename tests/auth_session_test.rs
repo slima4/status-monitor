@@ -43,7 +43,8 @@ async fn oauth_state_insert_consume_round_trip() {
     MIGRATOR.run(&pool).await.expect("migrate");
 
     let s = oauth_state::generate_state();
-    oauth_state::insert(&pool, &s, "github", Some("/after"), Some("inv-tok"))
+    let inv_id = uuid::Uuid::new_v4();
+    oauth_state::insert(&pool, &s, "github", Some("/after"), Some(inv_id))
         .await
         .expect("insert");
     let consumed = oauth_state::consume(&pool, &s)
@@ -52,7 +53,7 @@ async fn oauth_state_insert_consume_round_trip() {
         .expect("row");
     assert_eq!(consumed.provider, "github");
     assert_eq!(consumed.redirect_after.as_deref(), Some("/after"));
-    assert_eq!(consumed.invitation_token.as_deref(), Some("inv-tok"));
+    assert_eq!(consumed.invitation_id, Some(inv_id));
 
     // Second consume must return None — state is single-use.
     let again = oauth_state::consume(&pool, &s).await.expect("re-consume");
@@ -166,6 +167,66 @@ async fn upsert_links_existing_user_on_email_match() {
             .await
             .unwrap();
     assert_eq!(linked_count, 1);
+
+    pool.close().await;
+    drop_pg(&name).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn upsert_rejects_soft_deleted_user_via_identity_lookup() {
+    let Some((db_url, name)) = fresh_pg().await else {
+        return;
+    };
+    let pool = open_pool(&db_url).await;
+    MIGRATOR.run(&pool).await.expect("migrate");
+
+    // Seed a user + identity, then soft-delete the user. A subsequent
+    // GitHub OAuth callback for the same provider_user_id must NOT
+    // resurrect the account — the recovery flow is the only path back.
+    let (user_id,): (Uuid,) =
+        sqlx::query_as("INSERT INTO users (email) VALUES ('Carol@Example.test') RETURNING id")
+            .fetch_one(&pool)
+            .await
+            .expect("seed user");
+    sqlx::query(
+        "INSERT INTO oauth_identities (user_id, provider, provider_user_id, provider_username) \
+         VALUES ($1, 'github', '777', 'carol')",
+    )
+    .bind(user_id)
+    .execute(&pool)
+    .await
+    .expect("seed identity");
+    sqlx::query("UPDATE users SET deleted_at = now() WHERE id = $1")
+        .bind(user_id)
+        .execute(&pool)
+        .await
+        .expect("soft-delete user");
+
+    let identity = github::GithubIdentity {
+        provider_user_id: "777".into(),
+        provider_username: "carol".into(),
+        primary_verified_email: Some("carol@example.test".into()),
+        display_name: Some("Carol".into()),
+    };
+    let err = github::upsert_identity_and_signup_org(&pool, &identity)
+        .await
+        .expect_err("soft-deleted identity must be rejected");
+    let s = format!("{err:?}");
+    assert!(
+        s.contains("ACCOUNT_IN_DELETION_GRACE"),
+        "expected typed grace error, got: {s}"
+    );
+
+    // No new identity row, no new user — the soft-deleted row is still the
+    // only one.
+    let (user_count,): (i64,) =
+        sqlx::query_as("SELECT count(*) FROM users WHERE email = $1::citext")
+            .bind("carol@example.test")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(user_count, 1, "must not have created a parallel user");
 
     pool.close().await;
     drop_pg(&name).await;

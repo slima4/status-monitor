@@ -11,6 +11,7 @@
 //! invalidate a freshly committed session.
 
 use anyhow::Context;
+use chrono::{DateTime, Utc};
 use http_body_util::{BodyExt, Full, Limited};
 use hyper::Request;
 use hyper::body::Bytes;
@@ -213,17 +214,30 @@ pub async fn upsert_identity_and_signup_org(
 ) -> Result<ResolvedIdentity> {
     let mut tx = pool.begin().await.context("phase C: begin tx")?;
 
-    // 1. Identity lookup. (provider, provider_user_id) → user_id.
-    let existing: Option<(Uuid,)> = sqlx::query_as(
-        "SELECT user_id FROM oauth_identities \
-         WHERE provider = 'github' AND provider_user_id = $1",
+    // 1. Identity lookup. (provider, provider_user_id) → (user_id,
+    //    user.deleted_at). The deleted_at column travels with the lookup so
+    //    a soft-deleted user clicking "Sign in with GitHub" surfaces as a
+    //    typed error (ACCOUNT_IN_DELETION_GRACE) instead of silently
+    //    minting a fresh session and bumping last_login_at — that would
+    //    bypass the recovery-confirmation flow and fake the audit trail.
+    let existing: Option<(Uuid, Option<DateTime<Utc>>)> = sqlx::query_as(
+        "SELECT oi.user_id, u.deleted_at \
+         FROM oauth_identities oi JOIN users u ON u.id = oi.user_id \
+         WHERE oi.provider = 'github' AND oi.provider_user_id = $1",
     )
     .bind(&identity.provider_user_id)
     .fetch_optional(&mut *tx)
     .await
     .context("phase C: identity lookup")?;
 
-    if let Some((user_id,)) = existing {
+    if let Some((user_id, deleted_at)) = existing {
+        if deleted_at.is_some() {
+            tx.rollback().await.ok();
+            return Err(AppError::forbidden_code(
+                crate::api::error::codes::ACCOUNT_IN_DELETION_GRACE,
+                "this account is in its deletion grace window; use the recovery link from your deletion confirmation email to restore it before signing in again",
+            ));
+        }
         sqlx::query(
             "UPDATE oauth_identities SET last_login_at = now(), provider_username = $2 \
              WHERE provider = 'github' AND provider_user_id = $1",
