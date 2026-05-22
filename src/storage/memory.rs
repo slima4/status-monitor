@@ -472,3 +472,28 @@ impl crate::storage::admin::EnabledTargetSource for InMemoryTargetStore {
             .collect())
     }
 }
+
+#[async_trait]
+impl crate::storage::admin::PublicStatusTargetSource for InMemoryTargetStore {
+    async fn next_public_status_page(
+        &self,
+        after: Option<crate::storage::admin::PublicTargetCursor>,
+        limit: usize,
+    ) -> Result<Vec<(OrgId, Target)>> {
+        let org = OrgId(uuid::Uuid::nil());
+        // Single-org fixture: every row's org is the nil sentinel, so the
+        // `(org, id) > cursor` tuple compare collapses to `id > cursor.id`.
+        let cursor_target = after.map(|c| c.target_id);
+        let mut hits: Vec<Target> = self
+            .targets
+            .lock()
+            .iter()
+            .filter(|t| t.enabled && t.public_status)
+            .filter(|t| cursor_target.is_none_or(|cid| t.id > cid))
+            .cloned()
+            .collect();
+        hits.sort_by_key(|t| t.id);
+        hits.truncate(limit);
+        Ok(hits.into_iter().map(|t| (org, t)).collect())
+    }
+}

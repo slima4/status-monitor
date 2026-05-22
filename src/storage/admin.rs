@@ -46,6 +46,50 @@ impl EnabledTargetSource for AdminRepo {
     }
 }
 
+/// Keyset cursor over `(org_id, target_id)` ascending. `None` means "start
+/// from the beginning"; subsequent pages pass the last row's pair to skip
+/// past it on the next read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PublicTargetCursor {
+    pub org_id: OrgId,
+    pub target_id: Uuid,
+}
+
+impl PublicTargetCursor {
+    pub fn after(org_id: OrgId, target_id: Uuid) -> Self {
+        Self { org_id, target_id }
+    }
+}
+
+/// Paginated cross-tenant walk over enabled, public-status targets in *live*
+/// organisations. Separate from [`EnabledTargetSource`] because the
+/// access pattern is fundamentally different: the scheduler builds a single
+/// in-memory registry (full snapshot, infrequent), whereas the incident
+/// writer streams every 30 s and must keep page-sized memory + bounded SQL
+/// load at 10k+ orgs.
+#[async_trait]
+pub trait PublicStatusTargetSource: Send + Sync {
+    /// Next page of `(org_id, target)` strictly after `after`, up to `limit`
+    /// rows, ordered by `(org_id, target_id)` ascending. An empty result
+    /// signals the walk is done.
+    async fn next_public_status_page(
+        &self,
+        after: Option<PublicTargetCursor>,
+        limit: usize,
+    ) -> Result<Vec<(OrgId, Target)>>;
+}
+
+#[async_trait]
+impl PublicStatusTargetSource for AdminRepo {
+    async fn next_public_status_page(
+        &self,
+        after: Option<PublicTargetCursor>,
+        limit: usize,
+    ) -> Result<Vec<(OrgId, Target)>> {
+        AdminRepo::next_public_status_page(self, after, limit).await
+    }
+}
+
 /// `targets` row plus its `org_id`. Reuses [`TargetRow`] via `#[sqlx(flatten)]`
 /// so the column list stays single-sourced with the org-scoped store.
 #[derive(sqlx::FromRow)]
@@ -54,6 +98,11 @@ struct OrgTargetRow {
     #[sqlx(flatten)]
     target: TargetRow,
 }
+
+/// Single source for the cross-tenant target column list. Both the
+/// scheduler-snapshot and incident-writer-keyset queries return the same
+/// `targets` shape that [`decode_target_row`] consumes.
+const TARGET_COLUMNS: &str = "t.org_id, t.id, t.name, t.check_spec, t.interval_secs, t.enabled, t.tags, t.alerts, t.public_status, t.public_name, t.public_description, t.public_group, t.public_sort_order, t.created_at, t.updated_at";
 
 pub struct AdminRepo {
     pool: PgPool,
@@ -90,17 +139,60 @@ impl AdminRepo {
     /// post-deletion check writes, alert deliveries, and ClickHouse rows
     /// the cascade purge then has to clear.
     pub async fn list_all_enabled_targets(&self) -> Result<Vec<(OrgId, Target)>> {
-        let rows: Vec<OrgTargetRow> = sqlx::query_as::<_, OrgTargetRow>(
-            r#"SELECT t.org_id, t.id, t.name, t.check_spec, t.interval_secs, t.enabled, t.tags, t.alerts,
-                      t.public_status, t.public_name, t.public_description, t.public_group, t.public_sort_order,
-                      t.created_at, t.updated_at
-               FROM targets t
-               JOIN organizations o ON o.id = t.org_id
-               WHERE t.enabled = true AND o.deleted_at IS NULL"#,
-        )
-        .fetch_all(&self.pool)
-        .await
-        .context("admin: list all enabled targets")?;
+        let sql = format!(
+            "SELECT {TARGET_COLUMNS} \
+             FROM targets t JOIN organizations o ON o.id = t.org_id \
+             WHERE t.enabled = true AND o.deleted_at IS NULL"
+        );
+        let rows: Vec<OrgTargetRow> = sqlx::query_as::<_, OrgTargetRow>(&sql)
+            .fetch_all(&self.pool)
+            .await
+            .context("admin: list all enabled targets")?;
+        rows.into_iter()
+            .map(|r| {
+                decode_target_row(r.target, self.cipher.as_deref()).map(|t| (OrgId(r.org_id), t))
+            })
+            .collect()
+    }
+
+    /// Keyset-paginated walk over enabled, public-status targets in live
+    /// orgs. Backed by the partial index `idx_targets_public_page_cursor
+    /// (org_id, id) WHERE enabled AND public_status` so per-page cost stays
+    /// `O(page_size)` index reads, independent of total target count.
+    /// `limit` is clamped to a safety ceiling.
+    pub async fn next_public_status_page(
+        &self,
+        after: Option<PublicTargetCursor>,
+        limit: usize,
+    ) -> Result<Vec<(OrgId, Target)>> {
+        const MAX_PAGE: usize = 2_048;
+        let limit = limit.clamp(1, MAX_PAGE) as i64;
+        let base = format!(
+            "SELECT {TARGET_COLUMNS} \
+             FROM targets t JOIN organizations o ON o.id = t.org_id \
+             WHERE t.enabled = true AND t.public_status = true AND o.deleted_at IS NULL"
+        );
+        let rows: Vec<OrgTargetRow> = match after {
+            None => {
+                let sql = format!("{base} ORDER BY t.org_id, t.id LIMIT $1");
+                sqlx::query_as::<_, OrgTargetRow>(&sql)
+                    .bind(limit)
+                    .fetch_all(&self.pool)
+                    .await
+            }
+            Some(cursor) => {
+                let sql = format!(
+                    "{base} AND (t.org_id, t.id) > ($1, $2) ORDER BY t.org_id, t.id LIMIT $3"
+                );
+                sqlx::query_as::<_, OrgTargetRow>(&sql)
+                    .bind(cursor.org_id.0)
+                    .bind(cursor.target_id)
+                    .bind(limit)
+                    .fetch_all(&self.pool)
+                    .await
+            }
+        }
+        .context("admin: next public-status page")?;
         rows.into_iter()
             .map(|r| {
                 decode_target_row(r.target, self.cipher.as_deref()).map(|t| (OrgId(r.org_id), t))

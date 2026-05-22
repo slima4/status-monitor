@@ -22,6 +22,7 @@ use std::time::Duration;
 use anyhow::Context;
 use async_trait::async_trait;
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
+use futures::stream::{self, StreamExt};
 use sqlx::{FromRow, PgPool};
 use tokio::time::{MissedTickBehavior, interval};
 use tokio_util::sync::CancellationToken;
@@ -30,7 +31,7 @@ use uuid::Uuid;
 use crate::domain::{CheckResult, CheckStatus, OrgId, Target};
 use crate::error::Result;
 use crate::storage::ResultsStore;
-use crate::storage::admin::EnabledTargetSource;
+use crate::storage::admin::{PublicStatusTargetSource, PublicTargetCursor};
 use crate::storage::traits::TimeRange;
 
 /// Persistence handle for the `incidents` table — abstracted so the writer
@@ -39,6 +40,13 @@ use crate::storage::traits::TimeRange;
 #[async_trait]
 pub trait IncidentStore: Send + Sync {
     async fn open_for_target(&self, org: OrgId, target_id: Uuid) -> Result<Option<OpenIncident>>;
+    /// Batched cross-tenant lookup: one SQL round-trip resolves the
+    /// `OpenIncident` (if any) for every `(org, target)` pair in the page.
+    /// Collapses the N-per-page probes the per-target call would do.
+    async fn open_for_pairs(
+        &self,
+        pairs: &[(OrgId, Uuid)],
+    ) -> Result<std::collections::HashMap<(OrgId, Uuid), OpenIncident>>;
     async fn insert_open(&self, org: OrgId, new: NewOpenIncident) -> Result<Uuid>;
     async fn close(&self, org: OrgId, incident_id: Uuid, ended_at: DateTime<Utc>) -> Result<()>;
 }
@@ -72,6 +80,14 @@ pub struct IncidentWriterConfig {
     /// Max results fetched per component per tick. A safety cap so a hot
     /// loop of high-frequency checks doesn't blow up memory.
     pub max_results_per_tick: usize,
+    /// Number of `(org, target)` rows loaded per database round-trip during
+    /// the cross-tenant walk. Bounds peak writer-side RAM to roughly
+    /// `page_size * sizeof(Target)`; independent of total target count.
+    pub page_size: usize,
+    /// Max concurrent `process_target` futures per page. Keeps peak DB
+    /// connection demand bounded so the writer can't starve foreground
+    /// traffic. Tune below the Postgres pool size.
+    pub max_concurrency: usize,
 }
 
 impl Default for IncidentWriterConfig {
@@ -81,16 +97,18 @@ impl Default for IncidentWriterConfig {
             lookback: ChronoDuration::minutes(10),
             flap_threshold: 2,
             max_results_per_tick: 1_000,
+            page_size: 256,
+            max_concurrency: 4,
         }
     }
 }
 
 pub struct IncidentWriter {
-    /// Cross-org enumeration: returns every enabled target paired with its
-    /// `OrgId`, filtered to live (non-soft-deleted) organisations. The writer
-    /// never holds a single org — `EnabledTargetSource` is the only surface
-    /// it talks to for discovery.
-    targets: Arc<dyn EnabledTargetSource>,
+    /// Cross-org stream of public-status targets. The writer never holds a
+    /// single org — [`PublicStatusTargetSource`] is the only surface it
+    /// talks to for discovery, and it is keyset-paginated so the per-tick
+    /// memory and database load stay bounded as the tenant count grows.
+    targets: Arc<dyn PublicStatusTargetSource>,
     results_store: Arc<dyn ResultsStore>,
     incident_store: Arc<dyn IncidentStore>,
     cfg: IncidentWriterConfig,
@@ -98,7 +116,7 @@ pub struct IncidentWriter {
 
 impl IncidentWriter {
     pub fn new(
-        targets: Arc<dyn EnabledTargetSource>,
+        targets: Arc<dyn PublicStatusTargetSource>,
         results_store: Arc<dyn ResultsStore>,
         incident_store: Arc<dyn IncidentStore>,
         cfg: IncidentWriterConfig,
@@ -135,27 +153,62 @@ impl IncidentWriter {
 
     /// One iteration over every public component in every live org. Visible
     /// for tests so they can drive a deterministic single tick without
-    /// sleeping. A per-target error logs and continues — one tenant's
-    /// failure must not stall every other tenant's materialisation.
+    /// sleeping.
+    ///
+    /// Walks the cross-tenant target set with keyset pagination so peak RAM
+    /// is `O(page_size)` regardless of org count. For each page, all open
+    /// incidents are resolved in a single batched SQL query (one round-trip,
+    /// not one per target), then per-target work runs concurrently up to
+    /// `max_concurrency`. A per-target error logs and continues — one
+    /// tenant's failure must not stall every other tenant.
     pub async fn tick_once(&self) -> Result<()> {
-        let all = self.targets.list_all_enabled_targets().await?;
         let now = Utc::now();
         let from = now - self.cfg.lookback;
         let range = TimeRange { from, to: now };
-        for (org, target) in all.into_iter().filter(|(_, t)| t.public_status) {
-            if let Err(err) = self.process_target(org, &target, range).await {
-                tracing::warn!(
-                    %org,
-                    target_id = %target.id,
-                    error = %err,
-                    "incident_writer per-target failed"
-                );
-            }
+        let concurrency = self.cfg.max_concurrency.max(1);
+
+        let mut cursor: Option<PublicTargetCursor> = None;
+        loop {
+            let page = self
+                .targets
+                .next_public_status_page(cursor, self.cfg.page_size)
+                .await?;
+            let Some(last) = page.last() else {
+                return Ok(());
+            };
+            cursor = Some(PublicTargetCursor::after(last.0, last.1.id));
+
+            let pairs: Vec<(OrgId, Uuid)> = page.iter().map(|(o, t)| (*o, t.id)).collect();
+            let open_map = self.incident_store.open_for_pairs(&pairs).await?;
+            let open_map = Arc::new(open_map);
+
+            stream::iter(page.into_iter().map(|(org, target)| {
+                let open_map = open_map.clone();
+                async move {
+                    let open = open_map.get(&(org, target.id)).cloned();
+                    if let Err(err) = self.process_target(org, &target, open, range).await {
+                        tracing::warn!(
+                            %org,
+                            target_id = %target.id,
+                            error = %err,
+                            "incident_writer per-target failed"
+                        );
+                    }
+                }
+            }))
+            .buffer_unordered(concurrency)
+            .for_each(|_| async {})
+            .await;
         }
-        Ok(())
     }
 
-    async fn process_target(&self, org: OrgId, target: &Target, range: TimeRange) -> Result<()> {
+    async fn process_target(
+        &self,
+        org: OrgId,
+        target: &Target,
+        open: Option<OpenIncident>,
+        range: TimeRange,
+    ) -> Result<()> {
         let mut results = self
             .results_store
             .list_results(org, target.id, range, self.cfg.max_results_per_tick, 0)
@@ -163,7 +216,6 @@ impl IncidentWriter {
         // Storage returns DESC by timestamp; algorithm operates on ASC.
         results.sort_by_key(|r| r.timestamp);
 
-        let open = self.incident_store.open_for_target(org, target.id).await?;
         match decide(open.as_ref(), &results, self.cfg.flap_threshold) {
             Action::None => {}
             Action::Open(new) => {
@@ -311,6 +363,53 @@ impl IncidentStore for PgIncidentStore {
         }))
     }
 
+    async fn open_for_pairs(
+        &self,
+        pairs: &[(OrgId, Uuid)],
+    ) -> Result<std::collections::HashMap<(OrgId, Uuid), OpenIncident>> {
+        if pairs.is_empty() {
+            return Ok(std::collections::HashMap::new());
+        }
+        // UNNEST is the supported way to push a `(uuid, uuid)` zip into a
+        // single SQL set without ballooning bind count or fanning out to
+        // `IN ($1,$2),($3,$4),…`. Joining on the partial index
+        // `incidents(org_id, target_id) WHERE ended_at IS NULL` makes this
+        // O(page_size) index probes inside one round-trip.
+        let (orgs, targets): (Vec<Uuid>, Vec<Uuid>) = pairs.iter().map(|(o, t)| (o.0, *t)).unzip();
+        #[derive(FromRow)]
+        struct Row {
+            org_id: Uuid,
+            id: Uuid,
+            target_id: Uuid,
+            started_at: DateTime<Utc>,
+        }
+        let rows: Vec<Row> = sqlx::query_as::<_, Row>(
+            r#"SELECT i.org_id, i.id, i.target_id, i.started_at
+               FROM incidents i
+               JOIN unnest($1::uuid[], $2::uuid[]) AS pairs(org_id, target_id)
+                 ON i.org_id = pairs.org_id AND i.target_id = pairs.target_id
+               WHERE i.ended_at IS NULL"#,
+        )
+        .bind(&orgs)
+        .bind(&targets)
+        .fetch_all(&self.pool)
+        .await
+        .context("incident open_for_pairs")?;
+        Ok(rows
+            .into_iter()
+            .map(|r| {
+                (
+                    (OrgId(r.org_id), r.target_id),
+                    OpenIncident {
+                        id: r.id,
+                        target_id: r.target_id,
+                        started_at: r.started_at,
+                    },
+                )
+            })
+            .collect())
+    }
+
     async fn insert_open(&self, org: OrgId, new: NewOpenIncident) -> Result<Uuid> {
         let status_at_start = status_to_db(new.status_at_start)
             .ok_or_else(|| anyhow::anyhow!("cannot open incident from status=up"))?;
@@ -414,6 +513,34 @@ impl InMemoryIncidentStore {
 
 #[async_trait]
 impl IncidentStore for InMemoryIncidentStore {
+    async fn open_for_pairs(
+        &self,
+        pairs: &[(OrgId, Uuid)],
+    ) -> Result<std::collections::HashMap<(OrgId, Uuid), OpenIncident>> {
+        let g = self.inner.lock();
+        let mut out = std::collections::HashMap::with_capacity(pairs.len());
+        for (org, tid) in pairs {
+            let Some(rows) = g.by_target.get(tid) else {
+                continue;
+            };
+            if let Some(inc) = rows
+                .iter()
+                .filter(|i| i.ended_at.is_none())
+                .max_by_key(|i| i.started_at)
+            {
+                out.insert(
+                    (*org, *tid),
+                    OpenIncident {
+                        id: inc.id,
+                        target_id: inc.target_id,
+                        started_at: inc.started_at,
+                    },
+                );
+            }
+        }
+        Ok(out)
+    }
+
     async fn open_for_target(&self, _org: OrgId, target_id: Uuid) -> Result<Option<OpenIncident>> {
         let g = self.inner.lock();
         let Some(rows) = g.by_target.get(&target_id) else {
@@ -478,7 +605,7 @@ mod tests {
     use chrono::TimeZone;
 
     use crate::domain::{CheckSpec, ExpectedStatus, HttpCheck, HttpMethod, Target, TargetAlerts};
-    use crate::storage::admin::EnabledTargetSource;
+    use crate::storage::admin::PublicStatusTargetSource;
     use crate::storage::{InMemorySink, InMemoryTargetStore, ResultSink};
 
     use super::*;
@@ -695,9 +822,11 @@ mod tests {
             lookback: ChronoDuration::days(1),
             flap_threshold: 2,
             max_results_per_tick: 10_000,
+            page_size: 256,
+            max_concurrency: 4,
         };
         IncidentWriter::new(
-            targets as Arc<dyn EnabledTargetSource>,
+            targets as Arc<dyn PublicStatusTargetSource>,
             sink as Arc<dyn crate::storage::ResultsStore>,
             incidents as Arc<dyn IncidentStore>,
             cfg,

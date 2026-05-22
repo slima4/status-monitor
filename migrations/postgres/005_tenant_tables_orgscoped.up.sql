@@ -33,6 +33,12 @@ CREATE INDEX idx_targets_org_tags ON targets USING GIN(tags) WHERE tags <> '{}';
 CREATE INDEX idx_targets_org_public
     ON targets(org_id, public_group, public_sort_order)
     WHERE public_status = true;
+-- Keyset cursor index for cross-tenant pagination by (org_id, id).
+-- Partial scope keeps the index narrow (live public-status targets only)
+-- and lets Postgres range-scan it directly for the writer's per-page query.
+CREATE INDEX idx_targets_public_page_cursor
+    ON targets(org_id, id)
+    WHERE enabled = true AND public_status = true;
 
 CREATE TABLE incidents (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
