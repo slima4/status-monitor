@@ -10,10 +10,10 @@ use common::{make_user, unique_slug};
 use status_monitor::domain::{OrgId, Role};
 use status_monitor::storage::orgs as orgs_store;
 use status_monitor::storage::{
-    RemoveOutcome, RestoreOutcome, UpdateOrgOutcome, create_org_with_owner, default_org_for_user,
-    is_active_member, is_owner, list_deleted_orgs_deleted_by, list_members, list_orgs_for_user,
-    owner_org_count, remove_member, restore_org, slug_is_available, soft_delete_org,
-    update_org_fields,
+    RemoveOutcome, RestoreOutcome, UpdateOrgOutcome, create_org_with_owner, is_active_member,
+    is_owner, list_deleted_orgs_deleted_by, list_members, list_orgs_for_user,
+    oldest_membership_for_user, owner_org_count, remove_member, restore_org, slug_is_available,
+    soft_delete_org, update_org_fields,
 };
 use uuid::Uuid;
 
@@ -255,7 +255,12 @@ async fn default_org_lookup_returns_none_for_user_without_memberships() {
     // A brand-new user has no memberships → no default org until signup
     // auto-creates one.
     let user = make_user(&pool, "orgs").await;
-    assert!(default_org_for_user(&pool, user).await.unwrap().is_none());
+    assert!(
+        oldest_membership_for_user(&pool, user)
+            .await
+            .unwrap()
+            .is_none()
+    );
 
     sqlx::query("DELETE FROM users WHERE id = $1")
         .bind(user.0)

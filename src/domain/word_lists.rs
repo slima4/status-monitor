@@ -558,7 +558,7 @@ static SHORT_NOUNS: std::sync::LazyLock<Vec<&'static str>> = std::sync::LazyLock
 /// The slug is a starting point, not an identity marker: the user is
 /// expected to rename it to whatever they like via the status-page settings
 /// form, and the codebase never infers "this org is a signup-default" from
-/// the slug's shape — see [`crate::storage::default_org_for_user`].
+/// the slug's shape — see [`crate::storage::oldest_membership_for_user`].
 pub fn generate_signup_slug() -> String {
     let adj = SHORT_ADJECTIVES[fastrand::usize(..SHORT_ADJECTIVES.len())];
     let noun = SHORT_NOUNS[fastrand::usize(..SHORT_NOUNS.len())];

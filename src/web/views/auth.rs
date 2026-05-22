@@ -23,7 +23,7 @@ use serde::Deserialize;
 use crate::app::AppState;
 use crate::auth::url::{safe_redirect_target, url_encode};
 use crate::error::AppError;
-use crate::storage::orgs::{default_org_for_user, get_org};
+use crate::storage::orgs::{get_org, oldest_membership_for_user};
 use crate::web::assets::filters;
 use crate::web::auth::Session;
 use crate::web::error::WebResult;
@@ -148,7 +148,7 @@ pub async fn onboarding_org(
         return Ok(crate::web::auth::login_redirect("/onboarding/org").into_response());
     };
     let pool = state.require_db()?;
-    let Some(org_id) = default_org_for_user(pool, user.id).await? else {
+    let Some(org_id) = oldest_membership_for_user(pool, user.id).await? else {
         // No org at all (rare — invited-only with all invitations gone, or
         // freshly-deleted last org). Drop to dashboard rather than render a
         // page anchored on nothing.

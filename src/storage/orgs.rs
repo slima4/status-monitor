@@ -54,20 +54,19 @@ pub async fn is_active_member(pool: &PgPool, user: UserId, org: OrgId) -> Result
     Ok(exists)
 }
 
-/// Returns the user's default org id — the oldest active membership they
-/// hold, regardless of role. Used as the fallback when a session has no
-/// `active_org_id` (e.g. just-issued login, cleared cookie), and as the
-/// onboarding-page anchor right after signup.
+/// Returns the user's oldest active membership, regardless of role. Used
+/// as the fallback when a session has no `active_org_id` (e.g. just-issued
+/// login, cleared cookie), and as the onboarding-page anchor right after
+/// signup.
 ///
 /// Why "oldest membership, any role":
 ///  * For a brand-new user the signup transaction created exactly one
 ///    owned org, so that's what wins.
 ///  * For an invited-only user (no own org), their oldest invitation is
-///    a meaningful default — better than 403 with nowhere to land.
+///    a meaningful landing spot — better than 403 with nowhere to go.
 ///  * Robust against slug rename — does not rely on inferring identity
-///    from the slug's shape (replaces the old `personal-*` LIKE-pattern
-///    lookup that broke the moment a user picked a human-readable slug).
-pub async fn default_org_for_user(pool: &PgPool, user: UserId) -> Result<Option<OrgId>> {
+///    from the slug's shape.
+pub async fn oldest_membership_for_user(pool: &PgPool, user: UserId) -> Result<Option<OrgId>> {
     let row: Option<(Uuid,)> = sqlx::query_as(
         r#"SELECT m.org_id FROM memberships m
            JOIN organizations o ON o.id = m.org_id
@@ -78,7 +77,7 @@ pub async fn default_org_for_user(pool: &PgPool, user: UserId) -> Result<Option<
     .bind(user.0)
     .fetch_optional(pool)
     .await
-    .map_err(|e| AppError::Other(anyhow::anyhow!("default_org_for_user: {e}")))?;
+    .map_err(|e| AppError::Other(anyhow::anyhow!("oldest_membership_for_user: {e}")))?;
     Ok(row.map(|(id,)| OrgId(id)))
 }
 
