@@ -11,6 +11,7 @@ use tokio::time::{MissedTickBehavior, interval};
 use tokio_util::sync::CancellationToken;
 
 use crate::auth::magic_link;
+use crate::storage::locks::try_job;
 
 const CLEANUP_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
 
@@ -21,11 +22,16 @@ pub async fn run(pool: PgPool, shutdown: CancellationToken) {
     loop {
         tokio::select! {
             _ = shutdown.cancelled() => return,
-            _ = ticker.tick() => match magic_link::purge_old(&pool).await {
-                Ok(0) => {}
-                Ok(n) => tracing::info!(deleted = n, "magic_link purge"),
-                Err(err) => tracing::warn!(error = %err, "magic_link purge failed"),
-            },
+            _ = ticker.tick() => {
+                try_job(&pool, "magic_link_cleanup", || async {
+                    match magic_link::purge_old(&pool).await {
+                        Ok(0) => {}
+                        Ok(n) => tracing::info!(deleted = n, "magic_link purge"),
+                        Err(err) => tracing::warn!(error = %err, "magic_link purge failed"),
+                    }
+                })
+                .await;
+            }
         }
     }
 }

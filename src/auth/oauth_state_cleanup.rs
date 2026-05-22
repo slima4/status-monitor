@@ -17,6 +17,8 @@ use tokio::task::JoinHandle;
 use tokio::time::{MissedTickBehavior, interval};
 use tokio_util::sync::CancellationToken;
 
+use crate::storage::locks::try_job;
+
 const PERIOD: Duration = Duration::from_secs(10 * 60);
 
 /// Spawns the cleanup loop. Returns the join handle so `main` can drive
@@ -32,15 +34,18 @@ pub fn spawn(pool: PgPool, shutdown: CancellationToken) -> JoinHandle<()> {
             tokio::select! {
                 _ = shutdown.cancelled() => return,
                 _ = ticker.tick() => {
-                    match purge_expired(&pool).await {
-                        Ok(n) if n > 0 => {
-                            tracing::debug!(removed = n, "oauth_state_cleanup: purged expired states");
+                    try_job(&pool, "oauth_state_cleanup", || async {
+                        match purge_expired(&pool).await {
+                            Ok(n) if n > 0 => {
+                                tracing::debug!(removed = n, "oauth_state_cleanup: purged expired states");
+                            }
+                            Ok(_) => {}
+                            Err(err) => {
+                                tracing::warn!(error = %err, "oauth_state_cleanup: purge failed");
+                            }
                         }
-                        Ok(_) => {}
-                        Err(err) => {
-                            tracing::warn!(error = %err, "oauth_state_cleanup: purge failed");
-                        }
-                    }
+                    })
+                    .await;
                 }
             }
         }

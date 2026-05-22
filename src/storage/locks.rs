@@ -22,8 +22,15 @@
 //! - [`user_delete_lock_key`] — one user, a deliberately distinct namespace
 //!   from [`user_lock_key`] so account deletion does not serialise against
 //!   unrelated per-user cap writes.
+//! - [`job_lock_key`] — one named background job. Used by [`try_job`] so two
+//!   ticks of the same periodic worker cannot run concurrently when the
+//!   previous tick is slow (network blip, CH mutation queue, etc).
 
-use sqlx::PgExecutor;
+use std::future::Future;
+use std::panic::AssertUnwindSafe;
+
+use futures::FutureExt;
+use sqlx::{PgExecutor, PgPool};
 
 use crate::domain::{OrgId, UserId};
 
@@ -57,4 +64,91 @@ where
         .execute(executor)
         .await
         .map(|_| ())
+}
+
+/// Lock key for a named background job. Distinct namespace from any
+/// per-org / per-user keys so a job lock cannot accidentally collide with
+/// user-flow critical sections.
+pub fn job_lock_key(job: &'static str) -> String {
+    format!("job:{job}")
+}
+
+/// Run `body` only when the lock for `job` can be taken without waiting.
+///
+/// Holds a session-scoped `pg_try_advisory_lock` on a dedicated pool
+/// connection for the duration of `body`, then releases it before the
+/// connection returns to the pool. Errors at every step are treated as
+/// "skip this tick" — a background job that cannot take its own lock is
+/// never a fatal condition and the next tick retries from scratch.
+///
+/// Panic safety: `body` runs under `catch_unwind`. An unwinding panic
+/// still releases the lock and closes the connection (so the panicking
+/// session is not handed back to the pool with the lock still held),
+/// then the panic is resumed.
+pub async fn try_job<F, Fut>(pool: &PgPool, job: &'static str, body: F)
+where
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = ()>,
+{
+    let mut conn = match pool.acquire().await {
+        Ok(c) => c,
+        Err(err) => {
+            tracing::warn!(job, error = %err, "job_lock: pool acquire failed; skipping tick");
+            return;
+        }
+    };
+    let key = job_lock_key(job);
+    let acquired: Result<bool, _> =
+        sqlx::query_scalar("SELECT pg_try_advisory_lock(hashtextextended($1::text, 0))")
+            .bind(&key)
+            .fetch_one(&mut *conn)
+            .await;
+    match acquired {
+        Ok(true) => {}
+        Ok(false) => {
+            tracing::debug!(job, "job_lock: held by another tick; skipping");
+            return;
+        }
+        Err(err) => {
+            tracing::warn!(job, error = %err, "job_lock: try_lock query failed; skipping tick");
+            return;
+        }
+    }
+
+    let outcome = AssertUnwindSafe(body()).catch_unwind().await;
+
+    // Keyed unlock matches the acquire; do NOT use `pg_advisory_unlock_all()`
+    // here — it would silently strip any other session-scoped lock a future
+    // nested call (or library upgrade) might take on the same connection.
+    let unlock = sqlx::query("SELECT pg_advisory_unlock(hashtextextended($1::text, 0))")
+        .bind(&key)
+        .execute(&mut *conn)
+        .await;
+    if let Err(err) = unlock {
+        tracing::warn!(job, error = %err, "job_lock: unlock failed");
+    }
+
+    if let Err(panic) = outcome {
+        // Evict the connection rather than recycle it: the panic may have
+        // left other session state (cursors, prepared statements, search_path)
+        // in an unknown shape.
+        conn.close_on_drop();
+        std::panic::resume_unwind(panic);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn job_lock_key_is_namespaced_to_avoid_org_or_user_collisions() {
+        let key = job_lock_key("retention");
+        // The "job:" prefix is the namespace contract; org / user keys are
+        // bare UUIDs and the user-delete key has its own "user_delete:"
+        // prefix, so this layout guarantees no collision in the shared
+        // 64-bit `hashtextextended` space.
+        assert!(key.starts_with("job:"));
+        assert_eq!(key, "job:retention");
+    }
 }

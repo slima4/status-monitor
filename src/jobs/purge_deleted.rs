@@ -78,6 +78,14 @@ const CH_TENANT_TABLES: [&str; 2] = ["check_results", "check_results_1m"];
 /// Run one full purge cycle: cascade PG-side deletes for past-grace orgs,
 /// then drain whatever pending CH purges exist (including ones enqueued on
 /// previous ticks that didn't succeed).
+///
+/// **Invocation contract:** in production this is called only from
+/// [`crate::jobs::retention::run`], whose tick body sits inside
+/// [`crate::storage::locks::try_job`]. Two concurrent ticks of this work
+/// would race on the same `(org_id, ALTER … DELETE)` pairs in ClickHouse;
+/// the lock is the single defence. Add a new caller only behind the same
+/// lock — or no lock at all if the caller is the tests, which carry their
+/// own database.
 pub async fn purge_tick(
     pool: &PgPool,
     ch: &ChClient,

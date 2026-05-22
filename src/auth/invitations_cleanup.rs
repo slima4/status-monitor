@@ -13,6 +13,7 @@ use tokio::time::{MissedTickBehavior, interval};
 use tokio_util::sync::CancellationToken;
 
 use crate::auth::invitations;
+use crate::storage::locks::try_job;
 
 const CLEANUP_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
 
@@ -30,11 +31,16 @@ pub async fn run(pool: PgPool, keep_history_days: i64, shutdown: CancellationTok
     loop {
         tokio::select! {
             _ = shutdown.cancelled() => return,
-            _ = ticker.tick() => match invitations::purge_old(&pool, keep_history_days).await {
-                Ok(0) => {}
-                Ok(n) => tracing::info!(deleted = n, "invitation purge"),
-                Err(err) => tracing::warn!(error = %err, "invitation purge failed"),
-            },
+            _ = ticker.tick() => {
+                try_job(&pool, "invitations_cleanup", || async {
+                    match invitations::purge_old(&pool, keep_history_days).await {
+                        Ok(0) => {}
+                        Ok(n) => tracing::info!(deleted = n, "invitation purge"),
+                        Err(err) => tracing::warn!(error = %err, "invitation purge failed"),
+                    }
+                })
+                .await;
+            }
         }
     }
 }

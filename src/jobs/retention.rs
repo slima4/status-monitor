@@ -36,6 +36,7 @@ use crate::config::{RetentionConfig, SessionConfig};
 use crate::error::Result;
 use crate::jobs::purge_deleted::{self, PurgeStats, QueueDepth};
 use crate::public_status::PageCache;
+use crate::storage::locks::try_job;
 
 const SECONDS_PER_DAY: u64 = 86_400;
 const RUN_HOUR_UTC: u32 = 3;
@@ -88,13 +89,15 @@ pub async fn run(
                 return;
             }
             _ = ticker.tick() => {
-                match purge_old_data(&pool, &ch, &retention, &session, grace_days, &cache).await {
-                    Ok(report) => {
-                        emit_metrics(&report);
-                        tracing::info!(?report, "retention tick complete");
+                try_job(&pool, "retention", || async {
+                    match purge_old_data(&pool, &ch, &retention, &session, grace_days, &cache).await {
+                        Ok(report) => {
+                            emit_metrics(&report);
+                            tracing::info!(?report, "retention tick complete");
+                        }
+                        Err(err) => tracing::error!(?err, "retention tick failed"),
                     }
-                    Err(err) => tracing::error!(?err, "retention tick failed"),
-                }
+                }).await;
             }
         }
     }
