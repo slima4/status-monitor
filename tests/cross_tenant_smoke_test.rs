@@ -107,7 +107,7 @@ async fn public_source_trait_threads_org_param_to_distinct_responses() {
     // catches the future regression where an impl adds the trait parameter
     // but internally falls back to a baked default.
     use async_trait::async_trait;
-    use status_monitor::api::PageEnvelope;
+    use status_monitor::api::CursorPage;
     use status_monitor::api::public_error::PublicAppError;
     use status_monitor::domain::{ComponentHistoryResponse, PublicIncident, PublicMaintenanceList};
     use status_monitor::public_status::{IncidentListQuery, PublicSource};
@@ -136,7 +136,7 @@ async fn public_source_trait_threads_org_param_to_distinct_responses() {
             &self,
             _org: OrgId,
             _q: IncidentListQuery,
-        ) -> Result<PageEnvelope<PublicIncident>, PublicAppError> {
+        ) -> Result<CursorPage<PublicIncident>, PublicAppError> {
             unreachable!()
         }
         async fn incident_by_id(

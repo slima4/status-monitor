@@ -22,7 +22,7 @@ use url::Url;
 use uuid::Uuid;
 
 use common::build_test_app_with_public_source;
-use status_monitor::api::PageEnvelope;
+use status_monitor::api::CursorPage;
 use status_monitor::api::public_error::PublicAppError;
 use status_monitor::domain::{
     ComponentHistoryResponse, IncidentSeverity, IncidentStatusPhase, OrgId, PublicIncident,
@@ -57,8 +57,8 @@ impl PublicSource for TwoIncidentSource {
     async fn list_incidents(
         &self,
         _org: OrgId,
-        q: IncidentListQuery,
-    ) -> Result<PageEnvelope<PublicIncident>, PublicAppError> {
+        _q: IncidentListQuery,
+    ) -> Result<CursorPage<PublicIncident>, PublicAppError> {
         let now = Utc::now();
         let items = vec![
             PublicIncident {
@@ -88,7 +88,7 @@ impl PublicSource for TwoIncidentSource {
                 updates: vec![],
             },
         ];
-        Ok(PageEnvelope::new(items, 2, q.limit, q.offset))
+        Ok(CursorPage::new(items, None))
     }
     async fn incident_by_id(
         &self,

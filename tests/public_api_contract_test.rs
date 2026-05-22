@@ -18,7 +18,7 @@ use chrono::Utc;
 use tower::ServiceExt;
 use uuid::Uuid;
 
-use status_monitor::api::PageEnvelope;
+use status_monitor::api::CursorPage;
 use status_monitor::api::public_error::PublicAppError;
 use status_monitor::domain::{
     ComponentHistoryResponse, DayState, IncidentSeverity, IncidentStatusPhase, OrgId, OverallState,
@@ -131,8 +131,8 @@ impl PublicSource for FakePublicSource {
     async fn list_incidents(
         &self,
         _org: OrgId,
-        q: IncidentListQuery,
-    ) -> Result<PageEnvelope<PublicIncident>, PublicAppError> {
+        _q: IncidentListQuery,
+    ) -> Result<CursorPage<PublicIncident>, PublicAppError> {
         let item = PublicIncident {
             id: public_incident_id(),
             component_id: public_component_id(),
@@ -144,7 +144,7 @@ impl PublicSource for FakePublicSource {
             status_phase: IncidentStatusPhase::Investigating,
             updates: Vec::new(),
         };
-        Ok(PageEnvelope::new(vec![item], 1, q.limit, q.offset))
+        Ok(CursorPage::new(vec![item], None))
     }
 
     async fn incident_by_id(

@@ -1,3 +1,4 @@
+pub mod cursor;
 pub mod docs;
 pub mod error;
 pub mod handlers;
@@ -9,12 +10,13 @@ pub mod redaction;
 pub mod routes;
 pub mod types;
 
+pub use cursor::IncidentCursor;
 pub use docs::ApiDoc;
 pub use error::{ApiError, ApiErrorBody, codes};
 pub use idempotency::{IdempotencyCache, spawn_pruner as spawn_idempotency_pruner};
 pub use page::{
-    PageEnvelope, PageOfCheckResult, PageOfIncident, PageOfPublicIncident, PageOfTagCount,
-    PageOfTarget,
+    CursorPage, PageEnvelope, PageOfCheckResult, PageOfIncident, PageOfPublicIncident,
+    PageOfTagCount, PageOfTarget,
 };
 pub use public_error::{PublicApiError, PublicApiErrorBody, PublicAppError};
 pub use routes::{

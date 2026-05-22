@@ -20,7 +20,7 @@ use tower::ServiceExt;
 use uuid::Uuid;
 
 use common::{UnavailablePublicSource, build_test_app_with_public_source};
-use status_monitor::api::PageEnvelope;
+use status_monitor::api::CursorPage;
 use status_monitor::api::public_error::PublicAppError;
 use status_monitor::domain::{
     ComponentHistoryResponse, DayState, OrgId, OverallState, OverallStatus, PublicComponent,
@@ -75,7 +75,7 @@ impl PublicSource for BadgeSource {
         &self,
         _org: OrgId,
         _q: IncidentListQuery,
-    ) -> Result<PageEnvelope<PublicIncident>, PublicAppError> {
+    ) -> Result<CursorPage<PublicIncident>, PublicAppError> {
         unimplemented!()
     }
     async fn incident_by_id(

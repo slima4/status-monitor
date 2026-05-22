@@ -19,7 +19,7 @@ use tower::ServiceExt;
 use uuid::Uuid;
 
 use common::build_test_app_with_web_and_public_source;
-use status_monitor::api::PageEnvelope;
+use status_monitor::api::CursorPage;
 use status_monitor::api::public_error::PublicAppError;
 use status_monitor::domain::{
     ComponentHistoryResponse, DayState, IncidentSeverity, IncidentStatusPhase, OrgId, OverallState,
@@ -97,7 +97,7 @@ impl PublicSource for PublishedSource {
         &self,
         _org: OrgId,
         _q: IncidentListQuery,
-    ) -> Result<PageEnvelope<PublicIncident>, PublicAppError> {
+    ) -> Result<CursorPage<PublicIncident>, PublicAppError> {
         unimplemented!("not exercised by HTML page tests")
     }
     async fn incident_by_id(
@@ -160,7 +160,7 @@ impl PublicSource for EmptyDataSource {
         &self,
         _org: OrgId,
         _q: IncidentListQuery,
-    ) -> Result<PageEnvelope<PublicIncident>, PublicAppError> {
+    ) -> Result<CursorPage<PublicIncident>, PublicAppError> {
         unimplemented!()
     }
     async fn incident_by_id(
@@ -235,7 +235,7 @@ impl PublicSource for MaintenanceDominatesSource {
         &self,
         _org: OrgId,
         _q: IncidentListQuery,
-    ) -> Result<PageEnvelope<PublicIncident>, PublicAppError> {
+    ) -> Result<CursorPage<PublicIncident>, PublicAppError> {
         unimplemented!()
     }
     async fn incident_by_id(

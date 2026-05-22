@@ -19,8 +19,8 @@ use serde::Deserialize;
 use utoipa::IntoParams;
 use uuid::Uuid;
 
-use crate::api::PageEnvelope;
-use crate::api::page::PageOfPublicIncident;
+use crate::api::cursor::IncidentCursor;
+use crate::api::page::{CursorPage, CursorPageOfPublicIncident};
 use crate::api::public_error::{PublicApiError, PublicAppError};
 use crate::app::AppState;
 use crate::domain::{
@@ -57,8 +57,9 @@ pub struct BadgeQuery {
 pub struct IncidentsQuery {
     /// Page size (default 25, max 100).
     pub limit: Option<u32>,
-    /// Page offset.
-    pub offset: Option<u32>,
+    /// Opaque cursor returned by the previous page's `next_cursor`. Omit
+    /// to fetch the first page.
+    pub cursor: Option<String>,
     /// If true, return only incidents whose `ended_at` is null.
     pub ongoing_only: Option<bool>,
 }
@@ -127,7 +128,7 @@ pub async fn component_history(
     security(),
     params(IncidentsQuery),
     responses(
-        (status = 200, body = PageOfPublicIncident),
+        (status = 200, body = CursorPageOfPublicIncident),
         (status = 400, body = PublicApiError),
     ),
 )]
@@ -135,10 +136,20 @@ pub async fn public_incidents(
     State(state): State<AppState>,
     StatusPageOrg(org): StatusPageOrg,
     Query(q): Query<IncidentsQuery>,
-) -> Result<Json<PageEnvelope<PublicIncident>>, PublicAppError> {
+) -> Result<Json<CursorPage<PublicIncident>>, PublicAppError> {
+    // Cursor decode failure surfaces as `INVALID_CURSOR`. Map the internal
+    // `AppError` shape into `PublicAppError::BadRequest` so the public
+    // surface keeps its narrow error envelope (no internal context leaks
+    // through the unauthenticated path).
+    let cursor = q
+        .cursor
+        .as_deref()
+        .map(IncidentCursor::decode)
+        .transpose()
+        .map_err(|_| PublicAppError::BadRequest("invalid cursor"))?;
     let query = IncidentListQuery {
         limit: q.limit.unwrap_or(25).clamp(1, 100),
-        offset: q.offset.unwrap_or(0),
+        cursor,
         ongoing_only: q.ongoing_only.unwrap_or(false),
     };
     let page = state.public_source.list_incidents(org, query).await?;

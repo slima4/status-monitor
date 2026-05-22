@@ -13,7 +13,8 @@ use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use sqlx::{FromRow, PgPool};
 use uuid::Uuid;
 
-use crate::api::PageEnvelope;
+use crate::api::cursor::IncidentCursor;
+use crate::api::page::CursorPage;
 use crate::api::public_error::PublicAppError;
 use crate::domain::{
     ComponentHistoryResponse, IncidentSeverity, IncidentStatusPhase, OrgId, PublicIncident,
@@ -27,7 +28,7 @@ use super::xml::xml_escape;
 #[derive(Debug, Clone, Copy)]
 pub struct IncidentListQuery {
     pub limit: u32,
-    pub offset: u32,
+    pub cursor: Option<IncidentCursor>,
     pub ongoing_only: bool,
 }
 
@@ -35,7 +36,7 @@ impl Default for IncidentListQuery {
     fn default() -> Self {
         Self {
             limit: 25,
-            offset: 0,
+            cursor: None,
             ongoing_only: false,
         }
     }
@@ -59,7 +60,7 @@ pub trait PublicSource: Send + Sync {
         &self,
         org: OrgId,
         q: IncidentListQuery,
-    ) -> Result<PageEnvelope<PublicIncident>, PublicAppError>;
+    ) -> Result<CursorPage<PublicIncident>, PublicAppError>;
     async fn incident_by_id(&self, org: OrgId, id: Uuid) -> Result<PublicIncident, PublicAppError>;
     async fn maintenance(&self, org: OrgId) -> Result<PublicMaintenanceList, PublicAppError>;
     async fn incidents_rss(&self, org: OrgId, base_url: &str) -> Result<String, PublicAppError>;
@@ -131,12 +132,23 @@ impl PublicSource for OrgPublicSource {
         &self,
         org: OrgId,
         q: IncidentListQuery,
-    ) -> Result<PageEnvelope<PublicIncident>, PublicAppError> {
+    ) -> Result<CursorPage<PublicIncident>, PublicAppError> {
         let since = Utc::now() - ChronoDuration::days(self.rss_lookback_days as i64);
         let limit = q.limit.clamp(1, 100) as i64;
-        let offset = q.offset as i64;
         let ongoing_only = q.ongoing_only;
+        // Fetch one extra row to detect whether a next page exists without a
+        // second `count(*)` over the same range.
+        let fetch = limit + 1;
+        let (cursor_ts, cursor_id) = match q.cursor {
+            Some(c) => (Some(c.started_at), Some(c.id)),
+            None => (None, None),
+        };
 
+        // Keyset predicate on `(started_at, id)` with the same DESC ordering
+        // the page uses. Composite tiebreaker on `id` keeps two incidents
+        // sharing a `started_at` from being skipped or duplicated at a page
+        // boundary; the `$3 IS NULL OR ...` short-circuit lets us bind a
+        // `NULL` cursor for the first page without a separate query path.
         let rows: Vec<IncidentRow> = sqlx::query_as::<_, IncidentRow>(
             r#"SELECT i.id, i.target_id,
                       COALESCE(t.public_name, t.name) AS component_name,
@@ -149,44 +161,43 @@ impl PublicSource for OrgPublicSource {
                  AND t.public_status = true
                  AND i.started_at >= $1
                  AND ($2 = false OR i.ended_at IS NULL)
-               ORDER BY i.started_at DESC
-               LIMIT $3 OFFSET $4"#,
+                 AND (
+                     $3::timestamptz IS NULL
+                     OR (i.started_at, i.id) < ($3::timestamptz, $4::uuid)
+                 )
+               ORDER BY i.started_at DESC, i.id DESC
+               LIMIT $6"#,
         )
         .bind(since)
         .bind(ongoing_only)
-        .bind(limit)
-        .bind(offset)
+        .bind(cursor_ts)
+        .bind(cursor_id)
         .bind(org.0)
+        .bind(fetch)
         .fetch_all(&self.pg)
         .await
         .context("public list incidents")
         .map_err(PublicAppError::Internal)?;
 
-        let total_row: (i64,) = sqlx::query_as(
-            r#"SELECT count(*)
-               FROM incidents i
-               JOIN targets t ON t.id = i.target_id
-               WHERE i.org_id = $3
-                 AND t.org_id = $3
-                 AND t.public_status = true
-                 AND i.started_at >= $1
-                 AND ($2 = false OR i.ended_at IS NULL)"#,
-        )
-        .bind(since)
-        .bind(ongoing_only)
-        .bind(org.0)
-        .fetch_one(&self.pg)
-        .await
-        .context("public count incidents")
-        .map_err(PublicAppError::Internal)?;
+        let has_more = rows.len() as i64 > limit;
+        let mut kept = rows;
+        if has_more {
+            kept.truncate(limit as usize);
+        }
+        let next_cursor = if has_more {
+            kept.last().map(|r| {
+                IncidentCursor {
+                    started_at: r.started_at,
+                    id: r.id,
+                }
+                .encode()
+            })
+        } else {
+            None
+        };
 
-        let incidents = self.hydrate(org, rows).await?;
-        Ok(PageEnvelope::new(
-            incidents,
-            total_row.0.max(0) as u64,
-            q.limit,
-            q.offset,
-        ))
+        let incidents = self.hydrate(org, kept).await?;
+        Ok(CursorPage::new(incidents, next_cursor))
     }
 
     async fn incident_by_id(&self, org: OrgId, id: Uuid) -> Result<PublicIncident, PublicAppError> {
@@ -225,7 +236,7 @@ impl PublicSource for OrgPublicSource {
     async fn incidents_rss(&self, org: OrgId, base_url: &str) -> Result<String, PublicAppError> {
         let q = IncidentListQuery {
             limit: self.rss_max_items,
-            offset: 0,
+            cursor: None,
             ongoing_only: false,
         };
         let page = self.list_incidents(org, q).await?;
@@ -422,9 +433,9 @@ impl PublicSource for NoopPublicSource {
     async fn list_incidents(
         &self,
         _org: OrgId,
-        q: IncidentListQuery,
-    ) -> Result<PageEnvelope<PublicIncident>, PublicAppError> {
-        Ok(PageEnvelope::new(Vec::new(), 0, q.limit, q.offset))
+        _q: IncidentListQuery,
+    ) -> Result<CursorPage<PublicIncident>, PublicAppError> {
+        Ok(CursorPage::new(Vec::new(), None))
     }
 
     async fn incident_by_id(

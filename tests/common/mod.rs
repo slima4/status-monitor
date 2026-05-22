@@ -652,7 +652,7 @@ impl PublicSource for UnavailablePublicSource {
         _org: OrgId,
         _q: status_monitor::public_status::IncidentListQuery,
     ) -> Result<
-        status_monitor::api::PageEnvelope<status_monitor::domain::PublicIncident>,
+        status_monitor::api::page::CursorPage<status_monitor::domain::PublicIncident>,
         status_monitor::api::public_error::PublicAppError,
     > {
         Err(status_monitor::api::public_error::PublicAppError::Unavailable)

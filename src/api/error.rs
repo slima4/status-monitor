@@ -71,6 +71,7 @@ pub mod codes {
     pub const BULK_VALIDATION: &str = "BULK_VALIDATION";
     pub const BULK_TOO_LARGE: &str = "BULK_TOO_LARGE";
     pub const BAD_TIME_RANGE: &str = "BAD_TIME_RANGE";
+    pub const INVALID_CURSOR: &str = "INVALID_CURSOR";
     pub const TARGET_NOT_FOUND: &str = "TARGET_NOT_FOUND";
     pub const TARGET_DUPLICATE: &str = "TARGET_DUPLICATE";
     pub const CIRCUIT_OPEN: &str = "CIRCUIT_OPEN";
