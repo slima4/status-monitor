@@ -11,7 +11,7 @@
 
 mod common;
 
-use status_monitor::domain::{IncidentSeverity, IncidentStatusPhase};
+use status_monitor::domain::{ChannelKind, IncidentSeverity, IncidentStatusPhase};
 
 /// Pull the parenthesised list from a constraint def like
 /// `CHECK ((severity = ANY (ARRAY['minor'::text, 'major'::text, 'critical'::text])))`
@@ -101,6 +101,28 @@ async fn incident_updates_phase_check_matches_rust_enum() {
     assert_eq!(
         db, rust,
         "incident_updates.phase CHECK list ({db:?}) drifted from IncidentStatusPhase ({rust:?})"
+    );
+}
+
+#[tokio::test]
+#[ignore]
+async fn notification_channels_kind_check_matches_rust_enum() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let def = constraint_def(&pool, "notification_channels_kind_check")
+        .await
+        .expect("notification_channels_kind_check missing");
+    let db = sorted(quoted_tokens(&def));
+    let rust = sorted(
+        ChannelKind::ALL
+            .iter()
+            .map(|k| k.as_db_str().to_string())
+            .collect(),
+    );
+    assert_eq!(
+        db, rust,
+        "notification_channels.kind CHECK list ({db:?}) drifted from ChannelKind ({rust:?})"
     );
 }
 

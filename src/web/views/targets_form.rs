@@ -203,7 +203,7 @@ async fn channel_choices(
             ChannelChoice {
                 id: c.id.to_string(),
                 name: c.name,
-                kind: c.kind.as_str(),
+                kind: c.kind.as_db_str(),
                 selected: b.is_some(),
                 after_failures: b.map(|x| x.after_failures).unwrap_or(3),
                 notify_recovery: b.map(|x| x.notify_recovery).unwrap_or(true),

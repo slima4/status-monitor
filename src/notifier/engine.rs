@@ -174,7 +174,7 @@ impl AlertEngine {
                 last_error: signal.result.error.clone(),
                 timestamp: Utc::now(),
             };
-            let channel_label = channel.kind.as_str();
+            let channel_label = channel.kind.as_db_str();
             counter!(
                 names::NOTIFICATIONS_TOTAL,
                 "channel" => channel_label,

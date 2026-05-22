@@ -9,7 +9,10 @@ CREATE TABLE notification_channels (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     org_id      UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     name        TEXT NOT NULL,
-    kind        TEXT NOT NULL,
+    -- Closed enum; keep in lockstep with `domain::ChannelKind::ALL`. The
+    -- live drift test (`tests/enum_drift_test.rs`) introspects this CHECK
+    -- and fails if the lists disagree.
+    kind        TEXT NOT NULL CHECK (kind IN ('webhook', 'slack', 'telegram')),
     config      JSONB NOT NULL,
     enabled     BOOLEAN NOT NULL DEFAULT true,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),

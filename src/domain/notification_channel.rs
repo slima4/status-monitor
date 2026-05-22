@@ -23,7 +23,14 @@ pub enum ChannelKind {
 }
 
 impl ChannelKind {
-    pub const fn as_str(self) -> &'static str {
+    /// Every variant in declaration order. Used by the enum-drift integration
+    /// test to compare against the live Postgres CHECK constraint on
+    /// `notification_channels.kind`; keep in lockstep with the enum body.
+    pub const ALL: &'static [Self] = &[Self::Webhook, Self::Slack, Self::Telegram];
+
+    /// Stable string used in the Postgres `kind` CHECK constraint and the
+    /// JSON wire form.
+    pub const fn as_db_str(self) -> &'static str {
         match self {
             Self::Webhook => "webhook",
             Self::Slack => "slack",
@@ -203,7 +210,7 @@ mod tests {
         let c: ChannelConfig =
             serde_json::from_str(r#"{"type":"telegram","bot_token":"t","chat_id":"1"}"#).unwrap();
         assert_eq!(c.kind(), ChannelKind::Telegram);
-        assert_eq!(c.kind().as_str(), "telegram");
+        assert_eq!(c.kind().as_db_str(), "telegram");
     }
 
     #[test]

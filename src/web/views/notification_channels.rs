@@ -117,7 +117,7 @@ pub async fn list_partial(
         .map(|c| ChannelRow {
             id: c.id.to_string(),
             name: c.name,
-            kind: c.kind.as_str(),
+            kind: c.kind.as_db_str(),
             enabled: c.enabled,
             created: fmt_human(c.created_at),
         })
@@ -194,7 +194,7 @@ fn form_from_channel(c: NotificationChannel) -> ChannelFormModel {
         submit_method: "PATCH",
         name: c.name,
         enabled: c.enabled,
-        kind: c.kind.as_str(),
+        kind: c.kind.as_db_str(),
         config,
     }
 }

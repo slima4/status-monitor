@@ -174,7 +174,7 @@ impl NotificationChannelStore for PgNotificationChannelStore {
         )
         .bind(org.0)
         .bind(&new.name)
-        .bind(new.config.kind().as_str())
+        .bind(new.config.kind().as_db_str())
         .bind(&sealed)
         .bind(new.enabled)
         .bind(max_channels)
@@ -243,7 +243,7 @@ impl NotificationChannelStore for PgNotificationChannelStore {
         let (sealed, kind) = match &update.config {
             Some(c) => (
                 Some(seal(c, self.cipher.as_deref())?),
-                Some(c.kind().as_str()),
+                Some(c.kind().as_db_str()),
             ),
             None => (None, None),
         };
