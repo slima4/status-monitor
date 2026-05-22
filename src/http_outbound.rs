@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use anyhow::Context;
 use http_body_util::{BodyExt, Full, Limited};
 use hyper::Request;
@@ -30,6 +32,15 @@ pub type OutboundHttpClient = Client<HttpsConnector<SsrfHttpConnector>, Full<Byt
 // larger is a misconfigured or hostile endpoint, and we want a streamed limit
 // so we never allocate a multi-MB buffer just to reject it.
 const MAX_RESPONSE_BYTES: usize = 1 << 20;
+
+/// Total budget for a single outbound request (connect + headers + body). The
+/// `SsrfHttpConnector` already caps the connect phase at 10 s, but `hyper`'s
+/// client has no built-in read timeout — a hostile endpoint that ACKs the
+/// connect then drips one byte per second would pin a notifier task forever.
+/// 30 s is generous enough for slow Slack/Telegram acks under load, tight
+/// enough that a stuck request frees the worker before the next notification
+/// cycle.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub fn build_outbound_client(guard: SsrfGuard) -> OutboundHttpClient {
     crate::http_client::client::install_default_crypto_provider();
@@ -81,11 +92,15 @@ pub async fn post_json_with_headers<T: Serialize>(
     let req = builder
         .body(Full::new(Bytes::from(payload)))
         .context("building request")?;
-    let resp = client.request(req).await.context("sending request")?;
+    let resp = with_request_timeout(url, client.request(req)).await?;
     let status = resp.status();
     if !status.is_success() {
-        let bytes = resp
-            .into_body()
+        // Even on the error path we bound the diagnostic body: a hostile
+        // endpoint that returns 500 with a 10 GiB body would OOM the
+        // notifier otherwise. Limited rejects mid-stream, so we don't
+        // allocate the full payload just to truncate it.
+        let limited = Limited::new(resp.into_body(), MAX_RESPONSE_BYTES);
+        let bytes = limited
             .collect()
             .await
             .map(|c| c.to_bytes())
@@ -98,12 +113,32 @@ pub async fn post_json_with_headers<T: Serialize>(
     Ok(())
 }
 
+/// Wrap an outbound request future in [`REQUEST_TIMEOUT`]. Returns the same
+/// `Result<Response, AppError>` shape callers already match on; on timeout we
+/// surface a context that identifies the URL so the notifier audit log shows
+/// *which* webhook stalled.
+async fn with_request_timeout<F, T, E>(url: &Url, fut: F) -> Result<T>
+where
+    F: std::future::Future<Output = std::result::Result<T, E>>,
+    E: std::fmt::Display,
+{
+    match tokio::time::timeout(REQUEST_TIMEOUT, fut).await {
+        Ok(Ok(v)) => Ok(v),
+        Ok(Err(e)) => Err(AppError::Other(anyhow::anyhow!(
+            "sending request to {url}: {e}"
+        ))),
+        Err(_) => Err(AppError::Other(anyhow::anyhow!(
+            "request to {url} exceeded {REQUEST_TIMEOUT:?}"
+        ))),
+    }
+}
+
 pub async fn get_json<T: DeserializeOwned>(client: &OutboundHttpClient, url: &Url) -> Result<T> {
     let req = Request::get(url.as_str())
         .header(ACCEPT, "application/json")
         .body(Full::new(Bytes::new()))
         .context("building request")?;
-    let resp = client.request(req).await.context("sending request")?;
+    let resp = with_request_timeout(url, client.request(req)).await?;
     let status = resp.status();
     let limited = Limited::new(resp.into_body(), MAX_RESPONSE_BYTES);
     let bytes = limited.collect().await.map_err(|e| {
