@@ -31,8 +31,9 @@ const INCIDENTS_LIMIT_MAX: usize = 1_000;
 /// materialises every row in the window into Rust memory for in-process
 /// coalescing (no SQL LIMIT) and is called twice per `/incidents` request —
 /// a 365-day window on a 10 s-interval target is ~3 M rows × 2 in RAM,
-/// trivially OOMs the 5$ host tier. 90 days matches the longest plan
-/// retention; callers needing deeper history page backwards via `to`.
+/// trivially OOMs the 5$ host tier. 90 days bounds the worst-case allocation
+/// per request to a few MB regardless of any plan's retention window;
+/// callers needing deeper history page backwards via `to`.
 const MAX_RANGE_DAYS: i64 = 90;
 
 /// Resolves optional `from`/`to` query params to a validated `TimeRange`,
