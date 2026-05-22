@@ -10,15 +10,16 @@ incident, and schedule a maintenance window. For the wire-level details
 of the underlying endpoints see [REST API](api.md#public-status-endpoints).
 For Caddy + the rate-limit plugin see [Deployment](deployment.md#public-status-surface).
 
-> **SaaS-mode operators read this first.** This chapter describes the
-> page itself; the workflow is identical per org. In SaaS mode
-> (`tenancy.enabled = true`) each org gets its own page at
-> `{slug}.{base_domain}` — set `tenancy.subdomain_public_routes =
-> true` and leave `tenancy.path_based_public_routes` off. The path-based
-> `/status` surface is single-org and is for self-host only (the default).
-> See [Per-org status pages](per-org-status.md) for the routing, branding,
-> and isolation model, and [Multi-tenancy mode](configuration.md#multi-tenancy-mode)
-> for the flag matrix.
+> **Multi-tenant operators read this first.** This chapter describes the
+> page itself; the workflow is identical per org. In a multi-tenant
+> deployment each org gets its own page at `{slug}.{base_domain}` — set
+> `tenancy.subdomain_public_routes = true` and leave
+> `tenancy.path_based_public_routes` off. The path-based `/status` surface
+> is single-org and is for single-tenant deploys only (the default). See
+> [Per-org status pages](per-org-status.md) for the routing, branding,
+> and isolation model, and
+> [Public status routing](configuration.md#public-status-routing) for
+> the flag matrix.
 
 ## What's published vs what's private
 

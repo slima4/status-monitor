@@ -2,10 +2,10 @@
 
 status-monitor ships with an in-binary auth stack: GitHub OAuth for the
 operator UI, opaque per-user API tokens for the REST surface, and
-optional magic-link sign-in for users without a GitHub identity. The same
-binary serves self-host (single org, anonymous) and SaaS (multi-tenant,
-authenticated) deployments — see [Multi-tenancy](multi-tenancy.md) for
-how `tenancy.enabled` flips the model.
+optional magic-link sign-in for users without a GitHub identity. The
+binary always runs as multi-tenant SaaS — single-tenant deployments are
+just SaaS with one signed-up user; see [Multi-tenancy](multi-tenancy.md)
+for the full model.
 
 ## Concepts
 
@@ -164,16 +164,12 @@ Every authentication attempt — success or failure — writes a row to
 The "recent activity" panel on the user's settings page reads from this
 table.
 
-## Self-host vs SaaS
+## Deployment shape
 
-- **Self-host (`tenancy.enabled = false`).** A single org is provisioned
-  at startup. The auth stack is still wired; logging in is optional and
-  in practice the operator proxy (Caddy basic-auth, mTLS, …) gates
-  access. The cookie flow is harmless when nobody uses it.
-- **SaaS (`tenancy.enabled = true`).** Every authenticated request
-  carries an active org id; data writes scope through repositories that
-  enforce isolation. The cross-tenant test suite confirms a user can't
-  read or mutate another org's rows via slug URL or session token.
-
-See [docs/multi-tenancy.md](multi-tenancy.md) for the data model and
+Every authenticated request carries an active org id; data writes scope
+through repositories that enforce isolation. The cross-tenant test
+suite confirms a user can't read or mutate another org's rows via slug
+URL or session token. Single-tenant deployments work the same way —
+they just have one user and one org. See
+[docs/multi-tenancy.md](multi-tenancy.md) for the data model and
 isolation guarantees.

@@ -15,20 +15,18 @@ For the wildcard cert and reverse-proxy setup see
 
 ## When it applies
 
-| Mode | Config | Public surface |
+| Shape | Config | Public surface |
 |---|---|---|
-| Self-host | `tenancy.enabled = false` (default) | one org, served path-based at `/status` on the operator host |
-| SaaS | `tenancy.enabled = true` + `tenancy.subdomain_public_routes = true` | one page per org at `{slug}.{base_domain}` |
+| Single-tenant | `tenancy.path_based_public_routes = true` (default) | one org, served path-based at `/status` on the operator host |
+| Multi-tenant SaaS | `tenancy.subdomain_public_routes = true`, `tenancy.path_based_public_routes = false` | one page per org at `{slug}.{base_domain}` |
 
-Self-host never pays the subdomain path: there is a single org, so the
-page is mounted on the operator host and `public_status_enabled` is set on
-the provisioned org at startup. The rest of this chapter is SaaS.
+Single-tenant deploys never pay the subdomain path: there is a single live
+org, so the page is mounted on the operator host. The rest of this chapter
+is the multi-tenant case.
 
 Path-based public routes and subdomain public routes are mutually
-exclusive in SaaS — serving `/status` on the operator host there would
-publish one org's data to every tenant, so the binary refuses to boot
-with both `tenancy.enabled = true` and `tenancy.path_based_public_routes
-= true`. Use subdomains instead.
+exclusive — serving `/status` on the operator host alongside subdomains
+would publish one org's data to every tenant's expected URL. Pick one.
 
 ## Host routing
 

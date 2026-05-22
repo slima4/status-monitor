@@ -23,11 +23,10 @@ docker compose up -d
 ### Authentication boundary
 
 The Rust service ships an in-binary auth stack (GitHub OAuth + opaque
-API tokens; magic-link sign-in is gated by config). In self-host mode
-(`tenancy.enabled = false`) the Caddy basic-auth layer is still the
-recommended boundary — the native auth is wired but a small team usually
-prefers the proxy. In SaaS mode (`tenancy.enabled = true`) the native
-auth is the only boundary; basic-auth in front would double-prompt.
+API tokens; magic-link sign-in is gated by config). The native auth is
+the boundary; a basic-auth layer in front of Caddy would double-prompt.
+Single-tenant deploys behave the same way — sign up as the first user
+and the operator surface is yours.
 
 `/healthz` and `/readyz` are intentionally exposed without auth so
 uptime probes, load balancers, and orchestrators can hit them.

@@ -100,14 +100,12 @@ Browse:
 - `http://localhost:8080/status` — public status page
 - `http://localhost:8080/docs` — Swagger UI
 
-## Operator UI locally (SaaS mode)
+## Operator UI locally
 
-The `dev-app` container runs in **SaaS mode** (`tenancy.enabled=true`, mirrors
-the deployment). Self-host mode (`tenancy.enabled=false`) discards the session
-cookie before reading it, so the owner-gated operator APIs — status-page
-settings, members, invitations — return `401` and can't be exercised. The
-host workflow (`cargo run` against `config/default.toml`) is self-host unless
-you export the same env.
+The `dev-app` container runs the same SaaS code path as production. The
+host workflow (`cargo run` against `config/default.toml`) does too — the
+binary is multi-tenant SaaS in every environment; a single-tenant deploy
+is just a SaaS deploy with one signed-up user.
 
 Get an authenticated owner session without GitHub OAuth:
 

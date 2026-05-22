@@ -1,13 +1,8 @@
 # Multi-tenancy
 
-status-monitor supports two operational modes from a single binary:
+status-monitor runs as a multi-tenant SaaS from a single binary. The active org is always resolved from the authenticated session; there is no compile-time "self-host vs SaaS" mode and no ambient default org.
 
-| Mode | `tenancy.enabled` | When to use |
-|---|---|---|
-| **Self-host** | `false` (default) | One operator (or one team) running their own monitoring. Every row belongs to a single auto-provisioned "default" org; the user never sees the concept. |
-| **SaaS** | `true` | Multi-tenant deployment where users sign up, create orgs, and only see their own data. |
-
-The two modes share the same code paths. Self-host is SaaS-with-one-org plus a session shortcut.
+A single-tenant deployment is just a SaaS deployment where you sign up as the first user — the OAuth callback creates the user, an auto-provisioned org and the owner membership in one transaction. Teams who would rather skip the OAuth round-trip can seed `users` + `organizations` + `memberships` directly with a one-shot SQL script.
 
 ## The org model
 
@@ -61,9 +56,7 @@ The outbox table is the load-bearing piece. A naive "DELETE in PG, then DELETE i
 
 ## Public status routes gating
 
-> **Operator warning.** Until per-org status routing lands, the public status page (`/api/public/v1/status`, `/api/public/v1/badge.svg`, `/api/public/v1/incidents.rss`, `/status`, `/status/incidents/{id}`) is a single-aggregate view. Flipping `tenancy.enabled = true` while leaving these routes mounted would leak every tenant's public components to anonymous visitors.
-
-The gate: when `tenancy.enabled = true`, the public-status routes only respond if `tenancy.public_routes_enabled = true` as well. Self-host mode (`tenancy.enabled = false`) ignores the flag — there is only one org, so there is nothing to leak. See [`public_routes_enabled` — the SaaS-mode gotcha](configuration.md#public_routes_enabled--the-saas-mode-gotcha) for the full mode/flag matrix.
+Public-status routing has two shapes, gated by `tenancy.path_based_public_routes` and `tenancy.subdomain_public_routes`. Path-based routing (`/status`, `/api/public/v1/*` on the operator host, scoped to the single live org) is the default and is correct only for a single-tenant deploy. Multi-tenant deployments **must** flip to subdomain routing (`{slug}.{base_domain}`) — otherwise every visitor sees the lone org's data regardless of which slug they expected. The binary panics at boot on the dangerous combinations (subdomain routes with an empty `base_domain`, or a `cookie_domain` that overlaps the status wildcard); see [Public status routing](configuration.md#public-status-routing) for the full flag matrix.
 
 ## Tenant-isolation invariants
 

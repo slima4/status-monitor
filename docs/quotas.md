@@ -166,20 +166,15 @@ A plans-table change is invisible until the plan cache's TTL elapses (a
 cache hit is zero DB round-trips on the hot path), then the next lookup
 refetches.
 
-Single-tenant self-host can replace plan limits without a `plans` row:
+Single-tenant deploys raise limits the same way SaaS does: edit (or
+INSERT) the `plans` row the org is assigned to, or attach a
+`plan_overrides` row with the cap fields you want to raise. There is no
+config-side override knob — every quota lives in Postgres so the
+audit-trail covers both modes.
 
-```toml
-[quotas.self_host_overrides]
-enabled = false
-# max_targets = 10000
-# min_check_interval_secs = 5
-# ... any plan column
-```
-
-Overrides apply **only** when `tenancy.enabled = false`; in multi-tenant
-mode they are ignored. Every numeric quota / rate / interval is validated at
-config load — `< 1` is rejected with the offending field named, never a
-panic in router or limiter construction.
+Every numeric quota / rate / interval is validated at config load —
+`< 1` is rejected with the offending field named, never a panic in
+router or limiter construction.
 
 The reverse-proxy per-IP tiers (auth endpoints, org creation, public
 surface) are documented in [Deployment](deployment.md).

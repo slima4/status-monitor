@@ -31,7 +31,7 @@ Override `STATUS_MONITOR_CONFIG_PATH` to point at an alternate base config file.
 | `api.rate_limit` | `enabled`, `per_second`, `burst` | per-IP token-bucket rate limiter on `/api/v1/*`. Disabled by default |
 | `api.cors` | `enabled`, `allowed_origins`, `allowed_methods`, `allow_any_origin` | browser CORS for `/api/v1/*`. Disabled by default. Wildcard only via `allow_any_origin = true` |
 | _notification channels_ | — | Not a config block. Channels are **per-org runtime resources** managed via the [`/api/v1/notification-channels` API](api.md#notification-channels); secrets are sealed at rest with the credentials KEK |
-| `tenancy` | `enabled`, `default_org_slug`, `path_based_public_routes`, `subdomain_public_routes`, `free_tier_owner_org_limit`, `deletion_grace_period_days` | Self-host vs SaaS mode + org limits. See [Multi-tenancy mode](#multi-tenancy-mode) below and [docs/multi-tenancy.md](multi-tenancy.md) for the full model |
+| `tenancy` | `path_based_public_routes`, `subdomain_public_routes`, `free_tier_owner_org_limit`, `deletion_grace_period_days` | Public-status routing shape + org limits. See [Public status routing](#public-status-routing) below and [docs/multi-tenancy.md](multi-tenancy.md) for the full model |
 | `retention` | `check_results_days`, `login_attempts_days`, `quota_events_days`, `audit_log_days` | Long-horizon data-retention windows for the daily 03:00-UTC purge job. Every key is bound by the job — no decorative knobs |
 | `public_status` | `base_domain`, `cache_max_orgs`, `cache_ttl_secs`, `last_good_ttl_secs`, `logo_dir`, `max_logo_size_bytes`, `allowed_logo_mime_types`, `max_logo_dimension_px`, `default_brand_color`, `default_show_powered_by`, `public_per_ip_rate_limit_per_min` | Per-org public status pages at `{slug}.{base_domain}`. See [Public status page](#public-status-page) below and [Per-org status pages](per-org-status.md) |
 | `auth` | `enabled_methods`, `fingerprint_salt`, `public_base_url` | Sign-in methods, HMAC salt for IP/UA hashes, base URL embedded in invitation + magic-link emails. See [Auth configuration](#auth-configuration) below |
@@ -43,48 +43,21 @@ Override `STATUS_MONITOR_CONFIG_PATH` to point at an alternate base config file.
 | `email` | `provider`, `from_name`, `from_address` | Transactional email backend. `provider` ∈ `"resend" \| "log" \| "memory"` |
 | `email.resend` | `api_key` | Required when `email.provider = "resend"` |
 
-## Multi-tenancy mode
+## Public status routing
 
-status-monitor ships from one binary in two modes:
+status-monitor ships from one binary as a multi-tenant SaaS. The active org is always resolved from the authenticated session; there is no ambient "default org" and no compile-time self-host mode. A single-tenant deployment is just a SaaS deployment where you sign up as the first user (or seed `users` + `organizations` + `memberships` via a SQL one-shot).
 
-- `tenancy.enabled = false` (default) — **self-host**. The service provisions one org at startup (slug `tenancy.default_org_slug`, default `"default"`) and every request is implicitly scoped to it. No login flow, no orgs API in the user's face. This is the right mode for a team running their own monitoring.
-- `tenancy.enabled = true` — **SaaS**. The active org is resolved from the authenticated session. The real session backend (OAuth + password reset + invitations) is on the roadmap; until it lands a stub extractor returns 401 for unauthenticated traffic. Users create orgs through `/api/v1/orgs`, are subject to the three-org owner cap, and only see data tagged with their active `org_id`.
+The public status surface is gated by **two** independent flags because path-based and subdomain routing have opposite safety profiles:
 
-Switching modes is a config flip plus restart; no schema change. The same migrations apply.
+- `tenancy.path_based_public_routes` — serve `/status` and `/api/public/v1/*` on the operator host, scoped to the single live org. Useful for a single-tenant deploy (one org, one page). Defaults to `true`. **Must be set to `false` once you have more than one tenant — otherwise every visitor sees the lone org's data regardless of which slug they expected.**
+- `tenancy.subdomain_public_routes` — serve one page per org at `{slug}.{public_status.base_domain}` (apex wildcard). Defaults to `false`; requires a well-formed `base_domain`.
 
-### Public surface: the two routing flags
-
-The public status surface is gated by **two** independent flags. They are
-split because path-based and subdomain routing have opposite safety
-profiles in SaaS:
-
-- `tenancy.path_based_public_routes` — serve `/status` and
-  `/api/public/v1/*` on the operator host, scoped to a single org.
-  Defaults to `true`. Safe for self-host (one org, nothing to leak);
-  **must be set to `false` for SaaS**.
-- `tenancy.subdomain_public_routes` — serve one page per org at
-  `{slug}.{public_status.base_domain}` (apex wildcard). Defaults to `false`;
-  requires `tenancy.enabled = true` and a well-formed `base_domain`.
-
-| Mode | Recommended flags | Public surface |
+| Shape | Recommended flags | Public surface |
 |---|---|---|
-| Self-host (`tenancy.enabled = false`) | `path_based_public_routes = true` (default) | `/status` on the operator host (one org) |
-| SaaS (`tenancy.enabled = true`) | `subdomain_public_routes = true`, `path_based_public_routes = false` | `{slug}.{base_domain}` per org |
+| Single-tenant | `path_based_public_routes = true` (default) | `/status` on the operator host (one org) |
+| Multi-tenant SaaS | `subdomain_public_routes = true`, `path_based_public_routes = false` | `{slug}.{base_domain}` per org |
 
-The binary refuses to boot in the dangerous combinations:
-`subdomain_public_routes` without `tenancy.enabled`;
-`path_based_public_routes` **with** `tenancy.enabled` (it would publish
-the default org's data to every tenant); `subdomain_public_routes` with
-an empty or single-label `public_status.base_domain`; or an
-`auth.session.cookie_domain` that overlaps the status wildcard. Each is a
-loud panic at startup, not a silent runtime leak.
-
-Because `path_based_public_routes` defaults to `true`, flipping
-`tenancy.enabled = true` on an existing self-host deployment **fails to
-boot** until you also set `tenancy.path_based_public_routes = false` —
-this is the deliberate loud failure above, not a silent disable. Switch
-that deployment to subdomain routing. See
-[Per-org status pages](per-org-status.md) for the full model.
+The binary refuses to boot in the dangerous combinations: `subdomain_public_routes` with an empty or single-label `public_status.base_domain`; or an `auth.session.cookie_domain` that overlaps the status wildcard. Each is a loud panic at startup, not a silent runtime leak. See [Per-org status pages](per-org-status.md) for the full model.
 
 ### Org limits and the purge worker
 
