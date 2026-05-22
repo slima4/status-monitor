@@ -99,7 +99,7 @@ mod tests {
         let err = IncidentCursor::decode(&bogus).expect_err("wrong schema must reject");
         assert!(matches!(
             err,
-            AppError::BadRequest { ref code, .. } if *code == codes::INVALID_CURSOR
+            AppError::BadRequest { code, .. } if code == codes::INVALID_CURSOR
         ));
     }
 }
