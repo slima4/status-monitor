@@ -134,12 +134,35 @@ async fn cascade_past_grace(pool: &PgPool, grace_days: u32, cache: &PageCache) -
         .context("purge: enqueue ch")?;
 
         // ON DELETE CASCADE on every tenant table empties PG-side data.
-        sqlx::query("DELETE FROM organizations WHERE id = $1")
-            .bind(org_id)
-            .execute(&mut *tx)
-            .await
-            .context("purge: cascade delete")?;
+        //
+        // The `deleted_at` predicate is load-bearing, not cosmetic: the SELECT
+        // above runs outside any transaction, so an account-recovery commit
+        // (`auth::account::recover`, which sets `deleted_at = NULL`) between
+        // the SELECT and this DELETE would otherwise wipe a just-recovered org
+        // (and via FK CASCADE, every tenant row it owns). Re-checking the
+        // grace-window predicate inside the transaction makes the DELETE a
+        // no-op for any row that has since been restored.
+        let affected = sqlx::query(
+            r#"DELETE FROM organizations
+                WHERE id = $1
+                  AND deleted_at IS NOT NULL
+                  AND deleted_at < now() - ($2::int * INTERVAL '1 day')"#,
+        )
+        .bind(org_id)
+        .bind(i64::from(grace_days))
+        .execute(&mut *tx)
+        .await
+        .context("purge: cascade delete")?
+        .rows_affected();
 
+        if affected == 0 {
+            // Recovery raced us between the SELECT and the DELETE. Roll back
+            // so the queue INSERT above also vanishes — otherwise the CH-side
+            // drain would happily erase a *live* org's check_results.
+            tx.rollback().await.context("purge: rollback cascade")?;
+            tracing::info!(%org_id, "cascade skipped: org recovered after select");
+            continue;
+        }
         tx.commit().await.context("purge: commit cascade")?;
         // Data is gone from Postgres now — drop any hot/last-good page so the
         // public surface can't keep serving a snapshot of a purged org.

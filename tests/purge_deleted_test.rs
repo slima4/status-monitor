@@ -181,6 +181,107 @@ async fn restore_cancels_purge() {
         .unwrap();
 }
 
+/// Deterministic post-SELECT race: purge's outer SELECT (no row lock) picks
+/// up a past-grace org, then a concurrent recovery commits `deleted_at =
+/// NULL` before the cascade DELETE fires. Under READ COMMITTED the DELETE
+/// re-evaluates its WHERE clause against the post-commit state, the
+/// `deleted_at IS NOT NULL` predicate fails, and the per-org tx rolls back
+/// — so both the queue insert and the org row survive. Without the
+/// predicate this test wipes a recovered org.
+#[tokio::test]
+#[ignore]
+async fn cascade_predicate_blocks_post_select_recovery_race() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let Some(ch) = common::ch_client_from_env().await else {
+        return;
+    };
+    let user = make_user(&pool, "purge").await;
+    let org = create_org_with_owner(&pool, user, &unique_slug("race"), "n", 3)
+        .await
+        .unwrap()
+        .unwrap();
+    soft_delete_org(&pool, org.id, user).await.unwrap();
+    backdate_delete(&pool, org.id, 40).await;
+
+    // Recovery tx holds the row lock with deleted_at=NULL pending commit.
+    // purge_tick's SELECT (no FOR UPDATE) sees the still-committed past-grace
+    // state and proceeds; its cascade DELETE then blocks on the row lock
+    // until we commit below.
+    let mut recovery_tx = pool.begin().await.unwrap();
+    sqlx::query("UPDATE organizations SET deleted_at = NULL WHERE id = $1")
+        .bind(org.id.0)
+        .execute(&mut *recovery_tx)
+        .await
+        .unwrap();
+
+    let pool_clone = pool.clone();
+    let cache = test_cache();
+    let purge_handle =
+        tokio::spawn(async move { purge_tick(&pool_clone, &ch, 30, &cache).await.unwrap() });
+
+    // Poll pg_stat_activity for the purge worker's DELETE blocked on the row
+    // lock recovery_tx holds. Deterministic signal: when wait_event_type is
+    // 'Lock' for a DELETE on this exact org id, we know purge has reached the
+    // cascade DELETE and is suspended. Cap at 5s so a hung worker fails the
+    // test loudly instead of deadlocking.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        // Parameter values don't appear in pg_stat_activity.query (only the
+        // `$1`/`$2` placeholders), so match on the statement shape — under
+        // --include-ignored sequencing, no other purge runs concurrently.
+        let (blocked,): (i64,) = sqlx::query_as(
+            r#"SELECT count(*)::bigint FROM pg_stat_activity
+                WHERE wait_event_type = 'Lock'
+                  AND query ILIKE 'DELETE FROM organizations%'"#,
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        if blocked >= 1 {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "purge worker never blocked on the recovery row lock — race did not materialise"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    recovery_tx.commit().await.unwrap();
+    purge_handle.await.unwrap();
+
+    let (exists,): (bool,) =
+        sqlx::query_as("SELECT EXISTS (SELECT 1 FROM organizations WHERE id = $1)")
+            .bind(org.id.0)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(exists, "recovered org must survive the post-SELECT race");
+
+    let (queued,): (bool,) =
+        sqlx::query_as("SELECT EXISTS (SELECT 1 FROM clickhouse_purge_queue WHERE org_id = $1)")
+            .bind(org.id.0)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(
+        !queued,
+        "rolled-back cascade tx must leave no queue row that would erase live CH data"
+    );
+
+    sqlx::query("DELETE FROM organizations WHERE id = $1")
+        .bind(org.id.0)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM users WHERE id = $1")
+        .bind(user.0)
+        .execute(&pool)
+        .await
+        .unwrap();
+}
+
 #[tokio::test]
 #[ignore]
 async fn drain_is_idempotent_on_repeat() {
