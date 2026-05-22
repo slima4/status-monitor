@@ -1,6 +1,6 @@
 //! Live-PG (+CH for the no-op org cascade) tests for the daily retention
 //! job, plus a pure test that the configured windows equal what the Privacy
-//! Policy and the ClickHouse migration promise (Pre-Mortem #7 / criterion 17).
+//! Policy and the ClickHouse migration promise.
 //! DB tests skipped by default; run under `--run-ignored` with `DATABASE_URL`
 //! and `CLICKHOUSE_URL` set. Each test seeds rows tagged with a unique marker
 //! and asserts only on its own rows against the shared dev DB.
@@ -187,16 +187,22 @@ async fn purges_past_window_and_keeps_fresh_rows() {
 
 /// Pure: the code windows, the Privacy Policy table and the ClickHouse TTL
 /// must agree. If a window changes without the policy/migration being
-/// updated, this fails — one source of truth (Pre-Mortem #7).
+/// updated, this fails — one source of truth.
 #[test]
 fn windows_match_privacy_policy_and_clickhouse_ttl() {
+    // `check_results` retention is the ClickHouse table TTL, not an app-side
+    // knob — keep this constant in lockstep with the literal in
+    // `migrations/clickhouse/001_initial.sql`. 90 days matches the public
+    // status page strip's `history_days` and the public claim in
+    // `docs/legal/privacy.md`.
+    const CHECK_RESULTS_DAYS: u32 = 90;
     let r = RetentionConfig::default();
     let s = SessionConfig::default();
     let grace = TenancyConfig::default().deletion_grace_period_days;
 
     let policy = include_str!("../docs/legal/privacy.md");
     let want = [
-        format!("| Check results | {} days", r.check_results_days),
+        format!("| Check results | {CHECK_RESULTS_DAYS} days"),
         format!("| Login attempts | {} days", r.login_attempts_days),
         format!("| Quota events | {} days", r.quota_events_days),
         format!("| Sessions | {} days maximum", s.absolute_timeout_days),
@@ -218,7 +224,7 @@ fn windows_match_privacy_policy_and_clickhouse_ttl() {
 
     let migration = include_str!("../migrations/clickhouse/001_initial.sql");
     assert!(
-        migration.contains(&format!("INTERVAL {} DAY", r.check_results_days)),
-        "check_results ClickHouse TTL must equal retention.check_results_days"
+        migration.contains(&format!("INTERVAL {CHECK_RESULTS_DAYS} DAY")),
+        "check_results ClickHouse TTL must equal CHECK_RESULTS_DAYS"
     );
 }

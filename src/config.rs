@@ -326,22 +326,18 @@ impl Default for TenancyConfig {
 }
 
 /// Long-horizon data-retention windows for the daily purge job. Every field
-/// here is bound by `jobs::retention` — there are no decorative knobs. Windows
-/// that belong to a *different* cadence are intentionally absent and live with
-/// their owner: OAuth-state and magic-link tokens are swept by their own
-/// short-cadence security jobs; expired invitations by the invitations
-/// janitor; session idle/absolute timeouts come from `[auth.session]`;
-/// soft-deleted org/user grace from `tenancy.deletion_grace_period_days`;
-/// ClickHouse `check_results` by the table's own `TTL` (background merge),
-/// kept equal to `check_results_days` and asserted in tests; server/app log
-/// retention by the Docker log driver.
+/// here is bound by `jobs::retention`; an unhonoured knob is worse than a
+/// missing one, so `check_results_days` lives only in the ClickHouse
+/// migration TTL (an env override here would have been silently ignored —
+/// the TTL is baked at migration time, not re-issued as an ALTER on boot).
+/// Other cadences live with their owner: OAuth-state and magic-link tokens
+/// in their own short-cadence security jobs; expired invitations in the
+/// invitations janitor; session idle/absolute timeouts in `[auth.session]`;
+/// soft-deleted org/user grace in `tenancy.deletion_grace_period_days`;
+/// server/app log retention in the Docker log driver.
 #[derive(Debug, Clone, Copy, Deserialize, Serialize)]
 #[serde(default)]
 pub struct RetentionConfig {
-    /// `check_results` ClickHouse TTL, in days. Not issued as a runtime
-    /// mutation — it mirrors the table `TTL` so the Privacy Policy, the
-    /// migration and this config agree on one number.
-    pub check_results_days: u32,
     /// `login_attempts` rows older than this are deleted.
     pub login_attempts_days: u32,
     /// `quota_events` rows older than this are deleted.
@@ -353,7 +349,6 @@ pub struct RetentionConfig {
 impl Default for RetentionConfig {
     fn default() -> Self {
         Self {
-            check_results_days: 30,
             login_attempts_days: 180,
             quota_events_days: 90,
             audit_log_days: 730,

@@ -37,13 +37,6 @@ use crate::error::Result;
 use crate::jobs::purge_deleted::{self, PurgeStats, QueueDepth};
 use crate::public_status::PageCache;
 
-/// `check_results` retention is the ClickHouse table `TTL`, so this job does
-/// no arithmetic on `check_results_days`. But the unlimited / self-host plan
-/// paths can yield an `i32::MAX`-ish sentinel; at or beyond this we emit one
-/// explicit "retention effectively disabled" log line rather than letting a
-/// nonsense window pass silently.
-const RETENTION_DISABLED_THRESHOLD_DAYS: u32 = 36_500; // ~100 years
-
 const SECONDS_PER_DAY: u64 = 86_400;
 const RUN_HOUR_UTC: u32 = 3;
 
@@ -164,13 +157,6 @@ pub async fn purge_old_data(
     .await?;
 
     let sessions = sweep_sessions(pool, session.idle_timeout_days).await?;
-
-    if retention.check_results_days >= RETENTION_DISABLED_THRESHOLD_DAYS {
-        tracing::warn!(
-            days = retention.check_results_days,
-            "check_results retention effectively disabled by config; relying on ClickHouse TTL only"
-        );
-    }
 
     Ok(RetentionReport {
         purge,
