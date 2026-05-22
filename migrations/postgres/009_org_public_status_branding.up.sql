@@ -16,7 +16,12 @@ ALTER TABLE organizations
     -- unrepresentable and turn a legitimate `None` write into a constraint
     -- violation. For the default config NULL still resolves to `true`.
     ADD COLUMN public_show_powered_by      BOOLEAN,
-    ADD COLUMN public_custom_domain        TEXT UNIQUE,
+    -- CITEXT so case-only variants ('Status.ACME.com' vs 'status.acme.com')
+    -- collide under UNIQUE — `TEXT` would store both as distinct rows and
+    -- two orgs could verify the same host. The CHECK below pins storage to
+    -- canonical lowercase + no-trailing-dot so the routing layer doesn't
+    -- have to defensively normalise on every read.
+    ADD COLUMN public_custom_domain        CITEXT UNIQUE,
     ADD COLUMN public_custom_domain_verified_at TIMESTAMPTZ;
 
 ALTER TABLE organizations
@@ -28,7 +33,11 @@ ALTER TABLE organizations
                OR char_length(public_about) <= 500),
     ADD CONSTRAINT display_name_length
         CHECK (public_display_name IS NULL
-               OR char_length(public_display_name) BETWEEN 1 AND 80);
+               OR char_length(public_display_name) BETWEEN 1 AND 80),
+    ADD CONSTRAINT public_custom_domain_canonical
+        CHECK (public_custom_domain IS NULL
+               OR (public_custom_domain::text = lower(public_custom_domain::text)
+                   AND public_custom_domain::text NOT LIKE '%.'));
 
 CREATE INDEX idx_orgs_public_enabled
     ON organizations (slug)
