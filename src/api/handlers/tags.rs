@@ -31,7 +31,7 @@ pub struct TagsQuery {
     responses(
         (status = 200, body = PageOfTagCount, example = json!({
             "items": [{"name": "prod", "count": 12}, {"name": "staging", "count": 4}],
-            "total": 2, "limit": 100, "offset": 0
+            "limit": 100, "offset": 0, "has_more": true
         })),
         (status = 400, body = ApiError),
     ),
@@ -42,9 +42,9 @@ pub async fn list_tags(
     Query(q): Query<TagsQuery>,
 ) -> Result<Json<PageOfTagCount>> {
     let limit = q.limit.unwrap_or(TAGS_LIMIT_DEFAULT).min(TAGS_LIMIT_MAX);
-    let (items, total) = tokio::try_join!(
-        state.target_store.list_tags(org, q.q.clone(), limit),
-        state.target_store.count_tags(org, q.q.clone()),
-    )?;
-    Ok(Json(PageEnvelope::new(items, total, limit as u32, 0)))
+    let peek = state
+        .target_store
+        .list_tags(org, q.q.clone(), limit + 1)
+        .await?;
+    Ok(Json(PageEnvelope::from_peek(peek, limit as u32, 0)))
 }

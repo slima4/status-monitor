@@ -49,7 +49,7 @@ pub struct TargetRow {
 pub struct ListPage {
     pub active_tab: &'static str,
     pub rows: Vec<TargetRow>,
-    pub total: u64,
+    pub has_more: bool,
     pub limit: usize,
     pub offset: usize,
     pub prev_offset: Option<usize>,
@@ -63,7 +63,7 @@ pub struct ListPage {
 #[template(path = "targets/partials/list_body.html")]
 pub struct ListBodyPartial {
     pub rows: Vec<TargetRow>,
-    pub total: u64,
+    pub has_more: bool,
     pub limit: usize,
     pub offset: usize,
     pub prev_offset: Option<usize>,
@@ -79,12 +79,12 @@ pub async fn index(
     State(state): State<AppState>,
     Query(params): Query<ListParams>,
 ) -> WebResult<ListPage> {
-    let (rows, total, limit, offset) = fetch_rows(&state, org, &params).await?;
-    let (prev_offset, next_offset) = pagination_offsets(offset, limit, rows.len(), total);
+    let (rows, has_more, limit, offset) = fetch_rows(&state, org, &params).await?;
+    let (prev_offset, next_offset) = pagination_offsets(offset, limit, has_more);
     Ok(ListPage {
         active_tab: "targets",
         rows,
-        total,
+        has_more,
         limit,
         offset,
         prev_offset,
@@ -101,11 +101,11 @@ pub async fn list_partial(
     State(state): State<AppState>,
     Query(params): Query<ListParams>,
 ) -> WebResult<ListBodyPartial> {
-    let (rows, total, limit, offset) = fetch_rows(&state, org, &params).await?;
-    let (prev_offset, next_offset) = pagination_offsets(offset, limit, rows.len(), total);
+    let (rows, has_more, limit, offset) = fetch_rows(&state, org, &params).await?;
+    let (prev_offset, next_offset) = pagination_offsets(offset, limit, has_more);
     Ok(ListBodyPartial {
         rows,
-        total,
+        has_more,
         limit,
         offset,
         prev_offset,
@@ -119,11 +119,10 @@ pub async fn list_partial(
 fn pagination_offsets(
     offset: usize,
     limit: usize,
-    page_len: usize,
-    total: u64,
+    has_more: bool,
 ) -> (Option<usize>, Option<usize>) {
     let prev = (offset > 0).then(|| offset.saturating_sub(limit));
-    let next = ((offset + page_len) < total as usize).then_some(offset + limit);
+    let next = has_more.then_some(offset + limit);
     (prev, next)
 }
 
@@ -131,7 +130,7 @@ async fn fetch_rows(
     state: &AppState,
     org: OrgId,
     params: &ListParams,
-) -> Result<(Vec<TargetRow>, u64, usize, usize), crate::error::AppError> {
+) -> Result<(Vec<TargetRow>, bool, usize, usize), crate::error::AppError> {
     let limit = params.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
     let offset = params.offset.unwrap_or(0);
     let filter = TargetFilter {
@@ -141,10 +140,15 @@ async fn fetch_rows(
         enabled: params.enabled,
     };
 
-    let (targets, total) = tokio::try_join!(
-        state.target_store.list(org, filter.clone()),
-        state.target_store.count(org, filter),
-    )?;
+    let peek_filter = TargetFilter {
+        limit: filter.limit.map(|n| n + 1),
+        ..filter
+    };
+    let mut targets = state.target_store.list(org, peek_filter).await?;
+    let has_more = targets.len() > limit;
+    if has_more {
+        targets.truncate(limit);
+    }
 
     let now = Utc::now();
     let range = TimeRange {
@@ -170,7 +174,7 @@ async fn fetch_rows(
         .map(|(t, last)| make_row(t, last))
         .collect();
 
-    Ok((rows, total, limit, offset))
+    Ok((rows, has_more, limit, offset))
 }
 
 fn make_row(t: Target, last: Option<CheckResult>) -> TargetRow {
@@ -216,7 +220,7 @@ mod tests {
         let page = ListPage {
             active_tab: "targets",
             rows: vec![sample_row("api")],
-            total: 1,
+            has_more: false,
             limit: 50,
             offset: 0,
             q: String::new(),
@@ -236,7 +240,7 @@ mod tests {
     fn list_partial_renders_tbody_only() {
         let partial = ListBodyPartial {
             rows: vec![sample_row("api"), sample_row("worker")],
-            total: 100,
+            has_more: true,
             limit: 50,
             offset: 0,
             q: String::new(),
@@ -257,7 +261,7 @@ mod tests {
     fn empty_state_renders_message() {
         let partial = ListBodyPartial {
             rows: vec![],
-            total: 0,
+            has_more: false,
             limit: 50,
             offset: 0,
             q: String::new(),
@@ -277,7 +281,7 @@ mod tests {
         row.last_error = "connect timeout after 5000ms".into();
         let partial = ListBodyPartial {
             rows: vec![row],
-            total: 1,
+            has_more: false,
             limit: 50,
             offset: 0,
             q: String::new(),
@@ -296,7 +300,7 @@ mod tests {
     fn no_error_div_when_last_error_empty() {
         let partial = ListBodyPartial {
             rows: vec![sample_row("api")],
-            total: 1,
+            has_more: false,
             limit: 50,
             offset: 0,
             q: String::new(),

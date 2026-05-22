@@ -96,7 +96,7 @@
   <section class="sticker-card">
     <header class="flex items-center justify-between border-b-2 border-slate-100 px-5 py-3">
       <h2 class="panel-label">Recent results</h2>
-      <span class="text-xs text-slate-500">Latest {{ results.len() }} of {{ results_total }}</span>
+      <span class="text-xs text-slate-500">Latest {{ results.len() }}{% if results_has_more %}+{% endif %}</span>
     </header>
     <table class="min-w-full text-sm">
       <caption class="sr-only">Recent check results for {{ name }}</caption>

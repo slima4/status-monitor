@@ -155,22 +155,6 @@ impl TargetStore for PostgresTargetStore {
         self.rows_to_targets(rows)
     }
 
-    async fn count(&self, org: OrgId, filter: TargetFilter) -> Result<u64> {
-        let row: (i64,) = sqlx::query_as(
-            r#"SELECT count(*) FROM targets
-               WHERE org_id = $1
-                 AND ($2::bool IS NULL OR enabled = $2)
-                 AND ($3::text IS NULL OR $3 = ANY(tags))"#,
-        )
-        .bind(org.0)
-        .bind(filter.enabled)
-        .bind(filter.tag)
-        .fetch_one(&self.pool)
-        .await
-        .context("count targets")?;
-        Ok(row.0.max(0) as u64)
-    }
-
     async fn get(&self, org: OrgId, id: Uuid) -> Result<Option<Target>> {
         let row: Option<TargetRow> = sqlx::query_as::<_, TargetRow>(
             r#"SELECT id, name, check_spec, interval_secs, enabled, tags, alerts,
@@ -488,22 +472,6 @@ impl TargetStore for PostgresTargetStore {
                 count: c.max(0) as u64,
             })
             .collect())
-    }
-
-    async fn count_tags(&self, org: OrgId, prefix: Option<String>) -> Result<u64> {
-        let prefix_pat = prefix.as_deref().map(|p| format!("{p}%"));
-        let row: (i64,) = sqlx::query_as(
-            r#"SELECT count(DISTINCT tag)
-               FROM targets, unnest(tags) AS tag
-               WHERE org_id = $1
-                 AND ($2::text IS NULL OR tag LIKE $2)"#,
-        )
-        .bind(org.0)
-        .bind(prefix_pat)
-        .fetch_one(&self.pool)
-        .await
-        .context("count distinct tags")?;
-        Ok(row.0.max(0) as u64)
     }
 
     async fn summary(&self, org: OrgId) -> Result<TargetsSummary> {

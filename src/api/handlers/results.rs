@@ -104,7 +104,7 @@ impl RangeQuery {
                 "status": "up",
                 "duration_ms": 142
             }],
-            "total": 1, "limit": 1000, "offset": 0
+            "limit": 1000, "offset": 0, "has_more": false
         })),
         (status = 400, description = "Bad time range or filter", body = ApiError),
         (status = 404, description = "Target not found", body = ApiError),
@@ -122,19 +122,17 @@ pub async fn list_results(
     // The org-scoped `get` rides alongside the (also org-scoped) results
     // queries: a foreign/unknown id still 404s, but the cloak adds no serial
     // round-trip. Results are discarded unless the target resolves.
-    let (target, items, total) = tokio::try_join!(
+    let (target, peek) = tokio::try_join!(
         state.target_store.get(org, id),
         state
             .results_store
-            .list_results(org, id, range, limit, offset),
-        state.results_store.count_results(org, id, range),
+            .list_results(org, id, range, limit + 1, offset),
     )?;
     if target.is_none() {
         return Err(target_not_found());
     }
-    Ok(Json(PageEnvelope::new(
-        items,
-        total,
+    Ok(Json(PageEnvelope::from_peek(
+        peek,
         limit as u32,
         offset as u32,
     )))
@@ -211,7 +209,7 @@ pub struct IncidentsQuery {
                 "check_count": 5,
                 "error_sample": "connection refused"
             }],
-            "total": 1, "limit": 100, "offset": 0
+            "limit": 100, "offset": 0, "has_more": false
         })),
         (status = 400, body = ApiError),
         (status = 404, body = ApiError),
@@ -228,21 +226,21 @@ pub async fn list_incidents(
         .limit
         .unwrap_or(INCIDENTS_LIMIT_DEFAULT)
         .min(INCIDENTS_LIMIT_MAX);
-    let (target, items, total) = tokio::try_join!(
+    // Fetch limit+1 to detect a next page in a single call. Coalesced
+    // incidents are materialised in memory (no SQL LIMIT semantic), so a
+    // parallel `count(*)` previously meant scanning the full window twice;
+    // peeking saves the second pass and the second sort.
+    let (target, peek) = tokio::try_join!(
         state.target_store.get(org, id),
         state
             .results_store
-            .list_incidents(org, id, range, q.ongoing_only, limit, q.offset),
-        state
-            .results_store
-            .count_incidents(org, id, range, q.ongoing_only),
+            .list_incidents(org, id, range, q.ongoing_only, limit + 1, q.offset),
     )?;
     if target.is_none() {
         return Err(target_not_found());
     }
-    Ok(Json(PageEnvelope::new(
-        items,
-        total,
+    Ok(Json(PageEnvelope::from_peek(
+        peek,
         limit as u32,
         q.offset as u32,
     )))

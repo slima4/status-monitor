@@ -32,7 +32,6 @@ pub struct MaintenanceListQuery {
 pub trait MaintenanceStore: Send + Sync {
     async fn create(&self, new: NewMaintenanceWindow) -> Result<MaintenanceWindow>;
     async fn list(&self, q: MaintenanceListQuery) -> Result<Vec<MaintenanceWindow>>;
-    async fn count(&self, filter: MaintenanceFilter) -> Result<u64>;
     async fn get(&self, id: Uuid) -> Result<Option<MaintenanceWindow>>;
     async fn update(
         &self,
@@ -174,17 +173,6 @@ impl MaintenanceStore for PgMaintenanceStore {
         Ok(out)
     }
 
-    async fn count(&self, filter: MaintenanceFilter) -> Result<u64> {
-        let now = Utc::now();
-        let (total,): (i64,) = sqlx::query_as(&count_sql(filter))
-            .bind(now)
-            .bind(self.org_id())
-            .fetch_one(&self.pool)
-            .await
-            .map_err(|e| anyhow::anyhow!("count maintenance: {e}"))?;
-        Ok(total.max(0) as u64)
-    }
-
     async fn get(&self, id: Uuid) -> Result<Option<MaintenanceWindow>> {
         let row: Option<MaintenanceRow> = sqlx::query_as(
             r#"SELECT id, title, description, starts_at, ends_at, created_at, updated_at
@@ -313,14 +301,6 @@ fn list_sql(filter: MaintenanceFilter) -> String {
     )
 }
 
-fn count_sql(filter: MaintenanceFilter) -> String {
-    format!(
-        r#"SELECT count(*) FROM maintenance_windows
-           WHERE org_id = $2 AND ({clause})"#,
-        clause = filter_clause(filter),
-    )
-}
-
 fn filter_clause(filter: MaintenanceFilter) -> &'static str {
     match filter {
         MaintenanceFilter::Active => "starts_at <= $1 AND ends_at > $1",
@@ -407,15 +387,6 @@ impl MaintenanceStore for InMemoryMaintenanceStore {
             return Ok(Vec::new());
         }
         Ok(filtered[start..end].to_vec())
-    }
-
-    async fn count(&self, filter: MaintenanceFilter) -> Result<u64> {
-        let now = Utc::now();
-        let g = self.inner.lock();
-        Ok(g.windows
-            .iter()
-            .filter(|w| match_filter(w, filter, now))
-            .count() as u64)
     }
 
     async fn get(&self, id: Uuid) -> Result<Option<MaintenanceWindow>> {

@@ -75,17 +75,6 @@ impl ResultsStore for InMemorySink {
         Ok(paged)
     }
 
-    async fn count_results(&self, _org: OrgId, target_id: Uuid, range: TimeRange) -> Result<u64> {
-        Ok(self
-            .results
-            .lock()
-            .iter()
-            .filter(|r| {
-                r.target_id == target_id && r.timestamp >= range.from && r.timestamp < range.to
-            })
-            .count() as u64)
-    }
-
     async fn uptime(&self, _org: OrgId, target_id: Uuid, range: TimeRange) -> Result<UptimeStats> {
         let guard = self.results.lock();
         let filtered: Vec<CheckResult> = guard
@@ -114,20 +103,6 @@ impl ResultsStore for InMemorySink {
         incidents.sort_by_key(|i| std::cmp::Reverse(i.started_at));
         let paged: Vec<Incident> = incidents.into_iter().skip(offset).take(limit).collect();
         Ok(paged)
-    }
-
-    async fn count_incidents(
-        &self,
-        _org: OrgId,
-        target_id: Uuid,
-        range: TimeRange,
-        ongoing_only: bool,
-    ) -> Result<u64> {
-        let mut incidents = coalesce_for_target(&self.snapshot(), target_id, range);
-        if ongoing_only {
-            incidents.retain(|i| i.ended_at.is_none());
-        }
-        Ok(incidents.len() as u64)
     }
 
     async fn current_status_breakdown(
@@ -274,19 +249,6 @@ impl TargetStore for InMemoryTargetStore {
         Ok(collected)
     }
 
-    async fn count(&self, _org: OrgId, filter: TargetFilter) -> Result<u64> {
-        let guard = self.targets.lock();
-        let n = guard
-            .iter()
-            .filter(|t| filter.enabled.map(|e| t.enabled == e).unwrap_or(true))
-            .filter(|t| match &filter.tag {
-                Some(tag) => t.tags.iter().any(|x| x == tag),
-                None => true,
-            })
-            .count();
-        Ok(n as u64)
-    }
-
     async fn get(&self, _org: OrgId, id: Uuid) -> Result<Option<Target>> {
         Ok(self.targets.lock().iter().find(|t| t.id == id).cloned())
     }
@@ -417,21 +379,6 @@ impl TargetStore for InMemoryTargetStore {
         out.sort_by(|a, b| b.count.cmp(&a.count).then(a.name.cmp(&b.name)));
         out.truncate(limit);
         Ok(out)
-    }
-
-    async fn count_tags(&self, _org: OrgId, prefix: Option<String>) -> Result<u64> {
-        let mut seen = std::collections::HashSet::new();
-        for t in self.targets.lock().iter() {
-            for tag in &t.tags {
-                if let Some(pfx) = prefix.as_deref()
-                    && !tag.starts_with(pfx)
-                {
-                    continue;
-                }
-                seen.insert(tag.clone());
-            }
-        }
-        Ok(seen.len() as u64)
     }
 
     async fn summary(&self, _org: OrgId) -> Result<TargetsSummary> {

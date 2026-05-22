@@ -110,15 +110,15 @@ pub async fn list_maintenance(
         .clamp(1, LIST_LIMIT_MAX);
     let offset = q.offset.unwrap_or(0);
     let filter = q.status.unwrap_or_default();
-    let (items, total) = tokio::try_join!(
-        state.maintenance_store.list(MaintenanceListQuery {
+    let peek = state
+        .maintenance_store
+        .list(MaintenanceListQuery {
             filter,
-            limit,
+            limit: limit + 1,
             offset,
-        }),
-        state.maintenance_store.count(filter),
-    )?;
-    Ok(Json(PageEnvelope::new(items, total, limit, offset)))
+        })
+        .await?;
+    Ok(Json(PageEnvelope::from_peek(peek, limit, offset)))
 }
 
 #[utoipa::path(

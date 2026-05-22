@@ -117,8 +117,8 @@ async fn list_maintenance_paginates_and_filters() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     let v = body_json(resp).await;
-    assert_eq!(v["total"].as_u64().unwrap(), 3);
     assert!(v["items"].as_array().unwrap().len() >= 3);
+    assert_eq!(v["has_more"], false);
 }
 
 #[tokio::test]

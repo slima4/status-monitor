@@ -28,9 +28,6 @@ pub struct TargetFilter {
 #[async_trait]
 pub trait TargetStore: Send + Sync {
     async fn list(&self, org: OrgId, filter: TargetFilter) -> Result<Vec<Target>>;
-    /// Total rows matching `filter` (ignoring `limit`/`offset`). Used to fill
-    /// the `total` field of `PageEnvelope`.
-    async fn count(&self, org: OrgId, filter: TargetFilter) -> Result<u64>;
     async fn get(&self, org: OrgId, id: Uuid) -> Result<Option<Target>>;
     /// Create one target. `max_targets` is the plan cap; the INSERT is
     /// guarded by `(count) + 1 <= max_targets` so the bound holds even
@@ -57,8 +54,6 @@ pub trait TargetStore: Send + Sync {
         prefix: Option<String>,
         limit: usize,
     ) -> Result<Vec<TagCount>>;
-    /// Total number of distinct tags matching `prefix`.
-    async fn count_tags(&self, org: OrgId, prefix: Option<String>) -> Result<u64>;
     /// Totals + enabled/disabled split for the dashboard.
     async fn summary(&self, org: OrgId) -> Result<TargetsSummary>;
     /// Atomically enable or disable each id; returns the set that existed.
@@ -124,9 +119,6 @@ pub trait ResultsStore: Send + Sync {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<CheckResult>>;
-    /// Total rows for `target_id` in `range`. Used to fill the `total` field
-    /// of `PageEnvelope`.
-    async fn count_results(&self, org: OrgId, target_id: Uuid, range: TimeRange) -> Result<u64>;
     async fn uptime(&self, org: OrgId, target_id: Uuid, range: TimeRange) -> Result<UptimeStats>;
     /// Coalesce consecutive `down`/`error` results in `range` into incidents.
     /// `ongoing_only` filters out incidents that have already ended.
@@ -139,13 +131,6 @@ pub trait ResultsStore: Send + Sync {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<Incident>>;
-    async fn count_incidents(
-        &self,
-        org: OrgId,
-        target_id: Uuid,
-        range: TimeRange,
-        ongoing_only: bool,
-    ) -> Result<u64>;
     /// Per-status breakdown using each target's most recent observation in
     /// `range`. Targets with no observations in the range are omitted from
     /// the counts.

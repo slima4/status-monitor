@@ -381,29 +381,6 @@ impl ResultsStore for ClickhouseResultsStore {
         Ok(rows.into_iter().map(|r| row_to_result(r, org.0)).collect())
     }
 
-    async fn count_results(&self, org: OrgId, target_id: Uuid, range: TimeRange) -> Result<u64> {
-        #[derive(Row, Deserialize)]
-        struct CountRow {
-            n: u64,
-        }
-        let row: CountRow = self
-            .client
-            .query(&format!(
-                "SELECT count() AS n FROM {TABLE} \
-                 WHERE org_id = ? AND target_id = ? \
-                 AND timestamp >= fromUnixTimestamp64Milli(?) \
-                 AND timestamp < fromUnixTimestamp64Milli(?)"
-            ))
-            .bind(org.0)
-            .bind(target_id)
-            .bind(range.from.timestamp_millis())
-            .bind(range.to.timestamp_millis())
-            .fetch_one::<CountRow>()
-            .await
-            .context("clickhouse count_results")?;
-        Ok(row.n)
-    }
-
     async fn list_incidents(
         &self,
         org: OrgId,
@@ -420,21 +397,6 @@ impl ResultsStore for ClickhouseResultsStore {
         }
         incidents.sort_by_key(|i| std::cmp::Reverse(i.started_at));
         Ok(incidents.into_iter().skip(offset).take(limit).collect())
-    }
-
-    async fn count_incidents(
-        &self,
-        org: OrgId,
-        target_id: Uuid,
-        range: TimeRange,
-        ongoing_only: bool,
-    ) -> Result<u64> {
-        let rows = self.fetch_incident_rows(org, target_id, range).await?;
-        let mut incidents = coalesce_from_incident_rows(target_id, rows);
-        if ongoing_only {
-            incidents.retain(|i| i.ended_at.is_none());
-        }
-        Ok(incidents.len() as u64)
     }
 
     async fn current_status_breakdown(

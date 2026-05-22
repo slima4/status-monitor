@@ -291,11 +291,8 @@ async fn two_tenants_never_see_each_others_data() {
         cross.is_empty(),
         "results_store under org A must not return rows tagged with B's org"
     );
-    let cross_count = results_store
-        .count_results(a.org, target_b.id, range)
-        .await
-        .unwrap();
-    assert_eq!(cross_count, 0, "count must also enforce org_id filter");
+    // list_results above already asserts the cross-org rows are filtered;
+    // no separate count check is needed now that count_results is gone.
 
     // ── Membership ──────────────────────────────────────────────────────
     assert!(

@@ -50,7 +50,7 @@
 {% endif %}
   <tr class="border-t bg-slate-50">
     <td colspan="8" class="px-3 py-2 text-xs text-slate-500">
-      <span>Showing {% if rows.is_empty() %}0{% else %}{{ offset + 1 }}–{{ offset + rows.len() }}{% endif %} of {{ total }}</span>
+      <span>Showing {% if rows.is_empty() %}0{% else %}{{ offset + 1 }}–{{ offset + rows.len() }}{% endif %}{% if has_more %}+{% endif %}</span>
       {% if let Some(prev) = prev_offset %}
       <a class="ml-3 underline"
          hx-get="/web/targets/list?limit={{ limit }}&offset={{ prev }}&q={{ q|urlencode }}&tag={{ tag|urlencode }}{% if let Some(e) = enabled %}&enabled={{ e }}{% endif %}"

@@ -48,7 +48,7 @@ async fn list_targets_empty() {
     assert_eq!(resp.status(), StatusCode::OK);
     let v = body_json(resp).await;
     assert_eq!(v["items"].as_array().unwrap().len(), 0);
-    assert_eq!(v["total"], 0);
+    assert_eq!(v["has_more"], false);
     assert_eq!(v["limit"], 50);
     assert_eq!(v["offset"], 0);
 }

@@ -53,7 +53,7 @@ pub struct DetailPage {
     pub last_status: &'static str,
     pub uptime: UptimeStatsView,
     pub results: Vec<ResultRow>,
-    pub results_total: u64,
+    pub results_has_more: bool,
     pub config_json: String,
     pub range: &'static str,
     pub range_options: Vec<RangeOption>,
@@ -107,15 +107,16 @@ pub async fn index(
     let (from, to) = resolve_window(range_key, params.from, params.to);
     let time_range = TimeRange { from, to };
 
-    let (uptime, results, results_total) = tokio::try_join!(
+    let (uptime, mut results) = tokio::try_join!(
         state.results_store.uptime(org, target.id, time_range),
         state
             .results_store
-            .list_results(org, target.id, time_range, RESULTS_PAGE_LIMIT, 0),
-        state
-            .results_store
-            .count_results(org, target.id, time_range),
+            .list_results(org, target.id, time_range, RESULTS_PAGE_LIMIT + 1, 0),
     )?;
+    let results_has_more = results.len() > RESULTS_PAGE_LIMIT;
+    if results_has_more {
+        results.truncate(RESULTS_PAGE_LIMIT);
+    }
 
     let last_status = results.first().map(|r| r.status.as_str()).unwrap_or("");
     let result_rows = results.into_iter().map(ResultRow::from).collect();
@@ -135,7 +136,7 @@ pub async fn index(
         last_status,
         uptime: uptime.into(),
         results: result_rows,
-        results_total,
+        results_has_more,
         config_json,
         range: range_key,
         range_options: build_range_options(range_key),
@@ -220,7 +221,7 @@ mod tests {
                 response_code: "200".into(),
                 error: String::new(),
             }],
-            results_total: 1,
+            results_has_more: false,
             config_json: r#"{"type":"http"}"#.into(),
             range: "24h",
             range_options: build_range_options("24h"),

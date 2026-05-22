@@ -77,7 +77,7 @@ impl ListQuery {
                 "created_at": "2026-05-13T12:00:00.000Z",
                 "updated_at": "2026-05-13T12:00:00.000Z"
             }],
-            "total": 1, "limit": 50, "offset": 0
+            "limit": 50, "offset": 0, "has_more": false
         })),
         (status = 400, body = ApiError),
     ),
@@ -90,13 +90,15 @@ pub async fn list(
     let limit = query.effective_limit();
     let offset = query.offset;
     let filter = query.to_filter();
-    let (items, total) = tokio::try_join!(
-        state.target_store.list(org, filter.clone()),
-        state.target_store.count(org, filter),
-    )?;
-    Ok(Redacted::new(PageEnvelope::new(
-        items,
-        total,
+    // The filter struct owns its limit/offset; bump the limit by 1 to peek
+    // a row past the page boundary and let the envelope decide has_more.
+    let peek_filter = TargetFilter {
+        limit: filter.limit.map(|n| n + 1),
+        ..filter
+    };
+    let peek = state.target_store.list(org, peek_filter).await?;
+    Ok(Redacted::new(PageEnvelope::from_peek(
+        peek,
         limit as u32,
         offset as u32,
     )))
