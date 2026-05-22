@@ -30,19 +30,18 @@ const TABLE: &str = "check_results";
 /// destructive statement (DROP/TRUNCATE) under those conditions wipes live
 /// data, which is why migrations contain none.
 ///
-/// Splitter constraints (we don't validate these; just don't break them):
-/// - The splitter strips `--` line comments before splitting on `;`, but has
-///   no string-literal or block-comment tracker. So a migration must not
-///   contain a `;` inside a string literal, a `--` inside a string literal,
-///   or a `/* … */` block comment containing either character. CREATE
-///   FUNCTION bodies, multi-line strings, etc. won't survive either. Today's
-///   migrations only quote short tokens (`'UTC'`, `'up'`) so the gap is
-///   theoretical; extend the splitter before relying on otherwise.
-/// - The runner is not concurrent-safe: two processes racing through their
-///   first boot could both observe an empty applied set and both run the
-///   migration. With the IF NOT EXISTS discipline above this is harmless
-///   (second CREATE is a no-op); for multi-replica, take a pg_advisory_lock
-///   around the call.
+/// The splitter is a real tokenizer ([`split_statements`]) — it tracks
+/// single/double-quote string literals, backtick identifiers, line
+/// comments (`--`) and block comments (`/* … */`), so `;` inside any of
+/// those does **not** become a chunk boundary. CREATE FUNCTION bodies,
+/// regex defaults containing `';'`, doubled-quote escapes (`'it''s'`) and
+/// backslash escapes (`'a\\'b'`) all round-trip.
+///
+/// The runner is not concurrent-safe: two processes racing through their
+/// first boot could both observe an empty applied set and both run the
+/// migration. With the IF NOT EXISTS discipline above this is harmless
+/// (second CREATE is a no-op); for multi-replica, take a pg_advisory_lock
+/// around the call.
 const MIGRATIONS: &[(&str, &str)] = &[(
     "001_initial.sql",
     include_str!("../../migrations/clickhouse/001_initial.sql"),
@@ -78,7 +77,9 @@ pub async fn migrate(client: &Client) -> Result<()> {
             continue;
         }
         tracing::info!(migration = name, "applying clickhouse migration");
-        for stmt in split_statements(sql) {
+        for stmt in split_statements(sql)
+            .with_context(|| format!("clickhouse migration {name}: tokenize source"))?
+        {
             client
                 .query(&stmt)
                 .execute()
@@ -116,26 +117,100 @@ pub async fn migrate(client: &Client) -> Result<()> {
     Ok(())
 }
 
-/// Split a migration source into executable statements. Strips `--` line
-/// comments first so a stray `;` inside a comment doesn't produce a chunk
-/// that ClickHouse rejects as "Empty query". No string-literal tracking: a
-/// migration that needs a literal `;` inside quotes must split into multiple
-/// files (or extend this helper).
-fn split_statements(sql: &str) -> Vec<String> {
-    let stripped: String = sql
-        .lines()
-        .map(|line| match line.find("--") {
-            Some(i) => &line[..i],
-            None => line,
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    stripped
-        .split(';')
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(str::to_owned)
-        .collect()
+/// Split a migration source into executable statements with full
+/// awareness of string literals and comments.
+///
+/// Quoted regions (`'…'`, `"…"`, `` `…` ``) and comments (`--` to
+/// newline, `/* … */` block) suppress `;` recognition. Doubled quotes
+/// (`''`, `""`) and backslash escapes (`\'`, `\\`) inside a string keep
+/// the parser inside that string. Comment bodies are dropped from the
+/// emitted statement; quoted bodies are kept verbatim.
+///
+/// Returns an error on an unterminated string literal or block comment
+/// at EOF — these are migration bugs that must boot-fail loudly with a
+/// pointer to the source rather than be papered over with a half-parsed
+/// statement that ClickHouse then rejects far from the cause.
+fn split_statements(sql: &str) -> Result<Vec<String>> {
+    enum State {
+        Normal,
+        Quoted(char),
+        LineComment,
+        BlockComment,
+    }
+
+    let mut state = State::Normal;
+    let mut current = String::new();
+    let mut out = Vec::new();
+    let mut chars = sql.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        match state {
+            State::Normal => {
+                if c == ';' {
+                    push_statement(&mut current, &mut out);
+                } else if c == '-' && chars.peek() == Some(&'-') {
+                    chars.next();
+                    state = State::LineComment;
+                } else if c == '/' && chars.peek() == Some(&'*') {
+                    chars.next();
+                    state = State::BlockComment;
+                } else if c == '\'' || c == '"' || c == '`' {
+                    current.push(c);
+                    state = State::Quoted(c);
+                } else {
+                    current.push(c);
+                }
+            }
+            State::Quoted(q) => {
+                current.push(c);
+                if c == '\\' {
+                    if let Some(next) = chars.next() {
+                        current.push(next);
+                    }
+                } else if c == q {
+                    if chars.peek() == Some(&q) {
+                        if let Some(next) = chars.next() {
+                            current.push(next);
+                        }
+                    } else {
+                        state = State::Normal;
+                    }
+                }
+            }
+            State::LineComment => {
+                if c == '\n' {
+                    current.push('\n');
+                    state = State::Normal;
+                }
+            }
+            State::BlockComment => {
+                if c == '*' && chars.peek() == Some(&'/') {
+                    chars.next();
+                    state = State::Normal;
+                }
+            }
+        }
+    }
+    match state {
+        State::Normal | State::LineComment => {
+            push_statement(&mut current, &mut out);
+            Ok(out)
+        }
+        State::Quoted(q) => {
+            Err(anyhow::anyhow!("unterminated {q} string literal in migration source").into())
+        }
+        State::BlockComment => {
+            Err(anyhow::anyhow!("unterminated /* … */ block comment in migration source").into())
+        }
+    }
+}
+
+fn push_statement(buf: &mut String, out: &mut Vec<String>) {
+    let trimmed = buf.trim();
+    if !trimmed.is_empty() {
+        out.push(trimmed.to_string());
+    }
+    buf.clear();
 }
 
 pub fn build_client(cfg: &ClickhouseConfig) -> Client {
@@ -583,7 +658,7 @@ mod tests {
                    CREATE TABLE foo (x UInt8) ENGINE = TinyLog;\n\
                    -- another; with a semi\n\
                    DROP TABLE foo;";
-        let stmts = split_statements(sql);
+        let stmts = split_statements(sql).expect("test input is well-formed");
         assert_eq!(stmts.len(), 2);
         assert!(stmts[0].contains("CREATE TABLE foo"));
         assert!(stmts[1].contains("DROP TABLE foo"));
@@ -591,14 +666,108 @@ mod tests {
 
     #[test]
     fn split_discards_trailing_blank_chunk() {
-        let stmts = split_statements("SELECT 1;\n");
+        let stmts = split_statements("SELECT 1;\n").expect("test input is well-formed");
         assert_eq!(stmts.len(), 1);
         assert_eq!(stmts[0], "SELECT 1");
     }
 
     #[test]
     fn split_preserves_inline_comment_after_statement() {
-        let stmts = split_statements("SELECT 1; -- trailing\nSELECT 2;");
+        let stmts = split_statements("SELECT 1; -- trailing\nSELECT 2;")
+            .expect("test input is well-formed");
         assert_eq!(stmts, vec!["SELECT 1", "SELECT 2"]);
+    }
+
+    #[test]
+    fn split_keeps_semicolon_inside_single_quoted_string() {
+        // A `;` inside a quoted literal would become a chunk boundary
+        // under a naive split, leaving two syntax-error halves. The
+        // tokenizer must keep this as one statement.
+        let sql = "INSERT INTO t VALUES ('a; b', 'c;');";
+        let stmts = split_statements(sql).expect("test input is well-formed");
+        assert_eq!(stmts.len(), 1);
+        assert_eq!(stmts[0], "INSERT INTO t VALUES ('a; b', 'c;')");
+    }
+
+    #[test]
+    fn split_handles_doubled_quote_escape() {
+        // SQL-standard `''` inside a string represents a single quote and
+        // must not close the literal; an unintended close would expose a
+        // following `;` to the splitter.
+        let sql = "SELECT 'it''s; not over'; SELECT 2;";
+        let stmts = split_statements(sql).expect("test input is well-formed");
+        assert_eq!(stmts.len(), 2);
+        assert_eq!(stmts[0], "SELECT 'it''s; not over'");
+        assert_eq!(stmts[1], "SELECT 2");
+    }
+
+    #[test]
+    fn split_handles_backslash_escape_inside_string() {
+        // ClickHouse accepts `\'` as an escaped quote. The escape must
+        // keep the parser inside the string so the trailing `;` is data.
+        let sql = "SELECT 'a\\'b;c'; SELECT 2;";
+        let stmts = split_statements(sql).expect("test input is well-formed");
+        assert_eq!(stmts.len(), 2);
+        assert_eq!(stmts[0], "SELECT 'a\\'b;c'");
+        assert_eq!(stmts[1], "SELECT 2");
+    }
+
+    #[test]
+    fn split_keeps_semicolon_inside_double_quoted_identifier() {
+        let sql = "SELECT \"a;b\" FROM t; SELECT 2;";
+        let stmts = split_statements(sql).expect("test input is well-formed");
+        assert_eq!(stmts.len(), 2);
+        assert!(stmts[0].contains("\"a;b\""));
+    }
+
+    #[test]
+    fn split_keeps_semicolon_inside_backtick_identifier() {
+        let sql = "SELECT `a;b` FROM t; SELECT 2;";
+        let stmts = split_statements(sql).expect("test input is well-formed");
+        assert_eq!(stmts.len(), 2);
+        assert!(stmts[0].contains("`a;b`"));
+    }
+
+    #[test]
+    fn split_strips_block_comment_with_semicolon_inside() {
+        let sql = "SELECT 1 /* foo; bar */; SELECT 2;";
+        let stmts = split_statements(sql).expect("test input is well-formed");
+        assert_eq!(stmts.len(), 2);
+        assert_eq!(stmts[1], "SELECT 2");
+    }
+
+    #[test]
+    fn split_comment_only_input_produces_nothing() {
+        let stmts = split_statements("-- just a comment\n/* and a block */")
+            .expect("test input is well-formed");
+        assert!(stmts.is_empty());
+    }
+
+    #[test]
+    fn split_handles_trailing_statement_without_semicolon() {
+        let stmts = split_statements("SELECT 1; SELECT 2").expect("test input is well-formed");
+        assert_eq!(stmts, vec!["SELECT 1", "SELECT 2"]);
+    }
+
+    #[test]
+    fn split_errors_on_unterminated_string_literal() {
+        let err = split_statements("INSERT INTO t VALUES ('oops")
+            .expect_err("must error on unterminated string");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("unterminated") && msg.contains("string"),
+            "unexpected error: {msg}"
+        );
+    }
+
+    #[test]
+    fn split_errors_on_unterminated_block_comment() {
+        let err = split_statements("SELECT 1 /* never closes")
+            .expect_err("must error on unterminated block comment");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("unterminated") && msg.contains("block comment"),
+            "unexpected error: {msg}"
+        );
     }
 }
