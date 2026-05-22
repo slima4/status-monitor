@@ -1,0 +1,76 @@
+{%- import "public/_incident_chips.html" as chips -%}
+{%- import "public/_incident_card.html" as card -%}
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Incident history · {{ branding.display_name }} Status</title>
+    <meta name="description" content="Historical incidents for {{ branding.display_name }}.">
+    <meta name="robots" content="index,follow">
+    <link rel="icon" type="image/svg+xml" href="{{ "img/favicon.svg"|asset }}">
+    <link rel="alternate" type="application/rss+xml" title="Incidents (RSS)" href="{{ rss_url }}">
+    <link rel="stylesheet" href="{{ "css/app.css"|asset }}">
+    <style>
+        /* Re-validated by `safe_brand_color` — safe to interpolate. */
+        :root { --brand-color: {{ branding.brand_color }}; }
+    </style>
+    <script defer src="{{ "js/public/tz.js"|asset }}"></script>
+</head>
+<body class="bg-slate-50 text-slate-900 antialiased">
+    <a href="#main-content"
+       class="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:rounded focus:bg-white focus:px-3 focus:py-2 focus:text-sm focus:ring-2 focus:ring-slate-700">
+        Skip to main content
+    </a>
+    <header style="background-color: var(--brand-color)">
+        <div class="mx-auto flex max-w-3xl items-center justify-between px-4 py-5">
+            <a href="/status" class="flex items-center gap-3 text-lg font-semibold tracking-tight text-white">
+                {% if let Some(logo) = branding.logo_url %}
+                    <img src="{{ logo }}" alt="{{ branding.display_name }}" class="h-8 w-auto">
+                {% else %}
+                    {{ branding.display_name }}
+                {% endif %}
+            </a>
+            <a href="{{ rss_url }}" class="text-sm text-white/80 hover:text-white"
+               aria-label="Subscribe to incident updates via RSS">Subscribe (RSS)</a>
+        </div>
+    </header>
+
+    <main id="main-content" class="mx-auto max-w-3xl space-y-8 px-4 py-10">
+        <nav class="text-sm text-slate-500">
+            <a href="/status" class="hover:underline">← Back to status</a>
+        </nav>
+
+        <h1 class="text-2xl font-semibold tracking-tight">Incident history</h1>
+
+        {% if months.is_empty() %}
+            <p class="public-callout public-callout--neutral p-8 text-center text-sm text-slate-500">
+                No incidents recorded.
+            </p>
+        {% else %}
+            {% for bucket in months %}
+                <section aria-labelledby="month-{{ loop.index }}" class="space-y-3">
+                    <h2 id="month-{{ loop.index }}"
+                        class="text-sm font-semibold uppercase tracking-wide text-slate-500">
+                        {{ bucket.label }}
+                    </h2>
+                    <ul class="public-callout public-callout--neutral divide-y divide-slate-100 overflow-hidden p-0">
+                        {% for inc in bucket.incidents %}
+                        <li class="p-5">{% call card::card(inc) %}{% endcall %}</li>
+                        {% endfor %}
+                    </ul>
+                </section>
+            {% endfor %}
+
+            {% if let Some(cursor) = next_cursor %}
+                <p class="text-right text-sm">
+                    <a href="/status/incidents?cursor={{ cursor }}"
+                       class="font-medium text-blue-600 hover:underline">
+                        Older incidents →
+                    </a>
+                </p>
+            {% endif %}
+        {% endif %}
+    </main>
+</body>
+</html>

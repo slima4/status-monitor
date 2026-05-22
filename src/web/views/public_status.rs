@@ -57,6 +57,36 @@ pub struct IncidentDetailPage {
     pub rss_url: &'static str,
 }
 
+#[derive(Template, WebTemplate)]
+#[template(path = "public/archive.html")]
+pub struct IncidentArchivePage {
+    pub branding: BrandingView,
+    /// Incidents bucketed by `(year, month-name)` in DESC chronological
+    /// order. The template iterates each month as a section so the user
+    /// scans by date without explicit date-pickers — UX matches the
+    /// Atlassian / Statuspage.io archive convention.
+    pub months: Vec<MonthBucket>,
+    /// Opaque keyset cursor for the *next* page of older incidents; `None`
+    /// when this is the last page. The "Older incidents →" link only
+    /// renders when set.
+    pub next_cursor: Option<String>,
+    pub rss_url: &'static str,
+}
+
+pub struct MonthBucket {
+    /// Localised-ish label like "May 2026". Already date-formatted, so the
+    /// template renders it verbatim with no extra filters.
+    pub label: String,
+    pub incidents: Vec<IncidentSummary>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct ArchiveParams {
+    /// Keyset cursor returned by the previous archive page's next link.
+    /// Same opaque-token shape used by `/api/public/v1/incidents`.
+    pub cursor: Option<String>,
+}
+
 pub async fn index(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -151,6 +181,81 @@ pub async fn incident(
     .into_response()
 }
 
+/// Cursor-paginated archive view of every public incident for the org.
+/// Groups visually by month in DESC order so the user scans the page like
+/// a calendar without an explicit date picker. The link from the main
+/// status page (`/status`) lands here without a cursor; the "Older
+/// incidents →" link at the bottom passes `?cursor=…` to walk backwards.
+pub async fn archive(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(params): Query<ArchiveParams>,
+) -> Response {
+    use crate::api::cursor::IncidentCursor;
+    use crate::public_status::IncidentListQuery;
+
+    let org = match resolve_status_page_org(&state, &headers).await {
+        Ok(o) => o,
+        Err(err) => return render_public_error(err),
+    };
+    let cursor = match params.cursor.as_deref().map(IncidentCursor::decode) {
+        Some(Ok(c)) => Some(c),
+        Some(Err(_)) => return render_public_error(PublicAppError::BadRequest("invalid cursor")),
+        None => None,
+    };
+    let query = IncidentListQuery {
+        limit: ARCHIVE_PAGE_SIZE,
+        cursor,
+        ongoing_only: false,
+    };
+    let (page_res, list_res) = tokio::join!(
+        state.public_source.page(org),
+        state.public_source.list_incidents(org, query),
+    );
+    let fallback_name = match page_res {
+        Ok(p) => p.site_name.clone(),
+        Err(err) => return render_public_error(err),
+    };
+    let listing = match list_res {
+        Ok(l) => l,
+        Err(err) => return render_public_error(err),
+    };
+    let branding = resolve_branding(&state, org, &fallback_name).await;
+    let now = Utc::now();
+    let months = bucket_by_month(&listing.items, now);
+    IncidentArchivePage {
+        branding,
+        months,
+        next_cursor: listing.next_cursor,
+        rss_url: RSS_URL,
+    }
+    .into_response()
+}
+
+/// Group sorted-DESC incidents into per-month buckets. Sort order is
+/// preserved within and across buckets because the caller hands us rows
+/// already ordered by `(started_at DESC, id DESC)` via the keyset query.
+fn bucket_by_month(items: &[PublicIncident], now: DateTime<Utc>) -> Vec<MonthBucket> {
+    let mut out: Vec<MonthBucket> = Vec::new();
+    for incident in items {
+        // `%B %Y` → "May 2026". chrono's locale is C, which is exactly what
+        // we want for a stable status-page header; no manual month-name table.
+        let label = incident.started_at.format("%B %Y").to_string();
+        match out.last_mut() {
+            Some(bucket) if bucket.label == label => {
+                bucket.incidents.push(build_incident_summary(incident, now));
+            }
+            _ => {
+                out.push(MonthBucket {
+                    label,
+                    incidents: vec![build_incident_summary(incident, now)],
+                });
+            }
+        }
+    }
+    out
+}
+
 /// Maps a `PublicAppError` to an HTML response for the rendered routes —
 /// avoids leaking the JSON envelope into the browser.
 fn render_public_error(err: PublicAppError) -> Response {
@@ -181,6 +286,10 @@ fn render_public_error(err: PublicAppError) -> Response {
 
 const RSS_URL: &str = "/api/public/v1/incidents.rss";
 const HISTORY_LEN: usize = 90;
+/// Default page size for the archive view. Small enough that each render is
+/// snappy on the unauthenticated, edge-cached path; the keyset cursor walks
+/// older pages on demand.
+const ARCHIVE_PAGE_SIZE: u32 = 25;
 /// Single source of truth for the logo path — referenced by both the route
 /// registration and the URL the template emits so they cannot drift.
 pub const LOGO_ROUTE: &str = "/status/branding/logo";
@@ -1033,6 +1142,84 @@ mod tests {
         assert!(html.contains("--brand-color: #3b82f6;"));
         assert!(!html.contains("display: none"));
         assert!(!html.contains("} body {"));
+    }
+
+    fn fake_incident(started_at: DateTime<Utc>, id_low: u8, title: &str) -> PublicIncident {
+        let mut id_bytes = [0u8; 16];
+        id_bytes[15] = id_low;
+        PublicIncident {
+            id: Uuid::from_bytes(id_bytes),
+            component_id: Uuid::nil(),
+            component_name: "API".into(),
+            title: title.into(),
+            started_at,
+            ended_at: Some(started_at + ChronoDuration::minutes(15)),
+            severity: IncidentSeverity::Minor,
+            status_phase: IncidentStatusPhase::Resolved,
+            updates: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn bucket_by_month_groups_consecutive_incidents() {
+        let now = Utc::now();
+        let may_a = chrono::DateTime::parse_from_rfc3339("2026-05-22T10:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let may_b = chrono::DateTime::parse_from_rfc3339("2026-05-01T03:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let apr = chrono::DateTime::parse_from_rfc3339("2026-04-15T11:30:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let items = vec![
+            fake_incident(may_a, 1, "May late"),
+            fake_incident(may_b, 2, "May early"),
+            fake_incident(apr, 3, "April"),
+        ];
+        let buckets = bucket_by_month(&items, now);
+        assert_eq!(buckets.len(), 2);
+        assert_eq!(buckets[0].label, "May 2026");
+        assert_eq!(buckets[0].incidents.len(), 2);
+        assert_eq!(buckets[1].label, "April 2026");
+        assert_eq!(buckets[1].incidents.len(), 1);
+    }
+
+    #[test]
+    fn archive_page_renders_buckets_and_next_link() {
+        let now = Utc::now();
+        let started = chrono::DateTime::parse_from_rfc3339("2026-05-22T10:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let items = vec![fake_incident(started, 1, "ECS rolled back")];
+        let months = bucket_by_month(&items, now);
+        let page = IncidentArchivePage {
+            branding: sample_branding(),
+            months,
+            next_cursor: Some("opaque-cursor-token".into()),
+            rss_url: RSS_URL,
+        };
+        let html = page.render().unwrap();
+        assert!(html.contains("Incident history"));
+        assert!(html.contains("May 2026"));
+        assert!(html.contains("ECS rolled back"));
+        assert!(
+            html.contains("/status/incidents?cursor=opaque-cursor-token"),
+            "next-page link must include cursor"
+        );
+    }
+
+    #[test]
+    fn archive_page_renders_empty_state_without_next_link() {
+        let page = IncidentArchivePage {
+            branding: sample_branding(),
+            months: Vec::new(),
+            next_cursor: None,
+            rss_url: RSS_URL,
+        };
+        let html = page.render().unwrap();
+        assert!(html.contains("No incidents recorded."));
+        assert!(!html.contains("Older incidents"));
     }
 
     #[test]

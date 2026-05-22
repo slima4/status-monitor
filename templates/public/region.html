@@ -3,6 +3,7 @@
    every-30s trigger. Works without JavaScript: the trigger is purely an
    enhancement, and full HTTP refresh produces the same content. #}
 {% import "public/_incident_chips.html" as chips %}
+{% import "public/_incident_card.html" as card %}
 <div id="status-region"
      hx-get="/status?fragment=1"
      hx-trigger="every 30s"
@@ -179,29 +180,7 @@
             class="text-sm font-semibold uppercase tracking-wide text-slate-500">Past incidents (30 days)</h2>
         <ul class="public-callout public-callout--neutral divide-y divide-slate-100 overflow-hidden p-0">
             {% for inc in view.recent_incidents %}
-            <li class="p-5">
-                <article class="space-y-1.5">
-                    <div class="flex flex-wrap items-center gap-2">
-                        <a href="{{ inc.permalink }}"
-                           class="font-medium text-slate-900 hover:underline">{{ inc.header.title }}</a>
-                        {% call chips::sevphase(inc.header) %}{% endcall %}
-                        {% if inc.header.ongoing %}
-                            <span class="status-badge status-badge--down">Ongoing</span>
-                        {% endif %}
-                    </div>
-                    <p class="text-xs text-slate-500">
-                        {{ inc.header.component_name }} ·
-                        <time datetime="{{ inc.header.started_iso }}" data-tz>{{ inc.header.started_human }}</time>
-                        · {{ inc.header.duration_human }}
-                        {% match inc.ended_human %}
-                            {% when Some with (_) %} (resolved){% when None %}
-                        {% endmatch %}
-                    </p>
-                    {% match inc.latest_message %}
-                        {% when Some with (msg) %}<p class="text-sm text-slate-700">{{ msg }}</p>{% when None %}
-                    {% endmatch %}
-                </article>
-            </li>
+            <li class="p-5">{% call card::card(inc) %}{% endcall %}</li>
             {% endfor %}
         </ul>
         {% if view.recent_incidents_has_more %}

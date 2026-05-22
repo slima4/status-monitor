@@ -1,0 +1,28 @@
+{# Per-incident card body. Shared by the past-incidents list on the main
+   status page and the archive view so the two listings never drift in
+   chip placement, time format, or message-truncation behaviour. Caller
+   supplies `inc: IncidentSummary` as the loop variable. #}
+{% import "public/_incident_chips.html" as chips %}
+{% macro card(inc) %}
+<article class="space-y-1.5">
+    <div class="flex flex-wrap items-center gap-2">
+        <a href="{{ inc.permalink }}"
+           class="font-medium text-slate-900 hover:underline">{{ inc.header.title }}</a>
+        {% call chips::sevphase(inc.header) %}{% endcall %}
+        {% if inc.header.ongoing %}
+            <span class="status-badge status-badge--down">Ongoing</span>
+        {% endif %}
+    </div>
+    <p class="text-xs text-slate-500">
+        {{ inc.header.component_name }} ·
+        <time datetime="{{ inc.header.started_iso }}" data-tz>{{ inc.header.started_human }}</time>
+        · {{ inc.header.duration_human }}
+        {% match inc.ended_human %}
+            {% when Some with (_) %} (resolved){% when None %}
+        {% endmatch %}
+    </p>
+    {% match inc.latest_message %}
+        {% when Some with (msg) %}<p class="text-sm text-slate-700">{{ msg }}</p>{% when None %}
+    {% endmatch %}
+</article>
+{% endmacro %}
