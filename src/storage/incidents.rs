@@ -17,16 +17,22 @@ use crate::domain::{
 };
 use crate::error::Result;
 
+/// Operator-facing incident narration repository. Every method takes the
+/// caller's `org` (resolved from `CurrentOrg`) and refuses to touch any other
+/// tenant's rows. Compile-time scoping means "forgot to pass the org" is a
+/// type error, not a cross-tenant leak.
 #[async_trait]
 pub trait IncidentNarrationStore: Send + Sync {
-    async fn get(&self, id: Uuid) -> Result<Option<Incident>>;
+    async fn get(&self, org: OrgId, id: Uuid) -> Result<Option<Incident>>;
     async fn patch_narration(
         &self,
+        org: OrgId,
         id: Uuid,
         update: IncidentNarrationUpdate,
     ) -> Result<Option<Incident>>;
     async fn append_update(
         &self,
+        org: OrgId,
         incident_id: Uuid,
         new: NewIncidentUpdate,
         author: Option<String>,
@@ -35,24 +41,13 @@ pub trait IncidentNarrationStore: Send + Sync {
 
 // ── Postgres impl ────────────────────────────────────────────────────────
 
-/// Org-scoped operator-side incident store. Every query binds
-/// `self.default_org_id` so an operator on one tenant cannot read or mutate
-/// incidents owned by another.
 pub struct PgIncidentNarrationStore {
     pool: PgPool,
-    default_org_id: OrgId,
 }
 
 impl PgIncidentNarrationStore {
-    pub fn new(pool: PgPool, default_org_id: OrgId) -> Self {
-        Self {
-            pool,
-            default_org_id,
-        }
-    }
-
-    fn org_id(&self) -> Uuid {
-        self.default_org_id.0
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
     }
 }
 
@@ -146,12 +141,13 @@ fn parse_status(s: &str) -> CheckStatus {
 
 #[async_trait]
 impl IncidentNarrationStore for PgIncidentNarrationStore {
-    async fn get(&self, id: Uuid) -> Result<Option<Incident>> {
-        load_with_updates(&self.pool, id, self.org_id()).await
+    async fn get(&self, org: OrgId, id: Uuid) -> Result<Option<Incident>> {
+        load_with_updates(&self.pool, id, org.0).await
     }
 
     async fn patch_narration(
         &self,
+        org: OrgId,
         id: Uuid,
         update: IncidentNarrationUpdate,
     ) -> Result<Option<Incident>> {
@@ -173,7 +169,7 @@ impl IncidentNarrationStore for PgIncidentNarrationStore {
         .bind(update.public_description.is_some())
         .bind(update.public_description.clone().flatten())
         .bind(severity)
-        .bind(self.org_id())
+        .bind(org.0)
         .fetch_optional(&self.pool)
         .await
         .map_err(|e| anyhow::anyhow!("patch_narration: {e}"))?;
@@ -185,7 +181,7 @@ impl IncidentNarrationStore for PgIncidentNarrationStore {
                ORDER BY posted_at ASC"#,
         )
         .bind(id)
-        .bind(self.org_id())
+        .bind(org.0)
         .fetch_all(&self.pool)
         .await
         .map_err(|e| anyhow::anyhow!("get incident updates: {e}"))?;
@@ -194,6 +190,7 @@ impl IncidentNarrationStore for PgIncidentNarrationStore {
 
     async fn append_update(
         &self,
+        org: OrgId,
         incident_id: Uuid,
         new: NewIncidentUpdate,
         author: Option<String>,
@@ -208,7 +205,7 @@ impl IncidentNarrationStore for PgIncidentNarrationStore {
             .await
             .map_err(|e| anyhow::anyhow!("begin: {e}"))?;
         // org_id is denormalised onto incident_updates and enforced by the
-        // trg_incident_updates_org_match trigger. Filtering by the operator's
+        // trg_incident_updates_org_match trigger. Filtering by the caller's
         // own org_id here means an attempt to append to another tenant's
         // incident yields a clean no-op instead of touching the parent row.
         let row: Option<(DateTime<Utc>, String, String)> = sqlx::query_as(
@@ -222,14 +219,14 @@ impl IncidentNarrationStore for PgIncidentNarrationStore {
         .bind(phase_db)
         .bind(&new.message)
         .bind(author)
-        .bind(self.org_id())
+        .bind(org.0)
         .fetch_optional(&mut *tx)
         .await
         .map_err(|e| anyhow::anyhow!("append_update insert: {e}"))?;
         if row.is_some() {
             sqlx::query(r#"UPDATE incidents SET updated_at = now() WHERE id = $1 AND org_id = $2"#)
                 .bind(incident_id)
-                .bind(self.org_id())
+                .bind(org.0)
                 .execute(&mut *tx)
                 .await
                 .map_err(|e| anyhow::anyhow!("append_update bump parent: {e}"))?;
@@ -269,7 +266,7 @@ impl InMemoryIncidentNarrationStore {
 
 #[async_trait]
 impl IncidentNarrationStore for InMemoryIncidentNarrationStore {
-    async fn get(&self, id: Uuid) -> Result<Option<Incident>> {
+    async fn get(&self, _org: OrgId, id: Uuid) -> Result<Option<Incident>> {
         Ok(self
             .inner
             .lock()
@@ -281,6 +278,7 @@ impl IncidentNarrationStore for InMemoryIncidentNarrationStore {
 
     async fn patch_narration(
         &self,
+        _org: OrgId,
         id: Uuid,
         update: IncidentNarrationUpdate,
     ) -> Result<Option<Incident>> {
@@ -303,6 +301,7 @@ impl IncidentNarrationStore for InMemoryIncidentNarrationStore {
 
     async fn append_update(
         &self,
+        _org: OrgId,
         incident_id: Uuid,
         new: NewIncidentUpdate,
         _author: Option<String>,
@@ -346,6 +345,10 @@ mod tests {
         }
     }
 
+    fn org() -> OrgId {
+        OrgId(Uuid::nil())
+    }
+
     #[tokio::test]
     async fn patch_narration_overwrites_fields() {
         let store = InMemoryIncidentNarrationStore::new();
@@ -354,6 +357,7 @@ mod tests {
         store.seed(inc);
         let patched = store
             .patch_narration(
+                org(),
                 id,
                 IncidentNarrationUpdate {
                     public_title: Some(Some("Latency spike".into())),
@@ -378,6 +382,7 @@ mod tests {
         store.seed(inc);
         let patched = store
             .patch_narration(
+                org(),
                 id,
                 IncidentNarrationUpdate {
                     public_title: Some(None),
@@ -399,6 +404,7 @@ mod tests {
         store.seed(inc);
         let entry = store
             .append_update(
+                org(),
                 id,
                 NewIncidentUpdate {
                     phase: IncidentStatusPhase::Identified,
@@ -410,7 +416,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(entry.phase, IncidentStatusPhase::Identified);
-        let again = store.get(id).await.unwrap().unwrap();
+        let again = store.get(org(), id).await.unwrap().unwrap();
         assert_eq!(again.updates.len(), 1);
     }
 
@@ -419,6 +425,7 @@ mod tests {
         let store = InMemoryIncidentNarrationStore::new();
         let res = store
             .append_update(
+                org(),
                 Uuid::now_v7(),
                 NewIncidentUpdate {
                     phase: IncidentStatusPhase::Investigating,

@@ -72,7 +72,6 @@ fn time_range_around_now() -> TimeRange {
 struct Tenant {
     user: UserId,
     org: OrgId,
-    maintenance_store: PgMaintenanceStore,
 }
 
 async fn provision_tenant(pool: &PgPool, label: &str) -> Tenant {
@@ -81,16 +80,7 @@ async fn provision_tenant(pool: &PgPool, label: &str) -> Tenant {
         .await
         .unwrap()
         .expect("provision org");
-    // `maintenance_store` is still org-stamped at construction; the read
-    // repos under test (`PostgresTargetStore` / `ClickhouseResultsStore`)
-    // and the result sink take `org` per call / per result and are shared,
-    // so a single store queried with the wrong org must return nothing.
-    let maintenance_store = PgMaintenanceStore::new(pool.clone(), org.id);
-    Tenant {
-        user,
-        org: org.id,
-        maintenance_store,
-    }
+    Tenant { user, org: org.id }
 }
 
 async fn teardown(pool: &PgPool, ch: &clickhouse::Client, t: &Tenant) {
@@ -145,6 +135,7 @@ async fn two_tenants_never_see_each_others_data() {
     // the org via `CurrentOrg`).
     let target_store = PostgresTargetStore::from_pool(pool.clone(), None);
     let results_store = ClickhouseResultsStore::from_client(ch.clone());
+    let maintenance_store = PgMaintenanceStore::new(pool.clone());
     // ONE shared sink (production shape: `AppState` holds a single sink).
     // Isolation must come from the per-result `org_id`, NOT from a
     // per-tenant sink construction — a per-tenant sink masked the
@@ -214,35 +205,47 @@ async fn two_tenants_never_see_each_others_data() {
 
     // ── Maintenance windows ──────────────────────────────────────────────
     let now = Utc::now();
-    let mw_a = a
-        .maintenance_store
-        .create(NewMaintenanceWindow {
-            title: "a-window".into(),
-            description: None,
-            starts_at: now,
-            ends_at: now + chrono::Duration::hours(1),
-            component_ids: vec![],
-        })
+    let mw_a = maintenance_store
+        .create(
+            a.org,
+            NewMaintenanceWindow {
+                title: "a-window".into(),
+                description: None,
+                starts_at: now,
+                ends_at: now + chrono::Duration::hours(1),
+                component_ids: vec![],
+            },
+        )
         .await
         .expect("a mw");
-    let mw_b = b
-        .maintenance_store
-        .create(NewMaintenanceWindow {
-            title: "b-window".into(),
-            description: None,
-            starts_at: now,
-            ends_at: now + chrono::Duration::hours(1),
-            component_ids: vec![],
-        })
+    let mw_b = maintenance_store
+        .create(
+            b.org,
+            NewMaintenanceWindow {
+                title: "b-window".into(),
+                description: None,
+                starts_at: now,
+                ends_at: now + chrono::Duration::hours(1),
+                component_ids: vec![],
+            },
+        )
         .await
         .expect("b mw");
 
     assert!(
-        a.maintenance_store.get(mw_b.id).await.unwrap().is_none(),
+        maintenance_store
+            .get(a.org, mw_b.id)
+            .await
+            .unwrap()
+            .is_none(),
         "tenant a maintenance get of b's id must be None"
     );
     assert!(
-        b.maintenance_store.get(mw_a.id).await.unwrap().is_none(),
+        maintenance_store
+            .get(b.org, mw_a.id)
+            .await
+            .unwrap()
+            .is_none(),
         "tenant b maintenance get of a's id must be None"
     );
 

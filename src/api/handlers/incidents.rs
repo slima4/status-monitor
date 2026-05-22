@@ -17,6 +17,7 @@ use crate::api::handlers::validation::{self, validate_message};
 use crate::app::AppState;
 use crate::domain::{Incident, IncidentNarrationUpdate, NewIncidentUpdate, PublicIncidentUpdate};
 use crate::error::{AppError, Result};
+use crate::web::CurrentOrg;
 
 #[utoipa::path(
     patch,
@@ -40,6 +41,7 @@ use crate::error::{AppError, Result};
 )]
 pub async fn update_incident_narration(
     State(state): State<AppState>,
+    CurrentOrg(org): CurrentOrg,
     Path(id): Path<Uuid>,
     Json(update): Json<IncidentNarrationUpdate>,
 ) -> Result<Json<Incident>> {
@@ -50,7 +52,7 @@ pub async fn update_incident_narration(
     )?;
     match state
         .incident_narration_store
-        .patch_narration(id, update)
+        .patch_narration(org, id, update)
         .await?
     {
         Some(inc) => Ok(Json(inc)),
@@ -84,6 +86,7 @@ pub async fn update_incident_narration(
 )]
 pub async fn post_incident_update(
     State(state): State<AppState>,
+    CurrentOrg(org): CurrentOrg,
     Path(id): Path<Uuid>,
     Json(new): Json<NewIncidentUpdate>,
 ) -> Result<(
@@ -94,7 +97,7 @@ pub async fn post_incident_update(
     validate_message(&new.message, "message")?;
     let entry = state
         .incident_narration_store
-        .append_update(id, new, None)
+        .append_update(org, id, new, None)
         .await?
         .ok_or_else(|| AppError::not_found(codes::INCIDENT_NOT_FOUND, "incident not found"))?;
     let location = HeaderValue::from_str(&format!("/api/v1/incidents/{id}")).expect("uuid ascii");

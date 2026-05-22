@@ -263,7 +263,7 @@ async fn main() -> Result<()> {
     let incident_writer = Arc::new(IncidentWriter::new(
         target_store.clone(),
         results_store.clone(),
-        Arc::new(PgIncidentStore::new(pg_pool, default_org_id)),
+        Arc::new(PgIncidentStore::new(pg_pool)),
         default_org_id,
         IncidentWriterConfig::default(),
     ));
@@ -288,13 +288,10 @@ async fn main() -> Result<()> {
         ))
     };
 
-    let maintenance_store: Arc<dyn MaintenanceStore> = Arc::new(PgMaintenanceStore::new(
-        pg_pool_for_stores.clone(),
-        default_org_id,
-    ));
-    let incident_narration_store: Arc<dyn IncidentNarrationStore> = Arc::new(
-        PgIncidentNarrationStore::new(pg_pool_for_stores.clone(), default_org_id),
-    );
+    let maintenance_store: Arc<dyn MaintenanceStore> =
+        Arc::new(PgMaintenanceStore::new(pg_pool_for_stores.clone()));
+    let incident_narration_store: Arc<dyn IncidentNarrationStore> =
+        Arc::new(PgIncidentNarrationStore::new(pg_pool_for_stores.clone()));
 
     let outbound_http = status_monitor::http_outbound::build_outbound_client(
         status_monitor::security::SsrfGuard::from_security_config(&cfg.security),

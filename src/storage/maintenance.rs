@@ -28,43 +28,36 @@ pub struct MaintenanceListQuery {
     pub offset: u32,
 }
 
+/// Operator-facing maintenance repository. Every method takes the caller's
+/// `org` (resolved from `CurrentOrg`) so cross-tenant access is a type error,
+/// not a runtime check.
 #[async_trait]
 pub trait MaintenanceStore: Send + Sync {
-    async fn create(&self, new: NewMaintenanceWindow) -> Result<MaintenanceWindow>;
-    async fn list(&self, q: MaintenanceListQuery) -> Result<Vec<MaintenanceWindow>>;
-    async fn get(&self, id: Uuid) -> Result<Option<MaintenanceWindow>>;
+    async fn create(&self, org: OrgId, new: NewMaintenanceWindow) -> Result<MaintenanceWindow>;
+    async fn list(&self, org: OrgId, q: MaintenanceListQuery) -> Result<Vec<MaintenanceWindow>>;
+    async fn get(&self, org: OrgId, id: Uuid) -> Result<Option<MaintenanceWindow>>;
     async fn update(
         &self,
+        org: OrgId,
         id: Uuid,
         update: MaintenanceWindowUpdate,
     ) -> Result<Option<MaintenanceWindow>>;
-    async fn delete(&self, id: Uuid) -> Result<bool>;
-    /// Subset of `ids` that exist in `targets`. Used to validate
-    /// `component_ids` on create/update without requiring callers to plumb in
-    /// a `TargetStore`.
-    async fn existing_target_ids(&self, ids: &[Uuid]) -> Result<Vec<Uuid>>;
+    async fn delete(&self, org: OrgId, id: Uuid) -> Result<bool>;
+    /// Subset of `ids` that exist in `targets` for the caller's org. Used to
+    /// validate `component_ids` on create/update without requiring callers to
+    /// plumb in a `TargetStore`.
+    async fn existing_target_ids(&self, org: OrgId, ids: &[Uuid]) -> Result<Vec<Uuid>>;
 }
 
 // ── Postgres impl ────────────────────────────────────────────────────────
 
-/// Org-scoped Postgres-backed maintenance store. Every query binds
-/// `self.default_org_id` so callers in one tenant cannot read, mutate, or
-/// delete windows belonging to another.
 pub struct PgMaintenanceStore {
     pool: PgPool,
-    default_org_id: OrgId,
 }
 
 impl PgMaintenanceStore {
-    pub fn new(pool: PgPool, default_org_id: OrgId) -> Self {
-        Self {
-            pool,
-            default_org_id,
-        }
-    }
-
-    fn org_id(&self) -> Uuid {
-        self.default_org_id.0
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
     }
 }
 
@@ -109,7 +102,7 @@ async fn load_components(pool: &PgPool, maintenance_id: Uuid, org_id: Uuid) -> R
 
 #[async_trait]
 impl MaintenanceStore for PgMaintenanceStore {
-    async fn create(&self, new: NewMaintenanceWindow) -> Result<MaintenanceWindow> {
+    async fn create(&self, org: OrgId, new: NewMaintenanceWindow) -> Result<MaintenanceWindow> {
         let mut tx = self
             .pool
             .begin()
@@ -121,7 +114,7 @@ impl MaintenanceStore for PgMaintenanceStore {
                VALUES ($1, $2, $3, $4, $5)
                RETURNING id, title, description, starts_at, ends_at, created_at, updated_at"#,
         )
-        .bind(self.default_org_id.0)
+        .bind(org.0)
         .bind(&new.title)
         .bind(&new.description)
         .bind(new.starts_at)
@@ -155,37 +148,37 @@ impl MaintenanceStore for PgMaintenanceStore {
         Ok(row.into_window(new.component_ids))
     }
 
-    async fn list(&self, q: MaintenanceListQuery) -> Result<Vec<MaintenanceWindow>> {
+    async fn list(&self, org: OrgId, q: MaintenanceListQuery) -> Result<Vec<MaintenanceWindow>> {
         let now = Utc::now();
         let rows: Vec<MaintenanceRow> = sqlx::query_as(&list_sql(q.filter))
             .bind(now)
             .bind(q.limit as i64)
             .bind(q.offset as i64)
-            .bind(self.org_id())
+            .bind(org.0)
             .fetch_all(&self.pool)
             .await
             .map_err(|e| anyhow::anyhow!("list maintenance: {e}"))?;
         let mut out = Vec::with_capacity(rows.len());
         for row in rows {
-            let components = load_components(&self.pool, row.id, self.org_id()).await?;
+            let components = load_components(&self.pool, row.id, org.0).await?;
             out.push(row.into_window(components));
         }
         Ok(out)
     }
 
-    async fn get(&self, id: Uuid) -> Result<Option<MaintenanceWindow>> {
+    async fn get(&self, org: OrgId, id: Uuid) -> Result<Option<MaintenanceWindow>> {
         let row: Option<MaintenanceRow> = sqlx::query_as(
             r#"SELECT id, title, description, starts_at, ends_at, created_at, updated_at
                FROM maintenance_windows WHERE id = $1 AND org_id = $2"#,
         )
         .bind(id)
-        .bind(self.org_id())
+        .bind(org.0)
         .fetch_optional(&self.pool)
         .await
         .map_err(|e| anyhow::anyhow!("get maintenance: {e}"))?;
         match row {
             Some(r) => {
-                let components = load_components(&self.pool, r.id, self.org_id()).await?;
+                let components = load_components(&self.pool, r.id, org.0).await?;
                 Ok(Some(r.into_window(components)))
             }
             None => Ok(None),
@@ -194,6 +187,7 @@ impl MaintenanceStore for PgMaintenanceStore {
 
     async fn update(
         &self,
+        org: OrgId,
         id: Uuid,
         update: MaintenanceWindowUpdate,
     ) -> Result<Option<MaintenanceWindow>> {
@@ -221,7 +215,7 @@ impl MaintenanceStore for PgMaintenanceStore {
         .bind(update.description.clone())
         .bind(update.starts_at)
         .bind(update.ends_at)
-        .bind(self.org_id())
+        .bind(org.0)
         .fetch_optional(&mut *tx)
         .await
         .map_err(|e| anyhow::anyhow!("update maintenance: {e}"))?;
@@ -235,7 +229,7 @@ impl MaintenanceStore for PgMaintenanceStore {
                    WHERE maintenance_id = $1 AND org_id = $2"#,
             )
             .bind(row.id)
-            .bind(self.org_id())
+            .bind(org.0)
             .execute(&mut *tx)
             .await
             .map_err(|e| anyhow::anyhow!("delete components: {e}"))?;
@@ -260,29 +254,29 @@ impl MaintenanceStore for PgMaintenanceStore {
         tx.commit()
             .await
             .map_err(|e| anyhow::anyhow!("commit: {e}"))?;
-        let components = load_components(&self.pool, row.id, self.org_id()).await?;
+        let components = load_components(&self.pool, row.id, org.0).await?;
         Ok(Some(row.into_window(components)))
     }
 
-    async fn delete(&self, id: Uuid) -> Result<bool> {
+    async fn delete(&self, org: OrgId, id: Uuid) -> Result<bool> {
         let result =
             sqlx::query(r#"DELETE FROM maintenance_windows WHERE id = $1 AND org_id = $2"#)
                 .bind(id)
-                .bind(self.org_id())
+                .bind(org.0)
                 .execute(&self.pool)
                 .await
                 .map_err(|e| anyhow::anyhow!("delete maintenance: {e}"))?;
         Ok(result.rows_affected() > 0)
     }
 
-    async fn existing_target_ids(&self, ids: &[Uuid]) -> Result<Vec<Uuid>> {
+    async fn existing_target_ids(&self, org: OrgId, ids: &[Uuid]) -> Result<Vec<Uuid>> {
         if ids.is_empty() {
             return Ok(Vec::new());
         }
         let rows: Vec<(Uuid,)> =
             sqlx::query_as(r#"SELECT id FROM targets WHERE id = ANY($1::uuid[]) AND org_id = $2"#)
                 .bind(ids)
-                .bind(self.org_id())
+                .bind(org.0)
                 .fetch_all(&self.pool)
                 .await
                 .map_err(|e| anyhow::anyhow!("existing_target_ids: {e}"))?;
@@ -354,7 +348,7 @@ impl InMemoryMaintenanceStore {
 
 #[async_trait]
 impl MaintenanceStore for InMemoryMaintenanceStore {
-    async fn create(&self, new: NewMaintenanceWindow) -> Result<MaintenanceWindow> {
+    async fn create(&self, _org: OrgId, new: NewMaintenanceWindow) -> Result<MaintenanceWindow> {
         let now = Utc::now();
         let id = Uuid::now_v7();
         let mw = MaintenanceWindow {
@@ -371,7 +365,7 @@ impl MaintenanceStore for InMemoryMaintenanceStore {
         Ok(mw)
     }
 
-    async fn list(&self, q: MaintenanceListQuery) -> Result<Vec<MaintenanceWindow>> {
+    async fn list(&self, _org: OrgId, q: MaintenanceListQuery) -> Result<Vec<MaintenanceWindow>> {
         let now = Utc::now();
         let g = self.inner.lock();
         let mut filtered: Vec<MaintenanceWindow> = g
@@ -389,7 +383,7 @@ impl MaintenanceStore for InMemoryMaintenanceStore {
         Ok(filtered[start..end].to_vec())
     }
 
-    async fn get(&self, id: Uuid) -> Result<Option<MaintenanceWindow>> {
+    async fn get(&self, _org: OrgId, id: Uuid) -> Result<Option<MaintenanceWindow>> {
         Ok(self
             .inner
             .lock()
@@ -401,6 +395,7 @@ impl MaintenanceStore for InMemoryMaintenanceStore {
 
     async fn update(
         &self,
+        _org: OrgId,
         id: Uuid,
         update: MaintenanceWindowUpdate,
     ) -> Result<Option<MaintenanceWindow>> {
@@ -427,14 +422,14 @@ impl MaintenanceStore for InMemoryMaintenanceStore {
         Ok(Some(w.clone()))
     }
 
-    async fn delete(&self, id: Uuid) -> Result<bool> {
+    async fn delete(&self, _org: OrgId, id: Uuid) -> Result<bool> {
         let mut g = self.inner.lock();
         let before = g.windows.len();
         g.windows.retain(|w| w.id != id);
         Ok(g.windows.len() < before)
     }
 
-    async fn existing_target_ids(&self, ids: &[Uuid]) -> Result<Vec<Uuid>> {
+    async fn existing_target_ids(&self, _org: OrgId, ids: &[Uuid]) -> Result<Vec<Uuid>> {
         let g = self.inner.lock();
         Ok(ids
             .iter()
@@ -468,16 +463,23 @@ mod tests {
         }
     }
 
+    fn org() -> OrgId {
+        OrgId(Uuid::nil())
+    }
+
     #[tokio::test]
     async fn create_and_list_roundtrip() {
         let store = InMemoryMaintenanceStore::new();
-        let mw = store.create(upcoming()).await.unwrap();
+        let mw = store.create(org(), upcoming()).await.unwrap();
         let list = store
-            .list(MaintenanceListQuery {
-                filter: MaintenanceFilter::All,
-                limit: 10,
-                offset: 0,
-            })
+            .list(
+                org(),
+                MaintenanceListQuery {
+                    filter: MaintenanceFilter::All,
+                    limit: 10,
+                    offset: 0,
+                },
+            )
             .await
             .unwrap();
         assert_eq!(list.len(), 1);
@@ -487,13 +489,16 @@ mod tests {
     #[tokio::test]
     async fn filter_active_excludes_upcoming() {
         let store = InMemoryMaintenanceStore::new();
-        store.create(upcoming()).await.unwrap();
+        store.create(org(), upcoming()).await.unwrap();
         let active = store
-            .list(MaintenanceListQuery {
-                filter: MaintenanceFilter::Active,
-                limit: 10,
-                offset: 0,
-            })
+            .list(
+                org(),
+                MaintenanceListQuery {
+                    filter: MaintenanceFilter::Active,
+                    limit: 10,
+                    offset: 0,
+                },
+            )
             .await
             .unwrap();
         assert!(active.is_empty());
@@ -502,10 +507,11 @@ mod tests {
     #[tokio::test]
     async fn update_replaces_components() {
         let store = InMemoryMaintenanceStore::new();
-        let mw = store.create(upcoming()).await.unwrap();
+        let mw = store.create(org(), upcoming()).await.unwrap();
         let new_id = Uuid::now_v7();
         let patched = store
             .update(
+                org(),
                 mw.id,
                 MaintenanceWindowUpdate {
                     component_ids: Some(vec![new_id]),
@@ -523,13 +529,16 @@ mod tests {
         let known = Uuid::now_v7();
         let store = InMemoryMaintenanceStore::with_targets([known]);
         let unknown = Uuid::now_v7();
-        let got = store.existing_target_ids(&[known, unknown]).await.unwrap();
+        let got = store
+            .existing_target_ids(org(), &[known, unknown])
+            .await
+            .unwrap();
         assert_eq!(got, vec![known]);
     }
 
     #[tokio::test]
     async fn delete_returns_false_for_unknown() {
         let store = InMemoryMaintenanceStore::new();
-        assert!(!store.delete(Uuid::now_v7()).await.unwrap());
+        assert!(!store.delete(org(), Uuid::now_v7()).await.unwrap());
     }
 }

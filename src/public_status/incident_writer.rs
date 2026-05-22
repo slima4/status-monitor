@@ -32,12 +32,13 @@ use crate::error::Result;
 use crate::storage::{ResultsStore, TargetFilter, TargetStore, TimeRange};
 
 /// Persistence handle for the `incidents` table — abstracted so the writer
-/// can be unit-tested without a live database.
+/// can be unit-tested without a live database. Every method takes `org` so a
+/// single store instance can service every tenant.
 #[async_trait]
 pub trait IncidentStore: Send + Sync {
-    async fn open_for_target(&self, target_id: Uuid) -> Result<Option<OpenIncident>>;
-    async fn insert_open(&self, new: NewOpenIncident) -> Result<Uuid>;
-    async fn close(&self, incident_id: Uuid, ended_at: DateTime<Utc>) -> Result<()>;
+    async fn open_for_target(&self, org: OrgId, target_id: Uuid) -> Result<Option<OpenIncident>>;
+    async fn insert_open(&self, org: OrgId, new: NewOpenIncident) -> Result<Uuid>;
+    async fn close(&self, org: OrgId, incident_id: Uuid, ended_at: DateTime<Utc>) -> Result<()>;
 }
 
 #[derive(Debug, Clone)]
@@ -171,18 +172,23 @@ impl IncidentWriter {
         // Storage returns DESC by timestamp; algorithm operates on ASC.
         results.sort_by_key(|r| r.timestamp);
 
-        let open = self.incident_store.open_for_target(target.id).await?;
+        let open = self
+            .incident_store
+            .open_for_target(self.org, target.id)
+            .await?;
         match decide(open.as_ref(), &results, self.cfg.flap_threshold) {
             Action::None => {}
             Action::Open(new) => {
-                let id = self.incident_store.insert_open(new).await?;
+                let id = self.incident_store.insert_open(self.org, new).await?;
                 tracing::info!(target_id = %target.id, incident_id = %id, "incident opened");
             }
             Action::Close {
                 incident_id,
                 ended_at,
             } => {
-                self.incident_store.close(incident_id, ended_at).await?;
+                self.incident_store
+                    .close(self.org, incident_id, ended_at)
+                    .await?;
                 tracing::info!(target_id = %target.id, incident_id = %incident_id, "incident closed");
             }
         }
@@ -280,22 +286,13 @@ fn trailing_up_run(results: &[CheckResult]) -> &[CheckResult] {
 
 // ── PostgreSQL implementation ────────────────────────────────────────────────
 
-/// Org-scoped writer. The single-process materialiser today only services the
-/// default org (`tenancy.enabled = false`); a SaaS deployment that runs one
-/// materialiser across every tenant must either route each `CheckResult` to a
-/// per-org writer or replace this with an `AdminRepo`-style cross-org variant
-/// that derives `org_id` from the underlying target row.
 pub struct PgIncidentStore {
     pool: PgPool,
-    default_org_id: OrgId,
 }
 
 impl PgIncidentStore {
-    pub fn new(pool: PgPool, default_org_id: OrgId) -> Self {
-        Self {
-            pool,
-            default_org_id,
-        }
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
     }
 }
 
@@ -308,14 +305,14 @@ struct OpenIncidentRow {
 
 #[async_trait]
 impl IncidentStore for PgIncidentStore {
-    async fn open_for_target(&self, target_id: Uuid) -> Result<Option<OpenIncident>> {
+    async fn open_for_target(&self, org: OrgId, target_id: Uuid) -> Result<Option<OpenIncident>> {
         let row: Option<OpenIncidentRow> = sqlx::query_as::<_, OpenIncidentRow>(
             r#"SELECT id, target_id, started_at FROM incidents
                WHERE target_id = $1 AND org_id = $2 AND ended_at IS NULL
                ORDER BY started_at DESC LIMIT 1"#,
         )
         .bind(target_id)
-        .bind(self.default_org_id.0)
+        .bind(org.0)
         .fetch_optional(&self.pool)
         .await
         .context("incident open_for_target")?;
@@ -326,7 +323,7 @@ impl IncidentStore for PgIncidentStore {
         }))
     }
 
-    async fn insert_open(&self, new: NewOpenIncident) -> Result<Uuid> {
+    async fn insert_open(&self, org: OrgId, new: NewOpenIncident) -> Result<Uuid> {
         let status_at_start = status_to_db(new.status_at_start)
             .ok_or_else(|| anyhow::anyhow!("cannot open incident from status=up"))?;
         // Defensive: avoid two open incidents per target if a competing
@@ -345,14 +342,14 @@ impl IncidentStore for PgIncidentStore {
         .bind(status_at_start)
         .bind(new.check_count as i32)
         .bind(new.error_sample)
-        .bind(self.default_org_id.0)
+        .bind(org.0)
         .fetch_one(&self.pool)
         .await
         .context("incident insert_open")?;
         Ok(row.0)
     }
 
-    async fn close(&self, incident_id: Uuid, ended_at: DateTime<Utc>) -> Result<()> {
+    async fn close(&self, org: OrgId, incident_id: Uuid, ended_at: DateTime<Utc>) -> Result<()> {
         sqlx::query(
             r#"UPDATE incidents
                SET ended_at = $2,
@@ -362,7 +359,7 @@ impl IncidentStore for PgIncidentStore {
         )
         .bind(incident_id)
         .bind(ended_at)
-        .bind(self.default_org_id.0)
+        .bind(org.0)
         .execute(&self.pool)
         .await
         .context("incident close")?;
@@ -429,7 +426,7 @@ impl InMemoryIncidentStore {
 
 #[async_trait]
 impl IncidentStore for InMemoryIncidentStore {
-    async fn open_for_target(&self, target_id: Uuid) -> Result<Option<OpenIncident>> {
+    async fn open_for_target(&self, _org: OrgId, target_id: Uuid) -> Result<Option<OpenIncident>> {
         let g = self.inner.lock();
         let Some(rows) = g.by_target.get(&target_id) else {
             return Ok(None);
@@ -446,7 +443,7 @@ impl IncidentStore for InMemoryIncidentStore {
         Ok(open)
     }
 
-    async fn insert_open(&self, new: NewOpenIncident) -> Result<Uuid> {
+    async fn insert_open(&self, _org: OrgId, new: NewOpenIncident) -> Result<Uuid> {
         let mut g = self.inner.lock();
         let bucket = g.by_target.entry(new.target_id).or_default();
         if bucket.iter().any(|i| i.ended_at.is_none()) {
@@ -471,7 +468,7 @@ impl IncidentStore for InMemoryIncidentStore {
         Ok(id)
     }
 
-    async fn close(&self, incident_id: Uuid, ended_at: DateTime<Utc>) -> Result<()> {
+    async fn close(&self, _org: OrgId, incident_id: Uuid, ended_at: DateTime<Utc>) -> Result<()> {
         let mut g = self.inner.lock();
         for bucket in g.by_target.values_mut() {
             for inc in bucket.iter_mut() {

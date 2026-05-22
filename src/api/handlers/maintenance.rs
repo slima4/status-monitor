@@ -20,10 +20,11 @@ use crate::api::handlers::validation;
 use crate::api::page::{PageEnvelope, PageOfMaintenanceWindow};
 use crate::app::AppState;
 use crate::domain::{
-    MaintenanceFilter, MaintenanceWindow, MaintenanceWindowUpdate, NewMaintenanceWindow,
+    MaintenanceFilter, MaintenanceWindow, MaintenanceWindowUpdate, NewMaintenanceWindow, OrgId,
 };
 use crate::error::{AppError, Result};
-use crate::storage::MaintenanceListQuery;
+use crate::storage::{MaintenanceListQuery, MaintenanceStore};
+use crate::web::CurrentOrg;
 
 const MAX_WINDOW_DAYS: i64 = 30;
 const LIST_LIMIT_DEFAULT: u32 = 50;
@@ -63,6 +64,7 @@ pub struct ListQuery {
 )]
 pub async fn create_maintenance(
     State(state): State<AppState>,
+    CurrentOrg(org): CurrentOrg,
     Json(new): Json<NewMaintenanceWindow>,
 ) -> Result<(
     StatusCode,
@@ -72,15 +74,15 @@ pub async fn create_maintenance(
     validation::validate_title(&new.title, "title")?;
     validation::validate_description(new.description.as_deref(), "description")?;
     validate_time_range(new.starts_at, new.ends_at)?;
-    validate_component_ids(&state, &new.component_ids).await?;
+    validate_component_ids(state.maintenance_store.as_ref(), org, &new.component_ids).await?;
     // Handler-entry quota check (friendly 422). Maintenance windows are a
     // singular, low-concurrency create — store-level atomic enforcement is a
     // tracked follow-up; the headline atomic path is targets.
     state
         .quotas
-        .check_can_create_maintenance_window(state.default_org_id, None)
+        .check_can_create_maintenance_window(org, None)
         .await?;
-    let mw = state.maintenance_store.create(new).await?;
+    let mw = state.maintenance_store.create(org, new).await?;
     let location =
         HeaderValue::from_str(&format!("/api/v1/maintenance/{}", mw.id)).expect("uuid ascii");
     Ok((
@@ -102,6 +104,7 @@ pub async fn create_maintenance(
 )]
 pub async fn list_maintenance(
     State(state): State<AppState>,
+    CurrentOrg(org): CurrentOrg,
     Query(q): Query<ListQuery>,
 ) -> Result<Json<PageEnvelope<MaintenanceWindow>>> {
     let limit = q
@@ -112,11 +115,14 @@ pub async fn list_maintenance(
     let filter = q.status.unwrap_or_default();
     let peek = state
         .maintenance_store
-        .list(MaintenanceListQuery {
-            filter,
-            limit: limit + 1,
-            offset,
-        })
+        .list(
+            org,
+            MaintenanceListQuery {
+                filter,
+                limit: limit + 1,
+                offset,
+            },
+        )
         .await?;
     Ok(Json(PageEnvelope::from_peek(peek, limit, offset)))
 }
@@ -134,9 +140,10 @@ pub async fn list_maintenance(
 )]
 pub async fn get_maintenance(
     State(state): State<AppState>,
+    CurrentOrg(org): CurrentOrg,
     Path(id): Path<Uuid>,
 ) -> Result<Json<MaintenanceWindow>> {
-    match state.maintenance_store.get(id).await? {
+    match state.maintenance_store.get(org, id).await? {
         Some(mw) => Ok(Json(mw)),
         None => Err(AppError::not_found(
             codes::MAINTENANCE_NOT_FOUND,
@@ -162,6 +169,7 @@ pub async fn get_maintenance(
 )]
 pub async fn update_maintenance(
     State(state): State<AppState>,
+    CurrentOrg(org): CurrentOrg,
     Path(id): Path<Uuid>,
     Json(update): Json<MaintenanceWindowUpdate>,
 ) -> Result<Json<MaintenanceWindow>> {
@@ -171,7 +179,7 @@ pub async fn update_maintenance(
     // the data loss is just "a successful edit on a just-now-completed
     // window"; the next refresh will show the completed state. Worth
     // documenting; not worth a transaction on this low-traffic operator path.
-    let existing = state.maintenance_store.get(id).await?.ok_or_else(|| {
+    let existing = state.maintenance_store.get(org, id).await?.ok_or_else(|| {
         AppError::not_found(codes::MAINTENANCE_NOT_FOUND, "maintenance window not found")
     })?;
     if existing.ends_at <= Utc::now() {
@@ -188,9 +196,9 @@ pub async fn update_maintenance(
     let ends = update.ends_at.unwrap_or(existing.ends_at);
     validate_time_range(starts, ends)?;
     if let Some(ids) = update.component_ids.as_deref() {
-        validate_component_ids(&state, ids).await?;
+        validate_component_ids(state.maintenance_store.as_ref(), org, ids).await?;
     }
-    match state.maintenance_store.update(id, update).await? {
+    match state.maintenance_store.update(org, id, update).await? {
         Some(mw) => Ok(Json(mw)),
         None => Err(AppError::not_found(
             codes::MAINTENANCE_NOT_FOUND,
@@ -214,9 +222,10 @@ pub async fn update_maintenance(
 )]
 pub async fn delete_maintenance(
     State(state): State<AppState>,
+    CurrentOrg(org): CurrentOrg,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode> {
-    if state.maintenance_store.delete(id).await? {
+    if state.maintenance_store.delete(org, id).await? {
         Ok(StatusCode::NO_CONTENT)
     } else {
         Err(AppError::not_found(
@@ -246,11 +255,15 @@ fn validate_time_range(starts: chrono::DateTime<Utc>, ends: chrono::DateTime<Utc
     Ok(())
 }
 
-async fn validate_component_ids(state: &AppState, ids: &[Uuid]) -> Result<()> {
+async fn validate_component_ids(
+    store: &dyn MaintenanceStore,
+    org: OrgId,
+    ids: &[Uuid],
+) -> Result<()> {
     if ids.is_empty() {
         return Ok(());
     }
-    let known = state.maintenance_store.existing_target_ids(ids).await?;
+    let known = store.existing_target_ids(org, ids).await?;
     let unknown: Vec<Uuid> = ids
         .iter()
         .copied()
