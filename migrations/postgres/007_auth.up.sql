@@ -35,7 +35,10 @@ CREATE INDEX idx_sessions_last_used_at ON sessions(last_used_at);
 -- (personal + work GitHub) without a migration.
 CREATE TABLE oauth_identities (
     user_id           UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    provider          TEXT NOT NULL CHECK (provider IN ('github')),
+    -- Closed enum; keep in lockstep with `auth::OauthProvider::ALL`. Live
+    -- drift test (`tests/enum_drift_test.rs`) introspects this CHECK and
+    -- fails if the lists disagree.
+    provider          TEXT NOT NULL CHECK (provider IN ('github', 'google')),
     provider_user_id  TEXT NOT NULL,
     provider_username TEXT,
     created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -52,7 +55,8 @@ CREATE INDEX idx_oauth_identities_user ON oauth_identities(user_id);
 -- replayable tokens.
 CREATE TABLE oauth_states (
     state_hash        TEXT PRIMARY KEY,
-    provider          TEXT NOT NULL,
+    -- Same closed-enum invariant as `oauth_identities.provider`.
+    provider          TEXT NOT NULL CHECK (provider IN ('github', 'google')),
     redirect_after    TEXT,
     -- Bare invitation id, not the raw token. The token would be a
     -- replayable credential at rest (backup, slow-query log, pg_dump);

@@ -22,6 +22,7 @@ use serde_json::json;
 use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
+use crate::auth::OauthProvider;
 use crate::auth::url::url_encode;
 use crate::config::GithubOauthConfig;
 use crate::domain::{OrgId, UserId, generate_signup_slug};
@@ -223,8 +224,9 @@ pub async fn upsert_identity_and_signup_org(
     let existing: Option<(Uuid, Option<DateTime<Utc>>)> = sqlx::query_as(
         "SELECT oi.user_id, u.deleted_at \
          FROM oauth_identities oi JOIN users u ON u.id = oi.user_id \
-         WHERE oi.provider = 'github' AND oi.provider_user_id = $1",
+         WHERE oi.provider = $1 AND oi.provider_user_id = $2",
     )
+    .bind(OauthProvider::Github.as_db_str())
     .bind(&identity.provider_user_id)
     .fetch_optional(&mut *tx)
     .await
@@ -239,9 +241,10 @@ pub async fn upsert_identity_and_signup_org(
             ));
         }
         sqlx::query(
-            "UPDATE oauth_identities SET last_login_at = now(), provider_username = $2 \
-             WHERE provider = 'github' AND provider_user_id = $1",
+            "UPDATE oauth_identities SET last_login_at = now(), provider_username = $3 \
+             WHERE provider = $1 AND provider_user_id = $2",
         )
+        .bind(OauthProvider::Github.as_db_str())
         .bind(&identity.provider_user_id)
         .bind(&identity.provider_username)
         .execute(&mut *tx)
@@ -280,10 +283,11 @@ pub async fn upsert_identity_and_signup_org(
     if let Some((user_id,)) = by_email {
         sqlx::query(
             "INSERT INTO oauth_identities (user_id, provider, provider_user_id, provider_username) \
-             VALUES ($1, 'github', $2, $3) \
+             VALUES ($1, $2, $3, $4) \
              ON CONFLICT (provider, provider_user_id) DO NOTHING",
         )
         .bind(user_id)
+        .bind(OauthProvider::Github.as_db_str())
         .bind(&identity.provider_user_id)
         .bind(&identity.provider_username)
         .execute(&mut *tx)
@@ -320,9 +324,10 @@ pub async fn upsert_identity_and_signup_org(
 
     sqlx::query(
         "INSERT INTO oauth_identities (user_id, provider, provider_user_id, provider_username) \
-         VALUES ($1, 'github', $2, $3)",
+         VALUES ($1, $2, $3, $4)",
     )
     .bind(new_user_id)
+    .bind(OauthProvider::Github.as_db_str())
     .bind(&identity.provider_user_id)
     .bind(&identity.provider_username)
     .execute(&mut *tx)

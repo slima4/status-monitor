@@ -18,12 +18,14 @@ pub mod magic_link;
 pub mod magic_link_cleanup;
 pub mod oauth_state;
 pub mod oauth_state_cleanup;
+pub mod provider;
 pub mod recovery;
 pub mod session;
 pub mod token_hash;
 pub mod url;
 
 pub use fingerprint::{ensure_fingerprint_salt, hash_fingerprint};
+pub use provider::OauthProvider;
 
 use sha2::{Digest, Sha256};
 

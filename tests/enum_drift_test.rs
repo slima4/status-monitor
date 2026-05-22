@@ -11,6 +11,7 @@
 
 mod common;
 
+use status_monitor::auth::OauthProvider;
 use status_monitor::domain::{ChannelKind, IncidentSeverity, IncidentStatusPhase};
 
 /// Pull the parenthesised list from a constraint def like
@@ -101,6 +102,55 @@ async fn incident_updates_phase_check_matches_rust_enum() {
     assert_eq!(
         db, rust,
         "incident_updates.phase CHECK list ({db:?}) drifted from IncidentStatusPhase ({rust:?})"
+    );
+}
+
+#[tokio::test]
+#[ignore]
+async fn oauth_identities_provider_check_matches_rust_enum() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let def = constraint_def(&pool, "oauth_identities_provider_check")
+        .await
+        .expect("oauth_identities_provider_check missing");
+    let db = sorted(quoted_tokens(&def));
+    let rust = sorted(
+        OauthProvider::ALL
+            .iter()
+            .map(|p| p.as_db_str().to_string())
+            .collect(),
+    );
+    assert_eq!(
+        db, rust,
+        "oauth_identities.provider CHECK list ({db:?}) drifted from OauthProvider ({rust:?})"
+    );
+}
+
+/// `oauth_states.provider` must accept the same provider set as
+/// `oauth_identities.provider` — the OAuth dance writes a state row keyed
+/// on a provider before the callback ever inserts an identity row, so a
+/// CHECK on one but not the other would let a new provider's first request
+/// 500 at callback time instead of being rejected up-front by the schema.
+#[tokio::test]
+#[ignore]
+async fn oauth_states_provider_check_matches_rust_enum() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let def = constraint_def(&pool, "oauth_states_provider_check")
+        .await
+        .expect("oauth_states_provider_check missing");
+    let db = sorted(quoted_tokens(&def));
+    let rust = sorted(
+        OauthProvider::ALL
+            .iter()
+            .map(|p| p.as_db_str().to_string())
+            .collect(),
+    );
+    assert_eq!(
+        db, rust,
+        "oauth_states.provider CHECK list ({db:?}) drifted from OauthProvider ({rust:?})"
     );
 }
 

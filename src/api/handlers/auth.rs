@@ -65,7 +65,14 @@ pub async fn github_login(
     };
 
     let s = oauth_state::generate_state();
-    oauth_state::insert(pool, &s, "github", redirect_after, invitation_id).await?;
+    oauth_state::insert(
+        pool,
+        &s,
+        crate::auth::OauthProvider::Github.as_db_str(),
+        redirect_after,
+        invitation_id,
+    )
+    .await?;
     let url = github::authorize_url(cfg, &s);
     Ok(Redirect::to(&url))
 }
