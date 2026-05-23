@@ -9,8 +9,6 @@
 //!  * relies on the routing layer to stamp the `Cache-Control:
 //!    public, max-age=10, stale-while-revalidate=30` header.
 
-use std::sync::Arc;
-
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderValue, StatusCode, header};
@@ -20,6 +18,7 @@ use utoipa::IntoParams;
 use uuid::Uuid;
 
 use crate::api::cursor::IncidentCursor;
+use crate::api::json_arc::JsonArc;
 use crate::api::page::{CursorPage, CursorPageOfPublicIncident};
 use crate::api::public_error::{PublicApiError, PublicAppError};
 use crate::app::AppState;
@@ -83,9 +82,9 @@ pub struct IncidentsQuery {
 pub async fn public_status(
     State(state): State<AppState>,
     StatusPageOrg(org): StatusPageOrg,
-) -> Result<Json<PublicStatusPage>, PublicAppError> {
+) -> Result<JsonArc<PublicStatusPage>, PublicAppError> {
     let page = state.public_source.page(org).await?;
-    Ok(Json(Arc::unwrap_or_clone(page)))
+    Ok(JsonArc(page))
 }
 
 #[utoipa::path(

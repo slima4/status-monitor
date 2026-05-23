@@ -3,6 +3,7 @@ pub mod docs;
 pub mod error;
 pub mod handlers;
 pub mod idempotency;
+pub mod json_arc;
 pub mod middleware;
 pub mod page;
 pub mod public_error;
@@ -14,6 +15,7 @@ pub use cursor::IncidentCursor;
 pub use docs::ApiDoc;
 pub use error::{ApiError, ApiErrorBody, codes};
 pub use idempotency::{IdempotencyCache, spawn_pruner as spawn_idempotency_pruner};
+pub use json_arc::JsonArc;
 pub use page::{
     CursorPage, PageEnvelope, PageOfCheckResult, PageOfIncident, PageOfPublicIncident,
     PageOfTagCount, PageOfTarget,
