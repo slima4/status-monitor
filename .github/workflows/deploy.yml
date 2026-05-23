@@ -193,6 +193,24 @@ jobs:
             git pull --ff-only
           fi
 
+          # Ship only prod artifacts to the box. Pre-this, `git pull` landed
+          # the entire repo on /opt/status-monitor/, including root
+          # docker-compose.yml + compose.dev.yml that bind DBs to 0.0.0.0
+          # with default creds — one wrong `cd` + bare `docker compose up`
+          # = publicly exposed databases. The list is fetched along with the
+          # commit above; `reapply` prunes anything outside the allowlist.
+          # Brief window (~1s, post-pull pre-reapply) where dev files exist
+          # on disk on the first deploy that lands this — `concurrency: deploy`
+          # serialises runs, so an operator firing `docker compose up`
+          # mid-deploy is the case this guards against, not a race we enable.
+          if [ ! -f deployment/sparse-checkout.list ]; then
+            echo "::error::deployment/sparse-checkout.list missing — refusing to deploy"
+            exit 1
+          fi
+          git sparse-checkout init --no-cone
+          cp deployment/sparse-checkout.list .git/info/sparse-checkout
+          git sparse-checkout reapply
+
           cd deployment
 
           # --- bump STATUS_MONITOR_IMAGE in .env -----------------------------

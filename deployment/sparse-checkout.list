@@ -1,0 +1,7 @@
+# Sparse-checkout allowlist for the production box (/opt/status-monitor).
+# Pre-this, `git pull` shipped the entire repo (~420 tracked files incl.
+# root docker-compose.yml + compose.dev.yml that bind DBs to 0.0.0.0 with
+# default credentials). Wired in .github/workflows/deploy.yml.
+
+/deployment/
+/LICENSE

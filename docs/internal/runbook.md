@@ -22,10 +22,10 @@ curl https://acme.your-domain.com/                 # expect 200, HTML
 ssh your-server "uptime"
 
 # Container statuses?
-ssh your-server "cd /opt/status-monitor && docker compose ps"
+ssh your-server "cd /opt/status-monitor/deployment && docker compose ps"
 
 # Recent logs?
-ssh your-server "cd /opt/status-monitor && docker compose logs --tail=200 status-monitor"
+ssh your-server "cd /opt/status-monitor/deployment && docker compose logs --tail=200 status-monitor"
 ```
 
 ### Step 2 — Identify (~5 minutes)
@@ -52,16 +52,16 @@ If the outage is longer than 5 minutes and affects multiple users:
 
 ```bash
 # Restart everything
-cd /opt/status-monitor && docker compose restart
+cd /opt/status-monitor/deployment && docker compose restart
 
 # Restart just the app
-cd /opt/status-monitor && docker compose restart status-monitor
+cd /opt/status-monitor/deployment && docker compose restart status-monitor
 
 # Pull latest image and restart
-cd /opt/status-monitor && docker compose pull && docker compose up -d
+cd /opt/status-monitor/deployment && docker compose pull && docker compose up -d
 
 # Roll back to a previous image (if the last deploy broke things)
-cd /opt/status-monitor && docker compose pull status-monitor:<previous-tag>
+cd /opt/status-monitor/deployment && docker compose pull status-monitor:<previous-tag>
 ```
 
 ### Step 5 — Post-incident
@@ -120,11 +120,11 @@ Annual rotations (set calendar reminders).
 docker run --rm caddy:2-alpine caddy hash-password --plaintext "new-password"
 
 # Update .env
-ssh your-server "cd /opt/status-monitor && nano .env"
+ssh your-server "cd /opt/status-monitor/deployment && nano .env"
 # Replace STATUS_MONITOR_ADMIN_HASH=...
 
 # Reload Caddy (no downtime)
-ssh your-server "cd /opt/status-monitor && docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile"
+ssh your-server "cd /opt/status-monitor/deployment && docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile"
 ```
 
 ### `HETZNER_DNS_API_TOKEN`
@@ -132,7 +132,7 @@ ssh your-server "cd /opt/status-monitor && docker compose exec caddy caddy reloa
 ```bash
 # Create a new token at https://dns.hetzner.com/settings/api-token
 # Update .env, then restart caddy:
-ssh your-server "cd /opt/status-monitor && docker compose up -d caddy"
+ssh your-server "cd /opt/status-monitor/deployment && docker compose up -d caddy"
 # Verify the wildcard cert still works:
 curl https://acme.your-domain.com/
 # Once verified, revoke the old token in the Hetzner console
