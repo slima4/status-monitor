@@ -172,6 +172,10 @@ jobs:
                RUST_LOG='${{ vars.RUST_LOG }}' \
                bash -s" <<'REMOTE'
           set -euo pipefail
+          # Every file written during this script (including .env, .env.next,
+          # .env.bak.*, sparse-checkout overrides) must be owner-only. Fresh
+          # Hetzner box defaults umask 0022 → secrets land world-readable.
+          umask 077
 
           # Fail closed: only the two known values are accepted; anything else
           # (a quoting change, a typo) aborts rather than silently skipping —
@@ -396,6 +400,13 @@ jobs:
             [ "$n" = 1 ] || { echo "::error::RUST_LOG not written exactly once to .env (count=${n})"; exit 1; }
           fi
 
+          # Defensive fallback: tighten .env perms in case the file predates
+          # the umask 077 at the top of this script (umask only affects NEW
+          # files; a .env written by a pre-this-commit deploy stays 0644).
+          # Backups inherit perms from `cp .env …` which is 0600 now, so no
+          # explicit chmod needed for .env.bak.*.
+          chmod 600 .env
+
           # --- pull the new image FIRST -------------------------------------
           # Slow, network-fragile step. Do it while the OLD container still
           # serves: if the ssh session dies here the site stays up on the old
@@ -459,6 +470,27 @@ jobs:
           fi
 
           docker compose ps
+
+          # Defense in depth: assert internal services carry NO host port
+          # bindings. Prod compose uses `expose:` (network-internal only) for
+          # postgres/clickhouse/status-monitor; only caddy publishes 80/443.
+          # A silent `ports:` edit on postgres/clickhouse would bind DBs to
+          # 0.0.0.0 with default monitor/monitor creds = public DB; on the
+          # app it would bypass Caddy TLS + expose unauthenticated /metrics
+          # on 9090. Fail the deploy so the bad change can't reach steady
+          # state unnoticed. `docker compose ps -q` uses the live project
+          # name + handles replicas, so it doesn't bit-rot if the project
+          # is renamed or scaled.
+          for svc in postgres clickhouse status-monitor; do
+            for ctr in $(docker compose ps -q "$svc"); do
+              bound=$(docker port "$ctr" 2>/dev/null || true)
+              if [ -n "$bound" ]; then
+                echo "::error::${svc} ($ctr) has host port bindings — must use 'expose:' only:"
+                echo "$bound"
+                exit 1
+              fi
+            done
+          done
           REMOTE
 
       - name: health gate
