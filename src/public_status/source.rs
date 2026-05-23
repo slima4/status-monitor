@@ -18,11 +18,12 @@ use crate::api::page::CursorPage;
 use crate::api::public_error::PublicAppError;
 use crate::domain::{
     ComponentHistoryResponse, IncidentSeverity, IncidentStatusPhase, OrgId, PublicIncident,
-    PublicIncidentUpdate, PublicMaintenanceList, PublicStatusPage,
+    PublicIncidentUpdate, PublicMaintenanceList,
 };
 
 use super::aggregator::OrgAggregator;
-use super::cache::{PageCache, PageCacheError};
+use super::auto_incident_title;
+use super::cache::{PageCache, PageCacheError, PageData};
 use super::xml::xml_escape;
 
 #[derive(Debug, Clone, Copy)]
@@ -49,7 +50,7 @@ impl Default for IncidentListQuery {
 /// tenant's page to another.
 #[async_trait]
 pub trait PublicSource: Send + Sync {
-    async fn page(&self, org: OrgId) -> Result<Arc<PublicStatusPage>, PublicAppError>;
+    async fn page(&self, org: OrgId) -> Result<Arc<PageData>, PublicAppError>;
     async fn component_history(
         &self,
         org: OrgId,
@@ -101,7 +102,7 @@ impl OrgPublicSource {
 
 #[async_trait]
 impl PublicSource for OrgPublicSource {
-    async fn page(&self, org: OrgId) -> Result<Arc<PublicStatusPage>, PublicAppError> {
+    async fn page(&self, org: OrgId) -> Result<Arc<PageData>, PublicAppError> {
         let agg = self.aggregator.clone();
         let res = self
             .cache
@@ -226,10 +227,10 @@ impl PublicSource for OrgPublicSource {
     }
 
     async fn maintenance(&self, org: OrgId) -> Result<PublicMaintenanceList, PublicAppError> {
-        let page = self.page(org).await?;
+        let data = self.page(org).await?;
         Ok(PublicMaintenanceList {
-            active: page.active_maintenance.clone(),
-            upcoming: page.upcoming_maintenance.clone(),
+            active: data.page.active_maintenance.clone(),
+            upcoming: data.page.upcoming_maintenance.clone(),
         })
     }
 
@@ -291,7 +292,7 @@ impl OrgPublicSource {
                 let title = r
                     .public_title
                     .clone()
-                    .unwrap_or_else(|| format!("{} {}", r.component_name, r.status_at_start));
+                    .unwrap_or_else(|| auto_incident_title(&r.component_name, &r.status_at_start));
                 PublicIncident {
                     id: r.id,
                     component_id: r.target_id,
@@ -405,8 +406,8 @@ impl Default for NoopPublicSource {
 
 #[async_trait]
 impl PublicSource for NoopPublicSource {
-    async fn page(&self, _org: OrgId) -> Result<Arc<PublicStatusPage>, PublicAppError> {
-        Ok(Arc::new(PublicStatusPage {
+    async fn page(&self, _org: OrgId) -> Result<Arc<PageData>, PublicAppError> {
+        Ok(Arc::new(PageData::from(crate::domain::PublicStatusPage {
             overall: crate::domain::OverallStatus {
                 state: crate::domain::OverallState::Operational,
                 label: "All Systems Operational".into(),
@@ -419,7 +420,7 @@ impl PublicSource for NoopPublicSource {
             recent_incidents_has_more: false,
             active_maintenance: Vec::new(),
             upcoming_maintenance: Vec::new(),
-        }))
+        })))
     }
 
     async fn component_history(

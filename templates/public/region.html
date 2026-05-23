@@ -148,13 +148,19 @@
                     {% match c.description %}
                         {% when Some with (d) %}<p class="mt-0.5 text-xs text-slate-500">{{ d }}</p>{% when None %}
                     {% endmatch %}
-                    <div class="mt-4 grid grid-flow-col auto-cols-fr gap-0.5"
-                         role="img"
-                         aria-label="Daily status history for {{ c.name }}, last 90 days, oldest first.">
+                    <div class="day-strip mt-4"
+                         role="group"
+                         aria-label="Daily status history for {{ c.name }}, last 90 days. Arrow keys navigate days.">
                         {% for day in c.history %}
-                        <span class="day-cell {{ day.class }}"
-                              title="{{ day.label }} · {{ day.days_ago }}d ago"
-                              aria-hidden="true"></span>
+                        <button type="button"
+                                class="day-cell {{ day.class }}"
+                                data-day-trigger
+                                data-comp="{{ c.id }}"
+                                data-day="{{ day.day_index }}"
+                                aria-haspopup="dialog"
+                                aria-expanded="false"
+                                aria-label="{{ day.aria_label }}"
+                                tabindex="{% if day.day_index == 0 %}0{% else %}-1{% endif %}"></button>
                         {% endfor %}
                     </div>
                     <div class="mt-2 flex items-center justify-between text-[11px] text-slate-400">
@@ -192,5 +198,21 @@
         {% endif %}
     </section>
     {% endif %}
+
+    {# Shared popover + data blob for the day-strip. Lives inside the
+       30s-refreshed region so stale state doesn't survive a swap.
+       `</` is escaped to `<\/` server-side before reaching `|safe`. #}
+    <div id="day-popover" role="dialog" aria-labelledby="day-popover-date" hidden>
+        <p class="day-popover__date" data-slot="date" id="day-popover-date"></p>
+        <div class="day-pop-status" data-slot="badge" hidden>
+            <span class="day-pop-status__label" data-slot="state"></span>
+            <span class="day-pop-status__duration" data-slot="duration"></span>
+        </div>
+        <p class="day-popover__none" data-slot="none" hidden>No downtime recorded on this day.</p>
+        <p class="day-popover__related-heading" data-slot="related-heading" hidden>Related</p>
+        <ul class="day-popover__related-list" data-slot="related-list"></ul>
+    </div>
+    <template id="day-popover-related-tpl"><li><a></a></li></template>
+    <script id="day-strip-data" type="application/json">{{ view.day_strip_json|safe }}</script>
 
 </div>

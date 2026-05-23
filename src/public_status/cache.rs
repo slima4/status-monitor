@@ -21,10 +21,39 @@ use std::time::Duration;
 use moka::future::Cache as FutureCache;
 use moka::sync::Cache as SyncCache;
 
+use chrono::{DateTime, Utc};
+use uuid::Uuid;
+
 use crate::config::PublicStatusConfig;
 use crate::domain::{OrgId, PublicStatusPage};
 
-pub type PageData = PublicStatusPage;
+/// 90-day incident reference used only by the HTML popover matcher.
+/// Slim by design — full-detail incidents live on `PublicStatusPage`.
+#[derive(Debug, Clone)]
+pub struct HistoryIncidentMarker {
+    pub id: Uuid,
+    pub component_id: Uuid,
+    pub title: String,
+    pub started_at: DateTime<Utc>,
+    pub ended_at: Option<DateTime<Utc>>,
+}
+
+/// Cache value: JSON-API page + HTML-only history markers. Markers are
+/// excluded from the JSON wire shape (handler unwraps `.page`).
+#[derive(Debug, Clone)]
+pub struct PageData {
+    pub page: PublicStatusPage,
+    pub history_markers: Vec<HistoryIncidentMarker>,
+}
+
+impl From<PublicStatusPage> for PageData {
+    fn from(page: PublicStatusPage) -> Self {
+        Self {
+            page,
+            history_markers: Vec::new(),
+        }
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum PageCacheError {
@@ -170,7 +199,7 @@ mod tests {
     }
 
     fn make_page(site: &str) -> PageData {
-        PageData {
+        PageData::from(PublicStatusPage {
             overall: OverallStatus {
                 state: OverallState::Operational,
                 label: "All Systems Operational".into(),
@@ -183,7 +212,7 @@ mod tests {
             recent_incidents_has_more: false,
             active_maintenance: Vec::new(),
             upcoming_maintenance: Vec::new(),
-        }
+        })
     }
 
     #[tokio::test]
@@ -196,7 +225,7 @@ mod tests {
             .expect("first compute ok");
         let snap = cache.last_good(o).expect("snapshot present after success");
         assert!(Arc::ptr_eq(&page, &snap));
-        assert_eq!(page.site_name, "ok");
+        assert_eq!(page.page.site_name, "ok");
     }
 
     #[tokio::test]
@@ -276,7 +305,7 @@ mod tests {
         assert!(matches!(err, PageCacheError::Unavailable));
         // A's last_good is untouched.
         let snap_a = cache.last_good(a).expect("a still cached");
-        assert_eq!(snap_a.site_name, "a");
+        assert_eq!(snap_a.page.site_name, "a");
         assert!(cache.last_good(b).is_none(), "b has no snapshot");
     }
 
@@ -295,7 +324,7 @@ mod tests {
             })
             .await
             .expect("served stale");
-        assert_eq!(stale.site_name, "good");
+        assert_eq!(stale.page.site_name, "good");
     }
 
     #[tokio::test]

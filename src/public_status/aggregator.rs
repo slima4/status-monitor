@@ -23,6 +23,8 @@ use crate::domain::{
 use crate::error::Result;
 use crate::storage::TargetStore;
 
+use super::auto_incident_title;
+use super::cache::{HistoryIncidentMarker, PageData};
 use super::overall_status::{Counters, component_status, overall_state, overall_status};
 
 /// Aggregator-local configuration. Holds only the knobs the aggregator reads
@@ -80,9 +82,9 @@ impl OrgAggregator {
         }
     }
 
-    /// Builds a single `PublicStatusPage` snapshot for `org`. One call ↔ one
-    /// render.
-    pub async fn build(&self, org: OrgId) -> Result<PublicStatusPage> {
+    /// One `PageData` snapshot per call: wire-format page + 90-day
+    /// popover-only markers.
+    pub async fn build(&self, org: OrgId) -> Result<PageData> {
         let now = Utc::now();
         let components = self.load_public_components(org).await?;
         let component_ids: Vec<Uuid> = components.iter().map(|c| c.id).collect();
@@ -91,10 +93,12 @@ impl OrgAggregator {
             (active_maintenance, upcoming_maintenance, maintenance_by_target),
             active_incidents,
             (recent_incidents, recent_incidents_has_more),
+            history_markers,
         ) = tokio::try_join!(
             self.load_maintenance(org, now, &component_ids),
             self.load_active_incidents(org),
             self.load_recent_incidents(org, now),
+            self.load_history_markers(org, now),
         )?;
 
         let history_by_target = self.load_history_strips(org, &component_ids, now).await?;
@@ -168,16 +172,19 @@ impl OrgAggregator {
             .collect();
         let overall = overall_status(overall_state(&component_statuses));
 
-        Ok(PublicStatusPage {
-            overall,
-            generated_at: now,
-            site_name: self.cfg.site_name.clone(),
-            groups,
-            active_incidents,
-            recent_incidents,
-            recent_incidents_has_more,
-            active_maintenance,
-            upcoming_maintenance,
+        Ok(PageData {
+            page: PublicStatusPage {
+                overall,
+                generated_at: now,
+                site_name: self.cfg.site_name.clone(),
+                groups,
+                active_incidents,
+                recent_incidents,
+                recent_incidents_has_more,
+                active_maintenance,
+                upcoming_maintenance,
+            },
+            history_markers,
         })
     }
 
@@ -369,6 +376,49 @@ impl OrgAggregator {
         Ok((hydrated, has_more))
     }
 
+    /// 90-day slim incident pool for the popover matcher. 1000-row cap
+    /// guards against an incident-spam tenant blowing the rendered JSON.
+    async fn load_history_markers(
+        &self,
+        org: OrgId,
+        now: DateTime<Utc>,
+    ) -> Result<Vec<HistoryIncidentMarker>> {
+        let since = now - ChronoDuration::days(self.cfg.history_days as i64);
+        let rows: Vec<HistoryMarkerRow> = sqlx::query_as::<_, HistoryMarkerRow>(
+            r#"SELECT i.id, i.target_id,
+                      COALESCE(t.public_name, t.name) AS component_name,
+                      i.public_title, i.status_at_start,
+                      i.started_at, i.ended_at
+               FROM incidents i
+               JOIN targets t ON t.id = i.target_id
+               WHERE i.org_id = $2
+                 AND t.org_id = $2
+                 AND (i.ended_at IS NULL OR i.ended_at >= $1)
+                 AND t.public_status = true
+               ORDER BY i.started_at DESC
+               LIMIT 1000"#,
+        )
+        .bind(since)
+        .bind(org.0)
+        .fetch_all(&self.pg)
+        .await
+        .context("load history-window incident markers")?;
+        Ok(rows
+            .into_iter()
+            .map(|r| HistoryIncidentMarker {
+                id: r.id,
+                component_id: r.target_id,
+                title: truncate_title(
+                    r.public_title.unwrap_or_else(|| {
+                        auto_incident_title(&r.component_name, &r.status_at_start)
+                    }),
+                ),
+                started_at: r.started_at,
+                ended_at: r.ended_at,
+            })
+            .collect())
+    }
+
     async fn hydrate_incidents(
         &self,
         org: OrgId,
@@ -406,13 +456,10 @@ impl OrgAggregator {
                     .last()
                     .map(|u| u.phase)
                     .unwrap_or(IncidentStatusPhase::Investigating);
-                let title = r.public_title.clone().unwrap_or_else(|| {
-                    format!(
-                        "{} {}",
-                        r.component_name,
-                        r.status_at_start.replace('_', " ")
-                    )
-                });
+                let title = r
+                    .public_title
+                    .clone()
+                    .unwrap_or_else(|| auto_incident_title(&r.component_name, &r.status_at_start));
                 PublicIncident {
                     id: r.id,
                     component_id: r.target_id,
@@ -602,6 +649,17 @@ struct IncidentRow {
 }
 
 #[derive(FromRow)]
+struct HistoryMarkerRow {
+    id: Uuid,
+    target_id: Uuid,
+    component_name: String,
+    public_title: Option<String>,
+    status_at_start: String,
+    started_at: DateTime<Utc>,
+    ended_at: Option<DateTime<Utc>>,
+}
+
+#[derive(FromRow)]
 struct IncidentUpdateRow {
     incident_id: Uuid,
     posted_at: DateTime<Utc>,
@@ -632,6 +690,22 @@ struct RecentCountRow {
 }
 
 // ── helpers ─────────────────────────────────────────────────────────────────
+
+/// Cap popover title length so a runaway tenant can't blow up the inline
+/// strip JSON. Snaps to the last char-boundary at or before the cap.
+fn truncate_title(mut s: String) -> String {
+    const MAX: usize = 140;
+    if s.len() <= MAX {
+        return s;
+    }
+    let mut end = MAX;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    s.truncate(end);
+    s.push('…');
+    s
+}
 
 fn ts_to_datetime(secs: i64) -> DateTime<Utc> {
     chrono::DateTime::<Utc>::from_timestamp(secs, 0).unwrap_or_else(Utc::now)

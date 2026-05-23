@@ -21,7 +21,7 @@ use crate::domain::{
     PublicComponentGroup, PublicComponentStatus, PublicIncident, PublicIncidentUpdate,
     PublicMaintenance, PublicOrgBranding, PublicStatusPage,
 };
-use crate::public_status::{LocalDiskLogoStorage, LogoStorage};
+use crate::public_status::{HistoryIncidentMarker, LocalDiskLogoStorage, LogoStorage};
 use crate::storage::orgs::{OrgBranding, load_public_branding};
 use crate::web::assets::filters;
 use crate::web::error::{NotFoundPage, UnavailablePage};
@@ -96,17 +96,17 @@ pub async fn index(
         Ok(o) => o,
         Err(err) => return render_public_error(err),
     };
-    let page = match state.public_source.page(org).await {
-        Ok(p) => p,
+    let data = match state.public_source.page(org).await {
+        Ok(d) => d,
         Err(err) => return render_public_error(err),
     };
-    let view = build_view(&page);
+    let view = build_view(&data.page, &data.history_markers);
     if params.fragment.unwrap_or(0) != 0 {
         // Chrome-free auto-refresh fragment: no header/footer/style, so the
         // branding lookup is skipped on the 30s poll.
         StatusRegion { view }.into_response()
     } else {
-        let branding = resolve_branding(&state, org, &page.site_name).await;
+        let branding = resolve_branding(&state, org, &data.page.site_name).await;
         StatusFullPage { view, branding }.into_response()
     }
 }
@@ -166,7 +166,7 @@ pub async fn incident(
         Err(err) => return render_public_error(err),
     };
     let fallback_name = match page_res {
-        Ok(p) => p.site_name.clone(),
+        Ok(p) => p.page.site_name.clone(),
         Err(err) => return render_public_error(err),
     };
     let branding = resolve_branding(&state, org, &fallback_name).await;
@@ -213,7 +213,7 @@ pub async fn archive(
         state.public_source.list_incidents(org, query),
     );
     let fallback_name = match page_res {
-        Ok(p) => p.site_name.clone(),
+        Ok(p) => p.page.site_name.clone(),
         Err(err) => return render_public_error(err),
     };
     let listing = match list_res {
@@ -316,6 +316,8 @@ pub struct StatusView {
     pub has_components: bool,
     pub rss_url: &'static str,
     pub meta_description: String,
+    /// Inlined at `#day-strip-data`; consumed by day_popover.js.
+    pub day_strip_json: String,
 }
 
 pub struct GroupView {
@@ -337,8 +339,32 @@ pub struct ComponentView {
 
 pub struct DayCell {
     pub class: &'static str,
-    pub label: &'static str,
-    pub days_ago: usize,
+    pub aria_label: String,
+    /// Index into the day_strip_json blob for this component.
+    pub day_index: usize,
+}
+
+#[derive(serde::Serialize)]
+struct DayStripComponent {
+    name: String,
+    days: Vec<DayPopoverEntry>,
+}
+
+#[derive(serde::Serialize)]
+struct DayPopoverEntry {
+    date: String,
+    state: &'static str,
+    state_class: &'static str,
+    show_badge: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    downtime: Option<String>,
+    related: Vec<DayRelated>,
+}
+
+#[derive(serde::Serialize)]
+struct DayRelated {
+    title: String,
+    url: String,
 }
 
 /// Common header fields shared by the recent-incidents list and the detail page.
@@ -501,11 +527,13 @@ pub fn render_about(markdown: &str) -> String {
 
 // --- Builders ------------------------------------------------------------
 
-fn build_view(page: &PublicStatusPage) -> StatusView {
+fn build_view(page: &PublicStatusPage, history_markers: &[HistoryIncidentMarker]) -> StatusView {
     let now = page.generated_at;
 
     let groups = page.groups.iter().map(build_group).collect::<Vec<_>>();
     let has_components = groups.iter().any(|g| !g.components.is_empty());
+
+    let day_strip_json = build_day_strip_json(page, history_markers, now);
 
     let active = page
         .active_incidents
@@ -553,6 +581,7 @@ fn build_view(page: &PublicStatusPage) -> StatusView {
         has_components,
         rss_url: RSS_URL,
         meta_description,
+        day_strip_json,
     }
 }
 
@@ -565,7 +594,7 @@ fn build_group(g: &PublicComponentGroup) -> GroupView {
 
 fn build_component(c: &PublicComponent) -> ComponentView {
     let (status_label, status_class, status_icon) = component_classes(c.current_status);
-    let history = build_history(&c.history);
+    let history = build_history(c, &c.history);
     let (uptime_pct, summary) = history_stats(&c.history);
     ComponentView {
         id: c.id.to_string(),
@@ -580,20 +609,118 @@ fn build_component(c: &PublicComponent) -> ComponentView {
     }
 }
 
-fn build_history(states: &[DayState]) -> Vec<DayCell> {
+fn build_history(component: &PublicComponent, states: &[DayState]) -> Vec<DayCell> {
     let total = states.len().max(1);
     states
         .iter()
         .enumerate()
         .map(|(idx, s)| {
-            let (class, label) = day_classes(*s);
+            let (class, label, _tint) = day_classes(*s);
+            let day_index = idx;
+            let days_ago = total - 1 - idx;
             DayCell {
                 class,
-                label,
-                days_ago: total - 1 - idx,
+                day_index,
+                aria_label: format!("{} ({} days ago) — {}", component.name, days_ago, label),
             }
         })
         .collect()
+}
+
+/// Build the inline popover blob. UTC day boundary matches the
+/// aggregator's `toStartOfDay`, so cell colour and popover state align.
+fn build_day_strip_json(
+    page: &PublicStatusPage,
+    history_markers: &[HistoryIncidentMarker],
+    now: DateTime<Utc>,
+) -> String {
+    let today_start = now
+        .date_naive()
+        .and_hms_opt(0, 0, 0)
+        .map(|nd| DateTime::<Utc>::from_naive_utc_and_offset(nd, Utc))
+        .unwrap_or(now);
+    // Bucket markers once so the day loop scans only the component's own
+    // incidents instead of every org-wide marker × every day.
+    let mut by_comp: std::collections::HashMap<Uuid, Vec<&HistoryIncidentMarker>> =
+        std::collections::HashMap::new();
+    for m in history_markers {
+        by_comp.entry(m.component_id).or_default().push(m);
+    }
+    let empty: Vec<&HistoryIncidentMarker> = Vec::new();
+    let mut blob: std::collections::BTreeMap<String, DayStripComponent> =
+        std::collections::BTreeMap::new();
+    for group in &page.groups {
+        for c in &group.components {
+            let total = c.history.len().max(1);
+            let markers = by_comp.get(&c.id).unwrap_or(&empty);
+            let days = c
+                .history
+                .iter()
+                .enumerate()
+                .map(|(idx, s)| {
+                    let days_ago = total - 1 - idx;
+                    let day_start = today_start - ChronoDuration::days(days_ago as i64);
+                    let day_end = day_start + ChronoDuration::days(1);
+                    let (downtime, related) = day_overlap(markers, day_start, day_end, now);
+                    let (_class, state, state_class) = day_classes(*s);
+                    let show_badge = !matches!(s, DayState::Operational | DayState::NoData)
+                        || !related.is_empty();
+                    DayPopoverEntry {
+                        date: day_start.format("%-d %b %Y").to_string(),
+                        state,
+                        state_class,
+                        show_badge,
+                        downtime: (downtime > ChronoDuration::zero())
+                            .then(|| humanize_duration(downtime)),
+                        related,
+                    }
+                })
+                .collect();
+            blob.insert(
+                c.id.to_string(),
+                DayStripComponent {
+                    name: c.name.clone(),
+                    days,
+                },
+            );
+        }
+    }
+    // Escape every `<`, `>`, `&` to JSON `\uXXXX` so a malicious incident
+    // title can't terminate the inline <script> with `</script>`, slip into
+    // a comment via `<!--`, or close the JSON early via `&`/CDATA tricks.
+    // Browsers parse `<` etc. back to the original char on JSON.parse.
+    serde_json::to_string(&blob)
+        .unwrap_or_else(|_| "{}".to_string())
+        .replace('<', "\\u003c")
+        .replace('>', "\\u003e")
+        .replace('&', "\\u0026")
+}
+
+/// Sum incident time overlapping `[day_start, day_end)`. Caller pre-filters
+/// to one component's markers. Open-ended incidents clamp to `now`.
+fn day_overlap(
+    incidents: &[&HistoryIncidentMarker],
+    day_start: DateTime<Utc>,
+    day_end: DateTime<Utc>,
+    now: DateTime<Utc>,
+) -> (ChronoDuration, Vec<DayRelated>) {
+    let mut total = ChronoDuration::zero();
+    let mut links = Vec::new();
+    for inc in incidents {
+        let end = inc.ended_at.unwrap_or(now);
+        if inc.started_at >= day_end || end <= day_start {
+            continue;
+        }
+        let overlap_start = inc.started_at.max(day_start);
+        let overlap_end = end.min(day_end);
+        let overlap = (overlap_end - overlap_start).max(ChronoDuration::zero());
+        total = total + overlap;
+        links.push(DayRelated {
+            title: inc.title.clone(),
+            url: format!("/status/incidents/{}", inc.id),
+        });
+    }
+    (total, links)
 }
 
 fn history_stats(states: &[DayState]) -> (String, String) {
@@ -765,14 +892,15 @@ fn component_classes(s: PublicComponentStatus) -> (&'static str, &'static str, &
     }
 }
 
-fn day_classes(s: DayState) -> (&'static str, &'static str) {
+/// (bar fill class, human label, popover badge tint class).
+fn day_classes(s: DayState) -> (&'static str, &'static str, &'static str) {
     match s {
-        DayState::Operational => ("day-cell--op", "Operational"),
-        DayState::Degraded => ("day-cell--deg", "Degraded"),
-        DayState::PartialOutage => ("day-cell--part", "Partial outage"),
-        DayState::MajorOutage => ("day-cell--maj", "Major outage"),
-        DayState::Maintenance => ("day-cell--mnt", "Maintenance"),
-        DayState::NoData => ("day-cell--none", "No data"),
+        DayState::Operational => ("day-cell--op", "Operational", "day-pop-status--op"),
+        DayState::Degraded => ("day-cell--deg", "Degraded", "day-pop-status--deg"),
+        DayState::PartialOutage => ("day-cell--part", "Partial outage", "day-pop-status--part"),
+        DayState::MajorOutage => ("day-cell--maj", "Major outage", "day-pop-status--maj"),
+        DayState::Maintenance => ("day-cell--mnt", "Maintenance", "day-pop-status--mnt"),
+        DayState::NoData => ("day-cell--none", "No data", "day-pop-status--none"),
     }
 }
 
@@ -868,7 +996,7 @@ mod tests {
 
     #[test]
     fn full_page_renders_chrome_and_components() {
-        let view = build_view(&sample_page());
+        let view = build_view(&sample_page(), &[]);
         let html = StatusFullPage {
             view,
             branding: sample_branding(),
@@ -884,12 +1012,117 @@ mod tests {
         assert!(html.contains("data-tz"));
         assert!(html.contains("/static/js/htmx.min.js"));
         assert!(html.contains("/static/js/public/tz.js"));
+        assert!(html.contains("/static/js/public/day_popover.js"));
         assert!(html.contains("/api/public/v1/incidents.rss"));
     }
 
     #[test]
+    fn day_strip_renders_trigger_buttons_and_blob() {
+        let view = build_view(&sample_page(), &[]);
+        let html = StatusRegion { view }.render().unwrap();
+        assert!(html.contains("data-day-trigger"));
+        assert!(html.contains(r#"data-comp="#));
+        assert!(html.contains(r#"data-day="#));
+        // Shared popover + content template + JSON blob — each appears once.
+        assert_eq!(html.matches(r#"id="day-popover""#).count(), 1);
+        assert_eq!(html.matches(r#"id="day-popover-related-tpl""#).count(), 1);
+        assert_eq!(html.matches(r#"id="day-strip-data""#).count(), 1);
+        // Roving tabindex: one `tabindex="0"` per component strip; the rest
+        // are `tabindex="-1"`. Sample has 1 component × 90 days = 1 stop.
+        assert_eq!(html.matches(r#"tabindex="0""#).count(), 1);
+        assert_eq!(html.matches(r#"tabindex="-1""#).count(), 89);
+    }
+
+    #[test]
+    fn day_strip_blob_links_overlapping_incident() {
+        let mut p = sample_page();
+        // Replace `today` with a bad day, then add a marker for a 40m
+        // incident on the matching component.
+        let comp_id = p.groups[0].components[0].id;
+        let last = p.groups[0].components[0].history.len() - 1;
+        p.groups[0].components[0].history[last] = DayState::MajorOutage;
+        let marker = HistoryIncidentMarker {
+            id: Uuid::new_v4(),
+            component_id: comp_id,
+            title: "Edge nodes returning 502".into(),
+            started_at: p.generated_at - ChronoDuration::minutes(45),
+            ended_at: Some(p.generated_at - ChronoDuration::minutes(5)),
+        };
+        let view = build_view(&p, &[marker]);
+        // The JSON blob is the data source — assert against it, not the
+        // rendered <li> markup (the JS builds those at runtime).
+        assert!(view.day_strip_json.contains("Edge nodes returning 502"));
+        assert!(view.day_strip_json.contains("day-pop-status--maj"));
+        assert!(view.day_strip_json.contains("40m"));
+        assert!(view.day_strip_json.contains("\"show_badge\":true"));
+    }
+
+    #[test]
+    fn day_strip_blob_html_safe() {
+        // An attacker-controlled incident title may not introduce ANY raw
+        // `<`, `>`, or `&` into the inline JSON — those would let a title
+        // close the <script>, open a comment (`<!--`), or break CDATA.
+        let mut p = sample_page();
+        let comp_id = p.groups[0].components[0].id;
+        let marker = HistoryIncidentMarker {
+            id: Uuid::new_v4(),
+            component_id: comp_id,
+            title: "evil </script><!--<img src=x>& bad".into(),
+            started_at: p.generated_at - ChronoDuration::minutes(30),
+            ended_at: Some(p.generated_at - ChronoDuration::minutes(5)),
+        };
+        let view = build_view(&p, &[marker]);
+        assert!(!view.day_strip_json.contains('<'));
+        assert!(!view.day_strip_json.contains('>'));
+        // `&` appears only as `&` — never raw.
+        assert!(!view.day_strip_json.contains('&'));
+        assert!(view.day_strip_json.contains("\\u003c"));
+        // Round-trip safety: the encoded blob still parses back to the
+        // original string after JSON.parse.
+        let parsed: serde_json::Value =
+            serde_json::from_str(&view.day_strip_json).expect("valid json");
+        let title = parsed[comp_id.to_string()]["days"]
+            .as_array()
+            .and_then(|days| {
+                days.iter()
+                    .rev()
+                    .find(|d| !d["related"].as_array().unwrap().is_empty())
+            })
+            .map(|d| d["related"][0]["title"].as_str().unwrap().to_string())
+            .expect("found title");
+        assert_eq!(title, "evil </script><!--<img src=x>& bad");
+    }
+
+    #[test]
+    fn day_overlap_clamps_to_day_window() {
+        let comp_id = Uuid::new_v4();
+        let now = Utc::now();
+        let day_start = now
+            .date_naive()
+            .and_hms_opt(0, 0, 0)
+            .map(|nd| DateTime::<Utc>::from_naive_utc_and_offset(nd, Utc))
+            .unwrap();
+        let day_end = day_start + ChronoDuration::days(1);
+        let inc = HistoryIncidentMarker {
+            id: Uuid::new_v4(),
+            component_id: comp_id,
+            title: "spans midnight".into(),
+            started_at: day_start - ChronoDuration::hours(3),
+            ended_at: Some(day_start + ChronoDuration::hours(2)),
+        };
+        let pool: Vec<&HistoryIncidentMarker> = vec![&inc];
+        let (dur, links) = day_overlap(&pool, day_start, day_end, now);
+        assert_eq!(links.len(), 1);
+        assert_eq!(dur, ChronoDuration::hours(2));
+        let empty: Vec<&HistoryIncidentMarker> = Vec::new();
+        let (dur2, links2) = day_overlap(&empty, day_start, day_end, now);
+        assert!(links2.is_empty());
+        assert_eq!(dur2, ChronoDuration::zero());
+    }
+
+    #[test]
     fn fragment_renders_region_without_doctype() {
-        let view = build_view(&sample_page());
+        let view = build_view(&sample_page(), &[]);
         let html = StatusRegion { view }.render().unwrap();
         assert!(!html.contains("<!doctype html>"));
         assert!(!html.contains("<nav"));
@@ -902,7 +1135,7 @@ mod tests {
     fn empty_page_renders_with_zero_components() {
         let mut p = sample_page();
         p.groups.clear();
-        let view = build_view(&p);
+        let view = build_view(&p, &[]);
         let html = StatusFullPage {
             view,
             branding: sample_branding(),
@@ -934,7 +1167,7 @@ mod tests {
                 message: "Rolling back the deploy.".into(),
             }],
         });
-        let view = build_view(&p);
+        let view = build_view(&p, &[]);
         let html = StatusFullPage {
             view,
             branding: sample_branding(),
@@ -958,7 +1191,7 @@ mod tests {
             ends_at: Utc::now() + ChronoDuration::hours(1),
             affected_component_names: vec!["Gateway".into()],
         });
-        let view = build_view(&p);
+        let view = build_view(&p, &[]);
         let html = StatusFullPage {
             view,
             branding: sample_branding(),
@@ -980,9 +1213,10 @@ mod tests {
             DayState::Maintenance,
             DayState::NoData,
         ] {
-            let (class, label) = day_classes(s);
+            let (class, label, tint) = day_classes(s);
             assert!(!class.is_empty());
             assert!(!label.is_empty());
+            assert!(tint.starts_with("day-pop-status--"));
         }
     }
 
@@ -1096,7 +1330,7 @@ mod tests {
 
     #[test]
     fn branding_renders_logo_about_and_color() {
-        let view = build_view(&sample_page());
+        let view = build_view(&sample_page(), &[]);
         let branding = branding_with(PublicOrgBranding {
             public_display_name: Some("Acme Public".into()),
             public_about: Some("**hi** there".into()),
@@ -1115,7 +1349,7 @@ mod tests {
 
     #[test]
     fn powered_by_shown_by_default() {
-        let view = build_view(&sample_page());
+        let view = build_view(&sample_page(), &[]);
         let html = StatusFullPage {
             view,
             branding: sample_branding(),
@@ -1130,7 +1364,7 @@ mod tests {
     // sanitiser is the independent layer that holds even then.
     #[test]
     fn malicious_brand_color_cannot_escape_style_rule() {
-        let view = build_view(&sample_page());
+        let view = build_view(&sample_page(), &[]);
         let branding = branding_with(PublicOrgBranding {
             public_brand_color: Some("red; } body { display: none } /*".into()),
             ..PublicOrgBranding::default()
@@ -1228,7 +1462,7 @@ mod tests {
         // name and no logo image is emitted (the header shows text). The
         // default colour and powered-by footer are covered by their own
         // tests above; this one pins the resolved-name + no-logo path.
-        let view = build_view(&sample_page());
+        let view = build_view(&sample_page(), &[]);
         let branding = branding_with(PublicOrgBranding::default());
         let html = StatusFullPage { view, branding }.render().unwrap();
 

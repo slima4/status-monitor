@@ -23,6 +23,30 @@
 
     --font-display: "Inter", system-ui, sans-serif;
     --font-mono:    "JetBrains Mono", ui-monospace, monospace;
+
+    /* Public-status state palette. One source for the 6 day-states; the
+       day strip, legend dots, and popover badge all derive from these.
+       Retune a hue here — every surface follows in lockstep. */
+    --sm-state-op-bar:   var(--color-emerald-500);
+    --sm-state-deg-bar:  var(--color-amber-400);
+    --sm-state-part-bar: var(--color-orange-500);
+    --sm-state-maj-bar:  var(--color-rose-600);
+    --sm-state-mnt-bar:  var(--color-sky-400);
+    --sm-state-none-bar: var(--color-slate-200);
+
+    /* Softer popover-badge fills + text — same hue family as `--*-bar`. */
+    --sm-state-op-soft-bg:   var(--color-emerald-50);
+    --sm-state-op-soft-fg:   var(--color-emerald-800);
+    --sm-state-deg-soft-bg:  var(--color-amber-50);
+    --sm-state-deg-soft-fg:  var(--color-amber-800);
+    --sm-state-part-soft-bg: var(--color-orange-50);
+    --sm-state-part-soft-fg: var(--color-orange-800);
+    --sm-state-maj-soft-bg:  var(--color-rose-50);
+    --sm-state-maj-soft-fg:  var(--color-rose-800);
+    --sm-state-mnt-soft-bg:  var(--color-sky-50);
+    --sm-state-mnt-soft-fg:  var(--color-sky-800);
+    --sm-state-none-soft-bg: var(--color-slate-100);
+    --sm-state-none-soft-fg: var(--color-slate-700);
 }
 
 @layer components {
@@ -348,29 +372,146 @@
     .status-badge--disabled { @apply bg-slate-200   text-slate-700;   }
     .status-badge--tag      { @apply bg-slate-100   text-slate-700;   }
 
-    /* One 90-day history cell on the public status page. Shape only — the
-       per-day state colour is the view-supplied class (public's own flat
-       palette, not the cartoon .status-badge system). Defined once so the
-       static prefix isn't repeated 90×/component in every 30s fragment. */
-    .day-cell { @apply h-9 rounded-sm; }
-    .day-cell--op   { @apply bg-emerald-500; }
-    .day-cell--deg  { @apply bg-amber-400; }
-    .day-cell--part { @apply bg-orange-500; }
-    .day-cell--maj  { @apply bg-rose-600; }
-    .day-cell--mnt  { @apply bg-sky-400; }
-    .day-cell--none { @apply bg-slate-200; }
+    /* 90-day history strip; cells are direct <button> children. */
+    .day-strip {
+        display: grid;
+        grid-auto-flow: column;
+        grid-auto-columns: minmax(0, 1fr);
+        gap: 2px;
+    }
+
+    /* Cell button. Per-day fill comes from the .day-cell--* modifier
+       (public's flat palette — separate from .status-badge--*). */
+    .day-cell {
+        @apply h-9 w-full rounded-sm;
+        border: 0;
+        padding: 0;
+        cursor: pointer;
+        transition: transform 80ms ease, opacity 80ms ease;
+    }
+    .day-cell:hover,
+    .day-cell:focus-visible { transform: scaleY(1.08); }
+    .day-cell:active { transform: scaleY(0.94); }
+    .day-cell--op   { background-color: var(--sm-state-op-bar); }
+    .day-cell--deg  { background-color: var(--sm-state-deg-bar); }
+    .day-cell--part { background-color: var(--sm-state-part-bar); }
+    .day-cell--maj  { background-color: var(--sm-state-maj-bar); }
+    .day-cell--mnt  { background-color: var(--sm-state-mnt-bar); }
+    .day-cell--none { background-color: var(--sm-state-none-bar); }
+
+    /* Shared popover. position:fixed escapes ancestor overflow:hidden;
+       JS writes top/left + --day-pop-arrow-x. */
+    #day-popover {
+        position: fixed;
+        top: 0;
+        left: 0;
+        z-index: 30;
+        width: max-content;
+        max-width: min(20rem, calc(100vw - 1.5rem));
+        padding: 0.85rem 1rem;
+        background: #fff;
+        border: 1px solid var(--color-slate-200);
+        border-radius: 0.5rem;
+        box-shadow: 0 10px 24px -8px rgba(15, 23, 42, 0.18),
+                    0 4px 10px -4px rgba(15, 23, 42, 0.10);
+        text-align: left;
+        font-size: 0.875rem;
+        color: var(--color-slate-700);
+    }
+    #day-popover[hidden] { display: none; }
+    /* !important needed to beat the layer-3 display:flex on .day-pop-status. */
+    #day-popover [hidden] { display: none !important; }
+    /* Two stacked triangles: outer = border colour, inner = white fill. */
+    #day-popover::before,
+    #day-popover::after {
+        content: "";
+        position: absolute;
+        bottom: 100%;
+        left: var(--day-pop-arrow-x, 50%);
+        width: 0;
+        height: 0;
+        border-style: solid;
+        transform: translateX(-50%);
+    }
+    #day-popover::before {
+        border-width: 0 8px 8px 8px;
+        border-color: transparent transparent var(--color-slate-200) transparent;
+    }
+    #day-popover::after {
+        margin-bottom: -1px;
+        border-width: 0 7px 7px 7px;
+        border-color: transparent transparent #fff transparent;
+    }
+
+    .day-popover__date {
+        margin: 0 0 0.5rem 0;
+        font-weight: 600;
+        color: var(--color-slate-900);
+    }
+    .day-popover__none {
+        margin: 0;
+        color: var(--color-slate-700);
+    }
+    .day-popover__related-heading {
+        margin: 0.75rem 0 0.35rem 0;
+        font-size: 0.7rem;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--color-slate-400);
+    }
+    .day-popover__related-list {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+    }
+    .day-popover__related-list a {
+        color: var(--color-slate-800);
+        text-decoration: none;
+    }
+    .day-popover__related-list a:hover {
+        text-decoration: underline;
+    }
+
+    /* Status badge inside the popover. Same hue family as the bar the
+       visitor hovered, but a softer fill so the badge sits on white. The
+       per-state tint is one rule per state — restyle = edit here. */
+    .day-pop-status {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.75rem;
+        padding: 0.5rem 0.75rem;
+        border-radius: 0.375rem;
+        font-weight: 600;
+    }
+    .day-pop-status__label    { font-weight: 600; }
+    .day-pop-status__duration {
+        font-weight: 500;
+        font-variant-numeric: tabular-nums;
+        opacity: 0.85;
+    }
+    .day-pop-status--op   { background: var(--sm-state-op-soft-bg);   color: var(--sm-state-op-soft-fg); }
+    .day-pop-status--deg  { background: var(--sm-state-deg-soft-bg);  color: var(--sm-state-deg-soft-fg); }
+    .day-pop-status--part { background: var(--sm-state-part-soft-bg); color: var(--sm-state-part-soft-fg); }
+    .day-pop-status--maj  { background: var(--sm-state-maj-soft-bg);  color: var(--sm-state-maj-soft-fg); }
+    .day-pop-status--mnt  { background: var(--sm-state-mnt-soft-bg);  color: var(--sm-state-mnt-soft-fg); }
+    .day-pop-status--none { background: var(--sm-state-none-soft-bg); color: var(--sm-state-none-soft-fg); }
 
     /* Small colour swatch used in the public status-page legend. Fills are
        intentionally the same set the history strip uses (rendered via
        .day-cell--* from day_classes() in public_status.rs) — the legend
        names the same scale the bars paint. */
     .legend-dot         { @apply inline-block h-2.5 w-2.5 rounded-sm; }
-    .legend-dot--op     { @apply bg-emerald-500; }
-    .legend-dot--deg    { @apply bg-amber-400; }
-    .legend-dot--part   { @apply bg-orange-500; }
-    .legend-dot--maj    { @apply bg-rose-600; }
-    .legend-dot--mnt    { @apply bg-sky-400; }
-    .legend-dot--none   { @apply bg-slate-200; }
+    .legend-dot--op     { background-color: var(--sm-state-op-bar); }
+    .legend-dot--deg    { background-color: var(--sm-state-deg-bar); }
+    .legend-dot--part   { background-color: var(--sm-state-part-bar); }
+    .legend-dot--maj    { background-color: var(--sm-state-maj-bar); }
+    .legend-dot--mnt    { background-color: var(--sm-state-mnt-bar); }
+    .legend-dot--none   { background-color: var(--sm-state-none-bar); }
 
     /* Operator-surface inline alert / form banner. Same 2px ink-adjacent
        depth as .stat-tile (colored edge + tinted fill, no sticker shadow):
@@ -452,4 +593,8 @@
     .sticker-disclosure__icon { transition: none; }
     input[type="checkbox"],
     input[type="radio"] { transition: none; }
+    .day-cell { transition: none; }
+    .day-cell:hover,
+    .day-cell:focus-visible,
+    .day-cell:active { transform: none; }
 }
