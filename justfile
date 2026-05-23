@@ -87,6 +87,13 @@ check:
 dev-login:
     bash scripts/seed-dev-session.sh
 
+# Seed a substantial fixture set: 8 monitors + ~110 incidents (mixed
+# statuses + severities) + 90d ClickHouse history. For UI stress-testing
+# and screenshots. Idempotent (`seed-fixtures` tag wiped + re-inserted).
+# Requires `just dev-login` first so the org exists.
+seed-fixtures:
+    bash scripts/seed-fixtures.sh
+
 # Reset the dev Postgres DB (keeps ClickHouse + the warm build cache).
 # Use after editing a migration — pre-launch policy edits migrations in
 # place, which trips sqlx's "migration N modified" checksum guard.
