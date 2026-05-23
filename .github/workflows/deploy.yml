@@ -201,19 +201,25 @@ jobs:
           # the entire repo on /opt/status-monitor/, including root
           # docker-compose.yml + compose.dev.yml that bind DBs to 0.0.0.0
           # with default creds — one wrong `cd` + bare `docker compose up`
-          # = publicly exposed databases. The list is fetched along with the
-          # commit above; `reapply` prunes anything outside the allowlist.
-          # Brief window (~1s, post-pull pre-reapply) where dev files exist
-          # on disk on the first deploy that lands this — `concurrency: deploy`
-          # serialises runs, so an operator firing `docker compose up`
-          # mid-deploy is the case this guards against, not a race we enable.
-          if [ ! -f deployment/sparse-checkout.list ]; then
-            echo "::error::deployment/sparse-checkout.list missing — refusing to deploy"
+          # = publicly exposed databases. `reapply` prunes anything outside
+          # the allowlist.
+          #
+          # Critical ordering: `git sparse-checkout init` IMMEDIATELY prunes
+          # the working tree to its default pattern (cone-mode `/*` + `!/*/`
+          # = root files only, deletes all subdirs incl. `deployment/`). So
+          # the allowlist must be read from git objects (`git show HEAD:…`)
+          # BEFORE init — reading from the working tree races with the prune.
+          # Earlier draft of this block did `cp deployment/sparse-checkout.list`
+          # AFTER init and failed with "No such file or directory" on first
+          # deploy.
+          if ! git show "HEAD:deployment/sparse-checkout.list" > /tmp/sc.list 2>/dev/null; then
+            echo "::error::deployment/sparse-checkout.list missing in HEAD — refusing to deploy"
             exit 1
           fi
           git sparse-checkout init --no-cone
-          cp deployment/sparse-checkout.list .git/info/sparse-checkout
+          cp /tmp/sc.list .git/info/sparse-checkout
           git sparse-checkout reapply
+          rm -f /tmp/sc.list
 
           cd deployment
 
