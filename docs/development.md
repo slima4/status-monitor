@@ -149,6 +149,50 @@ curl -sS -X POST http://localhost:8080/api/v1/targets \
 `public_status: true` makes the target appear on `/status` and addressable via
 `/api/public/v1/badge.svg?component=<id>`.
 
+## Seed UI fixtures
+
+For end-to-end UI smoke (every public-page render path, varied check_spec
+kinds, notification channels, alert bindings, maintenance binding, adversarial
+title) use the bulk fixture script after `just dev-login`:
+
+```bash
+just seed-fixtures
+```
+
+What it seeds (under the `seed-fixtures` tag, idempotent):
+
+- **14 monitors** — 8 public (covering all 5 component states: Operational /
+  Degraded / Partial outage / Major outage / Maintenance — plus the
+  disabled-target and ungrouped render paths) and 6 internal exercising every
+  `check_spec` kind (http / tcp / dns / tls_cert / domain_expiry).
+- **161 incidents** — 150 resolved across 87 days (cleared the 50-incident
+  cap so the "Older incidents →" archive link renders), 10 active in mixed
+  phases (investigating / identified / monitoring), 1 adversarial-title
+  incident covering the day-popover JSON-escape path.
+- **90-day ClickHouse history** — per-target divergent shape via
+  `cityHash64(tid)` (each component has a distinct uptime% and outage
+  pattern), an explicit 87-89d "ancient outage" cluster on the first three
+  targets, and a 6-day NoData gap on fix-email.
+- **3 notification channels** — one per `ChannelConfig` variant (slack,
+  webhook enabled; telegram disabled), with alert bindings on fix-api /
+  fix-db / fix-auth mixing `notify_recovery` on/off and single/multi-channel
+  bindings.
+- **4 maintenance windows** — 1 active (bound to fix-db), 2 upcoming, 1 past.
+
+The script ends with a post-seed verification block that prints Postgres row
+counts, per-component last-5-min counters with an expected-vs-actual state
+matrix, an HTTP smoke against the public page, the adversarial-title escape
+check, and a 90-day ASCII day-strip per component. **Exits non-zero on any
+mismatch** — safe to chain in CI.
+
+Env overrides: `SLUG=<org>` (default `devorg`), `RESET_CH=0` to skip
+ClickHouse purge if you want to layer additional rows on top of a prior seed
+(default `1`).
+
+Then visit:
+- Public status page: <http://devorg.lvh.me:8080/>
+- Operator dashboard: <http://app.lvh.me:8080/>
+
 ## Logging
 
 `docker-compose.yml` sets the default level to:

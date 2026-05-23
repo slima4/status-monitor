@@ -87,10 +87,17 @@ check:
 dev-login:
     bash scripts/seed-dev-session.sh
 
-# Seed a substantial fixture set: 8 monitors + ~110 incidents (mixed
-# statuses + severities) + 90d ClickHouse history. For UI stress-testing
-# and screenshots. Idempotent (`seed-fixtures` tag wiped + re-inserted).
-# Requires `just dev-login` first so the org exists.
+# Seed a substantial fixture set: 14 monitors (8 public + 6 internal with
+# varied check_spec) + 161 incidents (150 resolved across 87d, 10 active in
+# mixed phases, 1 adversarial-title) + 90d ClickHouse history (per-target
+# divergent shape, ancient 87-89d outage cluster, 6-day NoData gap on
+# fix-email) + 3 notification channels + alert bindings + an active
+# maintenance window bound to fix-db. Drives all 5 public component states
+# (Operational / Degraded / Partial / Major / Maintenance) plus the
+# disabled-target and ungrouped render paths. Idempotent: tagged rows
+# wiped before re-insert; CH purged when RESET_CH=1 (default). Ends with a
+# post-seed verification block — exits non-zero on any expected-vs-actual
+# mismatch. Requires `just dev-login` first so the org exists.
 seed-fixtures:
     bash scripts/seed-fixtures.sh
 
