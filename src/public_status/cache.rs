@@ -38,19 +38,27 @@ pub struct HistoryIncidentMarker {
     pub ended_at: Option<DateTime<Utc>>,
 }
 
-/// Cache value: JSON-API page + HTML-only history markers. Markers are
-/// excluded from the JSON wire shape (handler unwraps `.page`).
+/// Cache value: page + history markers, each Arc-wrapped for cheap split.
 #[derive(Debug, Clone)]
 pub struct PageData {
-    pub page: PublicStatusPage,
-    pub history_markers: Vec<HistoryIncidentMarker>,
+    pub page: Arc<PublicStatusPage>,
+    pub history_markers: Arc<Vec<HistoryIncidentMarker>>,
 }
 
 impl From<PublicStatusPage> for PageData {
     fn from(page: PublicStatusPage) -> Self {
         Self {
-            page,
-            history_markers: Vec::new(),
+            page: Arc::new(page),
+            history_markers: Arc::new(Vec::new()),
+        }
+    }
+}
+
+impl From<(PublicStatusPage, Vec<HistoryIncidentMarker>)> for PageData {
+    fn from((page, markers): (PublicStatusPage, Vec<HistoryIncidentMarker>)) -> Self {
+        Self {
+            page: Arc::new(page),
+            history_markers: Arc::new(markers),
         }
     }
 }
@@ -97,20 +105,34 @@ impl PageCache {
         }
     }
 
-    /// Returns the cached `PageData` for `org` if fresh, otherwise invokes
-    /// `f` exactly once across concurrent callers for that org (single-
-    /// flight) and caches its `Ok` result. On `Err`, returns the org's
-    /// last-known-good snapshot if one exists; otherwise returns
-    /// [`PageCacheError::Unavailable`]. A failure for org A never affects
-    /// org B's cached or stale data.
-    pub async fn get_or_compute<F, Fut, E>(
+    /// Cached page for `org`, otherwise single-flight `f` and cache its
+    /// `Ok` (anything `Into<PageData>`). On `Err`, serves last-known-good
+    /// if any, else [`PageCacheError::Unavailable`]. Failures are per-org.
+    pub async fn get_or_compute<F, Fut, T, E>(
+        &self,
+        org: OrgId,
+        f: F,
+    ) -> Result<Arc<PublicStatusPage>, PageCacheError>
+    where
+        F: FnOnce() -> Fut,
+        Fut: Future<Output = Result<T, E>>,
+        T: Into<PageData>,
+        E: std::fmt::Display + std::fmt::Debug,
+    {
+        Ok(self.get_or_compute_data(org, f).await?.page.clone())
+    }
+
+    /// Variant returning the full envelope so the source layer can hand
+    /// back markers from the same atomic snapshot as the page.
+    pub(crate) async fn get_or_compute_data<F, Fut, T, E>(
         &self,
         org: OrgId,
         f: F,
     ) -> Result<Arc<PageData>, PageCacheError>
     where
         F: FnOnce() -> Fut,
-        Fut: Future<Output = Result<PageData, E>>,
+        Fut: Future<Output = Result<T, E>>,
+        T: Into<PageData>,
         E: std::fmt::Display + std::fmt::Debug,
     {
         let last_good = self.last_good.clone();
@@ -118,8 +140,8 @@ impl PageCache {
             .inner
             .try_get_with(org, async move {
                 match f().await {
-                    Ok(page) => {
-                        let arc = Arc::new(page);
+                    Ok(value) => {
+                        let arc = Arc::new(value.into());
                         last_good.insert(org, arc.clone());
                         Ok::<_, String>(arc)
                     }
@@ -131,7 +153,7 @@ impl PageCache {
             })
             .await;
         match res {
-            Ok(page) => Ok(page),
+            Ok(data) => Ok(data),
             Err(e) => match self.last_good.get(&org) {
                 Some(stale) => {
                     tracing::warn!(%org, error = %e, "public_status compute failed; serving stale");
@@ -158,10 +180,10 @@ impl PageCache {
         self.last_good.invalidate(&org);
     }
 
-    /// Snapshot of the last successful compute for `org`, if any. Useful for
-    /// tests and for surfacing "data is N seconds old" banners.
-    pub fn last_good(&self, org: OrgId) -> Option<Arc<PageData>> {
-        self.last_good.get(&org)
+    /// Snapshot of the last successful page compute for `org`, if any.
+    /// Useful for tests and for surfacing "data is N seconds old" banners.
+    pub fn last_good(&self, org: OrgId) -> Option<Arc<PublicStatusPage>> {
+        self.last_good.get(&org).map(|d| d.page.clone())
     }
 }
 
@@ -216,7 +238,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn returns_arc_pagedata_on_first_compute() {
+    async fn returns_arc_page_on_first_compute() {
         let cache = PageCache::for_test(Duration::from_secs(10));
         let o = org();
         let page = cache
@@ -225,7 +247,7 @@ mod tests {
             .expect("first compute ok");
         let snap = cache.last_good(o).expect("snapshot present after success");
         assert!(Arc::ptr_eq(&page, &snap));
-        assert_eq!(page.page.site_name, "ok");
+        assert_eq!(page.site_name, "ok");
     }
 
     #[tokio::test]
@@ -270,7 +292,7 @@ mod tests {
                     .expect("ok")
             }));
         }
-        let mut last: Option<Arc<PageData>> = None;
+        let mut last: Option<Arc<PublicStatusPage>> = None;
         for h in handles {
             let got = h.await.expect("join");
             if let Some(prev) = &last {
@@ -305,7 +327,7 @@ mod tests {
         assert!(matches!(err, PageCacheError::Unavailable));
         // A's last_good is untouched.
         let snap_a = cache.last_good(a).expect("a still cached");
-        assert_eq!(snap_a.page.site_name, "a");
+        assert_eq!(snap_a.site_name, "a");
         assert!(cache.last_good(b).is_none(), "b has no snapshot");
     }
 
@@ -324,7 +346,7 @@ mod tests {
             })
             .await
             .expect("served stale");
-        assert_eq!(stale.page.site_name, "good");
+        assert_eq!(stale.site_name, "good");
     }
 
     #[tokio::test]

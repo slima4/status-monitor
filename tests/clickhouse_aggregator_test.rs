@@ -163,7 +163,7 @@ async fn build_round_trips_seeded_data() {
             store.clone() as Arc<dyn TargetStore>,
             AggregatorConfig::default(),
         );
-        let page = agg.build(org_id).await.expect("aggregator build");
+        let (page, _markers) = agg.build(org_id).await.expect("aggregator build");
 
         let component = page
             .groups

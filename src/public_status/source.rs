@@ -18,12 +18,12 @@ use crate::api::page::CursorPage;
 use crate::api::public_error::PublicAppError;
 use crate::domain::{
     ComponentHistoryResponse, IncidentSeverity, IncidentStatusPhase, OrgId, PublicIncident,
-    PublicIncidentUpdate, PublicMaintenanceList,
+    PublicIncidentUpdate, PublicMaintenanceList, PublicStatusPage,
 };
 
 use super::aggregator::OrgAggregator;
 use super::auto_incident_title;
-use super::cache::{PageCache, PageCacheError, PageData};
+use super::cache::{HistoryIncidentMarker, PageCache, PageCacheError, PageData};
 use super::xml::xml_escape;
 
 #[derive(Debug, Clone, Copy)]
@@ -50,7 +50,22 @@ impl Default for IncidentListQuery {
 /// tenant's page to another.
 #[async_trait]
 pub trait PublicSource: Send + Sync {
-    async fn page(&self, org: OrgId) -> Result<Arc<PageData>, PublicAppError>;
+    /// JSON wire shape served by the API. The HTML route uses
+    /// `page_with_markers` to get this plus popover data atomically.
+    async fn page(&self, org: OrgId) -> Result<Arc<PublicStatusPage>, PublicAppError>;
+
+    /// Page + 90-day popover markers from one atomic snapshot. Default
+    /// returns empty markers so backends without popover data (tests, noop
+    /// self-host) don't have to think about them; the production source
+    /// overrides to fetch both halves from one cache slot.
+    async fn page_with_markers(
+        &self,
+        org: OrgId,
+    ) -> Result<(Arc<PublicStatusPage>, Arc<Vec<HistoryIncidentMarker>>), PublicAppError> {
+        let page = self.page(org).await?;
+        Ok((page, Arc::new(Vec::new())))
+    }
+
     async fn component_history(
         &self,
         org: OrgId,
@@ -100,18 +115,33 @@ impl OrgPublicSource {
     }
 }
 
-#[async_trait]
-impl PublicSource for OrgPublicSource {
-    async fn page(&self, org: OrgId) -> Result<Arc<PageData>, PublicAppError> {
+impl OrgPublicSource {
+    /// Shared cache hit; both halves come from one atomic snapshot.
+    async fn cached(&self, org: OrgId) -> Result<Arc<PageData>, PublicAppError> {
         let agg = self.aggregator.clone();
         let res = self
             .cache
-            .get_or_compute(org, move || async move { agg.build(org).await })
+            .get_or_compute_data(org, move || async move { agg.build(org).await })
             .await;
         match res {
-            Ok(page) => Ok(page),
+            Ok(data) => Ok(data),
             Err(PageCacheError::Unavailable) => Err(PublicAppError::Unavailable),
         }
+    }
+}
+
+#[async_trait]
+impl PublicSource for OrgPublicSource {
+    async fn page(&self, org: OrgId) -> Result<Arc<PublicStatusPage>, PublicAppError> {
+        Ok(self.cached(org).await?.page.clone())
+    }
+
+    async fn page_with_markers(
+        &self,
+        org: OrgId,
+    ) -> Result<(Arc<PublicStatusPage>, Arc<Vec<HistoryIncidentMarker>>), PublicAppError> {
+        let data = self.cached(org).await?;
+        Ok((data.page.clone(), data.history_markers.clone()))
     }
 
     async fn component_history(
@@ -227,10 +257,10 @@ impl PublicSource for OrgPublicSource {
     }
 
     async fn maintenance(&self, org: OrgId) -> Result<PublicMaintenanceList, PublicAppError> {
-        let data = self.page(org).await?;
+        let page = self.page(org).await?;
         Ok(PublicMaintenanceList {
-            active: data.page.active_maintenance.clone(),
-            upcoming: data.page.upcoming_maintenance.clone(),
+            active: page.active_maintenance.clone(),
+            upcoming: page.upcoming_maintenance.clone(),
         })
     }
 
@@ -406,8 +436,8 @@ impl Default for NoopPublicSource {
 
 #[async_trait]
 impl PublicSource for NoopPublicSource {
-    async fn page(&self, _org: OrgId) -> Result<Arc<PageData>, PublicAppError> {
-        Ok(Arc::new(PageData::from(crate::domain::PublicStatusPage {
+    async fn page(&self, _org: OrgId) -> Result<Arc<PublicStatusPage>, PublicAppError> {
+        Ok(Arc::new(PublicStatusPage {
             overall: crate::domain::OverallStatus {
                 state: crate::domain::OverallState::Operational,
                 label: "All Systems Operational".into(),
@@ -420,7 +450,7 @@ impl PublicSource for NoopPublicSource {
             recent_incidents_has_more: false,
             active_maintenance: Vec::new(),
             upcoming_maintenance: Vec::new(),
-        })))
+        }))
     }
 
     async fn component_history(

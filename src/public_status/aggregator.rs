@@ -24,7 +24,7 @@ use crate::error::Result;
 use crate::storage::TargetStore;
 
 use super::auto_incident_title;
-use super::cache::{HistoryIncidentMarker, PageData};
+use super::cache::HistoryIncidentMarker;
 use super::overall_status::{Counters, component_status, overall_state, overall_status};
 
 /// Aggregator-local configuration. Holds only the knobs the aggregator reads
@@ -82,9 +82,11 @@ impl OrgAggregator {
         }
     }
 
-    /// One `PageData` snapshot per call: wire-format page + 90-day
-    /// popover-only markers.
-    pub async fn build(&self, org: OrgId) -> Result<PageData> {
+    /// One atomic snapshot per call: page + 90-day popover markers.
+    pub async fn build(
+        &self,
+        org: OrgId,
+    ) -> Result<(PublicStatusPage, Vec<HistoryIncidentMarker>)> {
         let now = Utc::now();
         let components = self.load_public_components(org).await?;
         let component_ids: Vec<Uuid> = components.iter().map(|c| c.id).collect();
@@ -172,8 +174,8 @@ impl OrgAggregator {
             .collect();
         let overall = overall_status(overall_state(&component_statuses));
 
-        Ok(PageData {
-            page: PublicStatusPage {
+        Ok((
+            PublicStatusPage {
                 overall,
                 generated_at: now,
                 site_name: self.cfg.site_name.clone(),
@@ -185,7 +187,7 @@ impl OrgAggregator {
                 upcoming_maintenance,
             },
             history_markers,
-        })
+        ))
     }
 
     /// Per-component history endpoint (`GET /api/public/v1/components/{id}/history`).

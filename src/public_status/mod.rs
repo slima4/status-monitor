@@ -13,7 +13,7 @@ pub mod source;
 pub mod xml;
 
 pub use aggregator::{AggregatorConfig, OrgAggregator};
-pub use cache::{HistoryIncidentMarker, PageCache, PageCacheError, PageData};
+pub use cache::{HistoryIncidentMarker, PageCache, PageCacheError};
 
 /// Auto-generated incident title used when the operator did not set
 /// `public_title`. Single source so all three load sites stay aligned —

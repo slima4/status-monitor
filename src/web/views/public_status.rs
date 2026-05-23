@@ -96,17 +96,17 @@ pub async fn index(
         Ok(o) => o,
         Err(err) => return render_public_error(err),
     };
-    let data = match state.public_source.page(org).await {
-        Ok(d) => d,
+    let (page, markers) = match state.public_source.page_with_markers(org).await {
+        Ok(pair) => pair,
         Err(err) => return render_public_error(err),
     };
-    let view = build_view(&data.page, &data.history_markers);
+    let view = build_view(&page, &markers);
     if params.fragment.unwrap_or(0) != 0 {
         // Chrome-free auto-refresh fragment: no header/footer/style, so the
         // branding lookup is skipped on the 30s poll.
         StatusRegion { view }.into_response()
     } else {
-        let branding = resolve_branding(&state, org, &data.page.site_name).await;
+        let branding = resolve_branding(&state, org, &page.site_name).await;
         StatusFullPage { view, branding }.into_response()
     }
 }
@@ -166,7 +166,7 @@ pub async fn incident(
         Err(err) => return render_public_error(err),
     };
     let fallback_name = match page_res {
-        Ok(p) => p.page.site_name.clone(),
+        Ok(p) => p.site_name.clone(),
         Err(err) => return render_public_error(err),
     };
     let branding = resolve_branding(&state, org, &fallback_name).await;
@@ -213,7 +213,7 @@ pub async fn archive(
         state.public_source.list_incidents(org, query),
     );
     let fallback_name = match page_res {
-        Ok(p) => p.page.site_name.clone(),
+        Ok(p) => p.site_name.clone(),
         Err(err) => return render_public_error(err),
     };
     let listing = match list_res {
@@ -714,7 +714,7 @@ fn day_overlap(
         let overlap_start = inc.started_at.max(day_start);
         let overlap_end = end.min(day_end);
         let overlap = (overlap_end - overlap_start).max(ChronoDuration::zero());
-        total = total + overlap;
+        total += overlap;
         links.push(DayRelated {
             title: inc.title.clone(),
             url: format!("/status/incidents/{}", inc.id),
@@ -1062,7 +1062,7 @@ mod tests {
         // An attacker-controlled incident title may not introduce ANY raw
         // `<`, `>`, or `&` into the inline JSON — those would let a title
         // close the <script>, open a comment (`<!--`), or break CDATA.
-        let mut p = sample_page();
+        let p = sample_page();
         let comp_id = p.groups[0].components[0].id;
         let marker = HistoryIncidentMarker {
             id: Uuid::new_v4(),

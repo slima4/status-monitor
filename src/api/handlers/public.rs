@@ -84,8 +84,8 @@ pub async fn public_status(
     State(state): State<AppState>,
     StatusPageOrg(org): StatusPageOrg,
 ) -> Result<Json<PublicStatusPage>, PublicAppError> {
-    let data = state.public_source.page(org).await?;
-    Ok(Json(Arc::unwrap_or_clone(data).page))
+    let page = state.public_source.page(org).await?;
+    Ok(Json(Arc::unwrap_or_clone(page)))
 }
 
 #[utoipa::path(
@@ -271,8 +271,8 @@ pub async fn public_badge(
         ));
     }
 
-    let data = state.public_source.page(org).await?;
-    let page = &data.page;
+    let page = state.public_source.page(org).await?;
+    let page = &*page;
     let (label, status_text, color) = match q.component {
         Some(id) => {
             let comp = page
