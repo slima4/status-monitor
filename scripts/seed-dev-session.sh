@@ -24,9 +24,15 @@ SLUG="${SLUG:-devorg}"
 ORG_NAME="${ORG_NAME:-Dev Org}"
 TOKEN="${TOKEN:-devsession-localtest-0000000000}"
 PG_CONTAINER="${PG_CONTAINER:-status-monitor-postgres-1}"
-BASE_URL="${BASE_URL:-http://localhost:8080}"
+BASE_URL="${BASE_URL:-http://app.lvh.me:8080}"
 
 pg() { docker exec -i "$PG_CONTAINER" psql -U monitor -d monitor -v ON_ERROR_STOP=1 "$@"; }
+
+# Sessions store sha256(cookie_token) as the PK (`id_hash`), not the raw
+# token — a `sessions`-table leak otherwise replays as live cookies. Mirror
+# the `auth::sha256_hex(raw)` impl: straight SHA-256 of the raw bytes, lower
+# hex.
+TOKEN_HASH=$(printf '%s' "${TOKEN}" | shasum -a 256 | awk '{print $1}')
 
 pg <<SQL
 WITH u AS (
@@ -43,10 +49,10 @@ WITH u AS (
   ON CONFLICT (user_id, org_id) DO UPDATE SET role = 'owner'
   RETURNING 1
 )
-INSERT INTO sessions (id, user_id, active_org_id, expires_at)
-SELECT '${TOKEN}', u.id, o.id, now() + interval '30 days'
+INSERT INTO sessions (id_hash, user_id, active_org_id, expires_at)
+SELECT '${TOKEN_HASH}', u.id, o.id, now() + interval '30 days'
 FROM u, o
-ON CONFLICT (id) DO UPDATE
+ON CONFLICT (id_hash) DO UPDATE
   SET expires_at = EXCLUDED.expires_at, last_used_at = now();
 SQL
 
