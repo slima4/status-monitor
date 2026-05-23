@@ -137,6 +137,9 @@ Watch the Caddy logs. On first start it will:
 When you see `serving initial configuration`, visit
 `https://app.{domain}` — your browser will prompt for credentials.
 
+Once the stack is up, see **Hardening → Firewall** below to lock the
+box down at the network edge before exposing it to production traffic.
+
 #### Verify the wildcard cert (manual test)
 
 ```bash
@@ -167,6 +170,80 @@ Console, or `STATUS_MONITOR_DOMAIN` still set to a sub-host (it must be
 the base domain, e.g. `example.com`). While
 debugging, switch to the staging CA (see "Testing the TLS flow" below) so
 you don't burn production rate limits.
+
+## Hardening
+
+### Firewall
+
+The compose stack uses `expose:` (network-internal only) for Postgres,
+ClickHouse, and the app; only Caddy publishes 80/443. The deploy
+workflow fails closed if a `ports:` slip ever lands on an internal
+service — the firewall below is the second layer for the manual
+`docker compose up` case.
+
+**Network-edge firewall** (blocks traffic before it reaches the host)
+
+If the provider offers one (Hetzner Cloud Firewall, AWS Security
+Groups, etc.), default-deny inbound and allow only:
+
+| Direction | Protocol | Port | Source       | Purpose                |
+|-----------|----------|------|--------------|------------------------|
+| In        | TCP      | 22   | your ops IPs | SSH                    |
+| In        | TCP      | 80   | Any          | HTTP (redirects → 443) |
+| In        | TCP      | 443  | Any          | HTTPS                  |
+| In        | UDP      | 443  | Any          | HTTP/3 (QUIC)          |
+
+**Host firewall** (`ufw` — kicks in if the network-edge layer is
+absent or misconfigured)
+
+```bash
+sudo ufw default deny incoming
+sudo ufw default allow outgoing
+sudo ufw allow 22/tcp comment 'SSH'
+sudo ufw allow 80/tcp comment 'HTTP (Caddy)'
+sudo ufw allow 443/tcp comment 'HTTPS (Caddy)'
+sudo ufw allow 443/udp comment 'HTTP/3 / QUIC'
+sudo ufw enable
+sudo ufw status verbose
+```
+
+### Verify from outside
+
+Run from any machine OTHER than the host (loopback bypasses both
+firewalls):
+
+```bash
+# Internal ports must be filtered (no response)
+nmap -Pn -p 5432,8123,9000,8080,9090,2019 app.example.com
+# Expected: all six filtered/closed, none "open"
+#   5432       — Postgres
+#   8123,9000  — ClickHouse (HTTP + native)
+#   8080,9090  — app HTTP + Prometheus metrics
+#   2019       — Caddy admin API (binds 127.0.0.1; sanity check)
+
+# Public surface must serve
+curl -fsI https://app.example.com/healthz
+```
+
+### Secrets at rest
+
+`deployment/.env` carries Postgres + ClickHouse passwords, the
+credentials KEK, OAuth client secret, and Grafana write tokens. The
+deploy workflow restricts it to `0600` on every run (and starts the
+remote script with `umask 077` so every new file inherits owner-only
+perms). Verify after first deploy:
+
+```bash
+ssh deploy@your-host 'ls -l /opt/status-monitor/deployment/.env'
+# Expected: -rw------- (mode 0600), owner = deploy user
+```
+
+`clickhouse-users.xml` is intentionally world-readable — it carries no
+secrets (the password is injected at runtime via `from_env`). The
+`default` user still requires that runtime password, but the file
+grants it network access from any IP, so the DB port-binding check +
+firewall above are the primary controls — don't rely on ClickHouse
+auth as the sole barrier.
 
 ## Operations
 
