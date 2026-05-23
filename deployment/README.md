@@ -22,14 +22,13 @@ PostgreSQL, and ClickHouse.
 | Access logging | JSON format, rotated automatically |
 | Database exposure | Postgres + ClickHouse have no public ports |
 | Credential storage | AES-256-GCM at rest (KEK in env) |
-| ClickHouse memory | Capped at ~2 GB by default (see `clickhouse-config.xml`); adjust upward for larger hosts |
+| ClickHouse memory | Capped via `clickhouse-config.xml`; raise for larger workloads |
 
 ## Prerequisites
 
-- A Linux host (any cloud, any VPS, your own metal — Hetzner CX22 at €5/mo is fine)
+- A Linux host (any cloud, any VPS, your own metal)
 - Public IP with **ports 80 and 443 open**
 - Docker 24+ and `docker compose` v2
-- ~4 GB RAM and 20 GB disk
 - DNS zone in the **Hetzner Console** (the wildcard cert uses the Hetzner
   Cloud DNS-01 API):
   - `app.{domain}` → A/AAAA to this host (explicit record, beats the
@@ -481,12 +480,11 @@ what the container actually uses (you may need to wipe the volume after
 changing — Postgres and ClickHouse only honor `*_PASSWORD` env vars at
 first init).
 
-**High memory use on small VMs**
-The stack ships with `clickhouse-config.xml` capping ClickHouse at ~2 GB by
-default, which is enough for ~50M rows/day. If you run on a larger host
-(8 GB+ available for ClickHouse alone), edit `deployment/clickhouse-config.xml`
-to raise `max_server_memory_usage` and `max_memory_usage`, or delete the
-file entirely to use ClickHouse defaults.
+**Tuning ClickHouse memory**
+The stack ships `clickhouse-config.xml` with conservative defaults suitable
+for modest workloads. For larger workloads, edit
+`deployment/clickhouse-config.xml` to raise `max_server_memory_usage` and
+`max_memory_usage`, or delete the file entirely to use ClickHouse defaults.
 
 ## Lighthouse audit (public status page)
 
@@ -525,13 +523,13 @@ templates live in `templates/public/`.
 
 This deployment is right-sized for **single-tenant, small-team operator use**:
 
-- **No load balancer.** Caddy on one host handles 10k+ concurrent
-  connections. If you need geographic redundancy, run independent
-  status-monitor instances per region.
+- **No load balancer.** Caddy on one host fronts the stack. If you need
+  geographic redundancy, run independent status-monitor instances per
+  region.
 - **No HA database.** Single Postgres, single ClickHouse. If either dies,
   the service degrades to read-only or stops accepting writes. For HA,
   switch to managed Postgres (Neon, RDS) and managed ClickHouse (ClickHouse
-  Cloud, Altinity) — but you lose the "single VM, $20/month" property.
+  Cloud, Altinity) — but you lose the single-VM simplicity.
 - **No SSO.** Basic auth is the current auth boundary. Native session
   cookies or API tokens are not part of this stack.
 - **Rate limiting only on the public surface.** The operator UI/API has no
@@ -542,8 +540,6 @@ This deployment is right-sized for **single-tenant, small-team operator use**:
   credential-stuffing attacks at scale.
 
 These are deliberate omissions, each documented as a known gap.
-The deployment as specified is good enough for a fleet of up to ~100k
-monitored targets on a single host.
 
 ## File reference
 
