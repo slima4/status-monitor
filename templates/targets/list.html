@@ -4,9 +4,27 @@
 <section class="space-y-4">
   <header class="flex flex-wrap items-center justify-between gap-3">
     <h1 class="page-title">Monitors</h1>
+    {% if !onboarding %}
     <a href="/targets/new" class="sticker-btn sticker-btn--primary px-4 py-2 text-sm font-medium transition-transform hover:-translate-y-0.5">New monitor</a>
+    {% endif %}
   </header>
 
+  {% if onboarding %}
+  <div class="sticker-card flex flex-col items-center gap-4 p-8 text-center">
+    <h2 class="text-xl font-semibold text-slate-800">No monitors yet.</h2>
+    <p class="max-w-md text-sm text-slate-600">
+      Add your first monitor and we'll start checking it on your schedule. URLs,
+      TCP ports, DNS records, TLS certs, and domain expiry — all supported.
+    </p>
+    <a href="/targets/new"
+       class="sticker-btn sticker-btn--primary px-5 py-2.5 text-sm font-medium transition-transform hover:-translate-y-0.5">
+      ▶ Add your first monitor
+    </a>
+    <p class="text-xs text-slate-500">
+      Tip: try <code>https://example.com/</code> with the default 60-second interval.
+    </p>
+  </div>
+  {% else %}
   <form id="targets-filter"
         role="search"
         aria-label="Filter targets"
@@ -54,6 +72,7 @@
       {% include "targets/partials/list_body.html" %}
     </table>
   </div>
+  {% endif %}
 </section>
 
 <script defer src="{{ "js/ui/targets_list.js"|asset }}"></script>

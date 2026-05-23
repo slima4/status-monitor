@@ -18,7 +18,13 @@
         <span class="status-badge status-badge--none">no data</span>
       {% endif %}
       {% if !enabled %}<span class="status-badge status-badge--disabled">disabled</span>{% endif %}
-      <span class="ml-auto flex gap-2">
+      <span class="ml-auto flex flex-wrap gap-2">
+        <button type="button"
+                data-detail-test-now data-target-id="{{ id }}"
+                aria-describedby="detail-test-hint"
+                class="sticker-btn sticker-btn--accent px-3 py-1.5 text-sm font-medium inline-flex items-center gap-1.5">
+          <span aria-hidden="true">▶</span> Run check now
+        </button>
         <a href="/targets/{{ id }}/edit"
            class="btn-ghost px-3 py-1.5 text-sm">Edit</a>
         <button type="button"
@@ -38,6 +44,8 @@
         </button>
       </span>
     </div>
+    <div data-detail-test-result class="hidden"></div>
+    <span id="detail-test-hint" class="sr-only">Runs the saved check immediately and persists the result.</span>
     <p class="text-sm text-slate-500">
       <span class="font-mono uppercase">{{ kind }}</span>
       <span class="font-mono">{{ address }}</span>
@@ -132,6 +140,8 @@
     </table>
   </section>
 
+  <script defer src="{{ "js/ui/api_form.js"|asset }}"></script>
+  <script defer src="{{ "js/ui/target_detail.js"|asset }}"></script>
   <script defer src="{{ "js/echarts.min.js"|asset }}"></script>
   <script type="module" src="{{ "js/charts/latency.js"|asset }}"></script>
   <script type="module" src="{{ "js/charts/breakdown.js"|asset }}"></script>

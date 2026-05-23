@@ -57,6 +57,9 @@ pub struct ListPage {
     pub q: String,
     pub tag: String,
     pub enabled: Option<bool>,
+    /// True when 0 monitors AND no filters/offset — drives the onboarding
+    /// empty state instead of the generic "no matches" row.
+    pub onboarding: bool,
 }
 
 #[derive(Template, WebTemplate)]
@@ -81,6 +84,13 @@ pub async fn index(
 ) -> WebResult<ListPage> {
     let (rows, has_more, limit, offset) = fetch_rows(&state, org, &params).await?;
     let (prev_offset, next_offset) = pagination_offsets(offset, limit, has_more);
+    let q = params.q.unwrap_or_default();
+    let tag = params.tag.unwrap_or_default();
+    let onboarding = rows.is_empty()
+        && q.is_empty()
+        && tag.is_empty()
+        && params.enabled.is_none()
+        && offset == 0;
     Ok(ListPage {
         active_tab: "targets",
         rows,
@@ -89,9 +99,10 @@ pub async fn index(
         offset,
         prev_offset,
         next_offset,
-        q: params.q.unwrap_or_default(),
-        tag: params.tag.unwrap_or_default(),
+        q,
+        tag,
         enabled: params.enabled,
+        onboarding,
     })
 }
 
@@ -228,12 +239,35 @@ mod tests {
             enabled: None,
             prev_offset: None,
             next_offset: None,
+            onboarding: false,
         };
         let html = page.render().unwrap();
         assert!(html.starts_with("<!doctype html>"));
         assert!(html.contains("Monitors"));
         assert!(html.contains("api"));
         assert!(html.contains(r#"hx-get="/web/targets/list""#));
+    }
+
+    #[test]
+    fn onboarding_empty_state_renders_when_no_monitors_and_no_filters() {
+        let page = ListPage {
+            active_tab: "targets",
+            rows: vec![],
+            has_more: false,
+            limit: 50,
+            offset: 0,
+            q: String::new(),
+            tag: String::new(),
+            enabled: None,
+            prev_offset: None,
+            next_offset: None,
+            onboarding: true,
+        };
+        let html = page.render().unwrap();
+        assert!(html.contains("No monitors yet."));
+        assert!(html.contains("Add your first monitor"));
+        // Filters + table chrome must not render in onboarding mode.
+        assert!(!html.contains(r#"hx-get="/web/targets/list""#));
     }
 
     #[test]

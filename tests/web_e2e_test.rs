@@ -101,7 +101,9 @@ async fn dashboard_partial_returns_chrome_free_fragment() {
 }
 
 #[tokio::test]
-async fn targets_list_renders_filters_and_table_chrome() {
+async fn targets_list_empty_org_renders_onboarding_card() {
+    // Default test app has zero monitors → /targets renders the
+    // onboarding empty state instead of filters + table chrome.
     let resp = app()
         .oneshot(Request::get("/targets").body(Body::empty()).unwrap())
         .await
@@ -109,10 +111,9 @@ async fn targets_list_renders_filters_and_table_chrome() {
     assert_eq!(resp.status(), StatusCode::OK);
     let html = body_text(resp).await;
     assert!(html.contains("Monitors"));
-    assert!(html.contains(r#"id="targets-filter""#));
-    assert!(html.contains(r#"hx-get="/web/targets/list""#));
-    assert!(html.contains(r#"id="target-rows""#));
-    assert!(html.contains(r#"scope="col""#));
+    assert!(html.contains("No monitors yet."));
+    assert!(html.contains("Add your first monitor"));
+    assert!(!html.contains(r#"id="targets-filter""#));
 }
 
 #[tokio::test]

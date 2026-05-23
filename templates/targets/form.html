@@ -473,10 +473,15 @@
       {% endif %}
     </fieldset>
 
-    <div class="flex gap-3">
+    <div class="flex flex-wrap gap-3">
       <button type="submit"
               class="sticker-btn sticker-btn--primary px-4 py-2 text-sm font-medium transition-transform hover:-translate-y-0.5">
         {% if form.mode == "create" %}Create{% else %}Save changes{% endif %}
+      </button>
+      <button type="submit" data-save-and-test
+              class="sticker-btn sticker-btn--accent px-4 py-2 text-sm font-medium inline-flex items-center gap-1.5">
+        <span aria-hidden="true">▶</span>
+        {% if form.mode == "create" %}Create &amp; run first check{% else %}Save &amp; run check{% endif %}
       </button>
       <a href="{% if form.mode == "edit" %}/targets/{{ form.id }}{% else %}/targets{% endif %}"
          class="btn-ghost px-4 py-2 text-sm">Cancel</a>

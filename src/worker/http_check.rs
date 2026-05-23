@@ -369,9 +369,14 @@ fn snapshot_headers(headers: &hyper::HeaderMap) -> Vec<crate::api::types::Header
 }
 
 /// First [`PROBE_BODY_SNIPPET_BYTES`] of the decoded body as UTF-8 (lossy
-/// for binary responses, which surface as replacement characters).
+/// for binary responses, which surface as replacement characters). Snaps
+/// the cut back to a UTF-8 codepoint boundary so multi-byte chars aren't
+/// chopped mid-sequence into a replacement character.
 fn snapshot_body(decoded: &[u8]) -> String {
-    let end = decoded.len().min(PROBE_BODY_SNIPPET_BYTES);
+    let mut end = decoded.len().min(PROBE_BODY_SNIPPET_BYTES);
+    while end > 0 && (decoded[end - 1] & 0b1100_0000) == 0b1000_0000 {
+        end -= 1;
+    }
     String::from_utf8_lossy(&decoded[..end]).into_owned()
 }
 

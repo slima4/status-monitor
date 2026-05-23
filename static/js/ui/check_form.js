@@ -49,11 +49,90 @@
         }
     });
 
+    // ARIA radiogroup keyboard nav on the 5 check-type cards. Labels are
+    // tabindex-0 as a fallback for browsers that won't focus sr-only radios.
+    const checkTypeCards = form.querySelector(".check-type-cards");
+    if (checkTypeCards) {
+        checkTypeCards.querySelectorAll("[data-check-card]").forEach(label => {
+            if (!label.hasAttribute("tabindex")) label.setAttribute("tabindex", "0");
+        });
+
+        form.addEventListener("keydown", (evt) => {
+            if (evt.key !== "ArrowLeft" && evt.key !== "ArrowRight"
+                && evt.key !== "ArrowUp" && evt.key !== "ArrowDown") return;
+            const active = document.activeElement;
+            if (!active || !checkTypeCards.contains(active)) return;
+            if (active.tagName === "INPUT" && active.type !== "radio") return;
+            const radios = Array.from(checkTypeCards.querySelectorAll("input[name='check_type']"));
+            if (radios.length === 0) return;
+            const checkedIdx = radios.findIndex(r => r.checked);
+            const delta = (evt.key === "ArrowLeft" || evt.key === "ArrowUp") ? -1 : 1;
+            const next = checkedIdx < 0
+                ? 0
+                : (checkedIdx + delta + radios.length) % radios.length;
+            evt.preventDefault();
+            radios[next].checked = true;
+            radios[next].dispatchEvent(new Event("change", { bubbles: true }));
+            (radios[next].closest("[data-check-card]") || radios[next]).focus();
+        });
+
+        // Space/Enter selects the focused card.
+        checkTypeCards.addEventListener("keydown", (evt) => {
+            if (evt.key !== " " && evt.key !== "Enter") return;
+            const label = evt.target.closest("[data-check-card]");
+            if (!label) return;
+            const radio = label.querySelector("input[name='check_type']");
+            if (!radio || radio.checked) return;
+            evt.preventDefault();
+            radio.checked = true;
+            radio.dispatchEvent(new Event("change", { bubbles: true }));
+        });
+    }
+
+    // Auto-fill Name from the primary input until the user types into Name.
+    const nameInput = form.querySelector("[name='name']");
+    if (nameInput) {
+        nameInput.addEventListener("input", () => {
+            nameInput.dataset.userTouched = nameInput.value.trim() ? "1" : "";
+        });
+        const AUTOFILL_SOURCES = [
+            ["http_url", urlToName],
+            ["tcp_host", v => v.trim()],
+            ["dns_domain", v => v.trim()],
+            ["tls_host", v => v.trim()],
+            ["domain_expiry_domain", v => v.trim()],
+        ];
+        for (const [name, derive] of AUTOFILL_SOURCES) {
+            const src = form.querySelector(`[name='${name}']`);
+            if (!src) continue;
+            src.addEventListener("input", () => {
+                if (nameInput.dataset.userTouched) return;
+                const derived = derive(src.value);
+                if (derived) nameInput.value = derived;
+            });
+        }
+    }
+
+    function urlToName(raw) {
+        if (!raw) return "";
+        try {
+            // Accept a bare host like `example.com` by adding a scheme.
+            const u = new URL(/^[a-z]+:\/\//i.test(raw) ? raw : `https://${raw}`);
+            return u.hostname.replace(/^www\./i, "");
+        } catch {
+            return "";
+        }
+    }
+
     form.addEventListener("submit", async (evt) => {
         evt.preventDefault();
         clearErrors();
         const built = buildBody();
         if (built.error) { renderClientError(built.error); return; }
+        // SubmitEvent.submitter is the actual clicked button (null for
+        // form.requestSubmit() / Cmd+Enter, which we treat as primary save).
+        const submitter = evt.submitter;
+        const saveAndTest = submitter && submitter.hasAttribute("data-save-and-test");
 
         let res;
         try {
@@ -76,6 +155,10 @@
             if (!id && form.dataset.mode === "edit") {
                 const parts = form.dataset.action.split("/");
                 id = parts[parts.length - 1];
+            }
+            if (saveAndTest && id) {
+                // Best-effort: scheduler will run a check anyway on its own.
+                await window.smRunCheckNow(id);
             }
             window.location = id ? `/targets/${id}` : "/targets";
             return;
@@ -160,25 +243,35 @@
             };
         }
         if (checkType === "tls_cert") {
+            const warn = parseInt(data.get("tls_warn_days"), 10);
+            const crit = parseInt(data.get("tls_critical_days"), 10);
+            if (Number.isInteger(warn) && Number.isInteger(crit) && crit >= warn) {
+                return { error: "Critical days must be less than warn days." };
+            }
             return {
                 check: {
                     type: "tls_cert",
                     host: data.get("tls_host"),
                     port: parseInt(data.get("tls_port"), 10),
                     server_name: blankToNull(data.get("tls_server_name")),
-                    warn_days: parseInt(data.get("tls_warn_days"), 10),
-                    critical_days: parseInt(data.get("tls_critical_days"), 10),
+                    warn_days: warn,
+                    critical_days: crit,
                     timeout: parseInt(data.get("tls_timeout_ms"), 10),
                 },
             };
         }
         if (checkType === "domain_expiry") {
+            const warn = parseInt(data.get("domain_expiry_warn_days"), 10);
+            const crit = parseInt(data.get("domain_expiry_critical_days"), 10);
+            if (Number.isInteger(warn) && Number.isInteger(crit) && crit >= warn) {
+                return { error: "Critical days must be less than warn days." };
+            }
             return {
                 check: {
                     type: "domain_expiry",
                     domain: data.get("domain_expiry_domain"),
-                    warn_days: parseInt(data.get("domain_expiry_warn_days"), 10),
-                    critical_days: parseInt(data.get("domain_expiry_critical_days"), 10),
+                    warn_days: warn,
+                    critical_days: crit,
                     timeout: parseInt(data.get("domain_expiry_timeout_ms"), 10),
                 },
             };
@@ -271,12 +364,8 @@
             renderClientError(built.error);
             return;
         }
-        if (resultEl) {
-            resultEl.classList.remove("hidden", "test-result--ok", "test-result--bad", "test-result--warn");
-            resultEl.classList.add("test-result");
-            resultEl.textContent = "Running…";
-        }
         btn.disabled = true;
+        window.smRenderCheckRunning(resultEl);
         try {
             let res;
             try {
@@ -286,74 +375,29 @@
                     body: JSON.stringify({ check: built.check }),
                 });
             } catch (err) {
-                renderTestError(resultEl, `Network error: ${err.message || err}`);
-                return;
-            }
-            if (!res.ok) {
-                let body;
-                try { body = await res.json(); } catch { body = null; }
-                const code = (body && body.error && body.error.code) || `HTTP ${res.status}`;
-                const message = (body && body.error && body.error.message) || "Test rejected.";
-                renderTestError(resultEl, `${code}: ${message}`);
+                window.smRenderCheckError(resultEl, `Network error: ${err.message || err}`);
                 return;
             }
             let body;
-            try { body = await res.json(); }
-            catch {
-                renderTestError(resultEl, `Bad JSON in test response.`);
+            try { body = await res.json(); } catch { body = null; }
+            if (!res.ok) {
+                const code = (body && body.error && body.error.code) || `HTTP ${res.status}`;
+                const message = (body && body.error && body.error.message) || "Test rejected.";
+                window.smRenderCheckError(resultEl, `${code}: ${message}`);
                 return;
             }
-            renderTestResult(resultEl, body);
+            if (!body) {
+                window.smRenderCheckError(resultEl, "Bad JSON in test response.");
+                return;
+            }
+            window.smRenderCheckResult(resultEl, body.result || {}, {
+                matched: body.matched_expectations,
+                headers: body.response_headers_preview || [],
+                body: body.response_body_snippet || null,
+            });
         } finally {
             btn.disabled = false;
         }
-    }
-
-    function renderTestError(el, msg) {
-        if (!el) return;
-        el.className = "test-result test-result--bad";
-        el.textContent = msg;
-        el.classList.remove("hidden");
-    }
-
-    function renderTestResult(el, body) {
-        if (!el) return;
-        const r = body.result || {};
-        const matched = !!body.matched_expectations;
-        const status = r.status || "unknown";
-        const klass = matched && status === "up"
-            ? "test-result--ok"
-            : status === "degraded"
-                ? "test-result--warn"
-                : "test-result--bad";
-        el.className = `test-result ${klass}`;
-        const pillLabel = matched ? status.toUpperCase() : `${status.toUpperCase()} — expectation failed`;
-        const meta = [
-            r.duration_ms != null ? `${r.duration_ms} ms` : null,
-            r.response_code != null ? `HTTP ${r.response_code}` : null,
-            r.response_size != null ? `${r.response_size} B` : null,
-        ].filter(Boolean).join(" · ");
-        let html = `
-            <div class="flex flex-wrap items-center gap-2">
-                <span class="test-result__pill">${window.smEscapeHtml(pillLabel)}</span>
-                <span class="test-result__meta">${window.smEscapeHtml(meta)}</span>
-            </div>
-        `;
-        if (r.error) {
-            html += `<div class="test-result__meta mt-1">${window.smEscapeHtml(r.error)}</div>`;
-        }
-        const headers = body.response_headers_preview || [];
-        if (headers.length > 0) {
-            const rows = headers
-                .map(h => `${window.smEscapeHtml(h.name)}: ${window.smEscapeHtml(h.value)}`)
-                .join("\n");
-            html += `<details class="mt-2"><summary class="cursor-pointer text-xs">Response headers (${headers.length})</summary><pre class="test-result__body">${rows}</pre></details>`;
-        }
-        if (body.response_body_snippet) {
-            html += `<details class="mt-2" open><summary class="cursor-pointer text-xs">Response body (first 1 KiB)</summary><pre class="test-result__body">${window.smEscapeHtml(body.response_body_snippet)}</pre></details>`;
-        }
-        el.innerHTML = html;
-        el.classList.remove("hidden");
     }
 
     function blankToNull(v) { return v && v.length > 0 ? v : null; }

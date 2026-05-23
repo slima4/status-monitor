@@ -25,6 +25,87 @@ window.smRenderClientError = function (banner, msg) {
     banner.classList.remove("hidden");
 };
 
+// POST /api/v1/targets/{id}/check-now (best-effort). Returns the parsed
+// body on success or null on any failure — callers handle null themselves.
+window.smRunCheckNow = async function (id) {
+    try {
+        const r = await fetch(`/api/v1/targets/${id}/check-now`, {
+            method: "POST",
+            headers: {
+                "Accept": "application/json",
+                "X-Requested-With": "status-monitor",
+            },
+        });
+        let body = null;
+        try { body = await r.json(); } catch { /* empty body */ }
+        return { ok: r.ok, status: r.status, body };
+    } catch (err) {
+        return { ok: false, status: 0, body: null, networkError: err };
+    }
+};
+
+// Render a CheckResult-shaped object into an element using the
+// .test-result* CSS classes. `extra.matched` (bool) adjusts the pill
+// label; `extra.headers` (Vec) + `extra.body` (str) append HTTP-only
+// detail sections. Returns nothing.
+window.smRenderCheckResult = function (el, result, extra) {
+    if (!el) return;
+    extra = extra || {};
+    const status = (result && result.status) || "unknown";
+    const matched = extra.matched !== undefined ? !!extra.matched : status === "up";
+    const klass = matched && status === "up"
+        ? "test-result--ok"
+        : status === "degraded"
+            ? "test-result--warn"
+            : "test-result--bad";
+    el.className = `test-result ${klass}`;
+    const pillLabel = matched ? status.toUpperCase()
+        : `${status.toUpperCase()} — expectation failed`;
+    const meta = [
+        result.duration_ms != null ? `${result.duration_ms} ms` : null,
+        result.response_code != null ? `HTTP ${result.response_code}` : null,
+        result.response_size != null ? `${result.response_size} B` : null,
+    ].filter(Boolean).join(" · ");
+    let html = `
+        <div class="flex flex-wrap items-center gap-2">
+            <span class="test-result__pill">${window.smEscapeHtml(pillLabel)}</span>
+            <span class="test-result__meta">${window.smEscapeHtml(meta)}</span>
+        </div>
+    `;
+    if (result.error) {
+        html += `<div class="test-result__meta mt-1">${window.smEscapeHtml(result.error)}</div>`;
+    }
+    const headers = extra.headers || [];
+    if (headers.length > 0) {
+        const rows = headers
+            .map(h => `${window.smEscapeHtml(h.name)}: ${window.smEscapeHtml(h.value)}`)
+            .join("\n");
+        html += `<details class="mt-2"><summary class="cursor-pointer text-xs">Response headers (${headers.length})</summary><pre class="test-result__body">${rows}</pre></details>`;
+    }
+    if (extra.body) {
+        html += `<details class="mt-2" open><summary class="cursor-pointer text-xs">Response body (first 1 KiB)</summary><pre class="test-result__body">${window.smEscapeHtml(extra.body)}</pre></details>`;
+    }
+    if (extra.footnote) {
+        html += `<div class="test-result__meta mt-1 italic">${window.smEscapeHtml(extra.footnote)}</div>`;
+    }
+    el.innerHTML = html;
+    el.classList.remove("hidden");
+};
+
+window.smRenderCheckRunning = function (el) {
+    if (!el) return;
+    el.className = "test-result";
+    el.textContent = "Running…";
+    el.classList.remove("hidden");
+};
+
+window.smRenderCheckError = function (el, msg) {
+    if (!el) return;
+    el.className = "test-result test-result--bad";
+    el.textContent = msg;
+    el.classList.remove("hidden");
+};
+
 // `opts.messageFor(err)` → optional replacement message (e.g. SSRF copy);
 // `opts.onField(field)` → optional per-field affordance (focus/aria-invalid).
 window.smRenderApiError = function (banner, json, status, opts) {
