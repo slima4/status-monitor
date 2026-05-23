@@ -478,12 +478,20 @@ pub async fn test_check(
     let guard = ssrf_guard(&state);
     validate_check(&req.check, &guard)?;
     check_abuse(&state, org, &req.check)?;
-    let result = crate::worker::execute(Uuid::nil(), org.0, &req.check, &state.http_clients).await;
+    let (result, probe) =
+        crate::worker::execute_with_probe(Uuid::nil(), org.0, &req.check, &state.http_clients)
+            .await;
     let matched_expectations = matches!(result.status, crate::domain::CheckStatus::Up);
+    let (response_headers_preview, response_body_snippet) = match probe {
+        Some(p) => (p.response_headers_preview, p.response_body_snippet),
+        None => (Vec::new(), None),
+    };
     Ok(Json(TestResponse {
         matched_expectations,
         result,
         warnings: Vec::new(),
+        response_headers_preview,
+        response_body_snippet,
     }))
 }
 

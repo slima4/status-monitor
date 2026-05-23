@@ -37,12 +37,59 @@ const MAX_RAW_BODY_BYTES: usize = 1 << 20;
 /// HTML/JSON pages hit; anything past that is a `decode` failure.
 const MAX_DECODED_BODY_BYTES: usize = 8 << 20;
 
+/// Body snippet cap for the verbose test-check response.
+const PROBE_BODY_SNIPPET_BYTES: usize = 1024;
+/// Header-pair cap (after dedup-by-name) for the verbose test-check response.
+const PROBE_HEADERS_MAX: usize = 20;
+/// Header names whose values must not appear in the verbose response.
+const PROBE_REDACT_HEADERS: &[&str] = &[
+    "set-cookie",
+    "authorization",
+    "cookie",
+    "proxy-authorization",
+    "x-auth-token",
+    "x-api-key",
+    "x-csrf-token",
+    "x-amz-security-token",
+];
+
+/// Captured HTTP-level detail for the test-check endpoint.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct HttpProbe {
+    pub response_headers_preview: Vec<crate::api::types::HeaderPreview>,
+    pub response_body_snippet: Option<String>,
+}
+
 pub async fn execute_http_check(
     target_id: Uuid,
     org_id: Uuid,
     check: &HttpCheck,
     clients: &HttpClients,
 ) -> CheckResult {
+    do_http_check(target_id, org_id, check, clients, false)
+        .await
+        .0
+}
+
+/// Verbose variant for the operator test-check UI. Same result plus a
+/// probe of headers + body snippet (sensitive values redacted, body capped).
+pub(crate) async fn execute_http_check_probe(
+    target_id: Uuid,
+    org_id: Uuid,
+    check: &HttpCheck,
+    clients: &HttpClients,
+) -> (CheckResult, HttpProbe) {
+    let (r, p) = do_http_check(target_id, org_id, check, clients, true).await;
+    (r, p.unwrap_or_default())
+}
+
+async fn do_http_check(
+    target_id: Uuid,
+    org_id: Uuid,
+    check: &HttpCheck,
+    clients: &HttpClients,
+    capture: bool,
+) -> (CheckResult, Option<HttpProbe>) {
     let started_at = Utc::now();
     let start = Instant::now();
 
@@ -51,6 +98,19 @@ pub async fn execute_http_check(
 
     let origin = check.url.origin();
     let max_hops = effective_max_redirects(check);
+
+    let early = |err: &str| -> (CheckResult, Option<HttpProbe>) {
+        (
+            CheckResult::error_with_elapsed(
+                target_id,
+                org_id,
+                started_at,
+                start.elapsed().as_millis() as u32,
+                err.to_owned(),
+            ),
+            None,
+        )
+    };
 
     // Each hop reconnects through the same SSRF-guarded connector + DNS
     // resolver, so a `Location` pointing at an internal address is rejected
@@ -63,15 +123,7 @@ pub async fn execute_http_check(
     for hop in 0..=max_hops {
         let uri: Uri = match current.as_str().parse() {
             Ok(u) => u,
-            Err(_) => {
-                return CheckResult::error_with_elapsed(
-                    target_id,
-                    org_id,
-                    started_at,
-                    start.elapsed().as_millis() as u32,
-                    "invalid url",
-                );
-            }
+            Err(_) => return early("invalid url"),
         };
 
         // Strip credentials when a redirect leaves the original origin so a
@@ -80,48 +132,18 @@ pub async fn execute_http_check(
         let same_origin = current.origin() == origin;
         let req = match build_request(method, &uri, check, &send_body, same_origin, clients) {
             Ok(r) => r,
-            Err(err) => {
-                return CheckResult::error_with_elapsed(
-                    target_id,
-                    org_id,
-                    started_at,
-                    start.elapsed().as_millis() as u32,
-                    format!("request build failed: {err}"),
-                );
-            }
+            Err(err) => return early(&format!("request build failed: {err}")),
         };
 
         let remaining = check.timeout.saturating_sub(start.elapsed());
         if remaining.is_zero() {
-            return CheckResult::error_with_elapsed(
-                target_id,
-                org_id,
-                started_at,
-                start.elapsed().as_millis() as u32,
-                "timeout",
-            );
+            return early("timeout");
         }
 
         let response = match tokio::time::timeout(remaining, client.request(req)).await {
-            Err(_) => {
-                return CheckResult::error_with_elapsed(
-                    target_id,
-                    org_id,
-                    started_at,
-                    start.elapsed().as_millis() as u32,
-                    "timeout",
-                );
-            }
+            Err(_) => return early("timeout"),
             Ok(Ok(r)) => r,
-            Ok(Err(err)) => {
-                return CheckResult::error_with_elapsed(
-                    target_id,
-                    org_id,
-                    started_at,
-                    start.elapsed().as_millis() as u32,
-                    classify_hyper_error(&err),
-                );
-            }
+            Ok(Err(err)) => return early(classify_hyper_error(&err)),
         };
 
         let status_code = response.status().as_u16();
@@ -134,13 +156,7 @@ pub async fn execute_http_check(
                     hops = max_hops,
                     "redirect limit exceeded"
                 );
-                return CheckResult::error_with_elapsed(
-                    target_id,
-                    org_id,
-                    started_at,
-                    start.elapsed().as_millis() as u32,
-                    "too many redirects",
-                );
+                return early("too many redirects");
             }
 
             let next = match response
@@ -157,13 +173,7 @@ pub async fn execute_http_check(
                         hop,
                         "redirect with missing or unparseable Location"
                     );
-                    return CheckResult::error_with_elapsed(
-                        target_id,
-                        org_id,
-                        started_at,
-                        start.elapsed().as_millis() as u32,
-                        "invalid redirect location",
-                    );
+                    return early("invalid redirect location");
                 }
             };
             if !matches!(next.scheme(), "http" | "https") {
@@ -174,13 +184,7 @@ pub async fn execute_http_check(
                     scheme = next.scheme(),
                     "redirect to unsupported scheme"
                 );
-                return CheckResult::error_with_elapsed(
-                    target_id,
-                    org_id,
-                    started_at,
-                    start.elapsed().as_millis() as u32,
-                    "unsupported redirect scheme",
-                );
+                return early("unsupported redirect scheme");
             }
 
             // 307/308 preserve the method and body; 301/302/303 degrade to a
@@ -219,6 +223,7 @@ pub async fn execute_http_check(
             response,
             status_code,
             clients,
+            capture,
         )
         .await;
     }
@@ -226,13 +231,7 @@ pub async fn execute_http_check(
     // `for 0..=max_hops` always returns from inside the loop (final response
     // or the limit-exceeded branch); this is unreachable but keeps the
     // function total without an `unwrap`/`panic`.
-    CheckResult::error_with_elapsed(
-        target_id,
-        org_id,
-        started_at,
-        start.elapsed().as_millis() as u32,
-        "too many redirects",
-    )
+    early("too many redirects")
 }
 
 /// Collect, decode, and score the final (non-redirect) response.
@@ -248,7 +247,8 @@ async fn finalize(
     response: hyper::Response<hyper::body::Incoming>,
     status_code: u16,
     clients: &HttpClients,
-) -> CheckResult {
+    capture: bool,
+) -> (CheckResult, Option<HttpProbe>) {
     let ttfb_elapsed_ms = start.elapsed().as_millis();
     clients.ttfb_ms.record(ttfb_elapsed_ms as f64);
     let ttfb_ms = ttfb_elapsed_ms.min(u16::MAX as u128) as u16;
@@ -259,51 +259,41 @@ async fn finalize(
         .and_then(|h| h.to_str().ok())
         .map(|s| s.to_ascii_lowercase());
 
+    // Header preview is snapshotted before the response body is consumed:
+    // hyper bodies are streams and the headers handle becomes unavailable
+    // once we move the response into Limited.
+    let headers_preview = capture.then(|| snapshot_headers(response.headers()));
+
     let body_remaining = check.timeout.saturating_sub(start.elapsed());
     // Bound at the byte-budget *before* allocation: Limited streams frames
     // and errors mid-read once the cap is exceeded, so an oversized response
     // never sits fully in memory.
     let body_fut = Limited::new(response.into_body(), MAX_RAW_BODY_BYTES).collect();
+    let err_with_ttfb = |reason: &'static str| -> (CheckResult, Option<HttpProbe>) {
+        let mut r = CheckResult::error_with_elapsed(
+            target_id,
+            org_id,
+            started_at,
+            start.elapsed().as_millis() as u32,
+            reason,
+        );
+        r.ttfb_ms = Some(ttfb_ms);
+        let probe = headers_preview.clone().map(|h| HttpProbe {
+            response_headers_preview: h,
+            response_body_snippet: None,
+        });
+        (r, probe)
+    };
     let collected = match tokio::time::timeout(body_remaining, body_fut).await {
-        Err(_) => {
-            let mut r = CheckResult::error_with_elapsed(
-                target_id,
-                org_id,
-                started_at,
-                start.elapsed().as_millis() as u32,
-                "body timeout",
-            );
-            r.ttfb_ms = Some(ttfb_ms);
-            return r;
-        }
+        Err(_) => return err_with_ttfb("body timeout"),
         Ok(Ok(c)) => c,
-        Ok(Err(_)) => {
-            let mut r = CheckResult::error_with_elapsed(
-                target_id,
-                org_id,
-                started_at,
-                start.elapsed().as_millis() as u32,
-                "body",
-            );
-            r.ttfb_ms = Some(ttfb_ms);
-            return r;
-        }
+        Ok(Err(_)) => return err_with_ttfb("body"),
     };
 
     let raw = collected.to_bytes();
     let decoded = match decode_body(&raw, content_encoding.as_deref()) {
         Ok(b) => b,
-        Err(_) => {
-            let mut r = CheckResult::error_with_elapsed(
-                target_id,
-                org_id,
-                started_at,
-                start.elapsed().as_millis() as u32,
-                "decode",
-            );
-            r.ttfb_ms = Some(ttfb_ms);
-            return r;
-        }
+        Err(_) => return err_with_ttfb("decode"),
     };
 
     let size = decoded.len() as u32;
@@ -328,20 +318,61 @@ async fn finalize(
         (CheckStatus::Up, None)
     };
 
-    CheckResult {
-        target_id,
-        org_id,
-        timestamp: started_at,
-        status,
-        duration_ms,
-        dns_ms: None,
-        connect_ms: None,
-        tls_ms: None,
-        ttfb_ms: Some(ttfb_ms),
-        response_code: Some(status_code),
-        response_size: Some(size),
-        error,
+    let probe = capture.then(|| HttpProbe {
+        response_headers_preview: headers_preview.unwrap_or_default(),
+        response_body_snippet: Some(snapshot_body(&decoded)),
+    });
+
+    (
+        CheckResult {
+            target_id,
+            org_id,
+            timestamp: started_at,
+            status,
+            duration_ms,
+            dns_ms: None,
+            connect_ms: None,
+            tls_ms: None,
+            ttfb_ms: Some(ttfb_ms),
+            response_code: Some(status_code),
+            response_size: Some(size),
+            error,
+        },
+        probe,
+    )
+}
+
+/// First N unique-by-name response headers, sensitive values redacted.
+/// Multi-value headers (Set-Cookie, Link) collapse to one entry so the cap
+/// isn't burnt on a single repeated name.
+fn snapshot_headers(headers: &hyper::HeaderMap) -> Vec<crate::api::types::HeaderPreview> {
+    use crate::api::types::HeaderPreview;
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut out: Vec<HeaderPreview> = Vec::with_capacity(PROBE_HEADERS_MAX);
+    for (k, v) in headers.iter() {
+        let name = k.as_str().to_owned();
+        let lower = name.to_ascii_lowercase();
+        if !seen.insert(lower.clone()) {
+            continue;
+        }
+        let value = if PROBE_REDACT_HEADERS.iter().any(|r| *r == lower) {
+            "***REDACTED***".to_owned()
+        } else {
+            v.to_str().unwrap_or("<non-ascii>").to_owned()
+        };
+        out.push(HeaderPreview { name, value });
+        if out.len() >= PROBE_HEADERS_MAX {
+            break;
+        }
     }
+    out
+}
+
+/// First [`PROBE_BODY_SNIPPET_BYTES`] of the decoded body as UTF-8 (lossy
+/// for binary responses, which surface as replacement characters).
+fn snapshot_body(decoded: &[u8]) -> String {
+    let end = decoded.len().min(PROBE_BODY_SNIPPET_BYTES);
+    String::from_utf8_lossy(&decoded[..end]).into_owned()
 }
 
 fn build_request(

@@ -8,6 +8,7 @@ pub mod tcp_check;
 pub mod tls_cert;
 
 pub use http_check::execute_http_check;
+pub(crate) use http_check::{HttpProbe, execute_http_check_probe};
 pub use pool::{CheckTask, ResultFanout, WorkerPool, host_for_spec};
 
 use std::net::SocketAddr;
@@ -84,5 +85,21 @@ pub async fn execute(
             domain_expiry::execute_domain_expiry_check(target_id, org_id, domain).await
         }
         CheckSpec::Dns(d) => dns::execute_dns_check(target_id, org_id, d, clients).await,
+    }
+}
+
+/// Verbose variant of `execute` for the test-check UI: HTTP returns a
+/// populated probe; other variants return `None`.
+pub(crate) async fn execute_with_probe(
+    target_id: Uuid,
+    org_id: Uuid,
+    spec: &CheckSpec,
+    clients: &HttpClients,
+) -> (CheckResult, Option<HttpProbe>) {
+    if let CheckSpec::Http(http) = spec {
+        let (r, p) = execute_http_check_probe(target_id, org_id, http, clients).await;
+        (r, Some(p))
+    } else {
+        (execute(target_id, org_id, spec, clients).await, None)
     }
 }

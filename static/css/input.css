@@ -208,11 +208,22 @@
         border-color: var(--color-ink);
         box-shadow: 4px 4px 0 0 var(--color-ink);
     }
+    .sticker-btn:disabled {
+        @apply cursor-not-allowed opacity-60;
+        box-shadow: 2px 2px 0 0 var(--color-ink);
+    }
     /* Fill for a raised sticker control. One modifier per intent so the
        brand/destructive colour is named once, never re-typed per call site
        (mirrors .btn-ghost--danger). Padding/size stays at the call site. */
-    .sticker-btn--primary { @apply bg-emerald-600 text-white hover:bg-emerald-700; }
-    .sticker-btn--danger  { @apply bg-rose-600    text-white hover:bg-rose-700;   }
+    /* Hover handled via `:not(:disabled):hover` so disabled buttons keep
+       their base fill (Tailwind's `hover:` variant would still fire). */
+    .sticker-btn--primary { @apply bg-emerald-600 text-white; }
+    .sticker-btn--primary:not(:disabled):hover { @apply bg-emerald-700; }
+    .sticker-btn--danger  { @apply bg-rose-600    text-white; }
+    .sticker-btn--danger:not(:disabled):hover { @apply bg-rose-700; }
+    /* Accent fill for try-before-save controls. */
+    .sticker-btn--accent  { @apply bg-sky-700     text-white; }
+    .sticker-btn--accent:not(:disabled):hover { @apply bg-sky-800; }
 
     /* Flat secondary control (Edit/Cancel/toggle…) — the quiet sibling of
        .sticker-btn: same chunky radius + 2px edge, no ink, no raised
@@ -570,6 +581,70 @@
     }
     /* Status dot on the mascot — a calm breathing pulse, not a flash. */
     .sm-pulse { animation: sm-pulse 2.4s ease-in-out infinite; transform-origin: center; }
+
+    /* Check-type chooser: 5 cards at the top of /targets/new and edit.
+       Hides the radio (visual selection comes from :has(input:checked)). */
+    .check-type-cards { @apply grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5; }
+    .check-type-card {
+        @apply flex cursor-pointer flex-col items-start gap-1 rounded-xl border-2 border-slate-200 bg-white p-3 text-left transition;
+        @apply hover:border-slate-300 hover:bg-slate-50;
+    }
+    .check-type-card:has(input:checked) {
+        @apply border-slate-900 bg-slate-50;
+        box-shadow: 2px 2px 0 0 var(--color-ink, #0f172a);
+    }
+    .check-type-card:focus-within { @apply outline-none ring-2 ring-offset-2 ring-slate-400; }
+    .check-type-card__name { @apply text-sm font-semibold text-slate-800; }
+    .check-type-card__desc { @apply text-xs text-slate-500; }
+
+    /* Tag chip input. Container is a flex-wrap; the input grows to fill the
+       trailing free space so typing always lands inside the same row. */
+    .tag-chips {
+        @apply flex flex-wrap items-center gap-1.5 rounded-xl border-2 border-slate-200 bg-white p-2;
+        position: relative;
+    }
+    .tag-chips:focus-within { @apply border-slate-400; }
+    .tag-chip {
+        @apply inline-flex items-center gap-1 rounded-full border-2 border-slate-300 bg-slate-50 px-2 py-0.5 text-xs;
+    }
+    .tag-chip__remove {
+        @apply inline-flex h-4 w-4 items-center justify-center rounded-full text-slate-500 hover:bg-slate-200 hover:text-slate-800;
+    }
+    .tag-chip-input {
+        @apply min-w-[8rem] flex-1 border-0 bg-transparent px-1 text-sm outline-none;
+    }
+    .tag-suggestions {
+        @apply absolute left-0 top-full z-10 mt-1 max-h-56 w-full overflow-auto rounded-xl border-2 border-slate-200 bg-white p-1 text-sm shadow;
+    }
+    .tag-suggestions li {
+        @apply cursor-pointer rounded px-2 py-1 hover:bg-slate-100;
+    }
+    .tag-suggestions li[aria-selected="true"] { @apply bg-slate-100; }
+
+    /* Verbose test-check inline result. Same alert-card depth but with
+       slots for status pill, latency, headers, body snippet. */
+    /* `min-w-0` + `overflow-wrap: anywhere` on the pre stop unbreakable
+       tokens from overflowing the fieldset. */
+    .test-result        { @apply min-w-0 rounded-xl border-2 p-3 text-sm; }
+    .test-result--ok    { @apply border-emerald-300 bg-emerald-50 text-emerald-900; }
+    .test-result--bad   { @apply border-rose-300    bg-rose-50    text-rose-900;    }
+    .test-result--warn  { @apply border-amber-300   bg-amber-50   text-amber-900;   }
+    .test-result__pill  { @apply inline-block rounded-full border px-2 py-0.5 text-xs font-medium; }
+    .test-result__meta  { @apply text-xs text-slate-600; }
+    .test-result__body  {
+        @apply mt-2 max-h-48 overflow-auto rounded bg-white/60 p-2 font-mono text-xs;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+    }
+
+    /* Greyed-out per-row notification controls until the channel checkbox
+       is selected. CSS `:has()` parent selector — Safari 15.4+, Chrome
+       105+, Firefox 121+. */
+    [data-channel-row]:not(:has([data-channel-select]:checked)) [data-after-failures],
+    [data-channel-row]:not(:has([data-channel-select]:checked)) [data-notify-recovery] {
+        opacity: 0.5;
+        pointer-events: none;
+    }
 }
 
 @keyframes sm-ekg   { to { stroke-dashoffset: -236; } }

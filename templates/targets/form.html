@@ -8,7 +8,7 @@
       {% if form.mode == "create" %}New monitor{% else %}Edit {{ form.name }}{% endif %}
     </h1>
     <p class="text-sm text-slate-500">
-      Submits JSON to <code class="font-mono">{{ form.submit_method }} {{ form.action }}</code>. Validation runs on the API.
+      Pick what you want to watch and we'll check it on your schedule.
     </p>
   </header>
 
@@ -23,22 +23,252 @@
     <div id="form-errors" role="alert" aria-live="polite"
          class="hidden alert-card alert-card--error"></div>
 
+    <fieldset class="space-y-3">
+      <legend class="px-1 text-sm font-medium">What do you want to check?</legend>
+      <div class="check-type-cards">
+        <label class="check-type-card" data-check-card>
+          <input type="radio" name="check_type" value="http"{% if form.check_type == "http" %} checked{% endif %} class="sr-only">
+          <span class="check-type-card__name">HTTP</span>
+          <span class="check-type-card__desc">URL / API endpoint</span>
+        </label>
+        <label class="check-type-card" data-check-card>
+          <input type="radio" name="check_type" value="tcp"{% if form.check_type == "tcp" %} checked{% endif %} class="sr-only">
+          <span class="check-type-card__name">TCP</span>
+          <span class="check-type-card__desc">host : port reachable</span>
+        </label>
+        <label class="check-type-card" data-check-card>
+          <input type="radio" name="check_type" value="dns"{% if form.check_type == "dns" %} checked{% endif %} class="sr-only">
+          <span class="check-type-card__name">DNS</span>
+          <span class="check-type-card__desc">record resolves</span>
+        </label>
+        <label class="check-type-card" data-check-card>
+          <input type="radio" name="check_type" value="tls_cert"{% if form.check_type == "tls_cert" %} checked{% endif %} class="sr-only">
+          <span class="check-type-card__name">TLS cert</span>
+          <span class="check-type-card__desc">expiry + chain</span>
+        </label>
+        <label class="check-type-card" data-check-card>
+          <input type="radio" name="check_type" value="domain_expiry"{% if form.check_type == "domain_expiry" %} checked{% endif %} class="sr-only">
+          <span class="check-type-card__name">Domain</span>
+          <span class="check-type-card__desc">registration expiry</span>
+        </label>
+      </div>
+    </fieldset>
+
+    <fieldset data-variant="http"
+              class="space-y-3 sticker-card p-5{% if form.check_type != "http" %} hidden{% endif %}">
+      <legend class="px-1 text-sm font-medium">HTTP check</legend>
+      <label class="block">
+        <span class="text-xs text-slate-500">URL</span>
+        <input name="http_url" type="url" value="{{ form.http.url }}"
+               placeholder="https://example.com/healthz"
+               class="mt-1 w-full field font-mono">
+      </label>
+      <label class="block">
+        <span class="text-xs text-slate-500">Expected status</span>
+        <input name="expected_status_input" type="text" value="{{ form.http.expected_status_input }}"
+               placeholder="200" class="mt-1 w-40 field font-mono">
+        <span class="mt-1 block text-xs text-slate-500">
+          One code (<code>200</code>), a range (<code>200-299</code>), or a list (<code>200, 201, 204</code>).
+        </span>
+      </label>
+      <div class="flex flex-wrap items-center gap-3 pt-1">
+        <button type="button" data-test-now aria-describedby="test-hint-http"
+                class="sticker-btn sticker-btn--accent px-4 py-2 text-sm font-medium inline-flex items-center gap-1.5">
+          <span aria-hidden="true">▶</span> Test now
+        </button>
+        <span id="test-hint-http" class="text-xs text-slate-500">Runs the check once without saving.</span>
+      </div>
+      <div data-test-result class="hidden"></div>
+    </fieldset>
+
+    <fieldset data-variant="tcp"
+              class="space-y-3 sticker-card p-5{% if form.check_type != "tcp" %} hidden{% endif %}">
+      <legend class="px-1 text-sm font-medium">TCP check</legend>
+      <div class="flex flex-wrap gap-3">
+        <label class="block flex-1 min-w-[14rem]">
+          <span class="text-xs text-slate-500">Host</span>
+          <input name="tcp_host" type="text" value="{{ form.tcp.host }}" placeholder="example.com"
+                 class="mt-1 w-full field font-mono">
+        </label>
+        <label class="block w-40">
+          <span class="text-xs text-slate-500">Port</span>
+          <input name="tcp_port" type="number" min="1" max="65535" placeholder="5432"
+                 {% if form.tcp.port > 0 %}value="{{ form.tcp.port }}"{% endif %}
+                 class="mt-1 w-full field">
+        </label>
+        <label class="block w-40">
+          <span class="text-xs text-slate-500">Timeout (ms)</span>
+          <input name="tcp_timeout_ms" type="number" min="100" max="60000" value="{{ form.tcp.timeout_ms }}"
+                 class="mt-1 w-full field">
+        </label>
+      </div>
+      <div class="flex flex-wrap items-center gap-3 pt-1">
+        <button type="button" data-test-now aria-describedby="test-hint-tcp"
+                class="sticker-btn sticker-btn--accent px-4 py-2 text-sm font-medium inline-flex items-center gap-1.5">
+          <span aria-hidden="true">▶</span> Test now
+        </button>
+        <span id="test-hint-tcp" class="text-xs text-slate-500">Runs the check once without saving.</span>
+      </div>
+      <div data-test-result class="hidden"></div>
+    </fieldset>
+
+    <fieldset data-variant="dns"
+              class="space-y-3 sticker-card p-5{% if form.check_type != "dns" %} hidden{% endif %}">
+      <legend class="px-1 text-sm font-medium">DNS check</legend>
+      <p class="text-xs text-slate-500">
+        Resolves a record and (optionally) asserts a substring appears in
+        the answer. NXDOMAIN or an empty answer set fails the check.
+      </p>
+      <div class="grid grid-cols-2 gap-4 sm:grid-cols-3">
+        <label class="block sm:col-span-2">
+          <span class="text-xs text-slate-500">Domain</span>
+          <input name="dns_domain" type="text" value="{{ form.dns.domain }}"
+                 placeholder="api.example.com"
+                 class="mt-1 w-full field font-mono">
+        </label>
+        <label class="block">
+          <span class="text-xs text-slate-500">Record type</span>
+          <select name="dns_record_type" class="mt-1 w-full field">
+            <option value="A"{% if form.dns.record_type == "A" %} selected{% endif %}>A</option>
+            <option value="AAAA"{% if form.dns.record_type == "AAAA" %} selected{% endif %}>AAAA</option>
+            <option value="CNAME"{% if form.dns.record_type == "CNAME" %} selected{% endif %}>CNAME</option>
+            <option value="MX"{% if form.dns.record_type == "MX" %} selected{% endif %}>MX</option>
+            <option value="NS"{% if form.dns.record_type == "NS" %} selected{% endif %}>NS</option>
+            <option value="TXT"{% if form.dns.record_type == "TXT" %} selected{% endif %}>TXT</option>
+            <option value="SOA"{% if form.dns.record_type == "SOA" %} selected{% endif %}>SOA</option>
+            <option value="PTR"{% if form.dns.record_type == "PTR" %} selected{% endif %}>PTR</option>
+            <option value="CAA"{% if form.dns.record_type == "CAA" %} selected{% endif %}>CAA</option>
+            <option value="SRV"{% if form.dns.record_type == "SRV" %} selected{% endif %}>SRV</option>
+          </select>
+        </label>
+      </div>
+      <label class="block">
+        <span class="text-xs text-slate-500">Expected to contain (optional)</span>
+        <input name="dns_expected_contains" type="text" value="{{ form.dns.expected_contains }}"
+               placeholder="192.0.2.1"
+               class="mt-1 w-full field font-mono">
+      </label>
+      <div class="flex flex-wrap gap-3">
+        <label class="block flex-1 min-w-48">
+          <span class="text-xs text-slate-500">Resolver (optional)</span>
+          <input name="dns_resolver" type="text" value="{{ form.dns.resolver }}"
+                 placeholder="1.1.1.1"
+                 class="mt-1 w-full field font-mono">
+        </label>
+        <label class="block w-40">
+          <span class="text-xs text-slate-500">Timeout (ms)</span>
+          <input name="dns_timeout_ms" type="number" min="100" max="60000"
+                 value="{{ form.dns.timeout_ms }}"
+                 class="mt-1 w-full field">
+        </label>
+      </div>
+      <div class="flex flex-wrap items-center gap-3 pt-1">
+        <button type="button" data-test-now aria-describedby="test-hint-dns"
+                class="sticker-btn sticker-btn--accent px-4 py-2 text-sm font-medium inline-flex items-center gap-1.5">
+          <span aria-hidden="true">▶</span> Test now
+        </button>
+        <span id="test-hint-dns" class="text-xs text-slate-500">Runs the check once without saving.</span>
+      </div>
+      <div data-test-result class="hidden"></div>
+    </fieldset>
+
+    <fieldset data-variant="tls_cert"
+              class="space-y-3 sticker-card p-5{% if form.check_type != "tls_cert" %} hidden{% endif %}">
+      <legend class="px-1 text-sm font-medium">TLS certificate check</legend>
+      <p class="text-xs text-slate-500">
+        Connects to host:port, fetches the served certificate, and warns
+        before expiry. Degraded under <code>warn_days</code>, Down under
+        <code>critical_days</code>.
+      </p>
+      <div class="flex flex-wrap gap-3">
+        <label class="block flex-1 min-w-[14rem]">
+          <span class="text-xs text-slate-500">Host</span>
+          <input name="tls_host" type="text" value="{{ form.tls_cert.host }}"
+                 placeholder="example.com" class="mt-1 w-full field font-mono">
+        </label>
+        <label class="block w-32">
+          <span class="text-xs text-slate-500">Port</span>
+          <input name="tls_port" type="number" min="1" max="65535"
+                 value="{{ form.tls_cert.port }}" class="mt-1 w-full field">
+        </label>
+      </div>
+      <label class="block">
+        <span class="text-xs text-slate-500">SNI (optional, defaults to host)</span>
+        <input name="tls_server_name" type="text" value="{{ form.tls_cert.server_name }}"
+               placeholder="vhost.example.com" class="mt-1 w-full field font-mono">
+      </label>
+      <div class="grid grid-cols-3 gap-3">
+        <label class="block">
+          <span class="text-xs text-slate-500">Warn after (days &lt;)</span>
+          <input name="tls_warn_days" type="number" min="1" max="365"
+                 value="{{ form.tls_cert.warn_days }}" class="mt-1 w-full field">
+        </label>
+        <label class="block">
+          <span class="text-xs text-slate-500">Critical (days &lt;)</span>
+          <input name="tls_critical_days" type="number" min="1" max="365"
+                 value="{{ form.tls_cert.critical_days }}" class="mt-1 w-full field">
+        </label>
+        <label class="block">
+          <span class="text-xs text-slate-500">Timeout (ms)</span>
+          <input name="tls_timeout_ms" type="number" min="100" max="60000"
+                 value="{{ form.tls_cert.timeout_ms }}" class="mt-1 w-full field">
+        </label>
+      </div>
+      <div class="flex flex-wrap items-center gap-3 pt-1">
+        <button type="button" data-test-now aria-describedby="test-hint-tls"
+                class="sticker-btn sticker-btn--accent px-4 py-2 text-sm font-medium inline-flex items-center gap-1.5">
+          <span aria-hidden="true">▶</span> Test now
+        </button>
+        <span id="test-hint-tls" class="text-xs text-slate-500">Runs the check once without saving.</span>
+      </div>
+      <div data-test-result class="hidden"></div>
+    </fieldset>
+
+    <fieldset data-variant="domain_expiry"
+              class="space-y-3 sticker-card p-5{% if form.check_type != "domain_expiry" %} hidden{% endif %}">
+      <legend class="px-1 text-sm font-medium">Domain expiry check</legend>
+      <p class="text-xs text-slate-500">
+        Queries the WHOIS / RDAP record for the apex domain and warns
+        ahead of registration expiry.
+      </p>
+      <label class="block">
+        <span class="text-xs text-slate-500">Domain</span>
+        <input name="domain_expiry_domain" type="text" value="{{ form.domain_expiry.domain }}"
+               placeholder="example.com" class="mt-1 w-full field font-mono">
+      </label>
+      <div class="grid grid-cols-3 gap-3">
+        <label class="block">
+          <span class="text-xs text-slate-500">Warn after (days &lt;)</span>
+          <input name="domain_expiry_warn_days" type="number" min="1" max="365"
+                 value="{{ form.domain_expiry.warn_days }}" class="mt-1 w-full field">
+        </label>
+        <label class="block">
+          <span class="text-xs text-slate-500">Critical (days &lt;)</span>
+          <input name="domain_expiry_critical_days" type="number" min="1" max="365"
+                 value="{{ form.domain_expiry.critical_days }}" class="mt-1 w-full field">
+        </label>
+        <label class="block">
+          <span class="text-xs text-slate-500">Timeout (ms)</span>
+          <input name="domain_expiry_timeout_ms" type="number" min="100" max="60000"
+                 value="{{ form.domain_expiry.timeout_ms }}" class="mt-1 w-full field">
+        </label>
+      </div>
+      <div class="flex flex-wrap items-center gap-3 pt-1">
+        <button type="button" data-test-now aria-describedby="test-hint-domain"
+                class="sticker-btn sticker-btn--accent px-4 py-2 text-sm font-medium inline-flex items-center gap-1.5">
+          <span aria-hidden="true">▶</span> Test now
+        </button>
+        <span id="test-hint-domain" class="text-xs text-slate-500">Runs the check once without saving.</span>
+      </div>
+      <div data-test-result class="hidden"></div>
+    </fieldset>
+
     <fieldset class="space-y-3 sticker-card p-5">
-      <legend class="px-1 text-sm font-medium">Basic</legend>
+      <legend class="px-1 text-sm font-medium">Monitor</legend>
       <label class="block">
         <span class="text-xs text-slate-500">Name</span>
         <input name="name" type="text" required value="{{ form.name }}"
                class="mt-1 w-full field">
-      </label>
-      <label data-variant="http"
-             class="block{% if form.check_type != "http" %} hidden{% endif %}">
-        <span class="text-xs text-slate-500">URL</span>
-        <input name="http_url" type="url" value="{{ form.http.url }}"
-               class="mt-1 w-full field font-mono">
-        <span class="mt-1 block text-xs text-slate-500">
-          HTTP GET by default. Method, headers, auth, a TCP check and
-          tags live under <em>Advanced settings</em>.
-        </span>
       </label>
       <div class="block">
         <label for="interval_s" class="text-xs text-slate-500">Check interval</label>
@@ -78,246 +308,133 @@
         </label>
         <p class="mt-1 text-xs text-slate-500">When off, the monitor is saved but not checked or alerted on.</p>
       </div>
-      <label class="block">
-        <span class="text-xs text-slate-500">Tags (comma-separated)</span>
-        <input name="tags" type="text" value="{{ form.tags_csv }}"
-               class="mt-1 w-full field">
-      </label>
+      <div>
+        <span class="text-xs text-slate-500">Tags</span>
+        <div data-tag-chips class="tag-chips mt-1">
+          {% for t in form.tags %}
+          <span class="tag-chip" data-tag-value="{{ t }}">
+            <span class="tag-chip__label">{{ t }}</span>
+            <button type="button" class="tag-chip__remove" aria-label="Remove tag">×</button>
+          </span>
+          {% endfor %}
+          <input type="text" data-tag-input class="tag-chip-input"
+                 placeholder="Add tag…" autocomplete="off">
+          <ul data-tag-suggestions class="tag-suggestions hidden" role="listbox"></ul>
+        </div>
+      </div>
     </fieldset>
 
-    <details class="sticker-disclosure space-y-6">
+    <details class="sticker-disclosure space-y-6{% if form.check_type != "http" %} hidden{% endif %}"
+             data-variant="http-advanced">
       <summary>
         <span class="flex items-center gap-3">
           <span class="sticker-disclosure__icon">⚙</span>
           <span class="flex flex-col text-left">
-            <span class="text-sm font-semibold text-slate-700">Advanced settings</span>
-            <span class="text-xs text-slate-500">Check type, request options, headers, auth, TLS — optional</span>
+            <span class="text-sm font-semibold text-slate-700">Advanced HTTP</span>
+            <span class="text-xs text-slate-500">Method, headers, body, auth, TLS</span>
           </span>
         </span>
         <span class="sticker-disclosure__chevron">▾</span>
       </summary>
 
-    <div class="sticker-disclosure__body space-y-6">
-    <fieldset class="space-y-3 sticker-card p-5">
-      <legend class="px-1 text-sm font-medium">Check type</legend>
-      <div class="flex gap-4">
-        <label class="inline-flex items-center gap-2">
-          <input type="radio" name="check_type" value="http"{% if form.check_type == "http" %} checked{% endif %}>
-          <span class="text-sm">HTTP</span>
-        </label>
-        <label class="inline-flex items-center gap-2">
-          <input type="radio" name="check_type" value="tcp"{% if form.check_type == "tcp" %} checked{% endif %}>
-          <span class="text-sm">TCP</span>
-        </label>
-        <label class="inline-flex items-center gap-2">
-          <input type="radio" name="check_type" value="dns"{% if form.check_type == "dns" %} checked{% endif %}>
-          <span class="text-sm">DNS</span>
-        </label>
-      </div>
-    </fieldset>
+      <div class="sticker-disclosure__body space-y-4">
+        <div class="grid grid-cols-2 gap-4 sm:grid-cols-3">
+          <label class="block">
+            <span class="text-xs text-slate-500">Method</span>
+            <select name="http_method" class="mt-1 w-full field">
+              <option value="GET"{% if form.http.method == "GET" %} selected{% endif %}>GET</option>
+              <option value="HEAD"{% if form.http.method == "HEAD" %} selected{% endif %}>HEAD</option>
+              <option value="POST"{% if form.http.method == "POST" %} selected{% endif %}>POST</option>
+              <option value="PUT"{% if form.http.method == "PUT" %} selected{% endif %}>PUT</option>
+              <option value="PATCH"{% if form.http.method == "PATCH" %} selected{% endif %}>PATCH</option>
+              <option value="DELETE"{% if form.http.method == "DELETE" %} selected{% endif %}>DELETE</option>
+              <option value="OPTIONS"{% if form.http.method == "OPTIONS" %} selected{% endif %}>OPTIONS</option>
+            </select>
+          </label>
+          <label class="block">
+            <span class="text-xs text-slate-500">Timeout (ms)</span>
+            <input name="http_timeout_ms" type="number" min="100" max="60000" value="{{ form.http.timeout_ms }}"
+                   class="mt-1 w-full field">
+          </label>
+          <label class="block">
+            <span class="text-xs text-slate-500">Max redirects</span>
+            <input name="http_max_redirects" type="number" min="0" max="10" value="{{ form.http.max_redirects }}"
+                   class="mt-1 w-full field">
+          </label>
+        </div>
+        <div class="flex flex-wrap items-center gap-x-6 gap-y-2">
+          <label class="inline-flex items-center gap-2">
+            <input name="http_follow_redirects" type="checkbox"{% if form.http.follow_redirects %} checked{% endif %}>
+            <span class="text-sm">Follow redirects</span>
+          </label>
+          <label class="inline-flex items-center gap-2">
+            <input name="http_verify_tls" type="checkbox"{% if form.http.verify_tls %} checked{% endif %}>
+            <span class="text-sm">Verify TLS</span>
+          </label>
+        </div>
 
-    <fieldset data-variant="http"
-              class="space-y-3 sticker-card p-5{% if form.check_type != "http" %} hidden{% endif %}">
-      <legend class="px-1 text-sm font-medium">HTTP check</legend>
-      <p class="text-xs text-slate-500">URL is set in the Basic section above.</p>
-      <div class="grid grid-cols-2 gap-4 sm:grid-cols-3">
         <label class="block">
-          <span class="text-xs text-slate-500">Method</span>
-          <select name="http_method" class="mt-1 w-full field">
-            <option value="GET"{% if form.http.method == "GET" %} selected{% endif %}>GET</option>
-            <option value="HEAD"{% if form.http.method == "HEAD" %} selected{% endif %}>HEAD</option>
-            <option value="POST"{% if form.http.method == "POST" %} selected{% endif %}>POST</option>
-            <option value="PUT"{% if form.http.method == "PUT" %} selected{% endif %}>PUT</option>
-            <option value="PATCH"{% if form.http.method == "PATCH" %} selected{% endif %}>PATCH</option>
-            <option value="DELETE"{% if form.http.method == "DELETE" %} selected{% endif %}>DELETE</option>
-            <option value="OPTIONS"{% if form.http.method == "OPTIONS" %} selected{% endif %}>OPTIONS</option>
-          </select>
-        </label>
-        <label class="block">
-          <span class="text-xs text-slate-500">Timeout (ms)</span>
-          <input name="http_timeout_ms" type="number" min="100" max="60000" value="{{ form.http.timeout_ms }}"
+          <span class="text-xs text-slate-500">Expected body contains</span>
+          <input name="http_expected_body_contains" type="text" value="{{ form.http.expected_body_contains }}"
                  class="mt-1 w-full field">
         </label>
-        <label class="block">
-          <span class="text-xs text-slate-500">Max redirects</span>
-          <input name="http_max_redirects" type="number" min="0" max="10" value="{{ form.http.max_redirects }}"
-                 class="mt-1 w-full field">
-        </label>
-      </div>
-      <div class="flex flex-wrap items-center gap-x-6 gap-y-2">
-        <label class="inline-flex items-center gap-2">
-          <input name="http_follow_redirects" type="checkbox"{% if form.http.follow_redirects %} checked{% endif %}>
-          <span class="text-sm">Follow redirects</span>
-        </label>
-        <label class="inline-flex items-center gap-2">
-          <input name="http_verify_tls" type="checkbox"{% if form.http.verify_tls %} checked{% endif %}>
-          <span class="text-sm">Verify TLS</span>
-        </label>
-      </div>
 
-      <fieldset class="space-y-2 rounded-xl border-2 border-slate-200 p-3">
-        <legend class="px-1 text-xs text-slate-500">Expected status</legend>
-        <div class="flex flex-wrap gap-4">
-          <label class="inline-flex items-center gap-1">
-            <input type="radio" name="expected_kind" value="exact" data-expected-toggle{% if form.http.expected_kind == "exact" %} checked{% endif %}>
-            <span class="text-sm">Exact</span>
+        <label class="block">
+          <span class="text-xs text-slate-500">Request body</span>
+          <textarea name="http_body" rows="3" class="mt-1 w-full field font-mono">{{ form.http.body }}</textarea>
+        </label>
+
+        <fieldset class="space-y-2 rounded-xl border-2 border-slate-200 p-3">
+          <legend class="px-1 text-xs text-slate-500">Headers</legend>
+          <div data-header-rows class="space-y-2">
+            {% for h in form.http.headers %}
+            <div data-header-row class="flex flex-wrap items-center gap-2">
+              <input type="text" name="http_header_key" value="{{ h.name }}"
+                     placeholder="Header name" class="flex-1 min-w-[10rem] field font-mono">
+              <input type="text" name="http_header_value" value="{{ h.value }}"
+                     placeholder="Value" class="flex-[2] min-w-[14rem] field font-mono">
+              <button type="button" data-header-remove
+                      class="btn-ghost px-2 text-sm" aria-label="Remove header">×</button>
+            </div>
+            {% endfor %}
+          </div>
+          <button type="button" data-header-add
+                  class="btn-ghost px-3 text-sm">+ Add header</button>
+        </fieldset>
+
+        <fieldset class="space-y-2 rounded-xl border-2 border-slate-200 p-3"
+                  data-auth-field="basic"
+                  data-initial-mode="{{ form.http.auth.basic_initial_mode() }}"
+                  data-mode="{{ form.http.auth.basic_initial_mode() }}">
+          <legend class="px-1 text-xs text-slate-500">Basic auth</legend>
+          <label class="inline-flex items-center gap-2">
+            <input type="checkbox" data-auth-toggle>
+            <span class="text-sm">{% if form.http.auth.has_basic %}Replace credentials{% else %}Set credentials{% endif %}</span>
           </label>
-          <label class="inline-flex items-center gap-1">
-            <input type="radio" name="expected_kind" value="range" data-expected-toggle{% if form.http.expected_kind == "range" %} checked{% endif %}>
-            <span class="text-sm">Range</span>
+          <div class="grid grid-cols-2 gap-2">
+            <input type="text" name="http_basic_user" placeholder="username"
+                   value="{% if form.http.auth.has_basic %}***{% endif %}" disabled
+                   class="field">
+            <input type="password" name="http_basic_pass" placeholder="password"
+                   value="{% if form.http.auth.has_basic %}***{% endif %}" disabled
+                   class="field">
+          </div>
+        </fieldset>
+
+        <fieldset class="space-y-2 rounded-xl border-2 border-slate-200 p-3"
+                  data-auth-field="bearer"
+                  data-initial-mode="{{ form.http.auth.bearer_initial_mode() }}"
+                  data-mode="{{ form.http.auth.bearer_initial_mode() }}">
+          <legend class="px-1 text-xs text-slate-500">Bearer token</legend>
+          <label class="inline-flex items-center gap-2">
+            <input type="checkbox" data-auth-toggle>
+            <span class="text-sm">{% if form.http.auth.has_bearer %}Replace token{% else %}Set token{% endif %}</span>
           </label>
-          <label class="inline-flex items-center gap-1">
-            <input type="radio" name="expected_kind" value="one_of" data-expected-toggle{% if form.http.expected_kind == "one_of" %} checked{% endif %}>
-            <span class="text-sm">One of</span>
-          </label>
-        </div>
-        <div data-variant="expected-exact"{% if form.http.expected_kind != "exact" %} class="hidden"{% endif %}>
-          <input name="expected_exact" type="number" min="100" max="599" value="{{ form.http.expected_exact }}"
-                 class="w-32 field">
-        </div>
-        <div data-variant="expected-range" class="flex items-center gap-2{% if form.http.expected_kind != "range" %} hidden{% endif %}">
-          <input name="expected_range_min" type="number" min="100" max="599" value="{{ form.http.expected_range_min }}"
-                 class="w-24 field">
-          <span class="text-slate-500">–</span>
-          <input name="expected_range_max" type="number" min="100" max="599" value="{{ form.http.expected_range_max }}"
-                 class="w-24 field">
-        </div>
-        <div data-variant="expected-one-of"{% if form.http.expected_kind != "one_of" %} class="hidden"{% endif %}>
-          <input name="expected_one_of" type="text" placeholder="200, 201, 204" value="{{ form.http.expected_one_of_csv }}"
+          <input type="password" name="http_bearer_token" placeholder="token"
+                 value="{% if form.http.auth.has_bearer %}***{% endif %}" disabled
                  class="w-full field">
-        </div>
-      </fieldset>
-
-      <label class="block">
-        <span class="text-xs text-slate-500">Expected body contains</span>
-        <input name="http_expected_body_contains" type="text" value="{{ form.http.expected_body_contains }}"
-               class="mt-1 w-full field">
-      </label>
-
-      <label class="block">
-        <span class="text-xs text-slate-500">Request body</span>
-        <textarea name="http_body" rows="3" class="mt-1 w-full field font-mono">{{ form.http.body }}</textarea>
-      </label>
-
-      <label class="block">
-        <span class="text-xs text-slate-500">Headers (JSON object)</span>
-        <textarea name="http_headers" rows="3" class="mt-1 w-full field font-mono">{{ form.http.headers_json }}</textarea>
-      </label>
-
-      <fieldset class="space-y-2 rounded-xl border-2 border-slate-200 p-3"
-                data-auth-field="basic"
-                data-initial-mode="{{ form.http.auth.basic_initial_mode() }}"
-                data-mode="{{ form.http.auth.basic_initial_mode() }}">
-        <legend class="px-1 text-xs text-slate-500">Basic auth</legend>
-        <label class="inline-flex items-center gap-2">
-          <input type="checkbox" data-auth-toggle>
-          <span class="text-sm">{% if form.http.auth.has_basic %}Replace credentials{% else %}Set credentials{% endif %}</span>
-        </label>
-        <div class="grid grid-cols-2 gap-2">
-          <input type="text" name="http_basic_user" placeholder="username"
-                 value="{% if form.http.auth.has_basic %}***{% endif %}" disabled
-                 class="field">
-          <input type="password" name="http_basic_pass" placeholder="password"
-                 value="{% if form.http.auth.has_basic %}***{% endif %}" disabled
-                 class="field">
-        </div>
-      </fieldset>
-
-      <fieldset class="space-y-2 rounded-xl border-2 border-slate-200 p-3"
-                data-auth-field="bearer"
-                data-initial-mode="{{ form.http.auth.bearer_initial_mode() }}"
-                data-mode="{{ form.http.auth.bearer_initial_mode() }}">
-        <legend class="px-1 text-xs text-slate-500">Bearer token</legend>
-        <label class="inline-flex items-center gap-2">
-          <input type="checkbox" data-auth-toggle>
-          <span class="text-sm">{% if form.http.auth.has_bearer %}Replace token{% else %}Set token{% endif %}</span>
-        </label>
-        <input type="password" name="http_bearer_token" placeholder="token"
-               value="{% if form.http.auth.has_bearer %}***{% endif %}" disabled
-               class="w-full field">
-      </fieldset>
-    </fieldset>
-
-    <fieldset data-variant="tcp"
-              class="space-y-3 sticker-card p-5{% if form.check_type != "tcp" %} hidden{% endif %}">
-      <legend class="px-1 text-sm font-medium">TCP check</legend>
-      <label class="block">
-        <span class="text-xs text-slate-500">Host</span>
-        <input name="tcp_host" type="text" value="{{ form.tcp.host }}" placeholder="example.com"
-               class="mt-1 w-full field font-mono">
-      </label>
-      <div class="flex flex-wrap gap-3">
-        <label class="block w-40">
-          <span class="text-xs text-slate-500">Port</span>
-          <input name="tcp_port" type="number" min="1" max="65535" placeholder="5432"
-                 {% if form.tcp.port > 0 %}value="{{ form.tcp.port }}"{% endif %}
-                 class="mt-1 w-full field">
-        </label>
-        <label class="block w-40">
-          <span class="text-xs text-slate-500">Timeout (ms)</span>
-          <input name="tcp_timeout_ms" type="number" min="100" max="60000" value="{{ form.tcp.timeout_ms }}"
-                 class="mt-1 w-full field">
-        </label>
+        </fieldset>
       </div>
-    </fieldset>
-
-    <fieldset data-variant="dns"
-              class="space-y-3 sticker-card p-5{% if form.check_type != "dns" %} hidden{% endif %}">
-      <legend class="px-1 text-sm font-medium">DNS check</legend>
-      <p class="text-xs text-slate-500">
-        Resolves a record and (optionally) asserts a substring appears in
-        the answer. NXDOMAIN or an empty answer set fails the check;
-        records present without the expected substring report Degraded.
-      </p>
-      <div class="grid grid-cols-2 gap-4 sm:grid-cols-3">
-        <label class="block sm:col-span-2">
-          <span class="text-xs text-slate-500">Domain</span>
-          <input name="dns_domain" type="text" value="{{ form.dns.domain }}"
-                 placeholder="api.example.com"
-                 class="mt-1 w-full field font-mono">
-        </label>
-        <label class="block">
-          <span class="text-xs text-slate-500">Record type</span>
-          <select name="dns_record_type" class="mt-1 w-full field">
-            <option value="A"{% if form.dns.record_type == "A" %} selected{% endif %}>A</option>
-            <option value="AAAA"{% if form.dns.record_type == "AAAA" %} selected{% endif %}>AAAA</option>
-            <option value="CNAME"{% if form.dns.record_type == "CNAME" %} selected{% endif %}>CNAME</option>
-            <option value="MX"{% if form.dns.record_type == "MX" %} selected{% endif %}>MX</option>
-            <option value="NS"{% if form.dns.record_type == "NS" %} selected{% endif %}>NS</option>
-            <option value="TXT"{% if form.dns.record_type == "TXT" %} selected{% endif %}>TXT</option>
-            <option value="SOA"{% if form.dns.record_type == "SOA" %} selected{% endif %}>SOA</option>
-            <option value="PTR"{% if form.dns.record_type == "PTR" %} selected{% endif %}>PTR</option>
-            <option value="CAA"{% if form.dns.record_type == "CAA" %} selected{% endif %}>CAA</option>
-            <option value="SRV"{% if form.dns.record_type == "SRV" %} selected{% endif %}>SRV</option>
-          </select>
-        </label>
-      </div>
-      <label class="block">
-        <span class="text-xs text-slate-500">Expected to contain (optional)</span>
-        <input name="dns_expected_contains" type="text" value="{{ form.dns.expected_contains }}"
-               placeholder="192.0.2.1"
-               class="mt-1 w-full field font-mono">
-        <span class="mt-1 block text-xs text-slate-500">
-          Substring match against every answer value. Leave blank to
-          accept any non-empty answer.
-        </span>
-      </label>
-      <div class="flex flex-wrap gap-3">
-        <label class="block flex-1 min-w-48">
-          <span class="text-xs text-slate-500">Resolver (optional)</span>
-          <input name="dns_resolver" type="text" value="{{ form.dns.resolver }}"
-                 placeholder="1.1.1.1"
-                 class="mt-1 w-full field font-mono">
-        </label>
-        <label class="block w-40">
-          <span class="text-xs text-slate-500">Timeout (ms)</span>
-          <input name="dns_timeout_ms" type="number" min="100" max="60000"
-                 value="{{ form.dns.timeout_ms }}"
-                 class="mt-1 w-full field">
-        </label>
-      </div>
-    </fieldset>
-    </div>
     </details>
 
     <fieldset class="space-y-3 sticker-card p-5">
@@ -363,11 +480,17 @@
       </button>
       <a href="{% if form.mode == "edit" %}/targets/{{ form.id }}{% else %}/targets{% endif %}"
          class="btn-ghost px-4 py-2 text-sm">Cancel</a>
+      <span class="ml-auto self-center text-xs text-slate-400">
+        Tip: <kbd class="rounded border px-1.5 py-0.5">⌘/Ctrl</kbd> +
+             <kbd class="rounded border px-1.5 py-0.5">Enter</kbd> to save
+      </span>
     </div>
   </form>
 </section>
 
 <script defer src="{{ "js/ui/api_form.js"|asset }}"></script>
 <script defer src="{{ "js/ui/auth_field.js"|asset }}"></script>
+<script defer src="{{ "js/ui/header_rows.js"|asset }}"></script>
+<script defer src="{{ "js/ui/tag_chip_input.js"|asset }}"></script>
 <script defer src="{{ "js/ui/check_form.js"|asset }}"></script>
 {% endblock %}

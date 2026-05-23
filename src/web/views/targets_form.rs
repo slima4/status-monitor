@@ -13,6 +13,12 @@ use crate::web::assets::filters;
 use crate::web::error::WebResult;
 use crate::web::{AuthedBrowser, CurrentOrg};
 
+/// One HTTP header in the form's key/value row repeater.
+pub struct HeaderPair {
+    pub name: String,
+    pub value: String,
+}
+
 pub struct AuthFieldState {
     pub has_basic: bool,
     pub has_bearer: bool,
@@ -38,13 +44,11 @@ pub struct HttpFields {
     pub timeout_ms: u64,
     pub follow_redirects: bool,
     pub max_redirects: u8,
-    pub expected_kind: &'static str,
-    pub expected_exact: u16,
-    pub expected_range_min: u16,
-    pub expected_range_max: u16,
-    pub expected_one_of_csv: String,
+    /// Single-input replacement for the old radio + 3 fields. Accepts
+    /// "200", "200-299", "200, 201, 204". JS parses on submit.
+    pub expected_status_input: String,
     pub expected_body_contains: String,
-    pub headers_json: String,
+    pub headers: Vec<HeaderPair>,
     pub body: String,
     pub verify_tls: bool,
     pub auth: AuthFieldState,
@@ -61,13 +65,9 @@ impl Default for HttpFields {
             // should report Up, not Down on the redirect.
             follow_redirects: true,
             max_redirects: 5,
-            expected_kind: "exact",
-            expected_exact: 200,
-            expected_range_min: 200,
-            expected_range_max: 299,
-            expected_one_of_csv: String::new(),
+            expected_status_input: "200".into(),
             expected_body_contains: String::new(),
-            headers_json: "{}".into(),
+            headers: Vec::new(),
             body: String::new(),
             verify_tls: true,
             auth: AuthFieldState {
@@ -114,6 +114,46 @@ impl Default for DnsFields {
     }
 }
 
+pub struct TlsCertFields {
+    pub host: String,
+    pub port: u16,
+    pub server_name: String,
+    pub warn_days: u32,
+    pub critical_days: u32,
+    pub timeout_ms: u64,
+}
+
+impl Default for TlsCertFields {
+    fn default() -> Self {
+        Self {
+            host: String::new(),
+            port: 443,
+            server_name: String::new(),
+            warn_days: 30,
+            critical_days: 7,
+            timeout_ms: 5_000,
+        }
+    }
+}
+
+pub struct DomainExpiryFields {
+    pub domain: String,
+    pub warn_days: u32,
+    pub critical_days: u32,
+    pub timeout_ms: u64,
+}
+
+impl Default for DomainExpiryFields {
+    fn default() -> Self {
+        Self {
+            domain: String::new(),
+            warn_days: 30,
+            critical_days: 7,
+            timeout_ms: 5_000,
+        }
+    }
+}
+
 /// One row in the monitor form's Alerts section: an org channel plus whether
 /// this monitor binds to it and the per-binding firing policy.
 pub struct ChannelChoice {
@@ -136,11 +176,13 @@ pub struct FormModel {
     /// `min=`/JS guard mirror the same floor the API enforces (no magic 60).
     pub min_interval_s: u64,
     pub enabled: bool,
-    pub tags_csv: String,
+    pub tags: Vec<String>,
     pub check_type: &'static str,
     pub http: HttpFields,
     pub tcp: TcpFields,
     pub dns: DnsFields,
+    pub tls_cert: TlsCertFields,
+    pub domain_expiry: DomainExpiryFields,
     /// The org's notification channels, with this monitor's bindings prefilled.
     pub channels: Vec<ChannelChoice>,
 }
@@ -177,11 +219,13 @@ fn empty_create_form() -> FormModel {
         interval_s: 60,
         min_interval_s: 60,
         enabled: true,
-        tags_csv: String::new(),
+        tags: Vec::new(),
         check_type: "http",
         http: HttpFields::default(),
         tcp: TcpFields::default(),
         dns: DnsFields::default(),
+        tls_cert: TlsCertFields::default(),
+        domain_expiry: DomainExpiryFields::default(),
         channels: Vec::new(),
     }
 }
@@ -275,43 +319,55 @@ pub async fn edit_form(
 }
 
 fn form_from_target(t: Target, kind: FormKind) -> Result<FormModel, AppError> {
-    let tags_csv = t.tags.join(", ");
+    let tags = t.tags;
 
-    let (check_type, http, tcp, dns) = match t.check {
-        CheckSpec::Http(h) => (
-            "http",
-            http_fields_from(h),
-            TcpFields::default(),
-            DnsFields::default(),
-        ),
-        CheckSpec::Tcp(c) => (
-            "tcp",
-            HttpFields::default(),
-            TcpFields {
+    let mut http = HttpFields::default();
+    let mut tcp = TcpFields::default();
+    let mut dns = DnsFields::default();
+    let mut tls_cert = TlsCertFields::default();
+    let mut domain_expiry = DomainExpiryFields::default();
+    let check_type: &'static str = match t.check {
+        CheckSpec::Http(h) => {
+            http = http_fields_from(h);
+            "http"
+        }
+        CheckSpec::Tcp(c) => {
+            tcp = TcpFields {
                 host: c.host,
                 port: c.port,
                 timeout_ms: c.timeout.as_millis() as u64,
-            },
-            DnsFields::default(),
-        ),
-        CheckSpec::Dns(d) => (
-            "dns",
-            HttpFields::default(),
-            TcpFields::default(),
-            DnsFields {
+            };
+            "tcp"
+        }
+        CheckSpec::Dns(d) => {
+            dns = DnsFields {
                 domain: d.domain,
                 record_type: d.record_type.as_str(),
                 resolver: d.resolver.unwrap_or_default(),
                 expected_contains: d.expected_contains.unwrap_or_default(),
                 timeout_ms: d.timeout.as_millis() as u64,
-            },
-        ),
-        CheckSpec::TlsCert(_) | CheckSpec::DomainExpiry(_) => {
-            return Err(AppError::unprocessable(
-                "UNSUPPORTED_EDIT",
-                "Editing TLS-cert and domain-expiry checks is not yet available in the UI. \
-                 Use the JSON API directly.",
-            ));
+            };
+            "dns"
+        }
+        CheckSpec::TlsCert(c) => {
+            tls_cert = TlsCertFields {
+                host: c.host,
+                port: c.port,
+                server_name: c.server_name.unwrap_or_default(),
+                warn_days: c.warn_days,
+                critical_days: c.critical_days,
+                timeout_ms: c.timeout.as_millis() as u64,
+            };
+            "tls_cert"
+        }
+        CheckSpec::DomainExpiry(d) => {
+            domain_expiry = DomainExpiryFields {
+                domain: d.domain,
+                warn_days: d.warn_days,
+                critical_days: d.critical_days,
+                timeout_ms: d.timeout.as_millis() as u64,
+            };
+            "domain_expiry"
         }
     };
 
@@ -342,11 +398,13 @@ fn form_from_target(t: Target, kind: FormKind) -> Result<FormModel, AppError> {
         // Overwritten by the handler with the org plan's real floor.
         min_interval_s: 60,
         enabled: t.enabled,
-        tags_csv,
+        tags,
         check_type,
         http,
         tcp,
         dns,
+        tls_cert,
+        domain_expiry,
         channels: Vec::new(),
     })
 }
@@ -354,31 +412,26 @@ fn form_from_target(t: Target, kind: FormKind) -> Result<FormModel, AppError> {
 fn http_fields_from(h: crate::domain::HttpCheck) -> HttpFields {
     let has_basic = h.basic_auth.is_some();
     let has_bearer = h.bearer_token.is_some();
-    let (kind, exact, range_min, range_max, one_of) = match h.expected_status {
-        ExpectedStatus::Exact(c) => ("exact", c, 200, 299, String::new()),
-        ExpectedStatus::Range { min, max } => ("range", 200, min, max, String::new()),
-        ExpectedStatus::OneOf(v) => (
-            "one_of",
-            200,
-            200,
-            299,
-            v.iter().map(u16::to_string).collect::<Vec<_>>().join(", "),
-        ),
+    let expected_status_input = match h.expected_status {
+        ExpectedStatus::Exact(c) => c.to_string(),
+        ExpectedStatus::Range { min, max } => format!("{min}-{max}"),
+        ExpectedStatus::OneOf(v) => v.iter().map(u16::to_string).collect::<Vec<_>>().join(", "),
     };
-    let headers_json = serde_json::to_string_pretty(&h.headers).unwrap_or_else(|_| "{}".into());
+    let mut headers: Vec<HeaderPair> = h
+        .headers
+        .into_iter()
+        .map(|(name, value)| HeaderPair { name, value })
+        .collect();
+    headers.sort_by(|a, b| a.name.cmp(&b.name));
     HttpFields {
         url: h.url.to_string(),
         method: http_method_str(h.method),
         timeout_ms: h.timeout.as_millis() as u64,
         follow_redirects: h.follow_redirects,
         max_redirects: h.max_redirects,
-        expected_kind: kind,
-        expected_exact: exact,
-        expected_range_min: range_min,
-        expected_range_max: range_max,
-        expected_one_of_csv: one_of,
+        expected_status_input,
         expected_body_contains: h.expected_body_contains.unwrap_or_default(),
-        headers_json,
+        headers,
         body: h.body.unwrap_or_default(),
         verify_tls: h.verify_tls,
         auth: AuthFieldState {
@@ -418,6 +471,135 @@ mod tests {
         assert!(html.contains(r#"data-method="POST""#));
         assert!(html.contains(r#"data-mode="create""#));
         assert!(html.contains(r#"name="check_type" value="http""#));
+    }
+
+    #[test]
+    fn renders_all_five_check_type_cards() {
+        let html = FormPage {
+            active_tab: "targets",
+            form: empty_create_form(),
+        }
+        .render()
+        .unwrap();
+        assert_eq!(html.matches("data-check-card").count(), 5);
+        for v in ["http", "tcp", "dns", "tls_cert", "domain_expiry"] {
+            assert!(
+                html.contains(&format!(r#"value="{v}""#)),
+                "missing card for variant {v}"
+            );
+        }
+        // Default selection lands on HTTP.
+        assert!(html.contains(r#"name="check_type" value="http" checked"#));
+        // Each protocol panel is rendered (non-active panels are .hidden).
+        for v in ["http", "tcp", "dns", "tls_cert", "domain_expiry"] {
+            assert!(
+                html.contains(&format!(r#"data-variant="{v}""#)),
+                "missing panel for variant {v}"
+            );
+        }
+    }
+
+    #[test]
+    fn smart_expected_status_round_trips_all_three_shapes() {
+        for (status, want) in [
+            (ExpectedStatus::Exact(204), "204"),
+            (ExpectedStatus::Range { min: 200, max: 299 }, "200-299"),
+            (ExpectedStatus::OneOf(vec![200, 201, 204]), "200, 201, 204"),
+        ] {
+            use crate::domain::HttpCheck;
+            use std::collections::HashMap;
+            use std::time::Duration;
+            use url::Url;
+            let h = HttpCheck {
+                url: Url::parse("https://example.com").unwrap(),
+                method: HttpMethod::Get,
+                timeout: Duration::from_millis(5_000),
+                follow_redirects: true,
+                max_redirects: 5,
+                expected_status: status,
+                expected_body_contains: None,
+                headers: HashMap::new(),
+                body: None,
+                verify_tls: true,
+                basic_auth: None,
+                bearer_token: None,
+            };
+            assert_eq!(http_fields_from(h).expected_status_input, want);
+        }
+    }
+
+    #[test]
+    fn headers_render_as_row_inputs() {
+        use crate::domain::HttpCheck;
+        use std::collections::HashMap;
+        use std::time::Duration;
+        use url::Url;
+        let mut headers = HashMap::new();
+        headers.insert("Accept".to_string(), "application/json".to_string());
+        headers.insert("X-Request-Id".to_string(), "abc".to_string());
+        let t = Target {
+            id: uuid::Uuid::nil(),
+            name: "api".into(),
+            check: CheckSpec::Http(HttpCheck {
+                url: Url::parse("https://example.com").unwrap(),
+                method: HttpMethod::Get,
+                timeout: Duration::from_millis(5_000),
+                follow_redirects: true,
+                max_redirects: 5,
+                expected_status: ExpectedStatus::Exact(200),
+                expected_body_contains: None,
+                headers,
+                body: None,
+                verify_tls: true,
+                basic_auth: None,
+                bearer_token: None,
+            }),
+            interval: Duration::from_secs(60),
+            enabled: true,
+            tags: vec![],
+            alerts: Default::default(),
+            public_status: false,
+            public_name: None,
+            public_description: None,
+            public_group: None,
+            public_sort_order: 0,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+        let form = form_from_target(t, FormKind::Edit).unwrap();
+        assert_eq!(form.http.headers.len(), 2);
+        // Sorted alphabetically by name for stable rendering.
+        assert_eq!(form.http.headers[0].name, "Accept");
+        let html = FormPage {
+            active_tab: "targets",
+            form,
+        }
+        .render()
+        .unwrap();
+        // Container has `data-header-rows` (plural); each row has `data-header-row`
+        // (no value, followed by class). Count the row attr with trailing space
+        // to avoid matching the container.
+        assert_eq!(html.matches("data-header-row ").count(), 2);
+        assert!(html.contains(r#"name="http_header_key""#));
+        assert!(html.contains(r#"name="http_header_value""#));
+        assert!(html.contains(r#"value="Accept""#));
+        assert!(html.contains(r#"value="application/json""#));
+    }
+
+    #[test]
+    fn tags_render_as_chips() {
+        let mut form = empty_create_form();
+        form.tags = vec!["prod".into(), "api".into()];
+        let html = FormPage {
+            active_tab: "targets",
+            form,
+        }
+        .render()
+        .unwrap();
+        assert_eq!(html.matches(r#"class="tag-chip""#).count(), 2);
+        assert!(html.contains(r#"data-tag-value="prod""#));
+        assert!(html.contains(r#"data-tag-value="api""#));
+        assert!(html.contains(r#"data-tag-input"#));
     }
 
     #[test]
@@ -519,12 +701,12 @@ mod tests {
         assert_eq!(form.tcp.timeout_ms, 2_500);
         assert_eq!(form.interval_s, 30);
         assert!(!form.enabled);
-        assert_eq!(form.tags_csv, "prod, db");
+        assert_eq!(form.tags, vec!["prod".to_string(), "db".to_string()]);
         assert_eq!(form.submit_method, "PATCH");
     }
 
     #[test]
-    fn edit_form_rejects_tls_cert_target() {
+    fn edit_form_maps_tls_cert_target_fields() {
         use crate::domain::TlsCertCheck;
         use std::time::Duration;
         let t = Target {
@@ -532,11 +714,11 @@ mod tests {
             name: "tls".into(),
             check: CheckSpec::TlsCert(TlsCertCheck {
                 host: "example.com".into(),
-                port: 443,
-                server_name: None,
-                warn_days: 30,
-                critical_days: 7,
-                timeout: Duration::from_secs(5),
+                port: 8443,
+                server_name: Some("vhost.example.com".into()),
+                warn_days: 14,
+                critical_days: 3,
+                timeout: Duration::from_millis(4_500),
             }),
             interval: Duration::from_secs(3_600),
             enabled: true,
@@ -550,11 +732,47 @@ mod tests {
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
-        match form_from_target(t, FormKind::Edit) {
-            Err(AppError::Unprocessable { .. }) => {}
-            Ok(_) => panic!("expected Unprocessable"),
-            Err(other) => panic!("expected Unprocessable, got {other:?}"),
-        }
+        let form = form_from_target(t, FormKind::Edit).unwrap();
+        assert_eq!(form.check_type, "tls_cert");
+        assert_eq!(form.tls_cert.host, "example.com");
+        assert_eq!(form.tls_cert.port, 8443);
+        assert_eq!(form.tls_cert.server_name, "vhost.example.com");
+        assert_eq!(form.tls_cert.warn_days, 14);
+        assert_eq!(form.tls_cert.critical_days, 3);
+        assert_eq!(form.tls_cert.timeout_ms, 4_500);
+    }
+
+    #[test]
+    fn edit_form_maps_domain_expiry_target_fields() {
+        use crate::domain::DomainExpiryCheck;
+        use std::time::Duration;
+        let t = Target {
+            id: uuid::Uuid::nil(),
+            name: "dom".into(),
+            check: CheckSpec::DomainExpiry(DomainExpiryCheck {
+                domain: "example.com".into(),
+                warn_days: 60,
+                critical_days: 14,
+                timeout: Duration::from_secs(10),
+            }),
+            interval: Duration::from_secs(86_400),
+            enabled: true,
+            tags: vec![],
+            alerts: Default::default(),
+            public_status: false,
+            public_name: None,
+            public_description: None,
+            public_group: None,
+            public_sort_order: 0,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+        let form = form_from_target(t, FormKind::Edit).unwrap();
+        assert_eq!(form.check_type, "domain_expiry");
+        assert_eq!(form.domain_expiry.domain, "example.com");
+        assert_eq!(form.domain_expiry.warn_days, 60);
+        assert_eq!(form.domain_expiry.critical_days, 14);
+        assert_eq!(form.domain_expiry.timeout_ms, 10_000);
     }
 
     #[test]
@@ -637,6 +855,6 @@ mod tests {
         assert_eq!(form.check_type, "tcp");
         assert_eq!(form.tcp.host, "db.example.com");
         assert_eq!(form.tcp.port, 5432);
-        assert_eq!(form.tags_csv, "prod");
+        assert_eq!(form.tags, vec!["prod".to_string()]);
     }
 }

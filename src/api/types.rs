@@ -88,6 +88,12 @@ pub struct TestRequest {
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct HeaderPreview {
+    pub name: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct TestResponse {
     pub result: CheckResult,
     /// Whether the check would be considered `up` given the spec's
@@ -95,4 +101,10 @@ pub struct TestResponse {
     pub matched_expectations: bool,
     /// Validation warnings that did not block execution.
     pub warnings: Vec<String>,
+    /// Response headers preview, HTTP only. Sensitive headers redacted.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub response_headers_preview: Vec<HeaderPreview>,
+    /// First 1 KiB of decoded body, HTTP only. UTF-8 lossy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response_body_snippet: Option<String>,
 }
