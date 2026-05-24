@@ -25,7 +25,7 @@
                 </h1>
                 <p class="mt-1 text-sm opacity-80">
                     Last checked
-                    <time datetime="{{ view.generated_iso }}" data-tz>{{ view.generated_human }}</time>
+                    <time datetime="{{ view.generated_at|iso_ts }}" data-tz>{{ view.generated_at|human_ts }}</time>
                 </p>
             </div>
         </div>
@@ -49,8 +49,8 @@
                     </div>
                     <p class="text-sm text-slate-700">
                         Started
-                        <time datetime="{{ inc.header.started_iso }}" data-tz>{{ inc.header.started_human }}</time>
-                        — {{ inc.header.duration_human }} ago — {{ inc.header.component_name }}
+                        <time datetime="{{ inc.header.started_at|iso_ts }}" data-tz>{{ inc.header.started_at|human_ts }}</time>
+                        — {{ inc.header.duration_secs|humanize_dur }} ago — {{ inc.header.component_name }}
                     </p>
                     {% match inc.latest_message %}
                         {% when Some with (msg) %}
@@ -79,9 +79,9 @@
             <li class="text-sm">
                 <p class="font-medium text-sky-900">{{ m.title }}</p>
                 <p class="text-slate-700">
-                    <time datetime="{{ m.starts_iso }}" data-tz>{{ m.starts_human }}</time>
+                    <time datetime="{{ m.starts_at|iso_ts }}" data-tz>{{ m.starts_at|human_ts }}</time>
                     –
-                    <time datetime="{{ m.ends_iso }}" data-tz>{{ m.ends_human }}</time>
+                    <time datetime="{{ m.ends_at|iso_ts }}" data-tz>{{ m.ends_at|human_ts }}</time>
                     {% if !m.affects.is_empty() %} · affects {{ m.affects }}{% endif %}
                 </p>
                 {% match m.description %}
@@ -99,12 +99,12 @@
                 <p class="font-medium text-sky-900">{{ m.title }}</p>
                 <p class="text-slate-700">
                     Starts
-                    <time datetime="{{ m.starts_iso }}" data-tz>{{ m.starts_human }}</time>
-                    {% match m.starts_in_human %}
-                        {% when Some with (s) %} (in {{ s }}){% when None %}
+                    <time datetime="{{ m.starts_at|iso_ts }}" data-tz>{{ m.starts_at|human_ts }}</time>
+                    {% match m.starts_in_secs %}
+                        {% when Some with (s) %} (in {{ s|humanize_dur }}){% when None %}
                     {% endmatch %}
                     — ends
-                    <time datetime="{{ m.ends_iso }}" data-tz>{{ m.ends_human }}</time>
+                    <time datetime="{{ m.ends_at|iso_ts }}" data-tz>{{ m.ends_at|human_ts }}</time>
                     {% if !m.affects.is_empty() %} · affects {{ m.affects }}{% endif %}
                 </p>
                 {% match m.description %}

@@ -20,7 +20,7 @@ pub use check::{
 };
 pub use incident::{
     Incident, IncidentNarrationUpdate, NewIncidentUpdate, coalesce_incidents,
-    coalesce_incidents_bad_only,
+    coalesce_incidents_bad_only, elapsed_at,
 };
 pub use maintenance::{
     MaintenanceFilter, MaintenanceWindow, MaintenanceWindowUpdate, NewMaintenanceWindow,

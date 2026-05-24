@@ -486,11 +486,7 @@ impl From<CheckResult> for ResultRow {
 impl From<Incident> for IncidentRow {
     fn from(inc: Incident) -> Self {
         let ongoing = inc.ended_at.is_none();
-        let duration_secs = inc.ended_at.map(|end| {
-            inc.duration_secs
-                .map(|s| s as i64)
-                .unwrap_or_else(|| (end - inc.started_at).num_seconds().max(0))
-        });
+        let duration_secs = inc.closed_duration().map(|d| d.num_seconds());
         Self {
             id: inc.id,
             severity: inc.status.as_str(),

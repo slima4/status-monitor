@@ -16,6 +16,7 @@ use uuid::Uuid;
 use crate::api::public_error::PublicAppError;
 use crate::app::AppState;
 use crate::config::PublicStatusConfig;
+use crate::domain::elapsed_at;
 use crate::domain::{
     DayState, IncidentSeverity, IncidentStatusPhase, OrgId, OverallState, PublicComponent,
     PublicComponentGroup, PublicComponentStatus, PublicIncident, PublicIncidentUpdate,
@@ -26,7 +27,7 @@ use crate::storage::orgs::{OrgBranding, load_public_branding};
 use crate::web::error::{NotFoundPage, UnavailablePage};
 use crate::web::filters;
 use crate::web::host::resolve_status_page_org;
-use crate::web::views::{fmt_human, fmt_ts, humanize_duration};
+use crate::web::views::humanize_duration;
 
 #[derive(Debug, Default, Deserialize)]
 pub struct StatusParams {
@@ -52,8 +53,7 @@ pub struct StatusRegion {
 pub struct IncidentDetailPage {
     pub branding: BrandingView,
     pub incident: IncidentDetailView,
-    pub generated_iso: String,
-    pub generated_human: String,
+    pub generated_at: DateTime<Utc>,
     pub rss_url: &'static str,
 }
 
@@ -174,8 +174,7 @@ pub async fn incident(
     IncidentDetailPage {
         branding,
         incident: IncidentDetailView::from_incident(&inc, now),
-        generated_iso: fmt_ts(now),
-        generated_human: fmt_human(now),
+        generated_at: now,
         rss_url: RSS_URL,
     }
     .into_response()
@@ -301,8 +300,7 @@ pub struct StatusView {
     pub overall_class: &'static str,
     pub overall_icon: &'static str,
     pub overall_aria: &'static str,
-    pub generated_iso: String,
-    pub generated_human: String,
+    pub generated_at: DateTime<Utc>,
     pub groups: Vec<GroupView>,
     pub active_incidents: Vec<IncidentSummary>,
     pub recent_incidents: Vec<IncidentSummary>,
@@ -376,35 +374,28 @@ pub struct IncidentHeader {
     pub severity_class: &'static str,
     pub phase_label: &'static str,
     pub phase_class: &'static str,
-    pub started_iso: String,
-    pub started_human: String,
+    pub started_at: DateTime<Utc>,
     pub ongoing: bool,
-    pub duration_human: String,
+    /// Elapsed seconds at page-build `now`. Populated for both closed and
+    /// ongoing incidents — the public view shows a duration for all rows.
+    pub duration_secs: i64,
 }
 
 pub struct IncidentSummary {
     pub header: IncidentHeader,
-    pub ended_human: Option<String>,
+    pub ended_at: Option<DateTime<Utc>>,
     pub latest_message: Option<String>,
     pub permalink: String,
 }
 
 pub struct IncidentDetailView {
     pub header: IncidentHeader,
-    pub ended: Option<TimePair>,
+    pub ended_at: Option<DateTime<Utc>>,
     pub updates: Vec<IncidentUpdateView>,
 }
 
-/// Pair of ISO timestamp + human label, kept together so templates always
-/// have both halves (or neither) without per-field Option gymnastics.
-pub struct TimePair {
-    pub iso: String,
-    pub human: String,
-}
-
 pub struct IncidentUpdateView {
-    pub posted_iso: String,
-    pub posted_human: String,
+    pub posted_at: DateTime<Utc>,
     pub phase_label: &'static str,
     pub phase_class: &'static str,
     pub message: String,
@@ -414,12 +405,11 @@ pub struct MaintenanceView {
     pub id: String,
     pub title: String,
     pub description: Option<String>,
-    pub starts_iso: String,
-    pub starts_human: String,
-    pub ends_iso: String,
-    pub ends_human: String,
+    pub starts_at: DateTime<Utc>,
+    pub ends_at: DateTime<Utc>,
     pub affects: String,
-    pub starts_in_human: Option<String>,
+    /// Seconds until `starts_at` for upcoming windows; `None` once started.
+    pub starts_in_secs: Option<i64>,
 }
 
 /// Operator-controlled branding, resolved for rendering. Optional DB fields
@@ -568,8 +558,7 @@ fn build_view(page: &PublicStatusPage, history_markers: &[HistoryIncidentMarker]
         overall_class,
         overall_icon,
         overall_aria,
-        generated_iso: fmt_ts(now),
-        generated_human: fmt_human(now),
+        generated_at: now,
         groups,
         has_active_incident: !active.is_empty(),
         active_incidents: active,
@@ -760,8 +749,7 @@ fn history_stats(states: &[DayState]) -> (String, String) {
 
 fn build_incident_header(i: &PublicIncident, now: DateTime<Utc>) -> IncidentHeader {
     let ongoing = i.ended_at.is_none();
-    let duration_end = i.ended_at.unwrap_or(now);
-    let duration = (duration_end - i.started_at).max(ChronoDuration::zero());
+    let duration_secs = elapsed_at(i.started_at, i.ended_at, now).num_seconds();
     let (severity_label, severity_class) = severity_classes(i.severity);
     let (phase_label, phase_class) = phase_classes(i.status_phase);
     IncidentHeader {
@@ -772,10 +760,9 @@ fn build_incident_header(i: &PublicIncident, now: DateTime<Utc>) -> IncidentHead
         severity_class,
         phase_label,
         phase_class,
-        started_iso: fmt_ts(i.started_at),
-        started_human: fmt_human(i.started_at),
+        started_at: i.started_at,
         ongoing,
-        duration_human: humanize_duration(duration),
+        duration_secs,
     }
 }
 
@@ -791,7 +778,7 @@ fn build_incident_summary(i: &PublicIncident, now: DateTime<Utc>) -> IncidentSum
     IncidentSummary {
         permalink: format!("/status/incidents/{}", header.id),
         header,
-        ended_human: i.ended_at.map(fmt_human),
+        ended_at: i.ended_at,
         latest_message,
     }
 }
@@ -799,18 +786,13 @@ fn build_incident_summary(i: &PublicIncident, now: DateTime<Utc>) -> IncidentSum
 impl IncidentDetailView {
     fn from_incident(i: &PublicIncident, now: DateTime<Utc>) -> Self {
         let header = build_incident_header(i, now);
-        let ended = i.ended_at.map(|t| TimePair {
-            iso: fmt_ts(t),
-            human: fmt_human(t),
-        });
         let updates = i
             .updates
             .iter()
             .map(|u| {
                 let (l, c) = phase_classes(u.phase);
                 IncidentUpdateView {
-                    posted_iso: fmt_ts(u.posted_at),
-                    posted_human: fmt_human(u.posted_at),
+                    posted_at: u.posted_at,
                     phase_label: l,
                     phase_class: c,
                     message: u.message.clone(),
@@ -819,28 +801,22 @@ impl IncidentDetailView {
             .collect();
         Self {
             header,
-            ended,
+            ended_at: i.ended_at,
             updates,
         }
     }
 }
 
 fn build_maintenance(m: &PublicMaintenance, now: DateTime<Utc>) -> MaintenanceView {
-    let starts_in = if m.starts_at > now {
-        Some(humanize_duration(m.starts_at - now))
-    } else {
-        None
-    };
+    let starts_in_secs = (m.starts_at > now).then(|| (m.starts_at - now).num_seconds());
     MaintenanceView {
         id: m.id.to_string(),
         title: m.title.clone(),
         description: m.description.clone().filter(|s| !s.is_empty()),
-        starts_iso: fmt_ts(m.starts_at),
-        starts_human: fmt_human(m.starts_at),
-        ends_iso: fmt_ts(m.ends_at),
-        ends_human: fmt_human(m.ends_at),
+        starts_at: m.starts_at,
+        ends_at: m.ends_at,
         affects: m.affected_component_names.join(", "),
-        starts_in_human: starts_in,
+        starts_in_secs,
     }
 }
 
@@ -1229,8 +1205,7 @@ mod tests {
         let html = IncidentDetailPage {
             branding: sample_branding(),
             incident: detail,
-            generated_iso: fmt_ts(Utc::now()),
-            generated_human: fmt_human(Utc::now()),
+            generated_at: Utc::now(),
             rss_url: RSS_URL,
         }
         .render()

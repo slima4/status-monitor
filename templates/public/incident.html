@@ -52,14 +52,14 @@
                 </p>
                 <p class="text-sm text-slate-600">
                     Started
-                    <time datetime="{{ incident.header.started_iso }}" data-tz>{{ incident.header.started_human }}</time>
-                    {% match incident.ended %}
-                        {% when Some with (e) %}
+                    <time datetime="{{ incident.header.started_at|iso_ts }}" data-tz>{{ incident.header.started_at|human_ts }}</time>
+                    {% match incident.ended_at %}
+                        {% when Some with (t) %}
                             · Ended
-                            <time datetime="{{ e.iso }}" data-tz>{{ e.human }}</time>
+                            <time datetime="{{ t|iso_ts }}" data-tz>{{ t|human_ts }}</time>
                         {% when None %}
                     {% endmatch %}
-                    · Duration {{ incident.header.duration_human }}
+                    · Duration {{ incident.header.duration_secs|humanize_dur }}
                 </p>
             </header>
 
@@ -75,7 +75,7 @@
                         <li class="public-callout public-callout--neutral">
                             <div class="flex flex-wrap items-center gap-2 text-xs">
                                 <span class="rounded-full px-2 py-0.5 font-medium {{ u.phase_class }}">{{ u.phase_label }}</span>
-                                <time datetime="{{ u.posted_iso }}" data-tz class="text-slate-500">{{ u.posted_human }}</time>
+                                <time datetime="{{ u.posted_at|iso_ts }}" data-tz class="text-slate-500">{{ u.posted_at|human_ts }}</time>
                             </div>
                             <p class="mt-2 whitespace-pre-line text-sm text-slate-800">{{ u.message }}</p>
                         </li>
@@ -89,7 +89,7 @@
     <footer class="mx-auto max-w-3xl px-4 py-8 text-xs text-slate-400">
         {% if branding.show_powered_by %}Powered by status-monitor · {% endif %}
         <a href="{{ rss_url }}" class="hover:text-slate-600">RSS</a> ·
-        Updated <time datetime="{{ generated_iso }}" data-tz>{{ generated_human }}</time>
+        Updated <time datetime="{{ generated_at|iso_ts }}" data-tz>{{ generated_at|human_ts }}</time>
     </footer>
 </body>
 </html>

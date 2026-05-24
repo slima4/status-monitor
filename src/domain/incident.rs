@@ -42,6 +42,35 @@ pub struct Incident {
     pub updates: Vec<PublicIncidentUpdate>,
 }
 
+impl Incident {
+    /// Resolved duration of a CLOSED incident. Returns `None` for ongoing
+    /// incidents. Prefers the stored `duration_secs` set by the coalescer;
+    /// falls back to `(ended_at - started_at)` when missing. Saturating
+    /// cast guards against `u64::MAX` overflowing `i64` (unreachable in
+    /// practice; the duration would have to exceed ~292 billion years).
+    pub fn closed_duration(&self) -> Option<ChronoDuration> {
+        self.ended_at.map(|end| {
+            if let Some(s) = self.duration_secs {
+                return ChronoDuration::seconds(i64::try_from(s).unwrap_or(i64::MAX));
+            }
+            (end - self.started_at).max(ChronoDuration::zero())
+        })
+    }
+}
+
+/// Wall-clock duration of an incident at the given `now`. Open-ended
+/// incidents clamp to `now`. Used by view layers that want a single
+/// "how long has this been going on" number for both closed and
+/// ongoing rows. Always non-negative.
+pub fn elapsed_at(
+    started_at: DateTime<Utc>,
+    ended_at: Option<DateTime<Utc>>,
+    now: DateTime<Utc>,
+) -> ChronoDuration {
+    let end = ended_at.unwrap_or(now);
+    (end - started_at).max(ChronoDuration::zero())
+}
+
 /// Operator-narration patch.
 ///
 /// `public_title` and `public_description` use a "double-Option" pattern so
