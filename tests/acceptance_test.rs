@@ -11,7 +11,7 @@ use chrono::{Duration, Utc};
 use common::build_test_app_with_owner;
 use serde_json::{Value, json};
 use status_monitor::domain::{CheckResult, CheckStatus};
-use status_monitor::storage::{InMemorySink, ResultSink, TimeRange};
+use status_monitor::storage::{InMemorySink, IncidentListQuery, ResultSink, TimeRange};
 use tower::ServiceExt;
 use uuid::Uuid;
 
@@ -171,11 +171,13 @@ async fn coalescing_separates_runs_split_by_an_up_check() {
         .list_incidents(
             common::test_org_id(),
             target_id,
-            range,
-            std::time::Duration::from_secs(60),
-            false,
-            100,
-            0,
+            IncidentListQuery {
+                range,
+                monitor_interval: std::time::Duration::from_secs(60),
+                ongoing_only: false,
+                limit: 100,
+                offset: 0,
+            },
         )
         .await
         .unwrap();

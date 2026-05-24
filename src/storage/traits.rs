@@ -74,6 +74,37 @@ pub struct TimeRange {
     pub to: DateTime<Utc>,
 }
 
+/// Per-call options for [`ResultsStore::list_incidents`]. Grouped into a
+/// struct so adding a filter (e.g. severity) doesn't widen every impl
+/// and caller signature.
+///
+/// `monitor_interval` lets the storage layer pre-filter to bad statuses
+/// at the database (huge wire-cost reduction on healthy monitors) and
+/// infer recovery from gaps larger than `2 × interval`. `ongoing_only`
+/// drops incidents that already ended.
+#[derive(Debug, Clone, Copy)]
+pub struct IncidentListQuery {
+    pub range: TimeRange,
+    pub monitor_interval: std::time::Duration,
+    pub ongoing_only: bool,
+    pub limit: usize,
+    pub offset: usize,
+}
+
+impl IncidentListQuery {
+    /// First-page convenience for the typical "show me the most recent N
+    /// incidents in this window" query (no ongoing filter, no offset).
+    pub fn page(range: TimeRange, monitor_interval: std::time::Duration, limit: usize) -> Self {
+        Self {
+            range,
+            monitor_interval,
+            ongoing_only: false,
+            limit,
+            offset: 0,
+        }
+    }
+}
+
 #[derive(Debug, Default, Clone, Copy, serde::Serialize, utoipa::ToSchema)]
 pub struct UptimeStats {
     pub total: u64,
@@ -120,20 +151,13 @@ pub trait ResultsStore: Send + Sync {
         offset: usize,
     ) -> Result<Vec<CheckResult>>;
     async fn uptime(&self, org: OrgId, target_id: Uuid, range: TimeRange) -> Result<UptimeStats>;
-    /// Coalesce consecutive `down`/`error` results in `range` into incidents.
-    /// `monitor_interval` lets the storage layer pre-filter to bad statuses
-    /// at the database (huge wire-cost reduction on healthy monitors) and
-    /// infer recovery from gaps larger than `2 × interval`.
-    /// `ongoing_only` filters out incidents that have already ended.
+    /// Coalesce consecutive `down`/`error` results in the requested window
+    /// into incidents. See [`IncidentListQuery`] for the per-call options.
     async fn list_incidents(
         &self,
         org: OrgId,
         target_id: Uuid,
-        range: TimeRange,
-        monitor_interval: std::time::Duration,
-        ongoing_only: bool,
-        limit: usize,
-        offset: usize,
+        query: IncidentListQuery,
     ) -> Result<Vec<Incident>>;
     /// Per-status breakdown using each target's most recent observation in
     /// `range`. Targets with no observations in the range are omitted from

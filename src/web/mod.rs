@@ -8,6 +8,7 @@ pub mod assets;
 pub mod auth;
 pub mod client_ip;
 pub mod error;
+pub mod filters;
 pub mod host;
 pub mod routes;
 pub mod views;

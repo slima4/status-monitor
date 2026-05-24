@@ -17,7 +17,7 @@ use axum::response::{IntoResponse, Response};
 use bytes::Bytes;
 
 use crate::marketing::seo::{JsonLd, OpenGraph, json_ld_organization, json_ld_website};
-use crate::web::assets::filters;
+use crate::web::filters;
 
 use super::config::{BRAND, MarketingCfg};
 

@@ -32,4 +32,6 @@ pub use orgs::{
     update_public_branding,
 };
 pub use postgres::PostgresTargetStore;
-pub use traits::{ResultSink, ResultsStore, TargetFilter, TargetStore, TimeRange, UptimeStats};
+pub use traits::{
+    IncidentListQuery, ResultSink, ResultsStore, TargetFilter, TargetStore, TimeRange, UptimeStats,
+};

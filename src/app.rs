@@ -29,15 +29,16 @@ use crate::worker::WorkerPool;
 /// dashboard never reads another tenant's last build.
 pub type DashboardCache = Cache<OrgId, Arc<DashboardSummary>>;
 
-/// Pre-rendered detail-page live partial body. Cached for 5 seconds so
-/// the detail-page polling cadence (60s baseline + overdue/manual
-/// refreshes that arrive in bursts) collapses N concurrent pollers for
-/// the same target into a single ClickHouse round-trip + askama render
-/// per window. Keyed on `(OrgId, target_id, range_key)` so a tenant
-/// never reads another's snapshot and different range tabs don't share
-/// cache. `Bytes` is cheap-clone (Arc internally) and lets the handler
-/// emit the response without a copy.
-pub type LivePartialCache = Cache<(OrgId, uuid::Uuid, &'static str), bytes::Bytes>;
+/// Detail-page live snapshot (uptime stats + recent results + last-seen
+/// status). Cached for 5 seconds so the polling cadence (60s baseline +
+/// overdue/manual refreshes arriving in bursts) AND repeat full-page
+/// loads (browser back/forward, multi-tab) collapse to a single CH
+/// round-trip per window. Keyed `(OrgId, target_id, range_key)` so a
+/// tenant never reads another's snapshot and different range tabs don't
+/// share cache. `Arc` keeps clones cheap when the full-page handler
+/// pulls fields out for the surrounding chrome.
+pub type LiveDataCache =
+    Cache<(OrgId, uuid::Uuid, &'static str), Arc<crate::web::views::targets_detail::LiveData>>;
 
 /// Builder for the 5-second per-org dashboard cache. The moka `sync::Cache`
 /// is cheap to clone (everything inside is `Arc`), so it lives in `AppState`
@@ -57,7 +58,7 @@ fn build_dashboard_cache() -> DashboardCache {
 /// here), but the ceiling caps memory if a crawler hits every target.
 /// Each entry ~5 KB → 40k × 5 KB ≈ 200 MB worst case; a quarter of
 /// that in practice. moka evicts on capacity AND on the 5s TTL.
-fn build_live_partial_cache() -> LivePartialCache {
+fn build_live_data_cache() -> LiveDataCache {
     Cache::builder()
         .time_to_live(Duration::from_secs(5))
         .max_capacity(40_000)
@@ -84,7 +85,7 @@ pub struct AppState {
     pub http_clients: Arc<HttpClients>,
     pub worker_pool: Arc<WorkerPool>,
     pub dashboard_cache: DashboardCache,
-    pub live_partial_cache: LivePartialCache,
+    pub live_data_cache: LiveDataCache,
     pub idempotency: Arc<IdempotencyCache>,
     pub public_source: Arc<dyn PublicSource>,
     pub maintenance_store: Arc<dyn MaintenanceStore>,
@@ -195,7 +196,7 @@ impl AppState {
             http_clients,
             worker_pool,
             dashboard_cache: build_dashboard_cache(),
-            live_partial_cache: build_live_partial_cache(),
+            live_data_cache: build_live_data_cache(),
             idempotency: Arc::new(IdempotencyCache::new()),
             public_source,
             maintenance_store,

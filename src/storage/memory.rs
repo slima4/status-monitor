@@ -9,7 +9,7 @@ use crate::domain::{
 };
 use crate::error::Result;
 use crate::storage::traits::{
-    ResultSink, ResultsStore, TargetFilter, TargetStore, TimeRange, UptimeStats,
+    IncidentListQuery, ResultSink, ResultsStore, TargetFilter, TargetStore, TimeRange, UptimeStats,
 };
 
 #[derive(Default)]
@@ -91,18 +91,18 @@ impl ResultsStore for InMemorySink {
         &self,
         _org: OrgId,
         target_id: Uuid,
-        range: TimeRange,
-        _monitor_interval: std::time::Duration,
-        ongoing_only: bool,
-        limit: usize,
-        offset: usize,
+        query: IncidentListQuery,
     ) -> Result<Vec<Incident>> {
-        let mut incidents = coalesce_for_target(&self.snapshot(), target_id, range);
-        if ongoing_only {
+        let mut incidents = coalesce_for_target(&self.snapshot(), target_id, query.range);
+        if query.ongoing_only {
             incidents.retain(|i| i.ended_at.is_none());
         }
         incidents.sort_by_key(|i| std::cmp::Reverse(i.started_at));
-        let paged: Vec<Incident> = incidents.into_iter().skip(offset).take(limit).collect();
+        let paged: Vec<Incident> = incidents
+            .into_iter()
+            .skip(query.offset)
+            .take(query.limit)
+            .collect();
         Ok(paged)
     }
 

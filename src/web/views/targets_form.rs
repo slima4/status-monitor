@@ -9,8 +9,8 @@ use uuid::Uuid;
 use crate::app::AppState;
 use crate::domain::{CheckSpec, ExpectedStatus, HttpMethod, OrgId, Target, TargetAlerts};
 use crate::error::AppError;
-use crate::web::assets::filters;
 use crate::web::error::WebResult;
+use crate::web::filters;
 use crate::web::{AuthedBrowser, CurrentOrg};
 
 /// One HTTP header in the form's key/value row repeater.

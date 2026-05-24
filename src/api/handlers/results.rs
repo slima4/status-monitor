@@ -10,7 +10,7 @@ use crate::api::error::codes;
 use crate::api::page::{PageEnvelope, PageOfCheckResult, PageOfIncident};
 use crate::app::AppState;
 use crate::error::{AppError, Result};
-use crate::storage::{TimeRange, UptimeStats};
+use crate::storage::{IncidentListQuery, TimeRange, UptimeStats};
 use crate::web::CurrentOrg;
 
 /// 404 used when a target id is absent from the caller's org. Returned only
@@ -238,11 +238,13 @@ pub async fn list_incidents(
         .list_incidents(
             org,
             id,
-            range,
-            target.interval,
-            q.ongoing_only,
-            limit + 1,
-            q.offset,
+            IncidentListQuery {
+                range,
+                monitor_interval: target.interval,
+                ongoing_only: q.ongoing_only,
+                limit: limit + 1,
+                offset: q.offset,
+            },
         )
         .await?;
     Ok(Json(PageEnvelope::from_peek(

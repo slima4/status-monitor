@@ -25,8 +25,8 @@
       <tr data-incident-row
           data-incident-id="{{ inc.id }}"
           data-target-id="{{ id }}"
-          data-from="{{ inc.started_iso }}"
-          data-to="{% match inc.ended_iso %}{% when Some with (iso) %}{{ iso }}{% when None %}{% endmatch %}"
+          data-from="{{ inc.started_at|iso_ts }}"
+          data-to="{% match inc.ended_at %}{% when Some with (ts) %}{{ ts|iso_ts }}{% when None %}{% endmatch %}"
           data-ongoing="{% if inc.ongoing %}true{% else %}false{% endif %}"
           class="cursor-pointer border-t border-slate-100 hover:bg-slate-50{% if inc.ongoing %} border-l-4 border-l-rose-500 bg-rose-50/40{% endif %}">
         <td class="px-3 py-2 align-top">
@@ -37,15 +37,15 @@
           {% endif %}
         </td>
         <td class="px-3 py-2 align-top">
-          <time datetime="{{ inc.started_iso }}" title="{{ inc.started_iso }}">{{ inc.started_human }}</time>
+          <time datetime="{{ inc.started_at|iso_ts }}" title="{{ inc.started_at|iso_ts }}">{{ inc.started_at|human_ts }}</time>
         </td>
         <td class="px-3 py-2 align-top">
-          {% match inc.ended_iso %}
-            {% when Some with (iso) %}<time datetime="{{ iso }}" title="{{ iso }}">{{ inc.ended_human.as_deref().unwrap_or("") }}</time>
+          {% match inc.ended_at %}
+            {% when Some with (ts) %}<time datetime="{{ ts|iso_ts }}" title="{{ ts|iso_ts }}">{{ ts|human_ts }}</time>
             {% when None %}<span class="font-medium text-rose-600">—</span>
           {% endmatch %}
         </td>
-        <td class="px-3 py-2 align-top font-mono text-xs">{{ inc.duration_human }}</td>
+        <td class="px-3 py-2 align-top font-mono text-xs">{% match inc.duration_secs %}{% when Some with (s) %}{{ s|humanize_dur }}{% when None %}Ongoing{% endmatch %}</td>
         <td class="px-3 py-2 align-top text-right font-mono text-xs">{{ inc.check_count }}</td>
         <td class="px-3 py-2 align-top text-slate-600">
           <span class="line-clamp-2 break-words" title="{{ inc.error_sample }}">{% if !inc.error_sample.is_empty() %}{{ inc.error_sample }}{% else %}—{% endif %}</span>

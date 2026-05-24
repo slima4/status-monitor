@@ -23,8 +23,8 @@ use crate::app::AppState;
 use crate::domain::{ChannelConfig, NotificationChannel};
 use crate::error::AppError;
 use crate::web::CurrentOrg;
-use crate::web::assets::filters;
 use crate::web::error::WebResult;
+use crate::web::filters;
 use crate::web::views::{fmt_human, json_pretty, resolve_org};
 
 const TAB_NOTIFICATIONS: &str = "notifications";

@@ -59,9 +59,7 @@
     </table>
   </section>
 
-  <script defer src="{{ "js/ui/api_form.js"|asset }}"></script>
-  <script defer src="{{ "js/ui/target_detail.js"|asset }}"></script>
-  <script defer src="{{ "js/ui/tab_range_memory.js"|asset }}"></script>
+  {% include "targets/partials/detail_scripts.html" %}
   <script defer src="{{ "js/echarts.min.js"|asset }}"></script>
   <script type="module" src="{{ "js/charts/latency.js"|asset }}"></script>
   <script type="module" src="{{ "js/charts/breakdown.js"|asset }}"></script>

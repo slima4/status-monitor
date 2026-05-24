@@ -1,10 +1,10 @@
+use std::sync::Arc;
+
 use askama::Template;
 use askama_web::WebTemplate;
-use axum::body::Body;
 use axum::extract::{Path, Query, State};
-use axum::http::{StatusCode, header};
+use axum::http::header;
 use axum::response::{IntoResponse, Response};
-use bytes::Bytes;
 use chrono::{DateTime, Duration, Utc};
 use serde::Deserialize;
 use uuid::Uuid;
@@ -13,10 +13,10 @@ use crate::api::error::codes;
 use crate::app::AppState;
 use crate::domain::{CheckResult, Incident, OrgId};
 use crate::error::AppError;
-use crate::storage::{TimeRange, UptimeStats};
-use crate::web::assets::filters;
+use crate::storage::{IncidentListQuery, TimeRange, UptimeStats};
 use crate::web::error::{WebError, WebResult};
-use crate::web::views::{describe_check, fmt_human, fmt_ts, humanize_duration};
+use crate::web::filters;
+use crate::web::views::{describe_check, fmt_human, fmt_ts};
 use crate::web::{AuthedBrowser, CurrentOrg};
 
 // A raw row per check floods the page; the latency/breakdown charts above
@@ -60,6 +60,7 @@ pub struct DetailParams {
     pub to: Option<DateTime<Utc>>,
 }
 
+#[derive(Clone)]
 pub struct ResultRow {
     pub timestamp: String,
     pub status: &'static str,
@@ -69,15 +70,14 @@ pub struct ResultRow {
 }
 
 pub struct IncidentRow {
-    pub id: String,
+    pub id: Uuid,
     /// "down" | "error" | "degraded" — drives the `status-badge--*` CSS class.
     pub severity: &'static str,
-    pub started_iso: String,
-    pub started_human: String,
-    pub ended_iso: Option<String>,
-    pub ended_human: Option<String>,
-    /// "7m 12s" / "2h 14m" / "Ongoing".
-    pub duration_human: String,
+    pub started_at: DateTime<Utc>,
+    pub ended_at: Option<DateTime<Utc>>,
+    /// `Some(secs)` for closed incidents (template renders via
+    /// `humanize_dur`); `None` while ongoing (template renders "Ongoing").
+    pub duration_secs: Option<i64>,
     pub check_count: u64,
     pub error_sample: String,
     pub ongoing: bool,
@@ -154,6 +154,7 @@ pub struct DetailPage {
     pub to_human: String,
 }
 
+#[derive(Clone)]
 pub struct UptimeStatsView {
     pub total: u64,
     pub up: u64,
@@ -181,12 +182,94 @@ pub struct RangeOption {
     pub selected: bool,
 }
 
-struct LiveData {
-    uptime: UptimeStatsView,
-    result_rows: Vec<ResultRow>,
-    results_has_more: bool,
-    last_status: &'static str,
-    last_at_iso: String,
+/// ISO and human-readable strings for a `(from, to)` window. Both
+/// detail-page templates render the same four fields in the chrome
+/// (range pill caption, time inputs); precomputing once keeps the
+/// template free of filter chains for one-shot values.
+struct WindowLabels {
+    from_iso: String,
+    to_iso: String,
+    from_human: String,
+    to_human: String,
+}
+
+impl WindowLabels {
+    fn new(from: DateTime<Utc>, to: DateTime<Utc>) -> Self {
+        Self {
+            from_iso: fmt_ts(from),
+            to_iso: fmt_ts(to),
+            from_human: fmt_human(from),
+            to_human: fmt_human(to),
+        }
+    }
+}
+
+/// Snapshot of the per-target live region: uptime stats + recent rows +
+/// last-seen status. Cached in `AppState::live_data_cache` for 5s; both
+/// the full-page detail view and the htmx live-partial poll read from
+/// it so a burst of either kind collapses to one CH round-trip.
+#[derive(Clone)]
+pub struct LiveData {
+    pub uptime: UptimeStatsView,
+    pub result_rows: Vec<ResultRow>,
+    pub results_has_more: bool,
+    pub last_status: &'static str,
+    pub last_at_iso: String,
+}
+
+/// Cached front door for [`load_live_data`]. Returns a moka-shared
+/// `Arc<LiveData>` keyed on `(org, target_id, range_key)`. Preset
+/// ranges are cached for 5s; ad-hoc `from`/`to` windows skip the cache
+/// (one-off queries shouldn't pollute the shared bucket). Both the
+/// full-page `index` and the htmx `live_partial` go through here so a
+/// burst of either request type collapses to a single CH round-trip.
+async fn load_live_data_cached(
+    state: &AppState,
+    org: OrgId,
+    target_id: Uuid,
+    range_key: &'static str,
+    custom_from: Option<DateTime<Utc>>,
+    custom_to: Option<DateTime<Utc>>,
+) -> WebResult<Arc<LiveData>> {
+    let cacheable = custom_from.is_none() && custom_to.is_none();
+    if cacheable {
+        let key = (org, target_id, range_key);
+        if let Some(data) = state.live_data_cache.get(&key) {
+            return Ok(data);
+        }
+        let (from, to) = resolve_window(range_key, custom_from, custom_to);
+        let data = Arc::new(load_live_data(state, org, target_id, from, to).await?);
+        state.live_data_cache.insert(key, data.clone());
+        Ok(data)
+    } else {
+        let (from, to) = resolve_window(range_key, custom_from, custom_to);
+        Ok(Arc::new(
+            load_live_data(state, org, target_id, from, to).await?,
+        ))
+    }
+}
+
+/// Cheapest possible read of "what status is this monitor in right
+/// now?" — one row from the last [`LAST_RESULT_WINDOW_DAYS`] days.
+/// Used by the incidents tab so the header badge doesn't require the
+/// full uptime + recent-results scan `load_live_data` performs.
+async fn latest_status_probe(
+    state: &AppState,
+    org: OrgId,
+    target_id: Uuid,
+) -> WebResult<(&'static str, String)> {
+    let to = Utc::now();
+    let from = to - Duration::days(LAST_RESULT_WINDOW_DAYS);
+    let row = state
+        .results_store
+        .list_results(org, target_id, TimeRange { from, to }, 1, 0)
+        .await?
+        .into_iter()
+        .next();
+    Ok((
+        row.as_ref().map(|r| r.status.as_str()).unwrap_or(""),
+        row.map(|r| fmt_ts(r.timestamp)).unwrap_or_default(),
+    ))
 }
 
 // Shared "what does the live detail region show?" loader. The full-page
@@ -256,8 +339,9 @@ pub async fn index(
 
     let range_key = resolve_range_key(params.range.as_deref(), &RANGE_KEYS, DEFAULT_RANGE);
     let (from, to) = resolve_window(range_key, params.from, params.to);
-
-    let live = load_live_data(&state, org, target.id, from, to).await?;
+    let labels = WindowLabels::new(from, to);
+    let live =
+        load_live_data_cached(&state, org, target.id, range_key, params.from, params.to).await?;
     let ongoing_count = ongoing_from_status(live.last_status);
     let config_json = serde_json::to_string_pretty(&target.check)
         .map_err(|e| AppError::Other(anyhow::anyhow!(e)))?;
@@ -275,31 +359,26 @@ pub async fn index(
         enabled: target.enabled,
         tags: target.tags,
         last_status: live.last_status,
-        last_at_iso: live.last_at_iso,
-        uptime: live.uptime,
-        results: live.result_rows,
+        last_at_iso: live.last_at_iso.clone(),
+        uptime: live.uptime.clone(),
+        results: live.result_rows.clone(),
         results_has_more: live.results_has_more,
         config_json,
         range: range_key,
         range_options: build_range_options(range_key, &RANGE_KEYS),
         range_base_path: format!("/targets/{}", target.id),
-        from_iso: fmt_ts(from),
-        to_iso: fmt_ts(to),
-        from_human: fmt_human(from),
-        to_human: fmt_human(to),
+        from_iso: labels.from_iso,
+        to_iso: labels.to_iso,
+        from_human: labels.from_human,
+        to_human: labels.to_human,
     })
 }
 
 /// htmx-polled fragment that re-renders the KPI cards + recent-results
 /// table. Byte-identical to the section the full page initially served
-/// so swap is invisible. The header (status badge, action buttons),
-/// charts, and config disclosure stay outside this region — they're
-/// either user-triggered or too heavy to re-render every tick.
-///
-/// Cached via `live_partial_cache` (5s TTL) so N concurrent pollers for
-/// the same target collapse to one CH round-trip + render per window.
-/// Custom `from`/`to` query params skip the cache (one-off ad-hoc
-/// ranges shouldn't pollute the shared bucket).
+/// so swap is invisible. Reads from `live_data_cache` (5s TTL); a
+/// burst of pollers + the full-page handler share the same snapshot.
+/// Custom `from`/`to` query params skip the cache.
 pub async fn live_partial(
     _auth: AuthedBrowser,
     CurrentOrg(org): CurrentOrg,
@@ -314,47 +393,32 @@ pub async fn live_partial(
         .ok_or_else(|| AppError::not_found(codes::TARGET_NOT_FOUND, "monitor not found"))?;
 
     let range_key = resolve_range_key(params.range.as_deref(), &RANGE_KEYS, DEFAULT_RANGE);
-    let cache_key = (org, target.id, range_key);
-    let cacheable = params.from.is_none() && params.to.is_none();
-
-    if cacheable && let Some(body) = state.live_partial_cache.get(&cache_key) {
-        return Ok(html_response(body));
-    }
-
-    let (from, to) = resolve_window(range_key, params.from, params.to);
-    let live = load_live_data(&state, org, target.id, from, to).await?;
+    let live =
+        load_live_data_cached(&state, org, target.id, range_key, params.from, params.to).await?;
 
     let page = DetailLive {
         id: target.id.to_string(),
         name: target.name,
         range: range_key,
-        uptime: live.uptime,
-        results: live.result_rows,
+        uptime: live.uptime.clone(),
+        results: live.result_rows.clone(),
         results_has_more: live.results_has_more,
-        last_at_iso: live.last_at_iso,
+        last_at_iso: live.last_at_iso.clone(),
     };
     let rendered = page
         .render()
         .map_err(|e| AppError::Other(anyhow::anyhow!(e)))?;
-    let body = Bytes::from(rendered);
-    if cacheable {
-        state.live_partial_cache.insert(cache_key, body.clone());
-    }
-    Ok(html_response(body))
-}
-
-fn html_response(body: Bytes) -> Response {
-    Response::builder()
-        .status(StatusCode::OK)
-        .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
-        // The htmx poll URL is time-relative ("range=24h" → window relative
-        // to now). Browser cache would silently serve stale rows even after
-        // the server's 5s TTL elapsed; explicitly opt out.
-        .header(header::CACHE_CONTROL, "no-store")
-        .body(Body::from(body))
-        .unwrap_or_else(|_| {
-            (StatusCode::INTERNAL_SERVER_ERROR, "response build failed").into_response()
-        })
+    Ok((
+        [
+            (header::CONTENT_TYPE, "text/html; charset=utf-8"),
+            // The htmx poll URL is time-relative ("range=24h" → window
+            // relative to now). Browser cache would silently serve
+            // stale rows even after the server's 5s TTL elapsed.
+            (header::CACHE_CONTROL, "no-store"),
+        ],
+        rendered,
+    )
+        .into_response())
 }
 
 fn resolve_range_key(
@@ -367,7 +431,9 @@ fn resolve_range_key(
 }
 
 /// Maps a preset range key to a window. Explicit `from`/`to` query params
-/// override the preset (custom range case).
+/// override the preset (custom range case). Covers every key from both
+/// `RANGE_KEYS` and `INCIDENT_RANGE_KEYS` so the shared cached loader
+/// can serve either tab without falling back to the default branch.
 fn resolve_window(
     key: &'static str,
     from: Option<DateTime<Utc>>,
@@ -378,6 +444,7 @@ fn resolve_window(
         "1h" => Duration::hours(1),
         "7d" => Duration::days(7),
         "30d" => Duration::days(30),
+        "90d" => Duration::days(90),
         _ => Duration::hours(24),
     };
     (from.unwrap_or(to - span), to)
@@ -419,19 +486,17 @@ impl From<CheckResult> for ResultRow {
 impl From<Incident> for IncidentRow {
     fn from(inc: Incident) -> Self {
         let ongoing = inc.ended_at.is_none();
-        let duration_human = match (inc.ended_at, inc.duration_secs) {
-            (Some(_), Some(secs)) => humanize_duration(Duration::seconds(secs as i64)),
-            (Some(ended), None) => humanize_duration(ended - inc.started_at),
-            (None, _) => "Ongoing".into(),
-        };
+        let duration_secs = inc.ended_at.map(|end| {
+            inc.duration_secs
+                .map(|s| s as i64)
+                .unwrap_or_else(|| (end - inc.started_at).num_seconds().max(0))
+        });
         Self {
-            id: inc.id.to_string(),
+            id: inc.id,
             severity: inc.status.as_str(),
-            started_iso: fmt_ts(inc.started_at),
-            started_human: fmt_human(inc.started_at),
-            ended_iso: inc.ended_at.map(fmt_ts),
-            ended_human: inc.ended_at.map(fmt_human),
-            duration_human,
+            started_at: inc.started_at,
+            ended_at: inc.ended_at,
+            duration_secs,
             check_count: inc.check_count,
             error_sample: inc.error_sample.unwrap_or_default(),
             ongoing,
@@ -460,19 +525,20 @@ pub async fn incidents(
     let (from, to) = resolve_incident_window(range_key, params.from, params.to);
     let time_range = TimeRange { from, to };
 
+    let labels = WindowLabels::new(from, to);
     let interval = target.interval;
-    let (live, mut incidents) =
-        tokio::try_join!(load_live_data(&state, org, target.id, from, to), async {
+    // The incidents tab needs only the badge's `last_status` from the
+    // live region — not the uptime stats or 60 recent rows. Probe one
+    // row instead of running the full live loader; a 90d preset would
+    // otherwise scan the entire window for the same single field.
+    let ((last_status, last_at_iso), mut incidents) =
+        tokio::try_join!(latest_status_probe(&state, org, target.id), async {
             state
                 .results_store
                 .list_incidents(
                     org,
                     target.id,
-                    time_range,
-                    interval,
-                    false,
-                    INCIDENTS_PAGE_LIMIT + 1,
-                    0,
+                    IncidentListQuery::page(time_range, interval, INCIDENTS_PAGE_LIMIT + 1),
                 )
                 .await
                 .map_err(WebError::from)
@@ -486,7 +552,7 @@ pub async fn incidents(
     // what the Monitor tab shows. Fall back to the list (e.g. user
     // narrowed to a window where last_status is stale) by counting
     // open runs the coalescer kept.
-    let ongoing_count = ongoing_from_status(live.last_status)
+    let ongoing_count = ongoing_from_status(last_status)
         .max(incidents.iter().filter(|i| i.ended_at.is_none()).count());
     let (kind, address) = describe_check(&target.check);
 
@@ -501,17 +567,17 @@ pub async fn incidents(
         interval_s: target.interval.as_secs(),
         enabled: target.enabled,
         tags: target.tags,
-        last_status: live.last_status,
-        last_at_iso: live.last_at_iso,
+        last_status,
+        last_at_iso,
         incidents: incidents.into_iter().map(IncidentRow::from).collect(),
         incidents_has_more,
         range: range_key,
         range_options: build_range_options(range_key, &INCIDENT_RANGE_KEYS),
         range_base_path: format!("/targets/{}/incidents", target.id),
-        from_iso: fmt_ts(from),
-        to_iso: fmt_ts(to),
-        from_human: fmt_human(from),
-        to_human: fmt_human(to),
+        from_iso: labels.from_iso,
+        to_iso: labels.to_iso,
+        from_human: labels.from_human,
+        to_human: labels.to_human,
     })
 }
 
@@ -729,7 +795,7 @@ mod tests {
         };
         let row = IncidentRow::from(inc);
         assert!(!row.ongoing);
-        assert_eq!(row.duration_human, "7m");
+        assert_eq!(row.duration_secs, Some(7 * 60));
     }
 
     fn sample_incidents_page(incidents: Vec<IncidentRow>, ongoing_count: usize) -> IncidentsPage {
@@ -759,14 +825,13 @@ mod tests {
     }
 
     fn ongoing_row() -> IncidentRow {
+        use chrono::TimeZone;
         IncidentRow {
-            id: "01J000000000000000000ONGOING".into(),
+            id: Uuid::from_u128(0x0000_0001),
             severity: "down",
-            started_iso: "2026-05-13T11:50:00Z".into(),
-            started_human: "2026-05-13 11:50 UTC".into(),
-            ended_iso: None,
-            ended_human: None,
-            duration_human: "Ongoing".into(),
+            started_at: Utc.with_ymd_and_hms(2026, 5, 13, 11, 50, 0).unwrap(),
+            ended_at: None,
+            duration_secs: None,
             check_count: 4,
             error_sample: "connection refused".into(),
             ongoing: true,
@@ -774,14 +839,13 @@ mod tests {
     }
 
     fn resolved_row() -> IncidentRow {
+        use chrono::TimeZone;
         IncidentRow {
-            id: "01J000000000000000000RESOLVD".into(),
+            id: Uuid::from_u128(0x0000_0002),
             severity: "down",
-            started_iso: "2026-05-12T08:00:00Z".into(),
-            started_human: "2026-05-12 08:00 UTC".into(),
-            ended_iso: Some("2026-05-12T08:07:00Z".into()),
-            ended_human: Some("2026-05-12 08:07 UTC".into()),
-            duration_human: "7m 0s".into(),
+            started_at: Utc.with_ymd_and_hms(2026, 5, 12, 8, 0, 0).unwrap(),
+            ended_at: Some(Utc.with_ymd_and_hms(2026, 5, 12, 8, 7, 0).unwrap()),
+            duration_secs: Some(420),
             check_count: 7,
             error_sample: "HTTP 503 Service Unavailable".into(),
             ongoing: false,

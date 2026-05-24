@@ -6,10 +6,11 @@
 //! that is what makes the `immutable` response header *truthful* rather
 //! than a year-long promise the server can't keep.
 //!
-//! Templates must reference assets only through the [`filters::asset`]
-//! askama filter (`{{ "css/app.css"|asset }}`). A raw `/static/...` literal
-//! in a template is a bug the `no_raw_static_refs_in_templates` test fails
-//! on, so cache-busting can never silently regress.
+//! Templates must reference assets only through the `asset` askama filter
+//! (`{{ "css/app.css"|asset }}`, registered in `crate::web::filters`).
+//! A raw `/static/...` literal in a template is a bug the
+//! `no_raw_static_refs_in_templates` test fails on, so cache-busting
+//! can never silently regress.
 //!
 //! In release builds `rust_embed` bakes the files into the binary, so the
 //! fingerprint is stable for that binary's lifetime. In debug builds it
@@ -98,53 +99,6 @@ where
 {
     use axum::routing::get;
     router.route("/static/{*path}", get(serve))
-}
-
-/// askama custom filters. A bare-identifier filter `{{ x|asset }}` resolves
-/// to the type `filters::asset` that `#[filter_fn]` generates, so each
-/// module that derives a template brings this into scope with
-/// `use crate::web::assets::filters;`.
-pub mod filters {
-    /// `{{ "css/app.css"|asset }}` → the cache-busting URL for that asset.
-    /// `#[filter_fn]` expands this into the filter type askama's codegen
-    /// expects; the contract is piped value first, render environment
-    /// second, `askama::Result` out.
-    #[askama::filter_fn]
-    pub fn asset(value: &str, _: &dyn askama::Values) -> askama::Result<String> {
-        Ok(super::url(value))
-    }
-
-    /// AGPL-3.0 §13 source offer. `build.rs` bakes the repository URL and
-    /// build commit in via `rustc-env`. `source_url` deep-links to the
-    /// exact source the running binary was built from — `…/tree/<commit>`
-    /// when the commit is known, the repo root otherwise (an empty commit
-    /// is the "no git context" signal, so no sentinel string is shared
-    /// across the build/render boundary). `source_commit` is the short SHA
-    /// for display, empty when unknown. The footer renders both so every
-    /// network user is offered the Corresponding Source. The piped value is
-    /// unused — invoked as `{{ ""|source_url }}`.
-    static SOURCE_URL: std::sync::LazyLock<String> =
-        std::sync::LazyLock::new(|| match env!("SM_SOURCE_COMMIT") {
-            "" => env!("SM_SOURCE_URL").to_string(),
-            commit => format!("{}/tree/{commit}", env!("SM_SOURCE_URL")),
-        });
-
-    #[askama::filter_fn]
-    pub fn source_url(_: &str, _: &dyn askama::Values) -> askama::Result<&'static str> {
-        Ok(SOURCE_URL.as_str())
-    }
-
-    #[askama::filter_fn]
-    pub fn source_commit(_: &str, _: &dyn askama::Values) -> askama::Result<&'static str> {
-        Ok(env!("SM_SOURCE_COMMIT"))
-    }
-
-    /// Crate version baked at compile time. Public build string, safe to
-    /// show pre-auth — no host/tenant data. Invoked as `{{ ""|version }}`.
-    #[askama::filter_fn]
-    pub fn version(_: &str, _: &dyn askama::Values) -> askama::Result<&'static str> {
-        Ok(env!("CARGO_PKG_VERSION"))
-    }
 }
 
 #[cfg(test)]

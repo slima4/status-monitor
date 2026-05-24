@@ -15,7 +15,7 @@ use crate::domain::{
     CheckResult, CheckStatus, Incident, OrgId, coalesce_incidents, coalesce_incidents_bad_only,
 };
 use crate::error::Result;
-use crate::storage::traits::{ResultSink, ResultsStore, TimeRange, UptimeStats};
+use crate::storage::traits::{IncidentListQuery, ResultSink, ResultsStore, TimeRange, UptimeStats};
 
 const TABLE: &str = "check_results";
 
@@ -517,21 +517,23 @@ impl ResultsStore for ClickhouseResultsStore {
         &self,
         org: OrgId,
         target_id: Uuid,
-        range: TimeRange,
-        monitor_interval: std::time::Duration,
-        ongoing_only: bool,
-        limit: usize,
-        offset: usize,
+        query: IncidentListQuery,
     ) -> Result<Vec<Incident>> {
-        let range_end = range.to;
-        let rows = self.fetch_bad_only_rows(org, target_id, range).await?;
+        let range_end = query.range.to;
+        let rows = self
+            .fetch_bad_only_rows(org, target_id, query.range)
+            .await?;
         let mut incidents =
-            coalesce_from_bad_only_rows(target_id, rows, range_end, monitor_interval);
-        if ongoing_only {
+            coalesce_from_bad_only_rows(target_id, rows, range_end, query.monitor_interval);
+        if query.ongoing_only {
             incidents.retain(|i| i.ended_at.is_none());
         }
         incidents.sort_by_key(|i| std::cmp::Reverse(i.started_at));
-        Ok(incidents.into_iter().skip(offset).take(limit).collect())
+        Ok(incidents
+            .into_iter()
+            .skip(query.offset)
+            .take(query.limit)
+            .collect())
     }
 
     async fn current_status_breakdown(

@@ -24,7 +24,7 @@ use serde::Deserialize;
 use super::config::{BRAND, MarketingCfg};
 use super::pages::{CachedRender, cached_render, not_found, serve_cached};
 use super::seo::{JsonLd, OpenGraph, json_ld_blog_posting};
-use crate::web::assets::filters;
+use crate::web::filters;
 
 const POST_CACHE_CONTROL: HeaderValue =
     HeaderValue::from_static("public, max-age=600, stale-while-revalidate=86400");

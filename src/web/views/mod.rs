@@ -7,6 +7,8 @@ pub mod targets_detail;
 pub mod targets_form;
 pub mod targets_list;
 
+use std::fmt;
+
 use axum::response::{IntoResponse, Response};
 use chrono::{DateTime, Duration as ChronoDuration, SecondsFormat, Utc};
 use serde::Serialize;
@@ -65,28 +67,39 @@ pub(crate) fn fmt_human(t: DateTime<Utc>) -> String {
 /// Two-unit duration string, e.g. `"45s"`, `"17m"`, `"2h 14m"`, `"1d 1h"`.
 /// Negative durations clamp to zero.
 pub(crate) fn humanize_duration(d: ChronoDuration) -> String {
-    let total = d.num_seconds().max(0);
-    if total < 60 {
-        return format!("{total}s");
-    }
-    let mins = total / 60;
-    if mins < 60 {
-        return format!("{mins}m");
-    }
-    let hours = mins / 60;
-    let rem_mins = mins % 60;
-    if hours < 24 {
-        if rem_mins == 0 {
-            return format!("{hours}h");
+    HumanDur(d.num_seconds()).to_string()
+}
+
+/// Display wrapper for [`humanize_duration`] that writes directly to a
+/// `fmt::Formatter` instead of allocating an intermediate `String`. Cheap
+/// to construct from the raw seconds the storage layer already returns.
+pub struct HumanDur(pub i64);
+
+impl fmt::Display for HumanDur {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let total = self.0.max(0);
+        if total < 60 {
+            return write!(f, "{total}s");
         }
-        return format!("{hours}h {rem_mins}m");
-    }
-    let days = hours / 24;
-    let rem_hours = hours % 24;
-    if rem_hours == 0 {
-        format!("{days}d")
-    } else {
-        format!("{days}d {rem_hours}h")
+        let mins = total / 60;
+        if mins < 60 {
+            return write!(f, "{mins}m");
+        }
+        let hours = mins / 60;
+        let rem_mins = mins % 60;
+        if hours < 24 {
+            if rem_mins == 0 {
+                return write!(f, "{hours}h");
+            }
+            return write!(f, "{hours}h {rem_mins}m");
+        }
+        let days = hours / 24;
+        let rem_hours = hours % 24;
+        if rem_hours == 0 {
+            write!(f, "{days}d")
+        } else {
+            write!(f, "{days}d {rem_hours}h")
+        }
     }
 }
 
