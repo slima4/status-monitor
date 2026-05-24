@@ -20,6 +20,10 @@ use crate::web::{AuthedBrowser, CurrentOrg};
 const RESULTS_PAGE_LIMIT: usize = 60;
 const RANGE_KEYS: [&str; 4] = ["1h", "24h", "7d", "30d"];
 const DEFAULT_RANGE: &str = "24h";
+// Decoupled from the user's chart range so the header badge reflects the
+// monitor's actual current state, not "no data" when the user picked 1h
+// but the last check was 2h ago.
+const LAST_RESULT_WINDOW_DAYS: i64 = 7;
 
 #[derive(Debug, Default, Deserialize)]
 pub struct DetailParams {
@@ -118,7 +122,23 @@ pub async fn index(
         results.truncate(RESULTS_PAGE_LIMIT);
     }
 
-    let last_status = results.first().map(|r| r.status.as_str()).unwrap_or("");
+    // Header badge: prefer the newest row in the chart window. If the user
+    // picked a short range with no recent check, fall back to a 7d lookup
+    // so the badge still reflects current state instead of going blank.
+    let last_status = if let Some(latest) = results.first() {
+        latest.status.as_str()
+    } else if let Some(window) = wider_status_window(from, to) {
+        state
+            .results_store
+            .list_results(org, target.id, window, 1, 0)
+            .await?
+            .into_iter()
+            .next()
+            .map(|r| r.status.as_str())
+            .unwrap_or("")
+    } else {
+        ""
+    };
     let result_rows = results.into_iter().map(ResultRow::from).collect();
     let config_json = serde_json::to_string_pretty(&target.check)
         .map_err(|e| AppError::Other(anyhow::anyhow!(e)))?;
@@ -167,6 +187,18 @@ fn resolve_window(
         _ => Duration::hours(24),
     };
     (from.unwrap_or(to - span), to)
+}
+
+/// Fallback window for the "current health" badge when the user-picked
+/// chart range is empty. Returns `None` when the user's range already
+/// covers the last-result window so callers can skip a redundant query.
+fn wider_status_window(from: DateTime<Utc>, to: DateTime<Utc>) -> Option<TimeRange> {
+    let widened = to - Duration::days(LAST_RESULT_WINDOW_DAYS);
+    if from <= widened {
+        None
+    } else {
+        Some(TimeRange { from: widened, to })
+    }
 }
 
 fn build_range_options(active: &'static str) -> Vec<RangeOption> {
@@ -248,6 +280,25 @@ mod tests {
         let opts = build_range_options("7d");
         assert!(opts.iter().any(|o| o.key == "7d" && o.selected));
         assert_eq!(opts.iter().filter(|o| o.selected).count(), 1);
+    }
+
+    #[test]
+    fn wider_status_window_returns_some_for_short_user_range() {
+        let to = DateTime::parse_from_rfc3339("2026-05-13T12:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let win = wider_status_window(to - Duration::hours(1), to).expect("widen");
+        assert_eq!(win.from, to - Duration::days(LAST_RESULT_WINDOW_DAYS));
+        assert_eq!(win.to, to);
+    }
+
+    #[test]
+    fn wider_status_window_returns_none_for_wide_user_range() {
+        let to = DateTime::parse_from_rfc3339("2026-05-13T12:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        assert!(wider_status_window(to - Duration::days(30), to).is_none());
+        assert!(wider_status_window(to - Duration::days(LAST_RESULT_WINDOW_DAYS), to).is_none());
     }
 
     #[test]
