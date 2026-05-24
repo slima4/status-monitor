@@ -92,6 +92,7 @@ impl ResultsStore for InMemorySink {
         _org: OrgId,
         target_id: Uuid,
         range: TimeRange,
+        _monitor_interval: std::time::Duration,
         ongoing_only: bool,
         limit: usize,
         offset: usize,

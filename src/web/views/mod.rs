@@ -8,7 +8,7 @@ pub mod targets_form;
 pub mod targets_list;
 
 use axum::response::{IntoResponse, Response};
-use chrono::{DateTime, SecondsFormat, Utc};
+use chrono::{DateTime, Duration as ChronoDuration, SecondsFormat, Utc};
 use serde::Serialize;
 
 use crate::domain::{CheckSpec, OrgId};
@@ -60,4 +60,48 @@ pub(crate) fn fmt_ts(t: DateTime<Utc>) -> String {
 /// Pair with `fmt_ts` (ISO 8601) for `<time datetime>` round-trips.
 pub(crate) fn fmt_human(t: DateTime<Utc>) -> String {
     t.format("%Y-%m-%d %H:%M UTC").to_string()
+}
+
+/// Two-unit duration string, e.g. `"45s"`, `"17m"`, `"2h 14m"`, `"1d 1h"`.
+/// Negative durations clamp to zero.
+pub(crate) fn humanize_duration(d: ChronoDuration) -> String {
+    let total = d.num_seconds().max(0);
+    if total < 60 {
+        return format!("{total}s");
+    }
+    let mins = total / 60;
+    if mins < 60 {
+        return format!("{mins}m");
+    }
+    let hours = mins / 60;
+    let rem_mins = mins % 60;
+    if hours < 24 {
+        if rem_mins == 0 {
+            return format!("{hours}h");
+        }
+        return format!("{hours}h {rem_mins}m");
+    }
+    let days = hours / 24;
+    let rem_hours = hours % 24;
+    if rem_hours == 0 {
+        format!("{days}d")
+    } else {
+        format!("{days}d {rem_hours}h")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn humanize_duration_picks_largest_unit() {
+        assert_eq!(humanize_duration(ChronoDuration::seconds(0)), "0s");
+        assert_eq!(humanize_duration(ChronoDuration::seconds(45)), "45s");
+        assert_eq!(humanize_duration(ChronoDuration::minutes(17)), "17m");
+        assert_eq!(humanize_duration(ChronoDuration::minutes(134)), "2h 14m");
+        assert_eq!(humanize_duration(ChronoDuration::hours(25)), "1d 1h");
+        assert_eq!(humanize_duration(ChronoDuration::hours(48)), "2d");
+        assert_eq!(humanize_duration(ChronoDuration::seconds(-5)), "0s");
+    }
 }

@@ -121,12 +121,16 @@ pub trait ResultsStore: Send + Sync {
     ) -> Result<Vec<CheckResult>>;
     async fn uptime(&self, org: OrgId, target_id: Uuid, range: TimeRange) -> Result<UptimeStats>;
     /// Coalesce consecutive `down`/`error` results in `range` into incidents.
+    /// `monitor_interval` lets the storage layer pre-filter to bad statuses
+    /// at the database (huge wire-cost reduction on healthy monitors) and
+    /// infer recovery from gaps larger than `2 × interval`.
     /// `ongoing_only` filters out incidents that have already ended.
     async fn list_incidents(
         &self,
         org: OrgId,
         target_id: Uuid,
         range: TimeRange,
+        monitor_interval: std::time::Duration,
         ongoing_only: bool,
         limit: usize,
         offset: usize,

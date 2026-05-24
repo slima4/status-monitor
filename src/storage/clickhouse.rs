@@ -11,7 +11,9 @@ use uuid::Uuid;
 
 use crate::api::types::StatusBreakdown;
 use crate::config::ClickhouseConfig;
-use crate::domain::{CheckResult, CheckStatus, Incident, OrgId, coalesce_incidents};
+use crate::domain::{
+    CheckResult, CheckStatus, Incident, OrgId, coalesce_incidents, coalesce_incidents_bad_only,
+};
 use crate::error::Result;
 use crate::storage::traits::{ResultSink, ResultsStore, TimeRange, UptimeStats};
 
@@ -356,33 +358,39 @@ impl ClickhouseResultsStore {
         Self { client }
     }
 
-    /// Narrow projection: only the four columns incident coalescing needs.
-    /// Avoids paying for `response_code`/`response_size`/timing fields when
-    /// the caller only wants to detect bad-status runs. `org_id` is the
-    /// leading sort key — filtering on it is mandatory or the query degrades
-    /// to a full scan.
-    async fn fetch_incident_rows(
+    /// Pulls only `down`/`error` observations from CH so the wire and
+    /// decode cost stays proportional to *actual* incidents instead of
+    /// total check volume. On a healthy 1-min monitor over 30d that's
+    /// ~99% fewer rows. Pair with [`coalesce_incidents_bad_only`] — the
+    /// all-row coalescer needs `up`/`degraded` markers to detect recovery,
+    /// which we no longer pull.
+    async fn fetch_bad_only_rows(
         &self,
         org: OrgId,
         target_id: Uuid,
         range: TimeRange,
     ) -> Result<Vec<IncidentRow>> {
+        let down = CheckStatus::Down.as_enum8();
+        let error = CheckStatus::Error.as_enum8();
         let rows: Vec<IncidentRow> = self
             .client
             .query(&format!(
                 "SELECT target_id, timestamp, status, error FROM {TABLE} \
                  WHERE org_id = ? AND target_id = ? \
+                 AND status IN (?, ?) \
                  AND timestamp >= fromUnixTimestamp64Milli(?) \
                  AND timestamp < fromUnixTimestamp64Milli(?) \
                  ORDER BY timestamp ASC"
             ))
             .bind(org.0)
             .bind(target_id)
+            .bind(down)
+            .bind(error)
             .bind(range.from.timestamp_millis())
             .bind(range.to.timestamp_millis())
             .fetch_all::<IncidentRow>()
             .await
-            .context("clickhouse fetch_incident_rows")?;
+            .context("clickhouse fetch_bad_only_rows")?;
         Ok(rows)
     }
 }
@@ -406,6 +414,31 @@ fn coalesce_from_incident_rows(target_id: Uuid, rows: Vec<IncidentRow>) -> Vec<I
                 .unwrap_or_else(Utc::now);
             (ts, CheckStatus::from_enum8(r.status), r.error)
         }),
+    )
+}
+
+fn coalesce_from_bad_only_rows(
+    target_id: Uuid,
+    rows: Vec<IncidentRow>,
+    range_end: DateTime<Utc>,
+    monitor_interval: std::time::Duration,
+) -> Vec<Incident> {
+    // 2× the configured interval gives the scheduler one missed tick of
+    // grace before we declare a recovery happened in the gap. Floored at
+    // 120s so a sub-minute interval still tolerates one missed tick.
+    let interval_secs = monitor_interval.as_secs().max(60);
+    let threshold = chrono::Duration::seconds((interval_secs * 2) as i64);
+    coalesce_incidents_bad_only(
+        target_id,
+        rows.into_iter().map(|r| {
+            let ts = Utc
+                .timestamp_millis_opt(r.timestamp)
+                .single()
+                .unwrap_or_else(Utc::now);
+            (ts, CheckStatus::from_enum8(r.status), r.error)
+        }),
+        range_end,
+        threshold,
     )
 }
 
@@ -485,12 +518,15 @@ impl ResultsStore for ClickhouseResultsStore {
         org: OrgId,
         target_id: Uuid,
         range: TimeRange,
+        monitor_interval: std::time::Duration,
         ongoing_only: bool,
         limit: usize,
         offset: usize,
     ) -> Result<Vec<Incident>> {
-        let rows = self.fetch_incident_rows(org, target_id, range).await?;
-        let mut incidents = coalesce_from_incident_rows(target_id, rows);
+        let range_end = range.to;
+        let rows = self.fetch_bad_only_rows(org, target_id, range).await?;
+        let mut incidents =
+            coalesce_from_bad_only_rows(target_id, rows, range_end, monitor_interval);
         if ongoing_only {
             incidents.retain(|i| i.ended_at.is_none());
         }

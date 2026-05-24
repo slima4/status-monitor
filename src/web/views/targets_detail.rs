@@ -9,13 +9,14 @@ use chrono::{DateTime, Duration, Utc};
 use serde::Deserialize;
 use uuid::Uuid;
 
+use crate::api::error::codes;
 use crate::app::AppState;
-use crate::domain::{CheckResult, OrgId};
+use crate::domain::{CheckResult, Incident, OrgId};
 use crate::error::AppError;
 use crate::storage::{TimeRange, UptimeStats};
 use crate::web::assets::filters;
-use crate::web::error::WebResult;
-use crate::web::views::{describe_check, fmt_human, fmt_ts};
+use crate::web::error::{WebError, WebResult};
+use crate::web::views::{describe_check, fmt_human, fmt_ts, humanize_duration};
 use crate::web::{AuthedBrowser, CurrentOrg};
 
 // A raw row per check floods the page; the latency/breakdown charts above
@@ -28,6 +29,26 @@ const DEFAULT_RANGE: &str = "24h";
 // monitor's actual current state, not "no data" when the user picked 1h
 // but the last check was 2h ago.
 const LAST_RESULT_WINDOW_DAYS: i64 = 7;
+
+const SUBTAB_MONITOR: &str = "monitor";
+const SUBTAB_INCIDENTS: &str = "incidents";
+
+const INCIDENT_RANGE_KEYS: [&str; 4] = ["24h", "7d", "30d", "90d"];
+const INCIDENT_DEFAULT_RANGE: &str = "30d";
+const INCIDENTS_PAGE_LIMIT: usize = 100;
+
+fn ongoing_from_status(status: &str) -> usize {
+    // Loose semantic: badge tracks "current state is bad", not a
+    // separate CH scan. Misses the "fixed 30s ago, badge still set"
+    // case in exchange for zero extra queries on the highest-traffic
+    // page. Coalesce only ever opens one trailing run per target so
+    // the count is 0 or 1.
+    if matches!(status, "down" | "error") {
+        1
+    } else {
+        0
+    }
+}
 
 #[derive(Debug, Default, Deserialize)]
 pub struct DetailParams {
@@ -47,6 +68,21 @@ pub struct ResultRow {
     pub error: String,
 }
 
+pub struct IncidentRow {
+    pub id: String,
+    /// "down" | "error" | "degraded" — drives the `status-badge--*` CSS class.
+    pub severity: &'static str,
+    pub started_iso: String,
+    pub started_human: String,
+    pub ended_iso: Option<String>,
+    pub ended_human: Option<String>,
+    /// "7m 12s" / "2h 14m" / "Ongoing".
+    pub duration_human: String,
+    pub check_count: u64,
+    pub error_sample: String,
+    pub ongoing: bool,
+}
+
 #[derive(Template, WebTemplate)]
 #[template(path = "targets/partials/detail_live.html")]
 pub struct DetailLive {
@@ -60,9 +96,40 @@ pub struct DetailLive {
 }
 
 #[derive(Template, WebTemplate)]
+#[template(path = "targets/incidents.html")]
+pub struct IncidentsPage {
+    pub active_tab: &'static str,
+    pub subtab: &'static str,
+    pub ongoing_count: usize,
+    pub id: String,
+    pub name: String,
+    pub kind: &'static str,
+    pub address: String,
+    pub interval_s: u64,
+    pub enabled: bool,
+    pub tags: Vec<String>,
+    pub last_status: &'static str,
+    pub last_at_iso: String,
+    pub incidents: Vec<IncidentRow>,
+    pub incidents_has_more: bool,
+    pub range: &'static str,
+    pub range_options: Vec<RangeOption>,
+    pub range_base_path: String,
+    pub from_iso: String,
+    pub to_iso: String,
+    pub from_human: String,
+    pub to_human: String,
+}
+
+#[derive(Template, WebTemplate)]
 #[template(path = "targets/detail.html")]
 pub struct DetailPage {
     pub active_tab: &'static str,
+    /// Sub-tab strip selector under the monitor header. `"monitor"` on
+    /// this view; the Incidents page renders the same partial with
+    /// `"incidents"`.
+    pub subtab: &'static str,
+    pub ongoing_count: usize,
     pub id: String,
     pub name: String,
     pub kind: &'static str,
@@ -80,6 +147,7 @@ pub struct DetailPage {
     pub config_json: String,
     pub range: &'static str,
     pub range_options: Vec<RangeOption>,
+    pub range_base_path: String,
     pub from_iso: String,
     pub to_iso: String,
     pub from_human: String,
@@ -184,18 +252,21 @@ pub async fn index(
         .target_store
         .get(org, id)
         .await?
-        .ok_or_else(|| AppError::not_found("TARGET_NOT_FOUND", "monitor not found"))?;
+        .ok_or_else(|| AppError::not_found(codes::TARGET_NOT_FOUND, "monitor not found"))?;
 
-    let range_key = resolve_range_key(params.range.as_deref());
+    let range_key = resolve_range_key(params.range.as_deref(), &RANGE_KEYS, DEFAULT_RANGE);
     let (from, to) = resolve_window(range_key, params.from, params.to);
 
     let live = load_live_data(&state, org, target.id, from, to).await?;
+    let ongoing_count = ongoing_from_status(live.last_status);
     let config_json = serde_json::to_string_pretty(&target.check)
         .map_err(|e| AppError::Other(anyhow::anyhow!(e)))?;
     let (kind, address) = describe_check(&target.check);
 
     Ok(DetailPage {
         active_tab: "targets",
+        subtab: SUBTAB_MONITOR,
+        ongoing_count,
         id: target.id.to_string(),
         name: target.name,
         kind,
@@ -210,7 +281,8 @@ pub async fn index(
         results_has_more: live.results_has_more,
         config_json,
         range: range_key,
-        range_options: build_range_options(range_key),
+        range_options: build_range_options(range_key, &RANGE_KEYS),
+        range_base_path: format!("/targets/{}", target.id),
         from_iso: fmt_ts(from),
         to_iso: fmt_ts(to),
         from_human: fmt_human(from),
@@ -239,9 +311,9 @@ pub async fn live_partial(
         .target_store
         .get(org, id)
         .await?
-        .ok_or_else(|| AppError::not_found("TARGET_NOT_FOUND", "monitor not found"))?;
+        .ok_or_else(|| AppError::not_found(codes::TARGET_NOT_FOUND, "monitor not found"))?;
 
-    let range_key = resolve_range_key(params.range.as_deref());
+    let range_key = resolve_range_key(params.range.as_deref(), &RANGE_KEYS, DEFAULT_RANGE);
     let cache_key = (org, target.id, range_key);
     let cacheable = params.from.is_none() && params.to.is_none();
 
@@ -285,9 +357,13 @@ fn html_response(body: Bytes) -> Response {
         })
 }
 
-fn resolve_range_key(raw: Option<&str>) -> &'static str {
-    raw.and_then(|s| RANGE_KEYS.iter().copied().find(|k| *k == s))
-        .unwrap_or(DEFAULT_RANGE)
+fn resolve_range_key(
+    raw: Option<&str>,
+    keys: &[&'static str],
+    default: &'static str,
+) -> &'static str {
+    raw.and_then(|s| keys.iter().copied().find(|k| *k == s))
+        .unwrap_or(default)
 }
 
 /// Maps a preset range key to a window. Explicit `from`/`to` query params
@@ -319,9 +395,8 @@ fn wider_status_window(from: DateTime<Utc>, to: DateTime<Utc>) -> Option<TimeRan
     }
 }
 
-fn build_range_options(active: &'static str) -> Vec<RangeOption> {
-    RANGE_KEYS
-        .iter()
+fn build_range_options(active: &'static str, keys: &[&'static str]) -> Vec<RangeOption> {
+    keys.iter()
         .map(|k| RangeOption {
             key: k,
             selected: *k == active,
@@ -341,6 +416,120 @@ impl From<CheckResult> for ResultRow {
     }
 }
 
+impl From<Incident> for IncidentRow {
+    fn from(inc: Incident) -> Self {
+        let ongoing = inc.ended_at.is_none();
+        let duration_human = match (inc.ended_at, inc.duration_secs) {
+            (Some(_), Some(secs)) => humanize_duration(Duration::seconds(secs as i64)),
+            (Some(ended), None) => humanize_duration(ended - inc.started_at),
+            (None, _) => "Ongoing".into(),
+        };
+        Self {
+            id: inc.id.to_string(),
+            severity: inc.status.as_str(),
+            started_iso: fmt_ts(inc.started_at),
+            started_human: fmt_human(inc.started_at),
+            ended_iso: inc.ended_at.map(fmt_ts),
+            ended_human: inc.ended_at.map(fmt_human),
+            duration_human,
+            check_count: inc.check_count,
+            error_sample: inc.error_sample.unwrap_or_default(),
+            ongoing,
+        }
+    }
+}
+
+pub async fn incidents(
+    _auth: AuthedBrowser,
+    CurrentOrg(org): CurrentOrg,
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    Query(params): Query<DetailParams>,
+) -> WebResult<IncidentsPage> {
+    let target = state
+        .target_store
+        .get(org, id)
+        .await?
+        .ok_or_else(|| AppError::not_found(codes::TARGET_NOT_FOUND, "monitor not found"))?;
+
+    let range_key = resolve_range_key(
+        params.range.as_deref(),
+        &INCIDENT_RANGE_KEYS,
+        INCIDENT_DEFAULT_RANGE,
+    );
+    let (from, to) = resolve_incident_window(range_key, params.from, params.to);
+    let time_range = TimeRange { from, to };
+
+    let interval = target.interval;
+    let (live, mut incidents) =
+        tokio::try_join!(load_live_data(&state, org, target.id, from, to), async {
+            state
+                .results_store
+                .list_incidents(
+                    org,
+                    target.id,
+                    time_range,
+                    interval,
+                    false,
+                    INCIDENTS_PAGE_LIMIT + 1,
+                    0,
+                )
+                .await
+                .map_err(WebError::from)
+        },)?;
+
+    let incidents_has_more = incidents.len() > INCIDENTS_PAGE_LIMIT;
+    if incidents_has_more {
+        incidents.truncate(INCIDENTS_PAGE_LIMIT);
+    }
+    // Tab badge: prefer the live-status signal so the count matches
+    // what the Monitor tab shows. Fall back to the list (e.g. user
+    // narrowed to a window where last_status is stale) by counting
+    // open runs the coalescer kept.
+    let ongoing_count = ongoing_from_status(live.last_status)
+        .max(incidents.iter().filter(|i| i.ended_at.is_none()).count());
+    let (kind, address) = describe_check(&target.check);
+
+    Ok(IncidentsPage {
+        active_tab: "targets",
+        subtab: SUBTAB_INCIDENTS,
+        ongoing_count,
+        id: target.id.to_string(),
+        name: target.name,
+        kind,
+        address,
+        interval_s: target.interval.as_secs(),
+        enabled: target.enabled,
+        tags: target.tags,
+        last_status: live.last_status,
+        last_at_iso: live.last_at_iso,
+        incidents: incidents.into_iter().map(IncidentRow::from).collect(),
+        incidents_has_more,
+        range: range_key,
+        range_options: build_range_options(range_key, &INCIDENT_RANGE_KEYS),
+        range_base_path: format!("/targets/{}/incidents", target.id),
+        from_iso: fmt_ts(from),
+        to_iso: fmt_ts(to),
+        from_human: fmt_human(from),
+        to_human: fmt_human(to),
+    })
+}
+
+fn resolve_incident_window(
+    key: &'static str,
+    from: Option<DateTime<Utc>>,
+    to: Option<DateTime<Utc>>,
+) -> (DateTime<Utc>, DateTime<Utc>) {
+    let to = to.unwrap_or_else(Utc::now);
+    let span = match key {
+        "24h" => Duration::hours(24),
+        "7d" => Duration::days(7),
+        "90d" => Duration::days(90),
+        _ => Duration::days(30),
+    };
+    (from.unwrap_or(to - span), to)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -348,6 +537,8 @@ mod tests {
     fn sample_page() -> DetailPage {
         DetailPage {
             active_tab: "targets",
+            subtab: SUBTAB_MONITOR,
+            ongoing_count: 0,
             id: "00000000-0000-0000-0000-000000000001".into(),
             name: "api".into(),
             kind: "HTTP",
@@ -375,7 +566,8 @@ mod tests {
             results_has_more: false,
             config_json: r#"{"type":"http"}"#.into(),
             range: "24h",
-            range_options: build_range_options("24h"),
+            range_options: build_range_options("24h", &RANGE_KEYS),
+            range_base_path: "/targets/00000000-0000-0000-0000-000000000001".into(),
             from_iso: "2026-05-12T12:00:00Z".into(),
             to_iso: "2026-05-13T12:00:00Z".into(),
             from_human: "2026-05-12 12:00 UTC".into(),
@@ -405,7 +597,7 @@ mod tests {
 
     #[test]
     fn range_options_mark_active() {
-        let opts = build_range_options("7d");
+        let opts = build_range_options("7d", &RANGE_KEYS);
         assert!(opts.iter().any(|o| o.key == "7d" && o.selected));
         assert_eq!(opts.iter().filter(|o| o.selected).count(), 1);
     }
@@ -493,8 +685,177 @@ mod tests {
 
     #[test]
     fn resolve_range_key_clamps_to_allowed() {
-        assert_eq!(resolve_range_key(Some("1h")), "1h");
-        assert_eq!(resolve_range_key(Some("garbage")), "24h");
-        assert_eq!(resolve_range_key(None), "24h");
+        assert_eq!(
+            resolve_range_key(Some("1h"), &RANGE_KEYS, DEFAULT_RANGE),
+            "1h"
+        );
+        assert_eq!(
+            resolve_range_key(Some("garbage"), &RANGE_KEYS, DEFAULT_RANGE),
+            "24h"
+        );
+        assert_eq!(resolve_range_key(None, &RANGE_KEYS, DEFAULT_RANGE), "24h");
+    }
+
+    #[test]
+    fn resolve_incident_range_key_defaults_to_30d() {
+        let k = |s| resolve_range_key(s, &INCIDENT_RANGE_KEYS, INCIDENT_DEFAULT_RANGE);
+        assert_eq!(k(None), "30d");
+        assert_eq!(k(Some("")), "30d");
+        assert_eq!(k(Some("garbage")), "30d");
+        assert_eq!(k(Some("24h")), "24h");
+        assert_eq!(k(Some("90d")), "90d");
+    }
+
+    #[test]
+    fn incident_row_falls_back_to_start_end_when_duration_secs_missing() {
+        use chrono::TimeZone;
+        let start = Utc.with_ymd_and_hms(2026, 5, 12, 8, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2026, 5, 12, 8, 7, 0).unwrap();
+        let inc = crate::domain::Incident {
+            id: Uuid::nil(),
+            target_id: Uuid::nil(),
+            started_at: start,
+            ended_at: Some(end),
+            status: crate::domain::CheckStatus::Down,
+            duration_secs: None,
+            check_count: 7,
+            error_sample: None,
+            severity: Default::default(),
+            public_title: None,
+            public_description: None,
+            created_at: None,
+            updated_at: None,
+            updates: Vec::new(),
+        };
+        let row = IncidentRow::from(inc);
+        assert!(!row.ongoing);
+        assert_eq!(row.duration_human, "7m");
+    }
+
+    fn sample_incidents_page(incidents: Vec<IncidentRow>, ongoing_count: usize) -> IncidentsPage {
+        IncidentsPage {
+            active_tab: "targets",
+            subtab: SUBTAB_INCIDENTS,
+            ongoing_count,
+            id: "00000000-0000-0000-0000-000000000001".into(),
+            name: "api".into(),
+            kind: "HTTP",
+            address: "https://example.com".into(),
+            interval_s: 60,
+            enabled: true,
+            tags: vec!["prod".into()],
+            last_status: "down",
+            last_at_iso: "2026-05-13T12:00:00Z".into(),
+            incidents,
+            incidents_has_more: false,
+            range: "30d",
+            range_options: build_range_options("30d", &INCIDENT_RANGE_KEYS),
+            range_base_path: "/targets/00000000-0000-0000-0000-000000000001/incidents".into(),
+            from_iso: "2026-04-13T12:00:00Z".into(),
+            to_iso: "2026-05-13T12:00:00Z".into(),
+            from_human: "2026-04-13 12:00 UTC".into(),
+            to_human: "2026-05-13 12:00 UTC".into(),
+        }
+    }
+
+    fn ongoing_row() -> IncidentRow {
+        IncidentRow {
+            id: "01J000000000000000000ONGOING".into(),
+            severity: "down",
+            started_iso: "2026-05-13T11:50:00Z".into(),
+            started_human: "2026-05-13 11:50 UTC".into(),
+            ended_iso: None,
+            ended_human: None,
+            duration_human: "Ongoing".into(),
+            check_count: 4,
+            error_sample: "connection refused".into(),
+            ongoing: true,
+        }
+    }
+
+    fn resolved_row() -> IncidentRow {
+        IncidentRow {
+            id: "01J000000000000000000RESOLVD".into(),
+            severity: "down",
+            started_iso: "2026-05-12T08:00:00Z".into(),
+            started_human: "2026-05-12 08:00 UTC".into(),
+            ended_iso: Some("2026-05-12T08:07:00Z".into()),
+            ended_human: Some("2026-05-12 08:07 UTC".into()),
+            duration_human: "7m 0s".into(),
+            check_count: 7,
+            error_sample: "HTTP 503 Service Unavailable".into(),
+            ongoing: false,
+        }
+    }
+
+    #[test]
+    fn incidents_page_renders_empty_state_when_no_incidents() {
+        let html = sample_incidents_page(vec![], 0).render().unwrap();
+        assert!(html.starts_with("<!doctype html>"));
+        assert!(html.contains("No incidents in the last 30d"));
+        assert!(!html.contains("<table"));
+        assert!(html.contains("aria-current=\"page\""));
+    }
+
+    #[test]
+    fn incidents_page_renders_table_rows_with_ongoing_emphasis() {
+        let html = sample_incidents_page(vec![ongoing_row(), resolved_row()], 1)
+            .render()
+            .unwrap();
+        assert!(html.contains("<table"));
+        // Ongoing emphasis: red left border + pulsing badge + severity-tagged label.
+        assert!(html.contains("border-l-rose-500"));
+        assert!(html.contains("animate-pulse"));
+        assert!(html.contains("Ongoing · down"));
+        // Resolved row uses the regular severity badge.
+        assert!(html.contains(r#"status-badge status-badge--down">down<"#));
+        // Each row has a hidden detail row + the chevron for expand.
+        assert!(html.contains("data-incident-detail"));
+        assert!(html.contains("data-incident-chevron"));
+        // Row carries the window data the JS uses to fetch the timeline.
+        assert!(html.contains(r#"data-from="2026-05-13T11:50:00Z""#));
+    }
+
+    #[test]
+    fn incidents_page_ongoing_badge_appears_on_tab_strip() {
+        let html = sample_incidents_page(vec![ongoing_row()], 1)
+            .render()
+            .unwrap();
+        assert!(html.contains(r#"id="tab-incidents-badge""#));
+        assert!(html.contains(r#"aria-label="1 ongoing">1<"#));
+    }
+
+    #[test]
+    fn incidents_page_omits_tab_badge_when_no_ongoing() {
+        let html = sample_incidents_page(vec![resolved_row()], 0)
+            .render()
+            .unwrap();
+        assert!(!html.contains(r#"id="tab-incidents-badge""#));
+    }
+
+    #[test]
+    fn detail_page_tab_strip_marks_monitor_subtab_active() {
+        let html = sample_page().render().unwrap();
+        // Both tabs link to their own paths.
+        assert!(html.contains(r#"href="/targets/00000000-0000-0000-0000-000000000001""#));
+        assert!(html.contains(r#"href="/targets/00000000-0000-0000-0000-000000000001/incidents""#));
+        // The Monitor anchor must carry aria-current; the Incidents one must not.
+        let monitor_href = r#"href="/targets/00000000-0000-0000-0000-000000000001""#;
+        let monitor_pos = html.find(monitor_href).expect("monitor link present");
+        let monitor_anchor_end = html[monitor_pos..]
+            .find("</a>")
+            .expect("monitor anchor terminator");
+        let monitor_anchor = &html[monitor_pos..monitor_pos + monitor_anchor_end];
+        assert!(monitor_anchor.contains("aria-current=\"page\""));
+    }
+
+    #[test]
+    fn incidents_page_subtab_active_is_incidents() {
+        let html = sample_incidents_page(vec![], 0).render().unwrap();
+        let incidents_href = r#"href="/targets/00000000-0000-0000-0000-000000000001/incidents""#;
+        let pos = html.find(incidents_href).expect("incidents link present");
+        let anchor_end = html[pos..].find("</a>").expect("anchor terminator");
+        let anchor = &html[pos..pos + anchor_end];
+        assert!(anchor.contains("aria-current=\"page\""));
     }
 }

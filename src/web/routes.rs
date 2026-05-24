@@ -21,6 +21,10 @@ pub fn routes(state: AppState) -> Router {
         .route("/targets", get(views::targets_list::index))
         .route("/targets/new", get(views::targets_form::new_form))
         .route("/targets/{id}", get(views::targets_detail::index))
+        .route(
+            "/targets/{id}/incidents",
+            get(views::targets_detail::incidents),
+        )
         .route("/targets/{id}/edit", get(views::targets_form::edit_form))
         .route("/web/targets/list", get(views::targets_list::list_partial))
         .route(

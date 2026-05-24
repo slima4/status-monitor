@@ -26,7 +26,7 @@ use crate::storage::orgs::{OrgBranding, load_public_branding};
 use crate::web::assets::filters;
 use crate::web::error::{NotFoundPage, UnavailablePage};
 use crate::web::host::resolve_status_page_org;
-use crate::web::views::{fmt_human, fmt_ts};
+use crate::web::views::{fmt_human, fmt_ts, humanize_duration};
 
 #[derive(Debug, Default, Deserialize)]
 pub struct StatusParams {
@@ -922,34 +922,6 @@ fn phase_classes(p: IncidentStatusPhase) -> (&'static str, &'static str) {
     }
 }
 
-// --- Formatting ----------------------------------------------------------
-
-fn humanize_duration(d: ChronoDuration) -> String {
-    let total = d.num_seconds().max(0);
-    if total < 60 {
-        return format!("{total}s");
-    }
-    let mins = total / 60;
-    if mins < 60 {
-        return format!("{mins}m");
-    }
-    let hours = mins / 60;
-    let rem_mins = mins % 60;
-    if hours < 24 {
-        if rem_mins == 0 {
-            return format!("{hours}h");
-        }
-        return format!("{hours}h {rem_mins}m");
-    }
-    let days = hours / 24;
-    let rem_hours = hours % 24;
-    if rem_hours == 0 {
-        format!("{days}d")
-    } else {
-        format!("{days}d {rem_hours}h")
-    }
-}
-
 // --- Tests ---------------------------------------------------------------
 
 #[cfg(test)]
@@ -1218,15 +1190,6 @@ mod tests {
             assert!(!label.is_empty());
             assert!(tint.starts_with("day-pop-status--"));
         }
-    }
-
-    #[test]
-    fn humanize_duration_picks_largest_unit() {
-        assert_eq!(humanize_duration(ChronoDuration::seconds(45)), "45s");
-        assert_eq!(humanize_duration(ChronoDuration::minutes(17)), "17m");
-        assert_eq!(humanize_duration(ChronoDuration::minutes(134)), "2h 14m");
-        assert_eq!(humanize_duration(ChronoDuration::hours(25)), "1d 1h");
-        assert_eq!(humanize_duration(ChronoDuration::hours(48)), "2d");
     }
 
     #[test]

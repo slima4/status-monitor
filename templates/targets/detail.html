@@ -3,82 +3,12 @@
 {% block content %}
 <section class="space-y-6">
   <header class="space-y-2">
-    <a href="/targets" class="inline-block text-sm text-slate-500 hover:text-slate-700">← Monitors</a>
-    <div class="flex flex-wrap items-center gap-3">
-      <h1 class="page-title">{{ name }}</h1>
-      {% if last_status == "up" %}
-        <span class="status-badge status-badge--up">up</span>
-      {% else if last_status == "down" %}
-        <span class="status-badge status-badge--down">down</span>
-      {% else if last_status == "degraded" %}
-        <span class="status-badge status-badge--degraded">degraded</span>
-      {% else if last_status == "error" %}
-        <span class="status-badge status-badge--error">error</span>
-      {% else %}
-        <span class="status-badge status-badge--none">no data</span>
-      {% endif %}
-      {% if !enabled %}<span class="status-badge status-badge--disabled">disabled</span>{% endif %}
-      <span class="ml-auto flex flex-wrap gap-2">
-        <button type="button"
-                data-detail-test-now data-target-id="{{ id }}"
-                aria-describedby="detail-test-hint"
-                class="sticker-btn sticker-btn--accent px-3 py-1.5 text-sm font-medium inline-flex items-center gap-1.5">
-          <span aria-hidden="true">▶</span> Run check now
-        </button>
-        <a href="/targets/{{ id }}/edit"
-           class="btn-ghost px-3 py-1.5 text-sm">Edit</a>
-        <button type="button"
-                data-target-id="{{ id }}"
-                data-action="toggle-enabled"
-                data-current="{{ enabled }}"
-                class="btn-ghost px-3 py-1.5 text-sm">
-          {% if enabled %}Disable{% else %}Enable{% endif %}
-        </button>
-        <button type="button"
-                hx-delete="/api/v1/targets/{{ id }}"
-                hx-on::after-request="if (event.detail.successful) window.location='/targets'"
-                data-confirm-modal
-                data-confirm-title="Delete monitor?"
-                data-confirm-body="Permanently deletes {{ name }}, its history, and any incidents bound to it. Notification channels are untouched. This cannot be undone."
-                data-confirm-label="Delete monitor"
-                data-confirm-danger
-                aria-label="Delete monitor {{ name }}"
-                class="btn-ghost btn-ghost--danger px-3 py-1.5 text-sm focus-visible:ring-red-500">
-          Delete
-        </button>
-      </span>
-    </div>
-    <div data-detail-test-result class="hidden"></div>
-    <div data-detail-toggle-error class="hidden rounded border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700" aria-live="polite"></div>
-    <span id="detail-test-hint" class="sr-only">Runs the saved check immediately and persists the result.</span>
-    <p class="text-sm text-slate-500">
-      <span class="font-mono uppercase">{{ kind }}</span>
-      {% if kind == "HTTP" %}
-        <a href="{{ address }}" target="_blank" rel="noopener noreferrer"
-           class="font-mono text-slate-700 underline decoration-dotted underline-offset-2 hover:text-slate-900">{{ address }}</a>
-      {% else %}
-        <span class="font-mono">{{ address }}</span>
-      {% endif %}
-      <span class="ml-2" data-last-check
-            data-target-id="{{ id }}"
-            data-last-at="{{ last_at_iso }}"
-            data-interval-s="{{ interval_s }}">interval {{ interval_s }}s</span>
-    </p>
-    <div>
-      {% for tag in tags %}
-        <a href="/targets?tag={{ tag|urlencode }}"
-           class="status-badge status-badge--tag mr-1 hover:bg-slate-200">{{ tag }}</a>
-      {% endfor %}
-    </div>
+    {% include "targets/partials/detail_header.html" %}
   </header>
 
-  <nav class="flex items-center gap-1 text-sm" aria-label="Time range">
-    {% for opt in range_options %}
-    <a href="/targets/{{ id }}?range={{ opt.key }}"
-       class="rounded-full px-3 py-1 text-xs font-medium{% if opt.selected %} bg-slate-900 text-white{% else %} bg-slate-100 text-slate-600 hover:bg-slate-200{% endif %}"{% if opt.selected %} aria-current="true"{% endif %}>{{ opt.key }}</a>
-    {% endfor %}
-    <span class="ml-3 text-xs text-slate-500">{{ from_human }} → {{ to_human }}</span>
-  </nav>
+  {% include "targets/partials/detail_tabs.html" %}
+
+  {% include "targets/partials/range_pills.html" %}
 
   <section id="detail-live-kpi"
            hx-get="/web/partials/targets/{{ id }}/live?range={{ range }}"
@@ -131,6 +61,7 @@
 
   <script defer src="{{ "js/ui/api_form.js"|asset }}"></script>
   <script defer src="{{ "js/ui/target_detail.js"|asset }}"></script>
+  <script defer src="{{ "js/ui/tab_range_memory.js"|asset }}"></script>
   <script defer src="{{ "js/echarts.min.js"|asset }}"></script>
   <script type="module" src="{{ "js/charts/latency.js"|asset }}"></script>
   <script type="module" src="{{ "js/charts/breakdown.js"|asset }}"></script>

@@ -18,7 +18,10 @@ pub use check::{
     CheckSpec, DnsCheck, DnsRecordType, DomainExpiryCheck, ExpectedStatus, HttpCheck, HttpMethod,
     TcpCheck, TlsCertCheck,
 };
-pub use incident::{Incident, IncidentNarrationUpdate, NewIncidentUpdate, coalesce_incidents};
+pub use incident::{
+    Incident, IncidentNarrationUpdate, NewIncidentUpdate, coalesce_incidents,
+    coalesce_incidents_bad_only,
+};
 pub use maintenance::{
     MaintenanceFilter, MaintenanceWindow, MaintenanceWindowUpdate, NewMaintenanceWindow,
 };

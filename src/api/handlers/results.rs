@@ -27,13 +27,12 @@ const RESULTS_LIMIT_MAX: usize = 10_000;
 const INCIDENTS_LIMIT_DEFAULT: usize = 100;
 const INCIDENTS_LIMIT_MAX: usize = 1_000;
 
-/// Hard cap on the requested `(to - from)` span. `fetch_incident_rows`
-/// materialises every row in the window into Rust memory for in-process
-/// coalescing (no SQL LIMIT) and is called twice per `/incidents` request —
-/// a 365-day window on a 10 s-interval target is ~3 M rows × 2 in RAM,
-/// well past per-request budget. 90 days bounds the worst-case allocation
-/// per request to a few MB regardless of any plan's retention window;
-/// callers needing deeper history page backwards via `to`.
+/// Hard cap on the requested `(to - from)` span. `fetch_bad_only_rows`
+/// materialises bad-status rows in the window into Rust memory for
+/// in-process coalescing (no SQL LIMIT). On a chronically failing target
+/// a 365-day window still bloats memory; 90 days bounds the worst-case
+/// allocation per request to a few MB regardless of any plan's retention
+/// window. Callers needing deeper history page backwards via `to`.
 const MAX_RANGE_DAYS: i64 = 90;
 
 /// Resolves optional `from`/`to` query params to a validated `TimeRange`,
@@ -226,19 +225,26 @@ pub async fn list_incidents(
         .limit
         .unwrap_or(INCIDENTS_LIMIT_DEFAULT)
         .min(INCIDENTS_LIMIT_MAX);
-    // Fetch limit+1 to detect a next page in a single call. Coalesced
-    // incidents are materialised in memory (no SQL LIMIT semantic), so a
-    // parallel `count(*)` previously meant scanning the full window twice;
-    // peeking saves the second pass and the second sort.
-    let (target, peek) = tokio::try_join!(
-        state.target_store.get(org, id),
-        state
-            .results_store
-            .list_incidents(org, id, range, q.ongoing_only, limit + 1, q.offset),
-    )?;
-    if target.is_none() {
-        return Err(target_not_found());
-    }
+    // Fetch target first so we have `interval` for the storage call's
+    // gap-based recovery heuristic. The CH-side status filter that
+    // unlocks is worth the extra RTT.
+    let target = state
+        .target_store
+        .get(org, id)
+        .await?
+        .ok_or_else(target_not_found)?;
+    let peek = state
+        .results_store
+        .list_incidents(
+            org,
+            id,
+            range,
+            target.interval,
+            q.ongoing_only,
+            limit + 1,
+            q.offset,
+        )
+        .await?;
     Ok(Json(PageEnvelope::from_peek(
         peek,
         limit as u32,

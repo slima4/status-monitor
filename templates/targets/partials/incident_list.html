@@ -1,0 +1,81 @@
+{# Incidents table for the Incidents sub-tab. Inputs from
+   `IncidentsPage`: id, name, range, incidents, incidents_has_more. #}
+{% if incidents.is_empty() %}
+<div class="sticker-card flex items-center gap-3 p-6 text-sm text-slate-600">
+  <span aria-hidden="true" class="text-lg text-emerald-600">✓</span>
+  <span>No incidents in the last {{ range }}.</span>
+</div>
+{% else %}
+<section class="sticker-card overflow-hidden">
+  <table class="min-w-full text-sm">
+    <caption class="sr-only">Incidents for {{ name }}</caption>
+    <thead class="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+      <tr>
+        <th scope="col" class="px-3 py-2 w-28">Severity</th>
+        <th scope="col" class="px-3 py-2">Started</th>
+        <th scope="col" class="px-3 py-2">Ended</th>
+        <th scope="col" class="px-3 py-2 w-24">Duration</th>
+        <th scope="col" class="px-3 py-2 w-20 text-right">Checks</th>
+        <th scope="col" class="px-3 py-2">Trigger</th>
+        <th scope="col" class="px-3 py-2 w-10 text-right"><span class="sr-only">Expand</span></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for inc in incidents %}
+      <tr data-incident-row
+          data-incident-id="{{ inc.id }}"
+          data-target-id="{{ id }}"
+          data-from="{{ inc.started_iso }}"
+          data-to="{% match inc.ended_iso %}{% when Some with (iso) %}{{ iso }}{% when None %}{% endmatch %}"
+          data-ongoing="{% if inc.ongoing %}true{% else %}false{% endif %}"
+          class="cursor-pointer border-t border-slate-100 hover:bg-slate-50{% if inc.ongoing %} border-l-4 border-l-rose-500 bg-rose-50/40{% endif %}">
+        <td class="px-3 py-2 align-top">
+          {% if inc.ongoing %}
+            <span class="status-badge status-badge--{{ inc.severity }} motion-safe:animate-pulse">Ongoing · {{ inc.severity }}</span>
+          {% else %}
+            <span class="status-badge status-badge--{{ inc.severity }}">{{ inc.severity }}</span>
+          {% endif %}
+        </td>
+        <td class="px-3 py-2 align-top">
+          <time datetime="{{ inc.started_iso }}" title="{{ inc.started_iso }}">{{ inc.started_human }}</time>
+        </td>
+        <td class="px-3 py-2 align-top">
+          {% match inc.ended_iso %}
+            {% when Some with (iso) %}<time datetime="{{ iso }}" title="{{ iso }}">{{ inc.ended_human.as_deref().unwrap_or("") }}</time>
+            {% when None %}<span class="font-medium text-rose-600">—</span>
+          {% endmatch %}
+        </td>
+        <td class="px-3 py-2 align-top font-mono text-xs">{{ inc.duration_human }}</td>
+        <td class="px-3 py-2 align-top text-right font-mono text-xs">{{ inc.check_count }}</td>
+        <td class="px-3 py-2 align-top text-slate-600">
+          <span class="line-clamp-2 break-words" title="{{ inc.error_sample }}">{% if !inc.error_sample.is_empty() %}{{ inc.error_sample }}{% else %}—{% endif %}</span>
+        </td>
+        <td class="px-3 py-2 align-top text-right">
+          <button type="button"
+                  data-incident-expand
+                  data-incident-id="{{ inc.id }}"
+                  aria-expanded="false"
+                  aria-controls="incident-detail-{{ inc.id }}"
+                  aria-label="Show timeline"
+                  class="inline-flex h-6 w-6 items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-slate-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-slate-900">
+            <span data-incident-chevron aria-hidden="true">▾</span>
+          </button>
+        </td>
+      </tr>
+      <tr data-incident-detail data-for="{{ inc.id }}" id="incident-detail-{{ inc.id }}" hidden>
+        <td colspan="7" class="border-t border-slate-100 bg-slate-50 px-6 py-4">
+          <div data-incident-detail-body class="text-sm text-slate-700">
+            <span class="text-slate-500">Click to load timeline…</span>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% if incidents_has_more %}
+  <p class="border-t border-slate-100 bg-slate-50 px-3 py-2 text-xs text-slate-500">
+    Showing first {{ incidents.len() }} incidents — narrow the range to see more.
+  </p>
+  {% endif %}
+</section>
+{% endif %}
