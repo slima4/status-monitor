@@ -1,0 +1,26 @@
+{# Endpoint response for /web/partials/targets/{id}/live. Returns the
+   primary swap target (KPI section, replaced outerHTML) plus an OOB
+   tbody for Recent results so a single request updates both regions
+   while keeping the charts (which live BETWEEN them in detail.html)
+   untouched. The KPI section self-rearms by carrying the hx-get +
+   hx-trigger attrs on every render.
+
+   The OOB tbody is wrapped in <template> because the browser's HTML5
+   parser drops a bare <tbody> that isn't a child of <table> when
+   parsing the response — orphan <tr> rows then leak as text content.
+   <template> content is parsed in a separate context that preserves
+   table-internal tags, and htmx unwraps it during OOB application. #}
+<section id="detail-live-kpi"
+         hx-get="/web/partials/targets/{{ id }}/live?range={{ range }}"
+         hx-trigger="every 60s, sm:refresh-live from:body"
+         hx-swap="outerHTML"
+         hx-on::response-error="if(event.detail.xhr.status===404){this.removeAttribute('hx-trigger')}"
+         data-newest-ts="{{ last_at_iso }}"
+         class="grid gap-4 md:grid-cols-4">
+  {% include "targets/partials/detail_live_kpi_cards.html" %}
+</section>
+<template>
+  <tbody id="detail-live-recent" hx-swap-oob="true">
+    {% include "targets/partials/detail_live_rows.html" %}
+  </tbody>
+</template>

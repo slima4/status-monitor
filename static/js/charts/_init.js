@@ -5,6 +5,18 @@ export function initChart(el) {
     return echarts.init(el, null, { renderer: "canvas" });
 }
 
+// Replaces a chart container with a centered placeholder string. Use
+// when the fetched payload has no items so the user sees a clear "no
+// data yet" instead of an empty axes-only chart they might read as
+// broken. `msg` is plain text — caller is responsible for escaping.
+export function renderEmptyChart(el, msg) {
+    el.innerHTML = "";
+    const wrap = document.createElement("div");
+    wrap.className = "flex h-full items-center justify-center text-sm text-slate-500";
+    wrap.textContent = msg;
+    el.appendChild(wrap);
+}
+
 // Resolve a Tailwind theme token (`--color-*`, `--font-*`) to a concrete
 // value via a throwaway probe so charts share the CSS palette instead of
 // hardcoding hex. Tokens are oklch(); a raw oklch() canvas fillStyle fails
@@ -74,6 +86,32 @@ export function bindResize(chart) {
     return () => {
         window.removeEventListener("resize", handler);
         chart.dispose();
+    };
+}
+
+// Fetch a chart payload and either render it (when items.length > 0) or
+// swap in a "no data" placeholder. Defers `echarts.init` until data is
+// confirmed so the empty-data path doesn't allocate a canvas it'll
+// immediately tear down — and the returned disposer only touches a
+// chart instance if one was ever created.
+export function mountChartFromFetch(el, endpoint, render, emptyMsg) {
+    let chart = null;
+    fetchJson(endpoint)
+        .then(json => {
+            const items = unwrapItems(json);
+            if (items.length === 0) {
+                renderEmptyChart(el, emptyMsg);
+                return;
+            }
+            chart = initChart(el);
+            render(chart, items);
+        })
+        .catch(err => console.warn(`${endpoint} chart load failed`, err));
+    const handler = () => chart && chart.resize();
+    window.addEventListener("resize", handler, { passive: true });
+    return () => {
+        window.removeEventListener("resize", handler);
+        if (chart) chart.dispose();
     };
 }
 

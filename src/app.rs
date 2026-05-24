@@ -29,6 +29,16 @@ use crate::worker::WorkerPool;
 /// dashboard never reads another tenant's last build.
 pub type DashboardCache = Cache<OrgId, Arc<DashboardSummary>>;
 
+/// Pre-rendered detail-page live partial body. Cached for 5 seconds so
+/// the detail-page polling cadence (60s baseline + overdue/manual
+/// refreshes that arrive in bursts) collapses N concurrent pollers for
+/// the same target into a single ClickHouse round-trip + askama render
+/// per window. Keyed on `(OrgId, target_id, range_key)` so a tenant
+/// never reads another's snapshot and different range tabs don't share
+/// cache. `Bytes` is cheap-clone (Arc internally) and lets the handler
+/// emit the response without a copy.
+pub type LivePartialCache = Cache<(OrgId, uuid::Uuid, &'static str), bytes::Bytes>;
+
 /// Builder for the 5-second per-org dashboard cache. The moka `sync::Cache`
 /// is cheap to clone (everything inside is `Arc`), so it lives in `AppState`
 /// directly rather than behind another `Arc`.
@@ -39,6 +49,18 @@ fn build_dashboard_cache() -> DashboardCache {
         // a runaway cache won't eat the heap. Far above any realistic
         // active-org-set in one process.
         .max_capacity(1024)
+        .build()
+}
+
+/// Sized for ~10k targets × 4 range presets = 40k slots upper bound.
+/// Far below that in practice (only actively-viewed targets land in
+/// here), but the ceiling caps memory if a crawler hits every target.
+/// Each entry ~5 KB → 40k × 5 KB ≈ 200 MB worst case; a quarter of
+/// that in practice. moka evicts on capacity AND on the 5s TTL.
+fn build_live_partial_cache() -> LivePartialCache {
+    Cache::builder()
+        .time_to_live(Duration::from_secs(5))
+        .max_capacity(40_000)
         .build()
 }
 
@@ -62,6 +84,7 @@ pub struct AppState {
     pub http_clients: Arc<HttpClients>,
     pub worker_pool: Arc<WorkerPool>,
     pub dashboard_cache: DashboardCache,
+    pub live_partial_cache: LivePartialCache,
     pub idempotency: Arc<IdempotencyCache>,
     pub public_source: Arc<dyn PublicSource>,
     pub maintenance_store: Arc<dyn MaintenanceStore>,
@@ -172,6 +195,7 @@ impl AppState {
             http_clients,
             worker_pool,
             dashboard_cache: build_dashboard_cache(),
+            live_partial_cache: build_live_partial_cache(),
             idempotency: Arc::new(IdempotencyCache::new()),
             public_source,
             maintenance_store,

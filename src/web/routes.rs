@@ -23,6 +23,10 @@ pub fn routes(state: AppState) -> Router {
         .route("/targets/{id}", get(views::targets_detail::index))
         .route("/targets/{id}/edit", get(views::targets_form::edit_form))
         .route("/web/targets/list", get(views::targets_list::list_partial))
+        .route(
+            "/web/partials/targets/{id}/live",
+            get(views::targets_detail::live_partial),
+        )
         .route("/web/partials/dashboard", get(views::dashboard::region))
         .route("/login", get(views::auth::login))
         .route("/recover-account", get(views::auth::recover_account))

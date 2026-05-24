@@ -49,43 +49,45 @@
       </span>
     </div>
     <div data-detail-test-result class="hidden"></div>
+    <div data-detail-toggle-error class="hidden rounded border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700" aria-live="polite"></div>
     <span id="detail-test-hint" class="sr-only">Runs the saved check immediately and persists the result.</span>
     <p class="text-sm text-slate-500">
       <span class="font-mono uppercase">{{ kind }}</span>
-      <span class="font-mono">{{ address }}</span>
-      <span class="ml-2">interval {{ interval_s }}s</span>
+      {% if kind == "HTTP" %}
+        <a href="{{ address }}" target="_blank" rel="noopener noreferrer"
+           class="font-mono text-slate-700 underline decoration-dotted underline-offset-2 hover:text-slate-900">{{ address }}</a>
+      {% else %}
+        <span class="font-mono">{{ address }}</span>
+      {% endif %}
+      <span class="ml-2" data-last-check
+            data-target-id="{{ id }}"
+            data-last-at="{{ last_at_iso }}"
+            data-interval-s="{{ interval_s }}">interval {{ interval_s }}s</span>
     </p>
     <div>
-      {% for tag in tags %}<span class="status-badge status-badge--tag mr-1">{{ tag }}</span>{% endfor %}
+      {% for tag in tags %}
+        <a href="/targets?tag={{ tag|urlencode }}"
+           class="status-badge status-badge--tag mr-1 hover:bg-slate-200">{{ tag }}</a>
+      {% endfor %}
     </div>
   </header>
 
   <nav class="flex items-center gap-1 text-sm" aria-label="Time range">
     {% for opt in range_options %}
     <a href="/targets/{{ id }}?range={{ opt.key }}"
-       class="rounded-xl border-2 px-3 py-1{% if opt.selected %} border-slate-900 bg-slate-900 text-white{% else %} border-slate-200 hover:bg-slate-100{% endif %}">{{ opt.key }}</a>
+       class="rounded-full px-3 py-1 text-xs font-medium{% if opt.selected %} bg-slate-900 text-white{% else %} bg-slate-100 text-slate-600 hover:bg-slate-200{% endif %}"{% if opt.selected %} aria-current="true"{% endif %}>{{ opt.key }}</a>
     {% endfor %}
     <span class="ml-3 text-xs text-slate-500">{{ from_human }} → {{ to_human }}</span>
   </nav>
 
-  <section class="grid gap-4 md:grid-cols-4">
-    <div class="sticker-card p-5">
-      <p class="panel-label">Uptime</p>
-      <p class="kpi-value">{{ uptime.uptime_pct }}%</p>
-      <p class="mt-1 text-xs text-slate-500">{{ uptime.total }} checks</p>
-    </div>
-    <div class="sticker-card p-5">
-      <p class="panel-label">Up</p>
-      <p class="kpi-value kpi-value--ok">{{ uptime.up }}</p>
-    </div>
-    <div class="sticker-card p-5">
-      <p class="panel-label">Down</p>
-      <p class="kpi-value kpi-value--bad">{{ uptime.down }}</p>
-    </div>
-    <div class="sticker-card p-5">
-      <p class="panel-label">Errors</p>
-      <p class="kpi-value kpi-value--bad">{{ uptime.error }}</p>
-    </div>
+  <section id="detail-live-kpi"
+           hx-get="/web/partials/targets/{{ id }}/live?range={{ range }}"
+           hx-trigger="every 60s, sm:refresh-live from:body"
+           hx-swap="outerHTML"
+           hx-on::response-error="if(event.detail.xhr.status===404){this.removeAttribute('hx-trigger')}"
+           data-newest-ts="{{ last_at_iso }}"
+           class="grid gap-4 md:grid-cols-4">
+    {% include "targets/partials/detail_live_kpi_cards.html" %}
   </section>
 
   <section class="grid gap-4 lg:grid-cols-2">
@@ -121,25 +123,8 @@
           <th scope="col" class="px-3 py-2">Error</th>
         </tr>
       </thead>
-      <tbody>
-        {% if results.is_empty() %}
-        <tr><td colspan="5" class="px-3 py-6 text-center text-slate-500">No results in this window.</td></tr>
-        {% else %}
-        {% for r in results %}
-        <tr class="border-b last:border-0">
-          <td class="px-3 py-2 font-mono text-xs text-slate-600">{{ r.timestamp }}</td>
-          <td class="px-3 py-2">
-            {% if r.status == "up" %}<span class="status-badge status-badge--up">up</span>
-            {% else if r.status == "down" %}<span class="status-badge status-badge--down">down</span>
-            {% else if r.status == "degraded" %}<span class="status-badge status-badge--degraded">degraded</span>
-            {% else %}<span class="status-badge status-badge--error">{{ r.status }}</span>{% endif %}
-          </td>
-          <td class="px-3 py-2 text-slate-700">{{ r.duration_ms }} ms</td>
-          <td class="px-3 py-2 font-mono text-xs text-slate-700">{{ r.response_code }}</td>
-          <td class="px-3 py-2 text-xs text-slate-500">{{ r.error }}</td>
-        </tr>
-        {% endfor %}
-        {% endif %}
+      <tbody id="detail-live-recent">
+        {% include "targets/partials/detail_live_rows.html" %}
       </tbody>
     </table>
   </section>

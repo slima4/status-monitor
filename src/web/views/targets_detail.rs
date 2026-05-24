@@ -1,12 +1,16 @@
 use askama::Template;
 use askama_web::WebTemplate;
+use axum::body::Body;
 use axum::extract::{Path, Query, State};
+use axum::http::{StatusCode, header};
+use axum::response::{IntoResponse, Response};
+use bytes::Bytes;
 use chrono::{DateTime, Duration, Utc};
 use serde::Deserialize;
 use uuid::Uuid;
 
 use crate::app::AppState;
-use crate::domain::CheckResult;
+use crate::domain::{CheckResult, OrgId};
 use crate::error::AppError;
 use crate::storage::{TimeRange, UptimeStats};
 use crate::web::assets::filters;
@@ -44,6 +48,18 @@ pub struct ResultRow {
 }
 
 #[derive(Template, WebTemplate)]
+#[template(path = "targets/partials/detail_live.html")]
+pub struct DetailLive {
+    pub id: String,
+    pub name: String,
+    pub range: &'static str,
+    pub uptime: UptimeStatsView,
+    pub results: Vec<ResultRow>,
+    pub results_has_more: bool,
+    pub last_at_iso: String,
+}
+
+#[derive(Template, WebTemplate)]
 #[template(path = "targets/detail.html")]
 pub struct DetailPage {
     pub active_tab: &'static str,
@@ -55,6 +71,9 @@ pub struct DetailPage {
     pub enabled: bool,
     pub tags: Vec<String>,
     pub last_status: &'static str,
+    /// ISO 8601 timestamp of the most recent check, "" when none. Drives
+    /// the client-side "checked Ns ago · next in Ns" ticker.
+    pub last_at_iso: String,
     pub uptime: UptimeStatsView,
     pub results: Vec<ResultRow>,
     pub results_has_more: bool,
@@ -94,6 +113,66 @@ pub struct RangeOption {
     pub selected: bool,
 }
 
+struct LiveData {
+    uptime: UptimeStatsView,
+    result_rows: Vec<ResultRow>,
+    results_has_more: bool,
+    last_status: &'static str,
+    last_at_iso: String,
+}
+
+// Shared "what does the live detail region show?" loader. The full-page
+// `index` handler enriches it with chrome (range options, config JSON,
+// header strings); the `live_partial` handler returns it as-is for htmx
+// polling. Keeping the query graph in one place keeps the partial
+// byte-identical to the section the full page renders.
+async fn load_live_data(
+    state: &AppState,
+    org: OrgId,
+    target_id: Uuid,
+    from: DateTime<Utc>,
+    to: DateTime<Utc>,
+) -> WebResult<LiveData> {
+    let time_range = TimeRange { from, to };
+    let (uptime, mut results) = tokio::try_join!(
+        state.results_store.uptime(org, target_id, time_range),
+        state
+            .results_store
+            .list_results(org, target_id, time_range, RESULTS_PAGE_LIMIT + 1, 0),
+    )?;
+    let results_has_more = results.len() > RESULTS_PAGE_LIMIT;
+    if results_has_more {
+        results.truncate(RESULTS_PAGE_LIMIT);
+    }
+
+    let latest_outside_window = if results.is_empty()
+        && let Some(window) = wider_status_window(from, to)
+    {
+        state
+            .results_store
+            .list_results(org, target_id, window, 1, 0)
+            .await?
+            .into_iter()
+            .next()
+    } else {
+        None
+    };
+    let latest_for_badge = results.first().or(latest_outside_window.as_ref());
+    let last_status = latest_for_badge.map(|r| r.status.as_str()).unwrap_or("");
+    let last_at_iso = latest_for_badge
+        .map(|r| fmt_ts(r.timestamp))
+        .unwrap_or_default();
+    let result_rows = results.into_iter().map(ResultRow::from).collect();
+
+    Ok(LiveData {
+        uptime: uptime.into(),
+        result_rows,
+        results_has_more,
+        last_status,
+        last_at_iso,
+    })
+}
+
 pub async fn index(
     _auth: AuthedBrowser,
     CurrentOrg(org): CurrentOrg,
@@ -109,37 +188,8 @@ pub async fn index(
 
     let range_key = resolve_range_key(params.range.as_deref());
     let (from, to) = resolve_window(range_key, params.from, params.to);
-    let time_range = TimeRange { from, to };
 
-    let (uptime, mut results) = tokio::try_join!(
-        state.results_store.uptime(org, target.id, time_range),
-        state
-            .results_store
-            .list_results(org, target.id, time_range, RESULTS_PAGE_LIMIT + 1, 0),
-    )?;
-    let results_has_more = results.len() > RESULTS_PAGE_LIMIT;
-    if results_has_more {
-        results.truncate(RESULTS_PAGE_LIMIT);
-    }
-
-    // Header badge: prefer the newest row in the chart window. If the user
-    // picked a short range with no recent check, fall back to a 7d lookup
-    // so the badge still reflects current state instead of going blank.
-    let last_status = if let Some(latest) = results.first() {
-        latest.status.as_str()
-    } else if let Some(window) = wider_status_window(from, to) {
-        state
-            .results_store
-            .list_results(org, target.id, window, 1, 0)
-            .await?
-            .into_iter()
-            .next()
-            .map(|r| r.status.as_str())
-            .unwrap_or("")
-    } else {
-        ""
-    };
-    let result_rows = results.into_iter().map(ResultRow::from).collect();
+    let live = load_live_data(&state, org, target.id, from, to).await?;
     let config_json = serde_json::to_string_pretty(&target.check)
         .map_err(|e| AppError::Other(anyhow::anyhow!(e)))?;
     let (kind, address) = describe_check(&target.check);
@@ -153,10 +203,11 @@ pub async fn index(
         interval_s: target.interval.as_secs(),
         enabled: target.enabled,
         tags: target.tags,
-        last_status,
-        uptime: uptime.into(),
-        results: result_rows,
-        results_has_more,
+        last_status: live.last_status,
+        last_at_iso: live.last_at_iso,
+        uptime: live.uptime,
+        results: live.result_rows,
+        results_has_more: live.results_has_more,
         config_json,
         range: range_key,
         range_options: build_range_options(range_key),
@@ -165,6 +216,73 @@ pub async fn index(
         from_human: fmt_human(from),
         to_human: fmt_human(to),
     })
+}
+
+/// htmx-polled fragment that re-renders the KPI cards + recent-results
+/// table. Byte-identical to the section the full page initially served
+/// so swap is invisible. The header (status badge, action buttons),
+/// charts, and config disclosure stay outside this region — they're
+/// either user-triggered or too heavy to re-render every tick.
+///
+/// Cached via `live_partial_cache` (5s TTL) so N concurrent pollers for
+/// the same target collapse to one CH round-trip + render per window.
+/// Custom `from`/`to` query params skip the cache (one-off ad-hoc
+/// ranges shouldn't pollute the shared bucket).
+pub async fn live_partial(
+    _auth: AuthedBrowser,
+    CurrentOrg(org): CurrentOrg,
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    Query(params): Query<DetailParams>,
+) -> WebResult<Response> {
+    let target = state
+        .target_store
+        .get(org, id)
+        .await?
+        .ok_or_else(|| AppError::not_found("TARGET_NOT_FOUND", "monitor not found"))?;
+
+    let range_key = resolve_range_key(params.range.as_deref());
+    let cache_key = (org, target.id, range_key);
+    let cacheable = params.from.is_none() && params.to.is_none();
+
+    if cacheable && let Some(body) = state.live_partial_cache.get(&cache_key) {
+        return Ok(html_response(body));
+    }
+
+    let (from, to) = resolve_window(range_key, params.from, params.to);
+    let live = load_live_data(&state, org, target.id, from, to).await?;
+
+    let page = DetailLive {
+        id: target.id.to_string(),
+        name: target.name,
+        range: range_key,
+        uptime: live.uptime,
+        results: live.result_rows,
+        results_has_more: live.results_has_more,
+        last_at_iso: live.last_at_iso,
+    };
+    let rendered = page
+        .render()
+        .map_err(|e| AppError::Other(anyhow::anyhow!(e)))?;
+    let body = Bytes::from(rendered);
+    if cacheable {
+        state.live_partial_cache.insert(cache_key, body.clone());
+    }
+    Ok(html_response(body))
+}
+
+fn html_response(body: Bytes) -> Response {
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
+        // The htmx poll URL is time-relative ("range=24h" → window relative
+        // to now). Browser cache would silently serve stale rows even after
+        // the server's 5s TTL elapsed; explicitly opt out.
+        .header(header::CACHE_CONTROL, "no-store")
+        .body(Body::from(body))
+        .unwrap_or_else(|_| {
+            (StatusCode::INTERNAL_SERVER_ERROR, "response build failed").into_response()
+        })
 }
 
 fn resolve_range_key(raw: Option<&str>) -> &'static str {
@@ -238,6 +356,7 @@ mod tests {
             enabled: true,
             tags: vec!["prod".into()],
             last_status: "up",
+            last_at_iso: "2026-05-13T12:00:00Z".into(),
             uptime: UptimeStatsView {
                 total: 100,
                 up: 99,
@@ -308,6 +427,68 @@ mod tests {
             .with_timezone(&Utc);
         assert!(wider_status_window(to - Duration::days(30), to).is_none());
         assert!(wider_status_window(to - Duration::days(LAST_RESULT_WINDOW_DAYS), to).is_none());
+    }
+
+    fn sample_live() -> DetailLive {
+        DetailLive {
+            id: "00000000-0000-0000-0000-000000000001".into(),
+            name: "api".into(),
+            range: "24h",
+            uptime: UptimeStatsView {
+                total: 100,
+                up: 99,
+                down: 1,
+                degraded: 0,
+                error: 0,
+                uptime_pct: "99.00".into(),
+            },
+            results: vec![],
+            results_has_more: false,
+            last_at_iso: "2026-05-13T12:00:00Z".into(),
+        }
+    }
+
+    #[test]
+    fn live_partial_renders_kpi_swap_target_plus_oob_tbody() {
+        let html = sample_live().render().unwrap();
+        assert!(!html.contains("<!doctype html>"));
+        assert!(html.contains(r#"id="detail-live-kpi""#));
+        assert!(html.contains(
+            "hx-get=\"/web/partials/targets/00000000-0000-0000-0000-000000000001/live?range=24h\""
+        ));
+        assert!(html.contains(r#"hx-trigger="every 60s, sm:refresh-live from:body""#));
+        assert!(html.contains(r#"hx-swap="outerHTML""#));
+        assert!(html.contains(r#"data-newest-ts="2026-05-13T12:00:00Z""#));
+        // Tbody MUST be wrapped in <template> so browsers don't strip
+        // it as orphan-of-table during response parsing.
+        assert!(html.contains("<template>"));
+        let template_open = html.find("<template>").unwrap();
+        let recent_id = html.find(r#"id="detail-live-recent""#).unwrap();
+        let template_close = html.find("</template>").unwrap();
+        assert!(
+            template_open < recent_id && recent_id < template_close,
+            "OOB tbody must live inside the <template> wrapper"
+        );
+        assert!(html.contains(r#"hx-swap-oob="true""#));
+        assert!(html.contains("99.00"));
+    }
+
+    #[test]
+    fn detail_page_wraps_kpi_and_recent_separately_with_charts_between() {
+        let html = sample_page().render().unwrap();
+        assert!(html.contains(r#"id="detail-live-kpi""#));
+        assert!(html.contains(r#"id="detail-live-recent""#));
+        assert!(html.contains(r#"id="latency-chart""#));
+        let kpi_pos = html.find(r#"id="detail-live-kpi""#).expect("kpi present");
+        let chart_pos = html.find(r#"id="latency-chart""#).expect("chart present");
+        let recent_pos = html
+            .find(r#"id="detail-live-recent""#)
+            .expect("recent present");
+        assert!(kpi_pos < chart_pos, "KPI must render before charts");
+        assert!(
+            chart_pos < recent_pos,
+            "Charts must render before Recent results"
+        );
     }
 
     #[test]

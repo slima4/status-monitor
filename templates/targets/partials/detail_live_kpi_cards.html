@@ -1,0 +1,20 @@
+{# 4-up KPI cards. Rendered inside the #detail-live-kpi section on both
+   the initial page render and every htmx swap, so this fragment is the
+   single source of truth for the metric strip. #}
+<div class="sticker-card p-5">
+  <p class="panel-label">Uptime</p>
+  <p class="kpi-value">{{ uptime.uptime_pct }}%</p>
+  <p class="mt-1 text-xs text-slate-500">{{ uptime.total }} checks</p>
+</div>
+<div class="sticker-card p-5">
+  <p class="panel-label">Up</p>
+  <p class="kpi-value kpi-value--ok">{{ uptime.up }}</p>
+</div>
+<div class="sticker-card p-5">
+  <p class="panel-label">Down</p>
+  <p class="kpi-value kpi-value--bad">{{ uptime.down }}</p>
+</div>
+<div class="sticker-card p-5">
+  <p class="panel-label">Errors</p>
+  <p class="kpi-value kpi-value--bad">{{ uptime.error }}</p>
+</div>

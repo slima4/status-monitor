@@ -2,7 +2,7 @@
 // No DOM-side wiring beyond the (element, endpoint) signature — drop into
 // Svelte's onMount() unchanged when the migration happens.
 
-import { initChart, fetchJson, unwrapItems, quantile, timeBuckets, bindResize } from "./_init.js";
+import { mountChartFromFetch, quantile, timeBuckets } from "./_init.js";
 
 const BUCKETS = 60;
 const QUANTILES = [
@@ -56,10 +56,11 @@ function rangeFromEndpoint(endpoint) {
 }
 
 export function initLatencyChart(el, endpoint) {
-    const chart = initChart(el);
     const { from, to } = rangeFromEndpoint(endpoint);
-    fetchJson(endpoint)
-        .then(json => chart.setOption(buildOption(unwrapItems(json), from, to), { notMerge: true }))
-        .catch(err => console.warn("latency chart load failed", err));
-    return bindResize(chart);
+    return mountChartFromFetch(
+        el,
+        endpoint,
+        (chart, items) => chart.setOption(buildOption(items, from, to), { notMerge: true }),
+        "No data in this range yet.",
+    );
 }

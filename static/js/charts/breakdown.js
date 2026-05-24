@@ -1,4 +1,4 @@
-import { initChart, fetchJson, unwrapItems, bindResize, wireChartElements } from "./_init.js";
+import { mountChartFromFetch, wireChartElements } from "./_init.js";
 
 const PHASES = [
     { key: "dns_ms", name: "DNS", color: "#a78bfa" },
@@ -39,11 +39,12 @@ function buildOption(items) {
 }
 
 function initBreakdownChart(el) {
-    const chart = initChart(el);
-    fetchJson(el.dataset.endpoint)
-        .then(json => chart.setOption(buildOption(unwrapItems(json)), { notMerge: true }))
-        .catch(err => console.warn("breakdown chart load failed", err));
-    return bindResize(chart);
+    return mountChartFromFetch(
+        el,
+        el.dataset.endpoint,
+        (chart, items) => chart.setOption(buildOption(items), { notMerge: true }),
+        "No data in this range yet.",
+    );
 }
 
 wireChartElements("#breakdown-chart[data-endpoint]", initBreakdownChart);
