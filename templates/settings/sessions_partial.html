@@ -25,6 +25,11 @@
                 hx-target="#sessions-list"
                 hx-swap="innerHTML"
                 hx-on::after-request="if(event.detail.successful){htmx.trigger('body','sessions:refresh')}"
+                data-confirm-modal
+                data-confirm-title="Revoke this session?"
+                data-confirm-body="The device using this session is signed out immediately."
+                data-confirm-label="Revoke session"
+                data-confirm-danger
                 class="row-link row-link--danger">Revoke</button>
         {% endif %}
       </td>

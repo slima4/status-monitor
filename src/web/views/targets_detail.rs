@@ -276,6 +276,15 @@ mod tests {
     }
 
     #[test]
+    fn detail_delete_uses_shared_confirm_modal_not_browser_dialog() {
+        let html = sample_page().render().unwrap();
+        assert!(html.contains("data-confirm-modal"));
+        assert!(html.contains(r#"data-confirm-title="Delete monitor?""#));
+        assert!(html.contains("data-confirm-danger"));
+        assert!(!html.contains("hx-confirm"));
+    }
+
+    #[test]
     fn range_options_mark_active() {
         let opts = build_range_options("7d");
         assert!(opts.iter().any(|o| o.key == "7d" && o.selected));

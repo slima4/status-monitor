@@ -39,9 +39,13 @@
          class="mr-3 row-link">Copy</a>
       <button type="button"
               hx-delete="/api/v1/targets/{{ row.id }}"
-              hx-confirm="Delete monitor {{ row.name }}?"
               hx-target="closest tr"
               hx-swap="outerHTML swap:300ms"
+              data-confirm-modal
+              data-confirm-title="Delete monitor?"
+              data-confirm-body="Permanently deletes {{ row.name }}, its history, and any incidents bound to it. Notification channels are untouched. This cannot be undone."
+              data-confirm-label="Delete monitor"
+              data-confirm-danger
               aria-label="Delete monitor {{ row.name }}"
               class="row-link row-link--danger">Delete</button>
     </td>

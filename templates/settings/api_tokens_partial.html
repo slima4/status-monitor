@@ -19,8 +19,12 @@
         <button type="button"
                 hx-delete="/api/v1/me/api-tokens/{{ t.id }}"
                 hx-headers='{"X-Requested-With":"status-monitor"}'
-                hx-confirm="Revoke this token? Existing callers using it will start receiving 401."
                 hx-on::after-request="if(event.detail.successful){htmx.trigger('body','tokens:refresh')}"
+                data-confirm-modal
+                data-confirm-title="Revoke API token?"
+                data-confirm-body="Token {{ t.name }} can no longer be used. Existing callers receive 401 on the next request. Cannot be undone."
+                data-confirm-label="Revoke token"
+                data-confirm-danger
                 class="row-link row-link--danger">Revoke</button>
       </td>
     </tr>

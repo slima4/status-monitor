@@ -117,6 +117,14 @@
         outline-offset: 2px;
     }
 
+    /* Tailwind preflight zeroes margin on every element including <dialog>,
+       which kills the UA's `margin: auto` that centers a modal dialog.
+       Restore it so showModal() lands the dialog at viewport center
+       instead of (0, 0). */
+    dialog[open] {
+        margin: auto;
+    }
+
     /* Cartoon checkbox / radio. Native controls ignore the sticker
        language (ink edge + hard offset shadow) the rest of the UI speaks,
        so restyle them once here — every template's box inherits it, no

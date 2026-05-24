@@ -120,7 +120,13 @@
         btn.textContent = 'Delete organisation';
         btn.setAttribute('hx-delete', '/api/v1/orgs/' + org.id);
         btn.setAttribute('hx-swap', 'none');
-        btn.setAttribute('hx-confirm', 'Permanently delete ' + (org.slug || 'this organisation') + '?');
+        btn.setAttribute('data-confirm-modal', '');
+        btn.setAttribute('data-confirm-title', 'Delete organisation?');
+        btn.setAttribute('data-confirm-body',
+          'Permanently deletes ' + (org.slug || 'this organisation')
+          + ', its monitors, history, and incidents. Cannot be undone.');
+        btn.setAttribute('data-confirm-label', 'Delete organisation');
+        btn.setAttribute('data-confirm-danger', '');
         li.appendChild(btn);
 
         blockingList.appendChild(li);

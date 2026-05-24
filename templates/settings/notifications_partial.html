@@ -37,8 +37,12 @@
           <button type="button"
                   hx-delete="/api/v1/notification-channels/{{ c.id }}"
                   hx-headers='{"X-Requested-With":"status-monitor"}'
-                  hx-confirm="Delete this channel? Monitors bound to it stop alerting through it."
                   hx-on::after-request="if(event.detail.successful){htmx.trigger('body','channels:refresh')}"
+                  data-confirm-modal
+                  data-confirm-title="Delete notification channel?"
+                  data-confirm-body="Monitors bound to {{ c.name }} stop alerting through it. Channel can be re-added later but bindings must be re-applied."
+                  data-confirm-label="Delete channel"
+                  data-confirm-danger
                   class="row-link row-link--danger">Delete</button>
         </div>
       </td>

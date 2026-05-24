@@ -9,8 +9,12 @@
 <button type="button"
         hx-post="/auth/logout-all"
         hx-headers='{"X-Requested-With":"status-monitor"}'
-        hx-confirm="Log out of every session for this account?"
         hx-on::after-request="window.location.href='/login'"
+        data-confirm-modal
+        data-confirm-title="Log out everywhere?"
+        data-confirm-body="Every active session for this account is signed out, including this one. You will need to sign in again."
+        data-confirm-label="Log out everywhere"
+        data-confirm-danger
         class="btn-ghost btn-ghost--danger px-3 py-1.5 text-sm font-medium">
   Log out everywhere
 </button>
