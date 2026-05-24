@@ -89,10 +89,10 @@ pub struct DetailLive {
     pub id: String,
     pub name: String,
     pub range: &'static str,
-    pub uptime: UptimeStatsView,
-    pub results: Vec<ResultRow>,
+    pub uptime: Arc<UptimeStatsView>,
+    pub results: Arc<[ResultRow]>,
     pub results_has_more: bool,
-    pub last_at_iso: String,
+    pub last_at_iso: Arc<str>,
 }
 
 #[derive(Template, WebTemplate)]
@@ -140,9 +140,9 @@ pub struct DetailPage {
     pub last_status: &'static str,
     /// ISO 8601 timestamp of the most recent check, "" when none. Drives
     /// the client-side "checked Ns ago · next in Ns" ticker.
-    pub last_at_iso: String,
-    pub uptime: UptimeStatsView,
-    pub results: Vec<ResultRow>,
+    pub last_at_iso: Arc<str>,
+    pub uptime: Arc<UptimeStatsView>,
+    pub results: Arc<[ResultRow]>,
     pub results_has_more: bool,
     pub config_json: String,
     pub range: &'static str,
@@ -207,14 +207,15 @@ impl WindowLabels {
 /// Snapshot of the per-target live region: uptime stats + recent rows +
 /// last-seen status. Cached in `AppState::live_data_cache` for 5s; both
 /// the full-page detail view and the htmx live-partial poll read from
-/// it so a burst of either kind collapses to one CH round-trip.
-#[derive(Clone)]
+/// it so a burst of either kind collapses to one CH round-trip. Inner
+/// fields are `Arc` so a cache hit clones a pointer instead of the
+/// full row vector + uptime struct per request.
 pub struct LiveData {
-    pub uptime: UptimeStatsView,
-    pub result_rows: Vec<ResultRow>,
+    pub uptime: Arc<UptimeStatsView>,
+    pub result_rows: Arc<[ResultRow]>,
     pub results_has_more: bool,
     pub last_status: &'static str,
-    pub last_at_iso: String,
+    pub last_at_iso: Arc<str>,
 }
 
 /// Cached front door for [`load_live_data`]. Returns a moka-shared
@@ -310,13 +311,18 @@ async fn load_live_data(
     };
     let latest_for_badge = results.first().or(latest_outside_window.as_ref());
     let last_status = latest_for_badge.map(|r| r.status.as_str()).unwrap_or("");
-    let last_at_iso = latest_for_badge
+    let last_at_iso: Arc<str> = latest_for_badge
         .map(|r| fmt_ts(r.timestamp))
-        .unwrap_or_default();
-    let result_rows = results.into_iter().map(ResultRow::from).collect();
+        .unwrap_or_default()
+        .into();
+    let result_rows: Arc<[ResultRow]> = results
+        .into_iter()
+        .map(ResultRow::from)
+        .collect::<Vec<_>>()
+        .into();
 
     Ok(LiveData {
-        uptime: uptime.into(),
+        uptime: Arc::new(uptime.into()),
         result_rows,
         results_has_more,
         last_status,
@@ -359,9 +365,9 @@ pub async fn index(
         enabled: target.enabled,
         tags: target.tags,
         last_status: live.last_status,
-        last_at_iso: live.last_at_iso.clone(),
-        uptime: live.uptime.clone(),
-        results: live.result_rows.clone(),
+        last_at_iso: Arc::clone(&live.last_at_iso),
+        uptime: Arc::clone(&live.uptime),
+        results: Arc::clone(&live.result_rows),
         results_has_more: live.results_has_more,
         config_json,
         range: range_key,
@@ -400,10 +406,10 @@ pub async fn live_partial(
         id: target.id.to_string(),
         name: target.name,
         range: range_key,
-        uptime: live.uptime.clone(),
-        results: live.result_rows.clone(),
+        uptime: Arc::clone(&live.uptime),
+        results: Arc::clone(&live.result_rows),
         results_has_more: live.results_has_more,
-        last_at_iso: live.last_at_iso.clone(),
+        last_at_iso: Arc::clone(&live.last_at_iso),
     };
     let rendered = page
         .render()
@@ -609,22 +615,22 @@ mod tests {
             enabled: true,
             tags: vec!["prod".into()],
             last_status: "up",
-            last_at_iso: "2026-05-13T12:00:00Z".into(),
-            uptime: UptimeStatsView {
+            last_at_iso: Arc::from("2026-05-13T12:00:00Z"),
+            uptime: Arc::new(UptimeStatsView {
                 total: 100,
                 up: 99,
                 down: 1,
                 degraded: 0,
                 error: 0,
                 uptime_pct: "99.00".into(),
-            },
-            results: vec![ResultRow {
+            }),
+            results: Arc::from(vec![ResultRow {
                 timestamp: "2026-05-13T12:00:00Z".into(),
                 status: "up",
                 duration_ms: 42,
                 response_code: "200".into(),
                 error: String::new(),
-            }],
+            }]),
             results_has_more: false,
             config_json: r#"{"type":"http"}"#.into(),
             range: "24h",
@@ -688,17 +694,17 @@ mod tests {
             id: "00000000-0000-0000-0000-000000000001".into(),
             name: "api".into(),
             range: "24h",
-            uptime: UptimeStatsView {
+            uptime: Arc::new(UptimeStatsView {
                 total: 100,
                 up: 99,
                 down: 1,
                 degraded: 0,
                 error: 0,
                 uptime_pct: "99.00".into(),
-            },
-            results: vec![],
+            }),
+            results: Arc::from(Vec::<ResultRow>::new()),
             results_has_more: false,
-            last_at_iso: "2026-05-13T12:00:00Z".into(),
+            last_at_iso: Arc::from("2026-05-13T12:00:00Z"),
         }
     }
 
