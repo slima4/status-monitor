@@ -25,7 +25,13 @@ function buildOption(items, from, to) {
         connectNulls: false,
         itemStyle: { color },
         lineStyle: { color, width: 2 },
-        data: sortedBuckets.map(b => (b.sorted.length === 0 ? null : Math.round(quantile(b.sorted, q)))),
+        // Time-axis series needs [timestamp, value] pairs — a bare value
+        // array works only for a category axis. Without the timestamp
+        // every point lands at x=0 and the line is invisible.
+        data: sortedBuckets.map(b => [
+            b.t,
+            b.sorted.length === 0 ? null : Math.round(quantile(b.sorted, q)),
+        ]),
     }));
     return {
         tooltip: { trigger: "axis" },
