@@ -161,8 +161,14 @@ async fn fresh_probe(
     check: &DomainExpiryCheck,
     runtime: &DomainExpiryRuntime,
 ) -> std::result::Result<Arc<RdapAnswer>, ProbeFailure> {
-    let domain: Arc<str> = Arc::from(check.domain.as_str());
-    let tld = HostThrottle::rdap_tld(check.domain.as_str()).map(Arc::<str>::from);
+    // Canonicalise both the singleflight key AND the upstream lookup target
+    // — `Bähn.de`, `BÄHN.de`, and `xn--bhn-qla.de` must share one slot, one
+    // outbound RDAP call, and one per-TLD permit. Without this, the
+    // ingest-side canonicalisation could be defeated by anything that fed a
+    // raw user string here (e.g. a future test/admin path).
+    let canonical = crate::worker::host_throttle::canonical_host(&check.domain);
+    let domain: Arc<str> = Arc::from(canonical.as_str());
+    let tld = HostThrottle::rdap_tld(&canonical).map(Arc::<str>::from);
 
     // Throttle gate sits INSIDE the fetcher closure so a cache hit never
     // consumes a per-TLD permit and never bumps the wait counter — the

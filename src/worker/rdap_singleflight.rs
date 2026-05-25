@@ -215,6 +215,32 @@ mod tests {
         assert_eq!(outcome, FetchOutcome::Miss);
     }
 
+    /// Singleflight key normalisation lives in `domain_expiry::fresh_probe`
+    /// — by the time a domain hits `lookup` it is the canonical
+    /// (lowercased + IDN-encoded + trailing-dot stripped) form. This test
+    /// asserts the cache contract on the canonical key: identical keys
+    /// share a slot regardless of how many `Arc<str>` clones the caller
+    /// makes.
+    #[tokio::test]
+    async fn canonical_keys_share_one_slot() {
+        let sf = Arc::new(RdapSingleflight::new(Duration::from_secs(60)));
+        let calls = Arc::new(AtomicUsize::new(0));
+        for _ in 0..3 {
+            let _ = sf
+                .lookup(Arc::<str>::from("xn--bhn-qla.de"), || {
+                    let calls = calls.clone();
+                    async move {
+                        calls.fetch_add(1, Ordering::SeqCst);
+                        Ok(answer())
+                    }
+                })
+                .await
+                .unwrap();
+        }
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(sf.len(), 1);
+    }
+
     #[tokio::test]
     async fn distinct_domains_each_fetch_once() {
         let sf = RdapSingleflight::new(Duration::from_secs(60));

@@ -171,7 +171,7 @@ pub async fn get(
 pub async fn create(
     State(state): State<AppState>,
     CurrentOrg(org): CurrentOrg,
-    Json(new): Json<NewTarget>,
+    Json(mut new): Json<NewTarget>,
 ) -> Result<(
     StatusCode,
     AppendHeaders<[(axum::http::HeaderName, HeaderValue); 1]>,
@@ -179,6 +179,7 @@ pub async fn create(
 )> {
     let plan = state.quotas.limit_for_org(org).await?;
     let guard = ssrf_guard(&state);
+    canonicalize_check(&mut new.check)?;
     validate_new_target(&new, &guard, i64::from(plan.min_check_interval_secs))?;
     verify_alert_channels(&state, org, &new.alerts).await?;
     validate_owner_is_member(&state, org, new.owner_user_id).await?;
@@ -226,9 +227,10 @@ pub async fn update(
     State(state): State<AppState>,
     CurrentOrg(org): CurrentOrg,
     Path(id): Path<Uuid>,
-    Json(update): Json<TargetUpdate>,
+    Json(mut update): Json<TargetUpdate>,
 ) -> Result<Redacted<Target>> {
-    if let Some(check) = &update.check {
+    if let Some(check) = update.check.as_mut() {
+        canonicalize_check(check)?;
         validate_check(check, &ssrf_guard(&state))?;
         check_abuse(&state, org, check)?;
     }
@@ -348,7 +350,7 @@ pub async fn delete(
 pub async fn bulk_create(
     State(state): State<AppState>,
     CurrentOrg(org): CurrentOrg,
-    Json(items): Json<Vec<NewTarget>>,
+    Json(mut items): Json<Vec<NewTarget>>,
 ) -> Result<(StatusCode, Redacted<Vec<Target>>)> {
     if items.is_empty() {
         return Err(AppError::bad_request(
@@ -364,7 +366,8 @@ pub async fn bulk_create(
     }
     let plan = state.quotas.limit_for_org(org).await?;
     let guard = ssrf_guard(&state);
-    for new in &items {
+    for new in &mut items {
+        canonicalize_check(&mut new.check)?;
         validate_new_target(new, &guard, i64::from(plan.min_check_interval_secs))?;
         verify_alert_channels(&state, org, &new.alerts).await?;
         check_abuse(&state, org, &new.check)?;
@@ -521,9 +524,10 @@ pub async fn bulk_action(
 pub async fn test_check(
     State(state): State<AppState>,
     CurrentOrg(org): CurrentOrg,
-    Json(req): Json<TestRequest>,
+    Json(mut req): Json<TestRequest>,
 ) -> Result<Json<TestResponse>> {
     let guard = ssrf_guard(&state);
+    canonicalize_check(&mut req.check)?;
     validate_check(&req.check, &guard)?;
     check_abuse(&state, org, &req.check)?;
     let domain_expiry_rt = state.worker_pool.domain_expiry_runtime();
@@ -808,6 +812,53 @@ async fn verify_alert_channels(state: &AppState, org: OrgId, alerts: &TargetAler
     Ok(())
 }
 
+/// Normalises the host/domain of the check in place: IDN-encoded, ASCII
+/// lowercase, trailing dot stripped. After this runs, downstream stores the
+/// canonical form and every layer (circuit breaker, host throttle, RDAP
+/// singleflight) keys on the same string regardless of how the user typed it.
+/// HTTP URLs are skipped — `url::Url` already canonicalises hosts on parse.
+/// Returns `400` when IDN encoding fails on a user-supplied host.
+fn canonicalize_check(check: &mut crate::domain::CheckSpec) -> Result<()> {
+    use crate::domain::CheckSpec;
+    use crate::worker::host_throttle::canonical_host_strict;
+    use std::net::IpAddr;
+    fn canon_host(host: &mut String, field: &'static str, code: &'static str) -> Result<()> {
+        let raw = std::mem::take(host);
+        let unbracketed = crate::security::unbracket(&raw);
+        // IPs (literal or bracketed IPv6) bypass IDN — they have no host
+        // shape to canonicalise.
+        if unbracketed.parse::<IpAddr>().is_ok() {
+            *host = unbracketed.to_owned();
+            return Ok(());
+        }
+        match canonical_host_strict(unbracketed) {
+            Ok(canon) => {
+                *host = canon;
+                Ok(())
+            }
+            Err(_) => Err(AppError::bad_request_field(
+                code,
+                format!("host '{raw}' is not a valid IDN domain"),
+                field,
+            )),
+        }
+    }
+    match check {
+        CheckSpec::Http(_) => Ok(()),
+        CheckSpec::Tcp(tcp) => canon_host(&mut tcp.host, "check.host", codes::INVALID_TCP_HOST),
+        CheckSpec::TlsCert(cert) => {
+            canon_host(&mut cert.host, "check.host", codes::INVALID_TLS_CERT_PARAMS)
+        }
+        CheckSpec::DomainExpiry(d) => {
+            canon_host(&mut d.domain, "check.domain", codes::INVALID_DOMAIN_PARAMS)
+        }
+        CheckSpec::Dns(d) => {
+            canon_host(&mut d.domain, "check.domain", codes::INVALID_DNS_PARAMS)?;
+            Ok(())
+        }
+    }
+}
+
 fn validate_check(check: &crate::domain::CheckSpec, guard: &SsrfGuard) -> Result<()> {
     use crate::domain::CheckSpec;
     match check {
@@ -1040,5 +1091,54 @@ mod tests {
         let err = validate_public_target_field_updates(None, Some(&big), None)
             .expect_err("over-cap set must reject");
         assert_bad_request_with_field(err, "public_description");
+    }
+
+    #[test]
+    fn canonicalize_check_idn_encodes_tcp_host() {
+        use crate::domain::{CheckSpec, TcpCheck};
+        use std::time::Duration;
+        let mut spec = CheckSpec::Tcp(TcpCheck {
+            host: "Bähn.DE.".into(),
+            port: 443,
+            timeout: Duration::from_secs(5),
+        });
+        canonicalize_check(&mut spec).unwrap();
+        match spec {
+            CheckSpec::Tcp(tcp) => assert_eq!(tcp.host, "xn--bhn-qla.de"),
+            _ => panic!("variant changed"),
+        }
+    }
+
+    #[test]
+    fn canonicalize_check_preserves_ipv6_brackets_stripped() {
+        use crate::domain::{CheckSpec, TcpCheck};
+        use std::time::Duration;
+        let mut spec = CheckSpec::Tcp(TcpCheck {
+            host: "[::1]".into(),
+            port: 443,
+            timeout: Duration::from_secs(5),
+        });
+        canonicalize_check(&mut spec).unwrap();
+        match spec {
+            CheckSpec::Tcp(tcp) => assert_eq!(tcp.host, "::1"),
+            _ => panic!("variant changed"),
+        }
+    }
+
+    #[test]
+    fn canonicalize_check_lowercases_domain_expiry() {
+        use crate::domain::{CheckSpec, DomainExpiryCheck};
+        use std::time::Duration;
+        let mut spec = CheckSpec::DomainExpiry(DomainExpiryCheck {
+            domain: "EXAMPLE.COM.".into(),
+            warn_days: 30,
+            critical_days: 7,
+            timeout: Duration::from_secs(5),
+        });
+        canonicalize_check(&mut spec).unwrap();
+        match spec {
+            CheckSpec::DomainExpiry(d) => assert_eq!(d.domain, "example.com"),
+            _ => panic!("variant changed"),
+        }
     }
 }

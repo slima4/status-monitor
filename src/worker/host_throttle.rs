@@ -50,14 +50,15 @@ impl HostThrottle {
     }
 
     /// Lowercase TLD (last label) of a domain. `None` when the input has no
-    /// label. Trailing dot tolerated.
+    /// label. Operates on the canonical (IDN-encoded) form so that `bähn.рф`
+    /// and `bähn.xn--p1ai` and `BÄHN.рф` collapse onto the same TLD bucket.
     pub fn rdap_tld(domain: &str) -> Option<String> {
-        let trimmed = domain.trim_end_matches('.');
-        trimmed
+        let canonical = canonical_host(domain);
+        canonical
             .rsplit('.')
             .next()
             .filter(|t| !t.is_empty())
-            .map(str::to_ascii_lowercase)
+            .map(str::to_owned)
     }
 
     /// Wide-open cap for tests + benches.
@@ -159,11 +160,30 @@ fn clamp_permits(n: usize) -> usize {
     n.clamp(1, Semaphore::MAX_PERMITS)
 }
 
-/// Canonical host key: ASCII-lowercased + trailing dot stripped. The `url`
-/// crate already returns punycode for IDN, so the public-status FQDN
-/// trailing-dot Host bypass is what we still have to fix at this layer.
+/// Canonical host key: IDN-encoded + ASCII-lowercased + trailing dot stripped.
+/// Infallible — falls back to ASCII-lowercase when IDN encoding fails, so the
+/// worker hot path never panics on unexpected input.
+///
+/// Used by:
+/// - circuit-breaker key (`host_for_spec`) — `Example.COM`, `example.com.`,
+///   `BÄHN.de`, and `xn--bhn-qla.de` share one breaker.
+/// - per-(org, host, port) throttle key.
+/// - per-TLD RDAP throttle (`rdap_tld`).
+/// - cross-tenant RDAP singleflight cache key.
+///
+/// Use [`canonical_host_strict`] at the API ingest boundary to reject malformed
+/// IDN with a 400 instead of silently falling back.
 pub fn canonical_host(host: &str) -> String {
-    host.trim_end_matches('.').to_ascii_lowercase()
+    let trimmed = host.trim_end_matches('.');
+    idna::domain_to_ascii(trimmed).unwrap_or_else(|_| trimmed.to_ascii_lowercase())
+}
+
+/// Strict variant of [`canonical_host`] for use at the API ingest boundary.
+/// Uses UTS46 with UseSTD3ASCIIRules, so leading/trailing hyphens, embedded
+/// underscores, and other malformed IDN are rejected with a 400 instead of
+/// silently stored.
+pub fn canonical_host_strict(host: &str) -> Result<String, idna::Errors> {
+    idna::domain_to_ascii_strict(host.trim_end_matches('.'))
 }
 
 /// Network endpoint of a CheckSpec for variants that target one host+port.
@@ -267,6 +287,20 @@ mod tests {
     }
 
     #[test]
+    fn host_normalization_idn_round_trips_to_punycode() {
+        let punycode = "xn--bhn-qla.de";
+        assert_eq!(canonical_host("Bähn.de"), punycode);
+        assert_eq!(canonical_host("BÄHN.de"), punycode);
+        assert_eq!(canonical_host("bähn.de."), punycode);
+        assert_eq!(canonical_host("xn--bhn-qla.de"), punycode);
+    }
+
+    #[test]
+    fn canonical_host_strict_rejects_bad_idn() {
+        assert!(canonical_host_strict("--invalid-leading.com").is_err());
+    }
+
+    #[test]
     fn rdap_tld_extracts_lowercase_last_label() {
         assert_eq!(
             HostThrottle::rdap_tld("example.com").as_deref(),
@@ -278,6 +312,15 @@ mod tests {
         );
         assert_eq!(HostThrottle::rdap_tld("uk").as_deref(), Some("uk"));
         assert_eq!(HostThrottle::rdap_tld(""), None);
+    }
+
+    #[test]
+    fn rdap_tld_collapses_unicode_and_punycode_tld() {
+        // Cyrillic .рф and its punycode xn--p1ai map to the same bucket.
+        let unicode_tld = HostThrottle::rdap_tld("пример.рф");
+        let puny_tld = HostThrottle::rdap_tld("xn--e1afmkfd.xn--p1ai");
+        assert_eq!(unicode_tld, puny_tld);
+        assert_eq!(unicode_tld.as_deref(), Some("xn--p1ai"));
     }
 
     #[test]
