@@ -260,8 +260,10 @@ async fn build_page(state: &AppState, org: OrgId, params: &ListParams) -> WebRes
             .collect()
     };
 
-    let pool = state.require_db()?;
-    let members = list_members(pool, org).await?;
+    let members = match state.db.as_ref() {
+        Some(pool) => list_members(pool, org).await?,
+        None => Vec::new(),
+    };
     let owner_lookup: HashMap<Uuid, MemberLite> = members
         .iter()
         .map(|m| {

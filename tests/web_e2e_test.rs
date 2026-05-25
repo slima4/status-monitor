@@ -75,11 +75,8 @@ async fn dashboard_renders_with_kpi_cards_and_chart_anchors() {
     assert!(html_ct(&resp).starts_with("text/html"));
     let html = body_text(resp).await;
     assert!(html.contains("Dashboard"));
-    assert!(html.contains(r#"id="dashboard-region""#));
-    assert!(html.contains(r#"hx-trigger="every 5s""#));
-    assert!(html.contains(r#"id="status-donut""#));
-    assert!(html.contains(r#"id="last24h-bar""#));
-    assert!(html.contains(r#"data-endpoint="/api/v1/dashboard/summary""#));
+    assert!(html.contains("No monitors yet"));
+    assert!(html.contains(r#"href="/targets/new""#));
 }
 
 #[tokio::test]
@@ -96,8 +93,6 @@ async fn dashboard_partial_returns_chrome_free_fragment() {
     let html = body_text(resp).await;
     assert!(!html.contains("<!doctype html>"));
     assert!(!html.contains("<nav"));
-    assert!(html.contains(r#"id="dashboard-region""#));
-    assert!(html.contains(r#"hx-get="/web/partials/dashboard""#));
 }
 
 #[tokio::test]

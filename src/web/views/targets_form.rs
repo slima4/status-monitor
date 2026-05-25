@@ -290,8 +290,10 @@ async fn owner_choices(
     org: OrgId,
     selected: &str,
 ) -> Result<Vec<OwnerChoice>, AppError> {
-    let pool = state.require_db()?;
-    let members = crate::storage::orgs::list_members(pool, org).await?;
+    let members = match state.db.as_ref() {
+        Some(pool) => crate::storage::orgs::list_members(pool, org).await?,
+        None => return Ok(Vec::new()),
+    };
     let mut out: Vec<OwnerChoice> = members
         .into_iter()
         .map(|m| {
