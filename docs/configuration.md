@@ -15,6 +15,7 @@ Override `STATUS_MONITOR_CONFIG_PATH` to point at an alternate base config file.
 | `checker` | `max_concurrent_checks` | global concurrency cap enforced by worker pool semaphore |
 | `checker` | `default_timeout_ms`, `connect_timeout_ms` | client-side timeouts applied to outbound checks |
 | `checker` | `default_check_interval_secs` | fallback interval when target spec omits it |
+| `checker` | `per_host_max_inflight`, `rdap_max_inflight` | per-(org, host, port) and per-TLD RDAP concurrency caps. Fail-fast bulkhead — over-cap checks return a `degraded` result instead of queueing |
 | `http_client` | pool / keep-alive settings | hyper-util Client + connector tuning forwarded to the shared clients |
 | `http_client` | `http2_prior_knowledge` | when `true`, client speaks h2c upfront. Default `false`. Used by the loadtest harness |
 | `dns` | `cache_size`, `positive_ttl_secs`, `negative_ttl_secs`, `servers` | hickory resolver — point at internal resolvers when needed |
@@ -209,6 +210,8 @@ key, or an out-of-range ratio) are a clean startup config error.
 ## Tuning notes
 
 - **`max_concurrent_checks`** caps simultaneous in-flight checks. Per-check memory is small (a tokio task plus an in-flight hyper request), so the practical ceiling is set by file descriptors and ephemeral ports rather than RAM.
+- **`per_host_max_inflight`** (default `2`) is the per-tenant per-`(host, port)` in-flight cap. One tenant fanning a burst of checks at the same upstream looks like a probe; this cap keeps that fingerprint flat. Tenant-scoped — one customer's burst never starves another customer's monitor of the same host. Fail-fast: a check that would exceed the cap is recorded as `degraded` with `error="throttled: host concurrency cap"` and skipped (no alert fired — the upstream is fine, the back-pressure is operator-side). Counters: `status_monitor_host_throttle_waits_total{kind="host"}` (attempts) and `status_monitor_host_throttle_drops_total` (rejections).
+- **`rdap_max_inflight`** (default `1`) is the process-wide per-TLD RDAP concurrency cap (across all tenants). Daily check cadence + per-TLD slot means deep queues drain quickly without bursting any registry. Same fail-fast behavior + counters as the per-host cap.
 - **`storage.clickhouse.buffer_size`** is the mpsc capacity between worker pool and batcher. Sized for ~1 s of bursts at peak RPS. Drops increment `storage_dropped_total{reason="queue_full"}` — that metric is your back-pressure signal.
 - **`storage.clickhouse.batch_size` vs `batch_timeout_ms`** trade tail latency for throughput. `1000 / 500ms` is a good starting point at ~20k rps.
 - **`scheduler.jitter_pct`** prevents synchronized fleet-wide ticks. Default 10% is enough to spread N targets across an interval without making individual schedules unpredictable.

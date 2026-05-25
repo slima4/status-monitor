@@ -121,6 +121,10 @@ A response with `429 Too Many Requests` or `503 Service Unavailable` is recorded
 
 Some third-party APIs rate-limit by source IP regardless. GitHub's unauthenticated REST API is the canonical case: 60 req/h per IP, 5 000 req/h with a token in the `Authorization` header. Poll those endpoints at ≥ 300 s, or attach the token via a header in this spec.
 
+#### Per-host throttle
+
+The worker side caps the number of concurrent checks one tenant can fan at the same `(host, port)` so a burst of monitors against one upstream doesn't look like a probe. When the cap is reached, the over-cap check is recorded as `degraded` with `error="throttled: host concurrency cap"` and **no alert fires** — the upstream is fine, the back-pressure is operator-side. The cap is per-tenant: one customer's burst never starves another customer's monitor of the same host. Default cap is two in-flight per `(org, host, port)`; tune via `checker.per_host_max_inflight`. RDAP queries (domain expiry) carry their own per-TLD cap via `checker.rdap_max_inflight`.
+
 ### TCP
 
 ```jsonc

@@ -20,6 +20,8 @@ these names verbatim.
 | `status_monitor_notifications_total{channel,kind}` | counter | alert notifications dispatched |
 | `status_monitor_notifications_failures_total{channel}` | counter | notification dispatches that returned an error |
 | `status_monitor_alerts_dropped_total{reason}` | counter | alert signals dropped before reaching the engine |
+| `status_monitor_host_throttle_waits_total{kind}` | counter | per-(org,host,port) (`kind=host`) or per-TLD RDAP (`kind=rdap`) throttle acquire attempts |
+| `status_monitor_host_throttle_drops_total` | counter | throttle rejections — over-cap checks recorded as `degraded` without firing alerts |
 | `status_monitor_build_info{version}` | counter | set to 1 once at startup so the endpoint is never empty |
 | `status_monitor_check_duration_ms` | histogram | per-check wall time |
 | `status_monitor_check_dns_ms` | histogram | DNS resolution latency (recorded in the hickory wrapper) |
