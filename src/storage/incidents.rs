@@ -17,6 +17,19 @@ use crate::domain::{
 };
 use crate::error::Result;
 
+/// One open incident joined with its target name + latest update.
+/// Powers the operator dashboard banner.
+#[derive(Debug, Clone)]
+pub struct ActiveIncident {
+    pub id: Uuid,
+    pub target_id: Uuid,
+    pub target_name: String,
+    pub severity: IncidentSeverity,
+    pub started_at: DateTime<Utc>,
+    pub public_title: Option<String>,
+    pub latest_update: Option<PublicIncidentUpdate>,
+}
+
 /// Operator-facing incident narration repository. Every method takes the
 /// caller's `org` (resolved from `CurrentOrg`) and refuses to touch any other
 /// tenant's rows. Compile-time scoping means "forgot to pass the org" is a
@@ -37,6 +50,10 @@ pub trait IncidentNarrationStore: Send + Sync {
         new: NewIncidentUpdate,
         author: Option<String>,
     ) -> Result<Option<PublicIncidentUpdate>>;
+    /// Currently-open incidents across every target in `org`, oldest-first
+    /// (so the banner shows "first opened …" without re-sorting). Capped at
+    /// `limit` for the dashboard banner.
+    async fn list_active(&self, org: OrgId, limit: usize) -> Result<Vec<ActiveIncident>>;
 }
 
 // ── Postgres impl ────────────────────────────────────────────────────────
@@ -240,6 +257,70 @@ impl IncidentNarrationStore for PgIncidentNarrationStore {
             message,
         }))
     }
+
+    async fn list_active(&self, org: OrgId, limit: usize) -> Result<Vec<ActiveIncident>> {
+        // LATERAL picks the latest update per incident in one round-trip.
+        let cap = limit.clamp(1, 200) as i64;
+        let rows: Vec<ActiveIncidentRow> = sqlx::query_as(
+            r#"SELECT i.id, i.target_id,
+                      COALESCE(t.public_name, t.name) AS target_name,
+                      i.severity, i.started_at, i.public_title,
+                      u.posted_at AS update_posted_at,
+                      u.phase     AS update_phase,
+                      u.message   AS update_message
+               FROM incidents i
+               JOIN targets t ON t.id = i.target_id AND t.org_id = i.org_id
+               LEFT JOIN LATERAL (
+                   SELECT posted_at, phase, message
+                   FROM incident_updates iu
+                   WHERE iu.incident_id = i.id AND iu.org_id = i.org_id
+                   ORDER BY iu.posted_at DESC
+                   LIMIT 1
+               ) u ON true
+               WHERE i.org_id = $1 AND i.ended_at IS NULL
+               ORDER BY i.started_at ASC
+               LIMIT $2"#,
+        )
+        .bind(org.0)
+        .bind(cap)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| anyhow::anyhow!("list_active incidents: {e}"))?;
+        Ok(rows.into_iter().map(row_to_active).collect())
+    }
+}
+
+#[derive(sqlx::FromRow)]
+struct ActiveIncidentRow {
+    id: Uuid,
+    target_id: Uuid,
+    target_name: String,
+    severity: String,
+    started_at: DateTime<Utc>,
+    public_title: Option<String>,
+    update_posted_at: Option<DateTime<Utc>>,
+    update_phase: Option<String>,
+    update_message: Option<String>,
+}
+
+fn row_to_active(r: ActiveIncidentRow) -> ActiveIncident {
+    let latest_update = match (r.update_posted_at, r.update_phase, r.update_message) {
+        (Some(posted_at), Some(phase), Some(message)) => Some(PublicIncidentUpdate {
+            posted_at,
+            phase: IncidentStatusPhase::from_db_str(&phase),
+            message,
+        }),
+        _ => None,
+    };
+    ActiveIncident {
+        id: r.id,
+        target_id: r.target_id,
+        target_name: r.target_name,
+        severity: IncidentSeverity::from_db_str(&r.severity),
+        started_at: r.started_at,
+        public_title: r.public_title,
+        latest_update,
+    }
 }
 
 // ── In-memory impl (tests) ──────────────────────────────────────────────
@@ -318,6 +399,30 @@ impl IncidentNarrationStore for InMemoryIncidentNarrationStore {
         inc.updates.push(entry.clone());
         inc.updated_at = Some(entry.posted_at);
         Ok(Some(entry))
+    }
+
+    async fn list_active(&self, _org: OrgId, limit: usize) -> Result<Vec<ActiveIncident>> {
+        // In-memory store doesn't track targets; tests that need a real
+        // `target_name` use the Postgres-backed store via the harness.
+        let mut out: Vec<ActiveIncident> = self
+            .inner
+            .lock()
+            .incidents
+            .iter()
+            .filter(|i| i.ended_at.is_none())
+            .map(|i| ActiveIncident {
+                id: i.id,
+                target_id: i.target_id,
+                target_name: String::new(),
+                severity: i.severity,
+                started_at: i.started_at,
+                public_title: i.public_title.clone(),
+                latest_update: i.updates.last().cloned(),
+            })
+            .collect();
+        out.sort_by_key(|a| a.started_at);
+        out.truncate(limit);
+        Ok(out)
     }
 }
 

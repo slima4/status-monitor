@@ -13,7 +13,8 @@ pub mod traits;
 pub use admin::AdminRepo;
 pub use clickhouse::{ClickhouseResultSink, ClickhouseResultsStore, build_client, migrate};
 pub use incidents::{
-    InMemoryIncidentNarrationStore, IncidentNarrationStore, PgIncidentNarrationStore,
+    ActiveIncident, InMemoryIncidentNarrationStore, IncidentNarrationStore,
+    PgIncidentNarrationStore,
 };
 pub use maintenance::{
     InMemoryMaintenanceStore, MaintenanceListQuery, MaintenanceStore, PgMaintenanceStore,

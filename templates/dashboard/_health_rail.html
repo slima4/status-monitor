@@ -1,0 +1,38 @@
+<section class="sticker-card dashboard-rail" aria-label="Status breakdown">
+  <div class="dashboard-rail__cell">
+    <p class="dashboard-rail__label">
+      <span class="dashboard-dot dashboard-dot--up"></span>
+      Up
+    </p>
+    <p class="dashboard-rail__value{% if status_counts.up == 0 %} dashboard-rail__value--muted{% endif %}">
+      {{ status_counts.up }}
+    </p>
+  </div>
+  <div class="dashboard-rail__cell">
+    <p class="dashboard-rail__label">
+      <span class="dashboard-dot dashboard-dot--degraded"></span>
+      Degraded
+    </p>
+    <p class="dashboard-rail__value{% if status_counts.degraded == 0 %} dashboard-rail__value--muted{% endif %}">
+      {{ status_counts.degraded }}
+    </p>
+  </div>
+  <div class="dashboard-rail__cell">
+    <p class="dashboard-rail__label">
+      <span class="dashboard-dot dashboard-dot--down{% if status_counts.down > 0 %} dashboard-dot--pulse{% endif %}"></span>
+      Down
+    </p>
+    <p class="dashboard-rail__value{% if status_counts.down == 0 %} dashboard-rail__value--muted{% endif %}">
+      {{ status_counts.down }}
+    </p>
+  </div>
+  <div class="dashboard-rail__cell">
+    <p class="dashboard-rail__label">
+      <span class="dashboard-dot dashboard-dot--muted"></span>
+      Paused
+    </p>
+    <p class="dashboard-rail__value{% if status_counts.paused == 0 %} dashboard-rail__value--muted{% endif %}">
+      {{ status_counts.paused }}
+    </p>
+  </div>
+</section>

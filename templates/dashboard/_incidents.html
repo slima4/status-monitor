@@ -1,0 +1,37 @@
+{% if let Some(first) = active_incidents.first() %}
+<section class="dashboard-incident-banner">
+  <header class="dashboard-incident-banner__head">
+    <span class="dashboard-incident-banner__title">
+      <span class="dashboard-dot dashboard-dot--down dashboard-dot--pulse" aria-hidden="true"></span>
+      {{ active_incidents.len() }} active incident{% if active_incidents.len() != 1 %}s{% endif %}
+    </span>
+    <span class="dashboard-incident-banner__sub">
+      first opened <span class="dashboard-subhead__mono">{{ first.age_label }}</span> ago
+    </span>
+    <span class="dashboard-incident-banner__actions">
+      <a href="/incidents" class="sticker-btn px-3 py-1.5 text-xs">Acknowledge</a>
+      <a href="/incidents" class="sticker-btn sticker-btn--primary px-3 py-1.5 text-xs">Open incident →</a>
+    </span>
+  </header>
+  <ul class="dashboard-incident-banner__list">
+    {% for inc in active_incidents.iter() %}
+    <li class="dashboard-incident-banner__item">
+      <span class="dashboard-incident-severity dashboard-incident-severity--{{ inc.severity_class }}">{{ inc.severity_label }}</span>
+      <div class="dashboard-incident-banner__body">
+        <div class="dashboard-incident-banner__row">
+          <a href="/targets/{{ inc.target_id }}" class="dashboard-incident-banner__name">{{ inc.title }}</a>
+          <span class="dashboard-incident-banner__age">{{ inc.age_label }}</span>
+        </div>
+        {% if let Some(u) = inc.latest_update %}
+        <div class="dashboard-incident-banner__update">
+          <span class="dashboard-subhead__mono">{{ u.time_label }}</span>
+          <span class="dashboard-incident-banner__phase">{{ u.phase_label }}</span>
+          <span>{{ u.message }}</span>
+        </div>
+        {% endif %}
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}

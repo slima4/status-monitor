@@ -1,0 +1,18 @@
+{% for card in kpi_cards.iter() %}
+<article class="sticker-card dashboard-kpi-card">
+  <p class="dashboard-kpi-card__label">{{ card.label }}</p>
+  <div class="dashboard-kpi-card__row">
+    <p class="dashboard-kpi-card__value">{{ card.value }}</p>
+    <svg class="dashboard-kpi-card__spark dashboard-kpi-card__spark--{{ card.spark_tint }}"
+         viewBox="0 0 160 22" preserveAspectRatio="none" aria-hidden="true">
+      {% if kpis.spark_path != "" %}
+      {% if kpis.spark_fill != "" %}
+      <path class="dashboard-spark__fill" d="{{ kpis.spark_fill }}" />
+      {% endif %}
+      <path class="dashboard-spark__line" d="{{ kpis.spark_path }}" />
+      {% endif %}
+    </svg>
+  </div>
+  <p class="dashboard-kpi-card__hint">{{ card.hint_html|safe }}</p>
+</article>
+{% endfor %}

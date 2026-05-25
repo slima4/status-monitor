@@ -3,15 +3,9 @@
 {% block content %}
 <section class="space-y-5">
   <header class="flex flex-wrap items-end justify-between gap-3">
-    <div class="space-y-1">
+    <div class="flex items-center gap-3">
       <h1 class="page-title">Dashboard</h1>
-      <p class="text-sm text-slate-500">
-        <span class="font-mono text-slate-700">status:any region:any</span>
-        <span class="mx-1">·</span>
-        <span class="font-mono text-slate-700">{{ matches }}</span> matches
-        <span class="mx-1">·</span>
-        refresh <span class="font-mono text-slate-700">5s</span>
-      </p>
+      <span class="dashboard-chip">refresh · 5s</span>
     </div>
     <div class="flex flex-wrap items-center gap-2">
       <a href="/targets/new"
@@ -34,9 +28,6 @@
     </a>
   </div>
   {% else %}
-  {# Dashboard body: KPI strip + dense table. Auto-rearms via hx-swap=outerHTML
-     so each replacement still carries the every-5s trigger. Range tabs
-     swap into the same target by passing ?range=… on the click. #}
   {% include "dashboard/table.html" %}
   {% endif %}
 </section>

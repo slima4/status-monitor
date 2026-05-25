@@ -53,6 +53,22 @@
        the dashboard is a single-block edit. Names are dialect-agnostic
        (no "sticker"/"flat" baked in) so a future swap to a different
        look pivots on the values here, not the class names. */
+
+    /* V2 KPI / banner / rail palette. Operator-side semantic colours —
+       the warm-leaning soft fills come from `--sm-state-*-soft-*` so the
+       dashboard tracks the public-status palette automatically. */
+    --sm-dashboard-card-bg:      var(--color-white);
+    --sm-dashboard-label-fg:     var(--color-slate-500);
+    --sm-dashboard-value-fg:     var(--color-slate-900);
+    --sm-dashboard-hint-fg:      var(--color-slate-500);
+    --sm-dashboard-chip-bg:      var(--color-slate-100);
+    --sm-dashboard-chip-fg:      var(--color-slate-600);
+    --sm-dashboard-chip-active-bg: var(--color-slate-900);
+    --sm-dashboard-chip-active-fg: var(--color-white);
+    --sm-dashboard-banner-bg:    var(--color-rose-50);
+    --sm-dashboard-banner-fg:    var(--color-rose-900);
+    --sm-dashboard-banner-line:  var(--color-rose-200);
+
     --sm-dashboard-row-h:        2.5rem;
     --sm-dashboard-row-pad-x:    0.75rem;
     --sm-dashboard-hairline:     var(--color-slate-200);
@@ -72,6 +88,7 @@
     --sm-dashboard-dot-down:     var(--sm-state-maj-bar);
     --sm-dashboard-dot-error:    var(--sm-state-maj-bar);
     --sm-dashboard-dot-unknown:  var(--sm-state-none-bar);
+    --sm-dashboard-dot-muted:    var(--color-slate-300);
 
     /* Sparkline — stroke colour scales with row severity. `--down`
        fires whenever the row's `data-status="down"` so a bad row's
@@ -696,28 +713,6 @@
        the `--sm-dashboard-*` and `--sm-spark-*` tokens above, so a future
        restyle edits the tokens, not the rules. */
 
-    .kpi-strip {
-        @apply grid gap-3 sm:grid-cols-3;
-    }
-    /* Layout only — compose with `sticker-card` at the call site so
-       Tailwind v4 sees only utilities under `@apply` (it cannot
-       compose other component classes). */
-    .kpi-card {
-        @apply flex flex-col gap-1 p-4;
-    }
-    .kpi-card__label {
-        @apply text-xs font-medium uppercase tracking-wide text-slate-500;
-    }
-    .kpi-card__value {
-        @apply text-3xl font-semibold tabular-nums text-slate-900;
-    }
-    .kpi-card__unit {
-        @apply ml-1 text-base font-normal text-slate-500;
-    }
-    .kpi-card__hint {
-        @apply text-xs text-slate-500;
-    }
-
     .range-tabs {
         @apply inline-flex items-center gap-1 rounded-lg border-2 bg-white p-1 text-xs font-medium;
         border-color: var(--color-ink);
@@ -796,6 +791,21 @@
     .dashboard-dot--degraded  { background: var(--sm-dashboard-dot-degraded); }
     .dashboard-dot--down      { background: var(--sm-dashboard-dot-down); }
     .dashboard-dot--error     { background: var(--sm-dashboard-dot-error); }
+    .dashboard-dot--muted     { background: var(--sm-dashboard-dot-muted); }
+    .dashboard-dot--pulse {
+        position: relative;
+        box-shadow: 0 0 0 0 currentColor;
+        color: var(--sm-dashboard-dot-down);
+        animation: sm-dashboard-dot-pulse 1.8s ease-out infinite;
+    }
+    @keyframes sm-dashboard-dot-pulse {
+        0%   { box-shadow: 0 0 0 0 var(--color-rose-500); }
+        70%  { box-shadow: 0 0 0 0.5rem transparent; }
+        100% { box-shadow: 0 0 0 0 transparent; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+        .dashboard-dot--pulse { animation: none; box-shadow: none; }
+    }
 
     .dashboard-cell-monitor {
         flex-direction: column;
@@ -870,6 +880,155 @@
 
     .dashboard-empty {
         @apply px-6 py-10 text-center text-sm text-slate-500;
+    }
+
+    /* ── V2 ─ filter sub-line + chips ─────────────────────────────── */
+    .dashboard-subhead {
+        @apply text-sm text-slate-500;
+    }
+    .dashboard-subhead__mono {
+        @apply font-mono text-slate-700;
+        background: var(--color-slate-100);
+        padding: 1px 6px;
+        border-radius: 4px;
+    }
+    .dashboard-subhead__active {
+        @apply inline-flex items-center gap-1.5 font-medium;
+        color: var(--color-rose-700);
+    }
+
+    .dashboard-chip {
+        @apply inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-medium;
+        background: var(--sm-dashboard-chip-bg);
+        color: var(--sm-dashboard-chip-fg);
+    }
+    .dashboard-chip--active {
+        background: var(--sm-dashboard-chip-active-bg);
+        color: var(--sm-dashboard-chip-active-fg);
+    }
+    .dashboard-chip__count {
+        @apply font-mono opacity-70;
+    }
+    .dashboard-chips {
+        @apply flex flex-wrap items-center gap-1.5;
+    }
+
+    /* ── V2 ─ BigMetric KPI cards ─────────────────────────────────── */
+    .dashboard-kpis {
+        @apply grid gap-3 sm:grid-cols-3;
+    }
+    /* Layout only — composes with `.sticker-card` at the call site. */
+    .dashboard-kpi-card {
+        @apply flex flex-col gap-1.5 p-5;
+    }
+    .dashboard-kpi-card__label {
+        @apply text-xs uppercase tracking-wide;
+        color: var(--sm-dashboard-label-fg);
+    }
+    .dashboard-kpi-card__row {
+        @apply flex items-end justify-between gap-3;
+    }
+    .dashboard-kpi-card__value {
+        @apply text-3xl font-semibold tabular-nums;
+        color: var(--sm-dashboard-value-fg);
+        letter-spacing: -0.025em;
+        line-height: 1.05;
+    }
+    .dashboard-kpi-card__hint {
+        @apply text-xs;
+        color: var(--sm-dashboard-hint-fg);
+    }
+    .dashboard-kpi-card__spark {
+        width: 140px;
+        height: 36px;
+        display: block;
+        flex: none;
+    }
+    .dashboard-kpi-card__spark--ok   .dashboard-spark__line { stroke: var(--sm-spark-stroke-up); }
+    .dashboard-kpi-card__spark--ok   .dashboard-spark__fill { fill: var(--sm-spark-stroke-up); }
+    .dashboard-kpi-card__spark--ink  .dashboard-spark__line { stroke: var(--color-slate-700); }
+    .dashboard-kpi-card__spark--ink  .dashboard-spark__fill { fill: var(--color-slate-700); }
+    .dashboard-kpi-card__spark--info .dashboard-spark__line { stroke: var(--color-sky-500); }
+    .dashboard-kpi-card__spark--info .dashboard-spark__fill { fill: var(--color-sky-500); }
+
+    /* ── V2 ─ active incident banner ──────────────────────────────── */
+    .dashboard-incident-banner {
+        @apply rounded-2xl p-4;
+        background: var(--sm-dashboard-banner-bg);
+        box-shadow: 0 0 0 1px var(--sm-dashboard-banner-line);
+    }
+    .dashboard-incident-banner__head {
+        @apply flex flex-wrap items-center gap-3;
+    }
+    .dashboard-incident-banner__title {
+        @apply inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wider;
+        color: var(--color-rose-700);
+    }
+    .dashboard-incident-banner__sub {
+        @apply text-xs;
+        color: var(--color-rose-700);
+        opacity: 0.8;
+    }
+    .dashboard-incident-banner__actions {
+        @apply ml-auto inline-flex items-center gap-2;
+    }
+    .dashboard-incident-banner__list {
+        @apply mt-3 flex flex-col gap-2 list-none p-0;
+    }
+    .dashboard-incident-banner__item {
+        @apply flex items-start gap-3 rounded-lg bg-white/70 px-3 py-2 text-sm;
+    }
+    .dashboard-incident-banner__body {
+        @apply flex-1 min-w-0 flex flex-col gap-1;
+    }
+    .dashboard-incident-banner__row {
+        @apply flex flex-wrap items-baseline gap-2;
+    }
+    .dashboard-incident-banner__name {
+        @apply font-medium text-slate-900 no-underline hover:underline;
+    }
+    .dashboard-incident-banner__age {
+        @apply font-mono text-xs;
+        color: var(--color-rose-700);
+    }
+    .dashboard-incident-banner__update {
+        @apply flex flex-wrap items-baseline gap-2 text-xs;
+        color: var(--color-slate-600);
+    }
+    .dashboard-incident-banner__phase {
+        @apply rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider;
+        background: rgba(0, 0, 0, 0.06);
+        color: var(--color-slate-700);
+    }
+
+    .dashboard-incident-severity {
+        @apply inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-white;
+        flex: none;
+        margin-top: 1px;
+    }
+    .dashboard-incident-severity--minor    { background: var(--color-amber-600); }
+    .dashboard-incident-severity--major    { background: var(--color-rose-700); }
+    .dashboard-incident-severity--critical { background: var(--color-rose-900); }
+
+    /* ── V2 ─ status breakdown rail ───────────────────────────────── */
+    .dashboard-rail {
+        @apply grid grid-cols-2 gap-6 p-5 sm:grid-cols-4;
+    }
+    .dashboard-rail__cell {
+        @apply flex flex-col gap-1;
+    }
+    .dashboard-rail__label {
+        @apply inline-flex items-center gap-2 text-xs;
+        color: var(--sm-dashboard-label-fg);
+    }
+    .dashboard-rail__value {
+        @apply text-2xl font-medium tabular-nums;
+        color: var(--sm-dashboard-value-fg);
+        letter-spacing: -0.025em;
+        line-height: 1;
+    }
+    .dashboard-rail__value--muted {
+        color: var(--color-slate-400);
     }
 }
 

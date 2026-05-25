@@ -26,13 +26,15 @@ use uuid::Uuid;
 
 use crate::api::types::{DashboardMetrics, DashboardSparkBucket};
 use crate::app::AppState;
-use crate::domain::OrgId;
-use crate::storage::{TargetFilter, TimeRange};
+use crate::domain::{IncidentSeverity, OrgId};
+use crate::storage::{ActiveIncident, TargetFilter, TimeRange};
 use crate::web::error::WebResult;
 use crate::web::filters;
 use crate::web::host::is_subdomain_public_request;
 use crate::web::views::public_status::{self, StatusParams};
-use crate::web::views::{RangeOption, build_range_options, describe_check, resolve_range_key};
+use crate::web::views::{
+    HumanDur, RangeOption, build_range_options, describe_check, resolve_range_key,
+};
 use crate::web::{AuthedBrowser, CurrentOrg};
 
 pub(crate) const RANGE_KEYS: [&str; 4] = ["24h", "7d", "30d", "90d"];
@@ -97,8 +99,12 @@ pub struct DashboardRow {
 pub struct DashboardSnapshot {
     pub rows: Arc<[DashboardRow]>,
     pub kpis: DashboardKpis,
+    pub kpi_cards: Arc<[KpiCardSpec]>,
     pub matches: usize,
     pub truncated: bool,
+    pub active_incidents: Arc<[DashboardActiveIncident]>,
+    pub status_counts: StatusCounts,
+    pub type_counts: Arc<[TypeCount]>,
 }
 
 #[derive(Clone)]
@@ -106,7 +112,56 @@ pub struct DashboardKpis {
     pub uptime_pct_label: String,
     pub avg_response_ms_label: String,
     pub checks_label: String,
+    pub checks_successful_label: String,
     pub incidents: u64,
+    /// Fleet-aggregate sparkline shared by all three KPI cards.
+    pub spark_path: String,
+    pub spark_fill: String,
+}
+
+/// Per-card config passed to the KPI partial — kills the 3-way copy that
+/// a hand-unrolled template would force.
+#[derive(Clone)]
+pub struct KpiCardSpec {
+    pub label: String,
+    pub value: String,
+    pub hint_html: String,
+    pub spark_tint: &'static str,
+}
+
+/// Health-rail counts. A disabled monitor is "paused" regardless of its
+/// last sample; everything else flows from `last_status`.
+#[derive(Clone, Copy, Default)]
+pub struct StatusCounts {
+    pub up: u32,
+    pub degraded: u32,
+    pub down: u32,
+    pub paused: u32,
+}
+
+#[derive(Clone)]
+pub struct TypeCount {
+    pub label: &'static str,
+    pub count: u32,
+    pub active: bool,
+}
+
+#[derive(Clone)]
+pub struct DashboardActiveIncident {
+    pub id: String,
+    pub target_id: String,
+    pub title: String,
+    pub age_label: String,
+    pub severity_label: &'static str,
+    pub severity_class: &'static str,
+    pub latest_update: Option<DashboardIncidentUpdate>,
+}
+
+#[derive(Clone)]
+pub struct DashboardIncidentUpdate {
+    pub time_label: String,
+    pub phase_label: &'static str,
+    pub message: String,
 }
 
 #[derive(Template, WebTemplate)]
@@ -116,10 +171,14 @@ pub struct DashboardPage {
     pub range: &'static str,
     pub range_options: Vec<RangeOption>,
     pub kpis: DashboardKpis,
+    pub kpi_cards: Arc<[KpiCardSpec]>,
     pub rows: Arc<[DashboardRow]>,
     pub matches: usize,
     pub truncated: bool,
     pub onboarding: bool,
+    pub active_incidents: Arc<[DashboardActiveIncident]>,
+    pub status_counts: StatusCounts,
+    pub type_counts: Arc<[TypeCount]>,
 }
 
 #[derive(Template, WebTemplate)]
@@ -128,9 +187,13 @@ pub struct DashboardTablePartial {
     pub range: &'static str,
     pub range_options: Vec<RangeOption>,
     pub kpis: DashboardKpis,
+    pub kpi_cards: Arc<[KpiCardSpec]>,
     pub rows: Arc<[DashboardRow]>,
     pub matches: usize,
     pub truncated: bool,
+    pub active_incidents: Arc<[DashboardActiveIncident]>,
+    pub status_counts: StatusCounts,
+    pub type_counts: Arc<[TypeCount]>,
 }
 
 pub async fn root(state: State<AppState>, mut parts: Parts) -> Response {
@@ -181,10 +244,14 @@ pub async fn index(
         range,
         range_options: build_range_options(range, &RANGE_KEYS),
         kpis: snapshot.kpis.clone(),
+        kpi_cards: Arc::clone(&snapshot.kpi_cards),
         rows: Arc::clone(&snapshot.rows),
         matches: snapshot.matches,
         truncated: snapshot.truncated,
         onboarding,
+        active_incidents: Arc::clone(&snapshot.active_incidents),
+        status_counts: snapshot.status_counts,
+        type_counts: Arc::clone(&snapshot.type_counts),
     })
 }
 
@@ -203,9 +270,13 @@ pub async fn table_partial(
         range,
         range_options: build_range_options(range, &RANGE_KEYS),
         kpis: snapshot.kpis.clone(),
+        kpi_cards: Arc::clone(&snapshot.kpi_cards),
         rows: Arc::clone(&snapshot.rows),
         matches: snapshot.matches,
         truncated: snapshot.truncated,
+        active_incidents: Arc::clone(&snapshot.active_incidents),
+        status_counts: snapshot.status_counts,
+        type_counts: Arc::clone(&snapshot.type_counts),
     };
     let rendered = partial.render().map_err(|e| {
         crate::web::error::WebError::from(crate::error::AppError::Other(anyhow::anyhow!(e)))
@@ -255,11 +326,14 @@ async fn build_snapshot(
         enabled: None,
     };
 
-    let (mut targets, rollup, spark_rows, (checks_total, checks_up, incidents)) = tokio::try_join!(
+    let (mut targets, rollup, spark_rows, (checks_total, checks_up, incidents), active_raw) = tokio::try_join!(
         state.target_store.list(org, target_filter),
         state.results_store.dashboard_rollup(org, time_range),
         state.results_store.dashboard_sparkline(org, spark_from, to),
         state.results_store.last_n_summary(org, time_range),
+        state
+            .incident_narration_store
+            .list_active(org, ACTIVE_INCIDENTS_LIMIT),
     )?;
 
     let truncated = targets.len() > ROW_LIMIT;
@@ -273,6 +347,9 @@ async fn build_snapshot(
 
     let mut sample_total_ms: u64 = 0;
     let mut sample_total_n: u64 = 0;
+    let mut status_counts = StatusCounts::default();
+    let mut type_acc: [u32; TYPE_CHIP_ORDER.len()] = [0; TYPE_CHIP_ORDER.len()];
+    let mut spark_agg: [(f64, u32); SPARK_BUCKETS] = [(0.0, 0); SPARK_BUCKETS];
     let rows: Vec<DashboardRow> = targets
         .into_iter()
         .map(|t| {
@@ -287,24 +364,140 @@ async fn build_snapshot(
                     sample_total_ms.saturating_add((m.avg_ms as u64).saturating_mul(m.samples));
                 sample_total_n = sample_total_n.saturating_add(m.samples);
             }
-            DashboardRow::build(t.id, t.name, kind, address, t.enabled, metrics, spark)
+            for (i, slot) in spark.iter().enumerate().take(SPARK_BUCKETS) {
+                if let Some(v) = slot.filter(|v| v.is_finite()) {
+                    spark_agg[i].0 += v as f64;
+                    spark_agg[i].1 += 1;
+                }
+            }
+            let row = DashboardRow::build(t.id, t.name, kind, address, t.enabled, metrics, spark);
+            tally_status(&mut status_counts, &row);
+            if let Some(idx) = TYPE_CHIP_ORDER.iter().position(|k| *k == kind) {
+                type_acc[idx] += 1;
+            }
+            row
         })
         .collect();
 
+    let (spark_path, spark_fill, _) = render_kpi_spark(&spark_agg);
+    let checks_successful_label = format!("{} successful", format_count(checks_up));
     let kpis = DashboardKpis {
         uptime_pct_label: pct_label(checks_total, checks_up),
         avg_response_ms_label: avg_response_label(sample_total_ms, sample_total_n),
         checks_label: format_count(checks_total),
+        checks_successful_label: checks_successful_label.clone(),
         incidents,
+        spark_path,
+        spark_fill,
     };
+    let kpi_cards = build_kpi_cards(&kpis, range, checks_successful_label);
+
+    let now = Utc::now();
+    let active_incidents: Vec<DashboardActiveIncident> = active_raw
+        .into_iter()
+        .map(|i| DashboardActiveIncident::build(i, now))
+        .collect();
 
     let matches = rows.len();
     Ok(DashboardSnapshot {
         rows: Arc::from(rows.into_boxed_slice()),
         kpis,
+        kpi_cards: Arc::from(kpi_cards.into_boxed_slice()),
         matches,
         truncated,
+        active_incidents: Arc::from(active_incidents.into_boxed_slice()),
+        status_counts,
+        type_counts: Arc::from(build_type_counts(type_acc).into_boxed_slice()),
     })
+}
+
+const ACTIVE_INCIDENTS_LIMIT: usize = 5;
+const TYPE_CHIP_ORDER: &[&str] = &["HTTP", "TCP", "DNS", "TLS", "DOMAIN"];
+
+fn tally_status(counts: &mut StatusCounts, row: &DashboardRow) {
+    if !row.enabled {
+        counts.paused += 1;
+        return;
+    }
+    match row.last_status {
+        "up" => counts.up += 1,
+        "degraded" => counts.degraded += 1,
+        "down" | "error" => counts.down += 1,
+        _ => {}
+    }
+}
+
+fn build_type_counts(acc: [u32; TYPE_CHIP_ORDER.len()]) -> Vec<TypeCount> {
+    let total: u32 = acc.iter().sum();
+    if total == 0 {
+        return Vec::new();
+    }
+    let mut out = Vec::with_capacity(1 + TYPE_CHIP_ORDER.len());
+    out.push(TypeCount {
+        label: "All",
+        count: total,
+        active: true,
+    });
+    for (idx, &label) in TYPE_CHIP_ORDER.iter().enumerate() {
+        if acc[idx] > 0 {
+            out.push(TypeCount {
+                label,
+                count: acc[idx],
+                active: false,
+            });
+        }
+    }
+    out
+}
+
+fn build_kpi_cards(
+    kpis: &DashboardKpis,
+    range: &'static str,
+    checks_successful_label: String,
+) -> Vec<KpiCardSpec> {
+    let incidents_html = format!(
+        r#"Incidents (24h): <span class="{cls}">{n}</span>"#,
+        cls = if kpis.incidents > 0 {
+            "metric-alert"
+        } else {
+            "metric-quiet"
+        },
+        n = kpis.incidents,
+    );
+    vec![
+        KpiCardSpec {
+            label: format!("Uptime · {range}"),
+            value: kpis.uptime_pct_label.clone(),
+            hint_html: incidents_html,
+            spark_tint: "ok",
+        },
+        KpiCardSpec {
+            label: format!("Avg response · {range}"),
+            value: kpis.avg_response_ms_label.clone(),
+            hint_html: "across all monitors".into(),
+            spark_tint: "ink",
+        },
+        KpiCardSpec {
+            label: format!("Checks · {range}"),
+            value: kpis.checks_label.clone(),
+            hint_html: checks_successful_label,
+            spark_tint: "info",
+        },
+    ]
+}
+
+fn render_kpi_spark(agg: &[(f64, u32); SPARK_BUCKETS]) -> (String, String, u32) {
+    let series: Vec<Option<f32>> = agg
+        .iter()
+        .map(|(sum, n)| {
+            if *n == 0 {
+                None
+            } else {
+                Some((sum / *n as f64) as f32)
+            }
+        })
+        .collect();
+    render_spark_path(&series)
 }
 
 fn range_span(key: &'static str) -> Duration {
@@ -406,6 +599,65 @@ impl DashboardRow {
             spark_fill,
             spark_baseline_y,
         }
+    }
+}
+
+impl DashboardActiveIncident {
+    fn build(raw: ActiveIncident, now: DateTime<Utc>) -> Self {
+        let ActiveIncident {
+            id,
+            target_id,
+            target_name,
+            severity,
+            started_at,
+            public_title,
+            latest_update,
+        } = raw;
+        let title = public_title
+            .filter(|t| !t.trim().is_empty())
+            .or_else(|| (!target_name.is_empty()).then_some(target_name))
+            .unwrap_or_else(|| "Active incident".into());
+        let age_secs = (now - started_at).num_seconds().max(0);
+        Self {
+            id: id.to_string(),
+            target_id: target_id.to_string(),
+            title,
+            age_label: HumanDur(age_secs).to_string(),
+            severity_label: severity_display(severity),
+            severity_class: severity_class(severity),
+            latest_update: latest_update.map(|u| DashboardIncidentUpdate {
+                time_label: u.posted_at.format("%H:%M").to_string(),
+                phase_label: phase_display(u.phase),
+                message: u.message,
+            }),
+        }
+    }
+}
+
+fn severity_display(s: IncidentSeverity) -> &'static str {
+    match s {
+        IncidentSeverity::Minor => "MINOR",
+        IncidentSeverity::Major => "MAJOR",
+        IncidentSeverity::Critical => "CRITICAL",
+    }
+}
+
+fn severity_class(s: IncidentSeverity) -> &'static str {
+    match s {
+        IncidentSeverity::Minor => "minor",
+        IncidentSeverity::Major => "major",
+        IncidentSeverity::Critical => "critical",
+    }
+}
+
+fn phase_display(p: crate::domain::IncidentStatusPhase) -> &'static str {
+    use crate::domain::IncidentStatusPhase::*;
+    match p {
+        Investigating => "Investigating",
+        Identified => "Identified",
+        Monitoring => "Monitoring",
+        Resolved => "Resolved",
+        Postmortem => "Postmortem",
     }
 }
 
@@ -511,8 +763,15 @@ mod tests {
             uptime_pct_label: "99.92%".into(),
             avg_response_ms_label: "142 ms".into(),
             checks_label: "17.3k".into(),
+            checks_successful_label: "17.0k successful".into(),
             incidents: 3,
+            spark_path: String::new(),
+            spark_fill: String::new(),
         }
+    }
+
+    fn sample_kpi_cards() -> Vec<KpiCardSpec> {
+        build_kpi_cards(&sample_kpis(), "24h", "17.0k successful".into())
     }
 
     fn sample_row(name: &str, status: &'static str) -> DashboardRow {
@@ -544,10 +803,25 @@ mod tests {
             range: "24h",
             range_options: build_range_options("24h", &RANGE_KEYS),
             kpis: sample_kpis(),
+            kpi_cards: Arc::from(sample_kpi_cards().into_boxed_slice()),
             rows: Arc::from(rows.into_boxed_slice()),
             matches: 2,
             truncated: false,
             onboarding: false,
+            active_incidents: Arc::from(Vec::<DashboardActiveIncident>::new().into_boxed_slice()),
+            status_counts: StatusCounts {
+                up: 1,
+                degraded: 1,
+                ..Default::default()
+            },
+            type_counts: Arc::from(
+                vec![TypeCount {
+                    label: "All",
+                    count: 2,
+                    active: true,
+                }]
+                .into_boxed_slice(),
+            ),
         }
     }
 
@@ -577,9 +851,23 @@ mod tests {
             range: "7d",
             range_options: build_range_options("7d", &RANGE_KEYS),
             kpis: sample_kpis(),
+            kpi_cards: Arc::from(sample_kpi_cards().into_boxed_slice()),
             rows: Arc::from(vec![sample_row("api", "up")].into_boxed_slice()),
             matches: 1,
             truncated: false,
+            active_incidents: Arc::from(Vec::<DashboardActiveIncident>::new().into_boxed_slice()),
+            status_counts: StatusCounts {
+                up: 1,
+                ..Default::default()
+            },
+            type_counts: Arc::from(
+                vec![TypeCount {
+                    label: "All",
+                    count: 1,
+                    active: true,
+                }]
+                .into_boxed_slice(),
+            ),
         };
         let html = partial.render().unwrap();
         assert!(!html.contains("<!doctype html>"));
@@ -590,20 +878,30 @@ mod tests {
 
     #[test]
     fn onboarding_state_skips_table() {
+        let kpis = DashboardKpis {
+            uptime_pct_label: "—".into(),
+            avg_response_ms_label: "—".into(),
+            checks_label: "0".into(),
+            checks_successful_label: "0 successful".into(),
+            incidents: 0,
+            spark_path: String::new(),
+            spark_fill: String::new(),
+        };
         let page = DashboardPage {
             active_tab: "dashboard",
             range: "24h",
             range_options: build_range_options("24h", &RANGE_KEYS),
-            kpis: DashboardKpis {
-                uptime_pct_label: "—".into(),
-                avg_response_ms_label: "—".into(),
-                checks_label: "0".into(),
-                incidents: 0,
-            },
+            kpi_cards: Arc::from(
+                build_kpi_cards(&kpis, "24h", "0 successful".into()).into_boxed_slice(),
+            ),
+            kpis,
             rows: Arc::from(Vec::<DashboardRow>::new().into_boxed_slice()),
             matches: 0,
             truncated: false,
             onboarding: true,
+            active_incidents: Arc::from(Vec::<DashboardActiveIncident>::new().into_boxed_slice()),
+            status_counts: StatusCounts::default(),
+            type_counts: Arc::from(Vec::<TypeCount>::new().into_boxed_slice()),
         };
         let html = page.render().unwrap();
         assert!(html.contains("No monitors yet"));
@@ -635,5 +933,92 @@ mod tests {
     #[test]
     fn render_spark_path_empty_when_no_data() {
         assert_eq!(render_spark_path(&vec![None; 60]).0, "");
+    }
+
+    fn row_with(enabled: bool, status: &'static str) -> DashboardRow {
+        DashboardRow {
+            id: String::new(),
+            name: String::new(),
+            kind: "HTTP",
+            address: String::new(),
+            enabled,
+            last_status: status,
+            p50_label: String::new(),
+            p95_label: String::new(),
+            err_pct_label: String::new(),
+            uptime_pct_label: String::new(),
+            samples: 0,
+            spark: Vec::new(),
+            spark_path: String::new(),
+            spark_fill: String::new(),
+            spark_baseline_y: 0,
+        }
+    }
+
+    #[test]
+    fn tally_status_disabled_wins_over_status() {
+        let mut c = StatusCounts::default();
+        tally_status(&mut c, &row_with(false, "down"));
+        assert_eq!(c.paused, 1);
+        assert_eq!(c.down, 0);
+    }
+
+    #[test]
+    fn tally_status_error_counts_as_down() {
+        let mut c = StatusCounts::default();
+        tally_status(&mut c, &row_with(true, "error"));
+        assert_eq!(c.down, 1);
+    }
+
+    #[test]
+    fn tally_status_ignores_unknown_status() {
+        let mut c = StatusCounts::default();
+        tally_status(&mut c, &row_with(true, ""));
+        assert_eq!(c.up, 0);
+        assert_eq!(c.down, 0);
+    }
+
+    #[test]
+    fn build_type_counts_empty_returns_empty() {
+        assert!(build_type_counts([0; TYPE_CHIP_ORDER.len()]).is_empty());
+    }
+
+    #[test]
+    fn build_type_counts_emits_all_plus_nonzero_kinds() {
+        let mut acc = [0; TYPE_CHIP_ORDER.len()];
+        acc[0] = 3; // HTTP
+        acc[2] = 1; // DNS
+        let counts = build_type_counts(acc);
+        assert_eq!(counts.len(), 3);
+        assert_eq!(counts[0].label, "All");
+        assert_eq!(counts[0].count, 4);
+        assert_eq!(counts[1].label, "HTTP");
+        assert_eq!(counts[2].label, "DNS");
+    }
+
+    #[test]
+    fn dashboard_active_incident_falls_back_to_target_name_then_default() {
+        let now = Utc::now();
+        let make = |public_title, target_name: &str| ActiveIncident {
+            id: Uuid::nil(),
+            target_id: Uuid::nil(),
+            target_name: target_name.into(),
+            severity: IncidentSeverity::Major,
+            started_at: now - Duration::minutes(5),
+            public_title,
+            latest_update: None,
+        };
+        assert_eq!(
+            DashboardActiveIncident::build(make(Some("Outage".into()), "api"), now).title,
+            "Outage"
+        );
+        assert_eq!(
+            DashboardActiveIncident::build(make(None, "api"), now).title,
+            "api"
+        );
+        assert_eq!(
+            DashboardActiveIncident::build(make(Some("  ".into()), ""), now).title,
+            "Active incident"
+        );
     }
 }

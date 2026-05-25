@@ -1,37 +1,40 @@
-{# Operator dashboard body: KPI strip + range tabs + dense monitor table.
-   Self-rearming auto-refresh wraps the whole partial so a swap keeps
-   polling at 5 s, and the range tabs swap the same `#dashboard-table`
-   target with `?range=…`. #}
+{# Self-rearming swap zone; range tabs replace it via ?range=…. #}
 <div id="dashboard-table"
      hx-get="/web/partials/dashboard?range={{ range }}"
      hx-trigger="every 5s"
      hx-swap="outerHTML"
-     role="status"
-     aria-live="polite"
      class="space-y-4">
 
-  <section class="kpi-strip">
-    <div class="sticker-card kpi-card">
-      <p class="kpi-card__label">Uptime · {{ range }}</p>
-      <p class="kpi-card__value">{{ kpis.uptime_pct_label }}</p>
-      <p class="kpi-card__hint">
-        Incidents (24h):
-        <span class="{% if kpis.incidents > 0 %}metric-alert{% else %}metric-quiet{% endif %}">{{ kpis.incidents }}</span>
-      </p>
-    </div>
-    <div class="sticker-card kpi-card">
-      <p class="kpi-card__label">Avg response · {{ range }}</p>
-      <p class="kpi-card__value">{{ kpis.avg_response_ms_label }}</p>
-      <p class="kpi-card__hint">across all monitors</p>
-    </div>
-    <div class="sticker-card kpi-card">
-      <p class="kpi-card__label">Checks · {{ range }}</p>
-      <p class="kpi-card__value">{{ kpis.checks_label }}</p>
-      <p class="kpi-card__hint">total observations</p>
-    </div>
+  <p class="dashboard-subhead">
+    Filter <span class="dashboard-subhead__mono">status:any region:any</span>
+    <span class="mx-1">·</span>
+    <span class="dashboard-subhead__mono">{{ matches }}</span> matches
+    {% if active_incidents.len() > 0 %}
+    <span class="mx-1">·</span>
+    <span class="dashboard-subhead__active">
+      <span class="dashboard-dot dashboard-dot--down"></span>
+      {{ active_incidents.len() }} active
+    </span>
+    {% endif %}
+  </p>
+
+  <section class="dashboard-kpis">
+    {% include "dashboard/_kpi_card.html" %}
   </section>
 
+  {% include "dashboard/_incidents.html" %}
+
+  {% include "dashboard/_health_rail.html" %}
+
   <div class="flex flex-wrap items-center justify-between gap-2">
+    <div class="dashboard-chips" role="tablist" aria-label="Monitor type">
+      {% for chip in type_counts.iter() %}
+      <span class="dashboard-chip{% if chip.active %} dashboard-chip--active{% endif %}">
+        {{ chip.label }}
+        <span class="dashboard-chip__count">{{ chip.count }}</span>
+      </span>
+      {% endfor %}
+    </div>
     <div class="range-tabs" role="tablist" aria-label="Time range">
       {% for opt in range_options %}
       <button type="button"
@@ -45,13 +48,13 @@
               >{{ opt.key }}</button>
       {% endfor %}
     </div>
-    {% if truncated %}
-    <p class="text-xs text-slate-500">
-      Showing first {{ matches }} monitors —
-      <a href="/targets" class="underline">search the full list</a>.
-    </p>
-    {% endif %}
   </div>
+  {% if truncated %}
+  <p class="text-xs text-slate-500">
+    Showing first {{ matches }} monitors —
+    <a href="/targets" class="underline">search the full list</a>.
+  </p>
+  {% endif %}
 
   <div class="sticker-card dashboard-card">
     {% if rows.is_empty() %}
