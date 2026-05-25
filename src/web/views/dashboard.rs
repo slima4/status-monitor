@@ -370,8 +370,7 @@ async fn build_snapshot(
     let target_filter = TargetFilter {
         limit: Some(ROW_LIMIT + 1),
         offset: 0,
-        tag: None,
-        enabled: None,
+        ..Default::default()
     };
 
     let (

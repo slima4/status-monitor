@@ -77,62 +77,73 @@ DELETE FROM notification_channels
    AND name LIKE 'Fixture %';
 SQL
 
+echo "==> Postgres: pick first org member as owner FK for avatars"
+OWNER_USER_ID=$(pg -tAc \
+  "SELECT m.user_id::text FROM memberships m
+     JOIN users u ON u.id = m.user_id AND u.deleted_at IS NULL
+    WHERE m.org_id = (SELECT id FROM organizations WHERE slug='${SLUG}')
+    ORDER BY m.created_at ASC LIMIT 1;" 2>/dev/null || true)
+if [[ -z "$OWNER_USER_ID" ]]; then
+  echo "    (no membership found — every monitor will render unowned)"
+fi
+
 echo "==> Postgres: insert 14 monitors (8 public/visible + 6 internal/varied-spec)"
-# check_spec varies across 5 kinds: http (most), tcp, dns, tls_cert,
-# domain_expiry. Non-http live on internal targets so the public page stays
-# a pure HTTP smoke test while the operator targets list/detail exercises
-# every spec variant. A few rows carry enabled=false so the live scheduler
-# can't overwrite the seeded last-5-min counters that drive component
-# state (any single real 'down' would flip Operational → PartialOutage).
-# One row carries a NULL group so the ungrouped public render path is
-# covered. fix-cdn / fix-auth / fix-db stay enabled so the live-data
-# integration path is also exercised.
+# Most flags here exist to keep the seed counters from being clobbered by
+# the live scheduler — a single real 'down' would flip Operational →
+# PartialOutage. fix-search carries NULL group_name + NULL public_group
+# so the Ungrouped path renders. group_name is operator-side, distinct
+# from public_group, so the two surfaces can diverge.
 pg <<SQL
 WITH org AS (SELECT id FROM organizations WHERE slug='${SLUG}')
 INSERT INTO targets
   (org_id, name, check_spec, interval_secs, enabled, tags,
+   group_name, owner_user_id,
    public_status, public_name, public_group, public_sort_order)
 SELECT org.id, t.name, t.spec::jsonb,
        60, t.is_enabled, ARRAY['seed-fixtures'],
+       t.gname,
+       CASE WHEN t.has_owner AND '${OWNER_USER_ID}' <> ''
+            THEN '${OWNER_USER_ID}'::uuid ELSE NULL END,
        t.public, t.pname, t.grp, t.so
 FROM org, (VALUES
   -- Public / visible HTTP targets (group sort_order drives column layout).
   -- enabled=false on the Operational/Degraded/NoData ones — scheduler stray
   -- checks otherwise corrupt the pure-state seeded counters.
-  ('fix-api',     false, true,  'API',             'Core Services',   0,
+  ('fix-api',     false, true,  'API',             'Core Services',   0,  'API & Web',     true,
    '{"type":"http","url":"https://api.github.com/","method":"GET","timeout":5000,"follow_redirects":true,"max_redirects":3,"expected_status":{"kind":"exact","value":200},"headers":{},"verify_tls":true}'),
-  ('fix-web',     false, true,  'Website',         'Core Services',   1,
+  ('fix-web',     false, true,  'Website',         'Core Services',   1,  'API & Web',     true,
    '{"type":"http","url":"https://www.google.com/","method":"GET","timeout":5000,"follow_redirects":true,"max_redirects":3,"expected_status":{"kind":"exact","value":200},"headers":{},"verify_tls":true}'),
-  ('fix-cdn',     true,  true,  'CDN',             'Core Services',   2,
+  ('fix-cdn',     true,  true,  'CDN',             'Core Services',   2,  'CDN',           true,
    '{"type":"http","url":"https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js","method":"GET","timeout":5000,"follow_redirects":true,"max_redirects":3,"expected_status":{"kind":"exact","value":200},"headers":{},"verify_tls":true}'),
-  ('fix-db',      true,  true,  'Database',        'Infrastructure',  0,
+  ('fix-db',      true,  true,  'Database',        'Infrastructure',  0,  'Infrastructure',true,
    '{"type":"http","url":"https://www.cloudflare.com/cdn-cgi/trace","method":"GET","timeout":5000,"follow_redirects":true,"max_redirects":3,"expected_status":{"kind":"exact","value":200},"headers":{},"verify_tls":true}'),
-  ('fix-auth',    true,  true,  'Auth Service',    'Infrastructure',  1,
+  ('fix-auth',    true,  true,  'Auth Service',    'Infrastructure',  1,  'Infrastructure',false,
    '{"type":"http","url":"https://login.microsoftonline.com/common/discovery/v2.0/keys","method":"GET","timeout":5000,"follow_redirects":true,"max_redirects":3,"expected_status":{"kind":"exact","value":200},"headers":{},"verify_tls":true}'),
-  ('fix-email',   false, true,  'Email Delivery',  'Notifications',   0,
+  ('fix-email',   false, true,  'Email Delivery',  'Notifications',   0,  'Notifications', true,
    '{"type":"http","url":"https://en.wikipedia.org/wiki/Main_Page","method":"GET","timeout":5000,"follow_redirects":true,"max_redirects":3,"expected_status":{"kind":"exact","value":200},"headers":{},"verify_tls":true}'),
-  -- Public component, NULL group → exercises the ungrouped render path.
-  ('fix-search',  false, true,  'Search',          NULL,              0,
+  -- Public component, NULL public_group AND NULL group_name → exercises
+  -- the "Ungrouped" path on BOTH the public + Monitors pages.
+  ('fix-search',  false, true,  'Search',          NULL,              0,  NULL,            false,
    '{"type":"http","url":"https://duckduckgo.com/","method":"HEAD","timeout":5000,"follow_redirects":true,"max_redirects":3,"expected_status":{"kind":"range","value":{"min":200,"max":399}},"headers":{},"verify_tls":true}'),
   -- Public component, enabled=false → renders disabled marker on operator
   -- page; still surfaces on the public page (filter is public_status only).
-  ('fix-paused',  false, true,  'Beta Sandbox',    'Beta',            0,
+  ('fix-paused',  false, true,  'Beta Sandbox',    'Beta',            0,  'Beta',          true,
    '{"type":"http","url":"https://httpbin.org/status/200","method":"GET","timeout":5000,"follow_redirects":true,"max_redirects":3,"expected_status":{"kind":"exact","value":200},"headers":{},"verify_tls":true}'),
   -- Internal HTTP targets (legacy fixture rows; not on public page).
-  ('fix-payment', true,  false, 'Payment Gateway', 'Internal',        0,
+  ('fix-payment', true,  false, 'Payment Gateway', 'Internal',        0,  'Integrations',  true,
    '{"type":"http","url":"https://www.example.com/","method":"GET","timeout":5000,"follow_redirects":true,"max_redirects":3,"expected_status":{"kind":"exact","value":200},"headers":{},"verify_tls":true}'),
-  ('fix-admin',   true,  false, 'Admin Portal',    'Internal',        1,
+  ('fix-admin',   true,  false, 'Admin Portal',    'Internal',        1,  'Integrations',  false,
    '{"type":"http","url":"https://example.org/","method":"GET","timeout":5000,"follow_redirects":true,"max_redirects":3,"expected_status":{"kind":"exact","value":200},"headers":{},"verify_tls":true}'),
   -- Non-HTTP check_spec variants — only the operator targets UI renders these.
-  ('fix-tcp',     true,  false, 'Postgres Socket', 'Internal',        2,
+  ('fix-tcp',     true,  false, 'Postgres Socket', 'Internal',        2,  'Infrastructure',true,
    '{"type":"tcp","host":"db.example.com","port":5432,"timeout":3000}'),
-  ('fix-dns',     true,  false, 'DNS Apex',        'Internal',        3,
+  ('fix-dns',     true,  false, 'DNS Apex',        'Internal',        3,  'Infrastructure',false,
    '{"type":"dns","domain":"example.com","record_type":"A","resolver":"1.1.1.1","expected_contains":"93.184","timeout":3000}'),
-  ('fix-tls',     true,  false, 'TLS Cert',        'Internal',        4,
+  ('fix-tls',     true,  false, 'TLS Cert',        'Internal',        4,  'Infrastructure',false,
    '{"type":"tls_cert","host":"example.com","port":443,"server_name":null,"warn_days":30,"critical_days":7,"timeout":5000}'),
-  ('fix-domain',  true,  false, 'Domain Expiry',   'Internal',        5,
+  ('fix-domain',  true,  false, 'Domain Expiry',   'Internal',        5,  'Infrastructure',false,
    '{"type":"domain_expiry","domain":"example.com","warn_days":60,"critical_days":14,"timeout":10000}')
-) AS t(name,is_enabled,public,pname,grp,so,spec);
+) AS t(name,is_enabled,public,pname,grp,so,gname,has_owner,spec);
 SQL
 
 ORG=$(pg -tAc "SELECT id FROM organizations WHERE slug='${SLUG}';")
@@ -677,6 +688,37 @@ else
   fail=$((fail+1))
 fi
 
+# ── Operator Monitors page render (group + owner + bulk markup) ─────────────
+echo
+echo "## Operator Monitors page render"
+monitors_url="http://app.${BASE_DOMAIN}:8080/targets"
+cookies_file="${HOME}/.status-monitor-dev-cookies"
+curl_auth=()
+if [[ -f "$cookies_file" ]]; then
+  curl_auth=(-b "$cookies_file")
+fi
+monitors_status=$(curl -s -o /tmp/seed-fixtures-monitors.html -w '%{http_code}' \
+  "${curl_auth[@]}" "$monitors_url" || echo 000)
+echo "  GET $monitors_url → HTTP $monitors_status"
+if [[ "$monitors_status" == "200" ]]; then
+  group_count=$(grep -c 'class="monitors-group"' /tmp/seed-fixtures-monitors.html || true)
+  row_count=$(grep -c 'data-row-id=' /tmp/seed-fixtures-monitors.html || true)
+  bulk_present=$(grep -c 'id="monitors-bulk"' /tmp/seed-fixtures-monitors.html || true)
+  avatar_count=$(grep -c 'class="monitors-avatar"' /tmp/seed-fixtures-monitors.html || true)
+  ungrouped_present=$(grep -c 'data-group-name="Ungrouped"' /tmp/seed-fixtures-monitors.html || true)
+  echo "    group cards rendered  : $group_count   (expected ≥ 5: API & Web, CDN, Infrastructure, Notifications, Beta, Integrations, Ungrouped)"
+  echo "    monitor rows rendered : $row_count    (expected 14)"
+  echo "    bulk-bar present      : $([[ $bulk_present -gt 0 ]] && echo yes || echo no)"
+  echo "    owner avatars         : $avatar_count   (≥ 1 unless org has no members)"
+  echo "    Ungrouped group       : $([[ $ungrouped_present -gt 0 ]] && echo yes || echo no)   (fix-search → NULL group_name)"
+  if (( group_count < 5 || row_count < 14 || bulk_present < 1 )); then
+    echo "    WARN: Monitors page render below expected baseline — check template + view wiring"
+    fail=$((fail+1))
+  fi
+else
+  echo "  (page requires auth — re-run 'just dev-login' so cookies land in $cookies_file)"
+fi
+
 # ── Adversarial-title escape verification ────────────────────────────────────
 echo
 echo "## Adversarial-title escape"
@@ -721,14 +763,17 @@ echo "==========================================================================
 echo
 echo "Seeded org '${SLUG}' (id ${ORG})."
 echo "  monitors  : 14 (7 public/visible HTTP + 1 disabled public + 2 internal HTTP + 4 non-HTTP)"
+echo "  groups    : API & Web · CDN · Infrastructure · Notifications · Beta · Integrations · Ungrouped"
+echo "  owners    : $([[ -n "$OWNER_USER_ID" ]] && echo "8 monitors bound to ${OWNER_USER_ID:0:8}…" || echo 'no member found — every monitor unowned')"
 echo "  incidents : 161 (150 resolved across 87d + 10 active in mixed phases + 1 adversarial-title)"
 echo "  channels  : 3 (slack + webhook enabled, telegram disabled)"
 echo "  alerts    : bound on fix-api / fix-db / fix-auth"
 echo "  maintenance: 4 windows (1 active bound to fix-db) → drives Maintenance state"
 echo "  history   : 6-day NoData gap on fix-email; per-target last-5-min divergence"
 echo
-echo "Public status page: http://${SLUG}.${BASE_DOMAIN}:8080/"
-echo "Operator dashboard: http://app.${BASE_DOMAIN}:8080/"
+echo "Public status page : http://${SLUG}.${BASE_DOMAIN}:8080/"
+echo "Operator dashboard : http://app.${BASE_DOMAIN}:8080/"
+echo "Operator monitors  : http://app.${BASE_DOMAIN}:8080/targets"
 echo "(public page cache TTL ~10s; wait a moment before first load)"
 
 exit $(( fail > 0 ))

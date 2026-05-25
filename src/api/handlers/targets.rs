@@ -55,6 +55,7 @@ impl ListQuery {
             offset: self.offset,
             tag: self.tag.clone(),
             enabled: self.enabled,
+            ..Default::default()
         }
     }
 }
@@ -181,6 +182,7 @@ pub async fn create(
     let guard = ssrf_guard(&state);
     validate_new_target(&new, &guard, i64::from(plan.min_check_interval_secs))?;
     verify_alert_channels(&state, org, &new.alerts).await?;
+    validate_owner_is_member(&state, org, new.owner_user_id).await?;
     check_abuse(&state, org, &new.check)?;
     // Friendly pre-check; the store INSERT enforces the same cap atomically.
     state.quotas.check_can_create_targets(org, None, 1).await?;
@@ -240,6 +242,12 @@ pub async fn update(
         update.public_description.as_ref(),
         update.public_group.as_ref(),
     )?;
+    if let Some(Some(g)) = update.group_name.as_ref() {
+        validate_group_name(Some(g.as_str()))?;
+    }
+    if let Some(Some(uid)) = update.owner_user_id {
+        validate_owner_is_member(&state, org, Some(uid)).await?;
+    }
     // The check-interval floor applies to PATCH too — otherwise a target
     // created at the floor could be lowered below it, evading the plan.
     if let Some(interval) = update.interval {
@@ -347,6 +355,23 @@ pub async fn bulk_create(
         verify_alert_channels(&state, org, &new.alerts).await?;
         check_abuse(&state, org, &new.check)?;
     }
+    let owner_ids: std::collections::HashSet<Uuid> =
+        items.iter().filter_map(|t| t.owner_user_id).collect();
+    if !owner_ids.is_empty() {
+        let pool = state.require_db()?;
+        let members = crate::storage::orgs::list_members(pool, org).await?;
+        let member_set: std::collections::HashSet<Uuid> =
+            members.iter().map(|m| m.membership.user_id.0).collect();
+        for uid in owner_ids {
+            if !member_set.contains(&uid) {
+                return Err(AppError::bad_request_field(
+                    codes::OWNER_NOT_MEMBER,
+                    format!("owner_user_id {uid} is not a member of this org"),
+                    "owner_user_id",
+                ));
+            }
+        }
+    }
     let n = items.len() as i64;
     // Quantity-aware friendly pre-check; the store INSERT re-enforces the
     // same `current + n <= limit` bound atomically against a concurrent bulk.
@@ -425,6 +450,15 @@ pub async fn bulk_action(
                 ));
             }
             state.target_store.remove_tags(org, &req.ids, tags).await?
+        }
+        BulkAction::SetGroup { group } => {
+            // Trim + treat "" as clear so the wire format stays one shape
+            // (omit field = no-op, send "" or null = clear).
+            let normalized = group.as_deref().map(str::trim).filter(|s| !s.is_empty());
+            state
+                .target_store
+                .set_group(org, &req.ids, normalized)
+                .await?
         }
     };
 
@@ -612,6 +646,7 @@ fn validate_new_target(new: &NewTarget, guard: &SsrfGuard, min_interval_secs: i6
     }
     validate_check(&new.check, guard)?;
     validate_alerts(&new.alerts)?;
+    validate_group_name(new.group_name.as_deref())?;
     validate_public_target_fields(
         new.public_name.as_deref(),
         new.public_description.as_deref(),
@@ -637,6 +672,30 @@ fn validate_public_target_fields(
     validation::validate_description(description, "public_description")?;
     if let Some(g) = group {
         validation::check_length(g, "public_group", 50, codes::GROUP_TOO_LONG)?;
+    }
+    Ok(())
+}
+
+fn validate_group_name(group: Option<&str>) -> Result<()> {
+    use crate::api::handlers::validation;
+    if let Some(g) = group {
+        validation::check_length(g, "group_name", 50, codes::GROUP_TOO_LONG)?;
+    }
+    Ok(())
+}
+
+/// The DB FK only proves the user exists, not that they're in this org —
+/// without this check a target can be stamped with a cross-tenant user-id.
+async fn validate_owner_is_member(state: &AppState, org: OrgId, owner: Option<Uuid>) -> Result<()> {
+    let Some(uid) = owner else { return Ok(()) };
+    let pool = state.require_db()?;
+    let members = crate::storage::orgs::list_members(pool, org).await?;
+    if !members.iter().any(|m| m.membership.user_id.0 == uid) {
+        return Err(AppError::bad_request_field(
+            codes::OWNER_NOT_MEMBER,
+            format!("owner_user_id {uid} is not a member of this org"),
+            "owner_user_id",
+        ));
     }
     Ok(())
 }

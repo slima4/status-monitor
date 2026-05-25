@@ -98,6 +98,7 @@ pub mod codes {
     pub const TITLE_TOO_LONG: &str = "TITLE_TOO_LONG";
     pub const DESCRIPTION_TOO_LONG: &str = "DESCRIPTION_TOO_LONG";
     pub const GROUP_TOO_LONG: &str = "GROUP_TOO_LONG";
+    pub const OWNER_NOT_MEMBER: &str = "OWNER_NOT_MEMBER";
     pub const EMPTY_MESSAGE: &str = "EMPTY_MESSAGE";
     pub const MESSAGE_TOO_LONG: &str = "MESSAGE_TOO_LONG";
     pub const INVALID_PHASE: &str = "INVALID_PHASE";

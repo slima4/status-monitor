@@ -1,0 +1,68 @@
+{# 10 cells; align with `.monitors-table grid-template-columns`. #}
+<div class="monitors-row"
+     role="row"
+     data-row-id="{{ row.id }}"
+     data-status="{{ row.status_class }}"
+     data-paused="{% if row.enabled %}false{% else %}true{% endif %}">
+  <span>
+    <input type="checkbox" data-row-select aria-label="Select {{ row.name }}">
+  </span>
+  <span>
+    <span class="monitors-dot{% if row.status_class != "" %} monitors-dot--{{ row.status_class }}{% endif %}{% if row.status_class == "down" || row.status_class == "error" %} monitors-dot--pulse{% endif %}"
+          aria-hidden="true"></span>
+  </span>
+  <span class="monitors-row__monitor">
+    <a href="/targets/{{ row.id }}" class="monitors-row__name">{{ row.name }}</a>
+    <span class="monitors-row__host" title="{{ row.address }}">{{ row.address }}</span>
+  </span>
+  <span><span class="monitors-type">{{ row.kind }}</span></span>
+  <span>
+    {% for tag in row.tags %}
+    <span class="monitors-tag{% if tag == "p0" %} monitors-tag--p0{% else if tag == "p1" %} monitors-tag--p1{% endif %}">
+      {% if tag == "p0" || tag == "p1" %}<span class="monitors-tag__dot"></span>{% endif %}
+      {{ tag }}
+    </span>
+    {% endfor %}
+  </span>
+  <span class="monitors-row__num">{{ row.interval_label }}</span>
+  <span class="monitors-row__last">
+    <span class="monitors-row__num">{{ row.last_check_label }}</span>
+    <span class="monitors-row__sub">{{ row.next_check_label }}</span>
+  </span>
+  <span class="monitors-row__uptime">
+    <span class="monitors-row__uptime-val{% if row.status_class == "down" || row.status_class == "error" %} monitors-row__uptime-val--bad{% else if row.status_class == "degraded" %} monitors-row__uptime-val--warn{% endif %}">{{ row.uptime_30d_label }}</span>
+    <span class="monitors-row__sub">30 days</span>
+  </span>
+  <span>
+    {% if let Some(owner) = row.owner %}
+    <span class="monitors-avatar" title="{{ owner.label }}" style="background: {{ owner.color }}">{{ owner.initials }}</span>
+    {% endif %}
+  </span>
+  <span>
+    <div class="monitors-menu" data-menu-root>
+      <button type="button"
+              class="monitors-menu__btn"
+              data-menu-toggle
+              aria-haspopup="menu"
+              aria-expanded="false"
+              aria-label="More actions for {{ row.name }}">⋯</button>
+      <div class="monitors-popover" role="menu" hidden data-menu-panel>
+        <a href="/targets/{{ row.id }}" class="monitors-popover__item" role="menuitem">Open detail</a>
+        <a href="/targets/{{ row.id }}/edit" class="monitors-popover__item" role="menuitem">Edit</a>
+        <a href="/targets/new?from={{ row.id }}" class="monitors-popover__item" role="menuitem">Copy</a>
+        <button type="button"
+                class="monitors-popover__item"
+                role="menuitem"
+                data-row-action="{% if row.enabled %}disable{% else %}enable{% endif %}"
+                data-target-id="{{ row.id }}">{% if row.enabled %}Pause{% else %}Resume{% endif %}</button>
+        <div class="monitors-popover__sep" aria-hidden="true"></div>
+        <button type="button"
+                class="monitors-popover__item monitors-popover__item--danger"
+                role="menuitem"
+                data-row-action="delete"
+                data-target-id="{{ row.id }}"
+                data-row-confirm="Permanently delete {{ row.name }}? History is removed.">Delete</button>
+      </div>
+    </div>
+  </span>
+</div>

@@ -1,0 +1,71 @@
+<form id="monitors-filter"
+      role="search"
+      aria-label="Filter monitors"
+      hx-get="/web/targets/list"
+      hx-target="#target-rows"
+      hx-swap="outerHTML"
+      hx-push-url="true"
+      hx-trigger="change, keyup delay:300ms from:input[name='q']"
+      class="monitors-toolbar">
+  <label class="monitors-search" for="monitors-search">
+    <svg class="monitors-search__icon" viewBox="0 0 24 24" fill="none"
+         stroke="currentColor" stroke-width="2" aria-hidden="true">
+      <circle cx="11" cy="11" r="7"/>
+      <path d="M20 20l-3.5-3.5" stroke-linecap="round"/>
+    </svg>
+    {# `hx-preserve` keeps the cursor across #target-rows swaps. #}
+    <input id="monitors-search" name="q" type="search" value="{{ q }}"
+           placeholder="Search by name, host, tag…"
+           hx-preserve="true"
+           class="monitors-search__input">
+    <span class="monitors-search__keyhint" aria-hidden="true">/</span>
+  </label>
+
+  <div class="monitors-chips" role="tablist" aria-label="Type filter">
+    {% for chip in type_chips %}
+    <a href="?{% if chip.label != "All" %}kind={{ chip.label }}&amp;{% endif %}q={{ q|urlencode }}&amp;tag={{ tag|urlencode }}&amp;group={{ group|urlencode }}{% if let Some(o) = owner %}&amp;owner={{ o }}{% endif %}{% if let Some(e) = enabled %}&amp;enabled={{ e }}{% endif %}&amp;sort={{ sort }}"
+       hx-get="/web/targets/list?{% if chip.label != "All" %}kind={{ chip.label }}&amp;{% endif %}q={{ q|urlencode }}&amp;tag={{ tag|urlencode }}&amp;group={{ group|urlencode }}{% if let Some(o) = owner %}&amp;owner={{ o }}{% endif %}{% if let Some(e) = enabled %}&amp;enabled={{ e }}{% endif %}&amp;sort={{ sort }}"
+       hx-target="#target-rows"
+       hx-swap="outerHTML"
+       hx-push-url="true"
+       class="monitors-chip{% if chip.active %} monitors-chip--active{% endif %}"
+       role="tab"
+       aria-selected="{% if chip.active %}true{% else %}false{% endif %}">
+      {{ chip.label }}
+      <span class="monitors-chip__count">{{ chip.count }}</span>
+    </a>
+    {% endfor %}
+  </div>
+
+  <div class="monitors-toolbar__right">
+    <select name="enabled" class="monitors-toolbar__select" aria-label="Enabled">
+      <option value=""{% if enabled.is_none() %} selected{% endif %}>Status: any</option>
+      <option value="true"{% if enabled == Some(true) %} selected{% endif %}>Enabled</option>
+      <option value="false"{% if enabled == Some(false) %} selected{% endif %}>Paused</option>
+    </select>
+
+    <select name="owner" class="monitors-toolbar__select" aria-label="Owner">
+      <option value=""{% if owner.is_none() %} selected{% endif %}>Owner: any</option>
+      {% for opt in owner_options %}
+      <option value="{{ opt.id }}"{% if opt.selected %} selected{% endif %}>{{ opt.label }}</option>
+      {% endfor %}
+    </select>
+
+    <select name="group" class="monitors-toolbar__select" aria-label="Group">
+      <option value=""{% if group == "" %} selected{% endif %}>Group: any</option>
+      {% for opt in group_options %}
+      <option value="{{ opt.name }}"{% if opt.selected %} selected{% endif %}>{{ opt.name }}</option>
+      {% endfor %}
+    </select>
+
+    <select name="sort" class="monitors-toolbar__select" aria-label="Sort">
+      <option value="recent"{% if sort == "recent" %} selected{% endif %}>Recent activity</option>
+      <option value="name"{% if sort == "name" %} selected{% endif %}>Name (A–Z)</option>
+      <option value="created"{% if sort == "created" %} selected{% endif %}>Oldest first</option>
+    </select>
+
+    {# Chip clicks bypass this form (anchor + hx-get) so no double-submit. #}
+    <input type="hidden" name="kind" value="{{ kind }}">
+    <input type="hidden" name="tag"  value="{{ tag }}">
+  </div>
+</form>

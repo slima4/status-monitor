@@ -308,16 +308,19 @@
             return { error: `Check interval must be at least ${minInterval} seconds.` };
         }
 
-        return {
-            payload: {
-                name: data.get("name"),
-                interval,
-                enabled: data.get("enabled") === "on",
-                tags,
-                check,
-                alerts,
-            },
+        const groupRaw = (data.get("group_name") || "").trim();
+        const ownerRaw = (data.get("owner_user_id") || "").trim();
+        const payload = {
+            name: data.get("name"),
+            interval,
+            enabled: data.get("enabled") === "on",
+            tags,
+            check,
+            alerts,
         };
+        payload.group_name = groupRaw === "" ? null : groupRaw;
+        payload.owner_user_id = ownerRaw === "" ? null : ownerRaw;
+        return { payload };
     }
 
     // "200" → Exact; "200-299" → Range; "200, 201, 204" → OneOf.

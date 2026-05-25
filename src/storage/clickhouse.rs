@@ -707,6 +707,7 @@ impl ResultsStore for ClickhouseResultsStore {
             avg_ms: f64,
             quantiles: Vec<f64>,
             last_status: i8,
+            last_minute_ts: u32,
         }
         let from_s = u32::try_from(range.from.timestamp().max(0)).unwrap_or(0);
         let to_s = u32::try_from(range.to.timestamp().max(0)).unwrap_or(u32::MAX);
@@ -719,7 +720,8 @@ impl ResultsStore for ClickhouseResultsStore {
                    countIfMerge(up_checks) AS up, \
                    avgMerge(avg_duration_ms) AS avg_ms, \
                    quantilesMerge(0.5, 0.95)(duration_quantiles) AS quantiles, \
-                   argMaxMerge(last_status_state) AS last_status \
+                   argMaxMerge(last_status_state) AS last_status, \
+                   toUInt32(max(minute)) AS last_minute_ts \
                  FROM check_results_1m \
                  WHERE org_id = ? \
                  AND minute >= fromUnixTimestamp(?) \
@@ -746,6 +748,7 @@ impl ResultsStore for ClickhouseResultsStore {
                     p50_ms: p50.round().clamp(0.0, u32::MAX as f64) as u32,
                     p95_ms: p95.round().clamp(0.0, u32::MAX as f64) as u32,
                     last_status: CheckStatus::from_enum8(r.last_status).as_str().to_string(),
+                    last_minute_ts: (r.last_minute_ts > 0).then_some(r.last_minute_ts as i64),
                 }
             })
             .collect())

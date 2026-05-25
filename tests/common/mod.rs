@@ -649,6 +649,8 @@ pub fn http_target(addr: SocketAddr, path: &str, interval_ms: u64) -> Target {
         enabled: true,
         tags: vec![],
         alerts: status_monitor::domain::TargetAlerts::default(),
+        group_name: None,
+        owner_user_id: None,
         public_status: false,
         public_name: None,
         public_description: None,

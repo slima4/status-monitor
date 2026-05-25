@@ -1,70 +1,34 @@
-<tbody id="target-rows">
-{% if rows.is_empty() %}
-  <tr><td colspan="8" class="px-3 py-6 text-center text-slate-500">No monitors match these filters.</td></tr>
-{% else %}
-  {% for row in rows %}
-  <tr class="border-b last:border-0 transition-opacity" data-name="{{ row.name }}">
-    <td class="px-3 py-2">
-      {% if row.last_status == "up" %}
-        <span class="status-badge status-badge--up">up</span>
-      {% else if row.last_status == "down" %}
-        <span class="status-badge status-badge--down">down</span>
-      {% else if row.last_status == "degraded" %}
-        <span class="status-badge status-badge--degraded">degraded</span>
-      {% else if row.last_status == "error" %}
-        <span class="status-badge status-badge--error">error</span>
-      {% else %}
-        <span class="status-badge status-badge--none">—</span>
-      {% endif %}
-    </td>
-    <td class="px-3 py-2"><a href="/targets/{{ row.id }}" class="font-medium text-slate-900 hover:underline">{{ row.name }}</a></td>
-    <td class="px-3 py-2 font-mono text-xs uppercase text-slate-500">{{ row.kind }}</td>
-    <td class="px-3 py-2 font-mono text-xs text-slate-700">{{ row.address }}</td>
-    <td class="px-3 py-2 text-slate-500">{{ row.interval_s }}s</td>
-    <td class="px-3 py-2">
-      {% for tag in row.tags %}<span class="status-badge status-badge--tag mr-1">{{ tag }}</span>{% endfor %}
-    </td>
-    <td class="px-3 py-2 text-xs text-slate-500">
-      {% if row.last_at != "" %}{{ row.last_at }}{% else %}—{% endif %}
-      {% if row.last_error != "" %}
-      <div class="mt-0.5 max-w-xs truncate" title="{{ row.last_error }}">{{ row.last_error }}</div>
-      {% endif %}
-    </td>
-    <td class="px-3 py-2 text-right">
-      <a href="/targets/{{ row.id }}/edit"
-         aria-label="Edit monitor {{ row.name }}"
-         class="mr-3 row-link">Edit</a>
-      <a href="/targets/new?from={{ row.id }}"
-         aria-label="Copy monitor {{ row.name }}"
-         class="mr-3 row-link">Copy</a>
-      <button type="button"
-              hx-delete="/api/v1/targets/{{ row.id }}"
-              hx-target="closest tr"
-              hx-swap="outerHTML swap:300ms"
-              data-confirm-modal
-              data-confirm-title="Delete monitor?"
-              data-confirm-body="Permanently deletes {{ row.name }}, its history, and any incidents bound to it. Notification channels are untouched. This cannot be undone."
-              data-confirm-label="Delete monitor"
-              data-confirm-danger
-              aria-label="Delete monitor {{ row.name }}"
-              class="row-link row-link--danger">Delete</button>
-    </td>
-  </tr>
+{# htmx swap region: toolbar + bulk bar + groups + footer refresh together. #}
+<section id="target-rows" class="flex flex-col gap-3">
+  {% include "targets/partials/_toolbar.html" %}
+  {% include "targets/partials/_bulk_bar.html" %}
+
+  {% if groups.is_empty() %}
+  <div class="monitors-group">
+    <p class="monitors-empty">No monitors match these filters.</p>
+  </div>
+  {% else %}
+  {% for gb in groups %}
+  {% include "targets/partials/_group_card.html" %}
   {% endfor %}
-{% endif %}
-  <tr class="border-t bg-slate-50">
-    <td colspan="8" class="px-3 py-2 text-xs text-slate-500">
-      <span>Showing {% if rows.is_empty() %}0{% else %}{{ offset + 1 }}–{{ offset + rows.len() }}{% endif %}{% if has_more %}+{% endif %}</span>
+  {% endif %}
+
+  <div class="monitors-foot">
+    <span>
+      Showing <span class="monitors-foot__mono">{% if total == 0 %}0{% else %}{{ offset + 1 }}–{{ offset + total }}{% endif %}{% if has_more %}+{% endif %}</span>
+      of <span class="monitors-foot__mono">{{ total }}{% if has_more %}+{% endif %}</span>
+    </span>
+    <span>
       {% if let Some(prev) = prev_offset %}
-      <a class="ml-3 underline"
-         hx-get="/web/targets/list?limit={{ limit }}&offset={{ prev }}&q={{ q|urlencode }}&tag={{ tag|urlencode }}{% if let Some(e) = enabled %}&enabled={{ e }}{% endif %}"
+      <a class="row-link"
+         hx-get="/web/targets/list?limit={{ limit }}&amp;offset={{ prev }}&amp;q={{ q|urlencode }}&amp;tag={{ tag|urlencode }}&amp;group={{ group|urlencode }}&amp;kind={{ kind|urlencode }}{% if let Some(o) = owner %}&amp;owner={{ o }}{% endif %}{% if let Some(e) = enabled %}&amp;enabled={{ e }}{% endif %}&amp;sort={{ sort }}"
          hx-target="#target-rows" hx-swap="outerHTML" hx-push-url="true" href="#">← prev</a>
       {% endif %}
       {% if let Some(next) = next_offset %}
-      <a class="ml-3 underline"
-         hx-get="/web/targets/list?limit={{ limit }}&offset={{ next }}&q={{ q|urlencode }}&tag={{ tag|urlencode }}{% if let Some(e) = enabled %}&enabled={{ e }}{% endif %}"
+      <a class="row-link ml-3"
+         hx-get="/web/targets/list?limit={{ limit }}&amp;offset={{ next }}&amp;q={{ q|urlencode }}&amp;tag={{ tag|urlencode }}&amp;group={{ group|urlencode }}&amp;kind={{ kind|urlencode }}{% if let Some(o) = owner %}&amp;owner={{ o }}{% endif %}{% if let Some(e) = enabled %}&amp;enabled={{ e }}{% endif %}&amp;sort={{ sort }}"
          hx-target="#target-rows" hx-swap="outerHTML" hx-push-url="true" href="#">next →</a>
       {% endif %}
-    </td>
-  </tr>
-</tbody>
+    </span>
+  </div>
+</section>

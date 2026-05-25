@@ -177,6 +177,13 @@ pub struct FormModel {
     pub min_interval_s: u64,
     pub enabled: bool,
     pub tags: Vec<String>,
+    /// Free-text operator group label (drives Monitors-page bucketing).
+    pub group_name: String,
+    /// Selected owner user-id (or empty string for "unowned"); the form
+    /// renders a `<select>` populated from `owner_options`.
+    pub owner_user_id: String,
+    /// Org members available as owner candidates.
+    pub owner_options: Vec<OwnerChoice>,
     pub check_type: &'static str,
     pub http: HttpFields,
     pub tcp: TcpFields,
@@ -185,6 +192,13 @@ pub struct FormModel {
     pub domain_expiry: DomainExpiryFields,
     /// The org's notification channels, with this monitor's bindings prefilled.
     pub channels: Vec<ChannelChoice>,
+}
+
+/// One option in the form's "Owner" select.
+pub struct OwnerChoice {
+    pub id: String,
+    pub label: String,
+    pub selected: bool,
 }
 
 #[derive(Template, WebTemplate)]
@@ -220,6 +234,9 @@ fn empty_create_form() -> FormModel {
         min_interval_s: 60,
         enabled: true,
         tags: Vec::new(),
+        group_name: String::new(),
+        owner_user_id: String::new(),
+        owner_options: Vec::new(),
         check_type: "http",
         http: HttpFields::default(),
         tcp: TcpFields::default(),
@@ -266,6 +283,30 @@ async fn plan_min_interval(state: &AppState, org: OrgId) -> Result<u64, AppError
         .max(1))
 }
 
+/// Org members rendered as `<select>` options for the owner field.
+/// Empty option ("unowned") is added template-side.
+async fn owner_choices(
+    state: &AppState,
+    org: OrgId,
+    selected: &str,
+) -> Result<Vec<OwnerChoice>, AppError> {
+    let pool = state.require_db()?;
+    let members = crate::storage::orgs::list_members(pool, org).await?;
+    let mut out: Vec<OwnerChoice> = members
+        .into_iter()
+        .map(|m| {
+            let id = m.membership.user_id.0.to_string();
+            OwnerChoice {
+                selected: id == selected,
+                id,
+                label: m.email,
+            }
+        })
+        .collect();
+    out.sort_by(|a, b| a.label.cmp(&b.label));
+    Ok(out)
+}
+
 pub async fn new_form(
     _auth: AuthedBrowser,
     CurrentOrg(org): CurrentOrg,
@@ -285,6 +326,7 @@ pub async fn new_form(
         None => (empty_create_form(), TargetAlerts::default()),
     };
     form.channels = channel_choices(&state, org, &alerts).await?;
+    form.owner_options = owner_choices(&state, org, &form.owner_user_id).await?;
     form.min_interval_s = plan_min_interval(&state, org).await?;
     // A new monitor is prefilled with 60s; raise it if the plan floor is
     // higher so the default the user sees would actually be accepted.
@@ -309,6 +351,7 @@ pub async fn edit_form(
     let alerts = target.alerts.clone();
     let mut form = form_from_target(target, FormKind::Edit)?;
     form.channels = channel_choices(&state, org, &alerts).await?;
+    form.owner_options = owner_choices(&state, org, &form.owner_user_id).await?;
     // Edit keeps the saved interval as-is; if a plan floor rose past it the
     // save will surface the API error rather than silently rewriting it.
     form.min_interval_s = plan_min_interval(&state, org).await?;
@@ -320,6 +363,8 @@ pub async fn edit_form(
 
 fn form_from_target(t: Target, kind: FormKind) -> Result<FormModel, AppError> {
     let tags = t.tags;
+    let group_name = t.group_name.unwrap_or_default();
+    let owner_user_id = t.owner_user_id.map(|id| id.to_string()).unwrap_or_default();
 
     let mut http = HttpFields::default();
     let mut tcp = TcpFields::default();
@@ -399,6 +444,10 @@ fn form_from_target(t: Target, kind: FormKind) -> Result<FormModel, AppError> {
         min_interval_s: 60,
         enabled: t.enabled,
         tags,
+        group_name,
+        owner_user_id,
+        // Populated by the handler from `orgs::list_members`.
+        owner_options: Vec::new(),
         check_type,
         http,
         tcp,
@@ -558,6 +607,8 @@ mod tests {
             enabled: true,
             tags: vec![],
             alerts: Default::default(),
+            group_name: None,
+            owner_user_id: None,
             public_status: false,
             public_name: None,
             public_description: None,
@@ -648,6 +699,8 @@ mod tests {
             enabled: true,
             tags: vec![],
             alerts: Default::default(),
+            group_name: None,
+            owner_user_id: None,
             public_status: false,
             public_name: None,
             public_description: None,
@@ -686,6 +739,8 @@ mod tests {
             enabled: false,
             tags: vec!["prod".into(), "db".into()],
             alerts: Default::default(),
+            group_name: None,
+            owner_user_id: None,
             public_status: false,
             public_name: None,
             public_description: None,
@@ -724,6 +779,8 @@ mod tests {
             enabled: true,
             tags: vec![],
             alerts: Default::default(),
+            group_name: None,
+            owner_user_id: None,
             public_status: false,
             public_name: None,
             public_description: None,
@@ -759,6 +816,8 @@ mod tests {
             enabled: true,
             tags: vec![],
             alerts: Default::default(),
+            group_name: None,
+            owner_user_id: None,
             public_status: false,
             public_name: None,
             public_description: None,
@@ -793,6 +852,8 @@ mod tests {
             enabled: true,
             tags: vec![],
             alerts: Default::default(),
+            group_name: None,
+            owner_user_id: None,
             public_status: false,
             public_name: None,
             public_description: None,
@@ -837,6 +898,8 @@ mod tests {
             enabled: true,
             tags: vec!["prod".into()],
             alerts: Default::default(),
+            group_name: None,
+            owner_user_id: None,
             public_status: false,
             public_name: None,
             public_description: None,

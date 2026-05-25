@@ -18,8 +18,23 @@ pub trait ResultSink: Send + Sync {
 pub struct TargetFilter {
     pub limit: Option<usize>,
     pub offset: usize,
+    /// ILIKE substring against `name`. Callers pass `None` (not `Some("")`)
+    /// for "no filter" — the store does not normalise empty strings.
+    pub q: Option<String>,
     pub tag: Option<String>,
     pub enabled: Option<bool>,
+    pub group: Option<String>,
+    pub owner: Option<Uuid>,
+    #[allow(dead_code)]
+    pub sort: TargetSort,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum TargetSort {
+    #[default]
+    RecentActivity,
+    Name,
+    Created,
 }
 
 /// Operator-facing target repository. Every method is scoped to a single
@@ -67,6 +82,9 @@ pub trait TargetStore: Send + Sync {
     async fn add_tags(&self, org: OrgId, ids: &[Uuid], tags: &[String]) -> Result<Vec<Uuid>>;
     /// Removes `tags` from every named target; returns the set that existed.
     async fn remove_tags(&self, org: OrgId, ids: &[Uuid], tags: &[String]) -> Result<Vec<Uuid>>;
+    /// Sets every named target's `group_name` to `group` (None clears).
+    /// Returns the set that existed.
+    async fn set_group(&self, org: OrgId, ids: &[Uuid], group: Option<&str>) -> Result<Vec<Uuid>>;
     /// Liveness probe for `/readyz` — connection-level, not tenant data.
     async fn ping(&self) -> Result<()>;
 }

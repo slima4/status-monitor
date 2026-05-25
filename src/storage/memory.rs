@@ -175,6 +175,10 @@ impl ResultsStore for InMemorySink {
                 .last()
                 .map(|r| r.status.as_str().to_string())
                 .unwrap_or_default();
+            let last_minute_ts = rows.last().map(|r| {
+                let secs = r.timestamp.timestamp().max(0);
+                secs - (secs % 60)
+            });
             out.push(DashboardMetrics {
                 target_id: tid,
                 samples,
@@ -183,6 +187,7 @@ impl ResultsStore for InMemorySink {
                 p50_ms,
                 p95_ms,
                 last_status,
+                last_minute_ts,
             });
         }
         Ok(out)
@@ -382,6 +387,8 @@ impl InMemoryTargetStore {
             enabled: new.enabled,
             tags: new.tags,
             alerts: new.alerts,
+            group_name: new.group_name,
+            owner_user_id: new.owner_user_id,
             public_status: new.public_status,
             public_name: new.public_name,
             public_description: new.public_description,
@@ -401,18 +408,54 @@ impl TargetStore for InMemoryTargetStore {
     async fn list(&self, _org: OrgId, filter: TargetFilter) -> Result<Vec<Target>> {
         let limit = filter.limit.unwrap_or(100).min(10_000);
         let guard = self.targets.lock();
-        let collected: Vec<Target> = guard
+        let q_lower = filter
+            .q
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_lowercase);
+        let group = filter
+            .group
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        let mut collected: Vec<Target> = guard
             .iter()
             .filter(|t| filter.enabled.map(|e| t.enabled == e).unwrap_or(true))
             .filter(|t| match &filter.tag {
                 Some(tag) => t.tags.iter().any(|x| x == tag),
                 None => true,
             })
-            .skip(filter.offset)
-            .take(limit)
+            .filter(|t| match &q_lower {
+                Some(q) => t.name.to_lowercase().contains(q),
+                None => true,
+            })
+            .filter(|t| match group {
+                Some(g) => t.group_name.as_deref() == Some(g),
+                None => true,
+            })
+            .filter(|t| match filter.owner {
+                Some(u) => t.owner_user_id == Some(u),
+                None => true,
+            })
             .cloned()
             .collect();
-        Ok(collected)
+        match filter.sort {
+            crate::storage::traits::TargetSort::RecentActivity => {
+                collected.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+            }
+            crate::storage::traits::TargetSort::Name => {
+                collected.sort_by(|a, b| a.name.cmp(&b.name));
+            }
+            crate::storage::traits::TargetSort::Created => {
+                collected.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+            }
+        }
+        Ok(collected
+            .into_iter()
+            .skip(filter.offset)
+            .take(limit)
+            .collect())
     }
 
     async fn get(&self, _org: OrgId, id: Uuid) -> Result<Option<Target>> {
@@ -459,11 +502,15 @@ impl TargetStore for InMemoryTargetStore {
         if let Some(alerts) = update.alerts {
             t.alerts = alerts;
         }
+        if let Some(v) = update.group_name {
+            t.group_name = v;
+        }
+        if let Some(v) = update.owner_user_id {
+            t.owner_user_id = v;
+        }
         if let Some(v) = update.public_status {
             t.public_status = v;
         }
-        // Option<Option<String>>: outer Some = field present (inner None
-        // clears); outer None = omitted, leave the stored value unchanged.
         if let Some(v) = update.public_name {
             t.public_name = v;
         }
@@ -608,6 +655,20 @@ impl TargetStore for InMemoryTargetStore {
         for t in guard.iter_mut() {
             if ids.contains(&t.id) {
                 t.tags.retain(|x| !tags.contains(x));
+                t.updated_at = now;
+                hit.push(t.id);
+            }
+        }
+        Ok(hit)
+    }
+
+    async fn set_group(&self, _org: OrgId, ids: &[Uuid], group: Option<&str>) -> Result<Vec<Uuid>> {
+        let mut guard = self.targets.lock();
+        let now = Utc::now();
+        let mut hit = Vec::new();
+        for t in guard.iter_mut() {
+            if ids.contains(&t.id) {
+                t.group_name = group.map(str::to_owned);
                 t.updated_at = now;
                 hit.push(t.id);
             }

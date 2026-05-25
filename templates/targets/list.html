@@ -2,11 +2,22 @@
 {% block title %}Monitors · Status Monitor{% endblock %}
 {% block content %}
 <section class="space-y-4">
-  <header class="flex flex-wrap items-center justify-between gap-3">
-    <h1 class="page-title">Monitors</h1>
-    {% if !onboarding %}
-    <a href="/targets/new" class="sticker-btn sticker-btn--primary px-4 py-2 text-sm font-medium transition-transform hover:-translate-y-0.5">New monitor</a>
-    {% endif %}
+  <header class="flex flex-wrap items-end justify-between gap-3">
+    <div>
+      <div class="flex items-center gap-3">
+        <h1 class="page-title">Monitors</h1>
+        <span class="monitors-subhead__mono">{{ total }}{% if has_more %}+{% endif %}</span>
+      </div>
+      {% if !onboarding %}
+      <p class="monitors-subhead">
+        {{ groups.len() }} group{% if groups.len() != 1 %}s{% endif %}
+        ·
+        <span class="monitors-subhead__mono">{{ paused_total }}</span> paused on this page
+      </p>
+      {% endif %}
+    </div>
+    <a href="/targets/new"
+       class="sticker-btn sticker-btn--primary px-4 py-2 text-sm font-medium transition-transform hover:-translate-y-0.5">+ New monitor</a>
   </header>
 
   {% if onboarding %}
@@ -25,55 +36,9 @@
     </p>
   </div>
   {% else %}
-  <form id="targets-filter"
-        role="search"
-        aria-label="Filter targets"
-        hx-get="/web/targets/list"
-        hx-target="#target-rows"
-        hx-swap="outerHTML"
-        hx-push-url="true"
-        hx-trigger="change, keyup delay:300ms from:input[name='q']"
-        class="flex flex-wrap items-center gap-3 rounded-xl border-2 border-slate-200 bg-white px-3 py-2 text-sm">
-    <label class="sr-only" for="targets-search">Search by name</label>
-    <input id="targets-search" type="search" name="q" value="{{ q }}" placeholder="Search by name (client-side)"
-           data-client-filter
-           class="field text-sm w-64">
-    <label class="sr-only" for="targets-tag">Filter by tag</label>
-    <input id="targets-tag" type="text" name="tag" value="{{ tag }}" placeholder="Filter by tag"
-           class="field text-sm w-44">
-    <label class="flex items-center gap-1 text-slate-600">
-      <span>Enabled</span>
-      <select name="enabled" class="field">
-        <option value=""{% if enabled.is_none() %} selected{% endif %}>any</option>
-        <option value="true"{% if enabled == Some(true) %} selected{% endif %}>enabled</option>
-        <option value="false"{% if enabled == Some(false) %} selected{% endif %}>disabled</option>
-      </select>
-    </label>
-    <span role="status" class="ml-auto text-xs text-slate-500">
-      <span class="htmx-indicator" id="filter-indicator">Loading…</span>
-    </span>
-  </form>
-
-  <div class="overflow-x-auto sticker-card">
-    <table class="min-w-full text-sm">
-      <caption class="sr-only">Monitors with status, configuration, and recent activity.</caption>
-      <thead class="border-b bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
-        <tr>
-          <th scope="col" class="px-3 py-2">Status</th>
-          <th scope="col" class="px-3 py-2">Name</th>
-          <th scope="col" class="px-3 py-2">Type</th>
-          <th scope="col" class="px-3 py-2">Address</th>
-          <th scope="col" class="px-3 py-2">Interval</th>
-          <th scope="col" class="px-3 py-2">Tags</th>
-          <th scope="col" class="px-3 py-2">Last result</th>
-          <th scope="col" class="px-3 py-2 text-right">Actions</th>
-        </tr>
-      </thead>
-      {% include "targets/partials/list_body.html" %}
-    </table>
-  </div>
+  {% include "targets/partials/list_body.html" %}
   {% endif %}
 </section>
 
-<script defer src="{{ "js/ui/targets_list.js"|asset }}"></script>
+<script defer src="{{ "js/ui/monitors_list.js"|asset }}"></script>
 {% endblock %}

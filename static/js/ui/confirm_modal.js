@@ -1,8 +1,11 @@
-// Shared confirmation modal. One <dialog> is lazy-mounted to body; every
-// "are you sure?" prompt across the app uses it.
+// Shared user-dialog helpers. One <dialog> is lazy-mounted to body and
+// reused for every modal interaction across the app; a separate toast
+// rail handles non-blocking error/info notices.
 //
-// Direct call:
+// Direct calls:
 //   await smConfirm({title, body, confirmLabel, danger}) -> boolean
+//   await smPrompt({title, body, placeholder, value, splitOnComma}) -> string | string[] | null
+//   smToast({message, kind})           // kind: "error" (default) | "info" | "ok"
 //
 // Declarative wiring (works for hx-delete, vanilla onclick, fetch buttons):
 //   <button hx-delete="/..." data-confirm-modal
@@ -86,6 +89,114 @@
             // Pre-focus the safer button for destructive actions.
             (isDanger ? cancelBtn : confirmBtn).focus();
         });
+    };
+
+    // smPrompt: trimmed string, array when splitOnComma, or null.
+    let promptDialog = null;
+    let promptTitleEl, promptBodyEl, promptInputEl, promptOkBtn, promptCancelBtn;
+    let promptResolve = null;
+
+    function mountPrompt() {
+        if (promptDialog) return;
+        promptDialog = document.createElement("dialog");
+        promptDialog.id = "sm-prompt-modal";
+        promptDialog.className = "w-full max-w-md rounded-lg p-0 backdrop:bg-slate-900/40";
+        promptDialog.setAttribute("aria-labelledby", "sm-prompt-title");
+        promptDialog.innerHTML =
+            '<form method="dialog" class="space-y-4 p-6">' +
+                '<h2 id="sm-prompt-title" class="text-lg font-semibold text-slate-800"></h2>' +
+                '<p class="text-sm text-slate-600"></p>' +
+                '<input type="text" class="field w-full text-sm" data-sm-prompt-input>' +
+                '<div class="flex items-center justify-end gap-2 pt-2">' +
+                    '<button type="button" data-sm-prompt-cancel ' +
+                            'class="btn-ghost px-3 py-1.5 text-sm font-medium text-slate-700">Cancel</button>' +
+                    '<button type="submit" data-sm-prompt-ok ' +
+                            'class="sticker-btn sticker-btn--primary px-3 py-1.5 text-sm font-medium">OK</button>' +
+                '</div>' +
+            '</form>';
+        document.body.appendChild(promptDialog);
+        promptTitleEl  = promptDialog.querySelector("h2");
+        promptBodyEl   = promptDialog.querySelector("p");
+        promptInputEl  = promptDialog.querySelector("[data-sm-prompt-input]");
+        promptOkBtn    = promptDialog.querySelector("[data-sm-prompt-ok]");
+        promptCancelBtn= promptDialog.querySelector("[data-sm-prompt-cancel]");
+
+        promptDialog.querySelector("form").addEventListener("submit", (e) => {
+            e.preventDefault();
+            settlePrompt(promptInputEl.value);
+        });
+        promptCancelBtn.addEventListener("click", () => settlePrompt(null));
+        promptDialog.addEventListener("click", (e) => {
+            if (e.target === promptDialog) settlePrompt(null);
+        });
+        promptDialog.addEventListener("cancel", (e) => {
+            e.preventDefault();
+            settlePrompt(null);
+        });
+    }
+    function settlePrompt(raw) {
+        if (!promptResolve) return;
+        const r = promptResolve;
+        promptResolve = null;
+        const split = promptDialog.dataset.split === "1";
+        if (promptDialog.open) promptDialog.close();
+        if (raw === null) { r(null); return; }
+        const trimmed = String(raw).trim();
+        if (split) {
+            r(trimmed.split(",").map(s => s.trim()).filter(Boolean));
+        } else {
+            r(trimmed === "" ? null : trimmed);
+        }
+    }
+    window.smPrompt = function (opts) {
+        mountPrompt();
+        opts = opts || {};
+        promptTitleEl.textContent  = opts.title       || "Input";
+        promptBodyEl.textContent   = opts.body        || "";
+        promptInputEl.placeholder  = opts.placeholder || "";
+        promptInputEl.value        = opts.value       || "";
+        promptDialog.dataset.split = opts.splitOnComma ? "1" : "0";
+        if (promptDialog.open) settlePrompt(null);
+        return new Promise((resolve) => {
+            promptResolve = resolve;
+            promptDialog.showModal();
+            promptInputEl.focus();
+            promptInputEl.select();
+        });
+    };
+
+    // smToast: bottom-right rail, click or 4s auto-dismiss.
+    let toastRail = null;
+    function mountToastRail() {
+        if (toastRail) return;
+        toastRail = document.createElement("div");
+        toastRail.id = "sm-toast-rail";
+        toastRail.className = "pointer-events-none fixed bottom-4 right-4 z-50 flex flex-col gap-2";
+        document.body.appendChild(toastRail);
+    }
+    window.smToast = function (opts) {
+        mountToastRail();
+        opts = opts || {};
+        const msg  = opts.message || "";
+        const kind = opts.kind    || "error";
+        const klass = {
+            error: "alert-card alert-card--error",
+            info:  "alert-card alert-card--muted",
+            ok:    "alert-card alert-card--ok",
+            warn:  "alert-card alert-card--warn",
+        }[kind] || "alert-card alert-card--error";
+        const t = document.createElement("div");
+        t.className = "pointer-events-auto cursor-pointer " + klass;
+        t.style.minWidth = "16rem";
+        t.style.maxWidth = "22rem";
+        t.textContent = msg;
+        t.addEventListener("click", () => t.remove());
+        toastRail.appendChild(t);
+        setTimeout(() => {
+            t.style.transition = "opacity 200ms";
+            t.style.opacity = "0";
+            setTimeout(() => t.remove(), 250);
+        }, 4000);
     };
 
     // Capture-phase click interceptor: runs before htmx (bubble-phase) and

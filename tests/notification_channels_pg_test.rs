@@ -239,6 +239,8 @@ async fn target_alert_binding_channel_lookup_is_org_scoped_live_pg() {
             after_failures: 3,
             notify_recovery: true,
         }]),
+        group_name: None,
+        owner_user_id: None,
         public_status: false,
         public_name: None,
         public_description: None,

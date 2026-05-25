@@ -322,6 +322,26 @@
           <ul data-tag-suggestions class="tag-suggestions hidden" role="listbox"></ul>
         </div>
       </div>
+      <div class="grid gap-3 sm:grid-cols-2">
+        <label class="block">
+          <span class="text-xs text-slate-500">Group</span>
+          <input id="group_name" name="group_name" type="text"
+                 value="{{ form.group_name }}"
+                 placeholder="e.g. API &amp; Web"
+                 class="mt-1 w-full field">
+          <p class="mt-1 text-xs text-slate-500">Operator-side bucket on the Monitors page. Blank = ungrouped.</p>
+        </label>
+        <label class="block">
+          <span class="text-xs text-slate-500">Owner</span>
+          <select id="owner_user_id" name="owner_user_id" class="mt-1 w-full field">
+            <option value=""{% if form.owner_user_id == "" %} selected{% endif %}>— unowned —</option>
+            {% for opt in form.owner_options %}
+            <option value="{{ opt.id }}"{% if opt.selected %} selected{% endif %}>{{ opt.label }}</option>
+            {% endfor %}
+          </select>
+          <p class="mt-1 text-xs text-slate-500">Team member who owns this monitor.</p>
+        </label>
+      </div>
     </fieldset>
 
     <details class="sticker-disclosure space-y-6{% if form.check_type != "http" %} hidden{% endif %}"

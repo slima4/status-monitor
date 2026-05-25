@@ -36,6 +36,8 @@ fn target_named(name: &str) -> NewTarget {
         enabled: true,
         tags: vec![],
         alerts: Default::default(),
+        group_name: None,
+        owner_user_id: None,
         public_status: false,
         public_name: None,
         public_description: None,

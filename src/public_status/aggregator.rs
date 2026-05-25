@@ -233,8 +233,7 @@ impl OrgAggregator {
                 crate::storage::TargetFilter {
                     limit: Some(10_000),
                     offset: 0,
-                    tag: None,
-                    enabled: None,
+                    ..Default::default()
                 },
             )
             .await?;

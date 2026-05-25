@@ -1,0 +1,26 @@
+<div id="monitors-bulk" class="monitors-bulk" data-empty="true"
+     data-action-url="/api/v1/targets/bulk-action"
+     data-refresh-url="/web/targets/list?q={{ q|urlencode }}&amp;tag={{ tag|urlencode }}&amp;group={{ group|urlencode }}&amp;kind={{ kind|urlencode }}{% if let Some(o) = owner %}&amp;owner={{ o }}{% endif %}{% if let Some(e) = enabled %}&amp;enabled={{ e }}{% endif %}&amp;sort={{ sort }}">
+  <span>
+    <span class="monitors-bulk__count" data-bulk-count>0</span> selected
+  </span>
+  <div class="monitors-bulk__actions">
+    <button type="button" class="monitors-bulk__btn" data-bulk-action="disable">Pause</button>
+    <button type="button" class="monitors-bulk__btn" data-bulk-action="enable">Resume</button>
+    <button type="button" class="monitors-bulk__btn" data-bulk-action="set_group"
+            data-bulk-prompt="Move selected monitors to group (blank = clear):"
+            data-bulk-prompt-key="group">Move to group…</button>
+    <button type="button" class="monitors-bulk__btn" data-bulk-action="tag_add"
+            data-bulk-prompt="Add tag(s), comma-separated:"
+            data-bulk-prompt-key="tags"
+            data-bulk-prompt-split>Add tag…</button>
+    <button type="button" class="monitors-bulk__btn" data-bulk-action="tag_remove"
+            data-bulk-prompt="Remove tag(s), comma-separated:"
+            data-bulk-prompt-key="tags"
+            data-bulk-prompt-split>Remove tag…</button>
+    <button type="button" class="monitors-bulk__btn monitors-bulk__btn--danger"
+            data-bulk-action="delete"
+            data-bulk-confirm="Permanently delete selected monitors? History is removed.">Delete</button>
+  </div>
+  <button type="button" class="monitors-bulk__clear" data-bulk-clear>Clear</button>
+</div>

@@ -21,6 +21,14 @@ pub struct Target {
     pub tags: Vec<String>,
     #[serde(default)]
     pub alerts: TargetAlerts,
+    /// Operator-side grouping (independent of `public_group`).
+    #[serde(default)]
+    #[schema(example = "API & Web", nullable = true, max_length = 50)]
+    pub group_name: Option<String>,
+    /// FK to `users.id`. Nullable; cleared if the user is removed.
+    #[serde(default)]
+    #[schema(nullable = true)]
+    pub owner_user_id: Option<Uuid>,
     /// Whether this target appears on the public status page.
     #[serde(default)]
     #[schema(example = false, default = false)]
@@ -60,6 +68,12 @@ pub struct NewTarget {
     #[serde(default)]
     pub alerts: TargetAlerts,
     #[serde(default)]
+    #[schema(nullable = true, max_length = 50)]
+    pub group_name: Option<String>,
+    #[serde(default)]
+    #[schema(nullable = true)]
+    pub owner_user_id: Option<Uuid>,
+    #[serde(default)]
     #[schema(example = false, default = false)]
     pub public_status: bool,
     #[serde(default)]
@@ -87,6 +101,12 @@ pub struct TargetUpdate {
     pub enabled: Option<bool>,
     pub tags: Option<Vec<String>>,
     pub alerts: Option<TargetAlerts>,
+    #[serde(default, deserialize_with = "double_option")]
+    #[schema(nullable = true, value_type = Option<String>)]
+    pub group_name: Option<Option<String>>,
+    #[serde(default, deserialize_with = "double_option")]
+    #[schema(nullable = true, value_type = Option<Uuid>)]
+    pub owner_user_id: Option<Option<Uuid>>,
     pub public_status: Option<bool>,
     // Double-Option so PATCH can tell "field omitted → keep" from "field
     // present as null → clear back to the real monitor name/no group".

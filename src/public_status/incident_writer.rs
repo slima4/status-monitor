@@ -798,6 +798,8 @@ mod tests {
             enabled: true,
             tags: vec![],
             alerts: TargetAlerts::default(),
+            group_name: None,
+            owner_user_id: None,
             public_status: true,
             public_name: None,
             public_description: None,

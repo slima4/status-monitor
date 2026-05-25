@@ -522,8 +522,7 @@ pub mod settings {
         let filter = TargetFilter {
             limit: None,
             offset: 0,
-            tag: None,
-            enabled: None,
+            ..Default::default()
         };
         let mut targets = state.target_store.list(org, filter).await?;
         // Public first, then within public the aggregator's exact order

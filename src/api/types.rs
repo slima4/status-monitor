@@ -65,8 +65,16 @@ pub enum BulkAction {
     Enable,
     Disable,
     Delete,
-    TagAdd { tags: Vec<String> },
-    TagRemove { tags: Vec<String> },
+    TagAdd {
+        tags: Vec<String>,
+    },
+    TagRemove {
+        tags: Vec<String>,
+    },
+    /// Set every target's `group_name` to `group`. Pass `null` to clear.
+    SetGroup {
+        group: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -129,6 +137,11 @@ pub struct DashboardMetrics {
     /// Latest observed status string ("up" / "down" / "degraded" / "error"),
     /// or empty when the range contains no samples.
     pub last_status: String,
+    /// Unix-seconds of `max(minute)` over the rollup. `None` when the
+    /// range contains no samples.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(nullable = true)]
+    pub last_minute_ts: Option<i64>,
 }
 
 /// One sparkline bucket — minute-aligned average duration. The dashboard

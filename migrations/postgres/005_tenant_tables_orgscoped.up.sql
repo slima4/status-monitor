@@ -17,6 +17,8 @@ CREATE TABLE targets (
     enabled         BOOLEAN NOT NULL DEFAULT true,
     tags            TEXT[] NOT NULL DEFAULT '{}',
     alerts          JSONB NOT NULL DEFAULT '[]'::jsonb,
+    group_name      TEXT,
+    owner_user_id   UUID REFERENCES users(id) ON DELETE SET NULL,
     public_status        BOOLEAN NOT NULL DEFAULT false,
     public_name          TEXT,
     public_description   TEXT,
@@ -30,6 +32,10 @@ CREATE INDEX idx_targets_org_enabled
     ON targets(org_id, enabled) WHERE enabled = true;
 CREATE INDEX idx_targets_org_updated ON targets(org_id, updated_at);
 CREATE INDEX idx_targets_org_tags ON targets USING GIN(tags) WHERE tags <> '{}';
+CREATE INDEX idx_targets_org_group
+    ON targets(org_id, group_name) WHERE group_name IS NOT NULL;
+CREATE INDEX idx_targets_org_owner
+    ON targets(org_id, owner_user_id) WHERE owner_user_id IS NOT NULL;
 CREATE INDEX idx_targets_org_public
     ON targets(org_id, public_group, public_sort_order)
     WHERE public_status = true;

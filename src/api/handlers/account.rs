@@ -333,6 +333,7 @@ async fn build_owned_org(pool: &sqlx::PgPool, org: OrgExport) -> Result<OwnedOrg
     // carry no soft-delete column of their own.
     let target_rows: Vec<RawTargetRow> = sqlx::query_as(
         "SELECT id, name, check_spec, interval_secs, enabled, tags, \
+                group_name, owner_user_id, \
                 public_status, public_name, public_description, public_group, \
                 public_sort_order, created_at, updated_at \
          FROM targets WHERE org_id = $1 ORDER BY created_at",

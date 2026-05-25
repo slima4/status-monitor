@@ -34,5 +34,6 @@ pub use orgs::{
 };
 pub use postgres::PostgresTargetStore;
 pub use traits::{
-    IncidentListQuery, ResultSink, ResultsStore, TargetFilter, TargetStore, TimeRange, UptimeStats,
+    IncidentListQuery, ResultSink, ResultsStore, TargetFilter, TargetSort, TargetStore, TimeRange,
+    UptimeStats,
 };
