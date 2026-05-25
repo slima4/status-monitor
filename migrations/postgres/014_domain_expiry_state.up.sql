@@ -8,13 +8,22 @@
 -- older than the staleness ceiling.
 --
 -- One row per target. `target_id` is the PK so an upsert is O(1) and a target
--- delete cascades the cache.
+-- delete cascades the cache. `org_id` is denormalised onto the row so every
+-- query can filter by tenant — the trait method signatures require OrgId, so
+-- a future HTTP handler that takes target_id from request input cannot read
+-- another tenant's row by mistake.
+--
+-- `last_success_at` is the moment of the last *successful* probe. Distinct
+-- from `last_attempt_at`, which advances on every probe (success or failure).
+-- The staleness ceiling is measured against `last_success_at` only — a row
+-- with no successful probe must never satisfy the staleness branch.
 CREATE TABLE IF NOT EXISTS domain_expiry_state (
     target_id        UUID PRIMARY KEY REFERENCES targets(id) ON DELETE CASCADE,
+    org_id           UUID NOT NULL,
     domain           TEXT NOT NULL,
     expiry_at        TIMESTAMPTZ NOT NULL,
     registrar        TEXT,
-    verified_at      TIMESTAMPTZ NOT NULL,
+    last_success_at  TIMESTAMPTZ NOT NULL,
     last_attempt_at  TIMESTAMPTZ NOT NULL,
     last_error       TEXT,
     attempts         INT NOT NULL DEFAULT 0

@@ -85,6 +85,11 @@ impl RdapSingleflight {
             })
             .clone();
 
+        // MUST stay `tokio::sync::Mutex`. The guard is held across
+        // `fetcher().await` to serialise concurrent callers onto one
+        // outbound RDAP request — a sync mutex (parking_lot) would block the
+        // worker thread for the full RDAP round-trip and saturate the
+        // runtime under contention.
         let mut guard = slot.state.lock().await;
         if let SlotState::Ready { value, fetched_at } = &*guard
             && fetched_at.elapsed() < self.cache_ttl
@@ -101,9 +106,12 @@ impl RdapSingleflight {
         Ok((value, FetchOutcome::Miss))
     }
 
-    #[cfg(test)]
-    pub(crate) fn cached_keys(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.slots.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.slots.is_empty()
     }
 }
 
@@ -224,6 +232,6 @@ mod tests {
                 .unwrap();
         }
         assert_eq!(calls.load(Ordering::SeqCst), 3);
-        assert_eq!(sf.cached_keys(), 3);
+        assert_eq!(sf.len(), 3);
     }
 }

@@ -24,6 +24,8 @@ these names verbatim.
 | `status_monitor_host_throttle_drops_total` | counter | host-bulkhead rejections — `kind=host` over-cap checks recorded as `degraded` without firing alerts. RDAP drops do NOT increment this counter; they fall through to the sticky last-good path (see `domain_expiry_stale_served_total`) |
 | `status_monitor_rdap_singleflight_total{outcome}` | counter | RDAP singleflight outcome per domain — `hit` (cached, no outbound request) or `miss` (fetcher invoked) |
 | `status_monitor_domain_expiry_stale_served_total{kind}` | counter | times the domain-expiry executor served a cached last-good answer instead of a fresh probe. `kind` distinguishes the cause: `throttled`, `timeout`, `lookup_error`, or `fresh_error` (no usable last-good — emitted as a real `Error` instead) |
+| `status_monitor_domain_expiry_state_write_failed_total` | counter | failures writing the last-good cache row after a successful probe. Sustained values mean the sticky cache is going cold even though probes succeed — typical cause is Postgres write degradation |
+| `status_monitor_rdap_singleflight_slots` | gauge | live entries in the in-process RDAP singleflight cache. Bounded under normal load by the set of monitored domains; sudden growth signals a code path feeding non-target domains into the cache |
 | `status_monitor_build_info{version}` | counter | set to 1 once at startup so the endpoint is never empty |
 | `status_monitor_check_duration_ms` | histogram | per-check wall time |
 | `status_monitor_check_dns_ms` | histogram | DNS resolution latency (recorded in the hickory wrapper) |

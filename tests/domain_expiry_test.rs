@@ -9,7 +9,7 @@ use axum::routing::get;
 use chrono::Utc;
 use parking_lot::Mutex;
 use serde_json::{Value, json};
-use status_monitor::domain::{CheckStatus, DomainExpiryCheck};
+use status_monitor::domain::{CheckStatus, DomainExpiryCheck, OrgId};
 use status_monitor::http_outbound::build_outbound_client;
 use status_monitor::storage::{DomainExpiryStateStore, InMemoryDomainExpiryStateStore};
 use status_monitor::worker::domain_expiry::{
@@ -194,8 +194,10 @@ async fn domain_expiry_serves_last_good_on_rdap_failure() {
 
     let state: Arc<dyn DomainExpiryStateStore> = Arc::new(InMemoryDomainExpiryStateStore::new());
     let target = Uuid::now_v7();
+    let org = OrgId(Uuid::now_v7());
     state
         .upsert_success(
+            org,
             target,
             "foo.example",
             Utc::now() + chrono::Duration::days(60),
@@ -212,16 +214,16 @@ async fn domain_expiry_serves_last_good_on_rdap_failure() {
         DEFAULT_MAX_STALENESS,
     );
 
-    let r = execute_domain_expiry_check(
-        target,
-        Uuid::now_v7(),
-        &make_check("foo.example", 30, 7),
-        &runtime,
-    )
-    .await;
+    let r = execute_domain_expiry_check(target, org.0, &make_check("foo.example", 30, 7), &runtime)
+        .await;
 
     assert_eq!(r.status, CheckStatus::Up, "60-day cached answer is Up");
-    let err = r.error.as_deref().expect("stale serves an annotation");
-    assert!(err.contains("served_stale"), "annotation present");
-    assert!(err.contains("days_remaining"), "embeds cached details");
+    // Up cached verdicts must not carry the served_stale annotation —
+    // operators watch the stale-served counter instead. Customer-facing
+    // surfaces would otherwise display the internal annotation text.
+    assert!(
+        r.error.is_none(),
+        "Up cached verdict carries no error annotation, got: {:?}",
+        r.error
+    );
 }

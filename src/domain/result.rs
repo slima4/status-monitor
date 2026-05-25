@@ -8,6 +8,12 @@ use uuid::Uuid;
 /// is not target health.
 pub const HOST_THROTTLE_REASON: &str = "throttled: host concurrency cap";
 
+/// Prefix on the `error` field of results synthesized by the domain-expiry
+/// executor when serving a cached last-good answer instead of a fresh
+/// probe. Internal annotation — every renderer must strip it before
+/// showing the field to a customer.
+pub const SERVED_STALE_PREFIX: &str = "served_stale:";
+
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct CheckResult {
     pub target_id: Uuid,
@@ -58,6 +64,12 @@ impl CheckResult {
     pub fn is_throttle_degraded(&self) -> bool {
         matches!(self.status, CheckStatus::Degraded)
             && self.error.as_deref() == Some(HOST_THROTTLE_REASON)
+    }
+
+    pub fn is_served_stale(&self) -> bool {
+        self.error
+            .as_deref()
+            .is_some_and(|e| e.starts_with(SERVED_STALE_PREFIX))
     }
 }
 
@@ -126,5 +138,15 @@ mod tests {
         assert!(!synth(CheckStatus::Down, Some(HOST_THROTTLE_REASON)).is_throttle_degraded());
         assert!(!synth(CheckStatus::Degraded, Some("upstream 503")).is_throttle_degraded());
         assert!(!synth(CheckStatus::Degraded, None).is_throttle_degraded());
+    }
+
+    #[test]
+    fn is_served_stale_matches_prefix() {
+        assert!(
+            synth(CheckStatus::Degraded, Some("served_stale: age=10; details")).is_served_stale()
+        );
+        assert!(synth(CheckStatus::Up, Some("served_stale: age=0")).is_served_stale());
+        assert!(!synth(CheckStatus::Degraded, Some("upstream 503")).is_served_stale());
+        assert!(!synth(CheckStatus::Degraded, None).is_served_stale());
     }
 }

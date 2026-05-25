@@ -29,7 +29,7 @@ One tenant has more concurrent monitors at the same `(host, port)` than `checker
 
 ## `domain_expiry` results show `served_stale: …`
 
-The fresh RDAP probe failed (throttle, timeout, registry 5xx, network blip) but the executor served the most recent successful answer from `domain_expiry_state` instead of flipping the monitor red. The status reflects the cached `expiry_at`; the `error` field carries `last_verified_age_secs=…; refresh_failed=<kind>` plus the cached details. Customer-facing surfaces are unchanged.
+The fresh RDAP probe failed (throttle, timeout, registry 5xx, network blip) but the executor served the most recent successful answer from `domain_expiry_state` instead of flipping the monitor red. The status reflects the cached `expiry_at`. For Up the `error` field stays empty (the customer-facing surface shows nothing unusual); for Degraded/Down it carries `served_stale: last_verified_age_secs=…; refresh_failed=<kind>` plus the cached details so operators can distinguish a stale serve from a fresh probe.
 
 Inspect the failure kind via `status_monitor_domain_expiry_stale_served_total{kind}`:
 
@@ -40,7 +40,7 @@ Inspect the failure kind via `status_monitor_domain_expiry_stale_served_total{ki
 
 ## `domain_expiry` results have flipped to real `Error` after days of `served_stale`
 
-The cached row in `domain_expiry_state` is older than the 7-day staleness ceiling, so the executor stopped masking the registry outage. Either the registry has been down for that long (act on it), or this target's interval is so long that probes haven't run in a week. Check `verified_at` in `domain_expiry_state` for the target.
+The cached row in `domain_expiry_state` is older than the 7-day staleness ceiling, so the executor stopped masking the registry outage. Either the registry has been down for that long (act on it), or this target's interval is so long that probes haven't run in a week. Check `last_success_at` in `domain_expiry_state` for the target.
 
 ## TLS errors against internal hosts
 

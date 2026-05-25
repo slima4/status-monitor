@@ -130,6 +130,14 @@ fn register_descriptions() {
         "status_monitor_domain_expiry_stale_served_total",
         "Times the domain_expiry executor served a cached last-good answer instead of a fresh probe, labelled by failure kind"
     );
+    describe_counter!(
+        "status_monitor_domain_expiry_state_write_failed_total",
+        "Failures writing the last-good cache row after a successful probe — sustained values mean the sticky cache is going cold even though probes succeed"
+    );
+    describe_gauge!(
+        "status_monitor_rdap_singleflight_slots",
+        "Live entries in the RDAP singleflight cache. Bounded under normal load by the set of monitored domains"
+    );
 }
 
 pub mod names {
@@ -159,4 +167,7 @@ pub mod names {
     pub const HOST_THROTTLE_DROPS: &str = "status_monitor_host_throttle_drops_total";
     pub const RDAP_SINGLEFLIGHT: &str = "status_monitor_rdap_singleflight_total";
     pub const DOMAIN_EXPIRY_STALE_SERVED: &str = "status_monitor_domain_expiry_stale_served_total";
+    pub const DOMAIN_EXPIRY_STATE_WRITE_FAILED: &str =
+        "status_monitor_domain_expiry_state_write_failed_total";
+    pub const RDAP_SINGLEFLIGHT_SLOTS: &str = "status_monitor_rdap_singleflight_slots";
 }

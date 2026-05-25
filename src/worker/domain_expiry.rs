@@ -33,8 +33,10 @@ static RDAP_SINGLEFLIGHT_HITS: LazyLock<Counter> =
     LazyLock::new(|| counter!(names::RDAP_SINGLEFLIGHT, "outcome" => "hit"));
 static RDAP_SINGLEFLIGHT_MISSES: LazyLock<Counter> =
     LazyLock::new(|| counter!(names::RDAP_SINGLEFLIGHT, "outcome" => "miss"));
+static STATE_WRITE_FAILED: LazyLock<Counter> =
+    LazyLock::new(|| counter!(names::DOMAIN_EXPIRY_STATE_WRITE_FAILED));
 
-use crate::domain::{CheckResult, CheckStatus, DomainExpiryCheck};
+use crate::domain::{CheckResult, CheckStatus, DomainExpiryCheck, OrgId, SERVED_STALE_PREFIX};
 use crate::observability::metrics::names;
 use crate::storage::DomainExpiryStateStore;
 use crate::worker::host_throttle::{HostThrottle, Throttled};
@@ -53,8 +55,7 @@ pub struct DomainExpiryRuntime {
     pub singleflight: Arc<RdapSingleflight>,
     pub state_store: Arc<dyn DomainExpiryStateStore>,
     pub host_throttle: Arc<HostThrottle>,
-    pub max_staleness: Duration,
-    pub max_staleness_chrono: chrono::Duration,
+    max_staleness_chrono: chrono::Duration,
 }
 
 impl DomainExpiryRuntime {
@@ -72,9 +73,12 @@ impl DomainExpiryRuntime {
             singleflight,
             state_store,
             host_throttle,
-            max_staleness,
             max_staleness_chrono,
         }
+    }
+
+    pub fn max_staleness(&self) -> chrono::Duration {
+        self.max_staleness_chrono
     }
 }
 
@@ -92,15 +96,23 @@ pub async fn execute_domain_expiry_check(
 
     match probe {
         Ok(answer) => {
-            let _ = runtime
+            if let Err(e) = runtime
                 .state_store
                 .upsert_success(
+                    OrgId(org_id),
                     target_id,
                     &check.domain,
                     answer.expiration,
                     answer.registrar.as_deref(),
                 )
-                .await;
+                .await
+            {
+                // Silent swallow would freeze last_success_at while probes
+                // keep succeeding, eventually escalating future failures to
+                // Error instead of serving the (still-fresh) cached answer.
+                tracing::warn!(%target_id, error = %e, "domain_expiry: upsert_success failed");
+                STATE_WRITE_FAILED.increment(1);
+            }
             let verdict = classify(check, answer.expiration, answer.registrar.as_deref());
             emit_fresh(target_id, org_id, started_at, duration_ms, verdict)
         }
@@ -212,7 +224,7 @@ async fn fall_back(
     // hands back the current row. Decides staleness in app-space.
     let state = match runtime
         .state_store
-        .record_failure_returning(target_id, &err_msg)
+        .record_failure_returning(OrgId(org_id), target_id, &err_msg)
         .await
     {
         Ok(s) => s,
@@ -223,9 +235,15 @@ async fn fall_back(
     };
 
     if let Some(state) = state {
-        let age = Utc::now() - state.verified_at;
+        let age = Utc::now() - state.last_success_at;
         let age_secs = age.num_seconds().max(0) as u64;
         if age <= runtime.max_staleness_chrono {
+            tracing::debug!(
+                %target_id,
+                age_secs,
+                kind = err_kind,
+                "domain_expiry: serving stale last-good"
+            );
             counter!(names::DOMAIN_EXPIRY_STALE_SERVED, "kind" => err_kind).increment(1);
             let verdict = classify(check, state.expiry_at, state.registrar.as_deref());
             return emit_stale(
@@ -241,6 +259,11 @@ async fn fall_back(
     }
 
     counter!(names::DOMAIN_EXPIRY_STALE_SERVED, "kind" => "fresh_error").increment(1);
+    tracing::debug!(
+        %target_id,
+        kind = err_kind,
+        "domain_expiry: no usable last-good (missing or beyond staleness ceiling), emitting fresh Error"
+    );
     CheckResult::error_with_elapsed(target_id, org_id, started_at, duration_ms, err_msg)
 }
 
@@ -320,12 +343,20 @@ fn emit_stale(
     age_secs: u64,
     refresh_failure_kind: &str,
 ) -> CheckResult {
-    let annotation = format!(
-        "served_stale: last_verified_age_secs={age_secs}; refresh_failed={refresh_failure_kind}",
-    );
-    // Preserve the underlying classification's details too — operators want
-    // both "we're showing a stale answer" and "the stale answer says X".
-    let combined = format!("{annotation}; {}", verdict.details_json);
+    // On Up, the customer's domain is fine for the next N days regardless of
+    // where the answer came from — leave `error` empty so renderers that
+    // surface non-empty `error` as a warning don't mis-classify a healthy
+    // cached verdict. Operators still see the stale-served event via the
+    // `status_monitor_domain_expiry_stale_served_total` counter.
+    let error = match verdict.status {
+        CheckStatus::Up => None,
+        _ => {
+            let annotation = format!(
+                "{SERVED_STALE_PREFIX} last_verified_age_secs={age_secs}; refresh_failed={refresh_failure_kind}",
+            );
+            Some(format!("{annotation}; {}", verdict.details_json))
+        }
+    };
     CheckResult {
         target_id,
         org_id,
@@ -337,8 +368,8 @@ fn emit_stale(
         tls_ms: None,
         ttfb_ms: None,
         response_code: None,
-        response_size: Some(combined.len() as u32),
-        error: Some(combined),
+        response_size: error.as_ref().map(|e| e.len() as u32),
+        error,
     }
 }
 
@@ -358,30 +389,29 @@ mod tests {
         }
     }
 
-    fn seed_state(store: &InMemoryDomainExpiryStateStore, target: Uuid, days: i64) {
+    fn seed_state(store: &InMemoryDomainExpiryStateStore, org: OrgId, target: Uuid, days: i64) {
         let exp = Utc::now() + chrono::Duration::days(days);
-        futures::executor::block_on(store.upsert_success(target, "example.com", exp, Some("R")))
-            .unwrap();
+        futures::executor::block_on(store.upsert_success(
+            org,
+            target,
+            "example.com",
+            exp,
+            Some("R"),
+        ))
+        .unwrap();
     }
-
-    // The fresh + stale-within-window happy path is exercised end-to-end in
-    // `tests/domain_expiry_test.rs::domain_expiry_serves_last_good_on_rdap_failure`.
-    // Unit tests below cover branches the integration suite can't reach
-    // without backdating `verified_at` or driving the executor with no prior
-    // state.
 
     #[tokio::test]
     async fn beyond_staleness_emits_real_error() {
         let target = Uuid::new_v4();
-        let org = Uuid::new_v4();
+        let org = OrgId(Uuid::new_v4());
         let store: Arc<InMemoryDomainExpiryStateStore> =
             Arc::new(InMemoryDomainExpiryStateStore::new());
-        // Seed with a row, then manually backdate verified_at past the ceiling.
-        seed_state(&store, target, 90);
+        seed_state(&store, org, target, 90);
         {
             let mut g = store.inner_mut_for_test();
-            let s = g.get_mut(&target).unwrap();
-            s.verified_at = Utc::now() - chrono::Duration::days(10);
+            let s = g.get_mut(&(org, target)).unwrap();
+            s.last_success_at = Utc::now() - chrono::Duration::days(10);
         }
 
         let runtime = DomainExpiryRuntime::new(
@@ -395,7 +425,7 @@ mod tests {
         );
         let r = fall_back(
             target,
-            org,
+            org.0,
             &check("example.com"),
             &runtime,
             Utc::now(),

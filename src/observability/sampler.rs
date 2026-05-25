@@ -55,6 +55,9 @@ async fn run(
     let g_queue_depth = gauge!(names::RESULT_QUEUE_DEPTH);
     let g_pool_idle = gauge!(names::HTTP_POOL_IDLE);
     let g_pool_active = gauge!(names::HTTP_POOL_ACTIVE);
+    let g_singleflight_slots = gauge!(names::RDAP_SINGLEFLIGHT_SLOTS);
+
+    let singleflight = pool.domain_expiry_runtime().singleflight.clone();
 
     loop {
         tokio::select! {
@@ -70,6 +73,7 @@ async fn run(
                 g_queue_depth.set(depth as f64);
                 g_pool_idle.set(http_pool.idle() as f64);
                 g_pool_active.set(http_pool.active() as f64);
+                g_singleflight_slots.set(singleflight.len() as f64);
             }
         }
     }
