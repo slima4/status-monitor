@@ -100,8 +100,9 @@ async fn past_grace_cascades_and_enqueues_ch() {
     soft_delete_org(&pool, org.id, user).await.unwrap();
     backdate_delete(&pool, org.id, 40).await;
 
-    let stats = purge_tick(&pool, &ch, 30, &test_cache()).await.unwrap();
-    assert!(stats.cascaded >= 1, "expected at least one cascade");
+    // Parallel tests can grab this org via `LIMIT 10`, so assert on THIS
+    // org's outcome instead of tick-wide `cascaded`.
+    let _ = purge_tick(&pool, &ch, 30, &test_cache()).await.unwrap();
 
     // PG row gone via cascade.
     let (exists,): (bool,) =
@@ -557,9 +558,9 @@ async fn purge_resilient_to_kill_between_pg_cascade_and_ch_drain() {
 
     // Tick 1: cascade + drain both run. We then reset the queue row to pending
     // to emulate a SIGKILL between the PG commit and the CH ALTER. The PG side
-    // already committed and stays cascaded.
-    let stats = purge_tick(&pool, &ch, 30, &test_cache()).await.unwrap();
-    assert!(stats.cascaded >= 1, "first tick cascades");
+    // already committed and stays cascaded. Tick-wide `cascaded` is racy with
+    // parallel tests; assert on this org's row state below.
+    let _ = purge_tick(&pool, &ch, 30, &test_cache()).await.unwrap();
     let (org_exists,): (bool,) =
         sqlx::query_as("SELECT EXISTS (SELECT 1 FROM organizations WHERE id = $1)")
             .bind(org.id.0)
