@@ -24,7 +24,9 @@ use chrono::{DateTime, Duration, Utc};
 use serde::Deserialize;
 use uuid::Uuid;
 
-use crate::api::types::{DashboardMetrics, DashboardSparkBucket, FleetRibbonBucket};
+use crate::api::types::{
+    DashboardMetrics, DashboardSparkBucket, FleetRibbonBucket, PriorPeriodSummary,
+};
 use crate::app::AppState;
 use crate::domain::{IncidentSeverity, OrgId};
 use crate::storage::{ActiveIncident, TargetFilter, TimeRange};
@@ -137,7 +139,19 @@ pub struct KpiCardSpec {
     pub label: String,
     pub value: String,
     pub hint_html: String,
+    /// `None` when there is no prior data — template skips the line.
+    pub delta: Option<KpiDelta>,
     pub spark_tint: &'static str,
+}
+
+/// Renderable Δ-vs-prior chip: `<span class="{class}">{arrow} {body} vs
+/// prior</span>` — wrapper lives in the template so no `<span>` strings
+/// are allocated per render.
+#[derive(Clone)]
+pub struct KpiDelta {
+    pub class: &'static str,
+    pub arrow: &'static str,
+    pub body: String,
 }
 
 /// Health-rail counts. A disabled monitor is "paused" regardless of its
@@ -364,9 +378,10 @@ async fn build_snapshot(
         mut targets,
         rollup,
         spark_rows,
-        (checks_total, checks_up, incidents),
+        (checks_total, checks_up, avg_ms_current, incidents),
         active_raw,
         ribbon_rows,
+        prior,
     ) = tokio::try_join!(
         state.target_store.list(org, target_filter),
         state.results_store.dashboard_rollup(org, time_range),
@@ -378,6 +393,7 @@ async fn build_snapshot(
         state
             .results_store
             .fleet_ribbon(org, ribbon_from, to, RIBBON_BUCKET_SECONDS),
+        state.results_store.prior_period_summary(org, time_range),
     )?;
 
     let truncated = targets.len() > ROW_LIMIT;
@@ -389,8 +405,6 @@ async fn build_snapshot(
         rollup.into_iter().map(|m| (m.target_id, m)).collect();
     let spark_by_target = group_sparks(&spark_rows, spark_from);
 
-    let mut sample_total_ms: u64 = 0;
-    let mut sample_total_n: u64 = 0;
     let mut status_counts = StatusCounts::default();
     let mut type_acc: [u32; TYPE_CHIP_ORDER.len()] = [0; TYPE_CHIP_ORDER.len()];
     let mut spark_agg: [(f64, u32); SPARK_BUCKETS] = [(0.0, 0); SPARK_BUCKETS];
@@ -403,11 +417,6 @@ async fn build_snapshot(
                 .get(&t.id)
                 .cloned()
                 .unwrap_or_else(|| vec![None; SPARK_BUCKETS]);
-            if let Some(m) = metrics {
-                sample_total_ms =
-                    sample_total_ms.saturating_add((m.avg_ms as u64).saturating_mul(m.samples));
-                sample_total_n = sample_total_n.saturating_add(m.samples);
-            }
             for (i, slot) in spark.iter().enumerate().take(SPARK_BUCKETS) {
                 if let Some(v) = slot.filter(|v| v.is_finite()) {
                     spark_agg[i].0 += v as f64;
@@ -425,16 +434,21 @@ async fn build_snapshot(
 
     let (spark_path, spark_fill, _) = render_kpi_spark(&spark_agg);
     let checks_successful_label = format!("{} successful", format_count(checks_up));
+    let current = PriorPeriodSummary {
+        checks_total,
+        checks_up,
+        avg_ms: avg_ms_current,
+    };
     let kpis = DashboardKpis {
         uptime_pct_label: pct_label(checks_total, checks_up),
-        avg_response_ms_label: avg_response_label(sample_total_ms, sample_total_n),
+        avg_response_ms_label: avg_response_label(avg_ms_current, checks_total),
         checks_label: format_count(checks_total),
         checks_successful_label: checks_successful_label.clone(),
         incidents,
         spark_path,
         spark_fill,
     };
-    let kpi_cards = build_kpi_cards(&kpis, range, checks_successful_label);
+    let kpi_cards = build_kpi_cards(&kpis, range, checks_successful_label, &current, &prior);
 
     let now = Utc::now();
     let active_incidents: Vec<DashboardActiveIncident> = active_raw
@@ -500,6 +514,8 @@ fn build_kpi_cards(
     kpis: &DashboardKpis,
     range: &'static str,
     checks_successful_label: String,
+    current: &PriorPeriodSummary,
+    prior: &PriorPeriodSummary,
 ) -> Vec<KpiCardSpec> {
     let incidents_html = format!(
         r#"Incidents (24h): <span class="{cls}">{n}</span>"#,
@@ -515,21 +531,113 @@ fn build_kpi_cards(
             label: format!("Uptime · {range}"),
             value: kpis.uptime_pct_label.clone(),
             hint_html: incidents_html,
+            delta: uptime_delta(current, prior),
             spark_tint: "ok",
         },
         KpiCardSpec {
             label: format!("Avg response · {range}"),
             value: kpis.avg_response_ms_label.clone(),
             hint_html: "across all monitors".into(),
+            delta: avg_delta(current, prior),
             spark_tint: "ink",
         },
         KpiCardSpec {
             label: format!("Checks · {range}"),
             value: kpis.checks_label.clone(),
             hint_html: checks_successful_label,
+            delta: checks_delta(current, prior),
             spark_tint: "info",
         },
     ]
+}
+
+/// Polarity of a metric — whether a higher value is good, bad, or
+/// just informational. Drives the `metric-delta--{up,down,flat}` class
+/// (a green ↑ on uptime is the same class as a green ↓ on latency).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Polarity {
+    /// Bigger is better — uptime.
+    HigherIsBetter,
+    /// Smaller is better — response time.
+    LowerIsBetter,
+    /// Direction is informational only — checks count.
+    Neutral,
+}
+
+/// Standard chip for a non-zero Δ. `signed` carries the sign for the
+/// arrow; polarity decides which colour class wins.
+fn signed_delta(polarity: Polarity, signed: f64, body: String) -> KpiDelta {
+    let arrow = if signed > 0.0 { "↑" } else { "↓" };
+    let class = match polarity {
+        Polarity::HigherIsBetter if signed > 0.0 => "metric-delta--up",
+        Polarity::HigherIsBetter => "metric-delta--down",
+        Polarity::LowerIsBetter if signed < 0.0 => "metric-delta--up",
+        Polarity::LowerIsBetter => "metric-delta--down",
+        Polarity::Neutral => "metric-delta--flat",
+    };
+    KpiDelta { class, arrow, body }
+}
+
+fn flat_delta() -> KpiDelta {
+    KpiDelta {
+        class: "metric-delta--flat",
+        arrow: "±",
+        body: "unchanged".into(),
+    }
+}
+
+fn uptime_pct(s: &PriorPeriodSummary) -> Option<f64> {
+    if s.checks_total == 0 {
+        None
+    } else {
+        Some((s.checks_up as f64 / s.checks_total as f64) * 100.0)
+    }
+}
+
+fn uptime_delta(cur: &PriorPeriodSummary, prior: &PriorPeriodSummary) -> Option<KpiDelta> {
+    let (c, p) = (uptime_pct(cur)?, uptime_pct(prior)?);
+    // Round to display precision (2 dp) BEFORE the threshold check so
+    // the displayed value and the "unchanged" decision never disagree.
+    let diff = ((c - p) * 100.0).round() / 100.0;
+    if diff.abs() < 0.01 {
+        return Some(flat_delta());
+    }
+    Some(signed_delta(
+        Polarity::HigherIsBetter,
+        diff,
+        format!("{diff:+.2} pp"),
+    ))
+}
+
+fn avg_delta(cur: &PriorPeriodSummary, prior: &PriorPeriodSummary) -> Option<KpiDelta> {
+    if cur.checks_total == 0 || prior.checks_total == 0 {
+        return None;
+    }
+    let diff = cur.avg_ms as i64 - prior.avg_ms as i64;
+    if diff == 0 {
+        return Some(flat_delta());
+    }
+    Some(signed_delta(
+        Polarity::LowerIsBetter,
+        diff as f64,
+        format!("{diff:+} ms"),
+    ))
+}
+
+fn checks_delta(cur: &PriorPeriodSummary, prior: &PriorPeriodSummary) -> Option<KpiDelta> {
+    if cur.checks_total == 0 || prior.checks_total == 0 {
+        return None;
+    }
+    let diff = cur.checks_total as i64 - prior.checks_total as i64;
+    if diff == 0 {
+        return Some(flat_delta());
+    }
+    let body = if diff >= 0 {
+        format!("+{}", format_count(diff as u64))
+    } else {
+        format!("-{}", format_count(diff.unsigned_abs()))
+    };
+    Some(signed_delta(Polarity::Neutral, diff as f64, body))
 }
 
 /// Map CH ribbon rows → fixed-length 48-seg view. Buckets the storage
@@ -625,18 +733,21 @@ fn range_span(key: &'static str) -> Duration {
 }
 
 fn pct_label(total: u64, up: u64) -> String {
-    if total == 0 {
-        return "—".into();
+    match uptime_pct(&PriorPeriodSummary {
+        checks_total: total,
+        checks_up: up,
+        avg_ms: 0,
+    }) {
+        Some(p) => format!("{p:.2}%"),
+        None => "—".into(),
     }
-    format!("{:.2}%", (up as f64 / total as f64) * 100.0)
 }
 
-fn avg_response_label(sum_ms: u64, n: u64) -> String {
-    if n == 0 {
+fn avg_response_label(avg_ms: u32, samples: u64) -> String {
+    if samples == 0 {
         return "—".into();
     }
-    let avg = sum_ms as f64 / n as f64;
-    format!("{} ms", avg.round() as u64)
+    format!("{avg_ms} ms")
 }
 
 /// Compact count: "17.3k" / "1.2M" / "42". Matches the V3 KPI tile so
@@ -886,7 +997,14 @@ mod tests {
     }
 
     fn sample_kpi_cards() -> Vec<KpiCardSpec> {
-        build_kpi_cards(&sample_kpis(), "24h", "17.0k successful".into())
+        let zero = PriorPeriodSummary::default();
+        build_kpi_cards(
+            &sample_kpis(),
+            "24h",
+            "17.0k successful".into(),
+            &zero,
+            &zero,
+        )
     }
 
     fn sample_row(name: &str, status: &'static str) -> DashboardRow {
@@ -1012,9 +1130,11 @@ mod tests {
             active_tab: "dashboard",
             range: "24h",
             range_options: build_range_options("24h", &RANGE_KEYS),
-            kpi_cards: Arc::from(
-                build_kpi_cards(&kpis, "24h", "0 successful".into()).into_boxed_slice(),
-            ),
+            kpi_cards: Arc::from({
+                let zero = PriorPeriodSummary::default();
+                build_kpi_cards(&kpis, "24h", "0 successful".into(), &zero, &zero)
+                    .into_boxed_slice()
+            }),
             kpis,
             rows: Arc::from(Vec::<DashboardRow>::new().into_boxed_slice()),
             matches: 0,
@@ -1116,6 +1236,86 @@ mod tests {
         assert_eq!(counts[0].count, 4);
         assert_eq!(counts[1].label, "HTTP");
         assert_eq!(counts[2].label, "DNS");
+    }
+
+    fn prior(total: u64, up: u64, avg_ms: u32) -> PriorPeriodSummary {
+        PriorPeriodSummary {
+            checks_total: total,
+            checks_up: up,
+            avg_ms,
+        }
+    }
+
+    #[test]
+    fn uptime_delta_hides_when_either_side_has_no_data() {
+        assert!(uptime_delta(&prior(100, 100, 0), &prior(0, 0, 0)).is_none());
+        assert!(uptime_delta(&prior(0, 0, 0), &prior(100, 100, 0)).is_none());
+    }
+
+    #[test]
+    fn uptime_delta_higher_is_up_class() {
+        // 99.5% vs 98.0% → +1.50 pp better → metric-delta--up.
+        let d = uptime_delta(&prior(1000, 995, 0), &prior(1000, 980, 0)).expect("delta");
+        assert_eq!(d.class, "metric-delta--up");
+        assert_eq!(d.arrow, "↑");
+        assert_eq!(d.body, "+1.50 pp");
+    }
+
+    #[test]
+    fn uptime_delta_lower_is_down_class() {
+        let d = uptime_delta(&prior(1000, 950, 0), &prior(1000, 999, 0)).expect("delta");
+        assert_eq!(d.class, "metric-delta--down");
+        assert_eq!(d.arrow, "↓");
+        assert_eq!(d.body, "-4.90 pp");
+    }
+
+    #[test]
+    fn uptime_delta_flat_within_tolerance() {
+        // 99.9994% vs 99.9990% → diff ≈ 0.0004 pp → quantizes to 0 → flat.
+        let d = uptime_delta(&prior(1_000_000, 999_994, 0), &prior(1_000_000, 999_990, 0))
+            .expect("delta");
+        assert_eq!(d.class, "metric-delta--flat");
+        assert_eq!(d.arrow, "±");
+        assert_eq!(d.body, "unchanged");
+    }
+
+    #[test]
+    fn uptime_delta_quantize_threshold_matches_display() {
+        // 0.005 pp rounds *up* to 0.01 → should render the non-flat chip
+        // and the displayed value must equal the rounded threshold.
+        let d =
+            uptime_delta(&prior(100_000, 99_995, 0), &prior(100_000, 99_990, 0)).expect("delta");
+        assert_eq!(d.class, "metric-delta--up");
+        assert_eq!(d.body, "+0.01 pp");
+    }
+
+    #[test]
+    fn avg_delta_faster_is_up_class() {
+        // Avg dropped (better) — green.
+        let d = avg_delta(&prior(100, 100, 120), &prior(100, 100, 180)).expect("delta");
+        assert_eq!(d.class, "metric-delta--up");
+        assert_eq!(d.body, "-60 ms");
+    }
+
+    #[test]
+    fn avg_delta_slower_is_down_class() {
+        let d = avg_delta(&prior(100, 100, 200), &prior(100, 100, 150)).expect("delta");
+        assert_eq!(d.class, "metric-delta--down");
+        assert_eq!(d.body, "+50 ms");
+    }
+
+    #[test]
+    fn checks_delta_neutral_direction() {
+        let d = checks_delta(&prior(2_500, 2_500, 0), &prior(2_000, 2_000, 0)).expect("delta");
+        assert_eq!(d.class, "metric-delta--flat");
+        assert_eq!(d.arrow, "↑");
+        assert!(d.body.contains("+500"), "{}", d.body);
+    }
+
+    #[test]
+    fn checks_delta_hides_when_either_side_has_no_data() {
+        assert!(checks_delta(&prior(100, 100, 0), &prior(0, 0, 0)).is_none());
+        assert!(checks_delta(&prior(0, 0, 0), &prior(100, 100, 0)).is_none());
     }
 
     #[test]

@@ -142,6 +142,17 @@ pub struct DashboardSparkBucket {
     pub avg_ms: f32,
 }
 
+/// Aggregate health for the period immediately before the selected range
+/// — drives the Δ-vs-prior hints on each KPI card. Same shape as the
+/// "current" totals so the view layer subtracts cleanly. `avg_ms = 0`
+/// when there were no samples.
+#[derive(Debug, Clone, Default, Serialize, ToSchema)]
+pub struct PriorPeriodSummary {
+    pub checks_total: u64,
+    pub checks_up: u64,
+    pub avg_ms: u32,
+}
+
 /// One slice of the fleet 24h uptime ribbon. Aggregates every monitor in
 /// the org into a single bucket so the dashboard renders 48 × 30-minute
 /// cells from a single matview merge — cost stays O(buckets), not O(orgs

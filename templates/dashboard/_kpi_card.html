@@ -13,6 +13,11 @@
       {% endif %}
     </svg>
   </div>
+  {% if let Some(delta) = card.delta %}
+  <p class="dashboard-kpi-card__delta">
+    <span class="{{ delta.class }}">{{ delta.arrow }} {{ delta.body }} vs prior</span>
+  </p>
+  {% endif %}
   <p class="dashboard-kpi-card__hint">{{ card.hint_html|safe }}</p>
 </article>
 {% endfor %}

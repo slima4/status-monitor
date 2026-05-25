@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::api::types::{
-    DashboardMetrics, DashboardSparkBucket, FleetRibbonBucket, StatusBreakdown,
+    DashboardMetrics, DashboardSparkBucket, FleetRibbonBucket, PriorPeriodSummary, StatusBreakdown,
 };
 use crate::config::ClickhouseConfig;
 use crate::domain::{
@@ -575,16 +575,18 @@ impl ResultsStore for ClickhouseResultsStore {
         Ok(out)
     }
 
-    async fn last_n_summary(&self, org: OrgId, range: TimeRange) -> Result<(u64, u64, u64)> {
+    async fn last_n_summary(&self, org: OrgId, range: TimeRange) -> Result<(u64, u64, u32, u64)> {
         #[derive(Row, Deserialize)]
         struct Counts {
             total: u64,
             up: u64,
+            avg_ms: f64,
         }
         let counts: Counts = self
             .client
             .query(&format!(
-                "SELECT count() AS total, countIf(status = 'up') AS up \
+                "SELECT count() AS total, countIf(status = 'up') AS up, \
+                        avg(duration_ms) AS avg_ms \
                  FROM {TABLE} \
                  WHERE org_id = ? \
                  AND timestamp >= fromUnixTimestamp64Milli(?) \
@@ -634,7 +636,12 @@ impl ResultsStore for ClickhouseResultsStore {
         if let Some(t) = current_target {
             incidents += coalesce_from_incident_rows(t, group).len() as u64;
         }
-        Ok((counts.total, counts.up, incidents))
+        let avg_ms = if counts.avg_ms.is_finite() {
+            counts.avg_ms.round().clamp(0.0, u32::MAX as f64) as u32
+        } else {
+            0
+        };
+        Ok((counts.total, counts.up, avg_ms, incidents))
     }
 
     async fn uptime(&self, org: OrgId, target_id: Uuid, range: TimeRange) -> Result<UptimeStats> {
@@ -852,6 +859,60 @@ impl ResultsStore for ClickhouseResultsStore {
                 up: r.up,
             })
             .collect())
+    }
+
+    async fn prior_period_summary(
+        &self,
+        org: OrgId,
+        range: TimeRange,
+    ) -> Result<PriorPeriodSummary> {
+        // Reads raw `check_results` (not the matview) so the totals come
+        // from the same source as `last_n_summary` — the dashboard
+        // compares current (from `last_n_summary`) against prior here,
+        // and a source mismatch would produce phantom deltas during
+        // ingest lag.
+        #[derive(Row, Deserialize)]
+        struct PriorRow {
+            samples: u64,
+            up: u64,
+            avg_ms: f64,
+        }
+        let span_ms = (range.to - range.from).num_milliseconds().max(0);
+        let prior_to_ms = range.from.timestamp_millis();
+        let prior_from_ms = prior_to_ms.saturating_sub(span_ms);
+        let row: Option<PriorRow> = self
+            .client
+            .query(&format!(
+                "SELECT \
+                   count() AS samples, \
+                   countIf(status = 'up') AS up, \
+                   avg(duration_ms) AS avg_ms \
+                 FROM {TABLE} \
+                 WHERE org_id = ? \
+                 AND timestamp >= fromUnixTimestamp64Milli(?) \
+                 AND timestamp < fromUnixTimestamp64Milli(?)"
+            ))
+            .bind(org.0)
+            .bind(prior_from_ms)
+            .bind(prior_to_ms)
+            .fetch_optional::<PriorRow>()
+            .await
+            .context("clickhouse prior_period_summary")?;
+        let r = row.unwrap_or(PriorRow {
+            samples: 0,
+            up: 0,
+            avg_ms: 0.0,
+        });
+        let avg_ms = if r.avg_ms.is_finite() {
+            r.avg_ms.round().clamp(0.0, u32::MAX as f64) as u32
+        } else {
+            0
+        };
+        Ok(PriorPeriodSummary {
+            checks_total: r.samples,
+            checks_up: r.up,
+            avg_ms,
+        })
     }
 }
 

@@ -41,7 +41,7 @@ pub async fn dashboard_summary(
         to: now,
     };
 
-    let (targets, current_status, (checks_total, checks_up, incidents)) = tokio::try_join!(
+    let (targets, current_status, (checks_total, checks_up, _avg_ms, incidents)) = tokio::try_join!(
         state.target_store.summary(org_id),
         state.results_store.current_status_breakdown(org_id, range),
         state.results_store.last_n_summary(org_id, range),

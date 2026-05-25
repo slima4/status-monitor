@@ -3,8 +3,8 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use crate::api::types::{
-    DashboardMetrics, DashboardSparkBucket, FleetRibbonBucket, StatusBreakdown, TagCount,
-    TargetsSummary,
+    DashboardMetrics, DashboardSparkBucket, FleetRibbonBucket, PriorPeriodSummary, StatusBreakdown,
+    TagCount, TargetsSummary,
 };
 use crate::domain::{CheckResult, CheckStatus, Incident, NewTarget, OrgId, Target, TargetUpdate};
 use crate::error::Result;
@@ -170,9 +170,13 @@ pub trait ResultsStore: Send + Sync {
         org: OrgId,
         range: TimeRange,
     ) -> Result<StatusBreakdown>;
-    /// Aggregate uptime and incident count across all targets in `range`.
-    /// Returns `(checks_total, checks_up, incident_count)`.
-    async fn last_n_summary(&self, org: OrgId, range: TimeRange) -> Result<(u64, u64, u64)>;
+    /// Aggregate uptime, response, and incident count across all targets
+    /// in `range`. Returns `(checks_total, checks_up, avg_ms,
+    /// incident_count)`. `avg_ms` is the true sample-weighted mean —
+    /// must come from the same source as `checks_total`/`checks_up` so
+    /// the dashboard's Δ-vs-prior comparison doesn't mix raw and
+    /// per-target-rounded numbers.
+    async fn last_n_summary(&self, org: OrgId, range: TimeRange) -> Result<(u64, u64, u32, u64)>;
     /// Per-monitor rollup for the operator dashboard table. One row per
     /// target with samples/up/p50/p95/last_status in `range`. Targets
     /// with no samples are omitted; the caller joins the result with the
@@ -201,4 +205,16 @@ pub trait ResultsStore: Send + Sync {
         to: chrono::DateTime<Utc>,
         bucket_seconds: u32,
     ) -> Result<Vec<FleetRibbonBucket>>;
+    /// Fleet totals for the period immediately preceding `range` (same
+    /// span, ending at `range.from`). Drives the Δ-vs-prior hints on
+    /// each KPI card. Implementations MUST read from the same source as
+    /// `last_n_summary` so the dashboard never compares matview-derived
+    /// totals against raw totals (ingest lag would produce phantom
+    /// deltas). Returns zeros when there is no prior data — the view
+    /// layer hides the hint in that case.
+    async fn prior_period_summary(
+        &self,
+        org: OrgId,
+        range: TimeRange,
+    ) -> Result<PriorPeriodSummary>;
 }

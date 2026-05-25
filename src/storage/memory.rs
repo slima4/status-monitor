@@ -4,8 +4,8 @@ use parking_lot::Mutex;
 use uuid::Uuid;
 
 use crate::api::types::{
-    DashboardMetrics, DashboardSparkBucket, FleetRibbonBucket, StatusBreakdown, TagCount,
-    TargetsSummary,
+    DashboardMetrics, DashboardSparkBucket, FleetRibbonBucket, PriorPeriodSummary, StatusBreakdown,
+    TagCount, TargetsSummary,
 };
 use crate::domain::{
     CheckResult, CheckStatus, Incident, NewTarget, OrgId, Target, TargetUpdate, coalesce_incidents,
@@ -216,6 +216,40 @@ impl ResultsStore for InMemorySink {
             .collect())
     }
 
+    async fn prior_period_summary(
+        &self,
+        _org: OrgId,
+        range: TimeRange,
+    ) -> Result<PriorPeriodSummary> {
+        let guard = self.results.lock();
+        let span = range.to - range.from;
+        let prior_to = range.from;
+        let prior_from = prior_to - span;
+        let mut total = 0u64;
+        let mut up = 0u64;
+        let mut sum_ms: u64 = 0;
+        for r in guard.iter() {
+            if r.timestamp < prior_from || r.timestamp >= prior_to {
+                continue;
+            }
+            total += 1;
+            sum_ms = sum_ms.saturating_add(r.duration_ms as u64);
+            if r.status == CheckStatus::Up {
+                up += 1;
+            }
+        }
+        let avg_ms = if total == 0 {
+            0
+        } else {
+            (sum_ms / total).min(u32::MAX as u64) as u32
+        };
+        Ok(PriorPeriodSummary {
+            checks_total: total,
+            checks_up: up,
+            avg_ms,
+        })
+    }
+
     async fn fleet_ribbon(
         &self,
         _org: OrgId,
@@ -248,10 +282,11 @@ impl ResultsStore for InMemorySink {
             .collect())
     }
 
-    async fn last_n_summary(&self, _org: OrgId, range: TimeRange) -> Result<(u64, u64, u64)> {
+    async fn last_n_summary(&self, _org: OrgId, range: TimeRange) -> Result<(u64, u64, u32, u64)> {
         let guard = self.results.lock();
         let mut total = 0u64;
         let mut up = 0u64;
+        let mut sum_ms: u64 = 0;
         let mut by_target: std::collections::HashMap<Uuid, Vec<&CheckResult>> =
             std::collections::HashMap::new();
         for r in guard.iter() {
@@ -259,11 +294,17 @@ impl ResultsStore for InMemorySink {
                 continue;
             }
             total += 1;
+            sum_ms = sum_ms.saturating_add(r.duration_ms as u64);
             if r.status == CheckStatus::Up {
                 up += 1;
             }
             by_target.entry(r.target_id).or_default().push(r);
         }
+        let avg_ms = if total == 0 {
+            0
+        } else {
+            (sum_ms / total).min(u32::MAX as u64) as u32
+        };
         let mut incidents = 0u64;
         for results in by_target.values_mut() {
             results.sort_by_key(|r| r.timestamp);
@@ -278,7 +319,7 @@ impl ResultsStore for InMemorySink {
                 }
             }
         }
-        Ok((total, up, incidents))
+        Ok((total, up, avg_ms, incidents))
     }
 }
 
