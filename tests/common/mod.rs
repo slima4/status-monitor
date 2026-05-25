@@ -645,8 +645,8 @@ fn build_clients_with(dns_cfg: DnsConfig) -> status_monitor::error::Result<HttpC
         default_timeout_ms: 5_000,
         connect_timeout_ms: 2_000,
         default_check_interval_secs: 60,
-        per_host_max_inflight: usize::MAX,
-        rdap_max_inflight: usize::MAX,
+        per_host_max_inflight: tokio::sync::Semaphore::MAX_PERMITS,
+        rdap_max_inflight: tokio::sync::Semaphore::MAX_PERMITS,
     };
     let security_cfg = SecurityConfig {
         allow_private_targets: true,
