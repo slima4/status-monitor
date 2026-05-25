@@ -216,27 +216,31 @@ async fn cascade_predicate_blocks_post_select_recovery_race() {
         .execute(&mut *recovery_tx)
         .await
         .unwrap();
+    // Capture recovery_tx's backend PID so the poll below can scope to "who
+    // is blocked *by us*", filtering out unrelated DELETEs that parallel
+    // ignored-purge tests run on the same CI database.
+    let recovery_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+        .fetch_one(&mut *recovery_tx)
+        .await
+        .unwrap();
 
     let pool_clone = pool.clone();
     let cache = test_cache();
     let purge_handle =
         tokio::spawn(async move { purge_tick(&pool_clone, &ch, 30, &cache).await.unwrap() });
 
-    // Poll pg_stat_activity for the purge worker's DELETE blocked on the row
-    // lock recovery_tx holds. Deterministic signal: when wait_event_type is
-    // 'Lock' for a DELETE on this exact org id, we know purge has reached the
-    // cascade DELETE and is suspended. Cap at 5s so a hung worker fails the
-    // test loudly instead of deadlocking.
+    // Wait for a DELETE FROM organizations that is blocked specifically by
+    // recovery_tx's backend — `pg_blocking_pids(pid)` returns the array of
+    // pids holding locks the waiter needs. Cap at 5s so a hung worker fails
+    // loudly instead of deadlocking.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     loop {
-        // Parameter values don't appear in pg_stat_activity.query (only the
-        // `$1`/`$2` placeholders), so match on the statement shape — under
-        // --include-ignored sequencing, no other purge runs concurrently.
         let (blocked,): (i64,) = sqlx::query_as(
             r#"SELECT count(*)::bigint FROM pg_stat_activity
-                WHERE wait_event_type = 'Lock'
+                WHERE $1 = ANY(pg_blocking_pids(pid))
                   AND query ILIKE 'DELETE FROM organizations%'"#,
         )
+        .bind(recovery_pid)
         .fetch_one(&pool)
         .await
         .unwrap();
