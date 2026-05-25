@@ -142,7 +142,7 @@ Opens a TCP connection, performs a TLS handshake against the host (accepting any
 - `days_remaining < warn_days` → `degraded`
 - otherwise → `up`
 
-`error` carries a JSON document with `days_remaining`, `not_after`, `subject_common_name`, `issuer_common_name`. A handshake failure (plain-TCP host, network error) returns `error` status with the underlying message. `warn_days` must be strictly greater than `critical_days`. Recommended `interval >= 3600` — every probe opens a fresh TLS connection.
+`error` carries a JSON document with `days_remaining`, `not_after`, `subject_common_name`, `issuer_common_name`. A handshake failure (plain-TCP host, network error) returns `error` status with the underlying message. `warn_days` must be strictly greater than `critical_days`. Floor is `interval >= 3600` (enforced); default for a new monitor is `86400` (daily).
 
 ### Domain expiration
 
@@ -158,7 +158,7 @@ Opens a TCP connection, performs a TLS handshake against the host (accepting any
 
 Queries the [IANA RDAP bootstrap registry](https://data.iana.org/rdap/dns.json) to find the authoritative RDAP server for the domain's TLD, then fetches `/domain/<domain>` and reads the `events[?eventAction == "expiration"]` entry. Status mapping is the same as TLS cert: `< critical_days` → `down`, `< warn_days` → `degraded`, else `up`. Non-`up` results carry a JSON `error` body with `domain`, `days_remaining`, `expiration_date`, and (when present) `registrar`.
 
-The bootstrap registry is fetched lazily on the first lookup and cached for the lifetime of the process. The SSRF guard does not apply — the check's network destination is an IANA-published RDAP server, not the user-supplied domain. Recommended `interval >= 21600` (6 h); RDAP servers rate-limit clients. `warn_days` must be strictly greater than `critical_days`.
+The bootstrap registry is fetched lazily on the first lookup and cached for the lifetime of the process. The SSRF guard does not apply — the check's network destination is an IANA-published RDAP server, not the user-supplied domain. Floor is `interval >= 3600` (enforced); default for a new monitor is `86400` (daily). RDAP servers rate-limit clients — keep this near daily, not hourly. `warn_days` must be strictly greater than `critical_days`.
 
 ## Target payload
 
@@ -166,9 +166,11 @@ The bootstrap registry is fetched lazily on the first lookup and cached for the 
 {
   "name": "internal-api",
   "check": { /* check spec */ },
-  "interval": 60,             // seconds between ticks; floor is the plan's
-                              // min_check_interval_secs (free = 60); 10 is the
-                              // absolute DB CHECK hard floor
+  "interval": 60,             // seconds between ticks; effective floor is
+                              // max(plan.min_check_interval_secs, kind_min).
+                              // kind_min is 10 for http/tcp/dns and 3600 for
+                              // tls_cert/domain_expiry. Plan-free min = 60.
+                              // 10 is the absolute DB CHECK hard floor.
   "enabled": true,
   "tags": ["prod", "tier1"],
   "alerts": { /* optional, see below */ }
@@ -290,7 +292,7 @@ Common codes: `INVALID_URL_SCHEME`, `INVALID_URL_FORMAT`, `SSRF_BLOCKED`, `INVAL
 | Code | HTTP | Meaning |
 |---|---|---|
 | `QUOTA_EXCEEDED` | 422 | A plan quota would be exceeded. `details` carries `quota` (e.g. `max_targets`, `max_members`, `max_public_components`), `current`, `limit`, `plan`. |
-| `MIN_CHECK_INTERVAL` | 422 | Requested check interval is below the plan minimum (enforced on create **and** PATCH, single and bulk). |
+| `MIN_CHECK_INTERVAL` | 422 | Requested check interval is below the effective floor (`max(plan.min_check_interval_secs, kind_min)`), where `kind_min` is 3600 for `tls_cert` / `domain_expiry` and 10 for `http` / `tcp` / `dns`. Enforced on create, bulk, **and** PATCH. |
 | `INVITATIONS_LIMIT` | 409 | The org is at its pending-invitation cap. |
 | `RATE_LIMITED` | 429 | A per-minute rate budget was exceeded. `Retry-After` (seconds) is set; `details.scope` names the tier, e.g. `per_org_api_writes`. |
 | `ABUSE_BLOCKED` | 400 | Target blocked by abuse protection. `details.reason` explains. |

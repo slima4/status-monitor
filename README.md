@@ -12,14 +12,15 @@ Built on Rust 1.95 (edition 2024), Tokio, Axum, hyper-util (custom phase-timing 
 
 ## Check types
 
-| Type | Purpose |
-|---|---|
-| `http` | request a URL, match status / body / latency |
-| `tcp` | open a TCP socket within a timeout |
-| `tls_cert` | open TLS, parse leaf cert, alert before `notAfter` |
-| `domain_expiry` | query RDAP, alert before the domain's `expiration` event |
+| Type | Purpose | Default interval | Floor |
+|---|---|---|---|
+| `http` | request a URL, match status / body / latency | 60 s | `max(plan_min, 10 s)` |
+| `tcp` | open a TCP socket within a timeout | 60 s | `max(plan_min, 10 s)` |
+| `dns` | resolve a record, optionally match a value | 60 s | `max(plan_min, 10 s)` |
+| `tls_cert` | open TLS, parse leaf cert, alert before `notAfter` | 86 400 s (daily) | `max(plan_min, 3600 s)` |
+| `domain_expiry` | query RDAP, alert before the domain's `expiration` event | 86 400 s (daily) | `max(plan_min, 3600 s)` |
 
-`tls_cert` and `domain_expiry` use `warn_days` / `critical_days` thresholds, default to running daily, and surface `days_remaining` plus registrar / cert subject in the result payload. See [docs/api.md](docs/api.md) for the full payload shapes.
+`tls_cert` and `domain_expiry` use `warn_days` / `critical_days` thresholds and surface `days_remaining` plus registrar / cert subject in the result payload. Their floor is 1 hour regardless of plan — these probes track values that change on a scale of days, not minutes. See [docs/api.md](docs/api.md) for the full payload shapes.
 
 ## Public status page
 
@@ -71,7 +72,7 @@ curl -X POST http://127.0.0.1:8080/api/v1/targets \
       "headers": {},
       "verify_tls": true
     },
-    "interval": 30,
+    "interval": 60,
     "enabled": true,
     "tags": []
   }'

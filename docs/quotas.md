@@ -14,7 +14,7 @@ enough to keep abuse on a small VM cheap.
 | Quota | Free | Meaning |
 |---|---|---|
 | `max_targets` | 10 | Monitored targets in the org |
-| `min_check_interval_secs` | 60 | Floor on a target's check interval |
+| `min_check_interval_secs` | 60 | Plan-side floor on a target's check interval. The effective floor is `max(this, kind_min)` — `kind_min` is 3600 for `tls_cert` / `domain_expiry` and 10 for `http` / `tcp` / `dns`. |
 | `retention_days` | 30 | How long check results are kept |
 | `max_members` | 5 | Active members in the org |
 | `max_pending_invitations` | 10 | Outstanding (unaccepted) invitations |
@@ -74,7 +74,10 @@ enforced identically (atomic, never overshoot).
 
 A sub-minimum check interval is its own 422, `MIN_CHECK_INTERVAL`, enforced
 on create and PATCH, single and bulk — a target created at the floor cannot
-be edited below it.
+be edited below it. The floor is `max(plan.min_check_interval_secs, kind_min)`:
+the per-kind value (3600 for `tls_cert` / `domain_expiry`, 10 for the rest)
+applies regardless of plan tier — polling an expiry probe faster than once an
+hour yields no signal.
 
 ## Rate limiting
 
