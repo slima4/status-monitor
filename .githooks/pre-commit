@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # Cheap checks that mirror the `lint` job in .github/workflows/ci.yml.
-# Clippy and the test suite are intentionally left to CI / `just ci` —
-# both are too slow to run on every commit.
+# The test suite stays in CI / `just ci` — too slow for every commit.
 #
 # Install: `just install-hooks` (or `git config core.hooksPath .githooks`).
 # Bypass for an emergency commit: `git commit --no-verify`.
@@ -22,6 +21,7 @@ run() {
 }
 
 run "cargo fmt --check" cargo fmt --all -- --check
+run "cargo clippy" cargo clippy --lib --tests --no-deps -- -D warnings
 
 if command -v ast-grep >/dev/null 2>&1; then
   run "tenant-isolation scan" scripts/check_tenant_isolation.sh

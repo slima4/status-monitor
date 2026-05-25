@@ -829,7 +829,7 @@ impl ResultsStore for ClickhouseResultsStore {
         let to_s = u32::try_from(to.timestamp().max(0)).unwrap_or(u32::MAX);
         // Source matview is per-minute; round up to a multiple of 60s
         // so every output bucket spans an integer number of source rows.
-        let bucket = ((bucket_seconds.max(60) + 59) / 60) * 60;
+        let bucket = bucket_seconds.max(60).div_ceil(60) * 60;
         // INTERVAL is a SQL keyword position — clickhouse-rs `bind()`
         // produces a bare numeric literal, which is fine, but inlining
         // here keeps `bind()` strictly to value-position arguments.

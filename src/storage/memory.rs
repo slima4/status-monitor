@@ -165,12 +165,12 @@ impl ResultsStore for InMemorySink {
             durations.sort_unstable();
             let p50_ms = percentile(&durations, 0.50);
             let p95_ms = percentile(&durations, 0.95);
-            let avg_ms = if samples == 0 {
-                0
-            } else {
-                (durations.iter().map(|d| *d as u64).sum::<u64>() / samples).min(u32::MAX as u64)
-                    as u32
-            };
+            let avg_ms = durations
+                .iter()
+                .map(|d| *d as u64)
+                .sum::<u64>()
+                .checked_div(samples)
+                .map_or(0, |v| v.min(u32::MAX as u64) as u32);
             let last_status = rows
                 .last()
                 .map(|r| r.status.as_str().to_string())
@@ -243,11 +243,9 @@ impl ResultsStore for InMemorySink {
                 up += 1;
             }
         }
-        let avg_ms = if total == 0 {
-            0
-        } else {
-            (sum_ms / total).min(u32::MAX as u64) as u32
-        };
+        let avg_ms = sum_ms
+            .checked_div(total)
+            .map_or(0, |v| v.min(u32::MAX as u64) as u32);
         Ok(PriorPeriodSummary {
             checks_total: total,
             checks_up: up,
@@ -305,11 +303,9 @@ impl ResultsStore for InMemorySink {
             }
             by_target.entry(r.target_id).or_default().push(r);
         }
-        let avg_ms = if total == 0 {
-            0
-        } else {
-            (sum_ms / total).min(u32::MAX as u64) as u32
-        };
+        let avg_ms = sum_ms
+            .checked_div(total)
+            .map_or(0, |v| v.min(u32::MAX as u64) as u32);
         let mut incidents = 0u64;
         for results in by_target.values_mut() {
             results.sort_by_key(|r| r.timestamp);
@@ -442,13 +438,13 @@ impl TargetStore for InMemoryTargetStore {
             .collect();
         match filter.sort {
             crate::storage::traits::TargetSort::RecentActivity => {
-                collected.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+                collected.sort_by_key(|t| std::cmp::Reverse(t.updated_at));
             }
             crate::storage::traits::TargetSort::Name => {
                 collected.sort_by(|a, b| a.name.cmp(&b.name));
             }
             crate::storage::traits::TargetSort::Created => {
-                collected.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+                collected.sort_by_key(|t| t.created_at);
             }
         }
         Ok(collected

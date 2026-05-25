@@ -53,7 +53,7 @@ const RIBBON_HOURS: i64 = 24;
 const RIBBON_BUCKETS: usize = 48;
 const RIBBON_BUCKET_SECONDS: u32 = (RIBBON_HOURS as u32 * 3600) / RIBBON_BUCKETS as u32;
 const _: () = assert!(
-    (RIBBON_HOURS as u32 * 3600) % RIBBON_BUCKETS as u32 == 0,
+    (RIBBON_HOURS as u32 * 3600).is_multiple_of(RIBBON_BUCKETS as u32),
     "RIBBON_BUCKETS must divide the 24h window evenly so every second maps to a slot",
 );
 /// Cap rows on a single page render. Beyond this an org would benefit

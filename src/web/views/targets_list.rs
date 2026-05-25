@@ -585,7 +585,7 @@ mod tests {
 
     #[test]
     fn worst_of_picks_highest_severity() {
-        let g = vec![row("a", None, "up", true), row("b", None, "down", true)];
+        let g = [row("a", None, "up", true), row("b", None, "down", true)];
         let s = g.iter().map(|r| r.last_status).fold("up", worst_of);
         assert_eq!(s, "down");
     }
