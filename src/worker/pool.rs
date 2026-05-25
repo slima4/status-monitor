@@ -72,10 +72,11 @@ pub fn host_for_spec(spec: &CheckSpec) -> String {
             Some(addr) => format!("dns:{addr}"),
             None => format!("dns:{}", d.domain.to_ascii_lowercase()),
         },
-        // host_port_raw covers HTTP/TCP/TLS; an HTTP URL with no host
-        // hits the fallback once (rare — invalid spec slipped past
-        // validation).
-        _ => "unknown".to_owned(),
+        // host_port_raw already covered these; reaching here means an
+        // HTTP URL with no host_str. Listed explicitly so a future
+        // CheckSpec variant is forced through the match and can't
+        // silently collapse onto this catch-all.
+        CheckSpec::Http(_) | CheckSpec::Tcp(_) | CheckSpec::TlsCert(_) => "unknown".to_owned(),
     }
 }
 

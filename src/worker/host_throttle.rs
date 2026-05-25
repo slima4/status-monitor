@@ -45,6 +45,7 @@ impl HostThrottle {
     /// hot path only ever clones the Arc.
     pub fn key_for(org: OrgId, spec: &CheckSpec) -> Option<HostKey> {
         let (host, port) = host_port_raw(spec)?;
+        let port = port?;
         Some((org, Arc::from(canonical_host(host)), port))
     }
 
@@ -166,13 +167,15 @@ pub fn canonical_host(host: &str) -> String {
 }
 
 /// Network endpoint of a CheckSpec for variants that target one host+port.
-/// `None` for DNS (resolver is the resource) and DomainExpiry (per-TLD
-/// RDAP slot is the resource). Shared by `key_for` and `host_for_spec`.
-pub fn host_port_raw(spec: &CheckSpec) -> Option<(&str, u16)> {
+/// HTTP returns its host with `Some(port)` only when `port_or_known_default`
+/// can infer one — the breaker is happy with host alone, but the throttle
+/// requires both. `None` for DNS (resolver is the resource) and
+/// DomainExpiry (per-TLD RDAP slot is the resource).
+pub fn host_port_raw(spec: &CheckSpec) -> Option<(&str, Option<u16>)> {
     match spec {
-        CheckSpec::Http(http) => Some((http.url.host_str()?, http.url.port_or_known_default()?)),
-        CheckSpec::Tcp(tcp) => Some((tcp.host.as_str(), tcp.port)),
-        CheckSpec::TlsCert(cert) => Some((cert.host.as_str(), cert.port)),
+        CheckSpec::Http(http) => Some((http.url.host_str()?, http.url.port_or_known_default())),
+        CheckSpec::Tcp(tcp) => Some((tcp.host.as_str(), Some(tcp.port))),
+        CheckSpec::TlsCert(cert) => Some((cert.host.as_str(), Some(cert.port))),
         CheckSpec::Dns(_) | CheckSpec::DomainExpiry(_) => None,
     }
 }
