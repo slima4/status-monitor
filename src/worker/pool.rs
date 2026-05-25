@@ -1,8 +1,9 @@
 use std::sync::Arc;
+use std::sync::LazyLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use dashmap::DashMap;
-use metrics::{counter, histogram};
+use metrics::{Counter, counter, histogram};
 use tokio::sync::{Semaphore, mpsc};
 
 use uuid::Uuid;
@@ -17,40 +18,63 @@ use crate::worker::host_throttle::{HostPermit, HostThrottle, Throttled};
 
 const HOST_THROTTLE_REASON: &str = "throttled: host concurrency cap";
 
+// Hot-path counters resolved once. `counter!` rebuilds the label set on
+// every call — at high QPS that's a per-check allocation we don't need.
+static HOST_THROTTLE_WAITS_HOST: LazyLock<Counter> =
+    LazyLock::new(|| counter!(names::HOST_THROTTLE_WAITS, "kind" => "host"));
+static HOST_THROTTLE_WAITS_RDAP: LazyLock<Counter> =
+    LazyLock::new(|| counter!(names::HOST_THROTTLE_WAITS, "kind" => "rdap"));
+static HOST_THROTTLE_DROPS_C: LazyLock<Counter> =
+    LazyLock::new(|| counter!(names::HOST_THROTTLE_DROPS));
+
 pub struct CheckTask {
     pub target: Arc<Target>,
     /// Owning tenant of `target`. Threaded so a check result fans out to the
     /// alert engine with the org needed for tenant-scoped channel resolution.
     pub org_id: OrgId,
+    /// Pre-computed throttle key from `ScheduledTarget::build`. `None` for
+    /// check kinds the throttle skips (DNS, DomainExpiry — RDAP path).
+    pub host_key: Option<crate::worker::host_throttle::HostKey>,
+    /// Pre-computed circuit-breaker key. Cheap Arc clone — never recomputed
+    /// on the dispatch hot path.
+    pub breaker_key: Arc<str>,
+    /// Pre-computed RDAP TLD for DomainExpiry checks.
+    pub rdap_tld: Option<Arc<str>>,
 }
 
 impl CheckTask {
-    pub fn host(&self) -> String {
-        host_for_spec(&self.target.check)
+    pub fn breaker_key(&self) -> &str {
+        &self.breaker_key
     }
 }
 
 /// Canonical circuit-breaker key for a CheckSpec. Shared between the scheduler
-/// fan-out (CheckTask::host) and the on-demand `check-now` handler so both
-/// paths share the same per-host breaker.
+/// fan-out and the on-demand `check-now` handler so both paths share the
+/// same per-host breaker. Hosts are normalized (lowercased + trailing-dot
+/// stripped) — otherwise `Example.com` and `example.com` from two targets
+/// allocate two breakers + grow the map without bound under tenant-
+/// controlled casing.
 pub fn host_for_spec(spec: &CheckSpec) -> String {
     match spec {
-        CheckSpec::Http(http) => http.url.host_str().unwrap_or("unknown").to_owned(),
-        CheckSpec::Tcp(tcp) => tcp.host.clone(),
-        CheckSpec::TlsCert(cert) => cert.host.clone(),
+        CheckSpec::Http(http) => http
+            .url
+            .host_str()
+            .map(crate::worker::host_throttle::canonical_host)
+            .unwrap_or_else(|| "unknown".to_owned()),
+        CheckSpec::Tcp(tcp) => crate::worker::host_throttle::canonical_host(&tcp.host),
+        CheckSpec::TlsCert(cert) => crate::worker::host_throttle::canonical_host(&cert.host),
         // Group circuit-breaker state by TLD so a flaky registry doesn't
         // trip the breaker for unrelated TLDs.
         CheckSpec::DomainExpiry(d) => {
             let tld = d.domain.rsplit('.').next().unwrap_or("unknown");
-            format!("rdap:{tld}")
+            format!("rdap:{}", tld.to_ascii_lowercase())
         }
-        // Custom resolver → key by the resolver itself (one flaky DNS
-        // server shouldn't trip the breaker for unrelated targets that
-        // happen to share a name); default resolver → key by the queried
-        // name so a single broken domain doesn't trip the system breaker.
+        // Custom resolver → key by the resolver itself; default → key by
+        // the queried name so a single broken domain doesn't trip the
+        // system breaker.
         CheckSpec::Dns(d) => match &d.resolver {
             Some(addr) => format!("dns:{addr}"),
-            None => format!("dns:{}", d.domain),
+            None => format!("dns:{}", d.domain.to_ascii_lowercase()),
         },
     }
 }
@@ -129,7 +153,7 @@ pub struct WorkerPool {
     semaphore: Arc<Semaphore>,
     max_concurrent: usize,
     http_clients: Arc<HttpClients>,
-    breakers: Arc<DashMap<String, Arc<CircuitBreaker>>>,
+    breakers: Arc<DashMap<Arc<str>, Arc<CircuitBreaker>>>,
     breaker_cfg: CircuitBreakerConfig,
     fanout: ResultFanout,
     host_throttle: Arc<HostThrottle>,
@@ -194,6 +218,33 @@ impl WorkerPool {
         get_or_init_breaker(&self.breakers, host, self.breaker_cfg)
     }
 
+    /// Drop breakers whose only strong reference is the map and that are
+    /// in the steady `Closed` state. Run from the scheduler tick to bound
+    /// the breaker map under target churn (user-driven host edits, deletes).
+    pub fn sweep_breakers(&self) -> usize {
+        let stale: Vec<Arc<str>> = self
+            .breakers
+            .iter()
+            .filter(|e| {
+                Arc::strong_count(e.value()) == 1 && e.value().state() == BreakerState::Closed
+            })
+            .map(|e| e.key().clone())
+            .collect();
+        let mut removed = 0usize;
+        for k in stale {
+            if self
+                .breakers
+                .remove_if(&k, |_, v| {
+                    Arc::strong_count(v) == 1 && v.state() == BreakerState::Closed
+                })
+                .is_some()
+            {
+                removed += 1;
+            }
+        }
+        removed
+    }
+
     /// Runs a one-off check against `target` honoring the per-host circuit
     /// breaker. Returns `None` if the breaker is open and `force` is false.
     /// Result is recorded on the breaker but NOT dispatched through the
@@ -236,7 +287,7 @@ impl WorkerPool {
 
         tokio::spawn(async move {
             let _permit = permit;
-            let breaker = get_or_init_breaker(&breakers, &task.host(), breaker_cfg);
+            let breaker = get_or_init_breaker(&breakers, &task.breaker_key, breaker_cfg);
 
             if !breaker.allow() {
                 counter!(names::CHECK_ERRORS, "kind" => "circuit_open").increment(1);
@@ -245,10 +296,10 @@ impl WorkerPool {
                 return;
             }
 
-            let host_permit = match acquire_host_slot(&throttle, org_id, &task.target.check).await {
+            let host_permit = match acquire_host_slot(&throttle, &task) {
                 Ok(p) => p,
                 Err(Throttled) => {
-                    counter!(names::HOST_THROTTLE_DROPS).increment(1);
+                    HOST_THROTTLE_DROPS_C.increment(1);
                     let mut result =
                         CheckResult::error(task.target.id, org_id.0, HOST_THROTTLE_REASON);
                     result.status = CheckStatus::Degraded;
@@ -268,27 +319,23 @@ impl WorkerPool {
     }
 }
 
-async fn acquire_host_slot(
+fn acquire_host_slot(
     throttle: &HostThrottle,
-    org_id: OrgId,
-    spec: &CheckSpec,
+    task: &CheckTask,
 ) -> Result<Option<HostPermit>, Throttled> {
-    if let CheckSpec::DomainExpiry(d) = spec {
-        let Some(tld) = HostThrottle::rdap_tld(&d.domain) else {
-            return Ok(None);
-        };
-        counter!(names::HOST_THROTTLE_WAITS, "kind" => "rdap").increment(1);
-        return throttle.acquire_rdap(&tld).await.map(Some);
+    if let Some(tld) = task.rdap_tld.as_ref() {
+        HOST_THROTTLE_WAITS_RDAP.increment(1);
+        return throttle.acquire_rdap(tld).map(Some);
     }
-    if let Some(key) = HostThrottle::key_for(org_id, spec) {
-        counter!(names::HOST_THROTTLE_WAITS, "kind" => "host").increment(1);
-        return throttle.acquire(key).await.map(Some);
+    if let Some(key) = task.host_key.as_ref() {
+        HOST_THROTTLE_WAITS_HOST.increment(1);
+        return throttle.acquire(key).map(Some);
     }
     Ok(None)
 }
 
 fn get_or_init_breaker(
-    breakers: &DashMap<String, Arc<CircuitBreaker>>,
+    breakers: &DashMap<Arc<str>, Arc<CircuitBreaker>>,
     host: &str,
     cfg: CircuitBreakerConfig,
 ) -> Arc<CircuitBreaker> {
@@ -296,7 +343,7 @@ fn get_or_init_breaker(
         return b.clone();
     }
     breakers
-        .entry(host.to_owned())
+        .entry(Arc::from(host))
         .or_insert_with(|| Arc::new(CircuitBreaker::new(cfg)))
         .clone()
 }

@@ -620,7 +620,6 @@ fn build_clients_with(dns_cfg: DnsConfig) -> status_monitor::error::Result<HttpC
         default_check_interval_secs: 60,
         per_host_max_inflight: usize::MAX,
         rdap_max_inflight: usize::MAX,
-        host_throttle_acquire_ms: 60_000,
     };
     let security_cfg = SecurityConfig {
         allow_private_targets: true,

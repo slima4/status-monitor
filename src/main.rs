@@ -177,7 +177,6 @@ async fn main() -> Result<()> {
     let host_throttle = Arc::new(status_monitor::worker::host_throttle::HostThrottle::new(
         cfg.checker.per_host_max_inflight,
         cfg.checker.rdap_max_inflight,
-        std::time::Duration::from_millis(cfg.checker.host_throttle_acquire_ms),
     ));
     let pool = Arc::new(WorkerPool::new(
         cfg.checker.max_concurrent_checks,

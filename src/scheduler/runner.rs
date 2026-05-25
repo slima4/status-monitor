@@ -82,9 +82,14 @@ impl Scheduler {
         for st in diff.added {
             self.spawn_target(st);
         }
-        let evicted = self.pool.host_throttle().sweep();
-        if evicted > 0 {
-            tracing::debug!(evicted, "host throttle sweep");
+        let evicted_throttle = self.pool.host_throttle().sweep();
+        let evicted_breakers = self.pool.sweep_breakers();
+        if evicted_throttle > 0 || evicted_breakers > 0 {
+            tracing::debug!(
+                evicted_throttle,
+                evicted_breakers,
+                "host throttle + breaker sweep"
+            );
         }
         Ok(())
     }
@@ -150,6 +155,9 @@ fn dispatch(pool: &WorkerPool, st: &ScheduledTarget) {
     pool.dispatch(CheckTask {
         target: st.target.clone(),
         org_id: st.org_id,
+        host_key: st.host_key.clone(),
+        breaker_key: st.breaker_key.clone(),
+        rdap_tld: st.rdap_tld.clone(),
     });
 }
 

@@ -136,6 +136,8 @@ fn build_test_clients() -> HttpClients {
         default_timeout_ms: 5_000,
         connect_timeout_ms: 2_000,
         default_check_interval_secs: 60,
+        per_host_max_inflight: usize::MAX,
+        rdap_max_inflight: usize::MAX,
     };
     let dns_cfg = DnsConfig {
         cache_size: 1024,

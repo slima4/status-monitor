@@ -1,5 +1,4 @@
 use std::net::IpAddr;
-use std::sync::Arc;
 
 use axum::Json;
 use axum::extract::{Path, Query, State};
@@ -617,9 +616,13 @@ fn dispatch_first_check(state: &AppState, org: OrgId, target: &Target) {
     if !target.enabled {
         return;
     }
+    let st = crate::scheduler::registry::ScheduledTarget::build(org, target.clone());
     state.worker_pool.dispatch(CheckTask {
-        target: Arc::new(target.clone()),
-        org_id: org,
+        target: st.target,
+        org_id: st.org_id,
+        host_key: st.host_key,
+        breaker_key: st.breaker_key,
+        rdap_tld: st.rdap_tld,
     });
 }
 

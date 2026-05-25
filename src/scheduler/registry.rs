@@ -6,14 +6,41 @@ use uuid::Uuid;
 use crate::domain::{OrgId, Target};
 use crate::error::Result;
 use crate::storage::admin::EnabledTargetSource;
+use crate::worker::host_for_spec;
+use crate::worker::host_throttle::{HostKey, HostThrottle};
 
 /// A scheduled target plus its owning tenant. The `org_id` rides with the
 /// target through the scheduler→worker→alert path so channel resolution is
-/// tenant-scoped.
+/// tenant-scoped. host_key / breaker_key / rdap_tld are pre-computed at
+/// registry refresh so dispatch never allocates a host string.
 #[derive(Debug, Clone)]
 pub struct ScheduledTarget {
     pub org_id: OrgId,
     pub target: Arc<Target>,
+    pub host_key: Option<HostKey>,
+    pub breaker_key: Arc<str>,
+    pub rdap_tld: Option<Arc<str>>,
+}
+
+impl ScheduledTarget {
+    pub fn build(org_id: OrgId, target: Target) -> Self {
+        let target = Arc::new(target);
+        let host_key = HostThrottle::key_for(org_id, &target.check);
+        let breaker_key: Arc<str> = Arc::from(host_for_spec(&target.check));
+        let rdap_tld = match &target.check {
+            crate::domain::CheckSpec::DomainExpiry(d) => {
+                HostThrottle::rdap_tld(&d.domain).map(Arc::from)
+            }
+            _ => None,
+        };
+        Self {
+            org_id,
+            target,
+            host_key,
+            breaker_key,
+            rdap_tld,
+        }
+    }
 }
 
 pub struct TargetRegistry {
@@ -58,10 +85,7 @@ impl TargetRegistry {
         for (org_id, target) in fresh {
             seen.insert(target.id);
             let id = target.id;
-            let st = ScheduledTarget {
-                org_id,
-                target: Arc::new(target),
-            };
+            let st = ScheduledTarget::build(org_id, target);
             match self.targets.get(&id) {
                 Some(existing) => {
                     if existing.target.updated_at != st.target.updated_at {

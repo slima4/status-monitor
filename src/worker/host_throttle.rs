@@ -1,26 +1,25 @@
 use std::sync::Arc;
-use std::time::Duration;
 
 use dashmap::DashMap;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
-use tokio::time::timeout;
 
 use crate::domain::{CheckSpec, OrgId};
 
 /// Per-(org, host, port) in-flight cap. Tenant-scoped — one customer's burst
-/// can't starve another customer's monitor of the same host.
+/// can't starve another customer's monitor of the same host. Fail-fast
+/// bulkhead pattern: contention returns `Throttled` immediately with no
+/// wait, so a pool worker permit is never held while queued.
 pub struct HostThrottle {
     caps: DashMap<HostKey, Arc<Semaphore>>,
     /// RDAP slots keyed by TLD. Process-wide (not per-tenant) — never burst
     /// the registry. Per-TLD instead of single global so a slow `.com` query
     /// doesn't drag `.org` checks down with it.
-    rdap: DashMap<String, Arc<Semaphore>>,
+    rdap: DashMap<Arc<str>, Arc<Semaphore>>,
     per_host_max: usize,
     rdap_max: usize,
-    acquire_timeout: Duration,
 }
 
-pub type HostKey = (OrgId, String, u16);
+pub type HostKey = (OrgId, Arc<str>, u16);
 
 #[must_use = "drop HostPermit only after the check completes — early drop cancels the throttle"]
 pub struct HostPermit {
@@ -31,27 +30,30 @@ pub struct HostPermit {
 pub struct Throttled;
 
 impl HostThrottle {
-    pub fn new(per_host_max: usize, rdap_max: usize, acquire_timeout: Duration) -> Self {
+    pub fn new(per_host_max: usize, rdap_max: usize) -> Self {
         Self {
             caps: DashMap::new(),
             rdap: DashMap::new(),
             per_host_max: clamp_permits(per_host_max),
             rdap_max: clamp_permits(rdap_max),
-            acquire_timeout,
         }
     }
 
     /// `None` for DNS (shared resolver pool) and DomainExpiry (uses
-    /// `acquire_rdap` instead).
+    /// `acquire_rdap` instead). Called once at registry refresh — the
+    /// returned `Arc<str>` is cached on `ScheduledTarget` and the dispatch
+    /// hot path only ever clones the Arc.
     pub fn key_for(org: OrgId, spec: &CheckSpec) -> Option<HostKey> {
         match spec {
             CheckSpec::Http(http) => {
-                let host = normalize_host(http.url.host_str()?);
+                let host: Arc<str> = Arc::from(normalize_host(http.url.host_str()?));
                 let port = http.url.port_or_known_default()?;
                 Some((org, host, port))
             }
-            CheckSpec::Tcp(tcp) => Some((org, normalize_host(&tcp.host), tcp.port)),
-            CheckSpec::TlsCert(cert) => Some((org, normalize_host(&cert.host), cert.port)),
+            CheckSpec::Tcp(tcp) => Some((org, Arc::from(normalize_host(&tcp.host)), tcp.port)),
+            CheckSpec::TlsCert(cert) => {
+                Some((org, Arc::from(normalize_host(&cert.host)), cert.port))
+            }
             CheckSpec::Dns(_) | CheckSpec::DomainExpiry(_) => None,
         }
     }
@@ -69,41 +71,35 @@ impl HostThrottle {
 
     /// Wide-open cap for tests + benches.
     pub fn permissive() -> Arc<Self> {
-        Arc::new(Self::new(
-            Semaphore::MAX_PERMITS,
-            Semaphore::MAX_PERMITS,
-            Duration::from_secs(60),
-        ))
+        Arc::new(Self::new(Semaphore::MAX_PERMITS, Semaphore::MAX_PERMITS))
     }
 
-    pub async fn acquire(&self, key: HostKey) -> Result<HostPermit, Throttled> {
-        let sem = self.semaphore_for(key);
-        acquire_with_timeout(sem, self.acquire_timeout).await
+    pub fn acquire(&self, key: &HostKey) -> Result<HostPermit, Throttled> {
+        try_acquire(self.semaphore_for(key))
     }
 
-    /// Per-TLD RDAP cap. Caller derives the TLD from the domain via
-    /// `rdap_tld`.
-    pub async fn acquire_rdap(&self, tld: &str) -> Result<HostPermit, Throttled> {
-        let sem = self.rdap_semaphore_for(tld);
-        acquire_with_timeout(sem, self.acquire_timeout).await
+    /// Per-TLD RDAP cap. Caller passes the pre-computed TLD (cached on
+    /// `ScheduledTarget.rdap_tld`).
+    pub fn acquire_rdap(&self, tld: &Arc<str>) -> Result<HostPermit, Throttled> {
+        try_acquire(self.rdap_semaphore_for(tld))
     }
 
-    fn semaphore_for(&self, key: HostKey) -> Arc<Semaphore> {
-        if let Some(s) = self.caps.get(&key) {
+    fn semaphore_for(&self, key: &HostKey) -> Arc<Semaphore> {
+        if let Some(s) = self.caps.get(key) {
             return s.clone();
         }
         self.caps
-            .entry(key)
+            .entry(key.clone())
             .or_insert_with(|| Arc::new(Semaphore::new(self.per_host_max)))
             .clone()
     }
 
-    fn rdap_semaphore_for(&self, tld: &str) -> Arc<Semaphore> {
+    fn rdap_semaphore_for(&self, tld: &Arc<str>) -> Arc<Semaphore> {
         if let Some(s) = self.rdap.get(tld) {
             return s.clone();
         }
         self.rdap
-            .entry(tld.to_owned())
+            .entry(tld.clone())
             .or_insert_with(|| Arc::new(Semaphore::new(self.rdap_max)))
             .clone()
     }
@@ -130,7 +126,7 @@ impl HostThrottle {
                 removed += 1;
             }
         }
-        let rdap_keys: Vec<String> = self
+        let rdap_keys: Vec<Arc<str>> = self
             .rdap
             .iter()
             .filter(|e| Arc::strong_count(e.value()) == 1)
@@ -162,14 +158,10 @@ impl HostThrottle {
     }
 }
 
-async fn acquire_with_timeout(sem: Arc<Semaphore>, dur: Duration) -> Result<HostPermit, Throttled> {
-    if let Ok(p) = sem.clone().try_acquire_owned() {
-        return Ok(HostPermit { _inner: p });
-    }
-    match timeout(dur, sem.acquire_owned()).await {
-        Ok(Ok(p)) => Ok(HostPermit { _inner: p }),
-        _ => Err(Throttled),
-    }
+fn try_acquire(sem: Arc<Semaphore>) -> Result<HostPermit, Throttled> {
+    sem.try_acquire_owned()
+        .map(|p| HostPermit { _inner: p })
+        .map_err(|_| Throttled)
 }
 
 fn clamp_permits(n: usize) -> usize {
@@ -179,14 +171,17 @@ fn clamp_permits(n: usize) -> usize {
 /// Canonical host key: ASCII-lowercased + trailing dot stripped. The `url`
 /// crate already returns punycode for IDN, so the public-status FQDN
 /// trailing-dot Host bypass is what we still have to fix at this layer.
-fn normalize_host(host: &str) -> String {
+pub fn canonical_host(host: &str) -> String {
     host.trim_end_matches('.').to_ascii_lowercase()
+}
+
+fn normalize_host(host: &str) -> String {
+    canonical_host(host)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use uuid::Uuid;
 
     fn org() -> OrgId {
@@ -194,85 +189,73 @@ mod tests {
     }
 
     fn key(org: OrgId, host: &str) -> HostKey {
-        (org, host.to_owned(), 443)
+        (org, Arc::from(host), 443)
     }
 
-    #[tokio::test]
-    async fn twenty_concurrent_cap_two_all_complete() {
-        let throttle = Arc::new(HostThrottle::new(2, 1, Duration::from_secs(5)));
-        let org = org();
-        let in_flight = Arc::new(AtomicUsize::new(0));
-        let peak = Arc::new(AtomicUsize::new(0));
-
-        let mut tasks = Vec::new();
-        for _ in 0..20 {
-            let t = throttle.clone();
-            let k = key(org, "example.com");
-            let in_flight = in_flight.clone();
-            let peak = peak.clone();
-            tasks.push(tokio::spawn(async move {
-                let permit = t.acquire(k).await.expect("acquire");
-                let n = in_flight.fetch_add(1, Ordering::SeqCst) + 1;
-                peak.fetch_max(n, Ordering::SeqCst);
-                tokio::time::sleep(Duration::from_millis(20)).await;
-                in_flight.fetch_sub(1, Ordering::SeqCst);
-                drop(permit);
-            }));
-        }
-        for t in tasks {
-            t.await.unwrap();
-        }
-        assert_eq!(peak.load(Ordering::SeqCst), 2);
+    fn tld(s: &str) -> Arc<str> {
+        Arc::from(s)
     }
 
-    #[tokio::test]
-    async fn throttled_when_timeout_expires() {
-        let throttle = Arc::new(HostThrottle::new(1, 1, Duration::from_millis(10)));
+    #[test]
+    fn cap_two_allows_two_concurrent_then_rejects() {
+        let throttle = HostThrottle::new(2, 1);
         let org = org();
         let k = key(org, "example.com");
-
-        let hold = throttle.acquire(k.clone()).await.expect("first");
-        let denied = throttle.acquire(k).await;
-        assert!(denied.is_err(), "second acquire must time out");
-        drop(hold);
+        let _a = throttle.acquire(&k).expect("first");
+        let _b = throttle.acquire(&k).expect("second");
+        let third = throttle.acquire(&k);
+        assert!(third.is_err(), "third acquire above cap must fail-fast");
     }
 
-    #[tokio::test]
-    async fn tenant_isolation_a_does_not_starve_b() {
-        let throttle = Arc::new(HostThrottle::new(1, 1, Duration::from_millis(10)));
+    #[test]
+    fn permit_release_re_opens_slot() {
+        let throttle = HostThrottle::new(1, 1);
+        let org = org();
+        let k = key(org, "example.com");
+        {
+            let _hold = throttle.acquire(&k).expect("hold");
+            assert!(throttle.acquire(&k).is_err());
+        }
+        assert!(
+            throttle.acquire(&k).is_ok(),
+            "permit drop must replenish the slot"
+        );
+    }
+
+    #[test]
+    fn tenant_isolation_a_does_not_starve_b() {
+        let throttle = HostThrottle::new(1, 1);
         let a = org();
         let b = org();
-        let _hold_a = throttle.acquire(key(a, "example.com")).await.expect("a");
-
-        let b_permit = throttle.acquire(key(b, "example.com")).await;
+        let _hold_a = throttle.acquire(&key(a, "example.com")).expect("a");
+        let b_permit = throttle.acquire(&key(b, "example.com"));
         assert!(b_permit.is_ok(), "tenant B must not be starved by tenant A");
     }
 
-    #[tokio::test]
-    async fn rdap_global_cap_one_per_tld() {
-        let throttle = Arc::new(HostThrottle::new(2, 1, Duration::from_millis(10)));
-        let _hold = throttle.acquire_rdap("com").await.expect("first");
-        let denied_same_tld = throttle.acquire_rdap("com").await;
+    #[test]
+    fn rdap_cap_one_per_tld_independent() {
+        let throttle = HostThrottle::new(2, 1);
+        let _hold = throttle.acquire_rdap(&tld("com")).expect("first");
         assert!(
-            denied_same_tld.is_err(),
-            "second .com acquire must time out under cap=1"
+            throttle.acquire_rdap(&tld("com")).is_err(),
+            ".com cap=1 must reject second concurrent"
         );
-        // Different TLD is independent.
-        let other = throttle.acquire_rdap("org").await;
-        assert!(other.is_ok(), ".org must not be blocked by a stuck .com");
+        assert!(
+            throttle.acquire_rdap(&tld("org")).is_ok(),
+            ".org must not be blocked by a stuck .com"
+        );
     }
 
-    #[tokio::test]
-    async fn sweep_drops_unused_entries() {
-        let throttle = HostThrottle::new(2, 1, Duration::from_millis(10));
+    #[test]
+    fn sweep_drops_unused_entries() {
+        let throttle = HostThrottle::new(2, 1);
         let org = org();
         {
-            let _p = throttle.acquire(key(org, "h1")).await.unwrap();
-            let _q = throttle.acquire(key(org, "h2")).await.unwrap();
+            let _p = throttle.acquire(&key(org, "h1")).unwrap();
+            let _q = throttle.acquire(&key(org, "h2")).unwrap();
         }
         assert_eq!(throttle.map_len(), 2);
-        let evicted = throttle.sweep();
-        assert_eq!(evicted, 2);
+        assert_eq!(throttle.sweep(), 2);
         assert_eq!(throttle.map_len(), 0);
     }
 
