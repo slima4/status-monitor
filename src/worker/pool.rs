@@ -18,10 +18,11 @@ use crate::worker::host_throttle::{HostPermit, HostThrottle, Throttled};
 
 // Hot-path counters resolved once. `counter!` rebuilds the label set on
 // every call — at high QPS that's a per-check allocation we don't need.
+// `host_throttle_waits_total{kind=rdap}` is incremented by the
+// domain_expiry executor since RDAP no longer pre-throttles at the pool
+// level.
 static HOST_THROTTLE_WAITS_HOST: LazyLock<Counter> =
     LazyLock::new(|| counter!(names::HOST_THROTTLE_WAITS, "kind" => "host"));
-static HOST_THROTTLE_WAITS_RDAP: LazyLock<Counter> =
-    LazyLock::new(|| counter!(names::HOST_THROTTLE_WAITS, "kind" => "rdap"));
 static HOST_THROTTLE_DROPS_C: LazyLock<Counter> =
     LazyLock::new(|| counter!(names::HOST_THROTTLE_DROPS));
 
@@ -156,6 +157,7 @@ pub struct WorkerPool {
     breaker_cfg: CircuitBreakerConfig,
     fanout: ResultFanout,
     host_throttle: Arc<HostThrottle>,
+    domain_expiry: Arc<crate::worker::domain_expiry::DomainExpiryRuntime>,
 }
 
 impl WorkerPool {
@@ -165,6 +167,7 @@ impl WorkerPool {
         breaker_cfg: CircuitBreakerConfig,
         fanout: ResultFanout,
         host_throttle: Arc<HostThrottle>,
+        domain_expiry: Arc<crate::worker::domain_expiry::DomainExpiryRuntime>,
     ) -> Self {
         Self {
             semaphore: Arc::new(Semaphore::new(max_concurrent)),
@@ -174,11 +177,16 @@ impl WorkerPool {
             breaker_cfg,
             fanout,
             host_throttle,
+            domain_expiry,
         }
     }
 
     pub fn host_throttle(&self) -> Arc<HostThrottle> {
         self.host_throttle.clone()
+    }
+
+    pub fn domain_expiry_runtime(&self) -> Arc<crate::worker::domain_expiry::DomainExpiryRuntime> {
+        self.domain_expiry.clone()
     }
 
     pub fn max_concurrent(&self) -> usize {
@@ -260,7 +268,11 @@ impl WorkerPool {
         if !force && breaker.state() == BreakerState::Open && !breaker.allow() {
             return None;
         }
-        let result = crate::worker::execute(target_id, org_id, spec, &self.http_clients).await;
+        let deps = crate::worker::WorkerDeps {
+            http: &self.http_clients,
+            domain_expiry: &self.domain_expiry,
+        };
+        let result = crate::worker::execute(target_id, org_id, spec, &deps).await;
         breaker.record(result.status);
         Some(result)
     }
@@ -281,6 +293,7 @@ impl WorkerPool {
         let breaker_cfg = self.breaker_cfg;
         let fanout = self.fanout.clone();
         let throttle = self.host_throttle.clone();
+        let domain_expiry = self.domain_expiry.clone();
         let target = task.target.clone();
         let org_id = task.org_id;
 
@@ -307,9 +320,12 @@ impl WorkerPool {
                 }
             };
 
+            let deps = crate::worker::WorkerDeps {
+                http: &clients,
+                domain_expiry: &domain_expiry,
+            };
             let result =
-                crate::worker::execute(task.target.id, org_id.0, &task.target.check, &clients)
-                    .await;
+                crate::worker::execute(task.target.id, org_id.0, &task.target.check, &deps).await;
             breaker.record(result.status);
             record_metrics(&result);
             drop(host_permit);
@@ -322,9 +338,12 @@ fn acquire_host_slot(
     throttle: &HostThrottle,
     task: &CheckTask,
 ) -> Result<Option<HostPermit>, Throttled> {
-    if let Some(tld) = task.rdap_tld.as_ref() {
-        HOST_THROTTLE_WAITS_RDAP.increment(1);
-        return throttle.acquire_rdap(tld).map(Some);
+    // RDAP/DomainExpiry no longer pre-throttles here — the executor owns
+    // that path so it can fall back to the sticky last-good cache instead
+    // of letting the pool synthesize a Degraded row. `rdap_tld` is still
+    // pre-computed on `ScheduledTarget` for the executor's use.
+    if task.rdap_tld.is_some() {
+        return Ok(None);
     }
     if let Some(key) = task.host_key.as_ref() {
         HOST_THROTTLE_WAITS_HOST.increment(1);

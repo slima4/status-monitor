@@ -59,6 +59,7 @@ async fn scheduler_runs_target_periodically() {
         breaker_cfg(),
         ResultFanout::storage_only(tx),
         status_monitor::worker::host_throttle::HostThrottle::permissive(),
+        common::test_domain_expiry_runtime(),
     ));
     let scheduler = Arc::new(Scheduler::new(registry, pool, scheduler_cfg(30)));
     let shutdown = CancellationToken::new();
@@ -108,6 +109,7 @@ async fn scheduler_runs_jittered_target() {
         breaker_cfg(),
         ResultFanout::storage_only(tx),
         status_monitor::worker::host_throttle::HostThrottle::permissive(),
+        common::test_domain_expiry_runtime(),
     ));
     let scheduler = Arc::new(Scheduler::new(
         registry,
@@ -157,6 +159,7 @@ async fn scheduler_picks_up_new_targets_on_refresh() {
         breaker_cfg(),
         ResultFanout::storage_only(tx),
         status_monitor::worker::host_throttle::HostThrottle::permissive(),
+        common::test_domain_expiry_runtime(),
     ));
     let scheduler = Arc::new(Scheduler::new(registry, pool, scheduler_cfg(1)));
     let shutdown = CancellationToken::new();
@@ -197,6 +200,7 @@ async fn shutdown_drains_in_flight_results() {
         breaker_cfg(),
         ResultFanout::storage_only(tx.clone()),
         status_monitor::worker::host_throttle::HostThrottle::permissive(),
+        common::test_domain_expiry_runtime(),
     ));
     let scheduler = Arc::new(Scheduler::new(registry, pool, scheduler_cfg(30)));
     let batcher = ResultBatcher::new(
@@ -252,6 +256,7 @@ async fn worker_pool_breaker_opens_after_failures() {
         breaker_cfg(),
         ResultFanout::storage_only(tx),
         status_monitor::worker::host_throttle::HostThrottle::permissive(),
+        common::test_domain_expiry_runtime(),
     ));
     let scheduler = Arc::new(Scheduler::new(registry, pool.clone(), scheduler_cfg(30)));
     let shutdown = CancellationToken::new();

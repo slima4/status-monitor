@@ -31,6 +31,7 @@ async fn sampler_runs_and_shuts_down() {
         breaker_cfg(),
         ResultFanout::storage_only(tx.clone()),
         status_monitor::worker::host_throttle::HostThrottle::permissive(),
+        common::test_domain_expiry_runtime(),
     ));
 
     assert_eq!(pool.max_concurrent(), 16);

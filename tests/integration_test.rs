@@ -343,7 +343,12 @@ async fn execute_stamps_passed_org_id_on_result() {
 
     let target_id = Uuid::now_v7();
     let org_id = Uuid::now_v7();
-    let result = status_monitor::worker::execute(target_id, org_id, &spec, &client).await;
+    let domain_expiry = common::test_domain_expiry_runtime();
+    let deps = status_monitor::worker::WorkerDeps {
+        http: &client,
+        domain_expiry: &domain_expiry,
+    };
+    let result = status_monitor::worker::execute(target_id, org_id, &spec, &deps).await;
 
     assert_eq!(result.status, CheckStatus::Up);
     assert_eq!(

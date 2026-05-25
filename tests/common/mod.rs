@@ -23,11 +23,33 @@ use status_monitor::http_client::{HttpClients, build_clients};
 use status_monitor::http_outbound::{OutboundHttpClient, build_outbound_client};
 use status_monitor::public_status::{NoopPublicSource, PublicSource};
 use status_monitor::storage::{
-    InMemoryIncidentNarrationStore, InMemoryMaintenanceStore, InMemoryNotificationChannelStore,
-    InMemorySink, InMemoryTargetStore, IncidentNarrationStore, MaintenanceStore,
-    NotificationChannelStore, PostgresTargetStore, ResultSink, ResultsStore,
+    DomainExpiryStateStore, InMemoryDomainExpiryStateStore, InMemoryIncidentNarrationStore,
+    InMemoryMaintenanceStore, InMemoryNotificationChannelStore, InMemorySink, InMemoryTargetStore,
+    IncidentNarrationStore, MaintenanceStore, NotificationChannelStore, PostgresTargetStore,
+    ResultSink, ResultsStore,
 };
+use status_monitor::worker::domain_expiry::{DEFAULT_MAX_STALENESS, DomainExpiryRuntime};
+use status_monitor::worker::host_throttle::HostThrottle;
+use status_monitor::worker::rdap::RdapClient;
+use status_monitor::worker::rdap_singleflight::RdapSingleflight;
 use status_monitor::worker::{ResultFanout, WorkerPool};
+
+/// Default `DomainExpiryRuntime` for test routers. Wraps an in-memory state
+/// store + a permissive host throttle + a real RDAP client (never invoked
+/// in tests since no DomainExpiry probe runs through this surface).
+pub fn test_domain_expiry_runtime() -> Arc<DomainExpiryRuntime> {
+    let outbound = build_outbound_client(status_monitor::security::SsrfGuard::relaxed_for_tests());
+    let rdap_client = Arc::new(RdapClient::new(outbound));
+    let state_store: Arc<dyn DomainExpiryStateStore> =
+        Arc::new(InMemoryDomainExpiryStateStore::new());
+    Arc::new(DomainExpiryRuntime::new(
+        rdap_client,
+        Arc::new(RdapSingleflight::with_default_ttl()),
+        state_store,
+        HostThrottle::permissive(),
+        DEFAULT_MAX_STALENESS,
+    ))
+}
 use tokio::sync::{Mutex, mpsc};
 use tokio_util::sync::CancellationToken;
 use url::Url;
@@ -141,6 +163,7 @@ pub fn build_test_app_with_seedable_incidents(
         cfg.circuit_breaker,
         ResultFanout::storage_only(tx),
         status_monitor::worker::host_throttle::HostThrottle::permissive(),
+        test_domain_expiry_runtime(),
     ));
     let public_source = Arc::new(NoopPublicSource::default());
     let maintenance_store: Arc<dyn MaintenanceStore> = Arc::new(InMemoryMaintenanceStore::new());
@@ -214,6 +237,7 @@ fn build_test_app_with_public_source_inner(
         cfg.circuit_breaker,
         ResultFanout::storage_only(tx),
         status_monitor::worker::host_throttle::HostThrottle::permissive(),
+        test_domain_expiry_runtime(),
     ));
     let maintenance_store: Arc<dyn MaintenanceStore> = Arc::new(InMemoryMaintenanceStore::new());
     let incident_narration_store: Arc<dyn IncidentNarrationStore> =
@@ -290,6 +314,7 @@ pub async fn build_test_app_with_pg(
         cfg.circuit_breaker,
         ResultFanout::storage_only(tx),
         status_monitor::worker::host_throttle::HostThrottle::permissive(),
+        test_domain_expiry_runtime(),
     ));
     let public_source = Arc::new(NoopPublicSource::default());
     let maintenance_store: Arc<dyn MaintenanceStore> = Arc::new(InMemoryMaintenanceStore::new());
@@ -394,6 +419,7 @@ fn assemble_pg_router(pool: PgPool, cfg: AppConfig) -> Router {
         cfg.circuit_breaker,
         ResultFanout::storage_only(tx),
         status_monitor::worker::host_throttle::HostThrottle::permissive(),
+        test_domain_expiry_runtime(),
     ));
     let public_source = Arc::new(NoopPublicSource::default());
     let maintenance_store: Arc<dyn MaintenanceStore> = Arc::new(InMemoryMaintenanceStore::new());
@@ -497,6 +523,7 @@ pub fn build_test_app_state(mutate: impl FnOnce(&mut AppConfig)) -> AppState {
         cfg.circuit_breaker,
         ResultFanout::storage_only(tx),
         status_monitor::worker::host_throttle::HostThrottle::permissive(),
+        test_domain_expiry_runtime(),
     ));
     let public_source = Arc::new(NoopPublicSource::default());
     let maintenance_store: Arc<dyn MaintenanceStore> = Arc::new(InMemoryMaintenanceStore::new());

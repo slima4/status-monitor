@@ -5,6 +5,7 @@ pub mod host_throttle;
 pub mod http_check;
 pub mod pool;
 pub mod rdap;
+pub mod rdap_singleflight;
 pub mod tcp_check;
 pub mod tls_cert;
 
@@ -19,6 +20,16 @@ use uuid::Uuid;
 
 use crate::domain::{CheckResult, CheckSpec};
 use crate::http_client::HttpClients;
+use crate::worker::domain_expiry::DomainExpiryRuntime;
+
+/// Per-dispatch dependencies handed to `execute`. Bundles everything an
+/// executor sub-handler might need so adding a new dep (e.g. another
+/// per-resource bulkhead, another store) doesn't ripple through every call
+/// site's argument list.
+pub struct WorkerDeps<'a> {
+    pub http: &'a HttpClients,
+    pub domain_expiry: &'a DomainExpiryRuntime,
+}
 
 /// Maps a `days_remaining` value to the canonical Up/Degraded/Down ladder used
 /// by the TLS-cert and domain-expiry checks. Negative `days_remaining` always
@@ -74,18 +85,26 @@ pub async fn execute(
     target_id: Uuid,
     org_id: Uuid,
     spec: &CheckSpec,
-    clients: &HttpClients,
+    deps: &WorkerDeps<'_>,
 ) -> CheckResult {
     match spec {
-        CheckSpec::Http(http) => execute_http_check(target_id, org_id, http, clients).await,
-        CheckSpec::Tcp(tcp) => tcp_check::execute_tcp_check(target_id, org_id, tcp, clients).await,
+        CheckSpec::Http(http) => execute_http_check(target_id, org_id, http, deps.http).await,
+        CheckSpec::Tcp(tcp) => {
+            tcp_check::execute_tcp_check(target_id, org_id, tcp, deps.http).await
+        }
         CheckSpec::TlsCert(cert) => {
-            tls_cert::execute_tls_cert_check(target_id, org_id, cert, clients).await
+            tls_cert::execute_tls_cert_check(target_id, org_id, cert, deps.http).await
         }
         CheckSpec::DomainExpiry(domain) => {
-            domain_expiry::execute_domain_expiry_check(target_id, org_id, domain).await
+            domain_expiry::execute_domain_expiry_check(
+                target_id,
+                org_id,
+                domain,
+                deps.domain_expiry,
+            )
+            .await
         }
-        CheckSpec::Dns(d) => dns::execute_dns_check(target_id, org_id, d, clients).await,
+        CheckSpec::Dns(d) => dns::execute_dns_check(target_id, org_id, d, deps.http).await,
     }
 }
 
@@ -95,12 +114,12 @@ pub(crate) async fn execute_with_probe(
     target_id: Uuid,
     org_id: Uuid,
     spec: &CheckSpec,
-    clients: &HttpClients,
+    deps: &WorkerDeps<'_>,
 ) -> (CheckResult, Option<HttpProbe>) {
     if let CheckSpec::Http(http) = spec {
-        let (r, p) = execute_http_check_probe(target_id, org_id, http, clients).await;
+        let (r, p) = execute_http_check_probe(target_id, org_id, http, deps.http).await;
         (r, Some(p))
     } else {
-        (execute(target_id, org_id, spec, clients).await, None)
+        (execute(target_id, org_id, spec, deps).await, None)
     }
 }

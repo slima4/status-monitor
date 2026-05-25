@@ -1,100 +1,267 @@
-use std::time::Instant;
+//! Domain-expiry probe with sticky last-good fallback.
+//!
+//! Each scheduled check follows the same path:
+//!  1. Fresh-probe attempt: per-TLD bulkhead + cross-tenant singleflight.
+//!  2. On success: write the answer to `domain_expiry_state` (last-good
+//!     cache) and emit a CheckResult whose status is derived from
+//!     `classify_days`.
+//!  3. On failure (throttle, timeout, network, registry error): load
+//!     last-good. If younger than `max_staleness`, emit a CheckResult with
+//!     the *cached* status and an `error="served_stale: …"` annotation so
+//!     operator tools can see we served stale data.
+//!  4. If the row is missing or older than `max_staleness`, emit a real
+//!     `CheckStatus::Error` with the underlying failure message.
+//!
+//! Industry shape mirrors Better Stack / Site24x7 domain monitors: a
+//! transient registry blip never flips the customer's monitor red, and a
+//! genuinely-unreachable registry surfaces only after the staleness ceiling.
 
+use std::sync::Arc;
+use std::sync::LazyLock;
+use std::time::{Duration, Instant};
+
+use anyhow::anyhow;
 use chrono::Utc;
+use metrics::{Counter, counter};
 use serde::Serialize;
-use tokio::sync::OnceCell;
 use tokio::time::timeout;
 use uuid::Uuid;
 
-use crate::domain::{CheckResult, CheckStatus, DomainExpiryCheck};
-use crate::http_outbound::build_outbound_client;
-use crate::worker::rdap::RdapClient;
+static HOST_THROTTLE_WAITS_RDAP: LazyLock<Counter> =
+    LazyLock::new(|| counter!(names::HOST_THROTTLE_WAITS, "kind" => "rdap"));
+static RDAP_SINGLEFLIGHT_HITS: LazyLock<Counter> =
+    LazyLock::new(|| counter!(names::RDAP_SINGLEFLIGHT, "outcome" => "hit"));
+static RDAP_SINGLEFLIGHT_MISSES: LazyLock<Counter> =
+    LazyLock::new(|| counter!(names::RDAP_SINGLEFLIGHT, "outcome" => "miss"));
 
-/// Shared RDAP client kept in a process-static so all domain_expiry checks
-/// reuse one cached bootstrap map and one connection pool. A handle on
-/// `HttpClients` would be more idiomatic, but the RDAP outbound flow
-/// deliberately bypasses both the phase-timing connector and the SSRF guard
-/// that `HttpClients` carries — keeping it separate avoids leaking those
-/// semantics through. Built lazily on first invocation.
-static RDAP: OnceCell<RdapClient> = OnceCell::const_new();
+use crate::domain::{CheckResult, CheckStatus, DomainExpiryCheck};
+use crate::observability::metrics::names;
+use crate::storage::DomainExpiryStateStore;
+use crate::worker::host_throttle::{HostThrottle, Throttled};
+use crate::worker::rdap::{RdapAnswer, RdapClient};
+use crate::worker::rdap_singleflight::{FetchOutcome, RdapSingleflight};
+
+/// Default ceiling on how old a cached last-good answer may be while still
+/// being served. Past this, the executor escalates to `CheckStatus::Error`
+/// so an alert can fire on truly-unreachable registries.
+pub const DEFAULT_MAX_STALENESS: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+
+/// Bundle of dependencies the domain-expiry executor needs at dispatch
+/// time. Built once and shared across every probe via `Arc`.
+pub struct DomainExpiryRuntime {
+    pub rdap_client: Arc<RdapClient>,
+    pub singleflight: Arc<RdapSingleflight>,
+    pub state_store: Arc<dyn DomainExpiryStateStore>,
+    pub host_throttle: Arc<HostThrottle>,
+    pub max_staleness: Duration,
+    pub max_staleness_chrono: chrono::Duration,
+}
+
+impl DomainExpiryRuntime {
+    pub fn new(
+        rdap_client: Arc<RdapClient>,
+        singleflight: Arc<RdapSingleflight>,
+        state_store: Arc<dyn DomainExpiryStateStore>,
+        host_throttle: Arc<HostThrottle>,
+        max_staleness: Duration,
+    ) -> Self {
+        let max_staleness_chrono = chrono::Duration::from_std(max_staleness)
+            .expect("max_staleness fits chrono::Duration (caller passes a sane bound)");
+        Self {
+            rdap_client,
+            singleflight,
+            state_store,
+            host_throttle,
+            max_staleness,
+            max_staleness_chrono,
+        }
+    }
+}
 
 pub async fn execute_domain_expiry_check(
     target_id: Uuid,
     org_id: Uuid,
     check: &DomainExpiryCheck,
+    runtime: &DomainExpiryRuntime,
 ) -> CheckResult {
     let started_at = Utc::now();
     let start = Instant::now();
-    let client = RDAP
-        .get_or_init(|| async {
-            // RDAP destinations are derived from the IANA bootstrap, not from
-            // user-supplied input, so the strict guard is the correct default —
-            // a registry that resolves to a private IP would be a rebinding
-            // attempt against an internal target via a third-party referrer.
-            RdapClient::new(build_outbound_client(crate::security::SsrfGuard::strict()))
-        })
-        .await;
 
-    let outcome = timeout(check.timeout, run_check(check, client)).await;
+    let probe = fresh_probe(check, runtime).await;
     let duration_ms = start.elapsed().as_millis() as u32;
 
-    match outcome {
-        Ok(Ok(verdict)) => CheckResult {
-            target_id,
-            org_id,
-            timestamp: started_at,
-            status: verdict.status,
-            duration_ms,
-            dns_ms: None,
-            connect_ms: None,
-            tls_ms: None,
-            ttfb_ms: None,
-            response_code: None,
-            response_size: Some(verdict.details_json.len() as u32),
-            error: match verdict.status {
-                CheckStatus::Up => None,
-                _ => Some(verdict.details_json),
-            },
-        },
-        Ok(Err(err)) => CheckResult {
-            target_id,
-            org_id,
-            timestamp: started_at,
-            status: CheckStatus::Error,
-            duration_ms,
-            dns_ms: None,
-            connect_ms: None,
-            tls_ms: None,
-            ttfb_ms: None,
-            response_code: None,
-            response_size: None,
-            error: Some(err.to_string()),
-        },
-        Err(_) => {
-            CheckResult::error_with_elapsed(target_id, org_id, started_at, duration_ms, "timeout")
+    match probe {
+        Ok(answer) => {
+            let _ = runtime
+                .state_store
+                .upsert_success(
+                    target_id,
+                    &check.domain,
+                    answer.expiration,
+                    answer.registrar.as_deref(),
+                )
+                .await;
+            let verdict = classify(check, answer.expiration, answer.registrar.as_deref());
+            emit_fresh(target_id, org_id, started_at, duration_ms, verdict)
+        }
+        Err(err) => {
+            fall_back(
+                target_id,
+                org_id,
+                check,
+                runtime,
+                started_at,
+                duration_ms,
+                err,
+            )
+            .await
         }
     }
 }
 
+/// Outcome of the fresh-probe attempt — distinguished from a generic
+/// `Result` so the fallback path can record the right metric kind.
 #[derive(Debug)]
-pub struct DomainVerdict {
-    pub status: CheckStatus,
-    pub details_json: String,
+enum ProbeFailure {
+    Throttled,
+    Timeout,
+    Lookup(anyhow::Error),
 }
 
-pub async fn run_check(
+impl ProbeFailure {
+    fn kind(&self) -> &'static str {
+        match self {
+            Self::Throttled => "throttled",
+            Self::Timeout => "timeout",
+            Self::Lookup(_) => "lookup_error",
+        }
+    }
+    fn message(&self) -> String {
+        match self {
+            Self::Throttled => "rdap throttled".into(),
+            Self::Timeout => "rdap timeout".into(),
+            Self::Lookup(e) => e.to_string(),
+        }
+    }
+}
+
+async fn fresh_probe(
     check: &DomainExpiryCheck,
-    client: &RdapClient,
-) -> anyhow::Result<DomainVerdict> {
-    let answer = client.lookup_expiration(&check.domain).await?;
-    Ok(classify(check, answer.expiration, answer.registrar))
+    runtime: &DomainExpiryRuntime,
+) -> std::result::Result<Arc<RdapAnswer>, ProbeFailure> {
+    let domain: Arc<str> = Arc::from(check.domain.as_str());
+    let tld = HostThrottle::rdap_tld(check.domain.as_str()).map(Arc::<str>::from);
+
+    // Throttle gate sits INSIDE the fetcher closure so a cache hit never
+    // consumes a per-TLD permit and never bumps the wait counter — the
+    // bulkhead exists to protect registries from outbound traffic, and a
+    // hit makes no outbound traffic.
+    let client = runtime.rdap_client.clone();
+    let lookup_domain = domain.clone();
+    let host_throttle = runtime.host_throttle.clone();
+    let lookup = runtime.singleflight.lookup(domain, move || async move {
+        let _permit = match tld.as_ref() {
+            Some(t) => {
+                HOST_THROTTLE_WAITS_RDAP.increment(1);
+                match host_throttle.acquire_rdap(t) {
+                    Ok(p) => Some(p),
+                    Err(Throttled) => {
+                        return Err(crate::error::AppError::Other(anyhow!("rdap throttled")));
+                    }
+                }
+            }
+            None => None,
+        };
+        client.lookup_expiration(lookup_domain.as_ref()).await
+    });
+
+    let outcome = timeout(check.timeout, lookup).await;
+
+    match outcome {
+        Ok(Ok((answer, fetch_outcome))) => {
+            record_singleflight_outcome(fetch_outcome);
+            Ok(answer)
+        }
+        Ok(Err(crate::error::AppError::Other(e))) => {
+            // The throttle path encodes itself as "rdap throttled"; everything
+            // else is a lookup error from the registry transport.
+            if e.to_string() == "rdap throttled" {
+                Err(ProbeFailure::Throttled)
+            } else {
+                Err(ProbeFailure::Lookup(e))
+            }
+        }
+        Ok(Err(e)) => Err(ProbeFailure::Lookup(anyhow!(e.to_string()))),
+        Err(_) => Err(ProbeFailure::Timeout),
+    }
+}
+
+async fn fall_back(
+    target_id: Uuid,
+    org_id: Uuid,
+    check: &DomainExpiryCheck,
+    runtime: &DomainExpiryRuntime,
+    started_at: chrono::DateTime<Utc>,
+    duration_ms: u32,
+    err: ProbeFailure,
+) -> CheckResult {
+    let err_kind = err.kind();
+    let err_msg = err.message();
+
+    // Single round-trip: UPDATE … RETURNING bumps the failure counters AND
+    // hands back the current row. Decides staleness in app-space.
+    let state = match runtime
+        .state_store
+        .record_failure_returning(target_id, &err_msg)
+        .await
+    {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::warn!(%target_id, error = %e, "domain_expiry: state store write failed");
+            None
+        }
+    };
+
+    if let Some(state) = state {
+        let age = Utc::now() - state.verified_at;
+        let age_secs = age.num_seconds().max(0) as u64;
+        if age <= runtime.max_staleness_chrono {
+            counter!(names::DOMAIN_EXPIRY_STALE_SERVED, "kind" => err_kind).increment(1);
+            let verdict = classify(check, state.expiry_at, state.registrar.as_deref());
+            return emit_stale(
+                target_id,
+                org_id,
+                started_at,
+                duration_ms,
+                verdict,
+                age_secs,
+                err_kind,
+            );
+        }
+    }
+
+    counter!(names::DOMAIN_EXPIRY_STALE_SERVED, "kind" => "fresh_error").increment(1);
+    CheckResult::error_with_elapsed(target_id, org_id, started_at, duration_ms, err_msg)
+}
+
+fn record_singleflight_outcome(outcome: FetchOutcome) {
+    match outcome {
+        FetchOutcome::Hit => RDAP_SINGLEFLIGHT_HITS.increment(1),
+        FetchOutcome::Miss => RDAP_SINGLEFLIGHT_MISSES.increment(1),
+    }
+}
+
+#[derive(Debug)]
+struct Verdict {
+    status: CheckStatus,
+    details_json: String,
 }
 
 fn classify(
     check: &DomainExpiryCheck,
     expiration: chrono::DateTime<Utc>,
-    registrar: Option<String>,
-) -> DomainVerdict {
+    registrar: Option<&str>,
+) -> Verdict {
     let days_remaining = (expiration - Utc::now()).num_days();
     let status = crate::worker::classify_days(days_remaining, check.warn_days, check.critical_days);
 
@@ -109,11 +276,163 @@ fn classify(
         domain: &check.domain,
         days_remaining,
         expiration_date: expiration.to_rfc3339(),
-        registrar: registrar.as_deref(),
+        registrar,
     })
     .expect("infallible serialize for fixed struct");
-    DomainVerdict {
+    Verdict {
         status,
         details_json,
+    }
+}
+
+fn emit_fresh(
+    target_id: Uuid,
+    org_id: Uuid,
+    started_at: chrono::DateTime<Utc>,
+    duration_ms: u32,
+    verdict: Verdict,
+) -> CheckResult {
+    CheckResult {
+        target_id,
+        org_id,
+        timestamp: started_at,
+        status: verdict.status,
+        duration_ms,
+        dns_ms: None,
+        connect_ms: None,
+        tls_ms: None,
+        ttfb_ms: None,
+        response_code: None,
+        response_size: Some(verdict.details_json.len() as u32),
+        error: match verdict.status {
+            CheckStatus::Up => None,
+            _ => Some(verdict.details_json),
+        },
+    }
+}
+
+fn emit_stale(
+    target_id: Uuid,
+    org_id: Uuid,
+    started_at: chrono::DateTime<Utc>,
+    duration_ms: u32,
+    verdict: Verdict,
+    age_secs: u64,
+    refresh_failure_kind: &str,
+) -> CheckResult {
+    let annotation = format!(
+        "served_stale: last_verified_age_secs={age_secs}; refresh_failed={refresh_failure_kind}",
+    );
+    // Preserve the underlying classification's details too — operators want
+    // both "we're showing a stale answer" and "the stale answer says X".
+    let combined = format!("{annotation}; {}", verdict.details_json);
+    CheckResult {
+        target_id,
+        org_id,
+        timestamp: started_at,
+        status: verdict.status,
+        duration_ms,
+        dns_ms: None,
+        connect_ms: None,
+        tls_ms: None,
+        ttfb_ms: None,
+        response_code: None,
+        response_size: Some(combined.len() as u32),
+        error: Some(combined),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage::InMemoryDomainExpiryStateStore;
+    use crate::worker::host_throttle::HostThrottle;
+    use std::time::Duration as StdDuration;
+
+    fn check(domain: &str) -> DomainExpiryCheck {
+        DomainExpiryCheck {
+            domain: domain.into(),
+            warn_days: 30,
+            critical_days: 7,
+            timeout: StdDuration::from_secs(5),
+        }
+    }
+
+    fn seed_state(store: &InMemoryDomainExpiryStateStore, target: Uuid, days: i64) {
+        let exp = Utc::now() + chrono::Duration::days(days);
+        futures::executor::block_on(store.upsert_success(target, "example.com", exp, Some("R")))
+            .unwrap();
+    }
+
+    // The fresh + stale-within-window happy path is exercised end-to-end in
+    // `tests/domain_expiry_test.rs::domain_expiry_serves_last_good_on_rdap_failure`.
+    // Unit tests below cover branches the integration suite can't reach
+    // without backdating `verified_at` or driving the executor with no prior
+    // state.
+
+    #[tokio::test]
+    async fn beyond_staleness_emits_real_error() {
+        let target = Uuid::new_v4();
+        let org = Uuid::new_v4();
+        let store: Arc<InMemoryDomainExpiryStateStore> =
+            Arc::new(InMemoryDomainExpiryStateStore::new());
+        // Seed with a row, then manually backdate verified_at past the ceiling.
+        seed_state(&store, target, 90);
+        {
+            let mut g = store.inner_mut_for_test();
+            let s = g.get_mut(&target).unwrap();
+            s.verified_at = Utc::now() - chrono::Duration::days(10);
+        }
+
+        let runtime = DomainExpiryRuntime::new(
+            Arc::new(RdapClient::new(
+                crate::http_outbound::build_outbound_client(crate::security::SsrfGuard::strict()),
+            )),
+            Arc::new(RdapSingleflight::with_default_ttl()),
+            store,
+            HostThrottle::permissive(),
+            StdDuration::from_secs(7 * 24 * 3600),
+        );
+        let r = fall_back(
+            target,
+            org,
+            &check("example.com"),
+            &runtime,
+            Utc::now(),
+            1,
+            ProbeFailure::Timeout,
+        )
+        .await;
+        assert_eq!(r.status, CheckStatus::Error);
+        assert!(r.error.as_deref().unwrap().contains("timeout"));
+    }
+
+    #[tokio::test]
+    async fn no_state_emits_real_error() {
+        let target = Uuid::new_v4();
+        let org = Uuid::new_v4();
+        let store: Arc<InMemoryDomainExpiryStateStore> =
+            Arc::new(InMemoryDomainExpiryStateStore::new());
+        let runtime = DomainExpiryRuntime::new(
+            Arc::new(RdapClient::new(
+                crate::http_outbound::build_outbound_client(crate::security::SsrfGuard::strict()),
+            )),
+            Arc::new(RdapSingleflight::with_default_ttl()),
+            store,
+            HostThrottle::permissive(),
+            StdDuration::from_secs(7 * 24 * 3600),
+        );
+        let r = fall_back(
+            target,
+            org,
+            &check("example.com"),
+            &runtime,
+            Utc::now(),
+            1,
+            ProbeFailure::Lookup(anyhow!("nxdomain")),
+        )
+        .await;
+        assert_eq!(r.status, CheckStatus::Error);
+        assert!(r.error.as_deref().unwrap().contains("nxdomain"));
     }
 }

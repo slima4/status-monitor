@@ -27,6 +27,21 @@ Look at `status_monitor_check_errors_total{kind}` filtered by host to find the f
 
 One tenant has more concurrent monitors at the same `(host, port)` than `checker.per_host_max_inflight` allows (default 2). Over-cap checks are recorded `degraded` instead of running. No alert fires — the upstream is fine. Either spread the targets across more hosts, raise the cap, or rely on jitter to thin the burst. Watch `status_monitor_host_throttle_drops_total` to size the cap against real traffic.
 
+## `domain_expiry` results show `served_stale: …`
+
+The fresh RDAP probe failed (throttle, timeout, registry 5xx, network blip) but the executor served the most recent successful answer from `domain_expiry_state` instead of flipping the monitor red. The status reflects the cached `expiry_at`; the `error` field carries `last_verified_age_secs=…; refresh_failed=<kind>` plus the cached details. Customer-facing surfaces are unchanged.
+
+Inspect the failure kind via `status_monitor_domain_expiry_stale_served_total{kind}`:
+
+- `kind="throttled"` — per-TLD RDAP bulkhead rejected this probe. Raise `checker.rdap_max_inflight` if rampant, but the cap is also the IANA-friendliness lever.
+- `kind="timeout"` — the registry took longer than `check.timeout` (per-target). Either bump the per-check timeout or wait — most registries recover in minutes.
+- `kind="lookup_error"` — registry returned a non-2xx (often 404 or 5xx). If a specific TLD is stuck on 5xx, the registry is having an incident; rows keep streaming as `served_stale` until 7 days have passed.
+- `kind="fresh_error"` — no usable last-good (first probe, or the cached row is older than 7d). A real `CheckStatus::Error` is emitted and is alert-eligible.
+
+## `domain_expiry` results have flipped to real `Error` after days of `served_stale`
+
+The cached row in `domain_expiry_state` is older than the 7-day staleness ceiling, so the executor stopped masking the registry outage. Either the registry has been down for that long (act on it), or this target's interval is so long that probes haven't run in a week. Check `verified_at` in `domain_expiry_state` for the target.
+
 ## TLS errors against internal hosts
 
 Set `verify_tls: false` on the offending target. The check executor picks between a verifying and a non-verifying hyper-util client based on the flag — both share the same DNS cache and connection-pool sizing.

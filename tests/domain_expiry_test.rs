@@ -11,8 +11,14 @@ use parking_lot::Mutex;
 use serde_json::{Value, json};
 use status_monitor::domain::{CheckStatus, DomainExpiryCheck};
 use status_monitor::http_outbound::build_outbound_client;
-use status_monitor::worker::domain_expiry::run_check;
+use status_monitor::storage::{DomainExpiryStateStore, InMemoryDomainExpiryStateStore};
+use status_monitor::worker::domain_expiry::{
+    DEFAULT_MAX_STALENESS, DomainExpiryRuntime, execute_domain_expiry_check,
+};
+use status_monitor::worker::host_throttle::HostThrottle;
 use status_monitor::worker::rdap::RdapClient;
+use status_monitor::worker::rdap_singleflight::RdapSingleflight;
+use uuid::Uuid;
 
 #[derive(Clone)]
 struct ServerState {
@@ -102,6 +108,25 @@ fn client_for(addr: SocketAddr) -> RdapClient {
     )
 }
 
+fn runtime_with_client(client: RdapClient) -> DomainExpiryRuntime {
+    let state: Arc<dyn DomainExpiryStateStore> = Arc::new(InMemoryDomainExpiryStateStore::new());
+    DomainExpiryRuntime::new(
+        Arc::new(client),
+        Arc::new(RdapSingleflight::with_default_ttl()),
+        state,
+        HostThrottle::permissive(),
+        DEFAULT_MAX_STALENESS,
+    )
+}
+
+async fn classify_one(
+    addr: SocketAddr,
+    check: DomainExpiryCheck,
+) -> status_monitor::domain::CheckResult {
+    let runtime = runtime_with_client(client_for(addr));
+    execute_domain_expiry_check(Uuid::now_v7(), Uuid::now_v7(), &check, &runtime).await
+}
+
 #[tokio::test]
 async fn domain_expiry_up_when_far_from_expiry() {
     let (addr, _) = spawn_rdap_fixture(
@@ -110,21 +135,19 @@ async fn domain_expiry_up_when_far_from_expiry() {
         false,
     )
     .await;
-    let verdict = run_check(&make_check("foo.example", 30, 7), &client_for(addr))
-        .await
-        .expect("rdap ok");
-    assert_eq!(verdict.status, CheckStatus::Up);
+    let r = classify_one(addr, make_check("foo.example", 30, 7)).await;
+    assert_eq!(r.status, CheckStatus::Up);
+    assert!(r.error.is_none(), "fresh Up emits no error annotation");
 }
 
 #[tokio::test]
 async fn domain_expiry_degraded_under_warn_days() {
     let (addr, _) =
         spawn_rdap_fixture(Utc::now() + chrono::Duration::days(20), Some("Acme"), false).await;
-    let verdict = run_check(&make_check("foo.example", 30, 7), &client_for(addr))
-        .await
-        .expect("rdap ok");
-    assert_eq!(verdict.status, CheckStatus::Degraded);
-    let body: Value = serde_json::from_str(&verdict.details_json).unwrap();
+    let r = classify_one(addr, make_check("foo.example", 30, 7)).await;
+    assert_eq!(r.status, CheckStatus::Degraded);
+    let body: Value =
+        serde_json::from_str(r.error.as_deref().expect("degraded carries details")).unwrap();
     assert_eq!(body["registrar"], "Acme");
     assert!(body["days_remaining"].as_i64().unwrap() < 30);
 }
@@ -132,37 +155,73 @@ async fn domain_expiry_degraded_under_warn_days() {
 #[tokio::test]
 async fn domain_expiry_down_under_critical_days() {
     let (addr, _) = spawn_rdap_fixture(Utc::now() + chrono::Duration::days(3), None, false).await;
-    let verdict = run_check(&make_check("foo.example", 30, 7), &client_for(addr))
-        .await
-        .expect("rdap ok");
-    assert_eq!(verdict.status, CheckStatus::Down);
+    let r = classify_one(addr, make_check("foo.example", 30, 7)).await;
+    assert_eq!(r.status, CheckStatus::Down);
 }
 
 #[tokio::test]
 async fn domain_expiry_down_when_expired() {
     let (addr, _) = spawn_rdap_fixture(Utc::now() - chrono::Duration::days(1), None, false).await;
-    let verdict = run_check(&make_check("foo.example", 30, 7), &client_for(addr))
-        .await
-        .expect("rdap ok");
-    assert_eq!(verdict.status, CheckStatus::Down);
-    let body: Value = serde_json::from_str(&verdict.details_json).unwrap();
+    let r = classify_one(addr, make_check("foo.example", 30, 7)).await;
+    assert_eq!(r.status, CheckStatus::Down);
+    let body: Value =
+        serde_json::from_str(r.error.as_deref().expect("down carries details")).unwrap();
     assert!(body["days_remaining"].as_i64().unwrap() < 0);
 }
 
 #[tokio::test]
 async fn domain_expiry_errors_on_unknown_tld() {
     let (addr, _) = spawn_rdap_fixture(Utc::now() + chrono::Duration::days(100), None, false).await;
-    let err = run_check(&make_check("foo.unknowntld", 30, 7), &client_for(addr))
-        .await
-        .unwrap_err();
-    assert!(err.to_string().to_lowercase().contains("rdap"));
+    let r = classify_one(addr, make_check("foo.unknowntld", 30, 7)).await;
+    assert_eq!(r.status, CheckStatus::Error);
+    assert!(r.error.as_deref().unwrap().to_lowercase().contains("rdap"));
 }
 
 #[tokio::test]
 async fn domain_expiry_errors_on_rdap_404() {
     let (addr, _) = spawn_rdap_fixture(Utc::now() + chrono::Duration::days(100), None, true).await;
-    let err = run_check(&make_check("foo.example", 30, 7), &client_for(addr))
+    let r = classify_one(addr, make_check("foo.example", 30, 7)).await;
+    assert_eq!(r.status, CheckStatus::Error);
+    assert!(r.error.as_deref().unwrap().contains("404"));
+}
+
+/// Sticky-on-failure: when the registry returns 404 but a recent last-good
+/// exists in the state store, the executor surfaces the cached verdict +
+/// `served_stale` annotation instead of an Error.
+#[tokio::test]
+async fn domain_expiry_serves_last_good_on_rdap_failure() {
+    let (addr, _) = spawn_rdap_fixture(Utc::now() + chrono::Duration::days(100), None, true).await;
+
+    let state: Arc<dyn DomainExpiryStateStore> = Arc::new(InMemoryDomainExpiryStateStore::new());
+    let target = Uuid::now_v7();
+    state
+        .upsert_success(
+            target,
+            "foo.example",
+            Utc::now() + chrono::Duration::days(60),
+            Some("Acme"),
+        )
         .await
-        .unwrap_err();
-    assert!(err.to_string().contains("404"));
+        .unwrap();
+
+    let runtime = DomainExpiryRuntime::new(
+        Arc::new(client_for(addr)),
+        Arc::new(RdapSingleflight::with_default_ttl()),
+        state,
+        HostThrottle::permissive(),
+        DEFAULT_MAX_STALENESS,
+    );
+
+    let r = execute_domain_expiry_check(
+        target,
+        Uuid::now_v7(),
+        &make_check("foo.example", 30, 7),
+        &runtime,
+    )
+    .await;
+
+    assert_eq!(r.status, CheckStatus::Up, "60-day cached answer is Up");
+    let err = r.error.as_deref().expect("stale serves an annotation");
+    assert!(err.contains("served_stale"), "annotation present");
+    assert!(err.contains("days_remaining"), "embeds cached details");
 }

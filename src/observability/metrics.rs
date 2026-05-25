@@ -122,6 +122,14 @@ fn register_descriptions() {
         "status_monitor_alerts_dropped_total",
         "Alert signals dropped before reaching the engine, labelled by reason"
     );
+    describe_counter!(
+        "status_monitor_rdap_singleflight_total",
+        "RDAP singleflight outcomes per domain: hit (cached) or miss (fetched)"
+    );
+    describe_counter!(
+        "status_monitor_domain_expiry_stale_served_total",
+        "Times the domain_expiry executor served a cached last-good answer instead of a fresh probe, labelled by failure kind"
+    );
 }
 
 pub mod names {
@@ -149,4 +157,6 @@ pub mod names {
     pub const ALERTS_DROPPED: &str = "status_monitor_alerts_dropped_total";
     pub const HOST_THROTTLE_WAITS: &str = "status_monitor_host_throttle_waits_total";
     pub const HOST_THROTTLE_DROPS: &str = "status_monitor_host_throttle_drops_total";
+    pub const RDAP_SINGLEFLIGHT: &str = "status_monitor_rdap_singleflight_total";
+    pub const DOMAIN_EXPIRY_STALE_SERVED: &str = "status_monitor_domain_expiry_stale_served_total";
 }

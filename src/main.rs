@@ -178,12 +178,32 @@ async fn main() -> Result<()> {
         cfg.checker.per_host_max_inflight,
         cfg.checker.rdap_max_inflight,
     ));
+    let rdap_client = Arc::new(status_monitor::worker::rdap::RdapClient::new(
+        status_monitor::http_outbound::build_outbound_client(
+            status_monitor::security::SsrfGuard::strict(),
+        ),
+    ));
+    let domain_expiry_state: Arc<dyn status_monitor::storage::DomainExpiryStateStore> = Arc::new(
+        status_monitor::storage::PgDomainExpiryStateStore::new(pg_pool.clone()),
+    );
+    let domain_expiry_runtime = Arc::new(
+        status_monitor::worker::domain_expiry::DomainExpiryRuntime::new(
+            rdap_client,
+            Arc::new(
+                status_monitor::worker::rdap_singleflight::RdapSingleflight::with_default_ttl(),
+            ),
+            domain_expiry_state,
+            host_throttle.clone(),
+            status_monitor::worker::domain_expiry::DEFAULT_MAX_STALENESS,
+        ),
+    );
     let pool = Arc::new(WorkerPool::new(
         cfg.checker.max_concurrent_checks,
         (*http_clients).clone(),
         cfg.circuit_breaker,
         fanout,
         host_throttle.clone(),
+        domain_expiry_runtime,
     ));
     let scheduler_source: Arc<dyn storage::admin::EnabledTargetSource> = Arc::new(
         storage::admin::AdminRepo::new(pg_pool.clone(), cipher.clone(), "scheduler_refresh"),

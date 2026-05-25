@@ -526,9 +526,13 @@ pub async fn test_check(
     let guard = ssrf_guard(&state);
     validate_check(&req.check, &guard)?;
     check_abuse(&state, org, &req.check)?;
+    let domain_expiry_rt = state.worker_pool.domain_expiry_runtime();
+    let deps = crate::worker::WorkerDeps {
+        http: &state.http_clients,
+        domain_expiry: &domain_expiry_rt,
+    };
     let (result, probe) =
-        crate::worker::execute_with_probe(Uuid::nil(), org.0, &req.check, &state.http_clients)
-            .await;
+        crate::worker::execute_with_probe(Uuid::nil(), org.0, &req.check, &deps).await;
     let matched_expectations = matches!(result.status, crate::domain::CheckStatus::Up);
     let (response_headers_preview, response_body_snippet) = match probe {
         Some(p) => (p.response_headers_preview, p.response_body_snippet),
