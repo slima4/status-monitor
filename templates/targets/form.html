@@ -62,6 +62,11 @@
         <input name="http_url" type="url" value="{{ form.http.url }}"
                placeholder="https://example.com/healthz"
                class="mt-1 w-full field font-mono">
+        <span class="mt-1 block text-xs text-slate-500">
+          Some third-party APIs rate-limit by source IP (GitHub: 60 req/h unauthenticated, 5 000 with a token).
+          For those, poll every 5+ min and supply the credential via the Bearer-token field in Advanced HTTP.
+          A 429 / 503 with <code>Retry-After</code> renders as <em>degraded</em>, not <em>down</em>.
+        </span>
       </label>
       <label class="block">
         <span class="text-xs text-slate-500">Expected status</span>

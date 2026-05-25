@@ -9,7 +9,7 @@ use flate2::read::GzDecoder;
 use http_body_util::{BodyExt, Full, Limited};
 use hyper::body::Bytes as HBytes;
 use hyper::header::{
-    ACCEPT_ENCODING, AUTHORIZATION, HeaderName, HeaderValue, LOCATION, USER_AGENT,
+    ACCEPT_ENCODING, AUTHORIZATION, HeaderName, HeaderValue, LOCATION, RETRY_AFTER, USER_AGENT,
 };
 use hyper::{Method, Request, Uri};
 use metrics::counter;
@@ -263,6 +263,12 @@ async fn finalize(
     // hyper bodies are streams and the headers handle becomes unavailable
     // once we move the response into Limited.
     let headers_preview = capture.then(|| snapshot_headers(response.headers()));
+    let retry_after_raw = response
+        .headers()
+        .get(RETRY_AFTER)
+        .and_then(|h| h.to_str().ok())
+        .filter(|s| sanitised_retry_after(s))
+        .map(|s| s.to_string());
 
     let body_remaining = check.timeout.saturating_sub(start.elapsed());
     // Bound at the byte-budget *before* allocation: Limited streams frames
@@ -307,16 +313,8 @@ async fn finalize(
         None => true,
     };
 
-    let (status, error) = if !status_ok {
-        (
-            CheckStatus::Down,
-            Some(format!("unexpected status {status_code}")),
-        )
-    } else if !body_ok {
-        (CheckStatus::Down, Some("body match failed".to_string()))
-    } else {
-        (CheckStatus::Up, None)
-    };
+    let (status, error) =
+        classify_outcome(status_code, status_ok, body_ok, retry_after_raw.as_deref());
 
     let probe = capture.then(|| HttpProbe {
         response_headers_preview: headers_preview.unwrap_or_default(),
@@ -496,6 +494,49 @@ fn map_method(m: HttpMethod) -> Method {
     }
 }
 
+/// Retry-After per RFC 9110: delta-seconds or HTTP-date — both ASCII +
+/// alphanumeric + a handful of punctuation. Anything outside this set is
+/// untrusted upstream input that downstream notifiers (Slack-flavoured
+/// markdown, e.g.) would otherwise render verbatim.
+fn sanitised_retry_after(raw: &str) -> bool {
+    !raw.is_empty()
+        && raw.len() <= 64
+        && raw.bytes().all(|b| {
+            b.is_ascii_alphanumeric() || matches!(b, b' ' | b',' | b':' | b'.' | b'+' | b'-')
+        })
+}
+
+/// 429 / 503 means "we're throttling you, try later" — distinct from a real
+/// outage. Map it to `Degraded` so the monitor reflects back-pressure without
+/// opening an incident. A user who explicitly accepts 429/503 in
+/// `expected_status` is honored first.
+fn classify_outcome(
+    status_code: u16,
+    status_ok: bool,
+    body_ok: bool,
+    retry_after_raw: Option<&str>,
+) -> (CheckStatus, Option<String>) {
+    if !status_ok && matches!(status_code, 429 | 503) {
+        let detail = retry_after_raw
+            .map(|v| format!(" (Retry-After: {v})"))
+            .unwrap_or_default();
+        return (
+            CheckStatus::Degraded,
+            Some(format!("rate-limited {status_code}{detail}")),
+        );
+    }
+    if !status_ok {
+        return (
+            CheckStatus::Down,
+            Some(format!("unexpected status {status_code}")),
+        );
+    }
+    if !body_ok {
+        return (CheckStatus::Down, Some("body match failed".to_string()));
+    }
+    (CheckStatus::Up, None)
+}
+
 fn match_status(code: u16, expected: &ExpectedStatus) -> bool {
     match expected {
         ExpectedStatus::Exact(c) => code == *c,
@@ -562,6 +603,51 @@ mod tests {
             effective_max_redirects(&check("https://x/", true, 250)),
             MAX_REDIRECT_HOPS
         );
+    }
+
+    #[test]
+    fn sanitised_retry_after_rejects_markdown_injection() {
+        assert!(sanitised_retry_after("30"));
+        assert!(sanitised_retry_after("Wed, 21 Oct 2026 07:28:00 GMT"));
+        assert!(!sanitised_retry_after("<https://evil.example|free>"));
+        assert!(!sanitised_retry_after("*bold*"));
+        assert!(!sanitised_retry_after(""));
+        assert!(!sanitised_retry_after(&"a".repeat(65)));
+    }
+
+    #[test]
+    fn classify_outcome_marks_429_with_retry_after_as_degraded() {
+        let (s, err) = classify_outcome(429, false, true, Some("30"));
+        assert!(matches!(s, CheckStatus::Degraded));
+        assert_eq!(err.unwrap(), "rate-limited 429 (Retry-After: 30)");
+    }
+
+    #[test]
+    fn classify_outcome_marks_503_without_retry_after_as_degraded() {
+        let (s, err) = classify_outcome(503, false, true, None);
+        assert!(matches!(s, CheckStatus::Degraded));
+        assert_eq!(err.unwrap(), "rate-limited 503");
+    }
+
+    #[test]
+    fn classify_outcome_honors_user_expecting_429() {
+        let (s, err) = classify_outcome(429, true, true, Some("60"));
+        assert!(matches!(s, CheckStatus::Up));
+        assert!(err.is_none());
+    }
+
+    #[test]
+    fn classify_outcome_real_5xx_stays_down() {
+        let (s, err) = classify_outcome(500, false, true, None);
+        assert!(matches!(s, CheckStatus::Down));
+        assert_eq!(err.unwrap(), "unexpected status 500");
+    }
+
+    #[test]
+    fn classify_outcome_body_mismatch_is_down() {
+        let (s, err) = classify_outcome(200, true, false, None);
+        assert!(matches!(s, CheckStatus::Down));
+        assert_eq!(err.unwrap(), "body match failed");
     }
 
     #[test]

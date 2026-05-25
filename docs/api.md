@@ -115,6 +115,12 @@ Tagged enum, `type` discriminator.
 { "kind": "one_of", "value": [200, 204] }
 ```
 
+#### Rate-limited responses
+
+A response with `429 Too Many Requests` or `503 Service Unavailable` is recorded as `degraded`, not `down` — the upstream is telling us "I'm here, back off." The `error` field carries `rate-limited <code> (Retry-After: <value>)` when the header is present so operators can size the polling interval against what the upstream actually wants. A check that explicitly accepts 429 / 503 via `expected_status` is honored first and stays `up`.
+
+Some third-party APIs rate-limit by source IP regardless. GitHub's unauthenticated REST API is the canonical case: 60 req/h per IP, 5 000 req/h with a token in the `Authorization` header. Poll those endpoints at ≥ 300 s, or attach the token via a header in this spec.
+
 ### TCP
 
 ```jsonc
