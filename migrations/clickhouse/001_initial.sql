@@ -6,18 +6,18 @@
 -- next boot.
 
 CREATE TABLE IF NOT EXISTS check_results (
-    org_id     UUID,
-    target_id  UUID,
-    timestamp  DateTime64(3, 'UTC') CODEC(Delta, ZSTD(1)),
-    status     Enum8('up' = 1, 'down' = 2, 'degraded' = 3, 'error' = 4),
-    duration_ms UInt32 CODEC(T64, ZSTD(1)),
-    dns_ms      Nullable(UInt16),
-    connect_ms  Nullable(UInt16),
-    tls_ms      Nullable(UInt16),
-    ttfb_ms     Nullable(UInt16),
-    response_code Nullable(UInt16),
-    response_size Nullable(UInt32),
-    error       LowCardinality(Nullable(String))
+    org_id           UUID,
+    target_id        UUID,
+    timestamp        DateTime64(3, 'UTC') CODEC(Delta, ZSTD(1)),
+    status           Enum8('up' = 1, 'down' = 2, 'degraded' = 3, 'error' = 4),
+    duration_ms      UInt32 CODEC(T64, ZSTD(1)),
+    dns_ms           Nullable(UInt16),
+    connect_ms       Nullable(UInt16),
+    tls_ms           Nullable(UInt16),
+    ttfb_ms          Nullable(UInt16),
+    response_code    Nullable(UInt16),
+    response_size    Nullable(UInt32),
+    error            LowCardinality(Nullable(String))
 ) ENGINE = MergeTree
 PARTITION BY (toYYYYMMDD(timestamp), org_id)
 ORDER BY (org_id, target_id, timestamp)

@@ -1,19 +1,19 @@
 CREATE TABLE incidents (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    target_id       UUID NOT NULL REFERENCES targets(id) ON DELETE CASCADE,
-    started_at      TIMESTAMPTZ NOT NULL,
-    ended_at        TIMESTAMPTZ,
-    severity        TEXT NOT NULL DEFAULT 'major'
-                    CHECK (severity IN ('minor','major','critical')),
-    status_at_start TEXT NOT NULL
-                    CHECK (status_at_start IN ('down','degraded','error')),
-    check_count     INTEGER NOT NULL DEFAULT 0,
-    error_sample    TEXT,
-    public_title       TEXT,
-    public_description TEXT,
-    duration_secs   INTEGER,
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+    id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    target_id             UUID NOT NULL REFERENCES targets(id) ON DELETE CASCADE,
+    started_at            TIMESTAMPTZ NOT NULL,
+    ended_at              TIMESTAMPTZ,
+    severity              TEXT NOT NULL DEFAULT 'major'
+                          CHECK (severity IN ('minor', 'major', 'critical')),
+    status_at_start       TEXT NOT NULL
+                          CHECK (status_at_start IN ('down', 'degraded', 'error')),
+    check_count           INTEGER NOT NULL DEFAULT 0,
+    error_sample          TEXT,
+    public_title          TEXT,
+    public_description    TEXT,
+    duration_secs         INTEGER,
+    created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at            TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX idx_incidents_target_started ON incidents(target_id, started_at DESC);
