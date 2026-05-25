@@ -9,14 +9,12 @@ use tokio::sync::{Semaphore, mpsc};
 use uuid::Uuid;
 
 use crate::config::CircuitBreakerConfig;
-use crate::domain::{CheckResult, CheckSpec, CheckStatus, OrgId, Target};
+use crate::domain::{CheckResult, CheckSpec, CheckStatus, HOST_THROTTLE_REASON, OrgId, Target};
 use crate::http_client::HttpClients;
 use crate::notifier::event::AlertSignal;
 use crate::observability::metrics::names;
 use crate::worker::circuit_breaker::{BreakerState, CIRCUIT_OPEN_REASON, CircuitBreaker};
 use crate::worker::host_throttle::{HostPermit, HostThrottle, Throttled};
-
-const HOST_THROTTLE_REASON: &str = "throttled: host concurrency cap";
 
 // Hot-path counters resolved once. `counter!` rebuilds the label set on
 // every call — at high QPS that's a per-check allocation we don't need.

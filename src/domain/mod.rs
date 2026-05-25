@@ -38,7 +38,7 @@ pub use public::{
 };
 pub use quota::{Plan, PlanLimits, QuotaEvent};
 pub use reserved_slugs::is_reserved;
-pub use result::{CheckResult, CheckStatus};
+pub use result::{CheckResult, CheckStatus, HOST_THROTTLE_REASON};
 pub use target::{NewTarget, Target, TargetUpdate};
 pub use user::{User, UserId};
 pub use word_lists::generate_signup_slug;

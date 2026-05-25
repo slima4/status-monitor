@@ -213,6 +213,10 @@ impl IncidentWriter {
             .results_store
             .list_results(org, target.id, range, self.cfg.max_results_per_tick, 0)
             .await?;
+        // Drop throttle-degraded (operator-side, not target health) before
+        // sorting — shrinks the sort input by however many rows the throttle
+        // synthesized this lookback window.
+        results.retain(|r| !r.is_throttle_degraded());
         // Storage returns DESC by timestamp; algorithm operates on ASC.
         results.sort_by_key(|r| r.timestamp);
 
@@ -1047,6 +1051,31 @@ mod tests {
         }
         assert_eq!(incidents.insert_count(), baseline_inserts);
         assert_eq!(incidents.close_count(), baseline_closes);
+    }
+
+    #[tokio::test]
+    async fn tick_ignores_throttle_degraded_run() {
+        let target = make_public_target("api");
+        let target_id = target.id;
+        let now = Utc::now();
+        let targets = Arc::new(InMemoryTargetStore::from_vec(vec![target]));
+        let sink = Arc::new(InMemorySink::new());
+        let incidents = Arc::new(InMemoryIncidentStore::new());
+
+        let mut throttled = result(
+            target_id,
+            now - ChronoDuration::seconds(60),
+            CheckStatus::Degraded,
+        );
+        throttled.error = Some(crate::domain::HOST_THROTTLE_REASON.to_string());
+        let mut throttled_2 = throttled.clone();
+        throttled_2.timestamp = now - ChronoDuration::seconds(30);
+        seed_results(&sink, vec![throttled, throttled_2]).await;
+
+        let w = writer(targets, sink, incidents.clone());
+        w.tick_once().await.expect("tick");
+        assert_eq!(incidents.insert_count(), 0);
+        assert!(incidents.all_for(target_id).is_empty());
     }
 
     #[tokio::test]
