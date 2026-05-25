@@ -9,7 +9,9 @@ use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::api::types::{DashboardMetrics, DashboardSparkBucket, StatusBreakdown};
+use crate::api::types::{
+    DashboardMetrics, DashboardSparkBucket, FleetRibbonBucket, StatusBreakdown,
+};
 use crate::config::ClickhouseConfig;
 use crate::domain::{
     CheckResult, CheckStatus, Incident, OrgId, coalesce_incidents, coalesce_incidents_bad_only,
@@ -796,6 +798,58 @@ impl ResultsStore for ClickhouseResultsStore {
                 target_id: r.target_id,
                 bucket_ts: r.bucket_ts as i64,
                 avg_ms: r.avg_ms as f32,
+            })
+            .collect())
+    }
+
+    async fn fleet_ribbon(
+        &self,
+        org: OrgId,
+        from: DateTime<Utc>,
+        to: DateTime<Utc>,
+        bucket_seconds: u32,
+    ) -> Result<Vec<FleetRibbonBucket>> {
+        #[derive(Row, Deserialize)]
+        struct RibbonRow {
+            bucket_ts: u32,
+            samples: u64,
+            up: u64,
+        }
+        let from_s = u32::try_from(from.timestamp().max(0)).unwrap_or(0);
+        let to_s = u32::try_from(to.timestamp().max(0)).unwrap_or(u32::MAX);
+        // Source matview is per-minute; round up to a multiple of 60s
+        // so every output bucket spans an integer number of source rows.
+        let bucket = ((bucket_seconds.max(60) + 59) / 60) * 60;
+        // INTERVAL is a SQL keyword position — clickhouse-rs `bind()`
+        // produces a bare numeric literal, which is fine, but inlining
+        // here keeps `bind()` strictly to value-position arguments.
+        let query = format!(
+            "SELECT \
+               toUInt32(toStartOfInterval(minute, INTERVAL {bucket} SECOND)) AS bucket_ts, \
+               countMerge(total_checks) AS samples, \
+               countIfMerge(up_checks) AS up \
+             FROM check_results_1m \
+             WHERE org_id = ? \
+             AND minute >= fromUnixTimestamp(?) \
+             AND minute < fromUnixTimestamp(?) \
+             GROUP BY bucket_ts \
+             ORDER BY bucket_ts"
+        );
+        let rows: Vec<RibbonRow> = self
+            .client
+            .query(&query)
+            .bind(org.0)
+            .bind(from_s)
+            .bind(to_s)
+            .fetch_all::<RibbonRow>()
+            .await
+            .context("clickhouse fleet_ribbon")?;
+        Ok(rows
+            .into_iter()
+            .map(|r| FleetRibbonBucket {
+                bucket_ts: r.bucket_ts as i64,
+                samples: r.samples,
+                up: r.up,
             })
             .collect())
     }

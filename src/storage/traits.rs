@@ -3,7 +3,8 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use crate::api::types::{
-    DashboardMetrics, DashboardSparkBucket, StatusBreakdown, TagCount, TargetsSummary,
+    DashboardMetrics, DashboardSparkBucket, FleetRibbonBucket, StatusBreakdown, TagCount,
+    TargetsSummary,
 };
 use crate::domain::{CheckResult, CheckStatus, Incident, NewTarget, OrgId, Target, TargetUpdate};
 use crate::error::Result;
@@ -188,4 +189,16 @@ pub trait ResultsStore: Send + Sync {
         from: chrono::DateTime<Utc>,
         to: chrono::DateTime<Utc>,
     ) -> Result<Vec<DashboardSparkBucket>>;
+    /// Fleet-wide uptime ribbon: one bucket per `bucket_seconds` slice
+    /// across every monitor in `org`. Implementations MUST read from the
+    /// `check_results_1m` rollup so the cost stays O(buckets) regardless
+    /// of monitor count. Buckets with no samples are omitted; the caller
+    /// fills the window into a fixed-length array.
+    async fn fleet_ribbon(
+        &self,
+        org: OrgId,
+        from: chrono::DateTime<Utc>,
+        to: chrono::DateTime<Utc>,
+        bucket_seconds: u32,
+    ) -> Result<Vec<FleetRibbonBucket>>;
 }

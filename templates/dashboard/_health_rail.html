@@ -35,4 +35,16 @@
       {{ status_counts.paused }}
     </p>
   </div>
+  <div class="col-span-2 sm:col-span-4">
+    <div class="dashboard-ribbon" role="img" aria-label="Fleet uptime over the last 24 hours">
+      {% for seg in ribbon.segs.iter() %}
+      <span class="dashboard-ribbon__seg dashboard-ribbon__seg--{{ seg.class }}" title="{{ seg.title }}"></span>
+      {% endfor %}
+    </div>
+    <div class="dashboard-ribbon-meta">
+      <span>24h ago</span>
+      <span class="dashboard-ribbon-meta__value">{{ ribbon.uptime_label }}</span>
+      <span>now</span>
+    </div>
+  </div>
 </section>

@@ -4,7 +4,8 @@ use parking_lot::Mutex;
 use uuid::Uuid;
 
 use crate::api::types::{
-    DashboardMetrics, DashboardSparkBucket, StatusBreakdown, TagCount, TargetsSummary,
+    DashboardMetrics, DashboardSparkBucket, FleetRibbonBucket, StatusBreakdown, TagCount,
+    TargetsSummary,
 };
 use crate::domain::{
     CheckResult, CheckStatus, Incident, NewTarget, OrgId, Target, TargetUpdate, coalesce_incidents,
@@ -211,6 +212,38 @@ impl ResultsStore for InMemorySink {
                 target_id,
                 bucket_ts,
                 avg_ms: (sum as f32) / (n.max(1) as f32),
+            })
+            .collect())
+    }
+
+    async fn fleet_ribbon(
+        &self,
+        _org: OrgId,
+        from: DateTime<Utc>,
+        to: DateTime<Utc>,
+        bucket_seconds: u32,
+    ) -> Result<Vec<FleetRibbonBucket>> {
+        let guard = self.results.lock();
+        let bucket = bucket_seconds.max(60) as i64;
+        let mut by_bucket: std::collections::BTreeMap<i64, (u64, u64)> =
+            std::collections::BTreeMap::new();
+        for r in guard.iter() {
+            if r.timestamp < from || r.timestamp >= to {
+                continue;
+            }
+            let slot = (r.timestamp.timestamp() / bucket) * bucket;
+            let entry = by_bucket.entry(slot).or_insert((0, 0));
+            entry.0 += 1;
+            if r.status == CheckStatus::Up {
+                entry.1 += 1;
+            }
+        }
+        Ok(by_bucket
+            .into_iter()
+            .map(|(bucket_ts, (samples, up))| FleetRibbonBucket {
+                bucket_ts,
+                samples,
+                up,
             })
             .collect())
     }

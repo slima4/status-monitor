@@ -1030,6 +1030,28 @@
     .dashboard-rail__value--muted {
         color: var(--color-slate-400);
     }
+
+    /* ── V2 ─ fleet 24h ribbon ────────────────────────────────────── */
+    .dashboard-ribbon {
+        @apply flex w-full items-stretch gap-px overflow-hidden rounded;
+        height: 0.875rem;
+    }
+    .dashboard-ribbon__seg {
+        flex: 1 1 0;
+        min-width: 0;
+    }
+    .dashboard-ribbon__seg--op   { background: var(--sm-state-op-bar); }
+    .dashboard-ribbon__seg--deg  { background: var(--sm-state-deg-bar); }
+    .dashboard-ribbon__seg--maj  { background: var(--sm-state-maj-bar); }
+    .dashboard-ribbon__seg--none { background: var(--sm-state-none-bar); }
+    .dashboard-ribbon-meta {
+        @apply mt-2 flex items-center justify-between text-[11px];
+        color: var(--sm-dashboard-label-fg);
+    }
+    .dashboard-ribbon-meta__value {
+        color: var(--sm-dashboard-value-fg);
+        font-variant-numeric: tabular-nums;
+    }
 }
 
 @keyframes sm-ekg   { to { stroke-dashoffset: -236; } }

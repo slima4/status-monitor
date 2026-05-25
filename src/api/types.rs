@@ -141,3 +141,17 @@ pub struct DashboardSparkBucket {
     pub bucket_ts: i64,
     pub avg_ms: f32,
 }
+
+/// One slice of the fleet 24h uptime ribbon. Aggregates every monitor in
+/// the org into a single bucket so the dashboard renders 48 × 30-minute
+/// cells from a single matview merge — cost stays O(buckets), not O(orgs
+/// × monitors).
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct FleetRibbonBucket {
+    /// Unix-seconds at the bucket's start (`toStartOfInterval(minute, …)`).
+    pub bucket_ts: i64,
+    /// Total samples across every monitor in the bucket window.
+    pub samples: u64,
+    /// Samples with `status = up`.
+    pub up: u64,
+}

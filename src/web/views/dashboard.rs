@@ -24,7 +24,7 @@ use chrono::{DateTime, Duration, Utc};
 use serde::Deserialize;
 use uuid::Uuid;
 
-use crate::api::types::{DashboardMetrics, DashboardSparkBucket};
+use crate::api::types::{DashboardMetrics, DashboardSparkBucket, FleetRibbonBucket};
 use crate::app::AppState;
 use crate::domain::{IncidentSeverity, OrgId};
 use crate::storage::{ActiveIncident, TargetFilter, TimeRange};
@@ -44,6 +44,16 @@ pub(crate) const DEFAULT_RANGE: &str = "24h";
 /// fresh 1 h trace per monitor.
 const SPARK_MINUTES: i64 = 60;
 const SPARK_BUCKETS: usize = SPARK_MINUTES as usize;
+/// Fixed fleet ribbon: 24 h split into 48 × 30-minute cells. Window is
+/// independent of the selected range so the ribbon always reads as
+/// "last 24 h fleet health" regardless of the table's rollup span.
+const RIBBON_HOURS: i64 = 24;
+const RIBBON_BUCKETS: usize = 48;
+const RIBBON_BUCKET_SECONDS: u32 = (RIBBON_HOURS as u32 * 3600) / RIBBON_BUCKETS as u32;
+const _: () = assert!(
+    (RIBBON_HOURS as u32 * 3600) % RIBBON_BUCKETS as u32 == 0,
+    "RIBBON_BUCKETS must divide the 24h window evenly so every second maps to a slot",
+);
 /// Cap rows on a single page render. Beyond this an org would benefit
 /// from search/filter on `/targets`; rendering 5 k rows inline is a
 /// browser-side hazard, not just a server cost.
@@ -105,6 +115,7 @@ pub struct DashboardSnapshot {
     pub active_incidents: Arc<[DashboardActiveIncident]>,
     pub status_counts: StatusCounts,
     pub type_counts: Arc<[TypeCount]>,
+    pub ribbon: FleetRibbon,
 }
 
 #[derive(Clone)]
@@ -137,6 +148,21 @@ pub struct StatusCounts {
     pub degraded: u32,
     pub down: u32,
     pub paused: u32,
+}
+
+/// One cell of the 48-seg fleet ribbon. `class` drives the CSS variant;
+/// `title` is the hover tooltip ("HH:MM · 99.7%" or "HH:MM · no data").
+#[derive(Clone)]
+pub struct FleetRibbonSeg {
+    pub class: &'static str,
+    pub title: String,
+}
+
+#[derive(Clone)]
+pub struct FleetRibbon {
+    pub segs: Arc<[FleetRibbonSeg]>,
+    /// Aggregate uptime label across the full 24h window ("99.71%" or "—").
+    pub uptime_label: String,
 }
 
 #[derive(Clone)]
@@ -179,6 +205,7 @@ pub struct DashboardPage {
     pub active_incidents: Arc<[DashboardActiveIncident]>,
     pub status_counts: StatusCounts,
     pub type_counts: Arc<[TypeCount]>,
+    pub ribbon: FleetRibbon,
 }
 
 #[derive(Template, WebTemplate)]
@@ -194,6 +221,7 @@ pub struct DashboardTablePartial {
     pub active_incidents: Arc<[DashboardActiveIncident]>,
     pub status_counts: StatusCounts,
     pub type_counts: Arc<[TypeCount]>,
+    pub ribbon: FleetRibbon,
 }
 
 pub async fn root(state: State<AppState>, mut parts: Parts) -> Response {
@@ -252,6 +280,7 @@ pub async fn index(
         active_incidents: Arc::clone(&snapshot.active_incidents),
         status_counts: snapshot.status_counts,
         type_counts: Arc::clone(&snapshot.type_counts),
+        ribbon: snapshot.ribbon.clone(),
     })
 }
 
@@ -277,6 +306,7 @@ pub async fn table_partial(
         active_incidents: Arc::clone(&snapshot.active_incidents),
         status_counts: snapshot.status_counts,
         type_counts: Arc::clone(&snapshot.type_counts),
+        ribbon: snapshot.ribbon.clone(),
     };
     let rendered = partial.render().map_err(|e| {
         crate::web::error::WebError::from(crate::error::AppError::Other(anyhow::anyhow!(e)))
@@ -318,6 +348,10 @@ async fn build_snapshot(
     let from = to - range_span(range);
     let time_range = TimeRange { from, to };
     let spark_from = to - Duration::minutes(SPARK_MINUTES);
+    // Snap to a bucket boundary so the CH-side `toStartOfInterval` grid
+    // aligns 1:1 with the labels we render. Without this `from = now -
+    // 24h` is mid-bucket and the tooltips drift by up to 29 minutes.
+    let ribbon_from = snap_to_bucket(to - Duration::hours(RIBBON_HOURS), RIBBON_BUCKET_SECONDS);
 
     let target_filter = TargetFilter {
         limit: Some(ROW_LIMIT + 1),
@@ -326,7 +360,14 @@ async fn build_snapshot(
         enabled: None,
     };
 
-    let (mut targets, rollup, spark_rows, (checks_total, checks_up, incidents), active_raw) = tokio::try_join!(
+    let (
+        mut targets,
+        rollup,
+        spark_rows,
+        (checks_total, checks_up, incidents),
+        active_raw,
+        ribbon_rows,
+    ) = tokio::try_join!(
         state.target_store.list(org, target_filter),
         state.results_store.dashboard_rollup(org, time_range),
         state.results_store.dashboard_sparkline(org, spark_from, to),
@@ -334,6 +375,9 @@ async fn build_snapshot(
         state
             .incident_narration_store
             .list_active(org, ACTIVE_INCIDENTS_LIMIT),
+        state
+            .results_store
+            .fleet_ribbon(org, ribbon_from, to, RIBBON_BUCKET_SECONDS),
     )?;
 
     let truncated = targets.len() > ROW_LIMIT;
@@ -399,6 +443,7 @@ async fn build_snapshot(
         .collect();
 
     let matches = rows.len();
+    let ribbon = build_fleet_ribbon(&ribbon_rows, ribbon_from);
     Ok(DashboardSnapshot {
         rows: Arc::from(rows.into_boxed_slice()),
         kpis,
@@ -408,6 +453,7 @@ async fn build_snapshot(
         active_incidents: Arc::from(active_incidents.into_boxed_slice()),
         status_counts,
         type_counts: Arc::from(build_type_counts(type_acc).into_boxed_slice()),
+        ribbon,
     })
 }
 
@@ -484,6 +530,75 @@ fn build_kpi_cards(
             spark_tint: "info",
         },
     ]
+}
+
+/// Map CH ribbon rows → fixed-length 48-seg view. Buckets the storage
+/// layer omitted (no samples) become `none`. Aggregate uptime label is
+/// computed from the same sample totals so the displayed % matches the
+/// segs the operator sees. `from` must already be bucket-aligned (see
+/// `snap_to_bucket`) so labels line up with the CH `toStartOfInterval`
+/// grid.
+fn build_fleet_ribbon(rows: &[FleetRibbonBucket], from: DateTime<Utc>) -> FleetRibbon {
+    let from_ts = from.timestamp();
+    let bucket = RIBBON_BUCKET_SECONDS as i64;
+    let mut filled: [(u64, u64); RIBBON_BUCKETS] = [(0, 0); RIBBON_BUCKETS];
+    let mut total_samples: u64 = 0;
+    let mut total_up: u64 = 0;
+    for r in rows {
+        let offset = r.bucket_ts - from_ts;
+        if offset < 0 {
+            continue;
+        }
+        let slot = offset / bucket;
+        if slot >= RIBBON_BUCKETS as i64 {
+            continue;
+        }
+        let slot = slot as usize;
+        filled[slot].0 += r.samples;
+        filled[slot].1 += r.up;
+        total_samples += r.samples;
+        total_up += r.up;
+    }
+    let mut segs: Vec<FleetRibbonSeg> = Vec::with_capacity(RIBBON_BUCKETS);
+    for (i, (samples, up)) in filled.iter().enumerate() {
+        let slot_start = from + Duration::seconds(i as i64 * bucket);
+        // One pre-sized buffer per seg, no intermediate `time_label`
+        // String — chrono's `DelayedFormat` is a `Display` adapter we
+        // can write straight into the title buffer.
+        let mut title = String::with_capacity(24);
+        let class = if *samples == 0 {
+            write!(&mut title, "{} · no data", slot_start.format("%H:%M")).unwrap();
+            "none"
+        } else {
+            let pct = (*up as f64 / *samples as f64) * 100.0;
+            write!(&mut title, "{} · {:.1}%", slot_start.format("%H:%M"), pct).unwrap();
+            ribbon_class(pct)
+        };
+        segs.push(FleetRibbonSeg { class, title });
+    }
+    FleetRibbon {
+        segs: Arc::from(segs.into_boxed_slice()),
+        uptime_label: pct_label(total_samples, total_up),
+    }
+}
+
+/// Round `t` down to the nearest `bucket_seconds` boundary so the
+/// returned `from` matches a CH `toStartOfInterval(_, INTERVAL bucket
+/// SECOND)` grid line.
+fn snap_to_bucket(t: DateTime<Utc>, bucket_seconds: u32) -> DateTime<Utc> {
+    let b = bucket_seconds.max(1) as i64;
+    let snapped = (t.timestamp().div_euclid(b)) * b;
+    DateTime::<Utc>::from_timestamp(snapped, 0).unwrap_or(t)
+}
+
+fn ribbon_class(pct: f64) -> &'static str {
+    if pct >= 99.9 {
+        "op"
+    } else if pct >= 95.0 {
+        "deg"
+    } else {
+        "maj"
+    }
 }
 
 fn render_kpi_spark(agg: &[(f64, u32); SPARK_BUCKETS]) -> (String, String, u32) {
@@ -796,6 +911,10 @@ mod tests {
         }
     }
 
+    fn sample_ribbon() -> FleetRibbon {
+        build_fleet_ribbon(&[], snapped_from())
+    }
+
     fn sample_page() -> DashboardPage {
         let rows = vec![sample_row("api", "up"), sample_row("worker", "degraded")];
         DashboardPage {
@@ -822,6 +941,7 @@ mod tests {
                 }]
                 .into_boxed_slice(),
             ),
+            ribbon: sample_ribbon(),
         }
     }
 
@@ -868,6 +988,7 @@ mod tests {
                 }]
                 .into_boxed_slice(),
             ),
+            ribbon: sample_ribbon(),
         };
         let html = partial.render().unwrap();
         assert!(!html.contains("<!doctype html>"));
@@ -902,6 +1023,7 @@ mod tests {
             active_incidents: Arc::from(Vec::<DashboardActiveIncident>::new().into_boxed_slice()),
             status_counts: StatusCounts::default(),
             type_counts: Arc::from(Vec::<TypeCount>::new().into_boxed_slice()),
+            ribbon: sample_ribbon(),
         };
         let html = page.render().unwrap();
         assert!(html.contains("No monitors yet"));
@@ -994,6 +1116,137 @@ mod tests {
         assert_eq!(counts[0].count, 4);
         assert_eq!(counts[1].label, "HTTP");
         assert_eq!(counts[2].label, "DNS");
+    }
+
+    #[test]
+    fn ribbon_class_partitions_by_uptime() {
+        assert_eq!(ribbon_class(100.0), "op");
+        assert_eq!(ribbon_class(99.9), "op");
+        assert_eq!(ribbon_class(99.89), "deg");
+        assert_eq!(ribbon_class(95.0), "deg");
+        assert_eq!(ribbon_class(94.99), "maj");
+        assert_eq!(ribbon_class(0.0), "maj");
+    }
+
+    fn snapped_from() -> DateTime<Utc> {
+        snap_to_bucket(
+            Utc::now() - Duration::hours(RIBBON_HOURS),
+            RIBBON_BUCKET_SECONDS,
+        )
+    }
+
+    #[test]
+    fn build_fleet_ribbon_emits_48_segs_when_empty() {
+        let from = snapped_from();
+        let r = build_fleet_ribbon(&[], from);
+        assert_eq!(r.segs.len(), RIBBON_BUCKETS);
+        assert!(r.segs.iter().all(|s| s.class == "none"));
+        assert_eq!(r.uptime_label, "—");
+    }
+
+    #[test]
+    fn build_fleet_ribbon_classifies_rows_into_slots() {
+        let from = snapped_from();
+        let from_ts = from.timestamp();
+        let bucket = RIBBON_BUCKET_SECONDS as i64;
+        let rows = vec![
+            FleetRibbonBucket {
+                bucket_ts: from_ts,
+                samples: 100,
+                up: 100,
+            },
+            FleetRibbonBucket {
+                bucket_ts: from_ts + bucket,
+                samples: 100,
+                up: 97,
+            },
+            FleetRibbonBucket {
+                bucket_ts: from_ts + bucket * 2,
+                samples: 100,
+                up: 50,
+            },
+        ];
+        let r = build_fleet_ribbon(&rows, from);
+        assert_eq!(r.segs[0].class, "op");
+        assert_eq!(r.segs[1].class, "deg");
+        assert_eq!(r.segs[2].class, "maj");
+        assert_eq!(r.segs[3].class, "none");
+        assert!(r.uptime_label.starts_with("82.")); // 247/300
+    }
+
+    #[test]
+    fn build_fleet_ribbon_drops_out_of_window_rows() {
+        let from = snapped_from();
+        let from_ts = from.timestamp();
+        // Storage `WHERE minute >= from AND minute < to` should already
+        // filter these, but the view layer drops them defensively so a
+        // clock skew can't smear data into edge slots.
+        let rows = vec![
+            FleetRibbonBucket {
+                bucket_ts: from_ts - 10_000,
+                samples: 10,
+                up: 10,
+            },
+            FleetRibbonBucket {
+                bucket_ts: from_ts + (RIBBON_HOURS * 3600),
+                samples: 10,
+                up: 0,
+            },
+            FleetRibbonBucket {
+                bucket_ts: from_ts + (RIBBON_HOURS * 3600) + 10_000,
+                samples: 10,
+                up: 0,
+            },
+        ];
+        let r = build_fleet_ribbon(&rows, from);
+        assert!(r.segs.iter().all(|s| s.class == "none"));
+        assert_eq!(r.uptime_label, "—");
+    }
+
+    #[test]
+    fn build_fleet_ribbon_handles_all_down_slot() {
+        let from = snapped_from();
+        let rows = vec![FleetRibbonBucket {
+            bucket_ts: from.timestamp(),
+            samples: 50,
+            up: 0,
+        }];
+        let r = build_fleet_ribbon(&rows, from);
+        assert_eq!(r.segs[0].class, "maj");
+        assert!(r.segs[0].title.ends_with("0.0%"));
+        assert_eq!(r.uptime_label, "0.00%");
+    }
+
+    #[test]
+    fn build_fleet_ribbon_sums_multiple_rows_in_same_slot() {
+        // Storage emits one row per CH bucket so this shouldn't happen,
+        // but the +=-into-fixed-array contract is the whole point of the
+        // stack array — pin it.
+        let from = snapped_from();
+        let rows = vec![
+            FleetRibbonBucket {
+                bucket_ts: from.timestamp(),
+                samples: 40,
+                up: 40,
+            },
+            FleetRibbonBucket {
+                bucket_ts: from.timestamp(),
+                samples: 60,
+                up: 56,
+            },
+        ];
+        let r = build_fleet_ribbon(&rows, from);
+        assert_eq!(r.segs[0].class, "deg"); // 96/100 → 96 % → deg
+        assert_eq!(r.uptime_label, "96.00%");
+    }
+
+    #[test]
+    fn snap_to_bucket_floors_to_grid() {
+        let bucket = RIBBON_BUCKET_SECONDS as i64;
+        let t = DateTime::<Utc>::from_timestamp(bucket * 100 + 137, 0).unwrap();
+        let s = snap_to_bucket(t, RIBBON_BUCKET_SECONDS);
+        assert_eq!(s.timestamp() % bucket, 0);
+        assert_eq!(s.timestamp(), bucket * 100);
     }
 
     #[test]
