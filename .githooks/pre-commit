@@ -21,7 +21,10 @@ run() {
 }
 
 run "cargo fmt --check" cargo fmt --all -- --check
-run "cargo clippy" cargo clippy --lib --tests --no-deps -- -D warnings
+# `--all-targets` mirrors CI exactly (benches + examples + bins). Without
+# this, struct-literal drift in `benches/*.rs` passes local clippy and only
+# fails on the CI runner, costing a re-push.
+run "cargo clippy" cargo clippy --all-targets --no-deps -- -D warnings
 
 if command -v ast-grep >/dev/null 2>&1; then
   run "tenant-isolation scan" scripts/check_tenant_isolation.sh
