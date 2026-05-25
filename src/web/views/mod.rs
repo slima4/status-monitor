@@ -18,6 +18,36 @@ use crate::error::AppError;
 use crate::web::CurrentOrg;
 use crate::web::error::WebError;
 
+/// Shared range tab descriptor — the per-page handler builds a `Vec`
+/// from its allowed key set, marking exactly one entry `selected`. One
+/// source so the Console / Detail / Incidents tabs render identical
+/// markup and the active tab can never silently double-fire.
+pub struct RangeOption {
+    pub key: &'static str,
+    pub selected: bool,
+}
+
+pub(crate) fn build_range_options(active: &'static str, keys: &[&'static str]) -> Vec<RangeOption> {
+    keys.iter()
+        .map(|k| RangeOption {
+            key: k,
+            selected: *k == active,
+        })
+        .collect()
+}
+
+/// Returns the matching key from `keys` if `raw` is one of them, else
+/// `default`. Tiny but used by every page that exposes a `?range=` tab
+/// strip — centralised so adding a new preset is one edit.
+pub(crate) fn resolve_range_key(
+    raw: Option<&str>,
+    keys: &[&'static str],
+    default: &'static str,
+) -> &'static str {
+    raw.and_then(|s| keys.iter().copied().find(|k| *k == s))
+        .unwrap_or(default)
+}
+
 /// Resolve the caller's tenant for a `/settings/*` page exactly as the API
 /// does. An *unauthenticated* hit bounces to login (so a bookmarked settings
 /// URL works after sign-in); a Forbidden / DB error surfaces as the HTML

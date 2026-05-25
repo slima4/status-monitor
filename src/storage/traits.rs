@@ -2,7 +2,9 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use crate::api::types::{StatusBreakdown, TagCount, TargetsSummary};
+use crate::api::types::{
+    DashboardMetrics, DashboardSparkBucket, StatusBreakdown, TagCount, TargetsSummary,
+};
 use crate::domain::{CheckResult, CheckStatus, Incident, NewTarget, OrgId, Target, TargetUpdate};
 use crate::error::Result;
 
@@ -170,4 +172,20 @@ pub trait ResultsStore: Send + Sync {
     /// Aggregate uptime and incident count across all targets in `range`.
     /// Returns `(checks_total, checks_up, incident_count)`.
     async fn last_n_summary(&self, org: OrgId, range: TimeRange) -> Result<(u64, u64, u64)>;
+    /// Per-monitor rollup for the operator dashboard table. One row per
+    /// target with samples/up/p50/p95/last_status in `range`. Targets
+    /// with no samples are omitted; the caller joins the result with the
+    /// target list and synthesises a zero-sample row when needed.
+    async fn dashboard_rollup(&self, org: OrgId, range: TimeRange)
+    -> Result<Vec<DashboardMetrics>>;
+    /// Minute-bucketed average duration for the last 60 minutes, every
+    /// monitor in the org. Drives the per-row sparkline. Implementations
+    /// MUST read from the `check_results_1m` rollup (already aggregated
+    /// per minute) so the cost stays cheap even for large orgs.
+    async fn dashboard_sparkline(
+        &self,
+        org: OrgId,
+        from: chrono::DateTime<Utc>,
+        to: chrono::DateTime<Utc>,
+    ) -> Result<Vec<DashboardSparkBucket>>;
 }

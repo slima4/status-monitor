@@ -82,7 +82,11 @@ impl IntoResponse for WebError {
             | AppError::Io(_)
             | AppError::BindAddr { .. }
             | AppError::Other(_)) => {
-                tracing::error!(error = %err, "web handler failed");
+                // `%err` shows only the topmost context (anyhow Display).
+                // `?err` walks the source chain so a `.context("foo")?` on
+                // top of a ClickHouse / Postgres / reqwest error surfaces
+                // the underlying line, not just our wrapper string.
+                tracing::error!(error = ?err, "web handler failed");
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     InternalErrorPage { active_tab: "" },

@@ -28,6 +28,8 @@ ORDER BY (org_id, target_id, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 90 DAY
 SETTINGS index_granularity = 8192;
 
+-- Per-minute pre-aggregation; dashboard rollup merges from here so a
+-- 90d / 1k-monitor scan stays O(minutes), not O(raw checks).
 CREATE MATERIALIZED VIEW IF NOT EXISTS check_results_1m
 ENGINE = AggregatingMergeTree
 PARTITION BY (toYYYYMMDD(minute), org_id)
@@ -40,6 +42,7 @@ AS SELECT
     countState() AS total_checks,
     countIfState(status = 'up') AS up_checks,
     avgState(duration_ms) AS avg_duration_ms,
-    quantileState(0.99)(duration_ms) AS p99_duration_ms
+    quantilesState(0.5, 0.95, 0.99)(duration_ms) AS duration_quantiles,
+    argMaxState(status, timestamp) AS last_status_state
 FROM check_results
 GROUP BY org_id, target_id, minute;

@@ -40,6 +40,17 @@ pub type DashboardCache = Cache<OrgId, Arc<DashboardSummary>>;
 pub type LiveDataCache =
     Cache<(OrgId, uuid::Uuid, &'static str), Arc<crate::web::views::targets_detail::LiveData>>;
 
+/// Operator-dashboard page snapshot: KPI strip + per-monitor rollup +
+/// sparkline buckets for one (org, range) pair. Distinct from the
+/// `DashboardSummary` API cache above — that one stores the JSON donut
+/// payload at `/dashboard/summary`, this one stores the full V3 HTML
+/// page snapshot. 5s TTL absorbs both the htmx range re-swap and the
+/// auto-refresh poll. `Arc` keeps the cache-hit path a pointer bump
+/// (the snapshot can grow large at 1k+ monitors). Keyed on the static
+/// range key so the four tabs don't share entries.
+pub type DashboardPageCache =
+    Cache<(OrgId, &'static str), Arc<crate::web::views::dashboard::DashboardSnapshot>>;
+
 /// Builder for the 5-second per-org dashboard cache. The moka `sync::Cache`
 /// is cheap to clone (everything inside is `Arc`), so it lives in `AppState`
 /// directly rather than behind another `Arc`.
@@ -65,6 +76,18 @@ fn build_live_data_cache() -> LiveDataCache {
         .build()
 }
 
+/// Per-(org, range_key) dashboard-page snapshot cache. Each entry is
+/// heavier than a per-target snapshot (one row per monitor + ~60 spark
+/// buckets per monitor), so cap entries lower than `LiveDataCache`:
+/// 1024 orgs × 4 ranges = 4096 max. moka evicts on capacity AND on
+/// the 5s TTL.
+fn build_dashboard_page_cache() -> DashboardPageCache {
+    Cache::builder()
+        .time_to_live(Duration::from_secs(5))
+        .max_capacity(4_096)
+        .build()
+}
+
 /// Runtime handles required by API handlers — the storage layer plus enough
 /// scheduler/worker plumbing to support `test`, `check-now`, and the dashboard.
 #[derive(Clone)]
@@ -86,6 +109,7 @@ pub struct AppState {
     pub worker_pool: Arc<WorkerPool>,
     pub dashboard_cache: DashboardCache,
     pub live_data_cache: LiveDataCache,
+    pub dashboard_page_cache: DashboardPageCache,
     pub idempotency: Arc<IdempotencyCache>,
     pub public_source: Arc<dyn PublicSource>,
     pub maintenance_store: Arc<dyn MaintenanceStore>,
@@ -197,6 +221,7 @@ impl AppState {
             worker_pool,
             dashboard_cache: build_dashboard_cache(),
             live_data_cache: build_live_data_cache(),
+            dashboard_page_cache: build_dashboard_page_cache(),
             idempotency: Arc::new(IdempotencyCache::new()),
             public_source,
             maintenance_store,

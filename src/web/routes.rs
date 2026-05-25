@@ -31,7 +31,10 @@ pub fn routes(state: AppState) -> Router {
             "/web/partials/targets/{id}/live",
             get(views::targets_detail::live_partial),
         )
-        .route("/web/partials/dashboard", get(views::dashboard::region))
+        .route(
+            "/web/partials/dashboard",
+            get(views::dashboard::table_partial),
+        )
         .route("/login", get(views::auth::login))
         .route("/recover-account", get(views::auth::recover_account))
         .route("/onboarding/org", get(views::auth::onboarding_org))

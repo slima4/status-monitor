@@ -16,7 +16,9 @@ use crate::error::AppError;
 use crate::storage::{IncidentListQuery, TimeRange, UptimeStats};
 use crate::web::error::{WebError, WebResult};
 use crate::web::filters;
-use crate::web::views::{describe_check, fmt_human, fmt_ts};
+use crate::web::views::{
+    RangeOption, build_range_options, describe_check, fmt_human, fmt_ts, resolve_range_key,
+};
 use crate::web::{AuthedBrowser, CurrentOrg};
 
 // A raw row per check floods the page; the latency/breakdown charts above
@@ -175,11 +177,6 @@ impl From<UptimeStats> for UptimeStatsView {
             uptime_pct: format!("{:.2}", s.uptime_pct),
         }
     }
-}
-
-pub struct RangeOption {
-    pub key: &'static str,
-    pub selected: bool,
 }
 
 /// ISO and human-readable strings for a `(from, to)` window. Both
@@ -427,15 +424,6 @@ pub async fn live_partial(
         .into_response())
 }
 
-fn resolve_range_key(
-    raw: Option<&str>,
-    keys: &[&'static str],
-    default: &'static str,
-) -> &'static str {
-    raw.and_then(|s| keys.iter().copied().find(|k| *k == s))
-        .unwrap_or(default)
-}
-
 /// Maps a preset range key to a window. Explicit `from`/`to` query params
 /// override the preset (custom range case). Covers every key from both
 /// `RANGE_KEYS` and `INCIDENT_RANGE_KEYS` so the shared cached loader
@@ -466,15 +454,6 @@ fn wider_status_window(from: DateTime<Utc>, to: DateTime<Utc>) -> Option<TimeRan
     } else {
         Some(TimeRange { from: widened, to })
     }
-}
-
-fn build_range_options(active: &'static str, keys: &[&'static str]) -> Vec<RangeOption> {
-    keys.iter()
-        .map(|k| RangeOption {
-            key: k,
-            selected: *k == active,
-        })
-        .collect()
 }
 
 impl From<CheckResult> for ResultRow {

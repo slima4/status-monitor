@@ -1,0 +1,104 @@
+{# Operator dashboard body: KPI strip + range tabs + dense monitor table.
+   Self-rearming auto-refresh wraps the whole partial so a swap keeps
+   polling at 5 s, and the range tabs swap the same `#dashboard-table`
+   target with `?range=…`. #}
+<div id="dashboard-table"
+     hx-get="/web/partials/dashboard?range={{ range }}"
+     hx-trigger="every 5s"
+     hx-swap="outerHTML"
+     role="status"
+     aria-live="polite"
+     class="space-y-4">
+
+  <section class="kpi-strip">
+    <div class="sticker-card kpi-card">
+      <p class="kpi-card__label">Uptime · {{ range }}</p>
+      <p class="kpi-card__value">{{ kpis.uptime_pct_label }}</p>
+      <p class="kpi-card__hint">
+        Incidents (24h):
+        <span class="{% if kpis.incidents > 0 %}metric-alert{% else %}metric-quiet{% endif %}">{{ kpis.incidents }}</span>
+      </p>
+    </div>
+    <div class="sticker-card kpi-card">
+      <p class="kpi-card__label">Avg response · {{ range }}</p>
+      <p class="kpi-card__value">{{ kpis.avg_response_ms_label }}</p>
+      <p class="kpi-card__hint">across all monitors</p>
+    </div>
+    <div class="sticker-card kpi-card">
+      <p class="kpi-card__label">Checks · {{ range }}</p>
+      <p class="kpi-card__value">{{ kpis.checks_label }}</p>
+      <p class="kpi-card__hint">total observations</p>
+    </div>
+  </section>
+
+  <div class="flex flex-wrap items-center justify-between gap-2">
+    <div class="range-tabs" role="tablist" aria-label="Time range">
+      {% for opt in range_options %}
+      <button type="button"
+              role="tab"
+              aria-selected="{% if opt.selected %}true{% else %}false{% endif %}"
+              hx-get="/web/partials/dashboard?range={{ opt.key }}"
+              hx-target="#dashboard-table"
+              hx-swap="outerHTML"
+              hx-push-url="/?range={{ opt.key }}"
+              class="range-tabs__btn{% if opt.selected %} range-tabs__btn--active{% endif %}"
+              >{{ opt.key }}</button>
+      {% endfor %}
+    </div>
+    {% if truncated %}
+    <p class="text-xs text-slate-500">
+      Showing first {{ matches }} monitors —
+      <a href="/targets" class="underline">search the full list</a>.
+    </p>
+    {% endif %}
+  </div>
+
+  <div class="sticker-card dashboard-card">
+    {% if rows.is_empty() %}
+    <p class="dashboard-empty">No monitors match this range.</p>
+    {% else %}
+    <div class="dashboard-table" role="table" aria-label="Monitors with status, percentiles and recent latency">
+      <div class="dashboard-head" role="row">
+        <span aria-label="status"></span>
+        <span>Monitor</span>
+        <span>Type</span>
+        <span class="text-right">p50</span>
+        <span>Latency · 60min</span>
+        <span class="text-right">p95</span>
+        <span class="text-right">Err%</span>
+        <span class="text-right">{{ range }}</span>
+      </div>
+      {% for row in rows.iter() %}
+      <div class="dashboard-row"
+           role="row"
+           data-status="{{ row.last_status }}">
+        <span aria-hidden="true">
+          <span class="dashboard-dot{% if row.last_status != "" %} dashboard-dot--{{ row.last_status }}{% endif %}"></span>
+        </span>
+        <span class="dashboard-cell-monitor">
+          <a href="/targets/{{ row.id }}" class="dashboard-name">{{ row.name }}</a>
+          <span class="dashboard-host" title="{{ row.address }}">{{ row.kind }} {{ row.address }}</span>
+        </span>
+        <span class="dashboard-type">{{ row.kind }}</span>
+        <span class="dashboard-num">{{ row.p50_label }}</span>
+        <span>
+          <svg class="dashboard-spark" viewBox="0 0 160 22" preserveAspectRatio="none" aria-hidden="true">
+            {% if row.spark_path == "" %}
+            <line class="dashboard-spark__baseline" x1="0" x2="160" y1="{{ row.spark_baseline_y }}" y2="{{ row.spark_baseline_y }}" />
+            {% else %}
+            {% if row.spark_fill != "" %}
+            <path class="dashboard-spark__fill" d="{{ row.spark_fill }}" />
+            {% endif %}
+            <path class="dashboard-spark__line" d="{{ row.spark_path }}" />
+            {% endif %}
+          </svg>
+        </span>
+        <span class="dashboard-num">{{ row.p95_label }}</span>
+        <span class="dashboard-num{% if row.last_status == "down" || row.last_status == "error" %} dashboard-num--bad{% endif %}">{{ row.err_pct_label }}</span>
+        <span class="dashboard-num{% if row.samples == 0 %} dashboard-num--muted{% endif %}">{{ row.uptime_pct_label }}</span>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+</div>

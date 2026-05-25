@@ -108,3 +108,36 @@ pub struct TestResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub response_body_snippet: Option<String>,
 }
+
+/// Per-monitor rollup for the operator dashboard table. One row per target
+/// over the chosen range — drives every numeric cell in the Dashboard list
+/// (p50/p95/error rate/uptime%/last status). Produced by a single batched
+/// ClickHouse aggregation so a 1k-monitor org renders in one round-trip.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct DashboardMetrics {
+    pub target_id: Uuid,
+    /// Number of check samples observed in the range.
+    pub samples: u64,
+    /// Samples with `status = up`.
+    pub up: u64,
+    /// Mean check duration in milliseconds. `0` when `samples == 0`.
+    pub avg_ms: u32,
+    /// Median check duration in milliseconds. `0` when `samples == 0`.
+    pub p50_ms: u32,
+    /// 95th-percentile check duration in milliseconds. `0` when `samples == 0`.
+    pub p95_ms: u32,
+    /// Latest observed status string ("up" / "down" / "degraded" / "error"),
+    /// or empty when the range contains no samples.
+    pub last_status: String,
+}
+
+/// One sparkline bucket — minute-aligned average duration. The dashboard
+/// renders a fixed 60-minute trace per target so operators see a
+/// "right-now" trend independent of the selected aggregation range.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct DashboardSparkBucket {
+    pub target_id: Uuid,
+    /// Unix-seconds for the bucket's `toStartOfMinute(timestamp)`.
+    pub bucket_ts: i64,
+    pub avg_ms: f32,
+}

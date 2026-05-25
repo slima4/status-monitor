@@ -47,6 +47,41 @@
     --sm-state-mnt-soft-fg:  var(--color-sky-800);
     --sm-state-none-soft-bg: var(--color-slate-100);
     --sm-state-none-soft-fg: var(--color-slate-700);
+
+    /* Operator-dashboard tokens. Every visual choice in the Dashboard
+       table + KPI strip resolves through one of these so re-skinning
+       the dashboard is a single-block edit. Names are dialect-agnostic
+       (no "sticker"/"flat" baked in) so a future swap to a different
+       look pivots on the values here, not the class names. */
+    --sm-dashboard-row-h:        2.5rem;
+    --sm-dashboard-row-pad-x:    0.75rem;
+    --sm-dashboard-hairline:     var(--color-slate-200);
+    --sm-dashboard-num-fg:       var(--color-slate-800);
+    --sm-dashboard-mono-fg:      var(--color-slate-500);
+    --sm-dashboard-row-hover-bg: var(--color-slate-50);
+    --sm-dashboard-head-fg:      var(--color-slate-500);
+    --sm-dashboard-head-bg:      var(--color-slate-50);
+
+    /* Dot indicator per row — same hue family as `--sm-state-*` so the
+       Dashboard borrows the public-status palette without re-declaring
+       it here. Diameter is a knob so dense vs. comfortable layouts can
+       retune one value. */
+    --sm-dashboard-dot-size:     0.5rem;
+    --sm-dashboard-dot-up:       var(--sm-state-op-bar);
+    --sm-dashboard-dot-degraded: var(--sm-state-deg-bar);
+    --sm-dashboard-dot-down:     var(--sm-state-maj-bar);
+    --sm-dashboard-dot-error:    var(--sm-state-maj-bar);
+    --sm-dashboard-dot-unknown:  var(--sm-state-none-bar);
+
+    /* Sparkline — stroke colour scales with row severity. `--down`
+       fires whenever the row's `data-status="down"` so a bad row's
+       trace reads at a glance without the operator parsing a number. */
+    --sm-spark-w:              280px;
+    --sm-spark-h:              24px;
+    --sm-spark-stroke:         var(--color-slate-400);
+    --sm-spark-stroke-up:      var(--color-emerald-500);
+    --sm-spark-stroke-degraded:var(--color-amber-500);
+    --sm-spark-stroke-down:    var(--color-rose-500);
 }
 
 @layer components {
@@ -652,6 +687,189 @@
     [data-channel-row]:not(:has([data-channel-select]:checked)) [data-notify-recovery] {
         opacity: 0.5;
         pointer-events: none;
+    }
+
+    /* ── Operator dashboard (V3) ───────────────────────────────────────
+       Semantic, layout-agnostic class set for the Dashboard landing page.
+       Templates name structure (`dashboard-row`, `kpi-card`, `range-tabs`)
+       and never appearance. Every colour / spacing / size flows from
+       the `--sm-dashboard-*` and `--sm-spark-*` tokens above, so a future
+       restyle edits the tokens, not the rules. */
+
+    .kpi-strip {
+        @apply grid gap-3 sm:grid-cols-3;
+    }
+    /* Layout only — compose with `sticker-card` at the call site so
+       Tailwind v4 sees only utilities under `@apply` (it cannot
+       compose other component classes). */
+    .kpi-card {
+        @apply flex flex-col gap-1 p-4;
+    }
+    .kpi-card__label {
+        @apply text-xs font-medium uppercase tracking-wide text-slate-500;
+    }
+    .kpi-card__value {
+        @apply text-3xl font-semibold tabular-nums text-slate-900;
+    }
+    .kpi-card__unit {
+        @apply ml-1 text-base font-normal text-slate-500;
+    }
+    .kpi-card__hint {
+        @apply text-xs text-slate-500;
+    }
+
+    .range-tabs {
+        @apply inline-flex items-center gap-1 rounded-lg border-2 bg-white p-1 text-xs font-medium;
+        border-color: var(--color-ink);
+    }
+    .range-tabs__btn {
+        @apply rounded-md px-2.5 py-1 text-slate-600 hover:bg-slate-100;
+    }
+    .range-tabs__btn--active {
+        @apply bg-slate-900 text-white hover:bg-slate-900;
+    }
+
+    /* Composes with `sticker-card` at the call site (see `.kpi-card`). */
+    .dashboard-card {
+        @apply overflow-hidden;
+    }
+    /* Grid columns: dot · name+host · type · p50 · spark · p95 · err% · uptime.
+       Monitor is the only flexible col so it absorbs leftover space. Spark
+       is fixed-width — its SVG uses preserveAspectRatio="none" so a flex
+       cell stretches the line ~5× horizontally and looks scaled. Number
+       cols reserve 7ch so a 4-digit ms reading ("1234 ms") doesn't jitter. */
+    .dashboard-table {
+        display: grid;
+        grid-template-columns:
+            1.25rem
+            minmax(0, 1fr)
+            4.5rem
+            5.5rem
+            var(--sm-spark-w)
+            5.5rem
+            4rem
+            5rem;
+        /* `align-items: stretch` (grid default) so every cell in a row
+           fills the row band — otherwise the 2-line Monitor cell makes
+           the row tall and the 1-line number cells float centered with
+           background+hairline floating mid-row. Per-cell flex re-centers
+           content vertically inside the now-stretched cell. */
+    }
+    .dashboard-head,
+    .dashboard-row {
+        display: contents;
+    }
+    .dashboard-head > span {
+        background: var(--sm-dashboard-head-bg);
+        color: var(--sm-dashboard-head-fg);
+        font-size: 0.7rem;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        padding: 0.5rem var(--sm-dashboard-row-pad-x);
+        border-bottom: 1px solid var(--sm-dashboard-hairline);
+        display: flex;
+        align-items: center;
+    }
+    .dashboard-row > * {
+        padding: 0.5rem var(--sm-dashboard-row-pad-x);
+        border-bottom: 1px solid var(--sm-dashboard-hairline);
+        min-width: 0;
+        display: flex;
+        align-items: center;
+    }
+    .dashboard-row:last-child > * {
+        border-bottom: 0;
+    }
+    .dashboard-row:hover > * {
+        background: var(--sm-dashboard-row-hover-bg);
+    }
+
+    .dashboard-dot {
+        display: inline-block;
+        width: var(--sm-dashboard-dot-size);
+        height: var(--sm-dashboard-dot-size);
+        border-radius: 9999px;
+        background: var(--sm-dashboard-dot-unknown);
+    }
+    .dashboard-dot--up        { background: var(--sm-dashboard-dot-up); }
+    .dashboard-dot--degraded  { background: var(--sm-dashboard-dot-degraded); }
+    .dashboard-dot--down      { background: var(--sm-dashboard-dot-down); }
+    .dashboard-dot--error     { background: var(--sm-dashboard-dot-error); }
+
+    .dashboard-cell-monitor {
+        flex-direction: column;
+        align-items: stretch;
+        justify-content: center;
+    }
+    .dashboard-name {
+        @apply block truncate text-sm font-medium text-slate-900;
+        text-decoration: none;
+    }
+    .dashboard-name:hover {
+        text-decoration: underline;
+    }
+    .dashboard-host {
+        @apply block truncate font-mono text-xs;
+        color: var(--sm-dashboard-mono-fg);
+    }
+    .dashboard-type {
+        @apply font-mono text-xs uppercase;
+        color: var(--sm-dashboard-mono-fg);
+    }
+    .dashboard-num {
+        @apply text-right font-mono text-xs tabular-nums;
+        justify-content: flex-end;
+        color: var(--sm-dashboard-num-fg);
+    }
+    .dashboard-head > .text-right {
+        justify-content: flex-end;
+    }
+    .dashboard-num--muted {
+        color: var(--sm-dashboard-mono-fg);
+    }
+    .dashboard-num--bad {
+        color: var(--color-rose-700);
+    }
+
+    .dashboard-spark {
+        width: 100%;
+        height: var(--sm-spark-h);
+        display: block;
+    }
+    .dashboard-spark__line {
+        fill: none;
+        stroke: var(--sm-spark-stroke);
+        stroke-width: 1.25;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        /* viewBox 160x22 stretches via preserveAspectRatio=none, which
+           scales the stroke unevenly and yields a wedge-shaped line.
+           non-scaling-stroke locks pixel width post-transform. */
+        vector-effect: non-scaling-stroke;
+    }
+    .dashboard-spark__fill {
+        fill: var(--sm-spark-stroke);
+        fill-opacity: 0.10;
+        stroke: none;
+    }
+    .dashboard-row[data-status="up"]       .dashboard-spark__line { stroke: var(--sm-spark-stroke-up); }
+    .dashboard-row[data-status="degraded"] .dashboard-spark__line { stroke: var(--sm-spark-stroke-degraded); }
+    .dashboard-row[data-status="down"]     .dashboard-spark__line { stroke: var(--sm-spark-stroke-down); }
+    .dashboard-row[data-status="error"]    .dashboard-spark__line { stroke: var(--sm-spark-stroke-down); }
+    .dashboard-row[data-status="up"]       .dashboard-spark__fill { fill: var(--sm-spark-stroke-up); }
+    .dashboard-row[data-status="degraded"] .dashboard-spark__fill { fill: var(--sm-spark-stroke-degraded); }
+    .dashboard-row[data-status="down"]     .dashboard-spark__fill { fill: var(--sm-spark-stroke-down); }
+    .dashboard-row[data-status="error"]    .dashboard-spark__fill { fill: var(--sm-spark-stroke-down); }
+    .dashboard-spark__baseline {
+        stroke: var(--sm-dashboard-hairline);
+        stroke-dasharray: 2 3;
+        stroke-width: 1;
+        vector-effect: non-scaling-stroke;
+    }
+
+    .dashboard-empty {
+        @apply px-6 py-10 text-center text-sm text-slate-500;
     }
 }
 

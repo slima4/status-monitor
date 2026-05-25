@@ -9,7 +9,7 @@ use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::api::types::StatusBreakdown;
+use crate::api::types::{DashboardMetrics, DashboardSparkBucket, StatusBreakdown};
 use crate::config::ClickhouseConfig;
 use crate::domain::{
     CheckResult, CheckStatus, Incident, OrgId, coalesce_incidents, coalesce_incidents_bad_only,
@@ -680,6 +680,124 @@ impl ResultsStore for ClickhouseResultsStore {
             error: row.error,
             uptime_pct,
         })
+    }
+
+    async fn dashboard_rollup(
+        &self,
+        org: OrgId,
+        range: TimeRange,
+    ) -> Result<Vec<DashboardMetrics>> {
+        // Merges from the per-minute matview, not raw `check_results`.
+        // `minute` is `DateTime` (UInt32 s), so the bind is u32-seconds.
+        #[derive(Row, Deserialize)]
+        struct RollupRow {
+            #[serde(with = "clickhouse::serde::uuid")]
+            target_id: Uuid,
+            samples: u64,
+            up: u64,
+            avg_ms: f64,
+            quantiles: Vec<f64>,
+            last_status: i8,
+        }
+        let from_s = u32::try_from(range.from.timestamp().max(0)).unwrap_or(0);
+        let to_s = u32::try_from(range.to.timestamp().max(0)).unwrap_or(u32::MAX);
+        let rows: Vec<RollupRow> = self
+            .client
+            .query(
+                "SELECT \
+                   target_id, \
+                   countMerge(total_checks) AS samples, \
+                   countIfMerge(up_checks) AS up, \
+                   avgMerge(avg_duration_ms) AS avg_ms, \
+                   quantilesMerge(0.5, 0.95)(duration_quantiles) AS quantiles, \
+                   argMaxMerge(last_status_state) AS last_status \
+                 FROM check_results_1m \
+                 WHERE org_id = ? \
+                 AND minute >= fromUnixTimestamp(?) \
+                 AND minute < fromUnixTimestamp(?) \
+                 GROUP BY target_id",
+            )
+            .bind(org.0)
+            .bind(from_s)
+            .bind(to_s)
+            .fetch_all::<RollupRow>()
+            .await
+            .context("clickhouse dashboard_rollup")?;
+        Ok(rows
+            .into_iter()
+            .map(|r| {
+                let p50 = r.quantiles.first().copied().unwrap_or(0.0);
+                let p95 = r.quantiles.get(1).copied().unwrap_or(0.0);
+                let avg = if r.avg_ms.is_finite() { r.avg_ms } else { 0.0 };
+                DashboardMetrics {
+                    target_id: r.target_id,
+                    samples: r.samples,
+                    up: r.up,
+                    avg_ms: avg.round().clamp(0.0, u32::MAX as f64) as u32,
+                    p50_ms: p50.round().clamp(0.0, u32::MAX as f64) as u32,
+                    p95_ms: p95.round().clamp(0.0, u32::MAX as f64) as u32,
+                    last_status: CheckStatus::from_enum8(r.last_status).as_str().to_string(),
+                }
+            })
+            .collect())
+    }
+
+    async fn dashboard_sparkline(
+        &self,
+        org: OrgId,
+        from: DateTime<Utc>,
+        to: DateTime<Utc>,
+    ) -> Result<Vec<DashboardSparkBucket>> {
+        // Reads the per-minute pre-aggregated rollup so the cost stays
+        // O(buckets), independent of the raw sample rate. Two type
+        // pitfalls drove the explicit casts here:
+        //
+        // 1. The view's `minute` is `toStartOfMinute(timestamp)` which
+        //    has type `DateTime` (UInt32 seconds), NOT `DateTime64`.
+        //    Comparing it against `fromUnixTimestamp64Milli(i64)`
+        //    (DateTime64) mixes scales and CH rejects the predicate.
+        //    `fromUnixTimestamp(UInt32)` matches the column exactly.
+        //
+        // 2. `avg_duration_ms` is an `avgState` aggregate column, so
+        //    selecting it raw returns the opaque binary state. The
+        //    `avgMerge` finaliser is mandatory in `SELECT`.
+        #[derive(Row, Deserialize)]
+        struct SparkRow {
+            #[serde(with = "clickhouse::serde::uuid")]
+            target_id: Uuid,
+            bucket_ts: u32,
+            avg_ms: f64,
+        }
+        let from_s = u32::try_from(from.timestamp().max(0)).unwrap_or(0);
+        let to_s = u32::try_from(to.timestamp().max(0)).unwrap_or(u32::MAX);
+        let rows: Vec<SparkRow> = self
+            .client
+            .query(
+                "SELECT \
+                   target_id, \
+                   toUInt32(minute) AS bucket_ts, \
+                   avgMerge(avg_duration_ms) AS avg_ms \
+                 FROM check_results_1m \
+                 WHERE org_id = ? \
+                 AND minute >= fromUnixTimestamp(?) \
+                 AND minute < fromUnixTimestamp(?) \
+                 GROUP BY target_id, minute \
+                 ORDER BY target_id, minute",
+            )
+            .bind(org.0)
+            .bind(from_s)
+            .bind(to_s)
+            .fetch_all::<SparkRow>()
+            .await
+            .context("clickhouse dashboard_sparkline")?;
+        Ok(rows
+            .into_iter()
+            .map(|r| DashboardSparkBucket {
+                target_id: r.target_id,
+                bucket_ts: r.bucket_ts as i64,
+                avg_ms: r.avg_ms as f32,
+            })
+            .collect())
     }
 }
 

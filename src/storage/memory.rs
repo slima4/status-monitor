@@ -3,7 +3,9 @@ use chrono::{DateTime, Utc};
 use parking_lot::Mutex;
 use uuid::Uuid;
 
-use crate::api::types::{StatusBreakdown, TagCount, TargetsSummary};
+use crate::api::types::{
+    DashboardMetrics, DashboardSparkBucket, StatusBreakdown, TagCount, TargetsSummary,
+};
 use crate::domain::{
     CheckResult, CheckStatus, Incident, NewTarget, OrgId, Target, TargetUpdate, coalesce_incidents,
 };
@@ -139,6 +141,80 @@ impl ResultsStore for InMemorySink {
         Ok(out)
     }
 
+    async fn dashboard_rollup(
+        &self,
+        _org: OrgId,
+        range: TimeRange,
+    ) -> Result<Vec<DashboardMetrics>> {
+        let guard = self.results.lock();
+        let mut by_target: std::collections::BTreeMap<Uuid, Vec<&CheckResult>> =
+            std::collections::BTreeMap::new();
+        for r in guard.iter() {
+            if r.timestamp < range.from || r.timestamp >= range.to {
+                continue;
+            }
+            by_target.entry(r.target_id).or_default().push(r);
+        }
+        let mut out = Vec::with_capacity(by_target.len());
+        for (tid, mut rows) in by_target {
+            rows.sort_by_key(|r| r.timestamp);
+            let samples = rows.len() as u64;
+            let up = rows.iter().filter(|r| r.status == CheckStatus::Up).count() as u64;
+            let mut durations: Vec<u32> = rows.iter().map(|r| r.duration_ms).collect();
+            durations.sort_unstable();
+            let p50_ms = percentile(&durations, 0.50);
+            let p95_ms = percentile(&durations, 0.95);
+            let avg_ms = if samples == 0 {
+                0
+            } else {
+                (durations.iter().map(|d| *d as u64).sum::<u64>() / samples).min(u32::MAX as u64)
+                    as u32
+            };
+            let last_status = rows
+                .last()
+                .map(|r| r.status.as_str().to_string())
+                .unwrap_or_default();
+            out.push(DashboardMetrics {
+                target_id: tid,
+                samples,
+                up,
+                avg_ms,
+                p50_ms,
+                p95_ms,
+                last_status,
+            });
+        }
+        Ok(out)
+    }
+
+    async fn dashboard_sparkline(
+        &self,
+        _org: OrgId,
+        from: DateTime<Utc>,
+        to: DateTime<Utc>,
+    ) -> Result<Vec<DashboardSparkBucket>> {
+        let guard = self.results.lock();
+        let mut buckets: std::collections::BTreeMap<(Uuid, i64), (u64, u64)> =
+            std::collections::BTreeMap::new();
+        for r in guard.iter() {
+            if r.timestamp < from || r.timestamp >= to {
+                continue;
+            }
+            let minute_ts = (r.timestamp.timestamp() / 60) * 60;
+            let slot = buckets.entry((r.target_id, minute_ts)).or_insert((0, 0));
+            slot.0 += r.duration_ms as u64;
+            slot.1 += 1;
+        }
+        Ok(buckets
+            .into_iter()
+            .map(|((target_id, bucket_ts), (sum, n))| DashboardSparkBucket {
+                target_id,
+                bucket_ts,
+                avg_ms: (sum as f32) / (n.max(1) as f32),
+            })
+            .collect())
+    }
+
     async fn last_n_summary(&self, _org: OrgId, range: TimeRange) -> Result<(u64, u64, u64)> {
         let guard = self.results.lock();
         let mut total = 0u64;
@@ -171,6 +247,21 @@ impl ResultsStore for InMemorySink {
         }
         Ok((total, up, incidents))
     }
+}
+
+/// Nearest-rank percentile on a pre-sorted slice. Mirrors ClickHouse's
+/// `quantile(p)` so the in-memory fixture is byte-comparable to the
+/// production CH impl. Empty / single-element edge cases collapse to the
+/// natural answer (0 / the only value).
+fn percentile(sorted: &[u32], p: f64) -> u32 {
+    if sorted.is_empty() {
+        return 0;
+    }
+    let n = sorted.len();
+    let idx = ((p * n as f64).ceil() as usize)
+        .saturating_sub(1)
+        .min(n - 1);
+    sorted[idx]
 }
 
 fn coalesce_for_target(all: &[CheckResult], target_id: Uuid, range: TimeRange) -> Vec<Incident> {
