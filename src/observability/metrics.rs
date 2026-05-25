@@ -147,4 +147,6 @@ pub mod names {
     pub const NOTIFICATIONS_TOTAL: &str = "status_monitor_notifications_total";
     pub const NOTIFICATIONS_FAILURES: &str = "status_monitor_notifications_failures_total";
     pub const ALERTS_DROPPED: &str = "status_monitor_alerts_dropped_total";
+    pub const HOST_THROTTLE_WAITS: &str = "status_monitor_host_throttle_waits_total";
+    pub const HOST_THROTTLE_DROPS: &str = "status_monitor_host_throttle_drops_total";
 }

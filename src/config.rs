@@ -575,6 +575,27 @@ pub struct CheckerConfig {
     pub default_timeout_ms: u64,
     pub connect_timeout_ms: u64,
     pub default_check_interval_secs: u64,
+    /// Per-(org, host, port) in-flight cap. Tenant-scoped.
+    #[serde(default = "default_per_host_max_inflight")]
+    pub per_host_max_inflight: usize,
+    /// Process-wide RDAP concurrency cap.
+    #[serde(default = "default_rdap_max_inflight")]
+    pub rdap_max_inflight: usize,
+    /// Slot-acquire timeout; drops to Degraded result on expiry.
+    #[serde(default = "default_host_throttle_acquire_ms")]
+    pub host_throttle_acquire_ms: u64,
+}
+
+fn default_per_host_max_inflight() -> usize {
+    2
+}
+
+fn default_rdap_max_inflight() -> usize {
+    1
+}
+
+fn default_host_throttle_acquire_ms() -> u64 {
+    5_000
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -779,6 +800,20 @@ impl AppConfig {
             self.rate_limits.janitor.idle_threshold_hours,
             "rate_limits.janitor.idle_threshold_hours",
         )?;
+        ge1_u64(
+            self.checker.host_throttle_acquire_ms,
+            "checker.host_throttle_acquire_ms",
+        )?;
+        if self.checker.per_host_max_inflight == 0 {
+            return Err(crate::error::AppError::Other(anyhow::anyhow!(
+                "checker.per_host_max_inflight must be >= 1"
+            )));
+        }
+        if self.checker.rdap_max_inflight == 0 {
+            return Err(crate::error::AppError::Other(anyhow::anyhow!(
+                "checker.rdap_max_inflight must be >= 1"
+            )));
+        }
         Ok(())
     }
 

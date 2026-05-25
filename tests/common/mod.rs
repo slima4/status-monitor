@@ -140,6 +140,7 @@ pub fn build_test_app_with_seedable_incidents(
         (*http_clients).clone(),
         cfg.circuit_breaker,
         ResultFanout::storage_only(tx),
+        status_monitor::worker::host_throttle::HostThrottle::permissive(),
     ));
     let public_source = Arc::new(NoopPublicSource::default());
     let maintenance_store: Arc<dyn MaintenanceStore> = Arc::new(InMemoryMaintenanceStore::new());
@@ -212,6 +213,7 @@ fn build_test_app_with_public_source_inner(
         (*http_clients).clone(),
         cfg.circuit_breaker,
         ResultFanout::storage_only(tx),
+        status_monitor::worker::host_throttle::HostThrottle::permissive(),
     ));
     let maintenance_store: Arc<dyn MaintenanceStore> = Arc::new(InMemoryMaintenanceStore::new());
     let incident_narration_store: Arc<dyn IncidentNarrationStore> =
@@ -287,6 +289,7 @@ pub async fn build_test_app_with_pg(
         (*http_clients).clone(),
         cfg.circuit_breaker,
         ResultFanout::storage_only(tx),
+        status_monitor::worker::host_throttle::HostThrottle::permissive(),
     ));
     let public_source = Arc::new(NoopPublicSource::default());
     let maintenance_store: Arc<dyn MaintenanceStore> = Arc::new(InMemoryMaintenanceStore::new());
@@ -390,6 +393,7 @@ fn assemble_pg_router(pool: PgPool, cfg: AppConfig) -> Router {
         (*http_clients).clone(),
         cfg.circuit_breaker,
         ResultFanout::storage_only(tx),
+        status_monitor::worker::host_throttle::HostThrottle::permissive(),
     ));
     let public_source = Arc::new(NoopPublicSource::default());
     let maintenance_store: Arc<dyn MaintenanceStore> = Arc::new(InMemoryMaintenanceStore::new());
@@ -492,6 +496,7 @@ pub fn build_test_app_state(mutate: impl FnOnce(&mut AppConfig)) -> AppState {
         (*http_clients).clone(),
         cfg.circuit_breaker,
         ResultFanout::storage_only(tx),
+        status_monitor::worker::host_throttle::HostThrottle::permissive(),
     ));
     let public_source = Arc::new(NoopPublicSource::default());
     let maintenance_store: Arc<dyn MaintenanceStore> = Arc::new(InMemoryMaintenanceStore::new());
@@ -613,6 +618,9 @@ fn build_clients_with(dns_cfg: DnsConfig) -> status_monitor::error::Result<HttpC
         default_timeout_ms: 5_000,
         connect_timeout_ms: 2_000,
         default_check_interval_secs: 60,
+        per_host_max_inflight: usize::MAX,
+        rdap_max_inflight: usize::MAX,
+        host_throttle_acquire_ms: 60_000,
     };
     let security_cfg = SecurityConfig {
         allow_private_targets: true,

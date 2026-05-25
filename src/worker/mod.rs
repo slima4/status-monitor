@@ -1,6 +1,7 @@
 pub mod circuit_breaker;
 pub mod dns;
 pub mod domain_expiry;
+pub mod host_throttle;
 pub mod http_check;
 pub mod pool;
 pub mod rdap;

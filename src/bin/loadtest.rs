@@ -80,6 +80,9 @@ async fn main() {
         default_timeout_ms: args.timeout_ms,
         connect_timeout_ms: 2_000,
         default_check_interval_secs: 60,
+        per_host_max_inflight: usize::MAX,
+        rdap_max_inflight: usize::MAX,
+        host_throttle_acquire_ms: 60_000,
     };
     // No external resolvers — the mock is on loopback; hickory should never be queried.
     let dns_cfg = DnsConfig {

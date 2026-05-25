@@ -174,11 +174,17 @@ async fn main() -> Result<()> {
     );
     let (alert_tx, alert_rx) = mpsc::channel(cfg.storage.clickhouse.buffer_size.max(1024));
     let fanout = ResultFanout::new(result_tx.clone(), Some(alert_tx));
+    let host_throttle = Arc::new(status_monitor::worker::host_throttle::HostThrottle::new(
+        cfg.checker.per_host_max_inflight,
+        cfg.checker.rdap_max_inflight,
+        std::time::Duration::from_millis(cfg.checker.host_throttle_acquire_ms),
+    ));
     let pool = Arc::new(WorkerPool::new(
         cfg.checker.max_concurrent_checks,
         (*http_clients).clone(),
         cfg.circuit_breaker,
         fanout,
+        host_throttle.clone(),
     ));
     let scheduler_source: Arc<dyn storage::admin::EnabledTargetSource> = Arc::new(
         storage::admin::AdminRepo::new(pg_pool.clone(), cipher.clone(), "scheduler_refresh"),

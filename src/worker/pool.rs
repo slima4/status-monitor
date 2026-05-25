@@ -8,11 +8,14 @@ use tokio::sync::{Semaphore, mpsc};
 use uuid::Uuid;
 
 use crate::config::CircuitBreakerConfig;
-use crate::domain::{CheckResult, CheckSpec, OrgId, Target};
+use crate::domain::{CheckResult, CheckSpec, CheckStatus, OrgId, Target};
 use crate::http_client::HttpClients;
 use crate::notifier::event::AlertSignal;
 use crate::observability::metrics::names;
 use crate::worker::circuit_breaker::{BreakerState, CIRCUIT_OPEN_REASON, CircuitBreaker};
+use crate::worker::host_throttle::{HostPermit, HostThrottle, Throttled};
+
+const HOST_THROTTLE_REASON: &str = "throttled: host concurrency cap";
 
 pub struct CheckTask {
     pub target: Arc<Target>,
@@ -103,6 +106,17 @@ impl ResultFanout {
                 counter!(names::ALERTS_DROPPED, "reason" => "queue_full").increment(1);
             }
         }
+        self.dispatch_storage(result);
+    }
+
+    /// Storage-only dispatch — used for results that must not trigger alert
+    /// fan-out (e.g. throttle drops where the upstream is fine and the
+    /// "Degraded" status is operator-side back-pressure, not a real fault).
+    fn dispatch_storage_only(&self, result: CheckResult) {
+        self.dispatch_storage(result);
+    }
+
+    fn dispatch_storage(&self, result: CheckResult) {
         if let Err(err) = self.storage.try_send(result) {
             tracing::warn!(?err, "result channel full or closed");
             counter!(names::STORAGE_DROPPED, "reason" => "queue_full").increment(1);
@@ -118,6 +132,7 @@ pub struct WorkerPool {
     breakers: Arc<DashMap<String, Arc<CircuitBreaker>>>,
     breaker_cfg: CircuitBreakerConfig,
     fanout: ResultFanout,
+    host_throttle: Arc<HostThrottle>,
 }
 
 impl WorkerPool {
@@ -126,6 +141,7 @@ impl WorkerPool {
         http_clients: HttpClients,
         breaker_cfg: CircuitBreakerConfig,
         fanout: ResultFanout,
+        host_throttle: Arc<HostThrottle>,
     ) -> Self {
         Self {
             semaphore: Arc::new(Semaphore::new(max_concurrent)),
@@ -134,7 +150,12 @@ impl WorkerPool {
             breakers: Arc::new(DashMap::new()),
             breaker_cfg,
             fanout,
+            host_throttle,
         }
+    }
+
+    pub fn host_throttle(&self) -> Arc<HostThrottle> {
+        self.host_throttle.clone()
     }
 
     pub fn max_concurrent(&self) -> usize {
@@ -209,6 +230,7 @@ impl WorkerPool {
         let breakers = self.breakers.clone();
         let breaker_cfg = self.breaker_cfg;
         let fanout = self.fanout.clone();
+        let throttle = self.host_throttle.clone();
         let target = task.target.clone();
         let org_id = task.org_id;
 
@@ -223,14 +245,46 @@ impl WorkerPool {
                 return;
             }
 
+            let host_permit = match acquire_host_slot(&throttle, org_id, &task.target.check).await {
+                Ok(p) => p,
+                Err(Throttled) => {
+                    counter!(names::HOST_THROTTLE_DROPS).increment(1);
+                    let mut result =
+                        CheckResult::error(task.target.id, org_id.0, HOST_THROTTLE_REASON);
+                    result.status = CheckStatus::Degraded;
+                    fanout.dispatch_storage_only(result);
+                    return;
+                }
+            };
+
             let result =
                 crate::worker::execute(task.target.id, org_id.0, &task.target.check, &clients)
                     .await;
             breaker.record(result.status);
             record_metrics(&result);
+            drop(host_permit);
             fanout.dispatch(target, org_id, result);
         });
     }
+}
+
+async fn acquire_host_slot(
+    throttle: &HostThrottle,
+    org_id: OrgId,
+    spec: &CheckSpec,
+) -> Result<Option<HostPermit>, Throttled> {
+    if let CheckSpec::DomainExpiry(d) = spec {
+        let Some(tld) = HostThrottle::rdap_tld(&d.domain) else {
+            return Ok(None);
+        };
+        counter!(names::HOST_THROTTLE_WAITS, "kind" => "rdap").increment(1);
+        return throttle.acquire_rdap(&tld).await.map(Some);
+    }
+    if let Some(key) = HostThrottle::key_for(org_id, spec) {
+        counter!(names::HOST_THROTTLE_WAITS, "kind" => "host").increment(1);
+        return throttle.acquire(key).await.map(Some);
+    }
+    Ok(None)
 }
 
 fn get_or_init_breaker(

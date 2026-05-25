@@ -82,6 +82,10 @@ impl Scheduler {
         for st in diff.added {
             self.spawn_target(st);
         }
+        let evicted = self.pool.host_throttle().sweep();
+        if evicted > 0 {
+            tracing::debug!(evicted, "host throttle sweep");
+        }
         Ok(())
     }
 

@@ -13,6 +13,11 @@ max_concurrent_checks = 50000
 default_timeout_ms = 10000
 connect_timeout_ms = 5000
 default_check_interval_secs = 120
+# Per-(org, host, port) in-flight cap. Tenant-scoped.
+per_host_max_inflight = 2
+# Process-wide RDAP cap (across all tenants).
+rdap_max_inflight = 1
+host_throttle_acquire_ms = 5000
 
 [http_client]
 pool_max_idle_per_host = 100
