@@ -55,14 +55,10 @@ impl CheckTask {
 /// allocate two breakers + grow the map without bound under tenant-
 /// controlled casing.
 pub fn host_for_spec(spec: &CheckSpec) -> String {
+    if let Some((host, _)) = crate::worker::host_throttle::host_port_raw(spec) {
+        return crate::worker::host_throttle::canonical_host(host);
+    }
     match spec {
-        CheckSpec::Http(http) => http
-            .url
-            .host_str()
-            .map(crate::worker::host_throttle::canonical_host)
-            .unwrap_or_else(|| "unknown".to_owned()),
-        CheckSpec::Tcp(tcp) => crate::worker::host_throttle::canonical_host(&tcp.host),
-        CheckSpec::TlsCert(cert) => crate::worker::host_throttle::canonical_host(&cert.host),
         // Group circuit-breaker state by TLD so a flaky registry doesn't
         // trip the breaker for unrelated TLDs.
         CheckSpec::DomainExpiry(d) => {
@@ -76,6 +72,10 @@ pub fn host_for_spec(spec: &CheckSpec) -> String {
             Some(addr) => format!("dns:{addr}"),
             None => format!("dns:{}", d.domain.to_ascii_lowercase()),
         },
+        // host_port_raw covers HTTP/TCP/TLS; an HTTP URL with no host
+        // hits the fallback once (rare — invalid spec slipped past
+        // validation).
+        _ => "unknown".to_owned(),
     }
 }
 

@@ -44,18 +44,8 @@ impl HostThrottle {
     /// returned `Arc<str>` is cached on `ScheduledTarget` and the dispatch
     /// hot path only ever clones the Arc.
     pub fn key_for(org: OrgId, spec: &CheckSpec) -> Option<HostKey> {
-        match spec {
-            CheckSpec::Http(http) => {
-                let host: Arc<str> = Arc::from(normalize_host(http.url.host_str()?));
-                let port = http.url.port_or_known_default()?;
-                Some((org, host, port))
-            }
-            CheckSpec::Tcp(tcp) => Some((org, Arc::from(normalize_host(&tcp.host)), tcp.port)),
-            CheckSpec::TlsCert(cert) => {
-                Some((org, Arc::from(normalize_host(&cert.host)), cert.port))
-            }
-            CheckSpec::Dns(_) | CheckSpec::DomainExpiry(_) => None,
-        }
+        let (host, port) = host_port_raw(spec)?;
+        Some((org, Arc::from(canonical_host(host)), port))
     }
 
     /// Lowercase TLD (last label) of a domain. `None` when the input has no
@@ -175,8 +165,16 @@ pub fn canonical_host(host: &str) -> String {
     host.trim_end_matches('.').to_ascii_lowercase()
 }
 
-fn normalize_host(host: &str) -> String {
-    canonical_host(host)
+/// Network endpoint of a CheckSpec for variants that target one host+port.
+/// `None` for DNS (resolver is the resource) and DomainExpiry (per-TLD
+/// RDAP slot is the resource). Shared by `key_for` and `host_for_spec`.
+pub fn host_port_raw(spec: &CheckSpec) -> Option<(&str, u16)> {
+    match spec {
+        CheckSpec::Http(http) => Some((http.url.host_str()?, http.url.port_or_known_default()?)),
+        CheckSpec::Tcp(tcp) => Some((tcp.host.as_str(), tcp.port)),
+        CheckSpec::TlsCert(cert) => Some((cert.host.as_str(), cert.port)),
+        CheckSpec::Dns(_) | CheckSpec::DomainExpiry(_) => None,
+    }
 }
 
 #[cfg(test)]
@@ -261,8 +259,8 @@ mod tests {
 
     #[test]
     fn host_normalization_collapses_trailing_dot_and_case() {
-        assert_eq!(normalize_host("Example.COM."), "example.com");
-        assert_eq!(normalize_host("example.com"), "example.com");
+        assert_eq!(canonical_host("Example.COM."), "example.com");
+        assert_eq!(canonical_host("example.com"), "example.com");
     }
 
     #[test]
