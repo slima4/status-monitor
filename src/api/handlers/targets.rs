@@ -248,19 +248,34 @@ pub async fn update(
     if let Some(Some(uid)) = update.owner_user_id {
         validate_owner_is_member(&state, org, Some(uid)).await?;
     }
-    // The check-interval floor applies to PATCH too — otherwise a target
-    // created at the floor could be lowered below it, evading the plan.
     if let Some(interval) = update.interval {
-        let min = state
-            .quotas
-            .limit_for_org(org)
-            .await?
-            .min_check_interval_secs;
+        let plan_min = i64::from(
+            state
+                .quotas
+                .limit_for_org(org)
+                .await?
+                .min_check_interval_secs,
+        );
         let requested = interval.as_secs() as i64;
-        if requested < i64::from(min) {
+        let kind_floor = if requested >= MAX_KIND_FLOOR_SECS {
+            0
+        } else {
+            let kind = match update.check.as_ref() {
+                Some(c) => c.kind(),
+                None => state
+                    .target_store
+                    .get(org, id)
+                    .await?
+                    .map(|t| t.check.kind())
+                    .unwrap_or("http"),
+            };
+            min_interval_secs_for_kind(kind) as i64
+        };
+        let effective_floor = plan_min.max(kind_floor);
+        if requested < effective_floor {
             return Err(AppError::min_check_interval(
                 requested,
-                i64::from(min),
+                effective_floor,
                 "free",
             ));
         }
@@ -632,15 +647,29 @@ fn check_abuse(state: &AppState, org: OrgId, check: &crate::domain::CheckSpec) -
     Err(hit.into_app_error())
 }
 
+/// Largest per-kind floor (tls_cert / domain_expiry = 3600s). Any
+/// requested interval at or above this is guaranteed to clear every kind
+/// floor and lets the PATCH path skip the existing-target read.
+const MAX_KIND_FLOOR_SECS: i64 = 3_600;
+
+fn min_interval_secs_for_kind(kind: &str) -> u64 {
+    match kind {
+        "tls_cert" | "domain_expiry" => 3_600,
+        _ => 10,
+    }
+}
+
 /// Per-resource validation, including the plan's check-interval floor. Both
 /// `create` and `bulk_create` run this per item, so the floor is enforced by
 /// construction on every path rather than in one handler (I4).
 fn validate_new_target(new: &NewTarget, guard: &SsrfGuard, min_interval_secs: i64) -> Result<()> {
     let requested = new.interval.as_secs() as i64;
-    if requested < min_interval_secs {
+    let kind_floor = min_interval_secs_for_kind(new.check.kind()) as i64;
+    let effective_floor = min_interval_secs.max(kind_floor);
+    if requested < effective_floor {
         return Err(AppError::min_check_interval(
             requested,
-            min_interval_secs,
+            effective_floor,
             "free",
         ));
     }

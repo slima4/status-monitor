@@ -13,6 +13,33 @@
 
     const PROTOCOL_VARIANTS = ["http", "tcp", "dns", "tls_cert", "domain_expiry"];
 
+    const DEFAULT_INTERVAL = {
+        http: 60, tcp: 60, dns: 60, tls_cert: 86400, domain_expiry: 86400,
+    };
+    const KIND_MIN_INTERVAL = {
+        http: 10, tcp: 10, dns: 10, tls_cert: 3600, domain_expiry: 3600,
+    };
+
+    const intervalInput = document.getElementById("interval_s");
+    if (intervalInput) {
+        if (form.dataset.mode !== "create") {
+            intervalInput.dataset.userTouched = "1";
+        }
+        intervalInput.addEventListener("input", () => {
+            intervalInput.dataset.userTouched = "1";
+        });
+    }
+
+    function applyKindIntervalDefaults(kind) {
+        if (!intervalInput) return;
+        const planMin = Number(form.dataset.minInterval) || 60;
+        const effectiveMin = Math.max(planMin, KIND_MIN_INTERVAL[kind] || 10);
+        intervalInput.min = String(effectiveMin);
+        if (intervalInput.dataset.userTouched !== "1") {
+            intervalInput.value = String(Math.max(effectiveMin, DEFAULT_INTERVAL[kind] || 60));
+        }
+    }
+
     form.addEventListener("change", (evt) => {
         if (evt.target.name !== "check_type") return;
         const want = evt.target.value;
@@ -24,7 +51,11 @@
                 el.classList.toggle("hidden", want !== "http");
             }
         });
+        applyKindIntervalDefaults(want);
     });
+
+    const initialKind = form.querySelector("input[name='check_type']:checked")?.value || "http";
+    applyKindIntervalDefaults(initialKind);
 
     form.addEventListener("click", (evt) => {
         const preset = evt.target.closest("[data-interval-preset]");
@@ -32,6 +63,7 @@
             const input = document.getElementById("interval_s");
             if (input) {
                 input.value = preset.dataset.intervalPreset;
+                input.dataset.userTouched = "1";
                 input.focus({ preventScroll: true });
             }
             return;
@@ -302,7 +334,9 @@
             });
         }
 
-        const minInterval = Number(form.dataset.minInterval) || 60;
+        const planMin = Number(form.dataset.minInterval) || 60;
+        const kind = data.get("check_type") || "http";
+        const minInterval = Math.max(planMin, KIND_MIN_INTERVAL[kind] || 10);
         const interval = parseInt(data.get("interval_s"), 10);
         if (!Number.isInteger(interval) || interval < minInterval) {
             return { error: `Check interval must be at least ${minInterval} seconds.` };

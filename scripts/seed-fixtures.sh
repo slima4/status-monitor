@@ -100,7 +100,8 @@ INSERT INTO targets
    group_name, owner_user_id,
    public_status, public_name, public_group, public_sort_order)
 SELECT org.id, t.name, t.spec::jsonb,
-       60, t.is_enabled, ARRAY['seed-fixtures'],
+       CASE WHEN t.spec::jsonb->>'type' IN ('tls_cert','domain_expiry') THEN 86400 ELSE 60 END,
+       t.is_enabled, ARRAY['seed-fixtures'],
        t.gname,
        CASE WHEN t.has_owner AND '${OWNER_USER_ID}' <> ''
             THEN '${OWNER_USER_ID}'::uuid ELSE NULL END,

@@ -232,6 +232,90 @@ async fn sub_minimum_interval_rejected_on_create() {
     assert_eq!(b["error"]["code"], "MIN_CHECK_INTERVAL");
 }
 
+// ── tls_cert / domain_expiry have a 3600s kind-floor independent of plan ──
+#[tokio::test]
+async fn sub_kind_floor_interval_rejected_on_tls_cert_create() {
+    let Some(pool) = pg_pool_from_env().await else {
+        return;
+    };
+    let (app, _org) = build_test_app_with_pg_store(pool, |_| {}).await;
+    let name = format!("tls-{}", Uuid::now_v7());
+    let body = json!({
+        "name": name,
+        "check": {
+            "type": "tls_cert",
+            "host": "example.com",
+            "port": 443,
+            "server_name": null,
+            "warn_days": 30,
+            "critical_days": 7,
+            "timeout": 5000
+        },
+        "interval": 1800,
+        "tags": []
+    });
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::post("/api/v1/targets")
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body_json(resp).await["error"]["code"], "MIN_CHECK_INTERVAL");
+}
+
+#[tokio::test]
+async fn sub_kind_floor_interval_rejected_on_patch_without_check_field() {
+    let Some(pool) = pg_pool_from_env().await else {
+        return;
+    };
+    let (app, _org) = build_test_app_with_pg_store(pool.clone(), |_| {}).await;
+    let name = format!("tls-{}", Uuid::now_v7());
+    let create = json!({
+        "name": name,
+        "check": {
+            "type": "tls_cert",
+            "host": "example.com",
+            "port": 443,
+            "server_name": null,
+            "warn_days": 30,
+            "critical_days": 7,
+            "timeout": 5000
+        },
+        "interval": 86400,
+        "tags": []
+    });
+    let created = app
+        .clone()
+        .oneshot(
+            Request::post("/api/v1/targets")
+                .header("content-type", "application/json")
+                .body(Body::from(create.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(created.status(), StatusCode::CREATED);
+    let id = body_json(created).await["id"].as_str().unwrap().to_string();
+
+    let patch = json!({ "interval": 1800 });
+    let resp = app
+        .oneshot(
+            Request::patch(format!("/api/v1/targets/{id}"))
+                .header("content-type", "application/json")
+                .body(Body::from(patch.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body_json(resp).await["error"]["code"], "MIN_CHECK_INTERVAL");
+}
+
 // ── the floor is enforced on the *bulk* path too ────────────────
 #[tokio::test]
 async fn sub_minimum_interval_rejected_on_bulk() {

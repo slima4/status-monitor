@@ -16,6 +16,18 @@ pub enum CheckSpec {
     Dns(DnsCheck),
 }
 
+impl CheckSpec {
+    pub fn kind(&self) -> &'static str {
+        match self {
+            CheckSpec::Http(_) => "http",
+            CheckSpec::Tcp(_) => "tcp",
+            CheckSpec::Dns(_) => "dns",
+            CheckSpec::TlsCert(_) => "tls_cert",
+            CheckSpec::DomainExpiry(_) => "domain_expiry",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum HttpMethod {
