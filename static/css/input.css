@@ -76,6 +76,17 @@
     --theme-accent:        var(--color-emerald-600);
     --theme-accent-soft:   var(--color-emerald-50);
 
+    /* Sticker-shadow magnitudes. Pulled out of inline `box-shadow: 6px 6px …`
+       so a theme can flatten the dialect (set to `none`) or scale it down
+       without touching component rules. Defaults tuned quieter than the
+       original 6/4/2 ladder — settings pages were a wall of raised
+       controls. .field + .monitors-toolbar__select intentionally lost
+       their shadow entirely (most-repeated controls at scale). */
+    --theme-shadow-card:         4px 4px 0 0 var(--theme-ink);
+    --theme-shadow-btn:          3px 3px 0 0 var(--theme-ink);
+    --theme-shadow-btn-hover:    4px 5px 0 0 var(--theme-ink);
+    --theme-shadow-btn-disabled: 2px 2px 0 0 var(--theme-ink);
+
     /* Public-status state palette. One source for the 6 day-states; the
        day strip, legend dots, and popover badge all derive from these.
        Retune a hue here — every surface follows in lockstep. */
@@ -366,6 +377,12 @@
 
         --font-display: "JetBrains Mono", ui-monospace, monospace;
         --font-body:    "JetBrains Mono", ui-monospace, monospace;
+
+        /* CRT aesthetic reads flat — terminals don't have raised controls. */
+        --theme-shadow-card:         none;
+        --theme-shadow-btn:          none;
+        --theme-shadow-btn-hover:    none;
+        --theme-shadow-btn-disabled: none;
     }
     .theme-terminal.app-shell::before { opacity: 0.10; mix-blend-mode: screen; }
     .theme-terminal.app-shell::after  { background: none; }
@@ -451,7 +468,7 @@
         @apply rounded-2xl border-2;
         background: var(--theme-surface-elev);
         border-color: var(--theme-ink);
-        box-shadow: 6px 6px 0 0 var(--theme-ink);
+        box-shadow: var(--theme-shadow-card);
     }
 
     /* Same ink edge + hard offset shadow as .sticker-card, sized for a
@@ -460,11 +477,11 @@
     .sticker-btn {
         @apply rounded-xl border-2;
         border-color: var(--theme-ink);
-        box-shadow: 4px 4px 0 0 var(--theme-ink);
+        box-shadow: var(--theme-shadow-btn);
     }
     .sticker-btn:disabled {
         @apply cursor-not-allowed opacity-60;
-        box-shadow: 2px 2px 0 0 var(--theme-ink);
+        box-shadow: var(--theme-shadow-btn-disabled);
     }
     /* Fill for a raised sticker control. One modifier per intent so the
        brand/destructive colour is named once, never re-typed per call site
@@ -502,7 +519,6 @@
         background: var(--theme-surface-elev);
         color: var(--theme-text);
         border-color: var(--theme-ink);
-        box-shadow: var(--control-offset) var(--control-offset) 0 0 var(--theme-ink);
     }
     .field:disabled {
         @apply cursor-not-allowed;
@@ -537,7 +553,7 @@
         background: var(--theme-surface-elev);
         color: var(--theme-text);
         border-color: var(--theme-ink);
-        box-shadow: 4px 4px 0 0 var(--theme-ink);
+        box-shadow: var(--theme-shadow-btn);
         transition: transform 150ms ease, box-shadow 150ms ease;
     }
     .sticker-disclosure > summary::-webkit-details-marker { display: none; }
@@ -545,7 +561,7 @@
        of this vs the [open] rule then can't matter (no source-order trap). */
     .sticker-disclosure:not([open]) > summary:hover {
         @apply -translate-y-0.5;
-        box-shadow: 5px 6px 0 0 var(--theme-ink);
+        box-shadow: var(--theme-shadow-btn-hover);
     }
     /* Open = pressed in: the tile rides ~the 4px shadow offset, shadow
        gone. Keep this 0 0 0 0 (not `none`): `none` can't interpolate, so
@@ -1390,7 +1406,7 @@
         @apply flex flex-wrap items-center gap-3 rounded-2xl border-2 px-3 py-2;
         background: var(--sm-monitors-toolbar-bg);
         border-color: var(--theme-ink);
-        box-shadow: 4px 4px 0 0 var(--theme-ink);
+        box-shadow: var(--theme-shadow-btn);
     }
     .monitors-search {
         @apply flex flex-1 min-w-[16rem] items-center gap-2 rounded-lg px-3;
@@ -1425,15 +1441,10 @@
         -webkit-appearance: none;
         height: 2rem;
         border-color: var(--theme-ink);
-        box-shadow: var(--control-offset) var(--control-offset) 0 0 var(--theme-ink);
         background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 1.5l5 5 5-5'/%3E%3C/svg%3E");
         background-repeat: no-repeat;
         background-position: right 0.55rem center;
         background-size: 0.65rem;
-    }
-    .monitors-toolbar__select:hover {
-        box-shadow: calc(var(--control-offset) + 1px)
-                    calc(var(--control-offset) + 1px) 0 0 var(--theme-ink);
     }
 
     .monitors-chips {
@@ -1455,7 +1466,7 @@
         background: var(--sm-monitors-bulk-bg);
         color: var(--sm-monitors-bulk-fg);
         border-color: var(--theme-ink);
-        box-shadow: 4px 4px 0 0 var(--theme-ink);
+        box-shadow: var(--theme-shadow-btn);
     }
     .monitors-bulk[data-empty="true"] { display: none; }
     .monitors-bulk__count {
@@ -1515,7 +1526,7 @@
         @apply overflow-hidden rounded-2xl border-2;
         background: var(--theme-surface-elev);
         border-color: var(--theme-ink);
-        box-shadow: 4px 4px 0 0 var(--theme-ink);
+        box-shadow: var(--theme-shadow-btn);
     }
     .monitors-group + .monitors-group { @apply mt-3; }
     .monitors-group__head {
@@ -1771,7 +1782,7 @@
         background: var(--theme-surface-elev);
         border: 2px solid var(--theme-ink);
         border-radius: 0.625rem;
-        box-shadow: 4px 4px 0 0 var(--theme-ink);
+        box-shadow: var(--theme-shadow-btn);
         display: flex;
         flex-direction: column;
     }
