@@ -82,57 +82,54 @@
     --control-on:     var(--theme-action-primary); /* checked fill — tracks the primary CTA */
     --control-offset: 2px;
 
-    /* IBM Plex family — unified type system. Display = Plex Serif (warm,
-       geometric serif with subtle slab terminals — keeps editorial feel
-       but reads more technical than Fraunces). Body = Plex Sans (quirky
-       l/a/e, distinctive at small sizes). Mono = Plex Mono. Only loaded
-       when base.html opts in via .app-shell, so marketing/public stay on
-       system sans. */
-    --font-display: "IBM Plex Serif", ui-serif, Georgia, "Times New Roman", serif;
-    --font-body:    "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
+    /* IBM Plex Mono is the type backbone for the org-app shell — every
+       label/heading/CTA renders mono. Display + body share the same stack
+       so a heading and its body copy never desynchronise. Plex Sans is
+       still loaded by the @font-face block below (used by long-form prose
+       inside the marketing-shell article scope, kept here for cross-surface
+       parity). */
+    --font-display: "IBM Plex Mono", ui-monospace, "Cascadia Code", "Fira Code", Menlo, Consolas, monospace;
+    --font-body:    "IBM Plex Mono", ui-monospace, "Cascadia Code", "Fira Code", Menlo, Consolas, monospace;
     --font-mono:    "IBM Plex Mono", ui-monospace, monospace;
 
     /* ── Theme layer ───────────────────────────────────────────────────
-       Semantic surface/text/accent tokens for the org-app shell. The
-       chrome-level --sm-* component tokens resolve through these, so a
-       future re-skin (warm paper → graphite, paper → midnight) is one
-       block of token edits, not a template/class sweep. State colours
-       (--theme-state-*) below are theme-bound too — green=ok / red=bad
-       are the defaults, but a theme can swap the whole dialect. */
-    --theme-surface:       oklch(0.995 0.002 250);      /* near-white, faint cool */
-    --theme-surface-elev:  oklch(1 0 0);                /* card white */
-    --theme-surface-sunk:  oklch(0.975 0.004 250);      /* header / table head wash */
-    --theme-ink:           oklch(0.40 0.025 256);       /* sticker stroke / border — dark grey */
-    --theme-text:          oklch(0.27 0.04 256);
-    --theme-text-muted:    oklch(0.50 0.025 256);
-    --theme-text-quiet:    oklch(0.70 0.020 256);
-    --theme-text-faint:    oklch(0.85 0.005 250);
-    --theme-line:          oklch(0.92 0.005 250);
-    /* Action colours — softer than Tailwind's emerald-600 / sky-700 default
-       so the buttons read sophisticated, not neon. Lightness held so white
-       text keeps WCAG-AA contrast. */
-    --theme-action-primary:        oklch(0.60 0.11 165);
-    --theme-action-primary-hover:  oklch(0.52 0.11 165);
-    --theme-action-accent:         oklch(0.58 0.10 230);
-    --theme-action-accent-hover:   oklch(0.50 0.10 230);
-    --theme-action-danger:         oklch(0.58 0.13 25);
-    --theme-action-danger-hover:   oklch(0.50 0.13 25);
+       Semantic surface/text/accent tokens for the org-app shell. CLI/
+       terminal register — light cool neutrals, status-green as the only
+       chromatic accent, flat surfaces with hairline borders (no sticker
+       hard-shadow). Mirrors the marketing-shell --mk-* palette 1:1 so the
+       two surfaces feel like the same product. */
+    --theme-surface:       oklch(0.985 0.003 240);      /* page bg */
+    --theme-surface-elev:  oklch(0.995 0.001 240);      /* card / surface */
+    --theme-surface-sunk:  oklch(0.96 0.005 240);       /* header / table head wash */
+    --theme-ink:           oklch(0.18 0.015 240);       /* near-black, headlines + strong text */
+    --theme-text:          oklch(0.18 0.015 240);
+    --theme-text-muted:    oklch(0.34 0.012 240);
+    --theme-text-quiet:    oklch(0.45 0.012 240);
+    --theme-text-faint:    oklch(0.78 0.005 240);
+    --theme-line:          oklch(0.86 0.008 240);       /* hairline borders */
+    /* Action colours — status-green primary (ok semantic doubles as CTA),
+       near-black accent for neutral ghost buttons, hot red for danger. */
+    --theme-action-primary:        oklch(0.58 0.16 158);
+    --theme-action-primary-hover:  oklch(0.50 0.16 158);
+    --theme-action-accent:         oklch(0.18 0.015 240);
+    --theme-action-accent-hover:   oklch(0.30 0.012 240);
+    --theme-action-danger:         oklch(0.58 0.20 28);
+    --theme-action-danger-hover:   oklch(0.50 0.20 28);
 
     /* Mascot / EKG / pulse / focus ring track the primary action so brand
        cues stay in lockstep with the CTA colour. */
     --theme-accent:        var(--theme-action-primary);
-    --theme-accent-soft:   oklch(0.95 0.04 165);
+    --theme-accent-soft:   oklch(0.94 0.06 158);
 
-    /* Sticker-shadow magnitudes + colour. Pulled out of inline values so a
-       theme can flatten the dialect (set magnitudes to `none`) or recolour
-       the shadow independently of the border. Strokes stay on --theme-ink
-       (dark, for definition); shadows ride a softer --theme-shadow-colour
-       so the offset reads as depth, not a hard black outline. */
-    --theme-shadow-color:        oklch(0.50 0.02 256);
-    --theme-shadow-card:         3px 3px 0 0 var(--theme-shadow-color);
-    --theme-shadow-btn:          2px 2px 0 0 var(--theme-shadow-color);
-    --theme-shadow-btn-hover:    3px 4px 0 0 var(--theme-shadow-color);
-    --theme-shadow-btn-disabled: 1px 1px 0 0 var(--theme-shadow-color);
+    /* CLI register is flat — terminal UIs don't have raised controls.
+       Btn-hover keeps a subtle inset highlight for tactile feedback;
+       everything else is none. (A theme that wants the sticker dialect
+       back can override these — magnitudes 3px 3px 0 0 was the old default.) */
+    --theme-shadow-color:        oklch(0.20 0.015 240);
+    --theme-shadow-card:         none;
+    --theme-shadow-btn:          none;
+    --theme-shadow-btn-hover:    0 1px 0 oklch(1 0 0 / 0.5) inset;
+    --theme-shadow-btn-disabled: none;
 
     /* Universal state palette. Every operator-app surface that tints by
        meaning (ok/bad/warn) resolves through these tokens — status-badge,
@@ -149,31 +146,31 @@
          -fg-strong   darkest text (alert-card on -bg)
          -fg-onsoft   text on -tint badges
          -strong      solid colour (usage-bar fill, sparkline, edge cue) */
-    --theme-state-ok-bg:         var(--color-emerald-50);
-    --theme-state-ok-tint:       var(--color-emerald-100);
-    --theme-state-ok-line:       var(--color-emerald-300);
-    --theme-state-ok-line-soft:  var(--color-emerald-200);
-    --theme-state-ok-fg:         var(--color-emerald-700);
-    --theme-state-ok-fg-strong:  var(--color-emerald-900);
-    --theme-state-ok-fg-onsoft:  var(--color-emerald-800);
-    --theme-state-ok-strong:     var(--color-emerald-500);
+    --theme-state-ok-bg:         oklch(0.96 0.04 158);
+    --theme-state-ok-tint:       oklch(0.92 0.06 158);
+    --theme-state-ok-line:       oklch(0.70 0.12 158);
+    --theme-state-ok-line-soft:  oklch(0.82 0.08 158);
+    --theme-state-ok-fg:         oklch(0.45 0.14 158);
+    --theme-state-ok-fg-strong:  oklch(0.32 0.12 158);
+    --theme-state-ok-fg-onsoft:  oklch(0.38 0.13 158);
+    --theme-state-ok-strong:     oklch(0.58 0.16 158);
 
-    --theme-state-bad-bg:        var(--color-rose-50);
-    --theme-state-bad-tint:      var(--color-rose-100);
-    --theme-state-bad-line:      var(--color-rose-300);
-    --theme-state-bad-line-soft: var(--color-rose-200);
-    --theme-state-bad-fg:        var(--color-rose-700);
-    --theme-state-bad-fg-strong: var(--color-rose-900);
-    --theme-state-bad-fg-onsoft: var(--color-rose-800);
-    --theme-state-bad-strong:    var(--color-rose-500);
+    --theme-state-bad-bg:        oklch(0.96 0.03 28);
+    --theme-state-bad-tint:      oklch(0.91 0.07 28);
+    --theme-state-bad-line:      oklch(0.70 0.16 28);
+    --theme-state-bad-line-soft: oklch(0.83 0.10 28);
+    --theme-state-bad-fg:        oklch(0.48 0.18 28);
+    --theme-state-bad-fg-strong: oklch(0.34 0.14 28);
+    --theme-state-bad-fg-onsoft: oklch(0.40 0.16 28);
+    --theme-state-bad-strong:    oklch(0.58 0.20 28);
 
-    --theme-state-warn-bg:        var(--color-amber-50);
-    --theme-state-warn-tint:      var(--color-amber-100);
-    --theme-state-warn-line:      var(--color-amber-300);
-    --theme-state-warn-fg:        var(--color-amber-700);
-    --theme-state-warn-fg-strong: var(--color-amber-900);
-    --theme-state-warn-fg-onsoft: var(--color-amber-800);
-    --theme-state-warn-strong:    var(--color-amber-500);
+    --theme-state-warn-bg:        oklch(0.96 0.04 80);
+    --theme-state-warn-tint:      oklch(0.91 0.08 80);
+    --theme-state-warn-line:      oklch(0.70 0.14 80);
+    --theme-state-warn-fg:        oklch(0.48 0.14 80);
+    --theme-state-warn-fg-strong: oklch(0.34 0.10 80);
+    --theme-state-warn-fg-onsoft: oklch(0.40 0.12 80);
+    --theme-state-warn-strong:    oklch(0.78 0.14 80);
 
     /* Public-status state palette. One source for the 6 day-states; the
        day strip, legend dots, and popover badge all derive from these.
@@ -440,33 +437,23 @@
         --sm-monitors-row-bad-bg:      var(--theme-state-bad-bg);
         --sm-monitors-row-selected-bg: var(--theme-state-warn-bg);
     }
-    /* Subtle grain veil. SVG fractal noise inlined (zero extra request),
-       very low opacity — adds paper texture without competing with content.
-       Behind everything (z:0) but in front of the painted bg; siblings
-       use position:relative so the overlay does not eat clicks. */
+    /* Faint horizontal scanlines — pure CSS, no SVG raster cost. Mirrors
+       the marketing-shell atmosphere so both surfaces share the same paper. */
     .app-shell::before {
         content: "";
         position: fixed;
         inset: 0;
         pointer-events: none;
         z-index: 0;
-        background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='320' height='320'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.92' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.55 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
-        opacity: 0.045;
-        mix-blend-mode: multiply;
+        background-image: repeating-linear-gradient(
+            to bottom,
+            transparent 0,
+            transparent 3px,
+            oklch(0 0 0 / 0.018) 3px,
+            oklch(0 0 0 / 0.018) 4px
+        );
     }
-    /* Soft warm mesh in the top band — atmosphere without colour-clash. Two
-       low-saturation radial washes (amber + sky) at < 10% strength keep
-       the paper feel; the mesh fades by the time content reaches it. */
-    .app-shell::after {
-        content: "";
-        position: fixed;
-        inset: 0 0 auto 0;
-        height: 38rem;
-        pointer-events: none;
-        z-index: 0;
-        background:
-            radial-gradient(56rem 22rem at 88% -4%, oklch(0.93 0.04 235 / 0.20), transparent 72%);
-    }
+    .app-shell::after { content: none; }
     .app-shell > * { position: relative; z-index: 1; }
 
     /* Page-load reveal. Direct section children rise in sequence — one
@@ -728,7 +715,7 @@
        drop-blur). The shadow is plain CSS because it's an offset/colour
        arbitrary value @apply can't express cleanly. */
     .sticker-card {
-        @apply rounded-2xl border-2;
+        @apply rounded-sm border;
         background: var(--theme-surface-elev);
         border-color: var(--theme-ink);
         box-shadow: var(--theme-shadow-card);
@@ -738,7 +725,7 @@
        control (smaller offset). Both share var(--theme-ink) so the cartoon
        shadow stays one retunable token — never re-state the offset inline. */
     .sticker-btn {
-        @apply rounded-xl border-2;
+        @apply rounded-sm border;
         border-color: var(--theme-ink);
         box-shadow: var(--theme-shadow-btn);
     }
@@ -764,16 +751,23 @@
        shadow. `--danger` swaps the edge/text to the destructive ramp.
        Padding/size stays at the call site (controls vary). */
     .btn-ghost {
-        @apply rounded-xl border-2;
+        @apply rounded-sm border;
         border-color: var(--theme-line);
-        transition: background-color 120ms ease;
+        font-family: var(--font-mono);
+        transition: background-color 120ms ease, border-color 120ms ease;
     }
-    .btn-ghost:hover    { background: var(--theme-surface-sunk); }
+    .btn-ghost:hover {
+        background: var(--theme-surface-sunk);
+        border-color: var(--theme-ink);
+    }
     .btn-ghost--danger {
         border-color: var(--theme-state-bad-line-soft);
         color: var(--theme-state-bad-fg);
     }
-    .btn-ghost--danger:hover { background: var(--theme-state-bad-bg); }
+    .btn-ghost--danger:hover {
+        background: var(--theme-state-bad-bg);
+        border-color: var(--theme-state-bad-line);
+    }
 
     /* Cartoon text field — input / select / textarea. Same ink edge as
        the sticker family + the small hard offset shadow checkbox/radio
@@ -782,11 +776,14 @@
        .sticker-card convention). Focus ring is the global outline rule
        (a box-shadow ring here would be eaten by this shadow). */
     .field {
-        @apply rounded-xl border-2 px-3 py-2;
+        @apply rounded-sm border px-3 py-2;
         background: var(--theme-surface-elev);
         color: var(--theme-text);
-        border-color: var(--theme-ink);
+        border-color: var(--theme-line);
+        font-family: var(--font-mono);
+        transition: border-color 120ms ease;
     }
+    .field:focus { border-color: var(--theme-accent); }
     .field:disabled {
         @apply cursor-not-allowed;
         background: var(--theme-surface-sunk);
@@ -816,26 +813,23 @@
        every bit of look/motion is here (semantic layer, like sticker-*). */
     .sticker-disclosure > summary {
         @apply flex cursor-pointer select-none list-none items-center
-               justify-between gap-3 rounded-xl border-2 px-4 py-3;
+               justify-between gap-3 rounded-sm border px-4 py-3;
         background: var(--theme-surface-elev);
         color: var(--theme-text);
-        border-color: var(--theme-ink);
-        box-shadow: var(--theme-shadow-btn);
-        transition: transform 150ms ease, box-shadow 150ms ease;
+        border-color: var(--theme-line);
+        font-family: var(--font-mono);
+        transition: background-color 150ms ease, border-color 150ms ease;
     }
     .sticker-disclosure > summary::-webkit-details-marker { display: none; }
     /* :not([open]) so an expanded control never lifts on hover — order
        of this vs the [open] rule then can't matter (no source-order trap). */
     .sticker-disclosure:not([open]) > summary:hover {
-        @apply -translate-y-0.5;
-        box-shadow: var(--theme-shadow-btn-hover);
+        border-color: var(--theme-ink);
+        background: var(--theme-surface-sunk);
     }
-    /* Open = pressed in: the tile rides ~the 4px shadow offset, shadow
-       gone. Keep this 0 0 0 0 (not `none`): `none` can't interpolate, so
-       the collapse must stay a real box-shadow value to transition. */
     .sticker-disclosure[open] > summary {
-        @apply translate-x-[3px] translate-y-[3px];
-        box-shadow: 0 0 0 0 var(--theme-ink);
+        background: var(--theme-surface-sunk);
+        border-color: var(--theme-ink);
     }
     .sticker-disclosure__chevron {
         @apply text-base;
@@ -863,17 +857,27 @@
        shift on the active item (it's already where you are). One source
        so the shell follows the same restyle edit as everything else. */
     .nav-brand {
-        font-family: var(--font-display);
-        font-weight: 500;
-        letter-spacing: -0.018em;
-        font-size: 1.05rem;
+        font-family: var(--font-mono);
+        font-weight: 600;
+        letter-spacing: -0.005em;
+        font-size: 0.9375rem;
+        color: var(--theme-text);
+        text-decoration: none;
+        display: inline-flex;
+        align-items: baseline;
+        gap: 0.5rem;
     }
+    .nav-brand__mark { color: var(--theme-accent); font-weight: 600; }
+    .nav-brand__mark::before { content: "["; color: var(--theme-text-quiet); }
+    .nav-brand__mark::after  { content: "]"; color: var(--theme-text-quiet); }
+    .nav-brand__em { color: var(--theme-accent); font-weight: 600; }
     .nav-link {
         @apply text-sm;
+        font-family: var(--font-mono);
         color: var(--theme-text-muted);
         transition: color 120ms ease;
     }
-    .nav-link:hover     { color: var(--theme-text); }
+    .nav-link:hover     { color: var(--theme-accent); }
     .nav-link--active {
         @apply font-medium;
         color: var(--theme-text);
@@ -884,9 +888,10 @@
        the fill; the ink edge + chunky radius are shared so the cartoon
        language stays consistent whatever the backend state. */
     .sticker-pill {
-        @apply inline-flex items-center gap-1.5 rounded-full border-2 px-3 py-1
-               text-xs font-semibold;
-        border-color: var(--theme-ink);
+        @apply inline-flex items-center gap-1.5 rounded-sm border px-2.5 py-1
+               text-xs font-medium;
+        font-family: var(--font-mono);
+        border-color: var(--theme-line);
     }
     .sticker-pill--ok {
         background: var(--theme-state-ok-tint);
@@ -917,8 +922,8 @@
     .text-state-bad { color: var(--theme-state-bad-fg); }
 
     /* Bigger display scale for hero surfaces — login is the only page that
-       opts in today. Wider type + tighter tracking so Fraunces reads as
-       a true display, not a column header. */
+       opts in today. Wider type + tighter tracking so the mono display
+       reads as a true headline, not a column header. */
     .page-title--hero {
         font-size: clamp(2.5rem, 4vw + 1rem, 3.75rem);
         line-height: 1.02;
@@ -927,12 +932,12 @@
     }
 
     /* Empty-state hero (dashboard + monitors list when no monitors exist).
-       Wider than a regular .sticker-card, big Fraunces title, antenna+EKG
-       motif overhead, warm radial highlight behind the icon. One partial
+       Wider than a regular card, big mono title, antenna+EKG motif overhead,
+       subtle highlight behind the icon. One partial
        (templates/_empty_monitors_hero.html) renders this on both pages so
        wording and motion stay in lockstep. */
     .empty-hero {
-        @apply mx-auto flex flex-col items-center gap-6 rounded-2xl border-2 px-8 py-12 text-center;
+        @apply mx-auto flex flex-col items-center gap-6 rounded-sm border px-8 py-12 text-center;
         max-width: 38rem;
         background: var(--theme-surface-elev);
         border-color: var(--theme-ink);
@@ -1050,7 +1055,7 @@
 
     /* Status count tile. Colour is chosen by meaning via one modifier;
        --muted lets a zero problem-counter recede so a non-zero one pops. */
-    .stat-tile        { @apply rounded-xl border-2 py-3 text-center; }
+    .stat-tile        { @apply rounded-sm border py-3 text-center; }
     .stat-tile__label { @apply text-[11px] font-semibold uppercase tracking-wide; }
     .stat-tile__value { @apply mt-1 text-2xl font-bold tabular-nums; }
     .stat-tile--ok {
@@ -1263,7 +1268,7 @@
        severity reads from the colour, never from green/red hard-coded at
        call sites. Use for form errors, configuration warnings, success
        confirmations after a destructive action. */
-    .alert-card         { @apply rounded-xl border-2 p-3 text-sm; }
+    .alert-card         { @apply rounded-sm border p-3 text-sm; font-family: var(--font-mono); }
     .alert-card--warn {
         background: var(--theme-state-warn-bg);
         border-color: var(--theme-state-warn-line);
@@ -1353,19 +1358,20 @@
        Hides the radio (visual selection comes from :has(input:checked)). */
     .check-type-cards { @apply grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5; }
     .check-type-card {
-        @apply flex cursor-pointer flex-col items-start gap-1 rounded-xl border-2 p-3 text-left transition;
+        @apply flex cursor-pointer flex-col items-start gap-1 rounded-sm border p-3 text-left transition;
         background: var(--theme-surface-elev);
         border-color: var(--theme-line);
+        font-family: var(--font-mono);
     }
     .check-type-card:hover {
         background: var(--theme-surface-sunk);
+        border-color: var(--theme-ink);
     }
     .check-type-card:has(input:checked) {
         background: var(--theme-surface-sunk);
-        border-color: var(--theme-ink);
-        box-shadow: 2px 2px 0 0 var(--theme-shadow-color);
+        border-color: var(--theme-accent);
     }
-    .check-type-card:focus-within { @apply outline-none ring-2 ring-offset-2 ring-slate-400; }
+    .check-type-card:focus-within { @apply outline-none ring-2 ring-offset-2; --tw-ring-color: var(--theme-accent); }
     .check-type-card__name {
         @apply text-sm font-semibold;
         color: var(--theme-text);
@@ -1378,7 +1384,7 @@
     /* Tag chip input. Container is a flex-wrap; the input grows to fill the
        trailing free space so typing always lands inside the same row. */
     .tag-chips {
-        @apply flex flex-wrap items-center gap-1.5 rounded-xl border-2 p-2;
+        @apply flex flex-wrap items-center gap-1.5 rounded-sm border p-2;
         background: var(--theme-surface-elev);
         border-color: var(--theme-line);
         position: relative;
@@ -1403,7 +1409,7 @@
         color: var(--theme-text);
     }
     .tag-suggestions {
-        @apply absolute left-0 top-full z-10 mt-1 max-h-56 w-full overflow-auto rounded-xl border-2 p-1 text-sm shadow;
+        @apply absolute left-0 top-full z-10 mt-1 max-h-56 w-full overflow-auto rounded-sm border p-1 text-sm shadow;
         background: var(--theme-surface-elev);
         border-color: var(--theme-line);
     }
@@ -1418,7 +1424,7 @@
        slots for status pill, latency, headers, body snippet. */
     /* `min-w-0` + `overflow-wrap: anywhere` on the pre stop unbreakable
        tokens from overflowing the fieldset. */
-    .test-result        { @apply min-w-0 rounded-xl border-2 p-3 text-sm; }
+    .test-result        { @apply min-w-0 rounded-sm border p-3 text-sm; }
     .test-result--ok {
         background: var(--theme-state-ok-bg);
         border-color: var(--theme-state-ok-line);
@@ -1463,7 +1469,7 @@
        restyle edits the tokens, not the rules. */
 
     .range-tabs {
-        @apply inline-flex items-center gap-1 rounded-lg border-2 p-1 text-xs font-medium;
+        @apply inline-flex items-center gap-1 rounded-sm border p-1 text-xs font-medium;
         background: var(--theme-surface-elev);
         border-color: var(--theme-ink);
     }
@@ -1842,7 +1848,7 @@
     }
 
     .monitors-toolbar {
-        @apply flex flex-wrap items-center gap-3 rounded-2xl border-2 px-3 py-2;
+        @apply flex flex-wrap items-center gap-3 rounded-sm border px-3 py-2;
         background: var(--sm-monitors-toolbar-bg);
         border-color: var(--theme-ink);
         box-shadow: var(--theme-shadow-btn);
@@ -1873,7 +1879,7 @@
     }
     /* Compact `.field` variant — four fit on one row. */
     .monitors-toolbar__select {
-        @apply rounded-lg border-2 pr-7 pl-2.5 text-sm;
+        @apply rounded-sm border pr-7 pl-2.5 text-sm;
         background: var(--theme-surface-elev);
         color: var(--theme-text);
         appearance: none;
@@ -1901,7 +1907,7 @@
     .monitors-chip__count { @apply font-mono opacity-70; }
 
     .monitors-bulk {
-        @apply mt-3 flex flex-wrap items-center gap-3 rounded-2xl border-2 px-4 py-2 text-sm;
+        @apply mt-3 flex flex-wrap items-center gap-3 rounded-sm border px-4 py-2 text-sm;
         background: var(--sm-monitors-bulk-bg);
         color: var(--sm-monitors-bulk-fg);
         border-color: var(--theme-ink);
@@ -1962,7 +1968,7 @@
     }
 
     .monitors-group {
-        @apply overflow-hidden rounded-2xl border-2;
+        @apply overflow-hidden rounded-sm border;
         background: var(--theme-surface-elev);
         border-color: var(--theme-ink);
         box-shadow: var(--theme-shadow-btn);
@@ -2262,7 +2268,7 @@
     }
 
     .monitors-foot {
-        @apply mt-4 flex items-center justify-between gap-2 rounded-xl border-2 px-4 py-3 text-xs;
+        @apply mt-4 flex items-center justify-between gap-2 rounded-sm border px-4 py-3 text-xs;
         background: var(--theme-surface-elev);
         border-color: var(--theme-line);
         color: var(--theme-text-muted);

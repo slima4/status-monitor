@@ -41,36 +41,39 @@
        class="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:rounded focus:bg-[color:var(--theme-surface-elev)] focus:px-3 focus:py-2 focus:text-sm focus:ring-2 focus:ring-[color:var(--theme-ink)]">
         Skip to main content
     </a>
-    <header class="border-b border-[color:var(--theme-line)] bg-[color:var(--theme-surface-elev)]/80 backdrop-blur-md">
+    <header class="border-b border-[color:var(--theme-line)] bg-[color:var(--theme-surface)]">
         <nav aria-label="Primary" class="container mx-auto flex items-center gap-6 px-4 py-3">
-            <a href="/" class="nav-brand">Status Monitor</a>
+            <a href="/" class="nav-brand" aria-label="Uptimepage — home">
+                <span class="nav-brand__mark" aria-hidden="true">↑</span>
+                <span>uptime<span class="nav-brand__em">page</span></span>
+            </a>
             {% if active_tab != "login" && active_tab != "onboarding" && active_tab != "recover" %}
             <a href="/"{% if active_tab == "dashboard" %} aria-current="page"{% endif %}
-               class="nav-link{% if active_tab == "dashboard" %} nav-link--active{% endif %}">Dashboard</a>
+               class="nav-link{% if active_tab == "dashboard" %} nav-link--active{% endif %}">dashboard</a>
             <a href="/targets"{% if active_tab == "targets" %} aria-current="page"{% endif %}
-               class="nav-link{% if active_tab == "targets" %} nav-link--active{% endif %}">Monitors</a>
-            <a href="/docs" class="nav-link">API docs</a>
+               class="nav-link{% if active_tab == "targets" %} nav-link--active{% endif %}">monitors</a>
+            <a href="/docs" class="nav-link">api docs</a>
             <div class="ml-auto flex items-center gap-4">
               <a href="/settings/account"{% if active_tab == "account" %} aria-current="page"{% endif %}
-                 class="nav-link{% if active_tab == "account" %} nav-link--active{% endif %}">Account</a>
+                 class="nav-link{% if active_tab == "account" %} nav-link--active{% endif %}">account</a>
               <a href="/settings/usage"{% if active_tab == "usage" %} aria-current="page"{% endif %}
-                 class="nav-link{% if active_tab == "usage" %} nav-link--active{% endif %}">Usage</a>
+                 class="nav-link{% if active_tab == "usage" %} nav-link--active{% endif %}">usage</a>
               <a href="/settings/status-page"{% if active_tab == "status_page" %} aria-current="page"{% endif %}
-                 class="nav-link{% if active_tab == "status_page" %} nav-link--active{% endif %}">Status page</a>
+                 class="nav-link{% if active_tab == "status_page" %} nav-link--active{% endif %}">status page</a>
               <a href="/settings/notifications"{% if active_tab == "notifications" %} aria-current="page"{% endif %}
-                 class="nav-link{% if active_tab == "notifications" %} nav-link--active{% endif %}">Notifications</a>
+                 class="nav-link{% if active_tab == "notifications" %} nav-link--active{% endif %}">notifications</a>
               <a href="/settings/api-tokens"{% if active_tab == "settings" %} aria-current="page"{% endif %}
-                 class="nav-link{% if active_tab == "settings" %} nav-link--active{% endif %}">Settings</a>
+                 class="nav-link{% if active_tab == "settings" %} nav-link--active{% endif %}">settings</a>
               <button type="button"
                       hx-post="/auth/logout"
                       hx-headers='{"X-Requested-With":"status-monitor"}'
                       hx-on::after-request="window.location.href='/login'"
-                      class="btn-ghost px-2.5 py-1 text-xs font-medium text-body">
-                Log out
+                      class="btn-ghost px-2.5 py-1 text-xs font-medium">
+                log out
               </button>
             </div>
             {% else %}
-            <a href="/docs" class="nav-link ml-auto">API docs</a>
+            <a href="/docs" class="nav-link ml-auto">api docs</a>
             {% endif %}
         </nav>
     </header>
