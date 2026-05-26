@@ -496,6 +496,32 @@ mod tests {
     }
 
     #[test]
+    fn update_request_rejects_unknown_public_style() {
+        let err = serde_json::from_str::<UpdateStatusPageRequest>(r#"{"public_style":"garbage"}"#)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("unknown variant") && err.contains("garbage"),
+            "expected unknown-variant error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn update_request_absent_public_style_preserves_via_none() {
+        let r: UpdateStatusPageRequest = serde_json::from_str("{}").unwrap();
+        assert!(r.public_style.is_none());
+    }
+
+    #[test]
+    fn update_request_known_public_style_round_trips() {
+        for v in PublicStyle::ALL {
+            let body = format!(r#"{{"public_style":"{v}"}}"#);
+            let r: UpdateStatusPageRequest = serde_json::from_str(&body).unwrap();
+            assert_eq!(r.public_style.unwrap().as_str(), *v);
+        }
+    }
+
+    #[test]
     fn process_logo_rejects_non_image() {
         let err = process_logo(b"<svg xmlns='http://www.w3.org/2000/svg'/>", 1200).unwrap_err();
         assert!(matches!(err, AppError::BadRequest { .. }));
