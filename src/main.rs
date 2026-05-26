@@ -253,6 +253,7 @@ async fn main() -> Result<()> {
         pool.clone(),
         registry.clone(),
         http_pool_stats,
+        pg_pool.clone(),
         &result_tx,
         sample_interval,
         root.clone(),

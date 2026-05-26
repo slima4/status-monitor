@@ -43,6 +43,10 @@ these names verbatim.
 | `status_monitor_workers_in_flight` | gauge | current worker-pool semaphore depth (sampled) |
 | `status_monitor_result_queue_depth` | gauge | depth of the result channel buffer (sampled) |
 | `status_monitor_circuit_breakers_open` | gauge | currently-open breakers (sampled) |
+| `status_monitor_pg_pool_size` | gauge | total connections held in the sqlx Postgres pool (idle + in-use). Bounded above by `storage.postgres.max_connections` |
+| `status_monitor_pg_pool_idle` | gauge | connections sitting idle in the Postgres pool. A persistent `idle = 0` alongside `in_use` at the max is the saturation signal |
+| `status_monitor_pg_pool_in_use` | gauge | connections checked out of the Postgres pool right now (`size − idle`). Alert on a sustained high `in_use / size` ratio |
+| `status_monitor_process_resident_bytes` | gauge | resident set size of the process (`VmRSS`) in bytes. Linux only — absent on non-Linux dev runs. Early-warning signal for slow leaks ahead of the OOM killer |
 
 Scrape interval of 15 s is plenty — counters are written from hot tokio tasks; histograms aggregate per bucket without lock contention.
 

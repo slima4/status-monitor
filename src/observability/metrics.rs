@@ -150,6 +150,22 @@ fn register_descriptions() {
         "status_monitor_scheduler_refresh_duration_ms",
         "Wall-clock duration of one registry refresh tick (Postgres query + decode + DashMap diff). p99 climbing past a few hundred ms means the full-scan refresh is starting to strain at scale — switch to incremental sync"
     );
+    describe_gauge!(
+        "status_monitor_pg_pool_size",
+        "Total connections currently held in the sqlx Postgres pool (idle + in-use). Bounded above by the configured max_connections"
+    );
+    describe_gauge!(
+        "status_monitor_pg_pool_idle",
+        "Connections sitting idle in the Postgres pool. A persistent idle = 0 alongside in_use at the max means saturation"
+    );
+    describe_gauge!(
+        "status_monitor_pg_pool_in_use",
+        "Connections checked out of the Postgres pool right now (size − idle). Alert when the ratio against pool_size stays high for several minutes"
+    );
+    describe_gauge!(
+        "status_monitor_process_resident_bytes",
+        "Resident set size of the status-monitor process in bytes (VmRSS on Linux). Early-warning signal for slow leaks and unbounded growth before the OOM killer triggers; not exposed on non-Linux platforms"
+    );
 }
 
 pub mod names {
@@ -186,4 +202,8 @@ pub mod names {
     pub const SCHEDULER_CONSECUTIVE_REFRESH_FAILURES: &str =
         "status_monitor_scheduler_consecutive_refresh_failures";
     pub const SCHEDULER_REFRESH_DURATION_MS: &str = "status_monitor_scheduler_refresh_duration_ms";
+    pub const PG_POOL_SIZE: &str = "status_monitor_pg_pool_size";
+    pub const PG_POOL_IDLE: &str = "status_monitor_pg_pool_idle";
+    pub const PG_POOL_IN_USE: &str = "status_monitor_pg_pool_in_use";
+    pub const PROCESS_RESIDENT_BYTES: &str = "status_monitor_process_resident_bytes";
 }

@@ -3,6 +3,7 @@ mod common;
 use std::sync::Arc;
 use std::time::Duration;
 
+use sqlx::postgres::PgPoolOptions;
 use status_monitor::http_client::PoolStats;
 use status_monitor::observability::sampler;
 use status_monitor::scheduler::TargetRegistry;
@@ -39,11 +40,20 @@ async fn sampler_runs_and_shuts_down() {
     assert_eq!(registry.len(), 1);
     assert_eq!(tx.max_capacity(), 128);
 
+    // Lazy connect — never actually opens a Postgres connection; pool stats
+    // (size, num_idle) both report 0 and the gauges sample cleanly without
+    // requiring a real DB for this smoke test.
+    let pg_pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect_lazy("postgres://localhost:1/none")
+        .expect("lazy pool");
+
     let shutdown = CancellationToken::new();
     let h = sampler::spawn(
         pool,
         registry,
         PoolStats::new(),
+        pg_pool,
         &tx,
         Duration::from_millis(20),
         shutdown.clone(),

@@ -339,6 +339,51 @@ resource "grafana_rule_group" "pipeline" {
     }
   }
 
+  # Postgres pool saturating. in_use / size > 85% for 5m means almost
+  # every request is competing for the last few connections; the next
+  # spike will start timing out. Critical: pool exhaustion takes the
+  # whole app down (every handler awaits the pool). Tune the ratio if
+  # we observe sustained healthy operation closer to the line.
+  rule {
+    name           = "StatusMonitorPgPoolSaturating"
+    condition      = "C"
+    for            = "5m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+    labels = {
+      severity = "critical"
+      service  = "status-monitor"
+    }
+    annotations = {
+      summary     = "status-monitor: Postgres pool saturating"
+      description = "Postgres pool in_use / size > 0.85 for 5m — pool exhaustion is imminent. Likely causes: slow queries holding connections, traffic spike, or pool max_connections too low for current load. Runbook: runbooks/grafana-cloud.md."
+    }
+    data {
+      ref_id         = "A"
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      relative_time_range {
+        from = 300
+        to   = 0
+      }
+      # max() handles the single-instance case correctly; / size avoids a
+      # fixed threshold that would drift as the pool is resized.
+      model = jsonencode({
+        refId   = "A"
+        instant = true
+        expr    = "(max(status_monitor_pg_pool_in_use) / max(status_monitor_pg_pool_size)) > 0.85"
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = local.threshold_c
+    }
+  }
+
   # Storage write p99 latency high. histogram_quantile over the _bucket
   # series; p99 > 2s sustained for 10m means ClickHouse is degrading
   # before it starts dropping. rate over [10m] (not [5m]): on a
