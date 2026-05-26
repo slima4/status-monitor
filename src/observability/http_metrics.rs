@@ -1,27 +1,17 @@
 //! Per-route HTTP metrics middleware.
 //!
-//! Records `http_requests_total`, `http_request_duration_ms`, and
-//! `http_responses_inflight` for every routed request. The route label is
-//! `MatchedPath` (the path-pattern with placeholders like `/orgs/:id`), not
-//! the concrete URL — cardinality stays bounded by the router's static
-//! route table, regardless of how many distinct orgs or targets the
-//! customers add.
+//! Route label is `MatchedPath` — the path-pattern, not the concrete URL —
+//! so cardinality is bounded by the router's static route table. Method is
+//! clamped to canonical verbs and status is bucketed by class; neither can
+//! be used as a cardinality vector by an attacker spraying junk values.
 //!
-//! Method is clamped to the canonical HTTP verb set; status is bucketed to
-//! `2xx`/`3xx`/`4xx`/`5xx`/`other`. Both keep label cardinality on this hot
-//! path tractable — an attacker spraying `Method::from_bytes(b"AAAA…")` or
-//! exotic status codes can't grow the Prometheus series count.
+//! `/healthz` + `/readyz` short-circuit. Caddy active-health polls them in
+//! a tight loop and would otherwise dominate every SLO ratio — same
+//! suppression as access_log + the trace span factory.
 //!
-//! Health-probe paths (`/healthz`, `/readyz`) short-circuit. Caddy active-
-//! health and the deploy gate poll them in a tight loop; counting every
-//! probe would dominate `http_requests_total` and pollute the SLO ratios
-//! the dashboards compute. The same suppression already exists in the
-//! access-log + trace span paths — keeping it consistent.
-//!
-//! Duration is measured up to response *head* construction (when
-//! `next.run` returns), not body completion. There are no streaming
-//! routes today; if one is added, this becomes head-build latency and
-//! the metric name should be revisited.
+//! Duration is measured up to response head, not body completion. No
+//! streaming routes today; if one is added, the metric measures
+//! head-build latency, not wall time the client experiences.
 
 use std::sync::LazyLock;
 use std::time::Instant;
@@ -37,11 +27,9 @@ use crate::observability::metrics::names;
 
 static INFLIGHT: LazyLock<Gauge> = LazyLock::new(|| gauge!(names::HTTP_RESPONSES_INFLIGHT));
 
-/// RAII guard so the inflight gauge stays accurate across early-return
-/// and `?`-propagation. Release builds use `panic = "abort"` (see
-/// `Cargo.toml`), so a panicking handler restarts the process and the
-/// gauge resets — Drop is the recovery path for non-panic failures, not
-/// for panics.
+/// RAII so the gauge tracks `?`-propagation and early-return paths.
+/// Release builds set `panic = "abort"`, so a panicking handler restarts
+/// the process and the gauge resets — Drop covers the non-panic paths.
 struct InflightGuard;
 
 impl InflightGuard {
@@ -58,16 +46,13 @@ impl Drop for InflightGuard {
 }
 
 pub async fn middleware(req: Request, next: Next) -> Response {
-    // Skip health-probe noise: same contract as access_log + TraceLayer.
     if is_health_path(req.uri().path()) {
         return next.run(req).await;
     }
 
     let method = method_label(req.method());
-    // MatchedPath is populated by axum's routing before this middleware
-    // runs. Fallback handlers (e.g. catch-all 404s) carry no MatchedPath
-    // and bucket under `<unmatched>` — bot-scan noise stays bounded to
-    // one label series rather than one per URL.
+    // Fallback (non-matched) requests carry no MatchedPath and collapse
+    // to one `<unmatched>` series — bot-scan noise stays bounded.
     let route = req
         .extensions()
         .get::<MatchedPath>()
@@ -77,9 +62,8 @@ pub async fn middleware(req: Request, next: Next) -> Response {
     let _guard = InflightGuard::new();
     let started = Instant::now();
     let response = next.run(req).await;
-    // `as_secs_f64() * 1000.0` retains sub-millisecond precision; the
-    // u128 → f64 cast on `as_millis` would floor everything below 1 ms
-    // to zero and collapse fast-path latencies onto a single bucket.
+    // `as_secs_f64() * 1000.0` keeps sub-ms precision; `as_millis()`
+    // would floor every fast handler to the zero bucket.
     let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
     let status = status_class(response.status());
 
@@ -100,11 +84,8 @@ pub async fn middleware(req: Request, next: Next) -> Response {
     response
 }
 
-/// Clamps the request method to a fixed set of canonical verbs. Anything
-/// outside the set — including attacker-crafted `Method::from_bytes(...)`
-/// values that axum's `any(handler)` routes would otherwise pass through
-/// — buckets to `"other"`, so the `method` label can't be used as an
-/// unbounded cardinality vector.
+/// Clamps to a fixed verb set so `Method::from_bytes(b"AAAA…")` reaching
+/// an `any(handler)` route can't open new label series.
 fn method_label(method: &Method) -> &'static str {
     match method.as_str() {
         "GET" => "GET",
@@ -160,7 +141,6 @@ mod tests {
     fn method_label_buckets_unknown_verbs_under_other() {
         let custom = Method::from_bytes(b"PROPFIND").expect("valid token");
         assert_eq!(method_label(&custom), "other");
-        // Attacker-style unbounded value — must NOT escape the bucket.
         let fuzz = Method::from_bytes(b"AAAAAAAA").expect("valid token");
         assert_eq!(method_label(&fuzz), "other");
     }
