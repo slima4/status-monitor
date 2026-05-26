@@ -632,6 +632,22 @@
     /* Semantic layer: templates name meaning, never appearance. Restyle =
        edit these rules, no template touched. State is one `--modifier`. */
 
+    /* Body-copy helpers — let templates pick a tone semantically instead
+       of reaching for text-slate-500 / -600 (which would not track theme). */
+    .text-muted { color: var(--theme-text-muted); }
+    .text-quiet { color: var(--theme-text-quiet); }
+    .text-body  { color: var(--theme-text); }
+
+    /* Bigger display scale for hero surfaces — login is the only page that
+       opts in today. Wider type + tighter tracking so Fraunces reads as
+       a true display, not a column header. */
+    .page-title--hero {
+        font-size: clamp(2.5rem, 4vw + 1rem, 3.75rem);
+        line-height: 1.02;
+        letter-spacing: -0.035em;
+        font-variation-settings: "opsz" 120, "SOFT" 60, "WONK" 1;
+    }
+
     /* The single page <h1> scale, app-wide. (login adds sm:text-4xl on
        top for its hero.) One definition so every surface's title matches.
        Fraunces at 600 weight reads close to Inter 700 thanks to its denser
@@ -931,7 +947,7 @@
        not a one-shot animation. CSS-only: zero JS, zero image bytes — the
        performance promise the page makes, kept by the page itself. */
     .sm-ekg-line {
-        stroke: var(--color-brand-500);
+        stroke: var(--theme-accent);
         stroke-width: 2.5;
         fill: none;
         stroke-linecap: round;

@@ -5,7 +5,7 @@
   {% if token.is_empty() %}
   <header class="space-y-1">
     <h1 class="page-title">Recovery link invalid</h1>
-    <p class="text-sm text-slate-500">
+    <p class="text-sm text-muted" style="line-height: 1.6;">
       This recovery link is missing its token or has already been used. If your
       account is still within its grace period, request a fresh link by signing
       in again.
@@ -18,7 +18,7 @@
   {% else %}
   <header class="space-y-1">
     <h1 class="page-title">Recover your account</h1>
-    <p class="text-sm text-slate-500">
+    <p class="text-sm text-muted" style="line-height: 1.6;">
       Your account is scheduled for deletion. Restore it now to cancel the
       purge and sign back in.
     </p>
