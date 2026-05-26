@@ -3,6 +3,33 @@
 @source "../../templates/**/*.html";
 @source "../../src/**/*.rs";
 
+/* Self-hosted variable woff2, latin subset. One file per family — variable
+   axes expose via font-variation-settings on consumers (Fraunces: opsz,
+   wght, SOFT, WONK; Geist + JBM: wght). Served from /static/fonts/ with
+   the asset pipeline's 5-minute revalidating cache (immutable would need
+   template-side hashing, which @font-face's url() can't take). */
+@font-face {
+    font-family: "Fraunces";
+    src: url("/static/fonts/fraunces-variable.woff2") format("woff2");
+    font-weight: 100 900;
+    font-style: normal;
+    font-display: swap;
+}
+@font-face {
+    font-family: "Geist";
+    src: url("/static/fonts/geist-variable.woff2") format("woff2");
+    font-weight: 100 900;
+    font-style: normal;
+    font-display: swap;
+}
+@font-face {
+    font-family: "JetBrains Mono";
+    src: url("/static/fonts/jetbrains-mono-variable.woff2") format("woff2");
+    font-weight: 100 800;
+    font-style: normal;
+    font-display: swap;
+}
+
 @theme {
     --color-brand-50:  oklch(0.97 0.02 250);
     --color-brand-500: oklch(0.65 0.18 250);
