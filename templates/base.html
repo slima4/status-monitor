@@ -38,7 +38,7 @@
 <body class="app-shell antialiased"
       hx-headers='{"X-Requested-With":"status-monitor"}'>
     <a href="#main-content"
-       class="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:rounded focus:bg-white focus:px-3 focus:py-2 focus:text-sm focus:ring-2 focus:ring-slate-700">
+       class="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:rounded focus:bg-[color:var(--theme-surface-elev)] focus:px-3 focus:py-2 focus:text-sm focus:ring-2 focus:ring-[color:var(--theme-ink)]">
         Skip to main content
     </a>
     <header class="border-b border-[color:var(--theme-line)] bg-[color:var(--theme-surface-elev)]/80 backdrop-blur-md">
@@ -65,7 +65,7 @@
                       hx-post="/auth/logout"
                       hx-headers='{"X-Requested-With":"status-monitor"}'
                       hx-on::after-request="window.location.href='/login'"
-                      class="btn-ghost px-2.5 py-1 text-xs font-medium text-slate-700">
+                      class="btn-ghost px-2.5 py-1 text-xs font-medium text-body">
                 Log out
               </button>
             </div>
@@ -77,10 +77,10 @@
     <main id="main-content" tabindex="-1" class="container mx-auto px-4 py-6">
         {% block content %}{% endblock %}
     </main>
-    <footer class="container mx-auto px-4 py-4 text-xs text-slate-400">
-        <a href="/healthz" class="hover:text-slate-600">healthz</a>
+    <footer class="container mx-auto px-4 py-4 text-xs text-quiet">
+        <a href="/healthz" class="hover:text-body">healthz</a>
         <span class="mx-1">·</span>
-        <a href="/readyz" class="hover:text-slate-600">readyz</a>
+        <a href="/readyz" class="hover:text-body">readyz</a>
         <span class="mx-1">·</span>
         {% include "_footer_links.html" %}
     </footer>

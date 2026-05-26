@@ -1,3 +1,9 @@
+{% if channels.is_empty() %}
+<div class="flex items-center gap-3 px-4 py-6 text-sm text-muted">
+  <span aria-hidden="true" class="text-base text-quiet">✉</span>
+  <span>No notification channels yet — add one above to start receiving alerts.</span>
+</div>
+{% else %}
 <table class="w-full text-left text-sm">
   <thead class="bg-[color:var(--theme-surface-sunk)] text-xs uppercase text-muted">
     <tr>
@@ -8,7 +14,7 @@
       <th class="px-4 py-2"></th>
     </tr>
   </thead>
-  <tbody class="divide-y">
+  <tbody class="divide-y divide-[color:var(--theme-line)]">
     {% for c in channels %}
     <tr>
       <td class="px-4 py-2 align-top text-body">{{ c.name }}</td>
@@ -22,7 +28,7 @@
         <span class="status-badge status-badge--disabled">Disabled</span>
         {% endif %}
       </td>
-      <td class="px-4 py-2 align-top text-body">{{ c.created }}</td>
+      <td class="px-4 py-2 align-top text-body tabular-nums">{{ c.created }}</td>
       <td class="px-4 py-2">
         <div class="flex items-center justify-end gap-3">
           <span data-test-result class="text-xs"></span>
@@ -48,8 +54,6 @@
       </td>
     </tr>
     {% endfor %}
-    {% if channels.is_empty() %}
-    <tr><td colspan="5" class="px-4 py-3 text-sm text-muted">No notification channels yet.</td></tr>
-    {% endif %}
   </tbody>
 </table>
+{% endif %}

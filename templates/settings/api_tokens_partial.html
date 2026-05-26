@@ -1,3 +1,9 @@
+{% if tokens.is_empty() %}
+<div class="flex items-center gap-3 px-4 py-6 text-sm text-muted">
+  <span aria-hidden="true" class="font-mono text-base text-quiet">›</span>
+  <span>No tokens yet — name one above and click <span class="font-medium text-body">Create token</span> to get started.</span>
+</div>
+{% else %}
 <table class="w-full text-left text-sm">
   <thead class="bg-[color:var(--theme-surface-sunk)] text-xs uppercase text-muted">
     <tr>
@@ -8,13 +14,13 @@
       <th class="px-4 py-2"></th>
     </tr>
   </thead>
-  <tbody class="divide-y">
+  <tbody class="divide-y divide-[color:var(--theme-line)]">
     {% for t in tokens %}
     <tr>
       <td class="px-4 py-2 align-top text-body">{{ t.name }}</td>
       <td class="px-4 py-2 align-top font-mono text-xs text-muted">{{ t.prefix }}…</td>
-      <td class="px-4 py-2 align-top text-body">{{ t.created }}</td>
-      <td class="px-4 py-2 align-top text-body">{{ t.last_used }}</td>
+      <td class="px-4 py-2 align-top text-body tabular-nums">{{ t.created }}</td>
+      <td class="px-4 py-2 align-top text-body tabular-nums">{{ t.last_used }}</td>
       <td class="px-4 py-2 text-right">
         <button type="button"
                 hx-delete="/api/v1/me/api-tokens/{{ t.id }}"
@@ -29,8 +35,6 @@
       </td>
     </tr>
     {% endfor %}
-    {% if tokens.is_empty() %}
-    <tr><td colspan="5" class="px-4 py-3 text-sm text-muted">No tokens yet.</td></tr>
-    {% endif %}
   </tbody>
 </table>
+{% endif %}

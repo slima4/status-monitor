@@ -1,3 +1,9 @@
+{% if sessions.is_empty() %}
+<div class="flex items-center gap-3 px-4 py-6 text-sm text-muted">
+  <span aria-hidden="true" class="text-base text-quiet">○</span>
+  <span>No active sessions.</span>
+</div>
+{% else %}
 <table class="w-full text-left text-sm">
   <thead class="bg-[color:var(--theme-surface-sunk)] text-xs uppercase text-muted">
     <tr>
@@ -8,12 +14,12 @@
       <th class="px-4 py-2"></th>
     </tr>
   </thead>
-  <tbody class="divide-y">
+  <tbody class="divide-y divide-[color:var(--theme-line)]">
     {% for s in sessions %}
     <tr>
-      <td class="px-4 py-2 align-top text-body">{{ s.created }}</td>
-      <td class="px-4 py-2 align-top text-body">{{ s.last_used }}</td>
-      <td class="px-4 py-2 align-top text-body">{{ s.expires }}</td>
+      <td class="px-4 py-2 align-top text-body tabular-nums">{{ s.created }}</td>
+      <td class="px-4 py-2 align-top text-body tabular-nums">{{ s.last_used }}</td>
+      <td class="px-4 py-2 align-top text-body tabular-nums">{{ s.expires }}</td>
       <td class="px-4 py-2 align-top font-mono text-xs text-muted">{{ s.ip_short }}</td>
       <td class="px-4 py-2 text-right">
         {% if s.is_current %}
@@ -35,8 +41,6 @@
       </td>
     </tr>
     {% endfor %}
-    {% if sessions.is_empty() %}
-    <tr><td colspan="5" class="px-4 py-3 text-sm text-muted">No active sessions.</td></tr>
-    {% endif %}
   </tbody>
 </table>
+{% endif %}
