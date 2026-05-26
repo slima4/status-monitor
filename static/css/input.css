@@ -655,10 +655,22 @@
         color: var(--theme-text-muted);
     }
 
-    /* Big single-number KPI value (Monitors, Uptime, …). */
+    /* Big single-number KPI value (Monitors, Uptime, …). Fraunces at high
+       opsz with tabular + lining figures: editorial weight without the
+       column-alignment problems serif numbers usually bring. tnum keeps
+       digits same-width; lnum locks them on the baseline (Fraunces
+       defaults to old-style figures for body text, which would drop
+       3/4/5/7/9 below baseline and look messy in a big metric). */
     .kpi-value {
-        @apply mt-2 text-4xl font-bold tabular-nums;
+        @apply mt-2 text-4xl tabular-nums;
         color: var(--theme-text);
+        font-family: var(--font-display);
+        font-weight: 600;
+        font-optical-sizing: auto;
+        font-variation-settings: "opsz" 96, "SOFT" 30, "WONK" 0;
+        font-feature-settings: "tnum" 1, "lnum" 1;
+        letter-spacing: -0.02em;
+        line-height: 1.05;
     }
     .kpi-value--ok  { @apply text-emerald-700; }
     .kpi-value--bad { @apply text-rose-700; }
@@ -1256,9 +1268,14 @@
         @apply flex items-end justify-between gap-3;
     }
     .dashboard-kpi-card__value {
-        @apply text-3xl font-semibold tabular-nums;
+        @apply text-3xl tabular-nums;
         color: var(--sm-dashboard-value-fg);
-        letter-spacing: -0.025em;
+        font-family: var(--font-display);
+        font-weight: 600;
+        font-optical-sizing: auto;
+        font-variation-settings: "opsz" 80, "SOFT" 30, "WONK" 0;
+        font-feature-settings: "tnum" 1, "lnum" 1;
+        letter-spacing: -0.022em;
         line-height: 1.05;
     }
     .dashboard-kpi-card__hint {
@@ -1357,9 +1374,14 @@
         color: var(--sm-dashboard-label-fg);
     }
     .dashboard-rail__value {
-        @apply text-2xl font-medium tabular-nums;
+        @apply text-2xl tabular-nums;
         color: var(--sm-dashboard-value-fg);
-        letter-spacing: -0.025em;
+        font-family: var(--font-display);
+        font-weight: 600;
+        font-optical-sizing: auto;
+        font-variation-settings: "opsz" 60, "SOFT" 30, "WONK" 0;
+        font-feature-settings: "tnum" 1, "lnum" 1;
+        letter-spacing: -0.022em;
         line-height: 1;
     }
     .dashboard-rail__value--muted {
