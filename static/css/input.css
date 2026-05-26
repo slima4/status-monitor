@@ -951,8 +951,7 @@
         @apply mx-auto flex flex-col items-center gap-6 rounded-sm border px-8 py-12 text-center;
         max-width: 38rem;
         background: var(--theme-surface-elev);
-        border-color: var(--theme-ink);
-        box-shadow: var(--theme-shadow-card);
+        border-color: var(--theme-line);
         position: relative;
         overflow: hidden;
     }
@@ -969,7 +968,7 @@
         height: 14rem;
         background: radial-gradient(
             20rem 10rem at 50% 50%,
-            oklch(0.94 0.07 75 / 0.35),
+            oklch(0.92 0.08 158 / 0.30),
             transparent 70%
         );
         pointer-events: none;
@@ -985,11 +984,11 @@
         @apply flex flex-col items-center gap-4;
     }
     .empty-hero__title {
-        font-family: var(--font-display);
-        font-weight: 700;
-        font-size: 2.25rem;
-        letter-spacing: -0.025em;
-        line-height: 1.05;
+        font-family: var(--font-mono);
+        font-weight: 600;
+        font-size: 1.75rem;
+        letter-spacing: -0.02em;
+        line-height: 1.1;
         color: var(--theme-text);
     }
     .empty-hero__lede {
@@ -999,11 +998,9 @@
         line-height: 1.6;
     }
     .empty-hero__cta {
-        @apply px-6 py-3 text-sm font-medium;
+        @apply px-4 py-2 text-sm font-medium;
         margin-top: 0.5rem;
-        transition: transform 150ms ease;
     }
-    .empty-hero__cta:hover { @apply -translate-y-0.5; }
     .empty-hero__tip {
         @apply text-xs;
         color: var(--theme-text-quiet);

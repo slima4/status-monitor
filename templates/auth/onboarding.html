@@ -1,9 +1,9 @@
 {% extends "base.html" %}
-{% block title %}Welcome · Status Monitor{% endblock %}
+{% block title %}Welcome · Uptimepage{% endblock %}
 {% block content %}
 <section class="mx-auto max-w-xl space-y-6 sticker-card p-8">
   <header class="space-y-2">
-    <h1 class="page-title">Welcome, {{ display_name }}.</h1>
+    <h1 class="page-title"><span class="page-title__prefix">$</span>welcome, {{ display_name }}.</h1>
     <p class="text-sm text-muted" style="line-height: 1.6;">
       We created an organization for you. Pick a name your team will
       recognize, or keep the placeholder.
@@ -22,10 +22,10 @@
            required minlength="1" maxlength="80"
            class="w-full field text-sm">
     <div class="flex items-center justify-between">
-      <a href="/" class="text-sm text-muted hover:text-body transition-colors">Skip for now</a>
+      <a href="/" class="text-sm text-muted hover:text-body transition-colors">skip for now</a>
       <button type="submit"
-              class="sticker-btn sticker-btn--primary px-4 py-2 text-sm font-medium transition-transform hover:-translate-y-0.5">
-        Save and continue
+              class="sticker-btn sticker-btn--primary px-3 py-1.5 text-sm font-medium">
+        save and continue
       </button>
     </div>
     <p id="onboard-status" class="flash-text flash-text--ok" aria-live="polite"></p>

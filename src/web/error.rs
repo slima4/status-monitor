@@ -111,7 +111,7 @@ mod tests {
             UnavailablePage { active_tab: "" }.render().unwrap(),
         ] {
             assert!(html.starts_with("<!doctype html>"));
-            assert!(html.contains("Status Monitor"));
+            assert!(html.contains("Uptimepage"));
         }
     }
 }

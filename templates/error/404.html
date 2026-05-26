@@ -1,14 +1,14 @@
 {% extends "base.html" %}
-{% block title %}Not Found · Status Monitor{% endblock %}
+{% block title %}Not Found · Uptimepage{% endblock %}
 {% block content %}
 <section class="mx-auto max-w-md space-y-6 py-6 text-center">
     <div class="mx-auto w-40">
         {% include "auth/_login_mascot.html" %}
     </div>
     <div class="sticker-card space-y-2 p-8">
-        <h1 class="page-title">Not Found</h1>
+        <h1 class="page-title"><span class="page-title__prefix">HTTP/2</span>404 not found</h1>
         <p class="text-muted">The page you requested does not exist.</p>
-        <p><a href="/" class="text-sm text-muted hover:text-body">← Back to dashboard</a></p>
+        <p><a href="/" class="text-sm text-muted hover:text-body">← back to dashboard</a></p>
     </div>
 </section>
 {% endblock %}
