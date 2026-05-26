@@ -134,21 +134,7 @@
     const btn = root.querySelector("[data-menu-toggle]");
     const panel = root.querySelector("[data-menu-panel]");
     if (!btn || !panel) return;
-    const rect = btn.getBoundingClientRect();
-    // Show hidden first so offsetWidth measures.
-    panel.hidden = false;
-    panel.style.visibility = "hidden";
-    const w = panel.offsetWidth || 176;
-    const h = panel.offsetHeight || 200;
-    let top = rect.bottom + 4;
-    let left = rect.right - w;
-    if (top + h > window.innerHeight - 8) {
-      top = Math.max(8, rect.top - h - 4);
-    }
-    if (left < 8) left = 8;
-    panel.style.top = top + "px";
-    panel.style.left = left + "px";
-    panel.style.visibility = "";
+    window.smPositionFloating(btn, panel, { align: "end" });
   }
   function openMenuFor(root) {
     if (openMenu === root) {

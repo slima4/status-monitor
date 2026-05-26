@@ -91,23 +91,7 @@
         root.appendChild(select);
 
         function position() {
-            const rect = trigger.getBoundingClientRect();
-            panel.style.visibility = "hidden";
-            panel.hidden = false;
-            const w = Math.max(rect.width, panel.offsetWidth || 160);
-            const h = panel.offsetHeight || 200;
-            let top = rect.bottom + 4;
-            let left = rect.left;
-            if (top + h > window.innerHeight - 8) {
-                top = Math.max(8, rect.top - h - 4);
-            }
-            if (left + w > window.innerWidth - 8) {
-                left = Math.max(8, window.innerWidth - w - 8);
-            }
-            panel.style.top = top + "px";
-            panel.style.left = left + "px";
-            panel.style.minWidth = rect.width + "px";
-            panel.style.visibility = "";
+            window.smPositionFloating(trigger, panel, { minWidth: true });
         }
         function clearCursor() {
             for (const li of panel.children) li.removeAttribute("aria-current");
