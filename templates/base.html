@@ -1,10 +1,25 @@
 <!doctype html>
 <html lang="en">
 <head>
+    <script>
+      // First-paint reveal gate. Set BEFORE the stylesheet parses so the
+      // .sm-fresh-load animation rule applies on initial render; cleared
+      // after the stagger window so htmx polls (dashboard 5s, detail 60s)
+      // do not re-fire the rise animation on swapped nodes (= blink fix).
+      document.documentElement.classList.add('sm-fresh-load');
+      addEventListener('load', () => setTimeout(
+        () => document.documentElement.classList.remove('sm-fresh-load'),
+        900
+      ));
+    </script>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block title %}Status Monitor{% endblock %}</title>
     <link rel="icon" type="image/svg+xml" href="{{ "img/favicon.svg"|asset }}">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet"
+          href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT,WONK@9..144,400..700,0..100,0..1&family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
     <link rel="stylesheet" href="{{ "css/app.css"|asset }}">
     <script defer src="{{ "js/htmx.min.js"|asset }}"></script>
     <script defer src="{{ "js/json-enc.js"|asset }}"></script>
@@ -24,13 +39,13 @@
     </script>
     {% block head %}{% endblock %}
 </head>
-<body class="bg-slate-50 text-slate-900 antialiased"
+<body class="app-shell antialiased"
       hx-headers='{"X-Requested-With":"status-monitor"}'>
     <a href="#main-content"
        class="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:rounded focus:bg-white focus:px-3 focus:py-2 focus:text-sm focus:ring-2 focus:ring-slate-700">
         Skip to main content
     </a>
-    <header class="border-b bg-white">
+    <header class="border-b border-[color:var(--theme-line)] bg-[color:var(--theme-surface-elev)]/80 backdrop-blur-md">
         <nav aria-label="Primary" class="container mx-auto flex items-center gap-6 px-4 py-3">
             <a href="/" class="nav-brand">Status Monitor</a>
             {% if active_tab != "login" && active_tab != "onboarding" && active_tab != "recover" %}

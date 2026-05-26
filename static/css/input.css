@@ -21,8 +21,33 @@
     --control-on:     var(--color-emerald-600); /* exact same source as .sticker-btn--primary's bg-emerald-600 */
     --control-offset: 2px;
 
-    --font-display: "Inter", system-ui, sans-serif;
+    /* Display = warm humanist serif (Fraunces); body = geometric sans (Geist).
+       Distinctive pair on purpose — the org-app shell speaks editorial, not
+       SaaS-generic. Only loaded when base.html opts in via .app-shell, so
+       marketing/public stay on system sans. */
+    --font-display: "Fraunces", ui-serif, Georgia, "Times New Roman", serif;
+    --font-body:    "Geist", ui-sans-serif, system-ui, -apple-system, sans-serif;
     --font-mono:    "JetBrains Mono", ui-monospace, monospace;
+
+    /* ── Theme layer ───────────────────────────────────────────────────
+       Semantic surface/text/accent tokens for the org-app shell. The
+       chrome-level --sm-* component tokens resolve through these, so a
+       future re-skin (warm paper → graphite, paper → midnight) is one
+       block of token edits, not a template/class sweep.
+       State colours (--sm-state-*, alerts) intentionally stay tied to
+       the Tailwind palette — green=ok / red=bad is universal, not
+       theme-bound. */
+    --theme-surface:       oklch(0.995 0.003 85);       /* paper white, faint warmth */
+    --theme-surface-elev:  oklch(1 0 0);                /* card white */
+    --theme-surface-sunk:  oklch(0.978 0.005 85);       /* header / table head wash */
+    --theme-ink:           var(--color-ink);            /* sticker stroke */
+    --theme-text:          oklch(0.27 0.04 256);
+    --theme-text-muted:    oklch(0.50 0.025 256);
+    --theme-text-quiet:    oklch(0.70 0.020 256);
+    --theme-text-faint:    oklch(0.85 0.006 85);
+    --theme-line:          oklch(0.92 0.006 85);
+    --theme-accent:        var(--color-emerald-600);
+    --theme-accent-soft:   var(--color-emerald-50);
 
     /* Public-status state palette. One source for the 6 day-states; the
        day strip, legend dots, and popover badge all derive from these.
@@ -57,10 +82,10 @@
     /* V2 KPI / banner / rail palette. Operator-side semantic colours —
        the warm-leaning soft fills come from `--sm-state-*-soft-*` so the
        dashboard tracks the public-status palette automatically. */
-    --sm-dashboard-card-bg:      var(--color-white);
-    --sm-dashboard-label-fg:     var(--color-slate-500);
-    --sm-dashboard-value-fg:     var(--color-slate-900);
-    --sm-dashboard-hint-fg:      var(--color-slate-500);
+    --sm-dashboard-card-bg:      var(--theme-surface-elev);
+    --sm-dashboard-label-fg:     var(--theme-text-muted);
+    --sm-dashboard-value-fg:     var(--theme-text);
+    --sm-dashboard-hint-fg:      var(--theme-text-muted);
     --sm-dashboard-chip-bg:      var(--color-slate-100);
     --sm-dashboard-chip-fg:      var(--color-slate-600);
     --sm-dashboard-chip-active-bg: var(--color-slate-900);
@@ -71,12 +96,12 @@
 
     --sm-dashboard-row-h:        2.5rem;
     --sm-dashboard-row-pad-x:    0.75rem;
-    --sm-dashboard-hairline:     var(--color-slate-200);
-    --sm-dashboard-num-fg:       var(--color-slate-800);
-    --sm-dashboard-mono-fg:      var(--color-slate-500);
-    --sm-dashboard-row-hover-bg: var(--color-slate-50);
-    --sm-dashboard-head-fg:      var(--color-slate-500);
-    --sm-dashboard-head-bg:      var(--color-slate-50);
+    --sm-dashboard-hairline:     var(--theme-line);
+    --sm-dashboard-num-fg:       var(--theme-text);
+    --sm-dashboard-mono-fg:      var(--theme-text-muted);
+    --sm-dashboard-row-hover-bg: var(--theme-surface-sunk);
+    --sm-dashboard-head-fg:      var(--theme-text-muted);
+    --sm-dashboard-head-bg:      var(--theme-surface-sunk);
 
     /* Dot indicator per row — same hue family as `--sm-state-*` so the
        Dashboard borrows the public-status palette without re-declaring
@@ -101,19 +126,19 @@
     --sm-spark-stroke-down:    var(--color-rose-500);
 
     /* Monitors page (/targets) tokens — single retunable block. */
-    --sm-monitors-card-bg:     var(--color-white);
-    --sm-monitors-card-border: var(--color-slate-200);
+    --sm-monitors-card-bg:     var(--theme-surface-elev);
+    --sm-monitors-card-border: var(--theme-line);
     --sm-monitors-row-h:       2.75rem;
     --sm-monitors-row-pad-x:   0.5rem;
     --sm-monitors-row-pad-y:   0.6rem;
-    --sm-monitors-hairline:    var(--color-slate-200);
-    --sm-monitors-row-hover-bg:var(--color-slate-50);
-    --sm-monitors-head-bg:     var(--color-slate-50);
-    --sm-monitors-head-fg:     var(--color-slate-500);
-    --sm-monitors-name-fg:     var(--color-slate-900);
-    --sm-monitors-host-fg:     var(--color-slate-500);
-    --sm-monitors-num-fg:      var(--color-slate-800);
-    --sm-monitors-muted-fg:    var(--color-slate-400);
+    --sm-monitors-hairline:    var(--theme-line);
+    --sm-monitors-row-hover-bg:var(--theme-surface-sunk);
+    --sm-monitors-head-bg:     var(--theme-surface-sunk);
+    --sm-monitors-head-fg:     var(--theme-text-muted);
+    --sm-monitors-name-fg:     var(--theme-text);
+    --sm-monitors-host-fg:     var(--theme-text-muted);
+    --sm-monitors-num-fg:      var(--theme-text);
+    --sm-monitors-muted-fg:    var(--theme-text-quiet);
 
     --sm-monitors-group-bg:        var(--color-slate-50);
     --sm-monitors-group-fg:        var(--color-slate-700);
@@ -208,6 +233,72 @@
 }
 
 @layer base {
+    /* App-shell scope: opted in by `<body class="app-shell …">` in base.html.
+       Marketing/public pages stay on their own type/colour story — this
+       block is the *only* place the org app's surface + body type are set,
+       so a theme swap edits the --theme-* tokens above plus this rule. */
+    .app-shell {
+        font-family: var(--font-body);
+        font-feature-settings: "ss01", "cv11";  /* Geist: alternate a, single-storey g */
+        background: var(--theme-surface);
+        color: var(--theme-text);
+        position: relative;
+        min-height: 100vh;
+    }
+    /* Subtle grain veil. SVG fractal noise inlined (zero extra request),
+       very low opacity — adds paper texture without competing with content.
+       Behind everything (z:0) but in front of the painted bg; siblings
+       use position:relative so the overlay does not eat clicks. */
+    .app-shell::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        z-index: 0;
+        background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='320' height='320'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.92' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.55 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+        opacity: 0.045;
+        mix-blend-mode: multiply;
+    }
+    /* Soft warm mesh in the top band — atmosphere without colour-clash. Two
+       low-saturation radial washes (amber + sky) at < 10% strength keep
+       the paper feel; the mesh fades by the time content reaches it. */
+    .app-shell::after {
+        content: "";
+        position: fixed;
+        inset: 0 0 auto 0;
+        height: 38rem;
+        pointer-events: none;
+        z-index: 0;
+        background:
+            radial-gradient(60rem 24rem at 12% -8%, oklch(0.94 0.06 75 / 0.20), transparent 72%),
+            radial-gradient(48rem 22rem at 92% -2%, oklch(0.93 0.05 235 / 0.18), transparent 72%);
+    }
+    .app-shell > * { position: relative; z-index: 1; }
+
+    /* Page-load reveal. Direct section children rise in sequence — one
+       orchestrated entrance per first paint, then the class is removed by
+       the inline boot script in base.html. Without the gate, htmx polls
+       (dashboard 5s, target detail 60s) re-mount swapped nodes inside
+       these same selectors and the rule re-fires → screen blinks on
+       every refresh. .sm-fresh-load is set on <html> before paint and
+       cleared after window 'load' + 800ms. */
+    @keyframes sm-rise {
+        from { opacity: 0; transform: translateY(10px); }
+        to   { opacity: 1; transform: translateY(0); }
+    }
+    .sm-fresh-load .app-shell main > section > * {
+        animation: sm-rise 540ms cubic-bezier(0.2, 0.65, 0.3, 1) backwards;
+    }
+    .sm-fresh-load .app-shell main > section > *:nth-child(1) { animation-delay:  40ms; }
+    .sm-fresh-load .app-shell main > section > *:nth-child(2) { animation-delay: 110ms; }
+    .sm-fresh-load .app-shell main > section > *:nth-child(3) { animation-delay: 180ms; }
+    .sm-fresh-load .app-shell main > section > *:nth-child(4) { animation-delay: 250ms; }
+    .sm-fresh-load .app-shell main > section > *:nth-child(5) { animation-delay: 320ms; }
+    .sm-fresh-load .app-shell main > section > *:nth-child(n+6) { animation-delay: 380ms; }
+    @media (prefers-reduced-motion: reduce) {
+        .sm-fresh-load .app-shell main > section > * { animation: none; }
+    }
+
     /* Visible focus ring on every interactive element. Must be a real
        `outline`, not Tailwind `ring` (a box-shadow): the cartoon controls
        (.sticker-btn, .sticker-disclosure summary, .field) own a box-shadow,
@@ -419,7 +510,14 @@
        `--active` only swaps weight/colour for the current tab; no hover
        shift on the active item (it's already where you are). One source
        so the shell follows the same restyle edit as everything else. */
-    .nav-brand          { @apply font-semibold tracking-tight; }
+    .nav-brand {
+        font-family: var(--font-display);
+        font-weight: 600;
+        font-optical-sizing: auto;
+        font-variation-settings: "SOFT" 100, "WONK" 1;
+        letter-spacing: -0.018em;
+        font-size: 1.05rem;
+    }
     .nav-link           { @apply text-sm text-slate-500 hover:text-slate-700; }
     .nav-link--active   { @apply font-medium text-slate-900 hover:text-slate-900; }
 
@@ -439,8 +537,19 @@
        edit these rules, no template touched. State is one `--modifier`. */
 
     /* The single page <h1> scale, app-wide. (login adds sm:text-4xl on
-       top for its hero.) One definition so every surface's title matches. */
-    .page-title { @apply text-3xl font-bold tracking-tight text-slate-900; }
+       top for its hero.) One definition so every surface's title matches.
+       Fraunces at 600 weight reads close to Inter 700 thanks to its denser
+       stems; the SOFT axis softens the terminals to match the sticker
+       dialect's flat-cartoon edges. */
+    .page-title {
+        @apply text-4xl tracking-tight text-slate-900;
+        font-family: var(--font-display);
+        font-weight: 600;
+        font-optical-sizing: auto;
+        font-variation-settings: "SOFT" 50, "WONK" 0;
+        letter-spacing: -0.028em;
+        line-height: 1.05;
+    }
 
     /* Uppercase section/eyebrow label — one definition app-wide so the
        type scale stays in lockstep (also used for KPI-card labels). */
