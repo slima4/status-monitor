@@ -178,6 +178,10 @@ fn register_descriptions() {
         "status_monitor_http_responses_inflight",
         "HTTP requests currently being served. Climbing alongside flat throughput means handlers are blocking on something (usually a downstream pool); a release-valve signal for upstream contention"
     );
+    describe_counter!(
+        "status_monitor_ratelimit_drops_total",
+        "Per-org and per-user rate-limit rejections (HTTP 429), labelled by `scope` (the same string carried in the error response — e.g. `per_org_api_writes`, `per_user_bulk_ops`). Abuse signal: a sudden rate growth on one scope is the first indicator of a single tenant hammering the API"
+    );
 }
 
 pub mod names {
@@ -221,4 +225,5 @@ pub mod names {
     pub const HTTP_REQUESTS_TOTAL: &str = "status_monitor_http_requests_total";
     pub const HTTP_REQUEST_DURATION_MS: &str = "status_monitor_http_request_duration_ms";
     pub const HTTP_RESPONSES_INFLIGHT: &str = "status_monitor_http_responses_inflight";
+    pub const RATELIMIT_DROPS: &str = "status_monitor_ratelimit_drops_total";
 }

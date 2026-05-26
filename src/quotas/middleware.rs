@@ -10,9 +10,11 @@ use axum::extract::{FromRequestParts, Request, State};
 use axum::http::{Method, request::Parts};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
+use metrics::counter;
 
 use crate::app::AppState;
-use crate::quotas::ratelimit::{RateLimitCategory, RateLimitKey};
+use crate::observability::metrics::names;
+use crate::quotas::ratelimit::{Denied, RateLimitCategory, RateLimitKey};
 use crate::quotas::service::record_quota_event;
 use crate::web::auth::{CurrentOrg, CurrentUser};
 
@@ -85,11 +87,7 @@ pub async fn rate_limit_middleware(
             serde_json::json!({ "scope": d.scope }),
             None,
         );
-        return crate::error::AppError::RateLimited {
-            scope: d.scope,
-            retry_after_secs: d.retry_after_secs,
-        }
-        .into_response();
+        return denied_response(d);
     }
     if let Some(u) = user
         && let Err(d) = state
@@ -105,14 +103,23 @@ pub async fn rate_limit_middleware(
             serde_json::json!({ "scope": d.scope }),
             None,
         );
-        return crate::error::AppError::RateLimited {
-            scope: d.scope,
-            retry_after_secs: d.retry_after_secs,
-        }
-        .into_response();
+        return denied_response(d);
     }
 
     next.run(Request::from_parts(parts, body)).await
+}
+
+/// Wraps a `Denied` into a 429 response and increments the rate-limit
+/// drop counter on the way out. Counter is labelled by the same `scope`
+/// string carried in the error body so a dashboard can join the two —
+/// label set is bounded (2 tiers × 5 categories = 10 series).
+fn denied_response(d: Denied) -> Response {
+    counter!(names::RATELIMIT_DROPS, "scope" => d.scope.clone()).increment(1);
+    crate::error::AppError::RateLimited {
+        scope: d.scope,
+        retry_after_secs: d.retry_after_secs,
+    }
+    .into_response()
 }
 
 #[cfg(test)]

@@ -50,6 +50,7 @@ these names verbatim.
 | `status_monitor_http_requests_total{method,route,status}` | counter | inbound HTTP requests handled. `route` is `MatchedPath` (the path-pattern with placeholders) — cardinality bounded by the static router table, never by per-tenant ids. `status` is bucketed `2xx`/`3xx`/`4xx`/`5xx`/`other`; query `sum by (status) (rate(...[5m]))` for the SLO ratio |
 | `status_monitor_http_request_duration_ms{method,route}` | histogram | inbound HTTP request latency. Query `name{quantile="0.99"}` for tail latency per route — same summary-quantile exposition as the check histograms |
 | `status_monitor_http_responses_inflight` | gauge | inbound HTTP requests currently being served. Climbing alongside flat throughput points at handler back-pressure on a downstream pool |
+| `status_monitor_ratelimit_drops_total{scope}` | counter | HTTP 429s from the per-org / per-user rate-limit middleware. `scope` is the same string carried in the error body (`per_org_api_writes`, `per_user_bulk_ops`, …) so dashboards can join with `record_quota_event` audit rows. Abuse signal — a tenant hammering the API spikes one scope before shared resources notice |
 
 Scrape interval of 15 s is plenty — counters are written from hot tokio tasks; histograms aggregate per bucket without lock contention.
 
