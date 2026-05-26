@@ -4,12 +4,15 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
+use async_trait::async_trait;
 use axum::Router;
 use axum::http::StatusCode;
 use axum::routing::get;
-use status_monitor::domain::CheckStatus;
+use status_monitor::domain::{CheckStatus, OrgId, Target};
+use status_monitor::error::{AppError, Result as SmResult};
 use status_monitor::pipeline::{BatcherConfig, ResultBatcher};
 use status_monitor::scheduler::{Scheduler, TargetRegistry};
+use status_monitor::storage::admin::EnabledTargetSource;
 use status_monitor::storage::{InMemorySink, InMemoryTargetStore};
 use status_monitor::worker::circuit_breaker::CIRCUIT_OPEN_REASON;
 use status_monitor::worker::{ResultFanout, WorkerPool};
@@ -238,6 +241,129 @@ async fn shutdown_drains_in_flight_results() {
         !sink.is_empty(),
         "shutdown should drain in-flight results, got {}",
         sink.len()
+    );
+}
+
+struct FailingThenSucceedingSource {
+    inner: Arc<InMemoryTargetStore>,
+    remaining_failures: AtomicU32,
+}
+
+impl FailingThenSucceedingSource {
+    fn new(inner: Arc<InMemoryTargetStore>, fail_count: u32) -> Self {
+        Self {
+            inner,
+            remaining_failures: AtomicU32::new(fail_count),
+        }
+    }
+
+    fn remaining(&self) -> u32 {
+        self.remaining_failures.load(Ordering::SeqCst)
+    }
+}
+
+#[async_trait]
+impl EnabledTargetSource for FailingThenSucceedingSource {
+    async fn list_all_enabled_targets(&self) -> SmResult<Vec<(OrgId, Target)>> {
+        if self.remaining_failures.load(Ordering::SeqCst) > 0 {
+            self.remaining_failures.fetch_sub(1, Ordering::SeqCst);
+            return Err(AppError::Other(anyhow::anyhow!(
+                "test: simulated registry refresh failure",
+            )));
+        }
+        self.inner.list_all_enabled_targets().await
+    }
+}
+
+#[tokio::test]
+async fn scheduler_recovers_after_transient_refresh_failures() {
+    // Source fails 2 times then succeeds. With base 1s and the backoff
+    // schedule 1s, 2s, ..., recovery lands no later than ~3s from boot —
+    // a 30s deadline gives generous slack for CI scheduling.
+    let (addr, _counter) = spawn_counting_mock().await;
+    let inner = Arc::new(InMemoryTargetStore::from_vec(vec![http_target(
+        addr, "/ping", 200,
+    )]));
+    let source = Arc::new(FailingThenSucceedingSource::new(inner.clone(), 2));
+    let registry = Arc::new(TargetRegistry::new(source.clone()));
+    let (tx, mut rx) = mpsc::channel(64);
+
+    let pool = Arc::new(WorkerPool::new(
+        50,
+        test_client(),
+        breaker_cfg(),
+        ResultFanout::storage_only(tx),
+        status_monitor::worker::host_throttle::HostThrottle::permissive(),
+        common::test_domain_expiry_runtime(),
+    ));
+    let scheduler = Arc::new(Scheduler::new(registry, pool, scheduler_cfg(1)));
+    let shutdown = CancellationToken::new();
+    let handle = tokio::spawn(scheduler.run(shutdown.clone()));
+
+    // Wait for the first successful dispatch's result to arrive. If the
+    // scheduler bailed out on the first failure (no recovery), this hangs
+    // until the timeout fires.
+    let got = tokio::time::timeout(Duration::from_secs(30), rx.recv())
+        .await
+        .ok()
+        .flatten();
+
+    shutdown.cancel();
+    handle.await.unwrap().unwrap();
+
+    assert!(
+        got.is_some(),
+        "scheduler never recovered to dispatch a check"
+    );
+    assert_eq!(
+        source.remaining(),
+        0,
+        "all scheduled failures must have been consumed by the scheduler",
+    );
+}
+
+#[tokio::test]
+async fn scheduler_shutdown_observed_during_slow_refresh() {
+    // Source that simulates a slow PG handshake: blocks indefinitely on
+    // each list_all call. Without cancel-aware tick_once, shutdown would
+    // be blocked waiting for the in-flight refresh.
+    struct HangingSource;
+    #[async_trait]
+    impl EnabledTargetSource for HangingSource {
+        async fn list_all_enabled_targets(&self) -> SmResult<Vec<(OrgId, Target)>> {
+            std::future::pending::<()>().await;
+            unreachable!()
+        }
+    }
+
+    let registry = Arc::new(TargetRegistry::new(Arc::new(HangingSource)));
+    let (tx, _rx) = mpsc::channel(64);
+    let pool = Arc::new(WorkerPool::new(
+        10,
+        test_client(),
+        breaker_cfg(),
+        ResultFanout::storage_only(tx),
+        status_monitor::worker::host_throttle::HostThrottle::permissive(),
+        common::test_domain_expiry_runtime(),
+    ));
+    let scheduler = Arc::new(Scheduler::new(registry, pool, scheduler_cfg(1)));
+    let shutdown = CancellationToken::new();
+    let handle = tokio::spawn(scheduler.run(shutdown.clone()));
+
+    // Give the initial tick_once a beat to enter its blocking await.
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    shutdown.cancel();
+
+    let started = std::time::Instant::now();
+    let res = tokio::time::timeout(Duration::from_secs(2), handle).await;
+    let elapsed = started.elapsed();
+
+    let join_outcome =
+        res.expect("scheduler did not return within 2s — cancel-aware tick_once broken");
+    join_outcome.unwrap().unwrap();
+    assert!(
+        elapsed < Duration::from_secs(2),
+        "shutdown took {elapsed:?}, expected < 2s",
     );
 }
 

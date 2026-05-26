@@ -138,6 +138,14 @@ fn register_descriptions() {
         "status_monitor_rdap_singleflight_slots",
         "Live entries in the RDAP singleflight cache. Bounded under normal load by the set of monitored domains"
     );
+    describe_counter!(
+        "status_monitor_scheduler_refresh_failed_total",
+        "Registry refresh ticks that returned an error from Postgres — alert on a sustained rate above your normal noise floor"
+    );
+    describe_gauge!(
+        "status_monitor_scheduler_consecutive_refresh_failures",
+        "Consecutive registry refresh failures since the last success. Resets to 0 on recovery; primary alarm signal for a stuck scheduler"
+    );
 }
 
 pub mod names {
@@ -170,4 +178,7 @@ pub mod names {
     pub const DOMAIN_EXPIRY_STATE_WRITE_FAILED: &str =
         "status_monitor_domain_expiry_state_write_failed_total";
     pub const RDAP_SINGLEFLIGHT_SLOTS: &str = "status_monitor_rdap_singleflight_slots";
+    pub const SCHEDULER_REFRESH_FAILED: &str = "status_monitor_scheduler_refresh_failed_total";
+    pub const SCHEDULER_CONSECUTIVE_REFRESH_FAILURES: &str =
+        "status_monitor_scheduler_consecutive_refresh_failures";
 }

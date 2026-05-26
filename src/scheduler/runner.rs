@@ -1,7 +1,8 @@
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 use dashmap::DashMap;
+use metrics::{Counter, Gauge, counter, gauge};
 use tokio::task::JoinHandle;
 use tokio::time::{Instant, MissedTickBehavior, interval_at};
 use tokio_util::sync::CancellationToken;
@@ -9,6 +10,7 @@ use uuid::Uuid;
 
 use crate::config::SchedulerConfig;
 use crate::error::Result;
+use crate::observability::metrics::names;
 use crate::scheduler::registry::{ScheduledTarget, TargetRegistry};
 use crate::worker::{CheckTask, WorkerPool};
 
@@ -21,6 +23,18 @@ const SWEEP_INTERVAL: Duration = Duration::from_secs(30);
 /// The budget exists to bound shutdown on a stuck task (e.g. one spinning in a
 /// non-cancel-aware sync block) rather than hanging the process indefinitely.
 const SHUTDOWN_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Backoff cap on consecutive refresh failures: next attempt waits at most
+/// `base × REFRESH_BACKOFF_CAP_MULTIPLIER` seconds. Bounds recovery latency
+/// when the upstream DB returns — at default base=30s and cap=10, steady-state
+/// retry cadence under sustained outage is 5 minutes, with recovery noticed
+/// within the same window.
+const REFRESH_BACKOFF_CAP_MULTIPLIER: u64 = 10;
+
+static REFRESH_FAILED: LazyLock<Counter> =
+    LazyLock::new(|| counter!(names::SCHEDULER_REFRESH_FAILED));
+static CONSECUTIVE_REFRESH_FAILURES: LazyLock<Gauge> =
+    LazyLock::new(|| gauge!(names::SCHEDULER_CONSECUTIVE_REFRESH_FAILURES));
 
 pub struct Scheduler {
     registry: Arc<TargetRegistry>,
@@ -60,8 +74,22 @@ impl Scheduler {
         let mut sweep = tokio::time::interval(SWEEP_INTERVAL);
         sweep.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
-        if let Err(err) = self.tick_once().await {
-            tracing::error!(?err, "initial registry refresh failed");
+        let mut consecutive_failures: u32 = 0;
+
+        // Initial tick made cancel-aware so an operator-triggered shutdown
+        // during a slow PG handshake doesn't block boot for the full pool
+        // timeout. If shutdown fires here, skip the loop entirely.
+        let initial = tokio::select! {
+            _ = shutdown.cancelled() => None,
+            r = self.tick_once() => Some(r),
+        };
+        match initial {
+            None => {
+                tracing::info!("scheduler shutting down before initial refresh");
+                self.cancel_all().await;
+                return Ok(());
+            }
+            Some(r) => self.handle_refresh_result(&mut consecutive_failures, &mut refresh, r),
         }
 
         loop {
@@ -71,8 +99,19 @@ impl Scheduler {
                     break;
                 }
                 _ = refresh.tick() => {
-                    if let Err(err) = self.tick_once().await {
-                        tracing::error!(?err, "registry refresh failed");
+                    // tick_once awaits PG; wrap in a nested select so the
+                    // shutdown signal is observable during a slow handshake.
+                    let outcome = tokio::select! {
+                        _ = shutdown.cancelled() => None,
+                        r = self.tick_once() => Some(r),
+                    };
+                    match outcome {
+                        None => break,
+                        Some(r) => self.handle_refresh_result(
+                            &mut consecutive_failures,
+                            &mut refresh,
+                            r,
+                        ),
                     }
                 }
                 _ = sweep.tick() => {
@@ -83,6 +122,40 @@ impl Scheduler {
 
         self.cancel_all().await;
         Ok(())
+    }
+
+    fn handle_refresh_result(
+        &self,
+        consecutive_failures: &mut u32,
+        refresh: &mut tokio::time::Interval,
+        result: Result<()>,
+    ) {
+        match result {
+            Ok(()) => {
+                if *consecutive_failures > 0 {
+                    tracing::info!(
+                        prior_consecutive_failures = *consecutive_failures,
+                        "registry refresh recovered",
+                    );
+                    CONSECUTIVE_REFRESH_FAILURES.set(0.0);
+                    *consecutive_failures = 0;
+                }
+            }
+            Err(err) => {
+                *consecutive_failures = consecutive_failures.saturating_add(1);
+                REFRESH_FAILED.increment(1);
+                CONSECUTIVE_REFRESH_FAILURES.set(*consecutive_failures as f64);
+                let base = self.cfg.target_refresh_interval_secs;
+                let delay_secs = backoff_delay_secs(base, *consecutive_failures);
+                tracing::error!(
+                    ?err,
+                    consecutive_failures = *consecutive_failures,
+                    next_attempt_in_secs = delay_secs,
+                    "registry refresh failed",
+                );
+                refresh.reset_after(Duration::from_secs(delay_secs));
+            }
+        }
     }
 
     async fn tick_once(&self) -> Result<()> {
@@ -142,6 +215,16 @@ impl Scheduler {
         }
         drain_handles(handles, SHUTDOWN_DRAIN_TIMEOUT).await;
     }
+}
+
+/// Exponential backoff for consecutive refresh failures. Doubles each
+/// failure until it hits the cap (`base × REFRESH_BACKOFF_CAP_MULTIPLIER`)
+/// — bounded so the scheduler notices PG recovery within one cap-window.
+fn backoff_delay_secs(base_secs: u64, consecutive_failures: u32) -> u64 {
+    let shift = consecutive_failures.saturating_sub(1).min(u32::BITS - 1);
+    let mult = 1u64.checked_shl(shift).unwrap_or(u64::MAX);
+    let mult = mult.min(REFRESH_BACKOFF_CAP_MULTIPLIER);
+    base_secs.saturating_mul(mult)
 }
 
 /// Awaits target-task handles after their cancel tokens have fired. Bounded
@@ -242,7 +325,7 @@ fn jitter(base: Duration, jitter_pct: u8) -> Duration {
 
 #[cfg(test)]
 mod tests {
-    use super::{drain_handles, jitter};
+    use super::{REFRESH_BACKOFF_CAP_MULTIPLIER, backoff_delay_secs, drain_handles, jitter};
     use std::time::Duration;
     use tokio_util::sync::CancellationToken;
     use uuid::Uuid;
@@ -346,6 +429,33 @@ mod tests {
             elapsed < Duration::from_millis(500),
             "timeout not enforced: {elapsed:?}",
         );
+    }
+
+    #[test]
+    fn backoff_walks_the_expected_curve_with_default_base() {
+        // Base 30s, cap multiplier 10 → steady state at 300s.
+        let base = 30u64;
+        assert_eq!(backoff_delay_secs(base, 1), 30);
+        assert_eq!(backoff_delay_secs(base, 2), 60);
+        assert_eq!(backoff_delay_secs(base, 3), 120);
+        assert_eq!(backoff_delay_secs(base, 4), 240);
+        // 2^4 = 16, capped at REFRESH_BACKOFF_CAP_MULTIPLIER = 10.
+        assert_eq!(
+            backoff_delay_secs(base, 5),
+            base * REFRESH_BACKOFF_CAP_MULTIPLIER
+        );
+        assert_eq!(
+            backoff_delay_secs(base, 100),
+            base * REFRESH_BACKOFF_CAP_MULTIPLIER
+        );
+    }
+
+    #[test]
+    fn backoff_does_not_panic_at_extremes() {
+        // Saturating arithmetic guards both the shift and the multiply.
+        assert!(backoff_delay_secs(u64::MAX, 1) >= 1);
+        assert!(backoff_delay_secs(u64::MAX, u32::MAX) >= 1);
+        assert_eq!(backoff_delay_secs(1, 0), 1);
     }
 
     #[tokio::test]
