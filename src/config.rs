@@ -793,6 +793,10 @@ impl AppConfig {
             self.rate_limits.janitor.idle_threshold_hours,
             "rate_limits.janitor.idle_threshold_hours",
         )?;
+        ge1_u64(
+            self.scheduler.target_refresh_interval_secs,
+            "scheduler.target_refresh_interval_secs",
+        )?;
         if self.checker.per_host_max_inflight == 0 {
             return Err(crate::error::AppError::Other(anyhow::anyhow!(
                 "checker.per_host_max_inflight must be >= 1"

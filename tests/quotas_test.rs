@@ -526,6 +526,13 @@ fn zero_quota_config_is_a_clean_error_not_a_panic() {
     cfg.rate_limits.janitor.cleanup_interval_hours = 0;
     assert!(cfg.validate_quotas_and_limits().is_err());
 
+    let mut cfg = AppConfig::load().expect("config");
+    cfg.scheduler.target_refresh_interval_secs = 0;
+    assert!(
+        cfg.validate_quotas_and_limits().is_err(),
+        "target_refresh_interval_secs=0 would panic tokio::time::interval at scheduler boot — must be caught at load",
+    );
+
     // The shipped defaults must pass.
     assert!(
         AppConfig::load()

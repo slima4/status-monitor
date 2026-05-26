@@ -49,9 +49,12 @@ impl Scheduler {
     }
 
     pub async fn run(self: Arc<Self>, shutdown: CancellationToken) -> Result<()> {
-        let mut refresh = tokio::time::interval(Duration::from_secs(
-            self.cfg.target_refresh_interval_secs.max(1),
-        ));
+        debug_assert!(
+            self.cfg.target_refresh_interval_secs >= 1,
+            "target_refresh_interval_secs must be validated >= 1 before Scheduler::run",
+        );
+        let mut refresh =
+            tokio::time::interval(Duration::from_secs(self.cfg.target_refresh_interval_secs));
         refresh.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
         let mut sweep = tokio::time::interval(SWEEP_INTERVAL);
