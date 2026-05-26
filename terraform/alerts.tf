@@ -384,6 +384,92 @@ resource "grafana_rule_group" "pipeline" {
     }
   }
 
+  # Customer-visible 5xx error rate. Ratio (not absolute count) so the
+  # threshold stays sensible across traffic volumes; for=10m rides
+  # through deploy restarts and brief blips. 1% is a deliberate
+  # SLO-grade threshold: 99% success leaves headroom against the 99.9%
+  # we want to advertise. Critical — server-side errors are the most
+  # direct signal that customers see broken pages.
+  rule {
+    name           = "StatusMonitorHttp5xxRateHigh"
+    condition      = "C"
+    for            = "10m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+    labels = {
+      severity = "critical"
+      service  = "status-monitor"
+    }
+    annotations = {
+      summary     = "status-monitor: HTTP 5xx error rate above 1%"
+      description = "server-side errors are above 1% of total request volume for 10m — customers are hitting broken responses. Inspect `http_requests_total{status=\"5xx\"}` by route in the dashboard to localise. Runbook: runbooks/grafana-cloud.md."
+    }
+    data {
+      ref_id         = "A"
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "A"
+        instant = true
+        expr    = "(sum(rate(status_monitor_http_requests_total{status=\"5xx\"}[5m])) / sum(rate(status_monitor_http_requests_total[5m]))) > 0.01"
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = local.threshold_c
+    }
+  }
+
+  # HTTP tail latency. Pick the worst route's p99 across the window —
+  # `max(... {quantile="0.99"})` rather than histogram_quantile because
+  # the exporter emits summaries (see docs/metrics.md). 1s for 15m is
+  # the warning floor; tighten as steady-state baselines settle in.
+  rule {
+    name           = "StatusMonitorHttpLatencyHigh"
+    condition      = "C"
+    for            = "15m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+    labels = {
+      severity = "warning"
+      service  = "status-monitor"
+    }
+    annotations = {
+      summary     = "status-monitor: HTTP request p99 above 1s"
+      description = "the slowest route's p99 > 1000ms for 15m — at least one endpoint is degrading. Use the Per-route p99 panel to identify which route, then `route` label drills further. Runbook: runbooks/grafana-cloud.md."
+    }
+    data {
+      ref_id         = "A"
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      relative_time_range {
+        from = 1200
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "A"
+        instant = true
+        expr    = "max(status_monitor_http_request_duration_ms{quantile=\"0.99\"}) > 1000"
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = local.threshold_c
+    }
+  }
+
   # Storage write p99 latency high. histogram_quantile over the _bucket
   # series; p99 > 2s sustained for 10m means ClickHouse is degrading
   # before it starts dropping. rate over [10m] (not [5m]): on a
