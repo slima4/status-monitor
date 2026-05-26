@@ -4,17 +4,20 @@
 //! site can't silently miss CSRF or tenant-host isolation.
 //!
 //! Layer order (outermost first, runs earliest on request):
-//!   1. tenant-host isolation — 404s operator surface on tenant hosts
-//!   2. CSRF — rejects state-changing requests without the custom header
+//!   1. http metrics — records every matched request, including ones
+//!      the inner guards subsequently reject
+//!   2. tenant-host isolation — 404s operator surface on tenant hosts
+//!   3. CSRF — rejects state-changing requests without the custom header
 //!
 //! CSRF wraps the *merged* router so any future state-changing route
 //! added to `web::routes` is protected without a separate wiring step.
 
 use axum::Router;
-use axum::middleware::from_fn_with_state;
+use axum::middleware::{from_fn, from_fn_with_state};
 use tokio_util::sync::CancellationToken;
 
 use crate::app::AppState;
+use crate::observability::http_metrics;
 use crate::{api, web};
 
 /// Build the full app router (API + web UI) with the cross-cutting
@@ -34,14 +37,16 @@ pub fn build_app_router_api_only(state: AppState, shutdown: CancellationToken) -
 }
 
 fn apply_cross_cutting_layers(router: Router, state: AppState) -> Router {
-    // Last `.layer()` is OUTERMOST in axum — `tenant_host_isolation`
-    // runs first, then CSRF. Keep this order: 404 a tenant-host
-    // operator route before bothering with the CSRF constant-time
-    // header compare. Reordering reverses request semantics.
+    // Last `.layer()` is OUTERMOST in axum — http_metrics runs first
+    // (observes every routed request, including ones the guards below
+    // subsequently reject), then tenant_host_isolation, then CSRF.
+    // 404ing a tenant-host operator route still beats running CSRF's
+    // constant-time header compare; reordering reverses request semantics.
     router
         .layer(from_fn_with_state(
             state.clone(),
             web::auth::csrf::middleware,
         ))
         .layer(from_fn_with_state(state, web::host::tenant_host_isolation))
+        .layer(from_fn(http_metrics::middleware))
 }

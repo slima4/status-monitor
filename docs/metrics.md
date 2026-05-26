@@ -47,6 +47,9 @@ these names verbatim.
 | `status_monitor_pg_pool_idle` | gauge | connections sitting idle in the Postgres pool. A persistent `idle = 0` alongside `in_use` at the max is the saturation signal |
 | `status_monitor_pg_pool_in_use` | gauge | connections checked out of the Postgres pool right now (`size − idle`). Alert on a sustained high `in_use / size` ratio |
 | `status_monitor_process_resident_bytes` | gauge | resident set size of the process (`VmRSS`) in bytes. Linux only — absent on non-Linux dev runs. Early-warning signal for slow leaks ahead of the OOM killer |
+| `status_monitor_http_requests_total{method,route,status}` | counter | inbound HTTP requests handled. `route` is `MatchedPath` (the path-pattern with placeholders) — cardinality bounded by the static router table, never by per-tenant ids. `status` is bucketed `2xx`/`3xx`/`4xx`/`5xx`/`other`; query `sum by (status) (rate(...[5m]))` for the SLO ratio |
+| `status_monitor_http_request_duration_ms{method,route}` | histogram | inbound HTTP request latency. Query `name{quantile="0.99"}` for tail latency per route — same summary-quantile exposition as the check histograms |
+| `status_monitor_http_responses_inflight` | gauge | inbound HTTP requests currently being served. Climbing alongside flat throughput points at handler back-pressure on a downstream pool |
 
 Scrape interval of 15 s is plenty — counters are written from hot tokio tasks; histograms aggregate per bucket without lock contention.
 

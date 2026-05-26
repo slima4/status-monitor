@@ -412,7 +412,12 @@ async fn main() -> Result<()> {
         // Pre-warm the in-memory post cache so the first /blog hit
         // doesn't pay the parse cost.
         let _ = marketing::blog::init();
-        let marketing_router = marketing::router(marketing_cfg);
+        // Layered here, not inside marketing::router, to keep the marketing
+        // module free of `crate::observability` imports — its hard-isolation
+        // contract (see marketing/mod.rs) limits which crate paths it may
+        // depend on, and a future service extraction stays a clean cut.
+        let marketing_router = marketing::router(marketing_cfg)
+            .layer(middleware::from_fn(observability::http_metrics::middleware));
         let dispatch = marketing::RouteByHost {
             scheme,
             marketing: marketing_router,

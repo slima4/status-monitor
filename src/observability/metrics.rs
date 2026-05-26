@@ -166,6 +166,18 @@ fn register_descriptions() {
         "status_monitor_process_resident_bytes",
         "Resident set size of the status-monitor process in bytes (VmRSS on Linux). Early-warning signal for slow leaks and unbounded growth before the OOM killer triggers; not exposed on non-Linux platforms"
     );
+    describe_counter!(
+        "status_monitor_http_requests_total",
+        "HTTP requests handled, labelled by method, MatchedPath route, and status class (2xx/3xx/4xx/5xx/other). The route label is the path-pattern with placeholders so cardinality is bounded by the router's static route table"
+    );
+    describe_histogram!(
+        "status_monitor_http_request_duration_ms",
+        "HTTP request latency in milliseconds, labelled by method and MatchedPath route. Primary SLO signal — query the {quantile=\"0.99\"} series for tail latency"
+    );
+    describe_gauge!(
+        "status_monitor_http_responses_inflight",
+        "HTTP requests currently being served. Climbing alongside flat throughput means handlers are blocking on something (usually a downstream pool); a release-valve signal for upstream contention"
+    );
 }
 
 pub mod names {
@@ -206,4 +218,7 @@ pub mod names {
     pub const PG_POOL_IDLE: &str = "status_monitor_pg_pool_idle";
     pub const PG_POOL_IN_USE: &str = "status_monitor_pg_pool_in_use";
     pub const PROCESS_RESIDENT_BYTES: &str = "status_monitor_process_resident_bytes";
+    pub const HTTP_REQUESTS_TOTAL: &str = "status_monitor_http_requests_total";
+    pub const HTTP_REQUEST_DURATION_MS: &str = "status_monitor_http_request_duration_ms";
+    pub const HTTP_RESPONSES_INFLIGHT: &str = "status_monitor_http_responses_inflight";
 }
