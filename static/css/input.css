@@ -1,5 +1,11 @@
 @import "tailwindcss";
 
+/* Marketing shell is a fully isolated visual register — own tokens
+   (--mk-*), own primitives (.mk-*), own atmosphere. Lives in its own
+   file so marketing-only edits don't churn the org-app cascade and a
+   future bundle split is a build-time decision, not a CSS shuffle. */
+@import "./_marketing.css";
+
 @source "../../templates/**/*.html";
 @source "../../src/**/*.rs";
 
@@ -2290,3 +2296,4 @@
     .day-cell:focus-visible,
     .day-cell:active { transform: none; }
 }
+

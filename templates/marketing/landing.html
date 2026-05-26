@@ -1,366 +1,376 @@
 {% extends "marketing/base.html" %}
 {% block title %}Uptimepage — uptime monitoring & public status pages{% endblock %}
-{% block description %}Monitor your services every 30 seconds, get notified the moment something breaks, and share a beautiful public status page with your customers. Free to start, no credit card.{% endblock %}
+{% block description %}Monitor your services every 30 seconds, get notified the moment something breaks, and share a public status page with your customers. Free to start, no credit card.{% endblock %}
 {% block head %}
 <script type="application/ld+json">{{ org_json_ld.as_str()|safe }}</script>
 <script type="application/ld+json">{{ website_json_ld.as_str()|safe }}</script>
 {% endblock %}
 {% block content %}
-<section class="space-y-20 sm:space-y-24">
+<div class="space-y-24 sm:space-y-28">
 
-    {# ── Hero ─────────────────────────────────────────────────────── #}
-    <section class="mx-auto max-w-5xl space-y-8 text-center">
-        <span class="sticker-pill sticker-pill--ok">
-            <svg viewBox="0 0 8 8" class="h-2 w-2 fill-emerald-600" aria-hidden="true"><circle cx="4" cy="4" r="4"/></svg>
-            Currently free — no credit card
-        </span>
-        <h1 class="page-title text-4xl leading-tight sm:text-5xl md:text-6xl">
-            Know the moment your site goes down.<br class="hidden sm:block">
-            <span class="text-emerald-600">Tell your customers before they ask.</span>
-        </h1>
-        <p class="mx-auto max-w-2xl text-lg text-slate-600 sm:text-xl">
-            Monitor HTTP, TCP, and DNS endpoints as often as every minute. Get a Slack ping,
-            an email, or a webhook the moment something breaks. Share a branded
-            public status page so customers stop opening support tickets.
-        </p>
-        <div class="flex flex-wrap items-center justify-center gap-3 pt-2">
-            <a href="{{ app_url }}/login"
-               class="sticker-btn sticker-btn--primary inline-flex items-center gap-2 px-6 py-3 text-base font-semibold">
-                Start monitoring — free
-                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M13 5l7 7-7 7M5 12h15"/>
-                </svg>
-            </a>
-            <a href="#how-it-works" class="sticker-btn inline-flex items-center gap-2 bg-white px-6 py-3 text-base font-medium text-slate-900 hover:bg-slate-50">
-                See how it works
-            </a>
-        </div>
-        <p class="text-xs text-slate-500">
-            Sign in with GitHub. Two clicks to your first monitor.
-        </p>
-
-        {# Product preview — the public-status surface, flat dialect:
-           1px slate-200 frame, white bg, no sticker shadow. Mirrors
-           OverallBanner + ComponentGroup from the design system. #}
-        <div class="mx-auto max-w-4xl pt-6 text-left">
-            <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white">
-                <div class="flex items-center gap-1.5 border-b border-slate-200 bg-slate-50 px-4 py-2.5">
-                    <span class="h-3 w-3 rounded-full bg-rose-400" aria-hidden="true"></span>
-                    <span class="h-3 w-3 rounded-full bg-amber-400" aria-hidden="true"></span>
-                    <span class="h-3 w-3 rounded-full bg-emerald-400" aria-hidden="true"></span>
-                    <span class="ml-3 truncate rounded-md bg-white px-3 py-1 text-xs text-slate-500">acme.uptimepage.dev</span>
+    {# ── Hero ─────────────────────────────────────────────────────────
+       Mono-first headline on the left, a terminal frame + product
+       preview on the right. No italic-serif, no magazine subhead. #}
+    <section>
+        <div class="grid gap-12 lg:grid-cols-12 lg:items-start">
+            <div class="space-y-7 lg:col-span-7">
+                <div class="flex flex-wrap items-center gap-3">
+                    <span class="mk-livepill">
+                        <span class="mk-livepill__dot" aria-hidden="true"></span>
+                        free · no card
+                    </span>
+                    <span class="mk-eyebrow mk-eyebrow--ok">v{{ version }}</span>
                 </div>
-                <div class="space-y-6 p-6 sm:p-8">
-                    {# OverallBanner — 1px border, bg-emerald-50, rounded-2xl, no sticker. #}
-                    <section role="status" aria-live="polite"
-                             class="rounded-2xl border border-emerald-200 bg-emerald-50 p-7">
-                        <div class="flex items-center gap-4">
-                            <span aria-hidden="true"
-                                  class="inline-grid h-14 w-14 place-items-center rounded-full bg-emerald-500 text-white">
-                                <svg viewBox="0 0 24 24" class="h-6 w-6" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg>
-                            </span>
-                            <div class="min-w-0">
-                                <h3 class="text-2xl font-semibold tracking-tight text-emerald-900">All systems operational</h3>
-                                <p class="mt-1 text-sm text-emerald-900/80">Last checked <time>just now</time></p>
-                            </div>
-                        </div>
-                    </section>
 
-                    {# Components group — same shape as ComponentGroup.jsx:
-                       outer ul with rounded-2xl + slate-200 border + white bg,
-                       rows divided by slate-100, individual rows are padding-only. #}
-                    <section aria-labelledby="preview-group-heading" class="space-y-3">
-                        <h4 id="preview-group-heading"
-                            class="text-xs font-semibold uppercase tracking-wide text-slate-500">Services</h4>
-                        <ul class="divide-y divide-slate-100 overflow-hidden rounded-2xl border border-slate-200 bg-white">
-                            <li class="p-5">
+                <h1 class="mk-display">
+                    Status pages and uptime monitoring.
+                    <span class="mk-display-em">One POST, public in 30 seconds.</span>
+                </h1>
+
+                <p class="mk-lede">
+                    HTTP · TCP · DNS · TLS. Check every 30 seconds. Alert
+                    on Slack, webhook, email. Public page on a subdomain,
+                    your data on a JSON endpoint, history as RSS or SVG.
+                </p>
+
+                <div class="flex flex-wrap items-center gap-3 pt-1">
+                    <a href="{{ app_url }}/login" class="mk-cta mk-cta--primary">
+                        start free
+                        <svg class="mk-cta__arrow h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M13 5l7 7-7 7M5 12h15"/>
+                        </svg>
+                    </a>
+                    <a href="#how-it-works" class="mk-cta mk-cta--ghost">
+                        how it works
+                    </a>
+                </div>
+
+                <p class="mk-mono text-xs mk-quiet">
+                    sign in with github · no password · no email opt-in
+                </p>
+            </div>
+
+            <div class="lg:col-span-5 space-y-4">
+                <div class="mk-terminal" aria-hidden="true">
+                    <div class="mk-terminal__chrome">
+                        <span class="mk-terminal__dot"></span>
+                        <span class="mk-terminal__dot"></span>
+                        <span class="mk-terminal__dot"></span>
+                        <span class="mk-terminal__title">uptimepage — sh</span>
+                    </div>
+                    <div class="mk-terminal__body">
+                        <span class="mk-terminal__line mk-terminal__line--prompt">curl -I https://api.acme.dev/health</span>
+                        <span class="mk-terminal__line">HTTP/2 <span class="mk-terminal__line--ok">200</span></span>
+                        <span class="mk-terminal__line mk-terminal__line--meta">x-uptimepage: ok  region=fsn1  98ms</span>
+                        <span class="mk-terminal__line mk-terminal__line--blank"></span>
+                        <span class="mk-terminal__line mk-terminal__line--prompt">curl -X POST $UPTIMEPAGE/v1/monitors -d @target.yml</span>
+                        <span class="mk-terminal__line">{"id":"mon_1q3...","public":true}<span class="mk-terminal__cursor"></span></span>
+                    </div>
+                </div>
+
+                <div class="mk-preview">
+                    <div class="flex items-center gap-1.5 px-3 py-2 mk-rule-bottom" style="background: var(--mk-bg-2);">
+                        <span class="h-2 w-2 rounded-full" style="background: var(--mk-down);" aria-hidden="true"></span>
+                        <span class="h-2 w-2 rounded-full" style="background: var(--mk-warn);" aria-hidden="true"></span>
+                        <span class="h-2 w-2 rounded-full" style="background: var(--mk-ok);" aria-hidden="true"></span>
+                        <span class="ml-3 truncate rounded-sm px-2 py-0.5 mk-mono mk-quiet" style="background: var(--mk-surface); font-size: 0.625rem; border: 1px solid var(--mk-rule);">acme.uptimepage.dev</span>
+                    </div>
+                    <div class="space-y-3 p-3">
+                        <section role="status" aria-live="polite" class="rounded-sm p-3"
+                                 style="background: color-mix(in oklch, var(--mk-ok-soft) 55%, var(--mk-surface)); border: 1px solid color-mix(in oklch, var(--mk-ok) 30%, var(--mk-rule));">
+                            <div class="flex items-center gap-3">
+                                <span aria-hidden="true" class="inline-grid h-8 w-8 place-items-center rounded-full"
+                                      style="background: var(--mk-ok); color: white;">
+                                    <svg viewBox="0 0 24 24" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg>
+                                </span>
+                                <div class="min-w-0">
+                                    <h3 class="mk-h3" style="margin: 0; font-size: 0.875rem;">all systems operational</h3>
+                                    <p class="mt-0.5 mk-mono mk-quiet" style="font-size: 0.6875rem;">last check <time>3s ago</time></p>
+                                </div>
+                            </div>
+                        </section>
+
+                        <ul class="overflow-hidden rounded-sm" style="border: 1px solid var(--mk-rule); background: var(--mk-surface);">
+                            <li class="p-3">
                                 <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-                                    <p class="flex items-center gap-2">
-                                        <span aria-hidden="true" class="text-xs text-emerald-700">●</span>
-                                        <span class="font-medium text-slate-900">Marketing site</span>
+                                    <p class="flex items-center gap-2 mk-mono" style="font-size: 0.75rem;">
+                                        <span aria-hidden="true" style="color: var(--mk-ok); font-size: 0.5rem;">●</span>
+                                        <span style="color: var(--mk-ink); font-weight: 600;">marketing site</span>
                                     </p>
-                                    <span class="text-sm font-medium text-emerald-700">Operational</span>
+                                    <span class="mk-mono" style="font-size: 0.625rem; color: var(--mk-ok); letter-spacing: 0.1em;">OK</span>
                                 </div>
-                                <div role="img" aria-label="Daily status history, last 90 days."
-                                     class="mt-4 grid grid-flow-col auto-cols-fr gap-0.5">
-                                    {% for _ in 0..60 %}<span class="h-6 rounded-sm bg-emerald-500"></span>{% endfor %}
-                                </div>
-                                <div class="mt-2 flex items-center justify-between text-[11px] text-slate-400">
-                                    <span>90 days ago</span>
-                                    <span><span class="font-mono text-slate-600">100%</span> uptime · no incidents</span>
-                                    <span>Today</span>
+                                <div role="img" aria-label="Daily status history, last 60 days."
+                                     class="mt-2 grid grid-flow-col auto-cols-fr gap-0.5">
+                                    {% for _ in 0..60 %}<span class="mk-daystrip"></span>{% endfor %}
                                 </div>
                             </li>
-                            <li class="p-5">
+                            <li class="mk-rule-top p-3">
                                 <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-                                    <p class="flex items-center gap-2">
-                                        <span aria-hidden="true" class="text-xs text-emerald-700">●</span>
-                                        <span class="font-medium text-slate-900">API</span>
+                                    <p class="flex items-center gap-2 mk-mono" style="font-size: 0.75rem;">
+                                        <span aria-hidden="true" style="color: var(--mk-ok); font-size: 0.5rem;">●</span>
+                                        <span style="color: var(--mk-ink); font-weight: 600;">api</span>
                                     </p>
-                                    <span class="text-sm font-medium text-emerald-700">Operational</span>
+                                    <span class="mk-mono" style="font-size: 0.625rem; color: var(--mk-ok); letter-spacing: 0.1em;">OK</span>
                                 </div>
-                                <div role="img" aria-label="Daily status history, last 90 days."
-                                     class="mt-4 grid grid-flow-col auto-cols-fr gap-0.5">
-                                    {# i == 38 → ~30 days ago in the 60-cell strip; the one amber pip pairs with the "1 degraded" line in the footer below. #}
-                                    {% for i in 0..60 %}<span class="h-6 rounded-sm {% if i == 38 %}bg-amber-400{% else %}bg-emerald-500{% endif %}"></span>{% endfor %}
-                                </div>
-                                <div class="mt-2 flex items-center justify-between text-[11px] text-slate-400">
-                                    <span>90 days ago</span>
-                                    <span><span class="font-mono text-slate-600">99.92%</span> uptime · 1 degraded</span>
-                                    <span>Today</span>
+                                <div role="img" aria-label="Daily status history, last 60 days, with one degraded day."
+                                     class="mt-2 grid grid-flow-col auto-cols-fr gap-0.5">
+                                    {% for i in 0..60 %}<span class="mk-daystrip{% if i == 38 %} mk-daystrip--warn{% endif %}"></span>{% endfor %}
                                 </div>
                             </li>
-                            <li class="p-5">
+                            <li class="mk-rule-top p-3">
                                 <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-                                    <p class="flex items-center gap-2">
-                                        <span aria-hidden="true" class="text-xs text-emerald-700">●</span>
-                                        <span class="font-medium text-slate-900">Dashboard</span>
+                                    <p class="flex items-center gap-2 mk-mono" style="font-size: 0.75rem;">
+                                        <span aria-hidden="true" style="color: var(--mk-ok); font-size: 0.5rem;">●</span>
+                                        <span style="color: var(--mk-ink); font-weight: 600;">dashboard</span>
                                     </p>
-                                    <span class="text-sm font-medium text-emerald-700">Operational</span>
+                                    <span class="mk-mono" style="font-size: 0.625rem; color: var(--mk-ok); letter-spacing: 0.1em;">OK</span>
                                 </div>
-                                <div role="img" aria-label="Daily status history, last 90 days."
-                                     class="mt-4 grid grid-flow-col auto-cols-fr gap-0.5">
-                                    {% for _ in 0..60 %}<span class="h-6 rounded-sm bg-emerald-500"></span>{% endfor %}
-                                </div>
-                                <div class="mt-2 flex items-center justify-between text-[11px] text-slate-400">
-                                    <span>90 days ago</span>
-                                    <span><span class="font-mono text-slate-600">100%</span> uptime · no incidents</span>
-                                    <span>Today</span>
+                                <div role="img" aria-label="Daily status history, last 60 days."
+                                     class="mt-2 grid grid-flow-col auto-cols-fr gap-0.5">
+                                    {% for _ in 0..60 %}<span class="mk-daystrip"></span>{% endfor %}
                                 </div>
                             </li>
                         </ul>
-                    </section>
+                    </div>
                 </div>
+                <p class="text-center mk-mono text-xs mk-quiet">↑ what your customers see</p>
             </div>
-            <p class="mt-3 text-center text-xs text-slate-500">A real preview of what your customers see.</p>
         </div>
     </section>
 
-    {# ── Integrations strip ───────────────────────────────────────── #}
-    <section aria-label="Works with" class="space-y-5">
-        <p class="text-center text-xs font-medium uppercase tracking-wider text-slate-500">
-            Works with the tools you already use
-        </p>
-        <ul class="flex flex-wrap items-center justify-center gap-x-10 gap-y-4 text-slate-400">
-            <li class="inline-flex items-center gap-2 text-base font-medium">
-                <svg viewBox="0 0 24 24" class="h-5 w-5 fill-current" aria-hidden="true">
-                    <path d="M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523A2.528 2.528 0 0 1 0 15.165a2.527 2.527 0 0 1 2.522-2.52h2.52v2.52zm1.27 0a2.527 2.527 0 0 1 2.521-2.52 2.527 2.527 0 0 1 2.521 2.52v6.313A2.528 2.528 0 0 1 8.834 24a2.528 2.528 0 0 1-2.522-2.522v-6.313zM8.834 5.042a2.528 2.528 0 0 1-2.522-2.52A2.528 2.528 0 0 1 8.834 0a2.528 2.528 0 0 1 2.521 2.522v2.52H8.834zm0 1.27a2.527 2.527 0 0 1 2.521 2.521 2.527 2.527 0 0 1-2.521 2.521H2.522A2.527 2.527 0 0 1 0 8.834a2.528 2.528 0 0 1 2.522-2.522h6.312zm10.122 2.521a2.528 2.528 0 0 1 2.522-2.52A2.528 2.528 0 0 1 24 8.834a2.528 2.528 0 0 1-2.522 2.521h-2.522V8.834zm-1.268 0a2.527 2.527 0 0 1-2.523 2.521 2.527 2.527 0 0 1-2.52-2.521V2.522A2.527 2.527 0 0 1 14.685 0a2.528 2.528 0 0 1 2.523 2.522v6.312zm-2.523 10.122a2.528 2.528 0 0 1 2.523 2.522A2.528 2.528 0 0 1 14.685 24a2.528 2.528 0 0 1-2.52-2.522v-2.522h2.52zm0-1.268a2.527 2.527 0 0 1-2.52-2.523 2.527 2.527 0 0 1 2.52-2.52h6.313A2.527 2.527 0 0 1 24 14.685a2.528 2.528 0 0 1-2.522 2.523h-6.313z"/>
-                </svg>
-                Slack
+    {# ── Integrations ──────────────────────────────────────────── #}
+    <section aria-label="Works with" class="space-y-4 text-center">
+        <p class="mk-eyebrow">delivers via</p>
+        <ul class="flex flex-wrap items-center justify-center gap-x-8 gap-y-3">
+            <li class="mk-integration">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523A2.528 2.528 0 0 1 0 15.165a2.527 2.527 0 0 1 2.522-2.52h2.52v2.52zm1.27 0a2.527 2.527 0 0 1 2.521-2.52 2.527 2.527 0 0 1 2.521 2.52v6.313A2.528 2.528 0 0 1 8.834 24a2.528 2.528 0 0 1-2.522-2.522v-6.313zM8.834 5.042a2.528 2.528 0 0 1-2.522-2.52A2.528 2.528 0 0 1 8.834 0a2.528 2.528 0 0 1 2.521 2.522v2.52H8.834zm0 1.27a2.527 2.527 0 0 1 2.521 2.521 2.527 2.527 0 0 1-2.521 2.521H2.522A2.527 2.527 0 0 1 0 8.834a2.528 2.528 0 0 1 2.522-2.522h6.312zm10.122 2.521a2.528 2.528 0 0 1 2.522-2.52A2.528 2.528 0 0 1 24 8.834a2.528 2.528 0 0 1-2.522 2.521h-2.522V8.834zm-1.268 0a2.527 2.527 0 0 1-2.523 2.521 2.527 2.527 0 0 1-2.52-2.521V2.522A2.527 2.527 0 0 1 14.685 0a2.528 2.528 0 0 1 2.523 2.522v6.312zm-2.523 10.122a2.528 2.528 0 0 1 2.523 2.522A2.528 2.528 0 0 1 14.685 24a2.528 2.528 0 0 1-2.52-2.522v-2.522h2.52zm0-1.268a2.527 2.527 0 0 1-2.52-2.523 2.527 2.527 0 0 1 2.52-2.52h6.313A2.527 2.527 0 0 1 24 14.685a2.528 2.528 0 0 1-2.522 2.523h-6.313z"/></svg>
+                slack
             </li>
-            <li class="inline-flex items-center gap-2 text-base font-medium">
-                <svg viewBox="0 0 24 24" class="h-5 w-5 fill-current" aria-hidden="true"><path d="M12 .5A11.5 11.5 0 0 0 .5 12a11.5 11.5 0 0 0 7.86 10.91c.57.1.78-.25.78-.55v-1.92c-3.2.7-3.87-1.53-3.87-1.53-.52-1.33-1.27-1.69-1.27-1.69-1.05-.71.08-.7.08-.7 1.15.08 1.76 1.18 1.76 1.18 1.02 1.76 2.69 1.25 3.35.96.1-.74.4-1.25.73-1.54-2.55-.29-5.24-1.28-5.24-5.68 0-1.26.45-2.29 1.18-3.1-.12-.29-.51-1.46.11-3.04 0 0 .97-.31 3.18 1.18a11 11 0 0 1 5.79 0c2.21-1.49 3.18-1.18 3.18-1.18.63 1.58.24 2.75.12 3.04.73.81 1.18 1.84 1.18 3.1 0 4.42-2.69 5.39-5.26 5.67.42.36.78 1.07.78 2.17v3.22c0 .31.21.66.79.55A11.5 11.5 0 0 0 23.5 12 11.5 11.5 0 0 0 12 .5Z"/></svg>
-                GitHub
+            <li class="mk-integration">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .5A11.5 11.5 0 0 0 .5 12a11.5 11.5 0 0 0 7.86 10.91c.57.1.78-.25.78-.55v-1.92c-3.2.7-3.87-1.53-3.87-1.53-.52-1.33-1.27-1.69-1.27-1.69-1.05-.71.08-.7.08-.7 1.15.08 1.76 1.18 1.76 1.18 1.02 1.76 2.69 1.25 3.35.96.1-.74.4-1.25.73-1.54-2.55-.29-5.24-1.28-5.24-5.68 0-1.26.45-2.29 1.18-3.1-.12-.29-.51-1.46.11-3.04 0 0 .97-.31 3.18 1.18a11 11 0 0 1 5.79 0c2.21-1.49 3.18-1.18 3.18-1.18.63 1.58.24 2.75.12 3.04.73.81 1.18 1.84 1.18 3.1 0 4.42-2.69 5.39-5.26 5.67.42.36.78 1.07.78 2.17v3.22c0 .31.21.66.79.55A11.5 11.5 0 0 0 23.5 12 11.5 11.5 0 0 0 12 .5Z"/></svg>
+                github
             </li>
-            <li class="inline-flex items-center gap-2 text-base font-medium">
-                <svg viewBox="0 0 24 24" class="h-5 w-5 fill-current" aria-hidden="true"><path d="M2.6 4h18.8L12 17.5 2.6 4Zm-2 .6L11 19l1 1 1-1L23.4 4.6V20H.6V4.6Z"/></svg>
-                Email
+            <li class="mk-integration">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.6 4h18.8L12 17.5 2.6 4Zm-2 .6L11 19l1 1 1-1L23.4 4.6V20H.6V4.6Z"/></svg>
+                email
             </li>
-            <li class="inline-flex items-center gap-2 text-base font-medium">
-                <svg viewBox="0 0 24 24" class="h-5 w-5 fill-current" aria-hidden="true"><path d="M13.5 1.5 3 14h7.5l-1 8.5L21 10h-7.5L13.5 1.5Z"/></svg>
-                Webhooks
+            <li class="mk-integration">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13.5 1.5 3 14h7.5l-1 8.5L21 10h-7.5L13.5 1.5Z"/></svg>
+                webhook
             </li>
         </ul>
     </section>
 
-    {# ── Stat strip ───────────────────────────────────────────────── #}
-    <section aria-label="At-a-glance" class="grid gap-4 sm:grid-cols-4">
-        <div class="sticker-card p-5 text-center">
-            <div class="text-3xl font-bold text-emerald-600">1 min</div>
-            <div class="mt-1 text-xs uppercase tracking-wide text-slate-500">minimum check interval</div>
-        </div>
-        <div class="sticker-card p-5 text-center">
-            <div class="text-3xl font-bold text-emerald-600">90 days</div>
-            <div class="mt-1 text-xs uppercase tracking-wide text-slate-500">of history on your status page</div>
-        </div>
-        <div class="sticker-card p-5 text-center">
-            <div class="text-3xl font-bold text-emerald-600">3+</div>
-            <div class="mt-1 text-xs uppercase tracking-wide text-slate-500">notification channels per monitor</div>
-        </div>
-        <div class="sticker-card p-5 text-center">
-            <div class="text-3xl font-bold text-emerald-600">0</div>
-            <div class="mt-1 text-xs uppercase tracking-wide text-slate-500">credit card to start</div>
+    {# ── Stats ─────────────────────────────────────────────────── #}
+    <section aria-label="At-a-glance">
+        <div class="mk-stats">
+            <div class="mk-stat">
+                <span class="mk-stat__num"><em class="mk-stat__num--em">30</em>s</span>
+                <span class="mk-stat__unit">min check interval</span>
+            </div>
+            <div class="mk-stat">
+                <span class="mk-stat__num"><em class="mk-stat__num--em">90</em>d</span>
+                <span class="mk-stat__unit">public history</span>
+            </div>
+            <div class="mk-stat">
+                <span class="mk-stat__num"><em class="mk-stat__num--em">4</em></span>
+                <span class="mk-stat__unit">alert channels</span>
+            </div>
+            <div class="mk-stat">
+                <span class="mk-stat__num"><em class="mk-stat__num--em">$0</em></span>
+                <span class="mk-stat__unit">to start</span>
+            </div>
         </div>
     </section>
 
-    {# ── Feature grid ─────────────────────────────────────────────── #}
+    {# ── Features ──────────────────────────────────────────────── #}
     <section id="features" class="space-y-8">
-        <header class="mx-auto max-w-2xl space-y-2 text-center">
-            <h2 class="text-3xl font-bold tracking-tight sm:text-4xl">Everything you need, nothing you don’t.</h2>
-            <p class="text-slate-600">Built for teams who want answers, not another dashboard to manage.</p>
+        <header class="mx-auto max-w-2xl space-y-3 text-center">
+            <p class="mk-eyebrow mk-eyebrow--ok">capabilities</p>
+            <h2 class="mk-h2">Everything you need. <em class="mk-h2-em">Nothing you don't.</em></h2>
         </header>
 
-        <div class="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-            <article class="sticker-card space-y-3 p-6">
-                <svg viewBox="0 0 24 24" class="h-7 w-7 text-emerald-700" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+        <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <article class="mk-card space-y-3">
+                <span class="mk-numeral" aria-hidden="true">01</span>
+                <svg class="mk-card__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
                     <circle cx="12" cy="12" r="9"/>
                     <path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>
                 </svg>
-                <h3 class="text-lg font-semibold">Monitor anything</h3>
-                <p class="text-sm text-slate-600">
+                <h3 class="mk-h3">monitor anything</h3>
+                <p class="mk-body">
                     HTTP, TCP, DNS. Custom headers, basic-auth, bearer tokens,
-                    response-code expectations, TLS verification. From a marketing
-                    site to an internal API.
+                    response-code expectations, TLS verification. Marketing
+                    site to internal API.
                 </p>
             </article>
 
-            <article class="sticker-card space-y-3 p-6">
-                <svg viewBox="0 0 24 24" class="h-7 w-7 text-emerald-700" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+            <article class="mk-card space-y-3">
+                <span class="mk-numeral" aria-hidden="true">02</span>
+                <svg class="mk-card__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
                     <path d="M18 16v-5a6 6 0 0 0-12 0v5l-2 3h16l-2-3Z"/>
                     <path d="M10 19a2 2 0 0 0 4 0"/>
                 </svg>
-                <h3 class="text-lg font-semibold">Alerts that don’t cry wolf</h3>
-                <p class="text-sm text-slate-600">
-                    Slack, email, generic webhooks. Per-monitor channels, dedupe,
-                    flap-suppress. A one-minute blip doesn’t wake the team at 3 a.m.
+                <h3 class="mk-h3">alerts with flap-suppress</h3>
+                <p class="mk-body">
+                    Slack, email, generic webhooks. Per-monitor channels,
+                    dedupe, flap-suppress. A 60s blip doesn't page anyone
+                    at 03:00.
                 </p>
             </article>
 
-            <article class="sticker-card space-y-3 p-6">
-                <svg viewBox="0 0 24 24" class="h-7 w-7 text-emerald-700" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+            <article class="mk-card space-y-3">
+                <span class="mk-numeral" aria-hidden="true">03</span>
+                <svg class="mk-card__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
                     <rect x="3" y="4" width="18" height="14" rx="2"/>
                     <path d="M7 9h10M7 13h6"/>
                 </svg>
-                <h3 class="text-lg font-semibold">Public status page</h3>
-                <p class="text-sm text-slate-600">
-                    Brand it with your colour and logo. 90-day timeline, live
-                    incidents, scheduled maintenance, RSS feed, JSON API,
-                    embeddable SVG badge.
+                <h3 class="mk-h3">public status page</h3>
+                <p class="mk-body">
+                    Brand colour + logo. 90-day timeline, live incidents,
+                    scheduled maintenance, RSS feed, JSON API, embeddable
+                    SVG badge.
                 </p>
             </article>
 
-            <article class="sticker-card space-y-3 p-6">
-                <svg viewBox="0 0 24 24" class="h-7 w-7 text-emerald-700" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+            <article class="mk-card space-y-3">
+                <span class="mk-numeral" aria-hidden="true">04</span>
+                <svg class="mk-card__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
                     <path d="M5 4h14v16l-3-2-2 2-2-2-2 2-2-2-3 2V4Z"/>
                     <path d="M9 9h6M9 13h4"/>
                 </svg>
-                <h3 class="text-lg font-semibold">Incident timelines</h3>
-                <p class="text-sm text-slate-600">
-                    Auto-opened when a monitor goes down, auto-closed when it
-                    recovers. Add a public note ("investigating", "fixed") your
-                    customers see in real time.
+                <h3 class="mk-h3">incident timelines</h3>
+                <p class="mk-body">
+                    Auto-opened on a down monitor, auto-closed on recovery.
+                    Add a public note your customers see in real time.
                 </p>
             </article>
 
-            <article class="sticker-card space-y-3 p-6">
-                <svg viewBox="0 0 24 24" class="h-7 w-7 text-emerald-700" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+            <article class="mk-card space-y-3">
+                <span class="mk-numeral" aria-hidden="true">05</span>
+                <svg class="mk-card__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
                     <circle cx="12" cy="12" r="9"/>
                     <path d="M12 7v5l3 2"/>
                 </svg>
-                <h3 class="text-lg font-semibold">Scheduled maintenance</h3>
-                <p class="text-sm text-slate-600">
-                    Plan a window, the status page shows it ahead of time, the
-                    alert engine stays quiet during it. No false pages for
-                    planned work.
+                <h3 class="mk-h3">scheduled maintenance</h3>
+                <p class="mk-body">
+                    Plan a window, the status page shows it ahead of time,
+                    the alert engine stays quiet during it. No false pages
+                    for planned work.
                 </p>
             </article>
 
-            <article class="sticker-card space-y-3 p-6">
-                <svg viewBox="0 0 24 24" class="h-7 w-7 text-emerald-700" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+            <article class="mk-card space-y-3">
+                <span class="mk-numeral" aria-hidden="true">06</span>
+                <svg class="mk-card__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
                     <circle cx="9" cy="8" r="3"/>
                     <circle cx="17" cy="9" r="2.5"/>
                     <path d="M3 19c0-3 3-5 6-5s6 2 6 5M15 19c0-2 2-3.5 4-3.5s2 1 2 3.5"/>
                 </svg>
-                <h3 class="text-lg font-semibold">Team members</h3>
-                <p class="text-sm text-slate-600">
-                    Invite teammates by email or GitHub handle. Role-based access
-                    — owners, members. Audit log of who changed what.
+                <h3 class="mk-h3">team members</h3>
+                <p class="mk-body">
+                    Invite by email or GitHub handle. Role-based access —
+                    owners, members. Audit log of who changed what.
                 </p>
             </article>
         </div>
     </section>
 
-    {# ── How it works ─────────────────────────────────────────────── #}
+    {# ── How it works ──────────────────────────────────────────── #}
     <section id="how-it-works" class="space-y-8">
-        <header class="mx-auto max-w-2xl space-y-2 text-center">
-            <h2 class="text-3xl font-bold tracking-tight sm:text-4xl">Three steps from zero to a public status page.</h2>
-            <p class="text-slate-600">No onboarding call. No setup wizard.</p>
+        <header class="mx-auto max-w-2xl space-y-3 text-center">
+            <p class="mk-eyebrow mk-eyebrow--ok">from zero to live</p>
+            <h2 class="mk-h2">Three steps. <em class="mk-h2-em">No setup wizard.</em></h2>
         </header>
 
-        <ol class="grid gap-5 sm:grid-cols-3">
-            <li class="sticker-card relative space-y-3 p-6">
-                <span class="absolute right-4 top-4 text-6xl font-bold text-slate-300" aria-hidden="true">1</span>
-                <h3 class="text-lg font-semibold">Sign in with GitHub</h3>
-                <p class="text-sm text-slate-600">
-                    One click, no password, no email opt-in. Your org gets a slug
-                    and a free tier.
+        <ol class="grid gap-4 md:grid-cols-3">
+            <li class="mk-step">
+                <span class="mk-step__index">01</span>
+                <h3 class="mk-h3">sign in with github</h3>
+                <p class="mk-body mt-2">
+                    One click, no password, no email opt-in. Your org gets a
+                    slug and the free tier.
                 </p>
             </li>
-            <li class="sticker-card relative space-y-3 p-6">
-                <span class="absolute right-4 top-4 text-6xl font-bold text-slate-300" aria-hidden="true">2</span>
-                <h3 class="text-lg font-semibold">Add a monitor</h3>
-                <p class="text-sm text-slate-600">
-                    Paste a URL. Pick an interval. Choose where alerts should
-                    land. You’re monitored in under a minute.
+            <li class="mk-step">
+                <span class="mk-step__index">02</span>
+                <h3 class="mk-h3">add a monitor</h3>
+                <p class="mk-body mt-2">
+                    Paste a URL. Pick an interval. Pick channels. Monitored
+                    in under a minute.
                 </p>
             </li>
-            <li class="sticker-card relative space-y-3 p-6">
-                <span class="absolute right-4 top-4 text-6xl font-bold text-slate-300" aria-hidden="true">3</span>
-                <h3 class="text-lg font-semibold">Share the page</h3>
-                <p class="text-sm text-slate-600">
-                    Flip a monitor to public, point customers at
-                    <code>your-org.uptimepage.dev</code>, and walk away.
+            <li class="mk-step">
+                <span class="mk-step__index">03</span>
+                <h3 class="mk-h3">share the page</h3>
+                <p class="mk-body mt-2">
+                    Flip a monitor public, point customers at
+                    <code class="mk-chip">your-org.uptimepage.dev</code>,
+                    walk away.
                 </p>
             </li>
         </ol>
     </section>
 
-    {# ── Use cases / who it's for ─────────────────────────────────── #}
+    {# ── Use cases ─────────────────────────────────────────────── #}
     <section class="space-y-8">
-        <header class="mx-auto max-w-2xl space-y-2 text-center">
-            <h2 class="text-3xl font-bold tracking-tight sm:text-4xl">Who is it for?</h2>
+        <header class="mx-auto max-w-2xl space-y-3 text-center">
+            <p class="mk-eyebrow mk-eyebrow--ok">who it's for</p>
+            <h2 class="mk-h2">Built for people who <em class="mk-h2-em">ship things</em>.</h2>
         </header>
 
-        <div class="grid gap-5 md:grid-cols-3">
-            <article class="sticker-card space-y-2 p-6">
-                <h3 class="text-base font-semibold">Indie hackers & SaaS founders</h3>
-                <p class="text-sm text-slate-600">
-                    Ship a polished status page on day one. Look like a real
-                    company without the real-company invoice.
+        <div class="grid gap-4 md:grid-cols-3">
+            <article class="mk-card space-y-2">
+                <p class="mk-eyebrow">indie hackers</p>
+                <h3 class="mk-h3">look like a real shop</h3>
+                <p class="mk-body">
+                    Ship a polished status page on day one. No real-company
+                    invoice.
                 </p>
             </article>
-            <article class="sticker-card space-y-2 p-6">
-                <h3 class="text-base font-semibold">Internal tools teams</h3>
-                <p class="text-sm text-slate-600">
-                    Track every dependency your platform leans on — payment
-                    provider, mail sender, third-party API. Page when one wobbles.
+            <article class="mk-card space-y-2">
+                <p class="mk-eyebrow">internal tools</p>
+                <h3 class="mk-h3">watch every dependency</h3>
+                <p class="mk-body">
+                    Payment provider, mail sender, third-party API. Page
+                    when one wobbles.
                 </p>
             </article>
-            <article class="sticker-card space-y-2 p-6">
-                <h3 class="text-base font-semibold">Agencies & freelancers</h3>
-                <p class="text-sm text-slate-600">
-                    Give each client a branded status URL. One account, many
-                    pages, one tab in your browser.
+            <article class="mk-card space-y-2">
+                <p class="mk-eyebrow">agencies</p>
+                <h3 class="mk-h3">one tab, many clients</h3>
+                <p class="mk-body">
+                    Give each client a branded status URL. One account,
+                    many pages.
                 </p>
             </article>
         </div>
     </section>
 
-    {# ── Pricing ──────────────────────────────────────────────────── #}
+    {# ── Pricing ───────────────────────────────────────────────── #}
     <section id="pricing" class="mx-auto max-w-3xl">
-        <article class="sticker-card space-y-5 p-10 text-center">
-            <span class="sticker-pill sticker-pill--ok">Free while we’re young</span>
-            <h2 class="text-3xl font-bold tracking-tight sm:text-4xl">
-                Everything is free right now.
-            </h2>
-            <p class="mx-auto max-w-xl text-slate-600">
-                One plan, the full feature set, no usage caps that matter. We’ll
-                introduce paid tiers later as the product matures — but anyone
-                who signs up today gets to keep using what they have.
+        <article class="mk-price text-center space-y-5">
+            <span class="mk-livepill" style="margin: 0 auto;">
+                <span class="mk-livepill__dot" aria-hidden="true"></span>
+                free during beta
+            </span>
+            <h2 class="mk-h2">Free <em class="mk-h2-em">right now</em>.</h2>
+            <p class="mk-lede mx-auto">
+                One plan, full feature set, no caps that matter. Paid
+                tiers come later — sign up today and keep what you have.
             </p>
-            <ul class="mx-auto inline-flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm text-slate-700">
+            <ul class="mx-auto inline-flex flex-wrap items-center justify-center gap-x-5 gap-y-2 pt-1">
                 {% for label in pricing_features %}
-                <li class="inline-flex items-center gap-2">
-                    <svg viewBox="0 0 24 24" class="h-4 w-4 flex-none text-emerald-600" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5L20 7"/></svg>
+                <li class="mk-price__feature">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5L20 7"/></svg>
                     {{ label }}
                 </li>
                 {% endfor %}
             </ul>
             <div class="pt-2">
-                <a href="{{ app_url }}/login"
-                   class="sticker-btn sticker-btn--primary inline-flex items-center gap-2 px-6 py-3 text-base font-semibold">
-                    Get started — free
-                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+                <a href="{{ app_url }}/login" class="mk-cta mk-cta--primary">
+                    get started
+                    <svg class="mk-cta__arrow h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M13 5l7 7-7 7M5 12h15"/>
                     </svg>
                 </a>
@@ -368,69 +378,72 @@
         </article>
     </section>
 
-    {# ── FAQ ──────────────────────────────────────────────────────── #}
+    {# ── FAQ ───────────────────────────────────────────────────── #}
     <section id="faq" class="mx-auto max-w-3xl space-y-6">
         <header class="space-y-2 text-center">
-            <h2 class="text-3xl font-bold tracking-tight sm:text-4xl">Frequently asked questions</h2>
+            <p class="mk-eyebrow mk-eyebrow--ok">common questions</p>
+            <h2 class="mk-h2">FAQ</h2>
         </header>
-        <div class="space-y-3">
-            <details class="sticker-disclosure">
-                <summary class="cursor-pointer p-5 font-medium">Is there really no charge?</summary>
-                <div class="sticker-disclosure__body p-5 pt-0 text-sm text-slate-600">
-                    Right now, no. Everything is free while the product matures. We’ll
-                    introduce paid tiers later — anyone who signs up today keeps
-                    what they have.
+        <div>
+            <details class="mk-faq">
+                <summary>Is there really no charge?</summary>
+                <div class="mk-faq__body">
+                    Right now, no. Everything is free while the product matures.
+                    Paid tiers come later — anyone who signs up today keeps what
+                    they have.
                 </div>
             </details>
-            <details class="sticker-disclosure">
-                <summary class="cursor-pointer p-5 font-medium">Can I use my own domain for the status page?</summary>
-                <div class="sticker-disclosure__body p-5 pt-0 text-sm text-slate-600">
-                    Every org gets <code>your-org.uptimepage.dev</code> out of the
-                    box. A custom CNAME (<code>status.yourcompany.com</code>) is
-                    coming soon — drop a line if you need it sooner.
+            <details class="mk-faq">
+                <summary>Can I use my own domain for the status page?</summary>
+                <div class="mk-faq__body">
+                    Every org gets <code class="mk-chip">your-org.uptimepage.dev</code>
+                    out of the box. A custom CNAME (<code class="mk-chip">status.yourcompany.com</code>)
+                    is coming — drop a line if you need it sooner.
                 </div>
             </details>
-            <details class="sticker-disclosure">
-                <summary class="cursor-pointer p-5 font-medium">What kinds of monitors are supported?</summary>
-                <div class="sticker-disclosure__body p-5 pt-0 text-sm text-slate-600">
-                    HTTP/HTTPS, TCP port, and DNS lookups. Per-monitor headers,
+            <details class="mk-faq">
+                <summary>What kinds of monitors are supported?</summary>
+                <div class="mk-faq__body">
+                    HTTP/HTTPS, TCP port, DNS lookup. Per-monitor headers,
                     basic-auth, bearer tokens, expected status code, content-match,
-                    TLS verification, and follow-redirects rules.
+                    TLS verification, follow-redirects rules.
                 </div>
             </details>
-            <details class="sticker-disclosure">
-                <summary class="cursor-pointer p-5 font-medium">Where do alerts come from?</summary>
-                <div class="sticker-disclosure__body p-5 pt-0 text-sm text-slate-600">
-                    Slack, email, and any HTTPS webhook. Each monitor binds its own
-                    channels, so a marketing-site flap doesn’t page the on-call rota.
+            <details class="mk-faq">
+                <summary>Where do alerts come from?</summary>
+                <div class="mk-faq__body">
+                    Slack, email, any HTTPS webhook. Each monitor binds its own
+                    channels — a marketing-site flap doesn't page on-call.
                 </div>
             </details>
-            <details class="sticker-disclosure">
-                <summary class="cursor-pointer p-5 font-medium">Can I export my data?</summary>
-                <div class="sticker-disclosure__body p-5 pt-0 text-sm text-slate-600">
-                    Always. JSON export for every monitor and incident; RSS for
-                    public incidents; SVG badges you can drop in a README.
+            <details class="mk-faq">
+                <summary>Can I export my data?</summary>
+                <div class="mk-faq__body">
+                    Always. JSON export per monitor and incident. RSS for public
+                    incidents. SVG badges you can drop in a README.
                 </div>
             </details>
         </div>
     </section>
 
-    {# ── Closing CTA ──────────────────────────────────────────────── #}
-    <section class="sticker-card mx-auto max-w-3xl space-y-5 p-10 text-center">
-        <h2 class="text-3xl font-bold tracking-tight sm:text-4xl">
-            Your first monitor is one click away.
+    {# ── Closing CTA ───────────────────────────────────────────── #}
+    <section class="mx-auto max-w-3xl text-center space-y-5">
+        <h2 class="mk-h2">
+            Your first monitor is <em class="mk-h2-em">one command</em> away.
         </h2>
-        <p class="text-slate-600">
-            Sign in with GitHub, add a URL, ship a public page in under five minutes.
+        <p class="mk-lede mx-auto">
+            Sign in with GitHub, paste a URL, ship a public page in under
+            five minutes.
         </p>
-        <a href="{{ app_url }}/login"
-           class="sticker-btn sticker-btn--primary inline-flex items-center gap-2 px-7 py-3 text-base font-semibold">
-            Start free with GitHub
-            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M13 5l7 7-7 7M5 12h15"/>
-            </svg>
-        </a>
+        <div>
+            <a href="{{ app_url }}/login" class="mk-cta mk-cta--primary">
+                start free with github
+                <svg class="mk-cta__arrow h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M13 5l7 7-7 7M5 12h15"/>
+                </svg>
+            </a>
+        </div>
     </section>
 
-</section>
+</div>
 {% endblock %}

@@ -22,61 +22,88 @@
 
     {% block head %}{% endblock %}
 </head>
-<body class="bg-slate-50 text-slate-900 antialiased">
+<body class="marketing-shell antialiased">
     <a href="#main-content"
-       class="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:rounded focus:bg-white focus:px-3 focus:py-2 focus:text-sm focus:ring-2 focus:ring-slate-700">
+       class="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:rounded focus:bg-[color:var(--mk-surface)] focus:px-3 focus:py-2 focus:text-sm focus:ring-2 focus:ring-[color:var(--mk-ink)]">
         Skip to main content
     </a>
 
-    <header class="border-b bg-white">
-        <nav aria-label="Primary" class="container mx-auto flex items-center gap-6 px-4 py-3">
+    <header class="mk-header sticky top-0 z-30">
+        <nav aria-label="Primary" class="container mx-auto flex items-center gap-8 px-4 py-4">
             {% include "marketing/_brand_lockup.html" %}
-            <a href="/#features" class="nav-link hidden sm:inline">Features</a>
-            <a href="/#pricing" class="nav-link hidden sm:inline">Pricing</a>
-            <a href="/blog" class="nav-link hidden sm:inline">Blog</a>
-            <a href="{{ app_url }}/login"
-               class="ml-auto sticker-btn sticker-btn--primary inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold">
-                Sign in
+            <a href="/#features" class="mk-nav-link hidden sm:inline">features</a>
+            <a href="/#how-it-works" class="mk-nav-link hidden md:inline">how it works</a>
+            <a href="/#pricing" class="mk-nav-link hidden sm:inline">pricing</a>
+            <a href="/blog" class="mk-nav-link hidden sm:inline">notes</a>
+            <a href="{{ app_url }}/login" class="ml-auto mk-cta mk-cta--primary">
+                sign in
+                <svg class="mk-cta__arrow h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M13 5l7 7-7 7M5 12h15"/>
+                </svg>
             </a>
         </nav>
     </header>
 
-    <main id="main-content" tabindex="-1" class="container mx-auto px-4 py-12 sm:py-16">
+    <main id="main-content" tabindex="-1" class="container mx-auto px-4 py-16 sm:py-24">
         {% block content %}{% endblock %}
     </main>
 
-    <footer class="border-t bg-white">
-        <div class="container mx-auto grid gap-8 px-4 py-12 sm:grid-cols-4">
-            <div class="space-y-3 sm:col-span-2">
+    {# Mono ticker rail — runs uptime-flavoured stats across the page
+       just before the footer. Pure CSS marquee. #}
+    <div class="mk-ticker" aria-hidden="true">
+        <div class="mk-ticker__track">
+            {% for _ in 0..2 %}
+            <span class="mk-ticker__item"><span class="mk-ticker__num">99.97%</span> uptime · 90d</span>
+            <span class="mk-ticker__sep">·</span>
+            <span class="mk-ticker__item"><span class="mk-ticker__num">30s</span> min interval</span>
+            <span class="mk-ticker__sep">·</span>
+            <span class="mk-ticker__item"><span class="mk-ticker__num">HTTP · TCP · DNS · TLS</span></span>
+            <span class="mk-ticker__sep">·</span>
+            <span class="mk-ticker__item"><span class="mk-ticker__num">slack · email · webhook</span></span>
+            <span class="mk-ticker__sep">·</span>
+            <span class="mk-ticker__item"><span class="mk-ticker__num">90d</span> public history</span>
+            <span class="mk-ticker__sep">·</span>
+            <span class="mk-ticker__item">no card required</span>
+            <span class="mk-ticker__sep">·</span>
+            {% endfor %}
+        </div>
+    </div>
+
+    <footer class="mk-footer">
+        <div class="container mx-auto grid gap-10 px-4 py-12 sm:grid-cols-12">
+            <div class="space-y-4 sm:col-span-5">
                 {% include "marketing/_brand_lockup.html" %}
-                <p class="max-w-sm text-sm text-slate-600">
-                    Uptime monitoring and public status pages that just work.
+                <p class="max-w-sm text-sm" style="color: var(--mk-ink-soft);">
+                    Uptime monitoring and public status pages. For indie
+                    hackers, internal-tools teams, and agencies who refuse
+                    to look amateur.
                 </p>
-                <p class="text-xs text-slate-400">
-                    v{{ version }}
+                <p class="mk-mono mk-quiet text-xs">
+                    v{{ version }} · est. 2026
                 </p>
             </div>
 
-            <div class="space-y-2 text-sm">
-                <p class="font-semibold text-slate-900">Product</p>
-                <a href="/#features" class="block text-slate-600 hover:text-slate-900">Features</a>
-                <a href="/#pricing" class="block text-slate-600 hover:text-slate-900">Pricing</a>
-                <a href="/blog" class="block text-slate-600 hover:text-slate-900">Blog</a>
-                <a href="{{ app_url }}/login" class="block text-slate-600 hover:text-slate-900">Sign in</a>
+            <div class="sm:col-span-3">
+                <p class="mk-footer__heading">product</p>
+                <a href="/#features" class="mk-footer-link">features</a>
+                <a href="/#how-it-works" class="mk-footer-link">how it works</a>
+                <a href="/#pricing" class="mk-footer-link">pricing</a>
+                <a href="/blog" class="mk-footer-link">notes</a>
+                <a href="{{ app_url }}/login" class="mk-footer-link">sign in</a>
             </div>
 
-            <div class="space-y-2 text-sm">
-                <p class="font-semibold text-slate-900">Company</p>
-                <a href="/privacy" class="block text-slate-600 hover:text-slate-900">Privacy</a>
-                <a href="/terms" class="block text-slate-600 hover:text-slate-900">Terms</a>
-                <a href="/cookies" class="block text-slate-600 hover:text-slate-900">Cookies</a>
-                <a href="/security-policy" class="block text-slate-600 hover:text-slate-900">Security</a>
-                <a href="/impressum" class="block text-slate-600 hover:text-slate-900">Impressum</a>
+            <div class="sm:col-span-4">
+                <p class="mk-footer__heading">company</p>
+                <a href="/privacy" class="mk-footer-link">privacy</a>
+                <a href="/terms" class="mk-footer-link">terms</a>
+                <a href="/cookies" class="mk-footer-link">cookies</a>
+                <a href="/security-policy" class="mk-footer-link">security policy</a>
+                <a href="/impressum" class="mk-footer-link">impressum</a>
             </div>
         </div>
-        <div class="border-t border-slate-100">
-            <p class="container mx-auto px-4 py-4 text-xs text-slate-400">
-                &copy; 2026 Uptimepage. All rights reserved.
+        <div class="mk-rule-top">
+            <p class="container mx-auto px-4 py-4 text-xs mk-mono mk-quiet">
+                © 2026 Uptimepage · <em class="mk-em">made for production</em>
             </p>
         </div>
     </footer>
