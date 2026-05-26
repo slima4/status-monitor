@@ -7,14 +7,17 @@ use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use chrono::{DateTime, Utc};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use tower_cookies::Cookies;
 use utoipa::ToSchema;
 
 use crate::app::AppState;
 use crate::auth::session as session_store;
-use crate::domain::UserId;
+use crate::domain::{AppTheme, UserId};
 use crate::error::{AppError, Result};
+use crate::storage::users as users_store;
 use crate::web::auth::Session;
+use crate::web::theme as theme_cookie;
 
 #[derive(Debug, Serialize, ToSchema)]
 pub struct MeView {
@@ -97,4 +100,40 @@ pub async fn revoke_session(
         ));
     }
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ThemeView {
+    pub theme: AppTheme,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct UpdateThemeRequest {
+    pub theme: AppTheme,
+}
+
+pub async fn get_theme(State(state): State<AppState>, session: Session) -> Result<Json<ThemeView>> {
+    let user = session.user.as_ref().ok_or(AppError::Unauthorized)?;
+    let pool = state.db.as_ref().ok_or(AppError::Unauthorized)?;
+    let theme = users_store::get_theme(pool, user.id).await?;
+    Ok(Json(ThemeView { theme }))
+}
+
+pub async fn update_theme(
+    State(state): State<AppState>,
+    session: Session,
+    cookies: Cookies,
+    Json(req): Json<UpdateThemeRequest>,
+) -> Result<Json<ThemeView>> {
+    let user = session.user.as_ref().ok_or(AppError::Unauthorized)?;
+    let pool = state.db.as_ref().ok_or(AppError::Unauthorized)?;
+    let ok = users_store::set_theme(pool, user.id, req.theme).await?;
+    if !ok {
+        return Err(AppError::not_found("USER_NOT_FOUND", "user not found"));
+    }
+    cookies.add(theme_cookie::build_cookie(
+        req.theme,
+        state.cfg.auth.session.cookie_secure,
+    ));
+    Ok(Json(ThemeView { theme: req.theme }))
 }

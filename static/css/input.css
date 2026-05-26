@@ -608,8 +608,8 @@
         --theme-state-warn-fg-onsoft: oklch(0.88 0.16 80);
         --theme-state-warn-strong:    oklch(0.75 0.16 80);
     }
-    .theme-terminal.app-shell::before { opacity: 0.10; mix-blend-mode: screen; }
-    .theme-terminal.app-shell::after  { background: none; }
+    .theme-terminal .app-shell::before { opacity: 0.10; mix-blend-mode: screen; }
+    .theme-terminal .app-shell::after  { background: none; }
 
     /* "Winter" theme — adapted from DaisyUI's winter palette
        (https://daisyui.com/docs/themes/). Cool light surfaces, electric-
@@ -681,9 +681,7 @@
     }
     /* Kill the scanline overlay on public-shell + app-shell when classic
        is active. CRT atmosphere is the CLI register's signature. */
-    .theme-classic.public-shell::before,
-    .theme-classic.app-shell::before,
-    .theme-classic.marketing-shell::before { content: none; }
+    .theme-classic.public-shell::before { content: none; }
 
     /* Soft corners + thicker accent borders restore the original
        "rounded-2xl border-2" look on the public status banner + callouts;

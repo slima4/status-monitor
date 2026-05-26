@@ -27,3 +27,65 @@ pub struct User {
     pub updated_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,
 }
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum AppTheme {
+    #[default]
+    Default,
+    Terminal,
+    Winter,
+}
+
+impl AppTheme {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Default => "default",
+            Self::Terminal => "terminal",
+            Self::Winter => "winter",
+        }
+    }
+
+    pub fn from_db(s: &str) -> Self {
+        match s {
+            "default" => Self::Default,
+            "terminal" => Self::Terminal,
+            "winter" => Self::Winter,
+            other => {
+                tracing::warn!(
+                    value = other,
+                    "unknown user.theme in DB, falling back to default"
+                );
+                Self::Default
+            }
+        }
+    }
+
+    pub const ALL: &'static [&'static str] = &["default", "terminal", "winter"];
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn app_theme_matches_users_table_check_constraint() {
+        let migration = include_str!("../../migrations/postgres/004_organizations.up.sql");
+        for s in AppTheme::ALL {
+            let needle = format!("'{}'", s);
+            assert!(
+                migration.contains(&needle),
+                "AppTheme variant {:?} missing from users.theme CHECK",
+                s
+            );
+        }
+    }
+
+    #[test]
+    fn app_theme_from_db_round_trips_known_values() {
+        for s in AppTheme::ALL {
+            assert_eq!(AppTheme::from_db(s).as_str(), *s);
+        }
+        assert_eq!(AppTheme::from_db("garbage").as_str(), "default");
+    }
+}

@@ -10,6 +10,7 @@ pub mod orgs;
 pub mod postgres;
 pub mod postgres_secrets;
 pub mod traits;
+pub mod users;
 
 pub use admin::AdminRepo;
 pub use clickhouse::{ClickhouseResultSink, ClickhouseResultsStore, build_client, migrate};

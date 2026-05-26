@@ -168,6 +168,10 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
             post(handlers::account::recover_account),
         )
         .route("/me/usage", get(handlers::usage::get_me_usage))
+        .route(
+            "/me/theme",
+            get(handlers::me::get_theme).patch(handlers::me::update_theme),
+        )
         .route("/me/sessions", get(handlers::me::list_sessions))
         .route(
             "/me/sessions/{id}",

@@ -14,6 +14,59 @@
     </dl>
   </header>
 
+  <section class="space-y-4" aria-labelledby="appearance-heading">
+    <h2 id="appearance-heading" class="panel-label">Appearance</h2>
+
+    <div class="sticker-card space-y-2 p-5">
+      <label for="app-theme" class="text-sm font-medium">Theme</label>
+      <select id="app-theme" data-sm-combobox aria-label="Theme">
+        <option value="default">Default — CLI register</option>
+        <option value="terminal">Terminal — CRT phosphor</option>
+        <option value="winter">Winter — cool blue</option>
+      </select>
+      <p id="theme-result" class="text-xs text-muted" aria-live="polite">
+        Applies to the org app on every device you sign in to.
+      </p>
+    </div>
+  </section>
+
+  <script>
+    (function () {
+      const sel = document.getElementById("app-theme");
+      const out = document.getElementById("theme-result");
+      const HEADERS = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "X-Requested-With": "status-monitor",
+      };
+
+      fetch("/api/v1/me/theme", { headers: HEADERS })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (body) {
+          if (body && body.theme) sel.value = body.theme;
+        })
+        .catch(function () { /* fall back to the default selection */ });
+
+      sel.addEventListener("change", async function () {
+        const v = sel.value;
+        try {
+          const r = await fetch("/api/v1/me/theme", {
+            method: "PATCH",
+            headers: HEADERS,
+            body: JSON.stringify({ theme: v }),
+          });
+          if (!r.ok) throw new Error("HTTP " + r.status);
+          const html = document.documentElement;
+          html.classList.remove("theme-default", "theme-terminal", "theme-winter");
+          if (v !== "default") html.classList.add("theme-" + v);
+          out.textContent = "Saved.";
+        } catch (err) {
+          out.textContent = "Could not save theme: " + err.message;
+        }
+      });
+    })();
+  </script>
+
   <section class="space-y-4" aria-labelledby="privacy-heading">
     <h2 id="privacy-heading" class="panel-label">Privacy</h2>
 

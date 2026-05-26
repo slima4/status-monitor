@@ -2,10 +2,17 @@
 <html lang="en">
 <head>
     <script>
-      // First-paint reveal gate. Set BEFORE the stylesheet parses so the
-      // .sm-fresh-load animation rule applies on initial render; cleared
-      // after the stagger window so htmx polls (dashboard 5s, detail 60s)
-      // do not re-fire the rise animation on swapped nodes (= blink fix).
+      // First-paint reveal gate + theme apply, both BEFORE stylesheet parse.
+      // Theme: read sm_theme cookie (default | terminal | winter) and put
+      // theme-X on <html> so .theme-X .app-shell rules win at first render
+      // (no FOUC). The 3 known values are whitelisted to keep attacker
+      // cookie values out of the class list.
+      (function () {
+        var m = document.cookie.match(/(?:^|; )sm_theme=([^;]+)/);
+        if (m && /^(default|terminal|winter)$/.test(m[1]) && m[1] !== 'default') {
+          document.documentElement.classList.add('theme-' + m[1]);
+        }
+      })();
       document.documentElement.classList.add('sm-fresh-load');
       addEventListener('load', () => setTimeout(
         () => document.documentElement.classList.remove('sm-fresh-load'),

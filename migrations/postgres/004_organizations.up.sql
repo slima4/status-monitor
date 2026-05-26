@@ -29,6 +29,8 @@ CREATE TABLE users (
     -- Partial-UNIQUE via `idx_users_active`; see `organizations.slug` above.
     email           CITEXT NOT NULL,
     display_name    TEXT,
+    theme           TEXT NOT NULL DEFAULT 'default'
+                    CHECK (theme IN ('default', 'terminal', 'winter')),
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     deleted_at      TIMESTAMPTZ

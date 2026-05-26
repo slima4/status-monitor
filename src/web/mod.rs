@@ -11,6 +11,7 @@ pub mod error;
 pub mod filters;
 pub mod host;
 pub mod routes;
+pub mod theme;
 pub mod views;
 
 pub use auth::{AuthedBrowser, CurrentOrg, CurrentUser, Session, User};

@@ -220,5 +220,8 @@ pub async fn verify(
         &state.cfg.auth.session,
         created.cookie_token,
     ));
+    if let Err(err) = crate::web::theme::issue_for(&state, &cookies, user_id).await {
+        tracing::warn!(error = %err, "theme cookie issue failed (non-fatal)");
+    }
     Ok(Redirect::to("/").into_response())
 }
