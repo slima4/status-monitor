@@ -1,16 +1,16 @@
 {% extends "base.html" %}
-{% block title %}Dashboard · Status Monitor{% endblock %}
+{% block title %}Dashboard · Uptimepage{% endblock %}
 {% block content %}
 <section class="space-y-5">
   <header class="flex flex-wrap items-end justify-between gap-3">
     <div class="flex items-center gap-3">
-      <h1 class="page-title">Dashboard</h1>
+      <h1 class="page-title"><span class="page-title__prefix">$</span>dashboard</h1>
       <span class="dashboard-chip">refresh · 5s</span>
     </div>
     <div class="flex flex-wrap items-center gap-2">
       <a href="/targets/new"
-         class="sticker-btn sticker-btn--primary px-4 py-2 text-sm font-medium transition-transform hover:-translate-y-0.5">
-        + Monitor
+         class="sticker-btn sticker-btn--primary px-3 py-1.5 text-sm font-medium">
+        + monitor
       </a>
     </div>
   </header>

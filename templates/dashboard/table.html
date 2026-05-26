@@ -6,7 +6,7 @@
      class="space-y-4">
 
   <p class="dashboard-subhead">
-    Filter <span class="dashboard-subhead__mono">status:any region:any</span>
+    filter <span class="dashboard-subhead__mono">status:any region:any</span>
     <span class="mx-1">·</span>
     <span class="dashboard-subhead__mono">{{ matches }}</span> matches
     {% if active_incidents.len() > 0 %}
@@ -51,24 +51,24 @@
   </div>
   {% if truncated %}
   <p class="text-xs text-muted">
-    Showing first {{ matches }} monitors —
+    showing first {{ matches }} monitors —
     <a href="/targets" class="underline">search the full list</a>.
   </p>
   {% endif %}
 
   <div class="sticker-card dashboard-card">
     {% if rows.is_empty() %}
-    <p class="dashboard-empty">No monitors match this range.</p>
+    <p class="dashboard-empty">no monitors match this range.</p>
     {% else %}
     <div class="dashboard-table" role="table" aria-label="Monitors with status, percentiles and recent latency">
       <div class="dashboard-head" role="row">
         <span aria-label="status"></span>
-        <span>Monitor</span>
-        <span>Type</span>
+        <span>monitor</span>
+        <span>type</span>
         <span class="text-right">p50</span>
-        <span>Latency · 60min</span>
+        <span>latency · 60min</span>
         <span class="text-right">p95</span>
-        <span class="text-right">Err%</span>
+        <span class="text-right">err%</span>
         <span class="text-right">{{ range }}</span>
       </div>
       {% for row in rows.iter() %}

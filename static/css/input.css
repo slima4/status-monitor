@@ -714,21 +714,32 @@
        sticker — thick ink edge + a hard, un-blurred offset shadow (no soft
        drop-blur). The shadow is plain CSS because it's an offset/colour
        arbitrary value @apply can't express cleanly. */
+    /* Flat panel surface. CLI register — hairline border, no offset shadow.
+       (Default theme flattens --theme-shadow-card to none; .theme-terminal
+        / .theme-winter can bring the sticker dialect back via overrides.) */
     .sticker-card {
         @apply rounded-sm border;
         background: var(--theme-surface-elev);
-        border-color: var(--theme-ink);
+        border-color: var(--theme-line);
         box-shadow: var(--theme-shadow-card);
     }
 
-    /* Same ink edge + hard offset shadow as .sticker-card, sized for a
-       control (smaller offset). Both share var(--theme-ink) so the cartoon
-       shadow stays one retunable token — never re-state the offset inline. */
+    /* Filled control. Mono font, sharp corners, hairline edge. Bracket
+       wrap via ::before/::after when the control is a CTA-class fill
+       (--primary / --danger / --accent) so the chrome reads as CLI. */
     .sticker-btn {
-        @apply rounded-sm border;
-        border-color: var(--theme-ink);
+        @apply inline-flex items-center justify-center rounded-sm border;
+        border-color: var(--theme-line);
+        font-family: var(--font-mono);
         box-shadow: var(--theme-shadow-btn);
+        transition: background-color 120ms ease, border-color 120ms ease;
     }
+    .sticker-btn--primary::before,
+    .sticker-btn--accent::before,
+    .sticker-btn--danger::before  { content: "["; opacity: 0.7; margin-right: 0.3em; }
+    .sticker-btn--primary::after,
+    .sticker-btn--accent::after,
+    .sticker-btn--danger::after   { content: "]"; opacity: 0.7; margin-left: 0.3em; }
     .sticker-btn:disabled {
         @apply cursor-not-allowed opacity-60;
         box-shadow: var(--theme-shadow-btn-disabled);
@@ -1007,16 +1018,16 @@
 
     /* The single page <h1> scale, app-wide. (login adds .page-title--hero
        on top for its hero.) One definition so every surface's title
-       matches. Plex Serif 500 is the body-weight variant — reads
-       editorial without going slab-heavy. */
+       matches. Mono register — sharp tracking, no serif. */
     .page-title {
-        @apply text-4xl tracking-tight;
+        @apply text-3xl tracking-tight;
         color: var(--theme-text);
-        font-family: var(--font-display);
-        font-weight: 500;
-        letter-spacing: -0.028em;
-        line-height: 1.05;
+        font-family: var(--font-mono);
+        font-weight: 600;
+        letter-spacing: -0.02em;
+        line-height: 1.1;
     }
+    .page-title__prefix { color: var(--theme-text-faint); margin-right: 0.4em; font-weight: 500; }
 
     /* Uppercase section/eyebrow label — one definition app-wide so the
        type scale stays in lockstep (also used for KPI-card labels). */
@@ -1471,18 +1482,20 @@
     .range-tabs {
         @apply inline-flex items-center gap-1 rounded-sm border p-1 text-xs font-medium;
         background: var(--theme-surface-elev);
-        border-color: var(--theme-ink);
+        border-color: var(--theme-line);
+        font-family: var(--font-mono);
     }
     .range-tabs__btn {
-        @apply rounded-md px-2.5 py-1;
+        @apply rounded-sm px-2.5 py-1;
         color: var(--theme-text-muted);
+        font-family: var(--font-mono);
         transition: background-color 120ms ease, color 120ms ease;
     }
-    .range-tabs__btn:hover   { background: var(--theme-surface-sunk); color: var(--theme-text); }
+    .range-tabs__btn:hover   { background: var(--theme-surface-sunk); color: var(--theme-accent); }
     .range-tabs__btn--active,
     .range-tabs__btn--active:hover {
         background: var(--theme-ink);
-        color: var(--theme-surface-elev);
+        color: var(--theme-surface);
     }
 
     /* Composes with `sticker-card` at the call site (see `.kpi-card`). */
@@ -1518,9 +1531,10 @@
     .dashboard-head > span {
         background: var(--sm-dashboard-head-bg);
         color: var(--sm-dashboard-head-fg);
-        font-size: 0.7rem;
+        font-family: var(--font-mono);
+        font-size: 0.6875rem;
         font-weight: 600;
-        letter-spacing: 0.06em;
+        letter-spacing: 0.08em;
         text-transform: uppercase;
         padding: 0.5rem var(--sm-dashboard-row-pad-x);
         border-bottom: 1px solid var(--sm-dashboard-hairline);
@@ -1575,10 +1589,12 @@
     }
     .dashboard-name {
         @apply block truncate text-sm font-medium;
+        font-family: var(--font-mono);
         color: var(--theme-text);
         text-decoration: none;
     }
     .dashboard-name:hover {
+        color: var(--theme-accent);
         text-decoration: underline;
     }
     .dashboard-host {
@@ -1654,8 +1670,9 @@
         @apply font-mono;
         color: var(--theme-text);
         background: var(--theme-surface-sunk);
-        padding: 1px 6px;
-        border-radius: 4px;
+        border: 1px solid var(--theme-line);
+        padding: 0 0.4em;
+        border-radius: 2px;
     }
     .dashboard-subhead__active {
         @apply inline-flex items-center gap-1.5 font-medium;
@@ -1663,17 +1680,22 @@
     }
 
     .dashboard-chip {
-        @apply inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-medium;
+        @apply inline-flex items-center gap-1.5 rounded-sm border px-2.5 py-0.5 text-xs font-medium;
         background: var(--sm-dashboard-chip-bg);
         color: var(--sm-dashboard-chip-fg);
+        border-color: var(--theme-line);
+        font-family: var(--font-mono);
     }
     .dashboard-chip--active {
         background: var(--sm-dashboard-chip-active-bg);
         color: var(--sm-dashboard-chip-active-fg);
+        border-color: var(--theme-ink);
     }
     .dashboard-chip__count {
-        @apply font-mono opacity-70;
+        @apply font-mono;
+        color: var(--theme-ink);
     }
+    .dashboard-chip--active .dashboard-chip__count { color: inherit; }
     .dashboard-chips {
         @apply flex flex-wrap items-center gap-1.5;
     }
@@ -1696,10 +1718,10 @@
     .dashboard-kpi-card__value {
         @apply text-3xl tabular-nums;
         color: var(--sm-dashboard-value-fg);
-        font-family: var(--font-display);
-        font-weight: 500;
+        font-family: var(--font-mono);
+        font-weight: 600;
         font-feature-settings: "tnum" 1, "lnum" 1;
-        letter-spacing: -0.022em;
+        letter-spacing: -0.02em;
         line-height: 1.05;
     }
     .dashboard-kpi-card__hint {
@@ -1728,17 +1750,19 @@
 
     /* ── V2 ─ active incident banner ──────────────────────────────── */
     .dashboard-incident-banner {
-        @apply rounded-2xl p-4;
+        @apply rounded-sm border p-4;
         background: var(--sm-dashboard-banner-bg);
-        box-shadow: 0 0 0 1px var(--sm-dashboard-banner-line);
+        border-color: var(--sm-dashboard-banner-line);
     }
     .dashboard-incident-banner__head {
         @apply flex flex-wrap items-center gap-3;
     }
     .dashboard-incident-banner__title {
         @apply inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wider;
+        font-family: var(--font-mono);
         color: var(--theme-state-bad-fg);
     }
+    .dashboard-incident-banner__title::before { content: "// "; color: var(--theme-state-bad-fg); opacity: 0.7; }
     .dashboard-incident-banner__sub {
         @apply text-xs;
         color: var(--theme-state-bad-fg);
@@ -1751,8 +1775,9 @@
         @apply mt-3 flex flex-col gap-2 list-none p-0;
     }
     .dashboard-incident-banner__item {
-        @apply flex items-start gap-3 rounded-lg px-3 py-2 text-sm;
-        background: color-mix(in oklch, var(--theme-surface-elev) 70%, transparent);
+        @apply flex items-start gap-3 rounded-sm border px-3 py-2 text-sm;
+        background: var(--theme-surface-elev);
+        border-color: var(--theme-line);
     }
     .dashboard-incident-banner__body {
         @apply flex-1 min-w-0 flex flex-col gap-1;
@@ -1761,9 +1786,12 @@
         @apply flex flex-wrap items-baseline gap-2;
     }
     .dashboard-incident-banner__name {
-        @apply font-medium no-underline hover:underline;
+        @apply font-medium no-underline;
+        font-family: var(--font-mono);
         color: var(--theme-text);
+        transition: color 120ms ease;
     }
+    .dashboard-incident-banner__name:hover { color: var(--theme-accent); }
     .dashboard-incident-banner__age {
         @apply font-mono text-xs;
         color: var(--theme-state-bad-fg);
@@ -1773,13 +1801,16 @@
         color: var(--theme-text-muted);
     }
     .dashboard-incident-banner__phase {
-        @apply rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider;
-        background: rgba(0, 0, 0, 0.06);
+        @apply rounded-sm border px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider;
+        font-family: var(--font-mono);
+        background: var(--theme-surface);
+        border-color: var(--theme-line);
         color: var(--theme-text);
     }
 
     .dashboard-incident-severity {
-        @apply inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-white;
+        @apply inline-block rounded-sm px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-white;
+        font-family: var(--font-mono);
         flex: none;
         margin-top: 1px;
     }
@@ -1801,10 +1832,10 @@
     .dashboard-rail__value {
         @apply text-2xl tabular-nums;
         color: var(--sm-dashboard-value-fg);
-        font-family: var(--font-display);
-        font-weight: 500;
+        font-family: var(--font-mono);
+        font-weight: 600;
         font-feature-settings: "tnum" 1, "lnum" 1;
-        letter-spacing: -0.022em;
+        letter-spacing: -0.02em;
         line-height: 1;
     }
     .dashboard-rail__value--muted {
