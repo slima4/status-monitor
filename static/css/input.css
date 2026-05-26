@@ -586,6 +586,64 @@
     .theme-terminal.app-shell::before { opacity: 0.10; mix-blend-mode: screen; }
     .theme-terminal.app-shell::after  { background: none; }
 
+    /* "Winter" theme — adapted from DaisyUI's winter palette
+       (https://daisyui.com/docs/themes/). Cool light surfaces, electric-
+       blue primary, teal success / coral error. Keeps the same Plex
+       font stack as the default theme; drop the --font-* overrides if
+       you want winter to swap typography too. */
+    .theme-winter {
+        --theme-surface:       oklch(0.975 0.011 260);
+        --theme-surface-elev:  oklch(1 0 0);
+        --theme-surface-sunk:  oklch(0.933 0.016 263);
+        --theme-ink:           oklch(0.40 0.06 258);
+        --theme-text:          oklch(0.42 0.053 256);
+        --theme-text-muted:    oklch(0.55 0.04 256);
+        --theme-text-quiet:    oklch(0.72 0.025 256);
+        --theme-text-faint:    oklch(0.88 0.012 256);
+        --theme-line:          oklch(0.90 0.015 260);
+
+        --theme-action-primary:        oklch(0.57 0.20 258);
+        --theme-action-primary-hover:  oklch(0.48 0.20 258);
+        --theme-action-accent:         oklch(0.55 0.16 282);
+        --theme-action-accent-hover:   oklch(0.45 0.16 282);
+        --theme-action-danger:         oklch(0.60 0.18 20);
+        --theme-action-danger-hover:   oklch(0.50 0.18 20);
+
+        --theme-accent:        oklch(0.57 0.20 258);
+        --theme-accent-soft:   oklch(0.95 0.04 258);
+
+        --theme-shadow-color:        oklch(0.55 0.04 258);
+
+        /* Teal success matches winter's cyan-leaning palette. */
+        --theme-state-ok-bg:        oklch(0.96 0.03 198);
+        --theme-state-ok-tint:      oklch(0.92 0.06 198);
+        --theme-state-ok-line:      oklch(0.75 0.10 198);
+        --theme-state-ok-line-soft: oklch(0.82 0.07 198);
+        --theme-state-ok-fg:        oklch(0.45 0.10 198);
+        --theme-state-ok-fg-strong: oklch(0.30 0.08 198);
+        --theme-state-ok-fg-onsoft: oklch(0.40 0.10 198);
+        --theme-state-ok-strong:    oklch(0.65 0.12 198);
+
+        /* Coral error keeps red=bad but in the cooler register. */
+        --theme-state-bad-bg:        oklch(0.95 0.04 20);
+        --theme-state-bad-tint:      oklch(0.90 0.07 20);
+        --theme-state-bad-line:      oklch(0.70 0.14 20);
+        --theme-state-bad-line-soft: oklch(0.80 0.10 20);
+        --theme-state-bad-fg:        oklch(0.50 0.16 20);
+        --theme-state-bad-fg-strong: oklch(0.32 0.12 20);
+        --theme-state-bad-fg-onsoft: oklch(0.45 0.16 20);
+        --theme-state-bad-strong:    oklch(0.65 0.18 20);
+
+        /* Soft amber-yellow warning, cooler than the default amber. */
+        --theme-state-warn-bg:        oklch(0.96 0.03 71);
+        --theme-state-warn-tint:      oklch(0.92 0.05 71);
+        --theme-state-warn-line:      oklch(0.78 0.09 71);
+        --theme-state-warn-fg:        oklch(0.55 0.10 71);
+        --theme-state-warn-fg-strong: oklch(0.35 0.08 71);
+        --theme-state-warn-fg-onsoft: oklch(0.50 0.10 71);
+        --theme-state-warn-strong:    oklch(0.70 0.12 71);
+    }
+
     /* Cartoon checkbox / radio. Native controls ignore the sticker
        language (ink edge + hard offset shadow) the rest of the UI speaks,
        so restyle them once here — every template's box inherits it, no
