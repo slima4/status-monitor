@@ -828,43 +828,37 @@ fn build_maintenance(m: &PublicMaintenance, now: DateTime<Utc>) -> MaintenanceVi
 // here is a non-emoji Unicode symbol that inherits text colour via currentColor.
 fn overall_classes(s: OverallState) -> (&'static str, &'static str, &'static str) {
     match s {
-        OverallState::Operational => (
-            "border-emerald-200 bg-emerald-50 text-emerald-800",
-            "\u{25CF}",
-            "All systems operational",
-        ),
+        OverallState::Operational => ("public-overall--op", "\u{25CF}", "All systems operational"),
         OverallState::Maintenance => (
-            "border-sky-200 bg-sky-50 text-sky-800",
+            "public-overall--mnt",
             "\u{2699}\u{FE0E}",
             "Maintenance in progress",
         ),
         OverallState::MinorDisruption => (
-            "border-amber-200 bg-amber-50 text-amber-900",
+            "public-overall--minor",
             "\u{26A0}\u{FE0E}",
             "Minor service disruption",
         ),
         OverallState::PartialOutage => (
-            "border-orange-200 bg-orange-50 text-orange-900",
+            "public-overall--part",
             "\u{26A0}\u{FE0E}",
             "Partial system outage",
         ),
-        OverallState::MajorOutage => (
-            "border-rose-200 bg-rose-50 text-rose-900",
-            "\u{25CF}",
-            "Major system outage",
-        ),
+        OverallState::MajorOutage => ("public-overall--maj", "\u{25CF}", "Major system outage"),
     }
 }
 
 fn component_classes(s: PublicComponentStatus) -> (&'static str, &'static str, &'static str) {
     match s {
-        PublicComponentStatus::Operational => ("Operational", "text-emerald-700", "\u{25CF}"),
-        PublicComponentStatus::Degraded => ("Degraded", "text-amber-700", "\u{26A0}\u{FE0E}"),
+        PublicComponentStatus::Operational => ("Operational", "public-cmp--op", "\u{25CF}"),
+        PublicComponentStatus::Degraded => ("Degraded", "public-cmp--deg", "\u{26A0}\u{FE0E}"),
         PublicComponentStatus::PartialOutage => {
-            ("Partial outage", "text-orange-700", "\u{26A0}\u{FE0E}")
+            ("Partial outage", "public-cmp--part", "\u{26A0}\u{FE0E}")
         }
-        PublicComponentStatus::MajorOutage => ("Major outage", "text-rose-700", "\u{25CF}"),
-        PublicComponentStatus::Maintenance => ("Maintenance", "text-sky-700", "\u{2699}\u{FE0E}"),
+        PublicComponentStatus::MajorOutage => ("Major outage", "public-cmp--maj", "\u{25CF}"),
+        PublicComponentStatus::Maintenance => {
+            ("Maintenance", "public-cmp--mnt", "\u{2699}\u{FE0E}")
+        }
     }
 }
 
@@ -882,19 +876,21 @@ fn day_classes(s: DayState) -> (&'static str, &'static str, &'static str) {
 
 fn severity_classes(s: IncidentSeverity) -> (&'static str, &'static str) {
     match s {
-        IncidentSeverity::Minor => ("Minor", "bg-amber-100 text-amber-800"),
-        IncidentSeverity::Major => ("Major", "bg-orange-100 text-orange-800"),
-        IncidentSeverity::Critical => ("Critical", "bg-rose-100 text-rose-800"),
+        IncidentSeverity::Minor => ("Minor", "public-chip public-sev--minor"),
+        IncidentSeverity::Major => ("Major", "public-chip public-sev--major"),
+        IncidentSeverity::Critical => ("Critical", "public-chip public-sev--critical"),
     }
 }
 
 fn phase_classes(p: IncidentStatusPhase) -> (&'static str, &'static str) {
     match p {
-        IncidentStatusPhase::Investigating => ("Investigating", "bg-slate-100 text-slate-800"),
-        IncidentStatusPhase::Identified => ("Identified", "bg-amber-100 text-amber-900"),
-        IncidentStatusPhase::Monitoring => ("Monitoring", "bg-sky-100 text-sky-900"),
-        IncidentStatusPhase::Resolved => ("Resolved", "bg-emerald-100 text-emerald-900"),
-        IncidentStatusPhase::Postmortem => ("Postmortem", "bg-indigo-100 text-indigo-900"),
+        IncidentStatusPhase::Investigating => {
+            ("Investigating", "public-chip public-phase--investigating")
+        }
+        IncidentStatusPhase::Identified => ("Identified", "public-chip public-phase--identified"),
+        IncidentStatusPhase::Monitoring => ("Monitoring", "public-chip public-phase--monitoring"),
+        IncidentStatusPhase::Resolved => ("Resolved", "public-chip public-phase--resolved"),
+        IncidentStatusPhase::Postmortem => ("Postmortem", "public-chip public-phase--postmortem"),
     }
 }
 

@@ -167,6 +167,7 @@
     --theme-state-warn-bg:        oklch(0.96 0.04 80);
     --theme-state-warn-tint:      oklch(0.91 0.08 80);
     --theme-state-warn-line:      oklch(0.70 0.14 80);
+    --theme-state-warn-line-soft: oklch(0.83 0.09 80);
     --theme-state-warn-fg:        oklch(0.48 0.14 80);
     --theme-state-warn-fg-strong: oklch(0.34 0.10 80);
     --theme-state-warn-fg-onsoft: oklch(0.40 0.12 80);
@@ -456,6 +457,34 @@
     .app-shell::after { content: none; }
     .app-shell > * { position: relative; z-index: 1; }
 
+    /* Public status page shell. Same atmospheric paper + token chrome as
+       app-shell; intentionally does NOT inherit app-shell's sm-* dashboard
+       intermediaries (the public page doesn't render any dashboard widgets).
+       A future .theme-terminal / .theme-winter class set on <body> swaps the
+       whole register without template edits. */
+    .public-shell {
+        font-family: var(--font-body);
+        background: var(--theme-surface);
+        color: var(--theme-text);
+        position: relative;
+        min-height: 100vh;
+    }
+    .public-shell::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        z-index: 0;
+        background-image: repeating-linear-gradient(
+            to bottom,
+            transparent 0,
+            transparent 3px,
+            oklch(0 0 0 / 0.018) 3px,
+            oklch(0 0 0 / 0.018) 4px
+        );
+    }
+    .public-shell > * { position: relative; z-index: 1; }
+
     /* Page-load reveal. Direct section children rise in sequence — one
        orchestrated entrance per first paint, then the class is removed by
        the inline boot script in base.html. Without the gate, htmx polls
@@ -573,6 +602,7 @@
         --theme-state-warn-bg:        oklch(0.22 0.06 80);
         --theme-state-warn-tint:      oklch(0.27 0.08 80);
         --theme-state-warn-line:      oklch(0.55 0.14 80);
+        --theme-state-warn-line-soft: oklch(0.40 0.10 80);
         --theme-state-warn-fg:        oklch(0.80 0.14 80);
         --theme-state-warn-fg-strong: oklch(0.90 0.16 80);
         --theme-state-warn-fg-onsoft: oklch(0.88 0.16 80);
@@ -633,6 +663,7 @@
         --theme-state-warn-bg:        oklch(0.96 0.03 71);
         --theme-state-warn-tint:      oklch(0.92 0.05 71);
         --theme-state-warn-line:      oklch(0.78 0.09 71);
+        --theme-state-warn-line-soft: oklch(0.86 0.07 71);
         --theme-state-warn-fg:        oklch(0.55 0.10 71);
         --theme-state-warn-fg-strong: oklch(0.35 0.08 71);
         --theme-state-warn-fg-onsoft: oklch(0.50 0.10 71);
@@ -1293,10 +1324,94 @@
     /* Public-surface (flat) callout — same idea as .alert-card but with the
        quiet 1px slate-family border the public page uses everywhere. The
        sticker dialect doesn't bleed onto /status. */
-    .public-callout         { @apply rounded-2xl border p-5; }
-    .public-callout--warn   { @apply border-amber-200 bg-amber-50; }
-    .public-callout--info   { @apply border-sky-200   bg-sky-50;   }
-    .public-callout--neutral{ @apply border-slate-200 bg-white;    }
+    /* Public status page surface family. Hairline 1px line + 2px corners,
+       theme-token-bound so .theme-terminal / .theme-winter can re-skin the
+       entire public page without template changes. */
+    .public-callout {
+        @apply rounded-sm border p-5;
+        border-color: var(--theme-line);
+        background: var(--theme-surface-elev);
+    }
+    .public-callout--warn {
+        border-color: var(--theme-state-warn-line);
+        background: var(--theme-state-warn-bg);
+    }
+    .public-callout--info,
+    .public-callout--neutral {
+        border-color: var(--theme-line);
+        background: var(--theme-surface-elev);
+    }
+
+    /* Overall-status banner tint. Five variants tied to OverallState in
+       src/web/views/public_status.rs. State tokens carry theme-aware colour;
+       a .theme-* override on <body> re-paints all five without template edits. */
+    .public-overall--op {
+        border-color: var(--theme-state-ok-line);
+        background: var(--theme-state-ok-bg);
+        color: var(--theme-state-ok-fg-strong);
+    }
+    .public-overall--mnt {
+        border-color: var(--theme-line);
+        background: var(--theme-surface-elev);
+        color: var(--theme-text);
+    }
+    .public-overall--minor {
+        border-color: var(--theme-state-warn-line);
+        background: var(--theme-state-warn-bg);
+        color: var(--theme-state-warn-fg);
+    }
+    .public-overall--part {
+        border-color: var(--theme-state-warn-line);
+        background: var(--theme-state-warn-tint);
+        color: var(--theme-state-warn-fg-strong);
+    }
+    .public-overall--maj {
+        border-color: var(--theme-state-bad-line);
+        background: var(--theme-state-bad-bg);
+        color: var(--theme-state-bad-fg-strong);
+    }
+
+    /* Per-component status label colour (5 variants — see component_classes). */
+    .public-cmp--op   { color: var(--theme-state-ok-fg); }
+    .public-cmp--deg  { color: var(--theme-state-warn-fg); }
+    .public-cmp--part { color: var(--theme-state-warn-fg-strong); }
+    .public-cmp--maj  { color: var(--theme-state-bad-fg); }
+    .public-cmp--mnt  { color: var(--theme-text-muted); }
+
+    /* Incident severity + phase chips (used by public/_incident_chips.html).
+       Sharp corners + hairline edge to match the CLI register. */
+    .public-chip {
+        @apply rounded-sm px-2 py-0.5 text-xs font-medium;
+        border: 1px solid transparent;
+    }
+    .public-sev--minor,
+    .public-sev--major {
+        background: var(--theme-state-warn-bg);
+        color: var(--theme-state-warn-fg-strong);
+        border-color: var(--theme-state-warn-line-soft);
+    }
+    .public-sev--critical {
+        background: var(--theme-state-bad-bg);
+        color: var(--theme-state-bad-fg-strong);
+        border-color: var(--theme-state-bad-line-soft);
+    }
+    .public-phase--investigating,
+    .public-phase--monitoring,
+    .public-phase--postmortem {
+        background: var(--theme-surface-sunk);
+        color: var(--theme-text);
+        border-color: var(--theme-line);
+    }
+    .public-phase--identified {
+        background: var(--theme-state-warn-bg);
+        color: var(--theme-state-warn-fg-strong);
+        border-color: var(--theme-state-warn-line-soft);
+    }
+    .public-phase--resolved {
+        background: var(--theme-state-ok-bg);
+        color: var(--theme-state-ok-fg-strong);
+        border-color: var(--theme-state-ok-line-soft);
+    }
 
     /* Small inline status line — for JS-set messages ("Saved", error toasts,
        'sent' confirmations on row actions). Replaces ad-hoc text-emerald-700

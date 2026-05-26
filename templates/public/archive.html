@@ -17,9 +17,9 @@
     </style>
     <script defer src="{{ "js/public/tz.js"|asset }}"></script>
 </head>
-<body class="bg-slate-50 text-slate-900 antialiased">
+<body class="public-shell antialiased">
     <a href="#main-content"
-       class="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:rounded focus:bg-white focus:px-3 focus:py-2 focus:text-sm focus:ring-2 focus:ring-slate-700">
+       class="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:rounded-sm focus:bg-[color:var(--theme-surface-elev)] focus:px-3 focus:py-2 focus:text-sm focus:ring-2 focus:ring-[color:var(--theme-ink)]">
         Skip to main content
     </a>
     <header style="background-color: var(--brand-color)">
@@ -32,29 +32,29 @@
                 {% endif %}
             </a>
             <a href="{{ rss_url }}" class="text-sm text-white/80 hover:text-white"
-               aria-label="Subscribe to incident updates via RSS">Subscribe (RSS)</a>
+               aria-label="Subscribe to incident updates via RSS">RSS</a>
         </div>
     </header>
 
     <main id="main-content" class="mx-auto max-w-3xl space-y-8 px-4 py-10">
-        <nav class="text-sm text-slate-500">
+        <nav class="text-sm text-quiet">
             <a href="/status" class="hover:underline">← Back to status</a>
         </nav>
 
         <h1 class="text-2xl font-semibold tracking-tight">Incident history</h1>
 
         {% if months.is_empty() %}
-            <p class="public-callout public-callout--neutral p-8 text-center text-sm text-slate-500">
+            <p class="public-callout public-callout--neutral p-8 text-center text-sm text-quiet">
                 No incidents recorded.
             </p>
         {% else %}
             {% for bucket in months %}
                 <section aria-labelledby="month-{{ loop.index }}" class="space-y-3">
                     <h2 id="month-{{ loop.index }}"
-                        class="text-sm font-semibold uppercase tracking-wide text-slate-500">
+                        class="text-sm font-semibold uppercase tracking-wide text-quiet">
                         {{ bucket.label }}
                     </h2>
-                    <ul class="public-callout public-callout--neutral divide-y divide-slate-100 overflow-hidden p-0">
+                    <ul class="public-callout public-callout--neutral divide-y divide-[color:var(--theme-line)] overflow-hidden p-0">
                         {% for inc in bucket.incidents %}
                         <li class="p-5">{% call card::card(inc) %}{% endcall %}</li>
                         {% endfor %}
@@ -65,7 +65,8 @@
             {% if let Some(cursor) = next_cursor %}
                 <p class="text-right text-sm">
                     <a href="/status/incidents?cursor={{ cursor }}"
-                       class="font-medium text-blue-600 hover:underline">
+                       class="font-medium hover:underline"
+                       style="color: var(--theme-accent);">
                         Older incidents →
                     </a>
                 </p>

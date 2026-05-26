@@ -16,7 +16,7 @@
     <section aria-labelledby="overall-heading"
              role="status"
              aria-live="polite"
-             class="rounded-2xl border-2 p-6 sm:p-8 {{ view.overall_class }}">
+             class="rounded-sm border p-6 sm:p-8 {{ view.overall_class }}">
         <div class="flex items-center gap-4">
             <span aria-hidden="true" class="text-4xl leading-none">{{ view.overall_icon }}</span>
             <div class="min-w-0">
@@ -35,7 +35,8 @@
     {% if view.has_active_incident %}
     <section aria-labelledby="active-incidents-heading"
              class="public-callout public-callout--warn">
-        <h2 id="active-incidents-heading" class="text-base font-semibold text-amber-900">
+        <h2 id="active-incidents-heading" class="text-base font-semibold"
+            style="color: var(--theme-state-warn-fg-strong);">
             Active incident{% if view.active_incidents.len() != 1 %}s{% endif %}
         </h2>
         <ul class="mt-4 space-y-4">
@@ -44,21 +45,23 @@
                 <article class="space-y-1.5">
                     <div class="flex flex-wrap items-center gap-2">
                         <a href="{{ inc.permalink }}"
-                           class="font-medium text-amber-900 hover:underline">{{ inc.header.title }}</a>
+                           class="font-medium hover:underline"
+                           style="color: var(--theme-state-warn-fg-strong);">{{ inc.header.title }}</a>
                         {% call chips::sevphase(inc.header) %}{% endcall %}
                     </div>
-                    <p class="text-sm text-slate-700">
+                    <p class="text-sm text-muted">
                         Started
                         <time datetime="{{ inc.header.started_at|iso_ts }}" data-tz>{{ inc.header.started_at|human_ts }}</time>
                         — {{ inc.header.duration_secs|humanize_dur }} ago — {{ inc.header.component_name }}
                     </p>
                     {% match inc.latest_message %}
                         {% when Some with (msg) %}
-                            <p class="rounded-lg bg-white/70 px-3 py-2 text-sm italic text-slate-700">“{{ msg }}”</p>
+                            <p class="rounded-sm px-3 py-2 text-sm italic text-muted"
+                               style="background: var(--theme-surface-elev);">“{{ msg }}”</p>
                         {% when None %}
                     {% endmatch %}
                     <p>
-                        <a href="{{ inc.permalink }}" class="text-sm font-medium text-slate-600 hover:text-slate-900">View incident →</a>
+                        <a href="{{ inc.permalink }}" class="text-sm font-medium text-muted hover:text-body">View incident →</a>
                     </p>
                 </article>
             </li>
@@ -71,33 +74,33 @@
     {% if view.has_maintenance %}
     <section aria-labelledby="maintenance-heading"
              class="public-callout public-callout--info">
-        <h2 id="maintenance-heading" class="text-base font-semibold text-sky-900">Scheduled maintenance</h2>
+        <h2 id="maintenance-heading" class="text-base font-semibold text-body">Scheduled maintenance</h2>
         {% if !view.active_maintenance.is_empty() %}
-        <h3 class="mt-3 text-sm font-medium text-sky-900">In progress</h3>
+        <h3 class="mt-3 text-sm font-medium text-body">In progress</h3>
         <ul class="mt-1.5 space-y-2">
             {% for m in view.active_maintenance %}
             <li class="text-sm">
-                <p class="font-medium text-sky-900">{{ m.title }}</p>
-                <p class="text-slate-700">
+                <p class="font-medium text-body">{{ m.title }}</p>
+                <p class="text-muted">
                     <time datetime="{{ m.starts_at|iso_ts }}" data-tz>{{ m.starts_at|human_ts }}</time>
                     –
                     <time datetime="{{ m.ends_at|iso_ts }}" data-tz>{{ m.ends_at|human_ts }}</time>
                     {% if !m.affects.is_empty() %} · affects {{ m.affects }}{% endif %}
                 </p>
                 {% match m.description %}
-                    {% when Some with (d) %}<p class="text-slate-600">{{ d }}</p>{% when None %}
+                    {% when Some with (d) %}<p class="text-quiet">{{ d }}</p>{% when None %}
                 {% endmatch %}
             </li>
             {% endfor %}
         </ul>
         {% endif %}
         {% if !view.upcoming_maintenance.is_empty() %}
-        <h3 class="mt-4 text-sm font-medium text-sky-900">Upcoming</h3>
+        <h3 class="mt-4 text-sm font-medium text-body">Upcoming</h3>
         <ul class="mt-1.5 space-y-2">
             {% for m in view.upcoming_maintenance %}
             <li class="text-sm">
-                <p class="font-medium text-sky-900">{{ m.title }}</p>
-                <p class="text-slate-700">
+                <p class="font-medium text-body">{{ m.title }}</p>
+                <p class="text-muted">
                     Starts
                     <time datetime="{{ m.starts_at|iso_ts }}" data-tz>{{ m.starts_at|human_ts }}</time>
                     {% match m.starts_in_secs %}
@@ -108,7 +111,7 @@
                     {% if !m.affects.is_empty() %} · affects {{ m.affects }}{% endif %}
                 </p>
                 {% match m.description %}
-                    {% when Some with (d) %}<p class="text-slate-600">{{ d }}</p>{% when None %}
+                    {% when Some with (d) %}<p class="text-quiet">{{ d }}</p>{% when None %}
                 {% endmatch %}
             </li>
             {% endfor %}
@@ -121,7 +124,7 @@
     {% if view.has_components %}
         {# Status legend — one key for every colour the 90-day strips use,
            so a visitor can read a bar without hovering for the tooltip. #}
-        <ul class="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-slate-500"
+        <ul class="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-quiet"
             aria-label="Status colour key">
             <li class="flex items-center gap-1.5"><span class="legend-dot legend-dot--op"></span>Operational</li>
             <li class="flex items-center gap-1.5"><span class="legend-dot legend-dot--deg"></span>Degraded</li>
@@ -134,19 +137,19 @@
         {% for group in view.groups %}
         <section aria-labelledby="group-{{ loop.index }}-heading" class="space-y-3">
             <h2 id="group-{{ loop.index }}-heading"
-                class="text-sm font-semibold uppercase tracking-wide text-slate-500">{{ group.heading }}</h2>
-            <ul class="public-callout public-callout--neutral divide-y divide-slate-100 overflow-hidden p-0">
+                class="text-sm font-semibold uppercase tracking-wide text-quiet">{{ group.heading }}</h2>
+            <ul class="public-callout public-callout--neutral divide-y divide-[color:var(--theme-line)] overflow-hidden p-0">
                 {% for c in group.components %}
                 <li class="p-5">
                     <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
                         <p class="flex items-center gap-2">
                             <span aria-hidden="true" class="{{ c.status_class }}">{{ c.status_icon }}</span>
-                            <span class="font-medium text-slate-900">{{ c.name }}</span>
+                            <span class="font-medium text-body">{{ c.name }}</span>
                         </p>
                         <span class="text-sm font-medium {{ c.status_class }}">{{ c.status_label }}</span>
                     </div>
                     {% match c.description %}
-                        {% when Some with (d) %}<p class="mt-0.5 text-xs text-slate-500">{{ d }}</p>{% when None %}
+                        {% when Some with (d) %}<p class="mt-0.5 text-xs text-quiet">{{ d }}</p>{% when None %}
                     {% endmatch %}
                     <div class="day-strip mt-4"
                          role="group"
@@ -163,9 +166,9 @@
                                 tabindex="{% if day.day_index == 0 %}0{% else %}-1{% endif %}"></button>
                         {% endfor %}
                     </div>
-                    <div class="mt-2 flex items-center justify-between text-[11px] text-slate-400">
+                    <div class="mt-2 flex items-center justify-between text-[11px] text-quiet">
                         <span>90 days ago</span>
-                        <span><span class="font-mono text-slate-600">{{ c.uptime_pct }}%</span> uptime · {{ c.history_summary }}</span>
+                        <span><span class="font-mono text-muted">{{ c.uptime_pct }}%</span> uptime · {{ c.history_summary }}</span>
                         <span>Today</span>
                     </div>
                 </li>
@@ -174,7 +177,7 @@
         </section>
         {% endfor %}
     {% else %}
-        <section class="public-callout public-callout--neutral p-8 text-center text-sm text-slate-500">
+        <section class="public-callout public-callout--neutral p-8 text-center text-sm text-quiet">
             No public components have been configured yet.
         </section>
     {% endif %}
@@ -183,15 +186,16 @@
     {% if !view.recent_incidents.is_empty() %}
     <section aria-labelledby="recent-incidents-heading" class="space-y-3">
         <h2 id="recent-incidents-heading"
-            class="text-sm font-semibold uppercase tracking-wide text-slate-500">Past incidents (30 days)</h2>
-        <ul class="public-callout public-callout--neutral divide-y divide-slate-100 overflow-hidden p-0">
+            class="text-sm font-semibold uppercase tracking-wide text-quiet">Past incidents (30 days)</h2>
+        <ul class="public-callout public-callout--neutral divide-y divide-[color:var(--theme-line)] overflow-hidden p-0">
             {% for inc in view.recent_incidents %}
             <li class="p-5">{% call card::card(inc) %}{% endcall %}</li>
             {% endfor %}
         </ul>
         {% if view.recent_incidents_has_more %}
         <p class="text-right text-sm">
-            <a href="/status/incidents" class="font-medium text-blue-600 hover:underline">
+            <a href="/status/incidents" class="font-medium hover:underline"
+               style="color: var(--theme-accent);">
                 Older incidents →
             </a>
         </p>

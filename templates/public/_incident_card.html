@@ -7,13 +7,13 @@
 <article class="space-y-1.5">
     <div class="flex flex-wrap items-center gap-2">
         <a href="{{ inc.permalink }}"
-           class="font-medium text-slate-900 hover:underline">{{ inc.header.title }}</a>
+           class="font-medium text-body hover:underline">{{ inc.header.title }}</a>
         {% call chips::sevphase(inc.header) %}{% endcall %}
         {% if inc.header.ongoing %}
             <span class="status-badge status-badge--down">Ongoing</span>
         {% endif %}
     </div>
-    <p class="text-xs text-slate-500">
+    <p class="text-xs text-quiet">
         {{ inc.header.component_name }} ·
         <time datetime="{{ inc.header.started_at|iso_ts }}" data-tz>{{ inc.header.started_at|human_ts }}</time>
         · {{ inc.header.duration_secs|humanize_dur }}
@@ -22,7 +22,7 @@
         {% endmatch %}
     </p>
     {% match inc.latest_message %}
-        {% when Some with (msg) %}<p class="text-sm text-slate-700">{{ msg }}</p>{% when None %}
+        {% when Some with (msg) %}<p class="text-sm text-muted">{{ msg }}</p>{% when None %}
     {% endmatch %}
 </article>
 {% endmacro %}

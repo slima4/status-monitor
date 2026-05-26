@@ -22,9 +22,9 @@
     <script defer src="{{ "js/public/tz.js"|asset }}"></script>
     <script defer src="{{ "js/public/day_popover.js"|asset }}"></script>
 </head>
-<body class="bg-slate-50 text-slate-900 antialiased">
+<body class="public-shell antialiased">
     <a href="#main-content"
-       class="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:rounded focus:bg-white focus:px-3 focus:py-2 focus:text-sm focus:ring-2 focus:ring-slate-700">
+       class="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:rounded-sm focus:bg-[color:var(--theme-surface-elev)] focus:px-3 focus:py-2 focus:text-sm focus:ring-2 focus:ring-[color:var(--theme-ink)]">
         Skip to main content
     </a>
     <header style="background-color: var(--brand-color)">
@@ -37,13 +37,13 @@
                 {% endif %}
             </a>
             <a href="{{ view.rss_url }}" class="text-sm text-white/80 hover:text-white"
-               aria-label="Subscribe to incident updates via RSS">Subscribe (RSS)</a>
+               aria-label="Subscribe to incident updates via RSS">RSS</a>
         </div>
     </header>
 
     {% if let Some(about) = branding.about_html %}
-    <section class="border-b border-slate-200 bg-white">
-        <div class="mx-auto max-w-3xl px-4 py-4 prose prose-sm text-slate-600">
+    <section class="border-b border-[color:var(--theme-line)] bg-[color:var(--theme-surface-elev)]">
+        <div class="mx-auto max-w-3xl px-4 py-4 prose prose-sm text-muted">
             {{ about|safe }}
         </div>
     </section>
@@ -53,11 +53,11 @@
         {% include "public/region.html" %}
     </main>
 
-    <footer class="mx-auto max-w-3xl px-4 py-8 text-xs text-slate-400">
+    <footer class="mx-auto max-w-3xl px-4 py-8 text-xs text-quiet">
         {% if branding.show_powered_by %}Powered by status-monitor · {% endif %}
-        <a href="{{ view.rss_url }}" class="hover:text-slate-600">RSS</a> ·
+        <a href="{{ view.rss_url }}" class="hover:text-body">RSS</a> ·
         Updated <time datetime="{{ view.generated_at|iso_ts }}" data-tz>{{ view.generated_at|human_ts }}</time>
-        · <a href="/licenses" class="hover:text-slate-600">Licenses</a>
+        · <a href="/licenses" class="hover:text-body">Licenses</a>
         · {% include "_source.html" %}
     </footer>
 </body>

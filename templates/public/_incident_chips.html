@@ -5,6 +5,6 @@
    The optional "Ongoing" chip stays at the call site: active incidents
    are ongoing by definition and deliberately omit it. #}
 {% macro sevphase(header) %}
-<span class="rounded-full px-2 py-0.5 text-xs font-medium {{ header.severity_class }}">{{ header.severity_label }}</span>
-<span class="rounded-full px-2 py-0.5 text-xs font-medium {{ header.phase_class }}">{{ header.phase_label }}</span>
+<span class="{{ header.severity_class }}">{{ header.severity_label }}</span>
+<span class="{{ header.phase_class }}">{{ header.phase_label }}</span>
 {% endmacro %}
