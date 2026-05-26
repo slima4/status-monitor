@@ -75,7 +75,7 @@ async fn dashboard_renders_with_kpi_cards_and_chart_anchors() {
     assert!(html_ct(&resp).starts_with("text/html"));
     let html = body_text(resp).await;
     assert!(html.contains("Dashboard"));
-    assert!(html.contains("Nothing to watch yet."));
+    assert!(html.contains("nothing to watch yet."));
     assert!(html.contains(r#"href="/targets/new""#));
 }
 
@@ -106,8 +106,8 @@ async fn targets_list_empty_org_renders_onboarding_card() {
     assert_eq!(resp.status(), StatusCode::OK);
     let html = body_text(resp).await;
     assert!(html.contains("Monitors"));
-    assert!(html.contains("Nothing to watch yet."));
-    assert!(html.contains("Add your first monitor"));
+    assert!(html.contains("nothing to watch yet."));
+    assert!(html.contains("add your first monitor"));
     assert!(!html.contains(r#"id="targets-filter""#));
 }
 
@@ -162,7 +162,7 @@ async fn edit_form_shows_redacted_auth_state_for_existing_target() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     let html = body_text(resp).await;
-    assert!(html.contains("Edit redacted-edit-target"));
+    assert!(html.contains("edit redacted-edit-target"));
     assert!(html.contains(r#"data-method="PATCH""#));
     assert!(html.contains(r#"data-mode="edit""#));
     assert!(html.contains(r#"data-initial-mode="redacted""#));
@@ -292,7 +292,7 @@ async fn recover_account_page_renders_confirm_card() {
     assert_eq!(resp.status(), StatusCode::OK);
     assert!(html_ct(&resp).starts_with("text/html"));
     let body = body_text(resp).await;
-    assert!(body.contains("Recover your account"));
+    assert!(body.contains("recover your account"));
     assert!(body.contains(r#"hx-post="/api/v1/auth/recover-account""#));
     assert!(body.contains(r#"value="tok-abc""#));
 }
@@ -309,7 +309,7 @@ async fn recover_account_page_blank_token_shows_invalid() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     let body = body_text(resp).await;
-    assert!(body.contains("Recovery link invalid"));
+    assert!(body.contains("recovery link invalid"));
     assert!(!body.contains("hx-post"));
 }
 

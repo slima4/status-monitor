@@ -65,7 +65,7 @@ async fn landing_renders_without_db() {
 async fn blog_index_renders_without_db() {
     let (status, body, _) = get("/blog").await;
     assert_eq!(status, StatusCode::OK);
-    assert!(body.contains("From the workshop"));
+    assert!(body.contains("from the workshop"));
 }
 
 #[tokio::test]

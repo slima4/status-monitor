@@ -739,7 +739,7 @@ pub mod settings {
             .render()
             .unwrap();
             assert!(html.starts_with("<!doctype html>"));
-            assert!(html.contains("Active sessions"));
+            assert!(html.contains("active sessions"));
             assert!(html.contains(r#"hx-get="/web/partials/settings/sessions""#));
             assert!(html.contains("logout-all"));
         }
@@ -817,7 +817,7 @@ mod tests {
         }
         .render()
         .unwrap();
-        assert!(html.contains("Continue with GitHub"));
+        assert!(html.contains("continue with github"));
         assert!(html.contains(r#"href="/auth/github/login""#));
         assert!(!html.contains("not configured"));
         // Login page suppresses the user-area nav so a not-yet-authenticated
@@ -837,7 +837,7 @@ mod tests {
         .render()
         .unwrap();
         assert!(html.contains("not configured"));
-        assert!(!html.contains("Continue with GitHub"));
+        assert!(!html.contains("continue with github"));
     }
 
     #[test]
@@ -865,7 +865,7 @@ mod tests {
         }
         .render()
         .unwrap();
-        assert!(html.contains("Welcome, Alice"));
+        assert!(html.contains("welcome, Alice"));
         assert!(html.contains(r#"value="quiet-koala-7m0tt1""#));
         assert!(html.contains(r#"hx-patch="/api/v1/orgs/00000000-0000-0000-0000-000000000001""#));
         assert!(html.contains(r#""X-Requested-With":"status-monitor""#));
@@ -879,7 +879,7 @@ mod tests {
         }
         .render()
         .unwrap();
-        assert!(html.contains("Recover your account"));
+        assert!(html.contains("recover your account"));
         assert!(html.contains(r#"hx-post="/api/v1/auth/recover-account""#));
         assert!(html.contains(r#"hx-ext="json-enc""#));
         assert!(html.contains(r#"value="tok-abc""#));
@@ -895,7 +895,7 @@ mod tests {
         }
         .render()
         .unwrap();
-        assert!(html.contains("Recovery link invalid"));
+        assert!(html.contains("recovery link invalid"));
         assert!(!html.contains("hx-post"));
     }
 

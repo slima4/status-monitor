@@ -848,8 +848,8 @@ mod tests {
             .render()
             .unwrap();
         assert!(html.contains("<table"));
-        // Ongoing emphasis: red left border + pulsing badge + severity-tagged label.
-        assert!(html.contains("border-l-rose-500"));
+        // Ongoing emphasis: themed left border + pulsing badge + severity-tagged label.
+        assert!(html.contains("sm-incident-ongoing"));
         assert!(html.contains("animate-pulse"));
         assert!(html.contains("Ongoing · down"));
         // Resolved row uses the regular severity badge.
