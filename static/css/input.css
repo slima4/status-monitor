@@ -90,10 +90,9 @@
        Semantic surface/text/accent tokens for the org-app shell. The
        chrome-level --sm-* component tokens resolve through these, so a
        future re-skin (warm paper → graphite, paper → midnight) is one
-       block of token edits, not a template/class sweep.
-       State colours (--sm-state-*, alerts) intentionally stay tied to
-       the Tailwind palette — green=ok / red=bad is universal, not
-       theme-bound. */
+       block of token edits, not a template/class sweep. State colours
+       (--theme-state-*) below are theme-bound too — green=ok / red=bad
+       are the defaults, but a theme can swap the whole dialect. */
     --theme-surface:       oklch(0.995 0.002 250);      /* near-white, faint cool */
     --theme-surface-elev:  oklch(1 0 0);                /* card white */
     --theme-surface-sunk:  oklch(0.975 0.004 250);      /* header / table head wash */
@@ -128,6 +127,47 @@
     --theme-shadow-btn:          2px 2px 0 0 var(--theme-shadow-color);
     --theme-shadow-btn-hover:    3px 4px 0 0 var(--theme-shadow-color);
     --theme-shadow-btn-disabled: 1px 1px 0 0 var(--theme-shadow-color);
+
+    /* Universal state palette. Every operator-app surface that tints by
+       meaning (ok/bad/warn) resolves through these tokens — status-badge,
+       kpi-value, stat-tile, alert-card, flash-text, row-link--danger,
+       usage-bar, test-result, sticker-pill, dashboard banner, sparkline
+       stroke. Defaults track Tailwind emerald/rose/amber so the current
+       look is identical; a theme override (see .theme-terminal) can
+       replace the whole dialect in one block.
+         -bg          lightest fill (alert-card / stat-tile backdrop)
+         -tint        badge / pill fill
+         -line        2px border on alert / test-result
+         -line-soft   1px border on stat-tile
+         -fg          dark text on -bg
+         -fg-strong   darkest text (alert-card on -bg)
+         -fg-onsoft   text on -tint badges
+         -strong      solid colour (usage-bar fill, sparkline, edge cue) */
+    --theme-state-ok-bg:         var(--color-emerald-50);
+    --theme-state-ok-tint:       var(--color-emerald-100);
+    --theme-state-ok-line:       var(--color-emerald-300);
+    --theme-state-ok-line-soft:  var(--color-emerald-200);
+    --theme-state-ok-fg:         var(--color-emerald-700);
+    --theme-state-ok-fg-strong:  var(--color-emerald-900);
+    --theme-state-ok-fg-onsoft:  var(--color-emerald-800);
+    --theme-state-ok-strong:     var(--color-emerald-500);
+
+    --theme-state-bad-bg:        var(--color-rose-50);
+    --theme-state-bad-tint:      var(--color-rose-100);
+    --theme-state-bad-line:      var(--color-rose-300);
+    --theme-state-bad-line-soft: var(--color-rose-200);
+    --theme-state-bad-fg:        var(--color-rose-700);
+    --theme-state-bad-fg-strong: var(--color-rose-900);
+    --theme-state-bad-fg-onsoft: var(--color-rose-800);
+    --theme-state-bad-strong:    var(--color-rose-500);
+
+    --theme-state-warn-bg:        var(--color-amber-50);
+    --theme-state-warn-tint:      var(--color-amber-100);
+    --theme-state-warn-line:      var(--color-amber-300);
+    --theme-state-warn-fg:        var(--color-amber-700);
+    --theme-state-warn-fg-strong: var(--color-amber-900);
+    --theme-state-warn-fg-onsoft: var(--color-amber-800);
+    --theme-state-warn-strong:    var(--color-amber-500);
 
     /* Public-status state palette. One source for the 6 day-states; the
        day strip, legend dots, and popover badge all derive from these.
@@ -170,9 +210,9 @@
     --sm-dashboard-chip-fg:      var(--theme-text-muted);
     --sm-dashboard-chip-active-bg: var(--theme-ink);
     --sm-dashboard-chip-active-fg: var(--theme-surface-elev);
-    --sm-dashboard-banner-bg:    var(--color-rose-50);
-    --sm-dashboard-banner-fg:    var(--color-rose-900);
-    --sm-dashboard-banner-line:  var(--color-rose-200);
+    --sm-dashboard-banner-bg:    var(--theme-state-bad-bg);
+    --sm-dashboard-banner-fg:    var(--theme-state-bad-fg-strong);
+    --sm-dashboard-banner-line:  var(--theme-state-bad-line-soft);
 
     --sm-dashboard-row-h:        2.5rem;
     --sm-dashboard-row-pad-x:    0.75rem;
@@ -188,11 +228,11 @@
        it here. Diameter is a knob so dense vs. comfortable layouts can
        retune one value. */
     --sm-dashboard-dot-size:     0.5rem;
-    --sm-dashboard-dot-up:       var(--sm-state-op-bar);
-    --sm-dashboard-dot-degraded: var(--sm-state-deg-bar);
-    --sm-dashboard-dot-down:     var(--sm-state-maj-bar);
-    --sm-dashboard-dot-error:    var(--sm-state-maj-bar);
-    --sm-dashboard-dot-unknown:  var(--sm-state-none-bar);
+    --sm-dashboard-dot-up:       var(--theme-state-ok-strong);
+    --sm-dashboard-dot-degraded: var(--theme-state-warn-strong);
+    --sm-dashboard-dot-down:     var(--theme-state-bad-strong);
+    --sm-dashboard-dot-error:    var(--theme-state-bad-strong);
+    --sm-dashboard-dot-unknown:  var(--theme-text-faint);
     --sm-dashboard-dot-muted:    var(--theme-text-faint);
 
     /* Sparkline — stroke colour scales with row severity. `--down`
@@ -201,9 +241,9 @@
     --sm-spark-w:              280px;
     --sm-spark-h:              24px;
     --sm-spark-stroke:         var(--theme-text-quiet);
-    --sm-spark-stroke-up:      var(--color-emerald-500);
-    --sm-spark-stroke-degraded:var(--color-amber-500);
-    --sm-spark-stroke-down:    var(--color-rose-500);
+    --sm-spark-stroke-up:      var(--theme-state-ok-strong);
+    --sm-spark-stroke-degraded:var(--theme-state-warn-strong);
+    --sm-spark-stroke-down:    var(--theme-state-bad-strong);
 
     /* Monitors page (/targets) tokens — single retunable block. */
     --sm-monitors-card-bg:     var(--theme-surface-elev);
@@ -233,22 +273,22 @@
 
     --sm-monitors-bulk-bg:         var(--theme-ink);
     --sm-monitors-bulk-fg:         var(--theme-surface-elev);
-    --sm-monitors-bulk-accent:     var(--color-amber-300);
+    --sm-monitors-bulk-accent:     var(--theme-state-warn-line);
     --sm-monitors-bulk-btn-bg:     color-mix(in oklch, var(--color-white) 14%, transparent);
     --sm-monitors-bulk-danger-bg:  var(--theme-action-danger);
 
     --sm-monitors-tag-bg:          var(--theme-surface-sunk);
     --sm-monitors-tag-fg:          var(--theme-text-muted);
-    --sm-monitors-tag-p0-bg:       var(--color-rose-50);
-    --sm-monitors-tag-p0-fg:       var(--color-rose-800);
-    --sm-monitors-tag-p0-dot:      var(--color-rose-500);
-    --sm-monitors-tag-p1-bg:       var(--color-amber-50);
-    --sm-monitors-tag-p1-fg:       var(--color-amber-800);
-    --sm-monitors-tag-p1-dot:      var(--color-amber-500);
+    --sm-monitors-tag-p0-bg:       var(--theme-state-bad-bg);
+    --sm-monitors-tag-p0-fg:       var(--theme-state-bad-fg-onsoft);
+    --sm-monitors-tag-p0-dot:      var(--theme-state-bad-strong);
+    --sm-monitors-tag-p1-bg:       var(--theme-state-warn-bg);
+    --sm-monitors-tag-p1-fg:       var(--theme-state-warn-fg-onsoft);
+    --sm-monitors-tag-p1-dot:      var(--theme-state-warn-strong);
 
-    --sm-monitors-row-warn-bg:     var(--color-amber-50);
-    --sm-monitors-row-bad-bg:      var(--color-rose-50);
-    --sm-monitors-row-selected-bg: var(--color-amber-50);
+    --sm-monitors-row-warn-bg:     var(--theme-state-warn-bg);
+    --sm-monitors-row-bad-bg:      var(--theme-state-bad-bg);
+    --sm-monitors-row-selected-bg: var(--theme-state-warn-bg);
     --sm-monitors-row-paused-opacity: 0.55;
 
     --sm-monitors-avatar-size:     1.5rem;
@@ -323,6 +363,76 @@
         color: var(--theme-text);
         position: relative;
         min-height: 100vh;
+
+        /* Re-declare every `--sm-X: var(--theme-Y)` intermediary at body
+           scope. CSS resolves var() inside a custom-property declaration
+           at the declaration site, NOT lazily at the consumer — so a
+           token declared in @theme (= :root) bakes :root's --theme-*
+           value and is inherited as-resolved. Theme overrides on body
+           (.theme-terminal) never propagate UP into a :root chain. Re-
+           declaring here forces the same chain to re-resolve at body,
+           where theme overrides ARE in scope. See memory
+           reference_css_var_chain_through_root. */
+        --sm-dashboard-card-bg:        var(--theme-surface-elev);
+        --sm-dashboard-label-fg:       var(--theme-text-muted);
+        --sm-dashboard-value-fg:       var(--theme-text);
+        --sm-dashboard-hint-fg:        var(--theme-text-muted);
+        --sm-dashboard-chip-bg:        var(--theme-surface-sunk);
+        --sm-dashboard-chip-fg:        var(--theme-text-muted);
+        --sm-dashboard-chip-active-bg: var(--theme-ink);
+        --sm-dashboard-chip-active-fg: var(--theme-surface-elev);
+        --sm-dashboard-banner-bg:      var(--theme-state-bad-bg);
+        --sm-dashboard-banner-fg:      var(--theme-state-bad-fg-strong);
+        --sm-dashboard-banner-line:    var(--theme-state-bad-line-soft);
+        --sm-dashboard-hairline:       var(--theme-line);
+        --sm-dashboard-num-fg:         var(--theme-text);
+        --sm-dashboard-mono-fg:        var(--theme-text-muted);
+        --sm-dashboard-row-hover-bg:   var(--theme-surface-sunk);
+        --sm-dashboard-head-fg:        var(--theme-text-muted);
+        --sm-dashboard-head-bg:        var(--theme-surface-sunk);
+        --sm-dashboard-dot-up:         var(--theme-state-ok-strong);
+        --sm-dashboard-dot-degraded:   var(--theme-state-warn-strong);
+        --sm-dashboard-dot-down:       var(--theme-state-bad-strong);
+        --sm-dashboard-dot-error:      var(--theme-state-bad-strong);
+        --sm-dashboard-dot-unknown:    var(--theme-text-faint);
+        --sm-dashboard-dot-muted:      var(--theme-text-faint);
+        --sm-spark-stroke:             var(--theme-text-quiet);
+        --sm-spark-stroke-up:          var(--theme-state-ok-strong);
+        --sm-spark-stroke-degraded:    var(--theme-state-warn-strong);
+        --sm-spark-stroke-down:        var(--theme-state-bad-strong);
+        --sm-monitors-card-bg:         var(--theme-surface-elev);
+        --sm-monitors-card-border:     var(--theme-line);
+        --sm-monitors-hairline:        var(--theme-line);
+        --sm-monitors-row-hover-bg:    var(--theme-surface-sunk);
+        --sm-monitors-head-bg:         var(--theme-surface-sunk);
+        --sm-monitors-head-fg:         var(--theme-text-muted);
+        --sm-monitors-name-fg:         var(--theme-text);
+        --sm-monitors-host-fg:         var(--theme-text-muted);
+        --sm-monitors-num-fg:          var(--theme-text);
+        --sm-monitors-muted-fg:        var(--theme-text-quiet);
+        --sm-monitors-group-bg:        var(--theme-surface-sunk);
+        --sm-monitors-group-fg:        var(--theme-text);
+        --sm-monitors-group-meta-fg:   var(--theme-text-muted);
+        --sm-monitors-toolbar-bg:      var(--theme-surface-elev);
+        --sm-monitors-search-bg:       var(--theme-surface-sunk);
+        --sm-monitors-search-fg:       var(--theme-text);
+        --sm-monitors-keyhint-bg:      var(--theme-surface-elev);
+        --sm-monitors-keyhint-fg:      var(--theme-text-muted);
+        --sm-monitors-bulk-bg:         var(--theme-ink);
+        --sm-monitors-bulk-fg:         var(--theme-surface-elev);
+        --sm-monitors-bulk-accent:     var(--theme-state-warn-line);
+        --sm-monitors-bulk-danger-bg:  var(--theme-action-danger);
+        --sm-monitors-tag-bg:          var(--theme-surface-sunk);
+        --sm-monitors-tag-fg:          var(--theme-text-muted);
+        --sm-monitors-tag-p0-bg:       var(--theme-state-bad-bg);
+        --sm-monitors-tag-p0-fg:       var(--theme-state-bad-fg-onsoft);
+        --sm-monitors-tag-p0-dot:      var(--theme-state-bad-strong);
+        --sm-monitors-tag-p1-bg:       var(--theme-state-warn-bg);
+        --sm-monitors-tag-p1-fg:       var(--theme-state-warn-fg-onsoft);
+        --sm-monitors-tag-p1-dot:      var(--theme-state-warn-strong);
+        --sm-monitors-row-warn-bg:     var(--theme-state-warn-bg);
+        --sm-monitors-row-bad-bg:      var(--theme-state-bad-bg);
+        --sm-monitors-row-selected-bg: var(--theme-state-warn-bg);
     }
     /* Subtle grain veil. SVG fractal noise inlined (zero extra request),
        very low opacity — adds paper texture without competing with content.
@@ -417,10 +527,10 @@
 
     /* Example alt theme — flip the org app to a phosphor-on-black CRT look
        by adding `theme-terminal` to <body>. Every chrome surface, text
-       colour, sticker stroke, and the body font track this block; state
-       colours (--sm-state-*, alert/badge ok/warn/bad) stay tied to the
-       Tailwind palette by design. Atmosphere overrides drop the warm
-       mesh and lift the grain so it reads scanline-ish on dark. */
+       colour, sticker stroke, body font, AND the state-colour dialect
+       (ok/bad/warn → phosphor green / amber / hot red) track this block.
+       Atmosphere overrides drop the warm mesh and lift the grain so it
+       reads scanline-ish on dark. */
     .theme-terminal {
         --theme-surface:       oklch(0.10 0.012 150);
         --theme-surface-elev:  oklch(0.14 0.014 150);
@@ -442,6 +552,36 @@
         --theme-shadow-btn:          none;
         --theme-shadow-btn-hover:    none;
         --theme-shadow-btn-disabled: none;
+
+        /* State palette in CRT phosphor: ok = bright green, warn = amber,
+           bad = hot red. -bg is the dim glow tint sitting on the dark
+           surface; -fg/-fg-onsoft are the bright phosphor stroke; -strong
+           is the saturated solid for usage bars + sparkline strokes. */
+        --theme-state-ok-bg:          oklch(0.20 0.06 142);
+        --theme-state-ok-tint:        oklch(0.25 0.08 142);
+        --theme-state-ok-line:        oklch(0.50 0.12 142);
+        --theme-state-ok-line-soft:   oklch(0.35 0.10 142);
+        --theme-state-ok-fg:          oklch(0.85 0.16 142);
+        --theme-state-ok-fg-strong:   oklch(0.92 0.18 142);
+        --theme-state-ok-fg-onsoft:   oklch(0.88 0.17 142);
+        --theme-state-ok-strong:      oklch(0.80 0.18 142);
+
+        --theme-state-bad-bg:         oklch(0.20 0.08 25);
+        --theme-state-bad-tint:       oklch(0.25 0.10 25);
+        --theme-state-bad-line:       oklch(0.50 0.16 25);
+        --theme-state-bad-line-soft:  oklch(0.35 0.12 25);
+        --theme-state-bad-fg:         oklch(0.75 0.18 25);
+        --theme-state-bad-fg-strong:  oklch(0.85 0.20 25);
+        --theme-state-bad-fg-onsoft:  oklch(0.80 0.19 25);
+        --theme-state-bad-strong:     oklch(0.70 0.20 25);
+
+        --theme-state-warn-bg:        oklch(0.22 0.06 80);
+        --theme-state-warn-tint:      oklch(0.27 0.08 80);
+        --theme-state-warn-line:      oklch(0.55 0.14 80);
+        --theme-state-warn-fg:        oklch(0.80 0.14 80);
+        --theme-state-warn-fg-strong: oklch(0.90 0.16 80);
+        --theme-state-warn-fg-onsoft: oklch(0.88 0.16 80);
+        --theme-state-warn-strong:    oklch(0.75 0.16 80);
     }
     .theme-terminal.app-shell::before { opacity: 0.10; mix-blend-mode: screen; }
     .theme-terminal.app-shell::after  { background: none; }
@@ -565,7 +705,11 @@
         transition: background-color 120ms ease;
     }
     .btn-ghost:hover    { background: var(--theme-surface-sunk); }
-    .btn-ghost--danger  { @apply border-red-200 text-red-600 hover:bg-red-50; }
+    .btn-ghost--danger {
+        border-color: var(--theme-state-bad-line-soft);
+        color: var(--theme-state-bad-fg);
+    }
+    .btn-ghost--danger:hover { background: var(--theme-state-bad-bg); }
 
     /* Cartoon text field — input / select / textarea. Same ink edge as
        the sticker family + the small hard offset shadow checkbox/radio
@@ -642,7 +786,8 @@
         transition: background-color 200ms ease, color 200ms ease;
     }
     .sticker-disclosure[open] .sticker-disclosure__icon {
-        @apply bg-emerald-100 text-emerald-700;
+        background: var(--theme-state-ok-tint);
+        color: var(--theme-state-ok-fg);
     }
     /* Native <details> has no close animation; open is where it's felt. */
     .sticker-disclosure[open] > .sticker-disclosure__body {
@@ -679,8 +824,14 @@
                text-xs font-semibold;
         border-color: var(--theme-ink);
     }
-    .sticker-pill--ok      { @apply bg-emerald-100 text-emerald-900; }
-    .sticker-pill--warn    { @apply bg-amber-100  text-amber-900;  }
+    .sticker-pill--ok {
+        background: var(--theme-state-ok-tint);
+        color: var(--theme-state-ok-fg-strong);
+    }
+    .sticker-pill--warn {
+        background: var(--theme-state-warn-tint);
+        color: var(--theme-state-warn-fg-strong);
+    }
     .sticker-pill--neutral {
         background: var(--theme-surface-elev);
         color: var(--theme-text);
@@ -694,6 +845,12 @@
     .text-muted { color: var(--theme-text-muted); }
     .text-quiet { color: var(--theme-text-quiet); }
     .text-body  { color: var(--theme-text); }
+
+    /* Size-agnostic state-colour helpers — use these in templates/JS when
+       the call site picks its own font-size (modal titles, inline glyphs,
+       em-dashes). Pair with .flash-text only when you also want text-sm. */
+    .text-state-ok  { color: var(--theme-state-ok-fg); }
+    .text-state-bad { color: var(--theme-state-bad-fg); }
 
     /* Bigger display scale for hero surfaces — login is the only page that
        opts in today. Wider type + tighter tracking so Fraunces reads as
@@ -812,13 +969,16 @@
         letter-spacing: -0.02em;
         line-height: 1.05;
     }
-    .kpi-value--ok  { @apply text-emerald-700; }
-    .kpi-value--bad { @apply text-rose-700; }
+    .kpi-value--ok  { color: var(--theme-state-ok-fg); }
+    .kpi-value--bad { color: var(--theme-state-bad-fg); }
 
     /* Inline metric emphasis (e.g. an incident count): loud when it
        matters, quiet when zero. Same semantic-modifier idea as the tiles
        so no template hard-codes a colour. */
-    .metric-alert { @apply font-semibold text-rose-700; }
+    .metric-alert {
+        @apply font-semibold;
+        color: var(--theme-state-bad-fg);
+    }
     .metric-quiet {
         @apply font-semibold;
         color: var(--theme-text-quiet);
@@ -829,15 +989,24 @@
     .stat-tile        { @apply rounded-xl border-2 py-3 text-center; }
     .stat-tile__label { @apply text-[11px] font-semibold uppercase tracking-wide; }
     .stat-tile__value { @apply mt-1 text-2xl font-bold tabular-nums; }
-    .stat-tile--ok    { @apply border-emerald-200 bg-emerald-50; }
+    .stat-tile--ok {
+        background: var(--theme-state-ok-bg);
+        border-color: var(--theme-state-ok-line-soft);
+    }
     .stat-tile--ok    .stat-tile__label,
-    .stat-tile--ok    .stat-tile__value { @apply text-emerald-700; }
-    .stat-tile--bad   { @apply border-rose-300 bg-rose-50; }
+    .stat-tile--ok    .stat-tile__value { color: var(--theme-state-ok-fg); }
+    .stat-tile--bad {
+        background: var(--theme-state-bad-bg);
+        border-color: var(--theme-state-bad-line);
+    }
     .stat-tile--bad   .stat-tile__label,
-    .stat-tile--bad   .stat-tile__value { @apply text-rose-700; }
-    .stat-tile--warn  { @apply border-amber-300 bg-amber-50; }
+    .stat-tile--bad   .stat-tile__value { color: var(--theme-state-bad-fg); }
+    .stat-tile--warn {
+        background: var(--theme-state-warn-bg);
+        border-color: var(--theme-state-warn-line);
+    }
     .stat-tile--warn  .stat-tile__label,
-    .stat-tile--warn  .stat-tile__value { @apply text-amber-700; }
+    .stat-tile--warn  .stat-tile__value { color: var(--theme-state-warn-fg); }
     .stat-tile--info  {
         background: var(--theme-surface-sunk);
         border-color: var(--theme-line);
@@ -855,10 +1024,22 @@
        again. (The public status page is intentionally separate: it's a
        flat, brand-themed surface with its own view-supplied palette, not
        this cartoon one.) Mirrors .stat-tile--. */
-    .status-badge--up       { @apply bg-emerald-100 text-emerald-800; }
-    .status-badge--down     { @apply bg-rose-100    text-rose-800;    }
-    .status-badge--degraded { @apply bg-amber-100   text-amber-800;   }
-    .status-badge--error    { @apply bg-red-100     text-red-800;     }
+    .status-badge--up {
+        background: var(--theme-state-ok-tint);
+        color: var(--theme-state-ok-fg-onsoft);
+    }
+    .status-badge--down {
+        background: var(--theme-state-bad-tint);
+        color: var(--theme-state-bad-fg-onsoft);
+    }
+    .status-badge--degraded {
+        background: var(--theme-state-warn-tint);
+        color: var(--theme-state-warn-fg-onsoft);
+    }
+    .status-badge--error {
+        background: var(--theme-state-bad-tint);
+        color: var(--theme-state-bad-fg-onsoft);
+    }
     .status-badge--none {
         background: var(--theme-surface-sunk);
         color: var(--theme-text-muted);
@@ -1019,9 +1200,21 @@
        call sites. Use for form errors, configuration warnings, success
        confirmations after a destructive action. */
     .alert-card         { @apply rounded-xl border-2 p-3 text-sm; }
-    .alert-card--warn   { @apply border-amber-300   bg-amber-50   text-amber-800; }
-    .alert-card--error  { @apply border-red-300     bg-red-50     text-red-800; }
-    .alert-card--ok     { @apply border-emerald-300 bg-emerald-50 text-emerald-900; }
+    .alert-card--warn {
+        background: var(--theme-state-warn-bg);
+        border-color: var(--theme-state-warn-line);
+        color: var(--theme-state-warn-fg-onsoft);
+    }
+    .alert-card--error {
+        background: var(--theme-state-bad-bg);
+        border-color: var(--theme-state-bad-line);
+        color: var(--theme-state-bad-fg-onsoft);
+    }
+    .alert-card--ok {
+        background: var(--theme-state-ok-bg);
+        border-color: var(--theme-state-ok-line);
+        color: var(--theme-state-ok-fg-strong);
+    }
     .alert-card--muted {
         background: var(--theme-surface-sunk);
         border-color: var(--theme-line);
@@ -1040,9 +1233,9 @@
        'sent' confirmations on row actions). Replaces ad-hoc text-emerald-700
        et al. so the palette stays one source. */
     .flash-text         { @apply text-sm; }
-    .flash-text--ok     { @apply text-emerald-700; }
-    .flash-text--bad    { @apply text-rose-700; }
-    .flash-text--warn   { @apply text-amber-800; }
+    .flash-text--ok     { color: var(--theme-state-ok-fg); }
+    .flash-text--bad    { color: var(--theme-state-bad-fg); }
+    .flash-text--warn   { color: var(--theme-state-warn-fg-onsoft); }
     .flash-text--muted  { color: var(--theme-text-muted); }
 
     /* Inline table-row action link. Tiny, weight 500, underline-on-hover —
@@ -1053,7 +1246,17 @@
         color: var(--theme-text-muted);
     }
     .row-link:hover     { color: var(--theme-text); }
-    .row-link--danger   { @apply text-rose-700 hover:text-rose-800; }
+    .row-link--danger          { color: var(--theme-state-bad-fg); }
+    .row-link--danger:hover    { color: var(--theme-state-bad-fg-strong); }
+
+    /* Ongoing-incident row marker. 4px coloured edge on the left + faint
+       tint on the row body so an active incident pops in a long table
+       without leaning on Tailwind's bg-rose-50/40 (which wouldn't track
+       a future theme). */
+    .sm-incident-ongoing {
+        border-left: 4px solid var(--theme-state-bad-strong);
+        background: var(--theme-state-bad-bg);
+    }
 
     /* Usage / quota progress bar. Track is slate-200; fill is emerald.
        Width comes from a `style="width: N%"` attribute at the call site.
@@ -1064,7 +1267,7 @@
         background: var(--theme-surface-sunk);
     }
     .usage-bar__fill    { @apply h-full rounded; }
-    .usage-bar__fill--ok    { @apply bg-emerald-500; }
+    .usage-bar__fill--ok    { background: var(--theme-state-ok-strong); }
 
     /* Live "we never stop checking" heartbeat. The EKG path is drawn with a
        long dash that scrolls left → reads as a continuous monitor sweep,
@@ -1152,16 +1355,29 @@
     /* `min-w-0` + `overflow-wrap: anywhere` on the pre stop unbreakable
        tokens from overflowing the fieldset. */
     .test-result        { @apply min-w-0 rounded-xl border-2 p-3 text-sm; }
-    .test-result--ok    { @apply border-emerald-300 bg-emerald-50 text-emerald-900; }
-    .test-result--bad   { @apply border-rose-300    bg-rose-50    text-rose-900;    }
-    .test-result--warn  { @apply border-amber-300   bg-amber-50   text-amber-900;   }
+    .test-result--ok {
+        background: var(--theme-state-ok-bg);
+        border-color: var(--theme-state-ok-line);
+        color: var(--theme-state-ok-fg-strong);
+    }
+    .test-result--bad {
+        background: var(--theme-state-bad-bg);
+        border-color: var(--theme-state-bad-line);
+        color: var(--theme-state-bad-fg-strong);
+    }
+    .test-result--warn {
+        background: var(--theme-state-warn-bg);
+        border-color: var(--theme-state-warn-line);
+        color: var(--theme-state-warn-fg-strong);
+    }
     .test-result__pill  { @apply inline-block rounded-full border px-2 py-0.5 text-xs font-medium; }
     .test-result__meta  {
         @apply text-xs;
         color: var(--theme-text-muted);
     }
     .test-result__body  {
-        @apply mt-2 max-h-48 overflow-auto rounded bg-white/60 p-2 font-mono text-xs;
+        @apply mt-2 max-h-48 overflow-auto rounded p-2 font-mono text-xs;
+        background: color-mix(in oklch, var(--theme-surface-elev) 60%, transparent);
         white-space: pre-wrap;
         overflow-wrap: anywhere;
     }
@@ -1274,7 +1490,7 @@
         animation: sm-dashboard-dot-pulse 1.8s ease-out infinite;
     }
     @keyframes sm-dashboard-dot-pulse {
-        0%   { box-shadow: 0 0 0 0 var(--color-rose-500); }
+        0%   { box-shadow: 0 0 0 0 var(--theme-state-bad-strong); }
         70%  { box-shadow: 0 0 0 0.5rem transparent; }
         100% { box-shadow: 0 0 0 0 transparent; }
     }
@@ -1315,7 +1531,7 @@
         color: var(--sm-dashboard-mono-fg);
     }
     .dashboard-num--bad {
-        color: var(--color-rose-700);
+        color: var(--theme-state-bad-fg);
     }
 
     .dashboard-spark {
@@ -1373,7 +1589,7 @@
     }
     .dashboard-subhead__active {
         @apply inline-flex items-center gap-1.5 font-medium;
-        color: var(--color-rose-700);
+        color: var(--theme-state-bad-fg);
     }
 
     .dashboard-chip {
@@ -1424,8 +1640,8 @@
         @apply text-[11px] font-medium tabular-nums;
         margin-top: 0.125rem;
     }
-    .metric-delta--up   { color: var(--color-emerald-700); }
-    .metric-delta--down { color: var(--color-rose-700);    }
+    .metric-delta--up   { color: var(--theme-state-ok-fg); }
+    .metric-delta--down { color: var(--theme-state-bad-fg); }
     .metric-delta--flat { color: var(--theme-text-quiet);  }
     .dashboard-kpi-card__spark {
         width: 140px;
@@ -1451,11 +1667,11 @@
     }
     .dashboard-incident-banner__title {
         @apply inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wider;
-        color: var(--color-rose-700);
+        color: var(--theme-state-bad-fg);
     }
     .dashboard-incident-banner__sub {
         @apply text-xs;
-        color: var(--color-rose-700);
+        color: var(--theme-state-bad-fg);
         opacity: 0.8;
     }
     .dashboard-incident-banner__actions {
@@ -1465,7 +1681,8 @@
         @apply mt-3 flex flex-col gap-2 list-none p-0;
     }
     .dashboard-incident-banner__item {
-        @apply flex items-start gap-3 rounded-lg bg-white/70 px-3 py-2 text-sm;
+        @apply flex items-start gap-3 rounded-lg px-3 py-2 text-sm;
+        background: color-mix(in oklch, var(--theme-surface-elev) 70%, transparent);
     }
     .dashboard-incident-banner__body {
         @apply flex-1 min-w-0 flex flex-col gap-1;
@@ -1479,7 +1696,7 @@
     }
     .dashboard-incident-banner__age {
         @apply font-mono text-xs;
-        color: var(--color-rose-700);
+        color: var(--theme-state-bad-fg);
     }
     .dashboard-incident-banner__update {
         @apply flex flex-wrap items-baseline gap-2 text-xs;
@@ -1496,9 +1713,9 @@
         flex: none;
         margin-top: 1px;
     }
-    .dashboard-incident-severity--minor    { background: var(--color-amber-600); }
-    .dashboard-incident-severity--major    { background: var(--color-rose-700); }
-    .dashboard-incident-severity--critical { background: var(--color-rose-900); }
+    .dashboard-incident-severity--minor    { background: var(--theme-state-warn-strong); }
+    .dashboard-incident-severity--major    { background: var(--theme-state-bad-fg); }
+    .dashboard-incident-severity--critical { background: var(--theme-state-bad-fg-strong); }
 
     /* ── V2 ─ status breakdown rail ───────────────────────────────── */
     .dashboard-rail {
@@ -1533,10 +1750,10 @@
         flex: 1 1 0;
         min-width: 0;
     }
-    .dashboard-ribbon__seg--op   { background: var(--sm-state-op-bar); }
-    .dashboard-ribbon__seg--deg  { background: var(--sm-state-deg-bar); }
-    .dashboard-ribbon__seg--maj  { background: var(--sm-state-maj-bar); }
-    .dashboard-ribbon__seg--none { background: var(--sm-state-none-bar); }
+    .dashboard-ribbon__seg--op   { background: var(--theme-state-ok-strong); }
+    .dashboard-ribbon__seg--deg  { background: var(--theme-state-warn-strong); }
+    .dashboard-ribbon__seg--maj  { background: var(--theme-state-bad-strong); }
+    .dashboard-ribbon__seg--none { background: var(--theme-text-faint); }
     .dashboard-ribbon-meta {
         @apply mt-2 flex items-center justify-between text-[11px];
         color: var(--sm-dashboard-label-fg);
@@ -1789,7 +2006,7 @@
     .monitors-row[data-paused="true"]     > * { opacity: var(--sm-monitors-row-paused-opacity); }
     .monitors-row[data-selected="true"]   > * {
         background: var(--sm-monitors-row-selected-bg);
-        box-shadow: inset 3px 0 0 var(--color-amber-500);
+        box-shadow: inset 3px 0 0 var(--theme-state-warn-strong);
     }
     .monitors-row > *:first-child { box-shadow: inherit; }
 
@@ -1835,8 +2052,8 @@
         @apply font-mono text-xs tabular-nums;
         color: var(--sm-monitors-num-fg);
     }
-    .monitors-row__uptime-val--bad  { color: var(--color-rose-700); }
-    .monitors-row__uptime-val--warn { color: var(--color-amber-700); }
+    .monitors-row__uptime-val--bad  { color: var(--theme-state-bad-fg); }
+    .monitors-row__uptime-val--warn { color: var(--theme-state-warn-fg); }
 
     /* Borrows `--sm-dashboard-dot-*` so both pages share one ramp. */
     .monitors-dot {
@@ -1963,11 +2180,11 @@
         color: var(--theme-text);
         outline: none;
     }
-    .monitors-popover__item--danger { color: var(--color-rose-700); }
+    .monitors-popover__item--danger { color: var(--theme-state-bad-fg); }
     .monitors-popover__item--danger:hover,
     .monitors-popover__item--danger:focus-visible {
-        background: var(--color-rose-50);
-        color: var(--color-rose-800);
+        background: var(--theme-state-bad-bg);
+        color: var(--theme-state-bad-fg-onsoft);
     }
     .monitors-popover__sep {
         height: 1px;

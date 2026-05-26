@@ -145,7 +145,7 @@
       if (!res.ok) await fail(res);
       if (logoOutcome) reflectLogo(logoOutcome);
       result.textContent = "Saved.";
-      result.className = "text-sm text-emerald-700";
+      result.className = "flash-text flash-text--ok";
     } catch (err) {
       if (err === HANDLED) return; // banner already rendered
       window.smRenderClientError(banner, `Network error: ${err.message || err}`);

@@ -61,7 +61,7 @@
       // is a reload (it also picks up the suffix preview for any other slug-
       // derived UI without us re-templating it client-side).
       result.textContent = "Saved — reloading…";
-      result.className = "text-sm text-emerald-700";
+      result.className = "flash-text flash-text--ok";
       window.location.reload();
     } catch (err) {
       window.smRenderClientError(banner, `Network error: ${err.message || err}`);

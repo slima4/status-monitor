@@ -60,7 +60,7 @@
         const fromRaw = new Date(fromIso).getTime();
         const toRaw = toIso ? new Date(toIso).getTime() : Date.now();
         if (Number.isNaN(fromRaw) || Number.isNaN(toRaw)) {
-            body.innerHTML = `<span class="text-rose-600">Could not load timeline: invalid timestamp on incident row.</span>`;
+            body.innerHTML = `<span class="flash-text flash-text--bad">Could not load timeline: invalid timestamp on incident row.</span>`;
             return;
         }
         const url = `/api/v1/targets/${encodeURIComponent(targetId)}/results`
@@ -87,7 +87,7 @@
             body.innerHTML = parts.join("")
                 || `<span class="text-slate-500">No failures matched in this window.</span>`;
         } catch (err) {
-            body.innerHTML = `<span class="text-rose-600">Could not load timeline: ${window.smEscapeHtml(String(err.message || err))}</span>`;
+            body.innerHTML = `<span class="flash-text flash-text--bad">Could not load timeline: ${window.smEscapeHtml(String(err.message || err))}</span>`;
         }
     }
 

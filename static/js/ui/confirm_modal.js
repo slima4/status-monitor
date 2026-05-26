@@ -74,7 +74,7 @@
 
         const isDanger = !!opts.danger;
         titleEl.className = "text-lg font-semibold " +
-            (isDanger ? "text-rose-700" : "text-body");
+            (isDanger ? "text-state-bad" : "text-body");
         confirmBtn.className = "sticker-btn px-3 py-1.5 text-sm font-medium " +
             (isDanger ? "sticker-btn--danger" : "sticker-btn--primary");
 

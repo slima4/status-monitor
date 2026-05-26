@@ -27,7 +27,7 @@
         const el = document.getElementById("components-status");
         if (!el) return;
         el.textContent = msg;
-        el.className = "px-4 py-2 text-xs " + (ok ? "text-emerald-600" : "text-rose-600");
+        el.className = "px-4 py-2 flash-text " + (ok ? "flash-text--ok" : "flash-text--bad");
     }
 
     async function patch(id, body) {

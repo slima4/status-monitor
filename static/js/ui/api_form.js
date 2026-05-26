@@ -120,7 +120,7 @@ window.smRenderApiError = function (banner, json, status, opts) {
     banner.innerHTML = `<strong>${window.smEscapeHtml(code)}</strong>: ${window.smEscapeHtml(message)}`;
     if (err.field) {
         banner.insertAdjacentHTML("beforeend",
-            ` <span class="text-xs text-red-600">(field: ${window.smEscapeHtml(err.field)})</span>`);
+            ` <span class="text-xs text-state-bad">(field: ${window.smEscapeHtml(err.field)})</span>`);
     }
     banner.classList.remove("hidden");
     banner.scrollIntoView({ block: "center", behavior: "smooth" });

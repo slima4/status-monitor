@@ -2,7 +2,7 @@
    `IncidentsPage`: id, name, range, incidents, incidents_has_more. #}
 {% if incidents.is_empty() %}
 <div class="sticker-card flex items-center gap-3 p-6 text-sm text-muted">
-  <span aria-hidden="true" class="text-lg text-emerald-600">✓</span>
+  <span aria-hidden="true" class="text-lg text-state-ok">✓</span>
   <span>No incidents in the last {{ range }}.</span>
 </div>
 {% else %}
@@ -28,7 +28,7 @@
           data-from="{{ inc.started_at|iso_ts }}"
           data-to="{% match inc.ended_at %}{% when Some with (ts) %}{{ ts|iso_ts }}{% when None %}{% endmatch %}"
           data-ongoing="{% if inc.ongoing %}true{% else %}false{% endif %}"
-          class="cursor-pointer border-t border-[color:var(--theme-line)] hover:bg-[color:var(--theme-surface-sunk)]{% if inc.ongoing %} border-l-4 border-l-rose-500 bg-rose-50/40{% endif %}">
+          class="cursor-pointer border-t border-[color:var(--theme-line)] hover:bg-[color:var(--theme-surface-sunk)]{% if inc.ongoing %} sm-incident-ongoing{% endif %}">
         <td class="px-3 py-2 align-top">
           {% if inc.ongoing %}
             <span class="status-badge status-badge--{{ inc.severity }} motion-safe:animate-pulse">Ongoing · {{ inc.severity }}</span>
@@ -42,7 +42,7 @@
         <td class="px-3 py-2 align-top tabular-nums">
           {% match inc.ended_at %}
             {% when Some with (ts) %}<time datetime="{{ ts|iso_ts }}" title="{{ ts|iso_ts }}">{{ ts|human_ts }}</time>
-            {% when None %}<span class="font-medium text-rose-600">—</span>
+            {% when None %}<span class="font-medium text-state-bad">—</span>
           {% endmatch %}
         </td>
         <td class="px-3 py-2 align-top font-mono text-xs">{% match inc.duration_secs %}{% when Some with (s) %}{{ s|humanize_dur }}{% when None %}Ongoing{% endmatch %}</td>
