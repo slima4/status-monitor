@@ -670,6 +670,32 @@
         --theme-state-warn-strong:    oklch(0.70 0.12 71);
     }
 
+    /* "Classic" theme — preserves the original public-status look (system
+       sans-serif, soft 16px corners, pill chips, no scanline atmosphere)
+       for vendors who want a neutral SaaS-y status page instead of the
+       brutalist CLI register. Colour palette stays close to default light;
+       the differences are typography, corner radius, and atmosphere. */
+    .theme-classic {
+        --font-body:    ui-sans-serif, system-ui, sans-serif;
+        --font-display: ui-sans-serif, system-ui, sans-serif;
+    }
+    /* Kill the scanline overlay on public-shell + app-shell when classic
+       is active. CRT atmosphere is the CLI register's signature. */
+    .theme-classic.public-shell::before,
+    .theme-classic.app-shell::before,
+    .theme-classic.marketing-shell::before { content: none; }
+
+    /* Soft corners + thicker accent borders restore the original
+       "rounded-2xl border-2" look on the public status banner + callouts;
+       chips become pills again. */
+    .theme-classic .public-callout { border-radius: 1rem; }
+    .theme-classic .public-overall--op,
+    .theme-classic .public-overall--mnt,
+    .theme-classic .public-overall--minor,
+    .theme-classic .public-overall--part,
+    .theme-classic .public-overall--maj { border-radius: 1rem; border-width: 2px; }
+    .theme-classic .public-chip { border-radius: 9999px; border: 0; }
+
     /* Native checkbox / radio restyled to the CLI register: hairline
        1px border, 2px corners (round for radio), --theme-accent fill
        on check. No press-in physics, no offset shadow — flat to match
