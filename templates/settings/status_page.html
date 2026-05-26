@@ -1,9 +1,9 @@
 {% extends "base.html" %}
-{% block title %}Status page · Status Monitor{% endblock %}
+{% block title %}Status page · Uptimepage{% endblock %}
 {% block content %}
 <section class="space-y-6">
   <header class="space-y-1">
-    <h1 class="page-title">Status page settings</h1>
+    <h1 class="page-title"><span class="page-title__prefix">$</span>status page settings</h1>
     <p class="text-sm text-muted">
       Branding and visibility for your public status page. Logo, brand colour
       and about text only — there is no per-page custom CSS.
@@ -110,7 +110,7 @@
         <div class="flex items-center gap-3">
           <input id="brand-color" name="public_brand_color" type="color"
                  value="{{ brand_color_value }}"
-                 class="h-9 w-12 cursor-pointer rounded-lg border-2 border-[color:var(--theme-ink)]"
+                 class="h-9 w-12 cursor-pointer rounded-sm border border-[color:var(--theme-line)]"
                  oninput="document.getElementById('brand-color-out').textContent = this.value">
           <output id="brand-color-out" class="font-mono text-sm">{{ brand_color_value }}</output>
         </div>
@@ -136,11 +136,11 @@
              a single place and never emits an empty `src` (a wasted request). #}
           {% if let Some(logo) = s.logo_url %}
           <img id="logo-current" src="{{ logo }}" alt="Current logo"
-               class="h-12 w-auto rounded-lg border-2 border-[color:var(--theme-ink)] bg-[color:var(--theme-surface-sunk)] p-1">
+               class="h-12 w-auto rounded-sm border border-[color:var(--theme-line)] bg-[color:var(--theme-surface-sunk)] p-1">
           <span id="logo-none" class="hidden text-sm text-muted">No logo uploaded.</span>
           {% else %}
           <img id="logo-current" alt="Current logo"
-               class="hidden h-12 w-auto rounded-lg border-2 border-[color:var(--theme-ink)] bg-[color:var(--theme-surface-sunk)] p-1">
+               class="hidden h-12 w-auto rounded-sm border border-[color:var(--theme-line)] bg-[color:var(--theme-surface-sunk)] p-1">
           <span id="logo-none" class="text-sm text-muted">No logo uploaded.</span>
           {% endif %}
 

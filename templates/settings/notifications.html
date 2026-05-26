@@ -1,10 +1,10 @@
 {% extends "base.html" %}
-{% block title %}Notification channels · Status Monitor{% endblock %}
+{% block title %}Notification channels · Uptimepage{% endblock %}
 {% block content %}
 <section class="space-y-6">
   <header class="flex flex-wrap items-start justify-between gap-3">
     <div class="space-y-1">
-      <h1 class="page-title">Notification channels</h1>
+      <h1 class="page-title"><span class="page-title__prefix">$</span>notification channels</h1>
       <p class="text-sm text-muted">
         Slack, generic webhook or Telegram destinations. Bind them to monitors
         from the monitor's <em>Alerts</em> section to get Down / Recovered
@@ -13,7 +13,7 @@
     </div>
     <a href="/settings/notifications/new"
        class="sticker-btn sticker-btn--primary px-3 py-1.5 text-sm font-medium">
-      Add channel
+      add channel
     </a>
   </header>
 

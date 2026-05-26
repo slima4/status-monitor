@@ -1,9 +1,9 @@
 {% extends "base.html" %}
-{% block title %}API tokens · Status Monitor{% endblock %}
+{% block title %}API tokens · Uptimepage{% endblock %}
 {% block content %}
 <section class="space-y-6">
   <header class="space-y-1">
-    <h1 class="page-title">API tokens</h1>
+    <h1 class="page-title"><span class="page-title__prefix">$</span>api tokens</h1>
     <p class="text-sm text-muted">
       Bearer tokens for scripting against <code>/api/v1/*</code>. The full token
       is shown <strong>once</strong> when you create it — store it now.
@@ -23,7 +23,7 @@
            class="flex-1 field text-sm">
     <button type="submit"
             class="sticker-btn sticker-btn--primary px-3 py-1.5 text-sm font-medium">
-      Create token
+      create token
     </button>
   </form>
 
