@@ -113,6 +113,37 @@ impl RdapSingleflight {
     pub fn is_empty(&self) -> bool {
         self.slots.is_empty()
     }
+
+    /// Off-hot-path eviction. Drops slots that are no longer useful:
+    ///  - `Ready` slots whose `fetched_at` is older than `cache_ttl` (no
+    ///    cache hit possible — next call would refetch anyway).
+    ///  - `Empty` slots left behind by a fetcher failure.
+    ///
+    /// Skips slots a live caller still references (`strong_count > 1`) and
+    /// slots whose state is currently locked (`try_lock` fails). Atomic per
+    /// shard via `DashMap::retain` — never drops a slot another task just
+    /// cloned out of the map.
+    pub fn sweep(&self) -> usize {
+        let cache_ttl = self.cache_ttl;
+        let mut removed = 0usize;
+        self.slots.retain(|_, slot| {
+            if Arc::strong_count(slot) != 1 {
+                return true;
+            }
+            let Ok(guard) = slot.state.try_lock() else {
+                return true;
+            };
+            let drop_slot = match &*guard {
+                SlotState::Empty => true,
+                SlotState::Ready { fetched_at, .. } => fetched_at.elapsed() >= cache_ttl,
+            };
+            if drop_slot {
+                removed += 1;
+            }
+            !drop_slot
+        });
+        removed
+    }
 }
 
 #[cfg(test)]
@@ -239,6 +270,98 @@ mod tests {
         }
         assert_eq!(calls.load(Ordering::SeqCst), 1);
         assert_eq!(sf.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn sweep_drops_stale_ready_slots() {
+        let sf = RdapSingleflight::new(Duration::from_millis(20));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let _ = sf
+            .lookup(Arc::<str>::from("example.com"), || {
+                let calls = calls.clone();
+                async move {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                    Ok(answer())
+                }
+            })
+            .await
+            .unwrap();
+        assert_eq!(sf.len(), 1);
+        // Inside TTL: sweep keeps it.
+        assert_eq!(sf.sweep(), 0);
+        assert_eq!(sf.len(), 1);
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        // Past TTL: sweep drops it.
+        assert_eq!(sf.sweep(), 1);
+        assert_eq!(sf.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn sweep_drops_empty_slot_after_failure() {
+        let sf = RdapSingleflight::new(Duration::from_secs(60));
+        let err = sf
+            .lookup(Arc::<str>::from("example.com"), || async {
+                Err::<RdapAnswer, _>(crate::error::AppError::Other(anyhow::anyhow!("boom")))
+            })
+            .await;
+        assert!(err.is_err());
+        // Failure leaves the slot allocated but `Empty`. Sweep must reclaim
+        // it so a long tail of failed lookups can't grow the map unbounded.
+        assert_eq!(sf.len(), 1);
+        assert_eq!(sf.sweep(), 1);
+        assert_eq!(sf.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn sweep_keeps_slot_with_live_external_arc() {
+        // Isolates the strong_count guard: caller has cloned the slot's Arc
+        // out of the map but holds NO lock on it. Past TTL the try_lock check
+        // alone would evict; only the strong_count guard saves it.
+        let sf = RdapSingleflight::new(Duration::from_millis(20));
+        let _ = sf
+            .lookup(Arc::<str>::from("example.com"), || async { Ok(answer()) })
+            .await
+            .unwrap();
+        let stash: Arc<Slot> = sf
+            .slots
+            .get("example.com")
+            .expect("slot present")
+            .value()
+            .clone();
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        assert_eq!(sf.sweep(), 0, "external Arc clone must protect the slot");
+        assert_eq!(sf.len(), 1);
+        drop(stash);
+        assert_eq!(sf.sweep(), 1, "released external clone — sweep reclaims");
+        assert_eq!(sf.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn sweep_keeps_in_flight_slot() {
+        let sf = Arc::new(RdapSingleflight::new(Duration::from_millis(20)));
+        let started = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new(tokio::sync::Notify::new());
+        let started_c = started.clone();
+        let release_c = release.clone();
+        let sf_c = sf.clone();
+        let task = tokio::spawn(async move {
+            sf_c.lookup(Arc::<str>::from("example.com"), || async move {
+                started_c.notify_one();
+                release_c.notified().await;
+                Ok(answer())
+            })
+            .await
+            .unwrap()
+        });
+        started.notified().await;
+        // Fetcher holds the slot's mutex AND keeps the Arc alive — sweep
+        // must skip it even past TTL, otherwise the in-flight result is
+        // discarded.
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        assert_eq!(sf.sweep(), 0);
+        assert_eq!(sf.len(), 1);
+        release.notify_one();
+        let _ = task.await.unwrap();
     }
 
     #[tokio::test]

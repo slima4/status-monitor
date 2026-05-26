@@ -84,11 +84,13 @@ impl Scheduler {
         }
         let evicted_throttle = self.pool.host_throttle().sweep();
         let evicted_breakers = self.pool.sweep_breakers();
-        if evicted_throttle > 0 || evicted_breakers > 0 {
+        let evicted_singleflight = self.pool.domain_expiry_runtime().singleflight.sweep();
+        if evicted_throttle > 0 || evicted_breakers > 0 || evicted_singleflight > 0 {
             tracing::debug!(
                 evicted_throttle,
                 evicted_breakers,
-                "host throttle + breaker sweep"
+                evicted_singleflight,
+                "host throttle + breaker + singleflight sweep"
             );
         }
         Ok(())
