@@ -38,27 +38,27 @@
   </div>
 
   <div class="monitors-toolbar__right">
-    <select name="enabled" class="monitors-toolbar__select" aria-label="Enabled">
+    <select name="enabled" data-sm-combobox class="monitors-toolbar__select" aria-label="Enabled">
       <option value=""{% if enabled.is_none() %} selected{% endif %}>Status: any</option>
       <option value="true"{% if enabled == Some(true) %} selected{% endif %}>Enabled</option>
       <option value="false"{% if enabled == Some(false) %} selected{% endif %}>Paused</option>
     </select>
 
-    <select name="owner" class="monitors-toolbar__select" aria-label="Owner">
+    <select name="owner" data-sm-combobox class="monitors-toolbar__select" aria-label="Owner">
       <option value=""{% if owner.is_none() %} selected{% endif %}>Owner: any</option>
       {% for opt in owner_options %}
       <option value="{{ opt.id }}"{% if opt.selected %} selected{% endif %}>{{ opt.label }}</option>
       {% endfor %}
     </select>
 
-    <select name="group" class="monitors-toolbar__select" aria-label="Group">
+    <select name="group" data-sm-combobox class="monitors-toolbar__select" aria-label="Group">
       <option value=""{% if group == "" %} selected{% endif %}>Group: any</option>
       {% for opt in group_options %}
       <option value="{{ opt.name }}"{% if opt.selected %} selected{% endif %}>{{ opt.name }}</option>
       {% endfor %}
     </select>
 
-    <select name="sort" class="monitors-toolbar__select" aria-label="Sort">
+    <select name="sort" data-sm-combobox class="monitors-toolbar__select" aria-label="Sort">
       <option value="recent"{% if sort == "recent" %} selected{% endif %}>Recent activity</option>
       <option value="name"{% if sort == "name" %} selected{% endif %}>Name (A–Z)</option>
       <option value="created"{% if sort == "created" %} selected{% endif %}>Oldest first</option>

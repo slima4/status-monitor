@@ -19,6 +19,10 @@
 
     <div class="sticker-card space-y-2 p-5">
       <a href="/api/v1/me/data-export" download rel="nofollow"
+         data-confirm-modal
+         data-confirm-title="Export your data?"
+         data-confirm-body="Downloads a JSON file with your profile, sign-in identities, owned organisations, targets (credentials redacted), incidents, memberships and recent activity."
+         data-confirm-label="download"
          class="btn-ghost inline-block px-3 py-1.5 text-sm font-medium text-body">
         Export my data
       </a>
@@ -84,13 +88,13 @@
       <div class="flex items-center justify-end gap-2 pt-2">
         <button type="submit" value="cancel"
                 class="btn-ghost px-3 py-1.5 text-sm font-medium">
-          Cancel
+          cancel
         </button>
         <button type="button" id="confirm-delete" disabled
                 hx-delete="/api/v1/me"
                 hx-swap="none"
                 class="sticker-btn sticker-btn--danger px-3 py-1.5 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50">
-          Delete my account
+          delete my account
         </button>
       </div>
     </form>

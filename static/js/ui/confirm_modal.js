@@ -69,8 +69,8 @@
         opts = opts || {};
         titleEl.textContent    = opts.title        || "Are you sure?";
         bodyEl.textContent     = opts.body         || "";
-        confirmBtn.textContent = opts.confirmLabel || "Confirm";
-        cancelBtn.textContent  = opts.cancelLabel  || "Cancel";
+        confirmBtn.textContent = opts.confirmLabel || "confirm";
+        cancelBtn.textContent  = opts.cancelLabel  || "cancel";
 
         const isDanger = !!opts.danger;
         titleEl.className = "text-lg font-semibold " +
@@ -102,18 +102,18 @@
         if (promptDialog) return;
         promptDialog = document.createElement("dialog");
         promptDialog.id = "sm-prompt-modal";
-        promptDialog.className = "w-full max-w-md rounded-lg p-0 backdrop:bg-slate-900/40";
+        promptDialog.className = "w-full max-w-md p-0";
         promptDialog.setAttribute("aria-labelledby", "sm-prompt-title");
         promptDialog.innerHTML =
             '<form method="dialog" class="space-y-4 p-6">' +
-                '<h2 id="sm-prompt-title" class="text-lg font-semibold text-slate-800"></h2>' +
-                '<p class="text-sm text-slate-600"></p>' +
+                '<h2 id="sm-prompt-title" class="text-lg font-semibold"></h2>' +
+                '<p class="text-sm text-muted"></p>' +
                 '<input type="text" class="field w-full text-sm" data-sm-prompt-input>' +
                 '<div class="flex items-center justify-end gap-2 pt-2">' +
                     '<button type="button" data-sm-prompt-cancel ' +
-                            'class="btn-ghost px-3 py-1.5 text-sm font-medium text-slate-700">Cancel</button>' +
+                            'class="btn-ghost px-3 py-1.5 text-sm font-medium">cancel</button>' +
                     '<button type="submit" data-sm-prompt-ok ' +
-                            'class="sticker-btn sticker-btn--primary px-3 py-1.5 text-sm font-medium">OK</button>' +
+                            'class="sticker-btn sticker-btn--primary px-3 py-1.5 text-sm font-medium">ok</button>' +
                 '</div>' +
             '</form>';
         document.body.appendChild(promptDialog);
@@ -213,7 +213,7 @@
         window.smConfirm({
             title:        d.confirmTitle || "Are you sure?",
             body:         d.confirmBody  || "",
-            confirmLabel: d.confirmLabel || "Confirm",
+            confirmLabel: d.confirmLabel,
             cancelLabel:  d.confirmCancel,
             danger:       d.confirmDanger !== undefined,
         }).then(function (ok) {

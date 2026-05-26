@@ -47,21 +47,21 @@
               aria-expanded="false"
               aria-label="More actions for {{ row.name }}">⋯</button>
       <div class="monitors-popover" role="menu" hidden data-menu-panel>
-        <a href="/targets/{{ row.id }}" class="monitors-popover__item" role="menuitem">Open detail</a>
-        <a href="/targets/{{ row.id }}/edit" class="monitors-popover__item" role="menuitem">Edit</a>
-        <a href="/targets/new?from={{ row.id }}" class="monitors-popover__item" role="menuitem">Copy</a>
+        <a href="/targets/{{ row.id }}" class="monitors-popover__item" role="menuitem">open detail</a>
+        <a href="/targets/{{ row.id }}/edit" class="monitors-popover__item" role="menuitem">edit</a>
+        <a href="/targets/new?from={{ row.id }}" class="monitors-popover__item" role="menuitem">copy</a>
         <button type="button"
                 class="monitors-popover__item"
                 role="menuitem"
                 data-row-action="{% if row.enabled %}disable{% else %}enable{% endif %}"
-                data-target-id="{{ row.id }}">{% if row.enabled %}Pause{% else %}Resume{% endif %}</button>
+                data-target-id="{{ row.id }}">{% if row.enabled %}pause{% else %}resume{% endif %}</button>
         <div class="monitors-popover__sep" aria-hidden="true"></div>
         <button type="button"
                 class="monitors-popover__item monitors-popover__item--danger"
                 role="menuitem"
                 data-row-action="delete"
                 data-target-id="{{ row.id }}"
-                data-row-confirm="Permanently delete {{ row.name }}? History is removed.">Delete</button>
+                data-row-confirm="Permanently delete {{ row.name }}? History is removed.">delete</button>
       </div>
     </div>
   </span>

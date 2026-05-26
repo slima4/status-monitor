@@ -502,20 +502,22 @@
     /* App modals (the JS-mounted confirm + the per-page account-delete).
        Dialog elements render in the UA top layer outside .app-shell, so
        tokens have to resolve from :root — they do, because @theme is
-       emitted at :root scope. Sticker dialect: 2px ink border + the card
-       shadow. Backdrop dims via colour-mix on ink so dim level tracks
-       theme too (terminal's dim feels green-tinted, paper's neutral). */
+       emitted at :root scope. CLI register: hairline border, 2px corners,
+       mono backbone. Backdrop dims via colour-mix on ink so the dim level
+       tracks theme. */
     dialog#sm-confirm-modal,
+    dialog#sm-prompt-modal,
     dialog#delete-modal {
         background: var(--theme-surface-elev);
         color: var(--theme-text);
-        border: 2px solid var(--theme-ink);
-        border-radius: 0.75rem;
-        box-shadow: var(--theme-shadow-card);
+        border: 1px solid var(--theme-line);
+        border-radius: 2px;
+        font-family: var(--font-mono);
     }
     dialog#sm-confirm-modal::backdrop,
+    dialog#sm-prompt-modal::backdrop,
     dialog#delete-modal::backdrop {
-        background: color-mix(in oklch, var(--theme-ink) 40%, transparent);
+        background: color-mix(in oklch, var(--theme-ink) 55%, transparent);
     }
 
     /* Example alt theme — flip the org app to a phosphor-on-black CRT look
@@ -637,12 +639,10 @@
         --theme-state-warn-strong:    oklch(0.70 0.12 71);
     }
 
-    /* Cartoon checkbox / radio. Native controls ignore the sticker
-       language (ink edge + hard offset shadow) the rest of the UI speaks,
-       so restyle them once here — every template's box inherits it, no
-       per-template classes (semantic layer). Checked reuses the same
-       "pressed sticker" metaphor as .sticker-disclosure: it fills emerald
-       and rides onto its own shadow. */
+    /* Native checkbox / radio restyled to the CLI register: hairline
+       1px border, 2px corners (round for radio), --theme-accent fill
+       on check. No press-in physics, no offset shadow — flat to match
+       the rest of the surface. */
     input[type="checkbox"],
     input[type="radio"] {
         appearance: none;
@@ -656,29 +656,21 @@
         vertical-align: middle;
         cursor: pointer;
         background-color: var(--theme-surface-elev);
-        border: 2px solid var(--theme-ink);
-        box-shadow: var(--control-offset) var(--control-offset) 0 0 var(--theme-shadow-color);
-        transition: transform 120ms ease, box-shadow 120ms ease,
-                    background-color 120ms ease;
+        border: 1px solid var(--theme-line);
+        transition: border-color 120ms ease, background-color 120ms ease;
     }
-    input[type="checkbox"] { border-radius: 5px; }
+    input[type="checkbox"] { border-radius: 2px; }
     input[type="radio"]    { border-radius: 9999px; }
 
-    /* :not(:checked) so a checked box never re-grows a shadow on hover —
-       order-independent, mirrors the .sticker-disclosure :not([open]). */
     input[type="checkbox"]:not(:checked):hover:not(:disabled),
     input[type="radio"]:not(:checked):hover:not(:disabled) {
-        box-shadow: calc(var(--control-offset) + 1px)
-                    calc(var(--control-offset) + 1px) 0 0 var(--theme-shadow-color);
+        border-color: var(--theme-ink);
     }
 
-    /* Checked = pressed sticker: emerald fill (same emerald-600 token as
-       .sticker-btn--primary) ridden onto the shadow, shadow gone. */
     input[type="checkbox"]:checked,
     input[type="radio"]:checked {
         background-color: var(--control-on);
-        box-shadow: 0 0 0 0 var(--theme-ink);
-        transform: translate(var(--control-offset), var(--control-offset));
+        border-color: var(--control-on);
     }
 
     input[type="checkbox"]::after {
@@ -705,7 +697,6 @@
     input[type="radio"]:disabled {
         cursor: not-allowed;
         opacity: 0.5;
-        box-shadow: none;
     }
 }
 
@@ -810,7 +801,8 @@
         appearance: none;
         -webkit-appearance: none;
         padding-right: 2rem;
-        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 1.5l5 5 5-5'/%3E%3C/svg%3E");
+        cursor: pointer;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8' fill='none' stroke='%23475569' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 1.5l5 5 5-5'/%3E%3C/svg%3E");
         background-repeat: no-repeat;
         background-position: right 0.7rem center;
         background-size: 0.7rem;
@@ -1878,17 +1870,20 @@
     .monitors-toolbar {
         @apply flex flex-wrap items-center gap-3 rounded-sm border px-3 py-2;
         background: var(--sm-monitors-toolbar-bg);
-        border-color: var(--theme-ink);
-        box-shadow: var(--theme-shadow-btn);
+        border-color: var(--theme-line);
     }
     .monitors-search {
-        @apply flex flex-1 min-w-[16rem] items-center gap-2 rounded-lg px-3;
+        @apply flex flex-1 min-w-[16rem] items-center gap-2 rounded-sm border px-3;
         background: var(--sm-monitors-search-bg);
+        border-color: var(--theme-line);
         height: 2rem;
+        transition: border-color 120ms ease;
     }
+    .monitors-search:focus-within { border-color: var(--theme-accent); }
     .monitors-search__input {
         @apply min-w-0 flex-1 border-0 bg-transparent text-sm outline-none;
         color: var(--sm-monitors-search-fg);
+        font-family: var(--font-mono);
     }
     .monitors-search__input::placeholder { color: var(--theme-text-quiet); }
     .monitors-search__icon {
@@ -1910,29 +1905,142 @@
         @apply rounded-sm border pr-7 pl-2.5 text-sm;
         background: var(--theme-surface-elev);
         color: var(--theme-text);
+        font-family: var(--font-mono);
         appearance: none;
         -webkit-appearance: none;
         height: 2rem;
-        border-color: var(--theme-ink);
-        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 1.5l5 5 5-5'/%3E%3C/svg%3E");
+        border-color: var(--theme-line);
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8' fill='none' stroke='%23475569' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 1.5l5 5 5-5'/%3E%3C/svg%3E");
         background-repeat: no-repeat;
         background-position: right 0.55rem center;
         background-size: 0.65rem;
+        transition: border-color 120ms ease;
+        cursor: pointer;
+    }
+    .monitors-toolbar__select:hover { border-color: var(--theme-ink); }
+    .monitors-toolbar__select:focus { border-color: var(--theme-accent); outline: none; }
+
+    /* ── Custom combobox (cross-browser <select> replacement) ───────
+       Native <option> elements are OS-controlled and unstyleable in
+       Safari/Firefox. Wraps a real <select> for form submission while
+       rendering the visible chrome from <button>+<ul role="listbox">
+       so the option list matches the rest of the CLI register
+       cross-browser. Opt in via `data-sm-combobox` on the <select>. */
+    .sm-combobox {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+    }
+    .sm-combobox__trigger {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        justify-content: space-between;
+        height: 2rem;
+        padding: 0 0.625rem;
+        border-radius: 2px;
+        border: 1px solid var(--theme-line);
+        background: var(--theme-surface-elev);
+        color: var(--theme-text);
+        font-family: var(--font-mono);
+        font-size: 0.8125rem;
+        line-height: 1;
+        cursor: pointer;
+        text-align: left;
+        transition: border-color 120ms ease;
+    }
+    .sm-combobox__trigger:hover { border-color: var(--theme-ink); }
+    .sm-combobox__trigger[aria-expanded="true"],
+    .sm-combobox__trigger:focus-visible {
+        border-color: var(--theme-accent);
+        outline: none;
+    }
+    .sm-combobox__label {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .sm-combobox__chevron {
+        width: 0.6875rem;
+        height: 0.6875rem;
+        flex: none;
+        color: var(--theme-text-quiet);
+        transition: transform 160ms ease;
+    }
+    .sm-combobox__trigger[aria-expanded="true"] .sm-combobox__chevron {
+        transform: rotate(180deg);
+    }
+    .sm-combobox__panel {
+        position: fixed;
+        z-index: 50;
+        min-width: 10rem;
+        max-height: 18rem;
+        overflow-y: auto;
+        padding: 0.25rem;
+        background: var(--theme-surface-elev);
+        border: 1px solid var(--theme-line);
+        border-radius: 2px;
+        font-family: var(--font-mono);
+        list-style: none;
+        margin: 0;
+    }
+    .sm-combobox__panel[hidden] { display: none; }
+    .sm-combobox__option {
+        position: relative;
+        padding: 0.4rem 0.6rem 0.4rem 1.4rem;
+        border-radius: 2px;
+        font-size: 0.8125rem;
+        color: var(--theme-text);
+        cursor: pointer;
+        transition: background-color 120ms ease, color 120ms ease;
+        user-select: none;
+        white-space: nowrap;
+    }
+    .sm-combobox__option:hover,
+    .sm-combobox__option[aria-current="true"] {
+        background: var(--theme-surface-sunk);
+        color: var(--theme-accent);
+        outline: none;
+    }
+    .sm-combobox__option[aria-selected="true"] {
+        color: var(--theme-accent);
+        font-weight: 600;
+    }
+    .sm-combobox__option[aria-selected="true"]::before {
+        content: "✓";
+        position: absolute;
+        left: 0.4rem;
+        top: 50%;
+        transform: translateY(-50%);
+        font-size: 0.75rem;
+        color: var(--theme-accent);
     }
 
     .monitors-chips {
         @apply flex flex-wrap items-center gap-1.5;
     }
     .monitors-chip {
-        @apply inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-medium;
+        @apply inline-flex items-center gap-1.5 rounded-sm border px-2.5 py-0.5 text-xs font-medium;
         background: var(--sm-dashboard-chip-bg);
         color: var(--sm-dashboard-chip-fg);
+        border-color: var(--theme-line);
+        font-family: var(--font-mono);
+        text-decoration: none;
+        transition: border-color 120ms ease, color 120ms ease;
     }
-    .monitors-chip--active {
+    .monitors-chip:hover { border-color: var(--theme-ink); color: var(--theme-text); }
+    .monitors-chip--active,
+    .monitors-chip--active:hover {
         background: var(--sm-dashboard-chip-active-bg);
         color: var(--sm-dashboard-chip-active-fg);
+        border-color: var(--theme-ink);
     }
-    .monitors-chip__count { @apply font-mono opacity-70; }
+    .monitors-chip__count {
+        @apply font-mono;
+        color: var(--theme-ink);
+    }
+    .monitors-chip--active .monitors-chip__count { color: inherit; }
 
     .monitors-bulk {
         @apply mt-3 flex flex-wrap items-center gap-3 rounded-sm border px-4 py-2 text-sm;
@@ -2242,16 +2350,18 @@
         place-items: center;
         width: 1.5rem;
         height: 1.5rem;
-        border-radius: 6px;
+        border-radius: 2px;
         color: var(--theme-text-muted);
+        font-family: var(--font-mono);
         font-size: 1rem;
         line-height: 1;
         cursor: pointer;
+        transition: background-color 120ms ease, color 120ms ease;
     }
     .monitors-menu__btn:hover,
     .monitors-menu[data-open="true"] .monitors-menu__btn {
         background: var(--theme-surface-sunk);
-        color: var(--theme-text);
+        color: var(--theme-accent);
     }
     .monitors-popover {
         position: fixed;
@@ -2259,9 +2369,9 @@
         min-width: 11rem;
         padding: 0.25rem;
         background: var(--theme-surface-elev);
-        border: 2px solid var(--theme-ink);
-        border-radius: 0.625rem;
-        box-shadow: var(--theme-shadow-btn);
+        border: 1px solid var(--theme-line);
+        border-radius: 2px;
+        font-family: var(--font-mono);
         display: flex;
         flex-direction: column;
     }
@@ -2271,24 +2381,25 @@
         color: var(--theme-text);
         display: block;
         padding: 0.4rem 0.6rem;
-        border-radius: 0.375rem;
+        border-radius: 2px;
         text-decoration: none;
         cursor: pointer;
         background: transparent;
         border: 0;
         font: inherit;
+        transition: background-color 120ms ease, color 120ms ease;
     }
     .monitors-popover__item:hover,
     .monitors-popover__item:focus-visible {
         background: var(--theme-surface-sunk);
-        color: var(--theme-text);
+        color: var(--theme-accent);
         outline: none;
     }
     .monitors-popover__item--danger { color: var(--theme-state-bad-fg); }
     .monitors-popover__item--danger:hover,
     .monitors-popover__item--danger:focus-visible {
         background: var(--theme-state-bad-bg);
-        color: var(--theme-state-bad-fg-onsoft);
+        color: var(--theme-state-bad-fg-strong);
     }
     .monitors-popover__sep {
         height: 1px;
