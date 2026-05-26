@@ -2,7 +2,7 @@ use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 use dashmap::DashMap;
-use metrics::{Counter, Gauge, counter, gauge};
+use metrics::{Counter, Gauge, counter, gauge, histogram};
 use tokio::task::JoinHandle;
 use tokio::time::{Instant, MissedTickBehavior, interval_at};
 use tokio_util::sync::CancellationToken;
@@ -159,7 +159,14 @@ impl Scheduler {
     }
 
     async fn tick_once(&self) -> Result<()> {
-        let diff = self.registry.refresh().await?;
+        let started = std::time::Instant::now();
+        let result = self.registry.refresh().await;
+        // Record on both Ok and Err so Grafana can see "we got slow" AND
+        // "we got slow then timed out" — both inputs to the alerting signal
+        // that drives the future incremental-sync work.
+        histogram!(names::SCHEDULER_REFRESH_DURATION_MS)
+            .record(started.elapsed().as_millis() as f64);
+        let diff = result?;
         for id in diff.removed {
             if let Some((_, handle)) = self.tasks.remove(&id) {
                 handle.cancel.cancel();

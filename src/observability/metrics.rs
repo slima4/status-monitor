@@ -146,6 +146,10 @@ fn register_descriptions() {
         "status_monitor_scheduler_consecutive_refresh_failures",
         "Consecutive registry refresh failures since the last success. Resets to 0 on recovery; primary alarm signal for a stuck scheduler"
     );
+    describe_histogram!(
+        "status_monitor_scheduler_refresh_duration_ms",
+        "Wall-clock duration of one registry refresh tick (Postgres query + decode + DashMap diff). p99 climbing past a few hundred ms means the full-scan refresh is starting to strain at scale — switch to incremental sync"
+    );
 }
 
 pub mod names {
@@ -181,4 +185,5 @@ pub mod names {
     pub const SCHEDULER_REFRESH_FAILED: &str = "status_monitor_scheduler_refresh_failed_total";
     pub const SCHEDULER_CONSECUTIVE_REFRESH_FAILURES: &str =
         "status_monitor_scheduler_consecutive_refresh_failures";
+    pub const SCHEDULER_REFRESH_DURATION_MS: &str = "status_monitor_scheduler_refresh_duration_ms";
 }
