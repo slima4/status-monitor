@@ -38,13 +38,13 @@
   </section>
 
   <section class="sticker-card">
-    <header class="flex items-center justify-between border-b-2 border-slate-100 px-5 py-3">
+    <header class="flex items-center justify-between border-b-2 border-[color:var(--theme-line)] px-5 py-3">
       <h2 class="panel-label">Recent results</h2>
-      <span class="text-xs text-slate-500">Latest {{ results.len() }}{% if results_has_more %}+{% endif %}</span>
+      <span class="text-xs text-muted">Latest {{ results.len() }}{% if results_has_more %}+{% endif %}</span>
     </header>
     <table class="min-w-full text-sm">
       <caption class="sr-only">Recent check results for {{ name }}</caption>
-      <thead class="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+      <thead class="bg-[color:var(--theme-surface-sunk)] text-left text-xs uppercase tracking-wide text-muted">
         <tr>
           <th scope="col" class="px-3 py-2">Timestamp</th>
           <th scope="col" class="px-3 py-2">Status</th>
@@ -69,14 +69,14 @@
       <span class="flex items-center gap-3">
         <span class="sticker-disclosure__icon">⚙</span>
         <span class="flex flex-col text-left">
-          <span class="text-sm font-semibold text-slate-700">Configuration</span>
-          <span class="text-xs text-slate-500">Raw JSON this monitor runs with</span>
+          <span class="text-sm font-semibold text-body">Configuration</span>
+          <span class="text-xs text-muted">Raw JSON this monitor runs with</span>
         </span>
       </span>
       <span class="sticker-disclosure__chevron">▾</span>
     </summary>
     <div class="sticker-disclosure__body">
-      <pre class="sticker-card overflow-auto p-4 text-xs text-slate-700">{{ config_json }}</pre>
+      <pre class="sticker-card overflow-auto p-4 text-xs text-body">{{ config_json }}</pre>
     </div>
   </details>
 </section>

@@ -4,13 +4,13 @@
 <section class="space-y-8">
   <header class="space-y-1">
     <h1 class="page-title">Account</h1>
-    <p class="text-sm text-slate-500">
-      Signed in as <span class="font-medium text-slate-700">{{ email }}</span>
+    <p class="text-sm text-muted">
+      Signed in as <span class="font-medium text-body">{{ email }}</span>
       (via {{ provider }})
     </p>
-    <dl class="flex flex-wrap gap-x-8 gap-y-1 pt-1 text-sm text-slate-500">
-      <div><dt class="inline">Joined:</dt> <dd class="inline text-slate-700">{{ joined }}</dd></div>
-      <div><dt class="inline">Last sign-in:</dt> <dd class="inline text-slate-700">{{ last_seen }}</dd></div>
+    <dl class="flex flex-wrap gap-x-8 gap-y-1 pt-1 text-sm text-muted">
+      <div><dt class="inline">Joined:</dt> <dd class="inline text-body">{{ joined }}</dd></div>
+      <div><dt class="inline">Last sign-in:</dt> <dd class="inline text-body">{{ last_seen }}</dd></div>
     </dl>
   </header>
 
@@ -19,10 +19,10 @@
 
     <div class="sticker-card space-y-2 p-5">
       <a href="/api/v1/me/data-export" download rel="nofollow"
-         class="btn-ghost inline-block px-3 py-1.5 text-sm font-medium text-slate-700">
+         class="btn-ghost inline-block px-3 py-1.5 text-sm font-medium text-body">
         Export my data
       </a>
-      <p class="text-sm text-slate-500">
+      <p class="text-sm text-muted">
         Download everything associated with your account as a JSON file:
         profile, sign-in identities, owned organisations, targets (credentials
         redacted), incidents, memberships and recent activity.
@@ -35,7 +35,7 @@
               class="btn-ghost btn-ghost--danger inline-block px-3 py-1.5 text-sm font-medium">
         Delete my account
       </button>
-      <p class="text-sm text-slate-500">
+      <p class="text-sm text-muted">
         Permanently delete your account and every organisation you solely own.
         Recoverable for a grace period via a link emailed to you; permanent
         after that.
@@ -49,11 +49,10 @@
   </section>
 </section>
 
-<dialog id="delete-modal"
-        class="w-full max-w-lg rounded-lg p-0 backdrop:bg-slate-900/40">
+<dialog id="delete-modal" class="w-full max-w-lg p-0">
   <div class="space-y-4 p-6">
     <h2 class="text-lg font-semibold text-rose-700">Delete your account?</h2>
-    <p class="text-sm text-slate-600">
+    <p class="text-sm text-muted" style="line-height: 1.55;">
       This deactivates your account immediately and schedules a permanent
       purge after the recovery grace period. Sessions are signed out, API
       tokens revoked, pending invitations withdrawn, and organisations you
@@ -71,8 +70,10 @@
     </div>
 
     <form method="dialog" class="contents">
-      <label class="block text-sm font-medium text-slate-700" for="delete-confirm-input">
-        Type <code class="rounded bg-slate-100 px-1">DELETE</code> to confirm
+      <label class="block text-sm font-medium text-body" for="delete-confirm-input">
+        Type <code class="rounded px-1 font-mono"
+                   style="background: var(--theme-surface-sunk);">DELETE</code>
+        to confirm
       </label>
       <input id="delete-confirm-input" type="text" autocomplete="off"
              oninput="document.getElementById('confirm-delete').disabled = this.value !== 'DELETE'"
@@ -82,7 +83,7 @@
 
       <div class="flex items-center justify-end gap-2 pt-2">
         <button type="submit" value="cancel"
-                class="btn-ghost px-3 py-1.5 text-sm font-medium text-slate-700">
+                class="btn-ghost px-3 py-1.5 text-sm font-medium">
           Cancel
         </button>
         <button type="button" id="confirm-delete" disabled
@@ -106,11 +107,12 @@
       blockingList.textContent = '';
       orgs.forEach((org) => {
         const li = document.createElement('li');
-        li.className = 'flex items-center justify-between gap-3 rounded bg-white px-3 py-2';
+        li.className = 'flex items-center justify-between gap-3 rounded px-3 py-2';
+        li.style.background = 'var(--theme-surface-elev)';
         li.dataset.orgId = org.id;
 
         const name = document.createElement('span');
-        name.className = 'font-mono text-xs text-slate-700';
+        name.className = 'font-mono text-xs text-body';
         name.textContent = org.slug || org.id;
         li.appendChild(name);
 

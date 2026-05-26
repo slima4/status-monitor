@@ -5,14 +5,14 @@
    Active tab borrows the strip's bottom border with `border-b-slate-900`
    so it visually "lifts" out of the line. Inactive tabs keep the strip
    border via the parent. #}
-<nav class="-mb-px flex items-center gap-1 border-b border-slate-200 text-sm" aria-label="Monitor view">
+<nav class="-mb-px flex items-center gap-1 border-b border-[color:var(--theme-line)] text-sm" aria-label="Monitor view">
   <a href="/targets/{{ id }}"
-     class="inline-flex items-center gap-2 border-b-2 px-3 py-2{% if subtab == "monitor" %} border-slate-900 font-medium text-slate-900{% else %} border-transparent text-slate-500 hover:text-slate-700{% endif %}"
+     class="inline-flex items-center gap-2 border-b-2 px-3 py-2{% if subtab == "monitor" %} border-[color:var(--theme-ink)] font-medium text-body{% else %} border-transparent text-muted hover:text-body{% endif %}"
      {% if subtab == "monitor" %}aria-current="page"{% endif %}>
     Monitor
   </a>
   <a href="/targets/{{ id }}/incidents"
-     class="inline-flex items-center gap-2 border-b-2 px-3 py-2{% if subtab == "incidents" %} border-slate-900 font-medium text-slate-900{% else %} border-transparent text-slate-500 hover:text-slate-700{% endif %}"
+     class="inline-flex items-center gap-2 border-b-2 px-3 py-2{% if subtab == "incidents" %} border-[color:var(--theme-ink)] font-medium text-body{% else %} border-transparent text-muted hover:text-body{% endif %}"
      {% if subtab == "incidents" %}aria-current="page"{% endif %}>
     Incidents
     {% if ongoing_count > 0 %}

@@ -25,15 +25,17 @@
         if (dialog) return;
         dialog = document.createElement("dialog");
         dialog.id = "sm-confirm-modal";
-        dialog.className = "w-full max-w-md rounded-lg p-0 backdrop:bg-slate-900/40";
+        // Container styling (surface, border, shadow, backdrop) lives in
+        // input.css under #sm-confirm-modal so it tracks --theme-* tokens.
+        dialog.className = "w-full max-w-md p-0";
         dialog.setAttribute("aria-labelledby", "sm-confirm-title");
         dialog.innerHTML =
             '<div class="space-y-4 p-6">' +
                 '<h2 id="sm-confirm-title" class="text-lg font-semibold"></h2>' +
-                '<p class="text-sm text-slate-600"></p>' +
+                '<p class="text-sm text-muted"></p>' +
                 '<div class="flex items-center justify-end gap-2 pt-2">' +
                     '<button type="button" data-sm-confirm-cancel ' +
-                            'class="btn-ghost px-3 py-1.5 text-sm font-medium text-slate-700"></button>' +
+                            'class="btn-ghost px-3 py-1.5 text-sm font-medium"></button>' +
                     '<button type="button" data-sm-confirm-ok ' +
                             'class="px-3 py-1.5 text-sm font-medium"></button>' +
                 '</div>' +
@@ -72,7 +74,7 @@
 
         const isDanger = !!opts.danger;
         titleEl.className = "text-lg font-semibold " +
-            (isDanger ? "text-rose-700" : "text-slate-800");
+            (isDanger ? "text-rose-700" : "text-body");
         confirmBtn.className = "sticker-btn px-3 py-1.5 text-sm font-medium " +
             (isDanger ? "sticker-btn--danger" : "sticker-btn--primary");
 

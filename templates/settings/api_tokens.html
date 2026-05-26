@@ -4,7 +4,7 @@
 <section class="space-y-6">
   <header class="space-y-1">
     <h1 class="page-title">API tokens</h1>
-    <p class="text-sm text-slate-500">
+    <p class="text-sm text-muted">
       Bearer tokens for scripting against <code>/api/v1/*</code>. The full token
       is shown <strong>once</strong> when you create it — store it now.
     </p>
@@ -34,7 +34,7 @@
        hx-trigger="load, every 60s, tokens:refresh from:body"
        hx-swap="innerHTML"
        class="sticker-card overflow-hidden">
-    <p class="px-4 py-3 text-sm text-slate-500">Loading…</p>
+    <p class="px-4 py-3 text-sm text-muted">Loading…</p>
   </div>
 
   <script>
@@ -47,7 +47,7 @@
         document.getElementById('token-result').innerHTML = `
           <div class="alert-card alert-card--ok">
             <p class="font-medium">Token created — copy it now, you won't see it again.</p>
-            <pre class="mt-2 overflow-x-auto rounded bg-white px-3 py-2 font-mono text-xs">${body.token}</pre>
+            <pre class="mt-2 overflow-x-auto rounded bg-[color:var(--theme-surface-elev)] px-3 py-2 font-mono text-xs">${body.token}</pre>
           </div>`;
         document.getElementById('token-name').value = '';
         htmx.trigger('body', 'tokens:refresh');

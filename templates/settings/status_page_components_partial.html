@@ -3,11 +3,11 @@
    overlay, and the drag handle reorders. status_components.js autosaves
    each change via PATCH /api/v1/targets/{id} and persists the drag order. #}
 {% if rows.is_empty() %}
-<p class="px-4 py-6 text-center text-sm text-slate-500">
+<p class="px-4 py-6 text-center text-sm text-muted">
   No monitors yet. <a href="/targets/new" class="underline">Create one</a> first.
 </p>
 {% else %}
-<div class="hidden bg-slate-50 px-4 py-2 text-xs uppercase tracking-wide text-slate-500 sm:grid sm:grid-cols-[1.5rem_1fr_4rem_1fr_1fr] sm:gap-3">
+<div class="hidden bg-[color:var(--theme-surface-sunk)] px-4 py-2 text-xs uppercase tracking-wide text-muted sm:grid sm:grid-cols-[1.5rem_1fr_4rem_1fr_1fr] sm:gap-3">
   <span aria-hidden="true"></span>
   <span title="The monitor's real (operator-only) name.">Monitor</span>
   <span title="Show this monitor on the public status page.">Public</span>
@@ -20,13 +20,13 @@
        class="grid grid-cols-1 gap-2 px-4 py-3 sm:grid-cols-[1.5rem_1fr_4rem_1fr_1fr] sm:items-center sm:gap-3">
     <button type="button" data-drag-handle aria-label="Reorder {{ row.name }}"
             title="Drag to reorder, or focus and press ↑/↓"
-            class="cursor-move select-none text-slate-400 hover:text-slate-600">⠿</button>
-    <span class="truncate font-medium text-slate-700" title="Real monitor name: {{ row.name }}">{{ row.name }}</span>
+            class="cursor-move select-none text-quiet hover:text-muted">⠿</button>
+    <span class="truncate font-medium text-body" title="Real monitor name: {{ row.name }}">{{ row.name }}</span>
     <label class="inline-flex items-center gap-2">
       <input type="checkbox" data-field="public_status"{% if row.public_status %} checked{% endif %}
              aria-label="Show {{ row.name }} on the public status page"
              title="Show this monitor on the public status page">
-      <span class="text-xs text-slate-500 sm:hidden">Show publicly</span>
+      <span class="text-xs text-muted sm:hidden">Show publicly</span>
     </label>
     <input type="text" data-field="public_name" value="{{ row.public_name }}" maxlength="100"
            placeholder="{{ row.name }}" aria-label="Public name for {{ row.name }}"
@@ -39,5 +39,5 @@
   </div>
   {% endfor %}
 </div>
-<p id="components-status" class="px-4 py-2 text-xs text-slate-400" aria-live="polite"></p>
+<p id="components-status" class="px-4 py-2 text-xs text-quiet" aria-live="polite"></p>
 {% endif %}

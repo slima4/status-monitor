@@ -3,29 +3,57 @@
 @source "../../templates/**/*.html";
 @source "../../src/**/*.rs";
 
-/* Self-hosted variable woff2, latin subset. One file per family — variable
-   axes expose via font-variation-settings on consumers (Fraunces: opsz,
-   wght, SOFT, WONK; Geist + JBM: wght). Served from /static/fonts/ with
-   the asset pipeline's 5-minute revalidating cache (immutable would need
-   template-side hashing, which @font-face's url() can't take). */
+/* Self-hosted IBM Plex, latin subset. Plex is not a variable font, so each
+   weight is its own woff2 — 7 files total (~140 KB). Served from
+   /static/fonts/ with the asset pipeline's 5-minute revalidating cache
+   (immutable would need template-side hashing, which @font-face's url()
+   can't take). */
 @font-face {
-    font-family: "Fraunces";
-    src: url("/static/fonts/fraunces-variable.woff2") format("woff2");
-    font-weight: 100 900;
+    font-family: "IBM Plex Sans";
+    src: url("/static/fonts/plex-sans-400.woff2") format("woff2");
+    font-weight: 400;
     font-style: normal;
     font-display: swap;
 }
 @font-face {
-    font-family: "Geist";
-    src: url("/static/fonts/geist-variable.woff2") format("woff2");
-    font-weight: 100 900;
+    font-family: "IBM Plex Sans";
+    src: url("/static/fonts/plex-sans-500.woff2") format("woff2");
+    font-weight: 500;
     font-style: normal;
     font-display: swap;
 }
 @font-face {
-    font-family: "JetBrains Mono";
-    src: url("/static/fonts/jetbrains-mono-variable.woff2") format("woff2");
-    font-weight: 100 800;
+    font-family: "IBM Plex Sans";
+    src: url("/static/fonts/plex-sans-600.woff2") format("woff2");
+    font-weight: 600;
+    font-style: normal;
+    font-display: swap;
+}
+@font-face {
+    font-family: "IBM Plex Serif";
+    src: url("/static/fonts/plex-serif-500.woff2") format("woff2");
+    font-weight: 500;
+    font-style: normal;
+    font-display: swap;
+}
+@font-face {
+    font-family: "IBM Plex Serif";
+    src: url("/static/fonts/plex-serif-700.woff2") format("woff2");
+    font-weight: 700;
+    font-style: normal;
+    font-display: swap;
+}
+@font-face {
+    font-family: "IBM Plex Mono";
+    src: url("/static/fonts/plex-mono-400.woff2") format("woff2");
+    font-weight: 400;
+    font-style: normal;
+    font-display: swap;
+}
+@font-face {
+    font-family: "IBM Plex Mono";
+    src: url("/static/fonts/plex-mono-500.woff2") format("woff2");
+    font-weight: 500;
     font-style: normal;
     font-display: swap;
 }
@@ -45,16 +73,18 @@
        or template edits. --control-offset doubles as the checked
        "press-in" travel so it stays exactly the shadow distance. */
     --control-size:   1.15rem;
-    --control-on:     var(--color-emerald-600); /* exact same source as .sticker-btn--primary's bg-emerald-600 */
+    --control-on:     var(--theme-action-primary); /* checked fill — tracks the primary CTA */
     --control-offset: 2px;
 
-    /* Display = warm humanist serif (Fraunces); body = geometric sans (Geist).
-       Distinctive pair on purpose — the org-app shell speaks editorial, not
-       SaaS-generic. Only loaded when base.html opts in via .app-shell, so
-       marketing/public stay on system sans. */
-    --font-display: "Fraunces", ui-serif, Georgia, "Times New Roman", serif;
-    --font-body:    "Geist", ui-sans-serif, system-ui, -apple-system, sans-serif;
-    --font-mono:    "JetBrains Mono", ui-monospace, monospace;
+    /* IBM Plex family — unified type system. Display = Plex Serif (warm,
+       geometric serif with subtle slab terminals — keeps editorial feel
+       but reads more technical than Fraunces). Body = Plex Sans (quirky
+       l/a/e, distinctive at small sizes). Mono = Plex Mono. Only loaded
+       when base.html opts in via .app-shell, so marketing/public stay on
+       system sans. */
+    --font-display: "IBM Plex Serif", ui-serif, Georgia, "Times New Roman", serif;
+    --font-body:    "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
+    --font-mono:    "IBM Plex Mono", ui-monospace, monospace;
 
     /* ── Theme layer ───────────────────────────────────────────────────
        Semantic surface/text/accent tokens for the org-app shell. The
@@ -64,28 +94,40 @@
        State colours (--sm-state-*, alerts) intentionally stay tied to
        the Tailwind palette — green=ok / red=bad is universal, not
        theme-bound. */
-    --theme-surface:       oklch(0.995 0.003 85);       /* paper white, faint warmth */
+    --theme-surface:       oklch(0.995 0.002 250);      /* near-white, faint cool */
     --theme-surface-elev:  oklch(1 0 0);                /* card white */
-    --theme-surface-sunk:  oklch(0.978 0.005 85);       /* header / table head wash */
-    --theme-ink:           var(--color-ink);            /* sticker stroke */
+    --theme-surface-sunk:  oklch(0.975 0.004 250);      /* header / table head wash */
+    --theme-ink:           oklch(0.40 0.025 256);       /* sticker stroke / border — dark grey */
     --theme-text:          oklch(0.27 0.04 256);
     --theme-text-muted:    oklch(0.50 0.025 256);
     --theme-text-quiet:    oklch(0.70 0.020 256);
-    --theme-text-faint:    oklch(0.85 0.006 85);
-    --theme-line:          oklch(0.92 0.006 85);
-    --theme-accent:        var(--color-emerald-600);
-    --theme-accent-soft:   var(--color-emerald-50);
+    --theme-text-faint:    oklch(0.85 0.005 250);
+    --theme-line:          oklch(0.92 0.005 250);
+    /* Action colours — softer than Tailwind's emerald-600 / sky-700 default
+       so the buttons read sophisticated, not neon. Lightness held so white
+       text keeps WCAG-AA contrast. */
+    --theme-action-primary:        oklch(0.60 0.11 165);
+    --theme-action-primary-hover:  oklch(0.52 0.11 165);
+    --theme-action-accent:         oklch(0.58 0.10 230);
+    --theme-action-accent-hover:   oklch(0.50 0.10 230);
+    --theme-action-danger:         oklch(0.58 0.13 25);
+    --theme-action-danger-hover:   oklch(0.50 0.13 25);
 
-    /* Sticker-shadow magnitudes. Pulled out of inline `box-shadow: 6px 6px …`
-       so a theme can flatten the dialect (set to `none`) or scale it down
-       without touching component rules. Defaults tuned quieter than the
-       original 6/4/2 ladder — settings pages were a wall of raised
-       controls. .field + .monitors-toolbar__select intentionally lost
-       their shadow entirely (most-repeated controls at scale). */
-    --theme-shadow-card:         4px 4px 0 0 var(--theme-ink);
-    --theme-shadow-btn:          3px 3px 0 0 var(--theme-ink);
-    --theme-shadow-btn-hover:    4px 5px 0 0 var(--theme-ink);
-    --theme-shadow-btn-disabled: 2px 2px 0 0 var(--theme-ink);
+    /* Mascot / EKG / pulse / focus ring track the primary action so brand
+       cues stay in lockstep with the CTA colour. */
+    --theme-accent:        var(--theme-action-primary);
+    --theme-accent-soft:   oklch(0.95 0.04 165);
+
+    /* Sticker-shadow magnitudes + colour. Pulled out of inline values so a
+       theme can flatten the dialect (set magnitudes to `none`) or recolour
+       the shadow independently of the border. Strokes stay on --theme-ink
+       (dark, for definition); shadows ride a softer --theme-shadow-colour
+       so the offset reads as depth, not a hard black outline. */
+    --theme-shadow-color:        oklch(0.50 0.02 256);
+    --theme-shadow-card:         3px 3px 0 0 var(--theme-shadow-color);
+    --theme-shadow-btn:          2px 2px 0 0 var(--theme-shadow-color);
+    --theme-shadow-btn-hover:    3px 4px 0 0 var(--theme-shadow-color);
+    --theme-shadow-btn-disabled: 1px 1px 0 0 var(--theme-shadow-color);
 
     /* Public-status state palette. One source for the 6 day-states; the
        day strip, legend dots, and popover badge all derive from these.
@@ -193,7 +235,7 @@
     --sm-monitors-bulk-fg:         var(--theme-surface-elev);
     --sm-monitors-bulk-accent:     var(--color-amber-300);
     --sm-monitors-bulk-btn-bg:     color-mix(in oklch, var(--color-white) 14%, transparent);
-    --sm-monitors-bulk-danger-bg:  var(--color-rose-600);
+    --sm-monitors-bulk-danger-bg:  var(--theme-action-danger);
 
     --sm-monitors-tag-bg:          var(--theme-surface-sunk);
     --sm-monitors-tag-fg:          var(--theme-text-muted);
@@ -277,7 +319,6 @@
        so a theme swap edits the --theme-* tokens above plus this rule. */
     .app-shell {
         font-family: var(--font-body);
-        font-feature-settings: "ss01", "cv11";  /* Geist: alternate a, single-storey g */
         background: var(--theme-surface);
         color: var(--theme-text);
         position: relative;
@@ -308,8 +349,7 @@
         pointer-events: none;
         z-index: 0;
         background:
-            radial-gradient(60rem 24rem at 12% -8%, oklch(0.94 0.06 75 / 0.20), transparent 72%),
-            radial-gradient(48rem 22rem at 92% -2%, oklch(0.93 0.05 235 / 0.18), transparent 72%);
+            radial-gradient(56rem 22rem at 88% -4%, oklch(0.93 0.04 235 / 0.20), transparent 72%);
     }
     .app-shell > * { position: relative; z-index: 1; }
 
@@ -356,6 +396,25 @@
         margin: auto;
     }
 
+    /* App modals (the JS-mounted confirm + the per-page account-delete).
+       Dialog elements render in the UA top layer outside .app-shell, so
+       tokens have to resolve from :root — they do, because @theme is
+       emitted at :root scope. Sticker dialect: 2px ink border + the card
+       shadow. Backdrop dims via colour-mix on ink so dim level tracks
+       theme too (terminal's dim feels green-tinted, paper's neutral). */
+    dialog#sm-confirm-modal,
+    dialog#delete-modal {
+        background: var(--theme-surface-elev);
+        color: var(--theme-text);
+        border: 2px solid var(--theme-ink);
+        border-radius: 0.75rem;
+        box-shadow: var(--theme-shadow-card);
+    }
+    dialog#sm-confirm-modal::backdrop,
+    dialog#delete-modal::backdrop {
+        background: color-mix(in oklch, var(--theme-ink) 40%, transparent);
+    }
+
     /* Example alt theme — flip the org app to a phosphor-on-black CRT look
        by adding `theme-terminal` to <body>. Every chrome surface, text
        colour, sticker stroke, and the body font track this block; state
@@ -375,8 +434,8 @@
         --theme-accent:        oklch(0.85 0.16 90);
         --theme-accent-soft:   oklch(0.20 0.05 90);
 
-        --font-display: "JetBrains Mono", ui-monospace, monospace;
-        --font-body:    "JetBrains Mono", ui-monospace, monospace;
+        --font-display: "IBM Plex Mono", ui-monospace, monospace;
+        --font-body:    "IBM Plex Mono", ui-monospace, monospace;
 
         /* CRT aesthetic reads flat — terminals don't have raised controls. */
         --theme-shadow-card:         none;
@@ -407,7 +466,7 @@
         cursor: pointer;
         background-color: var(--theme-surface-elev);
         border: 2px solid var(--theme-ink);
-        box-shadow: var(--control-offset) var(--control-offset) 0 0 var(--theme-ink);
+        box-shadow: var(--control-offset) var(--control-offset) 0 0 var(--theme-shadow-color);
         transition: transform 120ms ease, box-shadow 120ms ease,
                     background-color 120ms ease;
     }
@@ -419,7 +478,7 @@
     input[type="checkbox"]:not(:checked):hover:not(:disabled),
     input[type="radio"]:not(:checked):hover:not(:disabled) {
         box-shadow: calc(var(--control-offset) + 1px)
-                    calc(var(--control-offset) + 1px) 0 0 var(--theme-ink);
+                    calc(var(--control-offset) + 1px) 0 0 var(--theme-shadow-color);
     }
 
     /* Checked = pressed sticker: emerald fill (same emerald-600 token as
@@ -488,13 +547,13 @@
        (mirrors .btn-ghost--danger). Padding/size stays at the call site. */
     /* Hover handled via `:not(:disabled):hover` so disabled buttons keep
        their base fill (Tailwind's `hover:` variant would still fire). */
-    .sticker-btn--primary { @apply bg-emerald-600 text-white; }
-    .sticker-btn--primary:not(:disabled):hover { @apply bg-emerald-700; }
-    .sticker-btn--danger  { @apply bg-rose-600    text-white; }
-    .sticker-btn--danger:not(:disabled):hover { @apply bg-rose-700; }
+    .sticker-btn--primary { background: var(--theme-action-primary); color: white; }
+    .sticker-btn--primary:not(:disabled):hover { background: var(--theme-action-primary-hover); }
+    .sticker-btn--danger  { background: var(--theme-action-danger); color: white; }
+    .sticker-btn--danger:not(:disabled):hover { background: var(--theme-action-danger-hover); }
     /* Accent fill for try-before-save controls. */
-    .sticker-btn--accent  { @apply bg-sky-700     text-white; }
-    .sticker-btn--accent:not(:disabled):hover { @apply bg-sky-800; }
+    .sticker-btn--accent  { background: var(--theme-action-accent); color: white; }
+    .sticker-btn--accent:not(:disabled):hover { background: var(--theme-action-accent-hover); }
 
     /* Flat secondary control (Edit/Cancel/toggle…) — the quiet sibling of
        .sticker-btn: same chunky radius + 2px edge, no ink, no raised
@@ -596,9 +655,7 @@
        so the shell follows the same restyle edit as everything else. */
     .nav-brand {
         font-family: var(--font-display);
-        font-weight: 600;
-        font-optical-sizing: auto;
-        font-variation-settings: "SOFT" 100, "WONK" 1;
+        font-weight: 500;
         letter-spacing: -0.018em;
         font-size: 1.05rem;
     }
@@ -645,7 +702,7 @@
         font-size: clamp(2.5rem, 4vw + 1rem, 3.75rem);
         line-height: 1.02;
         letter-spacing: -0.035em;
-        font-variation-settings: "opsz" 120, "SOFT" 60, "WONK" 1;
+        font-weight: 700;
     }
 
     /* Empty-state hero (dashboard + monitors list when no monitors exist).
@@ -692,9 +749,7 @@
     }
     .empty-hero__title {
         font-family: var(--font-display);
-        font-weight: 600;
-        font-optical-sizing: auto;
-        font-variation-settings: "opsz" 96, "SOFT" 40, "WONK" 0;
+        font-weight: 700;
         font-size: 2.25rem;
         letter-spacing: -0.025em;
         line-height: 1.05;
@@ -724,18 +779,15 @@
         padding: 1px 4px;
     }
 
-    /* The single page <h1> scale, app-wide. (login adds sm:text-4xl on
-       top for its hero.) One definition so every surface's title matches.
-       Fraunces at 600 weight reads close to Inter 700 thanks to its denser
-       stems; the SOFT axis softens the terminals to match the sticker
-       dialect's flat-cartoon edges. */
+    /* The single page <h1> scale, app-wide. (login adds .page-title--hero
+       on top for its hero.) One definition so every surface's title
+       matches. Plex Serif 500 is the body-weight variant — reads
+       editorial without going slab-heavy. */
     .page-title {
         @apply text-4xl tracking-tight;
         color: var(--theme-text);
         font-family: var(--font-display);
-        font-weight: 600;
-        font-optical-sizing: auto;
-        font-variation-settings: "SOFT" 50, "WONK" 0;
+        font-weight: 500;
         letter-spacing: -0.028em;
         line-height: 1.05;
     }
@@ -747,19 +799,15 @@
         color: var(--theme-text-muted);
     }
 
-    /* Big single-number KPI value (Monitors, Uptime, …). Fraunces at high
-       opsz with tabular + lining figures: editorial weight without the
-       column-alignment problems serif numbers usually bring. tnum keeps
-       digits same-width; lnum locks them on the baseline (Fraunces
-       defaults to old-style figures for body text, which would drop
-       3/4/5/7/9 below baseline and look messy in a big metric). */
+    /* Big single-number KPI value (Monitors, Uptime, …). Plex Serif 500
+       with tabular + lining figures — editorial weight, columns stay
+       aligned. tnum locks digit width, lnum forces baseline numerals
+       (Plex defaults to lining anyway, so lnum is a belt-and-braces). */
     .kpi-value {
         @apply mt-2 text-4xl tabular-nums;
         color: var(--theme-text);
         font-family: var(--font-display);
-        font-weight: 600;
-        font-optical-sizing: auto;
-        font-variation-settings: "opsz" 96, "SOFT" 30, "WONK" 0;
+        font-weight: 500;
         font-feature-settings: "tnum" 1, "lnum" 1;
         letter-spacing: -0.02em;
         line-height: 1.05;
@@ -1048,7 +1096,7 @@
     .check-type-card:has(input:checked) {
         background: var(--theme-surface-sunk);
         border-color: var(--theme-ink);
-        box-shadow: 2px 2px 0 0 var(--theme-ink);
+        box-shadow: 2px 2px 0 0 var(--theme-shadow-color);
     }
     .check-type-card:focus-within { @apply outline-none ring-2 ring-offset-2 ring-slate-400; }
     .check-type-card__name {
@@ -1363,9 +1411,7 @@
         @apply text-3xl tabular-nums;
         color: var(--sm-dashboard-value-fg);
         font-family: var(--font-display);
-        font-weight: 600;
-        font-optical-sizing: auto;
-        font-variation-settings: "opsz" 80, "SOFT" 30, "WONK" 0;
+        font-weight: 500;
         font-feature-settings: "tnum" 1, "lnum" 1;
         letter-spacing: -0.022em;
         line-height: 1.05;
@@ -1469,9 +1515,7 @@
         @apply text-2xl tabular-nums;
         color: var(--sm-dashboard-value-fg);
         font-family: var(--font-display);
-        font-weight: 600;
-        font-optical-sizing: auto;
-        font-variation-settings: "opsz" 60, "SOFT" 30, "WONK" 0;
+        font-weight: 500;
         font-feature-settings: "tnum" 1, "lnum" 1;
         letter-spacing: -0.022em;
         line-height: 1;
@@ -1618,12 +1662,12 @@
         outline-offset: 2px;
     }
     .monitors-bulk__btn--danger {
-        background: var(--sm-monitors-bulk-danger-bg);
-        border-color: var(--color-rose-700);
+        background: var(--theme-action-danger);
+        border-color: var(--theme-action-danger-hover);
     }
     .monitors-bulk__btn--danger:hover {
-        background: var(--color-rose-700);
-        border-color: var(--color-rose-800);
+        background: var(--theme-action-danger-hover);
+        border-color: var(--theme-action-danger-hover);
     }
     .monitors-bulk__clear {
         @apply text-xs;

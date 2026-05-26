@@ -3,11 +3,11 @@
 {% block content %}
 <section class="space-y-6">
   <header class="space-y-1">
-    <a href="/settings/notifications" class="inline-block text-sm text-slate-500 hover:text-slate-700">← Notification channels</a>
+    <a href="/settings/notifications" class="inline-block text-sm text-muted hover:text-body">← Notification channels</a>
     <h1 class="page-title">
       {% if form.mode == "create" %}New notification channel{% else %}Edit {{ form.name }}{% endif %}
     </h1>
-    <p class="text-sm text-slate-500">
+    <p class="text-sm text-muted">
       Submits JSON to <code class="font-mono">{{ form.submit_method }} {{ form.action }}</code>. Validation runs on the API.
     </p>
   </header>
@@ -25,12 +25,12 @@
     <fieldset class="sticker-card space-y-3 p-5">
       <legend class="px-1 text-sm font-medium">Basic</legend>
       <label class="block">
-        <span class="text-xs text-slate-500">Name</span>
+        <span class="text-xs text-muted">Name</span>
         <input name="name" type="text" required maxlength="100" value="{{ form.name }}"
                class="mt-1 w-full field">
       </label>
       <label class="block">
-        <span class="text-xs text-slate-500">Type</span>
+        <span class="text-xs text-muted">Type</span>
         <select name="kind" data-kind class="mt-1 w-full field">
           <option value="slack"{% if form.kind == "slack" %} selected{% endif %}>Slack</option>
           <option value="webhook"{% if form.kind == "webhook" %} selected{% endif %}>Webhook</option>
@@ -42,7 +42,7 @@
           <input name="enabled" type="checkbox"{% if form.enabled %} checked{% endif %}>
           <span class="text-sm">Enabled</span>
         </label>
-        <p class="mt-1 text-xs text-slate-500">When off, the channel is saved but bound monitors don't notify through it.</p>
+        <p class="mt-1 text-xs text-muted">When off, the channel is saved but bound monitors don't notify through it.</p>
       </div>
     </fieldset>
 
@@ -54,7 +54,7 @@
         <input type="checkbox" data-replace-config>
         <span class="text-sm">Replace transport config</span>
       </label>
-      <p class="text-xs text-slate-500">
+      <p class="text-xs text-muted">
         Secrets are never shown. Leave unchecked to edit only the name/type/status
         and keep the stored secret. Check it to re-enter the full config.
       </p>
@@ -62,7 +62,7 @@
 
       <div data-variant="slack"{% if form.kind != "slack" %} class="hidden"{% endif %}>
         <label class="block">
-          <span class="text-xs text-slate-500">Slack incoming webhook URL</span>
+          <span class="text-xs text-muted">Slack incoming webhook URL</span>
           <input name="slack_webhook_url" type="url" value="{{ form.config.slack_webhook_url }}"
                  placeholder="https://hooks.slack.com/services/T000/B000/XXXX"
                  class="mt-1 w-full field font-mono">
@@ -71,13 +71,13 @@
 
       <div data-variant="webhook" class="space-y-3{% if form.kind != "webhook" %} hidden{% endif %}">
         <label class="block">
-          <span class="text-xs text-slate-500">Webhook URL</span>
+          <span class="text-xs text-muted">Webhook URL</span>
           <input name="webhook_url" type="url" value="{{ form.config.webhook_url }}"
                  placeholder="https://example.com/hooks/alerts"
                  class="mt-1 w-full field font-mono">
         </label>
         <label class="block">
-          <span class="text-xs text-slate-500">Headers (JSON object)</span>
+          <span class="text-xs text-muted">Headers (JSON object)</span>
           <textarea name="webhook_headers" rows="3"
                     class="mt-1 w-full field font-mono">{{ form.config.webhook_headers_json }}</textarea>
         </label>
@@ -85,13 +85,13 @@
 
       <div data-variant="telegram" class="space-y-3{% if form.kind != "telegram" %} hidden{% endif %}">
         <label class="block">
-          <span class="text-xs text-slate-500">Bot token</span>
+          <span class="text-xs text-muted">Bot token</span>
           <input name="telegram_bot_token" type="text" value="{{ form.config.telegram_bot_token }}"
                  placeholder="123456:ABC-DEF…"
                  class="mt-1 w-full field font-mono">
         </label>
         <label class="block">
-          <span class="text-xs text-slate-500">Chat ID</span>
+          <span class="text-xs text-muted">Chat ID</span>
           <input name="telegram_chat_id" type="text" value="{{ form.config.telegram_chat_id }}"
                  placeholder="-1001234567890"
                  class="mt-1 w-full field font-mono">

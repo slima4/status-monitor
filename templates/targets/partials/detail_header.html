@@ -3,7 +3,7 @@
    kind, address, interval_s, enabled, tags, last_status, last_at_iso.
    Kept in sync because both views populate the same shape from
    `target_store.get` + the most-recent check row. #}
-<a href="/targets" class="inline-block text-sm text-slate-500 hover:text-slate-700">← Monitors</a>
+<a href="/targets" class="inline-block text-sm text-muted hover:text-body">← Monitors</a>
 <div class="flex flex-wrap items-center gap-3">
   <h1 class="page-title">{{ name }}</h1>
   {% if last_status == "up" %}
@@ -51,11 +51,11 @@
 <div data-detail-test-result class="hidden"></div>
 <div data-detail-toggle-error class="hidden rounded border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700" aria-live="polite"></div>
 <span id="detail-test-hint" class="sr-only">Runs the saved check immediately and persists the result.</span>
-<p class="text-sm text-slate-500">
+<p class="text-sm text-muted">
   <span class="font-mono uppercase">{{ kind }}</span>
   {% if kind == "HTTP" %}
     <a href="{{ address }}" target="_blank" rel="noopener noreferrer"
-       class="font-mono text-slate-700 underline decoration-dotted underline-offset-2 hover:text-slate-900">{{ address }}</a>
+       class="font-mono text-body underline decoration-dotted underline-offset-2 hover:text-body">{{ address }}</a>
   {% else %}
     <span class="font-mono">{{ address }}</span>
   {% endif %}
@@ -67,6 +67,6 @@
 <div>
   {% for tag in tags %}
     <a href="/targets?tag={{ tag|urlencode }}"
-       class="status-badge status-badge--tag mr-1 hover:bg-slate-200">{{ tag }}</a>
+       class="status-badge status-badge--tag mr-1 hover:bg-[color:var(--theme-surface-sunk)]">{{ tag }}</a>
   {% endfor %}
 </div>

@@ -1,5 +1,5 @@
 <table class="w-full text-left text-sm">
-  <thead class="bg-slate-50 text-xs uppercase text-slate-500">
+  <thead class="bg-[color:var(--theme-surface-sunk)] text-xs uppercase text-muted">
     <tr>
       <th class="px-4 py-2">Name</th>
       <th class="px-4 py-2">Prefix</th>
@@ -11,10 +11,10 @@
   <tbody class="divide-y">
     {% for t in tokens %}
     <tr>
-      <td class="px-4 py-2 align-top text-slate-700">{{ t.name }}</td>
-      <td class="px-4 py-2 align-top font-mono text-xs text-slate-500">{{ t.prefix }}…</td>
-      <td class="px-4 py-2 align-top text-slate-700">{{ t.created }}</td>
-      <td class="px-4 py-2 align-top text-slate-700">{{ t.last_used }}</td>
+      <td class="px-4 py-2 align-top text-body">{{ t.name }}</td>
+      <td class="px-4 py-2 align-top font-mono text-xs text-muted">{{ t.prefix }}…</td>
+      <td class="px-4 py-2 align-top text-body">{{ t.created }}</td>
+      <td class="px-4 py-2 align-top text-body">{{ t.last_used }}</td>
       <td class="px-4 py-2 text-right">
         <button type="button"
                 hx-delete="/api/v1/me/api-tokens/{{ t.id }}"
@@ -30,7 +30,7 @@
     </tr>
     {% endfor %}
     {% if tokens.is_empty() %}
-    <tr><td colspan="5" class="px-4 py-3 text-sm text-slate-500">No tokens yet.</td></tr>
+    <tr><td colspan="5" class="px-4 py-3 text-sm text-muted">No tokens yet.</td></tr>
     {% endif %}
   </tbody>
 </table>

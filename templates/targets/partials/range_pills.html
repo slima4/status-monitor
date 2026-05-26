@@ -4,7 +4,7 @@
 <nav class="flex items-center gap-1 pt-3 text-sm" aria-label="Time range">
   {% for opt in range_options %}
   <a href="{{ range_base_path }}?range={{ opt.key }}"
-     class="rounded-full px-3 py-1 text-xs font-medium{% if opt.selected %} bg-slate-900 text-white{% else %} bg-slate-100 text-slate-600 hover:bg-slate-200{% endif %}"{% if opt.selected %} aria-current="page"{% endif %}>{{ opt.key }}</a>
+     class="rounded-full px-3 py-1 text-xs font-medium{% if opt.selected %} bg-[color:var(--theme-ink)] text-[color:var(--theme-surface-elev)]{% else %} bg-[color:var(--theme-surface-sunk)] text-muted hover:bg-[color:var(--theme-surface-sunk)]{% endif %}"{% if opt.selected %} aria-current="page"{% endif %}>{{ opt.key }}</a>
   {% endfor %}
-  <span class="ml-3 text-xs text-slate-500">{{ from_human }} → {{ to_human }}</span>
+  <span class="ml-3 text-xs text-muted">{{ from_human }} → {{ to_human }}</span>
 </nav>

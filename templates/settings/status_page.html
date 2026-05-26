@@ -4,7 +4,7 @@
 <section class="space-y-6">
   <header class="space-y-1">
     <h1 class="page-title">Status page settings</h1>
-    <p class="text-sm text-slate-500">
+    <p class="text-sm text-muted">
       Branding and visibility for your public status page. Logo, brand colour
       and about text only — there is no per-page custom CSS.
     </p>
@@ -13,9 +13,9 @@
   {% if let Some(url) = s.status_url %}
   <div class="sticker-card space-y-3 p-4 text-sm">
     <div class="flex flex-wrap items-center gap-3">
-      <span class="text-slate-500">Your status page is at</span>
+      <span class="text-muted">Your status page is at</span>
       <a href="{{ url }}" target="_blank" rel="noopener"
-         class="font-medium text-slate-900 underline decoration-dotted">{{ url }} ↗</a>
+         class="font-medium text-body underline decoration-dotted">{{ url }} ↗</a>
       {% if !s.public_status_enabled %}
       <span class="status-badge status-badge--degraded">
         Disabled — visitors get 404 until you enable it below
@@ -30,17 +30,17 @@
     <form id="slug-form"
           data-action="/api/v1/orgs/{{ org_id }}"
           novalidate
-          class="space-y-2 border-t border-slate-200 pt-3">
+          class="space-y-2 border-t border-[color:var(--theme-line)] pt-3">
       <label for="slug-input" class="block text-sm font-medium">Change URL slug</label>
       <div class="flex flex-wrap items-center gap-2">
-        <span class="text-slate-500">https://</span>
+        <span class="text-muted">https://</span>
         <input id="slug-input" name="slug" type="text"
                value="{{ current_slug }}"
                minlength="3" maxlength="30"
                pattern="[a-z][a-z0-9-]*[a-z0-9]"
                autocomplete="off" spellcheck="false"
                class="field w-48 text-sm font-mono">
-        <span id="slug-suffix" class="text-slate-500 font-mono">{{ suffix }}</span>
+        <span id="slug-suffix" class="text-muted font-mono">{{ suffix }}</span>
         <button type="submit"
                 class="sticker-btn sticker-btn--primary px-3 py-1.5 text-sm font-medium">
           Save URL
@@ -49,7 +49,7 @@
       </div>
       <div id="slug-form-errors" role="alert" aria-live="polite"
            class="hidden alert-card alert-card--error text-xs"></div>
-      <p class="text-xs text-slate-500">
+      <p class="text-xs text-muted">
         3–30 lowercase letters, digits or hyphens; must start with a letter.
         Renaming is a hard cutover — the old URL stops working immediately.
       </p>
@@ -80,7 +80,7 @@
                {% if s.public_status_enabled %}checked{% endif %}>
         <span>
           <span class="text-sm font-medium">Enable public status page</span>
-          <span class="block text-xs text-slate-500">
+          <span class="block text-xs text-muted">
             The master switch. While off, the page returns 404.
           </span>
         </span>
@@ -92,7 +92,7 @@
                value="{% if let Some(v) = s.public_display_name %}{{ v }}{% endif %}"
                placeholder="{{ s.display_name }}"
                class="w-full field text-sm">
-        <p class="text-xs text-slate-500">Shown in the page header. Blank uses the org name.</p>
+        <p class="text-xs text-muted">Shown in the page header. Blank uses the org name.</p>
       </div>
 
       <div class="space-y-1">
@@ -100,7 +100,7 @@
         <textarea id="about" name="public_about" rows="3" maxlength="500"
                   placeholder="Markdown supported (500 chars max)"
                   class="w-full field text-sm font-mono">{% if let Some(v) = s.public_about %}{{ v }}{% endif %}</textarea>
-        <p class="text-xs text-slate-500">
+        <p class="text-xs text-muted">
           Markdown is sanitised on save and on render — only basic formatting and links survive.
         </p>
       </div>
@@ -110,11 +110,11 @@
         <div class="flex items-center gap-3">
           <input id="brand-color" name="public_brand_color" type="color"
                  value="{{ brand_color_value }}"
-                 class="h-9 w-12 cursor-pointer rounded-lg border-2 border-ink"
+                 class="h-9 w-12 cursor-pointer rounded-lg border-2 border-[color:var(--theme-ink)]"
                  oninput="document.getElementById('brand-color-out').textContent = this.value">
           <output id="brand-color-out" class="font-mono text-sm">{{ brand_color_value }}</output>
         </div>
-        <p class="text-xs text-slate-500">Used for the header background.</p>
+        <p class="text-xs text-muted">Used for the header background.</p>
       </div>
 
       <label class="flex items-start gap-3">
@@ -122,7 +122,7 @@
                {% if s.show_powered_by %}checked{% endif %}>
         <span>
           <span class="text-sm font-medium">Show "Powered by status-monitor"</span>
-          <span class="block text-xs text-slate-500">
+          <span class="block text-xs text-muted">
             Uncheck for a fully white-labelled footer.
           </span>
         </span>
@@ -136,27 +136,27 @@
              a single place and never emits an empty `src` (a wasted request). #}
           {% if let Some(logo) = s.logo_url %}
           <img id="logo-current" src="{{ logo }}" alt="Current logo"
-               class="h-12 w-auto rounded-lg border-2 border-ink bg-slate-50 p-1">
-          <span id="logo-none" class="hidden text-sm text-slate-500">No logo uploaded.</span>
+               class="h-12 w-auto rounded-lg border-2 border-[color:var(--theme-ink)] bg-[color:var(--theme-surface-sunk)] p-1">
+          <span id="logo-none" class="hidden text-sm text-muted">No logo uploaded.</span>
           {% else %}
           <img id="logo-current" alt="Current logo"
-               class="hidden h-12 w-auto rounded-lg border-2 border-ink bg-slate-50 p-1">
-          <span id="logo-none" class="text-sm text-slate-500">No logo uploaded.</span>
+               class="hidden h-12 w-auto rounded-lg border-2 border-[color:var(--theme-ink)] bg-[color:var(--theme-surface-sunk)] p-1">
+          <span id="logo-none" class="text-sm text-muted">No logo uploaded.</span>
           {% endif %}
 
-          <label class="btn-ghost cursor-pointer px-3 py-1.5 text-sm font-medium text-slate-700">
+          <label class="btn-ghost cursor-pointer px-3 py-1.5 text-sm font-medium text-body">
             Choose image…
             <input id="logo-file" type="file" class="sr-only"
                    accept="image/png,image/jpeg,image/webp">
           </label>
-          <span id="logo-filename" class="text-xs text-slate-500"></span>
+          <span id="logo-filename" class="text-xs text-muted"></span>
         </div>
-        <p class="text-xs text-slate-500">
+        <p class="text-xs text-muted">
           PNG, JPEG or WebP · max {{ max_logo_label }} · images wider or taller
           than {{ max_logo_dim_px }}px are downscaled · applied on save.
         </p>
         <label id="logo-remove-wrap"
-               class="flex items-center gap-2 text-xs text-slate-600
+               class="flex items-center gap-2 text-xs text-muted
                       {% if s.logo_url.is_none() %}hidden{% endif %}">
           <input type="checkbox" id="logo-remove">
           Remove the current logo when I save
@@ -176,15 +176,15 @@
   <div class="space-y-3">
     <div class="space-y-1">
       <h2 class="panel-label">Public components</h2>
-      <p class="text-sm text-slate-500">
+      <p class="text-sm text-muted">
         Each monitor can appear on your public status page as a component.
         Changes save automatically.
       </p>
-      <ul class="space-y-1 text-xs text-slate-500">
-        <li><strong class="font-medium text-slate-600">Public</strong> — show this monitor on the public page (off keeps it and its incidents private).</li>
-        <li><strong class="font-medium text-slate-600">Public name</strong> — what visitors see. Leave blank to show the monitor's real name.</li>
-        <li><strong class="font-medium text-slate-600">Group</strong> — optional heading that buckets components into sections on the page (e.g. “API”, “Web”). Blank components appear under “Ungrouped”.</li>
-        <li><strong class="font-medium text-slate-600">Reorder</strong> — drag the ⠿ handle (or focus it and press ↑/↓) to set the order shown publicly.</li>
+      <ul class="space-y-1 text-xs text-muted">
+        <li><strong class="font-medium text-muted">Public</strong> — show this monitor on the public page (off keeps it and its incidents private).</li>
+        <li><strong class="font-medium text-muted">Public name</strong> — what visitors see. Leave blank to show the monitor's real name.</li>
+        <li><strong class="font-medium text-muted">Group</strong> — optional heading that buckets components into sections on the page (e.g. “API”, “Web”). Blank components appear under “Ungrouped”.</li>
+        <li><strong class="font-medium text-muted">Reorder</strong> — drag the ⠿ handle (or focus it and press ↑/↓) to set the order shown publicly.</li>
       </ul>
     </div>
     <div id="status-components"
@@ -192,7 +192,7 @@
          hx-trigger="load"
          hx-swap="innerHTML"
          class="sticker-card overflow-hidden">
-      <p class="px-4 py-3 text-sm text-slate-500">Loading…</p>
+      <p class="px-4 py-3 text-sm text-muted">Loading…</p>
     </div>
   </div>
 
