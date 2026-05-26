@@ -16,6 +16,12 @@ use crate::worker::{CheckTask, WorkerPool};
 /// an operator-tuned refresh interval doesn't delay memory reclamation.
 const SWEEP_INTERVAL: Duration = Duration::from_secs(30);
 
+/// Upper bound on shutdown drain. Target loops exit on the next select poll
+/// after their cancel token fires, so well-behaved tasks return in milliseconds.
+/// The budget exists to bound shutdown on a stuck task (e.g. one spinning in a
+/// non-cancel-aware sync block) rather than hanging the process indefinitely.
+const SHUTDOWN_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
+
 pub struct Scheduler {
     registry: Arc<TargetRegistry>,
     pool: Arc<WorkerPool>,
@@ -72,7 +78,7 @@ impl Scheduler {
             }
         }
 
-        self.cancel_all();
+        self.cancel_all().await;
         Ok(())
     }
 
@@ -122,14 +128,57 @@ impl Scheduler {
         self.tasks.insert(id, TargetTaskHandle { cancel, handle });
     }
 
-    fn cancel_all(&self) {
+    async fn cancel_all(&self) {
         let ids: Vec<Uuid> = self.tasks.iter().map(|e| *e.key()).collect();
+        let mut handles: Vec<(Uuid, JoinHandle<()>)> = Vec::with_capacity(ids.len());
         for id in ids {
             if let Some((_, h)) = self.tasks.remove(&id) {
                 h.cancel.cancel();
-                drop(h.handle);
+                handles.push((id, h.handle));
             }
         }
+        drain_handles(handles, SHUTDOWN_DRAIN_TIMEOUT).await;
+    }
+}
+
+/// Awaits target-task handles after their cancel tokens have fired. Bounded
+/// by `timeout`: on expiry, remaining handles are dropped (detached), matching
+/// the pre-fix behaviour as a fallback — never blocks shutdown forever.
+async fn drain_handles(handles: Vec<(Uuid, JoinHandle<()>)>, timeout: Duration) {
+    let total = handles.len();
+    if total == 0 {
+        return;
+    }
+    tracing::info!(target_tasks = total, "draining target tasks on shutdown");
+    let started = std::time::Instant::now();
+
+    let drain = async {
+        for (id, h) in handles {
+            match h.await {
+                Ok(()) => {}
+                Err(err) if err.is_panic() => {
+                    tracing::error!(
+                        target_id = %id,
+                        error = %err,
+                        "target task panicked during shutdown",
+                    );
+                }
+                Err(_) => {}
+            }
+        }
+    };
+
+    match tokio::time::timeout(timeout, drain).await {
+        Ok(()) => tracing::info!(
+            target_tasks = total,
+            elapsed_ms = started.elapsed().as_millis() as u64,
+            "target tasks drained",
+        ),
+        Err(_) => tracing::warn!(
+            target_tasks = total,
+            timeout_secs = timeout.as_secs(),
+            "scheduler shutdown drain timed out — orphaning remaining tasks",
+        ),
     }
 }
 
@@ -190,8 +239,10 @@ fn jitter(base: Duration, jitter_pct: u8) -> Duration {
 
 #[cfg(test)]
 mod tests {
-    use super::jitter;
+    use super::{drain_handles, jitter};
     use std::time::Duration;
+    use tokio_util::sync::CancellationToken;
+    use uuid::Uuid;
 
     #[test]
     fn jitter_is_zero_when_pct_zero() {
@@ -235,5 +286,85 @@ mod tests {
         for _ in 0..10_000 {
             assert!(jitter(base, 100) <= base / 2);
         }
+    }
+
+    #[tokio::test]
+    async fn drain_handles_returns_immediately_when_no_tasks() {
+        let started = std::time::Instant::now();
+        drain_handles(Vec::new(), Duration::from_secs(5)).await;
+        assert!(started.elapsed() < Duration::from_millis(50));
+    }
+
+    #[tokio::test]
+    async fn drain_handles_awaits_well_behaved_tasks() {
+        // Three tasks that exit promptly on cancel. Drain must block until all
+        // have observably returned, not just detach their JoinHandles.
+        let mut handles = Vec::new();
+        let exited = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        for _ in 0..3 {
+            let tok = CancellationToken::new();
+            let tok_c = tok.clone();
+            let exited_c = exited.clone();
+            let h = tokio::spawn(async move {
+                tok_c.cancelled().await;
+                tokio::time::sleep(Duration::from_millis(20)).await;
+                exited_c.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            });
+            tok.cancel();
+            handles.push((Uuid::nil(), h));
+        }
+        let started = std::time::Instant::now();
+        drain_handles(handles, Duration::from_secs(5)).await;
+        assert_eq!(
+            exited.load(std::sync::atomic::Ordering::SeqCst),
+            3,
+            "all tasks must have run to completion before drain returned",
+        );
+        assert!(
+            started.elapsed() < Duration::from_millis(500),
+            "drain hung: {:?}",
+            started.elapsed(),
+        );
+    }
+
+    #[tokio::test]
+    async fn drain_handles_times_out_on_stuck_task() {
+        // Task ignores its cancel and never exits. Drain must bound shutdown
+        // by the timeout, not block forever.
+        let h = tokio::spawn(async { std::future::pending::<()>().await });
+        let started = std::time::Instant::now();
+        drain_handles(vec![(Uuid::nil(), h)], Duration::from_millis(50)).await;
+        let elapsed = started.elapsed();
+        assert!(
+            elapsed >= Duration::from_millis(50),
+            "drain returned before timeout: {elapsed:?}",
+        );
+        assert!(
+            elapsed < Duration::from_millis(500),
+            "timeout not enforced: {elapsed:?}",
+        );
+    }
+
+    #[tokio::test]
+    async fn drain_handles_continues_past_panicked_task() {
+        // A panicked task surfaces as a JoinError::Panic. Drain must log it
+        // and keep awaiting the rest — a single panicky target can't strand
+        // a well-behaved peer.
+        let h_panic = tokio::spawn(async { panic!("test panic") });
+        let tok = CancellationToken::new();
+        let tok_c = tok.clone();
+        let exited = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let exited_c = exited.clone();
+        let h_ok = tokio::spawn(async move {
+            tok_c.cancelled().await;
+            exited_c.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        });
+        tok.cancel();
+        drain_handles(
+            vec![(Uuid::nil(), h_panic), (Uuid::nil(), h_ok)],
+            Duration::from_secs(5),
+        )
+        .await;
+        assert_eq!(exited.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 }
