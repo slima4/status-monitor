@@ -113,10 +113,10 @@
     --sm-dashboard-label-fg:     var(--theme-text-muted);
     --sm-dashboard-value-fg:     var(--theme-text);
     --sm-dashboard-hint-fg:      var(--theme-text-muted);
-    --sm-dashboard-chip-bg:      var(--color-slate-100);
-    --sm-dashboard-chip-fg:      var(--color-slate-600);
-    --sm-dashboard-chip-active-bg: var(--color-slate-900);
-    --sm-dashboard-chip-active-fg: var(--color-white);
+    --sm-dashboard-chip-bg:      var(--theme-surface-sunk);
+    --sm-dashboard-chip-fg:      var(--theme-text-muted);
+    --sm-dashboard-chip-active-bg: var(--theme-ink);
+    --sm-dashboard-chip-active-fg: var(--theme-surface-elev);
     --sm-dashboard-banner-bg:    var(--color-rose-50);
     --sm-dashboard-banner-fg:    var(--color-rose-900);
     --sm-dashboard-banner-line:  var(--color-rose-200);
@@ -140,14 +140,14 @@
     --sm-dashboard-dot-down:     var(--sm-state-maj-bar);
     --sm-dashboard-dot-error:    var(--sm-state-maj-bar);
     --sm-dashboard-dot-unknown:  var(--sm-state-none-bar);
-    --sm-dashboard-dot-muted:    var(--color-slate-300);
+    --sm-dashboard-dot-muted:    var(--theme-text-faint);
 
     /* Sparkline — stroke colour scales with row severity. `--down`
        fires whenever the row's `data-status="down"` so a bad row's
        trace reads at a glance without the operator parsing a number. */
     --sm-spark-w:              280px;
     --sm-spark-h:              24px;
-    --sm-spark-stroke:         var(--color-slate-400);
+    --sm-spark-stroke:         var(--theme-text-quiet);
     --sm-spark-stroke-up:      var(--color-emerald-500);
     --sm-spark-stroke-degraded:var(--color-amber-500);
     --sm-spark-stroke-down:    var(--color-rose-500);
@@ -167,25 +167,25 @@
     --sm-monitors-num-fg:      var(--theme-text);
     --sm-monitors-muted-fg:    var(--theme-text-quiet);
 
-    --sm-monitors-group-bg:        var(--color-slate-50);
-    --sm-monitors-group-fg:        var(--color-slate-700);
-    --sm-monitors-group-meta-fg:   var(--color-slate-500);
+    --sm-monitors-group-bg:        var(--theme-surface-sunk);
+    --sm-monitors-group-fg:        var(--theme-text);
+    --sm-monitors-group-meta-fg:   var(--theme-text-muted);
     --sm-monitors-group-radius:    var(--radius-xl);
 
-    --sm-monitors-toolbar-bg:      var(--color-white);
-    --sm-monitors-search-bg:       var(--color-slate-50);
-    --sm-monitors-search-fg:       var(--color-slate-900);
-    --sm-monitors-keyhint-bg:      var(--color-white);
-    --sm-monitors-keyhint-fg:      var(--color-slate-500);
+    --sm-monitors-toolbar-bg:      var(--theme-surface-elev);
+    --sm-monitors-search-bg:       var(--theme-surface-sunk);
+    --sm-monitors-search-fg:       var(--theme-text);
+    --sm-monitors-keyhint-bg:      var(--theme-surface-elev);
+    --sm-monitors-keyhint-fg:      var(--theme-text-muted);
 
-    --sm-monitors-bulk-bg:         var(--color-slate-900);
-    --sm-monitors-bulk-fg:         var(--color-white);
+    --sm-monitors-bulk-bg:         var(--theme-ink);
+    --sm-monitors-bulk-fg:         var(--theme-surface-elev);
     --sm-monitors-bulk-accent:     var(--color-amber-300);
     --sm-monitors-bulk-btn-bg:     color-mix(in oklch, var(--color-white) 14%, transparent);
     --sm-monitors-bulk-danger-bg:  var(--color-rose-600);
 
-    --sm-monitors-tag-bg:          var(--color-slate-100);
-    --sm-monitors-tag-fg:          var(--color-slate-600);
+    --sm-monitors-tag-bg:          var(--theme-surface-sunk);
+    --sm-monitors-tag-fg:          var(--theme-text-muted);
     --sm-monitors-tag-p0-bg:       var(--color-rose-50);
     --sm-monitors-tag-p0-fg:       var(--color-rose-800);
     --sm-monitors-tag-p0-dot:      var(--color-rose-500);
@@ -345,6 +345,31 @@
         margin: auto;
     }
 
+    /* Example alt theme — flip the org app to a phosphor-on-black CRT look
+       by adding `theme-terminal` to <body>. Every chrome surface, text
+       colour, sticker stroke, and the body font track this block; state
+       colours (--sm-state-*, alert/badge ok/warn/bad) stay tied to the
+       Tailwind palette by design. Atmosphere overrides drop the warm
+       mesh and lift the grain so it reads scanline-ish on dark. */
+    .theme-terminal {
+        --theme-surface:       oklch(0.10 0.012 150);
+        --theme-surface-elev:  oklch(0.14 0.014 150);
+        --theme-surface-sunk:  oklch(0.07 0.010 150);
+        --theme-ink:           oklch(0.80 0.16 142);
+        --theme-text:          oklch(0.88 0.15 142);
+        --theme-text-muted:    oklch(0.65 0.10 142);
+        --theme-text-quiet:    oklch(0.45 0.07 142);
+        --theme-text-faint:    oklch(0.30 0.05 142);
+        --theme-line:          oklch(0.28 0.08 142);
+        --theme-accent:        oklch(0.85 0.16 90);
+        --theme-accent-soft:   oklch(0.20 0.05 90);
+
+        --font-display: "JetBrains Mono", ui-monospace, monospace;
+        --font-body:    "JetBrains Mono", ui-monospace, monospace;
+    }
+    .theme-terminal.app-shell::before { opacity: 0.10; mix-blend-mode: screen; }
+    .theme-terminal.app-shell::after  { background: none; }
+
     /* Cartoon checkbox / radio. Native controls ignore the sticker
        language (ink edge + hard offset shadow) the rest of the UI speaks,
        so restyle them once here — every template's box inherits it, no
@@ -363,9 +388,9 @@
         margin: 0;
         vertical-align: middle;
         cursor: pointer;
-        background-color: #fff;
-        border: 2px solid var(--color-ink);
-        box-shadow: var(--control-offset) var(--control-offset) 0 0 var(--color-ink);
+        background-color: var(--theme-surface-elev);
+        border: 2px solid var(--theme-ink);
+        box-shadow: var(--control-offset) var(--control-offset) 0 0 var(--theme-ink);
         transition: transform 120ms ease, box-shadow 120ms ease,
                     background-color 120ms ease;
     }
@@ -377,7 +402,7 @@
     input[type="checkbox"]:not(:checked):hover:not(:disabled),
     input[type="radio"]:not(:checked):hover:not(:disabled) {
         box-shadow: calc(var(--control-offset) + 1px)
-                    calc(var(--control-offset) + 1px) 0 0 var(--color-ink);
+                    calc(var(--control-offset) + 1px) 0 0 var(--theme-ink);
     }
 
     /* Checked = pressed sticker: emerald fill (same emerald-600 token as
@@ -385,7 +410,7 @@
     input[type="checkbox"]:checked,
     input[type="radio"]:checked {
         background-color: var(--control-on);
-        box-shadow: 0 0 0 0 var(--color-ink);
+        box-shadow: 0 0 0 0 var(--theme-ink);
         transform: translate(var(--control-offset), var(--control-offset));
     }
 
@@ -423,22 +448,23 @@
        drop-blur). The shadow is plain CSS because it's an offset/colour
        arbitrary value @apply can't express cleanly. */
     .sticker-card {
-        @apply rounded-2xl border-2 bg-white;
-        border-color: var(--color-ink);
-        box-shadow: 6px 6px 0 0 var(--color-ink);
+        @apply rounded-2xl border-2;
+        background: var(--theme-surface-elev);
+        border-color: var(--theme-ink);
+        box-shadow: 6px 6px 0 0 var(--theme-ink);
     }
 
     /* Same ink edge + hard offset shadow as .sticker-card, sized for a
-       control (smaller offset). Both share var(--color-ink) so the cartoon
+       control (smaller offset). Both share var(--theme-ink) so the cartoon
        shadow stays one retunable token — never re-state the offset inline. */
     .sticker-btn {
         @apply rounded-xl border-2;
-        border-color: var(--color-ink);
-        box-shadow: 4px 4px 0 0 var(--color-ink);
+        border-color: var(--theme-ink);
+        box-shadow: 4px 4px 0 0 var(--theme-ink);
     }
     .sticker-btn:disabled {
         @apply cursor-not-allowed opacity-60;
-        box-shadow: 2px 2px 0 0 var(--color-ink);
+        box-shadow: 2px 2px 0 0 var(--theme-ink);
     }
     /* Fill for a raised sticker control. One modifier per intent so the
        brand/destructive colour is named once, never re-typed per call site
@@ -457,7 +483,12 @@
        .sticker-btn: same chunky radius + 2px edge, no ink, no raised
        shadow. `--danger` swaps the edge/text to the destructive ramp.
        Padding/size stays at the call site (controls vary). */
-    .btn-ghost          { @apply rounded-xl border-2 border-slate-200 hover:bg-slate-100; }
+    .btn-ghost {
+        @apply rounded-xl border-2;
+        border-color: var(--theme-line);
+        transition: background-color 120ms ease;
+    }
+    .btn-ghost:hover    { background: var(--theme-surface-sunk); }
     .btn-ghost--danger  { @apply border-red-200 text-red-600 hover:bg-red-50; }
 
     /* Cartoon text field — input / select / textarea. Same ink edge as
@@ -467,12 +498,18 @@
        .sticker-card convention). Focus ring is the global outline rule
        (a box-shadow ring here would be eaten by this shadow). */
     .field {
-        @apply rounded-xl border-2 bg-white px-3 py-2;
-        border-color: var(--color-ink);
-        box-shadow: var(--control-offset) var(--control-offset) 0 0 var(--color-ink);
+        @apply rounded-xl border-2 px-3 py-2;
+        background: var(--theme-surface-elev);
+        color: var(--theme-text);
+        border-color: var(--theme-ink);
+        box-shadow: var(--control-offset) var(--control-offset) 0 0 var(--theme-ink);
     }
-    .field:disabled        { @apply cursor-not-allowed bg-slate-100 text-slate-400; }
-    .field::placeholder    { @apply text-slate-400; }
+    .field:disabled {
+        @apply cursor-not-allowed;
+        background: var(--theme-surface-sunk);
+        color: var(--theme-text-quiet);
+    }
+    .field::placeholder { color: var(--theme-text-quiet); }
     /* A native <select> uses the browser's own widget metrics and ignores
        part of .field's padding, so it renders shorter than a sibling
        <input>. appearance:none drops it onto the same box model (equal
@@ -496,9 +533,11 @@
        every bit of look/motion is here (semantic layer, like sticker-*). */
     .sticker-disclosure > summary {
         @apply flex cursor-pointer select-none list-none items-center
-               justify-between gap-3 rounded-xl border-2 bg-white px-4 py-3;
-        border-color: var(--color-ink);
-        box-shadow: 4px 4px 0 0 var(--color-ink);
+               justify-between gap-3 rounded-xl border-2 px-4 py-3;
+        background: var(--theme-surface-elev);
+        color: var(--theme-text);
+        border-color: var(--theme-ink);
+        box-shadow: 4px 4px 0 0 var(--theme-ink);
         transition: transform 150ms ease, box-shadow 150ms ease;
     }
     .sticker-disclosure > summary::-webkit-details-marker { display: none; }
@@ -506,23 +545,25 @@
        of this vs the [open] rule then can't matter (no source-order trap). */
     .sticker-disclosure:not([open]) > summary:hover {
         @apply -translate-y-0.5;
-        box-shadow: 5px 6px 0 0 var(--color-ink);
+        box-shadow: 5px 6px 0 0 var(--theme-ink);
     }
     /* Open = pressed in: the tile rides ~the 4px shadow offset, shadow
        gone. Keep this 0 0 0 0 (not `none`): `none` can't interpolate, so
        the collapse must stay a real box-shadow value to transition. */
     .sticker-disclosure[open] > summary {
         @apply translate-x-[3px] translate-y-[3px];
-        box-shadow: 0 0 0 0 var(--color-ink);
+        box-shadow: 0 0 0 0 var(--theme-ink);
     }
     .sticker-disclosure__chevron {
-        @apply text-base text-slate-400;
+        @apply text-base;
+        color: var(--theme-text-quiet);
         transition: transform 200ms ease;
     }
     .sticker-disclosure[open] .sticker-disclosure__chevron { @apply rotate-180; }
     .sticker-disclosure__icon {
-        @apply grid h-8 w-8 place-items-center rounded-lg bg-slate-100
-               text-base text-slate-500;
+        @apply grid h-8 w-8 place-items-center rounded-lg text-base;
+        background: var(--theme-surface-sunk);
+        color: var(--theme-text-muted);
         transition: background-color 200ms ease, color 200ms ease;
     }
     .sticker-disclosure[open] .sticker-disclosure__icon {
@@ -545,8 +586,17 @@
         letter-spacing: -0.018em;
         font-size: 1.05rem;
     }
-    .nav-link           { @apply text-sm text-slate-500 hover:text-slate-700; }
-    .nav-link--active   { @apply font-medium text-slate-900 hover:text-slate-900; }
+    .nav-link {
+        @apply text-sm;
+        color: var(--theme-text-muted);
+        transition: color 120ms ease;
+    }
+    .nav-link:hover     { color: var(--theme-text); }
+    .nav-link--active {
+        @apply font-medium;
+        color: var(--theme-text);
+    }
+    .nav-link--active:hover { color: var(--theme-text); }
 
     /* Status pill for the landing trust strip. `--ok` / `--warn` only swap
        the fill; the ink edge + chunky radius are shared so the cartoon
@@ -554,11 +604,14 @@
     .sticker-pill {
         @apply inline-flex items-center gap-1.5 rounded-full border-2 px-3 py-1
                text-xs font-semibold;
-        border-color: var(--color-ink);
+        border-color: var(--theme-ink);
     }
     .sticker-pill--ok      { @apply bg-emerald-100 text-emerald-900; }
     .sticker-pill--warn    { @apply bg-amber-100  text-amber-900;  }
-    .sticker-pill--neutral { @apply bg-white      text-slate-700; }
+    .sticker-pill--neutral {
+        background: var(--theme-surface-elev);
+        color: var(--theme-text);
+    }
 
     /* Semantic layer: templates name meaning, never appearance. Restyle =
        edit these rules, no template touched. State is one `--modifier`. */
@@ -569,7 +622,8 @@
        stems; the SOFT axis softens the terminals to match the sticker
        dialect's flat-cartoon edges. */
     .page-title {
-        @apply text-4xl tracking-tight text-slate-900;
+        @apply text-4xl tracking-tight;
+        color: var(--theme-text);
         font-family: var(--font-display);
         font-weight: 600;
         font-optical-sizing: auto;
@@ -580,10 +634,16 @@
 
     /* Uppercase section/eyebrow label — one definition app-wide so the
        type scale stays in lockstep (also used for KPI-card labels). */
-    .panel-label { @apply text-xs font-semibold uppercase tracking-wide text-slate-500; }
+    .panel-label {
+        @apply text-xs font-semibold uppercase tracking-wide;
+        color: var(--theme-text-muted);
+    }
 
     /* Big single-number KPI value (Monitors, Uptime, …). */
-    .kpi-value { @apply mt-2 text-4xl font-bold tabular-nums text-slate-900; }
+    .kpi-value {
+        @apply mt-2 text-4xl font-bold tabular-nums;
+        color: var(--theme-text);
+    }
     .kpi-value--ok  { @apply text-emerald-700; }
     .kpi-value--bad { @apply text-rose-700; }
 
@@ -591,7 +651,10 @@
        matters, quiet when zero. Same semantic-modifier idea as the tiles
        so no template hard-codes a colour. */
     .metric-alert { @apply font-semibold text-rose-700; }
-    .metric-quiet { @apply font-semibold text-slate-400; }
+    .metric-quiet {
+        @apply font-semibold;
+        color: var(--theme-text-quiet);
+    }
 
     /* Status count tile. Colour is chosen by meaning via one modifier;
        --muted lets a zero problem-counter recede so a non-zero one pops. */
@@ -607,12 +670,15 @@
     .stat-tile--warn  { @apply border-amber-300 bg-amber-50; }
     .stat-tile--warn  .stat-tile__label,
     .stat-tile--warn  .stat-tile__value { @apply text-amber-700; }
-    .stat-tile--info  { @apply border-slate-300 bg-slate-50; }
-    .stat-tile--info  .stat-tile__label { @apply text-slate-500; }
-    .stat-tile--info  .stat-tile__value { @apply text-slate-600; }
-    .stat-tile--muted { @apply border-slate-200; }
-    .stat-tile--muted .stat-tile__label { @apply text-slate-400; }
-    .stat-tile--muted .stat-tile__value { @apply text-slate-300; }
+    .stat-tile--info  {
+        background: var(--theme-surface-sunk);
+        border-color: var(--theme-line);
+    }
+    .stat-tile--info  .stat-tile__label { color: var(--theme-text-muted); }
+    .stat-tile--info  .stat-tile__value { color: var(--theme-text); }
+    .stat-tile--muted { border-color: var(--theme-line); }
+    .stat-tile--muted .stat-tile__label { color: var(--theme-text-quiet); }
+    .stat-tile--muted .stat-tile__value { color: var(--theme-text-faint); }
 
     /* Status badge fills. The base `.status-badge` (shape only) lives in
        the earlier components block; these modifiers are the single source
@@ -625,9 +691,18 @@
     .status-badge--down     { @apply bg-rose-100    text-rose-800;    }
     .status-badge--degraded { @apply bg-amber-100   text-amber-800;   }
     .status-badge--error    { @apply bg-red-100     text-red-800;     }
-    .status-badge--none     { @apply bg-slate-100   text-slate-500;   }
-    .status-badge--disabled { @apply bg-slate-200   text-slate-700;   }
-    .status-badge--tag      { @apply bg-slate-100   text-slate-700;   }
+    .status-badge--none {
+        background: var(--theme-surface-sunk);
+        color: var(--theme-text-muted);
+    }
+    .status-badge--disabled {
+        background: var(--theme-surface-sunk);
+        color: var(--theme-text);
+    }
+    .status-badge--tag {
+        background: var(--theme-surface-sunk);
+        color: var(--theme-text);
+    }
 
     /* 90-day history strip; cells are direct <button> children. */
     .day-strip {
@@ -779,7 +854,11 @@
     .alert-card--warn   { @apply border-amber-300   bg-amber-50   text-amber-800; }
     .alert-card--error  { @apply border-red-300     bg-red-50     text-red-800; }
     .alert-card--ok     { @apply border-emerald-300 bg-emerald-50 text-emerald-900; }
-    .alert-card--muted  { @apply border-slate-200   bg-slate-50   text-slate-600; }
+    .alert-card--muted {
+        background: var(--theme-surface-sunk);
+        border-color: var(--theme-line);
+        color: var(--theme-text-muted);
+    }
 
     /* Public-surface (flat) callout — same idea as .alert-card but with the
        quiet 1px slate-family border the public page uses everywhere. The
@@ -796,19 +875,26 @@
     .flash-text--ok     { @apply text-emerald-700; }
     .flash-text--bad    { @apply text-rose-700; }
     .flash-text--warn   { @apply text-amber-800; }
-    .flash-text--muted  { @apply text-slate-600; }
+    .flash-text--muted  { color: var(--theme-text-muted); }
 
     /* Inline table-row action link. Tiny, weight 500, underline-on-hover —
        same shape as `Edit / Copy / Revoke / Delete` cells. `--danger`
        swaps to the destructive ramp. */
-    .row-link           { @apply text-xs font-medium text-slate-600 hover:underline hover:text-slate-900; }
+    .row-link {
+        @apply text-xs font-medium hover:underline;
+        color: var(--theme-text-muted);
+    }
+    .row-link:hover     { color: var(--theme-text); }
     .row-link--danger   { @apply text-rose-700 hover:text-rose-800; }
 
     /* Usage / quota progress bar. Track is slate-200; fill is emerald.
        Width comes from a `style="width: N%"` attribute at the call site.
        (Threshold-driven --warn/--bad modifiers will land when a template
        actually colours by % — not synthesised ahead of demand.) */
-    .usage-bar          { @apply h-2 w-full overflow-hidden rounded bg-slate-200; }
+    .usage-bar {
+        @apply h-2 w-full overflow-hidden rounded;
+        background: var(--theme-surface-sunk);
+    }
     .usage-bar__fill    { @apply h-full rounded; }
     .usage-bar__fill--ok    { @apply bg-emerald-500; }
 
@@ -832,40 +918,66 @@
        Hides the radio (visual selection comes from :has(input:checked)). */
     .check-type-cards { @apply grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5; }
     .check-type-card {
-        @apply flex cursor-pointer flex-col items-start gap-1 rounded-xl border-2 border-slate-200 bg-white p-3 text-left transition;
-        @apply hover:border-slate-300 hover:bg-slate-50;
+        @apply flex cursor-pointer flex-col items-start gap-1 rounded-xl border-2 p-3 text-left transition;
+        background: var(--theme-surface-elev);
+        border-color: var(--theme-line);
+    }
+    .check-type-card:hover {
+        background: var(--theme-surface-sunk);
     }
     .check-type-card:has(input:checked) {
-        @apply border-slate-900 bg-slate-50;
-        box-shadow: 2px 2px 0 0 var(--color-ink, #0f172a);
+        background: var(--theme-surface-sunk);
+        border-color: var(--theme-ink);
+        box-shadow: 2px 2px 0 0 var(--theme-ink);
     }
     .check-type-card:focus-within { @apply outline-none ring-2 ring-offset-2 ring-slate-400; }
-    .check-type-card__name { @apply text-sm font-semibold text-slate-800; }
-    .check-type-card__desc { @apply text-xs text-slate-500; }
+    .check-type-card__name {
+        @apply text-sm font-semibold;
+        color: var(--theme-text);
+    }
+    .check-type-card__desc {
+        @apply text-xs;
+        color: var(--theme-text-muted);
+    }
 
     /* Tag chip input. Container is a flex-wrap; the input grows to fill the
        trailing free space so typing always lands inside the same row. */
     .tag-chips {
-        @apply flex flex-wrap items-center gap-1.5 rounded-xl border-2 border-slate-200 bg-white p-2;
+        @apply flex flex-wrap items-center gap-1.5 rounded-xl border-2 p-2;
+        background: var(--theme-surface-elev);
+        border-color: var(--theme-line);
         position: relative;
     }
-    .tag-chips:focus-within { @apply border-slate-400; }
+    .tag-chips:focus-within { border-color: var(--theme-text-quiet); }
     .tag-chip {
-        @apply inline-flex items-center gap-1 rounded-full border-2 border-slate-300 bg-slate-50 px-2 py-0.5 text-xs;
+        @apply inline-flex items-center gap-1 rounded-full border-2 px-2 py-0.5 text-xs;
+        background: var(--theme-surface-sunk);
+        border-color: var(--theme-line);
+        color: var(--theme-text);
     }
     .tag-chip__remove {
-        @apply inline-flex h-4 w-4 items-center justify-center rounded-full text-slate-500 hover:bg-slate-200 hover:text-slate-800;
+        @apply inline-flex h-4 w-4 items-center justify-center rounded-full;
+        color: var(--theme-text-muted);
+    }
+    .tag-chip__remove:hover {
+        background: var(--theme-surface-sunk);
+        color: var(--theme-text);
     }
     .tag-chip-input {
         @apply min-w-[8rem] flex-1 border-0 bg-transparent px-1 text-sm outline-none;
+        color: var(--theme-text);
     }
     .tag-suggestions {
-        @apply absolute left-0 top-full z-10 mt-1 max-h-56 w-full overflow-auto rounded-xl border-2 border-slate-200 bg-white p-1 text-sm shadow;
+        @apply absolute left-0 top-full z-10 mt-1 max-h-56 w-full overflow-auto rounded-xl border-2 p-1 text-sm shadow;
+        background: var(--theme-surface-elev);
+        border-color: var(--theme-line);
     }
     .tag-suggestions li {
-        @apply cursor-pointer rounded px-2 py-1 hover:bg-slate-100;
+        @apply cursor-pointer rounded px-2 py-1;
+        color: var(--theme-text);
     }
-    .tag-suggestions li[aria-selected="true"] { @apply bg-slate-100; }
+    .tag-suggestions li:hover,
+    .tag-suggestions li[aria-selected="true"] { background: var(--theme-surface-sunk); }
 
     /* Verbose test-check inline result. Same alert-card depth but with
        slots for status pill, latency, headers, body snippet. */
@@ -876,7 +988,10 @@
     .test-result--bad   { @apply border-rose-300    bg-rose-50    text-rose-900;    }
     .test-result--warn  { @apply border-amber-300   bg-amber-50   text-amber-900;   }
     .test-result__pill  { @apply inline-block rounded-full border px-2 py-0.5 text-xs font-medium; }
-    .test-result__meta  { @apply text-xs text-slate-600; }
+    .test-result__meta  {
+        @apply text-xs;
+        color: var(--theme-text-muted);
+    }
     .test-result__body  {
         @apply mt-2 max-h-48 overflow-auto rounded bg-white/60 p-2 font-mono text-xs;
         white-space: pre-wrap;
@@ -900,14 +1015,20 @@
        restyle edits the tokens, not the rules. */
 
     .range-tabs {
-        @apply inline-flex items-center gap-1 rounded-lg border-2 bg-white p-1 text-xs font-medium;
-        border-color: var(--color-ink);
+        @apply inline-flex items-center gap-1 rounded-lg border-2 p-1 text-xs font-medium;
+        background: var(--theme-surface-elev);
+        border-color: var(--theme-ink);
     }
     .range-tabs__btn {
-        @apply rounded-md px-2.5 py-1 text-slate-600 hover:bg-slate-100;
+        @apply rounded-md px-2.5 py-1;
+        color: var(--theme-text-muted);
+        transition: background-color 120ms ease, color 120ms ease;
     }
-    .range-tabs__btn--active {
-        @apply bg-slate-900 text-white hover:bg-slate-900;
+    .range-tabs__btn:hover   { background: var(--theme-surface-sunk); color: var(--theme-text); }
+    .range-tabs__btn--active,
+    .range-tabs__btn--active:hover {
+        background: var(--theme-ink);
+        color: var(--theme-surface-elev);
     }
 
     /* Composes with `sticker-card` at the call site (see `.kpi-card`). */
@@ -999,7 +1120,8 @@
         justify-content: center;
     }
     .dashboard-name {
-        @apply block truncate text-sm font-medium text-slate-900;
+        @apply block truncate text-sm font-medium;
+        color: var(--theme-text);
         text-decoration: none;
     }
     .dashboard-name:hover {
@@ -1065,16 +1187,19 @@
     }
 
     .dashboard-empty {
-        @apply px-6 py-10 text-center text-sm text-slate-500;
+        @apply px-6 py-10 text-center text-sm;
+        color: var(--theme-text-muted);
     }
 
     /* ── V2 ─ filter sub-line + chips ─────────────────────────────── */
     .dashboard-subhead {
-        @apply text-sm text-slate-500;
+        @apply text-sm;
+        color: var(--theme-text-muted);
     }
     .dashboard-subhead__mono {
-        @apply font-mono text-slate-700;
-        background: var(--color-slate-100);
+        @apply font-mono;
+        color: var(--theme-text);
+        background: var(--theme-surface-sunk);
         padding: 1px 6px;
         border-radius: 4px;
     }
@@ -1130,7 +1255,7 @@
     }
     .metric-delta--up   { color: var(--color-emerald-700); }
     .metric-delta--down { color: var(--color-rose-700);    }
-    .metric-delta--flat { color: var(--color-slate-400);   }
+    .metric-delta--flat { color: var(--theme-text-quiet);  }
     .dashboard-kpi-card__spark {
         width: 140px;
         height: 36px;
@@ -1139,8 +1264,8 @@
     }
     .dashboard-kpi-card__spark--ok   .dashboard-spark__line { stroke: var(--sm-spark-stroke-up); }
     .dashboard-kpi-card__spark--ok   .dashboard-spark__fill { fill: var(--sm-spark-stroke-up); }
-    .dashboard-kpi-card__spark--ink  .dashboard-spark__line { stroke: var(--color-slate-700); }
-    .dashboard-kpi-card__spark--ink  .dashboard-spark__fill { fill: var(--color-slate-700); }
+    .dashboard-kpi-card__spark--ink  .dashboard-spark__line { stroke: var(--theme-text); }
+    .dashboard-kpi-card__spark--ink  .dashboard-spark__fill { fill: var(--theme-text); }
     .dashboard-kpi-card__spark--info .dashboard-spark__line { stroke: var(--color-sky-500); }
     .dashboard-kpi-card__spark--info .dashboard-spark__fill { fill: var(--color-sky-500); }
 
@@ -1178,7 +1303,8 @@
         @apply flex flex-wrap items-baseline gap-2;
     }
     .dashboard-incident-banner__name {
-        @apply font-medium text-slate-900 no-underline hover:underline;
+        @apply font-medium no-underline hover:underline;
+        color: var(--theme-text);
     }
     .dashboard-incident-banner__age {
         @apply font-mono text-xs;
@@ -1186,12 +1312,12 @@
     }
     .dashboard-incident-banner__update {
         @apply flex flex-wrap items-baseline gap-2 text-xs;
-        color: var(--color-slate-600);
+        color: var(--theme-text-muted);
     }
     .dashboard-incident-banner__phase {
         @apply rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider;
         background: rgba(0, 0, 0, 0.06);
-        color: var(--color-slate-700);
+        color: var(--theme-text);
     }
 
     .dashboard-incident-severity {
@@ -1221,7 +1347,7 @@
         line-height: 1;
     }
     .dashboard-rail__value--muted {
-        color: var(--color-slate-400);
+        color: var(--theme-text-quiet);
     }
 
     /* ── V2 ─ fleet 24h ribbon ────────────────────────────────────── */
@@ -1249,11 +1375,13 @@
     /* ── Operator monitors page (/targets) ──────────────────────── */
 
     .monitors-subhead {
-        @apply text-sm text-slate-500;
+        @apply text-sm;
+        color: var(--theme-text-muted);
     }
     .monitors-subhead__mono {
-        @apply font-mono text-slate-700;
-        background: var(--color-slate-100);
+        @apply font-mono;
+        color: var(--theme-text);
+        background: var(--theme-surface-sunk);
         padding: 1px 6px;
         border-radius: 4px;
     }
@@ -1261,8 +1389,8 @@
     .monitors-toolbar {
         @apply flex flex-wrap items-center gap-3 rounded-2xl border-2 px-3 py-2;
         background: var(--sm-monitors-toolbar-bg);
-        border-color: var(--color-ink);
-        box-shadow: 4px 4px 0 0 var(--color-ink);
+        border-color: var(--theme-ink);
+        box-shadow: 4px 4px 0 0 var(--theme-ink);
     }
     .monitors-search {
         @apply flex flex-1 min-w-[16rem] items-center gap-2 rounded-lg px-3;
@@ -1273,26 +1401,31 @@
         @apply min-w-0 flex-1 border-0 bg-transparent text-sm outline-none;
         color: var(--sm-monitors-search-fg);
     }
-    .monitors-search__input::placeholder { @apply text-slate-400; }
-    .monitors-search__icon { @apply h-4 w-4 text-slate-400; }
+    .monitors-search__input::placeholder { color: var(--theme-text-quiet); }
+    .monitors-search__icon {
+        @apply h-4 w-4;
+        color: var(--theme-text-quiet);
+    }
     .monitors-search__keyhint {
         @apply rounded font-mono text-[10px];
         background: var(--sm-monitors-keyhint-bg);
         color: var(--sm-monitors-keyhint-fg);
         padding: 2px 5px;
-        box-shadow: 0 0 0 1px var(--color-slate-200);
+        box-shadow: 0 0 0 1px var(--theme-line);
     }
     .monitors-toolbar__right {
         @apply ml-auto flex flex-wrap items-center gap-2;
     }
     /* Compact `.field` variant — four fit on one row. */
     .monitors-toolbar__select {
-        @apply rounded-lg border-2 bg-white pr-7 pl-2.5 text-sm text-slate-700;
+        @apply rounded-lg border-2 pr-7 pl-2.5 text-sm;
+        background: var(--theme-surface-elev);
+        color: var(--theme-text);
         appearance: none;
         -webkit-appearance: none;
         height: 2rem;
-        border-color: var(--color-ink);
-        box-shadow: var(--control-offset) var(--control-offset) 0 0 var(--color-ink);
+        border-color: var(--theme-ink);
+        box-shadow: var(--control-offset) var(--control-offset) 0 0 var(--theme-ink);
         background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 1.5l5 5 5-5'/%3E%3C/svg%3E");
         background-repeat: no-repeat;
         background-position: right 0.55rem center;
@@ -1300,7 +1433,7 @@
     }
     .monitors-toolbar__select:hover {
         box-shadow: calc(var(--control-offset) + 1px)
-                    calc(var(--control-offset) + 1px) 0 0 var(--color-ink);
+                    calc(var(--control-offset) + 1px) 0 0 var(--theme-ink);
     }
 
     .monitors-chips {
@@ -1321,8 +1454,8 @@
         @apply mt-3 flex flex-wrap items-center gap-3 rounded-2xl border-2 px-4 py-2 text-sm;
         background: var(--sm-monitors-bulk-bg);
         color: var(--sm-monitors-bulk-fg);
-        border-color: var(--color-ink);
-        box-shadow: 4px 4px 0 0 var(--color-ink);
+        border-color: var(--theme-ink);
+        box-shadow: 4px 4px 0 0 var(--theme-ink);
     }
     .monitors-bulk[data-empty="true"] { display: none; }
     .monitors-bulk__count {
@@ -1331,7 +1464,7 @@
         padding: 1px 8px;
         border-radius: 9999px;
         background: var(--sm-monitors-bulk-accent);
-        color: var(--color-ink);
+        color: var(--theme-ink);
         font-family: var(--font-mono);
         font-weight: 600;
         font-size: 0.75rem;
@@ -1379,9 +1512,10 @@
     }
 
     .monitors-group {
-        @apply overflow-hidden rounded-2xl border-2 bg-white;
-        border-color: var(--color-ink);
-        box-shadow: 4px 4px 0 0 var(--color-ink);
+        @apply overflow-hidden rounded-2xl border-2;
+        background: var(--theme-surface-elev);
+        border-color: var(--theme-ink);
+        box-shadow: 4px 4px 0 0 var(--theme-ink);
     }
     .monitors-group + .monitors-group { @apply mt-3; }
     .monitors-group__head {
@@ -1393,7 +1527,8 @@
     }
     .monitors-group__head::-webkit-details-marker { display: none; }
     .monitors-group__chevron {
-        @apply inline-grid h-5 w-5 place-items-center text-slate-500;
+        @apply inline-grid h-5 w-5 place-items-center;
+        color: var(--theme-text-muted);
         transition: transform 120ms ease;
         transform: rotate(90deg);
     }
@@ -1561,8 +1696,8 @@
     .monitors-type {
         @apply inline-flex items-center justify-center rounded font-mono text-[10px] font-semibold uppercase;
         padding: 2px 6px;
-        background: var(--color-slate-100);
-        color: var(--color-slate-600);
+        background: var(--theme-surface-sunk);
+        color: var(--theme-text-muted);
         letter-spacing: 0.04em;
         min-width: 2.5rem;
     }
@@ -1585,7 +1720,7 @@
         width: 5px;
         height: 5px;
         border-radius: 50%;
-        background: var(--color-slate-400);
+        background: var(--theme-text-quiet);
     }
     .monitors-tag--p0 .monitors-tag__dot { background: var(--sm-monitors-tag-p0-dot); }
     .monitors-tag--p1 .monitors-tag__dot { background: var(--sm-monitors-tag-p1-dot); }
@@ -1618,31 +1753,32 @@
         width: 1.5rem;
         height: 1.5rem;
         border-radius: 6px;
-        color: var(--color-slate-500);
+        color: var(--theme-text-muted);
         font-size: 1rem;
         line-height: 1;
         cursor: pointer;
     }
     .monitors-menu__btn:hover,
     .monitors-menu[data-open="true"] .monitors-menu__btn {
-        background: var(--color-slate-100);
-        color: var(--color-slate-900);
+        background: var(--theme-surface-sunk);
+        color: var(--theme-text);
     }
     .monitors-popover {
         position: fixed;
         z-index: 40;
         min-width: 11rem;
         padding: 0.25rem;
-        background: var(--color-white);
-        border: 2px solid var(--color-ink);
+        background: var(--theme-surface-elev);
+        border: 2px solid var(--theme-ink);
         border-radius: 0.625rem;
-        box-shadow: 4px 4px 0 0 var(--color-ink);
+        box-shadow: 4px 4px 0 0 var(--theme-ink);
         display: flex;
         flex-direction: column;
     }
     .monitors-popover[hidden] { display: none; }
     .monitors-popover__item {
-        @apply text-left text-sm text-slate-700;
+        @apply text-left text-sm;
+        color: var(--theme-text);
         display: block;
         padding: 0.4rem 0.6rem;
         border-radius: 0.375rem;
@@ -1654,8 +1790,8 @@
     }
     .monitors-popover__item:hover,
     .monitors-popover__item:focus-visible {
-        background: var(--color-slate-100);
-        color: var(--color-slate-900);
+        background: var(--theme-surface-sunk);
+        color: var(--theme-text);
         outline: none;
     }
     .monitors-popover__item--danger { color: var(--color-rose-700); }
@@ -1667,18 +1803,19 @@
     .monitors-popover__sep {
         height: 1px;
         margin: 0.25rem 0;
-        background: var(--color-slate-200);
+        background: var(--theme-line);
     }
 
     .monitors-empty {
-        @apply px-6 py-10 text-center text-sm text-slate-500;
+        @apply px-6 py-10 text-center text-sm;
+        color: var(--theme-text-muted);
     }
 
     .monitors-foot {
         @apply mt-4 flex items-center justify-between gap-2 rounded-xl border-2 px-4 py-3 text-xs;
-        background: var(--color-white);
-        border-color: var(--color-slate-200);
-        color: var(--color-slate-500);
+        background: var(--theme-surface-elev);
+        border-color: var(--theme-line);
+        color: var(--theme-text-muted);
     }
     .monitors-foot__mono { @apply font-mono; }
 }
