@@ -17,7 +17,7 @@ impl LogOnlyEmailSender {
 
 impl Default for LogOnlyEmailSender {
     fn default() -> Self {
-        Self::new("Status Monitor [DEV]")
+        Self::new("Uptimepage [DEV]")
     }
 }
 

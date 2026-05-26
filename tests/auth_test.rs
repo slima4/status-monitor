@@ -284,10 +284,10 @@ async fn auth_tables_accept_representative_inserts() {
 
 #[tokio::test]
 async fn log_only_sender_renders_invitation_via_tracing() {
-    let sender = LogOnlyEmailSender::new("Status Monitor [TEST]");
+    let sender = LogOnlyEmailSender::new("Uptimepage [TEST]");
     let invite = TransactionalEmail {
         to: EmailAddress::new("alice@example.test", "Alice"),
-        from: EmailAddress::new("no-reply@example.invalid", "Status Monitor"),
+        from: EmailAddress::new("no-reply@example.invalid", "Uptimepage"),
         template: EmailTemplate::Invitation {
             org_name: "Acme".into(),
             inviter_display: "Bob".into(),
@@ -305,7 +305,7 @@ async fn in_memory_sender_captures_for_assertion() {
     let sender = InMemoryEmailSender::new();
     let email = TransactionalEmail {
         to: EmailAddress::new("alice@example.test", "Alice"),
-        from: EmailAddress::new("no-reply@example.invalid", "Status Monitor"),
+        from: EmailAddress::new("no-reply@example.invalid", "Uptimepage"),
         template: EmailTemplate::Invitation {
             org_name: "Acme".into(),
             inviter_display: "Bob".into(),

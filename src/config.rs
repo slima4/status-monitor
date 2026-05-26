@@ -123,7 +123,7 @@ impl Default for TransactionalEmailConfig {
     fn default() -> Self {
         Self {
             provider: "log".into(),
-            from_name: "Status Monitor".into(),
+            from_name: "Uptimepage".into(),
             from_address: "no-reply@example.invalid".into(),
             resend: ResendConfig::default(),
         }

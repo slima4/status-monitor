@@ -65,7 +65,7 @@ mod tests {
     fn sample_invitation() -> TransactionalEmail {
         TransactionalEmail {
             to: EmailAddress::new("alice@example.com", "Alice"),
-            from: EmailAddress::new("no-reply@example.invalid", "Status Monitor"),
+            from: EmailAddress::new("no-reply@example.invalid", "Uptimepage"),
             template: EmailTemplate::Invitation {
                 org_name: "Acme".into(),
                 inviter_display: "Bob <bob@acme.test>".into(),
@@ -79,7 +79,7 @@ mod tests {
     fn sample_magic_link() -> TransactionalEmail {
         TransactionalEmail {
             to: EmailAddress::new("alice@example.com", "Alice"),
-            from: EmailAddress::new("no-reply@example.invalid", "Status Monitor"),
+            from: EmailAddress::new("no-reply@example.invalid", "Uptimepage"),
             template: EmailTemplate::MagicLink {
                 url: "https://example.test/auth/magic-link/verify?token=xyz".into(),
                 expires_in_minutes: 15,
@@ -91,7 +91,7 @@ mod tests {
     #[test]
     fn invitation_render_includes_action_url_and_org() {
         let email = sample_invitation();
-        let rendered = email.template.render("Status Monitor");
+        let rendered = email.template.render("Uptimepage");
         assert!(rendered.subject.contains("Acme"));
         assert!(rendered.subject.contains("Bob"));
         assert!(
@@ -110,7 +110,7 @@ mod tests {
     #[test]
     fn magic_link_render_produces_subject_text_and_html() {
         let email = sample_magic_link();
-        let rendered = email.template.render("Status Monitor");
+        let rendered = email.template.render("Uptimepage");
         assert!(rendered.subject.contains("Sign in"));
         assert!(
             rendered
@@ -136,7 +136,7 @@ mod tests {
 
     #[tokio::test]
     async fn log_only_sender_emits_tracing_and_returns_id() {
-        let sender = LogOnlyEmailSender::new("Status Monitor [TEST]");
+        let sender = LogOnlyEmailSender::new("Uptimepage [TEST]");
         let id = sender
             .send(sample_invitation())
             .await
