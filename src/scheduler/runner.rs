@@ -186,7 +186,7 @@ impl Scheduler {
                 evicted_throttle,
                 evicted_breakers,
                 evicted_singleflight,
-                "host throttle + breaker + singleflight sweep"
+                "scheduler swept idle entries"
             );
         }
     }
