@@ -12,6 +12,10 @@ use crate::error::Result;
 use crate::scheduler::registry::{ScheduledTarget, TargetRegistry};
 use crate::worker::{CheckTask, WorkerPool};
 
+/// Fixed sweep cadence — decoupled from registry-refresh so a DB outage or
+/// an operator-tuned refresh interval doesn't delay memory reclamation.
+const SWEEP_INTERVAL: Duration = Duration::from_secs(30);
+
 pub struct Scheduler {
     registry: Arc<TargetRegistry>,
     pool: Arc<WorkerPool>,
@@ -44,6 +48,9 @@ impl Scheduler {
         ));
         refresh.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
+        let mut sweep = tokio::time::interval(SWEEP_INTERVAL);
+        sweep.set_missed_tick_behavior(MissedTickBehavior::Skip);
+
         if let Err(err) = self.tick_once().await {
             tracing::error!(?err, "initial registry refresh failed");
         }
@@ -58,6 +65,9 @@ impl Scheduler {
                     if let Err(err) = self.tick_once().await {
                         tracing::error!(?err, "registry refresh failed");
                     }
+                }
+                _ = sweep.tick() => {
+                    self.sweep_once();
                 }
             }
         }
@@ -82,6 +92,10 @@ impl Scheduler {
         for st in diff.added {
             self.spawn_target(st);
         }
+        Ok(())
+    }
+
+    fn sweep_once(&self) {
         let evicted_throttle = self.pool.host_throttle().sweep();
         let evicted_breakers = self.pool.sweep_breakers();
         let evicted_singleflight = self.pool.domain_expiry_runtime().singleflight.sweep();
@@ -93,7 +107,6 @@ impl Scheduler {
                 "host throttle + breaker + singleflight sweep"
             );
         }
-        Ok(())
     }
 
     fn spawn_target(&self, st: ScheduledTarget) {
