@@ -1145,7 +1145,8 @@ mod tests {
             ribbon: sample_ribbon(),
         };
         let html = page.render().unwrap();
-        assert!(html.contains("No monitors yet"));
+        assert!(html.contains("Nothing to watch yet."));
+        assert!(html.contains("Add your first monitor"));
         assert!(!html.contains(r#"id="dashboard-table""#));
     }
 

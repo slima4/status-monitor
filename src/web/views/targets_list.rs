@@ -653,7 +653,8 @@ mod tests {
             onboarding: true,
         };
         let html = page.render().unwrap();
-        assert!(html.contains("No monitors yet"));
+        assert!(html.contains("Nothing to watch yet."));
+        assert!(html.contains("Add your first monitor"));
     }
 
     #[test]

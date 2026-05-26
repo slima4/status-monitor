@@ -75,7 +75,7 @@ async fn dashboard_renders_with_kpi_cards_and_chart_anchors() {
     assert!(html_ct(&resp).starts_with("text/html"));
     let html = body_text(resp).await;
     assert!(html.contains("Dashboard"));
-    assert!(html.contains("No monitors yet"));
+    assert!(html.contains("Nothing to watch yet."));
     assert!(html.contains(r#"href="/targets/new""#));
 }
 
@@ -106,7 +106,7 @@ async fn targets_list_empty_org_renders_onboarding_card() {
     assert_eq!(resp.status(), StatusCode::OK);
     let html = body_text(resp).await;
     assert!(html.contains("Monitors"));
-    assert!(html.contains("No monitors yet."));
+    assert!(html.contains("Nothing to watch yet."));
     assert!(html.contains("Add your first monitor"));
     assert!(!html.contains(r#"id="targets-filter""#));
 }
