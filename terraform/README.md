@@ -106,6 +106,23 @@ rules evaluate; force a check failure to exercise the path.
 - `terraform plan` is the non-destructive gate (like `cargo check`):
   never `apply` a plan you haven't read. Provider schema mismatches
   surface here, not in prod.
+- **Stuck on `grafana_data_source_config` 403 read-only** during apply?
+  Means state has a `grafana_data_source_config.<name>` entry left over
+  from an aborted experiment, but the resource is gone from `.tf`, so
+  Terraform tries to DELETE the config — and Grafana Cloud refuses
+  because auto-provisioned datasources are read-only (same root cause
+  as the Loki→Tempo derived-field dead end above). The fix is a
+  state-only edit, no cloud call:
+
+  ```bash
+  cd terraform
+  terraform state rm grafana_data_source_config.<name>
+  terraform plan      # should now show 0 to add/change/destroy
+  ```
+
+  Safe because the underlying datasource was never successfully
+  managed; removing it from state leaves the read-only config exactly
+  as Grafana auto-provisioned it.
 - Don't hand-edit these resources in the Grafana UI — Terraform is the
   source of truth; a UI edit is drift, reverted on next `apply`.
 - Only `data.grafana_data_source.prometheus` is read; the live Loki /
