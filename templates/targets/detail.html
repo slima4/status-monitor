@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}{{ name }} · Status Monitor{% endblock %}
+{% block title %}{{ name }} · Uptimepage{% endblock %}
 {% block content %}
 <section class="space-y-6">
   <header class="space-y-2">
@@ -22,14 +22,14 @@
 
   <section class="grid gap-4 lg:grid-cols-2">
     <div class="sticker-card p-5">
-      <h2 class="panel-label">Latency (p50/p95/p99)</h2>
+      <h2 class="panel-label">latency (p50/p95/p99)</h2>
       <div id="latency-chart"
            class="mt-4 h-64 w-full"
            data-endpoint="/api/v1/targets/{{ id }}/results?from={{ from_iso|urlencode }}&to={{ to_iso|urlencode }}&limit=500"
            aria-label="Latency p50/p95/p99 over time"></div>
     </div>
     <div class="sticker-card p-5">
-      <h2 class="panel-label">Latency breakdown</h2>
+      <h2 class="panel-label">latency breakdown</h2>
       <div id="breakdown-chart"
            class="mt-4 h-64 w-full"
            data-endpoint="/api/v1/targets/{{ id }}/results?from={{ from_iso|urlencode }}&to={{ to_iso|urlencode }}&limit=200"
@@ -38,19 +38,19 @@
   </section>
 
   <section class="sticker-card">
-    <header class="flex items-center justify-between border-b-2 border-[color:var(--theme-line)] px-5 py-3">
-      <h2 class="panel-label">Recent results</h2>
-      <span class="text-xs text-muted">Latest {{ results.len() }}{% if results_has_more %}+{% endif %}</span>
+    <header class="flex items-center justify-between border-b border-[color:var(--theme-line)] px-5 py-3">
+      <h2 class="panel-label">recent results</h2>
+      <span class="text-xs text-muted">latest {{ results.len() }}{% if results_has_more %}+{% endif %}</span>
     </header>
-    <table class="min-w-full text-sm">
+    <table class="min-w-full text-sm font-mono">
       <caption class="sr-only">Recent check results for {{ name }}</caption>
       <thead class="bg-[color:var(--theme-surface-sunk)] text-left text-xs uppercase tracking-wide text-muted">
         <tr>
-          <th scope="col" class="px-3 py-2">Timestamp</th>
-          <th scope="col" class="px-3 py-2">Status</th>
-          <th scope="col" class="px-3 py-2">Duration</th>
-          <th scope="col" class="px-3 py-2">Code</th>
-          <th scope="col" class="px-3 py-2">Error</th>
+          <th scope="col" class="px-3 py-2">timestamp</th>
+          <th scope="col" class="px-3 py-2">status</th>
+          <th scope="col" class="px-3 py-2">duration</th>
+          <th scope="col" class="px-3 py-2">code</th>
+          <th scope="col" class="px-3 py-2">error</th>
         </tr>
       </thead>
       <tbody id="detail-live-recent">
@@ -69,8 +69,8 @@
       <span class="flex items-center gap-3">
         <span class="sticker-disclosure__icon">⚙</span>
         <span class="flex flex-col text-left">
-          <span class="text-sm font-semibold text-body">Configuration</span>
-          <span class="text-xs text-muted">Raw JSON this monitor runs with</span>
+          <span class="text-sm font-semibold text-body">configuration</span>
+          <span class="text-xs text-muted">raw JSON this monitor runs with</span>
         </span>
       </span>
       <span class="sticker-disclosure__chevron">▾</span>

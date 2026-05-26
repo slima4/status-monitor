@@ -1,11 +1,11 @@
 {% extends "base.html" %}
-{% block title %}{% if form.mode == "create" %}New monitor{% else %}Edit monitor{% endif %} · Status Monitor{% endblock %}
+{% block title %}{% if form.mode == "create" %}New monitor{% else %}Edit monitor{% endif %} · Uptimepage{% endblock %}
 {% block content %}
 <section class="space-y-6">
   <header class="space-y-1">
-    <a href="/targets" class="inline-block text-sm text-muted hover:text-body">← Monitors</a>
-    <h1 class="page-title">
-      {% if form.mode == "create" %}New monitor{% else %}Edit {{ form.name }}{% endif %}
+    <a href="/targets" class="inline-block text-sm text-muted hover:text-body">← monitors</a>
+    <h1 class="page-title truncate">
+      <span class="page-title__prefix">$</span>{% if form.mode == "create" %}new monitor{% else %}edit {{ form.name }}{% endif %}
     </h1>
     <p class="text-sm text-muted">
       Pick what you want to watch and we'll check it on your schedule.
@@ -409,7 +409,7 @@
           <textarea name="http_body" rows="3" class="mt-1 w-full field font-mono">{{ form.http.body }}</textarea>
         </label>
 
-        <fieldset class="space-y-2 rounded-xl border-2 border-[color:var(--theme-line)] p-3">
+        <fieldset class="space-y-2 rounded-sm border border-[color:var(--theme-line)] p-3">
           <legend class="px-1 text-xs text-muted">Headers</legend>
           <div data-header-rows class="space-y-2">
             {% for h in form.http.headers %}
@@ -427,7 +427,7 @@
                   class="btn-ghost px-3 text-sm">+ Add header</button>
         </fieldset>
 
-        <fieldset class="space-y-2 rounded-xl border-2 border-[color:var(--theme-line)] p-3"
+        <fieldset class="space-y-2 rounded-sm border border-[color:var(--theme-line)] p-3"
                   data-auth-field="basic"
                   data-initial-mode="{{ form.http.auth.basic_initial_mode() }}"
                   data-mode="{{ form.http.auth.basic_initial_mode() }}">
@@ -446,7 +446,7 @@
           </div>
         </fieldset>
 
-        <fieldset class="space-y-2 rounded-xl border-2 border-[color:var(--theme-line)] p-3"
+        <fieldset class="space-y-2 rounded-sm border border-[color:var(--theme-line)] p-3"
                   data-auth-field="bearer"
                   data-initial-mode="{{ form.http.auth.bearer_initial_mode() }}"
                   data-mode="{{ form.http.auth.bearer_initial_mode() }}">

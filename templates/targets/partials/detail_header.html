@@ -3,9 +3,9 @@
    kind, address, interval_s, enabled, tags, last_status, last_at_iso.
    Kept in sync because both views populate the same shape from
    `target_store.get` + the most-recent check row. #}
-<a href="/targets" class="inline-block text-sm text-muted hover:text-body">← Monitors</a>
+<a href="/targets" class="inline-block text-sm text-muted hover:text-body">← monitors</a>
 <div class="flex flex-wrap items-center gap-3">
-  <h1 class="page-title">{{ name }}</h1>
+  <h1 class="page-title"><span class="page-title__prefix">$</span>{{ name }}</h1>
   {% if last_status == "up" %}
     <span class="status-badge status-badge--up">up</span>
   {% else if last_status == "down" %}
@@ -23,16 +23,16 @@
             data-detail-test-now data-target-id="{{ id }}"
             aria-describedby="detail-test-hint"
             class="sticker-btn sticker-btn--accent px-3 py-1.5 text-sm font-medium inline-flex items-center gap-1.5">
-      <span aria-hidden="true">▶</span> Run check now
+      <span aria-hidden="true">▶</span> run check now
     </button>
     <a href="/targets/{{ id }}/edit"
-       class="btn-ghost px-3 py-1.5 text-sm">Edit</a>
+       class="btn-ghost px-3 py-1.5 text-sm">edit</a>
     <button type="button"
             data-target-id="{{ id }}"
             data-action="toggle-enabled"
             data-current="{{ enabled }}"
             class="btn-ghost px-3 py-1.5 text-sm">
-      {% if enabled %}Disable{% else %}Enable{% endif %}
+      {% if enabled %}disable{% else %}enable{% endif %}
     </button>
     <button type="button"
             hx-delete="/api/v1/targets/{{ id }}"
@@ -44,7 +44,7 @@
             data-confirm-danger
             aria-label="Delete monitor {{ name }}"
             class="btn-ghost btn-ghost--danger px-3 py-1.5 text-sm focus-visible:ring-red-500">
-      Delete
+      delete
     </button>
   </span>
 </div>

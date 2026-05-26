@@ -2001,8 +2001,7 @@
     .monitors-group {
         @apply overflow-hidden rounded-sm border;
         background: var(--theme-surface-elev);
-        border-color: var(--theme-ink);
-        box-shadow: var(--theme-shadow-btn);
+        border-color: var(--theme-line);
     }
     .monitors-group + .monitors-group { @apply mt-3; }
     .monitors-group__head {
@@ -2022,6 +2021,7 @@
     .monitors-group:not([open]) .monitors-group__chevron { transform: rotate(0deg); }
     .monitors-group__title {
         @apply text-sm font-semibold;
+        font-family: var(--font-mono);
         letter-spacing: -0.005em;
     }
     .monitors-group__meta {
@@ -2076,9 +2076,10 @@
     .monitors-head > span {
         background: var(--sm-monitors-head-bg);
         color: var(--sm-monitors-head-fg);
-        font-size: 0.7rem;
+        font-family: var(--font-mono);
+        font-size: 0.6875rem;
         font-weight: 600;
-        letter-spacing: 0.06em;
+        letter-spacing: 0.08em;
         text-transform: uppercase;
         white-space: nowrap;
         padding: 0.5rem var(--sm-monitors-row-pad-x);
@@ -2119,10 +2120,15 @@
     }
     .monitors-row__name {
         @apply truncate text-sm font-medium;
+        font-family: var(--font-mono);
         color: var(--sm-monitors-name-fg);
         text-decoration: none;
+        transition: color 120ms ease;
     }
-    .monitors-row__name:hover { text-decoration: underline; }
+    .monitors-row__name:hover {
+        color: var(--theme-accent);
+        text-decoration: underline;
+    }
     .monitors-row__host {
         @apply truncate font-mono text-xs;
         color: var(--sm-monitors-host-fg);
