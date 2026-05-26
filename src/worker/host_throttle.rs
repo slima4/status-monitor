@@ -96,47 +96,15 @@ impl HostThrottle {
             .clone()
     }
 
-    /// Off-hot-path eviction. Atomic via `remove_if` — never drops a
-    /// semaphore another task just cloned out.
+    /// Off-hot-path eviction across both maps (per-(org, host, port) caps
+    /// and per-TLD RDAP slots). Atomic per shard via the shared
+    /// `sweep_idle` helper — never drops a semaphore another task just
+    /// cloned out.
     pub fn sweep(&self) -> usize {
-        let mut removed = 0usize;
-        let host_keys: Vec<HostKey> = self
-            .caps
-            .iter()
-            .filter(|e| Arc::strong_count(e.value()) == 1)
-            .map(|e| e.key().clone())
-            .collect();
         let per_host_max = self.per_host_max;
-        for k in host_keys {
-            if self
-                .caps
-                .remove_if(&k, |_, v| {
-                    Arc::strong_count(v) == 1 && v.available_permits() == per_host_max
-                })
-                .is_some()
-            {
-                removed += 1;
-            }
-        }
-        let rdap_keys: Vec<Arc<str>> = self
-            .rdap
-            .iter()
-            .filter(|e| Arc::strong_count(e.value()) == 1)
-            .map(|e| e.key().clone())
-            .collect();
         let rdap_max = self.rdap_max;
-        for k in rdap_keys {
-            if self
-                .rdap
-                .remove_if(&k, |_, v| {
-                    Arc::strong_count(v) == 1 && v.available_permits() == rdap_max
-                })
-                .is_some()
-            {
-                removed += 1;
-            }
-        }
-        removed
+        crate::worker::sweep_idle(&self.caps, |sem| sem.available_permits() == per_host_max)
+            + crate::worker::sweep_idle(&self.rdap, |sem| sem.available_permits() == rdap_max)
     }
 
     #[cfg(test)]

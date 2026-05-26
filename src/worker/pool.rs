@@ -229,27 +229,7 @@ impl WorkerPool {
     /// in the steady `Closed` state. Run from the scheduler tick to bound
     /// the breaker map under target churn (user-driven host edits, deletes).
     pub fn sweep_breakers(&self) -> usize {
-        let stale: Vec<Arc<str>> = self
-            .breakers
-            .iter()
-            .filter(|e| {
-                Arc::strong_count(e.value()) == 1 && e.value().state() == BreakerState::Closed
-            })
-            .map(|e| e.key().clone())
-            .collect();
-        let mut removed = 0usize;
-        for k in stale {
-            if self
-                .breakers
-                .remove_if(&k, |_, v| {
-                    Arc::strong_count(v) == 1 && v.state() == BreakerState::Closed
-                })
-                .is_some()
-            {
-                removed += 1;
-            }
-        }
-        removed
+        crate::worker::sweep_idle(&self.breakers, |b| b.state() == BreakerState::Closed)
     }
 
     /// Runs a one-off check against `target` honoring the per-host circuit

@@ -119,30 +119,20 @@ impl RdapSingleflight {
     ///    cache hit possible — next call would refetch anyway).
     ///  - `Empty` slots left behind by a fetcher failure.
     ///
-    /// Skips slots a live caller still references (`strong_count > 1`) and
-    /// slots whose state is currently locked (`try_lock` fails). Atomic per
-    /// shard via `DashMap::retain` — never drops a slot another task just
-    /// cloned out of the map.
+    /// Skips slots a live caller still references (`strong_count > 1` —
+    /// handled by the shared helper) and slots whose state is currently
+    /// locked (`try_lock` fails). Atomic per shard.
     pub fn sweep(&self) -> usize {
         let cache_ttl = self.cache_ttl;
-        let mut removed = 0usize;
-        self.slots.retain(|_, slot| {
-            if Arc::strong_count(slot) != 1 {
-                return true;
-            }
+        crate::worker::sweep_idle(&self.slots, |slot| {
             let Ok(guard) = slot.state.try_lock() else {
-                return true;
+                return false;
             };
-            let drop_slot = match &*guard {
+            match &*guard {
                 SlotState::Empty => true,
                 SlotState::Ready { fetched_at, .. } => fetched_at.elapsed() >= cache_ttl,
-            };
-            if drop_slot {
-                removed += 1;
             }
-            !drop_slot
-        });
-        removed
+        })
     }
 }
 

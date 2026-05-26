@@ -13,14 +13,46 @@ pub use http_check::execute_http_check;
 pub(crate) use http_check::{HttpProbe, execute_http_check_probe};
 pub use pool::{CheckTask, ResultFanout, WorkerPool, host_for_spec};
 
+use std::hash::Hash;
 use std::net::SocketAddr;
+use std::sync::Arc;
 
+use dashmap::DashMap;
 use tokio::net::TcpStream;
 use uuid::Uuid;
 
 use crate::domain::{CheckResult, CheckSpec};
 use crate::http_client::HttpClients;
 use crate::worker::domain_expiry::DomainExpiryRuntime;
+
+/// Off-hot-path eviction over a `DashMap<K, Arc<T>>`. Drops entries whose
+/// only strong reference is the map's own and that the caller-supplied
+/// `idle` predicate accepts. Atomic per shard via `DashMap::retain` — never
+/// drops an entry another task just cloned out of the map.
+///
+/// Used by `HostThrottle::sweep`, `WorkerPool::sweep_breakers`, and
+/// `RdapSingleflight::sweep`. Three sites converged on this shape so an
+/// invariant fix (e.g. tightening the strong-count check) only has to be
+/// made in one place.
+pub(crate) fn sweep_idle<K, T, F>(map: &DashMap<K, Arc<T>>, idle: F) -> usize
+where
+    K: Eq + Hash,
+    F: Fn(&T) -> bool,
+{
+    let mut removed = 0usize;
+    map.retain(|_, slot| {
+        if Arc::strong_count(slot) != 1 {
+            return true;
+        }
+        if idle(slot.as_ref()) {
+            removed += 1;
+            false
+        } else {
+            true
+        }
+    });
+    removed
+}
 
 /// Per-dispatch dependencies handed to `execute`. Bundles everything an
 /// executor sub-handler might need so adding a new dep (e.g. another
