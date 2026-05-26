@@ -249,6 +249,96 @@ resource "grafana_rule_group" "pipeline" {
     }
   }
 
+  # Scheduler stuck: the registry refresh has failed N consecutive times
+  # under exponential backoff. The gauge resets to 0 on the first
+  # successful refresh, so a sustained high value means new
+  # customer-added targets aren't being picked up. Critical — every
+  # minute past the streak is a minute of stale registry. no_data = OK:
+  # absence of the gauge means the scheduler isn't even reporting
+  # (PipelineStalled covers that case).
+  rule {
+    name           = "StatusMonitorRegistryRefreshStuck"
+    condition      = "C"
+    for            = "5m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+    labels = {
+      severity = "critical"
+      service  = "status-monitor"
+    }
+    annotations = {
+      summary     = "status-monitor: scheduler refresh stuck"
+      description = "registry refresh has failed 5+ consecutive times for 5m — newly-added customer targets are not being scheduled. Backoff is active (up to 10× refresh interval). Likely cause: Postgres outage, schema drift, or cipher misconfig. Runbook: runbooks/grafana-cloud.md."
+    }
+    data {
+      ref_id         = "A"
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      relative_time_range {
+        from = 300
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "A"
+        instant = true
+        expr    = "max(status_monitor_scheduler_consecutive_refresh_failures) > 5"
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = local.threshold_c
+    }
+  }
+
+  # Registry refresh latency creeping up — the trigger for the deferred
+  # incremental-sync work in the scaling-roadmap. 500ms p99 over 15m is
+  # the threshold described in the metric describe text; tune as the
+  # baseline shifts. Warning — checks still run; this signals "the
+  # full-scan refresh is starting to strain" not "it's broken".
+  # Exporter ships summaries (no _bucket), hence the {quantile} label
+  # rather than histogram_quantile() — per docs/metrics.md.
+  rule {
+    name           = "StatusMonitorRegistryRefreshSlow"
+    condition      = "C"
+    for            = "15m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+    labels = {
+      severity = "warning"
+      service  = "status-monitor"
+    }
+    annotations = {
+      summary     = "status-monitor: registry refresh latency high"
+      description = "registry refresh p99 > 500ms for 15m — the full-scan refresh is starting to strain at the current org count. Trigger to start the deferred incremental-sync work. Runbook: runbooks/grafana-cloud.md."
+    }
+    data {
+      ref_id         = "A"
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      relative_time_range {
+        from = 1200
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "A"
+        instant = true
+        expr    = "max(status_monitor_scheduler_refresh_duration_ms{quantile=\"0.99\"}) > 500"
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = local.threshold_c
+    }
+  }
+
   # Storage write p99 latency high. histogram_quantile over the _bucket
   # series; p99 > 2s sustained for 10m means ClickHouse is degrading
   # before it starts dropping. rate over [10m] (not [5m]): on a
