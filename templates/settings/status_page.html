@@ -117,6 +117,17 @@
         <p class="text-xs text-muted">Used for the header background.</p>
       </div>
 
+      <div class="space-y-1">
+        <label for="public-style" class="text-sm font-medium">Page style</label>
+        <select id="public-style" name="public_style" data-sm-combobox aria-label="Page style">
+          <option value="default"{% if s.public_style.as_str() == "default" %} selected{% endif %}>Default — CLI register</option>
+          <option value="classic"{% if s.public_style.as_str() == "classic" %} selected{% endif %}>Classic — neutral SaaS</option>
+          <option value="terminal"{% if s.public_style.as_str() == "terminal" %} selected{% endif %}>Terminal — CRT phosphor</option>
+          <option value="winter"{% if s.public_style.as_str() == "winter" %} selected{% endif %}>Winter — cool blue</option>
+        </select>
+        <p class="text-xs text-muted">Surface register for the public page.</p>
+      </div>
+
       <label class="flex items-start gap-3">
         <input type="checkbox" name="public_show_powered_by" class="mt-1"
                {% if s.show_powered_by %}checked{% endif %}>

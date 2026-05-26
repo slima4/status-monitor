@@ -30,7 +30,9 @@ pub use notification_channel::{
     ChannelConfig, ChannelKind, NewNotificationChannel, NotificationChannel,
     NotificationChannelUpdate, validate_channel_name,
 };
-pub use org::{BrandingError, OrgId, Organization, PublicOrgBranding, SlugError, validate_slug};
+pub use org::{
+    BrandingError, OrgId, Organization, PublicOrgBranding, PublicStyle, SlugError, validate_slug,
+};
 pub use public::{
     ComponentHistoryResponse, DayState, IncidentSeverity, IncidentStatusPhase, OverallState,
     OverallStatus, PublicComponent, PublicComponentGroup, PublicComponentStatus, PublicIncident,

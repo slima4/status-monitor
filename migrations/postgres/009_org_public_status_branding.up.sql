@@ -9,6 +9,7 @@ ALTER TABLE organizations
     ADD COLUMN public_about                TEXT,
     ADD COLUMN public_brand_color          TEXT,
     ADD COLUMN public_logo_path            TEXT,
+    ADD COLUMN public_style                TEXT NOT NULL DEFAULT 'default',
     -- Nullable on purpose: the domain models this as Option<bool> where NULL
     -- means "no operator override — fall back to config.default_show_powered_by
     -- at read time", the same NULL-is-fallback contract every other public_*
@@ -37,7 +38,9 @@ ALTER TABLE organizations
     ADD CONSTRAINT public_custom_domain_canonical
         CHECK (public_custom_domain IS NULL
                OR (public_custom_domain::text = lower(public_custom_domain::text)
-                   AND public_custom_domain::text NOT LIKE '%.'));
+                   AND public_custom_domain::text NOT LIKE '%.')),
+    ADD CONSTRAINT public_style_known
+        CHECK (public_style IN ('default', 'classic', 'terminal', 'winter'));
 
 CREATE INDEX idx_orgs_public_enabled
     ON organizations (slug)

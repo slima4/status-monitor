@@ -89,6 +89,7 @@
       public_display_name: str("public_display_name"),
       public_about: str("public_about"),
       public_brand_color: str("public_brand_color"),
+      public_style: form.elements.public_style.value || "default",
       public_show_powered_by: form.elements.public_show_powered_by.checked,
     };
   }

@@ -425,6 +425,7 @@ pub struct BrandingView {
     pub brand_color: String,
     pub logo_url: Option<String>,
     pub show_powered_by: bool,
+    pub style: &'static str,
 }
 
 impl BrandingView {
@@ -450,6 +451,7 @@ impl BrandingView {
                 .as_deref()
                 .map(|p| format!("{LOGO_ROUTE}?v={p}")),
             show_powered_by: o.branding.show_powered_by(cfg.default_show_powered_by),
+            style: o.branding.public_style.as_str(),
         }
     }
 }

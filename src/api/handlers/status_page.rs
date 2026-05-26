@@ -19,7 +19,7 @@ use crate::api::ApiError;
 use crate::api::error::codes;
 use crate::api::routes::{path_based_public_routes_enabled, subdomain_public_routes_enabled};
 use crate::app::AppState;
-use crate::domain::{OrgId, PublicOrgBranding};
+use crate::domain::{OrgId, PublicOrgBranding, PublicStyle};
 use crate::error::{AppError, Result};
 use crate::public_status::{LocalDiskLogoStorage, LogoMime, LogoStorage};
 use crate::storage::{OrgBranding, orgs as orgs_store};
@@ -42,6 +42,7 @@ pub struct StatusPageSettings {
     pub public_about: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub public_brand_color: Option<String>,
+    pub public_style: PublicStyle,
     /// Resolved against the configured default when the operator hasn't chosen.
     pub show_powered_by: bool,
     /// Versioned logo URL on the public surface, or `null` when no logo.
@@ -68,6 +69,10 @@ pub struct UpdateStatusPageRequest {
     pub public_about: Option<String>,
     #[serde(default)]
     pub public_brand_color: Option<String>,
+    /// Absent = keep the current value, so a partial-replace client can't
+    /// silently reset the operator's chosen register to "default".
+    #[serde(default)]
+    pub public_style: Option<PublicStyle>,
     #[serde(default, deserialize_with = "de_checkbox_bool")]
     #[schema(value_type = bool)]
     pub public_show_powered_by: bool,
@@ -168,6 +173,7 @@ pub async fn update_settings(
         public_brand_color: normalise_opt(req.public_brand_color).map(|c| c.to_ascii_lowercase()),
         public_logo_path: None,
         public_show_powered_by: Some(req.public_show_powered_by),
+        public_style: req.public_style.unwrap_or(current.branding.public_style),
     };
     branding.validate().map_err(|e| {
         AppError::bad_request_field(codes::BRANDING_INVALID, e.to_string(), e.field())
@@ -322,6 +328,7 @@ pub(crate) fn build_settings(state: &AppState, ob: &OrgBranding) -> StatusPageSe
         public_display_name: b.public_display_name.clone(),
         public_about: b.public_about.clone(),
         public_brand_color: b.public_brand_color.clone(),
+        public_style: b.public_style,
         show_powered_by: b.show_powered_by(cfg.default_show_powered_by),
         logo_url: b
             .public_logo_path

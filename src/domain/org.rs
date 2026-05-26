@@ -40,6 +40,47 @@ pub struct PublicOrgBranding {
     pub public_brand_color: Option<String>,
     pub public_logo_path: Option<String>,
     pub public_show_powered_by: Option<bool>,
+    #[serde(default)]
+    pub public_style: PublicStyle,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum PublicStyle {
+    #[default]
+    Default,
+    Classic,
+    Terminal,
+    Winter,
+}
+
+impl PublicStyle {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Default => "default",
+            Self::Classic => "classic",
+            Self::Terminal => "terminal",
+            Self::Winter => "winter",
+        }
+    }
+
+    pub fn from_db(s: &str) -> Self {
+        match s {
+            "default" => Self::Default,
+            "classic" => Self::Classic,
+            "terminal" => Self::Terminal,
+            "winter" => Self::Winter,
+            other => {
+                tracing::warn!(
+                    value = other,
+                    "unknown public_style in DB, falling back to default"
+                );
+                Self::Default
+            }
+        }
+    }
+
+    pub const ALL: &'static [&'static str] = &["default", "classic", "terminal", "winter"];
 }
 
 /// Domain-layer mirror of the column CHECK constraints. Lets handlers map to
@@ -259,5 +300,30 @@ mod tests {
         assert_eq!(b.validate(), Err(BrandingError::DisplayNameLength));
         b.public_display_name = Some("y".repeat(81));
         assert_eq!(b.validate(), Err(BrandingError::DisplayNameLength));
+    }
+
+    #[test]
+    fn public_style_matches_migration_check_constraint() {
+        // PublicStyle::ALL is the canonical Rust list. Read the migration and
+        // confirm every variant appears in the SQL CHECK list — adding a new
+        // variant without updating the migration produces a 500 on PATCH.
+        let migration =
+            include_str!("../../migrations/postgres/009_org_public_status_branding.up.sql");
+        for s in PublicStyle::ALL {
+            let needle = format!("'{}'", s);
+            assert!(
+                migration.contains(&needle),
+                "PublicStyle variant {:?} missing from migration CHECK constraint",
+                s
+            );
+        }
+    }
+
+    #[test]
+    fn public_style_from_db_known_values_round_trip() {
+        for s in PublicStyle::ALL {
+            assert_eq!(PublicStyle::from_db(s).as_str(), *s);
+        }
+        assert_eq!(PublicStyle::from_db("garbage").as_str(), "default");
     }
 }

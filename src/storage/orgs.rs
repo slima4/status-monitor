@@ -9,7 +9,9 @@ use serde_json::Value;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::domain::{Membership, OrgId, Organization, PublicOrgBranding, Role, UserId};
+use crate::domain::{
+    Membership, OrgId, Organization, PublicOrgBranding, PublicStyle, Role, UserId,
+};
 use crate::error::{AppError, Result};
 use crate::storage::locks::{advisory_xact_lock, org_lock_key, user_lock_key};
 
@@ -907,7 +909,8 @@ pub async fn load_public_branding(pool: &PgPool, org: OrgId) -> Result<Option<Or
                   public_about,
                   public_brand_color,
                   public_logo_path,
-                  public_show_powered_by
+                  public_show_powered_by,
+                  public_style
              FROM organizations
             WHERE id = $1
               AND deleted_at IS NULL"#,
@@ -926,6 +929,7 @@ pub async fn load_public_branding(pool: &PgPool, org: OrgId) -> Result<Option<Or
             public_brand_color: r.public_brand_color,
             public_logo_path: r.public_logo_path,
             public_show_powered_by: r.public_show_powered_by,
+            public_style: PublicStyle::from_db(&r.public_style),
         },
     }))
 }
@@ -953,6 +957,7 @@ pub async fn update_public_branding(
                public_about           = $4,
                public_brand_color     = $5,
                public_show_powered_by = $6,
+               public_style           = $7,
                updated_at             = now()
            WHERE id = $1 AND deleted_at IS NULL
            RETURNING id"#,
@@ -963,6 +968,7 @@ pub async fn update_public_branding(
     .bind(b.public_about.as_deref())
     .bind(b.public_brand_color.as_deref())
     .bind(b.public_show_powered_by)
+    .bind(b.public_style.as_str())
     .fetch_optional(&mut *tx)
     .await
     .context("update_public_branding: update")?;
@@ -975,7 +981,10 @@ pub async fn update_public_branding(
         org,
         Some(actor),
         "org.status_page_updated",
-        serde_json::json!({ "public_status_enabled": b.public_status_enabled }),
+        serde_json::json!({
+            "public_status_enabled": b.public_status_enabled,
+            "public_style": b.public_style.as_str(),
+        }),
     )
     .await
     .context("update_public_branding: audit")?;
@@ -1113,6 +1122,7 @@ struct BrandingRow {
     public_brand_color: Option<String>,
     public_logo_path: Option<String>,
     public_show_powered_by: Option<bool>,
+    public_style: String,
 }
 
 #[derive(sqlx::FromRow)]
