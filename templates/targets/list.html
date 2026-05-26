@@ -21,20 +21,7 @@
   </header>
 
   {% if onboarding %}
-  <div class="sticker-card flex flex-col items-center gap-4 p-8 text-center">
-    <h2 class="text-xl font-semibold text-slate-800">No monitors yet.</h2>
-    <p class="max-w-md text-sm text-slate-600">
-      Add your first monitor and we'll start checking it on your schedule. URLs,
-      TCP ports, DNS records, TLS certs, and domain expiry — all supported.
-    </p>
-    <a href="/targets/new"
-       class="sticker-btn sticker-btn--primary px-5 py-2.5 text-sm font-medium transition-transform hover:-translate-y-0.5">
-      ▶ Add your first monitor
-    </a>
-    <p class="text-xs text-slate-500">
-      Tip: try <code>https://example.com/</code> with the default 60-second interval.
-    </p>
-  </div>
+  {% include "_empty_monitors_hero.html" %}
   {% else %}
   {% include "targets/partials/list_body.html" %}
   {% endif %}

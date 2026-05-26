@@ -648,6 +648,82 @@
         font-variation-settings: "opsz" 120, "SOFT" 60, "WONK" 1;
     }
 
+    /* Empty-state hero (dashboard + monitors list when no monitors exist).
+       Wider than a regular .sticker-card, big Fraunces title, antenna+EKG
+       motif overhead, warm radial highlight behind the icon. One partial
+       (templates/_empty_monitors_hero.html) renders this on both pages so
+       wording and motion stay in lockstep. */
+    .empty-hero {
+        @apply mx-auto flex flex-col items-center gap-6 rounded-2xl border-2 px-8 py-12 text-center;
+        max-width: 38rem;
+        background: var(--theme-surface-elev);
+        border-color: var(--theme-ink);
+        box-shadow: var(--theme-shadow-card);
+        position: relative;
+        overflow: hidden;
+    }
+    /* Warm halo behind the antenna icon — pulls focus to the motif without
+       another layout element. Sits at z:0 so the SVG + copy + button stay
+       on top (siblings get position:relative below). */
+    .empty-hero::before {
+        content: "";
+        position: absolute;
+        top: -2rem;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 24rem;
+        height: 14rem;
+        background: radial-gradient(
+            20rem 10rem at 50% 50%,
+            oklch(0.94 0.07 75 / 0.35),
+            transparent 70%
+        );
+        pointer-events: none;
+        z-index: 0;
+    }
+    .empty-hero > * { position: relative; z-index: 1; }
+
+    .empty-hero__icon {
+        width: 8rem;
+        height: auto;
+    }
+    .empty-hero__body {
+        @apply flex flex-col items-center gap-4;
+    }
+    .empty-hero__title {
+        font-family: var(--font-display);
+        font-weight: 600;
+        font-optical-sizing: auto;
+        font-variation-settings: "opsz" 96, "SOFT" 40, "WONK" 0;
+        font-size: 2.25rem;
+        letter-spacing: -0.025em;
+        line-height: 1.05;
+        color: var(--theme-text);
+    }
+    .empty-hero__lede {
+        @apply text-sm;
+        max-width: 28rem;
+        color: var(--theme-text-muted);
+        line-height: 1.6;
+    }
+    .empty-hero__cta {
+        @apply px-6 py-3 text-sm font-medium;
+        margin-top: 0.5rem;
+        transition: transform 150ms ease;
+    }
+    .empty-hero__cta:hover { @apply -translate-y-0.5; }
+    .empty-hero__tip {
+        @apply text-xs;
+        color: var(--theme-text-quiet);
+        margin-top: 0.25rem;
+    }
+    .empty-hero__tip-code {
+        @apply rounded font-mono;
+        background: var(--theme-surface-sunk);
+        color: var(--theme-text);
+        padding: 1px 4px;
+    }
+
     /* The single page <h1> scale, app-wide. (login adds sm:text-4xl on
        top for its hero.) One definition so every surface's title matches.
        Fraunces at 600 weight reads close to Inter 700 thanks to its denser

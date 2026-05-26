@@ -16,17 +16,7 @@
   </header>
 
   {% if onboarding %}
-  <div class="sticker-card flex flex-col items-center gap-3 p-8 text-center">
-    <h2 class="text-xl font-semibold text-slate-800">No monitors yet</h2>
-    <p class="max-w-md text-sm text-slate-600">
-      Add your first monitor and we'll start checking it on your schedule.
-      URLs, TCP ports, DNS records, TLS certs, and domain expiry — all supported.
-    </p>
-    <a href="/targets/new"
-       class="sticker-btn sticker-btn--primary px-5 py-2.5 text-sm font-medium transition-transform hover:-translate-y-0.5">
-      ▶ Add your first monitor
-    </a>
-  </div>
+  {% include "_empty_monitors_hero.html" %}
   {% else %}
   {% include "dashboard/table.html" %}
   {% endif %}
