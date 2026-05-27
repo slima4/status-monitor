@@ -331,7 +331,7 @@ pub mod settings {
             Some(f) => (
                 fmt_human(f.created_at),
                 provider_label(f.provider.as_deref()),
-                f.last_login_at
+                f.last_seen_at
                     .map(fmt_human)
                     .unwrap_or_else(|| "—".to_string()),
             ),

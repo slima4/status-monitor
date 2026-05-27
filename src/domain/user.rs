@@ -113,19 +113,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn app_theme_matches_users_table_check_constraint() {
-        let migration = include_str!("../../migrations/postgres/004_organizations.up.sql");
-        for s in AppTheme::ALL {
-            let needle = format!("'{}'", s);
-            assert!(
-                migration.contains(&needle),
-                "AppTheme variant {:?} missing from users.theme CHECK",
-                s
-            );
-        }
-    }
-
-    #[test]
     fn app_theme_from_db_round_trips_known_values() {
         for s in AppTheme::ALL {
             assert_eq!(AppTheme::from_db(s).as_str(), *s);

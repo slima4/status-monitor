@@ -348,23 +348,6 @@ mod tests {
     }
 
     #[test]
-    fn public_style_matches_migration_check_constraint() {
-        // PublicStyle::ALL is the canonical Rust list. Read the migration and
-        // confirm every variant appears in the SQL CHECK list — adding a new
-        // variant without updating the migration produces a 500 on PATCH.
-        let migration =
-            include_str!("../../migrations/postgres/009_org_public_status_branding.up.sql");
-        for s in PublicStyle::ALL {
-            let needle = format!("'{}'", s);
-            assert!(
-                migration.contains(&needle),
-                "PublicStyle variant {:?} missing from migration CHECK constraint",
-                s
-            );
-        }
-    }
-
-    #[test]
     fn public_style_from_db_known_values_round_trip() {
         for s in PublicStyle::ALL {
             assert_eq!(PublicStyle::from_db(s).as_str(), *s);

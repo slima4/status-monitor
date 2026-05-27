@@ -342,25 +342,22 @@ pub async fn recover(pool: &PgPool, raw_token: &str) -> Result<RecoverOutcome> {
     })
 }
 
-/// Read-only header facts for the account settings page. `provider` and
-/// `last_login_at` are the most-recent `oauth_identities` sign-in; `None`
-/// fields mean the user has no identity row yet (degraded, not an error).
+/// `last_seen_at` is the session-touched activity timestamp (cookie auth,
+/// API tokens, magic-link), not just OAuth handshakes — what users read
+/// "Last sign-in" as.
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct AccountFacts {
     pub created_at: DateTime<Utc>,
     pub provider: Option<String>,
-    pub last_login_at: Option<DateTime<Utc>>,
+    pub last_seen_at: Option<DateTime<Utc>>,
 }
 
-/// One indexed `users` lookup with a single lateral pick of the latest
-/// identity row — provider and last-sign-in come from the same scan rather
-/// than two correlated subqueries. Excludes soft-deleted users.
 pub async fn account_facts(pool: &PgPool, user_id: UserId) -> Result<Option<AccountFacts>> {
     Ok(sqlx::query_as::<_, AccountFacts>(
-        "SELECT u.created_at, oi.provider, oi.last_login_at \
+        "SELECT u.created_at, u.last_seen_at, oi.provider \
            FROM users u \
            LEFT JOIN LATERAL ( \
-                SELECT provider, last_login_at FROM oauth_identities \
+                SELECT provider FROM oauth_identities \
                  WHERE user_id = u.id ORDER BY last_login_at DESC LIMIT 1 \
            ) oi ON true \
           WHERE u.id = $1 AND u.deleted_at IS NULL",

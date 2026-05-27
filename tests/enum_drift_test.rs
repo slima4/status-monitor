@@ -12,7 +12,9 @@
 mod common;
 
 use status_monitor::auth::OauthProvider;
-use status_monitor::domain::{ChannelKind, IncidentSeverity, IncidentStatusPhase};
+use status_monitor::domain::{
+    AppTheme, ChannelKind, IncidentSeverity, IncidentStatusPhase, PublicStyle,
+};
 
 /// Pull the parenthesised list from a constraint def like
 /// `CHECK ((severity = ANY (ARRAY['minor'::text, 'major'::text, 'critical'::text])))`
@@ -173,6 +175,40 @@ async fn notification_channels_kind_check_matches_rust_enum() {
     assert_eq!(
         db, rust,
         "notification_channels.kind CHECK list ({db:?}) drifted from ChannelKind ({rust:?})"
+    );
+}
+
+#[tokio::test]
+#[ignore]
+async fn users_theme_check_matches_app_theme_enum() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let def = constraint_def(&pool, "users_theme_check")
+        .await
+        .expect("users_theme_check missing");
+    let db = sorted(quoted_tokens(&def));
+    let rust = sorted(AppTheme::ALL.iter().map(|s| (*s).to_string()).collect());
+    assert_eq!(
+        db, rust,
+        "users.theme CHECK list ({db:?}) drifted from AppTheme ({rust:?})"
+    );
+}
+
+#[tokio::test]
+#[ignore]
+async fn organizations_public_style_check_matches_public_style_enum() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let def = constraint_def(&pool, "public_style_known")
+        .await
+        .expect("public_style_known missing");
+    let db = sorted(quoted_tokens(&def));
+    let rust = sorted(PublicStyle::ALL.iter().map(|s| (*s).to_string()).collect());
+    assert_eq!(
+        db, rust,
+        "organizations.public_style CHECK list ({db:?}) drifted from PublicStyle ({rust:?})"
     );
 }
 

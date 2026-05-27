@@ -44,6 +44,15 @@ mod static_refs {
     pub fn version(_: &str, _: &dyn askama::Values) -> askama::Result<&'static str> {
         Ok(env!("CARGO_PKG_VERSION"))
     }
+
+    /// Evaluated once per process; a prod process crossing Jan 1 picks up
+    /// the new year on the next deploy.
+    #[askama::filter_fn]
+    pub fn current_year(_: &str, _: &dyn askama::Values) -> askama::Result<i32> {
+        use chrono::Datelike;
+        static YEAR: std::sync::OnceLock<i32> = std::sync::OnceLock::new();
+        Ok(*YEAR.get_or_init(|| chrono::Utc::now().year()))
+    }
 }
 
 /// Format raw values (timestamps, durations) by writing straight into the
