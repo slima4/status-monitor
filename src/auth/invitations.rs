@@ -300,29 +300,33 @@ pub async fn revoke(pool: &PgPool, org: OrgId, id: Uuid) -> Result<bool> {
 
 /// Mark `accepted_at = now()`. Returns false if the row no longer qualified
 /// (already accepted, declined, expired, or deleted) — caller surfaces that
-/// as `INVITATION_INVALID`.
-pub async fn mark_accepted(pool: &PgPool, id: Uuid) -> Result<bool> {
+/// as `INVITATION_INVALID`. The (id, org_id) tuple ties the mutation to the
+/// org the token resolved to; a request-supplied id alone could never flip a
+/// pending invite in another tenant.
+pub async fn mark_accepted(pool: &PgPool, org: OrgId, id: Uuid) -> Result<bool> {
     let res = sqlx::query(
         "UPDATE invitations SET accepted_at = now() \
-         WHERE id = $1 \
+         WHERE id = $1 AND org_id = $2 \
          AND accepted_at IS NULL AND declined_at IS NULL \
          AND expires_at > now()",
     )
     .bind(id)
+    .bind(org.0)
     .execute(pool)
     .await
     .context("invitations::mark_accepted")?;
     Ok(res.rows_affected() > 0)
 }
 
-pub async fn mark_declined(pool: &PgPool, id: Uuid) -> Result<bool> {
+pub async fn mark_declined(pool: &PgPool, org: OrgId, id: Uuid) -> Result<bool> {
     let res = sqlx::query(
         "UPDATE invitations SET declined_at = now() \
-         WHERE id = $1 \
+         WHERE id = $1 AND org_id = $2 \
          AND accepted_at IS NULL AND declined_at IS NULL \
          AND expires_at > now()",
     )
     .bind(id)
+    .bind(org.0)
     .execute(pool)
     .await
     .context("invitations::mark_declined")?;
@@ -335,7 +339,8 @@ pub async fn mark_declined(pool: &PgPool, id: Uuid) -> Result<bool> {
 /// query plan is stable and the bind avoids string concatenation.
 pub async fn purge_old(pool: &PgPool, keep_history_days: i64) -> Result<u64> {
     let res = sqlx::query(
-        "DELETE FROM invitations \
+        "/* SAFE: cross-tenant retention sweep */ \
+         DELETE FROM invitations \
          WHERE (accepted_at IS NOT NULL AND accepted_at < now() - make_interval(days => $1)) \
             OR (declined_at IS NOT NULL AND declined_at < now() - make_interval(days => $1)) \
             OR (accepted_at IS NULL AND declined_at IS NULL \

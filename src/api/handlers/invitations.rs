@@ -250,7 +250,7 @@ pub async fn accept(
     // both pass find_pending_by_token, both call add_member (idempotent
     // ON CONFLICT), the loser sees INVITATION_INVALID, and an orphan
     // membership remains visible to the same-user race.
-    if !inv::mark_accepted(pool, row.id).await? {
+    if !inv::mark_accepted(pool, row.org_id, row.id).await? {
         return Err(AppError::not_found(
             codes::INVITATION_INVALID,
             "invitation is invalid or has expired",
@@ -292,7 +292,7 @@ pub async fn decline(
             "invitation is invalid or has expired",
         ));
     };
-    if !inv::mark_declined(pool, row.id).await? {
+    if !inv::mark_declined(pool, row.org_id, row.id).await? {
         return Err(AppError::not_found(
             codes::INVITATION_INVALID,
             "invitation is invalid or has expired",

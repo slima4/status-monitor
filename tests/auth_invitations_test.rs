@@ -94,13 +94,13 @@ async fn create_lookup_accept_flow() {
         .await
         .unwrap();
     assert_eq!(added, AddMemberOutcome::Added);
-    let accepted = invitations::mark_accepted(&pool, created.row.id)
+    let accepted = invitations::mark_accepted(&pool, org, created.row.id)
         .await
         .unwrap();
     assert!(accepted);
 
     // Second accept attempt fails — row is no longer pending.
-    let again = invitations::mark_accepted(&pool, created.row.id)
+    let again = invitations::mark_accepted(&pool, org, created.row.id)
         .await
         .unwrap();
     assert!(!again);
@@ -139,7 +139,9 @@ async fn decline_flow() {
     .await
     .unwrap();
 
-    let declined = invitations::mark_declined(&pool, inv.row.id).await.unwrap();
+    let declined = invitations::mark_declined(&pool, org, inv.row.id)
+        .await
+        .unwrap();
     assert!(declined);
 
     let lookup = invitations::find_pending_by_token(&pool, &inv.token)
@@ -184,7 +186,9 @@ async fn expired_invitation_is_not_pending() {
         .unwrap();
     assert!(lookup.is_none());
     assert!(
-        !invitations::mark_accepted(&pool, inv.row.id).await.unwrap(),
+        !invitations::mark_accepted(&pool, org, inv.row.id)
+            .await
+            .unwrap(),
         "expired must not accept"
     );
 
@@ -293,6 +297,63 @@ async fn purge_old_drops_settled_and_expired_rows() {
         .await
         .unwrap();
     assert_eq!(n_fresh, 1, "fresh row must survive");
+
+    pool.close().await;
+    drop_pg(&name).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn mark_accepted_and_declined_require_matching_org() {
+    let Some((db, name)) = fresh_pg().await else {
+        return;
+    };
+    let pool = open_pool(&db).await;
+    MIGRATOR.run(&pool).await.unwrap();
+
+    let owner = seed_user(&pool, "tenant_a@example.test").await;
+    let org_a = seed_org(&pool, owner).await;
+    let attacker_owner = seed_user(&pool, "tenant_b@example.test").await;
+    let org_b = seed_org(&pool, attacker_owner).await;
+
+    let inv = invitations::create(
+        &pool,
+        org_a,
+        owner,
+        "victim@example.test",
+        Role::Member,
+        168,
+        u32::MAX,
+    )
+    .await
+    .unwrap();
+
+    assert!(
+        !invitations::mark_accepted(&pool, org_b, inv.row.id)
+            .await
+            .unwrap(),
+        "wrong-org accept must be a no-op",
+    );
+    assert!(
+        !invitations::mark_declined(&pool, org_b, inv.row.id)
+            .await
+            .unwrap(),
+        "wrong-org decline must be a no-op",
+    );
+    assert!(
+        invitations::find_pending_by_token(&pool, &inv.token)
+            .await
+            .unwrap()
+            .is_some(),
+        "invitation must still be pending after cross-tenant attempts",
+    );
+
+    assert!(
+        invitations::mark_accepted(&pool, org_a, inv.row.id)
+            .await
+            .unwrap(),
+        "matching-org accept must succeed",
+    );
 
     pool.close().await;
     drop_pg(&name).await;
