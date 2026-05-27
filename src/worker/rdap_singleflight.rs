@@ -12,7 +12,7 @@
 //!  - A successful response is reused for `cache_ttl` (default 60s). The
 //!    window is short by design: durable last-good lives in Postgres
 //!    `domain_expiry_state`; the in-process cache only absorbs
-//!    scheduler-jitter waves and concurrent target dispatch.
+//!    scheduler-stagger waves and concurrent target dispatch.
 //!  - Errors are *not* cached. The next caller after a failure tries again,
 //!    so a transient blip doesn't poison the slot.
 

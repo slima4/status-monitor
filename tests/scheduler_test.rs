@@ -19,9 +19,7 @@ use status_monitor::worker::{ResultFanout, WorkerPool};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use crate::common::{
-    breaker_cfg, http_target, scheduler_cfg, scheduler_cfg_jittered, spawn_router, test_client,
-};
+use crate::common::{breaker_cfg, http_target, scheduler_cfg, spawn_router, test_client};
 
 async fn spawn_counting_mock() -> (std::net::SocketAddr, Arc<AtomicU32>) {
     let counter = Arc::new(AtomicU32::new(0));
@@ -86,16 +84,13 @@ async fn scheduler_runs_target_periodically() {
     assert!(counter.load(Ordering::Relaxed) >= 3);
 }
 
-// Coverage smoke for the jittered code path: every other scheduler test uses
-// `scheduler_cfg(_)`, which hard-codes jitter_pct = 0, so the phase-offset
-// branch of `run_target_loop` had zero coverage and could regress to a panic
-// or a stall unnoticed. This asserts only what is non-flaky at wall-clock
-// resolution: with jitter enabled the target still checks promptly and keeps
-// producing results. It deliberately does NOT assert cadence steadiness — the
-// fixed-cadence-vs-drift invariant is locked structurally by the `jitter()`
-// unit tests (bounded, one-time offset), not by timing assertions here.
+// Coverage smoke for the stagger code path: confirms the deterministic
+// phase-offset branch of `run_target_loop` still produces results promptly.
+// Cadence-steadiness is locked structurally by the `stagger_offset` unit
+// tests (bounded, deterministic); this test asserts only that the loop
+// keeps ticking, not exact wall-clock timing.
 #[tokio::test]
-async fn scheduler_runs_jittered_target() {
+async fn scheduler_runs_staggered_target() {
     let (addr, counter) = spawn_counting_mock().await;
     let interval = Duration::from_millis(300);
     let store = Arc::new(InMemoryTargetStore::from_vec(vec![http_target(
@@ -114,11 +109,7 @@ async fn scheduler_runs_jittered_target() {
         status_monitor::worker::host_throttle::HostThrottle::permissive(),
         common::test_domain_expiry_runtime(),
     ));
-    let scheduler = Arc::new(Scheduler::new(
-        registry,
-        pool,
-        scheduler_cfg_jittered(30, 50),
-    ));
+    let scheduler = Arc::new(Scheduler::new(registry, pool, scheduler_cfg(30)));
     let shutdown = CancellationToken::new();
     let start = tokio::time::Instant::now();
     let handle = tokio::spawn(scheduler.clone().run(shutdown.clone()));
@@ -140,7 +131,7 @@ async fn scheduler_runs_jittered_target() {
     // arrive well inside a window that a stalled/never-firing loop would miss.
     assert!(
         elapsed < interval * 8,
-        "3 jittered checks took {elapsed:?}, expected < {:?}",
+        "3 staggered checks took {elapsed:?}, expected < {:?}",
         interval * 8,
     );
     assert!(

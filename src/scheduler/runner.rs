@@ -1,3 +1,5 @@
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
@@ -202,11 +204,10 @@ impl Scheduler {
         let cancel = CancellationToken::new();
         let token = cancel.clone();
         let pool = self.pool.clone();
-        let jitter_pct = self.cfg.jitter_pct;
         let id = st.target.id;
 
         let handle = tokio::spawn(async move {
-            run_target_loop(st, pool, jitter_pct, token).await;
+            run_target_loop(st, pool, token).await;
         });
         self.tasks.insert(id, TargetTaskHandle { cancel, handle });
     }
@@ -275,12 +276,7 @@ async fn drain_handles(handles: Vec<(Uuid, JoinHandle<()>)>, timeout: Duration) 
     }
 }
 
-async fn run_target_loop(
-    st: ScheduledTarget,
-    pool: Arc<WorkerPool>,
-    jitter_pct: u8,
-    shutdown: CancellationToken,
-) {
+async fn run_target_loop(st: ScheduledTarget, pool: Arc<WorkerPool>, shutdown: CancellationToken) {
     let base = st.target.interval;
 
     // Check immediately so a freshly-scheduled target reports up/down right
@@ -291,11 +287,11 @@ async fn run_target_loop(
     // interval — which would panic `interval_at` — is structurally impossible.
     debug_assert!(!base.is_zero(), "target interval must be non-zero");
 
-    // Jitter is a one-time phase offset: it spreads targets across the window
-    // (thundering-herd protection) while the fixed-cadence timer keeps every
-    // subsequent tick on a steady schedule. Re-drawing jitter each cycle is
-    // what made the observed interval visibly drift.
-    let start = Instant::now() + base + jitter(base, jitter_pct);
+    // Deterministic per-target phase offset across the full interval window.
+    // N targets sharing a host get spread over [0, interval) with expected
+    // gap interval/N — eliminates the random-collision starvation pattern
+    // a small random jitter window left on the per-host throttle.
+    let start = Instant::now() + base + stagger_offset(st.target.id, base);
     let mut tick = interval_at(start, base);
     tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
@@ -318,66 +314,68 @@ fn dispatch(pool: &WorkerPool, st: &ScheduledTarget) {
     });
 }
 
-fn jitter(base: Duration, jitter_pct: u8) -> Duration {
-    if jitter_pct == 0 || base.is_zero() {
+fn stagger_offset(id: Uuid, interval: Duration) -> Duration {
+    let interval_ms = interval.as_millis() as u64;
+    if interval_ms == 0 {
         return Duration::ZERO;
     }
-    let span = base.as_millis() as u64 * jitter_pct as u64 / 100;
-    if span == 0 {
-        return Duration::ZERO;
-    }
-    let drawn = Duration::from_millis(fastrand::u64(0..=span));
-    drawn.min(base / 2)
+    let mut h = DefaultHasher::new();
+    id.hash(&mut h);
+    Duration::from_millis(h.finish() % interval_ms)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{REFRESH_BACKOFF_CAP_MULTIPLIER, backoff_delay_secs, drain_handles, jitter};
+    use super::{
+        REFRESH_BACKOFF_CAP_MULTIPLIER, backoff_delay_secs, drain_handles, stagger_offset,
+    };
     use std::time::Duration;
     use tokio_util::sync::CancellationToken;
     use uuid::Uuid;
 
     #[test]
-    fn jitter_is_zero_when_pct_zero() {
-        assert_eq!(jitter(Duration::from_secs(60), 0), Duration::ZERO);
+    fn stagger_offset_is_deterministic() {
+        let id = Uuid::from_u128(0x1234_5678_90AB_CDEF_1234_5678_90AB_CDEF);
+        let base = Duration::from_secs(60);
+        let a = stagger_offset(id, base);
+        let b = stagger_offset(id, base);
+        assert_eq!(a, b, "same id+interval must yield identical offset");
     }
 
     #[test]
-    fn jitter_is_zero_when_base_zero() {
-        assert_eq!(jitter(Duration::ZERO, 50), Duration::ZERO);
-    }
-
-    #[test]
-    fn jitter_is_zero_when_span_rounds_down_to_zero() {
-        // 5ms * 10% = 0ms span → no usable spread, must collapse to zero
-        // rather than panic on `fastrand::u64(0..=0)`.
-        assert_eq!(jitter(Duration::from_millis(5), 10), Duration::ZERO);
-    }
-
-    #[test]
-    fn jitter_offset_stays_within_span() {
-        // The phase offset must never exceed the span (pct of base), and must
-        // actually spread (not silently collapse to zero — that would defeat
-        // thundering-herd protection). Sample heavily since the draw is random.
-        let base = Duration::from_millis(1000);
-        let pct = 10u8;
-        let span = Duration::from_millis(base.as_millis() as u64 * pct as u64 / 100);
-        let mut max_seen = Duration::ZERO;
-        for _ in 0..10_000 {
-            let j = jitter(base, pct);
-            assert!(j <= span, "{j:?} exceeded span {span:?}");
-            max_seen = max_seen.max(j);
+    fn stagger_offset_stays_within_interval() {
+        let base = Duration::from_secs(60);
+        for n in 0..1000u128 {
+            let id = Uuid::from_u128(n);
+            let o = stagger_offset(id, base);
+            assert!(o < base, "offset {o:?} must be < interval {base:?}");
         }
-        assert!(max_seen > Duration::ZERO, "jitter never produced a spread");
     }
 
     #[test]
-    fn jitter_offset_is_clamped_to_half_base_for_large_pct() {
-        // pct=100 ⇒ span=base, so only the `.min(base / 2)` clamp keeps the
-        // offset from pushing the timer's first tick past a whole period.
-        let base = Duration::from_millis(200);
-        for _ in 0..10_000 {
-            assert!(jitter(base, 100) <= base / 2);
+    fn stagger_offset_zero_interval_is_safe() {
+        assert_eq!(stagger_offset(Uuid::nil(), Duration::ZERO), Duration::ZERO);
+    }
+
+    #[test]
+    fn stagger_offset_distributes_uniformly() {
+        // 1000 distinct UUIDs hashed into 10 buckets over a 60s interval.
+        // Each bucket should receive ~100 ± a generous tolerance — confirms
+        // the hash spreads the host-shared targets across the window instead
+        // of clumping them into the same throttle contention slot.
+        let base = Duration::from_secs(60);
+        let bucket_ms = base.as_millis() as u64 / 10;
+        let mut buckets = [0u32; 10];
+        for n in 0..1000u128 {
+            let o = stagger_offset(Uuid::from_u128(n + 0xDEAD_BEEF_0000), base);
+            let idx = (o.as_millis() as u64 / bucket_ms).min(9) as usize;
+            buckets[idx] += 1;
+        }
+        for (i, &c) in buckets.iter().enumerate() {
+            assert!(
+                (60..=160).contains(&c),
+                "bucket {i} got {c} hits — distribution is clumped: {buckets:?}",
+            );
         }
     }
 

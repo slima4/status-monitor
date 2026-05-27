@@ -70,7 +70,6 @@ buffer_size = 100000
 
 [scheduler]
 target_refresh_interval_secs = 30
-jitter_pct = 10
 
 [observability]
 # Fallback only — tracing reads RUST_LOG first, and the container

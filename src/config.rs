@@ -673,7 +673,6 @@ pub struct ClickhouseConfig {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SchedulerConfig {
     pub target_refresh_interval_secs: u64,
-    pub jitter_pct: u8,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
