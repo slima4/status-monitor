@@ -1,12 +1,13 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use chrono::Utc;
 use metrics::counter;
 use moka::sync::Cache;
 use parking_lot::Mutex;
 use tokio::sync::mpsc;
+use tokio::time::MissedTickBehavior;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
@@ -24,10 +25,28 @@ use crate::storage::NotificationChannelStore;
 /// can take up to this long to start firing. 30s keeps both bounded.
 const CHANNEL_CACHE_TTL: Duration = Duration::from_secs(30);
 
-#[derive(Debug, Default, Clone, Copy)]
+/// Idle !alerting entries past this are orphans (deleted target/channel/
+/// binding). Latched (alerting=true) entries are never swept — re-pageing a
+/// continuously-down target after eviction would be worse than the memory.
+const STATE_TTL: Duration = Duration::from_secs(2 * 3600);
+
+const STATE_SWEEP_INTERVAL: Duration = Duration::from_secs(10 * 60);
+
+#[derive(Debug, Clone, Copy)]
 struct AlertState {
     consecutive_non_up: u32,
     alerting: bool,
+    last_touched: Instant,
+}
+
+impl Default for AlertState {
+    fn default() -> Self {
+        Self {
+            consecutive_non_up: 0,
+            alerting: false,
+            last_touched: Instant::now(),
+        }
+    }
 }
 
 /// Pure threshold/recovery decision. Extracted so the state machine is unit
@@ -101,6 +120,8 @@ impl AlertEngine {
     }
 
     pub async fn run(mut self, shutdown: CancellationToken) {
+        let mut sweep = tokio::time::interval(STATE_SWEEP_INTERVAL);
+        sweep.set_missed_tick_behavior(MissedTickBehavior::Skip);
         loop {
             tokio::select! {
                 _ = shutdown.cancelled() => return,
@@ -110,8 +131,22 @@ impl AlertEngine {
                         None => return,
                     }
                 }
+                _ = sweep.tick() => {
+                    let evicted = self.sweep_idle(STATE_TTL);
+                    if evicted > 0 {
+                        tracing::debug!(evicted, "alert engine state swept");
+                    }
+                }
             }
         }
+    }
+
+    fn sweep_idle(&self, ttl: Duration) -> usize {
+        let now = Instant::now();
+        let mut guard = self.state.lock();
+        let before = guard.len();
+        guard.retain(|_k, v| v.alerting || now.duration_since(v.last_touched) < ttl);
+        before - guard.len()
     }
 
     /// Resolve a bound channel id to its (org-scoped) channel. Cached for
@@ -157,6 +192,7 @@ impl AlertEngine {
                 continue;
             }
             let key = (target.id, binding.channel_id);
+            let touch_at = Instant::now();
             let (event_kind, failures_at_event, prev_state) = {
                 let mut guard = self.state.lock();
                 let entry = guard.entry(key).or_default();
@@ -167,6 +203,7 @@ impl AlertEngine {
                     binding.after_failures,
                     binding.notify_recovery,
                 );
+                entry.last_touched = touch_at;
                 (k, n, prev)
             };
             let Some(kind) = event_kind else { continue };
@@ -216,7 +253,9 @@ impl AlertEngine {
             };
             if !dispatch_ok {
                 counter!(names::NOTIFICATIONS_FAILURES, "channel" => channel_label).increment(1);
-                self.state.lock().insert(key, prev_state);
+                let mut restored = prev_state;
+                restored.last_touched = touch_at;
+                self.state.lock().insert(key, restored);
             }
         }
     }
@@ -503,6 +542,7 @@ mod tests {
             AlertState {
                 consecutive_non_up: 4,
                 alerting: true,
+                last_touched: Instant::now(),
             },
         );
 
@@ -535,5 +575,158 @@ mod tests {
             after.consecutive_non_up, 4,
             "rollback must preserve the failure count for the eventual Recovered payload",
         );
+    }
+
+    #[tokio::test]
+    async fn sweep_evicts_idle_non_alerting_and_keeps_fresh_and_latched() {
+        let store: Arc<dyn NotificationChannelStore> =
+            Arc::new(InMemoryNotificationChannelStore::new());
+        let engine = engine_with(store);
+
+        let baseline = Instant::now();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let fresh = (Uuid::now_v7(), Uuid::now_v7());
+        let stale_orphan = (Uuid::now_v7(), Uuid::now_v7());
+        let stale_latched = (Uuid::now_v7(), Uuid::now_v7());
+        {
+            let mut guard = engine.state.lock();
+            guard.insert(fresh, AlertState::default());
+            guard.insert(
+                stale_orphan,
+                AlertState {
+                    consecutive_non_up: 1,
+                    alerting: false,
+                    last_touched: baseline,
+                },
+            );
+            guard.insert(
+                stale_latched,
+                AlertState {
+                    consecutive_non_up: 7,
+                    alerting: true,
+                    last_touched: baseline,
+                },
+            );
+        }
+
+        let evicted = engine.sweep_idle(Duration::from_millis(10));
+        assert_eq!(
+            evicted, 1,
+            "only the idle non-alerting entry must be reclaimed"
+        );
+        let guard = engine.state.lock();
+        assert!(guard.contains_key(&fresh), "fresh entry must survive");
+        assert!(
+            !guard.contains_key(&stale_orphan),
+            "stale orphan must be evicted"
+        );
+        assert!(
+            guard.contains_key(&stale_latched),
+            "latched entry must never be swept — sweeping would let the next \
+             Down re-fire and double-page on a continuously-down target",
+        );
+    }
+
+    #[tokio::test]
+    async fn handle_refreshes_last_touched_so_active_bindings_survive_sweep() {
+        use crate::domain::{
+            AlertBinding, CheckResult, CheckSpec, CheckStatus, ExpectedStatus, HttpCheck,
+            HttpMethod, NewNotificationChannel, Target, TargetAlerts,
+        };
+        use chrono::Utc;
+        use std::collections::HashMap;
+        use std::time::Duration as StdDuration;
+
+        let store: Arc<dyn NotificationChannelStore> =
+            Arc::new(InMemoryNotificationChannelStore::new());
+        let ch = store
+            .create(
+                test_org(),
+                NewNotificationChannel {
+                    name: "ops".into(),
+                    config: ChannelConfig::Slack {
+                        webhook_url: "https://hooks.slack.com/x".into(),
+                    },
+                    enabled: true,
+                },
+                10,
+            )
+            .await
+            .unwrap();
+
+        let engine = engine_with(store);
+
+        let target = Arc::new(Target {
+            id: Uuid::now_v7(),
+            name: "live".into(),
+            check: CheckSpec::Http(HttpCheck {
+                url: url::Url::parse("https://example.com/").unwrap(),
+                method: HttpMethod::Get,
+                timeout: StdDuration::from_secs(5),
+                follow_redirects: false,
+                max_redirects: 0,
+                expected_status: ExpectedStatus::Exact(200),
+                expected_body_contains: None,
+                headers: HashMap::new(),
+                body: None,
+                verify_tls: true,
+                basic_auth: None,
+                bearer_token: None,
+            }),
+            interval: StdDuration::from_secs(30),
+            enabled: true,
+            tags: vec![],
+            alerts: TargetAlerts(vec![AlertBinding {
+                channel_id: ch.id,
+                after_failures: 5,
+                notify_recovery: true,
+            }]),
+            group_name: None,
+            owner_user_id: None,
+            public_status: false,
+            public_name: None,
+            public_description: None,
+            public_group: None,
+            public_sort_order: 0,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        });
+
+        let key = (target.id, ch.id);
+        let baseline = Instant::now();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        engine.state.lock().insert(
+            key,
+            AlertState {
+                consecutive_non_up: 0,
+                alerting: false,
+                last_touched: baseline,
+            },
+        );
+
+        let up_signal = AlertSignal {
+            target: target.clone(),
+            org_id: test_org(),
+            result: CheckResult {
+                target_id: target.id,
+                org_id: test_org().0,
+                timestamp: Utc::now(),
+                status: CheckStatus::Up,
+                duration_ms: 5,
+                dns_ms: None,
+                connect_ms: None,
+                tls_ms: None,
+                ttfb_ms: None,
+                response_code: Some(200),
+                response_size: Some(0),
+                error: None,
+            },
+        };
+        engine.handle(up_signal).await;
+
+        let evicted = engine.sweep_idle(Duration::from_millis(10));
+        assert_eq!(evicted, 0, "refreshed entry must not be swept");
+        assert!(engine.state.lock().contains_key(&key));
     }
 }
