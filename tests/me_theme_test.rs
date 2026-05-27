@@ -26,12 +26,14 @@ async fn fresh_pg() -> Option<(String, String)> {
 }
 
 async fn seed_user(pool: &sqlx::PgPool, email: &str) -> Uuid {
-    let (id,): (Uuid,) =
-        sqlx::query_as("INSERT INTO users (email, display_name) VALUES ($1, 'u') RETURNING id")
-            .bind(email)
-            .fetch_one(pool)
-            .await
-            .unwrap();
+    let (id,): (Uuid,) = sqlx::query_as(
+        "INSERT INTO users (email, display_name, terms_version, privacy_version) \
+         VALUES ($1, 'u', 'v1', 'v1') RETURNING id",
+    )
+    .bind(email)
+    .fetch_one(pool)
+    .await
+    .unwrap();
     id
 }
 

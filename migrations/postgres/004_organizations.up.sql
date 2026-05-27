@@ -25,8 +25,8 @@ CREATE INDEX idx_organizations_pending_purge
     WHERE deleted_at IS NOT NULL;
 
 -- Column order: fixed-width 8-byte-aligned (UUID, TIMESTAMPTZ) clustered
--- first, then variable-length (CITEXT, TEXT) at the end. Saves alignment
--- padding bytes per row on a hot table.
+-- first, variable-length (CITEXT, TEXT) in the middle, audit timestamps
+-- (created/updated/deleted) at the end by convention.
 CREATE TABLE users (
     id                      UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     -- Nullable so the user row can land before its signup org exists in
@@ -34,14 +34,11 @@ CREATE TABLE users (
     signup_org_id           UUID        REFERENCES organizations(id) ON DELETE SET NULL,
     onboarding_completed_at TIMESTAMPTZ,
     last_seen_at            TIMESTAMPTZ,
-    -- Bumping `*_version` surfaces the re-accept panel; defaults backfill
-    -- existing rows to "accepted on the day this migration ran".
+    -- `*_version` has no default — signup binds `auth::consent::*_VERSION`
+    -- explicitly; a baked-in `'v1'` would lie once the constant moves on.
     terms_accepted_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
     privacy_accepted_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
     marketing_opt_in_at     TIMESTAMPTZ,
-    created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
-    deleted_at              TIMESTAMPTZ,
     -- Partial-UNIQUE via `idx_users_active`; see `organizations.slug` above.
     email                   CITEXT      NOT NULL,
     display_name            TEXT,
@@ -51,10 +48,16 @@ CREATE TABLE users (
                                 'dark', 'night', 'dim', 'nord', 'dracula',
                                 'corporate', 'light', 'cupcake', 'cyberpunk', 'synthwave'
                             )),
+    -- `locale` (IETF BCP-47) and `timezone` (IANA) are unvalidated by SQL;
+    -- the Rust setter rejects garbage so the email renderer can trust the
+    -- value. See `domain::preferences`.
     locale                  TEXT,
     timezone                TEXT,
-    terms_version           TEXT        NOT NULL DEFAULT 'v1',
-    privacy_version         TEXT        NOT NULL DEFAULT 'v1'
+    terms_version           TEXT        NOT NULL,
+    privacy_version         TEXT        NOT NULL,
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at              TIMESTAMPTZ
 );
 
 CREATE UNIQUE INDEX idx_users_active ON users(email) WHERE deleted_at IS NULL;

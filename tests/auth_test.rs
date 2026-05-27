@@ -208,13 +208,15 @@ async fn auth_tables_accept_representative_inserts() {
             .expect("insert org")
             .get(0);
 
-    let user_id: Uuid =
-        sqlx::query("INSERT INTO users (email, email_verified_at) VALUES ($1, now()) RETURNING id")
-            .bind(format!("user-{}@example.test", Uuid::now_v7().simple()))
-            .fetch_one(&pool)
-            .await
-            .expect("insert user")
-            .get(0);
+    let user_id: Uuid = sqlx::query(
+        "INSERT INTO users (email, email_verified_at, terms_version, privacy_version) \
+         VALUES ($1, now(), 'v1', 'v1') RETURNING id",
+    )
+    .bind(format!("user-{}@example.test", Uuid::now_v7().simple()))
+    .fetch_one(&pool)
+    .await
+    .expect("insert user")
+    .get(0);
 
     sqlx::query(
         "INSERT INTO sessions (id_hash, user_id, active_org_id, expires_at) \

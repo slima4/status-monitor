@@ -459,11 +459,14 @@ pub fn session_layer(
 /// `Uuid::now_v7()` suffix, so concurrent suites never collide.
 pub async fn make_user(pool: &PgPool, prefix: &str) -> status_monitor::domain::UserId {
     let email = format!("{prefix}-{}@test.example", Uuid::now_v7());
-    let (id,): (Uuid,) = sqlx::query_as("INSERT INTO users (email) VALUES ($1) RETURNING id")
-        .bind(&email)
-        .fetch_one(pool)
-        .await
-        .expect("insert user");
+    let (id,): (Uuid,) = sqlx::query_as(
+        "INSERT INTO users (email, terms_version, privacy_version) \
+         VALUES ($1, 'v1', 'v1') RETURNING id",
+    )
+    .bind(&email)
+    .fetch_one(pool)
+    .await
+    .expect("insert user");
     status_monitor::domain::UserId(id)
 }
 

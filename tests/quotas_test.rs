@@ -110,11 +110,14 @@ async fn seed_org_on_plan(
 /// Insert a user and an active membership in `org`, returning the user id.
 async fn seed_member(pool: &PgPool, org: OrgId) -> UserId {
     let email = format!("m-{}@example.test", Uuid::now_v7());
-    let (uid,): (Uuid,) = sqlx::query_as("INSERT INTO users (email) VALUES ($1) RETURNING id")
-        .bind(&email)
-        .fetch_one(pool)
-        .await
-        .expect("seed user");
+    let (uid,): (Uuid,) = sqlx::query_as(
+        "INSERT INTO users (email, terms_version, privacy_version) \
+         VALUES ($1, 'v1', 'v1') RETURNING id",
+    )
+    .bind(&email)
+    .fetch_one(pool)
+    .await
+    .expect("seed user");
     sqlx::query("INSERT INTO memberships (user_id, org_id, role) VALUES ($1, $2, 'member')")
         .bind(uid)
         .bind(org.0)

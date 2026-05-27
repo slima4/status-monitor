@@ -314,11 +314,14 @@ pub async fn upsert_identity_and_signup_org(
     // 3. Brand-new user. Insert user, identity, signup org + owner
     //    membership all in this tx so a rollback leaves zero orphans.
     let (new_user_id,): (Uuid,) = sqlx::query_as(
-        "INSERT INTO users (email, display_name, email_verified_at) \
-         VALUES ($1, $2, now()) RETURNING id",
+        "INSERT INTO users (email, display_name, email_verified_at, \
+                            terms_version, privacy_version) \
+         VALUES ($1, $2, now(), $3, $4) RETURNING id",
     )
     .bind(email)
     .bind(identity.display_name.as_deref())
+    .bind(crate::auth::consent::TERMS_VERSION)
+    .bind(crate::auth::consent::PRIVACY_VERSION)
     .fetch_one(&mut *tx)
     .await
     .context("phase C: insert user")?;

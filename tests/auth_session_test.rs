@@ -139,11 +139,13 @@ async fn upsert_links_existing_user_on_email_match() {
     let pool = open_pool(&db_url).await;
     MIGRATOR.run(&pool).await.expect("migrate");
 
-    let (existing_id,): (Uuid,) =
-        sqlx::query_as("INSERT INTO users (email) VALUES ('Bob@Example.test') RETURNING id")
-            .fetch_one(&pool)
-            .await
-            .expect("seed user");
+    let (existing_id,): (Uuid,) = sqlx::query_as(
+        "INSERT INTO users (email, terms_version, privacy_version) \
+         VALUES ('Bob@Example.test', 'v1', 'v1') RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("seed user");
 
     let identity = github::GithubIdentity {
         provider_user_id: "99".into(),
@@ -184,11 +186,13 @@ async fn upsert_rejects_soft_deleted_user_via_identity_lookup() {
     // Seed a user + identity, then soft-delete the user. A subsequent
     // GitHub OAuth callback for the same provider_user_id must NOT
     // resurrect the account — the recovery flow is the only path back.
-    let (user_id,): (Uuid,) =
-        sqlx::query_as("INSERT INTO users (email) VALUES ('Carol@Example.test') RETURNING id")
-            .fetch_one(&pool)
-            .await
-            .expect("seed user");
+    let (user_id,): (Uuid,) = sqlx::query_as(
+        "INSERT INTO users (email, terms_version, privacy_version) \
+         VALUES ('Carol@Example.test', 'v1', 'v1') RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("seed user");
     sqlx::query(
         "INSERT INTO oauth_identities (user_id, provider, provider_user_id, provider_username) \
          VALUES ($1, 'github', '777', 'carol')",
@@ -241,7 +245,7 @@ async fn session_create_lookup_destroy_round_trip() {
     let pool = open_pool(&db_url).await;
     MIGRATOR.run(&pool).await.expect("migrate");
 
-    let (user_id,): (Uuid,) = sqlx::query_as("INSERT INTO users (email) VALUES ($1) RETURNING id")
+    let (user_id,): (Uuid,) = sqlx::query_as("INSERT INTO users (email, terms_version, privacy_version) VALUES ($1, 'v1', 'v1') RETURNING id")
         .bind(format!("ses-{}@example.test", Uuid::now_v7()))
         .fetch_one(&pool)
         .await
@@ -300,7 +304,7 @@ async fn session_lookup_destroys_idle_expired() {
     let pool = open_pool(&db_url).await;
     MIGRATOR.run(&pool).await.expect("migrate");
 
-    let (user_id,): (Uuid,) = sqlx::query_as("INSERT INTO users (email) VALUES ($1) RETURNING id")
+    let (user_id,): (Uuid,) = sqlx::query_as("INSERT INTO users (email, terms_version, privacy_version) VALUES ($1, 'v1', 'v1') RETURNING id")
         .bind(format!("idle-{}@example.test", Uuid::now_v7()))
         .fetch_one(&pool)
         .await
@@ -349,7 +353,7 @@ async fn session_touch_debounced_writes_at_most_once_per_window() {
     let pool = open_pool(&db_url).await;
     MIGRATOR.run(&pool).await.expect("migrate");
 
-    let (user_id,): (Uuid,) = sqlx::query_as("INSERT INTO users (email) VALUES ($1) RETURNING id")
+    let (user_id,): (Uuid,) = sqlx::query_as("INSERT INTO users (email, terms_version, privacy_version) VALUES ($1, 'v1', 'v1') RETURNING id")
         .bind(format!("touch-{}@example.test", Uuid::now_v7()))
         .fetch_one(&pool)
         .await
@@ -450,7 +454,7 @@ async fn login_audit_records_success_and_failure() {
     let pool = open_pool(&db_url).await;
     MIGRATOR.run(&pool).await.expect("migrate");
 
-    let (user_id,): (Uuid,) = sqlx::query_as("INSERT INTO users (email) VALUES ($1) RETURNING id")
+    let (user_id,): (Uuid,) = sqlx::query_as("INSERT INTO users (email, terms_version, privacy_version) VALUES ($1, 'v1', 'v1') RETURNING id")
         .bind(format!("aud-{}@example.test", Uuid::now_v7()))
         .fetch_one(&pool)
         .await
@@ -555,7 +559,7 @@ async fn session_fixation_pattern_destroys_pre_login_session() {
     let pool = open_pool(&db_url).await;
     MIGRATOR.run(&pool).await.expect("migrate");
 
-    let (user_id,): (Uuid,) = sqlx::query_as("INSERT INTO users (email) VALUES ($1) RETURNING id")
+    let (user_id,): (Uuid,) = sqlx::query_as("INSERT INTO users (email, terms_version, privacy_version) VALUES ($1, 'v1', 'v1') RETURNING id")
         .bind(format!("fix-{}@example.test", Uuid::now_v7()))
         .fetch_one(&pool)
         .await

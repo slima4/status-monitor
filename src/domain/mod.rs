@@ -5,6 +5,7 @@ pub mod maintenance;
 pub mod membership;
 pub mod notification_channel;
 pub mod org;
+pub mod preferences;
 pub mod public;
 pub mod quota;
 pub mod reserved_slugs;

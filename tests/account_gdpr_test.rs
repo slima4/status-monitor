@@ -37,13 +37,15 @@ async fn open_pool(db_url: &str) -> sqlx::PgPool {
 }
 
 async fn seed_user(pool: &sqlx::PgPool, email: &str, name: &str) -> Uuid {
-    let (id,): (Uuid,) =
-        sqlx::query_as("INSERT INTO users (email, display_name) VALUES ($1, $2) RETURNING id")
-            .bind(email)
-            .bind(name)
-            .fetch_one(pool)
-            .await
-            .unwrap();
+    let (id,): (Uuid,) = sqlx::query_as(
+        "INSERT INTO users (email, display_name, terms_version, privacy_version) \
+         VALUES ($1, $2, 'v1', 'v1') RETURNING id",
+    )
+    .bind(email)
+    .bind(name)
+    .fetch_one(pool)
+    .await
+    .unwrap();
     id
 }
 
