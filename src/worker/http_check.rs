@@ -1,4 +1,3 @@
-use std::error::Error as _;
 use std::time::Instant;
 
 use base64::Engine as _;
@@ -546,20 +545,28 @@ fn match_status(code: u16, expected: &ExpectedStatus) -> bool {
 }
 
 fn classify_hyper_error(err: &hyper_util::client::legacy::Error) -> &'static str {
-    if err.is_connect() {
-        // Source chain often carries an io::Error or our own "tcp connect timeout".
-        let msg = err
-            .source()
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| err.to_string());
-        if msg.contains("tcp connect timeout") || msg.to_lowercase().contains("timeout") {
-            "timeout"
-        } else {
-            "connect"
-        }
-    } else {
-        "transport"
+    if has_timeout_in_chain(err) {
+        return "timeout";
     }
+    if err.is_connect() {
+        return "connect";
+    }
+    "transport"
+}
+
+// Phrase set is narrow ("timed out" / "deadline") so `connect_timeout=…`
+// in a config-field error string does not flip a connect failure to a
+// timeout. Bare "timeout" substring is deliberately omitted.
+fn has_timeout_in_chain(err: &(dyn std::error::Error + 'static)) -> bool {
+    std::iter::successors(Some(err), |e| e.source()).any(|e| {
+        if let Some(io) = e.downcast_ref::<std::io::Error>()
+            && io.kind() == std::io::ErrorKind::TimedOut
+        {
+            return true;
+        }
+        let s = e.to_string().to_ascii_lowercase();
+        s.contains("timed out") || s.contains("deadline")
+    })
 }
 
 #[cfg(test)]
@@ -685,6 +692,79 @@ mod tests {
             err.to_string().contains("exceeded"),
             "expected exceeded error, got: {err}"
         );
+    }
+
+    #[derive(Debug)]
+    struct ChainErr {
+        msg: &'static str,
+        src: Option<Box<dyn std::error::Error + 'static>>,
+    }
+    impl std::fmt::Display for ChainErr {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str(self.msg)
+        }
+    }
+    impl std::error::Error for ChainErr {
+        fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+            self.src.as_deref()
+        }
+    }
+
+    #[test]
+    fn has_timeout_in_chain_matches_root_message() {
+        let e = ChainErr {
+            msg: "operation timed out",
+            src: None,
+        };
+        assert!(has_timeout_in_chain(&e));
+    }
+
+    #[test]
+    fn has_timeout_in_chain_walks_to_source() {
+        let leaf = ChainErr {
+            msg: "deadline elapsed",
+            src: None,
+        };
+        let root = ChainErr {
+            msg: "hyper error",
+            src: Some(Box::new(leaf)),
+        };
+        assert!(has_timeout_in_chain(&root));
+    }
+
+    #[test]
+    fn has_timeout_in_chain_returns_false_without_marker() {
+        let leaf = ChainErr {
+            msg: "connection reset",
+            src: None,
+        };
+        let root = ChainErr {
+            msg: "transport error",
+            src: Some(Box::new(leaf)),
+        };
+        assert!(!has_timeout_in_chain(&root));
+    }
+
+    #[test]
+    fn has_timeout_in_chain_does_not_match_config_field_substring() {
+        // `connect_timeout=5s` in an error message would have matched the
+        // earlier permissive `"timeout"` substring; the narrowed phrase set
+        // does not.
+        let e = ChainErr {
+            msg: "connect_timeout=5s exceeded budget",
+            src: None,
+        };
+        assert!(!has_timeout_in_chain(&e));
+    }
+
+    #[test]
+    fn has_timeout_in_chain_detects_io_error_kind() {
+        let io = std::io::Error::new(std::io::ErrorKind::TimedOut, "x");
+        let root = ChainErr {
+            msg: "outer",
+            src: Some(Box::new(io)),
+        };
+        assert!(has_timeout_in_chain(&root));
     }
 
     #[test]

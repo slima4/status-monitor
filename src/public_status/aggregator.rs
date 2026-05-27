@@ -16,9 +16,9 @@ use sqlx::{FromRow, PgPool};
 use uuid::Uuid;
 
 use crate::domain::{
-    CheckStatus, ComponentHistoryResponse, DayState, HOST_THROTTLE_REASON, IncidentSeverity,
-    IncidentStatusPhase, OrgId, PublicComponent, PublicComponentGroup, PublicComponentStatus,
-    PublicIncident, PublicIncidentUpdate, PublicMaintenance, PublicStatusPage, Target,
+    CheckStatus, ComponentHistoryResponse, DayState, IncidentSeverity, IncidentStatusPhase, OrgId,
+    PublicComponent, PublicComponentGroup, PublicComponentStatus, PublicIncident,
+    PublicIncidentUpdate, PublicMaintenance, PublicStatusPage, Target,
 };
 use crate::error::Result;
 use crate::storage::TargetStore;
@@ -565,10 +565,7 @@ impl OrgAggregator {
         // NB: degraded-only detection requires a richer aggregate than the
         // existing 1m MV exposes (up vs not-up only). Until the MV is
         // extended (separate phase) `Degraded` days collapse to `Operational`
-        // when no hard failures occur. Same gap also lets throttle-degraded
-        // minutes count toward `(total - up_)` and paint the strip as
-        // PartialOutage — rare per host-minute given the small default cap,
-        // but the strip cannot suppress it without the richer MV.
+        // when no hard failures occur.
         Ok(out)
     }
 
@@ -585,18 +582,15 @@ impl OrgAggregator {
             return Ok(Vec::new());
         }
         let from = now - ChronoDuration::minutes(5);
-        // `error IS NULL OR error != ?` keeps LowCardinality dictionary
-        // equality (one cmp per distinct value); `coalesce(error,'')` would
-        // materialize a non-LC column and slow per-row.
         let rows: Vec<RecentCountRow> = self
             .ch
             .query(&format!(
                 r#"SELECT
                        target_id,
-                       countIf(status = 'up')                                                AS up_,
-                       countIf(status = 'down')                                              AS down_,
-                       countIf(status = 'degraded' AND (error IS NULL OR error != ?))        AS degraded_,
-                       countIf(status = 'error')                                             AS error_
+                       countIf(status = 'up')       AS up_,
+                       countIf(status = 'down')     AS down_,
+                       countIf(status = 'degraded') AS degraded_,
+                       countIf(status = 'error')    AS error_
                    FROM {CH_TABLE}
                    WHERE org_id = ?
                      AND has(arrayMap(x -> toUUID(x), ?), target_id)
@@ -604,7 +598,6 @@ impl OrgAggregator {
                      AND timestamp <  fromUnixTimestamp64Milli(?)
                    GROUP BY target_id"#
             ))
-            .bind(HOST_THROTTLE_REASON)
             .bind(org.0)
             .bind(component_ids)
             .bind(from.timestamp_millis())

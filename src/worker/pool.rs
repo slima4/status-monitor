@@ -9,7 +9,7 @@ use tokio::sync::{Semaphore, mpsc};
 use uuid::Uuid;
 
 use crate::config::CircuitBreakerConfig;
-use crate::domain::{CheckResult, CheckSpec, CheckStatus, HOST_THROTTLE_REASON, OrgId, Target};
+use crate::domain::{CheckResult, CheckSpec, OrgId, Target};
 use crate::http_client::HttpClients;
 use crate::notifier::event::AlertSignal;
 use crate::observability::metrics::names;
@@ -130,17 +130,6 @@ impl ResultFanout {
                 counter!(names::ALERTS_DROPPED, "reason" => "queue_full").increment(1);
             }
         }
-        self.dispatch_storage(result);
-    }
-
-    /// Storage-only dispatch — used for results that must not trigger alert
-    /// fan-out (e.g. throttle drops where the upstream is fine and the
-    /// "Degraded" status is operator-side back-pressure, not a real fault).
-    fn dispatch_storage_only(&self, result: CheckResult) {
-        self.dispatch_storage(result);
-    }
-
-    fn dispatch_storage(&self, result: CheckResult) {
         if let Err(err) = self.storage.try_send(result) {
             tracing::warn!(?err, "result channel full or closed");
             counter!(names::STORAGE_DROPPED, "reason" => "queue_full").increment(1);
@@ -292,10 +281,6 @@ impl WorkerPool {
                 Ok(p) => p,
                 Err(Throttled) => {
                     HOST_THROTTLE_DROPS_C.increment(1);
-                    let mut result =
-                        CheckResult::error(task.target.id, org_id.0, HOST_THROTTLE_REASON);
-                    result.status = CheckStatus::Degraded;
-                    fanout.dispatch_storage_only(result);
                     return;
                 }
             };

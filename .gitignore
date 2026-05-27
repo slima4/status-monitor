@@ -20,6 +20,9 @@ claude.md
 # Local specs (not tracked in vcs)
 /specs/
 
+# Local real-target seed (points at live public endpoints — keep private)
+/scripts/seed-real.sh
+
 # Internal ops runbooks (local-only; operational notes, not shipped docs)
 /runbooks/
 

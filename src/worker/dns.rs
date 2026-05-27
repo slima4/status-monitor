@@ -100,22 +100,22 @@ async fn run_check(check: &DnsCheck, clients: &HttpClients) -> anyhow::Result<Dn
 }
 
 fn classify(check: &DnsCheck, answers: &[String]) -> DnsVerdict {
-    let mut matched = true;
-    if let Some(needle) = check.expected_contains.as_deref().filter(|s| !s.is_empty()) {
-        matched = answers.iter().any(|a| a.contains(needle));
-    }
+    let matched: Option<bool> = check
+        .expected_contains
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .map(|needle| answers.iter().any(|a| a.contains(needle)));
+
     // Empty answer set is Down regardless of expected_contains — that's
     // the same signal as NXDOMAIN; treating it as Up would let the check
     // silently pass after a record removal.
     let status = if answers.is_empty() {
         CheckStatus::Down
-    } else if matched {
-        CheckStatus::Up
     } else {
-        // Records exist but don't match the expected substring — the
-        // domain is *reachable*, the value drifted. Surface as Degraded
-        // so paging policy can be tuned separately from outright outages.
-        CheckStatus::Degraded
+        match matched {
+            Some(false) => CheckStatus::Degraded,
+            _ => CheckStatus::Up,
+        }
     };
 
     #[derive(Serialize)]
@@ -124,7 +124,7 @@ fn classify(check: &DnsCheck, answers: &[String]) -> DnsVerdict {
         record_type: &'a str,
         answers: &'a [String],
         expected_contains: Option<&'a str>,
-        matched: bool,
+        matched: Option<bool>,
     }
     let details_json = serde_json::to_string(&Details {
         domain: &check.domain,
@@ -184,5 +184,35 @@ mod tests {
     fn empty_expected_string_is_ignored() {
         let v = classify(&check(Some("")), &["192.0.2.1".into()]);
         assert_eq!(v.status, CheckStatus::Up);
+    }
+
+    #[test]
+    fn details_matched_is_null_when_no_expectation() {
+        let v = classify(&check(None), &[]);
+        assert!(
+            v.details_json.contains("\"matched\":null"),
+            "got: {}",
+            v.details_json
+        );
+    }
+
+    #[test]
+    fn details_matched_is_true_when_substring_present() {
+        let v = classify(&check(Some("192.0.2.1")), &["192.0.2.1".into()]);
+        assert!(
+            v.details_json.contains("\"matched\":true"),
+            "got: {}",
+            v.details_json
+        );
+    }
+
+    #[test]
+    fn details_matched_is_false_when_substring_absent() {
+        let v = classify(&check(Some("203.0.113.7")), &["192.0.2.1".into()]);
+        assert!(
+            v.details_json.contains("\"matched\":false"),
+            "got: {}",
+            v.details_json
+        );
     }
 }
