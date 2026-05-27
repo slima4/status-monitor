@@ -9,6 +9,7 @@
     const input = container.querySelector("[data-tag-input]");
     const suggBox = container.querySelector("[data-tag-suggestions]");
     if (!input || !suggBox) return;
+    window.smPreventPanelBlur(suggBox);
 
     const DEBOUNCE_MS = 200;
     let debounceTimer = null;
@@ -134,8 +135,7 @@
             li.setAttribute("role", "option");
             li.dataset.value = item.name;
             li.textContent = `${item.name} (${item.count})`;
-            li.addEventListener("mousedown", (evt) => {
-                evt.preventDefault();
+            li.addEventListener("mousedown", () => {
                 commit(item.name);
                 input.focus();
             });

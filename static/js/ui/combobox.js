@@ -158,8 +158,7 @@
                 else moveCursor(-1);
             }
         });
-        // Cancel host <label>'s activate-labelled-control on panel hits.
-        panel.addEventListener("mousedown", e => { e.preventDefault(); });
+        window.smPreventPanelBlur(panel);
         panel.addEventListener("click", e => {
             e.preventDefault();
             const li = e.target.closest(".sm-combobox__option");
