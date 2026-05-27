@@ -133,7 +133,7 @@
         </label>
         <label class="block">
           <span class="text-xs text-muted">Record type</span>
-          <select name="dns_record_type" class="mt-1 w-full field">
+          <select name="dns_record_type" data-sm-combobox aria-label="DNS record type" class="mt-1 w-full field">
             <option value="A"{% if form.dns.record_type == "A" %} selected{% endif %}>A</option>
             <option value="AAAA"{% if form.dns.record_type == "AAAA" %} selected{% endif %}>AAAA</option>
             <option value="CNAME"{% if form.dns.record_type == "CNAME" %} selected{% endif %}>CNAME</option>
@@ -338,7 +338,7 @@
         </label>
         <label class="block">
           <span class="text-xs text-muted">Owner</span>
-          <select id="owner_user_id" name="owner_user_id" class="mt-1 w-full field">
+          <select id="owner_user_id" name="owner_user_id" data-sm-combobox aria-label="Owner" class="mt-1 w-full field">
             <option value=""{% if form.owner_user_id == "" %} selected{% endif %}>— unowned —</option>
             {% for opt in form.owner_options %}
             <option value="{{ opt.id }}"{% if opt.selected %} selected{% endif %}>{{ opt.label }}</option>
@@ -366,7 +366,7 @@
         <div class="grid grid-cols-2 gap-4 sm:grid-cols-3">
           <label class="block">
             <span class="text-xs text-muted">Method</span>
-            <select name="http_method" class="mt-1 w-full field">
+            <select name="http_method" data-sm-combobox aria-label="HTTP method" class="mt-1 w-full field">
               <option value="GET"{% if form.http.method == "GET" %} selected{% endif %}>GET</option>
               <option value="HEAD"{% if form.http.method == "HEAD" %} selected{% endif %}>HEAD</option>
               <option value="POST"{% if form.http.method == "POST" %} selected{% endif %}>POST</option>

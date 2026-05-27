@@ -31,7 +31,7 @@
       </label>
       <label class="block">
         <span class="text-xs text-muted">Type</span>
-        <select name="kind" data-kind class="mt-1 w-full field">
+        <select name="kind" data-kind data-sm-combobox aria-label="Type" class="mt-1 w-full field">
           <option value="slack"{% if form.kind == "slack" %} selected{% endif %}>Slack</option>
           <option value="webhook"{% if form.kind == "webhook" %} selected{% endif %}>Webhook</option>
           <option value="telegram"{% if form.kind == "telegram" %} selected{% endif %}>Telegram</option>
