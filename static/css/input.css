@@ -385,6 +385,8 @@
         color: var(--theme-text);
         position: relative;
         min-height: 100vh;
+        display: flex;
+        flex-direction: column;
 
         /* Re-declare every `--sm-X: var(--theme-Y)` intermediary at body
            scope. CSS resolves var() inside a custom-property declaration
@@ -480,6 +482,10 @@
     .app-shell > *,
     .public-shell > *,
     .marketing-shell > * { position: relative; z-index: 1; }
+
+    /* Sticky footer: main grows so footer sits at viewport bottom on short
+       pages; flex-shrink:0 guards against basis collapse from inner overflow. */
+    .app-shell > main { flex: 1 0 auto; }
 
     /* Public status page shell. Same atmospheric paper + token chrome as
        app-shell; intentionally does NOT inherit app-shell's sm-* dashboard
