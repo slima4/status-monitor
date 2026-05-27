@@ -2046,6 +2046,7 @@
         @apply rounded-sm px-2.5 py-1;
         color: var(--theme-text-muted);
         font-family: var(--font-mono);
+        text-decoration: none;
         transition: background-color 120ms ease, color 120ms ease;
     }
     .range-tabs__btn:hover   { background: var(--theme-surface-sunk); color: var(--theme-accent); }
@@ -2054,6 +2055,14 @@
         background: var(--theme-ink);
         color: var(--theme-surface);
     }
+    .range-tabs-meta {
+        @apply text-xs;
+        color: var(--theme-text-quiet);
+        font-family: var(--font-mono);
+        font-variant-numeric: tabular-nums;
+        letter-spacing: 0.01em;
+    }
+    .range-tabs-meta::before { content: "› "; color: var(--theme-accent); opacity: 0.7; }
 
     /* Composes with `sticker-card` at the call site (see `.kpi-card`). */
     .dashboard-card {

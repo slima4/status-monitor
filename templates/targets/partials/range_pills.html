@@ -1,10 +1,14 @@
-{# Range-pill nav strip. Inputs: `range_options` (Vec<RangeOption>),
-   `range_base_path` (e.g. "/targets/{id}" or "/targets/{id}/incidents"),
-   `from_human`, `to_human`. #}
-<nav class="flex items-center gap-1 pt-3 text-sm" aria-label="Time range">
-  {% for opt in range_options %}
-  <a href="{{ range_base_path }}?range={{ opt.key }}"
-     class="rounded-full px-3 py-1 text-xs font-medium{% if opt.selected %} bg-[color:var(--theme-ink)] text-[color:var(--theme-surface-elev)]{% else %} bg-[color:var(--theme-surface-sunk)] text-muted hover:bg-[color:var(--theme-surface-sunk)]{% endif %}"{% if opt.selected %} aria-current="page"{% endif %}>{{ opt.key }}</a>
-  {% endfor %}
-  <span class="ml-3 text-xs text-muted">{{ from_human }} → {{ to_human }}</span>
-</nav>
+{# Shares `.range-tabs` with the dashboard. Inputs: `range_options`
+   (Vec<RangeOption>), `range_base_path`, `from_human`, `to_human`. #}
+<div class="flex flex-wrap items-center gap-3 pt-3">
+  <div class="range-tabs" role="tablist" aria-label="Time range">
+    {% for opt in range_options %}
+    <a href="{{ range_base_path }}?range={{ opt.key }}"
+       role="tab"
+       class="range-tabs__btn{% if opt.selected %} range-tabs__btn--active{% endif %}"
+       aria-selected="{% if opt.selected %}true{% else %}false{% endif %}"
+       {% if opt.selected %}aria-current="page"{% endif %}>{{ opt.key }}</a>
+    {% endfor %}
+  </div>
+  <span class="range-tabs-meta">{{ from_human }} → {{ to_human }}</span>
+</div>
