@@ -303,6 +303,11 @@ async fn http_check_redirect_loop_hits_budget() {
 
     assert_eq!(result.status, CheckStatus::Error);
     assert_eq!(result.error.as_deref(), Some("too many redirects"));
+    assert_eq!(
+        result.response_code,
+        Some(302),
+        "the 3xx that exceeded the cap must be preserved for diagnostics",
+    );
 }
 
 #[tokio::test]

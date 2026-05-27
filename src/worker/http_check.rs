@@ -98,17 +98,16 @@ async fn do_http_check(
     let origin = check.url.origin();
     let max_hops = effective_max_redirects(check);
 
-    let early = |err: &str| -> (CheckResult, Option<HttpProbe>) {
-        (
-            CheckResult::error_with_elapsed(
-                target_id,
-                org_id,
-                started_at,
-                start.elapsed().as_millis() as u32,
-                err.to_owned(),
-            ),
-            None,
-        )
+    let early = |err: &str, response_code: Option<u16>| -> (CheckResult, Option<HttpProbe>) {
+        let mut r = CheckResult::error_with_elapsed(
+            target_id,
+            org_id,
+            started_at,
+            start.elapsed().as_millis() as u32,
+            err.to_owned(),
+        );
+        r.response_code = response_code;
+        (r, None)
     };
 
     // Each hop reconnects through the same SSRF-guarded connector + DNS
@@ -122,7 +121,7 @@ async fn do_http_check(
     for hop in 0..=max_hops {
         let uri: Uri = match current.as_str().parse() {
             Ok(u) => u,
-            Err(_) => return early("invalid url"),
+            Err(_) => return early("invalid url", None),
         };
 
         // Strip credentials when a redirect leaves the original origin so a
@@ -131,18 +130,18 @@ async fn do_http_check(
         let same_origin = current.origin() == origin;
         let req = match build_request(method, &uri, check, &send_body, same_origin, clients) {
             Ok(r) => r,
-            Err(err) => return early(&format!("request build failed: {err}")),
+            Err(err) => return early(&format!("request build failed: {err}"), None),
         };
 
         let remaining = check.timeout.saturating_sub(start.elapsed());
         if remaining.is_zero() {
-            return early("timeout");
+            return early("timeout", None);
         }
 
         let response = match tokio::time::timeout(remaining, client.request(req)).await {
-            Err(_) => return early("timeout"),
+            Err(_) => return early("timeout", None),
             Ok(Ok(r)) => r,
-            Ok(Err(err)) => return early(classify_hyper_error(&err)),
+            Ok(Err(err)) => return early(classify_hyper_error(&err), None),
         };
 
         let status_code = response.status().as_u16();
@@ -155,7 +154,7 @@ async fn do_http_check(
                     hops = max_hops,
                     "redirect limit exceeded"
                 );
-                return early("too many redirects");
+                return early("too many redirects", Some(status_code));
             }
 
             let next = match response
@@ -172,7 +171,7 @@ async fn do_http_check(
                         hop,
                         "redirect with missing or unparseable Location"
                     );
-                    return early("invalid redirect location");
+                    return early("invalid redirect location", Some(status_code));
                 }
             };
             if !matches!(next.scheme(), "http" | "https") {
@@ -183,7 +182,7 @@ async fn do_http_check(
                     scheme = next.scheme(),
                     "redirect to unsupported scheme"
                 );
-                return early("unsupported redirect scheme");
+                return early("unsupported redirect scheme", Some(status_code));
             }
 
             // 307/308 preserve the method and body; 301/302/303 degrade to a
@@ -230,7 +229,7 @@ async fn do_http_check(
     // `for 0..=max_hops` always returns from inside the loop (final response
     // or the limit-exceeded branch); this is unreachable but keeps the
     // function total without an `unwrap`/`panic`.
-    early("too many redirects")
+    early("too many redirects", None)
 }
 
 /// Collect, decode, and score the final (non-redirect) response.
