@@ -140,6 +140,70 @@ async fn scheduler_runs_staggered_target() {
     );
 }
 
+async fn spawn_slow_mock(delay: Duration) -> (std::net::SocketAddr, Arc<AtomicU32>) {
+    let counter = Arc::new(AtomicU32::new(0));
+    let c = counter.clone();
+    let app = Router::new().route(
+        "/slow",
+        get(move || {
+            let c = c.clone();
+            async move {
+                c.fetch_add(1, Ordering::Relaxed);
+                tokio::time::sleep(delay).await;
+                "ok"
+            }
+        }),
+    );
+    (spawn_router(app).await, counter)
+}
+
+#[tokio::test]
+async fn dispatch_skips_when_target_probe_already_in_flight() {
+    // Cadence 150 ms, response time 600 ms — three ticks land before the
+    // first probe completes. Without the in-flight guard the mock would see
+    // every tick; with it, ticks 2-N drop and the counter only advances per
+    // completed probe.
+    let response = Duration::from_millis(600);
+    let cadence = Duration::from_millis(150);
+    let (addr, counter) = spawn_slow_mock(response).await;
+    let store = Arc::new(InMemoryTargetStore::from_vec(vec![http_target(
+        addr,
+        "/slow",
+        cadence.as_millis() as u64,
+    )]));
+    let registry = Arc::new(TargetRegistry::new(store));
+    let (tx, _rx) = mpsc::channel(64);
+
+    let pool = Arc::new(WorkerPool::new(
+        50,
+        test_client(),
+        breaker_cfg(),
+        ResultFanout::storage_only(tx),
+        status_monitor::worker::host_throttle::HostThrottle::permissive(),
+        common::test_domain_expiry_runtime(),
+    ));
+    let scheduler = Arc::new(Scheduler::new(registry, pool.clone(), scheduler_cfg(30)));
+    let shutdown = CancellationToken::new();
+    let handle = tokio::spawn(scheduler.clone().run(shutdown.clone()));
+
+    tokio::time::sleep(Duration::from_millis(1_500)).await;
+    shutdown.cancel();
+    handle.await.unwrap().unwrap();
+
+    let probes = counter.load(Ordering::Relaxed);
+    let dropped = pool.dropped_results();
+    // Upper bound (cadence-only): 1500/150 = 10. With the in-flight guard
+    // the worker can only start one probe per ~600 ms ⇒ ≤ 3.
+    assert!(
+        probes <= 4,
+        "probe should be deduplicated; got {probes} (expected ≤ 4)"
+    );
+    assert!(
+        dropped >= 3,
+        "in-flight dispatches should drop; got {dropped} (expected ≥ 3)"
+    );
+}
+
 #[tokio::test]
 async fn scheduler_picks_up_new_targets_on_refresh() {
     let (addr, counter) = spawn_counting_mock().await;

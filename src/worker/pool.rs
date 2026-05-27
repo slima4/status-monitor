@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::sync::LazyLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use dashmap::DashMap;
+use dashmap::{DashMap, DashSet};
 use metrics::{Counter, counter, histogram};
 use tokio::sync::{Semaphore, mpsc};
 
@@ -147,6 +147,10 @@ pub struct WorkerPool {
     fanout: ResultFanout,
     host_throttle: Arc<HostThrottle>,
     domain_expiry: Arc<crate::worker::domain_expiry::DomainExpiryRuntime>,
+    /// Target ids whose probe is mid-flight. Drop-guard backed (see
+    /// `InFlightGuard`) so panics also release. Bounds duplicate probes when
+    /// a slow check outlasts its cadence.
+    in_flight: Arc<DashSet<Uuid>>,
 }
 
 impl WorkerPool {
@@ -167,6 +171,7 @@ impl WorkerPool {
             fanout,
             host_throttle,
             domain_expiry,
+            in_flight: Arc::new(DashSet::new()),
         }
     }
 
@@ -247,6 +252,21 @@ impl WorkerPool {
     }
 
     pub fn dispatch(&self, task: CheckTask) {
+        // Skip-if-in-flight: scheduler ticks every `interval`, but a slow
+        // check (or a user-configured timeout > interval) can outlast its
+        // cadence. Without this guard, two probes for the same target race —
+        // duplicate ClickHouse rows at near-identical timestamps, double
+        // host-throttle consumption, ambiguous alert ordering.
+        if !self.in_flight.insert(task.target.id) {
+            counter!(names::STORAGE_DROPPED, "reason" => "target_in_flight").increment(1);
+            self.fanout.note_storage_dropped();
+            return;
+        }
+        let in_flight_guard = InFlightGuard {
+            set: self.in_flight.clone(),
+            id: task.target.id,
+        };
+
         let permit = match self.semaphore.clone().try_acquire_owned() {
             Ok(p) => p,
             Err(_) => {
@@ -268,6 +288,7 @@ impl WorkerPool {
 
         tokio::spawn(async move {
             let _permit = permit;
+            let _in_flight_guard = in_flight_guard;
             let breaker = get_or_init_breaker(&breakers, &task.breaker_key, breaker_cfg);
 
             if !breaker.allow() {
@@ -296,6 +317,17 @@ impl WorkerPool {
             drop(host_permit);
             fanout.dispatch(target, org_id, result);
         });
+    }
+}
+
+struct InFlightGuard {
+    set: Arc<DashSet<Uuid>>,
+    id: Uuid,
+}
+
+impl Drop for InFlightGuard {
+    fn drop(&mut self) {
+        self.set.remove(&self.id);
     }
 }
 
