@@ -146,6 +146,15 @@ pub async fn create(
     .context("invitations::create: count pending")?;
     if u32::try_from(pending).unwrap_or(u32::MAX) >= max_pending {
         tx.rollback().await.ok();
+        crate::quotas::service::record_quota_event(
+            Some(pool.clone()),
+            Some(org),
+            Some(inviter),
+            "quota_exceeded",
+            Some("max_pending_invitations"),
+            serde_json::json!({ "current": pending, "limit": i64::from(max_pending) }),
+            None,
+        );
         return Err(AppError::conflict(
             crate::api::error::codes::INVITATIONS_LIMIT,
             format!("pending invitation limit reached ({max_pending})"),

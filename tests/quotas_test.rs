@@ -802,6 +802,29 @@ async fn pending_invitation_cap_rejects_over_limit() {
     let resp = over.into_response();
     assert_eq!(resp.status(), StatusCode::CONFLICT);
     assert_eq!(body_json(resp).await["error"]["code"], "INVITATIONS_LIMIT");
+
+    // Cap-block must hit the same audit stream every other quota writes to —
+    // record_quota_event is fire-and-forget, so poll briefly.
+    let mut emitted = 0i64;
+    for _ in 0..20 {
+        emitted = sqlx::query_scalar(
+            "SELECT count(*) FROM quota_events \
+             WHERE org_id = $1 AND event = 'quota_exceeded' \
+             AND quota_name = 'max_pending_invitations'",
+        )
+        .bind(org.0)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        if emitted > 0 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(
+        emitted >= 1,
+        "expected quota_events row for max_pending_invitations block"
+    );
 }
 
 // ── N parallel invites never exceed the cap; dup email → one row ───
