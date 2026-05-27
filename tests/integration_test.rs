@@ -6,7 +6,7 @@ use std::time::Duration;
 use axum::Router;
 use axum::http::StatusCode;
 use axum::routing::get;
-use status_monitor::domain::{CheckStatus, ExpectedStatus};
+use status_monitor::domain::{CheckStatus, ExpectedStatus, HttpMethod};
 use status_monitor::storage::{InMemorySink, ResultSink};
 use status_monitor::worker::execute_http_check;
 use url::Url;
@@ -138,6 +138,35 @@ async fn http_check_total_timeout_is_error() {
         elapsed < Duration::from_millis(500),
         "timeout not enforced: elapsed {elapsed:?}"
     );
+}
+
+#[tokio::test]
+async fn http_check_head_with_gzip_content_encoding_is_up() {
+    use axum::http::header;
+    use axum::routing::head;
+    let app = Router::new().route(
+        "/h",
+        head(|| async {
+            (
+                StatusCode::OK,
+                [(header::CONTENT_ENCODING, "gzip")],
+                axum::body::Body::empty(),
+            )
+        }),
+    );
+    let addr = spawn_router(app).await;
+
+    let client = test_client();
+    let url = Url::parse(&format!("http://{addr}/h")).unwrap();
+    let mut check = default_http_check(url, ExpectedStatus::Exact(200));
+    check.method = HttpMethod::Head;
+
+    let result = execute_http_check(Uuid::now_v7(), uuid::Uuid::nil(), &check, &client).await;
+
+    assert_eq!(result.status, CheckStatus::Up);
+    assert_eq!(result.response_code, Some(200));
+    assert_eq!(result.response_size, Some(0));
+    assert!(result.error.is_none());
 }
 
 #[tokio::test]

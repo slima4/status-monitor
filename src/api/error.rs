@@ -58,6 +58,7 @@ pub mod codes {
     pub const INVALID_TCP_HOST: &str = "INVALID_TCP_HOST";
     pub const INVALID_STATUS_RANGE: &str = "INVALID_STATUS_RANGE";
     pub const INVALID_HTTP_METHOD: &str = "INVALID_HTTP_METHOD";
+    pub const INVALID_HEAD_BODY_MATCH: &str = "INVALID_HEAD_BODY_MATCH";
     pub const INVALID_TLS_CERT_PARAMS: &str = "INVALID_TLS_CERT_PARAMS";
     pub const INVALID_DOMAIN_PARAMS: &str = "INVALID_DOMAIN_PARAMS";
     pub const INVALID_DNS_PARAMS: &str = "INVALID_DNS_PARAMS";

@@ -887,6 +887,15 @@ fn validate_check(check: &crate::domain::CheckSpec, guard: &SsrfGuard) -> Result
                     "check.bearer_token",
                 ));
             }
+            if http.method == crate::domain::HttpMethod::Head
+                && http.expected_body_contains.is_some()
+            {
+                return Err(AppError::bad_request_field(
+                    codes::INVALID_HEAD_BODY_MATCH,
+                    "expected_body_contains cannot be combined with method=HEAD (HEAD responses carry no body)",
+                    "check.expected_body_contains",
+                ));
+            }
             // Plain http already sends creds in the clear, so this rule only
             // protects the https + forged-cert MITM path that bypasses the
             // confidentiality the operator was relying on.
@@ -1091,6 +1100,40 @@ mod tests {
         let err = validate_public_target_field_updates(None, Some(&big), None)
             .expect_err("over-cap set must reject");
         assert_bad_request_with_field(err, "public_description");
+    }
+
+    fn head_spec(body_match: Option<&str>) -> crate::domain::CheckSpec {
+        use crate::domain::{CheckSpec, ExpectedStatus, HttpCheck, HttpMethod};
+        use std::time::Duration;
+        CheckSpec::Http(HttpCheck {
+            url: "https://example.com/".parse().unwrap(),
+            method: HttpMethod::Head,
+            timeout: Duration::from_secs(5),
+            follow_redirects: false,
+            max_redirects: 0,
+            expected_status: ExpectedStatus::Exact(200),
+            expected_body_contains: body_match.map(str::to_owned),
+            headers: Default::default(),
+            body: None,
+            verify_tls: true,
+            basic_auth: None,
+            bearer_token: None,
+        })
+    }
+
+    #[test]
+    fn validate_check_rejects_head_with_body_match() {
+        use crate::security::ssrf::SsrfGuard;
+        let err = validate_check(&head_spec(Some("hello")), &SsrfGuard::strict())
+            .expect_err("HEAD + body match must reject");
+        assert_bad_request_with_field(err, "check.expected_body_contains");
+    }
+
+    #[test]
+    fn validate_check_accepts_head_without_body_match() {
+        use crate::security::ssrf::SsrfGuard;
+        validate_check(&head_spec(None), &SsrfGuard::strict())
+            .expect("HEAD without body match must pass");
     }
 
     #[test]

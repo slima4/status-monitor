@@ -252,12 +252,6 @@ async fn finalize(
     clients.ttfb_ms.record(ttfb_elapsed_ms as f64);
     let ttfb_ms = ttfb_elapsed_ms.min(u16::MAX as u128) as u16;
 
-    let content_encoding = response
-        .headers()
-        .get(hyper::header::CONTENT_ENCODING)
-        .and_then(|h| h.to_str().ok())
-        .map(|s| s.to_ascii_lowercase());
-
     // Header preview is snapshotted before the response body is consumed:
     // hyper bodies are streams and the headers handle becomes unavailable
     // once we move the response into Limited.
@@ -269,11 +263,6 @@ async fn finalize(
         .filter(|s| sanitised_retry_after(s))
         .map(|s| s.to_string());
 
-    let body_remaining = check.timeout.saturating_sub(start.elapsed());
-    // Bound at the byte-budget *before* allocation: Limited streams frames
-    // and errors mid-read once the cap is exceeded, so an oversized response
-    // never sits fully in memory.
-    let body_fut = Limited::new(response.into_body(), MAX_RAW_BODY_BYTES).collect();
     let err_with_ttfb = |reason: &'static str| -> (CheckResult, Option<HttpProbe>) {
         let mut r = CheckResult::error_with_elapsed(
             target_id,
@@ -289,16 +278,32 @@ async fn finalize(
         });
         (r, probe)
     };
-    let collected = match tokio::time::timeout(body_remaining, body_fut).await {
-        Err(_) => return err_with_ttfb("body timeout"),
-        Ok(Ok(c)) => c,
-        Ok(Err(_)) => return err_with_ttfb("body"),
-    };
 
-    let raw = collected.to_bytes();
-    let decoded = match decode_body(&raw, content_encoding.as_deref()) {
-        Ok(b) => b,
-        Err(_) => return err_with_ttfb("decode"),
+    // HEAD body is empty; the origin still sets Content-Encoding from the
+    // GET variant, so any decode attempt fails on the empty stream.
+    let decoded = if check.method == HttpMethod::Head {
+        Bytes::new()
+    } else {
+        let content_encoding = response
+            .headers()
+            .get(hyper::header::CONTENT_ENCODING)
+            .and_then(|h| h.to_str().ok())
+            .map(|s| s.to_ascii_lowercase());
+        let body_remaining = check.timeout.saturating_sub(start.elapsed());
+        // Bound at the byte-budget *before* allocation: Limited streams frames
+        // and errors mid-read once the cap is exceeded, so an oversized response
+        // never sits fully in memory.
+        let body_fut = Limited::new(response.into_body(), MAX_RAW_BODY_BYTES).collect();
+        let collected = match tokio::time::timeout(body_remaining, body_fut).await {
+            Err(_) => return err_with_ttfb("body timeout"),
+            Ok(Ok(c)) => c,
+            Ok(Err(_)) => return err_with_ttfb("body"),
+        };
+        let raw = collected.to_bytes();
+        match decode_body(&raw, content_encoding.as_deref()) {
+            Ok(b) => b,
+            Err(_) => return err_with_ttfb("decode"),
+        }
     };
 
     let size = decoded.len() as u32;
