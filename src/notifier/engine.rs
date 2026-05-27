@@ -72,6 +72,9 @@ pub struct AlertEngine {
     rx: mpsc::Receiver<AlertSignal>,
     channels: Arc<dyn NotificationChannelStore>,
     http: crate::http_outbound::OutboundHttpClient,
+    /// `handle()` is the sole writer (serial consumer of `rx`); the rollback
+    /// at the bottom relies on this — parallelizing per-binding fan-out will
+    /// break the prev_state restore.
     state: Arc<Mutex<HashMap<(Uuid, Uuid), AlertState>>>,
     /// Keyed by `(org, channel_id)` so a tenant's binding can only ever hit
     /// that tenant's channel. `None` is cached too, so a binding to a deleted
@@ -153,15 +156,18 @@ impl AlertEngine {
             if !channel.enabled {
                 continue;
             }
-            let (event_kind, failures_at_event) = {
+            let key = (target.id, binding.channel_id);
+            let (event_kind, failures_at_event, prev_state) = {
                 let mut guard = self.state.lock();
-                let entry = guard.entry((target.id, binding.channel_id)).or_default();
-                decide(
+                let entry = guard.entry(key).or_default();
+                let prev = *entry;
+                let (k, n) = decide(
                     entry,
                     is_up,
                     binding.after_failures,
                     binding.notify_recovery,
-                )
+                );
+                (k, n, prev)
             };
             let Some(kind) = event_kind else { continue };
 
@@ -181,24 +187,36 @@ impl AlertEngine {
                 "kind" => kind.as_str(),
             )
             .increment(1);
-            let notifier = match build_notifier(&channel.config, &self.http) {
-                Ok(n) => n,
+            // Rollback on dispatch failure — without it, a failed delivery
+            // latches alerting=true and silently suppresses every future Down.
+            let dispatch_ok = match build_notifier(&channel.config, &self.http) {
+                Ok(n) => match n.notify(&event).await {
+                    Ok(()) => true,
+                    Err(err) => {
+                        tracing::warn!(
+                            target_id = %target.id,
+                            channel_id = %binding.channel_id,
+                            kind = kind.as_str(),
+                            error = %err,
+                            "notifier dispatch failed"
+                        );
+                        false
+                    }
+                },
                 Err(err) => {
-                    counter!(names::NOTIFICATIONS_FAILURES, "channel" => channel_label)
-                        .increment(1);
-                    tracing::warn!(target_id = %target.id, channel_id = %binding.channel_id, error = %err, "building notifier failed");
-                    continue;
+                    tracing::warn!(
+                        target_id = %target.id,
+                        channel_id = %binding.channel_id,
+                        kind = kind.as_str(),
+                        error = %err,
+                        "building notifier failed"
+                    );
+                    false
                 }
             };
-            if let Err(err) = notifier.notify(&event).await {
+            if !dispatch_ok {
                 counter!(names::NOTIFICATIONS_FAILURES, "channel" => channel_label).increment(1);
-                tracing::warn!(
-                    target_id = %target.id,
-                    channel_id = %binding.channel_id,
-                    kind = kind.as_str(),
-                    error = %err,
-                    "notifier dispatch failed"
-                );
+                self.state.lock().insert(key, prev_state);
             }
         }
     }
@@ -304,5 +322,218 @@ mod tests {
         // Second hit served from cache even after the row is deleted.
         store.delete(test_org(), ch.id).await.unwrap();
         assert!(engine.resolve(test_org(), ch.id).await.is_some());
+    }
+
+    // ── Dispatch-failure rollback (FIRE-LOSS regression) ─────────────────
+
+    #[tokio::test]
+    async fn dispatch_failure_rolls_back_alerting_so_next_signal_retries() {
+        use crate::domain::{
+            AlertBinding, CheckResult, CheckSpec, CheckStatus, ExpectedStatus, HttpCheck,
+            HttpMethod, NewNotificationChannel, Target, TargetAlerts,
+        };
+        use chrono::Utc;
+        use std::collections::HashMap;
+        use std::time::Duration as StdDuration;
+
+        // Closed loopback port → dispatch fails at TCP connect, no mock server.
+        let store: Arc<dyn NotificationChannelStore> =
+            Arc::new(InMemoryNotificationChannelStore::new());
+        let ch = store
+            .create(
+                test_org(),
+                NewNotificationChannel {
+                    name: "ops".into(),
+                    config: ChannelConfig::Webhook {
+                        url: "http://127.0.0.1:1/notify".into(),
+                        headers: Default::default(),
+                    },
+                    enabled: true,
+                },
+                10,
+            )
+            .await
+            .unwrap();
+
+        let engine = engine_with(store);
+
+        let target = Arc::new(Target {
+            id: Uuid::now_v7(),
+            name: "boom".into(),
+            check: CheckSpec::Http(HttpCheck {
+                url: url::Url::parse("https://example.com/").unwrap(),
+                method: HttpMethod::Get,
+                timeout: StdDuration::from_secs(5),
+                follow_redirects: false,
+                max_redirects: 0,
+                expected_status: ExpectedStatus::Exact(200),
+                expected_body_contains: None,
+                headers: HashMap::new(),
+                body: None,
+                verify_tls: true,
+                basic_auth: None,
+                bearer_token: None,
+            }),
+            interval: StdDuration::from_secs(30),
+            enabled: true,
+            tags: vec![],
+            alerts: TargetAlerts(vec![AlertBinding {
+                channel_id: ch.id,
+                after_failures: 1,
+                notify_recovery: true,
+            }]),
+            group_name: None,
+            owner_user_id: None,
+            public_status: false,
+            public_name: None,
+            public_description: None,
+            public_group: None,
+            public_sort_order: 0,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        });
+
+        let down_signal = || AlertSignal {
+            target: target.clone(),
+            org_id: test_org(),
+            result: CheckResult {
+                target_id: target.id,
+                org_id: test_org().0,
+                timestamp: Utc::now(),
+                status: CheckStatus::Down,
+                duration_ms: 0,
+                dns_ms: None,
+                connect_ms: None,
+                tls_ms: None,
+                ttfb_ms: None,
+                response_code: None,
+                response_size: None,
+                error: Some("test outage".into()),
+            },
+        };
+
+        let key = (target.id, ch.id);
+
+        engine.handle(down_signal()).await;
+        let after_first = *engine.state.lock().get(&key).expect("state inserted");
+        assert!(
+            !after_first.alerting,
+            "alerting must roll back after failed dispatch"
+        );
+
+        engine.handle(down_signal()).await;
+        let after_second = *engine.state.lock().get(&key).unwrap();
+        assert!(
+            !after_second.alerting,
+            "second failure must also roll back, proving retry"
+        );
+    }
+
+    #[tokio::test]
+    async fn recovered_dispatch_failure_keeps_alerting_so_recovery_retries() {
+        // (true,true) resets state on success — failed Recovered must keep
+        // alerting=true so the next Up retries instead of dropping the event.
+        use crate::domain::{
+            AlertBinding, CheckResult, CheckSpec, CheckStatus, ExpectedStatus, HttpCheck,
+            HttpMethod, NewNotificationChannel, Target, TargetAlerts,
+        };
+        use chrono::Utc;
+        use std::collections::HashMap;
+        use std::time::Duration as StdDuration;
+
+        let store: Arc<dyn NotificationChannelStore> =
+            Arc::new(InMemoryNotificationChannelStore::new());
+        let ch = store
+            .create(
+                test_org(),
+                NewNotificationChannel {
+                    name: "ops".into(),
+                    config: ChannelConfig::Webhook {
+                        url: "http://127.0.0.1:1/notify".into(),
+                        headers: Default::default(),
+                    },
+                    enabled: true,
+                },
+                10,
+            )
+            .await
+            .unwrap();
+
+        let engine = engine_with(store);
+
+        let target = Arc::new(Target {
+            id: Uuid::now_v7(),
+            name: "fluky".into(),
+            check: CheckSpec::Http(HttpCheck {
+                url: url::Url::parse("https://example.com/").unwrap(),
+                method: HttpMethod::Get,
+                timeout: StdDuration::from_secs(5),
+                follow_redirects: false,
+                max_redirects: 0,
+                expected_status: ExpectedStatus::Exact(200),
+                expected_body_contains: None,
+                headers: HashMap::new(),
+                body: None,
+                verify_tls: true,
+                basic_auth: None,
+                bearer_token: None,
+            }),
+            interval: StdDuration::from_secs(30),
+            enabled: true,
+            tags: vec![],
+            alerts: TargetAlerts(vec![AlertBinding {
+                channel_id: ch.id,
+                after_failures: 1,
+                notify_recovery: true,
+            }]),
+            group_name: None,
+            owner_user_id: None,
+            public_status: false,
+            public_name: None,
+            public_description: None,
+            public_group: None,
+            public_sort_order: 0,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        });
+
+        let key = (target.id, ch.id);
+        engine.state.lock().insert(
+            key,
+            AlertState {
+                consecutive_non_up: 4,
+                alerting: true,
+            },
+        );
+
+        let up_signal = AlertSignal {
+            target: target.clone(),
+            org_id: test_org(),
+            result: CheckResult {
+                target_id: target.id,
+                org_id: test_org().0,
+                timestamp: Utc::now(),
+                status: CheckStatus::Up,
+                duration_ms: 10,
+                dns_ms: None,
+                connect_ms: None,
+                tls_ms: None,
+                ttfb_ms: None,
+                response_code: Some(200),
+                response_size: Some(0),
+                error: None,
+            },
+        };
+
+        engine.handle(up_signal).await;
+        let after = *engine.state.lock().get(&key).unwrap();
+        assert!(
+            after.alerting,
+            "alerting must persist across failed Recovered"
+        );
+        assert_eq!(
+            after.consecutive_non_up, 4,
+            "rollback must preserve the failure count for the eventual Recovered payload",
+        );
     }
 }
