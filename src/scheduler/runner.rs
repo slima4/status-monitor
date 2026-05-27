@@ -33,6 +33,10 @@ const SHUTDOWN_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
 /// within the same window.
 const REFRESH_BACKOFF_CAP_MULTIPLIER: u64 = 10;
 
+/// First-probe stagger cap: bounds the boot/refresh-batch burst while
+/// keeping a freshly-added target's first result within a few seconds.
+const INITIAL_PROBE_SPREAD: Duration = Duration::from_secs(5);
+
 static REFRESH_FAILED: LazyLock<Counter> =
     LazyLock::new(|| counter!(names::SCHEDULER_REFRESH_FAILED));
 static CONSECUTIVE_REFRESH_FAILURES: LazyLock<Gauge> =
@@ -279,13 +283,19 @@ async fn drain_handles(handles: Vec<(Uuid, JoinHandle<()>)>, timeout: Duration) 
 async fn run_target_loop(st: ScheduledTarget, pool: Arc<WorkerPool>, shutdown: CancellationToken) {
     let base = st.target.interval;
 
-    // Check immediately so a freshly-scheduled target reports up/down right
-    // away instead of staying blank until the first interval elapses.
-    dispatch(&pool, &st);
-
     // Validation enforces a per-plan interval floor (>= 1s), so a zero
     // interval — which would panic `interval_at` — is structurally impossible.
     debug_assert!(!base.is_zero(), "target interval must be non-zero");
+
+    // Cap at base/2 so a short-cadence target's first→second-probe gap
+    // stays under 1.5× interval.
+    let initial_cap = INITIAL_PROBE_SPREAD.min(base / 2);
+    let initial_offset = stagger_offset(st.target.id, initial_cap);
+    tokio::select! {
+        _ = shutdown.cancelled() => return,
+        _ = tokio::time::sleep(initial_offset) => {}
+    }
+    dispatch(&pool, &st);
 
     // Deterministic per-target phase offset across the full interval window.
     // N targets sharing a host get spread over [0, interval) with expected
@@ -355,6 +365,33 @@ mod tests {
     #[test]
     fn stagger_offset_zero_interval_is_safe() {
         assert_eq!(stagger_offset(Uuid::nil(), Duration::ZERO), Duration::ZERO);
+    }
+
+    #[test]
+    fn initial_offset_is_bounded_by_spread_cap() {
+        // INITIAL_PROBE_SPREAD.min(base/2) is what run_target_loop passes for
+        // the first probe — long-interval target gets its first result within
+        // the spread cap, short-interval target stays under base/2 so the
+        // first→second-probe gap stays under 1.5× interval.
+        use super::INITIAL_PROBE_SPREAD;
+        let long_base = Duration::from_secs(3600);
+        for n in 0..1000u128 {
+            let cap = INITIAL_PROBE_SPREAD.min(long_base / 2);
+            let o = stagger_offset(Uuid::from_u128(n), cap);
+            assert!(
+                o < INITIAL_PROBE_SPREAD,
+                "first-probe offset {o:?} exceeded cap"
+            );
+        }
+        let short_base = Duration::from_secs(2);
+        for n in 0..1000u128 {
+            let cap = INITIAL_PROBE_SPREAD.min(short_base / 2);
+            let o = stagger_offset(Uuid::from_u128(n), cap);
+            assert!(
+                o < short_base,
+                "first-probe offset {o:?} >= interval {short_base:?}"
+            );
+        }
     }
 
     #[test]
