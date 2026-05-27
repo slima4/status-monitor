@@ -106,16 +106,14 @@ fn classify(check: &DnsCheck, answers: &[String]) -> DnsVerdict {
         .filter(|s| !s.is_empty())
         .map(|needle| answers.iter().any(|a| a.contains(needle)));
 
-    // Empty answer set is Down regardless of expected_contains — that's
-    // the same signal as NXDOMAIN; treating it as Up would let the check
-    // silently pass after a record removal.
-    let status = if answers.is_empty() {
+    // Empty answers = NXDOMAIN-equivalent. Mismatched answers = the resolver
+    // returned the wrong record (BGP hijack, registrar takeover, regional
+    // misroute) — user explicitly opted into strict matching via
+    // expected_contains, so a sustained mismatch is a real outage signal.
+    let status = if answers.is_empty() || matches!(matched, Some(false)) {
         CheckStatus::Down
     } else {
-        match matched {
-            Some(false) => CheckStatus::Degraded,
-            _ => CheckStatus::Up,
-        }
+        CheckStatus::Up
     };
 
     #[derive(Serialize)]
@@ -175,9 +173,9 @@ mod tests {
     }
 
     #[test]
-    fn mismatched_substring_is_degraded() {
+    fn mismatched_substring_is_down() {
         let v = classify(&check(Some("203.0.113.7")), &["192.0.2.1".into()]);
-        assert_eq!(v.status, CheckStatus::Degraded);
+        assert_eq!(v.status, CheckStatus::Down);
     }
 
     #[test]

@@ -6,12 +6,11 @@
 //! never produces alerts. Its single job is to keep the `incidents` table in
 //! sync with what the recent check results say.
 //!
-//! Detection rule:
-//!  * `≥ flap_threshold` consecutive non-`up` results, no open incident →
-//!    INSERT a new open incident.
-//!  * `≥ flap_threshold` consecutive `up` results while an open incident
-//!    exists → UPDATE `ended_at` to the timestamp of the first `up` in that
-//!    trailing run.
+//! Detection rule (Degraded is back-pressure, not an outage):
+//!  * `≥ flap_threshold` consecutive `down`/`error` results, no open incident
+//!    → INSERT a new open incident.
+//!  * `≥ flap_threshold` consecutive `up`/`degraded` results while an open
+//!    incident exists → UPDATE `ended_at` to the first such timestamp.
 //!
 //! Both rules are idempotent: re-running with the same input produces no
 //! additional writes.
@@ -274,12 +273,9 @@ pub fn decide(open: Option<&OpenIncident>, results: &[CheckResult], flap_thresho
 
     match open {
         Some(inc) => {
-            let tail_up = trailing_up_run(results);
-            if tail_up.len() >= threshold {
-                // Only count up-results that happened AFTER the incident
-                // started; otherwise we could mistakenly close an incident
-                // using stale `up` rows that pre-date its start.
-                let recovery_start = &tail_up[0];
+            let tail_good = trailing_good_run(results);
+            if tail_good.len() >= threshold {
+                let recovery_start = &tail_good[0];
                 if recovery_start.timestamp > inc.started_at {
                     return Action::Close {
                         incident_id: inc.id,
@@ -306,19 +302,26 @@ pub fn decide(open: Option<&OpenIncident>, results: &[CheckResult], flap_thresho
     }
 }
 
+/// `Down` / `Error` = real outage. `Degraded` (rate-limit back-pressure) is
+/// not an outage — counting it would latch incidents on chronically
+/// rate-limited targets that the origin is still answering.
+fn is_bad(status: CheckStatus) -> bool {
+    matches!(status, CheckStatus::Down | CheckStatus::Error)
+}
+
 fn trailing_bad_run(results: &[CheckResult]) -> &[CheckResult] {
     let split = results
         .iter()
-        .rposition(|r| matches!(r.status, CheckStatus::Up))
+        .rposition(|r| !is_bad(r.status))
         .map(|i| i + 1)
         .unwrap_or(0);
     &results[split..]
 }
 
-fn trailing_up_run(results: &[CheckResult]) -> &[CheckResult] {
+fn trailing_good_run(results: &[CheckResult]) -> &[CheckResult] {
     let split = results
         .iter()
-        .rposition(|r| !matches!(r.status, CheckStatus::Up))
+        .rposition(|r| is_bad(r.status))
         .map(|i| i + 1)
         .unwrap_or(0);
     &results[split..]
@@ -748,6 +751,107 @@ mod tests {
         ];
         // Tail-up exists but pre-dates incident.started_at → no action.
         assert_eq!(decide(Some(&open), &results, 2), Action::None);
+    }
+
+    #[test]
+    fn decide_degraded_run_does_not_open_incident() {
+        let base = Utc.with_ymd_and_hms(2026, 5, 13, 12, 0, 0).unwrap();
+        let target = Uuid::now_v7();
+        let results = vec![
+            result(target, ts(base, 0), CheckStatus::Degraded),
+            result(target, ts(base, 30), CheckStatus::Degraded),
+            result(target, ts(base, 60), CheckStatus::Degraded),
+        ];
+        assert_eq!(decide(None, &results, 2), Action::None);
+    }
+
+    #[test]
+    fn decide_degraded_run_closes_open_incident() {
+        let base = Utc.with_ymd_and_hms(2026, 5, 13, 12, 0, 0).unwrap();
+        let target = Uuid::now_v7();
+        let open = OpenIncident {
+            id: Uuid::now_v7(),
+            target_id: target,
+            started_at: ts(base, 0),
+        };
+        let results = vec![
+            result(target, ts(base, 30), CheckStatus::Error),
+            result(target, ts(base, 60), CheckStatus::Degraded),
+            result(target, ts(base, 90), CheckStatus::Degraded),
+        ];
+        match decide(Some(&open), &results, 2) {
+            Action::Close {
+                incident_id,
+                ended_at,
+            } => {
+                assert_eq!(incident_id, open.id);
+                assert_eq!(ended_at, ts(base, 60));
+            }
+            other => panic!("expected Close, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn decide_trailing_degraded_breaks_a_bad_run_so_no_open() {
+        // [Down, Down, Degraded] cancels the trailing bad-run because the
+        // last result re-classifies as "not bad" — the resolver/origin is
+        // talking again, even if slowly.
+        let base = Utc.with_ymd_and_hms(2026, 5, 13, 12, 0, 0).unwrap();
+        let target = Uuid::now_v7();
+        let results = vec![
+            result(target, ts(base, 0), CheckStatus::Down),
+            result(target, ts(base, 30), CheckStatus::Down),
+            result(target, ts(base, 60), CheckStatus::Degraded),
+        ];
+        assert_eq!(decide(None, &results, 2), Action::None);
+    }
+
+    #[test]
+    fn decide_degraded_between_bad_results_does_not_carry_count() {
+        // [Down, Degraded, Down, Down] opens with check_count=2 — the
+        // intervening Degraded reset the trailing-bad run; only the final
+        // pair counts toward the threshold.
+        let base = Utc.with_ymd_and_hms(2026, 5, 13, 12, 0, 0).unwrap();
+        let target = Uuid::now_v7();
+        let results = vec![
+            result(target, ts(base, 0), CheckStatus::Down),
+            result(target, ts(base, 30), CheckStatus::Degraded),
+            result(target, ts(base, 60), CheckStatus::Down),
+            result(target, ts(base, 90), CheckStatus::Down),
+        ];
+        match decide(None, &results, 2) {
+            Action::Open(new) => {
+                assert_eq!(new.check_count, 2);
+                assert_eq!(new.started_at, ts(base, 60));
+            }
+            other => panic!("expected Open, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn decide_mixed_degraded_and_up_counts_toward_close() {
+        let base = Utc.with_ymd_and_hms(2026, 5, 13, 12, 0, 0).unwrap();
+        let target = Uuid::now_v7();
+        let open = OpenIncident {
+            id: Uuid::now_v7(),
+            target_id: target,
+            started_at: ts(base, 0),
+        };
+        let results = vec![
+            result(target, ts(base, 30), CheckStatus::Down),
+            result(target, ts(base, 60), CheckStatus::Up),
+            result(target, ts(base, 90), CheckStatus::Degraded),
+        ];
+        match decide(Some(&open), &results, 2) {
+            Action::Close {
+                incident_id,
+                ended_at,
+            } => {
+                assert_eq!(incident_id, open.id);
+                assert_eq!(ended_at, ts(base, 60));
+            }
+            other => panic!("expected Close, got {other:?}"),
+        }
     }
 
     #[test]
