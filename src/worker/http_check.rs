@@ -272,6 +272,9 @@ async fn finalize(
             reason,
         );
         r.ttfb_ms = Some(ttfb_ms);
+        // Status line came back (TTFB recorded) — preserve the code so a body
+        // failure still distinguishes 200-then-truncated from 503-broken-body.
+        r.response_code = Some(status_code);
         let probe = headers_preview.clone().map(|h| HttpProbe {
             response_headers_preview: h,
             response_body_snippet: None,

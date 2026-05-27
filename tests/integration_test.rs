@@ -170,6 +170,33 @@ async fn http_check_head_with_gzip_content_encoding_is_up() {
 }
 
 #[tokio::test]
+async fn http_check_body_decode_error_preserves_response_code() {
+    // Status line came back, body decode failed — response_code must persist.
+    use axum::http::header;
+    let app = Router::new().route(
+        "/g",
+        get(|| async {
+            (
+                StatusCode::OK,
+                [(header::CONTENT_ENCODING, "gzip")],
+                axum::body::Body::from(b"not actually gzipped".to_vec()),
+            )
+        }),
+    );
+    let addr = spawn_router(app).await;
+    let client = test_client();
+    let url = Url::parse(&format!("http://{addr}/g")).unwrap();
+    let check = default_http_check(url, ExpectedStatus::Exact(200));
+
+    let result = execute_http_check(Uuid::now_v7(), uuid::Uuid::nil(), &check, &client).await;
+
+    assert_eq!(result.status, CheckStatus::Error);
+    assert_eq!(result.error.as_deref(), Some("decode"));
+    assert_eq!(result.response_code, Some(200));
+    assert!(result.ttfb_ms.is_some());
+}
+
+#[tokio::test]
 async fn in_memory_sink_collects_results() {
     let app = Router::new().route("/", get(|| async { "ok" }));
     let addr = spawn_router(app).await;
