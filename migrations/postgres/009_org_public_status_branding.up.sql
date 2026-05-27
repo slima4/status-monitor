@@ -40,7 +40,11 @@ ALTER TABLE organizations
                OR (public_custom_domain::text = lower(public_custom_domain::text)
                    AND public_custom_domain::text NOT LIKE '%.')),
     ADD CONSTRAINT public_style_known
-        CHECK (public_style IN ('default', 'classic', 'terminal', 'winter'));
+        CHECK (public_style IN (
+            'default', 'classic', 'terminal', 'winter',
+            'dark', 'night', 'dim', 'nord', 'dracula',
+            'corporate', 'light', 'cupcake', 'cyberpunk', 'synthwave'
+        ));
 
 CREATE INDEX idx_orgs_public_enabled
     ON organizations (slug)

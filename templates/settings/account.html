@@ -20,9 +20,19 @@
     <div class="sticker-card space-y-2 p-5">
       <label for="app-theme" class="text-sm font-medium">Theme</label>
       <select id="app-theme" data-sm-combobox aria-label="Theme">
-        <option value="default">Default — CLI register</option>
-        <option value="terminal">Terminal — CRT phosphor</option>
-        <option value="winter">Winter — cool blue</option>
+        <option value="default"{% if theme == "default" %} selected{% endif %}>Default — CLI register</option>
+        <option value="terminal"{% if theme == "terminal" %} selected{% endif %}>Terminal — CRT phosphor</option>
+        <option value="winter"{% if theme == "winter" %} selected{% endif %}>Winter — cool blue</option>
+        <option value="dark"{% if theme == "dark" %} selected{% endif %}>Dark — slate</option>
+        <option value="night"{% if theme == "night" %} selected{% endif %}>Night — deep navy</option>
+        <option value="dim"{% if theme == "dim" %} selected{% endif %}>Dim — warm dark</option>
+        <option value="nord"{% if theme == "nord" %} selected{% endif %}>Nord — arctic light</option>
+        <option value="dracula"{% if theme == "dracula" %} selected{% endif %}>Dracula — purple dark</option>
+        <option value="corporate"{% if theme == "corporate" %} selected{% endif %}>Corporate — clean indigo</option>
+        <option value="light"{% if theme == "light" %} selected{% endif %}>Light — pure white</option>
+        <option value="cupcake"{% if theme == "cupcake" %} selected{% endif %}>Cupcake — pastel cream</option>
+        <option value="cyberpunk"{% if theme == "cyberpunk" %} selected{% endif %}>Cyberpunk — neon yellow</option>
+        <option value="synthwave"{% if theme == "synthwave" %} selected{% endif %}>Synthwave — retro neon</option>
       </select>
       <p id="theme-result" class="text-xs text-muted" aria-live="polite">
         Applies to the org app on every device you sign in to.
@@ -39,14 +49,6 @@
         "Accept": "application/json",
         "X-Requested-With": "status-monitor",
       };
-
-      fetch("/api/v1/me/theme", { headers: HEADERS })
-        .then(function (r) { return r.ok ? r.json() : null; })
-        .then(function (body) {
-          if (body && body.theme) sel.value = body.theme;
-        })
-        .catch(function () { /* fall back to the default selection */ });
-
       sel.addEventListener("change", async function () {
         const v = sel.value;
         try {
@@ -57,7 +59,9 @@
           });
           if (!r.ok) throw new Error("HTTP " + r.status);
           const html = document.documentElement;
-          html.classList.remove("theme-default", "theme-terminal", "theme-winter");
+          Array.from(html.classList)
+            .filter(function (c) { return c.indexOf("theme-") === 0; })
+            .forEach(function (c) { html.classList.remove(c); });
           if (v !== "default") html.classList.add("theme-" + v);
           out.textContent = "Saved.";
         } catch (err) {

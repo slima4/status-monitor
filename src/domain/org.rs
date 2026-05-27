@@ -52,6 +52,16 @@ pub enum PublicStyle {
     Classic,
     Terminal,
     Winter,
+    Dark,
+    Night,
+    Dim,
+    Nord,
+    Dracula,
+    Corporate,
+    Light,
+    Cupcake,
+    Cyberpunk,
+    Synthwave,
 }
 
 impl PublicStyle {
@@ -61,6 +71,16 @@ impl PublicStyle {
             Self::Classic => "classic",
             Self::Terminal => "terminal",
             Self::Winter => "winter",
+            Self::Dark => "dark",
+            Self::Night => "night",
+            Self::Dim => "dim",
+            Self::Nord => "nord",
+            Self::Dracula => "dracula",
+            Self::Corporate => "corporate",
+            Self::Light => "light",
+            Self::Cupcake => "cupcake",
+            Self::Cyberpunk => "cyberpunk",
+            Self::Synthwave => "synthwave",
         }
     }
 
@@ -70,6 +90,16 @@ impl PublicStyle {
             "classic" => Self::Classic,
             "terminal" => Self::Terminal,
             "winter" => Self::Winter,
+            "dark" => Self::Dark,
+            "night" => Self::Night,
+            "dim" => Self::Dim,
+            "nord" => Self::Nord,
+            "dracula" => Self::Dracula,
+            "corporate" => Self::Corporate,
+            "light" => Self::Light,
+            "cupcake" => Self::Cupcake,
+            "cyberpunk" => Self::Cyberpunk,
+            "synthwave" => Self::Synthwave,
             other => {
                 tracing::warn!(
                     value = other,
@@ -80,7 +110,22 @@ impl PublicStyle {
         }
     }
 
-    pub const ALL: &'static [&'static str] = &["default", "classic", "terminal", "winter"];
+    pub const ALL: &'static [&'static str] = &[
+        "default",
+        "classic",
+        "terminal",
+        "winter",
+        "dark",
+        "night",
+        "dim",
+        "nord",
+        "dracula",
+        "corporate",
+        "light",
+        "cupcake",
+        "cyberpunk",
+        "synthwave",
+    ];
 }
 
 /// Domain-layer mirror of the column CHECK constraints. Lets handlers map to

@@ -124,6 +124,16 @@
           <option value="classic"{% if s.public_style.as_str() == "classic" %} selected{% endif %}>Classic — neutral SaaS</option>
           <option value="terminal"{% if s.public_style.as_str() == "terminal" %} selected{% endif %}>Terminal — CRT phosphor</option>
           <option value="winter"{% if s.public_style.as_str() == "winter" %} selected{% endif %}>Winter — cool blue</option>
+          <option value="dark"{% if s.public_style.as_str() == "dark" %} selected{% endif %}>Dark — slate</option>
+          <option value="night"{% if s.public_style.as_str() == "night" %} selected{% endif %}>Night — deep navy</option>
+          <option value="dim"{% if s.public_style.as_str() == "dim" %} selected{% endif %}>Dim — warm dark</option>
+          <option value="nord"{% if s.public_style.as_str() == "nord" %} selected{% endif %}>Nord — arctic light</option>
+          <option value="dracula"{% if s.public_style.as_str() == "dracula" %} selected{% endif %}>Dracula — purple dark</option>
+          <option value="corporate"{% if s.public_style.as_str() == "corporate" %} selected{% endif %}>Corporate — clean indigo</option>
+          <option value="light"{% if s.public_style.as_str() == "light" %} selected{% endif %}>Light — pure white</option>
+          <option value="cupcake"{% if s.public_style.as_str() == "cupcake" %} selected{% endif %}>Cupcake — pastel cream</option>
+          <option value="cyberpunk"{% if s.public_style.as_str() == "cyberpunk" %} selected{% endif %}>Cyberpunk — neon yellow</option>
+          <option value="synthwave"{% if s.public_style.as_str() == "synthwave" %} selected{% endif %}>Synthwave — retro neon</option>
         </select>
         <p class="text-xs text-muted">Surface register for the public page.</p>
       </div>

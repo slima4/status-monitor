@@ -3,13 +3,12 @@
 <head>
     <script>
       // First-paint reveal gate + theme apply, both BEFORE stylesheet parse.
-      // Theme: read sm_theme cookie (default | terminal | winter) and put
-      // theme-X on <html> so .theme-X .app-shell rules win at first render
-      // (no FOUC). The 3 known values are whitelisted to keep attacker
-      // cookie values out of the class list.
+      // Theme: read sm_theme cookie and put theme-X on <html> so .theme-X
+      // rules win at first render (no FOUC). Whitelist keeps attacker cookie
+      // values out of the class list.
       (function () {
         var m = document.cookie.match(/(?:^|; )sm_theme=([^;]+)/);
-        if (m && /^(default|terminal|winter)$/.test(m[1]) && m[1] !== 'default') {
+        if (m && /^[a-z]+$/.test(m[1]) && m[1] !== 'default') {
           document.documentElement.classList.add('theme-' + m[1]);
         }
       })();

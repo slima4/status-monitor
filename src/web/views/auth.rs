@@ -311,6 +311,7 @@ pub mod settings {
         pub provider: String,
         pub joined: String,
         pub last_seen: String,
+        pub theme: String,
     }
 
     /// `GET /settings/account`. An unauthenticated hit redirects to login
@@ -335,12 +336,17 @@ pub mod settings {
             ),
             None => ("—".to_string(), "—".to_string(), "—".to_string()),
         };
+        let theme = crate::storage::users::get_theme(pool, user.id)
+            .await?
+            .as_str()
+            .to_string();
         Ok(AccountPage {
             active_tab: TAB_ACCOUNT,
             email: user.email,
             provider,
             joined,
             last_seen,
+            theme,
         }
         .into_response())
     }
@@ -705,6 +711,7 @@ pub mod settings {
                 provider: "GitHub".into(),
                 joined: "2026-02-14 09:00 UTC".into(),
                 last_seen: "2026-05-16 12:00 UTC".into(),
+                theme: "default".into(),
             }
             .render()
             .unwrap();

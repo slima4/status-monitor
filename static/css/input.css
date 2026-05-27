@@ -608,8 +608,10 @@
         --theme-state-warn-fg-onsoft: oklch(0.88 0.16 80);
         --theme-state-warn-strong:    oklch(0.75 0.16 80);
     }
-    .theme-terminal .app-shell::before { opacity: 0.10; mix-blend-mode: screen; }
-    .theme-terminal .app-shell::after  { background: none; }
+    .theme-terminal .app-shell::before,
+    .theme-terminal.public-shell::before { opacity: 0.10; mix-blend-mode: screen; }
+    .theme-terminal .app-shell::after,
+    .theme-terminal.public-shell::after  { background: none; }
 
     /* "Winter" theme — adapted from DaisyUI's winter palette
        (https://daisyui.com/docs/themes/). Cool light surfaces, electric-
@@ -693,6 +695,355 @@
     .theme-classic .public-overall--part,
     .theme-classic .public-overall--maj { border-radius: 1rem; border-width: 2px; }
     .theme-classic .public-chip { border-radius: 9999px; border: 0; }
+
+    .theme-dark {
+        --theme-surface:       oklch(0.20 0.012 256);
+        --theme-surface-elev:  oklch(0.24 0.012 256);
+        --theme-surface-sunk:  oklch(0.16 0.010 256);
+        --theme-ink:           oklch(0.95 0.005 256);
+        --theme-text:          oklch(0.88 0.008 256);
+        --theme-text-muted:    oklch(0.70 0.010 256);
+        --theme-text-quiet:    oklch(0.55 0.010 256);
+        --theme-text-faint:    oklch(0.38 0.010 256);
+        --theme-line:          oklch(0.32 0.012 256);
+        --theme-action-primary:        oklch(0.62 0.20 270);
+        --theme-action-primary-hover:  oklch(0.55 0.20 270);
+        --theme-action-accent:         oklch(0.75 0.18 330);
+        --theme-action-accent-hover:   oklch(0.65 0.18 330);
+        --theme-action-danger:         oklch(0.65 0.22 25);
+        --theme-action-danger-hover:   oklch(0.55 0.22 25);
+        --theme-accent:        oklch(0.75 0.16 195);
+        --theme-accent-soft:   oklch(0.28 0.05 195);
+        --theme-shadow-color:        oklch(0 0 0);
+        --theme-state-ok-bg:         oklch(0.25 0.05 162);  --theme-state-ok-tint:       oklch(0.30 0.08 162);
+        --theme-state-ok-line:       oklch(0.55 0.14 162);  --theme-state-ok-line-soft:  oklch(0.40 0.10 162);
+        --theme-state-ok-fg:         oklch(0.78 0.16 162);  --theme-state-ok-fg-strong:  oklch(0.88 0.18 162);
+        --theme-state-ok-fg-onsoft:  oklch(0.82 0.17 162);  --theme-state-ok-strong:     oklch(0.70 0.18 162);
+        --theme-state-bad-bg:        oklch(0.25 0.07 25);   --theme-state-bad-tint:      oklch(0.30 0.10 25);
+        --theme-state-bad-line:      oklch(0.55 0.18 25);   --theme-state-bad-line-soft: oklch(0.40 0.12 25);
+        --theme-state-bad-fg:        oklch(0.78 0.18 25);   --theme-state-bad-fg-strong: oklch(0.88 0.20 25);
+        --theme-state-bad-fg-onsoft: oklch(0.82 0.19 25);   --theme-state-bad-strong:    oklch(0.70 0.20 25);
+        --theme-state-warn-bg:       oklch(0.25 0.06 75);   --theme-state-warn-tint:     oklch(0.30 0.08 75);
+        --theme-state-warn-line:     oklch(0.55 0.14 75);   --theme-state-warn-line-soft: oklch(0.40 0.10 75);
+        --theme-state-warn-fg:       oklch(0.82 0.14 75);   --theme-state-warn-fg-strong: oklch(0.92 0.16 75);
+        --theme-state-warn-fg-onsoft: oklch(0.86 0.15 75);  --theme-state-warn-strong:   oklch(0.78 0.16 75);
+    }
+
+    .theme-night {
+        --theme-surface:       oklch(0.18 0.030 252);
+        --theme-surface-elev:  oklch(0.22 0.030 252);
+        --theme-surface-sunk:  oklch(0.14 0.028 252);
+        --theme-ink:           oklch(0.94 0.025 232);
+        --theme-text:          oklch(0.88 0.030 232);
+        --theme-text-muted:    oklch(0.70 0.025 232);
+        --theme-text-quiet:    oklch(0.55 0.020 232);
+        --theme-text-faint:    oklch(0.38 0.018 232);
+        --theme-line:          oklch(0.30 0.025 252);
+        --theme-action-primary:        oklch(0.75 0.16 232);
+        --theme-action-primary-hover:  oklch(0.65 0.16 232);
+        --theme-action-accent:         oklch(0.72 0.16 285);
+        --theme-action-accent-hover:   oklch(0.62 0.16 285);
+        --theme-action-danger:         oklch(0.70 0.18 18);
+        --theme-action-danger-hover:   oklch(0.60 0.18 18);
+        --theme-accent:        oklch(0.75 0.18 340);
+        --theme-accent-soft:   oklch(0.30 0.06 340);
+        --theme-shadow-color:        oklch(0 0 0);
+        --theme-state-ok-bg:         oklch(0.25 0.06 180);  --theme-state-ok-tint:       oklch(0.30 0.10 180);
+        --theme-state-ok-line:       oklch(0.55 0.15 180);  --theme-state-ok-line-soft:  oklch(0.40 0.11 180);
+        --theme-state-ok-fg:         oklch(0.80 0.15 180);  --theme-state-ok-fg-strong:  oklch(0.90 0.16 180);
+        --theme-state-ok-fg-onsoft:  oklch(0.85 0.16 180);  --theme-state-ok-strong:     oklch(0.72 0.16 180);
+        --theme-state-bad-bg:        oklch(0.25 0.08 18);   --theme-state-bad-tint:      oklch(0.30 0.11 18);
+        --theme-state-bad-line:      oklch(0.55 0.18 18);   --theme-state-bad-line-soft: oklch(0.40 0.13 18);
+        --theme-state-bad-fg:        oklch(0.80 0.16 18);   --theme-state-bad-fg-strong: oklch(0.90 0.18 18);
+        --theme-state-bad-fg-onsoft: oklch(0.85 0.17 18);   --theme-state-bad-strong:    oklch(0.72 0.18 18);
+        --theme-state-warn-bg:       oklch(0.25 0.07 80);   --theme-state-warn-tint:     oklch(0.30 0.10 80);
+        --theme-state-warn-line:     oklch(0.55 0.16 80);   --theme-state-warn-line-soft: oklch(0.40 0.12 80);
+        --theme-state-warn-fg:       oklch(0.85 0.14 80);   --theme-state-warn-fg-strong: oklch(0.93 0.16 80);
+        --theme-state-warn-fg-onsoft: oklch(0.88 0.15 80);  --theme-state-warn-strong:   oklch(0.80 0.16 80);
+    }
+
+    .theme-dim {
+        --theme-surface:       oklch(0.26 0.012 240);
+        --theme-surface-elev:  oklch(0.30 0.012 240);
+        --theme-surface-sunk:  oklch(0.22 0.010 240);
+        --theme-ink:           oklch(0.90 0.015 220);
+        --theme-text:          oklch(0.82 0.018 220);
+        --theme-text-muted:    oklch(0.65 0.015 220);
+        --theme-text-quiet:    oklch(0.52 0.012 220);
+        --theme-text-faint:    oklch(0.38 0.010 220);
+        --theme-line:          oklch(0.36 0.012 240);
+        --theme-action-primary:        oklch(0.78 0.18 142);
+        --theme-action-primary-hover:  oklch(0.68 0.18 142);
+        --theme-action-accent:         oklch(0.75 0.14 290);
+        --theme-action-accent-hover:   oklch(0.65 0.14 290);
+        --theme-action-danger:         oklch(0.68 0.20 22);
+        --theme-action-danger-hover:   oklch(0.58 0.20 22);
+        --theme-accent:        oklch(0.78 0.18 142);
+        --theme-accent-soft:   oklch(0.32 0.06 142);
+        --theme-shadow-color:        oklch(0 0 0);
+        --theme-state-ok-bg:         oklch(0.28 0.06 142);  --theme-state-ok-tint:       oklch(0.33 0.09 142);
+        --theme-state-ok-line:       oklch(0.55 0.14 142);  --theme-state-ok-line-soft:  oklch(0.42 0.10 142);
+        --theme-state-ok-fg:         oklch(0.82 0.16 142);  --theme-state-ok-fg-strong:  oklch(0.90 0.18 142);
+        --theme-state-ok-fg-onsoft:  oklch(0.86 0.17 142);  --theme-state-ok-strong:     oklch(0.75 0.18 142);
+        --theme-state-bad-bg:        oklch(0.28 0.07 22);   --theme-state-bad-tint:      oklch(0.33 0.10 22);
+        --theme-state-bad-line:      oklch(0.55 0.16 22);   --theme-state-bad-line-soft: oklch(0.42 0.12 22);
+        --theme-state-bad-fg:        oklch(0.78 0.18 22);   --theme-state-bad-fg-strong: oklch(0.88 0.20 22);
+        --theme-state-bad-fg-onsoft: oklch(0.82 0.19 22);   --theme-state-bad-strong:    oklch(0.70 0.20 22);
+        --theme-state-warn-bg:       oklch(0.28 0.05 80);   --theme-state-warn-tint:     oklch(0.33 0.08 80);
+        --theme-state-warn-line:     oklch(0.55 0.13 80);   --theme-state-warn-line-soft: oklch(0.42 0.10 80);
+        --theme-state-warn-fg:       oklch(0.82 0.12 80);   --theme-state-warn-fg-strong: oklch(0.90 0.14 80);
+        --theme-state-warn-fg-onsoft: oklch(0.86 0.13 80);  --theme-state-warn-strong:   oklch(0.78 0.14 80);
+    }
+
+    .theme-nord {
+        --theme-surface:       oklch(0.95 0.012 240);
+        --theme-surface-elev:  oklch(0.98 0.008 240);
+        --theme-surface-sunk:  oklch(0.90 0.018 240);
+        --theme-ink:           oklch(0.32 0.030 250);
+        --theme-text:          oklch(0.35 0.028 250);
+        --theme-text-muted:    oklch(0.50 0.025 250);
+        --theme-text-quiet:    oklch(0.65 0.020 250);
+        --theme-text-faint:    oklch(0.82 0.012 250);
+        --theme-line:          oklch(0.86 0.018 240);
+        --theme-action-primary:        oklch(0.55 0.10 245);
+        --theme-action-primary-hover:  oklch(0.45 0.10 245);
+        --theme-action-accent:         oklch(0.70 0.07 210);
+        --theme-action-accent-hover:   oklch(0.60 0.07 210);
+        --theme-action-danger:         oklch(0.58 0.13 22);
+        --theme-action-danger-hover:   oklch(0.48 0.13 22);
+        --theme-accent:        oklch(0.65 0.08 210);
+        --theme-accent-soft:   oklch(0.92 0.03 210);
+        --theme-shadow-color:        oklch(0.40 0.04 245);
+        --theme-state-ok-bg:         oklch(0.95 0.04 130);  --theme-state-ok-tint:       oklch(0.90 0.07 130);
+        --theme-state-ok-line:       oklch(0.72 0.10 130);  --theme-state-ok-line-soft:  oklch(0.82 0.07 130);
+        --theme-state-ok-fg:         oklch(0.48 0.10 130);  --theme-state-ok-fg-strong:  oklch(0.34 0.08 130);
+        --theme-state-ok-fg-onsoft:  oklch(0.42 0.10 130);  --theme-state-ok-strong:     oklch(0.62 0.12 130);
+        --theme-state-bad-bg:        oklch(0.95 0.04 22);   --theme-state-bad-tint:      oklch(0.90 0.07 22);
+        --theme-state-bad-line:      oklch(0.65 0.13 22);   --theme-state-bad-line-soft: oklch(0.80 0.10 22);
+        --theme-state-bad-fg:        oklch(0.50 0.14 22);   --theme-state-bad-fg-strong: oklch(0.35 0.12 22);
+        --theme-state-bad-fg-onsoft: oklch(0.45 0.13 22);   --theme-state-bad-strong:    oklch(0.60 0.15 22);
+        --theme-state-warn-bg:       oklch(0.96 0.04 86);   --theme-state-warn-tint:     oklch(0.92 0.07 86);
+        --theme-state-warn-line:     oklch(0.78 0.10 86);   --theme-state-warn-line-soft: oklch(0.85 0.08 86);
+        --theme-state-warn-fg:       oklch(0.55 0.10 86);   --theme-state-warn-fg-strong: oklch(0.38 0.08 86);
+        --theme-state-warn-fg-onsoft: oklch(0.48 0.10 86);  --theme-state-warn-strong:   oklch(0.70 0.12 86);
+    }
+
+    .theme-dracula {
+        --theme-surface:       oklch(0.24 0.025 290);
+        --theme-surface-elev:  oklch(0.28 0.025 290);
+        --theme-surface-sunk:  oklch(0.18 0.022 290);
+        --theme-ink:           oklch(0.97 0.005 90);
+        --theme-text:          oklch(0.94 0.008 90);
+        --theme-text-muted:    oklch(0.75 0.015 290);
+        --theme-text-quiet:    oklch(0.58 0.018 290);
+        --theme-text-faint:    oklch(0.40 0.015 290);
+        --theme-line:          oklch(0.36 0.030 290);
+        --theme-action-primary:        oklch(0.72 0.22 340);
+        --theme-action-primary-hover:  oklch(0.62 0.22 340);
+        --theme-action-accent:         oklch(0.70 0.18 290);
+        --theme-action-accent-hover:   oklch(0.60 0.18 290);
+        --theme-action-danger:         oklch(0.70 0.22 20);
+        --theme-action-danger-hover:   oklch(0.60 0.22 20);
+        --theme-accent:        oklch(0.85 0.20 80);
+        --theme-accent-soft:   oklch(0.32 0.08 80);
+        --theme-shadow-color:        oklch(0 0 0);
+        --theme-state-ok-bg:         oklch(0.28 0.08 142);  --theme-state-ok-tint:       oklch(0.33 0.12 142);
+        --theme-state-ok-line:       oklch(0.60 0.18 142);  --theme-state-ok-line-soft:  oklch(0.42 0.13 142);
+        --theme-state-ok-fg:         oklch(0.85 0.20 142);  --theme-state-ok-fg-strong:  oklch(0.92 0.22 142);
+        --theme-state-ok-fg-onsoft:  oklch(0.88 0.21 142);  --theme-state-ok-strong:     oklch(0.78 0.22 142);
+        --theme-state-bad-bg:        oklch(0.28 0.08 20);   --theme-state-bad-tint:      oklch(0.33 0.12 20);
+        --theme-state-bad-line:      oklch(0.60 0.20 20);   --theme-state-bad-line-soft: oklch(0.42 0.14 20);
+        --theme-state-bad-fg:        oklch(0.80 0.20 20);   --theme-state-bad-fg-strong: oklch(0.90 0.22 20);
+        --theme-state-bad-fg-onsoft: oklch(0.85 0.21 20);   --theme-state-bad-strong:    oklch(0.72 0.22 20);
+        --theme-state-warn-bg:       oklch(0.30 0.10 100);  --theme-state-warn-tint:     oklch(0.35 0.13 100);
+        --theme-state-warn-line:     oklch(0.65 0.18 100);  --theme-state-warn-line-soft: oklch(0.45 0.13 100);
+        --theme-state-warn-fg:       oklch(0.90 0.18 100);  --theme-state-warn-fg-strong: oklch(0.95 0.20 100);
+        --theme-state-warn-fg-onsoft: oklch(0.92 0.19 100); --theme-state-warn-strong:   oklch(0.85 0.20 100);
+    }
+
+    .theme-corporate {
+        --font-body:    ui-sans-serif, system-ui, sans-serif;
+        --font-display: ui-sans-serif, system-ui, sans-serif;
+        --theme-surface:       oklch(1 0 0);
+        --theme-surface-elev:  oklch(0.99 0.003 240);
+        --theme-surface-sunk:  oklch(0.96 0.006 240);
+        --theme-ink:           oklch(0.25 0.020 264);
+        --theme-text:          oklch(0.28 0.022 264);
+        --theme-text-muted:    oklch(0.48 0.018 264);
+        --theme-text-quiet:    oklch(0.62 0.014 264);
+        --theme-text-faint:    oklch(0.82 0.008 264);
+        --theme-line:          oklch(0.88 0.012 256);
+        --theme-action-primary:        oklch(0.50 0.20 270);
+        --theme-action-primary-hover:  oklch(0.42 0.20 270);
+        --theme-action-accent:         oklch(0.48 0.20 295);
+        --theme-action-accent-hover:   oklch(0.40 0.20 295);
+        --theme-action-danger:         oklch(0.55 0.22 25);
+        --theme-action-danger-hover:   oklch(0.45 0.22 25);
+        --theme-accent:        oklch(0.50 0.20 270);
+        --theme-accent-soft:   oklch(0.94 0.05 270);
+        --theme-shadow-color:        oklch(0.50 0.04 264);
+        --theme-state-ok-bg:         oklch(0.96 0.04 152);  --theme-state-ok-tint:       oklch(0.91 0.07 152);
+        --theme-state-ok-line:       oklch(0.65 0.14 152);  --theme-state-ok-line-soft:  oklch(0.80 0.10 152);
+        --theme-state-ok-fg:         oklch(0.45 0.13 152);  --theme-state-ok-fg-strong:  oklch(0.32 0.10 152);
+        --theme-state-ok-fg-onsoft:  oklch(0.40 0.12 152);  --theme-state-ok-strong:     oklch(0.58 0.16 152);
+        --theme-state-bad-bg:        oklch(0.96 0.03 25);   --theme-state-bad-tint:      oklch(0.91 0.06 25);
+        --theme-state-bad-line:      oklch(0.62 0.18 25);   --theme-state-bad-line-soft: oklch(0.80 0.10 25);
+        --theme-state-bad-fg:        oklch(0.45 0.18 25);   --theme-state-bad-fg-strong: oklch(0.32 0.14 25);
+        --theme-state-bad-fg-onsoft: oklch(0.40 0.16 25);   --theme-state-bad-strong:    oklch(0.55 0.20 25);
+        --theme-state-warn-bg:       oklch(0.96 0.05 65);   --theme-state-warn-tint:     oklch(0.91 0.09 65);
+        --theme-state-warn-line:     oklch(0.72 0.14 65);   --theme-state-warn-line-soft: oklch(0.83 0.10 65);
+        --theme-state-warn-fg:       oklch(0.50 0.14 65);   --theme-state-warn-fg-strong: oklch(0.35 0.10 65);
+        --theme-state-warn-fg-onsoft: oklch(0.42 0.12 65);  --theme-state-warn-strong:   oklch(0.65 0.16 65);
+    }
+
+    .theme-light {
+        --theme-surface:       oklch(1 0 0);
+        --theme-surface-elev:  oklch(0.98 0 0);
+        --theme-surface-sunk:  oklch(0.95 0 0);
+        --theme-ink:           oklch(0.20 0.015 256);
+        --theme-text:          oklch(0.25 0.015 256);
+        --theme-text-muted:    oklch(0.45 0.012 256);
+        --theme-text-quiet:    oklch(0.60 0.010 256);
+        --theme-text-faint:    oklch(0.82 0.005 256);
+        --theme-line:          oklch(0.88 0.005 256);
+        --theme-action-primary:        oklch(0.42 0.22 285);
+        --theme-action-primary-hover:  oklch(0.34 0.22 285);
+        --theme-action-accent:         oklch(0.62 0.14 195);
+        --theme-action-accent-hover:   oklch(0.52 0.14 195);
+        --theme-action-danger:         oklch(0.62 0.20 22);
+        --theme-action-danger-hover:   oklch(0.52 0.20 22);
+        --theme-accent:        oklch(0.42 0.22 285);
+        --theme-accent-soft:   oklch(0.95 0.04 285);
+        --theme-shadow-color:        oklch(0.30 0.02 256);
+        --theme-state-ok-bg:         oklch(0.96 0.04 162);  --theme-state-ok-tint:       oklch(0.91 0.07 162);
+        --theme-state-ok-line:       oklch(0.65 0.14 162);  --theme-state-ok-line-soft:  oklch(0.80 0.10 162);
+        --theme-state-ok-fg:         oklch(0.48 0.13 162);  --theme-state-ok-fg-strong:  oklch(0.35 0.10 162);
+        --theme-state-ok-fg-onsoft:  oklch(0.42 0.12 162);  --theme-state-ok-strong:     oklch(0.60 0.16 162);
+        --theme-state-bad-bg:        oklch(0.96 0.03 22);   --theme-state-bad-tint:      oklch(0.91 0.06 22);
+        --theme-state-bad-line:      oklch(0.65 0.18 22);   --theme-state-bad-line-soft: oklch(0.80 0.10 22);
+        --theme-state-bad-fg:        oklch(0.50 0.18 22);   --theme-state-bad-fg-strong: oklch(0.35 0.14 22);
+        --theme-state-bad-fg-onsoft: oklch(0.45 0.16 22);   --theme-state-bad-strong:    oklch(0.62 0.20 22);
+        --theme-state-warn-bg:       oklch(0.96 0.05 80);   --theme-state-warn-tint:     oklch(0.91 0.09 80);
+        --theme-state-warn-line:     oklch(0.72 0.14 80);   --theme-state-warn-line-soft: oklch(0.83 0.10 80);
+        --theme-state-warn-fg:       oklch(0.52 0.14 80);   --theme-state-warn-fg-strong: oklch(0.36 0.10 80);
+        --theme-state-warn-fg-onsoft: oklch(0.45 0.12 80);  --theme-state-warn-strong:   oklch(0.70 0.16 80);
+    }
+
+    .theme-cupcake {
+        --theme-surface:       oklch(0.97 0.012 60);
+        --theme-surface-elev:  oklch(0.99 0.008 60);
+        --theme-surface-sunk:  oklch(0.92 0.018 60);
+        --theme-ink:           oklch(0.30 0.06 320);
+        --theme-text:          oklch(0.32 0.055 320);
+        --theme-text-muted:    oklch(0.48 0.040 320);
+        --theme-text-quiet:    oklch(0.62 0.030 320);
+        --theme-text-faint:    oklch(0.80 0.018 320);
+        --theme-line:          oklch(0.85 0.025 60);
+        --theme-action-primary:        oklch(0.72 0.11 195);
+        --theme-action-primary-hover:  oklch(0.62 0.11 195);
+        --theme-action-accent:         oklch(0.75 0.13 350);
+        --theme-action-accent-hover:   oklch(0.65 0.13 350);
+        --theme-action-danger:         oklch(0.60 0.20 25);
+        --theme-action-danger-hover:   oklch(0.50 0.20 25);
+        --theme-accent:        oklch(0.78 0.16 75);
+        --theme-accent-soft:   oklch(0.95 0.06 75);
+        --theme-shadow-color:        oklch(0.45 0.05 320);
+        --theme-state-ok-bg:         oklch(0.96 0.05 165);  --theme-state-ok-tint:       oklch(0.91 0.09 165);
+        --theme-state-ok-line:       oklch(0.72 0.14 165);  --theme-state-ok-line-soft:  oklch(0.83 0.10 165);
+        --theme-state-ok-fg:         oklch(0.50 0.14 165);  --theme-state-ok-fg-strong:  oklch(0.35 0.10 165);
+        --theme-state-ok-fg-onsoft:  oklch(0.43 0.12 165);  --theme-state-ok-strong:     oklch(0.65 0.16 165);
+        --theme-state-bad-bg:        oklch(0.96 0.04 25);   --theme-state-bad-tint:      oklch(0.91 0.07 25);
+        --theme-state-bad-line:      oklch(0.68 0.18 25);   --theme-state-bad-line-soft: oklch(0.82 0.10 25);
+        --theme-state-bad-fg:        oklch(0.50 0.18 25);   --theme-state-bad-fg-strong: oklch(0.35 0.14 25);
+        --theme-state-bad-fg-onsoft: oklch(0.43 0.16 25);   --theme-state-bad-strong:    oklch(0.60 0.20 25);
+        --theme-state-warn-bg:       oklch(0.96 0.06 75);   --theme-state-warn-tint:     oklch(0.91 0.10 75);
+        --theme-state-warn-line:     oklch(0.75 0.14 75);   --theme-state-warn-line-soft: oklch(0.85 0.10 75);
+        --theme-state-warn-fg:       oklch(0.52 0.14 75);   --theme-state-warn-fg-strong: oklch(0.36 0.10 75);
+        --theme-state-warn-fg-onsoft: oklch(0.45 0.12 75);  --theme-state-warn-strong:   oklch(0.70 0.16 75);
+    }
+
+    .theme-cyberpunk {
+        --font-body:    ui-monospace, "Cascadia Code", "Fira Code", Menlo, Consolas, monospace;
+        --font-display: ui-monospace, "Cascadia Code", "Fira Code", Menlo, Consolas, monospace;
+        --theme-surface:       oklch(0.93 0.18 102);
+        --theme-surface-elev:  oklch(0.95 0.15 102);
+        --theme-surface-sunk:  oklch(0.85 0.18 102);
+        --theme-ink:           oklch(0.20 0.10 295);
+        --theme-text:          oklch(0.22 0.10 295);
+        --theme-text-muted:    oklch(0.38 0.08 295);
+        --theme-text-quiet:    oklch(0.55 0.06 295);
+        --theme-text-faint:    oklch(0.72 0.04 295);
+        --theme-line:          oklch(0.30 0.10 295);
+        --theme-action-primary:        oklch(0.68 0.22 350);
+        --theme-action-primary-hover:  oklch(0.58 0.22 350);
+        --theme-action-accent:         oklch(0.75 0.14 230);
+        --theme-action-accent-hover:   oklch(0.65 0.14 230);
+        --theme-action-danger:         oklch(0.60 0.22 28);
+        --theme-action-danger-hover:   oklch(0.50 0.22 28);
+        --theme-accent:        oklch(0.68 0.22 350);
+        --theme-accent-soft:   oklch(0.92 0.12 350);
+        --theme-shadow-color:        oklch(0.20 0.10 295);
+        --theme-state-ok-bg:         oklch(0.92 0.10 175);  --theme-state-ok-tint:       oklch(0.88 0.14 175);
+        --theme-state-ok-line:       oklch(0.55 0.16 175);  --theme-state-ok-line-soft:  oklch(0.75 0.13 175);
+        --theme-state-ok-fg:         oklch(0.32 0.13 175);  --theme-state-ok-fg-strong:  oklch(0.22 0.10 175);
+        --theme-state-ok-fg-onsoft:  oklch(0.28 0.12 175);  --theme-state-ok-strong:     oklch(0.55 0.16 175);
+        --theme-state-bad-bg:        oklch(0.90 0.12 28);   --theme-state-bad-tint:      oklch(0.85 0.16 28);
+        --theme-state-bad-line:      oklch(0.55 0.20 28);   --theme-state-bad-line-soft: oklch(0.72 0.16 28);
+        --theme-state-bad-fg:        oklch(0.42 0.18 28);   --theme-state-bad-fg-strong: oklch(0.28 0.14 28);
+        --theme-state-bad-fg-onsoft: oklch(0.35 0.16 28);   --theme-state-bad-strong:    oklch(0.55 0.20 28);
+        --theme-state-warn-bg:       oklch(0.92 0.14 75);   --theme-state-warn-tint:     oklch(0.88 0.18 75);
+        --theme-state-warn-line:     oklch(0.65 0.16 75);   --theme-state-warn-line-soft: oklch(0.80 0.14 75);
+        --theme-state-warn-fg:       oklch(0.40 0.14 75);   --theme-state-warn-fg-strong: oklch(0.26 0.10 75);
+        --theme-state-warn-fg-onsoft: oklch(0.32 0.12 75);  --theme-state-warn-strong:   oklch(0.62 0.18 75);
+    }
+
+    .theme-synthwave {
+        --theme-surface:       oklch(0.25 0.10 295);
+        --theme-surface-elev:  oklch(0.30 0.10 295);
+        --theme-surface-sunk:  oklch(0.20 0.10 295);
+        --theme-ink:           oklch(0.95 0.020 60);
+        --theme-text:          oklch(0.92 0.025 60);
+        --theme-text-muted:    oklch(0.78 0.030 320);
+        --theme-text-quiet:    oklch(0.62 0.035 320);
+        --theme-text-faint:    oklch(0.45 0.030 320);
+        --theme-line:          oklch(0.42 0.12 295);
+        --theme-action-primary:        oklch(0.75 0.22 340);
+        --theme-action-primary-hover:  oklch(0.65 0.22 340);
+        --theme-action-accent:         oklch(0.78 0.14 220);
+        --theme-action-accent-hover:   oklch(0.68 0.14 220);
+        --theme-action-danger:         oklch(0.65 0.22 22);
+        --theme-action-danger-hover:   oklch(0.55 0.22 22);
+        --theme-accent:        oklch(0.85 0.18 90);
+        --theme-accent-soft:   oklch(0.36 0.10 90);
+        --theme-shadow-color:        oklch(0 0 0);
+        --theme-state-ok-bg:         oklch(0.30 0.10 175);  --theme-state-ok-tint:       oklch(0.36 0.13 175);
+        --theme-state-ok-line:       oklch(0.62 0.16 175);  --theme-state-ok-line-soft:  oklch(0.46 0.13 175);
+        --theme-state-ok-fg:         oklch(0.85 0.16 175);  --theme-state-ok-fg-strong:  oklch(0.92 0.18 175);
+        --theme-state-ok-fg-onsoft:  oklch(0.88 0.17 175);  --theme-state-ok-strong:     oklch(0.78 0.18 175);
+        --theme-state-bad-bg:        oklch(0.30 0.10 22);   --theme-state-bad-tint:      oklch(0.36 0.13 22);
+        --theme-state-bad-line:      oklch(0.60 0.20 22);   --theme-state-bad-line-soft: oklch(0.45 0.15 22);
+        --theme-state-bad-fg:        oklch(0.82 0.20 22);   --theme-state-bad-fg-strong: oklch(0.92 0.22 22);
+        --theme-state-bad-fg-onsoft: oklch(0.86 0.21 22);   --theme-state-bad-strong:    oklch(0.72 0.22 22);
+        --theme-state-warn-bg:       oklch(0.32 0.10 75);   --theme-state-warn-tint:     oklch(0.38 0.13 75);
+        --theme-state-warn-line:     oklch(0.65 0.16 75);   --theme-state-warn-line-soft: oklch(0.48 0.13 75);
+        --theme-state-warn-fg:       oklch(0.88 0.16 75);   --theme-state-warn-fg-strong: oklch(0.95 0.18 75);
+        --theme-state-warn-fg-onsoft: oklch(0.90 0.17 75);  --theme-state-warn-strong:   oklch(0.82 0.18 75);
+    }
+    /* Theme atmosphere overrides. Theme class is on `<html>` for the org
+       app (body has .app-shell) and on `<body>` for the public page (body
+       also has .public-shell) — both selector forms needed per family. */
+    .theme-dark    .app-shell::before, .theme-dark.public-shell::before,
+    .theme-night   .app-shell::before, .theme-night.public-shell::before,
+    .theme-dim     .app-shell::before, .theme-dim.public-shell::before,
+    .theme-dracula .app-shell::before, .theme-dracula.public-shell::before {
+        opacity: 0.10; mix-blend-mode: screen;
+    }
+    .theme-synthwave .app-shell::before, .theme-synthwave.public-shell::before {
+        opacity: 0.12; mix-blend-mode: screen;
+    }
+    .theme-corporate .app-shell::before, .theme-corporate.public-shell::before {
+        content: none;
+    }
 
     /* Native checkbox / radio restyled to the CLI register: hairline
        1px border, 2px corners (round for radio), --theme-accent fill

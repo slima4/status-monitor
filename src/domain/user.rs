@@ -35,6 +35,16 @@ pub enum AppTheme {
     Default,
     Terminal,
     Winter,
+    Dark,
+    Night,
+    Dim,
+    Nord,
+    Dracula,
+    Corporate,
+    Light,
+    Cupcake,
+    Cyberpunk,
+    Synthwave,
 }
 
 impl AppTheme {
@@ -43,6 +53,16 @@ impl AppTheme {
             Self::Default => "default",
             Self::Terminal => "terminal",
             Self::Winter => "winter",
+            Self::Dark => "dark",
+            Self::Night => "night",
+            Self::Dim => "dim",
+            Self::Nord => "nord",
+            Self::Dracula => "dracula",
+            Self::Corporate => "corporate",
+            Self::Light => "light",
+            Self::Cupcake => "cupcake",
+            Self::Cyberpunk => "cyberpunk",
+            Self::Synthwave => "synthwave",
         }
     }
 
@@ -51,6 +71,16 @@ impl AppTheme {
             "default" => Self::Default,
             "terminal" => Self::Terminal,
             "winter" => Self::Winter,
+            "dark" => Self::Dark,
+            "night" => Self::Night,
+            "dim" => Self::Dim,
+            "nord" => Self::Nord,
+            "dracula" => Self::Dracula,
+            "corporate" => Self::Corporate,
+            "light" => Self::Light,
+            "cupcake" => Self::Cupcake,
+            "cyberpunk" => Self::Cyberpunk,
+            "synthwave" => Self::Synthwave,
             other => {
                 tracing::warn!(
                     value = other,
@@ -61,7 +91,21 @@ impl AppTheme {
         }
     }
 
-    pub const ALL: &'static [&'static str] = &["default", "terminal", "winter"];
+    pub const ALL: &'static [&'static str] = &[
+        "default",
+        "terminal",
+        "winter",
+        "dark",
+        "night",
+        "dim",
+        "nord",
+        "dracula",
+        "corporate",
+        "light",
+        "cupcake",
+        "cyberpunk",
+        "synthwave",
+    ];
 }
 
 #[cfg(test)]

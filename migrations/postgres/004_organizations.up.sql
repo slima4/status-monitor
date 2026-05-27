@@ -30,7 +30,11 @@ CREATE TABLE users (
     email           CITEXT NOT NULL,
     display_name    TEXT,
     theme           TEXT NOT NULL DEFAULT 'default'
-                    CHECK (theme IN ('default', 'terminal', 'winter')),
+                    CHECK (theme IN (
+                        'default', 'terminal', 'winter',
+                        'dark', 'night', 'dim', 'nord', 'dracula',
+                        'corporate', 'light', 'cupcake', 'cyberpunk', 'synthwave'
+                    )),
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     deleted_at      TIMESTAMPTZ
