@@ -13,24 +13,15 @@
     <link rel="stylesheet" href="{{ "css/app.css"|asset }}">
     <style>
         /* Re-validated by `safe_brand_color` — safe to interpolate. */
-        :root { --brand-color: {{ branding.brand_color }}; }
+        :root {
+            --brand-color: {{ branding.brand_color }};
+            --brand-text: {{ branding.brand_text }};
+        }
     </style>
     <script defer src="{{ "js/public/tz.js"|asset }}"></script>
 </head>
 {% include "public/_body_open.html" %}
-    <header style="background-color: var(--brand-color)">
-        <div class="mx-auto flex max-w-3xl items-center justify-between px-4 py-5">
-            <a href="/status" class="flex items-center gap-3 text-lg font-semibold tracking-tight text-white">
-                {% if let Some(logo) = branding.logo_url %}
-                    <img src="{{ logo }}" alt="{{ branding.display_name }}" class="h-8 w-auto">
-                {% else %}
-                    {{ branding.display_name }}
-                {% endif %}
-            </a>
-            <a href="{{ rss_url }}" class="text-sm text-white/80 hover:text-white"
-               aria-label="Subscribe to incident updates via RSS">RSS</a>
-        </div>
-    </header>
+    {% include "public/_brand_header.html" %}
 
     <main id="main-content" class="mx-auto max-w-3xl space-y-8 px-4 py-10">
         <nav class="text-sm text-quiet">
@@ -61,8 +52,7 @@
             {% if let Some(cursor) = next_cursor %}
                 <p class="text-right text-sm">
                     <a href="/status/incidents?cursor={{ cursor }}"
-                       class="font-medium hover:underline"
-                       style="color: var(--theme-accent);">
+                       class="font-medium hover:underline text-accent">
                         Older incidents →
                     </a>
                 </p>

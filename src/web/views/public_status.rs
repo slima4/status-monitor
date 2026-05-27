@@ -423,6 +423,7 @@ pub struct BrandingView {
     /// Already passed through [`safe_brand_color`]; safe to interpolate into
     /// the `:root` `<style>` block verbatim.
     pub brand_color: String,
+    pub brand_text: &'static str,
     pub logo_url: Option<String>,
     pub show_powered_by: bool,
     pub style: &'static str,
@@ -438,13 +439,16 @@ impl BrandingView {
             .map(str::trim)
             .filter(|s| !s.is_empty())
             .map(render_about);
+        let brand_color = safe_brand_color(
+            o.branding.public_brand_color.as_deref(),
+            &cfg.default_brand_color,
+        );
+        let brand_text = safe_brand_text_for(&brand_color);
         BrandingView {
             display_name,
             about_html,
-            brand_color: safe_brand_color(
-                o.branding.public_brand_color.as_deref(),
-                &cfg.default_brand_color,
-            ),
+            brand_color,
+            brand_text,
             logo_url: o
                 .branding
                 .public_logo_path
@@ -489,6 +493,45 @@ pub fn safe_brand_color(raw: Option<&str>, default: &str) -> String {
     match raw {
         Some(c) if is_strict_hex(c) => c.to_owned(),
         _ => default.to_owned(),
+    }
+}
+
+/// Pick whichever of `#ffffff` or `#0f172a` gives the higher WCAG contrast
+/// ratio against the brand. Threshold-by-luminance breaks for mid-tone
+/// brands like Twitter blue or Slack yellow (white passes AA-Large but fails
+/// AA on small text).
+pub fn safe_brand_text_for(brand_hex: &str) -> &'static str {
+    const WHITE: &str = "#ffffff";
+    const DARK: &str = "#0f172a";
+    const L_WHITE: f32 = 1.0;
+    // Pre-computed relative luminance of #0f172a.
+    const L_DARK: f32 = 0.0145;
+
+    fn srgb_to_linear(c: u8) -> f32 {
+        let s = f32::from(c) / 255.0;
+        if s <= 0.04045 {
+            s / 12.92
+        } else {
+            ((s + 0.055) / 1.055).powf(2.4)
+        }
+    }
+    let b = brand_hex.as_bytes();
+    if b.len() != 7 || b[0] != b'#' {
+        return WHITE;
+    }
+    let Ok(rgb) = u32::from_str_radix(brand_hex.trim_start_matches('#'), 16) else {
+        return WHITE;
+    };
+    let r = srgb_to_linear(((rgb >> 16) & 0xff) as u8);
+    let g = srgb_to_linear(((rgb >> 8) & 0xff) as u8);
+    let bl = srgb_to_linear((rgb & 0xff) as u8);
+    let lum = 0.2126 * r + 0.7152 * g + 0.0722 * bl;
+    let contrast_white = (L_WHITE + 0.05) / (lum + 0.05);
+    let contrast_dark = (lum + 0.05) / (L_DARK + 0.05);
+    if contrast_dark > contrast_white {
+        DARK
+    } else {
+        WHITE
     }
 }
 
@@ -1245,6 +1288,40 @@ mod tests {
             );
         }
         assert_eq!(safe_brand_color(None, "#3b82f6"), "#3b82f6");
+    }
+
+    #[test]
+    fn brand_text_picks_white_on_very_dark_brands() {
+        for dark in ["#000000", "#1e3a8a", "#064e3b", "#4c1d95", "#7c2d12"] {
+            assert_eq!(
+                safe_brand_text_for(dark),
+                "#ffffff",
+                "{dark} should pair with white"
+            );
+        }
+    }
+
+    #[test]
+    fn brand_text_picks_dark_on_anything_brighter() {
+        // Pastels, mid-tones (Twitter blue, Slack yellow, Tailwind 500s) all
+        // give better contrast against near-black than white per WCAG.
+        for bright in [
+            "#ffffff", "#ffee99", "#facc15", "#bef264", "#fde68a", "#1d9bf0", "#3b82f6", "#06b6d4",
+            "#22c55e", "#ecb22e",
+        ] {
+            assert_eq!(
+                safe_brand_text_for(bright),
+                "#0f172a",
+                "{bright} should pair with near-black"
+            );
+        }
+    }
+
+    #[test]
+    fn brand_text_falls_back_to_white_on_malformed() {
+        for bad in ["", "blue", "#fff", "#zzzzzz"] {
+            assert_eq!(safe_brand_text_for(bad), "#ffffff");
+        }
     }
 
     #[test]

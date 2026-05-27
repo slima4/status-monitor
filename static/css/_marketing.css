@@ -41,22 +41,8 @@
     text-rendering: optimizeLegibility;
 }
 
-/* Faint horizontal scanlines — pure CSS, no SVG raster cost. */
-.marketing-shell::before {
-    content: "";
-    position: fixed;
-    inset: 0;
-    pointer-events: none;
-    z-index: 0;
-    background-image: repeating-linear-gradient(
-        to bottom,
-        transparent 0,
-        transparent 3px,
-        oklch(0 0 0 / 0.018) 3px,
-        oklch(0 0 0 / 0.018) 4px
-    );
-}
-.marketing-shell > * { position: relative; z-index: 1; }
+/* Scanline atmosphere + z-index lift on direct children live with the
+   `.app-shell` / `.public-shell` rules in input.css. */
 
 /* ── Type primitives ───────────────────────────────────────────────── */
 .mk-eyebrow {

@@ -14,28 +14,19 @@
     <link rel="alternate" type="application/rss+xml" title="Incidents (RSS)" href="{{ view.rss_url }}">
     <link rel="stylesheet" href="{{ "css/app.css"|asset }}">
     <style>
-        /* `branding.brand_color` was re-validated by `safe_brand_color` and
-           is guaranteed to match ^#[0-9a-fA-F]{6}$ — safe to interpolate. */
-        :root { --brand-color: {{ branding.brand_color }}; }
+        /* Re-validated by `safe_brand_color` — safe to interpolate. */
+        :root {
+            --brand-color: {{ branding.brand_color }};
+            --brand-text: {{ branding.brand_text }};
+        }
     </style>
     <script defer src="{{ "js/htmx.min.js"|asset }}"></script>
     <script defer src="{{ "js/public/tz.js"|asset }}"></script>
     <script defer src="{{ "js/public/day_popover.js"|asset }}"></script>
 </head>
 {% include "public/_body_open.html" %}
-    <header style="background-color: var(--brand-color)">
-        <div class="mx-auto flex max-w-3xl items-center justify-between px-4 py-5">
-            <a href="/status" class="flex items-center gap-3 text-lg font-semibold tracking-tight text-white">
-                {% if let Some(logo) = branding.logo_url %}
-                    <img src="{{ logo }}" alt="{{ branding.display_name }}" class="h-8 w-auto">
-                {% else %}
-                    {{ branding.display_name }}
-                {% endif %}
-            </a>
-            <a href="{{ view.rss_url }}" class="text-sm text-white/80 hover:text-white"
-               aria-label="Subscribe to incident updates via RSS">RSS</a>
-        </div>
-    </header>
+    {% let rss_url = view.rss_url %}
+    {% include "public/_brand_header.html" %}
 
     {% if let Some(about) = branding.about_html %}
     <section class="border-b border-[color:var(--theme-line)] bg-[color:var(--theme-surface-elev)]">

@@ -35,8 +35,7 @@
     {% if view.has_active_incident %}
     <section aria-labelledby="active-incidents-heading"
              class="public-callout public-callout--warn">
-        <h2 id="active-incidents-heading" class="text-base font-semibold"
-            style="color: var(--theme-state-warn-fg-strong);">
+        <h2 id="active-incidents-heading" class="text-base font-semibold text-state-warn-strong">
             Active incident{% if view.active_incidents.len() != 1 %}s{% endif %}
         </h2>
         <ul class="mt-4 space-y-4">
@@ -45,8 +44,7 @@
                 <article class="space-y-1.5">
                     <div class="flex flex-wrap items-center gap-2">
                         <a href="{{ inc.permalink }}"
-                           class="font-medium hover:underline"
-                           style="color: var(--theme-state-warn-fg-strong);">{{ inc.header.title }}</a>
+                           class="font-medium hover:underline text-state-warn-strong">{{ inc.header.title }}</a>
                         {% call chips::sevphase(inc.header) %}{% endcall %}
                     </div>
                     <p class="text-sm text-muted">
@@ -194,8 +192,7 @@
         </ul>
         {% if view.recent_incidents_has_more %}
         <p class="text-right text-sm">
-            <a href="/status/incidents" class="font-medium hover:underline"
-               style="color: var(--theme-accent);">
+            <a href="/status/incidents" class="font-medium hover:underline text-accent">
                 Older incidents →
             </a>
         </p>

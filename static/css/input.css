@@ -438,9 +438,12 @@
         --sm-monitors-row-bad-bg:      var(--theme-state-bad-bg);
         --sm-monitors-row-selected-bg: var(--theme-state-warn-bg);
     }
-    /* Faint horizontal scanlines — pure CSS, no SVG raster cost. Mirrors
-       the marketing-shell atmosphere so both surfaces share the same paper. */
-    .app-shell::before {
+    /* Shared faint-horizontal-scanline atmosphere across the three shells.
+       Dark themes lift the opacity + blend-mode further down; .theme-classic
+       and .theme-corporate kill it via `content: none`. */
+    .app-shell::before,
+    .public-shell::before,
+    .marketing-shell::before {
         content: "";
         position: fixed;
         inset: 0;
@@ -455,7 +458,9 @@
         );
     }
     .app-shell::after { content: none; }
-    .app-shell > * { position: relative; z-index: 1; }
+    .app-shell > *,
+    .public-shell > *,
+    .marketing-shell > * { position: relative; z-index: 1; }
 
     /* Public status page shell. Same atmospheric paper + token chrome as
        app-shell; intentionally does NOT inherit app-shell's sm-* dashboard
@@ -469,21 +474,6 @@
         position: relative;
         min-height: 100vh;
     }
-    .public-shell::before {
-        content: "";
-        position: fixed;
-        inset: 0;
-        pointer-events: none;
-        z-index: 0;
-        background-image: repeating-linear-gradient(
-            to bottom,
-            transparent 0,
-            transparent 3px,
-            oklch(0 0 0 / 0.018) 3px,
-            oklch(0 0 0 / 0.018) 4px
-        );
-    }
-    .public-shell > * { position: relative; z-index: 1; }
 
     /* Page-load reveal. Direct section children rise in sequence — one
        orchestrated entrance per first paint, then the class is removed by
@@ -1327,8 +1317,14 @@
     /* Size-agnostic state-colour helpers — use these in templates/JS when
        the call site picks its own font-size (modal titles, inline glyphs,
        em-dashes). Pair with .flash-text only when you also want text-sm. */
-    .text-state-ok  { color: var(--theme-state-ok-fg); }
-    .text-state-bad { color: var(--theme-state-bad-fg); }
+    .text-state-ok          { color: var(--theme-state-ok-fg); }
+    .text-state-bad         { color: var(--theme-state-bad-fg); }
+    .text-state-warn-strong { color: var(--theme-state-warn-fg-strong); }
+    .text-accent            { color: var(--theme-accent); }
+    .text-brand             { color: var(--brand-text); }
+    /* Translucent brand-text variant that keeps focus rings + outlines at
+       full alpha (vs. `opacity-80`, which fades the whole element). */
+    .text-brand-soft        { color: color-mix(in srgb, var(--brand-text) 80%, transparent); }
 
     /* Bigger display scale for hero surfaces — login is the only page that
        opts in today. Wider type + tighter tracking so the mono display
