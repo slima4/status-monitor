@@ -558,11 +558,15 @@ pub mod settings {
     /// One progress-bar row. `pct` is pre-clamped 0–100 in Rust so the
     /// template stays logic-free; `limit_display` shows ∞ for the synthetic
     /// unlimited (self-host) plan instead of a meaningless 2.1-billion.
+    /// `fill_class` maps pct → ok/warn/bad CSS variant (`<80`, `80–94`,
+    /// `≥95`); `unlimited` swaps the bar to a hatched no-ceiling track.
     pub struct UsageBar {
         pub label: &'static str,
         pub current: i64,
         pub limit_display: String,
         pub pct: i64,
+        pub fill_class: &'static str,
+        pub unlimited: bool,
     }
 
     impl UsageBar {
@@ -574,6 +578,15 @@ pub mod settings {
             } else {
                 (current * 100 / limit).clamp(0, 100)
             };
+            let fill_class = if unlimited {
+                "ok"
+            } else {
+                match pct {
+                    100 => "bad",
+                    p if p >= 80 => "warn",
+                    _ => "ok",
+                }
+            };
             Self {
                 label,
                 current,
@@ -583,6 +596,8 @@ pub mod settings {
                     limit.to_string()
                 },
                 pct,
+                fill_class,
+                unlimited,
             }
         }
     }

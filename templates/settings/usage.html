@@ -11,13 +11,18 @@
 
   <div class="sticker-card space-y-4 p-5">
     {% for b in bars %}
-    <div>
-      <div class="mb-1 flex items-baseline justify-between">
-        <span class="text-sm font-medium text-body">{{ b.label }}</span>
-        <span class="text-sm tabular-nums text-muted">{{ b.current }} / {{ b.limit_display }}</span>
+    <div class="usage-row">
+      <div class="usage-row__head">
+        <span class="usage-row__label">{{ b.label }}</span>
+        <span class="usage-row__nums cli-brackets">{{ b.current }} / {{ b.limit_display }}</span>
       </div>
-      <div class="usage-bar">
-        <div class="usage-bar__fill usage-bar__fill--ok" style="width: {{ b.pct }}%"></div>
+      <div class="usage-bar{% if b.unlimited %} usage-bar--unlimited{% endif %}"
+           role="progressbar"
+           aria-label="{{ b.label }} usage"
+           aria-valuemin="0"
+           aria-valuemax="100"
+           {% if b.unlimited %}aria-valuetext="unlimited"{% else %}aria-valuenow="{{ b.pct }}"{% endif %}>
+        <div class="usage-bar__fill usage-bar__fill--{{ b.fill_class }}" style="width: {{ b.pct }}%"></div>
       </div>
     </div>
     {% endfor %}
