@@ -193,6 +193,9 @@ pub async fn create(
         .target_store
         .create(org, new, i64::from(plan.max_targets))
         .await?;
+    if t.public_status {
+        state.public_source.invalidate(org).await;
+    }
     dispatch_first_check(&state, org, &t);
     // UUID hex is always ASCII-safe → infallible.
     let location = HeaderValue::from_str(&format!("/api/v1/targets/{}", t.id))
@@ -290,13 +293,29 @@ pub async fn update(
     {
         state.quotas.check_public_components(org, None, 1).await?;
     }
+    let touches_public = touches_public_view(&update);
     match state.target_store.update(org, id, update).await? {
-        Some(t) => Ok(Redacted::new(t)),
+        Some(t) => {
+            if touches_public || t.public_status {
+                state.public_source.invalidate(org).await;
+            }
+            Ok(Redacted::new(t))
+        }
         None => Err(AppError::not_found(
             codes::TARGET_NOT_FOUND,
             "target not found",
         )),
     }
+}
+
+fn touches_public_view(u: &TargetUpdate) -> bool {
+    u.public_status.is_some()
+        || u.public_name.is_some()
+        || u.public_description.is_some()
+        || u.public_group.is_some()
+        || u.public_sort_order.is_some()
+        || u.name.is_some()
+        || u.group_name.is_some()
 }
 
 #[utoipa::path(
@@ -319,6 +338,7 @@ pub async fn delete(
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode> {
     if state.target_store.delete(org, id).await? {
+        state.public_source.invalidate(org).await;
         Ok(StatusCode::NO_CONTENT)
     } else {
         Err(AppError::not_found(
@@ -404,6 +424,9 @@ pub async fn bulk_create(
         .target_store
         .bulk_create(org, items, i64::from(plan.max_targets))
         .await?;
+    if out.iter().any(|t| t.public_status) {
+        state.public_source.invalidate(org).await;
+    }
     Ok((StatusCode::CREATED, Redacted::new(out)))
 }
 
@@ -444,6 +467,10 @@ pub async fn bulk_action(
         ));
     }
 
+    let action_touches_public = matches!(
+        &req.action,
+        BulkAction::Delete | BulkAction::SetGroup { .. }
+    );
     let succeeded = match &req.action {
         BulkAction::Enable => state.target_store.set_enabled(org, &req.ids, true).await?,
         BulkAction::Disable => state.target_store.set_enabled(org, &req.ids, false).await?,
@@ -489,6 +516,10 @@ pub async fn bulk_action(
             message: "target not found".into(),
         })
         .collect();
+
+    if action_touches_public && !succeeded.is_empty() {
+        state.public_source.invalidate(org).await;
+    }
 
     Ok(Json(BulkActionResponse { succeeded, failed }))
 }
@@ -1100,6 +1131,54 @@ mod tests {
         let err = validate_public_target_field_updates(None, Some(&big), None)
             .expect_err("over-cap set must reject");
         assert_bad_request_with_field(err, "public_description");
+    }
+
+    #[test]
+    fn touches_public_view_detects_visibility_and_render_fields() {
+        let mut u = TargetUpdate::default();
+        assert!(!touches_public_view(&u), "empty update is no-op");
+        u.enabled = Some(false);
+        assert!(
+            !touches_public_view(&u),
+            "enabled flag does not change public projection"
+        );
+
+        for u in [
+            TargetUpdate {
+                public_status: Some(true),
+                ..Default::default()
+            },
+            TargetUpdate {
+                public_status: Some(false),
+                ..Default::default()
+            },
+            TargetUpdate {
+                public_name: Some(Some("API".into())),
+                ..Default::default()
+            },
+            TargetUpdate {
+                public_description: Some(None),
+                ..Default::default()
+            },
+            TargetUpdate {
+                public_group: Some(Some("Web".into())),
+                ..Default::default()
+            },
+            TargetUpdate {
+                public_sort_order: Some(5),
+                ..Default::default()
+            },
+            TargetUpdate {
+                name: Some("new-name".into()),
+                ..Default::default()
+            },
+            TargetUpdate {
+                group_name: Some(Some("g".into())),
+                ..Default::default()
+            },
+        ] {
+            assert!(touches_public_view(&u), "{u:?} must invalidate");
+        }
     }
 
     fn head_spec(body_match: Option<&str>) -> crate::domain::CheckSpec {

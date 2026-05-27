@@ -273,6 +273,7 @@ pub async fn upload_logo(
         // Best-effort: a leftover file is harmless (unreferenced, hash-named).
         let _ = store.delete(&old).await;
     }
+    state.public_source.invalidate(org).await;
 
     let ob = load_for_settings(pool, org).await?;
     let base = public_base(&state, &ob.slug);
@@ -304,6 +305,7 @@ pub async fn delete_logo(
     if let Some(old) = orgs_store::set_public_logo_path(pool, org, user, None).await? {
         let store = LocalDiskLogoStorage::new(&state.cfg.public_status.logo_dir);
         let _ = store.delete(&old).await;
+        state.public_source.invalidate(org).await;
     }
     Ok(StatusCode::NO_CONTENT)
 }
