@@ -18,7 +18,7 @@ use bytes::Bytes;
 use serde::Serialize;
 
 use super::blog::list_published;
-use super::config::{BRAND, MarketingCfg, TAGLINE};
+use super::config::{BRAND, META_DESCRIPTION, MarketingCfg, TAGLINE};
 use super::legal;
 use super::pages::{APPLICATION_XML, TEXT_PLAIN};
 
@@ -37,7 +37,7 @@ impl OpenGraph {
     pub fn default_for(title: &str, canonical_origin: &str) -> Self {
         Self {
             title: title.to_string(),
-            description: TAGLINE.to_string(),
+            description: META_DESCRIPTION.to_string(),
             og_type: "website".to_string(),
             url: canonical_origin.to_string(),
             image: absolute_asset(canonical_origin, "/static/marketing/og.png"),

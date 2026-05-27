@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <defs>
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M32 0H0v32" fill="none" stroke="#dde2e8" stroke-width="0.5"/>
+    </pattern>
+  </defs>
+
+  <rect width="1200" height="630" fill="#f7f9fa"/>
+  <rect width="1200" height="630" fill="url(#grid)" opacity="0.55"/>
+  <rect x="0" y="0" width="1200" height="1" fill="#d0d6df"/>
+  <rect x="0" y="629" width="1200" height="1" fill="#d0d6df"/>
+
+  <g font-family="Menlo, 'Courier New', monospace">
+
+    <g transform="translate(96 92)" font-size="30" font-weight="600">
+      <text x="0" y="0" fill="#7c8493">[</text>
+      <text x="29" y="2" text-anchor="middle" font-size="42" fill="#0d9a5b">↑</text>
+      <text x="40" y="0" fill="#7c8493">]</text>
+      <text x="74" y="0" fill="#1a212c">Uptime</text>
+      <text x="188" y="0" fill="#0d9a5b">page</text>
+    </g>
+
+    <g transform="translate(96 240)" font-size="76" font-weight="600" fill="#1a212c">
+      <text x="0" y="0" letter-spacing="-2">Status pages and</text>
+      <text x="0" y="90" letter-spacing="-2">uptime monitoring.</text>
+    </g>
+
+    <text x="96" y="440" font-family="Menlo, 'Courier New', monospace"
+          font-size="48" font-weight="600" fill="#0d9a5b" letter-spacing="-1.2">
+      One POST, public in 30s.
+    </text>
+
+    <text x="96" y="498" font-family="Menlo, 'Courier New', monospace"
+          font-size="22" font-weight="500" fill="#4b5564">
+      HTTP · TCP · DNS · TLS  ·  alerts on slack, email, webhook.
+    </text>
+
+    <g transform="translate(96 540)" font-size="24" font-weight="700">
+      <rect x="0" y="0" width="356" height="58" rx="2" fill="#1a212c"/>
+      <text x="18" y="38" fill="#0d9a5b">[</text>
+      <text x="42" y="38" fill="#fafbfc">start free → no card</text>
+      <text x="332" y="38" fill="#0d9a5b">]</text>
+    </g>
+
+    <g transform="translate(1104 578)" font-size="22" font-weight="600" text-anchor="end">
+      <text x="0" y="0" fill="#1a212c">uptimepage.dev</text>
+    </g>
+
+  </g>
+</svg>

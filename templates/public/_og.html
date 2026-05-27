@@ -1,0 +1,10 @@
+<meta name="description" content="{{ og.description }}">
+<meta property="og:title" content="{{ og.title }}">
+<meta property="og:description" content="{{ og.description }}">
+<meta property="og:type" content="{{ og.og_type }}">
+{% if !og.url.is_empty() %}<meta property="og:url" content="{{ og.url }}">{% endif %}
+{% if !og.image.is_empty() %}<meta property="og:image" content="{{ og.image }}">{% endif %}
+<meta name="twitter:card" content="{% if og.image.is_empty() %}summary{% else %}summary_large_image{% endif %}">
+<meta name="twitter:title" content="{{ og.title }}">
+<meta name="twitter:description" content="{{ og.description }}">
+{% if !og.image.is_empty() %}<meta name="twitter:image" content="{{ og.image }}">{% endif %}

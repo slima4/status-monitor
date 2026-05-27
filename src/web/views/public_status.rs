@@ -26,7 +26,7 @@ use crate::public_status::{HistoryIncidentMarker, LocalDiskLogoStorage, LogoStor
 use crate::storage::orgs::{OrgBranding, load_public_branding};
 use crate::web::error::{NotFoundPage, UnavailablePage};
 use crate::web::filters;
-use crate::web::host::resolve_status_page_org;
+use crate::web::host::{HostShape, parse_host_shape, resolve_status_page_org};
 use crate::web::views::humanize_duration;
 
 #[derive(Debug, Default, Deserialize)]
@@ -40,6 +40,7 @@ pub struct StatusParams {
 pub struct StatusFullPage {
     pub view: StatusView,
     pub branding: BrandingView,
+    pub og: OgMeta,
 }
 
 #[derive(Template, WebTemplate)]
@@ -55,6 +56,7 @@ pub struct IncidentDetailPage {
     pub incident: IncidentDetailView,
     pub generated_at: DateTime<Utc>,
     pub rss_url: &'static str,
+    pub og: OgMeta,
 }
 
 #[derive(Template, WebTemplate)]
@@ -71,6 +73,19 @@ pub struct IncidentArchivePage {
     /// renders when set.
     pub next_cursor: Option<String>,
     pub rss_url: &'static str,
+    pub og: OgMeta,
+}
+
+/// OG/Twitter card metadata for the public status surface. Empty `url` /
+/// `image` mean "skip that tag" — fine for self-hosted setups where the
+/// marketing origin isn't configured.
+#[derive(Default)]
+pub struct OgMeta {
+    pub title: String,
+    pub description: String,
+    pub og_type: &'static str,
+    pub url: String,
+    pub image: String,
 }
 
 pub struct MonthBucket {
@@ -107,7 +122,18 @@ pub async fn index(
         StatusRegion { view }.into_response()
     } else {
         let branding = resolve_branding(&state, org, &page.site_name).await;
-        StatusFullPage { view, branding }.into_response()
+        let og = build_og_meta(
+            &state,
+            &headers,
+            "/status",
+            format!("{} Status", branding.display_name),
+            format!(
+                "Live operational status for {}. Current uptime, recent incidents, scheduled maintenance.",
+                branding.display_name
+            ),
+            "website",
+        );
+        StatusFullPage { view, branding, og }.into_response()
     }
 }
 
@@ -171,11 +197,20 @@ pub async fn incident(
     };
     let branding = resolve_branding(&state, org, &fallback_name).await;
     let now = Utc::now();
+    let og = build_og_meta(
+        &state,
+        &headers,
+        &format!("/status/incidents/{id}"),
+        format!("{} · {} Status", inc.title, branding.display_name),
+        format!("Incident report for {}: {}.", inc.component_name, inc.title),
+        "article",
+    );
     IncidentDetailPage {
         branding,
         incident: IncidentDetailView::from_incident(&inc, now),
         generated_at: now,
         rss_url: RSS_URL,
+        og,
     }
     .into_response()
 }
@@ -222,11 +257,20 @@ pub async fn archive(
     let branding = resolve_branding(&state, org, &fallback_name).await;
     let now = Utc::now();
     let months = bucket_by_month(&listing.items, now);
+    let og = build_og_meta(
+        &state,
+        &headers,
+        "/status/incidents",
+        format!("Incident history · {} Status", branding.display_name),
+        format!("Historical incidents for {}.", branding.display_name),
+        "website",
+    );
     IncidentArchivePage {
         branding,
         months,
         next_cursor: listing.next_cursor,
         rss_url: RSS_URL,
+        og,
     }
     .into_response()
 }
@@ -532,6 +576,59 @@ pub fn safe_brand_text_for(brand_hex: &str) -> &'static str {
         DARK
     } else {
         WHITE
+    }
+}
+
+/// Builds OG/Twitter metadata for the public surface. `og:url` is emitted
+/// only when the request Host validates as the apex or a tenant subdomain
+/// of `public_status.base_domain` — without that gate, an attacker hitting
+/// the page with `Host: evil.com` would poison the scraper cache so social
+/// shares of legitimate URLs unfurl with attacker's domain. `og:image`
+/// degrades to empty (template skips the tag) when the marketing origin
+/// isn't configured.
+fn build_og_meta(
+    state: &AppState,
+    headers: &HeaderMap,
+    path: &str,
+    title: String,
+    description: String,
+    og_type: &'static str,
+) -> OgMeta {
+    let scheme = headers
+        .get("x-forwarded-proto")
+        .and_then(|v| v.to_str().ok())
+        .filter(|s| matches!(*s, "http" | "https"))
+        .unwrap_or("https");
+    let host = headers
+        .get(header::HOST)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    let url = match parse_host_shape(host, &state.cfg.public_status.base_domain) {
+        HostShape::Apex | HostShape::Subdomain(_) => {
+            // Strip port + trailing dot the same way `parse_host_shape` does
+            // so the URL canonicalises to RFC-1034 form.
+            let canonical = host
+                .split(':')
+                .next()
+                .unwrap_or(host)
+                .strip_suffix('.')
+                .unwrap_or_else(|| host.split(':').next().unwrap_or(host));
+            format!("{scheme}://{canonical}{path}")
+        }
+        HostShape::Other => String::new(),
+    };
+    let origin = &state.cfg.marketing.canonical_origin;
+    let image = if origin.is_empty() {
+        String::new()
+    } else {
+        format!("{origin}/static/marketing/og.png")
+    };
+    OgMeta {
+        title,
+        description,
+        og_type,
+        url,
+        image,
     }
 }
 
@@ -989,6 +1086,7 @@ mod tests {
         let html = StatusFullPage {
             view,
             branding: sample_branding(),
+            og: OgMeta::default(),
         }
         .render()
         .unwrap();
@@ -1128,6 +1226,7 @@ mod tests {
         let html = StatusFullPage {
             view,
             branding: sample_branding(),
+            og: OgMeta::default(),
         }
         .render()
         .unwrap();
@@ -1160,6 +1259,7 @@ mod tests {
         let html = StatusFullPage {
             view,
             branding: sample_branding(),
+            og: OgMeta::default(),
         }
         .render()
         .unwrap();
@@ -1184,6 +1284,7 @@ mod tests {
         let html = StatusFullPage {
             view,
             branding: sample_branding(),
+            og: OgMeta::default(),
         }
         .render()
         .unwrap();
@@ -1248,6 +1349,7 @@ mod tests {
             incident: detail,
             generated_at: Utc::now(),
             rss_url: RSS_URL,
+            og: OgMeta::default(),
         }
         .render()
         .unwrap();
@@ -1352,7 +1454,13 @@ mod tests {
             public_show_powered_by: Some(false),
             ..PublicOrgBranding::default()
         });
-        let html = StatusFullPage { view, branding }.render().unwrap();
+        let html = StatusFullPage {
+            view,
+            branding,
+            og: OgMeta::default(),
+        }
+        .render()
+        .unwrap();
         assert!(html.contains("Acme Public Status"));
         assert!(html.contains("--brand-color: #ff0000;"));
         assert!(html.contains(r#"src="/status/branding/logo?v=acme-deadbeef.png""#));
@@ -1361,11 +1469,65 @@ mod tests {
     }
 
     #[test]
+    fn og_tags_render_with_image_when_marketing_origin_set() {
+        let view = build_view(&sample_page(), &[]);
+        let html = StatusFullPage {
+            view,
+            branding: sample_branding(),
+            og: OgMeta {
+                title: "Acme Status".into(),
+                description: "Live operational status for Acme.".into(),
+                og_type: "website",
+                url: "https://acme.uptimepage.dev/status".into(),
+                image: "https://uptimepage.dev/static/marketing/og.png".into(),
+            },
+        }
+        .render()
+        .unwrap();
+        assert!(html.contains(r#"<meta property="og:title" content="Acme Status">"#));
+        assert!(
+            html.contains(
+                r#"<meta property="og:url" content="https://acme.uptimepage.dev/status">"#
+            )
+        );
+        assert!(html.contains(
+            r#"<meta property="og:image" content="https://uptimepage.dev/static/marketing/og.png">"#
+        ));
+        assert!(html.contains(r#"<meta name="twitter:card" content="summary_large_image">"#));
+        assert!(html.contains(
+            r#"<meta name="twitter:image" content="https://uptimepage.dev/static/marketing/og.png">"#
+        ));
+    }
+
+    #[test]
+    fn og_tags_fall_back_to_summary_when_image_empty() {
+        let view = build_view(&sample_page(), &[]);
+        let html = StatusFullPage {
+            view,
+            branding: sample_branding(),
+            og: OgMeta {
+                title: "Acme Status".into(),
+                description: "Live operational status for Acme.".into(),
+                og_type: "website",
+                url: String::new(),
+                image: String::new(),
+            },
+        }
+        .render()
+        .unwrap();
+        assert!(html.contains(r#"<meta name="twitter:card" content="summary">"#));
+        assert!(!html.contains("og:image"));
+        assert!(!html.contains("og:url"));
+        assert!(!html.contains("twitter:image"));
+    }
+
+    #[test]
     fn powered_by_shown_by_default() {
         let view = build_view(&sample_page(), &[]);
         let html = StatusFullPage {
             view,
             branding: sample_branding(),
+            og: OgMeta::default(),
         }
         .render()
         .unwrap();
@@ -1382,7 +1544,13 @@ mod tests {
             public_brand_color: Some("red; } body { display: none } /*".into()),
             ..PublicOrgBranding::default()
         });
-        let html = StatusFullPage { view, branding }.render().unwrap();
+        let html = StatusFullPage {
+            view,
+            branding,
+            og: OgMeta::default(),
+        }
+        .render()
+        .unwrap();
         // Exactly one `--brand-color:` declaration, and it is the default —
         // `var(--brand-color)` uses have no colon so they don't match.
         assert_eq!(html.matches("--brand-color:").count(), 1);
@@ -1445,6 +1613,7 @@ mod tests {
             months,
             next_cursor: Some("opaque-cursor-token".into()),
             rss_url: RSS_URL,
+            og: OgMeta::default(),
         };
         let html = page.render().unwrap();
         assert!(html.contains("Incident history"));
@@ -1463,6 +1632,7 @@ mod tests {
             months: Vec::new(),
             next_cursor: None,
             rss_url: RSS_URL,
+            og: OgMeta::default(),
         };
         let html = page.render().unwrap();
         assert!(html.contains("No incidents recorded."));
@@ -1477,7 +1647,13 @@ mod tests {
         // tests above; this one pins the resolved-name + no-logo path.
         let view = build_view(&sample_page(), &[]);
         let branding = branding_with(PublicOrgBranding::default());
-        let html = StatusFullPage { view, branding }.render().unwrap();
+        let html = StatusFullPage {
+            view,
+            branding,
+            og: OgMeta::default(),
+        }
+        .render()
+        .unwrap();
 
         assert!(html.contains("Acme Status"), "display name = org name");
         assert!(

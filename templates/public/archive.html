@@ -6,8 +6,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Incident history · {{ branding.display_name }} Status</title>
-    <meta name="description" content="Historical incidents for {{ branding.display_name }}.">
     <meta name="robots" content="index,follow">
+    {% include "public/_og.html" %}
     <link rel="icon" type="image/svg+xml" href="{{ "img/favicon.svg"|asset }}">
     <link rel="alternate" type="application/rss+xml" title="Incidents (RSS)" href="{{ rss_url }}">
     <link rel="stylesheet" href="{{ "css/app.css"|asset }}">
