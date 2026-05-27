@@ -87,6 +87,45 @@ fn decide(
     }
 }
 
+/// Resolved-channel cache shared between the [`AlertEngine`] (reader) and
+/// the API handlers (invalidator). Cheaply cloned — moka wraps the inner
+/// state in an Arc — so both sides see the same entries. Without explicit
+/// invalidation on edit/delete, a webhook URL change or a revoked Slack
+/// token would still ship to the old endpoint until the TTL elapsed.
+#[derive(Clone)]
+pub struct AlertChannelCache {
+    inner: Cache<(OrgId, Uuid), Option<Arc<NotificationChannel>>>,
+}
+
+impl AlertChannelCache {
+    pub fn new() -> Self {
+        Self {
+            inner: Cache::builder()
+                .time_to_live(CHANNEL_CACHE_TTL)
+                .max_capacity(4096)
+                .build(),
+        }
+    }
+
+    pub fn invalidate(&self, org: OrgId, id: Uuid) {
+        self.inner.invalidate(&(org, id));
+    }
+
+    fn get(&self, key: &(OrgId, Uuid)) -> Option<Option<Arc<NotificationChannel>>> {
+        self.inner.get(key)
+    }
+
+    fn insert(&self, key: (OrgId, Uuid), val: Option<Arc<NotificationChannel>>) {
+        self.inner.insert(key, val);
+    }
+}
+
+impl Default for AlertChannelCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub struct AlertEngine {
     rx: mpsc::Receiver<AlertSignal>,
     channels: Arc<dyn NotificationChannelStore>,
@@ -98,7 +137,7 @@ pub struct AlertEngine {
     /// Keyed by `(org, channel_id)` so a tenant's binding can only ever hit
     /// that tenant's channel. `None` is cached too, so a binding to a deleted
     /// channel doesn't hammer the store on every check.
-    cache: Cache<(OrgId, Uuid), Option<Arc<NotificationChannel>>>,
+    cache: AlertChannelCache,
 }
 
 impl AlertEngine {
@@ -106,16 +145,14 @@ impl AlertEngine {
         rx: mpsc::Receiver<AlertSignal>,
         channels: Arc<dyn NotificationChannelStore>,
         http: crate::http_outbound::OutboundHttpClient,
+        cache: AlertChannelCache,
     ) -> Self {
         Self {
             rx,
             channels,
             http,
             state: Arc::new(Mutex::new(HashMap::new())),
-            cache: Cache::builder()
-                .time_to_live(CHANNEL_CACHE_TTL)
-                .max_capacity(4096)
-                .build(),
+            cache,
         }
     }
 
@@ -326,6 +363,7 @@ mod tests {
             crate::http_outbound::build_outbound_client(
                 crate::security::SsrfGuard::relaxed_for_tests(),
             ),
+            AlertChannelCache::new(),
         )
     }
 
@@ -361,6 +399,43 @@ mod tests {
         // Second hit served from cache even after the row is deleted.
         store.delete(test_org(), ch.id).await.unwrap();
         assert!(engine.resolve(test_org(), ch.id).await.is_some());
+    }
+
+    #[tokio::test]
+    async fn cache_invalidate_drops_the_entry_so_next_resolve_re_reads() {
+        let store: Arc<dyn NotificationChannelStore> =
+            Arc::new(InMemoryNotificationChannelStore::new());
+        let ch = store
+            .create(
+                test_org(),
+                NewNotificationChannel {
+                    name: "ops".into(),
+                    config: ChannelConfig::Slack {
+                        webhook_url: "https://hooks.slack.com/x".into(),
+                    },
+                    enabled: true,
+                },
+                10,
+            )
+            .await
+            .unwrap();
+        let cache = AlertChannelCache::new();
+        let (_tx, rx) = mpsc::channel(4);
+        let engine = AlertEngine::new(
+            rx,
+            store.clone(),
+            crate::http_outbound::build_outbound_client(
+                crate::security::SsrfGuard::relaxed_for_tests(),
+            ),
+            cache.clone(),
+        );
+        assert!(engine.resolve(test_org(), ch.id).await.is_some());
+        store.delete(test_org(), ch.id).await.unwrap();
+        cache.invalidate(test_org(), ch.id);
+        assert!(
+            engine.resolve(test_org(), ch.id).await.is_none(),
+            "post-invalidate resolve must re-read the store"
+        );
     }
 
     // ── Dispatch-failure rollback (FIRE-LOSS regression) ─────────────────

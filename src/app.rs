@@ -114,6 +114,11 @@ pub struct AppState {
     pub public_source: Arc<dyn PublicSource>,
     pub maintenance_store: Arc<dyn MaintenanceStore>,
     pub notification_channel_store: Arc<dyn NotificationChannelStore>,
+    /// Resolved-channel cache the [`AlertEngine`] reads from. Held here so
+    /// the channel CRUD handlers can `invalidate` on edit/delete and the
+    /// engine picks up the change on the next dispatch rather than waiting
+    /// out the cache TTL.
+    pub alert_channel_cache: crate::notifier::engine::AlertChannelCache,
     pub incident_narration_store: Arc<dyn IncidentNarrationStore>,
     /// Debounce cache for `sessions.last_used_at` writes — see
     /// `auth::session::touch_last_used_debounced`.
@@ -207,6 +212,7 @@ impl AppState {
         incident_narration_store: Arc<dyn IncidentNarrationStore>,
         outbound_http: OutboundHttpClient,
         email_sender: Arc<dyn EmailSender>,
+        alert_channel_cache: crate::notifier::engine::AlertChannelCache,
     ) -> Self {
         let quotas = Arc::new(QuotaService::new(&cfg, db.clone()));
         let rate_limits = Arc::new(RateLimitService::new());
@@ -234,6 +240,7 @@ impl AppState {
             quotas,
             rate_limits,
             abuse,
+            alert_channel_cache,
         }
     }
 }

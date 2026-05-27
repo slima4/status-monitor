@@ -235,6 +235,7 @@ async fn main() -> Result<()> {
         let token = root.clone();
         tokio::spawn(async move { batcher.run(token).await })
     };
+    let alert_channel_cache = status_monitor::notifier::engine::AlertChannelCache::new();
     let alert_engine_handle: Option<JoinHandle<()>> = Some({
         let token = root.clone();
         let engine = AlertEngine::new(
@@ -243,6 +244,7 @@ async fn main() -> Result<()> {
             status_monitor::http_outbound::build_outbound_client(
                 status_monitor::security::SsrfGuard::from_security_config(&cfg.security),
             ),
+            alert_channel_cache.clone(),
         );
         tokio::spawn(async move { engine.run(token).await })
     });
@@ -372,6 +374,7 @@ async fn main() -> Result<()> {
         incident_narration_store,
         outbound_http,
         email_sender,
+        alert_channel_cache,
     );
     // Hot-reload the abuse deny-lists on SIGHUP when enabled (validate then
     // atomic swap; a bad edit is rejected and the running rules stay).

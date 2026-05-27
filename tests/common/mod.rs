@@ -185,6 +185,7 @@ pub fn build_test_app_with_seedable_incidents(
         incident_narration_store,
         build_test_outbound_and_email().0,
         build_test_outbound_and_email().1,
+        status_monitor::notifier::engine::AlertChannelCache::new(),
     );
     let router = status_monitor::build_app_router_api_only(state, CancellationToken::new());
     // Auto-attach an owner session so operator routes resolve a CurrentOrg.
@@ -258,6 +259,7 @@ fn build_test_app_with_public_source_inner(
         incident_narration_store,
         build_test_outbound_and_email().0,
         build_test_outbound_and_email().1,
+        status_monitor::notifier::engine::AlertChannelCache::new(),
     );
     if with_web {
         status_monitor::build_app_router(state, CancellationToken::new())
@@ -336,6 +338,7 @@ pub async fn build_test_app_with_pg(
         incident_narration_store,
         build_test_outbound_and_email().0,
         build_test_outbound_and_email().1,
+        status_monitor::notifier::engine::AlertChannelCache::new(),
     );
     let app = status_monitor::build_app_router(state, CancellationToken::new());
     (app, provisioned_org)
@@ -441,6 +444,7 @@ fn assemble_pg_router(pool: PgPool, cfg: AppConfig) -> Router {
         incident_narration_store,
         build_test_outbound_and_email().0,
         build_test_outbound_and_email().1,
+        status_monitor::notifier::engine::AlertChannelCache::new(),
     );
     status_monitor::build_app_router(state, CancellationToken::new())
 }
@@ -548,6 +552,7 @@ pub fn build_test_app_state(mutate: impl FnOnce(&mut AppConfig)) -> AppState {
         incident_narration_store,
         build_test_outbound_and_email().0,
         build_test_outbound_and_email().1,
+        status_monitor::notifier::engine::AlertChannelCache::new(),
     )
 }
 

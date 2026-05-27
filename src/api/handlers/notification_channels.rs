@@ -168,12 +168,15 @@ pub async fn update(
     if let Some(cfg) = &update.config {
         validate_config(cfg)?;
     }
-    state
+    let updated = state
         .notification_channel_store
         .update(org, id, update)
         .await?
-        .map(Redacted::new)
-        .ok_or_else(channel_not_found)
+        .ok_or_else(channel_not_found)?;
+    // Drop any cached resolution so the next AlertEngine dispatch picks up
+    // the new URL / token / enabled flag instead of waiting out the TTL.
+    state.alert_channel_cache.invalidate(org, id);
+    Ok(Redacted::new(updated))
 }
 
 #[utoipa::path(
@@ -195,6 +198,7 @@ pub async fn delete(
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode> {
     if state.notification_channel_store.delete(org, id).await? {
+        state.alert_channel_cache.invalidate(org, id);
         Ok(StatusCode::NO_CONTENT)
     } else {
         Err(channel_not_found())
