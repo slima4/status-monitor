@@ -66,6 +66,8 @@ jobs:
           ast-grep --version
       - name: tenant-isolation check
         run: scripts/check_tenant_isolation.sh
+      - name: static lints
+        run: scripts/check_static_lints.sh
 
   # License + advisory + ban + source audit. Independent of the build,
   # uses its own cache, runs in parallel with `lint` and `test`. Pinned

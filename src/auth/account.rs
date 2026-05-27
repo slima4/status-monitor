@@ -207,11 +207,14 @@ pub async fn request_deletion(
         .execute(&mut *tx)
         .await
         .context("delete_account: drop api tokens")?;
-    sqlx::query("DELETE FROM invitations WHERE inviter_id = $1 AND accepted_at IS NULL")
-        .bind(user_id.0)
-        .execute(&mut *tx)
-        .await
-        .context("delete_account: drop pending invitations")?;
+    sqlx::query(
+        "/* SAFE: user-delete drops pending invites across every org they invited from */ \
+         DELETE FROM invitations WHERE inviter_id = $1 AND accepted_at IS NULL",
+    )
+    .bind(user_id.0)
+    .execute(&mut *tx)
+    .await
+    .context("delete_account: drop pending invitations")?;
     // Drop memberships in *shared* orgs only. The owner membership on each
     // tombstoned solo org is intentionally kept: it is how recovery re-grants
     // access to the restored orgs and how the solo set is re-derived without

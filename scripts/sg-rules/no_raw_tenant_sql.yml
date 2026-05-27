@@ -3,16 +3,20 @@ language: rust
 severity: error
 message: |-
   Tenant-table SQL must include `org_id` in its WHERE clause. Bind the
-  per-call `org` (resolved from the request's `CurrentOrg`) or add this file
-  to the AdminRepo allow-list in scripts/check_tenant_isolation.sh.
+  per-call `org` (resolved from the request's `CurrentOrg`), add the file
+  to the cross-tenant allow-list in scripts/check_tenant_isolation.sh,
+  or add an inline `/* SAFE: <reason> */` SQL comment if this specific
+  statement is genuinely cross-tenant by design (block-comment syntax so
+  Rust line-continuation can't accidentally fold it into the SQL body).
 note: |-
   Flagged tables: targets, incidents, incident_updates,
   maintenance_windows, maintenance_window_components, memberships,
-  organizations, org_audit_log.
+  organizations, org_audit_log, domain_expiry_state, invitations,
+  notification_channels, plan_overrides, quota_events.
 rule:
   any:
     - kind: raw_string_literal
     - kind: string_literal
-  regex: "(?is)\\b(FROM|UPDATE|INTO|DELETE\\s+FROM)\\s+(targets|incidents|incident_updates|maintenance_windows|maintenance_window_components|memberships|organizations|org_audit_log)\\b"
+  regex: "(?is)\\b(FROM|UPDATE|INTO|DELETE\\s+FROM)\\s+(targets|incidents|incident_updates|maintenance_windows|maintenance_window_components|memberships|organizations|org_audit_log|domain_expiry_state|invitations|notification_channels|plan_overrides|quota_events)\\b"
   not:
-    regex: "(?i)\\borg_id\\b"
+    regex: "(?i)(\\borg_id\\b|/\\*\\s*SAFE:)"

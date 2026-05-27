@@ -855,12 +855,12 @@ pub async fn find_public_status_org_by_slug(
     slug: &str,
 ) -> Result<Option<PublicStatusOrg>> {
     let row: Option<OrgRow> = sqlx::query_as(
-        r#"SELECT id, slug::text AS slug, name, created_at, updated_at, deleted_at
+        r#"/* SAFE: public-page lookup is intentionally not org_id-scoped */
+           SELECT id, slug::text AS slug, name, created_at, updated_at, deleted_at
            FROM organizations
            WHERE slug = $1
              AND public_status_enabled = true
-             AND deleted_at IS NULL
-           -- SAFE: public-page lookup is intentionally not org_id-scoped"#,
+             AND deleted_at IS NULL"#,
     )
     .bind(slug)
     .fetch_optional(pool)
