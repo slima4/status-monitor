@@ -1,10 +1,14 @@
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
+use async_trait::async_trait;
 use chrono::Utc;
+use parking_lot::Mutex;
 use status_monitor::domain::{CheckResult, CheckStatus};
+use status_monitor::error::Result as SmResult;
 use status_monitor::pipeline::{BatcherConfig, ResultBatcher};
-use status_monitor::storage::InMemorySink;
+use status_monitor::storage::{InMemorySink, ResultSink};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -100,6 +104,84 @@ async fn drains_on_shutdown() {
     shutdown.cancel();
     handle.await.unwrap();
     assert_eq!(sink.len(), 5, "shutdown should drain pending results");
+}
+
+/// Sink that fails the first `fail_first` flush attempts, then succeeds.
+/// Records every batch seen (including failed attempts) so the test can assert
+/// retry semantics.
+struct FlakySink {
+    fail_first: AtomicU32,
+    seen: Mutex<Vec<Vec<CheckResult>>>,
+}
+
+impl FlakySink {
+    fn new(fail_first: u32) -> Self {
+        Self {
+            fail_first: AtomicU32::new(fail_first),
+            seen: Mutex::new(Vec::new()),
+        }
+    }
+
+    fn writes_succeeded(&self) -> Vec<Vec<CheckResult>> {
+        self.seen
+            .lock()
+            .iter()
+            .filter(|b| !b.is_empty())
+            .cloned()
+            .collect()
+    }
+}
+
+#[async_trait]
+impl ResultSink for FlakySink {
+    async fn write_batch(&self, results: &[CheckResult]) -> SmResult<()> {
+        self.seen.lock().push(results.to_vec());
+        if self.fail_first.load(Ordering::SeqCst) > 0 {
+            self.fail_first.fetch_sub(1, Ordering::SeqCst);
+            return Err(anyhow::anyhow!("synthetic flush failure").into());
+        }
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn flush_failure_retains_buffer_for_next_attempt() {
+    // First attempt fails, second succeeds. The same rows must reach the sink
+    // on the second attempt — no `buffer.clear()` after the failed Err arm.
+    let (tx, rx) = mpsc::channel(64);
+    let sink = Arc::new(FlakySink::new(1));
+    let cfg = BatcherConfig {
+        batch_size: 2,
+        batch_timeout: Duration::from_millis(80),
+    };
+    let batcher = ResultBatcher::new(rx, sink.clone(), cfg);
+    let shutdown = CancellationToken::new();
+    let handle = tokio::spawn(batcher.run(shutdown.clone()));
+
+    let a = sample_result();
+    let b = sample_result();
+    tx.send(a.clone()).await.unwrap();
+    tx.send(b.clone()).await.unwrap();
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    let mut succeeded = Vec::new();
+    while tokio::time::Instant::now() < deadline {
+        succeeded = sink.writes_succeeded();
+        if succeeded.iter().any(|batch| batch.len() == 2) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(30)).await;
+    }
+    shutdown.cancel();
+    drop(tx);
+    handle.await.unwrap();
+
+    let retained = succeeded
+        .iter()
+        .find(|batch| batch.len() == 2)
+        .expect("a 2-row batch must have eventually been written");
+    assert_eq!(retained[0].target_id, a.target_id);
+    assert_eq!(retained[1].target_id, b.target_id);
 }
 
 #[tokio::test]
