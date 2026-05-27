@@ -3,11 +3,11 @@
 -- login audit, and the two `users` columns the auth flows need.
 --
 -- `users.email` is already CITEXT (see 004_organizations.up.sql); only the
--- new columns are added here.
+-- new columns are added here. `last_seen_at` moved to 004 alongside the
+-- other user-account state.
 
 ALTER TABLE users
-    ADD COLUMN email_verified_at TIMESTAMPTZ,
-    ADD COLUMN last_seen_at      TIMESTAMPTZ;
+    ADD COLUMN email_verified_at TIMESTAMPTZ;
 
 -- DB-backed sessions: cookie hash => user + active org. Lookup happens on
 -- every authenticated request; both an idle timeout and an absolute expiry

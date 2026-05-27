@@ -24,20 +24,37 @@ CREATE INDEX idx_organizations_pending_purge
     ON organizations(deleted_at)
     WHERE deleted_at IS NOT NULL;
 
+-- Column order: fixed-width 8-byte-aligned (UUID, TIMESTAMPTZ) clustered
+-- first, then variable-length (CITEXT, TEXT) at the end. Saves alignment
+-- padding bytes per row on a hot table.
 CREATE TABLE users (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id                      UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    -- Nullable so the user row can land before its signup org exists in
+    -- the same tx; the signup path UPDATEs this once the org commits.
+    signup_org_id           UUID        REFERENCES organizations(id) ON DELETE SET NULL,
+    onboarding_completed_at TIMESTAMPTZ,
+    last_seen_at            TIMESTAMPTZ,
+    -- Bumping `*_version` surfaces the re-accept panel; defaults backfill
+    -- existing rows to "accepted on the day this migration ran".
+    terms_accepted_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    privacy_accepted_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    marketing_opt_in_at     TIMESTAMPTZ,
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at              TIMESTAMPTZ,
     -- Partial-UNIQUE via `idx_users_active`; see `organizations.slug` above.
-    email           CITEXT NOT NULL,
-    display_name    TEXT,
-    theme           TEXT NOT NULL DEFAULT 'default'
-                    CHECK (theme IN (
-                        'default', 'terminal', 'winter',
-                        'dark', 'night', 'dim', 'nord', 'dracula',
-                        'corporate', 'light', 'cupcake', 'cyberpunk', 'synthwave'
-                    )),
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    deleted_at      TIMESTAMPTZ
+    email                   CITEXT      NOT NULL,
+    display_name            TEXT,
+    theme                   TEXT        NOT NULL DEFAULT 'default'
+                            CHECK (theme IN (
+                                'default', 'terminal', 'winter',
+                                'dark', 'night', 'dim', 'nord', 'dracula',
+                                'corporate', 'light', 'cupcake', 'cyberpunk', 'synthwave'
+                            )),
+    locale                  TEXT,
+    timezone                TEXT,
+    terms_version           TEXT        NOT NULL DEFAULT 'v1',
+    privacy_version         TEXT        NOT NULL DEFAULT 'v1'
 );
 
 CREATE UNIQUE INDEX idx_users_active ON users(email) WHERE deleted_at IS NULL;

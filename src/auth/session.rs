@@ -196,11 +196,22 @@ pub async fn touch_last_used_debounced(
     {
         return Ok(());
     }
-    sqlx::query("UPDATE sessions SET last_used_at = now() WHERE id_hash = $1")
-        .bind(id_hash)
-        .execute(pool)
-        .await
-        .context("session::touch_last_used_debounced")?;
+    // Server-side guard on the users.last_seen_at leg: an active user with
+    // N tabs across M replicas would otherwise dirty the same users heap row
+    // N*M times per debounce window. Skip the second UPDATE when the column
+    // is already fresh enough — last_seen_at resolution is coarse anyway.
+    sqlx::query(
+        "WITH bumped AS ( \
+             UPDATE sessions SET last_used_at = now() WHERE id_hash = $1 RETURNING user_id \
+         ) \
+         UPDATE users SET last_seen_at = now() \
+         WHERE id IN (SELECT user_id FROM bumped) \
+           AND (last_seen_at IS NULL OR last_seen_at < now() - interval '60 seconds')",
+    )
+    .bind(id_hash)
+    .execute(pool)
+    .await
+    .context("session::touch_last_used_debounced")?;
     cache.insert(id_hash.to_string(), now);
     Ok(())
 }

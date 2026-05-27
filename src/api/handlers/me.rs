@@ -137,3 +137,13 @@ pub async fn update_theme(
     ));
     Ok(Json(ThemeView { theme: req.theme }))
 }
+
+pub async fn complete_onboarding(
+    State(state): State<AppState>,
+    session: Session,
+) -> Result<StatusCode> {
+    let user = session.user.as_ref().ok_or(AppError::Unauthorized)?;
+    let pool = state.db.as_ref().ok_or(AppError::Unauthorized)?;
+    users_store::mark_onboarding_complete(pool, user.id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}

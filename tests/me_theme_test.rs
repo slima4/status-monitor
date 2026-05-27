@@ -128,7 +128,7 @@ async fn me_theme_patch_rejects_unknown_variant() {
         })
         .await
         .unwrap();
-    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
 
     let (stored,): (String,) = sqlx::query_as("SELECT theme FROM users WHERE id = $1")
         .bind(user)

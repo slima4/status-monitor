@@ -22,7 +22,7 @@
            required minlength="1" maxlength="80"
            class="w-full field text-sm">
     <div class="flex items-center justify-between">
-      <a href="/" class="text-sm text-muted hover:text-body transition-colors">skip for now</a>
+      <a id="skip-onboard" href="/" class="text-sm text-muted hover:text-body transition-colors">skip for now</a>
       <button type="submit"
               class="sticker-btn sticker-btn--primary px-3 py-1.5 text-sm font-medium">
         save and continue
@@ -32,11 +32,28 @@
   </form>
 
   <script>
-    document.body.addEventListener('htmx:afterRequest', (ev) => {
-      if (ev.detail.elt && ev.detail.elt.id === 'onboard-form' && ev.detail.successful) {
-        setTimeout(() => { window.location.href = '/'; }, 600);
+    (function () {
+      function markComplete() {
+        return fetch('/api/v1/me/onboarding/complete', {
+          method: 'POST',
+          headers: { 'X-Requested-With': 'status-monitor' },
+        }).catch(function () { /* best effort */ });
       }
-    });
+
+      document.body.addEventListener('htmx:afterRequest', function (ev) {
+        if (ev.detail.elt && ev.detail.elt.id === 'onboard-form' && ev.detail.successful) {
+          markComplete().finally(function () {
+            setTimeout(function () { window.location.href = '/'; }, 600);
+          });
+        }
+      });
+
+      const skip = document.getElementById('skip-onboard');
+      skip.addEventListener('click', function (ev) {
+        ev.preventDefault();
+        markComplete().finally(function () { window.location.href = '/'; });
+      });
+    })();
   </script>
 </section>
 {% endblock %}

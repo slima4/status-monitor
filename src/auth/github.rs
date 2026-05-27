@@ -28,7 +28,8 @@ use crate::config::GithubOauthConfig;
 use crate::domain::{OrgId, UserId, generate_signup_slug};
 use crate::error::{AppError, Result};
 use crate::http_outbound::OutboundHttpClient;
-use crate::storage::orgs::{create_signup_org_with_owner_in_tx, oldest_membership_for_user};
+use crate::storage::orgs::create_signup_org_with_owner_in_tx;
+use crate::storage::users as users_store;
 
 const GH_TOKEN_URL: &str = "https://github.com/login/oauth/access_token";
 const GH_USER_URL: &str = "https://api.github.com/user";
@@ -250,7 +251,7 @@ pub async fn upsert_identity_and_signup_org(
         .execute(&mut *tx)
         .await
         .context("phase C: bump last_login_at")?;
-        let signup_org_id = oldest_membership_for_user(pool, UserId(user_id)).await?;
+        let signup_org_id = users_store::resolve_signup_org(pool, UserId(user_id)).await?;
         tx.commit().await.context("phase C: commit (existing)")?;
         return Ok(ResolvedIdentity {
             user_id: UserId(user_id),
@@ -301,7 +302,7 @@ pub async fn upsert_identity_and_signup_org(
             .rows_affected() == 0 {
             // Already verified — no-op.
         }
-        let signup_org_id = oldest_membership_for_user(pool, UserId(user_id)).await?;
+        let signup_org_id = users_store::resolve_signup_org(pool, UserId(user_id)).await?;
         tx.commit().await.context("phase C: commit (linked)")?;
         return Ok(ResolvedIdentity {
             user_id: UserId(user_id),
@@ -335,6 +336,13 @@ pub async fn upsert_identity_and_signup_org(
     .context("phase C: insert identity")?;
 
     let org_id = create_signup_org_in_tx(&mut tx, UserId(new_user_id)).await?;
+
+    sqlx::query("UPDATE users SET signup_org_id = $1 WHERE id = $2")
+        .bind(org_id.0)
+        .bind(new_user_id)
+        .execute(&mut *tx)
+        .await
+        .context("phase C: set signup_org_id")?;
 
     tx.commit().await.context("phase C: commit (new user)")?;
     Ok(ResolvedIdentity {

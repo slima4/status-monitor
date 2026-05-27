@@ -172,6 +172,10 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
             "/me/theme",
             get(handlers::me::get_theme).patch(handlers::me::update_theme),
         )
+        .route(
+            "/me/onboarding/complete",
+            post(handlers::me::complete_onboarding),
+        )
         .route("/me/sessions", get(handlers::me::list_sessions))
         .route(
             "/me/sessions/{id}",

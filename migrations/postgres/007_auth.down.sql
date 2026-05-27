@@ -7,5 +7,4 @@ DROP TABLE IF EXISTS oauth_identities;
 DROP TABLE IF EXISTS sessions;
 
 ALTER TABLE users
-    DROP COLUMN IF EXISTS last_seen_at,
     DROP COLUMN IF EXISTS email_verified_at;
