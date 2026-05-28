@@ -526,7 +526,7 @@
 
     /* Visible focus ring on every interactive element. Must be a real
        `outline`, not Tailwind `ring` (a box-shadow): the cartoon controls
-       (.sticker-btn, .sticker-disclosure summary, .field) own a box-shadow,
+       (.sticker-btn, .field) own a box-shadow,
        and this rule is zero-specificity :where(), so a ring box-shadow
        loses to theirs and the indicator vanishes. outline is an
        independent property — never eaten. WCAG 2.2 / 2.4.7 (≥3:1). */
@@ -1252,53 +1252,6 @@
         background-repeat: no-repeat;
         background-position: right 0.7rem center;
         background-size: 0.7rem;
-    }
-
-    /* Cartoon disclosure. The <summary> is a sticker control — same ink
-       edge + hard offset shadow as .sticker-btn. Clicking it physically
-       "presses in": the shadow collapses to nothing and the tile shifts
-       onto where the shadow was, so expand reads as a press, not a snap.
-       The body then slides+fades in. Templates name .sticker-disclosure;
-       every bit of look/motion is here (semantic layer, like sticker-*). */
-    .sticker-disclosure > summary {
-        @apply flex cursor-pointer select-none list-none items-center
-               justify-between gap-3 rounded-sm border px-4 py-3;
-        background: var(--theme-surface-elev);
-        color: var(--theme-text);
-        border-color: var(--theme-line);
-        font-family: var(--font-mono);
-        transition: background-color 150ms ease, border-color 150ms ease;
-    }
-    .sticker-disclosure > summary::-webkit-details-marker { display: none; }
-    /* :not([open]) so an expanded control never lifts on hover — order
-       of this vs the [open] rule then can't matter (no source-order trap). */
-    .sticker-disclosure:not([open]) > summary:hover {
-        border-color: var(--theme-ink);
-        background: var(--theme-surface-sunk);
-    }
-    .sticker-disclosure[open] > summary {
-        background: var(--theme-surface-sunk);
-        border-color: var(--theme-ink);
-    }
-    .sticker-disclosure__chevron {
-        @apply text-base;
-        color: var(--theme-text-quiet);
-        transition: transform 200ms ease;
-    }
-    .sticker-disclosure[open] .sticker-disclosure__chevron { @apply rotate-180; }
-    .sticker-disclosure__icon {
-        @apply grid h-8 w-8 place-items-center rounded-lg text-base;
-        background: var(--theme-surface-sunk);
-        color: var(--theme-text-muted);
-        transition: background-color 200ms ease, color 200ms ease;
-    }
-    .sticker-disclosure[open] .sticker-disclosure__icon {
-        background: var(--theme-state-ok-tint);
-        color: var(--theme-state-ok-fg);
-    }
-    /* Native <details> has no close animation; open is where it's felt. */
-    .sticker-disclosure[open] > .sticker-disclosure__body {
-        animation: sm-disclose 180ms ease-out;
     }
 
     /* App-shell nav (base.html), the chrome on every authenticated page.
@@ -2680,6 +2633,7 @@
         overflow-y: auto;
         list-style: none;
         margin: 0;
+        border-radius: var(--radius-sm);
     }
     .sm-combobox__option {
         position: relative;
@@ -3124,20 +3078,11 @@
     0%, 100% { opacity: 1;   transform: scale(1);    }
     50%      { opacity: .55; transform: scale(.78);  }
 }
-@keyframes sm-disclose {
-    from { opacity: 0; transform: translateY(-0.5rem); }
-    to   { opacity: 1; transform: translateY(0);       }
-}
-
 /* Motion is decoration here, never information — a reduced-motion visitor
    still sees the full static EKG trace and a solid dot. WCAG 2.3.3. */
 @media (prefers-reduced-motion: reduce) {
     .sm-ekg-line { animation: none; stroke-dasharray: none; }
     .sm-pulse    { animation: none; }
-    .sticker-disclosure[open] > .sticker-disclosure__body { animation: none; }
-    .sticker-disclosure > summary,
-    .sticker-disclosure__chevron,
-    .sticker-disclosure__icon { transition: none; }
     input[type="checkbox"],
     input[type="radio"] { transition: none; }
     .day-cell { transition: none; }

@@ -57,7 +57,7 @@
     <fieldset data-variant="http"
               class="space-y-5 sticker-card p-5{% if form.check_type != "http" %} hidden{% endif %}">
       <legend class="px-1 text-sm font-medium">HTTP check</legend>
-      <p class="mb-3 text-xs text-muted">
+      <p class="mb-5 text-xs text-muted">
         Some third-party APIs rate-limit by source IP (GitHub: 60 req/h unauthenticated, 5&nbsp;000 with a token).
         For those, poll every 5+ min and supply the credential via the Bearer-token field in Advanced HTTP.
         A 429 / 503 with <code>Retry-After</code> renders as <em>degraded</em>, not <em>down</em>.
@@ -90,7 +90,7 @@
     <fieldset data-variant="tcp"
               class="space-y-5 sticker-card p-5{% if form.check_type != "tcp" %} hidden{% endif %}">
       <legend class="px-1 text-sm font-medium">TCP check</legend>
-      <p class="mb-3 text-xs text-muted">
+      <p class="mb-5 text-xs text-muted">
         Opens a TCP connection to host:port; a refused or timed-out connection fails the check.
       </p>
       <div class="flex flex-wrap gap-3">
@@ -124,7 +124,7 @@
     <fieldset data-variant="dns"
               class="space-y-5 sticker-card p-5{% if form.check_type != "dns" %} hidden{% endif %}">
       <legend class="px-1 text-sm font-medium">DNS check</legend>
-      <p class="mb-3 text-xs text-muted">
+      <p class="mb-5 text-xs text-muted">
         Resolves a record and (optionally) asserts a substring appears in
         the answer. NXDOMAIN or an empty answer set fails the check.
       </p>
@@ -184,7 +184,7 @@
     <fieldset data-variant="tls_cert"
               class="space-y-5 sticker-card p-5{% if form.check_type != "tls_cert" %} hidden{% endif %}">
       <legend class="px-1 text-sm font-medium">TLS certificate check</legend>
-      <p class="mb-3 text-xs text-muted">
+      <p class="mb-5 text-xs text-muted">
         Connects to host:port, fetches the served certificate, and warns
         before expiry. Degraded under <code>warn_days</code>, Down under
         <code>critical_days</code>.
@@ -239,7 +239,7 @@
     <fieldset data-variant="domain_expiry"
               class="space-y-5 sticker-card p-5{% if form.check_type != "domain_expiry" %} hidden{% endif %}">
       <legend class="px-1 text-sm font-medium">Domain expiry check</legend>
-      <p class="mb-3 text-xs text-muted">
+      <p class="mb-5 text-xs text-muted">
         Queries the WHOIS / RDAP record for the apex domain and warns
         ahead of registration expiry.
       </p>
