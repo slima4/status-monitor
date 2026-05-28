@@ -33,11 +33,11 @@ pub struct ListParams {
     pub q: Option<String>,
     #[serde(default)]
     pub tag: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "empty_as_none")]
     pub enabled: Option<bool>,
     #[serde(default)]
     pub group: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "empty_as_none")]
     pub owner: Option<Uuid>,
     #[serde(default)]
     pub kind: Option<String>,
@@ -47,6 +47,22 @@ pub struct ListParams {
     pub limit: Option<usize>,
     #[serde(default)]
     pub offset: Option<usize>,
+}
+
+/// Treats an empty query value (`owner=`, `enabled=`) as absent. The
+/// filter form's "any" options submit empty strings; without this serde
+/// tries to parse `""` as a Uuid/bool and 400s the whole request.
+fn empty_as_none<'de, D, T>(de: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: std::str::FromStr,
+    T::Err: std::fmt::Display,
+{
+    let raw = <Option<String>>::deserialize(de)?;
+    match raw.as_deref().map(str::trim) {
+        None | Some("") => Ok(None),
+        Some(s) => s.parse().map(Some).map_err(serde::de::Error::custom),
+    }
 }
 
 pub struct MonitorRow {
