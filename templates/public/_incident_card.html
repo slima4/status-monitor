@@ -15,7 +15,7 @@
     </div>
     <p class="text-xs text-quiet">
         {{ inc.header.component_name }} ·
-        <time datetime="{{ inc.header.started_at|iso_ts }}" data-tz>{{ inc.header.started_at|human_ts }}</time>
+        <time datetime="{{ inc.header.started_at|iso_ts }}" data-tz="exact">{{ inc.header.started_at|human_ts }}</time>
         · {{ inc.header.duration_secs|humanize_dur }}
         {% match inc.ended_at %}
             {% when Some with (_) %} (resolved){% when None %}

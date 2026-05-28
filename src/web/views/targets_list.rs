@@ -75,6 +75,9 @@ pub struct MonitorRow {
     pub group_name: Option<String>,
     pub last_status: &'static str,
     pub status_class: &'static str,
+    /// UTC instant of the last check; `None` when no samples. Drives the
+    /// client-side local-time rewrite; `last_check_label` is the no-JS fallback.
+    pub last_check_at: Option<chrono::DateTime<Utc>>,
     pub last_check_label: String,
     pub uptime_30d_label: String,
     pub owner: Option<OwnerView>,
@@ -391,9 +394,10 @@ fn build_row(
     let last_status = class;
     let status_class = class;
 
-    let last_check_label = metrics
+    let last_check_at = metrics
         .and_then(|m| m.last_minute_ts)
-        .and_then(|ts| chrono::DateTime::<Utc>::from_timestamp(ts, 0))
+        .and_then(|ts| chrono::DateTime::<Utc>::from_timestamp(ts, 0));
+    let last_check_label = last_check_at
         .map(|then| relative_ago(now - then))
         .unwrap_or_else(|| "—".into());
 
@@ -424,6 +428,7 @@ fn build_row(
         group_name: t.group_name.clone(),
         last_status,
         status_class,
+        last_check_at,
         last_check_label,
         uptime_30d_label,
         owner,
@@ -578,6 +583,7 @@ mod tests {
             group_name: group.map(str::to_owned),
             last_status: status,
             status_class: status_class_for(status),
+            last_check_at: None,
             last_check_label: "3s ago".into(),
             uptime_30d_label: "99.94%".into(),
             owner: None,

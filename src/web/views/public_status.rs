@@ -1098,7 +1098,7 @@ mod tests {
         assert!(html.contains(r#"hx-trigger="every 30s""#));
         assert!(html.contains("data-tz"));
         assert!(html.contains("/static/js/htmx.min.js"));
-        assert!(html.contains("/static/js/public/tz.js"));
+        assert!(html.contains("/static/js/ui/localtime.js"));
         assert!(html.contains("/static/js/public/day_popover.js"));
         assert!(html.contains("/api/public/v1/incidents.rss"));
     }

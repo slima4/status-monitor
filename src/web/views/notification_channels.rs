@@ -25,7 +25,7 @@ use crate::error::AppError;
 use crate::web::CurrentOrg;
 use crate::web::error::WebResult;
 use crate::web::filters;
-use crate::web::views::{fmt_human, json_pretty, resolve_org};
+use crate::web::views::{json_pretty, resolve_org};
 
 const TAB_NOTIFICATIONS: &str = "notifications";
 
@@ -34,7 +34,7 @@ pub struct ChannelRow {
     pub name: String,
     pub kind: &'static str,
     pub enabled: bool,
-    pub created: String,
+    pub created: chrono::DateTime<chrono::Utc>,
 }
 
 #[derive(Template, WebTemplate)]
@@ -119,7 +119,7 @@ pub async fn list_partial(
             name: c.name,
             kind: c.kind.as_db_str(),
             enabled: c.enabled,
-            created: fmt_human(c.created_at),
+            created: c.created_at,
         })
         .collect();
     Ok(ChannelsPartial { channels }.into_response())
@@ -265,7 +265,7 @@ mod tests {
                 name: "Ops Slack".into(),
                 kind: "slack",
                 enabled: true,
-                created: "2026-05-18 12:00 UTC".into(),
+                created: "2026-05-18T12:00:00Z".parse().unwrap(),
             }],
         }
         .render()

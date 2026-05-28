@@ -19,8 +19,8 @@
     <tr>
       <td class="px-4 py-2 align-top text-body">{{ t.name }}</td>
       <td class="px-4 py-2 align-top font-mono text-xs text-muted">{{ t.prefix }}…</td>
-      <td class="px-4 py-2 align-top text-body tabular-nums">{{ t.created }}</td>
-      <td class="px-4 py-2 align-top text-body tabular-nums">{{ t.last_used }}</td>
+      <td class="px-4 py-2 align-top text-body tabular-nums"><time datetime="{{ t.created|iso_ts }}" data-tz="exact">{{ t.created|human_ts }}</time></td>
+      <td class="px-4 py-2 align-top text-body tabular-nums">{% if let Some(ts) = t.last_used %}<time datetime="{{ ts|iso_ts }}" data-tz="exact">{{ ts|human_ts }}</time>{% else %}never{% endif %}</td>
       <td class="px-4 py-2 text-right">
         <button type="button"
                 hx-delete="/api/v1/me/api-tokens/{{ t.id }}"

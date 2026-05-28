@@ -28,7 +28,7 @@
         <span class="status-badge status-badge--disabled">Disabled</span>
         {% endif %}
       </td>
-      <td class="px-4 py-2 align-top text-body tabular-nums">{{ c.created }}</td>
+      <td class="px-4 py-2 align-top text-body tabular-nums"><time datetime="{{ c.created|iso_ts }}" data-tz="exact">{{ c.created|human_ts }}</time></td>
       <td class="px-4 py-2">
         <div class="flex items-center justify-end gap-3">
           <span data-test-result class="text-xs"></span>

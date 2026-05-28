@@ -199,7 +199,7 @@ pub struct DashboardActiveIncident {
 
 #[derive(Clone)]
 pub struct DashboardIncidentUpdate {
-    pub time_label: String,
+    pub posted_at: chrono::DateTime<chrono::Utc>,
     pub phase_label: &'static str,
     pub message: String,
 }
@@ -851,7 +851,7 @@ impl DashboardActiveIncident {
             severity_label: severity_display(severity),
             severity_class: severity_class(severity),
             latest_update: latest_update.map(|u| DashboardIncidentUpdate {
-                time_label: u.posted_at.format("%H:%M").to_string(),
+                posted_at: u.posted_at,
                 phase_label: phase_display(u.phase),
                 message: u.message,
             }),

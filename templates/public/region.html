@@ -49,7 +49,7 @@
                     </div>
                     <p class="text-sm text-muted">
                         Started
-                        <time datetime="{{ inc.header.started_at|iso_ts }}" data-tz>{{ inc.header.started_at|human_ts }}</time>
+                        <time datetime="{{ inc.header.started_at|iso_ts }}" data-tz="exact">{{ inc.header.started_at|human_ts }}</time>
                         — {{ inc.header.duration_secs|humanize_dur }} ago — {{ inc.header.component_name }}
                     </p>
                     {% match inc.latest_message %}
@@ -80,9 +80,9 @@
             <li class="text-sm">
                 <p class="font-medium text-body">{{ m.title }}</p>
                 <p class="text-muted">
-                    <time datetime="{{ m.starts_at|iso_ts }}" data-tz>{{ m.starts_at|human_ts }}</time>
+                    <time datetime="{{ m.starts_at|iso_ts }}" data-tz="exact">{{ m.starts_at|human_ts }}</time>
                     –
-                    <time datetime="{{ m.ends_at|iso_ts }}" data-tz>{{ m.ends_at|human_ts }}</time>
+                    <time datetime="{{ m.ends_at|iso_ts }}" data-tz="exact">{{ m.ends_at|human_ts }}</time>
                     {% if !m.affects.is_empty() %} · affects {{ m.affects }}{% endif %}
                 </p>
                 {% match m.description %}
@@ -100,12 +100,12 @@
                 <p class="font-medium text-body">{{ m.title }}</p>
                 <p class="text-muted">
                     Starts
-                    <time datetime="{{ m.starts_at|iso_ts }}" data-tz>{{ m.starts_at|human_ts }}</time>
+                    <time datetime="{{ m.starts_at|iso_ts }}" data-tz="exact">{{ m.starts_at|human_ts }}</time>
                     {% match m.starts_in_secs %}
                         {% when Some with (s) %} (in {{ s|humanize_dur }}){% when None %}
                     {% endmatch %}
                     — ends
-                    <time datetime="{{ m.ends_at|iso_ts }}" data-tz>{{ m.ends_at|human_ts }}</time>
+                    <time datetime="{{ m.ends_at|iso_ts }}" data-tz="exact">{{ m.ends_at|human_ts }}</time>
                     {% if !m.affects.is_empty() %} · affects {{ m.affects }}{% endif %}
                 </p>
                 {% match m.description %}

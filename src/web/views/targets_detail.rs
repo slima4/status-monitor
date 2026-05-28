@@ -64,7 +64,7 @@ pub struct DetailParams {
 
 #[derive(Clone)]
 pub struct ResultRow {
-    pub timestamp: String,
+    pub timestamp: chrono::DateTime<chrono::Utc>,
     pub status: &'static str,
     pub duration_ms: u32,
     pub response_code: String,
@@ -459,7 +459,7 @@ fn wider_status_window(from: DateTime<Utc>, to: DateTime<Utc>) -> Option<TimeRan
 impl From<CheckResult> for ResultRow {
     fn from(r: CheckResult) -> Self {
         Self {
-            timestamp: fmt_human(r.timestamp),
+            timestamp: r.timestamp,
             status: r.status.as_str(),
             duration_ms: r.duration_ms,
             response_code: r.response_code.map(|c| c.to_string()).unwrap_or_default(),
@@ -604,7 +604,7 @@ mod tests {
                 uptime_pct: "99.00".into(),
             }),
             results: Arc::from(vec![ResultRow {
-                timestamp: "2026-05-13T12:00:00Z".into(),
+                timestamp: "2026-05-13T12:00:00Z".parse().unwrap(),
                 status: "up",
                 duration_ms: 42,
                 response_code: "200".into(),

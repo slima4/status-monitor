@@ -37,11 +37,11 @@
           {% endif %}
         </td>
         <td class="px-3 py-2 align-top tabular-nums">
-          <time datetime="{{ inc.started_at|iso_ts }}" title="{{ inc.started_at|iso_ts }}">{{ inc.started_at|human_ts }}</time>
+          <time datetime="{{ inc.started_at|iso_ts }}" data-tz="exact">{{ inc.started_at|human_ts }}</time>
         </td>
         <td class="px-3 py-2 align-top tabular-nums">
           {% match inc.ended_at %}
-            {% when Some with (ts) %}<time datetime="{{ ts|iso_ts }}" title="{{ ts|iso_ts }}">{{ ts|human_ts }}</time>
+            {% when Some with (ts) %}<time datetime="{{ ts|iso_ts }}" data-tz="exact">{{ ts|human_ts }}</time>
             {% when None %}<span class="font-medium text-state-bad">—</span>
           {% endmatch %}
         </td>

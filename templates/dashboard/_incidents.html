@@ -24,7 +24,7 @@
         </div>
         {% if let Some(u) = inc.latest_update %}
         <div class="dashboard-incident-banner__update">
-          <span class="dashboard-subhead__mono">{{ u.time_label }}</span>
+          <time class="dashboard-subhead__mono" datetime="{{ u.posted_at|iso_ts }}" data-tz>{{ u.posted_at|human_ts }}</time>
           <span class="dashboard-incident-banner__phase">{{ u.phase_label }}</span>
           <span>{{ u.message }}</span>
         </div>

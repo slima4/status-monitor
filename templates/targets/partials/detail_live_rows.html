@@ -6,7 +6,7 @@
 {% else %}
 {% for r in results %}
 <tr class="border-b last:border-0">
-  <td class="px-3 py-2 font-mono text-xs text-muted">{{ r.timestamp }}</td>
+  <td class="px-3 py-2 font-mono text-xs text-muted"><time datetime="{{ r.timestamp|iso_ts }}" data-tz="exact">{{ r.timestamp|human_ts }}</time></td>
   <td class="px-3 py-2">
     {% if r.status == "up" %}<span class="status-badge status-badge--up">up</span>
     {% else if r.status == "down" %}<span class="status-badge status-badge--down">down</span>

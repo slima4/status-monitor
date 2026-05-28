@@ -9,8 +9,8 @@
       (via {{ provider }})
     </p>
     <dl class="flex flex-wrap gap-x-8 gap-y-1 pt-1 text-sm text-muted">
-      <div><dt class="inline">Joined:</dt> <dd class="inline text-body">{{ joined }}</dd></div>
-      <div><dt class="inline">Last sign-in:</dt> <dd class="inline text-body">{{ last_seen }}</dd></div>
+      <div><dt class="inline">Joined:</dt> <dd class="inline text-body">{% if let Some(ts) = joined %}<time datetime="{{ ts|iso_ts }}" data-tz="exact">{{ ts|human_ts }}</time>{% else %}—{% endif %}</dd></div>
+      <div><dt class="inline">Last sign-in:</dt> <dd class="inline text-body">{% if let Some(ts) = last_seen %}<time datetime="{{ ts|iso_ts }}" data-tz="exact">{{ ts|human_ts }}</time>{% else %}—{% endif %}</dd></div>
     </dl>
   </header>
 

@@ -17,9 +17,9 @@
   <tbody class="divide-y divide-[color:var(--theme-line)]">
     {% for s in sessions %}
     <tr>
-      <td class="px-4 py-2 align-top text-body tabular-nums">{{ s.created }}</td>
-      <td class="px-4 py-2 align-top text-body tabular-nums">{{ s.last_used }}</td>
-      <td class="px-4 py-2 align-top text-body tabular-nums">{{ s.expires }}</td>
+      <td class="px-4 py-2 align-top text-body tabular-nums"><time datetime="{{ s.created|iso_ts }}" data-tz="exact">{{ s.created|human_ts }}</time></td>
+      <td class="px-4 py-2 align-top text-body tabular-nums"><time datetime="{{ s.last_used|iso_ts }}" data-tz="exact">{{ s.last_used|human_ts }}</time></td>
+      <td class="px-4 py-2 align-top text-body tabular-nums"><time datetime="{{ s.expires|iso_ts }}" data-tz="exact">{{ s.expires|human_ts }}</time></td>
       <td class="px-4 py-2 align-top font-mono text-xs text-muted">{{ s.ip_short }}</td>
       <td class="px-4 py-2 text-right">
         {% if s.is_current %}

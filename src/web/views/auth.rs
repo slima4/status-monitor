@@ -236,7 +236,7 @@ pub mod settings {
     use crate::web::auth::{CurrentOrg, Session};
     use crate::web::error::WebResult;
     use crate::web::filters;
-    use crate::web::views::{fmt_human, resolve_org};
+    use crate::web::views::resolve_org;
 
     use super::{TAB_ACCOUNT, TAB_SETTINGS, TAB_STATUS_PAGE, TAB_USAGE};
 
@@ -256,9 +256,9 @@ pub mod settings {
         /// SHA-256 hex of the cookie. Surfaced into the revoke form URL —
         /// safe because the cookie's 256-bit pre-image can't be derived.
         pub id_hash: String,
-        pub created: String,
-        pub last_used: String,
-        pub expires: String,
+        pub created: chrono::DateTime<chrono::Utc>,
+        pub last_used: chrono::DateTime<chrono::Utc>,
+        pub expires: chrono::DateTime<chrono::Utc>,
         pub ip_short: String,
         pub is_current: bool,
     }
@@ -267,8 +267,8 @@ pub mod settings {
         pub id: String,
         pub name: String,
         pub prefix: String,
-        pub created: String,
-        pub last_used: String,
+        pub created: chrono::DateTime<chrono::Utc>,
+        pub last_used: Option<chrono::DateTime<chrono::Utc>>,
     }
 
     #[derive(Template, WebTemplate)]
@@ -310,8 +310,8 @@ pub mod settings {
         pub email: String,
         /// Identity provider label, e.g. `GitHub`, or `—` if none on file.
         pub provider: String,
-        pub joined: String,
-        pub last_seen: String,
+        pub joined: Option<chrono::DateTime<chrono::Utc>>,
+        pub last_seen: Option<chrono::DateTime<chrono::Utc>>,
         pub theme: String,
     }
 
@@ -329,13 +329,11 @@ pub mod settings {
         let pool = state.require_db()?;
         let (joined, provider, last_seen) = match account::account_facts(pool, user.id).await? {
             Some(f) => (
-                fmt_human(f.created_at),
+                Some(f.created_at),
                 provider_label(f.provider.as_deref()),
-                f.last_seen_at
-                    .map(fmt_human)
-                    .unwrap_or_else(|| "—".to_string()),
+                f.last_seen_at,
             ),
-            None => ("—".to_string(), "—".to_string(), "—".to_string()),
+            None => (None, "—".to_string(), None),
         };
         let theme = crate::storage::users::get_theme(pool, user.id)
             .await?
@@ -374,9 +372,9 @@ pub mod settings {
             .into_iter()
             .map(|r| SessionRow {
                 ip_short: short_hash(r.ip_hash.as_deref()),
-                created: fmt_human(r.created_at),
-                last_used: fmt_human(r.last_used_at),
-                expires: fmt_human(r.expires_at),
+                created: r.created_at,
+                last_used: r.last_used_at,
+                expires: r.expires_at,
                 is_current: Some(r.id_hash.as_str()) == current,
                 id_hash: r.id_hash,
             })
@@ -399,11 +397,8 @@ pub mod settings {
                 id: r.id.to_string(),
                 name: r.name,
                 prefix: r.token_prefix,
-                created: fmt_human(r.created_at),
-                last_used: r
-                    .last_used_at
-                    .map(fmt_human)
-                    .unwrap_or_else(|| "never".to_string()),
+                created: r.created_at,
+                last_used: r.last_used_at,
             })
             .collect();
         Ok(TokensPartial { tokens }.into_response())
@@ -725,8 +720,8 @@ pub mod settings {
                 active_tab: super::super::TAB_ACCOUNT,
                 email: "alice@example.com".into(),
                 provider: "GitHub".into(),
-                joined: "2026-02-14 09:00 UTC".into(),
-                last_seen: "2026-05-16 12:00 UTC".into(),
+                joined: Some("2026-02-14T09:00:00Z".parse().unwrap()),
+                last_seen: Some("2026-05-16T12:00:00Z".parse().unwrap()),
                 theme: "default".into(),
             }
             .render()
@@ -792,9 +787,9 @@ pub mod settings {
             let html = SessionsPartial {
                 sessions: vec![SessionRow {
                     id_hash: "abc".into(),
-                    created: "now".into(),
-                    last_used: "now".into(),
-                    expires: "soon".into(),
+                    created: "2026-05-16T12:00:00Z".parse().unwrap(),
+                    last_used: "2026-05-16T12:00:00Z".parse().unwrap(),
+                    expires: "2026-06-16T12:00:00Z".parse().unwrap(),
                     ip_short: "deadbeefcafe".into(),
                     is_current: true,
                 }],
@@ -812,8 +807,8 @@ pub mod settings {
                     id: "tok-1".into(),
                     name: "CI".into(),
                     prefix: "sm_live_aaaaaaaa".into(),
-                    created: "now".into(),
-                    last_used: "never".into(),
+                    created: "2026-05-16T12:00:00Z".parse().unwrap(),
+                    last_used: None,
                 }],
             }
             .render()
