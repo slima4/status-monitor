@@ -1540,6 +1540,15 @@
         background: var(--theme-surface-sunk);
         color: var(--theme-text-muted);
     }
+    .status-badge--pending {
+        background: var(--theme-surface-sunk);
+        color: var(--theme-text-muted);
+        animation: sm-pending-pulse 1.4s ease-in-out infinite;
+    }
+    @keyframes sm-pending-pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.5; }
+    }
     .status-badge--disabled {
         background: var(--theme-surface-sunk);
         color: var(--theme-text);

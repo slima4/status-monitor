@@ -79,58 +79,21 @@ export function timeBuckets(items, from, to, bucketCount, valueFn) {
     return buckets;
 }
 
-// Wire a chart instance to window resize + return its disposer.
-export function bindResize(chart) {
-    const handler = () => chart.resize();
-    window.addEventListener("resize", handler, { passive: true });
+// Re-derives a [now-span, now] window on each call so the chart tracks now
+// instead of freezing at the page-load window (which would exclude checks
+// that ran after load). Span and page size come from the initial endpoint.
+export function slidingWindow(endpoint) {
+    const u = new URL(endpoint, window.location.origin);
+    const f = u.searchParams.get("from");
+    const t = u.searchParams.get("to");
+    const spanMs = f && t ? +new Date(t) - +new Date(f) : 24 * 3600 * 1000;
+    const limit = u.searchParams.get("limit");
+    const base = u.origin + u.pathname;
     return () => {
-        window.removeEventListener("resize", handler);
-        chart.dispose();
+        const to = new Date();
+        const from = new Date(+to - spanMs);
+        const params = new URLSearchParams({ from: from.toISOString(), to: to.toISOString() });
+        if (limit) params.set("limit", limit);
+        return { url: `${base}?${params}`, from, to };
     };
-}
-
-// Fetch a chart payload and either render it (when items.length > 0) or
-// swap in a "no data" placeholder. Defers `echarts.init` until data is
-// confirmed so the empty-data path doesn't allocate a canvas it'll
-// immediately tear down — and the returned disposer only touches a
-// chart instance if one was ever created.
-export function mountChartFromFetch(el, endpoint, render, emptyMsg) {
-    let chart = null;
-    fetchJson(endpoint)
-        .then(json => {
-            const items = unwrapItems(json);
-            if (items.length === 0) {
-                renderEmptyChart(el, emptyMsg);
-                return;
-            }
-            chart = initChart(el);
-            render(chart, items);
-        })
-        .catch(err => console.warn(`${endpoint} chart load failed`, err));
-    const handler = () => chart && chart.resize();
-    window.addEventListener("resize", handler, { passive: true });
-    return () => {
-        window.removeEventListener("resize", handler);
-        if (chart) chart.dispose();
-    };
-}
-
-// Mounts a chart factory against every element matching `selector` on
-// initial load AND after any HTMX swap that introduces matching elements.
-// `factory(el)` must return a disposer fn; previous disposers fire on remount.
-export function wireChartElements(selector, factory) {
-    const disposers = new WeakMap();
-    const mount = (el) => {
-        if (!el) return;
-        const prev = disposers.get(el);
-        if (prev) prev();
-        const dispose = factory(el);
-        if (dispose) disposers.set(el, dispose);
-    };
-    const scan = (root) => root.querySelectorAll(selector).forEach(mount);
-    document.addEventListener("DOMContentLoaded", () => scan(document));
-    document.body.addEventListener("htmx:afterSettle", (e) => {
-        const target = e.detail?.target;
-        if (target?.querySelectorAll) scan(target);
-    });
 }

@@ -70,8 +70,11 @@
         // Keep relative labels current without re-fetching the page.
         setInterval(function () { decorate(document); }, 30000);
         if (document.body) {
-            document.body.addEventListener("htmx:afterSwap", function (e) {
-                decorate(e.detail && e.detail.target);
+            // Re-localize the whole document, not just the swap target: htmx
+            // OOB swaps land outside the primary target (e.g. the detail
+            // page's results rows), so a target-scoped pass would miss them.
+            document.body.addEventListener("htmx:afterSettle", function () {
+                decorate(document);
             });
         }
     }

@@ -24,3 +24,7 @@
     {% include "targets/partials/detail_live_rows.html" %}
   </tbody>
 </template>
+{# Badge + count live outside the swap region; OOB-update them here. #}
+<span id="detail-recent-count" hx-swap-oob="true" class="text-xs text-muted">latest {{ results.len() }}{% if results_has_more %}+{% endif %}</span>
+{% import "targets/partials/_status_badge.html" as sb %}
+{% call sb::show(last_status, enabled, true) %}{% endcall %}

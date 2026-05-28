@@ -40,7 +40,7 @@
   <section class="sticker-card">
     <header class="flex items-center justify-between border-b border-[color:var(--theme-line)] px-5 py-3">
       <h2 class="panel-label">recent results</h2>
-      <span class="text-xs text-muted">latest {{ results.len() }}{% if results_has_more %}+{% endif %}</span>
+      <span id="detail-recent-count" class="text-xs text-muted">latest {{ results.len() }}{% if results_has_more %}+{% endif %}</span>
     </header>
     <table class="min-w-full text-sm font-mono">
       <caption class="sr-only">Recent check results for {{ name }}</caption>
@@ -61,8 +61,7 @@
 
   {% include "targets/partials/detail_scripts.html" %}
   <script defer src="{{ "js/echarts.min.js"|asset }}"></script>
-  <script type="module" src="{{ "js/charts/latency.js"|asset }}"></script>
-  <script type="module" src="{{ "js/charts/breakdown.js"|asset }}"></script>
+  <script type="module" src="{{ "js/charts/detail_charts.js"|asset }}"></script>
 
   <details class="sticker-disclosure space-y-6">
     <summary>

@@ -1,11 +1,10 @@
-// Detail-page wiring: Run-check-now button, Enable/Disable toggle, and
-// the "checked Ns ago · next in Ns" ticker.
+// Detail-page wiring: Run-check-now button, Enable/Disable toggle, and a
+// one-shot nudge that resolves a just-created monitor's first status.
 //
-// The KPI cards + Recent results table live inside `#detail-live`, an
+// The KPI cards + Recent results table live inside `#detail-live-kpi`, an
 // htmx-polled partial that re-renders every 60s (or on demand via the
 // `sm:refresh-live` body event). We don't re-render those regions
-// client-side — the server template is the single source of truth, so
-// no row/badge/timestamp formatters here.
+// client-side — the server template is the single source of truth.
 
 (function () {
     function refreshLive() {
@@ -57,7 +56,7 @@
                     return;
                 }
                 window.smRenderCheckResult(resultEl, r.body || {}, {
-                    footnote: "Metrics update automatically; charts refresh on next page load.",
+                    footnote: "Metrics and charts update automatically.",
                 });
                 refreshLive();
             } finally {
@@ -110,71 +109,19 @@
         });
     }
 
-    // "checked Ns ago · next in Ns" ticker. Reads `data-last-at` from
-    // the ticker span on first render and `data-newest-ts` from the
-    // #detail-live partial after every htmx swap, so a freshly
-    // server-rendered timestamp resets the countdown without a page
-    // reload. When a check goes more than 2s past due we ask htmx to
-    // re-poll, throttled so a genuinely behind scheduler can't hammer.
-    const tickerEl = document.querySelector("[data-last-check]");
-    let lastAt = NaN;
-    let interval = NaN;
-    let lastRefreshAt = 0;
-    const REFRESH_MIN_GAP_MS = 5000;
-    // Auto-refresh fires only when the scheduler is meaningfully late,
-    // not the moment "due now" appears. The ticker UI already tells the
-    // user a check is pending; trigger an extra refresh only when delay
-    // becomes user-noticeable. Keeps steady-state polling to the
-    // configured every-60s cadence instead of 12+ extra refreshes/min
-    // on tabs where the scheduler is consistently a few seconds slow.
-    const OVERDUE_GRACE_S = 10;
-
-    function readTickerDataset() {
-        if (!tickerEl) return;
-        if (tickerEl.dataset.lastAt) {
-            const parsed = new Date(tickerEl.dataset.lastAt).getTime();
-            if (Number.isFinite(parsed)) lastAt = parsed;
-        }
-        const i = Number(tickerEl.dataset.intervalS) * 1000;
-        if (Number.isFinite(i) && i > 0) interval = i;
+    // A just-created monitor has no result until its first check lands.
+    // Poll until it does so "checking…" resolves without waiting for the
+    // 60s cadence, then stop — no steady-state extra requests.
+    const lastCheck = document.querySelector("[data-last-check]");
+    if (lastCheck && lastCheck.dataset.enabled === "true" && !lastCheck.dataset.lastAt) {
+        const nudge = setInterval(() => {
+            if (document.visibilityState === "visible") refreshLive();
+        }, 5000);
+        document.body.addEventListener("htmx:afterSettle", (ev) => {
+            const target = ev.detail && ev.detail.target;
+            if (target && target.id === "detail-live-kpi" && target.dataset.newestTs) {
+                clearInterval(nudge);
+            }
+        });
     }
-
-    function renderTicker() {
-        if (!tickerEl || !Number.isFinite(interval)) return;
-        const now = Date.now();
-        if (!Number.isFinite(lastAt)) {
-            tickerEl.textContent = `interval ${Math.round(interval / 1000)}s`;
-            return;
-        }
-        const ago = Math.max(0, Math.round((now - lastAt) / 1000));
-        const remaining = Math.round((lastAt + interval - now) / 1000);
-        const nextStr = remaining > 0 ? `next in ${remaining}s` : "due now";
-        tickerEl.textContent = `checked ${ago}s ago · ${nextStr}`;
-        if (remaining <= -OVERDUE_GRACE_S
-            && now - lastRefreshAt >= REFRESH_MIN_GAP_MS
-            && document.visibilityState === "visible") {
-            lastRefreshAt = now;
-            refreshLive();
-        }
-    }
-
-    if (tickerEl) {
-        readTickerDataset();
-        renderTicker();
-        setInterval(renderTicker, 1000);
-    }
-
-    // After htmx swaps #detail-live-kpi, pick up the new newest-timestamp
-    // so the ticker resets instead of clinging to the page-load value.
-    document.body.addEventListener("htmx:afterSettle", (ev) => {
-        const target = ev.detail && ev.detail.target;
-        if (!target || target.id !== "detail-live-kpi") return;
-        const newest = target.dataset.newestTs;
-        if (!newest) return;
-        const parsed = new Date(newest).getTime();
-        if (Number.isFinite(parsed)) {
-            lastAt = parsed;
-            renderTicker();
-        }
-    });
 })();

@@ -3,20 +3,11 @@
    kind, address, interval_s, enabled, tags, last_status, last_at_iso.
    Kept in sync because both views populate the same shape from
    `target_store.get` + the most-recent check row. #}
+{% import "targets/partials/_status_badge.html" as sb %}
 <a href="/targets" class="inline-block text-sm text-muted hover:text-body">← monitors</a>
 <div class="flex flex-wrap items-center gap-3">
   <h1 class="page-title"><span class="page-title__prefix">$</span>{{ name }}</h1>
-  {% if last_status == "up" %}
-    <span class="status-badge status-badge--up">up</span>
-  {% else if last_status == "down" %}
-    <span class="status-badge status-badge--down">down</span>
-  {% else if last_status == "degraded" %}
-    <span class="status-badge status-badge--degraded">degraded</span>
-  {% else if last_status == "error" %}
-    <span class="status-badge status-badge--error">error</span>
-  {% else %}
-    <span class="status-badge status-badge--none">no data</span>
-  {% endif %}
+  {% call sb::show(last_status, enabled, false) %}{% endcall %}
   {% if !enabled %}<span class="status-badge status-badge--disabled">disabled</span>{% endif %}
   <span class="ml-auto flex flex-wrap gap-2">
     <button type="button"
@@ -60,9 +51,8 @@
     <span class="font-mono">{{ address }}</span>
   {% endif %}
   <span class="ml-2" data-last-check
-        data-target-id="{{ id }}"
         data-last-at="{{ last_at_iso }}"
-        data-interval-s="{{ interval_s }}">interval {{ interval_s }}s</span>
+        data-enabled="{{ enabled }}">interval {{ interval_s }}s</span>
 </p>
 <div>
   {% for tag in tags %}

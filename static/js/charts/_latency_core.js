@@ -1,8 +1,4 @@
-// Pure chart core for the target-detail latency p50/p95/p99 line.
-// No DOM-side wiring beyond the (element, endpoint) signature — drop into
-// Svelte's onMount() unchanged when the migration happens.
-
-import { mountChartFromFetch, quantile, timeBuckets } from "./_init.js";
+import { quantile, timeBuckets } from "./_init.js";
 
 const BUCKETS = 60;
 const QUANTILES = [
@@ -11,7 +7,7 @@ const QUANTILES = [
     { name: "p99", q: 0.99, color: "#dc2626" },
 ];
 
-function buildOption(items, from, to) {
+export function buildLatencyOption(items, from, to) {
     const buckets = timeBuckets(items, from, to, BUCKETS, r => r.duration_ms);
     const sortedBuckets = buckets.map(b => ({
         t: b.t,
@@ -41,26 +37,4 @@ function buildOption(items, from, to) {
         yAxis: { type: "value", name: "ms", axisLabel: { formatter: "{value}" } },
         series,
     };
-}
-
-function rangeFromEndpoint(endpoint) {
-    try {
-        const u = new URL(endpoint, window.location.origin);
-        const from = u.searchParams.get("from");
-        const to = u.searchParams.get("to");
-        if (from && to) return { from: new Date(from), to: new Date(to) };
-    } catch { /* fall through */ }
-    const to = new Date();
-    const from = new Date(+to - 24 * 3600 * 1000);
-    return { from, to };
-}
-
-export function initLatencyChart(el, endpoint) {
-    const { from, to } = rangeFromEndpoint(endpoint);
-    return mountChartFromFetch(
-        el,
-        endpoint,
-        (chart, items) => chart.setOption(buildOption(items, from, to), { notMerge: true }),
-        "No data in this range yet.",
-    );
 }

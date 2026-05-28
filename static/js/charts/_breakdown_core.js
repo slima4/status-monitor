@@ -1,5 +1,3 @@
-import { mountChartFromFetch, wireChartElements } from "./_init.js";
-
 const PHASES = [
     { key: "dns_ms", name: "DNS", color: "#a78bfa" },
     { key: "connect_ms", name: "Connect", color: "#60a5fa" },
@@ -14,7 +12,7 @@ function appPhase(r) {
     return Math.max(0, (r.duration_ms || 0) - sum);
 }
 
-function buildOption(items) {
+export function buildBreakdownOption(items) {
     const sorted = [...items].sort((a, b) => +new Date(a.timestamp) - +new Date(b.timestamp));
     const enriched = sorted.map(r => ({ ...r, app_ms: appPhase(r) }));
     const xs = sorted.map(r => new Date(r.timestamp).toISOString());
@@ -37,14 +35,3 @@ function buildOption(items) {
         series,
     };
 }
-
-function initBreakdownChart(el) {
-    return mountChartFromFetch(
-        el,
-        el.dataset.endpoint,
-        (chart, items) => chart.setOption(buildOption(items), { notMerge: true }),
-        "No data in this range yet.",
-    );
-}
-
-wireChartElements("#breakdown-chart[data-endpoint]", initBreakdownChart);

@@ -200,8 +200,7 @@ async fn target_detail_renders_charts_and_range_nav() {
     assert!(html.contains(r#"id="latency-chart""#));
     assert!(html.contains(r#"id="breakdown-chart""#));
     assert!(html.contains("/api/v1/targets/"));
-    assert!(html.contains("/static/js/charts/latency.js"));
-    assert!(html.contains("/static/js/charts/breakdown.js"));
+    assert!(html.contains("/static/js/charts/detail_charts.js"));
 }
 
 #[tokio::test]
