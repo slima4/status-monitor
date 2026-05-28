@@ -8,7 +8,7 @@
       <span class="page-title__prefix">$</span>{% if form.mode == "create" %}new monitor{% else %}edit {{ form.name }}{% endif %}
     </h1>
     <p class="text-sm text-muted">
-      Pick what you want to watch and we'll check it on your schedule.
+      Pick what you want to watch and we’ll check it on your schedule.
     </p>
   </header>
 
@@ -61,9 +61,9 @@
         <span class="text-xs text-muted">URL</span>
         <input name="http_url" type="url" value="{{ form.http.url }}"
                placeholder="https://example.com/healthz"
-               class="mt-1 w-full field font-mono">
+               autocomplete="off" spellcheck="false" class="mt-1 w-full field font-mono">
         <span class="mt-1 block text-xs text-muted">
-          Some third-party APIs rate-limit by source IP (GitHub: 60 req/h unauthenticated, 5 000 with a token).
+          Some third-party APIs rate-limit by source IP (GitHub: 60 req/h unauthenticated, 5&nbsp;000 with a token).
           For those, poll every 5+ min and supply the credential via the Bearer-token field in Advanced HTTP.
           A 429 / 503 with <code>Retry-After</code> renders as <em>degraded</em>, not <em>down</em>.
         </span>
@@ -71,7 +71,8 @@
       <label class="block">
         <span class="text-xs text-muted">Expected status</span>
         <input name="expected_status_input" type="text" value="{{ form.http.expected_status_input }}"
-               placeholder="200" class="mt-1 w-40 field font-mono">
+               placeholder="200" autocomplete="off" spellcheck="false"
+               class="mt-1 w-40 field font-mono">
         <span class="mt-1 block text-xs text-muted">
           One code (<code>200</code>), a range (<code>200-299</code>), or a list (<code>200, 201, 204</code>).
         </span>
@@ -93,7 +94,7 @@
         <label class="block flex-1 min-w-[14rem]">
           <span class="text-xs text-muted">Host</span>
           <input name="tcp_host" type="text" value="{{ form.tcp.host }}" placeholder="example.com"
-                 class="mt-1 w-full field font-mono">
+                 autocomplete="off" spellcheck="false" class="mt-1 w-full field font-mono">
         </label>
         <label class="block w-40">
           <span class="text-xs text-muted">Port</span>
@@ -129,7 +130,7 @@
           <span class="text-xs text-muted">Domain</span>
           <input name="dns_domain" type="text" value="{{ form.dns.domain }}"
                  placeholder="api.example.com"
-                 class="mt-1 w-full field font-mono">
+                 autocomplete="off" spellcheck="false" class="mt-1 w-full field font-mono">
         </label>
         <label class="block">
           <span class="text-xs text-muted">Record type</span>
@@ -151,14 +152,14 @@
         <span class="text-xs text-muted">Expected to contain (optional)</span>
         <input name="dns_expected_contains" type="text" value="{{ form.dns.expected_contains }}"
                placeholder="192.0.2.1"
-               class="mt-1 w-full field font-mono">
+               autocomplete="off" spellcheck="false" class="mt-1 w-full field font-mono">
       </label>
       <div class="flex flex-wrap gap-3">
         <label class="block flex-1 min-w-48">
           <span class="text-xs text-muted">Resolver (optional)</span>
           <input name="dns_resolver" type="text" value="{{ form.dns.resolver }}"
                  placeholder="1.1.1.1"
-                 class="mt-1 w-full field font-mono">
+                 autocomplete="off" spellcheck="false" class="mt-1 w-full field font-mono">
         </label>
         <label class="block w-40">
           <span class="text-xs text-muted">Timeout (ms)</span>
@@ -189,7 +190,7 @@
         <label class="block flex-1 min-w-[14rem]">
           <span class="text-xs text-muted">Host</span>
           <input name="tls_host" type="text" value="{{ form.tls_cert.host }}"
-                 placeholder="example.com" class="mt-1 w-full field font-mono">
+                 placeholder="example.com" autocomplete="off" spellcheck="false" class="mt-1 w-full field font-mono">
         </label>
         <label class="block w-32">
           <span class="text-xs text-muted">Port</span>
@@ -200,7 +201,7 @@
       <label class="block">
         <span class="text-xs text-muted">SNI (optional, defaults to host)</span>
         <input name="tls_server_name" type="text" value="{{ form.tls_cert.server_name }}"
-               placeholder="vhost.example.com" class="mt-1 w-full field font-mono">
+               placeholder="vhost.example.com" autocomplete="off" spellcheck="false" class="mt-1 w-full field font-mono">
       </label>
       <div class="grid grid-cols-3 gap-3">
         <label class="block">
@@ -239,7 +240,7 @@
       <label class="block">
         <span class="text-xs text-muted">Domain</span>
         <input name="domain_expiry_domain" type="text" value="{{ form.domain_expiry.domain }}"
-               placeholder="example.com" class="mt-1 w-full field font-mono">
+               placeholder="example.com" autocomplete="off" spellcheck="false" class="mt-1 w-full field font-mono">
       </label>
       <div class="grid grid-cols-3 gap-3">
         <label class="block">
@@ -269,11 +270,11 @@
     </fieldset>
 
     <fieldset class="space-y-3 sticker-card p-5">
-      <legend class="px-1 text-sm font-medium">Monitor</legend>
+      <legend class="px-1 text-sm font-medium">Name &amp; schedule</legend>
       <label class="block">
         <span class="text-xs text-muted">Name</span>
         <input name="name" type="text" required value="{{ form.name }}"
-               class="mt-1 w-full field">
+               autocomplete="off" class="mt-1 w-full field">
       </label>
       <div class="block">
         <label for="interval_s" class="text-xs text-muted">Check interval</label>
@@ -306,6 +307,10 @@
           services, 30&nbsp;min–1&nbsp;h for low-priority or many monitors.
         </p>
       </div>
+    </fieldset>
+
+    <fieldset class="space-y-3 sticker-card p-5">
+      <legend class="px-1 text-sm font-medium">Organize</legend>
       <div>
         <label class="inline-flex items-center gap-2">
           <input name="enabled" type="checkbox"{% if form.enabled %} checked{% endif %}>
@@ -322,8 +327,8 @@
             <button type="button" class="tag-chip__remove" aria-label="Remove tag">×</button>
           </span>
           {% endfor %}
-          <input type="text" data-tag-input class="tag-chip-input"
-                 placeholder="Add tag…" autocomplete="off">
+          <input type="text" data-tag-input aria-label="Add tag" spellcheck="false"
+                 class="tag-chip-input" placeholder="Add tag…" autocomplete="off">
           <ul data-tag-suggestions class="tag-suggestions hidden" role="listbox"></ul>
         </div>
       </div>
@@ -349,20 +354,22 @@
       </div>
     </fieldset>
 
-    <details class="sticker-disclosure space-y-6{% if form.check_type != "http" %} hidden{% endif %}"
-             data-variant="http-advanced">
-      <summary>
-        <span class="flex items-center gap-3">
-          <span class="sticker-disclosure__icon">⚙</span>
-          <span class="flex flex-col text-left">
-            <span class="text-sm font-semibold text-body">Advanced HTTP</span>
-            <span class="text-xs text-muted">Method, headers, body, auth, TLS</span>
-          </span>
-        </span>
-        <span class="sticker-disclosure__chevron">▾</span>
-      </summary>
-
-      <div class="sticker-disclosure__body space-y-4">
+    <fieldset class="space-y-2 sticker-card px-5 py-3{% if form.check_type != "http" %} hidden{% endif %}"
+              data-variant="http-advanced" data-collapsible>
+      <legend class="px-1">
+        <button type="button" data-collapse-toggle aria-expanded="false"
+                aria-controls="advanced-http-body" aria-describedby="advanced-http-hint"
+                class="inline-flex cursor-pointer items-center gap-1.5 border-0 bg-transparent p-0 text-sm font-medium text-body">
+          Advanced HTTP
+          <span data-collapse-chevron aria-hidden="true"
+                class="text-base text-muted transition-transform motion-reduce:transition-none">▾</span>
+        </button>
+      </legend>
+      <button type="button" data-collapse-toggle tabindex="-1" aria-hidden="true"
+              class="block w-full cursor-pointer border-0 bg-transparent p-0 text-left">
+        <span id="advanced-http-hint" data-collapse-hint class="text-xs text-muted">Method, headers, body, auth, TLS</span>
+      </button>
+      <div id="advanced-http-body" class="hidden space-y-4">
         <div class="grid grid-cols-2 gap-4 sm:grid-cols-3">
           <label class="block">
             <span class="text-xs text-muted">Method</span>
@@ -401,12 +408,12 @@
         <label class="block">
           <span class="text-xs text-muted">Expected body contains</span>
           <input name="http_expected_body_contains" type="text" value="{{ form.http.expected_body_contains }}"
-                 class="mt-1 w-full field">
+                 autocomplete="off" spellcheck="false" class="mt-1 w-full field">
         </label>
 
         <label class="block">
           <span class="text-xs text-muted">Request body</span>
-          <textarea name="http_body" rows="3" class="mt-1 w-full field font-mono">{{ form.http.body }}</textarea>
+          <textarea name="http_body" rows="3" autocomplete="off" spellcheck="false" class="mt-1 w-full field font-mono">{{ form.http.body }}</textarea>
         </label>
 
         <fieldset class="space-y-2 rounded-sm border border-[color:var(--theme-line)] p-3">
@@ -415,9 +422,11 @@
             {% for h in form.http.headers %}
             <div data-header-row class="flex flex-wrap items-center gap-2">
               <input type="text" name="http_header_key" value="{{ h.name }}"
-                     placeholder="Header name" class="flex-1 min-w-[10rem] field font-mono">
+                     placeholder="Header name" aria-label="Header name"
+                     autocomplete="off" spellcheck="false" class="flex-1 min-w-[10rem] field font-mono">
               <input type="text" name="http_header_value" value="{{ h.value }}"
-                     placeholder="Value" class="flex-[2] min-w-[14rem] field font-mono">
+                     placeholder="Value" aria-label="Header value"
+                     autocomplete="off" spellcheck="false" class="flex-[2] min-w-[14rem] field font-mono">
               <button type="button" data-header-remove
                       class="btn-ghost px-2 text-sm" aria-label="Remove header">×</button>
             </div>
@@ -438,9 +447,11 @@
           </label>
           <div class="grid grid-cols-2 gap-2">
             <input type="text" name="http_basic_user" placeholder="username"
+                   aria-label="Basic auth username" autocomplete="off" spellcheck="false"
                    value="{% if form.http.auth.has_basic %}***{% endif %}" disabled
                    class="field">
             <input type="password" name="http_basic_pass" placeholder="password"
+                   aria-label="Basic auth password" autocomplete="off"
                    value="{% if form.http.auth.has_basic %}***{% endif %}" disabled
                    class="field">
           </div>
@@ -456,11 +467,12 @@
             <span class="text-sm">{% if form.http.auth.has_bearer %}Replace token{% else %}Set token{% endif %}</span>
           </label>
           <input type="password" name="http_bearer_token" placeholder="token"
+                 aria-label="Bearer token" autocomplete="off"
                  value="{% if form.http.auth.has_bearer %}***{% endif %}" disabled
                  class="w-full field">
         </fieldset>
       </div>
-    </details>
+    </fieldset>
 
     <fieldset class="space-y-3 sticker-card p-5">
       <legend class="px-1 text-sm font-medium">Notifications</legend>
@@ -522,5 +534,6 @@
 <script defer src="{{ "js/ui/auth_field.js"|asset }}"></script>
 <script defer src="{{ "js/ui/header_rows.js"|asset }}"></script>
 <script defer src="{{ "js/ui/tag_chip_input.js"|asset }}"></script>
+<script defer src="{{ "js/ui/collapsible.js"|asset }}"></script>
 <script defer src="{{ "js/ui/check_form.js"|asset }}"></script>
 {% endblock %}
