@@ -1213,6 +1213,31 @@
         color: var(--theme-text-quiet);
     }
     .field::placeholder { color: var(--theme-text-quiet); }
+    /* Notch label rides the input's top border; bg masks the border, z-index
+       lifts it above positioned siblings (chip box / combobox). */
+    .field-outline { @apply relative block; }
+    .field-outline > .field-outline__label {
+        position: absolute;
+        top: 0;
+        left: 0.55rem;
+        transform: translateY(-50%);
+        padding: 0 0.3rem;
+        font-size: 0.75rem;
+        line-height: 1;
+        color: var(--theme-text-muted);
+        background: var(--theme-surface-elev);
+        pointer-events: none;
+        z-index: 1;
+    }
+    /* Combobox fills the wrapper so its notch spans the full top border. */
+    .field-outline > .sm-combobox { width: 100%; }
+    .field-outline .sm-combobox__trigger {
+        width: 100%;
+        height: auto;
+        padding: 0.5rem 0.75rem;
+        font-size: inherit;
+        line-height: 1.5;
+    }
     /* A native <select> uses the browser's own widget metrics and ignores
        part of .field's padding, so it renders shorter than a sibling
        <input>. appearance:none drops it onto the same box model (equal
@@ -2615,7 +2640,7 @@
         justify-content: space-between;
         height: 2rem;
         padding: 0 0.625rem;
-        border-radius: 2px;
+        border-radius: var(--radius-sm);
         border: 1px solid var(--theme-line);
         background: var(--theme-surface-elev);
         color: var(--theme-text);
