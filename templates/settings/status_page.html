@@ -87,19 +87,23 @@
       </label>
 
       <div class="space-y-1">
-        <label for="display-name" class="text-sm font-medium">Display name</label>
-        <input id="display-name" name="public_display_name" type="text" maxlength="80"
-               value="{% if let Some(v) = s.public_display_name %}{{ v }}{% endif %}"
-               placeholder="{{ s.display_name }}"
-               class="w-full field text-sm">
+        <label class="field-outline">
+          <span class="field-outline__label">Display name</span>
+          <input id="display-name" name="public_display_name" type="text" maxlength="80"
+                 value="{% if let Some(v) = s.public_display_name %}{{ v }}{% endif %}"
+                 placeholder="{{ s.display_name }}"
+                 class="w-full field text-sm">
+        </label>
         <p class="text-xs text-muted">Shown in the page header. Blank uses the org name.</p>
       </div>
 
       <div class="space-y-1">
-        <label for="about" class="text-sm font-medium">About text</label>
-        <textarea id="about" name="public_about" rows="3" maxlength="500"
-                  placeholder="Markdown supported (500 chars max)"
-                  class="w-full field text-sm font-mono">{% if let Some(v) = s.public_about %}{{ v }}{% endif %}</textarea>
+        <label class="field-outline">
+          <span class="field-outline__label">About text</span>
+          <textarea id="about" name="public_about" rows="3" maxlength="500"
+                    placeholder="Markdown supported (500 chars max)"
+                    class="w-full field text-sm font-mono">{% if let Some(v) = s.public_about %}{{ v }}{% endif %}</textarea>
+        </label>
         <p class="text-xs text-muted">
           Markdown is sanitised on save and on render — only basic formatting and links survive.
         </p>
@@ -118,8 +122,9 @@
       </div>
 
       <div class="space-y-1">
-        <label for="public-style" class="text-sm font-medium">Page style</label>
-        <select id="public-style" name="public_style" data-sm-combobox aria-label="Page style">
+        <div class="field-outline">
+          <span class="field-outline__label">Page style</span>
+          <select id="public-style" name="public_style" data-sm-combobox aria-label="Page style" class="w-full field">
           <option value="default"{% if s.public_style.as_str() == "default" %} selected{% endif %}>Default — CLI register</option>
           <option value="classic"{% if s.public_style.as_str() == "classic" %} selected{% endif %}>Classic — neutral SaaS</option>
           <option value="terminal"{% if s.public_style.as_str() == "terminal" %} selected{% endif %}>Terminal — CRT phosphor</option>
@@ -134,7 +139,8 @@
           <option value="cupcake"{% if s.public_style.as_str() == "cupcake" %} selected{% endif %}>Cupcake — pastel cream</option>
           <option value="cyberpunk"{% if s.public_style.as_str() == "cyberpunk" %} selected{% endif %}>Cyberpunk — neon yellow</option>
           <option value="synthwave"{% if s.public_style.as_str() == "synthwave" %} selected{% endif %}>Synthwave — retro neon</option>
-        </select>
+          </select>
+        </div>
         <p class="text-xs text-muted">Surface register for the public page.</p>
       </div>
 

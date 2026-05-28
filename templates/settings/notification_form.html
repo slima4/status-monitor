@@ -22,21 +22,21 @@
     <div id="form-errors" role="alert" aria-live="polite"
          class="hidden alert-card alert-card--error"></div>
 
-    <fieldset class="sticker-card space-y-3 p-5">
+    <fieldset class="sticker-card space-y-5 p-5">
       <legend class="px-1 text-sm font-medium">Basic</legend>
-      <label class="block">
-        <span class="text-xs text-muted">Name</span>
+      <label class="field-outline">
+        <span class="field-outline__label">Name</span>
         <input name="name" type="text" required maxlength="100" value="{{ form.name }}"
-               class="mt-1 w-full field">
+               class="w-full field">
       </label>
-      <label class="block">
-        <span class="text-xs text-muted">Type</span>
-        <select name="kind" data-kind data-sm-combobox aria-label="Type" class="mt-1 w-full field">
+      <div class="field-outline">
+        <span class="field-outline__label">Type</span>
+        <select name="kind" data-kind data-sm-combobox aria-label="Type" class="w-full field">
           <option value="slack"{% if form.kind == "slack" %} selected{% endif %}>Slack</option>
           <option value="webhook"{% if form.kind == "webhook" %} selected{% endif %}>Webhook</option>
           <option value="telegram"{% if form.kind == "telegram" %} selected{% endif %}>Telegram</option>
         </select>
-      </label>
+      </div>
       <div>
         <label class="inline-flex items-center gap-2">
           <input name="enabled" type="checkbox"{% if form.enabled %} checked{% endif %}>
@@ -46,55 +46,57 @@
       </div>
     </fieldset>
 
-    <fieldset class="sticker-card space-y-3 p-5" data-config>
+    <fieldset class="sticker-card space-y-5 p-5" data-config>
       <legend class="px-1 text-sm font-medium">Transport</legend>
 
       {% if form.mode != "create" %}
-      <label class="inline-flex items-center gap-2">
-        <input type="checkbox" data-replace-config>
-        <span class="text-sm">Replace transport config</span>
-      </label>
-      <p class="text-xs text-muted">
-        Secrets are never shown. Leave unchecked to edit only the name/type/status
-        and keep the stored secret. Check it to re-enter the full config.
-      </p>
+      <div>
+        <label class="inline-flex items-center gap-2">
+          <input type="checkbox" data-replace-config>
+          <span class="text-sm">Replace transport config</span>
+        </label>
+        <p class="mt-1 text-xs text-muted">
+          Secrets are never shown. Leave unchecked to edit only the name/type/status
+          and keep the stored secret. Check it to re-enter the full config.
+        </p>
+      </div>
       {% endif %}
 
       <div data-variant="slack"{% if form.kind != "slack" %} class="hidden"{% endif %}>
-        <label class="block">
-          <span class="text-xs text-muted">Slack incoming webhook URL</span>
+        <label class="field-outline">
+          <span class="field-outline__label">Slack incoming webhook URL</span>
           <input name="slack_webhook_url" type="url" value="{{ form.config.slack_webhook_url }}"
                  placeholder="https://hooks.slack.com/services/T000/B000/XXXX"
-                 class="mt-1 w-full field font-mono">
+                 class="w-full field font-mono">
         </label>
       </div>
 
-      <div data-variant="webhook" class="space-y-3{% if form.kind != "webhook" %} hidden{% endif %}">
-        <label class="block">
-          <span class="text-xs text-muted">Webhook URL</span>
+      <div data-variant="webhook" class="space-y-5{% if form.kind != "webhook" %} hidden{% endif %}">
+        <label class="field-outline">
+          <span class="field-outline__label">Webhook URL</span>
           <input name="webhook_url" type="url" value="{{ form.config.webhook_url }}"
                  placeholder="https://example.com/hooks/alerts"
-                 class="mt-1 w-full field font-mono">
+                 class="w-full field font-mono">
         </label>
-        <label class="block">
-          <span class="text-xs text-muted">Headers (JSON object)</span>
+        <label class="field-outline">
+          <span class="field-outline__label">Headers (JSON object)</span>
           <textarea name="webhook_headers" rows="3"
-                    class="mt-1 w-full field font-mono">{{ form.config.webhook_headers_json }}</textarea>
+                    class="w-full field font-mono">{{ form.config.webhook_headers_json }}</textarea>
         </label>
       </div>
 
-      <div data-variant="telegram" class="space-y-3{% if form.kind != "telegram" %} hidden{% endif %}">
-        <label class="block">
-          <span class="text-xs text-muted">Bot token</span>
+      <div data-variant="telegram" class="space-y-5{% if form.kind != "telegram" %} hidden{% endif %}">
+        <label class="field-outline">
+          <span class="field-outline__label">Bot token</span>
           <input name="telegram_bot_token" type="text" value="{{ form.config.telegram_bot_token }}"
                  placeholder="123456:ABC-DEF…"
-                 class="mt-1 w-full field font-mono">
+                 class="w-full field font-mono">
         </label>
-        <label class="block">
-          <span class="text-xs text-muted">Chat ID</span>
+        <label class="field-outline">
+          <span class="field-outline__label">Chat ID</span>
           <input name="telegram_chat_id" type="text" value="{{ form.config.telegram_chat_id }}"
                  placeholder="-1001234567890"
-                 class="mt-1 w-full field font-mono">
+                 class="w-full field font-mono">
         </label>
       </div>
     </fieldset>
