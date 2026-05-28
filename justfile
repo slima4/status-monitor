@@ -101,6 +101,16 @@ dev-login:
 seed-fixtures:
     bash scripts/seed-fixtures.sh
 
+# Seed two monitors for eyeballing the detail latency + breakdown charts:
+# `lat-demo` (dense 30d, phase-rich, latency ramp + p95/p99 spikes) and
+# `lat-demo-short` (~30min of data — the "new monitor, data < smallest range"
+# case). Switching range must re-scale the x-axis and reshape the series.
+# Idempotent: tagged rows wiped (PG + CH) before re-insert. Needs `just
+# dev-login` first, and a clean CH (`just down-clean && just up-app`) so the
+# rollup carries the per-phase columns.
+seed-latency-demo:
+    bash scripts/seed-latency-demo.sh
+
 # Reset the dev Postgres DB (keeps ClickHouse + the warm build cache).
 # Use after editing a migration — pre-launch policy edits migrations in
 # place, which trips sqlx's "migration N modified" checksum guard.
