@@ -2842,8 +2842,8 @@
     .monitors-group[open] .monitors-group__pips { display: none; }
     .monitors-group:not([open]) .monitors-group__head { border-bottom: 0; }
 
-    /* Fleet table grid. Fixed widths reserve room for every numeric
-       cell so 4-digit ms / 30d% readings don't jitter the layout. */
+    /* Fleet table grid. Fixed widths reserve room for the last-check and
+       30d% cells so their readings don't jitter the layout. */
     .monitors-table {
         display: grid;
         grid-template-columns:
@@ -2852,7 +2852,6 @@
             minmax(0, 1.1fr)
             3.75rem
             minmax(0, 0.55fr)
-            4.25rem
             6.5rem
             6rem
             3.5rem

@@ -1,4 +1,4 @@
-{# 10 cells; align with `.monitors-table grid-template-columns`. #}
+{# 9 cells; align with `.monitors-table grid-template-columns`. #}
 <div class="monitors-row"
      role="row"
      data-row-id="{{ row.id }}"
@@ -24,7 +24,6 @@
     </span>
     {% endfor %}
   </span>
-  <span class="monitors-row__num">{{ row.interval_label }}</span>
   <span class="monitors-row__last">
     <span class="monitors-row__num">{{ row.last_check_label }}</span>
   </span>

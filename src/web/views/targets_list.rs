@@ -54,7 +54,6 @@ pub struct MonitorRow {
     pub name: String,
     pub kind: &'static str,
     pub address: String,
-    pub interval_label: String,
     pub enabled: bool,
     pub tags: Vec<String>,
     pub group_name: Option<String>,
@@ -369,8 +368,6 @@ fn build_row(
     now: chrono::DateTime<Utc>,
 ) -> MonitorRow {
     let (kind, address) = describe_check(&t.check);
-    let interval_label =
-        humanize_duration(ChronoDuration::from_std(t.interval).unwrap_or_default());
     let class = match metrics {
         Some(m) if m.samples > 0 => status_class_for(m.last_status.as_str()),
         _ => "",
@@ -406,7 +403,6 @@ fn build_row(
         name: t.name.clone(),
         kind,
         address,
-        interval_label,
         enabled: t.enabled,
         tags: t.tags.clone(),
         group_name: t.group_name.clone(),
@@ -561,7 +557,6 @@ mod tests {
             name: name.into(),
             kind: "HTTP",
             address: "https://example.com".into(),
-            interval_label: "60s".into(),
             enabled,
             tags: vec![],
             group_name: group.map(str::to_owned),
