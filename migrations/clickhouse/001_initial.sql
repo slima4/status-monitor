@@ -41,6 +41,12 @@ AS SELECT
     toStartOfMinute(timestamp) AS minute,
     countState() AS total_checks,
     countIfState(status = 'up') AS up_checks,
+    -- Per-status counts so the day-strip can tell Degraded from Down and the
+    -- uptime/summary reads stay O(buckets) instead of scanning raw. up + the
+    -- three below sum to total_checks.
+    countIfState(status = 'down') AS down_checks,
+    countIfState(status = 'degraded') AS degraded_checks,
+    countIfState(status = 'error') AS error_checks,
     avgState(duration_ms) AS avg_duration_ms,
     quantilesState(0.5, 0.95, 0.99)(duration_ms) AS duration_quantiles,
     -- Per-phase means power the monitor-detail breakdown chart server-side
