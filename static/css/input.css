@@ -2837,9 +2837,6 @@
     .monitors-group__pip--down    { background: var(--sm-dashboard-dot-down); }
     .monitors-group__pip--error   { background: var(--sm-dashboard-dot-error); }
     .monitors-group__pip--paused  { opacity: 0.35; }
-    /* Pip strip summarises status only while collapsed; once open the
-       per-row dots carry it, so the strip would just be noise. */
-    .monitors-group[open] .monitors-group__pips { display: none; }
     .monitors-group:not([open]) .monitors-group__head { border-bottom: 0; }
 
     /* Fleet table grid. Fixed widths reserve room for the last-check and
