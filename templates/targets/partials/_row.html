@@ -27,11 +27,9 @@
   <span class="monitors-row__num">{{ row.interval_label }}</span>
   <span class="monitors-row__last">
     <span class="monitors-row__num">{{ row.last_check_label }}</span>
-    <span class="monitors-row__sub">{{ row.next_check_label }}</span>
   </span>
   <span class="monitors-row__uptime">
     <span class="monitors-row__uptime-val{% if row.status_class == "down" || row.status_class == "error" %} monitors-row__uptime-val--bad{% else if row.status_class == "degraded" %} monitors-row__uptime-val--warn{% endif %}">{{ row.uptime_30d_label }}</span>
-    <span class="monitors-row__sub">30 days</span>
   </span>
   <span>
     {% if let Some(owner) = row.owner %}

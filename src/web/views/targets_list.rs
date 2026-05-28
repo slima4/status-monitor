@@ -55,14 +55,12 @@ pub struct MonitorRow {
     pub kind: &'static str,
     pub address: String,
     pub interval_label: String,
-    pub interval_s: u64,
     pub enabled: bool,
     pub tags: Vec<String>,
     pub group_name: Option<String>,
     pub last_status: &'static str,
     pub status_class: &'static str,
     pub last_check_label: String,
-    pub next_check_label: String,
     pub uptime_30d_label: String,
     pub owner: Option<OwnerView>,
 }
@@ -386,12 +384,6 @@ fn build_row(
         .map(|then| relative_ago(now - then))
         .unwrap_or_else(|| "—".into());
 
-    let next_check_label = if t.enabled {
-        format!("next: {interval_label}")
-    } else {
-        "next: paused".into()
-    };
-
     let uptime_30d_label = match metrics {
         Some(m) if m.samples > 0 => {
             let pct = (m.up as f64 / m.samples as f64) * 100.0;
@@ -415,14 +407,12 @@ fn build_row(
         kind,
         address,
         interval_label,
-        interval_s: t.interval.as_secs(),
         enabled: t.enabled,
         tags: t.tags.clone(),
         group_name: t.group_name.clone(),
         last_status,
         status_class,
         last_check_label,
-        next_check_label,
         uptime_30d_label,
         owner,
     }
@@ -572,14 +562,12 @@ mod tests {
             kind: "HTTP",
             address: "https://example.com".into(),
             interval_label: "60s".into(),
-            interval_s: 60,
             enabled,
             tags: vec![],
             group_name: group.map(str::to_owned),
             last_status: status,
             status_class: status_class_for(status),
             last_check_label: "3s ago".into(),
-            next_check_label: "next: 60s".into(),
             uptime_30d_label: "99.94%".into(),
             owner: None,
         }
