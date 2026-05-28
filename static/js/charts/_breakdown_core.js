@@ -1,21 +1,21 @@
+import { timeXAxis } from "./_init.js";
+
 const PHASES = [
-    { key: "dns_ms", name: "DNS", color: "#a78bfa" },
-    { key: "connect_ms", name: "Connect", color: "#60a5fa" },
-    { key: "tls_ms", name: "TLS", color: "#34d399" },
-    { key: "ttfb_ms", name: "Server response", color: "#fbbf24" },
-    { key: "app_ms", name: "Processing", color: "#fb7185" },
+    { key: "dns", name: "DNS", color: "#a78bfa" },
+    { key: "connect", name: "Connect", color: "#60a5fa" },
+    { key: "tls", name: "TLS", color: "#34d399" },
+    { key: "ttfb", name: "Server response", color: "#fbbf24" },
+    { key: "app", name: "Processing", color: "#fb7185" },
 ];
 
-// API exposes dns/connect/tls/ttfb; remaining time = server processing.
-function appPhase(r) {
-    const sum = (r.dns_ms || 0) + (r.connect_ms || 0) + (r.tls_ms || 0) + (r.ttfb_ms || 0);
-    return Math.max(0, (r.duration_ms || 0) - sum);
+// Server-aggregated buckets carry mean per-phase timings plus the mean total
+// (`avg`). Processing = total − measured phases (≥ 0); for check kinds without
+// phase timing (tcp/dns) the phases are 0 so the whole band is "Processing".
+function appPhase(b) {
+    return Math.max(0, b.avg - (b.dns + b.connect + b.tls + b.ttfb));
 }
 
-export function buildBreakdownOption(items) {
-    const sorted = [...items].sort((a, b) => +new Date(a.timestamp) - +new Date(b.timestamp));
-    const enriched = sorted.map(r => ({ ...r, app_ms: appPhase(r) }));
-    const xs = sorted.map(r => new Date(r.timestamp).toISOString());
+export function buildBreakdownOption(buckets, from, to) {
     const series = PHASES.map(({ key, name, color }) => ({
         name,
         type: "line",
@@ -24,13 +24,14 @@ export function buildBreakdownOption(items) {
         showSymbol: false,
         lineStyle: { width: 0 },
         itemStyle: { color },
-        data: enriched.map(r => r[key] || 0),
+        // [timestamp, value] pairs; `t` is unix-millis.
+        data: buckets.map(b => [b.t, key === "app" ? appPhase(b) : b[key]]),
     }));
     return {
         tooltip: { trigger: "axis" },
         legend: { bottom: 0 },
         grid: { left: 50, right: 20, top: 20, bottom: 40 },
-        xAxis: { type: "category", data: xs, boundaryGap: false, show: false },
+        xAxis: { ...timeXAxis(from, to), boundaryGap: false },
         yAxis: { type: "value", name: "ms" },
         series,
     };

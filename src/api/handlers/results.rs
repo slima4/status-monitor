@@ -8,6 +8,7 @@ use uuid::Uuid;
 use crate::api::ApiError;
 use crate::api::error::codes;
 use crate::api::page::{PageEnvelope, PageOfCheckResult, PageOfIncident};
+use crate::api::types::LatencySeries;
 use crate::app::AppState;
 use crate::error::{AppError, Result};
 use crate::storage::{IncidentListQuery, TimeRange, UptimeStats};
@@ -135,6 +136,74 @@ pub async fn list_results(
         limit as u32,
         offset as u32,
     )))
+}
+
+/// Bucket count the latency series aims for across any range. The server
+/// divides the span into ~this many slices (floored to the 60s rollup grain)
+/// so 1h and 30d both return a comparably dense series and switching ranges
+/// visibly re-scales the chart.
+const LATENCY_TARGET_BUCKETS: i64 = 60;
+
+/// Picks a bucket width (seconds) that splits `range` into roughly
+/// [`LATENCY_TARGET_BUCKETS`] slices, floored to a whole minute (the rollup
+/// grain) with a 60s minimum. 1h→60s, 24h→1440s, 7d→10080s, 30d→43200s.
+fn latency_bucket_seconds(range: TimeRange) -> u32 {
+    let span = (range.to - range.from).num_seconds().max(60);
+    let secs = (span / LATENCY_TARGET_BUCKETS / 60).max(1) * 60;
+    u32::try_from(secs).unwrap_or(u32::MAX)
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/targets/{id}/latency",
+    tag = "results",
+    summary = "Bucketed latency series for a target",
+    description = "Returns p50/p95/p99 and mean per-phase timings, pre-bucketed \
+                   server-side from the per-minute rollup into ~60 slices across \
+                   the range. Switching range re-scales the buckets; cost stays \
+                   O(buckets), not O(samples). Powers the monitor-detail charts.",
+    params(
+        ("id" = Uuid, Path, description = "Target id"),
+        ("from" = Option<DateTime<Utc>>, Query, description = "Inclusive lower bound (default: now-24h)"),
+        ("to" = Option<DateTime<Utc>>, Query, description = "Exclusive upper bound (default: now)"),
+    ),
+    responses(
+        (status = 200, body = LatencySeries, example = json!({
+            "bucket_seconds": 1440,
+            "buckets": [{
+                "t": 1747137600000_i64,
+                "p50": 120, "p95": 180, "p99": 240, "avg": 130,
+                "dns": 12, "connect": 20, "tls": 35, "ttfb": 60,
+                "samples": 24
+            }]
+        })),
+        (status = 400, description = "Bad time range", body = ApiError),
+        (status = 404, description = "Target not found", body = ApiError),
+    ),
+)]
+pub async fn latency(
+    State(state): State<AppState>,
+    CurrentOrg(org): CurrentOrg,
+    Path(id): Path<Uuid>,
+    Query(q): Query<RangeQuery>,
+) -> Result<Json<LatencySeries>> {
+    let range = q.resolve()?;
+    let bucket_seconds = latency_bucket_seconds(range);
+    // Org-scoped `get` rides alongside the (also org-scoped) rollup read so a
+    // foreign/unknown id still 404s without a serial round-trip.
+    let (target, buckets) = tokio::try_join!(
+        state.target_store.get(org, id),
+        state
+            .results_store
+            .latency_buckets(org, id, range, bucket_seconds),
+    )?;
+    if target.is_none() {
+        return Err(target_not_found());
+    }
+    Ok(Json(LatencySeries {
+        buckets,
+        bucket_seconds,
+    }))
 }
 
 #[utoipa::path(
@@ -307,6 +376,26 @@ mod tests {
         let range = resolve_range(Some(from), Some(to)).expect("boundary must pass");
         assert_eq!(range.from, from);
         assert_eq!(range.to, to);
+    }
+
+    #[test]
+    fn latency_bucket_seconds_scales_with_range() {
+        let span = |d: Duration| {
+            let to = ts(2026, 5, 1);
+            latency_bucket_seconds(TimeRange { from: to - d, to })
+        };
+        assert_eq!(span(Duration::try_hours(1).unwrap()), 60);
+        assert_eq!(span(Duration::try_hours(24).unwrap()), 1440);
+        assert_eq!(span(Duration::try_days(7).unwrap()), 10080);
+        assert_eq!(span(Duration::try_days(30).unwrap()), 43200);
+    }
+
+    #[test]
+    fn latency_bucket_seconds_floors_to_one_minute() {
+        // A sub-hour span must never produce a bucket below the 60s rollup grain.
+        let to = ts(2026, 5, 1);
+        let from = to - Duration::try_minutes(10).unwrap();
+        assert_eq!(latency_bucket_seconds(TimeRange { from, to }), 60);
     }
 
     #[test]

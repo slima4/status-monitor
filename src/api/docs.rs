@@ -10,8 +10,8 @@ use crate::api::page::PageEnvelope;
 use crate::api::public_error::{PublicApiError, PublicApiErrorBody};
 use crate::api::types::{
     BulkAction, BulkActionFailure, BulkActionRequest, BulkActionResponse, DashboardSummary,
-    Last24hSummary, StatusBreakdown, SystemSummary, TagCount, TargetsSummary, TestRequest,
-    TestResponse,
+    Last24hSummary, LatencyBucket, LatencySeries, StatusBreakdown, SystemSummary, TagCount,
+    TargetsSummary, TestRequest, TestResponse,
 };
 use crate::domain::Role;
 use crate::domain::{
@@ -50,6 +50,7 @@ use crate::storage::UptimeStats;
         handlers::targets::test_check,
         handlers::targets::check_now,
         handlers::results::list_results,
+        handlers::results::latency,
         handlers::results::uptime,
         handlers::results::list_incidents,
         handlers::tags::list_tags,
@@ -115,6 +116,8 @@ use crate::storage::UptimeStats;
             CheckResult,
             CheckStatus,
             UptimeStats,
+            LatencyBucket,
+            LatencySeries,
             Incident,
             AlertBinding,
             TargetAlerts,

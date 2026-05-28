@@ -43,6 +43,14 @@ AS SELECT
     countIfState(status = 'up') AS up_checks,
     avgState(duration_ms) AS avg_duration_ms,
     quantilesState(0.5, 0.95, 0.99)(duration_ms) AS duration_quantiles,
+    -- Per-phase means power the monitor-detail breakdown chart server-side
+    -- (O(buckets), no raw-row pull). Phases are Nullable: avgState skips
+    -- NULLs, so non-HTTP checks (tcp/dns) merge to NaN — finalised to 0 in
+    -- the query layer.
+    avgState(dns_ms) AS avg_dns_ms,
+    avgState(connect_ms) AS avg_connect_ms,
+    avgState(tls_ms) AS avg_tls_ms,
+    avgState(ttfb_ms) AS avg_ttfb_ms,
     argMaxState(status, timestamp) AS last_status_state
 FROM check_results
 GROUP BY org_id, target_id, minute;

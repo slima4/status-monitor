@@ -39,44 +39,33 @@ export async function fetchJson(url) {
     return res.json();
 }
 
-// Page handlers return either `{items, total, ...}` (paged) or a bare array
-// (legacy). Normalise both so chart code can stay agnostic.
-export function unwrapItems(json) {
-    return Array.isArray(json) ? json : (json?.items ?? []);
+// Range-aware x-axis tick formatter for a `type:"time"` axis. Granularity
+// follows the window so a 24h chart shows clock time, a multi-day chart
+// shows the date — the labels issue #29 asked for. Renders in the browser's
+// local timezone, matching the rest of the UI (localtime.js).
+const DAY_MS = 86400000;
+export function timeAxisFormatter(from, to) {
+    const span = +to - +from;
+    const p = (n) => String(n).padStart(2, "0");
+    return (value) => {
+        const d = new Date(value);
+        if (span <= DAY_MS) return `${p(d.getHours())}:${p(d.getMinutes())}`;
+        if (span <= 7 * DAY_MS) return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:00`;
+        return `${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+    };
 }
 
-// Returns numeric quantile from a sorted ascending array. `q` in [0, 1].
-export function quantile(sorted, q) {
-    if (sorted.length === 0) return 0;
-    const pos = (sorted.length - 1) * q;
-    const lo = Math.floor(pos);
-    const hi = Math.ceil(pos);
-    if (lo === hi) return sorted[lo];
-    return sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - lo);
-}
-
-// Bin timestamps into N equal time buckets between [from, to). Returns
-// an array of { t, values } where `values` is the numeric samples in that
-// bucket; callers compute their own aggregate (mean / quantile / count).
-export function timeBuckets(items, from, to, bucketCount, valueFn) {
-    const fromMs = +from;
-    const toMs = +to;
-    const span = Math.max(1, toMs - fromMs);
-    const buckets = Array.from({ length: bucketCount }, (_, i) => ({
-        t: new Date(fromMs + (i + 0.5) * (span / bucketCount)),
-        values: [],
-    }));
-    for (const item of items) {
-        const ms = +new Date(item.timestamp);
-        if (ms < fromMs || ms >= toMs) continue;
-        const idx = Math.min(
-            bucketCount - 1,
-            Math.floor(((ms - fromMs) / span) * bucketCount),
-        );
-        const v = valueFn(item);
-        if (Number.isFinite(v)) buckets[idx].values.push(v);
-    }
-    return buckets;
+// Shared time x-axis pinned to [from, to] so the axis spans the selected
+// range even when data covers only part of it (a 30-min monitor on a 1h
+// range shows data in the matching slice, not stretched full-width). Both
+// detail charts render the same window, so they share one axis config.
+export function timeXAxis(from, to) {
+    return {
+        type: "time",
+        min: +from,
+        max: +to,
+        axisLabel: { formatter: timeAxisFormatter(from, to), hideOverlap: true },
+    };
 }
 
 // Re-derives a [now-span, now] window on each call so the chart tracks now

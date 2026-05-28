@@ -10,7 +10,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::api::types::{
-    DashboardMetrics, DashboardSparkBucket, FleetRibbonBucket, PriorPeriodSummary, StatusBreakdown,
+    DashboardMetrics, DashboardSparkBucket, FleetRibbonBucket, LatencyBucket, PriorPeriodSummary,
+    StatusBreakdown,
 };
 use crate::config::ClickhouseConfig;
 use crate::domain::{
@@ -810,6 +811,89 @@ impl ResultsStore for ClickhouseResultsStore {
                 avg_ms: r.avg_ms as f32,
             })
             .collect())
+    }
+
+    async fn latency_buckets(
+        &self,
+        org: OrgId,
+        target_id: Uuid,
+        range: TimeRange,
+        bucket_seconds: u32,
+    ) -> Result<Vec<LatencyBucket>> {
+        #[derive(Row, Deserialize)]
+        struct LatRow {
+            bucket_ts: u32,
+            // quantilesMerge(0.5, 0.95, 0.99) finalises to Array(Float64) of
+            // length 3, in the level order requested.
+            quantiles: Vec<f64>,
+            avg: f64,
+            dns: f64,
+            connect: f64,
+            tls: f64,
+            ttfb: f64,
+            samples: u64,
+        }
+        let from_s = u32::try_from(range.from.timestamp().max(0)).unwrap_or(0);
+        let to_s = u32::try_from(range.to.timestamp().max(0)).unwrap_or(u32::MAX);
+        // Source matview is per-minute; round up to a whole number of source
+        // rows so every output bucket spans an integer count of minutes.
+        let bucket = bucket_seconds.max(60).div_ceil(60) * 60;
+        let query = format!(
+            "SELECT \
+               toUInt32(toStartOfInterval(minute, INTERVAL {bucket} SECOND)) AS bucket_ts, \
+               quantilesMerge(0.5, 0.95, 0.99)(duration_quantiles) AS quantiles, \
+               avgMerge(avg_duration_ms) AS avg, \
+               ifNull(avgMerge(avg_dns_ms), 0) AS dns, \
+               ifNull(avgMerge(avg_connect_ms), 0) AS connect, \
+               ifNull(avgMerge(avg_tls_ms), 0) AS tls, \
+               ifNull(avgMerge(avg_ttfb_ms), 0) AS ttfb, \
+               countMerge(total_checks) AS samples \
+             FROM check_results_1m \
+             WHERE org_id = ? AND target_id = ? \
+             AND minute >= fromUnixTimestamp(?) \
+             AND minute < fromUnixTimestamp(?) \
+             GROUP BY bucket_ts \
+             ORDER BY bucket_ts"
+        );
+        let rows: Vec<LatRow> = self
+            .client
+            .query(&query)
+            .bind(org.0)
+            .bind(target_id)
+            .bind(from_s)
+            .bind(to_s)
+            .fetch_all::<LatRow>()
+            .await
+            .context("clickhouse latency_buckets")?;
+        // Phases are folded to 0 in SQL via ifNull, and every emitted bucket
+        // has >= 1 sample, so each merged mean is a finite non-negative float.
+        let ms = |v: f64| v.round().max(0.0) as u32;
+        let buckets: Vec<LatencyBucket> = rows
+            .into_iter()
+            .map(|r| {
+                let q = |i: usize| r.quantiles.get(i).copied().map(ms).unwrap_or(0);
+                LatencyBucket {
+                    t: i64::from(r.bucket_ts) * 1000,
+                    p50: q(0),
+                    p95: q(1),
+                    p99: q(2),
+                    avg: ms(r.avg),
+                    dns: ms(r.dns),
+                    connect: ms(r.connect),
+                    tls: ms(r.tls),
+                    ttfb: ms(r.ttfb),
+                    samples: r.samples,
+                }
+            })
+            .collect();
+        tracing::debug!(
+            org = %org.0,
+            target = %target_id,
+            bucket_seconds = bucket,
+            buckets = buckets.len(),
+            "latency_buckets served from rollup"
+        );
+        Ok(buckets)
     }
 
     async fn fleet_ribbon(

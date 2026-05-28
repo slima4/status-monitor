@@ -1,7 +1,7 @@
 // Both detail charts read the same results window, so they share one fetch
 // per refresh. Refresh fires when the live KPI region settles.
 
-import { initChart, renderEmptyChart, fetchJson, unwrapItems, slidingWindow } from "./_init.js";
+import { initChart, renderEmptyChart, fetchJson, slidingWindow } from "./_init.js";
 import { buildLatencyOption } from "./_latency_core.js";
 import { buildBreakdownOption } from "./_breakdown_core.js";
 
@@ -20,15 +20,15 @@ function start() {
 
     async function refresh() {
         const { url, from, to } = query();
-        let items;
+        let buckets;
         try {
-            items = unwrapItems(await fetchJson(url));
+            buckets = (await fetchJson(url)).buckets ?? [];
         } catch (err) {
             console.warn(`${url} chart load failed`, err);
             return;
         }
         for (const { el, build } of specs) {
-            if (items.length === 0) {
+            if (buckets.length === 0) {
                 const inst = instances.get(el);
                 if (inst) { inst.dispose(); instances.delete(el); }
                 renderEmptyChart(el, EMPTY);
@@ -36,7 +36,7 @@ function start() {
             }
             let inst = instances.get(el);
             if (!inst) { el.innerHTML = ""; inst = initChart(el); instances.set(el, inst); }
-            inst.setOption(build(items, from, to), { notMerge: true });
+            inst.setOption(build(buckets, from, to), { notMerge: true });
         }
     }
 

@@ -25,15 +25,15 @@
       <h2 class="panel-label">latency (p50/p95/p99)</h2>
       <div id="latency-chart"
            class="mt-4 h-64 w-full"
-           data-endpoint="/api/v1/targets/{{ id }}/results?from={{ from_iso|urlencode }}&to={{ to_iso|urlencode }}&limit=500"
+           data-endpoint="/api/v1/targets/{{ id }}/latency?from={{ from_iso|urlencode }}&to={{ to_iso|urlencode }}"
            aria-label="Latency p50/p95/p99 over time"></div>
     </div>
     <div class="sticker-card p-5">
       <h2 class="panel-label">latency breakdown</h2>
       <div id="breakdown-chart"
            class="mt-4 h-64 w-full"
-           data-endpoint="/api/v1/targets/{{ id }}/results?from={{ from_iso|urlencode }}&to={{ to_iso|urlencode }}&limit=200"
-           aria-label="Latency phase breakdown for the last 200 results"></div>
+           data-endpoint="/api/v1/targets/{{ id }}/latency?from={{ from_iso|urlencode }}&to={{ to_iso|urlencode }}"
+           aria-label="Mean latency phase breakdown over time"></div>
     </div>
   </section>
 

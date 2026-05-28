@@ -3,8 +3,8 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use crate::api::types::{
-    DashboardMetrics, DashboardSparkBucket, FleetRibbonBucket, PriorPeriodSummary, StatusBreakdown,
-    TagCount, TargetsSummary,
+    DashboardMetrics, DashboardSparkBucket, FleetRibbonBucket, LatencyBucket, PriorPeriodSummary,
+    StatusBreakdown, TagCount, TargetsSummary,
 };
 use crate::domain::{CheckResult, CheckStatus, Incident, NewTarget, OrgId, Target, TargetUpdate};
 use crate::error::Result;
@@ -211,6 +211,19 @@ pub trait ResultsStore: Send + Sync {
         from: chrono::DateTime<Utc>,
         to: chrono::DateTime<Utc>,
     ) -> Result<Vec<DashboardSparkBucket>>;
+    /// Bucketed latency for a single monitor: p50/p95/p99 + per-phase means
+    /// per `bucket_seconds` slice across `range`. Drives the monitor-detail
+    /// latency and breakdown charts. Implementations MUST read from the
+    /// `check_results_1m` rollup so a 30d window stays O(buckets) regardless
+    /// of sample rate. Buckets with no samples are omitted; the chart leaves
+    /// the gap unconnected.
+    async fn latency_buckets(
+        &self,
+        org: OrgId,
+        target_id: Uuid,
+        range: TimeRange,
+        bucket_seconds: u32,
+    ) -> Result<Vec<LatencyBucket>>;
     /// Fleet-wide uptime ribbon: one bucket per `bucket_seconds` slice
     /// across every monitor in `org`. Implementations MUST read from the
     /// `check_results_1m` rollup so the cost stays O(buckets) regardless

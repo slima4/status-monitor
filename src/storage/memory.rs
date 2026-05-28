@@ -4,8 +4,8 @@ use parking_lot::Mutex;
 use uuid::Uuid;
 
 use crate::api::types::{
-    DashboardMetrics, DashboardSparkBucket, FleetRibbonBucket, PriorPeriodSummary, StatusBreakdown,
-    TagCount, TargetsSummary,
+    DashboardMetrics, DashboardSparkBucket, FleetRibbonBucket, LatencyBucket, PriorPeriodSummary,
+    StatusBreakdown, TagCount, TargetsSummary,
 };
 use crate::domain::{
     CheckResult, CheckStatus, Incident, NewTarget, OrgId, Target, TargetUpdate, coalesce_incidents,
@@ -251,6 +251,73 @@ impl ResultsStore for InMemorySink {
             checks_up: up,
             avg_ms,
         })
+    }
+
+    async fn latency_buckets(
+        &self,
+        _org: OrgId,
+        target_id: Uuid,
+        range: TimeRange,
+        bucket_seconds: u32,
+    ) -> Result<Vec<LatencyBucket>> {
+        #[derive(Default)]
+        struct Acc {
+            durations: Vec<u32>,
+            total_sum: u64,
+            // (sum, count) per phase; count skips NULL samples to match the
+            // matview's `avgState(<nullable>)` semantics.
+            dns: (u64, u64),
+            connect: (u64, u64),
+            tls: (u64, u64),
+            ttfb: (u64, u64),
+        }
+        fn add(acc: &mut (u64, u64), v: Option<u16>) {
+            if let Some(v) = v {
+                acc.0 += u64::from(v);
+                acc.1 += 1;
+            }
+        }
+        let mean = |(sum, n): (u64, u64)| -> u32 {
+            sum.checked_div(n)
+                .map_or(0, |v| v.min(u32::MAX as u64) as u32)
+        };
+        // Round to a whole-minute grain exactly as the ClickHouse impl does,
+        // so the in-memory test backend buckets identically to production.
+        let bucket = i64::from(bucket_seconds.max(60).div_ceil(60) * 60);
+        let mut by_bucket: std::collections::BTreeMap<i64, Acc> = std::collections::BTreeMap::new();
+        let guard = self.results.lock();
+        for r in guard.iter() {
+            if r.target_id != target_id || r.timestamp < range.from || r.timestamp >= range.to {
+                continue;
+            }
+            let slot = (r.timestamp.timestamp() / bucket) * bucket;
+            let acc = by_bucket.entry(slot).or_default();
+            acc.durations.push(r.duration_ms);
+            acc.total_sum += u64::from(r.duration_ms);
+            add(&mut acc.dns, r.dns_ms);
+            add(&mut acc.connect, r.connect_ms);
+            add(&mut acc.tls, r.tls_ms);
+            add(&mut acc.ttfb, r.ttfb_ms);
+        }
+        Ok(by_bucket
+            .into_iter()
+            .map(|(bucket_ts, mut acc)| {
+                acc.durations.sort_unstable();
+                let samples = acc.durations.len() as u64;
+                LatencyBucket {
+                    t: bucket_ts * 1000,
+                    p50: percentile(&acc.durations, 0.50),
+                    p95: percentile(&acc.durations, 0.95),
+                    p99: percentile(&acc.durations, 0.99),
+                    avg: mean((acc.total_sum, samples)),
+                    dns: mean(acc.dns),
+                    connect: mean(acc.connect),
+                    tls: mean(acc.tls),
+                    ttfb: mean(acc.ttfb),
+                    samples,
+                }
+            })
+            .collect())
     }
 
     async fn fleet_ribbon(
@@ -718,5 +785,93 @@ impl crate::storage::admin::PublicStatusTargetSource for InMemoryTargetStore {
         hits.sort_by_key(|t| t.id);
         hits.truncate(limit);
         Ok(hits.into_iter().map(|t| (org, t)).collect())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::TimeZone;
+
+    fn up_result(
+        target: Uuid,
+        base: DateTime<Utc>,
+        offset_s: i64,
+        dur: u32,
+        dns: u16,
+    ) -> CheckResult {
+        CheckResult {
+            target_id: target,
+            org_id: Uuid::nil(),
+            timestamp: base + chrono::Duration::seconds(offset_s),
+            status: CheckStatus::Up,
+            duration_ms: dur,
+            dns_ms: Some(dns),
+            connect_ms: Some(10),
+            tls_ms: None, // exercises the avgState-skips-NULL path
+            ttfb_ms: Some(20),
+            response_code: Some(200),
+            response_size: None,
+            error: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn latency_buckets_aggregate_per_slice_and_skip_null_phases() {
+        let store = InMemorySink::new();
+        let t = Uuid::from_u128(1);
+        let base = Utc.with_ymd_and_hms(2026, 5, 1, 0, 0, 0).unwrap();
+        // Two samples in slice 0 (0s, 30s), one in slice 1 (60s).
+        store
+            .write_batch(&[
+                up_result(t, base, 0, 100, 10),
+                up_result(t, base, 30, 200, 30),
+                up_result(t, base, 60, 300, 50),
+            ])
+            .await
+            .unwrap();
+        let range = TimeRange {
+            from: base,
+            to: base + chrono::Duration::seconds(120),
+        };
+        let buckets = store
+            .latency_buckets(OrgId(Uuid::nil()), t, range, 60)
+            .await
+            .unwrap();
+
+        assert_eq!(buckets.len(), 2);
+        let b0 = &buckets[0];
+        assert_eq!(b0.t, base.timestamp() * 1000, "t is unix-millis");
+        assert_eq!(b0.samples, 2);
+        assert_eq!(b0.avg, 150); // (100+200)/2
+        assert_eq!(b0.dns, 20); // (10+30)/2
+        assert_eq!(b0.tls, 0); // every sample NULL → skipped, finalises to 0
+        assert_eq!(buckets[1].samples, 1);
+        assert_eq!(buckets[1].p50, 300);
+    }
+
+    #[tokio::test]
+    async fn latency_buckets_isolate_target_and_window() {
+        let store = InMemorySink::new();
+        let t = Uuid::from_u128(1);
+        let base = Utc.with_ymd_and_hms(2026, 5, 1, 0, 0, 0).unwrap();
+        store
+            .write_batch(&[
+                up_result(t, base, 0, 100, 10),
+                up_result(Uuid::from_u128(2), base, 0, 100, 10), // other target
+                up_result(t, base, -120, 100, 10),               // before window
+            ])
+            .await
+            .unwrap();
+        let range = TimeRange {
+            from: base,
+            to: base + chrono::Duration::seconds(60),
+        };
+        let buckets = store
+            .latency_buckets(OrgId(Uuid::nil()), t, range, 60)
+            .await
+            .unwrap();
+        assert_eq!(buckets.len(), 1);
+        assert_eq!(buckets[0].samples, 1);
     }
 }

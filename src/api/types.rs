@@ -155,6 +155,41 @@ pub struct DashboardSparkBucket {
     pub avg_ms: f32,
 }
 
+/// One time-bucket of a single monitor's latency, merged from the
+/// `check_results_1m` rollup. Powers both monitor-detail charts (p50/p95/p99
+/// line + phase-breakdown area). The server picks a bucket width so any range
+/// yields ~60 buckets — switching 1h↔30d actually re-scales the series, and
+/// the cost stays O(buckets) instead of pulling raw samples to the client.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct LatencyBucket {
+    /// Unix-milliseconds at the bucket's start (JS `new Date(t)`).
+    pub t: i64,
+    /// Median / 95th / 99th-percentile duration over the bucket, in ms.
+    pub p50: u32,
+    pub p95: u32,
+    pub p99: u32,
+    /// Mean total duration over the bucket, in ms. The breakdown chart
+    /// derives "processing" time as `avg − (dns+connect+tls+ttfb)`.
+    pub avg: u32,
+    /// Mean per-phase timings over the bucket, in ms. `0` for check kinds
+    /// that don't record the phase (tcp/dns/tls-cert/domain).
+    pub dns: u32,
+    pub connect: u32,
+    pub tls: u32,
+    pub ttfb: u32,
+    /// Samples in the bucket. `0` marks a gap the chart leaves unconnected.
+    pub samples: u64,
+}
+
+/// Bucketed latency series for one monitor over a range, plus the bucket
+/// width the server chose. Returned by `GET /targets/{id}/latency`.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct LatencySeries {
+    pub buckets: Vec<LatencyBucket>,
+    /// Bucket width in seconds (always a multiple of the 60s rollup grain).
+    pub bucket_seconds: u32,
+}
+
 /// Aggregate health for the period immediately before the selected range
 /// — drives the Δ-vs-prior hints on each KPI card. Same shape as the
 /// "current" totals so the view layer subtracts cleanly. `avg_ms = 0`
