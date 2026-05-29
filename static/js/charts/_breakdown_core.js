@@ -1,4 +1,4 @@
-import { timeXAxis } from "./_init.js";
+import { timeXAxis, msChartBase } from "./_init.js";
 
 const PHASES = [
     { key: "dns", name: "DNS lookup", color: "#a78bfa" },
@@ -27,12 +27,5 @@ export function buildBreakdownOption(buckets, from, to) {
         // [timestamp, value] pairs; `t` is unix-millis.
         data: buckets.map(b => [b.t, key === "app" ? appPhase(b) : b[key]]),
     }));
-    return {
-        tooltip: { trigger: "axis" },
-        legend: { bottom: 0 },
-        grid: { left: 50, right: 20, top: 20, bottom: 40 },
-        xAxis: { ...timeXAxis(from, to), boundaryGap: false },
-        yAxis: { type: "value", name: "ms" },
-        series,
-    };
+    return { ...msChartBase(), xAxis: { ...timeXAxis(from, to), boundaryGap: false }, series };
 }

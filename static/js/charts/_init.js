@@ -39,10 +39,10 @@ export async function fetchJson(url) {
     return res.json();
 }
 
-// Range-aware x-axis tick formatter for a `type:"time"` axis. Granularity
-// follows the window so a 24h chart shows clock time, a multi-day chart
-// shows the date — the labels issue #29 asked for. Renders in the browser's
-// local timezone, matching the rest of the UI (localtime.js).
+// Range-aware x-axis tick formatter for a `type:"time"` axis. ≤24h shows
+// clock time; multi-day shows the date, plus clock time on intra-day ticks
+// so a day-boundary tick reads "05-23" not "05-23 00:00". Renders in the
+// browser's local timezone, matching the rest of the UI (localtime.js).
 const DAY_MS = 86400000;
 export function timeAxisFormatter(from, to) {
     const span = +to - +from;
@@ -50,7 +50,7 @@ export function timeAxisFormatter(from, to) {
     return (value) => {
         const d = new Date(value);
         if (span <= DAY_MS) return `${p(d.getHours())}:${p(d.getMinutes())}`;
-        if (span <= 7 * DAY_MS) return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:00`;
+        if (span <= 7 * DAY_MS && (d.getHours() || d.getMinutes())) return `${p(d.getHours())}:${p(d.getMinutes())}`;
         return `${p(d.getMonth() + 1)}-${p(d.getDate())}`;
     };
 }
@@ -65,6 +65,18 @@ export function timeXAxis(from, to) {
         min: +from,
         max: +to,
         axisLabel: { formatter: timeAxisFormatter(from, to), hideOverlap: true },
+    };
+}
+
+// Shared config for the two ms-valued detail-page charts: unit-suffixed
+// tooltip/y-axis and grid padding sized for the "{value} ms" labels. Callers
+// spread this and add their own xAxis/series.
+export function msChartBase() {
+    return {
+        tooltip: { trigger: "axis", valueFormatter: v => v == null ? "—" : `${v} ms` },
+        legend: { bottom: 0 },
+        grid: { left: 60, right: 20, top: 20, bottom: 40 },
+        yAxis: { type: "value", axisLabel: { formatter: "{value} ms" } },
     };
 }
 
