@@ -28,6 +28,7 @@ All responses use `Content-Type: application/json; charset=utf-8`.
 | `PATCH` | `/api/v1/targets/{id}` | update name, check spec, interval, enabled, tags |
 | `DELETE` | `/api/v1/targets/{id}` | delete a target |
 | `GET` | `/api/v1/targets/{id}/results` | recent check results (`from`, `to`, `limit`, `offset`) — paginated |
+| `GET` | `/api/v1/targets/{id}/latency` | bucketed latency series (`from`, `to`) — server-side quantiles + per-phase means |
 | `GET` | `/api/v1/targets/{id}/uptime` | uptime summary over a range |
 | `GET` | `/api/v1/targets/{id}/incidents` | coalesced incident periods (`from`, `to`, `ongoing_only`) — paginated |
 | `GET` | `/api/v1/tags` | tag inventory with target counts (`q` prefix) — paginated |
@@ -327,6 +328,31 @@ Every list endpoint returns:
 
 - `from` / `to` default to the last 24 h; `to` must be strictly greater than `from` (400 `BAD_TIME_RANGE` otherwise).
 - Returns a `PageEnvelope` of `CheckResult` ordered by `timestamp DESC`.
+
+## Latency series
+
+`GET /api/v1/targets/{id}/latency?from=…&to=…`
+
+Pre-bucketed quantiles and per-phase means read straight from the per-minute rollup — powers the monitor-detail latency line and phase-breakdown area charts. The server divides the range into ~60 slices (floored to the 60-second rollup grain), so any range returns a comparably dense series and the cost stays O(buckets), not O(samples). Switching range re-scales the buckets.
+
+- `from` / `to` default to the last 24 h; `to` must be strictly greater than `from` (400 `BAD_TIME_RANGE`).
+
+```jsonc
+{
+  "bucket_seconds": 1440,
+  "buckets": [
+    {
+      "t": 1747137600000,      // unix-ms at bucket start (JS new Date(t))
+      "p50": 120, "p95": 180, "p99": 240,
+      "avg": 130,              // mean total; breakdown chart derives "processing" = avg − (dns+connect+tls+ttfb)
+      "dns": 12, "connect": 20, "tls": 35, "ttfb": 60,  // mean per-phase ms; 0 for kinds that skip the phase
+      "samples": 24            // 0 marks a gap the chart leaves unconnected
+    }
+  ]
+}
+```
+
+`bucket_seconds` is always a multiple of 60 (1h→60, 24h→1440, 7d→10080, 30d→43200).
 
 ## Uptime query
 
