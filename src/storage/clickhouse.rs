@@ -289,9 +289,12 @@ impl ResultSink for ClickhouseResultSink {
             .with_max_elapsed_time(Some(Duration::from_secs(30)))
             .build();
 
-        // Full re-send on each retry is intentional: ClickHouse `insert_deduplicate` /
-        // ReplicatedMergeTree dedup handle partial writes server-side. Don't checkpoint
-        // mid-batch here — that races against the server's own dedup window.
+        // Full re-send on each retry is intentional and safe ONLY because the
+        // `check_results` table sets `non_replicated_deduplication_window` (see
+        // 001_initial.sql): a commit-then-lost-ack retry re-sends the identical
+        // block, which the server drops by hash instead of double-counting.
+        // Don't checkpoint mid-batch here — a partial re-send changes the block
+        // and defeats that dedup.
         let op = || async {
             self.write_once(&rows)
                 .await
@@ -1005,7 +1008,75 @@ impl ResultsStore for ClickhouseResultsStore {
 
 #[cfg(test)]
 mod tests {
-    use super::split_statements;
+    use super::{CheckStatus, MIGRATIONS, split_statements};
+
+    /// Parse the single `Enum8('name' = N, ...)` definition out of the embedded
+    /// migration into (name, value) pairs.
+    fn check_results_enum8() -> Vec<(String, i8)> {
+        let sql = MIGRATIONS[0].1;
+        let open = sql
+            .find("Enum8(")
+            .expect("check_results has an Enum8 column")
+            + "Enum8(".len();
+        let close = open + sql[open..].find(')').expect("Enum8 close paren");
+        sql[open..close]
+            .split(',')
+            .map(|kv| {
+                let (name, val) = kv.split_once('=').expect("Enum8 entry is `name = value`");
+                (
+                    name.trim().trim_matches('\'').to_string(),
+                    val.trim().parse::<i8>().expect("Enum8 value is an int"),
+                )
+            })
+            .collect()
+    }
+
+    /// Cross-store contract: every `CheckStatus` must exist in the
+    /// `check_results` Enum8 with a matching name+value. ClickHouse `Enum8` is a
+    /// closed domain — inserting an undefined key rejects the whole block, so a
+    /// new variant without a migration silently dark-holes all ingest.
+    #[test]
+    fn check_status_matches_clickhouse_enum8() {
+        // Exhaustive on purpose: a new `CheckStatus` variant fails to compile
+        // here, forcing this list AND the migration Enum8 to be updated together.
+        const ALL: &[CheckStatus] = &[
+            CheckStatus::Up,
+            CheckStatus::Down,
+            CheckStatus::Degraded,
+            CheckStatus::Error,
+        ];
+        // Uncalled, but its body is still exhaustiveness-checked at compile
+        // time — a new variant turns this into a hard E0004, the forcing signal.
+        #[allow(dead_code)]
+        fn exhaustiveness_guard(s: CheckStatus) {
+            match s {
+                CheckStatus::Up
+                | CheckStatus::Down
+                | CheckStatus::Degraded
+                | CheckStatus::Error => {}
+            }
+        }
+
+        let pairs = check_results_enum8();
+        assert_eq!(
+            pairs.len(),
+            ALL.len(),
+            "check_results Enum8 has {} keys but CheckStatus has {} variants: {pairs:?}",
+            pairs.len(),
+            ALL.len()
+        );
+        for &s in ALL {
+            assert!(
+                pairs
+                    .iter()
+                    .any(|(name, val)| name == s.as_str() && *val == s.as_enum8()),
+                "CheckStatus::{s:?} ({}={}) is not in the check_results Enum8 {pairs:?} — \
+                 adding a variant requires a ClickHouse migration",
+                s.as_str(),
+                s.as_enum8()
+            );
+        }
+    }
 
     #[test]
     fn split_strips_line_comments_before_splitting() {

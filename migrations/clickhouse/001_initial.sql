@@ -27,7 +27,13 @@ ORDER BY (org_id, target_id, timestamp)
 -- The Privacy Policy and `tests/retention_test.rs` pin the same number;
 -- changing it here must update both.
 TTL toDateTime(timestamp) + INTERVAL 90 DAY
-SETTINGS index_granularity = 8192;
+-- `non_replicated_deduplication_window`: this is a plain (non-Replicated)
+-- MergeTree, where insert dedup is OFF unless this window is set. The batcher
+-- re-sends the identical block on retry (`ClickhouseResultSink::write_batch`);
+-- without dedup a commit-then-lost-ack would double-count every row. The window
+-- (last N block hashes) lets the server drop the duplicate re-send. Sized well
+-- past the ~30 s retry budget's worth of sequential batches.
+SETTINGS index_granularity = 8192, non_replicated_deduplication_window = 1000;
 
 -- Per-minute pre-aggregation; dashboard rollup merges from here so a
 -- 90d / 1k-monitor scan stays O(minutes), not O(raw checks).
