@@ -1,9 +1,10 @@
 -- ClickHouse v1 schema. Multitenant from the start: `org_id` leads the
 -- ORDER BY on every tenant table so per-org queries hit the sparse primary
--- index. No DROP statements anywhere — every CREATE is `IF NOT EXISTS`, so a
--- re-run on a populated database is a no-op and a process crash between the
--- last CREATE and the `schema_migrations` INSERT can't destroy data on the
--- next boot.
+-- index — and stays OUT of the PARTITION BY, since (day, org) would explode
+-- into millions of partitions at scale. No DROP statements anywhere — every
+-- CREATE is `IF NOT EXISTS`, so a re-run on a populated database is a no-op
+-- and a crash between the last CREATE and the `schema_migrations` INSERT
+-- can't destroy data on the next boot.
 
 CREATE TABLE IF NOT EXISTS check_results (
     org_id           UUID,
@@ -19,7 +20,7 @@ CREATE TABLE IF NOT EXISTS check_results (
     response_size    Nullable(UInt32),
     error            LowCardinality(Nullable(String))
 ) ENGINE = MergeTree
-PARTITION BY (toYYYYMMDD(timestamp), org_id)
+PARTITION BY toYYYYMMDD(timestamp)
 ORDER BY (org_id, target_id, timestamp)
 -- 90-day retention matches the public status page's daily strip
 -- (`history_days` config) and the per-target operator drilldown window.
@@ -32,7 +33,7 @@ SETTINGS index_granularity = 8192;
 -- 90d / 1k-monitor scan stays O(minutes), not O(raw checks).
 CREATE MATERIALIZED VIEW IF NOT EXISTS check_results_1m
 ENGINE = AggregatingMergeTree
-PARTITION BY (toYYYYMMDD(minute), org_id)
+PARTITION BY toYYYYMMDD(minute)
 ORDER BY (org_id, target_id, minute)
 TTL toDateTime(minute) + INTERVAL 90 DAY
 AS SELECT
