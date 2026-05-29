@@ -1,0 +1,74 @@
+name: 🐛 Bug Report
+description: Something is broken or behaving wrong
+title: "[Bug]: "
+labels: ["bug", "needs triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for catching this! 🔍 A good bug report = a fast fix. Fill what you can — even a screenshot helps.
+
+        > [!CAUTION]
+        > **Security issue?** Don't file it here. Open a [private advisory](https://github.com/slima4/status-monitor/security/advisories/new) or email `slima4.u8@gmail.com` with subject `[SECURITY]`.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What went wrong, in one or two sentences.
+      placeholder: The status bar shows empty even though the monitor is up and running.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: How do we make it happen again?
+      placeholder: |
+        1. Create an HTTP monitor for example.com
+        2. Open the monitor detail page
+        3. Look at the "today" status bar — it's blank
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected vs actual
+      description: What should have happened instead? Paste exact error text / logs verbatim if any.
+      placeholder: |
+        Expected: status bar filled with green check ticks.
+        Actual: bar is empty.
+    validations:
+      required: false
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which area?
+      description: Best guess is fine — we re-triage anyway.
+      options:
+        - Not sure
+        - Web UI (general pages, layout, styling)
+        - Monitors & scheduling (checks, intervals, timing)
+        - Public status pages
+        - Dashboard, graphs & metrics
+        - Notifications & alerts (email, Slack, channels)
+        - Incidents & maintenance windows
+        - Accounts, teams & login (signup, OAuth, orgs, invites)
+        - Account limits & quotas
+        - API & tokens (HTTP / JSON API, API keys)
+        - Marketing site & docs (landing, blog)
+        - Performance & reliability (slow, errors, downtime)
+        - Other
+  - type: input
+    id: browser
+    attributes:
+      label: Browser / device
+      description: Helps a lot for visual bugs. Skip if it's not a display issue.
+      placeholder: Chrome 124 on macOS / Safari on iPhone
+    validations:
+      required: false
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you submit
+      options:
+        - label: I searched existing issues and this isn't a duplicate
+        - label: This is not a security vulnerability
+          required: true

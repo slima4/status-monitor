@@ -1,0 +1,49 @@
+name: issue-template-guard
+
+# Validates the GitHub issue forms against state that lives elsewhere —
+# repo labels, the area->label map, this repo's own URLs, and GitHub's
+# issue-form schema. A generic YAML lint passes broken forms; these are the
+# cross-boundary contracts that only fail at render time or silently in
+# triage. Implemented as plain python + gh (no third-party action to trust).
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/ISSUE_TEMPLATE/**"
+      - ".github/issue-area-labels.yml"
+      - ".github/scripts/validate-issue-templates.py"
+      - ".github/workflows/issue-template-guard.yml"
+  push:
+    branches: [main]
+    paths:
+      - ".github/ISSUE_TEMPLATE/**"
+      - ".github/issue-area-labels.yml"
+      - ".github/scripts/validate-issue-templates.py"
+      - ".github/workflows/issue-template-guard.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: read
+
+concurrency:
+  group: issue-template-guard-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: install pyyaml
+        run: pip install --quiet pyyaml
+      - name: fetch repo labels
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh label list --limit 200 --json name > labels.json
+      - name: validate issue templates
+        run: python3 .github/scripts/validate-issue-templates.py "${{ github.repository }}" labels.json

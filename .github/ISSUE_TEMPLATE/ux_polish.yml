@@ -1,0 +1,43 @@
+name: ✨ UX / Polish
+description: Confusing copy, clunky layout, or rough edges — not quite a bug, not a new feature
+title: "[UX]: "
+labels: ["ux", "needs triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The little things matter. 💅 Awkward wording, a button that shouldn't be there, a layout that fights you — drop it here. A screenshot is worth a thousand words.
+  - type: textarea
+    id: friction
+    attributes:
+      label: What feels off?
+      description: Describe the friction. What did you expect, what did you get?
+      placeholder: The error just says "connect" — I have no idea what went wrong or how to fix it.
+    validations:
+      required: true
+  - type: input
+    id: where
+    attributes:
+      label: Where?
+      description: Page URL or screen name.
+      placeholder: https://app.uptimepage.dev/targets/...
+    validations:
+      required: false
+  - type: textarea
+    id: better
+    attributes:
+      label: What would be better?
+      description: Your suggestion — clearer copy, different layout, whatever.
+      placeholder: 'Show: "Connection refused — the server isn''t accepting connections on that port."'
+    validations:
+      required: false
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What kind of polish?
+      options:
+        - Confusing wording / copy
+        - Layout / visual design
+        - Too many steps / clutter
+        - Inconsistent behavior
+        - Other

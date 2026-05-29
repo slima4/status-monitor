@@ -1,0 +1,20 @@
+# Maps each "area" dropdown option in the issue forms to its repo label.
+#
+# A dropdown selection does NOT auto-apply a label (GitHub limitation) — a
+# human reads the answer and labels at triage. This file makes that mapping
+# explicit so CI (issue-template-guard) can enforce both directions:
+#   - every dropdown option must appear here (add an option -> add a mapping)
+#   - every mapped label must exist in the repo (gh label create it)
+#   - a stale entry with no matching dropdown option fails the build
+# "Not sure" and "Other" intentionally map to no label — triage decides.
+"Web UI (general pages, layout, styling)": "area: web-ui"
+"Monitors & scheduling (checks, intervals, timing)": "area: scheduler"
+"Public status pages": "area: public-status"
+"Dashboard, graphs & metrics": "area: observability"
+"Notifications & alerts (email, Slack, channels)": "area: notifications"
+"Incidents & maintenance windows": "area: incidents"
+"Accounts, teams & login (signup, OAuth, orgs, invites)": "area: accounts"
+"Account limits & quotas": "area: quotas"
+"API & tokens (HTTP / JSON API, API keys)": "area: api"
+"Marketing site & docs (landing, blog)": "area: marketing"
+"Performance & reliability (slow, errors, downtime)": "area: reliability"

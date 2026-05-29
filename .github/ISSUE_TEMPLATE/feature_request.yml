@@ -1,0 +1,59 @@
+name: 💡 Feature Request
+description: Propose a new capability or change
+title: "[Feature]: "
+labels: ["enhancement", "needs triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Got an idea? 🚀 Tell us the *problem* first — the best features come from real pain, not pre-baked solutions.
+
+        > [!TIP]
+        > Architectural changes, new API endpoints, or schema changes? Open this to **discuss before coding** — see `CONTRIBUTING.md`.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What's the problem?
+      description: What are you trying to do that status-monitor doesn't support today?
+      placeholder: I run separate status pages for my public cloud and my enterprise clients, but I can only create one.
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: What would you like to see?
+      description: Your proposed solution. A rough UX / API sketch is gold.
+      placeholder: Let me create multiple named status pages, each with its own set of monitors and its own public URL.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Workarounds you've tried or other approaches you weighed.
+    validations:
+      required: false
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which area?
+      options:
+        - Not sure
+        - Web UI (general pages, layout, styling)
+        - Monitors & scheduling (checks, intervals, timing)
+        - Public status pages
+        - Dashboard, graphs & metrics
+        - Notifications & alerts (email, Slack, channels)
+        - Incidents & maintenance windows
+        - Accounts, teams & login (signup, OAuth, orgs, invites)
+        - Account limits & quotas
+        - API & tokens (HTTP / JSON API, API keys)
+        - Marketing site & docs (landing, blog)
+        - Performance & reliability (slow, errors, downtime)
+        - Other
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you submit
+      options:
+        - label: I searched existing issues and this isn't a duplicate
+        - label: I'm willing to help implement this (optional, but appreciated 🙌)
+          required: false
