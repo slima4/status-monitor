@@ -4,7 +4,7 @@ use anyhow::Context;
 use async_trait::async_trait;
 use backoff::ExponentialBackoffBuilder;
 use chrono::{DateTime, TimeZone, Utc};
-use clickhouse::{Client, Row};
+use clickhouse::{Client, Row, query::Query};
 use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -21,6 +21,26 @@ use crate::error::Result;
 use crate::storage::traits::{IncidentListQuery, ResultSink, ResultsStore, TimeRange, UptimeStats};
 
 const TABLE: &str = "check_results";
+
+/// Seconds bound for the matview `minute` column (`DateTime`, seconds). The raw
+/// table's `timestamp` is ms — binding a ms value here silently matches no rows.
+#[derive(Serialize)]
+struct MinuteBound(u32);
+
+impl MinuteBound {
+    fn new(dt: DateTime<Utc>) -> Self {
+        Self(dt.timestamp().clamp(0, i64::from(u32::MAX)) as u32)
+    }
+}
+
+/// `[from, to)` over the matview `minute` column; bind via [`bind_minute_window`].
+const MINUTE_WINDOW: &str = "minute >= fromUnixTimestamp(?) AND minute < fromUnixTimestamp(?)";
+
+/// The two [`MinuteBound`] binds [`MINUTE_WINDOW`] expects; call after the
+/// leading positional binds (org_id, target_id, …).
+fn bind_minute_window(q: Query, from: DateTime<Utc>, to: DateTime<Utc>) -> Query {
+    q.bind(MinuteBound::new(from)).bind(MinuteBound::new(to))
+}
 
 /// Ordered list of migrations. Each entry is `(filename, sql)`. Filename is
 /// recorded in `schema_migrations` after apply so we never re-run a migration
@@ -118,7 +138,74 @@ pub async fn migrate(client: &Client) -> Result<()> {
         }
     }
 
+    verify_rollup_schema(client).await?;
+
     tracing::info!("clickhouse ready");
+    Ok(())
+}
+
+/// Exact `(column, type)` shape of `check_results_1m`, in definition order.
+/// Editing the matview in `001_initial.sql` is a no-op on an existing DB
+/// (recorded migration + `IF NOT EXISTS`), so [`verify_rollup_schema`] checks
+/// the live view against this at boot and fails loud on drift. A matview change
+/// = recreate migration + update 001 + update this list. Type strings are
+/// CH-version-formatted; a server upgrade that reformats them fails boot here.
+const EXPECTED_ROLLUP_SCHEMA: &[(&str, &str)] = &[
+    ("org_id", "UUID"),
+    ("target_id", "UUID"),
+    ("minute", "DateTime('UTC')"),
+    ("total_checks", "AggregateFunction(count)"),
+    ("up_checks", "AggregateFunction(countIf, UInt8)"),
+    ("down_checks", "AggregateFunction(countIf, UInt8)"),
+    ("degraded_checks", "AggregateFunction(countIf, UInt8)"),
+    ("error_checks", "AggregateFunction(countIf, UInt8)"),
+    ("avg_duration_ms", "AggregateFunction(avg, UInt32)"),
+    (
+        "duration_quantiles",
+        "AggregateFunction(quantiles(0.5, 0.95, 0.99), UInt32)",
+    ),
+    ("avg_dns_ms", "AggregateFunction(avg, Nullable(UInt16))"),
+    ("avg_connect_ms", "AggregateFunction(avg, Nullable(UInt16))"),
+    ("avg_tls_ms", "AggregateFunction(avg, Nullable(UInt16))"),
+    ("avg_ttfb_ms", "AggregateFunction(avg, Nullable(UInt16))"),
+    (
+        "last_status_state",
+        "AggregateFunction(argMax, Enum8('up' = 1, 'down' = 2, 'degraded' = 3, 'error' = 4), DateTime64(3, 'UTC'))",
+    ),
+];
+
+/// Boot check: live `check_results_1m` must equal [`EXPECTED_ROLLUP_SCHEMA`].
+async fn verify_rollup_schema(client: &Client) -> Result<()> {
+    #[derive(Row, Deserialize)]
+    struct Col {
+        name: String,
+        #[serde(rename = "type")]
+        ty: String,
+    }
+    let live: Vec<(String, String)> = client
+        .query(
+            "SELECT name, type FROM system.columns \
+             WHERE database = currentDatabase() AND table = 'check_results_1m' \
+             ORDER BY position",
+        )
+        .fetch_all::<Col>()
+        .await
+        .context("clickhouse verify_rollup_schema: read system.columns")?
+        .into_iter()
+        .map(|c| (c.name, c.ty))
+        .collect();
+    let expected: Vec<(String, String)> = EXPECTED_ROLLUP_SCHEMA
+        .iter()
+        .map(|(n, t)| ((*n).to_string(), (*t).to_string()))
+        .collect();
+    if live != expected {
+        return Err(anyhow::anyhow!(
+            "check_results_1m schema drifted from the readers' contract — a matview \
+             edit in 001_initial.sql is a no-op on an existing DB; ship a recreate \
+             migration and update EXPECTED_ROLLUP_SCHEMA.\n  expected: {expected:?}\n  live:     {live:?}"
+        )
+        .into());
+    }
     Ok(())
 }
 
@@ -713,28 +800,21 @@ impl ResultsStore for ClickhouseResultsStore {
             last_status: i8,
             last_minute_ts: u32,
         }
-        let from_s = u32::try_from(range.from.timestamp().max(0)).unwrap_or(0);
-        let to_s = u32::try_from(range.to.timestamp().max(0)).unwrap_or(u32::MAX);
-        let rows: Vec<RollupRow> = self
-            .client
-            .query(
-                "SELECT \
-                   target_id, \
-                   countMerge(total_checks) AS samples, \
-                   countIfMerge(up_checks) AS up, \
-                   avgMerge(avg_duration_ms) AS avg_ms, \
-                   quantilesMerge(0.5, 0.95)(duration_quantiles) AS quantiles, \
-                   argMaxMerge(last_status_state) AS last_status, \
-                   toUInt32(max(minute)) AS last_minute_ts \
-                 FROM check_results_1m \
-                 WHERE org_id = ? \
-                 AND minute >= fromUnixTimestamp(?) \
-                 AND minute < fromUnixTimestamp(?) \
-                 GROUP BY target_id",
-            )
-            .bind(org.0)
-            .bind(from_s)
-            .bind(to_s)
+        let query = format!(
+            "SELECT \
+               target_id, \
+               countMerge(total_checks) AS samples, \
+               countIfMerge(up_checks) AS up, \
+               avgMerge(avg_duration_ms) AS avg_ms, \
+               quantilesMerge(0.5, 0.95)(duration_quantiles) AS quantiles, \
+               argMaxMerge(last_status_state) AS last_status, \
+               toUInt32(max(minute)) AS last_minute_ts \
+             FROM check_results_1m \
+             WHERE org_id = ? AND {MINUTE_WINDOW} \
+             GROUP BY target_id"
+        );
+        let q = self.client.query(&query).bind(org.0);
+        let rows: Vec<RollupRow> = bind_minute_window(q, range.from, range.to)
             .fetch_all::<RollupRow>()
             .await
             .context("clickhouse dashboard_rollup")?;
@@ -764,19 +844,8 @@ impl ResultsStore for ClickhouseResultsStore {
         from: DateTime<Utc>,
         to: DateTime<Utc>,
     ) -> Result<Vec<DashboardSparkBucket>> {
-        // Reads the per-minute pre-aggregated rollup so the cost stays
-        // O(buckets), independent of the raw sample rate. Two type
-        // pitfalls drove the explicit casts here:
-        //
-        // 1. The view's `minute` is `toStartOfMinute(timestamp)` which
-        //    has type `DateTime` (UInt32 seconds), NOT `DateTime64`.
-        //    Comparing it against `fromUnixTimestamp64Milli(i64)`
-        //    (DateTime64) mixes scales and CH rejects the predicate.
-        //    `fromUnixTimestamp(UInt32)` matches the column exactly.
-        //
-        // 2. `avg_duration_ms` is an `avgState` aggregate column, so
-        //    selecting it raw returns the opaque binary state. The
-        //    `avgMerge` finaliser is mandatory in `SELECT`.
+        // Reads the per-minute rollup so cost stays O(buckets), not O(raw). The
+        // `avgState` column needs its `avgMerge` finaliser in `SELECT`.
         #[derive(Row, Deserialize)]
         struct SparkRow {
             #[serde(with = "clickhouse::serde::uuid")]
@@ -784,25 +853,18 @@ impl ResultsStore for ClickhouseResultsStore {
             bucket_ts: u32,
             avg_ms: f64,
         }
-        let from_s = u32::try_from(from.timestamp().max(0)).unwrap_or(0);
-        let to_s = u32::try_from(to.timestamp().max(0)).unwrap_or(u32::MAX);
-        let rows: Vec<SparkRow> = self
-            .client
-            .query(
-                "SELECT \
-                   target_id, \
-                   toUInt32(minute) AS bucket_ts, \
-                   avgMerge(avg_duration_ms) AS avg_ms \
-                 FROM check_results_1m \
-                 WHERE org_id = ? \
-                 AND minute >= fromUnixTimestamp(?) \
-                 AND minute < fromUnixTimestamp(?) \
-                 GROUP BY target_id, minute \
-                 ORDER BY target_id, minute",
-            )
-            .bind(org.0)
-            .bind(from_s)
-            .bind(to_s)
+        let query = format!(
+            "SELECT \
+               target_id, \
+               toUInt32(minute) AS bucket_ts, \
+               avgMerge(avg_duration_ms) AS avg_ms \
+             FROM check_results_1m \
+             WHERE org_id = ? AND {MINUTE_WINDOW} \
+             GROUP BY target_id, minute \
+             ORDER BY target_id, minute"
+        );
+        let q = self.client.query(&query).bind(org.0);
+        let rows: Vec<SparkRow> = bind_minute_window(q, from, to)
             .fetch_all::<SparkRow>()
             .await
             .context("clickhouse dashboard_sparkline")?;
@@ -836,8 +898,6 @@ impl ResultsStore for ClickhouseResultsStore {
             ttfb: f64,
             samples: u64,
         }
-        let from_s = u32::try_from(range.from.timestamp().max(0)).unwrap_or(0);
-        let to_s = u32::try_from(range.to.timestamp().max(0)).unwrap_or(u32::MAX);
         // Source matview is per-minute; round up to a whole number of source
         // rows so every output bucket spans an integer count of minutes.
         let bucket = bucket_seconds.max(60).div_ceil(60) * 60;
@@ -852,19 +912,12 @@ impl ResultsStore for ClickhouseResultsStore {
                ifNull(avgMerge(avg_ttfb_ms), 0) AS ttfb, \
                countMerge(total_checks) AS samples \
              FROM check_results_1m \
-             WHERE org_id = ? AND target_id = ? \
-             AND minute >= fromUnixTimestamp(?) \
-             AND minute < fromUnixTimestamp(?) \
+             WHERE org_id = ? AND target_id = ? AND {MINUTE_WINDOW} \
              GROUP BY bucket_ts \
              ORDER BY bucket_ts"
         );
-        let rows: Vec<LatRow> = self
-            .client
-            .query(&query)
-            .bind(org.0)
-            .bind(target_id)
-            .bind(from_s)
-            .bind(to_s)
+        let q = self.client.query(&query).bind(org.0).bind(target_id);
+        let rows: Vec<LatRow> = bind_minute_window(q, range.from, range.to)
             .fetch_all::<LatRow>()
             .await
             .context("clickhouse latency_buckets")?;
@@ -912,8 +965,6 @@ impl ResultsStore for ClickhouseResultsStore {
             samples: u64,
             up: u64,
         }
-        let from_s = u32::try_from(from.timestamp().max(0)).unwrap_or(0);
-        let to_s = u32::try_from(to.timestamp().max(0)).unwrap_or(u32::MAX);
         // Source matview is per-minute; round up to a multiple of 60s
         // so every output bucket spans an integer number of source rows.
         let bucket = bucket_seconds.max(60).div_ceil(60) * 60;
@@ -926,18 +977,12 @@ impl ResultsStore for ClickhouseResultsStore {
                countMerge(total_checks) AS samples, \
                countIfMerge(up_checks) AS up \
              FROM check_results_1m \
-             WHERE org_id = ? \
-             AND minute >= fromUnixTimestamp(?) \
-             AND minute < fromUnixTimestamp(?) \
+             WHERE org_id = ? AND {MINUTE_WINDOW} \
              GROUP BY bucket_ts \
              ORDER BY bucket_ts"
         );
-        let rows: Vec<RibbonRow> = self
-            .client
-            .query(&query)
-            .bind(org.0)
-            .bind(from_s)
-            .bind(to_s)
+        let q = self.client.query(&query).bind(org.0);
+        let rows: Vec<RibbonRow> = bind_minute_window(q, from, to)
             .fetch_all::<RibbonRow>()
             .await
             .context("clickhouse fleet_ribbon")?;

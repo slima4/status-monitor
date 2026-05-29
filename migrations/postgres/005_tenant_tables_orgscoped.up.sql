@@ -13,6 +13,9 @@ CREATE TABLE targets (
     org_id                UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     name                  TEXT NOT NULL,
     check_spec            JSONB NOT NULL,
+    -- `>= 10` is an ingest-rate backstop, not an arbitrary minimum: lowering it
+    -- can push sustained ingest past what the batcher buffer absorbs (silent
+    -- buffer_overflow drops). Plans tighten it via `plans.min_check_interval_secs`.
     interval_secs         INTEGER NOT NULL CHECK (interval_secs >= 10),
     enabled               BOOLEAN NOT NULL DEFAULT true,
     tags                  TEXT[] NOT NULL DEFAULT '{}',
