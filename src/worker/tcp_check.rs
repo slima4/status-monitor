@@ -32,7 +32,9 @@ pub async fn execute_tcp_check(
             status: CheckStatus::Up,
             duration_ms,
             dns_ms: None,
-            connect_ms: Some(duration_ms as u16),
+            // Clamp like the other phase producers (dns/tls_cert/http): the
+            // column is UInt16, so a >65 s connect must saturate, not wrap.
+            connect_ms: Some(duration_ms.min(u16::MAX as u32) as u16),
             tls_ms: None,
             ttfb_ms: None,
             response_code: None,
