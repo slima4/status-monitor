@@ -690,7 +690,7 @@ pub mod settings {
                     UsageBar::new("Members", 1, i32::MAX),
                 ],
                 min_check_interval_secs: 60,
-                retention_days: 30,
+                retention_days: 90,
                 max_logo_size_label: "1 MB".into(),
                 max_api_tokens_per_user: 5,
                 api_writes_per_minute: 600,

@@ -15,7 +15,7 @@ enough to keep abuse on a small VM cheap.
 |---|---|---|
 | `max_targets` | 10 | Monitored targets in the org |
 | `min_check_interval_secs` | 60 | Plan-side floor on a target's check interval. The effective floor is `max(this, kind_min)` — `kind_min` is 3600 for `tls_cert` / `domain_expiry` and 10 for `http` / `tcp` / `dns`. |
-| `retention_days` | 30 | How long check results are kept |
+| `retention_days` | 90 | Informational — actual check-result retention is the flat ClickHouse table TTL (90d for every org), not this column |
 | `max_members` | 5 | Active members in the org |
 | `max_pending_invitations` | 10 | Outstanding (unaccepted) invitations |
 | `max_api_tokens_per_user` | 5 | API tokens a single user may hold |

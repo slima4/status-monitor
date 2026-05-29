@@ -9,6 +9,12 @@ CREATE TABLE plans (
     -- Resource quotas
     max_targets                     INTEGER NOT NULL,
     min_check_interval_secs         INTEGER NOT NULL,
+    -- NOT the ClickHouse retention authority. Check-result retention is the
+    -- `check_results` table TTL (`INTERVAL 90 DAY` in the CH migration),
+    -- flat for every org — per-org/per-plan retention is unsupported (it
+    -- can't be per-org in one MergeTree without partition-per-org, which
+    -- detonates ingest). Kept equal to the TTL by hand; to change retention,
+    -- change the TTL fleet-wide, not this column.
     retention_days                  INTEGER NOT NULL,
     max_members                     INTEGER NOT NULL,
     max_pending_invitations         INTEGER NOT NULL,
@@ -47,7 +53,7 @@ INSERT INTO plans (
     incident_narration_enabled
 ) VALUES (
     'free', 'Free', 'Free tier for small teams and personal projects',
-    10, 60, 30,
+    10, 60, 90,  -- retention_days = 90: matches the flat CH TTL (the authority)
     5, 10, 5,
     10, 20, 20,
     204800,
