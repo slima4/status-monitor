@@ -711,7 +711,7 @@ pub mod settings {
             assert!(html.contains("1 / ∞"));
             assert!(html.contains("width: 0%"));
             assert!(html.contains("60 seconds"));
-            assert!(html.contains(r#"href="mailto:upgrade@your-domain.com""#));
+            assert!(html.contains(r#"href="mailto:slima4.u8@gmail.com""#));
         }
 
         #[test]
