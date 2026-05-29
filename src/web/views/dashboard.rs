@@ -89,16 +89,15 @@ pub struct DashboardRow {
     pub uptime_pct_label: String,
     pub samples: u64,
     /// `60` minute-aligned average-duration points, oldest → newest.
-    /// Empty buckets carry `None` so the renderer can break the line
-    /// rather than drawing a misleading drop-to-zero spike.
+    /// Empty buckets carry `None`; the renderer skips them and connects
+    /// the line across the gap rather than drawing a drop-to-zero spike.
     pub spark: Vec<Option<f32>>,
     /// Pre-rendered SVG path `d` for the sparkline polyline. Built
     /// once server-side so the template stays static markup and the
     /// browser does no per-row math on render.
     pub spark_path: String,
-    /// SVG `<path d=…>` for the soft area fill under the line. One
-    /// closed sub-path per contiguous run of ≥2 samples so gaps don't
-    /// bridge across missing minutes.
+    /// SVG `<path d=…>` for the soft area fill under the line — the line
+    /// closed down to the baseline. Empty below two samples.
     pub spark_fill: String,
     pub spark_baseline_y: u32,
 }
@@ -896,18 +895,14 @@ fn status_label(raw: &str) -> &'static str {
     }
 }
 
-/// Per-row sparkline rendered into a `160×22` viewport (matches V3
-/// design spec). Returns `(line_path, fill_path, baseline_y)`:
-///   - `line_path`: polyline `M…L…`. Auto-scales to the row's own
-///     min/max so a fast monitor shows shape, not a flat line crushed
-///     by a slow neighbour. `M`-restart on each `None` so interior
-///     gaps break the line cleanly.
-///   - `fill_path`: closed area under the line, used for the soft
-///     tint. Built per contiguous segment of ≥2 points — each gap
-///     splits into its own closed sub-path so the fill never bridges
-///     a missing minute. Empty when no segment qualifies.
-///   - `baseline_y`: y-coord for the dashed "no data" line used when
-///     the row has zero samples.
+/// Per-row sparkline into a `160×22` viewport. Returns `(line, fill, baseline_y)`.
+///
+/// Line connects across `None` gaps so a monitor sampled slower than the 1-min
+/// bucket still renders. x spans the full window — data shorter than the window
+/// fills the recent end instead of being stretched across it; y auto-scales to
+/// the row's own min/max. A lone sample is a zero-length segment — a dot once
+/// the path's round linecap (CSS) renders it. Fill is the line closed to the
+/// baseline, empty below two samples. `baseline_y` carries the dashed no-data rule.
 fn render_spark_path(spark: &[Option<f32>]) -> (String, String, u32) {
     const W: f32 = 160.0;
     const H: f32 = 22.0;
@@ -924,57 +919,38 @@ fn render_spark_path(spark: &[Option<f32>]) -> (String, String, u32) {
     let max = present.iter().copied().fold(f32::NEG_INFINITY, f32::max);
     let span = (max - min).max(1.0);
 
-    let first = spark.iter().position(|s| finite(s).is_some()).unwrap_or(0);
-    let last = spark.iter().rposition(|s| finite(s).is_some()).unwrap_or(0);
-    let active_span = (last - first) as f32;
-    let step = if active_span > 0.0 {
-        W / active_span
-    } else {
-        0.0
-    };
+    let step = W / (spark.len().saturating_sub(1).max(1)) as f32;
 
-    let mut line = String::with_capacity(spark.len() * 14);
-    let mut fill = String::with_capacity(spark.len() * 14);
-    let mut segment: Vec<(f32, f32)> = Vec::with_capacity(present.len());
-    let mut pen_down = false;
+    let points: Vec<(f32, f32)> = spark
+        .iter()
+        .enumerate()
+        .filter_map(|(i, slot)| finite(slot).map(|v| (i, v)))
+        .map(|(i, v)| {
+            let x = step * i as f32;
+            let y = (1.0 - (v - min) / span) * H;
+            (x, y)
+        })
+        .collect();
 
-    let flush_segment = |fill: &mut String, seg: &mut Vec<(f32, f32)>| {
-        if seg.len() >= 2 {
-            let (fx, fy) = seg[0];
-            let (lx, _) = *seg.last().unwrap();
-            write!(fill, "M{fx:.1} {fy:.1}").unwrap();
-            for &(x, y) in &seg[1..] {
-                write!(fill, " L{x:.1} {y:.1}").unwrap();
-            }
-            write!(fill, " L{lx:.1} {H:.1} L{fx:.1} {H:.1} Z").unwrap();
-        }
-        seg.clear();
-    };
-
-    for (i, slot) in spark.iter().enumerate().skip(first).take(last - first + 1) {
-        match finite(slot) {
-            None => {
-                pen_down = false;
-                flush_segment(&mut fill, &mut segment);
-            }
-            Some(v) => {
-                let x = if active_span > 0.0 {
-                    step * (i - first) as f32
-                } else {
-                    W / 2.0
-                };
-                let y = (1.0 - (v - min) / span) * H;
-                if pen_down {
-                    write!(line, " L{x:.1} {y:.1}").unwrap();
-                } else {
-                    write!(line, "M{x:.1} {y:.1}").unwrap();
-                    pen_down = true;
-                }
-                segment.push((x, y));
-            }
-        }
+    // Build the body once; fill derives from it so the two cannot drift apart.
+    let mut line = String::with_capacity(points.len() * 14);
+    let (fx, fy) = points[0];
+    write!(line, "M{fx:.1} {fy:.1}").unwrap();
+    for &(x, y) in &points[1..] {
+        write!(line, " L{x:.1} {y:.1}").unwrap();
     }
-    flush_segment(&mut fill, &mut segment);
+
+    let fill = if points.len() >= 2 {
+        let (lx, _) = *points.last().unwrap();
+        let mut fill = String::with_capacity(line.len() + 32);
+        fill.push_str(&line);
+        write!(fill, " L{lx:.1} {H:.1} L{fx:.1} {H:.1} Z").unwrap();
+        fill
+    } else {
+        // zero-length segment → dot under the round linecap
+        write!(line, " L{fx:.1} {fy:.1}").unwrap();
+        String::new()
+    };
 
     (line, fill, baseline_y)
 }
@@ -1165,11 +1141,79 @@ mod tests {
     }
 
     #[test]
-    fn render_spark_path_breaks_on_none() {
-        let path = render_spark_path(&[Some(1.0), Some(2.0), None, Some(3.0)]).0;
-        assert!(path.starts_with('M'));
-        // Two `M` segments — once at start, once after the gap.
-        assert_eq!(path.matches('M').count(), 2);
+    fn render_spark_path_connects_across_gaps() {
+        let (line, fill, _) = render_spark_path(&[Some(1.0), Some(2.0), None, Some(3.0)]);
+        assert_eq!(line.matches('M').count(), 1);
+        assert_eq!(line.matches('L').count(), 2);
+        assert!(!fill.is_empty());
+    }
+
+    #[test]
+    fn render_spark_path_renders_sparse_interval_monitor() {
+        // ≥2-min cadence leaves every filled bucket isolated.
+        let mut spark = vec![None; 60];
+        for (i, slot) in spark.iter_mut().enumerate() {
+            if i % 5 == 0 {
+                *slot = Some(100.0 + i as f32);
+            }
+        }
+        let (line, fill, _) = render_spark_path(&spark);
+        assert!(line.starts_with('M'));
+        assert_eq!(line.matches('M').count(), 1);
+        assert!(line.contains('L'));
+        assert!(!fill.is_empty());
+    }
+
+    #[test]
+    fn render_spark_path_partial_window_fills_recent_end_only() {
+        // Half-window of data must start past the midpoint, not from x=0.
+        let mut spark = vec![None; 60];
+        for slot in spark.iter_mut().skip(30) {
+            *slot = Some(50.0);
+        }
+        let (line, _, _) = render_spark_path(&spark);
+        let first_x: f32 = line
+            .trim_start_matches('M')
+            .split_whitespace()
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap();
+        let last_x: f32 = line
+            .rsplit('L')
+            .next()
+            .unwrap()
+            .split_whitespace()
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert!(first_x > 80.0, "first sample x={first_x}, want recent half");
+        assert!(
+            (last_x - 160.0).abs() < 0.5,
+            "newest sample x={last_x}, want right edge"
+        );
+    }
+
+    #[test]
+    fn render_spark_path_drops_non_finite_samples() {
+        // CH avgMerge returns NaN for empty groups; one non-finite must not
+        // poison min/max nor emit an "M NaN" path browsers silently drop.
+        let (line, fill, _) =
+            render_spark_path(&[Some(1.0), Some(f32::NAN), Some(f32::INFINITY), Some(3.0)]);
+        assert!(!line.contains("NaN") && !line.contains("inf"));
+        assert_eq!(line.matches('L').count(), 1);
+        assert!(!fill.is_empty());
+    }
+
+    #[test]
+    fn render_spark_path_lone_sample_draws_dot() {
+        let mut spark = vec![None; 60];
+        spark[30] = Some(42.0);
+        let (line, fill, _) = render_spark_path(&spark);
+        assert_eq!(line.matches('M').count(), 1);
+        assert_eq!(line.matches('L').count(), 1);
+        assert!(fill.is_empty());
     }
 
     #[test]
