@@ -47,11 +47,16 @@ async fn sampler_runs_and_shuts_down() {
         .connect_lazy("postgres://localhost:1/none")
         .expect("lazy pool");
 
+    // Dead CH endpoint — the parts-count sample fails each tick and is skipped
+    // (best-effort), which is exactly the resilience this asserts.
+    let ch = clickhouse::Client::default().with_url("http://127.0.0.1:1");
+
     let shutdown = CancellationToken::new();
     let h = sampler::spawn(
         pool,
         registry,
         pg_pool,
+        ch,
         &tx,
         Duration::from_millis(20),
         shutdown.clone(),

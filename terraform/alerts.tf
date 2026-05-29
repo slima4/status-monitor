@@ -1,7 +1,7 @@
 locals {
   # Every rule's condition C is the same fixed pass-through: each rule
   # puts its real comparison in the A expr (`... > N`), so C only fires
-  # when A returns any series. Byte-identical across all six rules —
+  # when A returns any series. Byte-identical across every rule —
   # hoisted here, referenced as local.threshold_c.
   threshold_c = jsonencode({
     refId      = "C"
@@ -15,7 +15,7 @@ resource "grafana_folder" "obs" {
   title = "status-monitor"
 }
 
-# Six pipeline-health alerts. Each rule = a Prometheus query (ref A)
+# Pipeline-health alerts. Each rule = a Prometheus query (ref A)
 # feeding the shared server-side threshold expression (ref C =
 # local.threshold_c); the rule fires when C is true. Datasource UID
 # resolved by name (portable).
@@ -501,6 +501,96 @@ resource "grafana_rule_group" "pipeline" {
         refId   = "A"
         instant = true
         expr    = "histogram_quantile(0.99, sum(rate(status_monitor_storage_write_duration_ms_bucket[10m])) by (le)) > 2000"
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = local.threshold_c
+    }
+  }
+
+  # ClickHouse partition-explosion early warning. MaxPartCountForPartition
+  # (sampled app-side into this gauge) climbing toward parts_to_throw_insert
+  # (default 3000) means inserts are about to be rejected fleet-wide. A healthy
+  # day-partitioned schema sits in the low tens; 1500 is half the hard ceiling,
+  # ample lead time to react (almost always: a high-cardinality column was added
+  # to PARTITION BY, or merges fell behind). no_data = OK: the gauge is absent
+  # when CH is unreachable, which ResultsLost / StorageWriteLatencyHigh cover.
+  rule {
+    name           = "StatusMonitorClickHousePartsHigh"
+    condition      = "C"
+    for            = "10m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+    labels = {
+      severity = "warning"
+      service  = "status-monitor"
+    }
+    annotations = {
+      summary     = "status-monitor: ClickHouse partition count climbing"
+      description = "MaxPartCountForPartition > 1500 (hard limit parts_to_throw_insert=3000) for 10m — likely a high-cardinality column added to PARTITION BY, or merges falling behind. Runbook: runbooks/grafana-cloud.md."
+    }
+    data {
+      ref_id         = "A"
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      relative_time_range {
+        from = 1200
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "A"
+        instant = true
+        expr    = "max(status_monitor_clickhouse_max_part_count_for_partition) > 1500"
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = local.threshold_c
+    }
+  }
+
+  # Ingest buffer overflowing — the bounded batcher buffer evicting oldest
+  # results because sustained ingest exceeds what ClickHouse can absorb. Split
+  # from the generic ResultsLost so the page points at CAPACITY (scale CH, raise
+  # buffer_size, or the check-interval floor) instead of a CH outage, which
+  # ResultsLost's description would otherwise misdiagnose. Warning, not critical:
+  # ResultsLost already pages critical for the data loss itself; this rule's job
+  # is the correct diagnosis. no_data = OK (no drops emitted = nothing wrong).
+  rule {
+    name           = "StatusMonitorIngestBufferOverflow"
+    condition      = "C"
+    for            = "5m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+    labels = {
+      severity = "warning"
+      service  = "status-monitor"
+    }
+    annotations = {
+      summary     = "status-monitor: ingest buffer overflowing (capacity)"
+      description = "results dropped with reason=buffer_overflow for 5m — sustained ingest exceeds ClickHouse write throughput and the batcher is evicting oldest results. Capacity action (scale CH / raise buffer_size / check the interval floor), not a CH outage. Runbook: runbooks/grafana-cloud.md."
+    }
+    data {
+      ref_id         = "A"
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      relative_time_range {
+        from = 300
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "A"
+        instant = true
+        expr    = "sum(rate(status_monitor_storage_dropped_results_total{reason=\"buffer_overflow\"}[5m])) > 0"
       })
     }
     data {

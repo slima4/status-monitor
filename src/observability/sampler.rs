@@ -1,7 +1,9 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use clickhouse::{Client as ChClient, Row};
 use metrics::gauge;
+use serde::Deserialize;
 use sqlx::PgPool;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -17,6 +19,7 @@ pub fn spawn(
     pool: Arc<WorkerPool>,
     registry: Arc<TargetRegistry>,
     pg_pool: PgPool,
+    ch: ChClient,
     result_tx: &mpsc::Sender<CheckResult>,
     sample_interval: Duration,
     shutdown: CancellationToken,
@@ -30,6 +33,7 @@ pub fn spawn(
         pool,
         registry,
         pg_pool,
+        ch,
         tx,
         queue_capacity,
         sample_interval,
@@ -42,6 +46,7 @@ async fn run(
     pool: Arc<WorkerPool>,
     registry: Arc<TargetRegistry>,
     pg_pool: PgPool,
+    ch: ChClient,
     result_tx: mpsc::WeakSender<CheckResult>,
     queue_capacity: usize,
     sample_interval: Duration,
@@ -59,6 +64,7 @@ async fn run(
     let g_pg_idle = gauge!(names::PG_POOL_IDLE);
     let g_pg_in_use = gauge!(names::PG_POOL_IN_USE);
     let g_resident = gauge!(names::PROCESS_RESIDENT_BYTES);
+    let g_ch_parts = gauge!(names::CLICKHOUSE_MAX_PART_COUNT);
 
     let singleflight = pool.domain_expiry_runtime().singleflight.clone();
 
@@ -85,7 +91,41 @@ async fn run(
                 if let Some(bytes) = resident_bytes() {
                     g_resident.set(bytes as f64);
                 }
+
+                // Best-effort + time-bounded: the CH client has no read timeout,
+                // so a hung (not refused) server could otherwise block this arm
+                // indefinitely. The 2s cap bounds how long one hung read delays
+                // the next tick (and thus shutdown); a failed/slow read skips it.
+                match tokio::time::timeout(Duration::from_secs(2), max_part_count(&ch)).await {
+                    Ok(Some(parts)) => g_ch_parts.set(parts),
+                    Ok(None) => {}
+                    Err(_) => tracing::debug!("clickhouse parts-count sample timed out"),
+                }
             }
+        }
+    }
+}
+
+/// `MaxPartCountForPartition` from `system.asynchronous_metrics` (O(1),
+/// precomputed by the server). `None` on any query error so a transient CH
+/// outage doesn't take the gauge loop down with it.
+async fn max_part_count(ch: &ChClient) -> Option<f64> {
+    #[derive(Row, Deserialize)]
+    struct V {
+        value: f64,
+    }
+    match ch
+        .query(
+            "SELECT value FROM system.asynchronous_metrics \
+             WHERE metric = 'MaxPartCountForPartition'",
+        )
+        .fetch_optional::<V>()
+        .await
+    {
+        Ok(row) => row.map(|r| r.value),
+        Err(err) => {
+            tracing::debug!(?err, "clickhouse parts-count sample failed");
+            None
         }
     }
 }

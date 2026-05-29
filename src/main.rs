@@ -154,6 +154,7 @@ async fn main() -> Result<()> {
     let result_sink_for_state = result_sink.clone();
     let ch_client_for_public = clickhouse_client.clone();
     let ch_client_for_purge = clickhouse_client.clone();
+    let ch_client_for_sampler = clickhouse_client.clone();
     let results_store: Arc<dyn ResultsStore> =
         Arc::new(ClickhouseResultsStore::from_client(clickhouse_client));
 
@@ -254,6 +255,7 @@ async fn main() -> Result<()> {
         pool.clone(),
         registry.clone(),
         pg_pool.clone(),
+        ch_client_for_sampler,
         &result_tx,
         sample_interval,
         root.clone(),
