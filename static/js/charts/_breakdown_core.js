@@ -1,9 +1,9 @@
 import { timeXAxis } from "./_init.js";
 
 const PHASES = [
-    { key: "dns", name: "DNS", color: "#a78bfa" },
+    { key: "dns", name: "DNS lookup", color: "#a78bfa" },
     { key: "connect", name: "Connect", color: "#60a5fa" },
-    { key: "tls", name: "TLS", color: "#34d399" },
+    { key: "tls", name: "TLS handshake", color: "#34d399" },
     { key: "ttfb", name: "Server response", color: "#fbbf24" },
     { key: "app", name: "Processing", color: "#fb7185" },
 ];

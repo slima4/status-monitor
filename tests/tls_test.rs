@@ -31,6 +31,11 @@ async fn verify_tls_false_accepts_self_signed() {
         result.error
     );
     assert_eq!(result.response_code, Some(200));
+    // Per-phase timings populated for the breakdown chart: an HTTPS check
+    // records a TLS-handshake phase (the bug in #31 left these always None).
+    assert!(result.connect_ms.is_some(), "connect phase must be timed");
+    assert!(result.tls_ms.is_some(), "tls handshake phase must be timed");
+    assert!(result.ttfb_ms.is_some(), "ttfb must be timed");
 }
 
 #[tokio::test]
@@ -45,8 +50,7 @@ async fn verify_tls_true_rejects_self_signed() {
 
     assert_eq!(result.status, CheckStatus::Error);
     let err = result.error.expect("error message");
-    assert!(
-        ["connect", "transport", "request"].contains(&err.as_str()),
-        "expected TLS-class error, got {err}",
-    );
+    // The probe times each phase, so a handshake rejection is attributed to
+    // the TLS phase specifically rather than a generic connect/transport error.
+    assert_eq!(err, "tls", "expected TLS-phase error, got {err}");
 }

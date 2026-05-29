@@ -19,12 +19,7 @@ per_host_max_inflight = 2
 rdap_max_inflight = 1
 
 [http_client]
-pool_max_idle_per_host = 100
-pool_idle_timeout_secs = 90
 tcp_keepalive_secs = 60
-http2_keep_alive_interval_secs = 30
-http2_keep_alive_timeout_secs = 10
-http2_keep_alive_while_idle = true
 user_agent = "uptimepage/0.1 (+https://uptimepage.dev)"
 
 [dns]

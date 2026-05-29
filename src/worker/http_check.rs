@@ -16,6 +16,9 @@ use uuid::Uuid;
 
 use crate::domain::{CheckResult, CheckStatus, ExpectedStatus, HttpCheck, HttpMethod};
 use crate::http_client::HttpClients;
+use crate::http_client::connector::{
+    ConnGuard, ConnectError, PhaseTimings, TimedConnection, handshake, timed_connect,
+};
 use crate::observability::metrics::names;
 
 /// Hard ceiling on redirect hops, and the fallback when a check enables
@@ -92,9 +95,6 @@ async fn do_http_check(
     let started_at = Utc::now();
     let start = Instant::now();
 
-    let client = clients.pick(check.verify_tls);
-    let _active = clients.pool_stats().inflight_guard();
-
     let origin = check.url.origin();
     let max_hops = effective_max_redirects(check);
 
@@ -133,16 +133,57 @@ async fn do_http_check(
             Err(err) => return early(&format!("request build failed: {err}"), None),
         };
 
+        let Some(host) = uri.host() else {
+            return early("invalid url", None);
+        };
+        let is_https = uri.scheme_str() == Some("https");
+        let port = uri.port_u16().unwrap_or(if is_https { 443 } else { 80 });
+
+        // Fresh connection per hop, each phase timed. DNS+connect+TLS are
+        // bounded by the connect budget; the request+body by what's left.
+        let params = clients.connect_params(check.verify_tls);
         let remaining = check.timeout.saturating_sub(start.elapsed());
         if remaining.is_zero() {
             return early("timeout", None);
         }
+        let connect_budget = params.connect_timeout.min(remaining);
+        let TimedConnection {
+            stream,
+            timings,
+            alpn_h2,
+        } = match tokio::time::timeout(connect_budget, timed_connect(&params, host, port, is_https))
+            .await
+        {
+            Err(_) => return early("timeout", None),
+            Ok(Err(err)) => {
+                tracing::debug!(target_id = %target_id, hop, error = %err, "http connect failed");
+                return early(classify_connect_error(&err), None);
+            }
+            Ok(Ok(c)) => c,
+        };
 
-        let response = match tokio::time::timeout(remaining, client.request(req)).await {
+        let remaining = check.timeout.saturating_sub(start.elapsed());
+        if remaining.is_zero() {
+            return early("timeout", None);
+        }
+        let (mut sender, conn_guard) =
+            match tokio::time::timeout(remaining, handshake(stream, alpn_h2)).await {
+                Err(_) => return early("timeout", None),
+                Ok(Err(err)) => return early(classify_hyper_error(&err), None),
+                Ok(Ok(s)) => s,
+            };
+
+        let remaining = check.timeout.saturating_sub(start.elapsed());
+        if remaining.is_zero() {
+            return early("timeout", None);
+        }
+        let send_start = Instant::now();
+        let response = match tokio::time::timeout(remaining, sender.send_request(req)).await {
             Err(_) => return early("timeout", None),
             Ok(Ok(r)) => r,
             Ok(Err(err)) => return early(classify_hyper_error(&err), None),
         };
+        let ttfb_ms = send_start.elapsed().as_millis().min(u16::MAX as u128) as u16;
 
         let status_code = response.status().as_u16();
 
@@ -220,6 +261,9 @@ async fn do_http_check(
             start,
             response,
             status_code,
+            timings,
+            ttfb_ms,
+            conn_guard,
             clients,
             capture,
         )
@@ -233,8 +277,10 @@ async fn do_http_check(
 }
 
 /// Collect, decode, and score the final (non-redirect) response.
-// Private probe helper: the args are inherent (identity + check + timing
-// + response + clients); grouping them would only move the tuple around.
+// Private probe helper: the args are inherent (identity + check + timings
+// + response + connection + clients); grouping them would only move the tuple
+// around. `conn_guard` is held until the body is drained — the response streams
+// from its connection task.
 #[allow(clippy::too_many_arguments)]
 async fn finalize(
     target_id: Uuid,
@@ -244,12 +290,13 @@ async fn finalize(
     start: Instant,
     response: hyper::Response<hyper::body::Incoming>,
     status_code: u16,
+    timings: PhaseTimings,
+    ttfb_ms: u16,
+    _conn_guard: ConnGuard,
     clients: &HttpClients,
     capture: bool,
 ) -> (CheckResult, Option<HttpProbe>) {
-    let ttfb_elapsed_ms = start.elapsed().as_millis();
-    clients.ttfb_ms.record(ttfb_elapsed_ms as f64);
-    let ttfb_ms = ttfb_elapsed_ms.min(u16::MAX as u128) as u16;
+    clients.ttfb_ms.record(ttfb_ms as f64);
 
     // Header preview is snapshotted before the response body is consumed:
     // hyper bodies are streams and the headers handle becomes unavailable
@@ -270,6 +317,9 @@ async fn finalize(
             start.elapsed().as_millis() as u32,
             reason,
         );
+        r.dns_ms = Some(timings.dns_ms);
+        r.connect_ms = Some(timings.connect_ms);
+        r.tls_ms = timings.tls_ms;
         r.ttfb_ms = Some(ttfb_ms);
         // Status line came back (TTFB recorded) — preserve the code so a body
         // failure still distinguishes 200-then-truncated from 503-broken-body.
@@ -334,9 +384,9 @@ async fn finalize(
             timestamp: started_at,
             status,
             duration_ms,
-            dns_ms: None,
-            connect_ms: None,
-            tls_ms: None,
+            dns_ms: Some(timings.dns_ms),
+            connect_ms: Some(timings.connect_ms),
+            tls_ms: timings.tls_ms,
             ttfb_ms: Some(ttfb_ms),
             response_code: Some(status_code),
             response_size: Some(size),
@@ -551,14 +601,28 @@ fn match_status(code: u16, expected: &ExpectedStatus) -> bool {
     }
 }
 
-fn classify_hyper_error(err: &hyper_util::client::legacy::Error) -> &'static str {
+fn classify_hyper_error(err: &hyper::Error) -> &'static str {
     if has_timeout_in_chain(err) {
         return "timeout";
     }
-    if err.is_connect() {
-        return "connect";
-    }
     "transport"
+}
+
+/// Map a typed connect-phase failure to a reason string. TLS handshake
+/// failures keep their own `"tls"` reason so the breakdown attributes them
+/// correctly instead of folding them into a generic connect error.
+fn classify_connect_error(err: &ConnectError) -> &'static str {
+    match err {
+        ConnectError::Dns(_) | ConnectError::NoAddrs => "connect",
+        ConnectError::Connect(io) => {
+            if io.kind() == std::io::ErrorKind::TimedOut || has_timeout_in_chain(io) {
+                "timeout"
+            } else {
+                "connect"
+            }
+        }
+        ConnectError::Tls(_) => "tls",
+    }
 }
 
 // Phrase set is narrow ("timed out" / "deadline") so `connect_timeout=…`

@@ -28,7 +28,6 @@ struct Args {
     timeout_ms: u64,
     mock_ports: usize,
     ramp_secs: u64,
-    http2: bool,
 }
 
 impl Args {
@@ -38,14 +37,12 @@ impl Args {
         let timeout_ms = env_parse("TIMEOUT_MS", 5_000u64);
         let mock_ports = env_parse("MOCK_PORTS", 16usize).max(1);
         let ramp_secs = env_parse("RAMP_SECS", 2u64);
-        let http2 = env_parse("HTTP2", 0u8) != 0;
         Self {
             concurrency,
             duration_secs,
             timeout_ms,
             mock_ports,
             ramp_secs,
-            http2,
         }
     }
 }
@@ -66,14 +63,8 @@ async fn main() {
     println!("mock servers ({}): {mock_addrs:?}", mock_addrs.len());
 
     let http_cfg = HttpClientConfig {
-        pool_max_idle_per_host: 1024,
-        pool_idle_timeout_secs: 90,
         tcp_keepalive_secs: 60,
-        http2_keep_alive_interval_secs: 30,
-        http2_keep_alive_timeout_secs: 10,
-        http2_keep_alive_while_idle: true,
         user_agent: "StatusMonitor-LoadTest/1.0".into(),
-        http2_prior_knowledge: args.http2,
     };
     let checker_cfg = CheckerConfig {
         max_concurrent_checks: args.concurrency,

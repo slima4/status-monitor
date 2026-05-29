@@ -593,15 +593,10 @@ fn default_rdap_max_inflight() -> usize {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct HttpClientConfig {
-    pub pool_max_idle_per_host: usize,
-    pub pool_idle_timeout_secs: u64,
+    /// TCP keep-alive for the in-flight connection. Checks connect fresh each
+    /// run (no pool), so this only spans one request's body read.
     pub tcp_keepalive_secs: u64,
-    pub http2_keep_alive_interval_secs: u64,
-    pub http2_keep_alive_timeout_secs: u64,
-    pub http2_keep_alive_while_idle: bool,
     pub user_agent: String,
-    #[serde(default)]
-    pub http2_prior_knowledge: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

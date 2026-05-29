@@ -32,13 +32,11 @@ these names verbatim.
 | `status_monitor_build_info{version}` | counter | set to 1 once at startup so the endpoint is never empty |
 | `status_monitor_check_duration_ms` | histogram | per-check wall time |
 | `status_monitor_check_dns_ms` | histogram | DNS resolution latency (recorded in the hickory wrapper) |
-| `status_monitor_check_connect_ms` | histogram | TCP connect latency (recorded only when a new connection is established) |
-| `status_monitor_check_tls_ms` | histogram | TLS handshake latency (recorded only when a new HTTPS connection is established) |
-| `status_monitor_check_ttfb_ms` | histogram | time-to-first-byte across the response start |
+| `status_monitor_check_connect_ms` | histogram | TCP connect latency (every HTTP check connects fresh) |
+| `status_monitor_check_tls_ms` | histogram | TLS handshake latency (per HTTPS check) |
+| `status_monitor_check_ttfb_ms` | histogram | time-to-first-byte: request sent to response headers |
 | `status_monitor_storage_batch_size` | histogram | flush batch sizes |
 | `status_monitor_storage_write_duration_ms` | histogram | flush durations |
-| `status_monitor_http_pool_idle_connections` | gauge | connections held in the pool but not currently serving a request (sampled) |
-| `status_monitor_http_pool_active_connections` | gauge | connections currently serving an in-flight request (sampled) |
 | `status_monitor_targets_total` | gauge | enabled targets known to the registry (sampled) |
 | `status_monitor_workers_in_flight` | gauge | current worker-pool semaphore depth (sampled) |
 | `status_monitor_result_queue_depth` | gauge | depth of the result channel buffer (sampled) |
@@ -92,8 +90,6 @@ a sample ratio outside `[0.0, 1.0]`) fail fast at startup as a config
 error, not a runtime surprise. See
 [Configuration](configuration.md) for the keys and env overrides.
 
-## HTTP connection phase timings + pool gauges
+## HTTP connection phase timings
 
-`check_connect_ms` and `check_tls_ms` are recorded inside `PhaseConnector::call`, which means they fire only when a new connection is established — pooled-connection requests do not produce samples. That's correct semantics: phase timings reflect "establish a connection" cost, not the cost of reusing one.
-
-`http_pool_active_connections` counts in-flight requests via a per-request `ActiveGuard`. `http_pool_idle_connections` is computed as `alive − active`, saturating at zero. Under HTTP/2 a single connection serves many concurrent streams, so `active` can exceed `alive`; idle clamps to zero rather than emit a negative gauge.
+Every HTTP check opens a fresh connection (no pool — a monitor probes each target once per interval, so a pool rarely reused a socket, and fresh-connect is what lets the probe attribute time to each phase). `check_dns_ms`, `check_connect_ms`, and `check_tls_ms` are timed during that establishment and `check_ttfb_ms` from request-send to response headers. The same four values are written per-check into ClickHouse, which is what powers the detail-page latency-breakdown chart.

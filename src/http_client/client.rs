@@ -1,11 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use http_body_util::Full;
-use hyper::body::Bytes;
 use hyper_rustls::ConfigBuilderExt;
-use hyper_util::client::legacy::Client as HyperClient;
-use hyper_util::rt::{TokioExecutor, TokioTimer};
 use metrics::{Histogram, histogram};
 use rustls::ClientConfig;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
@@ -16,37 +12,45 @@ use tokio_rustls::TlsConnector;
 
 use crate::config::{CheckerConfig, DnsConfig, HttpClientConfig, SecurityConfig};
 use crate::error::Result;
-use crate::http_client::connector::{ConnectorInner, PhaseConnector};
+use crate::http_client::connector::ConnectParams;
 use crate::http_client::dns::HickoryDnsResolver;
-use crate::http_client::pool_stats::PoolStats;
 use crate::observability::metrics::names;
 use crate::security::SsrfGuard;
 
-pub type ReqBody = Full<Bytes>;
-pub type HyperHttpClient = HyperClient<PhaseConnector, ReqBody>;
-
+/// Shared, cheaply-clonable handles for the check path. Holds no connection
+/// pool: every HTTP check connects fresh (a monitor probes each target once per
+/// interval, so pooling rarely reused a socket — and fresh-connect is what lets
+/// the probe time DNS/connect/TLS per check). The two TLS connectors differ
+/// only in cert verification.
 #[derive(Clone)]
 pub struct HttpClients {
-    verifying: Arc<HyperHttpClient>,
-    insecure: Arc<HyperHttpClient>,
-    pub(crate) pool_stats: Arc<PoolStats>,
+    tls_verifying: Arc<TlsConnector>,
+    tls_insecure: Arc<TlsConnector>,
     pub(crate) ttfb_ms: Histogram,
+    connect_ms: Histogram,
+    tls_ms: Histogram,
     pub(crate) user_agent: Arc<str>,
     pub(crate) resolver: Arc<HickoryDnsResolver>,
     pub(crate) ssrf_guard: SsrfGuard,
+    connect_timeout: Duration,
+    tcp_keepalive: Option<Duration>,
 }
 
 impl HttpClients {
-    pub fn pick(&self, verify_tls: bool) -> &HyperHttpClient {
-        if verify_tls {
-            self.verifying.as_ref()
-        } else {
-            self.insecure.as_ref()
+    pub(crate) fn connect_params(&self, verify_tls: bool) -> ConnectParams<'_> {
+        ConnectParams {
+            resolver: &self.resolver,
+            ssrf_guard: self.ssrf_guard,
+            tls: if verify_tls {
+                &self.tls_verifying
+            } else {
+                &self.tls_insecure
+            },
+            connect_ms: &self.connect_ms,
+            tls_ms: &self.tls_ms,
+            connect_timeout: self.connect_timeout,
+            tcp_keepalive: self.tcp_keepalive,
         }
-    }
-
-    pub fn pool_stats(&self) -> &Arc<PoolStats> {
-        &self.pool_stats
     }
 
     pub fn user_agent(&self) -> &str {
@@ -71,81 +75,26 @@ pub fn build_clients(
     install_default_crypto_provider();
 
     let resolver = Arc::new(HickoryDnsResolver::new(dns_cfg)?);
-    let pool_stats = PoolStats::new();
     let ssrf_guard = SsrfGuard::new(security_cfg.allow_private_targets);
-    let connect_ms = histogram!(names::CHECK_CONNECT_MS);
-    let tls_ms = histogram!(names::CHECK_TLS_MS);
-
-    let shared = SharedConnect {
-        resolver: resolver.clone(),
-        pool_stats: pool_stats.clone(),
-        ssrf_guard,
-        connect_ms,
-        tls_ms,
-    };
-    let verifying = build_one(http_cfg, checker_cfg, &shared, true)?;
-    let insecure = build_one(http_cfg, checker_cfg, &shared, false)?;
+    let tls_verifying = Arc::new(TlsConnector::from(Arc::new(build_tls_config(true)?)));
+    let tls_insecure = Arc::new(TlsConnector::from(Arc::new(build_tls_config(false)?)));
 
     Ok(HttpClients {
-        verifying: Arc::new(verifying),
-        insecure: Arc::new(insecure),
-        pool_stats,
+        tls_verifying,
+        tls_insecure,
         ttfb_ms: histogram!(names::CHECK_TTFB_MS),
+        connect_ms: histogram!(names::CHECK_CONNECT_MS),
+        tls_ms: histogram!(names::CHECK_TLS_MS),
         user_agent: Arc::from(http_cfg.user_agent.as_str()),
         resolver,
         ssrf_guard,
-    })
-}
-
-struct SharedConnect {
-    resolver: Arc<HickoryDnsResolver>,
-    pool_stats: Arc<PoolStats>,
-    ssrf_guard: SsrfGuard,
-    connect_ms: Histogram,
-    tls_ms: Histogram,
-}
-
-fn build_one(
-    http_cfg: &HttpClientConfig,
-    checker_cfg: &CheckerConfig,
-    shared: &SharedConnect,
-    verify_tls: bool,
-) -> Result<HyperHttpClient> {
-    let tls_config = build_tls_config(verify_tls, http_cfg.http2_prior_knowledge)?;
-    let tls_connector = Arc::new(TlsConnector::from(Arc::new(tls_config)));
-
-    let inner = Arc::new(ConnectorInner {
-        resolver: shared.resolver.clone(),
-        tls: tls_connector,
-        pool_stats: shared.pool_stats.clone(),
-        ssrf_guard: shared.ssrf_guard,
-        connect_ms: shared.connect_ms.clone(),
-        tls_ms: shared.tls_ms.clone(),
         connect_timeout: Duration::from_millis(checker_cfg.connect_timeout_ms),
         tcp_keepalive: Some(Duration::from_secs(http_cfg.tcp_keepalive_secs))
             .filter(|d| !d.is_zero()),
-        tcp_nodelay: true,
-    });
-    let connector = PhaseConnector { inner };
-
-    let mut builder = HyperClient::builder(TokioExecutor::new());
-    builder
-        .timer(TokioTimer::new())
-        .pool_timer(TokioTimer::new())
-        .pool_idle_timeout(Duration::from_secs(http_cfg.pool_idle_timeout_secs))
-        .pool_max_idle_per_host(http_cfg.pool_max_idle_per_host)
-        .http2_keep_alive_interval(Duration::from_secs(http_cfg.http2_keep_alive_interval_secs))
-        .http2_keep_alive_timeout(Duration::from_secs(http_cfg.http2_keep_alive_timeout_secs))
-        .http2_keep_alive_while_idle(http_cfg.http2_keep_alive_while_idle)
-        .http2_adaptive_window(true);
-    if http_cfg.http2_prior_knowledge {
-        builder.http2_only(true);
-    }
-
-    Ok(builder.build(connector))
+    })
 }
 
-fn build_tls_config(verify: bool, h2_prior_knowledge: bool) -> Result<ClientConfig> {
+fn build_tls_config(verify: bool) -> Result<ClientConfig> {
     let builder = ClientConfig::builder();
     let mut cfg = if verify {
         match builder.with_native_roots() {
@@ -161,11 +110,7 @@ fn build_tls_config(verify: bool, h2_prior_knowledge: bool) -> Result<ClientConf
             .with_no_client_auth()
     };
 
-    cfg.alpn_protocols = if h2_prior_knowledge {
-        vec![b"h2".to_vec()]
-    } else {
-        vec![b"h2".to_vec(), b"http/1.1".to_vec()]
-    };
+    cfg.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
     Ok(cfg)
 }
 

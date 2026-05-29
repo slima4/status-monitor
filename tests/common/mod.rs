@@ -639,14 +639,8 @@ fn default_dns() -> DnsConfig {
 
 fn build_clients_with(dns_cfg: DnsConfig) -> status_monitor::error::Result<HttpClients> {
     let http_cfg = HttpClientConfig {
-        pool_max_idle_per_host: 10,
-        pool_idle_timeout_secs: 30,
         tcp_keepalive_secs: 30,
-        http2_keep_alive_interval_secs: 30,
-        http2_keep_alive_timeout_secs: 10,
-        http2_keep_alive_while_idle: true,
         user_agent: "StatusMonitor/test".into(),
-        http2_prior_knowledge: false,
     };
     let checker_cfg = CheckerConfig {
         max_concurrent_checks: 100,

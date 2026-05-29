@@ -163,7 +163,6 @@ async fn main() -> Result<()> {
         &cfg.dns,
         &cfg.security,
     )?);
-    let http_pool_stats = http_clients.pool_stats().clone();
 
     let (result_tx, result_rx) = mpsc::channel(cfg.storage.clickhouse.buffer_size.max(1024));
     // Notification channels are per-org and edited at runtime, so the alert
@@ -254,7 +253,6 @@ async fn main() -> Result<()> {
     let sampler_handle: JoinHandle<()> = status_monitor::observability::sampler::spawn(
         pool.clone(),
         registry.clone(),
-        http_pool_stats,
         pg_pool.clone(),
         &result_tx,
         sample_interval,

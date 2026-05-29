@@ -29,6 +29,11 @@ async fn http_check_returns_up_on_200() {
     assert_eq!(result.response_code, Some(200));
     assert_eq!(result.response_size, Some(4));
     assert!(result.error.is_none());
+    // Per-phase timings populated for the breakdown chart (#31). Plain HTTP has
+    // no TLS phase; connect + ttfb are always timed.
+    assert!(result.connect_ms.is_some(), "connect phase must be timed");
+    assert!(result.tls_ms.is_none(), "plain http has no tls phase");
+    assert!(result.ttfb_ms.is_some(), "ttfb must be timed");
 }
 
 #[tokio::test]

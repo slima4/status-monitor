@@ -122,14 +122,8 @@ fn default_check(addr: SocketAddr) -> HttpCheck {
 
 fn build_test_clients() -> HttpClients {
     let http_cfg = HttpClientConfig {
-        pool_max_idle_per_host: 1024,
-        pool_idle_timeout_secs: 60,
         tcp_keepalive_secs: 60,
-        http2_keep_alive_interval_secs: 30,
-        http2_keep_alive_timeout_secs: 10,
-        http2_keep_alive_while_idle: true,
         user_agent: "StatusMonitor/bench".into(),
-        http2_prior_knowledge: true,
     };
     let checker_cfg = CheckerConfig {
         max_concurrent_checks: 100_000,
