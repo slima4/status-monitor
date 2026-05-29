@@ -1,5 +1,6 @@
 {# Shares `.range-tabs` with the dashboard. Inputs: `range_options`
-   (Vec<RangeOption>), `range_base_path`, `from_human`, `to_human`. #}
+   (Vec<RangeOption>), `range_base_path`, `from_iso`, `to_iso`,
+   `from_human`, `to_human`. #}
 <div class="flex flex-wrap items-center gap-3 pt-3">
   <div class="range-tabs" role="tablist" aria-label="Time range">
     {% for opt in range_options %}
@@ -10,5 +11,5 @@
        {% if opt.selected %}aria-current="page"{% endif %}>{{ opt.key }}</a>
     {% endfor %}
   </div>
-  <span class="range-tabs-meta">{{ from_human }} → {{ to_human }}</span>
+  <span class="range-tabs-meta"><time datetime="{{ from_iso }}" data-tz="exact">{{ from_human }}</time> → <time datetime="{{ to_iso }}" data-tz="exact">{{ to_human }}</time></span>
 </div>
