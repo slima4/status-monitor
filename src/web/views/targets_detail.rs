@@ -634,7 +634,9 @@ mod tests {
         assert!(html.contains("Uptime"));
         assert!(html.contains("99.00"));
         assert!(html.contains("data-endpoint"));
-        assert!(html.contains("/api/v1/targets/00000000-0000-0000-0000-000000000001/results"));
+        // Charts read the server-bucketed latency endpoint; recent results are
+        // a server-rendered table, not an API fetch.
+        assert!(html.contains("/api/v1/targets/00000000-0000-0000-0000-000000000001/latency"));
     }
 
     #[test]
