@@ -128,6 +128,26 @@ async fn read_only_token_gets_but_cannot_write_targets() {
         "expected INSUFFICIENT_SCOPE, got: {body}"
     );
 
+    // The targets-only token also lacks channels:read — cross-resource gate.
+    let (status, body) = send(
+        &router,
+        "GET",
+        "/api/v1/notification-channels",
+        &ro.token,
+        &slug,
+        None,
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "targets-only token must not read channels"
+    );
+    assert!(
+        body.contains("INSUFFICIENT_SCOPE"),
+        "expected INSUFFICIENT_SCOPE, got: {body}"
+    );
+
     // Read-only token: creating is denied with INSUFFICIENT_SCOPE.
     let (status, body) = send(
         &router,

@@ -37,6 +37,11 @@ macro_rules! scope_marker {
 
 scope_marker!(TargetsRead => Scope::TargetsRead);
 scope_marker!(TargetsWrite => Scope::TargetsWrite);
+scope_marker!(ChannelsRead => Scope::ChannelsRead);
+scope_marker!(ChannelsWrite => Scope::ChannelsWrite);
+scope_marker!(IncidentsWrite => Scope::IncidentsWrite);
+scope_marker!(MaintenanceRead => Scope::MaintenanceRead);
+scope_marker!(MaintenanceWrite => Scope::MaintenanceWrite);
 
 /// Org id for the current request, gated on the scope `R`.
 pub struct Authorized<R: RequiredScope>(pub OrgId, pub PhantomData<R>);

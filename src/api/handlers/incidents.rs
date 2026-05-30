@@ -17,7 +17,7 @@ use crate::api::handlers::validation::{self, validate_message};
 use crate::app::AppState;
 use crate::domain::{Incident, IncidentNarrationUpdate, NewIncidentUpdate, PublicIncidentUpdate};
 use crate::error::{AppError, Result};
-use crate::web::CurrentOrg;
+use crate::web::{Authorized, IncidentsWrite};
 
 #[utoipa::path(
     patch,
@@ -41,7 +41,7 @@ use crate::web::CurrentOrg;
 )]
 pub async fn update_incident_narration(
     State(state): State<AppState>,
-    CurrentOrg(org): CurrentOrg,
+    Authorized(org, _): Authorized<IncidentsWrite>,
     Path(id): Path<Uuid>,
     Json(update): Json<IncidentNarrationUpdate>,
 ) -> Result<Json<Incident>> {
@@ -86,7 +86,7 @@ pub async fn update_incident_narration(
 )]
 pub async fn post_incident_update(
     State(state): State<AppState>,
-    CurrentOrg(org): CurrentOrg,
+    Authorized(org, _): Authorized<IncidentsWrite>,
     Path(id): Path<Uuid>,
     Json(new): Json<NewIncidentUpdate>,
 ) -> Result<(

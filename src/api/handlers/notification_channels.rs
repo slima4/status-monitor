@@ -1,8 +1,9 @@
 //! Operator endpoints for notification-channel CRUD + a send-test action.
 //!
 //! Standard `ApiError` envelope. Mounted under `/api/v1/notification-channels`.
-//! Every handler resolves the caller's tenant via [`CurrentOrg`] and threads
-//! it into the store, so a channel is only ever visible to its owning org.
+//! Every handler resolves the caller's tenant via the scope-gated
+//! `Authorized<…>` extractor (which wraps `CurrentOrg`) and threads the org
+//! into the store, so a channel is only ever visible to its owning org.
 //! Secrets are sealed at rest by the store and are never echoed back: every
 //! read path returns through [`Redacted`].
 
@@ -26,7 +27,7 @@ use crate::domain::{
 use crate::error::{AppError, Result};
 use crate::notifier::build_notifier;
 use crate::notifier::event::{AlertEvent, AlertKind};
-use crate::web::CurrentOrg;
+use crate::web::{Authorized, ChannelsRead, ChannelsWrite};
 
 /// Result of `POST /{id}/test`. A `false` never reaches the client — a failed
 /// delivery is a 422 (`CHANNEL_TEST_FAILED`) — but the explicit field keeps
@@ -62,7 +63,7 @@ pub struct TestNotificationResponse {
 )]
 pub async fn create(
     State(state): State<AppState>,
-    CurrentOrg(org): CurrentOrg,
+    Authorized(org, _): Authorized<ChannelsWrite>,
     Json(new): Json<NewNotificationChannel>,
 ) -> Result<(
     StatusCode,
@@ -108,7 +109,7 @@ pub async fn create(
 )]
 pub async fn list(
     State(state): State<AppState>,
-    CurrentOrg(org): CurrentOrg,
+    Authorized(org, _): Authorized<ChannelsRead>,
 ) -> Result<Redacted<Vec<NotificationChannel>>> {
     Ok(Redacted::new(
         state.notification_channel_store.list(org).await?,
@@ -128,7 +129,7 @@ pub async fn list(
 )]
 pub async fn get(
     State(state): State<AppState>,
-    CurrentOrg(org): CurrentOrg,
+    Authorized(org, _): Authorized<ChannelsRead>,
     Path(id): Path<Uuid>,
 ) -> Result<Redacted<NotificationChannel>> {
     state
@@ -158,7 +159,7 @@ pub async fn get(
 )]
 pub async fn update(
     State(state): State<AppState>,
-    CurrentOrg(org): CurrentOrg,
+    Authorized(org, _): Authorized<ChannelsWrite>,
     Path(id): Path<Uuid>,
     Json(update): Json<NotificationChannelUpdate>,
 ) -> Result<Redacted<NotificationChannel>> {
@@ -194,7 +195,7 @@ pub async fn update(
 )]
 pub async fn delete(
     State(state): State<AppState>,
-    CurrentOrg(org): CurrentOrg,
+    Authorized(org, _): Authorized<ChannelsWrite>,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode> {
     if state.notification_channel_store.delete(org, id).await? {
@@ -223,7 +224,7 @@ pub async fn delete(
 )]
 pub async fn test_send(
     State(state): State<AppState>,
-    CurrentOrg(org): CurrentOrg,
+    Authorized(org, _): Authorized<ChannelsWrite>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<TestNotificationResponse>> {
     let channel = state

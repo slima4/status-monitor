@@ -24,7 +24,7 @@ use crate::domain::{
 };
 use crate::error::{AppError, Result};
 use crate::storage::{MaintenanceListQuery, MaintenanceStore};
-use crate::web::CurrentOrg;
+use crate::web::{Authorized, MaintenanceRead, MaintenanceWrite};
 
 const MAX_WINDOW_DAYS: i64 = 30;
 const LIST_LIMIT_DEFAULT: u32 = 50;
@@ -64,7 +64,7 @@ pub struct ListQuery {
 )]
 pub async fn create_maintenance(
     State(state): State<AppState>,
-    CurrentOrg(org): CurrentOrg,
+    Authorized(org, _): Authorized<MaintenanceWrite>,
     Json(new): Json<NewMaintenanceWindow>,
 ) -> Result<(
     StatusCode,
@@ -104,7 +104,7 @@ pub async fn create_maintenance(
 )]
 pub async fn list_maintenance(
     State(state): State<AppState>,
-    CurrentOrg(org): CurrentOrg,
+    Authorized(org, _): Authorized<MaintenanceRead>,
     Query(q): Query<ListQuery>,
 ) -> Result<Json<PageEnvelope<MaintenanceWindow>>> {
     let limit = q
@@ -140,7 +140,7 @@ pub async fn list_maintenance(
 )]
 pub async fn get_maintenance(
     State(state): State<AppState>,
-    CurrentOrg(org): CurrentOrg,
+    Authorized(org, _): Authorized<MaintenanceRead>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<MaintenanceWindow>> {
     match state.maintenance_store.get(org, id).await? {
@@ -169,7 +169,7 @@ pub async fn get_maintenance(
 )]
 pub async fn update_maintenance(
     State(state): State<AppState>,
-    CurrentOrg(org): CurrentOrg,
+    Authorized(org, _): Authorized<MaintenanceWrite>,
     Path(id): Path<Uuid>,
     Json(update): Json<MaintenanceWindowUpdate>,
 ) -> Result<Json<MaintenanceWindow>> {
@@ -222,7 +222,7 @@ pub async fn update_maintenance(
 )]
 pub async fn delete_maintenance(
     State(state): State<AppState>,
-    CurrentOrg(org): CurrentOrg,
+    Authorized(org, _): Authorized<MaintenanceWrite>,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode> {
     if state.maintenance_store.delete(org, id).await? {
