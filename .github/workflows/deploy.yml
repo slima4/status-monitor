@@ -59,10 +59,15 @@ on:
         required: true
         type: boolean
         default: false
-  workflow_run:
-    workflows: [release-image]
-    types: [completed]
-    branches: [main]
+  # TEMPORARILY DISABLED for the status-monitor -> uptimepage prod cutover:
+  # the box layout (/opt/uptimepage, UPTIMEPAGE_* .env, project name) is
+  # migrated by hand once; auto-deploy would fire against the old layout
+  # mid-cutover. Re-enable the four lines below right after the manual
+  # cutover is verified healthy.
+  # workflow_run:
+  #   workflows: [release-image]
+  #   types: [completed]
+  #   branches: [main]
 
 # One deploy at a time — never let two runs race on the box / .env.
 concurrency:
