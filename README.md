@@ -61,6 +61,8 @@ terraform {
 
 provider "uptimepage" {
   token = var.uptimepage_token # or set UPTIMEPAGE_TOKEN
+  org   = "your-org-slug"      # required for managed resources; or UPTIMEPAGE_ORG
+  # endpoint defaults to https://app.uptimepage.dev; set it for a self-hosted instance
 }
 
 resource "uptimepage_target" "api" {
