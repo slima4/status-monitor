@@ -612,6 +612,13 @@ resource "grafana_contact_point" "default" {
     addresses = [var.alert_email]
     subject   = "[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}"
   }
+
+  # Renaming the contact point forces replace; the root policy references it
+  # by name, so the new one must exist (and the policy re-point) before the
+  # old is deleted — otherwise Grafana 409s the in-use delete.
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 # NOTE: grafana_notification_policy manages the SINGLE root policy for
