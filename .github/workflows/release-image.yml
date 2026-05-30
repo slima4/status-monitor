@@ -1,6 +1,6 @@
 name: release-image
 
-# Build the status-monitor container image in CI and push it to the GitHub
+# Build the uptimepage container image in CI and push it to the GitHub
 # Container Registry. Production pulls an immutable tag (sha-… or v…) and
 # never compiles Rust on the box — the build toolchain stays off prod.
 #

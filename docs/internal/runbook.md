@@ -22,10 +22,10 @@ curl https://acme.your-domain.com/                 # expect 200, HTML
 ssh your-server "uptime"
 
 # Container statuses?
-ssh your-server "cd /opt/status-monitor/deployment && docker compose ps"
+ssh your-server "cd /opt/uptimepage/deployment && docker compose ps"
 
 # Recent logs?
-ssh your-server "cd /opt/status-monitor/deployment && docker compose logs --tail=200 status-monitor"
+ssh your-server "cd /opt/uptimepage/deployment && docker compose logs --tail=200 uptimepage"
 ```
 
 ### Step 2 — Identify (~5 minutes)
@@ -33,8 +33,8 @@ ssh your-server "cd /opt/status-monitor/deployment && docker compose logs --tail
 | Symptom | Likely cause | First fix |
 |---|---|---|
 | `/readyz` returns 503 | DB unreachable | `docker compose ps postgres clickhouse` |
-| All endpoints return 502 from Caddy | App down | `docker compose logs status-monitor` then restart |
-| Login fails | GitHub OAuth misconfig | check `STATUS_MONITOR_AUTH__GITHUB__CLIENT_ID` |
+| All endpoints return 502 from Caddy | App down | `docker compose logs uptimepage` then restart |
+| Login fails | GitHub OAuth misconfig | check `UPTIMEPAGE_AUTH__GITHUB__CLIENT_ID` |
 | Wildcard cert errors | Hetzner DNS token issue | rotate the `HETZNER_DNS_API_TOKEN` |
 | Slow responses | DB overload or ClickHouse merge | check `docker stats` |
 | Status pages all 404 | App can't reach DB | check connection from container |
@@ -52,16 +52,16 @@ If the outage is longer than 5 minutes and affects multiple users:
 
 ```bash
 # Restart everything
-cd /opt/status-monitor/deployment && docker compose restart
+cd /opt/uptimepage/deployment && docker compose restart
 
 # Restart just the app
-cd /opt/status-monitor/deployment && docker compose restart status-monitor
+cd /opt/uptimepage/deployment && docker compose restart uptimepage
 
 # Pull latest image and restart
-cd /opt/status-monitor/deployment && docker compose pull && docker compose up -d
+cd /opt/uptimepage/deployment && docker compose pull && docker compose up -d
 
 # Roll back to a previous image (if the last deploy broke things)
-cd /opt/status-monitor/deployment && docker compose pull status-monitor:<previous-tag>
+cd /opt/uptimepage/deployment && docker compose pull uptimepage:<previous-tag>
 ```
 
 ### Step 5 — Post-incident
@@ -79,7 +79,7 @@ Weekly checklist (set a calendar reminder for Saturday morning).
 ### Step 1 — Confirm backups exist
 
 ```bash
-ssh backup-server "ls -lah /backups/status-monitor/ | tail -10"
+ssh backup-server "ls -lah /backups/uptimepage/ | tail -10"
 ```
 
 Should show daily files from the past 7+ days. If the newest is older
@@ -92,7 +92,7 @@ than 24h the backup job failed — check cron on the backup server.
 # OR use a local VM/container.
 
 # Copy the latest backup
-scp backup-server:/backups/status-monitor/postgres-latest.sql.gz test-vm:
+scp backup-server:/backups/uptimepage/postgres-latest.sql.gz test-vm:
 
 # Restore
 ssh test-vm "gunzip -c postgres-latest.sql.gz | docker exec -i postgres psql -U status_monitor status_monitor"
@@ -113,18 +113,18 @@ Append a line to `docs/internal/backup-verification.md`:
 
 Annual rotations (set calendar reminders).
 
-### `STATUS_MONITOR_ADMIN_HASH` (basic-auth password)
+### `UPTIMEPAGE_ADMIN_HASH` (basic-auth password)
 
 ```bash
 # Generate a new hash
 docker run --rm caddy:2-alpine caddy hash-password --plaintext "new-password"
 
 # Update .env
-ssh your-server "cd /opt/status-monitor/deployment && nano .env"
-# Replace STATUS_MONITOR_ADMIN_HASH=...
+ssh your-server "cd /opt/uptimepage/deployment && nano .env"
+# Replace UPTIMEPAGE_ADMIN_HASH=...
 
 # Reload Caddy (no downtime)
-ssh your-server "cd /opt/status-monitor/deployment && docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile"
+ssh your-server "cd /opt/uptimepage/deployment && docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile"
 ```
 
 ### `HETZNER_DNS_API_TOKEN`
@@ -132,7 +132,7 @@ ssh your-server "cd /opt/status-monitor/deployment && docker compose exec caddy 
 ```bash
 # Create a new token at https://dns.hetzner.com/settings/api-token
 # Update .env, then restart caddy:
-ssh your-server "cd /opt/status-monitor/deployment && docker compose up -d caddy"
+ssh your-server "cd /opt/uptimepage/deployment && docker compose up -d caddy"
 # Verify the wildcard cert still works:
 curl https://acme.your-domain.com/
 # Once verified, revoke the old token in the Hetzner console
@@ -144,8 +144,8 @@ Most disruptive — users may need to sign in again.
 
 1. GitHub → Settings → Developer settings → OAuth Apps → status-monitor →
    Generate a new client secret
-2. Update `STATUS_MONITOR_AUTH__GITHUB__CLIENT_SECRET` in `.env`
-3. Restart the app: `docker compose up -d status-monitor`
+2. Update `UPTIMEPAGE_AUTH__GITHUB__CLIENT_SECRET` in `.env`
+3. Restart the app: `docker compose up -d uptimepage`
 4. Test sign-in
 5. Delete the old secret in GitHub
 
@@ -169,7 +169,7 @@ is actually needed.
 all stored target credentials unreadable.
 
 1. Add the new KEK alongside the old one as
-   `STATUS_MONITOR_SECURITY__SECONDARY_KEK_BASE64`
+   `UPTIMEPAGE_SECURITY__SECONDARY_KEK_BASE64`
 2. Deploy a version that decrypts with either key and re-encrypts with the
    new one
 3. Wait until all data is re-encrypted (monitor the metric)

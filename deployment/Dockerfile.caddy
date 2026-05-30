@@ -1,4 +1,4 @@
-# Custom Caddy image for status-monitor.
+# Custom Caddy image for uptimepage.
 #
 # The stock `caddy:2-alpine` ships neither plugin we need:
 #   * caddy-dns/hetzner/v2 — DNS-01 solver, required for the wildcard

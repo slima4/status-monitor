@@ -130,7 +130,7 @@ For a production deployment with TLS, basic auth, and proper hardening (Caddy ed
 
 ```bash
 cargo build --release
-./target/release/status-monitor
+./target/release/uptimepage
 ```
 
 Requires Postgres and ClickHouse reachable at the URLs in `config/default.toml`. To run against the compose stack without rebuilding the container:
@@ -240,7 +240,7 @@ Requires Rust 1.95+ (edition 2024). Install via `rustup`. Fast dev loop runs the
 
 ```bash
 docker compose -f compose.dev.yml up -d
-cargo run --bin status-monitor
+cargo run --bin uptimepage
 ```
 
 See [docs/development.md](docs/development.md) for the host vs. docker workflow, log level overrides, seeding a target, and tests.

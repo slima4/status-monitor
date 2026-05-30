@@ -19,8 +19,8 @@
 #
 # Env overrides:
 #   SLUG          org slug to seed onto       (default: devorg)
-#   PG_CONTAINER  postgres container name     (default: status-monitor-postgres-1)
-#   CH_CONTAINER  clickhouse container name   (default: status-monitor-clickhouse-1)
+#   PG_CONTAINER  postgres container name     (default: uptimepage-postgres-1)
+#   CH_CONTAINER  clickhouse container name   (default: uptimepage-clickhouse-1)
 #   BASE_DOMAIN   for the printed URL         (default: lvh.me)
 #
 # Requires `just up-app` + `just dev-login` first (org must already exist) and
@@ -30,8 +30,8 @@
 set -euo pipefail
 
 SLUG="${SLUG:-devorg}"
-PG_CONTAINER="${PG_CONTAINER:-status-monitor-postgres-1}"
-CH_CONTAINER="${CH_CONTAINER:-status-monitor-clickhouse-1}"
+PG_CONTAINER="${PG_CONTAINER:-uptimepage-postgres-1}"
+CH_CONTAINER="${CH_CONTAINER:-uptimepage-clickhouse-1}"
 BASE_DOMAIN="${BASE_DOMAIN:-lvh.me}"
 
 pg() { docker exec -i "$PG_CONTAINER" psql -U monitor -d monitor -v ON_ERROR_STOP=1 "$@"; }

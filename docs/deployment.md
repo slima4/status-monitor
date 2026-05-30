@@ -63,8 +63,8 @@ Setup:
    api_key = "re_…"
    ```
 
-   Or via env: `STATUS_MONITOR_EMAIL__PROVIDER=resend`,
-   `STATUS_MONITOR_EMAIL__RESEND__API_KEY=re_…`.
+   Or via env: `UPTIMEPAGE_EMAIL__PROVIDER=resend`,
+   `UPTIMEPAGE_EMAIL__RESEND__API_KEY=re_…`.
 4. `auth.public_base_url` must be set to the externally-reachable origin
    (e.g. `https://status.acme.test`); the value is embedded in the links
    the recipient receives.
@@ -106,23 +106,23 @@ For the operator workflow (enabling components, narrating incidents, scheduling 
 `docker compose up -d` brings up Postgres 17, ClickHouse 26.3, and the monitor on the same network. Compose env vars wire the monitor to the stack:
 
 ```yaml
-STATUS_MONITOR_STORAGE__POSTGRES__URL: postgres://monitor:monitor@postgres:5432/monitor
-STATUS_MONITOR_STORAGE__CLICKHOUSE__URL: http://clickhouse:8123
-STATUS_MONITOR_STORAGE__CLICKHOUSE__USER: monitor
-STATUS_MONITOR_STORAGE__CLICKHOUSE__PASSWORD: monitor
-STATUS_MONITOR_OBSERVABILITY__LOG_FORMAT: json
+UPTIMEPAGE_STORAGE__POSTGRES__URL: postgres://monitor:monitor@postgres:5432/monitor
+UPTIMEPAGE_STORAGE__CLICKHOUSE__URL: http://clickhouse:8123
+UPTIMEPAGE_STORAGE__CLICKHOUSE__USER: monitor
+UPTIMEPAGE_STORAGE__CLICKHOUSE__PASSWORD: monitor
+UPTIMEPAGE_OBSERVABILITY__LOG_FORMAT: json
 ```
 
-The runtime image is `gcr.io/distroless/static-debian12:nonroot` for a minimal attack surface, no shell, and no glibc. Built from a static musl binary via `rust:1-alpine`. Final image is **16 MB** — both `status-monitor` and `loadtest` binaries fit in the same image.
+The runtime image is `gcr.io/distroless/static-debian12:nonroot` for a minimal attack surface, no shell, and no glibc. Built from a static musl binary via `rust:1-alpine`. Final image is **16 MB** — both `uptimepage` and `loadtest` binaries fit in the same image.
 
 ## Bind addresses
 
 Defaults are loopback (`127.0.0.1:8080` API, `127.0.0.1:9090` metrics). Override via env for non-loopback exposure:
 
 ```bash
-STATUS_MONITOR_SERVER__API_BIND=0.0.0.0:8080 \
-STATUS_MONITOR_SERVER__METRICS_BIND=0.0.0.0:9090 \
-./status-monitor
+UPTIMEPAGE_SERVER__API_BIND=0.0.0.0:8080 \
+UPTIMEPAGE_SERVER__METRICS_BIND=0.0.0.0:9090 \
+./uptimepage
 ```
 
 There is no built-in auth on the API port. Front it with a proxy or keep it on a private network. The ready-made Caddy stack under [`deployment/`](#production-deployment-with-caddy--basic-auth) does this for you.

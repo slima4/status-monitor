@@ -25,8 +25,8 @@
 #
 # Env overrides:
 #   SLUG          org slug to seed onto       (default: devorg)
-#   PG_CONTAINER  postgres container name     (default: status-monitor-postgres-1)
-#   CH_CONTAINER  clickhouse container name   (default: status-monitor-clickhouse-1)
+#   PG_CONTAINER  postgres container name     (default: uptimepage-postgres-1)
+#   CH_CONTAINER  clickhouse container name   (default: uptimepage-clickhouse-1)
 #   BASE_DOMAIN   for the printed URL         (default: lvh.me)
 #   RESET_CH      0 = skip purge (CH rows from prior runs accumulate); the
 #                 ClickHouse inserts below are NOT idempotent on timestamp,
@@ -38,8 +38,8 @@
 set -euo pipefail
 
 SLUG="${SLUG:-devorg}"
-PG_CONTAINER="${PG_CONTAINER:-status-monitor-postgres-1}"
-CH_CONTAINER="${CH_CONTAINER:-status-monitor-clickhouse-1}"
+PG_CONTAINER="${PG_CONTAINER:-uptimepage-postgres-1}"
+CH_CONTAINER="${CH_CONTAINER:-uptimepage-clickhouse-1}"
 BASE_DOMAIN="${BASE_DOMAIN:-lvh.me}"
 RESET_CH="${RESET_CH:-1}"
 
@@ -704,7 +704,7 @@ fi
 echo
 echo "## Operator Monitors page render"
 monitors_url="http://app.${BASE_DOMAIN}:8080/targets"
-cookies_file="${HOME}/.status-monitor-dev-cookies"
+cookies_file="${HOME}/.uptimepage-dev-cookies"
 curl_auth=()
 if [[ -f "$cookies_file" ]]; then
   curl_auth=(-b "$cookies_file")

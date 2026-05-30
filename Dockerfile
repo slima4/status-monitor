@@ -74,8 +74,8 @@ COPY --from=builder /out/loadtest /usr/local/bin/loadtest
 COPY --from=builder /usr/src/uptimepage/config /app/config
 COPY --from=builder /usr/src/uptimepage/migrations /app/migrations
 
-ENV STATUS_MONITOR_SERVER__API_BIND=0.0.0.0:8080 \
-    STATUS_MONITOR_SERVER__METRICS_BIND=0.0.0.0:9090
+ENV UPTIMEPAGE_SERVER__API_BIND=0.0.0.0:8080 \
+    UPTIMEPAGE_SERVER__METRICS_BIND=0.0.0.0:9090
 
 EXPOSE 8080 9090
 USER nonroot

@@ -1,10 +1,10 @@
 # Configuration
 
-Defaults live in `config/default.toml`. Every key can be overridden by an environment variable using the prefix `STATUS_MONITOR_` and `__` as the nested separator.
+Defaults live in `config/default.toml`. Every key can be overridden by an environment variable using the prefix `UPTIMEPAGE_` and `__` as the nested separator.
 
-Example: `STATUS_MONITOR_SERVER__API_BIND=0.0.0.0:8080`
+Example: `UPTIMEPAGE_SERVER__API_BIND=0.0.0.0:8080`
 
-Override `STATUS_MONITOR_CONFIG_PATH` to point at an alternate base config file.
+Override `UPTIMEPAGE_CONFIG_PATH` to point at an alternate base config file.
 
 ## Sections
 
@@ -136,7 +136,7 @@ base_domain = ""                       # REQUIRED when subdomain_public_routes =
 cache_max_orgs = 1000                  # hot + last-good cache bound
 cache_ttl_secs = 10                    # per-org rendered-page TTL
 last_good_ttl_secs = 3600              # idle eviction for the stale-fallback layer
-logo_dir = "/var/lib/status-monitor/logos"
+logo_dir = "/var/lib/uptimepage/logos"
 max_logo_size_bytes = 1048576          # 1 MiB byte ceiling (pre-decode)
 allowed_logo_mime_types = ["image/png", "image/jpeg", "image/webp"]
 max_logo_dimension_px = 1200           # larger uploads are downscaled; decode
@@ -195,7 +195,7 @@ trace_sample_ratio = 0.05              # parent-based head sampling, [0.0, 1.0]
 | `grafana.enabled` | second switch (kept separate so the block is inert until explicitly turned on) |
 | `grafana.otlp_endpoint` | OTLP/HTTP **base** URL; the service appends `/v1/traces` (a value already ending in it is left as-is). Empty fails boot when export is on |
 | `grafana.instance_id` | basic-auth username (Grafana Cloud instance id). Empty fails boot when export is on |
-| `grafana.api_key` | basic-auth password. **Env-only**: `STATUS_MONITOR_OBSERVABILITY__GRAFANA__API_KEY`. Never read from a config file; redacted in any serialised config |
+| `grafana.api_key` | basic-auth password. **Env-only**: `UPTIMEPAGE_OBSERVABILITY__GRAFANA__API_KEY`. Never read from a config file; redacted in any serialised config |
 | `grafana.trace_sample_ratio` | head sampling ratio under a parent-based sampler. Must be in `[0.0, 1.0]` or boot fails |
 
 Auth is `Authorization: Basic base64(instance_id:api_key)`. Resource

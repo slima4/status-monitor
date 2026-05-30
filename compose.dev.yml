@@ -15,6 +15,7 @@
 #   docker compose -f compose.dev.yml down
 # Tear down + wipe data:
 #   docker compose -f compose.dev.yml down -v
+name: uptimepage
 services:
   postgres:
     image: postgres:17-alpine

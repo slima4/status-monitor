@@ -16,14 +16,14 @@
 #   SLUG          org slug                (default: devorg)
 #   ORG_NAME      org display name        (default: Dev Org)
 #   TOKEN         session cookie value    (default: devsession-localtest-0000000000)
-#   PG_CONTAINER  postgres container name (default: status-monitor-postgres-1)
+#   PG_CONTAINER  postgres container name (default: uptimepage-postgres-1)
 set -euo pipefail
 
 EMAIL="${EMAIL:-dev@local.test}"
 SLUG="${SLUG:-devorg}"
 ORG_NAME="${ORG_NAME:-Dev Org}"
 TOKEN="${TOKEN:-devsession-localtest-0000000000}"
-PG_CONTAINER="${PG_CONTAINER:-status-monitor-postgres-1}"
+PG_CONTAINER="${PG_CONTAINER:-uptimepage-postgres-1}"
 BASE_URL="${BASE_URL:-http://app.lvh.me:8080}"
 
 pg() { docker exec -i "$PG_CONTAINER" psql -U monitor -d monitor -v ON_ERROR_STOP=1 "$@"; }

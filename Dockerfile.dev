@@ -7,7 +7,7 @@
 
 FROM rust:1-alpine
 
-WORKDIR /usr/src/status-monitor
+WORKDIR /usr/src/uptimepage
 
 ENV CARGO_TERM_COLOR=never \
     CARGO_INCREMENTAL=1
@@ -30,4 +30,4 @@ EXPOSE 8080 9090
 # cargo-watch re-runs on src/templates/static/migrations changes. The
 # `-i bin/` rule avoids restart loops when build.rs writes tailwindcss into
 # bin/ on first run.
-CMD ["cargo", "watch", "-i", "bin/*", "-i", "static/css/app.css", "-x", "run --bin status-monitor"]
+CMD ["cargo", "watch", "-i", "bin/*", "-i", "static/css/app.css", "-x", "run --bin uptimepage"]

@@ -30,7 +30,7 @@ docker compose -f compose.dev.yml up -d
 Run the binary natively:
 
 ```bash
-cargo run --bin status-monitor
+cargo run --bin uptimepage
 ```
 
 `config/default.toml` already points at `localhost:5432` and `localhost:8123`,
@@ -57,7 +57,7 @@ volumes, so they persist across restarts and don't clash with the host build.
 
 ```bash
 docker compose -f compose.dev.yml --profile dev-app up -d --build
-docker compose -f compose.dev.yml logs -f status-monitor
+docker compose -f compose.dev.yml logs -f uptimepage
 ```
 
 First run takes ~3 min (toolchain + cargo-watch install + cold build + Tailwind
@@ -70,13 +70,13 @@ Don't combine this with `cargo run` on the host — both bind 8080.
 Stop just the app (keep pg + ch up):
 
 ```bash
-docker compose -f compose.dev.yml stop status-monitor
+docker compose -f compose.dev.yml stop uptimepage
 ```
 
 ### Docker prod-shape workflow (full stack via Dockerfile)
 
 ```bash
-docker compose up -d --build status-monitor
+docker compose up -d --build uptimepage
 ```
 
 The `Dockerfile` uses [`cargo-chef`](https://github.com/LukeMathWalker/cargo-chef)
@@ -198,13 +198,13 @@ Then visit:
 `docker-compose.yml` sets the default level to:
 
 ```
-status_monitor=debug,sqlx=warn,hyper=warn,tower_http=info,info
+uptimepage=debug,sqlx=warn,hyper=warn,tower_http=info,info
 ```
 
 For the host workflow, pass it directly:
 
 ```bash
-RUST_LOG="status_monitor=debug,sqlx=warn" cargo run --bin status-monitor
+RUST_LOG="uptimepage=debug,sqlx=warn" cargo run --bin uptimepage
 ```
 
 `RUST_LOG` always wins over the config file. Anyhow errors are printed with
@@ -214,7 +214,7 @@ without re-running with backtraces.
 Stream container logs:
 
 ```bash
-docker compose logs -f status-monitor
+docker compose logs -f uptimepage
 ```
 
 ## Faster builds
@@ -293,6 +293,6 @@ build picks it up via the `@source` directive in `static/css/input.css`.
 
 | Symptom | Likely cause |
 |---|---|
-| `503 STATUS_DATA_UNAVAILABLE` | Aggregator's first compute failed. Check `status_monitor::public_status::cache` ERROR log for the actual SQL/CH error. |
+| `503 STATUS_DATA_UNAVAILABLE` | Aggregator's first compute failed. Check `uptimepage::public_status::cache` ERROR log for the actual SQL/CH error. |
 | `docker compose up --build` takes 5 min on every change | You're on the pre-cargo-chef Dockerfile. Pull latest. |
 | Native `cargo run` fails with `Connection refused` | `compose.dev.yml` isn't up, or you forgot to release port 8080 from a running container. |

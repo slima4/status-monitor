@@ -11,7 +11,7 @@
 
 // Scrape the in-binary Prometheus endpoint over the internal docker
 // network. The service binds metrics on 0.0.0.0:9090 inside the
-// container (set via STATUS_MONITOR_SERVER__METRICS_BIND in compose) so
+// container (set via UPTIMEPAGE_SERVER__METRICS_BIND in compose) so
 // a separate container can reach it; the port is never published to the
 // host.
 prometheus.scrape "status_monitor" {

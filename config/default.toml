@@ -79,7 +79,7 @@ gauge_sample_interval_ms = 1000
 # OTLP trace export to Grafana Cloud (or any OTLP/HTTP collector).
 # Active only when observability.tracing_enabled AND grafana.enabled are
 # both true. api_key is NEVER set here — supply it via the env var
-# STATUS_MONITOR_OBSERVABILITY__GRAFANA__API_KEY.
+# UPTIMEPAGE_OBSERVABILITY__GRAFANA__API_KEY.
 [observability.grafana]
 enabled = false
 otlp_endpoint = ""           # base, no /v1/traces suffix; e.g.
@@ -195,7 +195,7 @@ enabled_methods = ["github_oauth"]
 # GENERATE WITH: openssl rand -base64 32
 # LOAD-BEARING: rotating this re-fragments anomaly-detection windows. The
 # startup guard refuses to boot on a mismatch unless
-# STATUS_MONITOR_AUTH_ACCEPT_SALT_ROTATION=1 is set.
+# UPTIMEPAGE_AUTH_ACCEPT_SALT_ROTATION=1 is set.
 fingerprint_salt = ""
 
 [auth.session]

@@ -1,6 +1,7 @@
 # Local development only. Ports are published to the host and there is no
 # auth in front of the API. For production (TLS + basic auth + internal-only
 # databases), see ./deployment/.
+name: uptimepage
 services:
   postgres:
     image: postgres:17-alpine

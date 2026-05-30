@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <!--
-  Authoritative `default` user password for status-monitor.
+  Authoritative `default` user password for uptimepage.
 
   The clickhouse image only seeds CLICKHOUSE_PASSWORD on the FIRST
   volume init. A password added/changed after clickhouse_data already

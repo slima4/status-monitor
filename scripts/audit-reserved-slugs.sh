@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Audit live DNS labels under `${STATUS_MONITOR_DOMAIN}` against
+# Audit live DNS labels under `${UPTIMEPAGE_DOMAIN}` against
 # `src/domain/reserved_slugs.rs`. Apex-wildcard mode means every operator
 # subdomain shares its parent with `*.${domain}` — any label that resolves
 # but is NOT in the reserved list could be claimed by a user and stand in
@@ -8,7 +8,7 @@
 # Fails (exit 1) if any label resolves but is not reserved.
 #
 # Required:
-#   STATUS_MONITOR_DOMAIN — the apex domain, e.g. uptimepage.dev
+#   UPTIMEPAGE_DOMAIN — the apex domain, e.g. uptimepage.dev
 #
 # Optional:
 #   SUBDOMAIN_PROBES — space-separated extra labels to dig explicitly. The
@@ -22,7 +22,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-domain="${STATUS_MONITOR_DOMAIN:?STATUS_MONITOR_DOMAIN must be set}"
+domain="${UPTIMEPAGE_DOMAIN:?UPTIMEPAGE_DOMAIN must be set}"
 reserved_file="src/domain/reserved_slugs.rs"
 probes="${SUBDOMAIN_PROBES:-app www mail blog docs api status assets cdn static media images img logo www2 wwww mail2 smtp imap pop autodiscover autoconfig dkim dmarc spf _acme-challenge}"
 

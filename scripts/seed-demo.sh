@@ -10,8 +10,8 @@
 #
 # Env overrides:
 #   SLUG          org slug to seed onto       (default: default)
-#   PG_CONTAINER  postgres container name     (default: status-monitor-postgres-1)
-#   CH_CONTAINER  clickhouse container name   (default: status-monitor-clickhouse-1)
+#   PG_CONTAINER  postgres container name     (default: uptimepage-postgres-1)
+#   CH_CONTAINER  clickhouse container name   (default: uptimepage-clickhouse-1)
 #   BASE_DOMAIN   for the printed URL         (default: lvh.me)
 #   RESET_CH      1 = purge org's CH rows first (default: 0)
 #
@@ -20,8 +20,8 @@
 set -euo pipefail
 
 SLUG="${SLUG:-default}"
-PG_CONTAINER="${PG_CONTAINER:-status-monitor-postgres-1}"
-CH_CONTAINER="${CH_CONTAINER:-status-monitor-clickhouse-1}"
+PG_CONTAINER="${PG_CONTAINER:-uptimepage-postgres-1}"
+CH_CONTAINER="${CH_CONTAINER:-uptimepage-clickhouse-1}"
 BASE_DOMAIN="${BASE_DOMAIN:-lvh.me}"
 RESET_CH="${RESET_CH:-0}"
 

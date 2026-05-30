@@ -43,7 +43,7 @@ docs go live:
 
 | Item | Status |
 |---|---|
-| Project name | brand `uptimepage`; Rust crate/binary kept `status-monitor` |
+| Project name | `uptimepage` (brand + Rust crate/binary); legal entity stays `status-monitor-inc` until incorporation |
 | Contact / abuse / security email | `slima4.u8@gmail.com` — **ACTION:** confirm this mailbox is actively monitored (consider role aliases `abuse@`, `security@` that forward to it) |
 | Operator (legal entity) | `status-monitor-inc`, Nicosia, Cyprus — **ACTION:** add registered company number / VAT ID if the entity is incorporated |
 | Hosting location | Hetzner, Nürnberg, Germany — stated in Privacy Policy §6 and Impressum |

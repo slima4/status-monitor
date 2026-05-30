@@ -69,7 +69,7 @@ logs:
 # export RUST_LOG to override. Mirrors the dev-app container's filter so
 # native and in-container logs match.
 run:
-    RUST_LOG="${RUST_LOG:-status_monitor=debug,sqlx=warn,hyper=warn,tower_http=info,info}" \
+    RUST_LOG="${RUST_LOG:-uptimepage=debug,sqlx=warn,hyper=warn,tower_http=info,info}" \
         cargo run --bin uptimepage
 
 build:

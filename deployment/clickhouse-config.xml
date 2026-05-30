@@ -1,8 +1,8 @@
 <?xml version="1.0"?>
 <!--
-  ClickHouse production config for status-monitor.
+  ClickHouse production config for uptimepage.
 
-  Target: deploy on a 4 GB RAM VM with PostgreSQL + Caddy + status-monitor.
+  Target: deploy on a 4 GB RAM VM with PostgreSQL + Caddy + uptimepage.
   Default ClickHouse will easily consume 8+ GB; these settings cap it
   around 2 GB so the rest of the stack has room to breathe.
 

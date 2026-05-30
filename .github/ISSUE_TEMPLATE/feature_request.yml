@@ -14,7 +14,7 @@ body:
     id: problem
     attributes:
       label: What's the problem?
-      description: What are you trying to do that status-monitor doesn't support today?
+      description: What are you trying to do that uptimepage doesn't support today?
       placeholder: I run separate status pages for my public cloud and my enterprise clients, but I can only create one.
     validations:
       required: true
