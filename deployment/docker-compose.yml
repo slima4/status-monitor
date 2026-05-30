@@ -1,7 +1,7 @@
-# Production stack for status-monitor
+# Production stack for uptimepage
 #
 # Layout:
-#   Internet → Caddy (TLS, rate-limit) → status-monitor (no public ports)
+#   Internet → Caddy (TLS, rate-limit) → uptimepage (no public ports)
 #                                      → PostgreSQL  (no public ports)
 #                                      → ClickHouse  (no public ports)
 #
@@ -13,10 +13,10 @@
 # are never exposed.
 #
 # Required env vars in .env (see .env.example):
-#   STATUS_MONITOR_DOMAIN, STATUS_MONITOR_ACME_EMAIL, HETZNER_DNS_API_TOKEN,
-#   POSTGRES_PASSWORD, CLICKHOUSE_PASSWORD, STATUS_MONITOR_CREDENTIALS_KEK_BASE64
+#   UPTIMEPAGE_DOMAIN, UPTIMEPAGE_ACME_EMAIL, HETZNER_DNS_API_TOKEN,
+#   POSTGRES_PASSWORD, CLICKHOUSE_PASSWORD, UPTIMEPAGE_CREDENTIALS_KEK_BASE64
 
-name: status-monitor
+name: uptimepage
 
 services:
   caddy:
@@ -25,15 +25,15 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.caddy
-    image: status-monitor-caddy:2
+    image: uptimepage-caddy:2
     restart: unless-stopped
     ports:
       - "80:80"
       - "443:443"
       - "443:443/udp"   # HTTP/3
     environment:
-      STATUS_MONITOR_DOMAIN: ${STATUS_MONITOR_DOMAIN}
-      STATUS_MONITOR_ACME_EMAIL: ${STATUS_MONITOR_ACME_EMAIL}
+      UPTIMEPAGE_DOMAIN: ${UPTIMEPAGE_DOMAIN}
+      UPTIMEPAGE_ACME_EMAIL: ${UPTIMEPAGE_ACME_EMAIL}
       HETZNER_DNS_API_TOKEN: ${HETZNER_DNS_API_TOKEN}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
@@ -41,7 +41,7 @@ services:
       - caddy_config:/config
       - caddy_logs:/var/log/caddy
     depends_on:
-      status-monitor:
+      uptimepage:
         condition: service_started
     healthcheck:
       # Caddy's admin API (plaintext, always up while Caddy runs). Use the
@@ -54,70 +54,70 @@ services:
       timeout: 5s
       retries: 3
 
-  status-monitor:
+  uptimepage:
     # Build from repo root by default; override with a pre-built image by setting
-    # STATUS_MONITOR_IMAGE=ghcr.io/you/status-monitor:v1.2.3 in .env.
+    # UPTIMEPAGE_IMAGE=ghcr.io/you/uptimepage:v1.2.3 in .env.
     build:
       context: ..
       dockerfile: Dockerfile
-    image: ${STATUS_MONITOR_IMAGE:-status-monitor:latest}
+    image: ${UPTIMEPAGE_IMAGE:-uptimepage:latest}
     restart: unless-stopped
     # No `ports:` — only reachable via the internal network.
     expose:
       - "8080"   # API + UI
       - "9090"   # Prometheus metrics (scrape on internal network only)
     environment:
-      STATUS_MONITOR_STORAGE__POSTGRES__URL: postgres://monitor:${POSTGRES_PASSWORD}@postgres:5432/monitor
-      STATUS_MONITOR_STORAGE__CLICKHOUSE__URL: http://clickhouse:8123
-      STATUS_MONITOR_STORAGE__CLICKHOUSE__USER: default
-      STATUS_MONITOR_STORAGE__CLICKHOUSE__PASSWORD: ${CLICKHOUSE_PASSWORD}
-      STATUS_MONITOR_STORAGE__CLICKHOUSE__DATABASE: monitor
-      STATUS_MONITOR_SECURITY__CREDENTIALS_KEK_BASE64: ${STATUS_MONITOR_CREDENTIALS_KEK_BASE64}
-      STATUS_MONITOR_SECURITY__TRUSTED_PROXIES: ${STATUS_MONITOR_SECURITY__TRUSTED_PROXIES:-172.16.0.0/12,127.0.0.0/8,::1/128}
-      STATUS_MONITOR_OBSERVABILITY__LOG_FORMAT: json
+      UPTIMEPAGE_STORAGE__POSTGRES__URL: postgres://monitor:${POSTGRES_PASSWORD}@postgres:5432/monitor
+      UPTIMEPAGE_STORAGE__CLICKHOUSE__URL: http://clickhouse:8123
+      UPTIMEPAGE_STORAGE__CLICKHOUSE__USER: default
+      UPTIMEPAGE_STORAGE__CLICKHOUSE__PASSWORD: ${CLICKHOUSE_PASSWORD}
+      UPTIMEPAGE_STORAGE__CLICKHOUSE__DATABASE: monitor
+      UPTIMEPAGE_SECURITY__CREDENTIALS_KEK_BASE64: ${UPTIMEPAGE_CREDENTIALS_KEK_BASE64}
+      UPTIMEPAGE_SECURITY__TRUSTED_PROXIES: ${UPTIMEPAGE_SECURITY__TRUSTED_PROXIES:-172.16.0.0/12,127.0.0.0/8,::1/128}
+      UPTIMEPAGE_OBSERVABILITY__LOG_FORMAT: json
       # Bind metrics on all interfaces *inside* the container so the
       # optional Alloy sidecar (a separate container) can scrape it over
       # the internal docker network. Still never published to the host:
       # there is no `ports:` mapping for 9090, only `expose`. /metrics
       # has no auth, so it must stay internal-only.
-      STATUS_MONITOR_SERVER__METRICS_BIND: 0.0.0.0:9090
+      UPTIMEPAGE_SERVER__METRICS_BIND: 0.0.0.0:9090
       # Optional in-app OTLP trace export to Grafana Cloud (or any OTLP
       # collector). Off unless all of these are set in .env. Distinct
       # from the Alloy metrics path above — traces go straight from the
       # app to the OTLP gateway. The API token is a secret (env only).
-      STATUS_MONITOR_OBSERVABILITY__TRACING_ENABLED: ${STATUS_MONITOR_TRACING_ENABLED:-false}
-      STATUS_MONITOR_OBSERVABILITY__GRAFANA__ENABLED: ${GRAFANA_OTLP_ENABLED:-false}
-      STATUS_MONITOR_OBSERVABILITY__GRAFANA__OTLP_ENDPOINT: ${GRAFANA_OTLP_ENDPOINT:-}
-      STATUS_MONITOR_OBSERVABILITY__GRAFANA__INSTANCE_ID: ${GRAFANA_OTLP_INSTANCE_ID:-}
-      STATUS_MONITOR_OBSERVABILITY__GRAFANA__API_KEY: ${GRAFANA_OTLP_API_TOKEN:-}
+      UPTIMEPAGE_OBSERVABILITY__TRACING_ENABLED: ${UPTIMEPAGE_TRACING_ENABLED:-false}
+      UPTIMEPAGE_OBSERVABILITY__GRAFANA__ENABLED: ${GRAFANA_OTLP_ENABLED:-false}
+      UPTIMEPAGE_OBSERVABILITY__GRAFANA__OTLP_ENDPOINT: ${GRAFANA_OTLP_ENDPOINT:-}
+      UPTIMEPAGE_OBSERVABILITY__GRAFANA__INSTANCE_ID: ${GRAFANA_OTLP_INSTANCE_ID:-}
+      UPTIMEPAGE_OBSERVABILITY__GRAFANA__API_KEY: ${GRAFANA_OTLP_API_TOKEN:-}
       # Public-status surface routing. `path_based` serves `/status/<slug>` on
       # the operator host. `subdomain` serves per-org pages on
       # `{slug}.{public_status.base_domain}` (apex wildcard). base_domain
-      # reuses STATUS_MONITOR_DOMAIN so {slug}.{domain} resolves via the
+      # reuses UPTIMEPAGE_DOMAIN so {slug}.{domain} resolves via the
       # Caddy apex wildcard; only consulted when SUBDOMAIN_PUBLIC_ROUTES is
       # true.
-      STATUS_MONITOR_TENANCY__PATH_BASED_PUBLIC_ROUTES: ${STATUS_MONITOR_PATH_BASED_PUBLIC_ROUTES:-true}
-      STATUS_MONITOR_TENANCY__SUBDOMAIN_PUBLIC_ROUTES: ${STATUS_MONITOR_SUBDOMAIN_PUBLIC_ROUTES:-false}
-      STATUS_MONITOR_PUBLIC_STATUS__BASE_DOMAIN: ${STATUS_MONITOR_DOMAIN}
+      UPTIMEPAGE_TENANCY__PATH_BASED_PUBLIC_ROUTES: ${UPTIMEPAGE_PATH_BASED_PUBLIC_ROUTES:-true}
+      UPTIMEPAGE_TENANCY__SUBDOMAIN_PUBLIC_ROUTES: ${UPTIMEPAGE_SUBDOMAIN_PUBLIC_ROUTES:-false}
+      UPTIMEPAGE_PUBLIC_STATUS__BASE_DOMAIN: ${UPTIMEPAGE_DOMAIN}
       # Session-fingerprint salt. REQUIRED — boot refuses to start with an
       # empty salt.
-      STATUS_MONITOR_AUTH__FINGERPRINT_SALT: ${STATUS_MONITOR_AUTH_FINGERPRINT_SALT:-}
+      UPTIMEPAGE_AUTH__FINGERPRINT_SALT: ${UPTIMEPAGE_AUTH_FINGERPRINT_SALT:-}
       # GitHub OAuth — the operator login method (the app owns auth; there is
       # no edge basic_auth). client_id is public; client_secret is a secret.
       # redirect_url must exactly match the OAuth App's callback URL;
       # public_base_url is the external origin used to build OAuth/redirect
       # and emailed links.
-      STATUS_MONITOR_AUTH__GITHUB__CLIENT_ID: ${STATUS_MONITOR_AUTH_GITHUB_CLIENT_ID:-}
-      STATUS_MONITOR_AUTH__GITHUB__CLIENT_SECRET: ${STATUS_MONITOR_AUTH_GITHUB_CLIENT_SECRET:-}
-      STATUS_MONITOR_AUTH__GITHUB__REDIRECT_URL: ${STATUS_MONITOR_AUTH_GITHUB_REDIRECT_URL:-}
-      STATUS_MONITOR_AUTH__PUBLIC_BASE_URL: ${STATUS_MONITOR_AUTH_PUBLIC_BASE_URL:-}
+      UPTIMEPAGE_AUTH__GITHUB__CLIENT_ID: ${UPTIMEPAGE_AUTH_GITHUB_CLIENT_ID:-}
+      UPTIMEPAGE_AUTH__GITHUB__CLIENT_SECRET: ${UPTIMEPAGE_AUTH_GITHUB_CLIENT_SECRET:-}
+      UPTIMEPAGE_AUTH__GITHUB__REDIRECT_URL: ${UPTIMEPAGE_AUTH_GITHUB_REDIRECT_URL:-}
+      UPTIMEPAGE_AUTH__PUBLIC_BASE_URL: ${UPTIMEPAGE_AUTH_PUBLIC_BASE_URL:-}
       # Marketing site (apex + www). Disabled by default — the binary
       # serves only the operator + tenant surfaces unless this is true.
       # RouteByHost dispatches `Marketing` hosts only when enabled here.
-      STATUS_MONITOR_MARKETING__ENABLED: ${STATUS_MONITOR_MARKETING__ENABLED:-false}
-      STATUS_MONITOR_MARKETING__APP_URL: ${STATUS_MONITOR_MARKETING__APP_URL:-}
-      STATUS_MONITOR_MARKETING__CANONICAL_ORIGIN: ${STATUS_MONITOR_MARKETING__CANONICAL_ORIGIN:-}
-      STATUS_MONITOR_MARKETING__BLOG_ENABLED: ${STATUS_MONITOR_MARKETING__BLOG_ENABLED:-false}
+      UPTIMEPAGE_MARKETING__ENABLED: ${UPTIMEPAGE_MARKETING__ENABLED:-false}
+      UPTIMEPAGE_MARKETING__APP_URL: ${UPTIMEPAGE_MARKETING__APP_URL:-}
+      UPTIMEPAGE_MARKETING__CANONICAL_ORIGIN: ${UPTIMEPAGE_MARKETING__CANONICAL_ORIGIN:-}
+      UPTIMEPAGE_MARKETING__BLOG_ENABLED: ${UPTIMEPAGE_MARKETING__BLOG_ENABLED:-false}
       # Effective trace/log filter. tracing reads RUST_LOG before the
       # config file, so this is the authoritative knob; it must be at
       # least `debug` for HTTP request spans (hence OTLP traces) to be
@@ -184,7 +184,7 @@ services:
   # Off by default — only starts under the "metrics" profile:
   #   docker compose --profile metrics up -d
   # Requires GRAFANA_CLOUD_PROM_URL / _PROM_USER / _API_TOKEN in .env.
-  # Scrapes status-monitor:9090 on the internal network and remote-writes
+  # Scrapes uptimepage:9090 on the internal network and remote-writes
   # to Grafana Cloud; nothing new is exposed to the host.
   alloy:
     # Pinned for reproducible production deploys; bump deliberately.
@@ -218,7 +218,7 @@ services:
       # profile only). Rationale in runbooks/grafana-cloud.md.
       - /var/run/docker.sock:/var/run/docker.sock:ro
     depends_on:
-      status-monitor:
+      uptimepage:
         condition: service_started
 
 volumes:

@@ -161,7 +161,7 @@ base_domain = ""
 cache_max_orgs = 1000
 cache_ttl_secs = 10
 last_good_ttl_secs = 3600
-logo_dir = "/var/lib/status-monitor/logos"
+logo_dir = "/var/lib/uptimepage/logos"
 # 1 MiB. Real logos (PNG/JPEG/WebP) routinely exceed 200 KB; the prior
 # 204800 cap rejected ordinary uploads. Decode is still bounded by a
 # dimension + allocation guard (see status_page::process_logo) so a large

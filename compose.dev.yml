@@ -2,13 +2,13 @@
 #
 # 1. Native binary (default — fastest, ~3 s incremental):
 #       docker compose -f compose.dev.yml up -d
-#       cargo run --bin status-monitor
+#       cargo run --bin uptimepage
 #    config/default.toml already points at localhost:5432 and localhost:8123.
 #
-# 2. status-monitor inside docker with live reload (cargo-watch, ~3 s after
+# 2. uptimepage inside docker with live reload (cargo-watch, ~3 s after
 #    the first warm-up; rebuilds happen in-container against a cached target/):
 #       docker compose -f compose.dev.yml --profile dev-app up -d --build
-#       docker compose -f compose.dev.yml logs -f status-monitor
+#       docker compose -f compose.dev.yml logs -f uptimepage
 #    Don't run both modes at once — port 8080 will conflict.
 #
 # Tear down (keeps volumes):
@@ -52,7 +52,7 @@ services:
   # repo so `cargo watch` sees host edits; named volumes for target/, the
   # cargo registry, and bin/ so build artefacts and the linux Tailwind CLI
   # never collide with host (macOS) equivalents.
-  status-monitor:
+  uptimepage:
     profiles: ["dev-app"]
     build:
       context: .
@@ -63,34 +63,34 @@ services:
       clickhouse:
         condition: service_started
     environment:
-      STATUS_MONITOR_STORAGE__POSTGRES__URL: postgres://monitor:monitor@postgres:5432/monitor
-      STATUS_MONITOR_STORAGE__CLICKHOUSE__URL: http://clickhouse:8123
-      STATUS_MONITOR_STORAGE__CLICKHOUSE__USER: monitor
-      STATUS_MONITOR_STORAGE__CLICKHOUSE__PASSWORD: monitor
+      UPTIMEPAGE_STORAGE__POSTGRES__URL: postgres://monitor:monitor@postgres:5432/monitor
+      UPTIMEPAGE_STORAGE__CLICKHOUSE__URL: http://clickhouse:8123
+      UPTIMEPAGE_STORAGE__CLICKHOUSE__USER: monitor
+      UPTIMEPAGE_STORAGE__CLICKHOUSE__PASSWORD: monitor
       # Dev mirrors the prod deployment: per-subdomain public pages.
       # Seed a session with `just dev-login` (scripts/seed-dev-session.sh).
       # lvh.me resolves *.lvh.me -> 127.0.0.1 so {slug}.lvh.me:8080 hits the
       # local stack with no /etc/hosts surgery.
-      STATUS_MONITOR_TENANCY__PATH_BASED_PUBLIC_ROUTES: "false"
-      STATUS_MONITOR_TENANCY__SUBDOMAIN_PUBLIC_ROUTES: "true"
-      STATUS_MONITOR_PUBLIC_STATUS__BASE_DOMAIN: "lvh.me"
+      UPTIMEPAGE_TENANCY__PATH_BASED_PUBLIC_ROUTES: "false"
+      UPTIMEPAGE_TENANCY__SUBDOMAIN_PUBLIC_ROUTES: "true"
+      UPTIMEPAGE_PUBLIC_STATUS__BASE_DOMAIN: "lvh.me"
       # Marketing site on apex (lvh.me) + www.lvh.me. Disabled in prod
       # default; enabled here so visual changes can be inspected at
       # http://lvh.me:8080. Canonical/app URLs point at the prod hosts
       # because the validator requires https — the page renders fine,
       # only the canonical/OG meta tags reference the prod URLs.
-      STATUS_MONITOR_MARKETING__ENABLED: "true"
-      STATUS_MONITOR_MARKETING__APP_URL: "https://app.uptimepage.dev"
-      STATUS_MONITOR_MARKETING__CANONICAL_ORIGIN: "https://uptimepage.dev"
+      UPTIMEPAGE_MARKETING__ENABLED: "true"
+      UPTIMEPAGE_MARKETING__APP_URL: "https://app.uptimepage.dev"
+      UPTIMEPAGE_MARKETING__CANONICAL_ORIGIN: "https://uptimepage.dev"
       # Tenancy boot guards: ip/ua fingerprint salt is mandatory under SaaS.
       # Fixed dev-only value — never used outside the local stack.
-      STATUS_MONITOR_AUTH__FINGERPRINT_SALT: "dev-only-fingerprint-salt-not-for-prod"
+      UPTIMEPAGE_AUTH__FINGERPRINT_SALT: "dev-only-fingerprint-salt-not-for-prod"
       # Browser drops `Secure` cookies over plain HTTP; dev runs HTTP on lvh.me.
-      STATUS_MONITOR_AUTH__SESSION__COOKIE_SECURE: "false"
-      STATUS_MONITOR_OBSERVABILITY__LOG_FORMAT: json
-      STATUS_MONITOR_OBSERVABILITY__LOG_LEVEL: "status_monitor=debug,sqlx=warn,hyper=warn,tower_http=info,info"
-      STATUS_MONITOR_SERVER__API_BIND: "0.0.0.0:8080"
-      STATUS_MONITOR_SERVER__METRICS_BIND: "0.0.0.0:9090"
+      UPTIMEPAGE_AUTH__SESSION__COOKIE_SECURE: "false"
+      UPTIMEPAGE_OBSERVABILITY__LOG_FORMAT: json
+      UPTIMEPAGE_OBSERVABILITY__LOG_LEVEL: "uptimepage=debug,sqlx=warn,hyper=warn,tower_http=info,info"
+      UPTIMEPAGE_SERVER__API_BIND: "0.0.0.0:8080"
+      UPTIMEPAGE_SERVER__METRICS_BIND: "0.0.0.0:9090"
       # Faster cargo-watch rebuilds: mold (via the bind-mounted
       # .cargo/config.toml musl target) + a persistent sccache volume.
       # Dockerfile.dev apk-installs both.
@@ -102,12 +102,12 @@ services:
       # sccache's cross-build cache replaces the incremental win anyway.
       CARGO_INCREMENTAL: "0"
     volumes:
-      - .:/usr/src/status-monitor
+      - .:/usr/src/uptimepage
       - cargo_registry_dev:/usr/local/cargo/registry
-      - target_cache_dev:/usr/src/status-monitor/target
+      - target_cache_dev:/usr/src/uptimepage/target
       - sccache_dev:/sccache
       # Mask host bin/ so build.rs fetches the linux/alpine tailwindcss.
-      - tailwind_bin_dev:/usr/src/status-monitor/bin
+      - tailwind_bin_dev:/usr/src/uptimepage/bin
     ports:
       - "8080:8080"
       - "9090:9090"

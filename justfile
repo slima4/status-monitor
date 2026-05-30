@@ -47,7 +47,7 @@ up:
     docker compose -f compose.dev.yml up -d
     @echo "pg + ch up. run: cargo run --bin uptimepage"
 
-# Bring up the full dev stack incl. status-monitor with live reload.
+# Bring up the full dev stack incl. uptimepage with live reload.
 up-app:
     docker compose -f compose.dev.yml --profile dev-app up -d --build
 
@@ -59,9 +59,9 @@ down:
 down-clean:
     docker compose -f compose.dev.yml --profile dev-app down -v
 
-# Tail status-monitor logs (works for either dev-app or full docker-compose).
+# Tail uptimepage logs (works for either dev-app or full docker-compose).
 logs:
-    docker compose -f compose.dev.yml logs -f status-monitor
+    docker compose -f compose.dev.yml logs -f uptimepage
 
 # ── Build / run ─────────────────────────────────────────────────────────────
 
@@ -119,7 +119,7 @@ db-reset:
         psql -U monitor -d postgres \
         -c "DROP DATABASE IF EXISTS monitor WITH (FORCE);" \
         -c "CREATE DATABASE monitor OWNER monitor;"
-    docker compose -f compose.dev.yml restart status-monitor 2>/dev/null || true
+    docker compose -f compose.dev.yml restart uptimepage 2>/dev/null || true
     @echo "DB reset. App reconnects + re-applies migrations on a fresh schema."
 
 # ── Tests ───────────────────────────────────────────────────────────────────

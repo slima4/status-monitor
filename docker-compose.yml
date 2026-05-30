@@ -34,7 +34,7 @@ services:
         soft: 262144
         hard: 262144
 
-  status-monitor:
+  uptimepage:
     build:
       context: .
     depends_on:
@@ -43,12 +43,12 @@ services:
       clickhouse:
         condition: service_started
     environment:
-      STATUS_MONITOR_STORAGE__POSTGRES__URL: postgres://monitor:monitor@postgres:5432/monitor
-      STATUS_MONITOR_STORAGE__CLICKHOUSE__URL: http://clickhouse:8123
-      STATUS_MONITOR_STORAGE__CLICKHOUSE__USER: monitor
-      STATUS_MONITOR_STORAGE__CLICKHOUSE__PASSWORD: monitor
-      STATUS_MONITOR_OBSERVABILITY__LOG_FORMAT: json
-      STATUS_MONITOR_OBSERVABILITY__LOG_LEVEL: "status_monitor=debug,sqlx=warn,hyper=warn,tower_http=info,info"
+      UPTIMEPAGE_STORAGE__POSTGRES__URL: postgres://monitor:monitor@postgres:5432/monitor
+      UPTIMEPAGE_STORAGE__CLICKHOUSE__URL: http://clickhouse:8123
+      UPTIMEPAGE_STORAGE__CLICKHOUSE__USER: monitor
+      UPTIMEPAGE_STORAGE__CLICKHOUSE__PASSWORD: monitor
+      UPTIMEPAGE_OBSERVABILITY__LOG_FORMAT: json
+      UPTIMEPAGE_OBSERVABILITY__LOG_LEVEL: "uptimepage=debug,sqlx=warn,hyper=warn,tower_http=info,info"
     ports:
       - "8080:8080"
       - "9090:9090"

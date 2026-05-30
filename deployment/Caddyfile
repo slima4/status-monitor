@@ -1,6 +1,6 @@
-# Caddyfile — Production reverse proxy for status-monitor (SaaS layout)
+# Caddyfile — Production reverse proxy for uptimepage (SaaS layout)
 #
-# Subdomain layout (STATUS_MONITOR_DOMAIN is the BASE domain, e.g. example.com):
+# Subdomain layout (UPTIMEPAGE_DOMAIN is the BASE domain, e.g. example.com):
 #   app.{domain}              → Operator UI + API (basic auth), plus the
 #                               single-org /status page in self-host mode
 #   *.{domain}                → Per-org public status pages (wildcard cert,
@@ -21,13 +21,13 @@
 #   - JSON access logs with rotation
 #
 # Required environment variables (see .env.example):
-#   STATUS_MONITOR_DOMAIN       — base domain, e.g. example.com
-#   STATUS_MONITOR_ACME_EMAIL   — for Let's Encrypt notifications
+#   UPTIMEPAGE_DOMAIN       — base domain, e.g. example.com
+#   UPTIMEPAGE_ACME_EMAIL   — for Let's Encrypt notifications
 #
 # Required only for the *.{domain} wildcard surface (SaaS):
 #   HETZNER_DNS_API_TOKEN       — zone-edit token for the DNS-01 challenge
 {
-	email {$STATUS_MONITOR_ACME_EMAIL}
+	email {$UPTIMEPAGE_ACME_EMAIL}
 
 	# No global `acme_dns`: that would force DNS-01 on app.{domain} too and
 	# make self-host depend on a Hetzner token it doesn't need. The DNS-01
@@ -48,7 +48,7 @@
 # ═══════════════════════════════════════════════════════════════════════
 # Operator UI + API
 # ═══════════════════════════════════════════════════════════════════════
-app.{$STATUS_MONITOR_DOMAIN} {
+app.{$UPTIMEPAGE_DOMAIN} {
 	encode gzip zstd
 
 	# ─── Public health endpoints (no auth) ──────────────────────────────
@@ -57,11 +57,11 @@ app.{$STATUS_MONITOR_DOMAIN} {
 	# without credentials.
 	@health path /healthz /readyz
 	handle @health {
-		reverse_proxy status-monitor:8080
+		reverse_proxy uptimepage:8080
 	}
 
 	# ─── Block Prometheus metrics from the public internet ──────────────
-	# status-monitor exposes /metrics on :9090 (separate port), scraped on
+	# uptimepage exposes /metrics on :9090 (separate port), scraped on
 	# the internal docker network only. Return 404 so a misconfigured
 	# Prometheus or curious attacker can't enumerate your fleet.
 	@metrics path /metrics /metrics/*
@@ -87,7 +87,7 @@ app.{$STATUS_MONITOR_DOMAIN} {
 			}
 		}
 		header Cache-Control "public, max-age=10, stale-while-revalidate=30"
-		reverse_proxy status-monitor:8080 {
+		reverse_proxy uptimepage:8080 {
 			header_up X-Real-IP {remote_host}
 			transport http {
 				dial_timeout 5s
@@ -109,7 +109,7 @@ app.{$STATUS_MONITOR_DOMAIN} {
 				window 1m
 			}
 		}
-		reverse_proxy status-monitor:8080 {
+		reverse_proxy uptimepage:8080 {
 			header_up X-Real-IP {remote_host}
 		}
 	}
@@ -127,7 +127,7 @@ app.{$STATUS_MONITOR_DOMAIN} {
 				window 24h
 			}
 		}
-		reverse_proxy status-monitor:8080 {
+		reverse_proxy uptimepage:8080 {
 			header_up X-Real-IP {remote_host}
 		}
 	}
@@ -151,7 +151,7 @@ app.{$STATUS_MONITOR_DOMAIN} {
 				window 1m
 			}
 		}
-		reverse_proxy status-monitor:8080 {
+		reverse_proxy uptimepage:8080 {
 			header_up X-Real-IP {remote_host}
 		}
 	}
@@ -193,7 +193,7 @@ app.{$STATUS_MONITOR_DOMAIN} {
 	}
 
 	# ─── Reverse proxy to the Rust service ──────────────────────────────
-	reverse_proxy status-monitor:8080 {
+	reverse_proxy uptimepage:8080 {
 		# Caddy already forwards X-Forwarded-{For,Proto,Host} by default;
 		# X-Real-IP is the only one we have to set explicitly.
 		header_up X-Real-IP {remote_host}
@@ -229,7 +229,7 @@ app.{$STATUS_MONITOR_DOMAIN} {
 # covers the operator host). The Rust app reads the original Host header to
 # map the slug → org; an unknown or opted-out slug is a 404 from the app,
 # never a cert error (the wildcard cert covers all valid labels).
-*.{$STATUS_MONITOR_DOMAIN} {
+*.{$UPTIMEPAGE_DOMAIN} {
 	encode gzip zstd
 
 	# Wildcard cert via Hetzner DNS-01 (HTTP-01 can't validate a wildcard),
@@ -281,7 +281,7 @@ app.{$STATUS_MONITOR_DOMAIN} {
 	}
 
 	# Forward the original Host so the Rust app can extract the slug.
-	reverse_proxy status-monitor:8080 {
+	reverse_proxy uptimepage:8080 {
 		header_up Host {host}
 		header_up X-Real-IP {remote_host}
 		health_uri /healthz
@@ -302,18 +302,18 @@ app.{$STATUS_MONITOR_DOMAIN} {
 # ═══════════════════════════════════════════════════════════════════════
 # Marketing site (apex + www) — same upstream, host routing in-app.
 # ═══════════════════════════════════════════════════════════════════════
-# The bare {domain} and www.{domain} are served by the same status-monitor
+# The bare {domain} and www.{domain} are served by the same uptimepage
 # container; the Rust dispatcher (web/host.rs::classify_host + the
 # RouteByHost service) hands marketing requests off inside the binary.
 # Two per-host HTTP-01 certs — kept off the *.{domain} wildcard so a
 # wildcard-key leak still doesn't touch the marketing surface or the
 # operator host.
-{$STATUS_MONITOR_DOMAIN}, www.{$STATUS_MONITOR_DOMAIN} {
+{$UPTIMEPAGE_DOMAIN}, www.{$UPTIMEPAGE_DOMAIN} {
 	encode gzip zstd
 
 	# Send the canonical-host signal to the dispatcher. Marketing reads
 	# the Host header to decide between landing and a tenant fall-through.
-	reverse_proxy status-monitor:8080 {
+	reverse_proxy uptimepage:8080 {
 		header_up Host {host}
 		header_up X-Forwarded-Proto {scheme}
 		header_up X-Forwarded-For {remote_host}

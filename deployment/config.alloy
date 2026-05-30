@@ -1,4 +1,4 @@
-// Grafana Alloy — ship status-monitor metrics to Grafana Cloud.
+// Grafana Alloy — ship uptimepage metrics to Grafana Cloud.
 //
 // This runs as an opt-in sidecar in docker-compose.yml under the
 // "metrics" profile. The default `docker compose up -d` does NOT start
@@ -16,7 +16,7 @@
 // host.
 prometheus.scrape "status_monitor" {
   targets = [{
-    __address__ = "status-monitor:9090",
+    __address__ = "uptimepage:9090",
   }]
   forward_to      = [prometheus.remote_write.grafana_cloud.receiver]
   job_name        = "status-monitor"
@@ -52,7 +52,7 @@ prometheus.remote_write "grafana_cloud" {
 // Tails the application container's stdout/stderr through the Docker
 // API and ships it to Grafana Cloud Loki. Container discovery needs the
 // Docker socket, mounted read-only into this sidecar in
-// docker-compose.yml. Only the status-monitor container is shipped — a
+// docker-compose.yml. Only the uptimepage container is shipped — a
 // discovery.relabel `keep` drops postgres / clickhouse / caddy / alloy
 // so Loki ingest stays scoped and cheap.
 //
@@ -82,7 +82,7 @@ discovery.relabel "status_monitor_only" {
 
   rule {
     source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
-    regex         = "status-monitor"
+    regex         = "uptimepage"
     action        = "keep"
   }
 
