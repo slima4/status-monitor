@@ -17,7 +17,7 @@ use uuid::Uuid;
 use crate::domain::{CheckResult, CheckStatus, ExpectedStatus, HttpCheck, HttpMethod};
 use crate::http_client::HttpClients;
 use crate::http_client::connector::{
-    ConnGuard, ConnectError, PhaseTimings, TimedConnection, handshake, timed_connect,
+    ConnGuard, PhaseTimings, TimedConnection, handshake, timed_connect,
 };
 use crate::observability::metrics::names;
 
@@ -144,7 +144,7 @@ async fn do_http_check(
         let params = clients.connect_params(check.verify_tls);
         let remaining = check.timeout.saturating_sub(start.elapsed());
         if remaining.is_zero() {
-            return early("timeout", None);
+            return early("connect timeout", None);
         }
         let connect_budget = params.connect_timeout.min(remaining);
         let TimedConnection {
@@ -154,34 +154,42 @@ async fn do_http_check(
         } = match tokio::time::timeout(connect_budget, timed_connect(&params, host, port, is_https))
             .await
         {
-            Err(_) => return early("timeout", None),
+            Err(_) => return early("connect timeout", None),
             Ok(Err(err)) => {
                 tracing::debug!(target_id = %target_id, hop, error = %err, "http connect failed");
-                return early(classify_connect_error(&err), None);
+                let (dns_ms, connect_ms) = err.partial_timings();
+                let (mut r, _) = early(err.reason(), None);
+                r.dns_ms = dns_ms;
+                r.connect_ms = connect_ms;
+                return (r, None);
             }
             Ok(Ok(c)) => c,
         };
 
+        // Connection up — failures below carry the measured connect timings.
+        let stamp =
+            |reason: &str| timed_error(target_id, org_id, started_at, start, reason, &timings);
+
         let remaining = check.timeout.saturating_sub(start.elapsed());
         if remaining.is_zero() {
-            return early("timeout", None);
+            return stamp("no response");
         }
         let (mut sender, conn_guard) =
             match tokio::time::timeout(remaining, handshake(stream, alpn_h2)).await {
-                Err(_) => return early("timeout", None),
-                Ok(Err(err)) => return early(classify_hyper_error(&err), None),
+                Err(_) => return stamp("no response"),
+                Ok(Err(err)) => return stamp(classify_hyper_error(&err)),
                 Ok(Ok(s)) => s,
             };
 
         let remaining = check.timeout.saturating_sub(start.elapsed());
         if remaining.is_zero() {
-            return early("timeout", None);
+            return stamp("no response");
         }
         let send_start = Instant::now();
         let response = match tokio::time::timeout(remaining, sender.send_request(req)).await {
-            Err(_) => return early("timeout", None),
+            Err(_) => return stamp("no response"),
             Ok(Ok(r)) => r,
-            Ok(Err(err)) => return early(classify_hyper_error(&err), None),
+            Ok(Err(err)) => return stamp(classify_hyper_error(&err)),
         };
         let ttfb_ms = send_start.elapsed().as_millis().min(u16::MAX as u128) as u16;
 
@@ -274,6 +282,29 @@ async fn do_http_check(
     // or the limit-exceeded branch); this is unreachable but keeps the
     // function total without an `unwrap`/`panic`.
     early("too many redirects", None)
+}
+
+/// Post-connect failure carrying the measured connect-phase timings. `ttfb_ms`
+/// stays `None` — no first byte arrived.
+fn timed_error(
+    target_id: Uuid,
+    org_id: Uuid,
+    started_at: chrono::DateTime<Utc>,
+    start: Instant,
+    reason: &str,
+    timings: &PhaseTimings,
+) -> (CheckResult, Option<HttpProbe>) {
+    let mut r = CheckResult::error_with_elapsed(
+        target_id,
+        org_id,
+        started_at,
+        start.elapsed().as_millis() as u32,
+        reason,
+    );
+    r.dns_ms = Some(timings.dns_ms);
+    r.connect_ms = Some(timings.connect_ms);
+    r.tls_ms = timings.tls_ms;
+    (r, None)
 }
 
 /// Collect, decode, and score the final (non-redirect) response.
@@ -606,23 +637,6 @@ fn classify_hyper_error(err: &hyper::Error) -> &'static str {
         return "timeout";
     }
     "transport"
-}
-
-/// Map a typed connect-phase failure to a reason string. TLS handshake
-/// failures keep their own `"tls"` reason so the breakdown attributes them
-/// correctly instead of folding them into a generic connect error.
-fn classify_connect_error(err: &ConnectError) -> &'static str {
-    match err {
-        ConnectError::Dns(_) | ConnectError::NoAddrs => "connect",
-        ConnectError::Connect(io) => {
-            if io.kind() == std::io::ErrorKind::TimedOut || has_timeout_in_chain(io) {
-                "timeout"
-            } else {
-                "connect"
-            }
-        }
-        ConnectError::Tls(_) => "tls",
-    }
 }
 
 // Phrase set is narrow ("timed out" / "deadline") so `connect_timeout=…`

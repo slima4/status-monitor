@@ -206,7 +206,9 @@ WITH s AS (
          -- combinations appear across the 150-row run.
          (ARRAY['minor','major','critical'])[((n-1) % 3) + 1]        AS sev,
          (ARRAY['down','degraded','error'])[((n*2-1) % 3) + 1]       AS sas,
-         (ARRAY['connection refused','timeout','503 service unavailable','dns resolution failed','tls handshake failed','5xx rate breached'])[((n-1) % 6) + 1] AS err,
+         -- Phase-specific reasons the probe now emits (TCP / DNS / TLS); the
+         -- detail view maps `dns: …` to friendlier copy, the rest pass through.
+         (ARRAY['connection refused','connect timeout','dns: domain not found','certificate expired','certificate not trusted','no response'])[((n-1) % 6) + 1] AS err,
          -- 12 distinct titles round-robined for archive variety.
          (ARRAY[
            'Elevated 5xx error rate',
@@ -546,22 +548,31 @@ SELECT toUUID('${ORG}'),toUUID('${T_WEB}'),
        'degraded', 600 + (number * 40), 200
 FROM numbers(30);
 
-INSERT INTO monitor.check_results (org_id,target_id,timestamp,status,duration_ms,response_code,error)
+# Down rows model a TLS-phase failure: DNS + TCP completed (timings present),
+# the handshake was rejected (no tls_ms, no response_code) — exercises the
+# detail view's expandable partial-timing breakdown on a connect failure.
+INSERT INTO monitor.check_results (org_id,target_id,timestamp,status,duration_ms,response_code,error,dns_ms,connect_ms)
 SELECT toUUID('${ORG}'),toUUID('${T_CDN}'),
        now() - toIntervalSecond(number*4),
        if(number % 10 < 3, 'down', 'up'),
        if(number % 10 < 3, 0, 80 + (number % 30)),
-       if(number % 10 < 3, 503, 200),
-       if(number % 10 < 3, 'origin 5xx', NULL)
+       if(number % 10 < 3, NULL, 200),
+       if(number % 10 < 3, 'certificate expired', NULL),
+       if(number % 10 < 3, toUInt16(11 + (number % 5)), NULL),
+       if(number % 10 < 3, toUInt16(40 + (number % 8)), NULL)
 FROM numbers(30);
 
-INSERT INTO monitor.check_results (org_id,target_id,timestamp,status,duration_ms,response_code,error)
+# Down rows model a TCP-phase failure: DNS resolved (dns_ms present) but the
+# connection was refused — connect never completed, so connect_ms stays NULL,
+# matching ConnectError::Connect's partial timings.
+INSERT INTO monitor.check_results (org_id,target_id,timestamp,status,duration_ms,response_code,error,dns_ms)
 SELECT toUUID('${ORG}'),toUUID('${T_AUTH}'),
        now() - toIntervalSecond(number*4),
        if(number % 10 < 7, 'down', 'up'),
        if(number % 10 < 7, 0, 95 + (number % 20)),
-       if(number % 10 < 7, 503, 200),
-       if(number % 10 < 7, 'connection refused', NULL)
+       if(number % 10 < 7, NULL, 200),
+       if(number % 10 < 7, 'connection refused', NULL),
+       if(number % 10 < 7, toUInt16(9 + (number % 4)), NULL)
 FROM numbers(30);
 
 INSERT INTO monitor.check_results (org_id,target_id,timestamp,status,duration_ms,response_code)

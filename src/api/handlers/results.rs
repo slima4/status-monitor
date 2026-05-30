@@ -302,7 +302,7 @@ pub async fn list_incidents(
         .get(org, id)
         .await?
         .ok_or_else(target_not_found)?;
-    let peek = state
+    let mut peek = state
         .results_store
         .list_incidents(
             org,
@@ -316,6 +316,9 @@ pub async fn list_incidents(
             },
         )
         .await?;
+    for inc in &mut peek {
+        inc.sanitize_error_sample();
+    }
     Ok(Json(PageEnvelope::from_peek(
         peek,
         limit as u32,

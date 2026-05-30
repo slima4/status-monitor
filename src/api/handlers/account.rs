@@ -26,7 +26,7 @@ use crate::app::AppState;
 use crate::auth::login_audit::{self, LoginAttempt, LoginMethod};
 use crate::auth::url::token_link;
 use crate::auth::{account, fingerprint, session as session_store};
-use crate::domain::UserId;
+use crate::domain::{UserId, strip_served_stale};
 use crate::email::{EmailAddress, EmailTemplate, TransactionalEmail};
 use crate::error::{AppError, Result};
 use crate::storage::postgres_secrets::{RawTargetRow, RedactedTarget};
@@ -347,7 +347,7 @@ async fn build_owned_org(pool: &sqlx::PgPool, org: OrgExport) -> Result<OwnedOrg
         .map(|row| RedactedTarget::from_row(row, org.deleted_at))
         .collect();
 
-    let incidents: Vec<IncidentExport> = sqlx::query_as(
+    let mut incidents: Vec<IncidentExport> = sqlx::query_as(
         "SELECT id, target_id, started_at, ended_at, severity, status_at_start, \
                 check_count, error_sample, duration_secs, created_at, updated_at \
          FROM incidents WHERE org_id = $1 ORDER BY started_at DESC",
@@ -356,6 +356,11 @@ async fn build_owned_org(pool: &sqlx::PgPool, org: OrgExport) -> Result<OwnedOrg
     .fetch_all(pool)
     .await
     .map_err(db_err("incidents"))?;
+    for inc in &mut incidents {
+        if let Some(e) = inc.error_sample.take() {
+            inc.error_sample = strip_served_stale(&e).map(str::to_owned);
+        }
+    }
 
     let maintenance_windows: Vec<MaintenanceExport> = sqlx::query_as(
         "SELECT id, title, description, starts_at, ends_at, created_at, updated_at \

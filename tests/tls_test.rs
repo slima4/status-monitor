@@ -50,7 +50,10 @@ async fn verify_tls_true_rejects_self_signed() {
 
     assert_eq!(result.status, CheckStatus::Error);
     let err = result.error.expect("error message");
-    // The probe times each phase, so a handshake rejection is attributed to
-    // the TLS phase specifically rather than a generic connect/transport error.
-    assert_eq!(err, "tls", "expected TLS-phase error, got {err}");
+    // The probe drills the rustls error: a self-signed cert is an untrusted
+    // issuer, named specifically rather than a generic TLS/connect failure.
+    assert_eq!(
+        err, "certificate not trusted",
+        "expected untrusted-cert reason, got {err}"
+    );
 }

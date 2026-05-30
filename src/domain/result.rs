@@ -63,6 +63,17 @@ impl CheckResult {
     }
 }
 
+/// The error string with the operator-only `served_stale:` annotation removed,
+/// leaving the wrapped reason — the trailing JSON detail, or the bare reason
+/// for a non-stale error. Returns `None` when a stale annotation wraps nothing
+/// renderable. Every customer-facing surface must route `error` through this.
+pub fn strip_served_stale(raw: &str) -> Option<&str> {
+    match raw.strip_prefix(SERVED_STALE_PREFIX) {
+        None => Some(raw),
+        Some(rest) => rest.find('{').map(|i| &rest[i..]),
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum CheckStatus {
@@ -120,6 +131,19 @@ mod tests {
             response_size: None,
             error: error.map(str::to_owned),
         }
+    }
+
+    #[test]
+    fn strip_served_stale_unwraps_or_passes_through() {
+        // Non-stale errors pass through untouched.
+        assert_eq!(strip_served_stale("no response"), Some("no response"));
+        // Stale annotation with a wrapped JSON detail → surface the JSON.
+        assert_eq!(
+            strip_served_stale("served_stale: age=10; {\"domain\":\"x\"}"),
+            Some("{\"domain\":\"x\"}")
+        );
+        // Stale annotation with nothing renderable → None.
+        assert_eq!(strip_served_stale("served_stale: age=10"), None);
     }
 
     #[test]

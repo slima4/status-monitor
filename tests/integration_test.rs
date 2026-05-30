@@ -138,7 +138,10 @@ async fn http_check_total_timeout_is_error() {
     let elapsed = started.elapsed();
 
     assert_eq!(result.status, CheckStatus::Error);
-    assert_eq!(result.error.as_deref(), Some("timeout"));
+    // Connects fast, then the slow handler never replies in budget.
+    assert_eq!(result.error.as_deref(), Some("no response"));
+    assert!(result.connect_ms.is_some());
+    assert!(result.ttfb_ms.is_none());
     assert!(
         elapsed < Duration::from_millis(500),
         "timeout not enforced: elapsed {elapsed:?}"

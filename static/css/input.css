@@ -1704,6 +1704,33 @@
         color: var(--theme-text-muted);
     }
 
+    /* Live-results zebra rows (parity from the loop, not :nth-child, so the
+       interleaved detail sub-row doesn't throw the alternation off). Both
+       shades sit above the header wash so the head stays distinct. */
+    .result-row--even { background: var(--theme-surface-elev); }
+    .result-row--odd  { background: var(--theme-surface); }
+
+    /* Failed/degraded result rows + their expandable timing-breakdown sub-row. */
+    .result-row--bad  { box-shadow: inset 2px 0 0 var(--theme-state-bad-line); }
+    .result-row--warn { box-shadow: inset 2px 0 0 var(--theme-state-warn-line); }
+    .result-row-detail__cell {
+        background: var(--theme-surface-sunk);
+        font-family: var(--font-mono);
+    }
+    .result-row-detail__phase {
+        @apply mr-3 inline-block;
+        color: var(--theme-text-muted);
+    }
+    .result-row-detail__phase strong { color: var(--theme-text); }
+    /* Full, untruncated error — the row cell clips with `truncate`, the
+       expanded panel shows everything. Long raw probe text (DNS query dumps,
+       cert chains) must wrap rather than overflow the cell. */
+    .result-row-detail__error {
+        color: var(--theme-text);
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+    }
+
     /* Public-surface (flat) callout — same idea as .alert-card but with the
        quiet 1px slate-family border the public page uses everywhere. The
        sticker dialect doesn't bleed onto /status. */

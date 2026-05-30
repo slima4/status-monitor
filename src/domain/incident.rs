@@ -56,6 +56,15 @@ impl Incident {
             (end - self.started_at).max(ChronoDuration::zero())
         })
     }
+
+    /// Replace the error sample with its customer-safe form (the internal
+    /// `served_stale:` annotation removed). Must be called before any
+    /// customer-facing serialization of this incident.
+    pub fn sanitize_error_sample(&mut self) {
+        if let Some(e) = self.error_sample.take() {
+            self.error_sample = crate::domain::strip_served_stale(&e).map(str::to_owned);
+        }
+    }
 }
 
 /// Wall-clock duration of an incident at the given `now`. Open-ended

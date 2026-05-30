@@ -109,6 +109,17 @@
         });
     }
 
+    // Result-row timing expansion: delegated from document so it survives
+    // htmx OOB swaps of #detail-live-recent every 60s.
+    document.addEventListener("click", (ev) => {
+        const row = ev.target.closest("[data-result-row]");
+        if (!row) return;
+        const detail = row.nextElementSibling;
+        if (!detail || !detail.hasAttribute("data-result-detail")) return;
+        const open = detail.classList.toggle("hidden");
+        row.setAttribute("aria-expanded", String(!open));
+    });
+
     // A just-created monitor has no result until its first check lands.
     // Poll until it does so "checking…" resolves without waiting for the
     // 60s cadence, then stop — no steady-state extra requests.
