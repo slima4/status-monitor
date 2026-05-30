@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# status-monitor backup — PostgreSQL + ClickHouse + Caddy certs, local disk.
+# uptimepage backup — PostgreSQL + ClickHouse + Caddy certs, local disk.
 #
 #   backup.sh daily    pg_dump + ClickHouse dump  (cron: nightly)
 #   backup.sh weekly   tar of the caddy_data volume (certs/keys)
 #
-# Backups land under $BACKUP_ROOT (default /opt/status-monitor/backups),
+# Backups land under $BACKUP_ROOT (default /opt/uptimepage/backups),
 # mode 0700 (they contain a full DB dump — treat as secret). Retention is
 # pruned at the end of each run. Designed to run as the `deploy` user from
 # the compose project directory; it shells into the running containers, so
@@ -15,11 +15,11 @@ set -euo pipefail
 
 ACTION="${1:-}"
 COMPOSE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BACKUP_ROOT="${BACKUP_ROOT:-/opt/status-monitor/backups}"
+BACKUP_ROOT="${BACKUP_ROOT:-/opt/uptimepage/backups}"
 PG_KEEP_DAYS="${PG_KEEP_DAYS:-14}"
 CH_KEEP_DAYS="${CH_KEEP_DAYS:-7}"
 CADDY_KEEP_DAYS="${CADDY_KEEP_DAYS:-28}"
-PROJECT="status-monitor"            # compose `name:` — used for the volume name
+PROJECT="uptimepage"            # compose `name:` — used for the volume name
 TS="$(date -u +%Y%m%dT%H%M%SZ)"
 LOG="$BACKUP_ROOT/backup.log"
 

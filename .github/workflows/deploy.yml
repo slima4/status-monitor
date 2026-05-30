@@ -185,7 +185,7 @@ jobs:
             *) echo "::error::REMIGRATE must be true|false, got '$REMIGRATE'"; exit 1 ;;
           esac
 
-          cd /opt/status-monitor
+          cd /opt/uptimepage
           if [ -n "$HEAD_SHA" ]; then
             # Auto path: pin the working tree to the exact built commit so the
             # on-disk compose/.env/migrations match the image. A later push
@@ -198,7 +198,7 @@ jobs:
           fi
 
           # Ship only prod artifacts to the box. Pre-this, `git pull` landed
-          # the entire repo on /opt/status-monitor/, including root
+          # the entire repo on /opt/uptimepage/, including root
           # docker-compose.yml + compose.dev.yml that bind DBs to 0.0.0.0
           # with default creds — one wrong `cd` + bare `docker compose up`
           # = publicly exposed databases. `reapply` prunes anything outside
@@ -223,22 +223,22 @@ jobs:
 
           cd deployment
 
-          # --- bump STATUS_MONITOR_IMAGE in .env -----------------------------
+          # --- bump UPTIMEPAGE_IMAGE in .env -----------------------------
           # cp backup FIRST; awk in-place rewrite (every line is reprinted, only
           # the target key is substituted — never grep -v | append | mv); then
           # verify the line count is unchanged and the key carries the new value.
           cp .env ".env.bak.$(date +%s)"
           before=$(wc -l < .env)
           awk -v img="$NEW_IMAGE" '
-            /^STATUS_MONITOR_IMAGE=/ { print "STATUS_MONITOR_IMAGE=" img; seen=1; next }
+            /^UPTIMEPAGE_IMAGE=/ { print "UPTIMEPAGE_IMAGE=" img; seen=1; next }
             { print }
             END { if (!seen) exit 3 }
           ' .env > .env.next
           mv .env.next .env
           after=$(wc -l < .env)
           [ "$before" = "$after" ] || { echo "::error::.env line count changed $before -> $after"; exit 1; }
-          grep -qxF "STATUS_MONITOR_IMAGE=$NEW_IMAGE" .env \
-            || { echo "::error::STATUS_MONITOR_IMAGE not set to $NEW_IMAGE"; exit 1; }
+          grep -qxF "UPTIMEPAGE_IMAGE=$NEW_IMAGE" .env \
+            || { echo "::error::UPTIMEPAGE_IMAGE not set to $NEW_IMAGE"; exit 1; }
           # Keep the 10 most recent backups; prune the rest so deploys don't litter.
           ls -1t .env.bak.* 2>/dev/null | tail -n +11 | xargs -r rm -f
 
@@ -351,7 +351,7 @@ jobs:
                 m["GRAFANA_OTLP_INSTANCE_ID"]       = ENVIRON["GRAFANA_OTLP_INSTANCE_ID"]
                 m["GRAFANA_OTLP_API_TOKEN"]         = ENVIRON["GRAFANA_OTLP_API_TOKEN"]
                 m["GRAFANA_OTLP_ENABLED"]           = "true"
-                m["STATUS_MONITOR_TRACING_ENABLED"] = "true"
+                m["UPTIMEPAGE_TRACING_ENABLED"] = "true"
               }
               {
                 for (k in m) if ($0 ~ ("^" k "=")) { print k "=" m[k]; seen[k] = 1; next }
@@ -370,7 +370,7 @@ jobs:
               n=$(grep -cxF "${k}=$(printenv "$k")" .env || true)
               [ "$n" = 1 ] || { echo "::error::${k} not written exactly once to .env (count=${n})"; exit 1; }
             done
-            for k in GRAFANA_OTLP_ENABLED STATUS_MONITOR_TRACING_ENABLED; do
+            for k in GRAFANA_OTLP_ENABLED UPTIMEPAGE_TRACING_ENABLED; do
               n=$(grep -cxF "${k}=true" .env || true)
               [ "$n" = 1 ] || { echo "::error::${k} not written exactly once to .env (count=${n})"; exit 1; }
             done
@@ -418,13 +418,13 @@ jobs:
           # serves: if the ssh session dies here the site stays up on the old
           # image. (Pulling AFTER stop+drop once left prod 502 with an empty
           # DB when a session truncated mid-pull.)
-          docker compose pull status-monitor
+          docker compose pull uptimepage
 
           # --- optional destructive re-migrate (Postgres only) ---------------
           # Now the cutover is fast: stop, drop, recreate, restart in seconds.
           if [ "$REMIGRATE" = "true" ]; then
             echo "remigrate: stopping app + dropping Postgres database 'monitor'"
-            docker compose stop status-monitor
+            docker compose stop uptimepage
             docker compose exec -T postgres sh -c \
               'PGPASSWORD="$POSTGRES_PASSWORD" psql -U monitor -d postgres -v ON_ERROR_STOP=1 \
                  -c "DROP DATABASE IF EXISTS monitor WITH (FORCE);" \
@@ -441,9 +441,9 @@ jobs:
           if [ -n "${GRAFANA_OTLP_ENDPOINT:-}" ] \
              && [ -n "${GRAFANA_OTLP_INSTANCE_ID:-}" ] \
              && [ -n "${GRAFANA_OTLP_API_TOKEN:-}" ]; then
-            docker compose up -d --no-build --force-recreate status-monitor
+            docker compose up -d --no-build --force-recreate uptimepage
           else
-            docker compose up -d --no-build status-monitor
+            docker compose up -d --no-build uptimepage
           fi
 
           # Caddy: bind-mounted Caddyfile. A `git checkout` of a deploy
@@ -479,7 +479,7 @@ jobs:
 
           # Defense in depth: assert internal services carry NO host port
           # bindings. Prod compose uses `expose:` (network-internal only) for
-          # postgres/clickhouse/status-monitor; only caddy publishes 80/443.
+          # postgres/clickhouse/uptimepage; only caddy publishes 80/443.
           # A silent `ports:` edit on postgres/clickhouse would bind DBs to
           # 0.0.0.0 with default monitor/monitor creds = public DB; on the
           # app it would bypass Caddy TLS + expose unauthenticated /metrics
@@ -487,7 +487,7 @@ jobs:
           # state unnoticed. `docker compose ps -q` uses the live project
           # name + handles replicas, so it doesn't bit-rot if the project
           # is renamed or scaled.
-          for svc in postgres clickhouse status-monitor; do
+          for svc in postgres clickhouse uptimepage; do
             for ctr in $(docker compose ps -q "$svc"); do
               bound=$(docker port "$ctr" 2>/dev/null || true)
               if [ -n "$bound" ]; then
@@ -518,7 +518,7 @@ jobs:
             [ "$i" -lt 30 ] && sleep 5
           done
           echo "::error::app did not become healthy within ~150s"
-          cd /opt/status-monitor/deployment && docker compose logs --tail=80 status-monitor || true
+          cd /opt/uptimepage/deployment && docker compose logs --tail=80 uptimepage || true
           exit 1
           REMOTE
 

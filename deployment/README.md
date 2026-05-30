@@ -1,6 +1,6 @@
 # Status Monitor — Production Deployment
 
-This directory contains the production deployment for status-monitor:
+This directory contains the production deployment for uptimepage:
 **Caddy reverse proxy** (TLS + basic auth) in front of the Rust service,
 PostgreSQL, and ClickHouse.
 
@@ -58,7 +58,7 @@ The stock `caddy:2-alpine` image lacks two plugins this deployment needs:
   throttle on the public status surface.
 
 `deployment/Dockerfile.caddy` bakes both in. `docker compose up -d` builds
-it automatically and tags it `status-monitor-caddy:2` — there is no manual
+it automatically and tags it `uptimepage-caddy:2` — there is no manual
 one-time step. To rebuild after a Caddy or plugin bump:
 
 ```bash
@@ -88,12 +88,12 @@ docker run --rm caddy:2-alpine caddy hash-password
 # Enter password, get bcrypt hash
 ```
 
-Copy the output (starts with `$2a$14$...`) into `STATUS_MONITOR_ADMIN_HASH`
+Copy the output (starts with `$2a$14$...`) into `UPTIMEPAGE_ADMIN_HASH`
 in `.env`. **Wrap it in single quotes** to prevent docker-compose from
 treating `$` as variable interpolation:
 
 ```
-STATUS_MONITOR_ADMIN_HASH='$2a$14$abc...xyz'
+UPTIMEPAGE_ADMIN_HASH='$2a$14$abc...xyz'
 ```
 
 ### 4. Generate database passwords and KEK
@@ -103,7 +103,7 @@ STATUS_MONITOR_ADMIN_HASH='$2a$14$abc...xyz'
 {
   echo "POSTGRES_PASSWORD=$(openssl rand -base64 24)"
   echo "CLICKHOUSE_PASSWORD=$(openssl rand -base64 24)"
-  echo "STATUS_MONITOR_CREDENTIALS_KEK_BASE64=$(openssl rand -base64 32)"
+  echo "UPTIMEPAGE_CREDENTIALS_KEK_BASE64=$(openssl rand -base64 32)"
 }
 ```
 
@@ -165,7 +165,7 @@ docker compose logs caddy | grep -i "acme\|dns\|hetzner\|challenge"
 
 Common causes: token missing or not Read & Write, the zone is not in the
 token's project, the domain's authoritative DNS is not the Hetzner
-Console, or `STATUS_MONITOR_DOMAIN` still set to a sub-host (it must be
+Console, or `UPTIMEPAGE_DOMAIN` still set to a sub-host (it must be
 the base domain, e.g. `example.com`). While
 debugging, switch to the staging CA (see "Testing the TLS flow" below) so
 you don't burn production rate limits.
@@ -233,7 +233,7 @@ remote script with `umask 077` so every new file inherits owner-only
 perms). Verify after first deploy:
 
 ```bash
-ssh deploy@your-host 'ls -l /opt/status-monitor/deployment/.env'
+ssh deploy@your-host 'ls -l /opt/uptimepage/deployment/.env'
 # Expected: -rw------- (mode 0600), owner = deploy user
 ```
 
@@ -255,14 +255,14 @@ auth as the sole barrier.
 
 2. Add to `.env`:
    ```
-   STATUS_MONITOR_OPERATOR_HASH='$2a$14$...'
+   UPTIMEPAGE_OPERATOR_HASH='$2a$14$...'
    ```
 
 3. Uncomment the corresponding line in `Caddyfile`:
    ```caddy
    basic_auth {
-       admin {$STATUS_MONITOR_ADMIN_HASH}
-       operator {$STATUS_MONITOR_OPERATOR_HASH}   # <-- uncomment
+       admin {$UPTIMEPAGE_ADMIN_HASH}
+       operator {$UPTIMEPAGE_OPERATOR_HASH}   # <-- uncomment
    }
    ```
 
@@ -329,11 +329,11 @@ docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile
 
 ### Metrics
 
-The in-binary Prometheus endpoint is at `http://status-monitor:9090/metrics`
+The in-binary Prometheus endpoint is at `http://uptimepage:9090/metrics`
 on the **internal docker network**. It has no auth, so it is never
 published to the host (`expose`, not `ports`) and must never be served on
 the public domain. The service binds it on `0.0.0.0:9090` *inside* the
-container (`STATUS_MONITOR_SERVER__METRICS_BIND` in `docker-compose.yml`)
+container (`UPTIMEPAGE_SERVER__METRICS_BIND` in `docker-compose.yml`)
 so a sidecar container can reach it over the internal network.
 
 #### Ship to Grafana Cloud (optional)
@@ -357,7 +357,7 @@ Grafana Cloud. It is **off by default** and only starts under the
    ```
 
 4. Verify within ~15 s (one scrape interval): in Grafana Cloud Explore,
-   `up{job="status-monitor"}` should be `1`, and the `status_monitor_*`
+   `up{job="uptimepage"}` should be `1`, and the `status_monitor_*`
    series should appear. For the full view, import the dashboard against
    the Grafana Cloud Prometheus datasource — import steps and the
    datasource binding are in `dashboards/grafana/README.md`.
@@ -366,7 +366,7 @@ The sidecar is decoupled: if Alloy is stopped or fails, the service and
 its `/metrics` endpoint are unaffected — only remote shipping pauses
 (Alloy resumes from its on-disk WAL on restart). Scraping with your own
 Prometheus instead of Alloy also works — point it at
-`status-monitor:9090` on the internal network. Never expose `/metrics`
+`uptimepage:9090` on the internal network. Never expose `/metrics`
 on the public domain; if you must scrape from off-host, front it with a
 separate Caddy site carrying its own basic_auth and a strict IP
 allowlist.
@@ -390,7 +390,7 @@ If you've already issued a staging cert and want to switch to production,
 
 ```bash
 docker compose down
-docker volume rm status-monitor_caddy_data
+docker volume rm uptimepage_caddy_data
 docker compose up -d
 ```
 
@@ -418,7 +418,7 @@ See ClickHouse docs.
 Caddy data is small — just copy the volume:
 
 ```bash
-docker run --rm -v status-monitor_caddy_data:/source:ro \
+docker run --rm -v uptimepage_caddy_data:/source:ro \
     -v "$(pwd)/backups":/backup alpine \
     tar czf /backup/caddy-$(date +%Y%m%d).tar.gz -C /source .
 ```
@@ -436,13 +436,13 @@ For Caddy config changes (Caddyfile only, no env changes), use a hot reload:
 docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile
 ```
 
-For status-monitor upgrades, do a normal `up -d`. The new container is
+For uptimepage upgrades, do a normal `up -d`. The new container is
 distroless so Docker has no container-level healthcheck to gate on;
 instead, Caddy's active `health_uri /healthz` probe (every 30s) pulls
 the upstream out of rotation while it's down and back in once it
 recovers. There's a brief window of 502 responses during the swap —
 typically one health interval. If you need zero-downtime upgrades, run
-two status-monitor replicas behind Caddy's `reverse_proxy` load
+two uptimepage replicas behind Caddy's `reverse_proxy` load
 balancer (Caddy supports this with multiple upstreams).
 
 ## Troubleshooting
@@ -461,15 +461,15 @@ balancer (Caddy supports this with multiple upstreams).
 - Bcrypt hash in `.env` not wrapped in single quotes? `$` got interpolated. Wrap it.
 - Hash was generated for a different cost? Caddy accepts any valid bcrypt hash. Regenerate.
 
-**Caddy can't reach status-monitor**
+**Caddy can't reach uptimepage**
 ```bash
 docker compose ps                                  # both running?
-docker compose exec caddy wget -qO- http://status-monitor:8080/healthz
+docker compose exec caddy wget -qO- http://uptimepage:8080/healthz
 ```
 
-**status-monitor logs show "ClickHouse unreachable"**
+**uptimepage logs show "ClickHouse unreachable"**
 
-The status-monitor image is distroless (no shell, no wget) so probe from
+The uptimepage image is distroless (no shell, no wget) so probe from
 the caddy container, which shares the same docker network:
 
 ```bash
@@ -524,7 +524,7 @@ templates live in `templates/public/`.
 This deployment is right-sized for **single-tenant, small-team operator use**:
 
 - **No load balancer.** Caddy on one host fronts the stack. If you need
-  geographic redundancy, run independent status-monitor instances per
+  geographic redundancy, run independent uptimepage instances per
   region.
 - **No HA database.** Single Postgres, single ClickHouse. If either dies,
   the service degrades to read-only or stops accepting writes. For HA,
