@@ -815,7 +815,7 @@ pub async fn add_member(
 /// access control (e.g. [`is_active_member`]) before they trust the result.
 ///
 /// Used by the API-token request path: tokens carry no active-org state, so
-/// `X-Status-Monitor-Org: <slug>` is the only way the handler learns which
+/// `X-Uptimepage-Org: <slug>` is the only way the handler learns which
 /// org to scope to.
 ///
 /// Do NOT call this from any unauthenticated path. For

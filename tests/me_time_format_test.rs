@@ -73,7 +73,7 @@ async fn me_time_format_get_patch_round_trip() {
                 serde_json::json!({"time_format": "24h"}),
             );
             req.headers_mut()
-                .insert("x-requested-with", "status-monitor".parse().unwrap());
+                .insert("x-requested-with", "uptimepage".parse().unwrap());
             req
         })
         .await
@@ -126,7 +126,7 @@ async fn me_time_format_patch_rejects_unknown_variant() {
                 serde_json::json!({"time_format": "36h"}),
             );
             req.headers_mut()
-                .insert("x-requested-with", "status-monitor".parse().unwrap());
+                .insert("x-requested-with", "uptimepage".parse().unwrap());
             req
         })
         .await

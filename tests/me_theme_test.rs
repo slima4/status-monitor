@@ -72,7 +72,7 @@ async fn me_theme_get_patch_round_trip() {
                 serde_json::json!({"theme": "terminal"}),
             );
             req.headers_mut()
-                .insert("x-requested-with", "status-monitor".parse().unwrap());
+                .insert("x-requested-with", "uptimepage".parse().unwrap());
             req
         })
         .await
@@ -125,7 +125,7 @@ async fn me_theme_patch_rejects_unknown_variant() {
                 serde_json::json!({"theme": "garbage"}),
             );
             req.headers_mut()
-                .insert("x-requested-with", "status-monitor".parse().unwrap());
+                .insert("x-requested-with", "uptimepage".parse().unwrap());
             req
         })
         .await

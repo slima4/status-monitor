@@ -34,7 +34,7 @@
           <span data-test-result class="text-xs"></span>
           <button type="button"
                   hx-post="/api/v1/notification-channels/{{ c.id }}/test"
-                  hx-headers='{"X-Requested-With":"status-monitor"}'
+                  hx-headers='{"X-Requested-With":"uptimepage"}'
                   hx-swap="none"
                   hx-on::after-request="window.smChannelTestResult(this, event)"
                   class="row-link">Send test</button>
@@ -42,7 +42,7 @@
              class="row-link">Edit</a>
           <button type="button"
                   hx-delete="/api/v1/notification-channels/{{ c.id }}"
-                  hx-headers='{"X-Requested-With":"status-monitor"}'
+                  hx-headers='{"X-Requested-With":"uptimepage"}'
                   hx-on::after-request="if(event.detail.successful){htmx.trigger('body','channels:refresh')}"
                   data-confirm-modal
                   data-confirm-title="Delete notification channel?"

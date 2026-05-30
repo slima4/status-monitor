@@ -7,7 +7,7 @@
 //! 2. **API token** — `Authorization: Bearer sm_live_…` resolved by the
 //!    [`api_token`] middleware ahead of routing. The token carries no active
 //!    org, so handlers that need one must read an explicit org slug from the
-//!    `X-Status-Monitor-Org` header — otherwise [`CurrentOrg`] returns 400
+//!    `X-Uptimepage-Org` header — otherwise [`CurrentOrg`] returns 400
 //!    `ORG_REQUIRED`.
 //!
 //! [`CurrentOrg`] is the only extractor that hands a handler an `OrgId`.
@@ -51,7 +51,7 @@ use crate::storage::orgs::is_active_member;
 /// Custom header used by API-token clients to scope writes/reads to a specific
 /// org. Tokens carry no active-org state, so this header (or a future slug
 /// path param) is the only way the handler learns which org to read/write.
-pub const ORG_HEADER: HeaderName = HeaderName::from_static("x-status-monitor-org");
+pub const ORG_HEADER: HeaderName = HeaderName::from_static("x-uptimepage-org");
 
 #[derive(Debug, Clone)]
 pub struct User {
@@ -95,7 +95,7 @@ pub enum AuthContext {
         active_org_id: Option<OrgId>,
     },
     /// `Authorization: Bearer sm_live_…`. No active org — handlers reach for
-    /// `X-Status-Monitor-Org` (or a slug path param in future routes).
+    /// `X-Uptimepage-Org` (or a slug path param in future routes).
     ApiToken { user_id: UserId, token_id: Uuid },
 }
 
@@ -223,7 +223,7 @@ where
         let app_state = AppState::from_ref(state);
 
         // API-token path: tokens carry no active org. The caller MUST surface
-        // the org explicitly via `X-Status-Monitor-Org`. No fallback exists;
+        // the org explicitly via `X-Uptimepage-Org`. No fallback exists;
         // a missing/unknown header is a 400, not a silent default-org write.
         if let Some(AuthContext::ApiToken { user_id, .. }) = parts.extensions.get::<AuthContext>() {
             let pool = app_state.require_db()?;
@@ -300,7 +300,7 @@ where
     }
 }
 
-/// Reads `X-Status-Monitor-Org` from the request headers and resolves it to
+/// Reads `X-Uptimepage-Org` from the request headers and resolves it to
 /// an org id by slug. Returns `ORG_REQUIRED` when absent and
 /// `ORG_HEADER_INVALID` when the header value is malformed or names no org.
 async fn explicit_org_from_header(parts: &Parts, pool: &sqlx::PgPool) -> Result<OrgId> {
@@ -310,21 +310,18 @@ async fn explicit_org_from_header(parts: &Parts, pool: &sqlx::PgPool) -> Result<
         .ok_or_else(|| {
             AppError::bad_request(
                 codes::ORG_REQUIRED,
-                "API tokens must scope to an org via the X-Status-Monitor-Org header",
+                "API tokens must scope to an org via the X-Uptimepage-Org header",
             )
         })?
         .to_str()
         .map_err(|_| {
-            AppError::bad_request(
-                codes::ORG_HEADER_INVALID,
-                "X-Status-Monitor-Org is not UTF-8",
-            )
+            AppError::bad_request(codes::ORG_HEADER_INVALID, "X-Uptimepage-Org is not UTF-8")
         })?
         .trim();
     if raw.is_empty() {
         return Err(AppError::bad_request(
             codes::ORG_HEADER_INVALID,
-            "X-Status-Monitor-Org is empty",
+            "X-Uptimepage-Org is empty",
         ));
     }
     crate::storage::orgs::find_id_by_slug(pool, raw)
@@ -332,7 +329,7 @@ async fn explicit_org_from_header(parts: &Parts, pool: &sqlx::PgPool) -> Result<
         .ok_or_else(|| {
             AppError::bad_request(
                 codes::ORG_HEADER_INVALID,
-                "no organization matches X-Status-Monitor-Org",
+                "no organization matches X-Uptimepage-Org",
             )
         })
 }

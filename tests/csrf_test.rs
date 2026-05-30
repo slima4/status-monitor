@@ -70,7 +70,7 @@ async fn post_with_cookie_and_xrw_header_passes_guard() {
         .oneshot(
             req("POST", "/api/v1/targets")
                 .header("cookie", SESSION_COOKIE)
-                .header("x-requested-with", "status-monitor")
+                .header("x-requested-with", "uptimepage")
                 .header("content-type", "application/json")
                 .body(Body::from("{}"))
                 .unwrap(),

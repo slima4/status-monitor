@@ -886,7 +886,7 @@ mod tests {
         assert!(html.contains("welcome, Alice"));
         assert!(html.contains(r#"value="quiet-koala-7m0tt1""#));
         assert!(html.contains(r#"hx-patch="/api/v1/orgs/00000000-0000-0000-0000-000000000001""#));
-        assert!(html.contains(r#""X-Requested-With":"status-monitor""#));
+        assert!(html.contains(r#""X-Requested-With":"uptimepage""#));
     }
 
     #[test]

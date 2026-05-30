@@ -5,7 +5,7 @@
 //! - Bearer-token requests pass through (cross-origin Authorization headers
 //!   are not auto-attached by browsers, so no CSRF surface).
 //! - Cookie-bearing state-changing requests must carry the custom header
-//!   `X-Requested-With: status-monitor`. Browsers will only set custom headers
+//!   `X-Requested-With: uptimepage`. Browsers will only set custom headers
 //!   on same-origin XHR/fetch, so attackers can't forge them from a third-party
 //!   page. Missing-or-mismatched → 403 `CSRF_PROTECTION`.
 //!
@@ -26,7 +26,7 @@ use crate::app::AppState;
 use crate::web::auth::bearer_from_headers;
 
 pub const CSRF_HEADER: HeaderName = HeaderName::from_static("x-requested-with");
-pub const CSRF_HEADER_VALUE: &str = "status-monitor";
+pub const CSRF_HEADER_VALUE: &str = "uptimepage";
 
 /// Tower middleware that enforces the rule documented at module level.
 pub async fn middleware(State(state): State<AppState>, req: Request<Body>, next: Next) -> Response {
@@ -117,7 +117,7 @@ mod tests {
     fn header_matches_is_constant_time_correct() {
         let mut req = Request::new(Body::empty());
         req.headers_mut()
-            .insert(&CSRF_HEADER, "status-monitor".parse().unwrap());
+            .insert(&CSRF_HEADER, "uptimepage".parse().unwrap());
         assert!(header_matches(&req, &CSRF_HEADER, CSRF_HEADER_VALUE));
         req.headers_mut()
             .insert(&CSRF_HEADER, "something-else".parse().unwrap());

@@ -71,7 +71,7 @@ curl — pass the cookie directly:
   curl -i -X PATCH ${BASE_URL}/api/v1/orgs/\$(docker exec -i ${PG_CONTAINER} \\
       psql -U monitor -d monitor -tAc "select id from organizations where slug='${SLUG}'")/status-page \\
     -H 'content-type: application/json' \\
-    -H 'X-Requested-With: status-monitor' \\
+    -H 'X-Requested-With: uptimepage' \\
     -H 'Cookie: _sm_session=${TOKEN}' \\
     -d '{"public_status_enabled":true,"public_brand_color":"#3b82f6"}'
 

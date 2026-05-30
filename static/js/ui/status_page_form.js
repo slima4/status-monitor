@@ -22,7 +22,7 @@
   // check gives instant feedback and skips a doomed upload round-trip.
   const MAX_LOGO_BYTES = Number(form.dataset.maxLogoBytes) || 0;
   const MAX_LOGO_LABEL = form.dataset.maxLogoLabel || "the limit";
-  const HEADERS = { "Accept": "application/json", "X-Requested-With": "status-monitor" };
+  const HEADERS = { "Accept": "application/json", "X-Requested-With": "uptimepage" };
   // Thrown after a banner has been rendered, so the submit handler's catch
   // can tell a handled API rejection from a raw network failure.
   const HANDLED = Symbol("handled");

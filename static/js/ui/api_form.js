@@ -33,7 +33,7 @@ window.smRunCheckNow = async function (id) {
             method: "POST",
             headers: {
                 "Accept": "application/json",
-                "X-Requested-With": "status-monitor",
+                "X-Requested-With": "uptimepage",
             },
         });
         let body = null;

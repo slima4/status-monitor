@@ -16,7 +16,7 @@
   const HEADERS = {
     "Accept": "application/json",
     "Content-Type": "application/json",
-    "X-Requested-With": "status-monitor",
+    "X-Requested-With": "uptimepage",
   };
 
   function clear() {

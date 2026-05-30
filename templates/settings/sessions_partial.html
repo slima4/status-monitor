@@ -27,7 +27,7 @@
         {% else %}
         <button type="button"
                 hx-delete="/api/v1/me/sessions/{{ s.id_hash }}"
-                hx-headers='{"X-Requested-With":"status-monitor"}'
+                hx-headers='{"X-Requested-With":"uptimepage"}'
                 hx-target="#sessions-list"
                 hx-swap="innerHTML"
                 hx-on::after-request="if(event.detail.successful){htmx.trigger('body','sessions:refresh')}"

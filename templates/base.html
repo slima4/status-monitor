@@ -45,7 +45,7 @@
     {% block head %}{% endblock %}
 </head>
 <body class="app-shell antialiased"
-      hx-headers='{"X-Requested-With":"status-monitor"}'>
+      hx-headers='{"X-Requested-With":"uptimepage"}'>
     <a href="#main-content"
        class="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:rounded focus:bg-[color:var(--theme-surface-elev)] focus:px-3 focus:py-2 focus:text-sm focus:ring-2 focus:ring-[color:var(--theme-ink)]">
         Skip to main content
@@ -75,7 +75,7 @@
                  class="nav-link{% if active_tab == "settings" %} nav-link--active{% endif %}">settings</a>
               <button type="button"
                       hx-post="/auth/logout"
-                      hx-headers='{"X-Requested-With":"status-monitor"}'
+                      hx-headers='{"X-Requested-With":"uptimepage"}'
                       hx-on::after-request="window.location.href='/login'"
                       class="btn-ghost px-2.5 py-1 text-xs font-medium">
                 log out

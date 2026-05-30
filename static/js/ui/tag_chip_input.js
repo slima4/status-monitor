@@ -109,7 +109,7 @@
             let json;
             try {
                 const r = await fetch(`/api/v1/tags?q=${encodeURIComponent(q)}&limit=10`, {
-                    headers: { "Accept": "application/json", "X-Requested-With": "status-monitor" },
+                    headers: { "Accept": "application/json", "X-Requested-With": "uptimepage" },
                 });
                 if (!r.ok) { hideSuggestions(); return; }
                 json = await r.json();

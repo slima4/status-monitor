@@ -19,7 +19,7 @@ async fn magic_link_request_is_404_when_disabled() {
                 .method("POST")
                 .uri("/auth/magic-link/request")
                 .header("content-type", "application/json")
-                .header("x-requested-with", "status-monitor")
+                .header("x-requested-with", "uptimepage")
                 .body(Body::from(r#"{"email":"a@b.test"}"#))
                 .unwrap(),
         )
@@ -55,7 +55,7 @@ async fn magic_link_request_is_mounted_when_enabled() {
                 .method("POST")
                 .uri("/auth/magic-link/request")
                 .header("content-type", "application/json")
-                .header("x-requested-with", "status-monitor")
+                .header("x-requested-with", "uptimepage")
                 .body(Body::from(r#"{"email":"nobody@example.test"}"#))
                 .unwrap(),
         )

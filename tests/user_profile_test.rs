@@ -61,7 +61,7 @@ async fn complete_onboarding_endpoint_is_idempotent() {
         router
             .oneshot(
                 Request::post("/api/v1/me/onboarding/complete")
-                    .header("x-requested-with", "status-monitor")
+                    .header("x-requested-with", "uptimepage")
                     .body(Body::empty())
                     .unwrap(),
             )

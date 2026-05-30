@@ -37,7 +37,7 @@
                 headers: {
                     "Content-Type": "application/json",
                     "Accept": "application/json",
-                    "X-Requested-With": "status-monitor",
+                    "X-Requested-With": "uptimepage",
                 },
                 credentials: "same-origin",
                 body: JSON.stringify(body),

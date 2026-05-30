@@ -24,7 +24,7 @@
       <td class="px-4 py-2 text-right">
         <button type="button"
                 hx-delete="/api/v1/me/api-tokens/{{ t.id }}"
-                hx-headers='{"X-Requested-With":"status-monitor"}'
+                hx-headers='{"X-Requested-With":"uptimepage"}'
                 hx-on::after-request="if(event.detail.successful){htmx.trigger('body','tokens:refresh')}"
                 data-confirm-modal
                 data-confirm-title="Revoke API token?"

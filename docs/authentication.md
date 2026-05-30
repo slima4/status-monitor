@@ -113,7 +113,7 @@ same argon2id parameters as API tokens.
 ## Security model
 
 - **CSRF.** State-changing cookie-authenticated requests must carry
-  `X-Requested-With: status-monitor`. Bearer requests skip. The header
+  `X-Requested-With: uptimepage`. Bearer requests skip. The header
   is comparison-checked in constant time via `subtle::ConstantTimeEq`.
 - **Session fixation.** Both the OAuth callback and the magic-link
   verify endpoint destroy any pre-existing session bound to the browser

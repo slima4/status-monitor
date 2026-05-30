@@ -8,7 +8,7 @@
 
 <button type="button"
         hx-post="/auth/logout-all"
-        hx-headers='{"X-Requested-With":"status-monitor"}'
+        hx-headers='{"X-Requested-With":"uptimepage"}'
         hx-on::after-request="window.location.href='/login'"
         data-confirm-modal
         data-confirm-title="Log out everywhere?"

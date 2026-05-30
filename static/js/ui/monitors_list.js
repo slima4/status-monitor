@@ -98,7 +98,7 @@
         headers: {
           "Content-Type": "application/json",
           "Accept": "application/json",
-          "X-Requested-With": "status-monitor",
+          "X-Requested-With": "uptimepage",
         },
         body: JSON.stringify(body),
       });
@@ -197,7 +197,7 @@
         headers: {
           "Content-Type": "application/json",
           "Accept": "application/json",
-          "X-Requested-With": "status-monitor",
+          "X-Requested-With": "uptimepage",
         },
         body: JSON.stringify({ ids: [id], action: { type: action } }),
       });

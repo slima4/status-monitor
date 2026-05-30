@@ -81,7 +81,7 @@
                     headers: {
                         "Content-Type": "application/json",
                         "Accept": "application/json",
-                        "X-Requested-With": "status-monitor",
+                        "X-Requested-With": "uptimepage",
                     },
                     body: JSON.stringify({ enabled: !current }),
                 });
