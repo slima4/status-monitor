@@ -234,7 +234,7 @@ pub async fn test_send(
     let notifier = build_notifier(&channel.config, &state.outbound_http)?;
     let event = AlertEvent {
         target_id: Uuid::nil(),
-        target_name: "status-monitor test notification".to_string(),
+        target_name: "uptimepage test notification".to_string(),
         kind: AlertKind::Down,
         consecutive_failures: 1,
         last_status: CheckStatus::Down,

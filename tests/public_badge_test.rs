@@ -52,7 +52,7 @@ impl PublicSource for BadgeSource {
                 label: "Minor Disruption".into(),
             },
             generated_at: Utc::now(),
-            site_name: "status-monitor".into(),
+            site_name: "uptimepage".into(),
             groups: vec![PublicComponentGroup {
                 name: Some("Edge".into()),
                 components: vec![component],
@@ -121,7 +121,7 @@ async fn overall_badge_returns_svg_with_state_label() {
     assert_eq!(status, StatusCode::OK);
     assert!(ct.starts_with("image/svg+xml"), "content-type {ct}");
     assert!(body.starts_with("<svg "));
-    assert!(body.contains("status-monitor"));
+    assert!(body.contains("uptimepage"));
     assert!(body.contains("minor disruption"));
 }
 

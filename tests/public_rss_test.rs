@@ -105,7 +105,7 @@ impl PublicSource for TwoIncidentSource {
             .list_incidents(org, IncidentListQuery::default())
             .await?
             .items;
-        Ok(build_rss("status-monitor", base_url, &items))
+        Ok(build_rss("uptimepage", base_url, &items))
     }
 }
 

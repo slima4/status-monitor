@@ -99,7 +99,7 @@ impl PublicSource for FakePublicSource {
                 label: "Minor Service Disruption".into(),
             },
             generated_at: Utc::now(),
-            site_name: "status-monitor".into(),
+            site_name: "uptimepage".into(),
             groups: vec![PublicComponentGroup {
                 name: Some("API".into()),
                 components: vec![component],
@@ -189,7 +189,7 @@ impl PublicSource for FakePublicSource {
             .await?
             .items;
         Ok(uptimepage::public_status::source::build_rss(
-            "status-monitor",
+            "uptimepage",
             base_url,
             &items,
         ))

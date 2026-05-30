@@ -196,7 +196,7 @@ pub async fn data_export(
     let pool = state.require_db()?;
     let export = build_export(pool, user_id).await?;
     let filename = format!(
-        "status-monitor-export-{}-{}.json",
+        "uptimepage-export-{}-{}.json",
         user_id.0,
         Utc::now().format("%Y-%m-%d")
     );

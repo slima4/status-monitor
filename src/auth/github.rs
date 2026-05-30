@@ -35,7 +35,7 @@ const GH_TOKEN_URL: &str = "https://github.com/login/oauth/access_token";
 const GH_USER_URL: &str = "https://api.github.com/user";
 const GH_EMAILS_URL: &str = "https://api.github.com/user/emails";
 const MAX_GH_RESPONSE_BYTES: usize = 256 * 1024;
-const UA: &str = "status-monitor/auth";
+const UA: &str = "uptimepage/auth";
 
 /// Signup-slug retry budget. `generate_signup_slug` collides at p≈1e-9 per
 /// pair; 5 retries covers the 99.9999... case without spinning.

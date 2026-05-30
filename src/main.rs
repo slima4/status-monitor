@@ -119,7 +119,7 @@ async fn main() -> Result<()> {
         version = env!("CARGO_PKG_VERSION"),
         api_bind = %cfg.server.api_bind,
         metrics_bind = %cfg.server.metrics_bind,
-        "starting status-monitor"
+        "starting uptimepage"
     );
 
     let api_bind = cfg.server.api_bind.clone();

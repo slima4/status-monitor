@@ -30,10 +30,10 @@ mod secret_str {
     }
 }
 
-const ENV_PREFIX: &str = "STATUS_MONITOR";
+const ENV_PREFIX: &str = "UPTIMEPAGE";
 const ENV_SEPARATOR: &str = "__";
 const DEFAULT_CONFIG_PATH: &str = "config/default.toml";
-const CONFIG_PATH_ENV: &str = "STATUS_MONITOR_CONFIG_PATH";
+const CONFIG_PATH_ENV: &str = "UPTIMEPAGE_CONFIG_PATH";
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AppConfig {
@@ -385,7 +385,7 @@ impl Default for PublicStatusConfig {
             cache_max_orgs: 1000,
             cache_ttl_secs: 10,
             last_good_ttl_secs: 3600,
-            logo_dir: "/var/lib/status-monitor/logos".into(),
+            logo_dir: "/var/lib/uptimepage/logos".into(),
             max_logo_size_bytes: 1_048_576,
             allowed_logo_mime_types: vec![
                 "image/png".into(),
@@ -698,7 +698,7 @@ fn default_trace_sample_ratio() -> f64 {
 
 /// OTLP trace export to Grafana Cloud (or any OTLP/HTTP collector).
 /// Credentials never live in TOML — `api_key` is sourced only from
-/// `STATUS_MONITOR_OBSERVABILITY__GRAFANA__API_KEY`.
+/// `UPTIMEPAGE_OBSERVABILITY__GRAFANA__API_KEY`.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct GrafanaConfig {
     #[serde(default)]
@@ -896,7 +896,7 @@ impl AppConfig {
             }
             if g.api_key.expose_secret().trim().is_empty() {
                 return Err(err(
-                    "STATUS_MONITOR_OBSERVABILITY__GRAFANA__API_KEY is required when tracing_enabled and grafana.enabled are true".into(),
+                    "UPTIMEPAGE_OBSERVABILITY__GRAFANA__API_KEY is required when tracing_enabled and grafana.enabled are true".into(),
                 ));
             }
         }

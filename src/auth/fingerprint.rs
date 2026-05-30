@@ -15,7 +15,7 @@ use crate::error::{AppError, Result};
 
 /// Env override that lets an operator confirm an intentional rotation. Without
 /// it the boot fails when the configured salt is unknown.
-pub const ROTATION_OVERRIDE_ENV: &str = "STATUS_MONITOR_AUTH_ACCEPT_SALT_ROTATION";
+pub const ROTATION_OVERRIDE_ENV: &str = "UPTIMEPAGE_AUTH_ACCEPT_SALT_ROTATION";
 
 /// Result code surfaced when the configured salt disagrees with history and
 /// the override env var is absent.

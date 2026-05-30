@@ -73,7 +73,7 @@ impl PublicSource for PublishedSource {
                 label: "Major System Outage".into(),
             },
             generated_at: Utc::now(),
-            site_name: "status-monitor".into(),
+            site_name: "uptimepage".into(),
             groups: vec![PublicComponentGroup {
                 name: Some("Edge".into()),
                 components: vec![component],
@@ -138,7 +138,7 @@ impl PublicSource for EmptyDataSource {
                 label: "All Systems Operational".into(),
             },
             generated_at: Utc::now(),
-            site_name: "status-monitor".into(),
+            site_name: "uptimepage".into(),
             groups: vec![PublicComponentGroup {
                 name: None,
                 components: vec![component],
@@ -214,7 +214,7 @@ impl PublicSource for MaintenanceDominatesSource {
                 label: "Maintenance in progress".into(),
             },
             generated_at: now,
-            site_name: "status-monitor".into(),
+            site_name: "uptimepage".into(),
             groups: vec![PublicComponentGroup {
                 name: None,
                 components: vec![component],
