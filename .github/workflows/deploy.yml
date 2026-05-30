@@ -78,6 +78,7 @@ jobs:
     permissions:
       contents: read
       actions: read # read ci.yml run conclusion for the gate
+      packages: read # pull the app image from GHCR (org keeps it private)
     environment: production # attach required-reviewer / protection rules via the GitHub env
     env:
       # Auto path: deploy the exact commit that was built, never re-migrate.
@@ -161,6 +162,7 @@ jobs:
           ssh -T -i ~/.ssh/id_deploy -o IdentitiesOnly=yes \
               "${DEPLOY_USER}@${DEPLOY_HOST}" \
               "NEW_IMAGE='${NEW_IMAGE}' REMIGRATE='${REMIGRATE}' HEAD_SHA='${HEAD_SHA}' \
+               GHCR_USER='${{ github.actor }}' GHCR_TOKEN='${{ secrets.GITHUB_TOKEN }}' \
                GRAFANA_CLOUD_PROM_URL='${{ secrets.GRAFANA_CLOUD_PROM_URL }}' \
                GRAFANA_CLOUD_PROM_USER='${{ secrets.GRAFANA_CLOUD_PROM_USER }}' \
                GRAFANA_CLOUD_API_TOKEN='${{ secrets.GRAFANA_CLOUD_API_TOKEN }}' \
@@ -418,6 +420,11 @@ jobs:
           # serves: if the ssh session dies here the site stays up on the old
           # image. (Pulling AFTER stop+drop once left prod 502 with an empty
           # DB when a session truncated mid-pull.)
+          #
+          # Authenticate to GHCR so the pull works with the package kept
+          # private (org policy). The job's GITHUB_TOKEN carries packages:read;
+          # the login is ephemeral (token dies with the run).
+          echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
           docker compose pull uptimepage
 
           # --- optional destructive re-migrate (Postgres only) ---------------
