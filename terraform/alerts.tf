@@ -12,7 +12,7 @@ locals {
 }
 
 resource "grafana_folder" "obs" {
-  title = "status-monitor"
+  title = "uptimepage"
 }
 
 # Pipeline-health alerts. Each rule = a Prometheus query (ref A)
