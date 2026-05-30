@@ -4,7 +4,7 @@
 
 ## Operator
 
-status-monitor-inc
+uptimepage-inc
 Nicosia, Cyprus
 
 ## Contact
@@ -15,7 +15,7 @@ Email: slima4.u8@gmail.com
 
 (per §55 Abs. 2 RStV)
 
-status-monitor-inc, Nicosia, Cyprus (as above)
+uptimepage-inc, Nicosia, Cyprus (as above)
 
 ## Hosting
 

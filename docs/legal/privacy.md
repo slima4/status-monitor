@@ -9,7 +9,7 @@ similar laws.
 
 ## 1. Data Controller
 
-status-monitor-inc is the data controller for personal data processed via
+uptimepage-inc is the data controller for personal data processed via
 the Service.
 
 **Contact:** slima4.u8@gmail.com

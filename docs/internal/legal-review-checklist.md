@@ -3,7 +3,7 @@
 Before publishing **any** legal document under `docs/legal/`, work
 through this checklist:
 
-- [ ] Replace every `status-monitor` with your finalised project name
+- [x] Project name finalised as `uptimepage` (brand, crate/binary); legal entity `uptimepage-inc`
 - [ ] Replace every `slima4.u8@gmail.com` with your real contact email(s)
 - [ ] Verify the data inventory matches what your deployment actually
       stores (don't claim you don't store something that you do)
@@ -35,7 +35,7 @@ When you complete the checklist, sign off in a commit message:
 
 ---
 
-## Deployment status (status-monitor-inc)
+## Deployment status (uptimepage-inc)
 
 These values were filled in from the deployment configuration. Items
 marked **ACTION** still need a human decision or real data before the
@@ -43,9 +43,9 @@ docs go live:
 
 | Item | Status |
 |---|---|
-| Project name | `uptimepage` (brand + Rust crate/binary); legal entity stays `status-monitor-inc` until incorporation |
+| Project name | `uptimepage` (brand + Rust crate/binary); legal entity stays `uptimepage-inc` until incorporation |
 | Contact / abuse / security email | `slima4.u8@gmail.com` — **ACTION:** confirm this mailbox is actively monitored (consider role aliases `abuse@`, `security@` that forward to it) |
-| Operator (legal entity) | `status-monitor-inc`, Nicosia, Cyprus — **ACTION:** add registered company number / VAT ID if the entity is incorporated |
+| Operator (legal entity) | `uptimepage-inc`, Nicosia, Cyprus — **ACTION:** add registered company number / VAT ID if the entity is incorporated |
 | Hosting location | Hetzner, Nürnberg, Germany — stated in Privacy Policy §6 and Impressum |
 | Governing law | Germany (Hetzner-hosted). **ACTION:** confirm — the operating entity is in Cyprus; decide whether German or Cypriot law should govern |
 | Public domain | `uptimepage.dev` set in `security.txt` (Canonical/Policy). Confirm the security policy scope matches before publishing |

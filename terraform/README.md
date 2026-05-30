@@ -46,7 +46,7 @@ re-attempt the managed-ds path.
    `versions.tf` → set `cloud.organization` to that org name (it
    cannot be a variable; Terraform parses that block before
    variables). The org name is **not a secret** — safe to commit. The
-   workspace `status-monitor-grafana` is created on first run.
+   workspace `uptimepage-grafana` is created on first run.
 2. **Grafana service-account token**: Grafana stack → Administration →
    Users and access → Service accounts → new account, **Editor** role
    + the Alerting and Datasource *write* permissions (Admin is not

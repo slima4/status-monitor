@@ -8,10 +8,10 @@ terraform {
   required_version = ">= 1.9.0"
 
   cloud {
-    organization = "status-monitor"
+    organization = "uptimepage"
 
     workspaces {
-      name = "status-monitor-grafana"
+      name = "uptimepage-grafana"
     }
   }
 

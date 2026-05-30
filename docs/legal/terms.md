@@ -5,7 +5,7 @@
 ## 1. About these Terms
 
 These Terms of Service ("Terms") govern your use of the uptimepage
-service (the "Service"), operated by status-monitor-inc ("we", "us"). By
+service (the "Service"), operated by uptimepage-inc ("we", "us"). By
 signing up, you agree to these Terms.
 
 The Service's source code is published under an open-source licence at
