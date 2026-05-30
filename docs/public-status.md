@@ -2,7 +2,7 @@
 
 The public status page is the customer-facing surface — an unauthenticated
 HTML page at `/status` plus a small JSON + RSS API under
-`/api/public/v1/*`. It's the only part of status-monitor that's safe to
+`/api/public/v1/*`. It's the only part of uptimepage that's safe to
 expose on the open internet without basic auth in front of it.
 
 This chapter is for operators: how to publish a component, narrate an
@@ -207,7 +207,7 @@ per-IP rate limit (60 requests / minute), which requires the
 The stock `caddy:2-alpine` image doesn't include it — build a
 `custom-caddy:2` image once via `xcaddy`. The procedure is in
 [Deployment](deployment.md#public-status-surface) and
-[`deployment/README.md`](https://github.com/slima4/status-monitor/tree/main/deployment).
+[`deployment/README.md`](https://github.com/uptimepage/uptimepage/tree/main/deployment).
 
 If you'd rather not maintain a custom Caddy image, comment out the
 `rate_limit { … }` block in the Caddyfile. The public surface still

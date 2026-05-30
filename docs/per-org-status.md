@@ -11,7 +11,7 @@ This chapter is the per-org model. For the component/incident/maintenance
 workflow (identical per org) see [Public status page](public-status.md).
 For the wildcard cert and reverse-proxy setup see
 [Deployment](deployment.md#public-status-surface) and the full runbook in
-[`deployment/README.md`](https://github.com/slima4/status-monitor/tree/main/deployment).
+[`deployment/README.md`](https://github.com/uptimepage/uptimepage/tree/main/deployment).
 
 ## When it applies
 

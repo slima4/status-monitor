@@ -1,6 +1,6 @@
-# status-monitor
+# uptimepage
 
-[![docs](https://github.com/slima4/status-monitor/actions/workflows/docs.yml/badge.svg)](https://github.com/slima4/status-monitor/actions/workflows/docs.yml)
+[![docs](https://github.com/uptimepage/uptimepage/actions/workflows/docs.yml/badge.svg)](https://github.com/uptimepage/uptimepage/actions/workflows/docs.yml)
 
 Async Rust service that runs HTTP, TCP, TLS-certificate-expiry, and domain-expiry health checks against a configurable set of targets, applies per-host circuit breaking, batches results, and ships them to durable storage. Targets persist in PostgreSQL; check results land in ClickHouse for high-cardinality time-series queries. Exposes a REST API for target CRUD and result queries plus Prometheus metrics on a separate port.
 
@@ -8,7 +8,7 @@ Built on Rust 1.95 (edition 2024), Tokio, Axum, hyper-util (custom phase-timing 
 
 **Live service: <https://uptimepage.dev>** — hosted, free, sign in with GitHub.
 
-**Full docs: <https://slima4.github.io/status-monitor/>**
+**Full docs: <https://uptimepage.github.io/uptimepage/>**
 
 ## Check types
 
@@ -43,6 +43,38 @@ by binding one or more channels in its `alerts` array:
 Fire-once + recovery semantics. Channels are tenant-isolated — a target can
 only bind a channel its own org owns. See [docs/api.md](docs/api.md) for the
 full contract.
+
+## Terraform
+
+Manage targets and notification channels as code with the official provider
+[`uptimepage/uptimepage`](https://registry.terraform.io/providers/uptimepage/uptimepage)
+([source](https://github.com/uptimepage/terraform-provider-uptimepage)):
+
+```hcl
+terraform {
+  required_providers {
+    uptimepage = {
+      source = "uptimepage/uptimepage"
+    }
+  }
+}
+
+provider "uptimepage" {
+  token = var.uptimepage_token # or set UPTIMEPAGE_TOKEN
+}
+
+resource "uptimepage_target" "api" {
+  name     = "api prod"
+  interval = 60
+  check = {
+    type = "http"
+    http = {
+      url             = "https://example.com/healthz"
+      expected_status = { kind = "exact", exact = 200 }
+    }
+  }
+}
+```
 
 ## Quick start
 
@@ -110,7 +142,7 @@ cargo run --release
 
 ## Docs
 
-Hosted: <https://slima4.github.io/status-monitor/>
+Hosted: <https://uptimepage.github.io/uptimepage/>
 
 Sources under [`docs/`](docs/) — readable directly on GitHub too:
 
@@ -215,7 +247,7 @@ See [docs/development.md](docs/development.md) for the host vs. docker workflow,
 
 ## License
 
-status-monitor is licensed under [AGPL-3.0](LICENSE).
+uptimepage is licensed under [AGPL-3.0](LICENSE).
 
 See [LICENSING.md](LICENSING.md) for what this means in practice.
 

@@ -1,6 +1,6 @@
 # Multi-tenancy
 
-status-monitor runs as a multi-tenant SaaS from a single binary. The active org is always resolved from the authenticated session; there is no compile-time "self-host vs SaaS" mode and no ambient default org.
+uptimepage runs as a multi-tenant SaaS from a single binary. The active org is always resolved from the authenticated session; there is no compile-time "self-host vs SaaS" mode and no ambient default org.
 
 A single-tenant deployment is just a SaaS deployment where you sign up as the first user — the OAuth callback creates the user, an auto-provisioned org and the owner membership in one transaction. Teams who would rather skip the OAuth round-trip can seed `users` + `organizations` + `memberships` directly with a one-shot SQL script.
 

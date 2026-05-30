@@ -36,7 +36,7 @@ fn emit_source_identity() {
     let url = std::env::var("SM_SOURCE_URL")
         .ok()
         .filter(|s| !s.trim().is_empty())
-        .unwrap_or_else(|| "https://github.com/slima4/status-monitor".to_string());
+        .unwrap_or_else(|| "https://github.com/uptimepage/uptimepage".to_string());
 
     println!("cargo::rustc-env=SM_SOURCE_COMMIT={commit}");
     println!("cargo::rustc-env=SM_SOURCE_URL={url}");

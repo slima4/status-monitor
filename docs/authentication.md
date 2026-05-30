@@ -1,6 +1,6 @@
 # Authentication
 
-status-monitor ships with an in-binary auth stack: GitHub OAuth for the
+uptimepage ships with an in-binary auth stack: GitHub OAuth for the
 operator UI, opaque per-user API tokens for the REST surface, and
 optional magic-link sign-in for users without a GitHub identity. The
 binary always runs as multi-tenant SaaS — single-tenant deployments are

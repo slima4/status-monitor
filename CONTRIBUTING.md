@@ -1,11 +1,11 @@
-# Contributing to status-monitor
+# Contributing to uptimepage
 
 Thank you for considering a contribution. This document covers 
 what you need to know before opening a pull request.
 
 ## License agreement
 
-By contributing to status-monitor, you agree that your 
+By contributing to uptimepage, you agree that your 
 contributions will be licensed under **AGPL-3.0**, the same 
 license as the rest of the project.
 

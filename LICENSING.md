@@ -1,6 +1,6 @@
 # Licensing
 
-status-monitor is licensed under **AGPL-3.0**.
+uptimepage is licensed under **AGPL-3.0**.
 
 ## What you can do
 
@@ -12,7 +12,7 @@ status-monitor is licensed under **AGPL-3.0**.
 
 ## What AGPL-3.0 requires
 
-If you run a **modified version** of status-monitor as a network 
+If you run a **modified version** of uptimepage as a network 
 service that other people can interact with, you must offer those 
 users the source code of your modifications under AGPL-3.0.
 
@@ -40,7 +40,7 @@ to an AGPL-compatible license allow-list enforced in CI.
 ## Commercial licensing
 
 If AGPL-3.0 doesn't fit your use case — for example, you want to 
-embed status-monitor in a proprietary product without sharing your 
+embed uptimepage in a proprietary product without sharing your 
 modifications — email slima4.u8@gmail.com to discuss alternative 
 licensing.
 

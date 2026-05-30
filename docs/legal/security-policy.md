@@ -4,7 +4,7 @@
 
 ## Reporting Vulnerabilities
 
-Found a security issue in status-monitor? Email us at
+Found a security issue in uptimepage? Email us at
 **slima4.u8@gmail.com** with subject `[SECURITY]`.
 
 Please **do not** publicly disclose vulnerabilities until we have
@@ -50,7 +50,7 @@ welcome too.
 
 ## What's In Scope
 
-- The source code at https://github.com/slima4/status-monitor
+- The source code at https://github.com/uptimepage/uptimepage
 - The hosted Service (`app.example.com` and the public per-org pages at `*.example.com`)
 
 ## What's Out of Scope

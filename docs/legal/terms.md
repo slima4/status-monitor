@@ -4,12 +4,12 @@
 
 ## 1. About these Terms
 
-These Terms of Service ("Terms") govern your use of the status-monitor
+These Terms of Service ("Terms") govern your use of the uptimepage
 service (the "Service"), operated by status-monitor-inc ("we", "us"). By
 signing up, you agree to these Terms.
 
 The Service's source code is published under an open-source licence at
-https://github.com/slima4/status-monitor. You may self-host the Service
+https://github.com/uptimepage/uptimepage. You may self-host the Service
 under that licence; the source code is provided "as is" without warranty.
 These Terms apply when you use the hosted instance we operate. They do
 not apply to self-hosted deployments — those are governed solely by the
@@ -17,7 +17,7 @@ open-source licence.
 
 ## 2. The Service
 
-status-monitor is an HTTP/TCP monitoring service. You configure endpoints
+uptimepage is an HTTP/TCP monitoring service. You configure endpoints
 ("targets") to monitor; we periodically check them and store the results.
 We may also display selected results on a public status page if you opt in.
 

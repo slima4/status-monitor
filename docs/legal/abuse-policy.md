@@ -7,7 +7,7 @@ abuse, how to report it, and what we'll do.
 
 ## What Counts as Abuse
 
-We consider the following abusive use of the status-monitor service:
+We consider the following abusive use of the uptimepage service:
 
 - **Unauthorised monitoring:** Configuring targets pointing at systems
   the operator does not own or have permission to monitor

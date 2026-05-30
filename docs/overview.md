@@ -1,4 +1,4 @@
-# status-monitor
+# uptimepage
 
 Async Rust service that runs HTTP and TCP health checks against a configurable set of targets, applies per-host circuit breaking, batches results, and ships them to durable storage. Targets persist in PostgreSQL; check results land in ClickHouse for high-cardinality time-series queries. Exposes a REST API for target CRUD and result queries, a server-rendered operator UI on the same port, and Prometheus metrics on a separate port.
 
@@ -15,4 +15,4 @@ Built on Rust 1.95 (edition 2024), Tokio, Axum, hyper-util (custom phase-timing 
 
 ## Source
 
-[github.com/slima4/status-monitor](https://github.com/slima4/status-monitor)
+[github.com/uptimepage/uptimepage](https://github.com/uptimepage/uptimepage)

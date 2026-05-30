@@ -86,7 +86,7 @@ COPY --from=builder /usr/bin/caddy /usr/bin/caddy
 EOF
 ```
 
-Then point the `caddy` service in `deployment/docker-compose.yml` at `custom-caddy:2`. Full procedure (including the opt-out path that drops the rate-limit block) is in [`deployment/README.md`](https://github.com/slima4/status-monitor/tree/main/deployment).
+Then point the `caddy` service in `deployment/docker-compose.yml` at `custom-caddy:2`. Full procedure (including the opt-out path that drops the rate-limit block) is in [`deployment/README.md`](https://github.com/uptimepage/uptimepage/tree/main/deployment).
 
 The same custom image carries two more per-IP zones: `auth_endpoints` (10/min on `/auth/*`, `/api/v1/me`, invitation accept) and `org_creation` (3 per 24 h on `POST /api/v1/orgs`). These are the edge tier; the per-org / per-user budgets the service enforces from each org's plan are the [Quotas & rate limits](quotas.md) tier — complementary, since behind the proxy the app sees only the proxy as the peer.
 
@@ -97,7 +97,7 @@ When `tenancy.subdomain_public_routes = true`, each org's page is served at `{sl
 - a wildcard DNS record `*.{domain}` pointing at the host (plus explicit A/AAAA records for any operator subdomain — `app`, `mail`, etc. — which take precedence over the wildcard);
 - a **wildcard TLS cert** for `*.{domain}`. HTTP-01 can't validate a wildcard, so the custom Caddy image also bundles [`caddy-dns/hetzner`](https://github.com/caddy-dns/hetzner) and solves the ACME **DNS-01** challenge using a `HETZNER_DNS_API_TOKEN` (zone-edit scope) from `.env`. The operator host (`app.{domain}`) is kept on its own per-host HTTP-01 cert in a separate Caddyfile block so a wildcard-key compromise does not reach the operator surface.
 
-The wildcard means a new org's page works the moment its owner enables it — no per-org DNS or cert step. The end-to-end runbook (Hetzner zone setup, token scope, building the image, verifying the wildcard cert) is in [`deployment/README.md`](https://github.com/slima4/status-monitor/tree/main/deployment). The model — host routing, branding, opt-in gating, cookie scoping — is in [Per-org status pages](per-org-status.md).
+The wildcard means a new org's page works the moment its owner enables it — no per-org DNS or cert step. The end-to-end runbook (Hetzner zone setup, token scope, building the image, verifying the wildcard cert) is in [`deployment/README.md`](https://github.com/uptimepage/uptimepage/tree/main/deployment). The model — host routing, branding, opt-in gating, cookie scoping — is in [Per-org status pages](per-org-status.md).
 
 For the operator workflow (enabling components, narrating incidents, scheduling maintenance) see [Public status page](public-status.md).
 

@@ -1,16 +1,16 @@
 [book]
-title = "status-monitor"
+title = "uptimepage"
 description = "Async Rust health-check service — architecture, API, configuration, metrics, deployment."
-authors = ["status-monitor authors"]
+authors = ["uptimepage authors"]
 language = "en"
 src = "docs"
 
 [output.html]
 default-theme = "rust"
 preferred-dark-theme = "navy"
-git-repository-url = "https://github.com/slima4/status-monitor"
-edit-url-template = "https://github.com/slima4/status-monitor/edit/main/{path}"
-site-url = "/status-monitor/"
+git-repository-url = "https://github.com/uptimepage/uptimepage"
+edit-url-template = "https://github.com/uptimepage/uptimepage/edit/main/{path}"
+site-url = "/uptimepage/"
 
 [output.html.search]
 enable = true

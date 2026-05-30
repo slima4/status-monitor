@@ -2,7 +2,7 @@
 
 **Last updated:** 2026-05-15
 
-This Privacy Policy explains how the status-monitor service ("we", "us")
+This Privacy Policy explains how the uptimepage service ("we", "us")
 collects and processes personal data. It is intended to satisfy our
 obligations under the EU General Data Protection Regulation (GDPR) and
 similar laws.

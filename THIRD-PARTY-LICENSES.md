@@ -1,6 +1,6 @@
 # Third-Party Licenses
 
-status-monitor itself is licensed under AGPL-3.0 (see [LICENSE](LICENSE)).
+uptimepage itself is licensed under AGPL-3.0 (see [LICENSE](LICENSE)).
 The release binary additionally **embeds** the third-party assets listed
 below (vendored JavaScript under `static/js/`, and the Tailwind-generated
 `static/css/app.css`), all baked in via `rust-embed`. Their licenses and

@@ -9,7 +9,7 @@
 Subject: `[Status Update] Service degradation in progress`
 
 > We're investigating reports of slow responses and errors on the
-> status-monitor service starting at HH:MM UTC. Our team is working to
+> uptimepage service starting at HH:MM UTC. Our team is working to
 > resolve this. We'll update this thread as we learn more.
 >
 > Affected: [public status pages | operator UI | API | all]
@@ -35,7 +35,7 @@ Subject: `Scheduled maintenance — YYYY-MM-DD HH:MM UTC`
 **Use only if data was actually exposed.** Coordinate with the German
 supervisory authority before sending.
 
-Subject: `Important security notice about your status-monitor account`
+Subject: `Important security notice about your uptimepage account`
 
 > We are writing to inform you of a security incident affecting your
 > account.
@@ -60,7 +60,7 @@ Subject: `Important security notice about your status-monitor account`
 
 ## D. Account suspension notice
 
-Subject: `Your status-monitor account has been suspended`
+Subject: `Your uptimepage account has been suspended`
 
 > We have suspended your account ([email]) due to [violation: specific
 > description].
@@ -75,16 +75,16 @@ Subject: `Your status-monitor account has been suspended`
 
 ## E. Service shutdown notice (90+ days notice)
 
-Subject: `Important: status-monitor hosted service will shut down on YYYY-MM-DD`
+Subject: `Important: uptimepage hosted service will shut down on YYYY-MM-DD`
 
-> We are writing to let you know that the hosted status-monitor service
+> We are writing to let you know that the hosted uptimepage service
 > will shut down on [date], 90+ days from today.
 >
 > Your data will remain accessible until that date. To preserve your data:
 >
 > 1. Export your data: visit /settings/account → "Export My Data"
-> 2. Self-host: source code is at https://github.com/slima4/status-monitor —
+> 2. Self-host: source code is at https://github.com/uptimepage/uptimepage —
 >    deployment instructions are in the README
 >
 > We are sorry to discontinue the service. Thank you for using
-> status-monitor.
+> uptimepage.

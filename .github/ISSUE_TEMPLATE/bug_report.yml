@@ -9,7 +9,7 @@ body:
         Thanks for catching this! 🔍 A good bug report = a fast fix. Fill what you can — even a screenshot helps.
 
         > [!CAUTION]
-        > **Security issue?** Don't file it here. Open a [private advisory](https://github.com/slima4/status-monitor/security/advisories/new) or email `slima4.u8@gmail.com` with subject `[SECURITY]`.
+        > **Security issue?** Don't file it here. Open a [private advisory](https://github.com/uptimepage/uptimepage/security/advisories/new) or email `slima4.u8@gmail.com` with subject `[SECURITY]`.
   - type: textarea
     id: what
     attributes:

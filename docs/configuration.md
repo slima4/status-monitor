@@ -45,7 +45,7 @@ Override `STATUS_MONITOR_CONFIG_PATH` to point at an alternate base config file.
 
 ## Public status routing
 
-status-monitor ships from one binary as a multi-tenant SaaS. The active org is always resolved from the authenticated session; there is no ambient "default org" and no compile-time self-host mode. A single-tenant deployment is just a SaaS deployment where you sign up as the first user (or seed `users` + `organizations` + `memberships` via a SQL one-shot).
+uptimepage ships from one binary as a multi-tenant SaaS. The active org is always resolved from the authenticated session; there is no ambient "default org" and no compile-time self-host mode. A single-tenant deployment is just a SaaS deployment where you sign up as the first user (or seed `users` + `organizations` + `memberships` via a SQL one-shot).
 
 The public status surface is gated by **two** independent flags because path-based and subdomain routing have opposite safety profiles:
 
