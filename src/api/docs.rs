@@ -95,6 +95,10 @@ use crate::storage::UptimeStats;
         handlers::account::data_export,
         handlers::account::delete_account,
         handlers::account::recover_account,
+        handlers::api_tokens::list,
+        handlers::api_tokens::create,
+        handlers::api_tokens::rename,
+        handlers::api_tokens::revoke,
     ),
     components(
         schemas(
@@ -202,6 +206,10 @@ use crate::storage::UptimeStats;
             handlers::account::DeletionConfirmation,
             handlers::account::RecoverRequest,
             handlers::account::RecoveredAccount,
+            handlers::api_tokens::NewApiTokenRequest,
+            handlers::api_tokens::NewApiTokenResponse,
+            handlers::api_tokens::ApiTokenView,
+            handlers::api_tokens::RenameApiTokenRequest,
         ),
     ),
     tags(
@@ -216,6 +224,7 @@ use crate::storage::UptimeStats;
         (name = "incidents",     description = "Incident narration and timeline (operator)"),
         (name = "orgs",          description = "Organisation management and membership"),
         (name = "account",       description = "GDPR data export, account deletion and recovery"),
+        (name = "api-tokens",    description = "Personal API token management (browser session only)"),
     ),
 )]
 pub struct ApiDoc;

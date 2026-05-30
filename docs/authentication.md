@@ -65,6 +65,35 @@ the `Authorization` header, so there is no forgery surface.
 
 To manage resources with a token as code, see [Terraform](terraform.md).
 
+#### Scopes
+
+Every token carries a set of `resource:action` scopes. A request is rejected with `403 INSUFFICIENT_SCOPE` unless the token holds the scope its endpoint requires. `full_access` is a superset that grants all of them; unknown scope strings are ignored (forward-compatible).
+
+| Resource | `read` | `write` | `delete` | `execute` |
+|---|---|---|---|---|
+| `targets` | list / get / results / uptime / latency / incident history | create / update / bulk | delete, bulk-delete | run a check now, test-probe a config |
+| `channels` | list / get | create / update | delete | send a test notification |
+| `incidents` | — (target incident history is under `targets:read`; the public timeline needs no token) | narrate / post update | — | — |
+| `maintenance` | list / get | create / update | delete | — |
+| `status_page` | read settings | update settings, upload logo | remove logo | — |
+
+`write` implies `read` for the same resource. `delete` and `execute` are **independent** — they are *not* granted by `write`, so a config-management token (`*:write`) can change resources but cannot destroy them or trigger side effects. Grant `delete`/`execute` explicitly when you need them.
+
+#### Org binding
+
+A token is user-scoped, so each request names an org via the `X-Uptimepage-Org: <slug>` header. A token can additionally be **bound** to one org at creation:
+
+- **Bound** — the header is optional; if sent it must name the bound org, else `403 ORG_HEADER_MISMATCH`. The token can never act on the user's other orgs.
+- **Unbound** — the header is required (`400 ORG_REQUIRED` if absent). A malformed/unknown slug is `400 ORG_HEADER_INVALID` on either kind.
+
+#### Expiry
+
+A token may carry an expiry (1–365 days); an expired token authenticates as invalid. Tokens without an expiry never lapse — prefer a bounded lifetime.
+
+#### Managing tokens
+
+Token management — create, list, rename, revoke — is **browser-session only**: these endpoints read the session cookie and reject bearer tokens, so a token can never mint another token (which would escape its own scopes) or reach account/org administration. Mint tokens in the UI at **Settings → API tokens** (a verified email is required).
+
 ### Magic-link sign-in (gated)
 
 Available only when `auth.enabled_methods` contains `"magic_link"`:

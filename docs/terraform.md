@@ -43,10 +43,16 @@ resource "uptimepage_target" "api" {
 - **Token** — create one at **Settings → API tokens** (`/settings/api-tokens`;
   requires a verified email). Supply it via the `token` attribute or the
   `UPTIMEPAGE_TOKEN` environment variable. The full token is shown **once**.
+  Grant the **least scope** the provider needs: `targets:write` +
+  `channels:write` covers both managed resources (`write` implies `read`, and
+  Terraform only deletes during `terraform destroy`). Add `targets:delete` +
+  `channels:delete` only if you run `destroy`. For defence in depth, **bind the
+  token to the org** you manage so a leak can't reach your other orgs.
 - **Org** — API tokens are user-scoped, so every request must name an
   organization. Set `org` (the org **slug**) or `UPTIMEPAGE_ORG`; it is sent as
   the `X-Uptimepage-Org` header. Without it the API returns `400 ORG_REQUIRED`.
-  Find your slug from `GET /api/v1/orgs` or your dashboard URL.
+  Find your slug from `GET /api/v1/orgs` or your dashboard URL. A token bound to
+  an org requires `org` to match it (else `403 ORG_HEADER_MISMATCH`).
 - **Endpoint** — defaults to the hosted API at `https://app.uptimepage.dev`. For
   a self-hosted instance, set `endpoint` to your host (the apex marketing domain
   does not serve `/api/v1`).

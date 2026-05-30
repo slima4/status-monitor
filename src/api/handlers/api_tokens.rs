@@ -16,7 +16,7 @@ use sqlx::PgPool;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
-use crate::api::error::codes;
+use crate::api::error::{ApiError, codes};
 use crate::app::AppState;
 use crate::auth::api_tokens as tokens;
 use crate::auth::scope::{Scope, ScopeSet};
@@ -83,6 +83,24 @@ pub struct RenameApiTokenRequest {
     pub name: String,
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/me/api-tokens",
+    tag = "api-tokens",
+    summary = "Create an API token (browser session only)",
+    description = "Returns the raw token exactly once. Session-authenticated \
+                   only — a bearer token cannot mint another token.",
+    request_body = NewApiTokenRequest,
+    responses(
+        (status = 201, body = NewApiTokenResponse),
+        (status = 400, body = ApiError, description = "TOKEN_NAME_INVALID (empty or >80 chars)"),
+        (status = 401, body = ApiError, description = "Not a browser session"),
+        (status = 403, body = ApiError,
+            description = "EMAIL_NOT_VERIFIED, or bound org missing / caller not a member"),
+        (status = 422, body = ApiError,
+            description = "INVALID_SCOPES, INVALID_EXPIRY, or the per-user token cap reached"),
+    ),
+)]
 pub async fn create(
     State(state): State<AppState>,
     VerifiedBrowserUser(CurrentUser(user_id)): VerifiedBrowserUser,
@@ -133,6 +151,16 @@ pub async fn create(
     ))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/me/api-tokens",
+    tag = "api-tokens",
+    summary = "List the caller's API tokens (prefix only)",
+    responses(
+        (status = 200, body = Vec<ApiTokenView>),
+        (status = 401, body = ApiError, description = "Not a browser session"),
+    ),
+)]
 pub async fn list(
     State(state): State<AppState>,
     BrowserUser(CurrentUser(user_id)): BrowserUser,
@@ -155,6 +183,20 @@ pub async fn list(
     ))
 }
 
+#[utoipa::path(
+    patch,
+    path = "/api/v1/me/api-tokens/{id}",
+    tag = "api-tokens",
+    summary = "Rename an API token",
+    params(("id" = Uuid, Path)),
+    request_body = RenameApiTokenRequest,
+    responses(
+        (status = 204, description = "Renamed"),
+        (status = 400, body = ApiError, description = "TOKEN_NAME_INVALID (empty or >80 chars)"),
+        (status = 401, body = ApiError, description = "Not a browser session"),
+        (status = 404, body = ApiError, description = "TOKEN_NOT_FOUND"),
+    ),
+)]
 pub async fn rename(
     State(state): State<AppState>,
     BrowserUser(CurrentUser(user_id)): BrowserUser,
@@ -173,6 +215,18 @@ pub async fn rename(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[utoipa::path(
+    delete,
+    path = "/api/v1/me/api-tokens/{id}",
+    tag = "api-tokens",
+    summary = "Revoke an API token",
+    params(("id" = Uuid, Path)),
+    responses(
+        (status = 204, description = "Revoked"),
+        (status = 401, body = ApiError, description = "Not a browser session"),
+        (status = 404, body = ApiError, description = "TOKEN_NOT_FOUND"),
+    ),
+)]
 pub async fn revoke(
     State(state): State<AppState>,
     BrowserUser(CurrentUser(user_id)): BrowserUser,
