@@ -4,6 +4,7 @@
 
 - [Architecture](architecture.md)
 - [REST API](api.md)
+- [Terraform (IaC)](terraform.md)
 - [Web UI](ui.md)
 - [Public status page](public-status.md)
 - [Per-org status pages](per-org-status.md)
