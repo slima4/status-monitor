@@ -6,9 +6,9 @@ use std::time::Duration;
 use axum::Router;
 use axum::routing::get;
 use rcgen::{CertificateParams, DnType, KeyPair, SanType};
-use status_monitor::domain::{CheckStatus, TlsCertCheck};
-use status_monitor::worker::tls_cert::execute_tls_cert_check;
 use time::OffsetDateTime;
+use uptimepage::domain::{CheckStatus, TlsCertCheck};
+use uptimepage::worker::tls_cert::execute_tls_cert_check;
 use uuid::Uuid;
 
 use crate::common::test_client;

@@ -6,7 +6,15 @@ use axum::extract::Request;
 use axum::middleware::{self, Next};
 use axum::response::Response;
 use opentelemetry::trace::TraceContextExt;
-use status_monitor::{
+use tokio::net::TcpListener;
+use tokio::signal;
+use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
+use tokio::time::timeout;
+use tokio_util::sync::CancellationToken;
+use tower_http::trace::{DefaultOnResponse, TraceLayer};
+use tracing_opentelemetry::OpenTelemetrySpanExt;
+use uptimepage::{
     api::handlers::health::is_health_path,
     app::AppState,
     config::AppConfig,
@@ -31,14 +39,6 @@ use status_monitor::{
     },
     worker::{ResultFanout, WorkerPool},
 };
-use tokio::net::TcpListener;
-use tokio::signal;
-use tokio::sync::mpsc;
-use tokio::task::JoinHandle;
-use tokio::time::timeout;
-use tokio_util::sync::CancellationToken;
-use tower_http::trace::{DefaultOnResponse, TraceLayer};
-use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 const SHUTDOWN_DEADLINE: Duration = Duration::from_secs(10);
 
@@ -51,11 +51,11 @@ const SHUTDOWN_DEADLINE: Duration = Duration::from_secs(10);
 /// (a Loki derived field on `trace_id` pivots straight to the trace).
 ///
 /// Caveat: `trace_id` is present only when the `http.request` span is
-/// actually recorded — i.e. `status_monitor` at DEBUG in the active
+/// actually recorded — i.e. `uptimepage` at DEBUG in the active
 /// filter. Under a bare `info` `RUST_LOG` the span is absent and
 /// `trace_id` is simply omitted (never a fake id) — the access line
 /// still logs, but the Loki→Tempo pivot silently goes dark. The deploy
-/// `RUST_LOG` variable must keep `status_monitor=debug`.
+/// `RUST_LOG` variable must keep `uptimepage=debug`.
 async fn access_log(req: Request, next: Next) -> Response {
     // Decide skip from the BORROWED path; only own method+path when
     // we will actually log. Caddy active-health + the deploy gate poll
@@ -98,13 +98,13 @@ async fn main() -> Result<()> {
     // reaches the sampler/transport.
     cfg.validate_observability()?;
     let tracing_guard = observability::tracing::init(&cfg.observability);
-    status_monitor::app::assert_per_org_status_config(&cfg);
+    uptimepage::app::assert_per_org_status_config(&cfg);
     // A bad quota/rate/interval number is a clean startup config error,
     // never a `.expect()` crash-loop in router/layer construction (I6).
     cfg.validate_quotas_and_limits()?;
     // Same contract for the abuse rules: a malformed URL-pattern regex or
     // deny-list YAML fails fast here, not as a runtime panic.
-    status_monitor::security::AbuseGuard::validate(&cfg.abuse)?;
+    uptimepage::security::AbuseGuard::validate(&cfg.abuse)?;
     // Marketing host/URL/cookie invariants. Skipped wholesale when
     // marketing.enabled = false (the default).
     cfg.validate_marketing()?;
@@ -174,29 +174,24 @@ async fn main() -> Result<()> {
     );
     let (alert_tx, alert_rx) = mpsc::channel(cfg.storage.clickhouse.buffer_size.max(1024));
     let fanout = ResultFanout::new(result_tx.clone(), Some(alert_tx));
-    let host_throttle = Arc::new(status_monitor::worker::host_throttle::HostThrottle::new(
+    let host_throttle = Arc::new(uptimepage::worker::host_throttle::HostThrottle::new(
         cfg.checker.per_host_max_inflight,
         cfg.checker.rdap_max_inflight,
     ));
-    let rdap_client = Arc::new(status_monitor::worker::rdap::RdapClient::new(
-        status_monitor::http_outbound::build_outbound_client(
-            status_monitor::security::SsrfGuard::strict(),
-        ),
+    let rdap_client = Arc::new(uptimepage::worker::rdap::RdapClient::new(
+        uptimepage::http_outbound::build_outbound_client(uptimepage::security::SsrfGuard::strict()),
     ));
-    let domain_expiry_state: Arc<dyn status_monitor::storage::DomainExpiryStateStore> = Arc::new(
-        status_monitor::storage::PgDomainExpiryStateStore::new(pg_pool.clone()),
+    let domain_expiry_state: Arc<dyn uptimepage::storage::DomainExpiryStateStore> = Arc::new(
+        uptimepage::storage::PgDomainExpiryStateStore::new(pg_pool.clone()),
     );
-    let domain_expiry_runtime = Arc::new(
-        status_monitor::worker::domain_expiry::DomainExpiryRuntime::new(
+    let domain_expiry_runtime =
+        Arc::new(uptimepage::worker::domain_expiry::DomainExpiryRuntime::new(
             rdap_client,
-            Arc::new(
-                status_monitor::worker::rdap_singleflight::RdapSingleflight::with_default_ttl(),
-            ),
+            Arc::new(uptimepage::worker::rdap_singleflight::RdapSingleflight::with_default_ttl()),
             domain_expiry_state,
             host_throttle.clone(),
-            status_monitor::worker::domain_expiry::DEFAULT_MAX_STALENESS,
-        ),
-    );
+            uptimepage::worker::domain_expiry::DEFAULT_MAX_STALENESS,
+        ));
     let pool = Arc::new(WorkerPool::new(
         cfg.checker.max_concurrent_checks,
         (*http_clients).clone(),
@@ -235,14 +230,14 @@ async fn main() -> Result<()> {
         let token = root.clone();
         tokio::spawn(async move { batcher.run(token).await })
     };
-    let alert_channel_cache = status_monitor::notifier::engine::AlertChannelCache::new();
+    let alert_channel_cache = uptimepage::notifier::engine::AlertChannelCache::new();
     let alert_engine_handle: Option<JoinHandle<()>> = Some({
         let token = root.clone();
         let engine = AlertEngine::new(
             alert_rx,
             notification_channel_store.clone(),
-            status_monitor::http_outbound::build_outbound_client(
-                status_monitor::security::SsrfGuard::from_security_config(&cfg.security),
+            uptimepage::http_outbound::build_outbound_client(
+                uptimepage::security::SsrfGuard::from_security_config(&cfg.security),
             ),
             alert_channel_cache.clone(),
         );
@@ -251,7 +246,7 @@ async fn main() -> Result<()> {
     // Floor at 100ms to keep a misconfigured 0 / sub-tick value from spinning.
     let sample_interval =
         Duration::from_millis(cfg.observability.gauge_sample_interval_ms.max(100));
-    let sampler_handle: JoinHandle<()> = status_monitor::observability::sampler::spawn(
+    let sampler_handle: JoinHandle<()> = uptimepage::observability::sampler::spawn(
         pool.clone(),
         registry.clone(),
         pg_pool.clone(),
@@ -316,21 +311,21 @@ async fn main() -> Result<()> {
     let incident_narration_store: Arc<dyn IncidentNarrationStore> =
         Arc::new(PgIncidentNarrationStore::new(pg_pool_for_stores.clone()));
 
-    let outbound_http = status_monitor::http_outbound::build_outbound_client(
-        status_monitor::security::SsrfGuard::from_security_config(&cfg.security),
+    let outbound_http = uptimepage::http_outbound::build_outbound_client(
+        uptimepage::security::SsrfGuard::from_security_config(&cfg.security),
     );
-    let email_sender = status_monitor::email::build_email_sender(&cfg.email, &outbound_http)
+    let email_sender = uptimepage::email::build_email_sender(&cfg.email, &outbound_http)
         .map_err(|e| AppError::Other(anyhow::anyhow!("build_email_sender: {e}")))?;
 
-    status_monitor::auth::ensure_fingerprint_salt(&pg_pool_for_stores, &cfg.auth.fingerprint_salt)
+    uptimepage::auth::ensure_fingerprint_salt(&pg_pool_for_stores, &cfg.auth.fingerprint_salt)
         .await
         .map_err(|e| AppError::Other(anyhow::anyhow!("auth salt guard: {e}")))?;
 
     let prefix_len = cfg.auth.api_tokens.prefix_visible_chars as usize;
-    if prefix_len < status_monitor::auth::api_tokens::MIN_PREFIX_VISIBLE_CHARS {
+    if prefix_len < uptimepage::auth::api_tokens::MIN_PREFIX_VISIBLE_CHARS {
         return Err(AppError::Other(anyhow::anyhow!(
             "auth.api_tokens.prefix_visible_chars must be >= {} (got {prefix_len})",
-            status_monitor::auth::api_tokens::MIN_PREFIX_VISIBLE_CHARS
+            uptimepage::auth::api_tokens::MIN_PREFIX_VISIBLE_CHARS
         )));
     }
 
@@ -338,13 +333,13 @@ async fn main() -> Result<()> {
         let pool = pg_pool_for_stores.clone();
         let token = root.clone();
         let keep_days = i64::from(cfg.auth.invitations.expiry_hours / 24).max(1);
-        tokio::spawn(status_monitor::auth::invitations_cleanup::run(
+        tokio::spawn(uptimepage::auth::invitations_cleanup::run(
             pool, keep_days, token,
         ))
     };
 
     let oauth_state_cleanup_handle: JoinHandle<()> =
-        status_monitor::auth::oauth_state_cleanup::spawn(pg_pool_for_stores.clone(), root.clone());
+        uptimepage::auth::oauth_state_cleanup::spawn(pg_pool_for_stores.clone(), root.clone());
 
     // Magic-link sweep only runs when the method is wired into the router.
     // When disabled the routes 404, no rows are ever inserted, and the ticker
@@ -357,7 +352,7 @@ async fn main() -> Result<()> {
         .then(|| {
             let pool = pg_pool_for_stores.clone();
             let token = root.clone();
-            tokio::spawn(status_monitor::auth::magic_link_cleanup::run(pool, token))
+            tokio::spawn(uptimepage::auth::magic_link_cleanup::run(pool, token))
         });
 
     let state = AppState::new(
@@ -378,7 +373,7 @@ async fn main() -> Result<()> {
     );
     // Hot-reload the abuse deny-lists on SIGHUP when enabled (validate then
     // atomic swap; a bad edit is rejected and the running rules stay).
-    let abuse_reload_handle: Option<JoinHandle<()>> = status_monitor::security::abuse_reload::spawn(
+    let abuse_reload_handle: Option<JoinHandle<()>> = uptimepage::security::abuse_reload::spawn(
         state.abuse.clone(),
         state.cfg.clone(),
         root.clone(),
@@ -397,13 +392,13 @@ async fn main() -> Result<()> {
     // security.txt) reaches a handler; everything else 404s before the
     // operator UI, auth flows, and private API can leak surface on
     // `{slug}.{base}`. No-op when SaaS subdomain mode is off.
-    let app_router = status_monitor::build_app_router(state.clone(), root.clone());
+    let app_router = uptimepage::build_app_router(state.clone(), root.clone());
 
     // The single dispatch seam. When marketing is enabled, requests are
     // routed to the marketing or app router by classified `Host`.
     // Otherwise the app router serves everything as before.
     let combined: Router = if state.cfg.marketing.enabled {
-        let scheme = status_monitor::web::host::HostScheme::from_base_domain(
+        let scheme = uptimepage::web::host::HostScheme::from_base_domain(
             &state.cfg.public_status.base_domain,
         )
         .map_err(|e| AppError::Other(anyhow::anyhow!("HostScheme: {e}")))?;

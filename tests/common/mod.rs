@@ -12,33 +12,33 @@ use chrono::Utc;
 use serde_json::Value;
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
-use status_monitor::app::AppState;
-use status_monitor::config::{
+use uptimepage::app::AppState;
+use uptimepage::config::{
     AppConfig, CheckerConfig, CircuitBreakerConfig, DnsConfig, HttpClientConfig, SchedulerConfig,
     SecurityConfig, TransactionalEmailConfig,
 };
-use status_monitor::domain::{CheckSpec, ExpectedStatus, HttpCheck, HttpMethod, OrgId, Target};
-use status_monitor::email::{EmailSender, build_email_sender};
-use status_monitor::http_client::{HttpClients, build_clients};
-use status_monitor::http_outbound::{OutboundHttpClient, build_outbound_client};
-use status_monitor::public_status::{NoopPublicSource, PublicSource};
-use status_monitor::storage::{
+use uptimepage::domain::{CheckSpec, ExpectedStatus, HttpCheck, HttpMethod, OrgId, Target};
+use uptimepage::email::{EmailSender, build_email_sender};
+use uptimepage::http_client::{HttpClients, build_clients};
+use uptimepage::http_outbound::{OutboundHttpClient, build_outbound_client};
+use uptimepage::public_status::{NoopPublicSource, PublicSource};
+use uptimepage::storage::{
     DomainExpiryStateStore, InMemoryDomainExpiryStateStore, InMemoryIncidentNarrationStore,
     InMemoryMaintenanceStore, InMemoryNotificationChannelStore, InMemorySink, InMemoryTargetStore,
     IncidentNarrationStore, MaintenanceStore, NotificationChannelStore, PostgresTargetStore,
     ResultSink, ResultsStore,
 };
-use status_monitor::worker::domain_expiry::{DEFAULT_MAX_STALENESS, DomainExpiryRuntime};
-use status_monitor::worker::host_throttle::HostThrottle;
-use status_monitor::worker::rdap::RdapClient;
-use status_monitor::worker::rdap_singleflight::RdapSingleflight;
-use status_monitor::worker::{ResultFanout, WorkerPool};
+use uptimepage::worker::domain_expiry::{DEFAULT_MAX_STALENESS, DomainExpiryRuntime};
+use uptimepage::worker::host_throttle::HostThrottle;
+use uptimepage::worker::rdap::RdapClient;
+use uptimepage::worker::rdap_singleflight::RdapSingleflight;
+use uptimepage::worker::{ResultFanout, WorkerPool};
 
 /// Default `DomainExpiryRuntime` for test routers. Wraps an in-memory state
 /// store + a permissive host throttle + a real RDAP client (never invoked
 /// in tests since no DomainExpiry probe runs through this surface).
 pub fn test_domain_expiry_runtime() -> Arc<DomainExpiryRuntime> {
-    let outbound = build_outbound_client(status_monitor::security::SsrfGuard::relaxed_for_tests());
+    let outbound = build_outbound_client(uptimepage::security::SsrfGuard::relaxed_for_tests());
     let rdap_client = Arc::new(RdapClient::new(outbound));
     let state_store: Arc<dyn DomainExpiryStateStore> =
         Arc::new(InMemoryDomainExpiryStateStore::new());
@@ -61,7 +61,7 @@ use uuid::Uuid;
 pub fn build_test_outbound_and_email() -> (OutboundHttpClient, Arc<dyn EmailSender>) {
     // Tests need to hit localhost listeners (mock email server, etc.), so the
     // SSRF guard is relaxed — production callers pass the strict config.
-    let http = build_outbound_client(status_monitor::security::SsrfGuard::relaxed_for_tests());
+    let http = build_outbound_client(uptimepage::security::SsrfGuard::relaxed_for_tests());
     let cfg = TransactionalEmailConfig {
         provider: "memory".into(),
         ..Default::default()
@@ -82,8 +82,8 @@ pub fn test_org_id() -> OrgId {
 /// Companion to [`test_org_id`] for in-memory routers that need to thread a
 /// stable owner identity through `with_session`. Same justification: the
 /// in-memory stores don't enforce FK to `users`, so any stable value works.
-pub fn test_user_id() -> status_monitor::domain::UserId {
-    status_monitor::domain::UserId(Uuid::from_u128(0x0000_0000_0000_0000_0000_0000_0000_0002))
+pub fn test_user_id() -> uptimepage::domain::UserId {
+    uptimepage::domain::UserId(Uuid::from_u128(0x0000_0000_0000_0000_0000_0000_0000_0002))
 }
 
 /// One-line helper that wraps [`build_test_app`] with an owner session bound
@@ -162,7 +162,7 @@ pub fn build_test_app_with_seedable_incidents(
         (*http_clients).clone(),
         cfg.circuit_breaker,
         ResultFanout::storage_only(tx),
-        status_monitor::worker::host_throttle::HostThrottle::permissive(),
+        uptimepage::worker::host_throttle::HostThrottle::permissive(),
         test_domain_expiry_runtime(),
     ));
     let public_source = Arc::new(NoopPublicSource::default());
@@ -185,13 +185,13 @@ pub fn build_test_app_with_seedable_incidents(
         incident_narration_store,
         build_test_outbound_and_email().0,
         build_test_outbound_and_email().1,
-        status_monitor::notifier::engine::AlertChannelCache::new(),
+        uptimepage::notifier::engine::AlertChannelCache::new(),
     );
-    let router = status_monitor::build_app_router_api_only(state, CancellationToken::new());
+    let router = uptimepage::build_app_router_api_only(state, CancellationToken::new());
     // Auto-attach an owner session so operator routes resolve a CurrentOrg.
     // Tests that explicitly exercise the unauthenticated branch should
     // construct the router via `build_test_app` and stamp their own session.
-    let user = status_monitor::domain::UserId(Uuid::from_u128(0xA6));
+    let user = uptimepage::domain::UserId(Uuid::from_u128(0xA6));
     let router = with_session(
         router,
         user,
@@ -237,7 +237,7 @@ fn build_test_app_with_public_source_inner(
         (*http_clients).clone(),
         cfg.circuit_breaker,
         ResultFanout::storage_only(tx),
-        status_monitor::worker::host_throttle::HostThrottle::permissive(),
+        uptimepage::worker::host_throttle::HostThrottle::permissive(),
         test_domain_expiry_runtime(),
     ));
     let maintenance_store: Arc<dyn MaintenanceStore> = Arc::new(InMemoryMaintenanceStore::new());
@@ -259,12 +259,12 @@ fn build_test_app_with_public_source_inner(
         incident_narration_store,
         build_test_outbound_and_email().0,
         build_test_outbound_and_email().1,
-        status_monitor::notifier::engine::AlertChannelCache::new(),
+        uptimepage::notifier::engine::AlertChannelCache::new(),
     );
     if with_web {
-        status_monitor::build_app_router(state, CancellationToken::new())
+        uptimepage::build_app_router(state, CancellationToken::new())
     } else {
-        status_monitor::build_app_router_api_only(state, CancellationToken::new())
+        uptimepage::build_app_router_api_only(state, CancellationToken::new())
     }
 }
 
@@ -277,9 +277,9 @@ pub fn build_test_app_with_web(mutate: impl FnOnce(&mut AppConfig)) -> Router {
 fn build_test_app_inner(mutate: impl FnOnce(&mut AppConfig), with_web: bool) -> Router {
     let state = build_test_app_state(mutate);
     if with_web {
-        status_monitor::build_app_router(state, CancellationToken::new())
+        uptimepage::build_app_router(state, CancellationToken::new())
     } else {
-        status_monitor::build_app_router_api_only(state, CancellationToken::new())
+        uptimepage::build_app_router_api_only(state, CancellationToken::new())
     }
 }
 
@@ -315,7 +315,7 @@ pub async fn build_test_app_with_pg(
         (*http_clients).clone(),
         cfg.circuit_breaker,
         ResultFanout::storage_only(tx),
-        status_monitor::worker::host_throttle::HostThrottle::permissive(),
+        uptimepage::worker::host_throttle::HostThrottle::permissive(),
         test_domain_expiry_runtime(),
     ));
     let public_source = Arc::new(NoopPublicSource::default());
@@ -338,9 +338,9 @@ pub async fn build_test_app_with_pg(
         incident_narration_store,
         build_test_outbound_and_email().0,
         build_test_outbound_and_email().1,
-        status_monitor::notifier::engine::AlertChannelCache::new(),
+        uptimepage::notifier::engine::AlertChannelCache::new(),
     );
-    let app = status_monitor::build_app_router(state, CancellationToken::new());
+    let app = uptimepage::build_app_router(state, CancellationToken::new());
     (app, provisioned_org)
 }
 
@@ -421,7 +421,7 @@ fn assemble_pg_router(pool: PgPool, cfg: AppConfig) -> Router {
         (*http_clients).clone(),
         cfg.circuit_breaker,
         ResultFanout::storage_only(tx),
-        status_monitor::worker::host_throttle::HostThrottle::permissive(),
+        uptimepage::worker::host_throttle::HostThrottle::permissive(),
         test_domain_expiry_runtime(),
     ));
     let public_source = Arc::new(NoopPublicSource::default());
@@ -444,24 +444,24 @@ fn assemble_pg_router(pool: PgPool, cfg: AppConfig) -> Router {
         incident_narration_store,
         build_test_outbound_and_email().0,
         build_test_outbound_and_email().1,
-        status_monitor::notifier::engine::AlertChannelCache::new(),
+        uptimepage::notifier::engine::AlertChannelCache::new(),
     );
-    status_monitor::build_app_router(state, CancellationToken::new())
+    uptimepage::build_app_router(state, CancellationToken::new())
 }
 
 /// Layer that stamps the provided `Session` onto every request's extensions.
 /// `Session::from_request_parts` reads from the extensions when present, so
 /// tests can drive authenticated routes without the real auth backend.
 pub fn session_layer(
-    session: status_monitor::web::Session,
-) -> axum::Extension<status_monitor::web::Session> {
+    session: uptimepage::web::Session,
+) -> axum::Extension<uptimepage::web::Session> {
     axum::Extension(session)
 }
 
 /// Insert a fresh user with a unique email and return its id. `prefix` only
 /// disambiguates the email in shared-DB logs — uniqueness comes from the
 /// `Uuid::now_v7()` suffix, so concurrent suites never collide.
-pub async fn make_user(pool: &PgPool, prefix: &str) -> status_monitor::domain::UserId {
+pub async fn make_user(pool: &PgPool, prefix: &str) -> uptimepage::domain::UserId {
     let email = format!("{prefix}-{}@test.example", Uuid::now_v7());
     let (id,): (Uuid,) = sqlx::query_as(
         "INSERT INTO users (email, terms_version, privacy_version) \
@@ -471,7 +471,7 @@ pub async fn make_user(pool: &PgPool, prefix: &str) -> status_monitor::domain::U
     .fetch_one(pool)
     .await
     .expect("insert user");
-    status_monitor::domain::UserId(id)
+    uptimepage::domain::UserId(id)
 }
 
 /// `{prefix}-{8 hex}` — the tail of a v4 (pure-random) UUID, so two slugs
@@ -485,10 +485,10 @@ pub fn unique_slug(prefix: &str) -> String {
 /// A deterministic 32-byte AES-256-GCM cipher for sealing secrets at rest in
 /// PG-backed tests. The fixed key makes the at-rest envelope reproducible;
 /// it never touches a real KEK.
-pub fn test_cipher() -> Arc<status_monitor::security::Cipher> {
+pub fn test_cipher() -> Arc<uptimepage::security::Cipher> {
     use base64::Engine as _;
     let kek = base64::engine::general_purpose::STANDARD.encode([7u8; 32]);
-    Arc::new(status_monitor::security::Cipher::from_base64(&kek).unwrap())
+    Arc::new(uptimepage::security::Cipher::from_base64(&kek).unwrap())
 }
 
 /// Stamp a session onto `router`. `org` becomes `active_org_id` (the
@@ -497,12 +497,12 @@ pub fn test_cipher() -> Arc<status_monitor::security::Cipher> {
 /// `app_with_session` / `with_session` copies.
 pub fn with_session(
     router: Router,
-    user: status_monitor::domain::UserId,
+    user: uptimepage::domain::UserId,
     org: Option<OrgId>,
     session_id: Option<&str>,
 ) -> Router {
-    router.layer(session_layer(status_monitor::web::Session {
-        user: Some(status_monitor::web::User {
+    router.layer(session_layer(uptimepage::web::Session {
+        user: Some(uptimepage::web::User {
             id: user,
             email: format!("u-{}@test.example", user.0),
         }),
@@ -529,7 +529,7 @@ pub fn build_test_app_state(mutate: impl FnOnce(&mut AppConfig)) -> AppState {
         (*http_clients).clone(),
         cfg.circuit_breaker,
         ResultFanout::storage_only(tx),
-        status_monitor::worker::host_throttle::HostThrottle::permissive(),
+        uptimepage::worker::host_throttle::HostThrottle::permissive(),
         test_domain_expiry_runtime(),
     ));
     let public_source = Arc::new(NoopPublicSource::default());
@@ -552,7 +552,7 @@ pub fn build_test_app_state(mutate: impl FnOnce(&mut AppConfig)) -> AppState {
         incident_narration_store,
         build_test_outbound_and_email().0,
         build_test_outbound_and_email().1,
-        status_monitor::notifier::engine::AlertChannelCache::new(),
+        uptimepage::notifier::engine::AlertChannelCache::new(),
     )
 }
 
@@ -637,7 +637,7 @@ fn default_dns() -> DnsConfig {
     }
 }
 
-fn build_clients_with(dns_cfg: DnsConfig) -> status_monitor::error::Result<HttpClients> {
+fn build_clients_with(dns_cfg: DnsConfig) -> uptimepage::error::Result<HttpClients> {
     let http_cfg = HttpClientConfig {
         tcp_keepalive_secs: 30,
         user_agent: "StatusMonitor/test".into(),
@@ -684,7 +684,7 @@ pub fn http_target(addr: SocketAddr, path: &str, interval_ms: u64) -> Target {
         interval: Duration::from_millis(interval_ms),
         enabled: true,
         tags: vec![],
-        alerts: status_monitor::domain::TargetAlerts::default(),
+        alerts: uptimepage::domain::TargetAlerts::default(),
         group_name: None,
         owner_user_id: None,
         public_status: false,
@@ -723,10 +723,10 @@ impl PublicSource for UnavailablePublicSource {
         &self,
         _org: OrgId,
     ) -> Result<
-        Arc<status_monitor::domain::PublicStatusPage>,
-        status_monitor::api::public_error::PublicAppError,
+        Arc<uptimepage::domain::PublicStatusPage>,
+        uptimepage::api::public_error::PublicAppError,
     > {
-        Err(status_monitor::api::public_error::PublicAppError::Unavailable)
+        Err(uptimepage::api::public_error::PublicAppError::Unavailable)
     }
     async fn component_history(
         &self,
@@ -734,46 +734,44 @@ impl PublicSource for UnavailablePublicSource {
         _id: Uuid,
         _days: u32,
     ) -> Result<
-        status_monitor::domain::ComponentHistoryResponse,
-        status_monitor::api::public_error::PublicAppError,
+        uptimepage::domain::ComponentHistoryResponse,
+        uptimepage::api::public_error::PublicAppError,
     > {
-        Err(status_monitor::api::public_error::PublicAppError::Unavailable)
+        Err(uptimepage::api::public_error::PublicAppError::Unavailable)
     }
     async fn list_incidents(
         &self,
         _org: OrgId,
-        _q: status_monitor::public_status::IncidentListQuery,
+        _q: uptimepage::public_status::IncidentListQuery,
     ) -> Result<
-        status_monitor::api::page::CursorPage<status_monitor::domain::PublicIncident>,
-        status_monitor::api::public_error::PublicAppError,
+        uptimepage::api::page::CursorPage<uptimepage::domain::PublicIncident>,
+        uptimepage::api::public_error::PublicAppError,
     > {
-        Err(status_monitor::api::public_error::PublicAppError::Unavailable)
+        Err(uptimepage::api::public_error::PublicAppError::Unavailable)
     }
     async fn incident_by_id(
         &self,
         _org: OrgId,
         _id: Uuid,
-    ) -> Result<
-        status_monitor::domain::PublicIncident,
-        status_monitor::api::public_error::PublicAppError,
-    > {
-        Err(status_monitor::api::public_error::PublicAppError::Unavailable)
+    ) -> Result<uptimepage::domain::PublicIncident, uptimepage::api::public_error::PublicAppError>
+    {
+        Err(uptimepage::api::public_error::PublicAppError::Unavailable)
     }
     async fn maintenance(
         &self,
         _org: OrgId,
     ) -> Result<
-        status_monitor::domain::PublicMaintenanceList,
-        status_monitor::api::public_error::PublicAppError,
+        uptimepage::domain::PublicMaintenanceList,
+        uptimepage::api::public_error::PublicAppError,
     > {
-        Err(status_monitor::api::public_error::PublicAppError::Unavailable)
+        Err(uptimepage::api::public_error::PublicAppError::Unavailable)
     }
     async fn incidents_rss(
         &self,
         _org: OrgId,
         _base_url: &str,
-    ) -> Result<String, status_monitor::api::public_error::PublicAppError> {
-        Err(status_monitor::api::public_error::PublicAppError::Unavailable)
+    ) -> Result<String, uptimepage::api::public_error::PublicAppError> {
+        Err(uptimepage::api::public_error::PublicAppError::Unavailable)
     }
 }
 
@@ -826,7 +824,7 @@ pub async fn ch_client_from_env() -> Option<clickhouse::Client> {
         .with_password(&password);
     let mut guard = CH_MIGRATED.lock().await;
     if !*guard {
-        status_monitor::storage::migrate(&client)
+        uptimepage::storage::migrate(&client)
             .await
             .expect("run ch migrations");
         *guard = true;

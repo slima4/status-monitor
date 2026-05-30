@@ -16,8 +16,8 @@ use common::{
 };
 use serde_json::{Value, json};
 use sqlx::PgPool;
-use status_monitor::domain::{OrgId, UserId};
 use tower::ServiceExt;
+use uptimepage::domain::{OrgId, UserId};
 
 fn http_target(name: &str, url: &str) -> Value {
     json!({
@@ -104,8 +104,8 @@ async fn make_signup_org(pool: &PgPool, user: UserId, prefix: &str) -> OrgId {
 /// Pure-logic; always runs.
 #[test]
 fn shipped_abuse_patterns_match_compiled_default() {
-    let cfg = status_monitor::config::AppConfig::load().expect("load config/default.toml");
-    let compiled = status_monitor::config::AbuseConfig::default();
+    let cfg = uptimepage::config::AppConfig::load().expect("load config/default.toml");
+    let compiled = uptimepage::config::AbuseConfig::default();
     assert_eq!(
         cfg.abuse.url_patterns_denied, compiled.url_patterns_denied,
         "config/default.toml [abuse].url_patterns_denied drifted from AbuseConfig::default()"

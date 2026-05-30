@@ -12,8 +12,8 @@
 mod common;
 
 use chrono::{Duration, Timelike, Utc};
-use status_monitor::domain::{CheckResult, CheckStatus, OrgId};
-use status_monitor::storage::{
+use uptimepage::domain::{CheckResult, CheckStatus, OrgId};
+use uptimepage::storage::{
     ClickhouseResultSink, ClickhouseResultsStore, ResultSink, ResultsStore, TimeRange,
 };
 use uuid::Uuid;

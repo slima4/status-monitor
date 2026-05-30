@@ -8,7 +8,7 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use tower::util::ServiceExt;
 
-use status_monitor::marketing::{self, MarketingCfg};
+use uptimepage::marketing::{self, MarketingCfg};
 
 fn router() -> axum::Router {
     marketing::router(MarketingCfg {

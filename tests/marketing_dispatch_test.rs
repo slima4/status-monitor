@@ -8,8 +8,8 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use tower::util::ServiceExt;
 
-use status_monitor::marketing::RouteByHost;
-use status_monitor::web::host::HostScheme;
+use uptimepage::marketing::RouteByHost;
+use uptimepage::web::host::HostScheme;
 
 fn sentinel(name: &'static str) -> Router {
     Router::new().fallback(move || async move { name })

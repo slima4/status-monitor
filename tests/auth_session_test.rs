@@ -10,13 +10,13 @@
 mod common;
 
 use chrono::{Duration as ChronoDuration, Utc};
-use status_monitor::auth::{
+use uptimepage::auth::{
     fingerprint, github,
     login_audit::{self, LoginAttempt, LoginMethod},
     oauth_state, oauth_state_cleanup, session as session_store,
 };
-use status_monitor::config::SessionConfig;
-use status_monitor::domain::UserId;
+use uptimepage::config::SessionConfig;
+use uptimepage::domain::UserId;
 use uuid::Uuid;
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations/postgres");

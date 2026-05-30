@@ -22,13 +22,13 @@ use url::Url;
 use uuid::Uuid;
 
 use common::build_test_app_with_public_source;
-use status_monitor::api::CursorPage;
-use status_monitor::api::public_error::PublicAppError;
-use status_monitor::domain::{
+use uptimepage::api::CursorPage;
+use uptimepage::api::public_error::PublicAppError;
+use uptimepage::domain::{
     ComponentHistoryResponse, IncidentSeverity, IncidentStatusPhase, OrgId, PublicIncident,
     PublicIncidentUpdate, PublicMaintenanceList, PublicStatusPage,
 };
-use status_monitor::public_status::{IncidentListQuery, PublicSource, source::build_rss};
+use uptimepage::public_status::{IncidentListQuery, PublicSource, source::build_rss};
 
 const INCIDENT_TITLE: &str = "Edge proxy 5xx spike";
 const INCIDENT_BODY: &str = "First report from the edge fleet — investigating.";

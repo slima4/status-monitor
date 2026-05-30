@@ -15,7 +15,7 @@ use std::time::Duration;
 use chrono::Utc;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{Connection, Executor, PgConnection, Row};
-use status_monitor::email::{
+use uptimepage::email::{
     EmailAddress, EmailSender, EmailTemplate, InMemoryEmailSender, LogOnlyEmailSender,
     TransactionalEmail,
 };

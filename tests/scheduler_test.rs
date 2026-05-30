@@ -8,16 +8,16 @@ use async_trait::async_trait;
 use axum::Router;
 use axum::http::StatusCode;
 use axum::routing::get;
-use status_monitor::domain::{CheckStatus, OrgId, Target};
-use status_monitor::error::{AppError, Result as SmResult};
-use status_monitor::pipeline::{BatcherConfig, ResultBatcher};
-use status_monitor::scheduler::{Scheduler, TargetRegistry};
-use status_monitor::storage::admin::EnabledTargetSource;
-use status_monitor::storage::{InMemorySink, InMemoryTargetStore};
-use status_monitor::worker::circuit_breaker::CIRCUIT_OPEN_REASON;
-use status_monitor::worker::{ResultFanout, WorkerPool};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
+use uptimepage::domain::{CheckStatus, OrgId, Target};
+use uptimepage::error::{AppError, Result as SmResult};
+use uptimepage::pipeline::{BatcherConfig, ResultBatcher};
+use uptimepage::scheduler::{Scheduler, TargetRegistry};
+use uptimepage::storage::admin::EnabledTargetSource;
+use uptimepage::storage::{InMemorySink, InMemoryTargetStore};
+use uptimepage::worker::circuit_breaker::CIRCUIT_OPEN_REASON;
+use uptimepage::worker::{ResultFanout, WorkerPool};
 
 use crate::common::{breaker_cfg, http_target, scheduler_cfg, spawn_router, test_client};
 
@@ -59,7 +59,7 @@ async fn scheduler_runs_target_periodically() {
         test_client(),
         breaker_cfg(),
         ResultFanout::storage_only(tx),
-        status_monitor::worker::host_throttle::HostThrottle::permissive(),
+        uptimepage::worker::host_throttle::HostThrottle::permissive(),
         common::test_domain_expiry_runtime(),
     ));
     let scheduler = Arc::new(Scheduler::new(registry, pool, scheduler_cfg(30)));
@@ -106,7 +106,7 @@ async fn scheduler_runs_staggered_target() {
         test_client(),
         breaker_cfg(),
         ResultFanout::storage_only(tx),
-        status_monitor::worker::host_throttle::HostThrottle::permissive(),
+        uptimepage::worker::host_throttle::HostThrottle::permissive(),
         common::test_domain_expiry_runtime(),
     ));
     let scheduler = Arc::new(Scheduler::new(registry, pool, scheduler_cfg(30)));
@@ -179,7 +179,7 @@ async fn dispatch_skips_when_target_probe_already_in_flight() {
         test_client(),
         breaker_cfg(),
         ResultFanout::storage_only(tx),
-        status_monitor::worker::host_throttle::HostThrottle::permissive(),
+        uptimepage::worker::host_throttle::HostThrottle::permissive(),
         common::test_domain_expiry_runtime(),
     ));
     let scheduler = Arc::new(Scheduler::new(registry, pool.clone(), scheduler_cfg(30)));
@@ -216,7 +216,7 @@ async fn scheduler_picks_up_new_targets_on_refresh() {
         test_client(),
         breaker_cfg(),
         ResultFanout::storage_only(tx),
-        status_monitor::worker::host_throttle::HostThrottle::permissive(),
+        uptimepage::worker::host_throttle::HostThrottle::permissive(),
         common::test_domain_expiry_runtime(),
     ));
     let scheduler = Arc::new(Scheduler::new(registry, pool, scheduler_cfg(1)));
@@ -257,7 +257,7 @@ async fn shutdown_drains_in_flight_results() {
         test_client(),
         breaker_cfg(),
         ResultFanout::storage_only(tx.clone()),
-        status_monitor::worker::host_throttle::HostThrottle::permissive(),
+        uptimepage::worker::host_throttle::HostThrottle::permissive(),
         common::test_domain_expiry_runtime(),
     ));
     let scheduler = Arc::new(Scheduler::new(registry, pool, scheduler_cfg(30)));
@@ -348,7 +348,7 @@ async fn scheduler_recovers_after_transient_refresh_failures() {
         test_client(),
         breaker_cfg(),
         ResultFanout::storage_only(tx),
-        status_monitor::worker::host_throttle::HostThrottle::permissive(),
+        uptimepage::worker::host_throttle::HostThrottle::permissive(),
         common::test_domain_expiry_runtime(),
     ));
     let scheduler = Arc::new(Scheduler::new(registry, pool, scheduler_cfg(1)));
@@ -398,7 +398,7 @@ async fn scheduler_shutdown_observed_during_slow_refresh() {
         test_client(),
         breaker_cfg(),
         ResultFanout::storage_only(tx),
-        status_monitor::worker::host_throttle::HostThrottle::permissive(),
+        uptimepage::worker::host_throttle::HostThrottle::permissive(),
         common::test_domain_expiry_runtime(),
     ));
     let scheduler = Arc::new(Scheduler::new(registry, pool, scheduler_cfg(1)));
@@ -436,7 +436,7 @@ async fn worker_pool_breaker_opens_after_failures() {
         test_client(),
         breaker_cfg(),
         ResultFanout::storage_only(tx),
-        status_monitor::worker::host_throttle::HostThrottle::permissive(),
+        uptimepage::worker::host_throttle::HostThrottle::permissive(),
         common::test_domain_expiry_runtime(),
     ));
     let scheduler = Arc::new(Scheduler::new(registry, pool.clone(), scheduler_cfg(30)));

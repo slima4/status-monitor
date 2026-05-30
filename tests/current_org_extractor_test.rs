@@ -7,8 +7,8 @@ mod common;
 
 use axum::extract::FromRequestParts;
 use axum::http::Request;
-use status_monitor::error::AppError;
-use status_monitor::web::auth::CurrentOrg;
+use uptimepage::error::AppError;
+use uptimepage::web::auth::CurrentOrg;
 
 #[tokio::test]
 async fn no_session_returns_unauthorized() {

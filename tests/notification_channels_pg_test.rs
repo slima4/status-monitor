@@ -13,13 +13,13 @@ mod common;
 
 use std::time::Duration;
 
-use status_monitor::api::error::codes;
-use status_monitor::domain::{
+use uptimepage::api::error::codes;
+use uptimepage::domain::{
     AlertBinding, ChannelConfig, CheckSpec, ExpectedStatus, NewNotificationChannel, NewTarget,
     NotificationChannelUpdate, TargetAlerts,
 };
-use status_monitor::error::AppError;
-use status_monitor::storage::{
+use uptimepage::error::AppError;
+use uptimepage::storage::{
     NotificationChannelStore, PgNotificationChannelStore, PostgresTargetStore, TargetStore,
     create_org_with_owner,
 };
@@ -41,10 +41,10 @@ async fn two_orgs(
     pool: &sqlx::PgPool,
     tag: &str,
 ) -> (
-    status_monitor::domain::OrgId,
-    status_monitor::domain::OrgId,
-    status_monitor::domain::UserId,
-    status_monitor::domain::UserId,
+    uptimepage::domain::OrgId,
+    uptimepage::domain::OrgId,
+    uptimepage::domain::UserId,
+    uptimepage::domain::UserId,
 ) {
     let user_a = make_user(pool, tag).await;
     let user_b = make_user(pool, tag).await;
@@ -63,8 +63,8 @@ async fn two_orgs(
 
 async fn cleanup(
     pool: &sqlx::PgPool,
-    orgs: &[status_monitor::domain::OrgId],
-    users: &[status_monitor::domain::UserId],
+    orgs: &[uptimepage::domain::OrgId],
+    users: &[uptimepage::domain::UserId],
 ) {
     let _ = sqlx::query("DELETE FROM organizations WHERE id = ANY($1)")
         .bind(orgs.iter().map(|o| o.0).collect::<Vec<_>>())

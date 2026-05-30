@@ -19,10 +19,10 @@ mod common;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use common::{make_user, unique_slug};
-use status_monitor::domain::{OrgId, PublicOrgBranding, UserId};
-use status_monitor::storage::orgs::{find_id_by_slug, find_public_status_org_by_slug};
-use status_monitor::storage::{create_org_with_owner, update_public_branding};
 use tower::ServiceExt;
+use uptimepage::domain::{OrgId, PublicOrgBranding, UserId};
+use uptimepage::storage::orgs::{find_id_by_slug, find_public_status_org_by_slug};
+use uptimepage::storage::{create_org_with_owner, update_public_branding};
 
 /// The `public_status.base_domain` config value. Status pages live at
 /// `{slug}.{BASE_DOMAIN}` (apex-wildcard shape); see [`status_host`], the
@@ -78,7 +78,7 @@ async fn get_path(app: &axum::Router, path: &str, host: Option<&str>) -> StatusC
         .status()
 }
 
-fn saas_subdomain(cfg: &mut status_monitor::config::AppConfig) {
+fn saas_subdomain(cfg: &mut uptimepage::config::AppConfig) {
     cfg.tenancy.subdomain_public_routes = true;
     cfg.tenancy.path_based_public_routes = false;
     cfg.public_status.base_domain = BASE_DOMAIN.into();

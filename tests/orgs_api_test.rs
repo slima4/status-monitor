@@ -15,8 +15,8 @@ use axum::http::{Request, StatusCode};
 use common::{body_json, build_test_app_with_pg, make_user, unique_slug, with_session};
 use serde_json::{Value, json};
 use sqlx::PgPool;
-use status_monitor::domain::UserId;
 use tower::ServiceExt;
+use uptimepage::domain::UserId;
 
 fn cleanup_user(pool: PgPool, user: UserId) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {

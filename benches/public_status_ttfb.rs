@@ -18,15 +18,15 @@ use chrono::Utc;
 use criterion::{Criterion, criterion_group, criterion_main};
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
-use status_monitor::domain::{
+use tokio::runtime::Builder;
+use uptimepage::domain::{
     CheckResult, CheckSpec, CheckStatus, ExpectedStatus, HttpCheck, HttpMethod, NewTarget, OrgId,
     UserId,
 };
-use status_monitor::public_status::{AggregatorConfig, OrgAggregator};
-use status_monitor::storage::{
+use uptimepage::public_status::{AggregatorConfig, OrgAggregator};
+use uptimepage::storage::{
     ClickhouseResultSink, PostgresTargetStore, ResultSink, TargetStore, create_org_with_owner,
 };
-use tokio::runtime::Builder;
 use url::Url;
 use uuid::Uuid;
 
@@ -69,7 +69,7 @@ async fn try_ch_client() -> Option<clickhouse::Client> {
         .with_database(&database)
         .with_user(&user)
         .with_password(&password);
-    status_monitor::storage::migrate(&client).await.ok()?;
+    uptimepage::storage::migrate(&client).await.ok()?;
     Some(client)
 }
 

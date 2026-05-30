@@ -18,14 +18,14 @@ use axum::response::IntoResponse;
 use common::{body_json, build_test_app_with_pg_store, make_user, pg_pool_from_env};
 use serde_json::{Value, json};
 use sqlx::PgPool;
-use status_monitor::config::AppConfig;
-use status_monitor::domain::quota::Plan;
-use status_monitor::domain::{OrgId, Role, UserId};
-use status_monitor::quotas::{QuotaService, RateLimitCategory, RateLimitKey, RateLimitService};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 use tower::ServiceExt;
+use uptimepage::config::AppConfig;
+use uptimepage::domain::quota::Plan;
+use uptimepage::domain::{OrgId, Role, UserId};
+use uptimepage::quotas::{QuotaService, RateLimitCategory, RateLimitKey, RateLimitService};
 use uuid::Uuid;
 
 /// A `Plan` whose every per-minute rate is `per_min` and whose resource caps
@@ -776,7 +776,7 @@ async fn pending_invitation_cap_rejects_over_limit() {
     let (_pid, org) = seed_org_on_plan(&pool, 10, 50, 10, 3).await;
     let inviter = seed_member(&pool, org).await;
     for _ in 0..3 {
-        status_monitor::auth::invitations::create(
+        uptimepage::auth::invitations::create(
             &pool,
             org,
             inviter,
@@ -788,7 +788,7 @@ async fn pending_invitation_cap_rejects_over_limit() {
         .await
         .expect("within cap");
     }
-    let over = status_monitor::auth::invitations::create(
+    let over = uptimepage::auth::invitations::create(
         &pool,
         org,
         inviter,
@@ -841,7 +841,7 @@ async fn parallel_invites_never_exceed_cap_and_dedupe() {
     for _ in 0..10 {
         let p = pool.clone();
         handles.push(tokio::spawn(async move {
-            status_monitor::auth::invitations::create(
+            uptimepage::auth::invitations::create(
                 &p,
                 org,
                 inviter,
@@ -868,7 +868,7 @@ async fn parallel_invites_never_exceed_cap_and_dedupe() {
     for _ in 0..5 {
         let (p, e) = (pool.clone(), dup.clone());
         handles.push(tokio::spawn(async move {
-            status_monitor::auth::invitations::create(&p, org, inviter, &e, Role::Member, 72, 100)
+            uptimepage::auth::invitations::create(&p, org, inviter, &e, Role::Member, 72, 100)
                 .await
                 .is_ok()
         }));
@@ -896,7 +896,7 @@ async fn parallel_invites_never_exceed_cap_and_dedupe() {
 // ── max_members: friendly pre-check + atomic backstop, never overshoot ────
 #[tokio::test]
 async fn member_cap_is_enforced_atomically() {
-    use status_monitor::storage::orgs::{AddMemberOutcome, add_member};
+    use uptimepage::storage::orgs::{AddMemberOutcome, add_member};
     let Some(pool) = pg_pool_from_env().await else {
         return;
     };

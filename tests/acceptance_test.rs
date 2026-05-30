@@ -10,9 +10,9 @@ use axum::http::{Request, StatusCode};
 use chrono::{Duration, Utc};
 use common::build_test_app_with_owner;
 use serde_json::{Value, json};
-use status_monitor::domain::{CheckResult, CheckStatus};
-use status_monitor::storage::{InMemorySink, IncidentListQuery, ResultSink, TimeRange};
 use tower::ServiceExt;
+use uptimepage::domain::{CheckResult, CheckStatus};
+use uptimepage::storage::{InMemorySink, IncidentListQuery, ResultSink, TimeRange};
 use uuid::Uuid;
 
 fn app() -> axum::Router {
@@ -136,7 +136,7 @@ async fn idempotency_key_replays_bulk_action() {
 async fn coalescing_separates_runs_split_by_an_up_check() {
     // Build a sink with results: down, down, up, down — should coalesce into
     // TWO incidents (the `up` resets the run).
-    use status_monitor::storage::ResultsStore;
+    use uptimepage::storage::ResultsStore;
     let sink = Arc::new(InMemorySink::new());
     let target_id = Uuid::now_v7();
     let base = Utc::now() - Duration::try_minutes(10).unwrap();

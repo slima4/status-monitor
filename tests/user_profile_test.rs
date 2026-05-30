@@ -9,8 +9,8 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use chrono::{DateTime, Utc};
 use common::{build_test_app_with_pg, drop_test_db, fresh_test_db, open_test_pool, with_session};
-use status_monitor::domain::UserId;
 use tower::ServiceExt;
+use uptimepage::domain::UserId;
 use uuid::Uuid;
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations/postgres");
@@ -203,7 +203,7 @@ async fn get_signup_org_id_skips_soft_deleted_org() {
         .await
         .unwrap();
 
-    let resolved = status_monitor::storage::users::get_signup_org_id(&pool, UserId(user))
+    let resolved = uptimepage::storage::users::get_signup_org_id(&pool, UserId(user))
         .await
         .unwrap();
     assert!(
@@ -218,7 +218,7 @@ async fn get_signup_org_id_skips_soft_deleted_org() {
 #[tokio::test]
 #[ignore = "requires DATABASE_URL"]
 async fn session_touch_bumps_users_last_seen_at() {
-    use status_monitor::auth::session::{
+    use uptimepage::auth::session::{
         build_debounce_cache, hash_session_id, touch_last_used_debounced,
     };
 

@@ -19,17 +19,17 @@ mod common;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use status_monitor::app::assert_cookie_scope_safe;
-use status_monitor::auth::session;
-use status_monitor::config::SessionConfig;
 use tower::ServiceExt;
+use uptimepage::app::assert_cookie_scope_safe;
+use uptimepage::auth::session;
+use uptimepage::config::SessionConfig;
 
 /// Test base domain — mirrors the SaaS layout where the operator host
 /// (`app.test.local`) and every public page (`{slug}.test.local`) share
 /// `test.local` as their parent.
 const BASE_DOMAIN: &str = "test.local";
 
-fn saas_subdomain(cfg: &mut status_monitor::config::AppConfig) {
+fn saas_subdomain(cfg: &mut uptimepage::config::AppConfig) {
     cfg.tenancy.subdomain_public_routes = true;
     cfg.tenancy.path_based_public_routes = false;
     cfg.public_status.base_domain = BASE_DOMAIN.into();
@@ -41,7 +41,7 @@ fn saas_subdomain(cfg: &mut status_monitor::config::AppConfig) {
 /// otherwise silently widen the cookie scope.
 #[test]
 fn apex_cookie_domain_refused_at_boot() {
-    let mut cfg = status_monitor::config::AppConfig::load().expect("config");
+    let mut cfg = uptimepage::config::AppConfig::load().expect("config");
     saas_subdomain(&mut cfg);
     cfg.auth.session.cookie_domain = format!(".{BASE_DOMAIN}");
     let panicked = std::panic::catch_unwind(|| assert_cookie_scope_safe(&cfg));

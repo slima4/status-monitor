@@ -1,10 +1,10 @@
 use chrono::Utc;
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
-use status_monitor::domain::{CheckResult, CheckStatus};
-use status_monitor::storage::{InMemorySink, ResultSink};
 use std::hint::black_box;
 use std::sync::Arc;
 use tokio::runtime::Builder;
+use uptimepage::domain::{CheckResult, CheckStatus};
+use uptimepage::storage::{InMemorySink, ResultSink};
 use uuid::Uuid;
 
 fn sample_results(n: usize) -> Vec<CheckResult> {

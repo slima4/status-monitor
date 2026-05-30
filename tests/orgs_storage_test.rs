@@ -7,9 +7,9 @@
 mod common;
 
 use common::{make_user, unique_slug};
-use status_monitor::domain::{OrgId, Role};
-use status_monitor::storage::orgs as orgs_store;
-use status_monitor::storage::{
+use uptimepage::domain::{OrgId, Role};
+use uptimepage::storage::orgs as orgs_store;
+use uptimepage::storage::{
     RemoveOutcome, RestoreOutcome, UpdateOrgOutcome, create_org_with_owner, is_active_member,
     is_owner, list_deleted_orgs_deleted_by, list_members, list_orgs_for_user,
     oldest_membership_for_user, owner_org_count, remove_member, restore_org, slug_is_available,
@@ -327,7 +327,7 @@ async fn owner_limit_holds_under_50_concurrent_creates() {
 #[tokio::test]
 #[ignore]
 async fn signup_org_collision_retry_succeeds() {
-    use status_monitor::domain::generate_signup_slug;
+    use uptimepage::domain::generate_signup_slug;
 
     let Some(pool) = common::pg_pool_from_env().await else {
         return;

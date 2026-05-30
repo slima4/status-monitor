@@ -12,12 +12,12 @@ use std::time::Duration;
 
 use chrono::Utc;
 use sqlx::PgPool;
-use status_monitor::domain::{
+use uptimepage::domain::{
     CheckResult, CheckSpec, CheckStatus, ExpectedStatus, NewMaintenanceWindow, NewTarget, OrgId,
     UserId,
 };
-use status_monitor::storage::traits::TimeRange;
-use status_monitor::storage::{
+use uptimepage::storage::traits::TimeRange;
+use uptimepage::storage::{
     ClickhouseResultSink, ClickhouseResultsStore, MaintenanceStore, PgMaintenanceStore,
     PostgresTargetStore, ResultSink, ResultsStore, TargetFilter, TargetStore,
     create_org_with_owner, is_active_member,

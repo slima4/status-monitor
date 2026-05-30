@@ -7,13 +7,13 @@
 mod common;
 
 use common::{make_user, unique_slug};
-use status_monitor::config::PublicStatusConfig;
-use status_monitor::domain::OrgId;
-use status_monitor::jobs::purge_deleted::{
+use uptimepage::config::PublicStatusConfig;
+use uptimepage::domain::OrgId;
+use uptimepage::jobs::purge_deleted::{
     drain_clickhouse_purge_queue, purge_queue_depth, purge_tick,
 };
-use status_monitor::public_status::PageCache;
-use status_monitor::storage::{create_org_with_owner, soft_delete_org};
+use uptimepage::public_status::PageCache;
+use uptimepage::storage::{create_org_with_owner, soft_delete_org};
 use uuid::Uuid;
 
 /// A fresh empty cache per call. These tests assert on Postgres/ClickHouse

@@ -5,12 +5,12 @@ use std::time::Duration;
 use async_trait::async_trait;
 use chrono::Utc;
 use parking_lot::Mutex;
-use status_monitor::domain::{CheckResult, CheckStatus};
-use status_monitor::error::Result as SmResult;
-use status_monitor::pipeline::{BatcherConfig, ResultBatcher};
-use status_monitor::storage::{InMemorySink, ResultSink};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
+use uptimepage::domain::{CheckResult, CheckStatus};
+use uptimepage::error::Result as SmResult;
+use uptimepage::pipeline::{BatcherConfig, ResultBatcher};
+use uptimepage::storage::{InMemorySink, ResultSink};
 use uuid::Uuid;
 
 fn sample_result() -> CheckResult {

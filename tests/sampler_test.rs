@@ -4,12 +4,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use sqlx::postgres::PgPoolOptions;
-use status_monitor::observability::sampler;
-use status_monitor::scheduler::TargetRegistry;
-use status_monitor::storage::InMemoryTargetStore;
-use status_monitor::worker::{ResultFanout, WorkerPool};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
+use uptimepage::observability::sampler;
+use uptimepage::scheduler::TargetRegistry;
+use uptimepage::storage::InMemoryTargetStore;
+use uptimepage::worker::{ResultFanout, WorkerPool};
 
 use crate::common::{breaker_cfg, http_target, test_client};
 
@@ -30,7 +30,7 @@ async fn sampler_runs_and_shuts_down() {
         test_client(),
         breaker_cfg(),
         ResultFanout::storage_only(tx.clone()),
-        status_monitor::worker::host_throttle::HostThrottle::permissive(),
+        uptimepage::worker::host_throttle::HostThrottle::permissive(),
         common::test_domain_expiry_runtime(),
     ));
 

@@ -2,8 +2,8 @@ mod common;
 
 use axum::Router;
 use axum::routing::get;
-use status_monitor::domain::{CheckStatus, ExpectedStatus};
-use status_monitor::worker::execute_http_check;
+use uptimepage::domain::{CheckStatus, ExpectedStatus};
+use uptimepage::worker::execute_http_check;
 use url::Url;
 use uuid::Uuid;
 

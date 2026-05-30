@@ -7,7 +7,7 @@
 
 mod common;
 
-use status_monitor::auth::magic_link;
+use uptimepage::auth::magic_link;
 use uuid::Uuid;
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations/postgres");

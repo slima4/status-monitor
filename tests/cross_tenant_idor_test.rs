@@ -18,9 +18,9 @@ use axum::http::{Request, StatusCode};
 use common::{
     build_saas_router_with_pg_targets, default_http_check, make_user, unique_slug, with_session,
 };
-use status_monitor::domain::{CheckSpec, ExpectedStatus, NewTarget};
-use status_monitor::storage::{PostgresTargetStore, TargetStore, create_org_with_owner};
 use tower::ServiceExt;
+use uptimepage::domain::{CheckSpec, ExpectedStatus, NewTarget};
+use uptimepage::storage::{PostgresTargetStore, TargetStore, create_org_with_owner};
 use url::Url;
 
 fn a_target() -> NewTarget {

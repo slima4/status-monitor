@@ -4,8 +4,8 @@ use axum::http::StatusCode;
 use chrono::{Duration, Utc};
 use common::{body_json, build_test_app_with_seedable_incidents, json_request};
 use serde_json::json;
-use status_monitor::domain::{CheckStatus, Incident, IncidentSeverity};
 use tower::ServiceExt;
+use uptimepage::domain::{CheckStatus, Incident, IncidentSeverity};
 use uuid::Uuid;
 
 fn seed_incident() -> Incident {

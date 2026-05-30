@@ -8,10 +8,10 @@
 mod common;
 
 use common::make_user;
-use status_monitor::config::{PublicStatusConfig, RetentionConfig, SessionConfig, TenancyConfig};
-use status_monitor::jobs::retention::purge_old_data;
-use status_monitor::public_status::PageCache;
-use status_monitor::storage::create_org_with_owner;
+use uptimepage::config::{PublicStatusConfig, RetentionConfig, SessionConfig, TenancyConfig};
+use uptimepage::jobs::retention::purge_old_data;
+use uptimepage::public_status::PageCache;
+use uptimepage::storage::create_org_with_owner;
 use uuid::Uuid;
 
 fn cache() -> PageCache {

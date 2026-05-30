@@ -7,9 +7,9 @@
 
 mod common;
 
-use status_monitor::auth::invitations;
-use status_monitor::domain::{OrgId, Role, UserId, generate_signup_slug};
-use status_monitor::storage::orgs::{
+use uptimepage::auth::invitations;
+use uptimepage::domain::{OrgId, Role, UserId, generate_signup_slug};
+use uptimepage::storage::orgs::{
     self as orgs_store, AddMemberOutcome, create_signup_org_with_owner_in_tx,
 };
 use uuid::Uuid;

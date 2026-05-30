@@ -8,11 +8,11 @@ use axum::Router;
 use axum::routing::get;
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use futures::future::join_all;
-use status_monitor::config::{CheckerConfig, DnsConfig, HttpClientConfig, SecurityConfig};
-use status_monitor::domain::{ExpectedStatus, HttpCheck, HttpMethod};
-use status_monitor::http_client::{HttpClients, build_clients};
-use status_monitor::worker::execute_http_check;
 use tokio::runtime::{Builder, Runtime};
+use uptimepage::config::{CheckerConfig, DnsConfig, HttpClientConfig, SecurityConfig};
+use uptimepage::domain::{ExpectedStatus, HttpCheck, HttpMethod};
+use uptimepage::http_client::{HttpClients, build_clients};
+use uptimepage::worker::execute_http_check;
 use url::Url;
 use uuid::Uuid;
 

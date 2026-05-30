@@ -111,7 +111,7 @@ async fn public_endpoints_have_empty_security() {
 
 #[test]
 fn dump_openapi_spec_for_inspection() {
-    use status_monitor::api::ApiDoc;
+    use uptimepage::api::ApiDoc;
     use utoipa::OpenApi;
     let doc = ApiDoc::openapi().to_pretty_json().unwrap();
     std::fs::write("/tmp/openapi.json", &doc).unwrap();

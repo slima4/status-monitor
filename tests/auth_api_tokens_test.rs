@@ -9,7 +9,7 @@
 mod common;
 
 use common::make_user;
-use status_monitor::auth::api_tokens;
+use uptimepage::auth::api_tokens;
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations/postgres");
 

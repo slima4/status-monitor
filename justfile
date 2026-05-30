@@ -45,7 +45,7 @@ setup:
 # Bring up postgres + clickhouse only. `cargo run` natively against them.
 up:
     docker compose -f compose.dev.yml up -d
-    @echo "pg + ch up. run: cargo run --bin status-monitor"
+    @echo "pg + ch up. run: cargo run --bin uptimepage"
 
 # Bring up the full dev stack incl. status-monitor with live reload.
 up-app:
@@ -70,7 +70,7 @@ logs:
 # native and in-container logs match.
 run:
     RUST_LOG="${RUST_LOG:-status_monitor=debug,sqlx=warn,hyper=warn,tower_http=info,info}" \
-        cargo run --bin status-monitor
+        cargo run --bin uptimepage
 
 build:
     cargo build --release --bins

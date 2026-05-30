@@ -15,8 +15,8 @@ use common::{
     body_json, build_test_app_with_pg, drop_test_db, fresh_test_db, json_request, open_test_pool,
     with_session,
 };
-use status_monitor::domain::UserId;
 use tower::ServiceExt;
+use uptimepage::domain::UserId;
 use uuid::Uuid;
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations/postgres");

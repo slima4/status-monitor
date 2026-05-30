@@ -3,8 +3,8 @@ mod common;
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use common::build_test_app;
-use status_monitor::config::CorsConfig;
 use tower::ServiceExt;
+use uptimepage::config::CorsConfig;
 
 fn cors_cfg(origins: Vec<&str>, allow_any_origin: bool) -> CorsConfig {
     CorsConfig {

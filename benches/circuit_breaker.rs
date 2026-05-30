@@ -1,8 +1,8 @@
 use criterion::{Criterion, criterion_group, criterion_main};
-use status_monitor::config::CircuitBreakerConfig;
-use status_monitor::domain::CheckStatus;
-use status_monitor::worker::circuit_breaker::CircuitBreaker;
 use std::hint::black_box;
+use uptimepage::config::CircuitBreakerConfig;
+use uptimepage::domain::CheckStatus;
+use uptimepage::worker::circuit_breaker::CircuitBreaker;
 
 // Thresholds set high to keep the breaker in the Closed state across the bench,
 // isolating allow/record hot-path cost from state-transition cost.

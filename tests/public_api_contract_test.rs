@@ -18,14 +18,14 @@ use chrono::Utc;
 use tower::ServiceExt;
 use uuid::Uuid;
 
-use status_monitor::api::CursorPage;
-use status_monitor::api::public_error::PublicAppError;
-use status_monitor::domain::{
+use uptimepage::api::CursorPage;
+use uptimepage::api::public_error::PublicAppError;
+use uptimepage::domain::{
     ComponentHistoryResponse, DayState, IncidentSeverity, IncidentStatusPhase, OrgId, OverallState,
     OverallStatus, PublicComponent, PublicComponentGroup, PublicComponentStatus, PublicIncident,
     PublicIncidentUpdate, PublicMaintenance, PublicMaintenanceList, PublicStatusPage,
 };
-use status_monitor::public_status::{IncidentListQuery, PublicSource};
+use uptimepage::public_status::{IncidentListQuery, PublicSource};
 
 use common::build_test_app_with_public_source;
 
@@ -188,7 +188,7 @@ impl PublicSource for FakePublicSource {
             .list_incidents(org, IncidentListQuery::default())
             .await?
             .items;
-        Ok(status_monitor::public_status::source::build_rss(
+        Ok(uptimepage::public_status::source::build_rss(
             "status-monitor",
             base_url,
             &items,

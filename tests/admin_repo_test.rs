@@ -8,8 +8,8 @@
 mod common;
 
 use sqlx::PgPool;
-use status_monitor::storage::AdminRepo;
-use status_monitor::storage::admin::PublicTargetCursor;
+use uptimepage::storage::AdminRepo;
+use uptimepage::storage::admin::PublicTargetCursor;
 use uuid::Uuid;
 
 async fn seed_org_with_target(pool: &PgPool, slug: &str) -> (Uuid, Uuid) {

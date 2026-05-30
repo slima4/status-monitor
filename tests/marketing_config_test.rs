@@ -2,7 +2,7 @@
 //! valid baseline to violate exactly one invariant and asserts the
 //! validator returns a clean error.
 
-use status_monitor::config::AppConfig;
+use uptimepage::config::AppConfig;
 
 fn valid_cfg() -> AppConfig {
     let mut cfg = AppConfig::load().expect("load");

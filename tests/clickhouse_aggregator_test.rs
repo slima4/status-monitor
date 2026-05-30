@@ -27,17 +27,17 @@ use std::time::Duration;
 use chrono::Utc;
 use futures::FutureExt;
 use sqlx::PgPool;
-use status_monitor::domain::{
+use uptimepage::domain::{
     CheckResult, CheckSpec, CheckStatus, ExpectedStatus, NewTarget, PublicComponentStatus,
 };
-use status_monitor::public_status::{AggregatorConfig, OrgAggregator};
-use status_monitor::storage::{ClickhouseResultSink, PostgresTargetStore, ResultSink, TargetStore};
+use uptimepage::public_status::{AggregatorConfig, OrgAggregator};
+use uptimepage::storage::{ClickhouseResultSink, PostgresTargetStore, ResultSink, TargetStore};
 use url::Url;
 use uuid::Uuid;
 
 use crate::common::default_http_check;
 
-async fn seed_org(pool: &sqlx::PgPool, prefix: &str) -> status_monitor::domain::OrgId {
+async fn seed_org(pool: &sqlx::PgPool, prefix: &str) -> uptimepage::domain::OrgId {
     let slug = format!("{prefix}-{}", Uuid::now_v7().simple());
     let slug = &slug[..slug.len().min(30)];
     let (id,): (Uuid,) = sqlx::query_as(
@@ -47,7 +47,7 @@ async fn seed_org(pool: &sqlx::PgPool, prefix: &str) -> status_monitor::domain::
     .fetch_one(pool)
     .await
     .expect("insert agg-test org");
-    status_monitor::domain::OrgId(id)
+    uptimepage::domain::OrgId(id)
 }
 
 fn public_target(name: &str) -> NewTarget {

@@ -6,9 +6,9 @@ use std::time::Duration;
 use axum::Router;
 use axum::http::StatusCode;
 use axum::routing::get;
-use status_monitor::domain::{CheckStatus, ExpectedStatus, HttpMethod};
-use status_monitor::storage::{InMemorySink, ResultSink};
-use status_monitor::worker::execute_http_check;
+use uptimepage::domain::{CheckStatus, ExpectedStatus, HttpMethod};
+use uptimepage::storage::{InMemorySink, ResultSink};
+use uptimepage::worker::execute_http_check;
 use url::Url;
 use uuid::Uuid;
 
@@ -337,7 +337,7 @@ async fn http_check_307_preserves_method_and_body() {
     let client = test_client();
     let url = Url::parse(&format!("http://{addr}/start")).unwrap();
     let mut check = default_http_check(url, ExpectedStatus::Exact(200));
-    check.method = status_monitor::domain::HttpMethod::Post;
+    check.method = uptimepage::domain::HttpMethod::Post;
     check.body = Some("ping".to_string());
     check.expected_body_contains = Some("echo:ping".to_string());
     check.follow_redirects = true;
@@ -408,16 +408,16 @@ async fn execute_stamps_passed_org_id_on_result() {
     let client = test_client();
     let url = Url::parse(&format!("http://{addr}/health")).unwrap();
     let check = default_http_check(url, ExpectedStatus::Exact(200));
-    let spec = status_monitor::domain::CheckSpec::Http(check);
+    let spec = uptimepage::domain::CheckSpec::Http(check);
 
     let target_id = Uuid::now_v7();
     let org_id = Uuid::now_v7();
     let domain_expiry = common::test_domain_expiry_runtime();
-    let deps = status_monitor::worker::WorkerDeps {
+    let deps = uptimepage::worker::WorkerDeps {
         http: &client,
         domain_expiry: &domain_expiry,
     };
-    let result = status_monitor::worker::execute(target_id, org_id, &spec, &deps).await;
+    let result = uptimepage::worker::execute(target_id, org_id, &spec, &deps).await;
 
     assert_eq!(result.status, CheckStatus::Up);
     assert_eq!(

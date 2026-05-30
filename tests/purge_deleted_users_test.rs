@@ -8,9 +8,9 @@
 mod common;
 
 use common::{make_user, unique_slug};
-use status_monitor::domain::{OrgId, UserId};
-use status_monitor::jobs::purge_deleted::purge_users_past_grace;
-use status_monitor::storage::create_org_with_owner;
+use uptimepage::domain::{OrgId, UserId};
+use uptimepage::jobs::purge_deleted::purge_users_past_grace;
+use uptimepage::storage::create_org_with_owner;
 use uuid::Uuid;
 
 const GRACE: u32 = 30;

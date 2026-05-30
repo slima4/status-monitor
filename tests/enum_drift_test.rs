@@ -11,8 +11,8 @@
 
 mod common;
 
-use status_monitor::auth::OauthProvider;
-use status_monitor::domain::{
+use uptimepage::auth::OauthProvider;
+use uptimepage::domain::{
     AppTheme, ChannelKind, IncidentSeverity, IncidentStatusPhase, PublicStyle,
 };
 

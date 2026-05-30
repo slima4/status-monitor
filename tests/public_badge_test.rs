@@ -20,14 +20,14 @@ use tower::ServiceExt;
 use uuid::Uuid;
 
 use common::{UnavailablePublicSource, build_test_app_with_public_source};
-use status_monitor::api::CursorPage;
-use status_monitor::api::public_error::PublicAppError;
-use status_monitor::domain::{
+use uptimepage::api::CursorPage;
+use uptimepage::api::public_error::PublicAppError;
+use uptimepage::domain::{
     ComponentHistoryResponse, DayState, OrgId, OverallState, OverallStatus, PublicComponent,
     PublicComponentGroup, PublicComponentStatus, PublicIncident, PublicMaintenanceList,
     PublicStatusPage,
 };
-use status_monitor::public_status::{IncidentListQuery, PublicSource};
+use uptimepage::public_status::{IncidentListQuery, PublicSource};
 
 fn known_component_id() -> Uuid {
     Uuid::parse_str("00000000-0000-0000-0000-000000000c01").unwrap()

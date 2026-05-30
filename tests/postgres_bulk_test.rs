@@ -8,9 +8,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use sqlx::PgPool;
-use status_monitor::domain::{CheckSpec, ExpectedStatus, NewTarget, TargetUpdate};
-use status_monitor::security::Cipher;
-use status_monitor::storage::{PostgresTargetStore, TargetStore};
+use uptimepage::domain::{CheckSpec, ExpectedStatus, NewTarget, TargetUpdate};
+use uptimepage::security::Cipher;
+use uptimepage::storage::{PostgresTargetStore, TargetStore};
 use url::Url;
 use uuid::Uuid;
 
@@ -22,7 +22,7 @@ use crate::common::{default_http_check, test_cipher};
 async fn store_with_default_org(
     pool: PgPool,
     cipher: Option<Arc<Cipher>>,
-) -> (PostgresTargetStore, status_monitor::domain::OrgId) {
+) -> (PostgresTargetStore, uptimepage::domain::OrgId) {
     let slug = format!("bulk-{}", Uuid::now_v7().simple());
     let slug = &slug[..slug.len().min(30)];
     let (id,): (Uuid,) = sqlx::query_as(
@@ -32,7 +32,7 @@ async fn store_with_default_org(
     .fetch_one(&pool)
     .await
     .expect("insert bulk-test org");
-    let org_id = status_monitor::domain::OrgId(id);
+    let org_id = uptimepage::domain::OrgId(id);
     let store = PostgresTargetStore::from_pool(pool, cipher);
     (store, org_id)
 }
@@ -264,7 +264,7 @@ async fn legacy_plaintext_row_decrypts_passthrough(pool: PgPool) {
     .fetch_one(&pool)
     .await
     .expect("insert bulk-test org");
-    let org_id = status_monitor::domain::OrgId(org_uuid);
+    let org_id = uptimepage::domain::OrgId(org_uuid);
     let id = uuid::Uuid::now_v7();
     sqlx::query(
         "INSERT INTO targets (id, org_id, name, check_spec, interval_secs, enabled, tags) \

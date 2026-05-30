@@ -1,11 +1,11 @@
 [package]
-name = "status-monitor"
+name = "uptimepage"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.95"
 license = "AGPL-3.0-or-later"
 publish = false
-default-run = "status-monitor"
+default-run = "uptimepage"
 
 [dependencies]
 # Async runtime

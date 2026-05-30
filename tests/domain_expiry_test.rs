@@ -9,15 +9,15 @@ use axum::routing::get;
 use chrono::Utc;
 use parking_lot::Mutex;
 use serde_json::{Value, json};
-use status_monitor::domain::{CheckStatus, DomainExpiryCheck, OrgId};
-use status_monitor::http_outbound::build_outbound_client;
-use status_monitor::storage::{DomainExpiryStateStore, InMemoryDomainExpiryStateStore};
-use status_monitor::worker::domain_expiry::{
+use uptimepage::domain::{CheckStatus, DomainExpiryCheck, OrgId};
+use uptimepage::http_outbound::build_outbound_client;
+use uptimepage::storage::{DomainExpiryStateStore, InMemoryDomainExpiryStateStore};
+use uptimepage::worker::domain_expiry::{
     DEFAULT_MAX_STALENESS, DomainExpiryRuntime, execute_domain_expiry_check,
 };
-use status_monitor::worker::host_throttle::HostThrottle;
-use status_monitor::worker::rdap::RdapClient;
-use status_monitor::worker::rdap_singleflight::RdapSingleflight;
+use uptimepage::worker::host_throttle::HostThrottle;
+use uptimepage::worker::rdap::RdapClient;
+use uptimepage::worker::rdap_singleflight::RdapSingleflight;
 use uuid::Uuid;
 
 #[derive(Clone)]
@@ -103,7 +103,7 @@ fn make_check(domain: &str, warn: u32, critical: u32) -> DomainExpiryCheck {
 
 fn client_for(addr: SocketAddr) -> RdapClient {
     RdapClient::with_bootstrap_url(
-        build_outbound_client(status_monitor::security::SsrfGuard::relaxed_for_tests()),
+        build_outbound_client(uptimepage::security::SsrfGuard::relaxed_for_tests()),
         format!("http://{addr}/bootstrap.json"),
     )
 }
@@ -122,7 +122,7 @@ fn runtime_with_client(client: RdapClient) -> DomainExpiryRuntime {
 async fn classify_one(
     addr: SocketAddr,
     check: DomainExpiryCheck,
-) -> status_monitor::domain::CheckResult {
+) -> uptimepage::domain::CheckResult {
     let runtime = runtime_with_client(client_for(addr));
     execute_domain_expiry_check(Uuid::now_v7(), Uuid::now_v7(), &check, &runtime).await
 }

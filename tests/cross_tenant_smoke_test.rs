@@ -13,9 +13,9 @@ mod common;
 use std::sync::Arc;
 
 use chrono::Utc;
-use status_monitor::config::PublicStatusConfig;
-use status_monitor::domain::{OrgId, OverallState, OverallStatus, PublicStatusPage};
-use status_monitor::public_status::cache::PageCache;
+use uptimepage::config::PublicStatusConfig;
+use uptimepage::domain::{OrgId, OverallState, OverallStatus, PublicStatusPage};
+use uptimepage::public_status::cache::PageCache;
 use uuid::Uuid;
 
 const ORG_A_MARKER: &str = "tenant-A-marker-7c1e5f9b";
@@ -96,7 +96,7 @@ async fn cache_last_good_is_partitioned_per_org() {
         .expect_err("B has no last_good and must surface Unavailable");
     assert!(matches!(
         err,
-        status_monitor::public_status::cache::PageCacheError::Unavailable
+        uptimepage::public_status::cache::PageCacheError::Unavailable
     ));
     let snap = cache.last_good(org_a).expect("A still cached");
     assert!(snap.site_name.contains(ORG_A_MARKER));
@@ -109,11 +109,11 @@ async fn public_source_trait_threads_org_param_to_distinct_responses() {
     // catches the future regression where an impl adds the trait parameter
     // but internally falls back to a baked default.
     use async_trait::async_trait;
-    use status_monitor::api::CursorPage;
-    use status_monitor::api::public_error::PublicAppError;
-    use status_monitor::domain::{ComponentHistoryResponse, PublicIncident, PublicMaintenanceList};
-    use status_monitor::public_status::{IncidentListQuery, PublicSource};
     use std::collections::HashMap;
+    use uptimepage::api::CursorPage;
+    use uptimepage::api::public_error::PublicAppError;
+    use uptimepage::domain::{ComponentHistoryResponse, PublicIncident, PublicMaintenanceList};
+    use uptimepage::public_status::{IncidentListQuery, PublicSource};
 
     struct OrgKeyedSource {
         pages: HashMap<OrgId, Arc<PublicStatusPage>>,

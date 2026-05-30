@@ -16,10 +16,10 @@ use common::{
     body_json, build_test_app_with_pg, drop_test_db, fresh_test_db, open_test_pool, with_session,
 };
 use serde_json::json;
-use status_monitor::api::error::codes;
-use status_monitor::auth::account;
-use status_monitor::error::AppError;
 use tower::ServiceExt;
+use uptimepage::api::error::codes;
+use uptimepage::auth::account;
+use uptimepage::error::AppError;
 use uuid::Uuid;
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations/postgres");
@@ -108,7 +108,7 @@ async fn deletion_blocked_when_solely_owning_org_with_other_members() {
     let org = seed_org(&pool, "shared", owner).await;
     add_member(&pool, org, other, "member").await;
 
-    let err = account::request_deletion(&pool, status_monitor::domain::UserId(owner), 30)
+    let err = account::request_deletion(&pool, uptimepage::domain::UserId(owner), 30)
         .await
         .expect_err("must block");
     match err {
@@ -143,7 +143,7 @@ async fn deletion_then_recovery_round_trip() {
     MIGRATOR.run(&pool).await.unwrap();
 
     let user = seed_user(&pool, "solo@example.test", "Solo").await;
-    let uid = status_monitor::domain::UserId(user);
+    let uid = uptimepage::domain::UserId(user);
     let org = seed_org(&pool, "solo-org", user).await;
     sqlx::query(
         "INSERT INTO sessions (id_hash, user_id, expires_at) VALUES ($1, $2, now() + interval '1 day')",
@@ -264,7 +264,7 @@ async fn expired_recovery_token_cannot_recover() {
     MIGRATOR.run(&pool).await.unwrap();
 
     let user = seed_user(&pool, "late@example.test", "Late").await;
-    let uid = status_monitor::domain::UserId(user);
+    let uid = uptimepage::domain::UserId(user);
     seed_org(&pool, "late-org", user).await;
     let outcome = account::request_deletion(&pool, uid, 30).await.unwrap();
 
@@ -299,7 +299,7 @@ async fn recovery_returns_410_when_row_already_restored() {
     MIGRATOR.run(&pool).await.unwrap();
 
     let user = seed_user(&pool, "race@example.test", "Race").await;
-    let uid = status_monitor::domain::UserId(user);
+    let uid = uptimepage::domain::UserId(user);
     seed_org(&pool, "race-org", user).await;
     let outcome = account::request_deletion(&pool, uid, 30).await.unwrap();
 
@@ -357,7 +357,7 @@ async fn data_export_redacts_credentials_and_excludes_other_emails() {
     .unwrap();
 
     let (router, _) = build_test_app_with_pg(pool.clone(), |_cfg| {}).await;
-    let router = with_session(router, status_monitor::domain::UserId(owner), None, None);
+    let router = with_session(router, uptimepage::domain::UserId(owner), None, None);
 
     let resp = router
         .oneshot(
