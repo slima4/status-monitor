@@ -17,11 +17,14 @@ use crate::api::types::{
     BulkAction, BulkActionFailure, BulkActionRequest, BulkActionResponse, TestRequest, TestResponse,
 };
 use crate::app::AppState;
+use crate::auth::scope::Scope;
 use crate::domain::{CheckResult, NewTarget, OrgId, Target, TargetAlerts, TargetUpdate};
 use crate::error::{AppError, Result};
 use crate::security::SsrfGuard;
 use crate::storage::TargetFilter;
-use crate::web::{Authorized, TargetsRead, TargetsWrite};
+use crate::web::{
+    Authorized, CurrentOrg, TargetsDelete, TargetsExecute, TargetsRead, TargetsWrite, TokenScopes,
+};
 use crate::worker::{CheckTask, host_for_spec};
 
 const BULK_MAX: usize = 10_000;
@@ -334,7 +337,7 @@ fn touches_public_view(u: &TargetUpdate) -> bool {
 )]
 pub async fn delete(
     State(state): State<AppState>,
-    Authorized(org, _): Authorized<TargetsWrite>,
+    Authorized(org, _): Authorized<TargetsDelete>,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode> {
     if state.target_store.delete(org, id).await? {
@@ -451,9 +454,14 @@ pub async fn bulk_create(
 )]
 pub async fn bulk_action(
     State(state): State<AppState>,
-    Authorized(org, _): Authorized<TargetsWrite>,
+    CurrentOrg(org): CurrentOrg,
+    scopes: TokenScopes,
     Json(req): Json<BulkActionRequest>,
 ) -> Result<Json<BulkActionResponse>> {
+    scopes.require(match &req.action {
+        BulkAction::Delete => Scope::TargetsDelete,
+        _ => Scope::TargetsWrite,
+    })?;
     if req.ids.is_empty() {
         return Err(AppError::bad_request(
             codes::BULK_EMPTY,
@@ -554,7 +562,7 @@ pub async fn bulk_action(
 )]
 pub async fn test_check(
     State(state): State<AppState>,
-    Authorized(org, _): Authorized<TargetsWrite>,
+    Authorized(org, _): Authorized<TargetsExecute>,
     Json(mut req): Json<TestRequest>,
 ) -> Result<Json<TestResponse>> {
     let guard = ssrf_guard(&state);
@@ -616,7 +624,7 @@ pub struct CheckNowQuery {
 )]
 pub async fn check_now(
     State(state): State<AppState>,
-    Authorized(org, _): Authorized<TargetsWrite>,
+    Authorized(org, _): Authorized<TargetsExecute>,
     Path(id): Path<Uuid>,
     Query(q): Query<CheckNowQuery>,
 ) -> Result<Json<CheckResult>> {

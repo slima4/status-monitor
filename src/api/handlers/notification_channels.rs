@@ -27,7 +27,7 @@ use crate::domain::{
 use crate::error::{AppError, Result};
 use crate::notifier::build_notifier;
 use crate::notifier::event::{AlertEvent, AlertKind};
-use crate::web::{Authorized, ChannelsRead, ChannelsWrite};
+use crate::web::{Authorized, ChannelsDelete, ChannelsExecute, ChannelsRead, ChannelsWrite};
 
 /// Result of `POST /{id}/test`. A `false` never reaches the client — a failed
 /// delivery is a 422 (`CHANNEL_TEST_FAILED`) — but the explicit field keeps
@@ -195,7 +195,7 @@ pub async fn update(
 )]
 pub async fn delete(
     State(state): State<AppState>,
-    Authorized(org, _): Authorized<ChannelsWrite>,
+    Authorized(org, _): Authorized<ChannelsDelete>,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode> {
     if state.notification_channel_store.delete(org, id).await? {
@@ -224,7 +224,7 @@ pub async fn delete(
 )]
 pub async fn test_send(
     State(state): State<AppState>,
-    Authorized(org, _): Authorized<ChannelsWrite>,
+    Authorized(org, _): Authorized<ChannelsExecute>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<TestNotificationResponse>> {
     let channel = state

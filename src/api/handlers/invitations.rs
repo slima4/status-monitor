@@ -29,8 +29,7 @@ use crate::domain::{OrgId, Role};
 use crate::email::{EmailAddress, EmailTemplate, TransactionalEmail};
 use crate::error::{AppError, Result};
 use crate::storage::orgs as orgs_store;
-use crate::web::CurrentUser;
-use crate::web::auth::api_token::VerifiedCurrentUser;
+use crate::web::{BrowserUser, CurrentUser, VerifiedBrowserUser};
 
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct CreateInvitationRequest {
@@ -49,7 +48,7 @@ pub struct InvitationView {
 
 pub async fn create(
     State(state): State<AppState>,
-    VerifiedCurrentUser(CurrentUser(user_id)): VerifiedCurrentUser,
+    VerifiedBrowserUser(CurrentUser(user_id)): VerifiedBrowserUser,
     Path(org_id): Path<Uuid>,
     Json(req): Json<CreateInvitationRequest>,
 ) -> Result<(StatusCode, Json<InvitationView>)> {
@@ -169,7 +168,7 @@ pub async fn list(
 
 pub async fn revoke(
     State(state): State<AppState>,
-    CurrentUser(user_id): CurrentUser,
+    BrowserUser(CurrentUser(user_id)): BrowserUser,
     Path((org_id, invitation_id)): Path<(Uuid, Uuid)>,
 ) -> Result<StatusCode> {
     let pool = state.require_db()?;
@@ -194,7 +193,7 @@ pub struct TokenBody {
 
 pub async fn accept(
     State(state): State<AppState>,
-    CurrentUser(user_id): CurrentUser,
+    BrowserUser(CurrentUser(user_id)): BrowserUser,
     Json(body): Json<TokenBody>,
 ) -> Result<StatusCode> {
     let pool = state.require_db()?;

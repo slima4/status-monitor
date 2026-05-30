@@ -16,9 +16,12 @@ pub mod theme;
 pub mod time_format;
 pub mod views;
 
+pub use auth::api_token::{BrowserUser, VerifiedBrowserUser};
 pub use auth::authz::{
-    Authorized, ChannelsRead, ChannelsWrite, IncidentsWrite, MaintenanceRead, MaintenanceWrite,
-    ScopedOrgPath, StatusPageRead, StatusPageWrite, TargetsRead, TargetsWrite,
+    Authorized, ChannelsDelete, ChannelsExecute, ChannelsRead, ChannelsWrite, IncidentsWrite,
+    MaintenanceDelete, MaintenanceRead, MaintenanceWrite, ScopedOrgPath, StatusPageDelete,
+    StatusPageRead, StatusPageWrite, TargetsDelete, TargetsExecute, TargetsRead, TargetsWrite,
+    TokenScopes,
 };
 pub use auth::{AuthedBrowser, CurrentOrg, CurrentUser, Session, User};
 pub use host::{StatusPageHost, StatusPageOrg, extract_status_slug};

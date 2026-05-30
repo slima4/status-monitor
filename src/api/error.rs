@@ -140,6 +140,8 @@ pub mod codes {
     pub const TOKEN_LIMIT: &str = "TOKEN_LIMIT";
     pub const TOKEN_NAME_INVALID: &str = "TOKEN_NAME_INVALID";
     pub const TOKEN_NOT_FOUND: &str = "TOKEN_NOT_FOUND";
+    pub const INVALID_SCOPES: &str = "INVALID_SCOPES";
+    pub const INVALID_EXPIRY: &str = "INVALID_EXPIRY";
     // Invitations.
     pub const ALREADY_MEMBER: &str = "ALREADY_MEMBER";
     pub const ALREADY_INVITED: &str = "ALREADY_INVITED";

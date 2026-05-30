@@ -30,7 +30,7 @@ use crate::domain::{UserId, strip_served_stale};
 use crate::email::{EmailAddress, EmailTemplate, TransactionalEmail};
 use crate::error::{AppError, Result};
 use crate::storage::postgres_secrets::{RawTargetRow, RedactedTarget};
-use crate::web::CurrentUser;
+use crate::web::{BrowserUser, CurrentUser};
 
 // ---------------------------------------------------------------------------
 // Data export
@@ -429,7 +429,7 @@ pub struct DeletionConfirmation {
 )]
 pub async fn delete_account(
     State(state): State<AppState>,
-    CurrentUser(user_id): CurrentUser,
+    BrowserUser(CurrentUser(user_id)): BrowserUser,
 ) -> Result<Json<DeletionConfirmation>> {
     let pool = state.require_db()?;
     let grace_days = state.cfg.tenancy.deletion_grace_period_days;

@@ -13,15 +13,25 @@ use std::collections::HashSet;
 pub enum Scope {
     TargetsRead,
     TargetsWrite,
+    /// Delete targets — split from `write` so a config token can't destroy.
+    TargetsDelete,
+    /// Trigger checks / probes (`check-now`, ad-hoc test) — a side effect, not
+    /// a config write.
+    TargetsExecute,
     ChannelsRead,
     ChannelsWrite,
+    ChannelsDelete,
+    /// Send a test notification through a channel.
+    ChannelsExecute,
     IncidentsRead,
     IncidentsWrite,
     MaintenanceRead,
     MaintenanceWrite,
+    MaintenanceDelete,
     StatusPageRead,
     StatusPageWrite,
-    /// Superset of every other scope. The historical default.
+    StatusPageDelete,
+    /// Superset of every other scope.
     FullAccess,
 }
 
@@ -31,14 +41,20 @@ impl Scope {
         match self {
             Scope::TargetsRead => "targets:read",
             Scope::TargetsWrite => "targets:write",
+            Scope::TargetsDelete => "targets:delete",
+            Scope::TargetsExecute => "targets:execute",
             Scope::ChannelsRead => "channels:read",
             Scope::ChannelsWrite => "channels:write",
+            Scope::ChannelsDelete => "channels:delete",
+            Scope::ChannelsExecute => "channels:execute",
             Scope::IncidentsRead => "incidents:read",
             Scope::IncidentsWrite => "incidents:write",
             Scope::MaintenanceRead => "maintenance:read",
             Scope::MaintenanceWrite => "maintenance:write",
+            Scope::MaintenanceDelete => "maintenance:delete",
             Scope::StatusPageRead => "status_page:read",
             Scope::StatusPageWrite => "status_page:write",
+            Scope::StatusPageDelete => "status_page:delete",
             Scope::FullAccess => "full_access",
         }
     }
@@ -48,14 +64,20 @@ impl Scope {
         Some(match s {
             "targets:read" => Scope::TargetsRead,
             "targets:write" => Scope::TargetsWrite,
+            "targets:delete" => Scope::TargetsDelete,
+            "targets:execute" => Scope::TargetsExecute,
             "channels:read" => Scope::ChannelsRead,
             "channels:write" => Scope::ChannelsWrite,
+            "channels:delete" => Scope::ChannelsDelete,
+            "channels:execute" => Scope::ChannelsExecute,
             "incidents:read" => Scope::IncidentsRead,
             "incidents:write" => Scope::IncidentsWrite,
             "maintenance:read" => Scope::MaintenanceRead,
             "maintenance:write" => Scope::MaintenanceWrite,
+            "maintenance:delete" => Scope::MaintenanceDelete,
             "status_page:read" => Scope::StatusPageRead,
             "status_page:write" => Scope::StatusPageWrite,
+            "status_page:delete" => Scope::StatusPageDelete,
             "full_access" => Scope::FullAccess,
             _ => return None,
         })
@@ -156,14 +178,20 @@ mod tests {
         for raw in [
             "targets:read",
             "targets:write",
+            "targets:delete",
+            "targets:execute",
             "channels:read",
             "channels:write",
+            "channels:delete",
+            "channels:execute",
             "incidents:read",
             "incidents:write",
             "maintenance:read",
             "maintenance:write",
+            "maintenance:delete",
             "status_page:read",
             "status_page:write",
+            "status_page:delete",
             "full_access",
         ] {
             assert_eq!(Scope::parse(raw).unwrap().as_str(), raw);

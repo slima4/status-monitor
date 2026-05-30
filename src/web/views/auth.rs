@@ -233,6 +233,7 @@ pub mod settings {
     use crate::auth::{account, api_tokens, session as session_store};
     use crate::error::AppError;
     use crate::storage::TargetFilter;
+    use crate::storage::orgs::list_orgs_for_user;
     use crate::web::auth::{CurrentOrg, Session};
     use crate::web::error::WebResult;
     use crate::web::filters;
@@ -246,10 +247,17 @@ pub mod settings {
         pub active_tab: &'static str,
     }
 
+    pub struct OrgOption {
+        pub slug: String,
+        pub name: String,
+        pub selected: bool,
+    }
+
     #[derive(Template, WebTemplate)]
     #[template(path = "settings/api_tokens.html")]
     pub struct ApiTokensPage {
         pub active_tab: &'static str,
+        pub orgs: Vec<OrgOption>,
     }
 
     pub struct SessionRow {
@@ -269,6 +277,10 @@ pub mod settings {
         pub prefix: String,
         pub created: chrono::DateTime<chrono::Utc>,
         pub last_used: Option<chrono::DateTime<chrono::Utc>>,
+        pub expires: Option<chrono::DateTime<chrono::Utc>>,
+        pub expired: bool,
+        pub access: &'static str,
+        pub org: Option<String>,
     }
 
     #[derive(Template, WebTemplate)]
@@ -293,14 +305,35 @@ pub mod settings {
         .into_response()
     }
 
-    pub async fn api_tokens_page(session: Session) -> Response {
-        if session.user.is_none() {
-            return crate::web::auth::login_redirect("/settings/api-tokens").into_response();
+    pub async fn api_tokens_page(
+        State(state): State<AppState>,
+        session: Session,
+    ) -> WebResult<Response> {
+        let Some(user) = session.user.as_ref() else {
+            return Ok(crate::web::auth::login_redirect("/settings/api-tokens").into_response());
+        };
+        let pool = state.require_db()?;
+        let mut orgs: Vec<OrgOption> = list_orgs_for_user(pool, user.id)
+            .await?
+            .into_iter()
+            .map(|o| OrgOption {
+                selected: Some(o.org.id) == session.active_org_id,
+                slug: o.org.slug,
+                name: o.org.name,
+            })
+            .collect();
+        // Bind-by-default: if the active org didn't match (or none is set), pin
+        // the dropdown to the first org rather than letting the browser pick it.
+        if !orgs.iter().any(|o| o.selected)
+            && let Some(first) = orgs.first_mut()
+        {
+            first.selected = true;
         }
-        ApiTokensPage {
+        Ok(ApiTokensPage {
             active_tab: TAB_SETTINGS,
+            orgs,
         }
-        .into_response()
+        .into_response())
     }
 
     #[derive(Template, WebTemplate)]
@@ -389,6 +422,7 @@ pub mod settings {
             return Ok(Redirect::to("/login").into_response());
         };
         let pool = state.require_db()?;
+        let now = chrono::Utc::now();
         let rows = api_tokens::list_for_user(pool, user.id).await?;
         let tokens = rows
             .into_iter()
@@ -398,9 +432,27 @@ pub mod settings {
                 prefix: r.token_prefix,
                 created: r.created_at,
                 last_used: r.last_used_at,
+                expired: r.expires_at.is_some_and(|e| e <= now),
+                expires: r.expires_at,
+                access: access_label(&r.scopes.0),
+                org: r.org_slug,
             })
             .collect();
         Ok(TokensPartial { tokens }.into_response())
+    }
+
+    fn access_label(scopes: &[String]) -> &'static str {
+        use crate::auth::scope::Scope;
+        if scopes.iter().any(|s| s == Scope::FullAccess.as_str()) {
+            "full access"
+        } else if scopes.iter().all(|s| s.ends_with(":read")) {
+            "read-only"
+        } else if scopes.iter().any(|s| s.ends_with(":write")) {
+            "read & write"
+        } else {
+            // Only delete/execute scopes — no read or write to claim.
+            "custom"
+        }
     }
 
     /// Compact binary-unit label for help text (e.g. `1 MB`, `512 KB`).
@@ -766,11 +818,18 @@ pub mod settings {
         fn api_tokens_page_renders_create_form_and_partial_hook() {
             let html = ApiTokensPage {
                 active_tab: super::super::TAB_SETTINGS,
+                orgs: vec![OrgOption {
+                    slug: "acme".into(),
+                    name: "Acme".into(),
+                    selected: true,
+                }],
             }
             .render()
             .unwrap();
             assert!(html.contains("API tokens"));
-            assert!(html.contains(r#"hx-post="/api/v1/me/api-tokens""#));
+            assert!(html.contains(r#"id="new-token-form""#));
+            assert!(html.contains("/api/v1/me/api-tokens"));
+            assert!(html.contains(r#"<option value="acme" selected>Acme</option>"#));
             assert!(html.contains(r#"hx-get="/web/partials/settings/api-tokens""#));
         }
 
@@ -809,12 +868,18 @@ pub mod settings {
                     prefix: "sm_live_aaaaaaaa".into(),
                     created: "2026-05-16T12:00:00Z".parse().unwrap(),
                     last_used: None,
+                    expires: None,
+                    expired: false,
+                    access: "read-only",
+                    org: Some("acme".into()),
                 }],
             }
             .render()
             .unwrap();
             assert!(html.contains("CI"));
             assert!(html.contains("sm_live_aaaaaaaa"));
+            assert!(html.contains("read-only"));
+            assert!(html.contains("acme"));
             assert!(html.contains(r#"hx-delete="/api/v1/me/api-tokens/tok-1""#));
         }
     }

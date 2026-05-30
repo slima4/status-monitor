@@ -1,4 +1,4 @@
-//! API-token Bearer middleware + email-verified gate extractor.
+//! API-token Bearer middleware + the session-only auth extractors.
 //!
 //! The middleware runs ahead of the route handler. If the request carries
 //! `Authorization: Bearer sm_live_…`, it looks the token up (argon2-verify
@@ -11,9 +11,9 @@
 //! `INVALID_TOKEN`. A missing or non-Bearer `Authorization` header is **not**
 //! an error — the cookie path may still succeed.
 //!
-//! [`VerifiedCurrentUser`] is the type-level constraint required by
-//! verification-sensitive endpoints. Adding a new endpoint to that list means
-//! swapping the extractor as well.
+//! [`BrowserUser`] / [`VerifiedBrowserUser`] gate account-administration
+//! endpoints to a browser session: they read the cookie, never `AuthContext`,
+//! so an API token is rejected regardless of its scopes.
 
 use axum::extract::{FromRef, FromRequestParts, Request, State};
 use axum::http::request::Parts;
@@ -21,13 +21,15 @@ use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use axum::{Json, http::StatusCode};
 use chrono::{DateTime, Utc};
+use sqlx::PgPool;
 
 use crate::api::error::{ApiError, ApiErrorBody, codes};
 use crate::app::AppState;
 use crate::auth::api_tokens;
+use crate::domain::UserId;
 use crate::error::{AppError, Result};
 
-use super::{AuthContext, CurrentUser, bearer_from_headers};
+use super::{AuthContext, CurrentUser, Session, bearer_from_headers};
 
 /// Middleware entry point. Mount on the API router so it runs ahead of any
 /// `FromRequestParts` impl that reads `AuthContext`.
@@ -89,17 +91,56 @@ fn unauthorized() -> Response {
     (StatusCode::UNAUTHORIZED, Json(body)).into_response()
 }
 
-/// Extractor that enforces `email_verified_at IS NOT NULL`. Required by:
-/// - `POST /api/v1/orgs/{id}/invitations` (inviter shown to recipients)
-/// - `POST /api/v1/orgs/{id}/incidents/{id}/public-narrate` (text reaches public)
-/// - `POST /api/v1/me/api-tokens` (compromised unverified account exfiltrates)
-///
-/// The type-system carries the constraint so handler signatures advertise the
-/// requirement.
-#[derive(Debug, Clone, Copy)]
-pub struct VerifiedCurrentUser(pub CurrentUser);
+async fn ensure_email_verified(pool: &PgPool, user_id: UserId) -> Result<()> {
+    let row: Option<(Option<DateTime<Utc>>,)> =
+        sqlx::query_as("SELECT email_verified_at FROM users WHERE id = $1")
+            .bind(user_id.0)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| AppError::Other(anyhow::anyhow!("verify lookup: {e}")))?;
+    if row.and_then(|(v,)| v).is_some() {
+        Ok(())
+    } else {
+        Err(AppError::forbidden_code(
+            codes::EMAIL_NOT_VERIFIED,
+            "this action requires a verified email",
+        ))
+    }
+}
 
-impl<S> FromRequestParts<S> for VerifiedCurrentUser
+/// Session-authenticated user for account-administration endpoints that API
+/// tokens must never reach — managing the tokens themselves. A Bearer-only
+/// request carries no session cookie, so it 401s here instead of letting a
+/// scoped token mint or revoke siblings.
+#[derive(Debug, Clone, Copy)]
+pub struct BrowserUser(pub CurrentUser);
+
+impl<S> FromRequestParts<S> for BrowserUser
+where
+    S: Send + Sync,
+    AppState: FromRef<S>,
+{
+    type Rejection = AppError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self> {
+        let session = Session::from_request_parts(parts, state)
+            .await
+            .expect("Session extractor is infallible");
+        session
+            .user_id()
+            .map(|id| BrowserUser(CurrentUser(id)))
+            .ok_or(AppError::Unauthorized)
+    }
+}
+
+/// [`BrowserUser`] plus the verified-email gate. Required by `POST
+/// /api/v1/me/api-tokens` (a compromised unverified account could otherwise
+/// exfiltrate via a fresh token) and `POST /api/v1/orgs/{id}/invitations` (the
+/// inviter's address is shown to recipients).
+#[derive(Debug, Clone, Copy)]
+pub struct VerifiedBrowserUser(pub CurrentUser);
+
+impl<S> FromRequestParts<S> for VerifiedBrowserUser
 where
     S: Send + Sync,
     AppState: FromRef<S>,
@@ -108,21 +149,9 @@ where
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self> {
         let app_state = AppState::from_ref(state);
-        let user = CurrentUser::from_request_parts(parts, state).await?;
+        let BrowserUser(user) = BrowserUser::from_request_parts(parts, state).await?;
         let pool = app_state.db.as_ref().ok_or(AppError::Unauthorized)?;
-        let row: Option<(Option<DateTime<Utc>>,)> =
-            sqlx::query_as("SELECT email_verified_at FROM users WHERE id = $1")
-                .bind(user.0.0)
-                .fetch_optional(pool)
-                .await
-                .map_err(|e| AppError::Other(anyhow::anyhow!("verify lookup: {e}")))?;
-        let verified = row.and_then(|(v,)| v).is_some();
-        if !verified {
-            return Err(AppError::forbidden_code(
-                codes::EMAIL_NOT_VERIFIED,
-                "this action requires a verified email",
-            ));
-        }
+        ensure_email_verified(pool, user.0).await?;
         Ok(Self(user))
     }
 }

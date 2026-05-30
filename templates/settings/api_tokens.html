@@ -11,25 +11,81 @@
     <p class="text-sm text-muted">
       Managing monitors as code? Use the official
       <a href="https://registry.terraform.io/providers/uptimepage/uptimepage"
-         target="_blank" rel="noopener" class="underline">Terraform provider</a>.
+         target="_blank" rel="noopener" class="underline">Terraform provider</a>
+      with a token scoped to <code>targets:write</code> + <code>channels:write</code>.
     </p>
   </header>
 
-  <form id="new-token-form"
-        hx-post="/api/v1/me/api-tokens"
-        hx-ext="json-enc"
-        hx-headers='{"X-Requested-With":"uptimepage"}'
-        hx-target="#token-result"
-        hx-swap="innerHTML"
-        class="sticker-card flex flex-wrap items-center gap-2 p-4">
-    <label class="sr-only" for="token-name">Token name</label>
-    <input id="token-name" name="name" type="text" required minlength="1" maxlength="80"
-           placeholder="CI deploy, my laptop, …"
-           class="flex-1 field text-sm">
-    <button type="submit"
-            class="sticker-btn sticker-btn--primary px-3 py-1.5 text-sm font-medium">
-      create token
-    </button>
+  <form id="new-token-form" class="sticker-card space-y-4 p-4">
+    <div class="space-y-1">
+      <label class="text-xs uppercase text-muted" for="token-name">Name</label>
+      <input id="token-name" name="name" type="text" required minlength="1" maxlength="80"
+             placeholder="CI deploy, my laptop, …"
+             class="field text-sm w-full">
+    </div>
+
+    <div class="grid gap-4 sm:grid-cols-2">
+      <div class="space-y-1">
+        <label class="text-xs uppercase text-muted" for="token-org">Organization</label>
+        <select id="token-org" class="field text-sm w-full">
+          {% for o in orgs %}
+          <option value="{{ o.slug }}"{% if o.selected %} selected{% endif %}>{{ o.name }}</option>
+          {% endfor %}
+          <option value="">All my organizations</option>
+        </select>
+      </div>
+      <div class="space-y-1">
+        <label class="text-xs uppercase text-muted" for="token-expiry">Expires</label>
+        <select id="token-expiry" class="field text-sm w-full">
+          <option value="30">30 days</option>
+          <option value="60">60 days</option>
+          <option value="90" selected>90 days</option>
+          <option value="365">365 days</option>
+          <option value="">No expiry</option>
+        </select>
+      </div>
+    </div>
+
+    <fieldset class="space-y-2">
+      <legend class="text-xs uppercase text-muted">Access</legend>
+      <div class="flex flex-wrap gap-4 text-sm">
+        <label class="flex items-center gap-2"><input type="radio" name="access" value="read" checked> Read-only</label>
+        <label class="flex items-center gap-2"><input type="radio" name="access" value="write"> Read &amp; write</label>
+        <label class="flex items-center gap-2"><input type="radio" name="access" value="advanced"> Advanced</label>
+      </div>
+    </fieldset>
+
+    <div id="advanced-scopes" hidden
+         class="space-y-2 border-t border-[color:var(--theme-line)] pt-3 text-sm">
+      <div class="flex items-center gap-3"><span class="w-28 text-muted">targets</span>
+        <label class="flex items-center gap-1"><input type="checkbox" class="scope-box" value="targets:read" aria-label="targets read"> read</label>
+        <label class="flex items-center gap-1"><input type="checkbox" class="scope-box" value="targets:write" aria-label="targets write"> write</label>
+        <label class="flex items-center gap-1"><input type="checkbox" class="scope-box" value="targets:delete" aria-label="targets delete"> delete</label>
+        <label class="flex items-center gap-1"><input type="checkbox" class="scope-box" value="targets:execute" aria-label="targets execute"> run checks</label></div>
+      <div class="flex items-center gap-3"><span class="w-28 text-muted">channels</span>
+        <label class="flex items-center gap-1"><input type="checkbox" class="scope-box" value="channels:read" aria-label="channels read"> read</label>
+        <label class="flex items-center gap-1"><input type="checkbox" class="scope-box" value="channels:write" aria-label="channels write"> write</label>
+        <label class="flex items-center gap-1"><input type="checkbox" class="scope-box" value="channels:delete" aria-label="channels delete"> delete</label>
+        <label class="flex items-center gap-1"><input type="checkbox" class="scope-box" value="channels:execute" aria-label="channels execute"> send test</label></div>
+      <div class="flex items-center gap-3"><span class="w-28 text-muted">incidents</span>
+        <label class="flex items-center gap-1"><input type="checkbox" class="scope-box" value="incidents:read" aria-label="incidents read"> read</label>
+        <label class="flex items-center gap-1"><input type="checkbox" class="scope-box" value="incidents:write" aria-label="incidents write"> write</label></div>
+      <div class="flex items-center gap-3"><span class="w-28 text-muted">maintenance</span>
+        <label class="flex items-center gap-1"><input type="checkbox" class="scope-box" value="maintenance:read" aria-label="maintenance read"> read</label>
+        <label class="flex items-center gap-1"><input type="checkbox" class="scope-box" value="maintenance:write" aria-label="maintenance write"> write</label>
+        <label class="flex items-center gap-1"><input type="checkbox" class="scope-box" value="maintenance:delete" aria-label="maintenance delete"> delete</label></div>
+      <div class="flex items-center gap-3"><span class="w-28 text-muted">status page</span>
+        <label class="flex items-center gap-1"><input type="checkbox" class="scope-box" value="status_page:read" aria-label="status page read"> read</label>
+        <label class="flex items-center gap-1"><input type="checkbox" class="scope-box" value="status_page:write" aria-label="status page write"> write</label>
+        <label class="flex items-center gap-1"><input type="checkbox" class="scope-box" value="status_page:delete" aria-label="status page delete"> delete</label></div>
+    </div>
+
+    <div class="flex justify-end">
+      <button type="submit"
+              class="sticker-btn sticker-btn--primary px-3 py-1.5 text-sm font-medium">
+        create token
+      </button>
+    </div>
   </form>
 
   <div id="token-result" aria-live="polite"></div>
@@ -43,21 +99,64 @@
   </div>
 
   <script>
-    document.body.addEventListener('htmx:afterRequest', (ev) => {
-      const elt = ev.detail.elt;
-      if (!elt) return;
-      if (elt.id === 'new-token-form' && ev.detail.successful) {
-        const body = window.smJson(ev.detail.xhr);
-        if (!body || !body.token) return; // unparseable: leave server response in place
-        document.getElementById('token-result').innerHTML = `
-          <div class="alert-card alert-card--ok">
-            <p class="font-medium">Token created — copy it now, you won't see it again.</p>
-            <pre class="mt-2 overflow-x-auto rounded bg-[color:var(--theme-surface-elev)] px-3 py-2 font-mono text-xs">${body.token}</pre>
-          </div>`;
-        document.getElementById('token-name').value = '';
-        htmx.trigger('body', 'tokens:refresh');
+    (() => {
+      const RESOURCES = ['targets', 'channels', 'incidents', 'maintenance', 'status_page'];
+      const form = document.getElementById('new-token-form');
+      const adv = document.getElementById('advanced-scopes');
+      const result = document.getElementById('token-result');
+
+      form.querySelectorAll('input[name=access]').forEach((r) => {
+        r.addEventListener('change', () => {
+          adv.hidden = form.querySelector('input[name=access]:checked').value !== 'advanced';
+        });
+      });
+
+      function chosenScopes() {
+        const access = form.querySelector('input[name=access]:checked').value;
+        if (access === 'read') return RESOURCES.map((r) => r + ':read');
+        if (access === 'write') return RESOURCES.map((r) => r + ':write');
+        return Array.from(form.querySelectorAll('.scope-box:checked')).map((b) => b.value);
       }
-    });
+
+      function showError(msg) {
+        result.innerHTML = '<div class="alert-card alert-card--error"></div>';
+        result.querySelector('.alert-card').textContent = msg;
+      }
+
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const scopes = chosenScopes();
+        if (scopes.length === 0) { showError('Pick at least one scope.'); return; }
+
+        const body = { name: document.getElementById('token-name').value, scopes };
+        const org = document.getElementById('token-org').value;
+        if (org) body.org_slug = org;
+        const expiry = document.getElementById('token-expiry').value;
+        if (expiry) body.expires_in_days = parseInt(expiry, 10);
+
+        let res, data;
+        try {
+          res = await fetch('/api/v1/me/api-tokens', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'uptimepage' },
+            body: JSON.stringify(body),
+          });
+          data = await res.json();
+        } catch (_) {
+          showError('Network error — try again.');
+          return;
+        }
+
+        if (res.ok && data && data.token) {
+          result.innerHTML = '<div class="alert-card alert-card--ok"><p class="font-medium">Token created — copy it now, you will not see it again.</p><pre class="mt-2 overflow-x-auto rounded bg-[color:var(--theme-surface-elev)] px-3 py-2 font-mono text-xs"></pre></div>';
+          result.querySelector('pre').textContent = data.token;
+          document.getElementById('token-name').value = '';
+          htmx.trigger('body', 'tokens:refresh');
+        } else {
+          showError((data && data.error && data.error.message) || 'Could not create token.');
+        }
+      });
+    })();
   </script>
 </section>
 {% endblock %}

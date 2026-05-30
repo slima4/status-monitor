@@ -24,7 +24,7 @@ use crate::domain::{
 };
 use crate::error::{AppError, Result};
 use crate::storage::{MaintenanceListQuery, MaintenanceStore};
-use crate::web::{Authorized, MaintenanceRead, MaintenanceWrite};
+use crate::web::{Authorized, MaintenanceDelete, MaintenanceRead, MaintenanceWrite};
 
 const MAX_WINDOW_DAYS: i64 = 30;
 const LIST_LIMIT_DEFAULT: u32 = 50;
@@ -222,7 +222,7 @@ pub async fn update_maintenance(
 )]
 pub async fn delete_maintenance(
     State(state): State<AppState>,
-    Authorized(org, _): Authorized<MaintenanceWrite>,
+    Authorized(org, _): Authorized<MaintenanceDelete>,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode> {
     if state.maintenance_store.delete(org, id).await? {

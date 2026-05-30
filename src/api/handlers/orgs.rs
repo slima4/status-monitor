@@ -5,9 +5,11 @@
 //! needs to act on an org other than their active one (look at someone else's
 //! membership list, restore an org they soft-deleted yesterday), so binding
 //! the route to the active org would be wrong. Access control is therefore
-//! per-handler: each route extracts the caller via [`CurrentUser`] and then
-//! consults [`storage::orgs`] to decide whether the caller is a member /
-//! owner / deleter of the path-id org.
+//! per-handler: each route extracts the caller and then consults
+//! [`storage::orgs`] to decide whether they are a member / owner / deleter of
+//! the path-id org. Reads use [`CurrentUser`]; mutations use [`BrowserUser`],
+//! so an API token cannot create, rename, delete, or change membership of an
+//! org — those are browser-session operations.
 
 use axum::Json;
 use axum::extract::{Path, Query, State};
@@ -24,7 +26,7 @@ use crate::app::AppState;
 use crate::domain::{OrgId, Organization, Role, UserId, validate_slug};
 use crate::error::{AppError, Result};
 use crate::storage::orgs as orgs_store;
-use crate::web::CurrentUser;
+use crate::web::{BrowserUser, CurrentUser};
 
 // ── DTOs ────────────────────────────────────────────────────────────────────
 
@@ -128,7 +130,7 @@ pub struct SwitchActiveOrgRequest {
 )]
 pub async fn create_org(
     State(state): State<AppState>,
-    CurrentUser(user): CurrentUser,
+    BrowserUser(CurrentUser(user)): BrowserUser,
     Json(req): Json<CreateOrgRequest>,
 ) -> Result<(
     StatusCode,
@@ -264,7 +266,7 @@ pub async fn get_org(
 )]
 pub async fn update_org(
     State(state): State<AppState>,
-    CurrentUser(user): CurrentUser,
+    BrowserUser(CurrentUser(user)): BrowserUser,
     Path(id): Path<Uuid>,
     Json(req): Json<UpdateOrgRequest>,
 ) -> Result<Json<OrgView>> {
@@ -329,7 +331,7 @@ pub async fn update_org(
 )]
 pub async fn delete_org(
     State(state): State<AppState>,
-    CurrentUser(user): CurrentUser,
+    BrowserUser(CurrentUser(user)): BrowserUser,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode> {
     let pool = require_db(&state)?;
@@ -362,7 +364,7 @@ pub async fn delete_org(
 )]
 pub async fn restore_org(
     State(state): State<AppState>,
-    CurrentUser(user): CurrentUser,
+    BrowserUser(CurrentUser(user)): BrowserUser,
     Path(id): Path<Uuid>,
 ) -> Result<Json<OrgView>> {
     let pool = require_db(&state)?;
@@ -465,7 +467,7 @@ pub async fn list_org_members(
 )]
 pub async fn remove_org_member(
     State(state): State<AppState>,
-    CurrentUser(user): CurrentUser,
+    BrowserUser(CurrentUser(user)): BrowserUser,
     Path((id, target_user_id)): Path<(Uuid, Uuid)>,
 ) -> Result<StatusCode> {
     let pool = require_db(&state)?;
@@ -505,7 +507,7 @@ pub async fn remove_org_member(
 )]
 pub async fn switch_active_org(
     State(state): State<AppState>,
-    CurrentUser(user): CurrentUser,
+    BrowserUser(CurrentUser(user)): BrowserUser,
     Json(req): Json<SwitchActiveOrgRequest>,
 ) -> Result<StatusCode> {
     let pool = require_db(&state)?;

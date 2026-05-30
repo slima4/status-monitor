@@ -81,7 +81,8 @@ CREATE TABLE api_tokens (
     name            TEXT NOT NULL,
     token_hash      TEXT NOT NULL,
     token_prefix    TEXT NOT NULL,
-    scopes          JSONB NOT NULL DEFAULT '["full_access"]'::jsonb,
+    scopes          JSONB NOT NULL DEFAULT '["full_access"]'::jsonb
+                        CHECK (jsonb_typeof(scopes) = 'array'),
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     last_used_at    TIMESTAMPTZ,
     expires_at      TIMESTAMPTZ

@@ -8,10 +8,11 @@ mod common;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use common::{build_saas_router_with_pg_targets, make_user, unique_slug};
+use common::{build_saas_router_with_pg_targets, make_user, unique_slug, with_session};
 use serde_json::json;
 use tower::ServiceExt;
 use uptimepage::auth::api_tokens;
+use uptimepage::auth::scope::ScopeSet;
 use uptimepage::storage::create_org_with_owner;
 
 const PREFIX_LEN: usize = 16;
@@ -37,6 +38,42 @@ fn target_body() -> String {
     .to_string()
 }
 
+/// Mint a token, then set its scopes directly (scoped creation is covered
+/// elsewhere; here we just need a token carrying an exact set).
+async fn token_with_scopes(
+    pool: &sqlx::PgPool,
+    user: uptimepage::domain::UserId,
+    name: &str,
+    scopes_json: &str,
+) -> String {
+    let t = api_tokens::create(
+        pool,
+        user,
+        name,
+        &ScopeSet::full_access(),
+        None,
+        None,
+        PREFIX_LEN,
+        1000,
+    )
+    .await
+    .unwrap();
+    sqlx::query("UPDATE api_tokens SET scopes = $1::jsonb WHERE id = $2")
+        .bind(scopes_json)
+        .bind(t.id)
+        .execute(pool)
+        .await
+        .unwrap();
+    t.token
+}
+
+fn json_id(body: &str) -> String {
+    serde_json::from_str::<serde_json::Value>(body).unwrap()["id"]
+        .as_str()
+        .expect("id in response")
+        .to_owned()
+}
+
 async fn send(
     router: &axum::Router,
     method: &str,
@@ -50,6 +87,35 @@ async fn send(
         .uri(path)
         .header("authorization", format!("Bearer {token}"))
         .header("x-uptimepage-org", org);
+    let body = match body {
+        Some(j) => {
+            builder = builder.header("content-type", "application/json");
+            Body::from(j)
+        }
+        None => Body::empty(),
+    };
+    let resp = router
+        .clone()
+        .oneshot(builder.body(body).unwrap())
+        .await
+        .unwrap();
+    let status = resp.status();
+    let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20)
+        .await
+        .unwrap();
+    (status, String::from_utf8_lossy(&bytes).into_owned())
+}
+
+/// POST without a Bearer header — auth comes from a session stamped on the
+/// router. Token-management endpoints are browser-only, so this is the path
+/// the UI takes; `CurrentOrg` resolves from the session's active org.
+async fn send_as_browser(
+    router: &axum::Router,
+    method: &str,
+    path: &str,
+    body: Option<String>,
+) -> (StatusCode, String) {
+    let mut builder = Request::builder().method(method).uri(path);
     let body = match body {
         Some(j) => {
             builder = builder.header("content-type", "application/json");
@@ -85,9 +151,18 @@ async fn read_only_token_gets_but_cannot_write_targets() {
 
     // Read-only token: create (defaults to full_access) then narrow the scopes
     // directly — the scoped-creation API arrives in a later phase.
-    let ro = api_tokens::create(&pool, user, "ro", PREFIX_LEN, 1000)
-        .await
-        .unwrap();
+    let ro = api_tokens::create(
+        &pool,
+        user,
+        "ro",
+        &ScopeSet::full_access(),
+        None,
+        None,
+        PREFIX_LEN,
+        1000,
+    )
+    .await
+    .unwrap();
     sqlx::query(r#"UPDATE api_tokens SET scopes = '["targets:read"]'::jsonb WHERE id = $1"#)
         .bind(ro.id)
         .execute(&pool)
@@ -95,15 +170,33 @@ async fn read_only_token_gets_but_cannot_write_targets() {
         .unwrap();
 
     // Full-access token (default scopes).
-    let fa = api_tokens::create(&pool, user, "fa", PREFIX_LEN, 1000)
-        .await
-        .unwrap();
+    let fa = api_tokens::create(
+        &pool,
+        user,
+        "fa",
+        &ScopeSet::full_access(),
+        None,
+        None,
+        PREFIX_LEN,
+        1000,
+    )
+    .await
+    .unwrap();
 
     // Token scoped to a DIFFERENT resource — proves the read gate discriminates
     // by resource, not just read-vs-write.
-    let wrong = api_tokens::create(&pool, user, "wrong", PREFIX_LEN, 1000)
-        .await
-        .unwrap();
+    let wrong = api_tokens::create(
+        &pool,
+        user,
+        "wrong",
+        &ScopeSet::full_access(),
+        None,
+        None,
+        PREFIX_LEN,
+        1000,
+    )
+    .await
+    .unwrap();
     sqlx::query(r#"UPDATE api_tokens SET scopes = '["channels:read"]'::jsonb WHERE id = $1"#)
         .bind(wrong.id)
         .execute(&pool)
@@ -206,9 +299,18 @@ async fn org_bound_token_is_pinned_to_its_org() {
         .expect("org B");
 
     // Full-access token bound to org A.
-    let tok = api_tokens::create(&pool, user, "bound", PREFIX_LEN, 1000)
-        .await
-        .unwrap();
+    let tok = api_tokens::create(
+        &pool,
+        user,
+        "bound",
+        &ScopeSet::full_access(),
+        None,
+        None,
+        PREFIX_LEN,
+        1000,
+    )
+    .await
+    .unwrap();
     sqlx::query("UPDATE api_tokens SET org_id = $1 WHERE id = $2")
         .bind(org_a.id.0)
         .bind(tok.id)
@@ -299,18 +401,36 @@ async fn status_page_settings_require_status_page_scope() {
         .expect("org");
     let path = format!("/api/v1/orgs/{}/status-page", org.id.0);
 
-    let reader = api_tokens::create(&pool, user, "sp-read", PREFIX_LEN, 1000)
-        .await
-        .unwrap();
+    let reader = api_tokens::create(
+        &pool,
+        user,
+        "sp-read",
+        &ScopeSet::full_access(),
+        None,
+        None,
+        PREFIX_LEN,
+        1000,
+    )
+    .await
+    .unwrap();
     sqlx::query(r#"UPDATE api_tokens SET scopes = '["status_page:read"]'::jsonb WHERE id = $1"#)
         .bind(reader.id)
         .execute(&pool)
         .await
         .unwrap();
 
-    let wrong = api_tokens::create(&pool, user, "sp-wrong", PREFIX_LEN, 1000)
-        .await
-        .unwrap();
+    let wrong = api_tokens::create(
+        &pool,
+        user,
+        "sp-wrong",
+        &ScopeSet::full_access(),
+        None,
+        None,
+        PREFIX_LEN,
+        1000,
+    )
+    .await
+    .unwrap();
     sqlx::query(r#"UPDATE api_tokens SET scopes = '["targets:read"]'::jsonb WHERE id = $1"#)
         .bind(wrong.id)
         .execute(&pool)
@@ -359,9 +479,18 @@ async fn status_page_settings_require_status_page_scope() {
     );
 
     // A status_page:write token may PATCH (write ⇒ read).
-    let writer = api_tokens::create(&pool, user, "sp-write", PREFIX_LEN, 1000)
-        .await
-        .unwrap();
+    let writer = api_tokens::create(
+        &pool,
+        user,
+        "sp-write",
+        &ScopeSet::full_access(),
+        None,
+        None,
+        PREFIX_LEN,
+        1000,
+    )
+    .await
+    .unwrap();
     sqlx::query(r#"UPDATE api_tokens SET scopes = '["status_page:write"]'::jsonb WHERE id = $1"#)
         .bind(writer.id)
         .execute(&pool)
@@ -372,5 +501,377 @@ async fn status_page_settings_require_status_page_scope() {
         status,
         StatusCode::OK,
         "status_page:write must update settings, got: {body}"
+    );
+
+    // Destructive logo removal needs status_page:delete, not :write.
+    let logo = format!("/api/v1/orgs/{}/status-page/logo", org.id.0);
+    let (status, body) = send(&router, "DELETE", &logo, &writer.token, &slug, None).await;
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "write must not delete logo: {body}"
+    );
+    assert!(body.contains("INSUFFICIENT_SCOPE"), "{body}");
+    let deleter = token_with_scopes(&pool, user, "sp-del", r#"["status_page:delete"]"#).await;
+    let (status, body) = send(&router, "DELETE", &logo, &deleter, &slug, None).await;
+    assert!(
+        status.is_success(),
+        "status_page:delete must remove logo, got {status}: {body}"
+    );
+}
+
+/// P3 creation API: scopes required + validated, expiry capped, org binding
+/// membership-checked, and a valid request echoes scopes/org/expiry back.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL — run via DATABASE_URL=... cargo test -- --ignored"]
+async fn token_creation_validates_scopes_org_and_expiry() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+
+    let user = make_user(&pool, "create").await;
+    sqlx::query("UPDATE users SET email_verified_at = now() WHERE id = $1")
+        .bind(user.0)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let slug = unique_slug("create");
+    let org = create_org_with_owner(&pool, user, &slug, "Create", 3)
+        .await
+        .unwrap()
+        .expect("org")
+        .id;
+
+    // Token management is browser-only; drive create through a stamped session.
+    let router = build_saas_router_with_pg_targets(pool.clone()).await;
+    let router = with_session(router, user, Some(org), Some("create-sess"));
+    let url = "/api/v1/me/api-tokens";
+
+    // Empty scopes → 422.
+    let (status, body) = send_as_browser(
+        &router,
+        "POST",
+        url,
+        Some(r#"{"name":"x","scopes":[]}"#.into()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert!(body.contains("INVALID_SCOPES"), "{body}");
+
+    // Unknown scope → 422.
+    let (status, body) = send_as_browser(
+        &router,
+        "POST",
+        url,
+        Some(r#"{"name":"x","scopes":["bogus:read"]}"#.into()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert!(body.contains("INVALID_SCOPES"), "{body}");
+
+    // Expiry past the cap → 422.
+    let (status, body) = send_as_browser(
+        &router,
+        "POST",
+        url,
+        Some(r#"{"name":"x","scopes":["targets:read"],"expires_in_days":400}"#.into()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert!(body.contains("INVALID_EXPIRY"), "{body}");
+
+    // org_slug the caller is not a member of → 403.
+    let other = make_user(&pool, "other").await;
+    let other_slug = unique_slug("other");
+    create_org_with_owner(&pool, other, &other_slug, "Other", 3)
+        .await
+        .unwrap()
+        .expect("other org");
+    let (status, body) = send_as_browser(
+        &router,
+        "POST",
+        url,
+        Some(format!(
+            r#"{{"name":"x","scopes":["targets:read"],"org_slug":"{other_slug}"}}"#
+        )),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+
+    // Valid scoped + org-bound + expiring token → 201, echoes the inputs back.
+    let (status, body) = send_as_browser(
+        &router,
+        "POST",
+        url,
+        Some(format!(
+            r#"{{"name":"scoped","scopes":["targets:read"],"org_slug":"{slug}","expires_in_days":30}}"#
+        )),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert!(body.contains("targets:read"), "{body}");
+    assert!(body.contains(&format!("\"org\":\"{slug}\"")), "{body}");
+    assert!(body.contains("expires_at"), "{body}");
+
+    // The issued token actually carries what was stored: targets:read works,
+    // a write is denied — proving scopes/binding persisted, not just echoed.
+    let created: serde_json::Value = serde_json::from_str(&body).unwrap();
+    let scoped = created["token"].as_str().expect("token in create response");
+    let (status, _) = send(&router, "GET", "/api/v1/targets", scoped, &slug, None).await;
+    assert_eq!(status, StatusCode::OK, "issued read token must GET targets");
+    let (status, body) = send(
+        &router,
+        "POST",
+        "/api/v1/targets",
+        scoped,
+        &slug,
+        Some(target_body()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert!(body.contains("INSUFFICIENT_SCOPE"), "{body}");
+
+    // Zero-day expiry → 422.
+    let (status, body) = send_as_browser(
+        &router,
+        "POST",
+        url,
+        Some(r#"{"name":"x","scopes":["targets:read"],"expires_in_days":0}"#.into()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert!(body.contains("INVALID_EXPIRY"), "{body}");
+
+    // Unbound (no org_slug, no expiry) → 201.
+    let (status, body) = send_as_browser(
+        &router,
+        "POST",
+        url,
+        Some(r#"{"name":"unbound","scopes":["channels:read"]}"#.into()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+}
+
+/// Account administration is browser-session only: a Bearer API token — even
+/// full-access — cannot mint tokens (escaping its scopes via an unrestricted
+/// sibling), delete the account, or manage orgs. These endpoints read the
+/// session cookie, never `AuthContext`, so a token has no session and 401s.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL — run via DATABASE_URL=... cargo test -- --ignored"]
+async fn api_token_cannot_reach_account_admin() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+
+    let user = make_user(&pool, "noesc").await;
+    sqlx::query("UPDATE users SET email_verified_at = now() WHERE id = $1")
+        .bind(user.0)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let slug = unique_slug("noesc");
+    let org = create_org_with_owner(&pool, user, &slug, "NoEsc", 3)
+        .await
+        .unwrap()
+        .expect("org")
+        .id;
+    let fa = api_tokens::create(
+        &pool,
+        user,
+        "fa",
+        &ScopeSet::full_access(),
+        None,
+        None,
+        PREFIX_LEN,
+        1000,
+    )
+    .await
+    .unwrap();
+    let router = build_saas_router_with_pg_targets(pool.clone()).await;
+
+    // Every browser-only mutation must 401 for a Bearer token, whatever its
+    // scopes — (method, path, body) per endpoint class.
+    let cases: [(&str, String, Option<String>); 4] = [
+        (
+            "POST",
+            "/api/v1/me/api-tokens".into(),
+            Some(r#"{"name":"sibling","scopes":["full_access"]}"#.into()),
+        ),
+        ("DELETE", "/api/v1/me".into(), None),
+        (
+            "POST",
+            "/api/v1/orgs".into(),
+            Some(r#"{"slug":"x","name":"X"}"#.into()),
+        ),
+        ("DELETE", format!("/api/v1/orgs/{org}"), None),
+    ];
+    for (method, path, body) in cases {
+        let (status, b) = send(&router, method, &path, &fa.token, &slug, body).await;
+        assert_eq!(
+            status,
+            StatusCode::UNAUTHORIZED,
+            "token must not reach {method} {path}: {b}"
+        );
+    }
+}
+
+/// `targets:delete` and `targets:execute` are independent of `targets:write`:
+/// a write-only token can neither delete nor run a check.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL — run via DATABASE_URL=... cargo test -- --ignored"]
+async fn targets_delete_and_execute_are_separate_from_write() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+
+    let user = make_user(&pool, "split").await;
+    let slug = unique_slug("split");
+    create_org_with_owner(&pool, user, &slug, "Split", 3)
+        .await
+        .unwrap()
+        .expect("org");
+    let fa = api_tokens::create(
+        &pool,
+        user,
+        "fa",
+        &ScopeSet::full_access(),
+        None,
+        None,
+        PREFIX_LEN,
+        1000,
+    )
+    .await
+    .unwrap();
+    let router = build_saas_router_with_pg_targets(pool.clone()).await;
+
+    let (st, b) = send(
+        &router,
+        "POST",
+        "/api/v1/targets",
+        &fa.token,
+        &slug,
+        Some(target_body()),
+    )
+    .await;
+    assert!(st.is_success(), "{b}");
+    let id1 = json_id(&b);
+    let (st, b) = send(
+        &router,
+        "POST",
+        "/api/v1/targets",
+        &fa.token,
+        &slug,
+        Some(target_body()),
+    )
+    .await;
+    assert!(st.is_success(), "{b}");
+    let id2 = json_id(&b);
+
+    let write = token_with_scopes(&pool, user, "w", r#"["targets:write"]"#).await;
+    let (st, b) = send(
+        &router,
+        "DELETE",
+        &format!("/api/v1/targets/{id1}"),
+        &write,
+        &slug,
+        None,
+    )
+    .await;
+    assert_eq!(st, StatusCode::FORBIDDEN, "write must not delete: {b}");
+    assert!(b.contains("INSUFFICIENT_SCOPE"), "{b}");
+    let (st, b) = send(
+        &router,
+        "POST",
+        &format!("/api/v1/targets/{id1}/check-now"),
+        &write,
+        &slug,
+        None,
+    )
+    .await;
+    assert_eq!(st, StatusCode::FORBIDDEN, "write must not run a check: {b}");
+    assert!(b.contains("INSUFFICIENT_SCOPE"), "{b}");
+
+    let del = token_with_scopes(&pool, user, "d", r#"["targets:delete"]"#).await;
+    let (st, b) = send(
+        &router,
+        "DELETE",
+        &format!("/api/v1/targets/{id1}"),
+        &del,
+        &slug,
+        None,
+    )
+    .await;
+    assert!(
+        st.is_success(),
+        "delete-scoped token must delete, got {st}: {b}"
+    );
+
+    let exec = token_with_scopes(&pool, user, "x", r#"["targets:execute"]"#).await;
+    let (st, b) = send(
+        &router,
+        "POST",
+        &format!("/api/v1/targets/{id2}/check-now"),
+        &exec,
+        &slug,
+        None,
+    )
+    .await;
+    assert_ne!(
+        st,
+        StatusCode::FORBIDDEN,
+        "execute token must pass the scope gate: {b}"
+    );
+    assert!(!b.contains("INSUFFICIENT_SCOPE"), "{b}");
+
+    // channels:write alone cannot send a test — channels:execute is required.
+    let chan = json!({
+        "name": "ops",
+        "config": { "type": "slack", "webhook_url": "https://hooks.slack.com/services/T/B/X" },
+        "enabled": true
+    })
+    .to_string();
+    let (st, b) = send(
+        &router,
+        "POST",
+        "/api/v1/notification-channels",
+        &fa.token,
+        &slug,
+        Some(chan),
+    )
+    .await;
+    assert!(st.is_success(), "{b}");
+    let cid = json_id(&b);
+    let cwrite = token_with_scopes(&pool, user, "cw", r#"["channels:write"]"#).await;
+    let (st, b) = send(
+        &router,
+        "POST",
+        &format!("/api/v1/notification-channels/{cid}/test"),
+        &cwrite,
+        &slug,
+        None,
+    )
+    .await;
+    assert_eq!(
+        st,
+        StatusCode::FORBIDDEN,
+        "channels:write must not send a test: {b}"
+    );
+    assert!(b.contains("INSUFFICIENT_SCOPE"), "{b}");
+
+    // channels:write cannot delete a channel; channels:delete can.
+    let path = format!("/api/v1/notification-channels/{cid}");
+    let (st, b) = send(&router, "DELETE", &path, &cwrite, &slug, None).await;
+    assert_eq!(
+        st,
+        StatusCode::FORBIDDEN,
+        "channels:write must not delete: {b}"
+    );
+    assert!(b.contains("INSUFFICIENT_SCOPE"), "{b}");
+    let cdel = token_with_scopes(&pool, user, "cd", r#"["channels:delete"]"#).await;
+    let (st, b) = send(&router, "DELETE", &path, &cdel, &slug, None).await;
+    assert!(
+        st.is_success(),
+        "channels:delete must delete, got {st}: {b}"
     );
 }

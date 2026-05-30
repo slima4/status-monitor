@@ -74,6 +74,10 @@ pub struct ApiTokenListing {
     pub created_at: DateTime<Utc>,
     pub last_used_at: Option<DateTime<Utc>>,
     pub expires_at: Option<DateTime<Utc>>,
+    /// Stored scope strings (canonical `resource:action` forms).
+    pub scopes: sqlx::types::Json<Vec<String>>,
+    /// Slug of the bound org, or `None` for an unbound (any-member-org) token.
+    pub org_slug: Option<String>,
 }
 
 /// Output of [`create`]. `token` is the only place the caller can see the raw
@@ -148,10 +152,14 @@ pub async fn count_for_user(pool: &PgPool, user: UserId) -> Result<u32> {
 /// count + INSERT cannot race (the same standard as the owner-org and
 /// invitation caps — not check-then-act). Argon2 runs only *after* the
 /// cheap cap reject so a blocked abuse path doesn't pay ~150 ms of CPU.
+#[allow(clippy::too_many_arguments)]
 pub async fn create(
     pool: &PgPool,
     user: UserId,
     name: &str,
+    scopes: &ScopeSet,
+    org: Option<OrgId>,
+    expires_at: Option<DateTime<Utc>>,
     prefix_visible_chars: usize,
     max_tokens: i64,
 ) -> Result<CreatedToken> {
@@ -183,14 +191,18 @@ pub async fn create(
 
     let hash = token_hash::hash(&raw)?;
     let (id, created_at): (Uuid, DateTime<Utc>) = sqlx::query_as(
-        "INSERT INTO api_tokens (user_id, name, token_hash, token_prefix) \
-         VALUES ($1, $2, $3, $4) \
+        "INSERT INTO api_tokens \
+           (user_id, name, token_hash, token_prefix, scopes, org_id, expires_at) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7) \
          RETURNING id, created_at",
     )
     .bind(user.0)
     .bind(name)
     .bind(&hash)
     .bind(&prefix)
+    .bind(sqlx::types::Json(scopes.to_strings()))
+    .bind(org.map(|o| o.0))
+    .bind(expires_at)
     .fetch_one(&mut *tx)
     .await
     .context("api_tokens::create")?;
@@ -208,9 +220,12 @@ pub async fn create(
 /// reconstructed from this output.
 pub async fn list_for_user(pool: &PgPool, user: UserId) -> Result<Vec<ApiTokenListing>> {
     let rows: Vec<ApiTokenListing> = sqlx::query_as(
-        "SELECT id, name, token_prefix, created_at, last_used_at, expires_at \
-         FROM api_tokens WHERE user_id = $1 \
-         ORDER BY created_at DESC",
+        "SELECT t.id, t.name, t.token_prefix, t.created_at, t.last_used_at, \
+                t.expires_at, t.scopes, o.slug::text AS org_slug \
+         FROM api_tokens t \
+         LEFT JOIN organizations o ON o.id = t.org_id \
+         WHERE t.user_id = $1 \
+         ORDER BY t.created_at DESC",
     )
     .bind(user.0)
     .fetch_all(pool)

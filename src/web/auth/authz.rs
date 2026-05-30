@@ -17,7 +17,7 @@ use uuid::Uuid;
 
 use crate::api::error::codes;
 use crate::app::AppState;
-use crate::auth::scope::Scope;
+use crate::auth::scope::{Scope, ScopeSet};
 use crate::domain::OrgId;
 use crate::error::{AppError, Result};
 
@@ -40,27 +40,37 @@ macro_rules! scope_marker {
 
 scope_marker!(TargetsRead => Scope::TargetsRead);
 scope_marker!(TargetsWrite => Scope::TargetsWrite);
+scope_marker!(TargetsDelete => Scope::TargetsDelete);
+scope_marker!(TargetsExecute => Scope::TargetsExecute);
 scope_marker!(ChannelsRead => Scope::ChannelsRead);
 scope_marker!(ChannelsWrite => Scope::ChannelsWrite);
+scope_marker!(ChannelsDelete => Scope::ChannelsDelete);
+scope_marker!(ChannelsExecute => Scope::ChannelsExecute);
 scope_marker!(IncidentsWrite => Scope::IncidentsWrite);
 scope_marker!(MaintenanceRead => Scope::MaintenanceRead);
 scope_marker!(MaintenanceWrite => Scope::MaintenanceWrite);
+scope_marker!(MaintenanceDelete => Scope::MaintenanceDelete);
 scope_marker!(StatusPageRead => Scope::StatusPageRead);
 scope_marker!(StatusPageWrite => Scope::StatusPageWrite);
+scope_marker!(StatusPageDelete => Scope::StatusPageDelete);
+
+/// The single place the `INSUFFICIENT_SCOPE` 403 is minted.
+fn insufficient_scope(required: Scope) -> AppError {
+    AppError::forbidden_code(
+        codes::INSUFFICIENT_SCOPE,
+        format!(
+            "API token is missing the required scope `{}`",
+            required.as_str()
+        ),
+    )
+}
 
 /// Asserts that an API token in the request carries `required` (sessions pass).
-/// The single place the `INSUFFICIENT_SCOPE` 403 is minted.
 fn assert_scope(parts: &Parts, required: Scope) -> Result<()> {
     if let Some(AuthContext::ApiToken { scopes, .. }) = parts.extensions.get::<AuthContext>()
         && !scopes.allows(required)
     {
-        return Err(AppError::forbidden_code(
-            codes::INSUFFICIENT_SCOPE,
-            format!(
-                "API token is missing the required scope `{}`",
-                required.as_str()
-            ),
-        ));
+        return Err(insufficient_scope(required));
     }
     Ok(())
 }
@@ -123,5 +133,33 @@ where
             }
         }
         Ok(ScopedOrgPath(PhantomData))
+    }
+}
+
+/// The request's API-token scopes, or `None` for a session. For handlers whose
+/// required scope depends on the request body (e.g. bulk delete vs bulk edit);
+/// pair with [`CurrentOrg`] for the org gate.
+pub struct TokenScopes(pub Option<ScopeSet>);
+
+impl TokenScopes {
+    pub fn require(&self, scope: Scope) -> Result<()> {
+        match &self.0 {
+            Some(scopes) if !scopes.allows(scope) => Err(insufficient_scope(scope)),
+            _ => Ok(()),
+        }
+    }
+}
+
+impl<S> FromRequestParts<S> for TokenScopes
+where
+    S: Send + Sync,
+{
+    type Rejection = AppError;
+
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self> {
+        Ok(TokenScopes(match parts.extensions.get::<AuthContext>() {
+            Some(AuthContext::ApiToken { scopes, .. }) => Some(scopes.clone()),
+            _ => None,
+        }))
     }
 }

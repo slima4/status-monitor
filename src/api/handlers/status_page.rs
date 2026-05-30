@@ -24,7 +24,7 @@ use crate::error::{AppError, Result};
 use crate::public_status::{LocalDiskLogoStorage, LogoMime, LogoStorage};
 use crate::storage::{OrgBranding, orgs as orgs_store};
 use crate::web::views::public_status::LOGO_ROUTE;
-use crate::web::{CurrentUser, ScopedOrgPath, StatusPageRead, StatusPageWrite};
+use crate::web::{CurrentUser, ScopedOrgPath, StatusPageDelete, StatusPageRead, StatusPageWrite};
 
 use super::orgs::require_owner;
 
@@ -300,7 +300,7 @@ pub async fn upload_logo(
 pub async fn delete_logo(
     State(state): State<AppState>,
     CurrentUser(user): CurrentUser,
-    _: ScopedOrgPath<StatusPageWrite>,
+    _: ScopedOrgPath<StatusPageDelete>,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode> {
     let pool = state.require_db()?;
