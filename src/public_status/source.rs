@@ -430,7 +430,7 @@ impl NoopPublicSource {
 
 impl Default for NoopPublicSource {
     fn default() -> Self {
-        Self::new("status-monitor")
+        Self::new("uptimepage")
     }
 }
 

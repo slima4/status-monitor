@@ -42,7 +42,7 @@ pub struct AggregatorConfig {
 impl Default for AggregatorConfig {
     fn default() -> Self {
         Self {
-            site_name: "status-monitor".into(),
+            site_name: "uptimepage".into(),
             history_days: 90,
             recent_incidents_days: 30,
             max_recent_incidents: 50,

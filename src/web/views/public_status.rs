@@ -1465,7 +1465,7 @@ mod tests {
         assert!(html.contains("--brand-color: #ff0000;"));
         assert!(html.contains(r#"src="/status/branding/logo?v=acme-deadbeef.png""#));
         assert!(html.contains("<strong>hi</strong> there"));
-        assert!(!html.contains("Powered by status-monitor"));
+        assert!(!html.contains("Powered by uptimepage"));
     }
 
     #[test]
@@ -1531,7 +1531,7 @@ mod tests {
         }
         .render()
         .unwrap();
-        assert!(html.contains("Powered by status-monitor"));
+        assert!(html.contains("Powered by uptimepage"));
     }
 
     // PRE-MORTEM PM #6: a relaxed DB/app validator must not let a crafted

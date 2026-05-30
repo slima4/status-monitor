@@ -30,7 +30,7 @@ use crate::storage::UptimeStats;
 #[derive(OpenApi)]
 #[openapi(
     info(
-        title = "status-monitor",
+        title = "uptimepage",
         description = "HTTP / TCP / TLS-cert / domain-expiry / DNS health-check service. \
                        Schedules checks against configured targets, stores results, \
                        exposes a REST API.",
