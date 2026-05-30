@@ -91,6 +91,8 @@ pub mod codes {
     pub const INTERNAL: &str = "INTERNAL";
     pub const UNAUTHORIZED: &str = "UNAUTHORIZED";
     pub const FORBIDDEN: &str = "FORBIDDEN";
+    /// API token lacks the scope its target endpoint requires (403).
+    pub const INSUFFICIENT_SCOPE: &str = "INSUFFICIENT_SCOPE";
     // Maintenance + incident narration (operator surface).
     pub const INVALID_TIME_RANGE: &str = "INVALID_TIME_RANGE";
     pub const INVALID_COMPONENT_ID: &str = "INVALID_COMPONENT_ID";

@@ -16,6 +16,7 @@ pub mod theme;
 pub mod time_format;
 pub mod views;
 
+pub use auth::authz::{Authorized, TargetsRead, TargetsWrite};
 pub use auth::{AuthedBrowser, CurrentOrg, CurrentUser, Session, User};
 pub use host::{StatusPageHost, StatusPageOrg, extract_status_slug};
 pub use routes::routes;

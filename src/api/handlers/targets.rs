@@ -21,7 +21,7 @@ use crate::domain::{CheckResult, NewTarget, OrgId, Target, TargetAlerts, TargetU
 use crate::error::{AppError, Result};
 use crate::security::SsrfGuard;
 use crate::storage::TargetFilter;
-use crate::web::CurrentOrg;
+use crate::web::{Authorized, TargetsRead, TargetsWrite};
 use crate::worker::{CheckTask, host_for_spec};
 
 const BULK_MAX: usize = 10_000;
@@ -84,7 +84,7 @@ impl ListQuery {
 )]
 pub async fn list(
     State(state): State<AppState>,
-    CurrentOrg(org): CurrentOrg,
+    Authorized(org, _): Authorized<TargetsRead>,
     Query(query): Query<ListQuery>,
 ) -> Result<Redacted<PageOfTarget>> {
     let limit = query.effective_limit();
@@ -126,7 +126,7 @@ pub async fn list(
 )]
 pub async fn get(
     State(state): State<AppState>,
-    CurrentOrg(org): CurrentOrg,
+    Authorized(org, _): Authorized<TargetsRead>,
     Path(id): Path<Uuid>,
 ) -> Result<Redacted<Target>> {
     match state.target_store.get(org, id).await? {
@@ -170,7 +170,7 @@ pub async fn get(
 )]
 pub async fn create(
     State(state): State<AppState>,
-    CurrentOrg(org): CurrentOrg,
+    Authorized(org, _): Authorized<TargetsWrite>,
     Json(mut new): Json<NewTarget>,
 ) -> Result<(
     StatusCode,
@@ -228,7 +228,7 @@ pub async fn create(
 )]
 pub async fn update(
     State(state): State<AppState>,
-    CurrentOrg(org): CurrentOrg,
+    Authorized(org, _): Authorized<TargetsWrite>,
     Path(id): Path<Uuid>,
     Json(mut update): Json<TargetUpdate>,
 ) -> Result<Redacted<Target>> {
@@ -334,7 +334,7 @@ fn touches_public_view(u: &TargetUpdate) -> bool {
 )]
 pub async fn delete(
     State(state): State<AppState>,
-    CurrentOrg(org): CurrentOrg,
+    Authorized(org, _): Authorized<TargetsWrite>,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode> {
     if state.target_store.delete(org, id).await? {
@@ -369,7 +369,7 @@ pub async fn delete(
 )]
 pub async fn bulk_create(
     State(state): State<AppState>,
-    CurrentOrg(org): CurrentOrg,
+    Authorized(org, _): Authorized<TargetsWrite>,
     Json(mut items): Json<Vec<NewTarget>>,
 ) -> Result<(StatusCode, Redacted<Vec<Target>>)> {
     if items.is_empty() {
@@ -451,7 +451,7 @@ pub async fn bulk_create(
 )]
 pub async fn bulk_action(
     State(state): State<AppState>,
-    CurrentOrg(org): CurrentOrg,
+    Authorized(org, _): Authorized<TargetsWrite>,
     Json(req): Json<BulkActionRequest>,
 ) -> Result<Json<BulkActionResponse>> {
     if req.ids.is_empty() {
@@ -554,7 +554,7 @@ pub async fn bulk_action(
 )]
 pub async fn test_check(
     State(state): State<AppState>,
-    CurrentOrg(org): CurrentOrg,
+    Authorized(org, _): Authorized<TargetsWrite>,
     Json(mut req): Json<TestRequest>,
 ) -> Result<Json<TestResponse>> {
     let guard = ssrf_guard(&state);
@@ -616,7 +616,7 @@ pub struct CheckNowQuery {
 )]
 pub async fn check_now(
     State(state): State<AppState>,
-    CurrentOrg(org): CurrentOrg,
+    Authorized(org, _): Authorized<TargetsWrite>,
     Path(id): Path<Uuid>,
     Query(q): Query<CheckNowQuery>,
 ) -> Result<Json<CheckResult>> {

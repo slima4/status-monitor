@@ -51,6 +51,7 @@ pub async fn middleware(State(state): State<AppState>, mut req: Request, next: N
             req.extensions_mut().insert(AuthContext::ApiToken {
                 user_id: row.user_id,
                 token_id,
+                scopes: row.scopes,
             });
             // last_used_at debounce: most requests hit the cache and skip
             // the UPDATE entirely. Only spawn when the cache says a write is

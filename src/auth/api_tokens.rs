@@ -24,6 +24,7 @@ use rand::rngs::SysRng;
 use sqlx::PgPool;
 use uuid::Uuid;
 
+use crate::auth::scope::ScopeSet;
 use crate::auth::session::LAST_USED_DEBOUNCE_SECS;
 use crate::auth::token_hash;
 use crate::domain::UserId;
@@ -58,6 +59,7 @@ pub struct ApiTokenRow {
     pub user_id: UserId,
     pub name: String,
     pub expires_at: Option<DateTime<Utc>>,
+    pub scopes: ScopeSet,
 }
 
 /// One row returned by [`list_for_user`]. `token_prefix` is the only piece of
@@ -229,9 +231,16 @@ pub async fn lookup_by_raw(
     }
     let prefix = slice_prefix(raw, prefix_visible_chars);
 
-    type CandidateRow = (Uuid, Uuid, String, String, Option<DateTime<Utc>>);
+    type CandidateRow = (
+        Uuid,
+        Uuid,
+        String,
+        String,
+        Option<DateTime<Utc>>,
+        sqlx::types::Json<Vec<String>>,
+    );
     let rows: Vec<CandidateRow> = sqlx::query_as(
-        "SELECT id, user_id, name, token_hash, expires_at \
+        "SELECT id, user_id, name, token_hash, expires_at, scopes \
          FROM api_tokens WHERE token_prefix = $1",
     )
     .bind(prefix)
@@ -240,7 +249,7 @@ pub async fn lookup_by_raw(
     .context("api_tokens::lookup_by_raw")?;
 
     let now = Utc::now();
-    for (id, user_id, name, hash, expires_at) in rows {
+    for (id, user_id, name, hash, expires_at, scopes) in rows {
         if expires_at.is_some_and(|e| e <= now) {
             continue;
         }
@@ -250,6 +259,7 @@ pub async fn lookup_by_raw(
                 user_id: UserId(user_id),
                 name,
                 expires_at,
+                scopes: ScopeSet::from_strs(scopes.0.iter().map(String::as_str)),
             }));
         }
     }

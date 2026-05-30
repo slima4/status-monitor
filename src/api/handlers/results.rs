@@ -12,7 +12,7 @@ use crate::api::types::LatencySeries;
 use crate::app::AppState;
 use crate::error::{AppError, Result};
 use crate::storage::{IncidentListQuery, TimeRange, UptimeStats};
-use crate::web::CurrentOrg;
+use crate::web::{Authorized, TargetsRead};
 
 /// 404 used when a target id is absent from the caller's org. Returned only
 /// after the org-scoped `get` resolves to `None`, so a foreign tenant's UUID
@@ -112,7 +112,7 @@ impl RangeQuery {
 )]
 pub async fn list_results(
     State(state): State<AppState>,
-    CurrentOrg(org): CurrentOrg,
+    Authorized(org, _): Authorized<TargetsRead>,
     Path(id): Path<Uuid>,
     Query(q): Query<RangeQuery>,
 ) -> Result<Json<PageOfCheckResult>> {
@@ -183,7 +183,7 @@ fn latency_bucket_seconds(range: TimeRange) -> u32 {
 )]
 pub async fn latency(
     State(state): State<AppState>,
-    CurrentOrg(org): CurrentOrg,
+    Authorized(org, _): Authorized<TargetsRead>,
     Path(id): Path<Uuid>,
     Query(q): Query<RangeQuery>,
 ) -> Result<Json<LatencySeries>> {
@@ -227,7 +227,7 @@ pub async fn latency(
 )]
 pub async fn uptime(
     State(state): State<AppState>,
-    CurrentOrg(org): CurrentOrg,
+    Authorized(org, _): Authorized<TargetsRead>,
     Path(id): Path<Uuid>,
     Query(q): Query<RangeQuery>,
 ) -> Result<Json<UptimeStats>> {
@@ -285,7 +285,7 @@ pub struct IncidentsQuery {
 )]
 pub async fn list_incidents(
     State(state): State<AppState>,
-    CurrentOrg(org): CurrentOrg,
+    Authorized(org, _): Authorized<TargetsRead>,
     Path(id): Path<Uuid>,
     Query(q): Query<IncidentsQuery>,
 ) -> Result<Json<PageOfIncident>> {

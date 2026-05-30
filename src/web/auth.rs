@@ -17,6 +17,7 @@
 //! inside a request is this extractor.
 
 pub mod api_token;
+pub mod authz;
 pub mod csrf;
 
 /// `Authorization: Bearer <raw>` → trimmed `<raw>`, or `None` for anything
@@ -43,6 +44,7 @@ use crate::auth::url::url_encode;
 
 use crate::api::error::codes;
 use crate::app::AppState;
+use crate::auth::scope::ScopeSet;
 use crate::auth::session as session_store;
 use crate::domain::{OrgId, UserId};
 use crate::error::{AppError, Result};
@@ -96,7 +98,11 @@ pub enum AuthContext {
     },
     /// `Authorization: Bearer sm_live_…`. No active org — handlers reach for
     /// `X-Uptimepage-Org` (or a slug path param in future routes).
-    ApiToken { user_id: UserId, token_id: Uuid },
+    ApiToken {
+        user_id: UserId,
+        token_id: Uuid,
+        scopes: ScopeSet,
+    },
 }
 
 impl AuthContext {
