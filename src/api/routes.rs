@@ -174,6 +174,10 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
             get(handlers::me::get_theme).patch(handlers::me::update_theme),
         )
         .route(
+            "/me/time-format",
+            get(handlers::me::get_time_format).patch(handlers::me::update_time_format),
+        )
+        .route(
             "/me/onboarding/complete",
             post(handlers::me::complete_onboarding),
         )

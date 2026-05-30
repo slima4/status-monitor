@@ -3,6 +3,56 @@
 
 use std::str::FromStr;
 
+use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
+
+use crate::domain::AppTheme;
+
+/// The per-user display preferences read together on every login and on the
+/// account page — grouped so they ride one query and one cookie-issue pass
+/// instead of a getter (and a forgotten cookie) per preference.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DisplayPrefs {
+    pub theme: AppTheme,
+    pub time_format: TimeFormat,
+}
+
+/// Per-user 12h/24h preference for client-side timestamp rendering. `Auto`
+/// keeps the browser-locale default; the other two force the hour cycle. The
+/// string forms are the persisted (`users.time_format`) and JSON wire values.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub enum TimeFormat {
+    #[default]
+    #[serde(rename = "auto")]
+    Auto,
+    #[serde(rename = "12h")]
+    TwelveHour,
+    #[serde(rename = "24h")]
+    TwentyFourHour,
+}
+
+impl TimeFormat {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::TwelveHour => "12h",
+            Self::TwentyFourHour => "24h",
+        }
+    }
+
+    pub fn from_db(s: &str) -> Self {
+        match s {
+            "12h" => Self::TwelveHour,
+            "24h" => Self::TwentyFourHour,
+            "auto" => Self::Auto,
+            other => {
+                tracing::warn!(value = other, "unknown user.time_format in DB, using auto");
+                Self::Auto
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PrefError {
     LocaleFormat,
@@ -59,6 +109,24 @@ pub fn validate_timezone(s: &str) -> Result<(), PrefError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn time_format_round_trips_through_db_and_json() {
+        for f in [
+            TimeFormat::Auto,
+            TimeFormat::TwelveHour,
+            TimeFormat::TwentyFourHour,
+        ] {
+            assert_eq!(TimeFormat::from_db(f.as_str()), f);
+            let json = serde_json::to_string(&f).unwrap();
+            assert_eq!(json, format!("\"{}\"", f.as_str()));
+            assert_eq!(serde_json::from_str::<TimeFormat>(&json).unwrap(), f);
+        }
+        // Unknown stored value degrades to the safe default.
+        assert_eq!(TimeFormat::from_db("garbage"), TimeFormat::Auto);
+        // Unknown JSON value is rejected, not silently defaulted.
+        assert!(serde_json::from_str::<TimeFormat>("\"36h\"").is_err());
+    }
 
     #[test]
     fn locale_accepts_basic_shapes() {

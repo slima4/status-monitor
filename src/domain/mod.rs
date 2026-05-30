@@ -34,6 +34,7 @@ pub use notification_channel::{
 pub use org::{
     BrandingError, OrgId, Organization, PublicOrgBranding, PublicStyle, SlugError, validate_slug,
 };
+pub use preferences::{DisplayPrefs, TimeFormat};
 pub use public::{
     ComponentHistoryResponse, DayState, IncidentSeverity, IncidentStatusPhase, OverallState,
     OverallStatus, PublicComponent, PublicComponentGroup, PublicComponentStatus, PublicIncident,

@@ -313,6 +313,7 @@ pub mod settings {
         pub joined: Option<chrono::DateTime<chrono::Utc>>,
         pub last_seen: Option<chrono::DateTime<chrono::Utc>>,
         pub theme: String,
+        pub time_format: String,
     }
 
     /// `GET /settings/account`. An unauthenticated hit redirects to login
@@ -335,17 +336,15 @@ pub mod settings {
             ),
             None => (None, "—".to_string(), None),
         };
-        let theme = crate::storage::users::get_theme(pool, user.id)
-            .await?
-            .as_str()
-            .to_string();
+        let prefs = crate::storage::users::get_display_prefs(pool, user.id).await?;
         Ok(AccountPage {
             active_tab: TAB_ACCOUNT,
             email: user.email,
             provider,
             joined,
             last_seen,
-            theme,
+            theme: prefs.theme.as_str().to_string(),
+            time_format: prefs.time_format.as_str().to_string(),
         }
         .into_response())
     }
@@ -723,6 +722,7 @@ pub mod settings {
                 joined: Some("2026-02-14T09:00:00Z".parse().unwrap()),
                 last_seen: Some("2026-05-16T12:00:00Z".parse().unwrap()),
                 theme: "default".into(),
+                time_format: "auto".into(),
             }
             .render()
             .unwrap();

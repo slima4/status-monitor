@@ -13,11 +13,12 @@ use utoipa::ToSchema;
 
 use crate::app::AppState;
 use crate::auth::session as session_store;
-use crate::domain::{AppTheme, UserId};
+use crate::domain::{AppTheme, TimeFormat, UserId};
 use crate::error::{AppError, Result};
 use crate::storage::users as users_store;
 use crate::web::auth::Session;
 use crate::web::theme as theme_cookie;
+use crate::web::time_format as time_format_cookie;
 
 #[derive(Debug, Serialize, ToSchema)]
 pub struct MeView {
@@ -136,6 +137,47 @@ pub async fn update_theme(
         state.cfg.auth.session.cookie_secure,
     ));
     Ok(Json(ThemeView { theme: req.theme }))
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct TimeFormatView {
+    pub time_format: TimeFormat,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct UpdateTimeFormatRequest {
+    pub time_format: TimeFormat,
+}
+
+pub async fn get_time_format(
+    State(state): State<AppState>,
+    session: Session,
+) -> Result<Json<TimeFormatView>> {
+    let user = session.user.as_ref().ok_or(AppError::Unauthorized)?;
+    let pool = state.db.as_ref().ok_or(AppError::Unauthorized)?;
+    let time_format = users_store::get_time_format(pool, user.id).await?;
+    Ok(Json(TimeFormatView { time_format }))
+}
+
+pub async fn update_time_format(
+    State(state): State<AppState>,
+    session: Session,
+    cookies: Cookies,
+    Json(req): Json<UpdateTimeFormatRequest>,
+) -> Result<Json<TimeFormatView>> {
+    let user = session.user.as_ref().ok_or(AppError::Unauthorized)?;
+    let pool = state.db.as_ref().ok_or(AppError::Unauthorized)?;
+    let ok = users_store::set_time_format(pool, user.id, req.time_format).await?;
+    if !ok {
+        return Err(AppError::not_found("USER_NOT_FOUND", "user not found"));
+    }
+    cookies.add(time_format_cookie::build_cookie(
+        req.time_format,
+        state.cfg.auth.session.cookie_secure,
+    ));
+    Ok(Json(TimeFormatView {
+        time_format: req.time_format,
+    }))
 }
 
 pub async fn complete_onboarding(

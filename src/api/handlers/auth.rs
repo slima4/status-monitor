@@ -190,8 +190,10 @@ pub async fn github_callback(
         &state.cfg.auth.session,
         created.cookie_token,
     ));
-    if let Err(err) = crate::web::theme::issue_for(&state, &cookies, resolved.user_id).await {
-        tracing::warn!(error = %err, "theme cookie issue failed (non-fatal)");
+    if let Err(err) =
+        crate::web::display_prefs::issue_cookies(&state, &cookies, resolved.user_id).await
+    {
+        tracing::warn!(error = %err, "display-preference cookie issue failed (non-fatal)");
     }
 
     let redirect = if resolved.is_new_user {

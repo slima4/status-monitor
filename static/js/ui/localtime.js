@@ -15,13 +15,28 @@
 (function () {
     "use strict";
 
+    // Per-user 12h/24h preference, mirrored from users.time_format into the
+    // sm_time_format cookie. "auto" (or absent) keeps the browser-locale
+    // default; otherwise pin the hour cycle, since Intl follows the language
+    // tag (en-US → 12h) and can't read the OS 24-hour setting.
+    function hourCyclePref() {
+        var m = document.cookie.match(/(?:^|;\s*)sm_time_format=([^;]+)/);
+        var v = m && decodeURIComponent(m[1]);
+        if (v === "12h") return "h12";
+        if (v === "24h") return "h23";
+        return undefined;
+    }
+
     var timeFmt, dateFmt, dateYearFmt, exactFmt, fullFmt;
     try {
-        timeFmt = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
+        // hourCycle is one of the few component options allowed alongside
+        // timeStyle; undefined leaves the locale default untouched.
+        var hc = hourCyclePref();
+        timeFmt = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit", hourCycle: hc });
         dateFmt = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" });
         dateYearFmt = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" });
-        exactFmt = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "medium" });
-        fullFmt = new Intl.DateTimeFormat(undefined, { dateStyle: "full", timeStyle: "long" });
+        exactFmt = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "medium", hourCycle: hc });
+        fullFmt = new Intl.DateTimeFormat(undefined, { dateStyle: "full", timeStyle: "long", hourCycle: hc });
     } catch (_) { /* Intl unavailable: leave server text untouched */ }
 
     function sameDay(a, b) {

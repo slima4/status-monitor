@@ -7,11 +7,13 @@
 pub mod assets;
 pub mod auth;
 pub mod client_ip;
+pub mod display_prefs;
 pub mod error;
 pub mod filters;
 pub mod host;
 pub mod routes;
 pub mod theme;
+pub mod time_format;
 pub mod views;
 
 pub use auth::{AuthedBrowser, CurrentOrg, CurrentUser, Session, User};

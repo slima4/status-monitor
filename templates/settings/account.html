@@ -40,34 +40,70 @@
         Applies to the org app on every device you sign in to.
       </p>
     </div>
+
+    <div class="sticker-card space-y-2 p-5">
+      <div class="field-outline">
+        <span class="field-outline__label">Time format</span>
+        <select id="time-format" data-sm-combobox aria-label="Time format" class="w-full field">
+          <option value="auto"{% if time_format == "auto" %} selected{% endif %}>Auto — follow your browser</option>
+          <option value="12h"{% if time_format == "12h" %} selected{% endif %}>12-hour — 1:38 PM</option>
+          <option value="24h"{% if time_format == "24h" %} selected{% endif %}>24-hour — 13:38</option>
+        </select>
+      </div>
+      <p id="time-format-result" class="text-xs text-muted" aria-live="polite">
+        Controls how timestamps render. Auto uses your browser's locale, which
+        may not match your system's 24-hour setting.
+      </p>
+    </div>
   </section>
 
   <script>
     (function () {
-      const sel = document.getElementById("app-theme");
-      const out = document.getElementById("theme-result");
-      const HEADERS = {
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-        "X-Requested-With": "status-monitor",
-      };
-      sel.addEventListener("change", async function () {
-        const v = sel.value;
+      // Shared PATCH for the appearance selects; throws on a non-2xx so each
+      // handler's catch can surface the failure in its own result line.
+      async function savePref(url, body) {
+        const r = await fetch(url, {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "X-Requested-With": "status-monitor",
+          },
+          body: JSON.stringify(body),
+        });
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        return r;
+      }
+
+      const themeSel = document.getElementById("app-theme");
+      const themeOut = document.getElementById("theme-result");
+      themeSel.addEventListener("change", async function () {
+        const v = themeSel.value;
         try {
-          const r = await fetch("/api/v1/me/theme", {
-            method: "PATCH",
-            headers: HEADERS,
-            body: JSON.stringify({ theme: v }),
-          });
-          if (!r.ok) throw new Error("HTTP " + r.status);
+          await savePref("/api/v1/me/theme", { theme: v });
+          // Theme is a pure CSS-class swap — apply live, no reload.
           const html = document.documentElement;
           Array.from(html.classList)
             .filter(function (c) { return c.indexOf("theme-") === 0; })
             .forEach(function (c) { html.classList.remove(c); });
           if (v !== "default") html.classList.add("theme-" + v);
-          out.textContent = "Saved.";
+          themeOut.textContent = "Saved.";
         } catch (err) {
-          out.textContent = "Could not save theme: " + err.message;
+          themeOut.textContent = "Could not save theme: " + err.message;
+        }
+      });
+
+      const tfSel = document.getElementById("time-format");
+      const tfOut = document.getElementById("time-format-result");
+      tfSel.addEventListener("change", async function () {
+        try {
+          await savePref("/api/v1/me/time-format", { time_format: tfSel.value });
+          // The handler set the sm_time_format cookie; reload so every <time>
+          // element re-renders with the chosen hour cycle.
+          tfOut.textContent = "Saved — reloading…";
+          window.location.reload();
+        } catch (err) {
+          tfOut.textContent = "Could not save time format: " + err.message;
         }
       });
     })();

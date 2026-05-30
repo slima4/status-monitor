@@ -6,8 +6,49 @@ use anyhow::Context;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::domain::{AppTheme, OrgId, UserId};
+use crate::domain::{AppTheme, DisplayPrefs, OrgId, TimeFormat, UserId};
 use crate::error::Result;
+
+/// Both display preferences in one row read — used by the login cookie-issue
+/// pass and the account page. The per-preference setters below stay separate;
+/// each PATCH endpoint only writes its own column.
+pub async fn get_display_prefs(pool: &PgPool, user: UserId) -> Result<DisplayPrefs> {
+    let row: Option<(String, String)> =
+        sqlx::query_as("SELECT theme, time_format FROM users WHERE id = $1 AND deleted_at IS NULL")
+            .bind(user.0)
+            .fetch_optional(pool)
+            .await
+            .context("get_display_prefs")?;
+    Ok(match row {
+        Some((theme, time_format)) => DisplayPrefs {
+            theme: AppTheme::from_db(&theme),
+            time_format: TimeFormat::from_db(&time_format),
+        },
+        None => DisplayPrefs::default(),
+    })
+}
+
+pub async fn get_time_format(pool: &PgPool, user: UserId) -> Result<TimeFormat> {
+    let row: Option<(String,)> =
+        sqlx::query_as("SELECT time_format FROM users WHERE id = $1 AND deleted_at IS NULL")
+            .bind(user.0)
+            .fetch_optional(pool)
+            .await
+            .context("get_time_format")?;
+    Ok(row.map(|(s,)| TimeFormat::from_db(&s)).unwrap_or_default())
+}
+
+pub async fn set_time_format(pool: &PgPool, user: UserId, fmt: TimeFormat) -> Result<bool> {
+    let res = sqlx::query(
+        "UPDATE users SET time_format = $2, updated_at = now() WHERE id = $1 AND deleted_at IS NULL",
+    )
+    .bind(user.0)
+    .bind(fmt.as_str())
+    .execute(pool)
+    .await
+    .context("set_time_format")?;
+    Ok(res.rows_affected() == 1)
+}
 
 pub async fn get_theme(pool: &PgPool, user: UserId) -> Result<AppTheme> {
     let row: Option<(String,)> =

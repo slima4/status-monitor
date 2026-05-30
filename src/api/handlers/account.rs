@@ -556,8 +556,10 @@ pub async fn recover_account(
         &state.cfg.auth.session,
         created.cookie_token,
     ));
-    if let Err(err) = crate::web::theme::issue_for(&state, &cookies, outcome.user_id).await {
-        tracing::warn!(error = %err, "theme cookie issue failed (non-fatal)");
+    if let Err(err) =
+        crate::web::display_prefs::issue_cookies(&state, &cookies, outcome.user_id).await
+    {
+        tracing::warn!(error = %err, "display-preference cookie issue failed (non-fatal)");
     }
 
     Ok(Json(RecoveredAccount {
