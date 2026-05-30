@@ -5,15 +5,15 @@ State + secrets live in **HCP Terraform Cloud** — never in this repo.
 
 ## What this manages
 
-- `alerts.tf` — `status-monitor` folder; six alert rules in one
-  group: `StatusMonitorResultsLost`, `StatusMonitorPipelineStalled`,
-  `StatusMonitorNotificationDeliveryFailing` (critical),
-  `StatusMonitorCircuitBreakersOpen`, `StatusMonitorResultQueueBacklog`,
-  `StatusMonitorStorageWriteLatencyHigh` (warning); the default contact
+- `alerts.tf` — `uptimepage` folder; six alert rules in one
+  group: `UptimepageResultsLost`, `UptimepagePipelineStalled`,
+  `UptimepageNotificationDeliveryFailing` (critical),
+  `UptimepageCircuitBreakersOpen`, `UptimepageResultQueueBacklog`,
+  `UptimepageStorageWriteLatencyHigh` (warning); the default contact
   point; the root notification policy with severity routing (critical
   pages fast, warning batches slow).
 - `dashboard.tf` — the operator overview dashboard, from
-  `terraform/dashboards/status-monitor-overview.json`. The
+  `terraform/dashboards/uptimepage-overview.json`. The
   `${DS_PROMETHEUS}` template input is substituted with the real
   Prometheus datasource uid, and the export-only `__inputs`/`__requires`
   keys are stripped, before apply (the provider's POST path does no

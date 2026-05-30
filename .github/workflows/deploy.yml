@@ -548,7 +548,7 @@ jobs:
             -X POST "$ANNO_URL" \
             -H "Authorization: Bearer ${ANNO_TOKEN}" \
             -H 'Content-Type: application/json' \
-            --data "{\"time\":${ts},\"tags\":[\"deploy\",\"status-monitor\",\"prod\"],\"text\":\"deploy ${IMAGE_TAG}\"}" || true)
+            --data "{\"time\":${ts},\"tags\":[\"deploy\",\"uptimepage\",\"prod\"],\"text\":\"deploy ${IMAGE_TAG}\"}" || true)
           if [ -z "$code" ] || [ "$code" = 000 ]; then
             echo "::warning::grafana annotation: curl transport failure (deploy unaffected)"
             exit 0

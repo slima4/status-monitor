@@ -1,4 +1,4 @@
-# Status Monitor — Production Deployment
+# Uptimepage — Production Deployment
 
 This directory contains the production deployment for uptimepage:
 **Caddy reverse proxy** (TLS + basic auth) in front of the Rust service,
@@ -357,7 +357,7 @@ Grafana Cloud. It is **off by default** and only starts under the
    ```
 
 4. Verify within ~15 s (one scrape interval): in Grafana Cloud Explore,
-   `up{job="uptimepage"}` should be `1`, and the `status_monitor_*`
+   `up{job="uptimepage"}` should be `1`, and the `uptimepage_*`
    series should appear. For the full view, import the dashboard against
    the Grafana Cloud Prometheus datasource — import steps and the
    datasource binding are in `dashboards/grafana/README.md`.

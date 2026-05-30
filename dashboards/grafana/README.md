@@ -1,6 +1,6 @@
 # Grafana dashboards
 
-Dashboards for the `status_monitor_*` Prometheus series.
+Dashboards for the `uptimepage_*` Prometheus series.
 
 **Managed by Terraform** — `terraform/dashboard.tf` provisions the
 overview into Grafana Cloud as code (single source of truth; a UI edit
@@ -10,7 +10,7 @@ the Terraform module so HCP remote-exec can `file()` it.
 
 | File | Datasource | Scope |
 |---|---|---|
-| `terraform/dashboards/status-monitor-overview.json` | Prometheus | Operator metrics, single-instance. **No `org_id` label** — this is operator telemetry, not per-tenant uptime. |
+| `terraform/dashboards/uptimepage-overview.json` | Prometheus | Operator metrics, single-instance. **No `org_id` label** — this is operator telemetry, not per-tenant uptime. |
 
 ## Datasource contract
 
@@ -37,7 +37,7 @@ local/standalone Grafana that has no Terraform.
 ## Import — manual (UI)
 
 1. Grafana → Dashboards → New → Import.
-2. Upload `terraform/dashboards/status-monitor-overview.json` (or paste
+2. Upload `terraform/dashboards/uptimepage-overview.json` (or paste
    its contents).
 3. When prompted for `DS_PROMETHEUS`, pick the Prometheus datasource
    that scrapes `:9090/metrics`.
@@ -46,20 +46,20 @@ local/standalone Grafana that has no Terraform.
 
 Mount `terraform/dashboards/` into Grafana and point a dashboard
 provider at it.
-Add to Grafana's provisioning (`/etc/grafana/provisioning/dashboards/status-monitor.yaml`):
+Add to Grafana's provisioning (`/etc/grafana/provisioning/dashboards/uptimepage.yaml`):
 
 ```yaml
 apiVersion: 1
 providers:
-  - name: status-monitor
+  - name: uptimepage
     orgId: 1
-    folder: Status Monitor
+    folder: uptimepage
     type: file
     disableDeletion: false
     updateIntervalSeconds: 30
     allowUiUpdates: false
     options:
-      path: /var/lib/grafana/dashboards/status-monitor
+      path: /var/lib/grafana/dashboards/uptimepage
       foldersFromFilesStructure: false
 ```
 
@@ -78,7 +78,7 @@ committed to the repo.
 
 ## Updating the dashboards
 
-Edit `terraform/dashboards/status-monitor-overview.json`. Every PromQL
+Edit `terraform/dashboards/uptimepage-overview.json`. Every PromQL
 expression must reference a metric registered in
 `src/observability/metrics.rs` (`observability::metrics::names`) or
 sampled in `src/observability/sampler.rs`. After any edit run the gate

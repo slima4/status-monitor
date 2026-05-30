@@ -24,7 +24,7 @@
 # (dashboards/grafana/check-metric-names.sh) reads it from here too.
 locals {
   _dashboard_raw = jsondecode(replace(
-    file("${path.module}/dashboards/status-monitor-overview.json"),
+    file("${path.module}/dashboards/uptimepage-overview.json"),
     "$${DS_PROMETHEUS}",
     data.grafana_data_source.prometheus.uid
   ))

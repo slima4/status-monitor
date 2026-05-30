@@ -58,7 +58,7 @@ async fn middleware_pins_all_contracts() {
 
     let rendered = h.render();
     assert!(
-        rendered.contains("status_monitor_http_requests_total"),
+        rendered.contains("uptimepage_http_requests_total"),
         "counter series missing — middleware did not fire:\n{rendered}"
     );
     assert!(
@@ -129,7 +129,7 @@ async fn middleware_pins_all_contracts() {
     );
 
     let rendered = h.render();
-    let inflight = gauge_value(&rendered, "status_monitor_http_responses_inflight");
+    let inflight = gauge_value(&rendered, "uptimepage_http_responses_inflight");
     assert_eq!(
         inflight, 0.0,
         "inflight gauge leaked above baseline after sequential requests: {inflight}"

@@ -20,7 +20,7 @@ resource "grafana_folder" "obs" {
 # local.threshold_c); the rule fires when C is true. Datasource UID
 # resolved by name (portable).
 resource "grafana_rule_group" "pipeline" {
-  name             = "status-monitor-pipeline"
+  name             = "uptimepage-pipeline"
   folder_uid       = grafana_folder.obs.uid
   interval_seconds = 60
 
@@ -29,17 +29,17 @@ resource "grafana_rule_group" "pipeline" {
   # auth/availability). no_data = OK: absence of the metric means no
   # writes attempted, which PipelineStalled covers instead.
   rule {
-    name           = "StatusMonitorResultsLost"
+    name           = "UptimepageResultsLost"
     condition      = "C"
     for            = "5m"
     no_data_state  = "OK"
     exec_err_state = "Error"
     labels = {
       severity = "critical"
-      service  = "status-monitor"
+      service  = "uptimepage"
     }
     annotations = {
-      summary     = "status-monitor: check results being dropped"
+      summary     = "uptimepage: check results being dropped"
       description = "storage write failures or dropped results > 0 for 5m — checks run but results are not persisting. Runbook: runbooks/grafana-cloud.md."
     }
     data {
@@ -58,7 +58,7 @@ resource "grafana_rule_group" "pipeline" {
       model = jsonencode({
         refId   = "A"
         instant = true
-        expr    = "sum(rate(status_monitor_storage_dropped_results_total[5m])) > 0 or sum(rate(status_monitor_storage_writes_total{result=\"failure\"}[5m])) > 0"
+        expr    = "sum(rate(uptimepage_storage_dropped_results_total[5m])) > 0 or sum(rate(uptimepage_storage_writes_total{result=\"failure\"}[5m])) > 0"
       })
     }
     data {
@@ -76,17 +76,17 @@ resource "grafana_rule_group" "pipeline" {
   # Alerting: a vanished metric means the app/scheduler is down, which
   # is exactly the condition; for=10m rides through deploy restarts.
   rule {
-    name           = "StatusMonitorPipelineStalled"
+    name           = "UptimepagePipelineStalled"
     condition      = "C"
     for            = "10m"
     no_data_state  = "Alerting"
     exec_err_state = "Error"
     labels = {
       severity = "critical"
-      service  = "status-monitor"
+      service  = "uptimepage"
     }
     annotations = {
-      summary     = "status-monitor: pipeline stalled"
+      summary     = "uptimepage: pipeline stalled"
       description = "targets configured but no checks executing for 10m (scheduler/worker/app down). Runbook: runbooks/grafana-cloud.md."
     }
     data {
@@ -104,7 +104,7 @@ resource "grafana_rule_group" "pipeline" {
       model = jsonencode({
         refId   = "A"
         instant = true
-        expr    = "(sum(status_monitor_targets_total) > 0) and (sum(rate(status_monitor_checks_total[10m])) == 0)"
+        expr    = "(sum(uptimepage_targets_total) > 0) and (sum(rate(uptimepage_checks_total[10m])) == 0)"
       })
     }
     data {
@@ -126,17 +126,17 @@ resource "grafana_rule_group" "pipeline" {
   # until first increment. no_data = OK: nothing dispatched means
   # nothing to fail.
   rule {
-    name           = "StatusMonitorNotificationDeliveryFailing"
+    name           = "UptimepageNotificationDeliveryFailing"
     condition      = "C"
     for            = "5m"
     no_data_state  = "OK"
     exec_err_state = "Error"
     labels = {
       severity = "critical"
-      service  = "status-monitor"
+      service  = "uptimepage"
     }
     annotations = {
-      summary     = "status-monitor: alert delivery failing"
+      summary     = "uptimepage: alert delivery failing"
       description = "notification dispatch errors or dropped alert signals > 0 for 5m — outbound incident alerts may not be reaching users. Runbook: runbooks/grafana-cloud.md."
     }
     data {
@@ -149,7 +149,7 @@ resource "grafana_rule_group" "pipeline" {
       model = jsonencode({
         refId   = "A"
         instant = true
-        expr    = "sum(rate(status_monitor_notifications_failures_total[5m])) > 0 or sum(rate(status_monitor_alerts_dropped_total[5m])) > 0"
+        expr    = "sum(rate(uptimepage_notifications_failures_total[5m])) > 0 or sum(rate(uptimepage_alerts_dropped_total[5m])) > 0"
       })
     }
     data {
@@ -169,17 +169,17 @@ resource "grafana_rule_group" "pipeline" {
   # critical — checks still run; this is degraded coverage, not data
   # loss.
   rule {
-    name           = "StatusMonitorCircuitBreakersOpen"
+    name           = "UptimepageCircuitBreakersOpen"
     condition      = "C"
     for            = "15m"
     no_data_state  = "OK"
     exec_err_state = "Error"
     labels = {
       severity = "warning"
-      service  = "status-monitor"
+      service  = "uptimepage"
     }
     annotations = {
-      summary     = "status-monitor: circuit breakers stuck open"
+      summary     = "uptimepage: circuit breakers stuck open"
       description = "one or more circuit breakers Open for 15m — a target/upstream is persistently failing and its checks are being skipped. Runbook: runbooks/grafana-cloud.md."
     }
     data {
@@ -192,7 +192,7 @@ resource "grafana_rule_group" "pipeline" {
       model = jsonencode({
         refId   = "A"
         instant = true
-        expr    = "sum(status_monitor_circuit_breakers_open) > 0"
+        expr    = "sum(uptimepage_circuit_breakers_open) > 0"
       })
     }
     data {
@@ -212,17 +212,17 @@ resource "grafana_rule_group" "pipeline" {
   # for = 10m. Threshold 500 is a starting point — tune from the
   # result_queue_depth panel once a baseline is known.
   rule {
-    name           = "StatusMonitorResultQueueBacklog"
+    name           = "UptimepageResultQueueBacklog"
     condition      = "C"
     for            = "10m"
     no_data_state  = "OK"
     exec_err_state = "Error"
     labels = {
       severity = "warning"
-      service  = "status-monitor"
+      service  = "uptimepage"
     }
     annotations = {
-      summary     = "status-monitor: result queue backing up"
+      summary     = "uptimepage: result queue backing up"
       description = "result queue depth > 500 for 10m — write path is not keeping up; dropped results may follow. Runbook: runbooks/grafana-cloud.md."
     }
     data {
@@ -235,7 +235,7 @@ resource "grafana_rule_group" "pipeline" {
       model = jsonencode({
         refId   = "A"
         instant = true
-        expr    = "max(status_monitor_result_queue_depth) > 500"
+        expr    = "max(uptimepage_result_queue_depth) > 500"
       })
     }
     data {
@@ -257,17 +257,17 @@ resource "grafana_rule_group" "pipeline" {
   # absence of the gauge means the scheduler isn't even reporting
   # (PipelineStalled covers that case).
   rule {
-    name           = "StatusMonitorRegistryRefreshStuck"
+    name           = "UptimepageRegistryRefreshStuck"
     condition      = "C"
     for            = "5m"
     no_data_state  = "OK"
     exec_err_state = "Error"
     labels = {
       severity = "critical"
-      service  = "status-monitor"
+      service  = "uptimepage"
     }
     annotations = {
-      summary     = "status-monitor: scheduler refresh stuck"
+      summary     = "uptimepage: scheduler refresh stuck"
       description = "registry refresh has failed 5+ consecutive times for 5m — newly-added customer targets are not being scheduled. Backoff is active (up to 10× refresh interval). Likely cause: Postgres outage, schema drift, or cipher misconfig. Runbook: runbooks/grafana-cloud.md."
     }
     data {
@@ -280,7 +280,7 @@ resource "grafana_rule_group" "pipeline" {
       model = jsonencode({
         refId   = "A"
         instant = true
-        expr    = "max(status_monitor_scheduler_consecutive_refresh_failures) > 5"
+        expr    = "max(uptimepage_scheduler_consecutive_refresh_failures) > 5"
       })
     }
     data {
@@ -302,17 +302,17 @@ resource "grafana_rule_group" "pipeline" {
   # Exporter ships summaries (no _bucket), hence the {quantile} label
   # rather than histogram_quantile() — per docs/metrics.md.
   rule {
-    name           = "StatusMonitorRegistryRefreshSlow"
+    name           = "UptimepageRegistryRefreshSlow"
     condition      = "C"
     for            = "15m"
     no_data_state  = "OK"
     exec_err_state = "Error"
     labels = {
       severity = "warning"
-      service  = "status-monitor"
+      service  = "uptimepage"
     }
     annotations = {
-      summary     = "status-monitor: registry refresh latency high"
+      summary     = "uptimepage: registry refresh latency high"
       description = "registry refresh p99 > 500ms for 15m — the full-scan refresh is starting to strain at the current org count. Trigger to start the deferred incremental-sync work. Runbook: runbooks/grafana-cloud.md."
     }
     data {
@@ -325,7 +325,7 @@ resource "grafana_rule_group" "pipeline" {
       model = jsonencode({
         refId   = "A"
         instant = true
-        expr    = "max(status_monitor_scheduler_refresh_duration_ms{quantile=\"0.99\"}) > 500"
+        expr    = "max(uptimepage_scheduler_refresh_duration_ms{quantile=\"0.99\"}) > 500"
       })
     }
     data {
@@ -345,17 +345,17 @@ resource "grafana_rule_group" "pipeline" {
   # whole app down (every handler awaits the pool). Tune the ratio if
   # we observe sustained healthy operation closer to the line.
   rule {
-    name           = "StatusMonitorPgPoolSaturating"
+    name           = "UptimepagePgPoolSaturating"
     condition      = "C"
     for            = "5m"
     no_data_state  = "OK"
     exec_err_state = "Error"
     labels = {
       severity = "critical"
-      service  = "status-monitor"
+      service  = "uptimepage"
     }
     annotations = {
-      summary     = "status-monitor: Postgres pool saturating"
+      summary     = "uptimepage: Postgres pool saturating"
       description = "Postgres pool in_use / size > 0.85 for 5m — pool exhaustion is imminent. Likely causes: slow queries holding connections, traffic spike, or pool max_connections too low for current load. Runbook: runbooks/grafana-cloud.md."
     }
     data {
@@ -370,7 +370,7 @@ resource "grafana_rule_group" "pipeline" {
       model = jsonencode({
         refId   = "A"
         instant = true
-        expr    = "(max(status_monitor_pg_pool_in_use) / max(status_monitor_pg_pool_size)) > 0.85"
+        expr    = "(max(uptimepage_pg_pool_in_use) / max(uptimepage_pg_pool_size)) > 0.85"
       })
     }
     data {
@@ -391,17 +391,17 @@ resource "grafana_rule_group" "pipeline" {
   # we want to advertise. Critical — server-side errors are the most
   # direct signal that customers see broken pages.
   rule {
-    name           = "StatusMonitorHttp5xxRateHigh"
+    name           = "UptimepageHttp5xxRateHigh"
     condition      = "C"
     for            = "10m"
     no_data_state  = "OK"
     exec_err_state = "Error"
     labels = {
       severity = "critical"
-      service  = "status-monitor"
+      service  = "uptimepage"
     }
     annotations = {
-      summary     = "status-monitor: HTTP 5xx error rate above 1%"
+      summary     = "uptimepage: HTTP 5xx error rate above 1%"
       description = "server-side errors are above 1% of total request volume for 10m — customers are hitting broken responses. Inspect `http_requests_total{status=\"5xx\"}` by route in the dashboard to localise. Runbook: runbooks/grafana-cloud.md."
     }
     data {
@@ -414,7 +414,7 @@ resource "grafana_rule_group" "pipeline" {
       model = jsonencode({
         refId   = "A"
         instant = true
-        expr    = "(sum(rate(status_monitor_http_requests_total{status=\"5xx\"}[5m])) / sum(rate(status_monitor_http_requests_total[5m]))) > 0.01"
+        expr    = "(sum(rate(uptimepage_http_requests_total{status=\"5xx\"}[5m])) / sum(rate(uptimepage_http_requests_total[5m]))) > 0.01"
       })
     }
     data {
@@ -433,17 +433,17 @@ resource "grafana_rule_group" "pipeline" {
   # the exporter emits summaries (see docs/metrics.md). 1s for 15m is
   # the warning floor; tighten as steady-state baselines settle in.
   rule {
-    name           = "StatusMonitorHttpLatencyHigh"
+    name           = "UptimepageHttpLatencyHigh"
     condition      = "C"
     for            = "15m"
     no_data_state  = "OK"
     exec_err_state = "Error"
     labels = {
       severity = "warning"
-      service  = "status-monitor"
+      service  = "uptimepage"
     }
     annotations = {
-      summary     = "status-monitor: HTTP request p99 above 1s"
+      summary     = "uptimepage: HTTP request p99 above 1s"
       description = "the slowest route's p99 > 1000ms for 15m — at least one endpoint is degrading. Use the Per-route p99 panel to identify which route, then `route` label drills further. Runbook: runbooks/grafana-cloud.md."
     }
     data {
@@ -456,7 +456,7 @@ resource "grafana_rule_group" "pipeline" {
       model = jsonencode({
         refId   = "A"
         instant = true
-        expr    = "max(status_monitor_http_request_duration_ms{quantile=\"0.99\"}) > 1000"
+        expr    = "max(uptimepage_http_request_duration_ms{quantile=\"0.99\"}) > 1000"
       })
     }
     data {
@@ -477,17 +477,17 @@ resource "grafana_rule_group" "pipeline" {
   # dominate p99 and false-fire. Warning — early signal ahead of
   # ResultsLost.
   rule {
-    name           = "StatusMonitorStorageWriteLatencyHigh"
+    name           = "UptimepageStorageWriteLatencyHigh"
     condition      = "C"
     for            = "10m"
     no_data_state  = "OK"
     exec_err_state = "Error"
     labels = {
       severity = "warning"
-      service  = "status-monitor"
+      service  = "uptimepage"
     }
     annotations = {
-      summary     = "status-monitor: storage write latency high"
+      summary     = "uptimepage: storage write latency high"
       description = "storage write p99 > 2s for 10m — ClickHouse degrading; dropped results may follow. Runbook: runbooks/grafana-cloud.md."
     }
     data {
@@ -500,7 +500,7 @@ resource "grafana_rule_group" "pipeline" {
       model = jsonencode({
         refId   = "A"
         instant = true
-        expr    = "histogram_quantile(0.99, sum(rate(status_monitor_storage_write_duration_ms_bucket[10m])) by (le)) > 2000"
+        expr    = "histogram_quantile(0.99, sum(rate(uptimepage_storage_write_duration_ms_bucket[10m])) by (le)) > 2000"
       })
     }
     data {
@@ -522,17 +522,17 @@ resource "grafana_rule_group" "pipeline" {
   # to PARTITION BY, or merges fell behind). no_data = OK: the gauge is absent
   # when CH is unreachable, which ResultsLost / StorageWriteLatencyHigh cover.
   rule {
-    name           = "StatusMonitorClickHousePartsHigh"
+    name           = "UptimepageClickHousePartsHigh"
     condition      = "C"
     for            = "10m"
     no_data_state  = "OK"
     exec_err_state = "Error"
     labels = {
       severity = "warning"
-      service  = "status-monitor"
+      service  = "uptimepage"
     }
     annotations = {
-      summary     = "status-monitor: ClickHouse partition count climbing"
+      summary     = "uptimepage: ClickHouse partition count climbing"
       description = "MaxPartCountForPartition > 1500 (hard limit parts_to_throw_insert=3000) for 10m — likely a high-cardinality column added to PARTITION BY, or merges falling behind. Runbook: runbooks/grafana-cloud.md."
     }
     data {
@@ -545,7 +545,7 @@ resource "grafana_rule_group" "pipeline" {
       model = jsonencode({
         refId   = "A"
         instant = true
-        expr    = "max(status_monitor_clickhouse_max_part_count_for_partition) > 1500"
+        expr    = "max(uptimepage_clickhouse_max_part_count_for_partition) > 1500"
       })
     }
     data {
@@ -567,17 +567,17 @@ resource "grafana_rule_group" "pipeline" {
   # ResultsLost already pages critical for the data loss itself; this rule's job
   # is the correct diagnosis. no_data = OK (no drops emitted = nothing wrong).
   rule {
-    name           = "StatusMonitorIngestBufferOverflow"
+    name           = "UptimepageIngestBufferOverflow"
     condition      = "C"
     for            = "5m"
     no_data_state  = "OK"
     exec_err_state = "Error"
     labels = {
       severity = "warning"
-      service  = "status-monitor"
+      service  = "uptimepage"
     }
     annotations = {
-      summary     = "status-monitor: ingest buffer overflowing (capacity)"
+      summary     = "uptimepage: ingest buffer overflowing (capacity)"
       description = "results dropped with reason=buffer_overflow for 5m — sustained ingest exceeds ClickHouse write throughput and the batcher is evicting oldest results. Capacity action (scale CH / raise buffer_size / check the interval floor), not a CH outage. Runbook: runbooks/grafana-cloud.md."
     }
     data {
@@ -590,7 +590,7 @@ resource "grafana_rule_group" "pipeline" {
       model = jsonencode({
         refId   = "A"
         instant = true
-        expr    = "sum(rate(status_monitor_storage_dropped_results_total{reason=\"buffer_overflow\"}[5m])) > 0"
+        expr    = "sum(rate(uptimepage_storage_dropped_results_total{reason=\"buffer_overflow\"}[5m])) > 0"
       })
     }
     data {
@@ -606,7 +606,7 @@ resource "grafana_rule_group" "pipeline" {
 }
 
 resource "grafana_contact_point" "default" {
-  name = "status-monitor-default"
+  name = "uptimepage-default"
 
   email {
     addresses = [var.alert_email]

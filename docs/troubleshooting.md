@@ -8,7 +8,7 @@ The target store can't be reached. Check `storage.postgres.url` and that Postgre
 
 - Confirm `observability.metrics_enabled = true`
 - Confirm `metrics_bind` isn't blocked by a local firewall
-- `status_monitor_build_info` is emitted at startup so the endpoint is never truly empty — if it's also missing, the metrics exporter never bound
+- `uptimepage_build_info` is emitted at startup so the endpoint is never truly empty — if it's also missing, the metrics exporter never bound
 
 ## Many `storage_dropped_total{reason="queue_full"}`
 
@@ -21,17 +21,17 @@ The result channel between worker pool and batcher is back-pressured.
 
 ## Circuit breaker stuck open
 
-Look at `status_monitor_check_errors_total{kind}` filtered by host to find the failure mode, then wait `circuit_breaker.open_duration_secs` for the breaker to enter half-open and probe.
+Look at `uptimepage_checks_errors_total{kind}` filtered by host to find the failure mode, then wait `circuit_breaker.open_duration_secs` for the breaker to enter half-open and probe.
 
 ## Targets reporting `degraded` with `throttled: host concurrency cap`
 
-One tenant has more concurrent monitors at the same `(host, port)` than `checker.per_host_max_inflight` allows (default 2). Over-cap checks are recorded `degraded` instead of running. No alert fires — the upstream is fine. Either spread the targets across more hosts, raise the cap, or rely on jitter to thin the burst. Watch `status_monitor_host_throttle_drops_total` to size the cap against real traffic.
+One tenant has more concurrent monitors at the same `(host, port)` than `checker.per_host_max_inflight` allows (default 2). Over-cap checks are recorded `degraded` instead of running. No alert fires — the upstream is fine. Either spread the targets across more hosts, raise the cap, or rely on jitter to thin the burst. Watch `uptimepage_host_throttle_drops_total` to size the cap against real traffic.
 
 ## `domain_expiry` results show `served_stale: …`
 
 The fresh RDAP probe failed (throttle, timeout, registry 5xx, network blip) but the executor served the most recent successful answer from `domain_expiry_state` instead of flipping the monitor red. The status reflects the cached `expiry_at`. For Up the `error` field stays empty (the customer-facing surface shows nothing unusual); for Degraded/Down it carries `served_stale: last_verified_age_secs=…; refresh_failed=<kind>` plus the cached details so operators can distinguish a stale serve from a fresh probe.
 
-Inspect the failure kind via `status_monitor_domain_expiry_stale_served_total{kind}`:
+Inspect the failure kind via `uptimepage_domain_expiry_stale_served_total{kind}`:
 
 - `kind="throttled"` — per-TLD RDAP bulkhead rejected this probe. Raise `checker.rdap_max_inflight` if rampant, but the cap is also the IANA-friendliness lever.
 - `kind="timeout"` — the registry took longer than `check.timeout` (per-target). Either bump the per-check timeout or wait — most registries recover in minutes.

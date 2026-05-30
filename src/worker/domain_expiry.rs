@@ -353,7 +353,7 @@ fn emit_stale(
     // where the answer came from — leave `error` empty so renderers that
     // surface non-empty `error` as a warning don't mis-classify a healthy
     // cached verdict. Operators still see the stale-served event via the
-    // `status_monitor_domain_expiry_stale_served_total` counter.
+    // `uptimepage_domain_expiry_stale_served_total` counter.
     let error = match verdict.status {
         CheckStatus::Up => None,
         _ => {

@@ -14,12 +14,12 @@
 // container (set via UPTIMEPAGE_SERVER__METRICS_BIND in compose) so
 // a separate container can reach it; the port is never published to the
 // host.
-prometheus.scrape "status_monitor" {
+prometheus.scrape "uptimepage" {
   targets = [{
     __address__ = "uptimepage:9090",
   }]
   forward_to      = [prometheus.remote_write.grafana_cloud.receiver]
-  job_name        = "status-monitor"
+  job_name        = "uptimepage"
   scrape_interval = "15s"
 }
 
@@ -42,7 +42,7 @@ prometheus.remote_write "grafana_cloud" {
   // Cloud. Driven by GRAFANA_CLOUD_INSTANCE (set per host in .env);
   // falls back to a sane default when unset.
   external_labels = {
-    instance = coalesce(sys.env("GRAFANA_CLOUD_INSTANCE"), "status-monitor"),
+    instance = coalesce(sys.env("GRAFANA_CLOUD_INSTANCE"), "uptimepage"),
   }
 }
 
@@ -77,7 +77,7 @@ discovery.docker "containers" {
 // Keep ONLY the app container (compose service label is exact and
 // survives a project/container rename); tidy the noisy docker meta
 // labels down to stable {container,job} before the logs are shipped.
-discovery.relabel "status_monitor_only" {
+discovery.relabel "uptimepage_only" {
   targets = discovery.docker.containers.targets
 
   rule {
@@ -93,13 +93,13 @@ discovery.relabel "status_monitor_only" {
 
   rule {
     target_label = "job"
-    replacement  = "status-monitor"
+    replacement  = "uptimepage"
   }
 }
 
-loki.source.docker "status_monitor" {
+loki.source.docker "uptimepage" {
   host       = "unix:///var/run/docker.sock"
-  targets    = discovery.relabel.status_monitor_only.output
+  targets    = discovery.relabel.uptimepage_only.output
   labels     = {}
   forward_to = [loki.write.grafana_cloud.receiver]
 }
@@ -116,6 +116,6 @@ loki.write "grafana_cloud" {
   }
 
   external_labels = {
-    instance = coalesce(sys.env("GRAFANA_CLOUD_INSTANCE"), "status-monitor"),
+    instance = coalesce(sys.env("GRAFANA_CLOUD_INSTANCE"), "uptimepage"),
   }
 }

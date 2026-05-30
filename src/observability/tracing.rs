@@ -48,7 +48,7 @@ pub fn init(cfg: &ObservabilityConfig) -> TracingGuard {
     let (otel_layer, provider) = if cfg.tracing_enabled && cfg.grafana.enabled {
         match build_tracer_provider(&cfg.grafana) {
             Ok(provider) => {
-                let tracer = provider.tracer("status-monitor");
+                let tracer = provider.tracer("uptimepage");
                 opentelemetry::global::set_text_map_propagator(
                     opentelemetry_sdk::propagation::TraceContextPropagator::new(),
                 );
@@ -127,7 +127,7 @@ fn build_tracer_provider(g: &GrafanaConfig) -> anyhow::Result<SdkTracerProvider>
         .build()?;
 
     let resource = Resource::builder()
-        .with_service_name("status-monitor")
+        .with_service_name("uptimepage")
         .with_attribute(opentelemetry::KeyValue::new(
             "service.version",
             env!("CARGO_PKG_VERSION"),

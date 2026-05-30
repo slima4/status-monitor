@@ -207,7 +207,7 @@ services:
       GRAFANA_CLOUD_LOKI_USER: ${GRAFANA_CLOUD_LOKI_USER:-}
       # Distinguishes this sender in Grafana Cloud; set per host if you
       # run more than one so series don't collide.
-      GRAFANA_CLOUD_INSTANCE: ${GRAFANA_CLOUD_INSTANCE:-status-monitor}
+      GRAFANA_CLOUD_INSTANCE: ${GRAFANA_CLOUD_INSTANCE:-uptimepage}
     volumes:
       - ./config.alloy:/etc/alloy/config.alloy:ro
       - alloy_data:/var/lib/alloy/data
