@@ -23,8 +23,8 @@ use crate::domain::{OrgId, PublicOrgBranding, PublicStyle};
 use crate::error::{AppError, Result};
 use crate::public_status::{LocalDiskLogoStorage, LogoMime, LogoStorage};
 use crate::storage::{OrgBranding, orgs as orgs_store};
-use crate::web::CurrentUser;
 use crate::web::views::public_status::LOGO_ROUTE;
+use crate::web::{CurrentUser, ScopedOrgPath, StatusPageRead, StatusPageWrite};
 
 use super::orgs::require_owner;
 
@@ -124,6 +124,7 @@ pub struct LogoResponse {
 pub async fn get_settings(
     State(state): State<AppState>,
     CurrentUser(user): CurrentUser,
+    _: ScopedOrgPath<StatusPageRead>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<StatusPageSettings>> {
     let pool = state.require_db()?;
@@ -155,6 +156,7 @@ pub async fn get_settings(
 pub async fn update_settings(
     State(state): State<AppState>,
     CurrentUser(user): CurrentUser,
+    _: ScopedOrgPath<StatusPageWrite>,
     Path(id): Path<Uuid>,
     Json(req): Json<UpdateStatusPageRequest>,
 ) -> Result<Json<StatusPageSettings>> {
@@ -233,6 +235,7 @@ pub async fn update_settings(
 pub async fn upload_logo(
     State(state): State<AppState>,
     CurrentUser(user): CurrentUser,
+    _: ScopedOrgPath<StatusPageWrite>,
     Path(id): Path<Uuid>,
     mut multipart: Multipart,
 ) -> Result<Json<LogoResponse>> {
@@ -297,6 +300,7 @@ pub async fn upload_logo(
 pub async fn delete_logo(
     State(state): State<AppState>,
     CurrentUser(user): CurrentUser,
+    _: ScopedOrgPath<StatusPageWrite>,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode> {
     let pool = state.require_db()?;

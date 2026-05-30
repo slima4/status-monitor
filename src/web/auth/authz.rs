@@ -1,16 +1,19 @@
-//! Scope-gated org extractor.
+//! Scope-gated extractors.
 //!
-//! `Authorized<R>` resolves the caller's org via the same membership-checked
-//! path as [`CurrentOrg`] and additionally asserts that an API token carries
-//! the scope `R` requires. Session auth is unscoped and always passes the
-//! scope check; only [`AuthContext::ApiToken`] is gated. Swapping a handler's
-//! `CurrentOrg(org): CurrentOrg` for `Authorized(org, _): Authorized<…>` is the
-//! whole integration — the resolved `OrgId` threads through unchanged.
+//! [`Authorized<R>`] resolves the caller's org via the same membership-checked
+//! path as [`CurrentOrg`] (header-driven) and additionally asserts that an API
+//! token carries the scope `R` requires. [`ScopedOrgPath<R>`] is its companion
+//! for owner-keyed `:id` path routes (status-page settings) where the org comes
+//! from the URL, not the header: it asserts the scope and, for an org-bound
+//! token, that the path org matches the binding — ownership stays with the
+//! handler's `require_owner`. Session auth is unscoped and always passes the
+//! scope check; only [`AuthContext::ApiToken`] is gated.
 
 use std::marker::PhantomData;
 
-use axum::extract::{FromRef, FromRequestParts};
+use axum::extract::{FromRef, FromRequestParts, Path};
 use axum::http::request::Parts;
+use uuid::Uuid;
 
 use crate::api::error::codes;
 use crate::app::AppState;
@@ -21,7 +24,7 @@ use crate::error::{AppError, Result};
 use super::{AuthContext, CurrentOrg};
 
 /// Compile-time binding of a handler to the scope it requires. A new scope =
-/// a new marker type; the extractor below is untouched (open/closed).
+/// a new marker type; the extractors below are untouched (open/closed).
 pub trait RequiredScope {
     const SCOPE: Scope;
 }
@@ -42,6 +45,25 @@ scope_marker!(ChannelsWrite => Scope::ChannelsWrite);
 scope_marker!(IncidentsWrite => Scope::IncidentsWrite);
 scope_marker!(MaintenanceRead => Scope::MaintenanceRead);
 scope_marker!(MaintenanceWrite => Scope::MaintenanceWrite);
+scope_marker!(StatusPageRead => Scope::StatusPageRead);
+scope_marker!(StatusPageWrite => Scope::StatusPageWrite);
+
+/// Asserts that an API token in the request carries `required` (sessions pass).
+/// The single place the `INSUFFICIENT_SCOPE` 403 is minted.
+fn assert_scope(parts: &Parts, required: Scope) -> Result<()> {
+    if let Some(AuthContext::ApiToken { scopes, .. }) = parts.extensions.get::<AuthContext>()
+        && !scopes.allows(required)
+    {
+        return Err(AppError::forbidden_code(
+            codes::INSUFFICIENT_SCOPE,
+            format!(
+                "API token is missing the required scope `{}`",
+                required.as_str()
+            ),
+        ));
+    }
+    Ok(())
+}
 
 /// Org id for the current request, gated on the scope `R`.
 pub struct Authorized<R: RequiredScope>(pub OrgId, pub PhantomData<R>);
@@ -55,22 +77,51 @@ where
     type Rejection = AppError;
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self> {
-        // Resolve the org first (auth, membership, and any org binding) so a
+        // Resolve the org first (auth, membership, and the org binding) so a
         // missing/invalid X-Uptimepage-Org yields the same 400 for every token
         // — then gate on scope. Scope is checked only for API tokens; sessions
         // are unscoped and always pass.
         let CurrentOrg(org) = CurrentOrg::from_request_parts(parts, state).await?;
-        if let Some(AuthContext::ApiToken { scopes, .. }) = parts.extensions.get::<AuthContext>()
-            && !scopes.allows(R::SCOPE)
-        {
-            return Err(AppError::forbidden_code(
-                codes::INSUFFICIENT_SCOPE,
-                format!(
-                    "API token is missing the required scope `{}`",
-                    R::SCOPE.as_str()
-                ),
-            ));
-        }
+        assert_scope(parts, R::SCOPE)?;
         Ok(Authorized(org, PhantomData))
+    }
+}
+
+/// Scope + org-binding gate for owner-keyed `:id` path routes (status-page
+/// settings). The org comes from the URL, so this asserts the token scope and,
+/// for an org-bound token, that the path org equals the binding (else
+/// `ORG_HEADER_MISMATCH`). Ownership is enforced separately by the handler's
+/// `require_owner` (which is stricter than membership, so no `is_active_member`
+/// is duplicated here). Carries no payload — adding it to a handler *is* the
+/// gate. Assumes a single `{id}` path param (true for every status-page route);
+/// a route with extra path params would need an explicitly-named extractor.
+pub struct ScopedOrgPath<R: RequiredScope>(pub PhantomData<R>);
+
+impl<S, R> FromRequestParts<S> for ScopedOrgPath<R>
+where
+    S: Send + Sync,
+    AppState: FromRef<S>,
+    R: RequiredScope,
+{
+    type Rejection = AppError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self> {
+        assert_scope(parts, R::SCOPE)?;
+        if let Some(AuthContext::ApiToken {
+            org: Some(bound), ..
+        }) = parts.extensions.get::<AuthContext>()
+        {
+            let bound = *bound;
+            let Path(id) = Path::<Uuid>::from_request_parts(parts, state)
+                .await
+                .map_err(|_| AppError::not_found(codes::ORG_NOT_FOUND, "organisation not found"))?;
+            if OrgId(id) != bound {
+                return Err(AppError::forbidden_code(
+                    codes::ORG_HEADER_MISMATCH,
+                    "this token is bound to a different org",
+                ));
+            }
+        }
+        Ok(ScopedOrgPath(PhantomData))
     }
 }

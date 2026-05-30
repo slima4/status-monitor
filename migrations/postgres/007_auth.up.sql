@@ -75,6 +75,9 @@ CREATE INDEX idx_oauth_states_expires ON oauth_states(expires_at);
 CREATE TABLE api_tokens (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    -- NULL = unbound (any member org via X-Uptimepage-Org); non-NULL pins the
+    -- token to one org so it can never touch the owner's other orgs.
+    org_id          UUID REFERENCES organizations(id) ON DELETE CASCADE,
     name            TEXT NOT NULL,
     token_hash      TEXT NOT NULL,
     token_prefix    TEXT NOT NULL,
@@ -85,6 +88,7 @@ CREATE TABLE api_tokens (
 );
 CREATE INDEX idx_api_tokens_user   ON api_tokens(user_id);
 CREATE INDEX idx_api_tokens_prefix ON api_tokens(token_prefix);
+CREATE INDEX idx_api_tokens_org    ON api_tokens(org_id) WHERE org_id IS NOT NULL;
 
 -- Single-use org invitations. CITEXT email matches users.email so a
 -- mixed-case invite and a verified-lowercase OAuth login resolve to the same

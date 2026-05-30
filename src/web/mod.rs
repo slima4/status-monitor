@@ -18,7 +18,7 @@ pub mod views;
 
 pub use auth::authz::{
     Authorized, ChannelsRead, ChannelsWrite, IncidentsWrite, MaintenanceRead, MaintenanceWrite,
-    TargetsRead, TargetsWrite,
+    ScopedOrgPath, StatusPageRead, StatusPageWrite, TargetsRead, TargetsWrite,
 };
 pub use auth::{AuthedBrowser, CurrentOrg, CurrentUser, Session, User};
 pub use host::{StatusPageHost, StatusPageOrg, extract_status_slug};

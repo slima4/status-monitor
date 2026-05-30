@@ -96,12 +96,14 @@ pub enum AuthContext {
         session_id_hash: String,
         active_org_id: Option<OrgId>,
     },
-    /// `Authorization: Bearer sm_live_…`. No active org — handlers reach for
-    /// `X-Uptimepage-Org` (or a slug path param in future routes).
+    /// `Authorization: Bearer sm_live_…`. `org` is the token's binding: `Some`
+    /// pins it to one org (header optional, must match if present); `None`
+    /// leaves the org to the `X-Uptimepage-Org` header (any member org).
     ApiToken {
         user_id: UserId,
         token_id: Uuid,
         scopes: ScopeSet,
+        org: Option<OrgId>,
     },
 }
 
@@ -228,13 +230,29 @@ where
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self> {
         let app_state = AppState::from_ref(state);
 
-        // API-token path: tokens carry no active org. The caller MUST surface
-        // the org explicitly via `X-Uptimepage-Org`. No fallback exists;
-        // a missing/unknown header is a 400, not a silent default-org write.
-        if let Some(AuthContext::ApiToken { user_id, .. }) = parts.extensions.get::<AuthContext>() {
+        // API-token path: an unbound token MUST surface the org via
+        // `X-Uptimepage-Org` (no fallback — a missing/unknown header is a 400).
+        // A bound token implies its org; a header, if present, must match it.
+        // Either way `is_active_member` re-checks (defense vs revoked access).
+        if let Some(AuthContext::ApiToken { user_id, org, .. }) =
+            parts.extensions.get::<AuthContext>()
+        {
             let pool = app_state.require_db()?;
             let user_id = *user_id;
-            let org = explicit_org_from_header(parts, pool).await?;
+            let org = match *org {
+                Some(bound) => {
+                    if let Some(hdr) = optional_org_from_header(parts, pool).await?
+                        && hdr != bound
+                    {
+                        return Err(AppError::forbidden_code(
+                            codes::ORG_HEADER_MISMATCH,
+                            "X-Uptimepage-Org names a different org than this token is bound to",
+                        ));
+                    }
+                    bound
+                }
+                None => explicit_org_from_header(parts, pool).await?,
+            };
             if !is_active_member(pool, user_id, org).await? {
                 return Err(AppError::Forbidden);
             }
@@ -306,19 +324,15 @@ where
     }
 }
 
-/// Reads `X-Uptimepage-Org` from the request headers and resolves it to
-/// an org id by slug. Returns `ORG_REQUIRED` when absent and
-/// `ORG_HEADER_INVALID` when the header value is malformed or names no org.
-async fn explicit_org_from_header(parts: &Parts, pool: &sqlx::PgPool) -> Result<OrgId> {
-    let raw = parts
-        .headers
-        .get(&ORG_HEADER)
-        .ok_or_else(|| {
-            AppError::bad_request(
-                codes::ORG_REQUIRED,
-                "API tokens must scope to an org via the X-Uptimepage-Org header",
-            )
-        })?
+/// Resolve `X-Uptimepage-Org` to an org id by slug when the header is present.
+/// `Ok(None)` = header absent; a present-but-malformed or unknown value is
+/// `ORG_HEADER_INVALID`. Used directly by bound tokens (header optional) and by
+/// [`explicit_org_from_header`] for unbound tokens (header required).
+async fn optional_org_from_header(parts: &Parts, pool: &sqlx::PgPool) -> Result<Option<OrgId>> {
+    let Some(val) = parts.headers.get(&ORG_HEADER) else {
+        return Ok(None);
+    };
+    let raw = val
         .to_str()
         .map_err(|_| {
             AppError::bad_request(codes::ORG_HEADER_INVALID, "X-Uptimepage-Org is not UTF-8")
@@ -338,4 +352,16 @@ async fn explicit_org_from_header(parts: &Parts, pool: &sqlx::PgPool) -> Result<
                 "no organization matches X-Uptimepage-Org",
             )
         })
+        .map(Some)
+}
+
+/// `X-Uptimepage-Org` required: resolves the header or fails with
+/// `ORG_REQUIRED`. The unbound-token path — there is no org to fall back to.
+async fn explicit_org_from_header(parts: &Parts, pool: &sqlx::PgPool) -> Result<OrgId> {
+    optional_org_from_header(parts, pool).await?.ok_or_else(|| {
+        AppError::bad_request(
+            codes::ORG_REQUIRED,
+            "API tokens must scope to an org via the X-Uptimepage-Org header",
+        )
+    })
 }

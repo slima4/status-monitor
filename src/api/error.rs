@@ -133,6 +133,9 @@ pub mod codes {
     pub const INVALID_TOKEN: &str = "INVALID_TOKEN";
     pub const ORG_REQUIRED: &str = "ORG_REQUIRED";
     pub const ORG_HEADER_INVALID: &str = "ORG_HEADER_INVALID";
+    /// Org-bound token addressed a different org (via header or path) than the
+    /// one it is pinned to (403).
+    pub const ORG_HEADER_MISMATCH: &str = "ORG_HEADER_MISMATCH";
     pub const EMAIL_NOT_VERIFIED: &str = "EMAIL_NOT_VERIFIED";
     pub const TOKEN_LIMIT: &str = "TOKEN_LIMIT";
     pub const TOKEN_NAME_INVALID: &str = "TOKEN_NAME_INVALID";
