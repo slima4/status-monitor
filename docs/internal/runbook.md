@@ -95,10 +95,10 @@ than 24h the backup job failed — check cron on the backup server.
 scp backup-server:/backups/uptimepage/postgres-latest.sql.gz test-vm:
 
 # Restore
-ssh test-vm "gunzip -c postgres-latest.sql.gz | docker exec -i postgres psql -U status_monitor status_monitor"
+ssh test-vm "gunzip -c postgres-latest.sql.gz | docker exec -i postgres psql -U monitor monitor"
 
 # Spot-check
-ssh test-vm "docker exec postgres psql -U status_monitor -c 'SELECT COUNT(*) FROM organizations'"
+ssh test-vm "docker exec postgres psql -U monitor -c 'SELECT COUNT(*) FROM organizations'"
 ```
 
 ### Step 3 — Document
@@ -142,7 +142,7 @@ curl https://acme.your-domain.com/
 
 Most disruptive — users may need to sign in again.
 
-1. GitHub → Settings → Developer settings → OAuth Apps → status-monitor →
+1. GitHub → Settings → Developer settings → OAuth Apps → uptimepage →
    Generate a new client secret
 2. Update `UPTIMEPAGE_AUTH__GITHUB__CLIENT_SECRET` in `.env`
 3. Restart the app: `docker compose up -d uptimepage`

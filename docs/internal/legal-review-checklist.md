@@ -48,7 +48,7 @@ docs go live:
 | Operator (legal entity) | `status-monitor-inc`, Nicosia, Cyprus — **ACTION:** add registered company number / VAT ID if the entity is incorporated |
 | Hosting location | Hetzner, Nürnberg, Germany — stated in Privacy Policy §6 and Impressum |
 | Governing law | Germany (Hetzner-hosted). **ACTION:** confirm — the operating entity is in Cyprus; decide whether German or Cypriot law should govern |
-| Public domain | `status-monitor.example.com` placeholder in `security.txt` (Canonical/Policy) and the security policy scope. **ACTION:** replace with the real production domain before publishing |
+| Public domain | `uptimepage.dev` set in `security.txt` (Canonical/Policy). Confirm the security policy scope matches before publishing |
 | Retention periods | Privacy Policy table matches the documented retention windows; re-verify against `[retention]` config at deploy time |
 | Certifications | None claimed (DPA / SCC references describe processor safeguards, not our own certification) — OK |
 | Annual re-review reminder | **ACTION:** create the calendar reminder (docs review + `security.txt` `Expires`) |

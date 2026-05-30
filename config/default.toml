@@ -180,7 +180,7 @@ public_per_ip_rate_limit_per_min = 60
 # "resend" | "log" | "memory". Dev default is "log" so `cargo run` works with
 # no external accounts — action URLs are printed to tracing.
 provider = "log"
-from_name = "Status Monitor"
+from_name = "Uptimepage"
 from_address = "no-reply@example.invalid"
 
 [email.resend]

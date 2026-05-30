@@ -640,7 +640,7 @@ fn default_dns() -> DnsConfig {
 fn build_clients_with(dns_cfg: DnsConfig) -> uptimepage::error::Result<HttpClients> {
     let http_cfg = HttpClientConfig {
         tcp_keepalive_secs: 30,
-        user_agent: "StatusMonitor/test".into(),
+        user_agent: "Uptimepage/test".into(),
     };
     let checker_cfg = CheckerConfig {
         max_concurrent_checks: 100,

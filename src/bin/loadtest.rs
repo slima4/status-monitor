@@ -64,7 +64,7 @@ async fn main() {
 
     let http_cfg = HttpClientConfig {
         tcp_keepalive_secs: 60,
-        user_agent: "StatusMonitor-LoadTest/1.0".into(),
+        user_agent: "Uptimepage-LoadTest/1.0".into(),
     };
     let checker_cfg = CheckerConfig {
         max_concurrent_checks: args.concurrency,

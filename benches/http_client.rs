@@ -123,7 +123,7 @@ fn default_check(addr: SocketAddr) -> HttpCheck {
 fn build_test_clients() -> HttpClients {
     let http_cfg = HttpClientConfig {
         tcp_keepalive_secs: 60,
-        user_agent: "StatusMonitor/bench".into(),
+        user_agent: "Uptimepage/bench".into(),
     };
     let checker_cfg = CheckerConfig {
         max_concurrent_checks: 100_000,
