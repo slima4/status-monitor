@@ -173,6 +173,16 @@ jobs:
                GRAFANA_CLOUD_LOKI_USER='${{ secrets.GRAFANA_CLOUD_LOKI_USER }}' \
                RUST_LOG='${{ vars.RUST_LOG }}' \
                bash -s" <<'REMOTE'
+          # This script is delivered to `bash -s` over the ssh heredoc — i.e. on
+          # stdin (fd 0). A `docker compose exec -T` / `docker exec -i` / nested
+          # `ssh` run directly would inherit fd 0 and drain the rest of the
+          # script as its own stdin, silently skipping every later command (the
+          # Caddy reload, the port-binding security check) while still exiting 0.
+          # Slurp the remaining body to a temp file and run THAT with stdin
+          # pinned to /dev/null, so no child can ever consume the script body —
+          # the whole drain class is gone, no per-command `</dev/null` needed.
+          __body=$(mktemp) || exit 1; trap 'rm -f "$__body"' EXIT; cat >"$__body" || exit 1; bash "$__body" </dev/null; exit $?
+
           set -euo pipefail
           # Every file written during this script (including .env, .env.next,
           # .env.bak.*, sparse-checkout overrides) must be owner-only. Fresh
@@ -461,7 +471,17 @@ jobs:
           # only when they differ. Quiet on no-op deploys; fixes the file
           # without manual `docker compose restart caddy` when it changed.
           host_hash=$(sha256sum Caddyfile 2>/dev/null | awk '{print $1}')
-          ctr_hash=$(docker compose exec -T caddy sha256sum /etc/caddy/Caddyfile 2>/dev/null | awk '{print $1}')
+          # Capture the container read's real exit status — don't pipe straight
+          # into awk (awk exits 0 and would mask a failed exec) — and keep stderr
+          # off the captured stdout (a compose warning would corrupt the hash).
+          # On failure, warn and fall through with an empty hash → forces a
+          # recreate (safe default) instead of silently skipping it.
+          if ctr_line=$(docker compose exec -T caddy sha256sum /etc/caddy/Caddyfile 2>/dev/null); then
+            ctr_hash=$(printf '%s' "$ctr_line" | awk '{print $1}')
+          else
+            echo "::warning::could not read Caddyfile from caddy container; recreating to be safe"
+            ctr_hash=""
+          fi
           if [ -n "$host_hash" ] && [ "$host_hash" != "$ctr_hash" ]; then
             echo "Caddyfile drift (host=${host_hash:0:12} ctr=${ctr_hash:0:12}); recreating caddy"
             docker compose up -d --no-build --force-recreate caddy
@@ -515,6 +535,11 @@ jobs:
           # bad deploy is never silent.
           ssh -T -i ~/.ssh/id_deploy -o IdentitiesOnly=yes \
               "${DEPLOY_USER}@${DEPLOY_HOST}" bash -s <<'REMOTE'
+          # Same heredoc-over-stdin slurp-reexec as the deploy step (see there
+          # for the rationale): run the body from a temp file with stdin pinned
+          # to /dev/null so a future exec here can't drain the probe loop.
+          __body=$(mktemp) || exit 1; trap 'rm -f "$__body"' EXIT; cat >"$__body" || exit 1; bash "$__body" </dev/null; exit $?
+
           set -euo pipefail
           for i in $(seq 1 30); do
             if curl -fsS --max-time 5 \
