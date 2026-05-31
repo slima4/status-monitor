@@ -12,6 +12,7 @@ use uuid::Uuid;
 
 use crate::domain::{
     MaintenanceFilter, MaintenanceWindow, MaintenanceWindowUpdate, NewMaintenanceWindow, OrgId,
+    WriteSource,
 };
 use crate::error::Result;
 
@@ -33,7 +34,12 @@ pub struct MaintenanceListQuery {
 /// not a runtime check.
 #[async_trait]
 pub trait MaintenanceStore: Send + Sync {
-    async fn create(&self, org: OrgId, new: NewMaintenanceWindow) -> Result<MaintenanceWindow>;
+    async fn create(
+        &self,
+        org: OrgId,
+        new: NewMaintenanceWindow,
+        source: WriteSource,
+    ) -> Result<MaintenanceWindow>;
     async fn list(&self, org: OrgId, q: MaintenanceListQuery) -> Result<Vec<MaintenanceWindow>>;
     async fn get(&self, org: OrgId, id: Uuid) -> Result<Option<MaintenanceWindow>>;
     async fn update(
@@ -41,6 +47,7 @@ pub trait MaintenanceStore: Send + Sync {
         org: OrgId,
         id: Uuid,
         update: MaintenanceWindowUpdate,
+        source: WriteSource,
     ) -> Result<Option<MaintenanceWindow>>;
     async fn delete(&self, org: OrgId, id: Uuid) -> Result<bool>;
     /// Subset of `ids` that exist in `targets` for the caller's org. Used to
@@ -68,6 +75,7 @@ struct MaintenanceRow {
     description: Option<String>,
     starts_at: DateTime<Utc>,
     ends_at: DateTime<Utc>,
+    write_source: String,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
 }
@@ -81,6 +89,7 @@ impl MaintenanceRow {
             starts_at: self.starts_at,
             ends_at: self.ends_at,
             component_ids,
+            write_source: WriteSource::from_db(&self.write_source),
             created_at: self.created_at,
             updated_at: self.updated_at,
         }
@@ -102,7 +111,12 @@ async fn load_components(pool: &PgPool, maintenance_id: Uuid, org_id: Uuid) -> R
 
 #[async_trait]
 impl MaintenanceStore for PgMaintenanceStore {
-    async fn create(&self, org: OrgId, new: NewMaintenanceWindow) -> Result<MaintenanceWindow> {
+    async fn create(
+        &self,
+        org: OrgId,
+        new: NewMaintenanceWindow,
+        source: WriteSource,
+    ) -> Result<MaintenanceWindow> {
         let mut tx = self
             .pool
             .begin()
@@ -110,15 +124,16 @@ impl MaintenanceStore for PgMaintenanceStore {
             .map_err(|e| anyhow::anyhow!("begin: {e}"))?;
         let row: MaintenanceRow = sqlx::query_as(
             r#"INSERT INTO maintenance_windows
-                   (org_id, title, description, starts_at, ends_at)
-               VALUES ($1, $2, $3, $4, $5)
-               RETURNING id, title, description, starts_at, ends_at, created_at, updated_at"#,
+                   (org_id, title, description, starts_at, ends_at, write_source)
+               VALUES ($1, $2, $3, $4, $5, $6)
+               RETURNING id, title, description, starts_at, ends_at, write_source, created_at, updated_at"#,
         )
         .bind(org.0)
         .bind(&new.title)
         .bind(&new.description)
         .bind(new.starts_at)
         .bind(new.ends_at)
+        .bind(source.as_str())
         .fetch_one(&mut *tx)
         .await
         .map_err(|e| anyhow::anyhow!("insert maintenance: {e}"))?;
@@ -168,7 +183,7 @@ impl MaintenanceStore for PgMaintenanceStore {
 
     async fn get(&self, org: OrgId, id: Uuid) -> Result<Option<MaintenanceWindow>> {
         let row: Option<MaintenanceRow> = sqlx::query_as(
-            r#"SELECT id, title, description, starts_at, ends_at, created_at, updated_at
+            r#"SELECT id, title, description, starts_at, ends_at, write_source, created_at, updated_at
                FROM maintenance_windows WHERE id = $1 AND org_id = $2"#,
         )
         .bind(id)
@@ -190,6 +205,7 @@ impl MaintenanceStore for PgMaintenanceStore {
         org: OrgId,
         id: Uuid,
         update: MaintenanceWindowUpdate,
+        source: WriteSource,
     ) -> Result<Option<MaintenanceWindow>> {
         let mut tx = self
             .pool
@@ -202,13 +218,14 @@ impl MaintenanceStore for PgMaintenanceStore {
         // to be `Option<Option<String>>` like `IncidentNarrationUpdate`.
         let row: Option<MaintenanceRow> = sqlx::query_as(
             r#"UPDATE maintenance_windows
-               SET title       = COALESCE($2, title),
-                   description = COALESCE($3, description),
-                   starts_at   = COALESCE($4, starts_at),
-                   ends_at     = COALESCE($5, ends_at),
-                   updated_at  = now()
+               SET title        = COALESCE($2, title),
+                   description  = COALESCE($3, description),
+                   starts_at    = COALESCE($4, starts_at),
+                   ends_at      = COALESCE($5, ends_at),
+                   write_source = $7,
+                   updated_at   = now()
                WHERE id = $1 AND org_id = $6
-               RETURNING id, title, description, starts_at, ends_at, created_at, updated_at"#,
+               RETURNING id, title, description, starts_at, ends_at, write_source, created_at, updated_at"#,
         )
         .bind(id)
         .bind(update.title.as_ref())
@@ -216,6 +233,7 @@ impl MaintenanceStore for PgMaintenanceStore {
         .bind(update.starts_at)
         .bind(update.ends_at)
         .bind(org.0)
+        .bind(source.as_str())
         .fetch_optional(&mut *tx)
         .await
         .map_err(|e| anyhow::anyhow!("update maintenance: {e}"))?;
@@ -286,7 +304,7 @@ impl MaintenanceStore for PgMaintenanceStore {
 
 fn list_sql(filter: MaintenanceFilter) -> String {
     format!(
-        r#"SELECT id, title, description, starts_at, ends_at, created_at, updated_at
+        r#"SELECT id, title, description, starts_at, ends_at, write_source, created_at, updated_at
            FROM maintenance_windows
            WHERE org_id = $4 AND ({clause})
            ORDER BY starts_at DESC
@@ -348,7 +366,12 @@ impl InMemoryMaintenanceStore {
 
 #[async_trait]
 impl MaintenanceStore for InMemoryMaintenanceStore {
-    async fn create(&self, _org: OrgId, new: NewMaintenanceWindow) -> Result<MaintenanceWindow> {
+    async fn create(
+        &self,
+        _org: OrgId,
+        new: NewMaintenanceWindow,
+        source: WriteSource,
+    ) -> Result<MaintenanceWindow> {
         let now = Utc::now();
         let id = Uuid::now_v7();
         let mw = MaintenanceWindow {
@@ -358,6 +381,7 @@ impl MaintenanceStore for InMemoryMaintenanceStore {
             starts_at: new.starts_at,
             ends_at: new.ends_at,
             component_ids: new.component_ids,
+            write_source: source,
             created_at: now,
             updated_at: now,
         };
@@ -398,6 +422,7 @@ impl MaintenanceStore for InMemoryMaintenanceStore {
         _org: OrgId,
         id: Uuid,
         update: MaintenanceWindowUpdate,
+        source: WriteSource,
     ) -> Result<Option<MaintenanceWindow>> {
         let mut g = self.inner.lock();
         let Some(w) = g.windows.iter_mut().find(|w| w.id == id) else {
@@ -418,6 +443,7 @@ impl MaintenanceStore for InMemoryMaintenanceStore {
         if let Some(c) = update.component_ids {
             w.component_ids = c;
         }
+        w.write_source = source;
         w.updated_at = Utc::now();
         Ok(Some(w.clone()))
     }
@@ -470,7 +496,10 @@ mod tests {
     #[tokio::test]
     async fn create_and_list_roundtrip() {
         let store = InMemoryMaintenanceStore::new();
-        let mw = store.create(org(), upcoming()).await.unwrap();
+        let mw = store
+            .create(org(), upcoming(), WriteSource::Ui)
+            .await
+            .unwrap();
         let list = store
             .list(
                 org(),
@@ -489,7 +518,10 @@ mod tests {
     #[tokio::test]
     async fn filter_active_excludes_upcoming() {
         let store = InMemoryMaintenanceStore::new();
-        store.create(org(), upcoming()).await.unwrap();
+        store
+            .create(org(), upcoming(), WriteSource::Ui)
+            .await
+            .unwrap();
         let active = store
             .list(
                 org(),
@@ -507,7 +539,10 @@ mod tests {
     #[tokio::test]
     async fn update_replaces_components() {
         let store = InMemoryMaintenanceStore::new();
-        let mw = store.create(org(), upcoming()).await.unwrap();
+        let mw = store
+            .create(org(), upcoming(), WriteSource::Ui)
+            .await
+            .unwrap();
         let new_id = Uuid::now_v7();
         let patched = store
             .update(
@@ -517,6 +552,7 @@ mod tests {
                     component_ids: Some(vec![new_id]),
                     ..Default::default()
                 },
+                WriteSource::Ui,
             )
             .await
             .unwrap()

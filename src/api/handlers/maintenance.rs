@@ -24,7 +24,7 @@ use crate::domain::{
 };
 use crate::error::{AppError, Result};
 use crate::storage::{MaintenanceListQuery, MaintenanceStore};
-use crate::web::{Authorized, MaintenanceDelete, MaintenanceRead, MaintenanceWrite};
+use crate::web::{Authorized, MaintenanceDelete, MaintenanceRead, MaintenanceWrite, RequestSource};
 
 const MAX_WINDOW_DAYS: i64 = 30;
 const LIST_LIMIT_DEFAULT: u32 = 50;
@@ -65,6 +65,7 @@ pub struct ListQuery {
 pub async fn create_maintenance(
     State(state): State<AppState>,
     Authorized(org, _): Authorized<MaintenanceWrite>,
+    RequestSource(source): RequestSource,
     Json(new): Json<NewMaintenanceWindow>,
 ) -> Result<(
     StatusCode,
@@ -82,7 +83,7 @@ pub async fn create_maintenance(
         .quotas
         .check_can_create_maintenance_window(org, None)
         .await?;
-    let mw = state.maintenance_store.create(org, new).await?;
+    let mw = state.maintenance_store.create(org, new, source).await?;
     let location =
         HeaderValue::from_str(&format!("/api/v1/maintenance/{}", mw.id)).expect("uuid ascii");
     Ok((
@@ -170,6 +171,7 @@ pub async fn get_maintenance(
 pub async fn update_maintenance(
     State(state): State<AppState>,
     Authorized(org, _): Authorized<MaintenanceWrite>,
+    RequestSource(source): RequestSource,
     Path(id): Path<Uuid>,
     Json(update): Json<MaintenanceWindowUpdate>,
 ) -> Result<Json<MaintenanceWindow>> {
@@ -198,7 +200,11 @@ pub async fn update_maintenance(
     if let Some(ids) = update.component_ids.as_deref() {
         validate_component_ids(state.maintenance_store.as_ref(), org, ids).await?;
     }
-    match state.maintenance_store.update(org, id, update).await? {
+    match state
+        .maintenance_store
+        .update(org, id, update, source)
+        .await?
+    {
         Some(mw) => Ok(Json(mw)),
         None => Err(AppError::not_found(
             codes::MAINTENANCE_NOT_FOUND,

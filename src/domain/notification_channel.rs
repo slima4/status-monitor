@@ -9,6 +9,7 @@
 
 use std::collections::BTreeMap;
 
+use super::WriteSource;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -165,6 +166,8 @@ pub struct NotificationChannel {
     pub enabled: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// Where this channel was last changed from (UI, API, or Terraform).
+    pub write_source: WriteSource,
 }
 
 fn default_true() -> bool {

@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use sqlx::PgPool;
-use uptimepage::domain::{CheckSpec, ExpectedStatus, NewTarget, TargetUpdate};
+use uptimepage::domain::{CheckSpec, ExpectedStatus, NewTarget, TargetUpdate, WriteSource};
 use uptimepage::security::Cipher;
 use uptimepage::storage::{PostgresTargetStore, TargetStore};
 use url::Url;
@@ -67,7 +67,7 @@ async fn bulk_create_with_ragged_tags(pool: PgPool) {
     ];
 
     let created = store
-        .bulk_create(org, items, i64::MAX)
+        .bulk_create(org, items, WriteSource::Ui, i64::MAX)
         .await
         .expect("bulk_create succeeds");
 
@@ -85,7 +85,7 @@ async fn bulk_create_with_ragged_tags(pool: PgPool) {
 async fn bulk_create_empty_is_noop(pool: PgPool) {
     let (store, org) = store_with_default_org(pool, None).await;
     let result = store
-        .bulk_create(org, vec![], i64::MAX)
+        .bulk_create(org, vec![], WriteSource::Ui, i64::MAX)
         .await
         .expect("empty bulk ok");
     assert!(result.is_empty());
@@ -100,7 +100,7 @@ async fn bulk_create_empty_is_noop(pool: PgPool) {
 async fn target_update_public_overlay_set_keep_clear(pool: PgPool) {
     let (store, org) = store_with_default_org(pool, None).await;
     let t = store
-        .create(org, make("svc", vec![]), i64::MAX)
+        .create(org, make("svc", vec![]), WriteSource::Ui, i64::MAX)
         .await
         .expect("create");
 
@@ -114,6 +114,7 @@ async fn target_update_public_overlay_set_keep_clear(pool: PgPool) {
                 public_group: Some(Some("Core".into())),
                 ..Default::default()
             },
+            WriteSource::Ui,
         )
         .await
         .expect("update ok")
@@ -130,6 +131,7 @@ async fn target_update_public_overlay_set_keep_clear(pool: PgPool) {
                 public_status: Some(true),
                 ..Default::default()
             },
+            WriteSource::Ui,
         )
         .await
         .expect("update ok")
@@ -152,6 +154,7 @@ async fn target_update_public_overlay_set_keep_clear(pool: PgPool) {
                 public_group: Some(None),
                 ..Default::default()
             },
+            WriteSource::Ui,
         )
         .await
         .expect("update ok")
@@ -184,7 +187,10 @@ async fn credentials_stored_as_ciphertext_envelope(pool: PgPool) {
         public_sort_order: 0,
     };
 
-    let created = store.create(org, new, i64::MAX).await.expect("create");
+    let created = store
+        .create(org, new, WriteSource::Ui, i64::MAX)
+        .await
+        .expect("create");
 
     // Round-trip via the store decrypts.
     let fetched = store
@@ -224,7 +230,10 @@ async fn credentials_stored_as_ciphertext_envelope(pool: PgPool) {
 async fn no_credentials_no_envelope(pool: PgPool) {
     let (store, org) = store_with_default_org(pool.clone(), Some(test_cipher())).await;
     let new = make("plain", vec![]);
-    let created = store.create(org, new, i64::MAX).await.expect("create");
+    let created = store
+        .create(org, new, WriteSource::Ui, i64::MAX)
+        .await
+        .expect("create");
 
     let raw: (serde_json::Value,) = sqlx::query_as("SELECT check_spec FROM targets WHERE id = $1")
         .bind(created.id)

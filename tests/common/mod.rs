@@ -17,7 +17,9 @@ use uptimepage::config::{
     AppConfig, CheckerConfig, CircuitBreakerConfig, DnsConfig, HttpClientConfig, SchedulerConfig,
     SecurityConfig, TransactionalEmailConfig,
 };
-use uptimepage::domain::{CheckSpec, ExpectedStatus, HttpCheck, HttpMethod, OrgId, Target};
+use uptimepage::domain::{
+    CheckSpec, ExpectedStatus, HttpCheck, HttpMethod, OrgId, Target, WriteSource,
+};
 use uptimepage::email::{EmailSender, build_email_sender};
 use uptimepage::http_client::{HttpClients, build_clients};
 use uptimepage::http_outbound::{OutboundHttpClient, build_outbound_client};
@@ -692,6 +694,7 @@ pub fn http_target(addr: SocketAddr, path: &str, interval_ms: u64) -> Target {
         public_description: None,
         public_group: None,
         public_sort_order: 0,
+        write_source: WriteSource::Ui,
         created_at: Utc::now(),
         updated_at: Utc::now(),
     }

@@ -23,7 +23,8 @@ use crate::error::{AppError, Result};
 use crate::security::SsrfGuard;
 use crate::storage::TargetFilter;
 use crate::web::{
-    Authorized, CurrentOrg, TargetsDelete, TargetsExecute, TargetsRead, TargetsWrite, TokenScopes,
+    Authorized, CurrentOrg, RequestSource, TargetsDelete, TargetsExecute, TargetsRead,
+    TargetsWrite, TokenScopes,
 };
 use crate::worker::{CheckTask, host_for_spec};
 
@@ -174,6 +175,7 @@ pub async fn get(
 pub async fn create(
     State(state): State<AppState>,
     Authorized(org, _): Authorized<TargetsWrite>,
+    RequestSource(source): RequestSource,
     Json(mut new): Json<NewTarget>,
 ) -> Result<(
     StatusCode,
@@ -194,7 +196,7 @@ pub async fn create(
     }
     let t = state
         .target_store
-        .create(org, new, i64::from(plan.max_targets))
+        .create(org, new, source, i64::from(plan.max_targets))
         .await?;
     if t.public_status {
         state.public_source.invalidate(org).await;
@@ -232,6 +234,7 @@ pub async fn create(
 pub async fn update(
     State(state): State<AppState>,
     Authorized(org, _): Authorized<TargetsWrite>,
+    RequestSource(source): RequestSource,
     Path(id): Path<Uuid>,
     Json(mut update): Json<TargetUpdate>,
 ) -> Result<Redacted<Target>> {
@@ -297,7 +300,7 @@ pub async fn update(
         state.quotas.check_public_components(org, None, 1).await?;
     }
     let touches_public = touches_public_view(&update);
-    match state.target_store.update(org, id, update).await? {
+    match state.target_store.update(org, id, update, source).await? {
         Some(t) => {
             if touches_public || t.public_status {
                 state.public_source.invalidate(org).await;
@@ -373,6 +376,7 @@ pub async fn delete(
 pub async fn bulk_create(
     State(state): State<AppState>,
     Authorized(org, _): Authorized<TargetsWrite>,
+    RequestSource(source): RequestSource,
     Json(mut items): Json<Vec<NewTarget>>,
 ) -> Result<(StatusCode, Redacted<Vec<Target>>)> {
     if items.is_empty() {
@@ -425,7 +429,7 @@ pub async fn bulk_create(
     }
     let out = state
         .target_store
-        .bulk_create(org, items, i64::from(plan.max_targets))
+        .bulk_create(org, items, source, i64::from(plan.max_targets))
         .await?;
     if out.iter().any(|t| t.public_status) {
         state.public_source.invalidate(org).await;

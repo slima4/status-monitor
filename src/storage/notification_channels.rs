@@ -20,6 +20,7 @@ use uuid::Uuid;
 use crate::api::error::codes;
 use crate::domain::{
     ChannelConfig, NewNotificationChannel, NotificationChannel, NotificationChannelUpdate, OrgId,
+    WriteSource,
 };
 use crate::error::{AppError, Result};
 use crate::security::{Cipher, envelope_str, wrap_envelope};
@@ -78,6 +79,7 @@ pub trait NotificationChannelStore: Send + Sync {
         &self,
         org: OrgId,
         new: NewNotificationChannel,
+        source: WriteSource,
         max_channels: i64,
     ) -> Result<NotificationChannel>;
     async fn list(&self, org: OrgId) -> Result<Vec<NotificationChannel>>;
@@ -87,6 +89,7 @@ pub trait NotificationChannelStore: Send + Sync {
         org: OrgId,
         id: Uuid,
         update: NotificationChannelUpdate,
+        source: WriteSource,
     ) -> Result<Option<NotificationChannel>>;
     async fn delete(&self, org: OrgId, id: Uuid) -> Result<bool>;
     /// Subset of `ids` that exist in `org`. Mirrors
@@ -118,6 +121,7 @@ struct ChannelRow {
     name: String,
     config: Value,
     enabled: bool,
+    write_source: String,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
 }
@@ -133,6 +137,7 @@ impl ChannelRow {
             kind: config.kind(),
             config,
             enabled: self.enabled,
+            write_source: WriteSource::from_db(&self.write_source),
             created_at: self.created_at,
             updated_at: self.updated_at,
         })
@@ -150,6 +155,7 @@ impl NotificationChannelStore for PgNotificationChannelStore {
         &self,
         org: OrgId,
         new: NewNotificationChannel,
+        source: WriteSource,
         max_channels: i64,
     ) -> Result<NotificationChannel> {
         let sealed = seal(&new.config, self.cipher.as_deref())?;
@@ -167,10 +173,10 @@ impl NotificationChannelStore for PgNotificationChannelStore {
             .await
             .map_err(|e| AppError::Other(anyhow!("advisory lock: {e}")))?;
         let row: Option<ChannelRow> = sqlx::query_as(
-            r#"INSERT INTO notification_channels (org_id, name, kind, config, enabled)
-               SELECT $1, $2, $3, $4, $5
+            r#"INSERT INTO notification_channels (org_id, name, kind, config, enabled, write_source)
+               SELECT $1, $2, $3, $4, $5, $7
                WHERE (SELECT count(*) FROM notification_channels WHERE org_id = $1) < $6
-               RETURNING id, name, config, enabled, created_at, updated_at"#,
+               RETURNING id, name, config, enabled, write_source, created_at, updated_at"#,
         )
         .bind(org.0)
         .bind(&new.name)
@@ -178,6 +184,7 @@ impl NotificationChannelStore for PgNotificationChannelStore {
         .bind(&sealed)
         .bind(new.enabled)
         .bind(max_channels)
+        .bind(source.as_str())
         .fetch_optional(&mut *tx)
         .await
         .map_err(|e| {
@@ -205,7 +212,7 @@ impl NotificationChannelStore for PgNotificationChannelStore {
 
     async fn list(&self, org: OrgId) -> Result<Vec<NotificationChannel>> {
         let rows: Vec<ChannelRow> = sqlx::query_as(
-            r#"SELECT id, name, config, enabled, created_at, updated_at
+            r#"SELECT id, name, config, enabled, write_source, created_at, updated_at
                FROM notification_channels
                WHERE org_id = $1
                ORDER BY name"#,
@@ -221,7 +228,7 @@ impl NotificationChannelStore for PgNotificationChannelStore {
 
     async fn get(&self, org: OrgId, id: Uuid) -> Result<Option<NotificationChannel>> {
         let row: Option<ChannelRow> = sqlx::query_as(
-            r#"SELECT id, name, config, enabled, created_at, updated_at
+            r#"SELECT id, name, config, enabled, write_source, created_at, updated_at
                FROM notification_channels WHERE id = $1 AND org_id = $2"#,
         )
         .bind(id)
@@ -238,6 +245,7 @@ impl NotificationChannelStore for PgNotificationChannelStore {
         org: OrgId,
         id: Uuid,
         update: NotificationChannelUpdate,
+        source: WriteSource,
     ) -> Result<Option<NotificationChannel>> {
         // Re-seal only when the config is being changed; `kind` follows it.
         let (sealed, kind) = match &update.config {
@@ -249,13 +257,14 @@ impl NotificationChannelStore for PgNotificationChannelStore {
         };
         let row: Option<ChannelRow> = sqlx::query_as(
             r#"UPDATE notification_channels
-               SET name       = COALESCE($2, name),
-                   kind       = COALESCE($3, kind),
-                   config     = COALESCE($4, config),
-                   enabled    = COALESCE($5, enabled),
-                   updated_at = now()
+               SET name        = COALESCE($2, name),
+                   kind        = COALESCE($3, kind),
+                   config      = COALESCE($4, config),
+                   enabled     = COALESCE($5, enabled),
+                   write_source = $7,
+                   updated_at  = now()
                WHERE id = $1 AND org_id = $6
-               RETURNING id, name, config, enabled, created_at, updated_at"#,
+               RETURNING id, name, config, enabled, write_source, created_at, updated_at"#,
         )
         .bind(id)
         .bind(update.name.as_ref())
@@ -263,6 +272,7 @@ impl NotificationChannelStore for PgNotificationChannelStore {
         .bind(sealed)
         .bind(update.enabled)
         .bind(org.0)
+        .bind(source.as_str())
         .fetch_optional(&self.pool)
         .await
         .map_err(|e| {
@@ -338,6 +348,7 @@ impl NotificationChannelStore for InMemoryNotificationChannelStore {
         &self,
         org: OrgId,
         new: NewNotificationChannel,
+        source: WriteSource,
         max_channels: i64,
     ) -> Result<NotificationChannel> {
         let mut g = self.inner.lock();
@@ -360,6 +371,7 @@ impl NotificationChannelStore for InMemoryNotificationChannelStore {
             kind: new.config.kind(),
             config: new.config,
             enabled: new.enabled,
+            write_source: source,
             created_at: now,
             updated_at: now,
         };
@@ -393,6 +405,7 @@ impl NotificationChannelStore for InMemoryNotificationChannelStore {
         org: OrgId,
         id: Uuid,
         update: NotificationChannelUpdate,
+        source: WriteSource,
     ) -> Result<Option<NotificationChannel>> {
         let mut g = self.inner.lock();
         if let Some(name) = &update.name
@@ -417,6 +430,7 @@ impl NotificationChannelStore for InMemoryNotificationChannelStore {
         if let Some(enabled) = update.enabled {
             ch.enabled = enabled;
         }
+        ch.write_source = source;
         ch.updated_at = Utc::now();
         Ok(Some(ch.clone()))
     }
@@ -464,7 +478,10 @@ mod tests {
     #[tokio::test]
     async fn create_list_get_update_delete_roundtrip() {
         let store = InMemoryNotificationChannelStore::new();
-        let ch = store.create(org(), slack("ops"), 10).await.unwrap();
+        let ch = store
+            .create(org(), slack("ops"), WriteSource::Ui, 10)
+            .await
+            .unwrap();
         assert_eq!(store.list(org()).await.unwrap().len(), 1);
         assert_eq!(store.get(org(), ch.id).await.unwrap().unwrap().name, "ops");
 
@@ -476,6 +493,7 @@ mod tests {
                     enabled: Some(false),
                     ..Default::default()
                 },
+                WriteSource::Ui,
             )
             .await
             .unwrap()
@@ -489,19 +507,34 @@ mod tests {
     #[tokio::test]
     async fn create_enforces_cap_and_unique_name() {
         let store = InMemoryNotificationChannelStore::new();
-        store.create(org(), slack("a"), 1).await.unwrap();
-        let over = store.create(org(), slack("b"), 1).await.unwrap_err();
+        store
+            .create(org(), slack("a"), WriteSource::Ui, 1)
+            .await
+            .unwrap();
+        let over = store
+            .create(org(), slack("b"), WriteSource::Ui, 1)
+            .await
+            .unwrap_err();
         assert!(matches!(over, AppError::Unprocessable { .. }));
-        let dup = store.create(org(), slack("a"), 10).await.unwrap_err();
+        let dup = store
+            .create(org(), slack("a"), WriteSource::Ui, 10)
+            .await
+            .unwrap_err();
         assert!(matches!(dup, AppError::Unprocessable { .. }));
     }
 
     #[tokio::test]
     async fn channels_are_isolated_per_org() {
         let store = InMemoryNotificationChannelStore::new();
-        let a = store.create(org(), slack("ops"), 10).await.unwrap();
+        let a = store
+            .create(org(), slack("ops"), WriteSource::Ui, 10)
+            .await
+            .unwrap();
         // Same name in a different org is allowed and invisible to org A.
-        store.create(other_org(), slack("ops"), 10).await.unwrap();
+        store
+            .create(other_org(), slack("ops"), WriteSource::Ui, 10)
+            .await
+            .unwrap();
 
         assert_eq!(store.list(org()).await.unwrap().len(), 1);
         assert_eq!(store.list(other_org()).await.unwrap().len(), 1);
@@ -509,7 +542,12 @@ mod tests {
         assert!(store.get(other_org(), a.id).await.unwrap().is_none());
         assert!(
             store
-                .update(other_org(), a.id, NotificationChannelUpdate::default())
+                .update(
+                    other_org(),
+                    a.id,
+                    NotificationChannelUpdate::default(),
+                    WriteSource::Ui
+                )
                 .await
                 .unwrap()
                 .is_none()

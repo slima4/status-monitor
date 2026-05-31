@@ -8,7 +8,8 @@ use crate::api::types::{
     StatusBreakdown, TagCount, TargetsSummary,
 };
 use crate::domain::{
-    CheckResult, CheckStatus, Incident, NewTarget, OrgId, Target, TargetUpdate, coalesce_incidents,
+    CheckResult, CheckStatus, Incident, NewTarget, OrgId, Target, TargetUpdate, WriteSource,
+    coalesce_incidents,
 };
 use crate::error::Result;
 use crate::storage::traits::{
@@ -440,7 +441,7 @@ impl InMemoryTargetStore {
         self.targets.lock().push(target);
     }
 
-    fn materialize(new: NewTarget) -> Target {
+    fn materialize(new: NewTarget, source: WriteSource) -> Target {
         let now = Utc::now();
         Target {
             id: Uuid::now_v7(),
@@ -457,6 +458,7 @@ impl InMemoryTargetStore {
             public_description: new.public_description,
             public_group: new.public_group,
             public_sort_order: new.public_sort_order,
+            write_source: source,
             created_at: now,
             updated_at: now,
         }
@@ -525,7 +527,13 @@ impl TargetStore for InMemoryTargetStore {
         Ok(self.targets.lock().iter().find(|t| t.id == id).cloned())
     }
 
-    async fn create(&self, _org: OrgId, new: NewTarget, max_targets: i64) -> Result<Target> {
+    async fn create(
+        &self,
+        _org: OrgId,
+        new: NewTarget,
+        source: WriteSource,
+        max_targets: i64,
+    ) -> Result<Target> {
         let mut guard = self.targets.lock();
         // Lock held across count + push, so this is atomic for the same
         // reason the Postgres count-in-INSERT is.
@@ -537,12 +545,18 @@ impl TargetStore for InMemoryTargetStore {
                 "free",
             ));
         }
-        let target = Self::materialize(new);
+        let target = Self::materialize(new, source);
         guard.push(target.clone());
         Ok(target)
     }
 
-    async fn update(&self, _org: OrgId, id: Uuid, update: TargetUpdate) -> Result<Option<Target>> {
+    async fn update(
+        &self,
+        _org: OrgId,
+        id: Uuid,
+        update: TargetUpdate,
+        source: WriteSource,
+    ) -> Result<Option<Target>> {
         let mut guard = self.targets.lock();
         let Some(t) = guard.iter_mut().find(|t| t.id == id) else {
             return Ok(None);
@@ -586,6 +600,7 @@ impl TargetStore for InMemoryTargetStore {
         if let Some(v) = update.public_sort_order {
             t.public_sort_order = v;
         }
+        t.write_source = source;
         t.updated_at = Utc::now();
         Ok(Some(t.clone()))
     }
@@ -601,6 +616,7 @@ impl TargetStore for InMemoryTargetStore {
         &self,
         _org: OrgId,
         items: Vec<NewTarget>,
+        source: WriteSource,
         max_targets: i64,
     ) -> Result<Vec<Target>> {
         let mut guard = self.targets.lock();
@@ -614,7 +630,7 @@ impl TargetStore for InMemoryTargetStore {
         }
         let mut created = Vec::with_capacity(items.len());
         for new in items {
-            let target = Self::materialize(new);
+            let target = Self::materialize(new, source);
             guard.push(target.clone());
             created.push(target);
         }

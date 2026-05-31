@@ -116,6 +116,8 @@ pub struct IncidentsPage {
     pub interval_s: u64,
     pub enabled: bool,
     pub tags: Vec<String>,
+    /// `terraform`/`api` chip for externally-managed monitors; `None` (UI) hides it.
+    pub managed_by: Option<&'static str>,
     pub last_status: &'static str,
     pub last_at_iso: String,
     pub incidents: Vec<IncidentRow>,
@@ -145,6 +147,8 @@ pub struct DetailPage {
     pub interval_s: u64,
     pub enabled: bool,
     pub tags: Vec<String>,
+    /// `terraform`/`api` chip for externally-managed monitors; `None` (UI) hides it.
+    pub managed_by: Option<&'static str>,
     pub last_status: &'static str,
     /// ISO 8601 timestamp of the most recent check, "" when none. Drives
     /// the client-side "checked Ns ago · next in Ns" ticker.
@@ -367,6 +371,7 @@ pub async fn index(
         interval_s: target.interval.as_secs(),
         enabled: target.enabled,
         tags: target.tags,
+        managed_by: target.write_source.managed_label(),
         last_status: live.last_status,
         last_at_iso: Arc::clone(&live.last_at_iso),
         uptime: Arc::clone(&live.uptime),
@@ -621,6 +626,7 @@ pub async fn incidents(
         interval_s: target.interval.as_secs(),
         enabled: target.enabled,
         tags: target.tags,
+        managed_by: target.write_source.managed_label(),
         last_status,
         last_at_iso,
         incidents: incidents.into_iter().map(IncidentRow::from).collect(),
@@ -666,6 +672,7 @@ mod tests {
             interval_s: 60,
             enabled: true,
             tags: vec!["prod".into()],
+            managed_by: None,
             last_status: "up",
             last_at_iso: Arc::from("2026-05-13T12:00:00Z"),
             uptime: Arc::new(UptimeStatsView {
@@ -977,6 +984,7 @@ mod tests {
             interval_s: 60,
             enabled: true,
             tags: vec!["prod".into()],
+            managed_by: None,
             last_status: "down",
             last_at_iso: "2026-05-13T12:00:00Z".into(),
             incidents,

@@ -616,6 +616,7 @@ mod tests {
             public_description: None,
             public_group: None,
             public_sort_order: 0,
+            write_source: crate::domain::WriteSource::Ui,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
@@ -708,6 +709,7 @@ mod tests {
             public_description: None,
             public_group: None,
             public_sort_order: 0,
+            write_source: crate::domain::WriteSource::Ui,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
@@ -748,6 +750,7 @@ mod tests {
             public_description: None,
             public_group: None,
             public_sort_order: 0,
+            write_source: crate::domain::WriteSource::Ui,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
@@ -788,6 +791,7 @@ mod tests {
             public_description: None,
             public_group: None,
             public_sort_order: 0,
+            write_source: crate::domain::WriteSource::Ui,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
@@ -825,6 +829,7 @@ mod tests {
             public_description: None,
             public_group: None,
             public_sort_order: 0,
+            write_source: crate::domain::WriteSource::Ui,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
@@ -861,6 +866,7 @@ mod tests {
             public_description: None,
             public_group: None,
             public_sort_order: 0,
+            write_source: crate::domain::WriteSource::Ui,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
@@ -907,6 +913,7 @@ mod tests {
             public_description: None,
             public_group: None,
             public_sort_order: 0,
+            write_source: crate::domain::WriteSource::Ui,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };

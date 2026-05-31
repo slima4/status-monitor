@@ -16,7 +16,7 @@ use std::time::Duration;
 use uptimepage::api::error::codes;
 use uptimepage::domain::{
     AlertBinding, ChannelConfig, CheckSpec, ExpectedStatus, NewNotificationChannel, NewTarget,
-    NotificationChannelUpdate, TargetAlerts,
+    NotificationChannelUpdate, TargetAlerts, WriteSource,
 };
 use uptimepage::error::AppError;
 use uptimepage::storage::{
@@ -86,7 +86,7 @@ async fn channels_isolated_across_orgs_live_pg() {
     let store = PgNotificationChannelStore::new(pool.clone(), None);
 
     let ch = store
-        .create(org_a, slack("A Ops", "T/B/aaa"), i64::MAX)
+        .create(org_a, slack("A Ops", "T/B/aaa"), WriteSource::Ui, i64::MAX)
         .await
         .expect("A creates its channel");
 
@@ -103,7 +103,12 @@ async fn channels_isolated_across_orgs_live_pg() {
     // … nor mutate it: update is a no-op miss, delete reports nothing removed.
     assert!(
         store
-            .update(org_b, ch.id, NotificationChannelUpdate::default())
+            .update(
+                org_b,
+                ch.id,
+                NotificationChannelUpdate::default(),
+                WriteSource::Ui
+            )
             .await
             .unwrap()
             .is_none()
@@ -137,15 +142,18 @@ async fn quota_cap_is_per_org_live_pg() {
     // race-safe is covered by the storage-locks unit suite, not here.
 
     let a1 = store
-        .create(org_a, slack("A1", "T/B/a1"), cap)
+        .create(org_a, slack("A1", "T/B/a1"), WriteSource::Ui, cap)
         .await
         .expect("A #1");
     store
-        .create(org_a, slack("A2", "T/B/a2"), cap)
+        .create(org_a, slack("A2", "T/B/a2"), WriteSource::Ui, cap)
         .await
         .expect("A #2");
     // A is at its cap: the next create is rejected.
-    match store.create(org_a, slack("A3", "T/B/a3"), cap).await {
+    match store
+        .create(org_a, slack("A3", "T/B/a3"), WriteSource::Ui, cap)
+        .await
+    {
         Err(AppError::Unprocessable { code, .. }) => {
             assert_eq!(code, codes::CHANNEL_QUOTA_EXCEEDED)
         }
@@ -154,18 +162,18 @@ async fn quota_cap_is_per_org_live_pg() {
 
     // The cap is per-org: B is unaffected by A's count.
     store
-        .create(org_b, slack("B1", "T/B/b1"), cap)
+        .create(org_b, slack("B1", "T/B/b1"), WriteSource::Ui, cap)
         .await
         .expect("B #1 (A's count must not affect B)");
     store
-        .create(org_b, slack("B2", "T/B/b2"), cap)
+        .create(org_b, slack("B2", "T/B/b2"), WriteSource::Ui, cap)
         .await
         .expect("B #2");
 
     // Cap tracks the live count: freeing a slot lets A create again.
     assert!(store.delete(org_a, a1.id).await.unwrap());
     store
-        .create(org_a, slack("A4", "T/B/a4"), cap)
+        .create(org_a, slack("A4", "T/B/a4"), WriteSource::Ui, cap)
         .await
         .expect("A can create again after deleting one");
 
@@ -183,7 +191,7 @@ async fn channel_config_sealed_at_rest_live_pg() {
 
     let secret = "T/B/zzSEKRETzz";
     let ch = store
-        .create(org_a, slack("Sealed", secret), i64::MAX)
+        .create(org_a, slack("Sealed", secret), WriteSource::Ui, i64::MAX)
         .await
         .expect("create sealed channel");
 
@@ -223,7 +231,7 @@ async fn target_alert_binding_channel_lookup_is_org_scoped_live_pg() {
     let targets = PostgresTargetStore::from_pool(pool.clone(), None);
 
     let ch = channels
-        .create(org_a, slack("Bound", "T/B/bind"), i64::MAX)
+        .create(org_a, slack("Bound", "T/B/bind"), WriteSource::Ui, i64::MAX)
         .await
         .expect("A's channel");
 
@@ -248,7 +256,7 @@ async fn target_alert_binding_channel_lookup_is_org_scoped_live_pg() {
         public_sort_order: 0,
     };
     let created = targets
-        .create(org_a, new_target, i64::MAX)
+        .create(org_a, new_target, WriteSource::Ui, i64::MAX)
         .await
         .expect("A creates a target bound to its own channel");
 

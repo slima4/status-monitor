@@ -35,6 +35,8 @@ pub struct ChannelRow {
     pub kind: &'static str,
     pub enabled: bool,
     pub created: chrono::DateTime<chrono::Utc>,
+    /// `terraform`/`api` chip for externally-managed channels; `None` (UI) hides it.
+    pub managed_by: Option<&'static str>,
 }
 
 #[derive(Template, WebTemplate)]
@@ -120,6 +122,7 @@ pub async fn list_partial(
             kind: c.kind.as_db_str(),
             enabled: c.enabled,
             created: c.created_at,
+            managed_by: c.write_source.managed_label(),
         })
         .collect();
     Ok(ChannelsPartial { channels }.into_response())
@@ -232,6 +235,7 @@ mod tests {
                 webhook_url: "https://hooks.slack.com/services/T/B/zzUNIQUESECRETzz".into(),
             },
             enabled: true,
+            write_source: crate::domain::WriteSource::Ui,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };
@@ -266,6 +270,7 @@ mod tests {
                 kind: "slack",
                 enabled: true,
                 created: "2026-05-18T12:00:00Z".parse().unwrap(),
+                managed_by: None,
             }],
         }
         .render()

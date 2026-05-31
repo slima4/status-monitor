@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
+use super::WriteSource;
 use super::alert::TargetAlerts;
 use super::check::CheckSpec;
 
@@ -51,6 +52,9 @@ pub struct Target {
     pub public_sort_order: i32,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// Where this target was last changed from (UI, API, or Terraform).
+    #[serde(default)]
+    pub write_source: WriteSource,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]

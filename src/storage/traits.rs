@@ -6,7 +6,9 @@ use crate::api::types::{
     DashboardMetrics, DashboardSparkBucket, FleetRibbonBucket, LatencyBucket, PriorPeriodSummary,
     StatusBreakdown, TagCount, TargetsSummary,
 };
-use crate::domain::{CheckResult, CheckStatus, Incident, NewTarget, OrgId, Target, TargetUpdate};
+use crate::domain::{
+    CheckResult, CheckStatus, Incident, NewTarget, OrgId, Target, TargetUpdate, WriteSource,
+};
 use crate::error::Result;
 
 #[async_trait]
@@ -51,8 +53,20 @@ pub trait TargetStore: Send + Sync {
     /// guarded by `(count) + 1 <= max_targets` so the bound holds even
     /// against a concurrent create (no check-then-act). Returns
     /// `AppError::QuotaExceeded` when the cap is reached.
-    async fn create(&self, org: OrgId, new: NewTarget, max_targets: i64) -> Result<Target>;
-    async fn update(&self, org: OrgId, id: Uuid, update: TargetUpdate) -> Result<Option<Target>>;
+    async fn create(
+        &self,
+        org: OrgId,
+        new: NewTarget,
+        source: WriteSource,
+        max_targets: i64,
+    ) -> Result<Target>;
+    async fn update(
+        &self,
+        org: OrgId,
+        id: Uuid,
+        update: TargetUpdate,
+        source: WriteSource,
+    ) -> Result<Option<Target>>;
     async fn delete(&self, org: OrgId, id: Uuid) -> Result<bool>;
     /// Bulk create. Same atomic `(count) + items.len() <= max_targets`
     /// bound; either all rows insert or none do (`AppError::QuotaExceeded`).
@@ -60,6 +74,7 @@ pub trait TargetStore: Send + Sync {
         &self,
         org: OrgId,
         items: Vec<NewTarget>,
+        source: WriteSource,
         max_targets: i64,
     ) -> Result<Vec<Target>>;
     async fn list_updated_since(&self, org: OrgId, since: DateTime<Utc>) -> Result<Vec<Target>>;

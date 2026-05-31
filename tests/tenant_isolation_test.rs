@@ -14,7 +14,7 @@ use chrono::Utc;
 use sqlx::PgPool;
 use uptimepage::domain::{
     CheckResult, CheckSpec, CheckStatus, ExpectedStatus, NewMaintenanceWindow, NewTarget, OrgId,
-    UserId,
+    UserId, WriteSource,
 };
 use uptimepage::storage::traits::TimeRange;
 use uptimepage::storage::{
@@ -149,6 +149,7 @@ async fn two_tenants_never_see_each_others_data() {
         .create(
             a.org,
             target_named(&format!("a-target-{}", Uuid::now_v7())),
+            WriteSource::Ui,
             i64::MAX,
         )
         .await
@@ -157,6 +158,7 @@ async fn two_tenants_never_see_each_others_data() {
         .create(
             b.org,
             target_named(&format!("b-target-{}", Uuid::now_v7())),
+            WriteSource::Ui,
             i64::MAX,
         )
         .await
@@ -217,6 +219,7 @@ async fn two_tenants_never_see_each_others_data() {
                 ends_at: now + chrono::Duration::hours(1),
                 component_ids: vec![],
             },
+            WriteSource::Ui,
         )
         .await
         .expect("a mw");
@@ -230,6 +233,7 @@ async fn two_tenants_never_see_each_others_data() {
                 ends_at: now + chrono::Duration::hours(1),
                 component_ids: vec![],
             },
+            WriteSource::Ui,
         )
         .await
         .expect("b mw");

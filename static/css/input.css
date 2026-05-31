@@ -2997,6 +2997,20 @@
         min-width: 2.5rem;
     }
 
+    .monitors-row__nameline {
+        @apply inline-flex items-center gap-2 min-w-0;
+    }
+
+    /* Provenance chip for resources managed outside the UI (API/Terraform). */
+    .managed-chip {
+        @apply inline-flex items-center rounded font-mono text-[9.5px] font-medium uppercase;
+        padding: 1px 5px;
+        background: var(--theme-surface-sunk);
+        color: var(--theme-text-muted);
+        letter-spacing: 0.05em;
+        border: 1px solid var(--theme-line);
+    }
+
     .monitors-tag {
         @apply inline-flex items-center gap-1 rounded font-mono text-[10.5px] font-medium;
         padding: 1px 6px;

@@ -21,7 +21,7 @@ use sqlx::postgres::PgPoolOptions;
 use tokio::runtime::Builder;
 use uptimepage::domain::{
     CheckResult, CheckSpec, CheckStatus, ExpectedStatus, HttpCheck, HttpMethod, NewTarget, OrgId,
-    UserId,
+    UserId, WriteSource,
 };
 use uptimepage::public_status::{AggregatorConfig, OrgAggregator};
 use uptimepage::storage::{
@@ -157,7 +157,12 @@ async fn build_fixture() -> Option<Fixture> {
 
         for j in 0..COMPONENTS_PER_ORG {
             let t = target_store
-                .create(org.id, http_target(&format!("ttfb-{i}-{j}")), i64::MAX)
+                .create(
+                    org.id,
+                    http_target(&format!("ttfb-{i}-{j}")),
+                    WriteSource::Ui,
+                    i64::MAX,
+                )
                 .await
                 .expect("create target");
             let rows: Vec<CheckResult> = (0..RESULTS_PER_COMPONENT)

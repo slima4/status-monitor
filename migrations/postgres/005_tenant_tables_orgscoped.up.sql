@@ -27,6 +27,8 @@ CREATE TABLE targets (
     public_description    TEXT,
     public_group          TEXT,
     public_sort_order     INTEGER NOT NULL DEFAULT 0,
+    write_source          TEXT NOT NULL DEFAULT 'ui'
+                          CHECK (write_source IN ('ui', 'api', 'terraform')),
     created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at            TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -94,6 +96,8 @@ CREATE TABLE maintenance_windows (
     description     TEXT,
     starts_at       TIMESTAMPTZ NOT NULL,
     ends_at         TIMESTAMPTZ NOT NULL CHECK (ends_at > starts_at),
+    write_source    TEXT NOT NULL DEFAULT 'ui'
+                    CHECK (write_source IN ('ui', 'api', 'terraform')),
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );

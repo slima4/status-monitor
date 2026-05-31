@@ -81,6 +81,8 @@ pub struct MonitorRow {
     pub last_check_label: String,
     pub uptime_30d_label: String,
     pub owner: Option<OwnerView>,
+    /// `terraform`/`api` chip for externally-managed monitors; `None` (UI) hides it.
+    pub managed_by: Option<&'static str>,
 }
 
 pub struct OwnerView {
@@ -432,6 +434,7 @@ fn build_row(
         last_check_label,
         uptime_30d_label,
         owner,
+        managed_by: t.write_source.managed_label(),
     }
 }
 
@@ -587,6 +590,7 @@ mod tests {
             last_check_label: "3s ago".into(),
             uptime_30d_label: "99.94%".into(),
             owner: None,
+            managed_by: None,
         }
     }
 

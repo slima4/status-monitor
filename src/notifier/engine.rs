@@ -389,6 +389,7 @@ mod tests {
                     },
                     enabled: true,
                 },
+                crate::domain::WriteSource::Ui,
                 10,
             )
             .await
@@ -415,6 +416,7 @@ mod tests {
                     },
                     enabled: true,
                 },
+                crate::domain::WriteSource::Ui,
                 10,
             )
             .await
@@ -464,6 +466,7 @@ mod tests {
                     },
                     enabled: true,
                 },
+                crate::domain::WriteSource::Ui,
                 10,
             )
             .await
@@ -503,6 +506,7 @@ mod tests {
             public_description: None,
             public_group: None,
             public_sort_order: 0,
+            write_source: crate::domain::WriteSource::Ui,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         });
@@ -568,6 +572,7 @@ mod tests {
                     },
                     enabled: true,
                 },
+                crate::domain::WriteSource::Ui,
                 10,
             )
             .await
@@ -607,6 +612,7 @@ mod tests {
             public_description: None,
             public_group: None,
             public_sort_order: 0,
+            write_source: crate::domain::WriteSource::Ui,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         });
@@ -725,6 +731,7 @@ mod tests {
                     },
                     enabled: true,
                 },
+                crate::domain::WriteSource::Ui,
                 10,
             )
             .await
@@ -764,6 +771,7 @@ mod tests {
             public_description: None,
             public_group: None,
             public_sort_order: 0,
+            write_source: crate::domain::WriteSource::Ui,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         });

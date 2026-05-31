@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use crate::api::types::{TagCount, TargetsSummary};
 use crate::config::PostgresConfig;
-use crate::domain::{CheckSpec, NewTarget, OrgId, Target, TargetAlerts, TargetUpdate};
+use crate::domain::{CheckSpec, NewTarget, OrgId, Target, TargetAlerts, TargetUpdate, WriteSource};
 use crate::error::{AppError, Result};
 use crate::security::Cipher;
 use crate::storage::locks::{advisory_xact_lock, org_lock_key};
@@ -115,6 +115,7 @@ pub(crate) struct TargetRow {
     pub(crate) public_description: Option<String>,
     pub(crate) public_group: Option<String>,
     pub(crate) public_sort_order: i32,
+    pub(crate) write_source: String,
     pub(crate) created_at: DateTime<Utc>,
     pub(crate) updated_at: DateTime<Utc>,
 }
@@ -146,6 +147,7 @@ pub(crate) fn decode_target_row(row: TargetRow, cipher: Option<&Cipher>) -> Resu
         public_description: row.public_description,
         public_group: row.public_group,
         public_sort_order: row.public_sort_order,
+        write_source: WriteSource::from_db(&row.write_source),
         created_at: row.created_at,
         updated_at: row.updated_at,
     })
@@ -177,6 +179,7 @@ impl TargetStore for PostgresTargetStore {
             r#"SELECT id, name, check_spec, interval_secs, enabled, tags, alerts,
                       group_name, owner_user_id,
                       public_status, public_name, public_description, public_group, public_sort_order,
+                      write_source,
                       created_at, updated_at
                FROM targets
                WHERE org_id = $1
@@ -208,6 +211,7 @@ impl TargetStore for PostgresTargetStore {
             r#"SELECT id, name, check_spec, interval_secs, enabled, tags, alerts,
                       group_name, owner_user_id,
                       public_status, public_name, public_description, public_group, public_sort_order,
+                      write_source,
                       created_at, updated_at
                FROM targets WHERE id = $1 AND org_id = $2"#,
         )
@@ -222,7 +226,13 @@ impl TargetStore for PostgresTargetStore {
         }
     }
 
-    async fn create(&self, org: OrgId, new: NewTarget, max_targets: i64) -> Result<Target> {
+    async fn create(
+        &self,
+        org: OrgId,
+        new: NewTarget,
+        source: WriteSource,
+        max_targets: i64,
+    ) -> Result<Target> {
         let check_json = self.encode_check(&new.check)?;
         let alerts_json = serde_json::to_value(&new.alerts).context("encoding alerts JSON")?;
         // A per-org advisory lock held across count+INSERT in one tx. The
@@ -251,11 +261,13 @@ impl TargetStore for PostgresTargetStore {
         let row: TargetRow = sqlx::query_as::<_, TargetRow>(
             r#"INSERT INTO targets (org_id, name, check_spec, interval_secs, enabled, tags, alerts,
                                     group_name, owner_user_id,
-                                    public_status, public_name, public_description, public_group, public_sort_order)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+                                    public_status, public_name, public_description, public_group, public_sort_order,
+                                    write_source)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
                RETURNING id, name, check_spec, interval_secs, enabled, tags, alerts,
                       group_name, owner_user_id,
                       public_status, public_name, public_description, public_group, public_sort_order,
+                      write_source,
                       created_at, updated_at"#,
         )
         .bind(org.0)
@@ -272,6 +284,7 @@ impl TargetStore for PostgresTargetStore {
         .bind(&new.public_description)
         .bind(&new.public_group)
         .bind(new.public_sort_order)
+        .bind(source.as_str())
         .fetch_one(&mut *tx)
         .await
         .context("insert target")?;
@@ -279,7 +292,13 @@ impl TargetStore for PostgresTargetStore {
         self.decode_row(row)
     }
 
-    async fn update(&self, org: OrgId, id: Uuid, update: TargetUpdate) -> Result<Option<Target>> {
+    async fn update(
+        &self,
+        org: OrgId,
+        id: Uuid,
+        update: TargetUpdate,
+        source: WriteSource,
+    ) -> Result<Option<Target>> {
         let check_json = update
             .check
             .as_ref()
@@ -307,11 +326,13 @@ impl TargetStore for PostgresTargetStore {
                  public_description = CASE WHEN $15::bool THEN $16 ELSE public_description END,
                  public_group = CASE WHEN $17::bool THEN $18 ELSE public_group END,
                  public_sort_order = COALESCE($19, public_sort_order),
+                 write_source = $21,
                  updated_at = now()
                WHERE id = $1 AND org_id = $20
                RETURNING id, name, check_spec, interval_secs, enabled, tags, alerts,
                       group_name, owner_user_id,
                       public_status, public_name, public_description, public_group, public_sort_order,
+                      write_source,
                       created_at, updated_at"#,
         )
         .bind(id)
@@ -334,6 +355,7 @@ impl TargetStore for PostgresTargetStore {
         .bind(update.public_group.clone().flatten())
         .bind(update.public_sort_order)
         .bind(org.0)
+        .bind(source.as_str())
         .fetch_optional(&self.pool)
         .await
         .context("update target")?;
@@ -357,6 +379,7 @@ impl TargetStore for PostgresTargetStore {
         &self,
         org: OrgId,
         items: Vec<NewTarget>,
+        source: WriteSource,
         max_targets: i64,
     ) -> Result<Vec<Target>> {
         if items.is_empty() {
@@ -369,12 +392,14 @@ impl TargetStore for PostgresTargetStore {
         // READ COMMITTED). All-or-nothing on the cap.
         const SQL: &str = r#"INSERT INTO targets (org_id, name, check_spec, interval_secs, enabled, tags, alerts,
                                     group_name, owner_user_id,
-                                    public_status, public_name, public_description, public_group, public_sort_order)
+                                    public_status, public_name, public_description, public_group, public_sort_order,
+                                    write_source)
                SELECT $14, u.name, u.check_spec, u.interval_secs, u.enabled,
                       ARRAY(SELECT jsonb_array_elements_text(u.tags)),
                       u.alerts,
                       u.group_name, u.owner_user_id,
-                      u.public_status, u.public_name, u.public_description, u.public_group, u.public_sort_order
+                      u.public_status, u.public_name, u.public_description, u.public_group, u.public_sort_order,
+                      $15
                FROM UNNEST($1::text[], $2::jsonb[], $3::int4[], $4::bool[], $5::jsonb[], $6::jsonb[],
                            $7::text[], $8::uuid[],
                            $9::bool[], $10::text[], $11::text[], $12::text[], $13::int4[])
@@ -384,6 +409,7 @@ impl TargetStore for PostgresTargetStore {
                RETURNING id, name, check_spec, interval_secs, enabled, tags, alerts,
                       group_name, owner_user_id,
                       public_status, public_name, public_description, public_group, public_sort_order,
+                      write_source,
                       created_at, updated_at"#;
 
         let len = items.len();
@@ -457,6 +483,7 @@ impl TargetStore for PostgresTargetStore {
                 .bind(&public_group)
                 .bind(&public_sort_order)
                 .bind(org.0)
+                .bind(source.as_str())
                 .fetch_all(&mut *tx)
                 .await
                 .context("bulk insert targets")?
@@ -494,6 +521,7 @@ impl TargetStore for PostgresTargetStore {
                 .bind(&public_group)
                 .bind(&public_sort_order)
                 .bind(org.0)
+                .bind(source.as_str())
                 .fetch_all(&mut *tx)
                 .await
                 .context("bulk insert targets")?
@@ -508,6 +536,7 @@ impl TargetStore for PostgresTargetStore {
             r#"SELECT id, name, check_spec, interval_secs, enabled, tags, alerts,
                       group_name, owner_user_id,
                       public_status, public_name, public_description, public_group, public_sort_order,
+                      write_source,
                       created_at, updated_at
                FROM targets WHERE org_id = $1 AND updated_at > $2"#,
         )

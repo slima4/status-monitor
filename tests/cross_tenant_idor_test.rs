@@ -19,7 +19,7 @@ use common::{
     build_saas_router_with_pg_targets, default_http_check, make_user, unique_slug, with_session,
 };
 use tower::ServiceExt;
-use uptimepage::domain::{CheckSpec, ExpectedStatus, NewTarget};
+use uptimepage::domain::{CheckSpec, ExpectedStatus, NewTarget, WriteSource};
 use uptimepage::storage::{PostgresTargetStore, TargetStore, create_org_with_owner};
 use url::Url;
 
@@ -75,11 +75,11 @@ async fn logged_in_operator_cannot_read_another_orgs_target() {
     // production (`AppState` holds one store, the request supplies the org).
     let store = PostgresTargetStore::from_pool(pool.clone(), None);
     let t_a = store
-        .create(org_a, a_target(), i64::MAX)
+        .create(org_a, a_target(), WriteSource::Ui, i64::MAX)
         .await
         .expect("create A's target");
     let t_b = store
-        .create(org_b, a_target(), i64::MAX)
+        .create(org_b, a_target(), WriteSource::Ui, i64::MAX)
         .await
         .expect("create B's target");
 

@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
+use super::WriteSource;
+
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct MaintenanceWindow {
     pub id: Uuid,
@@ -14,6 +16,9 @@ pub struct MaintenanceWindow {
     pub component_ids: Vec<Uuid>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// Where this window was last changed from (UI, API, or Terraform).
+    #[serde(default)]
+    pub write_source: WriteSource,
 }
 
 #[derive(Debug, Clone, Deserialize, ToSchema)]

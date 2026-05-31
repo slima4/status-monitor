@@ -102,7 +102,7 @@ struct OrgTargetRow {
 /// Single source for the cross-tenant target column list. Both the
 /// scheduler-snapshot and incident-writer-keyset queries return the same
 /// `targets` shape that [`decode_target_row`] consumes.
-const TARGET_COLUMNS: &str = "t.org_id, t.id, t.name, t.check_spec, t.interval_secs, t.enabled, t.tags, t.alerts, t.group_name, t.owner_user_id, t.public_status, t.public_name, t.public_description, t.public_group, t.public_sort_order, t.created_at, t.updated_at";
+const TARGET_COLUMNS: &str = "t.org_id, t.id, t.name, t.check_spec, t.interval_secs, t.enabled, t.tags, t.alerts, t.group_name, t.owner_user_id, t.public_status, t.public_name, t.public_description, t.public_group, t.public_sort_order, t.write_source, t.created_at, t.updated_at";
 
 pub struct AdminRepo {
     pool: PgPool,

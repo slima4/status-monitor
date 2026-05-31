@@ -13,6 +13,7 @@ pub mod result;
 pub mod target;
 pub mod user;
 pub mod word_lists;
+pub mod write_source;
 
 pub use alert::{AlertBinding, TargetAlerts};
 pub use check::{
@@ -46,3 +47,4 @@ pub use result::{CheckResult, CheckStatus, SERVED_STALE_PREFIX, strip_served_sta
 pub use target::{NewTarget, Target, TargetUpdate};
 pub use user::{AppTheme, User, UserId};
 pub use word_lists::generate_signup_slug;
+pub use write_source::WriteSource;

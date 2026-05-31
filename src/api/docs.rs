@@ -23,7 +23,7 @@ use crate::domain::{
     NotificationChannel, NotificationChannelUpdate, OverallState, OverallStatus, PublicComponent,
     PublicComponentGroup, PublicComponentStatus, PublicIncident, PublicIncidentUpdate,
     PublicMaintenance, PublicMaintenanceList, PublicStatusPage, Target, TargetAlerts, TargetUpdate,
-    TcpCheck, TlsCertCheck,
+    TcpCheck, TlsCertCheck, WriteSource,
 };
 use crate::storage::UptimeStats;
 
@@ -119,6 +119,7 @@ use crate::storage::UptimeStats;
             ExpectedStatus,
             CheckResult,
             CheckStatus,
+            WriteSource,
             UptimeStats,
             LatencyBucket,
             LatencySeries,

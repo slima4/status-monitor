@@ -18,7 +18,7 @@ use uuid::Uuid;
 use crate::api::error::codes;
 use crate::app::AppState;
 use crate::auth::scope::{Scope, ScopeSet};
-use crate::domain::OrgId;
+use crate::domain::{OrgId, WriteSource};
 use crate::error::{AppError, Result};
 
 use super::{AuthContext, CurrentOrg};
@@ -161,5 +161,45 @@ where
             Some(AuthContext::ApiToken { scopes, .. }) => Some(scopes.clone()),
             _ => None,
         }))
+    }
+}
+
+/// The provider sets this token in its User-Agent so a Terraform-driven write
+/// is badged distinctly from a hand-rolled API call.
+const TERRAFORM_UA_MARKER: &str = "terraform-provider-uptimepage";
+
+/// Where the current request writes from, for the managed-by badge. A cookie
+/// session is [`WriteSource::Ui`]; a Bearer token is [`WriteSource::Terraform`]
+/// when its User-Agent carries the provider marker, else [`WriteSource::Api`].
+/// Only [`AuthContext::ApiToken`] is ever in extensions, so anything else is a
+/// browser session.
+pub struct RequestSource(pub WriteSource);
+
+impl<S> FromRequestParts<S> for RequestSource
+where
+    S: Send + Sync,
+{
+    type Rejection = std::convert::Infallible;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        _state: &S,
+    ) -> std::result::Result<Self, Self::Rejection> {
+        let source = match parts.extensions.get::<AuthContext>() {
+            Some(AuthContext::ApiToken { .. }) => {
+                let is_terraform = parts
+                    .headers
+                    .get(axum::http::header::USER_AGENT)
+                    .and_then(|v| v.to_str().ok())
+                    .is_some_and(|ua| ua.contains(TERRAFORM_UA_MARKER));
+                if is_terraform {
+                    WriteSource::Terraform
+                } else {
+                    WriteSource::Api
+                }
+            }
+            _ => WriteSource::Ui,
+        };
+        Ok(RequestSource(source))
     }
 }

@@ -15,6 +15,8 @@ CREATE TABLE notification_channels (
     kind        TEXT NOT NULL CHECK (kind IN ('webhook', 'slack', 'telegram')),
     config      JSONB NOT NULL,
     enabled     BOOLEAN NOT NULL DEFAULT true,
+    write_source TEXT NOT NULL DEFAULT 'ui'
+                CHECK (write_source IN ('ui', 'api', 'terraform')),
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     -- Names are the human handle in the target-binding UI; unique per tenant.

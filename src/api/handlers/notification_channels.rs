@@ -27,7 +27,9 @@ use crate::domain::{
 use crate::error::{AppError, Result};
 use crate::notifier::build_notifier;
 use crate::notifier::event::{AlertEvent, AlertKind};
-use crate::web::{Authorized, ChannelsDelete, ChannelsExecute, ChannelsRead, ChannelsWrite};
+use crate::web::{
+    Authorized, ChannelsDelete, ChannelsExecute, ChannelsRead, ChannelsWrite, RequestSource,
+};
 
 /// Result of `POST /{id}/test`. A `false` never reaches the client — a failed
 /// delivery is a 422 (`CHANNEL_TEST_FAILED`) — but the explicit field keeps
@@ -64,6 +66,7 @@ pub struct TestNotificationResponse {
 pub async fn create(
     State(state): State<AppState>,
     Authorized(org, _): Authorized<ChannelsWrite>,
+    RequestSource(source): RequestSource,
     Json(new): Json<NewNotificationChannel>,
 ) -> Result<(
     StatusCode,
@@ -87,7 +90,7 @@ pub async fn create(
     );
     let ch = state
         .notification_channel_store
-        .create(org, new, limit)
+        .create(org, new, source, limit)
         .await?;
     let location = HeaderValue::from_str(&format!("/api/v1/notification-channels/{}", ch.id))
         .expect("uuid produces ascii-only path");
@@ -160,6 +163,7 @@ pub async fn get(
 pub async fn update(
     State(state): State<AppState>,
     Authorized(org, _): Authorized<ChannelsWrite>,
+    RequestSource(source): RequestSource,
     Path(id): Path<Uuid>,
     Json(update): Json<NotificationChannelUpdate>,
 ) -> Result<Redacted<NotificationChannel>> {
@@ -171,7 +175,7 @@ pub async fn update(
     }
     let updated = state
         .notification_channel_store
-        .update(org, id, update)
+        .update(org, id, update, source)
         .await?
         .ok_or_else(channel_not_found)?;
     // Drop any cached resolution so the next AlertEngine dispatch picks up

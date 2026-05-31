@@ -17,7 +17,9 @@
   <tbody class="divide-y divide-[color:var(--theme-line)]">
     {% for c in channels %}
     <tr>
-      <td class="px-4 py-2 align-top text-body">{{ c.name }}</td>
+      <td class="px-4 py-2 align-top text-body">
+        <span class="inline-flex items-center gap-2">{{ c.name }}{% if let Some(m) = c.managed_by %}<span class="managed-chip" title="Managed by {{ m }} — changes made here may be overwritten on the next apply">{{ m }}</span>{% endif %}</span>
+      </td>
       <td class="px-4 py-2 align-top">
         <span class="status-badge status-badge--tag">{{ c.kind }}</span>
       </td>
