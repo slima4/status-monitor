@@ -145,6 +145,16 @@ FROM org, (VALUES
   ('fix-domain',  true,  false, 'Domain Expiry',   'Internal',        5,  'Infrastructure',false,
    '{"type":"domain_expiry","domain":"example.com","warn_days":60,"critical_days":14,"timeout":10000}')
 ) AS t(name,is_enabled,public,pname,grp,so,gname,has_owner,spec);
+
+-- Demonstrate the managed-by badge: pretend the Integrations monitors are
+-- authored by Terraform and one by a raw API token. UI-authored rows (the
+-- default 'ui') stay chip-less.
+UPDATE targets SET write_source = 'terraform'
+ WHERE org_id = (SELECT id FROM organizations WHERE slug='${SLUG}')
+   AND tags @> ARRAY['seed-fixtures'] AND name IN ('fix-payment','fix-admin');
+UPDATE targets SET write_source = 'api'
+ WHERE org_id = (SELECT id FROM organizations WHERE slug='${SLUG}')
+   AND tags @> ARRAY['seed-fixtures'] AND name = 'fix-tcp';
 SQL
 
 ORG=$(pg -tAc "SELECT id FROM organizations WHERE slug='${SLUG}';")
@@ -368,6 +378,13 @@ INSERT INTO notification_channels (org_id, name, kind, config, enabled) VALUES
   ('${ORG}'::uuid, 'Fixture Telegram', 'telegram',
    '{"type":"telegram","bot_token":"1234567890:AAH-fixture-bot-token","chat_id":"-1001234567890"}'::jsonb,
    false);
+
+-- Managed-by badge on the channels list too: webhook as Terraform, Slack as
+-- a raw API token; Telegram stays UI-authored (no chip).
+UPDATE notification_channels SET write_source = 'terraform'
+ WHERE org_id='${ORG}'::uuid AND name = 'Fixture Webhook';
+UPDATE notification_channels SET write_source = 'api'
+ WHERE org_id='${ORG}'::uuid AND name = 'Fixture Slack';
 
 -- Three binding shapes:
 --   fix-api  : both enabled channels, recovery on  (full notification mix)
@@ -779,6 +796,7 @@ echo "  groups    : API & Web · CDN · Infrastructure · Notifications · Beta 
 echo "  owners    : $([[ -n "$OWNER_USER_ID" ]] && echo "8 monitors bound to ${OWNER_USER_ID:0:8}…" || echo 'no member found — every monitor unowned')"
 echo "  incidents : 161 (150 resolved across 87d + 10 active in mixed phases + 1 adversarial-title)"
 echo "  channels  : 3 (slack + webhook enabled, telegram disabled)"
+echo "  managed   : fix-payment/fix-admin + Fixture Webhook → terraform chip; fix-tcp + Fixture Slack → api chip"
 echo "  alerts    : bound on fix-api / fix-db / fix-auth"
 echo "  maintenance: 4 windows (1 active bound to fix-db) → drives Maintenance state"
 echo "  history   : 6-day NoData gap on fix-email; per-target last-5-min divergence"
