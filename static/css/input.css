@@ -8,6 +8,9 @@
 
 @source "../../templates/**/*.html";
 @source "../../src/**/*.rs";
+/* Some UI is built in JS string templates (modals, toasts) — scan those too so
+   their utility classes survive tree-shaking. */
+@source "../../static/js/**/*.js";
 
 /* Self-hosted IBM Plex, latin subset. Plex is not a variable font, so each
    weight is its own woff2 — 7 files total (~140 KB). Served from
@@ -551,6 +554,7 @@
        tracks theme. */
     dialog#sm-confirm-modal,
     dialog#sm-prompt-modal,
+    dialog#sm-share-modal,
     dialog#delete-modal {
         background: var(--theme-surface-elev);
         color: var(--theme-text);
@@ -560,6 +564,7 @@
     }
     dialog#sm-confirm-modal::backdrop,
     dialog#sm-prompt-modal::backdrop,
+    dialog#sm-share-modal::backdrop,
     dialog#delete-modal::backdrop {
         background: color-mix(in oklch, var(--theme-ink) 55%, transparent);
     }

@@ -64,8 +64,12 @@ async fn access_log(req: Request, next: Next) -> Response {
     let logged = (!is_health_path(p)).then(|| {
         // Path only, never the query string: /auth/* carries
         // single-use magic-link tokens and the OAuth code/state,
-        // which must not reach stdout logs.
-        (req.method().clone(), req.uri().path().to_owned())
+        // which must not reach stdout logs. The /m/ share token lives in
+        // the path itself, so scrub that segment too.
+        (
+            req.method().clone(),
+            scrub_share_token(req.uri().path()).into_owned(),
+        )
     });
     let start = Instant::now();
     let resp = next.run(req).await;
@@ -87,6 +91,23 @@ async fn access_log(req: Request, next: Next) -> Response {
         );
     }
     resp
+}
+
+/// Replace a `/m/{token}` share-link capability token with a placeholder so the
+/// secret never reaches stdout logs or the exported span. The token is a path
+/// segment (not the query), so the query-stripping the access path already does
+/// for `/auth/*` would miss it; scrub the segment explicitly.
+fn scrub_share_token(path: &str) -> std::borrow::Cow<'_, str> {
+    match path.strip_prefix("/m/") {
+        Some(rest) => {
+            let tail = rest
+                .split_once('/')
+                .map(|(_, t)| format!("/{t}"))
+                .unwrap_or_default();
+            std::borrow::Cow::Owned(format!("/m/{{token}}{tail}"))
+        }
+        None => std::borrow::Cow::Borrowed(path),
+    }
 }
 
 #[tokio::main]
@@ -373,6 +394,7 @@ async fn main() -> Result<()> {
         outbound_http,
         email_sender,
         alert_channel_cache,
+        cipher,
     );
     // Hot-reload the abuse deny-lists on SIGHUP when enabled (validate then
     // atomic swap; a bad edit is rejected and the running rules stay).
@@ -442,7 +464,9 @@ async fn main() -> Result<()> {
                 // Path only, never the query string: /auth/* carries
                 // single-use magic-link tokens and the OAuth
                 // code/state, which must not reach stdout logs or the
-                // exported span.
+                // exported span. The /m/ share token is a path segment,
+                // scrubbed here so it never lands in an exported span.
+                let path = scrub_share_token(path);
                 tracing::debug_span!(
                     "http.request",
                     method = %req.method(),
@@ -531,5 +555,30 @@ async fn wait_for_signal() {
     tokio::select! {
         _ = ctrl_c => tracing::info!("received SIGINT"),
         _ = terminate => tracing::info!("received SIGTERM"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::scrub_share_token;
+
+    #[test]
+    fn scrub_share_token_masks_the_capability_segment() {
+        // The token is a path-segment secret; the placeholder must not echo it.
+        assert_eq!(scrub_share_token("/m/abc123secret"), "/m/{token}");
+        assert_eq!(scrub_share_token("/m/abc123secret/live"), "/m/{token}/live");
+        assert_eq!(
+            scrub_share_token("/m/abc123secret/incidents"),
+            "/m/{token}/incidents"
+        );
+        assert_eq!(scrub_share_token("/m/abc/latency"), "/m/{token}/latency");
+    }
+
+    #[test]
+    fn scrub_share_token_leaves_other_paths_untouched() {
+        assert_eq!(scrub_share_token("/targets/123"), "/targets/123");
+        assert_eq!(scrub_share_token("/"), "/");
+        // A path that merely starts with /m but isn't the share surface.
+        assert_eq!(scrub_share_token("/metrics"), "/metrics");
     }
 }

@@ -1,0 +1,85 @@
+{% extends "share/base.html" %}
+{% block title %}{{ name }} · Uptimepage{% endblock %}
+{% block content %}
+<section class="space-y-6">
+  <header class="space-y-2">
+    {% include "share/partials/share_header.html" %}
+  </header>
+
+  {% include "share/partials/share_tabs.html" %}
+
+  {% include "targets/partials/range_pills.html" %}
+
+  <section id="detail-live-kpi"
+           hx-get="/m/{{ token }}/live?range={{ range }}"
+           hx-trigger="every 60s, sm:refresh-live from:body"
+           hx-swap="outerHTML"
+           hx-on::response-error="if(event.detail.xhr.status===404){this.removeAttribute('hx-trigger')}"
+           data-newest-ts="{{ last_at_iso }}"
+           class="grid gap-4 md:grid-cols-4">
+    {% include "targets/partials/detail_live_kpi_cards.html" %}
+  </section>
+
+  <section class="grid gap-4 lg:grid-cols-2">
+    <div class="sticker-card p-5">
+      <h2 class="panel-label">latency (p50/p95/p99)</h2>
+      <div id="latency-chart"
+           class="mt-4 h-64 w-full"
+           data-endpoint="/m/{{ token }}/latency?from={{ from_iso|urlencode }}&to={{ to_iso|urlencode }}"
+           aria-label="Latency p50/p95/p99 over time"></div>
+    </div>
+    <div class="sticker-card p-5">
+      <h2 class="panel-label">latency breakdown</h2>
+      <div id="breakdown-chart"
+           class="mt-4 h-64 w-full"
+           data-endpoint="/m/{{ token }}/latency?from={{ from_iso|urlencode }}&to={{ to_iso|urlencode }}"
+           aria-label="Mean latency phase breakdown over time"></div>
+    </div>
+  </section>
+
+  <section class="sticker-card">
+    <header class="flex items-center justify-between border-b border-[color:var(--theme-line)] px-5 py-3">
+      <h2 class="panel-label">recent results</h2>
+      <span id="detail-recent-count" class="text-xs text-muted">latest {{ results.len() }}{% if results_has_more %}+{% endif %}</span>
+    </header>
+    <table class="min-w-full text-sm font-mono">
+      <caption class="sr-only">Recent check results for {{ name }}</caption>
+      <thead class="bg-[color:var(--theme-surface-sunk)] text-left text-xs uppercase tracking-wide text-muted">
+        <tr>
+          <th scope="col" class="px-3 py-2">timestamp</th>
+          <th scope="col" class="px-3 py-2">status</th>
+          <th scope="col" class="px-3 py-2">duration</th>
+          <th scope="col" class="px-3 py-2">code</th>
+          <th scope="col" class="px-3 py-2">error</th>
+        </tr>
+      </thead>
+      <tbody id="detail-live-recent">
+        {% include "targets/partials/detail_live_rows.html" %}
+      </tbody>
+    </table>
+  </section>
+
+  <script defer src="{{ "js/ui/target_detail.js"|asset }}"></script>
+  <script defer src="{{ "js/echarts.min.js"|asset }}"></script>
+  <script type="module" src="{{ "js/charts/detail_charts.js"|asset }}"></script>
+
+  <section class="space-y-2 sticker-card px-5 py-3" data-collapsible>
+    <button type="button" data-collapse-toggle aria-expanded="false"
+            aria-controls="configuration-body" aria-describedby="configuration-hint"
+            class="group inline-flex cursor-pointer items-center gap-1.5 border-0 bg-transparent p-0 text-sm font-medium text-body">
+      configuration
+      <span data-collapse-chevron aria-hidden="true"
+            class="text-base text-muted transition-transform group-hover:text-body motion-reduce:transition-none">▾</span>
+    </button>
+    <button type="button" data-collapse-toggle tabindex="-1" aria-hidden="true"
+            class="group block w-full cursor-pointer border-0 bg-transparent p-0 text-left">
+      <span id="configuration-hint" data-collapse-hint class="text-xs text-muted group-hover:text-body">raw JSON this monitor runs with (credentials hidden)</span>
+    </button>
+    <div id="configuration-body" class="hidden">
+      <pre class="sticker-card overflow-auto p-4 text-xs text-body">{{ config_json }}</pre>
+    </div>
+  </section>
+
+  <script defer src="{{ "js/ui/collapsible.js"|asset }}"></script>
+</section>
+{% endblock %}

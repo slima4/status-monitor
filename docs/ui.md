@@ -30,10 +30,11 @@ After `cargo build --release` you have one ~23 MB executable that contains every
 | `GET /settings/pages/{id}` | Per-page editor: URL slug (own save — a rename is a hard cutover), branding, logo, and the component curation list (per-monitor on-page toggle, public name/group). Each edit autosaves via the `/api/v1/status-pages/{id}` + `/components` endpoints. |
 | `GET /web/partials/settings/pages` | HTMX partial — the page rows for the list above. |
 | `GET /web/partials/dashboard` | HTMX partial — chrome-free dashboard region; self-rearms so each refresh still carries `hx-trigger="every 5s"`. |
+| `GET /m/{token}` | Public read-only share of one monitor — same detail dashboard, no operator chrome, credentials redacted, no login. Sub-resources (`/live`, `/incidents`, `/latency`, `/results`) are twinned under the token so the page never calls an operator URL. See [Share links](share-links.md). |
 | `GET /docs` | Swagger UI generated from `/api/openapi.json`. |
 | `GET /static/{path}` | Embedded assets (`css/`, `js/`, `img/`). |
 
-Every mutation goes through `/api/v1/*`. There are **no** `/web/*` write routes — the JSON API stays the single source of truth, which means a future SvelteKit port is a templates-only rewrite.
+Every mutation goes through `/api/v1/*`. There are **no** `/web/*` write routes — the JSON API stays the single source of truth, which means a future SvelteKit port is a templates-only rewrite. The `/m/{token}` share surface is read-only and serves no write method.
 
 ## Build pipeline
 

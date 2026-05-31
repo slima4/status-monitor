@@ -52,7 +52,10 @@
     }
 
     async function loadTimeline(row, body) {
-        const targetId = row.dataset.targetId;
+        // `data-results-base` carries the per-surface results prefix
+        // (`/api/v1/targets/{id}` operator-side, `/m/{token}` on a shared page),
+        // so the same drawer works without leaking an operator id onto a share.
+        const base = row.dataset.resultsBase;
         const fromIso = row.dataset.from;
         const toIso = row.dataset.to;
         const ongoing = row.dataset.ongoing === "true";
@@ -63,7 +66,7 @@
             body.innerHTML = `<span class="flash-text flash-text--bad">Could not load timeline: invalid timestamp on incident row.</span>`;
             return;
         }
-        const url = `/api/v1/targets/${encodeURIComponent(targetId)}/results`
+        const url = `${base}/results`
             + `?from=${encodeURIComponent(new Date(fromRaw - PAD_MS).toISOString())}`
             + `&to=${encodeURIComponent(new Date(toRaw + TAIL_PAD_MS).toISOString())}`
             + `&limit=${TIMELINE_FETCH_LIMIT}`;

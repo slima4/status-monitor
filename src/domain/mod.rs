@@ -3,6 +3,7 @@ pub mod check;
 pub mod incident;
 pub mod maintenance;
 pub mod membership;
+pub mod monitor_share;
 pub mod notification_channel;
 pub mod org;
 pub mod preferences;
@@ -29,6 +30,9 @@ pub use maintenance::{
     MaintenanceFilter, MaintenanceWindow, MaintenanceWindowUpdate, NewMaintenanceWindow,
 };
 pub use membership::{Membership, Role};
+pub use monitor_share::{
+    CreatedShare, MonitorShare, MonitorShareId, NewMonitorShare, ResolvedShare,
+};
 pub use notification_channel::{
     ChannelConfig, ChannelKind, NewNotificationChannel, NotificationChannel,
     NotificationChannelUpdate, validate_channel_name,

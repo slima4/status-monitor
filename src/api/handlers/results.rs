@@ -76,11 +76,11 @@ pub struct RangeQuery {
 }
 
 impl RangeQuery {
-    fn resolve(&self) -> Result<TimeRange> {
+    pub(crate) fn resolve(&self) -> Result<TimeRange> {
         resolve_range(self.from, self.to)
     }
 
-    fn limit(&self) -> usize {
+    pub(crate) fn limit(&self) -> usize {
         self.limit
             .unwrap_or(RESULTS_LIMIT_DEFAULT)
             .min(RESULTS_LIMIT_MAX)
@@ -147,7 +147,7 @@ const LATENCY_TARGET_BUCKETS: i64 = 60;
 /// Picks a bucket width (seconds) that splits `range` into roughly
 /// [`LATENCY_TARGET_BUCKETS`] slices, floored to a whole minute (the rollup
 /// grain) with a 60s minimum. 1h→60s, 24h→1440s, 7d→10080s, 30d→43200s.
-fn latency_bucket_seconds(range: TimeRange) -> u32 {
+pub(crate) fn latency_bucket_seconds(range: TimeRange) -> u32 {
     let span = (range.to - range.from).num_seconds().max(60);
     let secs = (span / LATENCY_TARGET_BUCKETS / 60).max(1) * 60;
     u32::try_from(secs).unwrap_or(u32::MAX)

@@ -8,6 +8,7 @@
 - [Web UI](ui.md)
 - [Public status page](public-status.md)
 - [Per-org status pages](per-org-status.md)
+- [Share links](share-links.md)
 - [Multi-tenancy](multi-tenancy.md)
 - [Authentication](authentication.md)
 - [Configuration](configuration.md)

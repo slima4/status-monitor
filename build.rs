@@ -69,13 +69,15 @@ fn watch_git_head() {
 fn main() {
     emit_source_identity();
 
-    // Tailwind v4 scans `templates/**/*.html` AND `src/**/*.rs` for class
-    // names (see @source directives in static/css/input.css), so the CSS
-    // must rebuild whenever either tree changes — including Rust files
-    // that emit class strings via format!(). The ~40ms overhead is the
-    // cost of co-locating class names with the code that uses them.
+    // Tailwind v4 scans `templates/**/*.html`, `src/**/*.rs`, AND
+    // `static/js/**/*.js` for class names (see @source directives in
+    // static/css/input.css), so the CSS must rebuild whenever any of those
+    // trees changes — including Rust files and JS modals that emit class
+    // strings. The ~40ms overhead is the cost of co-locating class names with
+    // the code that uses them.
     println!("cargo::rerun-if-changed=templates");
     println!("cargo::rerun-if-changed=static/css/input.css");
+    println!("cargo::rerun-if-changed=static/js");
     println!("cargo::rerun-if-changed=src");
     println!("cargo::rerun-if-changed=scripts/fetch-tailwind.sh");
     // `include_dir!` does NOT emit a watcher of its own. Without this

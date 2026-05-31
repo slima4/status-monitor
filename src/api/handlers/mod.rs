@@ -12,6 +12,7 @@ pub mod notification_channels;
 pub mod orgs;
 pub mod public;
 pub mod results;
+pub mod shares;
 pub mod status_page;
 pub mod tags;
 pub mod targets;

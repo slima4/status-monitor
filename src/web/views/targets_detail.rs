@@ -25,21 +25,21 @@ use crate::web::{AuthedBrowser, CurrentOrg};
 // already carry the trend. 60 ≈ the last hour at a 1-minute interval —
 // enough to eyeball recent behaviour, full history is the JSON API.
 const RESULTS_PAGE_LIMIT: usize = 60;
-const RANGE_KEYS: [&str; 4] = ["1h", "24h", "7d", "30d"];
-const DEFAULT_RANGE: &str = "24h";
+pub(crate) const RANGE_KEYS: [&str; 4] = ["1h", "24h", "7d", "30d"];
+pub(crate) const DEFAULT_RANGE: &str = "24h";
 // Decoupled from the user's chart range so the header badge reflects the
 // monitor's actual current state, not "no data" when the user picked 1h
 // but the last check was 2h ago.
 const LAST_RESULT_WINDOW_DAYS: i64 = 7;
 
-const SUBTAB_MONITOR: &str = "monitor";
-const SUBTAB_INCIDENTS: &str = "incidents";
+pub(crate) const SUBTAB_MONITOR: &str = "monitor";
+pub(crate) const SUBTAB_INCIDENTS: &str = "incidents";
 
-const INCIDENT_RANGE_KEYS: [&str; 4] = ["24h", "7d", "30d", "90d"];
-const INCIDENT_DEFAULT_RANGE: &str = "30d";
+pub(crate) const INCIDENT_RANGE_KEYS: [&str; 4] = ["24h", "7d", "30d", "90d"];
+pub(crate) const INCIDENT_DEFAULT_RANGE: &str = "30d";
 const INCIDENTS_PAGE_LIMIT: usize = 100;
 
-fn ongoing_from_status(status: &str) -> usize {
+pub(crate) fn ongoing_from_status(status: &str) -> usize {
     // Loose semantic: badge tracks "current state is bad", not a
     // separate CH scan. Misses the "fixed 30s ago, badge still set"
     // case in exchange for zero extra queries on the highest-traffic
@@ -118,10 +118,15 @@ pub struct IncidentsPage {
     pub tags: Vec<String>,
     /// `terraform`/`api` chip for externally-managed monitors; `None` (UI) hides it.
     pub managed_by: Option<&'static str>,
+    /// Count of live (non-revoked) share links; drives the header "shared" chip.
+    pub share_count: usize,
     pub last_status: &'static str,
     pub last_at_iso: String,
     pub incidents: Vec<IncidentRow>,
     pub incidents_has_more: bool,
+    /// URL prefix incidents_tab.js appends `/results` to for the timeline
+    /// drawer (`/api/v1/targets/{id}`).
+    pub results_base: String,
     pub range: &'static str,
     pub range_options: Vec<RangeOption>,
     pub range_base_path: String,
@@ -149,6 +154,8 @@ pub struct DetailPage {
     pub tags: Vec<String>,
     /// `terraform`/`api` chip for externally-managed monitors; `None` (UI) hides it.
     pub managed_by: Option<&'static str>,
+    /// Count of live (non-revoked) share links; drives the header "shared" chip.
+    pub share_count: usize,
     pub last_status: &'static str,
     /// ISO 8601 timestamp of the most recent check, "" when none. Drives
     /// the client-side "checked Ns ago · next in Ns" ticker.
@@ -193,15 +200,15 @@ impl From<UptimeStats> for UptimeStatsView {
 /// detail-page templates render the same four fields in the chrome
 /// (range pill caption, time inputs); precomputing once keeps the
 /// template free of filter chains for one-shot values.
-struct WindowLabels {
-    from_iso: String,
-    to_iso: String,
-    from_human: String,
-    to_human: String,
+pub(crate) struct WindowLabels {
+    pub from_iso: String,
+    pub to_iso: String,
+    pub from_human: String,
+    pub to_human: String,
 }
 
 impl WindowLabels {
-    fn new(from: DateTime<Utc>, to: DateTime<Utc>) -> Self {
+    pub(crate) fn new(from: DateTime<Utc>, to: DateTime<Utc>) -> Self {
         Self {
             from_iso: fmt_ts(from),
             to_iso: fmt_ts(to),
@@ -231,7 +238,7 @@ pub struct LiveData {
 /// (one-off queries shouldn't pollute the shared bucket). Both the
 /// full-page `index` and the htmx `live_partial` go through here so a
 /// burst of either request type collapses to a single CH round-trip.
-async fn load_live_data_cached(
+pub(crate) async fn load_live_data_cached(
     state: &AppState,
     org: OrgId,
     target_id: Uuid,
@@ -359,6 +366,10 @@ pub async fn index(
     let config_json = serde_json::to_string_pretty(&target.check)
         .map_err(|e| AppError::Other(anyhow::anyhow!(e)))?;
     let (kind, address) = describe_check(&target.check);
+    let share_count = state
+        .monitor_share_store
+        .count_active_for_target(org, target.id)
+        .await? as usize;
 
     Ok(DetailPage {
         active_tab: "targets",
@@ -372,6 +383,7 @@ pub async fn index(
         enabled: target.enabled,
         tags: target.tags,
         managed_by: target.write_source.managed_label(),
+        share_count,
         last_status: live.last_status,
         last_at_iso: Arc::clone(&live.last_at_iso),
         uptime: Arc::clone(&live.uptime),
@@ -441,7 +453,7 @@ pub async fn live_partial(
 /// override the preset (custom range case). Covers every key from both
 /// `RANGE_KEYS` and `INCIDENT_RANGE_KEYS` so the shared cached loader
 /// can serve either tab without falling back to the default branch.
-fn resolve_window(
+pub(crate) fn resolve_window(
     key: &'static str,
     from: Option<DateTime<Utc>>,
     to: Option<DateTime<Utc>>,
@@ -492,7 +504,7 @@ impl From<CheckResult> for ResultRow {
 /// Formats a raw `error` field for human display. Structured JSON payloads
 /// (TLS cert / domain expiry details) are rendered as readable sentences;
 /// terse check-engine codes are expanded to plain English.
-fn fmt_error_display(raw: &str) -> String {
+pub(crate) fn fmt_error_display(raw: &str) -> String {
     let raw = match strip_served_stale(raw) {
         Some(r) => r,
         None => return "using last known result".into(),
@@ -563,6 +575,69 @@ impl From<Incident> for IncidentRow {
     }
 }
 
+/// The incidents-tab data for one monitor: the header badge's live status, the
+/// page of incident rows, and the derived ongoing count. Loaded by
+/// [`load_incidents_data`] so the operator incidents page and the public share
+/// view render the same dataset from one query graph.
+pub(crate) struct IncidentsData {
+    pub last_status: &'static str,
+    pub last_at_iso: String,
+    pub rows: Vec<IncidentRow>,
+    pub has_more: bool,
+    pub ongoing_count: usize,
+}
+
+/// Load the incidents tab's dataset for `(org, target_id)` over `time_range`.
+/// `interval` is the monitor's check interval (drives incident coalescing).
+pub(crate) async fn load_incidents_data(
+    state: &AppState,
+    org: OrgId,
+    target_id: Uuid,
+    interval: std::time::Duration,
+    time_range: TimeRange,
+) -> WebResult<IncidentsData> {
+    // The incidents tab needs only the badge's `last_status` from the live
+    // region — not the uptime stats or 60 recent rows. Probe one row instead of
+    // running the full live loader; a 90d preset would otherwise scan the entire
+    // window for the same single field.
+    let ((last_status, last_at_iso), mut incidents) =
+        tokio::try_join!(latest_status_probe(state, org, target_id), async {
+            state
+                .results_store
+                .list_incidents(
+                    org,
+                    target_id,
+                    IncidentListQuery::page(time_range, interval, INCIDENTS_PAGE_LIMIT + 1),
+                )
+                .await
+                .map_err(WebError::from)
+        },)?;
+
+    let has_more = incidents.len() > INCIDENTS_PAGE_LIMIT;
+    if has_more {
+        incidents.truncate(INCIDENTS_PAGE_LIMIT);
+    }
+    // Strip the served-stale annotation from error samples before they reach a
+    // template, matching the JSON incidents API. Both the operator HTML page and
+    // the public share view inherit it from this one loader.
+    for inc in &mut incidents {
+        inc.sanitize_error_sample();
+    }
+    // Tab badge: prefer the live-status signal so the count matches what the
+    // Monitor tab shows. Fall back to the list (e.g. user narrowed to a window
+    // where last_status is stale) by counting open runs the coalescer kept.
+    let ongoing_count = ongoing_from_status(last_status)
+        .max(incidents.iter().filter(|i| i.ended_at.is_none()).count());
+
+    Ok(IncidentsData {
+        last_status,
+        last_at_iso,
+        rows: incidents.into_iter().map(IncidentRow::from).collect(),
+        has_more,
+        ongoing_count,
+    })
+}
+
 pub async fn incidents(
     _auth: AuthedBrowser,
     CurrentOrg(org): CurrentOrg,
@@ -583,42 +658,18 @@ pub async fn incidents(
     );
     let (from, to) = resolve_incident_window(range_key, params.from, params.to);
     let time_range = TimeRange { from, to };
-
     let labels = WindowLabels::new(from, to);
-    let interval = target.interval;
-    // The incidents tab needs only the badge's `last_status` from the
-    // live region — not the uptime stats or 60 recent rows. Probe one
-    // row instead of running the full live loader; a 90d preset would
-    // otherwise scan the entire window for the same single field.
-    let ((last_status, last_at_iso), mut incidents) =
-        tokio::try_join!(latest_status_probe(&state, org, target.id), async {
-            state
-                .results_store
-                .list_incidents(
-                    org,
-                    target.id,
-                    IncidentListQuery::page(time_range, interval, INCIDENTS_PAGE_LIMIT + 1),
-                )
-                .await
-                .map_err(WebError::from)
-        },)?;
-
-    let incidents_has_more = incidents.len() > INCIDENTS_PAGE_LIMIT;
-    if incidents_has_more {
-        incidents.truncate(INCIDENTS_PAGE_LIMIT);
-    }
-    // Tab badge: prefer the live-status signal so the count matches
-    // what the Monitor tab shows. Fall back to the list (e.g. user
-    // narrowed to a window where last_status is stale) by counting
-    // open runs the coalescer kept.
-    let ongoing_count = ongoing_from_status(last_status)
-        .max(incidents.iter().filter(|i| i.ended_at.is_none()).count());
+    let data = load_incidents_data(&state, org, target.id, target.interval, time_range).await?;
     let (kind, address) = describe_check(&target.check);
+    let share_count = state
+        .monitor_share_store
+        .count_active_for_target(org, target.id)
+        .await? as usize;
 
     Ok(IncidentsPage {
         active_tab: "targets",
         subtab: SUBTAB_INCIDENTS,
-        ongoing_count,
+        ongoing_count: data.ongoing_count,
         id: target.id.to_string(),
         name: target.name,
         kind,
@@ -627,10 +678,12 @@ pub async fn incidents(
         enabled: target.enabled,
         tags: target.tags,
         managed_by: target.write_source.managed_label(),
-        last_status,
-        last_at_iso,
-        incidents: incidents.into_iter().map(IncidentRow::from).collect(),
-        incidents_has_more,
+        share_count,
+        last_status: data.last_status,
+        last_at_iso: data.last_at_iso,
+        incidents: data.rows,
+        incidents_has_more: data.has_more,
+        results_base: format!("/api/v1/targets/{}", target.id),
         range: range_key,
         range_options: build_range_options(range_key, &INCIDENT_RANGE_KEYS),
         range_base_path: format!("/targets/{}/incidents", target.id),
@@ -641,7 +694,7 @@ pub async fn incidents(
     })
 }
 
-fn resolve_incident_window(
+pub(crate) fn resolve_incident_window(
     key: &'static str,
     from: Option<DateTime<Utc>>,
     to: Option<DateTime<Utc>>,
@@ -673,6 +726,7 @@ mod tests {
             enabled: true,
             tags: vec!["prod".into()],
             managed_by: None,
+            share_count: 0,
             last_status: "up",
             last_at_iso: Arc::from("2026-05-13T12:00:00Z"),
             uptime: Arc::new(UptimeStatsView {
@@ -834,6 +888,18 @@ mod tests {
     }
 
     #[test]
+    fn detail_header_shows_shared_chip_only_when_links_exist() {
+        // No links → no chip.
+        assert!(!sample_page().render().unwrap().contains("shared ·"));
+        // Live links → a chip that opens the share modal.
+        let mut p = sample_page();
+        p.share_count = 2;
+        let html = p.render().unwrap();
+        assert!(html.contains("shared · 2"));
+        assert!(html.contains("data-share-open"));
+    }
+
+    #[test]
     fn range_options_mark_active() {
         let opts = build_range_options("7d", &RANGE_KEYS);
         assert!(opts.iter().any(|o| o.key == "7d" && o.selected));
@@ -985,10 +1051,12 @@ mod tests {
             enabled: true,
             tags: vec!["prod".into()],
             managed_by: None,
+            share_count: 0,
             last_status: "down",
             last_at_iso: "2026-05-13T12:00:00Z".into(),
             incidents,
             incidents_has_more: false,
+            results_base: "/api/v1/targets/00000000-0000-0000-0000-000000000001".into(),
             range: "30d",
             range_options: build_range_options("30d", &INCIDENT_RANGE_KEYS),
             range_base_path: "/targets/00000000-0000-0000-0000-000000000001/incidents".into(),

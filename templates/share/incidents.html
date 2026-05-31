@@ -1,0 +1,17 @@
+{% extends "share/base.html" %}
+{% block title %}{{ name }} · Incidents · Uptimepage{% endblock %}
+{% block content %}
+<section class="space-y-6">
+  <header class="space-y-2">
+    {% include "share/partials/share_header.html" %}
+  </header>
+
+  {% include "share/partials/share_tabs.html" %}
+
+  {% include "targets/partials/range_pills.html" %}
+
+  {% include "targets/partials/incident_list.html" %}
+
+  <script defer src="{{ "js/ui/incidents_tab.js"|asset }}"></script>
+</section>
+{% endblock %}

@@ -27,6 +27,8 @@ pub struct Plan {
     pub max_api_tokens_per_user: i32,
     pub max_public_components: i32,
     pub max_status_pages: i32,
+    pub max_share_links_per_monitor: i32,
+    pub max_shared_monitors: i32,
     pub max_maintenance_windows: i32,
     pub max_notification_channels: i32,
     pub max_logo_size_bytes: i32,

@@ -1,0 +1,41 @@
+{# Read-only monitor header for the shared view. Mirrors the operator
+   detail_header's status/address/tags display but carries NO action buttons
+   (run/edit/enable/delete) and NO operator navigation. Inputs exist on both
+   ShareDetailPage and ShareIncidentsPage. #}
+{% import "targets/partials/_status_badge.html" as sb %}
+<div class="flex flex-wrap items-center gap-3">
+  <h1 class="page-title"><span class="page-title__prefix">$</span>{{ name }}</h1>
+  {% call sb::show(last_status, enabled, false) %}{% endcall %}
+  {% if !enabled %}<span class="status-badge status-badge--disabled">disabled</span>{% endif %}
+  {% if let Some(m) = managed_by %}<span class="managed-chip">{{ m }}</span>{% endif %}
+</div>
+<p class="text-sm text-muted">
+  <span class="font-mono uppercase">{{ kind }}</span>
+  {% if kind == "HTTP" %}
+    <a href="{{ address }}" target="_blank" rel="noopener noreferrer"
+       class="font-mono text-body underline decoration-dotted underline-offset-2 hover:text-body">{{ address }}</a>
+  {% else %}
+    <span class="font-mono">{{ address }}</span>
+  {% endif %}
+  <span class="ml-2" data-last-check
+        data-last-at="{{ last_at_iso }}"
+        data-enabled="{{ enabled }}">interval {{ interval_s }}s</span>
+</p>
+<div>
+  {% for tag in tags %}
+    <span class="status-badge status-badge--tag mr-1">{{ tag }}</span>
+  {% endfor %}
+</div>
+{% if last_status == "down" %}
+<div class="alert-card alert-card--error" role="alert" aria-live="polite">
+  <strong>Monitor is down.</strong> An active incident may be open — see the Incidents tab for details.
+</div>
+{% else if last_status == "error" %}
+<div class="alert-card alert-card--error" role="alert" aria-live="polite">
+  <strong>Monitor check failed.</strong> The last check couldn't complete — see the Incidents tab for details.
+</div>
+{% else if last_status == "degraded" %}
+<div class="alert-card alert-card--warn" role="alert" aria-live="polite">
+  <strong>Monitor is degraded.</strong> Response times are elevated or partial failures are occurring.
+</div>
+{% endif %}

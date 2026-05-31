@@ -4,6 +4,7 @@ pub mod legal;
 pub mod notification_channels;
 pub mod pages;
 pub mod public_status;
+pub mod share;
 pub mod targets_detail;
 pub mod targets_form;
 pub mod targets_list;

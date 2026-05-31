@@ -1,0 +1,18 @@
+{# Sub-tab strip for the shared view. Same Monitor/Incidents tabs as the
+   operator detail_tabs, but every href targets the token-scoped /m/{token}
+   surface. Inputs: token, subtab ("monitor" | "incidents"), ongoing_count. #}
+<nav class="-mb-px flex items-center gap-1 border-b border-[color:var(--theme-line)] text-sm" aria-label="Monitor view">
+  <a href="/m/{{ token }}"
+     class="inline-flex items-center gap-2 border-b-2 px-3 py-2{% if subtab == "monitor" %} border-[color:var(--theme-ink)] font-medium text-body{% else %} border-transparent text-muted hover:text-body{% endif %}"
+     {% if subtab == "monitor" %}aria-current="page"{% endif %}>
+    Monitor
+  </a>
+  <a href="/m/{{ token }}/incidents"
+     class="inline-flex items-center gap-2 border-b-2 px-3 py-2{% if subtab == "incidents" %} border-[color:var(--theme-ink)] font-medium text-body{% else %} border-transparent text-muted hover:text-body{% endif %}"
+     {% if subtab == "incidents" %}aria-current="page"{% endif %}>
+    Incidents
+    {% if ongoing_count > 0 %}
+    <span id="tab-incidents-badge" class="status-badge status-badge--down" aria-label="{{ ongoing_count }} ongoing">{{ ongoing_count }}</span>
+    {% endif %}
+  </a>
+</nav>

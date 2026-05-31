@@ -10,6 +10,12 @@
   {% call sb::show(last_status, enabled, false) %}{% endcall %}
   {% if !enabled %}<span class="status-badge status-badge--disabled">disabled</span>{% endif %}
   {% if let Some(m) = managed_by %}<span class="managed-chip">{{ m }}</span>{% endif %}
+  {% if share_count > 0 %}
+  <button type="button"
+          data-share-open data-target-id="{{ id }}" data-target-name="{{ name }}"
+          class="status-badge status-badge--tag hover:bg-[color:var(--theme-surface-sunk)]"
+          aria-label="{{ share_count }} active share link{% if share_count != 1 %}s{% endif %} — manage sharing">shared · {{ share_count }}</button>
+  {% endif %}
   <span class="ml-auto flex flex-wrap gap-2">
     <button type="button"
             data-detail-test-now data-target-id="{{ id }}"
@@ -19,6 +25,9 @@
     </button>
     <a href="/targets/{{ id }}/edit"
        class="btn-ghost px-3 py-1.5 text-sm">edit</a>
+    <button type="button"
+            data-share-open data-target-id="{{ id }}" data-target-name="{{ name }}"
+            class="btn-ghost px-3 py-1.5 text-sm">share</button>
     <button type="button"
             data-target-id="{{ id }}"
             data-action="toggle-enabled"

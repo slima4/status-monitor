@@ -121,6 +121,12 @@ pub mod codes {
     pub const SLUG_TAKEN: &str = "SLUG_TAKEN";
     pub const SLUG_INVALID: &str = "SLUG_INVALID";
     pub const STATUS_PAGE_NOT_FOUND: &str = "STATUS_PAGE_NOT_FOUND";
+    /// Share link unknown, revoked, expired, or its monitor/org gone. One
+    /// opaque code for every miss so the public `/m/{token}` surface gives no
+    /// enumeration signal.
+    pub const SHARE_NOT_FOUND: &str = "SHARE_NOT_FOUND";
+    /// Share label blank-after-trim or longer than 80 chars.
+    pub const SHARE_LABEL_INVALID: &str = "SHARE_LABEL_INVALID";
     /// POST a component that is already curated onto the page — edit via PATCH.
     pub const COMPONENT_ALREADY_ON_PAGE: &str = "COMPONENT_ALREADY_ON_PAGE";
     /// PATCH with no mutable field set — rejected so a no-op isn't silently 200.

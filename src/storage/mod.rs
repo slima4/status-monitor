@@ -5,6 +5,7 @@ pub mod incidents;
 pub mod locks;
 pub mod maintenance;
 pub mod memory;
+pub mod monitor_shares;
 pub mod notification_channels;
 pub mod orgs;
 pub mod postgres;
@@ -27,6 +28,9 @@ pub use maintenance::{
     InMemoryMaintenanceStore, MaintenanceListQuery, MaintenanceStore, PgMaintenanceStore,
 };
 pub use memory::{InMemorySink, InMemoryTargetStore};
+pub use monitor_shares::{
+    CreateShareOutcome, InMemoryMonitorShareStore, MonitorShareStore, PgMonitorShareStore,
+};
 pub use notification_channels::{
     InMemoryNotificationChannelStore, NotificationChannelStore, PgNotificationChannelStore,
 };

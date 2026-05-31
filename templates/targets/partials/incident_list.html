@@ -1,5 +1,8 @@
-{# Incidents table for the Incidents sub-tab. Inputs from
-   `IncidentsPage`: id, name, range, incidents, incidents_has_more. #}
+{# Incidents table for the Incidents sub-tab. Inputs: name, range, incidents,
+   incidents_has_more, and `results_base` — the URL prefix incidents_tab.js
+   appends `/results` to for the per-incident timeline. The operator page
+   passes `/api/v1/targets/{id}`; the public share view passes `/m/{token}`,
+   so no operator target id leaks onto a shared page. #}
 {% if incidents.is_empty() %}
 <div class="sticker-card flex items-center gap-3 p-6 text-sm text-muted">
   <span aria-hidden="true" class="text-lg text-state-ok">✓</span>
@@ -24,7 +27,7 @@
       {% for inc in incidents %}
       <tr data-incident-row
           data-incident-id="{{ inc.id }}"
-          data-target-id="{{ id }}"
+          data-results-base="{{ results_base }}"
           data-from="{{ inc.started_at|iso_ts }}"
           data-to="{% match inc.ended_at %}{% when Some with (ts) %}{{ ts|iso_ts }}{% when None %}{% endmatch %}"
           data-ongoing="{% if inc.ongoing %}true{% else %}false{% endif %}"

@@ -31,6 +31,9 @@ All responses use `Content-Type: application/json; charset=utf-8`.
 | `GET` | `/api/v1/targets/{id}/latency` | bucketed latency series (`from`, `to`) — server-side quantiles + per-phase means |
 | `GET` | `/api/v1/targets/{id}/uptime` | uptime summary over a range |
 | `GET` | `/api/v1/targets/{id}/incidents` | coalesced incident periods (`from`, `to`, `ongoing_only`) — paginated |
+| `POST` | `/api/v1/targets/{id}/shares` | mint a read-only share link; returns the share (token included) |
+| `GET` | `/api/v1/targets/{id}/shares` | list a monitor's live share links (never the token) |
+| `DELETE` | `/api/v1/targets/{id}/shares/{share_id}` | revoke a share link |
 | `GET` | `/api/v1/tags` | tag inventory with target counts (`q` prefix) — paginated |
 | `GET` | `/api/v1/dashboard/summary` | per-org rollup (5-second in-process cache, keyed by `OrgId`) |
 | `GET` | `/healthz` | liveness — always 200 once the process is up |
@@ -102,6 +105,18 @@ sensitive target fields (`url`, `headers`, `basic_auth`, `bearer_token`).
 See [Public status page](public-status.md) for the operator workflow and
 the per-page component fields (`public_name`, `public_description`,
 `public_group`, `sort_order`) that drive what's published.
+
+### Operator endpoints (share links)
+
+A share link is a capability URL that renders one monitor's full read-only detail view to anyone who has it, no account. Minting one is a monitor action, so it gates on member-level `targets:write` (not owner-only); listing needs `targets:read`. Scoped to the caller's active org (a foreign monitor id is 404). `expires_at` is optional; omit it for a link that never expires. The public surface those tokens unlock is documented in [Share links](share-links.md).
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `POST` | `/api/v1/targets/{id}/shares` | mint a share; body `{ "label"?, "expires_at"? }`, returns the `MonitorShare` |
+| `GET` | `/api/v1/targets/{id}/shares` | list live (non-revoked) shares |
+| `DELETE` | `/api/v1/targets/{id}/shares/{share_id}` | revoke immediately — the link 404s on its next request |
+
+Both `POST` and `GET` return the `token`; build the link as `/m/{token}` (prepend your origin). The token stays re-copyable — it is stored encrypted at rest (the app KEK, same as `basic_auth`/`bearer_token`); the public resolve path matches on a separate hash, so a hot link never triggers a decrypt. `token` is `null` only when a row was sealed under a KEK that is no longer configured. Two plan caps apply (columns on `plans`, overridable per-org via `plan_overrides`): `max_share_links_per_monitor` (active links on one monitor) and `max_shared_monitors` (distinct monitors in the org that have any link). The free plan is **1** and **2**. Exceeding either is `422 QUOTA_EXCEEDED` (the body names the `quota`). A label longer than 80 characters is `400 SHARE_LABEL_INVALID`; an `expires_at` in the past is `400 INVALID_EXPIRY`.
 
 ## Check specs
 

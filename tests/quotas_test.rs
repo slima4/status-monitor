@@ -48,6 +48,8 @@ fn test_plan(per_min: i32) -> Plan {
         max_api_tokens_per_user: 1,
         max_public_components: 1,
         max_status_pages: 1,
+        max_share_links_per_monitor: 1,
+        max_shared_monitors: 1,
         max_maintenance_windows: 1,
         max_notification_channels: 1,
         max_logo_size_bytes: 1,
@@ -79,12 +81,12 @@ async fn seed_org_on_plan(
     sqlx::query(
         "INSERT INTO plans (id, name, description, max_targets, min_check_interval_secs, \
          retention_days, max_members, max_pending_invitations, max_api_tokens_per_user, \
-         max_public_components, max_status_pages, max_maintenance_windows, max_notification_channels, max_logo_size_bytes, \
+         max_public_components, max_status_pages, max_share_links_per_monitor, max_shared_monitors, max_maintenance_windows, max_notification_channels, max_logo_size_bytes, \
          api_writes_per_minute, api_reads_per_minute, bulk_ops_per_minute, \
          test_now_per_minute, check_now_per_minute, custom_domain_enabled, \
          white_label_enabled, incident_narration_enabled, is_listed, created_at, updated_at) \
          SELECT $1, $1, 'seeded', $2, min_check_interval_secs, retention_days, $3, $4, \
-         max_api_tokens_per_user, $5, max_status_pages, max_maintenance_windows, max_notification_channels, max_logo_size_bytes, \
+         max_api_tokens_per_user, $5, max_status_pages, max_share_links_per_monitor, max_shared_monitors, max_maintenance_windows, max_notification_channels, max_logo_size_bytes, \
          api_writes_per_minute, api_reads_per_minute, bulk_ops_per_minute, \
          test_now_per_minute, check_now_per_minute, custom_domain_enabled, \
          white_label_enabled, incident_narration_enabled, false, now(), now() \
@@ -1134,13 +1136,13 @@ async fn bulk_and_read_rates_trip_429_independently() {
     sqlx::query(
         "INSERT INTO plans (id, name, description, max_targets, min_check_interval_secs, \
          retention_days, max_members, max_pending_invitations, max_api_tokens_per_user, \
-         max_public_components, max_status_pages, max_maintenance_windows, max_notification_channels, max_logo_size_bytes, \
+         max_public_components, max_status_pages, max_share_links_per_monitor, max_shared_monitors, max_maintenance_windows, max_notification_channels, max_logo_size_bytes, \
          api_writes_per_minute, api_reads_per_minute, bulk_ops_per_minute, \
          test_now_per_minute, check_now_per_minute, custom_domain_enabled, \
          white_label_enabled, incident_narration_enabled, is_listed, created_at, updated_at) \
          SELECT $1, $1, 'lowrate', max_targets, min_check_interval_secs, retention_days, \
          max_members, max_pending_invitations, max_api_tokens_per_user, max_public_components, max_status_pages, \
-         max_maintenance_windows, max_notification_channels, max_logo_size_bytes, api_writes_per_minute, 5, 3, \
+         max_share_links_per_monitor, max_shared_monitors, max_maintenance_windows, max_notification_channels, max_logo_size_bytes, api_writes_per_minute, 5, 3, \
          test_now_per_minute, check_now_per_minute, custom_domain_enabled, \
          white_label_enabled, incident_narration_enabled, false, now(), now() \
          FROM plans WHERE id = 'free'",
@@ -1427,13 +1429,13 @@ async fn forwarded_ip_cannot_bypass_the_org_bucket() {
     sqlx::query(
         "INSERT INTO plans (id, name, description, max_targets, min_check_interval_secs, \
          retention_days, max_members, max_pending_invitations, max_api_tokens_per_user, \
-         max_public_components, max_status_pages, max_maintenance_windows, max_notification_channels, max_logo_size_bytes, \
+         max_public_components, max_status_pages, max_share_links_per_monitor, max_shared_monitors, max_maintenance_windows, max_notification_channels, max_logo_size_bytes, \
          api_writes_per_minute, api_reads_per_minute, bulk_ops_per_minute, \
          test_now_per_minute, check_now_per_minute, custom_domain_enabled, \
          white_label_enabled, incident_narration_enabled, is_listed, created_at, updated_at) \
          SELECT $1, $1, 'xff', max_targets, min_check_interval_secs, retention_days, \
          max_members, max_pending_invitations, max_api_tokens_per_user, max_public_components, max_status_pages, \
-         max_maintenance_windows, max_notification_channels, max_logo_size_bytes, 3, api_reads_per_minute, bulk_ops_per_minute, \
+         max_share_links_per_monitor, max_shared_monitors, max_maintenance_windows, max_notification_channels, max_logo_size_bytes, 3, api_reads_per_minute, bulk_ops_per_minute, \
          test_now_per_minute, check_now_per_minute, custom_domain_enabled, \
          white_label_enabled, incident_narration_enabled, false, now(), now() \
          FROM plans WHERE id = 'free'",

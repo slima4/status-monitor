@@ -115,6 +115,10 @@ pub struct AppState {
     pub maintenance_store: Arc<dyn MaintenanceStore>,
     pub notification_channel_store: Arc<dyn NotificationChannelStore>,
     pub status_page_store: Arc<dyn crate::storage::StatusPageStore>,
+    /// Per-monitor share links (`/m/{token}`). Built from `db` so
+    /// `AppState::new`'s signature stays unchanged: a Pg store when tenancy is
+    /// live, an in-memory one for no-DB fixtures.
+    pub monitor_share_store: Arc<dyn crate::storage::MonitorShareStore>,
     /// Resolved-channel cache the [`AlertEngine`] reads from. Held here so
     /// the channel CRUD handlers can `invalidate` on edit/delete and the
     /// engine picks up the change on the next dispatch rather than waiting
@@ -215,8 +219,13 @@ impl AppState {
         outbound_http: OutboundHttpClient,
         email_sender: Arc<dyn EmailSender>,
         alert_channel_cache: crate::notifier::engine::AlertChannelCache,
+        cipher: Option<Arc<crate::security::Cipher>>,
     ) -> Self {
         let quotas = Arc::new(QuotaService::new(&cfg, db.clone()));
+        let monitor_share_store: Arc<dyn crate::storage::MonitorShareStore> = match db.clone() {
+            Some(pool) => Arc::new(crate::storage::PgMonitorShareStore::new(pool, cipher)),
+            None => Arc::new(crate::storage::InMemoryMonitorShareStore::new()),
+        };
         let rate_limits = Arc::new(RateLimitService::new());
         let abuse = Arc::new(AbuseGuard::from_config(&cfg.abuse));
         Self {
@@ -235,6 +244,7 @@ impl AppState {
             maintenance_store,
             notification_channel_store,
             status_page_store,
+            monitor_share_store,
             incident_narration_store,
             session_debounce: Arc::new(build_debounce_cache()),
             api_token_debounce: Arc::new(build_api_token_debounce()),

@@ -64,6 +64,8 @@ struct PlanRow {
     max_api_tokens_per_user: i32,
     max_public_components: i32,
     max_status_pages: i32,
+    max_share_links_per_monitor: i32,
+    max_shared_monitors: i32,
     max_maintenance_windows: i32,
     max_notification_channels: i32,
     max_logo_size_bytes: i32,
@@ -94,6 +96,8 @@ impl From<PlanRow> for Plan {
             max_api_tokens_per_user: r.max_api_tokens_per_user,
             max_public_components: r.max_public_components,
             max_status_pages: r.max_status_pages,
+            max_share_links_per_monitor: r.max_share_links_per_monitor,
+            max_shared_monitors: r.max_shared_monitors,
             max_maintenance_windows: r.max_maintenance_windows,
             max_notification_channels: r.max_notification_channels,
             max_logo_size_bytes: r.max_logo_size_bytes,
@@ -174,7 +178,9 @@ impl QuotaService {
                     "SELECT p.id, p.name, p.description, p.max_targets, \
                      p.min_check_interval_secs, p.retention_days, p.max_members, \
                      p.max_pending_invitations, p.max_api_tokens_per_user, \
-                     p.max_public_components, p.max_status_pages, p.max_maintenance_windows, \
+                     p.max_public_components, p.max_status_pages, \
+                     p.max_share_links_per_monitor, p.max_shared_monitors, \
+                     p.max_maintenance_windows, \
                      p.max_notification_channels, p.max_logo_size_bytes, \
                      p.api_writes_per_minute, \
                      p.api_reads_per_minute, p.bulk_ops_per_minute, \
@@ -513,6 +519,8 @@ struct PlanOverrides {
     max_api_tokens_per_user: Option<u32>,
     max_public_components: Option<u32>,
     max_status_pages: Option<u32>,
+    max_share_links_per_monitor: Option<u32>,
+    max_shared_monitors: Option<u32>,
     max_maintenance_windows: Option<u32>,
     max_notification_channels: Option<u32>,
     max_logo_size_bytes: Option<u32>,
@@ -532,6 +540,11 @@ fn apply_overrides(base: &Plan, ov: &PlanOverrides) -> Plan {
     p.max_api_tokens_per_user = take(ov.max_api_tokens_per_user, p.max_api_tokens_per_user);
     p.max_public_components = take(ov.max_public_components, p.max_public_components);
     p.max_status_pages = take(ov.max_status_pages, p.max_status_pages);
+    p.max_share_links_per_monitor = take(
+        ov.max_share_links_per_monitor,
+        p.max_share_links_per_monitor,
+    );
+    p.max_shared_monitors = take(ov.max_shared_monitors, p.max_shared_monitors);
     p.max_maintenance_windows = take(ov.max_maintenance_windows, p.max_maintenance_windows);
     p.max_notification_channels = take(ov.max_notification_channels, p.max_notification_channels);
     p.max_logo_size_bytes = take(ov.max_logo_size_bytes, p.max_logo_size_bytes);
@@ -579,6 +592,8 @@ fn unlimited_plan() -> Plan {
         max_api_tokens_per_user: i32::MAX,
         max_public_components: i32::MAX,
         max_status_pages: i32::MAX,
+        max_share_links_per_monitor: i32::MAX,
+        max_shared_monitors: i32::MAX,
         max_maintenance_windows: i32::MAX,
         max_notification_channels: i32::MAX,
         max_logo_size_bytes: i32::MAX,

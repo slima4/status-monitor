@@ -98,6 +98,14 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
             "/targets/{id}/incidents",
             get(handlers::results::list_incidents),
         )
+        .route(
+            "/targets/{id}/shares",
+            get(handlers::shares::list_shares).post(handlers::shares::create_share),
+        )
+        .route(
+            "/targets/{id}/shares/{share_id}",
+            axum::routing::delete(handlers::shares::revoke_share),
+        )
         .route("/tags", get(handlers::tags::list_tags))
         .route(
             "/dashboard/summary",

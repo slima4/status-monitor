@@ -31,6 +31,15 @@ pub fn routes(state: AppState) -> Router {
             "/web/partials/targets/{id}/live",
             get(views::targets_detail::live_partial),
         )
+        // Public capability links: a token grants read-only access to one
+        // monitor's detail view. Unauthenticated by design; the token resolves
+        // to its org. Always mounted (not gated on public_routes_active) — share
+        // links live on the operator app host, not the per-tenant status hosts.
+        .route("/m/{token}", get(views::share::detail))
+        .route("/m/{token}/incidents", get(views::share::incidents))
+        .route("/m/{token}/live", get(views::share::live_partial))
+        .route("/m/{token}/latency", get(views::share::latency))
+        .route("/m/{token}/results", get(views::share::results))
         .route(
             "/web/partials/dashboard",
             get(views::dashboard::table_partial),
