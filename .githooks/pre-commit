@@ -26,6 +26,10 @@ run "cargo fmt --check" cargo fmt --all -- --check
 # fails on the CI runner, costing a re-push.
 run "cargo clippy" cargo clippy --all-targets --no-deps -- -D warnings
 
+# Workflow path-filter parity (ci.yml ↔ release-image.yml). Pure-YAML check,
+# no ast-grep needed; self-skips when pyyaml is absent. Local-only by design.
+run "workflow filters sync" scripts/check_workflow_filters_sync.sh
+
 if command -v ast-grep >/dev/null 2>&1; then
   run "tenant-isolation scan" scripts/check_tenant_isolation.sh
   run "static lints" scripts/check_static_lints.sh
