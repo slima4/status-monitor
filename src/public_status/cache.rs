@@ -10,10 +10,11 @@
 //!    idle eviction so a churned/deleted tenant the purge worker has not yet
 //!    reached cannot keep its snapshot resident forever.
 //!
-//! Cross-tenant isolation: each `OrgId` has its own slot in both layers, so an
+//! Cross-tenant isolation: each `StatusPageId` has its own slot in both layers, so an
 //! org's compute failure can never serve another org's stale data, and a hot
 //! org's recompute can't block another org's request.
 
+use std::collections::HashMap;
 use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
@@ -25,7 +26,7 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use crate::config::PublicStatusConfig;
-use crate::domain::{OrgId, PublicStatusPage};
+use crate::domain::{PublicStatusPage, StatusPageId};
 
 /// 90-day incident reference used only by the HTML popover matcher.
 /// Slim by design — full-detail incidents live on `PublicStatusPage`.
@@ -38,11 +39,15 @@ pub struct HistoryIncidentMarker {
     pub ended_at: Option<DateTime<Utc>>,
 }
 
-/// Cache value: page + history markers, each Arc-wrapped for cheap split.
+/// Cache value: page + history markers + the page's `target_id → public name`
+/// map, each Arc-wrapped for cheap split. `component_names` is the same map the
+/// aggregator builds for the page render, reused by the incident list/detail
+/// paths so they don't re-run the component JOIN per request.
 #[derive(Debug, Clone)]
 pub struct PageData {
     pub page: Arc<PublicStatusPage>,
     pub history_markers: Arc<Vec<HistoryIncidentMarker>>,
+    pub component_names: Arc<HashMap<Uuid, String>>,
 }
 
 impl From<PublicStatusPage> for PageData {
@@ -50,15 +55,29 @@ impl From<PublicStatusPage> for PageData {
         Self {
             page: Arc::new(page),
             history_markers: Arc::new(Vec::new()),
+            component_names: Arc::new(HashMap::new()),
         }
     }
 }
 
-impl From<(PublicStatusPage, Vec<HistoryIncidentMarker>)> for PageData {
-    fn from((page, markers): (PublicStatusPage, Vec<HistoryIncidentMarker>)) -> Self {
+impl
+    From<(
+        PublicStatusPage,
+        Vec<HistoryIncidentMarker>,
+        HashMap<Uuid, String>,
+    )> for PageData
+{
+    fn from(
+        (page, markers, names): (
+            PublicStatusPage,
+            Vec<HistoryIncidentMarker>,
+            HashMap<Uuid, String>,
+        ),
+    ) -> Self {
         Self {
             page: Arc::new(page),
             history_markers: Arc::new(markers),
+            component_names: Arc::new(names),
         }
     }
 }
@@ -74,8 +93,8 @@ pub enum PageCacheError {
 /// handles are `Arc`-backed internally.
 #[derive(Clone)]
 pub struct PageCache {
-    inner: FutureCache<OrgId, Arc<PageData>>,
-    last_good: SyncCache<OrgId, Arc<PageData>>,
+    inner: FutureCache<StatusPageId, Arc<PageData>>,
+    last_good: SyncCache<StatusPageId, Arc<PageData>>,
 }
 
 impl PageCache {
@@ -110,7 +129,7 @@ impl PageCache {
     /// if any, else [`PageCacheError::Unavailable`]. Failures are per-org.
     pub async fn get_or_compute<F, Fut, T, E>(
         &self,
-        org: OrgId,
+        org: StatusPageId,
         f: F,
     ) -> Result<Arc<PublicStatusPage>, PageCacheError>
     where
@@ -126,7 +145,7 @@ impl PageCache {
     /// back markers from the same atomic snapshot as the page.
     pub(crate) async fn get_or_compute_data<F, Fut, T, E>(
         &self,
-        org: OrgId,
+        org: StatusPageId,
         f: F,
     ) -> Result<Arc<PageData>, PageCacheError>
     where
@@ -175,14 +194,14 @@ impl PageCache {
     /// rows are gone (so `last_good` can't outlive the data behind it) and
     /// by the settings handler on a `public_status_enabled` flip in either
     /// direction (so a stale snapshot can't survive a disable→enable cycle).
-    pub async fn invalidate(&self, org: OrgId) {
+    pub async fn invalidate(&self, org: StatusPageId) {
         self.inner.invalidate(&org).await;
         self.last_good.invalidate(&org);
     }
 
     /// Snapshot of the last successful page compute for `org`, if any.
     /// Useful for tests and for surfacing "data is N seconds old" banners.
-    pub fn last_good(&self, org: OrgId) -> Option<Arc<PublicStatusPage>> {
+    pub fn last_good(&self, org: StatusPageId) -> Option<Arc<PublicStatusPage>> {
         self.last_good.get(&org).map(|d| d.page.clone())
     }
 }
@@ -216,8 +235,8 @@ mod tests {
     use super::*;
     use crate::domain::{OverallState, OverallStatus};
 
-    fn org() -> OrgId {
-        OrgId(Uuid::new_v4())
+    fn org() -> StatusPageId {
+        StatusPageId(Uuid::new_v4())
     }
 
     fn make_page(site: &str) -> PageData {

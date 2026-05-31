@@ -110,11 +110,6 @@ pub(crate) struct TargetRow {
     pub(crate) alerts: serde_json::Value,
     pub(crate) group_name: Option<String>,
     pub(crate) owner_user_id: Option<Uuid>,
-    pub(crate) public_status: bool,
-    pub(crate) public_name: Option<String>,
-    pub(crate) public_description: Option<String>,
-    pub(crate) public_group: Option<String>,
-    pub(crate) public_sort_order: i32,
     pub(crate) write_source: String,
     pub(crate) created_at: DateTime<Utc>,
     pub(crate) updated_at: DateTime<Utc>,
@@ -142,11 +137,6 @@ pub(crate) fn decode_target_row(row: TargetRow, cipher: Option<&Cipher>) -> Resu
         alerts,
         group_name: row.group_name,
         owner_user_id: row.owner_user_id,
-        public_status: row.public_status,
-        public_name: row.public_name,
-        public_description: row.public_description,
-        public_group: row.public_group,
-        public_sort_order: row.public_sort_order,
         write_source: WriteSource::from_db(&row.write_source),
         created_at: row.created_at,
         updated_at: row.updated_at,
@@ -178,7 +168,6 @@ impl TargetStore for PostgresTargetStore {
         let sql = format!(
             r#"SELECT id, name, check_spec, interval_secs, enabled, tags, alerts,
                       group_name, owner_user_id,
-                      public_status, public_name, public_description, public_group, public_sort_order,
                       write_source,
                       created_at, updated_at
                FROM targets
@@ -210,7 +199,6 @@ impl TargetStore for PostgresTargetStore {
         let row: Option<TargetRow> = sqlx::query_as::<_, TargetRow>(
             r#"SELECT id, name, check_spec, interval_secs, enabled, tags, alerts,
                       group_name, owner_user_id,
-                      public_status, public_name, public_description, public_group, public_sort_order,
                       write_source,
                       created_at, updated_at
                FROM targets WHERE id = $1 AND org_id = $2"#,
@@ -260,13 +248,10 @@ impl TargetStore for PostgresTargetStore {
         }
         let row: TargetRow = sqlx::query_as::<_, TargetRow>(
             r#"INSERT INTO targets (org_id, name, check_spec, interval_secs, enabled, tags, alerts,
-                                    group_name, owner_user_id,
-                                    public_status, public_name, public_description, public_group, public_sort_order,
-                                    write_source)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+                                    group_name, owner_user_id, write_source)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
                RETURNING id, name, check_spec, interval_secs, enabled, tags, alerts,
                       group_name, owner_user_id,
-                      public_status, public_name, public_description, public_group, public_sort_order,
                       write_source,
                       created_at, updated_at"#,
         )
@@ -279,11 +264,6 @@ impl TargetStore for PostgresTargetStore {
         .bind(alerts_json)
         .bind(&new.group_name)
         .bind(new.owner_user_id)
-        .bind(new.public_status)
-        .bind(&new.public_name)
-        .bind(&new.public_description)
-        .bind(&new.public_group)
-        .bind(new.public_sort_order)
         .bind(source.as_str())
         .fetch_one(&mut *tx)
         .await
@@ -321,17 +301,11 @@ impl TargetStore for PostgresTargetStore {
                  alerts = COALESCE($7, alerts),
                  group_name = CASE WHEN $8::bool THEN $9 ELSE group_name END,
                  owner_user_id = CASE WHEN $10::bool THEN $11 ELSE owner_user_id END,
-                 public_status = COALESCE($12, public_status),
-                 public_name = CASE WHEN $13::bool THEN $14 ELSE public_name END,
-                 public_description = CASE WHEN $15::bool THEN $16 ELSE public_description END,
-                 public_group = CASE WHEN $17::bool THEN $18 ELSE public_group END,
-                 public_sort_order = COALESCE($19, public_sort_order),
-                 write_source = $21,
+                 write_source = $13,
                  updated_at = now()
-               WHERE id = $1 AND org_id = $20
+               WHERE id = $1 AND org_id = $12
                RETURNING id, name, check_spec, interval_secs, enabled, tags, alerts,
                       group_name, owner_user_id,
-                      public_status, public_name, public_description, public_group, public_sort_order,
                       write_source,
                       created_at, updated_at"#,
         )
@@ -346,14 +320,6 @@ impl TargetStore for PostgresTargetStore {
         .bind(update.group_name.clone().flatten())
         .bind(update.owner_user_id.is_some())
         .bind(update.owner_user_id.flatten())
-        .bind(update.public_status)
-        .bind(update.public_name.is_some())
-        .bind(update.public_name.clone().flatten())
-        .bind(update.public_description.is_some())
-        .bind(update.public_description.clone().flatten())
-        .bind(update.public_group.is_some())
-        .bind(update.public_group.clone().flatten())
-        .bind(update.public_sort_order)
         .bind(org.0)
         .bind(source.as_str())
         .fetch_optional(&self.pool)
@@ -391,24 +357,18 @@ impl TargetStore for PostgresTargetStore {
         // concurrent bulk (a count subquery alone is not race-safe under
         // READ COMMITTED). All-or-nothing on the cap.
         const SQL: &str = r#"INSERT INTO targets (org_id, name, check_spec, interval_secs, enabled, tags, alerts,
-                                    group_name, owner_user_id,
-                                    public_status, public_name, public_description, public_group, public_sort_order,
-                                    write_source)
-               SELECT $14, u.name, u.check_spec, u.interval_secs, u.enabled,
+                                    group_name, owner_user_id, write_source)
+               SELECT $9, u.name, u.check_spec, u.interval_secs, u.enabled,
                       ARRAY(SELECT jsonb_array_elements_text(u.tags)),
                       u.alerts,
                       u.group_name, u.owner_user_id,
-                      u.public_status, u.public_name, u.public_description, u.public_group, u.public_sort_order,
-                      $15
+                      $10
                FROM UNNEST($1::text[], $2::jsonb[], $3::int4[], $4::bool[], $5::jsonb[], $6::jsonb[],
-                           $7::text[], $8::uuid[],
-                           $9::bool[], $10::text[], $11::text[], $12::text[], $13::int4[])
+                           $7::text[], $8::uuid[])
                     AS u(name, check_spec, interval_secs, enabled, tags, alerts,
-                         group_name, owner_user_id,
-                         public_status, public_name, public_description, public_group, public_sort_order)
+                         group_name, owner_user_id)
                RETURNING id, name, check_spec, interval_secs, enabled, tags, alerts,
                       group_name, owner_user_id,
-                      public_status, public_name, public_description, public_group, public_sort_order,
                       write_source,
                       created_at, updated_at"#;
 
@@ -422,11 +382,6 @@ impl TargetStore for PostgresTargetStore {
         let mut alerts_json: Vec<Json<TargetAlerts>> = Vec::with_capacity(len);
         let mut group_name: Vec<Option<String>> = Vec::with_capacity(len);
         let mut owner_user_id: Vec<Option<Uuid>> = Vec::with_capacity(len);
-        let mut public_status: Vec<bool> = Vec::with_capacity(len);
-        let mut public_name: Vec<Option<String>> = Vec::with_capacity(len);
-        let mut public_description: Vec<Option<String>> = Vec::with_capacity(len);
-        let mut public_group: Vec<Option<String>> = Vec::with_capacity(len);
-        let mut public_sort_order: Vec<i32> = Vec::with_capacity(len);
 
         let mut tx = self.pool.begin().await.context("bulk create: begin")?;
         advisory_xact_lock(&mut *tx, &org_lock_key(org))
@@ -462,11 +417,6 @@ impl TargetStore for PostgresTargetStore {
                 alerts_json.push(Json(new.alerts));
                 group_name.push(new.group_name);
                 owner_user_id.push(new.owner_user_id);
-                public_status.push(new.public_status);
-                public_name.push(new.public_name);
-                public_description.push(new.public_description);
-                public_group.push(new.public_group);
-                public_sort_order.push(new.public_sort_order);
             }
             sqlx::query_as::<_, TargetRow>(SQL)
                 .bind(&names)
@@ -477,11 +427,6 @@ impl TargetStore for PostgresTargetStore {
                 .bind(&alerts_json)
                 .bind(&group_name)
                 .bind(&owner_user_id)
-                .bind(&public_status)
-                .bind(&public_name)
-                .bind(&public_description)
-                .bind(&public_group)
-                .bind(&public_sort_order)
                 .bind(org.0)
                 .bind(source.as_str())
                 .fetch_all(&mut *tx)
@@ -500,11 +445,6 @@ impl TargetStore for PostgresTargetStore {
                 alerts_json.push(Json(new.alerts));
                 group_name.push(new.group_name);
                 owner_user_id.push(new.owner_user_id);
-                public_status.push(new.public_status);
-                public_name.push(new.public_name);
-                public_description.push(new.public_description);
-                public_group.push(new.public_group);
-                public_sort_order.push(new.public_sort_order);
             }
             sqlx::query_as::<_, TargetRow>(SQL)
                 .bind(&names)
@@ -515,11 +455,6 @@ impl TargetStore for PostgresTargetStore {
                 .bind(&alerts_json)
                 .bind(&group_name)
                 .bind(&owner_user_id)
-                .bind(&public_status)
-                .bind(&public_name)
-                .bind(&public_description)
-                .bind(&public_group)
-                .bind(&public_sort_order)
                 .bind(org.0)
                 .bind(source.as_str())
                 .fetch_all(&mut *tx)
@@ -535,7 +470,6 @@ impl TargetStore for PostgresTargetStore {
         let rows: Vec<TargetRow> = sqlx::query_as::<_, TargetRow>(
             r#"SELECT id, name, check_spec, interval_secs, enabled, tags, alerts,
                       group_name, owner_user_id,
-                      public_status, public_name, public_description, public_group, public_sort_order,
                       write_source,
                       created_at, updated_at
                FROM targets WHERE org_id = $1 AND updated_at > $2"#,

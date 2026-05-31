@@ -19,7 +19,8 @@ enough to keep abuse on a small VM cheap.
 | `max_members` | 5 | Active members in the org |
 | `max_pending_invitations` | 10 | Outstanding (unaccepted) invitations |
 | `max_api_tokens_per_user` | 5 | API tokens a single user may hold |
-| `max_public_components` | 10 | Targets shown on the public status page |
+| `max_status_pages` | 1 | Public status pages the org can run |
+| `max_public_components` | 10 | Distinct monitors published across all of the org's pages (a monitor on several pages counts once) |
 | `max_maintenance_windows` | 20 | Scheduled maintenance windows |
 | `max_notification_channels` | 20 | Notification channels (Slack/webhook/Telegram) in the org |
 | `max_logo_size_bytes` | 1048576 | Status-page logo upload ceiling (1 MiB) |

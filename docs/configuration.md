@@ -156,16 +156,18 @@ public_per_ip_rate_limit_per_min = 60  # in-app limit behind the Caddy-side one
 | `public_per_ip_rate_limit_per_min` | second-layer rate limit behind the reverse proxy's |
 
 History-strip length (90 days) and the recent-incidents horizon (30 days)
-remain hard-coded defaults in `src/public_status/aggregator.rs`. What an
-org publishes is per-target:
+remain hard-coded defaults in `src/public_status/aggregator.rs`. What a
+page publishes is curated per-page — a monitor appears as a component
+only while it's bound to that page, and its presentation lives on the
+binding:
 
-| Target field | Purpose |
+| Per-page component field | Purpose |
 |---|---|
-| `public_status` | when `true`, the target is published as a component on `/status` |
-| `public_name` | display name (falls back to operator-side `name`) |
+| (binding exists) | the monitor is published as a component on that page |
+| `public_name` | display name (falls back to operator-side monitor name) |
 | `public_description` | optional one-liner |
 | `public_group` | optional group label; ungrouped components render last |
-| `public_sort_order` | ASC integer sort within a group |
+| `sort_order` | ASC integer sort within a group |
 
 See [Public status page](public-status.md) for the operator workflow and
 [Per-org status pages](per-org-status.md) for the SaaS subdomain model.

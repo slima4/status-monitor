@@ -5,6 +5,9 @@
 //! logo step — actually succeeds). Walks the real router via `oneshot`, so the
 //! extractor wiring, status codes and JSON error contract are all exercised.
 //!
+//! Branding lives on a page under `PATCH /api/v1/status-pages/{id}` (the
+//! `branding` sub-object); the logo has its own `/logo` endpoints.
+//!
 //! Live-PG ignored: the owner gate needs a Postgres pool. Run with
 //! `DATABASE_URL` set (see CLAUDE.md) — unset is a no-op pass.
 
@@ -13,11 +16,12 @@ mod common;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use common::{
-    body_json, build_test_app_with_pg, json_request, make_user, unique_slug, with_session,
+    body_json, build_saas_router_with_pg_cfg, json_request, make_user, unique_slug, with_session,
 };
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use tower::ServiceExt;
+use uptimepage::storage::create_org_with_owner;
 
 /// 1×1 RGBA PNG — `image::guess_format` accepts it and it is within every
 /// dimension/size bound, so `upload_logo` stores it verbatim.
@@ -34,41 +38,50 @@ async fn read(resp: axum::http::Response<Body>) -> (StatusCode, Value) {
     (st, body_json(resp).await)
 }
 
-/// Owner-of-a-fresh-org router + the org id. Creating the org through the API
-/// is what grants the `owner` membership the settings routes require.
-async fn owner_org(pool: PgPool) -> (axum::Router, String) {
+/// Owner-of-a-fresh-org router + a freshly-created page id. Creating the org
+/// through the API grants the `owner` membership the settings routes require;
+/// the page is the resource branding/logo edits target.
+async fn owner_page(pool: PgPool) -> (axum::Router, String) {
     let user = make_user(&pool, "sp").await;
+    let slug = unique_slug("sp");
+    let org = create_org_with_owner(&pool, user, &slug, "SP Co", 3)
+        .await
+        .unwrap()
+        .expect("org");
     let logo_dir = std::env::temp_dir().join(format!("sp-logo-{}", unique_slug("d")));
-    let (router, _) = build_test_app_with_pg(pool, move |cfg| {
+    let router = build_saas_router_with_pg_cfg(pool, move |cfg| {
         cfg.public_status.logo_dir = logo_dir.to_string_lossy().into_owned();
     })
     .await;
-    let router = with_session(router, user, None, None);
-    let slug = unique_slug("sp");
+    // Active org on the session is what the per-page routes resolve `org` from.
+    let router = with_session(router, user, Some(org.id), Some(slug.as_str()));
+
+    // Org creation seeds one default page (the free-plan cap); edit that one.
     let (st, body) = read(
         router
             .clone()
-            .oneshot(json_request(
-                "POST",
-                "/api/v1/orgs",
-                json!({ "slug": slug, "name": "SP Co" }),
-            ))
+            .oneshot(
+                Request::get("/api/v1/status-pages")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap(),
     )
     .await;
-    assert_eq!(st, StatusCode::CREATED);
-    (router, body["id"].as_str().unwrap().to_owned())
+    assert_eq!(st, StatusCode::OK, "list pages: {body}");
+    let id = body[0]["id"].as_str().expect("a default page").to_owned();
+    (router, id)
 }
 
-fn patch(org: &str, payload: Value) -> Request<Body> {
-    json_request("PATCH", &format!("/api/v1/orgs/{org}/status-page"), payload)
+fn patch(id: &str, payload: Value) -> Request<Body> {
+    json_request("PATCH", &format!("/api/v1/status-pages/{id}"), payload)
 }
 
 const BOUNDARY: &str = "X-SP-BOUNDARY";
 
 /// A `multipart/form-data` body with a single `file` part holding `bytes`.
-fn logo_request(org: &str, bytes: &[u8]) -> Request<Body> {
+fn logo_request(id: &str, bytes: &[u8]) -> Request<Body> {
     let mut body = format!(
         "--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"file\"; \
          filename=\"l.png\"\r\nContent-Type: image/png\r\n\r\n"
@@ -76,7 +89,7 @@ fn logo_request(org: &str, bytes: &[u8]) -> Request<Body> {
     .into_bytes();
     body.extend_from_slice(bytes);
     body.extend_from_slice(format!("\r\n--{BOUNDARY}--\r\n").as_bytes());
-    Request::post(format!("/api/v1/orgs/{org}/status-page/logo"))
+    Request::post(format!("/api/v1/status-pages/{id}/logo"))
         .header(
             "content-type",
             format!("multipart/form-data; boundary={BOUNDARY}"),
@@ -93,31 +106,33 @@ async fn valid_save_persists_and_round_trips() {
     let Some(pool) = common::pg_pool_from_env().await else {
         return;
     };
-    let (router, org) = owner_org(pool).await;
+    let (router, id) = owner_page(pool).await;
 
-    let (st, _) = read(
+    let (st, body) = read(
         router
             .clone()
             .oneshot(patch(
-                &org,
+                &id,
                 json!({
-                    "public_status_enabled": true,
-                    "public_display_name": "Acme Public",
-                    "public_about": "All good.",
-                    "public_brand_color": "#1A2B3C",
-                    "public_show_powered_by": false
+                    "enabled": true,
+                    "branding": {
+                        "public_display_name": "Acme Public",
+                        "public_about": "All good.",
+                        "public_brand_color": "#1A2B3C",
+                        "public_show_powered_by": false
+                    }
                 }),
             ))
             .await
             .unwrap(),
     )
     .await;
-    assert_eq!(st, StatusCode::OK);
+    assert_eq!(st, StatusCode::OK, "branding patch: {body}");
 
     let (st, body) = read(
         router
             .oneshot(
-                Request::get(format!("/api/v1/orgs/{org}/status-page"))
+                Request::get(format!("/api/v1/status-pages/{id}"))
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -126,10 +141,11 @@ async fn valid_save_persists_and_round_trips() {
     )
     .await;
     assert_eq!(st, StatusCode::OK);
-    assert_eq!(body["public_status_enabled"], true);
+    assert_eq!(body["enabled"], true);
     assert_eq!(body["public_display_name"], "Acme Public");
     assert_eq!(body["public_brand_color"], "#1a2b3c"); // lower-cased on write
     assert_eq!(body["show_powered_by"], false);
+    assert_eq!(body["public_show_powered_by"], false); // raw override, not just resolved
 }
 
 /// The form's default state (no display name / about set) must not read as a
@@ -140,56 +156,42 @@ async fn blank_optionals_save_as_cleared_not_rejected() {
     let Some(pool) = common::pg_pool_from_env().await else {
         return;
     };
-    let (router, org) = owner_org(pool).await;
-    let (st, _) = read(
+    let (router, id) = owner_page(pool).await;
+    let (st, body) = read(
         router
             .oneshot(patch(
-                &org,
+                &id,
                 json!({
-                    "public_status_enabled": false,
-                    "public_display_name": "",
-                    "public_about": "",
-                    "public_brand_color": "#3b82f6",
-                    "public_show_powered_by": true
+                    "enabled": false,
+                    "branding": {
+                        "public_display_name": "",
+                        "public_about": "",
+                        "public_brand_color": "#3b82f6",
+                        "public_show_powered_by": true
+                    }
                 }),
             ))
             .await
             .unwrap(),
     )
     .await;
-    assert_eq!(st, StatusCode::OK);
-}
-
-/// API clients (and the legacy htmx checkbox encoding) send `"on"` for a
-/// checked box — still accepted, never a deserialize 422.
-#[tokio::test]
-#[ignore]
-async fn checkbox_string_encoding_still_accepted() {
-    let Some(pool) = common::pg_pool_from_env().await else {
-        return;
-    };
-    let (router, org) = owner_org(pool).await;
-    let (st, _) = read(
-        router
-            .oneshot(patch(
-                &org,
-                json!({ "public_status_enabled": "on", "public_brand_color": "#3b82f6" }),
-            ))
-            .await
-            .unwrap(),
-    )
-    .await;
-    assert_eq!(st, StatusCode::OK);
+    assert_eq!(st, StatusCode::OK, "blank optionals: {body}");
 }
 
 // ── #25: a rejected save names the offending field ──────────────────────────
 
-async fn assert_field_rejection(payload: Value, expect_field: &str) {
+async fn assert_field_rejection(branding: Value, expect_field: &str) {
     let Some(pool) = common::pg_pool_from_env().await else {
         return;
     };
-    let (router, org) = owner_org(pool).await;
-    let (st, body) = read(router.oneshot(patch(&org, payload)).await.unwrap()).await;
+    let (router, id) = owner_page(pool).await;
+    let (st, body) = read(
+        router
+            .oneshot(patch(&id, json!({ "branding": branding })))
+            .await
+            .unwrap(),
+    )
+    .await;
     assert_eq!(st, StatusCode::BAD_REQUEST, "body: {body}");
     assert_eq!(body["error"]["code"], "BRANDING_INVALID");
     assert_eq!(
@@ -234,7 +236,7 @@ async fn over_long_display_name_points_at_that_field() {
     .await;
 }
 
-// ── #26: the folded-in logo step and the branding save are independent ──────
+// ── #26: the logo step and the branding save are independent ─────────────────
 
 #[tokio::test]
 #[ignore]
@@ -242,12 +244,12 @@ async fn logo_upload_then_branding_patch_keeps_logo() {
     let Some(pool) = common::pg_pool_from_env().await else {
         return;
     };
-    let (router, org) = owner_org(pool).await;
+    let (router, id) = owner_page(pool).await;
 
     let (st, body) = read(
         router
             .clone()
-            .oneshot(logo_request(&org, TINY_PNG))
+            .oneshot(logo_request(&id, TINY_PNG))
             .await
             .unwrap(),
     )
@@ -255,14 +257,14 @@ async fn logo_upload_then_branding_patch_keeps_logo() {
     assert_eq!(st, StatusCode::OK, "logo upload: {body}");
     assert!(body["logo_url"].as_str().is_some_and(|u| !u.is_empty()));
 
-    // The branding PATCH must not disturb the just-uploaded logo (the form
+    // The branding PATCH must not disturb the just-uploaded logo (the editor
     // does logo-then-PATCH on a single Save).
     let (st, _) = read(
         router
             .clone()
             .oneshot(patch(
-                &org,
-                json!({ "public_status_enabled": true, "public_brand_color": "#3b82f6" }),
+                &id,
+                json!({ "enabled": true, "branding": { "public_brand_color": "#3b82f6" } }),
             ))
             .await
             .unwrap(),
@@ -273,7 +275,7 @@ async fn logo_upload_then_branding_patch_keeps_logo() {
     let (st, body) = read(
         router
             .oneshot(
-                Request::get(format!("/api/v1/orgs/{org}/status-page"))
+                Request::get(format!("/api/v1/status-pages/{id}"))
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -298,20 +300,14 @@ async fn oversize_logo_is_clean_413_not_opaque() {
     let Some(pool) = common::pg_pool_from_env().await else {
         return;
     };
-    let (router, org) = owner_org(pool).await;
+    let (router, id) = owner_page(pool).await;
 
     // 1.2 MiB: over the 1 MiB cap but under the route body limit, so it
     // reaches the handler's own size check instead of being truncated.
     let mut oversized = TINY_PNG.to_vec();
     oversized.resize(1_258_291, 0);
 
-    let (st, body) = read(
-        router
-            .oneshot(logo_request(&org, &oversized))
-            .await
-            .unwrap(),
-    )
-    .await;
+    let (st, body) = read(router.oneshot(logo_request(&id, &oversized)).await.unwrap()).await;
     assert_eq!(st, StatusCode::PAYLOAD_TOO_LARGE, "body: {body}");
     assert_eq!(body["error"]["code"], "LOGO_TOO_LARGE");
 }

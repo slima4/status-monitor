@@ -33,6 +33,21 @@ const LIST_LIMIT_DEFAULT: usize = 50;
 const LIST_LIMIT_MAX: usize = 10_000;
 const ALLOWED_SCHEMES: &[&str] = &["http", "https"];
 
+/// Drop the public-page cache for every page that curates any of `ids`. A
+/// component's public name falls back to the monitor name and its membership
+/// follows the join row, so a rename or delete must refresh the pages it shows
+/// on. For deletes, call this *before* the cascade clears the join rows.
+async fn invalidate_pages_for(state: &AppState, org: OrgId, ids: &[Uuid]) {
+    match state.status_page_store.pages_for_targets(org, ids).await {
+        Ok(pages) => {
+            for page in pages {
+                state.public_source.invalidate(page).await;
+            }
+        }
+        Err(e) => tracing::warn!(error = %e, "could not resolve pages for cache invalidation"),
+    }
+}
+
 #[derive(Debug, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct ListQuery {
@@ -191,16 +206,10 @@ pub async fn create(
     check_abuse(&state, org, &new.check)?;
     // Friendly pre-check; the store INSERT enforces the same cap atomically.
     state.quotas.check_can_create_targets(org, None, 1).await?;
-    if new.public_status {
-        state.quotas.check_public_components(org, None, 1).await?;
-    }
     let t = state
         .target_store
         .create(org, new, source, i64::from(plan.max_targets))
         .await?;
-    if t.public_status {
-        state.public_source.invalidate(org).await;
-    }
     dispatch_first_check(&state, org, &t);
     // UUID hex is always ASCII-safe → infallible.
     let location = HeaderValue::from_str(&format!("/api/v1/targets/{}", t.id))
@@ -247,11 +256,6 @@ pub async fn update(
         validate_alerts(alerts)?;
         verify_alert_channels(&state, org, alerts).await?;
     }
-    validate_public_target_field_updates(
-        update.public_name.as_ref(),
-        update.public_description.as_ref(),
-        update.public_group.as_ref(),
-    )?;
     if let Some(Some(g)) = update.group_name.as_ref() {
         validate_group_name(Some(g.as_str()))?;
     }
@@ -290,21 +294,9 @@ pub async fn update(
             ));
         }
     }
-    // Flipping a private target public consumes a public-components slot.
-    // create/bulk already gate this; the PATCH path must too, or the cap is
-    // trivially bypassed by creating private then editing public.
-    if update.public_status == Some(true)
-        && let Some(existing) = state.target_store.get(org, id).await?
-        && !existing.public_status
-    {
-        state.quotas.check_public_components(org, None, 1).await?;
-    }
-    let touches_public = touches_public_view(&update);
     match state.target_store.update(org, id, update, source).await? {
         Some(t) => {
-            if touches_public || t.public_status {
-                state.public_source.invalidate(org).await;
-            }
+            invalidate_pages_for(&state, org, &[id]).await;
             Ok(Redacted::new(t))
         }
         None => Err(AppError::not_found(
@@ -312,16 +304,6 @@ pub async fn update(
             "target not found",
         )),
     }
-}
-
-fn touches_public_view(u: &TargetUpdate) -> bool {
-    u.public_status.is_some()
-        || u.public_name.is_some()
-        || u.public_description.is_some()
-        || u.public_group.is_some()
-        || u.public_sort_order.is_some()
-        || u.name.is_some()
-        || u.group_name.is_some()
 }
 
 #[utoipa::path(
@@ -343,8 +325,16 @@ pub async fn delete(
     Authorized(org, _): Authorized<TargetsDelete>,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode> {
+    // Resolve curated pages before the FK cascade clears the join rows.
+    let pages = state
+        .status_page_store
+        .pages_for_targets(org, &[id])
+        .await
+        .unwrap_or_default();
     if state.target_store.delete(org, id).await? {
-        state.public_source.invalidate(org).await;
+        for page in pages {
+            state.public_source.invalidate(page).await;
+        }
         Ok(StatusCode::NO_CONTENT)
     } else {
         Err(AppError::not_found(
@@ -420,20 +410,10 @@ pub async fn bulk_create(
     // Quantity-aware friendly pre-check; the store INSERT re-enforces the
     // same `current + n <= limit` bound atomically against a concurrent bulk.
     state.quotas.check_can_create_targets(org, None, n).await?;
-    let public = items.iter().filter(|t| t.public_status).count() as i64;
-    if public > 0 {
-        state
-            .quotas
-            .check_public_components(org, None, public)
-            .await?;
-    }
     let out = state
         .target_store
         .bulk_create(org, items, source, i64::from(plan.max_targets))
         .await?;
-    if out.iter().any(|t| t.public_status) {
-        state.public_source.invalidate(org).await;
-    }
     Ok((StatusCode::CREATED, Redacted::new(out)))
 }
 
@@ -479,14 +459,22 @@ pub async fn bulk_action(
         ));
     }
 
-    let action_touches_public = matches!(
-        &req.action,
-        BulkAction::Delete | BulkAction::SetGroup { .. }
-    );
     let succeeded = match &req.action {
         BulkAction::Enable => state.target_store.set_enabled(org, &req.ids, true).await?,
         BulkAction::Disable => state.target_store.set_enabled(org, &req.ids, false).await?,
-        BulkAction::Delete => state.target_store.delete_bulk(org, &req.ids).await?,
+        BulkAction::Delete => {
+            // Capture curated pages before the cascade drops the join rows.
+            let pages = state
+                .status_page_store
+                .pages_for_targets(org, &req.ids)
+                .await
+                .unwrap_or_default();
+            let succeeded = state.target_store.delete_bulk(org, &req.ids).await?;
+            for page in pages {
+                state.public_source.invalidate(page).await;
+            }
+            succeeded
+        }
         BulkAction::TagAdd { tags } => {
             if tags.is_empty() {
                 return Err(AppError::bad_request_field(
@@ -528,10 +516,6 @@ pub async fn bulk_action(
             message: "target not found".into(),
         })
         .collect();
-
-    if action_touches_public && !succeeded.is_empty() {
-        state.public_source.invalidate(org).await;
-    }
 
     Ok(Json(BulkActionResponse { succeeded, failed }))
 }
@@ -729,34 +713,7 @@ fn validate_new_target(new: &NewTarget, guard: &SsrfGuard, min_interval_secs: i6
     }
     validate_check(&new.check, guard)?;
     validate_alerts(&new.alerts)?;
-    validate_group_name(new.group_name.as_deref())?;
-    validate_public_target_fields(
-        new.public_name.as_deref(),
-        new.public_description.as_deref(),
-        new.public_group.as_deref(),
-    )
-}
-
-/// Length-cap the public_name / public_description / public_group columns
-/// that render onto the status page. The HTTP body limit (64 KiB single,
-/// 8 MiB bulk) stops a single giant blob, but without per-field caps an
-/// owner with a large `max_targets` quota could still bloat the rendered
-/// status page by stuffing every target with the largest blob the body
-/// limit allows.
-fn validate_public_target_fields(
-    name: Option<&str>,
-    description: Option<&str>,
-    group: Option<&str>,
-) -> Result<()> {
-    use crate::api::handlers::validation;
-    if let Some(n) = name {
-        validation::validate_title(n, "public_name")?;
-    }
-    validation::validate_description(description, "public_description")?;
-    if let Some(g) = group {
-        validation::check_length(g, "public_group", 50, codes::GROUP_TOO_LONG)?;
-    }
-    Ok(())
+    validate_group_name(new.group_name.as_deref())
 }
 
 fn validate_group_name(group: Option<&str>) -> Result<()> {
@@ -781,23 +738,6 @@ async fn validate_owner_is_member(state: &AppState, org: OrgId, owner: Option<Uu
         ));
     }
     Ok(())
-}
-
-/// Update-path variant: extract the inner `&str` from `Option<&Option<String>>`
-/// (skipping clears and omissions) and run the same caps.
-fn validate_public_target_field_updates(
-    name: Option<&Option<String>>,
-    description: Option<&Option<String>>,
-    group: Option<&Option<String>>,
-) -> Result<()> {
-    validate_public_target_fields(unset(name), unset(description), unset(group))
-}
-
-/// `Some(Some(s)) → Some(s)`; otherwise `None`. PATCH bodies model
-/// "untouched" vs "clear to null" vs "set to value" with a double Option;
-/// validation only runs on the set case.
-fn unset(opt: Option<&Option<String>>) -> Option<&str> {
-    opt.and_then(|inner| inner.as_deref())
 }
 
 /// Structural-only (no I/O): each binding's `after_failures` floor. The bound
@@ -1086,110 +1026,11 @@ fn check_ip(ip: IpAddr, guard: &SsrfGuard) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::handlers::validation::{MAX_DESCRIPTION, MAX_TITLE};
 
     fn assert_bad_request_with_field(err: AppError, expected_field: &str) {
         match err {
             AppError::BadRequest { field: Some(f), .. } => assert_eq!(f, expected_field),
             other => panic!("expected BadRequest with field={expected_field}, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn validate_public_target_fields_accepts_none() {
-        validate_public_target_fields(None, None, None).expect("all-None must pass");
-    }
-
-    #[test]
-    fn validate_public_target_fields_accepts_normal_values() {
-        validate_public_target_fields(Some("API"), Some("Public endpoint"), Some("Web"))
-            .expect("normal values must pass");
-    }
-
-    #[test]
-    fn validate_public_target_fields_rejects_oversized_name() {
-        let big = "x".repeat(MAX_TITLE + 1);
-        let err = validate_public_target_fields(Some(&big), None, None)
-            .expect_err("over-cap must reject");
-        assert_bad_request_with_field(err, "public_name");
-    }
-
-    #[test]
-    fn validate_public_target_fields_rejects_oversized_description() {
-        let big = "x".repeat(MAX_DESCRIPTION + 1);
-        let err = validate_public_target_fields(None, Some(&big), None)
-            .expect_err("over-cap must reject");
-        assert_bad_request_with_field(err, "public_description");
-    }
-
-    #[test]
-    fn validate_public_target_fields_rejects_oversized_group() {
-        let big = "x".repeat(51);
-        let err = validate_public_target_fields(None, None, Some(&big))
-            .expect_err("over-cap must reject");
-        assert_bad_request_with_field(err, "public_group");
-    }
-
-    #[test]
-    fn validate_public_target_field_updates_passes_clears() {
-        // Some(None) is a clear; no length check needed.
-        validate_public_target_field_updates(Some(&None), Some(&None), Some(&None))
-            .expect("clears must pass");
-    }
-
-    #[test]
-    fn validate_public_target_field_updates_rejects_oversized_set() {
-        let big = Some("x".repeat(MAX_DESCRIPTION + 1));
-        let err = validate_public_target_field_updates(None, Some(&big), None)
-            .expect_err("over-cap set must reject");
-        assert_bad_request_with_field(err, "public_description");
-    }
-
-    #[test]
-    fn touches_public_view_detects_visibility_and_render_fields() {
-        let mut u = TargetUpdate::default();
-        assert!(!touches_public_view(&u), "empty update is no-op");
-        u.enabled = Some(false);
-        assert!(
-            !touches_public_view(&u),
-            "enabled flag does not change public projection"
-        );
-
-        for u in [
-            TargetUpdate {
-                public_status: Some(true),
-                ..Default::default()
-            },
-            TargetUpdate {
-                public_status: Some(false),
-                ..Default::default()
-            },
-            TargetUpdate {
-                public_name: Some(Some("API".into())),
-                ..Default::default()
-            },
-            TargetUpdate {
-                public_description: Some(None),
-                ..Default::default()
-            },
-            TargetUpdate {
-                public_group: Some(Some("Web".into())),
-                ..Default::default()
-            },
-            TargetUpdate {
-                public_sort_order: Some(5),
-                ..Default::default()
-            },
-            TargetUpdate {
-                name: Some("new-name".into()),
-                ..Default::default()
-            },
-            TargetUpdate {
-                group_name: Some(Some("g".into())),
-                ..Default::default()
-            },
-        ] {
-            assert!(touches_public_view(&u), "{u:?} must invalidate");
         }
     }
 

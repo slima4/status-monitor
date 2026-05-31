@@ -27,7 +27,7 @@ use crate::domain::{
 };
 use crate::public_status::IncidentListQuery;
 use crate::public_status::badge::{component_badge, overall_badge, render_badge};
-use crate::web::host::StatusPageOrg;
+use crate::web::host::ResolvedStatusPage;
 
 const RSS_CONTENT_TYPE: HeaderValue =
     HeaderValue::from_static("application/rss+xml; charset=utf-8");
@@ -81,9 +81,9 @@ pub struct IncidentsQuery {
 )]
 pub async fn public_status(
     State(state): State<AppState>,
-    StatusPageOrg(org): StatusPageOrg,
+    ResolvedStatusPage(page): ResolvedStatusPage,
 ) -> Result<JsonArc<PublicStatusPage>, PublicAppError> {
-    let page = state.public_source.page(org).await?;
+    let page = state.public_source.page(page).await?;
     Ok(JsonArc(page))
 }
 
@@ -108,12 +108,15 @@ pub async fn public_status(
 )]
 pub async fn component_history(
     State(state): State<AppState>,
-    StatusPageOrg(org): StatusPageOrg,
+    ResolvedStatusPage(page): ResolvedStatusPage,
     Path(id): Path<Uuid>,
     Query(q): Query<HistoryQuery>,
 ) -> Result<Json<ComponentHistoryResponse>, PublicAppError> {
     let days = q.days.unwrap_or(90);
-    let res = state.public_source.component_history(org, id, days).await?;
+    let res = state
+        .public_source
+        .component_history(page, id, days)
+        .await?;
     Ok(Json(res))
 }
 
@@ -133,7 +136,7 @@ pub async fn component_history(
 )]
 pub async fn public_incidents(
     State(state): State<AppState>,
-    StatusPageOrg(org): StatusPageOrg,
+    ResolvedStatusPage(page): ResolvedStatusPage,
     Query(q): Query<IncidentsQuery>,
 ) -> Result<Json<CursorPage<PublicIncident>>, PublicAppError> {
     // Cursor decode failure surfaces as `INVALID_CURSOR`. Map the internal
@@ -151,7 +154,7 @@ pub async fn public_incidents(
         cursor,
         ongoing_only: q.ongoing_only.unwrap_or(false),
     };
-    let page = state.public_source.list_incidents(org, query).await?;
+    let page = state.public_source.list_incidents(page, query).await?;
     Ok(Json(page))
 }
 
@@ -173,10 +176,10 @@ pub async fn public_incidents(
 )]
 pub async fn public_incident(
     State(state): State<AppState>,
-    StatusPageOrg(org): StatusPageOrg,
+    ResolvedStatusPage(page): ResolvedStatusPage,
     Path(id): Path<Uuid>,
 ) -> Result<Json<PublicIncident>, PublicAppError> {
-    let inc = state.public_source.incident_by_id(org, id).await?;
+    let inc = state.public_source.incident_by_id(page, id).await?;
     Ok(Json(inc))
 }
 
@@ -196,7 +199,7 @@ pub async fn public_incident(
 )]
 pub async fn public_incidents_rss(
     State(state): State<AppState>,
-    StatusPageOrg(org): StatusPageOrg,
+    ResolvedStatusPage(page): ResolvedStatusPage,
 ) -> Result<Response, PublicAppError> {
     let base_url = format!(
         "http://{}",
@@ -208,7 +211,7 @@ pub async fn public_incidents_rss(
             .next()
             .unwrap_or("localhost")
     );
-    let body = state.public_source.incidents_rss(org, &base_url).await?;
+    let body = state.public_source.incidents_rss(page, &base_url).await?;
     let mut resp = (StatusCode::OK, body).into_response();
     resp.headers_mut()
         .insert(header::CONTENT_TYPE, RSS_CONTENT_TYPE);
@@ -231,9 +234,9 @@ pub async fn public_incidents_rss(
 )]
 pub async fn public_maintenance(
     State(state): State<AppState>,
-    StatusPageOrg(org): StatusPageOrg,
+    ResolvedStatusPage(page): ResolvedStatusPage,
 ) -> Result<Json<PublicMaintenanceList>, PublicAppError> {
-    let m = state.public_source.maintenance(org).await?;
+    let m = state.public_source.maintenance(page).await?;
     Ok(Json(m))
 }
 
@@ -259,7 +262,7 @@ pub async fn public_maintenance(
 )]
 pub async fn public_badge(
     State(state): State<AppState>,
-    StatusPageOrg(org): StatusPageOrg,
+    ResolvedStatusPage(page): ResolvedStatusPage,
     Query(q): Query<BadgeQuery>,
 ) -> Result<Response, PublicAppError> {
     if let Some(style) = q.style.as_deref()
@@ -270,7 +273,7 @@ pub async fn public_badge(
         ));
     }
 
-    let page = state.public_source.page(org).await?;
+    let page = state.public_source.page(page).await?;
     let page = &*page;
     let (label, status_text, color) = match q.component {
         Some(id) => {

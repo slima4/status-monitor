@@ -249,11 +249,6 @@ async fn target_alert_binding_channel_lookup_is_org_scoped_live_pg() {
         }]),
         group_name: None,
         owner_user_id: None,
-        public_status: false,
-        public_name: None,
-        public_description: None,
-        public_group: None,
-        public_sort_order: 0,
     };
     let created = targets
         .create(org_a, new_target, WriteSource::Ui, i64::MAX)

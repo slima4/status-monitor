@@ -13,14 +13,14 @@ use std::time::Duration;
 use chrono::Utc;
 use sqlx::PgPool;
 use uptimepage::domain::{
-    CheckResult, CheckSpec, CheckStatus, ExpectedStatus, NewMaintenanceWindow, NewTarget, OrgId,
-    UserId, WriteSource,
+    CheckResult, CheckSpec, CheckStatus, ExpectedStatus, NewMaintenanceWindow, NewStatusPage,
+    NewStatusPageComponent, NewTarget, OrgId, UserId, WriteSource,
 };
 use uptimepage::storage::traits::TimeRange;
 use uptimepage::storage::{
     ClickhouseResultSink, ClickhouseResultsStore, MaintenanceStore, PgMaintenanceStore,
-    PostgresTargetStore, ResultSink, ResultsStore, TargetFilter, TargetStore,
-    create_org_with_owner, is_active_member,
+    PgStatusPageStore, PostgresTargetStore, ResultSink, ResultsStore, StatusPageStore,
+    TargetFilter, TargetStore, create_org_with_owner, is_active_member,
 };
 use url::Url;
 use uuid::Uuid;
@@ -38,11 +38,6 @@ fn target_named(name: &str) -> NewTarget {
         alerts: Default::default(),
         group_name: None,
         owner_user_id: None,
-        public_status: false,
-        public_name: None,
-        public_description: None,
-        public_group: None,
-        public_sort_order: 0,
     }
 }
 
@@ -253,6 +248,86 @@ async fn two_tenants_never_see_each_others_data() {
             .unwrap()
             .is_none(),
         "tenant b maintenance get of a's id must be None"
+    );
+
+    // ── Status pages + curated components ─────────────────────────────────
+    // i64::MAX bypasses the per-org page cap — this asserts isolation, not
+    // quota. Each org already has a default page from signup; these are extra.
+    let page_store = PgStatusPageStore::new(pool.clone());
+    let page_a = page_store
+        .create(
+            a.org,
+            NewStatusPage {
+                slug: unique_slug("sp-a"),
+                name: "a-page".into(),
+                enabled: true,
+            },
+            WriteSource::Ui,
+            i64::MAX,
+        )
+        .await
+        .expect("a page")
+        .expect("within page cap");
+    let page_b = page_store
+        .create(
+            b.org,
+            NewStatusPage {
+                slug: unique_slug("sp-b"),
+                name: "b-page".into(),
+                enabled: true,
+            },
+            WriteSource::Ui,
+            i64::MAX,
+        )
+        .await
+        .expect("b page")
+        .expect("within page cap");
+
+    // Cross-org page get → None; list never enumerates the other tenant's page.
+    assert!(
+        page_store.get(a.org, page_b.id).await.unwrap().is_none(),
+        "tenant a get of b's page id must be None"
+    );
+    assert!(
+        page_store.get(b.org, page_a.id).await.unwrap().is_none(),
+        "tenant b get of a's page id must be None"
+    );
+    let a_pages = page_store.list(a.org).await.unwrap();
+    assert!(
+        a_pages.iter().any(|p| p.id == page_a.id),
+        "tenant a sees its own page"
+    );
+    assert!(
+        !a_pages.iter().any(|p| p.id == page_b.id),
+        "tenant a must not see tenant b's page"
+    );
+
+    // Curate A's target onto A's page; B must not read that component set even
+    // with A's exact page id (the store scopes `list_components` by org).
+    page_store
+        .add_component(
+            a.org,
+            page_a.id,
+            NewStatusPageComponent {
+                target_id: target_a.id,
+                public_name: None,
+                public_description: None,
+                public_group: None,
+                sort_order: 0,
+            },
+            i64::MAX,
+        )
+        .await
+        .expect("add a's component");
+    let a_comps = page_store.list_components(a.org, page_a.id).await.unwrap();
+    assert!(
+        a_comps.iter().any(|c| c.target_id == target_a.id),
+        "tenant a sees its curated component"
+    );
+    let b_view_of_a_page = page_store.list_components(b.org, page_a.id).await.unwrap();
+    assert!(
+        b_view_of_a_page.is_empty(),
+        "tenant b must not read components of a's page"
     );
 
     // ── ClickHouse results ───────────────────────────────────────────────

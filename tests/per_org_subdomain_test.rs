@@ -4,15 +4,15 @@
 //!
 //! Two layers of assertion:
 //!
-//!  * Storage gate: the public-path resolver `find_public_status_org_by_slug`
-//!    filters `public_status_enabled = true`, whereas the authenticated
-//!    `find_id_by_slug` does not. Swapping them would publish every org's
-//!    page regardless of opt-in.
-//!  * HTTP gate: the host-aware `StatusPageOrg` extractor admits a request
-//!    only for an enabled slug. A blocked request is a 404 (extractor
+//!  * Storage gate: the public-path resolver `find_public_status_page_by_slug`
+//!    resolves only enabled pages, whereas the authenticated `find_id_by_slug`
+//!    resolves the org regardless. Swapping them would publish every page
+//!    regardless of its published flag.
+//!  * HTTP gate: the host-aware `ResolvedStatusPage` extractor admits a request
+//!    only for an enabled page slug. A blocked request is a 404 (extractor
 //!    rejection); an admitted one renders the page (200). The 200-vs-404
-//!    split proves the extractor did the gating. Disabling via the operator
-//!    storage path flips a previously-served slug back to 404.
+//!    split proves the extractor did the gating. Disabling the page via the
+//!    operator storage path flips a previously-served slug back to 404.
 
 mod common;
 
@@ -20,9 +20,9 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use common::{make_user, unique_slug};
 use tower::ServiceExt;
-use uptimepage::domain::{OrgId, PublicOrgBranding, UserId};
-use uptimepage::storage::orgs::{find_id_by_slug, find_public_status_org_by_slug};
-use uptimepage::storage::{create_org_with_owner, update_public_branding};
+use uptimepage::domain::{OrgId, StatusPageUpdate, UserId, WriteSource};
+use uptimepage::storage::orgs::{find_id_by_slug, find_public_status_page_by_slug};
+use uptimepage::storage::{PgStatusPageStore, StatusPageStore, create_org_with_owner};
 
 /// The `public_status.base_domain` config value. Status pages live at
 /// `{slug}.{BASE_DOMAIN}` (apex-wildcard shape); see [`status_host`], the
@@ -36,28 +36,40 @@ fn status_host(slug: &str) -> String {
     format!("{slug}.{BASE_DOMAIN}")
 }
 
-/// Create an org owned by a fresh user and set its public-status opt-in
-/// through the same storage call the operator endpoint uses. Returns the
-/// org plus its owner so callers can flip the opt-in again later.
+/// Create an org owned by a fresh user. `create_org_with_owner` seeds a default
+/// status page (slug = org slug, enabled), so only the disabled case needs a
+/// follow-up flip. Returns the org plus its owner.
 async fn seed_org(pool: &sqlx::PgPool, slug: &str, enabled: bool) -> (OrgId, UserId) {
     let user = make_user(pool, "subdomain").await;
     let org = create_org_with_owner(pool, user, slug, slug, 100)
         .await
         .expect("create org")
         .expect("slug not taken");
-    set_enabled(pool, org.id, user, enabled).await;
+    if !enabled {
+        set_enabled(pool, org.id, false).await;
+    }
     (org.id, user)
 }
 
-async fn set_enabled(pool: &sqlx::PgPool, org: OrgId, actor: UserId, enabled: bool) {
-    let branding = PublicOrgBranding {
-        public_status_enabled: enabled,
-        ..PublicOrgBranding::default()
-    };
-    let updated = update_public_branding(pool, org, actor, &branding)
+/// Flip the org's default page published flag through the same store the
+/// operator endpoint uses.
+async fn set_enabled(pool: &sqlx::PgPool, org: OrgId, enabled: bool) {
+    let store = PgStatusPageStore::new(pool.clone());
+    let pages = store.list(org).await.expect("list pages");
+    let page = pages.first().expect("default page exists");
+    let updated = store
+        .update(
+            org,
+            page.id,
+            StatusPageUpdate {
+                enabled: Some(enabled),
+                ..Default::default()
+            },
+            WriteSource::Ui,
+        )
         .await
-        .expect("update branding");
-    assert!(updated, "org must exist for branding update");
+        .expect("update page");
+    assert!(updated.is_some(), "page must exist for update");
 }
 
 /// `GET /status` against the SaaS-subdomain app with an explicit `Host`.
@@ -98,21 +110,21 @@ async fn public_lookup_filters_disabled_orgs_but_authed_lookup_does_not() {
 
     // The public path sees only the opted-in org.
     assert!(
-        find_public_status_org_by_slug(&pool, &on)
+        find_public_status_page_by_slug(&pool, &on)
             .await
             .unwrap()
             .is_some(),
         "enabled org visible to public lookup"
     );
     assert!(
-        find_public_status_org_by_slug(&pool, &off)
+        find_public_status_page_by_slug(&pool, &off)
             .await
             .unwrap()
             .is_none(),
         "disabled org hidden from public lookup"
     );
     assert!(
-        find_public_status_org_by_slug(&pool, &unique_slug("ghost"))
+        find_public_status_page_by_slug(&pool, &unique_slug("ghost"))
             .await
             .unwrap()
             .is_none(),
@@ -355,7 +367,7 @@ async fn disabling_via_operator_path_takes_the_page_offline() {
         return;
     };
     let slug = unique_slug("flip");
-    let (org, user) = seed_org(&pool, &slug, true).await;
+    let (org, _user) = seed_org(&pool, &slug, true).await;
 
     let (app, _default) = common::build_test_app_with_pg(pool.clone(), saas_subdomain).await;
     let host = status_host(&slug);
@@ -367,7 +379,7 @@ async fn disabling_via_operator_path_takes_the_page_offline() {
     );
 
     // Operator turns the page off through the real storage path.
-    set_enabled(&pool, org, user, false).await;
+    set_enabled(&pool, org, false).await;
 
     assert_eq!(
         get_status(&app, Some(&host)).await,

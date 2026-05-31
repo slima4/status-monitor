@@ -2,26 +2,24 @@
 //!
 //! [`Authorized<R>`] resolves the caller's org via the same membership-checked
 //! path as [`CurrentOrg`] (header-driven) and additionally asserts that an API
-//! token carries the scope `R` requires. [`ScopedOrgPath<R>`] is its companion
-//! for owner-keyed `:id` path routes (status-page settings) where the org comes
-//! from the URL, not the header: it asserts the scope and, for an org-bound
-//! token, that the path org matches the binding — ownership stays with the
-//! handler's `require_owner`. Session auth is unscoped and always passes the
-//! scope check; only [`AuthContext::ApiToken`] is gated.
+//! token carries the scope `R` requires. [`OwnerAuthorized<R>`] adds an owner
+//! check on top for routes that mutate an owner-level asset (the status-page
+//! brand surface). Session auth is unscoped and always passes the scope check;
+//! only [`AuthContext::ApiToken`] is gated.
 
 use std::marker::PhantomData;
 
-use axum::extract::{FromRef, FromRequestParts, Path};
+use axum::extract::{FromRef, FromRequestParts};
 use axum::http::request::Parts;
-use uuid::Uuid;
 
 use crate::api::error::codes;
 use crate::app::AppState;
 use crate::auth::scope::{Scope, ScopeSet};
 use crate::domain::{OrgId, WriteSource};
 use crate::error::{AppError, Result};
+use crate::storage::{MembershipStatus, membership_status};
 
-use super::{AuthContext, CurrentOrg};
+use super::{AuthContext, CurrentOrg, CurrentUser};
 
 /// Compile-time binding of a handler to the scope it requires. A new scope =
 /// a new marker type; the extractors below are untouched (open/closed).
@@ -97,17 +95,15 @@ where
     }
 }
 
-/// Scope + org-binding gate for owner-keyed `:id` path routes (status-page
-/// settings). The org comes from the URL, so this asserts the token scope and,
-/// for an org-bound token, that the path org equals the binding (else
-/// `ORG_HEADER_MISMATCH`). Ownership is enforced separately by the handler's
-/// `require_owner` (which is stricter than membership, so no `is_active_member`
-/// is duplicated here). Carries no payload — adding it to a handler *is* the
-/// gate. Assumes a single `{id}` path param (true for every status-page route);
-/// a route with extra path params would need an explicitly-named extractor.
-pub struct ScopedOrgPath<R: RequiredScope>(pub PhantomData<R>);
+/// Owner-gated companion to [`Authorized`]. Resolves org + scope exactly like
+/// [`Authorized`], then asserts the caller *owns* the org — a non-owner member
+/// gets 403. Used for the status-page mutation routes, where the public brand
+/// surface is an owner-level asset. The `{id}` in those paths is the page id,
+/// so the org still comes from the header (resolved by [`CurrentOrg`]); the
+/// owner check is the only thing on top.
+pub struct OwnerAuthorized<R: RequiredScope>(pub OrgId, pub PhantomData<R>);
 
-impl<S, R> FromRequestParts<S> for ScopedOrgPath<R>
+impl<S, R> FromRequestParts<S> for OwnerAuthorized<R>
 where
     S: Send + Sync,
     AppState: FromRef<S>,
@@ -116,23 +112,19 @@ where
     type Rejection = AppError;
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self> {
+        let CurrentOrg(org) = CurrentOrg::from_request_parts(parts, state).await?;
         assert_scope(parts, R::SCOPE)?;
-        if let Some(AuthContext::ApiToken {
-            org: Some(bound), ..
-        }) = parts.extensions.get::<AuthContext>()
-        {
-            let bound = *bound;
-            let Path(id) = Path::<Uuid>::from_request_parts(parts, state)
-                .await
-                .map_err(|_| AppError::not_found(codes::ORG_NOT_FOUND, "organisation not found"))?;
-            if OrgId(id) != bound {
-                return Err(AppError::forbidden_code(
-                    codes::ORG_HEADER_MISMATCH,
-                    "this token is bound to a different org",
-                ));
-            }
+        let CurrentUser(user) = CurrentUser::from_request_parts(parts, state).await?;
+        let app_state = AppState::from_ref(state);
+        let pool = app_state.require_db()?;
+        match membership_status(pool, user, org).await? {
+            MembershipStatus::Owner => Ok(OwnerAuthorized(org, PhantomData)),
+            MembershipStatus::Member => Err(AppError::Forbidden),
+            MembershipStatus::None => Err(AppError::not_found(
+                codes::ORG_NOT_FOUND,
+                "organisation not found",
+            )),
         }
-        Ok(ScopedOrgPath(PhantomData))
     }
 }
 

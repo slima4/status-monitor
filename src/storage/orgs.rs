@@ -10,7 +10,8 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::domain::{
-    Membership, OrgId, Organization, PublicOrgBranding, PublicStyle, Role, UserId,
+    Membership, OrgId, Organization, PageRef, PublicOrgBranding, PublicStyle, Role, StatusPageId,
+    UserId,
 };
 use crate::error::{AppError, Result};
 use crate::storage::locks::{advisory_xact_lock, org_lock_key, user_lock_key};
@@ -163,6 +164,8 @@ pub async fn create_org_with_owner(
         ));
     }
 
+    create_default_status_page_in_tx(&mut tx, OrgId(org_row.id), slug, name).await?;
+
     record_audit_tx(
         &mut tx,
         OrgId(org_row.id),
@@ -211,6 +214,7 @@ pub async fn create_signup_org_with_owner_in_tx(
         .execute(&mut **tx)
         .await
         .context("create_signup_org_with_owner_in_tx: insert membership")?;
+    create_default_status_page_in_tx(tx, OrgId(org_id), slug, name).await?;
     record_audit_tx(
         &mut *tx,
         OrgId(org_id),
@@ -221,6 +225,56 @@ pub async fn create_signup_org_with_owner_in_tx(
     .await
     .context("create_signup_org_with_owner_in_tx: audit")?;
     Ok(Some(OrgId(org_id)))
+}
+
+/// Every org gets one default status page at signup (the free plan's single
+/// page), slug = the org slug so its public URL matches the org from day one.
+/// Enabled by default so `{slug}.{base}` is live immediately (empty pages
+/// render "All Systems Operational" until components are curated).
+pub(crate) async fn create_default_status_page_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    org: OrgId,
+    slug: &str,
+    name: &str,
+) -> Result<()> {
+    // status_pages.slug is globally unique (it routes a subdomain). The org slug
+    // is unique among orgs but could already be claimed by another org's
+    // manually-created page; a raw INSERT would then abort the whole signup tx.
+    // Try the org slug, and on a global collision fall back to a fresh random
+    // slug so org creation always succeeds — the owner can rename it afterwards.
+    let res = sqlx::query(
+        "INSERT INTO status_pages (org_id, slug, name, enabled) VALUES ($1, $2, $3, true)
+         ON CONFLICT (slug) DO NOTHING",
+    )
+    .bind(org.0)
+    .bind(slug)
+    .bind(name)
+    .execute(&mut **tx)
+    .await
+    .context("create_default_status_page_in_tx")?;
+    if res.rows_affected() == 0 {
+        // A fresh random slug, NOT one derived from the org id — that path could
+        // itself already be claimed, and an unguarded INSERT would abort the tx.
+        // Guard it too, then assert the row landed so signup never commits an
+        // org with zero pages.
+        let fallback = format!("page-{}", Uuid::new_v4().simple());
+        let res = sqlx::query(
+            "INSERT INTO status_pages (org_id, slug, name, enabled) VALUES ($1, $2, $3, true)
+             ON CONFLICT (slug) DO NOTHING",
+        )
+        .bind(org.0)
+        .bind(&fallback)
+        .bind(name)
+        .execute(&mut **tx)
+        .await
+        .context("create_default_status_page_in_tx fallback")?;
+        if res.rows_affected() == 0 {
+            return Err(AppError::Other(anyhow::anyhow!(
+                "default status page slug collision on fallback {fallback}"
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// Counts a user's currently-active owner memberships (soft-deleted orgs do
@@ -834,45 +888,73 @@ pub async fn find_id_by_slug(pool: &PgPool, slug: &str) -> Result<Option<OrgId>>
     Ok(row.map(|(o,)| OrgId(o)))
 }
 
-/// Newtype returned by [`find_public_status_org_by_slug`]. Wraps
-/// [`Organization`] so the type system distinguishes "an org row resolved
-/// through the unauthenticated public-status path" from one resolved through
-/// the operator / API-token path. The two paths have **opposite** security
-/// envelopes and must never share lookup helpers — the wrapper is the
-/// compile-time fence that keeps them separate.
-#[derive(Debug, Clone)]
-pub struct PublicStatusOrg(pub Organization);
+/// Newtype returned by [`find_public_status_page_by_slug`]. Carries the
+/// resolved [`PageRef`] from the unauthenticated public-status path, kept
+/// distinct from operator/API-token resolution (opposite security envelopes)
+/// so the two can't share lookup helpers.
+#[derive(Debug, Clone, Copy)]
+pub struct ResolvedPublicPage(pub PageRef);
 
-/// PUBLIC-STATUS PATH ONLY. Resolves an org slug to a [`PublicStatusOrg`] for
-/// the unauthenticated `*.{base_domain}` surface. Filters
-/// `public_status_enabled = true AND deleted_at IS NULL` — if either
-/// predicate fails the row is invisible (the handler maps `None` to 404).
-///
-/// The newtype return makes it a compile error to feed the result into
-/// operator-side code paths.
-pub async fn find_public_status_org_by_slug(
+/// PUBLIC-STATUS PATH ONLY. Resolves a page slug to a [`ResolvedPublicPage`]
+/// for the `*.{base_domain}` surface. Filters `status_pages.enabled = true` and
+/// the owning org not soft-deleted — if either fails the row is invisible (the
+/// handler maps `None` to 404).
+pub async fn find_public_status_page_by_slug(
     pool: &PgPool,
     slug: &str,
-) -> Result<Option<PublicStatusOrg>> {
-    let row: Option<OrgRow> = sqlx::query_as(
+) -> Result<Option<ResolvedPublicPage>> {
+    let row: Option<(Uuid, Uuid)> = sqlx::query_as(
         r#"/* SAFE: public-page lookup is intentionally not org_id-scoped */
-           SELECT id, slug::text AS slug, name, created_at, updated_at, deleted_at
-           FROM organizations
-           WHERE slug = $1
-             AND public_status_enabled = true
-             AND deleted_at IS NULL"#,
+           SELECT sp.id, sp.org_id
+           FROM status_pages sp
+           JOIN organizations o ON o.id = sp.org_id
+           WHERE sp.slug = $1
+             AND sp.enabled = true
+             AND o.deleted_at IS NULL"#,
     )
     .bind(slug)
     .fetch_optional(pool)
     .await
-    .context("find_public_status_org_by_slug")?;
-    Ok(row.map(|r| PublicStatusOrg(r.into_org())))
+    .context("find_public_status_page_by_slug")?;
+    Ok(row.map(|(page, org)| {
+        ResolvedPublicPage(PageRef {
+            page: StatusPageId(page),
+            org: OrgId(org),
+        })
+    }))
 }
 
-/// Org name + slug + operator-set public branding, as needed to render a
-/// status page (the renderer falls back to `name` when `public_display_name`
-/// is unset) or to build its live URL (`slug`). One query feeds both the
-/// public render path and the operator settings surface.
+/// PUBLIC-STATUS PATH ONLY (path-based / self-host). The lone live org's PRIMARY
+/// page — its oldest page (the one signup created), if enabled. Pinning to the
+/// oldest page keeps `/status` stable as other pages are added or toggled:
+/// disabling the primary page 404s rather than silently switching the public
+/// surface to a younger (e.g. internal) page. 404s (via `None`) if there is no
+/// single live org, the org has no page, or the primary page is disabled.
+pub async fn resolve_default_page_for_lone_org(pool: &PgPool) -> Result<Option<PageRef>> {
+    let Some(org) = find_lone_active_org(pool).await? else {
+        return Ok(None);
+    };
+    let row: Option<(Uuid, bool)> = sqlx::query_as(
+        r#"SELECT id, enabled FROM status_pages
+           WHERE org_id = $1
+           ORDER BY created_at ASC, id ASC
+           LIMIT 1"#,
+    )
+    .bind(org.0)
+    .fetch_optional(pool)
+    .await
+    .context("resolve_default_page_for_lone_org")?;
+    Ok(row
+        .filter(|(_, enabled)| *enabled)
+        .map(|(page, _)| PageRef {
+            page: StatusPageId(page),
+            org,
+        }))
+}
+
+/// Org name + page slug + the page's display branding, as needed to render a
+/// status page (header falls back to the org name when `public_display_name`
+/// is unset) or to build its live URL (`slug`).
 #[derive(Debug, Clone)]
 pub struct OrgBranding {
     pub name: String,
@@ -881,8 +963,7 @@ pub struct OrgBranding {
 }
 
 impl OrgBranding {
-    /// Header name: the operator override if non-blank, else the org name.
-    /// Shared so the operator preview and the live page resolve identically.
+    /// Header name: the page's display override if non-blank, else the org name.
     pub fn resolved_display_name(&self) -> &str {
         self.branding
             .public_display_name
@@ -893,37 +974,33 @@ impl OrgBranding {
     }
 }
 
-/// PUBLIC-STATUS PATH ONLY. Loads an org's name + public branding by id.
-///
-/// The id is already resolved through the opt-in-filtered slug lookup
-/// ([`find_public_status_org_by_slug`]) or the boot default org, so this read
-/// is intentionally keyed by id rather than re-checking `public_status_enabled`
-/// — the surface that calls it is what gates visibility. `deleted_at` is still
-/// excluded so a tombstoned org renders nothing.
-pub async fn load_public_branding(pool: &PgPool, org: OrgId) -> Result<Option<OrgBranding>> {
+/// PUBLIC-STATUS PATH ONLY. Loads a page's display branding (+ the owning org's
+/// name for the header fallback) by page id. Keyed by id because the surface
+/// that resolved the page already gated visibility; the org-soft-delete filter
+/// stays so a tombstoned org renders nothing.
+pub async fn load_page_branding(pool: &PgPool, page: StatusPageId) -> Result<Option<OrgBranding>> {
     let row: Option<BrandingRow> = sqlx::query_as(
-        r#"SELECT name,
-                  slug::text AS slug,
-                  public_status_enabled,
-                  public_display_name,
-                  public_about,
-                  public_brand_color,
-                  public_logo_path,
-                  public_show_powered_by,
-                  public_style
-             FROM organizations
-            WHERE id = $1
-              AND deleted_at IS NULL"#,
+        r#"SELECT o.name,
+                  sp.slug::text AS slug,
+                  sp.public_display_name,
+                  sp.public_about,
+                  sp.public_brand_color,
+                  sp.public_logo_path,
+                  sp.public_show_powered_by,
+                  sp.public_style
+             FROM status_pages sp
+             JOIN organizations o ON o.id = sp.org_id
+            WHERE sp.id = $1
+              AND o.deleted_at IS NULL"#,
     )
-    .bind(org.0)
+    .bind(page.0)
     .fetch_optional(pool)
     .await
-    .context("load_public_branding")?;
+    .context("load_page_branding")?;
     Ok(row.map(|r| OrgBranding {
         name: r.name,
         slug: r.slug,
         branding: PublicOrgBranding {
-            public_status_enabled: r.public_status_enabled,
             public_display_name: r.public_display_name,
             public_about: r.public_about,
             public_brand_color: r.public_brand_color,
@@ -932,121 +1009,6 @@ pub async fn load_public_branding(pool: &PgPool, org: OrgId) -> Result<Option<Or
             public_style: PublicStyle::from_db(&r.public_style),
         },
     }))
-}
-
-/// Overwrite an org's operator-set public-page branding (everything except
-/// the logo, which has its own upload/delete path). The full set is written
-/// in one statement — the settings form always submits every field, so a
-/// partial-merge layer would add complexity for no caller. Returns `false`
-/// when the org doesn't exist or is soft-deleted. Audit row is written in the
-/// same transaction so "who changed the public page" is answerable.
-pub async fn update_public_branding(
-    pool: &PgPool,
-    org: OrgId,
-    actor: UserId,
-    b: &PublicOrgBranding,
-) -> Result<bool> {
-    let mut tx = pool
-        .begin()
-        .await
-        .context("update_public_branding: begin")?;
-    let row: Option<(Uuid,)> = sqlx::query_as(
-        r#"UPDATE organizations
-           SET public_status_enabled = $2,
-               public_display_name    = $3,
-               public_about           = $4,
-               public_brand_color     = $5,
-               public_show_powered_by = $6,
-               public_style           = $7,
-               updated_at             = now()
-           WHERE id = $1 AND deleted_at IS NULL
-           RETURNING id"#,
-    )
-    .bind(org.0)
-    .bind(b.public_status_enabled)
-    .bind(b.public_display_name.as_deref())
-    .bind(b.public_about.as_deref())
-    .bind(b.public_brand_color.as_deref())
-    .bind(b.public_show_powered_by)
-    .bind(b.public_style.as_str())
-    .fetch_optional(&mut *tx)
-    .await
-    .context("update_public_branding: update")?;
-    if row.is_none() {
-        tx.rollback().await.ok();
-        return Ok(false);
-    }
-    record_audit_tx(
-        &mut tx,
-        org,
-        Some(actor),
-        "org.status_page_updated",
-        serde_json::json!({
-            "public_status_enabled": b.public_status_enabled,
-            "public_style": b.public_style.as_str(),
-        }),
-    )
-    .await
-    .context("update_public_branding: audit")?;
-    tx.commit()
-        .await
-        .context("update_public_branding: commit")?;
-    Ok(true)
-}
-
-/// Point `public_logo_path` at `new` (or clear it with `None`) and return the
-/// path it held before, so the caller can delete the now-orphaned file. The
-/// swap + audit happen in one transaction; a missing/deleted org yields
-/// `Ok(None)` with no write.
-pub async fn set_public_logo_path(
-    pool: &PgPool,
-    org: OrgId,
-    actor: UserId,
-    new: Option<&str>,
-) -> Result<Option<String>> {
-    let mut tx = pool.begin().await.context("set_public_logo_path: begin")?;
-    // Lock + read the prior path first; the RETURNING of the UPDATE would
-    // already show the new value, and another writer must not interleave
-    // between the read and the swap.
-    let Some((prev,)): Option<(Option<String>,)> = sqlx::query_as(
-        r#"SELECT public_logo_path
-             FROM organizations
-            WHERE id = $1 AND deleted_at IS NULL
-            FOR UPDATE"#,
-    )
-    .bind(org.0)
-    .fetch_optional(&mut *tx)
-    .await
-    .context("set_public_logo_path: read prior")?
-    else {
-        tx.rollback().await.ok();
-        return Ok(None);
-    };
-    sqlx::query(
-        r#"UPDATE organizations
-           SET public_logo_path = $2, updated_at = now()
-           WHERE id = $1 AND deleted_at IS NULL"#,
-    )
-    .bind(org.0)
-    .bind(new)
-    .execute(&mut *tx)
-    .await
-    .context("set_public_logo_path: update")?;
-    record_audit_tx(
-        &mut tx,
-        org,
-        Some(actor),
-        if new.is_some() {
-            "org.logo_changed"
-        } else {
-            "org.logo_removed"
-        },
-        Value::Null,
-    )
-    .await
-    .context("set_public_logo_path: audit")?;
-    tx.commit().await.context("set_public_logo_path: commit")?;
-    Ok(prev)
 }
 
 /// Look up a user's id by email (CITEXT). Drives the invitation flow's
@@ -1116,7 +1078,6 @@ pub(crate) async fn record_audit_tx(
 struct BrandingRow {
     name: String,
     slug: String,
-    public_status_enabled: bool,
     public_display_name: Option<String>,
     public_about: Option<String>,
     public_brand_color: Option<String>,

@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% block title %}Status pages · Uptimepage{% endblock %}
+{% block content %}
+<section class="space-y-6">
+  <header class="space-y-1">
+    <h1 class="page-title"><span class="page-title__prefix">$</span>status pages</h1>
+    <p class="text-sm text-muted">Public uptime dashboards for this organization.</p>
+  </header>
+
+  <div class="sticker-card space-y-1 p-4 font-mono text-xs leading-relaxed text-muted">
+    <p class="text-quiet"># status-pages --help</p>
+    <p># each page has its own URL and its own set of monitors</p>
+    <p># run several — e.g. a public page and a separate internal one</p>
+    <p># a monitor can sit on more than one page</p>
+    <p># unpublished = draft, its URL 404s until you publish it</p>
+  </div>
+
+  <form id="new-page-form" novalidate class="space-y-6"
+        data-suffix="{% if let Some(suffix) = host_suffix %}{{ suffix }}{% endif %}">
+    <div id="page-errors" role="alert" aria-live="polite"
+         class="hidden alert-card alert-card--error"></div>
+
+    <fieldset class="sticker-card space-y-5 p-5">
+      <legend class="px-1 text-sm font-medium">New page</legend>
+
+      <div class="grid gap-5 sm:grid-cols-2">
+        <label class="field-outline">
+          <span class="field-outline__label">Name</span>
+          <input id="page-name" type="text" required maxlength="80"
+                 placeholder="Public, EU customers, …" class="w-full field">
+        </label>
+        <label class="field-outline">
+          <span class="field-outline__label">URL slug</span>
+          <input id="page-slug" type="text" required pattern="[a-z0-9-]+"
+                 placeholder="acme" class="w-full field font-mono">
+        </label>
+      </div>
+      <p id="slug-preview" class="text-xs text-muted">{% if let Some(suffix) = host_suffix %}acme{{ suffix }}{% endif %}</p>
+
+      <div>
+        <label class="inline-flex items-center gap-2">
+          <input id="page-enabled" type="checkbox" checked>
+          <span class="text-sm">Published</span>
+        </label>
+        <p class="mt-1 text-xs text-muted">When off, the page is saved as a draft and its URL 404s.</p>
+      </div>
+
+      <div class="flex items-center justify-between">
+        <span class="text-xs text-muted cli-brackets">{{ rows.len() }} / {{ max_pages }} pages</span>
+        <button type="submit"
+                class="sticker-btn sticker-btn--primary px-4 py-2 text-sm font-medium"
+                {% if at_limit %}disabled title="Page limit reached for this plan"{% endif %}>
+          create page
+        </button>
+      </div>
+      {% if at_limit %}
+      <p class="alert-card alert-card--muted">Plan limit reached — delete a page to create another.</p>
+      {% endif %}
+    </fieldset>
+  </form>
+
+  <div id="pages-list"
+       hx-get="/web/partials/settings/pages"
+       hx-trigger="load, pages:refresh from:body"
+       hx-swap="innerHTML"
+       class="sticker-card overflow-hidden">
+    <p class="px-4 py-3 text-sm text-muted">Loading…</p>
+  </div>
+
+  <script>
+    (() => {
+      const form = document.getElementById('new-page-form');
+      const errors = document.getElementById('page-errors');
+      const nameEl = document.getElementById('page-name');
+      const slugEl = document.getElementById('page-slug');
+      const preview = document.getElementById('slug-preview');
+      const suffix = form.dataset.suffix;
+
+      function showError(msg) { errors.textContent = msg; errors.classList.remove('hidden'); }
+      function clearError() { errors.textContent = ''; errors.classList.add('hidden'); }
+      if (suffix) {
+        slugEl.addEventListener('input', () => {
+          preview.textContent = (slugEl.value.trim().toLowerCase() || 'acme') + suffix;
+        });
+      }
+
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        clearError();
+        const body = {
+          name: nameEl.value,
+          slug: slugEl.value.trim().toLowerCase(),
+          enabled: document.getElementById('page-enabled').checked,
+        };
+        let res, data;
+        try {
+          res = await fetch('/api/v1/status-pages', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'uptimepage' },
+            body: JSON.stringify(body),
+          });
+          data = await res.json().catch(() => null);
+        } catch (_) { showError('Network error — try again.'); return; }
+        if (res.ok) {
+          nameEl.value = ''; slugEl.value = '';
+          htmx.trigger('body', 'pages:refresh');
+        } else {
+          showError((data && data.error && data.error.message) || 'Could not create page.');
+        }
+      });
+    })();
+  </script>
+</section>
+{% endblock %}

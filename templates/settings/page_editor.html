@@ -1,0 +1,241 @@
+{% extends "base.html" %}
+{% block title %}{{ name }} · Status pages · Uptimepage{% endblock %}
+{% block content %}
+<section class="space-y-6" data-page-id="{{ id }}" data-suffix="{% if let Some(s) = host_suffix %}{{ s }}{% endif %}">
+  <header class="space-y-1">
+    <a href="/settings/pages" class="inline-block text-sm text-muted hover:text-body">← status pages</a>
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <h1 class="page-title truncate"><span class="page-title__prefix">$</span>{{ name }}</h1>
+      {% if status_url != "" %}<a href="{{ status_url }}" target="_blank" rel="noopener" class="btn-ghost px-3 py-1.5 text-sm">view live ↗</a>{% endif %}
+    </div>
+  </header>
+
+  <div id="editor-errors" role="alert" aria-live="polite" class="hidden alert-card alert-card--error"></div>
+  <div id="editor-ok" aria-live="polite" class="hidden alert-card alert-card--ok"></div>
+
+  <div class="sticker-card space-y-1 p-4 font-mono text-xs leading-relaxed text-muted">
+    <p class="text-quiet"># page --help</p>
+    <p># url ........ change the slug; a rename is a hard cutover</p>
+    <p># page ....... internal name + the branding visitors see</p>
+    <p># logo ....... optional · PNG / JPEG / WebP</p>
+    <p># components . toggle which monitors show; set a public name / group</p>
+    <p># publish off = draft, the URL 404s</p>
+  </div>
+
+  <!-- ── Public URL ──────────────────────────────────────────── -->
+  <div class="sticker-card space-y-3 p-4 text-sm">
+    <div class="flex flex-wrap items-center gap-3">
+      <span class="text-muted">This page is at</span>
+      {% if status_url != "" %}
+      <a id="live-url" href="{{ status_url }}" target="_blank" rel="noopener"
+         class="font-medium text-body underline decoration-dotted">{{ status_url }} ↗</a>
+      {% else %}
+      <span class="font-mono text-body">/status</span>
+      {% endif %}
+    </div>
+
+    <form id="slug-form" novalidate class="space-y-2 border-t border-[color:var(--theme-line)] pt-3">
+      <label for="f-slug" class="block text-sm font-medium">Change URL slug</label>
+      <div class="flex flex-wrap items-center gap-2">
+        {% if host_suffix.is_some() %}<span class="text-muted font-mono">https://</span>{% endif %}
+        <input id="f-slug" name="slug" type="text" value="{{ slug }}"
+               minlength="3" maxlength="30" pattern="[a-z][a-z0-9-]*[a-z0-9]"
+               autocomplete="off" spellcheck="false" class="field w-48 text-sm font-mono">
+        {% if let Some(suffix) = host_suffix %}<span class="text-muted font-mono">{{ suffix }}</span>{% endif %}
+        <button type="submit" class="sticker-btn sticker-btn--primary px-3 py-1.5 text-sm font-medium">Save URL</button>
+        <span id="slug-result" aria-live="polite" class="text-sm"></span>
+      </div>
+      <p class="text-xs text-muted">
+        3–30 lowercase letters, digits or hyphens; must start with a letter.
+        Renaming is a hard cutover — the old URL stops working immediately.
+      </p>
+    </form>
+  </div>
+
+  <!-- ── Page + branding ─────────────────────────────────────── -->
+  <form id="branding-form" novalidate class="space-y-6">
+    <fieldset class="sticker-card space-y-5 p-5">
+      <legend class="px-1 text-sm font-medium">Page</legend>
+
+      <div class="grid gap-5 sm:grid-cols-2">
+        <label class="field-outline">
+          <span class="field-outline__label">Name</span>
+          <input id="f-name" type="text" maxlength="80" value="{{ name }}" class="w-full field">
+        </label>
+        <label class="inline-flex items-center gap-2 self-end pb-2">
+          <input id="f-enabled" type="checkbox"{% if enabled %} checked{% endif %}>
+          <span class="text-sm">Published<span class="block text-xs text-muted">When off, the URL 404s.</span></span>
+        </label>
+      </div>
+
+      <div class="grid gap-5 sm:grid-cols-2">
+        <label class="field-outline">
+          <span class="field-outline__label">Public display name</span>
+          <input id="f-display" type="text" maxlength="80" value="{{ public_display_name }}"
+                 placeholder="Falls back to the org name" class="w-full field">
+        </label>
+        <div class="field-outline">
+          <span class="field-outline__label">Theme</span>
+          <select id="f-style" data-sm-combobox aria-label="Theme" class="w-full field">
+            {% for s in styles %}<option value="{{ s.value }}"{% if s.selected %} selected{% endif %}>{{ s.value }}</option>{% endfor %}
+          </select>
+        </div>
+      </div>
+
+      <label class="field-outline">
+        <span class="field-outline__label">About</span>
+        <textarea id="f-about" maxlength="500" rows="2" class="w-full field"
+                  placeholder="Short line shown under the header">{{ public_about }}</textarea>
+      </label>
+
+      <div class="flex flex-wrap items-center gap-6">
+        <label class="inline-flex items-center gap-2 text-sm">
+          <span class="text-xs uppercase text-muted">Brand color</span>
+          <input id="f-color" type="color" value="{{ brand_color_value }}" class="h-8 w-12 cursor-pointer align-middle">
+        </label>
+        <label class="inline-flex items-center gap-2 text-sm">
+          <input id="f-powered" type="checkbox"{% if show_powered_by %} checked{% endif %}>
+          <span class="text-sm">Show "powered by"</span>
+        </label>
+      </div>
+    </fieldset>
+
+    <div class="flex gap-3">
+      <button type="submit" class="sticker-btn sticker-btn--primary px-4 py-2 text-sm font-medium">save page</button>
+    </div>
+  </form>
+
+  <!-- ── Logo ─────────────────────────────────────────────────── -->
+  <fieldset class="sticker-card space-y-5 p-5">
+    <legend class="px-1 text-sm font-medium">Logo</legend>
+    {% if logo_url != "" %}<img src="{{ logo_url }}" alt="current logo" class="h-12">{% endif %}
+    <div class="flex flex-wrap items-center gap-3">
+      <input id="logo-file" type="file" accept="image/png,image/jpeg,image/webp" class="text-sm">
+      <button id="logo-upload" type="button" class="btn-ghost px-3 py-1.5 text-sm">upload</button>
+      {% if logo_url != "" %}<button id="logo-remove" type="button" class="row-link row-link--danger">remove</button>{% endif %}
+    </div>
+    <p class="text-xs text-muted">PNG / JPEG / WebP · up to {{ max_logo_bytes }} bytes · max {{ max_logo_dim_px }}px.</p>
+  </fieldset>
+
+  <!-- ── Components ───────────────────────────────────────────── -->
+  <section class="space-y-3" aria-labelledby="components-heading">
+    <div class="space-y-1">
+      <h2 id="components-heading" class="panel-label">Components</h2>
+      <p class="text-xs text-muted">Toggle which monitors appear on this page; set an optional public name / group.</p>
+    </div>
+    <div class="sticker-card overflow-hidden">
+      <table class="w-full text-left text-sm">
+        <thead class="bg-[color:var(--theme-surface-sunk)] text-xs uppercase text-muted">
+          <tr>
+            <th class="px-4 py-2">On page</th>
+            <th class="px-4 py-2">Monitor</th>
+            <th class="px-4 py-2">Public name</th>
+            <th class="px-4 py-2">Group</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-[color:var(--theme-line)]">
+          {% for c in components %}
+          <tr data-target-id="{{ c.target_id }}">
+            <td class="px-4 py-2 align-middle"><input type="checkbox" data-on-page{% if c.on_page %} checked{% endif %}></td>
+            <td class="px-4 py-2 align-middle text-body">{{ c.monitor_name }}</td>
+            <td class="px-4 py-2"><input type="text" data-field="public_name" value="{{ c.public_name }}" maxlength="80" placeholder="{{ c.monitor_name }}" class="w-full field text-xs"{% if !c.on_page %} disabled{% endif %}></td>
+            <td class="px-4 py-2"><input type="text" data-field="public_group" value="{{ c.public_group }}" maxlength="50" class="w-full field text-xs"{% if !c.on_page %} disabled{% endif %}></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <script>
+    (() => {
+      const root = document.querySelector('[data-page-id]');
+      const id = root.dataset.pageId;
+      const suffix = root.dataset.suffix || null;
+      const errBox = document.getElementById('editor-errors');
+      const okBox = document.getElementById('editor-ok');
+      function err(msg) { okBox.classList.add('hidden'); errBox.textContent = msg; errBox.classList.remove('hidden'); errBox.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
+      function ok(msg) { errBox.classList.add('hidden'); okBox.textContent = msg; okBox.classList.remove('hidden'); }
+      async function api(method, path, body) {
+        const opt = { method, headers: { 'X-Requested-With': 'uptimepage' } };
+        if (body !== undefined) { opt.headers['Content-Type'] = 'application/json'; opt.body = JSON.stringify(body); }
+        const res = await fetch(path, opt);
+        if (!res.ok) { const d = await res.json().catch(() => null); throw (d && d.error && d.error.message) || ('HTTP ' + res.status); }
+        return res;
+      }
+
+      // Slug has its own save — a rename is a hard cutover, so it's deliberately
+      // separate from the branding save and confirms the new live URL inline.
+      document.getElementById('slug-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const slugEl = document.getElementById('f-slug');
+        const result = document.getElementById('slug-result');
+        const slug = slugEl.value.trim().toLowerCase();
+        slugEl.value = slug;
+        result.textContent = '';
+        try {
+          await api('PATCH', '/api/v1/status-pages/' + id, { slug });
+          result.textContent = 'Saved ✓';
+          result.className = 'text-sm text-[color:var(--theme-state-ok-fg-strong)]';
+          const link = document.getElementById('live-url');
+          if (link && suffix !== null) {
+            const url = 'https://' + slug + suffix;
+            link.href = url; link.textContent = url + ' ↗';
+          }
+        } catch (m) { result.textContent = ''; err(m); }
+      });
+
+      document.getElementById('branding-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const body = {
+          name: document.getElementById('f-name').value,
+          enabled: document.getElementById('f-enabled').checked,
+          branding: {
+            public_display_name: document.getElementById('f-display').value || null,
+            public_about: document.getElementById('f-about').value || null,
+            public_brand_color: document.getElementById('f-color').value || null,
+            public_style: document.getElementById('f-style').value,
+            public_show_powered_by: document.getElementById('f-powered').checked,
+          },
+        };
+        try { await api('PATCH', '/api/v1/status-pages/' + id, body); ok('Saved.'); }
+        catch (m) { err(m); }
+      });
+
+      document.getElementById('logo-upload').addEventListener('click', async () => {
+        const f = document.getElementById('logo-file').files[0];
+        if (!f) { err('Pick a file first.'); return; }
+        const fd = new FormData(); fd.append('file', f);
+        try {
+          const res = await fetch('/api/v1/status-pages/' + id + '/logo', { method: 'POST', headers: { 'X-Requested-With': 'uptimepage' }, body: fd });
+          if (!res.ok) { const d = await res.json().catch(() => null); throw (d && d.error && d.error.message) || ('HTTP ' + res.status); }
+          location.reload();
+        } catch (m) { err(m); }
+      });
+      const rm = document.getElementById('logo-remove');
+      if (rm) rm.addEventListener('click', async () => { try { await api('DELETE', '/api/v1/status-pages/' + id + '/logo'); location.reload(); } catch (m) { err(m); } });
+
+      document.querySelectorAll('tr[data-target-id]').forEach((tr) => {
+        const tid = tr.dataset.targetId;
+        const toggle = tr.querySelector('[data-on-page]');
+        const inputs = tr.querySelectorAll('[data-field]');
+        toggle.addEventListener('change', async () => {
+          try {
+            if (toggle.checked) await api('POST', '/api/v1/status-pages/' + id + '/components', { target_id: tid });
+            else await api('DELETE', '/api/v1/status-pages/' + id + '/components/' + tid);
+            inputs.forEach((i) => { i.disabled = !toggle.checked; });
+            ok('Updated.');
+          } catch (m) { toggle.checked = !toggle.checked; err(m); }
+        });
+        inputs.forEach((input) => {
+          input.addEventListener('change', async () => {
+            if (!toggle.checked) return;
+            const body = {}; body[input.dataset.field] = input.value || null;
+            try { await api('PATCH', '/api/v1/status-pages/' + id + '/components/' + tid, body); } catch (m) { err(m); }
+          });
+        });
+      });
+    })();
+  </script>
+</section>
+{% endblock %}

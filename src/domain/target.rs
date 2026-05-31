@@ -22,7 +22,7 @@ pub struct Target {
     pub tags: Vec<String>,
     #[serde(default)]
     pub alerts: TargetAlerts,
-    /// Operator-side grouping (independent of `public_group`).
+    /// Operator-side grouping (independent of any status page's grouping).
     #[serde(default)]
     #[schema(example = "API & Web", nullable = true, max_length = 50)]
     pub group_name: Option<String>,
@@ -30,26 +30,6 @@ pub struct Target {
     #[serde(default)]
     #[schema(nullable = true)]
     pub owner_user_id: Option<Uuid>,
-    /// Whether this target appears on the public status page.
-    #[serde(default)]
-    #[schema(example = false, default = false)]
-    pub public_status: bool,
-    /// Public display name; falls back to `name` if null.
-    #[serde(default)]
-    #[schema(example = "API", nullable = true)]
-    pub public_name: Option<String>,
-    /// Short description shown under the component name on the public page.
-    #[serde(default)]
-    #[schema(example = "Primary REST endpoint", nullable = true, max_length = 200)]
-    pub public_description: Option<String>,
-    /// Optional grouping on the public page.
-    #[serde(default)]
-    #[schema(example = "API", nullable = true, max_length = 50)]
-    pub public_group: Option<String>,
-    /// Sort order within a group. Lower renders first.
-    #[serde(default)]
-    #[schema(example = 0, default = 0)]
-    pub public_sort_order: i32,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     /// Where this target was last changed from (UI, API, or Terraform).
@@ -77,21 +57,6 @@ pub struct NewTarget {
     #[serde(default)]
     #[schema(nullable = true)]
     pub owner_user_id: Option<Uuid>,
-    #[serde(default)]
-    #[schema(example = false, default = false)]
-    pub public_status: bool,
-    #[serde(default)]
-    #[schema(nullable = true)]
-    pub public_name: Option<String>,
-    #[serde(default)]
-    #[schema(nullable = true, max_length = 200)]
-    pub public_description: Option<String>,
-    #[serde(default)]
-    #[schema(nullable = true, max_length = 50)]
-    pub public_group: Option<String>,
-    #[serde(default)]
-    #[schema(default = 0)]
-    pub public_sort_order: i32,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
@@ -111,21 +76,6 @@ pub struct TargetUpdate {
     #[serde(default, deserialize_with = "double_option")]
     #[schema(nullable = true, value_type = Option<Uuid>)]
     pub owner_user_id: Option<Option<Uuid>>,
-    pub public_status: Option<bool>,
-    // Double-Option so PATCH can tell "field omitted → keep" from "field
-    // present as null → clear back to the real monitor name/no group".
-    // A plain Option collapses both to None, making un-set impossible.
-    // Wire shape is identical to Option<String> for clients.
-    #[serde(default, deserialize_with = "double_option")]
-    #[schema(nullable = true, value_type = Option<String>)]
-    pub public_name: Option<Option<String>>,
-    #[serde(default, deserialize_with = "double_option")]
-    #[schema(nullable = true, value_type = Option<String>)]
-    pub public_description: Option<Option<String>>,
-    #[serde(default, deserialize_with = "double_option")]
-    #[schema(nullable = true, value_type = Option<String>)]
-    pub public_group: Option<Option<String>>,
-    pub public_sort_order: Option<i32>,
 }
 
 /// Lifts the inner `Option<T>` into `Some(Option<T>)` so a missing field

@@ -22,11 +22,6 @@ CREATE TABLE targets (
     alerts                JSONB NOT NULL DEFAULT '[]'::jsonb,
     group_name            TEXT,
     owner_user_id         UUID REFERENCES users(id) ON DELETE SET NULL,
-    public_status         BOOLEAN NOT NULL DEFAULT false,
-    public_name           TEXT,
-    public_description    TEXT,
-    public_group          TEXT,
-    public_sort_order     INTEGER NOT NULL DEFAULT 0,
     write_source          TEXT NOT NULL DEFAULT 'ui'
                           CHECK (write_source IN ('ui', 'api', 'terraform')),
     created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -41,15 +36,6 @@ CREATE INDEX idx_targets_org_group
     ON targets(org_id, group_name) WHERE group_name IS NOT NULL;
 CREATE INDEX idx_targets_org_owner
     ON targets(org_id, owner_user_id) WHERE owner_user_id IS NOT NULL;
-CREATE INDEX idx_targets_org_public
-    ON targets(org_id, public_group, public_sort_order)
-    WHERE public_status = true;
--- Keyset cursor index for cross-tenant pagination by (org_id, id).
--- Partial scope keeps the index narrow (live public-status targets only)
--- and lets Postgres range-scan it directly for the writer's per-page query.
-CREATE INDEX idx_targets_public_page_cursor
-    ON targets(org_id, id)
-    WHERE enabled = true AND public_status = true;
 
 CREATE TABLE incidents (
     id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),

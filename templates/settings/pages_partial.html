@@ -1,0 +1,44 @@
+{% if rows.is_empty() %}
+<p class="px-4 py-3 text-sm text-muted">No status pages yet.</p>
+{% else %}
+<table class="w-full text-left text-sm">
+  <thead class="bg-[color:var(--theme-surface-sunk)] text-xs uppercase text-muted">
+    <tr>
+      <th class="px-4 py-2">Name</th>
+      <th class="px-4 py-2">URL</th>
+      <th class="px-4 py-2">Status</th>
+      <th class="px-4 py-2"></th>
+    </tr>
+  </thead>
+  <tbody class="divide-y divide-[color:var(--theme-line)]">
+    {% for r in rows %}
+    <tr>
+      <td class="px-4 py-2 align-top text-body">
+        <a href="/settings/pages/{{ r.id }}" class="underline decoration-dotted underline-offset-2">{{ r.name }}</a>
+      </td>
+      <td class="px-4 py-2 align-top font-mono text-xs">
+        {% if r.url != "" %}<a href="{{ r.url }}" target="_blank" rel="noopener" class="underline decoration-dotted">{{ r.slug }}</a>{% else %}{{ r.slug }}{% endif %}
+      </td>
+      <td class="px-4 py-2 align-top">
+        {% if r.enabled %}<span class="status-badge status-badge--up">Published</span>{% else %}<span class="status-badge status-badge--disabled">Draft</span>{% endif %}
+      </td>
+      <td class="px-4 py-2">
+        <div class="flex items-center justify-end gap-3">
+          <a href="/settings/pages/{{ r.id }}" class="row-link">Edit</a>
+          <button type="button"
+                  hx-delete="/api/v1/status-pages/{{ r.id }}"
+                  hx-headers='{"X-Requested-With":"uptimepage"}'
+                  hx-on::after-request="if(event.detail.successful){htmx.trigger('body','pages:refresh')}"
+                  data-confirm-modal
+                  data-confirm-title="Delete status page?"
+                  data-confirm-body="Deletes the page {{ r.name }} and its component selection. Monitors and their data are untouched."
+                  data-confirm-label="Delete page"
+                  data-confirm-danger
+                  class="row-link row-link--danger">Delete</button>
+        </div>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}

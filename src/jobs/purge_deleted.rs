@@ -49,7 +49,6 @@ use futures::future::join_all;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::domain::OrgId;
 use crate::error::Result;
 use crate::public_status::PageCache;
 use crate::storage::clickhouse::count_org_rows;
@@ -114,7 +113,7 @@ pub struct PurgeStats {
 /// PG-side step: pick orgs past the grace window, enqueue + cascade in one
 /// transaction per org. Returns the count actually cascaded so the caller can
 /// emit a metric.
-async fn cascade_past_grace(pool: &PgPool, grace_days: u32, cache: &PageCache) -> Result<u32> {
+async fn cascade_past_grace(pool: &PgPool, grace_days: u32, _cache: &PageCache) -> Result<u32> {
     let orgs: Vec<(Uuid,)> = sqlx::query_as(
         r#"SELECT id FROM organizations
            WHERE deleted_at IS NOT NULL
@@ -172,9 +171,9 @@ async fn cascade_past_grace(pool: &PgPool, grace_days: u32, cache: &PageCache) -
             continue;
         }
         tx.commit().await.context("purge: commit cascade")?;
-        // Data is gone from Postgres now — drop any hot/last-good page so the
-        // public surface can't keep serving a snapshot of a purged org.
-        cache.invalidate(OrgId(org_id)).await;
+        // The page resolver 404s a purged org's pages (slug lookup joins the
+        // now-deleted rows), so a stale cache entry is unreachable and ages out
+        // on TTL — no explicit invalidation needed.
         cascaded += 1;
         tracing::info!(%org_id, "org cascade-purged from postgres");
     }

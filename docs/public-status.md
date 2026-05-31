@@ -11,8 +11,8 @@ of the underlying endpoints see [REST API](api.md#public-status-endpoints).
 For Caddy + the rate-limit plugin see [Deployment](deployment.md#public-status-surface).
 
 > **Multi-tenant operators read this first.** This chapter describes the
-> page itself; the workflow is identical per org. In a multi-tenant
-> deployment each org gets its own page at `{slug}.{base_domain}` — set
+> page itself; the workflow is identical on every page. In a multi-tenant
+> deployment each org runs one or more pages at `{slug}.{base_domain}` — set
 > `tenancy.subdomain_public_routes = true` and leave
 > `tenancy.path_based_public_routes` off. The path-based `/status` surface
 > is single-org and is for single-tenant deploys only (the default). See
@@ -23,54 +23,69 @@ For Caddy + the rate-limit plugin see [Deployment](deployment.md#public-status-s
 
 ## What's published vs what's private
 
-By default every target is **private**. The aggregator filters at the SQL
-layer and the wire types literally cannot serialise sensitive fields
-(`url`, `headers`, `basic_auth`, `bearer_token` are not part of any
-public schema), so a misconfiguration cannot leak credentials.
+By default every target is **private**. A monitor becomes a "component"
+on a status page only when it is curated onto that page — there is no
+per-target "public" flag. The aggregator filters at the SQL layer (a
+page renders only the monitors bound to it) and the wire types literally
+cannot serialise sensitive fields (`url`, `headers`, `basic_auth`,
+`bearer_token` are not part of any public schema), so a misconfiguration
+cannot leak credentials.
 
-A target is published when its `public_status` flag is `true`. The five
-per-target knobs that drive the public view all live on the target
-itself (no `[public_status]` TOML block — there are no global tunables
-in v1):
+A monitor is published by adding it to a page; the per-page presentation
+lives on that binding, so the same monitor can appear on several pages
+under different names:
 
-| Field | Purpose |
+| Per-page field | Purpose |
 |---|---|
-| `public_status` | when `true`, the target appears as a "component" on the public page |
-| `public_name` | display name on the page; falls back to the operator-side `name` when unset |
+| (binding exists) | the monitor appears as a component on that page |
+| `public_name` | display name on this page; falls back to the operator-side monitor name when unset |
 | `public_description` | optional one-liner shown under the component name |
 | `public_group` | optional group label; components with the same value cluster together. Ungrouped components render last |
-| `public_sort_order` | integer sort key within a group (ASC); ties break on `public_name` |
+| `sort_order` | integer sort key within a group (ASC); the reorder endpoint rewrites it |
+
+A page belongs to an org and is managed by that org's owner; see
+[Per-org status pages](per-org-status.md) for the page model, the
+`max_status_pages` / `max_public_components` caps, and isolation.
 
 ## Enabling a component
 
-The quickest path is the UI: **Settings → Status page → Public
-components**. Every monitor in the org is listed; flip **Public** on,
-optionally set a **Public name** (blank shows the real monitor name) and
-a **Group**, and drag the ⠿ handle (or focus it and press ↑/↓) to set
-the public order. Each edit autosaves via the PATCH endpoint below.
+The quickest path is the UI: open the page in **Settings → Pages →
+{your page}**. The editor lists every monitor in the org; toggle one
+**on page**, optionally set a **Public name** (blank shows the real
+monitor name) and a **Group**. Each edit autosaves via the components
+API below.
 
-For scripting, PATCH the target directly:
+For scripting, add the monitor to the page, then set its per-page
+curation:
 
 ```bash
-curl -X PATCH http://127.0.0.1:8080/api/v1/targets/$ID \
+# Add monitor $TARGET_ID to page $PAGE_ID
+curl -X POST http://127.0.0.1:8080/api/v1/status-pages/$PAGE_ID/components \
   -H 'content-type: application/json' \
-  -d '{
-    "public_status": true,
-    "public_name": "Public API",
-    "public_description": "Primary REST surface, all regions.",
-    "public_group": "Core APIs",
-    "public_sort_order": 10
-  }'
+  -d '{"target_id": "'$TARGET_ID'", "public_name": "Public API", "public_group": "Core APIs"}'
+
+# Edit the per-page name / description / group later
+curl -X PATCH http://127.0.0.1:8080/api/v1/status-pages/$PAGE_ID/components/$TARGET_ID \
+  -H 'content-type: application/json' \
+  -d '{"public_description": "Primary REST surface, all regions."}'
+
+# Remove it from the page
+curl -X DELETE http://127.0.0.1:8080/api/v1/status-pages/$PAGE_ID/components/$TARGET_ID
 ```
 
-`public_name`, `public_description`, and `public_group` use the same
-three-state PATCH semantics as incident narration: **omit** the field to
-leave it unchanged, send a string to set it, or send JSON `null` to
-clear it back to the default (real monitor name / no group). Blanking
-the field in the UI sends `null` for you.
+On the `PATCH`, `public_name`, `public_description`, and `public_group`
+use the same three-state semantics as incident narration: **omit** the
+field to leave it unchanged, send a string to set it, or send JSON
+`null` to clear it back to the default (real monitor name / no group).
+Blanking the field in the UI clears it for you.
 
-The page is cached for 10 s in-process (moka single-flight, with an
-`ArcSwap` last-known-good fallback so transient ClickHouse failures
+Adding a monitor that's already on the page is an idempotent no-op.
+Adding a brand-new monitor when the org is at its `max_public_components`
+cap is a quota error; a monitor already published on another page costs
+nothing to add here.
+
+The page is cached for 10 s in-process (moka single-flight, with a
+second moka last-known-good cache so transient ClickHouse failures
 don't break the page). Changes appear on the next refresh.
 
 ## Narrating an incident
@@ -235,10 +250,11 @@ view inside the 10-second cache window. Unknown component ids return
 ## Common questions
 
 **Can I have a component that's public but doesn't trigger incidents?**
-Not in v1. Incident materialisation looks at the same `public_status`
-flag the page does. If you want a check that's published but not
-alerting, set `enabled = false` on the alert channels — the incident
-will still open, but no notification fires.
+No. Incident materialisation walks the same binding the page does — a
+monitor on any enabled page is eligible for incidents. If you want a
+check that's published but not alerting, set `enabled = false` on the
+alert channels — the incident will still open, but no notification
+fires.
 
 **Can I publish a maintenance window without listing the affected
 components?** No. `component_ids` may be empty in the request body, but

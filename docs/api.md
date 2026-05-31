@@ -54,14 +54,37 @@ These mutate the public surface; they live under the same auth boundary as
 | `PATCH` | `/api/v1/incidents/{id}` | update narration: `public_title`, `public_description`, `severity` (JSON `null` clears, omit to leave alone) |
 | `POST` | `/api/v1/incidents/{id}/updates` | append a status update — `phase` ∈ `investigating`/`identified`/`monitoring`/`resolved`/`postmortem`, `message` ≤ 2 000 chars |
 
+### Operator endpoints (status pages)
+
+An org owns one or more public status pages, each with its own slug, branding,
+and curated set of monitors. Reads are open to any active member; every mutation
+is owner-only. Scoped to the caller's active org (a foreign page id is 404).
+Adding a monitor already on the page returns 409 `COMPONENT_ALREADY_ON_PAGE` —
+edit it with `PATCH`. Model + caps in [Per-org status pages](per-org-status.md).
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/api/v1/status-pages` | list this org's pages |
+| `POST` | `/api/v1/status-pages` | create a page (capped at `max_status_pages`; slug globally unique) |
+| `GET` | `/api/v1/status-pages/{id}` | one page + its live URL and logo URL |
+| `PATCH` | `/api/v1/status-pages/{id}` | rename, change slug, publish/unpublish, edit branding |
+| `DELETE` | `/api/v1/status-pages/{id}` | delete the page |
+| `GET` | `/api/v1/status-pages/{id}/components` | the monitors curated onto the page |
+| `POST` | `/api/v1/status-pages/{id}/components` | add a monitor (distinct-target cap `max_public_components`) |
+| `PATCH` | `/api/v1/status-pages/{id}/components/{target_id}` | per-page `public_name` / `public_description` / `public_group` (JSON `null` clears) |
+| `DELETE` | `/api/v1/status-pages/{id}/components/{target_id}` | remove a monitor from the page |
+| `POST` | `/api/v1/status-pages/{id}/components/reorder` | set component order |
+| `POST` | `/api/v1/status-pages/{id}/logo` | upload a logo (multipart) |
+| `DELETE` | `/api/v1/status-pages/{id}/logo` | remove the logo |
+
 ### Public status endpoints
 
 Unauthenticated; mounted at `/api/public/v1/*` and bypassed at Caddy via the
 `@public` matcher (see [Deployment](deployment.md#public-status-surface)).
 Each response carries `Cache-Control: public, max-age=10,
-stale-while-revalidate=30`. Targets with `public_status = false` are
-invisible on every public surface — direct lookups return 404 and they
-never appear in any list. Wire types literally cannot serialise
+stale-while-revalidate=30`. A monitor not curated onto the page being
+served is invisible on every public surface — direct lookups return 404
+and it never appears in any list. Wire types literally cannot serialise
 sensitive target fields (`url`, `headers`, `basic_auth`, `bearer_token`).
 
 | Method | Path | Purpose |
@@ -77,8 +100,8 @@ sensitive target fields (`url`, `headers`, `basic_auth`, `bearer_token`).
 | `GET` | `/api/public/v1/badge.svg` | embeddable SVG status badge (overall, or `?component={id}`) |
 
 See [Public status page](public-status.md) for the operator workflow and
-the per-target fields (`public_status`, `public_name`, `public_description`,
-`public_group`, `public_sort_order`) that drive what's published.
+the per-page component fields (`public_name`, `public_description`,
+`public_group`, `sort_order`) that drive what's published.
 
 ## Check specs
 

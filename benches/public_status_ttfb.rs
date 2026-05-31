@@ -20,12 +20,13 @@ use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 use tokio::runtime::Builder;
 use uptimepage::domain::{
-    CheckResult, CheckSpec, CheckStatus, ExpectedStatus, HttpCheck, HttpMethod, NewTarget, OrgId,
-    UserId, WriteSource,
+    CheckResult, CheckSpec, CheckStatus, ExpectedStatus, HttpCheck, HttpMethod,
+    NewStatusPageComponent, NewTarget, OrgId, StatusPageId, UserId, WriteSource,
 };
 use uptimepage::public_status::{AggregatorConfig, OrgAggregator};
 use uptimepage::storage::{
-    ClickhouseResultSink, PostgresTargetStore, ResultSink, TargetStore, create_org_with_owner,
+    ClickhouseResultSink, PgStatusPageStore, PostgresTargetStore, ResultSink, StatusPageStore,
+    TargetStore, create_org_with_owner,
 };
 use url::Url;
 use uuid::Uuid;
@@ -42,6 +43,9 @@ struct Fixture {
     /// clear their data on Drop.
     user_ids: Vec<UserId>,
     org_ids: Vec<OrgId>,
+    /// The default page per org, with all its targets curated as components —
+    /// the page the benched `build` renders.
+    page_ids: Vec<StatusPageId>,
 }
 
 async fn try_pg_pool() -> Option<PgPool> {
@@ -97,11 +101,6 @@ fn http_target(name: &str) -> NewTarget {
         alerts: Default::default(),
         group_name: None,
         owner_user_id: None,
-        public_status: true,
-        public_name: None,
-        public_description: None,
-        public_group: None,
-        public_sort_order: 0,
     }
 }
 
@@ -144,6 +143,9 @@ async fn build_fixture() -> Option<Fixture> {
     let mut aggregators = Vec::with_capacity(ORG_COUNT);
     let mut user_ids = Vec::with_capacity(ORG_COUNT);
     let mut org_ids = Vec::with_capacity(ORG_COUNT);
+    let mut page_ids = Vec::with_capacity(ORG_COUNT);
+
+    let page_store = PgStatusPageStore::new(pool.clone());
 
     for i in 0..ORG_COUNT {
         let user = make_user(&pool).await;
@@ -155,6 +157,16 @@ async fn build_fixture() -> Option<Fixture> {
             Arc::new(PostgresTargetStore::from_pool(pool.clone(), None)) as Arc<dyn TargetStore>;
         let sink = ClickhouseResultSink::from_client(ch.clone());
 
+        // Org creation seeds one default page; curate every target onto it so
+        // the page-keyed aggregator has the full 50-component set to render.
+        let page_id = page_store
+            .list(org.id)
+            .await
+            .expect("list pages")
+            .first()
+            .expect("default page")
+            .id;
+
         for j in 0..COMPONENTS_PER_ORG {
             let t = target_store
                 .create(
@@ -165,6 +177,21 @@ async fn build_fixture() -> Option<Fixture> {
                 )
                 .await
                 .expect("create target");
+            page_store
+                .add_component(
+                    org.id,
+                    page_id,
+                    NewStatusPageComponent {
+                        target_id: t.id,
+                        public_name: None,
+                        public_description: None,
+                        public_group: None,
+                        sort_order: j as i32,
+                    },
+                    i64::MAX,
+                )
+                .await
+                .expect("add component");
             let rows: Vec<CheckResult> = (0..RESULTS_PER_COMPONENT)
                 .map(|k| ok_result(t.id, org.id.0, (k as i64) * 30))
                 .collect();
@@ -173,11 +200,11 @@ async fn build_fixture() -> Option<Fixture> {
         aggregators.push(OrgAggregator::new(
             pool.clone(),
             ch.clone(),
-            target_store,
             AggregatorConfig::default(),
         ));
         user_ids.push(user);
         org_ids.push(org.id);
+        page_ids.push(page_id);
     }
 
     // Single MV merge after all inserts. OPTIMIZE FINAL is table-wide; doing
@@ -194,6 +221,7 @@ async fn build_fixture() -> Option<Fixture> {
         aggregators,
         user_ids,
         org_ids,
+        page_ids,
     })
 }
 
@@ -244,10 +272,11 @@ fn bench_public_status_build(c: &mut Criterion) {
     // (which may have a colder block cache).
     let middle = ORG_COUNT / 2;
     let middle_org = fixture.org_ids[middle];
+    let middle_page = fixture.page_ids[middle];
     group.bench_function("aggregator_build_50x50", |b| {
         b.to_async(&rt).iter(|| async {
             fixture.aggregators[middle]
-                .build(middle_org)
+                .build(middle_page, middle_org)
                 .await
                 .expect("aggregator build");
         });

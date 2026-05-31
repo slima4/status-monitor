@@ -93,6 +93,8 @@ pub struct OwnedOrgExport {
     pub targets: Vec<RedactedTarget>,
     pub incidents: Vec<IncidentExport>,
     pub maintenance_windows: Vec<MaintenanceExport>,
+    pub status_pages: Vec<StatusPageExport>,
+    pub status_page_components: Vec<StatusPageComponentExport>,
     pub members: Vec<MemberMetadata>,
 }
 
@@ -134,6 +136,34 @@ pub struct MaintenanceExport {
     pub ends_at: DateTime<Utc>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize, ToSchema, sqlx::FromRow)]
+pub struct StatusPageExport {
+    #[schema(value_type = String, format = "uuid")]
+    pub id: Uuid,
+    pub slug: String,
+    pub name: String,
+    pub enabled: bool,
+    pub public_display_name: Option<String>,
+    pub public_about: Option<String>,
+    pub public_brand_color: Option<String>,
+    pub public_style: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// One curated monitor on a page, with the operator-authored per-page overrides.
+#[derive(Debug, Serialize, ToSchema, sqlx::FromRow)]
+pub struct StatusPageComponentExport {
+    #[schema(value_type = String, format = "uuid")]
+    pub status_page_id: Uuid,
+    #[schema(value_type = String, format = "uuid")]
+    pub target_id: Uuid,
+    pub public_name: Option<String>,
+    pub public_description: Option<String>,
+    pub public_group: Option<String>,
+    pub sort_order: i32,
 }
 
 /// Co-member of an owned org. Name + role ONLY — never email. Other members'
@@ -180,8 +210,9 @@ pub struct AuditEntryExport {
     description = "Returns a JSON document containing all data linked to the \
                    authenticated user: account info, OAuth identities, session \
                    and API-token metadata (never raw values), owned orgs with \
-                   their targets (credentials redacted), incidents and \
-                   maintenance, memberships, login history and audit entries. \
+                   their targets (credentials redacted), incidents, \
+                   maintenance, status pages and their curated components, \
+                   memberships, login history and audit entries. \
                    Excludes data from orgs where the user is a member but not \
                    owner.",
     responses(
@@ -333,9 +364,7 @@ async fn build_owned_org(pool: &sqlx::PgPool, org: OrgExport) -> Result<OwnedOrg
     // carry no soft-delete column of their own.
     let target_rows: Vec<RawTargetRow> = sqlx::query_as(
         "SELECT id, name, check_spec, interval_secs, enabled, tags, \
-                group_name, owner_user_id, \
-                public_status, public_name, public_description, public_group, \
-                public_sort_order, created_at, updated_at \
+                group_name, owner_user_id, created_at, updated_at \
          FROM targets WHERE org_id = $1 ORDER BY created_at",
     )
     .bind(org.id)
@@ -371,6 +400,27 @@ async fn build_owned_org(pool: &sqlx::PgPool, org: OrgExport) -> Result<OwnedOrg
     .await
     .map_err(db_err("maintenance_windows"))?;
 
+    let status_pages: Vec<StatusPageExport> = sqlx::query_as(
+        "SELECT id, slug, name, enabled, public_display_name, public_about, \
+                public_brand_color, public_style, created_at, updated_at \
+         FROM status_pages WHERE org_id = $1 ORDER BY created_at",
+    )
+    .bind(org.id)
+    .fetch_all(pool)
+    .await
+    .map_err(db_err("status_pages"))?;
+
+    let status_page_components: Vec<StatusPageComponentExport> = sqlx::query_as(
+        "SELECT status_page_id, target_id, public_name, public_description, \
+                public_group, sort_order \
+         FROM status_page_components WHERE org_id = $1 \
+         ORDER BY status_page_id, sort_order",
+    )
+    .bind(org.id)
+    .fetch_all(pool)
+    .await
+    .map_err(db_err("status_page_components"))?;
+
     // Co-members: display_name + role ONLY. A dedicated query, never the
     // operator-UI `list_members` helper (that returns email — third-party
     // PII the export must not leak).
@@ -389,6 +439,8 @@ async fn build_owned_org(pool: &sqlx::PgPool, org: OrgExport) -> Result<OwnedOrg
         targets,
         incidents,
         maintenance_windows,
+        status_pages,
+        status_page_components,
         members,
     })
 }

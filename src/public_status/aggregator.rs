@@ -1,12 +1,18 @@
-//! Aggregator that assembles the public status page payload from PostgreSQL
-//! and ClickHouse.
+//! Aggregator that assembles a public status page payload from PostgreSQL and
+//! ClickHouse.
 //!
 //! The aggregator is intentionally **read-only**, **idempotent**, and
-//! **side-effect-free** — it owns no caches and no background tasks. Caching
-//! is layered on top in [`super::cache`]; the incident materialisation writer
+//! **side-effect-free** — it owns no caches and no background tasks. Caching is
+//! layered on top in [`super::cache`]; the incident materialisation writer
 //! lives in its own module.
+//!
+//! Everything is scoped to a single page: a page selects its monitors via the
+//! `status_page_components` join, and each binding carries the per-page public
+//! name / group / order. Incidents, maintenance, and history are filtered to
+//! the page's component (target_id) set; component names resolve from the
+//! page's curation map, falling back to the monitor's own name.
 
-use std::sync::Arc;
+use std::collections::HashMap;
 
 use anyhow::Context;
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
@@ -16,12 +22,11 @@ use sqlx::{FromRow, PgPool};
 use uuid::Uuid;
 
 use crate::domain::{
-    CheckStatus, ComponentHistoryResponse, DayState, IncidentSeverity, IncidentStatusPhase, OrgId,
+    ComponentHistoryResponse, DayState, IncidentSeverity, IncidentStatusPhase, OrgId,
     PublicComponent, PublicComponentGroup, PublicComponentStatus, PublicIncident,
-    PublicIncidentUpdate, PublicMaintenance, PublicStatusPage, Target,
+    PublicIncidentUpdate, PublicMaintenance, PublicStatusPage, StatusPageId,
 };
 use crate::error::Result;
-use crate::storage::TargetStore;
 
 use super::auto_incident_title;
 use super::cache::HistoryIncidentMarker;
@@ -54,42 +59,46 @@ impl Default for AggregatorConfig {
 const CH_TABLE: &str = "check_results";
 const CH_MV: &str = "check_results_1m";
 
-/// Per-org status-page aggregator. Carries no `org_id` of its own — every
-/// method takes the target org as its first parameter so the compiler refuses
-/// to compile a call site that forgot which tenant's page is being built.
-/// The earlier shape baked the default org into the struct, which let a
-/// cache-key change silently serve org A's data to org B once a tenant ran
-/// the same page-build path.
+/// One monitor as it sits on a page: its target id, the resolved public name
+/// (per-page override or the monitor's own name), and the page-local grouping.
+struct PageComponent {
+    id: Uuid,
+    name: String,
+    description: Option<String>,
+    group: Option<String>,
+    sort_order: i32,
+}
+
+/// Page-scoped aggregator. Carries no ids of its own — every method takes the
+/// `(page, org)` pair, so the compiler refuses a call site that forgot which
+/// page is being built. `org` rides alongside `page` for tenant-scoped queries.
 pub struct OrgAggregator {
     pg: PgPool,
     ch: ClickhouseClient,
-    target_store: Arc<dyn TargetStore>,
     cfg: AggregatorConfig,
 }
 
 impl OrgAggregator {
-    pub fn new(
-        pg: PgPool,
-        ch: ClickhouseClient,
-        target_store: Arc<dyn TargetStore>,
-        cfg: AggregatorConfig,
-    ) -> Self {
-        Self {
-            pg,
-            ch,
-            target_store,
-            cfg,
-        }
+    pub fn new(pg: PgPool, ch: ClickhouseClient, cfg: AggregatorConfig) -> Self {
+        Self { pg, ch, cfg }
     }
 
-    /// One atomic snapshot per call: page + 90-day popover markers.
+    /// One atomic snapshot per call: page + 90-day popover markers + the
+    /// `target_id → public name` map (cached for the incident read paths).
     pub async fn build(
         &self,
+        page: StatusPageId,
         org: OrgId,
-    ) -> Result<(PublicStatusPage, Vec<HistoryIncidentMarker>)> {
+    ) -> Result<(
+        PublicStatusPage,
+        Vec<HistoryIncidentMarker>,
+        HashMap<Uuid, String>,
+    )> {
         let now = Utc::now();
-        let components = self.load_public_components(org).await?;
+        let components = self.load_page_components(page, org).await?;
         let component_ids: Vec<Uuid> = components.iter().map(|c| c.id).collect();
+        let name_by_id: HashMap<Uuid, String> =
+            components.iter().map(|c| (c.id, c.name.clone())).collect();
 
         let (
             (active_maintenance, upcoming_maintenance, maintenance_by_target),
@@ -97,38 +106,44 @@ impl OrgAggregator {
             (recent_incidents, recent_incidents_has_more),
             history_markers,
         ) = tokio::try_join!(
-            self.load_maintenance(org, now, &component_ids),
-            self.load_active_incidents(org),
-            self.load_recent_incidents(org, now),
-            self.load_history_markers(org, now),
+            self.load_maintenance(org, now, &component_ids, &name_by_id),
+            self.load_active_incidents(org, &component_ids, &name_by_id),
+            self.load_recent_incidents(org, now, &component_ids, &name_by_id),
+            self.load_history_markers(org, now, &component_ids, &name_by_id),
         )?;
 
-        let history_by_target = self.load_history_strips(org, &component_ids, now).await?;
-        let recent_counters = self.load_recent_counters(org, &component_ids, now).await?;
+        // Index by target_id so the per-component loop is O(1), not O(n²) — a
+        // page with hundreds of monitors otherwise linear-scans both vecs per
+        // component on every cache miss.
+        let history_by_target: HashMap<Uuid, Vec<DayState>> = self
+            .load_history_strips(org, &component_ids, now)
+            .await?
+            .into_iter()
+            .collect();
+        let recent_counters: HashMap<Uuid, Counters> = self
+            .load_recent_counters(org, &component_ids, now)
+            .await?
+            .into_iter()
+            .collect();
 
         let mut public_components: Vec<(Option<String>, i32, PublicComponent)> = components
             .iter()
-            .map(|t| {
-                let maint = maintenance_by_target.contains(&t.id);
-                let counters = recent_counters
-                    .iter()
-                    .find(|(id, _)| *id == t.id)
-                    .map(|(_, c)| *c)
-                    .unwrap_or_default();
+            .map(|c| {
+                let maint = maintenance_by_target.contains(&c.id);
+                let counters = recent_counters.get(&c.id).copied().unwrap_or_default();
                 let current = component_status(&counters, maint);
                 let history = history_by_target
-                    .iter()
-                    .find(|(id, _)| *id == t.id)
-                    .map(|(_, h)| h.clone())
+                    .get(&c.id)
+                    .cloned()
                     .unwrap_or_else(|| vec![DayState::NoData; self.cfg.history_days as usize]);
                 let pc = PublicComponent {
-                    id: t.id,
-                    name: t.public_name.clone().unwrap_or_else(|| t.name.clone()),
-                    description: t.public_description.clone(),
+                    id: c.id,
+                    name: c.name.clone(),
+                    description: c.description.clone(),
                     current_status: current,
                     history,
                 };
-                (t.public_group.clone(), t.public_sort_order, pc)
+                (c.group.clone(), c.sort_order, pc)
             })
             .collect();
 
@@ -187,23 +202,25 @@ impl OrgAggregator {
                 upcoming_maintenance,
             },
             history_markers,
+            name_by_id,
         ))
     }
 
     /// Per-component history endpoint (`GET /api/public/v1/components/{id}/history`).
+    /// 404s (via the error) when the target isn't on this page.
     pub async fn component_history(
         &self,
+        page: StatusPageId,
         org: OrgId,
         id: Uuid,
         days: u32,
     ) -> Result<ComponentHistoryResponse> {
         let now = Utc::now();
-        let target = self
-            .target_store
-            .get(org, id)
-            .await?
-            .filter(|t| t.public_status)
-            .ok_or_else(|| anyhow::anyhow!("component not public or not found"))?;
+        let components = self.load_page_components(page, org).await?;
+        let component = components
+            .into_iter()
+            .find(|c| c.id == id)
+            .ok_or_else(|| anyhow::anyhow!("component not on this page"))?;
 
         let history_by_target = self.load_history_strips(org, &[id], now).await?;
         let history = history_by_target
@@ -211,13 +228,11 @@ impl OrgAggregator {
             .find(|(target_id, _)| *target_id == id)
             .map(|(_, h)| h)
             .unwrap_or_else(|| vec![DayState::NoData; days as usize]);
-        // Caller can ask for a different window; load_history_strips returns
-        // cfg.history_days. Truncate or pad to `days`.
         let history = pad_or_truncate(history, days as usize);
 
         Ok(ComponentHistoryResponse {
             component_id: id,
-            component_name: target.public_name.unwrap_or(target.name),
+            component_name: component.name,
             days,
             history,
         })
@@ -225,29 +240,47 @@ impl OrgAggregator {
 
     // ── private helpers ─────────────────────────────────────────────────────
 
-    async fn load_public_components(&self, org: OrgId) -> Result<Vec<Target>> {
-        let all = self
-            .target_store
-            .list(
-                org,
-                crate::storage::TargetFilter {
-                    limit: Some(10_000),
-                    offset: 0,
-                    ..Default::default()
-                },
-            )
-            .await?;
-        Ok(all.into_iter().filter(|t| t.public_status).collect())
+    /// The page's monitors, with per-page curation applied. Ordered by
+    /// (group, sort_order, monitor name) to match the rendered layout.
+    async fn load_page_components(
+        &self,
+        page: StatusPageId,
+        org: OrgId,
+    ) -> Result<Vec<PageComponent>> {
+        let rows: Vec<PageComponentRow> = sqlx::query_as::<_, PageComponentRow>(
+            r#"SELECT spc.target_id, t.name AS monitor_name,
+                      spc.public_name, spc.public_description,
+                      spc.public_group, spc.sort_order
+               FROM status_page_components spc
+               JOIN targets t ON t.id = spc.target_id AND t.org_id = spc.org_id
+               WHERE spc.status_page_id = $1 AND spc.org_id = $2
+               ORDER BY spc.public_group NULLS LAST, spc.sort_order, t.name"#,
+        )
+        .bind(page.0)
+        .bind(org.0)
+        .fetch_all(&self.pg)
+        .await
+        .context("load page components")?;
+        Ok(rows
+            .into_iter()
+            .map(|r| PageComponent {
+                id: r.target_id,
+                name: r.public_name.unwrap_or(r.monitor_name),
+                description: r.public_description,
+                group: r.public_group,
+                sort_order: r.sort_order,
+            })
+            .collect())
     }
 
     async fn load_maintenance(
         &self,
         org: OrgId,
         now: DateTime<Utc>,
-        public_ids: &[Uuid],
+        component_ids: &[Uuid],
+        name_by_id: &HashMap<Uuid, String>,
     ) -> Result<(Vec<PublicMaintenance>, Vec<PublicMaintenance>, Vec<Uuid>)> {
         let horizon_end = now + self.cfg.upcoming_maintenance_horizon;
-        // Active OR upcoming-within-horizon — one query, classify client-side.
         let rows: Vec<MaintenanceRow> = sqlx::query_as::<_, MaintenanceRow>(
             r#"SELECT mw.id, mw.title, mw.description, mw.starts_at, mw.ends_at,
                       COALESCE(
@@ -269,29 +302,24 @@ impl OrgAggregator {
         .await
         .context("load maintenance windows")?;
 
-        let public_set: std::collections::HashSet<Uuid> = public_ids.iter().copied().collect();
-        let mut targets_by_id: std::collections::HashMap<Uuid, String> = Default::default();
-        for t in self.load_public_components_meta(org).await? {
-            targets_by_id.insert(t.id, t.public_name.clone().unwrap_or(t.name));
-        }
-
+        let on_page: std::collections::HashSet<Uuid> = component_ids.iter().copied().collect();
         let mut active = Vec::new();
         let mut upcoming = Vec::new();
         let mut active_target_ids: Vec<Uuid> = Vec::new();
         for row in rows {
-            // Only surface windows that touch at least one public component.
-            let public_components: Vec<Uuid> = row
+            // Only surface windows that touch at least one of THIS page's components.
+            let on_page_components: Vec<Uuid> = row
                 .component_ids
                 .iter()
                 .copied()
-                .filter(|id| public_set.contains(id))
+                .filter(|id| on_page.contains(id))
                 .collect();
-            if public_components.is_empty() {
+            if on_page_components.is_empty() {
                 continue;
             }
-            let names: Vec<String> = public_components
+            let names: Vec<String> = on_page_components
                 .iter()
-                .filter_map(|id| targets_by_id.get(id).cloned())
+                .filter_map(|id| name_by_id.get(id).cloned())
                 .collect();
             let pm = PublicMaintenance {
                 id: row.id,
@@ -302,7 +330,7 @@ impl OrgAggregator {
                 affected_component_names: names,
             };
             if row.starts_at <= now && row.ends_at > now {
-                active_target_ids.extend(public_components);
+                active_target_ids.extend(on_page_components);
                 active.push(pm);
             } else if row.starts_at > now {
                 upcoming.push(pm);
@@ -311,61 +339,60 @@ impl OrgAggregator {
         Ok((active, upcoming, active_target_ids))
     }
 
-    /// Cheaper variant for the maintenance loader — no filtering on
-    /// `public_status` flag; we re-pull because building both lists in one
-    /// query would force a join graph that's awkward to express. Cached one
-    /// layer up anyway.
-    async fn load_public_components_meta(&self, org: OrgId) -> Result<Vec<Target>> {
-        self.load_public_components(org).await
-    }
-
-    async fn load_active_incidents(&self, org: OrgId) -> Result<Vec<PublicIncident>> {
+    async fn load_active_incidents(
+        &self,
+        org: OrgId,
+        component_ids: &[Uuid],
+        name_by_id: &HashMap<Uuid, String>,
+    ) -> Result<Vec<PublicIncident>> {
+        if component_ids.is_empty() {
+            return Ok(Vec::new());
+        }
         let rows: Vec<IncidentRow> = sqlx::query_as::<_, IncidentRow>(
             r#"SELECT i.id, i.target_id,
-                      COALESCE(t.public_name, t.name) AS component_name,
                       i.started_at, i.ended_at, i.severity, i.status_at_start,
                       i.public_title, i.public_description
                FROM incidents i
-               JOIN targets t ON t.id = i.target_id
                WHERE i.org_id = $1
-                 AND t.org_id = $1
                  AND i.ended_at IS NULL
-                 AND t.public_status = true
+                 AND i.target_id = ANY($2)
                ORDER BY i.started_at DESC"#,
         )
         .bind(org.0)
+        .bind(component_ids)
         .fetch_all(&self.pg)
         .await
         .context("load active incidents")?;
-        self.hydrate_incidents(org, rows).await
+        self.hydrate_incidents(org, rows, name_by_id).await
     }
 
     async fn load_recent_incidents(
         &self,
         org: OrgId,
         now: DateTime<Utc>,
+        component_ids: &[Uuid],
+        name_by_id: &HashMap<Uuid, String>,
     ) -> Result<(Vec<PublicIncident>, bool)> {
+        if component_ids.is_empty() {
+            return Ok((Vec::new(), false));
+        }
         let since = now - ChronoDuration::days(self.cfg.recent_incidents_days as i64);
-        // Peek one past the render cap so the page can decide whether to
-        // render an "older incidents" link without a second `count(*)`.
         let peek_limit = self.cfg.max_recent_incidents as i64 + 1;
         let mut rows: Vec<IncidentRow> = sqlx::query_as::<_, IncidentRow>(
             r#"SELECT i.id, i.target_id,
-                      COALESCE(t.public_name, t.name) AS component_name,
                       i.started_at, i.ended_at, i.severity, i.status_at_start,
                       i.public_title, i.public_description
                FROM incidents i
-               JOIN targets t ON t.id = i.target_id
                WHERE i.org_id = $3
-                 AND t.org_id = $3
                  AND i.started_at >= $1
-                 AND t.public_status = true
+                 AND i.target_id = ANY($4)
                ORDER BY i.started_at DESC, i.id DESC
                LIMIT $2"#,
         )
         .bind(since)
         .bind(peek_limit)
         .bind(org.0)
+        .bind(component_ids)
         .fetch_all(&self.pg)
         .await
         .context("load recent incidents")?;
@@ -373,49 +400,53 @@ impl OrgAggregator {
         if has_more {
             rows.truncate(self.cfg.max_recent_incidents as usize);
         }
-        let hydrated = self.hydrate_incidents(org, rows).await?;
+        let hydrated = self.hydrate_incidents(org, rows, name_by_id).await?;
         Ok((hydrated, has_more))
     }
 
-    /// 90-day slim incident pool for the popover matcher. 1000-row cap
-    /// guards against an incident-spam tenant blowing the rendered JSON.
+    /// 90-day slim incident pool for the popover matcher. 1000-row cap guards
+    /// against an incident-spam tenant blowing the rendered JSON.
     async fn load_history_markers(
         &self,
         org: OrgId,
         now: DateTime<Utc>,
+        component_ids: &[Uuid],
+        name_by_id: &HashMap<Uuid, String>,
     ) -> Result<Vec<HistoryIncidentMarker>> {
+        if component_ids.is_empty() {
+            return Ok(Vec::new());
+        }
         let since = now - ChronoDuration::days(self.cfg.history_days as i64);
         let rows: Vec<HistoryMarkerRow> = sqlx::query_as::<_, HistoryMarkerRow>(
             r#"SELECT i.id, i.target_id,
-                      COALESCE(t.public_name, t.name) AS component_name,
                       i.public_title, i.status_at_start,
                       i.started_at, i.ended_at
                FROM incidents i
-               JOIN targets t ON t.id = i.target_id
                WHERE i.org_id = $2
-                 AND t.org_id = $2
                  AND (i.ended_at IS NULL OR i.ended_at >= $1)
-                 AND t.public_status = true
+                 AND i.target_id = ANY($3)
                ORDER BY i.started_at DESC
                LIMIT 1000"#,
         )
         .bind(since)
         .bind(org.0)
+        .bind(component_ids)
         .fetch_all(&self.pg)
         .await
         .context("load history-window incident markers")?;
         Ok(rows
             .into_iter()
-            .map(|r| HistoryIncidentMarker {
-                id: r.id,
-                component_id: r.target_id,
-                title: truncate_title(
-                    r.public_title.unwrap_or_else(|| {
-                        auto_incident_title(&r.component_name, &r.status_at_start)
-                    }),
-                ),
-                started_at: r.started_at,
-                ended_at: r.ended_at,
+            .map(|r| {
+                let component_name = name_by_id.get(&r.target_id).cloned().unwrap_or_default();
+                HistoryIncidentMarker {
+                    id: r.id,
+                    component_id: r.target_id,
+                    title: truncate_title(r.public_title.unwrap_or_else(|| {
+                        auto_incident_title(&component_name, &r.status_at_start)
+                    })),
+                    started_at: r.started_at,
+                    ended_at: r.ended_at,
+                }
             })
             .collect())
     }
@@ -424,6 +455,7 @@ impl OrgAggregator {
         &self,
         org: OrgId,
         rows: Vec<IncidentRow>,
+        name_by_id: &HashMap<Uuid, String>,
     ) -> Result<Vec<PublicIncident>> {
         if rows.is_empty() {
             return Ok(Vec::new());
@@ -444,6 +476,7 @@ impl OrgAggregator {
         Ok(rows
             .into_iter()
             .map(|r| {
+                let component_name = name_by_id.get(&r.target_id).cloned().unwrap_or_default();
                 let my_updates: Vec<PublicIncidentUpdate> = updates
                     .iter()
                     .filter(|u| u.incident_id == r.id)
@@ -460,11 +493,11 @@ impl OrgAggregator {
                 let title = r
                     .public_title
                     .clone()
-                    .unwrap_or_else(|| auto_incident_title(&r.component_name, &r.status_at_start));
+                    .unwrap_or_else(|| auto_incident_title(&component_name, &r.status_at_start));
                 PublicIncident {
                     id: r.id,
                     component_id: r.target_id,
-                    component_name: r.component_name.clone(),
+                    component_name,
                     title,
                     started_at: r.started_at,
                     ended_at: r.ended_at,
@@ -476,8 +509,8 @@ impl OrgAggregator {
             .collect())
     }
 
-    /// Fetches per-day worst-minute classification for each component using
-    /// the existing `check_results_1m` aggregating-merge view. Returns one
+    /// Fetches per-day worst-minute classification for each component using the
+    /// existing `check_results_1m` aggregating-merge view. Returns one
     /// `Vec<DayState>` per component, oldest-first, length = `history_days`.
     async fn load_history_strips(
         &self,
@@ -492,20 +525,7 @@ impl OrgAggregator {
         let rows: Vec<HistoryDayRow> = self
             .ch
             .query(&format!(
-                r#"WITH per_minute AS (
-                    SELECT
-                        target_id,
-                        toStartOfDay(minute) AS day,
-                        countMerge(total_checks) AS total,
-                        countIfMerge(up_checks) AS up_
-                    FROM {CH_MV}
-                    WHERE org_id = ?
-                      AND has(arrayMap(x -> toUUID(x), ?), target_id)
-                      AND minute >= fromUnixTimestamp64Milli(?)
-                      AND minute < fromUnixTimestamp64Milli(?)
-                    GROUP BY target_id, minute
-                )
-                SELECT
+                r#"SELECT
                     target_id,
                     toInt64(toUnixTimestamp(day)) AS day,
                     maxIf(toUInt8(total > 0 AND (total - up_) * 2 >= total), total > 0) AS any_major,
@@ -531,15 +551,10 @@ impl OrgAggregator {
             .bind(component_ids)
             .bind(from.timestamp_millis())
             .bind(now.timestamp_millis())
-            .bind(org.0)
-            .bind(component_ids)
-            .bind(from.timestamp_millis())
-            .bind(now.timestamp_millis())
             .fetch_all::<HistoryDayRow>()
             .await
             .context("ch history strip")?;
 
-        // Build day index → DayState per component.
         let mut out: Vec<(Uuid, Vec<DayState>)> = Vec::with_capacity(component_ids.len());
         for id in component_ids {
             let mut strip = vec![DayState::NoData; self.cfg.history_days as usize];
@@ -562,16 +577,12 @@ impl OrgAggregator {
             }
             out.push((*id, strip));
         }
-        // NB: degraded-only detection requires a richer aggregate than the
-        // existing 1m MV exposes (up vs not-up only). Until the MV is
-        // extended (separate phase) `Degraded` days collapse to `Operational`
-        // when no hard failures occur.
         Ok(out)
     }
 
-    /// Pulls raw `check_results` for the last 5 minutes — narrow enough that
-    /// the cost is negligible (<= 5 × N rows) and gives us the full
-    /// up/down/degraded/error breakdown needed by the component classifier.
+    /// Pulls raw `check_results` for the last 5 minutes — narrow enough that the
+    /// cost is negligible (<= 5 × N rows) and gives the full
+    /// up/down/degraded/error breakdown the component classifier needs.
     async fn load_recent_counters(
         &self,
         org: OrgId,
@@ -626,6 +637,16 @@ impl OrgAggregator {
 // ── PG row types ────────────────────────────────────────────────────────────
 
 #[derive(FromRow)]
+struct PageComponentRow {
+    target_id: Uuid,
+    monitor_name: String,
+    public_name: Option<String>,
+    public_description: Option<String>,
+    public_group: Option<String>,
+    sort_order: i32,
+}
+
+#[derive(FromRow)]
 struct MaintenanceRow {
     id: Uuid,
     title: String,
@@ -639,7 +660,6 @@ struct MaintenanceRow {
 struct IncidentRow {
     id: Uuid,
     target_id: Uuid,
-    component_name: String,
     started_at: DateTime<Utc>,
     ended_at: Option<DateTime<Utc>>,
     severity: String,
@@ -653,7 +673,6 @@ struct IncidentRow {
 struct HistoryMarkerRow {
     id: Uuid,
     target_id: Uuid,
-    component_name: String,
     public_title: Option<String>,
     status_at_start: String,
     started_at: DateTime<Utc>,
@@ -692,8 +711,8 @@ struct RecentCountRow {
 
 // ── helpers ─────────────────────────────────────────────────────────────────
 
-/// Cap popover title length so a runaway tenant can't blow up the inline
-/// strip JSON. Snaps to the last char-boundary at or before the cap.
+/// Cap popover title length so a runaway tenant can't blow up the inline strip
+/// JSON. Snaps to the last char-boundary at or before the cap.
 fn truncate_title(mut s: String) -> String {
     const MAX: usize = 140;
     if s.len() <= MAX {
@@ -739,18 +758,6 @@ fn pad_or_truncate(mut v: Vec<DayState>, len: usize) -> Vec<DayState> {
     out.extend(std::iter::repeat_n(DayState::NoData, pad));
     out.extend(v);
     out
-}
-
-/// Re-export of the original status string so the auto-generated incident
-/// title in `hydrate_incidents` reads sensibly. Currently only used as text;
-/// keep the mapping explicit so it doesn't drift from the DB CHECK constraint.
-#[allow(dead_code)]
-fn status_at_start_to_check_status(s: &str) -> CheckStatus {
-    match s {
-        "down" => CheckStatus::Down,
-        "degraded" => CheckStatus::Degraded,
-        _ => CheckStatus::Error,
-    }
 }
 
 #[cfg(test)]

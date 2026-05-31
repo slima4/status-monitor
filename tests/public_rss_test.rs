@@ -25,7 +25,7 @@ use common::build_test_app_with_public_source;
 use uptimepage::api::CursorPage;
 use uptimepage::api::public_error::PublicAppError;
 use uptimepage::domain::{
-    ComponentHistoryResponse, IncidentSeverity, IncidentStatusPhase, OrgId, PublicIncident,
+    ComponentHistoryResponse, IncidentSeverity, IncidentStatusPhase, PageRef, PublicIncident,
     PublicIncidentUpdate, PublicMaintenanceList, PublicStatusPage,
 };
 use uptimepage::public_status::{IncidentListQuery, PublicSource, source::build_rss};
@@ -43,12 +43,12 @@ struct TwoIncidentSource;
 
 #[async_trait]
 impl PublicSource for TwoIncidentSource {
-    async fn page(&self, _org: OrgId) -> Result<Arc<PublicStatusPage>, PublicAppError> {
+    async fn page(&self, _page: PageRef) -> Result<Arc<PublicStatusPage>, PublicAppError> {
         unimplemented!("not exercised by RSS test")
     }
     async fn component_history(
         &self,
-        _org: OrgId,
+        _page: PageRef,
         _id: Uuid,
         _days: u32,
     ) -> Result<ComponentHistoryResponse, PublicAppError> {
@@ -56,7 +56,7 @@ impl PublicSource for TwoIncidentSource {
     }
     async fn list_incidents(
         &self,
-        _org: OrgId,
+        _page: PageRef,
         _q: IncidentListQuery,
     ) -> Result<CursorPage<PublicIncident>, PublicAppError> {
         let now = Utc::now();
@@ -92,17 +92,17 @@ impl PublicSource for TwoIncidentSource {
     }
     async fn incident_by_id(
         &self,
-        _org: OrgId,
+        _page: PageRef,
         _id: Uuid,
     ) -> Result<PublicIncident, PublicAppError> {
         unimplemented!("not exercised by RSS test")
     }
-    async fn maintenance(&self, _org: OrgId) -> Result<PublicMaintenanceList, PublicAppError> {
+    async fn maintenance(&self, _page: PageRef) -> Result<PublicMaintenanceList, PublicAppError> {
         unimplemented!("not exercised by RSS test")
     }
-    async fn incidents_rss(&self, org: OrgId, base_url: &str) -> Result<String, PublicAppError> {
+    async fn incidents_rss(&self, page: PageRef, base_url: &str) -> Result<String, PublicAppError> {
         let items = self
-            .list_incidents(org, IncidentListQuery::default())
+            .list_incidents(page, IncidentListQuery::default())
             .await?
             .items;
         Ok(build_rss("uptimepage", base_url, &items))

@@ -19,8 +19,10 @@ use common::{
     build_saas_router_with_pg_targets, default_http_check, make_user, unique_slug, with_session,
 };
 use tower::ServiceExt;
-use uptimepage::domain::{CheckSpec, ExpectedStatus, NewTarget, WriteSource};
-use uptimepage::storage::{PostgresTargetStore, TargetStore, create_org_with_owner};
+use uptimepage::domain::{CheckSpec, ExpectedStatus, NewStatusPage, NewTarget, WriteSource};
+use uptimepage::storage::{
+    PgStatusPageStore, PostgresTargetStore, StatusPageStore, TargetStore, create_org_with_owner,
+};
 use url::Url;
 
 fn a_target() -> NewTarget {
@@ -34,11 +36,6 @@ fn a_target() -> NewTarget {
         alerts: Default::default(),
         group_name: None,
         owner_user_id: None,
-        public_status: false,
-        public_name: None,
-        public_description: None,
-        public_group: None,
-        public_sort_order: 0,
     }
 }
 
@@ -49,6 +46,28 @@ async fn status_of(router: &Router, path: &str) -> StatusCode {
         .await
         .unwrap()
         .status()
+}
+
+/// Issue `method path` with an optional JSON body and return the status. Used
+/// to probe the write/delete IDOR surfaces a bare GET can't reach.
+async fn method_status(
+    router: &Router,
+    method: &str,
+    path: &str,
+    body: Option<&str>,
+) -> StatusCode {
+    let builder = Request::builder()
+        .method(method)
+        .uri(path)
+        .header("X-Requested-With", "uptimepage");
+    let req = match body {
+        Some(json) => builder
+            .header("content-type", "application/json")
+            .body(Body::from(json.to_owned()))
+            .unwrap(),
+        None => builder.body(Body::empty()).unwrap(),
+    };
+    router.clone().oneshot(req).await.unwrap().status()
 }
 
 #[tokio::test]
@@ -158,6 +177,190 @@ async fn logged_in_operator_cannot_read_another_orgs_target() {
         .await;
     let _ = sqlx::query("DELETE FROM users WHERE id = ANY($1)")
         .bind(vec![user_a.0, user_b.0])
+        .execute(&pool)
+        .await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL — run via DATABASE_URL=... cargo test -- --ignored"]
+async fn logged_in_operator_cannot_touch_another_orgs_status_page() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+
+    let user_a = make_user(&pool, "sp-idor").await;
+    let user_b = make_user(&pool, "sp-idor").await;
+    let org_a = create_org_with_owner(&pool, user_a, &unique_slug("sp-idor-a"), "A", 3)
+        .await
+        .unwrap()
+        .expect("org a")
+        .id;
+    let org_b = create_org_with_owner(&pool, user_b, &unique_slug("sp-idor-b"), "B", 3)
+        .await
+        .unwrap()
+        .expect("org b")
+        .id;
+
+    // A's page lives in the same pool the router reads from.
+    let store = PgStatusPageStore::new(pool.clone());
+    let page_a = store
+        .create(
+            org_a,
+            NewStatusPage {
+                slug: unique_slug("apage"),
+                name: "A page".into(),
+                enabled: true,
+            },
+            WriteSource::Ui,
+            i64::MAX,
+        )
+        .await
+        .expect("create A's page")
+        .expect("within page cap");
+    let id = page_a.id;
+
+    let router = build_saas_router_with_pg_targets(pool.clone()).await;
+    let a = with_session(router.clone(), user_a, Some(org_a), Some("idor-test"));
+    let b = with_session(router, user_b, Some(org_b), Some("idor-test"));
+
+    let page_path = format!("/api/v1/status-pages/{id}");
+    let comp_path = format!("/api/v1/status-pages/{id}/components");
+
+    // A reaches its own page; B is cloaked with a 404 on every verb.
+    assert_eq!(status_of(&a, &page_path).await, StatusCode::OK);
+    assert_eq!(
+        status_of(&b, &page_path).await,
+        StatusCode::NOT_FOUND,
+        "B must not READ A's page"
+    );
+    assert_eq!(
+        method_status(&b, "PATCH", &page_path, Some(r#"{"enabled":false}"#)).await,
+        StatusCode::NOT_FOUND,
+        "B must not UPDATE A's page"
+    );
+    assert_eq!(
+        method_status(&b, "DELETE", &page_path, None).await,
+        StatusCode::NOT_FOUND,
+        "B must not DELETE A's page"
+    );
+    // …nor curate it: adding a component to a foreign page is a 404, not a leak.
+    assert_eq!(
+        method_status(
+            &b,
+            "POST",
+            &comp_path,
+            Some(&format!(r#"{{"target_id":"{}"}}"#, uuid::Uuid::new_v4())),
+        )
+        .await,
+        StatusCode::NOT_FOUND,
+        "B must not add a component to A's page"
+    );
+
+    // The list endpoint must not enumerate A's page for B.
+    let b_list = b
+        .clone()
+        .oneshot(
+            Request::get("/api/v1/status-pages")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(b_list.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(b_list.into_body(), 1 << 20)
+        .await
+        .unwrap();
+    assert!(
+        !String::from_utf8_lossy(&body).contains(&id.to_string()),
+        "B's page list must not leak A's page id"
+    );
+
+    let _ = sqlx::query("DELETE FROM organizations WHERE id = ANY($1)")
+        .bind(vec![org_a.0, org_b.0])
+        .execute(&pool)
+        .await;
+    let _ = sqlx::query("DELETE FROM users WHERE id = ANY($1)")
+        .bind(vec![user_a.0, user_b.0])
+        .execute(&pool)
+        .await;
+}
+
+/// A non-owner member of an org may READ its status pages but never mutate them
+/// — the public brand surface is owner-only. Guards the `OwnerAuthorized` gate.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL — run via DATABASE_URL=... cargo test -- --ignored"]
+async fn non_owner_member_cannot_mutate_status_pages() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+
+    let owner = make_user(&pool, "sp-owner").await;
+    let member = make_user(&pool, "sp-member").await;
+    let org = create_org_with_owner(&pool, owner, &unique_slug("sp-owner"), "O", 3)
+        .await
+        .unwrap()
+        .expect("org")
+        .id;
+    // An active, non-owner membership for the same org.
+    sqlx::query("INSERT INTO memberships (user_id, org_id, role) VALUES ($1, $2, 'member')")
+        .bind(member.0)
+        .bind(org.0)
+        .execute(&pool)
+        .await
+        .expect("seed member");
+
+    let page = PgStatusPageStore::new(pool.clone())
+        .create(
+            org,
+            NewStatusPage {
+                slug: unique_slug("opage"),
+                name: "page".into(),
+                enabled: true,
+            },
+            WriteSource::Ui,
+            i64::MAX,
+        )
+        .await
+        .expect("create page")
+        .expect("within page cap");
+    let id = page.id;
+
+    let router = build_saas_router_with_pg_targets(pool.clone()).await;
+    let m = with_session(router, member, Some(org), Some("sp-member"));
+    let page_path = format!("/api/v1/status-pages/{id}");
+    let comp_path = format!("/api/v1/status-pages/{id}/components");
+
+    // Read is allowed for any active member.
+    assert_eq!(status_of(&m, &page_path).await, StatusCode::OK);
+    // Every mutation is owner-only → 403 (not 404 — the member can see it exists).
+    assert_eq!(
+        method_status(&m, "PATCH", &page_path, Some(r#"{"enabled":false}"#)).await,
+        StatusCode::FORBIDDEN,
+        "member must not UPDATE the page"
+    );
+    assert_eq!(
+        method_status(&m, "DELETE", &page_path, None).await,
+        StatusCode::FORBIDDEN,
+        "member must not DELETE the page"
+    );
+    assert_eq!(
+        method_status(
+            &m,
+            "POST",
+            &comp_path,
+            Some(&format!(r#"{{"target_id":"{}"}}"#, uuid::Uuid::new_v4())),
+        )
+        .await,
+        StatusCode::FORBIDDEN,
+        "member must not curate the page"
+    );
+
+    let _ = sqlx::query("DELETE FROM organizations WHERE id = $1")
+        .bind(org.0)
+        .execute(&pool)
+        .await;
+    let _ = sqlx::query("DELETE FROM users WHERE id = ANY($1)")
+        .bind(vec![owner.0, member.0])
         .execute(&pool)
         .await;
 }

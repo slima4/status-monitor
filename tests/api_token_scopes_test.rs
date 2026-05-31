@@ -13,7 +13,8 @@ use serde_json::json;
 use tower::ServiceExt;
 use uptimepage::auth::api_tokens;
 use uptimepage::auth::scope::ScopeSet;
-use uptimepage::storage::create_org_with_owner;
+use uptimepage::domain::{NewStatusPage, WriteSource};
+use uptimepage::storage::{PgStatusPageStore, StatusPageStore, create_org_with_owner};
 
 const PREFIX_LEN: usize = 16;
 
@@ -399,7 +400,23 @@ async fn status_page_settings_require_status_page_scope() {
         .await
         .unwrap()
         .expect("org");
-    let path = format!("/api/v1/orgs/{}/status-page", org.id.0);
+
+    // A page to gate on — scope checks sit in front of the per-page store.
+    let page = PgStatusPageStore::new(pool.clone())
+        .create(
+            org.id,
+            NewStatusPage {
+                slug: unique_slug("sp-page"),
+                name: "SP".into(),
+                enabled: true,
+            },
+            WriteSource::Ui,
+            i64::MAX,
+        )
+        .await
+        .expect("create page")
+        .expect("within page cap");
+    let path = format!("/api/v1/status-pages/{}", page.id);
 
     let reader = api_tokens::create(
         &pool,
@@ -458,7 +475,7 @@ async fn status_page_settings_require_status_page_scope() {
     );
 
     // Write gate: a read-only status-page token cannot PATCH settings.
-    let patch = r#"{"public_status_enabled":false}"#.to_string();
+    let patch = r#"{"enabled":false}"#.to_string();
     let (status, body) = send(
         &router,
         "PATCH",
@@ -504,7 +521,7 @@ async fn status_page_settings_require_status_page_scope() {
     );
 
     // Destructive logo removal needs status_page:delete, not :write.
-    let logo = format!("/api/v1/orgs/{}/status-page/logo", org.id.0);
+    let logo = format!("/api/v1/status-pages/{}/logo", page.id);
     let (status, body) = send(&router, "DELETE", &logo, &writer.token, &slug, None).await;
     assert_eq!(
         status,

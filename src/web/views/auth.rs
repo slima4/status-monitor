@@ -34,7 +34,6 @@ use crate::web::filters;
 const TAB_LOGIN: &str = "login";
 const TAB_ONBOARD: &str = "onboarding";
 const TAB_SETTINGS: &str = "settings";
-const TAB_STATUS_PAGE: &str = "status_page";
 const TAB_USAGE: &str = "usage";
 const TAB_ACCOUNT: &str = "account";
 /// Suppresses the authenticated header nav (see base.html): a user reaching
@@ -225,21 +224,16 @@ pub mod settings {
     use axum::extract::State;
     use axum::response::{IntoResponse, Redirect, Response};
 
-    use crate::api::handlers::status_page::{
-        StatusPageSettings, build_settings, load_for_settings,
-    };
-    use crate::api::routes::subdomain_public_routes_enabled;
     use crate::app::AppState;
     use crate::auth::{account, api_tokens, session as session_store};
     use crate::error::AppError;
-    use crate::storage::TargetFilter;
     use crate::storage::orgs::list_orgs_for_user;
     use crate::web::auth::{CurrentOrg, Session};
     use crate::web::error::WebResult;
     use crate::web::filters;
     use crate::web::views::resolve_org;
 
-    use super::{TAB_ACCOUNT, TAB_SETTINGS, TAB_STATUS_PAGE, TAB_USAGE};
+    use super::{TAB_ACCOUNT, TAB_SETTINGS, TAB_USAGE};
 
     #[derive(Template, WebTemplate)]
     #[template(path = "settings/sessions.html")]
@@ -468,137 +462,6 @@ pub mod settings {
         } else {
             format!("{b} B")
         }
-    }
-
-    #[derive(Template, WebTemplate)]
-    #[template(path = "settings/status_page.html")]
-    pub struct StatusPageView {
-        pub active_tab: &'static str,
-        /// Drives the `hx-patch` / `hx-post` URLs in the form.
-        pub org_id: String,
-        /// Always populated (resolved override or configured default) so the
-        /// `<input type=color>` has a value even before the operator picks one.
-        pub brand_color_value: String,
-        /// Logo upload limit, rendered as help text *and* read by the client
-        /// for a pre-flight `file.size` check — one source so the copy and the
-        /// enforced cap can't drift from `public_status.max_logo_size_bytes`.
-        pub max_logo_bytes: u64,
-        pub max_logo_label: String,
-        pub max_logo_dim_px: u32,
-        pub s: StatusPageSettings,
-        /// Current URL slug; pre-fills the rename input.
-        pub current_slug: String,
-        /// What follows the slug in the public URL — `.{base}` in SaaS
-        /// subdomain mode, empty in path mode. Lets the form preview the new
-        /// URL as the operator types. `None` when no public surface is
-        /// mounted (no rename UI rendered then).
-        pub url_host_suffix: Option<String>,
-    }
-
-    /// `GET /settings/status-page`. Only an *unauthenticated* hit redirects to
-    /// login (matching the other settings pages); a Forbidden / DB error must
-    /// surface as itself, not a misleading login bounce or redirect loop.
-    /// `CurrentOrg` resolves the org exactly as the API does (active org, or
-    /// the default org in self-host), so the form acts on the same tenant.
-    pub async fn status_page(
-        State(state): State<AppState>,
-        org: Result<CurrentOrg, AppError>,
-    ) -> WebResult<Response> {
-        let org = match resolve_org(org, "/settings/status-page") {
-            Ok(o) => o,
-            Err(resp) => return Ok(*resp),
-        };
-        let pool = state.require_db()?;
-        let ob = load_for_settings(pool, org).await?;
-        let current_slug = ob.slug.clone();
-        let s = build_settings(&state, &ob);
-        let brand_color_value = s
-            .public_brand_color
-            .clone()
-            .unwrap_or_else(|| state.cfg.public_status.default_brand_color.clone());
-        let max_logo_bytes = u64::from(state.cfg.public_status.max_logo_size_bytes);
-        // SaaS subdomain mode is the only shape where the slug is in the
-        // hostname (`{slug}.{base}`); path mode keeps the slug in the URL
-        // path, which isn't a single-input rename. We expose the suffix only
-        // in the subdomain case — the template hides the form otherwise.
-        let url_host_suffix = subdomain_public_routes_enabled(&state.cfg).then(|| {
-            format!(
-                ".{}",
-                state.cfg.public_status.base_domain.trim_start_matches('.')
-            )
-        });
-        Ok(StatusPageView {
-            active_tab: TAB_STATUS_PAGE,
-            org_id: org.0.to_string(),
-            brand_color_value,
-            max_logo_bytes,
-            max_logo_label: human_bytes(max_logo_bytes),
-            max_logo_dim_px: state.cfg.public_status.max_logo_dimension_px,
-            s,
-            current_slug,
-            url_host_suffix,
-        }
-        .into_response())
-    }
-
-    /// One monitor as a candidate public component. `name` is the real
-    /// (operator-only) monitor name; the public page shows `public_name`
-    /// when set and the real name otherwise — the template warns about
-    /// that fallback so internal naming isn't leaked unintentionally.
-    pub struct StatusComponentRow {
-        pub id: String,
-        pub name: String,
-        pub public_status: bool,
-        pub public_name: String,
-        pub public_group: String,
-    }
-
-    #[derive(Template, WebTemplate)]
-    #[template(path = "settings/status_page_components_partial.html")]
-    pub struct StatusComponentsPartial {
-        pub rows: Vec<StatusComponentRow>,
-    }
-
-    /// `GET /web/partials/settings/status-page/components`. Every monitor in
-    /// the org: public ones first in the public page's own order (group →
-    /// sort key → name, matching the aggregator), private ones after by
-    /// name. Both are listed together — the row toggle flips exposure;
-    /// `PATCH /api/v1/targets/{id}` (same auth as the API) saves each edit.
-    pub async fn status_page_components_partial(
-        State(state): State<AppState>,
-        org: Result<CurrentOrg, AppError>,
-    ) -> WebResult<Response> {
-        let org = match resolve_org(org, "/settings/status-page") {
-            Ok(o) => o,
-            Err(resp) => return Ok(*resp),
-        };
-        let filter = TargetFilter {
-            limit: None,
-            offset: 0,
-            ..Default::default()
-        };
-        let mut targets = state.target_store.list(org, filter).await?;
-        // Public first, then within public the aggregator's exact order
-        // (group → sort_order → name) so this list matches the live page;
-        // private monitors trail, by name.
-        targets.sort_by(|a, b| {
-            (!a.public_status)
-                .cmp(&!b.public_status)
-                .then_with(|| a.public_group.cmp(&b.public_group))
-                .then_with(|| a.public_sort_order.cmp(&b.public_sort_order))
-                .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
-        });
-        let rows = targets
-            .into_iter()
-            .map(|t| StatusComponentRow {
-                id: t.id.to_string(),
-                name: t.name,
-                public_status: t.public_status,
-                public_name: t.public_name.unwrap_or_default(),
-                public_group: t.public_group.unwrap_or_default(),
-            })
-            .collect();
-        Ok(StatusComponentsPartial { rows }.into_response())
     }
 
     /// One progress-bar row. `pct` is pre-clamped 0–100 in Rust so the

@@ -10,6 +10,7 @@ pub mod public;
 pub mod quota;
 pub mod reserved_slugs;
 pub mod result;
+pub mod status_page;
 pub mod target;
 pub mod user;
 pub mod word_lists;
@@ -44,6 +45,10 @@ pub use public::{
 pub use quota::{Plan, PlanLimits, QuotaEvent};
 pub use reserved_slugs::is_reserved;
 pub use result::{CheckResult, CheckStatus, SERVED_STALE_PREFIX, strip_served_stale};
+pub use status_page::{
+    NewStatusPage, NewStatusPageComponent, PageRef, StatusPage, StatusPageComponent,
+    StatusPageComponentUpdate, StatusPageId, StatusPageUpdate,
+};
 pub use target::{NewTarget, Target, TargetUpdate};
 pub use user::{AppTheme, User, UserId};
 pub use word_lists::generate_signup_slug;

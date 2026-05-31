@@ -15,7 +15,7 @@ use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use axum::response::IntoResponse;
-use common::{body_json, build_test_app_with_pg_store, make_user, pg_pool_from_env};
+use common::{body_json, build_test_app_with_pg_store, make_user, pg_pool_from_env, unique_slug};
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use std::sync::Arc;
@@ -24,8 +24,10 @@ use tokio_util::sync::CancellationToken;
 use tower::ServiceExt;
 use uptimepage::config::AppConfig;
 use uptimepage::domain::quota::Plan;
-use uptimepage::domain::{OrgId, Role, UserId};
+use uptimepage::domain::{NewStatusPage, OrgId, Role, UserId, WriteSource};
+use uptimepage::error::AppError;
 use uptimepage::quotas::{QuotaService, RateLimitCategory, RateLimitKey, RateLimitService};
+use uptimepage::storage::{PgStatusPageStore, StatusPageStore};
 use uuid::Uuid;
 
 /// A `Plan` whose every per-minute rate is `per_min` and whose resource caps
@@ -45,6 +47,7 @@ fn test_plan(per_min: i32) -> Plan {
         max_pending_invitations: 1,
         max_api_tokens_per_user: 1,
         max_public_components: 1,
+        max_status_pages: 1,
         max_maintenance_windows: 1,
         max_notification_channels: 1,
         max_logo_size_bytes: 1,
@@ -76,12 +79,12 @@ async fn seed_org_on_plan(
     sqlx::query(
         "INSERT INTO plans (id, name, description, max_targets, min_check_interval_secs, \
          retention_days, max_members, max_pending_invitations, max_api_tokens_per_user, \
-         max_public_components, max_maintenance_windows, max_notification_channels, max_logo_size_bytes, \
+         max_public_components, max_status_pages, max_maintenance_windows, max_notification_channels, max_logo_size_bytes, \
          api_writes_per_minute, api_reads_per_minute, bulk_ops_per_minute, \
          test_now_per_minute, check_now_per_minute, custom_domain_enabled, \
          white_label_enabled, incident_narration_enabled, is_listed, created_at, updated_at) \
          SELECT $1, $1, 'seeded', $2, min_check_interval_secs, retention_days, $3, $4, \
-         max_api_tokens_per_user, $5, max_maintenance_windows, max_notification_channels, max_logo_size_bytes, \
+         max_api_tokens_per_user, $5, max_status_pages, max_maintenance_windows, max_notification_channels, max_logo_size_bytes, \
          api_writes_per_minute, api_reads_per_minute, bulk_ops_per_minute, \
          test_now_per_minute, check_now_per_minute, custom_domain_enabled, \
          white_label_enabled, incident_narration_enabled, false, now(), now() \
@@ -630,6 +633,55 @@ fn merged_write_subrouters_are_rate_limited() {
     );
 }
 
+// ── max_status_pages is enforced by the friendly pre-check ──────────
+#[tokio::test]
+async fn status_page_cap_blocks_create_live_pg() {
+    let Some(pool) = pg_pool_from_env().await else {
+        return;
+    };
+    // `seed_org_on_plan` clones the free plan (max_status_pages = 1) and inserts
+    // the org via raw SQL, so it starts with zero pages.
+    let (_pid, org) = seed_org_on_plan(&pool, 5, 5, 10, 10).await;
+    let cfg = AppConfig::load().expect("config");
+    let svc = QuotaService::new(&cfg, Some(pool.clone()));
+
+    // The first page is within the cap of 1.
+    svc.check_can_create_status_page(org, None)
+        .await
+        .expect("first page within cap");
+
+    let store = PgStatusPageStore::new(pool.clone());
+    store
+        .create(
+            org,
+            NewStatusPage {
+                slug: unique_slug("qpage"),
+                name: "q".into(),
+                enabled: true,
+            },
+            WriteSource::Ui,
+            1,
+        )
+        .await
+        .expect("create call ok")
+        .expect("first page within cap");
+
+    // Now at the cap → the pre-check rejects the next one.
+    match svc.check_can_create_status_page(org, None).await {
+        Err(AppError::QuotaExceeded { quota, .. }) => assert_eq!(quota, "max_status_pages"),
+        other => panic!("expected max_status_pages quota error, got {other:?}"),
+    }
+
+    let _ = sqlx::query("DELETE FROM organizations WHERE id = $1")
+        .bind(org.0)
+        .execute(&pool)
+        .await;
+    let _ = sqlx::query("DELETE FROM plans WHERE id = $1")
+        .bind(&_pid)
+        .execute(&pool)
+        .await;
+}
+
 // ── the plan cache holds a stale value until its TTL, then refreshes ─
 #[tokio::test]
 async fn plan_cache_holds_until_ttl_then_refreshes() {
@@ -956,9 +1008,9 @@ async fn member_cap_is_enforced_atomically() {
     );
 }
 
-// ── max_public_components: the PATCH public-flip is gated like create ─────
+// ── max_public_components: adding a distinct monitor past the cap is 422 ─────
 #[tokio::test]
-async fn patch_cannot_bypass_public_component_cap() {
+async fn add_component_hits_public_component_cap() {
     let Some(pool) = pg_pool_from_env().await else {
         return;
     };
@@ -973,48 +1025,101 @@ async fn patch_cannot_bypass_public_component_cap() {
         .await
         .unwrap();
 
-    // First public target consumes the only slot.
-    let pubt = json!({
-        "name": format!("pub-{}", Uuid::now_v7()),
-        "check": {"type":"http","url":"http://example.com","method":"GET","timeout":5000,
-            "follow_redirects":false,"max_redirects":0,
-            "expected_status":{"kind":"exact","value":200},"headers":{},"verify_tls":true},
-        "interval": 60, "tags": [], "public_status": true
-    });
-    let r = app
+    // A page to curate (within the inherited max_status_pages = 1).
+    let page = app
         .clone()
         .oneshot(
-            Request::post("/api/v1/targets")
+            Request::post("/api/v1/status-pages")
                 .header("content-type", "application/json")
-                .body(Body::from(pubt.to_string()))
+                .body(Body::from(
+                    json!({"slug": unique_slug("cap"), "name": "Cap", "enabled": true}).to_string(),
+                ))
                 .unwrap(),
         )
         .await
         .unwrap();
-    assert_eq!(r.status(), StatusCode::CREATED);
+    assert_eq!(page.status(), StatusCode::CREATED);
+    let page_id = body_json(page).await["id"].as_str().unwrap().to_string();
 
-    // A private target created fine…
-    let r = post_target(&app, &format!("priv-{}", Uuid::now_v7()), 60).await;
-    assert_eq!(r.status(), StatusCode::CREATED);
-    let id = body_json(r).await["id"].as_str().unwrap().to_string();
+    // Two distinct monitors.
+    let t1 = body_json(post_target(&app, &format!("t1-{}", Uuid::now_v7()), 60).await).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let t2 = body_json(post_target(&app, &format!("t2-{}", Uuid::now_v7()), 60).await).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
-    // …but flipping it public via PATCH must hit the same cap (the bypass
-    // this gate closes).
-    let resp = app
-        .oneshot(
-            Request::builder()
-                .method("PATCH")
-                .uri(format!("/api/v1/targets/{id}"))
-                .header("content-type", "application/json")
-                .body(Body::from(json!({"public_status": true}).to_string()))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
+    let add = |tid: &str| {
+        Request::post(format!("/api/v1/status-pages/{page_id}/components"))
+            .header("content-type", "application/json")
+            .body(Body::from(json!({ "target_id": tid }).to_string()))
+            .unwrap()
+    };
+
+    // First monitor fills the only public-component slot.
+    let r = app.clone().oneshot(add(&t1)).await.unwrap();
+    assert_eq!(r.status(), StatusCode::NO_CONTENT);
+
+    // A second *distinct* monitor exceeds the per-org cap → 422.
+    let resp = app.oneshot(add(&t2)).await.unwrap();
     assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
     let b = body_json(resp).await;
     assert_eq!(b["error"]["code"], "QUOTA_EXCEEDED");
     assert_eq!(b["error"]["details"]["quota"], "max_public_components");
+}
+
+// ── re-adding a monitor already on the page is a 409, not a silent no-op ─────
+#[tokio::test]
+async fn re_adding_an_existing_component_is_conflict() {
+    let Some(pool) = pg_pool_from_env().await else {
+        return;
+    };
+    let (app, _org) = build_test_app_with_pg_store(pool.clone(), |_| {}).await;
+
+    let page = app
+        .clone()
+        .oneshot(
+            Request::post("/api/v1/status-pages")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({"slug": unique_slug("dup"), "name": "Dup", "enabled": true}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(page.status(), StatusCode::CREATED);
+    let page_id = body_json(page).await["id"].as_str().unwrap().to_string();
+    let tid =
+        body_json(post_target(&app, &format!("dup-{}", Uuid::now_v7()), 60).await).await["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+    let add = || {
+        Request::post(format!("/api/v1/status-pages/{page_id}/components"))
+            .header("content-type", "application/json")
+            .body(Body::from(json!({ "target_id": tid }).to_string()))
+            .unwrap()
+    };
+
+    assert_eq!(
+        app.clone().oneshot(add()).await.unwrap().status(),
+        StatusCode::NO_CONTENT,
+        "first add succeeds"
+    );
+    let dup = app.oneshot(add()).await.unwrap();
+    assert_eq!(
+        dup.status(),
+        StatusCode::CONFLICT,
+        "re-adding the same monitor is rejected, not a silent no-op"
+    );
+    assert_eq!(
+        body_json(dup).await["error"]["code"],
+        "COMPONENT_ALREADY_ON_PAGE"
+    );
 }
 
 // ── bulk-ops and reads each trip 429 at their own per-min rate ─────
@@ -1029,12 +1134,12 @@ async fn bulk_and_read_rates_trip_429_independently() {
     sqlx::query(
         "INSERT INTO plans (id, name, description, max_targets, min_check_interval_secs, \
          retention_days, max_members, max_pending_invitations, max_api_tokens_per_user, \
-         max_public_components, max_maintenance_windows, max_notification_channels, max_logo_size_bytes, \
+         max_public_components, max_status_pages, max_maintenance_windows, max_notification_channels, max_logo_size_bytes, \
          api_writes_per_minute, api_reads_per_minute, bulk_ops_per_minute, \
          test_now_per_minute, check_now_per_minute, custom_domain_enabled, \
          white_label_enabled, incident_narration_enabled, is_listed, created_at, updated_at) \
          SELECT $1, $1, 'lowrate', max_targets, min_check_interval_secs, retention_days, \
-         max_members, max_pending_invitations, max_api_tokens_per_user, max_public_components, \
+         max_members, max_pending_invitations, max_api_tokens_per_user, max_public_components, max_status_pages, \
          max_maintenance_windows, max_notification_channels, max_logo_size_bytes, api_writes_per_minute, 5, 3, \
          test_now_per_minute, check_now_per_minute, custom_domain_enabled, \
          white_label_enabled, incident_narration_enabled, false, now(), now() \
@@ -1226,9 +1331,14 @@ fn every_quota_create_path_is_gated() {
             "check_can_create_targets",
         ),
         (
-            "src/api/handlers/targets.rs",
-            "pub async fn update(",
-            "check_public_components",
+            "src/api/handlers/status_page.rs",
+            "pub async fn create_page(",
+            "check_can_create_status_page",
+        ),
+        (
+            "src/api/handlers/status_page.rs",
+            "pub async fn add_component(",
+            "max_public_components",
         ),
         (
             "src/api/handlers/maintenance.rs",
@@ -1317,12 +1427,12 @@ async fn forwarded_ip_cannot_bypass_the_org_bucket() {
     sqlx::query(
         "INSERT INTO plans (id, name, description, max_targets, min_check_interval_secs, \
          retention_days, max_members, max_pending_invitations, max_api_tokens_per_user, \
-         max_public_components, max_maintenance_windows, max_notification_channels, max_logo_size_bytes, \
+         max_public_components, max_status_pages, max_maintenance_windows, max_notification_channels, max_logo_size_bytes, \
          api_writes_per_minute, api_reads_per_minute, bulk_ops_per_minute, \
          test_now_per_minute, check_now_per_minute, custom_domain_enabled, \
          white_label_enabled, incident_narration_enabled, is_listed, created_at, updated_at) \
          SELECT $1, $1, 'xff', max_targets, min_check_interval_secs, retention_days, \
-         max_members, max_pending_invitations, max_api_tokens_per_user, max_public_components, \
+         max_members, max_pending_invitations, max_api_tokens_per_user, max_public_components, max_status_pages, \
          max_maintenance_windows, max_notification_channels, max_logo_size_bytes, 3, api_reads_per_minute, bulk_ops_per_minute, \
          test_now_per_minute, check_now_per_minute, custom_domain_enabled, \
          white_label_enabled, incident_narration_enabled, false, now(), now() \

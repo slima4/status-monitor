@@ -23,7 +23,7 @@ use common::{UnavailablePublicSource, build_test_app_with_public_source};
 use uptimepage::api::CursorPage;
 use uptimepage::api::public_error::PublicAppError;
 use uptimepage::domain::{
-    ComponentHistoryResponse, DayState, OrgId, OverallState, OverallStatus, PublicComponent,
+    ComponentHistoryResponse, DayState, OverallState, OverallStatus, PageRef, PublicComponent,
     PublicComponentGroup, PublicComponentStatus, PublicIncident, PublicMaintenanceList,
     PublicStatusPage,
 };
@@ -38,7 +38,7 @@ struct BadgeSource;
 
 #[async_trait]
 impl PublicSource for BadgeSource {
-    async fn page(&self, _org: OrgId) -> Result<Arc<PublicStatusPage>, PublicAppError> {
+    async fn page(&self, _page: PageRef) -> Result<Arc<PublicStatusPage>, PublicAppError> {
         let component = PublicComponent {
             id: known_component_id(),
             name: "API".into(),
@@ -66,7 +66,7 @@ impl PublicSource for BadgeSource {
     }
     async fn component_history(
         &self,
-        _org: OrgId,
+        _page: PageRef,
         _id: Uuid,
         _days: u32,
     ) -> Result<ComponentHistoryResponse, PublicAppError> {
@@ -74,22 +74,26 @@ impl PublicSource for BadgeSource {
     }
     async fn list_incidents(
         &self,
-        _org: OrgId,
+        _page: PageRef,
         _q: IncidentListQuery,
     ) -> Result<CursorPage<PublicIncident>, PublicAppError> {
         unimplemented!()
     }
     async fn incident_by_id(
         &self,
-        _org: OrgId,
+        _page: PageRef,
         _id: Uuid,
     ) -> Result<PublicIncident, PublicAppError> {
         unimplemented!()
     }
-    async fn maintenance(&self, _org: OrgId) -> Result<PublicMaintenanceList, PublicAppError> {
+    async fn maintenance(&self, _page: PageRef) -> Result<PublicMaintenanceList, PublicAppError> {
         unimplemented!()
     }
-    async fn incidents_rss(&self, _org: OrgId, _base_url: &str) -> Result<String, PublicAppError> {
+    async fn incidents_rss(
+        &self,
+        _page: PageRef,
+        _base_url: &str,
+    ) -> Result<String, PublicAppError> {
         unimplemented!()
     }
 }

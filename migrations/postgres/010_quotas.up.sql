@@ -20,6 +20,7 @@ CREATE TABLE plans (
     max_pending_invitations         INTEGER NOT NULL,
     max_api_tokens_per_user         INTEGER NOT NULL,
     max_public_components           INTEGER NOT NULL,
+    max_status_pages                INTEGER NOT NULL,
     max_maintenance_windows         INTEGER NOT NULL,
     max_notification_channels       INTEGER NOT NULL,
     max_logo_size_bytes             INTEGER NOT NULL,
@@ -46,7 +47,7 @@ INSERT INTO plans (
     id, name, description,
     max_targets, min_check_interval_secs, retention_days,
     max_members, max_pending_invitations, max_api_tokens_per_user,
-    max_public_components, max_maintenance_windows, max_notification_channels,
+    max_public_components, max_status_pages, max_maintenance_windows, max_notification_channels,
     max_logo_size_bytes,
     api_writes_per_minute, api_reads_per_minute,
     bulk_ops_per_minute, test_now_per_minute, check_now_per_minute,
@@ -55,7 +56,7 @@ INSERT INTO plans (
     'free', 'Free', 'Free tier for small teams and personal projects',
     10, 60, 90,  -- retention_days = 90: matches the flat CH TTL (the authority)
     5, 10, 5,
-    10, 20, 20,
+    10, 1, 20, 20,  -- max_public_components, max_status_pages, max_maintenance_windows, max_notification_channels
     204800,
     600, 6000,
     30, 60, 60,

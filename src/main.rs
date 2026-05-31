@@ -261,7 +261,6 @@ async fn main() -> Result<()> {
     let aggregator = Arc::new(OrgAggregator::new(
         pg_pool.clone(),
         ch_client_for_public,
-        target_store.clone(),
         aggregator_cfg.clone(),
     ));
     let public_cache = PageCache::new(&cfg.public_status);
@@ -308,6 +307,9 @@ async fn main() -> Result<()> {
 
     let maintenance_store: Arc<dyn MaintenanceStore> =
         Arc::new(PgMaintenanceStore::new(pg_pool_for_stores.clone()));
+    let status_page_store: Arc<dyn uptimepage::storage::StatusPageStore> = Arc::new(
+        uptimepage::storage::PgStatusPageStore::new(pg_pool_for_stores.clone()),
+    );
     let incident_narration_store: Arc<dyn IncidentNarrationStore> =
         Arc::new(PgIncidentNarrationStore::new(pg_pool_for_stores.clone()));
 
@@ -366,6 +368,7 @@ async fn main() -> Result<()> {
         public_source,
         maintenance_store,
         notification_channel_store,
+        status_page_store,
         incident_narration_store,
         outbound_http,
         email_sender,

@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use sqlx::PgPool;
-use uptimepage::domain::{CheckSpec, ExpectedStatus, NewTarget, TargetUpdate, WriteSource};
+use uptimepage::domain::{CheckSpec, ExpectedStatus, NewTarget, WriteSource};
 use uptimepage::security::Cipher;
 use uptimepage::storage::{PostgresTargetStore, TargetStore};
 use url::Url;
@@ -48,11 +48,6 @@ fn make(name: &str, tags: Vec<String>) -> NewTarget {
         alerts: Default::default(),
         group_name: None,
         owner_user_id: None,
-        public_status: false,
-        public_name: None,
-        public_description: None,
-        public_group: None,
-        public_sort_order: 0,
     }
 }
 
@@ -91,78 +86,6 @@ async fn bulk_create_empty_is_noop(pool: PgPool) {
     assert!(result.is_empty());
 }
 
-/// PATCH must distinguish "field omitted → keep" from "field present as
-/// JSON null → clear". The status-page curation UI relies on the clear
-/// path to revert a component to its real monitor name. Exercises the
-/// double-Option + CASE-WHEN UPDATE bind renumbering directly.
-#[sqlx::test(migrations = "./migrations/postgres")]
-#[ignore = "requires DATABASE_URL — run via DATABASE_URL=... cargo test -- --ignored"]
-async fn target_update_public_overlay_set_keep_clear(pool: PgPool) {
-    let (store, org) = store_with_default_org(pool, None).await;
-    let t = store
-        .create(org, make("svc", vec![]), WriteSource::Ui, i64::MAX)
-        .await
-        .expect("create");
-
-    // Set the overlay.
-    let r = store
-        .update(
-            org,
-            t.id,
-            TargetUpdate {
-                public_name: Some(Some("Public API".into())),
-                public_group: Some(Some("Core".into())),
-                ..Default::default()
-            },
-            WriteSource::Ui,
-        )
-        .await
-        .expect("update ok")
-        .expect("target exists");
-    assert_eq!(r.public_name.as_deref(), Some("Public API"));
-    assert_eq!(r.public_group.as_deref(), Some("Core"));
-
-    // Omit the overlay fields (change something else) → must stay unchanged.
-    let r = store
-        .update(
-            org,
-            t.id,
-            TargetUpdate {
-                public_status: Some(true),
-                ..Default::default()
-            },
-            WriteSource::Ui,
-        )
-        .await
-        .expect("update ok")
-        .expect("target exists");
-    assert!(r.public_status);
-    assert_eq!(
-        r.public_name.as_deref(),
-        Some("Public API"),
-        "omitted field must be left unchanged"
-    );
-    assert_eq!(r.public_group.as_deref(), Some("Core"));
-
-    // Explicit null → clear back to no override.
-    let r = store
-        .update(
-            org,
-            t.id,
-            TargetUpdate {
-                public_name: Some(None),
-                public_group: Some(None),
-                ..Default::default()
-            },
-            WriteSource::Ui,
-        )
-        .await
-        .expect("update ok")
-        .expect("target exists");
-    assert_eq!(r.public_name, None, "explicit null must clear");
-    assert_eq!(r.public_group, None, "explicit null must clear");
-}
-
 #[sqlx::test(migrations = "./migrations/postgres")]
 #[ignore = "requires DATABASE_URL — run via DATABASE_URL=... cargo test -- --ignored"]
 async fn credentials_stored_as_ciphertext_envelope(pool: PgPool) {
@@ -180,11 +103,6 @@ async fn credentials_stored_as_ciphertext_envelope(pool: PgPool) {
         alerts: Default::default(),
         group_name: None,
         owner_user_id: None,
-        public_status: false,
-        public_name: None,
-        public_description: None,
-        public_group: None,
-        public_sort_order: 0,
     };
 
     let created = store

@@ -453,11 +453,6 @@ impl InMemoryTargetStore {
             alerts: new.alerts,
             group_name: new.group_name,
             owner_user_id: new.owner_user_id,
-            public_status: new.public_status,
-            public_name: new.public_name,
-            public_description: new.public_description,
-            public_group: new.public_group,
-            public_sort_order: new.public_sort_order,
             write_source: source,
             created_at: now,
             updated_at: now,
@@ -584,21 +579,6 @@ impl TargetStore for InMemoryTargetStore {
         }
         if let Some(v) = update.owner_user_id {
             t.owner_user_id = v;
-        }
-        if let Some(v) = update.public_status {
-            t.public_status = v;
-        }
-        if let Some(v) = update.public_name {
-            t.public_name = v;
-        }
-        if let Some(v) = update.public_description {
-            t.public_description = v;
-        }
-        if let Some(v) = update.public_group {
-            t.public_group = v;
-        }
-        if let Some(v) = update.public_sort_order {
-            t.public_sort_order = v;
         }
         t.write_source = source;
         t.updated_at = Utc::now();
@@ -794,7 +774,9 @@ impl crate::storage::admin::PublicStatusTargetSource for InMemoryTargetStore {
             .targets
             .lock()
             .iter()
-            .filter(|t| t.enabled && t.public_status)
+            // In-memory fixture has no page model; the writer watches every
+            // enabled target (page-membership filtering is a PG-only concern).
+            .filter(|t| t.enabled)
             .filter(|t| cursor_target.is_none_or(|cid| t.id > cid))
             .cloned()
             .collect();

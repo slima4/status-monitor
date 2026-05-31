@@ -50,11 +50,13 @@ pub fn routes(state: AppState) -> Router {
             "/settings/api-tokens",
             get(views::auth::settings::api_tokens_page),
         )
-        .route(
-            "/settings/status-page",
-            get(views::auth::settings::status_page),
-        )
         .route("/settings/usage", get(views::auth::settings::usage_page))
+        .route("/settings/pages", get(views::pages::pages_list))
+        .route("/settings/pages/{id}", get(views::pages::page_editor))
+        .route(
+            "/web/partials/settings/pages",
+            get(views::pages::pages_partial),
+        )
         .route(
             "/settings/notifications",
             get(views::notification_channels::index),
@@ -78,10 +80,6 @@ pub fn routes(state: AppState) -> Router {
         .route(
             "/web/partials/settings/api-tokens",
             get(views::auth::settings::api_tokens_partial),
-        )
-        .route(
-            "/web/partials/settings/status-page/components",
-            get(views::auth::settings::status_page_components_partial),
         )
         .route("/terms", get(views::legal::terms))
         .route("/privacy", get(views::legal::privacy))

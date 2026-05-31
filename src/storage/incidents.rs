@@ -263,7 +263,7 @@ impl IncidentNarrationStore for PgIncidentNarrationStore {
         let cap = limit.clamp(1, 200) as i64;
         let rows: Vec<ActiveIncidentRow> = sqlx::query_as(
             r#"SELECT i.id, i.target_id,
-                      COALESCE(t.public_name, t.name) AS target_name,
+                      t.name AS target_name,
                       i.severity, i.started_at, i.public_title,
                       u.posted_at AS update_posted_at,
                       u.phase     AS update_phase,

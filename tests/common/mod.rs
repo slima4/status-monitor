@@ -18,7 +18,7 @@ use uptimepage::config::{
     SecurityConfig, TransactionalEmailConfig,
 };
 use uptimepage::domain::{
-    CheckSpec, ExpectedStatus, HttpCheck, HttpMethod, OrgId, Target, WriteSource,
+    CheckSpec, ExpectedStatus, HttpCheck, HttpMethod, OrgId, PageRef, Target, WriteSource,
 };
 use uptimepage::email::{EmailSender, build_email_sender};
 use uptimepage::http_client::{HttpClients, build_clients};
@@ -26,9 +26,9 @@ use uptimepage::http_outbound::{OutboundHttpClient, build_outbound_client};
 use uptimepage::public_status::{NoopPublicSource, PublicSource};
 use uptimepage::storage::{
     DomainExpiryStateStore, InMemoryDomainExpiryStateStore, InMemoryIncidentNarrationStore,
-    InMemoryMaintenanceStore, InMemoryNotificationChannelStore, InMemorySink, InMemoryTargetStore,
-    IncidentNarrationStore, MaintenanceStore, NotificationChannelStore, PostgresTargetStore,
-    ResultSink, ResultsStore,
+    InMemoryMaintenanceStore, InMemoryNotificationChannelStore, InMemorySink,
+    InMemoryStatusPageStore, InMemoryTargetStore, IncidentNarrationStore, MaintenanceStore,
+    NotificationChannelStore, PgStatusPageStore, PostgresTargetStore, ResultSink, ResultsStore,
 };
 use uptimepage::worker::domain_expiry::{DEFAULT_MAX_STALENESS, DomainExpiryRuntime};
 use uptimepage::worker::host_throttle::HostThrottle;
@@ -184,6 +184,7 @@ pub fn build_test_app_with_seedable_incidents(
         public_source,
         maintenance_store,
         notification_channel_store,
+        Arc::new(InMemoryStatusPageStore::new()),
         incident_narration_store,
         build_test_outbound_and_email().0,
         build_test_outbound_and_email().1,
@@ -258,6 +259,7 @@ fn build_test_app_with_public_source_inner(
         public_source,
         maintenance_store,
         notification_channel_store,
+        Arc::new(InMemoryStatusPageStore::new()),
         incident_narration_store,
         build_test_outbound_and_email().0,
         build_test_outbound_and_email().1,
@@ -337,6 +339,7 @@ pub async fn build_test_app_with_pg(
         public_source,
         maintenance_store,
         notification_channel_store,
+        Arc::new(InMemoryStatusPageStore::new()),
         incident_narration_store,
         build_test_outbound_and_email().0,
         build_test_outbound_and_email().1,
@@ -402,9 +405,20 @@ pub async fn build_test_app_with_pg_store_anon(
 /// with per-org `session_layer`s. This is the harness for cross-tenant IDOR
 /// regression — two orgs, one target each, one shared store.
 pub async fn build_saas_router_with_pg_targets(pool: PgPool) -> Router {
+    build_saas_router_with_pg_cfg(pool, |_| {}).await
+}
+
+/// As [`build_saas_router_with_pg_targets`], but lets the caller tweak the
+/// config first (e.g. point `public_status.logo_dir` at a temp dir before the
+/// status-page store + logo routes are wired).
+pub async fn build_saas_router_with_pg_cfg(
+    pool: PgPool,
+    mutate: impl FnOnce(&mut AppConfig),
+) -> Router {
     let mut cfg = AppConfig::load().expect("config");
     cfg.tenancy.path_based_public_routes = false;
     cfg.tenancy.subdomain_public_routes = true;
+    mutate(&mut cfg);
     assemble_pg_router(pool, cfg)
 }
 
@@ -432,6 +446,7 @@ fn assemble_pg_router(pool: PgPool, cfg: AppConfig) -> Router {
         Arc::new(InMemoryIncidentNarrationStore::new());
     let notification_channel_store: Arc<dyn NotificationChannelStore> =
         Arc::new(InMemoryNotificationChannelStore::new());
+    let status_page_store = Arc::new(PgStatusPageStore::new(pool.clone()));
     let state = AppState::new(
         cfg,
         Some(pool),
@@ -443,6 +458,7 @@ fn assemble_pg_router(pool: PgPool, cfg: AppConfig) -> Router {
         public_source,
         maintenance_store,
         notification_channel_store,
+        status_page_store,
         incident_narration_store,
         build_test_outbound_and_email().0,
         build_test_outbound_and_email().1,
@@ -551,6 +567,7 @@ pub fn build_test_app_state(mutate: impl FnOnce(&mut AppConfig)) -> AppState {
         public_source,
         maintenance_store,
         notification_channel_store,
+        Arc::new(InMemoryStatusPageStore::new()),
         incident_narration_store,
         build_test_outbound_and_email().0,
         build_test_outbound_and_email().1,
@@ -689,11 +706,6 @@ pub fn http_target(addr: SocketAddr, path: &str, interval_ms: u64) -> Target {
         alerts: uptimepage::domain::TargetAlerts::default(),
         group_name: None,
         owner_user_id: None,
-        public_status: false,
-        public_name: None,
-        public_description: None,
-        public_group: None,
-        public_sort_order: 0,
         write_source: WriteSource::Ui,
         created_at: Utc::now(),
         updated_at: Utc::now(),
@@ -724,7 +736,7 @@ pub struct UnavailablePublicSource;
 impl PublicSource for UnavailablePublicSource {
     async fn page(
         &self,
-        _org: OrgId,
+        _page: PageRef,
     ) -> Result<
         Arc<uptimepage::domain::PublicStatusPage>,
         uptimepage::api::public_error::PublicAppError,
@@ -733,7 +745,7 @@ impl PublicSource for UnavailablePublicSource {
     }
     async fn component_history(
         &self,
-        _org: OrgId,
+        _page: PageRef,
         _id: Uuid,
         _days: u32,
     ) -> Result<
@@ -744,7 +756,7 @@ impl PublicSource for UnavailablePublicSource {
     }
     async fn list_incidents(
         &self,
-        _org: OrgId,
+        _page: PageRef,
         _q: uptimepage::public_status::IncidentListQuery,
     ) -> Result<
         uptimepage::api::page::CursorPage<uptimepage::domain::PublicIncident>,
@@ -754,7 +766,7 @@ impl PublicSource for UnavailablePublicSource {
     }
     async fn incident_by_id(
         &self,
-        _org: OrgId,
+        _page: PageRef,
         _id: Uuid,
     ) -> Result<uptimepage::domain::PublicIncident, uptimepage::api::public_error::PublicAppError>
     {
@@ -762,7 +774,7 @@ impl PublicSource for UnavailablePublicSource {
     }
     async fn maintenance(
         &self,
-        _org: OrgId,
+        _page: PageRef,
     ) -> Result<
         uptimepage::domain::PublicMaintenanceList,
         uptimepage::api::public_error::PublicAppError,
@@ -771,7 +783,7 @@ impl PublicSource for UnavailablePublicSource {
     }
     async fn incidents_rss(
         &self,
-        _org: OrgId,
+        _page: PageRef,
         _base_url: &str,
     ) -> Result<String, uptimepage::api::public_error::PublicAppError> {
         Err(uptimepage::api::public_error::PublicAppError::Unavailable)

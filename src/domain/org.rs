@@ -30,11 +30,11 @@ pub struct Organization {
     pub deleted_at: Option<DateTime<Utc>>,
 }
 
-/// Operator-controlled public-page branding. Optional fields fall back to
-/// `PublicStatusConfig` defaults when `None`.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+/// A status page's display branding (the page's `enabled` flag lives on
+/// `StatusPage`, not here). Optional fields fall back to `PublicStatusConfig`
+/// defaults when `None`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
 pub struct PublicOrgBranding {
-    pub public_status_enabled: bool,
     pub public_display_name: Option<String>,
     pub public_about: Option<String>,
     pub public_brand_color: Option<String>,

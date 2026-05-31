@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use chrono::Utc;
 use uptimepage::config::PublicStatusConfig;
-use uptimepage::domain::{OrgId, OverallState, OverallStatus, PublicStatusPage};
+use uptimepage::domain::{OrgId, OverallState, OverallStatus, PublicStatusPage, StatusPageId};
 use uptimepage::public_status::cache::PageCache;
 use uuid::Uuid;
 
@@ -41,8 +41,8 @@ fn page_with_marker(marker: &str) -> PublicStatusPage {
 #[tokio::test]
 async fn cache_does_not_serve_org_a_payload_to_org_b() {
     let cache = PageCache::new(&PublicStatusConfig::default());
-    let org_a = OrgId(Uuid::new_v4());
-    let org_b = OrgId(Uuid::new_v4());
+    let org_a = StatusPageId(Uuid::new_v4());
+    let org_b = StatusPageId(Uuid::new_v4());
 
     let primed = cache
         .get_or_compute(org_a, || async {
@@ -78,8 +78,8 @@ async fn cache_last_good_is_partitioned_per_org() {
     // recompute failure. Prime A, then fail B's first compute, and verify B
     // receives `Unavailable` rather than A's stale data.
     let cache = PageCache::new(&PublicStatusConfig::default());
-    let org_a = OrgId(Uuid::new_v4());
-    let org_b = OrgId(Uuid::new_v4());
+    let org_a = StatusPageId(Uuid::new_v4());
+    let org_b = StatusPageId(Uuid::new_v4());
 
     let _primed = cache
         .get_or_compute(org_a, || async {
@@ -112,23 +112,26 @@ async fn public_source_trait_threads_org_param_to_distinct_responses() {
     use std::collections::HashMap;
     use uptimepage::api::CursorPage;
     use uptimepage::api::public_error::PublicAppError;
-    use uptimepage::domain::{ComponentHistoryResponse, PublicIncident, PublicMaintenanceList};
+    use uptimepage::domain::{
+        ComponentHistoryResponse, PageRef, PublicIncident, PublicMaintenanceList, StatusPageId,
+    };
     use uptimepage::public_status::{IncidentListQuery, PublicSource};
 
-    struct OrgKeyedSource {
-        pages: HashMap<OrgId, Arc<PublicStatusPage>>,
+    // Public reads are keyed by status page, not org — isolation is per-page.
+    struct PageKeyedSource {
+        pages: HashMap<StatusPageId, Arc<PublicStatusPage>>,
     }
     #[async_trait]
-    impl PublicSource for OrgKeyedSource {
-        async fn page(&self, org: OrgId) -> Result<Arc<PublicStatusPage>, PublicAppError> {
+    impl PublicSource for PageKeyedSource {
+        async fn page(&self, page: PageRef) -> Result<Arc<PublicStatusPage>, PublicAppError> {
             self.pages
-                .get(&org)
+                .get(&page.page)
                 .cloned()
                 .ok_or(PublicAppError::NotFound)
         }
         async fn component_history(
             &self,
-            _org: OrgId,
+            _page: PageRef,
             _id: Uuid,
             _days: u32,
         ) -> Result<ComponentHistoryResponse, PublicAppError> {
@@ -136,41 +139,51 @@ async fn public_source_trait_threads_org_param_to_distinct_responses() {
         }
         async fn list_incidents(
             &self,
-            _org: OrgId,
+            _page: PageRef,
             _q: IncidentListQuery,
         ) -> Result<CursorPage<PublicIncident>, PublicAppError> {
             unreachable!()
         }
         async fn incident_by_id(
             &self,
-            _org: OrgId,
+            _page: PageRef,
             _id: Uuid,
         ) -> Result<PublicIncident, PublicAppError> {
             unreachable!()
         }
-        async fn maintenance(&self, _org: OrgId) -> Result<PublicMaintenanceList, PublicAppError> {
+        async fn maintenance(
+            &self,
+            _page: PageRef,
+        ) -> Result<PublicMaintenanceList, PublicAppError> {
             unreachable!()
         }
         async fn incidents_rss(
             &self,
-            _org: OrgId,
+            _page: PageRef,
             _base_url: &str,
         ) -> Result<String, PublicAppError> {
             unreachable!()
         }
     }
 
-    let org_a = OrgId(Uuid::new_v4());
-    let org_b = OrgId(Uuid::new_v4());
-    let src = OrgKeyedSource {
+    let org = OrgId(Uuid::new_v4());
+    let page_a = PageRef {
+        page: StatusPageId(Uuid::new_v4()),
+        org,
+    };
+    let page_b = PageRef {
+        page: StatusPageId(Uuid::new_v4()),
+        org,
+    };
+    let src = PageKeyedSource {
         pages: HashMap::from([
-            (org_a, Arc::new(page_with_marker(ORG_A_MARKER))),
-            (org_b, Arc::new(page_with_marker(ORG_B_MARKER))),
+            (page_a.page, Arc::new(page_with_marker(ORG_A_MARKER))),
+            (page_b.page, Arc::new(page_with_marker(ORG_B_MARKER))),
         ]),
     };
 
-    let resp_a = src.page(org_a).await.expect("A");
-    let resp_b = src.page(org_b).await.expect("B");
+    let resp_a = src.page(page_a).await.expect("A");
+    let resp_b = src.page(page_b).await.expect("B");
     assert!(resp_a.site_name.contains(ORG_A_MARKER));
     assert!(resp_b.site_name.contains(ORG_B_MARKER));
     let body_b = serde_json::to_string(&*resp_b).expect("serialise B");

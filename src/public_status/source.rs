@@ -5,6 +5,7 @@
 //! ClickHouse, and so the handler code never reaches across into private
 //! storage types.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::Context;
@@ -17,8 +18,8 @@ use crate::api::cursor::IncidentCursor;
 use crate::api::page::CursorPage;
 use crate::api::public_error::PublicAppError;
 use crate::domain::{
-    ComponentHistoryResponse, IncidentSeverity, IncidentStatusPhase, OrgId, PublicIncident,
-    PublicIncidentUpdate, PublicMaintenanceList, PublicStatusPage,
+    ComponentHistoryResponse, IncidentSeverity, IncidentStatusPhase, OrgId, PageRef,
+    PublicIncident, PublicIncidentUpdate, PublicMaintenanceList, PublicStatusPage,
 };
 
 use super::aggregator::OrgAggregator;
@@ -43,49 +44,51 @@ impl Default for IncidentListQuery {
     }
 }
 
-/// Per-org public-status data layer. Every method takes the target `OrgId`
-/// as its first parameter — there is no implicit default. The compiler
-/// refuses to compile a handler that forgot which tenant's data is being
-/// served, which is what prevents the cache from quietly serving one
-/// tenant's page to another.
+/// Public-status data layer, scoped to a single page. Every method takes a
+/// resolved [`PageRef`] (page id + org) — there is no implicit default, so the
+/// compiler refuses a handler that forgot which page is being served, which is
+/// what keeps the cache from serving one page's data under another's slot.
 #[async_trait]
 pub trait PublicSource: Send + Sync {
     /// JSON wire shape served by the API. The HTML route uses
     /// `page_with_markers` to get this plus popover data atomically.
-    async fn page(&self, org: OrgId) -> Result<Arc<PublicStatusPage>, PublicAppError>;
+    async fn page(&self, page: PageRef) -> Result<Arc<PublicStatusPage>, PublicAppError>;
 
-    /// Page + 90-day popover markers from one atomic snapshot. Default
-    /// returns empty markers so backends without popover data (tests, noop
-    /// self-host) don't have to think about them; the production source
-    /// overrides to fetch both halves from one cache slot.
+    /// Page + 90-day popover markers from one atomic snapshot. Default returns
+    /// empty markers so backends without popover data (tests, noop self-host)
+    /// don't have to think about them; the production source overrides to fetch
+    /// both halves from one cache slot.
     async fn page_with_markers(
         &self,
-        org: OrgId,
+        page: PageRef,
     ) -> Result<(Arc<PublicStatusPage>, Arc<Vec<HistoryIncidentMarker>>), PublicAppError> {
-        let page = self.page(org).await?;
-        Ok((page, Arc::new(Vec::new())))
+        let p = self.page(page).await?;
+        Ok((p, Arc::new(Vec::new())))
     }
 
     async fn component_history(
         &self,
-        org: OrgId,
+        page: PageRef,
         id: Uuid,
         days: u32,
     ) -> Result<ComponentHistoryResponse, PublicAppError>;
     async fn list_incidents(
         &self,
-        org: OrgId,
+        page: PageRef,
         q: IncidentListQuery,
     ) -> Result<CursorPage<PublicIncident>, PublicAppError>;
-    async fn incident_by_id(&self, org: OrgId, id: Uuid) -> Result<PublicIncident, PublicAppError>;
-    async fn maintenance(&self, org: OrgId) -> Result<PublicMaintenanceList, PublicAppError>;
-    async fn incidents_rss(&self, org: OrgId, base_url: &str) -> Result<String, PublicAppError>;
+    async fn incident_by_id(
+        &self,
+        page: PageRef,
+        id: Uuid,
+    ) -> Result<PublicIncident, PublicAppError>;
+    async fn maintenance(&self, page: PageRef) -> Result<PublicMaintenanceList, PublicAppError>;
+    async fn incidents_rss(&self, page: PageRef, base_url: &str) -> Result<String, PublicAppError>;
 
-    /// Drop any cached page for `org`. The settings handler calls this when
-    /// `public_status_enabled` flips to `false` so the now-disabled org
-    /// can't keep serving a cached page past TTL. Default no-op: backends
-    /// without a cache (the test/noop source) have nothing to drop.
-    async fn invalidate(&self, _org: OrgId) {}
+    /// Drop the cached snapshot for a page. The settings handler calls this on
+    /// a branding/enable/component edit so a stale page can't outlive its TTL.
+    /// Default no-op: backends without a cache have nothing to drop.
+    async fn invalidate(&self, _page: crate::domain::StatusPageId) {}
 }
 
 pub struct OrgPublicSource {
@@ -117,11 +120,13 @@ impl OrgPublicSource {
 
 impl OrgPublicSource {
     /// Shared cache hit; both halves come from one atomic snapshot.
-    async fn cached(&self, org: OrgId) -> Result<Arc<PageData>, PublicAppError> {
+    async fn cached(&self, page: PageRef) -> Result<Arc<PageData>, PublicAppError> {
         let agg = self.aggregator.clone();
         let res = self
             .cache
-            .get_or_compute_data(org, move || async move { agg.build(org).await })
+            .get_or_compute_data(page.page, move || async move {
+                agg.build(page.page, page.org).await
+            })
             .await;
         match res {
             Ok(data) => Ok(data),
@@ -132,21 +137,21 @@ impl OrgPublicSource {
 
 #[async_trait]
 impl PublicSource for OrgPublicSource {
-    async fn page(&self, org: OrgId) -> Result<Arc<PublicStatusPage>, PublicAppError> {
-        Ok(self.cached(org).await?.page.clone())
+    async fn page(&self, page: PageRef) -> Result<Arc<PublicStatusPage>, PublicAppError> {
+        Ok(self.cached(page).await?.page.clone())
     }
 
     async fn page_with_markers(
         &self,
-        org: OrgId,
+        page: PageRef,
     ) -> Result<(Arc<PublicStatusPage>, Arc<Vec<HistoryIncidentMarker>>), PublicAppError> {
-        let data = self.cached(org).await?;
+        let data = self.cached(page).await?;
         Ok((data.page.clone(), data.history_markers.clone()))
     }
 
     async fn component_history(
         &self,
-        org: OrgId,
+        page: PageRef,
         id: Uuid,
         days: u32,
     ) -> Result<ComponentHistoryResponse, PublicAppError> {
@@ -154,42 +159,41 @@ impl PublicSource for OrgPublicSource {
             return Err(PublicAppError::InvalidDays);
         }
         self.aggregator
-            .component_history(org, id, days)
+            .component_history(page.page, page.org, id, days)
             .await
             .map_err(|_| PublicAppError::NotFound)
     }
 
     async fn list_incidents(
         &self,
-        org: OrgId,
+        page: PageRef,
         q: IncidentListQuery,
     ) -> Result<CursorPage<PublicIncident>, PublicAppError> {
+        // The page's component set + per-page names, reused from the cached
+        // page snapshot. An incident is on this page iff its target is one of
+        // these components.
+        let names = self.cached(page).await?.component_names.clone();
+        if names.is_empty() {
+            return Ok(CursorPage::new(Vec::new(), None));
+        }
+        let component_ids: Vec<Uuid> = names.keys().copied().collect();
+
         let since = Utc::now() - ChronoDuration::days(self.rss_lookback_days as i64);
         let limit = q.limit.clamp(1, 100) as i64;
         let ongoing_only = q.ongoing_only;
-        // Fetch one extra row to detect whether a next page exists without a
-        // second `count(*)` over the same range.
         let fetch = limit + 1;
         let (cursor_ts, cursor_id) = match q.cursor {
             Some(c) => (Some(c.started_at), Some(c.id)),
             None => (None, None),
         };
 
-        // Keyset predicate on `(started_at, id)` with the same DESC ordering
-        // the page uses. Composite tiebreaker on `id` keeps two incidents
-        // sharing a `started_at` from being skipped or duplicated at a page
-        // boundary; the `$3 IS NULL OR ...` short-circuit lets us bind a
-        // `NULL` cursor for the first page without a separate query path.
         let rows: Vec<IncidentRow> = sqlx::query_as::<_, IncidentRow>(
             r#"SELECT i.id, i.target_id,
-                      COALESCE(t.public_name, t.name) AS component_name,
                       i.started_at, i.ended_at, i.severity, i.status_at_start,
                       i.public_title, i.public_description
                FROM incidents i
-               JOIN targets t ON t.id = i.target_id
                WHERE i.org_id = $5
-                 AND t.org_id = $5
-                 AND t.public_status = true
+                 AND i.target_id = ANY($7)
                  AND i.started_at >= $1
                  AND ($2 = false OR i.ended_at IS NULL)
                  AND (
@@ -203,8 +207,9 @@ impl PublicSource for OrgPublicSource {
         .bind(ongoing_only)
         .bind(cursor_ts)
         .bind(cursor_id)
-        .bind(org.0)
+        .bind(page.org.0)
         .bind(fetch)
+        .bind(&component_ids)
         .fetch_all(&self.pg)
         .await
         .context("public list incidents")
@@ -227,55 +232,59 @@ impl PublicSource for OrgPublicSource {
             None
         };
 
-        let incidents = self.hydrate(org, kept).await?;
+        let incidents = self.hydrate(page.org, kept, &names).await?;
         Ok(CursorPage::new(incidents, next_cursor))
     }
 
-    async fn incident_by_id(&self, org: OrgId, id: Uuid) -> Result<PublicIncident, PublicAppError> {
+    async fn incident_by_id(
+        &self,
+        page: PageRef,
+        id: Uuid,
+    ) -> Result<PublicIncident, PublicAppError> {
+        let names = self.cached(page).await?.component_names.clone();
+        let component_ids: Vec<Uuid> = names.keys().copied().collect();
         let row: Option<IncidentRow> = sqlx::query_as::<_, IncidentRow>(
             r#"SELECT i.id, i.target_id,
-                      COALESCE(t.public_name, t.name) AS component_name,
                       i.started_at, i.ended_at, i.severity, i.status_at_start,
                       i.public_title, i.public_description
                FROM incidents i
-               JOIN targets t ON t.id = i.target_id
                WHERE i.id = $1
                  AND i.org_id = $2
-                 AND t.org_id = $2
-                 AND t.public_status = true"#,
+                 AND i.target_id = ANY($3)"#,
         )
         .bind(id)
-        .bind(org.0)
+        .bind(page.org.0)
+        .bind(&component_ids)
         .fetch_optional(&self.pg)
         .await
         .context("public get incident")
         .map_err(PublicAppError::Internal)?;
 
         let row = row.ok_or(PublicAppError::NotFound)?;
-        let mut hydrated = self.hydrate(org, vec![row]).await?;
+        let mut hydrated = self.hydrate(page.org, vec![row], &names).await?;
         hydrated.pop().ok_or(PublicAppError::NotFound)
     }
 
-    async fn maintenance(&self, org: OrgId) -> Result<PublicMaintenanceList, PublicAppError> {
-        let page = self.page(org).await?;
+    async fn maintenance(&self, page: PageRef) -> Result<PublicMaintenanceList, PublicAppError> {
+        let p = self.page(page).await?;
         Ok(PublicMaintenanceList {
-            active: page.active_maintenance.clone(),
-            upcoming: page.upcoming_maintenance.clone(),
+            active: p.active_maintenance.clone(),
+            upcoming: p.upcoming_maintenance.clone(),
         })
     }
 
-    async fn incidents_rss(&self, org: OrgId, base_url: &str) -> Result<String, PublicAppError> {
+    async fn incidents_rss(&self, page: PageRef, base_url: &str) -> Result<String, PublicAppError> {
         let q = IncidentListQuery {
             limit: self.rss_max_items,
             cursor: None,
             ongoing_only: false,
         };
-        let page = self.list_incidents(org, q).await?;
-        Ok(build_rss(&self.site_name, base_url, &page.items))
+        let listed = self.list_incidents(page, q).await?;
+        Ok(build_rss(&self.site_name, base_url, &listed.items))
     }
 
-    async fn invalidate(&self, org: OrgId) {
-        self.cache.invalidate(org).await;
+    async fn invalidate(&self, page: crate::domain::StatusPageId) {
+        self.cache.invalidate(page).await;
     }
 }
 
@@ -284,6 +293,7 @@ impl OrgPublicSource {
         &self,
         org: OrgId,
         rows: Vec<IncidentRow>,
+        names: &HashMap<Uuid, String>,
     ) -> Result<Vec<PublicIncident>, PublicAppError> {
         if rows.is_empty() {
             return Ok(Vec::new());
@@ -305,6 +315,7 @@ impl OrgPublicSource {
         Ok(rows
             .into_iter()
             .map(|r| {
+                let component_name = names.get(&r.target_id).cloned().unwrap_or_default();
                 let mut my_updates: Vec<PublicIncidentUpdate> = updates
                     .iter()
                     .filter(|u| u.incident_id == r.id)
@@ -322,11 +333,11 @@ impl OrgPublicSource {
                 let title = r
                     .public_title
                     .clone()
-                    .unwrap_or_else(|| auto_incident_title(&r.component_name, &r.status_at_start));
+                    .unwrap_or_else(|| auto_incident_title(&component_name, &r.status_at_start));
                 PublicIncident {
                     id: r.id,
                     component_id: r.target_id,
-                    component_name: r.component_name,
+                    component_name,
                     title,
                     started_at: r.started_at,
                     ended_at: r.ended_at,
@@ -343,7 +354,6 @@ impl OrgPublicSource {
 struct IncidentRow {
     id: Uuid,
     target_id: Uuid,
-    component_name: String,
     started_at: DateTime<Utc>,
     ended_at: Option<DateTime<Utc>>,
     severity: String,
@@ -436,7 +446,7 @@ impl Default for NoopPublicSource {
 
 #[async_trait]
 impl PublicSource for NoopPublicSource {
-    async fn page(&self, _org: OrgId) -> Result<Arc<PublicStatusPage>, PublicAppError> {
+    async fn page(&self, _page: PageRef) -> Result<Arc<PublicStatusPage>, PublicAppError> {
         Ok(Arc::new(PublicStatusPage {
             overall: crate::domain::OverallStatus {
                 state: crate::domain::OverallState::Operational,
@@ -455,7 +465,7 @@ impl PublicSource for NoopPublicSource {
 
     async fn component_history(
         &self,
-        _org: OrgId,
+        _page: PageRef,
         _id: Uuid,
         _days: u32,
     ) -> Result<ComponentHistoryResponse, PublicAppError> {
@@ -464,7 +474,7 @@ impl PublicSource for NoopPublicSource {
 
     async fn list_incidents(
         &self,
-        _org: OrgId,
+        _page: PageRef,
         _q: IncidentListQuery,
     ) -> Result<CursorPage<PublicIncident>, PublicAppError> {
         Ok(CursorPage::new(Vec::new(), None))
@@ -472,20 +482,24 @@ impl PublicSource for NoopPublicSource {
 
     async fn incident_by_id(
         &self,
-        _org: OrgId,
+        _page: PageRef,
         _id: Uuid,
     ) -> Result<PublicIncident, PublicAppError> {
         Err(PublicAppError::NotFound)
     }
 
-    async fn maintenance(&self, _org: OrgId) -> Result<PublicMaintenanceList, PublicAppError> {
+    async fn maintenance(&self, _page: PageRef) -> Result<PublicMaintenanceList, PublicAppError> {
         Ok(PublicMaintenanceList {
             active: Vec::new(),
             upcoming: Vec::new(),
         })
     }
 
-    async fn incidents_rss(&self, _org: OrgId, base_url: &str) -> Result<String, PublicAppError> {
+    async fn incidents_rss(
+        &self,
+        _page: PageRef,
+        base_url: &str,
+    ) -> Result<String, PublicAppError> {
         Ok(build_rss(&self.site_name, base_url, &[]))
     }
 }

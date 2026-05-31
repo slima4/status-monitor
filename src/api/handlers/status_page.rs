@@ -1,12 +1,13 @@
-//! Operator-side public status-page settings (`/api/v1/orgs/{id}/status-page`
-//! and its `/logo` sub-resource).
+//! Operator-side status-page management (`/api/v1/status-pages` + its
+//! `/components` and `/logo` sub-resources).
 //!
-//! Every route is owner-only and keyed by an explicit `:id` path param, in the
-//! same spirit as [`super::orgs`] — a multi-org user manages each org's page
-//! independently of their active org. Branding is validated through the
-//! domain [`PublicOrgBranding::validate`] (the column CHECK constraints'
-//! mirror) before it touches the database; the logo path is server-derived
-//! from a content hash and never client-chosen.
+//! Pages are per-org; every route is scoped to the caller's active org (the
+//! store rejects a page id that isn't in that org with a 404). Reads gate on
+//! [`Authorized`] (any active member); every mutation gates on
+//! [`OwnerAuthorized`] — the public brand surface is an owner-level asset.
+//! Branding is validated through [`PublicOrgBranding::validate`] before it
+//! touches the DB; the logo path is server-derived from a content hash and never
+//! client-chosen.
 
 use axum::Json;
 use axum::extract::{Multipart, Path, State};
@@ -17,25 +18,31 @@ use uuid::Uuid;
 
 use crate::api::ApiError;
 use crate::api::error::codes;
-use crate::api::routes::{path_based_public_routes_enabled, subdomain_public_routes_enabled};
 use crate::app::AppState;
-use crate::domain::{OrgId, PublicOrgBranding, PublicStyle};
+use crate::domain::{
+    NewStatusPage, NewStatusPageComponent, OrgId, PublicOrgBranding, PublicStyle, StatusPage,
+    StatusPageComponent, StatusPageComponentUpdate, StatusPageId, StatusPageUpdate, validate_slug,
+};
 use crate::error::{AppError, Result};
 use crate::public_status::{LocalDiskLogoStorage, LogoMime, LogoStorage};
-use crate::storage::{OrgBranding, orgs as orgs_store};
-use crate::web::views::public_status::LOGO_ROUTE;
-use crate::web::{CurrentUser, ScopedOrgPath, StatusPageDelete, StatusPageRead, StatusPageWrite};
-
-use super::orgs::require_owner;
+use crate::storage::AddComponentOutcome;
+use crate::web::views::public_status::{
+    LOGO_ROUTE, public_base, public_logo_url, public_status_url,
+};
+use crate::web::{
+    Authorized, OwnerAuthorized, RequestSource, StatusPageDelete, StatusPageRead, StatusPageWrite,
+};
 
 // ── DTOs ────────────────────────────────────────────────────────────────────
 
+/// One page as returned to the operator: the stored page plus its resolved
+/// public URL and logo URL (computed from the current host shape).
 #[derive(Debug, Serialize, ToSchema)]
-pub struct StatusPageSettings {
-    pub public_status_enabled: bool,
-    /// Resolved header name: `public_display_name` if set, else the org name.
-    pub display_name: String,
-    /// Raw operator-set override (drives the form field; `null` = "use org name").
+pub struct StatusPageView {
+    pub id: StatusPageId,
+    pub slug: String,
+    pub name: String,
+    pub enabled: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub public_display_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -43,7 +50,10 @@ pub struct StatusPageSettings {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub public_brand_color: Option<String>,
     pub public_style: PublicStyle,
-    /// Resolved against the configured default when the operator hasn't chosen.
+    /// Raw override (absent = inherit the default); round-trips the tri-state
+    /// that `show_powered_by` below collapses.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub public_show_powered_by: Option<bool>,
     pub show_powered_by: bool,
     /// Versioned logo URL on the public surface, or `null` when no logo.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -55,50 +65,42 @@ pub struct StatusPageSettings {
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
-pub struct UpdateStatusPageRequest {
-    /// Accepts a real JSON bool (API clients) or an HTML-checkbox encoding
-    /// (the settings form posts via htmx `json-enc`, which sends a checked
-    /// box as the string `"on"` and omits an unchecked one). Absent = off.
-    #[serde(default, deserialize_with = "de_checkbox_bool")]
-    #[schema(value_type = bool)]
-    pub public_status_enabled: bool,
-    /// Empty/blank is normalised to `null` (fall back to the org name).
+pub struct CreatePageRequest {
+    pub slug: String,
+    #[schema(max_length = 80)]
+    pub name: String,
+    #[serde(default)]
+    pub enabled: bool,
+}
+
+#[derive(Debug, Default, Deserialize, ToSchema)]
+pub struct UpdatePageRequest {
+    pub name: Option<String>,
+    pub slug: Option<String>,
+    pub enabled: Option<bool>,
+    /// When present, replaces the page's display branding wholesale (the logo
+    /// has its own endpoints, so it is untouched here).
+    pub branding: Option<BrandingInput>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct BrandingInput {
     #[serde(default)]
     pub public_display_name: Option<String>,
     #[serde(default)]
     pub public_about: Option<String>,
     #[serde(default)]
     pub public_brand_color: Option<String>,
-    /// Absent = keep the current value, so a partial-replace client can't
-    /// silently reset the operator's chosen register to "default".
     #[serde(default)]
     pub public_style: Option<PublicStyle>,
-    #[serde(default, deserialize_with = "de_checkbox_bool")]
-    #[schema(value_type = bool)]
-    pub public_show_powered_by: bool,
+    #[serde(default)]
+    pub public_show_powered_by: Option<bool>,
 }
 
-/// Deserialize a checkbox-or-bool field. A JSON `true`/`false` passes through
-/// unchanged; a string is truthy for the conventional HTML/htmx encodings
-/// (`"on"`, `"true"`, `"1"`, `"yes"`); a number is truthy when non-zero. Any
-/// other value — `null`, array, object, an unrecognised string — is `false`,
-/// so a present-but-empty field never 422s. Field *absence* is handled by
-/// `#[serde(default)]` (an unchecked checkbox is simply omitted).
-fn de_checkbox_bool<'de, D>(deserializer: D) -> std::result::Result<bool, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    Ok(match serde_json::Value::deserialize(deserializer)? {
-        serde_json::Value::Bool(b) => b,
-        serde_json::Value::String(s) => {
-            matches!(
-                s.trim().to_ascii_lowercase().as_str(),
-                "on" | "true" | "1" | "yes"
-            )
-        }
-        serde_json::Value::Number(n) => n.as_f64().is_some_and(|f| f != 0.0),
-        _ => false,
-    })
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct ReorderRequest {
+    /// Target ids in their new display order (0-based `sort_order`).
+    pub target_ids: Vec<Uuid>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -106,143 +108,330 @@ pub struct LogoResponse {
     pub logo_url: String,
 }
 
-// ── Handlers ────────────────────────────────────────────────────────────────
+// ── Page CRUD ─────────────────────────────────────────────────────────────────
 
 #[utoipa::path(
-    get,
-    path = "/api/v1/orgs/{id}/status-page",
-    tag = "orgs",
-    summary = "Read an org's public status-page settings (owner-only)",
-    params(("id" = Uuid, Path)),
-    responses(
-        (status = 200, body = StatusPageSettings),
-        (status = 401, body = ApiError),
-        (status = 403, body = ApiError),
-        (status = 404, body = ApiError),
-    ),
+    get, path = "/api/v1/status-pages", tag = "status-pages",
+    summary = "List the org's status pages",
+    responses((status = 200, body = Vec<StatusPageView>), (status = 401, body = ApiError)),
 )]
-pub async fn get_settings(
+pub async fn list_pages(
     State(state): State<AppState>,
-    CurrentUser(user): CurrentUser,
-    _: ScopedOrgPath<StatusPageRead>,
-    Path(id): Path<Uuid>,
-) -> Result<Json<StatusPageSettings>> {
-    let pool = state.require_db()?;
-    let org = OrgId(id);
-    require_owner(pool, user, org).await?;
-    let ob = load_for_settings(pool, org).await?;
-    Ok(Json(build_settings(&state, &ob)))
+    Authorized(org, _): Authorized<StatusPageRead>,
+) -> Result<Json<Vec<StatusPageView>>> {
+    let pages = state.status_page_store.list(org).await?;
+    Ok(Json(pages.into_iter().map(|p| view(&state, p)).collect()))
 }
 
 #[utoipa::path(
-    patch,
-    path = "/api/v1/orgs/{id}/status-page",
-    tag = "orgs",
-    summary = "Update an org's public status-page settings (owner-only)",
-    description = "Replaces every branding field from the request; the logo \
-                   has its own endpoints. Toggling `public_status_enabled` off \
-                   drops any cached page so the org stops serving immediately.",
-    params(("id" = Uuid, Path)),
-    request_body = UpdateStatusPageRequest,
+    post, path = "/api/v1/status-pages", tag = "status-pages",
+    summary = "Create a status page",
+    request_body = CreatePageRequest,
     responses(
-        (status = 200, body = StatusPageSettings),
-        (status = 401, body = ApiError),
-        (status = 403, body = ApiError),
-        (status = 404, body = ApiError),
-        (status = 400, body = ApiError, description = "Branding failed validation; \
-                                                       `field` names the bad input"),
+        (status = 201, body = StatusPageView),
+        (status = 400, body = ApiError, description = "SLUG_INVALID / name invalid"),
+        (status = 422, body = ApiError, description = "SLUG_TAKEN or the per-org page cap reached"),
     ),
 )]
-pub async fn update_settings(
+pub async fn create_page(
     State(state): State<AppState>,
-    CurrentUser(user): CurrentUser,
-    _: ScopedOrgPath<StatusPageWrite>,
-    Path(id): Path<Uuid>,
-    Json(req): Json<UpdateStatusPageRequest>,
-) -> Result<Json<StatusPageSettings>> {
-    let pool = state.require_db()?;
-    let org = OrgId(id);
-    require_owner(pool, user, org).await?;
-    let current = load_for_settings(pool, org).await?;
-    let was_enabled = current.branding.public_status_enabled;
-
-    // `update_public_branding` deliberately leaves `public_logo_path` alone
-    // (the logo has its own endpoints), so it doesn't need to round-trip here.
-    let branding = PublicOrgBranding {
-        public_status_enabled: req.public_status_enabled,
-        public_display_name: normalise_opt(req.public_display_name),
-        public_about: normalise_opt(req.public_about),
-        public_brand_color: normalise_opt(req.public_brand_color).map(|c| c.to_ascii_lowercase()),
-        public_logo_path: None,
-        public_show_powered_by: Some(req.public_show_powered_by),
-        public_style: req.public_style.unwrap_or(current.branding.public_style),
-    };
-    branding.validate().map_err(|e| {
-        AppError::bad_request_field(codes::BRANDING_INVALID, e.to_string(), e.field())
-    })?;
-
-    if !orgs_store::update_public_branding(pool, org, user, &branding).await? {
-        return Err(AppError::not_found(
-            codes::ORG_NOT_FOUND,
-            "organisation not found",
-        ));
-    }
-
-    // Belt-and-braces: the extractor's `public_status_enabled = true` filter
-    // is the authoritative gate, but a stale cache can outlive a flip in
-    // either direction. Disable→enable: an in-flight compute that started
-    // before the disable can write its pre-disable snapshot after the
-    // post-disable invalidate (single-flight via `try_get_with` has no
-    // post-completion recheck), so without a second invalidate on re-enable
-    // the next request serves the orphan snapshot for up to `cache_ttl_secs`.
-    // Enable→disable: the cache must drop so the next re-enable starts fresh.
-    // Drop on either transition; per-PATCH cost is negligible.
-    if was_enabled != req.public_status_enabled {
-        state.public_source.invalidate(org).await;
-    }
-
-    let ob = OrgBranding {
-        name: current.name,
-        slug: current.slug,
-        branding: PublicOrgBranding {
-            // Reflect what was just persisted; the logo is unchanged.
-            public_logo_path: current.branding.public_logo_path,
-            ..branding
-        },
-    };
-    Ok(Json(build_settings(&state, &ob)))
+    OwnerAuthorized(org, _): OwnerAuthorized<StatusPageWrite>,
+    RequestSource(source): RequestSource,
+    Json(req): Json<CreatePageRequest>,
+) -> Result<(StatusCode, Json<StatusPageView>)> {
+    let slug = req.slug.trim().to_ascii_lowercase();
+    validate_slug(&slug)
+        .map_err(|e| AppError::bad_request_field(codes::SLUG_INVALID, e.to_string(), "slug"))?;
+    let name = validate_name(&req.name)?;
+    // Friendly pre-check (real plan, real count); the store's `None` is the
+    // race backstop, mapped to the same quota error with the real plan id.
+    state.quotas.check_can_create_status_page(org, None).await?;
+    let plan = state.quotas.limit_for_org(org).await?;
+    let max = i64::from(plan.max_status_pages);
+    let page = state
+        .status_page_store
+        .create(
+            org,
+            NewStatusPage {
+                slug,
+                name,
+                enabled: req.enabled,
+            },
+            source,
+            max,
+        )
+        .await?
+        .ok_or_else(|| AppError::quota_exceeded("max_status_pages", max, max, plan.id.clone()))?;
+    Ok((StatusCode::CREATED, Json(view(&state, page))))
 }
 
 #[utoipa::path(
-    post,
-    path = "/api/v1/orgs/{id}/status-page/logo",
-    tag = "orgs",
-    summary = "Upload a status-page logo (owner-only, multipart)",
-    description = "Field `file`: PNG/JPEG/WebP. The format is sniffed from the \
-                   bytes (the declared content-type is not trusted); images \
-                   larger than the configured max dimension are downscaled.",
+    get, path = "/api/v1/status-pages/{id}", tag = "status-pages",
+    summary = "Get a status page",
+    params(("id" = Uuid, Path)),
+    responses((status = 200, body = StatusPageView), (status = 404, body = ApiError)),
+)]
+pub async fn get_page(
+    State(state): State<AppState>,
+    Authorized(org, _): Authorized<StatusPageRead>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<StatusPageView>> {
+    let page = load(&state, org, id).await?;
+    Ok(Json(view(&state, page)))
+}
+
+#[utoipa::path(
+    patch, path = "/api/v1/status-pages/{id}", tag = "status-pages",
+    summary = "Update a status page (identity and/or branding)",
+    params(("id" = Uuid, Path)),
+    request_body = UpdatePageRequest,
+    responses(
+        (status = 200, body = StatusPageView),
+        (status = 400, body = ApiError, description = "SLUG_INVALID / BRANDING_INVALID"),
+        (status = 404, body = ApiError),
+        (status = 422, body = ApiError, description = "SLUG_TAKEN"),
+    ),
+)]
+pub async fn update_page(
+    State(state): State<AppState>,
+    OwnerAuthorized(org, _): OwnerAuthorized<StatusPageWrite>,
+    RequestSource(source): RequestSource,
+    Path(id): Path<Uuid>,
+    Json(req): Json<UpdatePageRequest>,
+) -> Result<Json<StatusPageView>> {
+    let slug = match req.slug {
+        Some(s) => {
+            let s = s.trim().to_ascii_lowercase();
+            validate_slug(&s).map_err(|e| {
+                AppError::bad_request_field(codes::SLUG_INVALID, e.to_string(), "slug")
+            })?;
+            Some(s)
+        }
+        None => None,
+    };
+    let branding = match req.branding {
+        Some(b) => {
+            let pob = PublicOrgBranding {
+                public_display_name: normalise_opt(b.public_display_name),
+                public_about: normalise_opt(b.public_about),
+                public_brand_color: normalise_opt(b.public_brand_color)
+                    .map(|c| c.to_ascii_lowercase()),
+                public_logo_path: None,
+                public_show_powered_by: b.public_show_powered_by,
+                public_style: b.public_style.unwrap_or_default(),
+            };
+            pob.validate().map_err(|e| {
+                AppError::bad_request_field(codes::BRANDING_INVALID, e.to_string(), e.field())
+            })?;
+            Some(pob)
+        }
+        None => None,
+    };
+    let page = state
+        .status_page_store
+        .update(
+            org,
+            StatusPageId(id),
+            StatusPageUpdate {
+                name: req.name.map(|n| validate_name(&n)).transpose()?,
+                slug,
+                enabled: req.enabled,
+                branding,
+            },
+            source,
+        )
+        .await?
+        .ok_or_else(page_not_found)?;
+    state.public_source.invalidate(StatusPageId(id)).await;
+    Ok(Json(view(&state, page)))
+}
+
+#[utoipa::path(
+    delete, path = "/api/v1/status-pages/{id}", tag = "status-pages",
+    summary = "Delete a status page",
+    params(("id" = Uuid, Path)),
+    responses((status = 204, description = "Deleted"), (status = 404, body = ApiError)),
+)]
+pub async fn delete_page(
+    State(state): State<AppState>,
+    OwnerAuthorized(org, _): OwnerAuthorized<StatusPageDelete>,
+    Path(id): Path<Uuid>,
+) -> Result<StatusCode> {
+    if !state
+        .status_page_store
+        .delete(org, StatusPageId(id))
+        .await?
+    {
+        return Err(page_not_found());
+    }
+    state.public_source.invalidate(StatusPageId(id)).await;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+// ── Components ────────────────────────────────────────────────────────────────
+
+#[utoipa::path(
+    get, path = "/api/v1/status-pages/{id}/components", tag = "status-pages",
+    summary = "List the monitors curated onto a page",
+    params(("id" = Uuid, Path)),
+    responses((status = 200, body = Vec<StatusPageComponent>), (status = 404, body = ApiError)),
+)]
+pub async fn list_components(
+    State(state): State<AppState>,
+    Authorized(org, _): Authorized<StatusPageRead>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Vec<StatusPageComponent>>> {
+    load(&state, org, id).await?;
+    let rows = state
+        .status_page_store
+        .list_components(org, StatusPageId(id))
+        .await?;
+    Ok(Json(rows))
+}
+
+#[utoipa::path(
+    post, path = "/api/v1/status-pages/{id}/components", tag = "status-pages",
+    summary = "Add a monitor to a page",
+    params(("id" = Uuid, Path)),
+    request_body = NewStatusPageComponent,
+    responses(
+        (status = 204, description = "Added"),
+        (status = 400, body = ApiError, description = "Invalid curation field"),
+        (status = 404, body = ApiError, description = "Page or target not in this org"),
+        (status = 409, body = ApiError, description = "Monitor already on the page — edit via PATCH"),
+        (status = 422, body = ApiError, description = "max_public_components reached"),
+    ),
+)]
+pub async fn add_component(
+    State(state): State<AppState>,
+    OwnerAuthorized(org, _): OwnerAuthorized<StatusPageWrite>,
+    Path(id): Path<Uuid>,
+    Json(mut new): Json<NewStatusPageComponent>,
+) -> Result<StatusCode> {
+    new.public_name = clean_curation(new.public_name, "public_name", 80)?;
+    new.public_description = clean_curation(new.public_description, "public_description", 200)?;
+    new.public_group = clean_curation(new.public_group, "public_group", 50)?;
+    let plan = state.quotas.limit_for_org(org).await?;
+    let max = i64::from(plan.max_public_components);
+    match state
+        .status_page_store
+        .add_component(org, StatusPageId(id), new, max)
+        .await?
+    {
+        AddComponentOutcome::Added => {
+            state.public_source.invalidate(StatusPageId(id)).await;
+            Ok(StatusCode::NO_CONTENT)
+        }
+        AddComponentOutcome::AlreadyOnPage => Err(AppError::conflict(
+            codes::COMPONENT_ALREADY_ON_PAGE,
+            "monitor is already on this page — edit it with PATCH",
+        )),
+        AddComponentOutcome::OverCap { used } => Err(AppError::quota_exceeded(
+            "max_public_components",
+            used,
+            max,
+            plan.id.clone(),
+        )),
+    }
+}
+
+#[utoipa::path(
+    patch, path = "/api/v1/status-pages/{id}/components/{target_id}", tag = "status-pages",
+    summary = "Edit a component's per-page curation",
+    params(("id" = Uuid, Path), ("target_id" = Uuid, Path)),
+    request_body = StatusPageComponentUpdate,
+    responses(
+        (status = 204, description = "Updated"),
+        (status = 400, body = ApiError, description = "Invalid curation field"),
+        (status = 404, body = ApiError),
+    ),
+)]
+pub async fn update_component(
+    State(state): State<AppState>,
+    OwnerAuthorized(org, _): OwnerAuthorized<StatusPageWrite>,
+    Path((id, target_id)): Path<(Uuid, Uuid)>,
+    Json(mut upd): Json<StatusPageComponentUpdate>,
+) -> Result<StatusCode> {
+    upd.public_name = clean_curation_patch(upd.public_name, "public_name", 80)?;
+    upd.public_description =
+        clean_curation_patch(upd.public_description, "public_description", 200)?;
+    upd.public_group = clean_curation_patch(upd.public_group, "public_group", 50)?;
+    if !state
+        .status_page_store
+        .update_component(org, StatusPageId(id), target_id, upd)
+        .await?
+    {
+        return Err(component_not_found());
+    }
+    state.public_source.invalidate(StatusPageId(id)).await;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(
+    delete, path = "/api/v1/status-pages/{id}/components/{target_id}", tag = "status-pages",
+    summary = "Remove a monitor from a page",
+    params(("id" = Uuid, Path), ("target_id" = Uuid, Path)),
+    responses((status = 204, description = "Removed"), (status = 404, body = ApiError)),
+)]
+pub async fn remove_component(
+    State(state): State<AppState>,
+    OwnerAuthorized(org, _): OwnerAuthorized<StatusPageDelete>,
+    Path((id, target_id)): Path<(Uuid, Uuid)>,
+) -> Result<StatusCode> {
+    if !state
+        .status_page_store
+        .remove_component(org, StatusPageId(id), target_id)
+        .await?
+    {
+        return Err(component_not_found());
+    }
+    state.public_source.invalidate(StatusPageId(id)).await;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(
+    post, path = "/api/v1/status-pages/{id}/components/reorder", tag = "status-pages",
+    summary = "Reorder a page's components",
+    params(("id" = Uuid, Path)),
+    request_body = ReorderRequest,
+    responses((status = 204, description = "Reordered"), (status = 404, body = ApiError)),
+)]
+pub async fn reorder_components(
+    State(state): State<AppState>,
+    OwnerAuthorized(org, _): OwnerAuthorized<StatusPageWrite>,
+    Path(id): Path<Uuid>,
+    Json(req): Json<ReorderRequest>,
+) -> Result<StatusCode> {
+    load(&state, org, id).await?;
+    state
+        .status_page_store
+        .reorder_components(org, StatusPageId(id), &req.target_ids)
+        .await?;
+    state.public_source.invalidate(StatusPageId(id)).await;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+// ── Logo ──────────────────────────────────────────────────────────────────────
+
+#[utoipa::path(
+    post, path = "/api/v1/status-pages/{id}/logo", tag = "status-pages",
+    summary = "Upload a page logo (multipart)",
     params(("id" = Uuid, Path)),
     request_body(content = String, content_type = "multipart/form-data"),
     responses(
         (status = 200, body = LogoResponse),
-        (status = 400, body = ApiError, description = "Missing file / not an allowed image"),
-        (status = 401, body = ApiError),
-        (status = 403, body = ApiError),
+        (status = 400, body = ApiError),
         (status = 404, body = ApiError),
         (status = 413, body = ApiError, description = "File exceeds the configured size limit"),
     ),
 )]
 pub async fn upload_logo(
     State(state): State<AppState>,
-    CurrentUser(user): CurrentUser,
-    _: ScopedOrgPath<StatusPageWrite>,
+    OwnerAuthorized(org, _): OwnerAuthorized<StatusPageWrite>,
     Path(id): Path<Uuid>,
     mut multipart: Multipart,
 ) -> Result<Json<LogoResponse>> {
-    let pool = state.require_db()?;
-    let org = OrgId(id);
-    require_owner(pool, user, org).await?;
-
+    let page = load(&state, org, id).await?;
     let raw = read_logo_field(&mut multipart).await?;
     let cfg = &state.cfg.public_status;
     if raw.len() > cfg.max_logo_size_bytes as usize {
@@ -252,9 +441,6 @@ pub async fn upload_logo(
         ));
     }
     let (mime, bytes) = process_logo(&raw, cfg.max_logo_dimension_px)?;
-    // Re-check post-processing: a downscaled re-encode (notably lossless WebP)
-    // can come out larger than the in-bounds original, so the pre-decode
-    // check above isn't sufficient on its own.
     if bytes.len() > cfg.max_logo_size_bytes as usize {
         return Err(AppError::payload_too_large(
             codes::LOGO_TOO_LARGE,
@@ -264,126 +450,143 @@ pub async fn upload_logo(
             ),
         ));
     }
-
     let store = LocalDiskLogoStorage::new(&cfg.logo_dir);
     let name = store
         .put(org, mime.as_content_type(), &bytes)
         .await
         .map_err(AppError::Other)?;
 
-    let prev = orgs_store::set_public_logo_path(pool, org, user, Some(&name)).await?;
+    let prev = state
+        .status_page_store
+        .set_logo_path(org, StatusPageId(id), Some(&name))
+        .await?
+        .ok_or_else(page_not_found)?;
     if let Some(old) = prev.filter(|p| p != &name) {
-        // Best-effort: a leftover file is harmless (unreferenced, hash-named).
         let _ = store.delete(&old).await;
     }
-    state.public_source.invalidate(org).await;
+    state.public_source.invalidate(StatusPageId(id)).await;
 
-    let ob = load_for_settings(pool, org).await?;
-    let base = public_base(&state, &ob.slug);
-    let url = logo_url(base.as_deref(), &name).unwrap_or_else(|| format!("{LOGO_ROUTE}?v={name}"));
+    let base = public_base(&state.cfg, &page.slug);
+    let url =
+        public_logo_url(base.as_deref(), &name).unwrap_or_else(|| format!("{LOGO_ROUTE}?v={name}"));
     Ok(Json(LogoResponse { logo_url: url }))
 }
 
 #[utoipa::path(
-    delete,
-    path = "/api/v1/orgs/{id}/status-page/logo",
-    tag = "orgs",
-    summary = "Remove an org's status-page logo (owner-only)",
+    delete, path = "/api/v1/status-pages/{id}/logo", tag = "status-pages",
+    summary = "Remove a page's logo",
     params(("id" = Uuid, Path)),
-    responses(
-        (status = 204, description = "Removed (idempotent)"),
-        (status = 401, body = ApiError),
-        (status = 403, body = ApiError),
-        (status = 404, body = ApiError),
-    ),
+    responses((status = 204, description = "Removed (idempotent)"), (status = 404, body = ApiError)),
 )]
 pub async fn delete_logo(
     State(state): State<AppState>,
-    CurrentUser(user): CurrentUser,
-    _: ScopedOrgPath<StatusPageDelete>,
+    OwnerAuthorized(org, _): OwnerAuthorized<StatusPageDelete>,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode> {
-    let pool = state.require_db()?;
-    let org = OrgId(id);
-    require_owner(pool, user, org).await?;
-    if let Some(old) = orgs_store::set_public_logo_path(pool, org, user, None).await? {
+    let prev = state
+        .status_page_store
+        .set_logo_path(org, StatusPageId(id), None)
+        .await?
+        .ok_or_else(page_not_found)?;
+    if let Some(old) = prev {
         let store = LocalDiskLogoStorage::new(&state.cfg.public_status.logo_dir);
         let _ = store.delete(&old).await;
-        state.public_source.invalidate(org).await;
+        state.public_source.invalidate(StatusPageId(id)).await;
     }
     Ok(StatusCode::NO_CONTENT)
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-/// Owner-gated load of everything the GET / post-mutation responses need:
-/// branding + org name (header fallback) + slug (live URL) — one round-trip.
-pub(crate) async fn load_for_settings(pool: &sqlx::PgPool, org: OrgId) -> Result<OrgBranding> {
-    orgs_store::load_public_branding(pool, org)
+async fn load(state: &AppState, org: OrgId, id: Uuid) -> Result<StatusPage> {
+    state
+        .status_page_store
+        .get(org, StatusPageId(id))
         .await?
-        .ok_or_else(|| AppError::not_found(codes::ORG_NOT_FOUND, "organisation not found"))
+        .ok_or_else(page_not_found)
 }
 
-pub(crate) fn build_settings(state: &AppState, ob: &OrgBranding) -> StatusPageSettings {
+fn page_not_found() -> AppError {
+    AppError::not_found(codes::STATUS_PAGE_NOT_FOUND, "status page not found")
+}
+
+fn component_not_found() -> AppError {
+    AppError::not_found(codes::STATUS_PAGE_NOT_FOUND, "component not on this page")
+}
+
+fn validate_name(name: &str) -> Result<String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() || trimmed.chars().count() > 80 {
+        return Err(AppError::bad_request_field(
+            codes::BRANDING_INVALID,
+            "name must be 1–80 characters",
+            "name",
+        ));
+    }
+    Ok(trimmed.to_owned())
+}
+
+fn view(state: &AppState, p: StatusPage) -> StatusPageView {
     let cfg = &state.cfg.public_status;
-    let b = &ob.branding;
-    let base = public_base(state, &ob.slug);
-    StatusPageSettings {
-        public_status_enabled: b.public_status_enabled,
-        display_name: ob.resolved_display_name().to_owned(),
+    let base = public_base(&state.cfg, &p.slug);
+    let b = &p.branding;
+    StatusPageView {
+        id: p.id,
+        slug: p.slug.clone(),
+        name: p.name,
+        enabled: p.enabled,
         public_display_name: b.public_display_name.clone(),
         public_about: b.public_about.clone(),
         public_brand_color: b.public_brand_color.clone(),
         public_style: b.public_style,
+        public_show_powered_by: b.public_show_powered_by,
         show_powered_by: b.show_powered_by(cfg.default_show_powered_by),
         logo_url: b
             .public_logo_path
             .as_deref()
-            .and_then(|p| logo_url(base.as_deref(), p)),
-        status_url: base.as_ref().map(|origin| status_url(state, origin)),
+            .and_then(|path| public_logo_url(base.as_deref(), path)),
+        status_url: base
+            .as_ref()
+            .map(|origin| public_status_url(&state.cfg, origin)),
     }
-}
-
-/// Public URL shown to the operator. SaaS subdomain mode serves the page at
-/// the apex of `{slug}.{base_domain}` (industry parity); the path-based
-/// self-host surface keeps `/status` as the mount point.
-fn status_url(state: &AppState, origin: &str) -> String {
-    if subdomain_public_routes_enabled(&state.cfg) {
-        // origin is already `https://{slug}.{base_domain}` — apex.
-        origin.to_owned()
-    } else {
-        format!("{origin}/status")
-    }
-}
-
-/// Public logo URL for `path`, or `None` when no public surface is mounted.
-/// One builder so the operator preview and the upload response can't disagree
-/// on shape (origin-prefixed in subdomain mode, host-relative in path mode).
-fn logo_url(base: Option<&str>, path: &str) -> Option<String> {
-    base.map(|origin| format!("{origin}{LOGO_ROUTE}?v={path}"))
-}
-
-/// Origin the public page is served from: an absolute `https://…` host in
-/// subdomain (SaaS) mode, an empty string (same operator host) in path mode,
-/// or `None` when no public surface is mounted.
-fn public_base(state: &AppState, slug: &str) -> Option<String> {
-    if subdomain_public_routes_enabled(&state.cfg) {
-        return Some(format!(
-            "https://{slug}.{}",
-            state.cfg.public_status.base_domain
-        ));
-    }
-    if path_based_public_routes_enabled(&state.cfg) {
-        return Some(String::new());
-    }
-    None
 }
 
 fn normalise_opt(s: Option<String>) -> Option<String> {
     s.map(|v| v.trim().to_owned()).filter(|v| !v.is_empty())
 }
 
-/// Pulls the first `file` part out of the multipart body.
+/// Trim a per-page curation field, treat blank as cleared (`None`), and bound
+/// it to the DB CHECK's max so an over-long value is a 400 with the field name
+/// rather than an opaque 500 from the constraint. `max` is in characters to
+/// match Postgres `char_length`.
+fn clean_curation(v: Option<String>, field: &'static str, max: usize) -> Result<Option<String>> {
+    let v = normalise_opt(v);
+    if let Some(ref s) = v
+        && s.chars().count() > max
+    {
+        return Err(AppError::bad_request_field(
+            codes::BRANDING_INVALID,
+            format!("{field} must be at most {max} characters"),
+            field,
+        ));
+    }
+    Ok(v)
+}
+
+/// Patch-flavoured [`clean_curation`]: preserves the present/absent distinction
+/// (outer `None` = leave unchanged) while normalising + validating the inner
+/// value (an explicit blank or `null` clears the override).
+fn clean_curation_patch(
+    v: Option<Option<String>>,
+    field: &'static str,
+    max: usize,
+) -> Result<Option<Option<String>>> {
+    match v {
+        None => Ok(None),
+        Some(inner) => Ok(Some(clean_curation(inner, field, max)?)),
+    }
+}
+
 async fn read_logo_field(multipart: &mut Multipart) -> Result<Vec<u8>> {
     while let Some(field) = multipart
         .next_field()
@@ -404,11 +607,8 @@ async fn read_logo_field(multipart: &mut Multipart) -> Result<Vec<u8>> {
     ))
 }
 
-/// Validates the image by *sniffing the bytes* (the client-declared
-/// content-type is ignored — that's what stops an HTML/SVG payload being
-/// stored and later served with an image content-type), then downscales it to
-/// fit `max_dim` if either side is larger. Bytes are re-encoded only when a
-/// resize actually happened, so an in-bounds upload is stored verbatim.
+/// Validates the image by sniffing the bytes (the declared content-type is
+/// ignored), then downscales to fit `max_dim` if either side is larger.
 fn process_logo(raw: &[u8], max_dim: u32) -> Result<(LogoMime, Vec<u8>)> {
     let fmt = image::guess_format(raw).map_err(|_| {
         AppError::bad_request(codes::LOGO_TYPE_INVALID, "unrecognised image format")
@@ -416,15 +616,6 @@ fn process_logo(raw: &[u8], max_dim: u32) -> Result<(LogoMime, Vec<u8>)> {
     let mime = LogoMime::from_image_format(fmt).ok_or_else(|| {
         AppError::bad_request(codes::LOGO_TYPE_INVALID, "logo must be PNG, JPEG, or WebP")
     })?;
-    // Decompression-bomb guard: bound the decoder's allocation and the
-    // canvas dimensions *before* the full decode. `load_from_memory` would
-    // happily allocate gigabytes for a tiny file that declares a 60000×60000
-    // canvas. The hard pixel ceiling is generous (real source art is far
-    // smaller, and oversized-but-honest images are downscaled below); the
-    // alloc cap is the actual DoS backstop. 10_000² × 4 B/px ≈ 400 MB >
-    // 128 MiB, so for any normal aspect ratio `max_alloc` is the binding
-    // gate; the pixel ceilings only catch pathological strips (e.g.
-    // 10001×1) — they are not independently tunable.
     const HARD_DIM_PX: u32 = 10_000;
     const MAX_DECODE_ALLOC: u64 = 128 * 1024 * 1024;
     let mut limits = image::Limits::default();
@@ -457,74 +648,7 @@ mod tests {
     #[test]
     fn normalise_blanks_to_none() {
         assert_eq!(normalise_opt(Some("  ".into())), None);
-        assert_eq!(normalise_opt(Some(String::new())), None);
-        assert_eq!(normalise_opt(None), None);
         assert_eq!(normalise_opt(Some("  hi ".into())), Some("hi".into()));
-    }
-
-    #[test]
-    fn update_request_accepts_json_bool_and_html_checkbox() {
-        // API client: real JSON booleans round-trip unchanged.
-        let r: UpdateStatusPageRequest = serde_json::from_str(
-            r#"{"public_status_enabled":true,"public_show_powered_by":false}"#,
-        )
-        .unwrap();
-        assert!(r.public_status_enabled);
-        assert!(!r.public_show_powered_by);
-
-        // htmx json-enc: a checked box arrives as the string "on".
-        let r: UpdateStatusPageRequest =
-            serde_json::from_str(r#"{"public_status_enabled":"on"}"#).unwrap();
-        assert!(r.public_status_enabled);
-        // An unchecked box is omitted entirely → default false (not a 422).
-        assert!(!r.public_show_powered_by);
-
-        // Both fields omitted (was a required field before the fix) → false,
-        // never a deserialize 422.
-        let r: UpdateStatusPageRequest = serde_json::from_str("{}").unwrap();
-        assert!(!r.public_status_enabled);
-        assert!(!r.public_show_powered_by);
-
-        // Explicit string falsey values, numbers, and null all coerce to
-        // false rather than erroring.
-        let r: UpdateStatusPageRequest = serde_json::from_str(
-            r#"{"public_status_enabled":"false","public_show_powered_by":""}"#,
-        )
-        .unwrap();
-        assert!(!r.public_status_enabled);
-        assert!(!r.public_show_powered_by);
-
-        let r: UpdateStatusPageRequest =
-            serde_json::from_str(r#"{"public_status_enabled":1,"public_show_powered_by":null}"#)
-                .unwrap();
-        assert!(r.public_status_enabled);
-        assert!(!r.public_show_powered_by);
-    }
-
-    #[test]
-    fn update_request_rejects_unknown_public_style() {
-        let err = serde_json::from_str::<UpdateStatusPageRequest>(r#"{"public_style":"garbage"}"#)
-            .unwrap_err()
-            .to_string();
-        assert!(
-            err.contains("unknown variant") && err.contains("garbage"),
-            "expected unknown-variant error, got: {err}"
-        );
-    }
-
-    #[test]
-    fn update_request_absent_public_style_preserves_via_none() {
-        let r: UpdateStatusPageRequest = serde_json::from_str("{}").unwrap();
-        assert!(r.public_style.is_none());
-    }
-
-    #[test]
-    fn update_request_known_public_style_round_trips() {
-        for v in PublicStyle::ALL {
-            let body = format!(r#"{{"public_style":"{v}"}}"#);
-            let r: UpdateStatusPageRequest = serde_json::from_str(&body).unwrap();
-            assert_eq!(r.public_style.unwrap().as_str(), *v);
-        }
     }
 
     #[test]
@@ -534,25 +658,7 @@ mod tests {
     }
 
     #[test]
-    fn process_logo_rejects_oversized_canvas() {
-        // Decompression-bomb shape: cheap to encode (1px tall) but a width
-        // past the hard pixel ceiling. The decoder's `Limits` must reject it
-        // *before* materialising the canvas, not OOM.
-        let wide = image::RgbaImage::from_pixel(10_001, 1, image::Rgba([0, 0, 0, 255]));
-        let mut buf = std::io::Cursor::new(Vec::new());
-        image::DynamicImage::ImageRgba8(wide)
-            .write_to(&mut buf, image::ImageFormat::Png)
-            .unwrap();
-        let err = process_logo(&buf.into_inner(), 1200).unwrap_err();
-        assert!(
-            matches!(&err, AppError::BadRequest { code, .. } if *code == codes::LOGO_DECODE_FAILED),
-            "expected LOGO_DECODE_FAILED, got {err:?}"
-        );
-    }
-
-    #[test]
     fn process_logo_passes_small_png_through_untouched() {
-        // 1x1 PNG.
         let png = image::RgbaImage::from_pixel(1, 1, image::Rgba([1, 2, 3, 255]));
         let mut buf = std::io::Cursor::new(Vec::new());
         image::DynamicImage::ImageRgba8(png)
@@ -561,18 +667,6 @@ mod tests {
         let raw = buf.into_inner();
         let (mime, out) = process_logo(&raw, 1200).unwrap();
         assert_eq!(mime, LogoMime::Png);
-        assert_eq!(out, raw, "in-bounds image must be stored verbatim");
-    }
-
-    #[test]
-    fn process_logo_downscales_oversized() {
-        let big = image::RgbaImage::from_pixel(2000, 1000, image::Rgba([9, 9, 9, 255]));
-        let mut buf = std::io::Cursor::new(Vec::new());
-        image::DynamicImage::ImageRgba8(big)
-            .write_to(&mut buf, image::ImageFormat::Png)
-            .unwrap();
-        let (_, out) = process_logo(&buf.into_inner(), 512).unwrap();
-        let decoded = image::load_from_memory(&out).unwrap();
-        assert!(decoded.width() <= 512 && decoded.height() <= 512);
+        assert_eq!(out, raw);
     }
 }

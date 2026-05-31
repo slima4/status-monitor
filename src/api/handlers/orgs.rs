@@ -303,13 +303,6 @@ pub async fn update_org(
         }
     };
 
-    // Drop any cached public page when the slug changes — the cache is keyed
-    // by `OrgId`, but slug-derived URLs (e.g. the logo origin) are baked into
-    // the rendered snapshot. A no-op patch (same slug as before) skips this
-    // since the storage layer already short-circuits the audit write.
-    if new_slug.is_some() {
-        state.public_source.invalidate(org_id).await;
-    }
     Ok(Json(org.into()))
 }
 

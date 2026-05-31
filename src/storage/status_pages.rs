@@ -1,0 +1,882 @@
+//! Storage for `status_pages` and their `status_page_components` curation.
+//!
+//! Per-org, owner-managed. Mirrors the `notification_channels` cap-enforcing
+//! create pattern (advisory lock + count subquery) for `max_status_pages`, and
+//! the `maintenance_window_components` join idioms for component curation. Page
+//! branding + logo writes live here (page-keyed), not on `organizations`.
+
+use std::collections::HashSet;
+
+use async_trait::async_trait;
+use chrono::{DateTime, Utc};
+use sqlx::PgPool;
+use uuid::Uuid;
+
+use crate::api::error::codes;
+use crate::domain::{
+    NewStatusPage, NewStatusPageComponent, OrgId, PublicOrgBranding, PublicStyle, StatusPage,
+    StatusPageComponent, StatusPageComponentUpdate, StatusPageId, StatusPageUpdate, WriteSource,
+};
+use crate::error::{AppError, Result};
+use crate::storage::locks::{advisory_xact_lock, org_lock_key};
+
+/// Outcome of [`StatusPageStore::add_component`]. The store stays free of
+/// plan/HTTP concerns; the handler maps `OverCap` to a quota 422 with the real
+/// plan id. Not-found (page/target outside the org) surfaces as an `Err`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AddComponentOutcome {
+    Added,
+    /// Already on this page — idempotent no-op.
+    AlreadyOnPage,
+    /// Adding a new distinct target would exceed `max_public_components`.
+    OverCap {
+        used: i64,
+    },
+}
+
+#[derive(sqlx::FromRow)]
+struct PreInsertGuard {
+    page_ok: bool,
+    target_ok: bool,
+    already_on_page: bool,
+    already_counted: bool,
+    used: i64,
+}
+
+#[async_trait]
+pub trait StatusPageStore: Send + Sync {
+    /// Create a page, capped at `max_pages` per org (race-safe under the
+    /// per-org advisory lock). `Ok(None)` = the cap was hit (the caller owns the
+    /// quota error so it can name the real plan); a taken slug → `SLUG_TAKEN`.
+    async fn create(
+        &self,
+        org: OrgId,
+        new: NewStatusPage,
+        source: WriteSource,
+        max_pages: i64,
+    ) -> Result<Option<StatusPage>>;
+    async fn list(&self, org: OrgId) -> Result<Vec<StatusPage>>;
+    async fn get(&self, org: OrgId, id: StatusPageId) -> Result<Option<StatusPage>>;
+    /// Update identity (name/slug/enabled) and/or branding. A taken slug →
+    /// `SLUG_TAKEN`. Logo is set via [`set_logo_path`]. Returns the updated
+    /// page, or `None` if it doesn't exist in this org.
+    async fn update(
+        &self,
+        org: OrgId,
+        id: StatusPageId,
+        upd: StatusPageUpdate,
+        source: WriteSource,
+    ) -> Result<Option<StatusPage>>;
+    async fn delete(&self, org: OrgId, id: StatusPageId) -> Result<bool>;
+    /// Swap the page's logo path, returning the prior path (so the caller can
+    /// delete the orphaned file). Outer `None` = page not found in this org.
+    async fn set_logo_path(
+        &self,
+        org: OrgId,
+        id: StatusPageId,
+        new: Option<&str>,
+    ) -> Result<Option<Option<String>>>;
+
+    async fn list_components(
+        &self,
+        org: OrgId,
+        page: StatusPageId,
+    ) -> Result<Vec<StatusPageComponent>>;
+    /// Add a monitor to a page. Enforces the per-org distinct-target
+    /// public-component cap under the advisory lock (a target already on
+    /// another page costs 0). The target must belong to `org`.
+    async fn add_component(
+        &self,
+        org: OrgId,
+        page: StatusPageId,
+        new: NewStatusPageComponent,
+        max_public_components: i64,
+    ) -> Result<AddComponentOutcome>;
+    async fn update_component(
+        &self,
+        org: OrgId,
+        page: StatusPageId,
+        target_id: Uuid,
+        upd: StatusPageComponentUpdate,
+    ) -> Result<bool>;
+    async fn remove_component(
+        &self,
+        org: OrgId,
+        page: StatusPageId,
+        target_id: Uuid,
+    ) -> Result<bool>;
+    /// Rewrite `sort_order` to match the given target_id order (0-based).
+    async fn reorder_components(
+        &self,
+        org: OrgId,
+        page: StatusPageId,
+        ordered_target_ids: &[Uuid],
+    ) -> Result<()>;
+
+    /// Distinct ids of every page in `org` that curates any of `target_ids`.
+    /// Lets a monitor write (rename, delete, enable flip) invalidate exactly
+    /// the public pages it appears on. Query it *before* a delete so the
+    /// cascade hasn't yet dropped the join rows.
+    async fn pages_for_targets(&self, org: OrgId, target_ids: &[Uuid])
+    -> Result<Vec<StatusPageId>>;
+}
+
+pub struct PgStatusPageStore {
+    pool: PgPool,
+}
+
+impl PgStatusPageStore {
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
+    }
+}
+
+#[derive(sqlx::FromRow)]
+struct PageRow {
+    id: Uuid,
+    org_id: Uuid,
+    slug: String,
+    name: String,
+    enabled: bool,
+    public_display_name: Option<String>,
+    public_about: Option<String>,
+    public_brand_color: Option<String>,
+    public_logo_path: Option<String>,
+    public_show_powered_by: Option<bool>,
+    public_style: String,
+    write_source: String,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
+}
+
+impl PageRow {
+    fn into_page(self) -> StatusPage {
+        StatusPage {
+            id: StatusPageId(self.id),
+            org_id: OrgId(self.org_id),
+            slug: self.slug,
+            name: self.name,
+            enabled: self.enabled,
+            branding: PublicOrgBranding {
+                public_display_name: self.public_display_name,
+                public_about: self.public_about,
+                public_brand_color: self.public_brand_color,
+                public_logo_path: self.public_logo_path,
+                public_show_powered_by: self.public_show_powered_by,
+                public_style: PublicStyle::from_db(&self.public_style),
+            },
+            write_source: WriteSource::from_db(&self.write_source),
+            created_at: self.created_at,
+            updated_at: self.updated_at,
+        }
+    }
+}
+
+const PAGE_COLUMNS: &str = "id, org_id, slug::text AS slug, name, enabled, \
+     public_display_name, public_about, public_brand_color, public_logo_path, \
+     public_show_powered_by, public_style, write_source, created_at, updated_at";
+
+fn is_unique_violation(e: &sqlx::Error) -> bool {
+    e.as_database_error()
+        .is_some_and(|d| d.is_unique_violation())
+}
+
+fn slug_taken() -> AppError {
+    AppError::unprocessable(codes::SLUG_TAKEN, "that status-page slug is already taken")
+}
+
+#[derive(sqlx::FromRow)]
+struct ComponentRow {
+    target_id: Uuid,
+    monitor_name: String,
+    public_name: Option<String>,
+    public_description: Option<String>,
+    public_group: Option<String>,
+    sort_order: i32,
+}
+
+#[async_trait]
+impl StatusPageStore for PgStatusPageStore {
+    async fn create(
+        &self,
+        org: OrgId,
+        new: NewStatusPage,
+        source: WriteSource,
+        max_pages: i64,
+    ) -> Result<Option<StatusPage>> {
+        let mut tx = self.pool.begin().await.map_err(db_err)?;
+        advisory_xact_lock(&mut *tx, &org_lock_key(org))
+            .await
+            .map_err(db_err)?;
+        let row: Option<PageRow> = sqlx::query_as(&format!(
+            r#"INSERT INTO status_pages (org_id, slug, name, enabled, write_source)
+               SELECT $1, $2, $3, $4, $5
+               WHERE (SELECT count(*) FROM status_pages WHERE org_id = $1) < $6
+               RETURNING {PAGE_COLUMNS}"#
+        ))
+        .bind(org.0)
+        .bind(&new.slug)
+        .bind(&new.name)
+        .bind(new.enabled)
+        .bind(source.as_str())
+        .bind(max_pages)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|e| {
+            if is_unique_violation(&e) {
+                slug_taken()
+            } else {
+                db_err(e)
+            }
+        })?;
+        let Some(row) = row else {
+            tx.rollback().await.ok();
+            return Ok(None); // cap hit — caller maps to a plan-named quota error
+        };
+        tx.commit().await.map_err(db_err)?;
+        Ok(Some(row.into_page()))
+    }
+
+    async fn list(&self, org: OrgId) -> Result<Vec<StatusPage>> {
+        let rows: Vec<PageRow> = sqlx::query_as(&format!(
+            "SELECT {PAGE_COLUMNS} FROM status_pages WHERE org_id = $1 ORDER BY created_at"
+        ))
+        .bind(org.0)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(db_err)?;
+        Ok(rows.into_iter().map(PageRow::into_page).collect())
+    }
+
+    async fn get(&self, org: OrgId, id: StatusPageId) -> Result<Option<StatusPage>> {
+        let row: Option<PageRow> = sqlx::query_as(&format!(
+            "SELECT {PAGE_COLUMNS} FROM status_pages WHERE id = $1 AND org_id = $2"
+        ))
+        .bind(id.0)
+        .bind(org.0)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(db_err)?;
+        Ok(row.map(PageRow::into_page))
+    }
+
+    async fn update(
+        &self,
+        org: OrgId,
+        id: StatusPageId,
+        upd: StatusPageUpdate,
+        source: WriteSource,
+    ) -> Result<Option<StatusPage>> {
+        // Branding `Some` replaces the display fields wholesale; `None` leaves
+        // them. name/slug/enabled use COALESCE so a partial update is honest.
+        let b = upd.branding;
+        let row: Option<PageRow> = sqlx::query_as(&format!(
+            r#"UPDATE status_pages SET
+                 name = COALESCE($3, name),
+                 slug = COALESCE($4, slug),
+                 enabled = COALESCE($5, enabled),
+                 public_display_name = CASE WHEN $6::bool THEN $7 ELSE public_display_name END,
+                 public_about        = CASE WHEN $6::bool THEN $8 ELSE public_about END,
+                 public_brand_color  = CASE WHEN $6::bool THEN $9 ELSE public_brand_color END,
+                 public_show_powered_by = CASE WHEN $6::bool THEN $10 ELSE public_show_powered_by END,
+                 public_style        = CASE WHEN $6::bool THEN $11 ELSE public_style END,
+                 write_source = $12,
+                 updated_at = now()
+               WHERE id = $1 AND org_id = $2
+               RETURNING {PAGE_COLUMNS}"#
+        ))
+        .bind(id.0)
+        .bind(org.0)
+        .bind(upd.name)
+        .bind(upd.slug)
+        .bind(upd.enabled)
+        .bind(b.is_some())
+        .bind(b.as_ref().and_then(|x| x.public_display_name.clone()))
+        .bind(b.as_ref().and_then(|x| x.public_about.clone()))
+        .bind(b.as_ref().and_then(|x| x.public_brand_color.clone()))
+        .bind(b.as_ref().and_then(|x| x.public_show_powered_by))
+        .bind(b.as_ref().map(|x| x.public_style.as_str()))
+        .bind(source.as_str())
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| if is_unique_violation(&e) { slug_taken() } else { db_err(e) })?;
+        Ok(row.map(PageRow::into_page))
+    }
+
+    async fn delete(&self, org: OrgId, id: StatusPageId) -> Result<bool> {
+        let res = sqlx::query("DELETE FROM status_pages WHERE id = $1 AND org_id = $2")
+            .bind(id.0)
+            .bind(org.0)
+            .execute(&self.pool)
+            .await
+            .map_err(db_err)?;
+        Ok(res.rows_affected() > 0)
+    }
+
+    async fn set_logo_path(
+        &self,
+        org: OrgId,
+        id: StatusPageId,
+        new: Option<&str>,
+    ) -> Result<Option<Option<String>>> {
+        let mut tx = self.pool.begin().await.map_err(db_err)?;
+        let Some((prev,)): Option<(Option<String>,)> = sqlx::query_as(
+            "SELECT public_logo_path FROM status_pages WHERE id = $1 AND org_id = $2 FOR UPDATE",
+        )
+        .bind(id.0)
+        .bind(org.0)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(db_err)?
+        else {
+            tx.rollback().await.ok();
+            return Ok(None);
+        };
+        sqlx::query(
+            "UPDATE status_pages SET public_logo_path = $3, updated_at = now() \
+             WHERE id = $1 AND org_id = $2",
+        )
+        .bind(id.0)
+        .bind(org.0)
+        .bind(new)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
+        tx.commit().await.map_err(db_err)?;
+        Ok(Some(prev))
+    }
+
+    async fn list_components(
+        &self,
+        org: OrgId,
+        page: StatusPageId,
+    ) -> Result<Vec<StatusPageComponent>> {
+        let rows: Vec<ComponentRow> = sqlx::query_as(
+            r#"SELECT spc.target_id, t.name AS monitor_name,
+                      spc.public_name, spc.public_description, spc.public_group, spc.sort_order
+               FROM status_page_components spc
+               JOIN targets t ON t.id = spc.target_id AND t.org_id = spc.org_id
+               WHERE spc.status_page_id = $1 AND spc.org_id = $2
+               ORDER BY spc.public_group NULLS LAST, spc.sort_order, t.name"#,
+        )
+        .bind(page.0)
+        .bind(org.0)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(db_err)?;
+        Ok(rows
+            .into_iter()
+            .map(|r| StatusPageComponent {
+                target_id: r.target_id,
+                monitor_name: r.monitor_name,
+                public_name: r.public_name,
+                public_description: r.public_description,
+                public_group: r.public_group,
+                sort_order: r.sort_order,
+            })
+            .collect())
+    }
+
+    async fn add_component(
+        &self,
+        org: OrgId,
+        page: StatusPageId,
+        new: NewStatusPageComponent,
+        max_public_components: i64,
+    ) -> Result<AddComponentOutcome> {
+        let mut tx = self.pool.begin().await.map_err(db_err)?;
+        advisory_xact_lock(&mut *tx, &org_lock_key(org))
+            .await
+            .map_err(db_err)?;
+        // One snapshot under the lock distinguishes every outcome: org-membership
+        // of the page and target (404, not a quota error), idempotent re-add, and
+        // the distinct-target cap (a target already counted on another page is
+        // free; a brand-new one costs 1).
+        let g: PreInsertGuard = sqlx::query_as(
+            r#"SELECT
+                 EXISTS (SELECT 1 FROM status_pages WHERE id = $2 AND org_id = $1) AS page_ok,
+                 EXISTS (SELECT 1 FROM targets WHERE id = $3 AND org_id = $1) AS target_ok,
+                 EXISTS (SELECT 1 FROM status_page_components
+                         WHERE status_page_id = $2 AND target_id = $3) AS already_on_page,
+                 EXISTS (SELECT 1 FROM status_page_components
+                         WHERE org_id = $1 AND target_id = $3) AS already_counted,
+                 (SELECT count(DISTINCT target_id) FROM status_page_components
+                  WHERE org_id = $1) AS used"#,
+        )
+        .bind(org.0)
+        .bind(page.0)
+        .bind(new.target_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(db_err)?;
+
+        if !g.page_ok {
+            return Err(AppError::not_found(
+                codes::STATUS_PAGE_NOT_FOUND,
+                "status page not found",
+            ));
+        }
+        if !g.target_ok {
+            return Err(AppError::not_found(
+                codes::TARGET_NOT_FOUND,
+                "target not found",
+            ));
+        }
+        if g.already_on_page {
+            return Ok(AddComponentOutcome::AlreadyOnPage);
+        }
+        let cost = i64::from(!g.already_counted);
+        if g.used + cost > max_public_components {
+            return Ok(AddComponentOutcome::OverCap { used: g.used });
+        }
+
+        // ON CONFLICT is a race backstop only — already_on_page handled above.
+        sqlx::query(
+            r#"INSERT INTO status_page_components
+                   (org_id, status_page_id, target_id, public_name, public_description, public_group, sort_order)
+               VALUES ($1, $2, $3, $4, $5, $6, $7)
+               ON CONFLICT (status_page_id, target_id) DO NOTHING"#,
+        )
+        .bind(org.0)
+        .bind(page.0)
+        .bind(new.target_id)
+        .bind(new.public_name)
+        .bind(new.public_description)
+        .bind(new.public_group)
+        .bind(new.sort_order)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
+        tx.commit().await.map_err(db_err)?;
+        Ok(AddComponentOutcome::Added)
+    }
+
+    async fn update_component(
+        &self,
+        org: OrgId,
+        page: StatusPageId,
+        target_id: Uuid,
+        upd: StatusPageComponentUpdate,
+    ) -> Result<bool> {
+        let res = sqlx::query(
+            r#"UPDATE status_page_components SET
+                 public_name = CASE WHEN $4::bool THEN $5 ELSE public_name END,
+                 public_description = CASE WHEN $6::bool THEN $7 ELSE public_description END,
+                 public_group = CASE WHEN $8::bool THEN $9 ELSE public_group END,
+                 sort_order = COALESCE($10, sort_order),
+                 updated_at = now()
+               WHERE status_page_id = $1 AND target_id = $2 AND org_id = $3"#,
+        )
+        .bind(page.0)
+        .bind(target_id)
+        .bind(org.0)
+        .bind(upd.public_name.is_some())
+        .bind(upd.public_name.flatten())
+        .bind(upd.public_description.is_some())
+        .bind(upd.public_description.flatten())
+        .bind(upd.public_group.is_some())
+        .bind(upd.public_group.flatten())
+        .bind(upd.sort_order)
+        .execute(&self.pool)
+        .await
+        .map_err(db_err)?;
+        Ok(res.rows_affected() > 0)
+    }
+
+    async fn remove_component(
+        &self,
+        org: OrgId,
+        page: StatusPageId,
+        target_id: Uuid,
+    ) -> Result<bool> {
+        let res = sqlx::query(
+            "DELETE FROM status_page_components \
+             WHERE status_page_id = $1 AND target_id = $2 AND org_id = $3",
+        )
+        .bind(page.0)
+        .bind(target_id)
+        .bind(org.0)
+        .execute(&self.pool)
+        .await
+        .map_err(db_err)?;
+        Ok(res.rows_affected() > 0)
+    }
+
+    async fn reorder_components(
+        &self,
+        org: OrgId,
+        page: StatusPageId,
+        ordered_target_ids: &[Uuid],
+    ) -> Result<()> {
+        if ordered_target_ids.is_empty() {
+            return Ok(());
+        }
+        // One UPDATE … FROM UNNEST with the new 0-based index as sort_order.
+        let indices: Vec<i32> = (0..ordered_target_ids.len() as i32).collect();
+        sqlx::query(
+            r#"UPDATE status_page_components spc
+               SET sort_order = u.ord, updated_at = now()
+               FROM UNNEST($3::uuid[], $4::int4[]) AS u(target_id, ord)
+               WHERE spc.status_page_id = $1 AND spc.org_id = $2
+                 AND spc.target_id = u.target_id"#,
+        )
+        .bind(page.0)
+        .bind(org.0)
+        .bind(ordered_target_ids)
+        .bind(&indices)
+        .execute(&self.pool)
+        .await
+        .map_err(db_err)?;
+        Ok(())
+    }
+
+    async fn pages_for_targets(
+        &self,
+        org: OrgId,
+        target_ids: &[Uuid],
+    ) -> Result<Vec<StatusPageId>> {
+        if target_ids.is_empty() {
+            return Ok(vec![]);
+        }
+        let rows: Vec<(Uuid,)> = sqlx::query_as(
+            r#"SELECT DISTINCT status_page_id FROM status_page_components
+               WHERE org_id = $1 AND target_id = ANY($2)"#,
+        )
+        .bind(org.0)
+        .bind(target_ids)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(db_err)?;
+        Ok(rows.into_iter().map(|(id,)| StatusPageId(id)).collect())
+    }
+}
+
+fn db_err(e: sqlx::Error) -> AppError {
+    AppError::Other(anyhow::anyhow!("status_pages: {e}"))
+}
+
+// ── In-memory store (tests / no-DB harnesses) ────────────────────────────────
+
+struct MemComponent {
+    page: StatusPageId,
+    org: OrgId,
+    target_id: Uuid,
+    public_name: Option<String>,
+    public_description: Option<String>,
+    public_group: Option<String>,
+    sort_order: i32,
+}
+
+#[derive(Default)]
+struct MemState {
+    pages: Vec<StatusPage>,
+    components: Vec<MemComponent>,
+}
+
+/// In-memory [`StatusPageStore`] mirroring [`PgStatusPageStore`] semantics
+/// (per-org page cap, global slug uniqueness, distinct-target component cap).
+/// `monitor_name` is left empty — it has no target store to resolve names from;
+/// DB-backed tests use [`PgStatusPageStore`] for that.
+#[derive(Default)]
+pub struct InMemoryStatusPageStore {
+    inner: std::sync::Mutex<MemState>,
+}
+
+impl InMemoryStatusPageStore {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+#[async_trait]
+impl StatusPageStore for InMemoryStatusPageStore {
+    async fn create(
+        &self,
+        org: OrgId,
+        new: NewStatusPage,
+        source: WriteSource,
+        max_pages: i64,
+    ) -> Result<Option<StatusPage>> {
+        let mut st = self.inner.lock().unwrap();
+        if st.pages.iter().filter(|p| p.org_id == org).count() as i64 >= max_pages {
+            return Ok(None); // cap hit — caller maps to a plan-named quota error
+        }
+        if st.pages.iter().any(|p| p.slug == new.slug) {
+            return Err(slug_taken());
+        }
+        let now = Utc::now();
+        let page = StatusPage {
+            id: StatusPageId(Uuid::new_v4()),
+            org_id: org,
+            slug: new.slug,
+            name: new.name,
+            enabled: new.enabled,
+            branding: PublicOrgBranding::default(),
+            write_source: source,
+            created_at: now,
+            updated_at: now,
+        };
+        st.pages.push(page.clone());
+        Ok(Some(page))
+    }
+
+    async fn list(&self, org: OrgId) -> Result<Vec<StatusPage>> {
+        let st = self.inner.lock().unwrap();
+        let mut out: Vec<StatusPage> = st
+            .pages
+            .iter()
+            .filter(|p| p.org_id == org)
+            .cloned()
+            .collect();
+        out.sort_by_key(|p| p.created_at);
+        Ok(out)
+    }
+
+    async fn get(&self, org: OrgId, id: StatusPageId) -> Result<Option<StatusPage>> {
+        let st = self.inner.lock().unwrap();
+        Ok(st
+            .pages
+            .iter()
+            .find(|p| p.id == id && p.org_id == org)
+            .cloned())
+    }
+
+    async fn update(
+        &self,
+        org: OrgId,
+        id: StatusPageId,
+        upd: StatusPageUpdate,
+        source: WriteSource,
+    ) -> Result<Option<StatusPage>> {
+        let mut st = self.inner.lock().unwrap();
+        // Existence (in this org) before the slug check, so a foreign/missing
+        // page is a 404, not a SLUG_TAKEN leak — matching the Pg UPDATE which
+        // only collides on the row it actually matches.
+        if !st.pages.iter().any(|p| p.id == id && p.org_id == org) {
+            return Ok(None);
+        }
+        if let Some(ref s) = upd.slug
+            && st.pages.iter().any(|p| p.slug == *s && p.id != id)
+        {
+            return Err(slug_taken());
+        }
+        let p = st
+            .pages
+            .iter_mut()
+            .find(|p| p.id == id && p.org_id == org)
+            .expect("checked above");
+        if let Some(n) = upd.name {
+            p.name = n;
+        }
+        if let Some(s) = upd.slug {
+            p.slug = s;
+        }
+        if let Some(e) = upd.enabled {
+            p.enabled = e;
+        }
+        if let Some(b) = upd.branding {
+            // The logo has its own endpoint; a branding replace leaves it alone.
+            let logo = p.branding.public_logo_path.clone();
+            p.branding = b;
+            p.branding.public_logo_path = logo;
+        }
+        p.write_source = source;
+        p.updated_at = Utc::now();
+        Ok(Some(p.clone()))
+    }
+
+    async fn delete(&self, org: OrgId, id: StatusPageId) -> Result<bool> {
+        let mut st = self.inner.lock().unwrap();
+        let before = st.pages.len();
+        st.pages.retain(|p| !(p.id == id && p.org_id == org));
+        let removed = st.pages.len() != before;
+        if removed {
+            st.components.retain(|c| c.page != id);
+        }
+        Ok(removed)
+    }
+
+    async fn set_logo_path(
+        &self,
+        org: OrgId,
+        id: StatusPageId,
+        new: Option<&str>,
+    ) -> Result<Option<Option<String>>> {
+        let mut st = self.inner.lock().unwrap();
+        let Some(p) = st.pages.iter_mut().find(|p| p.id == id && p.org_id == org) else {
+            return Ok(None);
+        };
+        let prev = p.branding.public_logo_path.take();
+        p.branding.public_logo_path = new.map(str::to_owned);
+        Ok(Some(prev))
+    }
+
+    async fn list_components(
+        &self,
+        org: OrgId,
+        page: StatusPageId,
+    ) -> Result<Vec<StatusPageComponent>> {
+        let st = self.inner.lock().unwrap();
+        let mut out: Vec<StatusPageComponent> = st
+            .components
+            .iter()
+            .filter(|c| c.page == page && c.org == org)
+            .map(|c| StatusPageComponent {
+                target_id: c.target_id,
+                monitor_name: String::new(),
+                public_name: c.public_name.clone(),
+                public_description: c.public_description.clone(),
+                public_group: c.public_group.clone(),
+                sort_order: c.sort_order,
+            })
+            .collect();
+        // Mirror the Pg `ORDER BY public_group NULLS LAST, sort_order`: Rust's
+        // Option ordering puts None first, so key on is_none() to push it last.
+        // target_id is the stable tiebreak (no monitor_name to sort on here).
+        out.sort_by(|a, b| {
+            (
+                a.public_group.is_none(),
+                &a.public_group,
+                a.sort_order,
+                a.target_id,
+            )
+                .cmp(&(
+                    b.public_group.is_none(),
+                    &b.public_group,
+                    b.sort_order,
+                    b.target_id,
+                ))
+        });
+        Ok(out)
+    }
+
+    async fn add_component(
+        &self,
+        org: OrgId,
+        page: StatusPageId,
+        new: NewStatusPageComponent,
+        max_public_components: i64,
+    ) -> Result<AddComponentOutcome> {
+        // Unlike the Pg store, this has no target table, so it can't verify the
+        // target belongs to `org` (no `TARGET_NOT_FOUND` path). Harnesses that
+        // need that guard use `PgStatusPageStore`.
+        let mut st = self.inner.lock().unwrap();
+        if !st.pages.iter().any(|p| p.id == page && p.org_id == org) {
+            return Err(AppError::not_found(
+                codes::STATUS_PAGE_NOT_FOUND,
+                "status page not found",
+            ));
+        }
+        if st
+            .components
+            .iter()
+            .any(|c| c.page == page && c.target_id == new.target_id)
+        {
+            return Ok(AddComponentOutcome::AlreadyOnPage);
+        }
+        let used = st
+            .components
+            .iter()
+            .filter(|c| c.org == org)
+            .map(|c| c.target_id)
+            .collect::<HashSet<_>>()
+            .len() as i64;
+        let already_counted = st
+            .components
+            .iter()
+            .any(|c| c.org == org && c.target_id == new.target_id);
+        let cost = i64::from(!already_counted);
+        if used + cost > max_public_components {
+            return Ok(AddComponentOutcome::OverCap { used });
+        }
+        st.components.push(MemComponent {
+            page,
+            org,
+            target_id: new.target_id,
+            public_name: new.public_name,
+            public_description: new.public_description,
+            public_group: new.public_group,
+            sort_order: new.sort_order,
+        });
+        Ok(AddComponentOutcome::Added)
+    }
+
+    async fn update_component(
+        &self,
+        org: OrgId,
+        page: StatusPageId,
+        target_id: Uuid,
+        upd: StatusPageComponentUpdate,
+    ) -> Result<bool> {
+        let mut st = self.inner.lock().unwrap();
+        let Some(c) = st
+            .components
+            .iter_mut()
+            .find(|c| c.page == page && c.org == org && c.target_id == target_id)
+        else {
+            return Ok(false);
+        };
+        if let Some(v) = upd.public_name {
+            c.public_name = v;
+        }
+        if let Some(v) = upd.public_description {
+            c.public_description = v;
+        }
+        if let Some(v) = upd.public_group {
+            c.public_group = v;
+        }
+        if let Some(v) = upd.sort_order {
+            c.sort_order = v;
+        }
+        Ok(true)
+    }
+
+    async fn remove_component(
+        &self,
+        org: OrgId,
+        page: StatusPageId,
+        target_id: Uuid,
+    ) -> Result<bool> {
+        let mut st = self.inner.lock().unwrap();
+        let before = st.components.len();
+        st.components
+            .retain(|c| !(c.page == page && c.org == org && c.target_id == target_id));
+        Ok(st.components.len() != before)
+    }
+
+    async fn reorder_components(
+        &self,
+        org: OrgId,
+        page: StatusPageId,
+        ordered_target_ids: &[Uuid],
+    ) -> Result<()> {
+        let mut st = self.inner.lock().unwrap();
+        for (i, tid) in ordered_target_ids.iter().enumerate() {
+            if let Some(c) = st
+                .components
+                .iter_mut()
+                .find(|c| c.page == page && c.org == org && c.target_id == *tid)
+            {
+                c.sort_order = i as i32;
+            }
+        }
+        Ok(())
+    }
+
+    async fn pages_for_targets(
+        &self,
+        org: OrgId,
+        target_ids: &[Uuid],
+    ) -> Result<Vec<StatusPageId>> {
+        let st = self.inner.lock().unwrap();
+        let mut pages: Vec<StatusPageId> = st
+            .components
+            .iter()
+            .filter(|c| c.org == org && target_ids.contains(&c.target_id))
+            .map(|c| c.page)
+            .collect();
+        pages.sort_by_key(|p| p.0);
+        pages.dedup();
+        Ok(pages)
+    }
+}

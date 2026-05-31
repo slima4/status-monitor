@@ -197,18 +197,18 @@ async fn users_theme_check_matches_app_theme_enum() {
 
 #[tokio::test]
 #[ignore]
-async fn organizations_public_style_check_matches_public_style_enum() {
+async fn status_pages_public_style_check_matches_public_style_enum() {
     let Some(pool) = common::pg_pool_from_env().await else {
         return;
     };
-    let def = constraint_def(&pool, "public_style_known")
+    let def = constraint_def(&pool, "status_page_style_known")
         .await
-        .expect("public_style_known missing");
+        .expect("status_page_style_known missing");
     let db = sorted(quoted_tokens(&def));
     let rust = sorted(PublicStyle::ALL.iter().map(|s| (*s).to_string()).collect());
     assert_eq!(
         db, rust,
-        "organizations.public_style CHECK list ({db:?}) drifted from PublicStyle ({rust:?})"
+        "status_pages.public_style CHECK list ({db:?}) drifted from PublicStyle ({rust:?})"
     );
 }
 

@@ -18,15 +18,15 @@ use crate::app::AppState;
 use crate::config::PublicStatusConfig;
 use crate::domain::elapsed_at;
 use crate::domain::{
-    DayState, IncidentSeverity, IncidentStatusPhase, OrgId, OverallState, PublicComponent,
+    DayState, IncidentSeverity, IncidentStatusPhase, OverallState, PublicComponent,
     PublicComponentGroup, PublicComponentStatus, PublicIncident, PublicIncidentUpdate,
-    PublicMaintenance, PublicOrgBranding, PublicStatusPage,
+    PublicMaintenance, PublicOrgBranding, PublicStatusPage, StatusPageId,
 };
 use crate::public_status::{HistoryIncidentMarker, LocalDiskLogoStorage, LogoStorage};
-use crate::storage::orgs::{OrgBranding, load_public_branding};
+use crate::storage::orgs::{OrgBranding, load_page_branding};
 use crate::web::error::{NotFoundPage, UnavailablePage};
 use crate::web::filters;
-use crate::web::host::{HostShape, parse_host_shape, resolve_status_page_org};
+use crate::web::host::{HostShape, parse_host_shape, resolve_status_page};
 use crate::web::views::humanize_duration;
 
 #[derive(Debug, Default, Deserialize)]
@@ -107,11 +107,11 @@ pub async fn index(
     headers: HeaderMap,
     Query(params): Query<StatusParams>,
 ) -> Response {
-    let org = match resolve_status_page_org(&state, &headers).await {
-        Ok(o) => o,
+    let page_ref = match resolve_status_page(&state, &headers).await {
+        Ok(p) => p,
         Err(err) => return render_public_error(err),
     };
-    let (page, markers) = match state.public_source.page_with_markers(org).await {
+    let (page, markers) = match state.public_source.page_with_markers(page_ref).await {
         Ok(pair) => pair,
         Err(err) => return render_public_error(err),
     };
@@ -121,7 +121,7 @@ pub async fn index(
         // branding lookup is skipped on the 30s poll.
         StatusRegion { view }.into_response()
     } else {
-        let branding = resolve_branding(&state, org, &page.site_name).await;
+        let branding = resolve_branding(&state, page_ref.page, &page.site_name).await;
         let og = build_og_meta(
             &state,
             &headers,
@@ -141,14 +141,14 @@ pub async fn index(
 /// resolution as the page; the on-disk path is re-derived from the DB so the
 /// query string is a cache-buster only, never a file selector.
 pub async fn logo(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    let org = match resolve_status_page_org(&state, &headers).await {
-        Ok(o) => o,
+    let page_ref = match resolve_status_page(&state, &headers).await {
+        Ok(p) => p,
         Err(err) => return render_public_error(err),
     };
     let Some(pool) = state.db.as_ref() else {
         return render_public_error(PublicAppError::NotFound);
     };
-    let logo_path = match load_public_branding(pool, org).await {
+    let logo_path = match load_page_branding(pool, page_ref.page).await {
         Ok(Some(ob)) => ob.branding.public_logo_path,
         Ok(None) => None,
         Err(e) => return render_public_error(PublicAppError::from(e)),
@@ -179,13 +179,13 @@ pub async fn incident(
     headers: HeaderMap,
     Path(id): Path<Uuid>,
 ) -> Response {
-    let org = match resolve_status_page_org(&state, &headers).await {
-        Ok(o) => o,
+    let page_ref = match resolve_status_page(&state, &headers).await {
+        Ok(p) => p,
         Err(err) => return render_public_error(err),
     };
     let (inc_res, page_res) = tokio::join!(
-        state.public_source.incident_by_id(org, id),
-        state.public_source.page(org),
+        state.public_source.incident_by_id(page_ref, id),
+        state.public_source.page(page_ref),
     );
     let inc = match inc_res {
         Ok(i) => i,
@@ -195,7 +195,7 @@ pub async fn incident(
         Ok(p) => p.site_name.clone(),
         Err(err) => return render_public_error(err),
     };
-    let branding = resolve_branding(&state, org, &fallback_name).await;
+    let branding = resolve_branding(&state, page_ref.page, &fallback_name).await;
     let now = Utc::now();
     let og = build_og_meta(
         &state,
@@ -228,8 +228,8 @@ pub async fn archive(
     use crate::api::cursor::IncidentCursor;
     use crate::public_status::IncidentListQuery;
 
-    let org = match resolve_status_page_org(&state, &headers).await {
-        Ok(o) => o,
+    let page_ref = match resolve_status_page(&state, &headers).await {
+        Ok(p) => p,
         Err(err) => return render_public_error(err),
     };
     let cursor = match params.cursor.as_deref().map(IncidentCursor::decode) {
@@ -243,8 +243,8 @@ pub async fn archive(
         ongoing_only: false,
     };
     let (page_res, list_res) = tokio::join!(
-        state.public_source.page(org),
-        state.public_source.list_incidents(org, query),
+        state.public_source.page(page_ref),
+        state.public_source.list_incidents(page_ref, query),
     );
     let fallback_name = match page_res {
         Ok(p) => p.site_name.clone(),
@@ -254,7 +254,7 @@ pub async fn archive(
         Ok(l) => l,
         Err(err) => return render_public_error(err),
     };
-    let branding = resolve_branding(&state, org, &fallback_name).await;
+    let branding = resolve_branding(&state, page_ref.page, &fallback_name).await;
     let now = Utc::now();
     let months = bucket_by_month(&listing.items, now);
     let og = build_og_meta(
@@ -336,6 +336,44 @@ const ARCHIVE_PAGE_SIZE: u32 = 25;
 /// Single source of truth for the logo path — referenced by both the route
 /// registration and the URL the template emits so they cannot drift.
 pub const LOGO_ROUTE: &str = "/status/branding/logo";
+
+/// Origin a page is served from: an absolute host in subdomain mode, an empty
+/// string (same operator host) in path mode, or `None` when no public surface
+/// is mounted. Single source for both the API view and the settings editor so
+/// their URLs can't diverge.
+pub fn public_base(cfg: &crate::config::AppConfig, slug: &str) -> Option<String> {
+    use crate::api::routes::{path_based_public_routes_enabled, subdomain_public_routes_enabled};
+    if subdomain_public_routes_enabled(cfg) {
+        return Some(format!("https://{slug}.{}", cfg.public_status.base_domain));
+    }
+    if path_based_public_routes_enabled(cfg) {
+        return Some(String::new());
+    }
+    None
+}
+
+/// Public page URL from an origin: the apex in subdomain mode, `{origin}/status`
+/// in path mode.
+pub fn public_status_url(cfg: &crate::config::AppConfig, origin: &str) -> String {
+    use crate::api::routes::subdomain_public_routes_enabled;
+    if subdomain_public_routes_enabled(cfg) {
+        origin.to_owned()
+    } else {
+        format!("{origin}/status")
+    }
+}
+
+/// Logo URL for a stored logo path, or `None` when no public surface is mounted.
+pub fn public_logo_url(base: Option<&str>, path: &str) -> Option<String> {
+    base.map(|origin| format!("{origin}{LOGO_ROUTE}?v={path}"))
+}
+
+/// `.{base_domain}` slug-preview suffix in subdomain mode; `None` in path mode.
+pub fn public_host_suffix(cfg: &crate::config::AppConfig) -> Option<String> {
+    use crate::api::routes::subdomain_public_routes_enabled;
+    subdomain_public_routes_enabled(cfg)
+        .then(|| format!(".{}", cfg.public_status.base_domain.trim_start_matches('.')))
+}
 
 pub struct StatusView {
     pub site_name: String,
@@ -507,10 +545,14 @@ impl BrandingView {
 /// Loads the org's branding for a rendered page. A missing row, missing DB
 /// handle, or query error degrades to defaults keyed off `fallback_name` —
 /// the status page must still render if branding can't be read.
-async fn resolve_branding(state: &AppState, org: OrgId, fallback_name: &str) -> BrandingView {
+async fn resolve_branding(
+    state: &AppState,
+    page: StatusPageId,
+    fallback_name: &str,
+) -> BrandingView {
     let cfg = &state.cfg.public_status;
     if let Some(pool) = state.db.as_ref()
-        && let Ok(Some(ob)) = load_public_branding(pool, org).await
+        && let Ok(Some(ob)) = load_page_branding(pool, page).await
     {
         return BrandingView::from_org(&ob, cfg);
     }

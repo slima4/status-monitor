@@ -26,8 +26,9 @@ After `cargo build --release` you have one ~23 MB executable that contains every
 | `GET /web/targets/list` | HTMX partial (`<tbody>` fragment) for filter/paginate swaps on the targets list. |
 | `GET /settings/notifications` | Notification-channel list. Send-test / edit / delete are HTMX row actions against `/api/v1/notification-channels`; the table body polls `/web/partials/settings/notifications` every 60 s. |
 | `GET /settings/notifications/new`, `…/{id}/edit` | Channel create/edit form (Slack / generic webhook / Telegram). On edit the stored secret stays masked behind a "Replace transport config" toggle — leaving it off omits `config` from the PATCH, mirroring the target form's "Replace credentials" pattern. |
-| `GET /settings/status-page` | Public-status branding + the **Public components** curation list: per-monitor public toggle, public name/group, drag-and-drop (or ↑/↓) reorder. Each edit autosaves via `PATCH /api/v1/targets/{id}`. |
-| `GET /web/partials/settings/status-page/components` | HTMX partial — the curation rows for the section above. |
+| `GET /settings/pages` | Status-pages list — create / rename / publish / delete pages (free plan: one). Create posts to `/api/v1/status-pages`; the list body refreshes via `/web/partials/settings/pages`. |
+| `GET /settings/pages/{id}` | Per-page editor: URL slug (own save — a rename is a hard cutover), branding, logo, and the component curation list (per-monitor on-page toggle, public name/group). Each edit autosaves via the `/api/v1/status-pages/{id}` + `/components` endpoints. |
+| `GET /web/partials/settings/pages` | HTMX partial — the page rows for the list above. |
 | `GET /web/partials/dashboard` | HTMX partial — chrome-free dashboard region; self-rearms so each refresh still carries `hx-trigger="every 5s"`. |
 | `GET /docs` | Swagger UI generated from `/api/openapi.json`. |
 | `GET /static/{path}` | Embedded assets (`css/`, `js/`, `img/`). |

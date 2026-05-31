@@ -29,6 +29,7 @@ pub mod usage_keys {
     pub const MEMBERS: &str = "max_members";
     pub const PENDING_INVITATIONS: &str = "max_pending_invitations";
     pub const PUBLIC_COMPONENTS: &str = "max_public_components";
+    pub const STATUS_PAGES: &str = "max_status_pages";
     pub const MAINTENANCE_WINDOWS: &str = "max_maintenance_windows";
     pub const NOTIFICATION_CHANNELS: &str = "max_notification_channels";
 }
@@ -37,8 +38,11 @@ pub mod usage_keys {
 /// friendly-check path *and* the usage snapshot so the number a customer is
 /// blocked at always equals the number the usage page shows (single source).
 const SQL_COUNT_TARGETS: &str = "SELECT count(*) FROM targets WHERE org_id = $1";
+// Public components are now distinct monitors curated onto any page — the
+// per-org cap counts a monitor once no matter how many pages it sits on.
 const SQL_COUNT_PUBLIC_COMPONENTS: &str =
-    "SELECT count(*) FROM targets WHERE org_id = $1 AND public_status = true";
+    "SELECT count(DISTINCT target_id) FROM status_page_components WHERE org_id = $1";
+const SQL_COUNT_STATUS_PAGES: &str = "SELECT count(*) FROM status_pages WHERE org_id = $1";
 const SQL_COUNT_MAINTENANCE_WINDOWS: &str =
     "SELECT count(*) FROM maintenance_windows WHERE org_id = $1";
 const SQL_COUNT_NOTIFICATION_CHANNELS: &str =
@@ -59,6 +63,7 @@ struct PlanRow {
     max_pending_invitations: i32,
     max_api_tokens_per_user: i32,
     max_public_components: i32,
+    max_status_pages: i32,
     max_maintenance_windows: i32,
     max_notification_channels: i32,
     max_logo_size_bytes: i32,
@@ -88,6 +93,7 @@ impl From<PlanRow> for Plan {
             max_pending_invitations: r.max_pending_invitations,
             max_api_tokens_per_user: r.max_api_tokens_per_user,
             max_public_components: r.max_public_components,
+            max_status_pages: r.max_status_pages,
             max_maintenance_windows: r.max_maintenance_windows,
             max_notification_channels: r.max_notification_channels,
             max_logo_size_bytes: r.max_logo_size_bytes,
@@ -128,6 +134,7 @@ pub struct OrgUsage {
     pub members: i64,
     pub pending_invitations: i64,
     pub public_components: i64,
+    pub status_pages: i64,
     pub maintenance_windows: i64,
     pub notification_channels: i64,
 }
@@ -167,7 +174,7 @@ impl QuotaService {
                     "SELECT p.id, p.name, p.description, p.max_targets, \
                      p.min_check_interval_secs, p.retention_days, p.max_members, \
                      p.max_pending_invitations, p.max_api_tokens_per_user, \
-                     p.max_public_components, p.max_maintenance_windows, \
+                     p.max_public_components, p.max_status_pages, p.max_maintenance_windows, \
                      p.max_notification_channels, p.max_logo_size_bytes, \
                      p.api_writes_per_minute, \
                      p.api_reads_per_minute, p.bulk_ops_per_minute, \
@@ -258,6 +265,29 @@ impl QuotaService {
         Ok(())
     }
 
+    /// Friendly pre-check for one new status page. The race-safe guarantee is
+    /// the count-subquery + advisory lock inside `StatusPageStore::create`,
+    /// handed the same `max_status_pages` cap.
+    pub async fn check_can_create_status_page(
+        &self,
+        org: OrgId,
+        user: Option<UserId>,
+    ) -> Result<()> {
+        let plan = self.limit_for_org(org).await?;
+        let limit = i64::from(plan.max_status_pages);
+        let current = self.count(SQL_COUNT_STATUS_PAGES, org).await?;
+        if current + 1 > limit {
+            self.record_block(org, user, "max_status_pages", current, limit);
+            return Err(AppError::quota_exceeded(
+                "max_status_pages",
+                current,
+                limit,
+                plan.id.clone(),
+            ));
+        }
+        Ok(())
+    }
+
     /// Friendly pre-check for one new notification channel. The race-safe
     /// guarantee is the count-subquery + advisory lock inside
     /// `NotificationChannelStore::create`, handed the same
@@ -304,31 +334,6 @@ impl QuotaService {
         Ok(())
     }
 
-    /// `additional` is how many targets this request would newly flip public.
-    pub async fn check_public_components(
-        &self,
-        org: OrgId,
-        user: Option<UserId>,
-        additional: i64,
-    ) -> Result<()> {
-        if additional <= 0 {
-            return Ok(());
-        }
-        let plan = self.limit_for_org(org).await?;
-        let limit = i64::from(plan.max_public_components);
-        let current = self.count(SQL_COUNT_PUBLIC_COMPONENTS, org).await?;
-        if current + additional > limit {
-            self.record_block(org, user, "max_public_components", current, limit);
-            return Err(AppError::quota_exceeded(
-                "max_public_components",
-                current,
-                limit,
-                plan.id.clone(),
-            ));
-        }
-        Ok(())
-    }
-
     /// Read-through the usage cache for one `(org, quota_name)` count.
     /// TTL-only and recompute-from-DB on miss — never an increment, so a path
     /// that forgets to adjust a counter cannot drift it (the cache contract).
@@ -358,6 +363,7 @@ impl QuotaService {
                 members: 0,
                 pending_invitations: 0,
                 public_components: 0,
+                status_pages: 0,
                 maintenance_windows: 0,
                 notification_channels: 0,
             });
@@ -388,6 +394,13 @@ impl QuotaService {
                 self.count(SQL_COUNT_PUBLIC_COMPONENTS, org),
             )
             .await?;
+        let status_pages = self
+            .cached_count(
+                org,
+                usage_keys::STATUS_PAGES,
+                self.count(SQL_COUNT_STATUS_PAGES, org),
+            )
+            .await?;
         let maintenance_windows = self
             .cached_count(
                 org,
@@ -408,6 +421,7 @@ impl QuotaService {
             members,
             pending_invitations,
             public_components,
+            status_pages,
             maintenance_windows,
             notification_channels,
         })
@@ -498,6 +512,7 @@ struct PlanOverrides {
     max_pending_invitations: Option<u32>,
     max_api_tokens_per_user: Option<u32>,
     max_public_components: Option<u32>,
+    max_status_pages: Option<u32>,
     max_maintenance_windows: Option<u32>,
     max_notification_channels: Option<u32>,
     max_logo_size_bytes: Option<u32>,
@@ -516,6 +531,7 @@ fn apply_overrides(base: &Plan, ov: &PlanOverrides) -> Plan {
     p.max_pending_invitations = take(ov.max_pending_invitations, p.max_pending_invitations);
     p.max_api_tokens_per_user = take(ov.max_api_tokens_per_user, p.max_api_tokens_per_user);
     p.max_public_components = take(ov.max_public_components, p.max_public_components);
+    p.max_status_pages = take(ov.max_status_pages, p.max_status_pages);
     p.max_maintenance_windows = take(ov.max_maintenance_windows, p.max_maintenance_windows);
     p.max_notification_channels = take(ov.max_notification_channels, p.max_notification_channels);
     p.max_logo_size_bytes = take(ov.max_logo_size_bytes, p.max_logo_size_bytes);
@@ -562,6 +578,7 @@ fn unlimited_plan() -> Plan {
         max_pending_invitations: i32::MAX,
         max_api_tokens_per_user: i32::MAX,
         max_public_components: i32::MAX,
+        max_status_pages: i32::MAX,
         max_maintenance_windows: i32::MAX,
         max_notification_channels: i32::MAX,
         max_logo_size_bytes: i32::MAX,

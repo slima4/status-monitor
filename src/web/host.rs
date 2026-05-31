@@ -21,7 +21,7 @@ use crate::api::handlers::health::is_health_path;
 use crate::api::public_error::PublicAppError;
 use crate::api::subdomain_public_routes_enabled;
 use crate::app::AppState;
-use crate::domain::OrgId;
+use crate::domain::{OrgId, PageRef, StatusPageId};
 
 /// Subdomain labels that route to the operator surface (dashboard + auth +
 /// API) instead of the per-org public page. These are NOT the
@@ -205,30 +205,31 @@ pub fn extract_status_slug<'a>(host: &'a str, base_domain: &str) -> Option<Statu
 ///
 /// [`find_public_status_org_by_slug`]: crate::storage::orgs::find_public_status_org_by_slug
 #[derive(Debug, Clone, Copy)]
-pub struct StatusPageOrg(pub OrgId);
+pub struct ResolvedStatusPage(pub PageRef);
 
-/// Shared resolver behind the [`StatusPageOrg`] extractor. Exposed so the
+/// Shared resolver behind the [`ResolvedStatusPage`] extractor. Exposed so the
 /// server-rendered handlers can map a failure to the styled HTML error page
 /// instead of the JSON envelope an extractor rejection would produce.
-pub async fn resolve_status_page_org(
+///
+/// Subdomain surface: parse the `Host` header, resolve the slug through
+/// [`find_public_status_page_by_slug`] (filters `enabled = true`). A
+/// missing/garbled host or a disabled/unknown page is a 404 — the public
+/// surface never confirms which pages exist. Path-based / self-host: the lone
+/// live org's default (first enabled) page.
+///
+/// [`find_public_status_page_by_slug`]: crate::storage::orgs::find_public_status_page_by_slug
+pub async fn resolve_status_page(
     state: &AppState,
     headers: &HeaderMap,
-) -> Result<OrgId, PublicAppError> {
+) -> Result<PageRef, PublicAppError> {
     if !subdomain_public_routes_enabled(&state.cfg) {
-        // Path-based public surface: there is no global "default org"
-        // baked into config. Look up the single live org on the box —
-        // works naturally for the self-host shape (one tenant, one page)
-        // and 404s if the deploy somehow has zero or multiple, which is
-        // exactly when path-based is the wrong surface anyway.
-        return resolve_single_org(state).await;
+        return resolve_default_page(state).await;
     }
 
     let host = headers
         .get(HOST)
         .and_then(|h| h.to_str().ok())
         .ok_or(PublicAppError::NotFound)?;
-    // `extract_status_slug` (via `parse_host_shape`) handles port + FQDN
-    // dot stripping centrally — no need to pre-normalise.
     let parsed = extract_status_slug(host, &state.cfg.public_status.base_domain)
         .ok_or(PublicAppError::NotFound)?;
 
@@ -238,55 +239,42 @@ pub async fn resolve_status_page_org(
         ))
     })?;
 
-    // Lowercase before the lookup. Hostnames are case-insensitive per
-    // RFC; mainstream browsers always lowercase, but a crafted client
-    // (curl with explicit `Host:`, misconfigured proxy, test rig) can
-    // send mixed case. Stored slugs are validated lowercase at create
-    // (see `domain::org::validate_slug`), so a case-sensitive compare
-    // here would 404 a legitimate tenant on `ACME.{base}` — matching
-    // the case-insensitivity already enforced by `parse_host_shape`.
+    // Lowercase before the lookup: stored slugs are canonical lowercase, but a
+    // crafted client can send mixed case. Matches `parse_host_shape`'s own
+    // case-insensitivity so a legitimate tenant on `ACME.{base}` still resolves.
     let slug = parsed.slug.to_ascii_lowercase();
 
-    // One indexed point lookup (partial index on slug WHERE
-    // public_status_enabled) per subdomain request. Intentional: the host
-    // determines the org, so resolution can't be hoisted out of the request.
-    // Self-host short-circuits above and never pays this. A slug→org cache is
-    // a deliberate non-goal here — the downstream page cache absorbs the
-    // expensive aggregation; this is a cheap keyed read.
-    //
-    // Public-status-specific lookup: filters `public_status_enabled = true`
-    // and returns the `PublicStatusOrg` newtype the operator path can't
-    // accept. Reusing the authenticated `find_id_by_slug` here would serve
-    // every org's public page regardless of opt-in.
-    let org = crate::storage::orgs::find_public_status_org_by_slug(pool, &slug)
+    // One indexed point lookup (partial index on slug WHERE enabled) per
+    // subdomain request. Filters `enabled = true` and returns the
+    // `ResolvedPublicPage` newtype the operator path can't accept.
+    let page = crate::storage::orgs::find_public_status_page_by_slug(pool, &slug)
         .await?
         .ok_or(PublicAppError::NotFound)?;
-    Ok(org.0.id)
+    Ok(page.0)
 }
 
-/// Path-based fallback: returns the lone live org's id, or 404 if zero or
-/// multiple orgs exist. Self-host single-tenant deploys hit this path; SaaS
-/// deploys disable `path_based_public_routes` so this never fires there.
+/// Path-based fallback: the lone live org's default (first enabled) page, or
+/// 404 if none. Self-host single-tenant deploys hit this path; SaaS disables
+/// path-based public routes so this never fires there.
 ///
-/// **Contract:** `state.db.is_some()` in every production code path. The
-/// `None` branch below is reachable ONLY from in-memory test fixtures, where
-/// `PublicSource` is mocked and ignores the returned org id. Returning the
-/// nil-UUID here keeps those fixtures rendering the same page they always
-/// did. Any future caller that would query a tenant-scoped table with the
-/// returned `OrgId` MUST also bail when `state.db.is_none()` — otherwise the
-/// nil sentinel would silently produce empty results in tests; today no such
-/// caller exists.
-async fn resolve_single_org(state: &AppState) -> Result<OrgId, PublicAppError> {
+/// **Contract:** `state.db.is_some()` in every production code path. The `None`
+/// branch is reachable ONLY from in-memory test fixtures, where `PublicSource`
+/// is mocked and ignores the returned ids. The nil sentinel keeps those
+/// fixtures rendering as before.
+async fn resolve_default_page(state: &AppState) -> Result<PageRef, PublicAppError> {
     let Some(pool) = state.db.as_ref() else {
-        return Ok(OrgId(uuid::Uuid::nil()));
+        return Ok(PageRef {
+            page: StatusPageId(uuid::Uuid::nil()),
+            org: OrgId(uuid::Uuid::nil()),
+        });
     };
-    crate::storage::orgs::find_lone_active_org(pool)
+    crate::storage::orgs::resolve_default_page_for_lone_org(pool)
         .await
-        .map_err(|e| PublicAppError::Internal(anyhow::anyhow!("resolve_single_org: {e}")))?
+        .map_err(|e| PublicAppError::Internal(anyhow::anyhow!("resolve_default_page: {e}")))?
         .ok_or(PublicAppError::NotFound)
 }
 
-impl<S> FromRequestParts<S> for StatusPageOrg
+impl<S> FromRequestParts<S> for ResolvedStatusPage
 where
     S: Send + Sync,
     AppState: FromRef<S>,
@@ -295,8 +283,8 @@ where
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let app_state = AppState::from_ref(state);
-        let org = resolve_status_page_org(&app_state, &parts.headers).await?;
-        Ok(StatusPageOrg(org))
+        let page = resolve_status_page(&app_state, &parts.headers).await?;
+        Ok(ResolvedStatusPage(page))
     }
 }
 

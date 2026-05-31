@@ -63,7 +63,7 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
     let logo_body_limit = state.cfg.public_status.max_logo_size_bytes as usize + 1024 * 1024;
     let logo = Router::new()
         .route(
-            "/orgs/{id}/status-page/logo",
+            "/status-pages/{id}/logo",
             post(handlers::status_page::upload_logo).delete(handlers::status_page::delete_logo),
         )
         .layer(from_fn_with_state(
@@ -150,8 +150,27 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
         )
         .route("/orgs/{id}/restore", post(handlers::orgs::restore_org))
         .route(
-            "/orgs/{id}/status-page",
-            get(handlers::status_page::get_settings).patch(handlers::status_page::update_settings),
+            "/status-pages",
+            get(handlers::status_page::list_pages).post(handlers::status_page::create_page),
+        )
+        .route(
+            "/status-pages/{id}",
+            get(handlers::status_page::get_page)
+                .patch(handlers::status_page::update_page)
+                .delete(handlers::status_page::delete_page),
+        )
+        .route(
+            "/status-pages/{id}/components",
+            get(handlers::status_page::list_components).post(handlers::status_page::add_component),
+        )
+        .route(
+            "/status-pages/{id}/components/reorder",
+            post(handlers::status_page::reorder_components),
+        )
+        .route(
+            "/status-pages/{id}/components/{target_id}",
+            axum::routing::patch(handlers::status_page::update_component)
+                .delete(handlers::status_page::remove_component),
         )
         .route("/orgs/{id}/usage", get(handlers::usage::get_org_usage))
         .route("/orgs/{id}/members", get(handlers::orgs::list_org_members))

@@ -56,8 +56,8 @@ async fn seed_public_target(pool: &PgPool, org_id: Uuid) -> Uuid {
         "verify_tls": true,
     });
     let (target_id,): (Uuid,) = sqlx::query_as(
-        r#"INSERT INTO targets (org_id, name, check_spec, interval_secs, enabled, public_status)
-           VALUES ($1, 't-pub', $2::jsonb, 60, true, true)
+        r#"INSERT INTO targets (org_id, name, check_spec, interval_secs, enabled)
+           VALUES ($1, 't-pub', $2::jsonb, 60, true)
            RETURNING id"#,
     )
     .bind(org_id)
@@ -65,7 +65,34 @@ async fn seed_public_target(pool: &PgPool, org_id: Uuid) -> Uuid {
     .fetch_one(pool)
     .await
     .unwrap();
+    bind_to_new_page(pool, org_id, target_id).await;
     target_id
+}
+
+/// Put `target_id` on a brand-new enabled page for `org_id`. Publicness is a
+/// `status_page_components` binding now, not a `targets` column; binding a
+/// target to several pages exercises the writer-walk's `DISTINCT ON`.
+async fn bind_to_new_page(pool: &PgPool, org_id: Uuid, target_id: Uuid) {
+    let slug = format!("admpg{}", &Uuid::new_v4().simple().to_string()[..16]);
+    let (page_id,): (Uuid,) = sqlx::query_as(
+        "INSERT INTO status_pages (org_id, slug, name, enabled) \
+         VALUES ($1, $2, 'p', true) RETURNING id",
+    )
+    .bind(org_id)
+    .bind(&slug)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO status_page_components (org_id, status_page_id, target_id) \
+         VALUES ($1, $2, $3)",
+    )
+    .bind(org_id)
+    .bind(page_id)
+    .bind(target_id)
+    .execute(pool)
+    .await
+    .unwrap();
 }
 
 #[tokio::test]
@@ -108,7 +135,7 @@ async fn enabled_targets_excludes_soft_deleted_orgs() {
 }
 
 /// Keyset paginator must:
-///   * skip targets with `public_status = false`
+///   * skip targets not bound to any enabled status page
 ///   * skip targets whose org is soft-deleted (load-bearing — same reason
 ///     as the scheduler walk above)
 ///   * never re-emit a row from a previous page
@@ -189,6 +216,52 @@ async fn public_status_pagination_filters_and_orders() {
     sqlx::query("DELETE FROM organizations WHERE id IN ($1, $2)")
         .bind(org_live)
         .bind(org_dead)
+        .execute(&pool)
+        .await
+        .unwrap();
+}
+
+/// A target bound to several enabled pages is still one `(org, target)` row in
+/// the writer walk — incidents are per-target, so the `DISTINCT ON (org_id, id)`
+/// must collapse the fan-out or the scheduler churns duplicate incident work.
+#[tokio::test]
+#[ignore]
+async fn target_on_multiple_pages_emitted_once() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let suffix = &Uuid::new_v4().simple().to_string()[..8];
+    let (org, _private) = seed_org_with_target(&pool, &format!("multi-{suffix}")).await;
+    // seed_public_target binds onto one page; add a second enabled page for it.
+    let target = seed_public_target(&pool, org).await;
+    bind_to_new_page(&pool, org, target).await;
+
+    let repo = AdminRepo::new(pool.clone(), None, "test");
+    let mut seen: Vec<Uuid> = Vec::new();
+    let mut cursor: Option<PublicTargetCursor> = None;
+    let mut steps = 0;
+    loop {
+        steps += 1;
+        assert!(steps <= 1000, "pagination must terminate");
+        let p = repo.next_public_status_page(cursor, 1).await.unwrap();
+        if p.is_empty() {
+            break;
+        }
+        let (o, t) = p.into_iter().next().unwrap();
+        seen.push(t.id);
+        cursor = Some(PublicTargetCursor {
+            org_id: o,
+            target_id: t.id,
+        });
+    }
+    assert_eq!(
+        seen.iter().filter(|id| **id == target).count(),
+        1,
+        "target on two enabled pages must appear exactly once in the walk"
+    );
+
+    sqlx::query("DELETE FROM organizations WHERE id = $1")
+        .bind(org)
         .execute(&pool)
         .await
         .unwrap();

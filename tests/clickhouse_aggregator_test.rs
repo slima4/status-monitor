@@ -28,15 +28,56 @@ use chrono::Utc;
 use futures::FutureExt;
 use sqlx::PgPool;
 use uptimepage::domain::{
-    CheckResult, CheckSpec, CheckStatus, ExpectedStatus, NewTarget, PublicComponentStatus,
-    WriteSource,
+    CheckResult, CheckSpec, CheckStatus, ExpectedStatus, NewStatusPage, NewStatusPageComponent,
+    NewTarget, OrgId, PublicComponentStatus, StatusPageId, WriteSource,
 };
 use uptimepage::public_status::{AggregatorConfig, OrgAggregator};
-use uptimepage::storage::{ClickhouseResultSink, PostgresTargetStore, ResultSink, TargetStore};
+use uptimepage::storage::{
+    ClickhouseResultSink, PgStatusPageStore, PostgresTargetStore, ResultSink, StatusPageStore,
+    TargetStore,
+};
 use url::Url;
 use uuid::Uuid;
 
 use crate::common::default_http_check;
+
+/// Publish `target_id` on a fresh enabled page and return the page id, so the
+/// page-keyed aggregator has a component set to filter on.
+async fn seed_page_with_target(pool: &PgPool, org: OrgId, target_id: Uuid) -> StatusPageId {
+    let store = PgStatusPageStore::new(pool.clone());
+    let slug = format!("aggpage{}", Uuid::now_v7().simple());
+    let slug = slug[..slug.len().min(30)].to_string();
+    let page = store
+        .create(
+            org,
+            NewStatusPage {
+                slug,
+                name: "Agg".into(),
+                enabled: true,
+            },
+            WriteSource::Ui,
+            i64::MAX,
+        )
+        .await
+        .expect("create page")
+        .expect("within page cap");
+    store
+        .add_component(
+            org,
+            page.id,
+            NewStatusPageComponent {
+                target_id,
+                public_name: None,
+                public_description: None,
+                public_group: None,
+                sort_order: 0,
+            },
+            i64::MAX,
+        )
+        .await
+        .expect("add component");
+    page.id
+}
 
 async fn seed_org(pool: &sqlx::PgPool, prefix: &str) -> uptimepage::domain::OrgId {
     let slug = format!("{prefix}-{}", Uuid::now_v7().simple());
@@ -62,11 +103,6 @@ fn public_target(name: &str) -> NewTarget {
         alerts: Default::default(),
         group_name: None,
         owner_user_id: None,
-        public_status: true,
-        public_name: None,
-        public_description: None,
-        public_group: None,
-        public_sort_order: 0,
     }
 }
 
@@ -160,13 +196,9 @@ async fn build_round_trips_seeded_data() {
             .await
             .expect("flush mv");
 
-        let agg = OrgAggregator::new(
-            pool,
-            ch,
-            store.clone() as Arc<dyn TargetStore>,
-            AggregatorConfig::default(),
-        );
-        let (page, _markers) = agg.build(org_id).await.expect("aggregator build");
+        let page_id = seed_page_with_target(&pool, org_id, target_id).await;
+        let agg = OrgAggregator::new(pool, ch, AggregatorConfig::default());
+        let (page, _markers, _names) = agg.build(page_id, org_id).await.expect("aggregator build");
 
         let component = page
             .groups
@@ -220,14 +252,10 @@ async fn component_history_returns_strip_for_public_target() {
             .await
             .expect("flush mv");
 
-        let agg = OrgAggregator::new(
-            pool,
-            ch,
-            store as Arc<dyn TargetStore>,
-            AggregatorConfig::default(),
-        );
+        let page_id = seed_page_with_target(&pool, org_id, target_id).await;
+        let agg = OrgAggregator::new(pool, ch, AggregatorConfig::default());
         let resp = agg
-            .component_history(org_id, target_id, 7)
+            .component_history(page_id, org_id, target_id, 7)
             .await
             .expect("component_history succeeds");
         assert_eq!(resp.component_id, target_id);

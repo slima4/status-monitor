@@ -102,7 +102,7 @@ struct OrgTargetRow {
 /// Single source for the cross-tenant target column list. Both the
 /// scheduler-snapshot and incident-writer-keyset queries return the same
 /// `targets` shape that [`decode_target_row`] consumes.
-const TARGET_COLUMNS: &str = "t.org_id, t.id, t.name, t.check_spec, t.interval_secs, t.enabled, t.tags, t.alerts, t.group_name, t.owner_user_id, t.public_status, t.public_name, t.public_description, t.public_group, t.public_sort_order, t.write_source, t.created_at, t.updated_at";
+const TARGET_COLUMNS: &str = "t.org_id, t.id, t.name, t.check_spec, t.interval_secs, t.enabled, t.tags, t.alerts, t.group_name, t.owner_user_id, t.write_source, t.created_at, t.updated_at";
 
 pub struct AdminRepo {
     pool: PgPool,
@@ -155,11 +155,12 @@ impl AdminRepo {
             .collect()
     }
 
-    /// Keyset-paginated walk over enabled, public-status targets in live
-    /// orgs. Backed by the partial index `idx_targets_public_page_cursor
-    /// (org_id, id) WHERE enabled AND public_status` so per-page cost stays
-    /// `O(page_size)` index reads, independent of total target count.
-    /// `limit` is clamped to a safety ceiling.
+    /// Keyset-paginated walk over enabled targets that appear on at least one
+    /// enabled status page in a live org — the set the public-status writer
+    /// watches for incidents. The `EXISTS` over `status_page_components` yields
+    /// exactly one row per `(org, target)` even when a monitor is on several
+    /// pages (incidents are per-target; the public surface filters per page at
+    /// read time). Keyset-ordered by `(org_id, id)`; `limit` is clamped.
     pub async fn next_public_status_page(
         &self,
         after: Option<PublicTargetCursor>,
@@ -170,7 +171,12 @@ impl AdminRepo {
         let base = format!(
             "SELECT {TARGET_COLUMNS} \
              FROM targets t JOIN organizations o ON o.id = t.org_id \
-             WHERE t.enabled = true AND t.public_status = true AND o.deleted_at IS NULL"
+             WHERE t.enabled = true AND o.deleted_at IS NULL \
+               AND EXISTS ( \
+                   SELECT 1 FROM status_page_components spc \
+                   JOIN status_pages sp ON sp.id = spc.status_page_id \
+                   WHERE spc.target_id = t.id AND spc.org_id = t.org_id \
+                     AND sp.enabled = true)"
         );
         let rows: Vec<OrgTargetRow> = match after {
             None => {

@@ -20,7 +20,7 @@ Every tenant-scoped table (`targets`, `incidents`, `incident_updates`, `maintena
 
 Org slugs are case-insensitive (`CITEXT`), 3–30 characters, must start with a lowercase letter, and otherwise contain `[a-z0-9-]` only — no leading or trailing hyphen and no consecutive hyphens. A static reserved list (`api`, `admin`, `login`, …) is rejected at creation.
 
-The placeholder slug a brand-new user's first org gets at signup takes the shape `{adj}-{noun}-{6char}` from inline word lists in `src/domain/word_lists.rs`. The signup transaction returns `Ok(None)` on a slug collision so the caller wraps the generate-and-insert pair in a 5-attempt retry loop; the birthday-paradox tail above 5 retries is astronomically small. Users typically rename the slug after signup via the status-page settings.
+The placeholder slug a brand-new user's first org gets at signup takes the shape `{adj}-{noun}-{6char}` from inline word lists in `src/domain/word_lists.rs`. The signup transaction returns `Ok(None)` on a slug collision so the caller wraps the generate-and-insert pair in a 5-attempt retry loop; the birthday-paradox tail above 5 retries is astronomically small. Users typically rename the slug after signup from settings; the org's default status page is created with the same slug, which the owner can change independently in the page editor.
 
 ### Three-org owner limit
 
@@ -49,10 +49,10 @@ The outbox table is the load-bearing piece. A naive "DELETE in PG, then DELETE i
 | Cache | Type | TTL |
 |---|---|---|
 | `dashboard_cache` | `moka::sync::Cache<OrgId, Arc<DashboardSummary>>` | 5 s |
-| `public_status::cache::PageCache` | `moka::future::Cache<OrgId, Arc<PageData>>` | 10 s |
-| `PageCache::last_good` | `DashMap<OrgId, Arc<ArcSwap<PageData>>>` | retained across rebuilds for stale-fallback |
+| `public_status::cache::PageCache` | `moka::future::Cache<StatusPageId, Arc<PageData>>` | 10 s |
+| `PageCache::last_good` | `moka::sync::Cache<StatusPageId, Arc<PageData>>` | retained across `inner`'s TTL eviction for stale-fallback |
 
-`PageCache::get_or_compute` does per-org single-flight via `moka`'s `try_get_with`, so a thundering herd against one org's page doesn't fan out into N expensive aggregator builds.
+The public-page caches are keyed by `StatusPageId`, not `OrgId`: an org can run several pages, each rendering a different subset of monitors, so the cache unit is the page. The underlying aggregator query still binds the org id, so a page only ever sees its own org's data. `PageCache::get_or_compute` does per-page single-flight via `moka`'s `try_get_with`, so a thundering herd against one page doesn't fan out into N expensive aggregator builds.
 
 ## Public status routes gating
 

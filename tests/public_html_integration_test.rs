@@ -22,9 +22,9 @@ use common::build_test_app_with_web_and_public_source;
 use uptimepage::api::CursorPage;
 use uptimepage::api::public_error::PublicAppError;
 use uptimepage::domain::{
-    ComponentHistoryResponse, DayState, IncidentSeverity, IncidentStatusPhase, OrgId, OverallState,
-    OverallStatus, PublicComponent, PublicComponentGroup, PublicComponentStatus, PublicIncident,
-    PublicIncidentUpdate, PublicMaintenanceList, PublicStatusPage,
+    ComponentHistoryResponse, DayState, IncidentSeverity, IncidentStatusPhase, OverallState,
+    OverallStatus, PageRef, PublicComponent, PublicComponentGroup, PublicComponentStatus,
+    PublicIncident, PublicIncidentUpdate, PublicMaintenanceList, PublicStatusPage,
 };
 use uptimepage::public_status::{IncidentListQuery, PublicSource};
 
@@ -44,7 +44,7 @@ struct PublishedSource;
 
 #[async_trait]
 impl PublicSource for PublishedSource {
-    async fn page(&self, _org: OrgId) -> Result<Arc<PublicStatusPage>, PublicAppError> {
+    async fn page(&self, _page: PageRef) -> Result<Arc<PublicStatusPage>, PublicAppError> {
         let component = PublicComponent {
             id: fixed_component_id(),
             name: PUBLIC_COMPONENT_NAME.into(),
@@ -88,7 +88,7 @@ impl PublicSource for PublishedSource {
 
     async fn component_history(
         &self,
-        _org: OrgId,
+        _page: PageRef,
         _id: Uuid,
         _days: u32,
     ) -> Result<ComponentHistoryResponse, PublicAppError> {
@@ -96,22 +96,26 @@ impl PublicSource for PublishedSource {
     }
     async fn list_incidents(
         &self,
-        _org: OrgId,
+        _page: PageRef,
         _q: IncidentListQuery,
     ) -> Result<CursorPage<PublicIncident>, PublicAppError> {
         unimplemented!("not exercised by HTML page tests")
     }
     async fn incident_by_id(
         &self,
-        _org: OrgId,
+        _page: PageRef,
         _id: Uuid,
     ) -> Result<PublicIncident, PublicAppError> {
         unimplemented!("not exercised by HTML page tests")
     }
-    async fn maintenance(&self, _org: OrgId) -> Result<PublicMaintenanceList, PublicAppError> {
+    async fn maintenance(&self, _page: PageRef) -> Result<PublicMaintenanceList, PublicAppError> {
         unimplemented!("not exercised by HTML page tests")
     }
-    async fn incidents_rss(&self, _org: OrgId, _base_url: &str) -> Result<String, PublicAppError> {
+    async fn incidents_rss(
+        &self,
+        _page: PageRef,
+        _base_url: &str,
+    ) -> Result<String, PublicAppError> {
         unimplemented!("not exercised by HTML page tests")
     }
 }
@@ -124,7 +128,7 @@ struct EmptyDataSource;
 
 #[async_trait]
 impl PublicSource for EmptyDataSource {
-    async fn page(&self, _org: OrgId) -> Result<Arc<PublicStatusPage>, PublicAppError> {
+    async fn page(&self, _page: PageRef) -> Result<Arc<PublicStatusPage>, PublicAppError> {
         let component = PublicComponent {
             id: fixed_component_id(),
             name: PUBLIC_COMPONENT_NAME.into(),
@@ -152,7 +156,7 @@ impl PublicSource for EmptyDataSource {
     }
     async fn component_history(
         &self,
-        _org: OrgId,
+        _page: PageRef,
         _id: Uuid,
         _days: u32,
     ) -> Result<ComponentHistoryResponse, PublicAppError> {
@@ -160,22 +164,26 @@ impl PublicSource for EmptyDataSource {
     }
     async fn list_incidents(
         &self,
-        _org: OrgId,
+        _page: PageRef,
         _q: IncidentListQuery,
     ) -> Result<CursorPage<PublicIncident>, PublicAppError> {
         unimplemented!()
     }
     async fn incident_by_id(
         &self,
-        _org: OrgId,
+        _page: PageRef,
         _id: Uuid,
     ) -> Result<PublicIncident, PublicAppError> {
         unimplemented!()
     }
-    async fn maintenance(&self, _org: OrgId) -> Result<PublicMaintenanceList, PublicAppError> {
+    async fn maintenance(&self, _page: PageRef) -> Result<PublicMaintenanceList, PublicAppError> {
         unimplemented!()
     }
-    async fn incidents_rss(&self, _org: OrgId, _base_url: &str) -> Result<String, PublicAppError> {
+    async fn incidents_rss(
+        &self,
+        _page: PageRef,
+        _base_url: &str,
+    ) -> Result<String, PublicAppError> {
         unimplemented!()
     }
 }
@@ -188,7 +196,7 @@ struct MaintenanceDominatesSource;
 
 #[async_trait]
 impl PublicSource for MaintenanceDominatesSource {
-    async fn page(&self, _org: OrgId) -> Result<Arc<PublicStatusPage>, PublicAppError> {
+    async fn page(&self, _page: PageRef) -> Result<Arc<PublicStatusPage>, PublicAppError> {
         let mut history = vec![DayState::Operational; 90];
         // Today's cell is the right-most slot in oldest-first order.
         history[89] = DayState::Maintenance;
@@ -228,7 +236,7 @@ impl PublicSource for MaintenanceDominatesSource {
     }
     async fn component_history(
         &self,
-        _org: OrgId,
+        _page: PageRef,
         _id: Uuid,
         _days: u32,
     ) -> Result<ComponentHistoryResponse, PublicAppError> {
@@ -236,22 +244,26 @@ impl PublicSource for MaintenanceDominatesSource {
     }
     async fn list_incidents(
         &self,
-        _org: OrgId,
+        _page: PageRef,
         _q: IncidentListQuery,
     ) -> Result<CursorPage<PublicIncident>, PublicAppError> {
         unimplemented!()
     }
     async fn incident_by_id(
         &self,
-        _org: OrgId,
+        _page: PageRef,
         _id: Uuid,
     ) -> Result<PublicIncident, PublicAppError> {
         unimplemented!()
     }
-    async fn maintenance(&self, _org: OrgId) -> Result<PublicMaintenanceList, PublicAppError> {
+    async fn maintenance(&self, _page: PageRef) -> Result<PublicMaintenanceList, PublicAppError> {
         unimplemented!()
     }
-    async fn incidents_rss(&self, _org: OrgId, _base_url: &str) -> Result<String, PublicAppError> {
+    async fn incidents_rss(
+        &self,
+        _page: PageRef,
+        _base_url: &str,
+    ) -> Result<String, PublicAppError> {
         unimplemented!()
     }
 }

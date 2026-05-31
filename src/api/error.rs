@@ -120,6 +120,9 @@ pub mod codes {
     pub const ORG_DELETED: &str = "ORG_DELETED";
     pub const SLUG_TAKEN: &str = "SLUG_TAKEN";
     pub const SLUG_INVALID: &str = "SLUG_INVALID";
+    pub const STATUS_PAGE_NOT_FOUND: &str = "STATUS_PAGE_NOT_FOUND";
+    /// POST a component that is already curated onto the page — edit via PATCH.
+    pub const COMPONENT_ALREADY_ON_PAGE: &str = "COMPONENT_ALREADY_ON_PAGE";
     /// PATCH with no mutable field set — rejected so a no-op isn't silently 200.
     pub const EMPTY_PATCH: &str = "EMPTY_PATCH";
     pub const OWNER_ORG_LIMIT: &str = "OWNER_ORG_LIMIT";
