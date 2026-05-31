@@ -3,16 +3,22 @@ name: ci
 on:
   push:
     branches: [main]
-    paths-ignore:
+    # Denylist: skip CI only when a push touches solely non-code paths. Any
+    # unlisted path (source, tests, Cargo, migrations) still runs, so new code
+    # never bypasses CI. ci.yml/release-image.yml are NOT listed — editing the
+    # pipeline must re-run it. Keep in sync with release-image.yml.
+    paths-ignore: &paths_ignore
       - "docs/**"
       - "book.toml"
       - "*.md"
+      - ".github/workflows/deploy.yml"
+      - ".github/workflows/docs.yml"
+      - ".github/workflows/dco.yml"
+      - ".github/workflows/issue-template-guard.yml"
+      - ".github/ISSUE_TEMPLATE/**"
   pull_request:
     branches: [main]
-    paths-ignore:
-      - "docs/**"
-      - "book.toml"
-      - "*.md"
+    paths-ignore: *paths_ignore
   workflow_dispatch:
 
 # Cancel superseded runs on the same ref. A push that lands while the

@@ -14,12 +14,19 @@ on:
   push:
     branches: [main]
     tags: ["v*"]
-    # Image is unaffected by docs-only changes; the Dockerfile copies no
-    # docs into the build context. Mirrors ci.yml's ignore set.
+    # Denylist, mirrors ci.yml: the image is unaffected by docs or by the
+    # deploy/docs/dco/issue-template workflows. Any unlisted path still builds,
+    # so new source never skips the image. Keep in sync with ci.yml (GHA can't
+    # share a YAML anchor across files).
     paths-ignore:
       - "docs/**"
       - "book.toml"
       - "*.md"
+      - ".github/workflows/deploy.yml"
+      - ".github/workflows/docs.yml"
+      - ".github/workflows/dco.yml"
+      - ".github/workflows/issue-template-guard.yml"
+      - ".github/ISSUE_TEMPLATE/**"
   workflow_dispatch:
 
 # A fast follow-up push to main supersedes the in-flight image build for
