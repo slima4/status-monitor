@@ -188,7 +188,14 @@ The bootstrap registry is fetched lazily on the first lookup and cached for the 
 }
 ```
 
-Server returns the full `Target` including `id` (UUIDv7), `created_at`, `updated_at`.
+Server returns the full `Target` including `id` (UUIDv7), `created_at`, `updated_at`, and `write_source`.
+
+`write_source` is a read-only field recording where the resource was last
+written from: `ui`, `api`, or `terraform` (decided server-side from the
+request, never the body — sending it is ignored). It also appears on
+notification channels and maintenance windows, and drives the "managed by"
+badge in the web UI. A write through any endpoint restamps it, so it reflects
+the most recent author.
 
 ### Alert config
 

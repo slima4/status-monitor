@@ -68,6 +68,18 @@ resource "uptimepage_target" "api" {
 For the full attribute reference and an example per check type, see the
 [provider docs on the Terraform Registry](https://registry.terraform.io/providers/uptimepage/uptimepage/latest/docs).
 
+## Managed-by badge
+
+Resources the provider creates or updates carry a `terraform` source marker
+(the provider identifies itself on every request). The web UI shows a small
+`terraform` chip next to those monitors and channels, plus a banner on the
+monitor detail page, so anyone browsing knows the resource is managed as code.
+
+The marker is informational — the UI does not lock the resource. But an edit
+made in the UI flips its badge to `ui` and **will be overwritten the next time
+you run `terraform apply`**, since your `.tf` files remain the source of truth.
+Change managed resources in Terraform, not the UI.
+
 ## Source
 
 Provider source and issue tracker:
