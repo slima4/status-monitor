@@ -34,6 +34,7 @@ CREATE TABLE users (
     signup_org_id           UUID        REFERENCES organizations(id) ON DELETE SET NULL,
     onboarding_completed_at TIMESTAMPTZ,
     last_seen_at            TIMESTAMPTZ,
+    email_verified_at       TIMESTAMPTZ,
     -- `*_version` has no default — signup binds `auth::consent::*_VERSION`
     -- explicitly; a baked-in `'v1'` would lie once the constant moves on.
     terms_accepted_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -53,6 +54,8 @@ CREATE TABLE users (
     -- value. See `domain::preferences`.
     locale                  TEXT,
     timezone                TEXT,
+    time_format             TEXT        NOT NULL DEFAULT 'auto'
+                            CHECK (time_format IN ('auto', '12h', '24h')),
     terms_version           TEXT        NOT NULL,
     privacy_version         TEXT        NOT NULL,
     created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),

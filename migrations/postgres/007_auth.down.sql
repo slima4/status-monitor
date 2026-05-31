@@ -5,6 +5,3 @@ DROP TABLE IF EXISTS api_tokens;
 DROP TABLE IF EXISTS oauth_states;
 DROP TABLE IF EXISTS oauth_identities;
 DROP TABLE IF EXISTS sessions;
-
-ALTER TABLE users
-    DROP COLUMN IF EXISTS email_verified_at;

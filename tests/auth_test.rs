@@ -24,6 +24,28 @@ use uuid::Uuid;
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations/postgres");
 
+/// Tables created (and dropped) by migration 007_auth.
+const AUTH_TABLES: [&str; 7] = [
+    "sessions",
+    "oauth_identities",
+    "oauth_states",
+    "api_tokens",
+    "invitations",
+    "magic_link_tokens",
+    "login_attempts",
+];
+
+async fn table_exists(pool: &sqlx::PgPool, name: &str) -> bool {
+    sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM information_schema.tables \
+         WHERE table_schema = 'public' AND table_name = $1)",
+    )
+    .bind(name)
+    .fetch_one(pool)
+    .await
+    .unwrap_or(false)
+}
+
 fn admin_url_and_test_db_name() -> Option<(Url, String, String)> {
     let raw = std::env::var("DATABASE_URL").ok()?;
     let mut url = Url::parse(&raw).expect("DATABASE_URL must be a valid URL");
@@ -86,33 +108,12 @@ async fn migrations_apply_forward_and_rollback_cleanly() {
 
     MIGRATOR.run(&pool).await.expect("forward migrations");
 
-    for tbl in [
-        "sessions",
-        "oauth_identities",
-        "oauth_states",
-        "api_tokens",
-        "invitations",
-        "magic_link_tokens",
-        "login_attempts",
-    ] {
-        let exists: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM information_schema.tables \
-             WHERE table_schema = 'public' AND table_name = $1)",
-        )
-        .bind(tbl)
-        .fetch_one(&pool)
-        .await
-        .unwrap_or(false);
-        assert!(exists, "{tbl} should exist after forward migration");
+    for tbl in AUTH_TABLES {
+        assert!(
+            table_exists(&pool, tbl).await,
+            "{tbl} should exist after forward migration"
+        );
     }
-    let users_has_verified: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM information_schema.columns \
-         WHERE table_name = 'users' AND column_name = 'email_verified_at')",
-    )
-    .fetch_one(&pool)
-    .await
-    .unwrap();
-    assert!(users_has_verified, "users.email_verified_at must exist");
 
     // Roll back the auth migration (007) only; older down migrations are
     // out-of-scope for this acceptance.
@@ -121,59 +122,28 @@ async fn migrations_apply_forward_and_rollback_cleanly() {
         .await
         .expect("rollback 007_auth cleanly");
 
-    for tbl in [
-        "sessions",
-        "oauth_identities",
-        "oauth_states",
-        "api_tokens",
-        "invitations",
-        "magic_link_tokens",
-        "login_attempts",
-    ] {
-        let exists: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM information_schema.tables \
-             WHERE table_schema = 'public' AND table_name = $1)",
-        )
-        .bind(tbl)
-        .fetch_one(&pool)
-        .await
-        .unwrap_or(false);
-        assert!(!exists, "{tbl} should be gone after rollback");
+    for tbl in AUTH_TABLES {
+        assert!(
+            !table_exists(&pool, tbl).await,
+            "{tbl} should be gone after rollback"
+        );
     }
-    // users table must survive: it was created by migration 004; 007's down
-    // only drops the two columns it added.
-    let users_still_exists: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM information_schema.tables \
-         WHERE table_schema = 'public' AND table_name = 'users')",
-    )
-    .fetch_one(&pool)
-    .await
-    .unwrap();
-    assert!(users_still_exists, "users must survive 007 rollback");
-    let users_has_verified_after_down: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM information_schema.columns \
-         WHERE table_name = 'users' AND column_name = 'email_verified_at')",
-    )
-    .fetch_one(&pool)
-    .await
-    .unwrap();
     assert!(
-        !users_has_verified_after_down,
-        "users.email_verified_at must be dropped by 007 down"
+        table_exists(&pool, "users").await,
+        "users must survive 007 rollback"
     );
 
+    // Re-apply forward: the auth tables come back.
     MIGRATOR
         .run(&pool)
         .await
         .expect("forward migrations after rollback");
-    let users_has_verified_again: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM information_schema.columns \
-         WHERE table_name = 'users' AND column_name = 'email_verified_at')",
-    )
-    .fetch_one(&pool)
-    .await
-    .unwrap();
-    assert!(users_has_verified_again);
+    for tbl in AUTH_TABLES {
+        assert!(
+            table_exists(&pool, tbl).await,
+            "{tbl} should exist after re-applying forward"
+        );
+    }
 
     pool.close().await;
     drop_test_database(&test_db).await;
