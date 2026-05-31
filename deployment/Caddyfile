@@ -156,6 +156,30 @@ app.{$UPTIMEPAGE_DOMAIN} {
 		}
 	}
 
+	# ─── Share links — anonymous, per-IP edge cap ───────────────────────
+	# /m/{token} is the only unauthenticated, app-served surface with no
+	# subject to key on (the app limiter keys on org/user; a share request
+	# has neither). The /m/{token}/{latency,results} sub-resources query
+	# ClickHouse uncached, so an unthrottled flood on a shared link would
+	# amplify into aggregation load. Caddy owns the per-IP tier here (it
+	# sees the real peer). Generous public-surface tier so a link dropped in
+	# a busy Slack channel never throttles real viewers — only a flood orders
+	# of magnitude higher trips it. Terminal handle: keeps /m/ off the
+	# unlimited catch-all. Zone names are process-global.
+	@share path /m/*
+	handle @share {
+		rate_limit {
+			zone share_links {
+				key {remote_host}
+				events 60
+				window 1m
+			}
+		}
+		reverse_proxy uptimepage:8080 {
+			header_up X-Real-IP {remote_host}
+		}
+	}
+
 	# ─── Operator surface: app-enforced session auth (SaaS) ─────────────
 	# No edge basic_auth. The health/metrics/public handle blocks above
 	# are terminal; every other (operator) request falls through to the

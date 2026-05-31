@@ -32,7 +32,7 @@ All responses use `Content-Type: application/json; charset=utf-8`.
 | `GET` | `/api/v1/targets/{id}/uptime` | uptime summary over a range |
 | `GET` | `/api/v1/targets/{id}/incidents` | coalesced incident periods (`from`, `to`, `ongoing_only`) — paginated |
 | `POST` | `/api/v1/targets/{id}/shares` | mint a read-only share link; returns the share (token included) |
-| `GET` | `/api/v1/targets/{id}/shares` | list a monitor's live share links (never the token) |
+| `GET` | `/api/v1/targets/{id}/shares` | list a monitor's live share links (token included, re-copyable) |
 | `DELETE` | `/api/v1/targets/{id}/shares/{share_id}` | revoke a share link |
 | `GET` | `/api/v1/tags` | tag inventory with target counts (`q` prefix) — paginated |
 | `GET` | `/api/v1/dashboard/summary` | per-org rollup (5-second in-process cache, keyed by `OrgId`) |
@@ -108,7 +108,7 @@ the per-page component fields (`public_name`, `public_description`,
 
 ### Operator endpoints (share links)
 
-A share link is a capability URL that renders one monitor's full read-only detail view to anyone who has it, no account. Minting one is a monitor action, so it gates on member-level `targets:write` (not owner-only); listing needs `targets:read`. Scoped to the caller's active org (a foreign monitor id is 404). `expires_at` is optional; omit it for a link that never expires. The public surface those tokens unlock is documented in [Share links](share-links.md).
+A share link is a capability URL that renders one monitor's full read-only detail view to anyone who has it, no account. Managing share links — mint, list, revoke — is a monitor action gated on member-level `targets:write` (not owner-only); listing returns the live token so a read-only caller can't harvest working public links. Scoped to the caller's active org (a foreign monitor id is 404). `expires_at` is optional; omit it for a link that never expires. The public surface those tokens unlock is documented in [Share links](share-links.md).
 
 | Method | Path | Purpose |
 |--------|------|---------|

@@ -18,7 +18,7 @@ use crate::app::AppState;
 use crate::domain::{MonitorShare, MonitorShareId, NewMonitorShare};
 use crate::error::{AppError, Result};
 use crate::storage::CreateShareOutcome;
-use crate::web::{Authorized, CurrentUser, TargetsRead, TargetsWrite};
+use crate::web::{Authorized, CurrentUser, TargetsWrite};
 
 /// Maximum share-label length (mirrors the `monitor_shares_label_length` CHECK).
 const LABEL_MAX: usize = 80;
@@ -138,7 +138,7 @@ pub async fn create_share(
 )]
 pub async fn list_shares(
     State(state): State<AppState>,
-    Authorized(org, _): Authorized<TargetsRead>,
+    Authorized(org, _): Authorized<TargetsWrite>,
     Path(target_id): Path<Uuid>,
 ) -> Result<Json<Vec<MonitorShare>>> {
     // Resolve the monitor first so a foreign/unknown id 404s instead of
