@@ -165,6 +165,11 @@ pub async fn logo(State(state): State<AppState>, headers: HeaderMap) -> Response
                     header::CACHE_CONTROL,
                     "public, max-age=3600, immutable".to_owned(),
                 ),
+                // User-uploaded bytes served on the same origin as the app
+                // (path-based public routing). nosniff stops MIME-guessing
+                // past the forced image type; inline keeps it a passive asset.
+                (header::X_CONTENT_TYPE_OPTIONS, "nosniff".to_owned()),
+                (header::CONTENT_DISPOSITION, "inline".to_owned()),
             ],
             bytes,
         )

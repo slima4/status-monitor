@@ -87,7 +87,7 @@ impl LocalDiskLogoStorage {
     }
 
     fn resolve(&self, name: &str) -> Result<PathBuf> {
-        // Stored names are bare `{org}-{hash}.{ext}` strings. Separators or
+        // Stored names are bare `{hash}.{ext}` strings. Separators or
         // `..` segments here mean a caller is trying to escape `root`.
         if name.is_empty() || name.contains('/') || name.contains('\\') || name.contains("..") {
             return Err(anyhow!("invalid logo path: {name}"));
@@ -101,13 +101,16 @@ impl LogoStorage for LocalDiskLogoStorage {
     async fn put(&self, org_id: OrgId, content_type: &str, data: &[u8]) -> Result<String> {
         let mime = LogoMime::from_content_type(content_type)
             .ok_or_else(|| anyhow!("unsupported logo content_type: {content_type}"))?;
-        // Hash-based filename so the served URL is safely cacheable forever:
-        // a new upload produces a new path, invalidating browser caches
-        // without server-side bookkeeping. 8 bytes is plenty — collisions
-        // don't break correctness, they just share a filename.
-        let digest = Sha256::digest(data);
-        let hash = hex_lower(&digest[..8]);
-        let name = format!("{}-{}.{}", org_id.0, hash, mime.as_extension());
+        // Opaque hash-based filename, salted with the org id: cacheable
+        // forever (new upload → new path, no server bookkeeping), per-org
+        // unique (same image in two orgs → distinct files, so a delete in
+        // one never strands the other), and the org id stays out of the
+        // public URL. 8 bytes is plenty — a collision only shares a file.
+        let mut hasher = Sha256::new();
+        hasher.update(org_id.0.as_bytes());
+        hasher.update(data);
+        let hash = hex_lower(&hasher.finalize()[..8]);
+        let name = format!("{}.{}", hash, mime.as_extension());
         let path = self.resolve(&name)?;
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)
