@@ -13,20 +13,6 @@
     {% endif %}
   </header>
 
-  {% if !rows.is_empty() %}
-  <div class="sticker-card space-y-1 p-4 font-mono text-xs leading-relaxed text-muted">
-    <p class="text-quiet"># status-pages --help</p>
-    <p># each page has its own URL and its own set of monitors</p>
-    <p># run several — e.g. a public page and a separate internal one</p>
-    <p># a monitor can sit on more than one page</p>
-    <p># unpublished = draft, its URL 404s until you publish it</p>
-  </div>
-  {% endif %}
-
-  {% if at_limit && !rows.is_empty() %}
-  <p class="alert-card alert-card--muted">Plan limit reached — delete a page to create another.</p>
-  {% endif %}
-
   <div id="page-errors" role="alert" aria-live="polite" class="hidden alert-card alert-card--error"></div>
 
   <div id="pages-list"
@@ -36,6 +22,25 @@
        class="sticker-card overflow-hidden">
     <p class="px-4 py-3 text-sm text-muted">Loading…</p>
   </div>
+
+  {% if at_limit && !rows.is_empty() %}
+  <p class="alert-card alert-card--muted">Plan limit reached — delete a page to create another.</p>
+  {% endif %}
+
+  {% if !rows.is_empty() %}
+  <details class="sticker-card font-mono text-xs leading-relaxed text-muted">
+    <summary class="sm-help-summary flex cursor-pointer select-none items-center gap-2 p-4 text-quiet">
+      <span class="sm-help-tri" aria-hidden="true">▸</span>
+      <span># status-pages --help</span>
+    </summary>
+    <div class="space-y-1 px-4 pb-4">
+      <p># each page has its own URL and its own set of monitors</p>
+      <p># run several — e.g. a public page and a separate internal one</p>
+      <p># a monitor can sit on more than one page</p>
+      <p># unpublished = draft, its URL 404s until you publish it</p>
+    </div>
+  </details>
+  {% endif %}
 
   <script>
     (() => {

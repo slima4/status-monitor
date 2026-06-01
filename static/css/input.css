@@ -1929,6 +1929,13 @@
     .cli-brackets::before { content: "[ "; opacity: 0.55; }
     .cli-brackets::after  { content: " ]"; opacity: 0.55; }
 
+    /* Collapsible `--help` block: one quiet prompt line until expanded. */
+    .sm-help-summary { list-style: none; }
+    .sm-help-summary::-webkit-details-marker { display: none; }
+    .sm-help-tri { display: inline-block; opacity: 0.7; transition: transform 0.15s ease; }
+    details[open] > .sm-help-summary .sm-help-tri { transform: rotate(90deg); }
+    @media (prefers-reduced-motion: reduce) { .sm-help-tri { transition: none; } }
+
     .usage-row {
         @apply space-y-1.5;
     }
