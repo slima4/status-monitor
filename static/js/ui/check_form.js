@@ -160,7 +160,17 @@
         evt.preventDefault();
         clearErrors();
         const built = buildBody();
-        if (built.error) { renderClientError(built.error); return; }
+        if (built.error) {
+            renderClientError(built.error);
+            if (built.field) {
+                const el = fieldForApiPath(built.field);
+                if (el) {
+                    el.setAttribute("aria-invalid", "true");
+                    el.focus({ preventScroll: true });
+                }
+            }
+            return;
+        }
         // SubmitEvent.submitter is the actual clicked button (null for
         // form.requestSubmit() / Cmd+Enter, which we treat as primary save).
         const submitter = evt.submitter;
@@ -313,6 +323,10 @@
 
     function buildBody() {
         const data = new FormData(form);
+        const name = (data.get("name") || "").trim();
+        if (!name) {
+            return { error: "Name is required — label this monitor so you can find it later.", field: "name" };
+        }
         const built = buildCheck();
         if (built.error) return { error: built.error };
         const check = built.check;
@@ -323,14 +337,17 @@
         for (const row of form.querySelectorAll("[data-channel-row]")) {
             const cb = row.querySelector("[data-channel-select]");
             if (!cb || !cb.checked) continue;
-            const after = parseInt(row.querySelector("[data-after-failures]").value, 10);
+            const afterEl = row.querySelector("[data-after-failures]");
+            const recoveryEl = row.querySelector("[data-notify-recovery]");
+            if (!afterEl || !recoveryEl) continue;
+            const after = parseInt(afterEl.value, 10);
             if (!Number.isInteger(after) || after < 1) {
                 return { error: `"After N failures" for channel must be a whole number ≥ 1.` };
             }
             alerts.push({
                 channel_id: cb.value,
                 after_failures: after,
-                notify_recovery: row.querySelector("[data-notify-recovery]").checked,
+                notify_recovery: recoveryEl.checked,
             });
         }
 
@@ -345,7 +362,7 @@
         const groupRaw = (data.get("group_name") || "").trim();
         const ownerRaw = (data.get("owner_user_id") || "").trim();
         const payload = {
-            name: data.get("name"),
+            name,
             interval,
             enabled: data.get("enabled") === "on",
             tags,
