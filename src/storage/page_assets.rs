@@ -25,6 +25,10 @@ pub struct AssetMeta {
     pub content_hash: String,
     pub content_type: String,
     pub byte_size: i64,
+    /// Per-slot extras (e.g. image `width`/`height`). Storage stays
+    /// kind-agnostic: the producer decides the keys, consumers read what they
+    /// need. Keeps new asset kinds from accreting typed fields here.
+    pub metadata: serde_json::Value,
 }
 
 #[async_trait]
@@ -104,7 +108,7 @@ impl PageAssetStore for PgPageAssetStore {
         .bind(&hash)
         .bind(byte_size)
         .bind(bytes)
-        .bind(metadata)
+        .bind(metadata.clone())
         .execute(&self.pool)
         .await
         .map_err(db_err)?;
@@ -112,6 +116,7 @@ impl PageAssetStore for PgPageAssetStore {
             content_hash: hash,
             content_type: content_type.to_owned(),
             byte_size,
+            metadata,
         })
     }
 
@@ -133,8 +138,8 @@ impl PageAssetStore for PgPageAssetStore {
     }
 
     async fn get_meta(&self, page: StatusPageId, slot: AssetSlot) -> Result<Option<AssetMeta>> {
-        let row: Option<(String, String, i64)> = sqlx::query_as(
-            "SELECT content_hash, content_type, byte_size FROM page_assets \
+        let row: Option<(String, String, i64, serde_json::Value)> = sqlx::query_as(
+            "SELECT content_hash, content_type, byte_size, metadata FROM page_assets \
              WHERE status_page_id = $1 AND slot = $2 AND storage = 'db'",
         )
         .bind(page.0)
@@ -142,13 +147,14 @@ impl PageAssetStore for PgPageAssetStore {
         .fetch_optional(&self.pool)
         .await
         .map_err(db_err)?;
-        Ok(
-            row.map(|(content_hash, content_type, byte_size)| AssetMeta {
+        Ok(row.map(
+            |(content_hash, content_type, byte_size, metadata)| AssetMeta {
                 content_hash,
                 content_type,
                 byte_size,
-            }),
-        )
+                metadata,
+            },
+        ))
     }
 
     async fn delete(&self, page: StatusPageId, slot: AssetSlot) -> Result<bool> {
@@ -166,9 +172,12 @@ impl PageAssetStore for PgPageAssetStore {
 
 /// In-memory [`PageAssetStore`] for no-DB fixtures. Keyed by `(page, slot)`,
 /// mirroring the `db` storage path of [`PgPageAssetStore`].
+/// One stored asset: its servable bytes + the producer's metadata jsonb.
+type AssetEntry = (AssetContent, serde_json::Value);
+
 #[derive(Default)]
 pub struct InMemoryPageAssetStore {
-    inner: std::sync::Mutex<std::collections::HashMap<(uuid::Uuid, &'static str), AssetContent>>,
+    inner: std::sync::Mutex<std::collections::HashMap<(uuid::Uuid, &'static str), AssetEntry>>,
 }
 
 impl InMemoryPageAssetStore {
@@ -186,22 +195,26 @@ impl PageAssetStore for InMemoryPageAssetStore {
         slot: AssetSlot,
         content_type: &str,
         bytes: &[u8],
-        _metadata: serde_json::Value,
+        metadata: serde_json::Value,
     ) -> Result<AssetMeta> {
         let hash = content_hash(bytes);
         let byte_size = bytes.len() as i64;
         self.inner.lock().unwrap().insert(
             (page.0, slot.as_str()),
-            AssetContent {
-                bytes: bytes.to_vec(),
-                content_type: content_type.to_owned(),
-                content_hash: hash.clone(),
-            },
+            (
+                AssetContent {
+                    bytes: bytes.to_vec(),
+                    content_type: content_type.to_owned(),
+                    content_hash: hash.clone(),
+                },
+                metadata.clone(),
+            ),
         );
         Ok(AssetMeta {
             content_hash: hash,
             content_type: content_type.to_owned(),
             byte_size,
+            metadata,
         })
     }
 
@@ -211,7 +224,7 @@ impl PageAssetStore for InMemoryPageAssetStore {
             .lock()
             .unwrap()
             .get(&(page.0, slot.as_str()))
-            .cloned())
+            .map(|(c, _)| c.clone()))
     }
 
     async fn get_meta(&self, page: StatusPageId, slot: AssetSlot) -> Result<Option<AssetMeta>> {
@@ -220,10 +233,11 @@ impl PageAssetStore for InMemoryPageAssetStore {
             .lock()
             .unwrap()
             .get(&(page.0, slot.as_str()))
-            .map(|c| AssetMeta {
+            .map(|(c, metadata)| AssetMeta {
                 content_hash: c.content_hash.clone(),
                 content_type: c.content_type.clone(),
                 byte_size: c.bytes.len() as i64,
+                metadata: metadata.clone(),
             }))
     }
 

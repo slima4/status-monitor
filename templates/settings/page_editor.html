@@ -108,7 +108,7 @@
   <!-- ── Logo ─────────────────────────────────────────────────── -->
   <fieldset class="sticker-card space-y-5 p-5">
     <legend class="px-1 text-sm font-medium">Logo</legend>
-    {% if logo_url != "" %}<div class="h-12"><img src="{{ logo_url }}" alt="current logo" decoding="async" class="h-12 w-auto"></div>{% endif %}
+    {% if logo_url != "" %}<div class="h-12"><img src="{{ logo_url }}" alt="current logo" decoding="async"{% if logo_w > 0 %} width="{{ logo_w }}" height="{{ logo_h }}"{% endif %} class="h-12 w-auto"></div>{% endif %}
     <div class="flex flex-wrap items-center gap-3">
       <label class="file-cli">
         <input id="logo-file" type="file" accept="image/png,image/jpeg,image/webp"

@@ -606,6 +606,12 @@ async fn read_logo_field(multipart: &mut Multipart) -> Result<Vec<u8>> {
     ))
 }
 
+// SEAM: this is the only kind-specific processing in the otherwise-generic
+// page-asset path (store + serve are kind-agnostic). When a 2nd asset slot
+// needs its own validation/transform (background, favicon, custom_css upload,
+// font), extract an `AssetProcessor` trait — `process(raw) -> {content_type,
+// bytes, metadata}` keyed by `AssetSlot` — and make the upload route generic
+// instead of branching per slot here. Not before: one kind doesn't need it.
 /// Validates the image by sniffing the bytes (the declared content-type is
 /// ignored), then downscales to fit `max_dim` if either side is larger.
 /// Returns the format, the (possibly re-encoded) bytes, and the final `(w, h)`.

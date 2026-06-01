@@ -139,6 +139,9 @@ pub struct PageEditorPage {
     pub host_suffix: Option<String>,
     pub status_url: String,
     pub logo_url: String,
+    /// Intrinsic logo dims for CLS-safe `<img width height>`; 0 = no logo.
+    pub logo_w: i64,
+    pub logo_h: i64,
     pub max_logo_bytes: u64,
     pub max_logo_dim_px: u32,
     /// Monitors on this page first (in order), then the rest by name.
@@ -217,6 +220,27 @@ pub async fn page_editor(
         .as_deref()
         .and_then(|hash| public_logo_url(base.as_deref(), hash))
         .unwrap_or_default();
+    let (logo_w, logo_h) = if b.logo_hash.is_some() {
+        match state
+            .page_asset_store
+            .get_meta(page_id, crate::domain::AssetSlot::Logo)
+            .await?
+        {
+            Some(m) => (
+                m.metadata
+                    .get("width")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0),
+                m.metadata
+                    .get("height")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0),
+            ),
+            None => (0, 0),
+        }
+    } else {
+        (0, 0)
+    };
     let styles = PublicStyle::ALL
         .iter()
         .map(|v| StyleOption {
@@ -242,6 +266,8 @@ pub async fn page_editor(
         host_suffix: public_host_suffix(&state.cfg),
         status_url,
         logo_url,
+        logo_w,
+        logo_h,
         max_logo_bytes: u64::from(cfg.max_logo_size_bytes),
         max_logo_dim_px: cfg.max_logo_dimension_px,
         components: rows,
