@@ -61,10 +61,11 @@
         for (let attempt = 0; attempt < 4; attempt++) {
           let res, data;
           try {
+            const slug = genSlug();
             res = await fetch('/api/v1/status-pages', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'uptimepage' },
-              body: JSON.stringify({ name: 'Untitled', slug: genSlug(), enabled: true }),
+              body: JSON.stringify({ name: slug, slug, enabled: true }),
             });
             data = await res.json().catch(() => null);
           } catch (_) {
