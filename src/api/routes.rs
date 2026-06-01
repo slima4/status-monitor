@@ -57,15 +57,18 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
     // bulk ceiling. Generous headroom over `max_logo_size_bytes` (not just
     // multipart framing) so an a-bit-too-large logo still reaches the handler
     // and gets a clean `413 LOGO_TOO_LARGE` instead of the body layer aborting
-    // mid-parse and surfacing as an opaque `LOGO_MISSING`. Its own auth layer
-    // mirrors the owner-gated `/orgs/{id}` routes since `.merge` lands these
-    // routes outside the main v1 middleware stack.
+    // mid-parse and surfacing as an opaque `LOGO_MISSING`. Like `bulk`, `.merge`
+    // lands these routes outside the main v1 stack, so they must carry their own
+    // auth AND rate-limit copies — the CPU-heavy image re-encode is exactly what
+    // the limiter exists to cap. Same inner→outer order: rate-limit innermost so
+    // auth resolves the org/user the limiter keys on.
     let logo_body_limit = state.cfg.public_status.max_logo_size_bytes as usize + 1024 * 1024;
     let logo = Router::new()
         .route(
             "/status-pages/{id}/logo",
             post(handlers::status_page::upload_logo).delete(handlers::status_page::delete_logo),
         )
+        .layer(from_fn_with_state(state.clone(), rate_limit_middleware))
         .layer(from_fn_with_state(
             state.clone(),
             crate::web::auth::api_token::middleware,

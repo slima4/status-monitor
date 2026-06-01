@@ -613,8 +613,12 @@ async fn read_logo_field(multipart: &mut Multipart) -> Result<Vec<u8>> {
 // bytes, metadata}` keyed by `AssetSlot` — and make the upload route generic
 // instead of branching per slot here. Not before: one kind doesn't need it.
 /// Validates the image by sniffing the bytes (the declared content-type is
-/// ignored), then downscales to fit `max_dim` if either side is larger.
-/// Returns the format, the (possibly re-encoded) bytes, and the final `(w, h)`.
+/// ignored), downscales to fit `max_dim` if either side is larger, and ALWAYS
+/// re-encodes. Re-encoding is the security boundary: stored/served bytes are
+/// freshly written image data, never the uploader's original — so a polyglot
+/// (valid image + appended HTML/script) or trailing payload can't survive to
+/// be served same-origin. Also drops EXIF. Returns the format, the re-encoded
+/// bytes, and the final `(w, h)`.
 fn process_logo(raw: &[u8], max_dim: u32) -> Result<(LogoMime, Vec<u8>, (u32, u32))> {
     let fmt = image::guess_format(raw).map_err(|_| {
         AppError::bad_request(codes::LOGO_TYPE_INVALID, "unrecognised image format")
@@ -636,13 +640,14 @@ fn process_logo(raw: &[u8], max_dim: u32) -> Result<(LogoMime, Vec<u8>, (u32, u3
             "could not decode image — malformed, or its dimensions exceed the limit",
         )
     })?;
-    if img.width() <= max_dim && img.height() <= max_dim {
-        return Ok((mime, raw.to_vec(), (img.width(), img.height())));
-    }
-    let resized = img.resize(max_dim, max_dim, image::imageops::FilterType::Lanczos3);
-    let dims = (resized.width(), resized.height());
+    let img = if img.width() > max_dim || img.height() > max_dim {
+        img.resize(max_dim, max_dim, image::imageops::FilterType::Lanczos3)
+    } else {
+        img
+    };
+    let dims = (img.width(), img.height());
     let mut out = std::io::Cursor::new(Vec::new());
-    resized.write_to(&mut out, fmt).map_err(|_| {
+    img.write_to(&mut out, fmt).map_err(|_| {
         AppError::bad_request(codes::LOGO_DECODE_FAILED, "could not re-encode image")
     })?;
     Ok((mime, out.into_inner(), dims))
@@ -665,16 +670,58 @@ mod tests {
     }
 
     #[test]
-    fn process_logo_passes_small_png_through_untouched() {
+    fn process_logo_reencodes_small_png() {
         let png = image::RgbaImage::from_pixel(1, 1, image::Rgba([1, 2, 3, 255]));
         let mut buf = std::io::Cursor::new(Vec::new());
         image::DynamicImage::ImageRgba8(png)
             .write_to(&mut buf, image::ImageFormat::Png)
             .unwrap();
         let raw = buf.into_inner();
+        // Even an in-bounds image is re-encoded (the security boundary): the
+        // output is a freshly written PNG of the same dims, decodable, not the
+        // original bytes verbatim.
         let (mime, out, dims) = process_logo(&raw, 1200).unwrap();
         assert_eq!(mime, LogoMime::Png);
-        assert_eq!(out, raw);
         assert_eq!(dims, (1, 1));
+        assert_eq!(image::guess_format(&out).unwrap(), image::ImageFormat::Png);
+        let decoded = image::load_from_memory(&out).unwrap();
+        assert_eq!((decoded.width(), decoded.height()), (1, 1));
+    }
+
+    /// Always-re-encode must NOT break WebP uploads: image 0.25 ships a
+    /// lossless WebP encoder, but small WebP previously passed through verbatim
+    /// — this guards that `write_to(WebP)` still succeeds on the re-encode path.
+    #[test]
+    fn process_logo_reencodes_webp() {
+        let rgba = image::RgbaImage::from_pixel(3, 3, image::Rgba([4, 5, 6, 255]));
+        let mut buf = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgba8(rgba)
+            .write_to(&mut buf, image::ImageFormat::WebP)
+            .unwrap();
+        let raw = buf.into_inner();
+        let (mime, out, dims) = process_logo(&raw, 1200).unwrap();
+        assert_eq!(mime, LogoMime::Webp);
+        assert_eq!(dims, (3, 3));
+        assert_eq!(image::guess_format(&out).unwrap(), image::ImageFormat::WebP);
+        image::load_from_memory(&out).unwrap();
+    }
+
+    /// A valid-PNG-plus-appended-bytes polyglot: re-encoding must strip the
+    /// trailing payload, so the stored bytes are pure image data.
+    #[test]
+    fn process_logo_strips_appended_payload() {
+        let png = image::RgbaImage::from_pixel(2, 2, image::Rgba([9, 9, 9, 255]));
+        let mut buf = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgba8(png)
+            .write_to(&mut buf, image::ImageFormat::Png)
+            .unwrap();
+        let mut raw = buf.into_inner();
+        raw.extend_from_slice(b"<script>alert(1)</script>");
+        let (_mime, out, _dims) = process_logo(&raw, 1200).unwrap();
+        let needle = b"<script>";
+        assert!(
+            !out.windows(needle.len()).any(|w| w == needle),
+            "re-encoded output must not contain the appended payload"
+        );
     }
 }
