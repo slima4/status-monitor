@@ -42,7 +42,7 @@
                minlength="3" maxlength="30" pattern="[a-z][a-z0-9-]*[a-z0-9]"
                autocomplete="off" spellcheck="false" class="field w-48 text-sm font-mono">
         {% if let Some(suffix) = host_suffix %}<span class="text-muted font-mono">{{ suffix }}</span>{% endif %}
-        <button type="submit" class="sticker-btn sticker-btn--primary px-3 py-1.5 text-sm font-medium">Save URL</button>
+        <button type="submit" class="sticker-btn sticker-btn--primary px-3 py-1.5 text-sm font-medium">save url</button>
         <span id="slug-result" aria-live="polite" class="text-sm"></span>
       </div>
       <p class="text-xs text-muted">
@@ -139,6 +139,9 @@
           </tr>
         </thead>
         <tbody class="divide-y divide-[color:var(--theme-line)]">
+          {% if components.is_empty() %}
+          <tr><td colspan="4" class="px-4 py-6 text-center text-sm text-muted">no monitors yet — <a href="/targets/new" class="underline decoration-dotted underline-offset-2">create a monitor</a> to show it on this page.</td></tr>
+          {% else %}
           {% for c in components %}
           <tr data-target-id="{{ c.target_id }}">
             <td class="px-4 py-2 align-middle"><input type="checkbox" data-on-page aria-label="Show {{ c.monitor_name }} on this page"{% if c.on_page %} checked{% endif %}></td>
@@ -147,6 +150,7 @@
             <td class="px-4 py-2"><input type="text" data-field="public_group" value="{{ c.public_group }}" maxlength="50" aria-label="Group for {{ c.monitor_name }}" autocomplete="off" class="w-full field text-xs"{% if !c.on_page %} disabled{% endif %}></td>
           </tr>
           {% endfor %}
+          {% endif %}
         </tbody>
       </table>
     </div>
