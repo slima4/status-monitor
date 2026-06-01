@@ -59,6 +59,11 @@ on:
         required: true
         type: boolean
         default: false
+      remigrate_clickhouse:
+        description: "DESTRUCTIVE: drop the ClickHouse data volume — wipes all check-result history + rollups; the app re-applies CH migrations on the fresh volume. Postgres untouched."
+        required: true
+        type: boolean
+        default: false
   workflow_run:
     workflows: [release-image]
     types: [completed]
@@ -85,6 +90,7 @@ jobs:
       # Manual path: operator-chosen tag + opt-in destructive remigrate.
       IMAGE_TAG: ${{ inputs.image_tag || format('sha-{0}', github.event.workflow_run.head_sha) }}
       REMIGRATE: ${{ inputs.remigrate || false }}
+      REMIGRATE_CH: ${{ inputs.remigrate_clickhouse || false }}
       HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
       DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
       DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
@@ -161,7 +167,7 @@ jobs:
           # KEK already there), never committed.
           ssh -T -i ~/.ssh/id_deploy -o IdentitiesOnly=yes \
               "${DEPLOY_USER}@${DEPLOY_HOST}" \
-              "NEW_IMAGE='${NEW_IMAGE}' REMIGRATE='${REMIGRATE}' HEAD_SHA='${HEAD_SHA}' \
+              "NEW_IMAGE='${NEW_IMAGE}' REMIGRATE='${REMIGRATE}' REMIGRATE_CH='${REMIGRATE_CH}' HEAD_SHA='${HEAD_SHA}' \
                GHCR_USER='${{ github.actor }}' GHCR_TOKEN='${{ secrets.GITHUB_TOKEN }}' \
                GRAFANA_CLOUD_PROM_URL='${{ secrets.GRAFANA_CLOUD_PROM_URL }}' \
                GRAFANA_CLOUD_PROM_USER='${{ secrets.GRAFANA_CLOUD_PROM_USER }}' \
@@ -195,6 +201,10 @@ jobs:
           case "$REMIGRATE" in
             true|false) ;;
             *) echo "::error::REMIGRATE must be true|false, got '$REMIGRATE'"; exit 1 ;;
+          esac
+          case "$REMIGRATE_CH" in
+            true|false) ;;
+            *) echo "::error::REMIGRATE_CH must be true|false, got '$REMIGRATE_CH'"; exit 1 ;;
           esac
 
           cd /opt/uptimepage
@@ -446,6 +456,25 @@ jobs:
               'PGPASSWORD="$POSTGRES_PASSWORD" psql -U monitor -d postgres -v ON_ERROR_STOP=1 \
                  -c "DROP DATABASE IF EXISTS monitor WITH (FORCE);" \
                  -c "CREATE DATABASE monitor OWNER monitor;"'
+          fi
+
+          # --- optional destructive ClickHouse re-migrate (volume drop) ------
+          # CH has no DROP DATABASE cutover like PG; a clean slate means
+          # removing the data volume so the server re-inits (CLICKHOUSE_DB
+          # auto-creates) and the app re-applies CH migrations on connect.
+          if [ "$REMIGRATE_CH" = "true" ]; then
+            echo "remigrate-ch: dropping the ClickHouse data volume"
+            # Project name off a still-running container (the compose project is
+            # `uptimepage`, not the dir) → the volume is <project>_clickhouse_data.
+            proj=$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' "$(docker compose ps -q postgres)")
+            docker compose stop uptimepage clickhouse
+            docker compose rm -f clickhouse
+            docker volume rm "${proj}_clickhouse_data"
+            # Bind-mounted CH config must stay world-readable (0644): container
+            # UID 101 can't read 0600 host files → silent boot loop on a fresh
+            # volume. cwd is /opt/uptimepage/deployment (the config lives here).
+            chmod 644 clickhouse-config.xml clickhouse-users.xml 2>/dev/null || true
+            docker compose up -d clickhouse
           fi
 
           # Scope the recreate to the app so a compose change never silently
