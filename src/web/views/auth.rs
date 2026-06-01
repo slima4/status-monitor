@@ -274,6 +274,8 @@ pub mod settings {
         pub expires: Option<chrono::DateTime<chrono::Utc>>,
         pub expired: bool,
         pub access: &'static str,
+        /// Sorted scope list for the access-cell tooltip.
+        pub scopes: String,
         pub org: Option<String>,
     }
 
@@ -429,22 +431,49 @@ pub mod settings {
                 expired: r.expires_at.is_some_and(|e| e <= now),
                 expires: r.expires_at,
                 access: access_label(&r.scopes.0),
+                scopes: {
+                    let mut s = r.scopes.0.clone();
+                    s.sort();
+                    s.join(", ")
+                },
                 org: r.org_slug,
             })
             .collect();
         Ok(TokensPartial { tokens }.into_response())
     }
 
+    /// Only an exact all-resources `:read` / `:write` set earns a preset word;
+    /// any narrower Advanced grant is `custom` (exact scopes in the tooltip).
     fn access_label(scopes: &[String]) -> &'static str {
         use crate::auth::scope::Scope;
+        use std::collections::HashSet;
+
         if scopes.iter().any(|s| s == Scope::FullAccess.as_str()) {
-            "full access"
-        } else if scopes.iter().all(|s| s.ends_with(":read")) {
+            return "full access";
+        }
+        const READ_PRESET: [&str; 5] = [
+            Scope::TargetsRead.as_str(),
+            Scope::ChannelsRead.as_str(),
+            Scope::IncidentsRead.as_str(),
+            Scope::MaintenanceRead.as_str(),
+            Scope::StatusPageRead.as_str(),
+        ];
+        const WRITE_PRESET: [&str; 5] = [
+            Scope::TargetsWrite.as_str(),
+            Scope::ChannelsWrite.as_str(),
+            Scope::IncidentsWrite.as_str(),
+            Scope::MaintenanceWrite.as_str(),
+            Scope::StatusPageWrite.as_str(),
+        ];
+        let have: HashSet<&str> = scopes.iter().map(String::as_str).collect();
+        let is_preset =
+            |preset: &[&str]| have.len() == preset.len() && preset.iter().all(|s| have.contains(s));
+
+        if is_preset(&READ_PRESET) {
             "read-only"
-        } else if scopes.iter().any(|s| s.ends_with(":write")) {
+        } else if is_preset(&WRITE_PRESET) {
             "read & write"
         } else {
-            // Only delete/execute scopes — no read or write to claim.
             "custom"
         }
     }
@@ -734,6 +763,7 @@ pub mod settings {
                     expires: None,
                     expired: false,
                     access: "read-only",
+                    scopes: "targets:read".into(),
                     org: Some("acme".into()),
                 }],
             }

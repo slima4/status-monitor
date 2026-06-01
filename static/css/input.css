@@ -1218,6 +1218,38 @@
         color: var(--theme-text-quiet);
     }
     .field::placeholder { color: var(--theme-text-quiet); }
+
+    /* Resource rows × action columns; one grid so checkboxes align per column
+       (empty cells hold the slot). Action labels live in the header. */
+    .scope-grid {
+        display: grid;
+        grid-template-columns: 7rem repeat(4, minmax(0, 1fr));
+        gap: 0.4rem 0.75rem;
+        align-items: center;
+    }
+    .scope-grid__head {
+        font-family: var(--font-mono);
+        font-size: 0.7rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--theme-text-muted);
+        text-align: center;
+    }
+    .scope-grid__head:first-child { text-align: left; }
+    .scope-grid__res {
+        font-family: var(--font-mono);
+        color: var(--theme-text-muted);
+    }
+    .scope-grid > label { display: flex; justify-content: center; margin: 0; }
+    .scope-grid[hidden] { display: none; }
+    .scope-grid__note {
+        grid-column: 1 / -1;
+        margin-top: 0.25rem;
+        font-family: var(--font-mono);
+        font-size: 0.7rem;
+        color: var(--theme-text-quiet);
+    }
+
     /* Notch label rides the input's top border; bg masks the border, z-index
        lifts it above positioned siblings (chip box / combobox). */
     .field-outline { @apply relative block; }

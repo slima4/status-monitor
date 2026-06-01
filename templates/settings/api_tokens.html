@@ -3,7 +3,7 @@
 {% block content %}
 <section class="space-y-6">
   <header class="space-y-1">
-    <h1 class="page-title"><span class="page-title__prefix">$</span>api tokens</h1>
+    <h1 class="page-title"><span class="page-title__prefix" aria-hidden="true">$</span>api tokens</h1>
     <p class="text-sm text-muted">
       Bearer tokens for scripting against <code>/api/v1/*</code>. The full token
       is shown <strong>once</strong> when you create it — store it now.
@@ -16,38 +16,38 @@
     </p>
   </header>
 
-  <form id="new-token-form" class="sticker-card space-y-4 p-4">
-    <div class="space-y-1">
-      <label class="text-xs uppercase text-muted" for="token-name">Name</label>
+  <form id="new-token-form" novalidate class="sticker-card space-y-4 p-4">
+    <label class="field-outline">
+      <span class="field-outline__label">Name</span>
       <input id="token-name" name="name" type="text" required minlength="1" maxlength="80"
              placeholder="CI deploy, my laptop, …"
-             class="field text-sm w-full">
-    </div>
+             autocomplete="off" spellcheck="false" class="w-full field font-mono">
+    </label>
 
     <div class="grid gap-4 sm:grid-cols-2">
-      <div class="space-y-1">
-        <label class="text-xs uppercase text-muted" for="token-org">Organization</label>
-        <select id="token-org" class="field text-sm w-full">
+      <label class="field-outline">
+        <span class="field-outline__label">Organization</span>
+        <select id="token-org" data-sm-combobox aria-label="Organization" class="w-full field font-mono">
           {% for o in orgs %}
           <option value="{{ o.slug }}"{% if o.selected %} selected{% endif %}>{{ o.name }}</option>
           {% endfor %}
           <option value="">All my organizations</option>
         </select>
-      </div>
-      <div class="space-y-1">
-        <label class="text-xs uppercase text-muted" for="token-expiry">Expires</label>
-        <select id="token-expiry" class="field text-sm w-full">
+      </label>
+      <label class="field-outline">
+        <span class="field-outline__label">Expires</span>
+        <select id="token-expiry" data-sm-combobox aria-label="Expires" class="w-full field font-mono">
           <option value="30">30 days</option>
           <option value="60">60 days</option>
           <option value="90" selected>90 days</option>
           <option value="365">365 days</option>
           <option value="">No expiry</option>
         </select>
-      </div>
+      </label>
     </div>
 
     <fieldset class="space-y-2">
-      <legend class="text-xs uppercase text-muted">Access</legend>
+      <legend class="text-xs text-muted">Access</legend>
       <div class="flex flex-wrap gap-4 text-sm">
         <label class="flex items-center gap-2"><input type="radio" name="access" value="read" checked> Read-only</label>
         <label class="flex items-center gap-2"><input type="radio" name="access" value="write"> Read &amp; write</label>
@@ -56,28 +56,44 @@
     </fieldset>
 
     <div id="advanced-scopes" hidden
-         class="space-y-2 border-t border-[color:var(--theme-line)] pt-3 text-sm">
-      <div class="flex items-center gap-3"><span class="w-28 text-muted">targets</span>
-        <label class="flex items-center gap-1"><input type="checkbox" class="scope-box" value="targets:read" aria-label="targets read"> read</label>
-        <label class="flex items-center gap-1"><input type="checkbox" class="scope-box" value="targets:write" aria-label="targets write"> write</label>
-        <label class="flex items-center gap-1"><input type="checkbox" class="scope-box" value="targets:delete" aria-label="targets delete"> delete</label>
-        <label class="flex items-center gap-1"><input type="checkbox" class="scope-box" value="targets:execute" aria-label="targets execute"> run checks</label></div>
-      <div class="flex items-center gap-3"><span class="w-28 text-muted">channels</span>
-        <label class="flex items-center gap-1"><input type="checkbox" class="scope-box" value="channels:read" aria-label="channels read"> read</label>
-        <label class="flex items-center gap-1"><input type="checkbox" class="scope-box" value="channels:write" aria-label="channels write"> write</label>
-        <label class="flex items-center gap-1"><input type="checkbox" class="scope-box" value="channels:delete" aria-label="channels delete"> delete</label>
-        <label class="flex items-center gap-1"><input type="checkbox" class="scope-box" value="channels:execute" aria-label="channels execute"> send test</label></div>
-      <div class="flex items-center gap-3"><span class="w-28 text-muted">incidents</span>
-        <label class="flex items-center gap-1"><input type="checkbox" class="scope-box" value="incidents:read" aria-label="incidents read"> read</label>
-        <label class="flex items-center gap-1"><input type="checkbox" class="scope-box" value="incidents:write" aria-label="incidents write"> write</label></div>
-      <div class="flex items-center gap-3"><span class="w-28 text-muted">maintenance</span>
-        <label class="flex items-center gap-1"><input type="checkbox" class="scope-box" value="maintenance:read" aria-label="maintenance read"> read</label>
-        <label class="flex items-center gap-1"><input type="checkbox" class="scope-box" value="maintenance:write" aria-label="maintenance write"> write</label>
-        <label class="flex items-center gap-1"><input type="checkbox" class="scope-box" value="maintenance:delete" aria-label="maintenance delete"> delete</label></div>
-      <div class="flex items-center gap-3"><span class="w-28 text-muted">status page</span>
-        <label class="flex items-center gap-1"><input type="checkbox" class="scope-box" value="status_page:read" aria-label="status page read"> read</label>
-        <label class="flex items-center gap-1"><input type="checkbox" class="scope-box" value="status_page:write" aria-label="status page write"> write</label>
-        <label class="flex items-center gap-1"><input type="checkbox" class="scope-box" value="status_page:delete" aria-label="status page delete"> delete</label></div>
+         class="scope-grid border-t border-[color:var(--theme-line)] pt-3 text-sm">
+      <span class="scope-grid__head">resource</span>
+      <span class="scope-grid__head">read</span>
+      <span class="scope-grid__head">write</span>
+      <span class="scope-grid__head">delete</span>
+      <span class="scope-grid__head">run</span>
+
+      <span class="scope-grid__res">targets</span>
+      <label><input type="checkbox" class="scope-box" value="targets:read" aria-label="targets read"></label>
+      <label><input type="checkbox" class="scope-box" value="targets:write" aria-label="targets write"></label>
+      <label><input type="checkbox" class="scope-box" value="targets:delete" aria-label="targets delete"></label>
+      <label><input type="checkbox" class="scope-box" value="targets:execute" aria-label="targets run checks" title="run checks"></label>
+
+      <span class="scope-grid__res">channels</span>
+      <label><input type="checkbox" class="scope-box" value="channels:read" aria-label="channels read"></label>
+      <label><input type="checkbox" class="scope-box" value="channels:write" aria-label="channels write"></label>
+      <label><input type="checkbox" class="scope-box" value="channels:delete" aria-label="channels delete"></label>
+      <label><input type="checkbox" class="scope-box" value="channels:execute" aria-label="channels send test" title="send test"></label>
+
+      <span class="scope-grid__res">incidents</span>
+      <label><input type="checkbox" class="scope-box" value="incidents:read" aria-label="incidents read"></label>
+      <label><input type="checkbox" class="scope-box" value="incidents:write" aria-label="incidents write"></label>
+      <span></span>
+      <span></span>
+
+      <span class="scope-grid__res">maintenance</span>
+      <label><input type="checkbox" class="scope-box" value="maintenance:read" aria-label="maintenance read"></label>
+      <label><input type="checkbox" class="scope-box" value="maintenance:write" aria-label="maintenance write"></label>
+      <label><input type="checkbox" class="scope-box" value="maintenance:delete" aria-label="maintenance delete"></label>
+      <span></span>
+
+      <span class="scope-grid__res">status page</span>
+      <label><input type="checkbox" class="scope-box" value="status_page:read" aria-label="status page read"></label>
+      <label><input type="checkbox" class="scope-box" value="status_page:write" aria-label="status page write"></label>
+      <label><input type="checkbox" class="scope-box" value="status_page:delete" aria-label="status page delete"></label>
+      <span></span>
+
+      <p class="scope-grid__note">run = run checks (targets) · send test (channels)</p>
     </div>
 
     <div class="flex justify-end">
@@ -104,6 +120,7 @@
       const form = document.getElementById('new-token-form');
       const adv = document.getElementById('advanced-scopes');
       const result = document.getElementById('token-result');
+      const submitBtn = form.querySelector('button[type=submit]');
 
       form.querySelectorAll('input[name=access]').forEach((r) => {
         r.addEventListener('change', () => {
@@ -125,14 +142,31 @@
 
       form.addEventListener('submit', async (e) => {
         e.preventDefault();
+        if (submitBtn.disabled) return;
+        const nameInput = document.getElementById('token-name');
+        const name = nameInput.value.trim();
+        if (!name) {
+          showError('Name is required — label this token so you can find it later.');
+          nameInput.focus();
+          return;
+        }
         const scopes = chosenScopes();
-        if (scopes.length === 0) { showError('Pick at least one scope.'); return; }
+        if (scopes.length === 0) {
+          showError('Pick at least one scope.');
+          const firstBox = form.querySelector('.scope-box');
+          if (firstBox) firstBox.focus();
+          return;
+        }
 
-        const body = { name: document.getElementById('token-name').value, scopes };
+        const body = { name, scopes };
         const org = document.getElementById('token-org').value;
         if (org) body.org_slug = org;
         const expiry = document.getElementById('token-expiry').value;
         if (expiry) body.expires_in_days = parseInt(expiry, 10);
+
+        const label = submitBtn.textContent;
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'creating…';
 
         let res, data;
         try {
@@ -145,11 +179,43 @@
         } catch (_) {
           showError('Network error — try again.');
           return;
+        } finally {
+          submitBtn.disabled = false;
+          submitBtn.textContent = label;
         }
 
         if (res.ok && data && data.token) {
-          result.innerHTML = '<div class="alert-card alert-card--ok"><p class="font-medium">Token created — copy it now, you will not see it again.</p><pre class="mt-2 overflow-x-auto rounded bg-[color:var(--theme-surface-elev)] px-3 py-2 font-mono text-xs"></pre></div>';
-          result.querySelector('pre').textContent = data.token;
+          result.innerHTML =
+            '<div class="alert-card alert-card--ok space-y-2">' +
+              '<p class="font-medium">Token created — copy it now, you will not see it again.</p>' +
+              '<div class="flex items-stretch gap-2">' +
+                '<pre class="flex-1 overflow-x-auto rounded bg-[color:var(--theme-surface-elev)] px-3 py-2 font-mono text-xs"></pre>' +
+                '<button type="button" data-token-copy class="shrink-0 btn-ghost px-2.5 py-1 text-xs">copy</button>' +
+              '</div>' +
+            '</div>';
+          const pre = result.querySelector('pre');
+          pre.textContent = data.token;
+          const copyBtn = result.querySelector('[data-token-copy]');
+          copyBtn.addEventListener('click', async () => {
+            let ok = false;
+            try {
+              if (navigator.clipboard && navigator.clipboard.writeText) {
+                await navigator.clipboard.writeText(data.token);
+                ok = true;
+              }
+            } catch (_) { /* fall through to legacy path */ }
+            if (!ok) {
+              const sel = window.getSelection();
+              const range = document.createRange();
+              range.selectNodeContents(pre);
+              sel.removeAllRanges();
+              sel.addRange(range);
+              try { ok = document.execCommand('copy'); } catch (_) { ok = false; }
+              sel.removeAllRanges();
+            }
+            copyBtn.textContent = ok ? 'copied' : 'press ⌘C';
+            setTimeout(() => { copyBtn.textContent = 'copy'; }, 1500);
+          });
           document.getElementById('token-name').value = '';
           htmx.trigger('body', 'tokens:refresh');
         } else {
