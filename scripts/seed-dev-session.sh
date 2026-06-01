@@ -36,9 +36,10 @@ TOKEN_HASH=$(printf '%s' "${TOKEN}" | shasum -a 256 | awk '{print $1}')
 
 pg <<SQL
 WITH u AS (
-  INSERT INTO users (email, terms_version, privacy_version)
-  VALUES ('${EMAIL}', 'v1', 'v1')
-  ON CONFLICT (email) WHERE deleted_at IS NULL DO UPDATE SET email = EXCLUDED.email
+  INSERT INTO users (email, terms_version, privacy_version, email_verified_at)
+  VALUES ('${EMAIL}', 'v1', 'v1', now())
+  ON CONFLICT (email) WHERE deleted_at IS NULL
+    DO UPDATE SET email_verified_at = COALESCE(users.email_verified_at, now())
   RETURNING id
 ), o AS (
   INSERT INTO organizations (slug, name) VALUES ('${SLUG}', '${ORG_NAME}')
