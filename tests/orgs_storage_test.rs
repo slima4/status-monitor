@@ -9,13 +9,16 @@ mod common;
 use std::time::Duration;
 
 use common::{default_http_check, make_user, unique_slug};
-use uptimepage::domain::{CheckSpec, ExpectedStatus, NewTarget, OrgId, Role, WriteSource};
+use uptimepage::domain::{
+    CheckSpec, ExpectedStatus, NewStatusPage, NewTarget, OrgId, Role, WriteSource,
+};
 use uptimepage::storage::orgs as orgs_store;
 use uptimepage::storage::{
-    PostgresTargetStore, RemoveOutcome, RestoreOutcome, TargetStore, UpdateOrgOutcome,
-    create_org_with_owner, is_active_member, is_owner, list_deleted_orgs_deleted_by, list_members,
-    list_orgs_for_user, oldest_membership_for_user, owner_org_count, remove_member, restore_org,
-    slug_is_available, soft_delete_org, update_org_fields,
+    PgStatusPageStore, PostgresTargetStore, RemoveOutcome, RestoreOutcome, StatusPageStore,
+    TargetStore, UpdateOrgOutcome, create_org_with_owner, is_active_member, is_owner,
+    list_deleted_orgs_deleted_by, list_members, list_orgs_for_user, oldest_membership_for_user,
+    owner_org_count, remove_member, restore_org, slug_is_available, soft_delete_org,
+    update_org_fields,
 };
 use url::Url;
 use uuid::Uuid;
@@ -578,9 +581,8 @@ async fn update_org_fields_combined_name_and_slug_is_atomic() {
 // These pin the invariants a user-facing slug rename will rely on, even though
 // the rename has no UI yet (API-only via `update_org_fields` / PATCH /orgs).
 
-// (1) Decoupling: renaming the org slug must NOT change the org's status-page
-// slug. The default page is seeded at create with slug = org slug; after a
-// rename the two are independent (the page slug is its own editable field).
+// (1) Decoupling: renaming the org slug must NOT change a status-page slug.
+// A page carries its own editable slug, independent of the org slug.
 #[tokio::test]
 #[ignore]
 async fn update_org_slug_does_not_touch_status_page_slug() {
@@ -594,14 +596,23 @@ async fn update_org_slug_does_not_touch_status_page_slug() {
         .unwrap()
         .unwrap();
 
-    // The seeded default page starts with slug == org slug.
-    let (page_slug_before,): (String,) =
-        sqlx::query_as("SELECT slug::text FROM status_pages WHERE org_id = $1")
-            .bind(org.id.0)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-    assert_eq!(page_slug_before, from, "default page seeded with org slug");
+    // The page carries its own slug, independent of the org slug.
+    let page_store = PgStatusPageStore::new(pool.clone());
+    let page_slug = unique_slug("page");
+    let page = page_store
+        .create(
+            org.id,
+            NewStatusPage {
+                slug: page_slug.clone(),
+                name: "P".into(),
+                enabled: true,
+            },
+            WriteSource::Ui,
+            i64::MAX,
+        )
+        .await
+        .unwrap()
+        .unwrap();
 
     let to = unique_slug("decouple-new");
     let outcome = update_org_fields(&pool, org.id, user, None, Some(&to))
@@ -609,15 +620,14 @@ async fn update_org_slug_does_not_touch_status_page_slug() {
         .unwrap();
     assert!(matches!(outcome, UpdateOrgOutcome::Updated(o) if o.slug == to));
 
-    // Page slug is unchanged — decoupled from the org slug.
-    let (page_slug_after,): (String,) =
-        sqlx::query_as("SELECT slug::text FROM status_pages WHERE org_id = $1")
-            .bind(org.id.0)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+    // The page's slug is unchanged — decoupled from the org slug.
+    let after = page_store
+        .get(org.id, page.id)
+        .await
+        .unwrap()
+        .expect("page still there");
     assert_eq!(
-        page_slug_after, from,
+        after.slug, page_slug,
         "status-page slug must not follow the org-slug rename"
     );
 
@@ -629,8 +639,8 @@ async fn update_org_slug_does_not_touch_status_page_slug() {
 }
 
 // (2) No orphan: org-scoped resources are keyed by org_id (UUID), not slug, so
-// they stay reachable after a slug rename. Proven with a target + the seeded
-// status page; notification channels share the identical `org_id` FK pattern.
+// they stay reachable after a slug rename. Proven with a target; channels and
+// pages share the identical `org_id` FK pattern.
 #[tokio::test]
 #[ignore]
 async fn update_org_slug_keeps_resources_reachable_by_id() {
@@ -675,15 +685,6 @@ async fn update_org_slug_keeps_resources_reachable_by_id() {
         still.is_some(),
         "target must survive an org-slug rename (keyed by org_id)"
     );
-
-    // Status page still attached to the org by id.
-    let (pages,): (i64,) =
-        sqlx::query_as("SELECT count(*) FROM status_pages WHERE org_id = $1")
-            .bind(org.id.0)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-    assert_eq!(pages, 1, "page still attached to org by id after rename");
 
     sqlx::query("DELETE FROM users WHERE id = $1")
         .bind(user.0)

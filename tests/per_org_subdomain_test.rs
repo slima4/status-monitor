@@ -20,7 +20,7 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use common::{make_user, unique_slug};
 use tower::ServiceExt;
-use uptimepage::domain::{OrgId, StatusPageUpdate, UserId, WriteSource};
+use uptimepage::domain::{NewStatusPage, OrgId, StatusPageUpdate, UserId, WriteSource};
 use uptimepage::storage::orgs::{find_id_by_slug, find_public_status_page_by_slug};
 use uptimepage::storage::{PgStatusPageStore, StatusPageStore, create_org_with_owner};
 
@@ -36,27 +36,38 @@ fn status_host(slug: &str) -> String {
     format!("{slug}.{BASE_DOMAIN}")
 }
 
-/// Create an org owned by a fresh user. `create_org_with_owner` seeds a default
-/// status page (slug = org slug, enabled), so only the disabled case needs a
-/// follow-up flip. Returns the org plus its owner.
+/// Create an org owned by a fresh user, plus its public page at slug = org slug
+/// (orgs are no longer auto-seeded a page — the owner creates one). Returns the
+/// org plus its owner.
 async fn seed_org(pool: &sqlx::PgPool, slug: &str, enabled: bool) -> (OrgId, UserId) {
     let user = make_user(pool, "subdomain").await;
     let org = create_org_with_owner(pool, user, slug, slug, 100)
         .await
         .expect("create org")
         .expect("slug not taken");
-    if !enabled {
-        set_enabled(pool, org.id, false).await;
-    }
+    PgStatusPageStore::new(pool.clone())
+        .create(
+            org.id,
+            NewStatusPage {
+                slug: slug.into(),
+                name: slug.into(),
+                enabled,
+            },
+            WriteSource::Ui,
+            i64::MAX,
+        )
+        .await
+        .expect("create page")
+        .expect("slug free");
     (org.id, user)
 }
 
-/// Flip the org's default page published flag through the same store the
-/// operator endpoint uses.
+/// Flip the org's page published flag through the same store the operator
+/// endpoint uses.
 async fn set_enabled(pool: &sqlx::PgPool, org: OrgId, enabled: bool) {
     let store = PgStatusPageStore::new(pool.clone());
     let pages = store.list(org).await.expect("list pages");
-    let page = pages.first().expect("default page exists");
+    let page = pages.first().expect("org has a page");
     let updated = store
         .update(
             org,

@@ -46,7 +46,6 @@ pub struct PagesPage {
     /// True when the org is at its `max_status_pages` cap (create disabled).
     pub at_limit: bool,
     pub max_pages: i32,
-    pub host_suffix: Option<String>,
 }
 
 #[derive(Template, WebTemplate)]
@@ -88,7 +87,6 @@ pub async fn pages_list(
         active_tab: TAB_PAGES,
         at_limit: rows.len() as i32 >= max_pages,
         max_pages,
-        host_suffix: public_host_suffix(&state.cfg),
         rows,
     }
     .into_response())

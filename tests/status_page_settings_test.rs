@@ -21,7 +21,8 @@ use common::{
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use tower::ServiceExt;
-use uptimepage::storage::create_org_with_owner;
+use uptimepage::domain::{NewStatusPage, WriteSource};
+use uptimepage::storage::{PgStatusPageStore, StatusPageStore, create_org_with_owner};
 
 /// 1×1 RGBA PNG — `image::guess_format` accepts it and it is within every
 /// dimension/size bound, so `upload_logo` stores it verbatim.
@@ -48,13 +49,27 @@ async fn owner_page(pool: PgPool) -> (axum::Router, String) {
         .await
         .unwrap()
         .expect("org");
+    // Orgs are no longer auto-seeded a page; create the one these edits target.
+    PgStatusPageStore::new(pool.clone())
+        .create(
+            org.id,
+            NewStatusPage {
+                slug: unique_slug("sp-page"),
+                name: "SP Page".into(),
+                enabled: true,
+            },
+            WriteSource::Ui,
+            i64::MAX,
+        )
+        .await
+        .expect("create page")
+        .expect("slug free");
     // Logos now persist in Postgres (`page_assets`), not on disk; the router's
     // Pg pool is all the upload path needs.
     let router = build_saas_router_with_pg_cfg(pool, |_| {}).await;
     // Active org on the session is what the per-page routes resolve `org` from.
     let router = with_session(router, user, Some(org.id), Some(slug.as_str()));
 
-    // Org creation seeds one default page (the free-plan cap); edit that one.
     let (st, body) = read(
         router
             .clone()
@@ -68,7 +83,7 @@ async fn owner_page(pool: PgPool) -> (axum::Router, String) {
     )
     .await;
     assert_eq!(st, StatusCode::OK, "list pages: {body}");
-    let id = body[0]["id"].as_str().expect("a default page").to_owned();
+    let id = body[0]["id"].as_str().expect("the created page").to_owned();
     (router, id)
 }
 

@@ -164,8 +164,6 @@ pub async fn create_org_with_owner(
         ));
     }
 
-    create_default_status_page_in_tx(&mut tx, OrgId(org_row.id), slug, name).await?;
-
     record_audit_tx(
         &mut tx,
         OrgId(org_row.id),
@@ -214,7 +212,6 @@ pub async fn create_signup_org_with_owner_in_tx(
         .execute(&mut **tx)
         .await
         .context("create_signup_org_with_owner_in_tx: insert membership")?;
-    create_default_status_page_in_tx(tx, OrgId(org_id), slug, name).await?;
     record_audit_tx(
         &mut *tx,
         OrgId(org_id),
@@ -227,55 +224,6 @@ pub async fn create_signup_org_with_owner_in_tx(
     Ok(Some(OrgId(org_id)))
 }
 
-/// Every org gets one default status page at signup (the free plan's single
-/// page), slug = the org slug so its public URL matches the org from day one.
-/// Enabled by default so `{slug}.{base}` is live immediately (empty pages
-/// render "All Systems Operational" until components are curated).
-pub(crate) async fn create_default_status_page_in_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    org: OrgId,
-    slug: &str,
-    name: &str,
-) -> Result<()> {
-    // status_pages.slug is globally unique (it routes a subdomain). The org slug
-    // is unique among orgs but could already be claimed by another org's
-    // manually-created page; a raw INSERT would then abort the whole signup tx.
-    // Try the org slug, and on a global collision fall back to a fresh random
-    // slug so org creation always succeeds — the owner can rename it afterwards.
-    let res = sqlx::query(
-        "INSERT INTO status_pages (org_id, slug, name, enabled) VALUES ($1, $2, $3, true)
-         ON CONFLICT (slug) DO NOTHING",
-    )
-    .bind(org.0)
-    .bind(slug)
-    .bind(name)
-    .execute(&mut **tx)
-    .await
-    .context("create_default_status_page_in_tx")?;
-    if res.rows_affected() == 0 {
-        // A fresh random slug, NOT one derived from the org id — that path could
-        // itself already be claimed, and an unguarded INSERT would abort the tx.
-        // Guard it too, then assert the row landed so signup never commits an
-        // org with zero pages.
-        let fallback = format!("page-{}", Uuid::new_v4().simple());
-        let res = sqlx::query(
-            "INSERT INTO status_pages (org_id, slug, name, enabled) VALUES ($1, $2, $3, true)
-             ON CONFLICT (slug) DO NOTHING",
-        )
-        .bind(org.0)
-        .bind(&fallback)
-        .bind(name)
-        .execute(&mut **tx)
-        .await
-        .context("create_default_status_page_in_tx fallback")?;
-        if res.rows_affected() == 0 {
-            return Err(AppError::Other(anyhow::anyhow!(
-                "default status page slug collision on fallback {fallback}"
-            )));
-        }
-    }
-    Ok(())
-}
 
 /// Counts a user's currently-active owner memberships (soft-deleted orgs do
 /// not count). Matches the filter used by the atomic enforcer in

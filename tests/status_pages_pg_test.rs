@@ -1,6 +1,6 @@
 //! Live-Postgres contract for `status_pages` + `status_page_components`:
-//! per-org isolation on every store method, the per-org page cap (which already
-//! counts the signup default page), the distinct-target public-component cap,
+//! per-org isolation on every store method, the per-org page cap,
+//! the distinct-target public-component cap,
 //! the `add_component` outcome taxonomy (404 vs idempotent vs over-cap),
 //! component curation CRUD + reorder, and global slug uniqueness across orgs.
 //!
@@ -48,7 +48,6 @@ fn component(target_id: Uuid) -> NewStatusPageComponent {
 }
 
 /// Two owner-orgs (one user each). Returns `(org_a, org_b, user_a, user_b)`.
-/// Each org already owns its signup default page.
 async fn two_orgs(pool: &sqlx::PgPool, tag: &str) -> (OrgId, OrgId, UserId, UserId) {
     let user_a = make_user(pool, tag).await;
     let user_b = make_user(pool, tag).await;
@@ -156,29 +155,35 @@ async fn pages_and_components_isolated_across_orgs_live_pg() {
 
 #[tokio::test]
 #[ignore = "requires DATABASE_URL — run via DATABASE_URL=... cargo test -- --ignored"]
-async fn page_cap_is_per_org_and_counts_default_live_pg() {
+async fn page_cap_is_per_org_live_pg() {
     let Some(pool) = pg_pool_from_env().await else {
         return;
     };
     let (org_a, org_b, user_a, user_b) = two_orgs(&pool, "sp-cap").await;
     let store = PgStatusPageStore::new(pool.clone());
-    let cap = 2;
+    let cap = 1; // the real free-plan max_status_pages
 
-    // Org already owns its default page (counts toward the cap), so exactly one
-    // more create is allowed before the cap bites.
-    assert_eq!(store.list(org_a).await.unwrap().len(), 1, "default page");
+    // Orgs are not auto-seeded a page — they start empty, so the free user gets
+    // the full quota for pages they create themselves.
+    assert_eq!(
+        store.list(org_a).await.unwrap().len(),
+        0,
+        "no auto-seeded page"
+    );
+
+    // The first user page is within the cap of 1.
     store
         .create(org_a, page(&unique_slug("acap")), WriteSource::Ui, cap)
         .await
-        .expect("A #2 call ok")
-        .expect("A #2 (default + 1 == cap)");
-    // At the cap the store returns Ok(None) — the handler turns that into the
-    // plan-named 422; here we assert the cap actually bit.
+        .expect("A create call ok")
+        .expect("A's first page is allowed");
+
+    // A second page hits the cap.
     let at_cap = store
         .create(org_a, page(&unique_slug("acap")), WriteSource::Ui, cap)
         .await
         .expect("create call ok");
-    assert!(at_cap.is_none(), "third page must hit the per-org cap");
+    assert!(at_cap.is_none(), "second page must hit the per-org cap");
 
     // The cap is per-org: B is unaffected by A being full.
     store

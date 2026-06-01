@@ -251,8 +251,7 @@ async fn two_tenants_never_see_each_others_data() {
     );
 
     // ── Status pages + curated components ─────────────────────────────────
-    // i64::MAX bypasses the per-org page cap — this asserts isolation, not
-    // quota. Each org already has a default page from signup; these are extra.
+    // i64::MAX bypasses the per-org page cap — this asserts isolation, not quota.
     let page_store = PgStatusPageStore::new(pool.clone());
     let page_a = page_store
         .create(
