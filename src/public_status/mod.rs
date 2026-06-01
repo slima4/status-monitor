@@ -25,7 +25,7 @@ pub use incident_writer::{
     InMemoryIncidentStore, IncidentStore, IncidentWriter, IncidentWriterConfig, NewOpenIncident,
     OpenIncident, PgIncidentStore,
 };
-pub use logo_storage::{LocalDiskLogoStorage, LogoMime, LogoStorage};
+pub use logo_storage::LogoMime;
 pub use overall_status::{
     Counters, component_status, day_state, overall_label, overall_state, overall_status,
 };

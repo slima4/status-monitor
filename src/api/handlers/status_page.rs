@@ -20,11 +20,12 @@ use crate::api::ApiError;
 use crate::api::error::codes;
 use crate::app::AppState;
 use crate::domain::{
-    NewStatusPage, NewStatusPageComponent, OrgId, PublicOrgBranding, PublicStyle, StatusPage,
-    StatusPageComponent, StatusPageComponentUpdate, StatusPageId, StatusPageUpdate, validate_slug,
+    AssetSlot, NewStatusPage, NewStatusPageComponent, OrgId, PublicOrgBranding, PublicStyle,
+    StatusPage, StatusPageComponent, StatusPageComponentUpdate, StatusPageId, StatusPageUpdate,
+    validate_slug,
 };
 use crate::error::{AppError, Result};
-use crate::public_status::{LocalDiskLogoStorage, LogoMime, LogoStorage};
+use crate::public_status::LogoMime;
 use crate::storage::AddComponentOutcome;
 use crate::web::views::public_status::{
     LOGO_ROUTE, public_base, public_logo_url, public_status_url,
@@ -216,7 +217,7 @@ pub async fn update_page(
                 public_about: normalise_opt(b.public_about),
                 public_brand_color: normalise_opt(b.public_brand_color)
                     .map(|c| c.to_ascii_lowercase()),
-                public_logo_path: None,
+                logo_hash: None,
                 public_show_powered_by: b.public_show_powered_by,
                 public_style: b.public_style.unwrap_or_default(),
             };
@@ -440,7 +441,7 @@ pub async fn upload_logo(
             format!("logo exceeds {} bytes", cfg.max_logo_size_bytes),
         ));
     }
-    let (mime, bytes) = process_logo(&raw, cfg.max_logo_dimension_px)?;
+    let (mime, bytes, dims) = process_logo(&raw, cfg.max_logo_dimension_px)?;
     if bytes.len() > cfg.max_logo_size_bytes as usize {
         return Err(AppError::payload_too_large(
             codes::LOGO_TOO_LARGE,
@@ -450,25 +451,23 @@ pub async fn upload_logo(
             ),
         ));
     }
-    let store = LocalDiskLogoStorage::new(&cfg.logo_dir);
-    let name = store
-        .put(org, mime.as_content_type(), &bytes)
-        .await
-        .map_err(AppError::Other)?;
-
-    let prev = state
-        .status_page_store
-        .set_logo_path(org, StatusPageId(id), Some(&name))
-        .await?
-        .ok_or_else(page_not_found)?;
-    if let Some(old) = prev.filter(|p| p != &name) {
-        let _ = store.delete(&old).await;
-    }
+    let (w, h) = dims;
+    let meta = state
+        .page_asset_store
+        .put(
+            org,
+            StatusPageId(id),
+            AssetSlot::Logo,
+            mime.as_content_type(),
+            &bytes,
+            serde_json::json!({ "width": w, "height": h }),
+        )
+        .await?;
     state.public_source.invalidate(StatusPageId(id)).await;
 
     let base = public_base(&state.cfg, &page.slug);
-    let url =
-        public_logo_url(base.as_deref(), &name).unwrap_or_else(|| format!("{LOGO_ROUTE}?v={name}"));
+    let url = public_logo_url(base.as_deref(), &meta.content_hash)
+        .unwrap_or_else(|| format!("{LOGO_ROUTE}?v={}", meta.content_hash));
     Ok(Json(LogoResponse { logo_url: url }))
 }
 
@@ -483,14 +482,14 @@ pub async fn delete_logo(
     OwnerAuthorized(org, _): OwnerAuthorized<StatusPageDelete>,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode> {
-    let prev = state
-        .status_page_store
-        .set_logo_path(org, StatusPageId(id), None)
+    // Page id is already org-scoped by the owner extractor; the delete is
+    // page-keyed and idempotent (no row → 204).
+    let _ = load(&state, org, id).await?;
+    if state
+        .page_asset_store
+        .delete(StatusPageId(id), AssetSlot::Logo)
         .await?
-        .ok_or_else(page_not_found)?;
-    if let Some(old) = prev {
-        let store = LocalDiskLogoStorage::new(&state.cfg.public_status.logo_dir);
-        let _ = store.delete(&old).await;
+    {
         state.public_source.invalidate(StatusPageId(id)).await;
     }
     Ok(StatusCode::NO_CONTENT)
@@ -542,9 +541,9 @@ fn view(state: &AppState, p: StatusPage) -> StatusPageView {
         public_show_powered_by: b.public_show_powered_by,
         show_powered_by: b.show_powered_by(cfg.default_show_powered_by),
         logo_url: b
-            .public_logo_path
+            .logo_hash
             .as_deref()
-            .and_then(|path| public_logo_url(base.as_deref(), path)),
+            .and_then(|hash| public_logo_url(base.as_deref(), hash)),
         status_url: base
             .as_ref()
             .map(|origin| public_status_url(&state.cfg, origin)),
@@ -609,7 +608,8 @@ async fn read_logo_field(multipart: &mut Multipart) -> Result<Vec<u8>> {
 
 /// Validates the image by sniffing the bytes (the declared content-type is
 /// ignored), then downscales to fit `max_dim` if either side is larger.
-fn process_logo(raw: &[u8], max_dim: u32) -> Result<(LogoMime, Vec<u8>)> {
+/// Returns the format, the (possibly re-encoded) bytes, and the final `(w, h)`.
+fn process_logo(raw: &[u8], max_dim: u32) -> Result<(LogoMime, Vec<u8>, (u32, u32))> {
     let fmt = image::guess_format(raw).map_err(|_| {
         AppError::bad_request(codes::LOGO_TYPE_INVALID, "unrecognised image format")
     })?;
@@ -631,14 +631,15 @@ fn process_logo(raw: &[u8], max_dim: u32) -> Result<(LogoMime, Vec<u8>)> {
         )
     })?;
     if img.width() <= max_dim && img.height() <= max_dim {
-        return Ok((mime, raw.to_vec()));
+        return Ok((mime, raw.to_vec(), (img.width(), img.height())));
     }
     let resized = img.resize(max_dim, max_dim, image::imageops::FilterType::Lanczos3);
+    let dims = (resized.width(), resized.height());
     let mut out = std::io::Cursor::new(Vec::new());
     resized.write_to(&mut out, fmt).map_err(|_| {
         AppError::bad_request(codes::LOGO_DECODE_FAILED, "could not re-encode image")
     })?;
-    Ok((mime, out.into_inner()))
+    Ok((mime, out.into_inner(), dims))
 }
 
 #[cfg(test)]
@@ -665,8 +666,9 @@ mod tests {
             .write_to(&mut buf, image::ImageFormat::Png)
             .unwrap();
         let raw = buf.into_inner();
-        let (mime, out) = process_logo(&raw, 1200).unwrap();
+        let (mime, out, dims) = process_logo(&raw, 1200).unwrap();
         assert_eq!(mime, LogoMime::Png);
         assert_eq!(out, raw);
+        assert_eq!(dims, (1, 1));
     }
 }

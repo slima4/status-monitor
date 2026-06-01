@@ -8,6 +8,7 @@ pub mod memory;
 pub mod monitor_shares;
 pub mod notification_channels;
 pub mod orgs;
+pub mod page_assets;
 pub mod postgres;
 pub mod postgres_secrets;
 pub mod status_pages;
@@ -42,6 +43,9 @@ pub use orgs::{
     membership_status, oldest_membership_for_user, owner_org_count, remove_member,
     resolve_default_page_for_lone_org, restore_org, slug_is_available, soft_delete_org,
     update_org_fields,
+};
+pub use page_assets::{
+    AssetContent, AssetMeta, InMemoryPageAssetStore, PageAssetStore, PgPageAssetStore,
 };
 pub use postgres::PostgresTargetStore;
 pub use status_pages::{

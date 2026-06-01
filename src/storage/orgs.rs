@@ -985,7 +985,8 @@ pub async fn load_page_branding(pool: &PgPool, page: StatusPageId) -> Result<Opt
                   sp.public_display_name,
                   sp.public_about,
                   sp.public_brand_color,
-                  sp.public_logo_path,
+                  (SELECT pa.content_hash FROM page_assets pa
+                   WHERE pa.status_page_id = sp.id AND pa.slot = 'logo') AS logo_hash,
                   sp.public_show_powered_by,
                   sp.public_style
              FROM status_pages sp
@@ -1004,7 +1005,7 @@ pub async fn load_page_branding(pool: &PgPool, page: StatusPageId) -> Result<Opt
             public_display_name: r.public_display_name,
             public_about: r.public_about,
             public_brand_color: r.public_brand_color,
-            public_logo_path: r.public_logo_path,
+            logo_hash: r.logo_hash,
             public_show_powered_by: r.public_show_powered_by,
             public_style: PublicStyle::from_db(&r.public_style),
         },
@@ -1081,7 +1082,7 @@ struct BrandingRow {
     public_display_name: Option<String>,
     public_about: Option<String>,
     public_brand_color: Option<String>,
-    public_logo_path: Option<String>,
+    logo_hash: Option<String>,
     public_show_powered_by: Option<bool>,
     public_style: String,
 }

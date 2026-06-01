@@ -16,13 +16,14 @@ use uuid::Uuid;
 use crate::api::public_error::PublicAppError;
 use crate::app::AppState;
 use crate::config::PublicStatusConfig;
+use crate::domain::AssetSlot;
 use crate::domain::elapsed_at;
 use crate::domain::{
     DayState, IncidentSeverity, IncidentStatusPhase, OverallState, PublicComponent,
     PublicComponentGroup, PublicComponentStatus, PublicIncident, PublicIncidentUpdate,
     PublicMaintenance, PublicOrgBranding, PublicStatusPage, StatusPageId,
 };
-use crate::public_status::{HistoryIncidentMarker, LocalDiskLogoStorage, LogoStorage};
+use crate::public_status::HistoryIncidentMarker;
 use crate::storage::orgs::{OrgBranding, load_page_branding};
 use crate::web::error::{NotFoundPage, UnavailablePage};
 use crate::web::filters;
@@ -137,30 +138,22 @@ pub async fn index(
     }
 }
 
-/// Serves the org's uploaded logo (or 404 when none is set). Same host→org
-/// resolution as the page; the on-disk path is re-derived from the DB so the
-/// query string is a cache-buster only, never a file selector.
+/// Serves the page's uploaded logo (or 404 when none is set). Same host→page
+/// resolution as the page itself; the query string is a cache-buster only,
+/// never a selector — the bytes come from the page's `logo` asset row.
 pub async fn logo(State(state): State<AppState>, headers: HeaderMap) -> Response {
     let page_ref = match resolve_status_page(&state, &headers).await {
         Ok(p) => p,
         Err(err) => return render_public_error(err),
     };
-    let Some(pool) = state.db.as_ref() else {
-        return render_public_error(PublicAppError::NotFound);
-    };
-    let logo_path = match load_page_branding(pool, page_ref.page).await {
-        Ok(Some(ob)) => ob.branding.public_logo_path,
-        Ok(None) => None,
-        Err(e) => return render_public_error(PublicAppError::from(e)),
-    };
-    let Some(logo_path) = logo_path else {
-        return render_public_error(PublicAppError::NotFound);
-    };
-    let store = LocalDiskLogoStorage::new(&state.cfg.public_status.logo_dir);
-    match store.get(&logo_path).await {
-        Ok(Some((bytes, content_type))) => (
+    match state
+        .page_asset_store
+        .get(page_ref.page, AssetSlot::Logo)
+        .await
+    {
+        Ok(Some(asset)) => (
             [
-                (header::CONTENT_TYPE, content_type),
+                (header::CONTENT_TYPE, asset.content_type),
                 (
                     header::CACHE_CONTROL,
                     "public, max-age=3600, immutable".to_owned(),
@@ -171,7 +164,7 @@ pub async fn logo(State(state): State<AppState>, headers: HeaderMap) -> Response
                 (header::X_CONTENT_TYPE_OPTIONS, "nosniff".to_owned()),
                 (header::CONTENT_DISPOSITION, "inline".to_owned()),
             ],
-            bytes,
+            asset.bytes,
         )
             .into_response(),
         Ok(None) => render_public_error(PublicAppError::NotFound),
@@ -368,9 +361,10 @@ pub fn public_status_url(cfg: &crate::config::AppConfig, origin: &str) -> String
     }
 }
 
-/// Logo URL for a stored logo path, or `None` when no public surface is mounted.
-pub fn public_logo_url(base: Option<&str>, path: &str) -> Option<String> {
-    base.map(|origin| format!("{origin}{LOGO_ROUTE}?v={path}"))
+/// Logo URL stamped with the asset's content hash (cache-buster), or `None`
+/// when no public surface is mounted.
+pub fn public_logo_url(base: Option<&str>, hash: &str) -> Option<String> {
+    base.map(|origin| format!("{origin}{LOGO_ROUTE}?v={hash}"))
 }
 
 /// `.{base_domain}` slug-preview suffix in subdomain mode; `None` in path mode.
@@ -538,9 +532,9 @@ impl BrandingView {
             brand_text,
             logo_url: o
                 .branding
-                .public_logo_path
+                .logo_hash
                 .as_deref()
-                .map(|p| format!("{LOGO_ROUTE}?v={p}")),
+                .map(|h| format!("{LOGO_ROUTE}?v={h}")),
             show_powered_by: o.branding.show_powered_by(cfg.default_show_powered_by),
             style: o.branding.public_style.as_str(),
         }
@@ -1497,7 +1491,7 @@ mod tests {
             public_display_name: Some("Acme Public".into()),
             public_about: Some("**hi** there".into()),
             public_brand_color: Some("#ff0000".into()),
-            public_logo_path: Some("acme-deadbeef.png".into()),
+            logo_hash: Some("deadbeefcafef00d".into()),
             public_show_powered_by: Some(false),
             ..PublicOrgBranding::default()
         });
@@ -1510,7 +1504,7 @@ mod tests {
         .unwrap();
         assert!(html.contains("Acme Public Status"));
         assert!(html.contains("--brand-color: #ff0000;"));
-        assert!(html.contains(r#"src="/status/branding/logo?v=acme-deadbeef.png""#));
+        assert!(html.contains(r#"src="/status/branding/logo?v=deadbeefcafef00d""#));
         assert!(html.contains("<strong>hi</strong> there"));
         assert!(!html.contains("Powered by uptimepage"));
     }

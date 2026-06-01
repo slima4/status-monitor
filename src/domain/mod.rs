@@ -6,6 +6,7 @@ pub mod membership;
 pub mod monitor_share;
 pub mod notification_channel;
 pub mod org;
+pub mod page_asset;
 pub mod preferences;
 pub mod public;
 pub mod quota;
@@ -40,6 +41,7 @@ pub use notification_channel::{
 pub use org::{
     BrandingError, OrgId, Organization, PublicOrgBranding, PublicStyle, SlugError, validate_slug,
 };
+pub use page_asset::{AssetSlot, SlotPolicy};
 pub use preferences::{DisplayPrefs, TimeFormat};
 pub use public::{
     ComponentHistoryResponse, DayState, IncidentSeverity, IncidentStatusPhase, OverallState,

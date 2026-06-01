@@ -366,7 +366,6 @@ pub struct PublicStatusConfig {
     /// worker can reach them.
     pub last_good_ttl_secs: u64,
 
-    pub logo_dir: String,
     pub max_logo_size_bytes: u32,
     pub allowed_logo_mime_types: Vec<String>,
     pub max_logo_dimension_px: u32,
@@ -385,7 +384,6 @@ impl Default for PublicStatusConfig {
             cache_max_orgs: 1000,
             cache_ttl_secs: 10,
             last_good_ttl_secs: 3600,
-            logo_dir: "/var/lib/uptimepage/logos".into(),
             max_logo_size_bytes: 1_048_576,
             allowed_logo_mime_types: vec![
                 "image/png".into(),

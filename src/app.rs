@@ -115,6 +115,10 @@ pub struct AppState {
     pub maintenance_store: Arc<dyn MaintenanceStore>,
     pub notification_channel_store: Arc<dyn NotificationChannelStore>,
     pub status_page_store: Arc<dyn crate::storage::StatusPageStore>,
+    /// Per-status-page assets (logo now; background/favicon/css later). Built
+    /// from `db` so `AppState::new`'s signature stays unchanged: a Pg store
+    /// when tenancy is live, an in-memory one for no-DB fixtures.
+    pub page_asset_store: Arc<dyn crate::storage::PageAssetStore>,
     /// Per-monitor share links (`/m/{token}`). Built from `db` so
     /// `AppState::new`'s signature stays unchanged: a Pg store when tenancy is
     /// live, an in-memory one for no-DB fixtures.
@@ -226,6 +230,10 @@ impl AppState {
             Some(pool) => Arc::new(crate::storage::PgMonitorShareStore::new(pool, cipher)),
             None => Arc::new(crate::storage::InMemoryMonitorShareStore::new()),
         };
+        let page_asset_store: Arc<dyn crate::storage::PageAssetStore> = match db.clone() {
+            Some(pool) => Arc::new(crate::storage::PgPageAssetStore::new(pool)),
+            None => Arc::new(crate::storage::InMemoryPageAssetStore::new()),
+        };
         let rate_limits = Arc::new(RateLimitService::new());
         let abuse = Arc::new(AbuseGuard::from_config(&cfg.abuse));
         Self {
@@ -244,6 +252,7 @@ impl AppState {
             maintenance_store,
             notification_channel_store,
             status_page_store,
+            page_asset_store,
             monitor_share_store,
             incident_narration_store,
             session_debounce: Arc::new(build_debounce_cache()),

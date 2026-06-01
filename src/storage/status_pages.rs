@@ -58,8 +58,9 @@ pub trait StatusPageStore: Send + Sync {
     async fn list(&self, org: OrgId) -> Result<Vec<StatusPage>>;
     async fn get(&self, org: OrgId, id: StatusPageId) -> Result<Option<StatusPage>>;
     /// Update identity (name/slug/enabled) and/or branding. A taken slug →
-    /// `SLUG_TAKEN`. Logo is set via [`set_logo_path`]. Returns the updated
-    /// page, or `None` if it doesn't exist in this org.
+    /// `SLUG_TAKEN`. The logo is a `page_assets` row written via
+    /// `PageAssetStore`, not here. Returns the updated page, or `None` if it
+    /// doesn't exist in this org.
     async fn update(
         &self,
         org: OrgId,
@@ -68,14 +69,6 @@ pub trait StatusPageStore: Send + Sync {
         source: WriteSource,
     ) -> Result<Option<StatusPage>>;
     async fn delete(&self, org: OrgId, id: StatusPageId) -> Result<bool>;
-    /// Swap the page's logo path, returning the prior path (so the caller can
-    /// delete the orphaned file). Outer `None` = page not found in this org.
-    async fn set_logo_path(
-        &self,
-        org: OrgId,
-        id: StatusPageId,
-        new: Option<&str>,
-    ) -> Result<Option<Option<String>>>;
 
     async fn list_components(
         &self,
@@ -141,7 +134,7 @@ struct PageRow {
     public_display_name: Option<String>,
     public_about: Option<String>,
     public_brand_color: Option<String>,
-    public_logo_path: Option<String>,
+    logo_hash: Option<String>,
     public_show_powered_by: Option<bool>,
     public_style: String,
     write_source: String,
@@ -161,7 +154,7 @@ impl PageRow {
                 public_display_name: self.public_display_name,
                 public_about: self.public_about,
                 public_brand_color: self.public_brand_color,
-                public_logo_path: self.public_logo_path,
+                logo_hash: self.logo_hash,
                 public_show_powered_by: self.public_show_powered_by,
                 public_style: PublicStyle::from_db(&self.public_style),
             },
@@ -173,7 +166,9 @@ impl PageRow {
 }
 
 const PAGE_COLUMNS: &str = "id, org_id, slug::text AS slug, name, enabled, \
-     public_display_name, public_about, public_brand_color, public_logo_path, \
+     public_display_name, public_about, public_brand_color, \
+     (SELECT pa.content_hash FROM page_assets pa \
+      WHERE pa.status_page_id = status_pages.id AND pa.slot = 'logo') AS logo_hash, \
      public_show_powered_by, public_style, write_source, created_at, updated_at";
 
 fn is_unique_violation(e: &sqlx::Error) -> bool {
@@ -311,39 +306,6 @@ impl StatusPageStore for PgStatusPageStore {
             .await
             .map_err(db_err)?;
         Ok(res.rows_affected() > 0)
-    }
-
-    async fn set_logo_path(
-        &self,
-        org: OrgId,
-        id: StatusPageId,
-        new: Option<&str>,
-    ) -> Result<Option<Option<String>>> {
-        let mut tx = self.pool.begin().await.map_err(db_err)?;
-        let Some((prev,)): Option<(Option<String>,)> = sqlx::query_as(
-            "SELECT public_logo_path FROM status_pages WHERE id = $1 AND org_id = $2 FOR UPDATE",
-        )
-        .bind(id.0)
-        .bind(org.0)
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(db_err)?
-        else {
-            tx.rollback().await.ok();
-            return Ok(None);
-        };
-        sqlx::query(
-            "UPDATE status_pages SET public_logo_path = $3, updated_at = now() \
-             WHERE id = $1 AND org_id = $2",
-        )
-        .bind(id.0)
-        .bind(org.0)
-        .bind(new)
-        .execute(&mut *tx)
-        .await
-        .map_err(db_err)?;
-        tx.commit().await.map_err(db_err)?;
-        Ok(Some(prev))
     }
 
     async fn list_components(
@@ -675,10 +637,11 @@ impl StatusPageStore for InMemoryStatusPageStore {
             p.enabled = e;
         }
         if let Some(b) = upd.branding {
-            // The logo has its own endpoint; a branding replace leaves it alone.
-            let logo = p.branding.public_logo_path.clone();
+            // The logo is a separate `page_assets` row; a branding replace
+            // leaves it (and its hash) alone.
+            let logo = p.branding.logo_hash.clone();
             p.branding = b;
-            p.branding.public_logo_path = logo;
+            p.branding.logo_hash = logo;
         }
         p.write_source = source;
         p.updated_at = Utc::now();
@@ -694,21 +657,6 @@ impl StatusPageStore for InMemoryStatusPageStore {
             st.components.retain(|c| c.page != id);
         }
         Ok(removed)
-    }
-
-    async fn set_logo_path(
-        &self,
-        org: OrgId,
-        id: StatusPageId,
-        new: Option<&str>,
-    ) -> Result<Option<Option<String>>> {
-        let mut st = self.inner.lock().unwrap();
-        let Some(p) = st.pages.iter_mut().find(|p| p.id == id && p.org_id == org) else {
-            return Ok(None);
-        };
-        let prev = p.branding.public_logo_path.take();
-        p.branding.public_logo_path = new.map(str::to_owned);
-        Ok(Some(prev))
     }
 
     async fn list_components(

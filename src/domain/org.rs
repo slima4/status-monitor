@@ -38,7 +38,10 @@ pub struct PublicOrgBranding {
     pub public_display_name: Option<String>,
     pub public_about: Option<String>,
     pub public_brand_color: Option<String>,
-    pub public_logo_path: Option<String>,
+    /// Content hash of the page's `logo` asset (cache-buster for the logo URL),
+    /// or `None` when no logo is set. Sourced from `page_assets`, read-only here
+    /// — logo writes go through `PageAssetStore`, never a branding update.
+    pub logo_hash: Option<String>,
     pub public_show_powered_by: Option<bool>,
     #[serde(default)]
     pub public_style: PublicStyle,

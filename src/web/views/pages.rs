@@ -213,9 +213,9 @@ pub async fn page_editor(
         .map(|o| public_status_url(&state.cfg, o))
         .unwrap_or_default();
     let logo_url = b
-        .public_logo_path
+        .logo_hash
         .as_deref()
-        .and_then(|p| public_logo_url(base.as_deref(), p))
+        .and_then(|hash| public_logo_url(base.as_deref(), hash))
         .unwrap_or_default();
     let styles = PublicStyle::ALL
         .iter()

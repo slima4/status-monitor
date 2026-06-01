@@ -14,7 +14,6 @@ CREATE TABLE status_pages (
     public_display_name      TEXT,
     public_about             TEXT,
     public_brand_color       TEXT,
-    public_logo_path         TEXT,
     -- NULL = no override, fall back to config.default_show_powered_by at read
     -- time; a NOT NULL DEFAULT would make that tri-state unrepresentable.
     public_show_powered_by   BOOLEAN,

@@ -412,8 +412,7 @@ pub async fn build_saas_router_with_pg_targets(pool: PgPool) -> Router {
 }
 
 /// As [`build_saas_router_with_pg_targets`], but lets the caller tweak the
-/// config first (e.g. point `public_status.logo_dir` at a temp dir before the
-/// status-page store + logo routes are wired).
+/// config first before the status-page store + logo routes are wired.
 pub async fn build_saas_router_with_pg_cfg(
     pool: PgPool,
     mutate: impl FnOnce(&mut AppConfig),

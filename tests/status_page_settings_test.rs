@@ -48,11 +48,9 @@ async fn owner_page(pool: PgPool) -> (axum::Router, String) {
         .await
         .unwrap()
         .expect("org");
-    let logo_dir = std::env::temp_dir().join(format!("sp-logo-{}", unique_slug("d")));
-    let router = build_saas_router_with_pg_cfg(pool, move |cfg| {
-        cfg.public_status.logo_dir = logo_dir.to_string_lossy().into_owned();
-    })
-    .await;
+    // Logos now persist in Postgres (`page_assets`), not on disk; the router's
+    // Pg pool is all the upload path needs.
+    let router = build_saas_router_with_pg_cfg(pool, |_| {}).await;
     // Active org on the session is what the per-page routes resolve `org` from.
     let router = with_session(router, user, Some(org.id), Some(slug.as_str()));
 
