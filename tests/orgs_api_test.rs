@@ -207,6 +207,32 @@ async fn create_org_with_reserved_slug_returns_400() {
 
 #[tokio::test]
 #[ignore]
+async fn patch_org_to_reserved_slug_returns_400() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let user = make_user(&pool, "orgs-api").await;
+    let (router, _) = build_test_app_with_pg(pool.clone(), |_cfg| {}).await;
+    let router = with_session(router, user, None, None);
+
+    let from = unique_slug("rev");
+    let (st, body) = create_org_for_user(router.clone(), &from, "Co").await;
+    assert_eq!(st, StatusCode::CREATED);
+    let id = body["id"].as_str().unwrap().to_owned();
+
+    // Reserved-slug rejection applies to the rename path, not just create.
+    let resp = router
+        .oneshot(patch_org(&id, json!({ "slug": "admin" })))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(read_value(resp).await["error"]["code"], "SLUG_INVALID");
+
+    cleanup_user(pool, user).await.unwrap();
+}
+
+#[tokio::test]
+#[ignore]
 async fn check_slug_endpoint_returns_availability() {
     let Some(pool) = common::pg_pool_from_env().await else {
         return;

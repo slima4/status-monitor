@@ -6,15 +6,18 @@
 
 mod common;
 
-use common::{make_user, unique_slug};
-use uptimepage::domain::{OrgId, Role};
+use std::time::Duration;
+
+use common::{default_http_check, make_user, unique_slug};
+use uptimepage::domain::{CheckSpec, ExpectedStatus, NewTarget, OrgId, Role, WriteSource};
 use uptimepage::storage::orgs as orgs_store;
 use uptimepage::storage::{
-    RemoveOutcome, RestoreOutcome, UpdateOrgOutcome, create_org_with_owner, is_active_member,
-    is_owner, list_deleted_orgs_deleted_by, list_members, list_orgs_for_user,
-    oldest_membership_for_user, owner_org_count, remove_member, restore_org, slug_is_available,
-    soft_delete_org, update_org_fields,
+    PostgresTargetStore, RemoveOutcome, RestoreOutcome, TargetStore, UpdateOrgOutcome,
+    create_org_with_owner, is_active_member, is_owner, list_deleted_orgs_deleted_by, list_members,
+    list_orgs_for_user, oldest_membership_for_user, owner_org_count, remove_member, restore_org,
+    slug_is_available, soft_delete_org, update_org_fields,
 };
+use url::Url;
 use uuid::Uuid;
 
 #[tokio::test]
@@ -563,6 +566,172 @@ async fn update_org_fields_combined_name_and_slug_is_atomic() {
     let names: std::collections::HashSet<_> = actions.into_iter().map(|(a,)| a).collect();
     assert!(names.contains("org.slug_changed"));
     assert!(names.contains("org.renamed"));
+
+    sqlx::query("DELETE FROM users WHERE id = $1")
+        .bind(user.0)
+        .execute(&pool)
+        .await
+        .unwrap();
+}
+
+// --- Future-rename safety: the org slug is cosmetic, ids carry the data. ---
+// These pin the invariants a user-facing slug rename will rely on, even though
+// the rename has no UI yet (API-only via `update_org_fields` / PATCH /orgs).
+
+// (1) Decoupling: renaming the org slug must NOT change the org's status-page
+// slug. The default page is seeded at create with slug = org slug; after a
+// rename the two are independent (the page slug is its own editable field).
+#[tokio::test]
+#[ignore]
+async fn update_org_slug_does_not_touch_status_page_slug() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let user = make_user(&pool, "slug").await;
+    let from = unique_slug("decouple");
+    let org = create_org_with_owner(&pool, user, &from, "Co", 3)
+        .await
+        .unwrap()
+        .unwrap();
+
+    // The seeded default page starts with slug == org slug.
+    let (page_slug_before,): (String,) =
+        sqlx::query_as("SELECT slug::text FROM status_pages WHERE org_id = $1")
+            .bind(org.id.0)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(page_slug_before, from, "default page seeded with org slug");
+
+    let to = unique_slug("decouple-new");
+    let outcome = update_org_fields(&pool, org.id, user, None, Some(&to))
+        .await
+        .unwrap();
+    assert!(matches!(outcome, UpdateOrgOutcome::Updated(o) if o.slug == to));
+
+    // Page slug is unchanged — decoupled from the org slug.
+    let (page_slug_after,): (String,) =
+        sqlx::query_as("SELECT slug::text FROM status_pages WHERE org_id = $1")
+            .bind(org.id.0)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        page_slug_after, from,
+        "status-page slug must not follow the org-slug rename"
+    );
+
+    sqlx::query("DELETE FROM users WHERE id = $1")
+        .bind(user.0)
+        .execute(&pool)
+        .await
+        .unwrap();
+}
+
+// (2) No orphan: org-scoped resources are keyed by org_id (UUID), not slug, so
+// they stay reachable after a slug rename. Proven with a target + the seeded
+// status page; notification channels share the identical `org_id` FK pattern.
+#[tokio::test]
+#[ignore]
+async fn update_org_slug_keeps_resources_reachable_by_id() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let user = make_user(&pool, "slug").await;
+    let from = unique_slug("orphan");
+    let org = create_org_with_owner(&pool, user, &from, "Co", 3)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let store = PostgresTargetStore::from_pool(pool.clone(), None);
+    let new = NewTarget {
+        name: "mon".into(),
+        check: CheckSpec::Http(default_http_check(
+            Url::parse("https://example.com/").unwrap(),
+            ExpectedStatus::Exact(200),
+        )),
+        interval: Duration::from_secs(30),
+        enabled: true,
+        tags: vec![],
+        alerts: Default::default(),
+        group_name: None,
+        owner_user_id: None,
+    };
+    let target = store
+        .create(org.id, new, WriteSource::Ui, i64::MAX)
+        .await
+        .unwrap();
+
+    let to = unique_slug("orphan-new");
+    let outcome = update_org_fields(&pool, org.id, user, None, Some(&to))
+        .await
+        .unwrap();
+    assert!(matches!(outcome, UpdateOrgOutcome::Updated(o) if o.slug == to));
+
+    // Target still reachable by (org_id, id) — the rename didn't orphan it.
+    let still = store.get(org.id, target.id).await.unwrap();
+    assert!(
+        still.is_some(),
+        "target must survive an org-slug rename (keyed by org_id)"
+    );
+
+    // Status page still attached to the org by id.
+    let (pages,): (i64,) =
+        sqlx::query_as("SELECT count(*) FROM status_pages WHERE org_id = $1")
+            .bind(org.id.0)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(pages, 1, "page still attached to org by id after rename");
+
+    sqlx::query("DELETE FROM users WHERE id = $1")
+        .bind(user.0)
+        .execute(&pool)
+        .await
+        .unwrap();
+}
+
+// (3) Resolver tracks the rename: `find_id_by_slug` is exactly what
+// `optional_org_from_header` uses to turn `X-Uptimepage-Org` into an OrgId.
+// After a rename the new slug resolves and the old slug stops resolving (which
+// surfaces to API tokens as `ORG_HEADER_INVALID`).
+#[tokio::test]
+#[ignore]
+async fn update_org_slug_resolved_by_find_id_by_slug() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let user = make_user(&pool, "slug").await;
+    let from = unique_slug("resolve");
+    let org = create_org_with_owner(&pool, user, &from, "Co", 3)
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        orgs_store::find_id_by_slug(&pool, &from).await.unwrap(),
+        Some(org.id),
+        "old slug resolves before rename"
+    );
+
+    let to = unique_slug("resolve-new");
+    let outcome = update_org_fields(&pool, org.id, user, None, Some(&to))
+        .await
+        .unwrap();
+    assert!(matches!(outcome, UpdateOrgOutcome::Updated(o) if o.slug == to));
+
+    // New slug resolves; old slug no longer matches any org.
+    assert_eq!(
+        orgs_store::find_id_by_slug(&pool, &to).await.unwrap(),
+        Some(org.id),
+        "new slug resolves after rename"
+    );
+    assert_eq!(
+        orgs_store::find_id_by_slug(&pool, &from).await.unwrap(),
+        None,
+        "old slug stops resolving (→ ORG_HEADER_INVALID for API tokens)"
+    );
 
     sqlx::query("DELETE FROM users WHERE id = $1")
         .bind(user.0)
