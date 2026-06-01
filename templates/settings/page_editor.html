@@ -5,7 +5,7 @@
   <header class="space-y-1">
     <a href="/settings/pages" class="inline-block text-sm text-muted hover:text-body">← status pages</a>
     <div class="flex flex-wrap items-center justify-between gap-3">
-      <h1 class="page-title truncate"><span class="page-title__prefix">$</span>{{ name }}</h1>
+      <h1 class="page-title truncate"><span class="page-title__prefix" aria-hidden="true">$</span>{{ name }}</h1>
       {% if status_url != "" %}<a href="{{ status_url }}" target="_blank" rel="noopener" class="btn-ghost px-3 py-1.5 text-sm">view live ↗</a>{% endif %}
     </div>
   </header>
@@ -60,7 +60,7 @@
       <div class="grid gap-5 sm:grid-cols-2">
         <label class="field-outline">
           <span class="field-outline__label">Name</span>
-          <input id="f-name" type="text" maxlength="80" value="{{ name }}" class="w-full field">
+          <input id="f-name" type="text" maxlength="80" value="{{ name }}" autocomplete="off" class="w-full field">
         </label>
         <label class="inline-flex items-center gap-2 self-end pb-2">
           <input id="f-enabled" type="checkbox"{% if enabled %} checked{% endif %}>
@@ -72,7 +72,7 @@
         <label class="field-outline">
           <span class="field-outline__label">Public display name</span>
           <input id="f-display" type="text" maxlength="80" value="{{ public_display_name }}"
-                 placeholder="Falls back to the org name" class="w-full field">
+                 autocomplete="off" placeholder="Falls back to the org name" class="w-full field">
         </label>
         <div class="field-outline">
           <span class="field-outline__label">Theme</span>
@@ -84,7 +84,7 @@
 
       <label class="field-outline">
         <span class="field-outline__label">About</span>
-        <textarea id="f-about" maxlength="500" rows="2" class="w-full field"
+        <textarea id="f-about" maxlength="500" rows="2" autocomplete="off" class="w-full field"
                   placeholder="Short line shown under the header">{{ public_about }}</textarea>
       </label>
 
@@ -95,7 +95,7 @@
         </label>
         <label class="inline-flex items-center gap-2 text-sm">
           <input id="f-powered" type="checkbox"{% if show_powered_by %} checked{% endif %}>
-          <span class="text-sm">Show "powered by"</span>
+          <span class="text-sm">Show “powered by”</span>
         </label>
       </div>
     </fieldset>
@@ -108,13 +108,18 @@
   <!-- ── Logo ─────────────────────────────────────────────────── -->
   <fieldset class="sticker-card space-y-5 p-5">
     <legend class="px-1 text-sm font-medium">Logo</legend>
-    {% if logo_url != "" %}<img src="{{ logo_url }}" alt="current logo" class="h-12">{% endif %}
+    {% if logo_url != "" %}<div class="h-12"><img src="{{ logo_url }}" alt="current logo" decoding="async" class="h-12 w-auto"></div>{% endif %}
     <div class="flex flex-wrap items-center gap-3">
-      <input id="logo-file" type="file" accept="image/png,image/jpeg,image/webp" class="text-sm">
-      <button id="logo-upload" type="button" class="btn-ghost px-3 py-1.5 text-sm">upload</button>
+      <label class="file-cli">
+        <input id="logo-file" type="file" accept="image/png,image/jpeg,image/webp"
+               aria-label="Logo file" aria-describedby="logo-help" class="sr-only">
+        <span class="file-cli__btn" aria-hidden="true">[ choose file ]</span>
+        <span class="file-cli__name" data-logo-name>no file selected</span>
+      </label>
+      <button id="logo-upload" type="button" class="btn-ghost px-3 py-1.5 text-[0.8rem]">[ upload ]</button>
       {% if logo_url != "" %}<button id="logo-remove" type="button" class="row-link row-link--danger">remove</button>{% endif %}
     </div>
-    <p class="text-xs text-muted">PNG / JPEG / WebP · up to {{ max_logo_bytes }} bytes · max {{ max_logo_dim_px }}px.</p>
+    <p id="logo-help" class="text-xs text-muted">PNG / JPEG / WebP · up to {{ max_logo_bytes|human_bytes }} · max {{ max_logo_dim_px }}px.</p>
   </fieldset>
 
   <!-- ── Components ───────────────────────────────────────────── -->
@@ -127,19 +132,19 @@
       <table class="w-full text-left text-sm">
         <thead class="bg-[color:var(--theme-surface-sunk)] text-xs uppercase text-muted">
           <tr>
-            <th class="px-4 py-2">On page</th>
-            <th class="px-4 py-2">Monitor</th>
-            <th class="px-4 py-2">Public name</th>
-            <th class="px-4 py-2">Group</th>
+            <th scope="col" class="px-4 py-2">On page</th>
+            <th scope="col" class="px-4 py-2">Monitor</th>
+            <th scope="col" class="px-4 py-2">Public name</th>
+            <th scope="col" class="px-4 py-2">Group</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-[color:var(--theme-line)]">
           {% for c in components %}
           <tr data-target-id="{{ c.target_id }}">
-            <td class="px-4 py-2 align-middle"><input type="checkbox" data-on-page{% if c.on_page %} checked{% endif %}></td>
+            <td class="px-4 py-2 align-middle"><input type="checkbox" data-on-page aria-label="Show {{ c.monitor_name }} on this page"{% if c.on_page %} checked{% endif %}></td>
             <td class="px-4 py-2 align-middle text-body">{{ c.monitor_name }}</td>
-            <td class="px-4 py-2"><input type="text" data-field="public_name" value="{{ c.public_name }}" maxlength="80" placeholder="{{ c.monitor_name }}" class="w-full field text-xs"{% if !c.on_page %} disabled{% endif %}></td>
-            <td class="px-4 py-2"><input type="text" data-field="public_group" value="{{ c.public_group }}" maxlength="50" class="w-full field text-xs"{% if !c.on_page %} disabled{% endif %}></td>
+            <td class="px-4 py-2"><input type="text" data-field="public_name" value="{{ c.public_name }}" maxlength="80" placeholder="{{ c.monitor_name }}" aria-label="Public name for {{ c.monitor_name }}" autocomplete="off" class="w-full field text-xs"{% if !c.on_page %} disabled{% endif %}></td>
+            <td class="px-4 py-2"><input type="text" data-field="public_group" value="{{ c.public_group }}" maxlength="50" aria-label="Group for {{ c.monitor_name }}" autocomplete="off" class="w-full field text-xs"{% if !c.on_page %} disabled{% endif %}></td>
           </tr>
           {% endfor %}
         </tbody>
@@ -154,8 +159,17 @@
       const suffix = root.dataset.suffix || null;
       const errBox = document.getElementById('editor-errors');
       const okBox = document.getElementById('editor-ok');
-      function err(msg) { okBox.classList.add('hidden'); errBox.textContent = msg; errBox.classList.remove('hidden'); errBox.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
+      const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      function err(msg) { okBox.classList.add('hidden'); errBox.textContent = msg; errBox.classList.remove('hidden'); errBox.scrollIntoView({ block: 'center', behavior: reduceMotion ? 'auto' : 'smooth' }); }
       function ok(msg) { errBox.classList.add('hidden'); okBox.textContent = msg; okBox.classList.remove('hidden'); }
+
+      // Warn before leaving with unsaved slug / branding edits (component
+      // rows save on change, so they never set this).
+      const dirty = { slug: false, branding: false };
+      function markClean(form) { dirty[form] = false; }
+      window.addEventListener('beforeunload', (e) => {
+        if (dirty.slug || dirty.branding) { e.preventDefault(); e.returnValue = ''; }
+      });
       async function api(method, path, body) {
         const opt = { method, headers: { 'X-Requested-With': 'uptimepage' } };
         if (body !== undefined) { opt.headers['Content-Type'] = 'application/json'; opt.body = JSON.stringify(body); }
@@ -166,15 +180,23 @@
 
       // Slug has its own save — a rename is a hard cutover, so it's deliberately
       // separate from the branding save and confirms the new live URL inline.
-      document.getElementById('slug-form').addEventListener('submit', async (e) => {
+      const slugForm = document.getElementById('slug-form');
+      slugForm.addEventListener('input', () => { dirty.slug = true; });
+      slugForm.addEventListener('submit', async (e) => {
         e.preventDefault();
+        const btn = slugForm.querySelector('button[type=submit]');
+        if (btn.disabled) return;
         const slugEl = document.getElementById('f-slug');
         const result = document.getElementById('slug-result');
         const slug = slugEl.value.trim().toLowerCase();
+        if (!slug) { err('URL slug is required.'); slugEl.focus(); return; }
         slugEl.value = slug;
         result.textContent = '';
+        const label = btn.textContent;
+        btn.disabled = true; btn.textContent = 'Saving…';
         try {
           await api('PATCH', '/api/v1/status-pages/' + id, { slug });
+          markClean('slug');
           result.textContent = 'Saved ✓';
           result.className = 'text-sm text-[color:var(--theme-state-ok-fg-strong)]';
           const link = document.getElementById('live-url');
@@ -183,10 +205,17 @@
             link.href = url; link.textContent = url + ' ↗';
           }
         } catch (m) { result.textContent = ''; err(m); }
+        finally { btn.disabled = false; btn.textContent = label; }
       });
 
-      document.getElementById('branding-form').addEventListener('submit', async (e) => {
+      const brandingForm = document.getElementById('branding-form');
+      const markBrandingDirty = () => { dirty.branding = true; };
+      brandingForm.addEventListener('input', markBrandingDirty);
+      brandingForm.addEventListener('change', markBrandingDirty);
+      brandingForm.addEventListener('submit', async (e) => {
         e.preventDefault();
+        const btn = brandingForm.querySelector('button[type=submit]');
+        if (btn.disabled) return;
         const body = {
           name: document.getElementById('f-name').value,
           enabled: document.getElementById('f-enabled').checked,
@@ -198,22 +227,47 @@
             public_show_powered_by: document.getElementById('f-powered').checked,
           },
         };
-        try { await api('PATCH', '/api/v1/status-pages/' + id, body); ok('Saved.'); }
+        const btnLabel = btn.textContent;
+        btn.disabled = true; btn.textContent = 'saving…';
+        try { await api('PATCH', '/api/v1/status-pages/' + id, body); markClean('branding'); ok('Saved.'); }
         catch (m) { err(m); }
+        finally { btn.disabled = false; btn.textContent = btnLabel; }
       });
 
-      document.getElementById('logo-upload').addEventListener('click', async () => {
+      const logoInput = document.getElementById('logo-file');
+      const logoName = document.querySelector('[data-logo-name]');
+      logoInput.addEventListener('change', () => {
+        const f = logoInput.files[0];
+        logoName.textContent = f ? '> ' + f.name : 'no file selected';
+      });
+
+      const uploadBtn = document.getElementById('logo-upload');
+      uploadBtn.addEventListener('click', async () => {
+        if (uploadBtn.disabled) return;
         const f = document.getElementById('logo-file').files[0];
         if (!f) { err('Pick a file first.'); return; }
         const fd = new FormData(); fd.append('file', f);
+        const label = uploadBtn.textContent;
+        uploadBtn.disabled = true; uploadBtn.textContent = '[ uploading… ]';
         try {
           const res = await fetch('/api/v1/status-pages/' + id + '/logo', { method: 'POST', headers: { 'X-Requested-With': 'uptimepage' }, body: fd });
           if (!res.ok) { const d = await res.json().catch(() => null); throw (d && d.error && d.error.message) || ('HTTP ' + res.status); }
+          dirty.slug = dirty.branding = false;
           location.reload();
-        } catch (m) { err(m); }
+        } catch (m) { err(m); uploadBtn.disabled = false; uploadBtn.textContent = label; }
       });
       const rm = document.getElementById('logo-remove');
-      if (rm) rm.addEventListener('click', async () => { try { await api('DELETE', '/api/v1/status-pages/' + id + '/logo'); location.reload(); } catch (m) { err(m); } });
+      if (rm) rm.addEventListener('click', async () => {
+        const okToRemove = await window.smConfirm({
+          title: 'Remove logo?',
+          body: 'The page falls back to no logo. You can upload a new one anytime.',
+          confirmLabel: 'Remove logo',
+          danger: true,
+        });
+        if (!okToRemove) return;
+        try { await api('DELETE', '/api/v1/status-pages/' + id + '/logo'); dirty.slug = dirty.branding = false; location.reload(); }
+        catch (m) { err(m); }
+      });
 
       document.querySelectorAll('tr[data-target-id]').forEach((tr) => {
         const tid = tr.dataset.targetId;

@@ -1124,6 +1124,7 @@
         cursor: not-allowed;
         opacity: 0.5;
     }
+
 }
 
 @layer components {
@@ -1196,6 +1197,31 @@
         background: var(--theme-state-bad-bg);
         border-color: var(--theme-state-bad-line);
     }
+
+    /* CLI file picker: native <input type=file> is sr-only; the label's
+       bracket button is the visible control and a sibling span echoes the
+       chosen filename (`> name` / `no file selected`). Mono throughout. */
+    .file-cli {
+        @apply inline-flex items-center gap-2 cursor-pointer;
+        font-family: var(--font-mono);
+        font-size: 0.8rem;
+    }
+    .file-cli__btn {
+        @apply rounded-sm border px-3 py-1.5 whitespace-nowrap;
+        border-color: var(--theme-line);
+        background: var(--theme-surface-elev);
+        color: var(--theme-text);
+        transition: background-color 120ms ease, border-color 120ms ease;
+    }
+    .file-cli:hover .file-cli__btn {
+        background: var(--theme-surface-sunk);
+        border-color: var(--theme-ink);
+    }
+    .file-cli:focus-within .file-cli__btn {
+        outline: 2px solid var(--color-brand-500);
+        outline-offset: 2px;
+    }
+    .file-cli__name { color: var(--theme-text-quiet); }
 
     /* Cartoon text field — input / select / textarea. Same ink edge as
        the sticker family + the small hard offset shadow checkbox/radio

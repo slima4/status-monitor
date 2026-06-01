@@ -4,16 +4,16 @@
 <table class="w-full text-left text-sm">
   <thead class="bg-[color:var(--theme-surface-sunk)] text-xs uppercase text-muted">
     <tr>
-      <th class="px-4 py-2">Name</th>
-      <th class="px-4 py-2">URL</th>
-      <th class="px-4 py-2">Status</th>
-      <th class="px-4 py-2"></th>
+      <th scope="col" class="px-4 py-2">Name</th>
+      <th scope="col" class="px-4 py-2">URL</th>
+      <th scope="col" class="px-4 py-2">Status</th>
+      <th scope="col" class="px-4 py-2"><span class="sr-only">Actions</span></th>
     </tr>
   </thead>
   <tbody class="divide-y divide-[color:var(--theme-line)]">
     {% for r in rows %}
     <tr>
-      <td class="px-4 py-2 align-top text-body">
+      <td class="px-4 py-2 align-top text-body break-words">
         <a href="/settings/pages/{{ r.id }}" class="underline decoration-dotted underline-offset-2">{{ r.name }}</a>
       </td>
       <td class="px-4 py-2 align-top font-mono text-xs">

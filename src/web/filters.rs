@@ -90,4 +90,20 @@ mod display {
     ) -> askama::Result<crate::web::views::HumanDur> {
         Ok(crate::web::views::HumanDur(*value))
     }
+
+    /// `{{ bytes|human_bytes }}` → `"512 KB"` / `"2 MB"`. Floors to the
+    /// largest whole binary unit.
+    #[askama::filter_fn]
+    pub fn human_bytes(value: &u64, _: &dyn askama::Values) -> askama::Result<String> {
+        const KB: u64 = 1024;
+        const MB: u64 = 1024 * KB;
+        let b = *value;
+        Ok(if b >= MB {
+            format!("{} MB", b / MB)
+        } else if b >= KB {
+            format!("{} KB", b / KB)
+        } else {
+            format!("{b} bytes")
+        })
+    }
 }
