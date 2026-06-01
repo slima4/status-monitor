@@ -5,7 +5,7 @@
   <header class="space-y-1">
     <a href="/targets" class="inline-block text-sm text-muted hover:text-body">← monitors</a>
     <h1 class="page-title truncate">
-      <span class="page-title__prefix">$</span>{% if form.mode == "create" %}new monitor{% else %}edit {{ form.name }}{% endif %}
+      <span class="page-title__prefix" aria-hidden="true">$</span>{% if form.mode == "create" %}new monitor{% else %}edit {{ form.name }}{% endif %}
     </h1>
     <p class="text-sm text-muted">
       Pick what you want to watch and we’ll check it on your schedule.

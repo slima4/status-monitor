@@ -30,40 +30,54 @@
     kindSel.addEventListener("change", () => showVariant(kindSel.value));
     if (replaceCb) replaceCb.addEventListener("change", syncConfigEnabled);
 
+    const submitBtn = form.querySelector("button[type=submit]");
     form.addEventListener("submit", async (evt) => {
         evt.preventDefault();
+        if (submitBtn.disabled) return;
         clearErrors();
         const built = buildBody();
-        if (built.error) { renderClientError(built.error); return; }
-
-        let res;
-        try {
-            res = await fetch(form.dataset.action, {
-                method: form.dataset.method,
-                headers: {
-                    "Content-Type": "application/json",
-                    "Accept": "application/json",
-                    "X-Requested-With": "uptimepage",
-                },
-                body: JSON.stringify(built.payload),
-            });
-        } catch (err) {
-            renderClientError(`Network error: ${err.message || err}`);
+        if (built.error) {
+            renderClientError(built.error);
+            if (built.field) form.querySelector(`[name="${built.field}"]`)?.focus();
             return;
         }
 
-        if (res.ok) { window.location = "/settings/notifications"; return; }
-
-        let body;
-        try { body = await res.json(); }
-        catch { renderClientError(`Request failed (${res.status})`); return; }
-        renderApiError(body, res.status);
+        const label = submitBtn.textContent;
+        submitBtn.disabled = true;
+        submitBtn.textContent = "Saving…";
+        let navigating = false;
+        try {
+            let res;
+            try {
+                res = await fetch(form.dataset.action, {
+                    method: form.dataset.method,
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Accept": "application/json",
+                        "X-Requested-With": "uptimepage",
+                    },
+                    body: JSON.stringify(built.payload),
+                });
+            } catch (err) {
+                renderClientError(`Network error: ${err.message || err}`);
+                return;
+            }
+            if (res.ok) { navigating = true; window.location = "/settings/notifications"; return; }
+            let body;
+            try { body = await res.json(); }
+            catch { renderClientError(`Request failed (${res.status})`); return; }
+            renderApiError(body, res.status);
+        } finally {
+            if (!navigating) { submitBtn.disabled = false; submitBtn.textContent = label; }
+        }
     });
 
     function buildBody() {
         const data = new FormData(form);
+        const name = (data.get("name") || "").trim();
+        if (!name) return { error: "Name is required.", field: "name" };
         const payload = {
-            name: data.get("name"),
+            name,
             enabled: data.get("enabled") === "on",
         };
 

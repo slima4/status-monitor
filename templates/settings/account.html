@@ -3,7 +3,7 @@
 {% block content %}
 <section class="space-y-8">
   <header class="space-y-1">
-    <h1 class="page-title"><span class="page-title__prefix">$</span>account</h1>
+    <h1 class="page-title"><span class="page-title__prefix" aria-hidden="true">$</span>account</h1>
     <p class="text-sm text-muted">
       Signed in as <span class="font-medium text-body">{{ email }}</span>
       (via {{ provider }})
@@ -174,7 +174,7 @@
                    style="background: var(--theme-surface-sunk);">DELETE</code>
         to confirm
       </label>
-      <input id="delete-confirm-input" type="text" autocomplete="off"
+      <input id="delete-confirm-input" type="text" autocomplete="off" spellcheck="false"
              oninput="document.getElementById('confirm-delete').disabled = this.value !== 'DELETE'"
              class="w-full field text-sm">
 

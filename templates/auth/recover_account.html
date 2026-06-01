@@ -4,7 +4,7 @@
 <section class="mx-auto max-w-md space-y-6 sticker-card p-8">
   {% if token.is_empty() %}
   <header class="space-y-1">
-    <h1 class="page-title"><span class="page-title__prefix">$</span>recovery link invalid</h1>
+    <h1 class="page-title"><span class="page-title__prefix" aria-hidden="true">$</span>recovery link invalid</h1>
     <p class="text-sm text-muted" style="line-height: 1.6;">
       This recovery link is missing its token or has already been used. If your
       account is still within its grace period, request a fresh link by signing
@@ -17,7 +17,7 @@
   </a>
   {% else %}
   <header class="space-y-1">
-    <h1 class="page-title"><span class="page-title__prefix">$</span>recover your account</h1>
+    <h1 class="page-title"><span class="page-title__prefix" aria-hidden="true">$</span>recover your account</h1>
     <p class="text-sm text-muted" style="line-height: 1.6;">
       Your account is scheduled for deletion. Restore it now to cancel the
       purge and sign back in.
@@ -29,7 +29,7 @@
         hx-ext="json-enc"
         hx-swap="none">
     <input type="hidden" name="token" value="{{ token }}">
-    <button type="submit"
+    <button type="submit" hx-disabled-elt="this"
             class="sticker-btn sticker-btn--primary px-3 py-1.5 text-sm font-medium">
       restore my account
     </button>
