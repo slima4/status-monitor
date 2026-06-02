@@ -44,7 +44,7 @@ struct LandingPage {
 }
 
 const PRICING_FEATURES: &[&str] = &[
-    "Unlimited monitors",
+    "Up to 20 monitors",
     "Public status page",
     "Slack, email & webhook alerts",
     "Team members",
