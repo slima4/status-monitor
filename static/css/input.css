@@ -137,7 +137,7 @@
     /* Universal state palette. Every operator-app surface that tints by
        meaning (ok/bad/warn) resolves through these tokens — status-badge,
        kpi-value, stat-tile, alert-card, flash-text, row-link--danger,
-       usage-bar, test-result, sticker-pill, dashboard banner, sparkline
+       usage meter, test-result, sticker-pill, dashboard banner, sparkline
        stroke. Defaults track Tailwind emerald/rose/amber so the current
        look is identical; a theme override (see .theme-terminal) can
        replace the whole dialect in one block.
@@ -148,7 +148,7 @@
          -fg          dark text on -bg
          -fg-strong   darkest text (alert-card on -bg)
          -fg-onsoft   text on -tint badges
-         -strong      solid colour (usage-bar fill, sparkline, edge cue) */
+         -strong      solid colour (quota cell, sparkline, edge cue) */
     --theme-state-ok-bg:         oklch(0.96 0.04 158);
     --theme-state-ok-tint:       oklch(0.92 0.06 158);
     --theme-state-ok-line:       oklch(0.70 0.12 158);
@@ -1936,12 +1936,6 @@
     details[open] > .sm-help-summary .sm-help-tri { transform: rotate(90deg); }
     @media (prefers-reduced-motion: reduce) { .sm-help-tri { transition: none; } }
 
-    .usage-row {
-        @apply space-y-1.5;
-    }
-    .usage-row__head {
-        @apply flex items-baseline justify-between gap-3;
-    }
     .usage-row__label {
         @apply text-sm font-medium;
         color: var(--theme-text);
@@ -1956,45 +1950,72 @@
         font-feature-settings: "tnum" 1, "lnum" 1;
         letter-spacing: 0.01em;
     }
-    .usage-bar {
-        @apply relative w-full overflow-hidden;
-        height: 1.125rem;
-        background: var(--theme-surface-sunk);
-        border-top: 1px solid var(--sm-dashboard-hairline);
+    /* Percent echo of the bar fill — same threshold colour, dimmer, so the
+       number agrees with the track without shouting over the count. */
+    .usage-row__pct {
+        @apply text-xs;
+        font-family: var(--font-mono);
+        font-variant-numeric: tabular-nums;
+        font-feature-settings: "tnum" 1, "lnum" 1;
+    }
+    .usage-row__pct--ok   { color: var(--theme-text-quiet); }
+    .usage-row__pct--warn { color: var(--theme-state-warn-fg); }
+    .usage-row__pct--bad  { color: var(--theme-state-bad-fg); }
+    /* Policy / rate-limit key→value rows: hairline register, last row open. */
+    .usage-def {
+        @apply flex items-baseline justify-between gap-3 py-1.5;
         border-bottom: 1px solid var(--sm-dashboard-hairline);
-        --sm-scale-tick-color: var(--theme-text-quiet);
-        --sm-scale-tick-width: 1.5px;
     }
-    /* Full-height quarter dividers — read as battery cells, not a
-       faint axis hint. Sits above the fill via pseudo paint order. */
-    .usage-bar::after {
-        content: "";
-        position: absolute;
-        inset: 0;
-        pointer-events: none;
-        background-image: var(--sm-scale-ticks-3);
-        opacity: 0.6;
+    .usage-def:last-child { border-bottom: 0; }
+    .usage-def dt { color: var(--theme-text-muted); }
+    .usage-def dd {
+        color: var(--theme-text);
+        font-family: var(--font-mono);
+        font-variant-numeric: tabular-nums;
+        font-feature-settings: "tnum" 1, "lnum" 1;
     }
-    .usage-bar--unlimited::after { display: none; }
-    .usage-bar__fill { @apply h-full; }
-    .usage-bar__fill--ok   { background: var(--theme-state-ok-strong); }
-    .usage-bar__fill--warn { background: var(--theme-state-warn-strong); }
-    .usage-bar__fill--bad  { background: var(--theme-state-bad-strong); }
-    .usage-bar--unlimited  { background-color: transparent; }
-    .usage-bar--unlimited::before {
-        content: "";
-        position: absolute;
-        inset: 0;
-        pointer-events: none;
+    /* Segmented quota meter. One shared grid keeps every row's track the
+       same length regardless of the count's width: label | track (1fr) |
+       numbers (auto, sized to the widest). Filled cells = solid threshold
+       colour; empty cells = the dashboard "no data" hatch. No hover — a
+       readout, not a control. */
+    .usage-grid {
+        @apply grid items-center;
+        grid-template-columns: auto minmax(0, 1fr) auto auto;
+        gap: 0.625rem 0.875rem;
+    }
+    /* Labels render as CLI flags: muted `--` prefix via pseudo + the kebab
+       key from the handler. Column is `auto` so the longest flag sets the
+       width; the row stacks below 480px so it can't overflow narrow phones. */
+    .usage-grid__label { @apply whitespace-nowrap; }
+    .usage-grid__label::before { content: "--"; color: var(--theme-text-quiet); }
+    @media (max-width: 480px) {
+        .usage-grid { grid-template-columns: minmax(0, 1fr) auto auto; }
+        .usage-grid__label { grid-column: 1 / -1; }
+    }
+    .usage-grid__track { @apply min-w-0; }
+    /* pct + count are their own right-aligned columns so the figures line
+       up vertically regardless of digit count. */
+    .usage-grid__pct  { text-align: right; }
+    .usage-grid__nums { white-space: nowrap; }
+    /* Fixed-width, right-aligned figure slots so `[ 1 / 10 ]` and
+       `[ 1 / 5 ]` render the same width — brackets line up every row. */
+    .usage-grid__fig { @apply inline-block text-right; min-width: 2.5ch; }
+
+    .usage-cells { @apply flex w-full; gap: 2px; height: 1.125rem; }
+    .usage-cells__c {
+        @apply flex-1;
+        border-radius: 1px;
         background-image: repeating-linear-gradient(
             -45deg,
             transparent 0,
-            transparent 3px,
-            var(--theme-accent) 3px,
-            var(--theme-accent) 4px);
-        opacity: 0.45;
+            transparent 2px,
+            var(--theme-text-faint) 2px,
+            var(--theme-text-faint) 3px);
     }
-    .usage-bar--unlimited .usage-bar__fill { display: none; }
+    .usage-cells__c--on-ok   { background: var(--theme-state-ok-strong); }
+    .usage-cells__c--on-warn { background: var(--theme-state-warn-strong); }
+    .usage-cells__c--on-bad  { background: var(--theme-state-bad-strong); }
 
     /* Live "we never stop checking" heartbeat. The EKG path is drawn with a
        long dash that scrolls left → reads as a continuous monitor sweep,

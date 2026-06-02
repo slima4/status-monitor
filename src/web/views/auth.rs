@@ -493,11 +493,38 @@ pub mod settings {
         }
     }
 
-    /// One progress-bar row. `pct` is pre-clamped 0–100 in Rust so the
-    /// template stays logic-free; `limit_display` shows ∞ for the synthetic
-    /// unlimited (self-host) plan instead of a meaningless 2.1-billion.
-    /// `fill_class` maps pct → ok/warn/bad CSS variant (`<80`, `80–94`,
-    /// `≥95`); `unlimited` swaps the bar to a hatched no-ceiling track.
+    /// Hard cap on rendered quota cells. One cell per unit up to this; a
+    /// larger plan falls back to a proportional `CELL_CAP`-wide meter so the
+    /// row stays legible instead of rendering hundreds of hairline cells.
+    const CELL_CAP: i64 = 64;
+
+    /// `cells[i] == true` for the first `round(pct% × total)` cells — the
+    /// proportion-filled flags the segmented meter iterates.
+    fn filled_flags(pct: i64, total: i64) -> Vec<bool> {
+        let on = ((pct * total + 50) / 100).clamp(0, total);
+        (0..total).map(|i| i < on).collect()
+    }
+
+    /// One cell per unit of `limit`, the first `current` filled — so the
+    /// user can literally count cells against the cap. Falls back to a
+    /// proportional `CELL_CAP`-wide meter once the limit exceeds the cap.
+    fn quota_cells(current: i64, limit: i64, pct: i64) -> Vec<bool> {
+        if limit <= 0 {
+            Vec::new()
+        } else if limit <= CELL_CAP {
+            let on = current.clamp(0, limit);
+            (0..limit).map(|i| i < on).collect()
+        } else {
+            filled_flags(pct, CELL_CAP)
+        }
+    }
+
+    /// One quota row. `pct` is pre-clamped 0–100 in Rust so the template
+    /// stays logic-free; `limit_display` shows ∞ for the synthetic unlimited
+    /// (self-host) plan instead of a meaningless 2.1-billion. `fill_class`
+    /// maps pct → ok/warn/bad CSS variant (`<80`, `80–94`, `≥95`).
+    /// `unlimited` swaps the segmented meter for an open-ended ∞ rail;
+    /// `cells` is the per-segment filled state (empty when unlimited).
     pub struct UsageBar {
         pub label: &'static str,
         pub current: i64,
@@ -505,6 +532,7 @@ pub mod settings {
         pub pct: i64,
         pub fill_class: &'static str,
         pub unlimited: bool,
+        pub cells: Vec<bool>,
     }
 
     impl UsageBar {
@@ -536,6 +564,11 @@ pub mod settings {
                 pct,
                 fill_class,
                 unlimited,
+                cells: if unlimited {
+                    Vec::new()
+                } else {
+                    quota_cells(current, limit, pct)
+                },
             }
         }
     }
@@ -575,25 +608,25 @@ pub mod settings {
             active_tab: TAB_USAGE,
             plan_name: p.name.clone(),
             bars: vec![
-                UsageBar::new("Targets", u.targets, p.max_targets),
-                UsageBar::new("Members", u.members, p.max_members),
+                UsageBar::new("targets", u.targets, p.max_targets),
+                UsageBar::new("members", u.members, p.max_members),
                 UsageBar::new(
-                    "Public components",
+                    "public-components",
                     u.public_components,
                     p.max_public_components,
                 ),
                 UsageBar::new(
-                    "Pending invitations",
+                    "pending-invitations",
                     u.pending_invitations,
                     p.max_pending_invitations,
                 ),
                 UsageBar::new(
-                    "Maintenance windows",
+                    "maintenance-windows",
                     u.maintenance_windows,
                     p.max_maintenance_windows,
                 ),
                 UsageBar::new(
-                    "Notification channels",
+                    "notification-channels",
                     u.notification_channels,
                     p.max_notification_channels,
                 ),
@@ -645,15 +678,19 @@ pub mod settings {
             .render()
             .unwrap();
             assert!(html.starts_with("<!doctype html>"));
-            assert!(html.contains("Plan:"));
+            // Plan rendered as a pill chip.
+            assert!(html.contains("sticker-pill--neutral"));
             assert!(html.contains("Free"));
-            // Bounded bar shows the count and a width proportional to usage.
-            assert!(html.contains("7 / 10"));
-            assert!(html.contains("width: 70%"));
-            // Unlimited (self-host) cap renders ∞, not i32::MAX, at 0%.
-            assert!(html.contains("1 / ∞"));
-            assert!(html.contains("width: 0%"));
-            assert!(html.contains("60 seconds"));
+            // Bounded quota: the figures, the progressbar value, and at
+            // least one filled cell in the segmented meter.
+            assert!(html.contains(r#"usage-grid__fig">7</span>"#));
+            assert!(html.contains(r#"usage-grid__fig">10</span>"#));
+            assert!(html.contains(r#"aria-valuenow="70""#));
+            assert!(html.contains("usage-cells__c--on-"));
+            // Unlimited (self-host) cap renders ∞ + a single empty cell.
+            assert!(html.contains(r#"usage-grid__fig">∞</span>"#));
+            assert!(html.contains(r#"aria-label="unlimited""#));
+            assert!(html.contains("60s"));
             assert!(html.contains(r#"href="mailto:slima4.u8@gmail.com""#));
         }
 

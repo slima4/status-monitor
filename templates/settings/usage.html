@@ -2,58 +2,64 @@
 {% block title %}Usage · Uptimepage{% endblock %}
 {% block content %}
 <section class="space-y-6">
-  <header class="space-y-1">
+  <header class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
     <h1 class="page-title"><span class="page-title__prefix" aria-hidden="true">$</span>usage &amp; quotas</h1>
-    <p class="text-sm text-muted">
-      Plan: <span class="font-medium text-body">{{ plan_name }}</span>
+    <p class="flex items-center gap-2 text-sm text-muted">
+      plan
+      <span class="sticker-pill sticker-pill--neutral"><span class="font-mono">{{ plan_name }}</span></span>
     </p>
   </header>
 
-  <div class="sticker-card space-y-4 p-5">
-    {% for b in bars %}
-    <div class="usage-row">
-      <div class="usage-row__head">
-        <span class="usage-row__label">{{ b.label }}</span>
-        <span class="usage-row__nums cli-brackets">{{ b.current }} / {{ b.limit_display }}</span>
-      </div>
-      <div class="usage-bar{% if b.unlimited %} usage-bar--unlimited{% endif %}"
-           role="progressbar"
-           aria-label="{{ b.label }} usage"
-           aria-valuemin="0"
-           aria-valuemax="100"
-           {% if b.unlimited %}aria-valuetext="unlimited"{% else %}aria-valuenow="{{ b.pct }}"{% endif %}>
-        <div class="usage-bar__fill usage-bar__fill--{{ b.fill_class }}" style="width: {{ b.pct }}%"></div>
-      </div>
+  <div class="sticker-card p-5">
+    <h2 class="panel-label mb-4">Resources</h2>
+    <div class="usage-grid">
+      {% for b in bars %}
+      <span class="usage-row__label usage-grid__label">{{ b.label }}</span>
+      {% if b.unlimited %}
+      <span class="usage-cells usage-grid__track" role="img" aria-label="unlimited"><span class="usage-cells__c"></span></span>
+      {% else %}
+      <span class="usage-cells usage-grid__track"
+            role="progressbar" aria-label="{{ b.label }} usage"
+            aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ b.pct }}">
+        {% for on in b.cells %}<span class="usage-cells__c{% if on %} usage-cells__c--on-{{ b.fill_class }}{% endif %}"></span>{% endfor %}
+      </span>
+      {% endif %}
+      <span class="usage-grid__pct{% if !b.unlimited %} usage-row__pct usage-row__pct--{{ b.fill_class }}{% endif %}">{% if !b.unlimited %}{{ b.pct }}%{% endif %}</span>
+      <span class="usage-grid__nums usage-row__nums cli-brackets"><span class="usage-grid__fig">{{ b.current }}</span> / <span class="usage-grid__fig">{{ b.limit_display }}</span></span>
+      {% endfor %}
     </div>
-    {% endfor %}
   </div>
 
   <div class="grid gap-4 sm:grid-cols-2">
     <div class="sticker-card p-5">
       <h2 class="panel-label mb-3">Policy</h2>
-      <dl class="space-y-1.5 text-sm text-muted">
-        <div class="flex justify-between"><dt>Minimum check interval</dt><dd class="tabular-nums">{{ min_check_interval_secs }} seconds</dd></div>
-        <div class="flex justify-between"><dt>Result retention</dt><dd class="tabular-nums">{{ retention_days }} days</dd></div>
-        <div class="flex justify-between"><dt>Maximum logo size</dt><dd class="tabular-nums">{{ max_logo_size_label }}</dd></div>
-        <div class="flex justify-between"><dt>API tokens per user</dt><dd class="tabular-nums">{{ max_api_tokens_per_user }}</dd></div>
+      <dl class="text-sm">
+        <div class="usage-def"><dt>Minimum check interval</dt><dd>{{ min_check_interval_secs }}s</dd></div>
+        <div class="usage-def"><dt>Result retention</dt><dd>{{ retention_days }} days</dd></div>
+        <div class="usage-def"><dt>Maximum logo size</dt><dd>{{ max_logo_size_label }}</dd></div>
+        <div class="usage-def"><dt>API tokens per user</dt><dd>{{ max_api_tokens_per_user }}</dd></div>
       </dl>
     </div>
 
     <div class="sticker-card p-5">
       <h2 class="panel-label mb-3">Rate limits <span class="font-normal normal-case text-quiet">(per minute)</span></h2>
-      <dl class="space-y-1.5 text-sm text-muted">
-        <div class="flex justify-between"><dt>API writes</dt><dd class="tabular-nums">{{ api_writes_per_minute }}</dd></div>
-        <div class="flex justify-between"><dt>API reads</dt><dd class="tabular-nums">{{ api_reads_per_minute }}</dd></div>
-        <div class="flex justify-between"><dt>Bulk ops</dt><dd class="tabular-nums">{{ bulk_ops_per_minute }}</dd></div>
-        <div class="flex justify-between"><dt>Test now</dt><dd class="tabular-nums">{{ test_now_per_minute }}</dd></div>
-        <div class="flex justify-between"><dt>Check now</dt><dd class="tabular-nums">{{ check_now_per_minute }}</dd></div>
+      <dl class="text-sm">
+        <div class="usage-def"><dt>API writes</dt><dd>{{ api_writes_per_minute }}</dd></div>
+        <div class="usage-def"><dt>API reads</dt><dd>{{ api_reads_per_minute }}</dd></div>
+        <div class="usage-def"><dt>Bulk ops</dt><dd>{{ bulk_ops_per_minute }}</dd></div>
+        <div class="usage-def"><dt>Test now</dt><dd>{{ test_now_per_minute }}</dd></div>
+        <div class="usage-def"><dt>Check now</dt><dd>{{ check_now_per_minute }}</dd></div>
       </dl>
     </div>
   </div>
 
-  <p class="text-sm text-muted">
-    Need higher limits?
-    <a class="font-medium text-brand-500 underline decoration-dotted hover:text-brand-900" href="mailto:slima4.u8@gmail.com">Contact us</a>
-  </p>
+  <div class="sticker-card space-y-1 p-4 font-mono text-xs leading-relaxed text-muted">
+    <p class="text-quiet"># usage --help</p>
+    <p># cells ...... one per unit; filled = used, hatched = free</p>
+    <p># color ...... green ok · amber ≥80% · red at the limit</p>
+    <p># ∞ .......... no ceiling on your plan</p>
+    <p># limits ..... rate limits are per-minute, per API token</p>
+    <p># raise ...... need a higher cap? <a class="underline decoration-dotted hover:text-body" href="mailto:slima4.u8@gmail.com">email us</a></p>
+  </div>
 </section>
 {% endblock %}
