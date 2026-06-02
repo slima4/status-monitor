@@ -224,7 +224,6 @@ pub async fn create_signup_org_with_owner_in_tx(
     Ok(Some(OrgId(org_id)))
 }
 
-
 /// Counts a user's currently-active owner memberships (soft-deleted orgs do
 /// not count). Matches the filter used by the atomic enforcer in
 /// [`create_org_with_owner`], so a pre-flight "you can create another org"
