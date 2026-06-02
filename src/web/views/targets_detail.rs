@@ -275,6 +275,7 @@ async fn latest_status_probe(
 ) -> WebResult<(&'static str, String)> {
     let to = Utc::now();
     let from = to - Duration::days(LAST_RESULT_WINDOW_DAYS);
+    // Current-status badge, not history browsing — exempt from the plan clamp.
     let row = state
         .results_store
         .list_results(
@@ -305,9 +306,7 @@ async fn load_live_data(
     from: DateTime<Utc>,
     to: DateTime<Utc>,
 ) -> WebResult<LiveData> {
-    // TODO(retention 2c): clamp to the org's plan window once HTML detail joins
-    // the per-plan clamp; unclamped preserves today's behavior meanwhile.
-    let time_range = ClampedRange::unclamped(TimeRange { from, to });
+    let time_range = state.quotas.clamp_raw(org, TimeRange { from, to }).await?;
     let (uptime, mut results) = tokio::try_join!(
         state.results_store.uptime(org, target_id, time_range),
         state
@@ -319,6 +318,7 @@ async fn load_live_data(
         results.truncate(RESULTS_PAGE_LIMIT);
     }
 
+    // Last-known status when the window is empty — current-status, not history.
     let latest_outside_window = if results.is_empty()
         && let Some(window) = wider_status_window(from, to)
     {
@@ -604,6 +604,7 @@ pub(crate) async fn load_incidents_data(
     interval: std::time::Duration,
     time_range: TimeRange,
 ) -> WebResult<IncidentsData> {
+    let range = state.quotas.clamp_raw(org, time_range).await?;
     // The incidents tab needs only the badge's `last_status` from the live
     // region — not the uptime stats or 60 recent rows. Probe one row instead of
     // running the full live loader; a 90d preset would otherwise scan the entire
@@ -615,13 +616,7 @@ pub(crate) async fn load_incidents_data(
                 .list_incidents(
                     org,
                     target_id,
-                    // TODO(retention 2c): clamp to the org's plan window when
-                    // HTML detail joins the per-plan clamp.
-                    IncidentListQuery::page(
-                        ClampedRange::unclamped(time_range),
-                        interval,
-                        INCIDENTS_PAGE_LIMIT + 1,
-                    ),
+                    IncidentListQuery::page(range, interval, INCIDENTS_PAGE_LIMIT + 1),
                 )
                 .await
                 .map_err(WebError::from)
