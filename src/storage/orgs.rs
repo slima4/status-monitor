@@ -334,6 +334,25 @@ pub async fn is_owner(pool: &PgPool, user: UserId, org: OrgId) -> Result<bool> {
     Ok(exists)
 }
 
+/// Owner user-ids of `org` (regardless of soft-delete state), ordered by id so
+/// callers taking a per-owner lock acquire in a deadlock-free order. Generic
+/// over the executor so it can run inside a caller's transaction.
+pub async fn owner_user_ids<'c, E>(executor: E, org: OrgId) -> Result<Vec<UserId>>
+where
+    E: sqlx::PgExecutor<'c>,
+{
+    let rows: Vec<(Uuid,)> = sqlx::query_as(
+        r#"SELECT user_id FROM memberships
+           WHERE org_id = $1 AND role = 'owner'
+           ORDER BY user_id"#,
+    )
+    .bind(org.0)
+    .fetch_all(executor)
+    .await
+    .context("owner_user_ids")?;
+    Ok(rows.into_iter().map(|(id,)| UserId(id)).collect())
+}
+
 /// Combined access-control resolution for routes gated on "active owner of
 /// this org". One round-trip returns enough to map to 404 (no membership /
 /// soft-deleted org) or 403 (member but not owner) without two separate

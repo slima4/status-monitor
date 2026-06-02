@@ -49,9 +49,12 @@ use futures::future::join_all;
 use sqlx::PgPool;
 use uuid::Uuid;
 
+use crate::domain::{OrgId, UserId};
 use crate::error::Result;
 use crate::public_status::PageCache;
 use crate::storage::clickhouse::count_org_rows;
+use crate::storage::locks::{advisory_xact_lock, user_delete_lock_key};
+use crate::storage::orgs;
 
 /// Hard cap on orgs processed per tick. Small enough that a stuck ClickHouse
 /// can't accumulate a huge backlog between alerts; large enough that a normal
@@ -130,6 +133,17 @@ async fn cascade_past_grace(pool: &PgPool, grace_days: u32, _cache: &PageCache) 
     let mut cascaded = 0u32;
     for (org_id,) in orgs {
         let mut tx = pool.begin().await.context("purge: begin tx")?;
+
+        // Lock every owner (ordered by id, deadlock-free) so a concurrent
+        // `undelete_in_tx` can't lift this org's tombstone between the re-check
+        // and the DELETE below — otherwise the cascade wipes a recovered org.
+        let owners = orgs::owner_user_ids(&mut *tx, OrgId(org_id)).await?;
+        for owner in &owners {
+            advisory_xact_lock(&mut *tx, &user_delete_lock_key(*owner))
+                .await
+                .context("purge: owner delete lock")?;
+        }
+
         sqlx::query(
             r#"INSERT INTO clickhouse_purge_queue (org_id)
                VALUES ($1)
@@ -334,30 +348,53 @@ pub async fn purge_queue_depth(pool: &PgPool) -> Result<QueueDepth> {
 
 /// Hard-delete soft-deleted users whose grace window has elapsed. The window
 /// is gated solely by `deleted_at` age — within it the user restores by
-/// re-authenticating. Postgres has no `DELETE … LIMIT`, so the batch bound is a
-/// subquery; the same `PURGE_BATCH_LIMIT` back-pressure as the org cascade caps
-/// a runaway mass-deletion. The `users` FK cascade erases dependent rows;
-/// `login_attempts` / `org_audit_log` keep theirs with the actor nulled.
+/// re-authenticating. The same `PURGE_BATCH_LIMIT` back-pressure as the org
+/// cascade caps a runaway mass-deletion. The `users` FK cascade erases
+/// dependent rows; `login_attempts` / `org_audit_log` keep theirs with the
+/// actor nulled.
+///
+/// Each row is deleted under the per-user delete lock (the lock
+/// `undelete_in_tx` takes), so a restore serialises with the purge; the in-tx
+/// re-check no-ops a row restored after the select.
 pub async fn purge_users_past_grace(pool: &PgPool, grace_days: u32) -> Result<u32> {
-    let purged: Vec<(Uuid,)> = sqlx::query_as(
-        r#"DELETE FROM users
-           WHERE id IN (
-               SELECT id FROM users
-                WHERE deleted_at IS NOT NULL
-                  AND deleted_at < now() - ($1::int * INTERVAL '1 day')
-                ORDER BY deleted_at ASC
-                LIMIT $2
-           )
-           RETURNING id"#,
+    let candidates: Vec<(Uuid,)> = sqlx::query_as(
+        r#"SELECT id FROM users
+            WHERE deleted_at IS NOT NULL
+              AND deleted_at < now() - ($1::int * INTERVAL '1 day')
+            ORDER BY deleted_at ASC
+            LIMIT $2"#,
     )
     .bind(i64::from(grace_days))
     .bind(PURGE_BATCH_LIMIT)
     .fetch_all(pool)
     .await
-    .context("purge: delete past-grace users")?;
+    .context("purge: select past-grace users")?;
 
-    for (id,) in &purged {
-        tracing::debug!(%id, "user hard-purged");
+    let mut purged = 0u32;
+    for (id,) in candidates {
+        let mut tx = pool.begin().await.context("purge: begin user tx")?;
+        advisory_xact_lock(&mut *tx, &user_delete_lock_key(UserId(id)))
+            .await
+            .context("purge: user delete lock")?;
+        let affected = sqlx::query(
+            r#"DELETE FROM users
+                WHERE id = $1
+                  AND deleted_at IS NOT NULL
+                  AND deleted_at < now() - ($2::int * INTERVAL '1 day')"#,
+        )
+        .bind(id)
+        .bind(i64::from(grace_days))
+        .execute(&mut *tx)
+        .await
+        .context("purge: delete past-grace user")?
+        .rows_affected();
+        tx.commit().await.context("purge: commit user delete")?;
+        if affected > 0 {
+            purged += 1;
+            tracing::debug!(%id, "user hard-purged");
+        } else {
+            tracing::info!(%id, "user purge skipped: restored after select");
+        }
     }
-    Ok(u32::try_from(purged.len()).unwrap_or(u32::MAX))
+    Ok(purged)
 }

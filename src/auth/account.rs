@@ -245,6 +245,14 @@ pub async fn request_deletion(
 /// The `deleted_at IS NOT NULL` guard makes it a no-op for an already-active
 /// row (a benign race), never an error.
 pub async fn undelete_in_tx(tx: &mut Transaction<'_, Postgres>, user_id: UserId) -> Result<()> {
+    // Serialise against the daily purge (same per-user lock): without it a
+    // restore and a same-user purge can interleave on the last grace day, the
+    // org cascade wiping tenant data microseconds before this clears
+    // `deleted_at` → user restored into an emptied account.
+    advisory_xact_lock(&mut **tx, &user_delete_lock_key(user_id))
+        .await
+        .context("undelete: user advisory lock")?;
+
     sqlx::query(
         "UPDATE users SET deleted_at = NULL, updated_at = now() \
          WHERE id = $1 AND deleted_at IS NOT NULL",

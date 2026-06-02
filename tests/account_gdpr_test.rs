@@ -241,6 +241,55 @@ async fn undelete_active_account_is_noop() {
     drop_pg(&name).await;
 }
 
+/// `undelete_in_tx` and the purge both take the per-user delete lock, so a
+/// restore cannot run while a purge holds it (the race that wiped data into a
+/// 'restored' account). Hold the lock on one connection and assert undelete
+/// blocks until it's released.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn undelete_blocks_while_user_delete_lock_held() {
+    use uptimepage::storage::locks::{advisory_xact_lock, user_delete_lock_key};
+
+    let Some((db, name)) = fresh_pg().await else {
+        return;
+    };
+    let pool = open_pool(&db).await;
+    MIGRATOR.run(&pool).await.unwrap();
+
+    let user = seed_user(&pool, "race@example.test", "Race").await;
+    let uid = uptimepage::domain::UserId(user);
+    seed_org(&pool, "race-org", user).await;
+    account::request_deletion(&pool, uid, 30)
+        .await
+        .expect("deletion succeeds");
+
+    // Holder takes the lock and keeps its tx open.
+    let mut holder = pool.begin().await.unwrap();
+    advisory_xact_lock(&mut *holder, &user_delete_lock_key(uid))
+        .await
+        .unwrap();
+
+    // While held, undelete must not make progress.
+    let mut blocked_tx = pool.begin().await.unwrap();
+    let blocked = tokio::time::timeout(
+        std::time::Duration::from_millis(500),
+        account::undelete_in_tx(&mut blocked_tx, uid),
+    )
+    .await;
+    assert!(blocked.is_err(), "undelete ran while delete lock was held");
+    drop(blocked_tx);
+
+    // Release, then undelete succeeds.
+    holder.commit().await.unwrap();
+    let mut tx = pool.begin().await.unwrap();
+    account::undelete_in_tx(&mut tx, uid).await.unwrap();
+    tx.commit().await.unwrap();
+    assert_user_deleted(&pool, user, false).await;
+
+    pool.close().await;
+    drop_pg(&name).await;
+}
+
 // ---------------------------------------------------------------------------
 // data export: redaction + cross-user exclusion
 // ---------------------------------------------------------------------------
