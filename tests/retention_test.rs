@@ -190,19 +190,22 @@ async fn purges_past_window_and_keeps_fresh_rows() {
 /// updated, this fails — one source of truth.
 #[test]
 fn windows_match_privacy_policy_and_clickhouse_ttl() {
-    // `check_results` retention is the ClickHouse table TTL, not an app-side
-    // knob — keep this constant in lockstep with the literal in
-    // `migrations/clickhouse/001_initial.sql`. 90 days matches the public
-    // status page strip's `history_days` and the public claim in
-    // `docs/legal/privacy.md`.
-    const CHECK_RESULTS_DAYS: u32 = 90;
+    // check-result retention is the ClickHouse table TTLs, not an app-side
+    // knob — keep these in lockstep with the literals in the CH migrations and
+    // the public claims in `docs/legal/privacy.md`. Raw + 1m rollup live 90
+    // days; the 1h rollup carries the aggregated history 13 months.
+    const CHECK_RESULTS_RAW_DAYS: u32 = 90;
+    const CHECK_RESULTS_HISTORY_MONTHS: u32 = 13;
     let r = RetentionConfig::default();
     let s = SessionConfig::default();
     let grace = TenancyConfig::default().deletion_grace_period_days;
 
     let policy = include_str!("../docs/legal/privacy.md");
     let want = [
-        format!("| Check results | {CHECK_RESULTS_DAYS} days"),
+        format!("| Check results (raw per-check detail) | {CHECK_RESULTS_RAW_DAYS} days"),
+        format!(
+            "| Check result history (aggregated, hourly) | {CHECK_RESULTS_HISTORY_MONTHS} months"
+        ),
         format!("| Login attempts | {} days", r.login_attempts_days),
         format!("| Quota events | {} days", r.quota_events_days),
         format!("| Sessions | {} days maximum", s.absolute_timeout_days),
@@ -222,9 +225,14 @@ fn windows_match_privacy_policy_and_clickhouse_ttl() {
         "Privacy Policy audit-log retention line changed"
     );
 
-    let migration = include_str!("../migrations/clickhouse/001_initial.sql");
+    let m1 = include_str!("../migrations/clickhouse/001_initial.sql");
     assert!(
-        migration.contains(&format!("INTERVAL {CHECK_RESULTS_DAYS} DAY")),
-        "check_results ClickHouse TTL must equal CHECK_RESULTS_DAYS"
+        m1.contains(&format!("INTERVAL {CHECK_RESULTS_RAW_DAYS} DAY")),
+        "check_results raw ClickHouse TTL must equal CHECK_RESULTS_RAW_DAYS"
+    );
+    let m2 = include_str!("../migrations/clickhouse/002_check_results_1h.sql");
+    assert!(
+        m2.contains(&format!("INTERVAL {CHECK_RESULTS_HISTORY_MONTHS} MONTH")),
+        "check_results_1h ClickHouse TTL must equal CHECK_RESULTS_HISTORY_MONTHS"
     );
 }

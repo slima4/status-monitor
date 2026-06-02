@@ -63,7 +63,8 @@ you (no profiling, no scoring).
 | Account data (email, OAuth) | Until account deletion |
 | Sessions | 90 days maximum |
 | API tokens | Until you revoke them |
-| Check results | 90 days (configurable on paid plans, not currently available) |
+| Check results (raw per-check detail) | 90 days |
+| Check result history (aggregated, hourly) | 13 months |
 | Login attempts | 180 days |
 | Audit log | 2 years |
 | Quota events | 90 days |

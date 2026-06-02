@@ -43,19 +43,30 @@ pub(crate) fn resolve_range(
     from: Option<DateTime<Utc>>,
     to: Option<DateTime<Utc>>,
 ) -> Result<TimeRange> {
+    let range = resolve_range_uncapped(from, to)?;
+    let max = Duration::try_days(MAX_RANGE_DAYS).unwrap_or_default();
+    if range.to - range.from > max {
+        return Err(AppError::bad_request(
+            codes::BAD_TIME_RANGE,
+            "time window exceeds maximum of 90 days; page backwards via 'to'",
+        ));
+    }
+    Ok(range)
+}
+
+/// Like [`resolve_range`] without the 90-day span cap. For rollup reads, where
+/// the per-plan `clamp_history` bounds the lookback (up to 13 months) and the
+/// pre-aggregated source has no per-request memory blow-up to guard against.
+pub(crate) fn resolve_range_uncapped(
+    from: Option<DateTime<Utc>>,
+    to: Option<DateTime<Utc>>,
+) -> Result<TimeRange> {
     let to = to.unwrap_or_else(Utc::now);
     let from = from.unwrap_or_else(|| to - Duration::try_hours(24).unwrap_or_default());
     if to <= from {
         return Err(AppError::bad_request(
             codes::BAD_TIME_RANGE,
             "'to' must be strictly greater than 'from'",
-        ));
-    }
-    let max = Duration::try_days(MAX_RANGE_DAYS).unwrap_or_default();
-    if to - from > max {
-        return Err(AppError::bad_request(
-            codes::BAD_TIME_RANGE,
-            "time window exceeds maximum of 90 days; page backwards via 'to'",
         ));
     }
     Ok(TimeRange { from, to })
@@ -78,6 +89,10 @@ pub struct RangeQuery {
 impl RangeQuery {
     pub(crate) fn resolve(&self) -> Result<TimeRange> {
         resolve_range(self.from, self.to)
+    }
+
+    pub(crate) fn resolve_uncapped(&self) -> Result<TimeRange> {
+        resolve_range_uncapped(self.from, self.to)
     }
 
     pub(crate) fn limit(&self) -> usize {
@@ -187,7 +202,10 @@ pub async fn latency(
     Path(id): Path<Uuid>,
     Query(q): Query<RangeQuery>,
 ) -> Result<Json<LatencySeries>> {
-    let range = state.quotas.clamp_history(org, q.resolve()?).await?;
+    let range = state
+        .quotas
+        .clamp_history(org, q.resolve_uncapped()?)
+        .await?;
     let bucket_seconds = latency_bucket_seconds(range.inner());
     // Org-scoped `get` rides alongside the (also org-scoped) rollup read so a
     // foreign/unknown id still 404s without a serial round-trip.

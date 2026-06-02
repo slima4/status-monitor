@@ -349,7 +349,7 @@ pub async fn latency(
     let resolved = resolve_share(&state, &token).await?;
     let range = state
         .quotas
-        .clamp_history(resolved.org, q.resolve()?)
+        .clamp_history(resolved.org, q.resolve_uncapped()?)
         .await?;
     let bucket_seconds = latency_bucket_seconds(range.inner());
     let buckets = state

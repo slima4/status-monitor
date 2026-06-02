@@ -38,6 +38,9 @@ impl MinuteBound {
 /// `[from, to)` over the matview `minute` column; bind via [`bind_minute_window`].
 const MINUTE_WINDOW: &str = "minute >= fromUnixTimestamp(?) AND minute < fromUnixTimestamp(?)";
 
+/// 1m rollup TTL (days). Ranges reaching past it read the 1h rollup instead.
+const MINUTE_ROLLUP_DAYS: i64 = 90;
+
 /// The two [`MinuteBound`] binds [`MINUTE_WINDOW`] expects; call after the
 /// leading positional binds (org_id, target_id, …).
 fn bind_minute_window(q: Query, from: DateTime<Utc>, to: DateTime<Utc>) -> Query {
@@ -69,10 +72,24 @@ fn bind_minute_window(q: Query, from: DateTime<Utc>, to: DateTime<Utc>) -> Query
 /// migration. With the IF NOT EXISTS discipline above this is harmless
 /// (second CREATE is a no-op); for multi-replica, take a pg_advisory_lock
 /// around the call.
-const MIGRATIONS: &[(&str, &str)] = &[(
-    "001_initial.sql",
-    include_str!("../../migrations/clickhouse/001_initial.sql"),
-)];
+const MIGRATIONS: &[(&str, &str)] = &[
+    (
+        "001_initial.sql",
+        include_str!("../../migrations/clickhouse/001_initial.sql"),
+    ),
+    // 002 `check_results_1h`: the hour-rollup for the long history tail. Same
+    // AggregateFunction columns as `check_results_1m`, so [`latency_buckets`]
+    // merges either with one finaliser set; it routes ranges past the 1m
+    // rollup's 90-day TTL here, keeping minute resolution within 90 days. A 2nd
+    // matview on raw `check_results` (accrues forward, no backfill). The 13-month
+    // TTL exceeds the 90-day raw/1m TTL, so the Privacy Policy and the
+    // `retention_test` guard disclose it; org erasure must clear it too (see
+    // [`CH_TENANT_TABLES`]). Migration SQL is frozen — keep this rationale here.
+    (
+        "002_check_results_1h.sql",
+        include_str!("../../migrations/clickhouse/002_check_results_1h.sql"),
+    ),
+];
 
 pub async fn migrate(client: &Client) -> Result<()> {
     tracing::info!("running clickhouse migrations");
@@ -176,8 +193,25 @@ const EXPECTED_ROLLUP_SCHEMA: &[(&str, &str)] = &[
     ),
 ];
 
-/// Boot check: live `check_results_1m` must equal [`EXPECTED_ROLLUP_SCHEMA`].
+/// Boot check: both rollups must equal [`EXPECTED_ROLLUP_SCHEMA`]. The 1h view
+/// mirrors the 1m column set with `hour` in place of `minute`.
 async fn verify_rollup_schema(client: &Client) -> Result<()> {
+    verify_view_schema(client, "check_results_1m", EXPECTED_ROLLUP_SCHEMA).await?;
+    let expected_1h: Vec<(&str, &str)> = EXPECTED_ROLLUP_SCHEMA
+        .iter()
+        .map(|(n, t)| {
+            if *n == "minute" {
+                ("hour", *t)
+            } else {
+                (*n, *t)
+            }
+        })
+        .collect();
+    verify_view_schema(client, "check_results_1h", &expected_1h).await?;
+    Ok(())
+}
+
+async fn verify_view_schema(client: &Client, view: &str, expected: &[(&str, &str)]) -> Result<()> {
     #[derive(Row, Deserialize)]
     struct Col {
         name: String,
@@ -187,24 +221,25 @@ async fn verify_rollup_schema(client: &Client) -> Result<()> {
     let live: Vec<(String, String)> = client
         .query(
             "SELECT name, type FROM system.columns \
-             WHERE database = currentDatabase() AND table = 'check_results_1m' \
+             WHERE database = currentDatabase() AND table = ? \
              ORDER BY position",
         )
+        .bind(view)
         .fetch_all::<Col>()
         .await
-        .context("clickhouse verify_rollup_schema: read system.columns")?
+        .context("clickhouse verify_view_schema: read system.columns")?
         .into_iter()
         .map(|c| (c.name, c.ty))
         .collect();
-    let expected: Vec<(String, String)> = EXPECTED_ROLLUP_SCHEMA
+    let expected: Vec<(String, String)> = expected
         .iter()
         .map(|(n, t)| ((*n).to_string(), (*t).to_string()))
         .collect();
     if live != expected {
         return Err(anyhow::anyhow!(
-            "check_results_1m schema drifted from the readers' contract — a matview \
-             edit in 001_initial.sql is a no-op on an existing DB; ship a recreate \
-             migration and update EXPECTED_ROLLUP_SCHEMA.\n  expected: {expected:?}\n  live:     {live:?}"
+            "{view} schema drifted from the readers' contract — a matview edit is a \
+             no-op on an existing DB; ship a recreate migration and update \
+             EXPECTED_ROLLUP_SCHEMA.\n  expected: {expected:?}\n  live:     {live:?}"
         )
         .into());
     }
@@ -905,12 +940,22 @@ impl ResultsStore for ClickhouseResultsStore {
             ttfb: f64,
             samples: u64,
         }
-        // Source matview is per-minute; round up to a whole number of source
-        // rows so every output bucket spans an integer count of minutes.
+        // Round up to a whole number of source rows so every output bucket
+        // spans an integer count of minutes.
         let bucket = bucket_seconds.max(60).div_ceil(60) * 60;
+        // Start past the 1m rollup's 90-day TTL → 1h rollup, else 1m (see
+        // MIGRATIONS). `minute`/`hour` are both DateTime seconds, so
+        // `bind_minute_window` binds either.
+        let (table, tcol) = if range.from >= Utc::now() - chrono::Duration::days(MINUTE_ROLLUP_DAYS)
+        {
+            ("check_results_1m", "minute")
+        } else {
+            ("check_results_1h", "hour")
+        };
+        let window = format!("{tcol} >= fromUnixTimestamp(?) AND {tcol} < fromUnixTimestamp(?)");
         let query = format!(
             "SELECT \
-               toUInt32(toStartOfInterval(minute, INTERVAL {bucket} SECOND)) AS bucket_ts, \
+               toUInt32(toStartOfInterval({tcol}, INTERVAL {bucket} SECOND)) AS bucket_ts, \
                quantilesMerge(0.5, 0.95, 0.99)(duration_quantiles) AS quantiles, \
                avgMerge(avg_duration_ms) AS avg, \
                ifNull(avgMerge(avg_dns_ms), 0) AS dns, \
@@ -918,8 +963,8 @@ impl ResultsStore for ClickhouseResultsStore {
                ifNull(avgMerge(avg_tls_ms), 0) AS tls, \
                ifNull(avgMerge(avg_ttfb_ms), 0) AS ttfb, \
                countMerge(total_checks) AS samples \
-             FROM check_results_1m \
-             WHERE org_id = ? AND target_id = ? AND {MINUTE_WINDOW} \
+             FROM {table} \
+             WHERE org_id = ? AND target_id = ? AND {window} \
              GROUP BY bucket_ts \
              ORDER BY bucket_ts"
         );

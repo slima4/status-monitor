@@ -142,3 +142,47 @@ async fn latency_buckets_clamp_all_null_phases_to_zero() {
     assert_eq!(b.avg, 70);
     assert_eq!(b.p50, 70);
 }
+
+// A range reaching past the 1m rollup's 90-day TTL must route to check_results_1h.
+#[tokio::test]
+#[ignore = "requires ClickHouse (CLICKHOUSE_URL)"]
+async fn latency_buckets_route_to_hour_rollup_past_90d() {
+    let Some(ch) = common::ch_client_from_env().await else {
+        return;
+    };
+    let sink = ClickhouseResultSink::from_client(ch.clone());
+    let store = ClickhouseResultsStore::from_client(ch);
+    let org = Uuid::now_v7();
+    let target = Uuid::now_v7();
+    // 100 days ago, aligned to the hour. The matview aggregates on insert
+    // (now), bucketing by the row's old timestamp into the 1h rollup.
+    let base = (Utc::now() - Duration::days(100))
+        .with_minute(0)
+        .unwrap()
+        .with_second(0)
+        .unwrap()
+        .with_nanosecond(0)
+        .unwrap();
+    let rows: Vec<CheckResult> = (0..4)
+        .map(|i| {
+            http_ok(
+                target,
+                org,
+                base + Duration::minutes(i * 10),
+                100 + (i as u32) * 50,
+            )
+        })
+        .collect();
+    sink.write_batch(&rows).await.expect("insert old samples");
+
+    let range = TimeRange {
+        from: base - Duration::hours(1),
+        to: base + Duration::hours(1),
+    };
+    let buckets = store
+        .latency_buckets(OrgId(org), target, ClampedRange::unclamped(range), 3600)
+        .await
+        .expect("latency_buckets query (1h path)");
+    assert_eq!(buckets.len(), 1, "four samples in one hour → one 1h bucket");
+    assert_eq!(buckets[0].samples, 4);
+}

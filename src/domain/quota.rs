@@ -72,15 +72,18 @@ impl Plan {
         }
     }
 
-    /// Capped here until the 1h rollup carries history past 90 days.
-    pub const PHYSICAL_MAX_RETENTION_DAYS: i64 = 90;
+    /// Raw + 1m rollup physical retention (days): raw forensics and
+    /// minute-resolution history cap here.
+    pub const RAW_MAX_DAYS: i64 = 90;
+    /// 1h rollup physical retention (days) — the long history tail.
+    pub const HISTORY_MAX_DAYS: i64 = 395;
 
     pub fn history_window_days(&self) -> i64 {
-        i64::from(self.retention_days).min(Self::PHYSICAL_MAX_RETENTION_DAYS)
+        i64::from(self.retention_days).min(Self::HISTORY_MAX_DAYS)
     }
 
     pub fn raw_window_days(&self) -> i64 {
-        i64::from(self.raw_days).min(Self::PHYSICAL_MAX_RETENTION_DAYS)
+        i64::from(self.raw_days).min(Self::RAW_MAX_DAYS)
     }
 }
 
