@@ -16,7 +16,7 @@ use uptimepage::domain::{
     CheckResult, CheckSpec, CheckStatus, ExpectedStatus, NewMaintenanceWindow, NewStatusPage,
     NewStatusPageComponent, NewTarget, OrgId, UserId, WriteSource,
 };
-use uptimepage::storage::traits::TimeRange;
+use uptimepage::storage::traits::{ClampedRange, TimeRange};
 use uptimepage::storage::{
     ClickhouseResultSink, ClickhouseResultsStore, MaintenanceStore, PgMaintenanceStore,
     PgStatusPageStore, PostgresTargetStore, ResultSink, ResultsStore, StatusPageStore,
@@ -344,7 +344,7 @@ async fn two_tenants_never_see_each_others_data() {
     let range = time_range_around_now();
     // Queried with org_a → sees a row for target_a.
     let a_results = results_store
-        .list_results(a.org, target_a.id, range, 10, 0)
+        .list_results(a.org, target_a.id, ClampedRange::unclamped(range), 10, 0)
         .await
         .unwrap();
     assert!(
@@ -367,7 +367,7 @@ async fn two_tenants_never_see_each_others_data() {
     // Same store, b's target id, but org_a → 0 rows (org_id filter wins over
     // target_id match: CH rows tagged with org_b are invisible under org_a).
     let cross = results_store
-        .list_results(a.org, target_b.id, range, 10, 0)
+        .list_results(a.org, target_b.id, ClampedRange::unclamped(range), 10, 0)
         .await
         .unwrap();
     assert!(

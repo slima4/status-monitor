@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use uuid::Uuid;
 
 use crate::api::types::{
@@ -110,6 +110,41 @@ pub struct TimeRange {
     pub to: DateTime<Utc>,
 }
 
+/// A [`TimeRange`] that passed a retention decision. The tenant read methods
+/// take this, not a bare `TimeRange`, so the compiler refuses any read that
+/// didn't pick a window — closing the per-surface bypass class.
+#[derive(Debug, Clone, Copy)]
+pub struct ClampedRange(TimeRange);
+
+impl ClampedRange {
+    /// Clamp `from` forward to `window_days` before `now`. `window_days` comes
+    /// from the plan, keeping storage free of the plan model.
+    pub fn for_window(range: TimeRange, window_days: i64, now: DateTime<Utc>) -> Self {
+        let floor = now - Duration::try_days(window_days.max(0)).unwrap_or_default();
+        Self(TimeRange {
+            from: range.from.max(floor),
+            to: range.to,
+        })
+    }
+
+    /// System read that must see the full window (incident detection, building
+    /// the public view) — explicit opt-out from the clamp.
+    pub fn unclamped(range: TimeRange) -> Self {
+        Self(range)
+    }
+
+    pub fn inner(&self) -> TimeRange {
+        self.0
+    }
+}
+
+impl std::ops::Deref for ClampedRange {
+    type Target = TimeRange;
+    fn deref(&self) -> &TimeRange {
+        &self.0
+    }
+}
+
 /// Per-call options for [`ResultsStore::list_incidents`]. Grouped into a
 /// struct so adding a filter (e.g. severity) doesn't widen every impl
 /// and caller signature.
@@ -120,7 +155,7 @@ pub struct TimeRange {
 /// drops incidents that already ended.
 #[derive(Debug, Clone, Copy)]
 pub struct IncidentListQuery {
-    pub range: TimeRange,
+    pub range: ClampedRange,
     pub monitor_interval: std::time::Duration,
     pub ongoing_only: bool,
     pub limit: usize,
@@ -130,7 +165,7 @@ pub struct IncidentListQuery {
 impl IncidentListQuery {
     /// First-page convenience for the typical "show me the most recent N
     /// incidents in this window" query (no ongoing filter, no offset).
-    pub fn page(range: TimeRange, monitor_interval: std::time::Duration, limit: usize) -> Self {
+    pub fn page(range: ClampedRange, monitor_interval: std::time::Duration, limit: usize) -> Self {
         Self {
             range,
             monitor_interval,
@@ -182,11 +217,12 @@ pub trait ResultsStore: Send + Sync {
         &self,
         org: OrgId,
         target_id: Uuid,
-        range: TimeRange,
+        range: ClampedRange,
         limit: usize,
         offset: usize,
     ) -> Result<Vec<CheckResult>>;
-    async fn uptime(&self, org: OrgId, target_id: Uuid, range: TimeRange) -> Result<UptimeStats>;
+    async fn uptime(&self, org: OrgId, target_id: Uuid, range: ClampedRange)
+    -> Result<UptimeStats>;
     /// Coalesce consecutive `down`/`error` results in the requested window
     /// into incidents. See [`IncidentListQuery`] for the per-call options.
     async fn list_incidents(
@@ -236,7 +272,7 @@ pub trait ResultsStore: Send + Sync {
         &self,
         org: OrgId,
         target_id: Uuid,
-        range: TimeRange,
+        range: ClampedRange,
         bucket_seconds: u32,
     ) -> Result<Vec<LatencyBucket>>;
     /// Fleet-wide uptime ribbon: one bucket per `bucket_seconds` slice
@@ -263,4 +299,45 @@ pub trait ResultsStore: Send + Sync {
         org: OrgId,
         range: TimeRange,
     ) -> Result<PriorPeriodSummary>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn at(y: i32, m: u32, d: u32) -> DateTime<Utc> {
+        use chrono::TimeZone;
+        Utc.with_ymd_and_hms(y, m, d, 0, 0, 0).unwrap()
+    }
+
+    #[test]
+    fn for_window_narrows_out_of_window_from() {
+        let now = at(2026, 5, 1);
+        let r = ClampedRange::for_window(
+            TimeRange {
+                from: now - Duration::try_days(60).unwrap(),
+                to: now,
+            },
+            30,
+            now,
+        );
+        assert_eq!(r.from, now - Duration::try_days(30).unwrap());
+        assert_eq!(r.to, now);
+    }
+
+    #[test]
+    fn for_window_leaves_in_window_from() {
+        let now = at(2026, 5, 1);
+        let from = now - Duration::try_days(7).unwrap();
+        let r = ClampedRange::for_window(TimeRange { from, to: now }, 30, now);
+        assert_eq!(r.from, from);
+    }
+
+    #[test]
+    fn unclamped_preserves_range() {
+        let now = at(2026, 5, 1);
+        let from = now - Duration::try_days(400).unwrap();
+        let r = ClampedRange::unclamped(TimeRange { from, to: now });
+        assert_eq!(r.from, from);
+    }
 }

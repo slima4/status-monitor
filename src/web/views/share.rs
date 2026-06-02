@@ -347,8 +347,11 @@ pub async fn latency(
     Query(q): Query<RangeQuery>,
 ) -> WebResult<Json<LatencySeries>> {
     let resolved = resolve_share(&state, &token).await?;
-    let range = q.resolve()?;
-    let bucket_seconds = latency_bucket_seconds(range);
+    let range = state
+        .quotas
+        .clamp_history(resolved.org, q.resolve()?)
+        .await?;
+    let bucket_seconds = latency_bucket_seconds(range.inner());
     let buckets = state
         .results_store
         .latency_buckets(resolved.org, resolved.target_id, range, bucket_seconds)
@@ -383,7 +386,7 @@ pub async fn results(
     Query(q): Query<RangeQuery>,
 ) -> WebResult<Json<serde_json::Value>> {
     let resolved = resolve_share(&state, &token).await?;
-    let range = q.resolve()?;
+    let range = state.quotas.clamp_raw(resolved.org, q.resolve()?).await?;
     let limit = q.limit();
     let rows = state
         .results_store

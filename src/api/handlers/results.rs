@@ -116,7 +116,7 @@ pub async fn list_results(
     Path(id): Path<Uuid>,
     Query(q): Query<RangeQuery>,
 ) -> Result<Json<PageOfCheckResult>> {
-    let range = q.resolve()?;
+    let range = state.quotas.clamp_raw(org, q.resolve()?).await?;
     let limit = q.limit();
     let offset = q.offset;
     // The org-scoped `get` rides alongside the (also org-scoped) results
@@ -187,8 +187,8 @@ pub async fn latency(
     Path(id): Path<Uuid>,
     Query(q): Query<RangeQuery>,
 ) -> Result<Json<LatencySeries>> {
-    let range = q.resolve()?;
-    let bucket_seconds = latency_bucket_seconds(range);
+    let range = state.quotas.clamp_history(org, q.resolve()?).await?;
+    let bucket_seconds = latency_bucket_seconds(range.inner());
     // Org-scoped `get` rides alongside the (also org-scoped) rollup read so a
     // foreign/unknown id still 404s without a serial round-trip.
     let (target, buckets) = tokio::try_join!(
@@ -231,7 +231,7 @@ pub async fn uptime(
     Path(id): Path<Uuid>,
     Query(q): Query<RangeQuery>,
 ) -> Result<Json<UptimeStats>> {
-    let range = q.resolve()?;
+    let range = state.quotas.clamp_raw(org, q.resolve()?).await?;
     let (target, stats) = tokio::try_join!(
         state.target_store.get(org, id),
         state.results_store.uptime(org, id, range),
@@ -289,7 +289,10 @@ pub async fn list_incidents(
     Path(id): Path<Uuid>,
     Query(q): Query<IncidentsQuery>,
 ) -> Result<Json<PageOfIncident>> {
-    let range = resolve_range(q.from, q.to)?;
+    let range = state
+        .quotas
+        .clamp_raw(org, resolve_range(q.from, q.to)?)
+        .await?;
     let limit = q
         .limit
         .unwrap_or(INCIDENTS_LIMIT_DEFAULT)

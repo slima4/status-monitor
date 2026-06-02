@@ -20,6 +20,7 @@ use crate::config::AppConfig;
 use crate::domain::quota::Plan;
 use crate::domain::{OrgId, UserId};
 use crate::error::{AppError, Result};
+use crate::storage::{ClampedRange, TimeRange};
 
 /// Cache-key tags for the usage cache. One vocabulary, equal to the
 /// `plans` column names so the transparency endpoint, the UI, and any
@@ -59,6 +60,7 @@ struct PlanRow {
     max_targets: i32,
     min_check_interval_secs: i32,
     retention_days: i32,
+    raw_days: i32,
     max_members: i32,
     max_pending_invitations: i32,
     max_api_tokens_per_user: i32,
@@ -92,6 +94,7 @@ impl From<PlanRow> for Plan {
             max_targets: r.max_targets,
             min_check_interval_secs: r.min_check_interval_secs,
             retention_days: r.retention_days,
+            raw_days: r.raw_days,
             max_members: r.max_members,
             max_pending_invitations: r.max_pending_invitations,
             max_api_tokens_per_user: r.max_api_tokens_per_user,
@@ -178,7 +181,8 @@ impl QuotaService {
                 // costs zero queries (the cache TTL bounds staleness).
                 let p: PlanRow = sqlx::query_as(
                     "SELECT p.id, p.name, p.description, p.max_targets, \
-                     p.min_check_interval_secs, p.retention_days, p.max_members, \
+                     p.min_check_interval_secs, p.retention_days, p.raw_days, \
+                     p.max_members, \
                      p.max_pending_invitations, p.max_api_tokens_per_user, \
                      p.max_public_components, p.max_status_pages, \
                      p.max_share_links_per_monitor, p.max_shared_monitors, \
@@ -218,6 +222,26 @@ impl QuotaService {
             })?;
 
         Ok(plan)
+    }
+
+    /// Clamp a read range to the org's raw forensics window (raw-table reads).
+    pub async fn clamp_raw(&self, org: OrgId, range: TimeRange) -> Result<ClampedRange> {
+        let plan = self.limit_for_org(org).await?;
+        Ok(ClampedRange::for_window(
+            range,
+            plan.raw_window_days(),
+            chrono::Utc::now(),
+        ))
+    }
+
+    /// Clamp a read range to the org's history window (rollup/chart reads).
+    pub async fn clamp_history(&self, org: OrgId, range: TimeRange) -> Result<ClampedRange> {
+        let plan = self.limit_for_org(org).await?;
+        Ok(ClampedRange::for_window(
+            range,
+            plan.history_window_days(),
+            chrono::Utc::now(),
+        ))
     }
 
     async fn count(&self, sql: &str, org: OrgId) -> Result<i64> {
@@ -642,6 +666,7 @@ fn unlimited_plan() -> Plan {
         max_targets: i32::MAX,
         min_check_interval_secs: 1,
         retention_days: i32::MAX,
+        raw_days: i32::MAX,
         max_members: i32::MAX,
         max_pending_invitations: i32::MAX,
         max_api_tokens_per_user: i32::MAX,

@@ -13,7 +13,7 @@ use crate::api::error::codes;
 use crate::app::AppState;
 use crate::domain::{CheckResult, Incident, OrgId, strip_served_stale};
 use crate::error::AppError;
-use crate::storage::{IncidentListQuery, TimeRange, UptimeStats};
+use crate::storage::{ClampedRange, IncidentListQuery, TimeRange, UptimeStats};
 use crate::web::error::{WebError, WebResult};
 use crate::web::filters;
 use crate::web::views::{
@@ -277,7 +277,13 @@ async fn latest_status_probe(
     let from = to - Duration::days(LAST_RESULT_WINDOW_DAYS);
     let row = state
         .results_store
-        .list_results(org, target_id, TimeRange { from, to }, 1, 0)
+        .list_results(
+            org,
+            target_id,
+            ClampedRange::unclamped(TimeRange { from, to }),
+            1,
+            0,
+        )
         .await?
         .into_iter()
         .next();
@@ -299,7 +305,9 @@ async fn load_live_data(
     from: DateTime<Utc>,
     to: DateTime<Utc>,
 ) -> WebResult<LiveData> {
-    let time_range = TimeRange { from, to };
+    // TODO(retention 2c): clamp to the org's plan window once HTML detail joins
+    // the per-plan clamp; unclamped preserves today's behavior meanwhile.
+    let time_range = ClampedRange::unclamped(TimeRange { from, to });
     let (uptime, mut results) = tokio::try_join!(
         state.results_store.uptime(org, target_id, time_range),
         state
@@ -316,7 +324,7 @@ async fn load_live_data(
     {
         state
             .results_store
-            .list_results(org, target_id, window, 1, 0)
+            .list_results(org, target_id, ClampedRange::unclamped(window), 1, 0)
             .await?
             .into_iter()
             .next()
@@ -607,7 +615,13 @@ pub(crate) async fn load_incidents_data(
                 .list_incidents(
                     org,
                     target_id,
-                    IncidentListQuery::page(time_range, interval, INCIDENTS_PAGE_LIMIT + 1),
+                    // TODO(retention 2c): clamp to the org's plan window when
+                    // HTML detail joins the per-plan clamp.
+                    IncidentListQuery::page(
+                        ClampedRange::unclamped(time_range),
+                        interval,
+                        INCIDENTS_PAGE_LIMIT + 1,
+                    ),
                 )
                 .await
                 .map_err(WebError::from)

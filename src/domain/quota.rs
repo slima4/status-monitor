@@ -22,6 +22,7 @@ pub struct Plan {
     pub max_targets: i32,
     pub min_check_interval_secs: i32,
     pub retention_days: i32,
+    pub raw_days: i32,
     pub max_members: i32,
     pub max_pending_invitations: i32,
     pub max_api_tokens_per_user: i32,
@@ -69,6 +70,17 @@ impl Plan {
             max_notification_channels: self.max_notification_channels,
             max_logo_size_bytes: self.max_logo_size_bytes,
         }
+    }
+
+    /// Capped here until the 1h rollup carries history past 90 days.
+    pub const PHYSICAL_MAX_RETENTION_DAYS: i64 = 90;
+
+    pub fn history_window_days(&self) -> i64 {
+        i64::from(self.retention_days).min(Self::PHYSICAL_MAX_RETENTION_DAYS)
+    }
+
+    pub fn raw_window_days(&self) -> i64 {
+        i64::from(self.raw_days).min(Self::PHYSICAL_MAX_RETENTION_DAYS)
     }
 }
 

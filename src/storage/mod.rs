@@ -52,6 +52,6 @@ pub use status_pages::{
     AddComponentOutcome, InMemoryStatusPageStore, PgStatusPageStore, StatusPageStore,
 };
 pub use traits::{
-    IncidentListQuery, ResultSink, ResultsStore, TargetFilter, TargetSort, TargetStore, TimeRange,
-    UptimeStats,
+    ClampedRange, IncidentListQuery, ResultSink, ResultsStore, TargetFilter, TargetSort,
+    TargetStore, TimeRange, UptimeStats,
 };

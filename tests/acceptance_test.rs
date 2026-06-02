@@ -12,7 +12,7 @@ use common::build_test_app_with_owner;
 use serde_json::{Value, json};
 use tower::ServiceExt;
 use uptimepage::domain::{CheckResult, CheckStatus};
-use uptimepage::storage::{InMemorySink, IncidentListQuery, ResultSink, TimeRange};
+use uptimepage::storage::{ClampedRange, InMemorySink, IncidentListQuery, ResultSink, TimeRange};
 use uuid::Uuid;
 
 fn app() -> axum::Router {
@@ -172,7 +172,7 @@ async fn coalescing_separates_runs_split_by_an_up_check() {
             common::test_org_id(),
             target_id,
             IncidentListQuery {
-                range,
+                range: ClampedRange::unclamped(range),
                 monitor_interval: std::time::Duration::from_secs(60),
                 ongoing_only: false,
                 limit: 100,

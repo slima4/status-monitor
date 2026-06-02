@@ -57,7 +57,10 @@ pub struct OrgQuotas {
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct UsagePolicy {
     pub min_check_interval_secs: i32,
+    /// History window (days) for charts/rollups.
     pub retention_days: i32,
+    /// Forensics window (days) for raw per-check detail; ≤ retention_days.
+    pub raw_days: i32,
     pub max_logo_size_bytes: i32,
     pub max_api_tokens_per_user: i32,
 }
@@ -150,6 +153,7 @@ pub async fn get_org_usage(
         policy: UsagePolicy {
             min_check_interval_secs: p.min_check_interval_secs,
             retention_days: p.retention_days,
+            raw_days: p.raw_days,
             max_logo_size_bytes: p.max_logo_size_bytes,
             max_api_tokens_per_user: p.max_api_tokens_per_user,
         },

@@ -18,7 +18,9 @@ use crate::domain::{
     CheckResult, CheckStatus, Incident, OrgId, coalesce_incidents, coalesce_incidents_bad_only,
 };
 use crate::error::Result;
-use crate::storage::traits::{IncidentListQuery, ResultSink, ResultsStore, TimeRange, UptimeStats};
+use crate::storage::traits::{
+    ClampedRange, IncidentListQuery, ResultSink, ResultsStore, TimeRange, UptimeStats,
+};
 
 const TABLE: &str = "check_results";
 
@@ -578,7 +580,7 @@ impl ResultsStore for ClickhouseResultsStore {
         &self,
         org: OrgId,
         target_id: Uuid,
-        range: TimeRange,
+        range: ClampedRange,
         limit: usize,
         offset: usize,
     ) -> Result<Vec<CheckResult>> {
@@ -614,7 +616,7 @@ impl ResultsStore for ClickhouseResultsStore {
     ) -> Result<Vec<Incident>> {
         let range_end = query.range.to;
         let rows = self
-            .fetch_bad_only_rows(org, target_id, query.range)
+            .fetch_bad_only_rows(org, target_id, query.range.inner())
             .await?;
         let mut incidents =
             coalesce_from_bad_only_rows(target_id, rows, range_end, query.monitor_interval);
@@ -735,7 +737,12 @@ impl ResultsStore for ClickhouseResultsStore {
         Ok((counts.total, counts.up, avg_ms, incidents))
     }
 
-    async fn uptime(&self, org: OrgId, target_id: Uuid, range: TimeRange) -> Result<UptimeStats> {
+    async fn uptime(
+        &self,
+        org: OrgId,
+        target_id: Uuid,
+        range: ClampedRange,
+    ) -> Result<UptimeStats> {
         #[derive(Row, Deserialize)]
         struct CountsRow {
             up: u64,
@@ -882,7 +889,7 @@ impl ResultsStore for ClickhouseResultsStore {
         &self,
         org: OrgId,
         target_id: Uuid,
-        range: TimeRange,
+        range: ClampedRange,
         bucket_seconds: u32,
     ) -> Result<Vec<LatencyBucket>> {
         #[derive(Row, Deserialize)]

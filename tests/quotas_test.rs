@@ -43,6 +43,7 @@ fn test_plan(per_min: i32) -> Plan {
         max_targets: 1,
         min_check_interval_secs: 1,
         retention_days: 1,
+        raw_days: 1,
         max_members: 1,
         max_pending_invitations: 1,
         max_api_tokens_per_user: 1,

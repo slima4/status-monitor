@@ -31,7 +31,7 @@ use crate::domain::{CheckResult, CheckStatus, OrgId, Target};
 use crate::error::Result;
 use crate::storage::ResultsStore;
 use crate::storage::admin::{PublicStatusTargetSource, PublicTargetCursor};
-use crate::storage::traits::TimeRange;
+use crate::storage::traits::{ClampedRange, TimeRange};
 
 /// Persistence handle for the `incidents` table — abstracted so the writer
 /// can be unit-tested without a live database. Every method takes `org` so a
@@ -208,9 +208,16 @@ impl IncidentWriter {
         open: Option<OpenIncident>,
         range: TimeRange,
     ) -> Result<()> {
+        // System read: incident detection sees the full retention window.
         let mut results = self
             .results_store
-            .list_results(org, target.id, range, self.cfg.max_results_per_tick, 0)
+            .list_results(
+                org,
+                target.id,
+                ClampedRange::unclamped(range),
+                self.cfg.max_results_per_tick,
+                0,
+            )
             .await?;
         // Storage returns DESC by timestamp; algorithm operates on ASC.
         results.sort_by_key(|r| r.timestamp);

@@ -14,7 +14,7 @@ mod common;
 use chrono::{Duration, Timelike, Utc};
 use uptimepage::domain::{CheckResult, CheckStatus, OrgId};
 use uptimepage::storage::{
-    ClickhouseResultSink, ClickhouseResultsStore, ResultSink, ResultsStore, TimeRange,
+    ClampedRange, ClickhouseResultSink, ClickhouseResultsStore, ResultSink, ResultsStore, TimeRange,
 };
 use uuid::Uuid;
 
@@ -86,7 +86,7 @@ async fn latency_buckets_merge_quantiles_and_phases_from_rollup() {
         to: base + Duration::minutes(5),
     };
     let buckets = store
-        .latency_buckets(OrgId(org), target, range, 60)
+        .latency_buckets(OrgId(org), target, ClampedRange::unclamped(range), 60)
         .await
         .expect("latency_buckets query");
 
@@ -132,7 +132,7 @@ async fn latency_buckets_clamp_all_null_phases_to_zero() {
         to: base + Duration::minutes(1),
     };
     let buckets = store
-        .latency_buckets(OrgId(org), target, range, 60)
+        .latency_buckets(OrgId(org), target, ClampedRange::unclamped(range), 60)
         .await
         .expect("latency_buckets query");
 

@@ -13,7 +13,8 @@ use crate::domain::{
 };
 use crate::error::Result;
 use crate::storage::traits::{
-    IncidentListQuery, ResultSink, ResultsStore, TargetFilter, TargetStore, TimeRange, UptimeStats,
+    ClampedRange, IncidentListQuery, ResultSink, ResultsStore, TargetFilter, TargetStore,
+    TimeRange, UptimeStats,
 };
 
 #[derive(Default)]
@@ -59,7 +60,7 @@ impl ResultsStore for InMemorySink {
         &self,
         _org: OrgId,
         target_id: Uuid,
-        range: TimeRange,
+        range: ClampedRange,
         limit: usize,
         offset: usize,
     ) -> Result<Vec<CheckResult>> {
@@ -79,7 +80,12 @@ impl ResultsStore for InMemorySink {
         Ok(paged)
     }
 
-    async fn uptime(&self, _org: OrgId, target_id: Uuid, range: TimeRange) -> Result<UptimeStats> {
+    async fn uptime(
+        &self,
+        _org: OrgId,
+        target_id: Uuid,
+        range: ClampedRange,
+    ) -> Result<UptimeStats> {
         let guard = self.results.lock();
         let filtered: Vec<CheckResult> = guard
             .iter()
@@ -97,7 +103,7 @@ impl ResultsStore for InMemorySink {
         target_id: Uuid,
         query: IncidentListQuery,
     ) -> Result<Vec<Incident>> {
-        let mut incidents = coalesce_for_target(&self.snapshot(), target_id, query.range);
+        let mut incidents = coalesce_for_target(&self.snapshot(), target_id, query.range.inner());
         if query.ongoing_only {
             incidents.retain(|i| i.ended_at.is_none());
         }
@@ -258,7 +264,7 @@ impl ResultsStore for InMemorySink {
         &self,
         _org: OrgId,
         target_id: Uuid,
-        range: TimeRange,
+        range: ClampedRange,
         bucket_seconds: u32,
     ) -> Result<Vec<LatencyBucket>> {
         #[derive(Default)]
@@ -833,7 +839,7 @@ mod tests {
             to: base + chrono::Duration::seconds(120),
         };
         let buckets = store
-            .latency_buckets(OrgId(Uuid::nil()), t, range, 60)
+            .latency_buckets(OrgId(Uuid::nil()), t, ClampedRange::unclamped(range), 60)
             .await
             .unwrap();
 
@@ -866,7 +872,7 @@ mod tests {
             to: base + chrono::Duration::seconds(60),
         };
         let buckets = store
-            .latency_buckets(OrgId(Uuid::nil()), t, range, 60)
+            .latency_buckets(OrgId(Uuid::nil()), t, ClampedRange::unclamped(range), 60)
             .await
             .unwrap();
         assert_eq!(buckets.len(), 1);

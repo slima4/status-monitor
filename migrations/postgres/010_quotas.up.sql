@@ -9,13 +9,12 @@ CREATE TABLE plans (
     -- Resource quotas
     max_targets                     INTEGER NOT NULL,
     min_check_interval_secs         INTEGER NOT NULL,
-    -- NOT the ClickHouse retention authority. Check-result retention is the
-    -- `check_results` table TTL (`INTERVAL 90 DAY` in the CH migration),
-    -- flat for every org — per-org/per-plan retention is unsupported (it
-    -- can't be per-org in one MergeTree without partition-per-org, which
-    -- detonates ingest). Kept equal to the TTL by hand; to change retention,
-    -- change the TTL fleet-wide, not this column.
+    -- Per-plan HISTORY window (days) for chart/rollup reads; raw_days below is
+    -- the shorter forensics window for raw-table reads. Enforced by the
+    -- query-window clamp in the read paths (retain-wide-show-narrow); the
+    -- physical CH TTL is the widest tier, never these per-plan values.
     retention_days                  INTEGER NOT NULL,
+    raw_days                        INTEGER NOT NULL DEFAULT 30,
     max_members                     INTEGER NOT NULL,
     max_pending_invitations         INTEGER NOT NULL,
     max_api_tokens_per_user         INTEGER NOT NULL,
@@ -75,7 +74,7 @@ INSERT INTO plans (
 -- the query-window clamp (RETENTION-TIERS), not this column.
 INSERT INTO plans (
     id, name, description,
-    max_targets, min_check_interval_secs, retention_days,
+    max_targets, min_check_interval_secs, retention_days, raw_days,
     max_members, max_pending_invitations, max_api_tokens_per_user,
     max_public_components, max_status_pages,
     max_share_links_per_monitor, max_shared_monitors,
@@ -87,7 +86,7 @@ INSERT INTO plans (
     incident_narration_enabled, is_listed
 ) VALUES (
     'pro', 'Pro', 'For teams and businesses running production services',
-    150, 30, 395,  -- max_targets, min_check_interval_secs, retention_days (13mo)
+    150, 30, 395, 90,  -- max_targets, min_check_interval_secs, retention_days (13mo), raw_days
     15, 25, 10,    -- max_members, max_pending_invitations, max_api_tokens_per_user
     75, 5,   -- max_public_components, max_status_pages
     5, 10,   -- max_share_links_per_monitor, max_shared_monitors
