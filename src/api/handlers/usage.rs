@@ -75,6 +75,7 @@ pub struct UsageRateLimits {
 pub struct UsageFeatures {
     pub custom_domain_enabled: bool,
     pub white_label_enabled: bool,
+    pub sms_alerts_enabled: bool,
     pub incident_narration_enabled: bool,
 }
 
@@ -162,6 +163,7 @@ pub async fn get_org_usage(
         features: UsageFeatures {
             custom_domain_enabled: p.custom_domain_enabled,
             white_label_enabled: p.white_label_enabled,
+            sms_alerts_enabled: p.sms_alerts_enabled,
             incident_narration_enabled: p.incident_narration_enabled,
         },
     }))

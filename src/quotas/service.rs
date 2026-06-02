@@ -76,6 +76,7 @@ struct PlanRow {
     check_now_per_minute: i32,
     custom_domain_enabled: bool,
     white_label_enabled: bool,
+    sms_alerts_enabled: bool,
     incident_narration_enabled: bool,
     is_listed: bool,
     created_at: chrono::DateTime<chrono::Utc>,
@@ -108,6 +109,7 @@ impl From<PlanRow> for Plan {
             check_now_per_minute: r.check_now_per_minute,
             custom_domain_enabled: r.custom_domain_enabled,
             white_label_enabled: r.white_label_enabled,
+            sms_alerts_enabled: r.sms_alerts_enabled,
             incident_narration_enabled: r.incident_narration_enabled,
             is_listed: r.is_listed,
             created_at: r.created_at,
@@ -186,8 +188,8 @@ impl QuotaService {
                      p.api_reads_per_minute, p.bulk_ops_per_minute, \
                      p.test_now_per_minute, p.check_now_per_minute, \
                      p.custom_domain_enabled, p.white_label_enabled, \
-                     p.incident_narration_enabled, p.is_listed, p.created_at, \
-                     p.updated_at \
+                     p.sms_alerts_enabled, p.incident_narration_enabled, \
+                     p.is_listed, p.created_at, p.updated_at \
                      FROM organizations o JOIN plans p ON p.id = o.plan_id \
                      WHERE o.id = $1",
                 )
@@ -203,6 +205,8 @@ impl QuotaService {
                 if let Some(ov) = plan_override(&db2, org).await? {
                     plan = apply_overrides(&plan, &ov);
                 }
+                // Billed add-ons stack on the resolved plan/override base.
+                plan = apply_addons(&plan, &org_addons(&db2, org).await?);
                 Ok::<Arc<Plan>, sqlx::Error>(Arc::new(plan))
             })
             .await
@@ -576,6 +580,57 @@ async fn plan_override(db: &PgPool, org: OrgId) -> Result<Option<PlanOverrides>,
     }
 }
 
+/// Additive, billed capacity on top of the base plan (Stripe quantity items).
+/// Unlike `PlanOverrides` (which replaces a cap), add-ons stack on the resolved
+/// plan/override. Count caps only. Summed per type from `org_addons`.
+#[derive(Debug, Default)]
+struct Addons {
+    extra_targets: i64,
+    extra_status_pages: i64,
+    extra_members: i64,
+    extra_shared_monitors: i64,
+    extra_notification_channels: i64,
+}
+
+fn apply_addons(base: &Plan, a: &Addons) -> Plan {
+    let mut p = base.clone();
+    // Saturate at i32::MAX; clamp negatives to 0 — a bad row must never shrink a cap.
+    let add = |cur: i32, extra: i64| {
+        i32::try_from(i64::from(cur).saturating_add(extra.max(0))).unwrap_or(i32::MAX)
+    };
+    p.max_targets = add(p.max_targets, a.extra_targets);
+    p.max_status_pages = add(p.max_status_pages, a.extra_status_pages);
+    p.max_members = add(p.max_members, a.extra_members);
+    p.max_shared_monitors = add(p.max_shared_monitors, a.extra_shared_monitors);
+    p.max_notification_channels = add(p.max_notification_channels, a.extra_notification_channels);
+    p
+}
+
+/// Add-on quantities for an org, summed by type. Like `plan_override`: a query
+/// error propagates (never memoize a degraded plan on a transient blip); empty
+/// is `Ok(default)`. Unknown type (CHECK makes it impossible) is logged + ignored.
+async fn org_addons(db: &PgPool, org: OrgId) -> Result<Addons, sqlx::Error> {
+    // PK (org_id, addon_type) → at most one row per type, no aggregation needed.
+    let rows: Vec<(String, i32)> =
+        sqlx::query_as("SELECT addon_type, quantity FROM org_addons WHERE org_id = $1")
+            .bind(org.0)
+            .fetch_all(db)
+            .await?;
+    let mut a = Addons::default();
+    for (kind, qty) in rows {
+        let qty = i64::from(qty);
+        match kind.as_str() {
+            "extra_targets" => a.extra_targets = qty,
+            "extra_status_pages" => a.extra_status_pages = qty,
+            "extra_members" => a.extra_members = qty,
+            "extra_shared_monitors" => a.extra_shared_monitors = qty,
+            "extra_notification_channels" => a.extra_notification_channels = qty,
+            other => tracing::warn!(addon_type = other, "unknown org_addons type; ignoring"),
+        }
+    }
+    Ok(a)
+}
+
 /// Unlimited plan used when there is no `plans` table to consult (DB-less
 /// in-memory test/dev fixtures). Every cap is `i32::MAX`.
 fn unlimited_plan() -> Plan {
@@ -604,6 +659,7 @@ fn unlimited_plan() -> Plan {
         check_now_per_minute: i32::MAX,
         custom_domain_enabled: false,
         white_label_enabled: false,
+        sms_alerts_enabled: false,
         incident_narration_enabled: true,
         is_listed: false,
         created_at: now,

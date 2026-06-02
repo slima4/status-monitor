@@ -200,15 +200,16 @@ async fn org_usage_reports_accurate_counts_and_limits() {
 
     assert_eq!(b["plan"]["id"], "free");
     assert_eq!(b["quotas"]["max_targets"]["current"], 2);
-    assert_eq!(b["quotas"]["max_targets"]["limit"], 10);
+    assert_eq!(b["quotas"]["max_targets"]["limit"], 20);
     // The seeded owner is the only member.
     assert_eq!(b["quotas"]["max_members"]["current"], 1);
-    assert_eq!(b["quotas"]["max_members"]["limit"], 5);
+    assert_eq!(b["quotas"]["max_members"]["limit"], 3);
     assert_eq!(b["quotas"]["max_pending_invitations"]["current"], 0);
     assert_eq!(b["policy"]["min_check_interval_secs"], 60);
     assert_eq!(b["policy"]["retention_days"], 90);
     assert_eq!(b["rate_limits"]["api_writes_per_minute"], 600);
     assert_eq!(b["features"]["incident_narration_enabled"], true);
+    assert_eq!(b["features"]["sms_alerts_enabled"], false);
 }
 
 #[tokio::test]

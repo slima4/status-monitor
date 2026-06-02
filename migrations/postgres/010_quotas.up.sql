@@ -35,6 +35,7 @@ CREATE TABLE plans (
     -- Feature toggles (wired in a later phase)
     custom_domain_enabled           BOOLEAN NOT NULL DEFAULT false,
     white_label_enabled             BOOLEAN NOT NULL DEFAULT false,
+    sms_alerts_enabled              BOOLEAN NOT NULL DEFAULT false,
     incident_narration_enabled      BOOLEAN NOT NULL DEFAULT true,
     -- Metadata
     is_listed                       BOOLEAN NOT NULL DEFAULT true,
@@ -58,15 +59,44 @@ INSERT INTO plans (
     incident_narration_enabled
 ) VALUES (
     'free', 'Free', 'Free tier for small teams and personal projects',
-    10, 60, 90,  -- retention_days = 90: matches the flat CH TTL (the authority)
-    5, 10, 5,
-    10, 1,  -- max_public_components, max_status_pages
+    20, 60, 90,  -- max_targets, min_check_interval_secs, retention_days
+    3, 10, 5,    -- max_members, max_pending_invitations, max_api_tokens_per_user
+    15, 1,  -- max_public_components, max_status_pages
     1, 2,   -- max_share_links_per_monitor, max_shared_monitors
     20, 20,  -- max_maintenance_windows, max_notification_channels
     1048576,  -- max_logo_size_bytes = 1 MiB, matches the enforced upload ceiling
     600, 6000,
     30, 60, 60,
     true
+);
+
+-- Paid tier, hidden (is_listed = false) until billing can flip an org to it.
+-- retention_days is the advertised 13-month history; the per-plan authority is
+-- the query-window clamp (RETENTION-TIERS), not this column.
+INSERT INTO plans (
+    id, name, description,
+    max_targets, min_check_interval_secs, retention_days,
+    max_members, max_pending_invitations, max_api_tokens_per_user,
+    max_public_components, max_status_pages,
+    max_share_links_per_monitor, max_shared_monitors,
+    max_maintenance_windows, max_notification_channels,
+    max_logo_size_bytes,
+    api_writes_per_minute, api_reads_per_minute,
+    bulk_ops_per_minute, test_now_per_minute, check_now_per_minute,
+    custom_domain_enabled, white_label_enabled, sms_alerts_enabled,
+    incident_narration_enabled, is_listed
+) VALUES (
+    'pro', 'Pro', 'For teams and businesses running production services',
+    150, 30, 395,  -- max_targets, min_check_interval_secs, retention_days (13mo)
+    15, 25, 10,    -- max_members, max_pending_invitations, max_api_tokens_per_user
+    75, 5,   -- max_public_components, max_status_pages
+    5, 10,   -- max_share_links_per_monitor, max_shared_monitors
+    50, 50,  -- max_maintenance_windows, max_notification_channels
+    1048576,  -- max_logo_size_bytes = 1 MiB
+    1200, 12000,
+    60, 120, 120,
+    true, true, true,  -- custom_domain, white_label, sms_alerts
+    true, false        -- incident_narration, is_listed
 );
 
 -- Every org references a plan. The FK + boot-check
@@ -108,6 +138,22 @@ CREATE TABLE plan_overrides (
     set_by_user_id  UUID REFERENCES users(id) ON DELETE SET NULL,
     expires_at      TIMESTAMPTZ,                       -- nullable = permanent
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Additive, billed capacity on top of the base plan (Stripe quantity items:
+-- "+20 monitors"). Unlike plan_overrides (which replaces a cap), add-ons stack:
+-- effective = (override ?? plan) + add-ons. Count caps only. Billing owns writes;
+-- purchase-gating is billing's job, not the read path.
+CREATE TABLE org_addons (
+    org_id      UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    addon_type  TEXT NOT NULL CHECK (addon_type IN (
+        'extra_targets', 'extra_status_pages', 'extra_members',
+        'extra_shared_monitors', 'extra_notification_channels'
+    )),
+    quantity    INTEGER NOT NULL CHECK (quantity > 0),
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (org_id, addon_type)
 );
 
 -- Best-effort observability stream of quota / rate-limit / abuse events.

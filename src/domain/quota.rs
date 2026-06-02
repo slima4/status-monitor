@@ -43,6 +43,7 @@ pub struct Plan {
     // Feature toggles
     pub custom_domain_enabled: bool,
     pub white_label_enabled: bool,
+    pub sms_alerts_enabled: bool,
     pub incident_narration_enabled: bool,
 
     // Metadata

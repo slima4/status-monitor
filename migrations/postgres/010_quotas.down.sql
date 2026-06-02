@@ -2,6 +2,7 @@
 -- organizations + users (not plans); organizations.plan_id references plans,
 -- so the FK column goes before the plans table.
 DROP TABLE IF EXISTS quota_events;
+DROP TABLE IF EXISTS org_addons;
 DROP TABLE IF EXISTS plan_overrides;
 
 DROP INDEX IF EXISTS idx_organizations_plan;

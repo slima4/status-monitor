@@ -60,6 +60,7 @@ fn test_plan(per_min: i32) -> Plan {
         check_now_per_minute: per_min,
         custom_domain_enabled: false,
         white_label_enabled: false,
+        sms_alerts_enabled: false,
         incident_narration_enabled: true,
         is_listed: false,
         created_at: now,
@@ -151,6 +152,17 @@ async fn seed_override(pool: &PgPool, org: OrgId, json: &str, expired: bool) {
     .expect("seed override");
 }
 
+/// Insert a billed add-on row (`org_addons`) for `org`.
+async fn seed_addon(pool: &PgPool, org: OrgId, addon_type: &str, quantity: i32) {
+    sqlx::query("INSERT INTO org_addons (org_id, addon_type, quantity) VALUES ($1, $2, $3)")
+        .bind(org.0)
+        .bind(addon_type)
+        .bind(quantity)
+        .execute(pool)
+        .await
+        .expect("seed addon");
+}
+
 fn target_payload(name: &str, interval: u64) -> Value {
     json!({
         "name": name,
@@ -189,16 +201,16 @@ async fn quota_event_count(pool: &PgPool) -> i64 {
         .unwrap_or(0)
 }
 
-// ── Report item: 11th target → 422 with the exact shape ──────────────────
+// ── Report item: target past the free cap → 422 with the exact shape ─────
 #[tokio::test]
-async fn eleventh_target_returns_422_quota_exceeded() {
+async fn target_past_free_cap_returns_422_quota_exceeded() {
     let Some(pool) = pg_pool_from_env().await else {
         return;
     };
     let before = quota_event_count(&pool).await;
     let (app, _org) = build_test_app_with_pg_store(pool.clone(), |_| {}).await;
 
-    for i in 0..10 {
+    for i in 0..20 {
         let resp = post_target(&app, &format!("ok-{}-{i}", Uuid::now_v7()), 60).await;
         assert_eq!(
             resp.status(),
@@ -211,8 +223,8 @@ async fn eleventh_target_returns_422_quota_exceeded() {
     let b = body_json(resp).await;
     assert_eq!(b["error"]["code"], "QUOTA_EXCEEDED");
     assert_eq!(b["error"]["details"]["quota"], "max_targets");
-    assert_eq!(b["error"]["details"]["current"], 10);
-    assert_eq!(b["error"]["details"]["limit"], 10);
+    assert_eq!(b["error"]["details"]["current"], 20);
+    assert_eq!(b["error"]["details"]["limit"], 20);
     assert_eq!(b["error"]["details"]["plan"], "free");
 
     // Report item: quota_events records the block (fire-and-forget).
@@ -732,6 +744,47 @@ async fn plan_override_replaces_named_caps() {
     assert_eq!(
         plan.max_members, 5,
         "an un-named cap keeps the plan default"
+    );
+}
+
+// ── billed add-ons stack additively on the base cap ─────────────────
+#[tokio::test]
+async fn addon_adds_to_base_cap() {
+    let Some(pool) = pg_pool_from_env().await else {
+        return;
+    };
+    // base: max_targets = 10, max_members = 4
+    let (_pid, org) = seed_org_on_plan(&pool, 10, 4, 5, 5).await;
+    seed_addon(&pool, org, "extra_targets", 20).await;
+    seed_addon(&pool, org, "extra_members", 3).await;
+
+    let cfg = AppConfig::load().expect("config");
+    let svc = QuotaService::new(&cfg, Some(pool.clone()));
+    let plan = svc.limit_for_org(org).await.unwrap();
+    assert_eq!(plan.max_targets, 30, "add-on stacks on the base cap");
+    assert_eq!(plan.max_members, 7);
+    assert_eq!(
+        plan.max_status_pages, 1,
+        "a cap with no add-on keeps the plan default"
+    );
+}
+
+// ── add-ons stack on top of an override (override sets base, add-on adds) ──
+#[tokio::test]
+async fn addon_stacks_on_override() {
+    let Some(pool) = pg_pool_from_env().await else {
+        return;
+    };
+    let (_pid, org) = seed_org_on_plan(&pool, 10, 4, 5, 5).await;
+    seed_override(&pool, org, r#"{"max_targets": 50}"#, false).await;
+    seed_addon(&pool, org, "extra_targets", 20).await;
+
+    let cfg = AppConfig::load().expect("config");
+    let svc = QuotaService::new(&cfg, Some(pool.clone()));
+    assert_eq!(
+        svc.limit_for_org(org).await.unwrap().max_targets,
+        70,
+        "effective = (override 50) + (add-on 20)"
     );
 }
 
