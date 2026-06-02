@@ -36,9 +36,6 @@ const TAB_ONBOARD: &str = "onboarding";
 const TAB_SETTINGS: &str = "settings";
 const TAB_USAGE: &str = "usage";
 const TAB_ACCOUNT: &str = "account";
-/// Suppresses the authenticated header nav (see base.html): a user reaching
-/// the recovery page is signed out by construction.
-const TAB_RECOVER: &str = "recover";
 
 #[derive(Debug, Default, Deserialize)]
 pub struct LoginQuery {
@@ -190,31 +187,6 @@ fn display_name_for(email: &str) -> String {
         "There".to_string()
     } else {
         capitalized
-    }
-}
-
-#[derive(Debug, Default, Deserialize)]
-pub struct RecoverQuery {
-    pub token: Option<String>,
-}
-
-#[derive(Template, WebTemplate)]
-#[template(path = "auth/recover_account.html")]
-pub struct RecoverAccountPage {
-    pub active_tab: &'static str,
-    /// Raw token from the email link; validity is decided by the API call the
-    /// page makes, not here. Empty ⇒ render the invalid-link state.
-    pub token: String,
-}
-
-/// `GET /recover-account?token=…`. Public (the user is signed out): renders a
-/// confirm card that POSTs the token to `/api/v1/auth/recover-account`. A
-/// blank token short-circuits to the invalid-link copy without an API round
-/// trip.
-pub async fn recover_account(Query(q): Query<RecoverQuery>) -> RecoverAccountPage {
-    RecoverAccountPage {
-        active_tab: TAB_RECOVER,
-        token: q.token.unwrap_or_default().trim().to_string(),
     }
 }
 
@@ -882,34 +854,6 @@ mod tests {
         assert!(html.contains(r#"value="quiet-koala-7m0tt1""#));
         assert!(html.contains(r#"hx-patch="/api/v1/orgs/00000000-0000-0000-0000-000000000001""#));
         assert!(html.contains(r#""X-Requested-With":"uptimepage""#));
-    }
-
-    #[test]
-    fn recover_page_renders_confirm_when_token_present() {
-        let html = RecoverAccountPage {
-            active_tab: TAB_RECOVER,
-            token: "tok-abc".into(),
-        }
-        .render()
-        .unwrap();
-        assert!(html.contains("recover your account"));
-        assert!(html.contains(r#"hx-post="/api/v1/auth/recover-account""#));
-        assert!(html.contains(r#"hx-ext="json-enc""#));
-        assert!(html.contains(r#"value="tok-abc""#));
-        // Signed-out page: the authenticated header nav must be suppressed.
-        assert!(!html.contains("Log out"));
-    }
-
-    #[test]
-    fn recover_page_blank_token_shows_invalid_state() {
-        let html = RecoverAccountPage {
-            active_tab: TAB_RECOVER,
-            token: String::new(),
-        }
-        .render()
-        .unwrap();
-        assert!(html.contains("recovery link invalid"));
-        assert!(!html.contains("hx-post"));
     }
 
     #[test]

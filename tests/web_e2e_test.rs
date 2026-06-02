@@ -279,40 +279,6 @@ async fn static_assets_cache_control_is_honest() {
 }
 
 #[tokio::test]
-async fn recover_account_page_renders_confirm_card() {
-    let resp = app()
-        .oneshot(
-            Request::get("/recover-account?token=tok-abc")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
-    assert!(html_ct(&resp).starts_with("text/html"));
-    let body = body_text(resp).await;
-    assert!(body.contains("recover your account"));
-    assert!(body.contains(r#"hx-post="/api/v1/auth/recover-account""#));
-    assert!(body.contains(r#"value="tok-abc""#));
-}
-
-#[tokio::test]
-async fn recover_account_page_blank_token_shows_invalid() {
-    let resp = app()
-        .oneshot(
-            Request::get("/recover-account")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
-    let body = body_text(resp).await;
-    assert!(body.contains("recovery link invalid"));
-    assert!(!body.contains("hx-post"));
-}
-
-#[tokio::test]
 async fn settings_account_redirects_to_login_when_unauthenticated() {
     let resp = build_test_app_with_web(|_| {})
         .oneshot(

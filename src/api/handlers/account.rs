@@ -1,8 +1,8 @@
-//! GDPR account endpoints: data export, deletion, recovery.
+//! GDPR account endpoints: data export and deletion.
 //!
 //! - `GET  /api/v1/me/data-export`      — everything we hold about the caller.
-//! - `DELETE /api/v1/me`                — soft-delete + 30-day grace.
-//! - `POST /api/v1/auth/recover-account` — undo within the grace window.
+//! - `DELETE /api/v1/me`                — soft-delete + 30-day grace. The
+//!   account is restored by signing in again within the window (re-auth).
 //!
 //! Cross-user / cross-org redaction is deliberate here: the export is the one
 //! place that legitimately reads other members' rows, so it never reuses the
@@ -12,20 +12,16 @@
 
 use axum::Json;
 use axum::extract::State;
-use axum::http::header::USER_AGENT;
 use axum::http::{HeaderMap, StatusCode, header};
-use axum::response::{IntoResponse, Response};
+use axum::response::{IntoResponse, Redirect, Response};
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
-use tower_cookies::Cookies;
+use serde::Serialize;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::api::error::ApiError;
 use crate::app::AppState;
-use crate::auth::login_audit::{self, LoginAttempt, LoginMethod};
-use crate::auth::url::token_link;
-use crate::auth::{account, fingerprint, session as session_store};
+use crate::auth::account;
 use crate::domain::{UserId, strip_served_stale};
 use crate::email::{EmailAddress, EmailTemplate, TransactionalEmail};
 use crate::error::{AppError, Result};
@@ -222,8 +218,21 @@ pub struct AuditEntryExport {
 )]
 pub async fn data_export(
     State(state): State<AppState>,
-    CurrentUser(user_id): CurrentUser,
+    headers: HeaderMap,
+    user: std::result::Result<CurrentUser, AppError>,
 ) -> Result<Response> {
+    // Export is a real browser-navigated download link, so an expired session
+    // must land on login (with a return path), not dump the JSON error in the
+    // tab. Programmatic callers (API token / XHR) still get the 401.
+    let CurrentUser(user_id) = match user {
+        Ok(u) => u,
+        Err(err) => {
+            if crate::api::middleware::is_browser_navigation(&headers) {
+                return Ok(Redirect::to("/login?redirect_after=/settings/account").into_response());
+            }
+            return Err(err);
+        }
+    };
     let pool = state.require_db()?;
     let export = build_export(pool, user_id).await?;
     let filename = format!(
@@ -456,8 +465,7 @@ fn db_err(what: &'static str) -> impl Fn(sqlx::Error) -> AppError {
 #[derive(Debug, Serialize, ToSchema)]
 pub struct DeletionConfirmation {
     pub scheduled_purge_at: DateTime<Utc>,
-    /// Masked, e.g. `j*****@gmail.com`.
-    pub recovery_token_sent_to_email: String,
+    /// The account can be restored by signing in again until this instant.
     pub can_recover_until: DateTime<Utc>,
 }
 
@@ -471,8 +479,8 @@ pub struct DeletionConfirmation {
                    deletes API tokens, declines pending invitations, and \
                    tombstones organisations the user solely owns. Rejects with \
                    422 OWNS_SHARED_ORGS if the user solely owns organisations \
-                   that still have other members. A recovery link is emailed \
-                   at deletion time.",
+                   that still have other members. The account can be restored \
+                   within the grace window by signing in again.",
     responses(
         (status = 200, body = DeletionConfirmation),
         (status = 409, body = ApiError, description = "Account already scheduled for deletion"),
@@ -488,14 +496,8 @@ pub async fn delete_account(
 
     let outcome = account::request_deletion(pool, user_id, grace_days).await?;
 
-    // Email post-commit: a mail failure must not roll back the deletion the
-    // user asked for. The recovery row is already persisted (hashed); the raw
-    // token lives only in this stack frame to build the link.
-    let recovery_url = token_link(
-        &state.cfg.auth.public_base_url,
-        "/recover-account",
-        &outcome.recovery_token,
-    );
+    // Notify post-commit: a mail failure must not roll back the deletion the
+    // user asked for. No link — restoring is done by signing in again.
     let outgoing = TransactionalEmail {
         from: EmailAddress::new(
             state.cfg.email.from_address.clone(),
@@ -503,7 +505,6 @@ pub async fn delete_account(
         ),
         to: EmailAddress::new(outcome.email.clone(), outcome.email.clone()),
         template: EmailTemplate::AccountDeletion {
-            recovery_url,
             scheduled_purge_at: outcome.grace_deadline,
         },
     };
@@ -513,143 +514,6 @@ pub async fn delete_account(
 
     Ok(Json(DeletionConfirmation {
         scheduled_purge_at: outcome.grace_deadline,
-        recovery_token_sent_to_email: mask_email(&outcome.email),
         can_recover_until: outcome.grace_deadline,
     }))
-}
-
-// ---------------------------------------------------------------------------
-// Account recovery
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Deserialize, ToSchema)]
-pub struct RecoverRequest {
-    pub token: String,
-}
-
-#[derive(Debug, Serialize, ToSchema)]
-pub struct RecoveredAccount {
-    #[schema(value_type = String, format = "uuid")]
-    pub user_id: Uuid,
-    pub email: String,
-}
-
-#[utoipa::path(
-    post,
-    path = "/api/v1/auth/recover-account",
-    tag = "account",
-    summary = "Undo an account deletion within the grace window",
-    request_body = RecoverRequest,
-    responses(
-        (status = 200, body = RecoveredAccount, description = "Account restored; fresh session issued"),
-        (status = 404, body = ApiError, description = "Recovery link invalid or expired"),
-        (status = 410, body = ApiError, description = "Account already permanently purged"),
-    ),
-)]
-pub async fn recover_account(
-    State(state): State<AppState>,
-    crate::web::client_ip::ClientIp(client_ip): crate::web::client_ip::ClientIp,
-    headers: HeaderMap,
-    cookies: Cookies,
-    Json(body): Json<RecoverRequest>,
-) -> Result<Response> {
-    let pool = state.require_db()?;
-    let outcome = account::recover(pool, body.token.trim()).await?;
-
-    // Account is un-deleted and committed; `load_user` will now resolve it,
-    // so a session minted here is valid (the load-bearing un-delete-before-
-    // session order).
-    let salt = state.cfg.auth.fingerprint_salt.as_str();
-    let ip_hash = fingerprint::hash_fingerprint(salt, &client_ip.to_string());
-    let ua_hash = fingerprint::hash_fingerprint(
-        salt,
-        headers
-            .get(USER_AGENT)
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or_default(),
-    );
-
-    // Session fixation: drop any pre-existing cookie-bound session first.
-    let cookie_name = state.cfg.auth.session.cookie_name.as_str();
-    if let Some(prev) = cookies.get(cookie_name).map(|c| c.value().to_string())
-        && !prev.is_empty()
-        && let Err(err) = session_store::destroy(pool, &prev).await
-    {
-        tracing::warn!(error = %err, "recover: pre-existing session destroy failed");
-    }
-
-    let created = session_store::create(
-        pool,
-        &state.cfg.auth.session,
-        outcome.user_id,
-        None,
-        ip_hash.as_deref(),
-        ua_hash.as_deref(),
-    )
-    .await?;
-
-    if let Err(err) = login_audit::record(
-        pool,
-        LoginMethod::MagicLink,
-        LoginAttempt {
-            user_id: Some(outcome.user_id),
-            success: true,
-            ip_hash: ip_hash.as_deref(),
-            user_agent_hash: ua_hash.as_deref(),
-            failure_reason: None,
-        },
-    )
-    .await
-    {
-        tracing::warn!(error = %err, "recover: login_audit write failed (non-fatal)");
-    }
-
-    cookies.add(session_store::build_cookie(
-        &state.cfg.auth.session,
-        created.cookie_token,
-    ));
-    if let Err(err) =
-        crate::web::display_prefs::issue_cookies(&state, &cookies, outcome.user_id).await
-    {
-        tracing::warn!(error = %err, "display-preference cookie issue failed (non-fatal)");
-    }
-
-    Ok(Json(RecoveredAccount {
-        user_id: outcome.user_id.0,
-        email: outcome.email,
-    })
-    .into_response())
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/// `jane@gmail.com` → `j*****@gmail.com`. Keeps the first local-part char and
-/// the full domain so the user can recognise which inbox to check without the
-/// response disclosing the whole address.
-fn mask_email(email: &str) -> String {
-    match email.split_once('@') {
-        Some((local, domain)) => {
-            let first = local.chars().next().unwrap_or('*');
-            format!("{first}*****@{domain}")
-        }
-        None => "*****".to_string(),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::mask_email;
-
-    #[test]
-    fn masks_local_part_keeps_domain() {
-        assert_eq!(mask_email("jane@gmail.com"), "j*****@gmail.com");
-        assert_eq!(mask_email("a@x.io"), "a*****@x.io");
-    }
-
-    #[test]
-    fn malformed_email_fully_masked() {
-        assert_eq!(mask_email("not-an-email"), "*****");
-    }
 }

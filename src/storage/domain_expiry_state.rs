@@ -1,5 +1,5 @@
 //! Sticky last-good cache for `domain_expiry` checks. See
-//! `migrations/postgres/014_domain_expiry_state.up.sql` for the row shape and
+//! `migrations/postgres/013_domain_expiry_state.up.sql` for the row shape and
 //! the reasoning behind the design.
 //!
 //! Every method takes `OrgId` and filters on it. The store row carries

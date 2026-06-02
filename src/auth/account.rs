@@ -15,11 +15,10 @@
 
 use anyhow::Context;
 use chrono::{DateTime, Utc};
-use sqlx::PgPool;
+use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
 use crate::api::error::codes;
-use crate::auth::recovery;
 use crate::domain::{OrgId, UserId};
 use crate::error::{AppError, Result};
 use crate::storage::locks::{advisory_xact_lock, org_lock_key, user_delete_lock_key};
@@ -32,17 +31,12 @@ pub struct BlockingOrg {
     pub slug: String,
 }
 
-/// Result of a successful deletion request — everything the handler needs to
-/// build the confirmation email and response. The raw recovery token is held
-/// only long enough to build the email link; it is never logged or persisted.
+/// Result of a successful deletion request.
 #[derive(Debug, Clone)]
 pub struct DeletionOutcome {
     pub email: String,
-    pub recovery_token: String,
-    /// The single grace boundary: recovery is possible until this instant,
-    /// and the hard purge runs after it. One value by construction (anchored
-    /// to the one `deleted_at` stamp) — the handler projects it into the two
-    /// API fields the response contract names.
+    /// The grace boundary: the account can be restored (by re-authenticating)
+    /// until this instant, after which the hard purge runs.
     pub grace_deadline: DateTime<Utc>,
 }
 
@@ -228,79 +222,40 @@ pub async fn request_deletion(
         .await
         .context("delete_account: drop shared memberships")?;
 
-    // Recovery deadline == purge grace boundary, anchored to the single
-    // `deleted_at` stamp so the recovery endpoint and the purge job agree by
-    // construction rather than by re-deriving "30 days" independently.
-    let can_recover_until = deleted_at + chrono::Duration::days(i64::from(grace_days));
-    let created = recovery::create_in_tx(&mut tx, user_id, can_recover_until)
-        .await
-        .map_err(|e| {
-            if is_unique_violation(&e) {
-                AppError::conflict(
-                    codes::ACCOUNT_ALREADY_DELETED,
-                    "This account is already scheduled for deletion.",
-                )
-            } else {
-                AppError::Other(anyhow::anyhow!("delete_account: recovery row: {e}"))
-            }
-        })?;
+    // Grace boundary, anchored to the single `deleted_at` stamp so this and the
+    // purge job agree by construction rather than re-deriving "30 days". The
+    // soft-deleted user restores by re-authenticating (see `undelete_in_tx`)
+    // within this window; the purge job hard-deletes after it.
+    let grace_deadline = deleted_at + chrono::Duration::days(i64::from(grace_days));
 
     tx.commit().await.context("delete_account: commit")?;
 
     Ok(DeletionOutcome {
         email,
-        recovery_token: created.token,
-        grace_deadline: can_recover_until,
+        grace_deadline,
     })
 }
 
-/// Outcome of a successful recovery: the un-deleted user and the orgs whose
-/// tombstone was lifted.
-#[derive(Debug, Clone)]
-pub struct RecoverOutcome {
-    pub user_id: UserId,
-    pub email: String,
-}
-
-/// Redeem a recovery token: clear `users.deleted_at`, lift the tombstone on
-/// the orgs the user solo-owned, and burn the token — all in one transaction.
+/// Un-delete a soft-deleted user **inside the caller's transaction**: clear
+/// `users.deleted_at`, lift the tombstone on the orgs they solo-own, and audit
+/// it. Called from the OAuth callback when a soft-deleted user signs in again —
+/// re-authentication IS the restore (the grace window is just the purge delay).
 ///
-/// Returns `Gone` (410) when the token verified but the row is already gone:
-/// the grace window elapsed and the purge ran. "The row is gone" is decided
-/// by the `RETURNING` result, never by recomputing the grace period here.
-pub async fn recover(pool: &PgPool, raw_token: &str) -> Result<RecoverOutcome> {
-    let Some(found) = recovery::resolve(pool, raw_token).await? else {
-        return Err(AppError::not_found(
-            codes::ACCOUNT_RECOVERY_INVALID,
-            "This recovery link is invalid or has expired.",
-        ));
-    };
-
-    let mut tx = pool.begin().await.context("recover: begin")?;
-
-    // Un-delete the user FIRST. `load_user` filters `deleted_at IS NULL`, so
-    // any session issued before this clears is dead on arrival; clearing it
-    // up front keeps the ordering load-bearing. Zero rows ⇒ already purged.
-    let row: Option<(String,)> = sqlx::query_as(
-        r#"UPDATE users
-              SET deleted_at = NULL, updated_at = now()
-            WHERE id = $1 AND deleted_at IS NOT NULL
-        RETURNING email::text"#,
+/// Runs in the callback's Phase C tx so a crash rolls back the whole restore.
+/// The `deleted_at IS NOT NULL` guard makes it a no-op for an already-active
+/// row (a benign race), never an error.
+pub async fn undelete_in_tx(tx: &mut Transaction<'_, Postgres>, user_id: UserId) -> Result<()> {
+    sqlx::query(
+        "UPDATE users SET deleted_at = NULL, updated_at = now() \
+         WHERE id = $1 AND deleted_at IS NOT NULL",
     )
-    .bind(found.user_id.0)
-    .fetch_optional(&mut *tx)
+    .bind(user_id.0)
+    .execute(&mut **tx)
     .await
-    .context("recover: un-delete user")?;
-    let Some((email,)) = row else {
-        tx.rollback().await.ok();
-        return Err(AppError::gone(
-            codes::ACCOUNT_GONE,
-            "This account has been permanently deleted and can no longer be recovered.",
-        ));
-    };
+    .context("undelete: un-delete user")?;
 
-    // Lift the tombstone on every org the user still owns (the solo orgs
-    // whose owner membership we deliberately kept at deletion time).
+    // Lift the tombstone on every org the user still owns (the solo orgs whose
+    // owner membership we deliberately kept at deletion time).
     let restored: Vec<(Uuid,)> = sqlx::query_as(
         r#"UPDATE organizations o
               SET deleted_at = NULL, updated_at = now()
@@ -311,38 +266,24 @@ pub async fn recover(pool: &PgPool, raw_token: &str) -> Result<RecoverOutcome> {
               AND o.deleted_at IS NOT NULL
         RETURNING o.id"#,
     )
-    .bind(found.user_id.0)
-    .fetch_all(&mut *tx)
+    .bind(user_id.0)
+    .fetch_all(&mut **tx)
     .await
-    .context("recover: un-delete solo orgs")?;
+    .context("undelete: un-delete solo orgs")?;
 
     for (org_id,) in &restored {
         record_audit_tx(
-            &mut tx,
+            tx,
             OrgId(*org_id),
-            Some(found.user_id),
+            Some(user_id),
             "user.deletion_recovered",
-            serde_json::json!({ "user_id": found.user_id.0 }),
+            serde_json::json!({ "user_id": user_id.0 }),
         )
         .await
-        .context("recover: audit")?;
+        .context("undelete: audit")?;
     }
 
-    // Burn the token so the link can't be replayed. Inside the same tx as the
-    // un-delete: a crash here rolls back the whole recovery, never a 200 with
-    // a half-restored account.
-    sqlx::query("UPDATE user_recovery_tokens SET used_at = now() WHERE id = $1")
-        .bind(found.id)
-        .execute(&mut *tx)
-        .await
-        .context("recover: burn token")?;
-
-    tx.commit().await.context("recover: commit")?;
-
-    Ok(RecoverOutcome {
-        user_id: found.user_id,
-        email,
-    })
+    Ok(())
 }
 
 /// `last_seen_at` is the session-touched activity timestamp (cookie auth,
@@ -369,8 +310,4 @@ pub async fn account_facts(pool: &PgPool, user_id: UserId) -> Result<Option<Acco
     .fetch_optional(pool)
     .await
     .context("account_facts: query")?)
-}
-
-fn is_unique_violation(e: &sqlx::Error) -> bool {
-    matches!(e, sqlx::Error::Database(db) if db.code().as_deref() == Some("23505"))
 }

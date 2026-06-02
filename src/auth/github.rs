@@ -204,24 +204,24 @@ pub struct ResolvedIdentity {
     pub user_id: UserId,
     pub signup_org_id: Option<OrgId>,
     pub is_new_user: bool,
+    /// True when this sign-in un-deleted a soft-deleted account — re-auth IS the
+    /// restore. The caller surfaces a "welcome back" notice.
+    pub restored: bool,
 }
 
 /// Phase C of the callback. Find-or-create the user, link the identity, and —
-/// for fresh users — create the signup org plus the owner membership. Caller
-/// is expected to immediately follow this with `session::create` on the same
-/// pool. All work runs inside one tx, no upstream calls.
+/// for fresh users — create the signup org plus the owner membership. A
+/// soft-deleted account that signs in again is un-deleted in this same tx
+/// (re-authentication is the restore). Caller follows with `session::create`.
+/// All work runs inside one tx, no upstream calls.
 pub async fn upsert_identity_and_signup_org(
     pool: &PgPool,
     identity: &GithubIdentity,
 ) -> Result<ResolvedIdentity> {
     let mut tx = pool.begin().await.context("phase C: begin tx")?;
 
-    // 1. Identity lookup. (provider, provider_user_id) → (user_id,
-    //    user.deleted_at). The deleted_at column travels with the lookup so
-    //    a soft-deleted user clicking "Sign in with GitHub" surfaces as a
-    //    typed error (ACCOUNT_IN_DELETION_GRACE) instead of silently
-    //    minting a fresh session and bumping last_login_at — that would
-    //    bypass the recovery-confirmation flow and fake the audit trail.
+    // deleted_at travels with the lookup so a soft-deleted user is restored
+    // (un-deleted in this tx) rather than silently logged in over a tombstone.
     let existing: Option<(Uuid, Option<DateTime<Utc>>)> = sqlx::query_as(
         "SELECT oi.user_id, u.deleted_at \
          FROM oauth_identities oi JOIN users u ON u.id = oi.user_id \
@@ -234,12 +234,11 @@ pub async fn upsert_identity_and_signup_org(
     .context("phase C: identity lookup")?;
 
     if let Some((user_id, deleted_at)) = existing {
-        if deleted_at.is_some() {
-            tx.rollback().await.ok();
-            return Err(AppError::forbidden_code(
-                crate::api::error::codes::ACCOUNT_IN_DELETION_GRACE,
-                "this account is in its deletion grace window; use the recovery link from your deletion confirmation email to restore it before signing in again",
-            ));
+        let restored = deleted_at.is_some();
+        if restored {
+            // Re-auth = restore: un-delete the account + lift its org tombstones
+            // in this tx, then log in normally.
+            crate::auth::account::undelete_in_tx(&mut tx, UserId(user_id)).await?;
         }
         sqlx::query(
             "UPDATE oauth_identities SET last_login_at = now(), provider_username = $3 \
@@ -251,12 +250,15 @@ pub async fn upsert_identity_and_signup_org(
         .execute(&mut *tx)
         .await
         .context("phase C: bump last_login_at")?;
-        let signup_org_id = users_store::resolve_signup_org(pool, UserId(user_id)).await?;
         tx.commit().await.context("phase C: commit (existing)")?;
+        // Resolve AFTER commit so a just-restored org's lifted tombstone is
+        // visible (resolve_signup_org runs on its own pool connection).
+        let signup_org_id = users_store::resolve_signup_org(pool, UserId(user_id)).await?;
         return Ok(ResolvedIdentity {
             user_id: UserId(user_id),
             signup_org_id,
             is_new_user: false,
+            restored,
         });
     }
 
@@ -308,6 +310,7 @@ pub async fn upsert_identity_and_signup_org(
             user_id: UserId(user_id),
             signup_org_id,
             is_new_user: false,
+            restored: false,
         });
     }
 
@@ -352,6 +355,7 @@ pub async fn upsert_identity_and_signup_org(
         user_id: UserId(new_user_id),
         signup_org_id: Some(org_id),
         is_new_user: true,
+        restored: false,
     })
 }
 

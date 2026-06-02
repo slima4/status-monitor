@@ -1,13 +1,13 @@
 //! Daily purge of soft-deleted orgs and users past their grace period.
 //!
 //! Each tick runs the org cascade/outbox below, then a back-pressured
-//! hard-delete of soft-deleted users whose grace window has elapsed and who
-//! hold no live (unexpired, unused) recovery token. The user row's FK
-//! `ON DELETE CASCADE` erases memberships, oauth_identities, api_tokens,
-//! invitations, sessions and recovery tokens; rows that reference the user
-//! as an actor (`login_attempts`, `org_audit_log`, `quota_events`,
-//! `plan_overrides`) keep their rows with the actor nulled — audit
-//! survives, identity does not.
+//! hard-delete of soft-deleted users whose grace window has elapsed
+//! (`deleted_at < now() - grace_days`, the sole gate — within the window the
+//! user restores by re-authenticating). The user row's FK `ON DELETE CASCADE`
+//! erases memberships, oauth_identities, api_tokens, invitations, sessions and
+//! re-auth grants; rows that reference the user as an actor (`login_attempts`,
+//! `org_audit_log`, `quota_events`, `plan_overrides`) keep their rows with the
+//! actor nulled — audit survives, identity does not.
 //!
 //! Two-step outbox pattern across Postgres and ClickHouse. The naive shape
 //! ("DELETE in PG, then DELETE in CH") leaves orphan rows in ClickHouse if the
@@ -143,9 +143,9 @@ async fn cascade_past_grace(pool: &PgPool, grace_days: u32, _cache: &PageCache) 
         // ON DELETE CASCADE on every tenant table empties PG-side data.
         //
         // The `deleted_at` predicate is load-bearing, not cosmetic: the SELECT
-        // above runs outside any transaction, so an account-recovery commit
-        // (`auth::account::recover`, which sets `deleted_at = NULL`) between
-        // the SELECT and this DELETE would otherwise wipe a just-recovered org
+        // above runs outside any transaction, so a restore commit
+        // (`auth::account::undelete_in_tx`, which sets `deleted_at = NULL`)
+        // between the SELECT and this DELETE would otherwise wipe a recovered org
         // (and via FK CASCADE, every tenant row it owns). Re-checking the
         // grace-window predicate inside the transaction makes the DELETE a
         // no-op for any row that has since been restored.
@@ -332,14 +332,12 @@ pub async fn purge_queue_depth(pool: &PgPool) -> Result<QueueDepth> {
     })
 }
 
-/// Hard-delete soft-deleted users whose grace window has elapsed, skipping
-/// anyone who still holds a live (unexpired, unused) recovery token — the
-/// recovery window is enforced by this predicate, not by re-deriving the
-/// grace period in the recovery endpoint. Postgres has no `DELETE … LIMIT`,
-/// so the batch bound is a subquery; the same `PURGE_BATCH_LIMIT`
-/// back-pressure as the org cascade caps a runaway mass-deletion. The
-/// `users` FK cascade erases dependent rows; `login_attempts` /
-/// `org_audit_log` keep theirs with the actor nulled.
+/// Hard-delete soft-deleted users whose grace window has elapsed. The window
+/// is gated solely by `deleted_at` age — within it the user restores by
+/// re-authenticating. Postgres has no `DELETE … LIMIT`, so the batch bound is a
+/// subquery; the same `PURGE_BATCH_LIMIT` back-pressure as the org cascade caps
+/// a runaway mass-deletion. The `users` FK cascade erases dependent rows;
+/// `login_attempts` / `org_audit_log` keep theirs with the actor nulled.
 pub async fn purge_users_past_grace(pool: &PgPool, grace_days: u32) -> Result<u32> {
     let purged: Vec<(Uuid,)> = sqlx::query_as(
         r#"DELETE FROM users
@@ -347,12 +345,6 @@ pub async fn purge_users_past_grace(pool: &PgPool, grace_days: u32) -> Result<u3
                SELECT id FROM users
                 WHERE deleted_at IS NOT NULL
                   AND deleted_at < now() - ($1::int * INTERVAL '1 day')
-                  AND NOT EXISTS (
-                      SELECT 1 FROM user_recovery_tokens t
-                       WHERE t.user_id = users.id
-                         AND t.expires_at > now()
-                         AND t.used_at IS NULL
-                  )
                 ORDER BY deleted_at ASC
                 LIMIT $2
            )

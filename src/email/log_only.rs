@@ -97,9 +97,9 @@ mod tests {
 
     #[test]
     fn redacts_account_takeover_params_keeps_host_path() {
-        let url = "https://app.example.com/recover-account?token=abcdef1234567890&foo=bar";
+        let url = "https://app.example.com/auth/magic-link/verify?token=abcdef1234567890&foo=bar";
         let out = redact_sensitive_params(url);
-        assert!(out.starts_with("https://app.example.com/recover-account?token=abcdef…"));
+        assert!(out.starts_with("https://app.example.com/auth/magic-link/verify?token=abcdef…"));
         assert!(out.contains("&foo=bar"), "non-sensitive params survive");
         assert!(!out.contains("abcdef1234567890"), "raw token must be gone");
     }

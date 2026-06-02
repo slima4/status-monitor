@@ -61,12 +61,9 @@ pub enum EmailTemplate {
         expires_in_minutes: u32,
         ip_hint: Option<String>,
     },
-    /// Account-deletion confirmation. Carries the one-shot recovery link and
-    /// the date the data is permanently purged.
-    AccountDeletion {
-        recovery_url: String,
-        scheduled_purge_at: DateTime<Utc>,
-    },
+    /// Account-deletion notification. Restoring is done by signing in again
+    /// before the data is permanently purged on `scheduled_purge_at`.
+    AccountDeletion { scheduled_purge_at: DateTime<Utc> },
 }
 
 impl EmailTemplate {
@@ -96,10 +93,9 @@ impl EmailTemplate {
                 *expires_in_minutes,
                 ip_hint.as_deref(),
             ),
-            EmailTemplate::AccountDeletion {
-                recovery_url,
-                scheduled_purge_at,
-            } => templates::account_deletion::render(site_name, recovery_url, *scheduled_purge_at),
+            EmailTemplate::AccountDeletion { scheduled_purge_at } => {
+                templates::account_deletion::render(site_name, *scheduled_purge_at)
+            }
         }
     }
 
@@ -108,7 +104,7 @@ impl EmailTemplate {
         match self {
             EmailTemplate::Invitation { accept_url, .. } => Some(accept_url),
             EmailTemplate::MagicLink { url, .. } => Some(url),
-            EmailTemplate::AccountDeletion { recovery_url, .. } => Some(recovery_url),
+            EmailTemplate::AccountDeletion { .. } => None,
         }
     }
 }

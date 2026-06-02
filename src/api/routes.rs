@@ -194,10 +194,6 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
             get(handlers::me::me).delete(handlers::account::delete_account),
         )
         .route("/me/data-export", get(handlers::account::data_export))
-        .route(
-            "/auth/recover-account",
-            post(handlers::account::recover_account),
-        )
         .route("/me/usage", get(handlers::usage::get_me_usage))
         .route(
             "/me/theme",
@@ -292,6 +288,7 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
     root.merge(SwaggerUi::new("/docs").url("/api/openapi.json", ApiDoc::openapi()))
         .layer(from_fn(api_middleware::cache_control))
         .layer(from_fn(api_middleware::json_charset))
+        .layer(from_fn(api_middleware::navigation_login_redirect))
         .layer(tower_cookies::CookieManagerLayer::new())
         .with_state(state)
 }

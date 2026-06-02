@@ -20,7 +20,6 @@ pub mod magic_link_cleanup;
 pub mod oauth_state;
 pub mod oauth_state_cleanup;
 pub mod provider;
-pub mod recovery;
 pub mod scope;
 pub mod session;
 pub mod token_hash;

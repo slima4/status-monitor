@@ -44,8 +44,8 @@ mod tests {
     #[test]
     fn token_link_trims_base_and_encodes_token() {
         assert_eq!(
-            token_link("https://x.test/", "/recover-account", "a b/c"),
-            "https://x.test/recover-account?token=a+b%2Fc"
+            token_link("https://x.test/", "/invitations/accept", "a b/c"),
+            "https://x.test/invitations/accept?token=a+b%2Fc"
         );
         assert_eq!(
             token_link("https://x.test", "/auth/magic-link/verify", "tok"),

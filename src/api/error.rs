@@ -163,23 +163,12 @@ pub mod codes {
     pub const FINGERPRINT_SALT_ROTATED: &str = "FINGERPRINT_SALT_ROTATED";
     // Magic-link sign-in (v1.1 — gated by auth.enabled_methods).
     pub const MAGIC_LINK_INVALID: &str = "MAGIC_LINK_INVALID";
-    // GDPR account export / deletion / recovery.
+    // GDPR account export / deletion.
     /// Deletion blocked: caller is the sole owner of an org that still has
     /// other members. `details.orgs` lists the blocking orgs (slug + id).
     pub const OWNS_SHARED_ORGS: &str = "OWNS_SHARED_ORGS";
     /// A second deletion of an already-soft-deleted account.
     pub const ACCOUNT_ALREADY_DELETED: &str = "ACCOUNT_ALREADY_DELETED";
-    /// Recovery link did not match a live recovery token (missing, expired,
-    /// already used). Opaque on purpose (anti-enumeration).
-    pub const ACCOUNT_RECOVERY_INVALID: &str = "ACCOUNT_RECOVERY_INVALID";
-    /// Recovery token verified but the account was already hard-purged — the
-    /// 30-day window elapsed and the data is gone for good (410).
-    pub const ACCOUNT_GONE: &str = "ACCOUNT_GONE";
-    /// A login (OAuth, magic-link, …) was attempted against a soft-deleted
-    /// account before the grace window elapsed. Surfaces to the operator
-    /// "use the recovery link from your deletion confirmation email"
-    /// instead of silently re-authenticating and faking the audit trail.
-    pub const ACCOUNT_IN_DELETION_GRACE: &str = "ACCOUNT_IN_DELETION_GRACE";
     // Public status-page settings + logo upload.
     pub const BRANDING_INVALID: &str = "BRANDING_INVALID";
     pub const LOGO_MISSING: &str = "LOGO_MISSING";

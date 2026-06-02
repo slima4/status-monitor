@@ -165,6 +165,10 @@ pub async fn verify(
         return Err(magic_link::invalid_token_error());
     };
 
+    // NB: `find_user_by_email` filters `deleted_at IS NULL`, so a soft-deleted
+    // user can NOT restore via magic-link — re-auth restore is GitHub-OAuth only
+    // (see `github::upsert_identity_and_signup_org`). Magic-link is off by
+    // default; if it's ever enabled, add the same un-delete-on-reauth here.
     let Some(user_id) = orgs_store::find_user_by_email(pool, &row.email).await? else {
         // Token was consumed (marked used) but no user owns the email — either
         // the email never matched a user (anti-enum INSERT for an unknown

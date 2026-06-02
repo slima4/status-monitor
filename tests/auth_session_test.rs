@@ -176,16 +176,16 @@ async fn upsert_links_existing_user_on_email_match() {
 
 #[tokio::test]
 #[ignore = "requires DATABASE_URL"]
-async fn upsert_rejects_soft_deleted_user_via_identity_lookup() {
+async fn upsert_restores_soft_deleted_user_on_reauth() {
     let Some((db_url, name)) = fresh_pg().await else {
         return;
     };
     let pool = open_pool(&db_url).await;
     MIGRATOR.run(&pool).await.expect("migrate");
 
-    // Seed a user + identity, then soft-delete the user. A subsequent
-    // GitHub OAuth callback for the same provider_user_id must NOT
-    // resurrect the account — the recovery flow is the only path back.
+    // Seed a user + identity, then soft-delete the user. A subsequent GitHub
+    // OAuth sign-in for the same provider_user_id un-deletes (restores) the
+    // account in place — re-auth IS the restore.
     let (user_id,): (Uuid,) = sqlx::query_as(
         "INSERT INTO users (email, terms_version, privacy_version) \
          VALUES ('Carol@Example.test', 'v1', 'v1') RETURNING id",
@@ -213,17 +213,24 @@ async fn upsert_rejects_soft_deleted_user_via_identity_lookup() {
         primary_verified_email: Some("carol@example.test".into()),
         display_name: Some("Carol".into()),
     };
-    let err = github::upsert_identity_and_signup_org(&pool, &identity)
+    let resolved = github::upsert_identity_and_signup_org(&pool, &identity)
         .await
-        .expect_err("soft-deleted identity must be rejected");
-    let s = format!("{err:?}");
+        .expect("soft-deleted identity is restored on re-auth");
+    assert_eq!(resolved.user_id.0, user_id);
     assert!(
-        s.contains("ACCOUNT_IN_DELETION_GRACE"),
-        "expected typed grace error, got: {s}"
+        resolved.restored,
+        "re-auth must restore the soft-deleted account"
     );
+    assert!(!resolved.is_new_user, "must not create a parallel user");
 
-    // No new identity row, no new user — the soft-deleted row is still the
-    // only one.
+    // The account is active again, and no parallel user was created.
+    let (deleted_at,): (Option<chrono::DateTime<Utc>>,) =
+        sqlx::query_as("SELECT deleted_at FROM users WHERE id = $1")
+            .bind(user_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(deleted_at.is_none(), "account must be un-deleted");
     let (user_count,): (i64,) =
         sqlx::query_as("SELECT count(*) FROM users WHERE email = $1::citext")
             .bind("carol@example.test")

@@ -136,8 +136,8 @@
       </button>
       <p class="text-sm text-muted">
         Permanently delete your account and every organisation you solely own.
-        Recoverable for a grace period via a link emailed to you; permanent
-        after that.
+        Recoverable for a grace period by signing in again — permanent after
+        that.
       </p>
     </div>
   </section>
@@ -153,10 +153,10 @@
     <h2 class="text-lg font-semibold text-state-bad">Delete your account?</h2>
     <p class="text-sm text-muted" style="line-height: 1.55;">
       This deactivates your account immediately and schedules a permanent
-      purge after the recovery grace period. Sessions are signed out, API
-      tokens revoked, pending invitations withdrawn, and organisations you
-      solely own are scheduled for deletion too. A recovery link is emailed
-      to you in case you change your mind.
+      purge after the grace period. Sessions are signed out, API tokens
+      revoked, pending invitations withdrawn, and organisations you solely own
+      are scheduled for deletion too. To restore it, just sign in again before
+      the purge date.
     </p>
 
     <div id="delete-blocking" class="hidden alert-card alert-card--warn space-y-3">
@@ -247,11 +247,11 @@
         if (xhr.status === 200) {
           const when = body.scheduled_purge_at
             ? new Date(body.scheduled_purge_at).toUTCString() : 'the grace period';
-          const sent = body.recovery_token_sent_to_email || 'your email';
           result.className = 'flash-text flash-text--ok';
-          result.textContent = 'Account scheduled for deletion. A recovery link '
-            + 'was sent to ' + sent + '. Permanent after ' + when + '. Signing out…';
+          result.textContent = 'Account scheduled for deletion. Sign in again '
+            + 'before ' + when + ' to restore it. Signing out…';
           document.getElementById('confirm-delete').disabled = true;
+          document.getElementById('delete-confirm-input').disabled = true;
           setTimeout(() => { window.location.href = '/login'; }, 4000);
           return;
         }

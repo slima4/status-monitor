@@ -147,6 +147,9 @@ pub async fn github_callback(
             tracing::warn!(error = %e, "github_callback: phase C failed");
             e
         })?;
+    if resolved.restored {
+        tracing::info!(user_id = %resolved.user_id.0, "re-auth restored a soft-deleted account");
+    }
 
     // Session fixation: drop any pre-login session bound to this browser
     // before minting the new one. Without this an attacker who pre-seeded a

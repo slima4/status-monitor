@@ -130,12 +130,12 @@ async fn deletion_blocked_when_solely_owning_org_with_other_members() {
 }
 
 // ---------------------------------------------------------------------------
-// delete then recover round-trip
+// delete then restore (re-auth) round-trip
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
 #[ignore = "requires DATABASE_URL"]
-async fn deletion_then_recovery_round_trip() {
+async fn deletion_then_restore_round_trip() {
     let Some((db, name)) = fresh_pg().await else {
         return;
     };
@@ -166,10 +166,9 @@ async fn deletion_then_recovery_round_trip() {
         .await
         .expect("deletion succeeds");
     assert_eq!(outcome.email, "solo@example.test");
-    assert!(!outcome.recovery_token.is_empty());
 
     // User + solo org soft-deleted; sessions/tokens gone; owner membership
-    // kept (so recovery can restore access); exactly one active recovery row.
+    // kept (so re-auth can restore access).
     assert_user_deleted(&pool, user, true).await;
     assert_org_deleted(&pool, org, true).await;
     let (sessions,): (i64,) = sqlx::query_as("SELECT count(*) FROM sessions WHERE user_id = $1")
@@ -191,16 +190,9 @@ async fn deletion_then_recovery_round_trip() {
             .await
             .unwrap();
     assert_eq!(memberships, 1, "solo-org owner membership must be kept");
-    let (recoveries,): (i64,) = sqlx::query_as(
-        "SELECT count(*) FROM user_recovery_tokens WHERE user_id = $1 AND used_at IS NULL",
-    )
-    .bind(user)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
-    assert_eq!(recoveries, 1);
 
-    // A second deletion of the now-soft-deleted account is rejected cleanly.
+    // A second deletion of the now-soft-deleted account is rejected cleanly
+    // by the `deleted_at IS NULL` guard.
     match account::request_deletion(&pool, uid, 30).await {
         Err(AppError::Conflict { code, .. }) => {
             assert_eq!(code, codes::ACCOUNT_ALREADY_DELETED);
@@ -208,112 +200,42 @@ async fn deletion_then_recovery_round_trip() {
         other => panic!("expected ACCOUNT_ALREADY_DELETED, got {other:?}"),
     }
 
-    // Recover with the emailed token: account + org restored, token burned.
-    let recovered = account::recover(&pool, &outcome.recovery_token)
+    // Restore = re-auth: the OAuth callback un-deletes in its own tx. Exercise
+    // that path's core directly.
+    let mut tx = pool.begin().await.unwrap();
+    account::undelete_in_tx(&mut tx, uid)
         .await
-        .expect("recovery succeeds");
-    assert_eq!(recovered.user_id, uid);
+        .expect("undelete succeeds");
+    tx.commit().await.unwrap();
     assert_user_deleted(&pool, user, false).await;
     assert_org_deleted(&pool, org, false).await;
-    let (used,): (i64,) = sqlx::query_as(
-        "SELECT count(*) FROM user_recovery_tokens WHERE user_id = $1 AND used_at IS NOT NULL",
-    )
-    .bind(user)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
-    assert_eq!(used, 1, "recovery token must be burned");
-
-    // The burned link can't be replayed.
-    match account::recover(&pool, &outcome.recovery_token).await {
-        Err(AppError::NotFound { code, .. }) => {
-            assert_eq!(code, codes::ACCOUNT_RECOVERY_INVALID);
-        }
-        other => panic!("expected ACCOUNT_RECOVERY_INVALID on replay, got {other:?}"),
-    }
 
     pool.close().await;
     drop_pg(&name).await;
 }
 
+/// `undelete_in_tx` on an already-active account is a harmless no-op (a benign
+/// race), not an error.
 #[tokio::test]
 #[ignore = "requires DATABASE_URL"]
-async fn recovery_with_unknown_token_is_404() {
+async fn undelete_active_account_is_noop() {
     let Some((db, name)) = fresh_pg().await else {
         return;
     };
     let pool = open_pool(&db).await;
     MIGRATOR.run(&pool).await.unwrap();
 
-    match account::recover(&pool, "definitely-not-a-real-token").await {
-        Err(AppError::NotFound { code, .. }) => assert_eq!(code, codes::ACCOUNT_RECOVERY_INVALID),
-        other => panic!("expected ACCOUNT_RECOVERY_INVALID, got {other:?}"),
-    }
-
-    pool.close().await;
-    drop_pg(&name).await;
-}
-
-#[tokio::test]
-#[ignore = "requires DATABASE_URL"]
-async fn expired_recovery_token_cannot_recover() {
-    let Some((db, name)) = fresh_pg().await else {
-        return;
-    };
-    let pool = open_pool(&db).await;
-    MIGRATOR.run(&pool).await.unwrap();
-
-    let user = seed_user(&pool, "late@example.test", "Late").await;
+    let user = seed_user(&pool, "active@example.test", "Active").await;
     let uid = uptimepage::domain::UserId(user);
-    seed_org(&pool, "late-org", user).await;
-    let outcome = account::request_deletion(&pool, uid, 30).await.unwrap();
+    let org = seed_org(&pool, "active-org", user).await;
 
-    // Slide the recovery window into the past — the grace period elapsed.
-    sqlx::query(
-        "UPDATE user_recovery_tokens SET expires_at = now() - interval '1 hour' WHERE user_id = $1",
-    )
-    .bind(user)
-    .execute(&pool)
-    .await
-    .unwrap();
-
-    match account::recover(&pool, &outcome.recovery_token).await {
-        Err(AppError::NotFound { code, .. }) => assert_eq!(code, codes::ACCOUNT_RECOVERY_INVALID),
-        other => panic!("expected ACCOUNT_RECOVERY_INVALID after expiry, got {other:?}"),
-    }
-
-    pool.close().await;
-    drop_pg(&name).await;
-}
-
-/// Defensive 410 branch: the token verifies but the user row is already gone
-/// (the un-delete `RETURNING` finds nothing). Simulated by clearing
-/// `deleted_at` out from under a still-live token.
-#[tokio::test]
-#[ignore = "requires DATABASE_URL"]
-async fn recovery_returns_410_when_row_already_restored() {
-    let Some((db, name)) = fresh_pg().await else {
-        return;
-    };
-    let pool = open_pool(&db).await;
-    MIGRATOR.run(&pool).await.unwrap();
-
-    let user = seed_user(&pool, "race@example.test", "Race").await;
-    let uid = uptimepage::domain::UserId(user);
-    seed_org(&pool, "race-org", user).await;
-    let outcome = account::request_deletion(&pool, uid, 30).await.unwrap();
-
-    // Token stays live + unused, but the user is no longer soft-deleted.
-    sqlx::query("UPDATE users SET deleted_at = NULL WHERE id = $1")
-        .bind(user)
-        .execute(&pool)
+    let mut tx = pool.begin().await.unwrap();
+    account::undelete_in_tx(&mut tx, uid)
         .await
-        .unwrap();
-
-    match account::recover(&pool, &outcome.recovery_token).await {
-        Err(AppError::Gone { code, .. }) => assert_eq!(code, codes::ACCOUNT_GONE),
-        other => panic!("expected ACCOUNT_GONE, got {other:?}"),
-    }
+        .expect("undelete is a no-op");
+    tx.commit().await.unwrap();
+    assert_user_deleted(&pool, user, false).await;
+    assert_org_deleted(&pool, org, false).await;
 
     pool.close().await;
     drop_pg(&name).await;
