@@ -63,7 +63,7 @@ INSERT INTO plans (
     10, 1,  -- max_public_components, max_status_pages
     1, 2,   -- max_share_links_per_monitor, max_shared_monitors
     20, 20,  -- max_maintenance_windows, max_notification_channels
-    204800,
+    1048576,  -- max_logo_size_bytes = 1 MiB, matches the enforced upload ceiling
     600, 6000,
     30, 60, 60,
     true
