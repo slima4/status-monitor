@@ -19,7 +19,7 @@ use crate::config::PublicStatusConfig;
 use crate::domain::AssetSlot;
 use crate::domain::elapsed_at;
 use crate::domain::{
-    DayState, IncidentSeverity, IncidentStatusPhase, OverallState, PublicComponent,
+    DayState, IncidentSeverity, IncidentStatusPhase, OrgId, OverallState, PublicComponent,
     PublicComponentGroup, PublicComponentStatus, PublicIncident, PublicIncidentUpdate,
     PublicMaintenance, PublicOrgBranding, PublicStatusPage, StatusPageId,
 };
@@ -122,7 +122,7 @@ pub async fn index(
         // branding lookup is skipped on the 30s poll.
         StatusRegion { view }.into_response()
     } else {
-        let branding = resolve_branding(&state, page_ref.page, &page.site_name).await;
+        let branding = resolve_branding(&state, page_ref.org, page_ref.page, &page.site_name).await;
         let og = build_og_meta(
             &state,
             &headers,
@@ -193,7 +193,7 @@ pub async fn incident(
         Ok(p) => p.site_name.clone(),
         Err(err) => return render_public_error(err),
     };
-    let branding = resolve_branding(&state, page_ref.page, &fallback_name).await;
+    let branding = resolve_branding(&state, page_ref.org, page_ref.page, &fallback_name).await;
     let now = Utc::now();
     let og = build_og_meta(
         &state,
@@ -252,7 +252,7 @@ pub async fn archive(
         Ok(l) => l,
         Err(err) => return render_public_error(err),
     };
-    let branding = resolve_branding(&state, page_ref.page, &fallback_name).await;
+    let branding = resolve_branding(&state, page_ref.org, page_ref.page, &fallback_name).await;
     let now = Utc::now();
     let months = bucket_by_month(&listing.items, now);
     let og = build_og_meta(
@@ -546,23 +546,47 @@ impl BrandingView {
 /// the status page must still render if branding can't be read.
 async fn resolve_branding(
     state: &AppState,
+    org: OrgId,
     page: StatusPageId,
     fallback_name: &str,
 ) -> BrandingView {
     let cfg = &state.cfg.public_status;
-    if let Some(pool) = state.db.as_ref()
+    let mut view = if let Some(pool) = state.db.as_ref()
         && let Ok(Some(ob)) = load_page_branding(pool, page).await
     {
-        return BrandingView::from_org(&ob, cfg);
-    }
-    BrandingView::from_org(
-        &OrgBranding {
-            name: fallback_name.to_owned(),
-            slug: String::new(),
-            branding: PublicOrgBranding::default(),
-        },
-        cfg,
-    )
+        BrandingView::from_org(&ob, cfg)
+    } else {
+        BrandingView::from_org(
+            &OrgBranding {
+                name: fallback_name.to_owned(),
+                slug: String::new(),
+                branding: PublicOrgBranding::default(),
+            },
+            cfg,
+        )
+    };
+    // On a plan-lookup fault, fail closed (badge shown) but log it — otherwise a
+    // DB blip silently strips a paying Pro page's white-label with no signal.
+    let white_label = match state.quotas.limit_for_org(org).await {
+        Ok(p) => p.white_label_enabled,
+        Err(e) => {
+            tracing::warn!(error = %e, org = %org.0, "white-label gate: plan lookup failed; showing badge");
+            false
+        }
+    };
+    view.show_powered_by = enforce_powered_by(
+        view.show_powered_by,
+        state.cfg.marketing.enabled,
+        white_label,
+    );
+    view
+}
+
+/// White-label is Pro-only: on SaaS a plan without white-label always shows the
+/// "powered by" badge, whatever the page stored. Self-host (marketing off) and
+/// white-label plans keep the stored preference.
+fn enforce_powered_by(stored: bool, saas: bool, white_label: bool) -> bool {
+    if saas && !white_label { true } else { stored }
 }
 
 /// Independent, template-side re-validation of the brand colour. Trusts
@@ -1083,6 +1107,17 @@ fn phase_classes(p: IncidentStatusPhase) -> (&'static str, &'static str) {
 mod tests {
     use super::*;
     use crate::domain::OverallStatus;
+
+    #[test]
+    fn powered_by_forced_for_saas_non_white_label() {
+        // SaaS free: badge shown even if the page tried to hide it.
+        assert!(enforce_powered_by(false, true, false));
+        assert!(enforce_powered_by(true, true, false));
+        // SaaS white-label (Pro): stored preference honoured.
+        assert!(!enforce_powered_by(false, true, true));
+        // Self-host: unrestricted, stored preference honoured.
+        assert!(!enforce_powered_by(false, false, false));
+    }
 
     fn sample_page() -> PublicStatusPage {
         PublicStatusPage {
