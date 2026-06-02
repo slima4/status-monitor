@@ -114,6 +114,15 @@ async fn seed_org_on_plan(
     (pid, OrgId(oid))
 }
 
+/// The shipping `free` plan's target cap, read from the seeded row so cap
+/// boundary tests exercise the real plan and never go stale when it changes.
+async fn free_target_cap(pool: &PgPool) -> i32 {
+    sqlx::query_scalar("SELECT max_targets FROM plans WHERE id = 'free'")
+        .fetch_one(pool)
+        .await
+        .expect("free plan cap")
+}
+
 /// Insert a user and an active membership in `org`, returning the user id.
 async fn seed_member(pool: &PgPool, org: OrgId) -> UserId {
     let email = format!("m-{}@example.test", Uuid::now_v7());
@@ -364,8 +373,10 @@ async fn bulk_over_cap_inserts_nothing() {
     let Some(pool) = pg_pool_from_env().await else {
         return;
     };
-    let (app, _org) = build_test_app_with_pg_store(pool, |_| {}).await;
-    for i in 0..8 {
+    let (app, _org) = build_test_app_with_pg_store(pool.clone(), |_| {}).await;
+    let cap = free_target_cap(&pool).await;
+    let pre = cap - 2; // leave 2 free slots so a 5-item bulk overflows
+    for i in 0..pre {
         assert_eq!(
             post_target(&app, &format!("seed-{}-{i}", Uuid::now_v7()), 60)
                 .await
@@ -373,7 +384,7 @@ async fn bulk_over_cap_inserts_nothing() {
             StatusCode::CREATED
         );
     }
-    // 8 existing + 5 new > 10 → all-or-nothing rejection.
+    // pre existing + 5 new > cap → all-or-nothing rejection.
     let items: Vec<Value> = (0..5)
         .map(|i| target_payload(&format!("bulk-{}-{i}", Uuid::now_v7()), 60))
         .collect();
@@ -397,7 +408,7 @@ async fn bulk_over_cap_inserts_nothing() {
     let v = body_json(list).await;
     assert_eq!(
         v["items"].as_array().map(|a| a.len()).unwrap_or(0),
-        8,
+        pre as usize,
         "no bulk row should have been inserted"
     );
 }
@@ -408,8 +419,9 @@ async fn concurrent_creates_never_overshoot_cap() {
     let Some(pool) = pg_pool_from_env().await else {
         return;
     };
-    let (app, _org) = build_test_app_with_pg_store(pool, |_| {}).await;
-    for i in 0..9 {
+    let (app, _org) = build_test_app_with_pg_store(pool.clone(), |_| {}).await;
+    let cap = free_target_cap(&pool).await;
+    for i in 0..(cap - 1) {
         assert_eq!(
             post_target(&app, &format!("pre-{}-{i}", Uuid::now_v7()), 60)
                 .await
@@ -417,9 +429,9 @@ async fn concurrent_creates_never_overshoot_cap() {
             StatusCode::CREATED
         );
     }
-    // 9 existing, cap 10: fire 12 in parallel — exactly one may win.
+    // cap-1 existing: fire cap+2 in parallel — exactly one may win.
     let mut handles = Vec::new();
-    for i in 0..12 {
+    for i in 0..(cap + 2) {
         let app = app.clone();
         handles.push(tokio::spawn(async move {
             post_target(&app, &format!("race-{}-{i}", Uuid::now_v7()), 60)
@@ -433,13 +445,16 @@ async fn concurrent_creates_never_overshoot_cap() {
             created += 1;
         }
     }
-    assert_eq!(created, 1, "exactly one create may cross 9→10");
+    assert_eq!(created, 1, "exactly one create may fill the last slot");
     let list = app
         .oneshot(Request::get("/api/v1/targets").body(Body::empty()).unwrap())
         .await
         .unwrap();
     let v = body_json(list).await;
-    assert_eq!(v["items"].as_array().map(|a| a.len()).unwrap_or(0), 10);
+    assert_eq!(
+        v["items"].as_array().map(|a| a.len()).unwrap_or(0),
+        cap as usize
+    );
 }
 
 // ── Report item: 601st API write/min → 429 with Retry-After ──────────────
@@ -1293,7 +1308,8 @@ async fn plan_upgrade_lifts_the_cap_after_cache_ttl() {
     };
     let (app, org) =
         build_test_app_with_pg_store(pool.clone(), |c| c.quotas.plan_cache_ttl_secs = 1).await;
-    for i in 0..10 {
+    let cap = free_target_cap(&pool).await;
+    for i in 0..cap {
         assert_eq!(
             post_target(&app, &format!("u-{}-{i}", Uuid::now_v7()), 60)
                 .await
@@ -1306,17 +1322,17 @@ async fn plan_upgrade_lifts_the_cap_after_cache_ttl() {
             .await
             .status(),
         StatusCode::UNPROCESSABLE_ENTITY,
-        "11th blocked on the free cap of 10"
+        "create past the cap is blocked"
     );
 
-    let (pid, _seed) = seed_org_on_plan(&pool, 12, 50, 10, 10).await;
+    let (pid, _seed) = seed_org_on_plan(&pool, cap + 2, 50, 10, 10).await;
     sqlx::query("UPDATE organizations SET plan_id = $1 WHERE id = $2")
         .bind(&pid)
         .bind(org.0)
         .execute(&pool)
         .await
         .unwrap();
-    // Cached 'free' is still in force until the TTL lapses.
+    // The cached lower cap is still in force until the TTL lapses.
     assert_eq!(
         post_target(&app, &format!("still-{}", Uuid::now_v7()), 60)
             .await
@@ -1329,7 +1345,7 @@ async fn plan_upgrade_lifts_the_cap_after_cache_ttl() {
             .await
             .status(),
         StatusCode::CREATED,
-        "after the TTL the higher cap applies; the existing 10 rows stayed"
+        "after the TTL the higher cap applies; the existing rows stayed"
     );
     let list = app
         .oneshot(Request::get("/api/v1/targets").body(Body::empty()).unwrap())
@@ -1340,7 +1356,7 @@ async fn plan_upgrade_lifts_the_cap_after_cache_ttl() {
             .as_array()
             .map(|a| a.len())
             .unwrap_or(0),
-        11
+        cap as usize + 1
     );
 }
 
