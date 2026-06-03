@@ -132,7 +132,7 @@ The deploy pipeline upserts the two switches from repo **variables** (Settings �
 - `MCP_ENABLED=true`
 - `MCP_OAUTH_ENABLED=true`
 
-`deploy.yml` writes the corresponding `UPTIMEPAGE_MCP_*` keys into the server `.env` on each deploy. The resource URI defaults to `https://mcp.{UPTIMEPAGE_DOMAIN}/mcp`; `mcp.{DOMAIN}` rides the existing `*.{DOMAIN}` wildcard cert + Caddy route (no new DNS). See [`deployment/.env.example`](../deployment/.env.example) and [Deployment](deployment.md).
+`deploy.yml` writes the corresponding `UPTIMEPAGE_MCP_*` keys into the server `.env` on each deploy. The resource URI defaults to `https://mcp.{UPTIMEPAGE_DOMAIN}/mcp`; `mcp.{DOMAIN}` rides the existing `*.{DOMAIN}` wildcard cert + Caddy route (no new DNS). See `deployment/.env.example` and [Deployment](deployment.md).
 
 ## Connecting a client
 
@@ -221,5 +221,3 @@ Once connected, drive it in natural language — the client picks the tool:
 - [Multi-tenancy](multi-tenancy.md) — the isolation model every tool inherits.
 - [Quotas & rate limits](quotas.md) — the per-plan limiter `/mcp` shares.
 - [Configuration](configuration.md) — full config reference.
-</content>
-</invoke>
