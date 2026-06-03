@@ -12,6 +12,7 @@ pub mod marketing;
 pub mod mcp;
 pub mod net;
 pub mod notifier;
+pub mod oauth;
 pub mod observability;
 pub mod pipeline;
 pub mod public_status;

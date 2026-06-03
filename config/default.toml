@@ -330,3 +330,19 @@ enabled = false
 # header always passes (non-browser clients like `mcp-remote` send none). Add
 # the connector's browser origin(s) here, e.g. ["https://claude.ai"].
 allowed_origins = []
+
+# Canonical absolute URI of the /mcp endpoint — the OAuth resource id (RFC 8707
+# token audience) and the `resource` in the protected-resource metadata. Empty
+# disables OAuth audience binding (static-token mode only).
+# e.g. "https://mcp.uptimepage.dev/mcp"
+resource_uri = ""
+
+# Enable the OAuth 2.1 authorization-server endpoints that back the one-click
+# claude.ai connector. Needs resource_uri + auth.public_base_url set to real
+# HTTPS origins. Off by default.
+oauth_enabled = false
+
+# Access-token lifetime in seconds (short; the connector auto-renews it with a
+# rotating refresh token). The connection lifetime is the user's consent choice.
+# Default 1 hour.
+access_token_ttl_secs = 3600

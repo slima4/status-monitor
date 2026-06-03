@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block title %}Authorize connection · Uptimepage{% endblock %}
+{% block content %}
+<section class="mx-auto w-full max-w-md">
+  <section class="sticker-card space-y-6 p-8">
+    <header class="space-y-1 text-center">
+      <h2 class="text-xl tracking-tight text-body"
+          style="font-family: var(--font-mono); font-weight: 600; letter-spacing: -0.01em;">
+        authorize connection
+      </h2>
+      <p class="text-sm text-muted">
+        <strong>{{ client_name }}</strong> wants read-only access to
+        <strong>{{ org_name }}</strong>.
+      </p>
+    </header>
+
+    <div class="space-y-2">
+      <p class="text-xs uppercase tracking-wide text-quiet">It will be able to</p>
+      <ul class="space-y-1 text-sm text-body">
+        {% for s in scopes %}
+        <li class="flex items-start gap-2">
+          <span aria-hidden="true">&middot;</span><span>{{ s.label }}</span>
+        </li>
+        {% endfor %}
+      </ul>
+      <p class="text-xs text-muted">
+        Read-only. It cannot change monitors, channels, or settings, and access is
+        limited to this one organization.
+      </p>
+    </div>
+
+    <div class="space-y-1">
+      <label for="consent-expiry" class="text-xs uppercase tracking-wide text-quiet">Connection expires</label>
+      <select id="consent-expiry" class="w-full field font-mono" aria-label="Connection expires">
+        <option value="30">30 days</option>
+        <option value="60">60 days</option>
+        <option value="90">90 days</option>
+        <option value="365">365 days</option>
+      </select>
+    </div>
+
+    {# Authorize-request parameters, re-validated server-side on submit. #}
+    <input type="hidden" id="c-client-id" value="{{ client_id }}">
+    <input type="hidden" id="c-redirect-uri" value="{{ redirect_uri }}">
+    <input type="hidden" id="c-code-challenge" value="{{ code_challenge }}">
+    <input type="hidden" id="c-scope" value="{{ scope }}">
+    <input type="hidden" id="c-state" value="{{ state }}">
+    <input type="hidden" id="c-resource" value="{{ resource }}">
+    <input type="hidden" id="c-default-ttl" value="{{ default_ttl_days }}">
+
+    <p id="consent-error" class="alert-card alert-card--warn text-xs" hidden></p>
+
+    <div class="flex gap-3">
+      <button type="button" id="consent-deny"
+              class="sticker-btn inline-flex w-1/2 items-center justify-center px-4 py-2.5 text-sm font-medium">
+        Deny
+      </button>
+      <button type="button" id="consent-approve"
+              class="sticker-btn sticker-btn--accent inline-flex w-1/2 items-center justify-center px-4 py-2.5 text-sm font-medium">
+        Approve
+      </button>
+    </div>
+  </section>
+</section>
+
+<script>
+  (function () {
+    var byId = function (id) { return document.getElementById(id); };
+    var sel = byId('consent-expiry');
+    sel.value = byId('c-default-ttl').value;
+
+    function submit(action) {
+      var approve = byId('consent-approve');
+      var deny = byId('consent-deny');
+      approve.disabled = true;
+      deny.disabled = true;
+      var body = {
+        action: action,
+        client_id: byId('c-client-id').value,
+        redirect_uri: byId('c-redirect-uri').value,
+        code_challenge: byId('c-code-challenge').value,
+        scope: byId('c-scope').value,
+        state: byId('c-state').value,
+        resource: byId('c-resource').value,
+        expires_in_days: parseInt(sel.value, 10)
+      };
+      fetch('/oauth/authorize/decision', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'uptimepage' },
+        body: JSON.stringify(body)
+      }).then(function (res) {
+        if (!res.ok) { return res.text().then(function (t) { throw new Error(t || 'Request failed'); }); }
+        return res.json();
+      }).then(function (data) {
+        if (data && data.redirect) { window.location.assign(data.redirect); }
+        else { throw new Error('No redirect returned'); }
+      }).catch(function (err) {
+        var e = byId('consent-error');
+        e.textContent = String(err.message || err);
+        e.hidden = false;
+        approve.disabled = false;
+        deny.disabled = false;
+      });
+    }
+
+    byId('consent-approve').addEventListener('click', function () { submit('approve'); });
+    byId('consent-deny').addEventListener('click', function () { submit('deny'); });
+  })();
+</script>
+{% endblock %}

@@ -81,12 +81,16 @@ impl McpAuth {
     }
 }
 
-/// 401 with a `Bearer` challenge — the hook the OAuth resource-metadata header
-/// attaches to in Phase 3.
-fn challenge() -> Response {
+/// 401 with a `WWW-Authenticate: Bearer` challenge. When OAuth is configured it
+/// carries the RFC 9728 `resource_metadata` pointer + `scope`, so a conformant
+/// client can discover the authorization server and start the flow; otherwise a
+/// plain `Bearer` (static-token mode).
+fn challenge(state: &AppState) -> Response {
     let mut resp = (StatusCode::UNAUTHORIZED, "authentication required").into_response();
-    resp.headers_mut()
-        .insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Bearer"));
+    let value = crate::oauth::www_authenticate_value(&state.cfg)
+        .and_then(|v| HeaderValue::from_str(&v).ok())
+        .unwrap_or_else(|| HeaderValue::from_static("Bearer"));
+    resp.headers_mut().insert(header::WWW_AUTHENTICATE, value);
     resp
 }
 
@@ -99,24 +103,36 @@ fn forbidden(message: &'static str) -> Response {
 /// requires a credential on every request, and `mcp-remote` sends one.
 pub async fn middleware(State(state): State<AppState>, mut req: Request, next: Next) -> Response {
     let Some(raw) = bearer_from_headers(req.headers()) else {
-        return challenge();
+        return challenge(&state);
     };
     if !raw.starts_with(api_tokens::TOKEN_PREFIX) {
-        return challenge();
+        return challenge(&state);
     }
     let Some(pool) = state.db.as_ref() else {
-        return challenge();
+        return challenge(&state);
     };
 
     let prefix_len = state.cfg.auth.api_tokens.prefix_visible_chars as usize;
     let row = match api_tokens::lookup_by_raw(pool, raw, prefix_len).await {
         Ok(api_tokens::LookupOutcome::Active(row)) => row,
-        Ok(api_tokens::LookupOutcome::Invalid) => return challenge(),
+        Ok(api_tokens::LookupOutcome::Invalid) => return challenge(&state),
         Err(err) => {
             tracing::warn!(target: "mcp", error = %err, "mcp token lookup failed");
-            return challenge();
+            return challenge(&state);
         }
     };
+
+    // Audience binding (RFC 8707): an OAuth-minted token carries the MCP
+    // resource URI; it must match ours. A token minted for any other resource
+    // is rejected — we never honour a token issued for a different audience. A
+    // `None` audience is a manually-minted static token (the documented non-
+    // OAuth convenience), accepted as before.
+    if let Some(aud) = row.audience.as_deref() {
+        let resource = state.cfg.mcp.resource_uri.trim_end_matches('/');
+        if resource.is_empty() || aud.trim_end_matches('/') != resource {
+            return challenge(&state);
+        }
+    }
 
     // The connector is single-org: the org comes from the token binding only.
     let Some(org) = row.org else {
@@ -131,7 +147,7 @@ pub async fn middleware(State(state): State<AppState>, mut req: Request, next: N
         Ok(false) => return forbidden("the token owner is no longer a member of this organization"),
         Err(err) => {
             tracing::warn!(target: "mcp", error = %err, "mcp membership check failed");
-            return challenge();
+            return challenge(&state);
         }
     }
 

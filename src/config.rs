@@ -77,11 +77,41 @@ pub struct AppConfig {
 /// Origin check (DNS-rebinding defense): empty disables it, and a request with
 /// no `Origin` header always passes — non-browser clients like `mcp-remote`
 /// send none, browser connectors send their own origin.
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct McpConfig {
     pub enabled: bool,
     pub allowed_origins: Vec<String>,
+    /// Canonical absolute URI of the MCP endpoint — the OAuth resource
+    /// identifier (RFC 8707 audience) and the `resource` value in the RFC 9728
+    /// protected-resource metadata. e.g. `https://mcp.uptimepage.dev/mcp`.
+    /// Empty disables OAuth audience binding (static-token mode only).
+    pub resource_uri: String,
+    /// Enable the OAuth 2.1 authorization-server endpoints (`/oauth/*` +
+    /// discovery metadata) that back the one-click connector. Requires
+    /// `resource_uri` and `auth.public_base_url` to be real HTTPS origins.
+    pub oauth_enabled: bool,
+    /// Access-token lifetime in seconds (short; auto-renewed via the rotating
+    /// refresh token). The *connection* lifetime is the user's consent choice,
+    /// which governs the refresh token. Default 1 hour.
+    pub access_token_ttl_secs: u32,
+}
+
+/// 1 hour — short access tokens, renewed by the refresh token.
+fn default_access_token_ttl_secs() -> u32 {
+    3600
+}
+
+impl Default for McpConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            allowed_origins: Vec::new(),
+            resource_uri: String::new(),
+            oauth_enabled: false,
+            access_token_ttl_secs: default_access_token_ttl_secs(),
+        }
+    }
 }
 
 /// `[marketing]`. Optional apex/`www` marketing site + blog served from

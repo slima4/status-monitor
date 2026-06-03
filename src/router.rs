@@ -25,6 +25,13 @@ use crate::{api, web};
 /// this function so a future call site can't silently miss either
 /// guard.
 pub fn build_app_router(state: AppState, shutdown: CancellationToken) -> Router {
+    // Purge expired OAuth codes + refresh tokens on a timer (no-op unless the
+    // OAuth connector is enabled and a DB is wired).
+    if state.cfg.mcp.oauth_enabled
+        && let Some(pool) = state.db.clone()
+    {
+        crate::oauth::spawn_sweeper(pool, shutdown.clone());
+    }
     let merged = api::build_router(state.clone(), shutdown).merge(web::routes(state.clone()));
     // Read MCP server at `/mcp` (no-op unless `cfg.mcp.enabled`). Mounted before
     // the cross-cutting layers so CSRF (Bearer-exempt) and tenant-host isolation

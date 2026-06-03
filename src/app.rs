@@ -171,6 +171,38 @@ pub fn assert_per_org_status_config(cfg: &AppConfig) {
     assert_cookie_scope_safe(cfg);
 }
 
+/// Refuses to boot when the MCP OAuth server is enabled but its identity URIs
+/// are missing or not HTTPS. Without this the AS would mint tokens whose
+/// audience is the empty/wrong resource and the resource server would then
+/// reject them — a silently-broken connector. Both URIs are also the OAuth
+/// `issuer` / `resource` identifiers, which MUST be absolute HTTPS in
+/// production. Loopback HTTP is allowed for local development.
+pub fn assert_mcp_oauth_config(cfg: &AppConfig) {
+    if !cfg.mcp.oauth_enabled {
+        return;
+    }
+    let check = |label: &str, raw: &str| {
+        let url = url::Url::parse(raw).unwrap_or_else(|_| {
+            panic!("{label} must be a valid absolute URL when mcp.oauth_enabled = true (got {raw:?})")
+        });
+        let loopback = matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "::1"));
+        if url.scheme() != "https" && !(url.scheme() == "http" && loopback) {
+            panic!(
+                "{label} must be https (or http on loopback for dev) when \
+                 mcp.oauth_enabled = true (got {raw:?})"
+            );
+        }
+    };
+    if cfg.mcp.resource_uri.trim().is_empty() {
+        panic!("mcp.oauth_enabled = true requires mcp.resource_uri to be set");
+    }
+    if cfg.auth.public_base_url.trim().is_empty() {
+        panic!("mcp.oauth_enabled = true requires auth.public_base_url (the OAuth issuer) to be set");
+    }
+    check("mcp.resource_uri", &cfg.mcp.resource_uri);
+    check("auth.public_base_url", &cfg.auth.public_base_url);
+}
+
 /// Refuses to boot when `auth.session.cookie_domain` overlaps the per-org
 /// status subdomain. Without this, a single config edit on the operator
 /// host can leak `_sm_session` to every tenant's status page.
@@ -269,7 +301,7 @@ impl AppState {
 
 #[cfg(test)]
 mod tests {
-    use super::{assert_cookie_scope_safe, assert_per_org_status_config};
+    use super::{assert_cookie_scope_safe, assert_mcp_oauth_config, assert_per_org_status_config};
     use crate::config::AppConfig;
 
     /// Run `f` with the default panic hook muted (so the expected-panic
@@ -375,5 +407,51 @@ mod tests {
         cfg.public_status.base_domain = "example.com".into();
         cfg.auth.session.cookie_domain = ".example.com".into();
         assert_cookie_scope_safe(&cfg);
+    }
+
+    fn oauth_on_cfg() -> AppConfig {
+        let mut cfg = AppConfig::load().expect("config");
+        cfg.mcp.oauth_enabled = true;
+        cfg.mcp.resource_uri = "https://mcp.example.com/mcp".into();
+        cfg.auth.public_base_url = "https://app.example.com".into();
+        cfg
+    }
+
+    #[test]
+    fn oauth_config_valid_https_passes() {
+        assert_mcp_oauth_config(&oauth_on_cfg());
+    }
+
+    #[test]
+    fn oauth_disabled_skips_all_checks() {
+        let mut cfg = oauth_on_cfg();
+        cfg.mcp.oauth_enabled = false;
+        cfg.mcp.resource_uri = String::new();
+        cfg.auth.public_base_url = String::new();
+        assert_mcp_oauth_config(&cfg);
+    }
+
+    #[test]
+    fn oauth_on_with_empty_resource_panics() {
+        let mut cfg = oauth_on_cfg();
+        cfg.mcp.resource_uri = String::new();
+        assert_panics("requires mcp.resource_uri", move || {
+            assert_mcp_oauth_config(&cfg)
+        });
+    }
+
+    #[test]
+    fn oauth_on_with_non_https_resource_panics() {
+        let mut cfg = oauth_on_cfg();
+        cfg.mcp.resource_uri = "http://mcp.example.com/mcp".into();
+        assert_panics("must be https", move || assert_mcp_oauth_config(&cfg));
+    }
+
+    #[test]
+    fn oauth_on_with_loopback_http_issuer_passes() {
+        let mut cfg = oauth_on_cfg();
+        cfg.mcp.resource_uri = "http://localhost:9000/mcp".into();
+        cfg.auth.public_base_url = "http://localhost:8080".into();
+        assert_mcp_oauth_config(&cfg);
     }
 }

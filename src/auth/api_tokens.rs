@@ -62,6 +62,10 @@ pub struct ApiTokenRow {
     pub scopes: ScopeSet,
     /// Org binding: `Some` pins the token to one org; `None` is unbound.
     pub org: Option<OrgId>,
+    /// RFC 8707 audience for OAuth-minted tokens (the MCP resource URI). `None`
+    /// for manually-minted tokens. The MCP resource server requires this to
+    /// match its canonical URI when present.
+    pub audience: Option<String>,
 }
 
 /// One row returned by [`list_for_user`]. `token_prefix` is the only piece of
@@ -135,7 +139,8 @@ fn slice_prefix(raw: &str, prefix_visible_chars: usize) -> &str {
 pub async fn count_for_user(pool: &PgPool, user: UserId) -> Result<u32> {
     let (n,): (i64,) = sqlx::query_as(
         "SELECT COUNT(*) FROM api_tokens \
-         WHERE user_id = $1 AND (expires_at IS NULL OR expires_at > now())",
+         WHERE user_id = $1 AND oauth_client_id IS NULL \
+           AND (expires_at IS NULL OR expires_at > now())",
     )
     .bind(user.0)
     .fetch_one(pool)
@@ -173,7 +178,8 @@ pub async fn create(
 
     let (current,): (i64,) = sqlx::query_as(
         "SELECT count(*) FROM api_tokens \
-         WHERE user_id = $1 AND (expires_at IS NULL OR expires_at > now())",
+         WHERE user_id = $1 AND oauth_client_id IS NULL \
+           AND (expires_at IS NULL OR expires_at > now())",
     )
     .bind(user.0)
     .fetch_one(&mut *tx)
@@ -216,6 +222,108 @@ pub async fn create(
     })
 }
 
+/// Mint an OAuth connector access token: an org-bound, expiring, audience-
+/// stamped (`sm_live_`) token issued by the OAuth token endpoint behind user
+/// consent. Distinct from [`create`]:
+///  - It does **not** count against the manual per-user token cap — OAuth
+///    tokens are a separate class (`oauth_client_id IS NOT NULL`), kept bounded
+///    instead by revoking the prior token for the same
+///    `(user, org, client, audience)` before inserting, so a re-consent is
+///    idempotent rather than additive.
+///  - `audience` (RFC 8707) and `oauth_client_id` are stamped so the resource
+///    server can reject tokens minted for any other resource.
+///
+/// The revoke + insert run under the same per-user advisory lock so two
+/// concurrent consents for one client can't both survive.
+#[allow(clippy::too_many_arguments)]
+pub async fn mint_oauth(
+    pool: &PgPool,
+    user: UserId,
+    org: OrgId,
+    name: &str,
+    scopes: &ScopeSet,
+    expires_at: DateTime<Utc>,
+    prefix_visible_chars: usize,
+    audience: &str,
+    oauth_client_id: &str,
+) -> Result<CreatedToken> {
+    let raw = generate_raw();
+    let prefix = slice_prefix(&raw, prefix_visible_chars).to_string();
+    let hash = token_hash::hash(&raw)?;
+
+    let mut tx = pool.begin().await.context("api_tokens::mint_oauth: begin")?;
+    advisory_xact_lock(&mut *tx, &user_lock_key(user))
+        .await
+        .context("api_tokens::mint_oauth: advisory lock")?;
+
+    // Idempotent re-consent: drop the previous connector token for this exact
+    // (user, org, client, audience) so the user never accumulates stale grants.
+    sqlx::query(
+        "DELETE FROM api_tokens \
+         WHERE user_id = $1 AND org_id = $2 AND oauth_client_id = $3 AND audience = $4",
+    )
+    .bind(user.0)
+    .bind(org.0)
+    .bind(oauth_client_id)
+    .bind(audience)
+    .execute(&mut *tx)
+    .await
+    .context("api_tokens::mint_oauth: revoke prior")?;
+
+    let (id, created_at): (Uuid, DateTime<Utc>) = sqlx::query_as(
+        "INSERT INTO api_tokens \
+           (user_id, name, token_hash, token_prefix, scopes, org_id, expires_at, \
+            audience, oauth_client_id) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) \
+         RETURNING id, created_at",
+    )
+    .bind(user.0)
+    .bind(name)
+    .bind(&hash)
+    .bind(&prefix)
+    .bind(sqlx::types::Json(scopes.to_strings()))
+    .bind(org.0)
+    .bind(expires_at)
+    .bind(audience)
+    .bind(oauth_client_id)
+    .fetch_one(&mut *tx)
+    .await
+    .context("api_tokens::mint_oauth: insert")?;
+    tx.commit().await.context("api_tokens::mint_oauth: commit")?;
+    Ok(CreatedToken {
+        id,
+        name: name.to_string(),
+        token: raw,
+        prefix,
+        created_at,
+    })
+}
+
+/// Revoke the connector's OAuth access token(s) for one
+/// `(user, org, client, audience)`. Called when a refresh-token replay is
+/// detected (token theft) so the leaked access token dies alongside the refresh
+/// family. Safe no-op when none exist.
+pub async fn revoke_oauth(
+    pool: &PgPool,
+    user: UserId,
+    org: OrgId,
+    oauth_client_id: &str,
+    audience: &str,
+) -> Result<()> {
+    sqlx::query(
+        "DELETE FROM api_tokens \
+         WHERE user_id = $1 AND org_id = $2 AND oauth_client_id = $3 AND audience = $4",
+    )
+    .bind(user.0)
+    .bind(org.0)
+    .bind(oauth_client_id)
+    .bind(audience)
+    .execute(pool)
+    .await
+    .context("api_tokens::revoke_oauth")?;
+    Ok(())
+}
+
 /// List the caller's tokens. Prefix-only; the raw token can never be
 /// reconstructed from this output.
 pub async fn list_for_user(pool: &PgPool, user: UserId) -> Result<Vec<ApiTokenListing>> {
@@ -256,9 +364,10 @@ pub async fn lookup_by_raw(
         Option<DateTime<Utc>>,
         sqlx::types::Json<Vec<String>>,
         Option<Uuid>,
+        Option<String>,
     );
     let rows: Vec<CandidateRow> = sqlx::query_as(
-        "SELECT id, user_id, name, token_hash, expires_at, scopes, org_id \
+        "SELECT id, user_id, name, token_hash, expires_at, scopes, org_id, audience \
          FROM api_tokens WHERE token_prefix = $1",
     )
     .bind(prefix)
@@ -267,7 +376,7 @@ pub async fn lookup_by_raw(
     .context("api_tokens::lookup_by_raw")?;
 
     let now = Utc::now();
-    for (id, user_id, name, hash, expires_at, scopes, org_id) in rows {
+    for (id, user_id, name, hash, expires_at, scopes, org_id, audience) in rows {
         if expires_at.is_some_and(|e| e <= now) {
             continue;
         }
@@ -279,6 +388,7 @@ pub async fn lookup_by_raw(
                 expires_at,
                 scopes: ScopeSet::from_strs(scopes.0.iter().map(String::as_str)),
                 org: org_id.map(OrgId),
+                audience,
             }));
         }
     }

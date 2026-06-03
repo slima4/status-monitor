@@ -112,6 +112,12 @@ pub fn routes(state: AppState) -> Router {
             );
     }
 
+    // OAuth 2.1 authorization-server + RFC 9728 resource metadata for the MCP
+    // connector. Merged here so the endpoints inherit cookies (the consent flow
+    // reads the session) + CSRF + the cross-cutting layers. Gated internally on
+    // mcp config.
+    r = r.merge(crate::oauth::routes(cfg));
+
     assets::mount_static(r)
         .fallback(error::not_found)
         .layer(CookieManagerLayer::new())

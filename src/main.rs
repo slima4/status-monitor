@@ -120,6 +120,7 @@ async fn main() -> Result<()> {
     cfg.validate_observability()?;
     let tracing_guard = observability::tracing::init(&cfg.observability);
     uptimepage::app::assert_per_org_status_config(&cfg);
+    uptimepage::app::assert_mcp_oauth_config(&cfg);
     // A bad quota/rate/interval number is a clean startup config error,
     // never a `.expect()` crash-loop in router/layer construction (I6).
     cfg.validate_quotas_and_limits()?;
