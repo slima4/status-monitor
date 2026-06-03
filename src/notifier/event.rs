@@ -4,7 +4,9 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 use uuid::Uuid;
 
-use crate::domain::{CheckResult, CheckStatus, OrgId, Target};
+use crate::domain::{
+    CheckResult, CheckStatus, IncidentSeverity, IncidentUrgency, NotificationReason, OrgId, Target,
+};
 
 /// Result-plus-target envelope produced by the worker pool and consumed by the
 /// alert engine. Lives here (next to AlertEvent) so the worker's fan-out
@@ -49,4 +51,39 @@ pub struct AlertEvent {
     pub last_status: CheckStatus,
     pub last_error: Option<String>,
     pub timestamp: DateTime<Utc>,
+}
+
+/// The incident-shaped payload handed to a transport when paging is driven by
+/// the incident lifecycle rather than the raw per-result threshold. Serialized
+/// as-is for the generic webhook channel.
+#[derive(Debug, Clone, Serialize)]
+pub struct IncidentNotice {
+    pub incident_id: Uuid,
+    pub reason: NotificationReason,
+    /// Monitor name; `None` for a manual incident not tied to a monitor.
+    pub monitor_name: Option<String>,
+    pub title: Option<String>,
+    pub severity: IncidentSeverity,
+    pub urgency: IncidentUrgency,
+    pub started_at: DateTime<Utc>,
+    pub ended_at: Option<DateTime<Utc>>,
+    pub error_sample: Option<String>,
+    /// Deep link to the incident detail page, when a base URL is configured.
+    pub url: Option<String>,
+}
+
+impl IncidentNotice {
+    /// Human label: monitor name, else title, else a generic fallback.
+    pub fn label(&self) -> &str {
+        self.monitor_name
+            .as_deref()
+            .or(self.title.as_deref())
+            .unwrap_or("incident")
+    }
+
+    /// Whole-minute duration for a resolved notice, when `ended_at` is set.
+    pub fn duration_minutes(&self) -> Option<i64> {
+        self.ended_at
+            .map(|end| (end - self.started_at).num_minutes().max(0))
+    }
 }

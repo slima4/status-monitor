@@ -346,3 +346,19 @@ oauth_enabled = false
 # rotating refresh token). The connection lifetime is the user's consent choice.
 # Default 1 hour.
 access_token_ttl_secs = 3600
+
+[escalation]
+# Incident paging. When on, an open incident pages the monitor's bound channels
+# and the legacy direct alert dispatch is suppressed (the incident is the single
+# source of down/up notification). When off, incidents still open + show in the
+# console but page no one, and the legacy alert path keeps firing.
+enabled = true
+
+# How often failed pages are re-attempted.
+tick_interval_secs = 15
+
+# Backpressure: max pages re-sent per sweep.
+max_pages_per_tick = 500
+
+# Give up paging a channel after this many failed attempts.
+max_attempts = 5

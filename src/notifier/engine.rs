@@ -138,6 +138,12 @@ pub struct AlertEngine {
     /// that tenant's channel. `None` is cached too, so a binding to a deleted
     /// channel doesn't hammer the store on every check.
     cache: AlertChannelCache,
+    /// When set, the incident lifecycle owns down/up notification and this
+    /// engine suppresses its direct per-binding dispatch — otherwise every
+    /// outage pages twice (once here, once via the escalation engine). Today
+    /// it's a global switch (every monitor opens an incident); it becomes a
+    /// per-monitor decision once escalation policies attach to a monitor.
+    incident_paging_active: bool,
 }
 
 impl AlertEngine {
@@ -146,6 +152,7 @@ impl AlertEngine {
         channels: Arc<dyn NotificationChannelStore>,
         http: crate::http_outbound::OutboundHttpClient,
         cache: AlertChannelCache,
+        incident_paging_active: bool,
     ) -> Self {
         Self {
             rx,
@@ -153,6 +160,7 @@ impl AlertEngine {
             http,
             state: Arc::new(Mutex::new(HashMap::new())),
             cache,
+            incident_paging_active,
         }
     }
 
@@ -215,6 +223,9 @@ impl AlertEngine {
     }
 
     async fn handle(&self, signal: AlertSignal) {
+        if self.incident_paging_active {
+            return;
+        }
         let target = signal.target;
         if target.alerts.is_empty() {
             return;
@@ -364,6 +375,7 @@ mod tests {
                 crate::security::SsrfGuard::relaxed_for_tests(),
             ),
             AlertChannelCache::new(),
+            false,
         )
     }
 
@@ -430,6 +442,7 @@ mod tests {
                 crate::security::SsrfGuard::relaxed_for_tests(),
             ),
             cache.clone(),
+            false,
         );
         assert!(engine.resolve(test_org(), ch.id).await.is_some());
         store.delete(test_org(), ch.id).await.unwrap();
@@ -645,6 +658,107 @@ mod tests {
         assert_eq!(
             after.consecutive_non_up, 4,
             "rollback must preserve the failure count for the eventual Recovered payload",
+        );
+    }
+
+    #[tokio::test]
+    async fn incident_paging_active_suppresses_all_direct_dispatch() {
+        // Reconciliation guard: when the incident lifecycle owns paging, this
+        // engine must not also fire — else every outage double-pages. A down
+        // signal with a real binding must leave no state and attempt no send.
+        use crate::domain::{
+            AlertBinding, CheckResult, CheckSpec, CheckStatus, ExpectedStatus, HttpCheck,
+            HttpMethod, NewNotificationChannel, Target, TargetAlerts,
+        };
+        use chrono::Utc;
+        use std::collections::HashMap;
+        use std::time::Duration as StdDuration;
+
+        let store: Arc<dyn NotificationChannelStore> =
+            Arc::new(InMemoryNotificationChannelStore::new());
+        let ch = store
+            .create(
+                test_org(),
+                NewNotificationChannel {
+                    name: "ops".into(),
+                    config: ChannelConfig::Slack {
+                        webhook_url: "https://hooks.slack.com/x".into(),
+                    },
+                    enabled: true,
+                },
+                crate::domain::WriteSource::Ui,
+                10,
+            )
+            .await
+            .unwrap();
+
+        let (_tx, rx) = mpsc::channel(4);
+        let engine = AlertEngine::new(
+            rx,
+            store,
+            crate::http_outbound::build_outbound_client(
+                crate::security::SsrfGuard::relaxed_for_tests(),
+            ),
+            AlertChannelCache::new(),
+            true, // incident paging active → suppress
+        );
+
+        let target = Arc::new(Target {
+            id: Uuid::now_v7(),
+            name: "api".into(),
+            check: CheckSpec::Http(HttpCheck {
+                url: url::Url::parse("https://example.com/").unwrap(),
+                method: HttpMethod::Get,
+                timeout: StdDuration::from_secs(5),
+                follow_redirects: false,
+                max_redirects: 0,
+                expected_status: ExpectedStatus::Exact(200),
+                expected_body_contains: None,
+                headers: HashMap::new(),
+                body: None,
+                verify_tls: true,
+                basic_auth: None,
+                bearer_token: None,
+            }),
+            interval: StdDuration::from_secs(30),
+            enabled: true,
+            tags: vec![],
+            alerts: TargetAlerts(vec![AlertBinding {
+                channel_id: ch.id,
+                after_failures: 1,
+                notify_recovery: true,
+            }]),
+            group_name: None,
+            owner_user_id: None,
+            write_source: crate::domain::WriteSource::Ui,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        });
+
+        engine
+            .handle(AlertSignal {
+                target: target.clone(),
+                org_id: test_org(),
+                result: CheckResult {
+                    target_id: target.id,
+                    org_id: test_org().0,
+                    timestamp: Utc::now(),
+                    status: CheckStatus::Down,
+                    duration_ms: 0,
+                    dns_ms: None,
+                    connect_ms: None,
+                    tls_ms: None,
+                    ttfb_ms: None,
+                    response_code: None,
+                    response_size: None,
+                    error: Some("outage".into()),
+                },
+            })
+            .await;
+
+        assert!(
+            engine.state.lock().is_empty(),
+            "suppressed engine must not advance any alert state"
         );
     }
 

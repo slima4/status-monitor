@@ -69,6 +69,36 @@ pub struct AppConfig {
     pub marketing: MarketingConfig,
     #[serde(default)]
     pub mcp: McpConfig,
+    #[serde(default)]
+    pub escalation: EscalationConfig,
+}
+
+/// `[escalation]`. Incident paging engine. When `enabled`, an open incident
+/// pages the monitor's bound notification channels and the legacy direct
+/// alert dispatch is suppressed (the incident becomes the single source of
+/// down/up notification). When disabled, incidents still open and show in the
+/// console but page no one — the legacy alert path keeps firing.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct EscalationConfig {
+    pub enabled: bool,
+    /// Retry-sweep cadence: how often failed pages are re-attempted.
+    pub tick_interval_secs: u64,
+    /// Backpressure: max pages re-sent per sweep.
+    pub max_pages_per_tick: u32,
+    /// Give up paging a channel after this many failed attempts.
+    pub max_attempts: u32,
+}
+
+impl Default for EscalationConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            tick_interval_secs: 15,
+            max_pages_per_tick: 500,
+            max_attempts: 5,
+        }
+    }
 }
 
 /// `[mcp]`. Read-only Model Context Protocol server at `/mcp` (Streamable
@@ -843,6 +873,18 @@ impl AppConfig {
             return Err(crate::error::AppError::Other(anyhow::anyhow!(
                 "checker.rdap_max_inflight must be >= 1"
             )));
+        }
+        if self.escalation.enabled {
+            ge1_u64(
+                self.escalation.tick_interval_secs,
+                "escalation.tick_interval_secs",
+            )?;
+            if self.escalation.max_attempts < 1 {
+                return Err(crate::error::AppError::Other(anyhow::anyhow!(
+                    "escalation.max_attempts must be >= 1 (got {})",
+                    self.escalation.max_attempts
+                )));
+            }
         }
         Ok(())
     }

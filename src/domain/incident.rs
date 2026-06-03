@@ -4,6 +4,7 @@ use serde_json::Value;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
+use super::org::OrgId;
 use super::public::{IncidentSeverity, IncidentStatusPhase, PublicIncidentUpdate};
 use super::result::CheckStatus;
 use super::user::UserId;
@@ -636,6 +637,22 @@ pub struct IncidentNotification {
     pub error: Option<String>,
     pub created_at: DateTime<Utc>,
     #[schema(nullable = true)]
+    pub sent_at: Option<DateTime<Utc>>,
+}
+
+/// A paging delivery-log row to persist. The store stamps `id`/`created_at`.
+#[derive(Debug, Clone)]
+pub struct NewIncidentNotification {
+    pub org: OrgId,
+    pub incident_id: Uuid,
+    pub escalation_level: Option<i32>,
+    pub target_user_id: Option<UserId>,
+    pub channel_id: Option<Uuid>,
+    pub transport: String,
+    pub reason: NotificationReason,
+    pub status: NotificationStatus,
+    pub attempt: i32,
+    pub error: Option<String>,
     pub sent_at: Option<DateTime<Utc>>,
 }
 

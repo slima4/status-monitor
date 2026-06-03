@@ -20,9 +20,10 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::domain::{
-    ActorType, IncidentEvent, IncidentEventKind, IncidentOrigin, IncidentSeverity, IncidentState,
-    IncidentTransition, IncidentUrgency, IncidentVisibility, NewManualIncident, OpsIncident, OrgId,
-    TransitionError, UserId, next_state,
+    ActorType, IncidentEvent, IncidentEventKind, IncidentNotification, IncidentOrigin,
+    IncidentSeverity, IncidentState, IncidentTransition, IncidentUrgency, IncidentVisibility,
+    NewIncidentNotification, NewManualIncident, NotificationReason, NotificationStatus, OpsIncident,
+    OrgId, TransitionError, UserId, next_state,
 };
 use crate::error::Result;
 use crate::storage::locks::{advisory_xact_lock, incident_lock_key};
@@ -67,6 +68,20 @@ pub struct IncidentOpsFilter {
     pub state: Option<IncidentState>,
     pub limit: Option<usize>,
     pub offset: usize,
+}
+
+/// A failed paging row the escalation engine should re-attempt. Carries the
+/// owning `org` (absent from the public [`IncidentNotification`]) so the engine
+/// can re-resolve the incident, monitor, and channel to rebuild the message.
+#[derive(Debug, Clone)]
+pub struct PendingNotification {
+    pub id: Uuid,
+    pub org: OrgId,
+    pub incident_id: Uuid,
+    pub channel_id: Option<Uuid>,
+    pub transport: String,
+    pub reason: NotificationReason,
+    pub attempt: i32,
 }
 
 #[async_trait]
@@ -121,6 +136,43 @@ pub trait IncidentOpsStore: Send + Sync {
         message: String,
     ) -> Result<Option<IncidentEvent>>;
     async fn timeline(&self, org: OrgId, id: Uuid) -> Result<Vec<IncidentEvent>>;
+    /// Append one internal timeline entry outside a lifecycle transition (e.g.
+    /// the escalation engine logging a `notified`/`escalated` event).
+    async fn append_event(
+        &self,
+        org: OrgId,
+        id: Uuid,
+        kind: IncidentEventKind,
+        actor: Actor,
+        message: Option<String>,
+    ) -> Result<()>;
+    /// Every paging-log row for an incident — the engine reads these to dedup
+    /// (never page the same channel+reason twice) before sending.
+    async fn notifications_for(
+        &self,
+        org: OrgId,
+        id: Uuid,
+    ) -> Result<Vec<IncidentNotification>>;
+    /// Persist one paging attempt. Returns the new row id.
+    async fn record_notification(&self, n: NewIncidentNotification) -> Result<Uuid>;
+    /// Cross-org failed pages still under the attempt cap, oldest first — the
+    /// engine's retry sweep.
+    async fn pending_notifications(
+        &self,
+        limit: usize,
+        max_attempts: i32,
+    ) -> Result<Vec<PendingNotification>>;
+    /// Update a paging row after a delivery attempt. `org`-scoped to keep the
+    /// tenant-isolation invariant even though ids today come from the engine.
+    async fn mark_notification(
+        &self,
+        org: OrgId,
+        id: Uuid,
+        status: NotificationStatus,
+        attempt: i32,
+        error: Option<String>,
+        sent_at: Option<DateTime<Utc>>,
+    ) -> Result<()>;
 }
 
 // ── Postgres impl ────────────────────────────────────────────────────────
@@ -217,6 +269,42 @@ fn row_to_event(r: EventRow) -> IncidentEvent {
         actor_id: r.actor_id,
         detail: r.detail,
         message: r.message,
+    }
+}
+
+const NOTIF_COLS: &str = "id, incident_id, escalation_level, target_user_id, channel_id, \
+     transport, reason, status, attempt, error, created_at, sent_at";
+
+#[derive(sqlx::FromRow)]
+struct NotifRow {
+    id: Uuid,
+    incident_id: Uuid,
+    escalation_level: Option<i32>,
+    target_user_id: Option<UserId>,
+    channel_id: Option<Uuid>,
+    transport: String,
+    reason: String,
+    status: String,
+    attempt: i32,
+    error: Option<String>,
+    created_at: DateTime<Utc>,
+    sent_at: Option<DateTime<Utc>>,
+}
+
+fn row_to_notif(r: NotifRow) -> IncidentNotification {
+    IncidentNotification {
+        id: r.id,
+        incident_id: r.incident_id,
+        escalation_level: r.escalation_level,
+        target_user_id: r.target_user_id,
+        channel_id: r.channel_id,
+        transport: r.transport,
+        reason: NotificationReason::from_db_str(&r.reason),
+        status: NotificationStatus::from_db_str(&r.status),
+        attempt: r.attempt,
+        error: r.error,
+        created_at: r.created_at,
+        sent_at: r.sent_at,
     }
 }
 
@@ -569,6 +657,143 @@ impl IncidentOpsStore for PgIncidentOpsStore {
         .map_err(|e| anyhow::anyhow!("incident timeline: {e}"))?;
         Ok(rows.into_iter().map(row_to_event).collect())
     }
+
+    async fn append_event(
+        &self,
+        org: OrgId,
+        id: Uuid,
+        kind: IncidentEventKind,
+        actor: Actor,
+        message: Option<String>,
+    ) -> Result<()> {
+        // SELECT-guarded so an event can't be appended to another tenant's (or
+        // a missing) incident.
+        sqlx::query(
+            r#"INSERT INTO incident_events (org_id, incident_id, kind, actor_type, actor_id, message)
+               SELECT i.org_id, $1, $2, $3, $4, $5
+               FROM incidents i WHERE i.id = $1 AND i.org_id = $6"#,
+        )
+        .bind(id)
+        .bind(kind.as_db_str())
+        .bind(actor.actor_type().as_db_str())
+        .bind(actor.user_id())
+        .bind(message)
+        .bind(org.0)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| anyhow::anyhow!("append incident_event: {e}"))?;
+        Ok(())
+    }
+
+    async fn notifications_for(
+        &self,
+        org: OrgId,
+        id: Uuid,
+    ) -> Result<Vec<IncidentNotification>> {
+        let sql = format!(
+            "SELECT {NOTIF_COLS} FROM incident_notifications \
+             WHERE incident_id = $1 AND org_id = $2 ORDER BY created_at ASC"
+        );
+        let rows: Vec<NotifRow> = sqlx::query_as(&sql)
+            .bind(id)
+            .bind(org.0)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| anyhow::anyhow!("notifications_for: {e}"))?;
+        Ok(rows.into_iter().map(row_to_notif).collect())
+    }
+
+    async fn record_notification(&self, n: NewIncidentNotification) -> Result<Uuid> {
+        let row: (Uuid,) = sqlx::query_as(
+            r#"INSERT INTO incident_notifications
+                 (org_id, incident_id, escalation_level, target_user_id, channel_id,
+                  transport, reason, status, attempt, error, sent_at)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+               RETURNING id"#,
+        )
+        .bind(n.org.0)
+        .bind(n.incident_id)
+        .bind(n.escalation_level)
+        .bind(n.target_user_id)
+        .bind(n.channel_id)
+        .bind(n.transport)
+        .bind(n.reason.as_db_str())
+        .bind(n.status.as_db_str())
+        .bind(n.attempt)
+        .bind(n.error)
+        .bind(n.sent_at)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| anyhow::anyhow!("record_notification: {e}"))?;
+        Ok(row.0)
+    }
+
+    async fn pending_notifications(
+        &self,
+        limit: usize,
+        max_attempts: i32,
+    ) -> Result<Vec<PendingNotification>> {
+        let cap = (limit as i64).clamp(1, 1000);
+        #[derive(sqlx::FromRow)]
+        struct Row {
+            id: Uuid,
+            org_id: Uuid,
+            incident_id: Uuid,
+            channel_id: Option<Uuid>,
+            transport: String,
+            reason: String,
+            attempt: i32,
+        }
+        let rows: Vec<Row> = sqlx::query_as(
+            r#"SELECT id, org_id, incident_id, channel_id, transport, reason, attempt
+               FROM incident_notifications
+               WHERE status IN ('queued','failed') AND attempt < $1
+               ORDER BY created_at ASC LIMIT $2"#,
+        )
+        .bind(max_attempts)
+        .bind(cap)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| anyhow::anyhow!("pending_notifications: {e}"))?;
+        Ok(rows
+            .into_iter()
+            .map(|r| PendingNotification {
+                id: r.id,
+                org: OrgId(r.org_id),
+                incident_id: r.incident_id,
+                channel_id: r.channel_id,
+                transport: r.transport,
+                reason: NotificationReason::from_db_str(&r.reason),
+                attempt: r.attempt,
+            })
+            .collect())
+    }
+
+    async fn mark_notification(
+        &self,
+        org: OrgId,
+        id: Uuid,
+        status: NotificationStatus,
+        attempt: i32,
+        error: Option<String>,
+        sent_at: Option<DateTime<Utc>>,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"UPDATE incident_notifications
+               SET status = $3, attempt = $4, error = $5, sent_at = $6
+               WHERE id = $1 AND org_id = $2"#,
+        )
+        .bind(id)
+        .bind(org.0)
+        .bind(status.as_db_str())
+        .bind(attempt)
+        .bind(error)
+        .bind(sent_at)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| anyhow::anyhow!("mark_notification: {e}"))?;
+        Ok(())
+    }
 }
 
 // ── In-memory impl (tests) ──────────────────────────────────────────────
@@ -582,6 +807,7 @@ pub struct InMemoryIncidentOpsStore {
 struct MemState {
     incidents: Vec<OpsIncident>,
     events: Vec<IncidentEvent>,
+    notifications: Vec<(OrgId, IncidentNotification)>,
 }
 
 impl InMemoryIncidentOpsStore {
@@ -771,6 +997,103 @@ impl IncidentOpsStore for InMemoryIncidentOpsStore {
             .collect();
         out.sort_by_key(|e| e.occurred_at);
         Ok(out)
+    }
+
+    async fn append_event(
+        &self,
+        _org: OrgId,
+        id: Uuid,
+        kind: IncidentEventKind,
+        actor: Actor,
+        message: Option<String>,
+    ) -> Result<()> {
+        let mut g = self.inner.lock();
+        if g.incidents.iter().any(|i| i.id == id) {
+            Self::push_event(&mut g, id, kind, actor, message);
+        }
+        Ok(())
+    }
+
+    async fn notifications_for(
+        &self,
+        _org: OrgId,
+        id: Uuid,
+    ) -> Result<Vec<IncidentNotification>> {
+        Ok(self
+            .inner
+            .lock()
+            .notifications
+            .iter()
+            .filter(|(_, n)| n.incident_id == id)
+            .map(|(_, n)| n.clone())
+            .collect())
+    }
+
+    async fn record_notification(&self, n: NewIncidentNotification) -> Result<Uuid> {
+        let id = Uuid::now_v7();
+        let row = IncidentNotification {
+            id,
+            incident_id: n.incident_id,
+            escalation_level: n.escalation_level,
+            target_user_id: n.target_user_id,
+            channel_id: n.channel_id,
+            transport: n.transport,
+            reason: n.reason,
+            status: n.status,
+            attempt: n.attempt,
+            error: n.error,
+            created_at: Utc::now(),
+            sent_at: n.sent_at,
+        };
+        self.inner.lock().notifications.push((n.org, row));
+        Ok(id)
+    }
+
+    async fn pending_notifications(
+        &self,
+        limit: usize,
+        max_attempts: i32,
+    ) -> Result<Vec<PendingNotification>> {
+        Ok(self
+            .inner
+            .lock()
+            .notifications
+            .iter()
+            .filter(|(_, n)| n.status == NotificationStatus::Failed && n.attempt < max_attempts)
+            .take(limit)
+            .map(|(org, n)| PendingNotification {
+                id: n.id,
+                org: *org,
+                incident_id: n.incident_id,
+                channel_id: n.channel_id,
+                transport: n.transport.clone(),
+                reason: n.reason,
+                attempt: n.attempt,
+            })
+            .collect())
+    }
+
+    async fn mark_notification(
+        &self,
+        org: OrgId,
+        id: Uuid,
+        status: NotificationStatus,
+        attempt: i32,
+        error: Option<String>,
+        sent_at: Option<DateTime<Utc>>,
+    ) -> Result<()> {
+        let mut g = self.inner.lock();
+        if let Some((_, n)) = g
+            .notifications
+            .iter_mut()
+            .find(|(o, n)| *o == org && n.id == id)
+        {
+            n.status = status;
+            n.attempt = attempt;
+            n.error = error;
+            n.sent_at = sent_at;
+        }
+        Ok(())
     }
 }
 

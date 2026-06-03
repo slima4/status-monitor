@@ -26,8 +26,8 @@ pub use check::{
 pub use incident::{
     ActorType, Incident, IncidentEvent, IncidentEventKind, IncidentNarrationUpdate,
     IncidentNotification, IncidentOrigin, IncidentState, IncidentTransition, IncidentUrgency,
-    IncidentVisibility, NewIncidentUpdate, NewManualIncident, NotificationReason,
-    NotificationStatus, OpsIncident, TransitionError, coalesce_incidents,
+    IncidentVisibility, NewIncidentNotification, NewIncidentUpdate, NewManualIncident,
+    NotificationReason, NotificationStatus, OpsIncident, TransitionError, coalesce_incidents,
     coalesce_incidents_bad_only, elapsed_at, next_state,
 };
 pub use maintenance::{

@@ -5,6 +5,7 @@ pub mod config;
 pub mod domain;
 pub mod email;
 pub mod error;
+pub mod escalation;
 pub mod http_client;
 pub mod http_outbound;
 pub mod jobs;

@@ -196,6 +196,12 @@ async fn main() -> Result<()> {
     );
     let (alert_tx, alert_rx) = mpsc::channel(cfg.storage.clickhouse.buffer_size.max(1024));
     let fanout = ResultFanout::new(result_tx.clone(), Some(alert_tx));
+    // Incident-driven paging. When escalation is enabled the incident lifecycle
+    // owns down/up notification and the alert engine suppresses its own dispatch
+    // (one pager, no double-page); the writer + API emit signals on this channel.
+    let escalation_enabled = cfg.escalation.enabled;
+    let (incident_signal_tx, incident_signal_rx) =
+        mpsc::channel::<uptimepage::escalation::IncidentSignal>(1024);
     let host_throttle = Arc::new(uptimepage::worker::host_throttle::HostThrottle::new(
         cfg.checker.per_host_max_inflight,
         cfg.checker.rdap_max_inflight,
@@ -262,6 +268,7 @@ async fn main() -> Result<()> {
                 uptimepage::security::SsrfGuard::from_security_config(&cfg.security),
             ),
             alert_channel_cache.clone(),
+            escalation_enabled,
         );
         tokio::spawn(async move { engine.run(token).await })
     });
@@ -300,17 +307,42 @@ async fn main() -> Result<()> {
         cipher.clone(),
         "incident_writer",
     ));
-    let incident_writer = Arc::new(IncidentWriter::new(
+    let mut writer = IncidentWriter::new(
         admin_repo_for_writer,
         results_store.clone(),
         Arc::new(PgIncidentStore::new(pg_pool)),
         IncidentWriterConfig::default(),
-    ));
+    );
+    if escalation_enabled {
+        writer = writer.with_signals(incident_signal_tx.clone());
+    }
+    let incident_writer = Arc::new(writer);
     let incident_writer_handle: JoinHandle<()> = {
         let writer = incident_writer.clone();
         let token = root.clone();
         tokio::spawn(async move { writer.run(token).await })
     };
+
+    // Incident paging worker: pages bound channels on open/resolve and retries
+    // failed deliveries. Only spawned when enabled; otherwise the alert engine
+    // keeps paging directly and signals on the channel are never consumed.
+    let escalation_engine_handle: Option<JoinHandle<()>> = escalation_enabled.then(|| {
+        let engine = uptimepage::escalation::EscalationEngine::new(
+            incident_signal_rx,
+            Arc::new(uptimepage::storage::PgIncidentOpsStore::new(
+                pg_pool_for_stores.clone(),
+            )),
+            target_store.clone(),
+            notification_channel_store.clone(),
+            uptimepage::http_outbound::build_outbound_client(
+                uptimepage::security::SsrfGuard::from_security_config(&cfg.security),
+            ),
+            cfg.escalation.clone(),
+            cfg.auth.public_base_url.clone(),
+        );
+        let token = root.clone();
+        tokio::spawn(async move { engine.run(token).await })
+    });
 
     let purge_handle: JoinHandle<()> = {
         let pool = pg_pool_for_stores.clone();
@@ -397,6 +429,11 @@ async fn main() -> Result<()> {
         alert_channel_cache,
         cipher,
     );
+    let state = if escalation_enabled {
+        state.with_incident_signals(incident_signal_tx)
+    } else {
+        state
+    };
     // Hot-reload the abuse deny-lists on SIGHUP when enabled (validate then
     // atomic swap; a bad edit is rejected and the running rules stay).
     let abuse_reload_handle: Option<JoinHandle<()>> = uptimepage::security::abuse_reload::spawn(
@@ -511,6 +548,9 @@ async fn main() -> Result<()> {
             oauth_state_cleanup_handle,
         );
         if let Some(h) = alert_engine_handle {
+            let _ = h.await;
+        }
+        if let Some(h) = escalation_engine_handle {
             let _ = h.await;
         }
         if let Some(h) = magic_link_cleanup_handle {

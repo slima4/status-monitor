@@ -25,12 +25,14 @@ use async_trait::async_trait;
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use futures::stream::{self, StreamExt};
 use sqlx::{FromRow, PgPool};
+use tokio::sync::mpsc;
 use tokio::time::{MissedTickBehavior, interval};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use crate::domain::{CheckResult, CheckStatus, OrgId, Target};
+use crate::domain::{CheckResult, CheckStatus, NotificationReason, OrgId, Target};
 use crate::error::Result;
+use crate::escalation::IncidentSignal;
 use crate::storage::ResultsStore;
 use crate::storage::admin::{EnabledTargetStream, PublicTargetCursor};
 use crate::storage::traits::{ClampedRange, TimeRange};
@@ -113,6 +115,9 @@ pub struct IncidentWriter {
     results_store: Arc<dyn ResultsStore>,
     incident_store: Arc<dyn IncidentStore>,
     cfg: IncidentWriterConfig,
+    /// Notifies the escalation engine when an incident opens or auto-resolves.
+    /// `None` leaves the writer paging-agnostic (tests, escalation disabled).
+    signal_tx: Option<mpsc::Sender<IncidentSignal>>,
 }
 
 impl IncidentWriter {
@@ -127,6 +132,28 @@ impl IncidentWriter {
             results_store,
             incident_store,
             cfg,
+            signal_tx: None,
+        }
+    }
+
+    /// Wire the escalation-engine signal channel so opens/resolves page.
+    pub fn with_signals(mut self, tx: mpsc::Sender<IncidentSignal>) -> Self {
+        self.signal_tx = Some(tx);
+        self
+    }
+
+    fn signal(&self, org: OrgId, incident_id: Uuid, reason: NotificationReason) {
+        if let Some(tx) = &self.signal_tx {
+            // Non-blocking: incident detection must never stall behind paging
+            // throughput. A full channel under a mass outage drops the nudge
+            // (logged); the row is still in the DB for a later reconcile.
+            if let Err(err) = tx.try_send(IncidentSignal {
+                org,
+                incident_id,
+                reason,
+            }) {
+                tracing::warn!(%org, %incident_id, error = %err, "incident paging signal dropped");
+            }
         }
     }
 
@@ -229,6 +256,7 @@ impl IncidentWriter {
             Action::Open(new) => {
                 let id = self.incident_store.insert_open(org, new).await?;
                 tracing::info!(%org, target_id = %target.id, incident_id = %id, "incident opened");
+                self.signal(org, id, NotificationReason::Opened);
             }
             Action::Close {
                 incident_id,
@@ -238,6 +266,7 @@ impl IncidentWriter {
                     .close(org, incident_id, ended_at)
                     .await?;
                 tracing::info!(%org, target_id = %target.id, incident_id = %incident_id, "incident closed");
+                self.signal(org, incident_id, NotificationReason::Resolved);
             }
         }
         Ok(())

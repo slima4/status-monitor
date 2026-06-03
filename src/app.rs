@@ -155,6 +155,9 @@ pub struct AppState {
     /// Compiled URL-pattern + domain deny-list. Built once from `cfg.abuse`;
     /// `main` validates the patterns/YAML first so this build is total.
     pub abuse: Arc<AbuseGuard>,
+    /// Escalation-engine signal channel. `Some` only when paging is enabled;
+    /// lifecycle handlers (declare/resolve/reopen) nudge the engine through it.
+    pub incident_signal_tx: Option<tokio::sync::mpsc::Sender<crate::escalation::IncidentSignal>>,
 }
 
 /// Run unconditionally at boot after config parse. Encodes the per-org
@@ -308,6 +311,38 @@ impl AppState {
             rate_limits,
             abuse,
             alert_channel_cache,
+            incident_signal_tx: None,
+        }
+    }
+
+    /// Attach the escalation-engine signal channel so lifecycle handlers can
+    /// page manual incidents. No-op wiring when paging is disabled.
+    pub fn with_incident_signals(
+        mut self,
+        tx: tokio::sync::mpsc::Sender<crate::escalation::IncidentSignal>,
+    ) -> Self {
+        self.incident_signal_tx = Some(tx);
+        self
+    }
+
+    /// Nudge the escalation engine that an incident changed. Best-effort and
+    /// non-blocking: drops (logged) when paging is disabled, the engine has
+    /// shut down, or the channel is saturated — a lifecycle request must never
+    /// block on paging throughput.
+    pub fn signal_incident(
+        &self,
+        org: OrgId,
+        incident_id: uuid::Uuid,
+        reason: crate::domain::NotificationReason,
+    ) {
+        if let Some(tx) = &self.incident_signal_tx
+            && let Err(err) = tx.try_send(crate::escalation::IncidentSignal {
+                org,
+                incident_id,
+                reason,
+            })
+        {
+            tracing::warn!(%org, %incident_id, error = %err, "incident paging signal dropped");
         }
     }
 }

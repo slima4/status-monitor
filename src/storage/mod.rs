@@ -24,7 +24,7 @@ pub use domain_expiry_state::{
 };
 pub use incident_ops::{
     Actor, IncidentOpsFilter, IncidentOpsStore, InMemoryIncidentOpsStore, LifecycleOutcome,
-    PgIncidentOpsStore,
+    PendingNotification, PgIncidentOpsStore,
 };
 pub use incidents::{
     ActiveIncident, InMemoryIncidentNarrationStore, IncidentNarrationStore,

@@ -11,7 +11,10 @@ mod common;
 
 use common::{make_user, unique_slug};
 use sqlx::PgPool;
-use uptimepage::domain::{IncidentState, OrgId};
+use uptimepage::domain::{
+    IncidentEventKind, IncidentState, NewIncidentNotification, NotificationReason,
+    NotificationStatus, OrgId,
+};
 use uptimepage::storage::{
     Actor, IncidentOpsStore, LifecycleOutcome, PgIncidentOpsStore, create_org_with_owner,
 };
@@ -224,5 +227,83 @@ async fn cross_org_cannot_touch_incident_pg() {
             .await
             .unwrap()
             .is_none()
+    );
+}
+
+#[tokio::test]
+#[ignore]
+async fn notification_log_record_retry_and_scope_pg() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let (org, _user, id) = seed(&pool, "incnotif").await;
+    let store = PgIncidentOpsStore::new(pool.clone());
+
+    // A failed paging row (channel_id NULL avoids needing a real channel; the
+    // org-match trigger still validates incident_id ↔ org_id).
+    store
+        .record_notification(NewIncidentNotification {
+            org,
+            incident_id: id,
+            escalation_level: Some(0),
+            target_user_id: None,
+            channel_id: None,
+            transport: "slack".into(),
+            reason: NotificationReason::Opened,
+            status: NotificationStatus::Failed,
+            attempt: 1,
+            error: Some("connect refused".into()),
+            sent_at: None,
+        })
+        .await
+        .expect("record");
+
+    let rows = store.notifications_for(org, id).await.unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].reason, NotificationReason::Opened);
+    assert_eq!(rows[0].status, NotificationStatus::Failed);
+    let notif_id = rows[0].id;
+
+    // The retry scan picks it up (attempt 1 < cap) with the owning org.
+    let pending = store.pending_notifications(50, 5).await.unwrap();
+    let mine = pending.iter().find(|p| p.id == notif_id).expect("pending");
+    assert_eq!(mine.org, org);
+    assert_eq!(mine.reason, NotificationReason::Opened);
+
+    // Mark it sent; it must drop out of the retry scan.
+    store
+        .mark_notification(org, notif_id, NotificationStatus::Sent, 2, None, Some(chrono::Utc::now()))
+        .await
+        .unwrap();
+    let rows = store.notifications_for(org, id).await.unwrap();
+    assert_eq!(rows[0].status, NotificationStatus::Sent);
+    assert_eq!(rows[0].attempt, 2);
+    assert!(rows[0].sent_at.is_some());
+    assert!(
+        store
+            .pending_notifications(50, 5)
+            .await
+            .unwrap()
+            .iter()
+            .all(|p| p.id != notif_id),
+        "a sent row must not be retried"
+    );
+
+    // append_event lands on the timeline; cross-org reads see nothing.
+    store
+        .append_event(org, id, IncidentEventKind::Notified, Actor::System, Some("paged".into()))
+        .await
+        .unwrap();
+    let tl = store.timeline(org, id).await.unwrap();
+    assert!(tl.iter().any(|e| e.kind == IncidentEventKind::Notified));
+
+    let other_user = make_user(&pool, "incnotifx").await;
+    let other = create_org_with_owner(&pool, other_user, &unique_slug("incnotifx"), "n", 3)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        store.notifications_for(other.id, id).await.unwrap().is_empty(),
+        "another org must not see this incident's paging log"
     );
 }

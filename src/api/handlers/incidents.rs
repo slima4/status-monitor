@@ -19,7 +19,7 @@ use crate::api::handlers::validation::{self, validate_message};
 use crate::app::AppState;
 use crate::domain::{
     Incident, IncidentEvent, IncidentNarrationUpdate, IncidentState, NewIncidentUpdate,
-    NewManualIncident, OpsIncident, PublicIncidentUpdate, UserId,
+    NewManualIncident, NotificationReason, OpsIncident, PublicIncidentUpdate, UserId,
 };
 use crate::error::{AppError, Result};
 use crate::storage::{Actor, IncidentOpsFilter, LifecycleOutcome};
@@ -250,6 +250,7 @@ pub async fn declare_incident(
         .incident_ops_store
         .declare(org, new, Actor::User(user))
         .await?;
+    state.signal_incident(org, inc.id, NotificationReason::Opened);
     Ok((StatusCode::CREATED, Json(inc)))
 }
 
@@ -292,6 +293,9 @@ pub async fn resolve_incident(
         .incident_ops_store
         .resolve(org, id, Actor::User(user), note)
         .await?;
+    if let LifecycleOutcome::Updated(inc) = &outcome {
+        state.signal_incident(org, inc.id, NotificationReason::Resolved);
+    }
     lifecycle_response(outcome)
 }
 
@@ -313,6 +317,9 @@ pub async fn reopen_incident(
         .incident_ops_store
         .reopen(org, id, Actor::User(user), note)
         .await?;
+    if let LifecycleOutcome::Updated(inc) = &outcome {
+        state.signal_incident(org, inc.id, NotificationReason::Reopened);
+    }
     lifecycle_response(outcome)
 }
 
