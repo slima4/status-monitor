@@ -63,7 +63,7 @@
     <input type="hidden" id="c-resource" value="{{ resource }}">
     <input type="hidden" id="c-default-ttl" value="{{ default_ttl_days }}">
 
-    <p id="consent-error" class="alert-card alert-card--warn text-xs" hidden></p>
+    <p id="consent-error" class="alert-card alert-card--warn text-xs" role="alert" aria-live="assertive" hidden></p>
 
     <div class="flex gap-3">
       <button type="button" id="consent-deny"
@@ -87,8 +87,12 @@
     function submit(action) {
       var approve = byId('consent-approve');
       var deny = byId('consent-deny');
+      var btn = action === 'approve' ? approve : deny;
+      var label = btn.textContent;
       approve.disabled = true;
       deny.disabled = true;
+      btn.setAttribute('aria-busy', 'true');
+      btn.textContent = action === 'approve' ? 'Approving…' : 'Denying…';
       var body = {
         action: action,
         client_id: byId('c-client-id').value,
@@ -115,6 +119,8 @@
         e.hidden = false;
         approve.disabled = false;
         deny.disabled = false;
+        btn.removeAttribute('aria-busy');
+        btn.textContent = label;
       });
     }
 
