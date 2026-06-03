@@ -85,7 +85,8 @@ impl McpServer {
     /// Use this first when asked about overall health or outages.
     #[tool(
         description = "Org health summary: per-state monitor totals and the worst currently-failing monitors. The one-shot answer to 'what is broken right now?'. Read-only.",
-        annotations(read_only_hint = true))]
+        annotations(read_only_hint = true)
+    )]
     async fn get_org_health(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -147,12 +148,7 @@ impl McpServer {
         failing.truncate(WORST_CAP);
 
         // `since` = the open incident's start, fetched only for the capped set.
-        let sinces = join_all(
-            failing
-                .iter()
-                .map(|(t, _, _)| self.ongoing_since(org, t)),
-        )
-        .await;
+        let sinces = join_all(failing.iter().map(|(t, _, _)| self.ongoing_since(org, t))).await;
 
         let worst = failing
             .into_iter()
@@ -178,7 +174,8 @@ impl McpServer {
     /// `get_org_health` for a quick "what's broken" overview.
     #[tool(
         description = "List monitors with optional state/type/tag filters and cursor pagination. Each item carries its current state and last-checked time. Read-only.",
-        annotations(read_only_hint = true))]
+        annotations(read_only_hint = true)
+    )]
     async fn list_monitors(
         &self,
         Parameters(args): Parameters<ListMonitorsArgs>,
@@ -191,9 +188,8 @@ impl McpServer {
         let state_filter = args.state.as_deref().map(parse_state).transpose()?;
         let type_filter = args.r#type.as_deref().map(parse_kind).transpose()?;
         let offset = match args.cursor.as_deref() {
-            Some(c) => {
-                cursor::decode_offset(c).ok_or_else(|| McpToolError::invalid_argument("invalid cursor"))?
-            }
+            Some(c) => cursor::decode_offset(c)
+                .ok_or_else(|| McpToolError::invalid_argument("invalid cursor"))?,
             None => 0,
         };
 
@@ -252,7 +248,8 @@ impl McpServer {
     /// `list_monitors`/`get_org_health` to investigate a specific monitor.
     #[tool(
         description = "One monitor's configuration, current state, last error, and 24h/30d uptime. Read-only.",
-        annotations(read_only_hint = true))]
+        annotations(read_only_hint = true)
+    )]
     async fn get_monitor(
         &self,
         Parameters(args): Parameters<GetMonitorArgs>,
@@ -298,7 +295,10 @@ impl McpServer {
             interval_secs: target.interval.as_secs(),
             group_name: target.group_name,
             tags: target.tags,
-            state: last.map(|r| r.status.as_str()).unwrap_or("no_data").to_string(),
+            state: last
+                .map(|r| r.status.as_str())
+                .unwrap_or("no_data")
+                .to_string(),
             last_checked_at: last.map(|r| r.timestamp.to_rfc3339()),
             last_error: last
                 .and_then(|r| r.error.as_deref())
@@ -313,7 +313,8 @@ impl McpServer {
     /// failing observations (with error text), and incident windows.
     #[tool(
         description = "One monitor's history over a window (1h/24h/7d/30d): uptime, latency series, failures with error text, and incident windows. Read-only.",
-        annotations(read_only_hint = true))]
+        annotations(read_only_hint = true)
+    )]
     async fn get_monitor_history(
         &self,
         Parameters(args): Parameters<GetMonitorHistoryArgs>,
@@ -402,7 +403,8 @@ impl McpServer {
     /// pages do I publish?".
     #[tool(
         description = "List the org's status pages: slug, name, public URL, enabled. Cursor-paginated. Read-only.",
-        annotations(read_only_hint = true))]
+        annotations(read_only_hint = true)
+    )]
     async fn list_status_pages(
         &self,
         Parameters(args): Parameters<ListStatusPagesArgs>,
@@ -449,7 +451,8 @@ impl McpServer {
     /// the "what do customers see" view.
     #[tool(
         description = "One status page: name, public URL, enabled, and its components with each linked monitor's current state. Read-only.",
-        annotations(read_only_hint = true))]
+        annotations(read_only_hint = true)
+    )]
     async fn get_status_page(
         &self,
         Parameters(args): Parameters<GetStatusPageArgs>,
@@ -503,7 +506,8 @@ impl McpServer {
     /// Org usage against plan limits. For "am I near my caps?".
     #[tool(
         description = "Org resource usage against plan limits: monitors, status pages, members, components, and key policy values. Read-only.",
-        annotations(read_only_hint = true))]
+        annotations(read_only_hint = true)
+    )]
     async fn get_org_usage(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -557,7 +561,8 @@ impl McpServer {
 
     #[tool(
         description = "Run a check on a monitor immediately and record the result. Requires user confirmation; a down result may fire the org's normal alerts. Not read-only.",
-        annotations(read_only_hint = false, idempotent_hint = false))]
+        annotations(read_only_hint = false, idempotent_hint = false)
+    )]
     async fn run_check_now(
         &self,
         Parameters(args): Parameters<MonitorIdArg>,
@@ -567,12 +572,14 @@ impl McpServer {
         let pool = self.require_pool()?;
         let args_json = json!({ "id": args.id });
         let result = self.run_check_now_inner(&ctx, &auth, &args).await;
-        self.finish(pool, &auth, "run_check_now", args_json, result).await
+        self.finish(pool, &auth, "run_check_now", args_json, result)
+            .await
     }
 
     #[tool(
         description = "Pause a monitor (stop its checks until resumed). Requires user confirmation. Not read-only; idempotent.",
-        annotations(read_only_hint = false, idempotent_hint = true))]
+        annotations(read_only_hint = false, idempotent_hint = true)
+    )]
     async fn pause_monitor(
         &self,
         Parameters(args): Parameters<MonitorIdArg>,
@@ -582,12 +589,14 @@ impl McpServer {
         let pool = self.require_pool()?;
         let args_json = json!({ "id": args.id });
         let result = self.set_enabled_inner(&ctx, &auth, &args, false).await;
-        self.finish(pool, &auth, "pause_monitor", args_json, result).await
+        self.finish(pool, &auth, "pause_monitor", args_json, result)
+            .await
     }
 
     #[tool(
         description = "Resume a paused monitor (restart its checks). Requires user confirmation. Not read-only; idempotent.",
-        annotations(read_only_hint = false, idempotent_hint = true))]
+        annotations(read_only_hint = false, idempotent_hint = true)
+    )]
     async fn resume_monitor(
         &self,
         Parameters(args): Parameters<MonitorIdArg>,
@@ -597,12 +606,14 @@ impl McpServer {
         let pool = self.require_pool()?;
         let args_json = json!({ "id": args.id });
         let result = self.set_enabled_inner(&ctx, &auth, &args, true).await;
-        self.finish(pool, &auth, "resume_monitor", args_json, result).await
+        self.finish(pool, &auth, "resume_monitor", args_json, result)
+            .await
     }
 
     #[tool(
         description = "Post an acknowledgement update to an incident; it appears on the public status page. Requires user confirmation and an explicit notify choice. Not read-only.",
-        annotations(read_only_hint = false, idempotent_hint = false))]
+        annotations(read_only_hint = false, idempotent_hint = false)
+    )]
     async fn acknowledge_incident(
         &self,
         Parameters(args): Parameters<AckIncidentArgs>,
@@ -612,7 +623,8 @@ impl McpServer {
         let pool = self.require_pool()?;
         let args_json = json!({ "id": args.id, "notify": args.notify });
         let result = self.acknowledge_incident_inner(&ctx, &auth, &args).await;
-        self.finish(pool, &auth, "acknowledge_incident", args_json, result).await
+        self.finish(pool, &auth, "acknowledge_incident", args_json, result)
+            .await
     }
 }
 
@@ -625,7 +637,11 @@ impl McpServer {
     }
 
     /// Load a target in the org, or a tool not-found error.
-    async fn load_target(&self, org: crate::domain::OrgId, id: Uuid) -> Result<Target, McpToolError> {
+    async fn load_target(
+        &self,
+        org: crate::domain::OrgId,
+        id: Uuid,
+    ) -> Result<Target, McpToolError> {
         self.state
             .target_store
             .get(org, id)
@@ -1037,7 +1053,12 @@ mod tests {
 
     #[test]
     fn parse_window_accepts_known_rejects_unknown() {
-        for (w, secs) in [("1h", 60u32), ("24h", 1_800), ("7d", 10_800), ("30d", 43_200)] {
+        for (w, secs) in [
+            ("1h", 60u32),
+            ("24h", 1_800),
+            ("7d", 10_800),
+            ("30d", 43_200),
+        ] {
             let (span, bucket) = parse_window(w).unwrap();
             assert_eq!(bucket, secs);
             assert!(span.num_hours() > 0);

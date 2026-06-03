@@ -131,7 +131,11 @@ pub async fn authorize_page(
     if let Some(req_resource) = p.resource.as_deref()
         && req_resource.trim_end_matches('/') != urls.resource
     {
-        return redirect_error(&p.redirect_uri, OAuthError::InvalidTarget, p.state.as_deref());
+        return redirect_error(
+            &p.redirect_uri,
+            OAuthError::InvalidTarget,
+            p.state.as_deref(),
+        );
     }
 
     // 3) Response type + PKCE.

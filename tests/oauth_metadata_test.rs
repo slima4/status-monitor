@@ -32,9 +32,15 @@ async fn authorization_server_metadata() {
     assert_eq!(resp.status(), StatusCode::OK);
     let j = body_json(resp).await;
     assert_eq!(j["issuer"], ISSUER);
-    assert_eq!(j["authorization_endpoint"], format!("{ISSUER}/oauth/authorize"));
+    assert_eq!(
+        j["authorization_endpoint"],
+        format!("{ISSUER}/oauth/authorize")
+    );
     assert_eq!(j["token_endpoint"], format!("{ISSUER}/oauth/token"));
-    assert_eq!(j["registration_endpoint"], format!("{ISSUER}/oauth/register"));
+    assert_eq!(
+        j["registration_endpoint"],
+        format!("{ISSUER}/oauth/register")
+    );
     assert_eq!(j["code_challenge_methods_supported"][0], "S256");
     assert_eq!(j["grant_types_supported"][0], "authorization_code");
     assert_eq!(j["response_types_supported"][0], "code");
@@ -77,10 +83,15 @@ async fn unauthenticated_mcp_points_at_resource_metadata() {
         .to_str()
         .unwrap();
     assert!(
-        wa.contains("resource_metadata=\"https://mcp.test.example/.well-known/oauth-protected-resource\""),
+        wa.contains(
+            "resource_metadata=\"https://mcp.test.example/.well-known/oauth-protected-resource\""
+        ),
         "challenge must point at the protected-resource metadata, got: {wa}"
     );
-    assert!(wa.contains("scope="), "challenge should advertise scope, got: {wa}");
+    assert!(
+        wa.contains("scope="),
+        "challenge should advertise scope, got: {wa}"
+    );
 }
 
 #[tokio::test]

@@ -272,7 +272,10 @@ mod tests {
         assert!(!grant_scope(None).contains("write"));
         assert!(!grant_scope(Some("targets:read")).contains(":write"));
         // Explicit write request is granted (write implies its read).
-        assert_eq!(grant_scope(Some("targets:write")), "targets:read targets:write");
+        assert_eq!(
+            grant_scope(Some("targets:write")),
+            "targets:read targets:write"
+        );
         assert_eq!(grant_scope(Some("targets:execute")), "targets:execute");
         assert_eq!(grant_scope(Some("incidents:write")), "incidents:write");
         // Full write connector.
@@ -285,7 +288,9 @@ mod tests {
     #[test]
     fn redirect_uri_acceptance() {
         // HTTPS with a host — accepted.
-        assert!(is_acceptable_redirect_uri("https://claude.ai/api/mcp/callback"));
+        assert!(is_acceptable_redirect_uri(
+            "https://claude.ai/api/mcp/callback"
+        ));
         // Loopback HTTP (mcp-remote) — accepted.
         assert!(is_acceptable_redirect_uri("http://localhost:8976/callback"));
         assert!(is_acceptable_redirect_uri("http://127.0.0.1:5000/cb"));
@@ -294,7 +299,9 @@ mod tests {
         // Custom/native schemes — rejected for this web connector.
         assert!(!is_acceptable_redirect_uri("com.evil.app:/cb"));
         // Userinfo in the authority — rejected (authority-confusion).
-        assert!(!is_acceptable_redirect_uri("https://attacker@victim.example/cb"));
+        assert!(!is_acceptable_redirect_uri(
+            "https://attacker@victim.example/cb"
+        ));
         assert!(!is_acceptable_redirect_uri("https://u:p@victim.example/cb"));
         // Fragment — rejected (RFC 6749 forbids it on redirect URIs).
         assert!(!is_acceptable_redirect_uri("https://claude.ai/cb#frag"));

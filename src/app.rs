@@ -183,7 +183,9 @@ pub fn assert_mcp_oauth_config(cfg: &AppConfig) {
     }
     let check = |label: &str, raw: &str| {
         let url = url::Url::parse(raw).unwrap_or_else(|_| {
-            panic!("{label} must be a valid absolute URL when mcp.oauth_enabled = true (got {raw:?})")
+            panic!(
+                "{label} must be a valid absolute URL when mcp.oauth_enabled = true (got {raw:?})"
+            )
         });
         let loopback = matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "::1"));
         if url.scheme() != "https" && !(url.scheme() == "http" && loopback) {
@@ -197,7 +199,9 @@ pub fn assert_mcp_oauth_config(cfg: &AppConfig) {
         panic!("mcp.oauth_enabled = true requires mcp.resource_uri to be set");
     }
     if cfg.auth.public_base_url.trim().is_empty() {
-        panic!("mcp.oauth_enabled = true requires auth.public_base_url (the OAuth issuer) to be set");
+        panic!(
+            "mcp.oauth_enabled = true requires auth.public_base_url (the OAuth issuer) to be set"
+        );
     }
     check("mcp.resource_uri", &cfg.mcp.resource_uri);
     check("auth.public_base_url", &cfg.auth.public_base_url);

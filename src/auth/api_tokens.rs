@@ -251,7 +251,10 @@ pub async fn mint_oauth(
     let prefix = slice_prefix(&raw, prefix_visible_chars).to_string();
     let hash = token_hash::hash(&raw)?;
 
-    let mut tx = pool.begin().await.context("api_tokens::mint_oauth: begin")?;
+    let mut tx = pool
+        .begin()
+        .await
+        .context("api_tokens::mint_oauth: begin")?;
     advisory_xact_lock(&mut *tx, &user_lock_key(user))
         .await
         .context("api_tokens::mint_oauth: advisory lock")?;
@@ -289,7 +292,9 @@ pub async fn mint_oauth(
     .fetch_one(&mut *tx)
     .await
     .context("api_tokens::mint_oauth: insert")?;
-    tx.commit().await.context("api_tokens::mint_oauth: commit")?;
+    tx.commit()
+        .await
+        .context("api_tokens::mint_oauth: commit")?;
     Ok(CreatedToken {
         id,
         name: name.to_string(),

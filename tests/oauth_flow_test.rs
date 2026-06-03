@@ -323,7 +323,8 @@ async fn oauth_grants_write_scope_only_when_requested() {
     let client_id = register_client(&app).await;
 
     // A connector that asks for write gets a write-scoped token (write ⇒ read).
-    let code = approve_with_scope(&app, &client_id, REDIRECT, "targets:write incidents:write").await;
+    let code =
+        approve_with_scope(&app, &client_id, REDIRECT, "targets:write incidents:write").await;
     let resp = post_token(&app, token_body(&code, REDIRECT, &client_id, VERIFIER)).await;
     assert_eq!(resp.status(), StatusCode::OK);
     let scope = body_json(resp).await["scope"].as_str().unwrap().to_string();
@@ -347,7 +348,10 @@ async fn refresh_token_rotates() {
     let refresh2 = j["refresh_token"].as_str().unwrap();
     assert!(j["access_token"].as_str().unwrap().starts_with("sm_live_"));
     assert_ne!(refresh2, refresh1, "refresh token must rotate on use");
-    assert_eq!(j["scope"], "targets:read", "scope must be preserved, not widened");
+    assert_eq!(
+        j["scope"], "targets:read",
+        "scope must be preserved, not widened"
+    );
 }
 
 #[tokio::test]

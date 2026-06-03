@@ -66,7 +66,9 @@ async fn mcp_with_sm_live_token_but_no_db_challenges() {
     // up, so the door fails closed rather than letting an unverified token in.
     let app = build_test_app_with_web(|cfg| cfg.mcp.enabled = true);
     let resp = app
-        .oneshot(mcp_post(Some("Bearer sm_live_0000000000000000000000000000000000000000000")))
+        .oneshot(mcp_post(Some(
+            "Bearer sm_live_0000000000000000000000000000000000000000000",
+        )))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);

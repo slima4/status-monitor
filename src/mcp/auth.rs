@@ -142,7 +142,9 @@ pub async fn middleware(State(state): State<AppState>, mut req: Request, next: N
     // a low-volume, LLM-driven path is an acceptable cost for failing closed.
     match is_active_member(pool, row.user_id, org).await {
         Ok(true) => {}
-        Ok(false) => return forbidden("the token owner is no longer a member of this organization"),
+        Ok(false) => {
+            return forbidden("the token owner is no longer a member of this organization");
+        }
         Err(err) => {
             tracing::warn!(target: "mcp", error = %err, "mcp membership check failed");
             return challenge(&state);
@@ -185,10 +187,22 @@ mod tests {
 
     #[test]
     fn require_allows_granted_scope() {
-        assert!(auth_with(&["targets:read"]).require(Scope::TargetsRead).is_ok());
+        assert!(
+            auth_with(&["targets:read"])
+                .require(Scope::TargetsRead)
+                .is_ok()
+        );
         // write implies read.
-        assert!(auth_with(&["targets:write"]).require(Scope::TargetsRead).is_ok());
-        assert!(auth_with(&["full_access"]).require(Scope::TargetsRead).is_ok());
+        assert!(
+            auth_with(&["targets:write"])
+                .require(Scope::TargetsRead)
+                .is_ok()
+        );
+        assert!(
+            auth_with(&["full_access"])
+                .require(Scope::TargetsRead)
+                .is_ok()
+        );
     }
 
     #[test]

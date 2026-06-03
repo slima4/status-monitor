@@ -36,13 +36,12 @@ pub async fn insert_client(
 }
 
 pub async fn get_client(pool: &PgPool, client_id: &str) -> Result<Option<OAuthClient>> {
-    let row: Option<(Option<String>, sqlx::types::Json<Vec<String>>)> = sqlx::query_as(
-        "SELECT client_name, redirect_uris FROM oauth_clients WHERE client_id = $1",
-    )
-    .bind(client_id)
-    .fetch_optional(pool)
-    .await
-    .context("oauth::get_client")?;
+    let row: Option<(Option<String>, sqlx::types::Json<Vec<String>>)> =
+        sqlx::query_as("SELECT client_name, redirect_uris FROM oauth_clients WHERE client_id = $1")
+            .bind(client_id)
+            .fetch_optional(pool)
+            .await
+            .context("oauth::get_client")?;
     Ok(row.map(|(client_name, uris)| OAuthClient {
         client_name,
         redirect_uris: uris.0,
