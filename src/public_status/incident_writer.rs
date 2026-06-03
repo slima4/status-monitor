@@ -8,11 +8,11 @@
 //! never produces alerts. Its single job is to keep the `incidents` table in
 //! sync with what the recent check results say.
 //!
-//! Detection rule (Degraded is back-pressure, not an outage):
-//!  * `≥ flap_threshold` consecutive `down`/`error` results, no open incident
-//!    → INSERT a new open incident.
-//!  * `≥ flap_threshold` consecutive `up`/`degraded` results while an open
-//!    incident exists → UPDATE `ended_at` to the first such timestamp.
+//! Detection rule (anything not `up` is unhealthy):
+//!  * `≥ flap_threshold` consecutive `down`/`error`/`degraded` results, no open
+//!    incident → INSERT a new open incident.
+//!  * `≥ flap_threshold` consecutive `up` results while an open incident exists
+//!    → UPDATE `ended_at` to the first such timestamp.
 //!
 //! Both rules are idempotent: re-running with the same input produces no
 //! additional writes.
@@ -340,11 +340,15 @@ pub fn decide(open: Option<&OpenIncident>, results: &[CheckResult], flap_thresho
     }
 }
 
-/// `Down` / `Error` = real outage. `Degraded` (rate-limit back-pressure) is
-/// not an outage — counting it would latch incidents on chronically
-/// rate-limited targets that the origin is still answering.
+/// Anything that is not a clean `Up` is unhealthy: `Down`/`Error` are outages
+/// and `Degraded` is a service not meeting its check (slow, partial, rate
+/// limited). All three open an incident and none counts as recovery — an
+/// incident clears only on a sustained run of genuine `Up`.
 fn is_bad(status: CheckStatus) -> bool {
-    matches!(status, CheckStatus::Down | CheckStatus::Error)
+    matches!(
+        status,
+        CheckStatus::Down | CheckStatus::Error | CheckStatus::Degraded
+    )
 }
 
 fn trailing_bad_run(results: &[CheckResult]) -> &[CheckResult] {
@@ -806,7 +810,8 @@ mod tests {
     }
 
     #[test]
-    fn decide_degraded_run_does_not_open_incident() {
+    fn decide_degraded_run_opens_incident() {
+        // A degraded service is unhealthy: a sustained run opens an incident.
         let base = Utc.with_ymd_and_hms(2026, 5, 13, 12, 0, 0).unwrap();
         let target = Uuid::now_v7();
         let results = vec![
@@ -814,11 +819,19 @@ mod tests {
             result(target, ts(base, 30), CheckStatus::Degraded),
             result(target, ts(base, 60), CheckStatus::Degraded),
         ];
-        assert_eq!(decide(None, &results, 2), Action::None);
+        match decide(None, &results, 2) {
+            Action::Open(new) => {
+                assert_eq!(new.status_at_start, CheckStatus::Degraded);
+                assert_eq!(new.check_count, 3);
+                assert_eq!(new.started_at, ts(base, 0));
+            }
+            other => panic!("expected Open, got {other:?}"),
+        }
     }
 
     #[test]
-    fn decide_degraded_run_closes_open_incident() {
+    fn decide_degraded_run_does_not_close_open_incident() {
+        // Degraded is not recovery; the incident stays open until a clean Up run.
         let base = Utc.with_ymd_and_hms(2026, 5, 13, 12, 0, 0).unwrap();
         let target = Uuid::now_v7();
         let open = OpenIncident {
@@ -831,23 +844,12 @@ mod tests {
             result(target, ts(base, 60), CheckStatus::Degraded),
             result(target, ts(base, 90), CheckStatus::Degraded),
         ];
-        match decide(Some(&open), &results, 2) {
-            Action::Close {
-                incident_id,
-                ended_at,
-            } => {
-                assert_eq!(incident_id, open.id);
-                assert_eq!(ended_at, ts(base, 60));
-            }
-            other => panic!("expected Close, got {other:?}"),
-        }
+        assert_eq!(decide(Some(&open), &results, 2), Action::None);
     }
 
     #[test]
-    fn decide_trailing_degraded_breaks_a_bad_run_so_no_open() {
-        // [Down, Down, Degraded] cancels the trailing bad-run because the
-        // last result re-classifies as "not bad" — the resolver/origin is
-        // talking again, even if slowly.
+    fn decide_trailing_degraded_extends_a_bad_run() {
+        // [Down, Down, Degraded] is still three unhealthy checks in a row.
         let base = Utc.with_ymd_and_hms(2026, 5, 13, 12, 0, 0).unwrap();
         let target = Uuid::now_v7();
         let results = vec![
@@ -855,14 +857,19 @@ mod tests {
             result(target, ts(base, 30), CheckStatus::Down),
             result(target, ts(base, 60), CheckStatus::Degraded),
         ];
-        assert_eq!(decide(None, &results, 2), Action::None);
+        match decide(None, &results, 2) {
+            Action::Open(new) => {
+                assert_eq!(new.check_count, 3);
+                assert_eq!(new.status_at_start, CheckStatus::Down);
+                assert_eq!(new.started_at, ts(base, 0));
+            }
+            other => panic!("expected Open, got {other:?}"),
+        }
     }
 
     #[test]
-    fn decide_degraded_between_bad_results_does_not_carry_count() {
-        // [Down, Degraded, Down, Down] opens with check_count=2 — the
-        // intervening Degraded reset the trailing-bad run; only the final
-        // pair counts toward the threshold.
+    fn decide_degraded_within_a_bad_run_carries_count() {
+        // [Down, Degraded, Down, Down] is one unbroken unhealthy run of 4.
         let base = Utc.with_ymd_and_hms(2026, 5, 13, 12, 0, 0).unwrap();
         let target = Uuid::now_v7();
         let results = vec![
@@ -873,15 +880,16 @@ mod tests {
         ];
         match decide(None, &results, 2) {
             Action::Open(new) => {
-                assert_eq!(new.check_count, 2);
-                assert_eq!(new.started_at, ts(base, 60));
+                assert_eq!(new.check_count, 4);
+                assert_eq!(new.started_at, ts(base, 0));
             }
             other => panic!("expected Open, got {other:?}"),
         }
     }
 
     #[test]
-    fn decide_mixed_degraded_and_up_counts_toward_close() {
+    fn decide_trailing_degraded_does_not_close() {
+        // A single Up between bad checks, ending Degraded, is not a recovery run.
         let base = Utc.with_ymd_and_hms(2026, 5, 13, 12, 0, 0).unwrap();
         let target = Uuid::now_v7();
         let open = OpenIncident {
@@ -894,16 +902,7 @@ mod tests {
             result(target, ts(base, 60), CheckStatus::Up),
             result(target, ts(base, 90), CheckStatus::Degraded),
         ];
-        match decide(Some(&open), &results, 2) {
-            Action::Close {
-                incident_id,
-                ended_at,
-            } => {
-                assert_eq!(incident_id, open.id);
-                assert_eq!(ended_at, ts(base, 60));
-            }
-            other => panic!("expected Close, got {other:?}"),
-        }
+        assert_eq!(decide(Some(&open), &results, 2), Action::None);
     }
 
     #[test]
