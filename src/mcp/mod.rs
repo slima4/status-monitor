@@ -13,7 +13,9 @@
 //! injects [`AuthContext`] into request extensions; tools read it back from the
 //! `RequestContext`. The org is always the token's — never a tool argument.
 
+mod audit;
 mod auth;
+mod confirm;
 mod cursor;
 mod error;
 mod schema;

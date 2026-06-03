@@ -39,9 +39,21 @@ use crate::config::AppConfig;
 /// How often the sweeper purges expired authorization codes + refresh tokens.
 const SWEEP_INTERVAL_SECS: u64 = 3600;
 
-/// The only scopes an OAuth connector may be granted. Read-only by construction
-/// — the consent flow never mints a write scope.
-const ALLOWED_SCOPES: &[Scope] = &[Scope::TargetsRead, Scope::StatusPageRead];
+/// Scopes a connector gets by default (no `scope` requested) — read-only.
+const DEFAULT_SCOPES: &[Scope] = &[Scope::TargetsRead, Scope::StatusPageRead];
+
+/// Every scope a connector MAY request. Write scopes are opt-in: granted only
+/// when the client explicitly asks for them, and surfaced distinctly on the
+/// consent screen. The write tools are each still scope-gated AND elicitation-
+/// confirmed per action, so a granted write scope is necessary but not
+/// sufficient to mutate anything.
+const GRANTABLE_SCOPES: &[Scope] = &[
+    Scope::TargetsRead,
+    Scope::StatusPageRead,
+    Scope::TargetsWrite,
+    Scope::TargetsExecute,
+    Scope::IncidentsWrite,
+];
 
 /// Authorization-code lifetime. Short — it's redeemed immediately.
 const CODE_TTL_SECS: i64 = 60;
@@ -118,34 +130,40 @@ fn resource_origin(uri: &str) -> Option<String> {
     })
 }
 
-/// Space-delimited scope string supported by the connector (for metadata).
-fn supported_scope_string() -> String {
-    ALLOWED_SCOPES
+fn scope_list_string(scopes: &[Scope]) -> String {
+    scopes
         .iter()
         .map(|s| s.as_str())
         .collect::<Vec<_>>()
         .join(" ")
 }
 
-/// Clamp a requested `scope` to the allowed read set. An empty/garbage request
-/// grants the full read set; anything else grants requested ∩ allowed. Never
-/// returns a write scope. Output is a canonical space-delimited string.
+/// Every scope the AS will advertise as grantable (for discovery metadata).
+fn grantable_scope_string() -> String {
+    scope_list_string(GRANTABLE_SCOPES)
+}
+
+/// The baseline read scopes (the `scope` hint in `WWW-Authenticate`).
+fn default_scope_string() -> String {
+    scope_list_string(DEFAULT_SCOPES)
+}
+
+/// Resolve the granted scope from a requested `scope`: requested ∩ grantable,
+/// de-duplicated, preserving the grantable ordering. An empty/garbage request
+/// grants the read-only default set — write scopes are NEVER granted unless
+/// explicitly requested. Output is a canonical space-delimited string.
 fn grant_scope(requested: Option<&str>) -> String {
-    let allowed: ScopeSet = ScopeSet::from_strs(ALLOWED_SCOPES.iter().map(|s| s.as_str()));
-    let mut granted: Vec<&'static str> = Vec::new();
-    if let Some(req) = requested {
-        for tok in req.split_whitespace() {
-            if let Some(s) = Scope::parse(tok)
-                && allowed.allows(s)
-                && ALLOWED_SCOPES.contains(&s)
-                && !granted.contains(&s.as_str())
-            {
-                granted.push(s.as_str());
-            }
-        }
-    }
+    let Some(req) = requested else {
+        return default_scope_string();
+    };
+    let asked: ScopeSet = ScopeSet::from_strs(req.split_whitespace());
+    let granted: Vec<&'static str> = GRANTABLE_SCOPES
+        .iter()
+        .filter(|s| asked.allows(**s))
+        .map(|s| s.as_str())
+        .collect();
     if granted.is_empty() {
-        return supported_scope_string();
+        return default_scope_string();
     }
     granted.join(" ")
 }
@@ -192,7 +210,7 @@ pub fn www_authenticate_value(cfg: &AppConfig) -> Option<String> {
     Some(format!(
         "Bearer resource_metadata=\"{}\", scope=\"{}\"",
         urls.resource_metadata_url(),
-        supported_scope_string()
+        default_scope_string()
     ))
 }
 
@@ -238,12 +256,30 @@ mod tests {
     }
 
     #[test]
-    fn grant_scope_intersects_with_allowed() {
+    fn grant_scope_intersects_with_grantable() {
         assert_eq!(grant_scope(Some("targets:read")), "targets:read");
-        // Write + unknown scopes are dropped; never granted.
-        assert_eq!(grant_scope(Some("targets:write")), "targets:read status_page:read");
-        assert_eq!(grant_scope(Some("targets:read targets:write")), "targets:read");
+        assert_eq!(
+            grant_scope(Some("status_page:read targets:read")),
+            "targets:read status_page:read"
+        );
+        // Unknown scopes are dropped → fall back to the read-only default.
         assert_eq!(grant_scope(Some("bogus")), "targets:read status_page:read");
+    }
+
+    #[test]
+    fn grant_scope_grants_write_only_when_requested() {
+        // Default + read requests never include write scopes.
+        assert!(!grant_scope(None).contains("write"));
+        assert!(!grant_scope(Some("targets:read")).contains(":write"));
+        // Explicit write request is granted (write implies its read).
+        assert_eq!(grant_scope(Some("targets:write")), "targets:read targets:write");
+        assert_eq!(grant_scope(Some("targets:execute")), "targets:execute");
+        assert_eq!(grant_scope(Some("incidents:write")), "incidents:write");
+        // Full write connector.
+        assert_eq!(
+            grant_scope(Some("targets:write targets:execute incidents:write")),
+            "targets:read targets:write targets:execute incidents:write"
+        );
     }
 
     #[test]

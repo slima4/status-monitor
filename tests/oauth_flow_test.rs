@@ -91,6 +91,36 @@ fn authorize_uri(client_id: &str, redirect: &str, resource: &str, challenge: &st
     )
 }
 
+/// Approve with an explicit requested scope (exercises opt-in write scopes).
+async fn approve_with_scope(app: &Router, client_id: &str, redirect: &str, scope: &str) -> String {
+    let resp = send(
+        app,
+        Request::builder()
+            .method("POST")
+            .uri("/oauth/authorize/decision")
+            .header("content-type", "application/json")
+            .header("x-requested-with", "uptimepage")
+            .body(Body::from(
+                serde_json::json!({
+                    "action": "approve",
+                    "client_id": client_id,
+                    "redirect_uri": redirect,
+                    "code_challenge": CHALLENGE,
+                    "scope": scope,
+                    "state": "xyz",
+                    "resource": RESOURCE,
+                    "expires_in_days": 30,
+                })
+                .to_string(),
+            ))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let j = body_json(resp).await;
+    query_param(j["redirect"].as_str().unwrap(), "code").expect("code in redirect")
+}
+
 async fn approve(app: &Router, client_id: &str, redirect: &str) -> String {
     let resp = send(
         app,
@@ -282,6 +312,25 @@ async fn unregistered_redirect_uri_is_rejected() {
     )
     .await;
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn oauth_grants_write_scope_only_when_requested() {
+    let Some(pool) = pg_pool_from_env().await else {
+        return;
+    };
+    let (app, _org) = build_test_app_with_pg_store(pool, cfg_oauth).await;
+    let client_id = register_client(&app).await;
+
+    // A connector that asks for write gets a write-scoped token (write ⇒ read).
+    let code = approve_with_scope(&app, &client_id, REDIRECT, "targets:write incidents:write").await;
+    let resp = post_token(&app, token_body(&code, REDIRECT, &client_id, VERIFIER)).await;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let scope = body_json(resp).await["scope"].as_str().unwrap().to_string();
+    assert!(scope.contains("targets:write"), "got scope: {scope}");
+    assert!(scope.contains("incidents:write"), "got scope: {scope}");
+    // write implies read — the connector can still read too.
+    assert!(scope.contains("targets:read"), "got scope: {scope}");
 }
 
 #[tokio::test]

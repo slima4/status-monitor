@@ -239,6 +239,60 @@ pub struct Quota {
     pub cap: i64,
 }
 
+// ── Write tools (Phase 4) ───────────────────────────────────────────────────
+
+/// `run_check_now` / `pause_monitor` / `resume_monitor` argument.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct MonitorIdArg {
+    /// The monitor id (from `list_monitors`).
+    pub id: String,
+}
+
+/// `run_check_now` result: the fresh probe's observation.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct CheckRunResult {
+    pub id: String,
+    /// Observed state: `up`, `down`, `degraded`, `error`.
+    pub state: String,
+    /// RFC 3339 time of the probe.
+    pub checked_at: String,
+    pub duration_ms: u32,
+    /// Error text when the probe failed. Untrusted data.
+    pub error: Option<String>,
+}
+
+/// `pause_monitor` / `resume_monitor` result.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct MonitorStateResult {
+    pub id: String,
+    /// The monitor's enabled state after the change.
+    pub enabled: bool,
+}
+
+/// `acknowledge_incident` argument.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct AckIncidentArgs {
+    /// The incident id.
+    pub id: String,
+    /// Optional note to post; defaults to a generic acknowledgement.
+    pub message: Option<String>,
+    /// Whether to notify status-page subscribers. Required — no default — so
+    /// alerting is always a conscious choice. (Subscriber push is not yet
+    /// implemented, so the result reports `notified: false` regardless.)
+    pub notify: bool,
+}
+
+/// `acknowledge_incident` result.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct AckResult {
+    pub incident_id: String,
+    /// RFC 3339 time the update was posted.
+    pub posted_at: String,
+    /// Whether subscribers were actually notified. Always `false` for now (no
+    /// subscriber-push pipeline) — never silently claims a notification fired.
+    pub notified: bool,
+}
+
 /// `get_org_usage` result: usage against the org's plan limits.
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct OrgUsage {

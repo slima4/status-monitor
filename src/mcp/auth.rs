@@ -35,9 +35,7 @@ use super::error::McpToolError;
 pub struct McpAuth {
     pub org: OrgId,
     pub scopes: ScopeSet,
-    #[allow(dead_code)]
     pub user_id: UserId,
-    #[allow(dead_code)]
     pub token_id: Uuid,
 }
 

@@ -90,8 +90,16 @@ fn scope_label(scope: &str) -> &'static str {
     match scope {
         "targets:read" => "Read your monitors and their current status",
         "status_page:read" => "Read your status pages and components",
-        _ => "Read access",
+        "targets:write" => "Pause and resume your monitors",
+        "targets:execute" => "Run checks on your monitors on demand",
+        "incidents:write" => "Post updates to your incidents (shown publicly)",
+        _ => "Access your data",
     }
+}
+
+/// A non-`:read` scope grants the ability to change something.
+fn is_write_scope(scope: &str) -> bool {
+    !scope.ends_with(":read")
 }
 
 pub async fn authorize_page(
@@ -178,8 +186,10 @@ pub async fn authorize_page(
         .split_whitespace()
         .map(|s| ConsentScope {
             label: scope_label(s),
+            write: is_write_scope(s),
         })
         .collect();
+    let has_write = scopes.iter().any(|s| s.write);
 
     ConsentPage {
         active_tab: "",
@@ -188,6 +198,7 @@ pub async fn authorize_page(
             .unwrap_or_else(|| "An application".to_string()),
         org_name,
         scopes,
+        has_write,
         client_id: p.client_id,
         redirect_uri: p.redirect_uri,
         code_challenge: p.code_challenge,
@@ -342,6 +353,7 @@ fn redirect_uri_string(redirect_uri: &str, pairs: &[(&str, &str)], state: Option
 
 struct ConsentScope {
     label: &'static str,
+    write: bool,
 }
 
 #[derive(askama::Template, askama_web::WebTemplate)]
@@ -352,6 +364,7 @@ struct ConsentPage {
     client_name: String,
     org_name: String,
     scopes: Vec<ConsentScope>,
+    has_write: bool,
     client_id: String,
     redirect_uri: String,
     code_challenge: String,

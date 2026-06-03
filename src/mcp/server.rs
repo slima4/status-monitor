@@ -16,25 +16,36 @@ use rmcp::service::RequestContext;
 use rmcp::{RoleServer, ServerHandler, tool, tool_handler, tool_router};
 use uuid::Uuid;
 
+use serde_json::json;
+
 use crate::api::types::DashboardMetrics;
 use crate::app::AppState;
 use crate::auth::scope::Scope;
-use crate::domain::strip_served_stale;
-use crate::domain::target::Target;
+use crate::domain::incident::NewIncidentUpdate;
+use crate::domain::public::IncidentStatusPhase;
+use crate::domain::target::{Target, TargetUpdate};
+use crate::domain::{WriteSource, strip_served_stale};
 use crate::storage::{ClampedRange, IncidentListQuery, TargetFilter, TimeRange};
 use crate::web::views::describe_check;
 use crate::web::views::public_status::{public_base, public_status_url};
+use crate::worker::pool::host_for_spec;
 
+use super::audit::{self, Outcome};
 use super::auth::McpAuth;
+use super::confirm::require_confirmation;
 use super::cursor;
-use super::error::McpToolError;
+use super::error::{McpToolError, codes};
 use super::schema::{
-    Failure, GetMonitorArgs, GetMonitorHistoryArgs, GetStatusPageArgs, HealthTotals,
-    IncidentWindow, LatencyPoint, ListMonitorsArgs, ListStatusPagesArgs, MonitorDetail,
-    MonitorHistory, MonitorList, MonitorListItem, OrgHealth, OrgUsage, Quota,
-    StatusPageComponent as McpComponent, StatusPageDetail, StatusPageList, StatusPageSummary,
-    WorstMonitor,
+    AckIncidentArgs, AckResult, CheckRunResult, Failure, GetMonitorArgs, GetMonitorHistoryArgs,
+    GetStatusPageArgs, HealthTotals, IncidentWindow, LatencyPoint, ListMonitorsArgs,
+    ListStatusPagesArgs, MonitorDetail, MonitorHistory, MonitorIdArg, MonitorList, MonitorListItem,
+    MonitorStateResult, OrgHealth, OrgUsage, Quota, StatusPageComponent as McpComponent,
+    StatusPageDetail, StatusPageList, StatusPageSummary, WorstMonitor,
 };
+
+/// Max length of an incident-update message (matches the REST `NewIncidentUpdate`
+/// schema bound).
+const MAX_INCIDENT_MESSAGE_LEN: usize = 2000;
 
 /// Health/list window. Matches the operator dashboard's default so the MCP
 /// answer and the UI agree on "right now".
@@ -536,9 +547,270 @@ impl McpServer {
             retention_days: p.retention_days.into(),
         }))
     }
+
+    // ── Write tools (scope-gated + elicitation-confirmed + audited) ──────────
+    //
+    // Each is a thin wrapper: build the audit args, run the inner body, then
+    // `finish` writes exactly one audit row for the outcome — so EVERY path
+    // (insufficient scope, declined, bad input, not-found, error, success) is
+    // recorded, not just the happy path.
+
+    #[tool(
+        description = "Run a check on a monitor immediately and record the result. Requires user confirmation; a down result may fire the org's normal alerts. Not read-only.",
+        annotations(read_only_hint = false, idempotent_hint = false))]
+    async fn run_check_now(
+        &self,
+        Parameters(args): Parameters<MonitorIdArg>,
+        ctx: RequestContext<RoleServer>,
+    ) -> Result<Json<CheckRunResult>, McpToolError> {
+        let auth = McpAuth::from_ctx(&ctx)?;
+        let pool = self.require_pool()?;
+        let args_json = json!({ "id": args.id });
+        let result = self.run_check_now_inner(&ctx, &auth, &args).await;
+        self.finish(pool, &auth, "run_check_now", args_json, result).await
+    }
+
+    #[tool(
+        description = "Pause a monitor (stop its checks until resumed). Requires user confirmation. Not read-only; idempotent.",
+        annotations(read_only_hint = false, idempotent_hint = true))]
+    async fn pause_monitor(
+        &self,
+        Parameters(args): Parameters<MonitorIdArg>,
+        ctx: RequestContext<RoleServer>,
+    ) -> Result<Json<MonitorStateResult>, McpToolError> {
+        let auth = McpAuth::from_ctx(&ctx)?;
+        let pool = self.require_pool()?;
+        let args_json = json!({ "id": args.id });
+        let result = self.set_enabled_inner(&ctx, &auth, &args, false).await;
+        self.finish(pool, &auth, "pause_monitor", args_json, result).await
+    }
+
+    #[tool(
+        description = "Resume a paused monitor (restart its checks). Requires user confirmation. Not read-only; idempotent.",
+        annotations(read_only_hint = false, idempotent_hint = true))]
+    async fn resume_monitor(
+        &self,
+        Parameters(args): Parameters<MonitorIdArg>,
+        ctx: RequestContext<RoleServer>,
+    ) -> Result<Json<MonitorStateResult>, McpToolError> {
+        let auth = McpAuth::from_ctx(&ctx)?;
+        let pool = self.require_pool()?;
+        let args_json = json!({ "id": args.id });
+        let result = self.set_enabled_inner(&ctx, &auth, &args, true).await;
+        self.finish(pool, &auth, "resume_monitor", args_json, result).await
+    }
+
+    #[tool(
+        description = "Post an acknowledgement update to an incident; it appears on the public status page. Requires user confirmation and an explicit notify choice. Not read-only.",
+        annotations(read_only_hint = false, idempotent_hint = false))]
+    async fn acknowledge_incident(
+        &self,
+        Parameters(args): Parameters<AckIncidentArgs>,
+        ctx: RequestContext<RoleServer>,
+    ) -> Result<Json<AckResult>, McpToolError> {
+        let auth = McpAuth::from_ctx(&ctx)?;
+        let pool = self.require_pool()?;
+        let args_json = json!({ "id": args.id, "notify": args.notify });
+        let result = self.acknowledge_incident_inner(&ctx, &auth, &args).await;
+        self.finish(pool, &auth, "acknowledge_incident", args_json, result).await
+    }
 }
 
 impl McpServer {
+    fn require_pool(&self) -> Result<&sqlx::PgPool, McpToolError> {
+        self.state
+            .db
+            .as_ref()
+            .ok_or_else(|| McpToolError::internal("db unavailable"))
+    }
+
+    /// Load a target in the org, or a tool not-found error.
+    async fn load_target(&self, org: crate::domain::OrgId, id: Uuid) -> Result<Target, McpToolError> {
+        self.state
+            .target_store
+            .get(org, id)
+            .await
+            .map_err(|e| McpToolError::internal(format!("get monitor: {e}")))?
+            .ok_or_else(|| McpToolError::not_found("monitor not found"))
+    }
+
+    /// Record exactly one audit row for a write tool's outcome, then return the
+    /// result unchanged. Success → `success`; a caller-fault error (scope,
+    /// confirmation, bad input, not-found) → `denied`; a server fault → `error`.
+    async fn finish<T>(
+        &self,
+        pool: &sqlx::PgPool,
+        auth: &McpAuth,
+        tool: &str,
+        args_json: serde_json::Value,
+        result: Result<T, McpToolError>,
+    ) -> Result<T, McpToolError> {
+        let (outcome, detail) = match &result {
+            Ok(_) => (Outcome::Success, None),
+            Err(e) => (outcome_for(e), Some(e.code)),
+        };
+        audit::record(pool, auth, tool, args_json, outcome, detail).await;
+        result
+    }
+
+    /// `run_check_now` body (no audit — the wrapper's `finish` records it).
+    async fn run_check_now_inner(
+        &self,
+        ctx: &RequestContext<RoleServer>,
+        auth: &McpAuth,
+        args: &MonitorIdArg,
+    ) -> Result<Json<CheckRunResult>, McpToolError> {
+        auth.require(Scope::TargetsExecute)?;
+        let id = parse_uuid(&args.id, "monitor id")?;
+        let target = self.load_target(auth.org, id).await?;
+        require_confirmation(
+            ctx,
+            format!(
+                "Run a check now on monitor \"{}\"? It probes the target immediately and \
+                 records the result; a failure may trigger your alerts.",
+                target.name
+            ),
+        )
+        .await?;
+
+        let host = host_for_spec(&target.check);
+        let Some(result) = self
+            .state
+            .worker_pool
+            .run_once(target.id, auth.org.0, &target.check, &host, true)
+            .await
+        else {
+            return Err(McpToolError::new(
+                "probe_failed",
+                "the probe did not run; try again",
+                true,
+            ));
+        };
+
+        // Persist like REST check-now so the monitor's state updates and the
+        // normal alert path applies. Best-effort: the probe already ran, so a
+        // persist failure is logged, not fatal — the observation is still
+        // returned.
+        if let Err(e) = self
+            .state
+            .result_sink
+            .write_batch(std::slice::from_ref(&result))
+            .await
+        {
+            tracing::warn!(target: "mcp", error = %e, "run_check_now persist failed");
+        }
+
+        Ok(Json(CheckRunResult {
+            id: target.id.to_string(),
+            state: result.status.as_str().to_string(),
+            checked_at: result.timestamp.to_rfc3339(),
+            duration_ms: result.duration_ms,
+            error: result
+                .error
+                .as_deref()
+                .and_then(strip_served_stale)
+                .map(str::to_owned),
+        }))
+    }
+
+    /// Shared pause/resume body (no audit — the wrapper's `finish` records it).
+    async fn set_enabled_inner(
+        &self,
+        ctx: &RequestContext<RoleServer>,
+        auth: &McpAuth,
+        args: &MonitorIdArg,
+        enabled: bool,
+    ) -> Result<Json<MonitorStateResult>, McpToolError> {
+        auth.require(Scope::TargetsWrite)?;
+        let id = parse_uuid(&args.id, "monitor id")?;
+        let target = self.load_target(auth.org, id).await?;
+
+        let (verb, effect) = if enabled {
+            ("Resume", "Its checks will restart.")
+        } else {
+            ("Pause", "Its checks will stop until you resume it.")
+        };
+        require_confirmation(ctx, format!("{verb} monitor \"{}\"? {effect}", target.name)).await?;
+
+        let updated = self
+            .state
+            .target_store
+            .update(
+                auth.org,
+                id,
+                TargetUpdate {
+                    enabled: Some(enabled),
+                    ..Default::default()
+                },
+                WriteSource::Api,
+            )
+            .await
+            .map_err(|e| McpToolError::internal(format!("set enabled: {e}")))?
+            .ok_or_else(|| McpToolError::not_found("monitor not found"))?;
+
+        Ok(Json(MonitorStateResult {
+            id: id.to_string(),
+            enabled: updated.enabled,
+        }))
+    }
+
+    /// `acknowledge_incident` body (no audit — the wrapper's `finish` records it).
+    async fn acknowledge_incident_inner(
+        &self,
+        ctx: &RequestContext<RoleServer>,
+        auth: &McpAuth,
+        args: &AckIncidentArgs,
+    ) -> Result<Json<AckResult>, McpToolError> {
+        auth.require(Scope::IncidentsWrite)?;
+        let id = parse_uuid(&args.id, "incident id")?;
+
+        let mut message = args.message.clone().unwrap_or_default();
+        if message.trim().is_empty() {
+            message = "Acknowledged.".to_string();
+        }
+        if message.len() > MAX_INCIDENT_MESSAGE_LEN {
+            return Err(McpToolError::invalid_argument(format!(
+                "message must be at most {MAX_INCIDENT_MESSAGE_LEN} characters"
+            )));
+        }
+
+        let notify_note = if args.notify {
+            "Subscriber notification was requested (note: subscriber push is not yet available, so no one will be paged)."
+        } else {
+            "Subscribers will not be notified."
+        };
+        require_confirmation(
+            ctx,
+            format!(
+                "Post this update to the incident and publish it on your status page?\n\n\"{message}\"\n\n{notify_note}"
+            ),
+        )
+        .await?;
+
+        let posted = self
+            .state
+            .incident_narration_store
+            .append_update(
+                auth.org,
+                id,
+                NewIncidentUpdate {
+                    phase: IncidentStatusPhase::Investigating,
+                    message,
+                },
+                Some("mcp".to_string()),
+            )
+            .await
+            .map_err(|e| McpToolError::internal(format!("acknowledge_incident: {e}")))?
+            .ok_or_else(|| McpToolError::not_found("incident not found"))?;
+
+        Ok(Json(AckResult {
+            incident_id: id.to_string(),
+            posted_at: posted.posted_at.to_rfc3339(),
+            // No subscriber-push pipeline yet — never claim a notification fired.
+            notified: false,
+        }))
+    }
+
     /// Public URL of a status page slug, mirroring the operator UI's own
     /// computation (subdomain → absolute apex, path mode → `/status`). Empty
     /// when no public surface is mounted.
@@ -642,6 +914,16 @@ fn ms_to_rfc3339(ms: i64) -> Option<String> {
 
 fn parse_uuid(s: &str, what: &str) -> Result<Uuid, McpToolError> {
     Uuid::parse_str(s).map_err(|_| McpToolError::invalid_argument(format!("invalid {what}")))
+}
+
+/// Map a write-tool error to an audit outcome: server faults are `error`;
+/// everything else (scope, confirmation, bad input, not-found) is a caller-side
+/// `denied`.
+fn outcome_for(e: &McpToolError) -> Outcome {
+    match e.code {
+        codes::INTERNAL | "probe_failed" => Outcome::Error,
+        _ => Outcome::Denied,
+    }
 }
 
 /// Window string → (span, latency bucket seconds). Bucket sizes target ~50-60

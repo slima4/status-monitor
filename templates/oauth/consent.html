@@ -9,23 +9,38 @@
         authorize connection
       </h2>
       <p class="text-sm text-muted">
+        {% if has_write %}
+        <strong>{{ client_name }}</strong> is requesting access to
+        <strong>{{ org_name }}</strong>.
+        {% else %}
         <strong>{{ client_name }}</strong> wants read-only access to
         <strong>{{ org_name }}</strong>.
+        {% endif %}
       </p>
     </header>
+
+    {% if has_write %}
+    <p class="alert-card alert-card--warn text-xs">
+      This connection can <strong>make changes</strong> to this organization
+      (see below). Each change still asks you to confirm before it happens.
+    </p>
+    {% endif %}
 
     <div class="space-y-2">
       <p class="text-xs uppercase tracking-wide text-quiet">It will be able to</p>
       <ul class="space-y-1 text-sm text-body">
         {% for s in scopes %}
         <li class="flex items-start gap-2">
+          {% if s.write %}
+          <span class="text-amber-600" aria-hidden="true">&#9888;</span><span>{{ s.label }}</span>
+          {% else %}
           <span aria-hidden="true">&middot;</span><span>{{ s.label }}</span>
+          {% endif %}
         </li>
         {% endfor %}
       </ul>
       <p class="text-xs text-muted">
-        Read-only. It cannot change monitors, channels, or settings, and access is
-        limited to this one organization.
+        Access is limited to this one organization.
       </p>
     </div>
 

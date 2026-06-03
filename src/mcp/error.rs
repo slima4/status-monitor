@@ -18,6 +18,8 @@ pub mod codes {
     pub const INVALID_ARGUMENT: &str = "invalid_argument";
     pub const NOT_FOUND: &str = "not_found";
     pub const INSUFFICIENT_SCOPE: &str = "insufficient_scope";
+    /// A write tool's elicitation was declined, cancelled, or unavailable.
+    pub const NOT_CONFIRMED: &str = "not_confirmed";
     pub const UNAUTHENTICATED: &str = "unauthenticated";
     pub const INTERNAL: &str = "internal";
 }
