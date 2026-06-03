@@ -26,6 +26,10 @@ use crate::{api, web};
 /// guard.
 pub fn build_app_router(state: AppState, shutdown: CancellationToken) -> Router {
     let merged = api::build_router(state.clone(), shutdown).merge(web::routes(state.clone()));
+    // Read MCP server at `/mcp` (no-op unless `cfg.mcp.enabled`). Mounted before
+    // the cross-cutting layers so CSRF (Bearer-exempt) and tenant-host isolation
+    // (`mcp` is an operator label) wrap it like the rest of the surface.
+    let merged = crate::mcp::mount(merged, state.clone());
     apply_cross_cutting_layers(merged, state)
 }
 

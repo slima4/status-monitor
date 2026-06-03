@@ -32,6 +32,7 @@ pub const RESERVED_SLUGS: &[&str] = &[
     "login",
     "logout",
     "mail",
+    "mcp",
     "mx",
     "ns",
     "ns1",

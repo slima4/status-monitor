@@ -1,0 +1,70 @@
+//! Model Context Protocol server — read tools at `/mcp`.
+//!
+//! A customer's LLM (Claude Desktop / IDE via `mcp-remote`, or the claude.ai
+//! connector once OAuth lands) answers operational questions about **their own
+//! org** through typed, authorized, side-effect-free tools. This is another
+//! authorized front door to the same stores the web app and `/api/v1` use, not
+//! a bypass: tenant isolation, scopes, rate limits, and audit all apply.
+//!
+//! Transport: Streamable HTTP via the official `rmcp` crate's
+//! [`StreamableHttpService`], mounted as a `tower::Service` on the existing
+//! axum router. Auth is an axum middleware in front of the service: it resolves
+//! a scoped `sm_live_` token, requires an org binding + live membership, and
+//! injects [`AuthContext`] into request extensions; tools read it back from the
+//! `RequestContext`. The org is always the token's — never a tool argument.
+
+mod auth;
+mod cursor;
+mod error;
+mod schema;
+mod server;
+
+use std::sync::Arc;
+
+use axum::Router;
+use axum::middleware::from_fn_with_state;
+use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
+use rmcp::transport::streamable_http_server::tower::{
+    StreamableHttpServerConfig, StreamableHttpService,
+};
+
+use crate::app::AppState;
+use server::McpServer;
+
+/// Mount the read MCP server at `/mcp` when `cfg.mcp.enabled`. No-op otherwise,
+/// so a deployment without the dedicated host + Caddy route never exposes it.
+///
+/// Layer order (outermost first): auth runs first and injects [`AuthContext`],
+/// then the shared per-plan rate limiter keys on the resolved org/user, then
+/// the rmcp transport service handles the JSON-RPC.
+pub fn mount(router: Router, state: AppState) -> Router {
+    if !state.cfg.mcp.enabled {
+        return router;
+    }
+    let svc = build_service(state.clone());
+    let mcp = Router::new()
+        .nest_service("/mcp", svc)
+        // Added inner→outer: rate-limit first (inner) so auth runs before it
+        // and the limiter sees the resolved org/user, never the TCP peer.
+        .layer(from_fn_with_state(
+            state.clone(),
+            crate::quotas::rate_limit_middleware,
+        ))
+        .layer(from_fn_with_state(state.clone(), auth::middleware));
+    router.merge(mcp)
+}
+
+/// Build the rmcp Streamable-HTTP service. `allowed_origins` feeds the
+/// transport's RFC 6454 Origin check (DNS-rebinding defense); an empty list
+/// disables it and a missing `Origin` header always passes (non-browser
+/// clients like `mcp-remote` send none). The `MCP-Protocol-Version` 400 and
+/// the 202-for-notifications behaviour are handled by the transport itself.
+fn build_service(state: AppState) -> StreamableHttpService<McpServer, LocalSessionManager> {
+    let config = StreamableHttpServerConfig::default()
+        .with_allowed_origins(state.cfg.mcp.allowed_origins.clone());
+    StreamableHttpService::new(
+        move || Ok(McpServer::new(state.clone())),
+        Arc::new(LocalSessionManager::default()),
+        config,
+    )
+}

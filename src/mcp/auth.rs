@@ -1,0 +1,187 @@
+//! MCP authentication.
+//!
+//! Two halves:
+//!  1. [`middleware`] — runs in front of the transport on every `/mcp` request.
+//!     Resolves the `sm_live_` Bearer token, **requires** an org binding and a
+//!     live membership, then injects [`AuthContext::ApiToken`] into request
+//!     extensions. Reusing that type means the shared rate limiter's
+//!     `CurrentOrg`/`CurrentUser` extractors work unchanged. A non-bound token
+//!     is rejected: the single-org connector takes its org from the credential,
+//!     never a tool argument or header.
+//!  2. [`McpAuth`] — what a tool reads back from its `RequestContext` to get the
+//!     org + scopes and to scope-gate itself.
+//!
+//! The OAuth 2.1 resource-server path (Phase 3) plugs in here later; this static
+//! token path is the dev/bring-up front door.
+
+use axum::extract::{Request, State};
+use axum::http::{HeaderValue, StatusCode, header};
+use axum::middleware::Next;
+use axum::response::{IntoResponse, Response};
+use rmcp::RoleServer;
+use rmcp::service::RequestContext;
+use uuid::Uuid;
+
+use crate::app::AppState;
+use crate::auth::api_tokens;
+use crate::auth::scope::{Scope, ScopeSet};
+use crate::domain::{OrgId, UserId};
+use crate::storage::orgs::is_active_member;
+use crate::web::auth::{AuthContext, bearer_from_headers};
+
+use super::error::McpToolError;
+
+/// Resolved MCP caller, read from request extensions inside a tool handler.
+pub struct McpAuth {
+    pub org: OrgId,
+    pub scopes: ScopeSet,
+    #[allow(dead_code)]
+    pub user_id: UserId,
+    #[allow(dead_code)]
+    pub token_id: Uuid,
+}
+
+impl McpAuth {
+    /// Pull the auth context the [`middleware`] injected. The transport forwards
+    /// the HTTP request `Parts` into `RequestContext.extensions`; the
+    /// middleware-inserted [`AuthContext`] lives in *those* parts' extensions.
+    pub fn from_ctx(ctx: &RequestContext<RoleServer>) -> Result<Self, McpToolError> {
+        let parts = ctx
+            .extensions
+            .get::<axum::http::request::Parts>()
+            .ok_or_else(|| McpToolError::internal("request parts missing from tool context"))?;
+        match parts.extensions.get::<AuthContext>() {
+            Some(AuthContext::ApiToken {
+                user_id,
+                token_id,
+                scopes,
+                org: Some(org),
+            }) => Ok(Self {
+                org: *org,
+                scopes: scopes.clone(),
+                user_id: *user_id,
+                token_id: *token_id,
+            }),
+            // The middleware guarantees a bound ApiToken before any tool runs;
+            // anything else is a server bug, not a caller error.
+            _ => Err(McpToolError::unauthenticated(
+                "no authenticated, org-bound token on this request",
+            )),
+        }
+    }
+
+    /// Gate the calling tool on `required`; surfaces a tool-execution error the
+    /// model can read rather than a bare protocol failure.
+    pub fn require(&self, required: Scope) -> Result<(), McpToolError> {
+        if self.scopes.allows(required) {
+            Ok(())
+        } else {
+            Err(McpToolError::insufficient_scope(required.as_str()))
+        }
+    }
+}
+
+/// 401 with a `Bearer` challenge — the hook the OAuth resource-metadata header
+/// attaches to in Phase 3.
+fn challenge() -> Response {
+    let mut resp = (StatusCode::UNAUTHORIZED, "authentication required").into_response();
+    resp.headers_mut()
+        .insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Bearer"));
+    resp
+}
+
+fn forbidden(message: &'static str) -> Response {
+    (StatusCode::FORBIDDEN, message).into_response()
+}
+
+/// Authenticate every `/mcp` request, inject [`AuthContext`], lazily bump
+/// `last_used_at`. Auth applies to the initialize handshake too — the spec
+/// requires a credential on every request, and `mcp-remote` sends one.
+pub async fn middleware(State(state): State<AppState>, mut req: Request, next: Next) -> Response {
+    let Some(raw) = bearer_from_headers(req.headers()) else {
+        return challenge();
+    };
+    if !raw.starts_with(api_tokens::TOKEN_PREFIX) {
+        return challenge();
+    }
+    let Some(pool) = state.db.as_ref() else {
+        return challenge();
+    };
+
+    let prefix_len = state.cfg.auth.api_tokens.prefix_visible_chars as usize;
+    let row = match api_tokens::lookup_by_raw(pool, raw, prefix_len).await {
+        Ok(api_tokens::LookupOutcome::Active(row)) => row,
+        Ok(api_tokens::LookupOutcome::Invalid) => return challenge(),
+        Err(err) => {
+            tracing::warn!(target: "mcp", error = %err, "mcp token lookup failed");
+            return challenge();
+        }
+    };
+
+    // The connector is single-org: the org comes from the token binding only.
+    let Some(org) = row.org else {
+        return forbidden("this token is not bound to an organization; mint an org-scoped token");
+    };
+
+    // Re-check membership on every request (defense vs revoked access). The
+    // rate limiter's CurrentOrg will re-verify too; one extra indexed lookup on
+    // a low-volume, LLM-driven path is an acceptable cost for failing closed.
+    match is_active_member(pool, row.user_id, org).await {
+        Ok(true) => {}
+        Ok(false) => return forbidden("the token owner is no longer a member of this organization"),
+        Err(err) => {
+            tracing::warn!(target: "mcp", error = %err, "mcp membership check failed");
+            return challenge();
+        }
+    }
+
+    let token_id = row.id;
+    req.extensions_mut().insert(AuthContext::ApiToken {
+        user_id: row.user_id,
+        token_id,
+        scopes: row.scopes,
+        org: Some(org),
+    });
+
+    if api_tokens::should_touch(&state.api_token_debounce, token_id) {
+        let cache = state.api_token_debounce.clone();
+        let pool = pool.clone();
+        tokio::spawn(async move {
+            if let Err(err) = api_tokens::touch_last_used_debounced(&pool, &cache, token_id).await {
+                tracing::warn!(target: "mcp", error = %err, "mcp last_used bump failed");
+            }
+        });
+    }
+
+    next.run(req).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn auth_with(scopes: &[&str]) -> McpAuth {
+        McpAuth {
+            org: OrgId(uuid::Uuid::nil()),
+            scopes: ScopeSet::from_strs(scopes.iter().copied()),
+            user_id: UserId(uuid::Uuid::nil()),
+            token_id: uuid::Uuid::nil(),
+        }
+    }
+
+    #[test]
+    fn require_allows_granted_scope() {
+        assert!(auth_with(&["targets:read"]).require(Scope::TargetsRead).is_ok());
+        // write implies read.
+        assert!(auth_with(&["targets:write"]).require(Scope::TargetsRead).is_ok());
+        assert!(auth_with(&["full_access"]).require(Scope::TargetsRead).is_ok());
+    }
+
+    #[test]
+    fn require_denies_missing_scope() {
+        let err = auth_with(&["status_page:read"])
+            .require(Scope::TargetsRead)
+            .unwrap_err();
+        assert_eq!(err.code, super::super::error::codes::INSUFFICIENT_SCOPE);
+    }
+}

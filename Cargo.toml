@@ -140,6 +140,18 @@ image = { version = "0.25.10", default-features = false, features = ["png", "jpe
 ipnet = { version = "2.12.0", features = ["serde"] }
 chrono-tz = { version = "0.10.4", default-features = false }
 
+# Model Context Protocol server (read tools at /mcp). Streamable HTTP transport
+# mounts as a tower::Service on the existing axum router. Server-only: client +
+# reqwest features excluded so we don't pull a second HTTP/TLS stack.
+rmcp = { version = "1.7", default-features = false, features = [
+    "server",
+    "macros",
+    "schemars",
+    "transport-streamable-http-server",
+    "transport-streamable-http-server-session",
+] }
+schemars = "1"
+
 [dev-dependencies]
 criterion = { version = "0.8", features = ["async_tokio"] }
 axum-server = { version = "0.8", features = ["tls-rustls-no-provider"] }

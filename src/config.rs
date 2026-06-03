@@ -67,6 +67,21 @@ pub struct AppConfig {
     pub abuse: AbuseConfig,
     #[serde(default)]
     pub marketing: MarketingConfig,
+    #[serde(default)]
+    pub mcp: McpConfig,
+}
+
+/// `[mcp]`. Read-only Model Context Protocol server at `/mcp` (Streamable
+/// HTTP). Disabled by default; enable per deployment once the dedicated `mcp.`
+/// host + Caddy route exist. `allowed_origins` feeds the transport's RFC 6454
+/// Origin check (DNS-rebinding defense): empty disables it, and a request with
+/// no `Origin` header always passes — non-browser clients like `mcp-remote`
+/// send none, browser connectors send their own origin.
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(default)]
+pub struct McpConfig {
+    pub enabled: bool,
+    pub allowed_origins: Vec<String>,
 }
 
 /// `[marketing]`. Optional apex/`www` marketing site + blog served from

@@ -20,6 +20,11 @@ use crate::web::auth::{CurrentOrg, CurrentUser};
 
 fn categorize(parts: &Parts) -> RateLimitCategory {
     let path = parts.uri.path();
+    // MCP is JSON-RPC over POST, but the Phase-1 tool surface is read-only, so
+    // it draws from the reads budget. Revisit when MCP write tools land.
+    if path == "/mcp" || path.starts_with("/mcp/") {
+        return RateLimitCategory::ApiReads;
+    }
     if path.contains("/bulk") {
         return RateLimitCategory::BulkOps;
     }

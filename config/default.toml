@@ -318,3 +318,15 @@ reserved_subdomains = ["www", "app"]
 # Mount the /blog routes. The post sources live in
 # `src/marketing/content/blog/` and are compiled into the binary.
 blog_enabled = true
+
+[mcp]
+# Read-only Model Context Protocol server at /mcp (Streamable HTTP). Off by
+# default; enable per deployment once the dedicated `mcp.` host + Caddy route
+# exist. Auth is a read-only, org-bound, expiring scoped API token.
+enabled = false
+
+# Allowed browser origins for the transport's RFC 6454 Origin check
+# (DNS-rebinding defense). Empty disables the check; a request with no Origin
+# header always passes (non-browser clients like `mcp-remote` send none). Add
+# the connector's browser origin(s) here, e.g. ["https://claude.ai"].
+allowed_origins = []

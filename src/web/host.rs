@@ -33,7 +33,7 @@ use crate::domain::{OrgId, PageRef, StatusPageId};
 /// operator surface across dozens of hosts and leaking the reserved list
 /// via response codes. Keep this set minimal — only labels actually
 /// served by the operator front door.
-const OPERATOR_LABELS: &[&str] = &["app"];
+const OPERATOR_LABELS: &[&str] = &["app", "mcp"];
 
 /// Marketing labels — apex (empty) and `www` route to the marketing site,
 /// not to a tenant. Kept tight (only `www`); deeper aliases would
