@@ -76,6 +76,19 @@ Discovery + authorization-server endpoints live on the **app** host (where the s
 
 Redirect URIs are restricted to HTTPS hosts (web connectors) and loopback HTTP (local tooling); custom schemes, non-loopback cleartext, userinfo, and fragments are rejected at registration.
 
+### Consent screen
+
+`GET /oauth/authorize` renders the consent screen — the one page the user sees during the OAuth flow. It appears **after login**, once the client + redirect URI are validated, and only when `mcp.oauth_enabled` is on. Approving here is what mints the token; nothing is granted until the user clicks Approve.
+
+It shows:
+
+- **Who and what** — the client name and the single org it's connecting to. Access is always scoped to that one org.
+- **Granted abilities** — one line per scope, in plain language (e.g. "Read your monitors and their current status", "Pause and resume your monitors"). Write abilities are flagged with a ⚠ marker, and a warning banner appears at the top stating the connection can make changes — each of which still asks for per-action confirmation.
+- **Connection expires** — a picker (30 / 60 / 90 / 365 days, default 90) that sets the refresh-token (connection) lifetime. There is no "never".
+- **Approve / Deny** — Deny aborts the flow; Approve mints the org-bound scoped token and returns the user to the client.
+
+A read-only request shows "wants read-only access" with no warning banner; a request that includes any write scope switches to the "is requesting access" wording plus the banner and ⚠ markers.
+
 ## Scopes
 
 The connector advertises five grantable scopes. A request with no `scope` (or only unknown scopes) grants the **read-only default**; write scopes are opt-in.
