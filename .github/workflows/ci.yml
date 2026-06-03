@@ -28,7 +28,9 @@ on:
 # so the canonical history's status checks aren't truncated.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  # Cancel a superseded run immediately, including on main — a newer push to the
+  # same ref makes the older ci/build obsolete; don't let it run to completion.
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always

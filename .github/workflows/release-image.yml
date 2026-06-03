@@ -34,7 +34,9 @@ on:
 # own immutable sha- tag so a deploy can pin any of them.
 concurrency:
   group: release-image-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  # Cancel a superseded build immediately, including on main — only the latest
+  # commit's image is deployed, so an older in-flight build is wasted minutes.
+  cancel-in-progress: true
 
 env:
   REGISTRY: ghcr.io
