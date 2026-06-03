@@ -152,6 +152,24 @@ jobs:
           install -m 600 /dev/stdin ~/.ssh/known_hosts <<< "${{ secrets.DEPLOY_KNOWN_HOSTS }}"
 
       - name: deploy over ssh
+        # All ${{ }} live here, never inline in the run block below: GitHub caps
+        # an expression-bearing string at 21000 chars and this block is large,
+        # so an inline ${{ }} makes the whole script one over-long expression and
+        # the file fails to parse. As $ENV refs the block stays expression-free.
+        env:
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GRAFANA_CLOUD_PROM_URL: ${{ secrets.GRAFANA_CLOUD_PROM_URL }}
+          GRAFANA_CLOUD_PROM_USER: ${{ secrets.GRAFANA_CLOUD_PROM_USER }}
+          GRAFANA_CLOUD_API_TOKEN: ${{ secrets.GRAFANA_CLOUD_API_TOKEN }}
+          GRAFANA_OTLP_ENDPOINT: ${{ secrets.GRAFANA_OTLP_ENDPOINT }}
+          GRAFANA_OTLP_INSTANCE_ID: ${{ secrets.GRAFANA_OTLP_INSTANCE_ID }}
+          GRAFANA_OTLP_API_TOKEN: ${{ secrets.GRAFANA_OTLP_API_TOKEN }}
+          GRAFANA_CLOUD_LOKI_URL: ${{ secrets.GRAFANA_CLOUD_LOKI_URL }}
+          GRAFANA_CLOUD_LOKI_USER: ${{ secrets.GRAFANA_CLOUD_LOKI_USER }}
+          RUST_LOG: ${{ vars.RUST_LOG }}
+          UPTIMEPAGE_MCP_ENABLED: ${{ vars.MCP_ENABLED }}
+          UPTIMEPAGE_MCP_OAUTH_ENABLED: ${{ vars.MCP_OAUTH_ENABLED }}
         run: |
           set -euo pipefail
           # Lowercase only the repo (GHCR requires it); OCI tags are
@@ -168,18 +186,18 @@ jobs:
           ssh -T -i ~/.ssh/id_deploy -o IdentitiesOnly=yes \
               "${DEPLOY_USER}@${DEPLOY_HOST}" \
               "NEW_IMAGE='${NEW_IMAGE}' REMIGRATE='${REMIGRATE}' REMIGRATE_CH='${REMIGRATE_CH}' HEAD_SHA='${HEAD_SHA}' \
-               GHCR_USER='${{ github.actor }}' GHCR_TOKEN='${{ secrets.GITHUB_TOKEN }}' \
-               GRAFANA_CLOUD_PROM_URL='${{ secrets.GRAFANA_CLOUD_PROM_URL }}' \
-               GRAFANA_CLOUD_PROM_USER='${{ secrets.GRAFANA_CLOUD_PROM_USER }}' \
-               GRAFANA_CLOUD_API_TOKEN='${{ secrets.GRAFANA_CLOUD_API_TOKEN }}' \
-               GRAFANA_OTLP_ENDPOINT='${{ secrets.GRAFANA_OTLP_ENDPOINT }}' \
-               GRAFANA_OTLP_INSTANCE_ID='${{ secrets.GRAFANA_OTLP_INSTANCE_ID }}' \
-               GRAFANA_OTLP_API_TOKEN='${{ secrets.GRAFANA_OTLP_API_TOKEN }}' \
-               GRAFANA_CLOUD_LOKI_URL='${{ secrets.GRAFANA_CLOUD_LOKI_URL }}' \
-               GRAFANA_CLOUD_LOKI_USER='${{ secrets.GRAFANA_CLOUD_LOKI_USER }}' \
-               RUST_LOG='${{ vars.RUST_LOG }}' \
-               UPTIMEPAGE_MCP_ENABLED='${{ vars.MCP_ENABLED }}' \
-               UPTIMEPAGE_MCP_OAUTH_ENABLED='${{ vars.MCP_OAUTH_ENABLED }}' \
+               GHCR_USER='${GHCR_USER}' GHCR_TOKEN='${GHCR_TOKEN}' \
+               GRAFANA_CLOUD_PROM_URL='${GRAFANA_CLOUD_PROM_URL}' \
+               GRAFANA_CLOUD_PROM_USER='${GRAFANA_CLOUD_PROM_USER}' \
+               GRAFANA_CLOUD_API_TOKEN='${GRAFANA_CLOUD_API_TOKEN}' \
+               GRAFANA_OTLP_ENDPOINT='${GRAFANA_OTLP_ENDPOINT}' \
+               GRAFANA_OTLP_INSTANCE_ID='${GRAFANA_OTLP_INSTANCE_ID}' \
+               GRAFANA_OTLP_API_TOKEN='${GRAFANA_OTLP_API_TOKEN}' \
+               GRAFANA_CLOUD_LOKI_URL='${GRAFANA_CLOUD_LOKI_URL}' \
+               GRAFANA_CLOUD_LOKI_USER='${GRAFANA_CLOUD_LOKI_USER}' \
+               RUST_LOG='${RUST_LOG}' \
+               UPTIMEPAGE_MCP_ENABLED='${UPTIMEPAGE_MCP_ENABLED}' \
+               UPTIMEPAGE_MCP_OAUTH_ENABLED='${UPTIMEPAGE_MCP_OAUTH_ENABLED}' \
                bash -s" <<'REMOTE'
           # This script is delivered to `bash -s` over the ssh heredoc — i.e. on
           # stdin (fd 0). A `docker compose exec -T` / `docker exec -i` / nested
