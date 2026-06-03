@@ -13,7 +13,9 @@ mod common;
 
 use uptimepage::auth::OauthProvider;
 use uptimepage::domain::{
-    AppTheme, ChannelKind, IncidentSeverity, IncidentStatusPhase, PublicStyle,
+    ActorType, AppTheme, ChannelKind, IncidentEventKind, IncidentOrigin, IncidentSeverity,
+    IncidentState, IncidentStatusPhase, IncidentUrgency, IncidentVisibility, NotificationReason,
+    NotificationStatus, PublicStyle,
 };
 
 /// Pull the parenthesised list from a constraint def like
@@ -210,6 +212,115 @@ async fn status_pages_public_style_check_matches_public_style_enum() {
         db, rust,
         "status_pages.public_style CHECK list ({db:?}) drifted from PublicStyle ({rust:?})"
     );
+}
+
+/// Shared body for the operational-incident CHECK constraints added in
+/// migration 018 — load the live constraint def, compare its quoted token set
+/// against the Rust enum's `as_db_str` values.
+async fn assert_check_matches(conname: &str, rust: Vec<String>) {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let def = constraint_def(&pool, conname)
+        .await
+        .unwrap_or_else(|| panic!("{conname} missing"));
+    let db = sorted(quoted_tokens(&def));
+    let rust = sorted(rust);
+    assert_eq!(db, rust, "{conname} CHECK list ({db:?}) drifted from Rust enum ({rust:?})");
+}
+
+fn db_strs<T: Copy>(all: &[T], f: impl Fn(T) -> &'static str) -> Vec<String> {
+    all.iter().map(|v| f(*v).to_string()).collect()
+}
+
+#[tokio::test]
+#[ignore]
+async fn incidents_state_check_matches_rust_enum() {
+    assert_check_matches(
+        "incidents_state_check",
+        db_strs(IncidentState::ALL, IncidentState::as_db_str),
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn incidents_urgency_check_matches_rust_enum() {
+    assert_check_matches(
+        "incidents_urgency_check",
+        db_strs(IncidentUrgency::ALL, IncidentUrgency::as_db_str),
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn incidents_origin_check_matches_rust_enum() {
+    assert_check_matches(
+        "incidents_origin_check",
+        db_strs(IncidentOrigin::ALL, IncidentOrigin::as_db_str),
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn incidents_visibility_check_matches_rust_enum() {
+    assert_check_matches(
+        "incidents_visibility_check",
+        db_strs(IncidentVisibility::ALL, IncidentVisibility::as_db_str),
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn incident_events_kind_check_matches_rust_enum() {
+    assert_check_matches(
+        "incident_events_kind_check",
+        db_strs(IncidentEventKind::ALL, IncidentEventKind::as_db_str),
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn incident_events_actor_type_check_matches_rust_enum() {
+    assert_check_matches(
+        "incident_events_actor_type_check",
+        db_strs(ActorType::ALL, ActorType::as_db_str),
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn incident_notifications_status_check_matches_rust_enum() {
+    assert_check_matches(
+        "incident_notifications_status_check",
+        db_strs(NotificationStatus::ALL, NotificationStatus::as_db_str),
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn incident_notifications_reason_check_matches_rust_enum() {
+    assert_check_matches(
+        "incident_notifications_reason_check",
+        db_strs(NotificationReason::ALL, NotificationReason::as_db_str),
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn targets_default_severity_check_matches_rust_enum() {
+    assert_check_matches(
+        "targets_default_severity_check",
+        db_strs(IncidentSeverity::ALL, IncidentSeverity::as_db_str),
+    )
+    .await;
 }
 
 /// `incidents.status_at_start` is a *subset* of `CheckStatus` (the values

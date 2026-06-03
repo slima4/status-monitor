@@ -6,18 +6,24 @@
 //! on check results.
 
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::AppendHeaders;
+use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::api::ApiError;
 use crate::api::error::codes;
 use crate::api::handlers::validation::{self, validate_message};
 use crate::app::AppState;
-use crate::domain::{Incident, IncidentNarrationUpdate, NewIncidentUpdate, PublicIncidentUpdate};
+use crate::domain::{
+    Incident, IncidentEvent, IncidentNarrationUpdate, IncidentState, NewIncidentUpdate,
+    NewManualIncident, OpsIncident, PublicIncidentUpdate, UserId,
+};
 use crate::error::{AppError, Result};
-use crate::web::{Authorized, IncidentsWrite};
+use crate::storage::{Actor, IncidentOpsFilter, LifecycleOutcome};
+use crate::web::{Authorized, CurrentUser, IncidentsRead, IncidentsWrite};
 
 #[utoipa::path(
     patch,
@@ -108,6 +114,254 @@ pub async fn post_incident_update(
     ))
 }
 
+// ── Operational lifecycle ──────────────────────────────────────────────────
+
+/// Full operational incident plus its internal activity timeline.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct IncidentDetail {
+    pub incident: OpsIncident,
+    pub timeline: Vec<IncidentEvent>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct ListIncidentsQuery {
+    /// Filter by operational state: `triggered`, `acknowledged`, `resolved`.
+    pub state: Option<String>,
+    pub limit: Option<usize>,
+}
+
+/// Optional operator note attached to a lifecycle action.
+#[derive(Debug, Default, Deserialize, ToSchema)]
+pub struct LifecycleBody {
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize, ToSchema)]
+pub struct AssignBody {
+    /// The responder to own the incident, or `null` to clear the assignee.
+    #[serde(default)]
+    pub user_id: Option<UserId>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct NoteBody {
+    pub message: String,
+}
+
+fn parse_state_filter(s: Option<&str>) -> Result<Option<IncidentState>> {
+    match s {
+        None => Ok(None),
+        Some("triggered") => Ok(Some(IncidentState::Triggered)),
+        Some("acknowledged") => Ok(Some(IncidentState::Acknowledged)),
+        Some("resolved") => Ok(Some(IncidentState::Resolved)),
+        Some(other) => Err(AppError::bad_request(
+            codes::INCIDENT_INVALID_STATE,
+            format!("unknown incident state filter: {other}"),
+        )),
+    }
+}
+
+/// Trim a blank note to `None`, reject one over the message length cap.
+fn clean_note(note: Option<String>) -> Result<Option<String>> {
+    let Some(n) = note else { return Ok(None) };
+    if n.trim().is_empty() {
+        return Ok(None);
+    }
+    if n.len() > validation::MAX_MESSAGE {
+        return Err(AppError::bad_request(
+            codes::MESSAGE_TOO_LONG,
+            "note too long",
+        ));
+    }
+    Ok(Some(n))
+}
+
+fn lifecycle_response(outcome: LifecycleOutcome) -> Result<Json<OpsIncident>> {
+    match outcome {
+        LifecycleOutcome::Updated(inc) => Ok(Json(*inc)),
+        LifecycleOutcome::NotFound => Err(AppError::not_found(
+            codes::INCIDENT_NOT_FOUND,
+            "incident not found",
+        )),
+        LifecycleOutcome::IllegalTransition(err) => {
+            Err(AppError::conflict(codes::INCIDENT_INVALID_STATE, err.to_string()))
+        }
+    }
+}
+
+#[utoipa::path(
+    get, path = "/api/v1/incidents", tag = "incidents",
+    summary = "List operational incidents (newest first)",
+    params(
+        ("state" = Option<String>, Query, description = "triggered | acknowledged | resolved"),
+        ("limit" = Option<usize>, Query),
+    ),
+    responses((status = 200, body = [OpsIncident]), (status = 400, body = ApiError)),
+)]
+pub async fn list_incidents(
+    State(state): State<AppState>,
+    Authorized(org, _): Authorized<IncidentsRead>,
+    Query(q): Query<ListIncidentsQuery>,
+) -> Result<Json<Vec<OpsIncident>>> {
+    let filter = IncidentOpsFilter {
+        state: parse_state_filter(q.state.as_deref())?,
+        limit: q.limit,
+    };
+    Ok(Json(state.incident_ops_store.list(org, filter).await?))
+}
+
+#[utoipa::path(
+    get, path = "/api/v1/incidents/{id}", tag = "incidents",
+    summary = "Get one incident with its internal activity timeline",
+    params(("id" = Uuid, Path)),
+    responses((status = 200, body = IncidentDetail), (status = 404, body = ApiError)),
+)]
+pub async fn get_incident(
+    State(state): State<AppState>,
+    Authorized(org, _): Authorized<IncidentsRead>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<IncidentDetail>> {
+    let incident = state
+        .incident_ops_store
+        .get(org, id)
+        .await?
+        .ok_or_else(|| AppError::not_found(codes::INCIDENT_NOT_FOUND, "incident not found"))?;
+    let timeline = state.incident_ops_store.timeline(org, id).await?;
+    Ok(Json(IncidentDetail { incident, timeline }))
+}
+
+#[utoipa::path(
+    post, path = "/api/v1/incidents", tag = "incidents",
+    summary = "Declare a manual incident",
+    request_body = NewManualIncident,
+    responses((status = 201, body = OpsIncident), (status = 400, body = ApiError)),
+)]
+pub async fn declare_incident(
+    State(state): State<AppState>,
+    Authorized(org, _): Authorized<IncidentsWrite>,
+    CurrentUser(user): CurrentUser,
+    Json(new): Json<NewManualIncident>,
+) -> Result<(StatusCode, Json<OpsIncident>)> {
+    validation::validate_optional_title(Some(&new.title), "title")?;
+    let inc = state
+        .incident_ops_store
+        .declare(org, new, Actor::User(user))
+        .await?;
+    Ok((StatusCode::CREATED, Json(inc)))
+}
+
+#[utoipa::path(
+    post, path = "/api/v1/incidents/{id}/acknowledge", tag = "incidents",
+    summary = "Acknowledge an incident (take ownership, halt escalation)",
+    params(("id" = Uuid, Path)), request_body = LifecycleBody,
+    responses((status = 200, body = OpsIncident), (status = 404, body = ApiError), (status = 409, body = ApiError)),
+)]
+pub async fn acknowledge_incident(
+    State(state): State<AppState>,
+    Authorized(org, _): Authorized<IncidentsWrite>,
+    CurrentUser(user): CurrentUser,
+    Path(id): Path<Uuid>,
+    Json(body): Json<LifecycleBody>,
+) -> Result<Json<OpsIncident>> {
+    let note = clean_note(body.note)?;
+    let outcome = state
+        .incident_ops_store
+        .acknowledge(org, id, Actor::User(user), note)
+        .await?;
+    lifecycle_response(outcome)
+}
+
+#[utoipa::path(
+    post, path = "/api/v1/incidents/{id}/resolve", tag = "incidents",
+    summary = "Resolve an incident",
+    params(("id" = Uuid, Path)), request_body = LifecycleBody,
+    responses((status = 200, body = OpsIncident), (status = 404, body = ApiError)),
+)]
+pub async fn resolve_incident(
+    State(state): State<AppState>,
+    Authorized(org, _): Authorized<IncidentsWrite>,
+    CurrentUser(user): CurrentUser,
+    Path(id): Path<Uuid>,
+    Json(body): Json<LifecycleBody>,
+) -> Result<Json<OpsIncident>> {
+    let note = clean_note(body.note)?;
+    let outcome = state
+        .incident_ops_store
+        .resolve(org, id, Actor::User(user), note)
+        .await?;
+    lifecycle_response(outcome)
+}
+
+#[utoipa::path(
+    post, path = "/api/v1/incidents/{id}/reopen", tag = "incidents",
+    summary = "Reopen a resolved incident",
+    params(("id" = Uuid, Path)), request_body = LifecycleBody,
+    responses((status = 200, body = OpsIncident), (status = 404, body = ApiError), (status = 409, body = ApiError)),
+)]
+pub async fn reopen_incident(
+    State(state): State<AppState>,
+    Authorized(org, _): Authorized<IncidentsWrite>,
+    CurrentUser(user): CurrentUser,
+    Path(id): Path<Uuid>,
+    Json(body): Json<LifecycleBody>,
+) -> Result<Json<OpsIncident>> {
+    let note = clean_note(body.note)?;
+    let outcome = state
+        .incident_ops_store
+        .reopen(org, id, Actor::User(user), note)
+        .await?;
+    lifecycle_response(outcome)
+}
+
+#[utoipa::path(
+    post, path = "/api/v1/incidents/{id}/assign", tag = "incidents",
+    summary = "Assign or unassign an incident's owner",
+    params(("id" = Uuid, Path)), request_body = AssignBody,
+    responses((status = 200, body = OpsIncident), (status = 404, body = ApiError)),
+)]
+pub async fn assign_incident(
+    State(state): State<AppState>,
+    Authorized(org, _): Authorized<IncidentsWrite>,
+    CurrentUser(user): CurrentUser,
+    Path(id): Path<Uuid>,
+    Json(body): Json<AssignBody>,
+) -> Result<Json<OpsIncident>> {
+    match state
+        .incident_ops_store
+        .assign(org, id, body.user_id, Actor::User(user))
+        .await?
+    {
+        Some(inc) => Ok(Json(inc)),
+        None => Err(AppError::not_found(
+            codes::INCIDENT_NOT_FOUND,
+            "incident not found",
+        )),
+    }
+}
+
+#[utoipa::path(
+    post, path = "/api/v1/incidents/{id}/notes", tag = "incidents",
+    summary = "Add an internal note to the incident timeline",
+    params(("id" = Uuid, Path)), request_body = NoteBody,
+    responses((status = 201, body = IncidentEvent), (status = 400, body = ApiError), (status = 404, body = ApiError)),
+)]
+pub async fn add_incident_note(
+    State(state): State<AppState>,
+    Authorized(org, _): Authorized<IncidentsWrite>,
+    CurrentUser(user): CurrentUser,
+    Path(id): Path<Uuid>,
+    Json(body): Json<NoteBody>,
+) -> Result<(StatusCode, Json<IncidentEvent>)> {
+    validate_message(&body.message, "message")?;
+    let event = state
+        .incident_ops_store
+        .add_note(org, id, Actor::User(user), body.message)
+        .await?
+        .ok_or_else(|| AppError::not_found(codes::INCIDENT_NOT_FOUND, "incident not found"))?;
+    Ok((StatusCode::CREATED, Json(event)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -163,6 +417,47 @@ mod tests {
         assert!(matches!(
             validate_message(&m, "message"),
             Err(AppError::BadRequest { code, .. }) if code == codes::MESSAGE_TOO_LONG
+        ));
+    }
+
+    #[test]
+    fn state_filter_parses_known_and_rejects_unknown() {
+        assert_eq!(parse_state_filter(None).unwrap(), None);
+        assert_eq!(
+            parse_state_filter(Some("acknowledged")).unwrap(),
+            Some(IncidentState::Acknowledged)
+        );
+        assert!(matches!(
+            parse_state_filter(Some("bogus")),
+            Err(AppError::BadRequest { code, .. }) if code == codes::INCIDENT_INVALID_STATE
+        ));
+    }
+
+    #[test]
+    fn blank_note_becomes_none_long_note_rejected() {
+        assert_eq!(clean_note(None).unwrap(), None);
+        assert_eq!(clean_note(Some("  \n".into())).unwrap(), None);
+        assert_eq!(clean_note(Some("on it".into())).unwrap(), Some("on it".into()));
+        let long = "x".repeat(validation::MAX_MESSAGE + 1);
+        assert!(matches!(
+            clean_note(Some(long)),
+            Err(AppError::BadRequest { code, .. }) if code == codes::MESSAGE_TOO_LONG
+        ));
+    }
+
+    #[test]
+    fn lifecycle_response_maps_outcomes() {
+        assert!(matches!(
+            lifecycle_response(LifecycleOutcome::NotFound),
+            Err(AppError::NotFound { code, .. }) if code == codes::INCIDENT_NOT_FOUND
+        ));
+        let err = crate::domain::TransitionError {
+            from: IncidentState::Resolved,
+            transition: crate::domain::IncidentTransition::Acknowledge,
+        };
+        assert!(matches!(
+            lifecycle_response(LifecycleOutcome::IllegalTransition(err)),
+            Err(AppError::Conflict { code, .. }) if code == codes::INCIDENT_INVALID_STATE
         ));
     }
 }

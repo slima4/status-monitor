@@ -766,8 +766,8 @@ impl crate::storage::admin::EnabledTargetSource for InMemoryTargetStore {
 }
 
 #[async_trait]
-impl crate::storage::admin::PublicStatusTargetSource for InMemoryTargetStore {
-    async fn next_public_status_page(
+impl crate::storage::admin::EnabledTargetStream for InMemoryTargetStore {
+    async fn next_enabled_target_page(
         &self,
         after: Option<crate::storage::admin::PublicTargetCursor>,
         limit: usize,

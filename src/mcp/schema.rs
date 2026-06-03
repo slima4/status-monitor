@@ -38,8 +38,8 @@ pub struct WorstMonitor {
     pub since: Option<String>,
     /// Stable id of the open incident, when one is recorded. Pass to
     /// `get_incident` for the update timeline, or to `acknowledge_incident`.
-    /// `null` unless this monitor is a status-page component (only those get a
-    /// recorded incident); a monitor can be failing with no `incident_id`.
+    /// `null` until the writer has confirmed the failure (a brief flap may not
+    /// open an incident); any monitor can have one.
     pub incident_id: Option<String>,
 }
 
@@ -379,31 +379,47 @@ pub struct MonitorStateResult {
     pub enabled: bool,
 }
 
-/// `acknowledge_incident` argument.
+/// `acknowledge_incident` / `resolve_incident` argument.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
-pub struct AckIncidentArgs {
+pub struct IncidentActionArgs {
     /// The incident id.
     pub id: String,
-    /// Optional note to post; defaults to a generic acknowledgement.
-    pub message: Option<String>,
-    /// Optional incident phase for the update: `investigating`, `identified`,
-    /// `monitoring`, `resolved`, `postmortem`. Defaults to `investigating`.
-    pub phase: Option<String>,
-    /// Whether to notify status-page subscribers. Required — no default — so
-    /// alerting is always a conscious choice. (Subscriber push is not yet
-    /// implemented, so the result reports `notified: false` regardless.)
-    pub notify: bool,
+    /// Optional internal note recorded on the incident's activity timeline.
+    /// This is operator-facing, not published to the public status page.
+    pub note: Option<String>,
 }
 
-/// `acknowledge_incident` result.
+/// Result of an incident lifecycle action.
 #[derive(Debug, Clone, Serialize, JsonSchema)]
-pub struct AckResult {
+pub struct IncidentActionResult {
+    pub incident_id: String,
+    /// Operational state after the action: `triggered`, `acknowledged`, `resolved`.
+    pub state: String,
+    /// RFC 3339 acknowledged time, when set.
+    pub acknowledged_at: Option<String>,
+    /// RFC 3339 resolved (ended) time, when set.
+    pub resolved_at: Option<String>,
+}
+
+/// `post_incident_update` argument: appends a public, customer-facing entry to
+/// the incident's status-page timeline.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct PostIncidentUpdateArgs {
+    /// The incident id.
+    pub id: String,
+    /// Public message shown on the status page.
+    pub message: String,
+    /// Optional phase: `investigating`, `identified`, `monitoring`,
+    /// `resolved`, `postmortem`. Defaults to `investigating`.
+    pub phase: Option<String>,
+}
+
+/// `post_incident_update` result.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct IncidentUpdatePosted {
     pub incident_id: String,
     /// RFC 3339 time the update was posted.
     pub posted_at: String,
-    /// Whether subscribers were actually notified. Always `false` for now (no
-    /// subscriber-push pipeline) — never silently claims a notification fired.
-    pub notified: bool,
 }
 
 /// `get_org_usage` result: usage against the org's plan limits.

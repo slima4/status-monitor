@@ -44,6 +44,7 @@ scope_marker!(ChannelsRead => Scope::ChannelsRead);
 scope_marker!(ChannelsWrite => Scope::ChannelsWrite);
 scope_marker!(ChannelsDelete => Scope::ChannelsDelete);
 scope_marker!(ChannelsExecute => Scope::ChannelsExecute);
+scope_marker!(IncidentsRead => Scope::IncidentsRead);
 scope_marker!(IncidentsWrite => Scope::IncidentsWrite);
 scope_marker!(MaintenanceRead => Scope::MaintenanceRead);
 scope_marker!(MaintenanceWrite => Scope::MaintenanceWrite);

@@ -73,6 +73,15 @@ pub fn job_lock_key(job: &'static str) -> String {
     format!("job:{job}")
 }
 
+/// Lock key for an incident's lifecycle critical section. Concurrent
+/// acknowledge / assign / resolve / escalate must serialise on the same
+/// incident so the state machine cannot be raced (e.g. an auto-resolve
+/// landing between a human ack's read and write). Own namespace so it never
+/// collides with org / user / job keys in the shared hash space.
+pub fn incident_lock_key(incident_id: uuid::Uuid) -> String {
+    format!("incident:{incident_id}")
+}
+
 /// Run `body` only when the lock for `job` can be taken without waiting.
 ///
 /// Holds a session-scoped `pg_try_advisory_lock` on a dedicated pool

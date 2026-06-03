@@ -61,18 +61,19 @@ impl PublicTargetCursor {
     }
 }
 
-/// Paginated cross-tenant walk over enabled, public-status targets in *live*
-/// organisations. Separate from [`EnabledTargetSource`] because the
-/// access pattern is fundamentally different: the scheduler builds a single
-/// in-memory registry (full snapshot, infrequent), whereas the incident
-/// writer streams every 30 s and must keep page-sized memory + bounded SQL
-/// load at 10k+ orgs.
+/// Paginated cross-tenant walk over every enabled target in *live*
+/// organisations — the set the incident writer watches. Separate from
+/// [`EnabledTargetSource`] because the access pattern differs: the scheduler
+/// builds a single in-memory registry (full snapshot, infrequent), whereas the
+/// incident writer streams every 30 s and must keep page-sized memory +
+/// bounded SQL load at 10k+ orgs. Whether a target is also a public status-page
+/// component is decided at incident-insert time, not here.
 #[async_trait]
-pub trait PublicStatusTargetSource: Send + Sync {
+pub trait EnabledTargetStream: Send + Sync {
     /// Next page of `(org_id, target)` strictly after `after`, up to `limit`
     /// rows, ordered by `(org_id, target_id)` ascending. An empty result
     /// signals the walk is done.
-    async fn next_public_status_page(
+    async fn next_enabled_target_page(
         &self,
         after: Option<PublicTargetCursor>,
         limit: usize,
@@ -80,13 +81,13 @@ pub trait PublicStatusTargetSource: Send + Sync {
 }
 
 #[async_trait]
-impl PublicStatusTargetSource for AdminRepo {
-    async fn next_public_status_page(
+impl EnabledTargetStream for AdminRepo {
+    async fn next_enabled_target_page(
         &self,
         after: Option<PublicTargetCursor>,
         limit: usize,
     ) -> Result<Vec<(OrgId, Target)>> {
-        AdminRepo::next_public_status_page(self, after, limit).await
+        AdminRepo::next_enabled_target_page(self, after, limit).await
     }
 }
 
@@ -155,13 +156,12 @@ impl AdminRepo {
             .collect()
     }
 
-    /// Keyset-paginated walk over enabled targets that appear on at least one
-    /// enabled status page in a live org — the set the public-status writer
-    /// watches for incidents. The `EXISTS` over `status_page_components` yields
-    /// exactly one row per `(org, target)` even when a monitor is on several
-    /// pages (incidents are per-target; the public surface filters per page at
-    /// read time). Keyset-ordered by `(org_id, id)`; `limit` is clamped.
-    pub async fn next_public_status_page(
+    /// Keyset-paginated walk over every enabled target in a live org — the set
+    /// the incident writer watches. Incidents open for any monitor, not only
+    /// public status-page components; whether the resulting incident is
+    /// publicly visible is decided when it is inserted. Keyset-ordered by
+    /// `(org_id, id)`; `limit` is clamped.
+    pub async fn next_enabled_target_page(
         &self,
         after: Option<PublicTargetCursor>,
         limit: usize,
@@ -171,12 +171,7 @@ impl AdminRepo {
         let base = format!(
             "SELECT {TARGET_COLUMNS} \
              FROM targets t JOIN organizations o ON o.id = t.org_id \
-             WHERE t.enabled = true AND o.deleted_at IS NULL \
-               AND EXISTS ( \
-                   SELECT 1 FROM status_page_components spc \
-                   JOIN status_pages sp ON sp.id = spc.status_page_id \
-                   WHERE spc.target_id = t.id AND spc.org_id = t.org_id \
-                     AND sp.enabled = true)"
+             WHERE t.enabled = true AND o.deleted_at IS NULL"
         );
         let rows: Vec<OrgTargetRow> = match after {
             None => {
@@ -198,7 +193,7 @@ impl AdminRepo {
                     .await
             }
         }
-        .context("admin: next public-status page")?;
+        .context("admin: next enabled-target page")?;
         rows.into_iter()
             .map(|r| {
                 decode_target_row(r.target, self.cipher.as_deref()).map(|t| (OrgId(r.org_id), t))

@@ -1,6 +1,7 @@
 pub mod admin;
 pub mod clickhouse;
 pub mod domain_expiry_state;
+pub mod incident_ops;
 pub mod incidents;
 pub mod locks;
 pub mod maintenance;
@@ -20,6 +21,10 @@ pub use clickhouse::{ClickhouseResultSink, ClickhouseResultsStore, build_client,
 pub use domain_expiry_state::{
     DomainExpiryState, DomainExpiryStateStore, InMemoryDomainExpiryStateStore,
     PgDomainExpiryStateStore,
+};
+pub use incident_ops::{
+    Actor, IncidentOpsFilter, IncidentOpsStore, InMemoryIncidentOpsStore, LifecycleOutcome,
+    PgIncidentOpsStore,
 };
 pub use incidents::{
     ActiveIncident, InMemoryIncidentNarrationStore, IncidentNarrationStore,

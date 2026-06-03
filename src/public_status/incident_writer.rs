@@ -1,5 +1,7 @@
-//! Background task that materialises public-component incidents into the
-//! Postgres `incidents` table.
+//! Background task that materialises incidents for every monitor into the
+//! Postgres `incidents` table. An incident opens for any enabled target that
+//! crosses the failure threshold; whether it is publicly visible is derived at
+//! insert time from the monitor's status-page membership.
 //!
 //! The writer is **purely a follower** of the existing `check_results` stream
 //! — it never modifies the hot write path, never gates check execution, and
@@ -30,7 +32,7 @@ use uuid::Uuid;
 use crate::domain::{CheckResult, CheckStatus, OrgId, Target};
 use crate::error::Result;
 use crate::storage::ResultsStore;
-use crate::storage::admin::{PublicStatusTargetSource, PublicTargetCursor};
+use crate::storage::admin::{EnabledTargetStream, PublicTargetCursor};
 use crate::storage::traits::{ClampedRange, TimeRange};
 
 /// Persistence handle for the `incidents` table — abstracted so the writer
@@ -68,7 +70,7 @@ pub struct NewOpenIncident {
 
 #[derive(Debug, Clone)]
 pub struct IncidentWriterConfig {
-    /// How often the writer wakes up and scans every public component.
+    /// How often the writer wakes up and scans every enabled target.
     pub tick_interval: Duration,
     /// How far back the writer looks at recent check results when deciding
     /// transitions.
@@ -103,11 +105,11 @@ impl Default for IncidentWriterConfig {
 }
 
 pub struct IncidentWriter {
-    /// Cross-org stream of public-status targets. The writer never holds a
-    /// single org — [`PublicStatusTargetSource`] is the only surface it
-    /// talks to for discovery, and it is keyset-paginated so the per-tick
-    /// memory and database load stay bounded as the tenant count grows.
-    targets: Arc<dyn PublicStatusTargetSource>,
+    /// Cross-org stream of every enabled target. The writer never holds a
+    /// single org — [`EnabledTargetStream`] is the only surface it talks to for
+    /// discovery, and it is keyset-paginated so the per-tick memory and
+    /// database load stay bounded as the tenant count grows.
+    targets: Arc<dyn EnabledTargetStream>,
     results_store: Arc<dyn ResultsStore>,
     incident_store: Arc<dyn IncidentStore>,
     cfg: IncidentWriterConfig,
@@ -115,7 +117,7 @@ pub struct IncidentWriter {
 
 impl IncidentWriter {
     pub fn new(
-        targets: Arc<dyn PublicStatusTargetSource>,
+        targets: Arc<dyn EnabledTargetStream>,
         results_store: Arc<dyn ResultsStore>,
         incident_store: Arc<dyn IncidentStore>,
         cfg: IncidentWriterConfig,
@@ -150,7 +152,7 @@ impl IncidentWriter {
         }
     }
 
-    /// One iteration over every public component in every live org. Visible
+    /// One iteration over every enabled target in every live org. Visible
     /// for tests so they can drive a deterministic single tick without
     /// sleeping.
     ///
@@ -170,7 +172,7 @@ impl IncidentWriter {
         loop {
             let page = self
                 .targets
-                .next_public_status_page(cursor, self.cfg.page_size)
+                .next_enabled_target_page(cursor, self.cfg.page_size)
                 .await?;
             let Some(last) = page.last() else {
                 return Ok(());
@@ -425,9 +427,17 @@ impl IncidentStore for PgIncidentStore {
             .ok_or_else(|| anyhow::anyhow!("cannot open incident from status=up"))?;
         // Defensive: avoid two open incidents per target if a competing
         // writer raced us (single-process today, but cheap).
+        // Visibility is derived here, not by the caller: an incident is public
+        // only while its monitor is a component of an enabled status page.
+        // Monitors that aren't on any page open internal-only incidents.
         let row: (Uuid,) = sqlx::query_as(
-            r#"INSERT INTO incidents (org_id, target_id, started_at, status_at_start, check_count, error_sample)
-               SELECT $6, $1, $2, $3, $4, $5
+            r#"INSERT INTO incidents (org_id, target_id, started_at, status_at_start, check_count, error_sample, visibility)
+               SELECT $6, $1, $2, $3, $4, $5,
+                      CASE WHEN EXISTS (
+                          SELECT 1 FROM status_page_components spc
+                          JOIN status_pages sp ON sp.id = spc.status_page_id
+                          WHERE spc.target_id = $1 AND spc.org_id = $6 AND sp.enabled = true
+                      ) THEN 'public' ELSE 'internal' END
                WHERE NOT EXISTS (
                    SELECT 1 FROM incidents
                    WHERE target_id = $1 AND org_id = $6 AND ended_at IS NULL
@@ -447,10 +457,16 @@ impl IncidentStore for PgIncidentStore {
     }
 
     async fn close(&self, org: OrgId, incident_id: Uuid, ended_at: DateTime<Utc>) -> Result<()> {
+        // Recovery detected by the follower: close the row and move the
+        // operational state to resolved with no human resolver. The state
+        // column and the timestamp must never disagree.
         sqlx::query(
             r#"UPDATE incidents
                SET ended_at = $2,
                    duration_secs = GREATEST(0, EXTRACT(EPOCH FROM ($2 - started_at))::int),
+                   state = 'resolved',
+                   resolved_by = NULL,
+                   next_escalation_at = NULL,
                    updated_at = now()
                WHERE id = $1 AND org_id = $3 AND ended_at IS NULL"#,
         )
@@ -615,7 +631,7 @@ mod tests {
     use chrono::TimeZone;
 
     use crate::domain::{CheckSpec, ExpectedStatus, HttpCheck, HttpMethod, Target, TargetAlerts};
-    use crate::storage::admin::PublicStatusTargetSource;
+    use crate::storage::admin::EnabledTargetStream;
     use crate::storage::{InMemorySink, InMemoryTargetStore, ResultSink};
 
     use super::*;
@@ -935,7 +951,7 @@ mod tests {
             max_concurrency: 4,
         };
         IncidentWriter::new(
-            targets as Arc<dyn PublicStatusTargetSource>,
+            targets as Arc<dyn EnabledTargetStream>,
             sink as Arc<dyn crate::storage::ResultsStore>,
             incidents as Arc<dyn IncidentStore>,
             cfg,

@@ -141,12 +141,37 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
             post(handlers::notification_channels::test_send),
         )
         .route(
+            "/incidents",
+            get(handlers::incidents::list_incidents).post(handlers::incidents::declare_incident),
+        )
+        .route(
             "/incidents/{id}",
-            axum::routing::patch(handlers::incidents::update_incident_narration),
+            axum::routing::patch(handlers::incidents::update_incident_narration)
+                .get(handlers::incidents::get_incident),
         )
         .route(
             "/incidents/{id}/updates",
             post(handlers::incidents::post_incident_update),
+        )
+        .route(
+            "/incidents/{id}/acknowledge",
+            post(handlers::incidents::acknowledge_incident),
+        )
+        .route(
+            "/incidents/{id}/resolve",
+            post(handlers::incidents::resolve_incident),
+        )
+        .route(
+            "/incidents/{id}/reopen",
+            post(handlers::incidents::reopen_incident),
+        )
+        .route(
+            "/incidents/{id}/assign",
+            post(handlers::incidents::assign_incident),
+        )
+        .route(
+            "/incidents/{id}/notes",
+            post(handlers::incidents::add_incident_note),
         )
         .route(
             "/orgs",

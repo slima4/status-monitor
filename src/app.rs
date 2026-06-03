@@ -129,6 +129,10 @@ pub struct AppState {
     /// out the cache TTL.
     pub alert_channel_cache: crate::notifier::engine::AlertChannelCache,
     pub incident_narration_store: Arc<dyn IncidentNarrationStore>,
+    /// Operational incident lifecycle (acknowledge/assign/resolve/reopen +
+    /// internal timeline). Built from `db` so `AppState::new`'s signature stays
+    /// unchanged: a Pg store when tenancy is live, in-memory for no-DB fixtures.
+    pub incident_ops_store: Arc<dyn crate::storage::IncidentOpsStore>,
     /// Debounce cache for `sessions.last_used_at` writes — see
     /// `auth::session::touch_last_used_debounced`.
     pub session_debounce: Arc<LastUsedDebounce>,
@@ -270,6 +274,10 @@ impl AppState {
             Some(pool) => Arc::new(crate::storage::PgPageAssetStore::new(pool)),
             None => Arc::new(crate::storage::InMemoryPageAssetStore::new()),
         };
+        let incident_ops_store: Arc<dyn crate::storage::IncidentOpsStore> = match db.clone() {
+            Some(pool) => Arc::new(crate::storage::PgIncidentOpsStore::new(pool)),
+            None => Arc::new(crate::storage::InMemoryIncidentOpsStore::new()),
+        };
         let rate_limits = Arc::new(RateLimitService::new());
         let abuse = Arc::new(AbuseGuard::from_config(&cfg.abuse));
         Self {
@@ -291,6 +299,7 @@ impl AppState {
             page_asset_store,
             monitor_share_store,
             incident_narration_store,
+            incident_ops_store,
             session_debounce: Arc::new(build_debounce_cache()),
             api_token_debounce: Arc::new(build_api_token_debounce()),
             outbound_http,

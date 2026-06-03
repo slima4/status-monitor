@@ -24,8 +24,11 @@ pub use check::{
     TcpCheck, TlsCertCheck,
 };
 pub use incident::{
-    Incident, IncidentNarrationUpdate, NewIncidentUpdate, coalesce_incidents,
-    coalesce_incidents_bad_only, elapsed_at,
+    ActorType, Incident, IncidentEvent, IncidentEventKind, IncidentNarrationUpdate,
+    IncidentNotification, IncidentOrigin, IncidentState, IncidentTransition, IncidentUrgency,
+    IncidentVisibility, NewIncidentUpdate, NewManualIncident, NotificationReason,
+    NotificationStatus, OpsIncident, TransitionError, coalesce_incidents,
+    coalesce_incidents_bad_only, elapsed_at, next_state,
 };
 pub use maintenance::{
     MaintenanceFilter, MaintenanceWindow, MaintenanceWindowUpdate, NewMaintenanceWindow,

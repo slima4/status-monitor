@@ -38,14 +38,15 @@ use super::confirm::require_confirmation;
 use super::cursor;
 use super::error::{McpToolError, codes};
 use super::schema::{
-    AckIncidentArgs, AckResult, CheckRunResult, CheckTiming, Failure, GetIncidentArgs,
-    GetMonitorArgs, GetMonitorHistoryArgs, GetStatusPageArgs, HealthTotals, IncidentDetail,
-    IncidentList, IncidentSummary, IncidentUpdateItem, IncidentWindow, LatencyPoint,
-    ListIncidentsArgs, ListMonitorsArgs, ListStatusPagesArgs, MonitorDetail, MonitorHistory,
-    MonitorIdArg, MonitorList, MonitorListItem, MonitorStateResult, OrgHealth, OrgUsage, Quota,
-    StatusPageComponent as McpComponent, StatusPageDetail, StatusPageList, StatusPageSummary,
-    WorstMonitor,
+    CheckRunResult, CheckTiming, Failure, GetIncidentArgs, GetMonitorArgs, GetMonitorHistoryArgs,
+    GetStatusPageArgs, HealthTotals, IncidentActionArgs, IncidentActionResult, IncidentDetail,
+    IncidentList, IncidentSummary, IncidentUpdateItem, IncidentUpdatePosted, IncidentWindow,
+    LatencyPoint, ListIncidentsArgs, ListMonitorsArgs, ListStatusPagesArgs, MonitorDetail,
+    MonitorHistory, MonitorIdArg, MonitorList, MonitorListItem, MonitorStateResult, OrgHealth,
+    OrgUsage, PostIncidentUpdateArgs, Quota, StatusPageComponent as McpComponent, StatusPageDetail,
+    StatusPageList, StatusPageSummary, WorstMonitor,
 };
+use crate::storage::{Actor, LifecycleOutcome};
 
 /// Max length of an incident-update message (matches the REST `NewIncidentUpdate`
 /// schema bound).
@@ -523,7 +524,7 @@ impl McpServer {
     /// or acknowledge. Incidents are recorded only for monitors that are
     /// components on a status page.
     #[tool(
-        description = "List currently-open incidents on the org's status pages: incident id, affected monitor, severity, and latest update phase. Only monitors that are status-page components have incidents. Read-only.",
+        description = "List the org's currently-open incidents: incident id, affected monitor, severity, and latest update phase. Covers incidents for any monitor, not only status-page components. Read-only.",
         annotations(read_only_hint = true)
     )]
     async fn list_incidents(
@@ -699,19 +700,53 @@ impl McpServer {
     }
 
     #[tool(
-        description = "Post an acknowledgement update to an incident; it appears on the public status page. Requires user confirmation and an explicit notify choice. Not read-only.",
-        annotations(read_only_hint = false, idempotent_hint = false)
+        description = "Acknowledge an incident: take ownership and halt escalation. Internal/operational only — does NOT post anything to the public status page. Use post_incident_update for customer-facing updates. Requires confirmation. Not read-only.",
+        annotations(read_only_hint = false, idempotent_hint = true)
     )]
     async fn acknowledge_incident(
         &self,
-        Parameters(args): Parameters<AckIncidentArgs>,
+        Parameters(args): Parameters<IncidentActionArgs>,
         ctx: RequestContext<RoleServer>,
-    ) -> Result<Json<AckResult>, McpToolError> {
+    ) -> Result<Json<IncidentActionResult>, McpToolError> {
         let auth = McpAuth::from_ctx(&ctx)?;
         let pool = self.require_pool()?;
-        let args_json = json!({ "id": args.id, "notify": args.notify });
+        let args_json = json!({ "id": args.id });
         let result = self.acknowledge_incident_inner(&ctx, &auth, &args).await;
         self.finish(pool, &auth, "acknowledge_incident", args_json, result)
+            .await
+    }
+
+    #[tool(
+        description = "Resolve an incident (mark the operational state resolved). Internal only — does not post to the public status page. Requires confirmation. Not read-only.",
+        annotations(read_only_hint = false, idempotent_hint = true)
+    )]
+    async fn resolve_incident(
+        &self,
+        Parameters(args): Parameters<IncidentActionArgs>,
+        ctx: RequestContext<RoleServer>,
+    ) -> Result<Json<IncidentActionResult>, McpToolError> {
+        let auth = McpAuth::from_ctx(&ctx)?;
+        let pool = self.require_pool()?;
+        let args_json = json!({ "id": args.id });
+        let result = self.resolve_incident_inner(&ctx, &auth, &args).await;
+        self.finish(pool, &auth, "resolve_incident", args_json, result)
+            .await
+    }
+
+    #[tool(
+        description = "Post a public, customer-facing update to an incident's status-page timeline (phase + message). This is what your subscribers and status-page visitors see. Requires confirmation. Not read-only.",
+        annotations(read_only_hint = false, idempotent_hint = false)
+    )]
+    async fn post_incident_update(
+        &self,
+        Parameters(args): Parameters<PostIncidentUpdateArgs>,
+        ctx: RequestContext<RoleServer>,
+    ) -> Result<Json<IncidentUpdatePosted>, McpToolError> {
+        let auth = McpAuth::from_ctx(&ctx)?;
+        let pool = self.require_pool()?;
+        let args_json = json!({ "id": args.id, "phase": args.phase });
+        let result = self.post_incident_update_inner(&ctx, &auth, &args).await;
+        self.finish(pool, &auth, "post_incident_update", args_json, result)
             .await
     }
 }
@@ -866,38 +901,72 @@ impl McpServer {
         &self,
         ctx: &RequestContext<RoleServer>,
         auth: &McpAuth,
-        args: &AckIncidentArgs,
-    ) -> Result<Json<AckResult>, McpToolError> {
+        args: &IncidentActionArgs,
+    ) -> Result<Json<IncidentActionResult>, McpToolError> {
+        auth.require(Scope::IncidentsWrite)?;
+        let id = parse_uuid(&args.id, "incident id")?;
+        let note = clean_incident_note(args.note.as_deref())?;
+        require_confirmation(
+            ctx,
+            "Acknowledge this incident (take ownership, stop escalation)?".to_string(),
+        )
+        .await?;
+        let outcome = self
+            .state
+            .incident_ops_store
+            .acknowledge(auth.org, id, Actor::Mcp(auth.user_id), note)
+            .await
+            .map_err(|e| McpToolError::internal(format!("acknowledge_incident: {e}")))?;
+        incident_action_result(id, outcome)
+    }
+
+    /// `resolve_incident` body.
+    async fn resolve_incident_inner(
+        &self,
+        ctx: &RequestContext<RoleServer>,
+        auth: &McpAuth,
+        args: &IncidentActionArgs,
+    ) -> Result<Json<IncidentActionResult>, McpToolError> {
+        auth.require(Scope::IncidentsWrite)?;
+        let id = parse_uuid(&args.id, "incident id")?;
+        let note = clean_incident_note(args.note.as_deref())?;
+        require_confirmation(ctx, "Resolve this incident?".to_string()).await?;
+        let outcome = self
+            .state
+            .incident_ops_store
+            .resolve(auth.org, id, Actor::Mcp(auth.user_id), note)
+            .await
+            .map_err(|e| McpToolError::internal(format!("resolve_incident: {e}")))?;
+        incident_action_result(id, outcome)
+    }
+
+    /// `post_incident_update` body — the public-facing status-page update.
+    async fn post_incident_update_inner(
+        &self,
+        ctx: &RequestContext<RoleServer>,
+        auth: &McpAuth,
+        args: &PostIncidentUpdateArgs,
+    ) -> Result<Json<IncidentUpdatePosted>, McpToolError> {
         auth.require(Scope::IncidentsWrite)?;
         let id = parse_uuid(&args.id, "incident id")?;
         let phase = match args.phase.as_deref() {
             Some(p) => parse_phase(p)?,
             None => IncidentStatusPhase::Investigating,
         };
-
-        let mut message = args.message.clone().unwrap_or_default();
-        if message.trim().is_empty() {
-            message = "Acknowledged.".to_string();
+        let message = args.message.trim().to_string();
+        if message.is_empty() {
+            return Err(McpToolError::invalid_argument("message must not be empty"));
         }
         if message.len() > MAX_INCIDENT_MESSAGE_LEN {
             return Err(McpToolError::invalid_argument(format!(
                 "message must be at most {MAX_INCIDENT_MESSAGE_LEN} characters"
             )));
         }
-
-        let notify_note = if args.notify {
-            "Subscriber notification was requested (note: subscriber push is not yet available, so no one will be paged)."
-        } else {
-            "Subscribers will not be notified."
-        };
         require_confirmation(
             ctx,
-            format!(
-                "Post this update to the incident and publish it on your status page?\n\n\"{message}\"\n\n{notify_note}"
-            ),
+            format!("Publish this update on your public status page?\n\n\"{message}\""),
         )
         .await?;
-
         let posted = self
             .state
             .incident_narration_store
@@ -908,14 +977,11 @@ impl McpServer {
                 Some("mcp".to_string()),
             )
             .await
-            .map_err(|e| McpToolError::internal(format!("acknowledge_incident: {e}")))?
+            .map_err(|e| McpToolError::internal(format!("post_incident_update: {e}")))?
             .ok_or_else(|| McpToolError::not_found("incident not found"))?;
-
-        Ok(Json(AckResult {
+        Ok(Json(IncidentUpdatePosted {
             incident_id: id.to_string(),
             posted_at: posted.posted_at.to_rfc3339(),
-            // No subscriber-push pipeline yet — never claim a notification fired.
-            notified: false,
         }))
     }
 
@@ -1117,7 +1183,37 @@ fn parse_state(s: &str) -> Result<&'static str, McpToolError> {
     }
 }
 
-/// Accepted incident phases for `acknowledge_incident`.
+/// Trim a blank incident note to `None`; reject one over the message cap.
+fn clean_incident_note(note: Option<&str>) -> Result<Option<String>, McpToolError> {
+    match note.map(str::trim).filter(|n| !n.is_empty()) {
+        None => Ok(None),
+        Some(n) if n.len() > MAX_INCIDENT_MESSAGE_LEN => Err(McpToolError::invalid_argument(
+            format!("note must be at most {MAX_INCIDENT_MESSAGE_LEN} characters"),
+        )),
+        Some(n) => Ok(Some(n.to_string())),
+    }
+}
+
+/// Map a lifecycle store outcome onto the MCP action result.
+fn incident_action_result(
+    id: uuid::Uuid,
+    outcome: LifecycleOutcome,
+) -> Result<Json<IncidentActionResult>, McpToolError> {
+    match outcome {
+        LifecycleOutcome::Updated(inc) => Ok(Json(IncidentActionResult {
+            incident_id: id.to_string(),
+            state: inc.state.as_db_str().to_string(),
+            acknowledged_at: inc.acknowledged_at.map(|t| t.to_rfc3339()),
+            resolved_at: inc.ended_at.map(|t| t.to_rfc3339()),
+        })),
+        LifecycleOutcome::NotFound => Err(McpToolError::not_found("incident not found")),
+        LifecycleOutcome::IllegalTransition(err) => {
+            Err(McpToolError::invalid_argument(err.to_string()))
+        }
+    }
+}
+
+/// Accepted incident phases for `post_incident_update`.
 fn parse_phase(s: &str) -> Result<IncidentStatusPhase, McpToolError> {
     match s {
         "investigating" => Ok(IncidentStatusPhase::Investigating),

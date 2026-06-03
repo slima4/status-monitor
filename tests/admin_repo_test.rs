@@ -135,14 +135,14 @@ async fn enabled_targets_excludes_soft_deleted_orgs() {
 }
 
 /// Keyset paginator must:
-///   * skip targets not bound to any enabled status page
+///   * include every enabled target — public and private alike
 ///   * skip targets whose org is soft-deleted (load-bearing — same reason
 ///     as the scheduler walk above)
 ///   * never re-emit a row from a previous page
 ///   * order monotonically by `(org_id, id)` so the cursor is correct
 #[tokio::test]
 #[ignore]
-async fn public_status_pagination_filters_and_orders() {
+async fn enabled_target_pagination_includes_all_and_skips_dead_org() {
     let Some(pool) = common::pg_pool_from_env().await else {
         return;
     };
@@ -164,18 +164,18 @@ async fn public_status_pagination_filters_and_orders() {
 
     let repo = AdminRepo::new(pool.clone(), None, "test");
 
-    // Single-page walk: only the live org's public target survives.
-    let page = repo.next_public_status_page(None, 1024).await.unwrap();
-    let ours: Vec<&Uuid> = page
+    // Single-page walk: both of the live org's targets survive (public and
+    // private); the dead org's target is filtered out.
+    let page = repo.next_enabled_target_page(None, 1024).await.unwrap();
+    let mut ours: Vec<Uuid> = page
         .iter()
         .filter(|(_, t)| t.id == public_target || t.id == private_target || t.id == dead_public)
-        .map(|(_, t)| &t.id)
+        .map(|(_, t)| t.id)
         .collect();
-    assert_eq!(
-        ours,
-        vec![&public_target],
-        "only live public target visible"
-    );
+    ours.sort();
+    let mut want = vec![public_target, private_target];
+    want.sort();
+    assert_eq!(ours, want, "both live targets visible, dead org filtered");
 
     // Multi-page walk with page_size=1 must still terminate without
     // re-emitting `public_target`.
@@ -186,7 +186,7 @@ async fn public_status_pagination_filters_and_orders() {
     loop {
         steps += 1;
         assert!(steps <= stop_after, "pagination must terminate");
-        let p = repo.next_public_status_page(cursor, 1).await.unwrap();
+        let p = repo.next_enabled_target_page(cursor, 1).await.unwrap();
         if p.is_empty() {
             break;
         }
@@ -208,8 +208,8 @@ async fn public_status_pagination_filters_and_orders() {
         "soft-deleted org's target must stay hidden in the paginated walk"
     );
     assert!(
-        !seen.contains(&private_target),
-        "non-public target must stay hidden in the paginated walk"
+        seen.contains(&private_target),
+        "private target now opens incidents too — must appear in the walk"
     );
 
     // Cleanup.
@@ -222,8 +222,8 @@ async fn public_status_pagination_filters_and_orders() {
 }
 
 /// A target bound to several enabled pages is still one `(org, target)` row in
-/// the writer walk — incidents are per-target, so the `DISTINCT ON (org_id, id)`
-/// must collapse the fan-out or the scheduler churns duplicate incident work.
+/// the writer walk — the walk reads each `targets` row directly, so page
+/// membership never fans a monitor into duplicate incident work.
 #[tokio::test]
 #[ignore]
 async fn target_on_multiple_pages_emitted_once() {
@@ -243,7 +243,7 @@ async fn target_on_multiple_pages_emitted_once() {
     loop {
         steps += 1;
         assert!(steps <= 1000, "pagination must terminate");
-        let p = repo.next_public_status_page(cursor, 1).await.unwrap();
+        let p = repo.next_enabled_target_page(cursor, 1).await.unwrap();
         if p.is_empty() {
             break;
         }
