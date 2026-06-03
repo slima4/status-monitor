@@ -16,17 +16,21 @@ All tools return typed `structuredContent`. Customer free text (monitor names, g
 
 ### Read tools
 
-Side-effect-free (`readOnlyHint`). Require `targets:read` or `status_page:read`.
+Side-effect-free (`readOnlyHint`). Require `targets:read`, `status_page:read`, or `incidents:read`.
 
 | Tool | Scope | Returns |
 |---|---|---|
-| `get_org_health` | `targets:read` | Per-state monitor totals + the worst currently-failing monitors. The one-shot "what is broken right now?" answer — start here. |
+| `get_org_health` | `targets:read` | Per-state monitor totals + the worst currently-failing monitors, each with its open `incident_id`. The one-shot "what is broken right now?" answer — start here. |
 | `list_monitors` | `targets:read` | Monitors with optional `state` / `type` / `tag` filters, cursor-paginated; each item carries current state + last-checked time. |
-| `get_monitor` | `targets:read` | One monitor's config, current state, last error, and 24h / 30d uptime. |
+| `get_monitor` | `targets:read` | One monitor's config, current state, last error, last HTTP status, and 24h / 30d uptime. |
 | `get_monitor_history` | `targets:read` | One monitor's history over a `window` (`1h` / `24h` / `7d` / `30d`): uptime, latency series, failures with error text, incident windows. |
+| `list_incidents` | `incidents:read` | Currently-open incidents on the org's status pages: incident id, affected monitor, severity, latest update phase. Cursor-paginated. |
+| `get_incident` | `incidents:read` | One incident: affected monitor, severity, open/resolved times, error sample, and the full operator-update timeline. |
 | `list_status_pages` | `status_page:read` | The org's status pages: slug, name, public URL, enabled. Cursor-paginated. |
 | `get_status_page` | `status_page:read` | One status page with its components and each linked monitor's current state. |
 | `get_org_usage` | `targets:read` | Resource usage against plan limits (monitors, status pages, members, components) + key policy values. |
+
+A status-page monitor is down → `get_org_health` gives the `incident_id` → `get_incident` shows the timeline → `acknowledge_incident` posts an update. Incidents (and the `incident_id` / ack workflow) exist only for monitors that are status-page components; a monitor not on any status page can be failing with `incident_id: null` — `since` still reports how long it's been down. `run_check_now` and `get_monitor` return `http_status` for HTTP monitors so you can tell "wrong status code" from "no response".
 
 ### Write tools
 
@@ -37,7 +41,7 @@ Not read-only. Each requires its scope **and** an interactive [confirmation](#co
 | `run_check_now` | `targets:execute` | Probe a monitor immediately and record the result. A `down` result may fire the org's normal alerts. |
 | `pause_monitor` | `targets:write` | Stop a monitor's checks until resumed. Idempotent. |
 | `resume_monitor` | `targets:write` | Restart a paused monitor's checks. Idempotent. |
-| `acknowledge_incident` | `incidents:write` | Post an update to an incident; it appears on the public status page. Takes an explicit `notify` choice (no default). |
+| `acknowledge_incident` | `incidents:write` | Post an update to an incident; it appears on the public status page. Optional `phase` (`investigating` / `identified` / `monitoring` / `resolved` / `postmortem`, default `investigating`) and an explicit `notify` choice (no default). |
 
 Write scopes are **never** granted unless explicitly requested — the OAuth connector defaults to read-only (see [Scopes](#scopes)).
 
@@ -54,7 +58,7 @@ A request with no/invalid token gets `401` with a `WWW-Authenticate: Bearer …`
 
 ### Two ways to get a token
 
-**1. By hand (manual connector).** Mint an org-bound, read-only, expiring token in the UI (Settings → API tokens; a verified email is required) and paste it into the client. Grant the least scope you need — `targets:read` + `status_page:read` for the read tools. This is the simplest path for Claude Desktop / Inspector and needs only `UPTIMEPAGE_MCP_ENABLED`.
+**1. By hand (manual connector).** Mint an org-bound, read-only, expiring token in the UI (Settings → API tokens; a verified email is required) and paste it into the client. Grant the least scope you need — `targets:read` + `status_page:read` + `incidents:read` for the read tools. This is the simplest path for Claude Desktop / Inspector and needs only `UPTIMEPAGE_MCP_ENABLED`.
 
 **2. One-click OAuth (claude.ai connector).** With `UPTIMEPAGE_MCP_OAUTH_ENABLED` on, the client discovers the authorization server, you log in with your existing session and approve a consent screen, and the server mints the same org-bound expiring token behind the scenes — no copy-paste. This is the only path that mints write scopes, and only when the consent screen's opt-in boxes are checked.
 
@@ -91,12 +95,13 @@ A read-only request shows "wants read-only access" with no warning banner; a req
 
 ## Scopes
 
-The connector advertises five grantable scopes. A request with no `scope` (or only unknown scopes) grants the **read-only default**; write scopes are opt-in.
+The connector advertises six grantable scopes. A request with no `scope` (or only unknown scopes) grants the **read-only default**; write scopes are opt-in.
 
 | Scope | Grants | In default set? |
 |---|---|---|
 | `targets:read` | all read tools over monitors | ✅ |
 | `status_page:read` | status-page read tools | ✅ |
+| `incidents:read` | `list_incidents`, `get_incident` | ✅ |
 | `targets:write` | `pause_monitor`, `resume_monitor` | opt-in |
 | `targets:execute` | `run_check_now` | opt-in |
 | `incidents:write` | `acknowledge_incident` | opt-in |
@@ -203,6 +208,8 @@ Once connected, drive it in natural language — the client picks the tool:
 - "What's broken in my org right now?" → `get_org_health`
 - "Show me every DNS monitor that's degraded." → `list_monitors(type=dns, state=degraded)`
 - "How has the checkout API done over the last 7 days?" → `get_monitor_history(window=7d)`
+- "What incidents are open, and what's been posted on them?" → `list_incidents` → `get_incident`
+- "Acknowledge the payments incident — we're investigating." → `acknowledge_incident(phase=investigating)` (asks you to confirm)
 - "Am I near any plan limits?" → `get_org_usage`
 - "Run a check on the payments monitor now." → `run_check_now` (asks you to confirm; may alert)
 - "Pause the staging monitor." → `pause_monitor` (asks you to confirm)

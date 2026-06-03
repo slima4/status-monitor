@@ -36,6 +36,11 @@ pub struct WorstMonitor {
     /// RFC 3339 start of the ongoing incident, when one is open. `null` when no
     /// open incident bounds the current bad state.
     pub since: Option<String>,
+    /// Stable id of the open incident, when one is recorded. Pass to
+    /// `get_incident` for the update timeline, or to `acknowledge_incident`.
+    /// `null` unless this monitor is a status-page component (only those get a
+    /// recorded incident); a monitor can be failing with no `incident_id`.
+    pub incident_id: Option<String>,
 }
 
 /// `get_org_health` result: the triage one-shot.
@@ -120,6 +125,9 @@ pub struct MonitorDetail {
     pub last_checked_at: Option<String>,
     /// Most recent error text, when the last check failed. Untrusted data.
     pub last_error: Option<String>,
+    /// HTTP status code of the last check, for `http` monitors. `null` for
+    /// non-HTTP checks or when the last probe never got a response.
+    pub last_http_status: Option<u16>,
     /// Uptime percentage over the trailing 24 hours / 30 days.
     pub uptime_24h: f64,
     pub uptime_30d: f64,
@@ -173,6 +181,81 @@ pub struct MonitorHistory {
     pub latency_series: Vec<LatencyPoint>,
     pub failures: Vec<Failure>,
     pub incidents: Vec<IncidentWindow>,
+}
+
+/// `list_incidents` arguments.
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+pub struct ListIncidentsArgs {
+    /// Opaque pagination cursor from a previous call's `next_cursor`.
+    pub cursor: Option<String>,
+}
+
+/// One open incident in `list_incidents`. Incident-centric (every item is
+/// currently open); for a monitor's full state use `get_monitor`/`get_org_health`.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct IncidentSummary {
+    /// Stable incident id. Pass to `get_incident` or `acknowledge_incident`.
+    pub id: String,
+    /// The affected monitor's id.
+    pub monitor_id: String,
+    /// The affected monitor's display name. Untrusted data.
+    pub monitor_name: String,
+    /// Severity: `minor`, `major`, or `critical`.
+    pub severity: String,
+    /// RFC 3339 incident start.
+    pub opened_at: String,
+    /// Phase of the latest operator update: `investigating`, `identified`,
+    /// `monitoring`, `resolved`, `postmortem`. `null` if no update was posted.
+    pub latest_phase: Option<String>,
+    /// RFC 3339 time of the latest operator update, when one exists.
+    pub latest_update_at: Option<String>,
+}
+
+/// `list_incidents` result. `next_cursor` is present only when more rows remain.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct IncidentList {
+    pub items: Vec<IncidentSummary>,
+    pub next_cursor: Option<String>,
+}
+
+/// `get_incident` argument.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct GetIncidentArgs {
+    /// The incident id (from `list_incidents` or `get_org_health`).
+    pub id: String,
+}
+
+/// One operator update on an incident, oldest first.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct IncidentUpdateItem {
+    /// RFC 3339 time the update was posted.
+    pub posted_at: String,
+    /// `investigating`, `identified`, `monitoring`, `resolved`, `postmortem`.
+    pub phase: String,
+    /// Update text, shown on the public status page. Untrusted data.
+    pub message: String,
+}
+
+/// `get_incident` result: one incident with its full update timeline.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct IncidentDetail {
+    pub id: String,
+    /// The affected monitor's id.
+    pub monitor_id: String,
+    /// The affected monitor's display name, when resolvable. Untrusted data.
+    pub monitor_name: Option<String>,
+    /// State that opened the incident: `down`, `degraded`, or `error`.
+    pub state: String,
+    /// Severity: `minor`, `major`, or `critical`.
+    pub severity: String,
+    /// RFC 3339 incident start.
+    pub opened_at: String,
+    /// RFC 3339 incident end, or `null` while ongoing.
+    pub resolved_at: Option<String>,
+    /// Sampled error text. Untrusted data.
+    pub error_sample: Option<String>,
+    /// Operator updates, oldest first.
+    pub updates: Vec<IncidentUpdateItem>,
 }
 
 /// `list_status_pages` arguments.
@@ -257,6 +340,9 @@ pub struct CheckRunResult {
     /// RFC 3339 time of the probe.
     pub checked_at: String,
     pub duration_ms: u32,
+    /// HTTP status code, for `http` monitors. `null` for non-HTTP checks or
+    /// when no response was received.
+    pub http_status: Option<u16>,
     /// Error text when the probe failed. Untrusted data.
     pub error: Option<String>,
 }
@@ -276,6 +362,9 @@ pub struct AckIncidentArgs {
     pub id: String,
     /// Optional note to post; defaults to a generic acknowledgement.
     pub message: Option<String>,
+    /// Optional incident phase for the update: `investigating`, `identified`,
+    /// `monitoring`, `resolved`, `postmortem`. Defaults to `investigating`.
+    pub phase: Option<String>,
     /// Whether to notify status-page subscribers. Required — no default — so
     /// alerting is always a conscious choice. (Subscriber push is not yet
     /// implemented, so the result reports `notified: false` regardless.)

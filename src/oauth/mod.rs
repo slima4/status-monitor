@@ -40,7 +40,11 @@ use crate::config::AppConfig;
 const SWEEP_INTERVAL_SECS: u64 = 3600;
 
 /// Scopes a connector gets by default (no `scope` requested) — read-only.
-const DEFAULT_SCOPES: &[Scope] = &[Scope::TargetsRead, Scope::StatusPageRead];
+const DEFAULT_SCOPES: &[Scope] = &[
+    Scope::TargetsRead,
+    Scope::StatusPageRead,
+    Scope::IncidentsRead,
+];
 
 /// Every scope a connector MAY request. Write scopes are opt-in: granted only
 /// when the client explicitly asks for them, and surfaced distinctly on the
@@ -50,6 +54,7 @@ const DEFAULT_SCOPES: &[Scope] = &[Scope::TargetsRead, Scope::StatusPageRead];
 const GRANTABLE_SCOPES: &[Scope] = &[
     Scope::TargetsRead,
     Scope::StatusPageRead,
+    Scope::IncidentsRead,
     Scope::TargetsWrite,
     Scope::TargetsExecute,
     Scope::IncidentsWrite,
@@ -251,8 +256,14 @@ mod tests {
 
     #[test]
     fn grant_scope_defaults_to_full_read_set() {
-        assert_eq!(grant_scope(None), "targets:read status_page:read");
-        assert_eq!(grant_scope(Some("")), "targets:read status_page:read");
+        assert_eq!(
+            grant_scope(None),
+            "targets:read status_page:read incidents:read"
+        );
+        assert_eq!(
+            grant_scope(Some("")),
+            "targets:read status_page:read incidents:read"
+        );
     }
 
     #[test]
@@ -263,7 +274,10 @@ mod tests {
             "targets:read status_page:read"
         );
         // Unknown scopes are dropped → fall back to the read-only default.
-        assert_eq!(grant_scope(Some("bogus")), "targets:read status_page:read");
+        assert_eq!(
+            grant_scope(Some("bogus")),
+            "targets:read status_page:read incidents:read"
+        );
     }
 
     #[test]
@@ -277,11 +291,14 @@ mod tests {
             "targets:read targets:write"
         );
         assert_eq!(grant_scope(Some("targets:execute")), "targets:execute");
-        assert_eq!(grant_scope(Some("incidents:write")), "incidents:write");
+        assert_eq!(
+            grant_scope(Some("incidents:write")),
+            "incidents:read incidents:write"
+        );
         // Full write connector.
         assert_eq!(
             grant_scope(Some("targets:write targets:execute incidents:write")),
-            "targets:read targets:write targets:execute incidents:write"
+            "targets:read incidents:read targets:write targets:execute incidents:write"
         );
     }
 

@@ -259,8 +259,11 @@ impl IncidentNarrationStore for PgIncidentNarrationStore {
     }
 
     async fn list_active(&self, org: OrgId, limit: usize) -> Result<Vec<ActiveIncident>> {
-        // LATERAL picks the latest update per incident in one round-trip.
-        let cap = limit.clamp(1, 200) as i64;
+        // LATERAL picks the latest update per incident in one round-trip. The
+        // ceiling bounds a runaway query; callers that paginate (MCP) pass a
+        // limit at least one page past what they'll surface so the page after
+        // the cap is still reachable.
+        let cap = limit.clamp(1, 1000) as i64;
         let rows: Vec<ActiveIncidentRow> = sqlx::query_as(
             r#"SELECT i.id, i.target_id,
                       t.name AS target_name,

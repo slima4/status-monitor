@@ -90,6 +90,7 @@ fn scope_label(scope: &str) -> &'static str {
     match scope {
         "targets:read" => "Read your monitors and their current status",
         "status_page:read" => "Read your status pages and components",
+        "incidents:read" => "Read your incidents and their updates",
         "targets:write" => "Pause and resume your monitors",
         "targets:execute" => "Run checks on your monitors on demand",
         "incidents:write" => "Post updates to your incidents (shown publicly)",

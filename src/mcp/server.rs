@@ -8,7 +8,6 @@
 use std::collections::HashMap;
 
 use chrono::{DateTime, Duration, TimeZone, Utc};
-use futures::future::join_all;
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::{Json, Parameters};
 use rmcp::model::{ServerCapabilities, ServerInfo};
@@ -36,11 +35,13 @@ use super::confirm::require_confirmation;
 use super::cursor;
 use super::error::{McpToolError, codes};
 use super::schema::{
-    AckIncidentArgs, AckResult, CheckRunResult, Failure, GetMonitorArgs, GetMonitorHistoryArgs,
-    GetStatusPageArgs, HealthTotals, IncidentWindow, LatencyPoint, ListMonitorsArgs,
-    ListStatusPagesArgs, MonitorDetail, MonitorHistory, MonitorIdArg, MonitorList, MonitorListItem,
-    MonitorStateResult, OrgHealth, OrgUsage, Quota, StatusPageComponent as McpComponent,
-    StatusPageDetail, StatusPageList, StatusPageSummary, WorstMonitor,
+    AckIncidentArgs, AckResult, CheckRunResult, Failure, GetIncidentArgs, GetMonitorArgs,
+    GetMonitorHistoryArgs, GetStatusPageArgs, HealthTotals, IncidentDetail, IncidentList,
+    IncidentSummary, IncidentUpdateItem, IncidentWindow, LatencyPoint, ListIncidentsArgs,
+    ListMonitorsArgs, ListStatusPagesArgs, MonitorDetail, MonitorHistory, MonitorIdArg,
+    MonitorList, MonitorListItem, MonitorStateResult, OrgHealth, OrgUsage, Quota,
+    StatusPageComponent as McpComponent, StatusPageDetail, StatusPageList, StatusPageSummary,
+    WorstMonitor,
 };
 
 /// Max length of an incident-update message (matches the REST `NewIncidentUpdate`
@@ -147,20 +148,39 @@ impl McpServer {
         failing.sort_by_key(|f| std::cmp::Reverse(f.2));
         failing.truncate(WORST_CAP);
 
-        // `since` = the open incident's start, fetched only for the capped set.
-        let sinces = join_all(failing.iter().map(|(t, _, _)| self.ongoing_since(org, t))).await;
-
-        let worst = failing
+        // A stable, acknowledgeable `incident_id` exists only for monitors that
+        // are components on a status page (the incident writer only materialises
+        // those). One indexed fetch maps target → its open public incident.
+        // Best-effort: a failure yields no ids rather than failing health.
+        let open = self
+            .state
+            .incident_narration_store
+            .list_active(org, MAX_MONITORS_FETCH)
+            .await
+            .unwrap_or_default();
+        let open_by_target: HashMap<Uuid, (String, String)> = open
             .into_iter()
-            .zip(sinces)
-            .map(|((t, state, _), since)| WorstMonitor {
+            .map(|i| (i.target_id, (i.id.to_string(), i.started_at.to_rfc3339())))
+            .collect();
+
+        // `since` must cover every failing monitor, public or not, so it falls
+        // back to the coalesced check history when no public incident is open.
+        let mut worst = Vec::with_capacity(failing.len());
+        for (t, state, _) in failing {
+            let inc = open_by_target.get(&t.id);
+            let since = match inc {
+                Some((_, s)) => Some(s.clone()),
+                None => self.ongoing_since(org, &t).await,
+            };
+            worst.push(WorstMonitor {
                 id: t.id.to_string(),
                 name: t.name,
                 r#type: t.check.kind().to_string(),
                 state: state.to_string(),
                 since,
-            })
-            .collect();
+                incident_id: inc.map(|(id, _)| id.clone()),
+            });
+        }
 
         Ok(Json(OrgHealth {
             org: org_slug,
@@ -304,6 +324,7 @@ impl McpServer {
                 .and_then(|r| r.error.as_deref())
                 .and_then(strip_served_stale)
                 .map(str::to_owned),
+            last_http_status: last.and_then(|r| r.response_code),
             uptime_24h: up24.uptime_pct,
             uptime_30d: up30.uptime_pct,
         }))
@@ -500,6 +521,119 @@ impl McpServer {
             public_url: self.page_public_url(&page.slug),
             enabled: page.enabled,
             components,
+        }))
+    }
+
+    /// Currently-open incidents across the org, oldest first. The entry point
+    /// for "what incidents are open?" and for obtaining an incident id to read
+    /// or acknowledge. Incidents are recorded only for monitors that are
+    /// components on a status page.
+    #[tool(
+        description = "List currently-open incidents on the org's status pages: incident id, affected monitor, severity, and latest update phase. Only monitors that are status-page components have incidents. Read-only.",
+        annotations(read_only_hint = true)
+    )]
+    async fn list_incidents(
+        &self,
+        Parameters(args): Parameters<ListIncidentsArgs>,
+        ctx: RequestContext<RoleServer>,
+    ) -> Result<Json<IncidentList>, McpToolError> {
+        let auth = McpAuth::from_ctx(&ctx)?;
+        auth.require(Scope::IncidentsRead)?;
+        let org = auth.org;
+        let offset = match args.cursor.as_deref() {
+            Some(c) => cursor::decode_offset(c)
+                .ok_or_else(|| McpToolError::invalid_argument("invalid cursor"))?,
+            None => 0,
+        };
+
+        let incidents = self
+            .state
+            .incident_narration_store
+            .list_active(org, MAX_MONITORS_FETCH)
+            .await
+            .map_err(|e| McpToolError::internal(format!("list incidents: {e}")))?;
+
+        let total = incidents.len();
+        let end = offset.saturating_add(PAGE_SIZE).min(total);
+        let items = if offset < total {
+            incidents[offset..end]
+                .iter()
+                .map(|i| IncidentSummary {
+                    id: i.id.to_string(),
+                    monitor_id: i.target_id.to_string(),
+                    monitor_name: i.target_name.clone(),
+                    severity: i.severity.as_db_str().to_string(),
+                    opened_at: i.started_at.to_rfc3339(),
+                    latest_phase: i
+                        .latest_update
+                        .as_ref()
+                        .map(|u| u.phase.as_db_str().to_string()),
+                    latest_update_at: i.latest_update.as_ref().map(|u| u.posted_at.to_rfc3339()),
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let next_cursor = (end < total).then(|| cursor::encode_offset(end));
+
+        Ok(Json(IncidentList { items, next_cursor }))
+    }
+
+    /// One incident with its full operator-update timeline. Use after
+    /// `list_incidents`/`get_org_health` to read what's been posted before
+    /// acknowledging.
+    #[tool(
+        description = "One incident: affected monitor, severity, open/resolved times, error sample, and the full operator-update timeline. Read-only.",
+        annotations(read_only_hint = true)
+    )]
+    async fn get_incident(
+        &self,
+        Parameters(args): Parameters<GetIncidentArgs>,
+        ctx: RequestContext<RoleServer>,
+    ) -> Result<Json<IncidentDetail>, McpToolError> {
+        let auth = McpAuth::from_ctx(&ctx)?;
+        auth.require(Scope::IncidentsRead)?;
+        let org = auth.org;
+        let id = parse_uuid(&args.id, "incident id")?;
+
+        let mut incident = self
+            .state
+            .incident_narration_store
+            .get(org, id)
+            .await
+            .map_err(|e| McpToolError::internal(format!("get incident: {e}")))?
+            .ok_or_else(|| McpToolError::not_found("incident not found"))?;
+        incident.sanitize_error_sample();
+
+        let monitor_name = self
+            .state
+            .target_store
+            .get(org, incident.target_id)
+            .await
+            .ok()
+            .flatten()
+            .map(|t| t.name);
+
+        let updates = incident
+            .updates
+            .iter()
+            .map(|u| IncidentUpdateItem {
+                posted_at: u.posted_at.to_rfc3339(),
+                phase: u.phase.as_db_str().to_string(),
+                message: u.message.clone(),
+            })
+            .collect();
+
+        Ok(Json(IncidentDetail {
+            id: incident.id.to_string(),
+            monitor_id: incident.target_id.to_string(),
+            monitor_name,
+            state: incident.status.as_str().to_string(),
+            severity: incident.severity.as_db_str().to_string(),
+            opened_at: incident.started_at.to_rfc3339(),
+            resolved_at: incident.ended_at.map(|e| e.to_rfc3339()),
+            error_sample: incident.error_sample.clone(),
+            updates,
         }))
     }
 
@@ -721,6 +855,7 @@ impl McpServer {
             state: result.status.as_str().to_string(),
             checked_at: result.timestamp.to_rfc3339(),
             duration_ms: result.duration_ms,
+            http_status: result.response_code,
             error: result
                 .error
                 .as_deref()
@@ -779,6 +914,10 @@ impl McpServer {
     ) -> Result<Json<AckResult>, McpToolError> {
         auth.require(Scope::IncidentsWrite)?;
         let id = parse_uuid(&args.id, "incident id")?;
+        let phase = match args.phase.as_deref() {
+            Some(p) => parse_phase(p)?,
+            None => IncidentStatusPhase::Investigating,
+        };
 
         let mut message = args.message.clone().unwrap_or_default();
         if message.trim().is_empty() {
@@ -809,10 +948,7 @@ impl McpServer {
             .append_update(
                 auth.org,
                 id,
-                NewIncidentUpdate {
-                    phase: IncidentStatusPhase::Investigating,
-                    message,
-                },
+                NewIncidentUpdate { phase, message },
                 Some("mcp".to_string()),
             )
             .await
@@ -836,9 +972,9 @@ impl McpServer {
             .unwrap_or_default()
     }
 
-    /// Start time of the monitor's open incident, RFC 3339, or `None` when none
-    /// is open. Best-effort: a lookup error yields `None` rather than failing
-    /// the whole health call.
+    /// Start of the monitor's ongoing failure run, RFC 3339, from coalesced
+    /// check history — covers every monitor, not only those with a public
+    /// incident. Best-effort: a lookup error yields `None`.
     async fn ongoing_since(&self, org: crate::domain::OrgId, t: &Target) -> Option<String> {
         let now = Utc::now();
         let range = ClampedRange::unclamped(TimeRange {
@@ -976,6 +1112,20 @@ fn parse_state(s: &str) -> Result<&'static str, McpToolError> {
     }
 }
 
+/// Accepted incident phases for `acknowledge_incident`.
+fn parse_phase(s: &str) -> Result<IncidentStatusPhase, McpToolError> {
+    match s {
+        "investigating" => Ok(IncidentStatusPhase::Investigating),
+        "identified" => Ok(IncidentStatusPhase::Identified),
+        "monitoring" => Ok(IncidentStatusPhase::Monitoring),
+        "resolved" => Ok(IncidentStatusPhase::Resolved),
+        "postmortem" => Ok(IncidentStatusPhase::Postmortem),
+        other => Err(McpToolError::invalid_argument(format!(
+            "unknown phase `{other}`; expected one of investigating, identified, monitoring, resolved, postmortem"
+        ))),
+    }
+}
+
 /// Accepted monitor kinds for the `list_monitors` filter.
 fn parse_kind(s: &str) -> Result<&'static str, McpToolError> {
     match s {
@@ -1036,6 +1186,14 @@ mod tests {
             assert_eq!(parse_kind(k).unwrap(), k);
         }
         assert!(parse_kind("grpc").is_err());
+    }
+
+    #[test]
+    fn parse_phase_accepts_known_rejects_unknown() {
+        for p in IncidentStatusPhase::ALL {
+            assert_eq!(parse_phase(p.as_db_str()).unwrap(), *p);
+        }
+        assert!(parse_phase("acknowledged").is_err());
     }
 
     #[test]
