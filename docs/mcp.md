@@ -197,7 +197,27 @@ curl -s https://mcp.uptimepage.dev/mcp \
   -H 'Content-Type: application/json' \
   -H 'Accept: application/json, text/event-stream' \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
+
+# call a tool: open incidents on your status pages
+curl -s https://mcp.uptimepage.dev/mcp \
+  -H 'Authorization: Bearer sm_live_YOUR_TOKEN' \
+  -H 'Mcp-Session-Id: THE_SESSION_ID' \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call",
+       "params":{"name":"list_incidents","arguments":{}}}'
+
+# read one incident's timeline (id from list_incidents or get_org_health)
+curl -s https://mcp.uptimepage.dev/mcp \
+  -H 'Authorization: Bearer sm_live_YOUR_TOKEN' \
+  -H 'Mcp-Session-Id: THE_SESSION_ID' \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":4,"method":"tools/call",
+       "params":{"name":"get_incident","arguments":{"id":"INCIDENT_ID"}}}'
 ```
+
+Write tools (`acknowledge_incident`, `pause_monitor`, …) follow the same `tools/call` shape but the client must support [elicitation](#confirmations) — curl can't approve the confirmation, so they're driven from a real MCP client.
 
 A missing/invalid token returns `401` with `WWW-Authenticate: Bearer …`; a wrong `Host` returns `403`; a missing `MCP-Protocol-Version` on a non-initialize call returns `400`; notifications get `202`.
 

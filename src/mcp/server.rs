@@ -21,10 +21,12 @@ use serde_json::json;
 use crate::api::types::DashboardMetrics;
 use crate::app::AppState;
 use crate::auth::scope::Scope;
-use crate::domain::incident::NewIncidentUpdate;
+use crate::domain::incident::{Incident, NewIncidentUpdate};
 use crate::domain::public::IncidentStatusPhase;
+use crate::domain::result::CheckResult;
 use crate::domain::target::{Target, TargetUpdate};
 use crate::domain::{WriteSource, strip_served_stale};
+use crate::storage::incidents::ActiveIncident;
 use crate::storage::{ClampedRange, IncidentListQuery, TargetFilter, TimeRange};
 use crate::web::views::describe_check;
 use crate::web::views::public_status::{public_base, public_status_url};
@@ -36,11 +38,11 @@ use super::confirm::require_confirmation;
 use super::cursor;
 use super::error::{McpToolError, codes};
 use super::schema::{
-    AckIncidentArgs, AckResult, CheckRunResult, Failure, GetIncidentArgs, GetMonitorArgs,
-    GetMonitorHistoryArgs, GetStatusPageArgs, HealthTotals, IncidentDetail, IncidentList,
-    IncidentSummary, IncidentUpdateItem, IncidentWindow, LatencyPoint, ListIncidentsArgs,
-    ListMonitorsArgs, ListStatusPagesArgs, MonitorDetail, MonitorHistory, MonitorIdArg,
-    MonitorList, MonitorListItem, MonitorStateResult, OrgHealth, OrgUsage, Quota,
+    AckIncidentArgs, AckResult, CheckRunResult, CheckTiming, Failure, GetIncidentArgs,
+    GetMonitorArgs, GetMonitorHistoryArgs, GetStatusPageArgs, HealthTotals, IncidentDetail,
+    IncidentList, IncidentSummary, IncidentUpdateItem, IncidentWindow, LatencyPoint,
+    ListIncidentsArgs, ListMonitorsArgs, ListStatusPagesArgs, MonitorDetail, MonitorHistory,
+    MonitorIdArg, MonitorList, MonitorListItem, MonitorStateResult, OrgHealth, OrgUsage, Quota,
     StatusPageComponent as McpComponent, StatusPageDetail, StatusPageList, StatusPageSummary,
     WorstMonitor,
 };
@@ -57,9 +59,10 @@ const HEALTH_WINDOW_HOURS: i64 = 24;
 const WORST_CAP: usize = 8;
 /// Page size for `list_monitors`.
 const PAGE_SIZE: usize = 50;
-/// Upper bound on monitors pulled for the in-memory join. Comfortably above any
-/// plan's monitor cap; pagination then slices the filtered set exactly.
-const MAX_MONITORS_FETCH: usize = 1000;
+/// Upper bound on rows pulled for an in-memory paginated list (monitors,
+/// incidents). Comfortably above any plan's cap; pagination then slices the
+/// fetched set exactly.
+const MAX_LIST_FETCH: usize = 1000;
 /// How far back to look for an open incident when reporting `since`.
 const SINCE_LOOKBACK_DAYS: i64 = 30;
 /// Cap on incidents/failures returned by `get_monitor_history` — bound the
@@ -107,12 +110,20 @@ impl McpServer {
             from: now - Duration::try_hours(HEALTH_WINDOW_HOURS).unwrap_or_default(),
             to: now,
         };
-        let (targets, rollup, org_row) = tokio::try_join!(
+        // `open` is best-effort (it only adds incident ids), so it rides a plain
+        // `join!` alongside the load-bearing queries rather than failing health.
+        let (targets, rollup, org_row, open) = tokio::join!(
             self.state.target_store.list(org, all_monitors_filter(None)),
             self.state.results_store.dashboard_rollup(org, range),
             crate::storage::orgs::get_org(pool, org),
-        )
-        .map_err(|e| McpToolError::internal(format!("org health query: {e}")))?;
+            self.state
+                .incident_narration_store
+                .list_active(org, MAX_LIST_FETCH),
+        );
+        let to_err = |e| McpToolError::internal(format!("org health query: {e}"));
+        let targets = targets.map_err(to_err)?;
+        let rollup = rollup.map_err(to_err)?;
+        let org_row = org_row.map_err(to_err)?;
 
         let metrics = index_by_target(rollup);
         let org_slug = org_row.map(|o| o.slug).unwrap_or_else(|| org.0.to_string());
@@ -151,15 +162,10 @@ impl McpServer {
 
         // A stable, acknowledgeable `incident_id` exists only for monitors that
         // are components on a status page (the incident writer only materialises
-        // those). One indexed fetch maps target → its open public incident.
-        // Best-effort: a failure yields no ids rather than failing health.
-        let open = self
-            .state
-            .incident_narration_store
-            .list_active(org, MAX_MONITORS_FETCH)
-            .await
-            .unwrap_or_default();
+        // those). Map target → its open public incident; a lookup failure yields
+        // no ids rather than failing health.
         let open_by_target: HashMap<Uuid, (String, String)> = open
+            .unwrap_or_default()
             .into_iter()
             .map(|i| (i.target_id, (i.id.to_string(), i.started_at.to_rfc3339())))
             .collect();
@@ -320,6 +326,8 @@ impl McpServer {
                 .and_then(strip_served_stale)
                 .map(str::to_owned),
             last_http_status: last.and_then(|r| r.response_code),
+            last_timing: last.map(check_timing).unwrap_or_default(),
+            last_response_size: last.and_then(|r| r.response_size),
             uptime_24h: up24.uptime_pct,
             uptime_30d: up30.uptime_pct,
         }))
@@ -535,23 +543,12 @@ impl McpServer {
         let incidents = self
             .state
             .incident_narration_store
-            .list_active(org, MAX_MONITORS_FETCH)
+            .list_active(org, MAX_LIST_FETCH)
             .await
             .map_err(|e| McpToolError::internal(format!("list incidents: {e}")))?;
 
         let (items, next_cursor) =
-            cursor::paginate(&incidents, offset, PAGE_SIZE, |i| IncidentSummary {
-                id: i.id.to_string(),
-                monitor_id: i.target_id.to_string(),
-                monitor_name: i.target_name.clone(),
-                severity: i.severity.as_db_str().to_string(),
-                opened_at: i.started_at.to_rfc3339(),
-                latest_phase: i
-                    .latest_update
-                    .as_ref()
-                    .map(|u| u.phase.as_db_str().to_string()),
-                latest_update_at: i.latest_update.as_ref().map(|u| u.posted_at.to_rfc3339()),
-            });
+            cursor::paginate(&incidents, offset, PAGE_SIZE, incident_summary);
 
         Ok(Json(IncidentList { items, next_cursor }))
     }
@@ -591,27 +588,7 @@ impl McpServer {
             .flatten()
             .map(|t| t.name);
 
-        let updates = incident
-            .updates
-            .iter()
-            .map(|u| IncidentUpdateItem {
-                posted_at: u.posted_at.to_rfc3339(),
-                phase: u.phase.as_db_str().to_string(),
-                message: u.message.clone(),
-            })
-            .collect();
-
-        Ok(Json(IncidentDetail {
-            id: incident.id.to_string(),
-            monitor_id: incident.target_id.to_string(),
-            monitor_name,
-            state: incident.status.as_str().to_string(),
-            severity: incident.severity.as_db_str().to_string(),
-            opened_at: incident.started_at.to_rfc3339(),
-            resolved_at: incident.ended_at.map(|e| e.to_rfc3339()),
-            error_sample: incident.error_sample.clone(),
-            updates,
-        }))
+        Ok(Json(incident_detail(&incident, monitor_name)))
     }
 
     /// Org usage against plan limits. For "am I near my caps?".
@@ -833,6 +810,8 @@ impl McpServer {
             checked_at: result.timestamp.to_rfc3339(),
             duration_ms: result.duration_ms,
             http_status: result.response_code,
+            timing: check_timing(&result),
+            response_size: result.response_size,
             error: result
                 .error
                 .as_deref()
@@ -1004,10 +983,10 @@ impl ServerHandler for McpServer {
 }
 
 /// Filter that returns every monitor in the org (optionally tag-scoped),
-/// bounded by [`MAX_MONITORS_FETCH`].
+/// bounded by [`MAX_LIST_FETCH`].
 fn all_monitors_filter(tag: Option<String>) -> TargetFilter {
     TargetFilter {
-        limit: Some(MAX_MONITORS_FETCH),
+        limit: Some(MAX_LIST_FETCH),
         offset: 0,
         tag,
         ..Default::default()
@@ -1016,6 +995,55 @@ fn all_monitors_filter(tag: Option<String>) -> TargetFilter {
 
 fn index_by_target(rollup: Vec<DashboardMetrics>) -> HashMap<Uuid, DashboardMetrics> {
     rollup.into_iter().map(|m| (m.target_id, m)).collect()
+}
+
+/// Per-phase timing from a check result.
+fn check_timing(r: &CheckResult) -> CheckTiming {
+    CheckTiming {
+        dns_ms: r.dns_ms,
+        connect_ms: r.connect_ms,
+        tls_ms: r.tls_ms,
+        ttfb_ms: r.ttfb_ms,
+    }
+}
+
+/// Map an open incident to its list summary.
+fn incident_summary(i: &ActiveIncident) -> IncidentSummary {
+    IncidentSummary {
+        id: i.id.to_string(),
+        monitor_id: i.target_id.to_string(),
+        monitor_name: i.target_name.clone(),
+        severity: i.severity.as_db_str().to_string(),
+        opened_at: i.started_at.to_rfc3339(),
+        latest_phase: i
+            .latest_update
+            .as_ref()
+            .map(|u| u.phase.as_db_str().to_string()),
+        latest_update_at: i.latest_update.as_ref().map(|u| u.posted_at.to_rfc3339()),
+    }
+}
+
+/// Map an incident (already error-sanitized) plus its monitor name to detail.
+fn incident_detail(i: &Incident, monitor_name: Option<String>) -> IncidentDetail {
+    IncidentDetail {
+        id: i.id.to_string(),
+        monitor_id: i.target_id.to_string(),
+        monitor_name,
+        state: i.status.as_str().to_string(),
+        severity: i.severity.as_db_str().to_string(),
+        opened_at: i.started_at.to_rfc3339(),
+        resolved_at: i.ended_at.map(|e| e.to_rfc3339()),
+        error_sample: i.error_sample.clone(),
+        updates: i
+            .updates
+            .iter()
+            .map(|u| IncidentUpdateItem {
+                posted_at: u.posted_at.to_rfc3339(),
+                phase: u.phase.as_db_str().to_string(),
+                message: u.message.clone(),
+            })
+            .collect(),
+    }
 }
 
 /// Current state string from the per-monitor rollup: the last observed status
@@ -1120,6 +1148,104 @@ fn parse_kind(s: &str) -> Result<&'static str, McpToolError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::public::{IncidentSeverity, PublicIncidentUpdate};
+    use crate::domain::result::CheckStatus;
+
+    fn check_result(dns: Option<u16>, ttfb: Option<u16>, size: Option<u32>) -> CheckResult {
+        CheckResult {
+            target_id: Uuid::nil(),
+            org_id: Uuid::nil(),
+            timestamp: Utc::now(),
+            status: CheckStatus::Up,
+            duration_ms: 100,
+            dns_ms: dns,
+            connect_ms: Some(30),
+            tls_ms: Some(45),
+            ttfb_ms: ttfb,
+            response_code: Some(200),
+            response_size: size,
+            error: None,
+        }
+    }
+
+    fn active_incident(latest: Option<PublicIncidentUpdate>) -> ActiveIncident {
+        ActiveIncident {
+            id: Uuid::nil(),
+            target_id: Uuid::nil(),
+            target_name: "api".into(),
+            severity: IncidentSeverity::Critical,
+            started_at: Utc::now(),
+            public_title: None,
+            latest_update: latest,
+        }
+    }
+
+    fn update(phase: IncidentStatusPhase) -> PublicIncidentUpdate {
+        PublicIncidentUpdate {
+            posted_at: Utc::now(),
+            phase,
+            message: "msg".into(),
+        }
+    }
+
+    #[test]
+    fn check_timing_copies_phase_fields() {
+        let t = check_timing(&check_result(Some(12), Some(120), Some(2048)));
+        assert_eq!(t.dns_ms, Some(12));
+        assert_eq!(t.connect_ms, Some(30));
+        assert_eq!(t.tls_ms, Some(45));
+        assert_eq!(t.ttfb_ms, Some(120));
+        // Non-applicable phases stay null.
+        let t = check_timing(&check_result(None, None, None));
+        assert_eq!(t.dns_ms, None);
+        assert_eq!(t.ttfb_ms, None);
+    }
+
+    #[test]
+    fn incident_summary_maps_severity_and_latest_update() {
+        let s = incident_summary(&active_incident(Some(update(
+            IncidentStatusPhase::Identified,
+        ))));
+        assert_eq!(s.monitor_name, "api");
+        assert_eq!(s.severity, "critical");
+        assert_eq!(s.latest_phase.as_deref(), Some("identified"));
+        assert!(s.latest_update_at.is_some());
+    }
+
+    #[test]
+    fn incident_summary_no_update_yields_null_phase() {
+        let s = incident_summary(&active_incident(None));
+        assert!(s.latest_phase.is_none());
+        assert!(s.latest_update_at.is_none());
+    }
+
+    #[test]
+    fn incident_detail_maps_state_severity_and_updates() {
+        let inc = Incident {
+            id: Uuid::nil(),
+            target_id: Uuid::nil(),
+            started_at: Utc::now(),
+            ended_at: None,
+            status: CheckStatus::Down,
+            duration_secs: None,
+            check_count: 3,
+            error_sample: Some("boom".into()),
+            severity: IncidentSeverity::Major,
+            public_title: None,
+            public_description: None,
+            created_at: None,
+            updated_at: None,
+            updates: vec![update(IncidentStatusPhase::Investigating)],
+        };
+        let d = incident_detail(&inc, Some("api".into()));
+        assert_eq!(d.state, "down");
+        assert_eq!(d.severity, "major");
+        assert_eq!(d.monitor_name.as_deref(), Some("api"));
+        assert!(d.resolved_at.is_none());
+        assert_eq!(d.error_sample.as_deref(), Some("boom"));
+        assert_eq!(d.updates.len(), 1);
+        assert_eq!(d.updates[0].phase, "investigating");
+    }
 
     fn metrics(samples: u64, last_status: &str, last_minute_ts: Option<i64>) -> DashboardMetrics {
         DashboardMetrics {

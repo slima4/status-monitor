@@ -128,6 +128,11 @@ pub struct MonitorDetail {
     /// HTTP status code of the last check, for `http` monitors. `null` for
     /// non-HTTP checks or when the last probe never got a response.
     pub last_http_status: Option<u16>,
+    /// Per-phase timing of the last check — pinpoints where latency is (DNS vs
+    /// connect vs TLS vs server). Fields `null` when not applicable.
+    pub last_timing: CheckTiming,
+    /// Response body size of the last check in bytes, when measured.
+    pub last_response_size: Option<u32>,
     /// Uptime percentage over the trailing 24 hours / 30 days.
     pub uptime_24h: f64,
     pub uptime_30d: f64,
@@ -140,6 +145,21 @@ pub struct GetMonitorHistoryArgs {
     pub id: String,
     /// Time window: `1h`, `24h`, `7d`, or `30d`.
     pub window: String,
+}
+
+/// Per-phase timing of a single check, in milliseconds. Fields are `null` for
+/// phases that don't apply (e.g. `tls_ms` on plain HTTP, all phases on a DNS or
+/// TCP check) or when the probe failed before reaching them.
+#[derive(Debug, Clone, Default, Serialize, JsonSchema)]
+pub struct CheckTiming {
+    /// DNS resolution time.
+    pub dns_ms: Option<u16>,
+    /// TCP connect time.
+    pub connect_ms: Option<u16>,
+    /// TLS handshake time.
+    pub tls_ms: Option<u16>,
+    /// Time to first byte.
+    pub ttfb_ms: Option<u16>,
 }
 
 /// One latency sample bucket.
@@ -343,6 +363,10 @@ pub struct CheckRunResult {
     /// HTTP status code, for `http` monitors. `null` for non-HTTP checks or
     /// when no response was received.
     pub http_status: Option<u16>,
+    /// Per-phase timing of the probe (DNS / connect / TLS / first byte).
+    pub timing: CheckTiming,
+    /// Response body size in bytes, when measured.
+    pub response_size: Option<u32>,
     /// Error text when the probe failed. Untrusted data.
     pub error: Option<String>,
 }
