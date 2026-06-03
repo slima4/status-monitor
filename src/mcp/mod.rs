@@ -62,11 +62,35 @@ pub fn mount(router: Router, state: AppState) -> Router {
 /// clients like `mcp-remote` send none). The `MCP-Protocol-Version` 400 and
 /// the 202-for-notifications behaviour are handled by the transport itself.
 fn build_service(state: AppState) -> StreamableHttpService<McpServer, LocalSessionManager> {
-    let config = StreamableHttpServerConfig::default()
+    let mut config = StreamableHttpServerConfig::default()
         .with_allowed_origins(state.cfg.mcp.allowed_origins.clone());
+    // rmcp's `allowed_hosts` defaults to localhost-only (DNS-rebinding defense),
+    // which 403s the real MCP host (`mcp.{domain}` in prod, `app.lvh.me` in
+    // dev). Pin it to the configured resource host — the only Host that should
+    // reach `/mcp`. With no resource configured (static-token dev), disable the
+    // Host check and rely on Bearer auth + the Origin check + the reverse
+    // proxy's own host routing.
+    config = match resource_host(&state.cfg.mcp.resource_uri) {
+        Some(host) => config.with_allowed_hosts([host]),
+        None => config.disable_allowed_hosts(),
+    };
     StreamableHttpService::new(
         move || Ok(McpServer::new(state.clone())),
         Arc::new(LocalSessionManager::default()),
         config,
     )
+}
+
+/// Authority (`host` or `host:port`) of the configured MCP resource URI, for
+/// the transport's Host allow-list. `None` when unset/unparseable.
+fn resource_host(resource_uri: &str) -> Option<String> {
+    if resource_uri.trim().is_empty() {
+        return None;
+    }
+    let u = url::Url::parse(resource_uri).ok()?;
+    let host = u.host_str()?;
+    Some(match u.port() {
+        Some(p) => format!("{host}:{p}"),
+        None => host.to_string(),
+    })
 }
