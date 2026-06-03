@@ -8,6 +8,7 @@
 use std::collections::HashMap;
 
 use chrono::{DateTime, Duration, TimeZone, Utc};
+use futures::future::join_all;
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::{Json, Parameters};
 use rmcp::model::{ServerCapabilities, ServerInfo};
@@ -165,22 +166,26 @@ impl McpServer {
 
         // `since` must cover every failing monitor, public or not, so it falls
         // back to the coalesced check history when no public incident is open.
-        let mut worst = Vec::with_capacity(failing.len());
-        for (t, state, _) in failing {
-            let inc = open_by_target.get(&t.id);
-            let since = match inc {
-                Some((_, s)) => Some(s.clone()),
-                None => self.ongoing_since(org, &t).await,
-            };
-            worst.push(WorstMonitor {
-                id: t.id.to_string(),
-                name: t.name,
-                r#type: t.check.kind().to_string(),
-                state: state.to_string(),
-                since,
-                incident_id: inc.map(|(id, _)| id.clone()),
-            });
-        }
+        // The ≤WORST_CAP fallbacks run concurrently.
+        let worst = join_all(failing.into_iter().map(|(t, state, _)| {
+            let open_by_target = &open_by_target;
+            async move {
+                let inc = open_by_target.get(&t.id);
+                let since = match inc {
+                    Some((_, s)) => Some(s.clone()),
+                    None => self.ongoing_since(org, &t).await,
+                };
+                WorstMonitor {
+                    id: t.id.to_string(),
+                    name: t.name,
+                    r#type: t.check.kind().to_string(),
+                    state: state.to_string(),
+                    since,
+                    incident_id: inc.map(|(id, _)| id.clone()),
+                }
+            }
+        }))
+        .await;
 
         Ok(Json(OrgHealth {
             org: org_slug,
@@ -249,19 +254,9 @@ impl McpServer {
             .collect();
         items.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.id.cmp(&b.id)));
 
-        let total = items.len();
-        let end = offset.saturating_add(PAGE_SIZE).min(total);
-        let page = if offset < total {
-            items[offset..end].to_vec()
-        } else {
-            Vec::new()
-        };
-        let next_cursor = (end < total).then(|| cursor::encode_offset(end));
+        let (items, next_cursor) = cursor::paginate(&items, offset, PAGE_SIZE, |i| i.clone());
 
-        Ok(Json(MonitorList {
-            items: page,
-            next_cursor,
-        }))
+        Ok(Json(MonitorList { items, next_cursor }))
     }
 
     /// Full config + current state + recent uptime for one monitor. Use after
@@ -448,22 +443,13 @@ impl McpServer {
             .map_err(|e| McpToolError::internal(format!("list status pages: {e}")))?;
         pages.sort_by(|a, b| a.slug.cmp(&b.slug));
 
-        let total = pages.len();
-        let end = offset.saturating_add(PAGE_SIZE).min(total);
-        let items = if offset < total {
-            pages[offset..end]
-                .iter()
-                .map(|p| StatusPageSummary {
-                    slug: p.slug.clone(),
-                    name: p.name.clone(),
-                    public_url: self.page_public_url(&p.slug),
-                    enabled: p.enabled,
-                })
-                .collect()
-        } else {
-            Vec::new()
-        };
-        let next_cursor = (end < total).then(|| cursor::encode_offset(end));
+        let (items, next_cursor) =
+            cursor::paginate(&pages, offset, PAGE_SIZE, |p| StatusPageSummary {
+                slug: p.slug.clone(),
+                name: p.name.clone(),
+                public_url: self.page_public_url(&p.slug),
+                enabled: p.enabled,
+            });
 
         Ok(Json(StatusPageList { items, next_cursor }))
     }
@@ -553,28 +539,19 @@ impl McpServer {
             .await
             .map_err(|e| McpToolError::internal(format!("list incidents: {e}")))?;
 
-        let total = incidents.len();
-        let end = offset.saturating_add(PAGE_SIZE).min(total);
-        let items = if offset < total {
-            incidents[offset..end]
-                .iter()
-                .map(|i| IncidentSummary {
-                    id: i.id.to_string(),
-                    monitor_id: i.target_id.to_string(),
-                    monitor_name: i.target_name.clone(),
-                    severity: i.severity.as_db_str().to_string(),
-                    opened_at: i.started_at.to_rfc3339(),
-                    latest_phase: i
-                        .latest_update
-                        .as_ref()
-                        .map(|u| u.phase.as_db_str().to_string()),
-                    latest_update_at: i.latest_update.as_ref().map(|u| u.posted_at.to_rfc3339()),
-                })
-                .collect()
-        } else {
-            Vec::new()
-        };
-        let next_cursor = (end < total).then(|| cursor::encode_offset(end));
+        let (items, next_cursor) =
+            cursor::paginate(&incidents, offset, PAGE_SIZE, |i| IncidentSummary {
+                id: i.id.to_string(),
+                monitor_id: i.target_id.to_string(),
+                monitor_name: i.target_name.clone(),
+                severity: i.severity.as_db_str().to_string(),
+                opened_at: i.started_at.to_rfc3339(),
+                latest_phase: i
+                    .latest_update
+                    .as_ref()
+                    .map(|u| u.phase.as_db_str().to_string()),
+                latest_update_at: i.latest_update.as_ref().map(|u| u.posted_at.to_rfc3339()),
+            });
 
         Ok(Json(IncidentList { items, next_cursor }))
     }
