@@ -88,6 +88,12 @@ services:
       UPTIMEPAGE_AUTH__FINGERPRINT_SALT: "dev-only-fingerprint-salt-not-for-prod"
       # Browser drops `Secure` cookies over plain HTTP; dev runs HTTP on lvh.me.
       UPTIMEPAGE_AUTH__SESSION__COOKIE_SECURE: "false"
+      # MCP server on. OAuth stays OFF in dev: the boot guard requires the
+      # issuer/resource to be https (or loopback http), and `app.lvh.me` is
+      # neither — enabling it would panic on boot. Test read+write tools with a
+      # static org-bound token (Settings → API tokens) via Claude Desktop /
+      # mcp-remote pointed at http://app.lvh.me:8080/mcp.
+      UPTIMEPAGE_MCP__ENABLED: "true"
       UPTIMEPAGE_OBSERVABILITY__LOG_FORMAT: json
       UPTIMEPAGE_OBSERVABILITY__LOG_LEVEL: "uptimepage=debug,sqlx=warn,hyper=warn,tower_http=info,info"
       UPTIMEPAGE_SERVER__API_BIND: "0.0.0.0:8080"

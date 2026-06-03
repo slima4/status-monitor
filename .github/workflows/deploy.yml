@@ -178,6 +178,8 @@ jobs:
                GRAFANA_CLOUD_LOKI_URL='${{ secrets.GRAFANA_CLOUD_LOKI_URL }}' \
                GRAFANA_CLOUD_LOKI_USER='${{ secrets.GRAFANA_CLOUD_LOKI_USER }}' \
                RUST_LOG='${{ vars.RUST_LOG }}' \
+               UPTIMEPAGE_MCP_ENABLED='${{ vars.MCP_ENABLED }}' \
+               UPTIMEPAGE_MCP_OAUTH_ENABLED='${{ vars.MCP_OAUTH_ENABLED }}' \
                bash -s" <<'REMOTE'
           # This script is delivered to `bash -s` over the ssh heredoc — i.e. on
           # stdin (fd 0). A `docker compose exec -T` / `docker exec -i` / nested
@@ -426,6 +428,44 @@ jobs:
             fi
             n=$(grep -cxF "RUST_LOG=$(printenv RUST_LOG)" .env || true)
             [ "$n" = 1 ] || { echo "::error::RUST_LOG not written exactly once to .env (count=${n})"; exit 1; }
+          fi
+
+          # --- managed MCP enable flags (optional) --------------------------
+          # Non-secret on/off flags, sourced from the repo *variables*
+          # MCP_ENABLED / MCP_OAUTH_ENABLED (passed as UPTIMEPAGE_MCP_ENABLED /
+          # UPTIMEPAGE_MCP_OAUTH_ENABLED). Same write contract as the blocks
+          # above: cp backup FIRST, single awk reprint, ENVIRON values,
+          # line-count bound, exactly-once verify. Runs when either is set;
+          # an unset flag is written as its (possibly empty) value, which the
+          # compose `${…:-false}` fallback reads as false. NOTE: with OAuth on,
+          # the app refuses to boot unless UPTIMEPAGE_AUTH_PUBLIC_BASE_URL is a
+          # real https origin — keep that set before flipping MCP_OAUTH_ENABLED.
+          if [ -n "${UPTIMEPAGE_MCP_ENABLED:-}" ] \
+             || [ -n "${UPTIMEPAGE_MCP_OAUTH_ENABLED:-}" ]; then
+            cp .env ".env.bak.$(date +%s).mcp"
+            before=$(awk 'END { print NR }' .env)
+            awk '
+              BEGIN {
+                m["UPTIMEPAGE_MCP_ENABLED"]       = ENVIRON["UPTIMEPAGE_MCP_ENABLED"]
+                m["UPTIMEPAGE_MCP_OAUTH_ENABLED"] = ENVIRON["UPTIMEPAGE_MCP_OAUTH_ENABLED"]
+              }
+              {
+                for (k in m) if ($0 ~ ("^" k "=")) { print k "=" m[k]; seen[k] = 1; next }
+                print
+              }
+              END { for (k in m) if (!seen[k]) print k "=" m[k] }
+            ' .env > .env.next
+            mv .env.next .env
+            after=$(awk 'END { print NR }' .env)
+            # 0..+2 lines may be appended (both keys absent before).
+            if [ "$after" -lt "$before" ] || [ "$after" -gt "$((before + 2))" ]; then
+              echo "::error::.env line count out of range after mcp upsert (${before} -> ${after})"
+              exit 1
+            fi
+            for k in UPTIMEPAGE_MCP_ENABLED UPTIMEPAGE_MCP_OAUTH_ENABLED; do
+              n=$(grep -cxF "${k}=$(printenv "$k")" .env || true)
+              [ "$n" = 1 ] || { echo "::error::${k} not written exactly once to .env (count=${n})"; exit 1; }
+            done
           fi
 
           # Defensive fallback: tighten .env perms in case the file predates

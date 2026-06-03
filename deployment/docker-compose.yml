@@ -118,6 +118,16 @@ services:
       UPTIMEPAGE_MARKETING__APP_URL: ${UPTIMEPAGE_MARKETING__APP_URL:-}
       UPTIMEPAGE_MARKETING__CANONICAL_ORIGIN: ${UPTIMEPAGE_MARKETING__CANONICAL_ORIGIN:-}
       UPTIMEPAGE_MARKETING__BLOG_ENABLED: ${UPTIMEPAGE_MARKETING__BLOG_ENABLED:-false}
+      # Read-only + write MCP server for LLM connectors. Deploy-managed:
+      # deploy.yml upserts UPTIMEPAGE_MCP_ENABLED / _OAUTH_ENABLED from the repo
+      # variables MCP_ENABLED / MCP_OAUTH_ENABLED (default off here when unset).
+      # The OAuth resource id is the canonical /mcp URI on the `mcp` subdomain
+      # (served by the *.{domain} wildcard; `mcp` is an operator label). The
+      # issuer is UPTIMEPAGE_AUTH_PUBLIC_BASE_URL above — which MUST be https
+      # when OAuth is on, or the app refuses to boot.
+      UPTIMEPAGE_MCP__ENABLED: ${UPTIMEPAGE_MCP_ENABLED:-false}
+      UPTIMEPAGE_MCP__OAUTH_ENABLED: ${UPTIMEPAGE_MCP_OAUTH_ENABLED:-false}
+      UPTIMEPAGE_MCP__RESOURCE_URI: ${UPTIMEPAGE_MCP_RESOURCE_URI:-https://mcp.${UPTIMEPAGE_DOMAIN}/mcp}
       # Effective trace/log filter. tracing reads RUST_LOG before the
       # config file, so this is the authoritative knob; it must be at
       # least `debug` for HTTP request spans (hence OTLP traces) to be
