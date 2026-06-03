@@ -7,7 +7,7 @@ Built on Rust 1.95 (edition 2024), Tokio, Axum, hyper-util (custom phase-timing 
 ## Where to start
 
 - New to the project → [Architecture](architecture.md) for the big picture
-- Integrating → [REST API](api.md)
+- Integrating → [REST API](api.md), or the [MCP server](mcp.md) for LLM clients
 - Browsing the data → [Web UI](ui.md)
 - Running it → [Deployment](deployment.md) and [Configuration](configuration.md)
 - Operating it → [Metrics & tracing](metrics.md) and [Troubleshooting](troubleshooting.md)

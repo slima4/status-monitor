@@ -40,6 +40,7 @@ Override `UPTIMEPAGE_CONFIG_PATH` to point at an alternate base config file.
 | `auth.api_tokens` | `max_per_user`, `prefix_visible_chars` | Cap per user, indexed prefix length for token lookup |
 | `auth.invitations` | `expiry_hours`, `max_pending_per_org` | Invitation lifetime and per-org pending cap |
 | `auth.magic_link` | `expiry_minutes`, `rate_limit_seconds` | Magic-link token lifetime. Routes only mount when `enabled_methods` includes `"magic_link"` |
+| `mcp` | `enabled`, `oauth_enabled`, `resource_uri`, `allowed_origins`, `access_token_ttl_secs` | LLM connector (MCP) server at `/mcp`. Off by default; OAuth requires real HTTPS `resource_uri` + `auth.public_base_url`. See [MCP server](mcp.md) |
 | `email` | `provider`, `from_name`, `from_address` | Transactional email backend. `provider` ∈ `"resend" \| "log" \| "memory"` |
 | `email.resend` | `api_key` | Required when `email.provider = "resend"` |
 

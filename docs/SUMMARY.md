@@ -11,6 +11,7 @@
 - [Share links](share-links.md)
 - [Multi-tenancy](multi-tenancy.md)
 - [Authentication](authentication.md)
+- [MCP server](mcp.md)
 - [Configuration](configuration.md)
 - [Quotas & rate limits](quotas.md)
 - [Metrics & tracing](metrics.md)

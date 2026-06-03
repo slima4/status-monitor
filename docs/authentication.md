@@ -63,7 +63,7 @@ argon2-verifies the survivor. `last_used_at` is updated through the same
 CSRF protection does not apply: cross-origin browsers don't auto-attach
 the `Authorization` header, so there is no forgery surface.
 
-To manage resources with a token as code, see [Terraform](terraform.md).
+To manage resources with a token as code, see [Terraform](terraform.md). To let an LLM client query and act on an org with a token, see the [MCP server](mcp.md).
 
 #### Scopes
 
