@@ -53,28 +53,39 @@ fi
 
 echo "==> Postgres: enable public status + wipe prior fixtures"
 pg <<SQL
-UPDATE organizations
-   SET name                  = 'Fixture Org',
-       public_display_name   = 'Fixture Status',
-       public_about          = 'Generated fixture data for UI stress-testing.',
-       public_brand_color    = '#0ea5e9',
-       public_status_enabled = true
- WHERE slug = '${SLUG}';
+UPDATE organizations SET name = 'Fixture Org' WHERE slug = '${SLUG}';
 
 -- incident_updates + maintenance_window_components cascade via FK; wipe is
--- idempotent. Channels wiped by the same fixture name prefix.
+-- idempotent. Channels wiped by the same fixture name prefix. Branding and
+-- component membership live on a status page (multi-page schema), recreated
+-- below — dropping the page cascades its status_page_components.
 DELETE FROM incidents
  WHERE org_id = (SELECT id FROM organizations WHERE slug='${SLUG}')
    AND target_id IN (
      SELECT id FROM targets
       WHERE org_id = (SELECT id FROM organizations WHERE slug='${SLUG}')
         AND tags @> ARRAY['seed-fixtures']);
+-- Manually-declared fixtures carry no target, so the target-scoped wipe above
+-- misses them; clear them by origin. incident_events cascade on delete.
+DELETE FROM incidents
+ WHERE org_id = (SELECT id FROM organizations WHERE slug='${SLUG}')
+   AND origin = 'manual';
 DELETE FROM targets
  WHERE org_id = (SELECT id FROM organizations WHERE slug='${SLUG}')
    AND tags @> ARRAY['seed-fixtures'];
 DELETE FROM notification_channels
  WHERE org_id = (SELECT id FROM organizations WHERE slug='${SLUG}')
    AND name LIKE 'Fixture %';
+DELETE FROM status_pages
+ WHERE org_id = (SELECT id FROM organizations WHERE slug='${SLUG}')
+   AND slug = 'fixtures';
+
+-- One enabled status page; as the org's lone page it serves the org subdomain.
+INSERT INTO status_pages
+  (org_id, slug, name, enabled, public_display_name, public_about, public_brand_color)
+SELECT id, 'fixtures', 'Fixture Status', true, 'Fixture Status',
+       'Generated fixture data for UI stress-testing.', '#0ea5e9'
+  FROM organizations WHERE slug = '${SLUG}';
 SQL
 
 echo "==> Postgres: pick first org member as owner FK for avatars"
@@ -94,19 +105,10 @@ echo "==> Postgres: insert 14 monitors (8 public/visible + 6 internal/varied-spe
 # so the Ungrouped path renders. group_name is operator-side, distinct
 # from public_group, so the two surfaces can diverge.
 pg <<SQL
-WITH org AS (SELECT id FROM organizations WHERE slug='${SLUG}')
-INSERT INTO targets
-  (org_id, name, check_spec, interval_secs, enabled, tags,
-   group_name, owner_user_id,
-   public_status, public_name, public_group, public_sort_order)
-SELECT org.id, t.name, t.spec::jsonb,
-       CASE WHEN t.spec::jsonb->>'type' IN ('tls_cert','domain_expiry') THEN 86400 ELSE 60 END,
-       t.is_enabled, ARRAY['seed-fixtures'],
-       t.gname,
-       CASE WHEN t.has_owner AND '${OWNER_USER_ID}' <> ''
-            THEN '${OWNER_USER_ID}'::uuid ELSE NULL END,
-       t.public, t.pname, t.grp, t.so
-FROM org, (VALUES
+WITH org AS (SELECT id FROM organizations WHERE slug='${SLUG}'),
+     sp AS (SELECT id FROM status_pages
+             WHERE org_id = (SELECT id FROM org) AND slug = 'fixtures'),
+     spec(name,is_enabled,public,pname,grp,so,gname,has_owner,spec) AS (VALUES
   -- Public / visible HTTP targets (group sort_order drives column layout).
   -- enabled=false on the Operational/Degraded/NoData ones — scheduler stray
   -- checks otherwise corrupt the pure-state seeded counters.
@@ -144,7 +146,25 @@ FROM org, (VALUES
    '{"type":"tls_cert","host":"example.com","port":443,"server_name":null,"warn_days":30,"critical_days":7,"timeout":5000}'),
   ('fix-domain',  true,  false, 'Domain Expiry',   'Internal',        5,  'Infrastructure',false,
    '{"type":"domain_expiry","domain":"example.com","warn_days":60,"critical_days":14,"timeout":10000}')
-) AS t(name,is_enabled,public,pname,grp,so,gname,has_owner,spec);
+     ),
+     ins AS (
+       INSERT INTO targets
+         (org_id, name, check_spec, interval_secs, enabled, tags, group_name, owner_user_id)
+       SELECT org.id, spec.name, spec.spec::jsonb,
+              CASE WHEN spec.spec::jsonb->>'type' IN ('tls_cert','domain_expiry') THEN 86400 ELSE 60 END,
+              spec.is_enabled, ARRAY['seed-fixtures'], spec.gname,
+              CASE WHEN spec.has_owner AND '${OWNER_USER_ID}' <> ''
+                   THEN '${OWNER_USER_ID}'::uuid ELSE NULL END
+       FROM org, spec
+       RETURNING id, name
+     )
+-- Public monitors become components of the fixture status page; the rest stay
+-- operator-only (and now still get incidents via the broadened writer).
+INSERT INTO status_page_components
+  (org_id, status_page_id, target_id, public_name, public_group, sort_order)
+SELECT (SELECT id FROM org), (SELECT id FROM sp), ins.id, spec.pname, spec.grp, spec.so
+FROM ins JOIN spec ON spec.name = ins.name
+WHERE spec.public;
 
 -- Demonstrate the managed-by badge: pretend the Integrations monitors are
 -- authored by Terraform and one by a raw API token. UI-authored rows (the
@@ -241,14 +261,17 @@ WITH s AS (
 ins AS (
   INSERT INTO incidents
     (org_id, target_id, started_at, ended_at, severity, status_at_start,
-     check_count, error_sample, public_title, public_description, duration_secs)
+     check_count, error_sample, public_title, public_description, duration_secs,
+     state, visibility, origin)
   SELECT '${ORG}'::uuid, s.target_id, s.started_at, s.started_at + s.dur,
          s.sev, s.sas, (s.n % 20) + 5, s.err,
          s.title || ' (fixture #' || s.n || ')',
          'Auto-generated fixture incident #' || s.n
            || '. Severity ' || s.sev || ', start status ' || s.sas
            || ', duration ' || extract(epoch from s.dur)::int || 's.',
-         extract(epoch from s.dur)::int
+         extract(epoch from s.dur)::int,
+         -- Closed, public, monitor-opened: operational state mirrors ended_at.
+         'resolved', 'public', 'monitor'
   FROM s
   RETURNING id, started_at, ended_at
 )
@@ -333,12 +356,21 @@ WITH s AS (
 ins AS (
   INSERT INTO incidents
     (org_id, target_id, started_at, ended_at, severity, status_at_start,
-     check_count, error_sample, public_title, public_description, duration_secs)
+     check_count, error_sample, public_title, public_description, duration_secs,
+     state, visibility, origin, acknowledged_at, acknowledged_by)
   SELECT '${ORG}'::uuid, s.target_id, s.started_at, NULL,
          s.sev, 'down', 3, 'connection refused',
          'Ongoing — ' || initcap(s.current_phase) || ' (fixture #' || s.n || ')',
          'Live fixture incident still in ' || s.current_phase || ' phase.',
-         NULL
+         NULL,
+         -- Past-investigating phases are acknowledged by the on-call owner;
+         -- still-investigating ones are unacknowledged (triggered).
+         CASE WHEN s.current_phase = 'investigating' THEN 'triggered' ELSE 'acknowledged' END,
+         'public', 'monitor',
+         CASE WHEN s.current_phase <> 'investigating'
+              THEN s.started_at + interval '4 minute' ELSE NULL END,
+         CASE WHEN s.current_phase <> 'investigating' AND '${OWNER_USER_ID}' <> ''
+              THEN '${OWNER_USER_ID}'::uuid ELSE NULL END
   FROM s
   RETURNING id, started_at
 )
@@ -360,6 +392,69 @@ CROSS JOIN LATERAL (
          'Mitigation applied; monitoring recovery.'
   WHERE s.current_phase = 'monitoring'
 ) AS p;
+SQL
+
+echo "==> Postgres: operational-layer incidents (internal-only + manually declared) with activity timelines"
+# These exercise the operator incidents console specifically:
+#   * internal incidents on non-public monitors (visibility='internal') — they
+#     appear in the console but NEVER on the public status page, proving the
+#     writer can open incidents for any monitor without leaking it publicly.
+#   * a manually declared incident (origin='manual', no monitor) acknowledged
+#     by the on-call owner.
+# Each gets incident_events so the detail page's Activity timeline is populated.
+pg <<SQL
+WITH ins AS (
+  INSERT INTO incidents
+    (org_id, target_id, started_at, ended_at, severity, status_at_start,
+     check_count, error_sample, title, duration_secs, state, visibility, origin)
+  VALUES
+    ('${ORG}'::uuid, '${T_PAY}'::uuid, now() - interval '40 minute', NULL,
+     'critical', 'down', 4, 'connection refused',
+     'Payment gateway unreachable', NULL, 'triggered', 'internal', 'monitor'),
+    ('${ORG}'::uuid, '${T_ADMIN}'::uuid, now() - interval '3 hour', now() - interval '2 hour',
+     'major', 'error', 6, 'http 500',
+     'Admin portal 5xx spike', 3600, 'resolved', 'internal', 'monitor')
+  RETURNING id, started_at, state
+)
+INSERT INTO incident_events (org_id, incident_id, occurred_at, kind, actor_type, actor_id, message)
+SELECT '${ORG}'::uuid, i.id, e.occurred_at, e.kind, e.actor_type,
+       CASE WHEN e.actor_type = 'user' AND '${OWNER_USER_ID}' <> ''
+            THEN '${OWNER_USER_ID}'::uuid ELSE NULL END,
+       e.message
+FROM ins i
+CROSS JOIN LATERAL (
+  SELECT i.started_at AS occurred_at, 'triggered'::text AS kind,
+         'system'::text AS actor_type, NULL::text AS message
+  UNION ALL SELECT i.started_at + interval '6 minute', 'acknowledged', 'user', 'Taking a look.'
+    WHERE i.state <> 'triggered'
+  UNION ALL SELECT i.started_at + interval '55 minute', 'resolved', 'user', 'Rolled back the bad deploy.'
+    WHERE i.state = 'resolved'
+) AS e(occurred_at, kind, actor_type, message);
+
+WITH ins AS (
+  INSERT INTO incidents
+    (org_id, target_id, started_at, ended_at, severity, status_at_start,
+     check_count, title, duration_secs, state, visibility, origin,
+     acknowledged_at, acknowledged_by)
+  VALUES
+    ('${ORG}'::uuid, NULL, now() - interval '20 minute', NULL,
+     'major', 'down', 0, 'Customer-reported checkout failures', NULL,
+     'acknowledged', 'internal', 'manual', now() - interval '15 minute',
+     CASE WHEN '${OWNER_USER_ID}' <> '' THEN '${OWNER_USER_ID}'::uuid ELSE NULL END)
+  RETURNING id, started_at
+)
+INSERT INTO incident_events (org_id, incident_id, occurred_at, kind, actor_type, actor_id, message)
+SELECT '${ORG}'::uuid, i.id, e.occurred_at, e.kind, e.actor_type,
+       CASE WHEN '${OWNER_USER_ID}' <> '' THEN '${OWNER_USER_ID}'::uuid ELSE NULL END,
+       e.message
+FROM ins i
+CROSS JOIN LATERAL (
+  SELECT i.started_at AS occurred_at, 'triggered'::text AS kind,
+         'user'::text AS actor_type, 'Declared from support ticket #4821.'::text AS message
+  UNION ALL SELECT i.started_at + interval '5 minute', 'acknowledged', 'user', 'On call investigating.'
+  UNION ALL SELECT i.started_at + interval '8 minute', 'note', 'user',
+         'Correlated with the payment gateway incident.'
+) AS e(occurred_at, kind, actor_type, message);
 SQL
 
 echo "==> Postgres: 3 notification channels (webhook + slack + telegram) and alert bindings"
@@ -417,14 +512,15 @@ echo "==> Postgres: 1 adversarial-title incident (XSS / day-popover JSON-escape 
 pg <<SQL
 INSERT INTO incidents
   (org_id, target_id, started_at, ended_at, severity, status_at_start,
-   check_count, error_sample, public_title, public_description, duration_secs)
+   check_count, error_sample, public_title, public_description, duration_secs,
+   state, visibility, origin)
 VALUES
   ('${ORG}'::uuid, '${T_SEARCH}'::uuid,
    now() - interval '36 hour', now() - interval '35 hour',
    'minor', 'degraded', 7, 'parse error',
    \$ADV\$Adversarial title </script><!-- & "double" — fixture smoke\$ADV\$,
    \$ADV\$Tests JSON escaping for the day_strip popover blob. Contains < > & " ' </script> <!-- and a unicode em-dash —.\$ADV\$,
-   3600);
+   3600, 'resolved', 'public', 'monitor');
 
 INSERT INTO incident_updates (org_id, incident_id, posted_at, phase, message)
 SELECT '${ORG}'::uuid, i.id, p.posted_at, p.phase, p.message
@@ -636,12 +732,12 @@ SQL
 echo
 echo "## ClickHouse last-5-min counters per public component"
 ch_out=$(ch -q "
-SELECT t.public_name, t.public_sort_order, t.public_group,
+SELECT spc.public_name, spc.sort_order, spc.public_group,
        coalesce(c.up_, 0)   AS up_,
        coalesce(c.down_, 0) AS down_,
        coalesce(c.deg_, 0)  AS deg_,
        coalesce(c.err_, 0)  AS err_
-FROM postgresql('${PG_CONTAINER}:5432','monitor','targets','monitor','monitor') t
+FROM postgresql('${PG_CONTAINER}:5432','monitor','status_page_components','monitor','monitor') spc
 LEFT JOIN (
   SELECT target_id,
          countIf(status='up')       AS up_,
@@ -651,11 +747,9 @@ LEFT JOIN (
   FROM monitor.check_results
   WHERE timestamp >= now() - INTERVAL 5 MINUTE
   GROUP BY target_id
-) c ON c.target_id = t.id
-WHERE t.org_id=toUUID('${ORG}')
-  AND has(t.tags, 'seed-fixtures')
-  AND t.public_status
-ORDER BY ifNull(t.public_group, 'zzz'), t.public_sort_order
+) c ON c.target_id = spc.target_id
+WHERE spc.org_id=toUUID('${ORG}')
+ORDER BY ifNull(spc.public_group, 'zzz'), spc.sort_order
 FORMAT TabSeparated")
 
 # Expected state matrix — keep in lockstep with header comment above.
@@ -794,7 +888,10 @@ echo "Seeded org '${SLUG}' (id ${ORG})."
 echo "  monitors  : 14 (7 public/visible HTTP + 1 disabled public + 2 internal HTTP + 4 non-HTTP)"
 echo "  groups    : API & Web · CDN · Infrastructure · Notifications · Beta · Integrations · Ungrouped"
 echo "  owners    : $([[ -n "$OWNER_USER_ID" ]] && echo "8 monitors bound to ${OWNER_USER_ID:0:8}…" || echo 'no member found — every monitor unowned')"
-echo "  incidents : 161 (150 resolved across 87d + 10 active in mixed phases + 1 adversarial-title)"
+echo "  incidents : 164 (150 resolved across 87d + 10 active in mixed phases + 1 adversarial-title
+              + 2 internal-only on non-public monitors + 1 manually declared)
+  ops state : active public incidents split triggered/acknowledged; internal + manual
+              incidents carry activity timelines for the operator console"
 echo "  channels  : 3 (slack + webhook enabled, telegram disabled)"
 echo "  managed   : fix-payment/fix-admin + Fixture Webhook → terraform chip; fix-tcp + Fixture Slack → api chip"
 echo "  alerts    : bound on fix-api / fix-db / fix-auth"
@@ -804,6 +901,7 @@ echo
 echo "Public status page : http://${SLUG}.${BASE_DOMAIN}:8080/"
 echo "Operator dashboard : http://app.${BASE_DOMAIN}:8080/"
 echo "Operator monitors  : http://app.${BASE_DOMAIN}:8080/targets"
+echo "Operator incidents : http://app.${BASE_DOMAIN}:8080/incidents"
 echo "(public page cache TTL ~10s; wait a moment before first load)"
 
 exit $(( fail > 0 ))

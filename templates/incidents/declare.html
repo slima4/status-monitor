@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Declare incident · Uptimepage{% endblock %}
+{% block content %}
+<section class="space-y-6">
+  <header class="space-y-1">
+    <a href="/incidents" class="inline-block text-sm text-muted hover:text-body">← incidents</a>
+    <h1 class="page-title"><span class="page-title__prefix" aria-hidden="true">$</span>declare incident</h1>
+    <p class="text-sm text-muted">
+      Open an incident by hand — for problems a monitor can't see on its own
+      (a customer report, a partner outage, a planned investigation).
+    </p>
+  </header>
+
+  <form data-incident-declare-form class="space-y-6">
+    <div data-incident-error class="hidden alert-card alert-card--error"></div>
+
+    <fieldset class="space-y-5 sticker-card p-5">
+      <label class="field-outline block">
+        <span class="field-outline__label">Title</span>
+        <input name="title" type="text" required maxlength="200" autocomplete="off"
+               class="w-full field" placeholder="e.g. Checkout failing for EU customers">
+      </label>
+
+      <div class="grid gap-4 sm:grid-cols-2">
+        <div class="field-outline">
+          <span class="field-outline__label">Severity</span>
+          <select name="severity" data-sm-combobox aria-label="Severity" class="w-full field">
+            <option value="minor">minor</option>
+            <option value="major" selected>major</option>
+            <option value="critical">critical</option>
+          </select>
+        </div>
+        <div class="field-outline">
+          <span class="field-outline__label">Urgency</span>
+          <select name="urgency" data-sm-combobox aria-label="Urgency" class="w-full field">
+            <option value="high" selected>high (page on-call)</option>
+            <option value="low">low (notify only)</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="field-outline">
+        <span class="field-outline__label">Affected monitor (optional)</span>
+        <select name="target_id" data-sm-combobox aria-label="Affected monitor" class="w-full field">
+          <option value="">— none —</option>
+          {% for m in monitors %}
+          <option value="{{ m.id }}">{{ m.name }}</option>
+          {% endfor %}
+        </select>
+        <p class="mt-1 text-xs text-muted">Link a monitor for context, or leave unset for a standalone incident.</p>
+      </div>
+    </fieldset>
+
+    <div class="flex justify-end gap-2">
+      <a href="/incidents" class="btn-ghost px-3 py-1.5 text-sm font-medium">cancel</a>
+      <button type="submit" class="sticker-btn sticker-btn--primary px-3 py-1.5 text-sm font-medium">declare</button>
+    </div>
+  </form>
+
+  <script defer src="{{ "js/ui/incidents_console.js"|asset }}"></script>
+</section>
+{% endblock %}

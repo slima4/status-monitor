@@ -95,7 +95,7 @@
 
     // smPrompt: trimmed string, array when splitOnComma, or null.
     let promptDialog = null;
-    let promptTitleEl, promptBodyEl, promptInputEl, promptOkBtn, promptCancelBtn;
+    let promptTitleEl, promptBodyEl, promptInputEl, promptTextEl, promptActiveEl, promptOkBtn, promptCancelBtn;
     let promptResolve = null;
 
     function mountPrompt() {
@@ -109,6 +109,7 @@
                 '<h2 id="sm-prompt-title" class="text-lg font-semibold"></h2>' +
                 '<p class="text-sm text-muted"></p>' +
                 '<input type="text" class="field w-full text-sm" data-sm-prompt-input>' +
+                '<textarea rows="5" class="field w-full text-sm" data-sm-prompt-text hidden></textarea>' +
                 '<div class="flex items-center justify-end gap-2 pt-2">' +
                     '<button type="button" data-sm-prompt-cancel ' +
                             'class="btn-ghost px-3 py-1.5 text-sm font-medium">cancel</button>' +
@@ -120,12 +121,21 @@
         promptTitleEl  = promptDialog.querySelector("h2");
         promptBodyEl   = promptDialog.querySelector("p");
         promptInputEl  = promptDialog.querySelector("[data-sm-prompt-input]");
+        promptTextEl   = promptDialog.querySelector("[data-sm-prompt-text]");
+        promptActiveEl = promptInputEl;
         promptOkBtn    = promptDialog.querySelector("[data-sm-prompt-ok]");
         promptCancelBtn= promptDialog.querySelector("[data-sm-prompt-cancel]");
 
         promptDialog.querySelector("form").addEventListener("submit", (e) => {
             e.preventDefault();
-            settlePrompt(promptInputEl.value);
+            settlePrompt(promptActiveEl.value);
+        });
+        // Cmd/Ctrl+Enter submits the multi-line composer (Enter inserts a newline).
+        promptTextEl.addEventListener("keydown", (e) => {
+            if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                e.preventDefault();
+                settlePrompt(promptActiveEl.value);
+            }
         });
         promptCancelBtn.addEventListener("click", () => settlePrompt(null));
         promptDialog.addEventListener("click", (e) => {
@@ -153,17 +163,21 @@
     window.smPrompt = function (opts) {
         mountPrompt();
         opts = opts || {};
+        const multiline = !!opts.multiline;
+        promptActiveEl = multiline ? promptTextEl : promptInputEl;
+        promptInputEl.hidden = multiline;
+        promptTextEl.hidden = !multiline;
         promptTitleEl.textContent  = opts.title       || "Input";
         promptBodyEl.textContent   = opts.body        || "";
-        promptInputEl.placeholder  = opts.placeholder || "";
-        promptInputEl.value        = opts.value       || "";
+        promptActiveEl.placeholder = opts.placeholder || "";
+        promptActiveEl.value       = opts.value       || "";
         promptDialog.dataset.split = opts.splitOnComma ? "1" : "0";
         if (promptDialog.open) settlePrompt(null);
         return new Promise((resolve) => {
             promptResolve = resolve;
             promptDialog.showModal();
-            promptInputEl.focus();
-            promptInputEl.select();
+            promptActiveEl.focus();
+            if (!multiline) promptActiveEl.select();
         });
     };
 

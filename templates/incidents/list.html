@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% block title %}Incidents · Uptimepage{% endblock %}
+{% block content %}
+<section class="space-y-5">
+  <header class="flex flex-wrap items-end justify-between gap-3">
+    <h1 class="page-title"><span class="page-title__prefix" aria-hidden="true">$</span>incidents</h1>
+    <a href="/incidents/declare"
+       class="sticker-btn sticker-btn--primary px-3 py-1.5 text-sm font-medium">+ declare incident</a>
+  </header>
+
+  <div data-incident-error class="hidden rounded-sm border border-state-bad px-3 py-2 text-sm text-state-bad"></div>
+
+  <nav aria-label="Filter by state" class="flex flex-wrap items-center gap-2">
+    {% for tab in state_tabs %}
+    <a href="/incidents?state={{ tab.key }}&amp;limit={{ limit }}"
+       class="dashboard-chip{% if tab.active %} dashboard-chip--active{% endif %}">{{ tab.label }}</a>
+    {% endfor %}
+  </nav>
+
+  {% if rows.is_empty() %}
+  <div class="sticker-card flex items-center gap-3 p-6 text-sm text-muted">
+    <span aria-hidden="true" class="text-lg text-state-ok">✓</span>
+    <span>No incidents match this filter.</span>
+  </div>
+  {% else %}
+  <section class="sticker-card overflow-hidden">
+    <table class="min-w-full text-sm">
+      <thead class="bg-[color:var(--theme-surface-sunk)] text-left text-xs uppercase tracking-wide text-muted">
+        <tr>
+          <th scope="col" class="px-3 py-2 w-28">Severity</th>
+          <th scope="col" class="px-3 py-2">Incident</th>
+          <th scope="col" class="px-3 py-2 w-44">State</th>
+          <th scope="col" class="px-3 py-2">Started</th>
+          <th scope="col" class="px-3 py-2 w-56 text-right">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr class="border-t border-[color:var(--theme-line)] hover:bg-[color:var(--theme-surface-sunk)]{% if row.ongoing %} sm-incident-ongoing{% endif %}">
+          <td class="px-3 py-2 align-top">
+            <span class="status-badge status-badge--{{ row.severity }}{% if row.ongoing %} motion-safe:animate-pulse{% endif %}">{{ row.severity }}</span>
+          </td>
+          <td class="px-3 py-2 align-top">
+            <a href="/incidents/{{ row.id }}" class="font-medium text-body hover:underline">{{ row.label }}</a>
+            <div class="mt-0.5 flex flex-wrap gap-1">
+              <span class="dashboard-chip">{{ row.origin }}</span>
+              <span class="dashboard-chip">{{ row.visibility }}</span>
+            </div>
+          </td>
+          <td class="px-3 py-2 align-top">
+            <span class="dashboard-chip">{{ row.state_label }}</span>
+            {% match row.acked_by %}{% when Some with (who) %}
+            <div class="mt-0.5 text-xs text-muted">by <span class="dashboard-subhead__mono">{{ who }}</span></div>
+            {% when None %}{% endmatch %}
+          </td>
+          <td class="px-3 py-2 align-top tabular-nums">
+            <time datetime="{{ row.started_at|iso_ts }}" data-tz>{{ row.started_at|human_ts }}</time>
+          </td>
+          <td class="px-3 py-2 align-top text-right">
+            <div class="inline-flex flex-wrap justify-end gap-1.5">
+              {% if row.state == "triggered" %}
+              <button type="button" data-incident-action="acknowledge" data-incident-id="{{ row.id }}"
+                      class="sticker-btn px-2 py-1 text-xs">ack</button>
+              {% endif %}
+              {% if row.ongoing %}
+              <button type="button" data-incident-action="resolve" data-incident-id="{{ row.id }}"
+                      class="sticker-btn px-2 py-1 text-xs">resolve</button>
+              {% else %}
+              <button type="button" data-incident-action="reopen" data-incident-id="{{ row.id }}"
+                      class="sticker-btn px-2 py-1 text-xs">reopen</button>
+              {% endif %}
+              <a href="/incidents/{{ row.id }}" class="sticker-btn sticker-btn--accent px-2 py-1 text-xs">view</a>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <div class="monitors-foot">
+      <span>
+        showing <span class="monitors-foot__mono">{{ range_lo }}–{{ range_hi }}</span>
+        of <span class="monitors-foot__mono">{{ total }}</span>
+        · page <span class="monitors-foot__mono">{{ page }}</span>/<span class="monitors-foot__mono">{{ total_pages }}</span>
+      </span>
+      <span class="flex flex-wrap items-center gap-3">
+        <span class="flex items-center gap-1 text-xs text-muted">
+          rows
+          {% for ps in page_sizes %}
+          <a class="dashboard-chip{% if ps.active %} dashboard-chip--active{% endif %}"
+             href="/incidents?state={{ state }}&amp;limit={{ ps.n }}">{{ ps.n }}</a>
+          {% endfor %}
+        </span>
+        {% match prev_offset %}{% when Some with (prev) %}
+        <a class="row-link" href="/incidents?state={{ state }}&amp;limit={{ limit }}&amp;offset={{ prev }}">← prev</a>
+        {% when None %}{% endmatch %}
+        {% match next_offset %}{% when Some with (next) %}
+        <a class="row-link" href="/incidents?state={{ state }}&amp;limit={{ limit }}&amp;offset={{ next }}">next →</a>
+        {% when None %}{% endmatch %}
+      </span>
+    </div>
+  </section>
+  {% endif %}
+
+  <script defer src="{{ "js/ui/incidents_console.js"|asset }}"></script>
+</section>
+{% endblock %}

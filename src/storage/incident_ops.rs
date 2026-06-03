@@ -66,12 +66,16 @@ pub enum LifecycleOutcome {
 pub struct IncidentOpsFilter {
     pub state: Option<IncidentState>,
     pub limit: Option<usize>,
+    pub offset: usize,
 }
 
 #[async_trait]
 pub trait IncidentOpsStore: Send + Sync {
     async fn get(&self, org: OrgId, id: Uuid) -> Result<Option<OpsIncident>>;
     async fn list(&self, org: OrgId, filter: IncidentOpsFilter) -> Result<Vec<OpsIncident>>;
+    /// Total incidents in `org` matching the optional state filter — for pager
+    /// "page N of M".
+    async fn count(&self, org: OrgId, state: Option<IncidentState>) -> Result<usize>;
     async fn declare(
         &self,
         org: OrgId,
@@ -310,20 +314,36 @@ impl IncidentOpsStore for PgIncidentOpsStore {
 
     async fn list(&self, org: OrgId, filter: IncidentOpsFilter) -> Result<Vec<OpsIncident>> {
         let cap = filter.limit.unwrap_or(100).clamp(1, 1000) as i64;
+        let off = filter.offset as i64;
         let state = filter.state.map(|s| s.as_db_str());
         let sql = format!(
             "SELECT {OPS_COLS} FROM incidents \
              WHERE org_id = $1 AND ($2::text IS NULL OR state = $2) \
-             ORDER BY started_at DESC LIMIT $3"
+             ORDER BY started_at DESC LIMIT $3 OFFSET $4"
         );
         let rows: Vec<OpsIncidentRow> = sqlx::query_as(&sql)
             .bind(org.0)
             .bind(state)
             .bind(cap)
+            .bind(off)
             .fetch_all(&self.pool)
             .await
             .map_err(|e| anyhow::anyhow!("list ops incidents: {e}"))?;
         Ok(rows.into_iter().map(row_to_ops).collect())
+    }
+
+    async fn count(&self, org: OrgId, state: Option<IncidentState>) -> Result<usize> {
+        let state = state.map(|s| s.as_db_str());
+        let n: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM incidents \
+             WHERE org_id = $1 AND ($2::text IS NULL OR state = $2)",
+        )
+        .bind(org.0)
+        .bind(state)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| anyhow::anyhow!("count ops incidents: {e}"))?;
+        Ok(n.max(0) as usize)
     }
 
     async fn declare(
@@ -627,8 +647,18 @@ impl IncidentOpsStore for InMemoryIncidentOpsStore {
             .cloned()
             .collect();
         out.sort_by_key(|i| std::cmp::Reverse(i.started_at));
-        out.truncate(filter.limit.unwrap_or(100));
-        Ok(out)
+        let lim = filter.limit.unwrap_or(100);
+        Ok(out.into_iter().skip(filter.offset).take(lim).collect())
+    }
+
+    async fn count(&self, _org: OrgId, state: Option<IncidentState>) -> Result<usize> {
+        Ok(self
+            .inner
+            .lock()
+            .incidents
+            .iter()
+            .filter(|i| state.is_none_or(|s| i.state == s))
+            .count())
     }
 
     async fn declare(&self, _org: OrgId, new: NewManualIncident, actor: Actor) -> Result<OpsIncident> {
@@ -897,12 +927,12 @@ mod tests {
         let _b = seed_triggered(&store);
         store.resolve(org(), a, Actor::System, None).await.unwrap();
         let triggered = store
-            .list(org(), IncidentOpsFilter { state: Some(IncidentState::Triggered), limit: None })
+            .list(org(), IncidentOpsFilter { state: Some(IncidentState::Triggered), limit: None, offset: 0 })
             .await
             .unwrap();
         assert_eq!(triggered.len(), 1);
         let resolved = store
-            .list(org(), IncidentOpsFilter { state: Some(IncidentState::Resolved), limit: None })
+            .list(org(), IncidentOpsFilter { state: Some(IncidentState::Resolved), limit: None, offset: 0 })
             .await
             .unwrap();
         assert_eq!(resolved.len(), 1);

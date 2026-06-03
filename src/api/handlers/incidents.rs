@@ -128,6 +128,7 @@ pub struct ListIncidentsQuery {
     /// Filter by operational state: `triggered`, `acknowledged`, `resolved`.
     pub state: Option<String>,
     pub limit: Option<usize>,
+    pub offset: Option<usize>,
 }
 
 /// Optional operator note attached to a lifecycle action.
@@ -207,6 +208,7 @@ pub async fn list_incidents(
     let filter = IncidentOpsFilter {
         state: parse_state_filter(q.state.as_deref())?,
         limit: q.limit,
+        offset: q.offset.unwrap_or(0),
     };
     Ok(Json(state.incident_ops_store.list(org, filter).await?))
 }

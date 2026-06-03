@@ -26,6 +26,9 @@ pub fn routes(state: AppState) -> Router {
             get(views::targets_detail::incidents),
         )
         .route("/targets/{id}/edit", get(views::targets_form::edit_form))
+        .route("/incidents", get(views::incidents::list))
+        .route("/incidents/declare", get(views::incidents::declare_form))
+        .route("/incidents/{id}", get(views::incidents::detail))
         .route("/web/targets/list", get(views::targets_list::list_partial))
         .route(
             "/web/partials/targets/{id}/live",

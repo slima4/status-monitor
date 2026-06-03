@@ -9,10 +9,12 @@
       first opened <span class="dashboard-subhead__mono">{{ first.age_label }}</span> ago
     </span>
     <span class="dashboard-incident-banner__actions">
-      <a href="/incidents" class="sticker-btn px-3 py-1.5 text-xs">acknowledge</a>
-      <a href="/incidents" class="sticker-btn sticker-btn--primary px-3 py-1.5 text-xs">open incident →</a>
+      <button type="button" data-incident-action="acknowledge" data-incident-id="{{ first.id }}"
+              class="sticker-btn px-3 py-1.5 text-xs">acknowledge</button>
+      <a href="/incidents" class="sticker-btn sticker-btn--primary px-3 py-1.5 text-xs">open console →</a>
     </span>
   </header>
+  <div data-incident-error class="hidden px-1 pt-2 text-xs text-state-bad"></div>
   <ul class="dashboard-incident-banner__list">
     {% for inc in active_incidents.iter() %}
     <li class="dashboard-incident-banner__item">
@@ -34,4 +36,5 @@
     {% endfor %}
   </ul>
 </section>
+<script defer src="{{ "js/ui/incidents_console.js"|asset }}"></script>
 {% endif %}
