@@ -174,6 +174,14 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
             post(handlers::incidents::add_incident_note),
         )
         .route(
+            "/incidents/{id}/publish",
+            post(handlers::incidents::publish_incident),
+        )
+        .route(
+            "/incidents/{id}/unpublish",
+            post(handlers::incidents::unpublish_incident),
+        )
+        .route(
             "/escalation-policies",
             get(handlers::escalation_policies::list)
                 .post(handlers::escalation_policies::create),

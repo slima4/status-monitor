@@ -150,6 +150,16 @@ pub struct NoteBody {
     pub message: String,
 }
 
+/// Optional public narration seeded when publishing. An omitted field leaves
+/// the stored copy unchanged; clearing copy is the narration patch endpoint.
+#[derive(Debug, Default, Deserialize, ToSchema)]
+pub struct PublishBody {
+    #[serde(default)]
+    pub public_title: Option<String>,
+    #[serde(default)]
+    pub public_description: Option<String>,
+}
+
 fn parse_state_filter(s: Option<&str>) -> Result<Option<IncidentState>> {
     match s {
         None => Ok(None),
@@ -369,6 +379,52 @@ pub async fn add_incident_note(
         .await?
         .ok_or_else(|| AppError::not_found(codes::INCIDENT_NOT_FOUND, "incident not found"))?;
     Ok((StatusCode::CREATED, Json(event)))
+}
+
+#[utoipa::path(
+    post, path = "/api/v1/incidents/{id}/publish", tag = "incidents",
+    summary = "Publish an incident to its monitor's status pages",
+    description = "Flips visibility to public so the incident shows on any status page \
+                   whose components include this monitor. Optionally seeds the public \
+                   title/description; omitted fields keep their stored value.",
+    params(("id" = Uuid, Path)), request_body = PublishBody,
+    responses((status = 200, body = OpsIncident), (status = 400, body = ApiError), (status = 404, body = ApiError)),
+)]
+pub async fn publish_incident(
+    State(state): State<AppState>,
+    Authorized(org, _): Authorized<IncidentsWrite>,
+    CurrentUser(user): CurrentUser,
+    Path(id): Path<Uuid>,
+    Json(body): Json<PublishBody>,
+) -> Result<Json<OpsIncident>> {
+    validation::validate_optional_title(Some(&body.public_title), "public_title")?;
+    validation::validate_optional_description(Some(&body.public_description), "public_description")?;
+    state
+        .incident_ops_store
+        .publish(org, id, body.public_title, body.public_description, Actor::User(user))
+        .await?
+        .map(Json)
+        .ok_or_else(|| AppError::not_found(codes::INCIDENT_NOT_FOUND, "incident not found"))
+}
+
+#[utoipa::path(
+    post, path = "/api/v1/incidents/{id}/unpublish", tag = "incidents",
+    summary = "Hide an incident from public status pages",
+    params(("id" = Uuid, Path)),
+    responses((status = 200, body = OpsIncident), (status = 404, body = ApiError)),
+)]
+pub async fn unpublish_incident(
+    State(state): State<AppState>,
+    Authorized(org, _): Authorized<IncidentsWrite>,
+    CurrentUser(user): CurrentUser,
+    Path(id): Path<Uuid>,
+) -> Result<Json<OpsIncident>> {
+    state
+        .incident_ops_store
+        .unpublish(org, id, Actor::User(user))
+        .await?
+        .map(Json)
+        .ok_or_else(|| AppError::not_found(codes::INCIDENT_NOT_FOUND, "incident not found"))
 }
 
 #[cfg(test)]

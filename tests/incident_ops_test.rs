@@ -307,3 +307,57 @@ async fn notification_log_record_retry_and_scope_pg() {
         "another org must not see this incident's paging log"
     );
 }
+
+#[tokio::test]
+#[ignore]
+async fn publish_sets_visibility_and_narration_then_unpublish_pg() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let (org, user, id) = seed(&pool, "incpub").await;
+    let store = PgIncidentOpsStore::new(pool.clone());
+
+    // Publish seeds the public title; visibility flips to public.
+    let pubd = store
+        .publish(org, id, Some("EU API outage".into()), None, Actor::User(user))
+        .await
+        .unwrap()
+        .expect("incident exists");
+    assert_eq!(pubd.visibility, uptimepage::domain::IncidentVisibility::Public);
+
+    let (vis, title): (String, Option<String>) =
+        sqlx::query_as("SELECT visibility, public_title FROM incidents WHERE id = $1")
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(vis, "public");
+    assert_eq!(title.as_deref(), Some("EU API outage"));
+
+    // A second publish without a title must not clobber the stored copy.
+    store.publish(org, id, None, None, Actor::User(user)).await.unwrap().unwrap();
+    let kept: Option<String> = sqlx::query_scalar("SELECT public_title FROM incidents WHERE id = $1")
+        .bind(id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(kept.as_deref(), Some("EU API outage"));
+
+    let unpubd = store.unpublish(org, id, Actor::User(user)).await.unwrap().unwrap();
+    assert_eq!(unpubd.visibility, uptimepage::domain::IncidentVisibility::Internal);
+
+    let tl = store.timeline(org, id).await.unwrap();
+    assert!(tl.iter().any(|e| e.kind == IncidentEventKind::Published));
+    assert!(tl.iter().any(|e| e.kind == IncidentEventKind::Unpublished));
+
+    // Cross-tenant publish is a no-op (returns None, leaves the row internal).
+    let other_user = make_user(&pool, "incpubx").await;
+    let other = create_org_with_owner(&pool, other_user, &unique_slug("incpubx"), "n", 3)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        store.publish(other.id, id, None, None, Actor::User(other_user)).await.unwrap().is_none(),
+        "another org cannot publish this incident"
+    );
+}

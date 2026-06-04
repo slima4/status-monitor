@@ -356,6 +356,7 @@ impl OrgAggregator {
                WHERE i.org_id = $1
                  AND i.ended_at IS NULL
                  AND i.target_id = ANY($2)
+                 AND i.visibility = 'public'
                ORDER BY i.started_at DESC"#,
         )
         .bind(org.0)
@@ -386,6 +387,7 @@ impl OrgAggregator {
                WHERE i.org_id = $3
                  AND i.started_at >= $1
                  AND i.target_id = ANY($4)
+                 AND i.visibility = 'public'
                ORDER BY i.started_at DESC, i.id DESC
                LIMIT $2"#,
         )
@@ -425,6 +427,7 @@ impl OrgAggregator {
                WHERE i.org_id = $2
                  AND (i.ended_at IS NULL OR i.ended_at >= $1)
                  AND i.target_id = ANY($3)
+                 AND i.visibility = 'public'
                ORDER BY i.started_at DESC
                LIMIT 1000"#,
         )

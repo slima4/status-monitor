@@ -141,6 +141,20 @@ pub trait IncidentOpsStore: Send + Sync {
         assignee: Option<UserId>,
         actor: Actor,
     ) -> Result<Option<OpsIncident>>;
+    /// Flip an incident to public visibility, optionally seeding the public
+    /// narration (a `None` field leaves the stored copy untouched). Logs a
+    /// `published` event. `None` ⇒ no such incident in `org`.
+    async fn publish(
+        &self,
+        org: OrgId,
+        id: Uuid,
+        public_title: Option<String>,
+        public_description: Option<String>,
+        actor: Actor,
+    ) -> Result<Option<OpsIncident>>;
+    /// Flip an incident back to internal visibility. Logs an `unpublished`
+    /// event. `None` ⇒ no such incident in `org`.
+    async fn unpublish(&self, org: OrgId, id: Uuid, actor: Actor) -> Result<Option<OpsIncident>>;
     async fn add_note(
         &self,
         org: OrgId,
@@ -660,6 +674,67 @@ impl IncidentOpsStore for PgIncidentOpsStore {
         Ok(Some(row_to_ops(row)))
     }
 
+    async fn publish(
+        &self,
+        org: OrgId,
+        id: Uuid,
+        public_title: Option<String>,
+        public_description: Option<String>,
+        actor: Actor,
+    ) -> Result<Option<OpsIncident>> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| anyhow::anyhow!("begin: {e}"))?;
+        // A provided narration field overwrites; an omitted one keeps the stored
+        // copy (clearing is the narration patch endpoint's job, not publish's).
+        let sql = format!(
+            "UPDATE incidents \
+             SET visibility = 'public', \
+                 public_title = CASE WHEN $3::bool THEN $4 ELSE public_title END, \
+                 public_description = CASE WHEN $5::bool THEN $6 ELSE public_description END, \
+                 updated_at = now() \
+             WHERE id = $1 AND org_id = $2 RETURNING {OPS_COLS}"
+        );
+        let row: Option<OpsIncidentRow> = sqlx::query_as(&sql)
+            .bind(id)
+            .bind(org.0)
+            .bind(public_title.is_some())
+            .bind(public_title)
+            .bind(public_description.is_some())
+            .bind(public_description)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(|e| anyhow::anyhow!("publish incident: {e}"))?;
+        let Some(row) = row else { return Ok(None) };
+        insert_event_tx(&mut tx, org, id, IncidentEventKind::Published, actor, None).await?;
+        tx.commit().await.map_err(|e| anyhow::anyhow!("commit: {e}"))?;
+        Ok(Some(row_to_ops(row)))
+    }
+
+    async fn unpublish(&self, org: OrgId, id: Uuid, actor: Actor) -> Result<Option<OpsIncident>> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| anyhow::anyhow!("begin: {e}"))?;
+        let sql = format!(
+            "UPDATE incidents SET visibility = 'internal', updated_at = now() \
+             WHERE id = $1 AND org_id = $2 RETURNING {OPS_COLS}"
+        );
+        let row: Option<OpsIncidentRow> = sqlx::query_as(&sql)
+            .bind(id)
+            .bind(org.0)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(|e| anyhow::anyhow!("unpublish incident: {e}"))?;
+        let Some(row) = row else { return Ok(None) };
+        insert_event_tx(&mut tx, org, id, IncidentEventKind::Unpublished, actor, None).await?;
+        tx.commit().await.map_err(|e| anyhow::anyhow!("commit: {e}"))?;
+        Ok(Some(row_to_ops(row)))
+    }
+
     async fn add_note(
         &self,
         org: OrgId,
@@ -1110,6 +1185,37 @@ impl IncidentOpsStore for InMemoryIncidentOpsStore {
         Ok(Some(updated))
     }
 
+    async fn publish(
+        &self,
+        _org: OrgId,
+        id: Uuid,
+        _public_title: Option<String>,
+        _public_description: Option<String>,
+        actor: Actor,
+    ) -> Result<Option<OpsIncident>> {
+        let mut g = self.inner.lock();
+        let Some(idx) = g.incidents.iter().position(|i| i.id == id) else {
+            return Ok(None);
+        };
+        g.incidents[idx].visibility = IncidentVisibility::Public;
+        g.incidents[idx].updated_at = Utc::now();
+        let updated = g.incidents[idx].clone();
+        Self::push_event(&mut g, id, IncidentEventKind::Published, actor, None);
+        Ok(Some(updated))
+    }
+
+    async fn unpublish(&self, _org: OrgId, id: Uuid, actor: Actor) -> Result<Option<OpsIncident>> {
+        let mut g = self.inner.lock();
+        let Some(idx) = g.incidents.iter().position(|i| i.id == id) else {
+            return Ok(None);
+        };
+        g.incidents[idx].visibility = IncidentVisibility::Internal;
+        g.incidents[idx].updated_at = Utc::now();
+        let updated = g.incidents[idx].clone();
+        Self::push_event(&mut g, id, IncidentEventKind::Unpublished, actor, None);
+        Ok(Some(updated))
+    }
+
     async fn add_note(&self, _org: OrgId, id: Uuid, actor: Actor, message: String) -> Result<Option<IncidentEvent>> {
         let mut g = self.inner.lock();
         if !g.incidents.iter().any(|i| i.id == id) {
@@ -1435,6 +1541,34 @@ mod tests {
         assert_eq!(tl.len(), 2);
         assert_eq!(tl[0].kind, IncidentEventKind::Assigned);
         assert_eq!(tl[1].kind, IncidentEventKind::Unassigned);
+    }
+
+    #[tokio::test]
+    async fn publish_then_unpublish_flips_visibility_and_logs() {
+        let store = InMemoryIncidentOpsStore::new();
+        let id = seed_triggered(&store);
+        let u = user();
+        let pubd = store
+            .publish(org(), id, Some("EU outage".into()), None, Actor::User(u))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(pubd.visibility, IncidentVisibility::Public);
+        let unpubd = store.unpublish(org(), id, Actor::User(u)).await.unwrap().unwrap();
+        assert_eq!(unpubd.visibility, IncidentVisibility::Internal);
+        let kinds: Vec<_> = store.timeline(org(), id).await.unwrap().into_iter().map(|e| e.kind).collect();
+        assert!(kinds.contains(&IncidentEventKind::Published));
+        assert!(kinds.contains(&IncidentEventKind::Unpublished));
+    }
+
+    #[tokio::test]
+    async fn publish_missing_incident_is_none() {
+        let store = InMemoryIncidentOpsStore::new();
+        let res = store
+            .publish(org(), Uuid::now_v7(), None, None, Actor::System)
+            .await
+            .unwrap();
+        assert!(res.is_none());
     }
 
     #[tokio::test]

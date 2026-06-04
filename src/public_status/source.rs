@@ -194,6 +194,7 @@ impl PublicSource for OrgPublicSource {
                FROM incidents i
                WHERE i.org_id = $5
                  AND i.target_id = ANY($7)
+                 AND i.visibility = 'public'
                  AND i.started_at >= $1
                  AND ($2 = false OR i.ended_at IS NULL)
                  AND (
@@ -250,7 +251,8 @@ impl PublicSource for OrgPublicSource {
                FROM incidents i
                WHERE i.id = $1
                  AND i.org_id = $2
-                 AND i.target_id = ANY($3)"#,
+                 AND i.target_id = ANY($3)
+                 AND i.visibility = 'public'"#,
         )
         .bind(id)
         .bind(page.org.0)

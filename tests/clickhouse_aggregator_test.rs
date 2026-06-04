@@ -264,3 +264,56 @@ async fn component_history_returns_strip_for_public_target() {
     })
     .await;
 }
+
+/// The visibility gate: an `internal` incident on a public component must not
+/// surface in the page's active list, recent list, or history markers — only
+/// `public` incidents do. Guards the internal-vs-public separation end-to-end.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL + CLICKHOUSE_URL"]
+async fn build_excludes_internal_incidents() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let Some(ch) = common::ch_client_from_env().await else {
+        return;
+    };
+    purge_prefix(&pool, "agg-vis-").await;
+
+    let org_id = seed_org(&pool, "agg-vis").await;
+    let unique = format!("agg-vis-{}", Uuid::now_v7());
+    let store = Arc::new(PostgresTargetStore::from_pool(pool.clone(), None));
+    let target = store
+        .create(org_id, public_target(&unique), WriteSource::Ui, i64::MAX)
+        .await
+        .expect("create public target");
+    let target_id = target.id;
+    let pool_for_cleanup = pool.clone();
+
+    with_cleanup(&pool_for_cleanup, target_id, async move {
+        let now = Utc::now();
+        let mk = |vis: &str| {
+            sqlx::query_scalar::<_, Uuid>(
+                "INSERT INTO incidents (org_id, target_id, started_at, status_at_start, visibility) \
+                 VALUES ($1, $2, $3, 'down', $4) RETURNING id",
+            )
+            .bind(org_id.0)
+            .bind(target_id)
+            .bind(now - chrono::Duration::minutes(5))
+            .bind(vis.to_string())
+        };
+        let public_id = mk("public").fetch_one(&pool).await.expect("insert public incident");
+        let _internal_id = mk("internal").fetch_one(&pool).await.expect("insert internal incident");
+
+        let page_id = seed_page_with_target(&pool, org_id, target_id).await;
+        let agg = OrgAggregator::new(pool, ch, AggregatorConfig::default());
+        let (page, markers, _names) = agg.build(page_id, org_id).await.expect("aggregator build");
+
+        let active: Vec<Uuid> = page.active_incidents.iter().map(|i| i.id).collect();
+        assert_eq!(active, vec![public_id], "only the public incident is active");
+        let recent: Vec<Uuid> = page.recent_incidents.iter().map(|i| i.id).collect();
+        assert_eq!(recent, vec![public_id], "only the public incident is recent");
+        let marked: Vec<Uuid> = markers.iter().map(|m| m.id).collect();
+        assert_eq!(marked, vec![public_id], "only the public incident is marked");
+    })
+    .await;
+}
