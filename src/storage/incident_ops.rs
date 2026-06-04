@@ -227,12 +227,17 @@ pub trait IncidentOpsStore: Send + Sync {
         round: i32,
         next_at: Option<DateTime<Utc>>,
     ) -> Result<bool>;
-    /// Cross-org triggered incidents whose escalation timer has elapsed,
-    /// soonest first — the engine's escalation sweep.
+    /// Atomically CLAIM cross-org triggered incidents whose escalation timer has
+    /// elapsed, soonest first — the engine's escalation sweep. The claim pushes
+    /// `next_escalation_at` forward by `lease_secs` under `FOR UPDATE SKIP
+    /// LOCKED`, so a second engine instance (multi-box) never grabs the same
+    /// rung; the caller then pages and records the real next time. If the caller
+    /// dies mid-rung the lease expires and the rung is retried (at-least-once).
     async fn due_for_escalation(
         &self,
         now: DateTime<Utc>,
         limit: usize,
+        lease_secs: i64,
     ) -> Result<Vec<DueIncident>>;
     /// Cross-org `triggered` incidents that were opened but never paged and
     /// never armed — no paging-log row, no bound policy, no timer — and are
@@ -1087,6 +1092,7 @@ impl IncidentOpsStore for PgIncidentOpsStore {
         &self,
         now: DateTime<Utc>,
         limit: usize,
+        lease_secs: i64,
     ) -> Result<Vec<DueIncident>> {
         let cap = (limit as i64).clamp(1, 1000);
         #[derive(sqlx::FromRow)]
@@ -1098,14 +1104,22 @@ impl IncidentOpsStore for PgIncidentOpsStore {
             escalation_level: i32,
             escalation_round: i32,
         }
+        // Claim-and-lease: lock the due rows with SKIP LOCKED and push their
+        // timer forward so a concurrent engine instance never re-selects them
+        // before this one pages + records the real next time.
         let rows: Vec<Row> = sqlx::query_as(
-            "SELECT id, org_id, target_id, escalation_policy_id, escalation_level, escalation_round \
-             FROM incidents \
-             WHERE state = 'triggered' AND next_escalation_at IS NOT NULL \
-                 AND next_escalation_at <= $1 \
-             ORDER BY next_escalation_at ASC LIMIT $2",
+            "UPDATE incidents SET next_escalation_at = $1 + make_interval(secs => $2::double precision) \
+             WHERE id IN ( \
+                 SELECT id FROM incidents \
+                 WHERE state = 'triggered' AND next_escalation_at IS NOT NULL \
+                     AND next_escalation_at <= $1 \
+                 ORDER BY next_escalation_at ASC LIMIT $3 \
+                 FOR UPDATE SKIP LOCKED \
+             ) \
+             RETURNING id, org_id, target_id, escalation_policy_id, escalation_level, escalation_round",
         )
         .bind(now)
+        .bind(lease_secs.max(1) as f64)
         .bind(cap)
         .fetch_all(&self.pool)
         .await
@@ -1610,26 +1624,30 @@ impl IncidentOpsStore for InMemoryIncidentOpsStore {
         &self,
         now: DateTime<Utc>,
         limit: usize,
+        lease_secs: i64,
     ) -> Result<Vec<DueIncident>> {
-        Ok(self
-            .inner
-            .lock()
-            .incidents
-            .iter()
-            .filter(|i| {
-                i.state == IncidentState::Triggered
-                    && i.next_escalation_at.is_some_and(|t| t <= now)
-            })
-            .take(limit)
-            .map(|i| DueIncident {
-                id: i.id,
+        // Claim-and-lease, mirroring the Pg impl: bump next_escalation_at forward
+        // as the rows are returned so a re-scan doesn't re-pick them.
+        let lease_to = now + chrono::Duration::seconds(lease_secs.max(1));
+        let mut g = self.inner.lock();
+        let mut out = Vec::new();
+        for inc in g.incidents.iter_mut().filter(|i| {
+            i.state == IncidentState::Triggered && i.next_escalation_at.is_some_and(|t| t <= now)
+        }) {
+            if out.len() >= limit {
+                break;
+            }
+            out.push(DueIncident {
+                id: inc.id,
                 org: OrgId(Uuid::nil()),
-                target_id: i.target_id,
-                escalation_policy_id: i.escalation_policy_id,
-                escalation_level: i.escalation_level,
-                escalation_round: i.escalation_round,
-            })
-            .collect())
+                target_id: inc.target_id,
+                escalation_policy_id: inc.escalation_policy_id,
+                escalation_level: inc.escalation_level,
+                escalation_round: inc.escalation_round,
+            });
+            inc.next_escalation_at = Some(lease_to);
+        }
+        Ok(out)
     }
 
     async fn due_for_reconcile(

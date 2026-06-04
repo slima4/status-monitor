@@ -10,7 +10,7 @@
 
 use std::str::FromStr;
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration as ChronoDuration, LocalResult, NaiveDateTime, TimeZone, Utc};
 use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -237,18 +237,40 @@ fn rotation_index(layer: &OnCallLayer, tz: Tz, at: DateTime<Utc>) -> i64 {
         }
         RotationType::Daily | RotationType::Weekly => {
             let period_days = (i64::from(layer.rotation_length_secs) / 86_400).max(1);
-            let anchor = layer.handoff_at.with_timezone(&tz).naive_local();
-            let now = at.with_timezone(&tz).naive_local();
-            if now < anchor {
+            let anchor_local = layer.handoff_at.with_timezone(&tz);
+            let now_local = at.with_timezone(&tz);
+            let anchor_date = anchor_local.date_naive();
+            let now_date = now_local.date_naive();
+            if now_date < anchor_date {
                 return 0;
             }
-            let mut days = (now.date() - anchor.date()).num_days();
-            // The current day's handoff has not landed yet until its wall time.
-            if now.time() < anchor.time() {
+            // Whether today's handoff has landed is decided by comparing real
+            // instants, not naive wall-clock times: the handoff-of-today is the
+            // anchor's time-of-day on `now`'s local date resolved to an actual
+            // UTC instant. A naive time-of-day compare misranks by an hour
+            // during the repeated fall-back hour.
+            let handoff_today = local_to_utc(tz, now_date.and_time(anchor_local.time()));
+            let mut days = (now_date - anchor_date).num_days();
+            if at < handoff_today {
                 days -= 1;
             }
             if days < 0 { 0 } else { days / period_days }
         }
+    }
+}
+
+/// Resolve a local wall-clock time to a concrete UTC instant, DST-safe: on the
+/// ambiguous fall-back hour take the earliest occurrence; in the spring-forward
+/// gap (the wall time never happens) take the instant the clock jumps to.
+fn local_to_utc(tz: Tz, naive: NaiveDateTime) -> DateTime<Utc> {
+    match tz.from_local_datetime(&naive) {
+        LocalResult::Single(dt) => dt.to_utc(),
+        LocalResult::Ambiguous(earliest, _) => earliest.to_utc(),
+        LocalResult::None => tz
+            .from_local_datetime(&(naive + ChronoDuration::hours(1)))
+            .earliest()
+            .map(|dt| dt.to_utc())
+            .unwrap_or_else(|| naive.and_utc()),
     }
 }
 
@@ -368,6 +390,32 @@ mod tests {
         assert_eq!(
             resolve_on_call(&s, &[l], &[], t("2026-03-09T12:30:00Z")), // 08:30 EDT
             vec![uid(1)]
+        );
+    }
+
+    #[test]
+    fn daily_handoff_does_not_regress_during_fall_back_hour() {
+        // US fall-back 2026: 02:00 EDT → 01:00 EST on 2026-11-01, so 01:00–02:00
+        // local happens twice. A handoff time-of-day inside that window used to
+        // regress the rotation by one when compared naively.
+        let s = schedule("America/New_York");
+        let l = layer(
+            0,
+            RotationType::Daily,
+            86_400,
+            "2026-10-30T01:30:00-04:00", // 01:30 local, anchor before the change
+            vec![participant(uid(1), 0), participant(uid(2), 1), participant(uid(3), 2)],
+        );
+        // 01:00 EDT (first 1am, before that day's 01:30 handoff) → index 1.
+        assert_eq!(
+            resolve_on_call(&s, std::slice::from_ref(&l), &[], t("2026-11-01T05:00:00Z")),
+            vec![uid(2)]
+        );
+        // 01:15 EST (the repeated hour, AFTER the 01:30 handoff already passed) →
+        // index 2, and must not slip back to index 1.
+        assert_eq!(
+            resolve_on_call(&s, &[l], &[], t("2026-11-01T06:15:00Z")),
+            vec![uid(3)]
         );
     }
 

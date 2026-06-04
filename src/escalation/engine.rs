@@ -370,7 +370,10 @@ impl Worker {
     /// sweep returns promptly (the remainder is picked up next tick).
     async fn escalate_due(&self) {
         let limit = self.cfg.max_pages_per_tick.max(1) as usize;
-        let due = match self.ops.due_for_escalation(Utc::now(), limit).await {
+        // Lease claimed rungs long enough to page + record the real next time
+        // before another instance could re-pick them.
+        let lease = (self.cfg.tick_interval_secs.max(1) as i64 * 2).max(60);
+        let due = match self.ops.due_for_escalation(Utc::now(), limit, lease).await {
             Ok(d) => d,
             Err(err) => {
                 tracing::warn!(error = %err, "escalation sweep scan failed");
