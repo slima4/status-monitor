@@ -2,6 +2,7 @@ pub mod account;
 pub mod api_tokens;
 pub mod auth;
 pub mod dashboard;
+pub mod escalation_policies;
 pub mod health;
 pub mod incidents;
 pub mod invitations;

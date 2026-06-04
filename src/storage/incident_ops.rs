@@ -84,6 +84,19 @@ pub struct PendingNotification {
     pub attempt: i32,
 }
 
+/// A triggered incident whose escalation timer is due. Carries the owning
+/// `org` (cross-org scan) plus the bookkeeping the engine needs to re-resolve
+/// the policy and compute the next rung.
+#[derive(Debug, Clone)]
+pub struct DueIncident {
+    pub id: Uuid,
+    pub org: OrgId,
+    pub target_id: Option<Uuid>,
+    pub escalation_policy_id: Option<Uuid>,
+    pub escalation_level: i32,
+    pub escalation_round: i32,
+}
+
 #[async_trait]
 pub trait IncidentOpsStore: Send + Sync {
     async fn get(&self, org: OrgId, id: Uuid) -> Result<Option<OpsIncident>>;
@@ -173,6 +186,36 @@ pub trait IncidentOpsStore: Send + Sync {
         error: Option<String>,
         sent_at: Option<DateTime<Utc>>,
     ) -> Result<()>;
+    /// Start escalation on a freshly-opened incident: stamp the resolved
+    /// policy, set the first level + round 0, and arm `next_escalation_at`.
+    /// Guarded on `state = 'triggered'` so a concurrent ack/resolve (which
+    /// clears the timer) is never overwritten. Returns whether a row changed.
+    async fn begin_escalation(
+        &self,
+        org: OrgId,
+        id: Uuid,
+        policy_id: Uuid,
+        level: i32,
+        next_at: Option<DateTime<Utc>>,
+    ) -> Result<bool>;
+    /// Advance escalation bookkeeping during the sweep. Same `triggered` guard
+    /// as [`Self::begin_escalation`]; `next_at = None` stops further escalation
+    /// (exhausted). Returns whether a row changed.
+    async fn record_escalation(
+        &self,
+        org: OrgId,
+        id: Uuid,
+        level: i32,
+        round: i32,
+        next_at: Option<DateTime<Utc>>,
+    ) -> Result<bool>;
+    /// Cross-org triggered incidents whose escalation timer has elapsed,
+    /// soonest first — the engine's escalation sweep.
+    async fn due_for_escalation(
+        &self,
+        now: DateTime<Utc>,
+        limit: usize,
+    ) -> Result<Vec<DueIncident>>;
 }
 
 // ── Postgres impl ────────────────────────────────────────────────────────
@@ -794,6 +837,96 @@ impl IncidentOpsStore for PgIncidentOpsStore {
         .map_err(|e| anyhow::anyhow!("mark_notification: {e}"))?;
         Ok(())
     }
+
+    async fn begin_escalation(
+        &self,
+        org: OrgId,
+        id: Uuid,
+        policy_id: Uuid,
+        level: i32,
+        next_at: Option<DateTime<Utc>>,
+    ) -> Result<bool> {
+        let res = sqlx::query(
+            "UPDATE incidents \
+             SET escalation_policy_id = $3, escalation_level = $4, escalation_round = 0, \
+                 next_escalation_at = $5, updated_at = now() \
+             WHERE id = $1 AND org_id = $2 AND state = 'triggered'",
+        )
+        .bind(id)
+        .bind(org.0)
+        .bind(policy_id)
+        .bind(level)
+        .bind(next_at)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| anyhow::anyhow!("begin_escalation: {e}"))?;
+        Ok(res.rows_affected() > 0)
+    }
+
+    async fn record_escalation(
+        &self,
+        org: OrgId,
+        id: Uuid,
+        level: i32,
+        round: i32,
+        next_at: Option<DateTime<Utc>>,
+    ) -> Result<bool> {
+        let res = sqlx::query(
+            "UPDATE incidents \
+             SET escalation_level = $3, escalation_round = $4, \
+                 next_escalation_at = $5, updated_at = now() \
+             WHERE id = $1 AND org_id = $2 AND state = 'triggered'",
+        )
+        .bind(id)
+        .bind(org.0)
+        .bind(level)
+        .bind(round)
+        .bind(next_at)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| anyhow::anyhow!("record_escalation: {e}"))?;
+        Ok(res.rows_affected() > 0)
+    }
+
+    async fn due_for_escalation(
+        &self,
+        now: DateTime<Utc>,
+        limit: usize,
+    ) -> Result<Vec<DueIncident>> {
+        let cap = (limit as i64).clamp(1, 1000);
+        #[derive(sqlx::FromRow)]
+        struct Row {
+            id: Uuid,
+            org_id: Uuid,
+            target_id: Option<Uuid>,
+            escalation_policy_id: Option<Uuid>,
+            escalation_level: i32,
+            escalation_round: i32,
+        }
+        let rows: Vec<Row> = sqlx::query_as(
+            "SELECT id, org_id, target_id, escalation_policy_id, escalation_level, escalation_round \
+             FROM incidents \
+             WHERE state = 'triggered' AND next_escalation_at IS NOT NULL \
+                 AND next_escalation_at <= $1 \
+             ORDER BY next_escalation_at ASC LIMIT $2",
+        )
+        .bind(now)
+        .bind(cap)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| anyhow::anyhow!("due_for_escalation: {e}"))?;
+        Ok(rows
+            .into_iter()
+            .map(|r| DueIncident {
+                id: r.id,
+                org: OrgId(r.org_id),
+                target_id: r.target_id,
+                escalation_policy_id: r.escalation_policy_id,
+                escalation_level: r.escalation_level,
+                escalation_round: r.escalation_round,
+            })
+            .collect())
+    }
 }
 
 // ── In-memory impl (tests) ──────────────────────────────────────────────
@@ -1094,6 +1227,77 @@ impl IncidentOpsStore for InMemoryIncidentOpsStore {
             n.sent_at = sent_at;
         }
         Ok(())
+    }
+
+    async fn begin_escalation(
+        &self,
+        _org: OrgId,
+        id: Uuid,
+        policy_id: Uuid,
+        level: i32,
+        next_at: Option<DateTime<Utc>>,
+    ) -> Result<bool> {
+        let mut g = self.inner.lock();
+        if let Some(inc) = g
+            .incidents
+            .iter_mut()
+            .find(|i| i.id == id && i.state == IncidentState::Triggered)
+        {
+            inc.escalation_policy_id = Some(policy_id);
+            inc.escalation_level = level;
+            inc.escalation_round = 0;
+            inc.next_escalation_at = next_at;
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    async fn record_escalation(
+        &self,
+        _org: OrgId,
+        id: Uuid,
+        level: i32,
+        round: i32,
+        next_at: Option<DateTime<Utc>>,
+    ) -> Result<bool> {
+        let mut g = self.inner.lock();
+        if let Some(inc) = g
+            .incidents
+            .iter_mut()
+            .find(|i| i.id == id && i.state == IncidentState::Triggered)
+        {
+            inc.escalation_level = level;
+            inc.escalation_round = round;
+            inc.next_escalation_at = next_at;
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    async fn due_for_escalation(
+        &self,
+        now: DateTime<Utc>,
+        limit: usize,
+    ) -> Result<Vec<DueIncident>> {
+        Ok(self
+            .inner
+            .lock()
+            .incidents
+            .iter()
+            .filter(|i| {
+                i.state == IncidentState::Triggered
+                    && i.next_escalation_at.is_some_and(|t| t <= now)
+            })
+            .take(limit)
+            .map(|i| DueIncident {
+                id: i.id,
+                org: OrgId(Uuid::nil()),
+                target_id: i.target_id,
+                escalation_policy_id: i.escalation_policy_id,
+                escalation_level: i.escalation_level,
+                escalation_round: i.escalation_round,
+            })
+            .collect())
     }
 }
 

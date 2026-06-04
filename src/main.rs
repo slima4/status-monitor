@@ -326,12 +326,16 @@ async fn main() -> Result<()> {
     // Incident paging worker: pages bound channels on open/resolve and retries
     // failed deliveries. Only spawned when enabled; otherwise the alert engine
     // keeps paging directly and signals on the channel are never consumed.
+    let escalation_policy_store: Arc<dyn uptimepage::storage::EscalationPolicyStore> = Arc::new(
+        uptimepage::storage::PgEscalationPolicyStore::new(pg_pool_for_stores.clone()),
+    );
     let escalation_engine_handle: Option<JoinHandle<()>> = escalation_enabled.then(|| {
         let engine = uptimepage::escalation::EscalationEngine::new(
             incident_signal_rx,
             Arc::new(uptimepage::storage::PgIncidentOpsStore::new(
                 pg_pool_for_stores.clone(),
             )),
+            escalation_policy_store.clone(),
             target_store.clone(),
             notification_channel_store.clone(),
             uptimepage::http_outbound::build_outbound_client(

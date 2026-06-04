@@ -1,6 +1,7 @@
 pub mod admin;
 pub mod clickhouse;
 pub mod domain_expiry_state;
+pub mod escalation_policies;
 pub mod incident_ops;
 pub mod incidents;
 pub mod locks;
@@ -22,9 +23,12 @@ pub use domain_expiry_state::{
     DomainExpiryState, DomainExpiryStateStore, InMemoryDomainExpiryStateStore,
     PgDomainExpiryStateStore,
 };
+pub use escalation_policies::{
+    EscalationPolicyStore, InMemoryEscalationPolicyStore, PgEscalationPolicyStore,
+};
 pub use incident_ops::{
-    Actor, IncidentOpsFilter, IncidentOpsStore, InMemoryIncidentOpsStore, LifecycleOutcome,
-    PendingNotification, PgIncidentOpsStore,
+    Actor, DueIncident, IncidentOpsFilter, IncidentOpsStore, InMemoryIncidentOpsStore,
+    LifecycleOutcome, PendingNotification, PgIncidentOpsStore,
 };
 pub use incidents::{
     ActiveIncident, InMemoryIncidentNarrationStore, IncidentNarrationStore,

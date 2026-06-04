@@ -53,6 +53,7 @@ fn test_plan(per_min: i32) -> Plan {
         max_shared_monitors: 1,
         max_maintenance_windows: 1,
         max_notification_channels: 1,
+        max_escalation_policies: 1,
         max_logo_size_bytes: 1,
         api_writes_per_minute: per_min,
         api_reads_per_minute: per_min,

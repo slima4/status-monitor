@@ -32,6 +32,7 @@ pub struct Plan {
     pub max_shared_monitors: i32,
     pub max_maintenance_windows: i32,
     pub max_notification_channels: i32,
+    pub max_escalation_policies: i32,
     pub max_logo_size_bytes: i32,
 
     // Per-org rate limits (per minute)

@@ -1,5 +1,6 @@
 pub mod alert;
 pub mod check;
+pub mod escalation_policy;
 pub mod incident;
 pub mod maintenance;
 pub mod membership;
@@ -22,6 +23,10 @@ pub use alert::{AlertBinding, TargetAlerts};
 pub use check::{
     CheckSpec, DnsCheck, DnsRecordType, DomainExpiryCheck, ExpectedStatus, HttpCheck, HttpMethod,
     TcpCheck, TlsCertCheck,
+};
+pub use escalation_policy::{
+    EscalationDecision, EscalationPolicy, EscalationPolicySummary, EscalationStep, EscalationTarget,
+    EscalationTargetType, NewEscalationPolicy, NewEscalationStep, NewEscalationTarget, next_step,
 };
 pub use incident::{
     ActorType, Incident, IncidentEvent, IncidentEventKind, IncidentNarrationUpdate,

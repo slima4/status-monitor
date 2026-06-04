@@ -174,6 +174,27 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
             post(handlers::incidents::add_incident_note),
         )
         .route(
+            "/escalation-policies",
+            get(handlers::escalation_policies::list)
+                .post(handlers::escalation_policies::create),
+        )
+        .route(
+            "/escalation-policies/default",
+            get(handlers::escalation_policies::get_org_default)
+                .put(handlers::escalation_policies::set_org_default),
+        )
+        .route(
+            "/escalation-policies/{id}",
+            get(handlers::escalation_policies::get)
+                .patch(handlers::escalation_policies::replace)
+                .delete(handlers::escalation_policies::delete),
+        )
+        .route(
+            "/targets/{id}/escalation-policy",
+            get(handlers::escalation_policies::get_target_policy)
+                .put(handlers::escalation_policies::set_target_policy),
+        )
+        .route(
             "/orgs",
             get(handlers::orgs::list_my_orgs).post(handlers::orgs::create_org),
         )

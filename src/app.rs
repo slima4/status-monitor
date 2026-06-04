@@ -133,6 +133,10 @@ pub struct AppState {
     /// internal timeline). Built from `db` so `AppState::new`'s signature stays
     /// unchanged: a Pg store when tenancy is live, in-memory for no-DB fixtures.
     pub incident_ops_store: Arc<dyn crate::storage::IncidentOpsStore>,
+    /// Escalation-policy config (owner CRUD + monitor/org binding). Built from
+    /// `db` like [`Self::incident_ops_store`] so the constructor signature is
+    /// unchanged.
+    pub escalation_policy_store: Arc<dyn crate::storage::EscalationPolicyStore>,
     /// Debounce cache for `sessions.last_used_at` writes — see
     /// `auth::session::touch_last_used_debounced`.
     pub session_debounce: Arc<LastUsedDebounce>,
@@ -281,6 +285,12 @@ impl AppState {
             Some(pool) => Arc::new(crate::storage::PgIncidentOpsStore::new(pool)),
             None => Arc::new(crate::storage::InMemoryIncidentOpsStore::new()),
         };
+        let escalation_policy_store: Arc<dyn crate::storage::EscalationPolicyStore> = match db
+            .clone()
+        {
+            Some(pool) => Arc::new(crate::storage::PgEscalationPolicyStore::new(pool)),
+            None => Arc::new(crate::storage::InMemoryEscalationPolicyStore::new()),
+        };
         let rate_limits = Arc::new(RateLimitService::new());
         let abuse = Arc::new(AbuseGuard::from_config(&cfg.abuse));
         Self {
@@ -303,6 +313,7 @@ impl AppState {
             monitor_share_store,
             incident_narration_store,
             incident_ops_store,
+            escalation_policy_store,
             session_debounce: Arc::new(build_debounce_cache()),
             api_token_debounce: Arc::new(build_api_token_debounce()),
             outbound_http,

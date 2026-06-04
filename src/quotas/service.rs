@@ -33,6 +33,7 @@ pub mod usage_keys {
     pub const STATUS_PAGES: &str = "max_status_pages";
     pub const MAINTENANCE_WINDOWS: &str = "max_maintenance_windows";
     pub const NOTIFICATION_CHANNELS: &str = "max_notification_channels";
+    pub const ESCALATION_POLICIES: &str = "max_escalation_policies";
 }
 
 /// The org-scoped count queries. Declared once and shared by the atomic
@@ -48,6 +49,8 @@ const SQL_COUNT_MAINTENANCE_WINDOWS: &str =
     "SELECT count(*) FROM maintenance_windows WHERE org_id = $1";
 const SQL_COUNT_NOTIFICATION_CHANNELS: &str =
     "SELECT count(*) FROM notification_channels WHERE org_id = $1";
+const SQL_COUNT_ESCALATION_POLICIES: &str =
+    "SELECT count(*) FROM escalation_policies WHERE org_id = $1 AND deleted_at IS NULL";
 
 /// Storage-layer row for `plans`. The domain `Plan` stays `sqlx`-free
 /// (per the domain/storage split); this is the only place that maps the
@@ -70,6 +73,7 @@ struct PlanRow {
     max_shared_monitors: i32,
     max_maintenance_windows: i32,
     max_notification_channels: i32,
+    max_escalation_policies: i32,
     max_logo_size_bytes: i32,
     api_writes_per_minute: i32,
     api_reads_per_minute: i32,
@@ -104,6 +108,7 @@ impl From<PlanRow> for Plan {
             max_shared_monitors: r.max_shared_monitors,
             max_maintenance_windows: r.max_maintenance_windows,
             max_notification_channels: r.max_notification_channels,
+            max_escalation_policies: r.max_escalation_policies,
             max_logo_size_bytes: r.max_logo_size_bytes,
             api_writes_per_minute: r.api_writes_per_minute,
             api_reads_per_minute: r.api_reads_per_minute,
@@ -187,7 +192,8 @@ impl QuotaService {
                      p.max_public_components, p.max_status_pages, \
                      p.max_share_links_per_monitor, p.max_shared_monitors, \
                      p.max_maintenance_windows, \
-                     p.max_notification_channels, p.max_logo_size_bytes, \
+                     p.max_notification_channels, p.max_escalation_policies, \
+                     p.max_logo_size_bytes, \
                      p.api_writes_per_minute, \
                      p.api_reads_per_minute, p.bulk_ops_per_minute, \
                      p.test_now_per_minute, p.check_now_per_minute, \
@@ -339,6 +345,29 @@ impl QuotaService {
             self.record_block(org, user, "max_notification_channels", current, limit);
             return Err(AppError::quota_exceeded(
                 "max_notification_channels",
+                current,
+                limit,
+                plan.id.clone(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Friendly pre-check for one new escalation policy. The race-safe
+    /// guarantee is the count-subquery + advisory lock inside
+    /// `EscalationPolicyStore::create`, handed the same `max_escalation_policies`.
+    pub async fn check_can_create_escalation_policy(
+        &self,
+        org: OrgId,
+        user: Option<UserId>,
+    ) -> Result<()> {
+        let plan = self.limit_for_org(org).await?;
+        let limit = i64::from(plan.max_escalation_policies);
+        let current = self.count(SQL_COUNT_ESCALATION_POLICIES, org).await?;
+        if current + 1 > limit {
+            self.record_block(org, user, "max_escalation_policies", current, limit);
+            return Err(AppError::quota_exceeded(
+                "max_escalation_policies",
                 current,
                 limit,
                 plan.id.clone(),
@@ -676,6 +705,7 @@ fn unlimited_plan() -> Plan {
         max_shared_monitors: i32::MAX,
         max_maintenance_windows: i32::MAX,
         max_notification_channels: i32::MAX,
+        max_escalation_policies: i32::MAX,
         max_logo_size_bytes: i32::MAX,
         api_writes_per_minute: i32::MAX,
         api_reads_per_minute: i32::MAX,

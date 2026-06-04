@@ -19,7 +19,8 @@ pub mod views;
 pub use auth::api_token::{BrowserUser, VerifiedBrowserUser};
 pub use auth::authz::{
     Authorized, ChannelsDelete, ChannelsExecute, ChannelsRead, ChannelsWrite, IncidentsRead,
-    IncidentsWrite, MaintenanceDelete, MaintenanceRead, MaintenanceWrite, OwnerAuthorized,
+    IncidentsWrite, MaintenanceDelete, MaintenanceRead, MaintenanceWrite, OnCallRead, OnCallWrite,
+    OwnerAuthorized,
     RequestSource,
     StatusPageDelete, StatusPageRead, StatusPageWrite, TargetsDelete, TargetsExecute, TargetsRead,
     TargetsWrite, TokenScopes,

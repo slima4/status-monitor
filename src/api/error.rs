@@ -110,6 +110,11 @@ pub mod codes {
     pub const INCIDENT_NOT_FOUND: &str = "INCIDENT_NOT_FOUND";
     pub const INCIDENT_INVALID_STATE: &str = "INCIDENT_INVALID_STATE";
     pub const INVALID_SEVERITY: &str = "INVALID_SEVERITY";
+    // Escalation policies (owner config surface).
+    pub const ESCALATION_POLICY_NOT_FOUND: &str = "ESCALATION_POLICY_NOT_FOUND";
+    pub const ESCALATION_POLICY_NAME_TAKEN: &str = "ESCALATION_POLICY_NAME_TAKEN";
+    pub const ESCALATION_POLICY_QUOTA_EXCEEDED: &str = "ESCALATION_POLICY_QUOTA_EXCEEDED";
+    pub const ESCALATION_POLICY_INVALID: &str = "ESCALATION_POLICY_INVALID";
     // Notification channels (operator surface).
     pub const CHANNEL_NOT_FOUND: &str = "CHANNEL_NOT_FOUND";
     pub const CHANNEL_NAME_TAKEN: &str = "CHANNEL_NAME_TAKEN";
