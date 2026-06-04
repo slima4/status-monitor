@@ -527,9 +527,17 @@ impl EscalationPolicyStore for PgEscalationPolicyStore {
         target_id: Uuid,
         policy_id: Option<Uuid>,
     ) -> Result<bool> {
+        // Self-guard the bound policy: clearing (NULL) is always allowed, but a
+        // non-null id must be a live policy in this org. Belt-and-suspenders
+        // behind the handler's validation so no caller can bind a foreign or
+        // soft-deleted policy.
         let result = sqlx::query(
             "UPDATE targets SET escalation_policy_id = $3, updated_at = now() \
-             WHERE id = $1 AND org_id = $2",
+             WHERE id = $1 AND org_id = $2 \
+                 AND ($3::uuid IS NULL OR EXISTS ( \
+                     SELECT 1 FROM escalation_policies p \
+                     WHERE p.id = $3 AND p.org_id = $2 AND p.deleted_at IS NULL \
+                 ))",
         )
         .bind(target_id)
         .bind(org.0)

@@ -1,11 +1,25 @@
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use chrono::Utc;
-use tokio::sync::mpsc;
-use tokio::time::MissedTickBehavior;
+use futures::stream::{FuturesUnordered, StreamExt};
+use tokio::sync::{Mutex, Semaphore, mpsc};
+use tokio::time::{Instant, MissedTickBehavior};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
+
+/// Concurrent in-flight signal pages — bounds a signal storm so one tenant's
+/// burst cannot spawn unbounded delivery tasks.
+const SIGNAL_CONCURRENCY: usize = 16;
+/// Incidents escalated/retried concurrently within a sweep, so one slow channel
+/// cannot serialise the whole tick.
+const SWEEP_CONCURRENCY: usize = 8;
+/// Fixed pool of per-incident locks (sharded by incident id) that serialise all
+/// paging for one incident across the concurrent signal + sweep tasks, so a
+/// reconcile and an inbound signal cannot both open the same episode and
+/// double-page. Two distinct incidents may share a shard (harmless contention).
+const PAGE_LOCK_SHARDS: usize = 256;
 
 use crate::config::EscalationConfig;
 use crate::domain::{
@@ -41,8 +55,18 @@ pub struct IncidentSignal {
     pub reason: NotificationReason,
 }
 
+/// Owns the rx loop. The paging work lives behind an `Arc<Worker>` so the loop
+/// can dispatch signal handling and the periodic sweep onto detached tasks —
+/// a slow channel can never stall `rx.recv()` (and with it every other
+/// tenant's pages) the way an inline await would.
 pub struct EscalationEngine {
     rx: mpsc::Receiver<IncidentSignal>,
+    w: Arc<Worker>,
+}
+
+/// The shared paging core. Every field is cheap to clone/share; methods take
+/// `&self` so they run from any task holding the `Arc`.
+struct Worker {
     ops: Arc<dyn IncidentOpsStore>,
     policies: Arc<dyn EscalationPolicyStore>,
     on_call: Arc<dyn OnCallStore>,
@@ -53,6 +77,12 @@ pub struct EscalationEngine {
     cfg: EscalationConfig,
     /// Operator base URL for incident deep links; empty omits the link.
     base_url: String,
+    /// True while a sweep task is in flight, so overlapping ticks skip rather
+    /// than stack a second sweep on top of a slow one.
+    sweeping: AtomicBool,
+    /// Sharded per-incident locks; `page()` holds one for the incident it
+    /// touches so concurrent signal + sweep tasks serialise per incident.
+    page_locks: Vec<Mutex<()>>,
 }
 
 impl EscalationEngine {
@@ -71,38 +101,149 @@ impl EscalationEngine {
     ) -> Self {
         Self {
             rx,
-            ops,
-            policies,
-            on_call,
-            contacts,
-            targets,
-            channels,
-            http,
-            cfg,
-            base_url,
+            w: Arc::new(Worker {
+                ops,
+                policies,
+                on_call,
+                contacts,
+                targets,
+                channels,
+                http,
+                cfg,
+                base_url,
+                sweeping: AtomicBool::new(false),
+                page_locks: (0..PAGE_LOCK_SHARDS).map(|_| Mutex::new(())).collect(),
+            }),
         }
     }
 
     pub async fn run(mut self, shutdown: CancellationToken) {
         let mut tick =
-            tokio::time::interval(Duration::from_secs(self.cfg.tick_interval_secs.max(1)));
+            tokio::time::interval(Duration::from_secs(self.w.cfg.tick_interval_secs.max(1)));
         tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
+        // Bounds concurrent signal-driven pages so a burst can't spawn without
+        // limit; the sweep self-limits via SWEEP_CONCURRENCY + the budget.
+        let sig_sem = Arc::new(Semaphore::new(SIGNAL_CONCURRENCY));
         loop {
             tokio::select! {
                 _ = shutdown.cancelled() => return,
                 maybe = self.rx.recv() => match maybe {
                     Some(sig) => {
-                        if let Err(err) = self.page(sig.org, sig.incident_id, sig.reason).await {
-                            tracing::warn!(incident_id = %sig.incident_id, error = %err, "incident paging failed");
-                        }
+                        let w = self.w.clone();
+                        let sem = sig_sem.clone();
+                        tokio::spawn(async move {
+                            let _permit = sem.acquire().await;
+                            if let Err(err) = w.page(sig.org, sig.incident_id, sig.reason).await {
+                                tracing::warn!(incident_id = %sig.incident_id, error = %err, "incident paging failed");
+                            }
+                        });
                     }
                     None => return,
                 },
                 _ = tick.tick() => {
-                    self.escalate_due().await;
-                    self.retry_pending().await;
+                    // Only one sweep at a time; a long sweep makes the next tick
+                    // a no-op rather than piling on.
+                    if self.w.sweeping.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire).is_ok() {
+                        let w = self.w.clone();
+                        tokio::spawn(async move {
+                            // Reset the flag on completion AND on unwind, so a
+                            // panic in a sweep never wedges the engine into
+                            // "always sweeping" (which would silently kill all
+                            // future escalation/retry/reconcile).
+                            struct ResetOnDrop(Arc<Worker>);
+                            impl Drop for ResetOnDrop {
+                                fn drop(&mut self) {
+                                    self.0.sweeping.store(false, Ordering::Release);
+                                }
+                            }
+                            let _reset = ResetOnDrop(w.clone());
+                            w.sweep().await;
+                        });
+                    }
                 }
             }
+        }
+    }
+
+    // Test entry points — production drives these through `run` + the sweep.
+    #[cfg(test)]
+    async fn page(&self, org: OrgId, incident_id: Uuid, reason: NotificationReason) -> Result<()> {
+        self.w.page(org, incident_id, reason).await
+    }
+    #[cfg(test)]
+    async fn escalate_due(&self) {
+        self.w.escalate_due().await
+    }
+    #[cfg(test)]
+    async fn retry_pending(&self) {
+        self.w.retry_pending().await
+    }
+    #[cfg(test)]
+    async fn reconcile(&self) {
+        self.w.reconcile().await
+    }
+}
+
+impl Worker {
+    /// Per-sweep wall-clock ceiling: a sweep never runs longer than one tick, so
+    /// the loop returns to draining `rx` promptly even under slow channels.
+    fn sweep_budget(&self) -> Duration {
+        Duration::from_secs(self.cfg.tick_interval_secs.max(1))
+    }
+
+    /// The shard lock guarding paging for `incident_id`.
+    fn page_lock(&self, incident_id: Uuid) -> &Mutex<()> {
+        let shard = (incident_id.as_u128() % PAGE_LOCK_SHARDS as u128) as usize;
+        &self.page_locks[shard]
+    }
+
+    /// Reconcile dropped open signals, then walk due escalations and retry
+    /// failed pages. Runs on a detached task off the rx loop.
+    async fn sweep(&self) {
+        self.reconcile().await;
+        self.escalate_due().await;
+        self.retry_pending().await;
+    }
+
+    /// Catch incidents whose `Opened` signal was lost (e.g. the bounded signal
+    /// channel saturated during a correlated mass outage): a `triggered`
+    /// incident, older than the grace window, that was never paged and never
+    /// armed. Re-running `page(Opened)` is idempotent — `open_episode` no-ops if
+    /// the episode is already active. The DB is the source of truth, not the
+    /// in-memory channel.
+    async fn reconcile(&self) {
+        let limit = self.cfg.max_pages_per_tick.max(1) as usize;
+        let grace = chrono::Duration::seconds(self.cfg.tick_interval_secs.max(1) as i64);
+        let cutoff = Utc::now() - grace;
+        let due = match self.ops.due_for_reconcile(cutoff, limit).await {
+            Ok(d) => d,
+            Err(err) => {
+                tracing::warn!(error = %err, "escalation reconcile scan failed");
+                return;
+            }
+        };
+        if !due.is_empty() {
+            tracing::warn!(count = due.len(), "reconciling incidents that were never paged");
+        }
+        let budget = self.sweep_budget();
+        let start = Instant::now();
+        let mut it = due.into_iter();
+        let mut futs = FuturesUnordered::new();
+        for d in it.by_ref().take(SWEEP_CONCURRENCY) {
+            futs.push(self.reconcile_one_logged(d));
+        }
+        while futs.next().await.is_some() {
+            if start.elapsed() < budget
+                && let Some(d) = it.next()
+            {
+                futs.push(self.reconcile_one_logged(d));
+            }
+        }
+    }
+
+    async fn reconcile_one_logged(&self, d: DueIncident) {
+        if let Err(err) = self.page(d.org, d.id, NotificationReason::Opened).await {
+            tracing::warn!(incident_id = %d.id, error = %err, "incident reconcile page failed");
         }
     }
 
@@ -110,6 +251,11 @@ impl EscalationEngine {
     /// (page the first rung, arm the timer); Resolved notifies the channels
     /// already paged this episode. The escalation sweep handles later rungs.
     async fn page(&self, org: OrgId, incident_id: Uuid, reason: NotificationReason) -> Result<()> {
+        // Serialise all paging for this incident: the dedup in open_episode /
+        // notify_resolution is read-then-act, so without this a concurrent
+        // signal task + sweep (reconcile) task could both open the same episode
+        // and double-page. Held for the whole resolve+page+record sequence.
+        let _guard = self.page_lock(incident_id).lock().await;
         let Some(incident) = self.ops.get(org, incident_id).await? else {
             return Ok(());
         };
@@ -155,6 +301,9 @@ impl EscalationEngine {
                         level, delay_secs, ..
                     } => {
                         let targets = self.resolve_targets(org, &policy, level, Utc::now()).await?;
+                        if targets.is_empty() {
+                            self.note_empty_rung(org, incident.id, level).await?;
+                        }
                         let paged = self
                             .page_channels(org, incident.id, &notice, reason, level, &targets)
                             .await?;
@@ -216,7 +365,9 @@ impl EscalationEngine {
             .await
     }
 
-    /// Walk the next rung of every due incident's policy.
+    /// Walk the next rung of every due incident's policy, bounded-concurrent so
+    /// one slow channel never serialises the tick, and budget-capped so the
+    /// sweep returns promptly (the remainder is picked up next tick).
     async fn escalate_due(&self) {
         let limit = self.cfg.max_pages_per_tick.max(1) as usize;
         let due = match self.ops.due_for_escalation(Utc::now(), limit).await {
@@ -226,10 +377,25 @@ impl EscalationEngine {
                 return;
             }
         };
-        for d in due {
-            if let Err(err) = self.escalate_one(&d).await {
-                tracing::warn!(incident_id = %d.id, error = %err, "escalation step failed");
+        let budget = self.sweep_budget();
+        let start = Instant::now();
+        let mut it = due.into_iter();
+        let mut futs = FuturesUnordered::new();
+        for d in it.by_ref().take(SWEEP_CONCURRENCY) {
+            futs.push(self.escalate_one_logged(d));
+        }
+        while futs.next().await.is_some() {
+            if start.elapsed() < budget
+                && let Some(d) = it.next()
+            {
+                futs.push(self.escalate_one_logged(d));
             }
+        }
+    }
+
+    async fn escalate_one_logged(&self, d: DueIncident) {
+        if let Err(err) = self.escalate_one(&d).await {
+            tracing::warn!(incident_id = %d.id, error = %err, "escalation step failed");
         }
     }
 
@@ -270,6 +436,9 @@ impl EscalationEngine {
                 };
                 let notice = self.notice(&incident, &target, NotificationReason::Escalated);
                 let targets = self.resolve_targets(d.org, &policy, level, Utc::now()).await?;
+                if targets.is_empty() {
+                    self.note_empty_rung(d.org, d.id, level).await?;
+                }
                 let paged = self
                     .page_channels(
                         d.org,
@@ -386,8 +555,26 @@ impl EscalationEngine {
             .await
     }
 
+    /// Record on the timeline that a policy rung paged no one (empty schedule, a
+    /// responder with no contacts, a deleted-and-cascaded channel) so the
+    /// incident does not silently escalate past an unreachable rung.
+    async fn note_empty_rung(&self, org: OrgId, incident_id: Uuid, level: i32) -> Result<()> {
+        self.ops
+            .append_event(
+                org,
+                incident_id,
+                IncidentEventKind::Escalated,
+                Actor::System,
+                Some(format!(
+                    "escalation level {level} reached no channel — check the policy's targets"
+                )),
+            )
+            .await
+    }
+
     /// Re-attempt failed deliveries under the attempt cap. Each retry updates
-    /// the existing row rather than inserting a new one.
+    /// the existing row rather than inserting a new one. Bounded-concurrent +
+    /// budget-capped like the escalation sweep.
     async fn retry_pending(&self) {
         let max_attempts = self.cfg.max_attempts as i32;
         let limit = self.cfg.max_pages_per_tick.max(1) as usize;
@@ -398,10 +585,25 @@ impl EscalationEngine {
                 return;
             }
         };
-        for p in pending {
-            if let Err(err) = self.retry_one(&p).await {
-                tracing::warn!(notification_id = %p.id, error = %err, "incident page retry failed");
+        let budget = self.sweep_budget();
+        let start = Instant::now();
+        let mut it = pending.into_iter();
+        let mut futs = FuturesUnordered::new();
+        for p in it.by_ref().take(SWEEP_CONCURRENCY) {
+            futs.push(self.retry_one_logged(p));
+        }
+        while futs.next().await.is_some() {
+            if start.elapsed() < budget
+                && let Some(p) = it.next()
+            {
+                futs.push(self.retry_one_logged(p));
             }
+        }
+    }
+
+    async fn retry_one_logged(&self, p: PendingNotification) {
+        if let Err(err) = self.retry_one(&p).await {
+            tracing::warn!(notification_id = %p.id, error = %err, "incident page retry failed");
         }
     }
 
@@ -486,9 +688,9 @@ impl EscalationEngine {
         match build_notifier(cfg, &self.http) {
             Ok(n) => match n.notify_incident(notice).await {
                 Ok(()) => (NotificationStatus::Sent, None),
-                Err(err) => (NotificationStatus::Failed, Some(err.to_string())),
+                Err(err) => (NotificationStatus::Failed, Some(redact_secrets(&err.to_string()))),
             },
-            Err(err) => (NotificationStatus::Failed, Some(err.to_string())),
+            Err(err) => (NotificationStatus::Failed, Some(redact_secrets(&err.to_string()))),
         }
     }
 
@@ -578,6 +780,34 @@ impl EscalationEngine {
         }
         Ok(())
     }
+}
+
+/// Strip the path/query/userinfo from any URL in a delivery error before it is
+/// persisted to `incident_notifications.error`. A Slack webhook secret lives in
+/// the path (`hooks.slack.com/services/T…/B…/<secret>`) and a Telegram bot
+/// token in `…/bot<token>/…`; storing the raw transport error would leak them
+/// at rest. Each whitespace token that parses as a URL is reduced to
+/// `scheme://host[:port]`; everything else is kept verbatim.
+fn redact_secrets(msg: &str) -> String {
+    msg.split_whitespace()
+        .map(|tok| {
+            if !tok.contains("://") {
+                return tok.to_string();
+            }
+            let trimmed = tok.trim_matches(|c: char| !c.is_alphanumeric() && c != ':' && c != '/');
+            match url::Url::parse(trimmed) {
+                Ok(u) if u.host_str().is_some() => {
+                    let port = u.port().map(|p| format!(":{p}")).unwrap_or_default();
+                    format!("{}://{}{}", u.scheme(), u.host_str().unwrap_or(""), port)
+                }
+                // Contains "://" but does not cleanly parse to a host — never
+                // echo it verbatim (the secret-bearing path may survive); drop
+                // the whole token.
+                _ => "[redacted-url]".to_string(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Wrap bare channel ids (the no-policy fallback + resolution paths) as page
@@ -1119,6 +1349,80 @@ mod tests {
         assert_eq!(rows.len(), 1, "the on-call responder's contact channel was paged");
         assert_eq!(rows[0].channel_id, Some(personal));
         assert_eq!(rows[0].target_user_id, Some(responder));
+    }
+
+    #[tokio::test]
+    async fn reconcile_pages_an_incident_whose_open_signal_was_dropped() {
+        let channels = Arc::new(InMemoryNotificationChannelStore::new());
+        let cid = failing_channel(&channels).await;
+        let target = target_with_channel(cid);
+        let tid = target.id;
+        let ops = Arc::new(InMemoryIncidentOpsStore::new());
+        // A triggered incident older than the grace window, never paged (its
+        // Opened signal was dropped): no notifications, no policy, no timer.
+        let now = Utc::now();
+        let id = Uuid::now_v7();
+        ops.seed(OpsIncident {
+            id,
+            target_id: Some(tid),
+            title: None,
+            state: IncidentState::Triggered,
+            severity: IncidentSeverity::Major,
+            urgency: IncidentUrgency::High,
+            origin: IncidentOrigin::Monitor,
+            visibility: IncidentVisibility::Internal,
+            started_at: now - chrono::Duration::seconds(120),
+            ended_at: None,
+            acknowledged_at: None,
+            acknowledged_by: None,
+            assigned_to: None,
+            resolved_by: None,
+            escalation_policy_id: None,
+            escalation_level: 0,
+            escalation_round: 0,
+            next_escalation_at: None,
+            check_count: 2,
+            error_sample: None,
+            created_at: now - chrono::Duration::seconds(120),
+            updated_at: now - chrono::Duration::seconds(120),
+        });
+        let targets = Arc::new(InMemoryTargetStore::from_vec(vec![target]));
+        let policies = Arc::new(InMemoryEscalationPolicyStore::new());
+
+        let eng = engine(ops.clone(), policies, targets, channels);
+        assert!(ops.notifications_for(org(), id).await.unwrap().is_empty());
+        eng.reconcile().await;
+        assert_eq!(
+            ops.notifications_for(org(), id).await.unwrap().len(),
+            1,
+            "reconcile re-pages the never-paged incident"
+        );
+        // Now that it has been paged, reconcile no longer picks it up.
+        eng.reconcile().await;
+        assert_eq!(ops.notifications_for(org(), id).await.unwrap().len(), 1);
+    }
+
+    #[test]
+    fn redact_secrets_strips_channel_url_paths() {
+        let slack = "POST https://hooks.slack.com/services/T01/B02/abcSECRETxyz failed: 404";
+        let out = redact_secrets(slack);
+        assert!(out.contains("https://hooks.slack.com"));
+        assert!(!out.contains("abcSECRETxyz"), "the webhook secret must not survive");
+        assert!(!out.contains("/services/"));
+
+        let tg = "https://api.telegram.org/bot123456:AAH-SECRET-TOKEN/sendMessage 401";
+        let out = redact_secrets(tg);
+        assert!(out.contains("https://api.telegram.org"));
+        assert!(!out.contains("SECRET-TOKEN"), "the bot token must not survive");
+
+        // Non-URL text is untouched.
+        assert_eq!(redact_secrets("connection refused"), "connection refused");
+
+        // A "://"-bearing token that does not cleanly parse is dropped wholesale
+        // rather than echoed (it might still carry the secret path).
+        let bad = redact_secrets("weird://[bad/SECRET-path");
+        assert!(!bad.contains("SECRET-path"), "an unparseable url token must not survive");
+        assert!(bad.contains("[redacted-url]"));
     }
 
     #[tokio::test]

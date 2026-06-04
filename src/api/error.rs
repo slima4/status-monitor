@@ -110,6 +110,7 @@ pub mod codes {
     pub const INCIDENT_NOT_FOUND: &str = "INCIDENT_NOT_FOUND";
     pub const INCIDENT_INVALID_STATE: &str = "INCIDENT_INVALID_STATE";
     pub const POSTMORTEM_NOT_FOUND: &str = "POSTMORTEM_NOT_FOUND";
+    pub const ASSIGNEE_NOT_MEMBER: &str = "ASSIGNEE_NOT_MEMBER";
     pub const INVALID_SEVERITY: &str = "INVALID_SEVERITY";
     // Escalation policies (owner config surface).
     pub const ESCALATION_POLICY_NOT_FOUND: &str = "ESCALATION_POLICY_NOT_FOUND";

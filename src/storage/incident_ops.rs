@@ -234,6 +234,16 @@ pub trait IncidentOpsStore: Send + Sync {
         now: DateTime<Utc>,
         limit: usize,
     ) -> Result<Vec<DueIncident>>;
+    /// Cross-org `triggered` incidents that were opened but never paged and
+    /// never armed — no paging-log row, no bound policy, no timer — and are
+    /// older than `cutoff`. These are incidents whose open signal was lost
+    /// (e.g. the signal channel saturated); the engine reconciles them by
+    /// re-running the open-episode paging. Oldest first.
+    async fn due_for_reconcile(
+        &self,
+        cutoff: DateTime<Utc>,
+        limit: usize,
+    ) -> Result<Vec<DueIncident>>;
 }
 
 // ── Postgres impl ────────────────────────────────────────────────────────
@@ -741,6 +751,25 @@ impl IncidentOpsStore for PgIncidentOpsStore {
             .begin()
             .await
             .map_err(|e| anyhow::anyhow!("begin: {e}"))?;
+        // The assignee must belong to this org — the FK only proves the user
+        // exists globally, so without this an org could pin (and the 200-vs-error
+        // result would probe for) a user from another tenant.
+        if let Some(uid) = assignee {
+            let member: Option<Uuid> = sqlx::query_scalar(
+                "SELECT user_id FROM memberships WHERE user_id = $1 AND org_id = $2",
+            )
+            .bind(uid.0)
+            .bind(org.0)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(|e| anyhow::anyhow!("validate assignee membership: {e}"))?;
+            if member.is_none() {
+                return Err(crate::error::AppError::unprocessable(
+                    crate::api::error::codes::ASSIGNEE_NOT_MEMBER,
+                    "assignee is not a member of this organization",
+                ));
+            }
+        }
         let sql = format!(
             "UPDATE incidents SET assigned_to = $3, updated_at = now() \
              WHERE id = $1 AND org_id = $2 RETURNING {OPS_COLS}"
@@ -1081,6 +1110,49 @@ impl IncidentOpsStore for PgIncidentOpsStore {
         .fetch_all(&self.pool)
         .await
         .map_err(|e| anyhow::anyhow!("due_for_escalation: {e}"))?;
+        Ok(rows
+            .into_iter()
+            .map(|r| DueIncident {
+                id: r.id,
+                org: OrgId(r.org_id),
+                target_id: r.target_id,
+                escalation_policy_id: r.escalation_policy_id,
+                escalation_level: r.escalation_level,
+                escalation_round: r.escalation_round,
+            })
+            .collect())
+    }
+
+    async fn due_for_reconcile(
+        &self,
+        cutoff: DateTime<Utc>,
+        limit: usize,
+    ) -> Result<Vec<DueIncident>> {
+        let cap = (limit as i64).clamp(1, 1000);
+        #[derive(sqlx::FromRow)]
+        struct Row {
+            id: Uuid,
+            org_id: Uuid,
+            target_id: Option<Uuid>,
+            escalation_policy_id: Option<Uuid>,
+            escalation_level: i32,
+            escalation_round: i32,
+        }
+        let rows: Vec<Row> = sqlx::query_as(
+            "SELECT id, org_id, target_id, escalation_policy_id, escalation_level, escalation_round \
+             FROM incidents i \
+             WHERE state = 'triggered' AND started_at <= $1 \
+                 AND escalation_policy_id IS NULL AND next_escalation_at IS NULL \
+                 AND NOT EXISTS ( \
+                     SELECT 1 FROM incident_notifications n WHERE n.incident_id = i.id \
+                 ) \
+             ORDER BY started_at ASC LIMIT $2",
+        )
+        .bind(cutoff)
+        .bind(cap)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| anyhow::anyhow!("due_for_reconcile: {e}"))?;
         Ok(rows
             .into_iter()
             .map(|r| DueIncident {
@@ -1547,6 +1619,34 @@ impl IncidentOpsStore for InMemoryIncidentOpsStore {
             .filter(|i| {
                 i.state == IncidentState::Triggered
                     && i.next_escalation_at.is_some_and(|t| t <= now)
+            })
+            .take(limit)
+            .map(|i| DueIncident {
+                id: i.id,
+                org: OrgId(Uuid::nil()),
+                target_id: i.target_id,
+                escalation_policy_id: i.escalation_policy_id,
+                escalation_level: i.escalation_level,
+                escalation_round: i.escalation_round,
+            })
+            .collect())
+    }
+
+    async fn due_for_reconcile(
+        &self,
+        cutoff: DateTime<Utc>,
+        limit: usize,
+    ) -> Result<Vec<DueIncident>> {
+        let g = self.inner.lock();
+        Ok(g
+            .incidents
+            .iter()
+            .filter(|i| {
+                i.state == IncidentState::Triggered
+                    && i.started_at <= cutoff
+                    && i.escalation_policy_id.is_none()
+                    && i.next_escalation_at.is_none()
+                    && !g.notifications.iter().any(|(_, n)| n.incident_id == i.id)
             })
             .take(limit)
             .map(|i| DueIncident {

@@ -450,3 +450,96 @@ async fn postmortem_publish_events_persist_with_actor_pg() {
         "postmortem unpublish lands on the timeline"
     );
 }
+
+#[tokio::test]
+#[ignore]
+async fn due_for_reconcile_finds_only_unpaged_triggered_pg() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let (org, user, never_paged) = seed(&pool, "increc").await;
+    let store = PgIncidentOpsStore::new(pool.clone());
+
+    // Old enough to be past any grace window.
+    sqlx::query("UPDATE incidents SET started_at = now() - interval '1 hour' WHERE id = $1")
+        .bind(never_paged)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let cutoff = chrono::Utc::now() - chrono::Duration::seconds(60);
+    let due = store.due_for_reconcile(cutoff, 100).await.unwrap();
+    assert!(
+        due.iter().any(|d| d.id == never_paged),
+        "an old, never-paged, unarmed triggered incident is reconcilable"
+    );
+
+    // Once it has a paging-log row, it drops out of the reconcile set.
+    store
+        .record_notification(NewIncidentNotification {
+            org,
+            incident_id: never_paged,
+            escalation_level: Some(0),
+            target_user_id: None,
+            channel_id: None,
+            transport: "webhook".into(),
+            reason: NotificationReason::Opened,
+            status: NotificationStatus::Sent,
+            attempt: 1,
+            error: None,
+            sent_at: Some(chrono::Utc::now()),
+        })
+        .await
+        .unwrap();
+    let due = store.due_for_reconcile(cutoff, 100).await.unwrap();
+    assert!(
+        !due.iter().any(|d| d.id == never_paged),
+        "a paged incident is no longer reconcilable"
+    );
+
+    // An acknowledged incident is never reconciled either.
+    let (_o2, _u2, acked) = (org, user, seed(&pool, "increc2").await.2);
+    sqlx::query("UPDATE incidents SET started_at = now() - interval '1 hour', state = 'acknowledged' WHERE id = $1")
+        .bind(acked)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let due = store.due_for_reconcile(cutoff, 100).await.unwrap();
+    assert!(!due.iter().any(|d| d.id == acked));
+}
+
+#[tokio::test]
+#[ignore]
+async fn assign_rejects_non_member_assignee_pg() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let (org, owner, id) = seed(&pool, "incassign").await;
+    let store = PgIncidentOpsStore::new(pool.clone());
+
+    // A user who belongs to a different org must not be assignable.
+    let outsider = make_user(&pool, "incassignx").await;
+    create_org_with_owner(&pool, outsider, &unique_slug("incassignx"), "n", 3)
+        .await
+        .unwrap()
+        .unwrap();
+    let err = store
+        .assign(org, id, Some(outsider), Actor::User(owner))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&err, uptimepage::error::AppError::Unprocessable { code, .. }
+            if *code == uptimepage::api::error::codes::ASSIGNEE_NOT_MEMBER),
+        "cross-org assignee must be rejected, got {err:?}"
+    );
+
+    // The org's own member assigns fine, and can be cleared.
+    let inc = store
+        .assign(org, id, Some(owner), Actor::User(owner))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(inc.assigned_to, Some(owner));
+    let inc = store.assign(org, id, None, Actor::User(owner)).await.unwrap().unwrap();
+    assert!(inc.assigned_to.is_none());
+}
