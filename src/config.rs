@@ -73,11 +73,14 @@ pub struct AppConfig {
     pub escalation: EscalationConfig,
 }
 
-/// `[escalation]`. Incident paging engine. When `enabled`, an open incident
-/// pages the monitor's bound notification channels and the legacy direct
-/// alert dispatch is suppressed (the incident becomes the single source of
-/// down/up notification). When disabled, incidents still open and show in the
-/// console but page no one — the legacy alert path keeps firing.
+/// `[escalation]`. Incident paging engine and its operator surfaces (escalation
+/// policies, on-call schedules). Off by default: a single-responder deployment
+/// gets direct alerting and the engine + its UI stay hidden. When `enabled`, an
+/// open incident pages the monitor's bound notification channels and the legacy
+/// direct alert dispatch is suppressed (the incident becomes the single source
+/// of down/up notification), and the escalation + on-call UI is mounted. When
+/// disabled, incidents still open and show in the console but page no one — the
+/// legacy alert path keeps firing.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct EscalationConfig {
@@ -93,7 +96,7 @@ pub struct EscalationConfig {
 impl Default for EscalationConfig {
     fn default() -> Self {
         Self {
-            enabled: true,
+            enabled: false,
             tick_interval_secs: 15,
             max_pages_per_tick: 500,
             max_attempts: 5,

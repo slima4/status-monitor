@@ -197,6 +197,9 @@ pub struct FormModel {
     pub escalation_choices: Vec<crate::web::views::escalation::Choice>,
     /// What an unbound monitor escalates through — shown while inheriting.
     pub escalation_hint: String,
+    /// Whether the escalation-policy section renders at all (off when the
+    /// team-paging feature is disabled for the deployment).
+    pub show_escalation: bool,
 }
 
 /// One option in the form's "Owner" select.
@@ -251,6 +254,7 @@ fn empty_create_form() -> FormModel {
         channels: Vec::new(),
         escalation_choices: Vec::new(),
         escalation_hint: String::new(),
+        show_escalation: false,
     }
 }
 
@@ -336,6 +340,7 @@ pub async fn new_form(
     };
     form.channels = channel_choices(&state, org, &alerts).await?;
     form.owner_options = owner_choices(&state, org, &form.owner_user_id).await?;
+    form.show_escalation = state.cfg.escalation.enabled;
     form.min_interval_s = plan_min_interval(&state, org).await?;
     // A new monitor is prefilled with 60s; raise it if the plan floor is
     // higher so the default the user sees would actually be accepted.
@@ -361,8 +366,11 @@ pub async fn edit_form(
     let mut form = form_from_target(target, FormKind::Edit)?;
     form.channels = channel_choices(&state, org, &alerts).await?;
     form.owner_options = owner_choices(&state, org, &form.owner_user_id).await?;
-    (form.escalation_choices, form.escalation_hint) =
-        crate::web::views::escalation::monitor_binding(&state, org, id).await?;
+    form.show_escalation = state.cfg.escalation.enabled;
+    if form.show_escalation {
+        (form.escalation_choices, form.escalation_hint) =
+            crate::web::views::escalation::monitor_binding(&state, org, id).await?;
+    }
     // Edit keeps the saved interval as-is; if a plan floor rose past it the
     // save will surface the API error rather than silently rewriting it.
     form.min_interval_s = plan_min_interval(&state, org).await?;
@@ -468,6 +476,7 @@ fn form_from_target(t: Target, kind: FormKind) -> Result<FormModel, AppError> {
         channels: Vec::new(),
         escalation_choices: Vec::new(),
         escalation_hint: String::new(),
+        show_escalation: false,
     })
 }
 
@@ -874,9 +883,11 @@ mod tests {
     #[test]
     fn escalation_selector_is_edit_only() {
         // Create has no monitor id to bind yet → a prompt, no selector.
+        let mut create_form = empty_create_form();
+        create_form.show_escalation = true;
         let create = FormPage {
             active_tab: "targets",
-            form: empty_create_form(),
+            form: create_form,
         }
         .render()
         .unwrap();
@@ -886,6 +897,7 @@ mod tests {
         // Edit renders the binding selector with the inherit option.
         let mut form = empty_create_form();
         form.mode = "edit";
+        form.show_escalation = true;
         form.id = "00000000-0000-0000-0000-000000000001".into();
         form.escalation_choices = vec![crate::web::views::escalation::Choice {
             id: "p1".into(),
@@ -902,6 +914,21 @@ mod tests {
         assert!(html.contains(r#"data-target-id="00000000-0000-0000-0000-000000000001""#));
         assert!(html.contains("— inherit org default —"));
         assert!(html.contains(r#"value="p1" selected"#));
+    }
+
+    #[test]
+    fn escalation_section_hidden_when_disabled() {
+        // show_escalation defaults off → the whole policy block is absent.
+        let form = empty_create_form();
+        assert!(!form.show_escalation);
+        let html = FormPage {
+            active_tab: "targets",
+            form,
+        }
+        .render()
+        .unwrap();
+        assert!(!html.contains("Escalation policy"));
+        assert!(!html.contains("Save the monitor first"));
     }
 
     #[test]

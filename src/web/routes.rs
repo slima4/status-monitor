@@ -16,6 +16,7 @@ use crate::web::{assets, error, views};
 /// parity); the operator dashboard keeps `/` on its own host.
 pub fn routes(state: AppState) -> Router {
     let cfg = &state.cfg;
+    crate::web::filters::set_escalation_ui(cfg.escalation.enabled);
     let mut r = Router::new()
         .route("/", get(views::dashboard::root))
         .route("/targets", get(views::targets_list::index))
@@ -90,29 +91,6 @@ pub fn routes(state: AppState) -> Router {
             "/web/partials/settings/notifications",
             get(views::notification_channels::list_partial),
         )
-        .route("/settings/escalation", get(views::escalation::index))
-        .route(
-            "/settings/escalation/new",
-            get(views::escalation::new_form),
-        )
-        .route(
-            "/settings/escalation/{id}/edit",
-            get(views::escalation::edit_form),
-        )
-        .route(
-            "/web/partials/settings/escalation",
-            get(views::escalation::list_partial),
-        )
-        .route("/settings/on-call", get(views::on_call::index))
-        .route("/settings/on-call/new", get(views::on_call::new_form))
-        .route(
-            "/settings/on-call/{id}/edit",
-            get(views::on_call::edit_form),
-        )
-        .route(
-            "/web/partials/settings/on-call",
-            get(views::on_call::list_partial),
-        )
         .route(
             "/web/partials/settings/sessions",
             get(views::auth::settings::sessions_partial),
@@ -129,6 +107,33 @@ pub fn routes(state: AppState) -> Router {
         .route("/security-policy", get(views::legal::security_policy))
         .route("/licenses", get(views::legal::licenses))
         .route("/.well-known/security.txt", get(views::legal::security_txt));
+
+    // Team-paging surfaces — mounted only when escalation is enabled, so a
+    // single-responder deployment never exposes policy/schedule config that
+    // nothing consumes.
+    if cfg.escalation.enabled {
+        r = r
+            .route("/settings/escalation", get(views::escalation::index))
+            .route("/settings/escalation/new", get(views::escalation::new_form))
+            .route(
+                "/settings/escalation/{id}/edit",
+                get(views::escalation::edit_form),
+            )
+            .route(
+                "/web/partials/settings/escalation",
+                get(views::escalation::list_partial),
+            )
+            .route("/settings/on-call", get(views::on_call::index))
+            .route("/settings/on-call/new", get(views::on_call::new_form))
+            .route(
+                "/settings/on-call/{id}/edit",
+                get(views::on_call::edit_form),
+            )
+            .route(
+                "/web/partials/settings/on-call",
+                get(views::on_call::list_partial),
+            );
+    }
 
     if public_routes_active(cfg) {
         r = r
