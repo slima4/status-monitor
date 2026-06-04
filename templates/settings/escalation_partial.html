@@ -13,7 +13,7 @@
       <option value="{{ c.id }}"{% if c.selected %} selected{% endif %}>{{ c.name }}</option>
       {% endfor %}
     </select>
-    <span data-default-result class="flash-text text-xs"></span>
+    <span data-default-result role="status" aria-live="polite" class="flash-text text-xs"></span>
   </div>
 </div>
 

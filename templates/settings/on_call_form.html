@@ -135,7 +135,7 @@
       <div data-cal-grid class="grid grid-cols-7 gap-px overflow-hidden rounded bg-[color:var(--theme-line)] text-xs"></div>
       <p data-cal-hint class="text-xs text-muted">Click a start day, then an end day, then choose who covers.</p>
       <div data-cal-picker class="hidden flex-wrap items-center gap-2"></div>
-      <p data-cal-result class="flash-text text-xs"></p>
+      <p data-cal-result role="status" aria-live="polite" class="flash-text text-xs"></p>
     </div>
     <ul data-override-seed class="hidden">
       {% for o in form.overrides %}

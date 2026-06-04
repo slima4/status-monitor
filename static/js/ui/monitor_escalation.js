@@ -6,10 +6,13 @@
     const sel = document.querySelector("[data-monitor-policy-select]");
     if (!sel) return;
     const result = document.querySelector("[data-monitor-policy-result]");
+    let clearTimer;
     const show = (msg, ok) => {
         if (!result) return;
+        clearTimeout(clearTimer);
         result.textContent = msg;
         result.className = "flash-text text-xs " + (ok ? "flash-text--ok" : "flash-text--bad");
+        if (ok) clearTimer = setTimeout(() => { result.textContent = ""; }, 4000);
     };
     sel.addEventListener("change", async () => {
         const targetId = sel.dataset.targetId;

@@ -31,10 +31,13 @@
 
     const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
+    let flashTimer;
     function flash(msg, ok) {
         if (!result) return;
+        clearTimeout(flashTimer);
         result.textContent = msg;
         result.className = "flash-text text-xs " + (ok ? "flash-text--ok" : "flash-text--bad");
+        if (ok) flashTimer = setTimeout(() => { result.textContent = ""; }, 4000);
     }
     function setHint(msg) { if (hint) hint.textContent = msg; }
 
@@ -172,7 +175,14 @@
     }
 
     async function removeOverride(id) {
-        if (!window.confirm("Remove this override?")) return;
+        const ov = overrides.find((o) => o.id === id);
+        const ok = await window.smConfirm({
+            title: "Remove override?",
+            body: ov ? `Remove ${ov.email} from this period?` : "Remove this override?",
+            confirmLabel: "remove",
+            danger: true,
+        });
+        if (!ok) return;
         try {
             const res = await fetch(`/api/v1/on-call/schedules/${scheduleId}/overrides/${id}`, {
                 method: "DELETE",

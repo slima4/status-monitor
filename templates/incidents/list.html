@@ -63,7 +63,7 @@
             <div class="inline-flex flex-wrap justify-end gap-1.5">
               {% if row.state == "triggered" %}
               <button type="button" data-incident-action="acknowledge" data-incident-id="{{ row.id }}"
-                      class="sticker-btn px-2 py-1 text-xs">ack</button>
+                      class="sticker-btn px-2 py-1 text-xs">acknowledge</button>
               {% endif %}
               {% if row.ongoing %}
               <button type="button" data-incident-action="resolve" data-incident-id="{{ row.id }}"

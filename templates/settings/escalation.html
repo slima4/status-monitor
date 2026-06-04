@@ -18,7 +18,7 @@
     </a>
   </header>
 
-  <div id="escalation-list"
+  <div id="escalation-list" data-hx-loader
        hx-get="/web/partials/settings/escalation"
        hx-trigger="load, every 60s, escalation:refresh from:body"
        hx-swap="innerHTML"

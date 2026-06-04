@@ -18,7 +18,7 @@
     </a>
   </header>
 
-  <div id="on-call-list"
+  <div id="on-call-list" data-hx-loader
        hx-get="/web/partials/settings/on-call"
        hx-trigger="load, every 60s, oncall:refresh from:body"
        hx-swap="innerHTML"
@@ -46,7 +46,7 @@
         </label>
         {% endfor %}
       </div>
-      <span data-contacts-result class="flash-text text-xs"></span>
+      <span data-contacts-result role="status" aria-live="polite" class="flash-text text-xs"></span>
       {% endif %}
     </div>
   </section>

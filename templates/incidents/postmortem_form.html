@@ -47,8 +47,9 @@
         {% for a in action_items %}
         <div data-action-item class="flex flex-wrap items-center gap-2">
           <input type="text" data-ai-text maxlength="2000" value="{{ a.text }}"
+                 aria-label="action item description"
                  class="min-w-48 flex-1 field" placeholder="follow-up task">
-          <select data-ai-owner class="field">
+          <select data-ai-owner class="field" aria-label="action item owner">
             <option value="">unassigned</option>
             {% for m in members %}
             <option value="{{ m.id }}"{% if m.id == a.owner_user_id %} selected{% endif %}>{{ m.email }}</option>
@@ -72,8 +73,9 @@
 
   <template id="action-item-template">
     <div data-action-item class="flex flex-wrap items-center gap-2">
-      <input type="text" data-ai-text maxlength="2000" value="" class="min-w-48 flex-1 field" placeholder="follow-up task">
-      <select data-ai-owner class="field">
+      <input type="text" data-ai-text maxlength="2000" value="" aria-label="action item description"
+             class="min-w-48 flex-1 field" placeholder="follow-up task">
+      <select data-ai-owner class="field" aria-label="action item owner">
         <option value="">unassigned</option>
         {% for m in members %}
         <option value="{{ m.id }}">{{ m.email }}</option>

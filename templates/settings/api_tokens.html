@@ -106,7 +106,7 @@
 
   <div id="token-result" aria-live="polite"></div>
 
-  <div id="tokens-list"
+  <div id="tokens-list" data-hx-loader
        hx-get="/web/partials/settings/api-tokens"
        hx-trigger="load, every 60s, tokens:refresh from:body"
        hx-swap="innerHTML"

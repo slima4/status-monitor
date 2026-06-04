@@ -2,14 +2,17 @@
 // swapped in by HTMX, so the change handler is delegated from <body> and
 // survives every refresh. Saves to PUT /api/v1/escalation-policies/default.
 (function () {
+    let clearTimer;
     document.body.addEventListener("change", async (evt) => {
         const sel = evt.target.closest && evt.target.closest("[data-default-select]");
         if (!sel) return;
         const result = sel.parentElement.querySelector("[data-default-result]");
         const show = (msg, ok) => {
             if (!result) return;
+            clearTimeout(clearTimer);
             result.textContent = msg;
             result.className = "flash-text text-xs " + (ok ? "flash-text--ok" : "flash-text--bad");
+            if (ok) clearTimer = setTimeout(() => { result.textContent = ""; }, 4000);
         };
         const policyId = sel.value || null;
         sel.disabled = true;

@@ -537,7 +537,7 @@
             <option value="{{ c.id }}"{% if c.selected %} selected{% endif %}>{{ c.name }}</option>
             {% endfor %}
           </select>
-          <span data-monitor-policy-result class="flash-text text-xs"></span>
+          <span data-monitor-policy-result role="status" aria-live="polite" class="flash-text text-xs"></span>
         </div>
         {% if !form.escalation_hint.is_empty() %}<p class="text-xs text-muted">{{ form.escalation_hint }}</p>{% endif %}
         {% else %}

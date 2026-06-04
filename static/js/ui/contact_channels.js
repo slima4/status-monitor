@@ -4,11 +4,14 @@
     const root = document.querySelector("[data-contacts]");
     if (!root) return;
     const result = root.querySelector("[data-contacts-result]");
+    let clearTimer;
 
     function show(msg, ok) {
         if (!result) return;
+        clearTimeout(clearTimer);
         result.textContent = msg;
         result.className = "flash-text text-xs " + (ok ? "flash-text--ok" : "flash-text--bad");
+        if (ok) clearTimer = setTimeout(() => { result.textContent = ""; }, 4000);
     }
 
     function currentIds() {

@@ -17,7 +17,7 @@
     </a>
   </header>
 
-  <div id="channels-list"
+  <div id="channels-list" data-hx-loader
        hx-get="/web/partials/settings/notifications"
        hx-trigger="load, every 60s, channels:refresh from:body"
        hx-swap="innerHTML"
