@@ -33,20 +33,7 @@ const LIST_LIMIT_DEFAULT: usize = 50;
 const LIST_LIMIT_MAX: usize = 10_000;
 const ALLOWED_SCHEMES: &[&str] = &["http", "https"];
 
-/// Drop the public-page cache for every page that curates any of `ids`. A
-/// component's public name falls back to the monitor name and its membership
-/// follows the join row, so a rename or delete must refresh the pages it shows
-/// on. For deletes, call this *before* the cascade clears the join rows.
-async fn invalidate_pages_for(state: &AppState, org: OrgId, ids: &[Uuid]) {
-    match state.status_page_store.pages_for_targets(org, ids).await {
-        Ok(pages) => {
-            for page in pages {
-                state.public_source.invalidate(page).await;
-            }
-        }
-        Err(e) => tracing::warn!(error = %e, "could not resolve pages for cache invalidation"),
-    }
-}
+use super::invalidate_pages_for;
 
 #[derive(Debug, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]

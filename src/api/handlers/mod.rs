@@ -20,3 +20,23 @@ pub mod tags;
 pub mod targets;
 pub mod usage;
 pub mod validation;
+
+use uuid::Uuid;
+
+use crate::app::AppState;
+use crate::domain::OrgId;
+
+/// Bust cached public status pages that surface any of `ids`.
+pub(crate) async fn invalidate_pages_for(state: &AppState, org: OrgId, ids: &[Uuid]) {
+    if ids.is_empty() {
+        return;
+    }
+    match state.status_page_store.pages_for_targets(org, ids).await {
+        Ok(pages) => {
+            for page in pages {
+                state.public_source.invalidate(page).await;
+            }
+        }
+        Err(e) => tracing::warn!(error = %e, "could not resolve pages for cache invalidation"),
+    }
+}

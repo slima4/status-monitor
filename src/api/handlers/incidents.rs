@@ -410,17 +410,7 @@ pub async fn publish_incident(
 /// visibility flip shows/hides immediately instead of after the page TTL. The
 /// JSON/RSS/detail surfaces are already live. Best-effort.
 async fn invalidate_incident_pages(state: &AppState, org: crate::domain::OrgId, target_id: Option<Uuid>) {
-    let Some(tid) = target_id else { return };
-    match state.status_page_store.pages_for_targets(org, &[tid]).await {
-        Ok(pages) => {
-            for page in pages {
-                state.public_source.invalidate(page).await;
-            }
-        }
-        Err(e) => {
-            tracing::warn!(error = %e, "could not invalidate pages after incident visibility change")
-        }
-    }
+    super::invalidate_pages_for(state, org, target_id.as_slice()).await;
 }
 
 #[utoipa::path(
