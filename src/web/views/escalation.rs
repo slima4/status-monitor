@@ -251,6 +251,43 @@ pub async fn edit_form(
     .into_response())
 }
 
+/// Per-monitor escalation selector choices + an "inheriting …" hint, shared by
+/// the monitor form's Alerts section. The monitor's own binding is marked
+/// selected; the hint shows what an unbound monitor escalates through.
+pub async fn monitor_binding(
+    state: &AppState,
+    org: OrgId,
+    target_id: Uuid,
+) -> WebResult<(Vec<Choice>, String)> {
+    let policies = state.escalation_policy_store.list(org).await?;
+    let own = state.escalation_policy_store.target_policy(org, target_id).await?;
+    let choices = policies
+        .iter()
+        .map(|p| Choice {
+            id: p.id.to_string(),
+            name: p.name.clone(),
+            selected: Some(p.id) == own,
+        })
+        .collect();
+    let hint = if own.is_some() {
+        String::new()
+    } else {
+        match state
+            .escalation_policy_store
+            .org_default(org)
+            .await?
+            .and_then(|d| policies.iter().find(|p| p.id == d))
+        {
+            Some(p) => format!("Inheriting the org default: {}", p.name),
+            None => {
+                "No escalation — pages no one until a policy is bound or an org default is set."
+                    .into()
+            }
+        }
+    };
+    Ok((choices, hint))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

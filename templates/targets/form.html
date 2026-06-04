@@ -522,6 +522,28 @@
         {% endfor %}
       </div>
       {% endif %}
+
+      <div class="mt-5 space-y-2 border-t border-[color:var(--theme-line)] pt-4">
+        <div class="space-y-1">
+          <span class="text-sm font-medium">Escalation policy</span>
+          <p class="text-xs text-muted">A multi-level paging ladder for this monitor's incidents. Manage policies under <a href="/settings/escalation" class="underline">escalation</a>.</p>
+        </div>
+        {% if form.mode == "edit" %}
+        <div class="flex flex-wrap items-center gap-3">
+          <select data-monitor-policy-select data-target-id="{{ form.id }}"
+                  aria-label="Escalation policy" class="field max-w-xs">
+            <option value="">— inherit org default —</option>
+            {% for c in form.escalation_choices %}
+            <option value="{{ c.id }}"{% if c.selected %} selected{% endif %}>{{ c.name }}</option>
+            {% endfor %}
+          </select>
+          <span data-monitor-policy-result class="flash-text text-xs"></span>
+        </div>
+        {% if !form.escalation_hint.is_empty() %}<p class="text-xs text-muted">{{ form.escalation_hint }}</p>{% endif %}
+        {% else %}
+        <p class="text-xs text-muted">Save the monitor first, then pick its escalation policy here.</p>
+        {% endif %}
+      </div>
     </fieldset>
 
     <div class="flex flex-wrap gap-3">
@@ -550,4 +572,5 @@
 <script defer src="{{ "js/ui/tag_chip_input.js"|asset }}"></script>
 <script defer src="{{ "js/ui/collapsible.js"|asset }}"></script>
 <script defer src="{{ "js/ui/check_form.js"|asset }}"></script>
+<script defer src="{{ "js/ui/monitor_escalation.js"|asset }}"></script>
 {% endblock %}

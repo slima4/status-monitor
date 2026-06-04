@@ -192,6 +192,11 @@ pub struct FormModel {
     pub domain_expiry: DomainExpiryFields,
     /// The org's notification channels, with this monitor's bindings prefilled.
     pub channels: Vec<ChannelChoice>,
+    /// Escalation-policy choices for the monitor's binding selector (edit only;
+    /// a not-yet-created monitor has no id to bind). Own binding marked selected.
+    pub escalation_choices: Vec<crate::web::views::escalation::Choice>,
+    /// What an unbound monitor escalates through — shown while inheriting.
+    pub escalation_hint: String,
 }
 
 /// One option in the form's "Owner" select.
@@ -244,6 +249,8 @@ fn empty_create_form() -> FormModel {
         tls_cert: TlsCertFields::default(),
         domain_expiry: DomainExpiryFields::default(),
         channels: Vec::new(),
+        escalation_choices: Vec::new(),
+        escalation_hint: String::new(),
     }
 }
 
@@ -354,6 +361,8 @@ pub async fn edit_form(
     let mut form = form_from_target(target, FormKind::Edit)?;
     form.channels = channel_choices(&state, org, &alerts).await?;
     form.owner_options = owner_choices(&state, org, &form.owner_user_id).await?;
+    (form.escalation_choices, form.escalation_hint) =
+        crate::web::views::escalation::monitor_binding(&state, org, id).await?;
     // Edit keeps the saved interval as-is; if a plan floor rose past it the
     // save will surface the API error rather than silently rewriting it.
     form.min_interval_s = plan_min_interval(&state, org).await?;
@@ -457,6 +466,8 @@ fn form_from_target(t: Target, kind: FormKind) -> Result<FormModel, AppError> {
         tls_cert,
         domain_expiry,
         channels: Vec::new(),
+        escalation_choices: Vec::new(),
+        escalation_hint: String::new(),
     })
 }
 
@@ -858,6 +869,39 @@ mod tests {
         assert!(html.contains(r#"value="api.example.com""#));
         assert!(html.contains(r#"value="edge.cdn""#));
         assert!(html.contains(r#"value="1.1.1.1""#));
+    }
+
+    #[test]
+    fn escalation_selector_is_edit_only() {
+        // Create has no monitor id to bind yet → a prompt, no selector.
+        let create = FormPage {
+            active_tab: "targets",
+            form: empty_create_form(),
+        }
+        .render()
+        .unwrap();
+        assert!(create.contains("Save the monitor first"));
+        assert!(!create.contains("data-monitor-policy-select"));
+
+        // Edit renders the binding selector with the inherit option.
+        let mut form = empty_create_form();
+        form.mode = "edit";
+        form.id = "00000000-0000-0000-0000-000000000001".into();
+        form.escalation_choices = vec![crate::web::views::escalation::Choice {
+            id: "p1".into(),
+            name: "Primary".into(),
+            selected: true,
+        }];
+        let html = FormPage {
+            active_tab: "targets",
+            form,
+        }
+        .render()
+        .unwrap();
+        assert!(html.contains("data-monitor-policy-select"));
+        assert!(html.contains(r#"data-target-id="00000000-0000-0000-0000-000000000001""#));
+        assert!(html.contains("— inherit org default —"));
+        assert!(html.contains(r#"value="p1" selected"#));
     }
 
     #[test]
