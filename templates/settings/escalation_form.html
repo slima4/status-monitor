@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}{% if form.mode == "create" %}New escalation policy{% else %}Edit escalation policy{% endif %} · Uptimepage{% endblock %}
+{% block content %}
+<section class="space-y-6">
+  <header class="space-y-1">
+    <a href="/settings/escalation" class="inline-block text-sm text-muted hover:text-body">← escalation policies</a>
+    <h1 class="page-title truncate">
+      <span class="page-title__prefix" aria-hidden="true">$</span>{% if form.mode == "create" %}new escalation policy{% else %}edit {{ form.name }}{% endif %}
+    </h1>
+    <p class="text-sm text-muted">
+      Submits JSON to <code class="font-mono">{{ form.submit_method }} {{ form.action }}</code>. Validation runs on the API.
+    </p>
+  </header>
+
+  {% if form.no_channels %}
+  <div class="alert-card alert-card--warn text-sm">
+    No notification channels yet — a policy pages channels, so
+    <a href="/settings/notifications/new" class="underline">add a channel</a> first.
+  </div>
+  {% endif %}
+
+  <form id="escalation-form"
+        data-action="{{ form.action }}"
+        data-method="{{ form.submit_method }}"
+        data-mode="{{ form.mode }}"
+        novalidate
+        class="space-y-6">
+
+    <div id="form-errors" role="alert" aria-live="polite"
+         class="hidden alert-card alert-card--error"></div>
+
+    <fieldset class="sticker-card space-y-5 p-5">
+      <legend class="px-1 text-sm font-medium">Basic</legend>
+      <label class="field-outline">
+        <span class="field-outline__label">Name</span>
+        <input name="name" type="text" required maxlength="100" value="{{ form.name }}"
+               autocomplete="off" class="w-full field">
+      </label>
+      <label class="field-outline">
+        <span class="field-outline__label">Description <span class="text-quiet">(optional)</span></span>
+        <input name="description" type="text" maxlength="2000" value="{{ form.description }}"
+               autocomplete="off" class="w-full field">
+      </label>
+      <label class="field-outline max-w-xs">
+        <span class="field-outline__label">Repeat the whole ladder</span>
+        <input name="repeat_count" type="number" min="0" max="10" value="{{ form.repeat_count }}"
+               class="w-full field">
+        <span class="mt-1 text-xs text-muted">Extra times to re-walk all levels if still unacknowledged. 0 = walk once.</span>
+      </label>
+    </fieldset>
+
+    <fieldset class="space-y-4">
+      <legend class="px-1 text-sm font-medium">Levels</legend>
+      <p class="text-xs text-muted">Each level pages its channels, then waits the delay before the next level.</p>
+
+      <div id="levels" class="space-y-4">
+        {% for level in form.levels %}
+        <div data-level-row class="sticker-card space-y-4 p-4">
+          <div class="flex items-center justify-between">
+            <h3 class="text-sm font-medium">level <span data-level-num>{{ loop.index }}</span></h3>
+            <button type="button" data-remove-level class="row-link row-link--danger text-xs">remove</button>
+          </div>
+          <label class="field-outline max-w-xs">
+            <span class="field-outline__label">Wait before next level (seconds)</span>
+            <input type="number" data-delay min="0" value="{{ level.delay_secs }}" class="w-full field">
+          </label>
+          <fieldset class="space-y-2" data-level-channels>
+            <legend class="text-xs uppercase text-muted">Channels paged at this level</legend>
+            {% for ch in level.channels %}
+            <label class="mr-4 inline-flex items-center gap-2">
+              <input type="checkbox" data-channel value="{{ ch.id }}"{% if ch.selected %} checked{% endif %}>
+              <span class="text-sm">{{ ch.name }}</span>
+            </label>
+            {% endfor %}
+          </fieldset>
+        </div>
+        {% endfor %}
+      </div>
+
+      <button type="button" id="add-level"
+              class="sticker-btn px-3 py-1.5 text-sm font-medium">add level</button>
+    </fieldset>
+
+    <div class="flex gap-3">
+      <button type="submit"
+              class="sticker-btn sticker-btn--primary px-4 py-2 text-sm font-medium">
+        {% if form.mode == "create" %}Create{% else %}Save changes{% endif %}
+      </button>
+      <a href="/settings/escalation" class="btn-ghost px-4 py-2 text-sm">Cancel</a>
+    </div>
+  </form>
+
+  <template id="level-template">
+    <div data-level-row class="sticker-card space-y-4 p-4">
+      <div class="flex items-center justify-between">
+        <h3 class="text-sm font-medium">level <span data-level-num>1</span></h3>
+        <button type="button" data-remove-level class="row-link row-link--danger text-xs">remove</button>
+      </div>
+      <label class="field-outline max-w-xs">
+        <span class="field-outline__label">Wait before next level (seconds)</span>
+        <input type="number" data-delay min="0" value="300" class="w-full field">
+      </label>
+      <fieldset class="space-y-2" data-level-channels>
+        <legend class="text-xs uppercase text-muted">Channels paged at this level</legend>
+        {% for ch in form.channel_choices %}
+        <label class="mr-4 inline-flex items-center gap-2">
+          <input type="checkbox" data-channel value="{{ ch.id }}">
+          <span class="text-sm">{{ ch.name }}</span>
+        </label>
+        {% endfor %}
+      </fieldset>
+    </div>
+  </template>
+</section>
+
+<script defer src="{{ "js/ui/api_form.js"|asset }}"></script>
+<script defer src="{{ "js/ui/escalation_policies.js"|asset }}"></script>
+{% endblock %}

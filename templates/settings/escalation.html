@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Escalation · Uptimepage{% endblock %}
+{% block content %}
+<section class="space-y-6">
+  <header class="flex flex-wrap items-start justify-between gap-3">
+    <div class="space-y-1">
+      <h1 class="page-title"><span class="page-title__prefix" aria-hidden="true">$</span>escalation policies</h1>
+      <p class="text-sm text-muted">
+        A ladder of levels, each paging notification channels after a delay. An
+        open incident pages level&nbsp;1, then escalates down the ladder until it
+        is acknowledged. Bind a policy to a monitor from its page, or set an org
+        default that covers every monitor without its own.
+      </p>
+    </div>
+    <a href="/settings/escalation/new"
+       class="sticker-btn sticker-btn--primary px-3 py-1.5 text-sm font-medium">
+      add policy
+    </a>
+  </header>
+
+  <div id="escalation-list"
+       hx-get="/web/partials/settings/escalation"
+       hx-trigger="load, every 60s, escalation:refresh from:body"
+       hx-swap="innerHTML"
+       class="space-y-6">
+    <p class="sticker-card px-4 py-3 text-sm text-muted">Loading…</p>
+  </div>
+</section>
+
+<script defer src="{{ "js/ui/escalation_list.js"|asset }}"></script>
+{% endblock %}

@@ -84,6 +84,19 @@ pub fn routes(state: AppState) -> Router {
             "/web/partials/settings/notifications",
             get(views::notification_channels::list_partial),
         )
+        .route("/settings/escalation", get(views::escalation::index))
+        .route(
+            "/settings/escalation/new",
+            get(views::escalation::new_form),
+        )
+        .route(
+            "/settings/escalation/{id}/edit",
+            get(views::escalation::edit_form),
+        )
+        .route(
+            "/web/partials/settings/escalation",
+            get(views::escalation::list_partial),
+        )
         .route(
             "/web/partials/settings/sessions",
             get(views::auth::settings::sessions_partial),

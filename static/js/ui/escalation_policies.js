@@ -1,0 +1,111 @@
+// Escalation-policy builder. Manages the dynamic level rows and serialises them
+// into a NewEscalationPolicy body for POST/PATCH /api/v1/escalation-policies.
+// Shares the error-banner layer from api_form.js (loaded before this).
+(function () {
+    const form = document.getElementById("escalation-form");
+    if (!form) return;
+    const levels = document.getElementById("levels");
+    const tmpl = document.getElementById("level-template");
+    const addBtn = document.getElementById("add-level");
+
+    function renumber() {
+        levels.querySelectorAll("[data-level-row]").forEach((row, i) => {
+            const n = row.querySelector("[data-level-num]");
+            if (n) n.textContent = String(i + 1);
+        });
+    }
+
+    addBtn.addEventListener("click", () => {
+        levels.appendChild(tmpl.content.cloneNode(true));
+        renumber();
+    });
+
+    levels.addEventListener("click", (evt) => {
+        const rm = evt.target.closest("[data-remove-level]");
+        if (!rm) return;
+        if (levels.querySelectorAll("[data-level-row]").length <= 1) {
+            renderClientError("A policy needs at least one level.");
+            return;
+        }
+        rm.closest("[data-level-row]").remove();
+        renumber();
+    });
+
+    const submitBtn = form.querySelector("button[type=submit]");
+    form.addEventListener("submit", async (evt) => {
+        evt.preventDefault();
+        if (submitBtn.disabled) return;
+        clearErrors();
+        const built = buildBody();
+        if (built.error) {
+            renderClientError(built.error);
+            return;
+        }
+        const label = submitBtn.textContent;
+        submitBtn.disabled = true;
+        submitBtn.textContent = "Saving…";
+        let navigating = false;
+        try {
+            let res;
+            try {
+                res = await fetch(form.dataset.action, {
+                    method: form.dataset.method,
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Accept": "application/json",
+                        "X-Requested-With": "uptimepage",
+                    },
+                    body: JSON.stringify(built.payload),
+                });
+            } catch (err) {
+                renderClientError(`Network error: ${err.message || err}`);
+                return;
+            }
+            if (res.ok) { navigating = true; window.location = "/settings/escalation"; return; }
+            let body;
+            try { body = await res.json(); }
+            catch { renderClientError(`Request failed (${res.status})`); return; }
+            renderApiError(body, res.status);
+        } finally {
+            if (!navigating) { submitBtn.disabled = false; submitBtn.textContent = label; }
+        }
+    });
+
+    function buildBody() {
+        const name = (form.querySelector("[name=name]").value || "").trim();
+        if (!name) return { error: "Name is required." };
+        const description = (form.querySelector("[name=description]").value || "").trim();
+        const repeat = parseInt(form.querySelector("[name=repeat_count]").value, 10);
+        const rows = Array.from(levels.querySelectorAll("[data-level-row]"));
+        if (rows.length === 0) return { error: "Add at least one level." };
+        const steps = [];
+        for (let i = 0; i < rows.length; i++) {
+            const delay = parseInt(rows[i].querySelector("[data-delay]").value, 10);
+            const channels = Array.from(rows[i].querySelectorAll("[data-channel]:checked")).map(c => c.value);
+            if (channels.length === 0) return { error: `Level ${i + 1} needs at least one channel.` };
+            steps.push({
+                level: i + 1,
+                delay_secs: Number.isFinite(delay) ? delay : 300,
+                targets: channels.map(id => ({ target_type: "channel", channel_id: id })),
+            });
+        }
+        return {
+            payload: {
+                name,
+                description: description || null,
+                repeat_count: Number.isFinite(repeat) ? repeat : 0,
+                steps,
+            },
+        };
+    }
+
+    function clearErrors() {
+        window.smClearFormErrors(document.getElementById("form-errors"));
+    }
+    function renderClientError(msg) {
+        window.smRenderClientError(document.getElementById("form-errors"), msg);
+    }
+    function renderApiError(json, status) {
+        window.smRenderApiError(document.getElementById("form-errors"), json, status);
+    }
+})();

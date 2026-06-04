@@ -1,0 +1,42 @@
+// Org-default escalation-policy selector on /settings/escalation. The list is
+// swapped in by HTMX, so the change handler is delegated from <body> and
+// survives every refresh. Saves to PUT /api/v1/escalation-policies/default.
+(function () {
+    document.body.addEventListener("change", async (evt) => {
+        const sel = evt.target.closest && evt.target.closest("[data-default-select]");
+        if (!sel) return;
+        const result = sel.parentElement.querySelector("[data-default-result]");
+        const show = (msg, ok) => {
+            if (!result) return;
+            result.textContent = msg;
+            result.className = "flash-text text-xs " + (ok ? "flash-text--ok" : "flash-text--bad");
+        };
+        const policyId = sel.value || null;
+        sel.disabled = true;
+        try {
+            const res = await fetch("/api/v1/escalation-policies/default", {
+                method: "PUT",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                    "X-Requested-With": "uptimepage",
+                },
+                body: JSON.stringify({ policy_id: policyId }),
+            });
+            if (res.ok) {
+                show("✓ saved", true);
+            } else {
+                let msg = "save failed";
+                try {
+                    const b = await res.json();
+                    if (b && b.error && b.error.message) msg = b.error.message;
+                } catch { /* non-JSON body */ }
+                show("✗ " + msg, false);
+            }
+        } catch (err) {
+            show("✗ network error", false);
+        } finally {
+            sel.disabled = false;
+        }
+    });
+})();

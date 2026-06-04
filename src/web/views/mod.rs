@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod dashboard;
+pub mod escalation;
 pub mod incidents;
 pub mod legal;
 pub mod notification_channels;
