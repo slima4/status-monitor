@@ -32,6 +32,13 @@
       {% endif %}
       <button type="button" data-incident-note data-incident-id="{{ id }}"
               class="sticker-btn sticker-btn--accent px-3 py-1.5 text-sm">add note</button>
+      {% if visibility == "public" %}
+      <button type="button" data-incident-unpublish data-incident-id="{{ id }}"
+              class="sticker-btn px-3 py-1.5 text-sm">unpublish</button>
+      {% else %}
+      <button type="button" data-incident-publish data-incident-id="{{ id }}"
+              class="sticker-btn px-3 py-1.5 text-sm">publish</button>
+      {% endif %}
     </div>
   </header>
 

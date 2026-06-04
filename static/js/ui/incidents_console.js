@@ -73,6 +73,45 @@
     window.location.reload();
   }
 
+  async function publish(id) {
+    if (!id) return;
+    let title = "";
+    if (window.smPrompt) {
+      const r = await window.smPrompt({
+        title: "Publish to status page?",
+        body: "Shows this incident on any status page that lists its monitor. Optional public title:",
+        placeholder: "leave blank to keep the current title",
+      });
+      // A cancelled prompt aborts; an empty string still publishes.
+      if (r === null || r === undefined) return;
+      title = r.toString().trim();
+    } else if (window.smConfirm) {
+      const ok = await window.smConfirm({ title: "Publish incident?", body: "", confirmLabel: "Publish" });
+      if (!ok) return;
+    }
+    const body = title ? { public_title: title } : {};
+    const res = await post("/api/v1/incidents/" + encodeURIComponent(id) + "/publish", body);
+    if (!res.ok) return showError(errMsg(res));
+    if (window.smToast) window.smToast({ message: "Published", kind: "ok" });
+    window.location.reload();
+  }
+
+  async function unpublish(id) {
+    if (!id) return;
+    if (window.smConfirm) {
+      const ok = await window.smConfirm({
+        title: "Unpublish incident?",
+        body: "Removes it from public status pages. Internal records are kept.",
+        confirmLabel: "Unpublish",
+      });
+      if (!ok) return;
+    }
+    const res = await post("/api/v1/incidents/" + encodeURIComponent(id) + "/unpublish", {});
+    if (!res.ok) return showError(errMsg(res));
+    if (window.smToast) window.smToast({ message: "Unpublished", kind: "ok" });
+    window.location.reload();
+  }
+
   async function submitDeclare(form) {
     const fd = new FormData(form);
     const tid = (fd.get("target_id") || "").toString().trim();
@@ -98,6 +137,16 @@
     if (note) {
       ev.preventDefault();
       return addNote(note.dataset.incidentId);
+    }
+    const pub = ev.target.closest("[data-incident-publish]");
+    if (pub) {
+      ev.preventDefault();
+      return publish(pub.dataset.incidentId);
+    }
+    const unpub = ev.target.closest("[data-incident-unpublish]");
+    if (unpub) {
+      ev.preventDefault();
+      return unpublish(unpub.dataset.incidentId);
     }
   });
 

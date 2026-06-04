@@ -496,4 +496,19 @@ mod tests {
         assert!(html.contains("Activity"));
         assert!(html.contains("alice@example.com"));
     }
+
+    #[test]
+    fn detail_internal_shows_publish_public_shows_unpublish() {
+        let internal = make_detail_page(ops(IncidentState::Triggered), None, None, "x".into(), vec![]);
+        let html = internal.render().unwrap();
+        assert!(html.contains(r#"data-incident-publish"#));
+        assert!(!html.contains(r#"data-incident-unpublish"#));
+
+        let mut pubinc = ops(IncidentState::Triggered);
+        pubinc.visibility = crate::domain::IncidentVisibility::Public;
+        let public = make_detail_page(pubinc, None, None, "x".into(), vec![]);
+        let html = public.render().unwrap();
+        assert!(html.contains(r#"data-incident-unpublish"#));
+        assert!(!html.contains(r#"data-incident-publish"#));
+    }
 }
