@@ -128,9 +128,9 @@
     </p>
     <div class="sticker-card space-y-3 p-4">
       <div class="flex items-center justify-between">
-        <button type="button" data-cal-prev class="row-link text-sm">← prev</button>
+        <button type="button" data-cal-prev class="row-link text-sm"><span aria-hidden="true">←</span> prev</button>
         <span data-cal-title class="text-sm font-medium"></span>
-        <button type="button" data-cal-next class="row-link text-sm">next →</button>
+        <button type="button" data-cal-next class="row-link text-sm">next <span aria-hidden="true">→</span></button>
       </div>
       <div data-cal-grid class="grid grid-cols-7 gap-px overflow-hidden rounded bg-[color:var(--theme-line)] text-xs"></div>
       <p data-cal-hint class="text-xs text-muted">Click a start day, then an end day, then choose who covers.</p>
