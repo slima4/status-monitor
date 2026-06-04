@@ -6,6 +6,7 @@ pub mod maintenance;
 pub mod membership;
 pub mod monitor_share;
 pub mod notification_channel;
+pub mod on_call;
 pub mod org;
 pub mod page_asset;
 pub mod preferences;
@@ -45,6 +46,11 @@ pub use monitor_share::{
 pub use notification_channel::{
     ChannelConfig, ChannelKind, NewNotificationChannel, NotificationChannel,
     NotificationChannelUpdate, validate_channel_name,
+};
+pub use on_call::{
+    NewOnCallLayer, NewOnCallOverride, NewOnCallParticipant, NewOnCallSchedule, OnCallLayer,
+    OnCallOverride, OnCallParticipant, OnCallSchedule, OnCallScheduleDetail, OnCallScheduleSummary,
+    RotationType, resolve_on_call,
 };
 pub use org::{
     BrandingError, OrgId, Organization, PublicOrgBranding, PublicStyle, SlugError, validate_slug,

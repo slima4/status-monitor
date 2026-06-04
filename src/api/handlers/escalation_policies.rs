@@ -38,9 +38,10 @@ fn invalid(msg: impl Into<String>) -> AppError {
     AppError::unprocessable(codes::ESCALATION_POLICY_INVALID, msg)
 }
 
-/// Validate a policy payload. Phase-3 scope: only `channel` targets route, so
-/// other target types are rejected here (the schema keeps them for a later
-/// phase). Levels must be unique and positive; ids must match their type.
+/// Validate a policy payload: levels unique and positive, and each target sets
+/// exactly the one id matching its type. Membership of `user` targets and
+/// ownership of `schedule`/`channel` targets are enforced in the store on write
+/// (so the IDOR check holds regardless of caller).
 fn validate(new: &NewEscalationPolicy) -> Result<()> {
     let name = new.name.trim();
     if name.is_empty() {
@@ -85,16 +86,13 @@ fn validate(new: &NewEscalationPolicy) -> Result<()> {
             if set.iter().filter(|x| **x).count() != 1 {
                 return Err(invalid("a target must set exactly one of user/schedule/channel"));
             }
-            match t.target_type {
-                EscalationTargetType::Channel if t.channel_id.is_some() => {}
-                EscalationTargetType::Channel => {
-                    return Err(invalid("channel target must set channel_id"));
-                }
-                EscalationTargetType::User | EscalationTargetType::Schedule => {
-                    return Err(invalid(
-                        "user and schedule targets are not supported yet; use a channel",
-                    ));
-                }
+            let ok = match t.target_type {
+                EscalationTargetType::Channel => t.channel_id.is_some(),
+                EscalationTargetType::User => t.user_id.is_some(),
+                EscalationTargetType::Schedule => t.schedule_id.is_some(),
+            };
+            if !ok {
+                return Err(invalid("target id must match its target_type"));
             }
         }
     }
@@ -331,7 +329,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_user_and_schedule_targets_for_now() {
+    fn accepts_user_and_schedule_targets() {
         let user = NewEscalationStep {
             level: 1,
             delay_secs: 0,
@@ -342,7 +340,34 @@ mod tests {
                 channel_id: None,
             }],
         };
-        assert!(validate(&policy(vec![user])).is_err());
+        assert!(validate(&policy(vec![user])).is_ok());
+        let schedule = NewEscalationStep {
+            level: 1,
+            delay_secs: 0,
+            targets: vec![NewEscalationTarget {
+                target_type: EscalationTargetType::Schedule,
+                user_id: None,
+                schedule_id: Some(Uuid::now_v7()),
+                channel_id: None,
+            }],
+        };
+        assert!(validate(&policy(vec![schedule])).is_ok());
+    }
+
+    #[test]
+    fn rejects_target_id_not_matching_type() {
+        // A user target carrying only a channel id is rejected.
+        let mismatched = NewEscalationStep {
+            level: 1,
+            delay_secs: 0,
+            targets: vec![NewEscalationTarget {
+                target_type: EscalationTargetType::User,
+                user_id: None,
+                schedule_id: None,
+                channel_id: Some(Uuid::now_v7()),
+            }],
+        };
+        assert!(validate(&policy(vec![mismatched])).is_err());
     }
 
     #[test]

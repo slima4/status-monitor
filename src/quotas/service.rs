@@ -34,6 +34,7 @@ pub mod usage_keys {
     pub const MAINTENANCE_WINDOWS: &str = "max_maintenance_windows";
     pub const NOTIFICATION_CHANNELS: &str = "max_notification_channels";
     pub const ESCALATION_POLICIES: &str = "max_escalation_policies";
+    pub const ON_CALL_SCHEDULES: &str = "max_on_call_schedules";
 }
 
 /// The org-scoped count queries. Declared once and shared by the atomic
@@ -51,6 +52,8 @@ const SQL_COUNT_NOTIFICATION_CHANNELS: &str =
     "SELECT count(*) FROM notification_channels WHERE org_id = $1";
 const SQL_COUNT_ESCALATION_POLICIES: &str =
     "SELECT count(*) FROM escalation_policies WHERE org_id = $1 AND deleted_at IS NULL";
+const SQL_COUNT_ON_CALL_SCHEDULES: &str =
+    "SELECT count(*) FROM on_call_schedules WHERE org_id = $1 AND deleted_at IS NULL";
 
 /// Storage-layer row for `plans`. The domain `Plan` stays `sqlx`-free
 /// (per the domain/storage split); this is the only place that maps the
@@ -74,6 +77,7 @@ struct PlanRow {
     max_maintenance_windows: i32,
     max_notification_channels: i32,
     max_escalation_policies: i32,
+    max_on_call_schedules: i32,
     max_logo_size_bytes: i32,
     api_writes_per_minute: i32,
     api_reads_per_minute: i32,
@@ -84,6 +88,7 @@ struct PlanRow {
     white_label_enabled: bool,
     sms_alerts_enabled: bool,
     incident_narration_enabled: bool,
+    on_call_enabled: bool,
     is_listed: bool,
     created_at: chrono::DateTime<chrono::Utc>,
     updated_at: chrono::DateTime<chrono::Utc>,
@@ -109,6 +114,7 @@ impl From<PlanRow> for Plan {
             max_maintenance_windows: r.max_maintenance_windows,
             max_notification_channels: r.max_notification_channels,
             max_escalation_policies: r.max_escalation_policies,
+            max_on_call_schedules: r.max_on_call_schedules,
             max_logo_size_bytes: r.max_logo_size_bytes,
             api_writes_per_minute: r.api_writes_per_minute,
             api_reads_per_minute: r.api_reads_per_minute,
@@ -119,6 +125,7 @@ impl From<PlanRow> for Plan {
             white_label_enabled: r.white_label_enabled,
             sms_alerts_enabled: r.sms_alerts_enabled,
             incident_narration_enabled: r.incident_narration_enabled,
+            on_call_enabled: r.on_call_enabled,
             is_listed: r.is_listed,
             created_at: r.created_at,
             updated_at: r.updated_at,
@@ -193,12 +200,14 @@ impl QuotaService {
                      p.max_share_links_per_monitor, p.max_shared_monitors, \
                      p.max_maintenance_windows, \
                      p.max_notification_channels, p.max_escalation_policies, \
+                     p.max_on_call_schedules, \
                      p.max_logo_size_bytes, \
                      p.api_writes_per_minute, \
                      p.api_reads_per_minute, p.bulk_ops_per_minute, \
                      p.test_now_per_minute, p.check_now_per_minute, \
                      p.custom_domain_enabled, p.white_label_enabled, \
                      p.sms_alerts_enabled, p.incident_narration_enabled, \
+                     p.on_call_enabled, \
                      p.is_listed, p.created_at, p.updated_at \
                      FROM organizations o JOIN plans p ON p.id = o.plan_id \
                      WHERE o.id = $1",
@@ -368,6 +377,29 @@ impl QuotaService {
             self.record_block(org, user, "max_escalation_policies", current, limit);
             return Err(AppError::quota_exceeded(
                 "max_escalation_policies",
+                current,
+                limit,
+                plan.id.clone(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Friendly pre-check for one new on-call schedule. The race-safe guarantee
+    /// is the count-subquery + advisory lock inside `OnCallStore::create`,
+    /// handed the same `max_on_call_schedules`.
+    pub async fn check_can_create_on_call_schedule(
+        &self,
+        org: OrgId,
+        user: Option<UserId>,
+    ) -> Result<()> {
+        let plan = self.limit_for_org(org).await?;
+        let limit = i64::from(plan.max_on_call_schedules);
+        let current = self.count(SQL_COUNT_ON_CALL_SCHEDULES, org).await?;
+        if current + 1 > limit {
+            self.record_block(org, user, "max_on_call_schedules", current, limit);
+            return Err(AppError::quota_exceeded(
+                "max_on_call_schedules",
                 current,
                 limit,
                 plan.id.clone(),
@@ -706,6 +738,7 @@ fn unlimited_plan() -> Plan {
         max_maintenance_windows: i32::MAX,
         max_notification_channels: i32::MAX,
         max_escalation_policies: i32::MAX,
+        max_on_call_schedules: i32::MAX,
         max_logo_size_bytes: i32::MAX,
         api_writes_per_minute: i32::MAX,
         api_reads_per_minute: i32::MAX,
@@ -716,6 +749,7 @@ fn unlimited_plan() -> Plan {
         white_label_enabled: false,
         sms_alerts_enabled: false,
         incident_narration_enabled: true,
+        on_call_enabled: true,
         is_listed: false,
         created_at: now,
         updated_at: now,

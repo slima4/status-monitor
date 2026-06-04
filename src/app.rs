@@ -137,6 +137,10 @@ pub struct AppState {
     /// `db` like [`Self::incident_ops_store`] so the constructor signature is
     /// unchanged.
     pub escalation_policy_store: Arc<dyn crate::storage::EscalationPolicyStore>,
+    /// On-call schedule config (owner CRUD + the who-is-on-call resolver).
+    pub on_call_store: Arc<dyn crate::storage::OnCallStore>,
+    /// Per-member contact channels paged when a user/schedule target resolves.
+    pub contact_store: Arc<dyn crate::storage::ContactStore>,
     /// Debounce cache for `sessions.last_used_at` writes — see
     /// `auth::session::touch_last_used_debounced`.
     pub session_debounce: Arc<LastUsedDebounce>,
@@ -291,6 +295,14 @@ impl AppState {
             Some(pool) => Arc::new(crate::storage::PgEscalationPolicyStore::new(pool)),
             None => Arc::new(crate::storage::InMemoryEscalationPolicyStore::new()),
         };
+        let on_call_store: Arc<dyn crate::storage::OnCallStore> = match db.clone() {
+            Some(pool) => Arc::new(crate::storage::PgOnCallStore::new(pool)),
+            None => Arc::new(crate::storage::InMemoryOnCallStore::new()),
+        };
+        let contact_store: Arc<dyn crate::storage::ContactStore> = match db.clone() {
+            Some(pool) => Arc::new(crate::storage::PgContactStore::new(pool)),
+            None => Arc::new(crate::storage::InMemoryContactStore::new()),
+        };
         let rate_limits = Arc::new(RateLimitService::new());
         let abuse = Arc::new(AbuseGuard::from_config(&cfg.abuse));
         Self {
@@ -314,6 +326,8 @@ impl AppState {
             incident_narration_store,
             incident_ops_store,
             escalation_policy_store,
+            on_call_store,
+            contact_store,
             session_debounce: Arc::new(build_debounce_cache()),
             api_token_debounce: Arc::new(build_api_token_debounce()),
             outbound_http,

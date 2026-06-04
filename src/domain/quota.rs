@@ -33,6 +33,7 @@ pub struct Plan {
     pub max_maintenance_windows: i32,
     pub max_notification_channels: i32,
     pub max_escalation_policies: i32,
+    pub max_on_call_schedules: i32,
     pub max_logo_size_bytes: i32,
 
     // Per-org rate limits (per minute)
@@ -47,6 +48,7 @@ pub struct Plan {
     pub white_label_enabled: bool,
     pub sms_alerts_enabled: bool,
     pub incident_narration_enabled: bool,
+    pub on_call_enabled: bool,
 
     // Metadata
     pub is_listed: bool,

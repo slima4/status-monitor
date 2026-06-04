@@ -1,5 +1,6 @@
 pub mod admin;
 pub mod clickhouse;
+pub mod contacts;
 pub mod domain_expiry_state;
 pub mod escalation_policies;
 pub mod incident_ops;
@@ -9,6 +10,7 @@ pub mod maintenance;
 pub mod memory;
 pub mod monitor_shares;
 pub mod notification_channels;
+pub mod on_call;
 pub mod orgs;
 pub mod page_assets;
 pub mod postgres;
@@ -19,6 +21,7 @@ pub mod users;
 
 pub use admin::AdminRepo;
 pub use clickhouse::{ClickhouseResultSink, ClickhouseResultsStore, build_client, migrate};
+pub use contacts::{ContactStore, InMemoryContactStore, PgContactStore};
 pub use domain_expiry_state::{
     DomainExpiryState, DomainExpiryStateStore, InMemoryDomainExpiryStateStore,
     PgDomainExpiryStateStore,
@@ -44,6 +47,7 @@ pub use monitor_shares::{
 pub use notification_channels::{
     InMemoryNotificationChannelStore, NotificationChannelStore, PgNotificationChannelStore,
 };
+pub use on_call::{InMemoryOnCallStore, OnCallStore, PgOnCallStore};
 pub use orgs::{
     MemberView, MembershipStatus, OrgBranding, OrgWithRole, RemoveOutcome, ResolvedPublicPage,
     RestoreOutcome, UpdateOrgOutcome, create_org_with_owner, find_lone_active_org,

@@ -11,16 +11,25 @@ use crate::config::EscalationConfig;
 use crate::domain::{
     EscalationDecision, EscalationPolicy, EscalationTargetType, IncidentEventKind, IncidentState,
     NewIncidentNotification, NotificationReason, NotificationStatus, OpsIncident, OrgId, Target,
-    next_step,
+    UserId, next_step,
 };
 use crate::error::Result;
 use crate::http_outbound::OutboundHttpClient;
 use crate::notifier::build_notifier;
 use crate::notifier::event::IncidentNotice;
 use crate::storage::{
-    Actor, DueIncident, EscalationPolicyStore, IncidentOpsStore, NotificationChannelStore,
-    PendingNotification, TargetStore,
+    Actor, ContactStore, DueIncident, EscalationPolicyStore, IncidentOpsStore, OnCallStore,
+    NotificationChannelStore, PendingNotification, TargetStore,
 };
+
+/// One resolved paging destination: a concrete channel plus, when the rung
+/// targeted a person or schedule, the responder it resolved to (recorded on the
+/// notification row for the audit trail).
+#[derive(Clone, Copy)]
+struct PageTarget {
+    channel_id: Uuid,
+    user_id: Option<UserId>,
+}
 
 /// A nudge that an incident's state changed and its paging should be
 /// reconciled. Carries no payload beyond identity + the reason to page; the
@@ -36,6 +45,8 @@ pub struct EscalationEngine {
     rx: mpsc::Receiver<IncidentSignal>,
     ops: Arc<dyn IncidentOpsStore>,
     policies: Arc<dyn EscalationPolicyStore>,
+    on_call: Arc<dyn OnCallStore>,
+    contacts: Arc<dyn ContactStore>,
     targets: Arc<dyn TargetStore>,
     channels: Arc<dyn NotificationChannelStore>,
     http: OutboundHttpClient,
@@ -50,6 +61,8 @@ impl EscalationEngine {
         rx: mpsc::Receiver<IncidentSignal>,
         ops: Arc<dyn IncidentOpsStore>,
         policies: Arc<dyn EscalationPolicyStore>,
+        on_call: Arc<dyn OnCallStore>,
+        contacts: Arc<dyn ContactStore>,
         targets: Arc<dyn TargetStore>,
         channels: Arc<dyn NotificationChannelStore>,
         http: OutboundHttpClient,
@@ -60,6 +73,8 @@ impl EscalationEngine {
             rx,
             ops,
             policies,
+            on_call,
+            contacts,
             targets,
             channels,
             http,
@@ -139,9 +154,9 @@ impl EscalationEngine {
                     EscalationDecision::Page {
                         level, delay_secs, ..
                     } => {
-                        let channels = channels_at_level(&policy, level);
+                        let targets = self.resolve_targets(org, &policy, level, Utc::now()).await?;
                         let paged = self
-                            .page_channels(org, incident.id, &notice, reason, level, &channels)
+                            .page_channels(org, incident.id, &notice, reason, level, &targets)
                             .await?;
                         let next_at = Some(Utc::now() + chrono::Duration::seconds(delay_secs.into()));
                         self.ops
@@ -159,9 +174,9 @@ impl EscalationEngine {
                 }
             }
             None => {
-                let channels = binding_channels(target);
+                let targets = channel_targets(binding_channels(target));
                 let paged = self
-                    .page_channels(org, incident.id, &notice, reason, 0, &channels)
+                    .page_channels(org, incident.id, &notice, reason, 0, &targets)
                     .await?;
                 self.log_paged(org, incident.id, reason, paged).await?;
             }
@@ -194,7 +209,7 @@ impl EscalationEngine {
                 &notice,
                 NotificationReason::Resolved,
                 incident.escalation_level,
-                &channels,
+                &channel_targets(channels),
             )
             .await?;
         self.log_paged(org, incident.id, NotificationReason::Resolved, paged)
@@ -254,7 +269,7 @@ impl EscalationEngine {
                     return Ok(());
                 };
                 let notice = self.notice(&incident, &target, NotificationReason::Escalated);
-                let channels = channels_at_level(&policy, level);
+                let targets = self.resolve_targets(d.org, &policy, level, Utc::now()).await?;
                 let paged = self
                     .page_channels(
                         d.org,
@@ -262,7 +277,7 @@ impl EscalationEngine {
                         &notice,
                         NotificationReason::Escalated,
                         level,
-                        &channels,
+                        &targets,
                     )
                     .await?;
                 let next_at = Some(Utc::now() + chrono::Duration::seconds(delay_secs.into()));
@@ -301,10 +316,11 @@ impl EscalationEngine {
         notice: &IncidentNotice,
         reason: NotificationReason,
         level: i32,
-        channels: &[Uuid],
+        targets: &[PageTarget],
     ) -> Result<u32> {
         let mut paged = 0u32;
-        for &cid in channels {
+        for t in targets {
+            let cid = t.channel_id;
             let Some(channel) = self.channels.get(org, cid).await? else {
                 continue;
             };
@@ -317,7 +333,7 @@ impl EscalationEngine {
                     org,
                     incident_id,
                     escalation_level: Some(level),
-                    target_user_id: None,
+                    target_user_id: t.user_id,
                     channel_id: Some(cid),
                     transport: channel.kind.as_db_str().to_string(),
                     reason,
@@ -500,28 +516,92 @@ impl EscalationEngine {
         let base = self.base_url.trim_end_matches('/');
         (!base.is_empty()).then(|| format!("{base}/incidents/{id}"))
     }
+
+    /// The concrete channels a policy rung pages, resolving each target type:
+    /// a `channel` routes straight through; a `user` pages that responder's
+    /// contact channels; a `schedule` resolves who is on call at `at` and pages
+    /// each of their contact channels. Deduped by channel so one channel is
+    /// paged at most once per rung (the first resolving responder is recorded).
+    /// A target that resolves to nothing (no contacts, empty schedule) is
+    /// skipped and logged.
+    async fn resolve_targets(
+        &self,
+        org: OrgId,
+        policy: &EscalationPolicy,
+        level: i32,
+        at: chrono::DateTime<Utc>,
+    ) -> Result<Vec<PageTarget>> {
+        let Some(step) = policy.steps.iter().find(|s| s.level == level) else {
+            return Ok(vec![]);
+        };
+        let mut out: Vec<PageTarget> = Vec::new();
+        for t in &step.targets {
+            match t.target_type {
+                EscalationTargetType::Channel => {
+                    if let Some(cid) = t.channel_id {
+                        push_target(&mut out, cid, None);
+                    }
+                }
+                EscalationTargetType::User => {
+                    if let Some(uid) = t.user_id {
+                        self.page_user(org, UserId(uid), &mut out).await?;
+                    }
+                }
+                EscalationTargetType::Schedule => {
+                    if let Some(sid) = t.schedule_id {
+                        for user in self.on_call.resolve_now(org, sid, at).await? {
+                            self.page_user(org, user, &mut out).await?;
+                        }
+                    }
+                }
+            }
+        }
+        if out.is_empty() {
+            // A rung that reaches no one is a live misconfiguration (empty
+            // schedule, a responder with no contacts, a deleted channel) — the
+            // incident escalates past it silently otherwise, so surface it.
+            tracing::warn!(policy_id = %policy.id, level, "escalation rung resolved to no reachable channel");
+        }
+        Ok(out)
+    }
+
+    /// Append a responder's contact channels to `out`, attributing each to the
+    /// user. A responder with no contact channels reaches no one — logged so a
+    /// silently-unreachable on-call is visible in traces.
+    async fn page_user(&self, org: OrgId, user: UserId, out: &mut Vec<PageTarget>) -> Result<()> {
+        let contacts = self.contacts.for_user(org, user).await?;
+        if contacts.is_empty() {
+            tracing::debug!(%user, "on-call responder has no contact channels; not paged");
+        }
+        for cid in contacts {
+            push_target(out, cid, Some(user));
+        }
+        Ok(())
+    }
 }
 
-/// The channel ids a policy rung pages. Only `channel` targets route today;
-/// `user`/`schedule` targets are skipped until on-call resolution lands.
-fn channels_at_level(policy: &EscalationPolicy, level: i32) -> Vec<Uuid> {
-    let Some(step) = policy.steps.iter().find(|s| s.level == level) else {
-        return vec![];
-    };
-    step.targets
-        .iter()
-        .filter_map(|t| match t.target_type {
-            EscalationTargetType::Channel => t.channel_id,
-            other => {
-                tracing::debug!(
-                    policy_id = %policy.id,
-                    target_type = other.as_db_str(),
-                    "escalation target type not yet routable; skipped"
-                );
-                None
-            }
+/// Wrap bare channel ids (the no-policy fallback + resolution paths) as page
+/// targets with no attributed responder.
+fn channel_targets(channels: Vec<Uuid>) -> Vec<PageTarget> {
+    channels
+        .into_iter()
+        .map(|channel_id| PageTarget {
+            channel_id,
+            user_id: None,
         })
         .collect()
+}
+
+/// Append a page target, deduped by channel so one channel is paged at most
+/// once per rung. The first occurrence wins (it may carry a responder).
+fn push_target(out: &mut Vec<PageTarget>, channel_id: Uuid, user_id: Option<UserId>) {
+    if out.iter().any(|t| t.channel_id == channel_id) {
+        return;
+    }
+    out.push(PageTarget {
+        channel_id,
+        user_id,
+    });
 }
 
 /// The channel ids bound directly to a monitor (the pre-policy fallback path).
@@ -630,8 +710,8 @@ mod tests {
         NewNotificationChannel, OpsIncident, Target, TargetAlerts, WriteSource,
     };
     use crate::storage::{
-        Actor, InMemoryEscalationPolicyStore, InMemoryIncidentOpsStore,
-        InMemoryNotificationChannelStore, InMemoryTargetStore,
+        Actor, InMemoryContactStore, InMemoryEscalationPolicyStore, InMemoryIncidentOpsStore,
+        InMemoryNotificationChannelStore, InMemoryOnCallStore, InMemoryTargetStore,
     };
 
     fn org() -> OrgId {
@@ -753,11 +833,31 @@ mod tests {
         targets: Arc<dyn TargetStore>,
         channels: Arc<dyn NotificationChannelStore>,
     ) -> EscalationEngine {
+        engine_with(
+            ops,
+            policies,
+            Arc::new(InMemoryOnCallStore::new()),
+            Arc::new(InMemoryContactStore::new()),
+            targets,
+            channels,
+        )
+    }
+
+    fn engine_with(
+        ops: Arc<dyn IncidentOpsStore>,
+        policies: Arc<dyn EscalationPolicyStore>,
+        on_call: Arc<dyn OnCallStore>,
+        contacts: Arc<dyn ContactStore>,
+        targets: Arc<dyn TargetStore>,
+        channels: Arc<dyn NotificationChannelStore>,
+    ) -> EscalationEngine {
         let (_tx, rx) = mpsc::channel(4);
         EscalationEngine::new(
             rx,
             ops,
             policies,
+            on_call,
+            contacts,
             targets,
             channels,
             crate::http_outbound::build_outbound_client(
@@ -941,6 +1041,84 @@ mod tests {
         eng.page(org(), id, NotificationReason::Resolved).await.unwrap();
         // Opened paged once; recovery opt-out blocked the resolution page.
         assert_eq!(ops.notifications_for(org(), id).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn schedule_target_pages_the_on_call_responders_contact_channel() {
+        use crate::domain::{
+            NewOnCallLayer, NewOnCallParticipant, NewOnCallSchedule, RotationType, UserId,
+        };
+
+        let channels = Arc::new(InMemoryNotificationChannelStore::new());
+        let personal = failing_channel(&channels).await;
+        let responder = UserId(Uuid::now_v7());
+
+        // On-call schedule with the responder, and their personal contact channel.
+        let on_call = Arc::new(InMemoryOnCallStore::new());
+        on_call.add_member(org(), responder);
+        let sched = on_call
+            .create(
+                org(),
+                NewOnCallSchedule {
+                    name: "primary".into(),
+                    timezone: "UTC".into(),
+                    layers: vec![NewOnCallLayer {
+                        name: None,
+                        rotation_type: RotationType::Daily,
+                        rotation_length_secs: 86_400,
+                        handoff_at: "2020-01-01T00:00:00Z".parse().unwrap(),
+                        layer_order: 0,
+                        participants: vec![NewOnCallParticipant { user_id: responder }],
+                    }],
+                },
+                10,
+            )
+            .await
+            .unwrap();
+        let contacts = Arc::new(InMemoryContactStore::new());
+        contacts.add_channel(org(), personal);
+        contacts
+            .replace_for_user(org(), responder, vec![personal])
+            .await
+            .unwrap();
+
+        // A policy whose only rung is a schedule target.
+        let policies = Arc::new(InMemoryEscalationPolicyStore::new());
+        let p = policies
+            .create(
+                org(),
+                crate::domain::NewEscalationPolicy {
+                    name: "p".into(),
+                    description: None,
+                    repeat_count: 0,
+                    steps: vec![NewEscalationStep {
+                        level: 1,
+                        delay_secs: 300,
+                        targets: vec![NewEscalationTarget {
+                            target_type: EscalationTargetType::Schedule,
+                            user_id: None,
+                            schedule_id: Some(sched.schedule.id),
+                            channel_id: None,
+                        }],
+                    }],
+                },
+                10,
+            )
+            .await
+            .unwrap();
+        let target = bare_target();
+        let tid = target.id;
+        policies.set_target_policy(org(), tid, Some(p.id)).await.unwrap();
+        let ops = Arc::new(InMemoryIncidentOpsStore::new());
+        let id = seed_incident(&ops, Some(tid));
+        let targets = Arc::new(InMemoryTargetStore::from_vec(vec![target]));
+
+        let eng = engine_with(ops.clone(), policies, on_call, contacts, targets, channels);
+        eng.page(org(), id, NotificationReason::Opened).await.unwrap();
+        let rows = ops.notifications_for(org(), id).await.unwrap();
+        assert_eq!(rows.len(), 1, "the on-call responder's contact channel was paged");
+        assert_eq!(rows[0].channel_id, Some(personal));
+        assert_eq!(rows[0].target_user_id, Some(responder));
     }
 
     #[tokio::test]

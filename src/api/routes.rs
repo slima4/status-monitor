@@ -195,6 +195,29 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
                 .put(handlers::escalation_policies::set_target_policy),
         )
         .route(
+            "/on-call/schedules",
+            get(handlers::on_call::list).post(handlers::on_call::create),
+        )
+        .route("/on-call/who", get(handlers::on_call::who))
+        .route(
+            "/on-call/my-contacts",
+            get(handlers::on_call::get_my_contacts).put(handlers::on_call::set_my_contacts),
+        )
+        .route(
+            "/on-call/schedules/{id}",
+            get(handlers::on_call::get)
+                .patch(handlers::on_call::replace)
+                .delete(handlers::on_call::delete),
+        )
+        .route(
+            "/on-call/schedules/{id}/overrides",
+            post(handlers::on_call::add_override),
+        )
+        .route(
+            "/on-call/schedules/{id}/overrides/{override_id}",
+            axum::routing::delete(handlers::on_call::delete_override),
+        )
+        .route(
             "/orgs",
             get(handlers::orgs::list_my_orgs).post(handlers::orgs::create_org),
         )

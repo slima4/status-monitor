@@ -115,6 +115,13 @@ pub mod codes {
     pub const ESCALATION_POLICY_NAME_TAKEN: &str = "ESCALATION_POLICY_NAME_TAKEN";
     pub const ESCALATION_POLICY_QUOTA_EXCEEDED: &str = "ESCALATION_POLICY_QUOTA_EXCEEDED";
     pub const ESCALATION_POLICY_INVALID: &str = "ESCALATION_POLICY_INVALID";
+    // On-call schedules (owner config surface).
+    pub const ON_CALL_SCHEDULE_NOT_FOUND: &str = "ON_CALL_SCHEDULE_NOT_FOUND";
+    pub const ON_CALL_SCHEDULE_NAME_TAKEN: &str = "ON_CALL_SCHEDULE_NAME_TAKEN";
+    pub const ON_CALL_SCHEDULE_QUOTA_EXCEEDED: &str = "ON_CALL_SCHEDULE_QUOTA_EXCEEDED";
+    pub const ON_CALL_SCHEDULE_INVALID: &str = "ON_CALL_SCHEDULE_INVALID";
+    pub const ON_CALL_OVERRIDE_NOT_FOUND: &str = "ON_CALL_OVERRIDE_NOT_FOUND";
+    pub const CONTACT_CHANNEL_INVALID: &str = "CONTACT_CHANNEL_INVALID";
     // Notification channels (operator surface).
     pub const CHANNEL_NOT_FOUND: &str = "CHANNEL_NOT_FOUND";
     pub const CHANNEL_NAME_TAKEN: &str = "CHANNEL_NAME_TAKEN";

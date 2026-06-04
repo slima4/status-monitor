@@ -10,6 +10,7 @@ pub mod magic_link;
 pub mod maintenance;
 pub mod me;
 pub mod notification_channels;
+pub mod on_call;
 pub mod orgs;
 pub mod public;
 pub mod results;

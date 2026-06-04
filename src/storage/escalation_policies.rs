@@ -120,9 +120,30 @@ struct TargetRow {
     channel_id: Option<Uuid>,
 }
 
+/// Run an `EXISTS`-style `id = $1 AND org_id = $2` ownership query; map a miss
+/// to an `ESCALATION_POLICY_INVALID` 422 with `msg`.
+async fn assert_owned_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    org: OrgId,
+    sql: &str,
+    id: Uuid,
+    msg: &'static str,
+) -> Result<()> {
+    let found: Option<Uuid> = sqlx::query_scalar(sql)
+        .bind(id)
+        .bind(org.0)
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(|e| AppError::Other(anyhow::anyhow!("validate escalation target: {e}")))?;
+    if found.is_none() {
+        return Err(AppError::unprocessable(codes::ESCALATION_POLICY_INVALID, msg));
+    }
+    Ok(())
+}
+
 /// Insert a policy's steps + targets inside an open transaction. Validates that
-/// every `channel` target belongs to `org` (the parent-chain org-match trigger
-/// guards step↔policy, not the channel reference, so this closes the IDOR).
+/// every target's referenced id belongs to `org` (the parent-chain org-match
+/// trigger guards step↔policy, not the leaf references, so this closes the IDOR).
 async fn insert_steps_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     org: OrgId,
@@ -151,21 +172,39 @@ async fn insert_steps_tx(
             }
         })?;
         for target in &step.targets {
+            // Each id type is validated against `org` so a policy cannot page a
+            // foreign channel, schedule, or non-member (closes the IDOR the
+            // parent-chain org-match trigger does not cover).
             if let Some(cid) = target.channel_id {
-                let owned: Option<Uuid> = sqlx::query_scalar(
+                assert_owned_tx(
+                    tx,
+                    org,
                     "SELECT id FROM notification_channels WHERE id = $1 AND org_id = $2",
+                    cid,
+                    "escalation target references an unknown notification channel",
                 )
-                .bind(cid)
-                .bind(org.0)
-                .fetch_optional(&mut **tx)
-                .await
-                .map_err(|e| AppError::Other(anyhow::anyhow!("validate channel: {e}")))?;
-                if owned.is_none() {
-                    return Err(AppError::unprocessable(
-                        codes::ESCALATION_POLICY_INVALID,
-                        "escalation target references an unknown notification channel",
-                    ));
-                }
+                .await?;
+            }
+            if let Some(uid) = target.user_id {
+                assert_owned_tx(
+                    tx,
+                    org,
+                    "SELECT user_id FROM memberships WHERE user_id = $1 AND org_id = $2",
+                    uid,
+                    "escalation target references a user who is not a member of this organization",
+                )
+                .await?;
+            }
+            if let Some(sid) = target.schedule_id {
+                assert_owned_tx(
+                    tx,
+                    org,
+                    "SELECT id FROM on_call_schedules \
+                     WHERE id = $1 AND org_id = $2 AND deleted_at IS NULL",
+                    sid,
+                    "escalation target references an unknown on-call schedule",
+                )
+                .await?;
             }
             sqlx::query(
                 r#"INSERT INTO escalation_targets
