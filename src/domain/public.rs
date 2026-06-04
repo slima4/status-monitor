@@ -162,6 +162,32 @@ pub struct PublicIncident {
     /// Most recent phase from operator updates; `investigating` if none.
     pub status_phase: IncidentStatusPhase,
     pub updates: Vec<PublicIncidentUpdate>,
+    /// Present only once an operator publishes a postmortem; never set on list
+    /// views.
+    #[serde(default)]
+    #[schema(nullable = true)]
+    pub postmortem: Option<PublicPostmortem>,
+}
+
+/// One published postmortem action item. The internal owner is deliberately
+/// omitted — only the public-safe task text and its done state are exposed.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct PublicActionItem {
+    pub text: String,
+    pub done: bool,
+}
+
+/// Customer-facing postmortem. Only surfaces after an operator publishes it.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct PublicPostmortem {
+    #[schema(nullable = true)]
+    pub summary: Option<String>,
+    #[schema(nullable = true)]
+    pub root_cause: Option<String>,
+    #[schema(nullable = true)]
+    pub impact: Option<String>,
+    pub action_items: Vec<PublicActionItem>,
+    pub published_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]

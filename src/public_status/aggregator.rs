@@ -507,6 +507,7 @@ impl OrgAggregator {
                     severity: IncidentSeverity::from_db_str(&r.severity),
                     status_phase,
                     updates: my_updates,
+                    postmortem: None,
                 }
             })
             .collect())

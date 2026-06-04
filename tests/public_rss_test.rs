@@ -75,6 +75,7 @@ impl PublicSource for TwoIncidentSource {
                     phase: IncidentStatusPhase::Investigating,
                     message: INCIDENT_BODY.into(),
                 }],
+                postmortem: None,
             },
             PublicIncident {
                 id: Uuid::parse_str("00000000-0000-0000-0000-000000000c02").unwrap(),
@@ -86,6 +87,7 @@ impl PublicSource for TwoIncidentSource {
                 severity: IncidentSeverity::Minor,
                 status_phase: IncidentStatusPhase::Resolved,
                 updates: vec![],
+                postmortem: None,
             },
         ];
         Ok(CursorPage::new(items, None))

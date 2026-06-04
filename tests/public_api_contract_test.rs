@@ -85,6 +85,7 @@ impl PublicSource for FakePublicSource {
                 phase: IncidentStatusPhase::Investigating,
                 message: "Rolling back the deploy.".into(),
             }],
+            postmortem: None,
         };
         let maintenance = PublicMaintenance {
             id: Uuid::nil(),
@@ -145,6 +146,7 @@ impl PublicSource for FakePublicSource {
             severity: IncidentSeverity::Major,
             status_phase: IncidentStatusPhase::Investigating,
             updates: Vec::new(),
+            postmortem: None,
         };
         Ok(CursorPage::new(vec![item], None))
     }
@@ -167,6 +169,7 @@ impl PublicSource for FakePublicSource {
             severity: IncidentSeverity::Major,
             status_phase: IncidentStatusPhase::Investigating,
             updates: Vec::new(),
+            postmortem: None,
         })
     }
 

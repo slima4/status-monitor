@@ -27,8 +27,9 @@ use crate::domain::{
     NewOnCallLayer, NewOnCallOverride, NewOnCallParticipant, NewOnCallSchedule, NotificationChannel,
     NotificationChannelUpdate, OnCallLayer, OnCallOverride, OnCallParticipant, OnCallSchedule,
     OnCallScheduleDetail, OnCallScheduleSummary, OpsIncident, OverallState, OverallStatus,
-    PublicComponent, PublicComponentGroup, PublicComponentStatus, PublicIncident,
-    PublicIncidentUpdate, PublicMaintenance, PublicMaintenanceList, PublicStatusPage, RotationType,
+    PublicActionItem, PublicComponent, PublicComponentGroup, PublicComponentStatus, PublicIncident,
+    PublicIncidentUpdate, PublicMaintenance, PublicMaintenanceList, PublicPostmortem,
+    PublicStatusPage, RotationType,
     Target, TargetAlerts, TargetUpdate, TcpCheck, TlsCertCheck, WriteSource,
 };
 use crate::storage::UptimeStats;
@@ -203,6 +204,8 @@ use crate::storage::UptimeStats;
             DayState,
             PublicIncident,
             PublicIncidentUpdate,
+            PublicPostmortem,
+            PublicActionItem,
             IncidentSeverity,
             IncidentStatusPhase,
             PublicMaintenance,

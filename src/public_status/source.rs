@@ -264,7 +264,9 @@ impl PublicSource for OrgPublicSource {
 
         let row = row.ok_or(PublicAppError::NotFound)?;
         let mut hydrated = self.hydrate(page.org, vec![row], &names).await?;
-        hydrated.pop().ok_or(PublicAppError::NotFound)
+        let mut incident = hydrated.pop().ok_or(PublicAppError::NotFound)?;
+        incident.postmortem = self.published_postmortem(page.org, id).await?;
+        Ok(incident)
     }
 
     async fn maintenance(&self, page: PageRef) -> Result<PublicMaintenanceList, PublicAppError> {
@@ -346,10 +348,63 @@ impl OrgPublicSource {
                     severity: IncidentSeverity::from_db_str(&r.severity),
                     status_phase,
                     updates: my_updates,
+                    postmortem: None,
                 }
             })
             .collect())
     }
+
+    /// Published postmortem for one incident, if the operator has published it.
+    /// Internal fields (the action-item owner) are dropped here.
+    async fn published_postmortem(
+        &self,
+        org: OrgId,
+        incident_id: Uuid,
+    ) -> Result<Option<crate::domain::PublicPostmortem>, PublicAppError> {
+        let row: Option<PostmortemRow> = sqlx::query_as::<_, PostmortemRow>(
+            r#"SELECT summary, root_cause, impact, action_items, published_at
+               FROM incident_postmortems
+               WHERE incident_id = $1 AND org_id = $2 AND published_at IS NOT NULL"#,
+        )
+        .bind(incident_id)
+        .bind(org.0)
+        .fetch_optional(&self.pg)
+        .await
+        .context("public get postmortem")
+        .map_err(PublicAppError::Internal)?;
+        Ok(row.map(|r| {
+            #[derive(serde::Deserialize)]
+            struct RawItem {
+                text: String,
+                #[serde(default)]
+                done: bool,
+            }
+            let action_items = serde_json::from_value::<Vec<RawItem>>(r.action_items)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|i| crate::domain::PublicActionItem {
+                    text: i.text,
+                    done: i.done,
+                })
+                .collect();
+            crate::domain::PublicPostmortem {
+                summary: r.summary,
+                root_cause: r.root_cause,
+                impact: r.impact,
+                action_items,
+                published_at: r.published_at,
+            }
+        }))
+    }
+}
+
+#[derive(FromRow)]
+struct PostmortemRow {
+    summary: Option<String>,
+    root_cause: Option<String>,
+    impact: Option<String>,
+    action_items: serde_json::Value,
+    published_at: DateTime<Utc>,
 }
 
 #[derive(FromRow)]

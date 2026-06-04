@@ -70,6 +70,37 @@
                     </ol>
                 {% endif %}
             </section>
+
+            {% match incident.postmortem %}{% when Some with (pm) %}
+            <section aria-labelledby="postmortem-heading" class="space-y-3">
+                <h2 id="postmortem-heading" class="text-sm font-semibold uppercase tracking-wide text-quiet">Postmortem</h2>
+                <div class="public-callout public-callout--neutral space-y-4 text-sm text-body">
+                    {% match pm.summary %}{% when Some with (s) %}
+                    <div><div class="text-xs uppercase tracking-wide text-quiet">Summary</div><p class="mt-1 whitespace-pre-line">{{ s }}</p></div>
+                    {% when None %}{% endmatch %}
+                    {% match pm.root_cause %}{% when Some with (s) %}
+                    <div><div class="text-xs uppercase tracking-wide text-quiet">Root cause</div><p class="mt-1 whitespace-pre-line">{{ s }}</p></div>
+                    {% when None %}{% endmatch %}
+                    {% match pm.impact %}{% when Some with (s) %}
+                    <div><div class="text-xs uppercase tracking-wide text-quiet">Impact</div><p class="mt-1 whitespace-pre-line">{{ s }}</p></div>
+                    {% when None %}{% endmatch %}
+                    {% if !pm.action_items.is_empty() %}
+                    <div>
+                        <div class="text-xs uppercase tracking-wide text-quiet">Action items</div>
+                        <ul class="mt-1 space-y-1">
+                            {% for a in pm.action_items %}
+                            <li class="flex items-baseline gap-2">
+                                <span aria-hidden="true">{% if a.done %}✓{% else %}○{% endif %}</span>
+                                <span{% if a.done %} class="text-quiet line-through"{% endif %}>{{ a.text }}</span>
+                            </li>
+                            {% endfor %}
+                        </ul>
+                    </div>
+                    {% endif %}
+                    <p class="text-xs text-quiet">Published <time datetime="{{ pm.published_at|iso_ts }}" data-tz="exact">{{ pm.published_at|human_ts }}</time></p>
+                </div>
+            </section>
+            {% when None %}{% endmatch %}
         </article>
     </main>
 

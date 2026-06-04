@@ -66,6 +66,7 @@ impl PublicSource for PublishedSource {
                 phase: IncidentStatusPhase::Investigating,
                 message: "Engineers paged.".into(),
             }],
+            postmortem: None,
         };
         Ok(Arc::new(PublicStatusPage {
             overall: OverallStatus {

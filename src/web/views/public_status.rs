@@ -473,6 +473,7 @@ pub struct IncidentDetailView {
     pub header: IncidentHeader,
     pub ended_at: Option<DateTime<Utc>>,
     pub updates: Vec<IncidentUpdateView>,
+    pub postmortem: Option<crate::domain::PublicPostmortem>,
 }
 
 pub struct IncidentUpdateView {
@@ -1010,6 +1011,7 @@ impl IncidentDetailView {
             header,
             ended_at: i.ended_at,
             updates,
+            postmortem: i.postmortem.clone(),
         }
     }
 }
@@ -1330,6 +1332,7 @@ mod tests {
                 phase: IncidentStatusPhase::Identified,
                 message: "Rolling back the deploy.".into(),
             }],
+            postmortem: None,
         });
         let view = build_view(&p, &[]);
         let html = StatusFullPage {
@@ -1418,6 +1421,7 @@ mod tests {
                     message: "Rolled back the deploy.".into(),
                 },
             ],
+            postmortem: None,
         };
         let detail = IncidentDetailView::from_incident(&inc, Utc::now());
         let html = IncidentDetailPage {
@@ -1434,6 +1438,47 @@ mod tests {
         assert!(html.contains("Investigating"));
         assert!(html.contains("Resolved"));
         assert!(html.contains("Rolled back the deploy."));
+    }
+
+    #[test]
+    fn incident_detail_renders_published_postmortem() {
+        let mut inc = fake_incident(Utc::now() - ChronoDuration::hours(2), 9, "DB outage");
+        inc.postmortem = Some(crate::domain::PublicPostmortem {
+            summary: Some("Connection pool exhausted.".into()),
+            root_cause: Some("Missing timeout.".into()),
+            impact: None,
+            action_items: vec![crate::domain::PublicActionItem {
+                text: "Cap pool checkout".into(),
+                done: true,
+            }],
+            published_at: Utc::now(),
+        });
+        let html = IncidentDetailPage {
+            branding: sample_branding(),
+            incident: IncidentDetailView::from_incident(&inc, Utc::now()),
+            generated_at: Utc::now(),
+            rss_url: RSS_URL,
+            og: OgMeta::default(),
+        }
+        .render()
+        .unwrap();
+        assert!(html.contains("Postmortem"));
+        assert!(html.contains("Connection pool exhausted."));
+        assert!(html.contains("Cap pool checkout"));
+
+        // No postmortem → no section.
+        let mut plain = fake_incident(Utc::now() - ChronoDuration::hours(2), 8, "Blip");
+        plain.postmortem = None;
+        let html2 = IncidentDetailPage {
+            branding: sample_branding(),
+            incident: IncidentDetailView::from_incident(&plain, Utc::now()),
+            generated_at: Utc::now(),
+            rss_url: RSS_URL,
+            og: OgMeta::default(),
+        }
+        .render()
+        .unwrap();
+        assert!(!html2.contains("Postmortem"));
     }
 
     fn branding_with(b: PublicOrgBranding) -> BrandingView {
@@ -1648,6 +1693,7 @@ mod tests {
             severity: IncidentSeverity::Minor,
             status_phase: IncidentStatusPhase::Resolved,
             updates: Vec::new(),
+            postmortem: None,
         }
     }
 

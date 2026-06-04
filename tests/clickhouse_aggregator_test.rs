@@ -317,3 +317,73 @@ async fn build_excludes_internal_incidents() {
     })
     .await;
 }
+
+/// End-to-end: a PUBLISHED postmortem surfaces on the public incident detail via
+/// `OrgPublicSource::incident_by_id`; a DRAFT one (published_at NULL) does not.
+/// Guards the publish → public-page wiring.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL + CLICKHOUSE_URL"]
+async fn published_postmortem_surfaces_on_public_incident() {
+    use std::sync::Arc;
+    use uptimepage::domain::PageRef;
+    use uptimepage::public_status::{OrgPublicSource, PageCache, PublicSource};
+
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let Some(ch) = common::ch_client_from_env().await else {
+        return;
+    };
+    purge_prefix(&pool, "agg-pm-").await;
+
+    let org_id = seed_org(&pool, "agg-pm").await;
+    let unique = format!("agg-pm-{}", Uuid::now_v7());
+    let store = Arc::new(PostgresTargetStore::from_pool(pool.clone(), None));
+    let target = store
+        .create(org_id, public_target(&unique), WriteSource::Ui, i64::MAX)
+        .await
+        .expect("create public target");
+    let target_id = target.id;
+    let pool_for_cleanup = pool.clone();
+
+    with_cleanup(&pool_for_cleanup, target_id, async move {
+        let incident_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO incidents (org_id, target_id, started_at, status_at_start, visibility) \
+             VALUES ($1, $2, now() - interval '1 hour', 'down', 'public') RETURNING id",
+        )
+        .bind(org_id.0)
+        .bind(target_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        let page_id = seed_page_with_target(&pool, org_id, target_id).await;
+        let cfg = uptimepage::config::PublicStatusConfig::default();
+        let agg = Arc::new(OrgAggregator::new(pool.clone(), ch, AggregatorConfig::default()));
+        let source = OrgPublicSource::new(agg, PageCache::new(&cfg), pool.clone(), "uptimepage");
+        let page_ref = PageRef { page: page_id, org: org_id };
+
+        // A draft postmortem (published_at NULL) must not surface.
+        sqlx::query(
+            "INSERT INTO incident_postmortems (org_id, incident_id, summary) VALUES ($1, $2, 'draft secret')",
+        )
+        .bind(org_id.0)
+        .bind(incident_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let inc = source.incident_by_id(page_ref, incident_id).await.expect("incident");
+        assert!(inc.postmortem.is_none(), "a draft postmortem must stay private");
+
+        // Publish it.
+        sqlx::query("UPDATE incident_postmortems SET published_at = now() WHERE incident_id = $1")
+            .bind(incident_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let inc = source.incident_by_id(page_ref, incident_id).await.expect("incident");
+        let pm = inc.postmortem.expect("published postmortem surfaces");
+        assert_eq!(pm.summary.as_deref(), Some("draft secret"));
+    })
+    .await;
+}
