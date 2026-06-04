@@ -121,17 +121,7 @@ fn parse_state(key: &str) -> Option<IncidentState> {
 /// Monitor id → name for the org, in one query (orgs are quota-capped, so a
 /// single bounded fetch is cheaper than N per-incident lookups).
 async fn name_map(state: &AppState, org: OrgId) -> WebResult<HashMap<Uuid, String>> {
-    let targets = state
-        .target_store
-        .list(
-            org,
-            TargetFilter {
-                limit: Some(10_000),
-                ..Default::default()
-            },
-        )
-        .await?;
-    Ok(targets.into_iter().map(|t| (t.id, t.name)).collect())
+    Ok(state.target_store.names(org).await?)
 }
 
 /// User id → email label for the org, for rendering "acknowledged by …".

@@ -528,6 +528,15 @@ impl TargetStore for InMemoryTargetStore {
         Ok(self.targets.lock().iter().find(|t| t.id == id).cloned())
     }
 
+    async fn names(&self, _org: OrgId) -> Result<std::collections::HashMap<Uuid, String>> {
+        Ok(self
+            .targets
+            .lock()
+            .iter()
+            .map(|t| (t.id, t.name.clone()))
+            .collect())
+    }
+
     async fn create(
         &self,
         _org: OrgId,

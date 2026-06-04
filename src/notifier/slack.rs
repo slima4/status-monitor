@@ -52,29 +52,38 @@ impl SlackNotifier {
             .as_deref()
             .map(|u| format!(" <{u}|view incident>"))
             .unwrap_or_default();
+        // Customer-supplied monitor name + error text must not inject Slack
+        // markup (live `<url|text>` links, `@channel` mentions) into the
+        // responders' channel.
+        let label = mrkdwn_escape(n.label());
         match n.reason {
             NotificationReason::Opened | NotificationReason::Escalated => format!(
                 "*{label}* — {sev} incident OPEN{err}{link}",
-                label = n.label(),
                 sev = n.severity.as_db_str(),
                 err = n
                     .error_sample
                     .as_deref()
-                    .map(|e| format!(": {e}"))
+                    .map(|e| format!(": {}", mrkdwn_escape(e)))
                     .unwrap_or_default(),
             ),
             NotificationReason::Reopened => {
-                format!("*{label}* — incident REOPENED{link}", label = n.label())
+                format!("*{label}* — incident REOPENED{link}")
             }
             NotificationReason::Resolved => {
                 let dur = n
                     .duration_minutes()
                     .map(|m| format!(" after {m}m"))
                     .unwrap_or_default();
-                format!("*{label}* — incident RESOLVED{dur}{link}", label = n.label())
+                format!("*{label}* — incident RESOLVED{dur}{link}")
             }
         }
     }
+}
+
+/// Escape the three characters Slack mrkdwn treats specially, so customer text
+/// renders literally rather than as live links or control sequences.
+fn mrkdwn_escape(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
 }
 
 #[async_trait]

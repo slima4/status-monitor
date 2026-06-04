@@ -519,10 +519,15 @@ pub async fn publish_postmortem(
         .set_published(org, id, true)
         .await?
         .ok_or_else(|| AppError::not_found(codes::POSTMORTEM_NOT_FOUND, "postmortem not found"))?;
-    state
+    // Best-effort audit event: the publish already committed, so a failure here
+    // must not 500 (which would prompt a retry that double-publishes/logs).
+    if let Err(err) = state
         .incident_ops_store
         .append_event(org, id, IncidentEventKind::PostmortemPublished, Actor::User(user), None)
-        .await?;
+        .await
+    {
+        tracing::warn!(incident_id = %id, error = %err, "failed to record postmortem-published event");
+    }
     Ok(Json(pm))
 }
 
@@ -543,10 +548,14 @@ pub async fn unpublish_postmortem(
         .set_published(org, id, false)
         .await?
         .ok_or_else(|| AppError::not_found(codes::POSTMORTEM_NOT_FOUND, "postmortem not found"))?;
-    state
+    // Best-effort audit event (see publish_postmortem).
+    if let Err(err) = state
         .incident_ops_store
         .append_event(org, id, IncidentEventKind::PostmortemUnpublished, Actor::User(user), None)
-        .await?;
+        .await
+    {
+        tracing::warn!(incident_id = %id, error = %err, "failed to record postmortem-unpublished event");
+    }
     Ok(Json(pm))
 }
 

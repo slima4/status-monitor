@@ -195,6 +195,16 @@ impl TargetStore for PostgresTargetStore {
         self.rows_to_targets(rows)
     }
 
+    async fn names(&self, org: OrgId) -> Result<std::collections::HashMap<Uuid, String>> {
+        let rows: Vec<(Uuid, String)> =
+            sqlx::query_as("SELECT id, name FROM targets WHERE org_id = $1")
+                .bind(org.0)
+                .fetch_all(&self.pool)
+                .await
+                .context("query target names")?;
+        Ok(rows.into_iter().collect())
+    }
+
     async fn get(&self, org: OrgId, id: Uuid) -> Result<Option<Target>> {
         let row: Option<TargetRow> = sqlx::query_as::<_, TargetRow>(
             r#"SELECT id, name, check_spec, interval_secs, enabled, tags, alerts,

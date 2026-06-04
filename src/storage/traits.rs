@@ -49,6 +49,10 @@ pub enum TargetSort {
 pub trait TargetStore: Send + Sync {
     async fn list(&self, org: OrgId, filter: TargetFilter) -> Result<Vec<Target>>;
     async fn get(&self, org: OrgId, id: Uuid) -> Result<Option<Target>>;
+    /// `id → name` for every live target in the org. A projection: it skips the
+    /// `check_spec` decode + secret decrypt that `list` pays, for callers that
+    /// only need labels (incident console, reports).
+    async fn names(&self, org: OrgId) -> Result<std::collections::HashMap<Uuid, String>>;
     /// Create one target. `max_targets` is the plan cap; the INSERT is
     /// guarded by `(count) + 1 <= max_targets` so the bound holds even
     /// against a concurrent create (no check-then-act). Returns

@@ -857,7 +857,7 @@ impl McpServer {
             format!(
                 "Run a check now on monitor \"{}\"? It probes the target immediately and \
                  records the result; a failure may trigger your alerts.",
-                target.name
+                sanitize_prompt(&target.name)
             ),
         )
         .await?;
@@ -922,7 +922,11 @@ impl McpServer {
         } else {
             ("Pause", "Its checks will stop until you resume it.")
         };
-        require_confirmation(ctx, format!("{verb} monitor \"{}\"? {effect}", target.name)).await?;
+        require_confirmation(
+            ctx,
+            format!("{verb} monitor \"{}\"? {effect}", sanitize_prompt(&target.name)),
+        )
+        .await?;
 
         let updated = self
             .state
@@ -1016,9 +1020,27 @@ impl McpServer {
                 "message must be at most {MAX_INCIDENT_MESSAGE_LEN} characters"
             )));
         }
+        // A public update only reaches customers on a published incident.
+        // Posting to an internal one would silently vanish (and resurface if it
+        // were later published), so reject it with a clear, actionable error.
+        let incident = self
+            .state
+            .incident_ops_store
+            .get(auth.org, id)
+            .await
+            .map_err(|e| McpToolError::internal(format!("post_incident_update: {e}")))?
+            .ok_or_else(|| McpToolError::not_found("incident not found"))?;
+        if incident.visibility != crate::domain::IncidentVisibility::Public {
+            return Err(McpToolError::invalid_argument(
+                "incident is not published; publish it before posting a public update",
+            ));
+        }
         require_confirmation(
             ctx,
-            format!("Publish this update on your public status page?\n\n\"{message}\""),
+            format!(
+                "Publish this update on your public status page?\n\n\"{}\"",
+                sanitize_prompt(&message)
+            ),
         )
         .await?;
         let posted = self
@@ -1221,6 +1243,14 @@ fn parse_window(s: &str) -> Result<(Duration, u32), McpToolError> {
         }
     };
     Ok((Duration::try_hours(hours).unwrap_or_default(), bucket))
+}
+
+/// Neutralise untrusted text (customer monitor names, operator messages)
+/// interpolated into a human confirmation prompt: drop control characters that
+/// could spoof the approval dialog and cap the length. The prompt's own
+/// structure (quotes, newlines) is added around the sanitized value.
+fn sanitize_prompt(s: &str) -> String {
+    s.chars().filter(|c| !c.is_control()).take(200).collect()
 }
 
 /// Accepted monitor states for the `list_monitors` filter.
