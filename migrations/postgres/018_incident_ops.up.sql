@@ -69,7 +69,8 @@ CREATE TABLE incident_events (
     kind         TEXT NOT NULL CHECK (kind IN (
                    'triggered','acknowledged','assigned','unassigned',
                    'escalated','notified','note','severity_changed',
-                   'state_changed','resolved','reopened','published','unpublished'
+                   'state_changed','resolved','reopened','published','unpublished',
+                   'postmortem_published','postmortem_unpublished'
                  )),
     actor_type   TEXT NOT NULL CHECK (actor_type IN ('system','user','mcp')),
     actor_id     UUID REFERENCES users(id) ON DELETE SET NULL,

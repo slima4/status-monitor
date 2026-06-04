@@ -49,11 +49,26 @@
     if (!id || !action) return;
     const verb = { acknowledge: "Acknowledge", resolve: "Resolve", reopen: "Reopen" }[action];
     if (!verb) return;
-    if (window.smConfirm) {
+    const body = {};
+    // Ack/resolve capture an optional note (the "why") onto the timeline;
+    // reopen just confirms. A cancelled prompt aborts; an empty note proceeds.
+    if (action !== "reopen" && window.smPrompt) {
+      const note = await window.smPrompt({
+        title: verb + " incident?",
+        body: "Add an optional note for the timeline — why, or what you found.",
+        placeholder: "optional note…",
+        multiline: true,
+        optional: true,
+      });
+      // null = cancelled (abort); "" = OK with no note (proceed).
+      if (note === null || note === undefined) return;
+      const trimmed = note.toString().trim();
+      if (trimmed) body.note = trimmed;
+    } else if (window.smConfirm) {
       const ok = await window.smConfirm({ title: verb + " incident?", body: "", confirmLabel: verb });
       if (!ok) return;
     }
-    const res = await post("/api/v1/incidents/" + encodeURIComponent(id) + "/" + action, {});
+    const res = await post("/api/v1/incidents/" + encodeURIComponent(id) + "/" + action, body);
     if (!res.ok) return showError(errMsg(res));
     if (window.smToast) window.smToast({ message: verb + "d", kind: "ok" });
     window.location.reload();
@@ -81,8 +96,9 @@
         title: "Publish to status page?",
         body: "Shows this incident on any status page that lists its monitor. Optional public title:",
         placeholder: "leave blank to keep the current title",
+        optional: true,
       });
-      // A cancelled prompt aborts; an empty string still publishes.
+      // null = cancelled (abort); "" = OK with no title (publish, keep title).
       if (r === null || r === undefined) return;
       title = r.toString().trim();
     } else if (window.smConfirm) {

@@ -154,10 +154,15 @@
         if (promptDialog.open) promptDialog.close();
         if (raw === null) { r(null); return; }
         const trimmed = String(raw).trim();
+        const optional = promptDialog.dataset.optional === "1";
         if (split) {
             r(trimmed.split(",").map(s => s.trim()).filter(Boolean));
+        } else if (trimmed === "") {
+            // Optional prompts proceed with an empty string; required ones treat
+            // empty the same as cancel. Cancel itself always resolves null above.
+            r(optional ? "" : null);
         } else {
-            r(trimmed === "" ? null : trimmed);
+            r(trimmed);
         }
     }
     window.smPrompt = function (opts) {
@@ -172,6 +177,7 @@
         promptActiveEl.placeholder = opts.placeholder || "";
         promptActiveEl.value       = opts.value       || "";
         promptDialog.dataset.split = opts.splitOnComma ? "1" : "0";
+        promptDialog.dataset.optional = opts.optional ? "1" : "0";
         if (promptDialog.open) settlePrompt(null);
         return new Promise((resolve) => {
             promptResolve = resolve;

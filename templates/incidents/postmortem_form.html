@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block title %}Postmortem · {{ incident_label }} · Uptimepage{% endblock %}
+{% block content %}
+<section class="space-y-6" data-postmortem data-incident-id="{{ incident_id }}">
+  <header class="flex flex-wrap items-end justify-between gap-3">
+    <div class="space-y-1">
+      <a href="/incidents/{{ incident_id }}" class="inline-block text-sm text-muted hover:text-body">← incident</a>
+      <h1 class="page-title truncate"><span class="page-title__prefix" aria-hidden="true">$</span>postmortem</h1>
+      <p class="text-sm text-muted">{{ incident_label }}</p>
+    </div>
+    {% if exists %}
+    <div class="flex items-center gap-2">
+      {% if published %}
+      <span class="dashboard-chip dashboard-chip--active">published</span>
+      <button type="button" data-postmortem-publish="false" class="btn-ghost px-3 py-1.5 text-sm">unpublish</button>
+      {% else %}
+      <button type="button" data-postmortem-publish="true" class="sticker-btn px-3 py-1.5 text-sm">publish</button>
+      {% endif %}
+    </div>
+    {% endif %}
+  </header>
+
+  <form id="postmortem-form" novalidate class="space-y-6">
+    <div id="form-errors" role="alert" aria-live="polite" class="hidden alert-card alert-card--error"></div>
+
+    <fieldset class="sticker-card space-y-5 p-5">
+      <label class="field-outline block">
+        <span class="field-outline__label">Summary</span>
+        <textarea name="summary" rows="3" maxlength="5000" class="w-full field"
+                  placeholder="What happened, in a sentence or two.">{{ summary }}</textarea>
+      </label>
+      <label class="field-outline block">
+        <span class="field-outline__label">Root cause</span>
+        <textarea name="root_cause" rows="3" maxlength="5000" class="w-full field"
+                  placeholder="Why it happened.">{{ root_cause }}</textarea>
+      </label>
+      <label class="field-outline block">
+        <span class="field-outline__label">Impact</span>
+        <textarea name="impact" rows="3" maxlength="5000" class="w-full field"
+                  placeholder="Who was affected and for how long.">{{ impact }}</textarea>
+      </label>
+    </fieldset>
+
+    <fieldset class="space-y-3">
+      <legend class="px-1 text-sm font-medium">Action items</legend>
+      <div id="action-items" class="space-y-2">
+        {% for a in action_items %}
+        <div data-action-item class="flex flex-wrap items-center gap-2">
+          <input type="text" data-ai-text maxlength="2000" value="{{ a.text }}"
+                 class="min-w-48 flex-1 field" placeholder="follow-up task">
+          <select data-ai-owner class="field">
+            <option value="">unassigned</option>
+            {% for m in members %}
+            <option value="{{ m.id }}"{% if m.id == a.owner_user_id %} selected{% endif %}>{{ m.email }}</option>
+            {% endfor %}
+          </select>
+          <label class="inline-flex items-center gap-1 text-sm text-muted">
+            <input type="checkbox" data-ai-done{% if a.done %} checked{% endif %}> done
+          </label>
+          <button type="button" data-ai-remove class="row-link row-link--danger text-xs">remove</button>
+        </div>
+        {% endfor %}
+      </div>
+      <button type="button" id="add-action-item" class="sticker-btn px-3 py-1.5 text-sm font-medium">add action item</button>
+    </fieldset>
+
+    <div class="flex justify-end gap-2">
+      <a href="/incidents/{{ incident_id }}" class="btn-ghost px-3 py-1.5 text-sm">cancel</a>
+      <button type="submit" class="sticker-btn sticker-btn--primary px-4 py-2 text-sm font-medium">save postmortem</button>
+    </div>
+  </form>
+
+  <template id="action-item-template">
+    <div data-action-item class="flex flex-wrap items-center gap-2">
+      <input type="text" data-ai-text maxlength="2000" value="" class="min-w-48 flex-1 field" placeholder="follow-up task">
+      <select data-ai-owner class="field">
+        <option value="">unassigned</option>
+        {% for m in members %}
+        <option value="{{ m.id }}">{{ m.email }}</option>
+        {% endfor %}
+      </select>
+      <label class="inline-flex items-center gap-1 text-sm text-muted">
+        <input type="checkbox" data-ai-done> done
+      </label>
+      <button type="button" data-ai-remove class="row-link row-link--danger text-xs">remove</button>
+    </div>
+  </template>
+</section>
+
+<script defer src="{{ "js/ui/api_form.js"|asset }}"></script>
+<script defer src="{{ "js/ui/postmortem_form.js"|asset }}"></script>
+{% endblock %}

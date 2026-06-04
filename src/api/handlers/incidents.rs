@@ -18,9 +18,9 @@ use crate::api::error::codes;
 use crate::api::handlers::validation::{self, validate_message};
 use crate::app::AppState;
 use crate::domain::{
-    Incident, IncidentEvent, IncidentMetrics, IncidentNarrationUpdate, IncidentPostmortem,
-    IncidentState, NewIncidentUpdate, NewManualIncident, NotificationReason, OpsIncident,
-    PostmortemUpsert, PublicIncidentUpdate, UserId,
+    Incident, IncidentEvent, IncidentEventKind, IncidentMetrics, IncidentNarrationUpdate,
+    IncidentPostmortem, IncidentState, NewIncidentUpdate, NewManualIncident, NotificationReason,
+    OpsIncident, PostmortemUpsert, PublicIncidentUpdate, UserId,
 };
 use crate::error::{AppError, Result};
 use crate::storage::{Actor, IncidentOpsFilter, LifecycleOutcome};
@@ -511,14 +511,19 @@ pub async fn put_postmortem(
 pub async fn publish_postmortem(
     State(state): State<AppState>,
     Authorized(org, _): Authorized<IncidentsWrite>,
+    CurrentUser(user): CurrentUser,
     Path(id): Path<Uuid>,
 ) -> Result<Json<IncidentPostmortem>> {
-    state
+    let pm = state
         .postmortem_store
         .set_published(org, id, true)
         .await?
-        .map(Json)
-        .ok_or_else(|| AppError::not_found(codes::POSTMORTEM_NOT_FOUND, "postmortem not found"))
+        .ok_or_else(|| AppError::not_found(codes::POSTMORTEM_NOT_FOUND, "postmortem not found"))?;
+    state
+        .incident_ops_store
+        .append_event(org, id, IncidentEventKind::PostmortemPublished, Actor::User(user), None)
+        .await?;
+    Ok(Json(pm))
 }
 
 #[utoipa::path(
@@ -530,14 +535,19 @@ pub async fn publish_postmortem(
 pub async fn unpublish_postmortem(
     State(state): State<AppState>,
     Authorized(org, _): Authorized<IncidentsWrite>,
+    CurrentUser(user): CurrentUser,
     Path(id): Path<Uuid>,
 ) -> Result<Json<IncidentPostmortem>> {
-    state
+    let pm = state
         .postmortem_store
         .set_published(org, id, false)
         .await?
-        .map(Json)
-        .ok_or_else(|| AppError::not_found(codes::POSTMORTEM_NOT_FOUND, "postmortem not found"))
+        .ok_or_else(|| AppError::not_found(codes::POSTMORTEM_NOT_FOUND, "postmortem not found"))?;
+    state
+        .incident_ops_store
+        .append_event(org, id, IncidentEventKind::PostmortemUnpublished, Actor::User(user), None)
+        .await?;
+    Ok(Json(pm))
 }
 
 #[cfg(test)]

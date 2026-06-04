@@ -417,3 +417,36 @@ async fn metrics_rolls_up_mtta_mttr_and_counts_pg() {
     assert!(isolated.mtta_secs.is_none());
     assert!(isolated.mttr_secs.is_none());
 }
+
+#[tokio::test]
+#[ignore]
+async fn postmortem_publish_events_persist_with_actor_pg() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let (org, user, id) = seed(&pool, "incpmev").await;
+    let store = PgIncidentOpsStore::new(pool.clone());
+
+    // These kinds are part of the incident_events CHECK; append_event must
+    // accept them and record the acting user.
+    store
+        .append_event(org, id, IncidentEventKind::PostmortemPublished, Actor::User(user), None)
+        .await
+        .unwrap();
+    store
+        .append_event(org, id, IncidentEventKind::PostmortemUnpublished, Actor::User(user), None)
+        .await
+        .unwrap();
+
+    let tl = store.timeline(org, id).await.unwrap();
+    assert!(
+        tl.iter().any(|e| e.kind == IncidentEventKind::PostmortemPublished
+            && e.actor_id == Some(user)),
+        "postmortem publish is attributed on the timeline"
+    );
+    assert!(
+        tl.iter()
+            .any(|e| e.kind == IncidentEventKind::PostmortemUnpublished),
+        "postmortem unpublish lands on the timeline"
+    );
+}

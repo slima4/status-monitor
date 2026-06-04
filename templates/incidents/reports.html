@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block title %}Incident reports · Uptimepage{% endblock %}
+{% block content %}
+<section class="space-y-5">
+  <header class="flex flex-wrap items-end justify-between gap-3">
+    <div class="space-y-1">
+      <a href="/incidents" class="inline-block text-sm text-muted hover:text-body">← incidents</a>
+      <h1 class="page-title"><span class="page-title__prefix" aria-hidden="true">$</span>incident reports</h1>
+    </div>
+    <nav aria-label="Window" class="flex flex-wrap items-center gap-2">
+      {% for w in windows %}
+      <a href="/incidents/reports?window_days={{ w.days }}"
+         class="dashboard-chip{% if w.active %} dashboard-chip--active{% endif %}">last {{ w.days }}d</a>
+      {% endfor %}
+    </nav>
+  </header>
+
+  <section class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+    <div class="sticker-card p-4">
+      <div class="text-xs uppercase tracking-wide text-muted">Incidents</div>
+      <div class="mt-1 text-2xl font-semibold tabular-nums">{{ total }}</div>
+    </div>
+    <div class="sticker-card p-4">
+      <div class="text-xs uppercase tracking-wide text-muted">MTTA</div>
+      <div class="mt-1 text-2xl font-semibold tabular-nums">{% match mtta %}{% when Some with (v) %}{{ v }}{% when None %}—{% endmatch %}</div>
+      <div class="text-xs text-quiet">mean time to acknowledge</div>
+    </div>
+    <div class="sticker-card p-4">
+      <div class="text-xs uppercase tracking-wide text-muted">MTTR</div>
+      <div class="mt-1 text-2xl font-semibold tabular-nums">{% match mttr %}{% when Some with (v) %}{{ v }}{% when None %}—{% endmatch %}</div>
+      <div class="text-xs text-quiet">mean time to resolve</div>
+    </div>
+    <div class="sticker-card p-4">
+      <div class="text-xs uppercase tracking-wide text-muted">Resolution</div>
+      <div class="mt-1 text-sm tabular-nums">
+        <div>{{ auto_resolved }} <span class="text-quiet">auto</span></div>
+        <div>{{ human_resolved }} <span class="text-quiet">by hand</span></div>
+      </div>
+    </div>
+  </section>
+
+  <div class="grid gap-4 lg:grid-cols-3">
+    <section class="sticker-card p-4">
+      <h2 class="panel-label">By severity</h2>
+      {% if by_severity.is_empty() %}
+      <p class="mt-2 text-sm text-muted">No incidents in this window.</p>
+      {% else %}
+      <ul class="mt-2 space-y-1 text-sm">
+        {% for b in by_severity %}
+        <li class="flex items-center justify-between gap-2">
+          <span class="status-badge status-badge--{{ b.label }}">{{ b.label }}</span>
+          <span class="tabular-nums">{{ b.count }}</span>
+        </li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+    </section>
+
+    <section class="sticker-card p-4">
+      <h2 class="panel-label">By state</h2>
+      {% if by_state.is_empty() %}
+      <p class="mt-2 text-sm text-muted">No incidents in this window.</p>
+      {% else %}
+      <ul class="mt-2 space-y-1 text-sm">
+        {% for b in by_state %}
+        <li class="flex items-center justify-between gap-2">
+          <span class="dashboard-chip">{{ b.label }}</span>
+          <span class="tabular-nums">{{ b.count }}</span>
+        </li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+    </section>
+
+    <section class="sticker-card p-4">
+      <h2 class="panel-label">Noisiest monitors</h2>
+      {% if top_monitors.is_empty() %}
+      <p class="mt-2 text-sm text-muted">No incidents in this window.</p>
+      {% else %}
+      <ul class="mt-2 space-y-1 text-sm">
+        {% for m in top_monitors %}
+        <li class="flex items-center justify-between gap-2">
+          <a href="/targets/{{ m.id }}" class="truncate hover:underline">{{ m.name }}</a>
+          <span class="tabular-nums">{{ m.count }}</span>
+        </li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+    </section>
+  </div>
+</section>
+{% endblock %}

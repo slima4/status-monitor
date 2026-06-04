@@ -428,6 +428,8 @@ pub enum IncidentEventKind {
     Reopened,
     Published,
     Unpublished,
+    PostmortemPublished,
+    PostmortemUnpublished,
 }
 
 impl IncidentEventKind {
@@ -445,6 +447,8 @@ impl IncidentEventKind {
         Self::Reopened,
         Self::Published,
         Self::Unpublished,
+        Self::PostmortemPublished,
+        Self::PostmortemUnpublished,
     ];
     pub fn as_db_str(self) -> &'static str {
         match self {
@@ -461,6 +465,8 @@ impl IncidentEventKind {
             Self::Reopened => "reopened",
             Self::Published => "published",
             Self::Unpublished => "unpublished",
+            Self::PostmortemPublished => "postmortem_published",
+            Self::PostmortemUnpublished => "postmortem_unpublished",
         }
     }
     /// Unknown values fall back to `Note` so a forward-migrated row never
@@ -479,6 +485,8 @@ impl IncidentEventKind {
             "reopened" => Self::Reopened,
             "published" => Self::Published,
             "unpublished" => Self::Unpublished,
+            "postmortem_published" => Self::PostmortemPublished,
+            "postmortem_unpublished" => Self::PostmortemUnpublished,
             _ => Self::Note,
         }
     }

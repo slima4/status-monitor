@@ -4,8 +4,11 @@
 <section class="space-y-5">
   <header class="flex flex-wrap items-end justify-between gap-3">
     <h1 class="page-title"><span class="page-title__prefix" aria-hidden="true">$</span>incidents</h1>
-    <a href="/incidents/declare"
-       class="sticker-btn sticker-btn--primary px-3 py-1.5 text-sm font-medium">+ declare incident</a>
+    <div class="flex items-center gap-2">
+      <a href="/incidents/reports" class="btn-ghost px-3 py-1.5 text-sm font-medium">reports</a>
+      <a href="/incidents/declare"
+         class="sticker-btn sticker-btn--primary px-3 py-1.5 text-sm font-medium">+ declare incident</a>
+    </div>
   </header>
 
   <div data-incident-error class="hidden rounded-sm border border-state-bad px-3 py-2 text-sm text-state-bad"></div>

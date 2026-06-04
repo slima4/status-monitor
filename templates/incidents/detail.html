@@ -64,19 +64,37 @@
   <section class="space-y-2">
     <h2 class="text-sm font-semibold uppercase tracking-wide text-muted">Activity</h2>
     {% if timeline.is_empty() %}
-    <div class="sticker-card p-4 text-sm text-muted">No activity recorded yet.</div>
+    <div class="sticker-card p-4 text-sm text-muted">No activity recorded yet. Add a note to capture context.</div>
     {% else %}
     <ol class="sticker-card divide-y divide-[color:var(--theme-line)]">
       {% for ev in timeline %}
       <li class="flex flex-wrap items-baseline gap-2 px-4 py-2 text-sm">
         <span class="dashboard-chip">{{ ev.kind }}</span>
-        <time class="text-xs text-muted tabular-nums" datetime="{{ ev.occurred_at|iso_ts }}" data-tz>{{ ev.occurred_at|human_ts }}</time>
-        <span class="text-xs text-quiet">by {{ ev.actor }}</span>
-        {% match ev.message %}{% when Some with (m) %}<span class="w-full text-body">{{ m }}</span>{% when None %}{% endmatch %}
+        <span class="text-xs text-quiet">by</span>
+        <span class="dashboard-subhead__mono text-xs">{{ ev.who }}</span>
+        {% if ev.via_mcp %}<span class="dashboard-chip" title="Performed through the MCP server">via MCP</span>{% endif %}
+        <time class="ml-auto text-xs text-muted tabular-nums" datetime="{{ ev.occurred_at|iso_ts }}" data-tz="exact">{{ ev.occurred_at|human_ts }}</time>
+        {% match ev.message %}{% when Some with (m) %}<span class="w-full whitespace-pre-line text-body">{{ m }}</span>{% when None %}{% endmatch %}
       </li>
       {% endfor %}
     </ol>
     {% endif %}
+  </section>
+
+  <section class="flex flex-wrap items-center justify-between gap-2">
+    <div class="flex items-center gap-2">
+      <h2 class="text-sm font-semibold uppercase tracking-wide text-muted">Postmortem</h2>
+      {% if has_postmortem %}
+        {% if postmortem_published %}
+        <span class="dashboard-chip dashboard-chip--active">published</span>
+        {% else %}
+        <span class="dashboard-chip">draft</span>
+        {% endif %}
+      {% endif %}
+    </div>
+    <a href="/incidents/{{ id }}/postmortem" class="sticker-btn px-3 py-1.5 text-sm">
+      {% if has_postmortem %}edit postmortem{% else %}write postmortem{% endif %}
+    </a>
   </section>
 
   <script defer src="{{ "js/ui/incidents_console.js"|asset }}"></script>
