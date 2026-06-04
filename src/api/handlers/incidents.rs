@@ -217,6 +217,7 @@ pub async fn list_incidents(
         state: parse_state_filter(q.state.as_deref())?,
         limit: q.limit,
         offset: q.offset.unwrap_or(0),
+        ..Default::default()
     };
     Ok(Json(state.incident_ops_store.list(org, filter).await?))
 }

@@ -13,34 +13,53 @@ use uuid::Uuid;
 
 use crate::api::error::codes;
 use crate::app::AppState;
-use crate::domain::{IncidentEvent, IncidentState, OpsIncident, OrgId, UserId};
+use crate::domain::{IncidentEvent, IncidentSeverity, IncidentState, OpsIncident, OrgId, UserId};
 use crate::error::AppError;
 use crate::storage::orgs::list_members;
 use crate::storage::{IncidentOpsFilter, TargetFilter};
 use crate::web::error::WebResult;
 use crate::web::filters;
-use crate::web::{AuthedBrowser, CurrentOrg};
+use crate::web::{AuthedBrowser, CurrentOrg, CurrentUser};
 
 const STATE_FILTERS: &[&str] = &["all", "triggered", "acknowledged", "resolved"];
+const SEVERITIES: &[&str] = &["minor", "major", "critical"];
 const PAGE_SIZES: &[usize] = &[25, 50, 100, 200];
 const DEFAULT_PAGE_SIZE: usize = 50;
 
 #[derive(Debug, Default, Deserialize)]
 pub struct ListParams {
     pub state: Option<String>,
+    pub severity: Option<String>,
+    /// `me` restricts to the current user's incidents; absent = everyone's.
+    pub assignee: Option<String>,
     pub limit: Option<usize>,
     pub offset: Option<usize>,
 }
 
 pub struct StateTab {
-    pub key: &'static str,
     pub label: &'static str,
+    pub href: String,
+    pub count: usize,
+    pub active: bool,
+}
+
+pub struct SeverityChip {
+    pub label: &'static str,
+    pub href: String,
     pub active: bool,
 }
 
 pub struct PageSize {
     pub n: usize,
+    pub href: String,
     pub active: bool,
+}
+
+/// An incident owner rendered as a deterministic initials avatar.
+pub struct OwnerAvatar {
+    pub initials: String,
+    pub color: String,
+    pub label: String,
 }
 
 pub struct ConsoleRow {
@@ -53,29 +72,50 @@ pub struct ConsoleRow {
     pub urgency: &'static str,
     pub origin: &'static str,
     pub visibility: &'static str,
-    pub acked_by: Option<String>,
+    pub acked_by: Option<OwnerAvatar>,
+    pub assignee: Option<OwnerAvatar>,
+    pub assigned_to_me: bool,
     pub started_at: DateTime<Utc>,
-    pub ended_at: Option<DateTime<Utc>>,
+    /// Coarse age: elapsed for ongoing, lifetime for resolved. Refreshed by the
+    /// 10s table poll, so no client-side ticking.
+    pub age: String,
     pub ongoing: bool,
 }
 
-#[derive(Template, WebTemplate)]
-#[template(path = "incidents/list.html")]
-pub struct IncidentsConsolePage {
-    pub active_tab: &'static str,
-    pub state: &'static str,
-    pub state_tabs: Vec<StateTab>,
+/// Row + pager state shared by the full console page and its live-polled table
+/// fragment.
+pub struct ConsoleData {
     pub rows: Vec<ConsoleRow>,
-    // Pager (offset/limit; total drives "page N of M").
+    /// Current user id, so a row can offer "assign to me".
+    pub self_id: String,
     pub limit: usize,
     pub total: usize,
     pub page: usize,
     pub total_pages: usize,
     pub range_lo: usize,
     pub range_hi: usize,
-    pub prev_offset: Option<usize>,
-    pub next_offset: Option<usize>,
+    pub prev_href: Option<String>,
+    pub next_href: Option<String>,
     pub page_sizes: Vec<PageSize>,
+    /// Query string (sans host) the table fragment re-polls itself with.
+    pub partial_query: String,
+}
+
+#[derive(Template, WebTemplate)]
+#[template(path = "incidents/list.html")]
+pub struct IncidentsConsolePage {
+    pub active_tab: &'static str,
+    pub state_tabs: Vec<StateTab>,
+    pub severity_chips: Vec<SeverityChip>,
+    pub mine_href: String,
+    pub mine_active: bool,
+    pub data: ConsoleData,
+}
+
+#[derive(Template, WebTemplate)]
+#[template(path = "incidents/_console_table.html")]
+pub struct IncidentsConsoleTable {
+    pub data: ConsoleData,
 }
 
 fn state_label(s: IncidentState) -> &'static str {
@@ -86,12 +126,37 @@ fn state_label(s: IncidentState) -> &'static str {
     }
 }
 
-fn row_from(inc: OpsIncident, monitor_name: Option<String>, acked_by: Option<String>) -> ConsoleRow {
+/// Coarse, jitter-free age — minute resolution, no seconds. The 10s table poll
+/// keeps it current, so it never ticks per-second on the client.
+fn fmt_age(secs: i64) -> String {
+    let s = secs.max(0);
+    if s < 60 {
+        "<1m".to_string()
+    } else if s < 3600 {
+        format!("{}m", s / 60)
+    } else if s < 86_400 {
+        format!("{}h {}m", s / 3600, (s % 3600) / 60)
+    } else {
+        format!("{}d {}h", s / 86_400, (s % 86_400) / 3600)
+    }
+}
+
+fn row_from(
+    inc: OpsIncident,
+    monitor_name: Option<String>,
+    acked_by: Option<OwnerAvatar>,
+    assignee: Option<OwnerAvatar>,
+    assigned_to_me: bool,
+) -> ConsoleRow {
     let label = inc
         .title
         .clone()
         .or(monitor_name)
         .unwrap_or_else(|| "Untitled incident".to_string());
+    let ongoing = inc.state.is_open();
+    // Ongoing: elapsed since start. Resolved: total lifetime.
+    let end = inc.ended_at.filter(|_| !ongoing).unwrap_or_else(Utc::now);
+    let age = fmt_age((end - inc.started_at).num_seconds());
     ConsoleRow {
         id: inc.id.to_string(),
         target_id: inc.target_id.map(|t| t.to_string()),
@@ -103,9 +168,11 @@ fn row_from(inc: OpsIncident, monitor_name: Option<String>, acked_by: Option<Str
         origin: inc.origin.as_db_str(),
         visibility: inc.visibility.as_db_str(),
         acked_by,
+        assignee,
+        assigned_to_me,
         started_at: inc.started_at,
-        ended_at: inc.ended_at,
-        ongoing: inc.state.is_open(),
+        age,
+        ongoing,
     }
 }
 
@@ -136,80 +203,198 @@ async fn members_map(state: &AppState, org: OrgId) -> WebResult<HashMap<UserId, 
         .collect())
 }
 
-pub async fn list(
-    _auth: AuthedBrowser,
-    CurrentOrg(org): CurrentOrg,
-    State(state): State<AppState>,
-    Query(params): Query<ListParams>,
-) -> WebResult<IncidentsConsolePage> {
-    let active: &'static str = STATE_FILTERS
+/// Active filter selection resolved from the raw query params.
+struct Resolved {
+    active: &'static str,
+    state: Option<IncidentState>,
+    severity_key: Option<&'static str>,
+    severity: Option<IncidentSeverity>,
+    mine: bool,
+    limit: usize,
+}
+
+fn resolve(params: &ListParams) -> Resolved {
+    let active = STATE_FILTERS
         .iter()
         .copied()
         .find(|s| Some(*s) == params.state.as_deref())
         .unwrap_or("all");
-    let st = parse_state(active);
-    let limit = params
-        .limit
-        .filter(|n| PAGE_SIZES.contains(n))
-        .unwrap_or(DEFAULT_PAGE_SIZE);
+    let severity_key = SEVERITIES
+        .iter()
+        .copied()
+        .find(|s| Some(*s) == params.severity.as_deref());
+    Resolved {
+        active,
+        state: parse_state(active),
+        severity_key,
+        severity: severity_key.map(IncidentSeverity::from_db_str),
+        mine: params.assignee.as_deref() == Some("me"),
+        limit: params
+            .limit
+            .filter(|n| PAGE_SIZES.contains(n))
+            .unwrap_or(DEFAULT_PAGE_SIZE),
+    }
+}
 
-    let total = state.incident_ops_store.count(org, st).await?;
-    let max_offset = if total == 0 { 0 } else { ((total - 1) / limit) * limit };
-    // Snap a hand-typed offset down to a page boundary, then clamp to the last
+/// Build the canonical query string for a console URL (nav links + the table
+/// fragment's self-poll), omitting defaults so URLs stay clean.
+fn build_query(state: &str, severity: Option<&str>, mine: bool, limit: usize, offset: usize) -> String {
+    let mut q = format!("state={state}&limit={limit}");
+    if let Some(s) = severity {
+        q.push_str("&severity=");
+        q.push_str(s);
+    }
+    if mine {
+        q.push_str("&assignee=me");
+    }
+    if offset > 0 {
+        q.push_str(&format!("&offset={offset}"));
+    }
+    q
+}
+
+/// Load the rows + pager shared by the full page and the table fragment.
+async fn console_data(
+    state: &AppState,
+    org: OrgId,
+    uid: UserId,
+    params: &ListParams,
+) -> WebResult<ConsoleData> {
+    let r = resolve(params);
+    let base = IncidentOpsFilter {
+        state: r.state,
+        severity: r.severity,
+        assignee: r.mine.then_some(uid),
+        ..Default::default()
+    };
+    let total = state.incident_ops_store.count(org, &base).await?;
+    let max_offset = if total == 0 { 0 } else { ((total - 1) / r.limit) * r.limit };
+    // Snap a hand-typed offset to a page boundary, then clamp to the last
     // populated page, so the page number and prev/next links stay aligned.
-    let offset = ((params.offset.unwrap_or(0) / limit) * limit).min(max_offset);
+    let offset = ((params.offset.unwrap_or(0) / r.limit) * r.limit).min(max_offset);
 
     let incidents = state
         .incident_ops_store
         .list(
             org,
             IncidentOpsFilter {
-                state: st,
-                limit: Some(limit),
+                limit: Some(r.limit),
                 offset,
+                ..base.clone()
             },
         )
         .await?;
-    let names = name_map(&state, org).await?;
-    let members = members_map(&state, org).await?;
+    let names = name_map(state, org).await?;
+    let members = members_map(state, org).await?;
     let rows: Vec<ConsoleRow> = incidents
         .into_iter()
         .map(|i| {
+            let avatar_of = |u: UserId| {
+                members.get(&u).map(|email| OwnerAvatar {
+                    initials: crate::web::avatar::initials_from(email),
+                    color: crate::web::avatar::avatar_color(u.0),
+                    label: email.clone(),
+                })
+            };
             let name = i.target_id.and_then(|t| names.get(&t).cloned());
-            let acked = i.acknowledged_by.and_then(|u| members.get(&u).cloned());
-            row_from(i, name, acked)
+            let acked = i.acknowledged_by.and_then(avatar_of);
+            let assignee = i.assigned_to.and_then(avatar_of);
+            let mine_row = i.assigned_to == Some(uid);
+            row_from(i, name, acked, assignee, mine_row)
         })
         .collect();
 
     let shown = rows.len();
-    let total_pages = if total == 0 { 1 } else { total.div_ceil(limit) };
-    Ok(IncidentsConsolePage {
-        active_tab: "incidents",
-        state: active,
-        state_tabs: STATE_FILTERS
-            .iter()
-            .map(|k| StateTab {
-                key: k,
-                label: k,
-                active: *k == active,
-            })
-            .collect(),
+    let total_pages = if total == 0 { 1 } else { total.div_ceil(r.limit) };
+    let nav = |off: usize| format!("/incidents?{}", build_query(r.active, r.severity_key, r.mine, r.limit, off));
+    Ok(ConsoleData {
         rows,
-        limit,
+        self_id: uid.0.to_string(),
+        limit: r.limit,
         total,
-        page: offset / limit + 1,
+        page: offset / r.limit + 1,
         total_pages,
         range_lo: if total == 0 { 0 } else { offset + 1 },
         range_hi: offset + shown,
-        prev_offset: (offset > 0).then(|| offset.saturating_sub(limit)),
-        next_offset: (offset + limit < total).then_some(offset + limit),
+        prev_href: (offset > 0).then(|| nav(offset.saturating_sub(r.limit))),
+        next_href: (offset + r.limit < total).then(|| nav(offset + r.limit)),
         page_sizes: PAGE_SIZES
             .iter()
+            .copied()
             .map(|n| PageSize {
-                n: *n,
-                active: *n == limit,
+                n,
+                href: format!("/incidents?{}", build_query(r.active, r.severity_key, r.mine, n, 0)),
+                active: n == r.limit,
             })
             .collect(),
+        partial_query: build_query(r.active, r.severity_key, r.mine, r.limit, offset),
+    })
+}
+
+pub async fn list(
+    _auth: AuthedBrowser,
+    CurrentOrg(org): CurrentOrg,
+    CurrentUser(uid): CurrentUser,
+    State(state): State<AppState>,
+    Query(params): Query<ListParams>,
+) -> WebResult<IncidentsConsolePage> {
+    let r = resolve(&params);
+    let data = console_data(&state, org, uid, &params).await?;
+
+    // Tab counts honour the active severity + assignee filter, across states.
+    let count_filter = IncidentOpsFilter {
+        severity: r.severity,
+        assignee: r.mine.then_some(uid),
+        ..Default::default()
+    };
+    let counts = state.incident_ops_store.counts_by_state(org, &count_filter).await?;
+
+    let state_tabs = STATE_FILTERS
+        .iter()
+        .copied()
+        .map(|k| StateTab {
+            label: k,
+            href: format!("/incidents?{}", build_query(k, r.severity_key, r.mine, r.limit, 0)),
+            count: counts.for_state(parse_state(k)),
+            active: k == r.active,
+        })
+        .collect();
+
+    let sev_href =
+        |sev: Option<&str>| format!("/incidents?{}", build_query(r.active, sev, r.mine, r.limit, 0));
+    let mut severity_chips = vec![SeverityChip {
+        label: "any",
+        href: sev_href(None),
+        active: r.severity_key.is_none(),
+    }];
+    severity_chips.extend(SEVERITIES.iter().copied().map(|s| SeverityChip {
+        label: s,
+        href: sev_href(Some(s)),
+        active: r.severity_key == Some(s),
+    }));
+
+    Ok(IncidentsConsolePage {
+        active_tab: "incidents",
+        state_tabs,
+        severity_chips,
+        mine_href: format!(
+            "/incidents?{}",
+            build_query(r.active, r.severity_key, !r.mine, r.limit, 0)
+        ),
+        mine_active: r.mine,
+        data,
+    })
+}
+
+pub async fn list_partial(
+    _auth: AuthedBrowser,
+    CurrentOrg(org): CurrentOrg,
+    CurrentUser(uid): CurrentUser,
+    State(state): State<AppState>,
+    Query(params): Query<ListParams>,
+) -> WebResult<IncidentsConsoleTable> {
+    Ok(IncidentsConsoleTable {
+        data: console_data(&state, org, uid, &params).await?,
     })
 }
 
@@ -637,24 +822,48 @@ mod tests {
         }
     }
 
-    fn page(rows: Vec<ConsoleRow>) -> IncidentsConsolePage {
-        IncidentsConsolePage {
-            active_tab: "incidents",
-            state: "all",
-            state_tabs: STATE_FILTERS
-                .iter()
-                .map(|k| StateTab { key: k, label: k, active: *k == "all" })
-                .collect(),
+    fn data(rows: Vec<ConsoleRow>) -> ConsoleData {
+        ConsoleData {
             rows,
+            self_id: Uuid::nil().to_string(),
             limit: 50,
             total: 0,
             page: 1,
             total_pages: 1,
             range_lo: 0,
             range_hi: 0,
-            prev_offset: None,
-            next_offset: None,
-            page_sizes: PAGE_SIZES.iter().map(|n| PageSize { n: *n, active: *n == 50 }).collect(),
+            prev_href: None,
+            next_href: None,
+            page_sizes: PAGE_SIZES
+                .iter()
+                .copied()
+                .map(|n| PageSize { n, href: format!("/incidents?limit={n}"), active: n == 50 })
+                .collect(),
+            partial_query: "state=all&limit=50".into(),
+        }
+    }
+
+    fn page(rows: Vec<ConsoleRow>) -> IncidentsConsolePage {
+        IncidentsConsolePage {
+            active_tab: "incidents",
+            state_tabs: STATE_FILTERS
+                .iter()
+                .copied()
+                .map(|k| StateTab {
+                    label: k,
+                    href: format!("/incidents?state={k}"),
+                    count: 0,
+                    active: k == "all",
+                })
+                .collect(),
+            severity_chips: vec![SeverityChip {
+                label: "any",
+                href: "/incidents".into(),
+                active: true,
+            }],
+            mine_href: "/incidents?assignee=me".into(),
+            mine_active: false,
+            data: data(rows),
         }
     }
 
@@ -666,7 +875,7 @@ mod tests {
 
     #[test]
     fn console_triggered_row_shows_ack_and_resolve() {
-        let row = row_from(ops(IncidentState::Triggered), Some("api-gateway".into()), None);
+        let row = row_from(ops(IncidentState::Triggered), Some("api-gateway".into()), None, None, false);
         let html = page(vec![row]).render().unwrap();
         assert!(html.contains("api-gateway"));
         assert!(html.contains(r#"data-incident-action="acknowledge""#));
@@ -678,7 +887,7 @@ mod tests {
     fn console_resolved_row_shows_reopen_only() {
         let mut inc = ops(IncidentState::Resolved);
         inc.ended_at = Some(Utc::now());
-        let row = row_from(inc, Some("api".into()), None);
+        let row = row_from(inc, Some("api".into()), None, None, false);
         let html = page(vec![row]).render().unwrap();
         assert!(html.contains(r#"data-incident-action="reopen""#));
         assert!(!html.contains(r#"data-incident-action="acknowledge""#));
@@ -688,13 +897,49 @@ mod tests {
     fn console_shows_acked_by() {
         let mut inc = ops(IncidentState::Acknowledged);
         inc.acknowledged_at = Some(Utc::now());
-        let row = row_from(inc, Some("api".into()), Some("alice@example.com".into()));
+        let acker = OwnerAvatar {
+            initials: "AL".into(),
+            color: "oklch(0.62 0.12 200)".into(),
+            label: "alice@example.com".into(),
+        };
+        let row = row_from(inc, Some("api".into()), Some(acker), None, false);
         let mut p = page(vec![row]);
-        p.total = 1;
-        p.range_lo = 1;
-        p.range_hi = 1;
+        p.data.total = 1;
+        p.data.range_lo = 1;
+        p.data.range_hi = 1;
         let html = p.render().unwrap();
-        assert!(html.contains("alice@example.com"));
+        // Acknowledger shown as a small avatar; email only in the tooltip.
+        assert!(html.contains("monitors-avatar--sm"));
+        assert!(html.contains("acknowledged by alice@example.com"));
+    }
+
+    #[test]
+    fn console_row_shows_assignee_urgency_and_assign_to_me() {
+        let mut inc = ops(IncidentState::Triggered);
+        inc.urgency = crate::domain::IncidentUrgency::Low;
+        let unassigned = row_from(inc, Some("api".into()), None, None, false);
+        let html = page(vec![unassigned]).render().unwrap();
+        // Low urgency surfaces, and an unassigned row offers assign-to-me.
+        assert!(html.contains("notify"));
+        assert!(html.contains(r#"data-incident-assign-self"#));
+
+        let assigned = row_from(
+            ops(IncidentState::Triggered),
+            Some("api".into()),
+            None,
+            Some(OwnerAvatar {
+                initials: "BO".into(),
+                color: "oklch(0.62 0.12 100)".into(),
+                label: "bob@example.com".into(),
+            }),
+            true,
+        );
+        let html = page(vec![assigned]).render().unwrap();
+        // Owner shown as a ringed avatar (mine), email in tooltip, no take button.
+        assert!(html.contains("monitors-avatar--me"));
+        assert!(html.contains("BO"));
+        assert!(html.contains("bob@example.com"));
+        assert!(!html.contains(">take<"));
     }
 
     #[test]

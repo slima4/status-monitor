@@ -16,6 +16,7 @@ use crate::domain::{OrgId, Target};
 use crate::storage::TimeRange;
 use crate::storage::orgs::list_members;
 use crate::storage::traits::{TargetFilter, TargetSort};
+use crate::web::avatar::{avatar_color, initials_from};
 use crate::web::error::WebResult;
 use crate::web::filters;
 use crate::web::views::{describe_check, humanize_duration};
@@ -537,24 +538,6 @@ fn relative_ago(d: ChronoDuration) -> String {
 }
 
 /// Splits on `@` first so emails don't all collapse to identical initials.
-fn initials_from(s: &str) -> String {
-    let head = s.split('@').next().unwrap_or(s);
-    let mut chars = head.chars().filter(|c| c.is_alphanumeric());
-    let a = chars.next().map(|c| c.to_ascii_uppercase());
-    let b = chars.next().map(|c| c.to_ascii_uppercase());
-    match (a, b) {
-        (Some(a), Some(b)) => format!("{a}{b}"),
-        (Some(a), None) => format!("{a}"),
-        _ => "—".into(),
-    }
-}
-
-fn avatar_color(id: Uuid) -> String {
-    let bytes = id.as_bytes();
-    let hue = ((bytes[0] as u16) << 8 | bytes[1] as u16) as f32 % 360.0;
-    format!("oklch(0.62 0.12 {hue:.0})")
-}
-
 fn parse_sort(raw: Option<&str>) -> TargetSort {
     match raw.unwrap_or("recent") {
         "name" => TargetSort::Name,

@@ -74,6 +74,17 @@
     window.location.reload();
   }
 
+  async function assignSelf(el) {
+    const id = el.dataset.incidentId;
+    const holder = el.closest("[data-self-user-id]");
+    const selfId = holder && holder.getAttribute("data-self-user-id");
+    if (!id || !selfId) return;
+    const res = await post("/api/v1/incidents/" + encodeURIComponent(id) + "/assign", { user_id: selfId });
+    if (!res.ok) return showError(errMsg(res));
+    if (window.smToast) window.smToast({ message: "Assigned to you", kind: "ok" });
+    window.location.reload();
+  }
+
   async function addNote(id) {
     if (!id || !window.smPrompt) return;
     const msg = await window.smPrompt({
@@ -148,6 +159,11 @@
     if (act) {
       ev.preventDefault();
       return runAction(act.dataset.incidentId, act.dataset.incidentAction);
+    }
+    const assign = ev.target.closest("[data-incident-assign-self]");
+    if (assign) {
+      ev.preventDefault();
+      return assignSelf(assign);
     }
     const note = ev.target.closest("[data-incident-note]");
     if (note) {

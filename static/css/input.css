@@ -3139,6 +3139,17 @@
         letter-spacing: 0.03em;
         text-transform: uppercase;
     }
+    /* Secondary avatar (e.g. who acknowledged) — smaller, recedes next to the
+       primary owner avatar. */
+    .monitors-avatar--sm {
+        width: 1.125rem;
+        height: 1.125rem;
+        font-size: 0.5rem;
+    }
+    /* The current user's own avatar: an accent ring meaning "you", no label. */
+    .monitors-avatar--me {
+        box-shadow: 0 0 0 2px var(--theme-surface), 0 0 0 3px var(--theme-accent);
+    }
 
     /* Per-row ⋯ popover. `position: fixed` escapes the group-card's
        `overflow: hidden`; JS sets top/left from the button rect. */

@@ -6,6 +6,7 @@
 
 pub mod assets;
 pub mod auth;
+pub mod avatar;
 pub mod client_ip;
 pub mod display_prefs;
 pub mod error;

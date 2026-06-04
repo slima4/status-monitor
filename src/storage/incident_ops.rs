@@ -67,8 +67,36 @@ pub enum LifecycleOutcome {
 #[derive(Debug, Clone, Default)]
 pub struct IncidentOpsFilter {
     pub state: Option<IncidentState>,
+    pub severity: Option<IncidentSeverity>,
+    /// Restrict to incidents owned by this user (the "assigned to me" view).
+    pub assignee: Option<UserId>,
     pub limit: Option<usize>,
     pub offset: usize,
+}
+
+/// Per-state incident tallies for the console filter tabs, under the active
+/// severity/assignee filter (state itself excluded so each tab shows its own
+/// total).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct IncidentStateCounts {
+    pub triggered: usize,
+    pub acknowledged: usize,
+    pub resolved: usize,
+}
+
+impl IncidentStateCounts {
+    pub fn total(&self) -> usize {
+        self.triggered + self.acknowledged + self.resolved
+    }
+
+    pub fn for_state(&self, state: Option<IncidentState>) -> usize {
+        match state {
+            Some(IncidentState::Triggered) => self.triggered,
+            Some(IncidentState::Acknowledged) => self.acknowledged,
+            Some(IncidentState::Resolved) => self.resolved,
+            None => self.total(),
+        }
+    }
 }
 
 /// A failed paging row the escalation engine should re-attempt. Carries the
@@ -102,9 +130,16 @@ pub struct DueIncident {
 pub trait IncidentOpsStore: Send + Sync {
     async fn get(&self, org: OrgId, id: Uuid) -> Result<Option<OpsIncident>>;
     async fn list(&self, org: OrgId, filter: IncidentOpsFilter) -> Result<Vec<OpsIncident>>;
-    /// Total incidents in `org` matching the optional state filter — for pager
-    /// "page N of M".
-    async fn count(&self, org: OrgId, state: Option<IncidentState>) -> Result<usize>;
+    /// Total incidents in `org` matching the filter — for pager "page N of M".
+    /// Honours state/severity/assignee (offset/limit ignored).
+    async fn count(&self, org: OrgId, filter: &IncidentOpsFilter) -> Result<usize>;
+    /// Per-state tallies for the console tabs, under the same severity/assignee
+    /// filter (the filter's own `state` is ignored — every state is counted).
+    async fn counts_by_state(
+        &self,
+        org: OrgId,
+        filter: &IncidentOpsFilter,
+    ) -> Result<IncidentStateCounts>;
     /// Aggregate incident reporting (MTTA/MTTR, counts, noisiest monitors) over
     /// a trailing window of `window_days`, scoped to `org`.
     async fn metrics(&self, org: OrgId, window_days: u32) -> Result<IncidentMetrics>;
@@ -480,14 +515,20 @@ impl IncidentOpsStore for PgIncidentOpsStore {
         let cap = filter.limit.unwrap_or(100).clamp(1, 1000) as i64;
         let off = filter.offset as i64;
         let state = filter.state.map(|s| s.as_db_str());
+        let severity = filter.severity.map(|s| s.as_db_str());
+        let assignee = filter.assignee.map(|u| u.0);
         let sql = format!(
             "SELECT {OPS_COLS} FROM incidents \
              WHERE org_id = $1 AND ($2::text IS NULL OR state = $2) \
-             ORDER BY started_at DESC LIMIT $3 OFFSET $4"
+                 AND ($3::text IS NULL OR severity = $3) \
+                 AND ($4::uuid IS NULL OR assigned_to = $4) \
+             ORDER BY started_at DESC LIMIT $5 OFFSET $6"
         );
         let rows: Vec<OpsIncidentRow> = sqlx::query_as(&sql)
             .bind(org.0)
             .bind(state)
+            .bind(severity)
+            .bind(assignee)
             .bind(cap)
             .bind(off)
             .fetch_all(&self.pool)
@@ -496,18 +537,55 @@ impl IncidentOpsStore for PgIncidentOpsStore {
         Ok(rows.into_iter().map(row_to_ops).collect())
     }
 
-    async fn count(&self, org: OrgId, state: Option<IncidentState>) -> Result<usize> {
-        let state = state.map(|s| s.as_db_str());
+    async fn count(&self, org: OrgId, filter: &IncidentOpsFilter) -> Result<usize> {
+        let state = filter.state.map(|s| s.as_db_str());
+        let severity = filter.severity.map(|s| s.as_db_str());
+        let assignee = filter.assignee.map(|u| u.0);
         let n: i64 = sqlx::query_scalar(
             "SELECT count(*) FROM incidents \
-             WHERE org_id = $1 AND ($2::text IS NULL OR state = $2)",
+             WHERE org_id = $1 AND ($2::text IS NULL OR state = $2) \
+                 AND ($3::text IS NULL OR severity = $3) \
+                 AND ($4::uuid IS NULL OR assigned_to = $4)",
         )
         .bind(org.0)
         .bind(state)
+        .bind(severity)
+        .bind(assignee)
         .fetch_one(&self.pool)
         .await
         .map_err(|e| anyhow::anyhow!("count ops incidents: {e}"))?;
         Ok(n.max(0) as usize)
+    }
+
+    async fn counts_by_state(
+        &self,
+        org: OrgId,
+        filter: &IncidentOpsFilter,
+    ) -> Result<IncidentStateCounts> {
+        let severity = filter.severity.map(|s| s.as_db_str());
+        let assignee = filter.assignee.map(|u| u.0);
+        let rows: Vec<(String, i64)> = sqlx::query_as(
+            "SELECT state, count(*) FROM incidents \
+             WHERE org_id = $1 AND ($2::text IS NULL OR severity = $2) \
+                 AND ($3::uuid IS NULL OR assigned_to = $3) \
+             GROUP BY state",
+        )
+        .bind(org.0)
+        .bind(severity)
+        .bind(assignee)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| anyhow::anyhow!("counts_by_state: {e}"))?;
+        let mut c = IncidentStateCounts::default();
+        for (state, n) in rows {
+            let n = n.max(0) as usize;
+            match IncidentState::from_db_str(&state) {
+                IncidentState::Triggered => c.triggered = n,
+                IncidentState::Acknowledged => c.acknowledged = n,
+                IncidentState::Resolved => c.resolved = n,
+            }
+        }
+        Ok(c)
     }
 
     async fn metrics(&self, org: OrgId, window_days: u32) -> Result<IncidentMetrics> {
@@ -1255,6 +1333,8 @@ impl IncidentOpsStore for InMemoryIncidentOpsStore {
             .incidents
             .iter()
             .filter(|i| filter.state.is_none_or(|s| i.state == s))
+            .filter(|i| filter.severity.is_none_or(|s| i.severity == s))
+            .filter(|i| filter.assignee.is_none_or(|u| i.assigned_to == Some(u)))
             .cloned()
             .collect();
         out.sort_by_key(|i| std::cmp::Reverse(i.started_at));
@@ -1262,14 +1342,36 @@ impl IncidentOpsStore for InMemoryIncidentOpsStore {
         Ok(out.into_iter().skip(filter.offset).take(lim).collect())
     }
 
-    async fn count(&self, _org: OrgId, state: Option<IncidentState>) -> Result<usize> {
+    async fn count(&self, _org: OrgId, filter: &IncidentOpsFilter) -> Result<usize> {
         Ok(self
             .inner
             .lock()
             .incidents
             .iter()
-            .filter(|i| state.is_none_or(|s| i.state == s))
+            .filter(|i| filter.state.is_none_or(|s| i.state == s))
+            .filter(|i| filter.severity.is_none_or(|s| i.severity == s))
+            .filter(|i| filter.assignee.is_none_or(|u| i.assigned_to == Some(u)))
             .count())
+    }
+
+    async fn counts_by_state(
+        &self,
+        _org: OrgId,
+        filter: &IncidentOpsFilter,
+    ) -> Result<IncidentStateCounts> {
+        let g = self.inner.lock();
+        let mut c = IncidentStateCounts::default();
+        for i in g.incidents.iter().filter(|i| {
+            filter.severity.is_none_or(|s| i.severity == s)
+                && filter.assignee.is_none_or(|u| i.assigned_to == Some(u))
+        }) {
+            match i.state {
+                IncidentState::Triggered => c.triggered += 1,
+                IncidentState::Acknowledged => c.acknowledged += 1,
+                IncidentState::Resolved => c.resolved += 1,
+            }
+        }
+        Ok(c)
     }
 
     async fn metrics(&self, _org: OrgId, window_days: u32) -> Result<IncidentMetrics> {
@@ -1860,14 +1962,69 @@ mod tests {
         let _b = seed_triggered(&store);
         store.resolve(org(), a, Actor::System, None).await.unwrap();
         let triggered = store
-            .list(org(), IncidentOpsFilter { state: Some(IncidentState::Triggered), limit: None, offset: 0 })
+            .list(org(), IncidentOpsFilter { state: Some(IncidentState::Triggered), ..Default::default() })
             .await
             .unwrap();
         assert_eq!(triggered.len(), 1);
         let resolved = store
-            .list(org(), IncidentOpsFilter { state: Some(IncidentState::Resolved), limit: None, offset: 0 })
+            .list(org(), IncidentOpsFilter { state: Some(IncidentState::Resolved), ..Default::default() })
             .await
             .unwrap();
         assert_eq!(resolved.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn filters_by_severity_and_assignee_with_counts() {
+        let store = InMemoryIncidentOpsStore::new();
+        let u = user();
+        // Two triggered (one critical, mine), one resolved minor.
+        let a = seed_triggered(&store);
+        let b = seed_triggered(&store);
+        let c = seed_triggered(&store);
+        {
+            let mut g = store.inner.lock();
+            for i in g.incidents.iter_mut() {
+                if i.id == a {
+                    i.severity = IncidentSeverity::Critical;
+                    i.assigned_to = Some(u);
+                } else if i.id == c {
+                    i.severity = IncidentSeverity::Minor;
+                }
+            }
+        }
+        let _ = b;
+        store.resolve(org(), c, Actor::System, None).await.unwrap();
+
+        // Severity filter.
+        let crit = store
+            .list(org(), IncidentOpsFilter { severity: Some(IncidentSeverity::Critical), ..Default::default() })
+            .await
+            .unwrap();
+        assert_eq!(crit.len(), 1);
+        assert_eq!(crit[0].id, a);
+
+        // Assignee filter ("mine").
+        let mine = store
+            .list(org(), IncidentOpsFilter { assignee: Some(u), ..Default::default() })
+            .await
+            .unwrap();
+        assert_eq!(mine.len(), 1);
+        assert_eq!(mine[0].id, a);
+
+        // counts_by_state ignores the state filter, honours severity/assignee.
+        let counts = store
+            .counts_by_state(org(), &IncidentOpsFilter::default())
+            .await
+            .unwrap();
+        assert_eq!(counts.triggered, 2);
+        assert_eq!(counts.resolved, 1);
+        assert_eq!(counts.total(), 3);
+
+        let mine_counts = store
+            .counts_by_state(org(), &IncidentOpsFilter { assignee: Some(u), ..Default::default() })
+            .await
+            .unwrap();
+        assert_eq!(mine_counts.triggered, 1);
+        assert_eq!(mine_counts.total(), 1);
     }
 }
