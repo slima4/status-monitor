@@ -1,0 +1,52 @@
+<div data-member-map class="hidden">
+  {% for m in members %}<span data-member-id="{{ m.id }}" data-member-email="{{ m.email }}"></span>{% endfor %}
+</div>
+{% if schedules.is_empty() %}
+<div class="sticker-card flex items-center gap-3 px-4 py-6 text-sm text-muted">
+  <span aria-hidden="true" class="text-base text-quiet">↘</span>
+  <span>No on-call schedules yet — add one above, then page it from an escalation policy.</span>
+</div>
+{% else %}
+<div class="sticker-card overflow-hidden">
+  <table class="w-full text-left text-sm">
+    <thead class="bg-[color:var(--theme-surface-sunk)] text-xs uppercase text-muted">
+      <tr>
+        <th class="px-4 py-2">Name</th>
+        <th class="px-4 py-2">On call now</th>
+        <th class="px-4 py-2">Timezone</th>
+        <th class="px-4 py-2">Layers</th>
+        <th class="px-4 py-2"></th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-[color:var(--theme-line)]">
+      {% for s in schedules %}
+      <tr>
+        <td class="px-4 py-2 align-top text-body">
+          <div class="font-medium">{{ s.name }}</div>
+        </td>
+        <td class="px-4 py-2 align-top text-body">
+          <span data-who-on-call data-schedule-id="{{ s.id }}" class="text-muted">…</span>
+        </td>
+        <td class="px-4 py-2 align-top font-mono text-xs text-muted">{{ s.timezone }}</td>
+        <td class="px-4 py-2 align-top tabular-nums">{{ s.layer_count }}</td>
+        <td class="px-4 py-2">
+          <div class="flex items-center justify-end gap-3">
+            <a href="/settings/on-call/{{ s.id }}/edit" class="row-link">Edit</a>
+            <button type="button"
+                    hx-delete="/api/v1/on-call/schedules/{{ s.id }}"
+                    hx-headers='{"X-Requested-With":"uptimepage"}'
+                    hx-on::after-request="if(event.detail.successful){htmx.trigger('body','oncall:refresh')}"
+                    data-confirm-modal
+                    data-confirm-title="Delete on-call schedule?"
+                    data-confirm-body="Escalation policies that page {{ s.name }} reach no one through it until repointed."
+                    data-confirm-label="Delete schedule"
+                    data-confirm-danger
+                    class="row-link row-link--danger">Delete</button>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}

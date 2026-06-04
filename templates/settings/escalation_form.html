@@ -73,6 +73,17 @@
             </label>
             {% endfor %}
           </fieldset>
+          {% if !form.schedule_choices.is_empty() %}
+          <fieldset class="space-y-2" data-level-schedules>
+            <legend class="text-xs uppercase text-muted">On-call schedules paged at this level</legend>
+            {% for sc in level.schedules %}
+            <label class="mr-4 inline-flex items-center gap-2">
+              <input type="checkbox" data-schedule value="{{ sc.id }}"{% if sc.selected %} checked{% endif %}>
+              <span class="text-sm">{{ sc.name }}</span>
+            </label>
+            {% endfor %}
+          </fieldset>
+          {% endif %}
         </div>
         {% endfor %}
       </div>
@@ -109,6 +120,17 @@
         </label>
         {% endfor %}
       </fieldset>
+      {% if !form.schedule_choices.is_empty() %}
+      <fieldset class="space-y-2" data-level-schedules>
+        <legend class="text-xs uppercase text-muted">On-call schedules paged at this level</legend>
+        {% for sc in form.schedule_choices %}
+        <label class="mr-4 inline-flex items-center gap-2">
+          <input type="checkbox" data-schedule value="{{ sc.id }}">
+          <span class="text-sm">{{ sc.name }}</span>
+        </label>
+        {% endfor %}
+      </fieldset>
+      {% endif %}
     </div>
   </template>
 </section>

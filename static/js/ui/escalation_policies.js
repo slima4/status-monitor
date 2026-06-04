@@ -82,11 +82,16 @@
         for (let i = 0; i < rows.length; i++) {
             const delay = parseInt(rows[i].querySelector("[data-delay]").value, 10);
             const channels = Array.from(rows[i].querySelectorAll("[data-channel]:checked")).map(c => c.value);
-            if (channels.length === 0) return { error: `Level ${i + 1} needs at least one channel.` };
+            const schedules = Array.from(rows[i].querySelectorAll("[data-schedule]:checked")).map(c => c.value);
+            if (channels.length === 0 && schedules.length === 0) {
+                return { error: `Level ${i + 1} needs at least one channel or schedule.` };
+            }
+            const targets = channels.map(id => ({ target_type: "channel", channel_id: id }))
+                .concat(schedules.map(id => ({ target_type: "schedule", schedule_id: id })));
             steps.push({
                 level: i + 1,
                 delay_secs: Number.isFinite(delay) ? delay : 300,
-                targets: channels.map(id => ({ target_type: "channel", channel_id: id })),
+                targets,
             });
         }
         return {

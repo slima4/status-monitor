@@ -4,6 +4,7 @@ pub mod escalation;
 pub mod incidents;
 pub mod legal;
 pub mod notification_channels;
+pub mod on_call;
 pub mod pages;
 pub mod public_status;
 pub mod share;

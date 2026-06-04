@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}On-call · Uptimepage{% endblock %}
+{% block content %}
+<section class="space-y-6">
+  <header class="flex flex-wrap items-start justify-between gap-3">
+    <div class="space-y-1">
+      <h1 class="page-title"><span class="page-title__prefix" aria-hidden="true">$</span>on-call schedules</h1>
+      <p class="text-sm text-muted">
+        A rotation of responders. An escalation policy can page a schedule, and
+        whoever is on call right now is reached through the channels they have
+        chosen to be paged on. One-off overrides cover swaps without editing the
+        rotation.
+      </p>
+    </div>
+    <a href="/settings/on-call/new"
+       class="sticker-btn sticker-btn--primary px-3 py-1.5 text-sm font-medium">
+      add schedule
+    </a>
+  </header>
+
+  <div id="on-call-list"
+       hx-get="/web/partials/settings/on-call"
+       hx-trigger="load, every 60s, oncall:refresh from:body"
+       hx-swap="innerHTML"
+       class="space-y-4">
+    <p class="sticker-card px-4 py-3 text-sm text-muted">Loading…</p>
+  </div>
+
+  <section class="space-y-3" aria-labelledby="contacts-heading">
+    <h2 id="contacts-heading" class="panel-label">channels that page you</h2>
+    <p class="text-xs text-muted">
+      When an escalation policy pages a schedule you are on, you are reached
+      through the channels you pick here. Saved as you toggle.
+    </p>
+    <div class="sticker-card space-y-3 p-5" data-contacts>
+      {% if no_channels %}
+      <p class="text-sm text-muted">
+        No notification channels yet — <a href="/settings/notifications/new" class="underline">add one</a> to be reachable.
+      </p>
+      {% else %}
+      <div class="flex flex-wrap gap-x-6 gap-y-2">
+        {% for c in contacts %}
+        <label class="inline-flex items-center gap-2">
+          <input type="checkbox" data-contact value="{{ c.id }}"{% if c.checked %} checked{% endif %}>
+          <span class="text-sm">{{ c.name }}</span>
+        </label>
+        {% endfor %}
+      </div>
+      <span data-contacts-result class="flash-text text-xs"></span>
+      {% endif %}
+    </div>
+  </section>
+</section>
+
+<script defer src="{{ "js/ui/on_call_list.js"|asset }}"></script>
+<script defer src="{{ "js/ui/contact_channels.js"|asset }}"></script>
+{% endblock %}

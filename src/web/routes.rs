@@ -97,6 +97,16 @@ pub fn routes(state: AppState) -> Router {
             "/web/partials/settings/escalation",
             get(views::escalation::list_partial),
         )
+        .route("/settings/on-call", get(views::on_call::index))
+        .route("/settings/on-call/new", get(views::on_call::new_form))
+        .route(
+            "/settings/on-call/{id}/edit",
+            get(views::on_call::edit_form),
+        )
+        .route(
+            "/web/partials/settings/on-call",
+            get(views::on_call::list_partial),
+        )
         .route(
             "/web/partials/settings/sessions",
             get(views::auth::settings::sessions_partial),

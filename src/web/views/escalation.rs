@@ -61,6 +61,8 @@ pub struct EscalationPartial {
 pub struct LevelModel {
     pub delay_secs: i32,
     pub channels: Vec<Choice>,
+    /// On-call schedules paged at this level (resolved to whoever is on call).
+    pub schedules: Vec<Choice>,
 }
 
 pub struct PolicyFormModel {
@@ -72,6 +74,8 @@ pub struct PolicyFormModel {
     pub repeat_count: i32,
     /// All org channels, unchecked — the template for a freshly-added level.
     pub channel_choices: Vec<Choice>,
+    /// All org on-call schedules, unchecked — for a freshly-added level.
+    pub schedule_choices: Vec<Choice>,
     pub levels: Vec<LevelModel>,
     /// True when the org has no channels yet (the builder warns + links out).
     pub no_channels: bool,
@@ -163,6 +167,20 @@ fn choices_from(channels: &[ChannelOption], selected: &[Uuid]) -> Vec<Choice> {
         .collect()
 }
 
+/// Org on-call schedules, listed once per request, as the parallel target set.
+async fn org_schedules(state: &AppState, org: OrgId) -> WebResult<Vec<ChannelOption>> {
+    Ok(state
+        .on_call_store
+        .list(org)
+        .await?
+        .into_iter()
+        .map(|s| ChannelOption {
+            id: s.id,
+            name: s.name,
+        })
+        .collect())
+}
+
 pub async fn new_form(
     State(state): State<AppState>,
     org: Result<CurrentOrg, AppError>,
@@ -172,6 +190,7 @@ pub async fn new_form(
         Err(resp) => return Ok(*resp),
     };
     let channels = org_channels(&state, org).await?;
+    let schedules = org_schedules(&state, org).await?;
     let form = PolicyFormModel {
         mode: "create",
         action: "/api/v1/escalation-policies".into(),
@@ -180,10 +199,12 @@ pub async fn new_form(
         description: String::new(),
         repeat_count: 0,
         channel_choices: choices_from(&channels, &[]),
+        schedule_choices: choices_from(&schedules, &[]),
         // One empty rung to start.
         levels: vec![LevelModel {
             delay_secs: 300,
             channels: choices_from(&channels, &[]),
+            schedules: choices_from(&schedules, &[]),
         }],
         no_channels: channels.is_empty(),
     };
@@ -211,19 +232,27 @@ pub async fn edit_form(
             AppError::not_found("ESCALATION_POLICY_NOT_FOUND", "escalation policy not found")
         })?;
     let channels = org_channels(&state, org).await?;
+    let schedules = org_schedules(&state, org).await?;
     let mut levels: Vec<LevelModel> = policy
         .steps
         .iter()
         .map(|step| {
-            let selected: Vec<Uuid> = step
+            let sel_channels: Vec<Uuid> = step
                 .targets
                 .iter()
                 .filter(|t| t.target_type == EscalationTargetType::Channel)
                 .filter_map(|t| t.channel_id)
                 .collect();
+            let sel_schedules: Vec<Uuid> = step
+                .targets
+                .iter()
+                .filter(|t| t.target_type == EscalationTargetType::Schedule)
+                .filter_map(|t| t.schedule_id)
+                .collect();
             LevelModel {
                 delay_secs: step.delay_secs,
-                channels: choices_from(&channels, &selected),
+                channels: choices_from(&channels, &sel_channels),
+                schedules: choices_from(&schedules, &sel_schedules),
             }
         })
         .collect();
@@ -231,6 +260,7 @@ pub async fn edit_form(
         levels.push(LevelModel {
             delay_secs: 300,
             channels: choices_from(&channels, &[]),
+            schedules: choices_from(&schedules, &[]),
         });
     }
     let form = PolicyFormModel {
@@ -241,6 +271,7 @@ pub async fn edit_form(
         description: policy.description.unwrap_or_default(),
         repeat_count: policy.repeat_count,
         channel_choices: choices_from(&channels, &[]),
+        schedule_choices: choices_from(&schedules, &[]),
         levels,
         no_channels: channels.is_empty(),
     };
@@ -350,9 +381,11 @@ mod tests {
                 description: String::new(),
                 repeat_count: 0,
                 channel_choices: vec![choice("Ops")],
+                schedule_choices: vec![],
                 levels: vec![LevelModel {
                     delay_secs: 300,
                     channels: vec![choice("Ops")],
+                    schedules: vec![],
                 }],
                 no_channels: false,
             },
