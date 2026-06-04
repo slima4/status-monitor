@@ -174,18 +174,15 @@ fn parse_state_filter(s: Option<&str>) -> Result<Option<IncidentState>> {
     }
 }
 
-/// Trim a blank note to `None`, reject one over the message length cap.
+/// Trim a blank note to `None`, reject one over the message length cap. Caps by
+/// character count to match the shared validators (a byte cap spuriously
+/// rejected multibyte notes well under the advertised character limit).
 fn clean_note(note: Option<String>) -> Result<Option<String>> {
     let Some(n) = note else { return Ok(None) };
     if n.trim().is_empty() {
         return Ok(None);
     }
-    if n.len() > validation::MAX_MESSAGE {
-        return Err(AppError::bad_request(
-            codes::MESSAGE_TOO_LONG,
-            "note too long",
-        ));
-    }
+    validation::check_length(&n, "note", validation::MAX_MESSAGE, codes::MESSAGE_TOO_LONG)?;
     Ok(Some(n))
 }
 
@@ -400,12 +397,30 @@ pub async fn publish_incident(
 ) -> Result<Json<OpsIncident>> {
     validation::validate_optional_title(Some(&body.public_title), "public_title")?;
     validation::validate_optional_description(Some(&body.public_description), "public_description")?;
-    state
+    let inc = state
         .incident_ops_store
         .publish(org, id, body.public_title, body.public_description, Actor::User(user))
         .await?
-        .map(Json)
-        .ok_or_else(|| AppError::not_found(codes::INCIDENT_NOT_FOUND, "incident not found"))
+        .ok_or_else(|| AppError::not_found(codes::INCIDENT_NOT_FOUND, "incident not found"))?;
+    invalidate_incident_pages(&state, org, inc.target_id).await;
+    Ok(Json(inc))
+}
+
+/// Bust the cached HTML status pages that list this incident's monitor, so a
+/// visibility flip shows/hides immediately instead of after the page TTL. The
+/// JSON/RSS/detail surfaces are already live. Best-effort.
+async fn invalidate_incident_pages(state: &AppState, org: crate::domain::OrgId, target_id: Option<Uuid>) {
+    let Some(tid) = target_id else { return };
+    match state.status_page_store.pages_for_targets(org, &[tid]).await {
+        Ok(pages) => {
+            for page in pages {
+                state.public_source.invalidate(page).await;
+            }
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "could not invalidate pages after incident visibility change")
+        }
+    }
 }
 
 #[utoipa::path(
@@ -420,12 +435,13 @@ pub async fn unpublish_incident(
     CurrentUser(user): CurrentUser,
     Path(id): Path<Uuid>,
 ) -> Result<Json<OpsIncident>> {
-    state
+    let inc = state
         .incident_ops_store
         .unpublish(org, id, Actor::User(user))
         .await?
-        .map(Json)
-        .ok_or_else(|| AppError::not_found(codes::INCIDENT_NOT_FOUND, "incident not found"))
+        .ok_or_else(|| AppError::not_found(codes::INCIDENT_NOT_FOUND, "incident not found"))?;
+    invalidate_incident_pages(&state, org, inc.target_id).await;
+    Ok(Json(inc))
 }
 
 // ── Metrics & postmortem ────────────────────────────────────────────────────

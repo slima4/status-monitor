@@ -1015,7 +1015,7 @@ impl McpServer {
         if message.is_empty() {
             return Err(McpToolError::invalid_argument("message must not be empty"));
         }
-        if message.len() > MAX_INCIDENT_MESSAGE_LEN {
+        if message.chars().count() > MAX_INCIDENT_MESSAGE_LEN {
             return Err(McpToolError::invalid_argument(format!(
                 "message must be at most {MAX_INCIDENT_MESSAGE_LEN} characters"
             )));
@@ -1154,7 +1154,7 @@ fn incident_summary(i: &ActiveIncident) -> IncidentSummary {
     IncidentSummary {
         id: i.id.to_string(),
         monitor_id: i.target_id.to_string(),
-        monitor_name: i.target_name.clone(),
+        monitor_name: sanitize_data(&i.target_name),
         severity: i.severity.as_db_str().to_string(),
         opened_at: i.started_at.to_rfc3339(),
         latest_phase: i
@@ -1170,7 +1170,7 @@ fn incident_detail(i: &Incident, monitor_name: Option<String>) -> IncidentDetail
     IncidentDetail {
         id: i.id.to_string(),
         monitor_id: i.target_id.to_string(),
-        monitor_name,
+        monitor_name: monitor_name.map(|n| sanitize_data(&n)),
         state: i.status.as_str().to_string(),
         severity: i.severity.as_db_str().to_string(),
         opened_at: i.started_at.to_rfc3339(),
@@ -1182,7 +1182,7 @@ fn incident_detail(i: &Incident, monitor_name: Option<String>) -> IncidentDetail
             .map(|u| IncidentUpdateItem {
                 posted_at: u.posted_at.to_rfc3339(),
                 phase: u.phase.as_db_str().to_string(),
-                message: u.message.clone(),
+                message: sanitize_data(&u.message),
             })
             .collect(),
     }
@@ -1253,6 +1253,17 @@ fn sanitize_prompt(s: &str) -> String {
     s.chars().filter(|c| !c.is_control()).take(200).collect()
 }
 
+/// Neutralise customer-supplied text returned to the model: drop control
+/// characters (except tab/newline, which are legitimate in error text) that
+/// could smuggle hidden instructions, and cap length. The server instructions
+/// already label this as data, not commands — this is belt-and-suspenders.
+fn sanitize_data(s: &str) -> String {
+    s.chars()
+        .filter(|c| !c.is_control() || *c == '\n' || *c == '\t')
+        .take(4000)
+        .collect()
+}
+
 /// Accepted monitor states for the `list_monitors` filter.
 fn parse_state(s: &str) -> Result<&'static str, McpToolError> {
     match s {
@@ -1271,9 +1282,11 @@ fn parse_state(s: &str) -> Result<&'static str, McpToolError> {
 fn clean_incident_note(note: Option<&str>) -> Result<Option<String>, McpToolError> {
     match note.map(str::trim).filter(|n| !n.is_empty()) {
         None => Ok(None),
-        Some(n) if n.len() > MAX_INCIDENT_MESSAGE_LEN => Err(McpToolError::invalid_argument(
-            format!("note must be at most {MAX_INCIDENT_MESSAGE_LEN} characters"),
-        )),
+        Some(n) if n.chars().count() > MAX_INCIDENT_MESSAGE_LEN => Err(
+            McpToolError::invalid_argument(format!(
+                "note must be at most {MAX_INCIDENT_MESSAGE_LEN} characters"
+            )),
+        ),
         Some(n) => Ok(Some(n.to_string())),
     }
 }

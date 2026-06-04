@@ -88,6 +88,18 @@ fn build_dashboard_page_cache() -> DashboardPageCache {
         .build()
 }
 
+/// Per-(org, window-days) incident metrics cache for `/incidents/reports`.
+/// The aggregates are a few index-backed scans; a 30s TTL collapses repeated
+/// loads + window flips without staleness mattering for a report view.
+pub type IncidentMetricsCache = Cache<(OrgId, u32), crate::domain::IncidentMetrics>;
+
+fn build_incident_metrics_cache() -> IncidentMetricsCache {
+    Cache::builder()
+        .time_to_live(Duration::from_secs(30))
+        .max_capacity(4_096)
+        .build()
+}
+
 /// Runtime handles required by API handlers — the storage layer plus enough
 /// scheduler/worker plumbing to support `test`, `check-now`, and the dashboard.
 #[derive(Clone)]
@@ -110,6 +122,7 @@ pub struct AppState {
     pub dashboard_cache: DashboardCache,
     pub live_data_cache: LiveDataCache,
     pub dashboard_page_cache: DashboardPageCache,
+    pub incident_metrics_cache: IncidentMetricsCache,
     pub idempotency: Arc<IdempotencyCache>,
     pub public_source: Arc<dyn PublicSource>,
     pub maintenance_store: Arc<dyn MaintenanceStore>,
@@ -322,6 +335,7 @@ impl AppState {
             dashboard_cache: build_dashboard_cache(),
             live_data_cache: build_live_data_cache(),
             dashboard_page_cache: build_dashboard_page_cache(),
+            incident_metrics_cache: build_incident_metrics_cache(),
             idempotency: Arc::new(IdempotencyCache::new()),
             public_source,
             maintenance_store,

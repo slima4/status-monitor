@@ -471,7 +471,16 @@ pub async fn reports(
         .window_days
         .filter(|d| WINDOW_DAYS.contains(d))
         .unwrap_or(DEFAULT_WINDOW);
-    let m = state.incident_ops_store.metrics(org, window).await?;
+    // 30s cache: a report view tolerates slight staleness and the aggregate
+    // scans need not re-run on every load / window flip.
+    let m = match state.incident_metrics_cache.get(&(org, window)) {
+        Some(m) => m,
+        None => {
+            let m = state.incident_ops_store.metrics(org, window).await?;
+            state.incident_metrics_cache.insert((org, window), m.clone());
+            m
+        }
+    };
     let names = name_map(&state, org).await?;
     let bucket = |b: crate::domain::MetricBucket| ReportBucket {
         label: b.key,
