@@ -26,6 +26,7 @@ Side-effect-free (`readOnlyHint`). Require `targets:read`, `status_page:read`, o
 | `get_monitor_history` | `targets:read` | One monitor's history over a `window` (`1h` / `24h` / `7d` / `30d`): uptime, latency series, failures with error text, incident windows. |
 | `list_incidents` | `incidents:read` | Currently-open incidents on the org's status pages: incident id, affected monitor, severity, latest update phase. Cursor-paginated. |
 | `get_incident` | `incidents:read` | One incident: affected monitor, severity, open/resolved times, error sample, and the full operator-update timeline. |
+| `get_incident_metrics` | `incidents:read` | Incident metrics over a trailing window (default 30 days): MTTA/MTTR, total, counts by severity and state, auto- vs human-resolved, and the noisiest monitors. |
 | `list_status_pages` | `status_page:read` | The org's status pages: slug, name, public URL, enabled. Cursor-paginated. |
 | `get_status_page` | `status_page:read` | One status page with its components and each linked monitor's current state. |
 | `get_org_usage` | `targets:read` | Resource usage against plan limits (monitors, status pages, members, components) + key policy values. |

@@ -18,8 +18,9 @@ use crate::api::error::codes;
 use crate::api::handlers::validation::{self, validate_message};
 use crate::app::AppState;
 use crate::domain::{
-    Incident, IncidentEvent, IncidentNarrationUpdate, IncidentState, NewIncidentUpdate,
-    NewManualIncident, NotificationReason, OpsIncident, PublicIncidentUpdate, UserId,
+    Incident, IncidentEvent, IncidentMetrics, IncidentNarrationUpdate, IncidentPostmortem,
+    IncidentState, NewIncidentUpdate, NewManualIncident, NotificationReason, OpsIncident,
+    PostmortemUpsert, PublicIncidentUpdate, UserId,
 };
 use crate::error::{AppError, Result};
 use crate::storage::{Actor, IncidentOpsFilter, LifecycleOutcome};
@@ -425,6 +426,118 @@ pub async fn unpublish_incident(
         .await?
         .map(Json)
         .ok_or_else(|| AppError::not_found(codes::INCIDENT_NOT_FOUND, "incident not found"))
+}
+
+// ── Metrics & postmortem ────────────────────────────────────────────────────
+
+#[derive(Debug, Default, Deserialize)]
+pub struct MetricsQuery {
+    /// Trailing window in days (clamped to 1..=365; default 30).
+    pub window_days: Option<u32>,
+}
+
+#[utoipa::path(
+    get, path = "/api/v1/incidents/metrics", tag = "incidents",
+    summary = "Incident metrics over a trailing window (MTTA/MTTR, counts, noisiest monitors)",
+    params(("window_days" = Option<u32>, Query, description = "1..=365, default 30")),
+    responses((status = 200, body = IncidentMetrics)),
+)]
+pub async fn incident_metrics(
+    State(state): State<AppState>,
+    Authorized(org, _): Authorized<IncidentsRead>,
+    Query(q): Query<MetricsQuery>,
+) -> Result<Json<IncidentMetrics>> {
+    let window = q.window_days.unwrap_or(30).clamp(1, 365);
+    Ok(Json(state.incident_ops_store.metrics(org, window).await?))
+}
+
+fn validate_postmortem(p: &PostmortemUpsert) -> Result<()> {
+    validation::validate_optional_description(Some(&p.summary), "summary")?;
+    validation::validate_optional_description(Some(&p.root_cause), "root_cause")?;
+    validation::validate_optional_description(Some(&p.impact), "impact")?;
+    for item in &p.action_items {
+        validate_message(&item.text, "action_items.text")?;
+    }
+    Ok(())
+}
+
+#[utoipa::path(
+    get, path = "/api/v1/incidents/{id}/postmortem", tag = "incidents",
+    summary = "Get an incident's postmortem",
+    params(("id" = Uuid, Path)),
+    responses((status = 200, body = IncidentPostmortem), (status = 404, body = ApiError)),
+)]
+pub async fn get_postmortem(
+    State(state): State<AppState>,
+    Authorized(org, _): Authorized<IncidentsRead>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<IncidentPostmortem>> {
+    state
+        .postmortem_store
+        .get(org, id)
+        .await?
+        .map(Json)
+        .ok_or_else(|| AppError::not_found(codes::POSTMORTEM_NOT_FOUND, "postmortem not found"))
+}
+
+#[utoipa::path(
+    put, path = "/api/v1/incidents/{id}/postmortem", tag = "incidents",
+    summary = "Create or replace an incident's postmortem",
+    params(("id" = Uuid, Path)), request_body = PostmortemUpsert,
+    responses((status = 200, body = IncidentPostmortem), (status = 400, body = ApiError), (status = 404, body = ApiError)),
+)]
+pub async fn put_postmortem(
+    State(state): State<AppState>,
+    Authorized(org, _): Authorized<IncidentsWrite>,
+    CurrentUser(user): CurrentUser,
+    Path(id): Path<Uuid>,
+    Json(body): Json<PostmortemUpsert>,
+) -> Result<Json<IncidentPostmortem>> {
+    validate_postmortem(&body)?;
+    state
+        .postmortem_store
+        .upsert(org, id, user, body)
+        .await?
+        .map(Json)
+        .ok_or_else(|| AppError::not_found(codes::INCIDENT_NOT_FOUND, "incident not found"))
+}
+
+#[utoipa::path(
+    post, path = "/api/v1/incidents/{id}/postmortem/publish", tag = "incidents",
+    summary = "Publish an incident's postmortem",
+    params(("id" = Uuid, Path)),
+    responses((status = 200, body = IncidentPostmortem), (status = 404, body = ApiError)),
+)]
+pub async fn publish_postmortem(
+    State(state): State<AppState>,
+    Authorized(org, _): Authorized<IncidentsWrite>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<IncidentPostmortem>> {
+    state
+        .postmortem_store
+        .set_published(org, id, true)
+        .await?
+        .map(Json)
+        .ok_or_else(|| AppError::not_found(codes::POSTMORTEM_NOT_FOUND, "postmortem not found"))
+}
+
+#[utoipa::path(
+    post, path = "/api/v1/incidents/{id}/postmortem/unpublish", tag = "incidents",
+    summary = "Unpublish an incident's postmortem",
+    params(("id" = Uuid, Path)),
+    responses((status = 200, body = IncidentPostmortem), (status = 404, body = ApiError)),
+)]
+pub async fn unpublish_postmortem(
+    State(state): State<AppState>,
+    Authorized(org, _): Authorized<IncidentsWrite>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<IncidentPostmortem>> {
+    state
+        .postmortem_store
+        .set_published(org, id, false)
+        .await?
+        .map(Json)
+        .ok_or_else(|| AppError::not_found(codes::POSTMORTEM_NOT_FOUND, "postmortem not found"))
 }
 
 #[cfg(test)]

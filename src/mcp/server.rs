@@ -39,11 +39,12 @@ use super::cursor;
 use super::error::{McpToolError, codes};
 use super::schema::{
     CheckRunResult, CheckTiming, Failure, GetIncidentArgs, GetMonitorArgs, GetMonitorHistoryArgs,
-    GetStatusPageArgs, HealthTotals, IncidentActionArgs, IncidentActionResult, IncidentDetail,
-    IncidentList, IncidentSummary, IncidentUpdateItem, IncidentUpdatePosted, IncidentWindow,
-    LatencyPoint, ListIncidentsArgs, ListMonitorsArgs, ListStatusPagesArgs, MonitorDetail,
-    MonitorHistory, MonitorIdArg, MonitorList, MonitorListItem, MonitorStateResult, OrgHealth,
-    OrgUsage, PostIncidentUpdateArgs, Quota, StatusPageComponent as McpComponent, StatusPageDetail,
+    GetIncidentMetricsArgs, GetStatusPageArgs, HealthTotals, IncidentActionArgs,
+    IncidentActionResult, IncidentDetail, IncidentList, IncidentMetricsResult, IncidentSummary,
+    IncidentUpdateItem, IncidentUpdatePosted, IncidentWindow, LatencyPoint, ListIncidentsArgs,
+    ListMonitorsArgs, ListStatusPagesArgs, MetricCount, MonitorDetail, MonitorHistory, MonitorIdArg,
+    MonitorList, MonitorListItem, MonitorStateResult, NoisyMonitor, OrgHealth, OrgUsage,
+    PostIncidentUpdateArgs, Quota, StatusPageComponent as McpComponent, StatusPageDetail,
     StatusPageList, StatusPageSummary, WorstMonitor,
 };
 use crate::storage::{Actor, LifecycleOutcome};
@@ -590,6 +591,55 @@ impl McpServer {
             .map(|t| t.name);
 
         Ok(Json(incident_detail(&incident, monitor_name)))
+    }
+
+    /// Incident reporting over a trailing window: MTTA/MTTR, counts by
+    /// severity/state, auto-vs-human resolution, and the noisiest monitors.
+    #[tool(
+        description = "Incident metrics over a trailing window (default 30 days): MTTA/MTTR in seconds, total incidents, counts by severity and state, auto- vs human-resolved, and the noisiest monitors. Read-only.",
+        annotations(read_only_hint = true)
+    )]
+    async fn get_incident_metrics(
+        &self,
+        Parameters(args): Parameters<GetIncidentMetricsArgs>,
+        ctx: RequestContext<RoleServer>,
+    ) -> Result<Json<IncidentMetricsResult>, McpToolError> {
+        let auth = McpAuth::from_ctx(&ctx)?;
+        auth.require(Scope::IncidentsRead)?;
+        let org = auth.org;
+        let window = args.window_days.unwrap_or(30).clamp(1, 365);
+        let m = self
+            .state
+            .incident_ops_store
+            .metrics(org, window)
+            .await
+            .map_err(|e| McpToolError::internal(format!("incident metrics: {e}")))?;
+        let buckets = |v: Vec<crate::domain::MetricBucket>| {
+            v.into_iter()
+                .map(|b| MetricCount {
+                    key: b.key,
+                    count: b.count,
+                })
+                .collect()
+        };
+        Ok(Json(IncidentMetricsResult {
+            window_days: m.window_days,
+            total: m.total,
+            mtta_secs: m.mtta_secs,
+            mttr_secs: m.mttr_secs,
+            by_severity: buckets(m.by_severity),
+            by_state: buckets(m.by_state),
+            auto_resolved: m.auto_resolved,
+            human_resolved: m.human_resolved,
+            top_monitors: m
+                .top_monitors
+                .into_iter()
+                .map(|t| NoisyMonitor {
+                    monitor_id: t.target_id.to_string(),
+                    count: t.count,
+                })
+                .collect(),
+        }))
     }
 
     /// Org usage against plan limits. For "am I near my caps?".

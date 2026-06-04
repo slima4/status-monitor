@@ -20,10 +20,11 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::domain::{
-    ActorType, IncidentEvent, IncidentEventKind, IncidentNotification, IncidentOrigin,
-    IncidentSeverity, IncidentState, IncidentTransition, IncidentUrgency, IncidentVisibility,
-    NewIncidentNotification, NewManualIncident, NotificationReason, NotificationStatus, OpsIncident,
-    OrgId, TransitionError, UserId, next_state,
+    ActorType, IncidentEvent, IncidentEventKind, IncidentMetrics, IncidentNotification,
+    IncidentOrigin, IncidentSeverity, IncidentState, IncidentTransition, IncidentUrgency,
+    IncidentVisibility, MetricBucket, MonitorIncidentCount, NewIncidentNotification,
+    NewManualIncident, NotificationReason, NotificationStatus, OpsIncident, OrgId, TransitionError,
+    UserId, next_state,
 };
 use crate::error::Result;
 use crate::storage::locks::{advisory_xact_lock, incident_lock_key};
@@ -104,6 +105,9 @@ pub trait IncidentOpsStore: Send + Sync {
     /// Total incidents in `org` matching the optional state filter — for pager
     /// "page N of M".
     async fn count(&self, org: OrgId, state: Option<IncidentState>) -> Result<usize>;
+    /// Aggregate incident reporting (MTTA/MTTR, counts, noisiest monitors) over
+    /// a trailing window of `window_days`, scoped to `org`.
+    async fn metrics(&self, org: OrgId, window_days: u32) -> Result<IncidentMetrics>;
     async fn declare(
         &self,
         org: OrgId,
@@ -489,6 +493,93 @@ impl IncidentOpsStore for PgIncidentOpsStore {
         .await
         .map_err(|e| anyhow::anyhow!("count ops incidents: {e}"))?;
         Ok(n.max(0) as usize)
+    }
+
+    async fn metrics(&self, org: OrgId, window_days: u32) -> Result<IncidentMetrics> {
+        let since = Utc::now() - chrono::Duration::days(window_days.clamp(1, 365) as i64);
+
+        #[derive(sqlx::FromRow)]
+        struct Scalars {
+            total: i64,
+            mtta: Option<f64>,
+            mttr: Option<f64>,
+            auto_resolved: i64,
+            human_resolved: i64,
+        }
+        let s: Scalars = sqlx::query_as(
+            "SELECT count(*) AS total, \
+                 (avg(extract(epoch FROM (acknowledged_at - started_at))) \
+                     FILTER (WHERE acknowledged_at IS NOT NULL))::float8 AS mtta, \
+                 (avg(extract(epoch FROM (ended_at - started_at))) \
+                     FILTER (WHERE ended_at IS NOT NULL))::float8 AS mttr, \
+                 count(*) FILTER (WHERE state = 'resolved' AND resolved_by IS NULL) AS auto_resolved, \
+                 count(*) FILTER (WHERE state = 'resolved' AND resolved_by IS NOT NULL) AS human_resolved \
+             FROM incidents WHERE org_id = $1 AND started_at >= $2",
+        )
+        .bind(org.0)
+        .bind(since)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| anyhow::anyhow!("incident metrics scalars: {e}"))?;
+
+        let bucket = |sql: &str| {
+            let sql = sql.to_string();
+            async move {
+                let rows: Vec<(String, i64)> = sqlx::query_as(&sql)
+                    .bind(org.0)
+                    .bind(since)
+                    .fetch_all(&self.pool)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("incident metrics bucket: {e}"))?;
+                Ok::<_, anyhow::Error>(
+                    rows.into_iter()
+                        .map(|(key, count)| MetricBucket {
+                            key,
+                            count: count.max(0) as u64,
+                        })
+                        .collect::<Vec<_>>(),
+                )
+            }
+        };
+        let by_severity = bucket(
+            "SELECT severity, count(*) FROM incidents \
+             WHERE org_id = $1 AND started_at >= $2 GROUP BY severity ORDER BY count DESC",
+        )
+        .await?;
+        let by_state = bucket(
+            "SELECT state, count(*) FROM incidents \
+             WHERE org_id = $1 AND started_at >= $2 GROUP BY state ORDER BY count DESC",
+        )
+        .await?;
+
+        let top: Vec<(Uuid, i64)> = sqlx::query_as(
+            "SELECT target_id, count(*) FROM incidents \
+             WHERE org_id = $1 AND started_at >= $2 AND target_id IS NOT NULL \
+             GROUP BY target_id ORDER BY count DESC, target_id LIMIT 10",
+        )
+        .bind(org.0)
+        .bind(since)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| anyhow::anyhow!("incident metrics top monitors: {e}"))?;
+
+        Ok(IncidentMetrics {
+            window_days,
+            total: s.total.max(0) as u64,
+            mtta_secs: s.mtta,
+            mttr_secs: s.mttr,
+            by_severity,
+            by_state,
+            auto_resolved: s.auto_resolved.max(0) as u64,
+            human_resolved: s.human_resolved.max(0) as u64,
+            top_monitors: top
+                .into_iter()
+                .map(|(target_id, count)| MonitorIncidentCount {
+                    target_id,
+                    count: count.max(0) as u64,
+                })
+                .collect(),
+        })
     }
 
     async fn declare(
@@ -1093,6 +1184,69 @@ impl IncidentOpsStore for InMemoryIncidentOpsStore {
             .iter()
             .filter(|i| state.is_none_or(|s| i.state == s))
             .count())
+    }
+
+    async fn metrics(&self, _org: OrgId, window_days: u32) -> Result<IncidentMetrics> {
+        let since = Utc::now() - chrono::Duration::days(window_days.clamp(1, 365) as i64);
+        let g = self.inner.lock();
+        let in_window: Vec<&OpsIncident> =
+            g.incidents.iter().filter(|i| i.started_at >= since).collect();
+
+        let mean = |vals: &[f64]| -> Option<f64> {
+            (!vals.is_empty()).then(|| vals.iter().sum::<f64>() / vals.len() as f64)
+        };
+        let mtta: Vec<f64> = in_window
+            .iter()
+            .filter_map(|i| i.acknowledged_at.map(|a| (a - i.started_at).num_seconds() as f64))
+            .collect();
+        let mttr: Vec<f64> = in_window
+            .iter()
+            .filter_map(|i| i.ended_at.map(|e| (e - i.started_at).num_seconds() as f64))
+            .collect();
+
+        let tally = |key_of: &dyn Fn(&OpsIncident) -> String| {
+            let mut counts: std::collections::HashMap<String, u64> = Default::default();
+            for i in &in_window {
+                *counts.entry(key_of(i)).or_default() += 1;
+            }
+            let mut v: Vec<MetricBucket> = counts
+                .into_iter()
+                .map(|(key, count)| MetricBucket { key, count })
+                .collect();
+            v.sort_by(|a, b| b.count.cmp(&a.count).then(a.key.cmp(&b.key)));
+            v
+        };
+
+        let mut top: std::collections::HashMap<Uuid, u64> = Default::default();
+        for i in &in_window {
+            if let Some(t) = i.target_id {
+                *top.entry(t).or_default() += 1;
+            }
+        }
+        let mut top_monitors: Vec<MonitorIncidentCount> = top
+            .into_iter()
+            .map(|(target_id, count)| MonitorIncidentCount { target_id, count })
+            .collect();
+        top_monitors.sort_by(|a, b| b.count.cmp(&a.count).then(a.target_id.cmp(&b.target_id)));
+        top_monitors.truncate(10);
+
+        Ok(IncidentMetrics {
+            window_days,
+            total: in_window.len() as u64,
+            mtta_secs: mean(&mtta),
+            mttr_secs: mean(&mttr),
+            by_severity: tally(&|i| i.severity.as_db_str().to_string()),
+            by_state: tally(&|i| i.state.as_db_str().to_string()),
+            auto_resolved: in_window
+                .iter()
+                .filter(|i| i.state == IncidentState::Resolved && i.resolved_by.is_none())
+                .count() as u64,
+            human_resolved: in_window
+                .iter()
+                .filter(|i| i.state == IncidentState::Resolved && i.resolved_by.is_some())
+                .count() as u64,
+            top_monitors,
+        })
     }
 
     async fn declare(&self, _org: OrgId, new: NewManualIncident, actor: Actor) -> Result<OpsIncident> {

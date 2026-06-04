@@ -30,11 +30,12 @@ pub use escalation_policy::{
     EscalationTargetType, NewEscalationPolicy, NewEscalationStep, NewEscalationTarget, next_step,
 };
 pub use incident::{
-    ActorType, Incident, IncidentEvent, IncidentEventKind, IncidentNarrationUpdate,
-    IncidentNotification, IncidentOrigin, IncidentState, IncidentTransition, IncidentUrgency,
-    IncidentVisibility, NewIncidentNotification, NewIncidentUpdate, NewManualIncident,
-    NotificationReason, NotificationStatus, OpsIncident, TransitionError, coalesce_incidents,
-    coalesce_incidents_bad_only, elapsed_at, next_state,
+    ActionItem, ActorType, Incident, IncidentEvent, IncidentEventKind, IncidentMetrics,
+    IncidentNarrationUpdate, IncidentNotification, IncidentOrigin, IncidentPostmortem,
+    IncidentState, IncidentTransition, IncidentUrgency, IncidentVisibility, MetricBucket,
+    MonitorIncidentCount, NewIncidentNotification, NewIncidentUpdate, NewManualIncident,
+    NotificationReason, NotificationStatus, OpsIncident, PostmortemUpsert, TransitionError,
+    coalesce_incidents, coalesce_incidents_bad_only, elapsed_at, next_state,
 };
 pub use maintenance::{
     MaintenanceFilter, MaintenanceWindow, MaintenanceWindowUpdate, NewMaintenanceWindow,

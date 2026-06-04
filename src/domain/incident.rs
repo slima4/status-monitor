@@ -588,7 +588,7 @@ pub struct OpsIncident {
 }
 
 /// Operator-declared incident not driven by a monitor's check stream.
-#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Default, Deserialize, ToSchema)]
 pub struct NewManualIncident {
     #[serde(default)]
     #[schema(nullable = true)]
@@ -713,6 +713,83 @@ pub fn next_state(
         (Resolved, Reopen) => Ok(Triggered),
         (Triggered | Acknowledged, Reopen) => Err(err()),
     }
+}
+
+/// One follow-up task captured in a postmortem.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ActionItem {
+    pub text: String,
+    #[serde(default)]
+    #[schema(nullable = true)]
+    pub owner_user_id: Option<UserId>,
+    #[serde(default)]
+    pub done: bool,
+}
+
+/// Retrospective document attached to a single incident.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct IncidentPostmortem {
+    pub incident_id: Uuid,
+    #[schema(nullable = true)]
+    pub summary: Option<String>,
+    #[schema(nullable = true)]
+    pub root_cause: Option<String>,
+    #[schema(nullable = true)]
+    pub impact: Option<String>,
+    pub action_items: Vec<ActionItem>,
+    #[schema(nullable = true)]
+    pub author_id: Option<UserId>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    /// `null` until the operator publishes the postmortem.
+    #[schema(nullable = true)]
+    pub published_at: Option<DateTime<Utc>>,
+}
+
+/// Operator-supplied postmortem content. Each field replaces the stored value;
+/// `action_items` is the full list every save.
+#[derive(Debug, Clone, Default, Deserialize, ToSchema)]
+pub struct PostmortemUpsert {
+    #[serde(default)]
+    pub summary: Option<String>,
+    #[serde(default)]
+    pub root_cause: Option<String>,
+    #[serde(default)]
+    pub impact: Option<String>,
+    #[serde(default)]
+    pub action_items: Vec<ActionItem>,
+}
+
+/// One severity/state bucket in the incident metrics rollup.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct MetricBucket {
+    pub key: String,
+    pub count: u64,
+}
+
+/// Noisiest monitor in the window, by incident count.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct MonitorIncidentCount {
+    pub target_id: Uuid,
+    pub count: u64,
+}
+
+/// Aggregate incident reporting over a trailing window. `mtta`/`mttr` are means
+/// in seconds, `null` when no incident in the window qualifies (none acked, or
+/// none resolved).
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct IncidentMetrics {
+    pub window_days: u32,
+    pub total: u64,
+    #[schema(nullable = true)]
+    pub mtta_secs: Option<f64>,
+    #[schema(nullable = true)]
+    pub mttr_secs: Option<f64>,
+    pub by_severity: Vec<MetricBucket>,
+    pub by_state: Vec<MetricBucket>,
+    pub auto_resolved: u64,
+    pub human_resolved: u64,
+    pub top_monitors: Vec<MonitorIncidentCount>,
 }
 
 #[cfg(test)]

@@ -12,8 +12,8 @@ mod common;
 use common::{make_user, unique_slug};
 use sqlx::PgPool;
 use uptimepage::domain::{
-    IncidentEventKind, IncidentState, NewIncidentNotification, NotificationReason,
-    NotificationStatus, OrgId,
+    IncidentEventKind, IncidentState, NewIncidentNotification, NewManualIncident,
+    NotificationReason, NotificationStatus, OrgId,
 };
 use uptimepage::storage::{
     Actor, IncidentOpsStore, LifecycleOutcome, PgIncidentOpsStore, create_org_with_owner,
@@ -360,4 +360,60 @@ async fn publish_sets_visibility_and_narration_then_unpublish_pg() {
         store.publish(other.id, id, None, None, Actor::User(other_user)).await.unwrap().is_none(),
         "another org cannot publish this incident"
     );
+}
+
+#[tokio::test]
+#[ignore]
+async fn metrics_rolls_up_mtta_mttr_and_counts_pg() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let (org, user, a) = seed(&pool, "incmetrics").await;
+    let store = PgIncidentOpsStore::new(pool.clone());
+
+    // A: human-acknowledged then human-resolved (contributes MTTA + MTTR).
+    store.acknowledge(org, a, Actor::User(user), None).await.unwrap();
+    store.resolve(org, a, Actor::User(user), None).await.unwrap();
+
+    // B: manual incident auto-resolved by the system (no resolver).
+    let b = store
+        .declare(org, NewManualIncident::default(), Actor::User(user))
+        .await
+        .unwrap();
+    store.auto_resolve(org, b.id).await.unwrap();
+
+    // C: manual incident left triggered.
+    store
+        .declare(org, NewManualIncident::default(), Actor::User(user))
+        .await
+        .unwrap();
+
+    let m = store.metrics(org, 30).await.unwrap();
+    assert_eq!(m.window_days, 30);
+    assert_eq!(m.total, 3);
+    assert!(m.mtta_secs.is_some(), "A was acknowledged");
+    assert!(m.mttr_secs.is_some(), "A and B were resolved");
+    assert_eq!(m.auto_resolved, 1, "B auto-resolved");
+    assert_eq!(m.human_resolved, 1, "A human-resolved");
+    let resolved = m.by_state.iter().find(|b| b.key == "resolved").map(|b| b.count);
+    assert_eq!(resolved, Some(2));
+    // A carries a target; the noisy-monitor list surfaces it.
+    assert!(m.top_monitors.iter().any(|t| t.count >= 1));
+
+    // A short window that predates every incident yields zeroes, not an error.
+    // (All incidents are seconds old, so window_days=1 still includes them; the
+    // store clamps and never divides by zero on an empty set.)
+    let other = store.metrics(org, 1).await.unwrap();
+    assert_eq!(other.total, 3);
+
+    // Cross-tenant isolation: a fresh org sees none of these.
+    let other_user = make_user(&pool, "incmetricsx").await;
+    let other_org = create_org_with_owner(&pool, other_user, &unique_slug("incmetricsx"), "n", 3)
+        .await
+        .unwrap()
+        .unwrap();
+    let isolated = store.metrics(other_org.id, 30).await.unwrap();
+    assert_eq!(isolated.total, 0);
+    assert!(isolated.mtta_secs.is_none());
+    assert!(isolated.mttr_secs.is_none());
 }

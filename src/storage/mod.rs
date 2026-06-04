@@ -15,6 +15,7 @@ pub mod orgs;
 pub mod page_assets;
 pub mod postgres;
 pub mod postgres_secrets;
+pub mod postmortems;
 pub mod status_pages;
 pub mod traits;
 pub mod users;
@@ -61,6 +62,7 @@ pub use page_assets::{
     AssetContent, AssetMeta, InMemoryPageAssetStore, PageAssetStore, PgPageAssetStore,
 };
 pub use postgres::PostgresTargetStore;
+pub use postmortems::{InMemoryPostmortemStore, PgPostmortemStore, PostmortemStore};
 pub use status_pages::{
     AddComponentOutcome, InMemoryStatusPageStore, PgStatusPageStore, StatusPageStore,
 };

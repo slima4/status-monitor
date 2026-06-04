@@ -181,6 +181,20 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
             "/incidents/{id}/unpublish",
             post(handlers::incidents::unpublish_incident),
         )
+        .route("/incidents/metrics", get(handlers::incidents::incident_metrics))
+        .route(
+            "/incidents/{id}/postmortem",
+            get(handlers::incidents::get_postmortem)
+                .put(handlers::incidents::put_postmortem),
+        )
+        .route(
+            "/incidents/{id}/postmortem/publish",
+            post(handlers::incidents::publish_postmortem),
+        )
+        .route(
+            "/incidents/{id}/postmortem/unpublish",
+            post(handlers::incidents::unpublish_postmortem),
+        )
         .route(
             "/escalation-policies",
             get(handlers::escalation_policies::list)

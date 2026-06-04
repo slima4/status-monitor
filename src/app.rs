@@ -141,6 +141,8 @@ pub struct AppState {
     pub on_call_store: Arc<dyn crate::storage::OnCallStore>,
     /// Per-member contact channels paged when a user/schedule target resolves.
     pub contact_store: Arc<dyn crate::storage::ContactStore>,
+    /// Per-incident retrospective documents (one per incident).
+    pub postmortem_store: Arc<dyn crate::storage::PostmortemStore>,
     /// Debounce cache for `sessions.last_used_at` writes — see
     /// `auth::session::touch_last_used_debounced`.
     pub session_debounce: Arc<LastUsedDebounce>,
@@ -303,6 +305,10 @@ impl AppState {
             Some(pool) => Arc::new(crate::storage::PgContactStore::new(pool)),
             None => Arc::new(crate::storage::InMemoryContactStore::new()),
         };
+        let postmortem_store: Arc<dyn crate::storage::PostmortemStore> = match db.clone() {
+            Some(pool) => Arc::new(crate::storage::PgPostmortemStore::new(pool)),
+            None => Arc::new(crate::storage::InMemoryPostmortemStore::new()),
+        };
         let rate_limits = Arc::new(RateLimitService::new());
         let abuse = Arc::new(AbuseGuard::from_config(&cfg.abuse));
         Self {
@@ -328,6 +334,7 @@ impl AppState {
             escalation_policy_store,
             on_call_store,
             contact_store,
+            postmortem_store,
             session_debounce: Arc::new(build_debounce_cache()),
             api_token_debounce: Arc::new(build_api_token_debounce()),
             outbound_http,

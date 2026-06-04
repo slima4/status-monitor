@@ -245,6 +245,47 @@ pub struct GetIncidentArgs {
     pub id: String,
 }
 
+/// `get_incident_metrics` argument.
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+pub struct GetIncidentMetricsArgs {
+    /// Trailing window in days (1..=365). Defaults to 30 when omitted.
+    pub window_days: Option<u32>,
+}
+
+/// One `{key, count}` bucket in the metrics rollup.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct MetricCount {
+    pub key: String,
+    pub count: u64,
+}
+
+/// A monitor and how many incidents it raised in the window.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct NoisyMonitor {
+    pub monitor_id: String,
+    pub count: u64,
+}
+
+/// `get_incident_metrics` result: MTTA/MTTR and incident counts over a window.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct IncidentMetricsResult {
+    pub window_days: u32,
+    /// Incidents opened in the window.
+    pub total: u64,
+    /// Mean time to acknowledge, seconds. `null` if none were acknowledged.
+    pub mtta_secs: Option<f64>,
+    /// Mean time to resolve, seconds. `null` if none were resolved.
+    pub mttr_secs: Option<f64>,
+    pub by_severity: Vec<MetricCount>,
+    pub by_state: Vec<MetricCount>,
+    /// Resolved automatically on recovery, with no human resolver.
+    pub auto_resolved: u64,
+    /// Resolved by a person.
+    pub human_resolved: u64,
+    /// Noisiest monitors, most incidents first.
+    pub top_monitors: Vec<NoisyMonitor>,
+}
+
 /// One operator update on an incident, oldest first.
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct IncidentUpdateItem {
