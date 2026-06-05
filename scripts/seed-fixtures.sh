@@ -78,12 +78,13 @@ DELETE FROM notification_channels
    AND name LIKE 'Fixture %';
 DELETE FROM status_pages
  WHERE org_id = (SELECT id FROM organizations WHERE slug='${SLUG}')
-   AND slug = 'fixtures';
+   AND slug IN ('fixtures', '${SLUG}');
 
--- One enabled status page; as the org's lone page it serves the org subdomain.
+-- Page slug must equal the subdomain label (= org slug): the public surface
+-- resolves {slug}.{base_domain} against status_pages.slug directly.
 INSERT INTO status_pages
   (org_id, slug, name, enabled, public_display_name, public_about, public_brand_color)
-SELECT id, 'fixtures', 'Fixture Status', true, 'Fixture Status',
+SELECT id, '${SLUG}', 'Fixture Status', true, 'Fixture Status',
        'Generated fixture data for UI stress-testing.', '#0ea5e9'
   FROM organizations WHERE slug = '${SLUG}';
 SQL
@@ -107,7 +108,7 @@ echo "==> Postgres: insert 14 monitors (8 public/visible + 6 internal/varied-spe
 pg <<SQL
 WITH org AS (SELECT id FROM organizations WHERE slug='${SLUG}'),
      sp AS (SELECT id FROM status_pages
-             WHERE org_id = (SELECT id FROM org) AND slug = 'fixtures'),
+             WHERE org_id = (SELECT id FROM org) AND slug = '${SLUG}'),
      spec(name,is_enabled,public,pname,grp,so,gname,has_owner,spec) AS (VALUES
   -- Public / visible HTTP targets (group sort_order drives column layout).
   -- enabled=false on the Operational/Degraded/NoData ones — scheduler stray
@@ -237,7 +238,7 @@ WITH s AS (
          (ARRAY['minor','major','critical'])[((n-1) % 3) + 1]        AS sev,
          (ARRAY['down','degraded','error'])[((n*2-1) % 3) + 1]       AS sas,
          -- Phase-specific reasons the probe now emits (TCP / DNS / TLS); the
-         -- detail view maps `dns: …` to friendlier copy, the rest pass through.
+         -- detail view maps "dns: …" to friendlier copy, the rest pass through.
          (ARRAY['connection refused','connect timeout','dns: domain not found','certificate expired','certificate not trusted','no response'])[((n-1) % 6) + 1] AS err,
          -- 12 distinct titles round-robined for archive variety.
          (ARRAY[
@@ -534,6 +535,20 @@ CROSS JOIN LATERAL (
 ) p;
 SQL
 
+# Mark the seeded 'triggered' incidents as already-paged. The escalation
+# reconcile sweep re-pages any triggered incident with no policy, no armed
+# timer, and no notification row (the dropped-open-signal signature); bulk
+# inserts have none, so the engine logs a reconcile WARN every boot when
+# escalation is enabled. Synthesize one delivered 'opened' notification each
+# — the only state the sweep targets. Cascades on incident delete, so re-runs
+# stay clean.
+pg <<SQL
+INSERT INTO incident_notifications (org_id, incident_id, transport, reason, status, sent_at)
+SELECT org_id, id, 'webhook', 'opened', 'sent', started_at
+FROM incidents
+WHERE org_id = '${ORG}'::uuid AND state = 'triggered';
+SQL
+
 if [ "$RESET_CH" = "1" ]; then
   echo "==> ClickHouse: purging existing rows for fixture targets"
   # Every tid below was length-validated post-`read -r`; an empty tid here
@@ -778,14 +793,19 @@ classify() {
   if (( hard * 2 >= total )); then echo MajorOutage; else echo PartialOutage; fi
 }
 
-fail=0
+# Hard failures (non-zero exit); NOTES are non-fatal observations.
+FAILED=()
+NOTES=()
 printf '  %-18s %-14s %5s %5s %5s %5s   %s\n' name expected up down deg err actual
 while IFS=$'\t' read -r name _ord _group up down deg err; do
   [[ -z "$name" ]] && continue
   actual=$(classify "$up" "$down" "$deg" "$err" "$name")
   expected="${EXPECT[$name]:-?}"
   mark="OK"
-  if [[ "$actual" != "$expected" ]]; then mark="MISMATCH"; fail=$((fail+1)); fi
+  if [[ "$actual" != "$expected" ]]; then
+    mark="MISMATCH"
+    FAILED+=("clickhouse component '${name}': expected ${expected}, classified ${actual} (up=${up} down=${down} deg=${deg} err=${err}) — check last-5-min seed writes")
+  fi
   printf '  %-18s %-14s %5s %5s %5s %5s   %s [%s]\n' \
     "$name" "$expected" "$up" "$down" "$deg" "$err" "$actual" "$mark"
 done <<< "$ch_out"
@@ -794,21 +814,31 @@ done <<< "$ch_out"
 echo
 echo "## Public page render"
 http_url="http://${SLUG}.${BASE_DOMAIN}:8080/"
+echo "  host ${SLUG}.${BASE_DOMAIN} resolves against status_pages.slug='${SLUG}' (subdomain routing must be ON)"
 # Cache TTL is ~10s; give the aggregator one beat so the freshly-seeded rows
 # replace any prior cached page.
 sleep 12
-status_code=$(curl -s -o /tmp/seed-fixtures-pub.html -w '%{http_code}' "$http_url" || echo 000)
-echo "  GET $http_url → HTTP $status_code"
+read -r status_code time_total < <(curl -s -o /tmp/seed-fixtures-pub.html \
+  -w '%{http_code} %{time_total}\n' "$http_url" 2>/dev/null || echo '000 0')
+echo "  GET $http_url → HTTP $status_code (${time_total}s)"
 if [[ "$status_code" == "200" ]]; then
   states=$(grep -oE '>Operational<|>Degraded<|>Partial outage<|>Major outage<|>Maintenance<' \
            /tmp/seed-fixtures-pub.html | sort | uniq -c | awk '{print $2" "$3" ×"$1}')
   archive=$(grep -c 'Older incidents' /tmp/seed-fixtures-pub.html || true)
+  body_bytes=$(wc -c < /tmp/seed-fixtures-pub.html | tr -d ' ')
+  echo "  body size: ${body_bytes} bytes"
   echo "  rendered badges:"
   echo "$states" | sed 's/^/    /'
   echo "  'Older incidents →' archive link present: $([[ $archive -gt 0 ]] && echo yes || echo no)"
 else
-  echo "  WARN: page did not return 200 — check application logs"
-  fail=$((fail+1))
+  case "$status_code" in
+    000) hint="connection refused — is the app running on :8080?" ;;
+    303) hint="redirected (login) — subdomain routing OFF; run with UPTIMEPAGE_TENANCY__SUBDOMAIN_PUBLIC_ROUTES=true and UPTIMEPAGE_PUBLIC_STATUS__BASE_DOMAIN=${BASE_DOMAIN}" ;;
+    404) hint="no enabled status page with slug '${SLUG}' — the org's public page slug must equal the subdomain label" ;;
+    *)   hint="unexpected status — check application logs" ;;
+  esac
+  echo "  WARN: page did not return 200 — $hint"
+  FAILED+=("public page render: HTTP ${status_code} — ${hint}")
 fi
 
 # ── Operator Monitors page render (group + owner + bulk markup) ─────────────
@@ -820,9 +850,9 @@ curl_auth=()
 if [[ -f "$cookies_file" ]]; then
   curl_auth=(-b "$cookies_file")
 fi
-monitors_status=$(curl -s -o /tmp/seed-fixtures-monitors.html -w '%{http_code}' \
-  "${curl_auth[@]}" "$monitors_url" || echo 000)
-echo "  GET $monitors_url → HTTP $monitors_status"
+read -r monitors_status monitors_time < <(curl -s -o /tmp/seed-fixtures-monitors.html \
+  -w '%{http_code} %{time_total}\n' "${curl_auth[@]}" "$monitors_url" 2>/dev/null || echo '000 0')
+echo "  GET $monitors_url → HTTP $monitors_status (${monitors_time}s)"
 if [[ "$monitors_status" == "200" ]]; then
   group_count=$(grep -c 'class="monitors-group"' /tmp/seed-fixtures-monitors.html || true)
   row_count=$(grep -c 'data-row-id=' /tmp/seed-fixtures-monitors.html || true)
@@ -836,10 +866,11 @@ if [[ "$monitors_status" == "200" ]]; then
   echo "    Ungrouped group       : $([[ $ungrouped_present -gt 0 ]] && echo yes || echo no)   (fix-search → NULL group_name)"
   if (( group_count < 5 || row_count < 14 || bulk_present < 1 )); then
     echo "    WARN: Monitors page render below expected baseline — check template + view wiring"
-    fail=$((fail+1))
+    FAILED+=("operator monitors render: groups=${group_count} rows=${row_count} bulk=${bulk_present} (want ≥5 / 14 / ≥1)")
   fi
 else
   echo "  (page requires auth — re-run 'just dev-login' so cookies land in $cookies_file)"
+  NOTES+=("operator monitors check skipped: HTTP ${monitors_status} (no dev-login cookie)")
 fi
 
 # ── Adversarial-title escape verification ────────────────────────────────────
@@ -849,12 +880,13 @@ if grep -q 'Adversarial title &#60;/script&#62;' /tmp/seed-fixtures-pub.html 2>/
   echo "  HTML body : entity-encoded ✓"
 else
   echo "  HTML body : NOT FOUND or not encoded — verify XSS escape path"
-  fail=$((fail+1))
+  FAILED+=("adversarial-title HTML escape: encoded marker absent (public page may have failed to render)")
 fi
 if grep -q 'Adversarial title \\u003c/script\\u003e' /tmp/seed-fixtures-pub.html 2>/dev/null; then
   echo "  JSON blob : \\u-escaped ✓"
 else
   echo "  JSON blob : NOT FOUND — day-popover JSON may not be rendering"
+  NOTES+=("adversarial-title JSON escape: \\u-escaped marker absent (day-popover JSON or page render)")
 fi
 
 # ── Day-strip pattern (1 char per day, oldest→newest) ────────────────────────
@@ -877,10 +909,15 @@ PY
 
 echo
 echo "=========================================================================="
-if (( fail == 0 )); then
+if (( ${#NOTES[@]} > 0 )); then
+  echo "  NOTES (non-fatal):"
+  for n in "${NOTES[@]}"; do echo "    • $n"; done
+fi
+if (( ${#FAILED[@]} == 0 )); then
   echo "  RESULT: all checks passed ✓"
 else
-  echo "  RESULT: ${fail} check(s) failed — see [MISMATCH] / WARN lines above"
+  echo "  RESULT: ${#FAILED[@]} check(s) failed:"
+  for f in "${FAILED[@]}"; do echo "    ✗ $f"; done
 fi
 echo "=========================================================================="
 echo
@@ -904,4 +941,4 @@ echo "Operator monitors  : http://app.${BASE_DOMAIN}:8080/targets"
 echo "Operator incidents : http://app.${BASE_DOMAIN}:8080/incidents"
 echo "(public page cache TTL ~10s; wait a moment before first load)"
 
-exit $(( fail > 0 ))
+exit $(( ${#FAILED[@]} > 0 ))
