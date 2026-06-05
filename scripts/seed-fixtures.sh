@@ -331,28 +331,23 @@ SELECT '${ORG}'::uuid, ins.id, '${T_DB}'::uuid
 FROM ins WHERE ins.title = 'Fixture rolling database patch';
 SQL
 
-echo "==> Postgres: 10 active incidents (5 investigating, 3 identified, 2 monitoring)"
-# Round-robin EXCLUDES fix-db — it's bound to the active maintenance window
-# above, and a Maintenance-state component should not also carry open
-# incidents on the public page (active-incidents banner pulls every open
-# incident regardless of component state → visually contradictory).
+echo "==> Postgres: 4 active incidents (one per frozen public monitor; all phases + states)"
+# One OPEN incident per target — mirrors the writer's single-open-per-target
+# invariant (insert_open guards NOT EXISTS open), so the public active banner
+# never lists the same component twice. Seeded only on enabled=false public
+# monitors: the live writer never checks disabled targets, so it can't
+# auto-resolve these mid-demo. Excludes fix-db (Maintenance-bound) and the
+# enabled=true fix-cdn / fix-auth, whose incidents the live writer owns.
 pg <<SQL
 WITH s AS (
-  SELECT n,
-         CASE ((n-1) % 5)
-           WHEN 0 THEN '${T_API}'::uuid
-           WHEN 1 THEN '${T_WEB}'::uuid
-           WHEN 2 THEN '${T_CDN}'::uuid
-           WHEN 3 THEN '${T_AUTH}'::uuid
-           ELSE        '${T_EMAIL}'::uuid
-         END AS target_id,
-         now() - (n * interval '13 minute')                         AS started_at,
-         -- phase distribution: 1-5 investigating, 6-8 identified, 9-10 monitoring
-         CASE WHEN n <= 5 THEN 'investigating'
-              WHEN n <= 8 THEN 'identified'
-              ELSE             'monitoring' END                     AS current_phase,
-         (ARRAY['major','critical','major'])[((n-1) % 3) + 1]       AS sev
-  FROM generate_series(1, 10) n
+  SELECT target_id, phase, sev,
+         now() - (ord * interval '13 minute') AS started_at
+  FROM (VALUES
+    ('${T_API}'::uuid,    'investigating', 'major',    1),
+    ('${T_WEB}'::uuid,    'identified',    'critical', 2),
+    ('${T_EMAIL}'::uuid,  'monitoring',    'major',    3),
+    ('${T_SEARCH}'::uuid, 'investigating', 'minor',    4)
+  ) AS v(target_id, phase, sev, ord)
 ),
 ins AS (
   INSERT INTO incidents
@@ -361,16 +356,16 @@ ins AS (
      state, visibility, origin, acknowledged_at, acknowledged_by)
   SELECT '${ORG}'::uuid, s.target_id, s.started_at, NULL,
          s.sev, 'down', 3, 'connection refused',
-         'Ongoing — ' || initcap(s.current_phase) || ' (fixture #' || s.n || ')',
-         'Live fixture incident still in ' || s.current_phase || ' phase.',
+         'Ongoing — ' || initcap(s.phase) || ' (' || s.phase || ' phase)',
+         'Live fixture incident still in ' || s.phase || ' phase.',
          NULL,
          -- Past-investigating phases are acknowledged by the on-call owner;
          -- still-investigating ones are unacknowledged (triggered).
-         CASE WHEN s.current_phase = 'investigating' THEN 'triggered' ELSE 'acknowledged' END,
+         CASE WHEN s.phase = 'investigating' THEN 'triggered' ELSE 'acknowledged' END,
          'public', 'monitor',
-         CASE WHEN s.current_phase <> 'investigating'
+         CASE WHEN s.phase <> 'investigating'
               THEN s.started_at + interval '4 minute' ELSE NULL END,
-         CASE WHEN s.current_phase <> 'investigating' AND '${OWNER_USER_ID}' <> ''
+         CASE WHEN s.phase <> 'investigating' AND '${OWNER_USER_ID}' <> ''
               THEN '${OWNER_USER_ID}'::uuid ELSE NULL END
   FROM s
   RETURNING id, started_at
@@ -387,11 +382,11 @@ CROSS JOIN LATERAL (
   UNION ALL
   SELECT i.started_at + interval '5 minute', 'identified',
          'Root cause identified — failover in progress.'
-  WHERE s.current_phase IN ('identified','monitoring')
+  WHERE s.phase IN ('identified','monitoring')
   UNION ALL
   SELECT i.started_at + interval '10 minute', 'monitoring',
          'Mitigation applied; monitoring recovery.'
-  WHERE s.current_phase = 'monitoring'
+  WHERE s.phase = 'monitoring'
 ) AS p;
 SQL
 
@@ -925,8 +920,8 @@ echo "Seeded org '${SLUG}' (id ${ORG})."
 echo "  monitors  : 14 (7 public/visible HTTP + 1 disabled public + 2 internal HTTP + 4 non-HTTP)"
 echo "  groups    : API & Web · CDN · Infrastructure · Notifications · Beta · Integrations · Ungrouped"
 echo "  owners    : $([[ -n "$OWNER_USER_ID" ]] && echo "8 monitors bound to ${OWNER_USER_ID:0:8}…" || echo 'no member found — every monitor unowned')"
-echo "  incidents : 164 (150 resolved across 87d + 10 active in mixed phases + 1 adversarial-title
-              + 2 internal-only on non-public monitors + 1 manually declared)
+echo "  incidents : 158 (150 resolved across 87d + 4 active (one per frozen public monitor)
+              + 1 adversarial-title + 2 internal-only on non-public monitors + 1 manually declared)
   ops state : active public incidents split triggered/acknowledged; internal + manual
               incidents carry activity timelines for the operator console"
 echo "  channels  : 3 (slack + webhook enabled, telegram disabled)"
