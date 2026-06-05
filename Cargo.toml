@@ -193,3 +193,7 @@ harness = false
 [[bench]]
 name = "public_status_ttfb"
 harness = false
+
+[[bench]]
+name = "public_status_concurrent"
+harness = false

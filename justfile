@@ -140,6 +140,28 @@ test-ch:
     CLICKHOUSE_URL=http://127.0.0.1:8123 \
         cargo test --test clickhouse_aggregator_test -- --ignored
 
+# ── Benchmarks ──────────────────────────────────────────────────────────────
+
+# Uses a throwaway `ci_verify` DB so the dev DB is untouched (harness
+# auto-applies migrations on a fresh schema). Needs `just up`. Skips without
+# DATABASE_URL so plain `cargo bench`/CI never runs it.
+# DB-backed status-page perf benches — run before a release to catch schema/perf drift.
+bench-db:
+    docker compose -f compose.dev.yml exec -T postgres \
+        psql -U monitor -d postgres \
+        -c "DROP DATABASE IF EXISTS ci_verify WITH (FORCE);" \
+        -c "CREATE DATABASE ci_verify OWNER monitor;"
+    docker compose -f compose.dev.yml exec -T clickhouse \
+        clickhouse-client -u monitor --password monitor \
+        --query "DROP DATABASE IF EXISTS ci_verify"
+    docker compose -f compose.dev.yml exec -T clickhouse \
+        clickhouse-client -u monitor --password monitor \
+        --query "CREATE DATABASE ci_verify"
+    DATABASE_URL=postgres://monitor:monitor@127.0.0.1:5432/ci_verify \
+    CLICKHOUSE_URL=http://127.0.0.1:8123 \
+    CLICKHOUSE_DATABASE=ci_verify \
+        cargo bench --bench public_status_ttfb --bench public_status_concurrent
+
 # ── Lints ───────────────────────────────────────────────────────────────────
 
 fmt:

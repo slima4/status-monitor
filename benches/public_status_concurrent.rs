@@ -1,21 +1,26 @@
-//! TTFB benchmark for the public-status aggregator under a 50-org × 50-component
-//! fixture. Validates that the `(org_id, target_id, ts)` ORDER BY on
-//! `check_results` keeps single-org lookups bounded — a regression to a
-//! full-table scan would show up as a linear-in-org-count growth here.
+//! Concurrent cache-miss throughput for the public-status aggregator.
+//!
+//! The TTFB bench measures one org's cold `build` in isolation. This one fires
+//! many *distinct*-org builds at once — the case where a traffic spike rolls a
+//! batch of separate tenants through cache miss in the same window. It surfaces
+//! the shared-resource ceiling the single-org bench can't: the Postgres pool and
+//! the ClickHouse client both serialize work across tenants, so aggregate
+//! builds/sec flattens once concurrent builds exceed the pool's connection count
+//! regardless of how many cores are free.
 //!
 //! Requires a live Postgres + ClickHouse. If `DATABASE_URL` or `CLICKHOUSE_URL`
-//! are unset the bench prints a skip message and exits cleanly, so this file
-//! is safe to leave in `cargo bench` invocations on a laptop without docker.
+//! are unset the bench prints a skip message and exits cleanly.
 //!
-//! Run: `just up && DATABASE_URL=postgres://monitor:monitor@127.0.0.1:5432/monitor \
-//!                  CLICKHOUSE_URL=http://127.0.0.1:8123 \
-//!       cargo bench --bench public_status_ttfb`
+//! Run: `DATABASE_URL=postgres://monitor:monitor@127.0.0.1:5432/ci_verify \
+//!       CLICKHOUSE_URL=http://127.0.0.1:8123 CLICKHOUSE_DATABASE=ci_verify \
+//!       cargo bench --bench public_status_concurrent`
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::Utc;
-use criterion::{Criterion, criterion_group, criterion_main};
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+use futures::future::join_all;
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 use tokio::runtime::Builder;
@@ -31,28 +36,27 @@ use uptimepage::storage::{
 use url::Url;
 use uuid::Uuid;
 
-const ORG_COUNT: usize = 50;
-const COMPONENTS_PER_ORG: usize = 50;
+const ORG_COUNT: usize = 64;
+const COMPONENTS_PER_ORG: usize = 25;
 const RESULTS_PER_COMPONENT: usize = 60;
+const BATCHES: [usize; 4] = [1, 8, 16, 32];
 
 struct Fixture {
     pool: PgPool,
     ch: clickhouse::Client,
     aggregators: Vec<OrgAggregator>,
-    /// Owned by the fixture so the bench-loop tenants stay alive; PG cascades
-    /// clear their data on Drop.
     user_ids: Vec<UserId>,
     org_ids: Vec<OrgId>,
-    /// One page per org, with all its targets curated as components — the page
-    /// the benched `build` renders.
     page_ids: Vec<StatusPageId>,
 }
 
 async fn try_pg_pool() -> Option<PgPool> {
     let url = std::env::var("DATABASE_URL").ok()?;
+    // Mirror the production default (config: storage.postgres.max_connections)
+    // so the measured ceiling reflects what a real deployment hits.
     let pool = PgPoolOptions::new()
-        .max_connections(8)
-        .acquire_timeout(Duration::from_secs(5))
+        .max_connections(10)
+        .acquire_timeout(Duration::from_secs(10))
         .connect(&url)
         .await
         .ok()?;
@@ -78,11 +82,10 @@ async fn try_ch_client() -> Option<clickhouse::Client> {
 }
 
 fn http_target(name: &str) -> NewTarget {
-    let url = Url::parse("https://example.com/").unwrap();
     NewTarget {
         name: name.into(),
         check: CheckSpec::Http(HttpCheck {
-            url,
+            url: Url::parse("https://example.com/").unwrap(),
             method: HttpMethod::Get,
             timeout: Duration::from_secs(5),
             follow_redirects: true,
@@ -122,7 +125,7 @@ fn ok_result(target_id: Uuid, org_id: Uuid, secs_ago: i64) -> CheckResult {
 }
 
 async fn make_user(pool: &PgPool) -> UserId {
-    let email = format!("ttfb-{}@bench.example", Uuid::now_v7());
+    let email = format!("conc-{}@bench.example", Uuid::now_v7());
     let (id,): (Uuid,) = sqlx::query_as(
         r#"INSERT INTO users (email, terms_version, privacy_version)
            VALUES ($1, $2, $3) RETURNING id"#,
@@ -154,7 +157,7 @@ async fn build_fixture() -> Option<Fixture> {
 
     for i in 0..ORG_COUNT {
         let user = make_user(&pool).await;
-        let org = create_org_with_owner(&pool, user, &unique_slug(&format!("ttfb{i}")), "ttfb", 3)
+        let org = create_org_with_owner(&pool, user, &unique_slug(&format!("conc{i}")), "conc", 3)
             .await
             .expect("create org")
             .expect("slug fresh");
@@ -162,8 +165,6 @@ async fn build_fixture() -> Option<Fixture> {
             Arc::new(PostgresTargetStore::from_pool(pool.clone(), None)) as Arc<dyn TargetStore>;
         let sink = ClickhouseResultSink::from_client(ch.clone());
 
-        // Curate every target onto one page so the page-keyed aggregator has
-        // the full component set to render.
         let page_id = page_store
             .create(
                 org.id,
@@ -184,7 +185,7 @@ async fn build_fixture() -> Option<Fixture> {
             let t = target_store
                 .create(
                     org.id,
-                    http_target(&format!("ttfb-{i}-{j}")),
+                    http_target(&format!("conc-{i}-{j}")),
                     WriteSource::Ui,
                     i64::MAX,
                 )
@@ -220,9 +221,6 @@ async fn build_fixture() -> Option<Fixture> {
         page_ids.push(page_id);
     }
 
-    // Single MV merge after all inserts. OPTIMIZE FINAL is table-wide; doing
-    // it once per org would burn most of the fixture's wall-clock budget
-    // re-merging the same partitions on every iteration.
     ch.query("OPTIMIZE TABLE check_results_1m FINAL")
         .execute()
         .await
@@ -251,8 +249,6 @@ async fn teardown(fixture: &Fixture) {
             .execute(&fixture.pool)
             .await;
     }
-    // Best-effort CH cleanup — the rows for these orgs are isolated by org_id,
-    // so a regression test can simply DELETE WHERE org_id IN (...).
     for org in &fixture.org_ids {
         let _ = fixture
             .ch
@@ -269,35 +265,36 @@ async fn teardown(fixture: &Fixture) {
     }
 }
 
-fn bench_public_status_build(c: &mut Criterion) {
+fn bench_concurrent_build(c: &mut Criterion) {
     let rt = Builder::new_multi_thread().enable_all().build().unwrap();
     let Some(fixture) = rt.block_on(build_fixture()) else {
-        eprintln!(
-            "skipped: DATABASE_URL / CLICKHOUSE_URL not set — run `just up` first to enable this bench"
-        );
+        eprintln!("skipped: DATABASE_URL / CLICKHOUSE_URL not set");
         return;
     };
 
-    let mut group = c.benchmark_group("public_status_ttfb");
-    group.sample_size(40);
-    // Pick the median org so the bench measures a typical tenant, not the
-    // first one (which may benefit from PG/CH page-cache warmup) or the last
-    // (which may have a colder block cache).
-    let middle = ORG_COUNT / 2;
-    let middle_org = fixture.org_ids[middle];
-    let middle_page = fixture.page_ids[middle];
-    group.bench_function("aggregator_build_50x50", |b| {
-        b.to_async(&rt).iter(|| async {
-            fixture.aggregators[middle]
-                .build(middle_page, middle_org)
-                .await
-                .expect("aggregator build");
+    let mut group = c.benchmark_group("public_status_concurrent");
+    group.sample_size(20);
+    for &batch in BATCHES.iter() {
+        group.throughput(Throughput::Elements(batch as u64));
+        group.bench_with_input(BenchmarkId::from_parameter(batch), &batch, |b, &batch| {
+            b.to_async(&rt).iter(|| async {
+                // Each iteration drives `batch` distinct orgs through a cold
+                // aggregator build concurrently — no cache in the path, so the
+                // only shared bottleneck is the PG pool + CH client.
+                let futs = (0..batch).map(|n| {
+                    let idx = n % ORG_COUNT;
+                    fixture.aggregators[idx].build(fixture.page_ids[idx], fixture.org_ids[idx])
+                });
+                for r in join_all(futs).await {
+                    r.expect("aggregator build");
+                }
+            });
         });
-    });
+    }
     group.finish();
 
     rt.block_on(teardown(&fixture));
 }
 
-criterion_group!(benches, bench_public_status_build);
+criterion_group!(benches, bench_concurrent_build);
 criterion_main!(benches);
