@@ -274,7 +274,7 @@ impl PgOnCallStore {
         let participants: Vec<ParticipantRow> = sqlx::query_as(
             "SELECT p.id, p.layer_id, p.user_id, p.position \
              FROM on_call_participants p JOIN on_call_layers l ON l.id = p.layer_id \
-             WHERE p.org_id = $1 AND l.schedule_id = $2 ORDER BY p.position",
+             WHERE p.org_id = $1 AND l.schedule_id = $2 ORDER BY p.layer_id, p.position",
         )
         .bind(org.0)
         .bind(id)
@@ -388,10 +388,11 @@ impl OnCallStore for PgOnCallStore {
         tx.commit()
             .await
             .map_err(|e| AppError::Other(anyhow::anyhow!("commit: {e}")))?;
-        Ok(self
-            .get(org, id)
-            .await?
-            .expect("just-created schedule is live"))
+        self.get(org, id).await?.ok_or_else(|| {
+            AppError::Other(anyhow::anyhow!(
+                "on-call schedule {id} not found immediately after create"
+            ))
+        })
     }
 
     async fn replace(

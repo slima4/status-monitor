@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use chrono::Utc;
 use futures::stream::{FuturesUnordered, StreamExt};
+use moka::future::Cache;
 use tokio::sync::{Mutex, Semaphore, mpsc};
 use tokio::time::{Instant, MissedTickBehavior};
 use tokio_util::sync::CancellationToken;
@@ -20,6 +21,10 @@ const SWEEP_CONCURRENCY: usize = 8;
 /// reconcile and an inbound signal cannot both open the same episode and
 /// double-page. Two distinct incidents may share a shard (harmless contention).
 const PAGE_LOCK_SHARDS: usize = 256;
+/// On-call roster cache lifetime. Short enough that an edit or a handoff is
+/// reflected within seconds; long enough to collapse a sweep's repeated
+/// resolutions of the same schedule into one query.
+const ON_CALL_CACHE_TTL_SECS: u64 = 15;
 
 use crate::config::EscalationConfig;
 use crate::domain::{
@@ -83,6 +88,11 @@ struct Worker {
     /// Sharded per-incident locks; `page()` holds one for the incident it
     /// touches so concurrent signal + sweep tasks serialise per incident.
     page_locks: Vec<Mutex<()>>,
+    /// Short-TTL cache of resolved on-call rosters, keyed by schedule. Who is
+    /// on call only changes at a handoff (>= daily), so a correlated outage
+    /// paging many incidents off one schedule resolves it once per window
+    /// instead of running the multi-query load per incident every tick.
+    on_call_cache: Cache<(OrgId, Uuid), Arc<Vec<UserId>>>,
 }
 
 impl EscalationEngine {
@@ -113,6 +123,10 @@ impl EscalationEngine {
                 base_url,
                 sweeping: AtomicBool::new(false),
                 page_locks: (0..PAGE_LOCK_SHARDS).map(|_| Mutex::new(())).collect(),
+                on_call_cache: Cache::builder()
+                    .max_capacity(10_000)
+                    .time_to_live(Duration::from_secs(ON_CALL_CACHE_TTL_SECS))
+                    .build(),
             }),
         }
     }
@@ -746,6 +760,28 @@ impl Worker {
         (!base.is_empty()).then(|| format!("{base}/incidents/{id}"))
     }
 
+    /// Resolve a schedule's current on-call roster, served from a short-TTL
+    /// cache so a sweep paging many incidents off one schedule loads it once.
+    async fn resolve_on_call(
+        &self,
+        org: OrgId,
+        schedule_id: Uuid,
+        at: chrono::DateTime<Utc>,
+    ) -> Result<Arc<Vec<UserId>>> {
+        if let Some(users) = self.on_call_cache.get(&(org, schedule_id)).await {
+            return Ok(users);
+        }
+        let users = Arc::new(self.on_call.resolve_now(org, schedule_id, at).await?);
+        // Don't cache an empty roster: a coverage gap an operator fixes
+        // mid-incident must take effect next tick, not after the TTL.
+        if !users.is_empty() {
+            self.on_call_cache
+                .insert((org, schedule_id), users.clone())
+                .await;
+        }
+        Ok(users)
+    }
+
     /// The concrete channels a policy rung pages, resolving each target type:
     /// a `channel` routes straight through; a `user` pages that responder's
     /// contact channels; a `schedule` resolves who is on call at `at` and pages
@@ -778,7 +814,7 @@ impl Worker {
                 }
                 EscalationTargetType::Schedule => {
                     if let Some(sid) = t.schedule_id {
-                        for user in self.on_call.resolve_now(org, sid, at).await? {
+                        for user in self.resolve_on_call(org, sid, at).await?.iter().copied() {
                             self.page_user(org, user, &mut out).await?;
                         }
                     }
@@ -800,7 +836,7 @@ impl Worker {
     async fn page_user(&self, org: OrgId, user: UserId, out: &mut Vec<PageTarget>) -> Result<()> {
         let contacts = self.contacts.for_user(org, user).await?;
         if contacts.is_empty() {
-            tracing::debug!(%user, "on-call responder has no contact channels; not paged");
+            tracing::warn!(%user, "on-call responder has no contact channels; not paged");
         }
         for cid in contacts {
             push_target(out, cid, Some(user));

@@ -10,7 +10,9 @@
 
 use std::str::FromStr;
 
-use chrono::{DateTime, Duration as ChronoDuration, LocalResult, NaiveDateTime, TimeZone, Utc};
+use chrono::{
+    DateTime, Duration as ChronoDuration, LocalResult, NaiveDateTime, Offset, TimeZone, Utc,
+};
 use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -266,11 +268,22 @@ fn local_to_utc(tz: Tz, naive: NaiveDateTime) -> DateTime<Utc> {
     match tz.from_local_datetime(&naive) {
         LocalResult::Single(dt) => dt.to_utc(),
         LocalResult::Ambiguous(earliest, _) => earliest.to_utc(),
-        LocalResult::None => tz
-            .from_local_datetime(&(naive + ChronoDuration::hours(1)))
-            .earliest()
-            .map(|dt| dt.to_utc())
-            .unwrap_or_else(|| naive.and_utc()),
+        LocalResult::None => {
+            // Spring-forward gap: this wall time never occurs. Step forward to
+            // the first instant that does (real gaps are <=1h; bound the search
+            // so a pathological zone can't loop). Derive UTC from the zone's
+            // offset as a last resort rather than mislabelling local as UTC.
+            for mins in [60, 120, 180, 240] {
+                if let Some(dt) = tz
+                    .from_local_datetime(&(naive + ChronoDuration::minutes(mins)))
+                    .earliest()
+                {
+                    return dt.to_utc();
+                }
+            }
+            let offset = tz.offset_from_utc_datetime(&naive).fix();
+            (naive - ChronoDuration::seconds(offset.local_minus_utc() as i64)).and_utc()
+        }
     }
 }
 
