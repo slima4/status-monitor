@@ -537,6 +537,18 @@ impl TargetStore for InMemoryTargetStore {
             .collect())
     }
 
+    async fn names_and_kinds(
+        &self,
+        _org: OrgId,
+    ) -> Result<std::collections::HashMap<Uuid, (String, String)>> {
+        Ok(self
+            .targets
+            .lock()
+            .iter()
+            .map(|t| (t.id, (t.name.clone(), t.check.kind().to_string())))
+            .collect())
+    }
+
     async fn create(
         &self,
         _org: OrgId,

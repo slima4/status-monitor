@@ -1,4 +1,5 @@
-// Incident console actions: acknowledge / resolve / reopen / add-note / declare.
+// Incident console actions: acknowledge / resolve / reopen / add-note /
+// post-update / declare.
 // Posts to /api/v1/incidents/* (same-origin session cookie + X-Requested-With,
 // the custom header that gates state-changing requests). Reloads on success so
 // the row/detail reflects the new state.
@@ -50,13 +51,18 @@
     const verb = { acknowledge: "Acknowledge", resolve: "Resolve", reopen: "Reopen" }[action];
     if (!verb) return;
     const body = {};
-    // Ack/resolve capture an optional note (the "why") onto the timeline;
-    // reopen just confirms. A cancelled prompt aborts; an empty note proceeds.
+    // Ack/resolve capture an optional note (the "why"). Resolving a public
+    // incident also posts this as the public "Resolved" update, so its prompt
+    // says so. reopen just confirms. Cancel aborts; an empty note proceeds.
     if (action !== "reopen" && window.smPrompt) {
+      const promptBody =
+        action === "resolve"
+          ? "This message is posted as the public “Resolved” update on the status page (for public incidents). Leave blank for a default closing message."
+          : "Add an optional note for the timeline — why, or what you found.";
       const note = await window.smPrompt({
         title: verb + " incident?",
-        body: "Add an optional note for the timeline — why, or what you found.",
-        placeholder: "optional note…",
+        body: promptBody,
+        placeholder: action === "resolve" ? "resolution message…" : "optional note…",
         multiline: true,
         optional: true,
       });
@@ -82,6 +88,18 @@
     const res = await post("/api/v1/incidents/" + encodeURIComponent(id) + "/assign", { user_id: selfId });
     if (!res.ok) return showError(errMsg(res));
     if (window.smToast) window.smToast({ message: "Assigned to you", kind: "ok" });
+    window.location.reload();
+  }
+
+  async function assignTo(select) {
+    const id = select.dataset.incidentId;
+    if (!id) return;
+    const val = (select.value || "").trim();
+    const res = await post("/api/v1/incidents/" + encodeURIComponent(id) + "/assign", {
+      user_id: val || null,
+    });
+    if (!res.ok) return showError(errMsg(res));
+    if (window.smToast) window.smToast({ message: val ? "Assigned" : "Unassigned", kind: "ok" });
     window.location.reload();
   }
 
@@ -139,6 +157,21 @@
     window.location.reload();
   }
 
+  async function submitUpdate(form) {
+    const id = form.dataset.incidentId;
+    if (!id) return;
+    const fd = new FormData(form);
+    const body = {
+      phase: (fd.get("phase") || "investigating").toString(),
+      message: (fd.get("message") || "").toString().trim(),
+    };
+    if (!body.message) return showError("message: cannot be empty");
+    const res = await post("/api/v1/incidents/" + encodeURIComponent(id) + "/updates", body);
+    if (!res.ok) return showError(errMsg(res));
+    if (window.smToast) window.smToast({ message: "Update posted", kind: "ok" });
+    window.location.reload();
+  }
+
   async function submitDeclare(form) {
     const fd = new FormData(form);
     const tid = (fd.get("target_id") || "").toString().trim();
@@ -182,11 +215,34 @@
     }
   });
 
+  root.addEventListener("change", function (ev) {
+    const sel = ev.target.closest("[data-incident-assign-select]");
+    if (sel) return assignTo(sel);
+  });
+
   root.addEventListener("submit", function (ev) {
-    const form = ev.target.closest("[data-incident-declare-form]");
-    if (form) {
+    const declare = ev.target.closest("[data-incident-declare-form]");
+    if (declare) {
       ev.preventDefault();
-      submitDeclare(form);
+      return submitDeclare(declare);
+    }
+    const update = ev.target.closest("[data-incident-update-form]");
+    if (update) {
+      ev.preventDefault();
+      return submitUpdate(update);
+    }
+  });
+
+  // `/` focuses the incidents search, unless already typing in a field.
+  root.addEventListener("keydown", function (e) {
+    if (e.key !== "/" || e.metaKey || e.ctrlKey || e.altKey) return;
+    const t = e.target;
+    if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+    const search = root.getElementById("incidents-search");
+    if (search) {
+      e.preventDefault();
+      search.focus();
+      search.select();
     }
   });
 })();

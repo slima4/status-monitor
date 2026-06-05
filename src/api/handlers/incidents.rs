@@ -94,6 +94,7 @@ pub async fn update_incident_narration(
 pub async fn post_incident_update(
     State(state): State<AppState>,
     Authorized(org, _): Authorized<IncidentsWrite>,
+    CurrentUser(user): CurrentUser,
     Path(id): Path<Uuid>,
     Json(new): Json<NewIncidentUpdate>,
 ) -> Result<(
@@ -104,7 +105,7 @@ pub async fn post_incident_update(
     validate_message(&new.message, "message")?;
     let entry = state
         .incident_narration_store
-        .append_update(org, id, new, None)
+        .append_update(org, id, new, Some(user.0.to_string()))
         .await?
         .ok_or_else(|| AppError::not_found(codes::INCIDENT_NOT_FOUND, "incident not found"))?;
     let location = HeaderValue::from_str(&format!("/api/v1/incidents/{id}")).expect("uuid ascii");
@@ -193,9 +194,10 @@ fn lifecycle_response(outcome: LifecycleOutcome) -> Result<Json<OpsIncident>> {
             codes::INCIDENT_NOT_FOUND,
             "incident not found",
         )),
-        LifecycleOutcome::IllegalTransition(err) => {
-            Err(AppError::conflict(codes::INCIDENT_INVALID_STATE, err.to_string()))
-        }
+        LifecycleOutcome::IllegalTransition(err) => Err(AppError::conflict(
+            codes::INCIDENT_INVALID_STATE,
+            err.to_string(),
+        )),
     }
 }
 
@@ -397,10 +399,19 @@ pub async fn publish_incident(
     Json(body): Json<PublishBody>,
 ) -> Result<Json<OpsIncident>> {
     validation::validate_optional_title(Some(&body.public_title), "public_title")?;
-    validation::validate_optional_description(Some(&body.public_description), "public_description")?;
+    validation::validate_optional_description(
+        Some(&body.public_description),
+        "public_description",
+    )?;
     let inc = state
         .incident_ops_store
-        .publish(org, id, body.public_title, body.public_description, Actor::User(user))
+        .publish(
+            org,
+            id,
+            body.public_title,
+            body.public_description,
+            Actor::User(user),
+        )
         .await?
         .ok_or_else(|| AppError::not_found(codes::INCIDENT_NOT_FOUND, "incident not found"))?;
     invalidate_incident_pages(&state, org, inc.target_id).await;
@@ -410,7 +421,11 @@ pub async fn publish_incident(
 /// Bust the cached HTML status pages that list this incident's monitor, so a
 /// visibility flip shows/hides immediately instead of after the page TTL. The
 /// JSON/RSS/detail surfaces are already live. Best-effort.
-async fn invalidate_incident_pages(state: &AppState, org: crate::domain::OrgId, target_id: Option<Uuid>) {
+async fn invalidate_incident_pages(
+    state: &AppState,
+    org: crate::domain::OrgId,
+    target_id: Option<Uuid>,
+) {
     super::invalidate_pages_for(state, org, target_id.as_slice()).await;
 }
 
@@ -530,7 +545,13 @@ pub async fn publish_postmortem(
     // must not 500 (which would prompt a retry that double-publishes/logs).
     if let Err(err) = state
         .incident_ops_store
-        .append_event(org, id, IncidentEventKind::PostmortemPublished, Actor::User(user), None)
+        .append_event(
+            org,
+            id,
+            IncidentEventKind::PostmortemPublished,
+            Actor::User(user),
+            None,
+        )
         .await
     {
         tracing::warn!(incident_id = %id, error = %err, "failed to record postmortem-published event");
@@ -558,7 +579,13 @@ pub async fn unpublish_postmortem(
     // Best-effort audit event (see publish_postmortem).
     if let Err(err) = state
         .incident_ops_store
-        .append_event(org, id, IncidentEventKind::PostmortemUnpublished, Actor::User(user), None)
+        .append_event(
+            org,
+            id,
+            IncidentEventKind::PostmortemUnpublished,
+            Actor::User(user),
+            None,
+        )
         .await
     {
         tracing::warn!(incident_id = %id, error = %err, "failed to record postmortem-unpublished event");
@@ -641,7 +668,10 @@ mod tests {
     fn blank_note_becomes_none_long_note_rejected() {
         assert_eq!(clean_note(None).unwrap(), None);
         assert_eq!(clean_note(Some("  \n".into())).unwrap(), None);
-        assert_eq!(clean_note(Some("on it".into())).unwrap(), Some("on it".into()));
+        assert_eq!(
+            clean_note(Some("on it".into())).unwrap(),
+            Some("on it".into())
+        );
         let long = "x".repeat(validation::MAX_MESSAGE + 1);
         assert!(matches!(
             clean_note(Some(long)),

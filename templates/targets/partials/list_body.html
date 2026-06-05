@@ -15,19 +15,33 @@
 
   <div class="monitors-foot">
     <span>
-      Showing <span class="monitors-foot__mono">{% if total == 0 %}0{% else %}{{ offset + 1 }}–{{ offset + total }}{% endif %}{% if has_more %}+{% endif %}</span>
+      showing <span class="monitors-foot__mono">{% if total == 0 %}0{% else %}{{ offset + 1 }}–{{ offset + total }}{% endif %}{% if has_more %}+{% endif %}</span>
       of <span class="monitors-foot__mono">{{ total }}{% if has_more %}+{% endif %}</span>
     </span>
-    <span>
+    <span class="flex flex-wrap items-center gap-3">
+      <span class="flex items-center gap-1 text-xs text-muted">
+        rows
+        {% for ps in page_sizes %}
+        <a class="dashboard-chip{% if ps.active %} dashboard-chip--active{% endif %}"
+           href="/targets?limit={{ ps.n }}&amp;offset=0&amp;{{ query_suffix }}"
+           hx-get="/web/targets/list?limit={{ ps.n }}&amp;offset=0&amp;{{ query_suffix }}"
+           hx-target="#target-rows" hx-swap="outerHTML"
+           hx-push-url="/targets?limit={{ ps.n }}&amp;offset=0&amp;{{ query_suffix }}">{{ ps.n }}</a>
+        {% endfor %}
+      </span>
       {% if let Some(prev) = prev_offset %}
       <a class="row-link"
-         hx-get="/web/targets/list?limit={{ limit }}&amp;offset={{ prev }}&amp;q={{ q|urlencode }}&amp;tag={{ tag|urlencode }}&amp;group={{ group|urlencode }}&amp;kind={{ kind|urlencode }}{% if let Some(o) = owner %}&amp;owner={{ o }}{% endif %}{% if let Some(e) = enabled %}&amp;enabled={{ e }}{% endif %}&amp;sort={{ sort }}"
-         hx-target="#target-rows" hx-swap="outerHTML" hx-push-url="true" href="#">← prev</a>
+         href="/targets?limit={{ limit }}&amp;offset={{ prev }}&amp;{{ query_suffix }}"
+         hx-get="/web/targets/list?limit={{ limit }}&amp;offset={{ prev }}&amp;{{ query_suffix }}"
+         hx-target="#target-rows" hx-swap="outerHTML"
+         hx-push-url="/targets?limit={{ limit }}&amp;offset={{ prev }}&amp;{{ query_suffix }}">← prev</a>
       {% endif %}
       {% if let Some(next) = next_offset %}
       <a class="row-link ml-3"
-         hx-get="/web/targets/list?limit={{ limit }}&amp;offset={{ next }}&amp;q={{ q|urlencode }}&amp;tag={{ tag|urlencode }}&amp;group={{ group|urlencode }}&amp;kind={{ kind|urlencode }}{% if let Some(o) = owner %}&amp;owner={{ o }}{% endif %}{% if let Some(e) = enabled %}&amp;enabled={{ e }}{% endif %}&amp;sort={{ sort }}"
-         hx-target="#target-rows" hx-swap="outerHTML" hx-push-url="true" href="#">next →</a>
+         href="/targets?limit={{ limit }}&amp;offset={{ next }}&amp;{{ query_suffix }}"
+         hx-get="/web/targets/list?limit={{ limit }}&amp;offset={{ next }}&amp;{{ query_suffix }}"
+         hx-target="#target-rows" hx-swap="outerHTML"
+         hx-push-url="/targets?limit={{ limit }}&amp;offset={{ next }}&amp;{{ query_suffix }}">next →</a>
       {% endif %}
     </span>
   </div>

@@ -11,6 +11,18 @@ pub fn url_encode(s: &str) -> String {
     byte_serialize(s.as_bytes()).collect()
 }
 
+/// Append `key=value` to a query-string buffer, inserting `&` before all but
+/// the first pair and form-encoding the value. Single owner so the various
+/// list-view link builders assemble query strings identically.
+pub fn push_param(buf: &mut String, key: &str, value: &str) {
+    if !buf.is_empty() {
+        buf.push('&');
+    }
+    buf.push_str(key);
+    buf.push('=');
+    buf.push_str(&url_encode(value));
+}
+
 /// Same-origin path predicate for `?redirect_after=` style query params.
 /// Accepts `/foo`, `/foo/bar`, `/`; rejects `//evil.test`, `/\evil.test`,
 /// `https://evil.test`, the empty string. Centralised so the login page link,

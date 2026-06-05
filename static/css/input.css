@@ -316,9 +316,9 @@
     --sm-monitors-row-selected-bg: var(--theme-state-warn-bg);
     --sm-monitors-row-paused-opacity: 0.55;
 
-    --sm-monitors-avatar-size:     1.5rem;
+    --sm-monitors-avatar-size:     1.2rem;
     --sm-monitors-avatar-fg:       var(--color-white);
-    --sm-monitors-avatar-font:     0.625rem;
+    --sm-monitors-avatar-font:     0.5rem;
 }
 
 @layer components {
@@ -1161,6 +1161,13 @@
     .sticker-btn:disabled {
         @apply cursor-not-allowed opacity-60;
         box-shadow: var(--theme-shadow-btn-disabled);
+    }
+    /* Base hover for plain (variant-less) sticker controls — declared before
+       the colour variants so their hover wins on equal specificity. */
+    .sticker-btn:not(:disabled) { cursor: pointer; }
+    .sticker-btn:not(:disabled):hover {
+        border-color: var(--theme-text-muted);
+        background: var(--theme-surface-sunk);
     }
     /* Fill for a raised sticker control. One modifier per intent so the
        brand/destructive colour is named once, never re-typed per call site
@@ -2370,6 +2377,8 @@
         color: var(--sm-dashboard-chip-active-fg);
         border-color: var(--theme-ink);
     }
+    /* Borderless treatment matching the monitors-table chips. */
+    .dashboard-chip--flat { border-color: transparent; }
     .dashboard-chip__count {
         @apply font-mono;
         color: var(--theme-ink);

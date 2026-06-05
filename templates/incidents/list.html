@@ -3,7 +3,10 @@
 {% block content %}
 <section class="space-y-5">
   <header class="flex flex-wrap items-end justify-between gap-3">
-    <h1 class="page-title"><span class="page-title__prefix" aria-hidden="true">$</span>incidents</h1>
+    <div class="flex items-center gap-3">
+      <h1 class="page-title"><span class="page-title__prefix" aria-hidden="true">$</span>incidents</h1>
+      <span class="monitors-subhead__mono">{{ total }}</span>
+    </div>
     <div class="flex items-center gap-2">
       <a href="/incidents/reports" class="btn-ghost px-3 py-1.5 text-sm font-medium">reports</a>
       <a href="/incidents/declare"
@@ -11,16 +14,60 @@
     </div>
   </header>
 
-  <div data-incident-error class="hidden rounded-sm border border-state-bad px-3 py-2 text-sm text-state-bad"></div>
+  <div data-incident-error role="alert" aria-live="polite" class="hidden rounded-sm border border-state-bad px-3 py-2 text-sm text-state-bad"></div>
 
-  <div class="flex flex-wrap items-center justify-between gap-3">
-    <nav aria-label="Filter by state" class="flex flex-wrap items-center gap-2">
-      {% for tab in state_tabs %}
-      <a href="{{ tab.href }}"
-         class="dashboard-chip{% if tab.active %} dashboard-chip--active{% endif %}">{{ tab.label }} <span class="cli-brackets">{{ tab.count }}</span></a>
-      {% endfor %}
-    </nav>
-    <div class="flex flex-wrap items-center gap-3">
+  {# The filter form sits OUTSIDE #incidents-results so swaps never replace the
+     search box — focus + cursor stay put while typing. It swaps only the
+     tabs+table region below. #}
+  <form id="incidents-filter" role="search" aria-label="Filter incidents"
+        hx-get="/incidents"
+        hx-target="#incidents-results"
+        hx-select="#incidents-results"
+        hx-swap="outerHTML"
+        hx-push-url="true"
+        hx-trigger="change, keyup changed delay:300ms from:input[name='q']"
+        class="monitors-toolbar">
+    <label class="monitors-search" for="incidents-search">
+      <svg class="monitors-search__icon" viewBox="0 0 24 24" fill="none"
+           stroke="currentColor" stroke-width="2" aria-hidden="true">
+        <circle cx="11" cy="11" r="7"/>
+        <path d="M20 20l-3.5-3.5" stroke-linecap="round"/>
+      </svg>
+      <input id="incidents-search" name="q" type="search" value="{{ search }}"
+             placeholder="Search title or monitor…"
+             class="monitors-search__input">
+      <span class="monitors-search__keyhint" aria-hidden="true">/</span>
+    </label>
+
+    <div class="monitors-toolbar__right">
+      <select name="assignee" data-sm-combobox class="monitors-toolbar__select" aria-label="Owner">
+        {% for o in owner_options %}
+        <option value="{{ o.value }}"{% if o.selected %} selected{% endif %}>{{ o.label }}</option>
+        {% endfor %}
+      </select>
+
+      <select name="sort" data-sm-combobox class="monitors-toolbar__select" aria-label="Sort">
+        {% for s in sort_options %}
+        <option value="{{ s.key }}"{% if s.selected %} selected{% endif %}>{{ s.label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <input type="hidden" name="state" value="{{ state_value }}">
+    <input type="hidden" name="limit" value="{{ data.limit }}">
+    {% match severity_value %}{% when Some with (sv) %}
+    <input type="hidden" name="severity" value="{{ sv }}">
+    {% when None %}{% endmatch %}
+  </form>
+
+  <div id="incidents-results" class="space-y-4">
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <nav aria-label="Filter by state" class="flex flex-wrap items-center gap-2">
+        {% for tab in state_tabs %}
+        <a href="{{ tab.href }}"
+           class="dashboard-chip{% if tab.active %} dashboard-chip--active{% endif %}">{{ tab.label }} <span class="cli-brackets">{{ tab.count }}</span></a>
+        {% endfor %}
+      </nav>
       <nav aria-label="Filter by severity" class="flex flex-wrap items-center gap-1 text-xs text-muted">
         sev
         {% for chip in severity_chips %}
@@ -28,18 +75,15 @@
            class="dashboard-chip{% if chip.active %} dashboard-chip--active{% endif %}">{{ chip.label }}</a>
         {% endfor %}
       </nav>
-      <a href="{{ mine_href }}"
-         class="dashboard-chip{% if mine_active %} dashboard-chip--active{% endif %}"
-         {% if mine_active %}aria-current="true"{% endif %}>mine</a>
     </div>
-  </div>
 
-  <div id="incident-table"
-       hx-get="/web/partials/incidents?{{ data.partial_query }}"
-       hx-trigger="every 10s"
-       hx-swap="innerHTML"
-       data-hx-loader>
-    {% include "incidents/_console_table.html" %}
+    <div id="incident-table"
+         hx-get="/web/partials/incidents?{{ data.partial_query }}"
+         hx-trigger="every 10s"
+         hx-swap="innerHTML"
+         data-hx-loader>
+      {% include "incidents/_console_table.html" %}
+    </div>
   </div>
 
   <script defer src="{{ "js/ui/incidents_console.js"|asset }}"></script>

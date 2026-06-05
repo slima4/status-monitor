@@ -65,15 +65,12 @@
 
   <section class="space-y-2 sticker-card px-5 py-3" data-collapsible>
     <button type="button" data-collapse-toggle aria-expanded="false"
-            aria-controls="configuration-body" aria-describedby="configuration-hint"
-            class="group inline-flex cursor-pointer items-center gap-1.5 border-0 bg-transparent p-0 text-sm font-medium text-body">
+            aria-controls="configuration-body"
+            class="group flex w-full cursor-pointer items-center gap-1.5 border-0 bg-transparent p-0 text-left text-sm font-medium text-body">
       configuration
       <span data-collapse-chevron aria-hidden="true"
             class="text-base text-muted transition-transform group-hover:text-body motion-reduce:transition-none">▾</span>
-    </button>
-    <button type="button" data-collapse-toggle tabindex="-1" aria-hidden="true"
-            class="group block w-full cursor-pointer border-0 bg-transparent p-0 text-left">
-      <span id="configuration-hint" data-collapse-hint class="text-xs text-muted group-hover:text-body">raw JSON this monitor runs with</span>
+      <span data-collapse-hint class="ml-auto text-xs font-normal text-muted group-hover:text-body">raw JSON this monitor runs with</span>
     </button>
     <div id="configuration-body" class="hidden">
       <pre class="sticker-card overflow-auto p-4 text-xs text-body">{{ config_json }}</pre>

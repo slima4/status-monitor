@@ -53,6 +53,14 @@ pub trait TargetStore: Send + Sync {
     /// `check_spec` decode + secret decrypt that `list` pays, for callers that
     /// only need labels (incident console, reports).
     async fn names(&self, org: OrgId) -> Result<std::collections::HashMap<Uuid, String>>;
+    /// `id → (name, check kind)` for every live target in the org. Like
+    /// [`names`](Self::names) but also returns the check discriminator
+    /// (`http`/`tcp`/`dns`/`tls_cert`/`domain_expiry`), read straight from the
+    /// `check_spec` tag — no full spec decode or secret decrypt.
+    async fn names_and_kinds(
+        &self,
+        org: OrgId,
+    ) -> Result<std::collections::HashMap<Uuid, (String, String)>>;
     /// Create one target. `max_targets` is the plan cap; the INSERT is
     /// guarded by `(count) + 1 <= max_targets` so the bound holds even
     /// against a concurrent create (no check-then-act). Returns

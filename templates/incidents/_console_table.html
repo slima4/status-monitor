@@ -5,11 +5,12 @@
 </div>
 {% else %}
 <section class="sticker-card overflow-hidden" data-self-user-id="{{ data.self_id }}">
-  <table class="min-w-full text-sm">
-    <thead class="bg-[color:var(--theme-surface-sunk)] text-left text-xs uppercase tracking-wide text-muted">
+  <table class="min-w-full text-xs">
+    <thead class="bg-[color:var(--theme-surface-sunk)] text-left font-mono text-[0.6875rem] font-semibold uppercase tracking-[0.08em] text-muted">
       <tr>
         <th scope="col" class="px-3 py-2 w-28">Severity</th>
         <th scope="col" class="px-3 py-2">Incident</th>
+        <th scope="col" class="px-3 py-2 w-20">Type</th>
         <th scope="col" class="px-3 py-2 w-44">State</th>
         <th scope="col" class="px-3 py-2 w-48">Owner</th>
         <th scope="col" class="px-3 py-2 w-24 text-right">Age</th>
@@ -24,23 +25,39 @@
         </td>
         <td class="px-3 py-2 align-top">
           <a href="/incidents/{{ row.id }}" title="{{ row.label }}"
-             class="block max-w-[22rem] truncate font-medium text-body hover:underline">{{ row.label }}</a>
+             class="block max-w-[22rem] truncate text-sm font-medium text-body hover:underline">{{ row.label }}</a>
           <div class="mt-0.5 flex flex-wrap gap-1">
-            <span class="dashboard-chip">{{ row.origin }}</span>
-            <span class="dashboard-chip">{{ row.visibility }}</span>
+            <span class="dashboard-chip dashboard-chip--flat">{{ row.origin }}</span>
+            <span class="dashboard-chip dashboard-chip--flat">{{ row.visibility }}</span>
             {% if row.urgency == "high" %}
-            <span class="dashboard-chip" title="high urgency — pages on-call">page</span>
+            <span class="dashboard-chip dashboard-chip--flat" title="high urgency — pages on-call">page</span>
             {% else %}
-            <span class="dashboard-chip" title="low urgency — notify only">notify</span>
+            <span class="dashboard-chip dashboard-chip--flat" title="low urgency — notify only">notify</span>
             {% endif %}
           </div>
         </td>
         <td class="px-3 py-2 align-top">
-          <div class="flex items-center gap-1.5">
-            <span class="dashboard-chip">{{ row.state_label }}</span>
-            {% match row.acked_by %}{% when Some with (a) %}
-            <span class="monitors-avatar monitors-avatar--sm" title="acknowledged by {{ a.label }}" style="background: {{ a.color }}">{{ a.initials }}</span>
-            {% when None %}{% endmatch %}
+          {% match row.kind %}{% when Some with (k) %}
+          <span class="dashboard-chip dashboard-chip--flat" title="monitor check type">{{ k }}</span>
+          {% when None %}<span class="text-quiet">—</span>{% endmatch %}
+        </td>
+        <td class="px-3 py-2 align-top">
+          <div class="flex flex-col items-start gap-1.5">
+            <span class="dashboard-chip dashboard-chip--flat">{{ row.state_label }}</span>
+            {% if row.acked_by.is_some() || row.state == "resolved" %}
+            <div class="flex items-center gap-1.5">
+              {% match row.acked_by %}{% when Some with (a) %}
+              <span class="monitors-avatar" title="acknowledged by {{ a.label }}" style="background: {{ a.color }}">{{ a.initials }}</span>
+              {% when None %}{% endmatch %}
+              {% if row.state == "resolved" %}
+              {% match row.resolved_by %}{% when Some with (rv) %}
+              <span class="monitors-avatar" title="resolved by {{ rv.label }}" style="background: {{ rv.color }}">{{ rv.initials }}</span>
+              {% when None %}
+              <span class="dashboard-chip dashboard-chip--flat" title="resolved automatically on recovery">auto</span>
+              {% endmatch %}
+              {% endif %}
+            </div>
+            {% endif %}
           </div>
         </td>
         <td class="px-3 py-2 align-top">
@@ -49,15 +66,18 @@
             {% when Some with (o) %}
             <span class="monitors-avatar{% if row.assigned_to_me %} monitors-avatar--me{% endif %}" title="{{ o.label }}" style="background: {{ o.color }}">{{ o.initials }}</span>
             {% if !row.assigned_to_me %}
-            <button type="button" data-incident-assign-self data-incident-id="{{ row.id }}" class="row-link text-xs">take</button>
+            <button type="button" data-incident-assign-self data-incident-id="{{ row.id }}"
+                    class="cli-brackets cursor-pointer font-mono text-xs text-muted hover:text-body">take</button>
             {% endif %}
             {% when None %}
-            <button type="button" data-incident-assign-self data-incident-id="{{ row.id }}" class="row-link text-xs">assign to me</button>
+            <button type="button" data-incident-assign-self data-incident-id="{{ row.id }}"
+                    class="cli-brackets cursor-pointer font-mono text-xs text-muted hover:text-body">assign to me</button>
             {% endmatch %}
           </div>
         </td>
-        <td class="px-3 py-2 align-top text-right tabular-nums {% if row.ongoing %}text-body{% else %}text-muted{% endif %}"
-            title="started {{ row.started_at|human_ts }}">{{ row.age }}</td>
+        <td class="px-3 py-2 align-top text-right tabular-nums {% if row.ongoing %}text-body{% else %}text-muted{% endif %}">
+          <time datetime="{{ row.started_at|iso_ts }}" data-tz>{{ row.age }}</time>
+        </td>
         <td class="px-3 py-2 align-top text-right whitespace-nowrap">
           <div class="flex items-center justify-end gap-1.5">
             {% if row.state == "triggered" %}

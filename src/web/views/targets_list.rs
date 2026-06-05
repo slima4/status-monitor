@@ -27,6 +27,7 @@ const MAX_LIMIT: usize = 200;
 const UPTIME_WINDOW_DAYS: i64 = 30;
 const UNGROUPED_LABEL: &str = "Ungrouped";
 const TYPE_CHIPS: &[&str] = &["HTTP", "TCP", "DNS", "TLS", "DOMAIN"];
+const PAGE_SIZES: &[usize] = &[25, 50, 100, 200];
 
 #[derive(Debug, Default, Deserialize)]
 pub struct ListParams {
@@ -123,6 +124,11 @@ pub struct GroupOption {
     pub selected: bool,
 }
 
+pub struct PageSizeChip {
+    pub n: usize,
+    pub active: bool,
+}
+
 #[derive(Template, WebTemplate)]
 #[template(path = "targets/list.html")]
 pub struct ListPage {
@@ -133,6 +139,10 @@ pub struct ListPage {
     pub type_chips: Vec<TypeChip>,
     pub owner_options: Vec<OwnerOption>,
     pub group_options: Vec<GroupOption>,
+    pub page_sizes: Vec<PageSizeChip>,
+    /// Shared filter query (everything but `limit`/`offset`), URL-encoded, for
+    /// the footer pagination links' real hrefs + htmx swap targets.
+    pub query_suffix: String,
     pub has_more: bool,
     pub limit: usize,
     pub offset: usize,
@@ -160,6 +170,10 @@ pub struct ListBodyPartial {
     /// drift away from the URL state.
     pub owner_options: Vec<OwnerOption>,
     pub group_options: Vec<GroupOption>,
+    pub page_sizes: Vec<PageSizeChip>,
+    /// Shared filter query (everything but `limit`/`offset`), URL-encoded, for
+    /// the footer pagination links' real hrefs + htmx swap targets.
+    pub query_suffix: String,
     pub has_more: bool,
     pub limit: usize,
     pub offset: usize,
@@ -198,6 +212,8 @@ pub async fn list_partial(
         type_chips: page.type_chips,
         owner_options: page.owner_options,
         group_options: page.group_options,
+        page_sizes: page.page_sizes,
+        query_suffix: page.query_suffix,
         has_more: page.has_more,
         limit: page.limit,
         offset: page.offset,
@@ -342,6 +358,16 @@ async fn build_page(state: &AppState, org: OrgId, params: &ListParams) -> WebRes
 
     let group_options = collect_group_options(&groups, &group);
 
+    let page_sizes = PAGE_SIZES
+        .iter()
+        .map(|&n| PageSizeChip {
+            n,
+            active: n == limit,
+        })
+        .collect();
+
+    let query_suffix = build_query_suffix(&q, &tag, &group, &kind, params, sort_key(sort));
+
     let prev_offset = (offset > 0).then(|| offset.saturating_sub(limit));
     let next_offset = has_more.then_some(offset + limit);
 
@@ -362,6 +388,8 @@ async fn build_page(state: &AppState, org: OrgId, params: &ListParams) -> WebRes
         type_chips,
         owner_options,
         group_options,
+        page_sizes,
+        query_suffix,
         has_more,
         limit,
         offset,
@@ -520,6 +548,30 @@ fn collect_group_options(groups: &[GroupBlock], selected: &str) -> Vec<GroupOpti
         .collect()
 }
 
+fn build_query_suffix(
+    q: &str,
+    tag: &str,
+    group: &str,
+    kind: &str,
+    params: &ListParams,
+    sort: &str,
+) -> String {
+    use crate::auth::url::push_param;
+    let mut s = String::new();
+    push_param(&mut s, "q", q);
+    push_param(&mut s, "tag", tag);
+    push_param(&mut s, "group", group);
+    push_param(&mut s, "kind", kind);
+    if let Some(o) = params.owner {
+        push_param(&mut s, "owner", &o.to_string());
+    }
+    if let Some(e) = params.enabled {
+        push_param(&mut s, "enabled", if e { "true" } else { "false" });
+    }
+    push_param(&mut s, "sort", sort);
+    s
+}
+
 fn status_class_for(status: &str) -> &'static str {
     match status {
         "up" => "up",
@@ -630,6 +682,8 @@ mod tests {
             type_chips: vec![],
             owner_options: vec![],
             group_options: vec![],
+            page_sizes: vec![],
+            query_suffix: String::new(),
             has_more: false,
             limit: 50,
             offset: 0,
@@ -671,6 +725,8 @@ mod tests {
             }],
             owner_options: vec![],
             group_options: vec![],
+            page_sizes: vec![],
+            query_suffix: String::new(),
             has_more: false,
             limit: 50,
             offset: 0,

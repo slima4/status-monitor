@@ -42,7 +42,23 @@
     </div>
   </header>
 
-  <div data-incident-error class="hidden rounded-sm border border-state-bad px-3 py-2 text-sm text-state-bad"></div>
+  <div data-incident-error role="alert" aria-live="polite" class="hidden rounded-sm border border-state-bad px-3 py-2 text-sm text-state-bad"></div>
+
+  <div class="flex flex-wrap items-center gap-2 text-sm" data-incident-id="{{ id }}">
+    <span class="text-xs uppercase tracking-wide text-muted">Owner</span>
+    {% match owner %}{% when Some with (o) %}
+    <span class="monitors-avatar monitors-avatar--sm" title="{{ o.label }}" style="background: {{ o.color }}">{{ o.initials }}</span>
+    <span class="text-body">{{ o.label }}</span>
+    {% when None %}
+    <span class="text-quiet">unassigned</span>
+    {% endmatch %}
+    <select data-incident-assign-select data-incident-id="{{ id }}" data-sm-combobox
+            class="monitors-toolbar__select" aria-label="Assign owner">
+      {% for m in owner_options %}
+      <option value="{{ m.value }}"{% if m.selected %} selected{% endif %}>{{ m.label }}</option>
+      {% endfor %}
+    </select>
+  </div>
 
   <section class="sticker-card grid grid-cols-2 gap-4 p-4 text-sm sm:grid-cols-4">
     <div><div class="text-xs uppercase tracking-wide text-muted">Started</div>
@@ -79,6 +95,59 @@
       {% endfor %}
     </ol>
     {% endif %}
+  </section>
+
+  <section class="space-y-3" data-incident-id="{{ id }}">
+    <div class="flex items-center justify-between gap-2">
+      <h2 class="text-sm font-semibold uppercase tracking-wide text-muted">Status updates</h2>
+      <span class="text-xs text-quiet">public timeline{% if visibility != "public" %} · draft{% endif %}</span>
+    </div>
+
+    {% if public_updates.is_empty() %}
+    <p class="text-sm text-muted">No updates posted yet.</p>
+    {% else %}
+    <ol class="sticker-card divide-y divide-[color:var(--theme-line)]">
+      {% for u in public_updates %}
+      <li class="flex flex-wrap items-baseline gap-2 px-4 py-3 text-sm">
+        <span class="public-chip public-phase--{{ u.phase }}">{{ u.phase }}</span>
+        <span class="text-xs text-quiet">by</span>
+        <span class="dashboard-subhead__mono text-xs">{{ u.author }}</span>
+        <time class="ml-auto text-xs text-muted tabular-nums" datetime="{{ u.posted_at|iso_ts }}" data-tz="exact">{{ u.posted_at|human_ts }}</time>
+        <p class="w-full whitespace-pre-line text-body">{{ u.message }}</p>
+      </li>
+      {% endfor %}
+    </ol>
+    {% endif %}
+
+    <details class="sticker-card">
+      <summary class="sm-help-summary flex cursor-pointer select-none items-center gap-2 p-4 text-sm text-body">
+        <span class="sm-help-tri" aria-hidden="true">▸</span>
+        <span>Post an update</span>
+        {% if visibility != "public" %}
+        <span class="ml-auto text-xs text-quiet">won't show until published</span>
+        {% endif %}
+      </summary>
+      <form data-incident-update-form data-incident-id="{{ id }}"
+            class="space-y-3 border-t border-[color:var(--theme-line)] p-4">
+        <label class="field-outline block">
+          <span class="field-outline__label">Message</span>
+          <textarea name="message" required rows="3" maxlength="2000"
+                    class="w-full field" placeholder="What changed? Keep it customer-readable…"></textarea>
+        </label>
+        <p class="text-xs text-quiet">To close the incident, use <span class="text-body">resolve</span> above — it posts the final “Resolved” update for you.</p>
+        <div class="flex flex-wrap items-end justify-between gap-3">
+          <div class="field-outline w-40">
+            <span class="field-outline__label">Phase</span>
+            <select name="phase" data-sm-combobox aria-label="Update phase" class="w-full field">
+              <option value="investigating" selected>investigating</option>
+              <option value="identified">identified</option>
+              <option value="monitoring">monitoring</option>
+            </select>
+          </div>
+          <button type="submit" class="sticker-btn sticker-btn--primary px-3 py-1.5 text-sm font-medium">post update</button>
+        </div>
+      </form>
+    </details>
   </section>
 
   <section class="flex flex-wrap items-center justify-between gap-2">

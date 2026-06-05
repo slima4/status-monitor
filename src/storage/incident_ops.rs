@@ -70,8 +70,50 @@ pub struct IncidentOpsFilter {
     pub severity: Option<IncidentSeverity>,
     /// Restrict to incidents owned by this user (the "assigned to me" view).
     pub assignee: Option<UserId>,
+    /// Free-text match over incident title and monitor name (case-insensitive).
+    pub query: Option<String>,
+    pub sort: IncidentSort,
     pub limit: Option<usize>,
     pub offset: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum IncidentSort {
+    #[default]
+    Recent,
+    Oldest,
+    Severity,
+}
+
+impl IncidentSort {
+    pub fn from_key(key: &str) -> Self {
+        match key {
+            "oldest" => Self::Oldest,
+            "severity" => Self::Severity,
+            _ => Self::Recent,
+        }
+    }
+    fn order_sql(self) -> &'static str {
+        match self {
+            Self::Recent => "started_at DESC",
+            Self::Oldest => "started_at ASC",
+            Self::Severity => {
+                "CASE severity WHEN 'critical' THEN 3 WHEN 'major' THEN 2 ELSE 1 END DESC, \
+                 started_at DESC"
+            }
+        }
+    }
+}
+
+/// A `%…%` `LIKE` pattern with the operator's wildcards neutralised, so a
+/// literal `%` or `_` in the search box matches itself, not everything.
+fn like_contains(s: &str) -> String {
+    format!(
+        "%{}%",
+        s.replace('\\', "\\\\")
+            .replace('%', "\\%")
+            .replace('_', "\\_")
+    )
 }
 
 /// Per-state incident tallies for the console filter tabs, under the active
@@ -214,11 +256,7 @@ pub trait IncidentOpsStore: Send + Sync {
     ) -> Result<()>;
     /// Every paging-log row for an incident — the engine reads these to dedup
     /// (never page the same channel+reason twice) before sending.
-    async fn notifications_for(
-        &self,
-        org: OrgId,
-        id: Uuid,
-    ) -> Result<Vec<IncidentNotification>>;
+    async fn notifications_for(&self, org: OrgId, id: Uuid) -> Result<Vec<IncidentNotification>>;
     /// Persist one paging attempt. Returns the new row id.
     async fn record_notification(&self, n: NewIncidentNotification) -> Result<Uuid>;
     /// Cross-org failed pages still under the attempt cap, oldest first — the
@@ -304,6 +342,23 @@ const OPS_COLS: &str = "id, target_id, title, state, severity, urgency, origin, 
      started_at, ended_at, acknowledged_at, acknowledged_by, assigned_to, resolved_by, \
      escalation_policy_id, escalation_level, escalation_round, next_escalation_at, \
      check_count, error_sample, created_at, updated_at";
+
+/// Public closing line for an auto-resolved incident; shared with the writer's
+/// `close` path.
+pub const AUTO_RESOLVED_MESSAGE: &str =
+    "Automatically resolved — monitoring checks have recovered.";
+
+/// Upper bound on per-incident timeline/update rows a detail view renders, so a
+/// pathological long-lived incident can't blow up the query or page.
+pub const INCIDENT_DETAIL_ROW_CAP: i64 = 500;
+
+/// Public resolution line: the note, or a default when blank.
+fn resolved_public_message(note: Option<&str>) -> String {
+    match note.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(n) => n.to_string(),
+        None => "This incident has been resolved.".to_string(),
+    }
+}
 
 #[derive(sqlx::FromRow)]
 struct OpsIncidentRow {
@@ -449,6 +504,8 @@ async fn insert_event_tx(
 impl PgIncidentOpsStore {
     /// Shared transition core: lock, read current state, apply the pure state
     /// machine, run `update` to mutate the row, then log `kind`.
+    /// `public_resolution`, when set, appends a `resolved` public update — only
+    /// when the incident is public.
     #[allow(clippy::too_many_arguments)]
     async fn transition(
         &self,
@@ -459,6 +516,7 @@ impl PgIncidentOpsStore {
         actor: Actor,
         note: Option<String>,
         update_sql: &str,
+        public_resolution: Option<String>,
     ) -> Result<LifecycleOutcome> {
         let mut tx = self
             .pool
@@ -493,7 +551,28 @@ impl PgIncidentOpsStore {
             .map_err(|e| anyhow::anyhow!("apply transition: {e}"))?;
 
         insert_event_tx(&mut tx, org, id, event_kind, actor, note.as_deref()).await?;
-        tx.commit().await.map_err(|e| anyhow::anyhow!("commit: {e}"))?;
+        if let Some(message) = public_resolution
+            && row.visibility == "public"
+        {
+            let author = actor
+                .user_id()
+                .map(|u| u.0.to_string())
+                .unwrap_or_else(|| "system".to_string());
+            sqlx::query(
+                r#"INSERT INTO incident_updates (org_id, incident_id, phase, message, author)
+                   VALUES ($1, $2, 'resolved', $3, $4)"#,
+            )
+            .bind(org.0)
+            .bind(id)
+            .bind(message)
+            .bind(author)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| anyhow::anyhow!("resolve public update: {e}"))?;
+        }
+        tx.commit()
+            .await
+            .map_err(|e| anyhow::anyhow!("commit: {e}"))?;
         Ok(LifecycleOutcome::Updated(Box::new(row_to_ops(row))))
     }
 }
@@ -517,12 +596,21 @@ impl IncidentOpsStore for PgIncidentOpsStore {
         let state = filter.state.map(|s| s.as_db_str());
         let severity = filter.severity.map(|s| s.as_db_str());
         let assignee = filter.assignee.map(|u| u.0);
+        let query = filter
+            .query
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .map(like_contains);
         let sql = format!(
             "SELECT {OPS_COLS} FROM incidents \
              WHERE org_id = $1 AND ($2::text IS NULL OR state = $2) \
                  AND ($3::text IS NULL OR severity = $3) \
                  AND ($4::uuid IS NULL OR assigned_to = $4) \
-             ORDER BY started_at DESC LIMIT $5 OFFSET $6"
+                 AND ($7::text IS NULL OR title ILIKE $7 OR EXISTS ( \
+                     SELECT 1 FROM targets t \
+                      WHERE t.id = incidents.target_id AND t.name ILIKE $7)) \
+             ORDER BY {} LIMIT $5 OFFSET $6",
+            filter.sort.order_sql()
         );
         let rows: Vec<OpsIncidentRow> = sqlx::query_as(&sql)
             .bind(org.0)
@@ -531,6 +619,7 @@ impl IncidentOpsStore for PgIncidentOpsStore {
             .bind(assignee)
             .bind(cap)
             .bind(off)
+            .bind(query)
             .fetch_all(&self.pool)
             .await
             .map_err(|e| anyhow::anyhow!("list ops incidents: {e}"))?;
@@ -541,16 +630,25 @@ impl IncidentOpsStore for PgIncidentOpsStore {
         let state = filter.state.map(|s| s.as_db_str());
         let severity = filter.severity.map(|s| s.as_db_str());
         let assignee = filter.assignee.map(|u| u.0);
+        let query = filter
+            .query
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .map(like_contains);
         let n: i64 = sqlx::query_scalar(
             "SELECT count(*) FROM incidents \
              WHERE org_id = $1 AND ($2::text IS NULL OR state = $2) \
                  AND ($3::text IS NULL OR severity = $3) \
-                 AND ($4::uuid IS NULL OR assigned_to = $4)",
+                 AND ($4::uuid IS NULL OR assigned_to = $4) \
+                 AND ($5::text IS NULL OR title ILIKE $5 OR EXISTS ( \
+                     SELECT 1 FROM targets t \
+                      WHERE t.id = incidents.target_id AND t.name ILIKE $5))",
         )
         .bind(org.0)
         .bind(state)
         .bind(severity)
         .bind(assignee)
+        .bind(query)
         .fetch_one(&self.pool)
         .await
         .map_err(|e| anyhow::anyhow!("count ops incidents: {e}"))?;
@@ -564,15 +662,24 @@ impl IncidentOpsStore for PgIncidentOpsStore {
     ) -> Result<IncidentStateCounts> {
         let severity = filter.severity.map(|s| s.as_db_str());
         let assignee = filter.assignee.map(|u| u.0);
+        let query = filter
+            .query
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .map(like_contains);
         let rows: Vec<(String, i64)> = sqlx::query_as(
             "SELECT state, count(*) FROM incidents \
              WHERE org_id = $1 AND ($2::text IS NULL OR severity = $2) \
                  AND ($3::uuid IS NULL OR assigned_to = $3) \
+                 AND ($4::text IS NULL OR title ILIKE $4 OR EXISTS ( \
+                     SELECT 1 FROM targets t \
+                      WHERE t.id = incidents.target_id AND t.name ILIKE $4)) \
              GROUP BY state",
         )
         .bind(org.0)
         .bind(severity)
         .bind(assignee)
+        .bind(query)
         .fetch_all(&self.pool)
         .await
         .map_err(|e| anyhow::anyhow!("counts_by_state: {e}"))?;
@@ -707,7 +814,9 @@ impl IncidentOpsStore for PgIncidentOpsStore {
             .map_err(|e| anyhow::anyhow!("declare incident: {e}"))?;
         let id = row.id;
         insert_event_tx(&mut tx, org, id, IncidentEventKind::Triggered, actor, None).await?;
-        tx.commit().await.map_err(|e| anyhow::anyhow!("commit: {e}"))?;
+        tx.commit()
+            .await
+            .map_err(|e| anyhow::anyhow!("commit: {e}"))?;
         Ok(row_to_ops(row))
     }
 
@@ -737,6 +846,7 @@ impl IncidentOpsStore for PgIncidentOpsStore {
             actor,
             note,
             &sql,
+            None,
         )
         .await
     }
@@ -757,6 +867,7 @@ impl IncidentOpsStore for PgIncidentOpsStore {
                  resolved_by = $3, next_escalation_at = NULL, updated_at = now() \
              WHERE id = $1 AND org_id = $2 RETURNING {OPS_COLS}"
         );
+        let public_resolution = Some(resolved_public_message(note.as_deref()));
         self.transition(
             org,
             id,
@@ -765,6 +876,7 @@ impl IncidentOpsStore for PgIncidentOpsStore {
             actor,
             note,
             &sql,
+            public_resolution,
         )
         .await
     }
@@ -787,6 +899,7 @@ impl IncidentOpsStore for PgIncidentOpsStore {
             Actor::System,
             None,
             &sql,
+            Some(AUTO_RESOLVED_MESSAGE.to_string()),
         )
         .await
     }
@@ -818,6 +931,7 @@ impl IncidentOpsStore for PgIncidentOpsStore {
             actor,
             note,
             &sql,
+            None,
         )
         .await
     }
@@ -873,7 +987,9 @@ impl IncidentOpsStore for PgIncidentOpsStore {
             IncidentEventKind::Unassigned
         };
         insert_event_tx(&mut tx, org, id, kind, actor, None).await?;
-        tx.commit().await.map_err(|e| anyhow::anyhow!("commit: {e}"))?;
+        tx.commit()
+            .await
+            .map_err(|e| anyhow::anyhow!("commit: {e}"))?;
         Ok(Some(row_to_ops(row)))
     }
 
@@ -912,7 +1028,9 @@ impl IncidentOpsStore for PgIncidentOpsStore {
             .map_err(|e| anyhow::anyhow!("publish incident: {e}"))?;
         let Some(row) = row else { return Ok(None) };
         insert_event_tx(&mut tx, org, id, IncidentEventKind::Published, actor, None).await?;
-        tx.commit().await.map_err(|e| anyhow::anyhow!("commit: {e}"))?;
+        tx.commit()
+            .await
+            .map_err(|e| anyhow::anyhow!("commit: {e}"))?;
         Ok(Some(row_to_ops(row)))
     }
 
@@ -933,8 +1051,18 @@ impl IncidentOpsStore for PgIncidentOpsStore {
             .await
             .map_err(|e| anyhow::anyhow!("unpublish incident: {e}"))?;
         let Some(row) = row else { return Ok(None) };
-        insert_event_tx(&mut tx, org, id, IncidentEventKind::Unpublished, actor, None).await?;
-        tx.commit().await.map_err(|e| anyhow::anyhow!("commit: {e}"))?;
+        insert_event_tx(
+            &mut tx,
+            org,
+            id,
+            IncidentEventKind::Unpublished,
+            actor,
+            None,
+        )
+        .await?;
+        tx.commit()
+            .await
+            .map_err(|e| anyhow::anyhow!("commit: {e}"))?;
         Ok(Some(row_to_ops(row)))
     }
 
@@ -969,10 +1097,11 @@ impl IncidentOpsStore for PgIncidentOpsStore {
             r#"SELECT id, incident_id, occurred_at, kind, actor_type, actor_id, detail, message
                FROM incident_events
                WHERE incident_id = $1 AND org_id = $2
-               ORDER BY occurred_at ASC"#,
+               ORDER BY occurred_at ASC LIMIT $3"#,
         )
         .bind(id)
         .bind(org.0)
+        .bind(INCIDENT_DETAIL_ROW_CAP)
         .fetch_all(&self.pool)
         .await
         .map_err(|e| anyhow::anyhow!("incident timeline: {e}"))?;
@@ -1006,11 +1135,7 @@ impl IncidentOpsStore for PgIncidentOpsStore {
         Ok(())
     }
 
-    async fn notifications_for(
-        &self,
-        org: OrgId,
-        id: Uuid,
-    ) -> Result<Vec<IncidentNotification>> {
+    async fn notifications_for(&self, org: OrgId, id: Uuid) -> Result<Vec<IncidentNotification>> {
         let sql = format!(
             "SELECT {NOTIF_COLS} FROM incident_notifications \
              WHERE incident_id = $1 AND org_id = $2 ORDER BY created_at ASC"
@@ -1282,7 +1407,13 @@ impl InMemoryIncidentOpsStore {
         self.inner.lock().incidents.push(incident);
     }
 
-    fn push_event(state: &mut MemState, incident_id: Uuid, kind: IncidentEventKind, actor: Actor, message: Option<String>) {
+    fn push_event(
+        state: &mut MemState,
+        incident_id: Uuid,
+        kind: IncidentEventKind,
+        actor: Actor,
+        message: Option<String>,
+    ) {
         state.events.push(IncidentEvent {
             id: Uuid::now_v7(),
             incident_id,
@@ -1320,13 +1451,40 @@ impl InMemoryIncidentOpsStore {
     }
 }
 
+fn sev_rank(s: IncidentSeverity) -> u8 {
+    match s {
+        IncidentSeverity::Critical => 3,
+        IncidentSeverity::Major => 2,
+        IncidentSeverity::Minor => 1,
+    }
+}
+
+fn in_mem_matches_query(inc: &OpsIncident, needle: Option<&str>) -> bool {
+    needle.is_none_or(|n| {
+        inc.title
+            .as_deref()
+            .is_some_and(|t| t.to_lowercase().contains(n))
+    })
+}
+
 #[async_trait]
 impl IncidentOpsStore for InMemoryIncidentOpsStore {
     async fn get(&self, _org: OrgId, id: Uuid) -> Result<Option<OpsIncident>> {
-        Ok(self.inner.lock().incidents.iter().find(|i| i.id == id).cloned())
+        Ok(self
+            .inner
+            .lock()
+            .incidents
+            .iter()
+            .find(|i| i.id == id)
+            .cloned())
     }
 
     async fn list(&self, _org: OrgId, filter: IncidentOpsFilter) -> Result<Vec<OpsIncident>> {
+        let needle = filter
+            .query
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .map(str::to_lowercase);
         let mut out: Vec<OpsIncident> = self
             .inner
             .lock()
@@ -1335,14 +1493,28 @@ impl IncidentOpsStore for InMemoryIncidentOpsStore {
             .filter(|i| filter.state.is_none_or(|s| i.state == s))
             .filter(|i| filter.severity.is_none_or(|s| i.severity == s))
             .filter(|i| filter.assignee.is_none_or(|u| i.assigned_to == Some(u)))
+            .filter(|i| in_mem_matches_query(i, needle.as_deref()))
             .cloned()
             .collect();
-        out.sort_by_key(|i| std::cmp::Reverse(i.started_at));
+        match filter.sort {
+            IncidentSort::Recent => out.sort_by_key(|i| std::cmp::Reverse(i.started_at)),
+            IncidentSort::Oldest => out.sort_by_key(|i| i.started_at),
+            IncidentSort::Severity => out.sort_by(|a, b| {
+                sev_rank(b.severity)
+                    .cmp(&sev_rank(a.severity))
+                    .then(b.started_at.cmp(&a.started_at))
+            }),
+        }
         let lim = filter.limit.unwrap_or(100);
         Ok(out.into_iter().skip(filter.offset).take(lim).collect())
     }
 
     async fn count(&self, _org: OrgId, filter: &IncidentOpsFilter) -> Result<usize> {
+        let needle = filter
+            .query
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .map(str::to_lowercase);
         Ok(self
             .inner
             .lock()
@@ -1351,6 +1523,7 @@ impl IncidentOpsStore for InMemoryIncidentOpsStore {
             .filter(|i| filter.state.is_none_or(|s| i.state == s))
             .filter(|i| filter.severity.is_none_or(|s| i.severity == s))
             .filter(|i| filter.assignee.is_none_or(|u| i.assigned_to == Some(u)))
+            .filter(|i| in_mem_matches_query(i, needle.as_deref()))
             .count())
     }
 
@@ -1359,11 +1532,17 @@ impl IncidentOpsStore for InMemoryIncidentOpsStore {
         _org: OrgId,
         filter: &IncidentOpsFilter,
     ) -> Result<IncidentStateCounts> {
+        let needle = filter
+            .query
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .map(str::to_lowercase);
         let g = self.inner.lock();
         let mut c = IncidentStateCounts::default();
         for i in g.incidents.iter().filter(|i| {
             filter.severity.is_none_or(|s| i.severity == s)
                 && filter.assignee.is_none_or(|u| i.assigned_to == Some(u))
+                && in_mem_matches_query(i, needle.as_deref())
         }) {
             match i.state {
                 IncidentState::Triggered => c.triggered += 1,
@@ -1377,15 +1556,21 @@ impl IncidentOpsStore for InMemoryIncidentOpsStore {
     async fn metrics(&self, _org: OrgId, window_days: u32) -> Result<IncidentMetrics> {
         let since = Utc::now() - chrono::Duration::days(window_days.clamp(1, 365) as i64);
         let g = self.inner.lock();
-        let in_window: Vec<&OpsIncident> =
-            g.incidents.iter().filter(|i| i.started_at >= since).collect();
+        let in_window: Vec<&OpsIncident> = g
+            .incidents
+            .iter()
+            .filter(|i| i.started_at >= since)
+            .collect();
 
         let mean = |vals: &[f64]| -> Option<f64> {
             (!vals.is_empty()).then(|| vals.iter().sum::<f64>() / vals.len() as f64)
         };
         let mtta: Vec<f64> = in_window
             .iter()
-            .filter_map(|i| i.acknowledged_at.map(|a| (a - i.started_at).num_seconds() as f64))
+            .filter_map(|i| {
+                i.acknowledged_at
+                    .map(|a| (a - i.started_at).num_seconds() as f64)
+            })
             .collect();
         let mttr: Vec<f64> = in_window
             .iter()
@@ -1437,7 +1622,12 @@ impl IncidentOpsStore for InMemoryIncidentOpsStore {
         })
     }
 
-    async fn declare(&self, _org: OrgId, new: NewManualIncident, actor: Actor) -> Result<OpsIncident> {
+    async fn declare(
+        &self,
+        _org: OrgId,
+        new: NewManualIncident,
+        actor: Actor,
+    ) -> Result<OpsIncident> {
         let now = Utc::now();
         let inc = OpsIncident {
             id: Uuid::now_v7(),
@@ -1469,48 +1659,100 @@ impl IncidentOpsStore for InMemoryIncidentOpsStore {
         Ok(inc)
     }
 
-    async fn acknowledge(&self, _org: OrgId, id: Uuid, actor: Actor, note: Option<String>) -> Result<LifecycleOutcome> {
-        Ok(self.apply(id, IncidentTransition::Acknowledge, IncidentEventKind::Acknowledged, actor, note, |i| {
-            i.state = IncidentState::Acknowledged;
-            i.acknowledged_at.get_or_insert_with(Utc::now);
-            if i.acknowledged_by.is_none() {
-                i.acknowledged_by = actor.user_id();
-            }
-            i.next_escalation_at = None;
-        }))
+    async fn acknowledge(
+        &self,
+        _org: OrgId,
+        id: Uuid,
+        actor: Actor,
+        note: Option<String>,
+    ) -> Result<LifecycleOutcome> {
+        Ok(self.apply(
+            id,
+            IncidentTransition::Acknowledge,
+            IncidentEventKind::Acknowledged,
+            actor,
+            note,
+            |i| {
+                i.state = IncidentState::Acknowledged;
+                i.acknowledged_at.get_or_insert_with(Utc::now);
+                if i.acknowledged_by.is_none() {
+                    i.acknowledged_by = actor.user_id();
+                }
+                i.next_escalation_at = None;
+            },
+        ))
     }
 
-    async fn resolve(&self, _org: OrgId, id: Uuid, actor: Actor, note: Option<String>) -> Result<LifecycleOutcome> {
-        Ok(self.apply(id, IncidentTransition::Resolve, IncidentEventKind::Resolved, actor, note, |i| {
-            i.state = IncidentState::Resolved;
-            i.ended_at.get_or_insert_with(Utc::now);
-            i.resolved_by = actor.user_id();
-            i.next_escalation_at = None;
-        }))
+    async fn resolve(
+        &self,
+        _org: OrgId,
+        id: Uuid,
+        actor: Actor,
+        note: Option<String>,
+    ) -> Result<LifecycleOutcome> {
+        Ok(self.apply(
+            id,
+            IncidentTransition::Resolve,
+            IncidentEventKind::Resolved,
+            actor,
+            note,
+            |i| {
+                i.state = IncidentState::Resolved;
+                i.ended_at.get_or_insert_with(Utc::now);
+                i.resolved_by = actor.user_id();
+                i.next_escalation_at = None;
+            },
+        ))
     }
 
     async fn auto_resolve(&self, _org: OrgId, id: Uuid) -> Result<LifecycleOutcome> {
-        Ok(self.apply(id, IncidentTransition::AutoResolve, IncidentEventKind::Resolved, Actor::System, None, |i| {
-            i.state = IncidentState::Resolved;
-            i.ended_at.get_or_insert_with(Utc::now);
-            i.resolved_by = None;
-            i.next_escalation_at = None;
-        }))
+        Ok(self.apply(
+            id,
+            IncidentTransition::AutoResolve,
+            IncidentEventKind::Resolved,
+            Actor::System,
+            None,
+            |i| {
+                i.state = IncidentState::Resolved;
+                i.ended_at.get_or_insert_with(Utc::now);
+                i.resolved_by = None;
+                i.next_escalation_at = None;
+            },
+        ))
     }
 
-    async fn reopen(&self, _org: OrgId, id: Uuid, actor: Actor, note: Option<String>) -> Result<LifecycleOutcome> {
-        Ok(self.apply(id, IncidentTransition::Reopen, IncidentEventKind::Reopened, actor, note, |i| {
-            i.state = IncidentState::Triggered;
-            i.ended_at = None;
-            i.resolved_by = None;
-            i.acknowledged_at = None;
-            i.acknowledged_by = None;
-            i.escalation_level = 0;
-            i.escalation_round = 0;
-        }))
+    async fn reopen(
+        &self,
+        _org: OrgId,
+        id: Uuid,
+        actor: Actor,
+        note: Option<String>,
+    ) -> Result<LifecycleOutcome> {
+        Ok(self.apply(
+            id,
+            IncidentTransition::Reopen,
+            IncidentEventKind::Reopened,
+            actor,
+            note,
+            |i| {
+                i.state = IncidentState::Triggered;
+                i.ended_at = None;
+                i.resolved_by = None;
+                i.acknowledged_at = None;
+                i.acknowledged_by = None;
+                i.escalation_level = 0;
+                i.escalation_round = 0;
+            },
+        ))
     }
 
-    async fn assign(&self, _org: OrgId, id: Uuid, assignee: Option<UserId>, actor: Actor) -> Result<Option<OpsIncident>> {
+    async fn assign(
+        &self,
+        _org: OrgId,
+        id: Uuid,
+        assignee: Option<UserId>,
+        actor: Actor,
+    ) -> Result<Option<OpsIncident>> {
         let mut g = self.inner.lock();
         let Some(idx) = g.incidents.iter().position(|i| i.id == id) else {
             return Ok(None);
@@ -1558,7 +1800,13 @@ impl IncidentOpsStore for InMemoryIncidentOpsStore {
         Ok(Some(updated))
     }
 
-    async fn add_note(&self, _org: OrgId, id: Uuid, actor: Actor, message: String) -> Result<Option<IncidentEvent>> {
+    async fn add_note(
+        &self,
+        _org: OrgId,
+        id: Uuid,
+        actor: Actor,
+        message: String,
+    ) -> Result<Option<IncidentEvent>> {
         let mut g = self.inner.lock();
         if !g.incidents.iter().any(|i| i.id == id) {
             return Ok(None);
@@ -1577,6 +1825,7 @@ impl IncidentOpsStore for InMemoryIncidentOpsStore {
             .cloned()
             .collect();
         out.sort_by_key(|e| e.occurred_at);
+        out.truncate(INCIDENT_DETAIL_ROW_CAP as usize);
         Ok(out)
     }
 
@@ -1595,11 +1844,7 @@ impl IncidentOpsStore for InMemoryIncidentOpsStore {
         Ok(())
     }
 
-    async fn notifications_for(
-        &self,
-        _org: OrgId,
-        id: Uuid,
-    ) -> Result<Vec<IncidentNotification>> {
+    async fn notifications_for(&self, _org: OrgId, id: Uuid) -> Result<Vec<IncidentNotification>> {
         Ok(self
             .inner
             .lock()
@@ -1758,8 +2003,7 @@ impl IncidentOpsStore for InMemoryIncidentOpsStore {
         limit: usize,
     ) -> Result<Vec<DueIncident>> {
         let g = self.inner.lock();
-        Ok(g
-            .incidents
+        Ok(g.incidents
             .iter()
             .filter(|i| {
                 i.state == IncidentState::Triggered
@@ -1784,6 +2028,22 @@ impl IncidentOpsStore for InMemoryIncidentOpsStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resolved_public_message_uses_note_or_default() {
+        assert_eq!(
+            resolved_public_message(Some("rolled back deploy")),
+            "rolled back deploy"
+        );
+        assert_eq!(
+            resolved_public_message(Some("   ")),
+            "This incident has been resolved."
+        );
+        assert_eq!(
+            resolved_public_message(None),
+            "This incident has been resolved."
+        );
+    }
 
     fn org() -> OrgId {
         OrgId(Uuid::nil())
@@ -1854,10 +2114,20 @@ mod tests {
         let store = InMemoryIncidentOpsStore::new();
         let id = seed_triggered(&store);
         let first = user();
-        let acked = unwrap_updated(store.acknowledge(org(), id, Actor::User(first), None).await.unwrap());
+        let acked = unwrap_updated(
+            store
+                .acknowledge(org(), id, Actor::User(first), None)
+                .await
+                .unwrap(),
+        );
         let first_at = acked.acknowledged_at;
         // A second responder re-acks; ownership + time must not be overwritten.
-        let again = unwrap_updated(store.acknowledge(org(), id, Actor::User(user()), None).await.unwrap());
+        let again = unwrap_updated(
+            store
+                .acknowledge(org(), id, Actor::User(user()), None)
+                .await
+                .unwrap(),
+        );
         assert_eq!(again.acknowledged_by, Some(first));
         assert_eq!(again.acknowledged_at, first_at);
     }
@@ -1866,8 +2136,14 @@ mod tests {
     async fn cannot_acknowledge_resolved() {
         let store = InMemoryIncidentOpsStore::new();
         let id = seed_triggered(&store);
-        store.resolve(org(), id, Actor::User(user()), None).await.unwrap();
-        let out = store.acknowledge(org(), id, Actor::User(user()), None).await.unwrap();
+        store
+            .resolve(org(), id, Actor::User(user()), None)
+            .await
+            .unwrap();
+        let out = store
+            .acknowledge(org(), id, Actor::User(user()), None)
+            .await
+            .unwrap();
         assert!(matches!(out, LifecycleOutcome::IllegalTransition(_)));
     }
 
@@ -1876,7 +2152,12 @@ mod tests {
         let store = InMemoryIncidentOpsStore::new();
         let id = seed_triggered(&store);
         let u = user();
-        let inc = unwrap_updated(store.resolve(org(), id, Actor::User(u), None).await.unwrap());
+        let inc = unwrap_updated(
+            store
+                .resolve(org(), id, Actor::User(u), None)
+                .await
+                .unwrap(),
+        );
         assert_eq!(inc.state, IncidentState::Resolved);
         assert_eq!(inc.resolved_by, Some(u));
         assert!(inc.ended_at.is_some());
@@ -1890,9 +2171,20 @@ mod tests {
     async fn reopen_resets_resolution_and_ack() {
         let store = InMemoryIncidentOpsStore::new();
         let id = seed_triggered(&store);
-        store.acknowledge(org(), id, Actor::User(user()), None).await.unwrap();
-        store.resolve(org(), id, Actor::User(user()), None).await.unwrap();
-        let inc = unwrap_updated(store.reopen(org(), id, Actor::User(user()), None).await.unwrap());
+        store
+            .acknowledge(org(), id, Actor::User(user()), None)
+            .await
+            .unwrap();
+        store
+            .resolve(org(), id, Actor::User(user()), None)
+            .await
+            .unwrap();
+        let inc = unwrap_updated(
+            store
+                .reopen(org(), id, Actor::User(user()), None)
+                .await
+                .unwrap(),
+        );
         assert_eq!(inc.state, IncidentState::Triggered);
         assert!(inc.ended_at.is_none());
         assert!(inc.acknowledged_by.is_none());
@@ -1928,9 +2220,19 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(pubd.visibility, IncidentVisibility::Public);
-        let unpubd = store.unpublish(org(), id, Actor::User(u)).await.unwrap().unwrap();
+        let unpubd = store
+            .unpublish(org(), id, Actor::User(u))
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(unpubd.visibility, IncidentVisibility::Internal);
-        let kinds: Vec<_> = store.timeline(org(), id).await.unwrap().into_iter().map(|e| e.kind).collect();
+        let kinds: Vec<_> = store
+            .timeline(org(), id)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|e| e.kind)
+            .collect();
         assert!(kinds.contains(&IncidentEventKind::Published));
         assert!(kinds.contains(&IncidentEventKind::Unpublished));
     }
@@ -1962,12 +2264,24 @@ mod tests {
         let _b = seed_triggered(&store);
         store.resolve(org(), a, Actor::System, None).await.unwrap();
         let triggered = store
-            .list(org(), IncidentOpsFilter { state: Some(IncidentState::Triggered), ..Default::default() })
+            .list(
+                org(),
+                IncidentOpsFilter {
+                    state: Some(IncidentState::Triggered),
+                    ..Default::default()
+                },
+            )
             .await
             .unwrap();
         assert_eq!(triggered.len(), 1);
         let resolved = store
-            .list(org(), IncidentOpsFilter { state: Some(IncidentState::Resolved), ..Default::default() })
+            .list(
+                org(),
+                IncidentOpsFilter {
+                    state: Some(IncidentState::Resolved),
+                    ..Default::default()
+                },
+            )
             .await
             .unwrap();
         assert_eq!(resolved.len(), 1);
@@ -1997,7 +2311,13 @@ mod tests {
 
         // Severity filter.
         let crit = store
-            .list(org(), IncidentOpsFilter { severity: Some(IncidentSeverity::Critical), ..Default::default() })
+            .list(
+                org(),
+                IncidentOpsFilter {
+                    severity: Some(IncidentSeverity::Critical),
+                    ..Default::default()
+                },
+            )
             .await
             .unwrap();
         assert_eq!(crit.len(), 1);
@@ -2005,7 +2325,13 @@ mod tests {
 
         // Assignee filter ("mine").
         let mine = store
-            .list(org(), IncidentOpsFilter { assignee: Some(u), ..Default::default() })
+            .list(
+                org(),
+                IncidentOpsFilter {
+                    assignee: Some(u),
+                    ..Default::default()
+                },
+            )
             .await
             .unwrap();
         assert_eq!(mine.len(), 1);
@@ -2021,7 +2347,13 @@ mod tests {
         assert_eq!(counts.total(), 3);
 
         let mine_counts = store
-            .counts_by_state(org(), &IncidentOpsFilter { assignee: Some(u), ..Default::default() })
+            .counts_by_state(
+                org(),
+                &IncidentOpsFilter {
+                    assignee: Some(u),
+                    ..Default::default()
+                },
+            )
             .await
             .unwrap();
         assert_eq!(mine_counts.triggered, 1);

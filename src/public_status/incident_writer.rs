@@ -490,22 +490,30 @@ impl IncidentStore for PgIncidentStore {
     }
 
     async fn close(&self, org: OrgId, incident_id: Uuid, ended_at: DateTime<Utc>) -> Result<()> {
-        // Recovery detected by the follower: close the row and move the
-        // operational state to resolved with no human resolver. The state
-        // column and the timestamp must never disagree.
+        // Recovery: close the row, resolve with no human resolver. For a public
+        // incident, append a `resolved` update for the timeline — the CTE
+        // RETURNING yields a row only while ended_at was NULL, so a re-run over
+        // an already-closed incident never duplicates it.
         sqlx::query(
-            r#"UPDATE incidents
-               SET ended_at = $2,
-                   duration_secs = GREATEST(0, EXTRACT(EPOCH FROM ($2 - started_at))::int),
-                   state = 'resolved',
-                   resolved_by = NULL,
-                   next_escalation_at = NULL,
-                   updated_at = now()
-               WHERE id = $1 AND org_id = $3 AND ended_at IS NULL"#,
+            r#"WITH closed AS (
+                   UPDATE incidents
+                      SET ended_at = $2,
+                          duration_secs = GREATEST(0, EXTRACT(EPOCH FROM ($2 - started_at))::int),
+                          state = 'resolved',
+                          resolved_by = NULL,
+                          next_escalation_at = NULL,
+                          updated_at = now()
+                    WHERE id = $1 AND org_id = $3 AND ended_at IS NULL
+                   RETURNING id, org_id, visibility
+               )
+               INSERT INTO incident_updates (org_id, incident_id, phase, message, author)
+               SELECT org_id, id, 'resolved', $4, 'system'
+               FROM closed WHERE visibility = 'public'"#,
         )
         .bind(incident_id)
         .bind(ended_at)
         .bind(org.0)
+        .bind(crate::storage::incident_ops::AUTO_RESOLVED_MESSAGE)
         .execute(&self.pool)
         .await
         .context("incident close")?;

@@ -13,16 +13,23 @@ use uuid::Uuid;
 
 use crate::api::error::codes;
 use crate::app::AppState;
-use crate::domain::{IncidentEvent, IncidentSeverity, IncidentState, OpsIncident, OrgId, UserId};
+use crate::domain::{
+    IncidentEvent, IncidentSeverity, IncidentState, IncidentStatusPhase, OpsIncident, OrgId, UserId,
+};
 use crate::error::AppError;
 use crate::storage::orgs::list_members;
-use crate::storage::{IncidentOpsFilter, TargetFilter};
+use crate::storage::{IncidentOpsFilter, IncidentSort, TargetFilter};
 use crate::web::error::WebResult;
 use crate::web::filters;
 use crate::web::{AuthedBrowser, CurrentOrg, CurrentUser};
 
 const STATE_FILTERS: &[&str] = &["all", "triggered", "acknowledged", "resolved"];
 const SEVERITIES: &[&str] = &["minor", "major", "critical"];
+const SORTS: &[(&str, &str)] = &[
+    ("recent", "Recent"),
+    ("oldest", "Oldest"),
+    ("severity", "Severity"),
+];
 const PAGE_SIZES: &[usize] = &[25, 50, 100, 200];
 const DEFAULT_PAGE_SIZE: usize = 50;
 
@@ -30,10 +37,25 @@ const DEFAULT_PAGE_SIZE: usize = 50;
 pub struct ListParams {
     pub state: Option<String>,
     pub severity: Option<String>,
-    /// `me` restricts to the current user's incidents; absent = everyone's.
+    /// `me`, a member's user id, or absent (everyone's). Drives the owner filter.
     pub assignee: Option<String>,
+    /// Free-text search over incident title + monitor name.
+    pub q: Option<String>,
+    pub sort: Option<String>,
     pub limit: Option<usize>,
     pub offset: Option<usize>,
+}
+
+pub struct SortOption {
+    pub key: &'static str,
+    pub label: &'static str,
+    pub selected: bool,
+}
+
+pub struct OwnerOption {
+    pub value: String,
+    pub label: String,
+    pub selected: bool,
 }
 
 pub struct StateTab {
@@ -68,11 +90,15 @@ pub struct ConsoleRow {
     pub label: String,
     pub state: &'static str,
     pub state_label: &'static str,
+    /// Monitor check type; `None` for a manual incident (no monitor).
+    pub kind: Option<&'static str>,
     pub severity: &'static str,
     pub urgency: &'static str,
     pub origin: &'static str,
     pub visibility: &'static str,
     pub acked_by: Option<OwnerAvatar>,
+    /// Manual resolver; `None` on a resolved incident = writer auto-close.
+    pub resolved_by: Option<OwnerAvatar>,
     pub assignee: Option<OwnerAvatar>,
     pub assigned_to_me: bool,
     pub started_at: DateTime<Utc>,
@@ -107,8 +133,14 @@ pub struct IncidentsConsolePage {
     pub active_tab: &'static str,
     pub state_tabs: Vec<StateTab>,
     pub severity_chips: Vec<SeverityChip>,
-    pub mine_href: String,
-    pub mine_active: bool,
+    pub sort_options: Vec<SortOption>,
+    pub owner_options: Vec<OwnerOption>,
+    pub search: String,
+    /// Active state/severity, carried as hidden form fields so the search/sort/
+    /// owner controls preserve them on submit.
+    pub state_value: &'static str,
+    pub severity_value: Option<&'static str>,
+    pub total: usize,
     pub data: ConsoleData,
 }
 
@@ -145,6 +177,7 @@ fn row_from(
     inc: OpsIncident,
     monitor_name: Option<String>,
     acked_by: Option<OwnerAvatar>,
+    resolved_by: Option<OwnerAvatar>,
     assignee: Option<OwnerAvatar>,
     assigned_to_me: bool,
 ) -> ConsoleRow {
@@ -163,11 +196,13 @@ fn row_from(
         label,
         state: inc.state.as_db_str(),
         state_label: state_label(inc.state),
+        kind: None,
         severity: inc.severity.as_db_str(),
         urgency: inc.urgency.as_db_str(),
         origin: inc.origin.as_db_str(),
         visibility: inc.visibility.as_db_str(),
         acked_by,
+        resolved_by,
         assignee,
         assigned_to_me,
         started_at: inc.started_at,
@@ -185,10 +220,20 @@ fn parse_state(key: &str) -> Option<IncidentState> {
     }
 }
 
-/// Monitor id → name for the org, in one query (orgs are quota-capped, so a
-/// single bounded fetch is cheaper than N per-incident lookups).
 async fn name_map(state: &AppState, org: OrgId) -> WebResult<HashMap<Uuid, String>> {
     Ok(state.target_store.names(org).await?)
+}
+
+/// Friendly check-type label for the console: the raw `CheckSpec::kind` with
+/// the two-word kinds shortened (`tls_cert` → `tls`, `domain_expiry` → `domain`).
+fn kind_label(kind: &str) -> &'static str {
+    match kind {
+        "tcp" => "tcp",
+        "dns" => "dns",
+        "tls_cert" => "tls",
+        "domain_expiry" => "domain",
+        _ => "http",
+    }
 }
 
 /// User id → email label for the org, for rendering "acknowledged by …".
@@ -209,8 +254,27 @@ struct Resolved {
     state: Option<IncidentState>,
     severity_key: Option<&'static str>,
     severity: Option<IncidentSeverity>,
-    mine: bool,
+    /// Raw `assignee` param: `me`, a user-id string, or `None`. Owns both the
+    /// owner dropdown selection and the URL value.
+    assignee: Option<String>,
+    query: Option<String>,
+    sort: &'static str,
     limit: usize,
+}
+
+impl Resolved {
+    fn mine(&self) -> bool {
+        self.assignee.as_deref() == Some("me")
+    }
+    /// The selected owner id, when the assignee param is a member (not `me`).
+    /// A malformed id (URL tampering) maps to the nil sentinel so the filter
+    /// matches no incident, rather than silently falling back to "show all".
+    fn owner_id(&self) -> Option<Uuid> {
+        match self.assignee.as_deref() {
+            Some("me") | None => None,
+            Some(s) => Some(Uuid::parse_str(s).unwrap_or(Uuid::nil())),
+        }
+    }
 }
 
 fn resolve(params: &ListParams) -> Resolved {
@@ -223,12 +287,28 @@ fn resolve(params: &ListParams) -> Resolved {
         .iter()
         .copied()
         .find(|s| Some(*s) == params.severity.as_deref());
+    let sort = SORTS
+        .iter()
+        .map(|(k, _)| *k)
+        .find(|k| Some(*k) == params.sort.as_deref())
+        .unwrap_or("recent");
     Resolved {
         active,
         state: parse_state(active),
         severity_key,
         severity: severity_key.map(IncidentSeverity::from_db_str),
-        mine: params.assignee.as_deref() == Some("me"),
+        assignee: params
+            .assignee
+            .as_deref()
+            .map(str::to_owned)
+            .filter(|s| !s.is_empty()),
+        query: params
+            .q
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned),
+        sort,
         limit: params
             .limit
             .filter(|n| PAGE_SIZES.contains(n))
@@ -236,19 +316,44 @@ fn resolve(params: &ListParams) -> Resolved {
     }
 }
 
-/// Build the canonical query string for a console URL (nav links + the table
-/// fragment's self-poll), omitting defaults so URLs stay clean.
-fn build_query(state: &str, severity: Option<&str>, mine: bool, limit: usize, offset: usize) -> String {
-    let mut q = format!("state={state}&limit={limit}");
-    if let Some(s) = severity {
-        q.push_str("&severity=");
-        q.push_str(s);
+/// Resolve the `assignee` filter param to a concrete user id: `me` → the
+/// caller, a member id → that member, anything else → unfiltered.
+fn assignee_filter(r: &Resolved, uid: UserId) -> Option<UserId> {
+    if r.mine() {
+        Some(uid)
+    } else {
+        r.owner_id().map(UserId)
     }
-    if mine {
-        q.push_str("&assignee=me");
+}
+
+/// Canonical query string for a console URL (nav links + the table fragment's
+/// self-poll), omitting defaults so URLs stay clean. `assignee` carries `me` or
+/// a member id verbatim.
+fn build_query(
+    r: &Resolved,
+    state: &str,
+    severity: Option<&str>,
+    limit: usize,
+    offset: usize,
+) -> String {
+    use crate::auth::url::push_param;
+    let mut q = String::new();
+    push_param(&mut q, "state", state);
+    push_param(&mut q, "limit", &limit.to_string());
+    if let Some(s) = severity {
+        push_param(&mut q, "severity", s);
+    }
+    if let Some(a) = r.assignee.as_deref() {
+        push_param(&mut q, "assignee", a);
+    }
+    if let Some(query) = r.query.as_deref() {
+        push_param(&mut q, "q", query);
+    }
+    if r.sort != "recent" {
+        push_param(&mut q, "sort", r.sort);
     }
     if offset > 0 {
-        q.push_str(&format!("&offset={offset}"));
+        push_param(&mut q, "offset", &offset.to_string());
     }
     q
 }
@@ -259,16 +364,23 @@ async fn console_data(
     org: OrgId,
     uid: UserId,
     params: &ListParams,
+    members: &HashMap<UserId, String>,
 ) -> WebResult<ConsoleData> {
     let r = resolve(params);
     let base = IncidentOpsFilter {
         state: r.state,
         severity: r.severity,
-        assignee: r.mine.then_some(uid),
+        assignee: assignee_filter(&r, uid),
+        query: r.query.clone(),
+        sort: IncidentSort::from_key(r.sort),
         ..Default::default()
     };
     let total = state.incident_ops_store.count(org, &base).await?;
-    let max_offset = if total == 0 { 0 } else { ((total - 1) / r.limit) * r.limit };
+    let max_offset = if total == 0 {
+        0
+    } else {
+        ((total - 1) / r.limit) * r.limit
+    };
     // Snap a hand-typed offset to a page boundary, then clamp to the last
     // populated page, so the page number and prev/next links stay aligned.
     let offset = ((params.offset.unwrap_or(0) / r.limit) * r.limit).min(max_offset);
@@ -284,8 +396,8 @@ async fn console_data(
             },
         )
         .await?;
-    let names = name_map(state, org).await?;
-    let members = members_map(state, org).await?;
+    // One lean projection (id, name, check kind) — no full target decode.
+    let targets = state.target_store.names_and_kinds(org).await?;
     let rows: Vec<ConsoleRow> = incidents
         .into_iter()
         .map(|i| {
@@ -296,17 +408,34 @@ async fn console_data(
                     label: email.clone(),
                 })
             };
-            let name = i.target_id.and_then(|t| names.get(&t).cloned());
+            let name = i
+                .target_id
+                .and_then(|t| targets.get(&t).map(|(n, _)| n.clone()));
+            let kind = i
+                .target_id
+                .and_then(|t| targets.get(&t).map(|(_, k)| kind_label(k)));
             let acked = i.acknowledged_by.and_then(avatar_of);
+            let resolved = i.resolved_by.and_then(avatar_of);
             let assignee = i.assigned_to.and_then(avatar_of);
             let mine_row = i.assigned_to == Some(uid);
-            row_from(i, name, acked, assignee, mine_row)
+            let mut row = row_from(i, name, acked, resolved, assignee, mine_row);
+            row.kind = kind;
+            row
         })
         .collect();
 
     let shown = rows.len();
-    let total_pages = if total == 0 { 1 } else { total.div_ceil(r.limit) };
-    let nav = |off: usize| format!("/incidents?{}", build_query(r.active, r.severity_key, r.mine, r.limit, off));
+    let total_pages = if total == 0 {
+        1
+    } else {
+        total.div_ceil(r.limit)
+    };
+    let nav = |off: usize| {
+        format!(
+            "/incidents?{}",
+            build_query(&r, r.active, r.severity_key, r.limit, off)
+        )
+    };
     Ok(ConsoleData {
         rows,
         self_id: uid.0.to_string(),
@@ -323,11 +452,14 @@ async fn console_data(
             .copied()
             .map(|n| PageSize {
                 n,
-                href: format!("/incidents?{}", build_query(r.active, r.severity_key, r.mine, n, 0)),
+                href: format!(
+                    "/incidents?{}",
+                    build_query(&r, r.active, r.severity_key, n, 0)
+                ),
                 active: n == r.limit,
             })
             .collect(),
-        partial_query: build_query(r.active, r.severity_key, r.mine, r.limit, offset),
+        partial_query: build_query(&r, r.active, r.severity_key, r.limit, offset),
     })
 }
 
@@ -339,29 +471,37 @@ pub async fn list(
     Query(params): Query<ListParams>,
 ) -> WebResult<IncidentsConsolePage> {
     let r = resolve(&params);
-    let data = console_data(&state, org, uid, &params).await?;
+    let members = members_map(&state, org).await?;
+    let data = console_data(&state, org, uid, &params, &members).await?;
 
-    // Tab counts honour the active severity + assignee filter, across states.
+    // Tab counts honour the active severity + assignee + search, across states.
     let count_filter = IncidentOpsFilter {
         severity: r.severity,
-        assignee: r.mine.then_some(uid),
+        assignee: assignee_filter(&r, uid),
+        query: r.query.clone(),
         ..Default::default()
     };
-    let counts = state.incident_ops_store.counts_by_state(org, &count_filter).await?;
+    let counts = state
+        .incident_ops_store
+        .counts_by_state(org, &count_filter)
+        .await?;
 
     let state_tabs = STATE_FILTERS
         .iter()
         .copied()
         .map(|k| StateTab {
             label: k,
-            href: format!("/incidents?{}", build_query(k, r.severity_key, r.mine, r.limit, 0)),
+            href: format!(
+                "/incidents?{}",
+                build_query(&r, k, r.severity_key, r.limit, 0)
+            ),
             count: counts.for_state(parse_state(k)),
             active: k == r.active,
         })
         .collect();
 
     let sev_href =
-        |sev: Option<&str>| format!("/incidents?{}", build_query(r.active, sev, r.mine, r.limit, 0));
+        |sev: Option<&str>| format!("/incidents?{}", build_query(&r, r.active, sev, r.limit, 0));
     let mut severity_chips = vec![SeverityChip {
         label: "any",
         href: sev_href(None),
@@ -373,15 +513,46 @@ pub async fn list(
         active: r.severity_key == Some(s),
     }));
 
+    let sort_options = SORTS
+        .iter()
+        .map(|(key, label)| SortOption {
+            key,
+            label,
+            selected: *key == r.sort,
+        })
+        .collect();
+
+    let mut owner_options = vec![
+        OwnerOption {
+            value: String::new(),
+            label: "Owner: any".into(),
+            selected: r.assignee.is_none(),
+        },
+        OwnerOption {
+            value: "me".into(),
+            label: "Assigned to me".into(),
+            selected: r.mine(),
+        },
+    ];
+    let mut members: Vec<(UserId, String)> = members.into_iter().collect();
+    members.sort_by(|a, b| a.1.cmp(&b.1));
+    let owner_id = r.owner_id();
+    owner_options.extend(members.into_iter().map(|(uid, email)| OwnerOption {
+        selected: owner_id == Some(uid.0),
+        value: uid.0.to_string(),
+        label: email,
+    }));
+
     Ok(IncidentsConsolePage {
         active_tab: "incidents",
         state_tabs,
         severity_chips,
-        mine_href: format!(
-            "/incidents?{}",
-            build_query(r.active, r.severity_key, !r.mine, r.limit, 0)
-        ),
-        mine_active: r.mine,
+        sort_options,
+        owner_options,
+        search: r.query.clone().unwrap_or_default(),
+        state_value: r.active,
+        severity_value: r.severity_key,
+        total: data.total,
         data,
     })
 }
@@ -393,8 +564,9 @@ pub async fn list_partial(
     State(state): State<AppState>,
     Query(params): Query<ListParams>,
 ) -> WebResult<IncidentsConsoleTable> {
+    let members = members_map(&state, org).await?;
     Ok(IncidentsConsoleTable {
-        data: console_data(&state, org, uid, &params).await?,
+        data: console_data(&state, org, uid, &params, &members).await?,
     })
 }
 
@@ -407,6 +579,62 @@ pub struct TimelineRow {
     pub via_mcp: bool,
     pub occurred_at: DateTime<Utc>,
     pub message: Option<String>,
+}
+
+/// A public `incident_updates` entry, distinct from the internal `TimelineRow`.
+pub struct PublicUpdateRow {
+    pub phase: &'static str,
+    pub message: String,
+    pub posted_at: DateTime<Utc>,
+    /// Operator-facing only; never rendered on the public status page.
+    pub author: String,
+}
+
+/// Stored author (user id / `system` / NULL) → label; a departed member reads
+/// `former member`, not a raw id.
+fn author_label(author: Option<&str>, members: &HashMap<UserId, String>) -> String {
+    match author {
+        None | Some("system") => "system".to_string(),
+        Some(s) => match Uuid::parse_str(s) {
+            Ok(u) => members
+                .get(&UserId(u))
+                .cloned()
+                .unwrap_or_else(|| "former member".to_string()),
+            Err(_) => s.to_string(),
+        },
+    }
+}
+
+/// Operator-facing update timeline — selects `author`, which the public
+/// hydrate deliberately omits.
+async fn public_update_rows(
+    state: &AppState,
+    org: OrgId,
+    id: Uuid,
+    members: &HashMap<UserId, String>,
+) -> WebResult<Vec<PublicUpdateRow>> {
+    let Some(pool) = &state.db else {
+        return Ok(Vec::new());
+    };
+    let rows: Vec<(DateTime<Utc>, String, String, Option<String>)> = sqlx::query_as(
+        "SELECT posted_at, phase, message, author FROM incident_updates \
+         WHERE incident_id = $1 AND org_id = $2 ORDER BY posted_at ASC LIMIT $3",
+    )
+    .bind(id)
+    .bind(org.0)
+    .bind(crate::storage::incident_ops::INCIDENT_DETAIL_ROW_CAP)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| AppError::Other(anyhow::anyhow!("load incident updates: {e}")))?;
+    Ok(rows
+        .into_iter()
+        .map(|(posted_at, phase, message, author)| PublicUpdateRow {
+            phase: IncidentStatusPhase::from_db_str(&phase).as_db_str(),
+            message,
+            posted_at,
+            author: author_label(author.as_deref(), members),
+        })
+        .collect())
 }
 
 /// Resolve an event's actor to a human label + whether it came via MCP.
@@ -448,6 +676,10 @@ pub struct IncidentDetailPage {
     pub error_sample: Option<String>,
     pub ongoing: bool,
     pub timeline: Vec<TimelineRow>,
+    pub public_updates: Vec<PublicUpdateRow>,
+    pub owner: Option<OwnerAvatar>,
+    /// `Unassigned` + each member.
+    pub owner_options: Vec<OwnerOption>,
     pub has_postmortem: bool,
     pub postmortem_published: bool,
 }
@@ -505,19 +737,46 @@ pub async fn detail(
         })
         .collect();
     let postmortem = state.postmortem_store.get(org, id).await?;
+    let public_updates = public_update_rows(&state, org, id, &members).await?;
+
+    let assigned_to = inc.assigned_to;
+    let owner = assigned_to.and_then(|u| {
+        members.get(&u).map(|email| OwnerAvatar {
+            initials: crate::web::avatar::initials_from(email),
+            color: crate::web::avatar::avatar_color(u.0),
+            label: email.clone(),
+        })
+    });
+    let mut sorted: Vec<(UserId, String)> = members.into_iter().collect();
+    sorted.sort_by(|a, b| a.1.cmp(&b.1));
+    let mut owner_options = vec![OwnerOption {
+        value: String::new(),
+        label: "Unassigned".into(),
+        selected: assigned_to.is_none(),
+    }];
+    owner_options.extend(sorted.into_iter().map(|(u, email)| OwnerOption {
+        selected: assigned_to == Some(u),
+        value: u.0.to_string(),
+        label: email,
+    }));
+
     let label = inc
         .title
         .clone()
         .or_else(|| monitor_name.clone())
         .unwrap_or_else(|| "Untitled incident".to_string());
-    Ok(make_detail_page(
+    let mut page = make_detail_page(
         inc,
         monitor_name,
         acknowledged_by,
         label,
         timeline,
+        public_updates,
         postmortem.as_ref(),
-    ))
+    );
+    page.owner = owner;
+    page.owner_options = owner_options;
+    Ok(page)
 }
 
 fn make_detail_page(
@@ -526,6 +785,7 @@ fn make_detail_page(
     acknowledged_by: Option<String>,
     label: String,
     timeline: Vec<TimelineRow>,
+    public_updates: Vec<PublicUpdateRow>,
     postmortem: Option<&crate::domain::IncidentPostmortem>,
 ) -> IncidentDetailPage {
     IncidentDetailPage {
@@ -547,6 +807,9 @@ fn make_detail_page(
         error_sample: inc.error_sample.clone(),
         ongoing: inc.state.is_open(),
         timeline,
+        public_updates,
+        owner: None,
+        owner_options: Vec::new(),
         has_postmortem: postmortem.is_some(),
         postmortem_published: postmortem.is_some_and(|p| p.published_at.is_some()),
     }
@@ -662,7 +925,9 @@ pub async fn reports(
         Some(m) => m,
         None => {
             let m = state.incident_ops_store.metrics(org, window).await?;
-            state.incident_metrics_cache.insert((org, window), m.clone());
+            state
+                .incident_metrics_cache
+                .insert((org, window), m.clone());
             m
         }
     };
@@ -782,9 +1047,18 @@ pub async fn postmortem_form(
         incident_label,
         exists: pm.is_some(),
         published: pm.as_ref().is_some_and(|p| p.published_at.is_some()),
-        summary: pm.as_ref().and_then(|p| p.summary.clone()).unwrap_or_default(),
-        root_cause: pm.as_ref().and_then(|p| p.root_cause.clone()).unwrap_or_default(),
-        impact: pm.as_ref().and_then(|p| p.impact.clone()).unwrap_or_default(),
+        summary: pm
+            .as_ref()
+            .and_then(|p| p.summary.clone())
+            .unwrap_or_default(),
+        root_cause: pm
+            .as_ref()
+            .and_then(|p| p.root_cause.clone())
+            .unwrap_or_default(),
+        impact: pm
+            .as_ref()
+            .and_then(|p| p.impact.clone())
+            .unwrap_or_default(),
         action_items,
         members,
     })
@@ -837,7 +1111,11 @@ mod tests {
             page_sizes: PAGE_SIZES
                 .iter()
                 .copied()
-                .map(|n| PageSize { n, href: format!("/incidents?limit={n}"), active: n == 50 })
+                .map(|n| PageSize {
+                    n,
+                    href: format!("/incidents?limit={n}"),
+                    active: n == 50,
+                })
                 .collect(),
             partial_query: "state=all&limit=50".into(),
         }
@@ -861,8 +1139,23 @@ mod tests {
                 href: "/incidents".into(),
                 active: true,
             }],
-            mine_href: "/incidents?assignee=me".into(),
-            mine_active: false,
+            sort_options: SORTS
+                .iter()
+                .map(|(key, label)| SortOption {
+                    key,
+                    label,
+                    selected: *key == "recent",
+                })
+                .collect(),
+            owner_options: vec![OwnerOption {
+                value: String::new(),
+                label: "Owner: any".into(),
+                selected: true,
+            }],
+            search: String::new(),
+            state_value: "all",
+            severity_value: None,
+            total: 0,
             data: data(rows),
         }
     }
@@ -875,7 +1168,14 @@ mod tests {
 
     #[test]
     fn console_triggered_row_shows_ack_and_resolve() {
-        let row = row_from(ops(IncidentState::Triggered), Some("api-gateway".into()), None, None, false);
+        let row = row_from(
+            ops(IncidentState::Triggered),
+            Some("api-gateway".into()),
+            None,
+            None,
+            None,
+            false,
+        );
         let html = page(vec![row]).render().unwrap();
         assert!(html.contains("api-gateway"));
         assert!(html.contains(r#"data-incident-action="acknowledge""#));
@@ -887,7 +1187,7 @@ mod tests {
     fn console_resolved_row_shows_reopen_only() {
         let mut inc = ops(IncidentState::Resolved);
         inc.ended_at = Some(Utc::now());
-        let row = row_from(inc, Some("api".into()), None, None, false);
+        let row = row_from(inc, Some("api".into()), None, None, None, false);
         let html = page(vec![row]).render().unwrap();
         assert!(html.contains(r#"data-incident-action="reopen""#));
         assert!(!html.contains(r#"data-incident-action="acknowledge""#));
@@ -902,22 +1202,60 @@ mod tests {
             color: "oklch(0.62 0.12 200)".into(),
             label: "alice@example.com".into(),
         };
-        let row = row_from(inc, Some("api".into()), Some(acker), None, false);
+        let row = row_from(inc, Some("api".into()), Some(acker), None, None, false);
         let mut p = page(vec![row]);
         p.data.total = 1;
         p.data.range_lo = 1;
         p.data.range_hi = 1;
         let html = p.render().unwrap();
-        // Acknowledger shown as a small avatar; email only in the tooltip.
-        assert!(html.contains("monitors-avatar--sm"));
+        // Acknowledger shown as an avatar; email only in the tooltip.
+        assert!(html.contains("monitors-avatar"));
         assert!(html.contains("acknowledged by alice@example.com"));
+    }
+
+    #[test]
+    fn console_row_shows_monitor_kind() {
+        let mut row = row_from(
+            ops(IncidentState::Triggered),
+            Some("api".into()),
+            None,
+            None,
+            None,
+            false,
+        );
+        row.kind = Some("tls");
+        assert!(page(vec![row]).render().unwrap().contains(">tls<"));
+
+        let manual = row_from(ops(IncidentState::Triggered), None, None, None, None, false);
+        assert!(page(vec![manual]).render().unwrap().contains("—"));
+    }
+
+    #[test]
+    fn console_resolved_shows_resolver_avatar_and_auto_marker() {
+        let mut inc = ops(IncidentState::Resolved);
+        inc.ended_at = Some(Utc::now());
+        let resolver = OwnerAvatar {
+            initials: "CA".into(),
+            color: "oklch(0.62 0.12 50)".into(),
+            label: "carol@example.com".into(),
+        };
+        let row = row_from(inc, Some("api".into()), None, Some(resolver), None, false);
+        let html = page(vec![row]).render().unwrap();
+        assert!(html.contains("resolved by carol@example.com"));
+
+        let mut auto = ops(IncidentState::Resolved);
+        auto.ended_at = Some(Utc::now());
+        let arow = row_from(auto, Some("api".into()), None, None, None, false);
+        let ahtml = page(vec![arow]).render().unwrap();
+        assert!(ahtml.contains(">auto<"));
+        assert!(!ahtml.contains("resolved by"));
     }
 
     #[test]
     fn console_row_shows_assignee_urgency_and_assign_to_me() {
         let mut inc = ops(IncidentState::Triggered);
         inc.urgency = crate::domain::IncidentUrgency::Low;
-        let unassigned = row_from(inc, Some("api".into()), None, None, false);
+        let unassigned = row_from(inc, Some("api".into()), None, None, None, false);
         let html = page(vec![unassigned]).render().unwrap();
         // Low urgency surfaces, and an unassigned row offers assign-to-me.
         assert!(html.contains("notify"));
@@ -926,6 +1264,7 @@ mod tests {
         let assigned = row_from(
             ops(IncidentState::Triggered),
             Some("api".into()),
+            None,
             None,
             Some(OwnerAvatar {
                 initials: "BO".into(),
@@ -956,12 +1295,19 @@ mod tests {
             occurred_at: Utc::now(),
             message: None,
         }];
+        let updates = vec![PublicUpdateRow {
+            phase: "identified",
+            message: "Root cause found.".into(),
+            posted_at: Utc::now(),
+            author: "bob@example.com".into(),
+        }];
         let page = make_detail_page(
             inc,
             None,
             Some("alice@example.com".into()),
             "Payments degraded".to_string(),
             timeline,
+            updates,
             None,
         );
         let html = page.render().unwrap();
@@ -969,19 +1315,51 @@ mod tests {
         assert!(html.contains(r#"data-incident-note"#));
         assert!(html.contains("Activity"));
         assert!(html.contains("alice@example.com"));
+        // Public-update timeline + post form both present, with the author.
+        assert!(html.contains(r#"data-incident-update-form"#));
+        assert!(html.contains("Status updates"));
+        assert!(html.contains("Root cause found."));
+        assert!(html.contains("bob@example.com"));
+        assert!(html.contains("Owner"));
+        assert!(html.contains(r#"data-incident-assign-select"#));
+    }
+
+    #[test]
+    fn author_label_resolves_member_system_and_departed() {
+        let u = UserId(Uuid::now_v7());
+        let mut members = HashMap::new();
+        members.insert(u, "alice@example.com".to_string());
+        assert_eq!(
+            author_label(Some(&u.0.to_string()), &members),
+            "alice@example.com"
+        );
+        assert_eq!(author_label(Some("system"), &members), "system");
+        assert_eq!(author_label(None, &members), "system");
+        let gone = UserId(Uuid::now_v7());
+        assert_eq!(
+            author_label(Some(&gone.0.to_string()), &members),
+            "former member"
+        );
     }
 
     #[test]
     fn detail_internal_shows_publish_public_shows_unpublish() {
-        let internal =
-            make_detail_page(ops(IncidentState::Triggered), None, None, "x".into(), vec![], None);
+        let internal = make_detail_page(
+            ops(IncidentState::Triggered),
+            None,
+            None,
+            "x".into(),
+            vec![],
+            vec![],
+            None,
+        );
         let html = internal.render().unwrap();
         assert!(html.contains(r#"data-incident-publish"#));
         assert!(!html.contains(r#"data-incident-unpublish"#));
 
         let mut pubinc = ops(IncidentState::Triggered);
         pubinc.visibility = crate::domain::IncidentVisibility::Public;
-        let public = make_detail_page(pubinc, None, None, "x".into(), vec![], None);
+        let public = make_detail_page(pubinc, None, None, "x".into(), vec![], vec![], None);
         let html = public.render().unwrap();
         assert!(html.contains(r#"data-incident-unpublish"#));
         assert!(!html.contains(r#"data-incident-publish"#));
@@ -1003,7 +1381,10 @@ mod tests {
             detail: serde_json::Value::Null,
             message: None,
         };
-        assert_eq!(actor_label(&ev(ActorType::System, None), &members), ("system".into(), false));
+        assert_eq!(
+            actor_label(&ev(ActorType::System, None), &members),
+            ("system".into(), false)
+        );
         assert_eq!(
             actor_label(&ev(ActorType::User, Some(u)), &members),
             ("alice@example.com".into(), false)
@@ -1022,7 +1403,15 @@ mod tests {
 
     #[test]
     fn detail_shows_write_vs_edit_postmortem() {
-        let none = make_detail_page(ops(IncidentState::Resolved), None, None, "x".into(), vec![], None);
+        let none = make_detail_page(
+            ops(IncidentState::Resolved),
+            None,
+            None,
+            "x".into(),
+            vec![],
+            vec![],
+            None,
+        );
         assert!(none.render().unwrap().contains("write postmortem"));
 
         let pm = crate::domain::IncidentPostmortem {
@@ -1036,7 +1425,15 @@ mod tests {
             updated_at: Utc::now(),
             published_at: Some(Utc::now()),
         };
-        let with = make_detail_page(ops(IncidentState::Resolved), None, None, "x".into(), vec![], Some(&pm));
+        let with = make_detail_page(
+            ops(IncidentState::Resolved),
+            None,
+            None,
+            "x".into(),
+            vec![],
+            vec![],
+            Some(&pm),
+        );
         let html = with.render().unwrap();
         assert!(html.contains("edit postmortem"));
         assert!(html.contains("published"));
@@ -1057,13 +1454,22 @@ mod tests {
             window_days: 30,
             windows: WINDOW_DAYS
                 .iter()
-                .map(|d| WindowOption { days: *d, active: *d == 30 })
+                .map(|d| WindowOption {
+                    days: *d,
+                    active: *d == 30,
+                })
                 .collect(),
             total: 4,
             mtta: Some("5m 0s".into()),
             mttr: Some("1h 2m".into()),
-            by_severity: vec![ReportBucket { label: "major".into(), count: 3 }],
-            by_state: vec![ReportBucket { label: "resolved".into(), count: 2 }],
+            by_severity: vec![ReportBucket {
+                label: "major".into(),
+                count: 3,
+            }],
+            by_state: vec![ReportBucket {
+                label: "resolved".into(),
+                count: 2,
+            }],
             auto_resolved: 1,
             human_resolved: 1,
             top_monitors: vec![ReportMonitorRow {

@@ -276,8 +276,8 @@ ins AS (
   FROM s
   RETURNING id, started_at, ended_at
 )
-INSERT INTO incident_updates (org_id, incident_id, posted_at, phase, message)
-SELECT '${ORG}', i.id, p.posted_at, p.phase::text, p.message
+INSERT INTO incident_updates (org_id, incident_id, posted_at, phase, message, author)
+SELECT '${ORG}', i.id, p.posted_at, p.phase::text, p.message, NULLIF('${OWNER_USER_ID}', '')
 FROM ins i
 JOIN s ON s.started_at = i.started_at
 CROSS JOIN LATERAL (
@@ -372,8 +372,8 @@ ins AS (
 )
 -- One investigating update on every ongoing incident; layer in identified
 -- and monitoring rows when the target phase is past those.
-INSERT INTO incident_updates (org_id, incident_id, posted_at, phase, message)
-SELECT '${ORG}', i.id, p.posted_at, p.phase, p.message
+INSERT INTO incident_updates (org_id, incident_id, posted_at, phase, message, author)
+SELECT '${ORG}', i.id, p.posted_at, p.phase, p.message, NULLIF('${OWNER_USER_ID}', '')
 FROM ins i
 JOIN s ON s.started_at = i.started_at
 CROSS JOIN LATERAL (
@@ -518,8 +518,8 @@ VALUES
    \$ADV\$Tests JSON escaping for the day_strip popover blob. Contains < > & " ' </script> <!-- and a unicode em-dash —.\$ADV\$,
    3600, 'resolved', 'public', 'monitor');
 
-INSERT INTO incident_updates (org_id, incident_id, posted_at, phase, message)
-SELECT '${ORG}'::uuid, i.id, p.posted_at, p.phase, p.message
+INSERT INTO incident_updates (org_id, incident_id, posted_at, phase, message, author)
+SELECT '${ORG}'::uuid, i.id, p.posted_at, p.phase, p.message, NULLIF('${OWNER_USER_ID}', '')
 FROM (SELECT id, started_at, ended_at FROM incidents
        WHERE org_id='${ORG}'::uuid AND target_id='${T_SEARCH}'::uuid
          AND public_title LIKE 'Adversarial title%') i
