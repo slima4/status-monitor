@@ -39,7 +39,7 @@ use uuid::Uuid;
 const ORG_COUNT: usize = 64;
 const COMPONENTS_PER_ORG: usize = 25;
 const RESULTS_PER_COMPONENT: usize = 60;
-const BATCHES: [usize; 4] = [1, 8, 16, 32];
+const BATCHES: [usize; 5] = [1, 16, 32, 48, 64];
 
 struct Fixture {
     pool: PgPool,
@@ -52,10 +52,14 @@ struct Fixture {
 
 async fn try_pg_pool() -> Option<PgPool> {
     let url = std::env::var("DATABASE_URL").ok()?;
-    // Mirror the production default (config: storage.postgres.max_connections)
-    // so the measured ceiling reflects what a real deployment hits.
+    // Defaults to the production pool size (config: storage.postgres
+    // .max_connections); override via POOL_MAX to measure a different ceiling.
+    let max_conns: u32 = std::env::var("POOL_MAX")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(30);
     let pool = PgPoolOptions::new()
-        .max_connections(10)
+        .max_connections(max_conns)
         .acquire_timeout(Duration::from_secs(10))
         .connect(&url)
         .await
