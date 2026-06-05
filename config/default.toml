@@ -352,7 +352,7 @@ access_token_ttl_secs = 3600
 # and the legacy direct alert dispatch is suppressed (the incident is the single
 # source of down/up notification). When off, incidents still open + show in the
 # console but page no one, and the legacy alert path keeps firing.
-enabled = true
+enabled = false
 
 # How often failed pages are re-attempted.
 tick_interval_secs = 15
