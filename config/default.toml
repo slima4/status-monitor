@@ -50,7 +50,7 @@ half_open_max_calls = 3
 
 [storage.postgres]
 url = "postgres://monitor:monitor@localhost:5432/monitor"
-max_connections = 10
+max_connections = 30
 min_connections = 2
 acquire_timeout_secs = 10
 
