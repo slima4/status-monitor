@@ -82,9 +82,15 @@ fn validate(new: &NewEscalationPolicy) -> Result<()> {
             return Err(invalid("too many targets in one step"));
         }
         for t in &step.targets {
-            let set = [t.user_id.is_some(), t.schedule_id.is_some(), t.channel_id.is_some()];
+            let set = [
+                t.user_id.is_some(),
+                t.schedule_id.is_some(),
+                t.channel_id.is_some(),
+            ];
             if set.iter().filter(|x| **x).count() != 1 {
-                return Err(invalid("a target must set exactly one of user/schedule/channel"));
+                return Err(invalid(
+                    "a target must set exactly one of user/schedule/channel",
+                ));
             }
             let ok = match t.target_type {
                 EscalationTargetType::Channel => t.channel_id.is_some(),
@@ -135,8 +141,17 @@ pub async fn create(
         .quotas
         .check_can_create_escalation_policy(org, None)
         .await?;
-    let limit = i64::from(state.quotas.limit_for_org(org).await?.max_escalation_policies);
-    let policy = state.escalation_policy_store.create(org, new, limit).await?;
+    let limit = i64::from(
+        state
+            .quotas
+            .limit_for_org(org)
+            .await?
+            .max_escalation_policies,
+    );
+    let policy = state
+        .escalation_policy_store
+        .create(org, new, limit)
+        .await?;
     Ok((StatusCode::CREATED, Json(policy)))
 }
 
@@ -199,7 +214,11 @@ pub async fn delete(
 }
 
 /// Resolve a binding target to a live policy id, rejecting an unknown one.
-async fn validate_binding(state: &AppState, org: crate::domain::OrgId, b: &PolicyBinding) -> Result<()> {
+async fn validate_binding(
+    state: &AppState,
+    org: crate::domain::OrgId,
+    b: &PolicyBinding,
+) -> Result<()> {
     if let Some(pid) = b.policy_id
         && state.escalation_policy_store.get(org, pid).await?.is_none()
     {
@@ -233,7 +252,10 @@ pub async fn set_org_default(
     Json(b): Json<PolicyBinding>,
 ) -> Result<Json<PolicyBinding>> {
     validate_binding(&state, org, &b).await?;
-    state.escalation_policy_store.set_org_default(org, b.policy_id).await?;
+    state
+        .escalation_policy_store
+        .set_org_default(org, b.policy_id)
+        .await?;
     Ok(Json(b))
 }
 
@@ -249,7 +271,10 @@ pub async fn get_target_policy(
     Path(id): Path<Uuid>,
 ) -> Result<Json<PolicyBinding>> {
     if state.target_store.get(org, id).await?.is_none() {
-        return Err(AppError::not_found(codes::TARGET_NOT_FOUND, "monitor not found"));
+        return Err(AppError::not_found(
+            codes::TARGET_NOT_FOUND,
+            "monitor not found",
+        ));
     }
     // The monitor's own binding only (not the org-default fallback), so the
     // form can show "inherit" vs "override".
@@ -275,7 +300,10 @@ pub async fn set_target_policy(
         .set_target_policy(org, id, b.policy_id)
         .await?
     {
-        return Err(AppError::not_found(codes::TARGET_NOT_FOUND, "monitor not found"));
+        return Err(AppError::not_found(
+            codes::TARGET_NOT_FOUND,
+            "monitor not found",
+        ));
     }
     Ok(Json(b))
 }
@@ -306,8 +334,16 @@ mod tests {
     #[test]
     fn accepts_a_channel_ladder() {
         let p = policy(vec![
-            NewEscalationStep { level: 1, delay_secs: 300, targets: vec![channel_target()] },
-            NewEscalationStep { level: 2, delay_secs: 600, targets: vec![channel_target()] },
+            NewEscalationStep {
+                level: 1,
+                delay_secs: 300,
+                targets: vec![channel_target()],
+            },
+            NewEscalationStep {
+                level: 2,
+                delay_secs: 600,
+                targets: vec![channel_target()],
+            },
         ]);
         assert!(validate(&p).is_ok());
     }
@@ -322,8 +358,16 @@ mod tests {
     #[test]
     fn rejects_duplicate_levels() {
         let p = policy(vec![
-            NewEscalationStep { level: 1, delay_secs: 0, targets: vec![channel_target()] },
-            NewEscalationStep { level: 1, delay_secs: 0, targets: vec![channel_target()] },
+            NewEscalationStep {
+                level: 1,
+                delay_secs: 0,
+                targets: vec![channel_target()],
+            },
+            NewEscalationStep {
+                level: 1,
+                delay_secs: 0,
+                targets: vec![channel_target()],
+            },
         ]);
         assert!(validate(&p).is_err());
     }
@@ -398,7 +442,11 @@ mod tests {
 
     #[test]
     fn rejects_empty_step() {
-        let empty = NewEscalationStep { level: 1, delay_secs: 0, targets: vec![] };
+        let empty = NewEscalationStep {
+            level: 1,
+            delay_secs: 0,
+            targets: vec![],
+        };
         assert!(validate(&policy(vec![empty])).is_err());
     }
 }

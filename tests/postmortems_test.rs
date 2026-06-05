@@ -60,8 +60,16 @@ async fn upsert_publish_and_isolation_pg() {
                 root_cause: Some("missing jitter".into()),
                 impact: Some("8 min of 503s".into()),
                 action_items: vec![
-                    ActionItem { text: "add jitter".into(), owner_user_id: Some(user), done: false },
-                    ActionItem { text: "alert on hit-rate".into(), owner_user_id: None, done: false },
+                    ActionItem {
+                        text: "add jitter".into(),
+                        owner_user_id: Some(user),
+                        done: false,
+                    },
+                    ActionItem {
+                        text: "alert on hit-rate".into(),
+                        owner_user_id: None,
+                        done: false,
+                    },
                 ],
             },
         )
@@ -81,7 +89,11 @@ async fn upsert_publish_and_isolation_pg() {
             user,
             PostmortemUpsert {
                 summary: Some("cache stampede (revised)".into()),
-                action_items: vec![ActionItem { text: "add jitter".into(), owner_user_id: None, done: true }],
+                action_items: vec![ActionItem {
+                    text: "add jitter".into(),
+                    owner_user_id: None,
+                    done: true,
+                }],
                 ..Default::default()
             },
         )
@@ -89,15 +101,26 @@ async fn upsert_publish_and_isolation_pg() {
         .unwrap()
         .unwrap();
     assert_eq!(updated.summary.as_deref(), Some("cache stampede (revised)"));
-    assert_eq!(updated.root_cause, None, "an omitted field clears on replace");
+    assert_eq!(
+        updated.root_cause, None,
+        "an omitted field clears on replace"
+    );
     assert_eq!(updated.action_items.len(), 1);
     assert!(updated.action_items[0].done);
     assert_eq!(updated.author_id, Some(user), "author kept across edits");
 
     // Publish then unpublish.
-    let pubd = store.set_published(org, incident_id, true).await.unwrap().unwrap();
+    let pubd = store
+        .set_published(org, incident_id, true)
+        .await
+        .unwrap()
+        .unwrap();
     assert!(pubd.published_at.is_some());
-    let unpubd = store.set_published(org, incident_id, false).await.unwrap().unwrap();
+    let unpubd = store
+        .set_published(org, incident_id, false)
+        .await
+        .unwrap()
+        .unwrap();
     assert!(unpubd.published_at.is_none());
 
     // Cross-tenant: another org can neither read nor attach a postmortem.
@@ -109,7 +132,12 @@ async fn upsert_publish_and_isolation_pg() {
     assert!(store.get(other.id, incident_id).await.unwrap().is_none());
     assert!(
         store
-            .upsert(other.id, incident_id, other_user, PostmortemUpsert::default())
+            .upsert(
+                other.id,
+                incident_id,
+                other_user,
+                PostmortemUpsert::default()
+            )
             .await
             .unwrap()
             .is_none(),

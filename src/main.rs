@@ -329,10 +329,12 @@ async fn main() -> Result<()> {
     let escalation_policy_store: Arc<dyn uptimepage::storage::EscalationPolicyStore> = Arc::new(
         uptimepage::storage::PgEscalationPolicyStore::new(pg_pool_for_stores.clone()),
     );
-    let on_call_store: Arc<dyn uptimepage::storage::OnCallStore> =
-        Arc::new(uptimepage::storage::PgOnCallStore::new(pg_pool_for_stores.clone()));
-    let contact_store: Arc<dyn uptimepage::storage::ContactStore> =
-        Arc::new(uptimepage::storage::PgContactStore::new(pg_pool_for_stores.clone()));
+    let on_call_store: Arc<dyn uptimepage::storage::OnCallStore> = Arc::new(
+        uptimepage::storage::PgOnCallStore::new(pg_pool_for_stores.clone()),
+    );
+    let contact_store: Arc<dyn uptimepage::storage::ContactStore> = Arc::new(
+        uptimepage::storage::PgContactStore::new(pg_pool_for_stores.clone()),
+    );
     let escalation_engine_handle: Option<JoinHandle<()>> = escalation_enabled.then(|| {
         let engine = uptimepage::escalation::EscalationEngine::new(
             incident_signal_rx,

@@ -38,13 +38,13 @@ use super::confirm::require_confirmation;
 use super::cursor;
 use super::error::{McpToolError, codes};
 use super::schema::{
-    CheckRunResult, CheckTiming, Failure, GetIncidentArgs, GetMonitorArgs, GetMonitorHistoryArgs,
-    GetIncidentMetricsArgs, GetStatusPageArgs, HealthTotals, IncidentActionArgs,
+    CheckRunResult, CheckTiming, Failure, GetIncidentArgs, GetIncidentMetricsArgs, GetMonitorArgs,
+    GetMonitorHistoryArgs, GetStatusPageArgs, HealthTotals, IncidentActionArgs,
     IncidentActionResult, IncidentDetail, IncidentList, IncidentMetricsResult, IncidentSummary,
     IncidentUpdateItem, IncidentUpdatePosted, IncidentWindow, LatencyPoint, ListIncidentsArgs,
-    ListMonitorsArgs, ListStatusPagesArgs, MetricCount, MonitorDetail, MonitorHistory, MonitorIdArg,
-    MonitorList, MonitorListItem, MonitorStateResult, NoisyMonitor, OrgHealth, OrgUsage,
-    PostIncidentUpdateArgs, Quota, StatusPageComponent as McpComponent, StatusPageDetail,
+    ListMonitorsArgs, ListStatusPagesArgs, MetricCount, MonitorDetail, MonitorHistory,
+    MonitorIdArg, MonitorList, MonitorListItem, MonitorStateResult, NoisyMonitor, OrgHealth,
+    OrgUsage, PostIncidentUpdateArgs, Quota, StatusPageComponent as McpComponent, StatusPageDetail,
     StatusPageList, StatusPageSummary, WorstMonitor,
 };
 use crate::storage::{Actor, LifecycleOutcome};
@@ -924,7 +924,10 @@ impl McpServer {
         };
         require_confirmation(
             ctx,
-            format!("{verb} monitor \"{}\"? {effect}", sanitize_prompt(&target.name)),
+            format!(
+                "{verb} monitor \"{}\"? {effect}",
+                sanitize_prompt(&target.name)
+            ),
         )
         .await?;
 
@@ -992,8 +995,11 @@ impl McpServer {
             .await
             .map_err(|e| McpToolError::internal(format!("resolve_incident: {e}")))?;
         if let crate::storage::LifecycleOutcome::Updated(inc) = &outcome {
-            self.state
-                .signal_incident(auth.org, inc.id, crate::domain::NotificationReason::Resolved);
+            self.state.signal_incident(
+                auth.org,
+                inc.id,
+                crate::domain::NotificationReason::Resolved,
+            );
         }
         incident_action_result(id, outcome)
     }
@@ -1282,11 +1288,11 @@ fn parse_state(s: &str) -> Result<&'static str, McpToolError> {
 fn clean_incident_note(note: Option<&str>) -> Result<Option<String>, McpToolError> {
     match note.map(str::trim).filter(|n| !n.is_empty()) {
         None => Ok(None),
-        Some(n) if n.chars().count() > MAX_INCIDENT_MESSAGE_LEN => Err(
-            McpToolError::invalid_argument(format!(
+        Some(n) if n.chars().count() > MAX_INCIDENT_MESSAGE_LEN => {
+            Err(McpToolError::invalid_argument(format!(
                 "note must be at most {MAX_INCIDENT_MESSAGE_LEN} characters"
-            )),
-        ),
+            )))
+        }
         Some(n) => Ok(Some(n.to_string())),
     }
 }

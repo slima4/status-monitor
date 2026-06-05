@@ -270,7 +270,12 @@ mod tests {
         let id = Uuid::now_v7();
         assert!(
             store
-                .upsert(org(), id, UserId(Uuid::now_v7()), PostmortemUpsert::default())
+                .upsert(
+                    org(),
+                    id,
+                    UserId(Uuid::now_v7()),
+                    PostmortemUpsert::default()
+                )
                 .await
                 .unwrap()
                 .is_none(),
@@ -306,12 +311,21 @@ mod tests {
         let id = Uuid::now_v7();
         store.seed_incident(org(), id);
         store
-            .upsert(org(), id, UserId(Uuid::now_v7()), PostmortemUpsert::default())
+            .upsert(
+                org(),
+                id,
+                UserId(Uuid::now_v7()),
+                PostmortemUpsert::default(),
+            )
             .await
             .unwrap();
         let p = store.set_published(org(), id, true).await.unwrap().unwrap();
         assert!(p.published_at.is_some());
-        let p = store.set_published(org(), id, false).await.unwrap().unwrap();
+        let p = store
+            .set_published(org(), id, false)
+            .await
+            .unwrap()
+            .unwrap();
         assert!(p.published_at.is_none());
     }
 

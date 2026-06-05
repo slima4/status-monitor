@@ -388,7 +388,10 @@ impl OnCallStore for PgOnCallStore {
         tx.commit()
             .await
             .map_err(|e| AppError::Other(anyhow::anyhow!("commit: {e}")))?;
-        Ok(self.get(org, id).await?.expect("just-created schedule is live"))
+        Ok(self
+            .get(org, id)
+            .await?
+            .expect("just-created schedule is live"))
     }
 
     async fn replace(
@@ -719,7 +722,11 @@ impl OnCallStore for InMemoryOnCallStore {
         new: NewOnCallOverride,
     ) -> Result<Option<OnCallOverride>> {
         let mut g = self.inner.lock();
-        if !g.members.iter().any(|(o, u)| *o == org && *u == new.user_id) {
+        if !g
+            .members
+            .iter()
+            .any(|(o, u)| *o == org && *u == new.user_id)
+        {
             return Err(not_member());
         }
         let ov = OnCallOverride {
@@ -828,10 +835,19 @@ mod tests {
     #[tokio::test]
     async fn enforces_cap_and_unique_name() {
         let store = store_with_members().await;
-        store.create(org(), schedule("a", vec![user(1)]), 1).await.unwrap();
-        let over = store.create(org(), schedule("b", vec![user(1)]), 1).await.unwrap_err();
+        store
+            .create(org(), schedule("a", vec![user(1)]), 1)
+            .await
+            .unwrap();
+        let over = store
+            .create(org(), schedule("b", vec![user(1)]), 1)
+            .await
+            .unwrap_err();
         assert!(matches!(over, AppError::Unprocessable { .. }));
-        let dup = store.create(org(), schedule("a", vec![user(1)]), 10).await.unwrap_err();
+        let dup = store
+            .create(org(), schedule("a", vec![user(1)]), 10)
+            .await
+            .unwrap_err();
         assert!(matches!(dup, AppError::Unprocessable { .. }));
     }
 
@@ -844,8 +860,14 @@ mod tests {
             .unwrap();
         let day0 = "2026-06-01T12:00:00Z".parse().unwrap();
         let day1 = "2026-06-02T12:00:00Z".parse().unwrap();
-        assert_eq!(store.resolve_now(org(), d.schedule.id, day0).await.unwrap(), vec![user(1)]);
-        assert_eq!(store.resolve_now(org(), d.schedule.id, day1).await.unwrap(), vec![user(2)]);
+        assert_eq!(
+            store.resolve_now(org(), d.schedule.id, day0).await.unwrap(),
+            vec![user(1)]
+        );
+        assert_eq!(
+            store.resolve_now(org(), d.schedule.id, day1).await.unwrap(),
+            vec![user(2)]
+        );
     }
 
     #[tokio::test]
@@ -871,8 +893,19 @@ mod tests {
             .unwrap()
             .unwrap();
         let at = "2026-06-01T12:00:00Z".parse().unwrap();
-        assert_eq!(store.resolve_now(org(), d.schedule.id, at).await.unwrap(), vec![user(9)]);
-        assert!(store.delete_override(org(), d.schedule.id, ov.id).await.unwrap());
-        assert_eq!(store.resolve_now(org(), d.schedule.id, at).await.unwrap(), vec![user(1)]);
+        assert_eq!(
+            store.resolve_now(org(), d.schedule.id, at).await.unwrap(),
+            vec![user(9)]
+        );
+        assert!(
+            store
+                .delete_override(org(), d.schedule.id, ov.id)
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            store.resolve_now(org(), d.schedule.id, at).await.unwrap(),
+            vec![user(1)]
+        );
     }
 }

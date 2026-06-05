@@ -32,8 +32,8 @@ use crate::http_outbound::OutboundHttpClient;
 use crate::notifier::build_notifier;
 use crate::notifier::event::IncidentNotice;
 use crate::storage::{
-    Actor, ContactStore, DueIncident, EscalationPolicyStore, IncidentOpsStore, OnCallStore,
-    NotificationChannelStore, PendingNotification, TargetStore,
+    Actor, ContactStore, DueIncident, EscalationPolicyStore, IncidentOpsStore,
+    NotificationChannelStore, OnCallStore, PendingNotification, TargetStore,
 };
 
 /// One resolved paging destination: a concrete channel plus, when the rung
@@ -223,7 +223,10 @@ impl Worker {
             }
         };
         if !due.is_empty() {
-            tracing::warn!(count = due.len(), "reconciling incidents that were never paged");
+            tracing::warn!(
+                count = due.len(),
+                "reconciling incidents that were never paged"
+            );
         }
         let budget = self.sweep_budget();
         let start = Instant::now();
@@ -300,14 +303,17 @@ impl Worker {
                     EscalationDecision::Page {
                         level, delay_secs, ..
                     } => {
-                        let targets = self.resolve_targets(org, &policy, level, Utc::now()).await?;
+                        let targets = self
+                            .resolve_targets(org, &policy, level, Utc::now())
+                            .await?;
                         if targets.is_empty() {
                             self.note_empty_rung(org, incident.id, level).await?;
                         }
                         let paged = self
                             .page_channels(org, incident.id, &notice, reason, level, &targets)
                             .await?;
-                        let next_at = Some(Utc::now() + chrono::Duration::seconds(delay_secs.into()));
+                        let next_at =
+                            Some(Utc::now() + chrono::Duration::seconds(delay_secs.into()));
                         self.ops
                             .begin_escalation(org, incident.id, policy_id, level, next_at)
                             .await?;
@@ -438,7 +444,9 @@ impl Worker {
                     return Ok(());
                 };
                 let notice = self.notice(&incident, &target, NotificationReason::Escalated);
-                let targets = self.resolve_targets(d.org, &policy, level, Utc::now()).await?;
+                let targets = self
+                    .resolve_targets(d.org, &policy, level, Utc::now())
+                    .await?;
                 if targets.is_empty() {
                     self.note_empty_rung(d.org, d.id, level).await?;
                 }
@@ -618,12 +626,22 @@ impl Worker {
         // resolved) — is dropped so on-call never gets a stale notice. Burning
         // an attempt lets the row exhaust instead of retrying forever.
         let rebuilt = match p.channel_id {
-            Some(cid) => self.rebuild_notice(p.org, p.incident_id, cid, p.reason).await?,
+            Some(cid) => {
+                self.rebuild_notice(p.org, p.incident_id, cid, p.reason)
+                    .await?
+            }
             None => None,
         };
         let Some((notice, channel_cfg, state)) = rebuilt else {
             self.ops
-                .mark_notification(p.org, p.id, NotificationStatus::Failed, next_attempt, None, None)
+                .mark_notification(
+                    p.org,
+                    p.id,
+                    NotificationStatus::Failed,
+                    next_attempt,
+                    None,
+                    None,
+                )
                 .await?;
             return Ok(());
         };
@@ -691,9 +709,15 @@ impl Worker {
         match build_notifier(cfg, &self.http) {
             Ok(n) => match n.notify_incident(notice).await {
                 Ok(()) => (NotificationStatus::Sent, None),
-                Err(err) => (NotificationStatus::Failed, Some(redact_secrets(&err.to_string()))),
+                Err(err) => (
+                    NotificationStatus::Failed,
+                    Some(redact_secrets(&err.to_string())),
+                ),
             },
-            Err(err) => (NotificationStatus::Failed, Some(redact_secrets(&err.to_string()))),
+            Err(err) => (
+                NotificationStatus::Failed,
+                Some(redact_secrets(&err.to_string())),
+            ),
         }
     }
 
@@ -1113,10 +1137,14 @@ mod tests {
         let policies = Arc::new(InMemoryEscalationPolicyStore::new());
 
         let eng = engine(ops.clone(), policies, targets, channels);
-        eng.page(org(), id, NotificationReason::Opened).await.unwrap();
+        eng.page(org(), id, NotificationReason::Opened)
+            .await
+            .unwrap();
         assert_eq!(ops.notifications_for(org(), id).await.unwrap().len(), 1);
         // A duplicate Opened signal does not re-page the same episode.
-        eng.page(org(), id, NotificationReason::Opened).await.unwrap();
+        eng.page(org(), id, NotificationReason::Opened)
+            .await
+            .unwrap();
         assert_eq!(ops.notifications_for(org(), id).await.unwrap().len(), 1);
     }
 
@@ -1143,16 +1171,24 @@ mod tests {
             )
             .await
             .unwrap();
-        policies.set_target_policy(org(), tid, Some(p.id)).await.unwrap();
+        policies
+            .set_target_policy(org(), tid, Some(p.id))
+            .await
+            .unwrap();
 
         let eng = engine(ops.clone(), policies, targets, channels);
-        eng.page(org(), id, NotificationReason::Opened).await.unwrap();
+        eng.page(org(), id, NotificationReason::Opened)
+            .await
+            .unwrap();
         let rows = ops.notifications_for(org(), id).await.unwrap();
         assert_eq!(rows.len(), 1);
         let inc = ops.get(org(), id).await.unwrap().unwrap();
         assert_eq!(inc.escalation_level, 1);
         assert_eq!(inc.escalation_policy_id, Some(p.id));
-        assert!(inc.next_escalation_at.is_some(), "timer is armed for level 2");
+        assert!(
+            inc.next_escalation_at.is_some(),
+            "timer is armed for level 2"
+        );
     }
 
     #[tokio::test]
@@ -1179,12 +1215,20 @@ mod tests {
             )
             .await
             .unwrap();
-        policies.set_target_policy(org(), tid, Some(p.id)).await.unwrap();
+        policies
+            .set_target_policy(org(), tid, Some(p.id))
+            .await
+            .unwrap();
 
         let eng = engine(ops.clone(), policies, targets, channels);
         // Level 1 page + arm (delay 0 → immediately due).
-        eng.page(org(), id, NotificationReason::Opened).await.unwrap();
-        assert_eq!(ops.get(org(), id).await.unwrap().unwrap().escalation_level, 1);
+        eng.page(org(), id, NotificationReason::Opened)
+            .await
+            .unwrap();
+        assert_eq!(
+            ops.get(org(), id).await.unwrap().unwrap().escalation_level,
+            1
+        );
 
         // Sweep escalates to level 2.
         eng.escalate_due().await;
@@ -1225,12 +1269,19 @@ mod tests {
             )
             .await
             .unwrap();
-        policies.set_target_policy(org(), tid, Some(p.id)).await.unwrap();
+        policies
+            .set_target_policy(org(), tid, Some(p.id))
+            .await
+            .unwrap();
 
         let eng = engine(ops.clone(), policies, targets, channels);
-        eng.page(org(), id, NotificationReason::Opened).await.unwrap();
+        eng.page(org(), id, NotificationReason::Opened)
+            .await
+            .unwrap();
         // A responder acks → next_escalation_at cleared, state acknowledged.
-        ops.acknowledge(org(), id, Actor::System, None).await.unwrap();
+        ops.acknowledge(org(), id, Actor::System, None)
+            .await
+            .unwrap();
         eng.escalate_due().await;
         // Still only the level-1 page; the sweep found nothing due.
         assert_eq!(ops.notifications_for(org(), id).await.unwrap().len(), 1);
@@ -1248,12 +1299,18 @@ mod tests {
         let policies = Arc::new(InMemoryEscalationPolicyStore::new());
 
         let eng = engine(ops.clone(), policies, targets, channels);
-        eng.page(org(), id, NotificationReason::Opened).await.unwrap();
+        eng.page(org(), id, NotificationReason::Opened)
+            .await
+            .unwrap();
         ops.resolve(org(), id, Actor::System, None).await.unwrap();
-        eng.page(org(), id, NotificationReason::Resolved).await.unwrap();
+        eng.page(org(), id, NotificationReason::Resolved)
+            .await
+            .unwrap();
         assert_eq!(ops.notifications_for(org(), id).await.unwrap().len(), 2);
         // A duplicate Resolved signal is absorbed.
-        eng.page(org(), id, NotificationReason::Resolved).await.unwrap();
+        eng.page(org(), id, NotificationReason::Resolved)
+            .await
+            .unwrap();
         assert_eq!(ops.notifications_for(org(), id).await.unwrap().len(), 2);
     }
 
@@ -1269,9 +1326,13 @@ mod tests {
         let policies = Arc::new(InMemoryEscalationPolicyStore::new());
 
         let eng = engine(ops.clone(), policies, targets, channels);
-        eng.page(org(), id, NotificationReason::Opened).await.unwrap();
+        eng.page(org(), id, NotificationReason::Opened)
+            .await
+            .unwrap();
         ops.resolve(org(), id, Actor::System, None).await.unwrap();
-        eng.page(org(), id, NotificationReason::Resolved).await.unwrap();
+        eng.page(org(), id, NotificationReason::Resolved)
+            .await
+            .unwrap();
         // Opened paged once; recovery opt-out blocked the resolution page.
         assert_eq!(ops.notifications_for(org(), id).await.unwrap().len(), 1);
     }
@@ -1341,15 +1402,24 @@ mod tests {
             .unwrap();
         let target = bare_target();
         let tid = target.id;
-        policies.set_target_policy(org(), tid, Some(p.id)).await.unwrap();
+        policies
+            .set_target_policy(org(), tid, Some(p.id))
+            .await
+            .unwrap();
         let ops = Arc::new(InMemoryIncidentOpsStore::new());
         let id = seed_incident(&ops, Some(tid));
         let targets = Arc::new(InMemoryTargetStore::from_vec(vec![target]));
 
         let eng = engine_with(ops.clone(), policies, on_call, contacts, targets, channels);
-        eng.page(org(), id, NotificationReason::Opened).await.unwrap();
+        eng.page(org(), id, NotificationReason::Opened)
+            .await
+            .unwrap();
         let rows = ops.notifications_for(org(), id).await.unwrap();
-        assert_eq!(rows.len(), 1, "the on-call responder's contact channel was paged");
+        assert_eq!(
+            rows.len(),
+            1,
+            "the on-call responder's contact channel was paged"
+        );
         assert_eq!(rows[0].channel_id, Some(personal));
         assert_eq!(rows[0].target_user_id, Some(responder));
     }
@@ -1410,13 +1480,19 @@ mod tests {
         let slack = "POST https://hooks.slack.com/services/T01/B02/abcSECRETxyz failed: 404";
         let out = redact_secrets(slack);
         assert!(out.contains("https://hooks.slack.com"));
-        assert!(!out.contains("abcSECRETxyz"), "the webhook secret must not survive");
+        assert!(
+            !out.contains("abcSECRETxyz"),
+            "the webhook secret must not survive"
+        );
         assert!(!out.contains("/services/"));
 
         let tg = "https://api.telegram.org/bot123456:AAH-SECRET-TOKEN/sendMessage 401";
         let out = redact_secrets(tg);
         assert!(out.contains("https://api.telegram.org"));
-        assert!(!out.contains("SECRET-TOKEN"), "the bot token must not survive");
+        assert!(
+            !out.contains("SECRET-TOKEN"),
+            "the bot token must not survive"
+        );
 
         // Non-URL text is untouched.
         assert_eq!(redact_secrets("connection refused"), "connection refused");
@@ -1424,7 +1500,10 @@ mod tests {
         // A "://"-bearing token that does not cleanly parse is dropped wholesale
         // rather than echoed (it might still carry the secret path).
         let bad = redact_secrets("weird://[bad/SECRET-path");
-        assert!(!bad.contains("SECRET-path"), "an unparseable url token must not survive");
+        assert!(
+            !bad.contains("SECRET-path"),
+            "an unparseable url token must not survive"
+        );
         assert!(bad.contains("[redacted-url]"));
     }
 
@@ -1436,7 +1515,9 @@ mod tests {
         let targets = Arc::new(InMemoryTargetStore::new());
         let policies = Arc::new(InMemoryEscalationPolicyStore::new());
         let eng = engine(ops.clone(), policies, targets, channels);
-        eng.page(org(), id, NotificationReason::Opened).await.unwrap();
+        eng.page(org(), id, NotificationReason::Opened)
+            .await
+            .unwrap();
         assert!(ops.notifications_for(org(), id).await.unwrap().is_empty());
     }
 
@@ -1452,13 +1533,18 @@ mod tests {
         let policies = Arc::new(InMemoryEscalationPolicyStore::new());
 
         let eng = engine(ops.clone(), policies, targets, channels);
-        eng.page(org(), id, NotificationReason::Opened).await.unwrap();
+        eng.page(org(), id, NotificationReason::Opened)
+            .await
+            .unwrap();
         for _ in 0..10 {
             eng.retry_pending().await;
         }
         let rows = ops.notifications_for(org(), id).await.unwrap();
         assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].attempt, EscalationConfig::default().max_attempts as i32);
+        assert_eq!(
+            rows[0].attempt,
+            EscalationConfig::default().max_attempts as i32
+        );
         assert_eq!(rows[0].status, NotificationStatus::Failed);
     }
 
@@ -1474,7 +1560,9 @@ mod tests {
         let policies = Arc::new(InMemoryEscalationPolicyStore::new());
 
         let eng = engine(ops.clone(), policies, targets, channels);
-        eng.page(org(), id, NotificationReason::Opened).await.unwrap();
+        eng.page(org(), id, NotificationReason::Opened)
+            .await
+            .unwrap();
         ops.resolve(org(), id, Actor::System, None).await.unwrap();
         eng.retry_pending().await;
         let rows = ops.notifications_for(org(), id).await.unwrap();

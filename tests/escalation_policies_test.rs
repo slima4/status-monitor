@@ -15,9 +15,7 @@ use sqlx::PgPool;
 use uptimepage::domain::{
     EscalationTargetType, NewEscalationPolicy, NewEscalationStep, NewEscalationTarget, OrgId,
 };
-use uptimepage::storage::{
-    EscalationPolicyStore, PgEscalationPolicyStore, create_org_with_owner,
-};
+use uptimepage::storage::{EscalationPolicyStore, PgEscalationPolicyStore, create_org_with_owner};
 use uuid::Uuid;
 
 async fn seed_org(pool: &PgPool, prefix: &str) -> OrgId {
@@ -89,7 +87,10 @@ async fn create_get_replace_delete_roundtrip_pg() {
     let created = store
         .create(
             org,
-            policy("primary", vec![channel_step(1, 300, c1), channel_step(2, 600, c2)]),
+            policy(
+                "primary",
+                vec![channel_step(1, 300, c1), channel_step(2, 600, c2)],
+            ),
             10,
         )
         .await
@@ -105,7 +106,11 @@ async fn create_get_replace_delete_roundtrip_pg() {
 
     // Replace the whole ladder with a single rung.
     let replaced = store
-        .replace(org, created.id, policy("primary", vec![channel_step(1, 60, c1)]))
+        .replace(
+            org,
+            created.id,
+            policy("primary", vec![channel_step(1, 60, c1)]),
+        )
         .await
         .unwrap()
         .unwrap();
@@ -129,10 +134,17 @@ async fn rejects_cross_org_channel_target_pg() {
 
     // A policy in `org` cannot reference another tenant's channel.
     let err = store
-        .create(org, policy("x", vec![channel_step(1, 60, foreign_channel)]), 10)
+        .create(
+            org,
+            policy("x", vec![channel_step(1, 60, foreign_channel)]),
+            10,
+        )
         .await
         .unwrap_err();
-    assert!(matches!(err, uptimepage::error::AppError::Unprocessable { .. }));
+    assert!(matches!(
+        err,
+        uptimepage::error::AppError::Unprocessable { .. }
+    ));
     // The failed insert rolled back — no orphan policy left behind.
     assert!(store.list(org).await.unwrap().is_empty());
 }
@@ -147,25 +159,48 @@ async fn resolve_for_target_binding_default_and_delete_fallback_pg() {
     let target = seed_target(&pool, org).await;
     let store = PgEscalationPolicyStore::new(pool.clone());
 
-    let def = store.create(org, policy("default", vec![]), 10).await.unwrap();
-    let bound = store.create(org, policy("bound", vec![]), 10).await.unwrap();
+    let def = store
+        .create(org, policy("default", vec![]), 10)
+        .await
+        .unwrap();
+    let bound = store
+        .create(org, policy("bound", vec![]), 10)
+        .await
+        .unwrap();
 
     assert_eq!(store.resolve_for_target(org, target).await.unwrap(), None);
 
     store.set_org_default(org, Some(def.id)).await.unwrap();
     assert_eq!(store.org_default(org).await.unwrap(), Some(def.id));
-    assert_eq!(store.resolve_for_target(org, target).await.unwrap(), Some(def.id));
+    assert_eq!(
+        store.resolve_for_target(org, target).await.unwrap(),
+        Some(def.id)
+    );
     // Effective policy is the default, but the monitor has no own binding yet.
     assert_eq!(store.target_policy(org, target).await.unwrap(), None);
 
-    assert!(store.set_target_policy(org, target, Some(bound.id)).await.unwrap());
-    assert_eq!(store.resolve_for_target(org, target).await.unwrap(), Some(bound.id));
-    assert_eq!(store.target_policy(org, target).await.unwrap(), Some(bound.id));
+    assert!(
+        store
+            .set_target_policy(org, target, Some(bound.id))
+            .await
+            .unwrap()
+    );
+    assert_eq!(
+        store.resolve_for_target(org, target).await.unwrap(),
+        Some(bound.id)
+    );
+    assert_eq!(
+        store.target_policy(org, target).await.unwrap(),
+        Some(bound.id)
+    );
 
     // Deleting the bound policy clears the dangling binding → falls back to the
     // org default (the soft-delete reference cleanup).
     assert!(store.delete(org, bound.id).await.unwrap());
-    assert_eq!(store.resolve_for_target(org, target).await.unwrap(), Some(def.id));
+    assert_eq!(
+        store.resolve_for_target(org, target).await.unwrap(),
+        Some(def.id)
+    );
 
     // Deleting the default too clears it → no policy.
     assert!(store.delete(org, def.id).await.unwrap());
@@ -184,9 +219,18 @@ async fn create_enforces_quota_and_unique_name_pg() {
 
     store.create(org, policy("a", vec![]), 1).await.unwrap();
     let over = store.create(org, policy("b", vec![]), 1).await.unwrap_err();
-    assert!(matches!(over, uptimepage::error::AppError::Unprocessable { .. }));
-    let dup = store.create(org, policy("a", vec![]), 10).await.unwrap_err();
-    assert!(matches!(dup, uptimepage::error::AppError::Unprocessable { .. }));
+    assert!(matches!(
+        over,
+        uptimepage::error::AppError::Unprocessable { .. }
+    ));
+    let dup = store
+        .create(org, policy("a", vec![]), 10)
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        dup,
+        uptimepage::error::AppError::Unprocessable { .. }
+    ));
     // A deleted name frees up for reuse (partial unique index on deleted_at).
     let live = store.list(org).await.unwrap();
     assert_eq!(live.len(), 1);
@@ -209,6 +253,12 @@ async fn policies_are_isolated_per_org_pg() {
     store.create(b, policy("shared", vec![]), 10).await.unwrap();
     assert!(store.get(b, pa.id).await.unwrap().is_none());
     assert!(!store.delete(b, pa.id).await.unwrap());
-    assert!(store.replace(b, pa.id, policy("shared", vec![])).await.unwrap().is_none());
+    assert!(
+        store
+            .replace(b, pa.id, policy("shared", vec![]))
+            .await
+            .unwrap()
+            .is_none()
+    );
     assert!(store.get(a, pa.id).await.unwrap().is_some());
 }

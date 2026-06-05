@@ -2,9 +2,9 @@ use async_trait::async_trait;
 use serde::Serialize;
 use url::Url;
 
+use crate::domain::NotificationReason;
 use crate::error::{AppError, Result};
 use crate::http_outbound::{OutboundHttpClient, post_json};
-use crate::domain::NotificationReason;
 use crate::notifier::Notifier;
 use crate::notifier::event::{AlertEvent, AlertKind, IncidentNotice};
 
@@ -60,7 +60,11 @@ impl TelegramNotifier {
     }
 
     fn render_incident(n: &IncidentNotice) -> String {
-        let link = n.url.as_deref().map(|u| format!("\n{u}")).unwrap_or_default();
+        let link = n
+            .url
+            .as_deref()
+            .map(|u| format!("\n{u}"))
+            .unwrap_or_default();
         match n.reason {
             NotificationReason::Opened | NotificationReason::Escalated => format!(
                 "{label} — {sev} incident OPEN{err}{link}",

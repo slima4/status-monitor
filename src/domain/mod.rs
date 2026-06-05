@@ -26,8 +26,9 @@ pub use check::{
     TcpCheck, TlsCertCheck,
 };
 pub use escalation_policy::{
-    EscalationDecision, EscalationPolicy, EscalationPolicySummary, EscalationStep, EscalationTarget,
-    EscalationTargetType, NewEscalationPolicy, NewEscalationStep, NewEscalationTarget, next_step,
+    EscalationDecision, EscalationPolicy, EscalationPolicySummary, EscalationStep,
+    EscalationTarget, EscalationTargetType, NewEscalationPolicy, NewEscalationStep,
+    NewEscalationTarget, next_step,
 };
 pub use incident::{
     ActionItem, ActorType, Incident, IncidentEvent, IncidentEventKind, IncidentMetrics,

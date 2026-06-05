@@ -248,11 +248,10 @@ pub async fn edit_form(
         Ok(o) => o,
         Err(resp) => return Ok(*resp),
     };
-    let detail = state
-        .on_call_store
-        .get(org, id)
-        .await?
-        .ok_or_else(|| AppError::not_found("ON_CALL_SCHEDULE_NOT_FOUND", "schedule not found"))?;
+    let detail =
+        state.on_call_store.get(org, id).await?.ok_or_else(|| {
+            AppError::not_found("ON_CALL_SCHEDULE_NOT_FOUND", "schedule not found")
+        })?;
     let members = org_members(&state, org).await?;
     let email_of = |uid: &str| -> String {
         members
@@ -376,7 +375,10 @@ mod tests {
             schedule_id: "sid".into(),
             name: "Primary".into(),
             timezone: "UTC".into(),
-            members: vec![MemberChoice { id: "uid".into(), email: "a@b.c".into() }],
+            members: vec![MemberChoice {
+                id: "uid".into(),
+                email: "a@b.c".into(),
+            }],
             layers: vec![LayerModel {
                 name: String::new(),
                 rotation_type: "daily",
@@ -395,9 +397,12 @@ mod tests {
 
     #[test]
     fn new_form_renders_one_layer_no_calendar() {
-        let html = ScheduleFormPage { active_tab: TAB_ON_CALL, form: form("create") }
-            .render()
-            .unwrap();
+        let html = ScheduleFormPage {
+            active_tab: TAB_ON_CALL,
+            form: form("create"),
+        }
+        .render()
+        .unwrap();
         assert!(html.contains("data-layer-row"));
         assert!(html.contains(r#"data-rotation-type"#));
         // The overrides calendar is edit-only.
@@ -415,7 +420,12 @@ mod tests {
             starts_at: "2026-06-01T00:00:00Z".parse().unwrap(),
             ends_at: "2026-06-02T00:00:00Z".parse().unwrap(),
         }];
-        let html = ScheduleFormPage { active_tab: TAB_ON_CALL, form: f }.render().unwrap();
+        let html = ScheduleFormPage {
+            active_tab: TAB_ON_CALL,
+            form: f,
+        }
+        .render()
+        .unwrap();
         assert!(html.contains("data-cal-grid"));
         assert!(html.contains(r#"data-override-id="oid""#));
     }

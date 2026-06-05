@@ -226,7 +226,10 @@ async fn assert_check_matches(conname: &str, rust: Vec<String>) {
         .unwrap_or_else(|| panic!("{conname} missing"));
     let db = sorted(quoted_tokens(&def));
     let rust = sorted(rust);
-    assert_eq!(db, rust, "{conname} CHECK list ({db:?}) drifted from Rust enum ({rust:?})");
+    assert_eq!(
+        db, rust,
+        "{conname} CHECK list ({db:?}) drifted from Rust enum ({rust:?})"
+    );
 }
 
 fn db_strs<T: Copy>(all: &[T], f: impl Fn(T) -> &'static str) -> Vec<String> {

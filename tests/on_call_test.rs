@@ -13,8 +13,8 @@ mod common;
 use common::{make_user, unique_slug};
 use sqlx::PgPool;
 use uptimepage::domain::{
-    NewOnCallLayer, NewOnCallOverride, NewOnCallParticipant, NewOnCallSchedule, OrgId, RotationType,
-    UserId,
+    NewOnCallLayer, NewOnCallOverride, NewOnCallParticipant, NewOnCallSchedule, OrgId,
+    RotationType, UserId,
 };
 use uptimepage::storage::{
     ContactStore, OnCallStore, PgContactStore, PgOnCallStore, create_org_with_owner,
@@ -99,7 +99,11 @@ async fn create_get_replace_delete_roundtrip_pg() {
 
     // Replace with a single-participant layer.
     let replaced = store
-        .replace(org, created.schedule.id, schedule("primary", "UTC", vec![owner]))
+        .replace(
+            org,
+            created.schedule.id,
+            schedule("primary", "UTC", vec![owner]),
+        )
         .await
         .unwrap()
         .unwrap();
@@ -124,7 +128,10 @@ async fn rejects_non_member_participant_pg() {
         .create(org, schedule("x", "UTC", vec![outsider]), 10)
         .await
         .unwrap_err();
-    assert!(matches!(err, uptimepage::error::AppError::Unprocessable { .. }));
+    assert!(matches!(
+        err,
+        uptimepage::error::AppError::Unprocessable { .. }
+    ));
     // The failed insert rolled back — no orphan schedule.
     assert!(store.list(org).await.unwrap().is_empty());
 }
@@ -144,7 +151,10 @@ async fn override_crud_and_resolution_pg() {
         .unwrap();
 
     let at = "2026-06-01T12:00:00Z".parse().unwrap();
-    assert_eq!(store.resolve_now(org, sched.schedule.id, at).await.unwrap(), vec![owner]);
+    assert_eq!(
+        store.resolve_now(org, sched.schedule.id, at).await.unwrap(),
+        vec![owner]
+    );
 
     let ov = store
         .add_override(
@@ -160,10 +170,21 @@ async fn override_crud_and_resolution_pg() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(store.resolve_now(org, sched.schedule.id, at).await.unwrap(), vec![cover]);
+    assert_eq!(
+        store.resolve_now(org, sched.schedule.id, at).await.unwrap(),
+        vec![cover]
+    );
 
-    assert!(store.delete_override(org, sched.schedule.id, ov.id).await.unwrap());
-    assert_eq!(store.resolve_now(org, sched.schedule.id, at).await.unwrap(), vec![owner]);
+    assert!(
+        store
+            .delete_override(org, sched.schedule.id, ov.id)
+            .await
+            .unwrap()
+    );
+    assert_eq!(
+        store.resolve_now(org, sched.schedule.id, at).await.unwrap(),
+        vec![owner]
+    );
 }
 
 #[tokio::test]
@@ -172,7 +193,9 @@ async fn schedule_target_fk_and_contact_resolution_pg() {
     let Some(pool) = common::pg_pool_from_env().await else {
         return;
     };
-    use uptimepage::domain::{NewEscalationPolicy, NewEscalationStep, NewEscalationTarget, EscalationTargetType};
+    use uptimepage::domain::{
+        EscalationTargetType, NewEscalationPolicy, NewEscalationStep, NewEscalationTarget,
+    };
     use uptimepage::storage::{EscalationPolicyStore, PgEscalationPolicyStore};
 
     let (org, owner) = seed_org(&pool, "ocfk").await;
@@ -206,7 +229,10 @@ async fn schedule_target_fk_and_contact_resolution_pg() {
         )
         .await
         .expect("policy with schedule target");
-    assert_eq!(policy.steps[0].targets[0].schedule_id, Some(sched.schedule.id));
+    assert_eq!(
+        policy.steps[0].targets[0].schedule_id,
+        Some(sched.schedule.id)
+    );
 
     // A foreign schedule id is rejected by the store's IDOR guard.
     let (_other, _) = seed_org(&pool, "ocfkoth").await;
@@ -233,15 +259,24 @@ async fn schedule_target_fk_and_contact_resolution_pg() {
         )
         .await
         .unwrap_err();
-    assert!(matches!(err, uptimepage::error::AppError::Unprocessable { .. }));
+    assert!(matches!(
+        err,
+        uptimepage::error::AppError::Unprocessable { .. }
+    ));
 
     // Contact channels: a member's set, validated against org ownership.
     let contacts = PgContactStore::new(pool.clone());
     let c1 = seed_channel(&pool, org, "alice-tg").await;
     let c2 = seed_channel(&pool, org, "alice-slack").await;
-    contacts.replace_for_user(org, owner, vec![c1, c2]).await.unwrap();
+    contacts
+        .replace_for_user(org, owner, vec![c1, c2])
+        .await
+        .unwrap();
     assert_eq!(contacts.for_user(org, owner).await.unwrap().len(), 2);
-    contacts.replace_for_user(org, owner, vec![c1]).await.unwrap();
+    contacts
+        .replace_for_user(org, owner, vec![c1])
+        .await
+        .unwrap();
     assert_eq!(contacts.for_user(org, owner).await.unwrap(), vec![c1]);
 }
 
@@ -256,8 +291,14 @@ async fn contact_rejects_cross_org_channel_pg() {
     let foreign = seed_channel(&pool, other, "theirs").await;
     let contacts = PgContactStore::new(pool.clone());
 
-    let err = contacts.replace_for_user(org, owner, vec![foreign]).await.unwrap_err();
-    assert!(matches!(err, uptimepage::error::AppError::Unprocessable { .. }));
+    let err = contacts
+        .replace_for_user(org, owner, vec![foreign])
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        uptimepage::error::AppError::Unprocessable { .. }
+    ));
     // The rollback left no contact rows behind.
     assert!(contacts.for_user(org, owner).await.unwrap().is_empty());
 }
@@ -272,9 +313,15 @@ async fn schedules_are_isolated_per_org_pg() {
     let (b, owner_b) = seed_org(&pool, "ocisob").await;
     let store = PgOnCallStore::new(pool.clone());
 
-    let sa = store.create(a, schedule("shared", "UTC", vec![owner_a]), 10).await.unwrap();
+    let sa = store
+        .create(a, schedule("shared", "UTC", vec![owner_a]), 10)
+        .await
+        .unwrap();
     // Same name in another org is allowed and invisible across the tenant line.
-    store.create(b, schedule("shared", "UTC", vec![owner_b]), 10).await.unwrap();
+    store
+        .create(b, schedule("shared", "UTC", vec![owner_b]), 10)
+        .await
+        .unwrap();
     assert!(store.get(b, sa.schedule.id).await.unwrap().is_none());
     assert!(!store.delete(b, sa.schedule.id).await.unwrap());
     assert!(store.get(a, sa.schedule.id).await.unwrap().is_some());
@@ -289,13 +336,31 @@ async fn create_enforces_quota_and_unique_name_pg() {
     let (org, owner) = seed_org(&pool, "ocquota").await;
     let store = PgOnCallStore::new(pool.clone());
 
-    store.create(org, schedule("a", "UTC", vec![owner]), 1).await.unwrap();
-    let over = store.create(org, schedule("b", "UTC", vec![owner]), 1).await.unwrap_err();
-    assert!(matches!(over, uptimepage::error::AppError::Unprocessable { .. }));
-    let dup = store.create(org, schedule("a", "UTC", vec![owner]), 10).await.unwrap_err();
-    assert!(matches!(dup, uptimepage::error::AppError::Unprocessable { .. }));
+    store
+        .create(org, schedule("a", "UTC", vec![owner]), 1)
+        .await
+        .unwrap();
+    let over = store
+        .create(org, schedule("b", "UTC", vec![owner]), 1)
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        over,
+        uptimepage::error::AppError::Unprocessable { .. }
+    ));
+    let dup = store
+        .create(org, schedule("a", "UTC", vec![owner]), 10)
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        dup,
+        uptimepage::error::AppError::Unprocessable { .. }
+    ));
     // A deleted name frees up for reuse (partial unique index on deleted_at).
     let live = store.list(org).await.unwrap();
     store.delete(org, live[0].id).await.unwrap();
-    store.create(org, schedule("a", "UTC", vec![owner]), 10).await.unwrap();
+    store
+        .create(org, schedule("a", "UTC", vec![owner]), 10)
+        .await
+        .unwrap();
 }

@@ -35,7 +35,10 @@ fn invalid(msg: impl Into<String>) -> AppError {
 }
 
 fn not_found() -> AppError {
-    AppError::not_found(codes::ON_CALL_SCHEDULE_NOT_FOUND, "on-call schedule not found")
+    AppError::not_found(
+        codes::ON_CALL_SCHEDULE_NOT_FOUND,
+        "on-call schedule not found",
+    )
 }
 
 /// Validate schedule metadata + the layer stack. Participant membership is
@@ -58,10 +61,14 @@ fn validate(new: &NewOnCallSchedule) -> Result<()> {
         }
         match layer.rotation_type {
             RotationType::Daily if layer.rotation_length_secs % DAY_SECS != 0 => {
-                return Err(invalid("a daily rotation length must be a whole number of days"));
+                return Err(invalid(
+                    "a daily rotation length must be a whole number of days",
+                ));
             }
             RotationType::Weekly if layer.rotation_length_secs % WEEK_SECS != 0 => {
-                return Err(invalid("a weekly rotation length must be a whole number of weeks"));
+                return Err(invalid(
+                    "a weekly rotation length must be a whole number of weeks",
+                ));
             }
             _ => {}
         }
@@ -106,7 +113,10 @@ pub async fn create(
     Json(new): Json<NewOnCallSchedule>,
 ) -> Result<(StatusCode, Json<OnCallScheduleDetail>)> {
     validate(&new)?;
-    state.quotas.check_can_create_on_call_schedule(org, None).await?;
+    state
+        .quotas
+        .check_can_create_on_call_schedule(org, None)
+        .await?;
     let limit = i64::from(state.quotas.limit_for_org(org).await?.max_on_call_schedules);
     let detail = state.on_call_store.create(org, new, limit).await?;
     Ok((StatusCode::CREATED, Json(detail)))
@@ -123,7 +133,12 @@ pub async fn get(
     Authorized(org, _): Authorized<OnCallRead>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<OnCallScheduleDetail>> {
-    state.on_call_store.get(org, id).await?.map(Json).ok_or_else(not_found)
+    state
+        .on_call_store
+        .get(org, id)
+        .await?
+        .map(Json)
+        .ok_or_else(not_found)
 }
 
 #[utoipa::path(
@@ -139,7 +154,12 @@ pub async fn replace(
     Json(new): Json<NewOnCallSchedule>,
 ) -> Result<Json<OnCallScheduleDetail>> {
     validate(&new)?;
-    state.on_call_store.replace(org, id, new).await?.map(Json).ok_or_else(not_found)
+    state
+        .on_call_store
+        .replace(org, id, new)
+        .await?
+        .map(Json)
+        .ok_or_else(not_found)
 }
 
 #[utoipa::path(
@@ -193,10 +213,17 @@ pub async fn delete_override(
     OwnerAuthorized(org, _): OwnerAuthorized<OnCallWrite>,
     Path((id, override_id)): Path<(Uuid, Uuid)>,
 ) -> Result<StatusCode> {
-    if state.on_call_store.delete_override(org, id, override_id).await? {
+    if state
+        .on_call_store
+        .delete_override(org, id, override_id)
+        .await?
+    {
         Ok(StatusCode::NO_CONTENT)
     } else {
-        Err(AppError::not_found(codes::ON_CALL_OVERRIDE_NOT_FOUND, "override not found"))
+        Err(AppError::not_found(
+            codes::ON_CALL_OVERRIDE_NOT_FOUND,
+            "override not found",
+        ))
     }
 }
 
@@ -232,7 +259,10 @@ pub async fn who(
         return Err(not_found());
     }
     let at = q.at.unwrap_or_else(chrono::Utc::now);
-    let user_ids = state.on_call_store.resolve_now(org, q.schedule_id, at).await?;
+    let user_ids = state
+        .on_call_store
+        .resolve_now(org, q.schedule_id, at)
+        .await?;
     Ok(Json(WhoResponse {
         schedule_id: q.schedule_id,
         at,
@@ -310,12 +340,24 @@ mod tests {
     #[test]
     fn accepts_a_valid_schedule() {
         assert!(validate(&schedule("UTC", vec![layer(RotationType::Daily, DAY_SECS)])).is_ok());
-        assert!(validate(&schedule("America/New_York", vec![layer(RotationType::Custom, 3600)])).is_ok());
+        assert!(
+            validate(&schedule(
+                "America/New_York",
+                vec![layer(RotationType::Custom, 3600)]
+            ))
+            .is_ok()
+        );
     }
 
     #[test]
     fn rejects_unknown_timezone() {
-        assert!(validate(&schedule("Mars/Phobos", vec![layer(RotationType::Daily, DAY_SECS)])).is_err());
+        assert!(
+            validate(&schedule(
+                "Mars/Phobos",
+                vec![layer(RotationType::Daily, DAY_SECS)]
+            ))
+            .is_err()
+        );
     }
 
     #[test]

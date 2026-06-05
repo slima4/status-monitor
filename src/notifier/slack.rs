@@ -2,11 +2,11 @@ use async_trait::async_trait;
 use serde::Serialize;
 use url::Url;
 
+use crate::domain::NotificationReason;
 use crate::error::Result;
 use crate::http_outbound::{OutboundHttpClient, post_json};
 use crate::notifier::Notifier;
 use crate::notifier::event::{AlertEvent, AlertKind, IncidentNotice};
-use crate::domain::NotificationReason;
 
 pub struct SlackNotifier {
     client: OutboundHttpClient,
@@ -83,7 +83,9 @@ impl SlackNotifier {
 /// Escape the three characters Slack mrkdwn treats specially, so customer text
 /// renders literally rather than as live links or control sequences.
 fn mrkdwn_escape(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 #[async_trait]

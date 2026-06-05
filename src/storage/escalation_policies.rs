@@ -136,7 +136,10 @@ async fn assert_owned_tx(
         .await
         .map_err(|e| AppError::Other(anyhow::anyhow!("validate escalation target: {e}")))?;
     if found.is_none() {
-        return Err(AppError::unprocessable(codes::ESCALATION_POLICY_INVALID, msg));
+        return Err(AppError::unprocessable(
+            codes::ESCALATION_POLICY_INVALID,
+            msg,
+        ));
     }
     Ok(())
 }
@@ -287,19 +290,26 @@ impl PgEscalationPolicyStore {
 #[async_trait]
 impl EscalationPolicyStore for PgEscalationPolicyStore {
     async fn list(&self, org: OrgId) -> Result<Vec<EscalationPolicySummary>> {
-        let rows: Vec<(Uuid, String, Option<String>, i32, i64, DateTime<Utc>, DateTime<Utc>)> =
-            sqlx::query_as(
-                "SELECT p.id, p.name, p.description, p.repeat_count, \
+        let rows: Vec<(
+            Uuid,
+            String,
+            Option<String>,
+            i32,
+            i64,
+            DateTime<Utc>,
+            DateTime<Utc>,
+        )> = sqlx::query_as(
+            "SELECT p.id, p.name, p.description, p.repeat_count, \
                     (SELECT count(*) FROM escalation_steps s WHERE s.policy_id = p.id), \
                     p.created_at, p.updated_at \
                  FROM escalation_policies p \
                  WHERE p.org_id = $1 AND p.deleted_at IS NULL \
                  ORDER BY p.created_at DESC",
-            )
-            .bind(org.0)
-            .fetch_all(&self.pool)
-            .await
-            .map_err(|e| AppError::Other(anyhow::anyhow!("list escalation_policies: {e}")))?;
+        )
+        .bind(org.0)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| AppError::Other(anyhow::anyhow!("list escalation_policies: {e}")))?;
         Ok(rows
             .into_iter()
             .map(
@@ -594,7 +604,12 @@ impl InMemoryEscalationPolicyStore {
     }
 }
 
-fn materialise(org: OrgId, id: Uuid, new: &NewEscalationPolicy, now: DateTime<Utc>) -> EscalationPolicy {
+fn materialise(
+    org: OrgId,
+    id: Uuid,
+    new: &NewEscalationPolicy,
+    now: DateTime<Utc>,
+) -> EscalationPolicy {
     let _ = org;
     EscalationPolicy {
         id,
@@ -693,9 +708,10 @@ impl EscalationPolicyStore for InMemoryEscalationPolicyStore {
         new: NewEscalationPolicy,
     ) -> Result<Option<EscalationPolicy>> {
         let mut g = self.inner.lock();
-        if g.policies.iter().any(|(o, p, deleted)| {
-            *o == org && !*deleted && p.id != id && p.name == new.name
-        }) {
+        if g.policies
+            .iter()
+            .any(|(o, p, deleted)| *o == org && !*deleted && p.id != id && p.name == new.name)
+        {
             return Err(name_taken());
         }
         let created_at = match g
@@ -843,7 +859,11 @@ mod tests {
         let store = InMemoryEscalationPolicyStore::new();
         let cid = Uuid::now_v7();
         let p = store
-            .create(org(), policy("primary", vec![channel_step(1, 300, cid)]), 10)
+            .create(
+                org(),
+                policy("primary", vec![channel_step(1, 300, cid)]),
+                10,
+            )
             .await
             .unwrap();
         assert_eq!(p.steps.len(), 1);
@@ -858,17 +878,29 @@ mod tests {
     async fn create_enforces_cap_and_unique_name() {
         let store = InMemoryEscalationPolicyStore::new();
         store.create(org(), policy("a", vec![]), 1).await.unwrap();
-        let over = store.create(org(), policy("b", vec![]), 1).await.unwrap_err();
+        let over = store
+            .create(org(), policy("b", vec![]), 1)
+            .await
+            .unwrap_err();
         assert!(matches!(over, AppError::Unprocessable { .. }));
-        let dup = store.create(org(), policy("a", vec![]), 10).await.unwrap_err();
+        let dup = store
+            .create(org(), policy("a", vec![]), 10)
+            .await
+            .unwrap_err();
         assert!(matches!(dup, AppError::Unprocessable { .. }));
     }
 
     #[tokio::test]
     async fn resolve_prefers_target_binding_then_org_default() {
         let store = InMemoryEscalationPolicyStore::new();
-        let def = store.create(org(), policy("default", vec![]), 10).await.unwrap();
-        let bound = store.create(org(), policy("bound", vec![]), 10).await.unwrap();
+        let def = store
+            .create(org(), policy("default", vec![]), 10)
+            .await
+            .unwrap();
+        let bound = store
+            .create(org(), policy("bound", vec![]), 10)
+            .await
+            .unwrap();
         let target = Uuid::now_v7();
 
         // No binding, no default → none.
@@ -882,12 +914,18 @@ mod tests {
         );
         assert_eq!(store.target_policy(org(), target).await.unwrap(), None);
         // A target binding wins over the org default.
-        store.set_target_policy(org(), target, Some(bound.id)).await.unwrap();
+        store
+            .set_target_policy(org(), target, Some(bound.id))
+            .await
+            .unwrap();
         assert_eq!(
             store.resolve_for_target(org(), target).await.unwrap(),
             Some(bound.id)
         );
-        assert_eq!(store.target_policy(org(), target).await.unwrap(), Some(bound.id));
+        assert_eq!(
+            store.target_policy(org(), target).await.unwrap(),
+            Some(bound.id)
+        );
         // Deleting the bound policy falls back to the org default.
         store.delete(org(), bound.id).await.unwrap();
         assert_eq!(
@@ -899,8 +937,14 @@ mod tests {
     #[tokio::test]
     async fn policies_are_isolated_per_org() {
         let store = InMemoryEscalationPolicyStore::new();
-        let a = store.create(org(), policy("ops", vec![]), 10).await.unwrap();
-        store.create(other_org(), policy("ops", vec![]), 10).await.unwrap();
+        let a = store
+            .create(org(), policy("ops", vec![]), 10)
+            .await
+            .unwrap();
+        store
+            .create(other_org(), policy("ops", vec![]), 10)
+            .await
+            .unwrap();
         assert!(store.get(other_org(), a.id).await.unwrap().is_none());
         assert!(!store.delete(other_org(), a.id).await.unwrap());
         assert!(store.get(org(), a.id).await.unwrap().is_some());
@@ -918,7 +962,10 @@ mod tests {
             .replace(
                 org(),
                 p.id,
-                policy("p", vec![channel_step(1, 60, cid), channel_step(2, 120, cid)]),
+                policy(
+                    "p",
+                    vec![channel_step(1, 60, cid), channel_step(2, 120, cid)],
+                ),
             )
             .await
             .unwrap()

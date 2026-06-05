@@ -304,12 +304,11 @@ impl AppState {
             Some(pool) => Arc::new(crate::storage::PgIncidentOpsStore::new(pool)),
             None => Arc::new(crate::storage::InMemoryIncidentOpsStore::new()),
         };
-        let escalation_policy_store: Arc<dyn crate::storage::EscalationPolicyStore> = match db
-            .clone()
-        {
-            Some(pool) => Arc::new(crate::storage::PgEscalationPolicyStore::new(pool)),
-            None => Arc::new(crate::storage::InMemoryEscalationPolicyStore::new()),
-        };
+        let escalation_policy_store: Arc<dyn crate::storage::EscalationPolicyStore> =
+            match db.clone() {
+                Some(pool) => Arc::new(crate::storage::PgEscalationPolicyStore::new(pool)),
+                None => Arc::new(crate::storage::InMemoryEscalationPolicyStore::new()),
+            };
         let on_call_store: Arc<dyn crate::storage::OnCallStore> = match db.clone() {
             Some(pool) => Arc::new(crate::storage::PgOnCallStore::new(pool)),
             None => Arc::new(crate::storage::InMemoryOnCallStore::new()),

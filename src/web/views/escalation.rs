@@ -291,7 +291,10 @@ pub async fn monitor_binding(
     target_id: Uuid,
 ) -> WebResult<(Vec<Choice>, String)> {
     let policies = state.escalation_policy_store.list(org).await?;
-    let own = state.escalation_policy_store.target_policy(org, target_id).await?;
+    let own = state
+        .escalation_policy_store
+        .target_policy(org, target_id)
+        .await?;
     let choices = policies
         .iter()
         .map(|p| Choice {

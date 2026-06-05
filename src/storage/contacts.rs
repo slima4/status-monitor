@@ -171,9 +171,15 @@ mod tests {
         let c2 = Uuid::now_v7();
         store.add_channel(org(), c1);
         store.add_channel(org(), c2);
-        store.replace_for_user(org(), user(), vec![c1, c2]).await.unwrap();
+        store
+            .replace_for_user(org(), user(), vec![c1, c2])
+            .await
+            .unwrap();
         assert_eq!(store.for_user(org(), user()).await.unwrap().len(), 2);
-        store.replace_for_user(org(), user(), vec![c1]).await.unwrap();
+        store
+            .replace_for_user(org(), user(), vec![c1])
+            .await
+            .unwrap();
         assert_eq!(store.for_user(org(), user()).await.unwrap(), vec![c1]);
     }
 

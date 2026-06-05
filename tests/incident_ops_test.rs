@@ -122,8 +122,16 @@ async fn reopen_after_resolve_clears_state_pg() {
         .acknowledge(org, id, Actor::User(user), None)
         .await
         .unwrap();
-    store.resolve(org, id, Actor::User(user), None).await.unwrap();
-    let reopened = updated(store.reopen(org, id, Actor::User(user), None).await.unwrap());
+    store
+        .resolve(org, id, Actor::User(user), None)
+        .await
+        .unwrap();
+    let reopened = updated(
+        store
+            .reopen(org, id, Actor::User(user), None)
+            .await
+            .unwrap(),
+    );
     assert_eq!(reopened.state, IncidentState::Triggered);
     assert!(reopened.ended_at.is_none());
     assert!(reopened.acknowledged_by.is_none());
@@ -138,7 +146,10 @@ async fn illegal_transition_is_reported_pg() {
     };
     let (org, user, id) = seed(&pool, "incillegal").await;
     let store = PgIncidentOpsStore::new(pool.clone());
-    store.resolve(org, id, Actor::User(user), None).await.unwrap();
+    store
+        .resolve(org, id, Actor::User(user), None)
+        .await
+        .unwrap();
     // Acknowledging a resolved incident is illegal (reopen first).
     let out = store
         .acknowledge(org, id, Actor::User(user), None)
@@ -272,7 +283,14 @@ async fn notification_log_record_retry_and_scope_pg() {
 
     // Mark it sent; it must drop out of the retry scan.
     store
-        .mark_notification(org, notif_id, NotificationStatus::Sent, 2, None, Some(chrono::Utc::now()))
+        .mark_notification(
+            org,
+            notif_id,
+            NotificationStatus::Sent,
+            2,
+            None,
+            Some(chrono::Utc::now()),
+        )
         .await
         .unwrap();
     let rows = store.notifications_for(org, id).await.unwrap();
@@ -291,7 +309,13 @@ async fn notification_log_record_retry_and_scope_pg() {
 
     // append_event lands on the timeline; cross-org reads see nothing.
     store
-        .append_event(org, id, IncidentEventKind::Notified, Actor::System, Some("paged".into()))
+        .append_event(
+            org,
+            id,
+            IncidentEventKind::Notified,
+            Actor::System,
+            Some("paged".into()),
+        )
         .await
         .unwrap();
     let tl = store.timeline(org, id).await.unwrap();
@@ -303,7 +327,11 @@ async fn notification_log_record_retry_and_scope_pg() {
         .unwrap()
         .unwrap();
     assert!(
-        store.notifications_for(other.id, id).await.unwrap().is_empty(),
+        store
+            .notifications_for(other.id, id)
+            .await
+            .unwrap()
+            .is_empty(),
         "another org must not see this incident's paging log"
     );
 }
@@ -319,11 +347,20 @@ async fn publish_sets_visibility_and_narration_then_unpublish_pg() {
 
     // Publish seeds the public title; visibility flips to public.
     let pubd = store
-        .publish(org, id, Some("EU API outage".into()), None, Actor::User(user))
+        .publish(
+            org,
+            id,
+            Some("EU API outage".into()),
+            None,
+            Actor::User(user),
+        )
         .await
         .unwrap()
         .expect("incident exists");
-    assert_eq!(pubd.visibility, uptimepage::domain::IncidentVisibility::Public);
+    assert_eq!(
+        pubd.visibility,
+        uptimepage::domain::IncidentVisibility::Public
+    );
 
     let (vis, title): (String, Option<String>) =
         sqlx::query_as("SELECT visibility, public_title FROM incidents WHERE id = $1")
@@ -335,16 +372,28 @@ async fn publish_sets_visibility_and_narration_then_unpublish_pg() {
     assert_eq!(title.as_deref(), Some("EU API outage"));
 
     // A second publish without a title must not clobber the stored copy.
-    store.publish(org, id, None, None, Actor::User(user)).await.unwrap().unwrap();
-    let kept: Option<String> = sqlx::query_scalar("SELECT public_title FROM incidents WHERE id = $1")
-        .bind(id)
-        .fetch_one(&pool)
+    store
+        .publish(org, id, None, None, Actor::User(user))
         .await
+        .unwrap()
         .unwrap();
+    let kept: Option<String> =
+        sqlx::query_scalar("SELECT public_title FROM incidents WHERE id = $1")
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert_eq!(kept.as_deref(), Some("EU API outage"));
 
-    let unpubd = store.unpublish(org, id, Actor::User(user)).await.unwrap().unwrap();
-    assert_eq!(unpubd.visibility, uptimepage::domain::IncidentVisibility::Internal);
+    let unpubd = store
+        .unpublish(org, id, Actor::User(user))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        unpubd.visibility,
+        uptimepage::domain::IncidentVisibility::Internal
+    );
 
     let tl = store.timeline(org, id).await.unwrap();
     assert!(tl.iter().any(|e| e.kind == IncidentEventKind::Published));
@@ -357,7 +406,11 @@ async fn publish_sets_visibility_and_narration_then_unpublish_pg() {
         .unwrap()
         .unwrap();
     assert!(
-        store.publish(other.id, id, None, None, Actor::User(other_user)).await.unwrap().is_none(),
+        store
+            .publish(other.id, id, None, None, Actor::User(other_user))
+            .await
+            .unwrap()
+            .is_none(),
         "another org cannot publish this incident"
     );
 }
@@ -372,8 +425,14 @@ async fn metrics_rolls_up_mtta_mttr_and_counts_pg() {
     let store = PgIncidentOpsStore::new(pool.clone());
 
     // A: human-acknowledged then human-resolved (contributes MTTA + MTTR).
-    store.acknowledge(org, a, Actor::User(user), None).await.unwrap();
-    store.resolve(org, a, Actor::User(user), None).await.unwrap();
+    store
+        .acknowledge(org, a, Actor::User(user), None)
+        .await
+        .unwrap();
+    store
+        .resolve(org, a, Actor::User(user), None)
+        .await
+        .unwrap();
 
     // B: manual incident auto-resolved by the system (no resolver).
     let b = store
@@ -395,7 +454,11 @@ async fn metrics_rolls_up_mtta_mttr_and_counts_pg() {
     assert!(m.mttr_secs.is_some(), "A and B were resolved");
     assert_eq!(m.auto_resolved, 1, "B auto-resolved");
     assert_eq!(m.human_resolved, 1, "A human-resolved");
-    let resolved = m.by_state.iter().find(|b| b.key == "resolved").map(|b| b.count);
+    let resolved = m
+        .by_state
+        .iter()
+        .find(|b| b.key == "resolved")
+        .map(|b| b.count);
     assert_eq!(resolved, Some(2));
     // A carries a target; the noisy-monitor list surfaces it.
     assert!(m.top_monitors.iter().any(|t| t.count >= 1));
@@ -430,18 +493,30 @@ async fn postmortem_publish_events_persist_with_actor_pg() {
     // These kinds are part of the incident_events CHECK; append_event must
     // accept them and record the acting user.
     store
-        .append_event(org, id, IncidentEventKind::PostmortemPublished, Actor::User(user), None)
+        .append_event(
+            org,
+            id,
+            IncidentEventKind::PostmortemPublished,
+            Actor::User(user),
+            None,
+        )
         .await
         .unwrap();
     store
-        .append_event(org, id, IncidentEventKind::PostmortemUnpublished, Actor::User(user), None)
+        .append_event(
+            org,
+            id,
+            IncidentEventKind::PostmortemUnpublished,
+            Actor::User(user),
+            None,
+        )
         .await
         .unwrap();
 
     let tl = store.timeline(org, id).await.unwrap();
     assert!(
-        tl.iter().any(|e| e.kind == IncidentEventKind::PostmortemPublished
-            && e.actor_id == Some(user)),
+        tl.iter()
+            .any(|e| e.kind == IncidentEventKind::PostmortemPublished && e.actor_id == Some(user)),
         "postmortem publish is attributed on the timeline"
     );
     assert!(
@@ -540,6 +615,10 @@ async fn assign_rejects_non_member_assignee_pg() {
         .unwrap()
         .unwrap();
     assert_eq!(inc.assigned_to, Some(owner));
-    let inc = store.assign(org, id, None, Actor::User(owner)).await.unwrap().unwrap();
+    let inc = store
+        .assign(org, id, None, Actor::User(owner))
+        .await
+        .unwrap()
+        .unwrap();
     assert!(inc.assigned_to.is_none());
 }

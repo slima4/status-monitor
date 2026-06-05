@@ -328,7 +328,13 @@ mod tests {
         let s = schedule("UTC");
         assert!(resolve_on_call(&s, &[], &[], t("2026-06-01T12:00:00Z")).is_empty());
         // A layer with no participants contributes nothing.
-        let l = layer(0, RotationType::Daily, 86_400, "2026-06-01T00:00:00Z", vec![]);
+        let l = layer(
+            0,
+            RotationType::Daily,
+            86_400,
+            "2026-06-01T00:00:00Z",
+            vec![],
+        );
         assert!(resolve_on_call(&s, &[l], &[], t("2026-06-01T12:00:00Z")).is_empty());
     }
 
@@ -343,12 +349,24 @@ mod tests {
             vec![participant(uid(1), 0), participant(uid(2), 1)],
         );
         // Before the first handoff time on day 0 → still participant 0.
-        assert_eq!(resolve_on_call(&s, std::slice::from_ref(&l), &[], t("2026-06-01T08:59:00Z")), vec![uid(1)]);
+        assert_eq!(
+            resolve_on_call(&s, std::slice::from_ref(&l), &[], t("2026-06-01T08:59:00Z")),
+            vec![uid(1)]
+        );
         // After handoff on day 0 → participant 0.
-        assert_eq!(resolve_on_call(&s, std::slice::from_ref(&l), &[], t("2026-06-01T09:00:00Z")), vec![uid(1)]);
+        assert_eq!(
+            resolve_on_call(&s, std::slice::from_ref(&l), &[], t("2026-06-01T09:00:00Z")),
+            vec![uid(1)]
+        );
         // Day 1 → participant 1; day 2 → back to 0.
-        assert_eq!(resolve_on_call(&s, std::slice::from_ref(&l), &[], t("2026-06-02T10:00:00Z")), vec![uid(2)]);
-        assert_eq!(resolve_on_call(&s, &[l], &[], t("2026-06-03T10:00:00Z")), vec![uid(1)]);
+        assert_eq!(
+            resolve_on_call(&s, std::slice::from_ref(&l), &[], t("2026-06-02T10:00:00Z")),
+            vec![uid(2)]
+        );
+        assert_eq!(
+            resolve_on_call(&s, &[l], &[], t("2026-06-03T10:00:00Z")),
+            vec![uid(1)]
+        );
     }
 
     #[test]
@@ -362,9 +380,15 @@ mod tests {
             vec![participant(uid(1), 0), participant(uid(2), 1)],
         );
         // One second before the day-1 boundary → still participant 0.
-        assert_eq!(resolve_on_call(&s, std::slice::from_ref(&l), &[], t("2026-06-02T08:59:59Z")), vec![uid(1)]);
+        assert_eq!(
+            resolve_on_call(&s, std::slice::from_ref(&l), &[], t("2026-06-02T08:59:59Z")),
+            vec![uid(1)]
+        );
         // Exactly at the boundary → participant 1 takes over.
-        assert_eq!(resolve_on_call(&s, &[l], &[], t("2026-06-02T09:00:00Z")), vec![uid(2)]);
+        assert_eq!(
+            resolve_on_call(&s, &[l], &[], t("2026-06-02T09:00:00Z")),
+            vec![uid(2)]
+        );
     }
 
     #[test]
@@ -404,7 +428,11 @@ mod tests {
             RotationType::Daily,
             86_400,
             "2026-10-30T01:30:00-04:00", // 01:30 local, anchor before the change
-            vec![participant(uid(1), 0), participant(uid(2), 1), participant(uid(3), 2)],
+            vec![
+                participant(uid(1), 0),
+                participant(uid(2), 1),
+                participant(uid(3), 2),
+            ],
         );
         // 01:00 EDT (first 1am, before that day's 01:30 handoff) → index 1.
         assert_eq!(
@@ -429,9 +457,18 @@ mod tests {
             "2026-06-01T00:00:00Z",
             vec![participant(uid(1), 0), participant(uid(2), 1)],
         );
-        assert_eq!(resolve_on_call(&s, std::slice::from_ref(&l), &[], t("2026-06-04T00:00:00Z")), vec![uid(1)]);
-        assert_eq!(resolve_on_call(&s, std::slice::from_ref(&l), &[], t("2026-06-08T00:00:00Z")), vec![uid(2)]);
-        assert_eq!(resolve_on_call(&s, &[l], &[], t("2026-06-15T00:00:00Z")), vec![uid(1)]);
+        assert_eq!(
+            resolve_on_call(&s, std::slice::from_ref(&l), &[], t("2026-06-04T00:00:00Z")),
+            vec![uid(1)]
+        );
+        assert_eq!(
+            resolve_on_call(&s, std::slice::from_ref(&l), &[], t("2026-06-08T00:00:00Z")),
+            vec![uid(2)]
+        );
+        assert_eq!(
+            resolve_on_call(&s, &[l], &[], t("2026-06-15T00:00:00Z")),
+            vec![uid(1)]
+        );
     }
 
     #[test]
@@ -444,9 +481,18 @@ mod tests {
             "2026-06-01T00:00:00Z",
             vec![participant(uid(1), 0), participant(uid(2), 1)],
         );
-        assert_eq!(resolve_on_call(&s, std::slice::from_ref(&l), &[], t("2026-06-01T00:30:00Z")), vec![uid(1)]);
-        assert_eq!(resolve_on_call(&s, std::slice::from_ref(&l), &[], t("2026-06-01T01:00:00Z")), vec![uid(2)]);
-        assert_eq!(resolve_on_call(&s, &[l], &[], t("2026-06-01T02:00:00Z")), vec![uid(1)]);
+        assert_eq!(
+            resolve_on_call(&s, std::slice::from_ref(&l), &[], t("2026-06-01T00:30:00Z")),
+            vec![uid(1)]
+        );
+        assert_eq!(
+            resolve_on_call(&s, std::slice::from_ref(&l), &[], t("2026-06-01T01:00:00Z")),
+            vec![uid(2)]
+        );
+        assert_eq!(
+            resolve_on_call(&s, &[l], &[], t("2026-06-01T02:00:00Z")),
+            vec![uid(1)]
+        );
     }
 
     #[test]
@@ -459,7 +505,10 @@ mod tests {
             "2026-06-01T00:00:00Z",
             vec![participant(uid(1), 0), participant(uid(2), 1)],
         );
-        assert_eq!(resolve_on_call(&s, &[l], &[], t("2026-05-01T00:00:00Z")), vec![uid(1)]);
+        assert_eq!(
+            resolve_on_call(&s, &[l], &[], t("2026-05-01T00:00:00Z")),
+            vec![uid(1)]
+        );
     }
 
     #[test]
@@ -473,8 +522,14 @@ mod tests {
             "2026-06-01T00:00:00Z",
             vec![participant(uid(2), 1), participant(uid(1), 0)],
         );
-        assert_eq!(resolve_on_call(&s, std::slice::from_ref(&l), &[], t("2026-06-01T00:30:00Z")), vec![uid(1)]);
-        assert_eq!(resolve_on_call(&s, &[l], &[], t("2026-06-01T01:30:00Z")), vec![uid(2)]);
+        assert_eq!(
+            resolve_on_call(&s, std::slice::from_ref(&l), &[], t("2026-06-01T00:30:00Z")),
+            vec![uid(1)]
+        );
+        assert_eq!(
+            resolve_on_call(&s, &[l], &[], t("2026-06-01T01:30:00Z")),
+            vec![uid(2)]
+        );
     }
 
     #[test]
@@ -496,7 +551,12 @@ mod tests {
         );
         // Order of the slice should not matter — the top layer wins.
         assert_eq!(
-            resolve_on_call(&s, &[base.clone(), top.clone()], &[], t("2026-06-01T00:30:00Z")),
+            resolve_on_call(
+                &s,
+                &[base.clone(), top.clone()],
+                &[],
+                t("2026-06-01T00:30:00Z")
+            ),
             vec![uid(2)]
         );
         assert_eq!(
@@ -525,7 +585,12 @@ mod tests {
         };
         // Inside the window → the override user, ignoring the rotation.
         assert_eq!(
-            resolve_on_call(&s, std::slice::from_ref(&l), std::slice::from_ref(&ov), t("2026-06-01T03:00:00Z")),
+            resolve_on_call(
+                &s,
+                std::slice::from_ref(&l),
+                std::slice::from_ref(&ov),
+                t("2026-06-01T03:00:00Z")
+            ),
             vec![uid(9)]
         );
         // The end is exclusive → rotation resumes at exactly ends_at.
