@@ -484,6 +484,7 @@ impl EscalationPolicyStore for PgEscalationPolicyStore {
         .map_err(|e| AppError::Other(anyhow::anyhow!("clear target bindings: {e}")))?;
         sqlx::query(
             "UPDATE organizations SET default_escalation_policy_id = NULL \
+             /* SAFE: organizations is keyed by id, which is the tenant boundary */ \
              WHERE id = $2 AND default_escalation_policy_id = $1",
         )
         .bind(id)
@@ -563,6 +564,7 @@ impl EscalationPolicyStore for PgEscalationPolicyStore {
             "SELECT p.id FROM organizations o \
              LEFT JOIN escalation_policies p \
                  ON p.id = o.default_escalation_policy_id AND p.deleted_at IS NULL \
+             /* SAFE: organizations is keyed by id, which is the tenant boundary */ \
              WHERE o.id = $1",
         )
         .bind(org.0)
@@ -574,7 +576,7 @@ impl EscalationPolicyStore for PgEscalationPolicyStore {
     }
 
     async fn set_org_default(&self, org: OrgId, policy_id: Option<Uuid>) -> Result<()> {
-        sqlx::query("UPDATE organizations SET default_escalation_policy_id = $2 WHERE id = $1")
+        sqlx::query("UPDATE organizations SET default_escalation_policy_id = $2 /* SAFE: organizations is keyed by id, which is the tenant boundary */ WHERE id = $1")
             .bind(org.0)
             .bind(policy_id)
             .execute(&self.pool)
