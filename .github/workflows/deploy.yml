@@ -446,8 +446,8 @@ jobs:
           # values via ENVIRON so they are byte-exact and never enter argv
           # or a trace. Presence of all three connection values is the
           # enable signal — the two on/off flags are then forced true.
-          # compose defaults both flags false, so dropping the secrets
-          # turns tracing back off on the next deploy. A half-config
+          # Removing the secrets only SKIPS this block (the prior flags
+          # persist in .env); to disable, clear the keys there. A half-config
           # (missing one) writes nothing rather than a broken partial.
           if [ -n "${GRAFANA_OTLP_ENDPOINT:-}" ] \
              && [ -n "${GRAFANA_OTLP_INSTANCE_ID:-}" ] \
