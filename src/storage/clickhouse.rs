@@ -611,6 +611,15 @@ fn row_to_result(row: OwnedResultRow, org_id: Uuid) -> CheckResult {
 
 #[async_trait]
 impl ResultsStore for ClickhouseResultsStore {
+    async fn ping(&self) -> Result<()> {
+        self.client
+            .query("SELECT 1")
+            .execute()
+            .await
+            .context("clickhouse ping")?;
+        Ok(())
+    }
+
     async fn list_results(
         &self,
         org: OrgId,

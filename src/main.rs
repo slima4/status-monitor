@@ -454,6 +454,9 @@ async fn main() -> Result<()> {
         root.clone(),
     );
 
+    let heartbeat_handle: Option<JoinHandle<()>> =
+        observability::heartbeat::spawn(&state, root.clone());
+
     // One span per HTTP request — the unit the OTLP layer exports; with
     // no instrumented span there is nothing to trace. DEBUG level so the
     // span is recorded only when the filter is at least debug.
@@ -569,6 +572,9 @@ async fn main() -> Result<()> {
             let _ = h.await;
         }
         if let Some(h) = abuse_reload_handle {
+            let _ = h.await;
+        }
+        if let Some(h) = heartbeat_handle {
             let _ = h.await;
         }
     };

@@ -758,6 +758,8 @@ pub struct ObservabilityConfig {
     pub grafana: GrafanaConfig,
     #[serde(default = "default_gauge_sample_interval_ms")]
     pub gauge_sample_interval_ms: u64,
+    #[serde(default)]
+    pub heartbeat: HeartbeatConfig,
 }
 
 fn default_gauge_sample_interval_ms() -> u64 {
@@ -802,6 +804,37 @@ impl Default for GrafanaConfig {
             instance_id: String::new(),
             api_key: empty_secret(),
             trace_sample_ratio: default_trace_sample_ratio(),
+        }
+    }
+}
+
+/// External dead-man's-switch heartbeat. The app pings `url` on an interval
+/// *only while every critical dependency is reachable*; an independent
+/// watcher (Healthchecks.io, Dead Man's Snitch, Grafana OnCall heartbeat)
+/// alerts when the pings stop. This is the one signal that survives the whole
+/// box dying — the in-app metrics/alert path can't page when it's the thing
+/// that's down. `url` carries a capability token, so it is env-sourced
+/// (`UPTIMEPAGE_OBSERVABILITY__HEARTBEAT__URL`) and never logged.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct HeartbeatConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub url: String,
+    #[serde(default = "default_heartbeat_interval_seconds")]
+    pub interval_seconds: u64,
+}
+
+fn default_heartbeat_interval_seconds() -> u64 {
+    60
+}
+
+impl Default for HeartbeatConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            url: String::new(),
+            interval_seconds: default_heartbeat_interval_seconds(),
         }
     }
 }
@@ -985,6 +1018,19 @@ impl AppConfig {
             if g.api_key.expose_secret().trim().is_empty() {
                 return Err(err(
                     "UPTIMEPAGE_OBSERVABILITY__GRAFANA__API_KEY is required when tracing_enabled and grafana.enabled are true".into(),
+                ));
+            }
+        }
+        let hb = &self.observability.heartbeat;
+        if hb.enabled {
+            if hb.url.trim().is_empty() {
+                return Err(err(
+                    "UPTIMEPAGE_OBSERVABILITY__HEARTBEAT__URL is required when observability.heartbeat.enabled is true".into(),
+                ));
+            }
+            if hb.interval_seconds == 0 {
+                return Err(err(
+                    "observability.heartbeat.interval_seconds must be > 0".into()
                 ));
             }
         }

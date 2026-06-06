@@ -133,6 +133,26 @@ where
     }
 }
 
+/// GET a URL and succeed on any 2xx, discarding the body. For fire-and-check
+/// pings (e.g. an external heartbeat snitch) where only reachability + status
+/// matter. The body is bounded-drained so a hostile endpoint can't OOM us.
+/// The returned error embeds `url`; callers whose URL carries a secret token
+/// must not log it verbatim.
+pub async fn get_ok(client: &OutboundHttpClient, url: &Url) -> Result<()> {
+    let req = Request::get(url.as_str())
+        .body(Full::new(Bytes::new()))
+        .context("building request")?;
+    let resp = with_request_timeout(url, client.request(req)).await?;
+    let status = resp.status();
+    let _ = Limited::new(resp.into_body(), MAX_RESPONSE_BYTES)
+        .collect()
+        .await;
+    if !status.is_success() {
+        return Err(AppError::Other(anyhow::anyhow!("{url} returned {status}")));
+    }
+    Ok(())
+}
+
 pub async fn get_json<T: DeserializeOwned>(client: &OutboundHttpClient, url: &Url) -> Result<T> {
     let req = Request::get(url.as_str())
         .header(ACCEPT, "application/json")

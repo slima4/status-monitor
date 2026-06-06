@@ -56,6 +56,10 @@ impl ResultSink for InMemorySink {
 // integration tests.
 #[async_trait]
 impl ResultsStore for InMemorySink {
+    async fn ping(&self) -> Result<()> {
+        Ok(())
+    }
+
     async fn list_results(
         &self,
         _org: OrgId,

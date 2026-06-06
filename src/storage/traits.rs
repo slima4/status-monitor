@@ -225,6 +225,8 @@ impl UptimeStats {
 /// zero rows, not that org's data.
 #[async_trait]
 pub trait ResultsStore: Send + Sync {
+    /// Liveness probe for `/readyz` — connection-level, not tenant data.
+    async fn ping(&self) -> Result<()>;
     async fn list_results(
         &self,
         org: OrgId,

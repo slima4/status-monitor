@@ -88,6 +88,16 @@ instance_id = ""             # Grafana Cloud numeric instance / stack id
 trace_sample_ratio = 1.0     # parent-based head sampling; 1.0 = keep all
                              # (low volume — lower when traffic grows)
 
+# External dead-man's-switch. While every critical dependency is reachable the
+# app pings `url` every `interval_seconds`; an independent watcher alerts when
+# the pings stop. url carries a token — set it via the env var
+# UPTIMEPAGE_OBSERVABILITY__HEARTBEAT__URL, never here. interval_seconds must be
+# shorter than the watcher's grace period.
+[observability.heartbeat]
+enabled = false
+url = ""
+interval_seconds = 60
+
 # Per-IP API rate limiting is enforced by Caddy (see deployment/Caddyfile);
 # the in-process limiter is per-org / per-user — see [rate_limits] + plans.
 

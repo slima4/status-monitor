@@ -1,0 +1,68 @@
+use std::sync::Arc;
+use std::time::Duration;
+
+use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
+use url::Url;
+
+use crate::app::{self, AppState};
+use crate::http_outbound::{self, OutboundHttpClient};
+use crate::storage::{ResultsStore, TargetStore};
+
+pub fn spawn(state: &AppState, cancel: CancellationToken) -> Option<JoinHandle<()>> {
+    let cfg = &state.cfg.observability.heartbeat;
+    if !cfg.enabled {
+        return None;
+    }
+    let url = match Url::parse(&cfg.url) {
+        Ok(u) => u,
+        Err(e) => {
+            tracing::error!(error = %e, "heartbeat disabled: invalid heartbeat url");
+            return None;
+        }
+    };
+    let interval = Duration::from_secs(cfg.interval_seconds.max(1));
+    Some(tokio::spawn(run(
+        state.outbound_http.clone(),
+        url,
+        interval,
+        state.target_store.clone(),
+        state.results_store.clone(),
+        cancel,
+    )))
+}
+
+async fn run(
+    client: OutboundHttpClient,
+    url: Url,
+    interval: Duration,
+    target_store: Arc<dyn TargetStore>,
+    results_store: Arc<dyn ResultsStore>,
+    cancel: CancellationToken,
+) {
+    // URL embeds a capability token — log only the host, never the full URL.
+    let host = url.host_str().unwrap_or("?").to_owned();
+    let mut ticker = tokio::time::interval(interval);
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    loop {
+        tokio::select! {
+            _ = cancel.cancelled() => break,
+            _ = ticker.tick() => {
+                // Skip the ping when a dependency is down so the external watcher
+                // alerts on partial outages, not just a dead process.
+                let ready = app::probe_readiness(&target_store, &results_store).await;
+                if !ready.all_ok() {
+                    tracing::warn!(
+                        postgres = ready.postgres,
+                        clickhouse = ready.clickhouse,
+                        "heartbeat: dependency down, withholding snitch ping"
+                    );
+                    continue;
+                }
+                if http_outbound::get_ok(&client, &url).await.is_err() {
+                    tracing::warn!(host = %host, "heartbeat: snitch ping failed");
+                }
+            }
+        }
+    }
+}

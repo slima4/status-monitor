@@ -100,6 +100,11 @@ services:
       UPTIMEPAGE_OBSERVABILITY__GRAFANA__OTLP_ENDPOINT: ${GRAFANA_OTLP_ENDPOINT:-}
       UPTIMEPAGE_OBSERVABILITY__GRAFANA__INSTANCE_ID: ${GRAFANA_OTLP_INSTANCE_ID:-}
       UPTIMEPAGE_OBSERVABILITY__GRAFANA__API_KEY: ${GRAFANA_OTLP_API_TOKEN:-}
+      # External dead-man's-switch heartbeat. Off unless HEARTBEAT_URL is set
+      # in .env; the URL holds a capability token (env only, never logged).
+      UPTIMEPAGE_OBSERVABILITY__HEARTBEAT__ENABLED: ${HEARTBEAT_ENABLED:-false}
+      UPTIMEPAGE_OBSERVABILITY__HEARTBEAT__URL: ${HEARTBEAT_URL:-}
+      UPTIMEPAGE_OBSERVABILITY__HEARTBEAT__INTERVAL_SECONDS: ${HEARTBEAT_INTERVAL_SECONDS:-60}
       # Public-status surface routing. `path_based` serves `/status/<slug>` on
       # the operator host. `subdomain` serves per-org pages on
       # `{slug}.{public_status.base_domain}` (apex wildcard). base_domain
