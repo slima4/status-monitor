@@ -124,6 +124,7 @@ impl ResultsStore for InMemorySink {
         &self,
         _org: OrgId,
         range: TimeRange,
+        _region: Option<&str>,
     ) -> Result<StatusBreakdown> {
         let guard = self.results.lock();
         let mut latest: std::collections::HashMap<Uuid, &CheckResult> =
@@ -157,6 +158,7 @@ impl ResultsStore for InMemorySink {
         &self,
         _org: OrgId,
         range: TimeRange,
+        _region: Option<&str>,
     ) -> Result<Vec<DashboardMetrics>> {
         let guard = self.results.lock();
         let mut by_target: std::collections::BTreeMap<Uuid, Vec<&CheckResult>> =
@@ -209,6 +211,7 @@ impl ResultsStore for InMemorySink {
         _org: OrgId,
         from: DateTime<Utc>,
         to: DateTime<Utc>,
+        _region: Option<&str>,
     ) -> Result<Vec<DashboardSparkBucket>> {
         let guard = self.results.lock();
         let mut buckets: std::collections::BTreeMap<(Uuid, i64), (u64, u64)> =
@@ -236,6 +239,7 @@ impl ResultsStore for InMemorySink {
         &self,
         _org: OrgId,
         range: TimeRange,
+        _region: Option<&str>,
     ) -> Result<PriorPeriodSummary> {
         let guard = self.results.lock();
         let span = range.to - range.from;
@@ -337,6 +341,7 @@ impl ResultsStore for InMemorySink {
         from: DateTime<Utc>,
         to: DateTime<Utc>,
         bucket_seconds: u32,
+        _region: Option<&str>,
     ) -> Result<Vec<FleetRibbonBucket>> {
         let guard = self.results.lock();
         let bucket = bucket_seconds.max(60) as i64;
@@ -363,7 +368,12 @@ impl ResultsStore for InMemorySink {
             .collect())
     }
 
-    async fn last_n_summary(&self, _org: OrgId, range: TimeRange) -> Result<(u64, u64, u32, u64)> {
+    async fn last_n_summary(
+        &self,
+        _org: OrgId,
+        range: TimeRange,
+        _region: Option<&str>,
+    ) -> Result<(u64, u64, u32, u64)> {
         let guard = self.results.lock();
         let mut total = 0u64;
         let mut up = 0u64;
@@ -768,6 +778,10 @@ impl TargetStore for InMemoryTargetStore {
 
     async fn ping(&self) -> Result<()> {
         Ok(())
+    }
+
+    async fn regions_for_org(&self, _org: OrgId) -> Result<Vec<String>> {
+        Ok(Vec::new())
     }
 }
 

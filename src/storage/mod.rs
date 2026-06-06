@@ -11,6 +11,7 @@ pub mod memory;
 pub mod monitor_shares;
 pub mod notification_channels;
 pub mod on_call;
+pub mod operator;
 pub mod orgs;
 pub mod page_assets;
 pub mod postgres;
@@ -49,6 +50,7 @@ pub use notification_channels::{
     InMemoryNotificationChannelStore, NotificationChannelStore, PgNotificationChannelStore,
 };
 pub use on_call::{InMemoryOnCallStore, OnCallStore, PgOnCallStore};
+pub use operator::{AgentAuth, AgentRow, DeleteRegion, OperatorRepo, RegionRow};
 pub use orgs::{
     MemberView, MembershipStatus, OrgBranding, OrgWithRole, RemoveOutcome, ResolvedPublicPage,
     RestoreOutcome, UpdateOrgOutcome, create_org_with_owner, find_lone_active_org,

@@ -93,6 +93,9 @@ pub mod codes {
     pub const FORBIDDEN: &str = "FORBIDDEN";
     /// API token lacks the scope its target endpoint requires (403).
     pub const INSUFFICIENT_SCOPE: &str = "INSUFFICIENT_SCOPE";
+    /// Agent result batch exceeds the per-request cap (422). Skewed/foreign
+    /// rows are dropped per-row, not rejected, so they need no code.
+    pub const AGENT_BATCH_TOO_LARGE: &str = "AGENT_BATCH_TOO_LARGE";
     // Maintenance + incident narration (operator surface).
     pub const INVALID_TIME_RANGE: &str = "INVALID_TIME_RANGE";
     pub const INVALID_COMPONENT_ID: &str = "INVALID_COMPONENT_ID";
@@ -185,6 +188,17 @@ pub mod codes {
     pub const OWNS_SHARED_ORGS: &str = "OWNS_SHARED_ORGS";
     /// A second deletion of an already-soft-deleted account.
     pub const ACCOUNT_ALREADY_DELETED: &str = "ACCOUNT_ALREADY_DELETED";
+    // Operator (instance-admin) surface — regions + agents.
+    /// Operator surface addressed but `operator.admin_token` is unset (404 —
+    /// the surface is invisible when disabled).
+    pub const OPERATOR_DISABLED: &str = "OPERATOR_DISABLED";
+    pub const REGION_NOT_FOUND: &str = "REGION_NOT_FOUND";
+    pub const REGION_EXISTS: &str = "REGION_EXISTS";
+    pub const REGION_INVALID: &str = "REGION_INVALID";
+    /// Region still referenced by an agent or a target assignment (409).
+    pub const REGION_IN_USE: &str = "REGION_IN_USE";
+    pub const AGENT_NOT_FOUND: &str = "AGENT_NOT_FOUND";
+    pub const AGENT_INVALID: &str = "AGENT_INVALID";
     // Public status-page settings + logo upload.
     pub const BRANDING_INVALID: &str = "BRANDING_INVALID";
     pub const LOGO_MISSING: &str = "LOGO_MISSING";

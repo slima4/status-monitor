@@ -65,6 +65,8 @@ const ROW_LIMIT: usize = 500;
 pub struct DashboardParams {
     #[serde(default)]
     pub range: Option<String>,
+    #[serde(default)]
+    pub region: Option<String>,
 }
 
 /// One row in the dashboard table — every cell the template renders.
@@ -219,6 +221,8 @@ pub struct DashboardPage {
     pub status_counts: StatusCounts,
     pub type_counts: Arc<[TypeCount]>,
     pub ribbon: FleetRibbon,
+    pub regions: Vec<String>,
+    pub selected_region: Option<String>,
 }
 
 #[derive(Template, WebTemplate)]
@@ -235,6 +239,8 @@ pub struct DashboardTablePartial {
     pub status_counts: StatusCounts,
     pub type_counts: Arc<[TypeCount]>,
     pub ribbon: FleetRibbon,
+    pub regions: Vec<String>,
+    pub selected_region: Option<String>,
 }
 
 pub async fn root(state: State<AppState>, mut parts: Parts) -> Response {
@@ -278,7 +284,9 @@ pub async fn index(
     Query(params): Query<DashboardParams>,
 ) -> WebResult<DashboardPage> {
     let range = resolve_range_key(params.range.as_deref(), &RANGE_KEYS, DEFAULT_RANGE);
-    let snapshot = load_snapshot(&state, org.0, range).await?;
+    let regions = state.target_store.regions_for_org(org.0).await?;
+    let selected_region = resolve_region(params.region, &regions);
+    let snapshot = snapshot_for(&state, org.0, range, selected_region.as_deref()).await?;
     let onboarding = snapshot.matches == 0;
     Ok(DashboardPage {
         active_tab: "dashboard",
@@ -294,7 +302,28 @@ pub async fn index(
         status_counts: snapshot.status_counts,
         type_counts: Arc::clone(&snapshot.type_counts),
         ribbon: snapshot.ribbon.clone(),
+        regions,
+        selected_region,
     })
+}
+
+/// An unknown region collapses to the all-regions view, not an empty dashboard.
+fn resolve_region(requested: Option<String>, regions: &[String]) -> Option<String> {
+    requested.filter(|r| regions.iter().any(|x| x == r))
+}
+
+/// All-regions is cached; a region-filtered view is built directly (selection is
+/// rare, not worth widening the cache key).
+async fn snapshot_for(
+    state: &AppState,
+    org: OrgId,
+    range: &'static str,
+    region: Option<&str>,
+) -> WebResult<Arc<DashboardSnapshot>> {
+    match region {
+        Some(r) => Ok(Arc::new(build_snapshot(state, org, range, Some(r)).await?)),
+        None => load_snapshot(state, org, range).await,
+    }
 }
 
 /// htmx partial — the range-tab strip swaps just this fragment so a tab
@@ -307,7 +336,9 @@ pub async fn table_partial(
     Query(params): Query<DashboardParams>,
 ) -> WebResult<Response> {
     let range = resolve_range_key(params.range.as_deref(), &RANGE_KEYS, DEFAULT_RANGE);
-    let snapshot = load_snapshot(&state, org.0, range).await?;
+    let regions = state.target_store.regions_for_org(org.0).await?;
+    let selected_region = resolve_region(params.region, &regions);
+    let snapshot = snapshot_for(&state, org.0, range, selected_region.as_deref()).await?;
     let partial = DashboardTablePartial {
         range,
         range_options: build_range_options(range, &RANGE_KEYS),
@@ -320,6 +351,8 @@ pub async fn table_partial(
         status_counts: snapshot.status_counts,
         type_counts: Arc::clone(&snapshot.type_counts),
         ribbon: snapshot.ribbon.clone(),
+        regions,
+        selected_region,
     };
     let rendered = partial.render().map_err(|e| {
         crate::web::error::WebError::from(crate::error::AppError::Other(anyhow::anyhow!(e)))
@@ -345,7 +378,7 @@ async fn load_snapshot(
     if let Some(snap) = state.dashboard_page_cache.get(&(org, range)) {
         return Ok(snap);
     }
-    let snap = Arc::new(build_snapshot(state, org, range).await?);
+    let snap = Arc::new(build_snapshot(state, org, range, None).await?);
     state
         .dashboard_page_cache
         .insert((org, range), Arc::clone(&snap));
@@ -356,6 +389,7 @@ async fn build_snapshot(
     state: &AppState,
     org: OrgId,
     range: &'static str,
+    region: Option<&str>,
 ) -> WebResult<DashboardSnapshot> {
     let to = Utc::now();
     let from = to - range_span(range);
@@ -382,16 +416,16 @@ async fn build_snapshot(
         prior,
     ) = tokio::try_join!(
         state.target_store.list(org, target_filter),
-        state.results_store.dashboard_rollup(org, time_range),
-        state.results_store.dashboard_sparkline(org, spark_from, to),
-        state.results_store.last_n_summary(org, time_range),
+        state.results_store.dashboard_rollup(org, time_range, region),
+        state.results_store.dashboard_sparkline(org, spark_from, to, region),
+        state.results_store.last_n_summary(org, time_range, region),
         state
             .incident_narration_store
             .list_active(org, ACTIVE_INCIDENTS_LIMIT),
         state
             .results_store
-            .fleet_ribbon(org, ribbon_from, to, RIBBON_BUCKET_SECONDS),
-        state.results_store.prior_period_summary(org, time_range),
+            .fleet_ribbon(org, ribbon_from, to, RIBBON_BUCKET_SECONDS, region),
+        state.results_store.prior_period_summary(org, time_range, region),
     )?;
 
     let truncated = targets.len() > ROW_LIMIT;
@@ -1035,6 +1069,8 @@ mod tests {
                 .into_boxed_slice(),
             ),
             ribbon: sample_ribbon(),
+            regions: Vec::new(),
+            selected_region: None,
         }
     }
 
@@ -1082,6 +1118,8 @@ mod tests {
                 .into_boxed_slice(),
             ),
             ribbon: sample_ribbon(),
+            regions: Vec::new(),
+            selected_region: None,
         };
         let html = partial.render().unwrap();
         assert!(!html.contains("<!doctype html>"));
@@ -1119,6 +1157,8 @@ mod tests {
             status_counts: StatusCounts::default(),
             type_counts: Arc::from(Vec::<TypeCount>::new().into_boxed_slice()),
             ribbon: sample_ribbon(),
+            regions: Vec::new(),
+            selected_region: None,
         };
         let html = page.render().unwrap();
         assert!(html.contains("nothing to watch yet."));

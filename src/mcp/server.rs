@@ -116,7 +116,7 @@ impl McpServer {
         // `join!` alongside the load-bearing queries rather than failing health.
         let (targets, rollup, org_row, open) = tokio::join!(
             self.state.target_store.list(org, all_monitors_filter(None)),
-            self.state.results_store.dashboard_rollup(org, range),
+            self.state.results_store.dashboard_rollup(org, range, None),
             crate::storage::orgs::get_org(pool, org),
             self.state
                 .incident_narration_store
@@ -235,7 +235,7 @@ impl McpServer {
             self.state
                 .target_store
                 .list(org, all_monitors_filter(args.tag.clone())),
-            self.state.results_store.dashboard_rollup(org, range),
+            self.state.results_store.dashboard_rollup(org, range, None),
         )
         .map_err(|e| McpToolError::internal(format!("list monitors query: {e}")))?;
 
@@ -496,7 +496,7 @@ impl McpServer {
         };
         let (components, rollup) = tokio::try_join!(
             self.state.status_page_store.list_components(org, page.id),
-            self.state.results_store.dashboard_rollup(org, range),
+            self.state.results_store.dashboard_rollup(org, range, None),
         )
         .map_err(|e| McpToolError::internal(format!("status page components: {e}")))?;
         let metrics = index_by_target(rollup);

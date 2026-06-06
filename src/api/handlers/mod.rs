@@ -1,4 +1,5 @@
 pub mod account;
+pub mod agents;
 pub mod api_tokens;
 pub mod auth;
 pub mod dashboard;
@@ -11,6 +12,7 @@ pub mod maintenance;
 pub mod me;
 pub mod notification_channels;
 pub mod on_call;
+pub mod operator;
 pub mod orgs;
 pub mod public;
 pub mod results;

@@ -9,7 +9,12 @@
 CREATE TABLE IF NOT EXISTS check_results (
     org_id           UUID,
     target_id        UUID,
+    region           LowCardinality(String),
     timestamp        DateTime64(3, 'UTC') CODEC(Delta, ZSTD(1)),
+    -- Server receive time, distinct from agent-supplied `timestamp`, so clock
+    -- skew is detectable.
+    ingested_at      DateTime64(3, 'UTC') DEFAULT now64(3) CODEC(Delta, ZSTD(1)),
+    agent_id         LowCardinality(String),
     status           Enum8('up' = 1, 'down' = 2, 'degraded' = 3, 'error' = 4),
     duration_ms      UInt32 CODEC(T64, ZSTD(1)),
     dns_ms           Nullable(UInt16),
@@ -21,7 +26,7 @@ CREATE TABLE IF NOT EXISTS check_results (
     error            LowCardinality(Nullable(String))
 ) ENGINE = MergeTree
 PARTITION BY toYYYYMMDD(timestamp)
-ORDER BY (org_id, target_id, timestamp)
+ORDER BY (org_id, target_id, region, timestamp)
 -- 90-day retention matches the public status page's daily strip
 -- (`history_days` config) and the per-target operator drilldown window.
 -- The Privacy Policy and `tests/retention_test.rs` pin the same number;
@@ -40,11 +45,12 @@ SETTINGS index_granularity = 8192, non_replicated_deduplication_window = 1000;
 CREATE MATERIALIZED VIEW IF NOT EXISTS check_results_1m
 ENGINE = AggregatingMergeTree
 PARTITION BY toYYYYMMDD(minute)
-ORDER BY (org_id, target_id, minute)
+ORDER BY (org_id, target_id, region, minute)
 TTL toDateTime(minute) + INTERVAL 90 DAY
 AS SELECT
     org_id,
     target_id,
+    region,
     toStartOfMinute(timestamp) AS minute,
     countState() AS total_checks,
     countIfState(status = 'up') AS up_checks,
@@ -66,4 +72,4 @@ AS SELECT
     avgState(ttfb_ms) AS avg_ttfb_ms,
     argMaxState(status, timestamp) AS last_status_state
 FROM check_results
-GROUP BY org_id, target_id, minute;
+GROUP BY org_id, target_id, region, minute;

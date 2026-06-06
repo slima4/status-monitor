@@ -16,9 +16,11 @@
 //! incident: the repos require an `OrgId`, and the only place to obtain one
 //! inside a request is this extractor.
 
+pub mod agent;
 pub mod api_token;
 pub mod authz;
 pub mod csrf;
+pub mod operator;
 
 /// `Authorization: Bearer <raw>` → trimmed `<raw>`, or `None` for anything
 /// else. Used by both the API-token middleware (to decide whether to look the

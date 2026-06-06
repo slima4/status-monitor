@@ -7,6 +7,7 @@
 //! but their flows arrive in later phases.
 
 pub mod account;
+pub mod agent_token;
 pub mod api_tokens;
 pub mod consent;
 pub mod email_norm;

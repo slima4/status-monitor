@@ -24,6 +24,8 @@ pub use auth::authz::{
     OwnerAuthorized, RequestSource, StatusPageDelete, StatusPageRead, StatusPageWrite,
     TargetsDelete, TargetsExecute, TargetsRead, TargetsWrite, TokenScopes,
 };
+pub use auth::agent::AgentIdentity;
+pub use auth::operator::OperatorAuth;
 pub use auth::{AuthedBrowser, CurrentOrg, CurrentUser, Session, User};
 pub use host::{ResolvedStatusPage, StatusPageHost, extract_status_slug};
 pub use routes::routes;

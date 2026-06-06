@@ -1,0 +1,3 @@
+DROP TABLE IF EXISTS agents;
+DROP TABLE IF EXISTS target_regions;
+DROP TABLE IF EXISTS regions;

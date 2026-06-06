@@ -54,6 +54,7 @@ impl McpAuth {
                 token_id,
                 scopes,
                 org: Some(org),
+                ..
             }) => Ok(Self {
                 org: *org,
                 scopes: scopes.clone(),

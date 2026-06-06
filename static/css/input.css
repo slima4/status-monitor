@@ -2364,6 +2364,27 @@
         @apply inline-flex items-center gap-1.5 font-medium;
         color: var(--theme-state-bad-fg);
     }
+    /* Inline region picker — reads as part of the mono filter token, not a
+       chrome'd form control. */
+    .dashboard-subhead__select {
+        font-family: var(--font-mono);
+        font-size: inherit;
+        color: var(--theme-text);
+        background: transparent;
+        border: 0;
+        padding: 0;
+        cursor: pointer;
+        appearance: none;
+        -webkit-appearance: none;
+    }
+    .dashboard-subhead__select:focus-visible {
+        outline: 1px dotted currentColor;
+        outline-offset: 2px;
+    }
+    .dashboard-subhead__caret {
+        opacity: 0.6;
+        margin-left: 0.15em;
+    }
 
     .dashboard-chip {
         @apply inline-flex items-center gap-1.5 rounded-sm border px-2.5 py-0.5 text-xs font-medium;

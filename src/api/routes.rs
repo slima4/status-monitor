@@ -362,11 +362,47 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
             .route("/auth/magic-link/verify", get(handlers::magic_link::verify));
     }
 
+    // Region-agent surface. Auth is the `AgentIdentity` extractor in each
+    // handler (resolves the agent token against the `agents` table), NOT the
+    // tenant `api_token` middleware — leaving that off means no `AuthContext` is
+    // ever populated here, so a `sm_live_` tenant token can never reach this
+    // nest. Result batches reuse the bulk body limit.
+    let agent = Router::new()
+        .route("/targets", get(handlers::agents::pull_targets))
+        .route("/results", post(handlers::agents::ingest_results))
+        .layer(DefaultBodyLimit::max(BULK_BODY_LIMIT));
+
+    // Operator (instance-admin) surface. Each handler is gated by the
+    // `OperatorAuth` extractor (static bearer secret); when the secret is unset
+    // the extractor 404s, so the surface is invisible.
+    let operator = Router::new()
+        .route(
+            "/regions",
+            get(handlers::operator::list_regions).post(handlers::operator::create_region),
+        )
+        .route(
+            "/regions/{id}",
+            axum::routing::patch(handlers::operator::update_region)
+                .delete(handlers::operator::delete_region),
+        )
+        .route(
+            "/agents",
+            get(handlers::operator::list_agents).post(handlers::operator::create_agent),
+        )
+        .route(
+            "/agents/{id}",
+            axum::routing::patch(handlers::operator::update_agent)
+                .delete(handlers::operator::delete_agent),
+        )
+        .layer(DefaultBodyLimit::max(SINGLE_BODY_LIMIT));
+
     let mut root = Router::new()
         .route("/healthz", get(handlers::health::healthz))
         .route("/readyz", get(handlers::health::readyz))
         .merge(auth_routes)
-        .nest("/api/v1", v1);
+        .nest("/api/v1", v1)
+        .nest("/api/agent", agent)
+        .nest("/operator", operator);
 
     if public_routes_active(&state.cfg) {
         root = root.nest("/api/public/v1", build_public_router());

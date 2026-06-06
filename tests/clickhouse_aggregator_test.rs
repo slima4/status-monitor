@@ -181,7 +181,7 @@ async fn build_round_trips_seeded_data() {
     let pool_for_cleanup = pool.clone();
 
     with_cleanup(&pool_for_cleanup, target_id, async move {
-        let sink = ClickhouseResultSink::from_client(ch.clone());
+        let sink = ClickhouseResultSink::new(ch.clone(), "default".into(), "default".into());
         let now = Utc::now();
         let rows: Vec<CheckResult> = (0..5)
             .map(|i| ok_result(target_id, org_id.0, now - chrono::Duration::seconds(i * 30)))
@@ -242,7 +242,7 @@ async fn component_history_returns_strip_for_public_target() {
     let pool_for_cleanup = pool.clone();
 
     with_cleanup(&pool_for_cleanup, target_id, async move {
-        let sink = ClickhouseResultSink::from_client(ch.clone());
+        let sink = ClickhouseResultSink::new(ch.clone(), "default".into(), "default".into());
         let now = Utc::now();
         sink.write_batch(&[ok_result(target_id, org_id.0, now)])
             .await

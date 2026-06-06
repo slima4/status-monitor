@@ -1,12 +1,32 @@
 {# Self-rearming swap zone; range tabs replace it via ?range=…. #}
 <div id="dashboard-table"
-     hx-get="/web/partials/dashboard?range={{ range }}"
+     hx-get="/web/partials/dashboard?range={{ range }}{% if let Some(r) = selected_region %}&region={{ r }}{% endif %}"
      hx-trigger="every 5s"
      hx-swap="outerHTML"
      class="space-y-4">
 
   <p class="dashboard-subhead">
-    filter <span class="dashboard-subhead__mono">status:any region:any</span>
+    filter <span class="dashboard-subhead__mono">status:any</span>
+    {% if regions.len() > 1 %}
+    <span class="dashboard-subhead__mono">region:<select class="dashboard-subhead__select"
+            id="dashboard-region-filter"
+            hx-preserve="true"
+            name="region"
+            aria-label="Region"
+            hx-get="/?range={{ range }}"
+            hx-target="#dashboard-table"
+            hx-select="#dashboard-table"
+            hx-swap="outerHTML"
+            hx-push-url="true"
+            hx-trigger="change">
+      <option value=""{% if selected_region.is_none() %} selected{% endif %}>any</option>
+      {% for r in regions %}
+      <option value="{{ r }}"{% if let Some(sel) = selected_region %}{% if sel == r %} selected{% endif %}{% endif %}>{{ r }}</option>
+      {% endfor %}
+    </select><span class="dashboard-subhead__caret" aria-hidden="true">▾</span></span>
+    {% else %}
+    <span class="dashboard-subhead__mono">region:any</span>
+    {% endif %}
     <span class="mx-1">·</span>
     <span class="dashboard-subhead__mono">{{ matches }}</span> matches
     {% if active_incidents.len() > 0 %}
@@ -40,10 +60,11 @@
       <button type="button"
               role="tab"
               aria-selected="{% if opt.selected %}true{% else %}false{% endif %}"
-              hx-get="/web/partials/dashboard?range={{ opt.key }}"
+              hx-get="/?range={{ opt.key }}{% if let Some(r) = selected_region %}&region={{ r }}{% endif %}"
               hx-target="#dashboard-table"
+              hx-select="#dashboard-table"
               hx-swap="outerHTML"
-              hx-push-url="/?range={{ opt.key }}"
+              hx-push-url="true"
               class="range-tabs__btn{% if opt.selected %} range-tabs__btn--active{% endif %}"
               >{{ opt.key }}</button>
       {% endfor %}

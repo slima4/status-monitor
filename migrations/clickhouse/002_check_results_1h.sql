@@ -4,11 +4,12 @@
 CREATE MATERIALIZED VIEW IF NOT EXISTS check_results_1h
 ENGINE = AggregatingMergeTree
 PARTITION BY toYYYYMM(hour)
-ORDER BY (org_id, target_id, hour)
+ORDER BY (org_id, target_id, region, hour)
 TTL toDateTime(hour) + INTERVAL 13 MONTH
 AS SELECT
     org_id,
     target_id,
+    region,
     toStartOfHour(timestamp) AS hour,
     countState() AS total_checks,
     countIfState(status = 'up') AS up_checks,
@@ -23,4 +24,4 @@ AS SELECT
     avgState(ttfb_ms) AS avg_ttfb_ms,
     argMaxState(status, timestamp) AS last_status_state
 FROM check_results
-GROUP BY org_id, target_id, hour;
+GROUP BY org_id, target_id, region, hour;

@@ -137,7 +137,7 @@ async fn two_tenants_never_see_each_others_data() {
     // Isolation must come from the per-result `org_id`, NOT from a
     // per-tenant sink construction — a per-tenant sink masked the
     // write-path org-stamping bug (results landed under the wrong org).
-    let result_sink = ClickhouseResultSink::from_client(ch.clone());
+    let result_sink = ClickhouseResultSink::new(ch.clone(), "default".into(), "default".into());
 
     // ── Targets ──────────────────────────────────────────────────────────
     let target_a = target_store

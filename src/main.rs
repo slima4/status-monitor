@@ -137,6 +137,14 @@ async fn main() -> Result<()> {
         None
     };
 
+    cfg.validate_runtime()?;
+
+    // Regional-agent mode: a stateless probe, no web/PG/CH/alerting. Branches
+    // before any of that is constructed.
+    if cfg.agent.enabled {
+        return uptimepage::agent::run(cfg).await;
+    }
+
     tracing::info!(
         version = env!("CARGO_PKG_VERSION"),
         api_bind = %cfg.server.api_bind,
@@ -157,10 +165,13 @@ async fn main() -> Result<()> {
         }
     };
     let pg_pool = PostgresTargetStore::connect_pool(&cfg.storage.postgres).await?;
-    let target_store: Arc<dyn TargetStore> = Arc::new(PostgresTargetStore::from_pool(
-        pg_pool.clone(),
-        cipher.clone(),
-    ));
+    storage::admin::AdminRepo::new(pg_pool.clone(), cipher.clone(), "region_reconcile")
+        .reconcile_regions(&cfg.scheduler.region, cfg.scheduler.effective_default_region())
+        .await?;
+    let target_store: Arc<dyn TargetStore> = Arc::new(
+        PostgresTargetStore::from_pool(pg_pool.clone(), cipher.clone())
+            .with_default_region(cfg.scheduler.effective_default_region()),
+    );
 
     tracing::info!(
         // SAFE: operator infra endpoint (no credentials — password is a
@@ -171,8 +182,15 @@ async fn main() -> Result<()> {
     );
     let clickhouse_client = storage::build_client(&cfg.storage.clickhouse);
     storage::migrate(&clickhouse_client).await?;
-    let result_sink: Arc<dyn ResultSink> =
-        Arc::new(ClickhouseResultSink::from_client(clickhouse_client.clone()));
+    // The control plane's in-process scheduler stamps its own region but a
+    // distinct agent id, so the `agent_id` dimension cleanly separates
+    // control-plane self-checks from real per-region agents (which carry their
+    // agents-row id).
+    let result_sink: Arc<dyn ResultSink> = Arc::new(ClickhouseResultSink::new(
+        clickhouse_client.clone(),
+        cfg.scheduler.region.clone(),
+        "control-plane".to_string(),
+    ));
     let result_sink_for_state = result_sink.clone();
     let ch_client_for_public = clickhouse_client.clone();
     let ch_client_for_purge = clickhouse_client.clone();
@@ -228,9 +246,11 @@ async fn main() -> Result<()> {
         host_throttle.clone(),
         domain_expiry_runtime,
     ));
-    let scheduler_source: Arc<dyn storage::admin::EnabledTargetSource> = Arc::new(
-        storage::admin::AdminRepo::new(pg_pool.clone(), cipher.clone(), "scheduler_refresh"),
-    );
+    let scheduler_source: Arc<dyn storage::admin::EnabledTargetSource> =
+        Arc::new(storage::admin::RegionTargetSource::new(
+            storage::admin::AdminRepo::new(pg_pool.clone(), cipher.clone(), "scheduler_refresh"),
+            cfg.scheduler.region.clone(),
+        ));
     let registry = Arc::new(TargetRegistry::new(scheduler_source));
     let scheduler = Arc::new(Scheduler::new(
         registry.clone(),

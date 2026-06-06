@@ -46,6 +46,28 @@ impl EnabledTargetSource for AdminRepo {
     }
 }
 
+/// Scheduler source scoped to the control plane's own region. Wraps
+/// [`AdminRepo`] so the local scheduler runs exactly the targets assigned to
+/// its region — the same query an agent pulls for its region. Remote regions
+/// are left to their agents.
+pub struct RegionTargetSource {
+    repo: AdminRepo,
+    region: String,
+}
+
+impl RegionTargetSource {
+    pub fn new(repo: AdminRepo, region: String) -> Self {
+        Self { repo, region }
+    }
+}
+
+#[async_trait]
+impl EnabledTargetSource for RegionTargetSource {
+    async fn list_all_enabled_targets(&self) -> Result<Vec<(OrgId, Target)>> {
+        self.repo.list_enabled_targets_for_region(&self.region).await
+    }
+}
+
 /// Keyset cursor over `(org_id, target_id)` ascending. `None` means "start
 /// from the beginning"; subsequent pages pass the last row's pair to skip
 /// past it on the next read.
@@ -154,6 +176,111 @@ impl AdminRepo {
                 decode_target_row(r.target, self.cipher.as_deref()).map(|t| (OrgId(r.org_id), t))
             })
             .collect()
+    }
+
+    /// Boot reconciliation for the config-driven region model. Idempotent.
+    /// Upserts the control plane's own region and the new-target default region
+    /// so their FK targets exist, then assigns every still-unassigned enabled
+    /// target to the default region — so no target is ever orphaned between the
+    /// region tables existing and the create path writing assignments.
+    pub async fn reconcile_regions(
+        &self,
+        scheduler_region: &str,
+        default_region: &str,
+    ) -> Result<()> {
+        for id in [scheduler_region, default_region] {
+            sqlx::query(
+                "INSERT INTO regions (id, name, location) VALUES ($1, $1, '') \
+                 ON CONFLICT (id) DO NOTHING",
+            )
+            .bind(id)
+            .execute(&self.pool)
+            .await
+            .context("admin: reconcile_regions upsert region")?;
+        }
+        sqlx::query(
+            "INSERT INTO target_regions (target_id, region) \
+             SELECT t.id, $1 FROM targets t \
+             WHERE NOT EXISTS (SELECT 1 FROM target_regions tr WHERE tr.target_id = t.id) \
+             ON CONFLICT DO NOTHING",
+        )
+        .bind(default_region)
+        .execute(&self.pool)
+        .await
+        .context("admin: reconcile_regions backfill assignments")?;
+        Ok(())
+    }
+
+    /// Cheap config-pull validator for one region: a digest over the assigned
+    /// targets' ids and a hash of each `check_spec`, plus count + max
+    /// `updated_at`. The per-row `check_spec` hash means the etag changes on any
+    /// content rewrite — including a credential re-encrypt (KEK rotation) that
+    /// leaves `updated_at` untouched — so an agent never serves stale config off
+    /// a `304`. Still no decrypt: it hashes the stored (encrypted) ciphertext.
+    pub async fn region_pull_etag(&self, region: &str) -> Result<String> {
+        let row: (i64, Option<chrono::DateTime<chrono::Utc>>, Option<String>) = sqlx::query_as(
+            "SELECT count(*)::bigint, max(t.updated_at), \
+                    md5(coalesce(string_agg(t.id::text || ':' || md5(t.check_spec::text), \
+                                            ',' ORDER BY t.id), '')) \
+             FROM target_regions tr \
+             JOIN targets t ON t.id = tr.target_id \
+             JOIN organizations o ON o.id = t.org_id \
+             WHERE tr.region = $1 AND t.enabled = true AND o.deleted_at IS NULL",
+        )
+        .bind(region)
+        .fetch_one(&self.pool)
+        .await
+        .context("admin: region pull etag")?;
+        let (count, max_updated, digest) = row;
+        let ts = max_updated.map(|d| d.timestamp_millis()).unwrap_or(0);
+        Ok(format!("\"{count}-{ts}-{}\"", digest.unwrap_or_default()))
+    }
+
+    /// Enabled targets assigned to one region (via `target_regions`), in live
+    /// orgs. Backs the agent config-pull API. Same decrypted shape as
+    /// [`Self::list_all_enabled_targets`].
+    pub async fn list_enabled_targets_for_region(
+        &self,
+        region: &str,
+    ) -> Result<Vec<(OrgId, Target)>> {
+        let sql = format!(
+            "SELECT {TARGET_COLUMNS} \
+             FROM targets t \
+             JOIN organizations o ON o.id = t.org_id \
+             JOIN target_regions tr ON tr.target_id = t.id \
+             WHERE t.enabled = true AND o.deleted_at IS NULL AND tr.region = $1"
+        );
+        let rows: Vec<OrgTargetRow> = sqlx::query_as::<_, OrgTargetRow>(&sql)
+            .bind(region)
+            .fetch_all(&self.pool)
+            .await
+            .context("admin: list enabled targets for region")?;
+        rows.into_iter()
+            .map(|r| {
+                decode_target_row(r.target, self.cipher.as_deref()).map(|t| (OrgId(r.org_id), t))
+            })
+            .collect()
+    }
+
+    /// Map of enabled `target_id -> owning org` for one region. Ingest uses it
+    /// both to reject results for targets outside the agent's region and to
+    /// stamp the authoritative `org_id` (never trusting the agent-supplied one).
+    pub async fn assigned_targets_for_region(
+        &self,
+        region: &str,
+    ) -> Result<std::collections::HashMap<Uuid, OrgId>> {
+        let rows: Vec<(Uuid, Uuid)> = sqlx::query_as(
+            "SELECT tr.target_id, t.org_id \
+             FROM target_regions tr \
+             JOIN targets t ON t.id = tr.target_id \
+             JOIN organizations o ON o.id = t.org_id \
+             WHERE tr.region = $1 AND t.enabled = true AND o.deleted_at IS NULL",
+        )
+        .bind(region)
+        .fetch_all(&self.pool)
+        .await
+        .context("admin: assigned targets for region")?;
+        Ok(rows.into_iter().map(|(t, o)| (t, OrgId(o))).collect())
     }
 
     /// Keyset-paginated walk over every enabled target in a live org — the set

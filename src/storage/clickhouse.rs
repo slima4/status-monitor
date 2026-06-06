@@ -172,6 +172,7 @@ pub async fn migrate(client: &Client) -> Result<()> {
 const EXPECTED_ROLLUP_SCHEMA: &[(&str, &str)] = &[
     ("org_id", "UUID"),
     ("target_id", "UUID"),
+    ("region", "LowCardinality(String)"),
     ("minute", "DateTime('UTC')"),
     ("total_checks", "AggregateFunction(count)"),
     ("up_checks", "AggregateFunction(countIf, UInt8)"),
@@ -379,11 +380,19 @@ struct CountRow {
 
 pub struct ClickhouseResultSink {
     client: Client,
+    /// Region + agent id stamped on results from this control plane's own
+    /// scheduler. Agent-submitted batches carry their own via [`write_batch_tagged`].
+    region: String,
+    agent_id: String,
 }
 
 impl ClickhouseResultSink {
-    pub fn from_client(client: Client) -> Self {
-        Self { client }
+    pub fn new(client: Client, region: String, agent_id: String) -> Self {
+        Self {
+            client,
+            region,
+            agent_id,
+        }
     }
 
     async fn write_once(
@@ -396,16 +405,20 @@ impl ClickhouseResultSink {
         }
         insert.end().await
     }
-}
 
-#[async_trait]
-impl ResultSink for ClickhouseResultSink {
-    async fn write_batch(&self, results: &[CheckResult]) -> Result<()> {
+    async fn write_batch_inner(
+        &self,
+        results: &[CheckResult],
+        region: &str,
+        agent_id: &str,
+    ) -> Result<()> {
         if results.is_empty() {
             return Ok(());
         }
-        let rows: Vec<CheckResultRow<'_>> =
-            results.iter().map(CheckResultRow::from_result).collect();
+        let rows: Vec<CheckResultRow<'_>> = results
+            .iter()
+            .map(|r| CheckResultRow::from_result(r, region, agent_id))
+            .collect();
 
         let backoff = ExponentialBackoffBuilder::new()
             .with_initial_interval(Duration::from_millis(100))
@@ -437,13 +450,34 @@ impl ResultSink for ClickhouseResultSink {
     }
 }
 
+#[async_trait]
+impl ResultSink for ClickhouseResultSink {
+    async fn write_batch(&self, results: &[CheckResult]) -> Result<()> {
+        self.write_batch_inner(results, &self.region, &self.agent_id)
+            .await
+    }
+
+    async fn write_batch_tagged(
+        &self,
+        results: &[CheckResult],
+        region: &str,
+        agent_id: &str,
+    ) -> Result<()> {
+        self.write_batch_inner(results, region, agent_id).await
+    }
+}
+
 #[derive(Debug, Row, Serialize)]
 struct CheckResultRow<'a> {
     #[serde(with = "clickhouse::serde::uuid")]
     org_id: Uuid,
     #[serde(with = "clickhouse::serde::uuid")]
     target_id: Uuid,
+    // Sent explicitly, not via column DEFAULT: the matview groups on the
+    // inserted block, so `region` must be in it.
+    region: &'a str,
     timestamp: i64,
+    agent_id: &'a str,
     status: i8,
     duration_ms: u32,
     dns_ms: Option<u16>,
@@ -456,11 +490,13 @@ struct CheckResultRow<'a> {
 }
 
 impl<'a> CheckResultRow<'a> {
-    fn from_result(r: &'a CheckResult) -> Self {
+    fn from_result(r: &'a CheckResult, region: &'a str, agent_id: &'a str) -> Self {
         Self {
             org_id: r.org_id,
             target_id: r.target_id,
+            region,
             timestamp: r.timestamp.timestamp_millis(),
+            agent_id,
             status: r.status.as_enum8(),
             duration_ms: r.duration_ms,
             dns_ms: r.dns_ms,
@@ -679,22 +715,28 @@ impl ResultsStore for ClickhouseResultsStore {
         &self,
         org: OrgId,
         range: TimeRange,
+        region: Option<&str>,
     ) -> Result<StatusBreakdown> {
         #[derive(Row, Deserialize)]
         struct Latest {
             status: i8,
         }
-        let rows: Vec<Latest> = self
+        let region_pred = region.map(|_| "AND region = ?").unwrap_or("");
+        let mut q = self
             .client
             .query(&format!(
                 "SELECT argMax(status, timestamp) AS status \
                  FROM {TABLE} \
-                 WHERE org_id = ? \
+                 WHERE org_id = ? {region_pred} \
                  AND timestamp >= fromUnixTimestamp64Milli(?) \
                  AND timestamp < fromUnixTimestamp64Milli(?) \
                  GROUP BY target_id"
             ))
-            .bind(org.0)
+            .bind(org.0);
+        if let Some(r) = region {
+            q = q.bind(r);
+        }
+        let rows: Vec<Latest> = q
             .bind(range.from.timestamp_millis())
             .bind(range.to.timestamp_millis())
             .fetch_all::<Latest>()
@@ -712,24 +754,34 @@ impl ResultsStore for ClickhouseResultsStore {
         Ok(out)
     }
 
-    async fn last_n_summary(&self, org: OrgId, range: TimeRange) -> Result<(u64, u64, u32, u64)> {
+    async fn last_n_summary(
+        &self,
+        org: OrgId,
+        range: TimeRange,
+        region: Option<&str>,
+    ) -> Result<(u64, u64, u32, u64)> {
         #[derive(Row, Deserialize)]
         struct Counts {
             total: u64,
             up: u64,
             avg_ms: f64,
         }
-        let counts: Counts = self
+        let region_pred = region.map(|_| "AND region = ?").unwrap_or("");
+        let mut cq = self
             .client
             .query(&format!(
                 "SELECT count() AS total, countIf(status = 'up') AS up, \
                         avg(duration_ms) AS avg_ms \
                  FROM {TABLE} \
-                 WHERE org_id = ? \
+                 WHERE org_id = ? {region_pred} \
                  AND timestamp >= fromUnixTimestamp64Milli(?) \
                  AND timestamp < fromUnixTimestamp64Milli(?)"
             ))
-            .bind(org.0)
+            .bind(org.0);
+        if let Some(r) = region {
+            cq = cq.bind(r);
+        }
+        let counts: Counts = cq
             .bind(range.from.timestamp_millis())
             .bind(range.to.timestamp_millis())
             .fetch_one::<Counts>()
@@ -738,16 +790,20 @@ impl ResultsStore for ClickhouseResultsStore {
 
         // Pull the entire range in one query ordered by (target_id, timestamp).
         // Coalesce per-target client-side; avoids one round-trip per target.
-        let rows: Vec<IncidentRow> = self
+        let mut rq = self
             .client
             .query(&format!(
                 "SELECT target_id, timestamp, status, error FROM {TABLE} \
-                 WHERE org_id = ? \
+                 WHERE org_id = ? {region_pred} \
                  AND timestamp >= fromUnixTimestamp64Milli(?) \
                  AND timestamp < fromUnixTimestamp64Milli(?) \
                  ORDER BY target_id ASC, timestamp ASC"
             ))
-            .bind(org.0)
+            .bind(org.0);
+        if let Some(r) = region {
+            rq = rq.bind(r);
+        }
+        let rows: Vec<IncidentRow> = rq
             .bind(range.from.timestamp_millis())
             .bind(range.to.timestamp_millis())
             .fetch_all::<IncidentRow>()
@@ -837,6 +893,7 @@ impl ResultsStore for ClickhouseResultsStore {
         &self,
         org: OrgId,
         range: TimeRange,
+        region: Option<&str>,
     ) -> Result<Vec<DashboardMetrics>> {
         // Merges from the per-minute matview, not raw `check_results`.
         // `minute` is `DateTime` (UInt32 s), so the bind is u32-seconds.
@@ -861,10 +918,14 @@ impl ResultsStore for ClickhouseResultsStore {
                argMaxMerge(last_status_state) AS last_status, \
                toUInt32(max(minute)) AS last_minute_ts \
              FROM check_results_1m \
-             WHERE org_id = ? AND {MINUTE_WINDOW} \
-             GROUP BY target_id"
+             WHERE org_id = ? {region_pred} AND {MINUTE_WINDOW} \
+             GROUP BY target_id",
+            region_pred = region.map(|_| "AND region = ?").unwrap_or("")
         );
-        let q = self.client.query(&query).bind(org.0);
+        let mut q = self.client.query(&query).bind(org.0);
+        if let Some(r) = region {
+            q = q.bind(r);
+        }
         let rows: Vec<RollupRow> = bind_minute_window(q, range.from, range.to)
             .fetch_all::<RollupRow>()
             .await
@@ -894,6 +955,7 @@ impl ResultsStore for ClickhouseResultsStore {
         org: OrgId,
         from: DateTime<Utc>,
         to: DateTime<Utc>,
+        region: Option<&str>,
     ) -> Result<Vec<DashboardSparkBucket>> {
         // Reads the per-minute rollup so cost stays O(buckets), not O(raw). The
         // `avgState` column needs its `avgMerge` finaliser in `SELECT`.
@@ -910,11 +972,15 @@ impl ResultsStore for ClickhouseResultsStore {
                toUInt32(minute) AS bucket_ts, \
                avgMerge(avg_duration_ms) AS avg_ms \
              FROM check_results_1m \
-             WHERE org_id = ? AND {MINUTE_WINDOW} \
+             WHERE org_id = ? {region_pred} AND {MINUTE_WINDOW} \
              GROUP BY target_id, minute \
-             ORDER BY target_id, minute"
+             ORDER BY target_id, minute",
+            region_pred = region.map(|_| "AND region = ?").unwrap_or("")
         );
-        let q = self.client.query(&query).bind(org.0);
+        let mut q = self.client.query(&query).bind(org.0);
+        if let Some(r) = region {
+            q = q.bind(r);
+        }
         let rows: Vec<SparkRow> = bind_minute_window(q, from, to)
             .fetch_all::<SparkRow>()
             .await
@@ -1019,6 +1085,7 @@ impl ResultsStore for ClickhouseResultsStore {
         from: DateTime<Utc>,
         to: DateTime<Utc>,
         bucket_seconds: u32,
+        region: Option<&str>,
     ) -> Result<Vec<FleetRibbonBucket>> {
         #[derive(Row, Deserialize)]
         struct RibbonRow {
@@ -1038,11 +1105,15 @@ impl ResultsStore for ClickhouseResultsStore {
                countMerge(total_checks) AS samples, \
                countIfMerge(up_checks) AS up \
              FROM check_results_1m \
-             WHERE org_id = ? AND {MINUTE_WINDOW} \
+             WHERE org_id = ? {region_pred} AND {MINUTE_WINDOW} \
              GROUP BY bucket_ts \
-             ORDER BY bucket_ts"
+             ORDER BY bucket_ts",
+            region_pred = region.map(|_| "AND region = ?").unwrap_or("")
         );
-        let q = self.client.query(&query).bind(org.0);
+        let mut q = self.client.query(&query).bind(org.0);
+        if let Some(r) = region {
+            q = q.bind(r);
+        }
         let rows: Vec<RibbonRow> = bind_minute_window(q, from, to)
             .fetch_all::<RibbonRow>()
             .await
@@ -1061,6 +1132,7 @@ impl ResultsStore for ClickhouseResultsStore {
         &self,
         org: OrgId,
         range: TimeRange,
+        region: Option<&str>,
     ) -> Result<PriorPeriodSummary> {
         // Reads raw `check_results` (not the matview) so the totals come
         // from the same source as `last_n_summary` — the dashboard
@@ -1076,7 +1148,8 @@ impl ResultsStore for ClickhouseResultsStore {
         let span_ms = (range.to - range.from).num_milliseconds().max(0);
         let prior_to_ms = range.from.timestamp_millis();
         let prior_from_ms = prior_to_ms.saturating_sub(span_ms);
-        let row: Option<PriorRow> = self
+        let region_pred = region.map(|_| "AND region = ?").unwrap_or("");
+        let mut q = self
             .client
             .query(&format!(
                 "SELECT \
@@ -1084,11 +1157,15 @@ impl ResultsStore for ClickhouseResultsStore {
                    countIf(status = 'up') AS up, \
                    avg(duration_ms) AS avg_ms \
                  FROM {TABLE} \
-                 WHERE org_id = ? \
+                 WHERE org_id = ? {region_pred} \
                  AND timestamp >= fromUnixTimestamp64Milli(?) \
                  AND timestamp < fromUnixTimestamp64Milli(?)"
             ))
-            .bind(org.0)
+            .bind(org.0);
+        if let Some(r) = region {
+            q = q.bind(r);
+        }
+        let row: Option<PriorRow> = q
             .bind(prior_from_ms)
             .bind(prior_to_ms)
             .fetch_optional::<PriorRow>()

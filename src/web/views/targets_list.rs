@@ -288,7 +288,7 @@ async fn build_page(state: &AppState, org: OrgId, params: &ListParams) -> WebRes
         };
         state
             .results_store
-            .dashboard_rollup(org, range)
+            .dashboard_rollup(org, range, None)
             .await?
             .into_iter()
             .map(|m| (m.target_id, m))

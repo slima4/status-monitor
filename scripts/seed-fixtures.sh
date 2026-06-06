@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Seed a substantial fixture set (14 monitors, ~160 incidents across all
 # statuses, 90d ClickHouse history, notification channels, alert bindings,
-# maintenance-bound components, adversarial-title incident) into a running
-# local stack — for UI stress-testing, screenshots, and smoke-testing every
-# rendered code path on the public + operator pages.
+# maintenance-bound components, adversarial-title incident, two regions +
+# a sample agent) into a running local stack — for UI stress-testing,
+# screenshots, and smoke-testing every rendered code path on the public +
+# operator pages. fix-api/fix-web also report from 'eu-west' so the dashboard
+# region selector has distinct per-region data.
 #
 # Coverage matrix on the public page:
 #   fix-api    Operational   (mostly-up recent + open incident churn)
@@ -73,6 +75,10 @@ DELETE FROM incidents
 DELETE FROM targets
  WHERE org_id = (SELECT id FROM organizations WHERE slug='${SLUG}')
    AND tags @> ARRAY['seed-fixtures'];
+-- target_regions cascade with their targets above; drop the fixture agent and
+-- the fixture-only region ('default' is owned by the app).
+DELETE FROM agents WHERE name LIKE 'Fixture %';
+DELETE FROM regions WHERE id = 'eu-west';
 DELETE FROM notification_channels
  WHERE org_id = (SELECT id FROM organizations WHERE slug='${SLUG}')
    AND name LIKE 'Fixture %';
@@ -203,6 +209,33 @@ for _v in T_API T_WEB T_CDN T_DB T_AUTH T_EMAIL T_SEARCH T_PAUSED \
   fi
 done
 unset _v _id
+
+echo "==> Postgres: regions, target assignments, and a sample operator agent"
+# Two regions so the dashboard region selector has something to switch between:
+# every fixture target runs on 'default' (the control plane), and fix-api +
+# fix-web additionally report from 'eu-west'. The agent row drives the operator
+# surface; its credential is a non-verifying placeholder (display only).
+pg <<SQL
+INSERT INTO regions (id, name, location) VALUES
+  ('default', 'Default', 'control plane'),
+  ('eu-west', 'EU West', 'Amsterdam')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO target_regions (target_id, region)
+SELECT id, 'default' FROM targets
+ WHERE org_id = '${ORG}' AND tags @> ARRAY['seed-fixtures']
+ON CONFLICT DO NOTHING;
+
+INSERT INTO target_regions (target_id, region)
+SELECT id, 'eu-west' FROM targets
+ WHERE org_id = '${ORG}' AND tags @> ARRAY['seed-fixtures']
+   AND name IN ('fix-api', 'fix-web')
+ON CONFLICT DO NOTHING;
+
+INSERT INTO agents (region, name, enabled, token_hash, token_prefix)
+VALUES ('eu-west', 'Fixture EU probe', true,
+        'seed-fixture-disabled-credential', 'sm_agent_fixture');
+SQL
 
 # Public targets only — incidents on internal monitors wouldn't surface on
 # the public status page anyway. Round-robin across 6 visible HTTP targets
@@ -573,8 +606,8 @@ echo "==> ClickHouse: 90d baseline history for visible monitors (per-target dive
 # fix-email is handled separately so we can punch a NoData gap into it.
 for tid in "$T_API" "$T_WEB" "$T_CDN" "$T_DB" "$T_AUTH" "$T_SEARCH"; do
   ch -mn <<SQL
-INSERT INTO monitor.check_results (org_id,target_id,timestamp,status,duration_ms,response_code)
-SELECT toUUID('${ORG}'),toUUID('${tid}'),
+INSERT INTO monitor.check_results (org_id,target_id,region,timestamp,status,duration_ms,response_code)
+SELECT toUUID('${ORG}'),toUUID('${tid}'),'default',
        now() - toIntervalHour(6) - toIntervalDay(number) - toIntervalMinute(number % 47),
        'up',
        80 + (cityHash64('${tid}') % 120) + (number % 35),
@@ -584,8 +617,8 @@ FROM numbers(90);
 -- Down spikes pinned to days 0..59 so they never collide with degraded days
 -- (60..86) — keeps the day_state classifier from masking Degraded under
 -- PartialOutage when both types land on the same calendar day.
-INSERT INTO monitor.check_results (org_id,target_id,timestamp,status,duration_ms,response_code,error)
-SELECT toUUID('${ORG}'),toUUID('${tid}'),
+INSERT INTO monitor.check_results (org_id,target_id,region,timestamp,status,duration_ms,response_code,error)
+SELECT toUUID('${ORG}'),toUUID('${tid}'),'default',
        now() - toIntervalHour(6)
              - toIntervalDay((number * 7 + (cityHash64('${tid}') % 13)) % 60)
              - toIntervalMinute(((number * 11 + cityHash64('${tid}')) % 60)),
@@ -593,8 +626,8 @@ SELECT toUUID('${ORG}'),toUUID('${tid}'),
 FROM numbers(20)
 WHERE number < (4 + (cityHash64('${tid}') % 12));
 
-INSERT INTO monitor.check_results (org_id,target_id,timestamp,status,duration_ms,response_code)
-SELECT toUUID('${ORG}'),toUUID('${tid}'),
+INSERT INTO monitor.check_results (org_id,target_id,region,timestamp,status,duration_ms,response_code)
+SELECT toUUID('${ORG}'),toUUID('${tid}'),'default',
        now() - toIntervalHour(6)
              - toIntervalDay(60 + (number * 3 + (cityHash64('${tid}') % 7)) % 27)
              - toIntervalMinute(((number * 23 + cityHash64('${tid}')) % 60)),
@@ -610,20 +643,20 @@ echo "==> ClickHouse: ancient outage clusters (day 87 / 88 / 89) for old-history
 # Forces a visible red cell on the LEFT edge of the day-strip on three
 # components — exercises rendering of the very oldest history bucket.
 ch -mn <<SQL
-INSERT INTO monitor.check_results (org_id,target_id,timestamp,status,duration_ms,response_code,error)
-SELECT toUUID('${ORG}'),toUUID('${T_API}'),
+INSERT INTO monitor.check_results (org_id,target_id,region,timestamp,status,duration_ms,response_code,error)
+SELECT toUUID('${ORG}'),toUUID('${T_API}'),'default',
        now() - toIntervalDay(89) - toIntervalMinute(15 + number * 3),
        'down', 0, 503, 'historical outage (89d ago)'
 FROM numbers(6);
 
-INSERT INTO monitor.check_results (org_id,target_id,timestamp,status,duration_ms,response_code,error)
-SELECT toUUID('${ORG}'),toUUID('${T_WEB}'),
+INSERT INTO monitor.check_results (org_id,target_id,region,timestamp,status,duration_ms,response_code,error)
+SELECT toUUID('${ORG}'),toUUID('${T_WEB}'),'default',
        now() - toIntervalDay(88) - toIntervalMinute(45 + number * 4),
        'down', 0, 504, 'historical outage (88d ago)'
 FROM numbers(5);
 
-INSERT INTO monitor.check_results (org_id,target_id,timestamp,status,duration_ms,response_code,error)
-SELECT toUUID('${ORG}'),toUUID('${T_CDN}'),
+INSERT INTO monitor.check_results (org_id,target_id,region,timestamp,status,duration_ms,response_code,error)
+SELECT toUUID('${ORG}'),toUUID('${T_CDN}'),'default',
        now() - toIntervalDay(87) - toIntervalMinute(120 + number * 5),
        'down', 0, 502, 'historical outage (87d ago)'
 FROM numbers(4);
@@ -635,8 +668,8 @@ echo "==> ClickHouse: fix-email 90d history with a 6-day NoData gap"
 # this state. Same 6h shift as the baseline keeps day-0 rows out of the
 # last-5-min window.
 ch -mn <<SQL
-INSERT INTO monitor.check_results (org_id,target_id,timestamp,status,duration_ms,response_code)
-SELECT toUUID('${ORG}'),toUUID('${T_EMAIL}'),
+INSERT INTO monitor.check_results (org_id,target_id,region,timestamp,status,duration_ms,response_code)
+SELECT toUUID('${ORG}'),toUUID('${T_EMAIL}'),'default',
        now() - toIntervalHour(6) - toIntervalDay(number) - toIntervalMinute(number % 47),
        'up',
        110 + (number % 25),
@@ -659,14 +692,14 @@ echo "==> ClickHouse: last-5-min divergent writes — drives per-component curre
 # fix-email skipped (no recent rows → counters.total()==0 → Operational
 #   fallback, exercising the "no recent data" branch).
 ch -mn <<SQL
-INSERT INTO monitor.check_results (org_id,target_id,timestamp,status,duration_ms,response_code)
-SELECT toUUID('${ORG}'),toUUID('${T_API}'),
+INSERT INTO monitor.check_results (org_id,target_id,region,timestamp,status,duration_ms,response_code)
+SELECT toUUID('${ORG}'),toUUID('${T_API}'),'default',
        now() - toIntervalSecond(number*4),
        'up', 90 + (number % 25), 200
 FROM numbers(30);
 
-INSERT INTO monitor.check_results (org_id,target_id,timestamp,status,duration_ms,response_code)
-SELECT toUUID('${ORG}'),toUUID('${T_WEB}'),
+INSERT INTO monitor.check_results (org_id,target_id,region,timestamp,status,duration_ms,response_code)
+SELECT toUUID('${ORG}'),toUUID('${T_WEB}'),'default',
        now() - toIntervalSecond(number*4),
        'degraded', 600 + (number * 40), 200
 FROM numbers(30);
@@ -674,8 +707,8 @@ FROM numbers(30);
 # Down rows model a TLS-phase failure: DNS + TCP completed (timings present),
 # the handshake was rejected (no tls_ms, no response_code) — exercises the
 # detail view's expandable partial-timing breakdown on a connect failure.
-INSERT INTO monitor.check_results (org_id,target_id,timestamp,status,duration_ms,response_code,error,dns_ms,connect_ms)
-SELECT toUUID('${ORG}'),toUUID('${T_CDN}'),
+INSERT INTO monitor.check_results (org_id,target_id,region,timestamp,status,duration_ms,response_code,error,dns_ms,connect_ms)
+SELECT toUUID('${ORG}'),toUUID('${T_CDN}'),'default',
        now() - toIntervalSecond(number*4),
        if(number % 10 < 3, 'down', 'up'),
        if(number % 10 < 3, 0, 80 + (number % 30)),
@@ -688,8 +721,8 @@ FROM numbers(30);
 # Down rows model a TCP-phase failure: DNS resolved (dns_ms present) but the
 # connection was refused — connect never completed, so connect_ms stays NULL,
 # matching ConnectError::Connect's partial timings.
-INSERT INTO monitor.check_results (org_id,target_id,timestamp,status,duration_ms,response_code,error,dns_ms)
-SELECT toUUID('${ORG}'),toUUID('${T_AUTH}'),
+INSERT INTO monitor.check_results (org_id,target_id,region,timestamp,status,duration_ms,response_code,error,dns_ms)
+SELECT toUUID('${ORG}'),toUUID('${T_AUTH}'),'default',
        now() - toIntervalSecond(number*4),
        if(number % 10 < 7, 'down', 'up'),
        if(number % 10 < 7, 0, 95 + (number % 20)),
@@ -698,10 +731,59 @@ SELECT toUUID('${ORG}'),toUUID('${T_AUTH}'),
        if(number % 10 < 7, toUInt16(9 + (number % 4)), NULL)
 FROM numbers(30);
 
-INSERT INTO monitor.check_results (org_id,target_id,timestamp,status,duration_ms,response_code)
-SELECT toUUID('${ORG}'),toUUID('${T_SEARCH}'),
+INSERT INTO monitor.check_results (org_id,target_id,region,timestamp,status,duration_ms,response_code)
+SELECT toUUID('${ORG}'),toUUID('${T_SEARCH}'),'default',
        now() - toIntervalSecond(number*4),
        'up', 70 + (number % 20), 200
+FROM numbers(30);
+SQL
+
+echo "==> ClickHouse: eu-west region history for fix-api + fix-web (region selector)"
+# fix-api + fix-web also report from eu-west with a slower, slightly worse
+# shape, so switching the dashboard region selector shows visibly different
+# metrics than the default region.
+ch -mn <<SQL
+INSERT INTO monitor.check_results (org_id,target_id,region,timestamp,status,duration_ms,response_code)
+SELECT toUUID('${ORG}'),toUUID('${T_API}'),'eu-west',
+       now() - toIntervalHour(6) - toIntervalDay(number) - toIntervalMinute(number % 31),
+       'up', 150 + (number % 70), 200
+FROM numbers(90);
+
+-- Down + error spikes in HISTORY (not the last-5-min window) so they exercise
+-- region-scoped incident/error rendering without flipping the public live
+-- status, which sums the last 5 min across regions. Covers down (null
+-- response_code + error text) and the error status.
+INSERT INTO monitor.check_results (org_id,target_id,region,timestamp,status,duration_ms,response_code,error)
+SELECT toUUID('${ORG}'),toUUID('${T_API}'),'eu-west',
+       now() - toIntervalHour(6) - toIntervalDay(1 + (number * 5) % 40) - toIntervalMinute(number % 60),
+       'down', 0, NULL, 'eu-west upstream timeout'
+FROM numbers(10);
+
+INSERT INTO monitor.check_results (org_id,target_id,region,timestamp,status,duration_ms,response_code,error)
+SELECT toUUID('${ORG}'),toUUID('${T_API}'),'eu-west',
+       now() - toIntervalHour(6) - toIntervalDay(3 + (number * 7) % 40) - toIntervalMinute(number % 60),
+       'error', 0, NULL, 'eu-west TLS handshake failed'
+FROM numbers(6);
+
+-- Recent window all-up but slower than the default region: keeps the public
+-- Operational classification while the region selector still shows distinct
+-- per-region latency.
+INSERT INTO monitor.check_results (org_id,target_id,region,timestamp,status,duration_ms,response_code)
+SELECT toUUID('${ORG}'),toUUID('${T_API}'),'eu-west',
+       now() - toIntervalSecond(number*4),
+       'up', 165 + (number % 40), 200
+FROM numbers(30);
+
+INSERT INTO monitor.check_results (org_id,target_id,region,timestamp,status,duration_ms,response_code)
+SELECT toUUID('${ORG}'),toUUID('${T_WEB}'),'eu-west',
+       now() - toIntervalHour(6) - toIntervalDay(number) - toIntervalMinute(number % 31),
+       'up', 120 + (number % 30), 200
+FROM numbers(90);
+
+INSERT INTO monitor.check_results (org_id,target_id,region,timestamp,status,duration_ms,response_code)
+SELECT toUUID('${ORG}'),toUUID('${T_WEB}'),'eu-west',
+       now() - toIntervalSecond(number*4),
+       'up', 125 + (number % 25), 200
 FROM numbers(30);
 SQL
 

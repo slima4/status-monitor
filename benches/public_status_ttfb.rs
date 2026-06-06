@@ -160,7 +160,7 @@ async fn build_fixture() -> Option<Fixture> {
             .expect("slug fresh");
         let target_store =
             Arc::new(PostgresTargetStore::from_pool(pool.clone(), None)) as Arc<dyn TargetStore>;
-        let sink = ClickhouseResultSink::from_client(ch.clone());
+        let sink = ClickhouseResultSink::new(ch.clone(), "default".into(), "default".into());
 
         // Curate every target onto one page so the page-keyed aggregator has
         // the full component set to render.

@@ -28,6 +28,9 @@ use crate::storage::traits::{TargetFilter, TargetSort, TargetStore};
 pub struct PostgresTargetStore {
     pool: PgPool,
     cipher: Option<Arc<Cipher>>,
+    /// Region assigned to targets created through this store, so a new target
+    /// is scheduled immediately instead of waiting for boot reconciliation.
+    default_region: Arc<str>,
 }
 
 impl PostgresTargetStore {
@@ -57,7 +60,18 @@ impl PostgresTargetStore {
     }
 
     pub fn from_pool(pool: PgPool, cipher: Option<Arc<Cipher>>) -> Self {
-        Self { pool, cipher }
+        Self {
+            pool,
+            cipher,
+            default_region: Arc::from("default"),
+        }
+    }
+
+    /// Set the region new targets are assigned to. Wired from
+    /// `scheduler.effective_default_region()` at boot.
+    pub fn with_default_region(mut self, region: impl Into<Arc<str>>) -> Self {
+        self.default_region = region.into();
+        self
     }
 
     pub fn pool(&self) -> &PgPool {
@@ -78,6 +92,35 @@ impl PostgresTargetStore {
 
     fn rows_to_targets(&self, rows: Vec<TargetRow>) -> Result<Vec<Target>> {
         rows.into_iter().map(|r| self.decode_row(r)).collect()
+    }
+
+    /// Assign freshly-created targets to the default region within the create
+    /// transaction. Ensures the region row exists first (idempotent) so a store
+    /// configured with a not-yet-reconciled region can't FK-violate.
+    async fn assign_default_region(
+        &self,
+        conn: &mut sqlx::PgConnection,
+        target_ids: &[Uuid],
+    ) -> Result<()> {
+        let region: &str = &self.default_region;
+        sqlx::query(
+            "INSERT INTO regions (id, name, location) VALUES ($1, $1, '') \
+             ON CONFLICT (id) DO NOTHING",
+        )
+        .bind(region)
+        .execute(&mut *conn)
+        .await
+        .context("assign_default_region: ensure region")?;
+        sqlx::query(
+            "INSERT INTO target_regions (target_id, region) \
+             SELECT unnest($1::uuid[]), $2 ON CONFLICT DO NOTHING",
+        )
+        .bind(target_ids)
+        .bind(region)
+        .execute(&mut *conn)
+        .await
+        .context("assign_default_region: insert assignments")?;
+        Ok(())
     }
 }
 
@@ -294,6 +337,7 @@ impl TargetStore for PostgresTargetStore {
         .fetch_one(&mut *tx)
         .await
         .context("insert target")?;
+        self.assign_default_region(&mut *tx, &[row.id]).await?;
         tx.commit().await.context("create target: commit")?;
         self.decode_row(row)
     }
@@ -488,6 +532,8 @@ impl TargetStore for PostgresTargetStore {
                 .context("bulk insert targets")?
         };
 
+        let ids: Vec<Uuid> = rows.iter().map(|r| r.id).collect();
+        self.assign_default_region(&mut *tx, &ids).await?;
         tx.commit().await.context("bulk create: commit")?;
         self.rows_to_targets(rows)
     }
@@ -661,5 +707,19 @@ impl TargetStore for PostgresTargetStore {
             .await
             .context("postgres ping")?;
         Ok(())
+    }
+
+    async fn regions_for_org(&self, org: OrgId) -> Result<Vec<String>> {
+        let rows: Vec<(String,)> = sqlx::query_as(
+            "SELECT DISTINCT tr.region \
+             FROM target_regions tr JOIN targets t ON t.id = tr.target_id \
+             WHERE t.org_id = $1 \
+             ORDER BY tr.region",
+        )
+        .bind(org.0)
+        .fetch_all(&self.pool)
+        .await
+        .context("postgres regions_for_org")?;
+        Ok(rows.into_iter().map(|(r,)| r).collect())
     }
 }

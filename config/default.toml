@@ -65,6 +65,11 @@ buffer_size = 100000
 
 [scheduler]
 target_refresh_interval_secs = 30
+# This control plane's region id (override per deployment, e.g. "eu-helsinki").
+# A normal region row, not a sentinel — operator renames it to a real location.
+region = "default"
+# Region new targets are assigned to; empty falls back to `region`.
+default_region = ""
 
 [observability]
 # Fallback only — tracing reads RUST_LOG first, and the container
@@ -372,3 +377,21 @@ max_pages_per_tick = 500
 
 # Give up paging a channel after this many failed attempts.
 max_attempts = 5
+
+# Regional probe mode. Off = this process is a normal dashboard. On = it runs
+# as a stateless agent: pulls its region's monitor config from control_plane_url
+# and ships results back, with no local Postgres/ClickHouse/web/alerting. The
+# token carries a capability — set it via UPTIMEPAGE_AGENT__TOKEN, never here.
+[agent]
+enabled = false
+control_plane_url = ""
+region = ""
+pull_interval_secs = 30
+flush_interval_secs = 5
+buffer_capacity = 10000
+
+# Operator (instance-admin) surface for managing regions and agents across all
+# tenants. Gated by a static bearer secret — set it via UPTIMEPAGE_OPERATOR__ADMIN_TOKEN,
+# never here. Empty disables the surface (it 404s).
+[operator]
+admin_token = ""

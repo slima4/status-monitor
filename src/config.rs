@@ -71,6 +71,60 @@ pub struct AppConfig {
     pub mcp: McpConfig,
     #[serde(default)]
     pub escalation: EscalationConfig,
+    #[serde(default)]
+    pub agent: AgentConfig,
+    #[serde(default)]
+    pub operator: OperatorConfig,
+}
+
+/// `[operator]`. Instance-admin surface (`/operator/*`) for managing regions
+/// and agents across all tenants. Gated by a static bearer secret — env only,
+/// never a config file. Empty `admin_token` disables the surface entirely.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct OperatorConfig {
+    #[serde(default = "empty_secret", with = "secret_str")]
+    pub admin_token: SecretString,
+}
+
+impl Default for OperatorConfig {
+    fn default() -> Self {
+        Self {
+            admin_token: empty_secret(),
+        }
+    }
+}
+
+/// `[agent]`. Turns this process into a stateless regional probe: it pulls its
+/// region's monitor config from a control plane and ships results back, running
+/// no web/Postgres/ClickHouse/alerting of its own. Off by default (the process
+/// is a normal dashboard). `token` carries a capability — env only, never a
+/// config file.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct AgentConfig {
+    pub enabled: bool,
+    pub control_plane_url: String,
+    #[serde(default = "empty_secret", with = "secret_str")]
+    pub token: SecretString,
+    pub region: String,
+    pub pull_interval_secs: u64,
+    pub flush_interval_secs: u64,
+    pub buffer_capacity: usize,
+}
+
+impl Default for AgentConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            control_plane_url: String::new(),
+            token: empty_secret(),
+            region: String::new(),
+            pull_interval_secs: 30,
+            flush_interval_secs: 5,
+            buffer_capacity: 10_000,
+        }
+    }
 }
 
 /// `[escalation]`. Incident paging engine and its operator surfaces (escalation
@@ -744,6 +798,30 @@ pub struct ClickhouseConfig {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SchedulerConfig {
     pub target_refresh_interval_secs: u64,
+    /// This control plane's own region id. Its scheduler runs the targets
+    /// assigned to this region and stamps results with it — the same query an
+    /// agent pulls for its region. Boot reconciles the row into `regions`.
+    #[serde(default = "default_region_id")]
+    pub region: String,
+    /// Region assigned to newly-created targets. Empty falls back to `region`.
+    #[serde(default)]
+    pub default_region: String,
+}
+
+fn default_region_id() -> String {
+    "default".to_string()
+}
+
+impl SchedulerConfig {
+    /// Region new targets are assigned to: explicit `default_region`, else the
+    /// control plane's own `region`.
+    pub fn effective_default_region(&self) -> &str {
+        if self.default_region.trim().is_empty() {
+            &self.region
+        } else {
+            &self.default_region
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -1033,6 +1111,35 @@ impl AppConfig {
                     "observability.heartbeat.interval_seconds must be > 0".into()
                 ));
             }
+        }
+        Ok(())
+    }
+
+    /// Validate the regional-agent section. Only enforced when `agent.enabled`.
+    pub fn validate_runtime(&self) -> Result<()> {
+        fn err(msg: &str) -> crate::error::AppError {
+            crate::error::AppError::Other(anyhow::anyhow!(msg.to_string()))
+        }
+        let agent = &self.agent;
+        if !agent.enabled {
+            return Ok(());
+        }
+        if agent.control_plane_url.trim().is_empty() {
+            return Err(err("agent.control_plane_url is required when agent.enabled"));
+        }
+        if agent.region.trim().is_empty() {
+            return Err(err("agent.region is required when agent.enabled"));
+        }
+        if agent.token.expose_secret().trim().is_empty() {
+            return Err(err(
+                "UPTIMEPAGE_AGENT__TOKEN is required when agent.enabled is true",
+            ));
+        }
+        if agent.pull_interval_secs == 0 {
+            return Err(err("agent.pull_interval_secs must be > 0"));
+        }
+        if agent.buffer_capacity == 0 {
+            return Err(err("agent.buffer_capacity must be > 0"));
         }
         Ok(())
     }

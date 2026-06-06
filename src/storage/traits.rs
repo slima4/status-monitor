@@ -14,6 +14,18 @@ use crate::error::Result;
 #[async_trait]
 pub trait ResultSink: Send + Sync {
     async fn write_batch(&self, results: &[CheckResult]) -> Result<()>;
+
+    /// Write results tagged with the producing region + agent. The default
+    /// ignores the tags (home path); CH overrides to stamp them. Used by the
+    /// agent ingest API to attribute results to the submitting region.
+    async fn write_batch_tagged(
+        &self,
+        results: &[CheckResult],
+        _region: &str,
+        _agent_id: &str,
+    ) -> Result<()> {
+        self.write_batch(results).await
+    }
 }
 
 #[derive(Debug, Default, Clone)]
@@ -114,6 +126,10 @@ pub trait TargetStore: Send + Sync {
     async fn set_group(&self, org: OrgId, ids: &[Uuid], group: Option<&str>) -> Result<Vec<Uuid>>;
     /// Liveness probe for `/readyz` — connection-level, not tenant data.
     async fn ping(&self) -> Result<()>;
+    /// Distinct regions this org's targets are assigned to, sorted, for the
+    /// dashboard region selector. Empty or single-element means a single-region
+    /// org. Reads `target_regions` (config), not check history.
+    async fn regions_for_org(&self, org: OrgId) -> Result<Vec<String>>;
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -252,6 +268,7 @@ pub trait ResultsStore: Send + Sync {
         &self,
         org: OrgId,
         range: TimeRange,
+        region: Option<&str>,
     ) -> Result<StatusBreakdown>;
     /// Aggregate uptime, response, and incident count across all targets
     /// in `range`. Returns `(checks_total, checks_up, avg_ms,
@@ -259,13 +276,22 @@ pub trait ResultsStore: Send + Sync {
     /// must come from the same source as `checks_total`/`checks_up` so
     /// the dashboard's Δ-vs-prior comparison doesn't mix raw and
     /// per-target-rounded numbers.
-    async fn last_n_summary(&self, org: OrgId, range: TimeRange) -> Result<(u64, u64, u32, u64)>;
+    async fn last_n_summary(
+        &self,
+        org: OrgId,
+        range: TimeRange,
+        region: Option<&str>,
+    ) -> Result<(u64, u64, u32, u64)>;
     /// Per-monitor rollup for the operator dashboard table. One row per
     /// target with samples/up/p50/p95/last_status in `range`. Targets
     /// with no samples are omitted; the caller joins the result with the
     /// target list and synthesises a zero-sample row when needed.
-    async fn dashboard_rollup(&self, org: OrgId, range: TimeRange)
-    -> Result<Vec<DashboardMetrics>>;
+    async fn dashboard_rollup(
+        &self,
+        org: OrgId,
+        range: TimeRange,
+        region: Option<&str>,
+    ) -> Result<Vec<DashboardMetrics>>;
     /// Minute-bucketed average duration for the last 60 minutes, every
     /// monitor in the org. Drives the per-row sparkline. Implementations
     /// MUST read from the `check_results_1m` rollup (already aggregated
@@ -275,6 +301,7 @@ pub trait ResultsStore: Send + Sync {
         org: OrgId,
         from: chrono::DateTime<Utc>,
         to: chrono::DateTime<Utc>,
+        region: Option<&str>,
     ) -> Result<Vec<DashboardSparkBucket>>;
     /// Bucketed latency for a single monitor: p50/p95/p99 + per-phase means
     /// per `bucket_seconds` slice across `range`. Drives the monitor-detail
@@ -300,6 +327,7 @@ pub trait ResultsStore: Send + Sync {
         from: chrono::DateTime<Utc>,
         to: chrono::DateTime<Utc>,
         bucket_seconds: u32,
+        region: Option<&str>,
     ) -> Result<Vec<FleetRibbonBucket>>;
     /// Fleet totals for the period immediately preceding `range` (same
     /// span, ending at `range.from`). Drives the Δ-vs-prior hints on
@@ -312,6 +340,7 @@ pub trait ResultsStore: Send + Sync {
         &self,
         org: OrgId,
         range: TimeRange,
+        region: Option<&str>,
     ) -> Result<PriorPeriodSummary>;
 }
 

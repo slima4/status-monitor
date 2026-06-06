@@ -100,6 +100,33 @@ fn build_incident_metrics_cache() -> IncidentMetricsCache {
         .build()
 }
 
+/// Per-process fast-path for recently-ingested agent `batch_id`s. NOT the
+/// source of truth: it is per-replica, so during a blue/green cutover a retry
+/// can land on the other color and miss here. The authoritative cross-process
+/// guarantee is ClickHouse block dedup (`non_replicated_deduplication_window`):
+/// the agent re-sends a byte-identical block under a stable `batch_id`, which
+/// the server drops regardless of which color writes it. This cache just spares
+/// the common-case retry a redundant CH round-trip. TTL past the retry budget.
+pub type AgentIngestDedup = Cache<uuid::Uuid, ()>;
+
+fn build_agent_ingest_dedup() -> AgentIngestDedup {
+    Cache::builder()
+        .time_to_live(Duration::from_secs(300))
+        .max_capacity(100_000)
+        .build()
+}
+
+/// Per-agent "last_seen written recently" set, so a chatty agent doesn't UPDATE
+/// its row on every pull/push.
+pub type AgentSeenDebounce = Cache<uuid::Uuid, ()>;
+
+fn build_agent_seen_debounce() -> AgentSeenDebounce {
+    Cache::builder()
+        .time_to_live(Duration::from_secs(30))
+        .max_capacity(10_000)
+        .build()
+}
+
 /// Per-dependency readiness snapshot. Both critical stores must answer for
 /// the app to be "ready". Drives `/readyz` and the external heartbeat.
 #[derive(Debug, Clone, Copy)]
@@ -237,6 +264,14 @@ pub struct AppState {
     /// Escalation-engine signal channel. `Some` only when paging is enabled;
     /// lifecycle handlers (declare/resolve/reopen) nudge the engine through it.
     pub incident_signal_tx: Option<tokio::sync::mpsc::Sender<crate::escalation::IncidentSignal>>,
+    /// KEK cipher for decrypting check credentials — needed by the agent
+    /// config-pull API, which serves decrypted params to region agents.
+    pub cipher: Option<Arc<crate::security::Cipher>>,
+    /// Dedup of recently-ingested agent result `batch_id`s.
+    pub agent_ingest_dedup: AgentIngestDedup,
+    /// Debounce for agent `last_seen_at` writes — at most one UPDATE per agent
+    /// per TTL, mirroring the api-token last-used debounce.
+    pub agent_seen_debounce: AgentSeenDebounce,
 }
 
 /// Run unconditionally at boot after config parse. Encodes the per-org
@@ -349,7 +384,7 @@ impl AppState {
     ) -> Self {
         let quotas = Arc::new(QuotaService::new(&cfg, db.clone()));
         let monitor_share_store: Arc<dyn crate::storage::MonitorShareStore> = match db.clone() {
-            Some(pool) => Arc::new(crate::storage::PgMonitorShareStore::new(pool, cipher)),
+            Some(pool) => Arc::new(crate::storage::PgMonitorShareStore::new(pool, cipher.clone())),
             None => Arc::new(crate::storage::InMemoryMonitorShareStore::new()),
         };
         let page_asset_store: Arc<dyn crate::storage::PageAssetStore> = match db.clone() {
@@ -413,6 +448,9 @@ impl AppState {
             abuse,
             alert_channel_cache,
             incident_signal_tx: None,
+            cipher,
+            agent_ingest_dedup: build_agent_ingest_dedup(),
+            agent_seen_debounce: build_agent_seen_debounce(),
         }
     }
 
