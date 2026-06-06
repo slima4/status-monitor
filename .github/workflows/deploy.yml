@@ -170,6 +170,8 @@ jobs:
           RUST_LOG: ${{ vars.RUST_LOG }}
           UPTIMEPAGE_MCP_ENABLED: ${{ vars.MCP_ENABLED }}
           UPTIMEPAGE_MCP_OAUTH_ENABLED: ${{ vars.MCP_OAUTH_ENABLED }}
+          # Secret, not a variable — the URL carries a capability token.
+          HEARTBEAT_URL: ${{ secrets.HEARTBEAT_URL }}
         run: |
           set -euo pipefail
           # Lowercase only the repo (GHCR requires it); OCI tags are
@@ -198,6 +200,7 @@ jobs:
                RUST_LOG='${RUST_LOG}' \
                UPTIMEPAGE_MCP_ENABLED='${UPTIMEPAGE_MCP_ENABLED}' \
                UPTIMEPAGE_MCP_OAUTH_ENABLED='${UPTIMEPAGE_MCP_OAUTH_ENABLED}' \
+               HEARTBEAT_URL='${HEARTBEAT_URL}' \
                bash -s" <<'REMOTE'
           # This script is delivered to `bash -s` over the ssh heredoc — i.e. on
           # stdin (fd 0). A `docker compose exec -T` / `docker exec -i` / nested
@@ -273,6 +276,15 @@ jobs:
           # Re-assert 0644 on EVERY deploy (the old chmod only ran on the
           # volume-drop path, so normal deploys silently left them 0600).
           chmod 644 clickhouse-config.xml clickhouse-users.xml 2>/dev/null || true
+          # Fail loud if the mode didn't take (immutable bit, ACL, odd FS) —
+          # a 0600 here is the silent multi-day boot loop we just had.
+          for f in clickhouse-config.xml clickhouse-users.xml; do
+            mode=$(stat -c '%a' "$f" 2>/dev/null || echo "missing")
+            if [ "$mode" != "644" ]; then
+              echo "::error::${f} must be mode 644 for the ClickHouse container (UID 101) to read it; got ${mode}"
+              exit 1
+            fi
+          done
 
           # Single-file bind mounts pin the inode at container-create time:
           # a rewritten (new-inode) config is invisible to the running CH, and
@@ -473,6 +485,37 @@ jobs:
             done
           fi
 
+          # --- managed external heartbeat (optional) ------------------------
+          # Same write contract as the OTLP block: present → write URL +
+          # ENABLED=true. Removing the secret only SKIPS this block, so a prior
+          # HEARTBEAT_* persists in .env — to disable, clear those keys there.
+          if [ -n "${HEARTBEAT_URL:-}" ]; then
+            cp .env ".env.bak.$(date +%s).heartbeat"
+            before=$(awk 'END { print NR }' .env)
+            awk '
+              BEGIN {
+                m["HEARTBEAT_URL"]     = ENVIRON["HEARTBEAT_URL"]
+                m["HEARTBEAT_ENABLED"] = "true"
+              }
+              {
+                for (k in m) if ($0 ~ ("^" k "=")) { print k "=" m[k]; seen[k] = 1; next }
+                print
+              }
+              END { for (k in m) if (!seen[k]) print k "=" m[k] }
+            ' .env > .env.next
+            mv .env.next .env
+            after=$(awk 'END { print NR }' .env)
+            # 0..+2: appended only if both keys were absent before.
+            if [ "$after" -lt "$before" ] || [ "$after" -gt "$((before + 2))" ]; then
+              echo "::error::.env line count out of range after heartbeat upsert (${before} -> ${after})"
+              exit 1
+            fi
+            n=$(grep -cxF "HEARTBEAT_URL=$(printenv HEARTBEAT_URL)" .env || true)
+            [ "$n" = 1 ] || { echo "::error::HEARTBEAT_URL not written exactly once to .env (count=${n})"; exit 1; }
+            n=$(grep -cxF "HEARTBEAT_ENABLED=true" .env || true)
+            [ "$n" = 1 ] || { echo "::error::HEARTBEAT_ENABLED not written exactly once to .env (count=${n})"; exit 1; }
+          fi
+
           # --- managed RUST_LOG (optional) ----------------------------------
           # Non-secret log/trace filter, sourced from the repo *variable*
           # RUST_LOG (vars, not secrets). Same write contract as the blocks
@@ -631,6 +674,62 @@ jobs:
             echo "cutover ok; stopping previous color uptimepage_${active}"
             docker compose stop "uptimepage_${active}"
           fi
+
+          # Post-cutover gate. The readyz probe above is a single reachability
+          # check on the new color before traffic shifts; this asserts the
+          # dependencies are sustainably healthy and the new color stayed up
+          # once it took load — catches a store that is up-but-boot-looping or
+          # a color that OOMs under real traffic, which readyz alone misses.
+          for dep in postgres clickhouse; do
+            health="unknown"
+            for _ in $(seq 1 6); do
+              health=$(docker inspect -f '{{ .State.Health.Status }}' \
+                "$(docker compose ps -q "$dep")" 2>/dev/null || echo unknown)
+              [ "$health" = "healthy" ] && break
+              sleep 5   # tolerate a brief "starting" right after a recreate
+            done
+            if [ "$health" != "healthy" ]; then
+              echo "::error::${dep} not healthy after cutover (status=${health})"
+              docker compose logs --tail=60 "$dep" || true
+              exit 1
+            fi
+          done
+          tgt_state=$(docker inspect -f '{{ .State.Status }}' \
+            "$(docker compose ps -q "$TARGET_SVC")" 2>/dev/null || echo unknown)
+          if [ "$tgt_state" != "running" ]; then
+            echo "::error::${TARGET_SVC} is ${tgt_state} after cutover, expected running"
+            docker compose logs --tail=80 "$TARGET_SVC" || true
+            # New color died after the old one was stopped — a full outage that
+            # readyz (probed pre-traffic) can't catch. Use the blue/green
+            # reserve: restart the previous color, confirm it actually serves,
+            # then retire the dead color so Caddy stops retrying it. The deploy
+            # still fails — operator must investigate — but prod self-restores.
+            # .active_color is untouched above on this path, so it still names
+            # the previous color: no fixup needed.
+            if [ -n "$active" ]; then
+              prev="uptimepage_${active}"
+              echo "rolling back to previous color ${prev}"
+              docker compose start "$prev" || true
+              rolled_back=""
+              for i in $(seq 1 24); do
+                if docker compose exec -T clickhouse \
+                     wget -q -T 5 -t 1 -O /dev/null "http://${prev}:8080/readyz"; then
+                  rolled_back=1; echo "rollback ok: ${prev} ready after ${i} attempt(s)"; break
+                fi
+                [ "$i" -lt 24 ] && sleep 5
+              done
+              docker compose stop "$TARGET_SVC" || true
+              if [ -n "$rolled_back" ]; then
+                echo "::warning::deploy failed but rolled back to ${prev}; prod restored on the previous image"
+              else
+                echo "::error::rollback FAILED — ${prev} not ready after ~120s; prod is DOWN, manual intervention required"
+              fi
+            else
+              echo "::error::no previous color to roll back to (fresh bring-up); ${TARGET_SVC} is down"
+            fi
+            exit 1
+          fi
+          echo "post-cutover health gate ok: deps healthy, ${TARGET_SVC} running"
 
           # Record the now-active color (hint only; the running container is
           # the source of truth). Owner-only, same discipline as .env.
