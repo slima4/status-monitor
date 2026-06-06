@@ -265,6 +265,42 @@ jobs:
 
           cd deployment
 
+          # --- CH bind-mounted config: re-assert mode + heal stale mounts ----
+          # `git checkout`/`sparse-checkout reapply` above recreate these
+          # files under this script's `umask 077` → 0600. The ClickHouse
+          # container runs as UID 101 and can't read 0600 host files, so it
+          # boot-loops on "Access to file denied: …/config.d/custom.xml".
+          # Re-assert 0644 on EVERY deploy (the old chmod only ran on the
+          # volume-drop path, so normal deploys silently left them 0600).
+          chmod 644 clickhouse-config.xml clickhouse-users.xml 2>/dev/null || true
+
+          # Single-file bind mounts pin the inode at container-create time:
+          # a rewritten (new-inode) config is invisible to the running CH, and
+          # a plain `restart` re-reads the same stale inode. Hash host vs
+          # in-container and force-recreate CH only on drift (same pattern as
+          # the Caddyfile block below). Must run BEFORE the readyz gate, which
+          # probes from the CH container and would hang if CH were looping.
+          ch_recreate=""
+          for pair in \
+            "clickhouse-config.xml:/etc/clickhouse-server/config.d/custom.xml" \
+            "clickhouse-users.xml:/etc/clickhouse-server/users.d/zz-default-password.xml"; do
+            hf="${pair%%:*}"; cf="${pair#*:}"
+            host_h=$(sha256sum "$hf" 2>/dev/null | awk '{print $1}')
+            if ctr_line=$(docker compose exec -T clickhouse sha256sum "$cf" 2>/dev/null); then
+              ctr_h=$(printf '%s' "$ctr_line" | awk '{print $1}')
+            else
+              ctr_h=""   # CH down/unreadable → force a recreate (safe default)
+            fi
+            if [ -z "$host_h" ] || [ "$host_h" != "$ctr_h" ]; then
+              echo "CH config drift on ${hf} (host=${host_h:0:12} ctr=${ctr_h:0:12})"
+              ch_recreate=1
+            fi
+          done
+          if [ -n "$ch_recreate" ]; then
+            echo "recreating clickhouse to re-resolve bind mounts to current inodes"
+            docker compose up -d --no-build --force-recreate clickhouse
+          fi
+
           # --- pick the blue/green target color -----------------------------
           # Steady state runs exactly one app color; deploy the OTHER, then
           # stop the previous one. The running color is the source of truth
@@ -547,10 +583,7 @@ jobs:
             docker compose stop uptimepage_blue uptimepage_green clickhouse
             docker compose rm -f clickhouse
             docker volume rm "${proj}_clickhouse_data"
-            # Bind-mounted CH config must stay world-readable (0644): container
-            # UID 101 can't read 0600 host files → silent boot loop on a fresh
-            # volume. cwd is /opt/uptimepage/deployment (the config lives here).
-            chmod 644 clickhouse-config.xml clickhouse-users.xml 2>/dev/null || true
+            # Config mode (0644) already re-asserted unconditionally above.
             docker compose up -d clickhouse
           fi
 
