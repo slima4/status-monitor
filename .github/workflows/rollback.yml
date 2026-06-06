@@ -1,0 +1,81 @@
+name: rollback
+
+# Roll production back to a previous image via the same zero-downtime
+# blue/green cutover used by `deploy`. This workflow only resolves the target
+# image tag and re-dispatches `deploy` with it — all the cutover, .env, and
+# safety logic lives in deploy.yml (single source of truth, never duplicated).
+#
+# IMPORTANT — rollback is CODE-ONLY:
+#   • Applied database migrations are NOT reverted. Rolling the image back is
+#     safe only when the newer deploy's migrations were additive (old code can
+#     still read the newer schema). A breaking schema change must instead be
+#     undone with deploy's destructive `remigrate` path (downtime), not here.
+#   • The previous color's container is left stopped (not removed) by deploy,
+#     so the very fastest manual rollback — when the prior container is still
+#     present on the box — is just `docker compose start uptimepage_<color>`
+#     + `stop` the bad one. This workflow is the from-anywhere image rollback.
+#
+# Required repo secrets: same as deploy (DEPLOY_* set there); this workflow
+# uses only the GitHub API + a workflow dispatch, no SSH of its own.
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Image tag to roll back to (e.g. sha-<full40>, v1.2.3). Leave empty to auto-pick the previous successful auto-deploy."
+        required: false
+        type: string
+
+concurrency:
+  group: deploy-production # share deploy's lane so a rollback can't race a deploy
+  cancel-in-progress: false
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write # read deploy run history + dispatch the deploy workflow
+    env:
+      GH_TOKEN: ${{ github.token }}
+      INPUT_TAG: ${{ inputs.image_tag }}
+      REPO: ${{ github.repository }}
+    steps:
+      - name: resolve target tag
+        id: resolve
+        run: |
+          set -euo pipefail
+          tag="${INPUT_TAG:-}"
+          if [ -z "$tag" ]; then
+            # Auto-pick: the head_sha of the 2nd-most-recent SUCCESSFUL auto
+            # deploy (event=workflow_run — those map 1:1 to a published
+            # sha-<40> image; manual dispatches don't, so they're excluded).
+            # The API returns runs newest-first; dedup to DISTINCT shas keeping
+            # that order (jq's unique_by sorts, which would scramble recency),
+            # so [0] is what's live now and [1] is the previous distinct image.
+            # shellcheck disable=SC2016  # $s is a jq variable, must not expand in shell
+            prev=$(gh api \
+              "repos/${REPO}/actions/workflows/deploy.yml/runs?event=workflow_run&status=success&per_page=20" \
+              --jq '[.workflow_runs[].head_sha] | reduce .[] as $s ([]; if index($s) then . else . + [$s] end) | .[1] // empty' 2>/dev/null || true)
+            [ -n "$prev" ] || { echo "::error::could not auto-resolve a previous deploy — pass image_tag explicitly"; exit 1; }
+            tag="sha-${prev}"
+          fi
+          # Same validation deploy enforces: a sha-* tag must be the full 40-hex.
+          case "$tag" in
+            sha-*)
+              printf '%s' "${tag#sha-}" | grep -qiE '^[0-9a-f]{40}$' \
+                || { echo "::error::resolved tag '$tag' is not sha-<full 40-hex>"; exit 1; }
+              ;;
+          esac
+          echo "rolling back to: $tag"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: dispatch deploy with the rollback tag
+        run: |
+          set -euo pipefail
+          tag='${{ steps.resolve.outputs.tag }}'
+          gh workflow run deploy.yml \
+            -f image_tag="$tag" \
+            -f remigrate=false \
+            -f remigrate_clickhouse=false
+          echo "dispatched deploy for $tag — watch it in the Actions tab (zero-downtime blue/green cutover)."

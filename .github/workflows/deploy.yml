@@ -265,6 +265,25 @@ jobs:
 
           cd deployment
 
+          # --- pick the blue/green target color -----------------------------
+          # Steady state runs exactly one app color; deploy the OTHER, then
+          # stop the previous one. The running color is the source of truth
+          # (.active_color is only a hint); a box where neither is up (fresh
+          # bring-up / full recreate) defaults to blue.
+          active=""
+          if docker compose ps --services --status running 2>/dev/null | grep -qx uptimepage_blue; then
+            active="blue"
+          elif docker compose ps --services --status running 2>/dev/null | grep -qx uptimepage_green; then
+            active="green"
+          fi
+          case "$active" in
+            blue)  target="green" ;;
+            green) target="blue"  ;;
+            *)     target="blue"  ;;
+          esac
+          TARGET_SVC="uptimepage_${target}"
+          echo "active color: ${active:-none}; deploying to: ${target}"
+
           # --- bump UPTIMEPAGE_IMAGE in .env -----------------------------
           # cp backup FIRST; awk in-place rewrite (every line is reprinted, only
           # the target key is substituted — never grep -v | append | mv); then
@@ -503,13 +522,13 @@ jobs:
           # private (org policy). The job's GITHUB_TOKEN carries packages:read;
           # the login is ephemeral (token dies with the run).
           echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
-          docker compose pull uptimepage
+          docker compose pull "$TARGET_SVC"
 
           # --- optional destructive re-migrate (Postgres only) ---------------
           # Now the cutover is fast: stop, drop, recreate, restart in seconds.
           if [ "$REMIGRATE" = "true" ]; then
             echo "remigrate: stopping app + dropping Postgres database 'monitor'"
-            docker compose stop uptimepage
+            docker compose stop uptimepage_blue uptimepage_green
             docker compose exec -T postgres sh -c \
               'PGPASSWORD="$POSTGRES_PASSWORD" psql -U monitor -d postgres -v ON_ERROR_STOP=1 \
                  -c "DROP DATABASE IF EXISTS monitor WITH (FORCE);" \
@@ -525,7 +544,7 @@ jobs:
             # Project name off a still-running container (the compose project is
             # `uptimepage`, not the dir) → the volume is <project>_clickhouse_data.
             proj=$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' "$(docker compose ps -q postgres)")
-            docker compose stop uptimepage clickhouse
+            docker compose stop uptimepage_blue uptimepage_green clickhouse
             docker compose rm -f clickhouse
             docker volume rm "${proj}_clickhouse_data"
             # Bind-mounted CH config must stay world-readable (0644): container
@@ -535,20 +554,55 @@ jobs:
             docker compose up -d clickhouse
           fi
 
-          # Scope the recreate to the app so a compose change never silently
-          # recreates postgres/caddy as a side effect of the roll. When the
-          # OTLP trace creds are managed here, --force-recreate for the same
-          # reason the alloy line below uses it: a token rotation on an
-          # unchanged image tag would otherwise keep the old container with
-          # stale trace env. A normal deploy bumps the image and recreates
-          # anyway, so this only bites the same-tag re-enable/rotate path.
+          # --- blue/green cutover -------------------------------------------
+          # Boot the idle color on the new image while the active color keeps
+          # serving. Its deps (postgres/clickhouse) start too if down, but the
+          # active color + caddy are untouched. --force-recreate when OTLP
+          # trace creds are managed here so a same-tag token rotation actually
+          # lands (otherwise `up -d` keeps the old container + stale env); a
+          # normal image bump recreates anyway.
           if [ -n "${GRAFANA_OTLP_ENDPOINT:-}" ] \
              && [ -n "${GRAFANA_OTLP_INSTANCE_ID:-}" ] \
              && [ -n "${GRAFANA_OTLP_API_TOKEN:-}" ]; then
-            docker compose up -d --no-build --force-recreate uptimepage
+            docker compose up -d --no-build --force-recreate "$TARGET_SVC"
           else
-            docker compose up -d --no-build uptimepage
+            docker compose up -d --no-build "$TARGET_SVC"
           fi
+
+          # Gate on the NEW color's /readyz (DB reachable + migrations applied)
+          # BEFORE shifting traffic. Probe it on the internal docker network
+          # from the clickhouse container (always up as an app dependency, and
+          # ships wget) — the app image is distroless and the host can't reach
+          # :8080 (no published port). Caddy still routes to the OLD color
+          # throughout this wait, so a slow/failed boot never drops traffic.
+          ready=""
+          for i in $(seq 1 30); do
+            if docker compose exec -T clickhouse \
+                 wget -q -T 5 -t 1 -O /dev/null "http://${TARGET_SVC}:8080/readyz"; then
+              ready=1; echo "${TARGET_SVC} ready after ${i} attempt(s)"; break
+            fi
+            [ "$i" -lt 30 ] && sleep 5
+          done
+          if [ -z "$ready" ]; then
+            echo "::error::${TARGET_SVC} did not become ready within ~150s — aborting cutover; ${active:-previous} color still serving"
+            docker compose logs --tail=80 "$TARGET_SVC" || true
+            docker compose stop "$TARGET_SVC" || true
+            exit 1
+          fi
+
+          # New color is ready and Caddy's active /readyz check now routes to
+          # it. Stop the previous color — axum drains in-flight requests
+          # within stop_grace_period (30s). Keep it stopped (not removed) so a
+          # rollback is an instant `docker compose start uptimepage_${active}`.
+          if [ -n "$active" ]; then
+            echo "cutover ok; stopping previous color uptimepage_${active}"
+            docker compose stop "uptimepage_${active}"
+          fi
+
+          # Record the now-active color (hint only; the running container is
+          # the source of truth). Owner-only, same discipline as .env.
+          printf '%s\n' "$target" > .active_color
+          chmod 600 .active_color
 
           # Caddy: bind-mounted Caddyfile. A `git checkout` of a deploy
           # that edits the file leaves the running container reading the
@@ -601,7 +655,7 @@ jobs:
           # state unnoticed. `docker compose ps -q` uses the live project
           # name + handles replicas, so it doesn't bit-rot if the project
           # is renamed or scaled.
-          for svc in postgres clickhouse uptimepage; do
+          for svc in postgres clickhouse uptimepage_blue uptimepage_green; do
             for ctr in $(docker compose ps -q "$svc"); do
               bound=$(docker port "$ctr" 2>/dev/null || true)
               if [ -n "$bound" ]; then

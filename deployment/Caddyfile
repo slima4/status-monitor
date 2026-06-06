@@ -46,6 +46,42 @@
 }
 
 # ═══════════════════════════════════════════════════════════════════════
+# Shared app upstream — blue/green replicas
+# ═══════════════════════════════════════════════════════════════════════
+# Both app colors with active health checks. Steady state one color is up; the
+# stopped color fails /readyz and is held out of rotation. During a deploy's
+# brief overlap both are healthy and round-robined (same DB, harmless).
+# Imported by every site block below so the upstream is defined once.
+(app_upstream) {
+	reverse_proxy uptimepage_blue:8080 uptimepage_green:8080 {
+		lb_policy round_robin
+		lb_try_duration 5s
+		header_up X-Real-IP {remote_host}
+
+		# Liveness, not readiness. The app binds its HTTP listener only after
+		# migrations finish, so a freshly booted, still-migrating color can't
+		# answer /healthz yet — it stays out of rotation until it's actually
+		# serving. /readyz would be wrong here: it 503s whenever Postgres is
+		# briefly unreachable, which would eject every upstream and 502 the
+		# whole edge on a transient blip. The deploy gates the cutover on
+		# /readyz separately, before stopping the old color. Caddy preserves
+		# the inbound Host + X-Forwarded-* by default, so the public status +
+		# marketing surfaces still see the original Host for routing.
+		health_uri /healthz
+		health_interval 5s
+		health_timeout 3s
+		fail_duration 10s
+
+		transport http {
+			dial_timeout 5s
+			response_header_timeout 30s
+			read_buffer 64KB
+			write_buffer 64KB
+		}
+	}
+}
+
+# ═══════════════════════════════════════════════════════════════════════
 # Operator UI + API
 # ═══════════════════════════════════════════════════════════════════════
 app.{$UPTIMEPAGE_DOMAIN} {
@@ -57,7 +93,7 @@ app.{$UPTIMEPAGE_DOMAIN} {
 	# without credentials.
 	@health path /healthz /readyz
 	handle @health {
-		reverse_proxy uptimepage:8080
+		import app_upstream
 	}
 
 	# ─── Block Prometheus metrics from the public internet ──────────────
@@ -87,13 +123,7 @@ app.{$UPTIMEPAGE_DOMAIN} {
 			}
 		}
 		header Cache-Control "public, max-age=10, stale-while-revalidate=30"
-		reverse_proxy uptimepage:8080 {
-			header_up X-Real-IP {remote_host}
-			transport http {
-				dial_timeout 5s
-				response_header_timeout 30s
-			}
-		}
+		import app_upstream
 	}
 
 	# ─── Per-IP limits on the abuse-sensitive endpoints ─────────────────
@@ -109,9 +139,7 @@ app.{$UPTIMEPAGE_DOMAIN} {
 				window 1m
 			}
 		}
-		reverse_proxy uptimepage:8080 {
-			header_up X-Real-IP {remote_host}
-		}
+		import app_upstream
 	}
 
 	# Org creation — strict speedbump against naive mass-signup abuse.
@@ -127,9 +155,7 @@ app.{$UPTIMEPAGE_DOMAIN} {
 				window 24h
 			}
 		}
-		reverse_proxy uptimepage:8080 {
-			header_up X-Real-IP {remote_host}
-		}
+		import app_upstream
 	}
 
 	# ─── Login page — defense-in-depth speedbump ────────────────────────
@@ -151,9 +177,7 @@ app.{$UPTIMEPAGE_DOMAIN} {
 				window 1m
 			}
 		}
-		reverse_proxy uptimepage:8080 {
-			header_up X-Real-IP {remote_host}
-		}
+		import app_upstream
 	}
 
 	# ─── Share links — anonymous, per-IP edge cap ───────────────────────
@@ -175,9 +199,7 @@ app.{$UPTIMEPAGE_DOMAIN} {
 				window 1m
 			}
 		}
-		reverse_proxy uptimepage:8080 {
-			header_up X-Real-IP {remote_host}
-		}
+		import app_upstream
 	}
 
 	# ─── Operator surface: app-enforced session auth (SaaS) ─────────────
@@ -217,31 +239,7 @@ app.{$UPTIMEPAGE_DOMAIN} {
 	}
 
 	# ─── Reverse proxy to the Rust service ──────────────────────────────
-	reverse_proxy uptimepage:8080 {
-		# Caddy already forwards X-Forwarded-{For,Proto,Host} by default;
-		# X-Real-IP is the only one we have to set explicitly.
-		header_up X-Real-IP {remote_host}
-
-		# Active health check. The runtime image is distroless (no shell,
-		# no wget) so the Docker healthcheck would have nothing to call —
-		# Caddy probes /healthz directly instead. /healthz is process
-		# liveness only; /readyz hits the database, which would add ~3k
-		# pointless DB roundtrips per day at this interval. With a single
-		# replica a failed probe returns 502 until /healthz recovers —
-		# the right signal for an external uptime probe.
-		health_uri /healthz
-		health_interval 30s
-		health_timeout 3s
-
-		# Timeouts — long enough for slow ClickHouse aggregation queries
-		# but bounded so we don't hold connections forever.
-		transport http {
-			dial_timeout 5s
-			response_header_timeout 30s
-			read_buffer 64KB
-			write_buffer 64KB
-		}
-	}
+	import app_upstream
 }
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -304,23 +302,9 @@ app.{$UPTIMEPAGE_DOMAIN} {
 		format json
 	}
 
-	# Forward the original Host so the Rust app can extract the slug.
-	reverse_proxy uptimepage:8080 {
-		header_up Host {host}
-		header_up X-Real-IP {remote_host}
-		health_uri /healthz
-		health_interval 30s
-		health_timeout 3s
-
-		# Public-page aggregation also hits ClickHouse — keep the same
-		# bounded-but-generous timeouts as the operator surface.
-		transport http {
-			dial_timeout 5s
-			response_header_timeout 30s
-			read_buffer 64KB
-			write_buffer 64KB
-		}
-	}
+	# The app reads the original Host to map slug → org; Caddy forwards it
+	# upstream by default.
+	import app_upstream
 }
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -336,17 +320,9 @@ app.{$UPTIMEPAGE_DOMAIN} {
 	encode gzip zstd
 
 	# Send the canonical-host signal to the dispatcher. Marketing reads
-	# the Host header to decide between landing and a tenant fall-through.
-	reverse_proxy uptimepage:8080 {
-		header_up Host {host}
-		header_up X-Forwarded-Proto {scheme}
-		header_up X-Forwarded-For {remote_host}
-
-		transport http {
-			dial_timeout 5s
-			response_header_timeout 30s
-		}
-	}
+	# the Host header to decide between landing and a tenant fall-through;
+	# Caddy forwards Host + X-Forwarded-* upstream by default.
+	import app_upstream
 
 	# Marketing surfaces are public, cacheable, JS-free; no edge auth.
 	header {

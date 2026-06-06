@@ -14,10 +14,14 @@
 // container (set via UPTIMEPAGE_SERVER__METRICS_BIND in compose) so
 // a separate container can reach it; the port is never published to the
 // host.
+// Both blue/green replicas. Steady state one color is up (the other scrape
+// yields up=0, harmless); during a deploy's brief overlap both are up — the
+// `color` label keeps their series distinct so they don't collide.
 prometheus.scrape "uptimepage" {
-  targets = [{
-    __address__ = "uptimepage:9090",
-  }]
+  targets = [
+    { __address__ = "uptimepage_blue:9090",  color = "blue"  },
+    { __address__ = "uptimepage_green:9090", color = "green" },
+  ]
   forward_to      = [prometheus.remote_write.grafana_cloud.receiver]
   job_name        = "uptimepage"
   scrape_interval = "15s"
@@ -82,13 +86,15 @@ discovery.relabel "uptimepage_only" {
 
   rule {
     source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
-    regex         = "uptimepage"
+    regex         = "uptimepage_(blue|green)"
     action        = "keep"
   }
 
+  // Collapse both colors under one container label so blue/green don't split
+  // the Loki stream — they are the same logical app.
   rule {
-    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
-    target_label  = "container"
+    target_label = "container"
+    replacement  = "uptimepage"
   }
 
   rule {

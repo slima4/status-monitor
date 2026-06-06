@@ -40,9 +40,8 @@ services:
       - caddy_data:/data           # certs + keys — back this up!
       - caddy_config:/config
       - caddy_logs:/var/log/caddy
-    depends_on:
-      uptimepage:
-        condition: service_started
+    # No depends_on the app: Caddy tolerates a down upstream via its active
+    # health check, and the app color it should wait for changes per deploy.
     healthcheck:
       # Caddy's admin API (plaintext, always up while Caddy runs). Use the
       # IPv4 literal: Caddy binds admin on 127.0.0.1 only, but `localhost`
@@ -54,7 +53,13 @@ services:
       timeout: 5s
       retries: 3
 
-  uptimepage:
+  # Two interchangeable app replicas for zero-downtime cutover. Steady state
+  # runs exactly one; a deploy boots the idle color, waits for its /readyz,
+  # then stops the running one (graceful drain). Caddy fronts both and routes
+  # only to whichever passes its health check. The body is defined once on
+  # `uptimepage_blue` (the `&uptimepage_app` anchor) and merged into
+  # `uptimepage_green` — both are byte-identical.
+  uptimepage_blue: &uptimepage_app
     # Build from repo root by default; override with a pre-built image by setting
     # UPTIMEPAGE_IMAGE=ghcr.io/you/uptimepage:v1.2.3 in .env.
     build:
@@ -62,6 +67,11 @@ services:
       dockerfile: Dockerfile
     image: ${UPTIMEPAGE_IMAGE:-uptimepage:latest}
     restart: unless-stopped
+    # Long enough for an in-flight ClickHouse-backed request (Caddy's
+    # response_header_timeout is 30s) to finish on SIGTERM before SIGKILL.
+    # The app drains via axum graceful shutdown; the default 10s grace would
+    # truncate a slow request mid-cutover.
+    stop_grace_period: 30s
     # No `ports:` — only reachable via the internal network.
     expose:
       - "8080"   # API + UI
@@ -142,6 +152,9 @@ services:
     # No container-level healthcheck: the runtime image is distroless
     # (no shell, no wget, no curl). Caddy probes /healthz actively via
     # `health_uri` in the reverse_proxy block — see Caddyfile.
+
+  uptimepage_green:
+    <<: *uptimepage_app
 
   postgres:
     image: postgres:17-alpine
@@ -227,9 +240,8 @@ services:
       # operator-controlled box, pinned upstream Alloy image, metrics
       # profile only). Rationale in runbooks/grafana-cloud.md.
       - /var/run/docker.sock:/var/run/docker.sock:ro
-    depends_on:
-      uptimepage:
-        condition: service_started
+    # No depends_on the app: Alloy scrapes/tails over the network and must
+    # survive either color being the one that's down.
 
 volumes:
   caddy_data:
