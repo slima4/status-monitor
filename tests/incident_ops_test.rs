@@ -194,6 +194,7 @@ async fn writer_opens_internal_incident_for_private_monitor_pg() {
                 status_at_start: CheckStatus::Down,
                 check_count: 2,
                 error_sample: None,
+                region: None,
             },
         )
         .await

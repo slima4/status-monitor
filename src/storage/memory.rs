@@ -85,6 +85,24 @@ impl ResultsStore for InMemorySink {
         Ok(paged)
     }
 
+    async fn list_results_by_region(
+        &self,
+        org: OrgId,
+        target_id: Uuid,
+        range: ClampedRange,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<(String, CheckResult)>> {
+        // No region dimension in memory; tag every row one synthetic region.
+        let rows = self
+            .list_results(org, target_id, range, limit, offset, None)
+            .await?;
+        Ok(rows
+            .into_iter()
+            .map(|r| ("default".to_string(), r))
+            .collect())
+    }
+
     async fn uptime(
         &self,
         _org: OrgId,

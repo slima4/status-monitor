@@ -227,7 +227,9 @@ impl AdminRepo {
              FROM target_regions tr \
              JOIN targets t ON t.id = tr.target_id \
              JOIN organizations o ON o.id = t.org_id \
-             WHERE tr.region = $1 AND t.enabled = true AND o.deleted_at IS NULL",
+             JOIN regions rg ON rg.id = tr.region \
+             WHERE tr.region = $1 AND t.enabled = true AND o.deleted_at IS NULL \
+               AND rg.enabled",
         )
         .bind(region)
         .fetch_one(&self.pool)
@@ -250,7 +252,9 @@ impl AdminRepo {
              FROM targets t \
              JOIN organizations o ON o.id = t.org_id \
              JOIN target_regions tr ON tr.target_id = t.id \
-             WHERE t.enabled = true AND o.deleted_at IS NULL AND tr.region = $1"
+             JOIN regions rg ON rg.id = tr.region \
+             WHERE t.enabled = true AND o.deleted_at IS NULL AND tr.region = $1 \
+               AND rg.enabled"
         );
         let rows: Vec<OrgTargetRow> = sqlx::query_as::<_, OrgTargetRow>(&sql)
             .bind(region)
@@ -276,7 +280,9 @@ impl AdminRepo {
              FROM target_regions tr \
              JOIN targets t ON t.id = tr.target_id \
              JOIN organizations o ON o.id = t.org_id \
-             WHERE tr.region = $1 AND t.enabled = true AND o.deleted_at IS NULL",
+             JOIN regions rg ON rg.id = tr.region \
+             WHERE tr.region = $1 AND t.enabled = true AND o.deleted_at IS NULL \
+               AND rg.enabled",
         )
         .bind(region)
         .fetch_all(&self.pool)

@@ -79,6 +79,7 @@ struct PlanRow {
     max_escalation_policies: i32,
     max_on_call_schedules: i32,
     max_logo_size_bytes: i32,
+    max_regions: i32,
     api_writes_per_minute: i32,
     api_reads_per_minute: i32,
     bulk_ops_per_minute: i32,
@@ -116,6 +117,7 @@ impl From<PlanRow> for Plan {
             max_escalation_policies: r.max_escalation_policies,
             max_on_call_schedules: r.max_on_call_schedules,
             max_logo_size_bytes: r.max_logo_size_bytes,
+            max_regions: r.max_regions,
             api_writes_per_minute: r.api_writes_per_minute,
             api_reads_per_minute: r.api_reads_per_minute,
             bulk_ops_per_minute: r.bulk_ops_per_minute,
@@ -201,7 +203,7 @@ impl QuotaService {
                      p.max_maintenance_windows, \
                      p.max_notification_channels, p.max_escalation_policies, \
                      p.max_on_call_schedules, \
-                     p.max_logo_size_bytes, \
+                     p.max_logo_size_bytes, p.max_regions, \
                      p.api_writes_per_minute, \
                      p.api_reads_per_minute, p.bulk_ops_per_minute, \
                      p.test_now_per_minute, p.check_now_per_minute, \
@@ -740,6 +742,7 @@ fn unlimited_plan() -> Plan {
         max_escalation_policies: i32::MAX,
         max_on_call_schedules: i32::MAX,
         max_logo_size_bytes: i32::MAX,
+        max_regions: i32::MAX,
         api_writes_per_minute: i32::MAX,
         api_reads_per_minute: i32::MAX,
         bulk_ops_per_minute: i32::MAX,

@@ -624,6 +624,42 @@ struct OwnedResultRow {
     error: Option<String>,
 }
 
+#[derive(Debug, Row, Deserialize)]
+struct RegionResultRow {
+    region: String,
+    #[serde(with = "clickhouse::serde::uuid")]
+    target_id: Uuid,
+    timestamp: i64,
+    status: i8,
+    duration_ms: u32,
+    dns_ms: Option<u16>,
+    connect_ms: Option<u16>,
+    tls_ms: Option<u16>,
+    ttfb_ms: Option<u16>,
+    response_code: Option<u16>,
+    response_size: Option<u32>,
+    error: Option<String>,
+}
+
+impl RegionResultRow {
+    fn split(self, org_id: Uuid) -> (String, CheckResult) {
+        let inner = OwnedResultRow {
+            target_id: self.target_id,
+            timestamp: self.timestamp,
+            status: self.status,
+            duration_ms: self.duration_ms,
+            dns_ms: self.dns_ms,
+            connect_ms: self.connect_ms,
+            tls_ms: self.tls_ms,
+            ttfb_ms: self.ttfb_ms,
+            response_code: self.response_code,
+            response_size: self.response_size,
+            error: self.error,
+        };
+        (self.region, row_to_result(inner, org_id))
+    }
+}
+
 fn row_to_result(row: OwnedResultRow, org_id: Uuid) -> CheckResult {
     let timestamp: DateTime<Utc> = Utc
         .timestamp_millis_opt(row.timestamp)
@@ -692,6 +728,38 @@ impl ResultsStore for ClickhouseResultsStore {
             .await
             .context("clickhouse list_results")?;
         Ok(rows.into_iter().map(|r| row_to_result(r, org.0)).collect())
+    }
+
+    async fn list_results_by_region(
+        &self,
+        org: OrgId,
+        target_id: Uuid,
+        range: ClampedRange,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<(String, CheckResult)>> {
+        let limit = limit.min(10_000) as u64;
+        let offset = offset as u64;
+        let rows: Vec<RegionResultRow> = self
+            .client
+            .query(&format!(
+                "SELECT region, target_id, timestamp, status, duration_ms, dns_ms, connect_ms, \
+                 tls_ms, ttfb_ms, response_code, response_size, error FROM {TABLE} \
+                 WHERE org_id = ? AND target_id = ? \
+                 AND timestamp >= fromUnixTimestamp64Milli(?) \
+                 AND timestamp < fromUnixTimestamp64Milli(?) \
+                 ORDER BY timestamp DESC LIMIT ? OFFSET ?"
+            ))
+            .bind(org.0)
+            .bind(target_id)
+            .bind(range.from.timestamp_millis())
+            .bind(range.to.timestamp_millis())
+            .bind(limit)
+            .bind(offset)
+            .fetch_all::<RegionResultRow>()
+            .await
+            .context("clickhouse list_results_by_region")?;
+        Ok(rows.into_iter().map(|r| r.split(org.0)).collect())
     }
 
     async fn list_incidents(

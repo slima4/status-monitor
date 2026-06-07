@@ -43,13 +43,14 @@ use crate::storage::traits::{ClampedRange, TimeRange};
 #[async_trait]
 pub trait IncidentStore: Send + Sync {
     async fn open_for_target(&self, org: OrgId, target_id: Uuid) -> Result<Option<OpenIncident>>;
-    /// Batched cross-tenant lookup: one SQL round-trip resolves the
-    /// `OpenIncident` (if any) for every `(org, target)` pair in the page.
-    /// Collapses the N-per-page probes the per-target call would do.
+    /// Batched cross-tenant lookup: one SQL round-trip resolves every open
+    /// `OpenIncident` for every `(org, target)` pair in the page. A pair maps to
+    /// a list because the per-region policy can hold more than one open incident
+    /// per target; the combined policies yield at most one (region `None`).
     async fn open_for_pairs(
         &self,
         pairs: &[(OrgId, Uuid)],
-    ) -> Result<std::collections::HashMap<(OrgId, Uuid), OpenIncident>>;
+    ) -> Result<std::collections::HashMap<(OrgId, Uuid), Vec<OpenIncident>>>;
     async fn insert_open(&self, org: OrgId, new: NewOpenIncident) -> Result<Uuid>;
     async fn close(&self, org: OrgId, incident_id: Uuid, ended_at: DateTime<Utc>) -> Result<()>;
 }
@@ -59,6 +60,8 @@ pub struct OpenIncident {
     pub id: Uuid,
     pub target_id: Uuid,
     pub started_at: DateTime<Utc>,
+    /// `None` = whole-target incident; `Some(r)` = scoped to one region.
+    pub region: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -68,6 +71,19 @@ pub struct NewOpenIncident {
     pub status_at_start: CheckStatus,
     pub check_count: u32,
     pub error_sample: Option<String>,
+    pub region: Option<String>,
+}
+
+/// How per-region health folds into incidents. Engine implements all three; the
+/// writer applies a fixed default until the per-monitor selector ships.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RegionIncidentPolicy {
+    /// One incident per target, opened as soon as any region is sustained-bad.
+    AnyDown,
+    /// One incident per target, opened once `n` regions agree it is down.
+    Quorum(u32),
+    /// One incident per `(target, region)`.
+    PerRegion,
 }
 
 #[derive(Debug, Clone)]
@@ -213,7 +229,7 @@ impl IncidentWriter {
             stream::iter(page.into_iter().map(|(org, target)| {
                 let open_map = open_map.clone();
                 async move {
-                    let open = open_map.get(&(org, target.id)).cloned();
+                    let open = open_map.get(&(org, target.id)).cloned().unwrap_or_default();
                     if let Err(err) = self.process_target(org, &target, open, range).await {
                         tracing::warn!(
                             %org,
@@ -234,40 +250,54 @@ impl IncidentWriter {
         &self,
         org: OrgId,
         target: &Target,
-        open: Option<OpenIncident>,
+        open: Vec<OpenIncident>,
         range: TimeRange,
     ) -> Result<()> {
-        // System read: incident detection sees the full retention window.
-        let mut results = self
+        let tagged = self
             .results_store
-            .list_results(
+            .list_results_by_region(
                 org,
                 target.id,
                 ClampedRange::unclamped(range),
                 self.cfg.max_results_per_tick,
                 0,
-                None,
             )
             .await?;
-        // Storage returns DESC by timestamp; algorithm operates on ASC.
-        results.sort_by_key(|r| r.timestamp);
+        // Each region evaluated on its own ASC run, never interleaved.
+        let mut by_region: std::collections::BTreeMap<String, Vec<CheckResult>> =
+            std::collections::BTreeMap::new();
+        for (region, r) in tagged {
+            by_region.entry(region).or_default().push(r);
+        }
+        let mut by_region: Vec<(String, Vec<CheckResult>)> = by_region.into_iter().collect();
+        for (_, results) in by_region.iter_mut() {
+            results.sort_by_key(|r| r.timestamp);
+        }
 
-        match decide(open.as_ref(), &results, self.cfg.flap_threshold) {
-            Action::None => {}
-            Action::Open(new) => {
-                let id = self.incident_store.insert_open(org, new).await?;
-                tracing::info!(%org, target_id = %target.id, incident_id = %id, "incident opened");
-                self.signal(org, id, NotificationReason::Opened);
-            }
-            Action::Close {
-                incident_id,
-                ended_at,
-            } => {
-                self.incident_store
-                    .close(org, incident_id, ended_at)
-                    .await?;
-                tracing::info!(%org, target_id = %target.id, incident_id = %incident_id, "incident closed");
-                self.signal(org, incident_id, NotificationReason::Resolved);
+        // AnyDown until the per-monitor policy selector ships.
+        let actions = decide_multi(
+            target.id,
+            &open,
+            &by_region,
+            self.cfg.flap_threshold,
+            RegionIncidentPolicy::AnyDown,
+        );
+        for action in actions {
+            match action {
+                Action::None => {}
+                Action::Open(new) => {
+                    let id = self.incident_store.insert_open(org, new).await?;
+                    tracing::info!(%org, target_id = %target.id, incident_id = %id, "incident opened");
+                    self.signal(org, id, NotificationReason::Opened);
+                }
+                Action::Close {
+                    incident_id,
+                    ended_at,
+                } => {
+                    self.incident_store.close(org, incident_id, ended_at).await?;
+                    tracing::info!(%org, target_id = %target.id, incident_id = %incident_id, "incident closed");
+                    self.signal(org, incident_id, NotificationReason::Resolved);
+                }
             }
         }
         Ok(())
@@ -292,51 +322,142 @@ impl PartialEq for NewOpenIncident {
             && self.status_at_start == other.status_at_start
             && self.check_count == other.check_count
             && self.error_sample == other.error_sample
+            && self.region == other.region
     }
 }
 
-/// Pure decision function: given the current open-incident state and a list
-/// of recent results sorted ascending by timestamp, return what should happen.
+/// Single-region convenience over [`decide_multi`]: one region, combined
+/// any-down policy. Kept for call sites and tests that reason about a flat
+/// result stream. Returns at most one [`Action`].
 ///
-/// **Idempotency**: this function is referentially transparent. Running it
-/// twice on the same `(open, results)` returns the same `Action`, and any
-/// `Action::Open` it returns assumes the caller has just verified there is
-/// no open incident — running again after the write naturally falls through
-/// to `Action::None` because the open incident is now present.
+/// **Idempotency**: referentially transparent. Any `Action::Open` it returns
+/// assumes the caller has just verified there is no open incident — re-running
+/// after the write falls through to `Action::None`.
 pub fn decide(open: Option<&OpenIncident>, results: &[CheckResult], flap_threshold: u32) -> Action {
-    if results.is_empty() {
+    let Some(target_id) = results.first().map(|r| r.target_id) else {
         return Action::None;
-    }
-    let threshold = flap_threshold as usize;
-    let target_id = results[0].target_id;
+    };
+    let opens: Vec<OpenIncident> = open.cloned().into_iter().collect();
+    let by_region = [(String::new(), results.to_vec())];
+    decide_multi(
+        target_id,
+        &opens,
+        &by_region,
+        flap_threshold,
+        RegionIncidentPolicy::AnyDown,
+    )
+    .into_iter()
+    .next()
+    .unwrap_or(Action::None)
+}
 
-    match open {
-        Some(inc) => {
-            let tail_good = trailing_good_run(results);
-            if tail_good.len() >= threshold {
-                let recovery_start = &tail_good[0];
-                if recovery_start.timestamp > inc.started_at {
-                    return Action::Close {
-                        incident_id: inc.id,
-                        ended_at: recovery_start.timestamp,
-                    };
+/// Pure region-aware decision. Each `(region, results)` group is one region's
+/// checks ascending by time; `opens` is every open incident for the target.
+/// Returns the writes to apply; an empty vec means nothing to do.
+pub fn decide_multi(
+    target_id: Uuid,
+    opens: &[OpenIncident],
+    by_region: &[(String, Vec<CheckResult>)],
+    flap_threshold: u32,
+    policy: RegionIncidentPolicy,
+) -> Vec<Action> {
+    let threshold = (flap_threshold as usize).max(1);
+
+    struct Verdict<'a> {
+        region: &'a str,
+        bad: &'a [CheckResult],
+        good: &'a [CheckResult],
+    }
+    let verdicts: Vec<Verdict> = by_region
+        .iter()
+        .map(|(region, results)| Verdict {
+            region,
+            bad: trailing_bad_run(results),
+            good: trailing_good_run(results),
+        })
+        .collect();
+
+    match policy {
+        RegionIncidentPolicy::PerRegion => {
+            let mut actions = Vec::new();
+            for v in &verdicts {
+                let open = opens.iter().find(|i| i.region.as_deref() == Some(v.region));
+                match open {
+                    None if v.bad.len() >= threshold => {
+                        actions.push(Action::Open(NewOpenIncident {
+                            target_id,
+                            started_at: v.bad[0].timestamp,
+                            status_at_start: v.bad[0].status,
+                            check_count: v.bad.len() as u32,
+                            error_sample: v.bad.iter().find_map(|r| r.error.clone()),
+                            region: Some(v.region.to_string()),
+                        }));
+                    }
+                    Some(inc)
+                        if v.good.len() >= threshold && v.good[0].timestamp > inc.started_at =>
+                    {
+                        actions.push(Action::Close {
+                            incident_id: inc.id,
+                            ended_at: v.good[0].timestamp,
+                        });
+                    }
+                    _ => {}
                 }
             }
-            Action::None
+            actions
         }
-        None => {
-            let tail_bad = trailing_bad_run(results);
-            if tail_bad.len() >= threshold {
-                let first = &tail_bad[0];
-                return Action::Open(NewOpenIncident {
-                    target_id,
-                    started_at: first.timestamp,
-                    status_at_start: first.status,
-                    check_count: tail_bad.len() as u32,
-                    error_sample: tail_bad.iter().find_map(|r| r.error.clone()),
-                });
+        RegionIncidentPolicy::AnyDown | RegionIncidentPolicy::Quorum(_) => {
+            let quorum = match policy {
+                RegionIncidentPolicy::Quorum(n) => (n as usize).max(1),
+                _ => 1,
+            };
+            // Regions sustained-bad, earliest onset first.
+            let mut bad: Vec<&Verdict> = verdicts.iter().filter(|v| v.bad.len() >= threshold).collect();
+            bad.sort_by_key(|v| v.bad[0].timestamp);
+            let combined = opens.iter().find(|i| i.region.is_none());
+
+            match combined {
+                None => {
+                    if bad.len() >= quorum {
+                        // region = None: one whole-target incident, so its key
+                        // must be region-independent or the next tick re-opens it.
+                        let trigger = bad[quorum - 1];
+                        let origin = bad[0];
+                        vec![Action::Open(NewOpenIncident {
+                            target_id,
+                            started_at: trigger.bad[0].timestamp,
+                            status_at_start: origin.bad[0].status,
+                            check_count: origin.bad.len() as u32,
+                            error_sample: bad
+                                .iter()
+                                .find_map(|v| v.bad.iter().find_map(|r| r.error.clone())),
+                            region: None,
+                        })]
+                    } else {
+                        vec![]
+                    }
+                }
+                Some(inc) => {
+                    // Close once below quorum, with a sustained-good region as
+                    // recovery evidence; ended_at = latest such recovery.
+                    if bad.len() < quorum {
+                        let ended = verdicts
+                            .iter()
+                            .filter(|v| v.good.len() >= threshold)
+                            .map(|v| v.good[0].timestamp)
+                            .max();
+                        if let Some(ended) = ended
+                            && ended > inc.started_at
+                        {
+                            return vec![Action::Close {
+                                incident_id: inc.id,
+                                ended_at: ended,
+                            }];
+                        }
+                    }
+                    vec![]
+                }
             }
-            Action::None
         }
     }
 }
@@ -387,13 +508,14 @@ struct OpenIncidentRow {
     id: Uuid,
     target_id: Uuid,
     started_at: DateTime<Utc>,
+    region: Option<String>,
 }
 
 #[async_trait]
 impl IncidentStore for PgIncidentStore {
     async fn open_for_target(&self, org: OrgId, target_id: Uuid) -> Result<Option<OpenIncident>> {
         let row: Option<OpenIncidentRow> = sqlx::query_as::<_, OpenIncidentRow>(
-            r#"SELECT id, target_id, started_at FROM incidents
+            r#"SELECT id, target_id, started_at, region FROM incidents
                WHERE target_id = $1 AND org_id = $2 AND ended_at IS NULL
                ORDER BY started_at DESC LIMIT 1"#,
         )
@@ -406,13 +528,14 @@ impl IncidentStore for PgIncidentStore {
             id: r.id,
             target_id: r.target_id,
             started_at: r.started_at,
+            region: r.region,
         }))
     }
 
     async fn open_for_pairs(
         &self,
         pairs: &[(OrgId, Uuid)],
-    ) -> Result<std::collections::HashMap<(OrgId, Uuid), OpenIncident>> {
+    ) -> Result<std::collections::HashMap<(OrgId, Uuid), Vec<OpenIncident>>> {
         if pairs.is_empty() {
             return Ok(std::collections::HashMap::new());
         }
@@ -428,9 +551,10 @@ impl IncidentStore for PgIncidentStore {
             id: Uuid,
             target_id: Uuid,
             started_at: DateTime<Utc>,
+            region: Option<String>,
         }
         let rows: Vec<Row> = sqlx::query_as::<_, Row>(
-            r#"SELECT i.org_id, i.id, i.target_id, i.started_at
+            r#"SELECT i.org_id, i.id, i.target_id, i.started_at, i.region
                FROM incidents i
                JOIN unnest($1::uuid[], $2::uuid[]) AS pairs(org_id, target_id)
                  ON i.org_id = pairs.org_id AND i.target_id = pairs.target_id
@@ -441,19 +565,19 @@ impl IncidentStore for PgIncidentStore {
         .fetch_all(&self.pool)
         .await
         .context("incident open_for_pairs")?;
-        Ok(rows
-            .into_iter()
-            .map(|r| {
-                (
-                    (OrgId(r.org_id), r.target_id),
-                    OpenIncident {
-                        id: r.id,
-                        target_id: r.target_id,
-                        started_at: r.started_at,
-                    },
-                )
-            })
-            .collect())
+        let mut out: std::collections::HashMap<(OrgId, Uuid), Vec<OpenIncident>> =
+            std::collections::HashMap::new();
+        for r in rows {
+            out.entry((OrgId(r.org_id), r.target_id))
+                .or_default()
+                .push(OpenIncident {
+                    id: r.id,
+                    target_id: r.target_id,
+                    started_at: r.started_at,
+                    region: r.region,
+                });
+        }
+        Ok(out)
     }
 
     async fn insert_open(&self, org: OrgId, new: NewOpenIncident) -> Result<Uuid> {
@@ -465,8 +589,8 @@ impl IncidentStore for PgIncidentStore {
         // only while its monitor is a component of an enabled status page.
         // Monitors that aren't on any page open internal-only incidents.
         let row: (Uuid,) = sqlx::query_as(
-            r#"INSERT INTO incidents (org_id, target_id, started_at, status_at_start, check_count, error_sample, visibility)
-               SELECT $6, $1, $2, $3, $4, $5,
+            r#"INSERT INTO incidents (org_id, target_id, started_at, status_at_start, check_count, error_sample, region, visibility)
+               SELECT $6, $1, $2, $3, $4, $5, $7,
                       CASE WHEN EXISTS (
                           SELECT 1 FROM status_page_components spc
                           JOIN status_pages sp ON sp.id = spc.status_page_id
@@ -475,6 +599,7 @@ impl IncidentStore for PgIncidentStore {
                WHERE NOT EXISTS (
                    SELECT 1 FROM incidents
                    WHERE target_id = $1 AND org_id = $6 AND ended_at IS NULL
+                     AND region IS NOT DISTINCT FROM $7
                )
                RETURNING id"#,
         )
@@ -484,6 +609,7 @@ impl IncidentStore for PgIncidentStore {
         .bind(new.check_count as i32)
         .bind(new.error_sample)
         .bind(org.0)
+        .bind(new.region)
         .fetch_one(&self.pool)
         .await
         .context("incident insert_open")?;
@@ -554,6 +680,7 @@ pub struct MemIncident {
     pub status_at_start: CheckStatus,
     pub check_count: u32,
     pub error_sample: Option<String>,
+    pub region: Option<String>,
 }
 
 impl InMemoryIncidentStore {
@@ -584,26 +711,25 @@ impl IncidentStore for InMemoryIncidentStore {
     async fn open_for_pairs(
         &self,
         pairs: &[(OrgId, Uuid)],
-    ) -> Result<std::collections::HashMap<(OrgId, Uuid), OpenIncident>> {
+    ) -> Result<std::collections::HashMap<(OrgId, Uuid), Vec<OpenIncident>>> {
         let g = self.inner.lock();
         let mut out = std::collections::HashMap::with_capacity(pairs.len());
         for (org, tid) in pairs {
             let Some(rows) = g.by_target.get(tid) else {
                 continue;
             };
-            if let Some(inc) = rows
+            let open: Vec<OpenIncident> = rows
                 .iter()
                 .filter(|i| i.ended_at.is_none())
-                .max_by_key(|i| i.started_at)
-            {
-                out.insert(
-                    (*org, *tid),
-                    OpenIncident {
-                        id: inc.id,
-                        target_id: inc.target_id,
-                        started_at: inc.started_at,
-                    },
-                );
+                .map(|i| OpenIncident {
+                    id: i.id,
+                    target_id: i.target_id,
+                    started_at: i.started_at,
+                    region: i.region.clone(),
+                })
+                .collect();
+            if !open.is_empty() {
+                out.insert((*org, *tid), open);
             }
         }
         Ok(out)
@@ -622,6 +748,7 @@ impl IncidentStore for InMemoryIncidentStore {
                 id: i.id,
                 target_id: i.target_id,
                 started_at: i.started_at,
+                region: i.region.clone(),
             });
         Ok(open)
     }
@@ -629,13 +756,13 @@ impl IncidentStore for InMemoryIncidentStore {
     async fn insert_open(&self, _org: OrgId, new: NewOpenIncident) -> Result<Uuid> {
         let mut g = self.inner.lock();
         let bucket = g.by_target.entry(new.target_id).or_default();
-        if bucket.iter().any(|i| i.ended_at.is_none()) {
-            // Idempotent guard: don't double-open.
-            return Ok(bucket
-                .iter()
-                .find(|i| i.ended_at.is_none())
-                .map(|i| i.id)
-                .unwrap_or_else(Uuid::nil));
+        // Idempotent guard, region-aware: don't double-open for the same
+        // (target, region) key (region `None` = the combined incident).
+        if let Some(existing) = bucket
+            .iter()
+            .find(|i| i.ended_at.is_none() && i.region == new.region)
+        {
+            return Ok(existing.id);
         }
         let id = Uuid::now_v7();
         bucket.push(MemIncident {
@@ -646,6 +773,7 @@ impl IncidentStore for InMemoryIncidentStore {
             status_at_start: new.status_at_start,
             check_count: new.check_count,
             error_sample: new.error_sample,
+            region: new.region,
         });
         g.inserts += 1;
         Ok(id)
@@ -765,6 +893,7 @@ mod tests {
         let open = OpenIncident {
             id: Uuid::now_v7(),
             target_id: target,
+            region: None,
             started_at: ts(base, 0),
         };
         let results = vec![
@@ -791,6 +920,7 @@ mod tests {
         let open = OpenIncident {
             id: Uuid::now_v7(),
             target_id: target,
+            region: None,
             started_at: ts(base, 0),
         };
         let results = vec![
@@ -808,6 +938,7 @@ mod tests {
         let open = OpenIncident {
             id: Uuid::now_v7(),
             target_id: target,
+            region: None,
             started_at: ts(base, 1_000),
         };
         let results = vec![
@@ -846,6 +977,7 @@ mod tests {
         let open = OpenIncident {
             id: Uuid::now_v7(),
             target_id: target,
+            region: None,
             started_at: ts(base, 0),
         };
         let results = vec![
@@ -904,6 +1036,7 @@ mod tests {
         let open = OpenIncident {
             id: Uuid::now_v7(),
             target_id: target,
+            region: None,
             started_at: ts(base, 0),
         };
         let results = vec![
@@ -931,11 +1064,298 @@ mod tests {
         let open = OpenIncident {
             id: Uuid::now_v7(),
             target_id: target,
+            region: None,
             started_at: ts(base, 0),
         };
         // Same input, but now we know about the open incident; trailing 'up'
         // run length is 0, so nothing happens.
         assert_eq!(decide(Some(&open), &results, 2), Action::None);
+    }
+
+    // ── multi-region decide_multi() ─────────────────────────────────────────
+
+    fn mbase() -> DateTime<Utc> {
+        Utc.with_ymd_and_hms(2026, 5, 13, 12, 0, 0).unwrap()
+    }
+
+    #[test]
+    fn any_down_opens_from_a_single_bad_region_among_healthy() {
+        // The original interleave bug: one region down while another is up. A
+        // blended stream could let the healthy region's rows mask it; per-region
+        // evaluation opens correctly.
+        let b = mbase();
+        let t = Uuid::now_v7();
+        let by_region = vec![
+            (
+                "eu".to_string(),
+                vec![
+                    result(t, ts(b, 0), CheckStatus::Down),
+                    result(t, ts(b, 30), CheckStatus::Down),
+                ],
+            ),
+            (
+                "us".to_string(),
+                vec![
+                    result(t, ts(b, 0), CheckStatus::Up),
+                    result(t, ts(b, 30), CheckStatus::Up),
+                ],
+            ),
+        ];
+        match decide_multi(t, &[], &by_region, 2, RegionIncidentPolicy::AnyDown).as_slice() {
+            [Action::Open(n)] => {
+                assert_eq!(n.region, None, "combined incident is region-agnostic");
+                assert_eq!(n.started_at, ts(b, 0));
+                assert_eq!(n.status_at_start, CheckStatus::Down);
+            }
+            other => panic!("expected one Open, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn any_down_stays_open_while_one_region_still_bad() {
+        let b = mbase();
+        let t = Uuid::now_v7();
+        let open = OpenIncident {
+            id: Uuid::now_v7(),
+            target_id: t,
+            started_at: ts(b, 0),
+            region: None,
+        };
+        let by_region = vec![
+            (
+                "eu".to_string(),
+                vec![
+                    result(t, ts(b, 30), CheckStatus::Down),
+                    result(t, ts(b, 60), CheckStatus::Up),
+                    result(t, ts(b, 90), CheckStatus::Up),
+                ],
+            ),
+            (
+                "us".to_string(),
+                vec![
+                    result(t, ts(b, 60), CheckStatus::Down),
+                    result(t, ts(b, 90), CheckStatus::Down),
+                ],
+            ),
+        ];
+        assert!(
+            decide_multi(t, &[open], &by_region, 2, RegionIncidentPolicy::AnyDown).is_empty(),
+            "must not close while a region is still down"
+        );
+    }
+
+    #[test]
+    fn any_down_closes_when_all_regions_recovered() {
+        let b = mbase();
+        let t = Uuid::now_v7();
+        let open = OpenIncident {
+            id: Uuid::now_v7(),
+            target_id: t,
+            started_at: ts(b, 0),
+            region: None,
+        };
+        let by_region = vec![
+            (
+                "eu".to_string(),
+                vec![
+                    result(t, ts(b, 30), CheckStatus::Down),
+                    result(t, ts(b, 60), CheckStatus::Up),
+                    result(t, ts(b, 90), CheckStatus::Up),
+                ],
+            ),
+            (
+                "us".to_string(),
+                vec![
+                    result(t, ts(b, 120), CheckStatus::Up),
+                    result(t, ts(b, 150), CheckStatus::Up),
+                ],
+            ),
+        ];
+        match decide_multi(t, std::slice::from_ref(&open), &by_region, 2, RegionIncidentPolicy::AnyDown).as_slice()
+        {
+            [Action::Close {
+                incident_id,
+                ended_at,
+            }] => {
+                assert_eq!(*incident_id, open.id);
+                // Latest region recovery onset wins.
+                assert_eq!(*ended_at, ts(b, 120));
+            }
+            other => panic!("expected one Close, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn quorum_needs_two_regions_before_opening() {
+        let b = mbase();
+        let t = Uuid::now_v7();
+        let one_bad = vec![
+            (
+                "eu".to_string(),
+                vec![
+                    result(t, ts(b, 0), CheckStatus::Down),
+                    result(t, ts(b, 30), CheckStatus::Down),
+                ],
+            ),
+            (
+                "us".to_string(),
+                vec![
+                    result(t, ts(b, 0), CheckStatus::Up),
+                    result(t, ts(b, 30), CheckStatus::Up),
+                ],
+            ),
+        ];
+        assert!(
+            decide_multi(t, &[], &one_bad, 2, RegionIncidentPolicy::Quorum(2)).is_empty(),
+            "one region down is below quorum"
+        );
+
+        let two_bad = vec![
+            (
+                "eu".to_string(),
+                vec![
+                    result(t, ts(b, 0), CheckStatus::Down),
+                    result(t, ts(b, 30), CheckStatus::Down),
+                ],
+            ),
+            (
+                "us".to_string(),
+                vec![
+                    result(t, ts(b, 60), CheckStatus::Down),
+                    result(t, ts(b, 90), CheckStatus::Down),
+                ],
+            ),
+        ];
+        match decide_multi(t, &[], &two_bad, 2, RegionIncidentPolicy::Quorum(2)).as_slice() {
+            [Action::Open(n)] => {
+                assert_eq!(n.region, None);
+                // Opens when the quorum-th (second) region went bad.
+                assert_eq!(n.started_at, ts(b, 60));
+            }
+            other => panic!("expected one Open, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn quorum_closes_when_back_below_threshold() {
+        // One region still down, but below a quorum of 2 → the combined incident
+        // clears (the per-region policy is the one that keeps it open).
+        let b = mbase();
+        let t = Uuid::now_v7();
+        let open = OpenIncident {
+            id: Uuid::now_v7(),
+            target_id: t,
+            started_at: ts(b, 0),
+            region: None,
+        };
+        let by_region = vec![
+            (
+                "eu".to_string(),
+                vec![
+                    result(t, ts(b, 30), CheckStatus::Down),
+                    result(t, ts(b, 60), CheckStatus::Up),
+                    result(t, ts(b, 90), CheckStatus::Up),
+                ],
+            ),
+            (
+                "us".to_string(),
+                vec![
+                    result(t, ts(b, 60), CheckStatus::Down),
+                    result(t, ts(b, 90), CheckStatus::Down),
+                ],
+            ),
+        ];
+        match decide_multi(t, std::slice::from_ref(&open), &by_region, 2, RegionIncidentPolicy::Quorum(2))
+            .as_slice()
+        {
+            [Action::Close { incident_id, .. }] => assert_eq!(*incident_id, open.id),
+            other => panic!("expected one Close, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn per_region_opens_one_incident_per_bad_region() {
+        let b = mbase();
+        let t = Uuid::now_v7();
+        let by_region = vec![
+            (
+                "eu".to_string(),
+                vec![
+                    result(t, ts(b, 0), CheckStatus::Down),
+                    result(t, ts(b, 30), CheckStatus::Down),
+                ],
+            ),
+            (
+                "us".to_string(),
+                vec![
+                    result(t, ts(b, 0), CheckStatus::Down),
+                    result(t, ts(b, 30), CheckStatus::Down),
+                ],
+            ),
+            (
+                "ap".to_string(),
+                vec![
+                    result(t, ts(b, 0), CheckStatus::Up),
+                    result(t, ts(b, 30), CheckStatus::Up),
+                ],
+            ),
+        ];
+        let actions = decide_multi(t, &[], &by_region, 2, RegionIncidentPolicy::PerRegion);
+        let mut regions: Vec<String> = actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::Open(n) => n.region.clone(),
+                _ => None,
+            })
+            .collect();
+        regions.sort();
+        assert_eq!(regions, vec!["eu".to_string(), "us".to_string()]);
+    }
+
+    #[test]
+    fn per_region_closes_only_the_recovered_region() {
+        let b = mbase();
+        let t = Uuid::now_v7();
+        let eu_open = OpenIncident {
+            id: Uuid::now_v7(),
+            target_id: t,
+            started_at: ts(b, 0),
+            region: Some("eu".to_string()),
+        };
+        let us_open = OpenIncident {
+            id: Uuid::now_v7(),
+            target_id: t,
+            started_at: ts(b, 0),
+            region: Some("us".to_string()),
+        };
+        let by_region = vec![
+            (
+                "eu".to_string(),
+                vec![
+                    result(t, ts(b, 30), CheckStatus::Up),
+                    result(t, ts(b, 60), CheckStatus::Up),
+                ],
+            ),
+            (
+                "us".to_string(),
+                vec![
+                    result(t, ts(b, 30), CheckStatus::Down),
+                    result(t, ts(b, 60), CheckStatus::Down),
+                ],
+            ),
+        ];
+        match decide_multi(
+            t,
+            &[eu_open.clone(), us_open],
+            &by_region,
+            2,
+            RegionIncidentPolicy::PerRegion,
+        )
+        .as_slice()
+        {
+            [Action::Close { incident_id, .. }] => assert_eq!(*incident_id, eu_open.id),
+            other => panic!("expected one Close (eu only), got {other:?}"),
+        }
     }
 
     // ── full writer tick with InMemoryIncidentStore ─────────────────────────

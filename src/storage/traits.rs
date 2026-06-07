@@ -252,6 +252,16 @@ pub trait ResultsStore: Send + Sync {
         offset: usize,
         region: Option<&str>,
     ) -> Result<Vec<CheckResult>>;
+    /// Recent results for one target, each paired with its region, in one query.
+    /// The caller groups by region so per-region runs don't interleave.
+    async fn list_results_by_region(
+        &self,
+        org: OrgId,
+        target_id: Uuid,
+        range: ClampedRange,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<(String, CheckResult)>>;
     async fn uptime(
         &self,
         org: OrgId,

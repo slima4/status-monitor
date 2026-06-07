@@ -35,6 +35,7 @@ pub struct Plan {
     pub max_escalation_policies: i32,
     pub max_on_call_schedules: i32,
     pub max_logo_size_bytes: i32,
+    pub max_regions: i32,
 
     // Per-org rate limits (per minute)
     pub api_writes_per_minute: i32,

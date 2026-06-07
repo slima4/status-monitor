@@ -56,6 +56,7 @@ fn test_plan(per_min: i32) -> Plan {
         max_escalation_policies: 1,
         max_on_call_schedules: 1,
         max_logo_size_bytes: 1,
+        max_regions: 1,
         api_writes_per_minute: per_min,
         api_reads_per_minute: per_min,
         bulk_ops_per_minute: per_min,

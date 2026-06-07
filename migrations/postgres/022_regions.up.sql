@@ -6,6 +6,8 @@ CREATE TABLE regions (
     id          TEXT PRIMARY KEY,
     name        TEXT NOT NULL,
     location    TEXT,
+    -- Retire a region without dropping it (FK blocks drop; drop loses history).
+    enabled     BOOLEAN NOT NULL DEFAULT true,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -36,3 +38,12 @@ CREATE TABLE agents (
 );
 CREATE INDEX idx_agents_region ON agents(region);
 CREATE INDEX idx_agents_token_prefix ON agents(token_prefix);
+
+-- Incident region: NULL = whole-target incident, a value = one region's.
+-- Nullable so detection can stay combined now and go per-region later.
+ALTER TABLE incidents ADD COLUMN region TEXT;
+
+-- Per-plan region cap (each region multiplies a target's check volume).
+-- Reserved now (default 1); enforced once region assignment is exposed.
+ALTER TABLE plans ADD COLUMN max_regions INTEGER NOT NULL DEFAULT 1;
+UPDATE plans SET max_regions = 6 WHERE id = 'pro';

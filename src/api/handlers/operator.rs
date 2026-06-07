@@ -75,6 +75,7 @@ pub struct RegionView {
     pub id: String,
     pub name: String,
     pub location: Option<String>,
+    pub enabled: bool,
     pub created_at: DateTime<Utc>,
 }
 
@@ -88,9 +89,12 @@ pub struct NewRegion {
 
 #[derive(Deserialize)]
 pub struct UpdateRegion {
-    pub name: String,
+    #[serde(default)]
+    pub name: Option<String>,
     #[serde(default)]
     pub location: Option<String>,
+    #[serde(default)]
+    pub enabled: Option<bool>,
 }
 
 pub async fn list_regions(
@@ -105,6 +109,7 @@ pub async fn list_regions(
                 id: r.id,
                 name: r.name,
                 location: r.location,
+                enabled: r.enabled,
                 created_at: r.created_at,
             })
             .collect(),
@@ -135,9 +140,23 @@ pub async fn update_region(
     Path(id): Path<String>,
     Json(req): Json<UpdateRegion>,
 ) -> Result<StatusCode> {
-    let name = validate_name(&req.name)?;
-    let location = validate_location(req.location.as_deref())?;
-    if repo(&state)?.update_region(&id, name, location).await? {
+    if req.name.is_none() && req.location.is_none() && req.enabled.is_none() {
+        return Err(AppError::bad_request(
+            codes::EMPTY_PATCH,
+            "set at least one of name, location, enabled",
+        ));
+    }
+    let r = repo(&state)?;
+    let mut found = false;
+    if req.name.is_some() || req.location.is_some() {
+        let name = req.name.as_deref().map(validate_name).transpose()?;
+        let location = validate_location(req.location.as_deref())?;
+        found |= r.update_region(&id, name, location).await?;
+    }
+    if let Some(enabled) = req.enabled {
+        found |= r.set_region_enabled(&id, enabled).await?;
+    }
+    if found {
         Ok(StatusCode::NO_CONTENT)
     } else {
         Err(AppError::not_found(

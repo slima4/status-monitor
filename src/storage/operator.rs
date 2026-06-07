@@ -15,6 +15,7 @@ pub struct RegionRow {
     pub id: String,
     pub name: String,
     pub location: Option<String>,
+    pub enabled: bool,
     pub created_at: DateTime<Utc>,
 }
 
@@ -55,7 +56,7 @@ impl OperatorRepo {
 
     pub async fn list_regions(&self) -> Result<Vec<RegionRow>> {
         let rows = sqlx::query_as::<_, RegionRow>(
-            "SELECT id, name, location, created_at FROM regions ORDER BY id",
+            "SELECT id, name, location, enabled, created_at FROM regions ORDER BY id",
         )
         .fetch_all(&self.pool)
         .await
@@ -83,20 +84,36 @@ impl OperatorRepo {
         Ok(res.rows_affected() > 0)
     }
 
-    /// Update a region's display fields. `false` if no such region.
+    /// Patch a region's display fields. Each `None` leaves that field as-is, so
+    /// a name-only update never wipes the location. `false` if no such region.
     pub async fn update_region(
         &self,
         id: &str,
-        name: &str,
+        name: Option<&str>,
         location: Option<&str>,
     ) -> Result<bool> {
-        let res = sqlx::query("UPDATE regions SET name = $2, location = $3 WHERE id = $1")
+        let res = sqlx::query(
+            "UPDATE regions SET name = COALESCE($2, name), \
+             location = COALESCE($3, location) WHERE id = $1",
+        )
+        .bind(id)
+        .bind(name)
+        .bind(location)
+        .execute(&self.pool)
+        .await
+        .context("operator: update region")?;
+        Ok(res.rows_affected() > 0)
+    }
+
+    /// Enable/disable a region (disabled = not scheduled, not served to agents,
+    /// history kept). `false` if no such region.
+    pub async fn set_region_enabled(&self, id: &str, enabled: bool) -> Result<bool> {
+        let res = sqlx::query("UPDATE regions SET enabled = $2 WHERE id = $1")
             .bind(id)
-            .bind(name)
-            .bind(location)
+            .bind(enabled)
             .execute(&self.pool)
             .await
-            .context("operator: update region")?;
+            .context("operator: set region enabled")?;
         Ok(res.rows_affected() > 0)
     }
 

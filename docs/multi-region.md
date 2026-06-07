@@ -51,7 +51,7 @@ Authorization: Bearer <that-secret>
 |--------|------|---------|
 | `GET` | `/operator/regions` | list regions |
 | `POST` | `/operator/regions` | create a region (`id` is a `[a-z0-9-]` slug, `name`, optional `location`) |
-| `PATCH` | `/operator/regions/{id}` | rename / relocate a region |
+| `PATCH` | `/operator/regions/{id}` | rename / relocate, or enable / disable a region (`enabled`) |
 | `DELETE` | `/operator/regions/{id}` | delete a region — `409` while it still holds agents or assigned targets |
 | `GET` | `/operator/agents` | list agents |
 | `POST` | `/operator/agents` | mint an agent — the response carries its `sm_agent_…` token **once** |
@@ -59,6 +59,8 @@ Authorization: Bearer <that-secret>
 | `DELETE` | `/operator/agents/{id}` | delete an agent |
 
 The agent token is shown only at creation; store it when it is minted. Disabling an agent is immediately enforced on its next pull. There is no token-rotation endpoint yet — rotate by deleting and re-creating the agent.
+
+Disabling a **region** stops it being scheduled and stops config-pull for it (its agents receive no targets) while keeping its stored history — a reversible alternative to deleting, which the foreign keys block while the region is in use.
 
 A typical bring-up: create the region, mint an agent in it, copy the token to the agent box's `UPTIMEPAGE_AGENT__TOKEN`, start the agent.
 
@@ -71,5 +73,11 @@ Once results carry a region, the operator surfaces let you slice by it:
 - **REST API** — `/api/v1/targets/{id}/results`, `/latency`, and `/uptime` accept an optional `region=` query parameter; `/api/v1/targets/{id}/latency/by-region` returns one series per region. See [REST API](api.md#latency-series).
 
 What deliberately **blends** across regions: the public status page's component status (the public "is it up" answer is region-agnostic by design), the monitors list, and incident timelines. Those aggregate every region so a viewer sees one verdict.
+
+## Incident detection across regions
+
+Detection evaluates each region's recent run **independently** and then combines the verdicts, so one region's transient network blip can't corrupt the picture for a target probed from several places. The current rule is **any-region-down**: a target opens one (whole-target) incident as soon as any region is sustained-unhealthy, and clears it once the regions have recovered. There is still exactly one incident per target — its `region` is unset.
+
+The combine step is a pluggable policy. Two more shapes are built and tested but not yet selectable: **quorum** (open only once *N* regions agree it's down — the standard defence against single-location false positives) and **per-region** (a separate incident per region). A per-monitor selector for these is planned; until then every monitor uses any-region-down.
 
 See [Configuration](configuration.md) for the `[scheduler]`, `[agent]`, and `[operator]` keys, and [Architecture](architecture.md) for where the pieces sit.
