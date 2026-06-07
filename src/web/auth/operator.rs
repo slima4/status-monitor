@@ -39,7 +39,11 @@ where
         // Compare fixed-length digests: `ct_eq` short-circuits on a length
         // mismatch, so hashing both sides first keeps the compare constant-time
         // regardless of the presented length (no secret-length timing leak).
-        if bool::from(sha256_hex(presented).as_bytes().ct_eq(sha256_hex(expected).as_bytes())) {
+        if bool::from(
+            sha256_hex(presented)
+                .as_bytes()
+                .ct_eq(sha256_hex(expected).as_bytes()),
+        ) {
             Ok(OperatorAuth)
         } else {
             Err(AppError::Unauthorized)

@@ -190,6 +190,33 @@ pub struct LatencySeries {
     pub bucket_seconds: u32,
 }
 
+/// One region's latency buckets — a single overlay line.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct RegionLatencySeries {
+    pub region: String,
+    pub buckets: Vec<LatencyBucket>,
+}
+
+/// Per-region latency for one monitor — each region overlaid as its own line.
+/// Returned by `GET /targets/{id}/latency/by-region`.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct LatencySeriesByRegion {
+    pub regions: Vec<RegionLatencySeries>,
+    pub bucket_seconds: u32,
+}
+
+/// One region's rollup for a single monitor over a range — drives the
+/// per-region breakdown table on the monitor detail page.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct RegionRollup {
+    pub region: String,
+    pub samples: u64,
+    pub up: u64,
+    pub p50_ms: u32,
+    pub p95_ms: u32,
+    pub last_status: String,
+}
+
 /// Aggregate health for the period immediately before the selected range
 /// — drives the Δ-vs-prior hints on each KPI card. Same shape as the
 /// "current" totals so the view layer subtracts cleanly. `avg_ms = 0`

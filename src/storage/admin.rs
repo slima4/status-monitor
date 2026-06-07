@@ -64,7 +64,9 @@ impl RegionTargetSource {
 #[async_trait]
 impl EnabledTargetSource for RegionTargetSource {
     async fn list_all_enabled_targets(&self) -> Result<Vec<(OrgId, Target)>> {
-        self.repo.list_enabled_targets_for_region(&self.region).await
+        self.repo
+            .list_enabled_targets_for_region(&self.region)
+            .await
     }
 }
 

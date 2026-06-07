@@ -24,6 +24,9 @@ Override `UPTIMEPAGE_CONFIG_PATH` to point at an alternate base config file.
 | `storage.postgres` | `url`, `max_connections`, `min_connections`, `acquire_timeout_secs` | target metadata store |
 | `storage.clickhouse` | `url`, `database`, `user`, `password`, `batch_size`, `batch_timeout_ms`, `buffer_size` | result sink and pipeline back-pressure |
 | `scheduler` | `target_refresh_interval_secs`, `jitter_pct` | how often the registry is reconciled against Postgres, and how much jitter is applied to each target's tick |
+| `scheduler` | `region`, `default_region` | this control plane's own region id (a normal region row, default `"default"`) and the region new targets are assigned to (empty falls back to `region`). See [Multi-region probes](multi-region.md) |
+| `agent` | `enabled`, `control_plane_url`, `region`, `pull_interval_secs`, `flush_interval_secs`, `buffer_capacity` | run this process as a stateless regional probe instead of a control plane. `token` is **env-only** (`UPTIMEPAGE_AGENT__TOKEN`). Off by default. See [Multi-region probes](multi-region.md) |
+| `operator` | `admin_token` | static bearer secret for the instance-admin `/operator/*` surface (regions + agents). **Env-only** (`UPTIMEPAGE_OPERATOR__ADMIN_TOKEN`); empty disables the surface (404s) |
 | `observability` | `log_level`, `log_format` | tracing-subscriber filter + JSON vs pretty output |
 | `observability` | `metrics_enabled`, `gauge_sample_interval_ms` | Prometheus exporter toggle and sampler cadence |
 | `observability` | `tracing_enabled` | Master on/off for OTLP trace export. Export is active only when this **and** `observability.grafana.enabled` are true |

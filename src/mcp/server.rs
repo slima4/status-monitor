@@ -301,9 +301,11 @@ impl McpServer {
             to: now,
         });
         let (latest, up24, up30) = tokio::try_join!(
-            self.state.results_store.list_results(org, id, r24, 1, 0),
-            self.state.results_store.uptime(org, id, r24),
-            self.state.results_store.uptime(org, id, r30),
+            self.state
+                .results_store
+                .list_results(org, id, r24, 1, 0, None),
+            self.state.results_store.uptime(org, id, r24, None),
+            self.state.results_store.uptime(org, id, r30, None),
         )
         .map_err(|e| McpToolError::internal(format!("monitor history: {e}")))?;
 
@@ -366,10 +368,10 @@ impl McpServer {
             to: now,
         });
         let (uptime, buckets, incidents) = tokio::try_join!(
-            self.state.results_store.uptime(org, id, range),
+            self.state.results_store.uptime(org, id, range, None),
             self.state
                 .results_store
-                .latency_buckets(org, id, range, bucket_secs),
+                .latency_buckets(org, id, range, bucket_secs, None),
             self.state.results_store.list_incidents(
                 org,
                 id,

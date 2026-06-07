@@ -86,7 +86,7 @@ async fn latency_buckets_merge_quantiles_and_phases_from_rollup() {
         to: base + Duration::minutes(5),
     };
     let buckets = store
-        .latency_buckets(OrgId(org), target, ClampedRange::unclamped(range), 60)
+        .latency_buckets(OrgId(org), target, ClampedRange::unclamped(range), 60, None)
         .await
         .expect("latency_buckets query");
 
@@ -132,7 +132,7 @@ async fn latency_buckets_clamp_all_null_phases_to_zero() {
         to: base + Duration::minutes(1),
     };
     let buckets = store
-        .latency_buckets(OrgId(org), target, ClampedRange::unclamped(range), 60)
+        .latency_buckets(OrgId(org), target, ClampedRange::unclamped(range), 60, None)
         .await
         .expect("latency_buckets query");
 
@@ -180,7 +180,13 @@ async fn latency_buckets_route_to_hour_rollup_past_90d() {
         to: base + Duration::hours(1),
     };
     let buckets = store
-        .latency_buckets(OrgId(org), target, ClampedRange::unclamped(range), 3600)
+        .latency_buckets(
+            OrgId(org),
+            target,
+            ClampedRange::unclamped(range),
+            3600,
+            None,
+        )
         .await
         .expect("latency_buckets query (1h path)");
     assert_eq!(buckets.len(), 1, "four samples in one hour → one 1h bucket");

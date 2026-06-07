@@ -112,12 +112,7 @@ impl OperatorRepo {
         {
             Ok(res) if res.rows_affected() > 0 => Ok(DeleteRegion::Deleted),
             Ok(_) => Ok(DeleteRegion::NotFound),
-            Err(e)
-                if e.as_database_error()
-                    .and_then(|d| d.code())
-                    .as_deref()
-                    == Some("23503") =>
-            {
+            Err(e) if e.as_database_error().and_then(|d| d.code()).as_deref() == Some("23503") => {
                 Ok(DeleteRegion::InUse)
             }
             Err(e) => Err(anyhow::Error::new(e)

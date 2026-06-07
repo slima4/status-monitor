@@ -22,3 +22,28 @@ export function buildLatencyOption(buckets, from, to) {
     }));
     return { ...msChartBase(), xAxis: timeXAxis(from, to), series };
 }
+
+// Color cycle for the per-region overlay; wraps past its length.
+const REGION_COLORS = [
+    "#0ea5e9", "#6366f1", "#dc2626", "#16a34a",
+    "#d97706", "#7c3aed", "#0891b2", "#db2777",
+];
+
+// Multi-region overlay: one p95 line per region so regions compare directly.
+// `regions` is `[{ region, buckets }]`; p50/p99 are dropped — comparing one
+// metric across regions is the whole point, three quantiles × N regions is noise.
+export function buildLatencyOverlayOption(regions, from, to) {
+    const series = regions.map((r, i) => {
+        const color = REGION_COLORS[i % REGION_COLORS.length];
+        return {
+            name: r.region,
+            type: "line",
+            smooth: true,
+            showSymbol: false,
+            itemStyle: { color },
+            lineStyle: { color, width: 2 },
+            data: (r.buckets ?? []).map(b => [b.t, b.p95]),
+        };
+    });
+    return { ...msChartBase(), xAxis: timeXAxis(from, to), series };
+}

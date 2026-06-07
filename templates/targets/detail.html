@@ -10,8 +10,22 @@
 
   {% include "targets/partials/range_pills.html" %}
 
+  {% if regions.len() > 1 %}
+  <p class="dashboard-subhead">
+    filter <span class="dashboard-subhead__mono">region:<select class="dashboard-subhead__select"
+            data-region-filter
+            name="region"
+            aria-label="Region">
+      <option value=""{% if selected_region.is_none() %} selected{% endif %}>all</option>
+      {% for r in regions %}
+      <option value="{{ r }}"{% if let Some(sel) = selected_region %}{% if sel == r %} selected{% endif %}{% endif %}>{{ r }}</option>
+      {% endfor %}
+    </select><span class="dashboard-subhead__caret" aria-hidden="true">▾</span></span>
+  </p>
+  {% endif %}
+
   <section id="detail-live-kpi"
-           hx-get="/web/partials/targets/{{ id }}/live?range={{ range }}"
+           hx-get="/web/partials/targets/{{ id }}/live?range={{ range }}{% if let Some(r) = selected_region %}&region={{ r|urlencode }}{% endif %}"
            hx-trigger="every 60s, sm:refresh-live from:body"
            hx-swap="outerHTML"
            hx-on::response-error="if(event.detail.xhr.status===404){this.removeAttribute('hx-trigger')}"
@@ -25,17 +39,48 @@
       <h2 class="panel-label">latency (p50/p95/p99)</h2>
       <div id="latency-chart"
            class="mt-4 h-64 w-full"
-           data-endpoint="/api/v1/targets/{{ id }}/latency?from={{ from_iso|urlencode }}&to={{ to_iso|urlencode }}"
+           data-endpoint="/api/v1/targets/{{ id }}/latency?from={{ from_iso|urlencode }}&to={{ to_iso|urlencode }}{% if let Some(r) = selected_region %}&region={{ r|urlencode }}{% endif %}"
+           {% if regions.len() > 1 && selected_region.is_none() %}data-overlay-endpoint="/api/v1/targets/{{ id }}/latency/by-region?from={{ from_iso|urlencode }}&to={{ to_iso|urlencode }}"{% endif %}
            aria-label="Latency p50/p95/p99 over time"></div>
     </div>
     <div class="sticker-card p-5">
       <h2 class="panel-label">latency breakdown</h2>
       <div id="breakdown-chart"
            class="mt-4 h-64 w-full"
-           data-endpoint="/api/v1/targets/{{ id }}/latency?from={{ from_iso|urlencode }}&to={{ to_iso|urlencode }}"
+           data-endpoint="/api/v1/targets/{{ id }}/latency?from={{ from_iso|urlencode }}&to={{ to_iso|urlencode }}{% if let Some(r) = selected_region %}&region={{ r|urlencode }}{% endif %}"
            aria-label="Mean latency phase breakdown over time"></div>
     </div>
   </section>
+
+  {% if region_breakdown.len() > 1 %}
+  <section class="sticker-card p-5">
+    <h2 class="panel-label">by region · {{ range }}</h2>
+    <table class="mt-4 min-w-full text-sm">
+      <thead class="text-left text-xs uppercase tracking-wide text-muted">
+        <tr>
+          <th scope="col" class="py-2 pr-4">region</th>
+          <th scope="col" class="py-2 pr-4">uptime</th>
+          <th scope="col" class="py-2 pr-4 text-right">p50</th>
+          <th scope="col" class="py-2 pr-4 text-right">p95</th>
+          <th scope="col" class="py-2 text-right">status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in region_breakdown %}
+        <tr{% if row.selected %} class="font-medium text-body"{% endif %}>
+          <td class="py-1.5 pr-4 font-mono">{{ row.region }}</td>
+          <td class="py-1.5 pr-4">{{ row.uptime_label }}</td>
+          <td class="py-1.5 pr-4 text-right font-mono">{{ row.p50_label }}</td>
+          <td class="py-1.5 pr-4 text-right font-mono">{{ row.p95_label }}</td>
+          <td class="py-1.5 text-right">
+            <span class="dashboard-dot{% if !row.last_status.is_empty() %} dashboard-dot--{{ row.last_status }}{% endif %}"></span>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+  {% endif %}
 
   <section class="sticker-card">
     <header class="flex items-center justify-between border-b border-[color:var(--theme-line)] px-5 py-3">

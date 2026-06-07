@@ -89,12 +89,14 @@ export function slidingWindow(endpoint) {
     const t = u.searchParams.get("to");
     const spanMs = f && t ? +new Date(t) - +new Date(f) : 24 * 3600 * 1000;
     const limit = u.searchParams.get("limit");
+    const region = u.searchParams.get("region");
     const base = u.origin + u.pathname;
     return () => {
         const to = new Date();
         const from = new Date(+to - spanMs);
         const params = new URLSearchParams({ from: from.toISOString(), to: to.toISOString() });
         if (limit) params.set("limit", limit);
+        if (region) params.set("region", region);
         return { url: `${base}?${params}`, from, to };
     };
 }

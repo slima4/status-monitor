@@ -96,6 +96,10 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
             get(handlers::results::list_results),
         )
         .route("/targets/{id}/latency", get(handlers::results::latency))
+        .route(
+            "/targets/{id}/latency/by-region",
+            get(handlers::results::latency_by_region),
+        )
         .route("/targets/{id}/uptime", get(handlers::results::uptime))
         .route(
             "/targets/{id}/incidents",

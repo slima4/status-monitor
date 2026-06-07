@@ -246,6 +246,7 @@ impl IncidentWriter {
                 ClampedRange::unclamped(range),
                 self.cfg.max_results_per_tick,
                 0,
+                None,
             )
             .await?;
         // Storage returns DESC by timestamp; algorithm operates on ASC.

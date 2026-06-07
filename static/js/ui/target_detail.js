@@ -65,6 +65,18 @@
         });
     }
 
+    // Region filter: full-page nav (so the chart modules re-init) preserving
+    // the current range. Empty value clears the filter back to all regions.
+    const regionSel = document.querySelector("[data-region-filter]");
+    if (regionSel) {
+        regionSel.addEventListener("change", () => {
+            const url = new URL(location.href);
+            if (regionSel.value) url.searchParams.set("region", regionSel.value);
+            else url.searchParams.delete("region");
+            location.assign(url.pathname + url.search);
+        });
+    }
+
     // Enable/Disable toggle.
     const toggleBtn = document.querySelector('[data-action="toggle-enabled"]');
     const toggleErr = document.querySelector("[data-detail-toggle-error]");

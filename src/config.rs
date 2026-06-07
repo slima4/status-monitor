@@ -1125,7 +1125,9 @@ impl AppConfig {
             return Ok(());
         }
         if agent.control_plane_url.trim().is_empty() {
-            return Err(err("agent.control_plane_url is required when agent.enabled"));
+            return Err(err(
+                "agent.control_plane_url is required when agent.enabled",
+            ));
         }
         if agent.region.trim().is_empty() {
             return Err(err("agent.region is required when agent.enabled"));

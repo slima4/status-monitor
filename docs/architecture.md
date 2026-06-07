@@ -113,3 +113,7 @@ breaker as scheduled checks, with `?force=true` available to bypass.
 - `WorkerPool::execute` spawns a new task per dispatch, gated by `Arc<Semaphore>` sized to `max_concurrent_checks`
 - Batcher is a single task with `tokio::select!` over channel-recv, timeout, and cancellation
 - Sampler is a single task that periodically reads gauge sources (pool semaphore counts, target count, breaker counts) and records into the metrics registry
+
+## Multi-region probes
+
+By default one process is the whole system: it schedules and runs every check itself, in one region. A deployment can add regions by running extra processes as **agents** (`[agent] enabled = true`) — stateless probes with no database, web, or alerting. Each agent pulls its region's decrypted monitor config from the control plane and POSTs results back; region is the partition key, so one agent per region needs no coordination. The control plane's own region is a normal region row (`scheduler.region`), not a sentinel. Results carry their region + agent through both ClickHouse rollups, so reads can slice by region. Regions and agents are provisioned through the instance-admin `/operator/*` surface. See [Multi-region probes](multi-region.md) for the full model, operator surface, and read-path behaviour.

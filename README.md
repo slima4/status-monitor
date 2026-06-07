@@ -158,6 +158,7 @@ Sources under [`docs/`](docs/) — readable directly on GitHub too:
 | [docs/api.md](docs/api.md) | REST endpoints, check-spec payload shapes, result + uptime queries |
 | [docs/public-status.md](docs/public-status.md) | operator guide to the public `/status` page: enable components, narrate incidents, schedule maintenance |
 | [docs/authentication.md](docs/authentication.md) | sign-in, sessions, scoped API tokens, org binding |
+| [docs/multi-region.md](docs/multi-region.md) | regional probe agents, the operator surface, running an agent, per-region views |
 | [docs/mcp.md](docs/mcp.md) | MCP server for LLM clients: tools, scopes, OAuth connector, enabling, examples |
 | [docs/configuration.md](docs/configuration.md) | `default.toml` reference, env override scheme, tuning notes |
 | [docs/metrics.md](docs/metrics.md) | Prometheus series (incl. connect / TLS / pool gauges), OpenTelemetry tracing |

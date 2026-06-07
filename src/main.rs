@@ -166,7 +166,10 @@ async fn main() -> Result<()> {
     };
     let pg_pool = PostgresTargetStore::connect_pool(&cfg.storage.postgres).await?;
     storage::admin::AdminRepo::new(pg_pool.clone(), cipher.clone(), "region_reconcile")
-        .reconcile_regions(&cfg.scheduler.region, cfg.scheduler.effective_default_region())
+        .reconcile_regions(
+            &cfg.scheduler.region,
+            cfg.scheduler.effective_default_region(),
+        )
         .await?;
     let target_store: Arc<dyn TargetStore> = Arc::new(
         PostgresTargetStore::from_pool(pg_pool.clone(), cipher.clone())

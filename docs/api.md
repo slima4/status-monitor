@@ -27,9 +27,10 @@ All responses use `Content-Type: application/json; charset=utf-8`.
 | `GET` | `/api/v1/targets/{id}` | get one target |
 | `PATCH` | `/api/v1/targets/{id}` | update name, check spec, interval, enabled, tags |
 | `DELETE` | `/api/v1/targets/{id}` | delete a target |
-| `GET` | `/api/v1/targets/{id}/results` | recent check results (`from`, `to`, `limit`, `offset`) — paginated |
-| `GET` | `/api/v1/targets/{id}/latency` | bucketed latency series (`from`, `to`) — server-side quantiles + per-phase means |
-| `GET` | `/api/v1/targets/{id}/uptime` | uptime summary over a range |
+| `GET` | `/api/v1/targets/{id}/results` | recent check results (`from`, `to`, `limit`, `offset`, `region`) — paginated |
+| `GET` | `/api/v1/targets/{id}/latency` | bucketed latency series (`from`, `to`, `region`) — server-side quantiles + per-phase means |
+| `GET` | `/api/v1/targets/{id}/latency/by-region` | per-region latency series (`from`, `to`) — one series per region, for overlay charts |
+| `GET` | `/api/v1/targets/{id}/uptime` | uptime summary over a range (`from`, `to`, `region`) |
 | `GET` | `/api/v1/targets/{id}/incidents` | coalesced incident periods (`from`, `to`, `ongoing_only`) — paginated |
 | `POST` | `/api/v1/targets/{id}/shares` | mint a read-only share link; returns the share (token included) |
 | `GET` | `/api/v1/targets/{id}/shares` | list a monitor's live share links (token included, re-copyable) |
@@ -40,6 +41,15 @@ All responses use `Content-Type: application/json; charset=utf-8`.
 | `GET` | `/readyz` | readiness — pings the target store; 503 if unreachable |
 | `GET` | `/api/openapi.json` | OpenAPI 3.1 document |
 | `GET` | `/docs` | Swagger UI |
+
+### Instance-admin and agent surfaces
+
+Two surfaces sit outside `/api/v1` with their own auth, used only for multi-region deployments:
+
+- `/operator/*` — instance-admin regions + agents CRUD, gated by a static bearer secret (`UPTIMEPAGE_OPERATOR__ADMIN_TOKEN`); `404`s when unset.
+- `/api/agent/*` — the pull/ingest endpoints an agent uses, authenticated by its `sm_agent_…` token (not a tenant `api_token`).
+
+Both are documented in [Multi-region probes](multi-region.md).
 
 ### Operator endpoints (maintenance + incident narration)
 
@@ -398,6 +408,26 @@ Pre-bucketed quantiles and per-phase means read straight from the per-minute rol
 ```
 
 `bucket_seconds` is always a multiple of 60 (1h→60, 24h→1440, 7d→10080, 30d→43200).
+
+### Region filter
+
+`results`, `latency`, and `uptime` accept an optional `region=` query parameter to scope the read to one probe region; omit it for an all-regions view. Region ids are the slugs registered via the operator surface. See [Multi-region probes](multi-region.md).
+
+### Per-region latency series
+
+`GET /api/v1/targets/{id}/latency/by-region?from=…&to=…`
+
+Same bucketing and cost as `/latency`, but split by region so each can be overlaid as its own line — powers the monitor-detail overlay chart. One entry per region that has samples in the range; each region's `buckets` use the same shape as `/latency`.
+
+```jsonc
+{
+  "bucket_seconds": 1440,
+  "regions": [
+    { "region": "default",  "buckets": [ /* LatencyBucket… */ ] },
+    { "region": "eu-west",  "buckets": [ /* LatencyBucket… */ ] }
+  ]
+}
+```
 
 ## Uptime query
 

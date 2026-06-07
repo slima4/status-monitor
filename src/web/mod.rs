@@ -17,6 +17,7 @@ pub mod theme;
 pub mod time_format;
 pub mod views;
 
+pub use auth::agent::AgentIdentity;
 pub use auth::api_token::{BrowserUser, VerifiedBrowserUser};
 pub use auth::authz::{
     Authorized, ChannelsDelete, ChannelsExecute, ChannelsRead, ChannelsWrite, IncidentsRead,
@@ -24,7 +25,6 @@ pub use auth::authz::{
     OwnerAuthorized, RequestSource, StatusPageDelete, StatusPageRead, StatusPageWrite,
     TargetsDelete, TargetsExecute, TargetsRead, TargetsWrite, TokenScopes,
 };
-pub use auth::agent::AgentIdentity;
 pub use auth::operator::OperatorAuth;
 pub use auth::{AuthedBrowser, CurrentOrg, CurrentUser, Session, User};
 pub use host::{ResolvedStatusPage, StatusPageHost, extract_status_slug};

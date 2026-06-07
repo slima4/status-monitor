@@ -337,7 +337,7 @@ impl TargetStore for PostgresTargetStore {
         .fetch_one(&mut *tx)
         .await
         .context("insert target")?;
-        self.assign_default_region(&mut *tx, &[row.id]).await?;
+        self.assign_default_region(&mut tx, &[row.id]).await?;
         tx.commit().await.context("create target: commit")?;
         self.decode_row(row)
     }
@@ -533,7 +533,7 @@ impl TargetStore for PostgresTargetStore {
         };
 
         let ids: Vec<Uuid> = rows.iter().map(|r| r.id).collect();
-        self.assign_default_region(&mut *tx, &ids).await?;
+        self.assign_default_region(&mut tx, &ids).await?;
         tx.commit().await.context("bulk create: commit")?;
         self.rows_to_targets(rows)
     }

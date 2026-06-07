@@ -11,7 +11,7 @@
    <template> content is parsed in a separate context that preserves
    table-internal tags, and htmx unwraps it during OOB application. #}
 <section id="detail-live-kpi"
-         hx-get="/web/partials/targets/{{ id }}/live?range={{ range }}"
+         hx-get="/web/partials/targets/{{ id }}/live?range={{ range }}{% if let Some(r) = selected_region %}&region={{ r|urlencode }}{% endif %}"
          hx-trigger="every 60s, sm:refresh-live from:body"
          hx-swap="outerHTML"
          hx-on::response-error="if(event.detail.xhr.status===404){this.removeAttribute('hx-trigger')}"

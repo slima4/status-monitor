@@ -29,9 +29,7 @@ use crate::pipeline::{BatcherConfig, ResultBatcher};
 use crate::scheduler::{Scheduler, TargetRegistry};
 use crate::security::SsrfGuard;
 use crate::storage::admin::EnabledTargetSource;
-use crate::storage::{
-    DomainExpiryStateStore, InMemoryDomainExpiryStateStore, ResultSink,
-};
+use crate::storage::{DomainExpiryStateStore, InMemoryDomainExpiryStateStore, ResultSink};
 use crate::worker::domain_expiry::{DEFAULT_MAX_STALENESS, DomainExpiryRuntime};
 use crate::worker::host_throttle::HostThrottle;
 use crate::worker::rdap::RdapClient;
@@ -108,8 +106,16 @@ impl EnabledTargetSource for AgentPullSource {
 
         let resp = match tokio::time::timeout(HTTP_TIMEOUT, self.client.request(req)).await {
             Ok(Ok(r)) => r,
-            Ok(Err(e)) => return self.cached_or_err(format!("config pull request failed: {e}")).await,
-            Err(_) => return self.cached_or_err("config pull request timed out".into()).await,
+            Ok(Err(e)) => {
+                return self
+                    .cached_or_err(format!("config pull request failed: {e}"))
+                    .await;
+            }
+            Err(_) => {
+                return self
+                    .cached_or_err("config pull request timed out".into())
+                    .await;
+            }
         };
 
         let status = resp.status();
@@ -188,7 +194,10 @@ impl ResultSink for AgentResultSink {
         // batcher reforms (supersets) the buffer between ticks.
         let batch_id = Uuid::new_v4();
         let mut headers = std::collections::BTreeMap::new();
-        headers.insert("Authorization".to_string(), format!("Bearer {}", self.token));
+        headers.insert(
+            "Authorization".to_string(),
+            format!("Bearer {}", self.token),
+        );
         let backoff = ExponentialBackoffBuilder::new()
             .with_initial_interval(Duration::from_millis(200))
             .with_max_interval(Duration::from_secs(5))
@@ -207,7 +216,11 @@ impl ResultSink for AgentResultSink {
 /// Run the process as a regional agent until SIGINT/SIGTERM.
 pub async fn run(cfg: AppConfig) -> Result<()> {
     let region = cfg.agent.region.clone();
-    let base = cfg.agent.control_plane_url.trim_end_matches('/').to_string();
+    let base = cfg
+        .agent
+        .control_plane_url
+        .trim_end_matches('/')
+        .to_string();
     let token = cfg.agent.token.expose_secret().to_string();
     tracing::info!(
         region = %region,
@@ -234,8 +247,7 @@ pub async fn run(cfg: AppConfig) -> Result<()> {
         &cfg.dns,
         &cfg.security,
     )?);
-    let (result_tx, result_rx) =
-        tokio::sync::mpsc::channel(cfg.agent.buffer_capacity.max(1024));
+    let (result_tx, result_rx) = tokio::sync::mpsc::channel(cfg.agent.buffer_capacity.max(1024));
     let fanout = ResultFanout::new(result_tx, None);
     let host_throttle = Arc::new(HostThrottle::new(
         cfg.checker.per_host_max_inflight,

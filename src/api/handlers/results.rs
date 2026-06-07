@@ -8,7 +8,7 @@ use uuid::Uuid;
 use crate::api::ApiError;
 use crate::api::error::codes;
 use crate::api::page::{PageEnvelope, PageOfCheckResult, PageOfIncident};
-use crate::api::types::LatencySeries;
+use crate::api::types::{LatencySeries, LatencySeriesByRegion};
 use crate::app::AppState;
 use crate::error::{AppError, Result};
 use crate::storage::{IncidentListQuery, TimeRange, UptimeStats};
@@ -84,6 +84,8 @@ pub struct RangeQuery {
     /// Page offset (default 0).
     #[serde(default)]
     pub offset: usize,
+    /// Restrict to one probe region; omit for all regions.
+    pub region: Option<String>,
 }
 
 impl RangeQuery {
@@ -141,7 +143,7 @@ pub async fn list_results(
         state.target_store.get(org, id),
         state
             .results_store
-            .list_results(org, id, range, limit + 1, offset),
+            .list_results(org, id, range, limit + 1, offset, q.region.as_deref()),
     )?;
     if target.is_none() {
         return Err(target_not_found());
@@ -213,13 +215,58 @@ pub async fn latency(
         state.target_store.get(org, id),
         state
             .results_store
-            .latency_buckets(org, id, range, bucket_seconds),
+            .latency_buckets(org, id, range, bucket_seconds, q.region.as_deref()),
     )?;
     if target.is_none() {
         return Err(target_not_found());
     }
     Ok(Json(LatencySeries {
         buckets,
+        bucket_seconds,
+    }))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/targets/{id}/latency/by-region",
+    tag = "results",
+    summary = "Per-region bucketed latency series for a target",
+    description = "Like `/latency`, but split by probe region so each region can \
+                   be overlaid as its own line. One entry per region with samples \
+                   in the range; same server-side bucketing and O(buckets) cost.",
+    params(
+        ("id" = Uuid, Path, description = "Target id"),
+        ("from" = Option<DateTime<Utc>>, Query, description = "Inclusive lower bound (default: now-24h)"),
+        ("to" = Option<DateTime<Utc>>, Query, description = "Exclusive upper bound (default: now)"),
+    ),
+    responses(
+        (status = 200, body = LatencySeriesByRegion),
+        (status = 400, description = "Bad time range", body = ApiError),
+        (status = 404, description = "Target not found", body = ApiError),
+    ),
+)]
+pub async fn latency_by_region(
+    State(state): State<AppState>,
+    Authorized(org, _): Authorized<TargetsRead>,
+    Path(id): Path<Uuid>,
+    Query(q): Query<RangeQuery>,
+) -> Result<Json<LatencySeriesByRegion>> {
+    let range = state
+        .quotas
+        .clamp_history(org, q.resolve_uncapped()?)
+        .await?;
+    let bucket_seconds = latency_bucket_seconds(range.inner());
+    let (target, regions) = tokio::try_join!(
+        state.target_store.get(org, id),
+        state
+            .results_store
+            .latency_buckets_by_region(org, id, range, bucket_seconds),
+    )?;
+    if target.is_none() {
+        return Err(target_not_found());
+    }
+    Ok(Json(LatencySeriesByRegion {
+        regions,
         bucket_seconds,
     }))
 }
@@ -252,7 +299,9 @@ pub async fn uptime(
     let range = state.quotas.clamp_raw(org, q.resolve()?).await?;
     let (target, stats) = tokio::try_join!(
         state.target_store.get(org, id),
-        state.results_store.uptime(org, id, range),
+        state
+            .results_store
+            .uptime(org, id, range, q.region.as_deref()),
     )?;
     if target.is_none() {
         return Err(target_not_found());

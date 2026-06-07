@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use crate::api::types::{
     DashboardMetrics, DashboardSparkBucket, FleetRibbonBucket, LatencyBucket, PriorPeriodSummary,
-    StatusBreakdown,
+    RegionLatencySeries, RegionRollup, StatusBreakdown,
 };
 use crate::config::ClickhouseConfig;
 use crate::domain::{
@@ -663,21 +663,27 @@ impl ResultsStore for ClickhouseResultsStore {
         range: ClampedRange,
         limit: usize,
         offset: usize,
+        region: Option<&str>,
     ) -> Result<Vec<CheckResult>> {
         let limit = limit.min(10_000) as u64;
         let offset = offset as u64;
-        let rows: Vec<OwnedResultRow> = self
+        let region_pred = region.map(|_| "AND region = ?").unwrap_or("");
+        let mut q = self
             .client
             .query(&format!(
                 "SELECT target_id, timestamp, status, duration_ms, dns_ms, connect_ms, tls_ms, \
                  ttfb_ms, response_code, response_size, error FROM {TABLE} \
-                 WHERE org_id = ? AND target_id = ? \
+                 WHERE org_id = ? AND target_id = ? {region_pred} \
                  AND timestamp >= fromUnixTimestamp64Milli(?) \
                  AND timestamp < fromUnixTimestamp64Milli(?) \
                  ORDER BY timestamp DESC LIMIT ? OFFSET ?"
             ))
             .bind(org.0)
-            .bind(target_id)
+            .bind(target_id);
+        if let Some(r) = region {
+            q = q.bind(r);
+        }
+        let rows: Vec<OwnedResultRow> = q
             .bind(range.from.timestamp_millis())
             .bind(range.to.timestamp_millis())
             .bind(limit)
@@ -842,6 +848,7 @@ impl ResultsStore for ClickhouseResultsStore {
         org: OrgId,
         target_id: Uuid,
         range: ClampedRange,
+        region: Option<&str>,
     ) -> Result<UptimeStats> {
         #[derive(Row, Deserialize)]
         struct CountsRow {
@@ -851,7 +858,8 @@ impl ResultsStore for ClickhouseResultsStore {
             error: u64,
         }
 
-        let row: CountsRow = self
+        let region_pred = region.map(|_| "AND region = ?").unwrap_or("");
+        let mut q = self
             .client
             .query(&format!(
                 "SELECT \
@@ -860,12 +868,16 @@ impl ResultsStore for ClickhouseResultsStore {
                    countIf(status = 'degraded') AS degraded, \
                    countIf(status = 'error') AS error \
                  FROM {TABLE} \
-                 WHERE org_id = ? AND target_id = ? \
+                 WHERE org_id = ? AND target_id = ? {region_pred} \
                  AND timestamp >= fromUnixTimestamp64Milli(?) \
                  AND timestamp < fromUnixTimestamp64Milli(?)"
             ))
             .bind(org.0)
-            .bind(target_id)
+            .bind(target_id);
+        if let Some(r) = region {
+            q = q.bind(r);
+        }
+        let row: CountsRow = q
             .bind(range.from.timestamp_millis())
             .bind(range.to.timestamp_millis())
             .fetch_one::<CountsRow>()
@@ -1001,6 +1013,7 @@ impl ResultsStore for ClickhouseResultsStore {
         target_id: Uuid,
         range: ClampedRange,
         bucket_seconds: u32,
+        region: Option<&str>,
     ) -> Result<Vec<LatencyBucket>> {
         #[derive(Row, Deserialize)]
         struct LatRow {
@@ -1028,6 +1041,7 @@ impl ResultsStore for ClickhouseResultsStore {
             ("check_results_1h", "hour")
         };
         let window = format!("{tcol} >= fromUnixTimestamp(?) AND {tcol} < fromUnixTimestamp(?)");
+        let region_pred = region.map(|_| "AND region = ?").unwrap_or("");
         let query = format!(
             "SELECT \
                toUInt32(toStartOfInterval({tcol}, INTERVAL {bucket} SECOND)) AS bucket_ts, \
@@ -1039,11 +1053,14 @@ impl ResultsStore for ClickhouseResultsStore {
                ifNull(avgMerge(avg_ttfb_ms), 0) AS ttfb, \
                countMerge(total_checks) AS samples \
              FROM {table} \
-             WHERE org_id = ? AND target_id = ? AND {window} \
+             WHERE org_id = ? AND target_id = ? {region_pred} AND {window} \
              GROUP BY bucket_ts \
              ORDER BY bucket_ts"
         );
-        let q = self.client.query(&query).bind(org.0).bind(target_id);
+        let mut q = self.client.query(&query).bind(org.0).bind(target_id);
+        if let Some(r) = region {
+            q = q.bind(r);
+        }
         let rows: Vec<LatRow> = bind_minute_window(q, range.from, range.to)
             .fetch_all::<LatRow>()
             .await
@@ -1077,6 +1094,126 @@ impl ResultsStore for ClickhouseResultsStore {
             "latency_buckets served from rollup"
         );
         Ok(buckets)
+    }
+
+    async fn region_breakdown(
+        &self,
+        org: OrgId,
+        target_id: Uuid,
+        range: TimeRange,
+    ) -> Result<Vec<RegionRollup>> {
+        #[derive(Row, Deserialize)]
+        struct R {
+            region: String,
+            samples: u64,
+            up: u64,
+            quantiles: Vec<f64>,
+            last_status: i8,
+        }
+        let q = self
+            .client
+            .query(&format!(
+                "SELECT region, \
+                   countMerge(total_checks) AS samples, \
+                   countIfMerge(up_checks) AS up, \
+                   quantilesMerge(0.5, 0.95)(duration_quantiles) AS quantiles, \
+                   argMaxMerge(last_status_state) AS last_status \
+                 FROM check_results_1m \
+                 WHERE org_id = ? AND target_id = ? AND {MINUTE_WINDOW} \
+                 GROUP BY region ORDER BY region"
+            ))
+            .bind(org.0)
+            .bind(target_id);
+        let rows: Vec<R> = bind_minute_window(q, range.from, range.to)
+            .fetch_all::<R>()
+            .await
+            .context("clickhouse region_breakdown")?;
+        let ms = |v: f64| v.round().clamp(0.0, u32::MAX as f64) as u32;
+        Ok(rows
+            .into_iter()
+            .map(|r| RegionRollup {
+                region: r.region,
+                samples: r.samples,
+                up: r.up,
+                p50_ms: ms(r.quantiles.first().copied().unwrap_or(0.0)),
+                p95_ms: ms(r.quantiles.get(1).copied().unwrap_or(0.0)),
+                last_status: CheckStatus::from_enum8(r.last_status).as_str().to_string(),
+            })
+            .collect())
+    }
+
+    async fn latency_buckets_by_region(
+        &self,
+        org: OrgId,
+        target_id: Uuid,
+        range: ClampedRange,
+        bucket_seconds: u32,
+    ) -> Result<Vec<RegionLatencySeries>> {
+        #[derive(Row, Deserialize)]
+        struct LatRow {
+            region: String,
+            bucket_ts: u32,
+            quantiles: Vec<f64>,
+            avg: f64,
+            dns: f64,
+            connect: f64,
+            tls: f64,
+            ttfb: f64,
+            samples: u64,
+        }
+        let bucket = bucket_seconds.max(60).div_ceil(60) * 60;
+        let (table, tcol) = if range.from >= Utc::now() - chrono::Duration::days(MINUTE_ROLLUP_DAYS)
+        {
+            ("check_results_1m", "minute")
+        } else {
+            ("check_results_1h", "hour")
+        };
+        let window = format!("{tcol} >= fromUnixTimestamp(?) AND {tcol} < fromUnixTimestamp(?)");
+        let query = format!(
+            "SELECT region, \
+               toUInt32(toStartOfInterval({tcol}, INTERVAL {bucket} SECOND)) AS bucket_ts, \
+               quantilesMerge(0.5, 0.95, 0.99)(duration_quantiles) AS quantiles, \
+               avgMerge(avg_duration_ms) AS avg, \
+               ifNull(avgMerge(avg_dns_ms), 0) AS dns, \
+               ifNull(avgMerge(avg_connect_ms), 0) AS connect, \
+               ifNull(avgMerge(avg_tls_ms), 0) AS tls, \
+               ifNull(avgMerge(avg_ttfb_ms), 0) AS ttfb, \
+               countMerge(total_checks) AS samples \
+             FROM {table} \
+             WHERE org_id = ? AND target_id = ? AND {window} \
+             GROUP BY region, bucket_ts \
+             ORDER BY region, bucket_ts"
+        );
+        let q = self.client.query(&query).bind(org.0).bind(target_id);
+        let rows: Vec<LatRow> = bind_minute_window(q, range.from, range.to)
+            .fetch_all::<LatRow>()
+            .await
+            .context("clickhouse latency_buckets_by_region")?;
+        let ms = |v: f64| v.round().max(0.0) as u32;
+        let mut out: Vec<RegionLatencySeries> = Vec::new();
+        for r in rows {
+            let q = |i: usize| r.quantiles.get(i).copied().map(ms).unwrap_or(0);
+            let bucket = LatencyBucket {
+                t: i64::from(r.bucket_ts) * 1000,
+                p50: q(0),
+                p95: q(1),
+                p99: q(2),
+                avg: ms(r.avg),
+                dns: ms(r.dns),
+                connect: ms(r.connect),
+                tls: ms(r.tls),
+                ttfb: ms(r.ttfb),
+                samples: r.samples,
+            };
+            match out.last_mut() {
+                Some(s) if s.region == r.region => s.buckets.push(bucket),
+                _ => out.push(RegionLatencySeries {
+                    region: r.region,
+                    buckets: vec![bucket],
+                }),
+            }
+        }
+        Ok(out)
     }
 
     async fn fleet_ribbon(

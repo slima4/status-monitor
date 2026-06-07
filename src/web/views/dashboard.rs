@@ -308,7 +308,7 @@ pub async fn index(
 }
 
 /// An unknown region collapses to the all-regions view, not an empty dashboard.
-fn resolve_region(requested: Option<String>, regions: &[String]) -> Option<String> {
+pub(crate) fn resolve_region(requested: Option<String>, regions: &[String]) -> Option<String> {
     requested.filter(|r| regions.iter().any(|x| x == r))
 }
 
@@ -416,8 +416,12 @@ async fn build_snapshot(
         prior,
     ) = tokio::try_join!(
         state.target_store.list(org, target_filter),
-        state.results_store.dashboard_rollup(org, time_range, region),
-        state.results_store.dashboard_sparkline(org, spark_from, to, region),
+        state
+            .results_store
+            .dashboard_rollup(org, time_range, region),
+        state
+            .results_store
+            .dashboard_sparkline(org, spark_from, to, region),
         state.results_store.last_n_summary(org, time_range, region),
         state
             .incident_narration_store
@@ -425,7 +429,9 @@ async fn build_snapshot(
         state
             .results_store
             .fleet_ribbon(org, ribbon_from, to, RIBBON_BUCKET_SECONDS, region),
-        state.results_store.prior_period_summary(org, time_range, region),
+        state
+            .results_store
+            .prior_period_summary(org, time_range, region),
     )?;
 
     let truncated = targets.len() > ROW_LIMIT;
@@ -764,7 +770,7 @@ fn range_span(key: &'static str) -> Duration {
     }
 }
 
-fn pct_label(total: u64, up: u64) -> String {
+pub(crate) fn pct_label(total: u64, up: u64) -> String {
     match uptime_pct(&PriorPeriodSummary {
         checks_total: total,
         checks_up: up,

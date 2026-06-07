@@ -119,8 +119,7 @@ pub async fn create_region(
     let id = validate_region_id(&req.id)?;
     let name = validate_name(&req.name)?;
     let location = validate_location(req.location.as_deref())?;
-    if repo(&state)?.create_region(id, name, location).await?
-    {
+    if repo(&state)?.create_region(id, name, location).await? {
         Ok(StatusCode::CREATED)
     } else {
         Err(AppError::conflict(
@@ -138,11 +137,13 @@ pub async fn update_region(
 ) -> Result<StatusCode> {
     let name = validate_name(&req.name)?;
     let location = validate_location(req.location.as_deref())?;
-    if repo(&state)?.update_region(&id, name, location).await?
-    {
+    if repo(&state)?.update_region(&id, name, location).await? {
         Ok(StatusCode::NO_CONTENT)
     } else {
-        Err(AppError::not_found(codes::REGION_NOT_FOUND, "region not found"))
+        Err(AppError::not_found(
+            codes::REGION_NOT_FOUND,
+            "region not found",
+        ))
     }
 }
 
@@ -153,9 +154,10 @@ pub async fn delete_region(
 ) -> Result<StatusCode> {
     match repo(&state)?.delete_region(&id).await? {
         DeleteRegion::Deleted => Ok(StatusCode::NO_CONTENT),
-        DeleteRegion::NotFound => {
-            Err(AppError::not_found(codes::REGION_NOT_FOUND, "region not found"))
-        }
+        DeleteRegion::NotFound => Err(AppError::not_found(
+            codes::REGION_NOT_FOUND,
+            "region not found",
+        )),
         DeleteRegion::InUse => Err(AppError::conflict(
             codes::REGION_IN_USE,
             "region still has agents or assigned targets",
@@ -270,7 +272,10 @@ pub async fn update_agent(
     if found {
         Ok(StatusCode::NO_CONTENT)
     } else {
-        Err(AppError::not_found(codes::AGENT_NOT_FOUND, "agent not found"))
+        Err(AppError::not_found(
+            codes::AGENT_NOT_FOUND,
+            "agent not found",
+        ))
     }
 }
 
@@ -282,6 +287,9 @@ pub async fn delete_agent(
     if repo(&state)?.delete_agent(id).await? {
         Ok(StatusCode::NO_CONTENT)
     } else {
-        Err(AppError::not_found(codes::AGENT_NOT_FOUND, "agent not found"))
+        Err(AppError::not_found(
+            codes::AGENT_NOT_FOUND,
+            "agent not found",
+        ))
     }
 }

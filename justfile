@@ -201,3 +201,10 @@ smoke:
     @echo "badge:"    ; curl -sS -o /dev/null -w "  %{http_code}\n" http://localhost:8080/api/public/v1/badge.svg
     @echo "rss:"      ; curl -sS -o /dev/null -w "  %{http_code}\n" http://localhost:8080/api/public/v1/incidents.rss
     @echo "html:"     ; curl -sS -o /dev/null -w "  %{http_code}\n" http://localhost:8080/status
+
+# Smoke-test the operator surface (regions + agents): self-cleaning, asserts
+# every status code. Needs the app running with UPTIMEPAGE_OPERATOR__ADMIN_TOKEN
+# set; pass the same value as the arg or via OPERATOR_TOKEN.
+#   just smoke-operator <admin-token>
+smoke-operator token=env_var_or_default("OPERATOR_TOKEN", ""):
+    OPERATOR_TOKEN={{token}} bash scripts/smoke-operator.sh

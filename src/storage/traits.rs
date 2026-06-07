@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 use crate::api::types::{
     DashboardMetrics, DashboardSparkBucket, FleetRibbonBucket, LatencyBucket, PriorPeriodSummary,
-    StatusBreakdown, TagCount, TargetsSummary,
+    RegionLatencySeries, RegionRollup, StatusBreakdown, TagCount, TargetsSummary,
 };
 use crate::domain::{
     CheckResult, CheckStatus, Incident, NewTarget, OrgId, Target, TargetUpdate, WriteSource,
@@ -250,9 +250,15 @@ pub trait ResultsStore: Send + Sync {
         range: ClampedRange,
         limit: usize,
         offset: usize,
+        region: Option<&str>,
     ) -> Result<Vec<CheckResult>>;
-    async fn uptime(&self, org: OrgId, target_id: Uuid, range: ClampedRange)
-    -> Result<UptimeStats>;
+    async fn uptime(
+        &self,
+        org: OrgId,
+        target_id: Uuid,
+        range: ClampedRange,
+        region: Option<&str>,
+    ) -> Result<UptimeStats>;
     /// Coalesce consecutive `down`/`error` results in the requested window
     /// into incidents. See [`IncidentListQuery`] for the per-call options.
     async fn list_incidents(
@@ -315,7 +321,27 @@ pub trait ResultsStore: Send + Sync {
         target_id: Uuid,
         range: ClampedRange,
         bucket_seconds: u32,
+        region: Option<&str>,
     ) -> Result<Vec<LatencyBucket>>;
+    /// Per-region rollup for one target over `range` — drives the detail-page
+    /// region breakdown table. One row per region; regions with no samples are
+    /// omitted. Single-region orgs see one row.
+    async fn region_breakdown(
+        &self,
+        org: OrgId,
+        target_id: Uuid,
+        range: TimeRange,
+    ) -> Result<Vec<RegionRollup>>;
+    /// Per-region latency buckets for one target — the overlay view, each
+    /// region a separate line. Same rollup source + bucketing as
+    /// [`latency_buckets`](Self::latency_buckets), split by region.
+    async fn latency_buckets_by_region(
+        &self,
+        org: OrgId,
+        target_id: Uuid,
+        range: ClampedRange,
+        bucket_seconds: u32,
+    ) -> Result<Vec<RegionLatencySeries>>;
     /// Fleet-wide uptime ribbon: one bucket per `bucket_seconds` slice
     /// across every monitor in `org`. Implementations MUST read from the
     /// `check_results_1m` rollup so the cost stays O(buckets) regardless

@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use crate::api::types::{
     DashboardMetrics, DashboardSparkBucket, FleetRibbonBucket, LatencyBucket, PriorPeriodSummary,
-    StatusBreakdown, TagCount, TargetsSummary,
+    RegionLatencySeries, RegionRollup, StatusBreakdown, TagCount, TargetsSummary,
 };
 use crate::domain::{
     CheckResult, CheckStatus, Incident, NewTarget, OrgId, Target, TargetUpdate, WriteSource,
@@ -67,6 +67,7 @@ impl ResultsStore for InMemorySink {
         range: ClampedRange,
         limit: usize,
         offset: usize,
+        _region: Option<&str>,
     ) -> Result<Vec<CheckResult>> {
         let guard = self.results.lock();
         let mut out: Vec<CheckResult> = guard
@@ -89,6 +90,7 @@ impl ResultsStore for InMemorySink {
         _org: OrgId,
         target_id: Uuid,
         range: ClampedRange,
+        _region: Option<&str>,
     ) -> Result<UptimeStats> {
         let guard = self.results.lock();
         let filtered: Vec<CheckResult> = guard
@@ -274,6 +276,7 @@ impl ResultsStore for InMemorySink {
         target_id: Uuid,
         range: ClampedRange,
         bucket_seconds: u32,
+        _region: Option<&str>,
     ) -> Result<Vec<LatencyBucket>> {
         #[derive(Default)]
         struct Acc {
@@ -333,6 +336,25 @@ impl ResultsStore for InMemorySink {
                 }
             })
             .collect())
+    }
+
+    async fn region_breakdown(
+        &self,
+        _org: OrgId,
+        _target_id: Uuid,
+        _range: TimeRange,
+    ) -> Result<Vec<RegionRollup>> {
+        Ok(Vec::new())
+    }
+
+    async fn latency_buckets_by_region(
+        &self,
+        _org: OrgId,
+        _target_id: Uuid,
+        _range: ClampedRange,
+        _bucket_seconds: u32,
+    ) -> Result<Vec<RegionLatencySeries>> {
+        Ok(Vec::new())
     }
 
     async fn fleet_ribbon(
@@ -878,7 +900,13 @@ mod tests {
             to: base + chrono::Duration::seconds(120),
         };
         let buckets = store
-            .latency_buckets(OrgId(Uuid::nil()), t, ClampedRange::unclamped(range), 60)
+            .latency_buckets(
+                OrgId(Uuid::nil()),
+                t,
+                ClampedRange::unclamped(range),
+                60,
+                None,
+            )
             .await
             .unwrap();
 
@@ -911,7 +939,13 @@ mod tests {
             to: base + chrono::Duration::seconds(60),
         };
         let buckets = store
-            .latency_buckets(OrgId(Uuid::nil()), t, ClampedRange::unclamped(range), 60)
+            .latency_buckets(
+                OrgId(Uuid::nil()),
+                t,
+                ClampedRange::unclamped(range),
+                60,
+                None,
+            )
             .await
             .unwrap();
         assert_eq!(buckets.len(), 1);

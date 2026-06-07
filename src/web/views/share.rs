@@ -118,6 +118,9 @@ pub struct ShareDetailPage {
     pub to_iso: String,
     pub from_human: String,
     pub to_human: String,
+    /// Always `None` — the public share surface is not region-filtered; the
+    /// field exists so the shared range-pills partial type-checks.
+    pub selected_region: Option<String>,
 }
 
 #[derive(Template, WebTemplate)]
@@ -157,6 +160,7 @@ pub struct ShareIncidentsPage {
     pub to_iso: String,
     pub from_human: String,
     pub to_human: String,
+    pub selected_region: Option<String>,
 }
 
 pub async fn detail(
@@ -188,6 +192,7 @@ pub async fn detail(
         range_key,
         params.from,
         params.to,
+        None,
     )
     .await?;
     let ongoing_count = ongoing_from_status(live.last_status);
@@ -219,6 +224,7 @@ pub async fn detail(
         to_iso: labels.to_iso,
         from_human: labels.from_human,
         to_human: labels.to_human,
+        selected_region: None,
     })
 }
 
@@ -248,7 +254,8 @@ pub async fn live_partial(
             resolved.target_id,
             range_key,
             params.from,
-            params.to
+            params.to,
+            None,
         ),
     )?;
     // Monitor gone (cascade-deleted with its share between resolve and now) →
@@ -337,6 +344,7 @@ pub async fn incidents(
         to_iso: labels.to_iso,
         from_human: labels.from_human,
         to_human: labels.to_human,
+        selected_region: None,
     })
 }
 
@@ -354,7 +362,13 @@ pub async fn latency(
     let bucket_seconds = latency_bucket_seconds(range.inner());
     let buckets = state
         .results_store
-        .latency_buckets(resolved.org, resolved.target_id, range, bucket_seconds)
+        .latency_buckets(
+            resolved.org,
+            resolved.target_id,
+            range,
+            bucket_seconds,
+            None,
+        )
         .await?;
     Ok(Json(LatencySeries {
         buckets,
@@ -390,7 +404,14 @@ pub async fn results(
     let limit = q.limit();
     let rows = state
         .results_store
-        .list_results(resolved.org, resolved.target_id, range, limit, q.offset)
+        .list_results(
+            resolved.org,
+            resolved.target_id,
+            range,
+            limit,
+            q.offset,
+            None,
+        )
         .await?;
     let items: Vec<ShareResultRow> = rows
         .into_iter()
@@ -418,6 +439,7 @@ mod tests {
             range: None,
             from: Some(to - Duration::days(3650)),
             to: Some(to),
+            ..Default::default()
         };
         clamp_window(&mut p);
         let span = to - p.from.unwrap();
@@ -433,6 +455,7 @@ mod tests {
             range: None,
             from: Some(small),
             to: Some(to),
+            ..Default::default()
         };
         clamp_window(&mut p);
         assert_eq!(p.from, Some(small), "an in-bounds window is untouched");
@@ -442,6 +465,7 @@ mod tests {
             range: Some("24h".into()),
             from: None,
             to: None,
+            ..Default::default()
         };
         clamp_window(&mut preset);
         assert!(preset.from.is_none());

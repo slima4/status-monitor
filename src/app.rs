@@ -384,7 +384,10 @@ impl AppState {
     ) -> Self {
         let quotas = Arc::new(QuotaService::new(&cfg, db.clone()));
         let monitor_share_store: Arc<dyn crate::storage::MonitorShareStore> = match db.clone() {
-            Some(pool) => Arc::new(crate::storage::PgMonitorShareStore::new(pool, cipher.clone())),
+            Some(pool) => Arc::new(crate::storage::PgMonitorShareStore::new(
+                pool,
+                cipher.clone(),
+            )),
             None => Arc::new(crate::storage::InMemoryMonitorShareStore::new()),
         };
         let page_asset_store: Arc<dyn crate::storage::PageAssetStore> = match db.clone() {

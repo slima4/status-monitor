@@ -4,7 +4,7 @@
 <div class="flex flex-wrap items-center gap-3 pt-3">
   <div class="range-tabs" role="tablist" aria-label="Time range">
     {% for opt in range_options %}
-    <a href="{{ range_base_path }}?range={{ opt.key }}"
+    <a href="{{ range_base_path }}?range={{ opt.key }}{% if let Some(r) = selected_region %}&region={{ r|urlencode }}{% endif %}"
        role="tab"
        class="range-tabs__btn{% if opt.selected %} range-tabs__btn--active{% endif %}"
        aria-selected="{% if opt.selected %}true{% else %}false{% endif %}"

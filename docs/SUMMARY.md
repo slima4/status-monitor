@@ -11,6 +11,7 @@
 - [Share links](share-links.md)
 - [Incident management](incidents.md)
 - [Multi-tenancy](multi-tenancy.md)
+- [Multi-region probes](multi-region.md)
 - [Authentication](authentication.md)
 - [MCP server](mcp.md)
 - [Configuration](configuration.md)

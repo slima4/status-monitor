@@ -60,6 +60,8 @@ pub struct DetailParams {
     pub from: Option<DateTime<Utc>>,
     #[serde(default)]
     pub to: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub region: Option<String>,
 }
 
 #[derive(Clone)]
@@ -101,6 +103,8 @@ pub struct DetailLive {
     pub results: Arc<[ResultRow]>,
     pub results_has_more: bool,
     pub last_at_iso: Arc<str>,
+    /// Carried so the self-rearming live poll keeps the active region filter.
+    pub selected_region: Option<String>,
 }
 
 #[derive(Template, WebTemplate)]
@@ -134,6 +138,9 @@ pub struct IncidentsPage {
     pub to_iso: String,
     pub from_human: String,
     pub to_human: String,
+    /// Always `None` here — the incidents tab is not region-filtered yet; the
+    /// field exists so the shared range-pills partial type-checks.
+    pub selected_region: Option<String>,
 }
 
 #[derive(Template, WebTemplate)]
@@ -171,6 +178,39 @@ pub struct DetailPage {
     pub to_iso: String,
     pub from_human: String,
     pub to_human: String,
+    /// Distinct regions this org's targets run in; drives the region selector,
+    /// rendered only when there is more than one.
+    pub regions: Vec<String>,
+    pub selected_region: Option<String>,
+    /// Per-region rollup rows; empty for single-region orgs (table hidden).
+    pub region_breakdown: Vec<RegionBreakdownRow>,
+}
+
+/// One row of the per-region breakdown table on the monitor detail page.
+pub struct RegionBreakdownRow {
+    pub region: String,
+    pub uptime_label: String,
+    pub p50_label: String,
+    pub p95_label: String,
+    /// "" when the region has no samples in the range.
+    pub last_status: String,
+    /// Marks the row matching the active region filter.
+    pub selected: bool,
+}
+
+impl RegionBreakdownRow {
+    fn from_rollup(r: crate::api::types::RegionRollup, selected_region: Option<&str>) -> Self {
+        let uptime_label = super::dashboard::pct_label(r.samples, r.up);
+        let selected = selected_region == Some(r.region.as_str());
+        Self {
+            selected,
+            uptime_label,
+            p50_label: format!("{} ms", r.p50_ms),
+            p95_label: format!("{} ms", r.p95_ms),
+            last_status: r.last_status,
+            region: r.region,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -245,21 +285,24 @@ pub(crate) async fn load_live_data_cached(
     range_key: &'static str,
     custom_from: Option<DateTime<Utc>>,
     custom_to: Option<DateTime<Utc>>,
+    region: Option<&str>,
 ) -> WebResult<Arc<LiveData>> {
-    let cacheable = custom_from.is_none() && custom_to.is_none();
+    // A region-filtered view skips the shared cache (selection is rare, not
+    // worth widening the key) — same call as the custom-window path.
+    let cacheable = custom_from.is_none() && custom_to.is_none() && region.is_none();
     if cacheable {
         let key = (org, target_id, range_key);
         if let Some(data) = state.live_data_cache.get(&key) {
             return Ok(data);
         }
         let (from, to) = resolve_window(range_key, custom_from, custom_to);
-        let data = Arc::new(load_live_data(state, org, target_id, from, to).await?);
+        let data = Arc::new(load_live_data(state, org, target_id, from, to, region).await?);
         state.live_data_cache.insert(key, data.clone());
         Ok(data)
     } else {
         let (from, to) = resolve_window(range_key, custom_from, custom_to);
         Ok(Arc::new(
-            load_live_data(state, org, target_id, from, to).await?,
+            load_live_data(state, org, target_id, from, to, region).await?,
         ))
     }
 }
@@ -284,6 +327,7 @@ async fn latest_status_probe(
             ClampedRange::unclamped(TimeRange { from, to }),
             1,
             0,
+            None,
         )
         .await?
         .into_iter()
@@ -305,13 +349,21 @@ async fn load_live_data(
     target_id: Uuid,
     from: DateTime<Utc>,
     to: DateTime<Utc>,
+    region: Option<&str>,
 ) -> WebResult<LiveData> {
     let time_range = state.quotas.clamp_raw(org, TimeRange { from, to }).await?;
     let (uptime, mut results) = tokio::try_join!(
-        state.results_store.uptime(org, target_id, time_range),
         state
             .results_store
-            .list_results(org, target_id, time_range, RESULTS_PAGE_LIMIT + 1, 0),
+            .uptime(org, target_id, time_range, region),
+        state.results_store.list_results(
+            org,
+            target_id,
+            time_range,
+            RESULTS_PAGE_LIMIT + 1,
+            0,
+            region
+        ),
     )?;
     let results_has_more = results.len() > RESULTS_PAGE_LIMIT;
     if results_has_more {
@@ -324,7 +376,14 @@ async fn load_live_data(
     {
         state
             .results_store
-            .list_results(org, target_id, ClampedRange::unclamped(window), 1, 0)
+            .list_results(
+                org,
+                target_id,
+                ClampedRange::unclamped(window),
+                1,
+                0,
+                region,
+            )
             .await?
             .into_iter()
             .next()
@@ -368,8 +427,29 @@ pub async fn index(
     let range_key = resolve_range_key(params.range.as_deref(), &RANGE_KEYS, DEFAULT_RANGE);
     let (from, to) = resolve_window(range_key, params.from, params.to);
     let labels = WindowLabels::new(from, to);
-    let live =
-        load_live_data_cached(&state, org, target.id, range_key, params.from, params.to).await?;
+    let regions = state.target_store.regions_for_org(org).await?;
+    let selected_region = super::dashboard::resolve_region(params.region, &regions);
+    let live = load_live_data_cached(
+        &state,
+        org,
+        target.id,
+        range_key,
+        params.from,
+        params.to,
+        selected_region.as_deref(),
+    )
+    .await?;
+    let region_breakdown = if regions.len() > 1 {
+        state
+            .results_store
+            .region_breakdown(org, target.id, TimeRange { from, to })
+            .await?
+            .into_iter()
+            .map(|r| RegionBreakdownRow::from_rollup(r, selected_region.as_deref()))
+            .collect()
+    } else {
+        Vec::new()
+    };
     let ongoing_count = ongoing_from_status(live.last_status);
     let config_json = serde_json::to_string_pretty(&target.check)
         .map_err(|e| AppError::Other(anyhow::anyhow!(e)))?;
@@ -405,6 +485,9 @@ pub async fn index(
         to_iso: labels.to_iso,
         from_human: labels.from_human,
         to_human: labels.to_human,
+        regions,
+        selected_region,
+        region_breakdown,
     })
 }
 
@@ -427,8 +510,21 @@ pub async fn live_partial(
         .ok_or_else(|| AppError::not_found(codes::TARGET_NOT_FOUND, "monitor not found"))?;
 
     let range_key = resolve_range_key(params.range.as_deref(), &RANGE_KEYS, DEFAULT_RANGE);
-    let live =
-        load_live_data_cached(&state, org, target.id, range_key, params.from, params.to).await?;
+    // The poll only echoes the region into its own URL — it doesn't render the
+    // selector — so it trusts the region the full page already validated rather
+    // than re-running regions_for_org every tick. An unknown value just filters
+    // to empty (org-scoped), corrected on the next full load.
+    let selected_region = params.region;
+    let live = load_live_data_cached(
+        &state,
+        org,
+        target.id,
+        range_key,
+        params.from,
+        params.to,
+        selected_region.as_deref(),
+    )
+    .await?;
 
     let page = DetailLive {
         id: target.id.to_string(),
@@ -440,6 +536,7 @@ pub async fn live_partial(
         results: Arc::clone(&live.result_rows),
         results_has_more: live.results_has_more,
         last_at_iso: Arc::clone(&live.last_at_iso),
+        selected_region,
     };
     let rendered = page
         .render()
@@ -700,6 +797,7 @@ pub async fn incidents(
         to_iso: labels.to_iso,
         from_human: labels.from_human,
         to_human: labels.to_human,
+        selected_region: None,
     })
 }
 
@@ -766,6 +864,9 @@ mod tests {
             to_iso: "2026-05-13T12:00:00Z".into(),
             from_human: "2026-05-12 12:00 UTC".into(),
             to_human: "2026-05-13 12:00 UTC".into(),
+            regions: Vec::new(),
+            selected_region: None,
+            region_breakdown: Vec::new(),
         }
     }
 
@@ -952,6 +1053,7 @@ mod tests {
             results: Arc::from(Vec::<ResultRow>::new()),
             results_has_more: false,
             last_at_iso: Arc::from("2026-05-13T12:00:00Z"),
+            selected_region: None,
         }
     }
 
@@ -1073,6 +1175,7 @@ mod tests {
             to_iso: "2026-05-13T12:00:00Z".into(),
             from_human: "2026-04-13 12:00 UTC".into(),
             to_human: "2026-05-13 12:00 UTC".into(),
+            selected_region: None,
         }
     }
 
