@@ -44,6 +44,8 @@ CREATE INDEX idx_agents_token_prefix ON agents(token_prefix);
 ALTER TABLE incidents ADD COLUMN region TEXT;
 
 -- Per-plan region cap (each region multiplies a target's check volume).
--- Reserved now (default 1); enforced once region assignment is exposed.
 ALTER TABLE plans ADD COLUMN max_regions INTEGER NOT NULL DEFAULT 1;
 UPDATE plans SET max_regions = 6 WHERE id = 'pro';
+
+-- Per-monitor multi-region incident policy: "any_down" | {"quorum": n}.
+ALTER TABLE targets ADD COLUMN region_policy JSONB NOT NULL DEFAULT '"any_down"'::jsonb;

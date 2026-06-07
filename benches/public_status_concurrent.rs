@@ -106,6 +106,7 @@ fn http_target(name: &str) -> NewTarget {
         enabled: true,
         tags: vec![],
         alerts: Default::default(),
+        region_policy: Default::default(),
         group_name: None,
         owner_user_id: None,
     }

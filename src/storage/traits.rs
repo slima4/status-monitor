@@ -130,6 +130,21 @@ pub trait TargetStore: Send + Sync {
     /// dashboard region selector. Empty or single-element means a single-region
     /// org. Reads `target_regions` (config), not check history.
     async fn regions_for_org(&self, org: OrgId) -> Result<Vec<String>>;
+    /// Region catalog: ids of every enabled region, sorted. The set a monitor
+    /// may be assigned to. Global (regions are operator-defined), so no `org`.
+    async fn available_regions(&self) -> Result<Vec<String>>;
+    /// Regions one target is assigned to, sorted. `None` if the target is not in
+    /// the org (so a guessed id from another tenant reads as not-found).
+    async fn regions_for_target(&self, org: OrgId, target_id: Uuid) -> Result<Option<Vec<String>>>;
+    /// Replace a target's region assignments with `regions`. `false` if the
+    /// target is not in the org. Caller validates the regions exist + are
+    /// enabled and within the plan's `max_regions`.
+    async fn set_target_regions(
+        &self,
+        org: OrgId,
+        target_id: Uuid,
+        regions: &[String],
+    ) -> Result<bool>;
 }
 
 #[derive(Debug, Clone, Copy)]

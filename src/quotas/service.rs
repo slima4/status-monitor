@@ -296,6 +296,29 @@ impl QuotaService {
         Ok(())
     }
 
+    /// Region-assignment cap. `requested` is the size of the region set the
+    /// caller wants for one monitor (assignment replaces the set, so this is the
+    /// whole count, not an increment). Audits a block like every other cap.
+    pub async fn check_region_assignment(
+        &self,
+        org: OrgId,
+        user: Option<UserId>,
+        requested: i64,
+    ) -> Result<()> {
+        let plan = self.limit_for_org(org).await?;
+        let limit = i64::from(plan.max_regions);
+        if requested > limit {
+            self.record_block(org, user, "max_regions", requested, limit);
+            return Err(AppError::quota_exceeded(
+                "max_regions",
+                requested,
+                limit,
+                plan.id.clone(),
+            ));
+        }
+        Ok(())
+    }
+
     pub async fn check_can_create_maintenance_window(
         &self,
         org: OrgId,

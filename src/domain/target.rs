@@ -9,6 +9,21 @@ use super::WriteSource;
 use super::alert::TargetAlerts;
 use super::check::CheckSpec;
 
+/// How a target's per-region health folds into incidents. Stored per monitor;
+/// the incident writer's `decide_multi` consumes it. `AnyDown` and `Quorum` keep
+/// one whole-target incident; `PerRegion` is reserved (not yet selectable).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum RegionIncidentPolicy {
+    /// Open as soon as any region is sustained-bad.
+    #[default]
+    AnyDown,
+    /// Open once at least `n` regions agree it is down (location quorum).
+    Quorum(u32),
+    /// One incident per region down.
+    PerRegion,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct Target {
     pub id: Uuid,
@@ -22,6 +37,9 @@ pub struct Target {
     pub tags: Vec<String>,
     #[serde(default)]
     pub alerts: TargetAlerts,
+    /// How multi-region health folds into incidents for this monitor.
+    #[serde(default)]
+    pub region_policy: RegionIncidentPolicy,
     /// Operator-side grouping (independent of any status page's grouping).
     #[serde(default)]
     #[schema(example = "API & Web", nullable = true, max_length = 50)]
@@ -52,6 +70,8 @@ pub struct NewTarget {
     #[serde(default)]
     pub alerts: TargetAlerts,
     #[serde(default)]
+    pub region_policy: RegionIncidentPolicy,
+    #[serde(default)]
     #[schema(nullable = true, max_length = 50)]
     pub group_name: Option<String>,
     #[serde(default)]
@@ -68,6 +88,8 @@ pub struct TargetUpdate {
     #[schema(value_type = Option<u64>)]
     pub interval: Option<Duration>,
     pub enabled: Option<bool>,
+    #[serde(default)]
+    pub region_policy: Option<RegionIncidentPolicy>,
     pub tags: Option<Vec<String>>,
     pub alerts: Option<TargetAlerts>,
     #[serde(default, deserialize_with = "double_option")]

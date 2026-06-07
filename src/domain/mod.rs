@@ -72,7 +72,7 @@ pub use status_page::{
     NewStatusPage, NewStatusPageComponent, PageRef, StatusPage, StatusPageComponent,
     StatusPageComponentUpdate, StatusPageId, StatusPageUpdate,
 };
-pub use target::{NewTarget, Target, TargetUpdate};
+pub use target::{NewTarget, RegionIncidentPolicy, Target, TargetUpdate};
 pub use user::{AppTheme, User, UserId};
 pub use word_lists::generate_signup_slug;
 pub use write_source::WriteSource;

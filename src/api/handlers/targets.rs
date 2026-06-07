@@ -4,7 +4,7 @@ use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::AppendHeaders;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use url::Host;
 use utoipa::IntoParams;
 use uuid::Uuid;
@@ -18,7 +18,9 @@ use crate::api::types::{
 };
 use crate::app::AppState;
 use crate::auth::scope::Scope;
-use crate::domain::{CheckResult, NewTarget, OrgId, Target, TargetAlerts, TargetUpdate};
+use crate::domain::{
+    CheckResult, NewTarget, OrgId, RegionIncidentPolicy, Target, TargetAlerts, TargetUpdate,
+};
 use crate::error::{AppError, Result};
 use crate::security::SsrfGuard;
 use crate::storage::TargetFilter;
@@ -188,6 +190,7 @@ pub async fn create(
     let guard = ssrf_guard(&state);
     canonicalize_check(&mut new.check)?;
     validate_new_target(&new, &guard, i64::from(plan.min_check_interval_secs))?;
+    validate_region_policy(new.region_policy)?;
     verify_alert_channels(&state, org, &new.alerts).await?;
     validate_owner_is_member(&state, org, new.owner_user_id).await?;
     check_abuse(&state, org, &new.check)?;
@@ -243,6 +246,9 @@ pub async fn update(
         validate_alerts(alerts)?;
         verify_alert_channels(&state, org, alerts).await?;
     }
+    if let Some(policy) = update.region_policy {
+        validate_region_policy(policy)?;
+    }
     if let Some(Some(g)) = update.group_name.as_ref() {
         validate_group_name(Some(g.as_str()))?;
     }
@@ -291,6 +297,87 @@ pub async fn update(
             "target not found",
         )),
     }
+}
+
+/// The regions a monitor probes from. A single-region deployment is one entry.
+#[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct TargetRegions {
+    pub regions: Vec<String>,
+}
+
+#[utoipa::path(
+    get, path = "/api/v1/targets/{id}/regions", tag = "targets",
+    summary = "List the regions a monitor probes from",
+    params(("id" = Uuid, Path)),
+    responses((status = 200, body = TargetRegions), (status = 404, body = ApiError)),
+)]
+pub async fn get_target_regions(
+    State(state): State<AppState>,
+    Authorized(org, _): Authorized<TargetsRead>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<TargetRegions>> {
+    match state.target_store.regions_for_target(org, id).await? {
+        Some(regions) => Ok(Json(TargetRegions { regions })),
+        None => Err(AppError::not_found(
+            codes::TARGET_NOT_FOUND,
+            "target not found",
+        )),
+    }
+}
+
+#[utoipa::path(
+    put, path = "/api/v1/targets/{id}/regions", tag = "targets",
+    summary = "Set the regions a monitor probes from",
+    params(("id" = Uuid, Path)), request_body = TargetRegions,
+    responses(
+        (status = 200, body = TargetRegions),
+        (status = 404, body = ApiError),
+        (status = 422, body = ApiError),
+    ),
+)]
+pub async fn set_target_regions(
+    State(state): State<AppState>,
+    Authorized(org, _): Authorized<TargetsWrite>,
+    Path(id): Path<Uuid>,
+    Json(req): Json<TargetRegions>,
+) -> Result<Json<TargetRegions>> {
+    let mut regions: Vec<String> = req
+        .regions
+        .iter()
+        .map(|r| r.trim().to_string())
+        .filter(|r| !r.is_empty())
+        .collect();
+    regions.sort();
+    regions.dedup();
+    if regions.is_empty() {
+        return Err(AppError::unprocessable(
+            codes::REGION_INVALID,
+            "at least one region is required",
+        ));
+    }
+    state
+        .quotas
+        .check_region_assignment(org, None, regions.len() as i64)
+        .await?;
+    let available: std::collections::HashSet<String> = state
+        .target_store
+        .available_regions()
+        .await?
+        .into_iter()
+        .collect();
+    if let Some(bad) = regions.iter().find(|r| !available.contains(*r)) {
+        return Err(AppError::unprocessable(
+            codes::REGION_INVALID,
+            format!("unknown or disabled region: {bad}"),
+        ));
+    }
+    if !state.target_store.set_target_regions(org, id, &regions).await? {
+        return Err(AppError::not_found(
+            codes::TARGET_NOT_FOUND,
+            "target not found",
+        ));
+    }
+    Ok(Json(TargetRegions { regions }))
 }
 
 #[utoipa::path(
@@ -756,6 +843,25 @@ fn validate_alerts(alerts: &TargetAlerts) -> Result<()> {
         }
     }
     Ok(())
+}
+
+const MAX_QUORUM: u32 = 64;
+
+/// Per-monitor region incident policy. `per_region` is reserved (its incidents
+/// aren't consumer-safe yet) and rejected; `quorum` needs a positive count.
+fn validate_region_policy(policy: RegionIncidentPolicy) -> Result<()> {
+    match policy {
+        RegionIncidentPolicy::AnyDown => Ok(()),
+        RegionIncidentPolicy::Quorum(n) if (1..=MAX_QUORUM).contains(&n) => Ok(()),
+        RegionIncidentPolicy::Quorum(_) => Err(AppError::unprocessable(
+            codes::INVALID_REGION_POLICY,
+            format!("quorum must be between 1 and {MAX_QUORUM}"),
+        )),
+        RegionIncidentPolicy::PerRegion => Err(AppError::unprocessable(
+            codes::INVALID_REGION_POLICY,
+            "per-region incident detection is not available yet",
+        )),
+    }
 }
 
 /// Reject a binding to a channel the caller's org doesn't own (the store is

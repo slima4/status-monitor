@@ -179,3 +179,53 @@ async fn assigned_targets_map_carries_authoritative_org() {
 
     assert_eq!(map.get(&t).map(|o| o.0), Some(org));
 }
+
+#[tokio::test]
+#[ignore]
+async fn set_and_read_target_regions_honours_enabled_and_org() {
+    use uptimepage::domain::OrgId;
+    use uptimepage::storage::{PostgresTargetStore, TargetStore};
+
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    ensure_region(&pool, "eu-assign").await;
+    ensure_region(&pool, "us-assign").await;
+    sqlx::query("UPDATE regions SET enabled = false WHERE id = 'us-assign'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let org = seed_org(&pool).await;
+    let target = seed_target(&pool, org).await;
+    let store = PostgresTargetStore::from_pool(pool.clone(), None);
+
+    // available_regions excludes a disabled region.
+    let avail = store.available_regions().await.unwrap();
+    assert!(avail.contains(&"eu-assign".to_string()));
+    assert!(!avail.contains(&"us-assign".to_string()));
+
+    // Assignment replaces the set and reads back.
+    assert!(
+        store
+            .set_target_regions(OrgId(org), target, &["eu-assign".to_string()])
+            .await
+            .unwrap()
+    );
+    assert_eq!(
+        store.regions_for_target(OrgId(org), target).await.unwrap(),
+        Some(vec!["eu-assign".to_string()])
+    );
+
+    // Cross-org: a foreign org reading this target sees not-found, not data.
+    let other = seed_org(&pool).await;
+    assert_eq!(
+        store.regions_for_target(OrgId(other), target).await.unwrap(),
+        None
+    );
+    assert!(
+        !store
+            .set_target_regions(OrgId(other), target, &["eu-assign".to_string()])
+            .await
+            .unwrap()
+    );
+}

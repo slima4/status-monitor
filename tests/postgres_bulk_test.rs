@@ -46,6 +46,7 @@ fn make(name: &str, tags: Vec<String>) -> NewTarget {
         enabled: true,
         tags,
         alerts: Default::default(),
+        region_policy: Default::default(),
         group_name: None,
         owner_user_id: None,
     }
@@ -101,6 +102,7 @@ async fn credentials_stored_as_ciphertext_envelope(pool: PgPool) {
         enabled: true,
         tags: vec![],
         alerts: Default::default(),
+        region_policy: Default::default(),
         group_name: None,
         owner_user_id: None,
     };

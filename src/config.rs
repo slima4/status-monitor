@@ -85,12 +85,22 @@ pub struct AppConfig {
 pub struct OperatorConfig {
     #[serde(default = "empty_secret", with = "secret_str")]
     pub admin_token: SecretString,
+    /// An agent with no successful pull/push for this long is reported stale
+    /// (dead-man's-switch): a Prometheus gauge flips and the operator surface
+    /// flags it. Default 3× the agent's default pull interval.
+    #[serde(default = "default_agent_stale_after_secs")]
+    pub agent_stale_after_secs: u64,
+}
+
+fn default_agent_stale_after_secs() -> u64 {
+    90
 }
 
 impl Default for OperatorConfig {
     fn default() -> Self {
         Self {
             admin_token: empty_secret(),
+            agent_stale_after_secs: default_agent_stale_after_secs(),
         }
     }
 }

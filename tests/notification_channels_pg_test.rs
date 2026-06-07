@@ -247,6 +247,7 @@ async fn target_alert_binding_channel_lookup_is_org_scoped_live_pg() {
             after_failures: 3,
             notify_recovery: true,
         }]),
+        region_policy: Default::default(),
         group_name: None,
         owner_user_id: None,
     };

@@ -64,6 +64,7 @@ pub mod codes {
     pub const INVALID_DNS_PARAMS: &str = "INVALID_DNS_PARAMS";
     pub const INVALID_TLS_CRED_COMBO: &str = "INVALID_TLS_CRED_COMBO";
     pub const INVALID_ALERT_CONFIG: &str = "INVALID_ALERT_CONFIG";
+    pub const INVALID_REGION_POLICY: &str = "INVALID_REGION_POLICY";
     pub const INVALID_CONFIG: &str = "INVALID_CONFIG";
     pub const EMPTY_NAME: &str = "EMPTY_NAME";
     pub const INVALID_NAME: &str = "INVALID_NAME";

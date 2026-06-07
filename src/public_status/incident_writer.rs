@@ -30,7 +30,9 @@ use tokio::time::{MissedTickBehavior, interval};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use crate::domain::{CheckResult, CheckStatus, NotificationReason, OrgId, Target};
+use crate::domain::{
+    CheckResult, CheckStatus, NotificationReason, OrgId, RegionIncidentPolicy, Target,
+};
 use crate::error::Result;
 use crate::escalation::IncidentSignal;
 use crate::storage::ResultsStore;
@@ -74,17 +76,6 @@ pub struct NewOpenIncident {
     pub region: Option<String>,
 }
 
-/// How per-region health folds into incidents. Engine implements all three; the
-/// writer applies a fixed default until the per-monitor selector ships.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RegionIncidentPolicy {
-    /// One incident per target, opened as soon as any region is sustained-bad.
-    AnyDown,
-    /// One incident per target, opened once `n` regions agree it is down.
-    Quorum(u32),
-    /// One incident per `(target, region)`.
-    PerRegion,
-}
 
 #[derive(Debug, Clone)]
 pub struct IncidentWriterConfig {
@@ -274,14 +265,14 @@ impl IncidentWriter {
             results.sort_by_key(|r| r.timestamp);
         }
 
-        // AnyDown until the per-monitor policy selector ships.
-        let actions = decide_multi(
-            target.id,
-            &open,
-            &by_region,
-            self.cfg.flap_threshold,
-            RegionIncidentPolicy::AnyDown,
-        );
+        // PerRegion isn't consumer-safe yet (downstream assumes one incident per
+        // target), so it falls back to AnyDown until those surfaces handle N.
+        let policy = match target.region_policy {
+            RegionIncidentPolicy::PerRegion => RegionIncidentPolicy::AnyDown,
+            p => p,
+        };
+        let actions =
+            decide_multi(target.id, &open, &by_region, self.cfg.flap_threshold, policy);
         for action in actions {
             match action {
                 Action::None => {}
@@ -407,8 +398,10 @@ pub fn decide_multi(
             actions
         }
         RegionIncidentPolicy::AnyDown | RegionIncidentPolicy::Quorum(_) => {
+            // Clamp to the regions that actually reported: a quorum larger than
+            // the live region count still fires (never silently "never opens").
             let quorum = match policy {
-                RegionIncidentPolicy::Quorum(n) => (n as usize).max(1),
+                RegionIncidentPolicy::Quorum(n) => (n as usize).clamp(1, verdicts.len().max(1)),
                 _ => 1,
             };
             // Regions sustained-bad, earliest onset first.
@@ -1274,6 +1267,35 @@ mod tests {
     }
 
     #[test]
+    fn quorum_clamps_to_live_region_count() {
+        // quorum=3 but only 2 regions report → clamps to 2, so a both-down
+        // outage still opens instead of waiting for a third region that
+        // doesn't exist.
+        let b = mbase();
+        let t = Uuid::now_v7();
+        let by_region = vec![
+            (
+                "eu".to_string(),
+                vec![
+                    result(t, ts(b, 0), CheckStatus::Down),
+                    result(t, ts(b, 30), CheckStatus::Down),
+                ],
+            ),
+            (
+                "us".to_string(),
+                vec![
+                    result(t, ts(b, 0), CheckStatus::Down),
+                    result(t, ts(b, 30), CheckStatus::Down),
+                ],
+            ),
+        ];
+        match decide_multi(t, &[], &by_region, 2, RegionIncidentPolicy::Quorum(3)).as_slice() {
+            [Action::Open(_)] => {}
+            other => panic!("expected Open (quorum clamped to live count), got {other:?}"),
+        }
+    }
+
+    #[test]
     fn per_region_opens_one_incident_per_bad_region() {
         let b = mbase();
         let t = Uuid::now_v7();
@@ -1382,6 +1404,7 @@ mod tests {
             enabled: true,
             tags: vec![],
             alerts: TargetAlerts::default(),
+            region_policy: Default::default(),
             group_name: None,
             owner_user_id: None,
             write_source: crate::domain::WriteSource::Ui,

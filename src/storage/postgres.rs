@@ -151,6 +151,7 @@ pub(crate) struct TargetRow {
     pub(crate) enabled: bool,
     pub(crate) tags: Vec<String>,
     pub(crate) alerts: serde_json::Value,
+    pub(crate) region_policy: serde_json::Value,
     pub(crate) group_name: Option<String>,
     pub(crate) owner_user_id: Option<Uuid>,
     pub(crate) write_source: String,
@@ -170,6 +171,13 @@ pub(crate) fn decode_target_row(row: TargetRow, cipher: Option<&Cipher>) -> Resu
         serde_json::from_value(check_json).context("decoding check_spec JSON")?;
     let alerts: TargetAlerts =
         serde_json::from_value(row.alerts).context("decoding alerts JSON")?;
+    // Degrade a malformed/unknown policy to the default rather than failing the
+    // whole row — this read feeds the cross-tenant scheduler + incident writer,
+    // so one bad value must not stop scheduling for the target (or its batch).
+    let region_policy = serde_json::from_value(row.region_policy).unwrap_or_else(|e| {
+        tracing::warn!(target_id = %row.id, error = %e, "invalid region_policy; defaulting to any_down");
+        Default::default()
+    });
     Ok(Target {
         id: row.id,
         name: row.name,
@@ -178,6 +186,7 @@ pub(crate) fn decode_target_row(row: TargetRow, cipher: Option<&Cipher>) -> Resu
         enabled: row.enabled,
         tags: row.tags,
         alerts,
+        region_policy,
         group_name: row.group_name,
         owner_user_id: row.owner_user_id,
         write_source: WriteSource::from_db(&row.write_source),
@@ -209,7 +218,7 @@ impl TargetStore for PostgresTargetStore {
             .filter(|s| !s.is_empty())
             .map(str::to_owned);
         let sql = format!(
-            r#"SELECT id, name, check_spec, interval_secs, enabled, tags, alerts,
+            r#"SELECT id, name, check_spec, interval_secs, enabled, tags, alerts, region_policy,
                       group_name, owner_user_id,
                       write_source,
                       created_at, updated_at
@@ -266,7 +275,7 @@ impl TargetStore for PostgresTargetStore {
 
     async fn get(&self, org: OrgId, id: Uuid) -> Result<Option<Target>> {
         let row: Option<TargetRow> = sqlx::query_as::<_, TargetRow>(
-            r#"SELECT id, name, check_spec, interval_secs, enabled, tags, alerts,
+            r#"SELECT id, name, check_spec, interval_secs, enabled, tags, alerts, region_policy,
                       group_name, owner_user_id,
                       write_source,
                       created_at, updated_at
@@ -292,6 +301,8 @@ impl TargetStore for PostgresTargetStore {
     ) -> Result<Target> {
         let check_json = self.encode_check(&new.check)?;
         let alerts_json = serde_json::to_value(&new.alerts).context("encoding alerts JSON")?;
+        let region_policy_json =
+            serde_json::to_value(new.region_policy).context("encoding region_policy JSON")?;
         // A per-org advisory lock held across count+INSERT in one tx. The
         // count-in-INSERT predicate alone is NOT race-safe under READ
         // COMMITTED — concurrent creators each see a snapshot count and all
@@ -317,9 +328,9 @@ impl TargetStore for PostgresTargetStore {
         }
         let row: TargetRow = sqlx::query_as::<_, TargetRow>(
             r#"INSERT INTO targets (org_id, name, check_spec, interval_secs, enabled, tags, alerts,
-                                    group_name, owner_user_id, write_source)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-               RETURNING id, name, check_spec, interval_secs, enabled, tags, alerts,
+                                    group_name, owner_user_id, write_source, region_policy)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+               RETURNING id, name, check_spec, interval_secs, enabled, tags, alerts, region_policy,
                       group_name, owner_user_id,
                       write_source,
                       created_at, updated_at"#,
@@ -334,6 +345,7 @@ impl TargetStore for PostgresTargetStore {
         .bind(&new.group_name)
         .bind(new.owner_user_id)
         .bind(source.as_str())
+        .bind(region_policy_json)
         .fetch_one(&mut *tx)
         .await
         .context("insert target")?;
@@ -360,6 +372,10 @@ impl TargetStore for PostgresTargetStore {
             .as_ref()
             .map(|a| serde_json::to_value(a).context("encoding alerts JSON"))
             .transpose()?;
+        let region_policy_json = update
+            .region_policy
+            .map(|p| serde_json::to_value(p).context("encoding region_policy JSON"))
+            .transpose()?;
 
         let row: Option<TargetRow> = sqlx::query_as::<_, TargetRow>(
             r#"UPDATE targets SET
@@ -369,12 +385,13 @@ impl TargetStore for PostgresTargetStore {
                  enabled = COALESCE($5, enabled),
                  tags = COALESCE($6, tags),
                  alerts = COALESCE($7, alerts),
+                 region_policy = COALESCE($14, region_policy),
                  group_name = CASE WHEN $8::bool THEN $9 ELSE group_name END,
                  owner_user_id = CASE WHEN $10::bool THEN $11 ELSE owner_user_id END,
                  write_source = $13,
                  updated_at = now()
                WHERE id = $1 AND org_id = $12
-               RETURNING id, name, check_spec, interval_secs, enabled, tags, alerts,
+               RETURNING id, name, check_spec, interval_secs, enabled, tags, alerts, region_policy,
                       group_name, owner_user_id,
                       write_source,
                       created_at, updated_at"#,
@@ -392,6 +409,7 @@ impl TargetStore for PostgresTargetStore {
         .bind(update.owner_user_id.flatten())
         .bind(org.0)
         .bind(source.as_str())
+        .bind(region_policy_json)
         .fetch_optional(&self.pool)
         .await
         .context("update target")?;
@@ -437,7 +455,7 @@ impl TargetStore for PostgresTargetStore {
                            $7::text[], $8::uuid[])
                     AS u(name, check_spec, interval_secs, enabled, tags, alerts,
                          group_name, owner_user_id)
-               RETURNING id, name, check_spec, interval_secs, enabled, tags, alerts,
+               RETURNING id, name, check_spec, interval_secs, enabled, tags, alerts, region_policy,
                       group_name, owner_user_id,
                       write_source,
                       created_at, updated_at"#;
@@ -540,7 +558,7 @@ impl TargetStore for PostgresTargetStore {
 
     async fn list_updated_since(&self, org: OrgId, since: DateTime<Utc>) -> Result<Vec<Target>> {
         let rows: Vec<TargetRow> = sqlx::query_as::<_, TargetRow>(
-            r#"SELECT id, name, check_spec, interval_secs, enabled, tags, alerts,
+            r#"SELECT id, name, check_spec, interval_secs, enabled, tags, alerts, region_policy,
                       group_name, owner_user_id,
                       write_source,
                       created_at, updated_at
@@ -721,5 +739,71 @@ impl TargetStore for PostgresTargetStore {
         .await
         .context("postgres regions_for_org")?;
         Ok(rows.into_iter().map(|(r,)| r).collect())
+    }
+
+    async fn available_regions(&self) -> Result<Vec<String>> {
+        let rows: Vec<(String,)> =
+            sqlx::query_as("SELECT id FROM regions WHERE enabled ORDER BY id")
+                .fetch_all(&self.pool)
+                .await
+                .context("postgres available_regions")?;
+        Ok(rows.into_iter().map(|(r,)| r).collect())
+    }
+
+    async fn regions_for_target(&self, org: OrgId, target_id: Uuid) -> Result<Option<Vec<String>>> {
+        let owns: (bool,) =
+            sqlx::query_as("SELECT EXISTS(SELECT 1 FROM targets WHERE id = $1 AND org_id = $2)")
+                .bind(target_id)
+                .bind(org.0)
+                .fetch_one(&self.pool)
+                .await
+                .context("postgres regions_for_target ownership")?;
+        if !owns.0 {
+            return Ok(None);
+        }
+        let rows: Vec<(String,)> = sqlx::query_as(
+            "SELECT region FROM target_regions WHERE target_id = $1 ORDER BY region",
+        )
+        .bind(target_id)
+        .fetch_all(&self.pool)
+        .await
+        .context("postgres regions_for_target")?;
+        Ok(Some(rows.into_iter().map(|(r,)| r).collect()))
+    }
+
+    async fn set_target_regions(
+        &self,
+        org: OrgId,
+        target_id: Uuid,
+        regions: &[String],
+    ) -> Result<bool> {
+        let mut tx = self.pool.begin().await.context("set regions: begin")?;
+        let owns: (bool,) =
+            sqlx::query_as("SELECT EXISTS(SELECT 1 FROM targets WHERE id = $1 AND org_id = $2)")
+                .bind(target_id)
+                .bind(org.0)
+                .fetch_one(&mut *tx)
+                .await
+                .context("set regions: ownership")?;
+        if !owns.0 {
+            tx.rollback().await.ok();
+            return Ok(false);
+        }
+        sqlx::query("DELETE FROM target_regions WHERE target_id = $1")
+            .bind(target_id)
+            .execute(&mut *tx)
+            .await
+            .context("set regions: clear")?;
+        sqlx::query(
+            "INSERT INTO target_regions (target_id, region) \
+             SELECT $1, unnest($2::text[])",
+        )
+        .bind(target_id)
+        .bind(regions)
+        .execute(&mut *tx)
+        .await
+        .context("set regions: insert")?;
+        tx.commit().await.context("set regions: commit")?;
+        Ok(true)
     }
 }

@@ -98,6 +98,14 @@ fn register_descriptions() {
         "uptimepage_circuit_breakers_open",
         "Number of circuit breakers currently in the Open state"
     );
+    describe_gauge!(
+        "uptimepage_agent_last_seen_age_seconds",
+        "Seconds since a regional agent last checked in, labelled by region and agent"
+    );
+    describe_gauge!(
+        "uptimepage_agent_up",
+        "1 if a regional agent checked in within the staleness window, else 0"
+    );
     describe_counter!(
         "uptimepage_notifications_total",
         "Alert notifications dispatched, labelled by channel and kind"
@@ -204,6 +212,8 @@ pub mod names {
     pub const DOMAIN_EXPIRY_STATE_WRITE_FAILED: &str =
         "uptimepage_domain_expiry_state_write_failed_total";
     pub const RDAP_SINGLEFLIGHT_SLOTS: &str = "uptimepage_rdap_singleflight_slots";
+    pub const AGENT_LAST_SEEN_AGE: &str = "uptimepage_agent_last_seen_age_seconds";
+    pub const AGENT_UP: &str = "uptimepage_agent_up";
     pub const SCHEDULER_REFRESH_FAILED: &str = "uptimepage_scheduler_refresh_failed_total";
     pub const SCHEDULER_CONSECUTIVE_REFRESH_FAILURES: &str =
         "uptimepage_scheduler_consecutive_refresh_failures";

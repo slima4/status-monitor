@@ -34,6 +34,7 @@ fn a_target() -> NewTarget {
         enabled: true,
         tags: vec![],
         alerts: Default::default(),
+        region_policy: Default::default(),
         group_name: None,
         owner_user_id: None,
     }

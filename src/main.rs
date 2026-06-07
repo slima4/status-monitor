@@ -346,6 +346,17 @@ async fn main() -> Result<()> {
         tokio::spawn(async move { writer.run(token).await })
     };
 
+    // Dead-man's-switch for regional agents: gauges + a warn log when one goes
+    // dark. Cheap periodic DB read; harmless in a single-region deployment.
+    let agent_health_handle: JoinHandle<()> = {
+        let repo = uptimepage::storage::operator::OperatorRepo::new(pg_pool_for_stores.clone());
+        let stale_after = std::time::Duration::from_secs(cfg.operator.agent_stale_after_secs);
+        let token = root.clone();
+        tokio::spawn(
+            async move { uptimepage::observability::agent_health::run(repo, stale_after, token).await },
+        )
+    };
+
     // Incident paging worker: pages bound channels on open/resolve and retries
     // failed deliveries. Only spawned when enabled; otherwise the alert engine
     // keeps paging directly and signals on the channel are never consumed.
@@ -581,6 +592,7 @@ async fn main() -> Result<()> {
             batcher_handle,
             sampler_handle,
             incident_writer_handle,
+            agent_health_handle,
             purge_handle,
             invitation_purge_handle,
             oauth_state_cleanup_handle,

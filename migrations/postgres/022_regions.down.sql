@@ -1,3 +1,4 @@
+ALTER TABLE targets DROP COLUMN IF EXISTS region_policy;
 ALTER TABLE plans DROP COLUMN IF EXISTS max_regions;
 ALTER TABLE incidents DROP COLUMN IF EXISTS region;
 DROP TABLE IF EXISTS agents;

@@ -194,6 +194,9 @@ pub struct AgentView {
     pub enabled: bool,
     pub token_prefix: String,
     pub last_seen_at: Option<DateTime<Utc>>,
+    /// Enabled agent with no check-in within the staleness window (dead-man's
+    /// switch). A disabled agent is never stale (it is intentionally dark).
+    pub stale: bool,
     pub created_at: DateTime<Utc>,
 }
 
@@ -226,17 +229,27 @@ pub async fn list_agents(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<AgentView>>> {
     let agents = repo(&state)?.list_agents().await?;
+    let threshold = state.cfg.operator.agent_stale_after_secs;
+    let now = Utc::now();
     Ok(Json(
         agents
             .into_iter()
-            .map(|a| AgentView {
-                id: a.id,
-                region: a.region,
-                name: a.name,
-                enabled: a.enabled,
-                token_prefix: a.token_prefix,
-                last_seen_at: a.last_seen_at,
-                created_at: a.created_at,
+            .map(|a| {
+                // Same rule as the background sweep: never-seen agents age from
+                // creation, so a fresh agent inside the window isn't "stale".
+                let since = a.last_seen_at.unwrap_or(a.created_at);
+                let stale =
+                    a.enabled && (now - since).num_seconds().max(0) as u64 > threshold;
+                AgentView {
+                    id: a.id,
+                    region: a.region,
+                    name: a.name,
+                    enabled: a.enabled,
+                    token_prefix: a.token_prefix,
+                    last_seen_at: a.last_seen_at,
+                    stale,
+                    created_at: a.created_at,
+                }
             })
             .collect(),
     ))

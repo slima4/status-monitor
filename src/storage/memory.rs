@@ -511,6 +511,7 @@ impl InMemoryTargetStore {
             enabled: new.enabled,
             tags: new.tags,
             alerts: new.alerts,
+            region_policy: new.region_policy,
             group_name: new.group_name,
             owner_user_id: new.owner_user_id,
             write_source: source,
@@ -822,6 +823,28 @@ impl TargetStore for InMemoryTargetStore {
 
     async fn regions_for_org(&self, _org: OrgId) -> Result<Vec<String>> {
         Ok(Vec::new())
+    }
+
+    async fn available_regions(&self) -> Result<Vec<String>> {
+        Ok(Vec::new())
+    }
+
+    async fn regions_for_target(
+        &self,
+        _org: OrgId,
+        target_id: Uuid,
+    ) -> Result<Option<Vec<String>>> {
+        let exists = self.targets.lock().iter().any(|t| t.id == target_id);
+        Ok(exists.then(Vec::new))
+    }
+
+    async fn set_target_regions(
+        &self,
+        _org: OrgId,
+        target_id: Uuid,
+        _regions: &[String],
+    ) -> Result<bool> {
+        Ok(self.targets.lock().iter().any(|t| t.id == target_id))
     }
 }
 

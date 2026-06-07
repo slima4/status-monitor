@@ -102,6 +102,11 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
         )
         .route("/targets/{id}/uptime", get(handlers::results::uptime))
         .route(
+            "/targets/{id}/regions",
+            get(handlers::targets::get_target_regions)
+                .put(handlers::targets::set_target_regions),
+        )
+        .route(
             "/targets/{id}/incidents",
             get(handlers::results::list_incidents),
         )

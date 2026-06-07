@@ -1063,6 +1063,7 @@ mod tests {
                 after_failures: 1,
                 notify_recovery,
             }]),
+            region_policy: Default::default(),
             group_name: None,
             owner_user_id: None,
             write_source: WriteSource::Ui,

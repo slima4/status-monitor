@@ -665,6 +665,7 @@ async fn update_org_slug_keeps_resources_reachable_by_id() {
         enabled: true,
         tags: vec![],
         alerts: Default::default(),
+        region_policy: Default::default(),
         group_name: None,
         owner_user_id: None,
     };

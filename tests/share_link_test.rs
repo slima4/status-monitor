@@ -64,6 +64,7 @@ async fn make_target(store: &dyn TargetStore, org: OrgId, name: &str, secret: bo
         enabled: true,
         tags: vec![],
         alerts: Default::default(),
+        region_policy: Default::default(),
         group_name: None,
         owner_user_id: None,
     };

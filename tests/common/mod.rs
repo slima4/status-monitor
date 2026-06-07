@@ -708,6 +708,7 @@ pub fn http_target(addr: SocketAddr, path: &str, interval_ms: u64) -> Target {
         enabled: true,
         tags: vec![],
         alerts: uptimepage::domain::TargetAlerts::default(),
+        region_policy: Default::default(),
         group_name: None,
         owner_user_id: None,
         write_source: WriteSource::Ui,
