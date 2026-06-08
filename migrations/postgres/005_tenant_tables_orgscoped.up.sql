@@ -38,7 +38,7 @@ CREATE INDEX idx_targets_org_owner
     ON targets(org_id, owner_user_id) WHERE owner_user_id IS NOT NULL;
 
 CREATE TABLE incidents (
-    id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id                    UUID PRIMARY KEY DEFAULT uuidv7(),
     org_id                UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     target_id             UUID NOT NULL REFERENCES targets(id) ON DELETE CASCADE,
     started_at            TIMESTAMPTZ NOT NULL,
@@ -62,7 +62,7 @@ CREATE INDEX idx_incidents_org_open
     ON incidents(org_id, target_id) WHERE ended_at IS NULL;
 
 CREATE TABLE incident_updates (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id              UUID PRIMARY KEY DEFAULT uuidv7(),
     org_id          UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     incident_id     UUID NOT NULL REFERENCES incidents(id) ON DELETE CASCADE,
     posted_at       TIMESTAMPTZ NOT NULL DEFAULT now(),

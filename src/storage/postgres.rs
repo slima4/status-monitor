@@ -54,6 +54,11 @@ impl PostgresTargetStore {
             .run(&pool)
             .await
             .context("postgres migrations")?;
+        // Non-fatal: the DEFAULT partition accepts writes even if provisioning
+        // fails, and the daily retention tick retries. Don't block boot on it.
+        if let Err(err) = super::partitions::ensure_partitions(&pool).await {
+            tracing::warn!(?err, "partition provisioning at boot failed; continuing");
+        }
         assert_default_plan_present(&pool).await?;
         tracing::info!("postgres ready");
         Ok(pool)

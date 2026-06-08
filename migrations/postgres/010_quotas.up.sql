@@ -160,16 +160,19 @@ CREATE TABLE org_addons (
 -- can be lost under DB pressure by design (a failed audit insert must
 -- never turn a clean 422 / 429 into a 500). Readers must treat this as a
 -- sample, not an authoritative trail.
+-- Month-partitioned; the PK must include the partition key.
 CREATE TABLE quota_events (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id              UUID NOT NULL DEFAULT uuidv7(),
     org_id          UUID REFERENCES organizations(id) ON DELETE CASCADE,
     user_id         UUID REFERENCES users(id) ON DELETE SET NULL,
     event           TEXT NOT NULL,           -- 'quota_exceeded', 'rate_limited', 'abuse_blocked'
     quota_name      TEXT,                    -- 'max_targets', 'api_writes_per_minute', etc.
     details         JSONB NOT NULL DEFAULT '{}'::jsonb,
     ip_hash         TEXT,
-    occurred_at     TIMESTAMPTZ NOT NULL DEFAULT now()
-);
+    occurred_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (id, occurred_at)
+) PARTITION BY RANGE (occurred_at);
+CREATE TABLE quota_events_default PARTITION OF quota_events DEFAULT;
 
 CREATE INDEX idx_quota_events_org_time
     ON quota_events(org_id, occurred_at DESC);

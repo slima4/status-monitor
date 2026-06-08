@@ -15,6 +15,7 @@ pub mod operator;
 pub mod org_ttl;
 pub mod orgs;
 pub mod page_assets;
+pub mod partitions;
 pub mod postgres;
 pub mod postgres_secrets;
 pub mod postmortems;

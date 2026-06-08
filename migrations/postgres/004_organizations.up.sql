@@ -79,18 +79,22 @@ CREATE INDEX idx_memberships_user ON memberships(user_id);
 -- Compliance-grade audit trail. Every row is written in-transaction with
 -- its data change via `storage::orgs::record_audit_tx` (the single writer,
 -- fenced by `scripts/sg-rules/org_audit_single_writer.yml`).
+-- Month-partitioned; the PK must include the partition key.
 CREATE TABLE org_audit_log (
-    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id          UUID NOT NULL DEFAULT uuidv7(),
     org_id      UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     actor_id    UUID REFERENCES users(id) ON DELETE SET NULL,
     action      TEXT NOT NULL,
     metadata    JSONB NOT NULL DEFAULT '{}'::jsonb,
-    occurred_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
+    occurred_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (id, occurred_at)
+) PARTITION BY RANGE (occurred_at);
+
+CREATE TABLE org_audit_log_default PARTITION OF org_audit_log DEFAULT;
 
 CREATE INDEX idx_audit_log_org_time ON org_audit_log(org_id, occurred_at DESC);
--- org_id-leading index above can't serve the cross-tenant daily retention
--- delete (`occurred_at < cutoff`, no org filter) — add a plain one.
+-- org_id-leading index above can't serve the boundary retention delete
+-- (`occurred_at < cutoff`, no org filter) — add a plain one.
 CREATE INDEX idx_org_audit_log_occurred_at ON org_audit_log(occurred_at);
 
 CREATE TABLE clickhouse_purge_queue (

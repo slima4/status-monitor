@@ -137,16 +137,19 @@ CREATE INDEX idx_magic_link_tokens_prefix
 
 -- Audit of every authentication attempt — successes for the user's "recent
 -- activity" page, failures for credential-stuffing detection.
+-- Month-partitioned; the PK must include the partition key.
 CREATE TABLE login_attempts (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id              UUID NOT NULL DEFAULT uuidv7(),
     user_id         UUID REFERENCES users(id) ON DELETE SET NULL,
     method          TEXT NOT NULL,
     success         BOOLEAN NOT NULL,
     ip_hash         TEXT,
     user_agent_hash TEXT,
     failure_reason  TEXT,
-    occurred_at     TIMESTAMPTZ NOT NULL DEFAULT now()
-);
+    occurred_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (id, occurred_at)
+) PARTITION BY RANGE (occurred_at);
+CREATE TABLE login_attempts_default PARTITION OF login_attempts DEFAULT;
 CREATE INDEX idx_login_attempts_user_time
     ON login_attempts(user_id, occurred_at DESC);
 -- Partial index restricted to failures. Postgres rejects `now() - interval

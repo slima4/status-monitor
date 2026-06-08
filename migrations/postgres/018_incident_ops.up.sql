@@ -62,7 +62,7 @@ CREATE INDEX idx_incidents_org_target_ended
 -- Distinct from incident_updates (the PUBLIC, customer-facing timeline). This
 -- is the responder-facing record of every lifecycle action.
 CREATE TABLE incident_events (
-    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id           UUID PRIMARY KEY DEFAULT uuidv7(),
     org_id       UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     incident_id  UUID NOT NULL REFERENCES incidents(id) ON DELETE CASCADE,
     occurred_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -88,7 +88,7 @@ CREATE TRIGGER trg_incident_events_org_match
 -- ── incident_notifications: paging delivery log ──────────────────────────
 -- One row per (incident, target, attempt). Powers audit, retry, and dedup.
 CREATE TABLE incident_notifications (
-    id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id               UUID PRIMARY KEY DEFAULT uuidv7(),
     org_id           UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     incident_id      UUID NOT NULL REFERENCES incidents(id) ON DELETE CASCADE,
     escalation_level INTEGER,

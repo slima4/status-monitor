@@ -2,7 +2,7 @@
 -- denied attempt) writes a row here, in addition to a structured tracing event.
 -- Reads are never audited — only state-changing tools.
 CREATE TABLE mcp_audit (
-    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id          UUID PRIMARY KEY DEFAULT uuidv7(),
     actor_type  TEXT NOT NULL DEFAULT 'mcp',
     -- The api_tokens row the call authenticated with. No FK: the token may be
     -- rotated/revoked later, but its audit history must survive.

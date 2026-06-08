@@ -37,6 +37,7 @@ use crate::error::Result;
 use crate::jobs::purge_deleted::{self, PurgeStats, QueueDepth};
 use crate::public_status::PageCache;
 use crate::storage::locks::try_job;
+use crate::storage::partitions;
 
 const SECONDS_PER_DAY: u64 = 86_400;
 const RUN_HOUR_UTC: u32 = 3;
@@ -137,24 +138,29 @@ pub async fn purge_old_data(
     let purge = purge_deleted::purge_tick(pool, ch, grace_days, cache).await?;
     let purge_queue = purge_deleted::purge_queue_depth(pool).await?;
 
-    let login_attempts = delete_older_than(
+    partitions::ensure_partitions(pool).await?;
+
+    let login_attempts = trim_partitioned(
         pool,
+        "login_attempts",
         "DELETE FROM login_attempts \
          WHERE occurred_at < now() - ($1::int * INTERVAL '1 day')",
         retention.login_attempts_days,
         "retention: login_attempts",
     )
     .await?;
-    let quota_events = delete_older_than(
+    let quota_events = trim_partitioned(
         pool,
+        "quota_events",
         "DELETE FROM quota_events \
          WHERE occurred_at < now() - ($1::int * INTERVAL '1 day')",
         retention.quota_events_days,
         "retention: quota_events",
     )
     .await?;
-    let audit_log = delete_older_than(
+    let audit_log = trim_partitioned(
         pool,
+        "org_audit_log",
         "DELETE FROM org_audit_log \
          WHERE occurred_at < now() - ($1::int * INTERVAL '1 day')",
         retention.audit_log_days,
@@ -188,6 +194,22 @@ pub async fn purge_old_data(
         sessions,
         api_tokens,
     })
+}
+
+/// Drop aged-out partitions, then boundary-delete the remainder so the exact day
+/// window still holds. Returns the boundary-delete row count.
+async fn trim_partitioned(
+    pool: &PgPool,
+    table: &'static str,
+    delete_query: &'static str,
+    days: u32,
+    ctx: &'static str,
+) -> Result<u64> {
+    let dropped = partitions::drop_old_partitions(pool, table, days).await?;
+    metrics::counter!("retention_dropped_partitions_total", "table" => table).increment(dropped);
+    let default_rows = partitions::default_partition_rows(pool, table).await?;
+    metrics::gauge!("partition_default_rows", "table" => table).set(default_rows as f64);
+    delete_older_than(pool, delete_query, days, ctx).await
 }
 
 /// Cross-tenant by design (this is the retention sweep) — `query` is a static
