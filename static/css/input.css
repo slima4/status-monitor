@@ -2067,6 +2067,18 @@
         color: var(--theme-text-muted);
     }
 
+    /* Compact single-select segmented control (sr-only radio + label). */
+    .seg { @apply inline-flex flex-wrap gap-1; }
+    .seg-option {
+        @apply cursor-pointer rounded-sm border px-3 py-1.5 text-sm transition;
+        background: var(--theme-surface-elev);
+        border-color: var(--theme-line);
+        font-family: var(--font-mono);
+    }
+    .seg-option:hover { background: var(--theme-surface-sunk); border-color: var(--theme-ink); }
+    .seg-option:has(input:checked) { background: var(--theme-surface-sunk); border-color: var(--theme-accent); }
+    .seg-option:focus-within { @apply outline-none ring-2 ring-offset-2; --tw-ring-color: var(--theme-accent); }
+
     /* Tag chip input. Container is a flex-wrap; the input grows to fill the
        trailing free space so typing always lands inside the same row. */
     .tag-chips {

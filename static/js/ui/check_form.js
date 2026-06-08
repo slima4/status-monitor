@@ -366,7 +366,7 @@
             alerts.push({ channel_id: cb.value });
         }
 
-        const confEl = form.querySelector("[data-alert-confirmations]");
+        const confEl = form.querySelector("input[name='alert_confirmations']:checked");
         const confirmations = confEl ? parseInt(confEl.value, 10) : 2;
         if (!Number.isInteger(confirmations) || confirmations < 1) {
             return { error: "Confirmations before alerting must be a whole number ≥ 1." };

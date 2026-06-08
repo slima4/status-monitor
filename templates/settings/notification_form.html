@@ -88,12 +88,12 @@
           <input name="webhook_secret" type="text" value="{{ form.config.webhook_secret }}"
                  placeholder="leave blank to send unsigned"
                  autocomplete="off" spellcheck="false" class="w-full field font-mono">
+          <span class="mt-1 block text-xs text-muted">
+            If set, each POST carries an <code>X-Uptimepage-Signature</code>
+            (HMAC-SHA256 of <code>timestamp.body</code>) and an
+            <code>X-Uptimepage-Timestamp</code> header to verify.
+          </span>
         </label>
-        <p class="mt-1 text-xs text-muted">
-          If set, each POST carries an <code>X-Uptimepage-Signature</code>
-          (HMAC-SHA256 of <code>timestamp.body</code>) and an
-          <code>X-Uptimepage-Timestamp</code> header to verify.
-        </p>
       </div>
 
       <div data-variant="telegram" class="space-y-5{% if form.kind != "telegram" %} hidden{% endif %}">

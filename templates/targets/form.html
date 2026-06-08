@@ -502,34 +502,46 @@
       </p>
       <div class="divide-y divide-[color:var(--theme-line)]">
         {% for c in form.channels %}
-        <div data-channel-row class="flex flex-wrap items-center gap-4 py-2">
-          <label class="inline-flex min-w-[14rem] items-center gap-2">
-            <input type="checkbox" data-channel-select value="{{ c.id }}"{% if c.selected %} checked{% endif %}>
-            <span class="text-sm">{{ c.name }}</span>
-            <span class="status-badge status-badge--tag">{{ c.kind }}</span>
-          </label>
-        </div>
+        <label data-channel-row class="flex cursor-pointer items-center gap-3 py-2.5">
+          <input type="checkbox" data-channel-select value="{{ c.id }}"{% if c.selected %} checked{% endif %}>
+          <span class="min-w-0 truncate text-sm">{{ c.name }}</span>
+          <span class="status-badge status-badge--tag ml-auto shrink-0">{{ c.kind }}</span>
+        </label>
         {% endfor %}
       </div>
       {% endif %}
 
-      <div class="flex flex-wrap items-end gap-4">
-        <label class="field-outline w-56">
-          <span class="field-outline__label">Confirmations before alerting</span>
-          <input type="number" data-alert-confirmations min="1" max="100"
-                 value="{{ form.alert_confirmations }}" class="w-full field">
-        </label>
+      <div class="space-y-4 border-t border-[color:var(--theme-line)] pt-4">
+        <div class="space-y-1">
+          <span class="text-sm font-medium">Alerting</span>
+          <p class="text-xs text-muted">When this monitor pages you, and how often.</p>
+        </div>
+        <div class="grid gap-4 sm:grid-cols-2 sm:items-start">
+          <div>
+            <span class="mb-1.5 block text-xs text-muted">Confirmations before alerting</span>
+            <div class="seg" role="radiogroup" aria-label="Confirmations before alerting">
+              {% for o in form.confirmation_options() %}
+              <label class="seg-option">
+                <input type="radio" name="alert_confirmations" value="{{ o.value }}" class="sr-only"{% if o.selected %} checked{% endif %}>
+                {{ o.label }}
+              </label>
+              {% endfor %}
+            </div>
+            <span class="mt-1 block text-xs text-muted">Consecutive failed checks before an incident opens.</span>
+          </div>
+          <div class="field-outline block">
+            <span class="mb-1.5 block text-xs text-muted">Remind while down</span>
+            <select data-renotify-secs data-sm-combobox aria-label="Reminder cadence" class="w-full field">
+              {% for o in form.renotify_options() %}
+              <option value="{{ o.secs }}"{% if o.selected %} selected{% endif %}>{{ o.label }}</option>
+              {% endfor %}
+            </select>
+            <span class="mt-1 block text-xs text-muted">Re-page on this cadence until acknowledged.</span>
+          </div>
+        </div>
         <label class="inline-flex items-center gap-2 text-sm">
           <input type="checkbox" data-notify-recovery{% if form.notify_recovery %} checked{% endif %}>
           Notify on recovery
-        </label>
-        <label class="field-outline w-56">
-          <span class="field-outline__label">Remind while down</span>
-          <select data-renotify-secs class="w-full field">
-            {% for o in form.renotify_options() %}
-            <option value="{{ o.secs }}"{% if o.selected %} selected{% endif %}>{{ o.label }}</option>
-            {% endfor %}
-          </select>
         </label>
       </div>
 

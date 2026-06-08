@@ -263,7 +263,30 @@ pub struct RenotifyChoice {
     pub selected: bool,
 }
 
+pub struct ConfirmationChoice {
+    pub value: u32,
+    pub label: String,
+    pub selected: bool,
+}
+
 impl FormModel {
+    /// Confirmation-count presets; an off-preset stored value is preserved as its own option.
+    pub fn confirmation_options(&self) -> Vec<ConfirmationChoice> {
+        let mut values = vec![1, 2, 3, 5];
+        if !values.contains(&self.alert_confirmations) {
+            values.push(self.alert_confirmations);
+            values.sort_unstable();
+        }
+        values
+            .into_iter()
+            .map(|value| ConfirmationChoice {
+                value,
+                label: value.to_string(),
+                selected: value == self.alert_confirmations,
+            })
+            .collect()
+    }
+
     /// Reminder-cadence presets with the monitor's current interval selected.
     pub fn renotify_options(&self) -> Vec<RenotifyChoice> {
         const PRESETS: [(u32, &str); 6] = [
