@@ -109,7 +109,11 @@ mod tests {
         assert_eq!(raw_ttl_days(0), 1, "0 days would delete on next merge");
         assert_eq!(raw_ttl_days(-5), 1);
         assert_eq!(raw_ttl_days(Plan::RAW_MAX_DAYS as i32), max);
-        assert_eq!(raw_ttl_days(10_000), max, "never retain past the disclosed max");
+        assert_eq!(
+            raw_ttl_days(10_000),
+            max,
+            "never retain past the disclosed max"
+        );
         assert_eq!(raw_ttl_days(i32::MAX), max);
     }
 }

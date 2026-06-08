@@ -21,8 +21,7 @@ use uptimepage::{
     error::{AppError, Result},
     http_client::client::build_clients,
     jobs::retention,
-    marketing,
-    observability,
+    marketing, observability,
     pipeline::{BatcherConfig, ResultBatcher},
     public_status::{
         AggregatorConfig, IncidentWriter, IncidentWriterConfig, OrgAggregator, OrgPublicSource,
@@ -340,9 +339,9 @@ async fn main() -> Result<()> {
         let repo = uptimepage::storage::operator::OperatorRepo::new(pg_pool_for_stores.clone());
         let stale_after = std::time::Duration::from_secs(cfg.operator.agent_stale_after_secs);
         let token = root.clone();
-        tokio::spawn(
-            async move { uptimepage::observability::agent_health::run(repo, stale_after, token).await },
-        )
+        tokio::spawn(async move {
+            uptimepage::observability::agent_health::run(repo, stale_after, token).await
+        })
     };
 
     // Incident paging worker: the single notification path. Always running — it

@@ -10,9 +10,7 @@ use axum::routing::post;
 use chrono::Utc;
 use parking_lot::Mutex;
 use serde_json::Value;
-use uptimepage::domain::{
-    ChannelConfig, IncidentSeverity, IncidentUrgency, NotificationReason,
-};
+use uptimepage::domain::{ChannelConfig, IncidentSeverity, IncidentUrgency, NotificationReason};
 use uptimepage::http_outbound::build_outbound_client;
 use uptimepage::notifier::build_notifier;
 use uptimepage::notifier::event::IncidentNotice;
@@ -81,7 +79,10 @@ async fn slack_channel_posts_text_payload() {
         &build_outbound_client(uptimepage::security::SsrfGuard::relaxed_for_tests()),
     )
     .expect("notifier");
-    notifier.notify_incident(&make_notice()).await.expect("notify");
+    notifier
+        .notify_incident(&make_notice())
+        .await
+        .expect("notify");
 
     let captured = store.lock().clone();
     assert_eq!(captured.len(), 1);
@@ -133,7 +134,10 @@ async fn slack_single_region_omits_breakdown() {
 
     let captured = store.lock().clone();
     let text = captured[0].body["text"].as_str().unwrap();
-    assert!(!text.contains("down:"), "single region leaked breakdown: {text}");
+    assert!(
+        !text.contains("down:"),
+        "single region leaked breakdown: {text}"
+    );
 }
 
 #[tokio::test]
@@ -181,7 +185,10 @@ async fn webhook_signed_delivery_carries_a_verifiable_signature() {
         &build_outbound_client(uptimepage::security::SsrfGuard::relaxed_for_tests()),
     )
     .expect("notifier");
-    notifier.notify_incident(&make_notice()).await.expect("notify");
+    notifier
+        .notify_incident(&make_notice())
+        .await
+        .expect("notify");
 
     let captured = store.lock().clone();
     let req = &captured[0];
@@ -200,7 +207,10 @@ async fn webhook_signed_delivery_carries_a_verifiable_signature() {
     mac.update(b".");
     mac.update(req.raw.as_bytes());
     let expected = format!("sha256={}", hex::encode(mac.finalize().into_bytes()));
-    assert_eq!(sig, &expected, "signature must verify against the sent body");
+    assert_eq!(
+        sig, &expected,
+        "signature must verify against the sent body"
+    );
 }
 
 #[tokio::test]

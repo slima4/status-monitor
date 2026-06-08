@@ -13,8 +13,8 @@ mod common;
 
 use std::time::Duration;
 
-use uptimepage::api::error::codes;
 use chrono::Utc;
+use uptimepage::api::error::codes;
 use uptimepage::domain::{
     AlertBinding, ChannelConfig, CheckSpec, ExpectedStatus, NewIncidentNotification,
     NewNotificationChannel, NewTarget, NotificationChannelUpdate, NotificationReason,
@@ -244,9 +244,7 @@ async fn target_alert_binding_channel_lookup_is_org_scoped_live_pg() {
         interval: Duration::from_secs(30),
         enabled: true,
         tags: vec![],
-        alerts: TargetAlerts(vec![AlertBinding {
-            channel_id: ch.id,
-        }]),
+        alerts: TargetAlerts(vec![AlertBinding { channel_id: ch.id }]),
         region_policy: Default::default(),
         alert_confirmations: 2,
         notify_recovery: true,

@@ -77,7 +77,6 @@ pub struct NewOpenIncident {
     pub regions_up: Vec<String>,
 }
 
-
 #[derive(Debug, Clone)]
 pub struct IncidentWriterConfig {
     /// How often the writer wakes up and scans every enabled target.
@@ -281,7 +280,9 @@ impl IncidentWriter {
                     incident_id,
                     ended_at,
                 } => {
-                    self.incident_store.close(org, incident_id, ended_at).await?;
+                    self.incident_store
+                        .close(org, incident_id, ended_at)
+                        .await?;
                     tracing::info!(%org, target_id = %target.id, incident_id = %incident_id, "incident closed");
                     self.signal(org, incident_id, NotificationReason::Resolved);
                 }
@@ -364,7 +365,10 @@ pub fn decide_multi(
         .collect();
 
     let quorum = quorum.clamp(1, verdicts.len().max(1));
-    let mut bad: Vec<&Verdict> = verdicts.iter().filter(|v| v.bad.len() >= threshold).collect();
+    let mut bad: Vec<&Verdict> = verdicts
+        .iter()
+        .filter(|v| v.bad.len() >= threshold)
+        .collect();
     bad.sort_by_key(|v| v.bad[0].timestamp);
     let combined = opens.iter().find(|i| i.region.is_none());
 
@@ -1162,12 +1166,13 @@ mod tests {
                 ],
             ),
         ];
-        match decide_multi(t, std::slice::from_ref(&open), &by_region, 2, 1).as_slice()
-        {
-            [Action::Close {
-                incident_id,
-                ended_at,
-            }] => {
+        match decide_multi(t, std::slice::from_ref(&open), &by_region, 2, 1).as_slice() {
+            [
+                Action::Close {
+                    incident_id,
+                    ended_at,
+                },
+            ] => {
                 assert_eq!(*incident_id, open.id);
                 // Latest region recovery onset wins.
                 assert_eq!(*ended_at, ts(b, 120));
@@ -1256,9 +1261,7 @@ mod tests {
                 ],
             ),
         ];
-        match decide_multi(t, std::slice::from_ref(&open), &by_region, 2, 2)
-            .as_slice()
-        {
+        match decide_multi(t, std::slice::from_ref(&open), &by_region, 2, 2).as_slice() {
             [Action::Close { incident_id, .. }] => assert_eq!(*incident_id, open.id),
             other => panic!("expected one Close, got {other:?}"),
         }

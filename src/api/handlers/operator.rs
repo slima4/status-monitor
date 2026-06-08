@@ -238,8 +238,7 @@ pub async fn list_agents(
                 // Same rule as the background sweep: never-seen agents age from
                 // creation, so a fresh agent inside the window isn't "stale".
                 let since = a.last_seen_at.unwrap_or(a.created_at);
-                let stale =
-                    a.enabled && (now - since).num_seconds().max(0) as u64 > threshold;
+                let stale = a.enabled && (now - since).num_seconds().max(0) as u64 > threshold;
                 AgentView {
                     id: a.id,
                     region: a.region,

@@ -32,8 +32,7 @@ use crate::config::EscalationConfig;
 use crate::domain::{
     EscalationDecision, EscalationPolicy, EscalationTargetType, IncidentEventKind, IncidentState,
     NewIncidentNotification, NotificationOutcome, NotificationReason, NotificationStatus,
-    OpsIncident, OrgId, Target,
-    UserId, next_step,
+    OpsIncident, OrgId, Target, UserId, next_step,
 };
 use crate::error::Result;
 use crate::http_outbound::OutboundHttpClient;
@@ -657,8 +656,9 @@ impl Worker {
             }
             // A first-attempt failure schedules the backoff so the retry sweep
             // waits instead of re-firing next tick.
-            let next_attempt_at =
-                (status == NotificationStatus::Failed).then(|| self.retry_backoff(1)).flatten();
+            let next_attempt_at = (status == NotificationStatus::Failed)
+                .then(|| self.retry_backoff(1))
+                .flatten();
             if status == NotificationStatus::Failed {
                 self.note_dead_letter(channel.kind.as_db_str(), next_attempt_at);
             }
@@ -727,7 +727,11 @@ impl Worker {
     async fn retry_pending(&self) {
         let max_attempts = self.cfg.max_attempts as i32;
         let limit = self.cfg.max_pages_per_tick.max(1) as usize;
-        let pending = match self.ops.pending_notifications(Utc::now(), limit, max_attempts).await {
+        let pending = match self
+            .ops
+            .pending_notifications(Utc::now(), limit, max_attempts)
+            .await
+        {
             Ok(p) => p,
             Err(err) => {
                 tracing::warn!(error = %err, "escalation retry scan failed");
@@ -808,8 +812,9 @@ impl Worker {
             return Ok(());
         }
         let (status, error) = self.deliver(&channel_cfg, &notice).await;
-        let next_attempt_at =
-            (status == NotificationStatus::Failed).then(|| self.retry_backoff(next_attempt)).flatten();
+        let next_attempt_at = (status == NotificationStatus::Failed)
+            .then(|| self.retry_backoff(next_attempt))
+            .flatten();
         if status == NotificationStatus::Failed {
             self.note_dead_letter(&p.transport, next_attempt_at);
         }
@@ -1711,7 +1716,11 @@ mod tests {
         assert_eq!(retry_delay_secs(2, 30, 3600, 5), Some(60));
         assert_eq!(retry_delay_secs(3, 30, 3600, 5), Some(120));
         assert_eq!(retry_delay_secs(4, 30, 3600, 5), Some(240));
-        assert_eq!(retry_delay_secs(5, 30, 3600, 5), None, "attempt cap → dead-letter");
+        assert_eq!(
+            retry_delay_secs(5, 30, 3600, 5),
+            None,
+            "attempt cap → dead-letter"
+        );
         // The doubling is bounded by the configured cap.
         assert_eq!(retry_delay_secs(10, 30, 3600, 100), Some(3600));
         assert_eq!(retry_delay_secs(4, 30, 90, 100), Some(90), "cap bites");

@@ -187,7 +187,8 @@ pub fn build_test_app_with_seedable_incidents(
         Arc::new(InMemoryStatusPageStore::new()),
         incident_narration_store,
         build_test_outbound_and_email().0,
-        build_test_outbound_and_email().1,        None,
+        build_test_outbound_and_email().1,
+        None,
     );
     let router = uptimepage::build_app_router_api_only(state, CancellationToken::new());
     // Auto-attach an owner session so operator routes resolve a CurrentOrg.
@@ -261,7 +262,8 @@ fn build_test_app_with_public_source_inner(
         Arc::new(InMemoryStatusPageStore::new()),
         incident_narration_store,
         build_test_outbound_and_email().0,
-        build_test_outbound_and_email().1,        None,
+        build_test_outbound_and_email().1,
+        None,
     );
     if with_web {
         uptimepage::build_app_router(state, CancellationToken::new())
@@ -340,7 +342,8 @@ pub async fn build_test_app_with_pg(
         Arc::new(InMemoryStatusPageStore::new()),
         incident_narration_store,
         build_test_outbound_and_email().0,
-        build_test_outbound_and_email().1,        None,
+        build_test_outbound_and_email().1,
+        None,
     );
     let app = uptimepage::build_app_router(state, CancellationToken::new());
     (app, provisioned_org)
@@ -457,7 +460,8 @@ fn assemble_pg_router(pool: PgPool, cfg: AppConfig) -> Router {
         status_page_store,
         incident_narration_store,
         build_test_outbound_and_email().0,
-        build_test_outbound_and_email().1,        None,
+        build_test_outbound_and_email().1,
+        None,
     );
     uptimepage::build_app_router(state, CancellationToken::new())
 }
@@ -565,7 +569,8 @@ pub fn build_test_app_state(mutate: impl FnOnce(&mut AppConfig)) -> AppState {
         Arc::new(InMemoryStatusPageStore::new()),
         incident_narration_store,
         build_test_outbound_and_email().0,
-        build_test_outbound_and_email().1,        None,
+        build_test_outbound_and_email().1,
+        None,
     )
 }
 

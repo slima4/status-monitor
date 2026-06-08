@@ -138,7 +138,10 @@ const TARGET_COLUMNS: &str = "t.org_id, t.id, t.name, t.check_spec, t.interval_s
 /// (bad rows cluster by the `(org_id, id)` keyset), so the paginator skips and
 /// advances rather than aborting the walk. The snapshot reads layer the guard
 /// on top via [`decode_targets_or_err`].
-fn decode_targets_skipping(rows: Vec<OrgTargetRow>, cipher: Option<&Cipher>) -> Vec<(OrgId, Target)> {
+fn decode_targets_skipping(
+    rows: Vec<OrgTargetRow>,
+    cipher: Option<&Cipher>,
+) -> Vec<(OrgId, Target)> {
     rows.into_iter()
         .filter_map(|r| {
             let org = OrgId(r.org_id);

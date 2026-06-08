@@ -383,8 +383,7 @@ async fn channel_choices(
     org: OrgId,
     alerts: &TargetAlerts,
 ) -> Result<Vec<ChannelChoice>, AppError> {
-    let bound: std::collections::HashSet<Uuid> =
-        alerts.iter().map(|b| b.channel_id).collect();
+    let bound: std::collections::HashSet<Uuid> = alerts.iter().map(|b| b.channel_id).collect();
     let channels = state.notification_channel_store.list(org).await?;
     Ok(channels
         .into_iter()

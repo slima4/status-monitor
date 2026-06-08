@@ -24,8 +24,7 @@ use crate::domain::{
     IncidentOrigin, IncidentSeverity, IncidentState, IncidentTransition, IncidentUrgency,
     IncidentVisibility, MetricBucket, MonitorIncidentCount, NewIncidentNotification,
     NewManualIncident, NotificationOutcome, NotificationReason, NotificationStatus, OpsIncident,
-    OrgId, TransitionError,
-    UserId, next_state,
+    OrgId, TransitionError, UserId, next_state,
 };
 use crate::error::Result;
 use crate::storage::locks::{advisory_xact_lock, incident_lock_key};
@@ -330,11 +329,7 @@ pub trait IncidentOpsStore: Send + Sync {
     /// (`next_escalation_at IS NULL` — an active ladder drives its own cadence).
     /// The engine re-pages the channels already notified this episode. Oldest
     /// last-page first.
-    async fn due_for_renotify(
-        &self,
-        now: DateTime<Utc>,
-        limit: usize,
-    ) -> Result<Vec<DueIncident>>;
+    async fn due_for_renotify(&self, now: DateTime<Utc>, limit: usize) -> Result<Vec<DueIncident>>;
 }
 
 // ── Postgres impl ────────────────────────────────────────────────────────
@@ -1403,11 +1398,7 @@ impl IncidentOpsStore for PgIncidentOpsStore {
             .collect())
     }
 
-    async fn due_for_renotify(
-        &self,
-        now: DateTime<Utc>,
-        limit: usize,
-    ) -> Result<Vec<DueIncident>> {
+    async fn due_for_renotify(&self, now: DateTime<Utc>, limit: usize) -> Result<Vec<DueIncident>> {
         let cap = (limit as i64).clamp(1, 1000);
         #[derive(sqlx::FromRow)]
         struct Row {

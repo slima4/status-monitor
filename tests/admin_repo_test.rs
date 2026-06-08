@@ -189,7 +189,11 @@ async fn region_list_skips_undecodable_row() {
         .execute(&pool)
         .await
         .unwrap();
-    let org = seed_org(&pool, &format!("admrg-{}", &Uuid::new_v4().simple().to_string()[..8])).await;
+    let org = seed_org(
+        &pool,
+        &format!("admrg-{}", &Uuid::new_v4().simple().to_string()[..8]),
+    )
+    .await;
     let good = seed_good_target(&pool, org).await;
     let bad = seed_bad_target(&pool, org).await;
     for t in [good, bad] {
@@ -210,7 +214,10 @@ async fn region_list_skips_undecodable_row() {
         .map(|(_, t)| t.id)
         .collect();
     assert!(ids.contains(&good));
-    assert!(!ids.contains(&bad), "undecodable row skipped in region list");
+    assert!(
+        !ids.contains(&bad),
+        "undecodable row skipped in region list"
+    );
 
     pool.close().await;
     common::drop_test_db(&db_name).await;
@@ -228,7 +235,11 @@ async fn paginator_skips_trailing_undecodable_and_completes() {
     let pool = common::open_test_pool(&db_url).await;
     MIGRATOR.run(&pool).await.unwrap();
 
-    let org = seed_org(&pool, &format!("admpg-{}", &Uuid::new_v4().simple().to_string()[..8])).await;
+    let org = seed_org(
+        &pool,
+        &format!("admpg-{}", &Uuid::new_v4().simple().to_string()[..8]),
+    )
+    .await;
     // Pinned ids so `bad` deterministically sorts LAST in the keyset.
     let g1 = Uuid::from_u128(1);
     let g2 = Uuid::from_u128(2);
@@ -254,7 +265,10 @@ async fn paginator_skips_trailing_undecodable_and_completes() {
         seen.extend(page.iter().map(|(_, t)| t.id));
         cursor = Some(PublicTargetCursor::after(org_id, last));
     }
-    assert!(seen.contains(&g1) && seen.contains(&g2), "both good targets walked");
+    assert!(
+        seen.contains(&g1) && seen.contains(&g2),
+        "both good targets walked"
+    );
     assert!(!seen.contains(&bad), "trailing bad row skipped");
 
     pool.close().await;
@@ -273,7 +287,11 @@ async fn paginator_advances_past_all_bad_page() {
     let pool = common::open_test_pool(&db_url).await;
     MIGRATOR.run(&pool).await.unwrap();
 
-    let org = seed_org(&pool, &format!("admpg2-{}", &Uuid::new_v4().simple().to_string()[..8])).await;
+    let org = seed_org(
+        &pool,
+        &format!("admpg2-{}", &Uuid::new_v4().simple().to_string()[..8]),
+    )
+    .await;
     // Pinned ids so `bad` deterministically sorts FIRST — it fills the first
     // page_size=1 page, forcing the skip-and-advance path.
     let bad = Uuid::from_u128(1);
@@ -285,7 +303,11 @@ async fn paginator_advances_past_all_bad_page() {
     // page_size=1: first SQL row is the bad one → internal loop skips it and
     // returns the good row, not an empty (walk-complete) page.
     let page = repo.next_enabled_target_page(None, 1).await.unwrap();
-    assert_eq!(page.len(), 1, "skipped the leading bad page, returned the good row");
+    assert_eq!(
+        page.len(),
+        1,
+        "skipped the leading bad page, returned the good row"
+    );
     assert_eq!(page[0].1.id, good);
     assert_ne!(page[0].1.id, bad);
 

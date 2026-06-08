@@ -112,12 +112,13 @@ async fn provisions_partitions_routes_inserts_and_drops_aged() {
         // Parent + DEFAULT + provisioned months → several concrete children.
         let children: i64 = scalar(
             &pool,
-            &format!(
-                "SELECT count(*) FROM pg_inherits WHERE inhparent = '{table}'::regclass"
-            ),
+            &format!("SELECT count(*) FROM pg_inherits WHERE inhparent = '{table}'::regclass"),
         )
         .await;
-        assert!(children >= 2, "{table} should have month partitions, got {children}");
+        assert!(
+            children >= 2,
+            "{table} should have month partitions, got {children}"
+        );
     }
 
     // A fresh login_attempt lands in the current-month partition, never DEFAULT.
@@ -144,15 +145,24 @@ async fn provisions_partitions_routes_inserts_and_drops_aged() {
 
     // Drop everything strictly before the current month: past partitions go,
     // the current month (and its just-inserted row) stays.
-    let before: i64 =
-        scalar(&pool, "SELECT count(*) FROM login_attempts WHERE method = 'parttest'").await;
+    let before: i64 = scalar(
+        &pool,
+        "SELECT count(*) FROM login_attempts WHERE method = 'parttest'",
+    )
+    .await;
     assert_eq!(before, 1);
     partitions::drop_old_partitions(&pool, "login_attempts", 0)
         .await
         .expect("drop");
-    let after: i64 =
-        scalar(&pool, "SELECT count(*) FROM login_attempts WHERE method = 'parttest'").await;
-    assert_eq!(after, 1, "current-month row must survive a drop of aged partitions");
+    let after: i64 = scalar(
+        &pool,
+        "SELECT count(*) FROM login_attempts WHERE method = 'parttest'",
+    )
+    .await;
+    assert_eq!(
+        after, 1,
+        "current-month row must survive a drop of aged partitions"
+    );
 
     let _ = sqlx::query("DELETE FROM login_attempts WHERE method = 'parttest'")
         .execute(&pool)

@@ -25,7 +25,6 @@ pub mod users;
 
 pub use admin::AdminRepo;
 pub use clickhouse::{ClickhouseResultSink, ClickhouseResultsStore, build_client, migrate};
-pub use org_ttl::OrgTtlDays;
 pub use contacts::{ContactStore, InMemoryContactStore, PgContactStore};
 pub use domain_expiry_state::{
     DomainExpiryState, DomainExpiryStateStore, InMemoryDomainExpiryStateStore,
@@ -54,6 +53,7 @@ pub use notification_channels::{
 };
 pub use on_call::{InMemoryOnCallStore, OnCallStore, PgOnCallStore};
 pub use operator::{AgentAuth, AgentRow, DeleteRegion, OperatorRepo, RegionRow};
+pub use org_ttl::OrgTtlDays;
 pub use orgs::{
     MemberView, MembershipStatus, OrgBranding, OrgWithRole, RemoveOutcome, ResolvedPublicPage,
     RestoreOutcome, UpdateOrgOutcome, create_org_with_owner, find_lone_active_org,

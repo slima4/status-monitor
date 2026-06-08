@@ -230,7 +230,10 @@ async fn set_and_read_target_regions_honours_enabled_and_org() {
     // Cross-org: a foreign org reading this target sees not-found, not data.
     let other = seed_org(&pool).await;
     assert_eq!(
-        store.regions_for_target(OrgId(other), target).await.unwrap(),
+        store
+            .regions_for_target(OrgId(other), target)
+            .await
+            .unwrap(),
         None
     );
     assert!(

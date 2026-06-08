@@ -36,8 +36,7 @@ pub use incident::{
     IncidentState, IncidentTransition, IncidentUrgency, IncidentVisibility, MetricBucket,
     MonitorIncidentCount, NewIncidentNotification, NewIncidentUpdate, NewManualIncident,
     NotificationOutcome, NotificationReason, NotificationStatus, OpsIncident, PostmortemUpsert,
-    TransitionError,
-    coalesce_incidents, coalesce_incidents_bad_only, elapsed_at, next_state,
+    TransitionError, coalesce_incidents, coalesce_incidents_bad_only, elapsed_at, next_state,
 };
 pub use maintenance::{
     MaintenanceFilter, MaintenanceWindow, MaintenanceWindowUpdate, NewMaintenanceWindow,

@@ -206,7 +206,10 @@ pub async fn create(
         .await?;
     // The store seeds only the default region; widen to the full set.
     if regions.len() > 1 {
-        state.target_store.set_target_regions(org, t.id, &regions).await?;
+        state
+            .target_store
+            .set_target_regions(org, t.id, &regions)
+            .await?;
     }
     dispatch_first_check(&state, org, &t);
     // UUID hex is always ASCII-safe → infallible.
@@ -382,7 +385,11 @@ pub async fn set_target_regions(
             format!("unknown or disabled region: {bad}"),
         ));
     }
-    if !state.target_store.set_target_regions(org, id, &regions).await? {
+    if !state
+        .target_store
+        .set_target_regions(org, id, &regions)
+        .await?
+    {
         return Err(AppError::not_found(
             codes::TARGET_NOT_FOUND,
             "target not found",
@@ -510,7 +517,10 @@ pub async fn bulk_create(
     if regions.len() > 1 {
         let derived = RegionIncidentPolicy::default();
         for (t, explicit) in out.iter().zip(item_policies) {
-            state.target_store.set_target_regions(org, t.id, &regions).await?;
+            state
+                .target_store
+                .set_target_regions(org, t.id, &regions)
+                .await?;
             state
                 .target_store
                 .update(

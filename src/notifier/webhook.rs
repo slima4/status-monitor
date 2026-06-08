@@ -64,7 +64,10 @@ impl Notifier for WebhookNotifier {
             let ts = Utc::now().timestamp();
             // Operator headers can't shadow the signature: insert ours last.
             headers.insert(TIMESTAMP_HEADER.to_string(), ts.to_string());
-            headers.insert(SIGNATURE_HEADER.to_string(), Self::sign(secret, ts, &payload));
+            headers.insert(
+                SIGNATURE_HEADER.to_string(),
+                Self::sign(secret, ts, &payload),
+            );
         }
         post_bytes_with_headers(&self.client, &self.url, payload, &headers).await
     }
@@ -83,8 +86,14 @@ mod tests {
         assert!(a.starts_with("sha256="));
 
         // A different key, timestamp, or body all change the signature.
-        assert_ne!(a, WebhookNotifier::sign("fedcba9876543210", 1_700_000_000, body));
-        assert_ne!(a, WebhookNotifier::sign("0123456789abcdef", 1_700_000_001, body));
+        assert_ne!(
+            a,
+            WebhookNotifier::sign("fedcba9876543210", 1_700_000_000, body)
+        );
+        assert_ne!(
+            a,
+            WebhookNotifier::sign("0123456789abcdef", 1_700_000_001, body)
+        );
         assert_ne!(
             a,
             WebhookNotifier::sign("0123456789abcdef", 1_700_000_000, b"{}")

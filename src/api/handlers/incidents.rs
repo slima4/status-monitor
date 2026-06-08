@@ -269,7 +269,9 @@ pub async fn incident_notifications(
             "incident not found",
         ));
     }
-    Ok(Json(state.incident_ops_store.notifications_for(org, id).await?))
+    Ok(Json(
+        state.incident_ops_store.notifications_for(org, id).await?,
+    ))
 }
 
 #[utoipa::path(
