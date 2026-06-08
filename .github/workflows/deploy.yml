@@ -268,20 +268,22 @@ jobs:
 
           cd deployment
 
-          # --- CH bind-mounted config: re-assert mode + heal stale mounts ----
+          # --- bind-mounted config: re-assert mode + heal stale mounts -------
           # `git checkout`/`sparse-checkout reapply` above recreate these
-          # files under this script's `umask 077` → 0600. The ClickHouse
-          # container runs as UID 101 and can't read 0600 host files, so it
-          # boot-loops on "Access to file denied: …/config.d/custom.xml".
-          # Re-assert 0644 on EVERY deploy (the old chmod only ran on the
-          # volume-drop path, so normal deploys silently left them 0600).
-          chmod 644 clickhouse-config.xml clickhouse-users.xml 2>/dev/null || true
+          # files under this script's `umask 077` → 0600. The containers run
+          # as non-root (ClickHouse UID 101, Postgres UID 70) and can't read
+          # 0600 host files, so they boot-loop ("Access to file denied" for
+          # CH; "could not open configuration file … Permission denied" for
+          # PG started with config_file=). Re-assert 0644 on EVERY deploy (the
+          # old chmod only ran on the volume-drop path, so normal deploys
+          # silently left them 0600).
+          chmod 644 clickhouse-config.xml clickhouse-users.xml postgresql.conf 2>/dev/null || true
           # Fail loud if the mode didn't take (immutable bit, ACL, odd FS) —
           # a 0600 here is the silent multi-day boot loop we just had.
-          for f in clickhouse-config.xml clickhouse-users.xml; do
+          for f in clickhouse-config.xml clickhouse-users.xml postgresql.conf; do
             mode=$(stat -c '%a' "$f" 2>/dev/null || echo "missing")
             if [ "$mode" != "644" ]; then
-              echo "::error::${f} must be mode 644 for the ClickHouse container (UID 101) to read it; got ${mode}"
+              echo "::error::${f} must be mode 644 for its container to read it; got ${mode}"
               exit 1
             fi
           done
