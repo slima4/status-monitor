@@ -322,6 +322,17 @@ pub trait IncidentOpsStore: Send + Sync {
         cutoff: DateTime<Utc>,
         limit: usize,
     ) -> Result<Vec<DueIncident>>;
+    /// Cross-org open, unacknowledged incidents whose monitor wants an outage
+    /// reminder (`renotify_interval_secs > 0`) and whose last successful page is
+    /// older than that interval, and which are not mid-escalation
+    /// (`next_escalation_at IS NULL` — an active ladder drives its own cadence).
+    /// The engine re-pages the channels already notified this episode. Oldest
+    /// last-page first.
+    async fn due_for_renotify(
+        &self,
+        now: DateTime<Utc>,
+        limit: usize,
+    ) -> Result<Vec<DueIncident>>;
 }
 
 // ── Postgres impl ────────────────────────────────────────────────────────
@@ -1386,6 +1397,65 @@ impl IncidentOpsStore for PgIncidentOpsStore {
             })
             .collect())
     }
+
+    async fn due_for_renotify(
+        &self,
+        now: DateTime<Utc>,
+        limit: usize,
+    ) -> Result<Vec<DueIncident>> {
+        let cap = (limit as i64).clamp(1, 1000);
+        #[derive(sqlx::FromRow)]
+        struct Row {
+            id: Uuid,
+            org_id: Uuid,
+            target_id: Option<Uuid>,
+            escalation_policy_id: Option<Uuid>,
+            escalation_level: i32,
+            escalation_round: i32,
+        }
+        // Cadence keys off the last page *attempt* (`max(created_at)`), not the
+        // last success: gating on `sent_at` would leave a failing channel's
+        // incident perpetually overdue and re-page it every tick. NULL (no page
+        // yet) fails the `<=`, leaving an unpaged incident to reconcile/retry.
+        // Each reminder writes a fresh row, advancing the gate one interval out;
+        // within-interval delivery retries are the retry sweep's job. The
+        // `(org_id, incident_id, created_at)` index serves the max as an
+        // index-only scan.
+        let rows: Vec<Row> = sqlx::query_as(
+            "SELECT i.id, i.org_id, i.target_id, i.escalation_policy_id, \
+                    i.escalation_level, i.escalation_round \
+             FROM incidents i \
+             JOIN targets t ON t.id = i.target_id AND t.org_id = i.org_id \
+             WHERE i.state = 'triggered' AND i.ended_at IS NULL \
+                 AND i.next_escalation_at IS NULL \
+                 AND t.renotify_interval_secs > 0 \
+                 AND ( \
+                     SELECT max(n.created_at) FROM incident_notifications n \
+                     WHERE n.incident_id = i.id AND n.org_id = i.org_id \
+                 ) <= $1 - make_interval(secs => t.renotify_interval_secs::double precision) \
+             ORDER BY ( \
+                 SELECT max(n.created_at) FROM incident_notifications n \
+                 WHERE n.incident_id = i.id AND n.org_id = i.org_id \
+             ) ASC \
+             LIMIT $2",
+        )
+        .bind(now)
+        .bind(cap)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| anyhow::anyhow!("due_for_renotify: {e}"))?;
+        Ok(rows
+            .into_iter()
+            .map(|r| DueIncident {
+                id: r.id,
+                org: OrgId(r.org_id),
+                target_id: r.target_id,
+                escalation_policy_id: r.escalation_policy_id,
+                escalation_level: r.escalation_level,
+                escalation_round: r.escalation_round,
+            })
+            .collect())
+    }
 }
 
 // ── In-memory impl (tests) ──────────────────────────────────────────────
@@ -2028,6 +2098,17 @@ impl IncidentOpsStore for InMemoryIncidentOpsStore {
                 escalation_round: i.escalation_round,
             })
             .collect())
+    }
+
+    // The reminder cadence depends on the per-target `renotify_interval_secs`,
+    // which this single-tenant double doesn't hold (no targets table). The scan
+    // is exercised against Postgres; engine tests drive the paging step directly.
+    async fn due_for_renotify(
+        &self,
+        _now: DateTime<Utc>,
+        _limit: usize,
+    ) -> Result<Vec<DueIncident>> {
+        Ok(Vec::new())
     }
 }
 

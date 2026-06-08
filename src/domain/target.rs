@@ -59,6 +59,9 @@ pub struct Target {
     /// Whether a recovery is announced to the monitor's channels.
     #[serde(default = "default_true")]
     pub notify_recovery: bool,
+    /// Seconds between reminders while an outage stays unacknowledged. 0 = off.
+    #[serde(default = "default_renotify_interval_secs")]
+    pub renotify_interval_secs: u32,
     /// How multi-region health folds into incidents for this monitor.
     #[serde(default)]
     pub region_policy: RegionIncidentPolicy,
@@ -96,6 +99,9 @@ pub struct NewTarget {
     pub alert_confirmations: u32,
     #[serde(default = "default_true")]
     pub notify_recovery: bool,
+    /// Seconds between reminders while an outage stays unacknowledged. 0 = off.
+    #[serde(default = "default_renotify_interval_secs")]
+    pub renotify_interval_secs: u32,
     /// Detection policy. Omit to take the derived default — quorum-majority when
     /// the monitor lands in more than one region, any-down for a single region.
     #[serde(default)]
@@ -121,6 +127,7 @@ pub struct TargetUpdate {
     pub region_policy: Option<RegionIncidentPolicy>,
     pub alert_confirmations: Option<u32>,
     pub notify_recovery: Option<bool>,
+    pub renotify_interval_secs: Option<u32>,
     pub tags: Option<Vec<String>>,
     pub alerts: Option<TargetAlerts>,
     #[serde(default, deserialize_with = "double_option")]
@@ -148,6 +155,10 @@ fn default_true() -> bool {
 
 fn default_alert_confirmations() -> u32 {
     2
+}
+
+fn default_renotify_interval_secs() -> u32 {
+    3600
 }
 
 mod duration_secs {

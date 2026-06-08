@@ -14,14 +14,16 @@ mod common;
 use std::time::Duration;
 
 use uptimepage::api::error::codes;
+use chrono::Utc;
 use uptimepage::domain::{
-    AlertBinding, ChannelConfig, CheckSpec, ExpectedStatus, NewNotificationChannel, NewTarget,
-    NotificationChannelUpdate, TargetAlerts, WriteSource,
+    AlertBinding, ChannelConfig, CheckSpec, ExpectedStatus, NewIncidentNotification,
+    NewNotificationChannel, NewTarget, NotificationChannelUpdate, NotificationReason,
+    NotificationStatus, TargetAlerts, WriteSource,
 };
 use uptimepage::error::AppError;
 use uptimepage::storage::{
-    NotificationChannelStore, PgNotificationChannelStore, PostgresTargetStore, TargetStore,
-    create_org_with_owner,
+    Actor, IncidentOpsStore, NotificationChannelStore, PgIncidentOpsStore,
+    PgNotificationChannelStore, PostgresTargetStore, TargetStore, create_org_with_owner,
 };
 
 use common::{default_http_check, make_user, pg_pool_from_env, test_cipher, unique_slug};
@@ -248,6 +250,7 @@ async fn target_alert_binding_channel_lookup_is_org_scoped_live_pg() {
         region_policy: Default::default(),
         alert_confirmations: 2,
         notify_recovery: true,
+        renotify_interval_secs: 3600,
         group_name: None,
         owner_user_id: None,
     };
@@ -279,4 +282,140 @@ async fn target_alert_binding_channel_lookup_is_org_scoped_live_pg() {
     );
 
     cleanup(&pool, &[org_a, org_b], &[user_a, user_b]).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL — run via DATABASE_URL=... cargo test -- --ignored"]
+async fn due_for_renotify_selects_overdue_open_unacked_live_pg() {
+    let Some(pool) = pg_pool_from_env().await else {
+        return;
+    };
+    let user = make_user(&pool, "renotify").await;
+    let org = create_org_with_owner(&pool, user, &unique_slug("renotify"), "R", 3)
+        .await
+        .unwrap()
+        .expect("org")
+        .id;
+    let targets = PostgresTargetStore::from_pool(pool.clone(), None);
+    let ops = PgIncidentOpsStore::new(pool.clone());
+
+    let mk_target = |name: &str, renotify: u32| {
+        let url = url::Url::parse("https://example.com/").unwrap();
+        NewTarget {
+            name: name.into(),
+            check: CheckSpec::Http(default_http_check(url, ExpectedStatus::Exact(200))),
+            interval: Duration::from_secs(30),
+            enabled: true,
+            tags: vec![],
+            alerts: TargetAlerts::default(),
+            region_policy: Default::default(),
+            alert_confirmations: 2,
+            notify_recovery: true,
+            renotify_interval_secs: renotify,
+            group_name: None,
+            owner_user_id: None,
+        }
+    };
+
+    // Open a triggered incident for `target_id` and record one successful page
+    // `page_age` ago. Returns the incident id.
+    async fn open_paged_incident(
+        pool: &sqlx::PgPool,
+        ops: &PgIncidentOpsStore,
+        org: uptimepage::domain::OrgId,
+        target_id: uuid::Uuid,
+        page_age: chrono::Duration,
+    ) -> uuid::Uuid {
+        let (inc,): (uuid::Uuid,) = sqlx::query_as(
+            "INSERT INTO incidents \
+                (org_id, target_id, started_at, status_at_start, state, severity, urgency, origin, visibility) \
+             VALUES ($1, $2, now() - interval '3 hours', 'down', 'triggered', 'major', 'high', 'monitor', 'internal') \
+             RETURNING id",
+        )
+        .bind(org.0)
+        .bind(target_id)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        let notif = ops
+            .record_notification(NewIncidentNotification {
+                org,
+                incident_id: inc,
+                escalation_level: Some(0),
+                target_user_id: None,
+                channel_id: None,
+                transport: "slack".into(),
+                reason: NotificationReason::Opened,
+                status: NotificationStatus::Sent,
+                attempt: 1,
+                error: None,
+                sent_at: Some(Utc::now() - page_age),
+            })
+            .await
+            .unwrap();
+        // record_notification stamps created_at = now(); backdate it so the
+        // reminder cadence (which keys off the last attempt's created_at) sees
+        // this page as `page_age` old.
+        sqlx::query("UPDATE incident_notifications SET created_at = $2 WHERE id = $1")
+            .bind(notif)
+            .bind(Utc::now() - page_age)
+            .execute(pool)
+            .await
+            .unwrap();
+        inc
+    }
+
+    let overdue_t = targets
+        .create(org, mk_target("overdue", 3600), WriteSource::Ui, i64::MAX)
+        .await
+        .unwrap();
+    let recent_t = targets
+        .create(org, mk_target("recent", 3600), WriteSource::Ui, i64::MAX)
+        .await
+        .unwrap();
+    let off_t = targets
+        .create(org, mk_target("off", 0), WriteSource::Ui, i64::MAX)
+        .await
+        .unwrap();
+
+    let overdue =
+        open_paged_incident(&pool, &ops, org, overdue_t.id, chrono::Duration::hours(2)).await;
+    let recent =
+        open_paged_incident(&pool, &ops, org, recent_t.id, chrono::Duration::minutes(1)).await;
+    let off = open_paged_incident(&pool, &ops, org, off_t.id, chrono::Duration::hours(2)).await;
+
+    let due: Vec<uuid::Uuid> = ops
+        .due_for_renotify(Utc::now(), 100)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|d| d.id)
+        .collect();
+    assert!(due.contains(&overdue), "an overdue open incident is due");
+    assert!(
+        !due.contains(&recent),
+        "a recently-paged incident is below its interval"
+    );
+    assert!(
+        !due.contains(&off),
+        "renotify_interval_secs = 0 disables reminders"
+    );
+
+    // Acknowledging the overdue one silences it.
+    ops.acknowledge(org, overdue, Actor::System, None)
+        .await
+        .unwrap();
+    let due: Vec<uuid::Uuid> = ops
+        .due_for_renotify(Utc::now(), 100)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|d| d.id)
+        .collect();
+    assert!(
+        !due.contains(&overdue),
+        "an acknowledged incident is not reminded"
+    );
+
+    cleanup(&pool, &[org], &[user]).await;
 }

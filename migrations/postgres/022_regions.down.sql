@@ -1,3 +1,4 @@
+ALTER TABLE targets DROP COLUMN IF EXISTS renotify_interval_secs;
 ALTER TABLE targets DROP COLUMN IF EXISTS notify_recovery;
 ALTER TABLE targets DROP COLUMN IF EXISTS alert_confirmations;
 ALTER TABLE targets DROP COLUMN IF EXISTS region_policy;

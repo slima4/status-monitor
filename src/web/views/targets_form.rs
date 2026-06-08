@@ -195,6 +195,8 @@ pub struct FormModel {
     pub alert_confirmations: u32,
     /// Whether a recovery is announced to the bound channels (monitor-level).
     pub notify_recovery: bool,
+    /// Seconds between outage reminders while unacknowledged; 0 = off.
+    pub renotify_interval_secs: u32,
     /// Escalation-policy choices for the monitor's binding selector (edit only;
     /// a not-yet-created monitor has no id to bind). Own binding marked selected.
     pub escalation_choices: Vec<crate::web::views::escalation::Choice>,
@@ -252,6 +254,35 @@ fn region_threshold_choices(selected: RegionIncidentPolicy, max: usize) -> Vec<T
         });
     }
     out
+}
+
+/// One preset in the outage-reminder dropdown. `secs` is submitted verbatim.
+pub struct RenotifyChoice {
+    pub secs: u32,
+    pub label: String,
+    pub selected: bool,
+}
+
+impl FormModel {
+    /// Reminder-cadence presets with the monitor's current interval selected.
+    pub fn renotify_options(&self) -> Vec<RenotifyChoice> {
+        const PRESETS: [(u32, &str); 6] = [
+            (0, "Off"),
+            (900, "Every 15 minutes"),
+            (1800, "Every 30 minutes"),
+            (3600, "Every hour"),
+            (7200, "Every 2 hours"),
+            (21600, "Every 6 hours"),
+        ];
+        PRESETS
+            .iter()
+            .map(|(secs, label)| RenotifyChoice {
+                secs: *secs,
+                label: (*label).to_string(),
+                selected: *secs == self.renotify_interval_secs,
+            })
+            .collect()
+    }
 }
 
 /// One option in the form's "Owner" select.
@@ -312,6 +343,7 @@ fn empty_create_form() -> FormModel {
         channels: Vec::new(),
         alert_confirmations: 2,
         notify_recovery: true,
+        renotify_interval_secs: 3600,
         escalation_choices: Vec::new(),
         escalation_hint: String::new(),
         show_escalation: false,
@@ -558,6 +590,7 @@ fn form_from_target(t: Target, kind: FormKind) -> Result<FormModel, AppError> {
 
     let alert_confirmations = t.alert_confirmations;
     let notify_recovery = t.notify_recovery;
+    let renotify_interval_secs = t.renotify_interval_secs;
 
     Ok(FormModel {
         mode,
@@ -583,6 +616,7 @@ fn form_from_target(t: Target, kind: FormKind) -> Result<FormModel, AppError> {
         channels: Vec::new(),
         alert_confirmations,
         notify_recovery,
+        renotify_interval_secs,
         escalation_choices: Vec::new(),
         escalation_hint: String::new(),
         show_escalation: false,
@@ -744,6 +778,7 @@ mod tests {
             region_policy: Default::default(),
             alert_confirmations: 2,
             notify_recovery: true,
+            renotify_interval_secs: 3600,
             group_name: None,
             owner_user_id: None,
             write_source: crate::domain::WriteSource::Ui,
@@ -835,6 +870,7 @@ mod tests {
             region_policy: Default::default(),
             alert_confirmations: 2,
             notify_recovery: true,
+            renotify_interval_secs: 3600,
             group_name: None,
             owner_user_id: None,
             write_source: crate::domain::WriteSource::Ui,
@@ -874,6 +910,7 @@ mod tests {
             region_policy: Default::default(),
             alert_confirmations: 2,
             notify_recovery: true,
+            renotify_interval_secs: 3600,
             group_name: None,
             owner_user_id: None,
             write_source: crate::domain::WriteSource::Ui,
@@ -913,6 +950,7 @@ mod tests {
             region_policy: Default::default(),
             alert_confirmations: 2,
             notify_recovery: true,
+            renotify_interval_secs: 3600,
             group_name: None,
             owner_user_id: None,
             write_source: crate::domain::WriteSource::Ui,
@@ -949,6 +987,7 @@ mod tests {
             region_policy: Default::default(),
             alert_confirmations: 2,
             notify_recovery: true,
+            renotify_interval_secs: 3600,
             group_name: None,
             owner_user_id: None,
             write_source: crate::domain::WriteSource::Ui,
@@ -984,6 +1023,7 @@ mod tests {
             region_policy: Default::default(),
             alert_confirmations: 2,
             notify_recovery: true,
+            renotify_interval_secs: 3600,
             group_name: None,
             owner_user_id: None,
             write_source: crate::domain::WriteSource::Ui,
@@ -1080,6 +1120,7 @@ mod tests {
             region_policy: Default::default(),
             alert_confirmations: 2,
             notify_recovery: true,
+            renotify_interval_secs: 3600,
             group_name: None,
             owner_user_id: None,
             write_source: crate::domain::WriteSource::Ui,

@@ -372,6 +372,7 @@
             return { error: "Confirmations before alerting must be a whole number ≥ 1." };
         }
         const recoveryEl = form.querySelector("[data-notify-recovery]");
+        const renotifyEl = form.querySelector("[data-renotify-secs]");
 
         const planMin = Number(form.dataset.minInterval) || 60;
         const kind = data.get("check_type") || "http";
@@ -392,6 +393,7 @@
             alerts,
             alert_confirmations: confirmations,
             notify_recovery: recoveryEl ? recoveryEl.checked : true,
+            renotify_interval_secs: renotifyEl ? parseInt(renotifyEl.value, 10) || 0 : 3600,
         };
         payload.group_name = groupRaw === "" ? null : groupRaw;
         payload.owner_user_id = ownerRaw === "" ? null : ownerRaw;

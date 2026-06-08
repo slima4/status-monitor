@@ -917,6 +917,30 @@ mod tests {
     }
 
     #[test]
+    fn decide_isolated_good_blip_does_not_close_then_reopen() {
+        // A flapping monitor: while an incident is open, one stray Up between bad
+        // checks must not close it — a close would be followed by a reopen on the
+        // next bad run, a page storm. Symmetric confirmation (a sustained good run
+        // to close, a sustained bad run to reopen) keeps it one incident, so no
+        // separate flap cooldown is needed.
+        let base = Utc.with_ymd_and_hms(2026, 5, 13, 12, 0, 0).unwrap();
+        let target = Uuid::now_v7();
+        let open = OpenIncident {
+            id: Uuid::now_v7(),
+            target_id: target,
+            region: None,
+            started_at: ts(base, 0),
+        };
+        let results = vec![
+            result(target, ts(base, 30), CheckStatus::Down),
+            result(target, ts(base, 60), CheckStatus::Up),
+            result(target, ts(base, 90), CheckStatus::Down),
+            result(target, ts(base, 120), CheckStatus::Down),
+        ];
+        assert_eq!(decide(Some(&open), &results, 2), Action::None);
+    }
+
+    #[test]
     fn decide_degraded_run_opens_incident() {
         // A degraded service is unhealthy: a sustained run opens an incident.
         let base = Utc.with_ymd_and_hms(2026, 5, 13, 12, 0, 0).unwrap();
@@ -1296,6 +1320,7 @@ mod tests {
             region_policy: Default::default(),
             alert_confirmations: 2,
             notify_recovery: true,
+            renotify_interval_secs: 3600,
             group_name: None,
             owner_user_id: None,
             write_source: crate::domain::WriteSource::Ui,

@@ -255,6 +255,7 @@ pub async fn update(
         verify_alert_channels(&state, org, alerts).await?;
     }
     validate_alert_confirmations(update.alert_confirmations)?;
+    validate_renotify_interval(update.renotify_interval_secs)?;
     if update.region_policy.is_some() {
         let available = state.target_store.available_regions().await?;
         validate_region_policy(update.region_policy, available.len())?;
@@ -824,7 +825,21 @@ fn validate_new_target(new: &NewTarget, guard: &SsrfGuard, min_interval_secs: i6
     validate_check(&new.check, guard)?;
     validate_alerts(&new.alerts)?;
     validate_alert_confirmations(Some(new.alert_confirmations))?;
+    validate_renotify_interval(Some(new.renotify_interval_secs))?;
     validate_group_name(new.group_name.as_deref())
+}
+
+/// The outage reminder cadence is either off (0) or no tighter than a minute —
+/// a sub-minute reminder would just spam responders.
+fn validate_renotify_interval(secs: Option<u32>) -> Result<()> {
+    if matches!(secs, Some(n) if n > 0 && n < 60) {
+        return Err(AppError::bad_request_field(
+            codes::INVALID_ALERT_CONFIG,
+            "renotify_interval_secs must be 0 (off) or at least 60",
+            "renotify_interval_secs",
+        ));
+    }
+    Ok(())
 }
 
 /// One confirmation minimum — alerting after zero failures is meaningless.

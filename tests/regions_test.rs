@@ -77,28 +77,33 @@ async fn reconcile_upserts_region_and_backfills_unassigned() {
     // Region row does not exist yet — reconcile must create it, then backfill.
     repo.reconcile_regions(region, region).await.unwrap();
 
-    let ids: Vec<Uuid> = repo
-        .list_enabled_targets_for_region(region)
+    // Assert on the orphan's own assignment row, not by listing the region:
+    // `reconcile_regions` backfills unassigned targets across the whole DB, so
+    // on the shared test database the region also collects other suites' targets
+    // (some with encrypted check_spec this cipher-less repo can't decode). The
+    // direct lookup is immune to that cross-suite contamination.
+    const COUNT_SQL: &str =
+        "SELECT count(*) FROM target_regions WHERE target_id = $1 AND region = $2";
+    let assigned: i64 = sqlx::query_scalar(COUNT_SQL)
+        .bind(orphan)
+        .bind(region)
+        .fetch_one(&pool)
         .await
-        .unwrap()
-        .into_iter()
-        .map(|(_, t)| t.id)
-        .collect();
-    assert!(
-        ids.contains(&orphan),
+        .unwrap();
+    assert_eq!(
+        assigned, 1,
         "reconcile must assign an unassigned target to the default region"
     );
 
     // Idempotent: a second run neither errors nor duplicates the assignment.
     repo.reconcile_regions(region, region).await.unwrap();
-    let count = repo
-        .list_enabled_targets_for_region(region)
+    let assigned: i64 = sqlx::query_scalar(COUNT_SQL)
+        .bind(orphan)
+        .bind(region)
+        .fetch_one(&pool)
         .await
-        .unwrap()
-        .into_iter()
-        .filter(|(_, t)| t.id == orphan)
-        .count();
-    assert_eq!(count, 1, "reconcile must not duplicate assignments");
+        .unwrap();
+    assert_eq!(assigned, 1, "reconcile must not duplicate assignments");
 }
 
 #[tokio::test]

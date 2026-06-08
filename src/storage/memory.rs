@@ -513,6 +513,7 @@ impl InMemoryTargetStore {
             alerts: new.alerts,
             alert_confirmations: new.alert_confirmations.max(1),
             notify_recovery: new.notify_recovery,
+            renotify_interval_secs: new.renotify_interval_secs,
             region_policy: new.region_policy.unwrap_or_default(),
             group_name: new.group_name,
             owner_user_id: new.owner_user_id,
@@ -663,6 +664,9 @@ impl TargetStore for InMemoryTargetStore {
         }
         if let Some(r) = update.notify_recovery {
             t.notify_recovery = r;
+        }
+        if let Some(n) = update.renotify_interval_secs {
+            t.renotify_interval_secs = n;
         }
         if let Some(p) = update.region_policy {
             t.region_policy = p;

@@ -701,6 +701,7 @@ pub fn http_target(addr: SocketAddr, path: &str, interval_ms: u64) -> Target {
         region_policy: Default::default(),
         alert_confirmations: 2,
         notify_recovery: true,
+        renotify_interval_secs: 3600,
         group_name: None,
         owner_user_id: None,
         write_source: WriteSource::Ui,

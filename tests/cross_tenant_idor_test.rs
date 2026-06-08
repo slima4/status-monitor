@@ -37,6 +37,7 @@ fn a_target() -> NewTarget {
         region_policy: Default::default(),
         alert_confirmations: 2,
         notify_recovery: true,
+        renotify_interval_secs: 3600,
         group_name: None,
         owner_user_id: None,
     }

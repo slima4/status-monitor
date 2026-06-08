@@ -196,6 +196,10 @@ impl EscalationEngine {
     async fn reconcile(&self) {
         self.w.reconcile().await
     }
+    #[cfg(test)]
+    async fn renotify_one(&self, d: &crate::storage::DueIncident) -> Result<()> {
+        self.w.renotify_one(d).await
+    }
 }
 
 impl Worker {
@@ -216,6 +220,7 @@ impl Worker {
     async fn sweep(&self) {
         self.reconcile().await;
         self.escalate_due().await;
+        self.renotify_due().await;
         self.retry_pending().await;
     }
 
@@ -419,6 +424,84 @@ impl Worker {
         if let Err(err) = self.escalate_one(&d).await {
             tracing::warn!(incident_id = %d.id, error = %err, "escalation step failed");
         }
+    }
+
+    /// Re-page the channels of open, unacknowledged incidents whose monitor's
+    /// reminder interval has elapsed since the last page. Bounded-concurrent +
+    /// budget-capped like the escalation sweep. Unlike `escalate_due` this takes
+    /// no claim-and-lease: a reminder is idempotent in intent, so a duplicate
+    /// across two engine instances is a harmless extra page (not a skipped or
+    /// double-advanced rung), and the single-tick single-flight guard already
+    /// prevents an instance from reminding the same incident twice per interval.
+    async fn renotify_due(&self) {
+        let limit = self.cfg.max_pages_per_tick.max(1) as usize;
+        let due = match self.ops.due_for_renotify(Utc::now(), limit).await {
+            Ok(d) => d,
+            Err(err) => {
+                tracing::warn!(error = %err, "renotify scan failed");
+                return;
+            }
+        };
+        let budget = self.sweep_budget();
+        let start = Instant::now();
+        let mut it = due.into_iter();
+        let mut futs = FuturesUnordered::new();
+        for d in it.by_ref().take(SWEEP_CONCURRENCY) {
+            futs.push(self.renotify_one_logged(d));
+        }
+        while futs.next().await.is_some() {
+            if start.elapsed() < budget
+                && let Some(d) = it.next()
+            {
+                futs.push(self.renotify_one_logged(d));
+            }
+        }
+    }
+
+    async fn renotify_one_logged(&self, d: DueIncident) {
+        if let Err(err) = self.renotify_one(&d).await {
+            tracing::warn!(incident_id = %d.id, error = %err, "incident reminder failed");
+        }
+    }
+
+    /// Re-page the channels already notified this episode for a still-open,
+    /// unacknowledged incident. Re-reads state under the per-incident lock so an
+    /// ack/resolve landing after the scan silences the reminder; the fresh page
+    /// advances the last-paged time, so the next reminder is one interval out.
+    async fn renotify_one(&self, d: &DueIncident) -> Result<()> {
+        let _guard = self.page_lock(d.id).lock().await;
+        let Some(incident) = self.ops.get(d.org, d.id).await? else {
+            return Ok(());
+        };
+        if incident.state != IncidentState::Triggered {
+            return Ok(());
+        }
+        let Some(target_id) = incident.target_id else {
+            return Ok(());
+        };
+        let Some(target) = self.targets.get(d.org, target_id).await? else {
+            return Ok(());
+        };
+        if target.renotify_interval_secs == 0 {
+            return Ok(());
+        }
+        let channels = resolvable_channels(&self.ops.notifications_for(d.org, d.id).await?);
+        if channels.is_empty() {
+            return Ok(());
+        }
+        let notice = self.notice(&incident, &target, NotificationReason::Opened);
+        let paged = self
+            .page_channels(
+                d.org,
+                d.id,
+                &notice,
+                NotificationReason::Opened,
+                incident.escalation_level,
+                &channel_targets(channels),
+            )
+            .await?;
+        self.log_paged(d.org, d.id, NotificationReason::Opened, paged)
+            .await
     }
 
     async fn escalate_one(&self, d: &DueIncident) -> Result<()> {
@@ -1050,6 +1133,7 @@ mod tests {
             alerts: TargetAlerts(vec![AlertBinding { channel_id }]),
             alert_confirmations: 1,
             notify_recovery,
+            renotify_interval_secs: 3600,
             region_policy: Default::default(),
             group_name: None,
             owner_user_id: None,
@@ -1361,6 +1445,49 @@ mod tests {
             .unwrap();
         // Opened paged once; recovery opt-out blocked the resolution page.
         assert_eq!(ops.notifications_for(org(), id).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn renotify_re_pages_an_open_unacked_incident_then_stops_once_acked() {
+        let channels = Arc::new(InMemoryNotificationChannelStore::new());
+        let cid = failing_channel(&channels).await;
+        let target = target_with_channel(cid);
+        let tid = target.id;
+        let ops = Arc::new(InMemoryIncidentOpsStore::new());
+        let id = seed_incident(&ops, Some(tid));
+        let targets = Arc::new(InMemoryTargetStore::from_vec(vec![target]));
+        let policies = Arc::new(InMemoryEscalationPolicyStore::new());
+
+        let eng = engine(ops.clone(), policies, targets, channels);
+        eng.page(org(), id, NotificationReason::Opened)
+            .await
+            .unwrap();
+        assert_eq!(ops.notifications_for(org(), id).await.unwrap().len(), 1);
+
+        let due = DueIncident {
+            id,
+            org: org(),
+            target_id: Some(tid),
+            escalation_policy_id: None,
+            escalation_level: 0,
+            escalation_round: 0,
+        };
+        eng.renotify_one(&due).await.unwrap();
+        assert_eq!(
+            ops.notifications_for(org(), id).await.unwrap().len(),
+            2,
+            "reminder re-pages the bound channel while down + unacked"
+        );
+
+        ops.acknowledge(org(), id, Actor::System, None)
+            .await
+            .unwrap();
+        eng.renotify_one(&due).await.unwrap();
+        assert_eq!(
+            ops.notifications_for(org(), id).await.unwrap().len(),
+            2,
+            "an acknowledged incident is not reminded"
+        );
     }
 
     #[tokio::test]

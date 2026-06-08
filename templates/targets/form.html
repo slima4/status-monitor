@@ -523,6 +523,14 @@
           <input type="checkbox" data-notify-recovery{% if form.notify_recovery %} checked{% endif %}>
           Notify on recovery
         </label>
+        <label class="field-outline w-56">
+          <span class="field-outline__label">Remind while down</span>
+          <select data-renotify-secs class="w-full field">
+            {% for o in form.renotify_options() %}
+            <option value="{{ o.secs }}"{% if o.selected %} selected{% endif %}>{{ o.label }}</option>
+            {% endfor %}
+          </select>
+        </label>
       </div>
 
       {% if form.show_escalation %}
