@@ -26,6 +26,8 @@ const PAGE_LOCK_SHARDS: usize = 256;
 /// resolutions of the same schedule into one query.
 const ON_CALL_CACHE_TTL_SECS: u64 = 15;
 
+use metrics::counter;
+
 use crate::config::EscalationConfig;
 use crate::domain::{
     EscalationDecision, EscalationPolicy, EscalationTargetType, IncidentEventKind, IncidentState,
@@ -214,12 +216,28 @@ impl Worker {
     /// +50% random jitter so a correlated burst of failures doesn't retry in
     /// lockstep against a recovering endpoint.
     fn retry_backoff(&self, attempt: i32) -> Option<chrono::DateTime<Utc>> {
-        retry_delay_secs(attempt, self.cfg.retry_backoff_base_secs, self.cfg.max_attempts).map(
-            |secs| {
-                let jitter = fastrand::u64(0..=secs / 2 + 1);
-                Utc::now() + chrono::Duration::seconds((secs + jitter) as i64)
-            },
+        retry_delay_secs(
+            attempt,
+            self.cfg.retry_backoff_base_secs,
+            self.cfg.retry_backoff_cap_secs,
+            self.cfg.max_attempts,
         )
+        .map(|secs| {
+            let jitter = fastrand::u64(0..=secs / 2 + 1);
+            Utc::now() + chrono::Duration::seconds((secs + jitter) as i64)
+        })
+    }
+
+    /// Count a page that exhausted its retries (no further attempt scheduled),
+    /// so a systemic delivery failure shows up as a metric, not just per-incident.
+    fn note_dead_letter(&self, transport: &str, next_attempt_at: Option<chrono::DateTime<Utc>>) {
+        if next_attempt_at.is_none() {
+            counter!(
+                crate::observability::metrics::names::NOTIFICATIONS_DEAD_LETTERED,
+                "transport" => transport.to_string()
+            )
+            .increment(1);
+        }
     }
 
     /// The shard lock guarding paging for `incident_id`.
@@ -640,6 +658,9 @@ impl Worker {
             // waits instead of re-firing next tick.
             let next_attempt_at =
                 (status == NotificationStatus::Failed).then(|| self.retry_backoff(1)).flatten();
+            if status == NotificationStatus::Failed {
+                self.note_dead_letter(channel.kind.as_db_str(), next_attempt_at);
+            }
             self.ops
                 .mark_notification(
                     org,
@@ -749,6 +770,8 @@ impl Worker {
         let Some((notice, channel_cfg, state)) = rebuilt else {
             // Channel/incident gone: back off so a dead target doesn't churn
             // every tick, and let the attempt cap retire the row.
+            let next_attempt_at = self.retry_backoff(next_attempt);
+            self.note_dead_letter(&p.transport, next_attempt_at);
             self.ops
                 .mark_notification(
                     p.org,
@@ -757,7 +780,7 @@ impl Worker {
                     next_attempt,
                     None,
                     None,
-                    self.retry_backoff(next_attempt),
+                    next_attempt_at,
                 )
                 .await?;
             return Ok(());
@@ -780,6 +803,9 @@ impl Worker {
         let (status, error) = self.deliver(&channel_cfg, &notice).await;
         let next_attempt_at =
             (status == NotificationStatus::Failed).then(|| self.retry_backoff(next_attempt)).flatten();
+        if status == NotificationStatus::Failed {
+            self.note_dead_letter(&p.transport, next_attempt_at);
+        }
         self.ops
             .mark_notification(
                 p.org,
@@ -984,14 +1010,13 @@ fn redact_secrets(msg: &str) -> String {
 /// Exponential retry backoff in seconds after `attempt` just failed:
 /// `base * 2^(attempt-1)` capped at one hour. `None` once `attempt` reaches
 /// `max_attempts` — the row is dead-lettered, not rescheduled.
-fn retry_delay_secs(attempt: i32, base_secs: u64, max_attempts: u32) -> Option<u64> {
-    const CAP_SECS: u64 = 3600;
+fn retry_delay_secs(attempt: i32, base_secs: u64, cap_secs: u64, max_attempts: u32) -> Option<u64> {
     if attempt >= max_attempts as i32 {
         return None;
     }
     let base = base_secs.max(1);
     let shift = (attempt.max(1) - 1).min(16) as u32;
-    Some(base.saturating_mul(1u64 << shift).min(CAP_SECS))
+    Some(base.saturating_mul(1u64 << shift).min(cap_secs.max(base)))
 }
 
 /// Wrap bare channel ids (the no-policy fallback + resolution paths) as page
@@ -1672,14 +1697,15 @@ mod tests {
 
     #[test]
     fn retry_backoff_doubles_then_dead_letters() {
-        // base 30s, cap 5 attempts: 30, 60, 120, 240, then None (exhausted).
-        assert_eq!(retry_delay_secs(1, 30, 5), Some(30));
-        assert_eq!(retry_delay_secs(2, 30, 5), Some(60));
-        assert_eq!(retry_delay_secs(3, 30, 5), Some(120));
-        assert_eq!(retry_delay_secs(4, 30, 5), Some(240));
-        assert_eq!(retry_delay_secs(5, 30, 5), None, "attempt cap → dead-letter");
-        // The doubling is capped at one hour.
-        assert_eq!(retry_delay_secs(10, 30, 100), Some(3600));
+        // base 30s, cap 1h, 5 attempts: 30, 60, 120, 240, then None (exhausted).
+        assert_eq!(retry_delay_secs(1, 30, 3600, 5), Some(30));
+        assert_eq!(retry_delay_secs(2, 30, 3600, 5), Some(60));
+        assert_eq!(retry_delay_secs(3, 30, 3600, 5), Some(120));
+        assert_eq!(retry_delay_secs(4, 30, 3600, 5), Some(240));
+        assert_eq!(retry_delay_secs(5, 30, 3600, 5), None, "attempt cap → dead-letter");
+        // The doubling is bounded by the configured cap.
+        assert_eq!(retry_delay_secs(10, 30, 3600, 100), Some(3600));
+        assert_eq!(retry_delay_secs(4, 30, 90, 100), Some(90), "cap bites");
     }
 
     #[test]

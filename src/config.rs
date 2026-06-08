@@ -158,6 +158,8 @@ pub struct EscalationConfig {
     /// Base delay for the exponential retry backoff: attempt n waits
     /// `base * 2^(n-1)` (capped) before the next try.
     pub retry_backoff_base_secs: u64,
+    /// Ceiling on a single retry's backoff delay.
+    pub retry_backoff_cap_secs: u64,
 }
 
 impl Default for EscalationConfig {
@@ -168,6 +170,7 @@ impl Default for EscalationConfig {
             max_pages_per_tick: 500,
             max_attempts: 5,
             retry_backoff_base_secs: 30,
+            retry_backoff_cap_secs: 3600,
         }
     }
 }

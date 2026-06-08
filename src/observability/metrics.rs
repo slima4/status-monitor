@@ -55,6 +55,10 @@ fn register_descriptions() {
         "uptimepage_storage_dropped_results_total",
         "Results dropped before storage, labelled by reason"
     );
+    describe_counter!(
+        "uptimepage_notifications_dead_lettered_total",
+        "Incident pages that exhausted all retries without delivering, labelled by transport"
+    );
 
     describe_histogram!(
         "uptimepage_check_duration_ms",
@@ -187,6 +191,7 @@ pub mod names {
     pub const BREAKER_STATE_CHANGES: &str = "uptimepage_circuit_breaker_state_changes_total";
     pub const STORAGE_WRITES: &str = "uptimepage_storage_writes_total";
     pub const STORAGE_DROPPED: &str = "uptimepage_storage_dropped_results_total";
+    pub const NOTIFICATIONS_DEAD_LETTERED: &str = "uptimepage_notifications_dead_lettered_total";
     pub const CHECK_DURATION_MS: &str = "uptimepage_check_duration_ms";
     pub const CHECK_DNS_MS: &str = "uptimepage_check_dns_ms";
     pub const CHECK_CONNECT_MS: &str = "uptimepage_check_connect_ms";
