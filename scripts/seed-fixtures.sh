@@ -535,10 +535,11 @@ UPDATE notification_channels SET write_source = 'terraform'
 UPDATE notification_channels SET write_source = 'api'
  WHERE org_id='${ORG}'::uuid AND name = 'Fixture Slack';
 
--- Three monitors, each a different notification shape:
---   fix-api  : both enabled channels, 3 confirmations, recovery on
---   fix-db   : Slack only,            5 confirmations, recovery off (silent recovery)
---   fix-auth : Slack + Telegram,      2 confirmations, recovery on (disabled-channel ref ok)
+-- Three monitors, each a different notification shape — and a different reminder
+-- cadence so the form's renotify dropdown renders hourly / off / 15-minute:
+--   fix-api  : both enabled channels, 3 confirmations, recovery on,  remind hourly
+--   fix-db   : Slack only,            5 confirmations, recovery off,  reminders off
+--   fix-auth : Slack + Telegram,      2 confirmations, recovery on,   remind every 15m
 -- COALESCE guards against a future rename / typo in the WHERE clause:
 -- jsonb_agg over zero rows returns NULL, which violates alerts NOT NULL.
 UPDATE targets SET
@@ -547,7 +548,7 @@ UPDATE targets SET
       FROM notification_channels
      WHERE org_id='${ORG}'::uuid AND name IN ('Fixture Slack','Fixture Webhook')
   ), '[]'::jsonb),
-  alert_confirmations = 3, notify_recovery = true
+  alert_confirmations = 3, notify_recovery = true, renotify_interval_secs = 3600
 WHERE id='${T_API}'::uuid;
 
 UPDATE targets SET
@@ -556,7 +557,7 @@ UPDATE targets SET
       FROM notification_channels
      WHERE org_id='${ORG}'::uuid AND name = 'Fixture Slack'
   ), '[]'::jsonb),
-  alert_confirmations = 5, notify_recovery = false
+  alert_confirmations = 5, notify_recovery = false, renotify_interval_secs = 0
 WHERE id='${T_DB}'::uuid;
 
 UPDATE targets SET
@@ -565,7 +566,7 @@ UPDATE targets SET
       FROM notification_channels
      WHERE org_id='${ORG}'::uuid AND name IN ('Fixture Slack','Fixture Telegram')
   ), '[]'::jsonb),
-  alert_confirmations = 2, notify_recovery = true
+  alert_confirmations = 2, notify_recovery = true, renotify_interval_secs = 900
 WHERE id='${T_AUTH}'::uuid;
 SQL
 
@@ -597,18 +598,37 @@ CROSS JOIN LATERAL (
 ) p;
 SQL
 
-# Mark the seeded 'triggered' incidents as already-paged. The escalation
-# reconcile sweep re-pages any triggered incident with no policy, no armed
-# timer, and no notification row (the dropped-open-signal signature); bulk
-# inserts have none, so the engine logs a reconcile WARN every boot when
-# escalation is enabled. Synthesize one delivered 'opened' notification each
-# — the only state the sweep targets. Cascades on incident delete, so re-runs
-# stay clean.
+# Mark the seeded 'triggered' incidents as already-paged. Two background sweeps
+# act on a triggered incident otherwise: reconcile re-pages one with no
+# notification row at all, and renotify re-pages one whose last page is older
+# than the monitor's reminder interval. Synthesize one delivered 'opened'
+# notification each, stamped now() (not started_at) so the reminder is a full
+# interval out and neither sweep churns on boot. Attributed to the webhook
+# channel so the incident's Delivery section shows a channel name. Cascades on
+# incident delete, so re-runs stay clean.
 pg <<SQL
-INSERT INTO incident_notifications (org_id, incident_id, transport, reason, status, sent_at)
-SELECT org_id, id, 'webhook', 'opened', 'sent', started_at
-FROM incidents
-WHERE org_id = '${ORG}'::uuid AND state = 'triggered';
+INSERT INTO incident_notifications (org_id, incident_id, channel_id, transport, reason, status, attempt, sent_at)
+SELECT i.org_id, i.id,
+       (SELECT id FROM notification_channels WHERE org_id = i.org_id AND kind = 'webhook' LIMIT 1),
+       'webhook', 'opened', 'sent', 1, now()
+FROM incidents i
+WHERE i.org_id = '${ORG}'::uuid AND i.state = 'triggered';
+
+-- Delivery-log coverage: give one open incident a retrying page and a
+-- dead-lettered one too, so the incident Delivery section renders all of
+-- sent / retrying / dead-letter at once. next_attempt_at sits an hour out (or
+-- NULL for the dead-letter) so the retry sweep stays quiet on a fixture box.
+INSERT INTO incident_notifications
+  (org_id, incident_id, channel_id, transport, reason, status, attempt, error, next_attempt_at)
+SELECT i.org_id, i.id,
+       (SELECT id FROM notification_channels WHERE org_id = i.org_id AND kind = 'slack' LIMIT 1),
+       'slack', 'opened', v.status, v.attempt, v.error, v.next_attempt_at
+FROM incidents i
+CROSS JOIN (VALUES
+  ('failed'::text, 3, 'connection timed out', now() + interval '1 hour'),
+  ('failed'::text, 5, 'connection refused',   NULL::timestamptz)
+) AS v(status, attempt, error, next_attempt_at)
+WHERE i.org_id = '${ORG}'::uuid AND i.target_id = '${T_PAY}'::uuid AND i.state = 'triggered';
 SQL
 
 if [ "$RESET_CH" = "1" ]; then
