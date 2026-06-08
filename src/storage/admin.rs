@@ -129,6 +129,57 @@ struct OrgTargetRow {
 /// `targets` shape that [`decode_target_row`] consumes.
 const TARGET_COLUMNS: &str = "t.org_id, t.id, t.name, t.check_spec, t.interval_secs, t.enabled, t.tags, t.alerts, t.region_policy, t.alert_confirmations, t.notify_recovery, t.renotify_interval_secs, t.group_name, t.owner_user_id, t.write_source, t.created_at, t.updated_at";
 
+/// Per-row lenient decode: skip (logged + counted) any row whose `check_spec`,
+/// `alerts`, or credential decrypt won't parse, rather than failing the whole
+/// batch — one bad row (a shape predating a schema change, a credential that
+/// won't decrypt) must never blind the scheduler to every other target.
+///
+/// No all-failed guard here: a page of all-bad rows is not necessarily systemic
+/// (bad rows cluster by the `(org_id, id)` keyset), so the paginator skips and
+/// advances rather than aborting the walk. The snapshot reads layer the guard
+/// on top via [`decode_targets_or_err`].
+fn decode_targets_skipping(rows: Vec<OrgTargetRow>, cipher: Option<&Cipher>) -> Vec<(OrgId, Target)> {
+    rows.into_iter()
+        .filter_map(|r| {
+            let org = OrgId(r.org_id);
+            let target_id = r.target.id;
+            match decode_target_row(r.target, cipher) {
+                Ok(t) => Some((org, t)),
+                Err(err) => {
+                    tracing::error!(
+                        %target_id,
+                        org_id = %org.0,
+                        error = ?err,
+                        "skipping target that failed to decode (check_spec/alerts/credentials)"
+                    );
+                    metrics::counter!("uptimepage_undecodable_targets_total").increment(1);
+                    None
+                }
+            }
+        })
+        .collect()
+}
+
+/// Snapshot decode for the scheduler's full lists. Skips one bad row, but if
+/// *every* row fails it's a systemic fault (wrong KEK, schema drift): an empty
+/// result here is dangerous — callers read it as "no targets" and drop the
+/// whole fleet — so all-failed returns `Err`, keeping prior state and surfacing
+/// loudly. A genuinely empty input returns `Ok(empty)` as normal.
+fn decode_targets_or_err(
+    rows: Vec<OrgTargetRow>,
+    cipher: Option<&Cipher>,
+) -> Result<Vec<(OrgId, Target)>> {
+    let total = rows.len();
+    let decoded = decode_targets_skipping(rows, cipher);
+    if decoded.is_empty() && total > 0 {
+        return Err(anyhow::anyhow!(
+            "all {total} cross-tenant targets failed to decode — likely a cipher/KEK or schema fault"
+        )
+        .into());
+    }
+    Ok(decoded)
+}
+
 pub struct AdminRepo {
     pool: PgPool,
     cipher: Option<Arc<Cipher>>,
@@ -173,11 +224,7 @@ impl AdminRepo {
             .fetch_all(&self.pool)
             .await
             .context("admin: list all enabled targets")?;
-        rows.into_iter()
-            .map(|r| {
-                decode_target_row(r.target, self.cipher.as_deref()).map(|t| (OrgId(r.org_id), t))
-            })
-            .collect()
+        decode_targets_or_err(rows, self.cipher.as_deref())
     }
 
     /// Boot reconciliation for the config-driven region model. Idempotent.
@@ -261,11 +308,7 @@ impl AdminRepo {
             .fetch_all(&self.pool)
             .await
             .context("admin: list enabled targets for region")?;
-        rows.into_iter()
-            .map(|r| {
-                decode_target_row(r.target, self.cipher.as_deref()).map(|t| (OrgId(r.org_id), t))
-            })
-            .collect()
+        decode_targets_or_err(rows, self.cipher.as_deref())
     }
 
     /// Map of enabled `target_id -> owning org` for one region. Ingest uses it
@@ -308,31 +351,42 @@ impl AdminRepo {
              FROM targets t JOIN organizations o ON o.id = t.org_id \
              WHERE t.enabled = true AND o.deleted_at IS NULL"
         );
-        let rows: Vec<OrgTargetRow> = match after {
-            None => {
-                let sql = format!("{base} ORDER BY t.org_id, t.id LIMIT $1");
-                sqlx::query_as::<_, OrgTargetRow>(&sql)
-                    .bind(limit)
-                    .fetch_all(&self.pool)
-                    .await
+        // Advance by the raw last row, not the last *decoded* one: if an entire
+        // page decodes to nothing (a clustered run of bad rows), skip past it
+        // and keep reading instead of returning empty — empty must mean "no more
+        // rows", which is the caller's walk-complete signal.
+        let mut cursor = after;
+        loop {
+            let rows: Vec<OrgTargetRow> = match cursor {
+                None => {
+                    let sql = format!("{base} ORDER BY t.org_id, t.id LIMIT $1");
+                    sqlx::query_as::<_, OrgTargetRow>(&sql)
+                        .bind(limit)
+                        .fetch_all(&self.pool)
+                        .await
+                }
+                Some(c) => {
+                    let sql = format!(
+                        "{base} AND (t.org_id, t.id) > ($1, $2) ORDER BY t.org_id, t.id LIMIT $3"
+                    );
+                    sqlx::query_as::<_, OrgTargetRow>(&sql)
+                        .bind(c.org_id.0)
+                        .bind(c.target_id)
+                        .bind(limit)
+                        .fetch_all(&self.pool)
+                        .await
+                }
             }
-            Some(cursor) => {
-                let sql = format!(
-                    "{base} AND (t.org_id, t.id) > ($1, $2) ORDER BY t.org_id, t.id LIMIT $3"
-                );
-                sqlx::query_as::<_, OrgTargetRow>(&sql)
-                    .bind(cursor.org_id.0)
-                    .bind(cursor.target_id)
-                    .bind(limit)
-                    .fetch_all(&self.pool)
-                    .await
+            .context("admin: next enabled-target page")?;
+            let Some(raw_last) = rows.last() else {
+                return Ok(Vec::new()); // no more rows — walk complete
+            };
+            let next = PublicTargetCursor::after(OrgId(raw_last.org_id), raw_last.target.id);
+            let decoded = decode_targets_skipping(rows, self.cipher.as_deref());
+            if !decoded.is_empty() {
+                return Ok(decoded);
             }
+            cursor = Some(next);
         }
-        .context("admin: next enabled-target page")?;
-        rows.into_iter()
-            .map(|r| {
-                decode_target_row(r.target, self.cipher.as_deref()).map(|t| (OrgId(r.org_id), t))
-            })
-            .collect()
     }
 }

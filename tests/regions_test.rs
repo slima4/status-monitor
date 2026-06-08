@@ -7,6 +7,8 @@ use sqlx::PgPool;
 use uptimepage::storage::AdminRepo;
 use uuid::Uuid;
 
+static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations/postgres");
+
 fn check_spec() -> serde_json::Value {
     serde_json::json!({
         "type": "http",
@@ -65,9 +67,15 @@ async fn assign(pool: &PgPool, target_id: Uuid, region: &str) {
 #[tokio::test]
 #[ignore]
 async fn reconcile_upserts_region_and_backfills_unassigned() {
-    let Some(pool) = common::pg_pool_from_env().await else {
+    // Own DB: reconcile_regions backfills every unassigned target across the
+    // whole database, which races other suites' targets on the shared pool.
+    // Isolation keeps that global mutation contained.
+    let Some((db_url, db_name)) = common::fresh_test_db("regions_reconcile").await else {
         return;
     };
+    let pool = common::open_test_pool(&db_url).await;
+    MIGRATOR.run(&pool).await.unwrap();
+
     let region = "eu-reconcile";
     let org = seed_org(&pool).await;
     // Seeded directly (not via the store) so it carries no region assignment.
@@ -77,11 +85,6 @@ async fn reconcile_upserts_region_and_backfills_unassigned() {
     // Region row does not exist yet — reconcile must create it, then backfill.
     repo.reconcile_regions(region, region).await.unwrap();
 
-    // Assert on the orphan's own assignment row, not by listing the region:
-    // `reconcile_regions` backfills unassigned targets across the whole DB, so
-    // on the shared test database the region also collects other suites' targets
-    // (some with encrypted check_spec this cipher-less repo can't decode). The
-    // direct lookup is immune to that cross-suite contamination.
     const COUNT_SQL: &str =
         "SELECT count(*) FROM target_regions WHERE target_id = $1 AND region = $2";
     let assigned: i64 = sqlx::query_scalar(COUNT_SQL)
@@ -104,6 +107,9 @@ async fn reconcile_upserts_region_and_backfills_unassigned() {
         .await
         .unwrap();
     assert_eq!(assigned, 1, "reconcile must not duplicate assignments");
+
+    pool.close().await;
+    common::drop_test_db(&db_name).await;
 }
 
 #[tokio::test]

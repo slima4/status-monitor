@@ -12,6 +12,25 @@ use uptimepage::storage::AdminRepo;
 use uptimepage::storage::admin::PublicTargetCursor;
 use uuid::Uuid;
 
+// Own DB per test: AdminRepo reads + decodes every enabled target across all
+// orgs, so a foreign row with an invalid check_spec from another suite on the
+// shared pool would fail the whole call. Isolation keeps the cross-org read clean.
+static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations/postgres");
+
+fn http_check_spec() -> serde_json::Value {
+    serde_json::json!({
+        "type": "http",
+        "url": "https://example.com/",
+        "method": "GET",
+        "timeout": 5000,
+        "follow_redirects": false,
+        "max_redirects": 0,
+        "expected_status": {"kind": "exact", "value": 200},
+        "headers": {},
+        "verify_tls": true,
+    })
+}
+
 async fn seed_org_with_target(pool: &PgPool, slug: &str) -> (Uuid, Uuid) {
     let (org_id,): (Uuid,) =
         sqlx::query_as("INSERT INTO organizations (slug, name) VALUES ($1, 's') RETURNING id")
@@ -19,24 +38,13 @@ async fn seed_org_with_target(pool: &PgPool, slug: &str) -> (Uuid, Uuid) {
             .fetch_one(pool)
             .await
             .unwrap();
-    let check_spec = serde_json::json!({
-        "type": "http",
-        "url": "https://example.com/",
-        "method": "GET",
-        "timeout": 5000,
-        "follow_redirects": false,
-        "max_redirects": 0,
-        "expected_status": {"kind": "exact", "value": 200},
-        "headers": {},
-        "verify_tls": true,
-    });
     let (target_id,): (Uuid,) = sqlx::query_as(
         r#"INSERT INTO targets (org_id, name, check_spec, interval_secs, enabled)
            VALUES ($1, 't', $2::jsonb, 60, true)
            RETURNING id"#,
     )
     .bind(org_id)
-    .bind(check_spec)
+    .bind(http_check_spec())
     .fetch_one(pool)
     .await
     .unwrap();
@@ -44,29 +52,34 @@ async fn seed_org_with_target(pool: &PgPool, slug: &str) -> (Uuid, Uuid) {
 }
 
 async fn seed_public_target(pool: &PgPool, org_id: Uuid) -> Uuid {
-    let check_spec = serde_json::json!({
-        "type": "http",
-        "url": "https://example.com/",
-        "method": "GET",
-        "timeout": 5000,
-        "follow_redirects": false,
-        "max_redirects": 0,
-        "expected_status": {"kind": "exact", "value": 200},
-        "headers": {},
-        "verify_tls": true,
-    });
     let (target_id,): (Uuid,) = sqlx::query_as(
         r#"INSERT INTO targets (org_id, name, check_spec, interval_secs, enabled)
            VALUES ($1, 't-pub', $2::jsonb, 60, true)
            RETURNING id"#,
     )
     .bind(org_id)
-    .bind(check_spec)
+    .bind(http_check_spec())
     .fetch_one(pool)
     .await
     .unwrap();
     bind_to_new_page(pool, org_id, target_id).await;
     target_id
+}
+
+/// Insert a target with an explicit id, so tests can pin keyset ordering
+/// deterministically (uuidv7 ids minted in the same millisecond don't have a
+/// guaranteed order — the tail is random).
+async fn insert_target_with_id(pool: &PgPool, org_id: Uuid, id: Uuid, spec: serde_json::Value) {
+    sqlx::query(
+        "INSERT INTO targets (id, org_id, name, check_spec, interval_secs, enabled) \
+         VALUES ($1, $2, 't', $3::jsonb, 60, true)",
+    )
+    .bind(id)
+    .bind(org_id)
+    .bind(spec)
+    .execute(pool)
+    .await
+    .unwrap();
 }
 
 /// Put `target_id` on a brand-new enabled page for `org_id`. Publicness is a
@@ -95,12 +108,199 @@ async fn bind_to_new_page(pool: &PgPool, org_id: Uuid, target_id: Uuid) {
     .unwrap();
 }
 
+async fn seed_org(pool: &PgPool, slug: &str) -> Uuid {
+    let (org_id,): (Uuid,) =
+        sqlx::query_as("INSERT INTO organizations (slug, name) VALUES ($1, 's') RETURNING id")
+            .bind(slug)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    org_id
+}
+
+/// Valid HTTP target in an existing org (no page binding), returning its id.
+async fn seed_good_target(pool: &PgPool, org_id: Uuid) -> Uuid {
+    let (id,): (Uuid,) = sqlx::query_as(
+        "INSERT INTO targets (org_id, name, check_spec, interval_secs, enabled) \
+         VALUES ($1, 'g', $2::jsonb, 60, true) RETURNING id",
+    )
+    .bind(org_id)
+    .bind(http_check_spec())
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    id
+}
+
+/// Enabled target whose `{}` check_spec has no `type` tag — the decoder rejects it.
+async fn seed_bad_target(pool: &PgPool, org_id: Uuid) -> Uuid {
+    let (id,): (Uuid,) = sqlx::query_as(
+        "INSERT INTO targets (org_id, name, check_spec, interval_secs, enabled) \
+         VALUES ($1, 'bad', '{}'::jsonb, 60, true) RETURNING id",
+    )
+    .bind(org_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    id
+}
+
+/// An empty enabled set must be `Ok(empty)`, never an error — the all-failed
+/// guard keys on `total > 0`, so genuinely-zero targets stays a clean empty.
+#[tokio::test]
+#[ignore]
+async fn empty_enabled_set_is_ok_not_error() {
+    let Some((db_url, db_name)) = common::fresh_test_db("admin_repo").await else {
+        return;
+    };
+    let pool = common::open_test_pool(&db_url).await;
+    MIGRATOR.run(&pool).await.unwrap();
+
+    let repo = AdminRepo::new(pool.clone(), None, "test");
+    assert!(
+        repo.list_all_enabled_targets().await.unwrap().is_empty(),
+        "no targets → Ok(empty), not Err"
+    );
+    assert!(
+        repo.next_enabled_target_page(None, 10)
+            .await
+            .unwrap()
+            .is_empty(),
+        "empty walk returns empty, not Err"
+    );
+
+    pool.close().await;
+    common::drop_test_db(&db_name).await;
+}
+
+/// The region pull list skips an undecodable row and returns the rest.
+#[tokio::test]
+#[ignore]
+async fn region_list_skips_undecodable_row() {
+    let Some((db_url, db_name)) = common::fresh_test_db("admin_repo").await else {
+        return;
+    };
+    let pool = common::open_test_pool(&db_url).await;
+    MIGRATOR.run(&pool).await.unwrap();
+
+    let region = "eu-adm";
+    sqlx::query("INSERT INTO regions (id, name) VALUES ($1, $1)")
+        .bind(region)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let org = seed_org(&pool, &format!("admrg-{}", &Uuid::new_v4().simple().to_string()[..8])).await;
+    let good = seed_good_target(&pool, org).await;
+    let bad = seed_bad_target(&pool, org).await;
+    for t in [good, bad] {
+        sqlx::query("INSERT INTO target_regions (target_id, region) VALUES ($1, $2)")
+            .bind(t)
+            .bind(region)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+
+    let repo = AdminRepo::new(pool.clone(), None, "test");
+    let ids: Vec<Uuid> = repo
+        .list_enabled_targets_for_region(region)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|(_, t)| t.id)
+        .collect();
+    assert!(ids.contains(&good));
+    assert!(!ids.contains(&bad), "undecodable row skipped in region list");
+
+    pool.close().await;
+    common::drop_test_db(&db_name).await;
+}
+
+/// Regression: a bad row sorting LAST in the keyset must not abort the walk.
+/// (uuidv7 ids are time-ordered, so the last-inserted target sorts last.) The
+/// paginator advances past the trailing all-bad page instead of erroring.
+#[tokio::test]
+#[ignore]
+async fn paginator_skips_trailing_undecodable_and_completes() {
+    let Some((db_url, db_name)) = common::fresh_test_db("admin_repo").await else {
+        return;
+    };
+    let pool = common::open_test_pool(&db_url).await;
+    MIGRATOR.run(&pool).await.unwrap();
+
+    let org = seed_org(&pool, &format!("admpg-{}", &Uuid::new_v4().simple().to_string()[..8])).await;
+    // Pinned ids so `bad` deterministically sorts LAST in the keyset.
+    let g1 = Uuid::from_u128(1);
+    let g2 = Uuid::from_u128(2);
+    let bad = Uuid::from_u128(3);
+    insert_target_with_id(&pool, org, g1, http_check_spec()).await;
+    insert_target_with_id(&pool, org, g2, http_check_spec()).await;
+    insert_target_with_id(&pool, org, bad, serde_json::json!({})).await;
+
+    let repo = AdminRepo::new(pool.clone(), None, "test");
+    let mut seen: Vec<Uuid> = Vec::new();
+    let mut cursor: Option<PublicTargetCursor> = None;
+    let mut steps = 0;
+    loop {
+        steps += 1;
+        assert!(steps <= 50, "walk must terminate");
+        let page = repo
+            .next_enabled_target_page(cursor, 1)
+            .await
+            .expect("walk must not error on a trailing undecodable row");
+        let Some((org_id, last)) = page.last().map(|(o, t)| (*o, t.id)) else {
+            break;
+        };
+        seen.extend(page.iter().map(|(_, t)| t.id));
+        cursor = Some(PublicTargetCursor::after(org_id, last));
+    }
+    assert!(seen.contains(&g1) && seen.contains(&g2), "both good targets walked");
+    assert!(!seen.contains(&bad), "trailing bad row skipped");
+
+    pool.close().await;
+    common::drop_test_db(&db_name).await;
+}
+
+/// A page that decodes to nothing in the MIDDLE of the walk (a bad row sorting
+/// before a good one, page_size=1) must be skipped-and-advanced, not read as
+/// end-of-walk.
+#[tokio::test]
+#[ignore]
+async fn paginator_advances_past_all_bad_page() {
+    let Some((db_url, db_name)) = common::fresh_test_db("admin_repo").await else {
+        return;
+    };
+    let pool = common::open_test_pool(&db_url).await;
+    MIGRATOR.run(&pool).await.unwrap();
+
+    let org = seed_org(&pool, &format!("admpg2-{}", &Uuid::new_v4().simple().to_string()[..8])).await;
+    // Pinned ids so `bad` deterministically sorts FIRST — it fills the first
+    // page_size=1 page, forcing the skip-and-advance path.
+    let bad = Uuid::from_u128(1);
+    let good = Uuid::from_u128(2);
+    insert_target_with_id(&pool, org, bad, serde_json::json!({})).await;
+    insert_target_with_id(&pool, org, good, http_check_spec()).await;
+
+    let repo = AdminRepo::new(pool.clone(), None, "test");
+    // page_size=1: first SQL row is the bad one → internal loop skips it and
+    // returns the good row, not an empty (walk-complete) page.
+    let page = repo.next_enabled_target_page(None, 1).await.unwrap();
+    assert_eq!(page.len(), 1, "skipped the leading bad page, returned the good row");
+    assert_eq!(page[0].1.id, good);
+    assert_ne!(page[0].1.id, bad);
+
+    pool.close().await;
+    common::drop_test_db(&db_name).await;
+}
+
 #[tokio::test]
 #[ignore]
 async fn enabled_targets_excludes_soft_deleted_orgs() {
-    let Some(pool) = common::pg_pool_from_env().await else {
+    let Some((db_url, db_name)) = common::fresh_test_db("admin_repo").await else {
         return;
     };
+    let pool = common::open_test_pool(&db_url).await;
+    MIGRATOR.run(&pool).await.unwrap();
     let slug = format!("admrep-{}", &Uuid::new_v4().simple().to_string()[..8]);
     let (org_id, target_id) = seed_org_with_target(&pool, &slug).await;
 
@@ -126,12 +326,8 @@ async fn enabled_targets_excludes_soft_deleted_orgs() {
         "soft-deleted org's target must NOT remain in the scheduler's enabled set"
     );
 
-    // Cleanup.
-    sqlx::query("DELETE FROM organizations WHERE id = $1")
-        .bind(org_id)
-        .execute(&pool)
-        .await
-        .unwrap();
+    pool.close().await;
+    common::drop_test_db(&db_name).await;
 }
 
 /// Keyset paginator must:
@@ -143,9 +339,11 @@ async fn enabled_targets_excludes_soft_deleted_orgs() {
 #[tokio::test]
 #[ignore]
 async fn enabled_target_pagination_includes_all_and_skips_dead_org() {
-    let Some(pool) = common::pg_pool_from_env().await else {
+    let Some((db_url, db_name)) = common::fresh_test_db("admin_repo").await else {
         return;
     };
+    let pool = common::open_test_pool(&db_url).await;
+    MIGRATOR.run(&pool).await.unwrap();
     let suffix = &Uuid::new_v4().simple().to_string()[..8];
     let slug_live = format!("pubpg-{suffix}-l");
     let slug_dead = format!("pubpg-{suffix}-d");
@@ -212,13 +410,8 @@ async fn enabled_target_pagination_includes_all_and_skips_dead_org() {
         "private target now opens incidents too — must appear in the walk"
     );
 
-    // Cleanup.
-    sqlx::query("DELETE FROM organizations WHERE id IN ($1, $2)")
-        .bind(org_live)
-        .bind(org_dead)
-        .execute(&pool)
-        .await
-        .unwrap();
+    pool.close().await;
+    common::drop_test_db(&db_name).await;
 }
 
 /// A target bound to several enabled pages is still one `(org, target)` row in
@@ -227,9 +420,11 @@ async fn enabled_target_pagination_includes_all_and_skips_dead_org() {
 #[tokio::test]
 #[ignore]
 async fn target_on_multiple_pages_emitted_once() {
-    let Some(pool) = common::pg_pool_from_env().await else {
+    let Some((db_url, db_name)) = common::fresh_test_db("admin_repo").await else {
         return;
     };
+    let pool = common::open_test_pool(&db_url).await;
+    MIGRATOR.run(&pool).await.unwrap();
     let suffix = &Uuid::new_v4().simple().to_string()[..8];
     let (org, _private) = seed_org_with_target(&pool, &format!("multi-{suffix}")).await;
     // seed_public_target binds onto one page; add a second enabled page for it.
@@ -260,9 +455,87 @@ async fn target_on_multiple_pages_emitted_once() {
         "target on two enabled pages must appear exactly once in the walk"
     );
 
-    sqlx::query("DELETE FROM organizations WHERE id = $1")
-        .bind(org)
-        .execute(&pool)
+    pool.close().await;
+    common::drop_test_db(&db_name).await;
+}
+
+/// One target with an unparseable `check_spec` must not sink the whole
+/// cross-tenant load — the scheduler skips it and still returns every other
+/// target, so a single bad row can't blind the fleet.
+#[tokio::test]
+#[ignore]
+async fn undecodable_target_is_skipped_not_fatal() {
+    let Some((db_url, db_name)) = common::fresh_test_db("admin_repo").await else {
+        return;
+    };
+    let pool = common::open_test_pool(&db_url).await;
+    MIGRATOR.run(&pool).await.unwrap();
+
+    let slug = format!("admlen-{}", &Uuid::new_v4().simple().to_string()[..8]);
+    let (org_id, good) = seed_org_with_target(&pool, &slug).await;
+    // Empty check_spec → no `type` tag → the decoder rejects this row.
+    let (bad,): (Uuid,) = sqlx::query_as(
+        "INSERT INTO targets (org_id, name, check_spec, interval_secs, enabled) \
+         VALUES ($1, 'bad', '{}'::jsonb, 60, true) RETURNING id",
+    )
+    .bind(org_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let repo = AdminRepo::new(pool.clone(), None, "test");
+    // The call succeeds despite the bad row (no Err), returning only the good one.
+    let ids: Vec<Uuid> = repo
+        .list_all_enabled_targets()
         .await
-        .unwrap();
+        .unwrap()
+        .into_iter()
+        .map(|(_, t)| t.id)
+        .collect();
+    assert!(ids.contains(&good), "the decodable target must still load");
+    assert!(
+        !ids.contains(&bad),
+        "the undecodable target is skipped, not returned"
+    );
+
+    pool.close().await;
+    common::drop_test_db(&db_name).await;
+}
+
+/// When *every* enabled target fails to decode (a systemic cipher/schema fault,
+/// not one bad row), the load must error — not return an empty list that the
+/// scheduler/incident-writer would read as "no targets" and silently go dark.
+#[tokio::test]
+#[ignore]
+async fn all_targets_undecodable_errors_not_empty() {
+    let Some((db_url, db_name)) = common::fresh_test_db("admin_repo").await else {
+        return;
+    };
+    let pool = common::open_test_pool(&db_url).await;
+    MIGRATOR.run(&pool).await.unwrap();
+
+    let slug = format!("admsys-{}", &Uuid::new_v4().simple().to_string()[..8]);
+    let (org_id,): (Uuid,) =
+        sqlx::query_as("INSERT INTO organizations (slug, name) VALUES ($1, 's') RETURNING id")
+            .bind(&slug)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    sqlx::query(
+        "INSERT INTO targets (org_id, name, check_spec, interval_secs, enabled) \
+         VALUES ($1, 'bad', '{}'::jsonb, 60, true)",
+    )
+    .bind(org_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let repo = AdminRepo::new(pool.clone(), None, "test");
+    assert!(
+        repo.list_all_enabled_targets().await.is_err(),
+        "all-undecodable must fail loud, not return an empty list"
+    );
+
+    pool.close().await;
+    common::drop_test_db(&db_name).await;
 }
