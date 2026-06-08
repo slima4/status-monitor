@@ -219,11 +219,6 @@ pub struct AppState {
     /// `AppState::new`'s signature stays unchanged: a Pg store when tenancy is
     /// live, an in-memory one for no-DB fixtures.
     pub monitor_share_store: Arc<dyn crate::storage::MonitorShareStore>,
-    /// Resolved-channel cache the [`AlertEngine`] reads from. Held here so
-    /// the channel CRUD handlers can `invalidate` on edit/delete and the
-    /// engine picks up the change on the next dispatch rather than waiting
-    /// out the cache TTL.
-    pub alert_channel_cache: crate::notifier::engine::AlertChannelCache,
     pub incident_narration_store: Arc<dyn IncidentNarrationStore>,
     /// Operational incident lifecycle (acknowledge/assign/resolve/reopen +
     /// internal timeline). Built from `db` so `AppState::new`'s signature stays
@@ -379,7 +374,6 @@ impl AppState {
         incident_narration_store: Arc<dyn IncidentNarrationStore>,
         outbound_http: OutboundHttpClient,
         email_sender: Arc<dyn EmailSender>,
-        alert_channel_cache: crate::notifier::engine::AlertChannelCache,
         cipher: Option<Arc<crate::security::Cipher>>,
     ) -> Self {
         let quotas = Arc::new(QuotaService::new(&cfg, db.clone()));
@@ -449,7 +443,6 @@ impl AppState {
             quotas,
             rate_limits,
             abuse,
-            alert_channel_cache,
             incident_signal_tx: None,
             cipher,
             agent_ingest_dedup: build_agent_ingest_dedup(),

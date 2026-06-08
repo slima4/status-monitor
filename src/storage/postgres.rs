@@ -152,6 +152,8 @@ pub(crate) struct TargetRow {
     pub(crate) tags: Vec<String>,
     pub(crate) alerts: serde_json::Value,
     pub(crate) region_policy: serde_json::Value,
+    pub(crate) alert_confirmations: i32,
+    pub(crate) notify_recovery: bool,
     pub(crate) group_name: Option<String>,
     pub(crate) owner_user_id: Option<Uuid>,
     pub(crate) write_source: String,
@@ -175,7 +177,7 @@ pub(crate) fn decode_target_row(row: TargetRow, cipher: Option<&Cipher>) -> Resu
     // whole row — this read feeds the cross-tenant scheduler + incident writer,
     // so one bad value must not stop scheduling for the target (or its batch).
     let region_policy = serde_json::from_value(row.region_policy).unwrap_or_else(|e| {
-        tracing::warn!(target_id = %row.id, error = %e, "invalid region_policy; defaulting to any_down");
+        tracing::warn!(target_id = %row.id, error = %e, "invalid region_policy; defaulting to majority");
         Default::default()
     });
     Ok(Target {
@@ -186,6 +188,8 @@ pub(crate) fn decode_target_row(row: TargetRow, cipher: Option<&Cipher>) -> Resu
         enabled: row.enabled,
         tags: row.tags,
         alerts,
+        alert_confirmations: row.alert_confirmations.max(1) as u32,
+        notify_recovery: row.notify_recovery,
         region_policy,
         group_name: row.group_name,
         owner_user_id: row.owner_user_id,
@@ -219,6 +223,7 @@ impl TargetStore for PostgresTargetStore {
             .map(str::to_owned);
         let sql = format!(
             r#"SELECT id, name, check_spec, interval_secs, enabled, tags, alerts, region_policy,
+                      alert_confirmations, notify_recovery,
                       group_name, owner_user_id,
                       write_source,
                       created_at, updated_at
@@ -276,6 +281,7 @@ impl TargetStore for PostgresTargetStore {
     async fn get(&self, org: OrgId, id: Uuid) -> Result<Option<Target>> {
         let row: Option<TargetRow> = sqlx::query_as::<_, TargetRow>(
             r#"SELECT id, name, check_spec, interval_secs, enabled, tags, alerts, region_policy,
+                      alert_confirmations, notify_recovery,
                       group_name, owner_user_id,
                       write_source,
                       created_at, updated_at
@@ -301,8 +307,8 @@ impl TargetStore for PostgresTargetStore {
     ) -> Result<Target> {
         let check_json = self.encode_check(&new.check)?;
         let alerts_json = serde_json::to_value(&new.alerts).context("encoding alerts JSON")?;
-        let region_policy_json =
-            serde_json::to_value(new.region_policy).context("encoding region_policy JSON")?;
+        let region_policy_json = serde_json::to_value(new.region_policy.unwrap_or_default())
+            .context("encoding region_policy JSON")?;
         // A per-org advisory lock held across count+INSERT in one tx. The
         // count-in-INSERT predicate alone is NOT race-safe under READ
         // COMMITTED — concurrent creators each see a snapshot count and all
@@ -328,9 +334,11 @@ impl TargetStore for PostgresTargetStore {
         }
         let row: TargetRow = sqlx::query_as::<_, TargetRow>(
             r#"INSERT INTO targets (org_id, name, check_spec, interval_secs, enabled, tags, alerts,
-                                    group_name, owner_user_id, write_source, region_policy)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                                    group_name, owner_user_id, write_source, region_policy,
+                                    alert_confirmations, notify_recovery)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
                RETURNING id, name, check_spec, interval_secs, enabled, tags, alerts, region_policy,
+                      alert_confirmations, notify_recovery,
                       group_name, owner_user_id,
                       write_source,
                       created_at, updated_at"#,
@@ -346,6 +354,8 @@ impl TargetStore for PostgresTargetStore {
         .bind(new.owner_user_id)
         .bind(source.as_str())
         .bind(region_policy_json)
+        .bind(new.alert_confirmations.max(1) as i32)
+        .bind(new.notify_recovery)
         .fetch_one(&mut *tx)
         .await
         .context("insert target")?;
@@ -386,12 +396,15 @@ impl TargetStore for PostgresTargetStore {
                  tags = COALESCE($6, tags),
                  alerts = COALESCE($7, alerts),
                  region_policy = COALESCE($14, region_policy),
+                 alert_confirmations = COALESCE($15, alert_confirmations),
+                 notify_recovery = COALESCE($16, notify_recovery),
                  group_name = CASE WHEN $8::bool THEN $9 ELSE group_name END,
                  owner_user_id = CASE WHEN $10::bool THEN $11 ELSE owner_user_id END,
                  write_source = $13,
                  updated_at = now()
                WHERE id = $1 AND org_id = $12
                RETURNING id, name, check_spec, interval_secs, enabled, tags, alerts, region_policy,
+                      alert_confirmations, notify_recovery,
                       group_name, owner_user_id,
                       write_source,
                       created_at, updated_at"#,
@@ -410,6 +423,8 @@ impl TargetStore for PostgresTargetStore {
         .bind(org.0)
         .bind(source.as_str())
         .bind(region_policy_json)
+        .bind(update.alert_confirmations.map(|n| n.max(1) as i32))
+        .bind(update.notify_recovery)
         .fetch_optional(&self.pool)
         .await
         .context("update target")?;
@@ -445,17 +460,20 @@ impl TargetStore for PostgresTargetStore {
         // concurrent bulk (a count subquery alone is not race-safe under
         // READ COMMITTED). All-or-nothing on the cap.
         const SQL: &str = r#"INSERT INTO targets (org_id, name, check_spec, interval_secs, enabled, tags, alerts,
-                                    group_name, owner_user_id, write_source)
+                                    group_name, owner_user_id, write_source,
+                                    alert_confirmations, notify_recovery)
                SELECT $9, u.name, u.check_spec, u.interval_secs, u.enabled,
                       ARRAY(SELECT jsonb_array_elements_text(u.tags)),
                       u.alerts,
                       u.group_name, u.owner_user_id,
-                      $10
+                      $10,
+                      u.alert_confirmations, u.notify_recovery
                FROM UNNEST($1::text[], $2::jsonb[], $3::int4[], $4::bool[], $5::jsonb[], $6::jsonb[],
-                           $7::text[], $8::uuid[])
+                           $7::text[], $8::uuid[], $11::int4[], $12::bool[])
                     AS u(name, check_spec, interval_secs, enabled, tags, alerts,
-                         group_name, owner_user_id)
+                         group_name, owner_user_id, alert_confirmations, notify_recovery)
                RETURNING id, name, check_spec, interval_secs, enabled, tags, alerts, region_policy,
+                      alert_confirmations, notify_recovery,
                       group_name, owner_user_id,
                       write_source,
                       created_at, updated_at"#;
@@ -470,6 +488,8 @@ impl TargetStore for PostgresTargetStore {
         let mut alerts_json: Vec<Json<TargetAlerts>> = Vec::with_capacity(len);
         let mut group_name: Vec<Option<String>> = Vec::with_capacity(len);
         let mut owner_user_id: Vec<Option<Uuid>> = Vec::with_capacity(len);
+        let mut confirmations: Vec<i32> = Vec::with_capacity(len);
+        let mut recoveries: Vec<bool> = Vec::with_capacity(len);
 
         let mut tx = self.pool.begin().await.context("bulk create: begin")?;
         advisory_xact_lock(&mut *tx, &org_lock_key(org))
@@ -505,6 +525,8 @@ impl TargetStore for PostgresTargetStore {
                 alerts_json.push(Json(new.alerts));
                 group_name.push(new.group_name);
                 owner_user_id.push(new.owner_user_id);
+                confirmations.push(new.alert_confirmations.max(1) as i32);
+                recoveries.push(new.notify_recovery);
             }
             sqlx::query_as::<_, TargetRow>(SQL)
                 .bind(&names)
@@ -517,6 +539,8 @@ impl TargetStore for PostgresTargetStore {
                 .bind(&owner_user_id)
                 .bind(org.0)
                 .bind(source.as_str())
+                .bind(&confirmations)
+                .bind(&recoveries)
                 .fetch_all(&mut *tx)
                 .await
                 .context("bulk insert targets")?
@@ -533,6 +557,8 @@ impl TargetStore for PostgresTargetStore {
                 alerts_json.push(Json(new.alerts));
                 group_name.push(new.group_name);
                 owner_user_id.push(new.owner_user_id);
+                confirmations.push(new.alert_confirmations.max(1) as i32);
+                recoveries.push(new.notify_recovery);
             }
             sqlx::query_as::<_, TargetRow>(SQL)
                 .bind(&names)
@@ -545,6 +571,8 @@ impl TargetStore for PostgresTargetStore {
                 .bind(&owner_user_id)
                 .bind(org.0)
                 .bind(source.as_str())
+                .bind(&confirmations)
+                .bind(&recoveries)
                 .fetch_all(&mut *tx)
                 .await
                 .context("bulk insert targets")?
@@ -559,6 +587,7 @@ impl TargetStore for PostgresTargetStore {
     async fn list_updated_since(&self, org: OrgId, since: DateTime<Utc>) -> Result<Vec<Target>> {
         let rows: Vec<TargetRow> = sqlx::query_as::<_, TargetRow>(
             r#"SELECT id, name, check_spec, interval_secs, enabled, tags, alerts, region_policy,
+                      alert_confirmations, notify_recovery,
                       group_name, owner_user_id,
                       write_source,
                       created_at, updated_at

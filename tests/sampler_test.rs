@@ -29,7 +29,7 @@ async fn sampler_runs_and_shuts_down() {
         16,
         test_client(),
         breaker_cfg(),
-        ResultFanout::storage_only(tx.clone()),
+        ResultFanout::new(tx.clone()),
         uptimepage::worker::host_throttle::HostThrottle::permissive(),
         common::test_domain_expiry_runtime(),
     ));

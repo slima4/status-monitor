@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use askama::Template;
 use askama_web::WebTemplate;
 use axum::extract::{Path, Query, State};
@@ -7,7 +5,9 @@ use serde::Deserialize;
 use uuid::Uuid;
 
 use crate::app::AppState;
-use crate::domain::{CheckSpec, ExpectedStatus, HttpMethod, OrgId, Target, TargetAlerts};
+use crate::domain::{
+    CheckSpec, ExpectedStatus, HttpMethod, OrgId, RegionIncidentPolicy, Target, TargetAlerts,
+};
 use crate::error::AppError;
 use crate::web::error::WebResult;
 use crate::web::filters;
@@ -155,14 +155,13 @@ impl Default for DomainExpiryFields {
 }
 
 /// One row in the monitor form's Alerts section: an org channel plus whether
-/// this monitor binds to it and the per-binding firing policy.
+/// this monitor binds to it. Channels are pure delivery targets — the firing
+/// policy (confirmations, recovery) is monitor-level.
 pub struct ChannelChoice {
     pub id: String,
     pub name: String,
     pub kind: &'static str,
     pub selected: bool,
-    pub after_failures: u32,
-    pub notify_recovery: bool,
 }
 
 pub struct FormModel {
@@ -192,6 +191,10 @@ pub struct FormModel {
     pub domain_expiry: DomainExpiryFields,
     /// The org's notification channels, with this monitor's bindings prefilled.
     pub channels: Vec<ChannelChoice>,
+    /// Consecutive failing checks before this monitor alerts (monitor-level).
+    pub alert_confirmations: u32,
+    /// Whether a recovery is announced to the bound channels (monitor-level).
+    pub notify_recovery: bool,
     /// Escalation-policy choices for the monitor's binding selector (edit only;
     /// a not-yet-created monitor has no id to bind). Own binding marked selected.
     pub escalation_choices: Vec<crate::web::views::escalation::Choice>,
@@ -200,12 +203,67 @@ pub struct FormModel {
     /// Whether the escalation-policy section renders at all (off when the
     /// team-paging feature is disabled for the deployment).
     pub show_escalation: bool,
+    /// The enabled region catalog with this monitor's assignments prefilled
+    /// (edit only). Empty / single-region deployments still render one row.
+    pub region_choices: Vec<RegionChoice>,
+    /// Detection-threshold dropdown options with the monitor's current one
+    /// selected: `any` / `majority` / `all` plus a fixed count up to the catalog.
+    pub region_threshold_options: Vec<ThresholdChoice>,
+    /// Whether the region assignment + policy section renders (edit only — a
+    /// not-yet-created monitor has no id to assign regions to).
+    pub show_regions: bool,
+}
+
+/// One option in the detection-threshold dropdown. `value` is what the form
+/// submits (`any`/`majority`/`all` or a plain integer).
+pub struct ThresholdChoice {
+    pub value: String,
+    pub label: String,
+    pub selected: bool,
+}
+
+/// Build the threshold dropdown for `selected`, offering the symbolic presets
+/// plus a fixed count for each region up to `max`.
+fn region_threshold_choices(selected: RegionIncidentPolicy, max: usize) -> Vec<ThresholdChoice> {
+    let current = match selected {
+        RegionIncidentPolicy::Any => "any".to_string(),
+        RegionIncidentPolicy::Majority => "majority".to_string(),
+        RegionIncidentPolicy::All => "all".to_string(),
+        RegionIncidentPolicy::Count(n) => n.to_string(),
+    };
+    let mut out = vec![
+        ("any", "Any region down".to_string()),
+        ("majority", "Majority of regions".to_string()),
+        ("all", "All regions".to_string()),
+    ]
+    .into_iter()
+    .map(|(v, label)| ThresholdChoice {
+        selected: current == v,
+        value: v.to_string(),
+        label,
+    })
+    .collect::<Vec<_>>();
+    for n in 1..=max {
+        let v = n.to_string();
+        out.push(ThresholdChoice {
+            selected: current == v,
+            value: v.clone(),
+            label: format!("{n} region{}", if n == 1 { "" } else { "s" }),
+        });
+    }
+    out
 }
 
 /// One option in the form's "Owner" select.
 pub struct OwnerChoice {
     pub id: String,
     pub label: String,
+    pub selected: bool,
+}
+
+/// One region in the monitor form's assignment checkboxes.
+pub struct RegionChoice {
+    pub id: String,
     pub selected: bool,
 }
 
@@ -252,9 +310,14 @@ fn empty_create_form() -> FormModel {
         tls_cert: TlsCertFields::default(),
         domain_expiry: DomainExpiryFields::default(),
         channels: Vec::new(),
+        alert_confirmations: 2,
+        notify_recovery: true,
         escalation_choices: Vec::new(),
         escalation_hint: String::new(),
         show_escalation: false,
+        region_choices: Vec::new(),
+        region_threshold_options: Vec::new(),
+        show_regions: false,
     }
 }
 
@@ -265,21 +328,16 @@ async fn channel_choices(
     org: OrgId,
     alerts: &TargetAlerts,
 ) -> Result<Vec<ChannelChoice>, AppError> {
-    let bound: HashMap<Uuid, &crate::domain::AlertBinding> =
-        alerts.iter().map(|b| (b.channel_id, b)).collect();
+    let bound: std::collections::HashSet<Uuid> =
+        alerts.iter().map(|b| b.channel_id).collect();
     let channels = state.notification_channel_store.list(org).await?;
     Ok(channels
         .into_iter()
-        .map(|c| {
-            let b = bound.get(&c.id).copied();
-            ChannelChoice {
-                id: c.id.to_string(),
-                name: c.name,
-                kind: c.kind.as_db_str(),
-                selected: b.is_some(),
-                after_failures: b.map(|x| x.after_failures).unwrap_or(3),
-                notify_recovery: b.map(|x| x.notify_recovery).unwrap_or(true),
-            }
+        .map(|c| ChannelChoice {
+            selected: bound.contains(&c.id),
+            id: c.id.to_string(),
+            name: c.name,
+            kind: c.kind.as_db_str(),
         })
         .collect())
 }
@@ -345,6 +403,29 @@ pub async fn new_form(
     // A new monitor is prefilled with 60s; raise it if the plan floor is
     // higher so the default the user sees would actually be accepted.
     form.interval_s = form.interval_s.max(form.min_interval_s);
+    // Prefill the default coverage (all regions capped at the plan, checked).
+    let available = state.target_store.available_regions().await?;
+    let max_regions = state.quotas.limit_for_org(org).await?.max_regions;
+    if available.len() > 1 && max_regions > 1 {
+        let default_region = state.cfg.scheduler.effective_default_region().to_string();
+        let default_set = crate::api::handlers::targets::default_region_set(
+            available.clone(),
+            max_regions,
+            &default_region,
+        );
+        let chosen: std::collections::HashSet<String> = default_set.iter().cloned().collect();
+        let cap = available.len().min(max_regions.max(1) as usize);
+        form.region_choices = available
+            .into_iter()
+            .map(|r| RegionChoice {
+                selected: chosen.contains(&r),
+                id: r,
+            })
+            .collect();
+        form.region_threshold_options =
+            region_threshold_choices(RegionIncidentPolicy::default(), cap);
+        form.show_regions = true;
+    }
     Ok(FormPage {
         active_tab: "targets",
         form,
@@ -363,6 +444,7 @@ pub async fn edit_form(
         .await?
         .ok_or_else(|| AppError::not_found("TARGET_NOT_FOUND", "monitor not found"))?;
     let alerts = target.alerts.clone();
+    let region_policy = target.region_policy;
     let mut form = form_from_target(target, FormKind::Edit)?;
     form.channels = channel_choices(&state, org, &alerts).await?;
     form.owner_options = owner_choices(&state, org, &form.owner_user_id).await?;
@@ -370,6 +452,28 @@ pub async fn edit_form(
     if form.show_escalation {
         (form.escalation_choices, form.escalation_hint) =
             crate::web::views::escalation::monitor_binding(&state, org, id).await?;
+    }
+    // Meaningless unless the deployment has >1 region and the plan allows >1.
+    let available = state.target_store.available_regions().await?;
+    let max_regions = state.quotas.limit_for_org(org).await?.max_regions;
+    if available.len() > 1 && max_regions > 1 {
+        let assigned: std::collections::HashSet<String> = state
+            .target_store
+            .regions_for_target(org, id)
+            .await?
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
+        let cap = available.len().min(max_regions.max(1) as usize);
+        form.region_choices = available
+            .into_iter()
+            .map(|r| RegionChoice {
+                selected: assigned.contains(&r),
+                id: r,
+            })
+            .collect();
+        form.region_threshold_options = region_threshold_choices(region_policy, cap);
+        form.show_regions = true;
     }
     // Edit keeps the saved interval as-is; if a plan floor rose past it the
     // save will surface the API error rather than silently rewriting it.
@@ -452,6 +556,9 @@ fn form_from_target(t: Target, kind: FormKind) -> Result<FormModel, AppError> {
         ),
     };
 
+    let alert_confirmations = t.alert_confirmations;
+    let notify_recovery = t.notify_recovery;
+
     Ok(FormModel {
         mode,
         id,
@@ -474,9 +581,14 @@ fn form_from_target(t: Target, kind: FormKind) -> Result<FormModel, AppError> {
         tls_cert,
         domain_expiry,
         channels: Vec::new(),
+        alert_confirmations,
+        notify_recovery,
         escalation_choices: Vec::new(),
         escalation_hint: String::new(),
         show_escalation: false,
+        region_choices: Vec::new(),
+        region_threshold_options: Vec::new(),
+        show_regions: false,
     })
 }
 
@@ -630,6 +742,8 @@ mod tests {
             tags: vec![],
             alerts: Default::default(),
             region_policy: Default::default(),
+            alert_confirmations: 2,
+            notify_recovery: true,
             group_name: None,
             owner_user_id: None,
             write_source: crate::domain::WriteSource::Ui,
@@ -719,6 +833,8 @@ mod tests {
             tags: vec![],
             alerts: Default::default(),
             region_policy: Default::default(),
+            alert_confirmations: 2,
+            notify_recovery: true,
             group_name: None,
             owner_user_id: None,
             write_source: crate::domain::WriteSource::Ui,
@@ -756,6 +872,8 @@ mod tests {
             tags: vec!["prod".into(), "db".into()],
             alerts: Default::default(),
             region_policy: Default::default(),
+            alert_confirmations: 2,
+            notify_recovery: true,
             group_name: None,
             owner_user_id: None,
             write_source: crate::domain::WriteSource::Ui,
@@ -793,6 +911,8 @@ mod tests {
             tags: vec![],
             alerts: Default::default(),
             region_policy: Default::default(),
+            alert_confirmations: 2,
+            notify_recovery: true,
             group_name: None,
             owner_user_id: None,
             write_source: crate::domain::WriteSource::Ui,
@@ -827,6 +947,8 @@ mod tests {
             tags: vec![],
             alerts: Default::default(),
             region_policy: Default::default(),
+            alert_confirmations: 2,
+            notify_recovery: true,
             group_name: None,
             owner_user_id: None,
             write_source: crate::domain::WriteSource::Ui,
@@ -860,6 +982,8 @@ mod tests {
             tags: vec![],
             alerts: Default::default(),
             region_policy: Default::default(),
+            alert_confirmations: 2,
+            notify_recovery: true,
             group_name: None,
             owner_user_id: None,
             write_source: crate::domain::WriteSource::Ui,
@@ -954,6 +1078,8 @@ mod tests {
             tags: vec!["prod".into()],
             alerts: Default::default(),
             region_policy: Default::default(),
+            alert_confirmations: 2,
+            notify_recovery: true,
             group_name: None,
             owner_user_id: None,
             write_source: crate::domain::WriteSource::Ui,

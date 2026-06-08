@@ -1,4 +1,3 @@
-pub mod engine;
 pub mod event;
 pub mod slack;
 pub mod telegram;
@@ -11,14 +10,13 @@ use async_trait::async_trait;
 use crate::domain::ChannelConfig;
 use crate::error::Result;
 use crate::http_outbound::OutboundHttpClient;
-use crate::notifier::event::{AlertEvent, IncidentNotice};
+use crate::notifier::event::IncidentNotice;
 use crate::notifier::slack::SlackNotifier;
 use crate::notifier::telegram::TelegramNotifier;
 use crate::notifier::webhook::WebhookNotifier;
 
 #[async_trait]
 pub trait Notifier: Send + Sync {
-    async fn notify(&self, event: &AlertEvent) -> Result<()>;
     /// Page an incident lifecycle event (opened/resolved/reopened/escalated).
     async fn notify_incident(&self, notice: &IncidentNotice) -> Result<()>;
 }

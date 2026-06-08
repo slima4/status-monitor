@@ -6,7 +6,7 @@ use crate::domain::NotificationReason;
 use crate::error::Result;
 use crate::http_outbound::{OutboundHttpClient, post_json};
 use crate::notifier::Notifier;
-use crate::notifier::event::{AlertEvent, AlertKind, IncidentNotice};
+use crate::notifier::event::IncidentNotice;
 
 pub struct SlackNotifier {
     client: OutboundHttpClient,
@@ -26,26 +26,6 @@ impl SlackNotifier {
         }
     }
 
-    fn render(event: &AlertEvent) -> String {
-        match event.kind {
-            AlertKind::Down => format!(
-                ":rotating_light: *{name}* is DOWN ({failures} consecutive failures, status={status}{err})",
-                name = event.target_name,
-                failures = event.consecutive_failures,
-                status = event.last_status.as_str(),
-                err = event
-                    .last_error
-                    .as_deref()
-                    .map(|e| format!(": {e}"))
-                    .unwrap_or_default()
-            ),
-            AlertKind::Recovered => format!(
-                ":white_check_mark: *{name}* has RECOVERED",
-                name = event.target_name
-            ),
-        }
-    }
-
     fn render_incident(n: &IncidentNotice) -> String {
         let link = n
             .url
@@ -58,13 +38,14 @@ impl SlackNotifier {
         let label = mrkdwn_escape(n.label());
         match n.reason {
             NotificationReason::Opened | NotificationReason::Escalated => format!(
-                "*{label}* — {sev} incident OPEN{err}{link}",
+                "*{label}* — {sev} incident OPEN{err}{regions}{link}",
                 sev = n.severity.as_db_str(),
                 err = n
                     .error_sample
                     .as_deref()
                     .map(|e| format!(": {}", mrkdwn_escape(e)))
                     .unwrap_or_default(),
+                regions = region_line(n),
             ),
             NotificationReason::Reopened => {
                 format!("*{label}* — incident REOPENED{link}")
@@ -88,18 +69,15 @@ fn mrkdwn_escape(s: &str) -> String {
         .replace('>', "&gt;")
 }
 
+/// Per-region breakdown line, escaped for mrkdwn; empty for single-region.
+fn region_line(n: &IncidentNotice) -> String {
+    n.region_summary(mrkdwn_escape, " • ")
+        .map(|s| format!("\n• {s}"))
+        .unwrap_or_default()
+}
+
 #[async_trait]
 impl Notifier for SlackNotifier {
-    async fn notify(&self, event: &AlertEvent) -> Result<()> {
-        let text = Self::render(event);
-        post_json(
-            &self.client,
-            &self.webhook_url,
-            &SlackPayload { text: &text },
-        )
-        .await
-    }
-
     async fn notify_incident(&self, notice: &IncidentNotice) -> Result<()> {
         let text = Self::render_incident(notice);
         post_json(

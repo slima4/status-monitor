@@ -115,10 +115,6 @@ fn register_descriptions() {
         "Alert notification dispatches that returned an error, labelled by channel"
     );
     describe_counter!(
-        "uptimepage_alerts_dropped_total",
-        "Alert signals dropped before reaching the engine, labelled by reason"
-    );
-    describe_counter!(
         "uptimepage_rdap_singleflight_total",
         "RDAP singleflight outcomes per domain: hit (cached) or miss (fetched)"
     );
@@ -204,7 +200,6 @@ pub mod names {
     pub const BREAKERS_OPEN: &str = "uptimepage_circuit_breakers_open";
     pub const NOTIFICATIONS_TOTAL: &str = "uptimepage_notifications_total";
     pub const NOTIFICATIONS_FAILURES: &str = "uptimepage_notifications_failures_total";
-    pub const ALERTS_DROPPED: &str = "uptimepage_alerts_dropped_total";
     pub const HOST_THROTTLE_WAITS: &str = "uptimepage_host_throttle_waits_total";
     pub const HOST_THROTTLE_DROPS: &str = "uptimepage_host_throttle_drops_total";
     pub const RDAP_SINGLEFLIGHT: &str = "uptimepage_rdap_singleflight_total";

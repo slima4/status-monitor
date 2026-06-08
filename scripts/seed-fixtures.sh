@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Seed a substantial fixture set (14 monitors, ~160 incidents across all
 # statuses, 90d ClickHouse history, notification channels, alert bindings,
-# maintenance-bound components, adversarial-title incident, two regions +
-# a sample agent) into a running local stack — for UI stress-testing,
+# maintenance-bound components, adversarial-title incident, four regions +
+# per-region agents) into a running local stack — for UI stress-testing,
 # screenshots, and smoke-testing every rendered code path on the public +
-# operator pages. fix-api/fix-web also report from 'eu-west' so the dashboard
-# region selector has distinct per-region data.
+# operator pages. fix-api probes from 4 regions (quorum 2-of-4), fix-web from 2,
+# so the region selectors, per-region breakdown/overlay, quorum detection, and
+# the agent dead-man's-switch (one stale agent) all have distinct data.
 #
 # Coverage matrix on the public page:
 #   fix-api    Operational   (mostly-up recent + open incident churn)
@@ -75,10 +76,11 @@ DELETE FROM incidents
 DELETE FROM targets
  WHERE org_id = (SELECT id FROM organizations WHERE slug='${SLUG}')
    AND tags @> ARRAY['seed-fixtures'];
--- target_regions cascade with their targets above; drop the fixture agent and
--- the fixture-only region ('default' is owned by the app).
+-- target_regions cascade with their targets above; drop the fixture agents and
+-- the fixture-only regions ('default' is owned by the app). Agents first — they
+-- FK-reference regions.
 DELETE FROM agents WHERE name LIKE 'Fixture %';
-DELETE FROM regions WHERE id = 'eu-west';
+DELETE FROM regions WHERE id IN ('eu-west', 'us-east', 'ap-south');
 DELETE FROM notification_channels
  WHERE org_id = (SELECT id FROM organizations WHERE slug='${SLUG}')
    AND name LIKE 'Fixture %';
@@ -210,31 +212,54 @@ for _v in T_API T_WEB T_CDN T_DB T_AUTH T_EMAIL T_SEARCH T_PAUSED \
 done
 unset _v _id
 
-echo "==> Postgres: regions, target assignments, and a sample operator agent"
-# Two regions so the dashboard region selector has something to switch between:
-# every fixture target runs on 'default' (the control plane), and fix-api +
-# fix-web additionally report from 'eu-west'. The agent row drives the operator
-# surface; its credential is a non-verifying placeholder (display only).
+echo "==> Postgres: regions, multi-region assignments, quorum policy, operator agents"
+# Four regions so the dashboard/monitor region selectors, quorum detection, and
+# the operator agent surface all have real data. Every fixture target runs on
+# 'default' (the control plane); fix-api additionally probes from all three
+# remote regions and fix-web from eu-west. Agent rows drive the operator surface
+# (credentials are non-verifying placeholders, display only).
 pg <<SQL
 INSERT INTO regions (id, name, location) VALUES
   ('default', 'Default', 'control plane'),
-  ('eu-west', 'EU West', 'Amsterdam')
+  ('eu-west', 'EU West', 'Amsterdam'),
+  ('us-east', 'US East', 'Virginia'),
+  ('ap-south', 'AP South', 'Singapore')
 ON CONFLICT (id) DO NOTHING;
+
+-- Lift the fixture org's region cap so multi-region assignment + quorum can be
+-- exercised through the API/UI (the default free cap is 1).
+UPDATE plans SET max_regions = GREATEST(max_regions, 10)
+ WHERE id = (SELECT plan_id FROM organizations WHERE id = '${ORG}');
 
 INSERT INTO target_regions (target_id, region)
 SELECT id, 'default' FROM targets
  WHERE org_id = '${ORG}' AND tags @> ARRAY['seed-fixtures']
 ON CONFLICT DO NOTHING;
 
+-- fix-api → all three remote regions (4 total); fix-web → eu-west (2 total).
 INSERT INTO target_regions (target_id, region)
-SELECT id, 'eu-west' FROM targets
- WHERE org_id = '${ORG}' AND tags @> ARRAY['seed-fixtures']
-   AND name IN ('fix-api', 'fix-web')
+SELECT id, r FROM targets, unnest(ARRAY['eu-west','us-east','ap-south']) AS r
+ WHERE org_id = '${ORG}' AND tags @> ARRAY['seed-fixtures'] AND name = 'fix-api'
 ON CONFLICT DO NOTHING;
 
-INSERT INTO agents (region, name, enabled, token_hash, token_prefix)
-VALUES ('eu-west', 'Fixture EU probe', true,
-        'seed-fixture-disabled-credential', 'sm_agent_fixture');
+INSERT INTO target_regions (target_id, region)
+SELECT id, 'eu-west' FROM targets
+ WHERE org_id = '${ORG}' AND tags @> ARRAY['seed-fixtures'] AND name = 'fix-web'
+ON CONFLICT DO NOTHING;
+
+-- Multi-region detection, exercising both shapes: fix-api a fixed count (2 of 4),
+-- fix-web the symbolic "all" (both of 2).
+UPDATE targets SET region_policy = '{"count":2}'::jsonb
+ WHERE org_id = '${ORG}' AND tags @> ARRAY['seed-fixtures'] AND name = 'fix-api';
+UPDATE targets SET region_policy = '"all"'::jsonb
+ WHERE org_id = '${ORG}' AND tags @> ARRAY['seed-fixtures'] AND name = 'fix-web';
+
+-- A fresh probe per remote region plus a deliberately STALE one (last seen
+-- 10 min ago) so the dead-man's-switch (stale flag + agent_up gauge) shows.
+INSERT INTO agents (region, name, enabled, token_hash, token_prefix, last_seen_at) VALUES
+  ('eu-west',  'Fixture EU probe',         true, 'seed-fixture-cred-eu', 'sm_agent_fixeu', now()),
+  ('us-east',  'Fixture US probe',         true, 'seed-fixture-cred-us', 'sm_agent_fixus', now()),
+  ('ap-south', 'Fixture AP probe (stale)', true, 'seed-fixture-cred-ap', 'sm_agent_fixap', now() - interval '10 minutes');
 SQL
 
 # Public targets only — incidents on internal monitors wouldn't surface on
@@ -489,8 +514,8 @@ SQL
 echo "==> Postgres: 3 notification channels (webhook + slack + telegram) and alert bindings"
 # Channel kinds match ChannelConfig — one per variant. The Telegram row is
 # disabled so the operator UI renders both the enabled and disabled states.
-# Alert bindings exercise both notify_recovery=true and =false, and multiple
-# bindings per target.
+# Bindings are pure delivery targets ({channel_id}); the firing policy
+# (alert_confirmations, notify_recovery) lives on the monitor and is set below.
 pg <<SQL
 INSERT INTO notification_channels (org_id, name, kind, config, enabled) VALUES
   ('${ORG}'::uuid, 'Fixture Slack',    'slack',
@@ -510,29 +535,38 @@ UPDATE notification_channels SET write_source = 'terraform'
 UPDATE notification_channels SET write_source = 'api'
  WHERE org_id='${ORG}'::uuid AND name = 'Fixture Slack';
 
--- Three binding shapes:
---   fix-api  : both enabled channels, recovery on  (full notification mix)
---   fix-db   : Slack only,            recovery off (silent recovery edge)
---   fix-auth : Slack + Telegram,      recovery on  (disabled-channel ref ok)
+-- Three monitors, each a different notification shape:
+--   fix-api  : both enabled channels, 3 confirmations, recovery on
+--   fix-db   : Slack only,            5 confirmations, recovery off (silent recovery)
+--   fix-auth : Slack + Telegram,      2 confirmations, recovery on (disabled-channel ref ok)
 -- COALESCE guards against a future rename / typo in the WHERE clause:
 -- jsonb_agg over zero rows returns NULL, which violates alerts NOT NULL.
-UPDATE targets SET alerts = COALESCE((
-  SELECT jsonb_agg(jsonb_build_object('channel_id', id, 'after_failures', 3, 'notify_recovery', true))
-    FROM notification_channels
-   WHERE org_id='${ORG}'::uuid AND name IN ('Fixture Slack','Fixture Webhook')
-), '[]'::jsonb) WHERE id='${T_API}'::uuid;
+UPDATE targets SET
+  alerts = COALESCE((
+    SELECT jsonb_agg(jsonb_build_object('channel_id', id))
+      FROM notification_channels
+     WHERE org_id='${ORG}'::uuid AND name IN ('Fixture Slack','Fixture Webhook')
+  ), '[]'::jsonb),
+  alert_confirmations = 3, notify_recovery = true
+WHERE id='${T_API}'::uuid;
 
-UPDATE targets SET alerts = COALESCE((
-  SELECT jsonb_agg(jsonb_build_object('channel_id', id, 'after_failures', 5, 'notify_recovery', false))
-    FROM notification_channels
-   WHERE org_id='${ORG}'::uuid AND name = 'Fixture Slack'
-), '[]'::jsonb) WHERE id='${T_DB}'::uuid;
+UPDATE targets SET
+  alerts = COALESCE((
+    SELECT jsonb_agg(jsonb_build_object('channel_id', id))
+      FROM notification_channels
+     WHERE org_id='${ORG}'::uuid AND name = 'Fixture Slack'
+  ), '[]'::jsonb),
+  alert_confirmations = 5, notify_recovery = false
+WHERE id='${T_DB}'::uuid;
 
-UPDATE targets SET alerts = COALESCE((
-  SELECT jsonb_agg(jsonb_build_object('channel_id', id, 'after_failures', 2, 'notify_recovery', true))
-    FROM notification_channels
-   WHERE org_id='${ORG}'::uuid AND name IN ('Fixture Slack','Fixture Telegram')
-), '[]'::jsonb) WHERE id='${T_AUTH}'::uuid;
+UPDATE targets SET
+  alerts = COALESCE((
+    SELECT jsonb_agg(jsonb_build_object('channel_id', id))
+      FROM notification_channels
+     WHERE org_id='${ORG}'::uuid AND name IN ('Fixture Slack','Fixture Telegram')
+  ), '[]'::jsonb),
+  alert_confirmations = 2, notify_recovery = true
+WHERE id='${T_AUTH}'::uuid;
 SQL
 
 echo "==> Postgres: 1 adversarial-title incident (XSS / day-popover JSON-escape smoke)"
@@ -738,10 +772,11 @@ SELECT toUUID('${ORG}'),toUUID('${T_SEARCH}'),'default',
 FROM numbers(30);
 SQL
 
-echo "==> ClickHouse: eu-west region history for fix-api + fix-web (region selector)"
-# fix-api + fix-web also report from eu-west with a slower, slightly worse
-# shape, so switching the dashboard region selector shows visibly different
-# metrics than the default region.
+echo "==> ClickHouse: per-region history for fix-api (4 regions) + fix-web (eu-west)"
+# Each region reports a visibly different latency shape so the region selector,
+# per-region breakdown table, and overlay chart all show distinct lines:
+# default fastest, us-east fast, eu-west slower (+history down/error spikes),
+# ap-south slowest. fix-web reports from eu-west too.
 ch -mn <<SQL
 INSERT INTO monitor.check_results (org_id,target_id,region,timestamp,status,duration_ms,response_code)
 SELECT toUUID('${ORG}'),toUUID('${T_API}'),'eu-west',
@@ -773,6 +808,32 @@ SELECT toUUID('${ORG}'),toUUID('${T_API}'),'eu-west',
        now() - toIntervalSecond(number*4),
        'up', 165 + (number % 40), 200
 FROM numbers(30);
+
+-- us-east: fast region, clean. Recent window + history.
+INSERT INTO monitor.check_results (org_id,target_id,region,timestamp,status,duration_ms,response_code)
+SELECT toUUID('${ORG}'),toUUID('${T_API}'),'us-east',
+       now() - toIntervalSecond(number*4),
+       'up', 90 + (number % 30), 200
+FROM numbers(30);
+
+INSERT INTO monitor.check_results (org_id,target_id,region,timestamp,status,duration_ms,response_code)
+SELECT toUUID('${ORG}'),toUUID('${T_API}'),'us-east',
+       now() - toIntervalHour(6) - toIntervalDay(number) - toIntervalMinute(number % 31),
+       'up', 95 + (number % 40), 200
+FROM numbers(90);
+
+-- ap-south: slowest region, clean. Recent window + history.
+INSERT INTO monitor.check_results (org_id,target_id,region,timestamp,status,duration_ms,response_code)
+SELECT toUUID('${ORG}'),toUUID('${T_API}'),'ap-south',
+       now() - toIntervalSecond(number*4),
+       'up', 220 + (number % 60), 200
+FROM numbers(30);
+
+INSERT INTO monitor.check_results (org_id,target_id,region,timestamp,status,duration_ms,response_code)
+SELECT toUUID('${ORG}'),toUUID('${T_API}'),'ap-south',
+       now() - toIntervalHour(6) - toIntervalDay(number) - toIntervalMinute(number % 31),
+       'up', 230 + (number % 50), 200
+FROM numbers(90);
 
 INSERT INTO monitor.check_results (org_id,target_id,region,timestamp,status,duration_ms,response_code)
 SELECT toUUID('${ORG}'),toUUID('${T_WEB}'),'eu-west',
@@ -818,6 +879,27 @@ SELECT 'notification_channels', count(*)::text FROM notification_channels WHERE 
 UNION ALL
 SELECT 'targets w/ alerts',    count(*)::text FROM targets
   WHERE org_id='${ORG}' AND tags @> ARRAY['seed-fixtures'] AND jsonb_array_length(alerts) > 0;
+SQL
+
+# ── Regions, assignments, agents (multi-region smoke surface) ─────────────────
+echo
+echo "## Regions & agents"
+pg -tA <<SQL | column -t -s '|'
+SELECT 'regions'              AS what, count(*)::text AS n FROM regions
+UNION ALL
+SELECT 'agents',              count(*)::text FROM agents
+UNION ALL
+SELECT '  └ stale (>90s)',    count(*)::text FROM agents
+  WHERE enabled AND coalesce(last_seen_at, created_at) < now() - interval '90 seconds'
+UNION ALL
+SELECT 'multi-region targets', count(*)::text FROM (
+  SELECT tr.target_id FROM target_regions tr JOIN targets t ON t.id = tr.target_id
+   WHERE t.org_id='${ORG}' AND t.tags @> ARRAY['seed-fixtures']
+   GROUP BY tr.target_id HAVING count(*) > 1) m
+UNION ALL
+SELECT 'multi-region-policy targets', count(*)::text FROM targets
+  WHERE org_id='${ORG}' AND tags @> ARRAY['seed-fixtures']
+    AND region_policy <> '"majority"'::jsonb;
 SQL
 
 # ── ClickHouse last-5-min counters + expected/actual state matrix ────────────

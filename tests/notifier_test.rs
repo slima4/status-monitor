@@ -10,10 +10,12 @@ use axum::routing::post;
 use chrono::Utc;
 use parking_lot::Mutex;
 use serde_json::Value;
-use uptimepage::domain::{ChannelConfig, CheckStatus};
+use uptimepage::domain::{
+    ChannelConfig, IncidentSeverity, IncidentUrgency, NotificationReason,
+};
 use uptimepage::http_outbound::build_outbound_client;
 use uptimepage::notifier::build_notifier;
-use uptimepage::notifier::event::{AlertEvent, AlertKind};
+use uptimepage::notifier::event::IncidentNotice;
 use uuid::Uuid;
 
 #[derive(Default, Clone)]
@@ -39,15 +41,20 @@ async fn capture(
     StatusCode::OK
 }
 
-fn make_event() -> AlertEvent {
-    AlertEvent {
-        target_id: Uuid::now_v7(),
-        target_name: "demo".into(),
-        kind: AlertKind::Down,
-        consecutive_failures: 3,
-        last_status: CheckStatus::Down,
-        last_error: Some("500".into()),
-        timestamp: Utc::now(),
+fn make_notice() -> IncidentNotice {
+    IncidentNotice {
+        incident_id: Uuid::now_v7(),
+        reason: NotificationReason::Opened,
+        monitor_name: Some("demo".into()),
+        title: None,
+        severity: IncidentSeverity::Major,
+        urgency: IncidentUrgency::High,
+        started_at: Utc::now(),
+        ended_at: None,
+        error_sample: Some("500".into()),
+        regions_down: vec![],
+        regions_up: vec![],
+        url: None,
     }
 }
 
@@ -62,7 +69,7 @@ async fn slack_channel_posts_text_payload() {
         &build_outbound_client(uptimepage::security::SsrfGuard::relaxed_for_tests()),
     )
     .expect("notifier");
-    notifier.notify(&make_event()).await.expect("notify");
+    notifier.notify_incident(&make_notice()).await.expect("notify");
 
     let captured = store.lock().clone();
     assert_eq!(captured.len(), 1);
@@ -71,12 +78,54 @@ async fn slack_channel_posts_text_payload() {
         .get("text")
         .and_then(Value::as_str)
         .unwrap();
-    assert!(text.contains("DOWN"));
+    assert!(text.contains("OPEN"));
     assert!(text.contains("demo"));
 }
 
 #[tokio::test]
-async fn webhook_channel_posts_event_payload_with_custom_header() {
+async fn slack_multi_region_includes_breakdown() {
+    let (addr, store) = spawn_capture_server().await;
+    let cfg = ChannelConfig::Slack {
+        webhook_url: format!("http://{addr}/hook"),
+    };
+    let notifier = build_notifier(
+        &cfg,
+        &build_outbound_client(uptimepage::security::SsrfGuard::relaxed_for_tests()),
+    )
+    .expect("notifier");
+    let mut notice = make_notice();
+    notice.regions_down = vec!["eu-west".into(), "us-east".into()];
+    notice.regions_up = vec!["ap-south".into()];
+    notifier.notify_incident(&notice).await.expect("notify");
+
+    let captured = store.lock().clone();
+    let text = captured[0].body["text"].as_str().unwrap();
+    assert!(text.contains("eu-west"), "breakdown missing: {text}");
+    assert!(text.contains("ap-south"), "breakdown missing: {text}");
+}
+
+#[tokio::test]
+async fn slack_single_region_omits_breakdown() {
+    let (addr, store) = spawn_capture_server().await;
+    let cfg = ChannelConfig::Slack {
+        webhook_url: format!("http://{addr}/hook"),
+    };
+    let notifier = build_notifier(
+        &cfg,
+        &build_outbound_client(uptimepage::security::SsrfGuard::relaxed_for_tests()),
+    )
+    .expect("notifier");
+    let mut notice = make_notice();
+    notice.regions_down = vec!["eu-west".into()];
+    notifier.notify_incident(&notice).await.expect("notify");
+
+    let captured = store.lock().clone();
+    let text = captured[0].body["text"].as_str().unwrap();
+    assert!(!text.contains("down:"), "single region leaked breakdown: {text}");
+}
+
+#[tokio::test]
+async fn webhook_channel_posts_incident_payload_with_custom_header() {
     let (addr, store) = spawn_capture_server().await;
     let cfg = ChannelConfig::Webhook {
         url: format!("http://{addr}/hook"),
@@ -87,15 +136,17 @@ async fn webhook_channel_posts_event_payload_with_custom_header() {
         &build_outbound_client(uptimepage::security::SsrfGuard::relaxed_for_tests()),
     )
     .expect("notifier");
-    notifier.notify(&make_event()).await.expect("notify");
+    let mut notice = make_notice();
+    notice.regions_down = vec!["eu-west".into()];
+    notice.regions_up = vec!["us-east".into()];
+    notifier.notify_incident(&notice).await.expect("notify");
 
     let captured = store.lock().clone();
     assert_eq!(captured.len(), 1);
     let body = &captured[0].body;
-    // The event no longer carries a `channel` discriminator.
-    assert!(body.get("channel").is_none());
-    assert_eq!(body["kind"], "down");
-    assert_eq!(body["target_name"], "demo");
+    assert_eq!(body["monitor_name"], "demo");
+    assert_eq!(body["regions_down"][0], "eu-west");
+    assert_eq!(body["regions_up"][0], "us-east");
 }
 
 #[tokio::test]

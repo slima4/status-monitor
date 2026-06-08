@@ -511,7 +511,9 @@ impl InMemoryTargetStore {
             enabled: new.enabled,
             tags: new.tags,
             alerts: new.alerts,
-            region_policy: new.region_policy,
+            alert_confirmations: new.alert_confirmations.max(1),
+            notify_recovery: new.notify_recovery,
+            region_policy: new.region_policy.unwrap_or_default(),
             group_name: new.group_name,
             owner_user_id: new.owner_user_id,
             write_source: source,
@@ -655,6 +657,15 @@ impl TargetStore for InMemoryTargetStore {
         }
         if let Some(alerts) = update.alerts {
             t.alerts = alerts;
+        }
+        if let Some(n) = update.alert_confirmations {
+            t.alert_confirmations = n.max(1);
+        }
+        if let Some(r) = update.notify_recovery {
+            t.notify_recovery = r;
+        }
+        if let Some(p) = update.region_policy {
+            t.region_policy = p;
         }
         if let Some(v) = update.group_name {
             t.group_name = v;
@@ -851,10 +862,7 @@ impl TargetStore for InMemoryTargetStore {
 #[async_trait]
 impl crate::storage::admin::EnabledTargetSource for InMemoryTargetStore {
     /// Single-org test fixture: org is not modelled, so every enabled target
-    /// is tagged with the nil-UUID org. The alert fan-out is only ever wired
-    /// in production (`ResultFanout::new`); test routers use
-    /// `ResultFanout::storage_only`, so this sentinel never reaches a
-    /// channel resolution.
+    /// is tagged with the nil-UUID org.
     async fn list_all_enabled_targets(&self) -> Result<Vec<(OrgId, Target)>> {
         let org = OrgId(uuid::Uuid::nil());
         Ok(self

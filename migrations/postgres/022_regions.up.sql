@@ -42,10 +42,19 @@ CREATE INDEX idx_agents_token_prefix ON agents(token_prefix);
 -- Incident region: NULL = whole-target incident, a value = one region's.
 -- Nullable so detection can stay combined now and go per-region later.
 ALTER TABLE incidents ADD COLUMN region TEXT;
+-- Regions down / still up when the incident opened (drives the alert breakdown,
+-- snapshotted so a later assignment change can't rewrite history).
+ALTER TABLE incidents ADD COLUMN regions_down TEXT[];
+ALTER TABLE incidents ADD COLUMN regions_up TEXT[];
 
 -- Per-plan region cap (each region multiplies a target's check volume).
 ALTER TABLE plans ADD COLUMN max_regions INTEGER NOT NULL DEFAULT 1;
 UPDATE plans SET max_regions = 6 WHERE id = 'pro';
 
--- Per-monitor multi-region incident policy: "any_down" | {"quorum": n}.
-ALTER TABLE targets ADD COLUMN region_policy JSONB NOT NULL DEFAULT '"any_down"'::jsonb;
+-- Per-monitor detection threshold: "any" | "majority" | "all" | {"count": n}.
+ALTER TABLE targets ADD COLUMN region_policy JSONB NOT NULL DEFAULT '"majority"'::jsonb;
+
+-- Per-monitor alerting: consecutive failures before alerting, and whether a
+-- recovery is announced. Channels bound to a monitor are pure delivery targets.
+ALTER TABLE targets ADD COLUMN alert_confirmations INTEGER NOT NULL DEFAULT 2;
+ALTER TABLE targets ADD COLUMN notify_recovery BOOLEAN NOT NULL DEFAULT true;

@@ -495,7 +495,7 @@ async fn rejects_alerts_binding_to_unknown_channel() {
     // which needs the channel CRUD API to seed a real channel, is covered
     // in the Phase 3 notification-channel suite.)
     let payload = target_payload_with_alerts(json!([
-        { "channel_id": "00000000-0000-0000-0000-0000000000aa", "after_failures": 3 }
+        { "channel_id": "00000000-0000-0000-0000-0000000000aa" }
     ]));
     assert_eq!(post_target(payload).await, StatusCode::BAD_REQUEST);
 }
@@ -535,12 +535,10 @@ async fn create_target_without_alerts_defaults_empty() {
 }
 
 #[tokio::test]
-async fn rejects_alerts_with_zero_after_failures() {
-    // Structural check runs before channel resolution, so a bad
-    // after_failures is rejected regardless of channel existence.
-    let payload = target_payload_with_alerts(json!([
-        { "channel_id": "00000000-0000-0000-0000-0000000000aa", "after_failures": 0 }
-    ]));
+async fn rejects_zero_alert_confirmations() {
+    // Alerting after zero failures is meaningless; rejected structurally.
+    let mut payload = target_payload_with_alerts(json!([]));
+    payload["alert_confirmations"] = json!(0);
     assert_eq!(post_target(payload).await, StatusCode::BAD_REQUEST);
 }
 

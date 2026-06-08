@@ -6,7 +6,7 @@ use crate::domain::NotificationReason;
 use crate::error::{AppError, Result};
 use crate::http_outbound::{OutboundHttpClient, post_json};
 use crate::notifier::Notifier;
-use crate::notifier::event::{AlertEvent, AlertKind, IncidentNotice};
+use crate::notifier::event::IncidentNotice;
 
 /// Telegram Bot API sender. The bot token is embedded in the fixed
 /// `api.telegram.org` endpoint path; `chat_id` is sent in the body.
@@ -42,23 +42,6 @@ impl TelegramNotifier {
         })
     }
 
-    fn render(event: &AlertEvent) -> String {
-        match event.kind {
-            AlertKind::Down => format!(
-                "🚨 {name} is DOWN ({failures} consecutive failures, status={status}{err})",
-                name = event.target_name,
-                failures = event.consecutive_failures,
-                status = event.last_status.as_str(),
-                err = event
-                    .last_error
-                    .as_deref()
-                    .map(|e| format!(": {e}"))
-                    .unwrap_or_default()
-            ),
-            AlertKind::Recovered => format!("✅ {name} has RECOVERED", name = event.target_name),
-        }
-    }
-
     fn render_incident(n: &IncidentNotice) -> String {
         let link = n
             .url
@@ -67,7 +50,7 @@ impl TelegramNotifier {
             .unwrap_or_default();
         match n.reason {
             NotificationReason::Opened | NotificationReason::Escalated => format!(
-                "{label} — {sev} incident OPEN{err}{link}",
+                "{label} — {sev} incident OPEN{err}{regions}{link}",
                 label = n.label(),
                 sev = n.severity.as_db_str(),
                 err = n
@@ -75,6 +58,7 @@ impl TelegramNotifier {
                     .as_deref()
                     .map(|e| format!(": {e}"))
                     .unwrap_or_default(),
+                regions = region_line(n),
             ),
             NotificationReason::Reopened => {
                 format!("{label} — incident REOPENED{link}", label = n.label())
@@ -90,21 +74,15 @@ impl TelegramNotifier {
     }
 }
 
+/// Per-region breakdown line (plain text); empty for single-region.
+fn region_line(n: &IncidentNotice) -> String {
+    n.region_summary(|r| r.to_string(), " · ")
+        .map(|s| format!("\n{s}"))
+        .unwrap_or_default()
+}
+
 #[async_trait]
 impl Notifier for TelegramNotifier {
-    async fn notify(&self, event: &AlertEvent) -> Result<()> {
-        let text = Self::render(event);
-        post_json(
-            &self.client,
-            &self.send_url,
-            &SendMessage {
-                chat_id: &self.chat_id,
-                text: &text,
-            },
-        )
-        .await
-    }
-
     async fn notify_incident(&self, notice: &IncidentNotice) -> Result<()> {
         let text = Self::render_incident(notice);
         post_json(

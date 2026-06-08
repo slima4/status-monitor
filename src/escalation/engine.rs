@@ -361,12 +361,11 @@ impl Worker {
         incident: &OpsIncident,
         target: &Target,
     ) -> Result<()> {
+        if !target.notify_recovery {
+            return Ok(());
+        }
         let rows = self.ops.notifications_for(org, incident.id).await?;
-        let opted_out = recovery_opted_out(target);
-        let channels: Vec<Uuid> = resolvable_channels(&rows)
-            .into_iter()
-            .filter(|cid| !opted_out.contains(cid))
-            .collect();
+        let channels: Vec<Uuid> = resolvable_channels(&rows);
         if channels.is_empty() {
             return Ok(());
         }
@@ -708,11 +707,8 @@ impl Worker {
         let Some(channel) = self.channels.get(org, channel_id).await? else {
             return Ok(None);
         };
-        Ok(Some((
-            self.notice(&incident, &target, reason),
-            channel.config.clone(),
-            incident.state,
-        )))
+        let notice = self.notice(&incident, &target, reason);
+        Ok(Some((notice, channel.config.clone(), incident.state)))
     }
 
     async fn deliver(
@@ -751,6 +747,9 @@ impl Worker {
             started_at: inc.started_at,
             ended_at: inc.ended_at,
             error_sample: inc.error_sample.clone(),
+            // Open-time snapshot off the incident — no per-page region query.
+            regions_down: inc.regions_down.clone(),
+            regions_up: inc.regions_up.clone(),
             url: self.deep_link(inc.id),
         }
     }
@@ -902,16 +901,6 @@ fn binding_channels(target: &Target) -> Vec<Uuid> {
     target.alerts.iter().map(|b| b.channel_id).collect()
 }
 
-/// Channels whose binding opted out of recovery notices.
-fn recovery_opted_out(target: &Target) -> Vec<Uuid> {
-    target
-        .alerts
-        .iter()
-        .filter(|b| !b.notify_recovery)
-        .map(|b| b.channel_id)
-        .collect()
-}
-
 /// Is an outage already being paged? True when the most recent open-side page
 /// (opened/reopened/escalated) is newer than the most recent resolution page —
 /// i.e. we are inside an unresolved paging episode. Used to absorb duplicate
@@ -1058,11 +1047,9 @@ mod tests {
             interval: StdDuration::from_secs(30),
             enabled: true,
             tags: vec![],
-            alerts: TargetAlerts(vec![AlertBinding {
-                channel_id,
-                after_failures: 1,
-                notify_recovery,
-            }]),
+            alerts: TargetAlerts(vec![AlertBinding { channel_id }]),
+            alert_confirmations: 1,
+            notify_recovery,
             region_policy: Default::default(),
             group_name: None,
             owner_user_id: None,
@@ -1102,6 +1089,8 @@ mod tests {
             next_escalation_at: None,
             check_count: 2,
             error_sample: Some("boom".into()),
+            regions_down: Vec::new(),
+            regions_up: Vec::new(),
             created_at: now,
             updated_at: now,
         });
@@ -1493,6 +1482,8 @@ mod tests {
             next_escalation_at: None,
             check_count: 2,
             error_sample: None,
+            regions_down: Vec::new(),
+            regions_up: Vec::new(),
             created_at: now - chrono::Duration::seconds(120),
             updated_at: now - chrono::Duration::seconds(120),
         });

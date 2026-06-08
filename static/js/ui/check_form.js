@@ -171,6 +171,17 @@
             }
             return;
         }
+        // Detection threshold rides the payload when the region fieldset is present.
+        // Symbolic values (any/majority/all) go as-is; a number becomes {count: n}.
+        const regionRoot = document.querySelector("[data-monitor-regions]");
+        if (regionRoot) {
+            const sel = regionRoot.querySelector("[data-region-policy]");
+            if (sel) {
+                const n = parseInt(sel.value, 10);
+                built.payload.region_policy = Number.isInteger(n) ? { count: n } : sel.value;
+            }
+        }
+
         // SubmitEvent.submitter is the actual clicked button (null for
         // form.requestSubmit() / Cmd+Enter, which we treat as primary save).
         const submitter = evt.submitter;
@@ -197,6 +208,21 @@
             if (!id && form.dataset.mode === "edit") {
                 const parts = form.dataset.action.split("/");
                 id = parts[parts.length - 1];
+            }
+            // Apply the chosen regions (best-effort; on create the server
+            // already seeded default coverage if this fails).
+            if (regionRoot && id) {
+                const regions = [...regionRoot.querySelectorAll("[data-region-checkbox]:checked")]
+                    .map((c) => c.value);
+                if (regions.length) {
+                    try {
+                        await fetch(`/api/v1/targets/${id}/regions`, {
+                            method: "PUT",
+                            headers: jsonHeaders(),
+                            body: JSON.stringify({ regions }),
+                        });
+                    } catch { /* server default coverage stands */ }
+                }
             }
             if (saveAndTest && id) {
                 // Best-effort: scheduler will run a check anyway on its own.
@@ -337,19 +363,15 @@
         for (const row of form.querySelectorAll("[data-channel-row]")) {
             const cb = row.querySelector("[data-channel-select]");
             if (!cb || !cb.checked) continue;
-            const afterEl = row.querySelector("[data-after-failures]");
-            const recoveryEl = row.querySelector("[data-notify-recovery]");
-            if (!afterEl || !recoveryEl) continue;
-            const after = parseInt(afterEl.value, 10);
-            if (!Number.isInteger(after) || after < 1) {
-                return { error: `"After N failures" for channel must be a whole number ≥ 1.` };
-            }
-            alerts.push({
-                channel_id: cb.value,
-                after_failures: after,
-                notify_recovery: recoveryEl.checked,
-            });
+            alerts.push({ channel_id: cb.value });
         }
+
+        const confEl = form.querySelector("[data-alert-confirmations]");
+        const confirmations = confEl ? parseInt(confEl.value, 10) : 2;
+        if (!Number.isInteger(confirmations) || confirmations < 1) {
+            return { error: "Confirmations before alerting must be a whole number ≥ 1." };
+        }
+        const recoveryEl = form.querySelector("[data-notify-recovery]");
 
         const planMin = Number(form.dataset.minInterval) || 60;
         const kind = data.get("check_type") || "http";
@@ -368,6 +390,8 @@
             tags,
             check,
             alerts,
+            alert_confirmations: confirmations,
+            notify_recovery: recoveryEl ? recoveryEl.checked : true,
         };
         payload.group_name = groupRaw === "" ? null : groupRaw;
         payload.owner_user_id = ownerRaw === "" ? null : ownerRaw;

@@ -9,23 +9,15 @@ use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 pub struct AlertBinding {
-    /// Id of a channel in the caller's org (`notification_channels.id`).
+    /// Id of a channel in the caller's org (`notification_channels.id`). A
+    /// binding is a pure delivery target; the firing policy (confirmations,
+    /// recovery) lives on the monitor.
     #[schema(value_type = String, format = "uuid")]
     pub channel_id: Uuid,
-    /// Consecutive non-up checks before a Down alert fires. Must be >= 1.
-    #[schema(minimum = 1)]
-    pub after_failures: u32,
-    #[serde(default = "default_notify_recovery")]
-    pub notify_recovery: bool,
-}
-
-fn default_notify_recovery() -> bool {
-    true
 }
 
 /// A target's alert bindings. Serialised transparently as a JSON array so the
-/// `targets.alerts` column is a list of `{channel_id, after_failures,
-/// notify_recovery}` objects.
+/// `targets.alerts` column is a list of `{channel_id}` objects.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(transparent)]
 #[schema(value_type = Vec<AlertBinding>)]
@@ -46,25 +38,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn deserialize_binding_list_with_default_recovery() {
-        let json = r#"[{"channel_id":"00000000-0000-0000-0000-000000000001","after_failures":3}]"#;
+    fn deserialize_bare_binding() {
+        let json = r#"[{"channel_id":"00000000-0000-0000-0000-000000000001"}]"#;
         let alerts: TargetAlerts = serde_json::from_str(json).unwrap();
         assert_eq!(alerts.iter().count(), 1);
-        let b = alerts.0.first().unwrap();
-        assert_eq!(b.after_failures, 3);
-        assert!(b.notify_recovery);
     }
 
     #[test]
-    fn deserialize_multiple_bindings_and_explicit_recovery() {
+    fn deserialize_multiple_bindings() {
         let json = r#"[
-            {"channel_id":"00000000-0000-0000-0000-000000000001","after_failures":2,"notify_recovery":false},
-            {"channel_id":"00000000-0000-0000-0000-000000000002","after_failures":5}
+            {"channel_id":"00000000-0000-0000-0000-000000000001"},
+            {"channel_id":"00000000-0000-0000-0000-000000000002"}
         ]"#;
         let alerts: TargetAlerts = serde_json::from_str(json).unwrap();
         assert_eq!(alerts.iter().count(), 2);
-        assert!(!alerts.0[0].notify_recovery);
-        assert!(alerts.0[1].notify_recovery);
     }
 
     #[test]

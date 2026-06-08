@@ -1091,6 +1091,8 @@ mod tests {
             next_escalation_at: None,
             check_count: 2,
             error_sample: None,
+            regions_down: Vec::new(),
+            regions_up: Vec::new(),
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }

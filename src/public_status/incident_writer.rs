@@ -30,9 +30,7 @@ use tokio::time::{MissedTickBehavior, interval};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use crate::domain::{
-    CheckResult, CheckStatus, NotificationReason, OrgId, RegionIncidentPolicy, Target,
-};
+use crate::domain::{CheckResult, CheckStatus, NotificationReason, OrgId, Target};
 use crate::error::Result;
 use crate::escalation::IncidentSignal;
 use crate::storage::ResultsStore;
@@ -74,6 +72,9 @@ pub struct NewOpenIncident {
     pub check_count: u32,
     pub error_sample: Option<String>,
     pub region: Option<String>,
+    /// Regions down / still up at open time (empty for a single-region monitor).
+    pub regions_down: Vec<String>,
+    pub regions_up: Vec<String>,
 }
 
 
@@ -103,7 +104,7 @@ pub struct IncidentWriterConfig {
 impl Default for IncidentWriterConfig {
     fn default() -> Self {
         Self {
-            tick_interval: Duration::from_secs(30),
+            tick_interval: Duration::from_secs(15),
             lookback: ChronoDuration::minutes(10),
             flap_threshold: 2,
             max_results_per_tick: 1_000,
@@ -265,14 +266,9 @@ impl IncidentWriter {
             results.sort_by_key(|r| r.timestamp);
         }
 
-        // PerRegion isn't consumer-safe yet (downstream assumes one incident per
-        // target), so it falls back to AnyDown until those surfaces handle N.
-        let policy = match target.region_policy {
-            RegionIncidentPolicy::PerRegion => RegionIncidentPolicy::AnyDown,
-            p => p,
-        };
-        let actions =
-            decide_multi(target.id, &open, &by_region, self.cfg.flap_threshold, policy);
+        let confirmations = target.alert_confirmations.max(1);
+        let quorum = target.region_policy.required(by_region.len());
+        let actions = decide_multi(target.id, &open, &by_region, confirmations, quorum);
         for action in actions {
             match action {
                 Action::None => {}
@@ -314,6 +310,8 @@ impl PartialEq for NewOpenIncident {
             && self.check_count == other.check_count
             && self.error_sample == other.error_sample
             && self.region == other.region
+            && self.regions_down == other.regions_down
+            && self.regions_up == other.regions_up
     }
 }
 
@@ -330,29 +328,26 @@ pub fn decide(open: Option<&OpenIncident>, results: &[CheckResult], flap_thresho
     };
     let opens: Vec<OpenIncident> = open.cloned().into_iter().collect();
     let by_region = [(String::new(), results.to_vec())];
-    decide_multi(
-        target_id,
-        &opens,
-        &by_region,
-        flap_threshold,
-        RegionIncidentPolicy::AnyDown,
-    )
-    .into_iter()
-    .next()
-    .unwrap_or(Action::None)
+    decide_multi(target_id, &opens, &by_region, flap_threshold, 1)
+        .into_iter()
+        .next()
+        .unwrap_or(Action::None)
 }
 
 /// Pure region-aware decision. Each `(region, results)` group is one region's
 /// checks ascending by time; `opens` is every open incident for the target.
-/// Returns the writes to apply; an empty vec means nothing to do.
+/// `confirmations` is the per-region consecutive-bad run needed; `quorum` is how
+/// many regions must agree before the combined incident opens (clamped to the
+/// live region count so it can never be unreachable). Returns the writes to
+/// apply; an empty vec means nothing to do.
 pub fn decide_multi(
     target_id: Uuid,
     opens: &[OpenIncident],
     by_region: &[(String, Vec<CheckResult>)],
-    flap_threshold: u32,
-    policy: RegionIncidentPolicy,
+    confirmations: u32,
+    quorum: usize,
 ) -> Vec<Action> {
-    let threshold = (flap_threshold as usize).max(1);
+    let threshold = (confirmations as usize).max(1);
 
     struct Verdict<'a> {
         region: &'a str,
@@ -368,89 +363,62 @@ pub fn decide_multi(
         })
         .collect();
 
-    match policy {
-        RegionIncidentPolicy::PerRegion => {
-            let mut actions = Vec::new();
-            for v in &verdicts {
-                let open = opens.iter().find(|i| i.region.as_deref() == Some(v.region));
-                match open {
-                    None if v.bad.len() >= threshold => {
-                        actions.push(Action::Open(NewOpenIncident {
-                            target_id,
-                            started_at: v.bad[0].timestamp,
-                            status_at_start: v.bad[0].status,
-                            check_count: v.bad.len() as u32,
-                            error_sample: v.bad.iter().find_map(|r| r.error.clone()),
-                            region: Some(v.region.to_string()),
-                        }));
-                    }
-                    Some(inc)
-                        if v.good.len() >= threshold && v.good[0].timestamp > inc.started_at =>
-                    {
-                        actions.push(Action::Close {
-                            incident_id: inc.id,
-                            ended_at: v.good[0].timestamp,
-                        });
-                    }
-                    _ => {}
-                }
-            }
-            actions
-        }
-        RegionIncidentPolicy::AnyDown | RegionIncidentPolicy::Quorum(_) => {
-            // Clamp to the regions that actually reported: a quorum larger than
-            // the live region count still fires (never silently "never opens").
-            let quorum = match policy {
-                RegionIncidentPolicy::Quorum(n) => (n as usize).clamp(1, verdicts.len().max(1)),
-                _ => 1,
-            };
-            // Regions sustained-bad, earliest onset first.
-            let mut bad: Vec<&Verdict> = verdicts.iter().filter(|v| v.bad.len() >= threshold).collect();
-            bad.sort_by_key(|v| v.bad[0].timestamp);
-            let combined = opens.iter().find(|i| i.region.is_none());
+    let quorum = quorum.clamp(1, verdicts.len().max(1));
+    let mut bad: Vec<&Verdict> = verdicts.iter().filter(|v| v.bad.len() >= threshold).collect();
+    bad.sort_by_key(|v| v.bad[0].timestamp);
+    let combined = opens.iter().find(|i| i.region.is_none());
 
-            match combined {
-                None => {
-                    if bad.len() >= quorum {
-                        // region = None: one whole-target incident, so its key
-                        // must be region-independent or the next tick re-opens it.
-                        let trigger = bad[quorum - 1];
-                        let origin = bad[0];
-                        vec![Action::Open(NewOpenIncident {
-                            target_id,
-                            started_at: trigger.bad[0].timestamp,
-                            status_at_start: origin.bad[0].status,
-                            check_count: origin.bad.len() as u32,
-                            error_sample: bad
-                                .iter()
-                                .find_map(|v| v.bad.iter().find_map(|r| r.error.clone())),
-                            region: None,
-                        })]
-                    } else {
-                        vec![]
-                    }
-                }
-                Some(inc) => {
-                    // Close once below quorum, with a sustained-good region as
-                    // recovery evidence; ended_at = latest such recovery.
-                    if bad.len() < quorum {
-                        let ended = verdicts
-                            .iter()
-                            .filter(|v| v.good.len() >= threshold)
-                            .map(|v| v.good[0].timestamp)
-                            .max();
-                        if let Some(ended) = ended
-                            && ended > inc.started_at
-                        {
-                            return vec![Action::Close {
-                                incident_id: inc.id,
-                                ended_at: ended,
-                            }];
-                        }
-                    }
-                    vec![]
+    match combined {
+        None => {
+            if bad.len() >= quorum {
+                // region = None: one whole-target incident, so its key must be
+                // region-independent or the next tick re-opens it.
+                let trigger = bad[quorum - 1];
+                let origin = bad[0];
+                vec![Action::Open(NewOpenIncident {
+                    target_id,
+                    started_at: trigger.bad[0].timestamp,
+                    status_at_start: origin.bad[0].status,
+                    check_count: origin.bad.len() as u32,
+                    error_sample: bad
+                        .iter()
+                        .find_map(|v| v.bad.iter().find_map(|r| r.error.clone())),
+                    region: None,
+                    regions_down: bad
+                        .iter()
+                        .map(|v| v.region)
+                        .filter(|r| !r.is_empty())
+                        .map(str::to_string)
+                        .collect(),
+                    regions_up: verdicts
+                        .iter()
+                        .filter(|v| v.bad.len() < threshold && !v.region.is_empty())
+                        .map(|v| v.region.to_string())
+                        .collect(),
+                })]
+            } else {
+                vec![]
+            }
+        }
+        Some(inc) => {
+            // Close once below quorum, with a sustained-good region as recovery
+            // evidence; ended_at = latest such recovery.
+            if bad.len() < quorum {
+                let ended = verdicts
+                    .iter()
+                    .filter(|v| v.good.len() >= threshold)
+                    .map(|v| v.good[0].timestamp)
+                    .max();
+                if let Some(ended) = ended
+                    && ended > inc.started_at
+                {
+                    return vec![Action::Close {
+                        incident_id: inc.id,
+                        ended_at: ended,
+                    }];
                 }
             }
+            vec![]
         }
     }
 }
@@ -582,8 +550,8 @@ impl IncidentStore for PgIncidentStore {
         // only while its monitor is a component of an enabled status page.
         // Monitors that aren't on any page open internal-only incidents.
         let row: (Uuid,) = sqlx::query_as(
-            r#"INSERT INTO incidents (org_id, target_id, started_at, status_at_start, check_count, error_sample, region, visibility)
-               SELECT $6, $1, $2, $3, $4, $5, $7,
+            r#"INSERT INTO incidents (org_id, target_id, started_at, status_at_start, check_count, error_sample, region, regions_down, regions_up, visibility)
+               SELECT $6, $1, $2, $3, $4, $5, $7, $8, $9,
                       CASE WHEN EXISTS (
                           SELECT 1 FROM status_page_components spc
                           JOIN status_pages sp ON sp.id = spc.status_page_id
@@ -603,6 +571,8 @@ impl IncidentStore for PgIncidentStore {
         .bind(new.error_sample)
         .bind(org.0)
         .bind(new.region)
+        .bind(&new.regions_down)
+        .bind(&new.regions_up)
         .fetch_one(&self.pool)
         .await
         .context("incident insert_open")?;
@@ -674,6 +644,8 @@ pub struct MemIncident {
     pub check_count: u32,
     pub error_sample: Option<String>,
     pub region: Option<String>,
+    pub regions_down: Vec<String>,
+    pub regions_up: Vec<String>,
 }
 
 impl InMemoryIncidentStore {
@@ -767,6 +739,8 @@ impl IncidentStore for InMemoryIncidentStore {
             check_count: new.check_count,
             error_sample: new.error_sample,
             region: new.region,
+            regions_down: new.regions_down,
+            regions_up: new.regions_up,
         });
         g.inserts += 1;
         Ok(id)
@@ -1094,7 +1068,7 @@ mod tests {
                 ],
             ),
         ];
-        match decide_multi(t, &[], &by_region, 2, RegionIncidentPolicy::AnyDown).as_slice() {
+        match decide_multi(t, &[], &by_region, 2, 1).as_slice() {
             [Action::Open(n)] => {
                 assert_eq!(n.region, None, "combined incident is region-agnostic");
                 assert_eq!(n.started_at, ts(b, 0));
@@ -1132,7 +1106,7 @@ mod tests {
             ),
         ];
         assert!(
-            decide_multi(t, &[open], &by_region, 2, RegionIncidentPolicy::AnyDown).is_empty(),
+            decide_multi(t, &[open], &by_region, 2, 1).is_empty(),
             "must not close while a region is still down"
         );
     }
@@ -1164,7 +1138,7 @@ mod tests {
                 ],
             ),
         ];
-        match decide_multi(t, std::slice::from_ref(&open), &by_region, 2, RegionIncidentPolicy::AnyDown).as_slice()
+        match decide_multi(t, std::slice::from_ref(&open), &by_region, 2, 1).as_slice()
         {
             [Action::Close {
                 incident_id,
@@ -1199,7 +1173,7 @@ mod tests {
             ),
         ];
         assert!(
-            decide_multi(t, &[], &one_bad, 2, RegionIncidentPolicy::Quorum(2)).is_empty(),
+            decide_multi(t, &[], &one_bad, 2, 2).is_empty(),
             "one region down is below quorum"
         );
 
@@ -1219,7 +1193,7 @@ mod tests {
                 ],
             ),
         ];
-        match decide_multi(t, &[], &two_bad, 2, RegionIncidentPolicy::Quorum(2)).as_slice() {
+        match decide_multi(t, &[], &two_bad, 2, 2).as_slice() {
             [Action::Open(n)] => {
                 assert_eq!(n.region, None);
                 // Opens when the quorum-th (second) region went bad.
@@ -1258,7 +1232,7 @@ mod tests {
                 ],
             ),
         ];
-        match decide_multi(t, std::slice::from_ref(&open), &by_region, 2, RegionIncidentPolicy::Quorum(2))
+        match decide_multi(t, std::slice::from_ref(&open), &by_region, 2, 2)
             .as_slice()
         {
             [Action::Close { incident_id, .. }] => assert_eq!(*incident_id, open.id),
@@ -1289,94 +1263,9 @@ mod tests {
                 ],
             ),
         ];
-        match decide_multi(t, &[], &by_region, 2, RegionIncidentPolicy::Quorum(3)).as_slice() {
+        match decide_multi(t, &[], &by_region, 2, 3).as_slice() {
             [Action::Open(_)] => {}
             other => panic!("expected Open (quorum clamped to live count), got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn per_region_opens_one_incident_per_bad_region() {
-        let b = mbase();
-        let t = Uuid::now_v7();
-        let by_region = vec![
-            (
-                "eu".to_string(),
-                vec![
-                    result(t, ts(b, 0), CheckStatus::Down),
-                    result(t, ts(b, 30), CheckStatus::Down),
-                ],
-            ),
-            (
-                "us".to_string(),
-                vec![
-                    result(t, ts(b, 0), CheckStatus::Down),
-                    result(t, ts(b, 30), CheckStatus::Down),
-                ],
-            ),
-            (
-                "ap".to_string(),
-                vec![
-                    result(t, ts(b, 0), CheckStatus::Up),
-                    result(t, ts(b, 30), CheckStatus::Up),
-                ],
-            ),
-        ];
-        let actions = decide_multi(t, &[], &by_region, 2, RegionIncidentPolicy::PerRegion);
-        let mut regions: Vec<String> = actions
-            .iter()
-            .filter_map(|a| match a {
-                Action::Open(n) => n.region.clone(),
-                _ => None,
-            })
-            .collect();
-        regions.sort();
-        assert_eq!(regions, vec!["eu".to_string(), "us".to_string()]);
-    }
-
-    #[test]
-    fn per_region_closes_only_the_recovered_region() {
-        let b = mbase();
-        let t = Uuid::now_v7();
-        let eu_open = OpenIncident {
-            id: Uuid::now_v7(),
-            target_id: t,
-            started_at: ts(b, 0),
-            region: Some("eu".to_string()),
-        };
-        let us_open = OpenIncident {
-            id: Uuid::now_v7(),
-            target_id: t,
-            started_at: ts(b, 0),
-            region: Some("us".to_string()),
-        };
-        let by_region = vec![
-            (
-                "eu".to_string(),
-                vec![
-                    result(t, ts(b, 30), CheckStatus::Up),
-                    result(t, ts(b, 60), CheckStatus::Up),
-                ],
-            ),
-            (
-                "us".to_string(),
-                vec![
-                    result(t, ts(b, 30), CheckStatus::Down),
-                    result(t, ts(b, 60), CheckStatus::Down),
-                ],
-            ),
-        ];
-        match decide_multi(
-            t,
-            &[eu_open.clone(), us_open],
-            &by_region,
-            2,
-            RegionIncidentPolicy::PerRegion,
-        )
-        .as_slice()
-        {
-            [Action::Close { incident_id, .. }] => assert_eq!(*incident_id, eu_open.id),
-            other => panic!("expected one Close (eu only), got {other:?}"),
         }
     }
 
@@ -1405,6 +1294,8 @@ mod tests {
             tags: vec![],
             alerts: TargetAlerts::default(),
             region_policy: Default::default(),
+            alert_confirmations: 2,
+            notify_recovery: true,
             group_name: None,
             owner_user_id: None,
             write_source: crate::domain::WriteSource::Ui,

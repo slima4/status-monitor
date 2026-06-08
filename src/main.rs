@@ -22,7 +22,6 @@ use uptimepage::{
     http_client::client::build_clients,
     jobs::retention,
     marketing,
-    notifier::engine::AlertEngine,
     observability,
     pipeline::{BatcherConfig, ResultBatcher},
     public_status::{
@@ -215,12 +214,10 @@ async fn main() -> Result<()> {
     let notification_channel_store: Arc<dyn NotificationChannelStore> = Arc::new(
         PgNotificationChannelStore::new(pg_pool.clone(), cipher.clone()),
     );
-    let (alert_tx, alert_rx) = mpsc::channel(cfg.storage.clickhouse.buffer_size.max(1024));
-    let fanout = ResultFanout::new(result_tx.clone(), Some(alert_tx));
-    // Incident-driven paging. When escalation is enabled the incident lifecycle
-    // owns down/up notification and the alert engine suppresses its own dispatch
-    // (one pager, no double-page); the writer + API emit signals on this channel.
-    let escalation_enabled = cfg.escalation.enabled;
+    let fanout = ResultFanout::new(result_tx.clone());
+    // Incident-driven paging is the single notification path: the writer opens
+    // region-aware incidents and the engine delivers them — to a monitor's bound
+    // channels (simple mode) or up an escalation policy when one is bound.
     let (incident_signal_tx, incident_signal_rx) =
         mpsc::channel::<uptimepage::escalation::IncidentSignal>(1024);
     let host_throttle = Arc::new(uptimepage::worker::host_throttle::HostThrottle::new(
@@ -281,20 +278,6 @@ async fn main() -> Result<()> {
         let token = root.clone();
         tokio::spawn(async move { batcher.run(token).await })
     };
-    let alert_channel_cache = uptimepage::notifier::engine::AlertChannelCache::new();
-    let alert_engine_handle: Option<JoinHandle<()>> = Some({
-        let token = root.clone();
-        let engine = AlertEngine::new(
-            alert_rx,
-            notification_channel_store.clone(),
-            uptimepage::http_outbound::build_outbound_client(
-                uptimepage::security::SsrfGuard::from_security_config(&cfg.security),
-            ),
-            alert_channel_cache.clone(),
-            escalation_enabled,
-        );
-        tokio::spawn(async move { engine.run(token).await })
-    });
     // Floor at 100ms to keep a misconfigured 0 / sub-tick value from spinning.
     let sample_interval =
         Duration::from_millis(cfg.observability.gauge_sample_interval_ms.max(100));
@@ -330,15 +313,13 @@ async fn main() -> Result<()> {
         cipher.clone(),
         "incident_writer",
     ));
-    let mut writer = IncidentWriter::new(
+    let writer = IncidentWriter::new(
         admin_repo_for_writer,
         results_store.clone(),
         Arc::new(PgIncidentStore::new(pg_pool)),
         IncidentWriterConfig::default(),
-    );
-    if escalation_enabled {
-        writer = writer.with_signals(incident_signal_tx.clone());
-    }
+    )
+    .with_signals(incident_signal_tx.clone());
     let incident_writer = Arc::new(writer);
     let incident_writer_handle: JoinHandle<()> = {
         let writer = incident_writer.clone();
@@ -357,9 +338,10 @@ async fn main() -> Result<()> {
         )
     };
 
-    // Incident paging worker: pages bound channels on open/resolve and retries
-    // failed deliveries. Only spawned when enabled; otherwise the alert engine
-    // keeps paging directly and signals on the channel are never consumed.
+    // Incident paging worker: the single notification path. Always running — it
+    // pages a monitor's bound channels on open/resolve (region-aware) and walks
+    // an escalation policy when one is bound. The `escalation.enabled` flag only
+    // gates the policy/on-call UI, not whether incidents notify.
     let escalation_policy_store: Arc<dyn uptimepage::storage::EscalationPolicyStore> = Arc::new(
         uptimepage::storage::PgEscalationPolicyStore::new(pg_pool_for_stores.clone()),
     );
@@ -369,7 +351,7 @@ async fn main() -> Result<()> {
     let contact_store: Arc<dyn uptimepage::storage::ContactStore> = Arc::new(
         uptimepage::storage::PgContactStore::new(pg_pool_for_stores.clone()),
     );
-    let escalation_engine_handle: Option<JoinHandle<()>> = escalation_enabled.then(|| {
+    let escalation_engine_handle: JoinHandle<()> = {
         let engine = uptimepage::escalation::EscalationEngine::new(
             incident_signal_rx,
             Arc::new(uptimepage::storage::PgIncidentOpsStore::new(
@@ -388,7 +370,7 @@ async fn main() -> Result<()> {
         );
         let token = root.clone();
         tokio::spawn(async move { engine.run(token).await })
-    });
+    };
 
     let purge_handle: JoinHandle<()> = {
         let pool = pg_pool_for_stores.clone();
@@ -472,14 +454,9 @@ async fn main() -> Result<()> {
         incident_narration_store,
         outbound_http,
         email_sender,
-        alert_channel_cache,
         cipher,
     );
-    let state = if escalation_enabled {
-        state.with_incident_signals(incident_signal_tx)
-    } else {
-        state
-    };
+    let state = state.with_incident_signals(incident_signal_tx);
     // Hot-reload the abuse deny-lists on SIGHUP when enabled (validate then
     // atomic swap; a bad edit is rejected and the running rules stay).
     let abuse_reload_handle: Option<JoinHandle<()>> = uptimepage::security::abuse_reload::spawn(
@@ -593,16 +570,11 @@ async fn main() -> Result<()> {
             sampler_handle,
             incident_writer_handle,
             agent_health_handle,
+            escalation_engine_handle,
             purge_handle,
             invitation_purge_handle,
             oauth_state_cleanup_handle,
         );
-        if let Some(h) = alert_engine_handle {
-            let _ = h.await;
-        }
-        if let Some(h) = escalation_engine_handle {
-            let _ = h.await;
-        }
         if let Some(h) = magic_link_cleanup_handle {
             let _ = h.await;
         }

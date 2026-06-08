@@ -6,7 +6,7 @@ use url::Url;
 use crate::error::Result;
 use crate::http_outbound::{OutboundHttpClient, post_json_with_headers};
 use crate::notifier::Notifier;
-use crate::notifier::event::{AlertEvent, IncidentNotice};
+use crate::notifier::event::IncidentNotice;
 
 pub struct WebhookNotifier {
     client: OutboundHttpClient,
@@ -26,10 +26,6 @@ impl WebhookNotifier {
 
 #[async_trait]
 impl Notifier for WebhookNotifier {
-    async fn notify(&self, event: &AlertEvent) -> Result<()> {
-        post_json_with_headers(&self.client, &self.url, event, &self.headers).await
-    }
-
     async fn notify_incident(&self, notice: &IncidentNotice) -> Result<()> {
         post_json_with_headers(&self.client, &self.url, notice, &self.headers).await
     }

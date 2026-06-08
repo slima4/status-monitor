@@ -190,16 +190,24 @@ pub async fn create(
     let guard = ssrf_guard(&state);
     canonicalize_check(&mut new.check)?;
     validate_new_target(&new, &guard, i64::from(plan.min_check_interval_secs))?;
-    validate_region_policy(new.region_policy)?;
+    let available = state.target_store.available_regions().await?;
+    validate_region_policy(new.region_policy, available.len())?;
     verify_alert_channels(&state, org, &new.alerts).await?;
     validate_owner_is_member(&state, org, new.owner_user_id).await?;
     check_abuse(&state, org, &new.check)?;
     // Friendly pre-check; the store INSERT enforces the same cap atomically.
     state.quotas.check_can_create_targets(org, None, 1).await?;
+    let default_region = state.cfg.scheduler.effective_default_region().to_string();
+    let regions = default_region_set(available, plan.max_regions, &default_region);
+    // None → the store applies the column default (Majority).
     let t = state
         .target_store
         .create(org, new, source, i64::from(plan.max_targets))
         .await?;
+    // The store seeds only the default region; widen to the full set.
+    if regions.len() > 1 {
+        state.target_store.set_target_regions(org, t.id, &regions).await?;
+    }
     dispatch_first_check(&state, org, &t);
     // UUID hex is always ASCII-safe → infallible.
     let location = HeaderValue::from_str(&format!("/api/v1/targets/{}", t.id))
@@ -246,8 +254,10 @@ pub async fn update(
         validate_alerts(alerts)?;
         verify_alert_channels(&state, org, alerts).await?;
     }
-    if let Some(policy) = update.region_policy {
-        validate_region_policy(policy)?;
+    validate_alert_confirmations(update.alert_confirmations)?;
+    if update.region_policy.is_some() {
+        let available = state.target_store.available_regions().await?;
+        validate_region_policy(update.region_policy, available.len())?;
     }
     if let Some(Some(g)) = update.group_name.as_ref() {
         validate_group_name(Some(g.as_str()))?;
@@ -457,9 +467,11 @@ pub async fn bulk_create(
     }
     let plan = state.quotas.limit_for_org(org).await?;
     let guard = ssrf_guard(&state);
+    let available = state.target_store.available_regions().await?;
     for new in &mut items {
         canonicalize_check(&mut new.check)?;
         validate_new_target(new, &guard, i64::from(plan.min_check_interval_secs))?;
+        validate_region_policy(new.region_policy, available.len())?;
         verify_alert_channels(&state, org, &new.alerts).await?;
         check_abuse(&state, org, &new.check)?;
     }
@@ -484,10 +496,34 @@ pub async fn bulk_create(
     // Quantity-aware friendly pre-check; the store INSERT re-enforces the
     // same `current + n <= limit` bound atomically against a concurrent bulk.
     state.quotas.check_can_create_targets(org, None, n).await?;
+    // Captured before the move so each item's explicit policy survives the
+    // bulk insert and is reapplied once the full region set is assigned.
+    let item_policies: Vec<Option<RegionIncidentPolicy>> =
+        items.iter().map(|i| i.region_policy).collect();
+    let default_region = state.cfg.scheduler.effective_default_region().to_string();
+    let regions = default_region_set(available, plan.max_regions, &default_region);
     let out = state
         .target_store
         .bulk_create(org, items, source, i64::from(plan.max_targets))
         .await?;
+    if regions.len() > 1 {
+        let derived = RegionIncidentPolicy::default();
+        for (t, explicit) in out.iter().zip(item_policies) {
+            state.target_store.set_target_regions(org, t.id, &regions).await?;
+            state
+                .target_store
+                .update(
+                    org,
+                    t.id,
+                    TargetUpdate {
+                        region_policy: Some(explicit.unwrap_or(derived)),
+                        ..Default::default()
+                    },
+                    source,
+                )
+                .await?;
+        }
+    }
     Ok((StatusCode::CREATED, Redacted::new(out)))
 }
 
@@ -787,7 +823,20 @@ fn validate_new_target(new: &NewTarget, guard: &SsrfGuard, min_interval_secs: i6
     }
     validate_check(&new.check, guard)?;
     validate_alerts(&new.alerts)?;
+    validate_alert_confirmations(Some(new.alert_confirmations))?;
     validate_group_name(new.group_name.as_deref())
+}
+
+/// One confirmation minimum — alerting after zero failures is meaningless.
+fn validate_alert_confirmations(n: Option<u32>) -> Result<()> {
+    if matches!(n, Some(0)) {
+        return Err(AppError::bad_request_field(
+            codes::INVALID_ALERT_CONFIG,
+            "alert_confirmations must be >= 1",
+            "alert_confirmations",
+        ));
+    }
+    Ok(())
 }
 
 fn validate_group_name(group: Option<&str>) -> Result<()> {
@@ -814,23 +863,15 @@ async fn validate_owner_is_member(state: &AppState, org: OrgId, owner: Option<Uu
     Ok(())
 }
 
-/// Structural-only (no I/O): each binding's `after_failures` floor. The bound
+/// Structural-only (no I/O): reject duplicate channel bindings. The bound
 /// `channel_id` is checked to exist in the caller's org by the async
 /// [`verify_alert_channels`] — kept separate so the sync per-item path
 /// (`validate_new_target`, also used by bulk) stays sync.
 fn validate_alerts(alerts: &TargetAlerts) -> Result<()> {
     let mut seen = std::collections::HashSet::new();
     for (i, b) in alerts.iter().enumerate() {
-        if b.after_failures == 0 {
-            return Err(AppError::bad_request_field(
-                codes::INVALID_ALERT_CONFIG,
-                format!("alerts[{i}]: after_failures must be >= 1"),
-                format!("alerts[{i}].after_failures"),
-            ));
-        }
-        // Two bindings to the same channel share one engine AlertState, so
-        // the second would silently override the first's policy. Reject it
-        // for predictable behaviour.
+        // A monitor delivers each open/resolve once per bound channel; a
+        // duplicate binding would just double-page the same channel.
         if !seen.insert(b.channel_id) {
             return Err(AppError::bad_request_field(
                 codes::INVALID_ALERT_CONFIG,
@@ -847,20 +888,46 @@ fn validate_alerts(alerts: &TargetAlerts) -> Result<()> {
 
 const MAX_QUORUM: u32 = 64;
 
-/// Per-monitor region incident policy. `per_region` is reserved (its incidents
-/// aren't consumer-safe yet) and rejected; `quorum` needs a positive count.
-fn validate_region_policy(policy: RegionIncidentPolicy) -> Result<()> {
+/// `any`/`majority`/`all` (and `None`) always pass — they track the live region
+/// count. A fixed `count` must be in `1..=min(64, region_count)`; a count larger
+/// than the regions that exist can never be met.
+fn validate_region_policy(policy: Option<RegionIncidentPolicy>, region_count: usize) -> Result<()> {
+    let max = (region_count as u32).clamp(1, MAX_QUORUM);
     match policy {
-        RegionIncidentPolicy::AnyDown => Ok(()),
-        RegionIncidentPolicy::Quorum(n) if (1..=MAX_QUORUM).contains(&n) => Ok(()),
-        RegionIncidentPolicy::Quorum(_) => Err(AppError::unprocessable(
-            codes::INVALID_REGION_POLICY,
-            format!("quorum must be between 1 and {MAX_QUORUM}"),
-        )),
-        RegionIncidentPolicy::PerRegion => Err(AppError::unprocessable(
-            codes::INVALID_REGION_POLICY,
-            "per-region incident detection is not available yet",
-        )),
+        Some(RegionIncidentPolicy::Count(n)) if !(1..=max).contains(&n) => {
+            Err(AppError::unprocessable(
+                codes::INVALID_REGION_POLICY,
+                format!("region count must be between 1 and {max}"),
+            ))
+        }
+        _ => Ok(()),
+    }
+}
+
+/// The default region set for a new monitor: every enabled region, capped at the
+/// plan's `max_regions` (default region kept first when the cap bites), so the
+/// default can never exceed the quota.
+pub(crate) fn default_region_set(
+    available: Vec<String>,
+    max_regions: i32,
+    default_region: &str,
+) -> Vec<String> {
+    let cap = max_regions.max(1) as usize;
+    let set: Vec<String> = if available.len() <= cap {
+        available
+    } else {
+        let mut v = vec![default_region.to_string()];
+        for r in available {
+            if r != default_region && v.len() < cap {
+                v.push(r);
+            }
+        }
+        v
+    };
+    if set.is_empty() {
+        vec![default_region.to_string()]
+    } else {
+        set
     }
 }
 

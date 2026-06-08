@@ -341,7 +341,7 @@ impl PgIncidentOpsStore {
 const OPS_COLS: &str = "id, target_id, title, state, severity, urgency, origin, visibility, \
      started_at, ended_at, acknowledged_at, acknowledged_by, assigned_to, resolved_by, \
      escalation_policy_id, escalation_level, escalation_round, next_escalation_at, \
-     check_count, error_sample, created_at, updated_at";
+     check_count, error_sample, regions_down, regions_up, created_at, updated_at";
 
 /// Public closing line for an auto-resolved incident; shared with the writer's
 /// `close` path.
@@ -382,6 +382,8 @@ struct OpsIncidentRow {
     next_escalation_at: Option<DateTime<Utc>>,
     check_count: i32,
     error_sample: Option<String>,
+    regions_down: Option<Vec<String>>,
+    regions_up: Option<Vec<String>>,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
 }
@@ -408,6 +410,8 @@ fn row_to_ops(r: OpsIncidentRow) -> OpsIncident {
         next_escalation_at: r.next_escalation_at,
         check_count: r.check_count.max(0) as u64,
         error_sample: r.error_sample,
+        regions_down: r.regions_down.unwrap_or_default(),
+        regions_up: r.regions_up.unwrap_or_default(),
         created_at: r.created_at,
         updated_at: r.updated_at,
     }
@@ -1650,6 +1654,8 @@ impl IncidentOpsStore for InMemoryIncidentOpsStore {
             next_escalation_at: None,
             check_count: 0,
             error_sample: None,
+            regions_down: Vec::new(),
+            regions_up: Vec::new(),
             created_at: now,
             updated_at: now,
         };
@@ -2077,6 +2083,8 @@ mod tests {
             next_escalation_at: Some(now),
             check_count: 2,
             error_sample: Some("boom".into()),
+            regions_down: Vec::new(),
+            regions_up: Vec::new(),
             created_at: now,
             updated_at: now,
         });

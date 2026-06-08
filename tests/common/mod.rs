@@ -163,7 +163,7 @@ pub fn build_test_app_with_seedable_incidents(
         cfg.checker.max_concurrent_checks.max(1),
         (*http_clients).clone(),
         cfg.circuit_breaker,
-        ResultFanout::storage_only(tx),
+        ResultFanout::new(tx),
         uptimepage::worker::host_throttle::HostThrottle::permissive(),
         test_domain_expiry_runtime(),
     ));
@@ -187,9 +187,7 @@ pub fn build_test_app_with_seedable_incidents(
         Arc::new(InMemoryStatusPageStore::new()),
         incident_narration_store,
         build_test_outbound_and_email().0,
-        build_test_outbound_and_email().1,
-        uptimepage::notifier::engine::AlertChannelCache::new(),
-        None,
+        build_test_outbound_and_email().1,        None,
     );
     let router = uptimepage::build_app_router_api_only(state, CancellationToken::new());
     // Auto-attach an owner session so operator routes resolve a CurrentOrg.
@@ -240,7 +238,7 @@ fn build_test_app_with_public_source_inner(
         cfg.checker.max_concurrent_checks.max(1),
         (*http_clients).clone(),
         cfg.circuit_breaker,
-        ResultFanout::storage_only(tx),
+        ResultFanout::new(tx),
         uptimepage::worker::host_throttle::HostThrottle::permissive(),
         test_domain_expiry_runtime(),
     ));
@@ -263,9 +261,7 @@ fn build_test_app_with_public_source_inner(
         Arc::new(InMemoryStatusPageStore::new()),
         incident_narration_store,
         build_test_outbound_and_email().0,
-        build_test_outbound_and_email().1,
-        uptimepage::notifier::engine::AlertChannelCache::new(),
-        None,
+        build_test_outbound_and_email().1,        None,
     );
     if with_web {
         uptimepage::build_app_router(state, CancellationToken::new())
@@ -320,7 +316,7 @@ pub async fn build_test_app_with_pg(
         cfg.checker.max_concurrent_checks.max(1),
         (*http_clients).clone(),
         cfg.circuit_breaker,
-        ResultFanout::storage_only(tx),
+        ResultFanout::new(tx),
         uptimepage::worker::host_throttle::HostThrottle::permissive(),
         test_domain_expiry_runtime(),
     ));
@@ -344,9 +340,7 @@ pub async fn build_test_app_with_pg(
         Arc::new(InMemoryStatusPageStore::new()),
         incident_narration_store,
         build_test_outbound_and_email().0,
-        build_test_outbound_and_email().1,
-        uptimepage::notifier::engine::AlertChannelCache::new(),
-        None,
+        build_test_outbound_and_email().1,        None,
     );
     let app = uptimepage::build_app_router(state, CancellationToken::new());
     (app, provisioned_org)
@@ -438,7 +432,7 @@ fn assemble_pg_router(pool: PgPool, cfg: AppConfig) -> Router {
         cfg.checker.max_concurrent_checks.max(1),
         (*http_clients).clone(),
         cfg.circuit_breaker,
-        ResultFanout::storage_only(tx),
+        ResultFanout::new(tx),
         uptimepage::worker::host_throttle::HostThrottle::permissive(),
         test_domain_expiry_runtime(),
     ));
@@ -463,9 +457,7 @@ fn assemble_pg_router(pool: PgPool, cfg: AppConfig) -> Router {
         status_page_store,
         incident_narration_store,
         build_test_outbound_and_email().0,
-        build_test_outbound_and_email().1,
-        uptimepage::notifier::engine::AlertChannelCache::new(),
-        None,
+        build_test_outbound_and_email().1,        None,
     );
     uptimepage::build_app_router(state, CancellationToken::new())
 }
@@ -549,7 +541,7 @@ pub fn build_test_app_state(mutate: impl FnOnce(&mut AppConfig)) -> AppState {
         cfg.checker.max_concurrent_checks.max(1),
         (*http_clients).clone(),
         cfg.circuit_breaker,
-        ResultFanout::storage_only(tx),
+        ResultFanout::new(tx),
         uptimepage::worker::host_throttle::HostThrottle::permissive(),
         test_domain_expiry_runtime(),
     ));
@@ -573,9 +565,7 @@ pub fn build_test_app_state(mutate: impl FnOnce(&mut AppConfig)) -> AppState {
         Arc::new(InMemoryStatusPageStore::new()),
         incident_narration_store,
         build_test_outbound_and_email().0,
-        build_test_outbound_and_email().1,
-        uptimepage::notifier::engine::AlertChannelCache::new(),
-        None,
+        build_test_outbound_and_email().1,        None,
     )
 }
 
@@ -709,6 +699,8 @@ pub fn http_target(addr: SocketAddr, path: &str, interval_ms: u64) -> Target {
         tags: vec![],
         alerts: uptimepage::domain::TargetAlerts::default(),
         region_policy: Default::default(),
+        alert_confirmations: 2,
+        notify_recovery: true,
         group_name: None,
         owner_user_id: None,
         write_source: WriteSource::Ui,

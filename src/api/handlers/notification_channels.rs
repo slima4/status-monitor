@@ -21,12 +21,12 @@ use crate::api::error::codes;
 use crate::api::redaction::Redacted;
 use crate::app::AppState;
 use crate::domain::{
-    CheckStatus, NewNotificationChannel, NotificationChannel, NotificationChannelUpdate,
-    validate_channel_name,
+    IncidentSeverity, IncidentUrgency, NewNotificationChannel, NotificationChannel,
+    NotificationChannelUpdate, NotificationReason, validate_channel_name,
 };
 use crate::error::{AppError, Result};
 use crate::notifier::build_notifier;
-use crate::notifier::event::{AlertEvent, AlertKind};
+use crate::notifier::event::IncidentNotice;
 use crate::web::{
     Authorized, ChannelsDelete, ChannelsExecute, ChannelsRead, ChannelsWrite, RequestSource,
 };
@@ -178,9 +178,6 @@ pub async fn update(
         .update(org, id, update, source)
         .await?
         .ok_or_else(channel_not_found)?;
-    // Drop any cached resolution so the next AlertEngine dispatch picks up
-    // the new URL / token / enabled flag instead of waiting out the TTL.
-    state.alert_channel_cache.invalidate(org, id);
     Ok(Redacted::new(updated))
 }
 
@@ -203,7 +200,6 @@ pub async fn delete(
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode> {
     if state.notification_channel_store.delete(org, id).await? {
-        state.alert_channel_cache.invalidate(org, id);
         Ok(StatusCode::NO_CONTENT)
     } else {
         Err(channel_not_found())
@@ -237,19 +233,24 @@ pub async fn test_send(
         .await?
         .ok_or_else(channel_not_found)?;
     let notifier = build_notifier(&channel.config, &state.outbound_http)?;
-    let event = AlertEvent {
-        target_id: Uuid::nil(),
-        target_name: "uptimepage test notification".to_string(),
-        kind: AlertKind::Down,
-        consecutive_failures: 1,
-        last_status: CheckStatus::Down,
-        last_error: Some(
+    let notice = IncidentNotice {
+        incident_id: Uuid::nil(),
+        reason: NotificationReason::Opened,
+        monitor_name: Some("uptimepage test notification".to_string()),
+        title: None,
+        severity: IncidentSeverity::Minor,
+        urgency: IncidentUrgency::Low,
+        started_at: Utc::now(),
+        ended_at: None,
+        error_sample: Some(
             "This is a test notification confirming the channel is configured correctly."
                 .to_string(),
         ),
-        timestamp: Utc::now(),
+        regions_down: Vec::new(),
+        regions_up: Vec::new(),
+        url: None,
     };
-    notifier.notify(&event).await.map_err(|e| {
+    notifier.notify_incident(&notice).await.map_err(|e| {
         AppError::unprocessable(
             codes::CHANNEL_TEST_FAILED,
             format!("test delivery failed: {e}"),

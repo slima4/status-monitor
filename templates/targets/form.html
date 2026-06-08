@@ -498,7 +498,7 @@
       </p>
       {% else %}
       <p class="mb-3 text-xs text-muted">
-        Pick channels to notify. Down fires after N consecutive non-up checks.
+        Pick channels to notify when this monitor opens or resolves an incident.
       </p>
       <div class="divide-y divide-[color:var(--theme-line)]">
         {% for c in form.channels %}
@@ -508,20 +508,22 @@
             <span class="text-sm">{{ c.name }}</span>
             <span class="status-badge status-badge--tag">{{ c.kind }}</span>
           </label>
-          <label class="inline-flex items-center gap-1 text-xs text-muted">
-            After
-            <input type="number" data-after-failures min="1" max="100" value="{{ c.after_failures }}"
-                   class="w-20 field text-sm">
-            failures
-          </label>
-          <label class="inline-flex items-center gap-1 text-xs text-muted">
-            <input type="checkbox" data-notify-recovery{% if c.notify_recovery %} checked{% endif %}>
-            Notify on recovery
-          </label>
         </div>
         {% endfor %}
       </div>
       {% endif %}
+
+      <div class="flex flex-wrap items-end gap-4">
+        <label class="field-outline w-56">
+          <span class="field-outline__label">Confirmations before alerting</span>
+          <input type="number" data-alert-confirmations min="1" max="100"
+                 value="{{ form.alert_confirmations }}" class="w-full field">
+        </label>
+        <label class="inline-flex items-center gap-2 text-sm">
+          <input type="checkbox" data-notify-recovery{% if form.notify_recovery %} checked{% endif %}>
+          Notify on recovery
+        </label>
+      </div>
 
       {% if form.show_escalation %}
       <div class="mt-5 space-y-2 border-t border-[color:var(--theme-line)] pt-4">
@@ -544,6 +546,35 @@
         {% else %}
         <p class="text-xs text-muted">Save the monitor first, then pick its escalation policy here.</p>
         {% endif %}
+      </div>
+      {% endif %}
+
+      {% if form.show_regions %}
+      <div class="mt-5 space-y-3 border-t border-[color:var(--theme-line)] pt-4"
+           data-monitor-regions data-target-id="{{ form.id }}">
+        <div class="space-y-1">
+          <span class="text-sm font-medium">Regions &amp; detection</span>
+          <p class="text-xs text-muted">Which locations probe this monitor, and how their results combine into an incident.</p>
+        </div>
+        <div class="flex flex-wrap gap-3">
+          {% for r in form.region_choices %}
+          <label class="inline-flex items-center gap-1.5 text-sm">
+            <input type="checkbox" data-region-checkbox value="{{ r.id }}"{% if r.selected %} checked{% endif %}>
+            <span>{{ r.id }}</span>
+          </label>
+          {% endfor %}
+        </div>
+        <div class="flex flex-wrap items-end gap-3">
+          <div class="field-outline w-64">
+            <span class="field-outline__label">Alert when</span>
+            <select data-region-policy data-sm-combobox aria-label="Detection threshold" class="w-full field">
+              {% for o in form.region_threshold_options %}
+              <option value="{{ o.value }}"{% if o.selected %} selected{% endif %}>{{ o.label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+        <p class="text-xs text-muted">Opens one incident when this many regions agree the monitor is down. Majority suppresses a single location's network blip.{% if form.mode == "create" %} Saved with the monitor.{% endif %}</p>
       </div>
       {% endif %}
     </fieldset>

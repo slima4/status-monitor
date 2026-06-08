@@ -1,5 +1,9 @@
+ALTER TABLE targets DROP COLUMN IF EXISTS notify_recovery;
+ALTER TABLE targets DROP COLUMN IF EXISTS alert_confirmations;
 ALTER TABLE targets DROP COLUMN IF EXISTS region_policy;
 ALTER TABLE plans DROP COLUMN IF EXISTS max_regions;
+ALTER TABLE incidents DROP COLUMN IF EXISTS regions_up;
+ALTER TABLE incidents DROP COLUMN IF EXISTS regions_down;
 ALTER TABLE incidents DROP COLUMN IF EXISTS region;
 DROP TABLE IF EXISTS agents;
 DROP TABLE IF EXISTS target_regions;

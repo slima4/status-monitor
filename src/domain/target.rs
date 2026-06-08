@@ -9,19 +9,35 @@ use super::WriteSource;
 use super::alert::TargetAlerts;
 use super::check::CheckSpec;
 
-/// How a target's per-region health folds into incidents. Stored per monitor;
-/// the incident writer's `decide_multi` consumes it. `AnyDown` and `Quorum` keep
-/// one whole-target incident; `PerRegion` is reserved (not yet selectable).
+/// How many regions must agree a monitor is down before it alerts. `Any`,
+/// `Majority`, and `All` track the live region count; `Count` is a fixed number
+/// the user chose. Resolved to a concrete threshold by [`Self::required`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum RegionIncidentPolicy {
-    /// Open as soon as any region is sustained-bad.
+    /// One region down is enough.
+    Any,
+    /// More than half the regions (`n/2 + 1`).
     #[default]
-    AnyDown,
-    /// Open once at least `n` regions agree it is down (location quorum).
-    Quorum(u32),
-    /// One incident per region down.
-    PerRegion,
+    Majority,
+    /// Every region.
+    All,
+    /// A fixed number of regions.
+    Count(u32),
+}
+
+impl RegionIncidentPolicy {
+    /// The concrete number of down regions needed, given how many are in play.
+    /// Always clamped to `1..=region_count` so it can never be impossible.
+    pub fn required(&self, region_count: usize) -> usize {
+        let n = match self {
+            Self::Any => 1,
+            Self::Majority => region_count / 2 + 1,
+            Self::All => region_count,
+            Self::Count(c) => *c as usize,
+        };
+        n.clamp(1, region_count.max(1))
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -37,6 +53,12 @@ pub struct Target {
     pub tags: Vec<String>,
     #[serde(default)]
     pub alerts: TargetAlerts,
+    /// Consecutive failing checks before this monitor alerts. Min 1.
+    #[serde(default = "default_alert_confirmations")]
+    pub alert_confirmations: u32,
+    /// Whether a recovery is announced to the monitor's channels.
+    #[serde(default = "default_true")]
+    pub notify_recovery: bool,
     /// How multi-region health folds into incidents for this monitor.
     #[serde(default)]
     pub region_policy: RegionIncidentPolicy,
@@ -69,8 +91,15 @@ pub struct NewTarget {
     pub tags: Vec<String>,
     #[serde(default)]
     pub alerts: TargetAlerts,
+    /// Consecutive failing checks before this monitor alerts. Min 1.
+    #[serde(default = "default_alert_confirmations")]
+    pub alert_confirmations: u32,
+    #[serde(default = "default_true")]
+    pub notify_recovery: bool,
+    /// Detection policy. Omit to take the derived default — quorum-majority when
+    /// the monitor lands in more than one region, any-down for a single region.
     #[serde(default)]
-    pub region_policy: RegionIncidentPolicy,
+    pub region_policy: Option<RegionIncidentPolicy>,
     #[serde(default)]
     #[schema(nullable = true, max_length = 50)]
     pub group_name: Option<String>,
@@ -90,6 +119,8 @@ pub struct TargetUpdate {
     pub enabled: Option<bool>,
     #[serde(default)]
     pub region_policy: Option<RegionIncidentPolicy>,
+    pub alert_confirmations: Option<u32>,
+    pub notify_recovery: Option<bool>,
     pub tags: Option<Vec<String>>,
     pub alerts: Option<TargetAlerts>,
     #[serde(default, deserialize_with = "double_option")]
@@ -113,6 +144,10 @@ where
 
 fn default_true() -> bool {
     true
+}
+
+fn default_alert_confirmations() -> u32 {
+    2
 }
 
 mod duration_secs {

@@ -11,7 +11,6 @@ use uuid::Uuid;
 use crate::config::CircuitBreakerConfig;
 use crate::domain::{CheckResult, CheckSpec, OrgId, Target};
 use crate::http_client::HttpClients;
-use crate::notifier::event::AlertSignal;
 use crate::observability::metrics::names;
 use crate::worker::circuit_breaker::{BreakerState, CIRCUIT_OPEN_REASON, CircuitBreaker};
 use crate::worker::host_throttle::{HostPermit, HostThrottle, Throttled};
@@ -79,30 +78,21 @@ pub fn host_for_spec(spec: &CheckSpec) -> String {
     }
 }
 
-/// Fan-out for completed CheckResults: every result goes to the storage mpsc;
-/// when alerts are configured a parallel mpsc forwards (target, result) pairs
-/// to the alert engine. Both downstreams own independent back-pressure budgets.
+/// Sink for completed CheckResults into the storage mpsc. Notifications are
+/// driven separately by the incident writer reading the result stream, so the
+/// hot path no longer fans out per-result alert signals.
 #[derive(Clone)]
 pub struct ResultFanout {
     storage: mpsc::Sender<CheckResult>,
-    alerts: Option<mpsc::Sender<AlertSignal>>,
     storage_dropped: Arc<AtomicU64>,
 }
 
 impl ResultFanout {
-    pub fn new(
-        storage: mpsc::Sender<CheckResult>,
-        alerts: Option<mpsc::Sender<AlertSignal>>,
-    ) -> Self {
+    pub fn new(storage: mpsc::Sender<CheckResult>) -> Self {
         Self {
             storage,
-            alerts,
             storage_dropped: Arc::new(AtomicU64::new(0)),
         }
-    }
-
-    pub fn storage_only(storage: mpsc::Sender<CheckResult>) -> Self {
-        Self::new(storage, None)
     }
 
     pub fn queue_depth(&self) -> u64 {
@@ -118,18 +108,7 @@ impl ResultFanout {
         self.storage_dropped.fetch_add(1, Ordering::Relaxed);
     }
 
-    fn dispatch(&self, target: Arc<Target>, org_id: OrgId, result: CheckResult) {
-        if let Some(tx) = &self.alerts {
-            // Only clone when an alert downstream is attached.
-            let signal = AlertSignal {
-                target,
-                org_id,
-                result: result.clone(),
-            };
-            if tx.try_send(signal).is_err() {
-                counter!(names::ALERTS_DROPPED, "reason" => "queue_full").increment(1);
-            }
-        }
+    fn dispatch(&self, result: CheckResult) {
         if let Err(err) = self.storage.try_send(result) {
             tracing::warn!(?err, "result channel full or closed");
             counter!(names::STORAGE_DROPPED, "reason" => "queue_full").increment(1);
@@ -283,7 +262,6 @@ impl WorkerPool {
         let fanout = self.fanout.clone();
         let throttle = self.host_throttle.clone();
         let domain_expiry = self.domain_expiry.clone();
-        let target = task.target.clone();
         let org_id = task.org_id;
 
         tokio::spawn(async move {
@@ -294,7 +272,7 @@ impl WorkerPool {
             if !breaker.allow() {
                 counter!(names::CHECK_ERRORS, "kind" => "circuit_open").increment(1);
                 let result = CheckResult::error(task.target.id, org_id.0, CIRCUIT_OPEN_REASON);
-                fanout.dispatch(target, org_id, result);
+                fanout.dispatch(result);
                 return;
             }
 
@@ -315,7 +293,7 @@ impl WorkerPool {
             breaker.record(result.status);
             record_metrics(&result);
             drop(host_permit);
-            fanout.dispatch(target, org_id, result);
+            fanout.dispatch(result);
         });
     }
 }

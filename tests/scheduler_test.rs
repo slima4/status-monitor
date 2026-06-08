@@ -58,7 +58,7 @@ async fn scheduler_runs_target_periodically() {
         50,
         test_client(),
         breaker_cfg(),
-        ResultFanout::storage_only(tx),
+        ResultFanout::new(tx),
         uptimepage::worker::host_throttle::HostThrottle::permissive(),
         common::test_domain_expiry_runtime(),
     ));
@@ -105,7 +105,7 @@ async fn scheduler_runs_staggered_target() {
         50,
         test_client(),
         breaker_cfg(),
-        ResultFanout::storage_only(tx),
+        ResultFanout::new(tx),
         uptimepage::worker::host_throttle::HostThrottle::permissive(),
         common::test_domain_expiry_runtime(),
     ));
@@ -178,7 +178,7 @@ async fn dispatch_skips_when_target_probe_already_in_flight() {
         50,
         test_client(),
         breaker_cfg(),
-        ResultFanout::storage_only(tx),
+        ResultFanout::new(tx),
         uptimepage::worker::host_throttle::HostThrottle::permissive(),
         common::test_domain_expiry_runtime(),
     ));
@@ -215,7 +215,7 @@ async fn scheduler_picks_up_new_targets_on_refresh() {
         50,
         test_client(),
         breaker_cfg(),
-        ResultFanout::storage_only(tx),
+        ResultFanout::new(tx),
         uptimepage::worker::host_throttle::HostThrottle::permissive(),
         common::test_domain_expiry_runtime(),
     ));
@@ -256,7 +256,7 @@ async fn shutdown_drains_in_flight_results() {
         50,
         test_client(),
         breaker_cfg(),
-        ResultFanout::storage_only(tx.clone()),
+        ResultFanout::new(tx.clone()),
         uptimepage::worker::host_throttle::HostThrottle::permissive(),
         common::test_domain_expiry_runtime(),
     ));
@@ -347,7 +347,7 @@ async fn scheduler_recovers_after_transient_refresh_failures() {
         50,
         test_client(),
         breaker_cfg(),
-        ResultFanout::storage_only(tx),
+        ResultFanout::new(tx),
         uptimepage::worker::host_throttle::HostThrottle::permissive(),
         common::test_domain_expiry_runtime(),
     ));
@@ -397,7 +397,7 @@ async fn scheduler_shutdown_observed_during_slow_refresh() {
         10,
         test_client(),
         breaker_cfg(),
-        ResultFanout::storage_only(tx),
+        ResultFanout::new(tx),
         uptimepage::worker::host_throttle::HostThrottle::permissive(),
         common::test_domain_expiry_runtime(),
     ));
@@ -435,7 +435,7 @@ async fn worker_pool_breaker_opens_after_failures() {
         50,
         test_client(),
         breaker_cfg(),
-        ResultFanout::storage_only(tx),
+        ResultFanout::new(tx),
         uptimepage::worker::host_throttle::HostThrottle::permissive(),
         common::test_domain_expiry_runtime(),
     ));

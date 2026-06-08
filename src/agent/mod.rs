@@ -248,7 +248,7 @@ pub async fn run(cfg: AppConfig) -> Result<()> {
         &cfg.security,
     )?);
     let (result_tx, result_rx) = tokio::sync::mpsc::channel(cfg.agent.buffer_capacity.max(1024));
-    let fanout = ResultFanout::new(result_tx, None);
+    let fanout = ResultFanout::new(result_tx);
     let host_throttle = Arc::new(HostThrottle::new(
         cfg.checker.per_host_max_inflight,
         cfg.checker.rdap_max_inflight,

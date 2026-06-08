@@ -195,6 +195,8 @@ async fn writer_opens_internal_incident_for_private_monitor_pg() {
                 check_count: 2,
                 error_sample: None,
                 region: None,
+                regions_down: Vec::new(),
+                regions_up: Vec::new(),
             },
         )
         .await

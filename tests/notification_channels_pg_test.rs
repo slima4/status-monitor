@@ -244,10 +244,10 @@ async fn target_alert_binding_channel_lookup_is_org_scoped_live_pg() {
         tags: vec![],
         alerts: TargetAlerts(vec![AlertBinding {
             channel_id: ch.id,
-            after_failures: 3,
-            notify_recovery: true,
         }]),
         region_policy: Default::default(),
+        alert_confirmations: 2,
+        notify_recovery: true,
         group_name: None,
         owner_user_id: None,
     };

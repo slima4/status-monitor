@@ -75,6 +75,8 @@ async fn make_target(pool: &sqlx::PgPool, org: OrgId, name: &str) -> Uuid {
         tags: vec![],
         alerts: Default::default(),
         region_policy: Default::default(),
+        alert_confirmations: 2,
+        notify_recovery: true,
         group_name: None,
         owner_user_id: None,
     };
