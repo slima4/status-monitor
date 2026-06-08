@@ -571,6 +571,7 @@ mod tests {
         let cfg = ChannelConfig::Webhook {
             url: "https://x.test/h".into(),
             headers: BTreeMap::from([("X-Tok".into(), "s3cret".into())]),
+            secret: None,
         };
 
         // No KEK: plaintext JSON, still opens.

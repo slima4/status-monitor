@@ -35,10 +35,15 @@ pub fn build_notifier(cfg: &ChannelConfig, http: &OutboundHttpClient) -> Result<
         })
     };
     Ok(match cfg {
-        ChannelConfig::Webhook { url, headers } => Arc::new(WebhookNotifier::new(
+        ChannelConfig::Webhook {
+            url,
+            headers,
+            secret,
+        } => Arc::new(WebhookNotifier::new(
             http.clone(),
             parse(url)?,
             headers.clone(),
+            secret.clone(),
         )) as Arc<dyn Notifier>,
         ChannelConfig::Slack { webhook_url } => {
             Arc::new(SlackNotifier::new(http.clone(), parse(webhook_url)?)) as Arc<dyn Notifier>

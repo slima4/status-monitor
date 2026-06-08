@@ -1094,6 +1094,7 @@ mod tests {
                     config: ChannelConfig::Webhook {
                         url: "http://127.0.0.1:1/notify".into(),
                         headers: Default::default(),
+                        secret: None,
                     },
                     enabled: true,
                 },

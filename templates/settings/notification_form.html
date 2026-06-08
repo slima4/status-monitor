@@ -83,6 +83,17 @@
           <textarea name="webhook_headers" rows="3" spellcheck="false"
                     class="w-full field font-mono">{{ form.config.webhook_headers_json }}</textarea>
         </label>
+        <label class="field-outline">
+          <span class="field-outline__label">Signing secret (optional)</span>
+          <input name="webhook_secret" type="text" value="{{ form.config.webhook_secret }}"
+                 placeholder="leave blank to send unsigned"
+                 autocomplete="off" spellcheck="false" class="w-full field font-mono">
+        </label>
+        <p class="mt-1 text-xs text-muted">
+          If set, each POST carries an <code>X-Uptimepage-Signature</code>
+          (HMAC-SHA256 of <code>timestamp.body</code>) and an
+          <code>X-Uptimepage-Timestamp</code> header to verify.
+        </p>
       </div>
 
       <div data-variant="telegram" class="space-y-5{% if form.kind != "telegram" %} hidden{% endif %}">

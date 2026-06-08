@@ -49,6 +49,11 @@ pub enum ChannelConfig {
         url: String,
         #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
         headers: BTreeMap<String, String>,
+        /// Optional HMAC-SHA256 signing key. When set, each delivery carries an
+        /// `X-Uptimepage-Signature` + `X-Uptimepage-Timestamp` the receiver can
+        /// verify; absent leaves the POST unsigned.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        secret: Option<String>,
     },
     Slack {
         webhook_url: String,
@@ -80,10 +85,17 @@ impl ChannelConfig {
     /// a variant is masked everywhere by editing one match arm.
     pub fn redact_in_place(&mut self) {
         match self {
-            Self::Webhook { url, headers } => {
+            Self::Webhook {
+                url,
+                headers,
+                secret,
+            } => {
                 *url = MASK.to_string();
                 for v in headers.values_mut() {
                     *v = MASK.to_string();
+                }
+                if secret.is_some() {
+                    *secret = Some(MASK.to_string());
                 }
             }
             Self::Slack { webhook_url } => *webhook_url = MASK.to_string(),
@@ -104,7 +116,15 @@ impl ChannelConfig {
     /// rejected, never written back as the literal `***`.
     pub fn has_redaction_sentinel(&self) -> bool {
         match self {
-            Self::Webhook { url, headers } => url == MASK || headers.values().any(|v| v == MASK),
+            Self::Webhook {
+                url,
+                headers,
+                secret,
+            } => {
+                url == MASK
+                    || headers.values().any(|v| v == MASK)
+                    || secret.as_deref() == Some(MASK)
+            }
             Self::Slack { webhook_url } => webhook_url == MASK,
             Self::Telegram { bot_token, .. } => bot_token == MASK,
         }
@@ -122,7 +142,17 @@ impl ChannelConfig {
             Ok(())
         }
         match self {
-            Self::Webhook { url, .. } => https(url, "url"),
+            Self::Webhook { url, secret, .. } => {
+                https(url, "url")?;
+                // A short signing key undermines the HMAC; require a meaningful
+                // length when one is set (empty/absent stays unsigned).
+                if let Some(s) = secret
+                    && s.len() < 16
+                {
+                    return Err("secret must be at least 16 characters".into());
+                }
+                Ok(())
+            }
             Self::Slack { webhook_url } => https(webhook_url, "webhook_url"),
             Self::Telegram { bot_token, chat_id } => {
                 if bot_token.trim().is_empty() {
@@ -198,6 +228,7 @@ mod tests {
     fn config_round_trips_per_variant() {
         for json in [
             r#"{"type":"webhook","url":"https://x.test/h","headers":{"X-Tok":"s"}}"#,
+            r#"{"type":"webhook","url":"https://x.test/h","secret":"0123456789abcdef"}"#,
             r#"{"type":"slack","webhook_url":"https://hooks.slack.com/x"}"#,
             r#"{"type":"telegram","bot_token":"123:abc","chat_id":"-100"}"#,
         ] {
@@ -231,11 +262,17 @@ mod tests {
         let w = ChannelConfig::Webhook {
             url: "https://x.test/hooks/abc/secret".into(),
             headers: BTreeMap::from([("Authorization".into(), "Bearer tkn".into())]),
+            secret: Some("0123456789abcdef".into()),
         };
         let rw = w.redacted();
         assert_eq!(rw["url"], "***");
         assert_eq!(rw["headers"]["Authorization"], "***");
+        assert_eq!(rw["secret"], "***");
         assert!(!serde_json::to_string(&rw).unwrap().contains("tkn"));
+        // A re-submitted masked signing secret is caught as the sentinel.
+        let mut masked = w.clone();
+        masked.redact_in_place();
+        assert!(masked.has_redaction_sentinel());
     }
 
     #[test]
@@ -258,10 +295,21 @@ mod tests {
         assert!(
             ChannelConfig::Webhook {
                 url: "https://ok.test".into(),
-                headers: BTreeMap::new()
+                headers: BTreeMap::new(),
+                secret: None,
             }
             .validate()
             .is_ok()
+        );
+        // A too-short signing secret is rejected.
+        assert!(
+            ChannelConfig::Webhook {
+                url: "https://ok.test".into(),
+                headers: BTreeMap::new(),
+                secret: Some("short".into()),
+            }
+            .validate()
+            .is_err()
         );
     }
 

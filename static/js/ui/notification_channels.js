@@ -107,6 +107,10 @@
                     url: (data.get("webhook_url") || "").trim(),
                     headers,
                 };
+                const secret = (data.get("webhook_secret") || "").trim();
+                if (secret) {
+                    payload.config.secret = secret;
+                }
             } else {
                 payload.config = {
                     type: "telegram",

@@ -21,6 +21,9 @@ use uuid::Uuid;
 #[derive(Default, Clone)]
 struct CapturedRequest {
     body: Value,
+    /// Verbatim request body bytes — the signature covers these exact bytes.
+    raw: String,
+    headers: std::collections::HashMap<String, String>,
 }
 
 async fn spawn_capture_server() -> (SocketAddr, Arc<Mutex<Vec<CapturedRequest>>>) {
@@ -34,10 +37,19 @@ async fn spawn_capture_server() -> (SocketAddr, Arc<Mutex<Vec<CapturedRequest>>>
 
 async fn capture(
     State(store): State<Arc<Mutex<Vec<CapturedRequest>>>>,
+    headers: axum::http::HeaderMap,
     body: String,
 ) -> StatusCode {
     let parsed: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
-    store.lock().push(CapturedRequest { body: parsed });
+    let headers = headers
+        .iter()
+        .map(|(k, v)| (k.as_str().to_string(), v.to_str().unwrap_or("").to_string()))
+        .collect();
+    store.lock().push(CapturedRequest {
+        body: parsed,
+        raw: body,
+        headers,
+    });
     StatusCode::OK
 }
 
@@ -130,6 +142,7 @@ async fn webhook_channel_posts_incident_payload_with_custom_header() {
     let cfg = ChannelConfig::Webhook {
         url: format!("http://{addr}/hook"),
         headers: std::collections::BTreeMap::from([("X-Test-Token".into(), "secret".into())]),
+        secret: None,
     };
     let notifier = build_notifier(
         &cfg,
@@ -147,6 +160,47 @@ async fn webhook_channel_posts_incident_payload_with_custom_header() {
     assert_eq!(body["monitor_name"], "demo");
     assert_eq!(body["regions_down"][0], "eu-west");
     assert_eq!(body["regions_up"][0], "us-east");
+    // Unsigned channel: no signature headers.
+    assert!(!captured[0].headers.contains_key("x-uptimepage-signature"));
+}
+
+#[tokio::test]
+async fn webhook_signed_delivery_carries_a_verifiable_signature() {
+    use hmac::{Hmac, KeyInit, Mac};
+    use sha2::Sha256;
+
+    let (addr, store) = spawn_capture_server().await;
+    let secret = "0123456789abcdef-signing-key";
+    let cfg = ChannelConfig::Webhook {
+        url: format!("http://{addr}/hook"),
+        headers: std::collections::BTreeMap::new(),
+        secret: Some(secret.into()),
+    };
+    let notifier = build_notifier(
+        &cfg,
+        &build_outbound_client(uptimepage::security::SsrfGuard::relaxed_for_tests()),
+    )
+    .expect("notifier");
+    notifier.notify_incident(&make_notice()).await.expect("notify");
+
+    let captured = store.lock().clone();
+    let req = &captured[0];
+    let ts = req
+        .headers
+        .get("x-uptimepage-timestamp")
+        .expect("timestamp header");
+    let sig = req
+        .headers
+        .get("x-uptimepage-signature")
+        .expect("signature header");
+
+    // Recompute over the exact "{timestamp}.{raw_body}" the receiver would.
+    let mut mac = Hmac::<Sha256>::new_from_slice(secret.as_bytes()).unwrap();
+    mac.update(ts.as_bytes());
+    mac.update(b".");
+    mac.update(req.raw.as_bytes());
+    let expected = format!("sha256={}", hex::encode(mac.finalize().into_bytes()));
+    assert_eq!(sig, &expected, "signature must verify against the sent body");
 }
 
 #[tokio::test]

@@ -58,6 +58,7 @@ pub struct ConfigFields {
     pub slack_webhook_url: String,
     pub webhook_url: String,
     pub webhook_headers_json: String,
+    pub webhook_secret: String,
     pub telegram_bot_token: String,
     pub telegram_chat_id: String,
 }
@@ -68,6 +69,7 @@ impl Default for ConfigFields {
             slack_webhook_url: String::new(),
             webhook_url: String::new(),
             webhook_headers_json: "{}".into(),
+            webhook_secret: String::new(),
             telegram_bot_token: String::new(),
             telegram_chat_id: String::new(),
         }
@@ -182,9 +184,14 @@ fn form_from_channel(c: NotificationChannel) -> ChannelFormModel {
     let mut config = ConfigFields::default();
     match redacted {
         ChannelConfig::Slack { webhook_url } => config.slack_webhook_url = webhook_url,
-        ChannelConfig::Webhook { url, headers } => {
+        ChannelConfig::Webhook {
+            url,
+            headers,
+            secret,
+        } => {
             config.webhook_url = url;
             config.webhook_headers_json = json_pretty(&headers);
+            config.webhook_secret = secret.unwrap_or_default();
         }
         ChannelConfig::Telegram { bot_token, chat_id } => {
             config.telegram_bot_token = bot_token;

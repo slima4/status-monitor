@@ -77,8 +77,21 @@ pub async fn post_json_with_headers<T: Serialize>(
     body: &T,
     headers: &std::collections::BTreeMap<String, String>,
 ) -> Result<()> {
-    use hyper::header::{HeaderName, HeaderValue};
     let payload = serde_json::to_vec(body).context("serializing request payload")?;
+    post_bytes_with_headers(client, url, payload, headers).await
+}
+
+/// POST pre-serialized JSON bytes with caller-supplied headers. Lets a signed
+/// transport hash the exact bytes it sends (the signature must cover the wire
+/// body verbatim, so serialization can't happen twice). Same header-skip and
+/// bounded-error-body behaviour as [`post_json_with_headers`].
+pub async fn post_bytes_with_headers(
+    client: &OutboundHttpClient,
+    url: &Url,
+    payload: Vec<u8>,
+    headers: &std::collections::BTreeMap<String, String>,
+) -> Result<()> {
+    use hyper::header::{HeaderName, HeaderValue};
     let mut builder = Request::post(url.as_str()).header(CONTENT_TYPE, "application/json");
     for (k, v) in headers {
         match (
