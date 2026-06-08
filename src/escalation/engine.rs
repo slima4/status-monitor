@@ -31,7 +31,8 @@ use metrics::counter;
 use crate::config::EscalationConfig;
 use crate::domain::{
     EscalationDecision, EscalationPolicy, EscalationTargetType, IncidentEventKind, IncidentState,
-    NewIncidentNotification, NotificationReason, NotificationStatus, OpsIncident, OrgId, Target,
+    NewIncidentNotification, NotificationOutcome, NotificationReason, NotificationStatus,
+    OpsIncident, OrgId, Target,
     UserId, next_step,
 };
 use crate::error::Result;
@@ -665,11 +666,13 @@ impl Worker {
                 .mark_notification(
                     org,
                     id,
-                    status,
-                    1,
-                    error,
-                    (status == NotificationStatus::Sent).then(Utc::now),
-                    next_attempt_at,
+                    NotificationOutcome {
+                        status,
+                        attempt: 1,
+                        error,
+                        sent_at: (status == NotificationStatus::Sent).then(Utc::now),
+                        next_attempt_at,
+                    },
                 )
                 .await?;
         }
@@ -776,11 +779,13 @@ impl Worker {
                 .mark_notification(
                     p.org,
                     p.id,
-                    NotificationStatus::Failed,
-                    next_attempt,
-                    None,
-                    None,
-                    next_attempt_at,
+                    NotificationOutcome {
+                        status: NotificationStatus::Failed,
+                        attempt: next_attempt,
+                        error: None,
+                        sent_at: None,
+                        next_attempt_at,
+                    },
                 )
                 .await?;
             return Ok(());
@@ -791,11 +796,13 @@ impl Worker {
                 .mark_notification(
                     p.org,
                     p.id,
-                    NotificationStatus::Suppressed,
-                    next_attempt,
-                    None,
-                    None,
-                    None,
+                    NotificationOutcome {
+                        status: NotificationStatus::Suppressed,
+                        attempt: next_attempt,
+                        error: None,
+                        sent_at: None,
+                        next_attempt_at: None,
+                    },
                 )
                 .await?;
             return Ok(());
@@ -810,11 +817,13 @@ impl Worker {
             .mark_notification(
                 p.org,
                 p.id,
-                status,
-                next_attempt,
-                error,
-                (status == NotificationStatus::Sent).then(Utc::now),
-                next_attempt_at,
+                NotificationOutcome {
+                    status,
+                    attempt: next_attempt,
+                    error,
+                    sent_at: (status == NotificationStatus::Sent).then(Utc::now),
+                    next_attempt_at,
+                },
             )
             .await?;
         Ok(())

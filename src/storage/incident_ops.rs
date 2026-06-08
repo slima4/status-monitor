@@ -23,7 +23,8 @@ use crate::domain::{
     ActorType, IncidentEvent, IncidentEventKind, IncidentMetrics, IncidentNotification,
     IncidentOrigin, IncidentSeverity, IncidentState, IncidentTransition, IncidentUrgency,
     IncidentVisibility, MetricBucket, MonitorIncidentCount, NewIncidentNotification,
-    NewManualIncident, NotificationReason, NotificationStatus, OpsIncident, OrgId, TransitionError,
+    NewManualIncident, NotificationOutcome, NotificationReason, NotificationStatus, OpsIncident,
+    OrgId, TransitionError,
     UserId, next_state,
 };
 use crate::error::Result;
@@ -276,11 +277,7 @@ pub trait IncidentOpsStore: Send + Sync {
         &self,
         org: OrgId,
         id: Uuid,
-        status: NotificationStatus,
-        attempt: i32,
-        error: Option<String>,
-        sent_at: Option<DateTime<Utc>>,
-        next_attempt_at: Option<DateTime<Utc>>,
+        outcome: NotificationOutcome,
     ) -> Result<()>;
     /// Start escalation on a freshly-opened incident: stamp the resolved
     /// policy, set the first level + round 0, and arm `next_escalation_at`.
@@ -1244,11 +1241,7 @@ impl IncidentOpsStore for PgIncidentOpsStore {
         &self,
         org: OrgId,
         id: Uuid,
-        status: NotificationStatus,
-        attempt: i32,
-        error: Option<String>,
-        sent_at: Option<DateTime<Utc>>,
-        next_attempt_at: Option<DateTime<Utc>>,
+        outcome: NotificationOutcome,
     ) -> Result<()> {
         sqlx::query(
             r#"UPDATE incident_notifications
@@ -1257,11 +1250,11 @@ impl IncidentOpsStore for PgIncidentOpsStore {
         )
         .bind(id)
         .bind(org.0)
-        .bind(status.as_db_str())
-        .bind(attempt)
-        .bind(error)
-        .bind(sent_at)
-        .bind(next_attempt_at)
+        .bind(outcome.status.as_db_str())
+        .bind(outcome.attempt)
+        .bind(outcome.error)
+        .bind(outcome.sent_at)
+        .bind(outcome.next_attempt_at)
         .execute(&self.pool)
         .await
         .map_err(|e| anyhow::anyhow!("mark_notification: {e}"))?;
@@ -2008,11 +2001,7 @@ impl IncidentOpsStore for InMemoryIncidentOpsStore {
         &self,
         org: OrgId,
         id: Uuid,
-        status: NotificationStatus,
-        attempt: i32,
-        error: Option<String>,
-        sent_at: Option<DateTime<Utc>>,
-        next_attempt_at: Option<DateTime<Utc>>,
+        outcome: NotificationOutcome,
     ) -> Result<()> {
         let mut g = self.inner.lock();
         if let Some((_, n)) = g
@@ -2020,11 +2009,11 @@ impl IncidentOpsStore for InMemoryIncidentOpsStore {
             .iter_mut()
             .find(|(o, n)| *o == org && n.id == id)
         {
-            n.status = status;
-            n.attempt = attempt;
-            n.error = error;
-            n.sent_at = sent_at;
-            n.next_attempt_at = next_attempt_at;
+            n.status = outcome.status;
+            n.attempt = outcome.attempt;
+            n.error = outcome.error;
+            n.sent_at = outcome.sent_at;
+            n.next_attempt_at = outcome.next_attempt_at;
         }
         Ok(())
     }

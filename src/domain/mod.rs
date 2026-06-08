@@ -35,7 +35,8 @@ pub use incident::{
     IncidentNarrationUpdate, IncidentNotification, IncidentOrigin, IncidentPostmortem,
     IncidentState, IncidentTransition, IncidentUrgency, IncidentVisibility, MetricBucket,
     MonitorIncidentCount, NewIncidentNotification, NewIncidentUpdate, NewManualIncident,
-    NotificationReason, NotificationStatus, OpsIncident, PostmortemUpsert, TransitionError,
+    NotificationOutcome, NotificationReason, NotificationStatus, OpsIncident, PostmortemUpsert,
+    TransitionError,
     coalesce_incidents, coalesce_incidents_bad_only, elapsed_at, next_state,
 };
 pub use maintenance::{

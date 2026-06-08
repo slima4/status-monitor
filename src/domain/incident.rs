@@ -673,6 +673,19 @@ pub struct NewIncidentNotification {
     pub sent_at: Option<DateTime<Utc>>,
 }
 
+/// Result of one paging attempt, applied to its `incident_notifications` row by
+/// `IncidentOpsStore::mark_notification`.
+#[derive(Debug, Clone)]
+pub struct NotificationOutcome {
+    pub status: NotificationStatus,
+    pub attempt: i32,
+    pub error: Option<String>,
+    pub sent_at: Option<DateTime<Utc>>,
+    /// Schedules the next retry (backoff), or clears it once the row is sent,
+    /// suppressed, or dead-lettered (attempts exhausted).
+    pub next_attempt_at: Option<DateTime<Utc>>,
+}
+
 // ───────────────────────── Lifecycle state machine ────────────────────────
 
 /// A requested operational transition. `Resolve` is a human action;

@@ -13,7 +13,7 @@ use common::{make_user, unique_slug};
 use sqlx::PgPool;
 use uptimepage::domain::{
     IncidentEventKind, IncidentState, NewIncidentNotification, NewManualIncident,
-    NotificationReason, NotificationStatus, OrgId,
+    NotificationOutcome, NotificationReason, NotificationStatus, OrgId,
 };
 use uptimepage::storage::{
     Actor, IncidentOpsStore, LifecycleOutcome, PgIncidentOpsStore, create_org_with_owner,
@@ -291,11 +291,13 @@ async fn notification_log_record_retry_and_scope_pg() {
         .mark_notification(
             org,
             notif_id,
-            NotificationStatus::Failed,
-            2,
-            Some("still down".into()),
-            None,
-            Some(now + chrono::Duration::hours(1)),
+            NotificationOutcome {
+                status: NotificationStatus::Failed,
+                attempt: 2,
+                error: Some("still down".into()),
+                sent_at: None,
+                next_attempt_at: Some(now + chrono::Duration::hours(1)),
+            },
         )
         .await
         .unwrap();
@@ -323,11 +325,13 @@ async fn notification_log_record_retry_and_scope_pg() {
         .mark_notification(
             org,
             notif_id,
-            NotificationStatus::Sent,
-            3,
-            None,
-            Some(chrono::Utc::now()),
-            None,
+            NotificationOutcome {
+                status: NotificationStatus::Sent,
+                attempt: 3,
+                error: None,
+                sent_at: Some(chrono::Utc::now()),
+                next_attempt_at: None,
+            },
         )
         .await
         .unwrap();
