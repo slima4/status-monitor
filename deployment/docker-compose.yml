@@ -162,16 +162,19 @@ services:
     <<: *uptimepage_app
 
   postgres:
-    image: postgres:17-alpine
+    image: postgres:18-alpine
     restart: unless-stopped
     expose:
       - "5432"
+    # Tuning overrides; PGDATA still supplies the data directory.
+    command: ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"]
     environment:
       POSTGRES_USER: monitor
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: monitor
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql
+      - ./postgresql.conf:/etc/postgresql/postgresql.conf:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U monitor -d monitor"]
       interval: 10s

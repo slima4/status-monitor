@@ -4,7 +4,7 @@
 name: uptimepage
 services:
   postgres:
-    image: postgres:17-alpine
+    image: postgres:18-alpine
     environment:
       POSTGRES_USER: monitor
       POSTGRES_PASSWORD: monitor
@@ -12,7 +12,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - pg_data:/var/lib/postgresql/data
+      - pg_data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U monitor"]
       interval: 5s

@@ -94,7 +94,7 @@ jobs:
     needs: lint
     services:
       postgres:
-        image: postgres:17-alpine
+        image: postgres:18-alpine
         env:
           POSTGRES_USER: monitor
           POSTGRES_PASSWORD: monitor
