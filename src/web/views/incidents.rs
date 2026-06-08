@@ -682,6 +682,61 @@ pub struct IncidentDetailPage {
     pub owner_options: Vec<OwnerOption>,
     pub has_postmortem: bool,
     pub postmortem_published: bool,
+    /// Per-channel delivery log (the `incident_notifications` rows).
+    pub notifications: Vec<NotificationRow>,
+}
+
+/// One paging-delivery row for the incident's notifications section.
+pub struct NotificationRow {
+    pub channel: String,
+    pub transport: String,
+    pub reason: &'static str,
+    pub status: &'static str,
+    pub status_label: &'static str,
+    pub attempt: i32,
+    pub error: Option<String>,
+    pub sent_at: Option<DateTime<Utc>>,
+    pub next_attempt_at: Option<DateTime<Utc>>,
+    /// Failed with no retry scheduled — delivery gave up.
+    pub dead_lettered: bool,
+}
+
+fn notification_status_label(s: crate::domain::NotificationStatus) -> &'static str {
+    use crate::domain::NotificationStatus::*;
+    match s {
+        Queued => "Queued",
+        Sent => "Sent",
+        Failed => "Failed",
+        Suppressed => "Suppressed",
+    }
+}
+
+fn notification_row(
+    n: &crate::domain::IncidentNotification,
+    channel_names: &std::collections::HashMap<Uuid, String>,
+) -> NotificationRow {
+    use crate::domain::NotificationStatus;
+    let channel = n
+        .channel_id
+        .map(|c| {
+            channel_names
+                .get(&c)
+                .cloned()
+                .unwrap_or_else(|| "(deleted channel)".to_string())
+        })
+        .unwrap_or_else(|| n.transport.clone());
+    NotificationRow {
+        channel,
+        transport: n.transport.clone(),
+        reason: n.reason.as_db_str(),
+        status: n.status.as_db_str(),
+        status_label: notification_status_label(n.status),
+        attempt: n.attempt,
+        error: n.error.clone(),
+        sent_at: n.sent_at,
+        next_attempt_at: n.next_attempt_at,
+        dead_lettered: n.status == NotificationStatus::Failed && n.next_attempt_at.is_none(),
+    }
 }
 
 fn event_kind_label(e: &IncidentEvent) -> &'static str {
@@ -739,6 +794,21 @@ pub async fn detail(
     let postmortem = state.postmortem_store.get(org, id).await?;
     let public_updates = public_update_rows(&state, org, id, &members).await?;
 
+    let channel_names: std::collections::HashMap<Uuid, String> = state
+        .notification_channel_store
+        .list(org)
+        .await?
+        .into_iter()
+        .map(|c| (c.id, c.name))
+        .collect();
+    let notifications = state
+        .incident_ops_store
+        .notifications_for(org, id)
+        .await?
+        .iter()
+        .map(|n| notification_row(n, &channel_names))
+        .collect();
+
     let assigned_to = inc.assigned_to;
     let owner = assigned_to.and_then(|u| {
         members.get(&u).map(|email| OwnerAvatar {
@@ -776,6 +846,7 @@ pub async fn detail(
     );
     page.owner = owner;
     page.owner_options = owner_options;
+    page.notifications = notifications;
     Ok(page)
 }
 
@@ -812,6 +883,7 @@ fn make_detail_page(
         owner_options: Vec::new(),
         has_postmortem: postmortem.is_some(),
         postmortem_published: postmortem.is_some_and(|p| p.published_at.is_some()),
+        notifications: Vec::new(),
     }
 }
 
@@ -1324,6 +1396,51 @@ mod tests {
         assert!(html.contains("bob@example.com"));
         assert!(html.contains("Owner"));
         assert!(html.contains(r#"data-incident-assign-select"#));
+    }
+
+    #[test]
+    fn detail_renders_delivery_log_with_dead_letter_and_retry() {
+        let mut page = make_detail_page(
+            ops(IncidentState::Triggered),
+            Some("api".into()),
+            None,
+            "api".to_string(),
+            vec![],
+            vec![],
+            None,
+        );
+        page.notifications = vec![
+            NotificationRow {
+                channel: "Ops Slack".into(),
+                transport: "slack".into(),
+                reason: "opened",
+                status: "sent",
+                status_label: "Sent",
+                attempt: 1,
+                error: None,
+                sent_at: Some(Utc::now()),
+                next_attempt_at: None,
+                dead_lettered: false,
+            },
+            NotificationRow {
+                channel: "Pager webhook".into(),
+                transport: "webhook".into(),
+                reason: "opened",
+                status: "failed",
+                status_label: "Failed",
+                attempt: 5,
+                error: Some("connection refused".into()),
+                sent_at: None,
+                next_attempt_at: None,
+                dead_lettered: true,
+            },
+        ];
+        let html = page.render().unwrap();
+        assert!(html.contains("Delivery"));
+        assert!(html.contains("Ops Slack"));
+        assert!(html.contains("Pager webhook"));
+        assert!(html.contains("dead-letter"));
+        assert!(html.contains("connection refused"));
     }
 
     #[test]

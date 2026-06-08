@@ -278,11 +278,45 @@ async fn notification_log_record_retry_and_scope_pg() {
     assert_eq!(rows[0].status, NotificationStatus::Failed);
     let notif_id = rows[0].id;
 
-    // The retry scan picks it up (attempt 1 < cap) with the owning org.
-    let pending = store.pending_notifications(50, 5).await.unwrap();
+    // The retry scan picks it up (attempt 1 < cap, no backoff scheduled) with
+    // the owning org.
+    let now = chrono::Utc::now();
+    let pending = store.pending_notifications(now, 50, 5).await.unwrap();
     let mine = pending.iter().find(|p| p.id == notif_id).expect("pending");
     assert_eq!(mine.org, org);
     assert_eq!(mine.reason, NotificationReason::Opened);
+
+    // Schedule a backoff into the future: the scan must skip it until due.
+    store
+        .mark_notification(
+            org,
+            notif_id,
+            NotificationStatus::Failed,
+            2,
+            Some("still down".into()),
+            None,
+            Some(now + chrono::Duration::hours(1)),
+        )
+        .await
+        .unwrap();
+    assert!(
+        store
+            .pending_notifications(now, 50, 5)
+            .await
+            .unwrap()
+            .iter()
+            .all(|p| p.id != notif_id),
+        "a backed-off row is not retried before next_attempt_at"
+    );
+    assert!(
+        store
+            .pending_notifications(now + chrono::Duration::hours(2), 50, 5)
+            .await
+            .unwrap()
+            .iter()
+            .any(|p| p.id == notif_id),
+        "once the backoff elapses the row is due again"
+    );
 
     // Mark it sent; it must drop out of the retry scan.
     store
@@ -290,19 +324,20 @@ async fn notification_log_record_retry_and_scope_pg() {
             org,
             notif_id,
             NotificationStatus::Sent,
-            2,
+            3,
             None,
             Some(chrono::Utc::now()),
+            None,
         )
         .await
         .unwrap();
     let rows = store.notifications_for(org, id).await.unwrap();
     assert_eq!(rows[0].status, NotificationStatus::Sent);
-    assert_eq!(rows[0].attempt, 2);
+    assert_eq!(rows[0].attempt, 3);
     assert!(rows[0].sent_at.is_some());
     assert!(
         store
-            .pending_notifications(50, 5)
+            .pending_notifications(chrono::Utc::now(), 50, 5)
             .await
             .unwrap()
             .iter()

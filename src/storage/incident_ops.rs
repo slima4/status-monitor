@@ -259,15 +259,19 @@ pub trait IncidentOpsStore: Send + Sync {
     async fn notifications_for(&self, org: OrgId, id: Uuid) -> Result<Vec<IncidentNotification>>;
     /// Persist one paging attempt. Returns the new row id.
     async fn record_notification(&self, n: NewIncidentNotification) -> Result<Uuid>;
-    /// Cross-org failed pages still under the attempt cap, oldest first — the
+    /// Cross-org failed pages still under the attempt cap whose backoff has
+    /// elapsed (`next_attempt_at` null or `<= now`), soonest-due first — the
     /// engine's retry sweep.
     async fn pending_notifications(
         &self,
+        now: DateTime<Utc>,
         limit: usize,
         max_attempts: i32,
     ) -> Result<Vec<PendingNotification>>;
-    /// Update a paging row after a delivery attempt. `org`-scoped to keep the
-    /// tenant-isolation invariant even though ids today come from the engine.
+    /// Update a paging row after a delivery attempt. `next_attempt_at` schedules
+    /// the next retry (backoff) or clears it once sent/suppressed/exhausted.
+    /// `org`-scoped to keep the tenant-isolation invariant even though ids today
+    /// come from the engine.
     async fn mark_notification(
         &self,
         org: OrgId,
@@ -276,6 +280,7 @@ pub trait IncidentOpsStore: Send + Sync {
         attempt: i32,
         error: Option<String>,
         sent_at: Option<DateTime<Utc>>,
+        next_attempt_at: Option<DateTime<Utc>>,
     ) -> Result<()>;
     /// Start escalation on a freshly-opened incident: stamp the resolved
     /// policy, set the first level + round 0, and arm `next_escalation_at`.
@@ -454,7 +459,7 @@ fn row_to_event(r: EventRow) -> IncidentEvent {
 }
 
 const NOTIF_COLS: &str = "id, incident_id, escalation_level, target_user_id, channel_id, \
-     transport, reason, status, attempt, error, created_at, sent_at";
+     transport, reason, status, attempt, error, created_at, sent_at, next_attempt_at";
 
 #[derive(sqlx::FromRow)]
 struct NotifRow {
@@ -470,6 +475,7 @@ struct NotifRow {
     error: Option<String>,
     created_at: DateTime<Utc>,
     sent_at: Option<DateTime<Utc>>,
+    next_attempt_at: Option<DateTime<Utc>>,
 }
 
 fn row_to_notif(r: NotifRow) -> IncidentNotification {
@@ -486,6 +492,7 @@ fn row_to_notif(r: NotifRow) -> IncidentNotification {
         error: r.error,
         created_at: r.created_at,
         sent_at: r.sent_at,
+        next_attempt_at: r.next_attempt_at,
     }
 }
 
@@ -1191,6 +1198,7 @@ impl IncidentOpsStore for PgIncidentOpsStore {
 
     async fn pending_notifications(
         &self,
+        now: DateTime<Utc>,
         limit: usize,
         max_attempts: i32,
     ) -> Result<Vec<PendingNotification>> {
@@ -1209,10 +1217,12 @@ impl IncidentOpsStore for PgIncidentOpsStore {
             r#"SELECT id, org_id, incident_id, channel_id, transport, reason, attempt
                FROM incident_notifications
                WHERE status IN ('queued','failed') AND attempt < $1
-               ORDER BY created_at ASC LIMIT $2"#,
+                 AND (next_attempt_at IS NULL OR next_attempt_at <= $3)
+               ORDER BY next_attempt_at ASC NULLS FIRST LIMIT $2"#,
         )
         .bind(max_attempts)
         .bind(cap)
+        .bind(now)
         .fetch_all(&self.pool)
         .await
         .map_err(|e| anyhow::anyhow!("pending_notifications: {e}"))?;
@@ -1238,10 +1248,11 @@ impl IncidentOpsStore for PgIncidentOpsStore {
         attempt: i32,
         error: Option<String>,
         sent_at: Option<DateTime<Utc>>,
+        next_attempt_at: Option<DateTime<Utc>>,
     ) -> Result<()> {
         sqlx::query(
             r#"UPDATE incident_notifications
-               SET status = $3, attempt = $4, error = $5, sent_at = $6
+               SET status = $3, attempt = $4, error = $5, sent_at = $6, next_attempt_at = $7
                WHERE id = $1 AND org_id = $2"#,
         )
         .bind(id)
@@ -1250,6 +1261,7 @@ impl IncidentOpsStore for PgIncidentOpsStore {
         .bind(attempt)
         .bind(error)
         .bind(sent_at)
+        .bind(next_attempt_at)
         .execute(&self.pool)
         .await
         .map_err(|e| anyhow::anyhow!("mark_notification: {e}"))?;
@@ -1479,6 +1491,15 @@ impl InMemoryIncidentOpsStore {
 
     pub fn seed(&self, incident: OpsIncident) {
         self.inner.lock().incidents.push(incident);
+    }
+
+    /// Test helper: clear every notification's retry backoff so the next
+    /// `retry_pending` treats them as due (simulates the backoff elapsing).
+    #[cfg(test)]
+    pub fn clear_retry_backoff(&self) {
+        for (_, n) in self.inner.lock().notifications.iter_mut() {
+            n.next_attempt_at = None;
+        }
     }
 
     fn push_event(
@@ -1946,6 +1967,7 @@ impl IncidentOpsStore for InMemoryIncidentOpsStore {
             error: n.error,
             created_at: Utc::now(),
             sent_at: n.sent_at,
+            next_attempt_at: None,
         };
         self.inner.lock().notifications.push((n.org, row));
         Ok(id)
@@ -1953,6 +1975,7 @@ impl IncidentOpsStore for InMemoryIncidentOpsStore {
 
     async fn pending_notifications(
         &self,
+        now: DateTime<Utc>,
         limit: usize,
         max_attempts: i32,
     ) -> Result<Vec<PendingNotification>> {
@@ -1961,7 +1984,13 @@ impl IncidentOpsStore for InMemoryIncidentOpsStore {
             .lock()
             .notifications
             .iter()
-            .filter(|(_, n)| n.status == NotificationStatus::Failed && n.attempt < max_attempts)
+            .filter(|(_, n)| {
+                matches!(
+                    n.status,
+                    NotificationStatus::Failed | NotificationStatus::Queued
+                ) && n.attempt < max_attempts
+                    && n.next_attempt_at.is_none_or(|t| t <= now)
+            })
             .take(limit)
             .map(|(org, n)| PendingNotification {
                 id: n.id,
@@ -1983,6 +2012,7 @@ impl IncidentOpsStore for InMemoryIncidentOpsStore {
         attempt: i32,
         error: Option<String>,
         sent_at: Option<DateTime<Utc>>,
+        next_attempt_at: Option<DateTime<Utc>>,
     ) -> Result<()> {
         let mut g = self.inner.lock();
         if let Some((_, n)) = g
@@ -1994,6 +2024,7 @@ impl IncidentOpsStore for InMemoryIncidentOpsStore {
             n.attempt = attempt;
             n.error = error;
             n.sent_at = sent_at;
+            n.next_attempt_at = next_attempt_at;
         }
         Ok(())
     }

@@ -86,6 +86,7 @@ use crate::storage::UptimeStats;
         handlers::incidents::post_incident_update,
         handlers::incidents::list_incidents,
         handlers::incidents::get_incident,
+        handlers::incidents::incident_notifications,
         handlers::incidents::declare_incident,
         handlers::incidents::acknowledge_incident,
         handlers::incidents::resolve_incident,

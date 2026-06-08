@@ -97,6 +97,34 @@
     {% endif %}
   </section>
 
+  <section class="space-y-2">
+    <h2 class="text-sm font-semibold uppercase tracking-wide text-muted">Delivery</h2>
+    {% if notifications.is_empty() %}
+    <div class="sticker-card p-4 text-sm text-muted">No pages sent for this incident.</div>
+    {% else %}
+    <ol class="sticker-card divide-y divide-[color:var(--theme-line)]">
+      {% for n in notifications %}
+      <li class="flex flex-wrap items-baseline gap-2 px-4 py-2 text-sm">
+        <span class="dashboard-subhead__mono text-xs">{{ n.channel }}</span>
+        <span class="dashboard-chip">{{ n.reason }}</span>
+        {% if n.dead_lettered %}
+        <span class="status-badge status-badge--down" title="Delivery gave up after all retries">dead-letter</span>
+        {% else %}
+        <span class="dashboard-chip">{{ n.status_label }}{% if n.attempt > 1 %} · try {{ n.attempt }}{% endif %}</span>
+        {% endif %}
+        {% match n.sent_at %}{% when Some with (t) %}
+        <time class="ml-auto text-xs text-muted tabular-nums" datetime="{{ t|iso_ts }}" data-tz="exact">{{ t|human_ts }}</time>
+        {% when None %}{% endmatch %}
+        {% match n.next_attempt_at %}{% when Some with (t) %}
+        <span class="w-full text-xs text-quiet">next retry <time datetime="{{ t|iso_ts }}" data-tz="exact">{{ t|human_ts }}</time></span>
+        {% when None %}{% endmatch %}
+        {% match n.error %}{% when Some with (e) %}<span class="w-full whitespace-pre-line font-mono text-xs text-muted">{{ e }}</span>{% when None %}{% endmatch %}
+      </li>
+      {% endfor %}
+    </ol>
+    {% endif %}
+  </section>
+
   <section class="space-y-3" data-incident-id="{{ id }}">
     <div class="flex items-center justify-between gap-2">
       <h2 class="text-sm font-semibold uppercase tracking-wide text-muted">Status updates</h2>

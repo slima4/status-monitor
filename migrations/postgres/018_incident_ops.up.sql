@@ -100,16 +100,20 @@ CREATE TABLE incident_notifications (
     attempt          INTEGER NOT NULL DEFAULT 1,
     error            TEXT,
     created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
-    sent_at          TIMESTAMPTZ
+    sent_at          TIMESTAMPTZ,
+    -- Earliest time the retry sweep may re-attempt a failed page (exponential
+    -- backoff). NULL = eligible now (never tried, or first failure pre-schedule).
+    next_attempt_at  TIMESTAMPTZ
 );
 
 CREATE INDEX idx_incident_notifications_incident
     ON incident_notifications (org_id, incident_id, created_at);
--- Retry sweep: pending_notifications walks created_at ASC; index the sort key
--- (under the same partial predicate) so the LIMIT stops early instead of
--- sorting the whole pending set every tick.
+-- Retry sweep: pending_notifications orders by next_attempt_at NULLS FIRST so
+-- due (and never-scheduled) rows surface first; index the sort key under the
+-- same partial predicate so the LIMIT stops early instead of scanning the
+-- whole pending set every tick.
 CREATE INDEX idx_incident_notifications_retry
-    ON incident_notifications (created_at) WHERE status IN ('queued','failed');
+    ON incident_notifications (next_attempt_at NULLS FIRST) WHERE status IN ('queued','failed');
 
 CREATE TRIGGER trg_incident_notifications_org_match
     BEFORE INSERT OR UPDATE OF incident_id, org_id ON incident_notifications

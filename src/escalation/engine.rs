@@ -209,6 +209,19 @@ impl Worker {
         Duration::from_secs(self.cfg.tick_interval_secs.max(1))
     }
 
+    /// Wall-clock time of the next retry after `attempt` just failed, or `None`
+    /// once the attempt cap is reached (the row is dead-lettered). Adds up to
+    /// +50% random jitter so a correlated burst of failures doesn't retry in
+    /// lockstep against a recovering endpoint.
+    fn retry_backoff(&self, attempt: i32) -> Option<chrono::DateTime<Utc>> {
+        retry_delay_secs(attempt, self.cfg.retry_backoff_base_secs, self.cfg.max_attempts).map(
+            |secs| {
+                let jitter = fastrand::u64(0..=secs / 2 + 1);
+                Utc::now() + chrono::Duration::seconds((secs + jitter) as i64)
+            },
+        )
+    }
+
     /// The shard lock guarding paging for `incident_id`.
     fn page_lock(&self, incident_id: Uuid) -> &Mutex<()> {
         let shard = (incident_id.as_u128() % PAGE_LOCK_SHARDS as u128) as usize;
@@ -623,6 +636,10 @@ impl Worker {
             if status == NotificationStatus::Sent {
                 paged += 1;
             }
+            // A first-attempt failure schedules the backoff so the retry sweep
+            // waits instead of re-firing next tick.
+            let next_attempt_at =
+                (status == NotificationStatus::Failed).then(|| self.retry_backoff(1)).flatten();
             self.ops
                 .mark_notification(
                     org,
@@ -631,6 +648,7 @@ impl Worker {
                     1,
                     error,
                     (status == NotificationStatus::Sent).then(Utc::now),
+                    next_attempt_at,
                 )
                 .await?;
         }
@@ -685,7 +703,7 @@ impl Worker {
     async fn retry_pending(&self) {
         let max_attempts = self.cfg.max_attempts as i32;
         let limit = self.cfg.max_pages_per_tick.max(1) as usize;
-        let pending = match self.ops.pending_notifications(limit, max_attempts).await {
+        let pending = match self.ops.pending_notifications(Utc::now(), limit, max_attempts).await {
             Ok(p) => p,
             Err(err) => {
                 tracing::warn!(error = %err, "escalation retry scan failed");
@@ -729,6 +747,8 @@ impl Worker {
             None => None,
         };
         let Some((notice, channel_cfg, state)) = rebuilt else {
+            // Channel/incident gone: back off so a dead target doesn't churn
+            // every tick, and let the attempt cap retire the row.
             self.ops
                 .mark_notification(
                     p.org,
@@ -737,11 +757,13 @@ impl Worker {
                     next_attempt,
                     None,
                     None,
+                    self.retry_backoff(next_attempt),
                 )
                 .await?;
             return Ok(());
         };
         if reason_is_stale(p.reason, state) {
+            // Terminal: the page no longer matches the incident state.
             self.ops
                 .mark_notification(
                     p.org,
@@ -750,11 +772,14 @@ impl Worker {
                     next_attempt,
                     None,
                     None,
+                    None,
                 )
                 .await?;
             return Ok(());
         }
         let (status, error) = self.deliver(&channel_cfg, &notice).await;
+        let next_attempt_at =
+            (status == NotificationStatus::Failed).then(|| self.retry_backoff(next_attempt)).flatten();
         self.ops
             .mark_notification(
                 p.org,
@@ -763,6 +788,7 @@ impl Worker {
                 next_attempt,
                 error,
                 (status == NotificationStatus::Sent).then(Utc::now),
+                next_attempt_at,
             )
             .await?;
         Ok(())
@@ -953,6 +979,19 @@ fn redact_secrets(msg: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// Exponential retry backoff in seconds after `attempt` just failed:
+/// `base * 2^(attempt-1)` capped at one hour. `None` once `attempt` reaches
+/// `max_attempts` — the row is dead-lettered, not rescheduled.
+fn retry_delay_secs(attempt: i32, base_secs: u64, max_attempts: u32) -> Option<u64> {
+    const CAP_SECS: u64 = 3600;
+    if attempt >= max_attempts as i32 {
+        return None;
+    }
+    let base = base_secs.max(1);
+    let shift = (attempt.max(1) - 1).min(16) as u32;
+    Some(base.saturating_mul(1u64 << shift).min(CAP_SECS))
 }
 
 /// Wrap bare channel ids (the no-policy fallback + resolution paths) as page
@@ -1632,6 +1671,18 @@ mod tests {
     }
 
     #[test]
+    fn retry_backoff_doubles_then_dead_letters() {
+        // base 30s, cap 5 attempts: 30, 60, 120, 240, then None (exhausted).
+        assert_eq!(retry_delay_secs(1, 30, 5), Some(30));
+        assert_eq!(retry_delay_secs(2, 30, 5), Some(60));
+        assert_eq!(retry_delay_secs(3, 30, 5), Some(120));
+        assert_eq!(retry_delay_secs(4, 30, 5), Some(240));
+        assert_eq!(retry_delay_secs(5, 30, 5), None, "attempt cap → dead-letter");
+        // The doubling is capped at one hour.
+        assert_eq!(retry_delay_secs(10, 30, 100), Some(3600));
+    }
+
+    #[test]
     fn redact_secrets_strips_channel_url_paths() {
         let slack = "POST https://hooks.slack.com/services/T01/B02/abcSECRETxyz failed: 404";
         let out = redact_secrets(slack);
@@ -1693,6 +1744,8 @@ mod tests {
             .await
             .unwrap();
         for _ in 0..10 {
+            // Each round simulates the exponential backoff having elapsed.
+            ops.clear_retry_backoff();
             eng.retry_pending().await;
         }
         let rows = ops.notifications_for(org(), id).await.unwrap();
@@ -1720,6 +1773,7 @@ mod tests {
             .await
             .unwrap();
         ops.resolve(org(), id, Actor::System, None).await.unwrap();
+        ops.clear_retry_backoff();
         eng.retry_pending().await;
         let rows = ops.notifications_for(org(), id).await.unwrap();
         assert_eq!(rows.len(), 1);

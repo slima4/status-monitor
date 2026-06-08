@@ -245,6 +245,34 @@ pub async fn get_incident(
 }
 
 #[utoipa::path(
+    get, path = "/api/v1/incidents/{id}/notifications", tag = "incidents",
+    summary = "Per-channel delivery log for an incident",
+    description = "Every paging attempt for the incident — channel, transport, status, \
+                   attempt count, error (secrets redacted), and retry schedule — so a \
+                   responder can confirm a page went through or see why it failed.",
+    params(("id" = Uuid, Path)),
+    responses(
+        (status = 200, body = [crate::domain::IncidentNotification]),
+        (status = 404, body = ApiError),
+    ),
+)]
+pub async fn incident_notifications(
+    State(state): State<AppState>,
+    Authorized(org, _): Authorized<IncidentsRead>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Vec<crate::domain::IncidentNotification>>> {
+    // 404 a missing/foreign incident rather than returning an empty log, so the
+    // response can't be used to probe which incident ids exist in other tenants.
+    if state.incident_ops_store.get(org, id).await?.is_none() {
+        return Err(AppError::not_found(
+            codes::INCIDENT_NOT_FOUND,
+            "incident not found",
+        ));
+    }
+    Ok(Json(state.incident_ops_store.notifications_for(org, id).await?))
+}
+
+#[utoipa::path(
     post, path = "/api/v1/incidents", tag = "incidents",
     summary = "Declare a manual incident",
     request_body = NewManualIncident,

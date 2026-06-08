@@ -155,6 +155,9 @@ pub struct EscalationConfig {
     pub max_pages_per_tick: u32,
     /// Give up paging a channel after this many failed attempts.
     pub max_attempts: u32,
+    /// Base delay for the exponential retry backoff: attempt n waits
+    /// `base * 2^(n-1)` (capped) before the next try.
+    pub retry_backoff_base_secs: u64,
 }
 
 impl Default for EscalationConfig {
@@ -164,6 +167,7 @@ impl Default for EscalationConfig {
             tick_interval_secs: 15,
             max_pages_per_tick: 500,
             max_attempts: 5,
+            retry_backoff_base_secs: 30,
         }
     }
 }

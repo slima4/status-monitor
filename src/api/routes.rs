@@ -159,6 +159,10 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
                 .get(handlers::incidents::get_incident),
         )
         .route(
+            "/incidents/{id}/notifications",
+            get(handlers::incidents::incident_notifications),
+        )
+        .route(
             "/incidents/{id}/updates",
             post(handlers::incidents::post_incident_update),
         )

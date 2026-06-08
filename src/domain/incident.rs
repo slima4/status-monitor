@@ -651,6 +651,10 @@ pub struct IncidentNotification {
     pub created_at: DateTime<Utc>,
     #[schema(nullable = true)]
     pub sent_at: Option<DateTime<Utc>>,
+    /// When the retry sweep will next re-attempt a failed delivery; `None` once
+    /// it has been sent, suppressed, or dead-lettered (attempts exhausted).
+    #[schema(nullable = true)]
+    pub next_attempt_at: Option<DateTime<Utc>>,
 }
 
 /// A paging delivery-log row to persist. The store stamps `id`/`created_at`.
