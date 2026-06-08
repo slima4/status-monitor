@@ -191,10 +191,10 @@ async fn purges_past_window_and_keeps_fresh_rows() {
 #[test]
 fn windows_match_privacy_policy_and_clickhouse_ttl() {
     // check-result retention is the ClickHouse table TTLs, not an app-side
-    // knob — keep these in lockstep with the literals in the CH migrations and
-    // the public claims in `docs/legal/privacy.md`. Raw + 1m rollup live 90
-    // days; the 1h rollup carries the aggregated history 13 months.
-    const CHECK_RESULTS_RAW_DAYS: u32 = 90;
+    // knob — keep these in lockstep with the CH migrations and the public
+    // claims in `docs/legal/privacy.md`. Raw + 1m rollup live 30 days; the 1h
+    // rollup carries the aggregated history 13 months.
+    const CHECK_RESULTS_RAW_DAYS: u32 = 30;
     const CHECK_RESULTS_HISTORY_MONTHS: u32 = 13;
     let r = RetentionConfig::default();
     let s = SessionConfig::default();
@@ -227,8 +227,9 @@ fn windows_match_privacy_policy_and_clickhouse_ttl() {
 
     let m1 = include_str!("../migrations/clickhouse/001_initial.sql");
     assert!(
-        m1.contains(&format!("INTERVAL {CHECK_RESULTS_RAW_DAYS} DAY")),
-        "check_results raw ClickHouse TTL must equal CHECK_RESULTS_RAW_DAYS"
+        m1.contains(&format!("DEFAULT {CHECK_RESULTS_RAW_DAYS} CODEC(ZSTD(1))"))
+            && m1.contains("TTL timestamp + toIntervalDay(ttl_days)"),
+        "check_results raw retention must be the per-row ttl_days DEFAULT = CHECK_RESULTS_RAW_DAYS"
     );
     let m2 = include_str!("../migrations/clickhouse/002_check_results_1h.sql");
     assert!(

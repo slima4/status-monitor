@@ -16,11 +16,34 @@ use moka::future::Cache;
 use serde::Deserialize;
 use sqlx::PgPool;
 
+use std::collections::HashMap;
+
+use anyhow::Context;
+use uuid::Uuid;
+
 use crate::config::AppConfig;
-use crate::domain::quota::Plan;
+use crate::domain::quota::{Plan, raw_ttl_days};
 use crate::domain::{OrgId, UserId};
 use crate::error::{AppError, Result};
 use crate::storage::{ClampedRange, TimeRange};
+
+/// Bulk `org_id → physical raw-retention days`, one query, the same ceiling as
+/// [`Plan::raw_window_days`] via [`raw_ttl_days`]. Feeds the write-path TTL
+/// snapshot ([`crate::storage::org_ttl`]), which must read every active org
+/// without thrashing the per-org plan cache. Plan-level: `raw_days` carries no
+/// per-org override or add-on today, so no override folding is applied.
+pub async fn raw_ttl_days_by_org(pool: &PgPool) -> Result<HashMap<Uuid, u16>> {
+    let rows: Vec<(Uuid, i32)> = sqlx::query_as(
+        "SELECT o.id, p.raw_days FROM organizations o JOIN plans p ON p.id = o.plan_id",
+    )
+    .fetch_all(pool)
+    .await
+    .context("load raw_days by org")?;
+    Ok(rows
+        .into_iter()
+        .map(|(id, raw)| (id, raw_ttl_days(raw)))
+        .collect())
+}
 
 /// Cache-key tags for the usage cache. One vocabulary, equal to the
 /// `plans` column names so the transparency endpoint, the UI, and any

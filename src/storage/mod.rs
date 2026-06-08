@@ -12,6 +12,7 @@ pub mod monitor_shares;
 pub mod notification_channels;
 pub mod on_call;
 pub mod operator;
+pub mod org_ttl;
 pub mod orgs;
 pub mod page_assets;
 pub mod postgres;
@@ -23,6 +24,7 @@ pub mod users;
 
 pub use admin::AdminRepo;
 pub use clickhouse::{ClickhouseResultSink, ClickhouseResultsStore, build_client, migrate};
+pub use org_ttl::OrgTtlDays;
 pub use contacts::{ContactStore, InMemoryContactStore, PgContactStore};
 pub use domain_expiry_state::{
     DomainExpiryState, DomainExpiryStateStore, InMemoryDomainExpiryStateStore,

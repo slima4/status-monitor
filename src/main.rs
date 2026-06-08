@@ -188,10 +188,15 @@ async fn main() -> Result<()> {
     // distinct agent id, so the `agent_id` dimension cleanly separates
     // control-plane self-checks from real per-region agents (which carry their
     // agents-row id).
+    // Snapshot warms via the refresh task's immediate first tick (spawned
+    // below), so boot doesn't block on a PG round-trip; early rows default
+    // until it lands.
+    let org_ttl = storage::OrgTtlDays::new();
     let result_sink: Arc<dyn ResultSink> = Arc::new(ClickhouseResultSink::new(
         clickhouse_client.clone(),
         cfg.scheduler.region.clone(),
         "control-plane".to_string(),
+        org_ttl.clone(),
     ));
     let result_sink_for_state = result_sink.clone();
     let ch_client_for_public = clickhouse_client.clone();
@@ -278,6 +283,8 @@ async fn main() -> Result<()> {
         let token = root.clone();
         tokio::spawn(async move { batcher.run(token).await })
     };
+    let org_ttl_handle: JoinHandle<()> =
+        storage::org_ttl::spawn_refresh(org_ttl, pg_pool.clone(), root.clone());
     // Floor at 100ms to keep a misconfigured 0 / sub-tick value from spinning.
     let sample_interval =
         Duration::from_millis(cfg.observability.gauge_sample_interval_ms.max(100));
@@ -567,6 +574,7 @@ async fn main() -> Result<()> {
         let _ = tokio::join!(
             scheduler_handle,
             batcher_handle,
+            org_ttl_handle,
             sampler_handle,
             incident_writer_handle,
             agent_health_handle,

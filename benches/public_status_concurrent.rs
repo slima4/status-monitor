@@ -171,7 +171,12 @@ async fn build_fixture() -> Option<Fixture> {
             .expect("slug fresh");
         let target_store =
             Arc::new(PostgresTargetStore::from_pool(pool.clone(), None)) as Arc<dyn TargetStore>;
-        let sink = ClickhouseResultSink::new(ch.clone(), "default".into(), "default".into());
+        let sink = ClickhouseResultSink::new(
+            ch.clone(),
+            "default".into(),
+            "default".into(),
+            uptimepage::storage::OrgTtlDays::new(),
+        );
 
         let page_id = page_store
             .create(

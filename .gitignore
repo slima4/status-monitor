@@ -16,6 +16,8 @@
 CLAUDE.md
 claude.md
 .claude/
+.agents/
+skills-lock.json
 
 # Local specs (not tracked in vcs)
 /specs/

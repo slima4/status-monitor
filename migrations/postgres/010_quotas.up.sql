@@ -86,7 +86,7 @@ INSERT INTO plans (
     incident_narration_enabled, is_listed
 ) VALUES (
     'pro', 'Pro', 'For teams and businesses running production services',
-    150, 30, 395, 90,  -- max_targets, min_check_interval_secs, retention_days (13mo), raw_days
+    150, 30, 395, 30,  -- max_targets, min_check_interval_secs, retention_days (13mo), raw_days
     15, 25, 10,    -- max_members, max_pending_invitations, max_api_tokens_per_user
     75, 5,   -- max_public_components, max_status_pages
     5, 10,   -- max_share_links_per_monitor, max_shared_monitors

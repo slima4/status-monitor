@@ -62,6 +62,7 @@ password = "monitor"
 batch_size = 1000
 batch_timeout_ms = 500
 buffer_size = 100000
+async_insert = true
 
 [scheduler]
 target_refresh_interval_secs = 30

@@ -57,7 +57,9 @@ impl Default for AggregatorConfig {
 }
 
 const CH_TABLE: &str = "check_results";
-const CH_MV: &str = "check_results_1m";
+// Day-resolution strip reads the hour rollup (13-month tail), so it spans the
+// full `history_days` window independent of the shorter 1m-rollup TTL.
+const CH_HISTORY_MV: &str = "check_results_1h";
 
 /// One monitor as it sits on a page: its target id, the resolved public name
 /// (per-page override or the monitor's own name), and the page-local grouping.
@@ -538,23 +540,23 @@ impl OrgAggregator {
                 FROM (
                     SELECT
                         target_id,
-                        toStartOfDay(minute) AS day,
+                        toStartOfDay(hour) AS day,
                         countMerge(total_checks) AS total,
                         countIfMerge(up_checks) AS up_
-                    FROM {CH_MV}
+                    FROM {CH_HISTORY_MV}
                     WHERE org_id = ?
                       AND has(arrayMap(x -> toUUID(x), ?), target_id)
-                      AND minute >= fromUnixTimestamp64Milli(?)
-                      AND minute < fromUnixTimestamp64Milli(?)
-                    GROUP BY target_id, minute
+                      AND hour >= fromUnixTimestamp(?)
+                      AND hour < fromUnixTimestamp(?)
+                    GROUP BY target_id, hour
                 )
                 GROUP BY target_id, day
                 ORDER BY target_id, day"#
             ))
             .bind(org.0)
             .bind(component_ids)
-            .bind(from.timestamp_millis())
-            .bind(now.timestamp_millis())
+            .bind(from.timestamp())
+            .bind(now.timestamp())
             .fetch_all::<HistoryDayRow>()
             .await
             .context("ch history strip")?;
@@ -609,14 +611,14 @@ impl OrgAggregator {
                    FROM {CH_TABLE}
                    WHERE org_id = ?
                      AND has(arrayMap(x -> toUUID(x), ?), target_id)
-                     AND timestamp >= fromUnixTimestamp64Milli(?)
-                     AND timestamp <  fromUnixTimestamp64Milli(?)
+                     AND timestamp >= fromUnixTimestamp(?)
+                     AND timestamp <  fromUnixTimestamp(?)
                    GROUP BY target_id"#
             ))
             .bind(org.0)
             .bind(component_ids)
-            .bind(from.timestamp_millis())
-            .bind(now.timestamp_millis())
+            .bind(from.timestamp())
+            .bind(now.timestamp())
             .fetch_all::<RecentCountRow>()
             .await
             .context("ch recent counters")?;

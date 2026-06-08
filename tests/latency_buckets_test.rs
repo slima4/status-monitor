@@ -58,7 +58,12 @@ async fn latency_buckets_merge_quantiles_and_phases_from_rollup() {
     let Some(ch) = common::ch_client_from_env().await else {
         return;
     };
-    let sink = ClickhouseResultSink::new(ch.clone(), "default".into(), "default".into());
+    let sink = ClickhouseResultSink::new(
+        ch.clone(),
+        "default".into(),
+        "default".into(),
+        uptimepage::storage::OrgTtlDays::new(),
+    );
     let store = ClickhouseResultsStore::from_client(ch);
     let org = Uuid::now_v7();
     let target = Uuid::now_v7();
@@ -111,7 +116,12 @@ async fn latency_buckets_clamp_all_null_phases_to_zero() {
     let Some(ch) = common::ch_client_from_env().await else {
         return;
     };
-    let sink = ClickhouseResultSink::new(ch.clone(), "default".into(), "default".into());
+    let sink = ClickhouseResultSink::new(
+        ch.clone(),
+        "default".into(),
+        "default".into(),
+        uptimepage::storage::OrgTtlDays::new(),
+    );
     let store = ClickhouseResultsStore::from_client(ch);
     let org = Uuid::now_v7();
     let target = Uuid::now_v7();
@@ -150,7 +160,12 @@ async fn latency_buckets_route_to_hour_rollup_past_90d() {
     let Some(ch) = common::ch_client_from_env().await else {
         return;
     };
-    let sink = ClickhouseResultSink::new(ch.clone(), "default".into(), "default".into());
+    let sink = ClickhouseResultSink::new(
+        ch.clone(),
+        "default".into(),
+        "default".into(),
+        uptimepage::storage::OrgTtlDays::new(),
+    );
     let store = ClickhouseResultsStore::from_client(ch);
     let org = Uuid::now_v7();
     let target = Uuid::now_v7();

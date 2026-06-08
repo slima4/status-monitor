@@ -18,33 +18,55 @@ use crate::domain::{
     CheckResult, CheckStatus, Incident, OrgId, coalesce_incidents, coalesce_incidents_bad_only,
 };
 use crate::error::Result;
+use crate::storage::org_ttl::OrgTtlDays;
 use crate::storage::traits::{
     ClampedRange, IncidentListQuery, ResultSink, ResultsStore, TimeRange, UptimeStats,
 };
 
 const TABLE: &str = "check_results";
 
-/// Seconds bound for the matview `minute` column (`DateTime`, seconds). The raw
-/// table's `timestamp` is ms — binding a ms value here silently matches no rows.
+/// Seconds bound for the matview `minute` column (`DateTime`).
 #[derive(Serialize)]
 struct MinuteBound(u32);
 
 impl MinuteBound {
     fn new(dt: DateTime<Utc>) -> Self {
-        Self(dt.timestamp().clamp(0, i64::from(u32::MAX)) as u32)
+        Self(to_unix_secs(dt))
     }
+}
+
+/// `timestamp`/`ingested_at` are `DateTime` (UInt32 seconds on the wire).
+fn to_unix_secs(dt: DateTime<Utc>) -> u32 {
+    dt.timestamp().clamp(0, i64::from(u32::MAX)) as u32
+}
+
+fn from_unix_secs(secs: u32) -> DateTime<Utc> {
+    Utc.timestamp_opt(i64::from(secs), 0)
+        .single()
+        .unwrap_or_else(Utc::now)
 }
 
 /// `[from, to)` over the matview `minute` column; bind via [`bind_minute_window`].
 const MINUTE_WINDOW: &str = "minute >= fromUnixTimestamp(?) AND minute < fromUnixTimestamp(?)";
 
 /// 1m rollup TTL (days). Ranges reaching past it read the 1h rollup instead.
-const MINUTE_ROLLUP_DAYS: i64 = 90;
+const MINUTE_ROLLUP_DAYS: i64 = 30;
 
 /// The two [`MinuteBound`] binds [`MINUTE_WINDOW`] expects; call after the
 /// leading positional binds (org_id, target_id, …).
 fn bind_minute_window(q: Query, from: DateTime<Utc>, to: DateTime<Utc>) -> Query {
     q.bind(MinuteBound::new(from)).bind(MinuteBound::new(to))
+}
+
+/// `(table, time_column)` for a range: the 1m rollup within its TTL, else the
+/// 1h rollup. Both carry the same AggregateFunction columns, so a merge query
+/// reads either by swapping these two tokens.
+fn rollup_source(from: DateTime<Utc>) -> (&'static str, &'static str) {
+    if from >= Utc::now() - chrono::Duration::days(MINUTE_ROLLUP_DAYS) {
+        ("check_results_1m", "minute")
+    } else {
+        ("check_results_1h", "hour")
+    }
 }
 
 /// Ordered list of migrations. Each entry is `(filename, sql)`. Filename is
@@ -78,13 +100,13 @@ const MIGRATIONS: &[(&str, &str)] = &[
         include_str!("../../migrations/clickhouse/001_initial.sql"),
     ),
     // 002 `check_results_1h`: the hour-rollup for the long history tail. Same
-    // AggregateFunction columns as `check_results_1m`, so [`latency_buckets`]
+    // AggregateFunction columns as `check_results_1m`, so [`rollup_source`]
     // merges either with one finaliser set; it routes ranges past the 1m
-    // rollup's 90-day TTL here, keeping minute resolution within 90 days. A 2nd
-    // matview on raw `check_results` (accrues forward, no backfill). The 13-month
-    // TTL exceeds the 90-day raw/1m TTL, so the Privacy Policy and the
-    // `retention_test` guard disclose it; org erasure must clear it too (see
-    // [`CH_TENANT_TABLES`]). Migration SQL is frozen — keep this rationale here.
+    // rollup's 30-day TTL here. A 2nd matview on raw `check_results` (accrues
+    // forward, no backfill). The 13-month TTL exceeds the raw/1m TTL, so the
+    // Privacy Policy and the `retention_test` guard disclose it; org erasure
+    // must clear it too (see [`CH_TENANT_TABLES`]). Migration SQL is frozen —
+    // keep this rationale here.
     (
         "002_check_results_1h.sql",
         include_str!("../../migrations/clickhouse/002_check_results_1h.sql"),
@@ -190,7 +212,7 @@ const EXPECTED_ROLLUP_SCHEMA: &[(&str, &str)] = &[
     ("avg_ttfb_ms", "AggregateFunction(avg, Nullable(UInt16))"),
     (
         "last_status_state",
-        "AggregateFunction(argMax, Enum8('up' = 1, 'down' = 2, 'degraded' = 3, 'error' = 4), DateTime64(3, 'UTC'))",
+        "AggregateFunction(argMax, Enum8('up' = 1, 'down' = 2, 'degraded' = 3, 'error' = 4), DateTime('UTC'))",
     ),
 ];
 
@@ -351,6 +373,18 @@ pub fn build_client(cfg: &ClickhouseConfig) -> Client {
     if !cfg.password.expose_secret().is_empty() {
         client = client.with_password(cfg.password.expose_secret());
     }
+    if cfg.async_insert {
+        // INSERT-only settings; SELECTs ignore them. `wait_for_async_insert`
+        // keeps end() returning only after a durable flush. `async_insert`
+        // coalesces server-side, which forms its own blocks — so the raw
+        // MergeTree block dedup no longer recognises a re-sent batch;
+        // `async_insert_deduplicate` restores idempotency for the batcher's
+        // identical-block retry.
+        client = client
+            .with_setting("async_insert", "1")
+            .with_setting("wait_for_async_insert", "1")
+            .with_setting("async_insert_deduplicate", "1");
+    }
     client
 }
 
@@ -384,14 +418,17 @@ pub struct ClickhouseResultSink {
     /// scheduler. Agent-submitted batches carry their own via [`write_batch_tagged`].
     region: String,
     agent_id: String,
+    /// Per-org physical retention, resolved from the org's plan at write time.
+    org_ttl: OrgTtlDays,
 }
 
 impl ClickhouseResultSink {
-    pub fn new(client: Client, region: String, agent_id: String) -> Self {
+    pub fn new(client: Client, region: String, agent_id: String, org_ttl: OrgTtlDays) -> Self {
         Self {
             client,
             region,
             agent_id,
+            org_ttl,
         }
     }
 
@@ -415,9 +452,11 @@ impl ClickhouseResultSink {
         if results.is_empty() {
             return Ok(());
         }
+        let ttls = self.org_ttl.days_for_each(results.iter().map(|r| r.org_id));
         let rows: Vec<CheckResultRow<'_>> = results
             .iter()
-            .map(|r| CheckResultRow::from_result(r, region, agent_id))
+            .zip(ttls)
+            .map(|(r, ttl)| CheckResultRow::from_result(r, region, agent_id, ttl))
             .collect();
 
         let backoff = ExponentialBackoffBuilder::new()
@@ -476,7 +515,7 @@ struct CheckResultRow<'a> {
     // Sent explicitly, not via column DEFAULT: the matview groups on the
     // inserted block, so `region` must be in it.
     region: &'a str,
-    timestamp: i64,
+    timestamp: u32,
     agent_id: &'a str,
     status: i8,
     duration_ms: u32,
@@ -487,15 +526,16 @@ struct CheckResultRow<'a> {
     response_code: Option<u16>,
     response_size: Option<u32>,
     error: Option<&'a str>,
+    ttl_days: u16,
 }
 
 impl<'a> CheckResultRow<'a> {
-    fn from_result(r: &'a CheckResult, region: &'a str, agent_id: &'a str) -> Self {
+    fn from_result(r: &'a CheckResult, region: &'a str, agent_id: &'a str, ttl_days: u16) -> Self {
         Self {
             org_id: r.org_id,
             target_id: r.target_id,
             region,
-            timestamp: r.timestamp.timestamp_millis(),
+            timestamp: to_unix_secs(r.timestamp),
             agent_id,
             status: r.status.as_enum8(),
             duration_ms: r.duration_ms,
@@ -506,6 +546,7 @@ impl<'a> CheckResultRow<'a> {
             response_code: r.response_code,
             response_size: r.response_size,
             error: r.error.as_deref(),
+            ttl_days,
         }
     }
 }
@@ -544,16 +585,16 @@ impl ClickhouseResultsStore {
                 "SELECT target_id, timestamp, status, error FROM {TABLE} \
                  WHERE org_id = ? AND target_id = ? \
                  AND status IN (?, ?) \
-                 AND timestamp >= fromUnixTimestamp64Milli(?) \
-                 AND timestamp < fromUnixTimestamp64Milli(?) \
+                 AND timestamp >= fromUnixTimestamp(?) \
+                 AND timestamp < fromUnixTimestamp(?) \
                  ORDER BY timestamp ASC"
             ))
             .bind(org.0)
             .bind(target_id)
             .bind(down)
             .bind(error)
-            .bind(range.from.timestamp_millis())
-            .bind(range.to.timestamp_millis())
+            .bind(range.from.timestamp())
+            .bind(range.to.timestamp())
             .fetch_all::<IncidentRow>()
             .await
             .context("clickhouse fetch_bad_only_rows")?;
@@ -565,7 +606,7 @@ impl ClickhouseResultsStore {
 struct IncidentRow {
     #[serde(with = "clickhouse::serde::uuid")]
     target_id: Uuid,
-    timestamp: i64,
+    timestamp: u32,
     status: i8,
     error: Option<String>,
 }
@@ -574,11 +615,11 @@ fn coalesce_from_incident_rows(target_id: Uuid, rows: Vec<IncidentRow>) -> Vec<I
     coalesce_incidents(
         target_id,
         rows.into_iter().map(|r| {
-            let ts = Utc
-                .timestamp_millis_opt(r.timestamp)
-                .single()
-                .unwrap_or_else(Utc::now);
-            (ts, CheckStatus::from_enum8(r.status), r.error)
+            (
+                from_unix_secs(r.timestamp),
+                CheckStatus::from_enum8(r.status),
+                r.error,
+            )
         }),
     )
 }
@@ -597,11 +638,11 @@ fn coalesce_from_bad_only_rows(
     coalesce_incidents_bad_only(
         target_id,
         rows.into_iter().map(|r| {
-            let ts = Utc
-                .timestamp_millis_opt(r.timestamp)
-                .single()
-                .unwrap_or_else(Utc::now);
-            (ts, CheckStatus::from_enum8(r.status), r.error)
+            (
+                from_unix_secs(r.timestamp),
+                CheckStatus::from_enum8(r.status),
+                r.error,
+            )
         }),
         range_end,
         threshold,
@@ -612,7 +653,7 @@ fn coalesce_from_bad_only_rows(
 struct OwnedResultRow {
     #[serde(with = "clickhouse::serde::uuid")]
     target_id: Uuid,
-    timestamp: i64,
+    timestamp: u32,
     status: i8,
     duration_ms: u32,
     dns_ms: Option<u16>,
@@ -629,7 +670,7 @@ struct RegionResultRow {
     region: String,
     #[serde(with = "clickhouse::serde::uuid")]
     target_id: Uuid,
-    timestamp: i64,
+    timestamp: u32,
     status: i8,
     duration_ms: u32,
     dns_ms: Option<u16>,
@@ -661,14 +702,10 @@ impl RegionResultRow {
 }
 
 fn row_to_result(row: OwnedResultRow, org_id: Uuid) -> CheckResult {
-    let timestamp: DateTime<Utc> = Utc
-        .timestamp_millis_opt(row.timestamp)
-        .single()
-        .unwrap_or_else(Utc::now);
     CheckResult {
         target_id: row.target_id,
         org_id,
-        timestamp,
+        timestamp: from_unix_secs(row.timestamp),
         status: CheckStatus::from_enum8(row.status),
         duration_ms: row.duration_ms,
         dns_ms: row.dns_ms,
@@ -710,8 +747,8 @@ impl ResultsStore for ClickhouseResultsStore {
                 "SELECT target_id, timestamp, status, duration_ms, dns_ms, connect_ms, tls_ms, \
                  ttfb_ms, response_code, response_size, error FROM {TABLE} \
                  WHERE org_id = ? AND target_id = ? {region_pred} \
-                 AND timestamp >= fromUnixTimestamp64Milli(?) \
-                 AND timestamp < fromUnixTimestamp64Milli(?) \
+                 AND timestamp >= fromUnixTimestamp(?) \
+                 AND timestamp < fromUnixTimestamp(?) \
                  ORDER BY timestamp DESC LIMIT ? OFFSET ?"
             ))
             .bind(org.0)
@@ -720,8 +757,8 @@ impl ResultsStore for ClickhouseResultsStore {
             q = q.bind(r);
         }
         let rows: Vec<OwnedResultRow> = q
-            .bind(range.from.timestamp_millis())
-            .bind(range.to.timestamp_millis())
+            .bind(range.from.timestamp())
+            .bind(range.to.timestamp())
             .bind(limit)
             .bind(offset)
             .fetch_all::<OwnedResultRow>()
@@ -746,14 +783,14 @@ impl ResultsStore for ClickhouseResultsStore {
                 "SELECT region, target_id, timestamp, status, duration_ms, dns_ms, connect_ms, \
                  tls_ms, ttfb_ms, response_code, response_size, error FROM {TABLE} \
                  WHERE org_id = ? AND target_id = ? \
-                 AND timestamp >= fromUnixTimestamp64Milli(?) \
-                 AND timestamp < fromUnixTimestamp64Milli(?) \
+                 AND timestamp >= fromUnixTimestamp(?) \
+                 AND timestamp < fromUnixTimestamp(?) \
                  ORDER BY timestamp DESC LIMIT ? OFFSET ?"
             ))
             .bind(org.0)
             .bind(target_id)
-            .bind(range.from.timestamp_millis())
-            .bind(range.to.timestamp_millis())
+            .bind(range.from.timestamp())
+            .bind(range.to.timestamp())
             .bind(limit)
             .bind(offset)
             .fetch_all::<RegionResultRow>()
@@ -802,8 +839,8 @@ impl ResultsStore for ClickhouseResultsStore {
                 "SELECT argMax(status, timestamp) AS status \
                  FROM {TABLE} \
                  WHERE org_id = ? {region_pred} \
-                 AND timestamp >= fromUnixTimestamp64Milli(?) \
-                 AND timestamp < fromUnixTimestamp64Milli(?) \
+                 AND timestamp >= fromUnixTimestamp(?) \
+                 AND timestamp < fromUnixTimestamp(?) \
                  GROUP BY target_id"
             ))
             .bind(org.0);
@@ -811,8 +848,8 @@ impl ResultsStore for ClickhouseResultsStore {
             q = q.bind(r);
         }
         let rows: Vec<Latest> = q
-            .bind(range.from.timestamp_millis())
-            .bind(range.to.timestamp_millis())
+            .bind(range.from.timestamp())
+            .bind(range.to.timestamp())
             .fetch_all::<Latest>()
             .await
             .context("clickhouse current_status_breakdown")?;
@@ -848,16 +885,16 @@ impl ResultsStore for ClickhouseResultsStore {
                         avg(duration_ms) AS avg_ms \
                  FROM {TABLE} \
                  WHERE org_id = ? {region_pred} \
-                 AND timestamp >= fromUnixTimestamp64Milli(?) \
-                 AND timestamp < fromUnixTimestamp64Milli(?)"
+                 AND timestamp >= fromUnixTimestamp(?) \
+                 AND timestamp < fromUnixTimestamp(?)"
             ))
             .bind(org.0);
         if let Some(r) = region {
             cq = cq.bind(r);
         }
         let counts: Counts = cq
-            .bind(range.from.timestamp_millis())
-            .bind(range.to.timestamp_millis())
+            .bind(range.from.timestamp())
+            .bind(range.to.timestamp())
             .fetch_one::<Counts>()
             .await
             .context("clickhouse last_n_summary counts")?;
@@ -869,8 +906,8 @@ impl ResultsStore for ClickhouseResultsStore {
             .query(&format!(
                 "SELECT target_id, timestamp, status, error FROM {TABLE} \
                  WHERE org_id = ? {region_pred} \
-                 AND timestamp >= fromUnixTimestamp64Milli(?) \
-                 AND timestamp < fromUnixTimestamp64Milli(?) \
+                 AND timestamp >= fromUnixTimestamp(?) \
+                 AND timestamp < fromUnixTimestamp(?) \
                  ORDER BY target_id ASC, timestamp ASC"
             ))
             .bind(org.0);
@@ -878,8 +915,8 @@ impl ResultsStore for ClickhouseResultsStore {
             rq = rq.bind(r);
         }
         let rows: Vec<IncidentRow> = rq
-            .bind(range.from.timestamp_millis())
-            .bind(range.to.timestamp_millis())
+            .bind(range.from.timestamp())
+            .bind(range.to.timestamp())
             .fetch_all::<IncidentRow>()
             .await
             .context("clickhouse last_n_summary rows")?;
@@ -937,8 +974,8 @@ impl ResultsStore for ClickhouseResultsStore {
                    countIf(status = 'error') AS error \
                  FROM {TABLE} \
                  WHERE org_id = ? AND target_id = ? {region_pred} \
-                 AND timestamp >= fromUnixTimestamp64Milli(?) \
-                 AND timestamp < fromUnixTimestamp64Milli(?)"
+                 AND timestamp >= fromUnixTimestamp(?) \
+                 AND timestamp < fromUnixTimestamp(?)"
             ))
             .bind(org.0)
             .bind(target_id);
@@ -946,8 +983,8 @@ impl ResultsStore for ClickhouseResultsStore {
             q = q.bind(r);
         }
         let row: CountsRow = q
-            .bind(range.from.timestamp_millis())
-            .bind(range.to.timestamp_millis())
+            .bind(range.from.timestamp())
+            .bind(range.to.timestamp())
             .fetch_one::<CountsRow>()
             .await
             .context("clickhouse uptime")?;
@@ -988,6 +1025,7 @@ impl ResultsStore for ClickhouseResultsStore {
             last_status: i8,
             last_minute_ts: u32,
         }
+        let (table, tcol) = rollup_source(range.from);
         let query = format!(
             "SELECT \
                target_id, \
@@ -996,9 +1034,10 @@ impl ResultsStore for ClickhouseResultsStore {
                avgMerge(avg_duration_ms) AS avg_ms, \
                quantilesMerge(0.5, 0.95)(duration_quantiles) AS quantiles, \
                argMaxMerge(last_status_state) AS last_status, \
-               toUInt32(max(minute)) AS last_minute_ts \
-             FROM check_results_1m \
-             WHERE org_id = ? {region_pred} AND {MINUTE_WINDOW} \
+               toUInt32(max({tcol})) AS last_minute_ts \
+             FROM {table} \
+             WHERE org_id = ? {region_pred} \
+               AND {tcol} >= fromUnixTimestamp(?) AND {tcol} < fromUnixTimestamp(?) \
              GROUP BY target_id",
             region_pred = region.map(|_| "AND region = ?").unwrap_or("")
         );
@@ -1099,15 +1138,9 @@ impl ResultsStore for ClickhouseResultsStore {
         // Round up to a whole number of source rows so every output bucket
         // spans an integer count of minutes.
         let bucket = bucket_seconds.max(60).div_ceil(60) * 60;
-        // Start past the 1m rollup's 90-day TTL → 1h rollup, else 1m (see
-        // MIGRATIONS). `minute`/`hour` are both DateTime seconds, so
-        // `bind_minute_window` binds either.
-        let (table, tcol) = if range.from >= Utc::now() - chrono::Duration::days(MINUTE_ROLLUP_DAYS)
-        {
-            ("check_results_1m", "minute")
-        } else {
-            ("check_results_1h", "hour")
-        };
+        // `minute`/`hour` are both DateTime seconds, so `bind_minute_window`
+        // binds either.
+        let (table, tcol) = rollup_source(range.from);
         let window = format!("{tcol} >= fromUnixTimestamp(?) AND {tcol} < fromUnixTimestamp(?)");
         let region_pred = region.map(|_| "AND region = ?").unwrap_or("");
         let query = format!(
@@ -1230,12 +1263,7 @@ impl ResultsStore for ClickhouseResultsStore {
             samples: u64,
         }
         let bucket = bucket_seconds.max(60).div_ceil(60) * 60;
-        let (table, tcol) = if range.from >= Utc::now() - chrono::Duration::days(MINUTE_ROLLUP_DAYS)
-        {
-            ("check_results_1m", "minute")
-        } else {
-            ("check_results_1h", "hour")
-        };
+        let (table, tcol) = rollup_source(range.from);
         let window = format!("{tcol} >= fromUnixTimestamp(?) AND {tcol} < fromUnixTimestamp(?)");
         let query = format!(
             "SELECT region, \
@@ -1350,9 +1378,9 @@ impl ResultsStore for ClickhouseResultsStore {
             up: u64,
             avg_ms: f64,
         }
-        let span_ms = (range.to - range.from).num_milliseconds().max(0);
-        let prior_to_ms = range.from.timestamp_millis();
-        let prior_from_ms = prior_to_ms.saturating_sub(span_ms);
+        let span_secs = (range.to - range.from).num_seconds().max(0);
+        let prior_to_secs = range.from.timestamp();
+        let prior_from_secs = prior_to_secs.saturating_sub(span_secs);
         let region_pred = region.map(|_| "AND region = ?").unwrap_or("");
         let mut q = self
             .client
@@ -1363,16 +1391,16 @@ impl ResultsStore for ClickhouseResultsStore {
                    avg(duration_ms) AS avg_ms \
                  FROM {TABLE} \
                  WHERE org_id = ? {region_pred} \
-                 AND timestamp >= fromUnixTimestamp64Milli(?) \
-                 AND timestamp < fromUnixTimestamp64Milli(?)"
+                 AND timestamp >= fromUnixTimestamp(?) \
+                 AND timestamp < fromUnixTimestamp(?)"
             ))
             .bind(org.0);
         if let Some(r) = region {
             q = q.bind(r);
         }
         let row: Option<PriorRow> = q
-            .bind(prior_from_ms)
-            .bind(prior_to_ms)
+            .bind(prior_from_secs)
+            .bind(prior_to_secs)
             .fetch_optional::<PriorRow>()
             .await
             .context("clickhouse prior_period_summary")?;

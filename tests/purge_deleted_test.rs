@@ -419,11 +419,11 @@ async fn drain_erases_ch_rows_then_completes() {
     // One real result row for this org; the MV propagates it to check_results_1m.
     ch.query(
         "INSERT INTO check_results (org_id, target_id, timestamp, status, duration_ms) \
-         VALUES (?, ?, fromUnixTimestamp64Milli(?), 'up', ?)",
+         VALUES (?, ?, fromUnixTimestamp(?), 'up', ?)",
     )
     .bind(org.id.0)
     .bind(Uuid::now_v7())
-    .bind(chrono::Utc::now().timestamp_millis())
+    .bind(chrono::Utc::now().timestamp())
     .bind(42u32)
     .execute()
     .await

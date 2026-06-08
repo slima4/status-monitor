@@ -10,28 +10,35 @@ CREATE TABLE IF NOT EXISTS check_results (
     org_id           UUID,
     target_id        UUID,
     region           LowCardinality(String),
-    timestamp        DateTime64(3, 'UTC') CODEC(Delta, ZSTD(1)),
+    -- Second precision: min check interval is 20s, so no two checks for one
+    -- monitor share a second. Sub-second latency lives in `duration_ms`.
+    -- DoubleDelta crushes the near-constant interval gaps; jitter-free seconds
+    -- make it far tighter than ms would.
+    timestamp        DateTime('UTC') CODEC(DoubleDelta, ZSTD(1)),
     -- Server receive time, distinct from agent-supplied `timestamp`, so clock
     -- skew is detectable.
-    ingested_at      DateTime64(3, 'UTC') DEFAULT now64(3) CODEC(Delta, ZSTD(1)),
+    ingested_at      DateTime('UTC') DEFAULT now() CODEC(DoubleDelta, ZSTD(1)),
     agent_id         LowCardinality(String),
     status           Enum8('up' = 1, 'down' = 2, 'degraded' = 3, 'error' = 4),
     duration_ms      UInt32 CODEC(T64, ZSTD(1)),
-    dns_ms           Nullable(UInt16),
-    connect_ms       Nullable(UInt16),
-    tls_ms           Nullable(UInt16),
-    ttfb_ms          Nullable(UInt16),
-    response_code    Nullable(UInt16),
-    response_size    Nullable(UInt32),
-    error            LowCardinality(Nullable(String))
+    dns_ms           Nullable(UInt16) CODEC(T64, ZSTD(1)),
+    connect_ms       Nullable(UInt16) CODEC(T64, ZSTD(1)),
+    tls_ms           Nullable(UInt16) CODEC(T64, ZSTD(1)),
+    ttfb_ms          Nullable(UInt16) CODEC(T64, ZSTD(1)),
+    response_code    Nullable(UInt16) CODEC(T64, ZSTD(1)),
+    response_size    Nullable(UInt32) CODEC(T64, ZSTD(1)),
+    error            LowCardinality(Nullable(String)),
+    -- Per-row retention window, stamped from the org's plan at write time.
+    -- DEFAULT applies only until the write path's snapshot first loads. A
+    -- per-plan policy change needs no schema change; same-value rows compress
+    -- away.
+    ttl_days         UInt16 DEFAULT 30 CODEC(ZSTD(1))
 ) ENGINE = MergeTree
 PARTITION BY toYYYYMMDD(timestamp)
 ORDER BY (org_id, target_id, region, timestamp)
--- 90-day retention matches the public status page's daily strip
--- (`history_days` config) and the per-target operator drilldown window.
--- The Privacy Policy and `tests/retention_test.rs` pin the same number;
--- changing it here must update both.
-TTL toDateTime(timestamp) + INTERVAL 90 DAY
+-- The DEFAULT is the disclosed raw window; Privacy Policy and
+-- `tests/retention_test.rs` pin it.
+TTL timestamp + toIntervalDay(ttl_days)
 -- `non_replicated_deduplication_window`: this is a plain (non-Replicated)
 -- MergeTree, where insert dedup is OFF unless this window is set. The batcher
 -- re-sends the identical block on retry (`ClickhouseResultSink::write_batch`);
@@ -41,12 +48,13 @@ TTL toDateTime(timestamp) + INTERVAL 90 DAY
 SETTINGS index_granularity = 8192, non_replicated_deduplication_window = 1000;
 
 -- Per-minute pre-aggregation; dashboard rollup merges from here so a
--- 90d / 1k-monitor scan stays O(minutes), not O(raw checks).
+-- 30d / 1k-monitor scan stays O(minutes), not O(raw checks). Ranges past
+-- this TTL read the 1h rollup (the disk-heavy minute grain stays short).
 CREATE MATERIALIZED VIEW IF NOT EXISTS check_results_1m
 ENGINE = AggregatingMergeTree
 PARTITION BY toYYYYMMDD(minute)
 ORDER BY (org_id, target_id, region, minute)
-TTL toDateTime(minute) + INTERVAL 90 DAY
+TTL toDateTime(minute) + INTERVAL 30 DAY
 AS SELECT
     org_id,
     target_id,

@@ -91,6 +91,29 @@ impl Plan {
     }
 }
 
+/// Physical per-row TTL (days) for a raw-retention value: the same ceiling as
+/// [`Plan::raw_window_days`], floored at 1 so a 0 or negative value never means
+/// "delete on the next merge". Single source for the write-path TTL stamp.
+pub fn raw_ttl_days(raw_days: i32) -> u16 {
+    i64::from(raw_days).clamp(1, Plan::RAW_MAX_DAYS) as u16
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Plan, raw_ttl_days};
+
+    #[test]
+    fn raw_ttl_days_floors_at_one_and_caps_at_max() {
+        let max = Plan::RAW_MAX_DAYS as u16;
+        assert_eq!(raw_ttl_days(30), 30);
+        assert_eq!(raw_ttl_days(0), 1, "0 days would delete on next merge");
+        assert_eq!(raw_ttl_days(-5), 1);
+        assert_eq!(raw_ttl_days(Plan::RAW_MAX_DAYS as i32), max);
+        assert_eq!(raw_ttl_days(10_000), max, "never retain past the disclosed max");
+        assert_eq!(raw_ttl_days(i32::MAX), max);
+    }
+}
+
 /// The resource caps, grouped. Carrying these as one value keeps the future
 /// per-org override merge a single step instead of a dozen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
