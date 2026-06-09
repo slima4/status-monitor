@@ -68,7 +68,7 @@
       <tbody>
         {% for row in region_breakdown %}
         <tr{% if row.selected %} class="font-medium text-body"{% endif %}>
-          <td class="py-1.5 pr-4 font-mono">{{ row.region_label }}</td>
+          <td class="py-1.5 pr-4">{{ row.region_label }}</td>
           <td class="py-1.5 pr-4">{{ row.uptime_label }}</td>
           <td class="py-1.5 pr-4 text-right font-mono">{{ row.p50_label }}</td>
           <td class="py-1.5 pr-4 text-right font-mono">{{ row.p95_label }}</td>

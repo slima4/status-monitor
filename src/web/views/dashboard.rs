@@ -34,7 +34,7 @@ use crate::web::error::WebResult;
 use crate::web::filters;
 use crate::web::host::is_subdomain_public_request;
 use crate::web::views::public_status::{self, StatusParams};
-use crate::web::views::region_display::{labeled_regions, LabeledRegion};
+use crate::web::views::region_display::{LabeledRegion, labeled_regions};
 use crate::web::views::{
     HumanDur, RangeOption, build_range_options, describe_check, resolve_range_key,
 };

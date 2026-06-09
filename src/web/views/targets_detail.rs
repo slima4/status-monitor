@@ -16,10 +16,10 @@ use crate::error::AppError;
 use crate::storage::{ClampedRange, IncidentListQuery, TimeRange, UptimeStats};
 use crate::web::error::{WebError, WebResult};
 use crate::web::filters;
+use crate::web::views::region_display::{LabeledRegion, labeled_regions};
 use crate::web::views::{
     RangeOption, build_range_options, describe_check, fmt_human, fmt_ts, resolve_range_key,
 };
-use crate::web::views::region_display::{labeled_regions, LabeledRegion};
 use crate::web::{AuthedBrowser, CurrentOrg};
 
 // A raw row per check floods the page; the latency/breakdown charts above
@@ -189,7 +189,6 @@ pub struct DetailPage {
 
 /// One row of the per-region breakdown table on the monitor detail page.
 pub struct RegionBreakdownRow {
-    pub region: String,
     pub region_label: String,
     pub uptime_label: String,
     pub p50_label: String,
@@ -220,7 +219,6 @@ impl RegionBreakdownRow {
             p95_label: format!("{} ms", r.p95_ms),
             last_status: r.last_status,
             region_label,
-            region: r.region,
         }
     }
 }
