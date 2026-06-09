@@ -319,6 +319,43 @@ pub struct TargetRegions {
     pub regions: Vec<String>,
 }
 
+/// One region in the catalog returned by `GET /api/v1/regions`.
+#[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct RegionInfo {
+    pub id: String,
+    pub name: String,
+    pub location: String,
+}
+
+/// The enabled region catalog a monitor may be assigned to.
+#[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct RegionCatalog {
+    pub regions: Vec<RegionInfo>,
+}
+
+#[utoipa::path(
+    get, path = "/api/v1/regions", tag = "targets",
+    summary = "List the available probe regions",
+    responses((status = 200, body = RegionCatalog)),
+)]
+pub async fn list_regions(
+    State(state): State<AppState>,
+    Authorized(_org, _): Authorized<TargetsRead>,
+) -> Result<Json<RegionCatalog>> {
+    let regions = state
+        .target_store
+        .available_regions_detailed()
+        .await?
+        .into_iter()
+        .map(|r| RegionInfo {
+            id: r.id,
+            name: r.name,
+            location: r.location,
+        })
+        .collect();
+    Ok(Json(RegionCatalog { regions }))
+}
+
 #[utoipa::path(
     get, path = "/api/v1/targets/{id}/regions", tag = "targets",
     summary = "List the regions a monitor probes from",

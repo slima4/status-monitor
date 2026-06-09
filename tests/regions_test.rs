@@ -243,3 +243,43 @@ async fn set_and_read_target_regions_honours_enabled_and_org() {
             .unwrap()
     );
 }
+
+#[tokio::test]
+#[ignore]
+async fn available_regions_detailed_carries_labels_and_excludes_disabled() {
+    use uptimepage::storage::{PostgresTargetStore, TargetStore};
+
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    sqlx::query(
+        "INSERT INTO regions (id, name, location, enabled) \
+         VALUES ('eu-detail', 'EU Detail', 'Helsinki', true) \
+         ON CONFLICT (id) DO UPDATE SET name = excluded.name, \
+         location = excluded.location, enabled = true",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO regions (id, name, location, enabled) \
+         VALUES ('us-detail-off', 'US Off', 'Ashburn', false) \
+         ON CONFLICT (id) DO UPDATE SET enabled = false",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let store = PostgresTargetStore::from_pool(pool.clone(), None);
+
+    let detailed = store.available_regions_detailed().await.unwrap();
+    let eu = detailed
+        .iter()
+        .find(|r| r.id == "eu-detail")
+        .expect("enabled region present in the catalog");
+    assert_eq!(eu.name, "EU Detail");
+    assert_eq!(eu.location, "Helsinki");
+    assert!(
+        !detailed.iter().any(|r| r.id == "us-detail-off"),
+        "a disabled region must not appear in the catalog"
+    );
+}

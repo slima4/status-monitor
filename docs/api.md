@@ -31,6 +31,9 @@ All responses use `Content-Type: application/json; charset=utf-8`.
 | `GET` | `/api/v1/targets/{id}/latency` | bucketed latency series (`from`, `to`, `region`) — server-side quantiles + per-phase means |
 | `GET` | `/api/v1/targets/{id}/latency/by-region` | per-region latency series (`from`, `to`) — one series per region, for overlay charts |
 | `GET` | `/api/v1/targets/{id}/uptime` | uptime summary over a range (`from`, `to`, `region`) |
+| `GET` | `/api/v1/targets/{id}/regions` | list the regions a monitor probes from |
+| `PUT` | `/api/v1/targets/{id}/regions` | set the regions a monitor probes from |
+| `GET` | `/api/v1/regions` | list the enabled probe-region catalog (`id`, `name`, `location`) |
 | `GET` | `/api/v1/targets/{id}/incidents` | coalesced incident periods (`from`, `to`, `ongoing_only`) — paginated |
 | `POST` | `/api/v1/targets/{id}/shares` | mint a read-only share link; returns the share (token included) |
 | `GET` | `/api/v1/targets/{id}/shares` | list a monitor's live share links (token included, re-copyable) |

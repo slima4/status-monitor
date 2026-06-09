@@ -54,6 +54,18 @@ async fn list_targets_empty() {
 }
 
 #[tokio::test]
+async fn regions_catalog_endpoint_returns_shape() {
+    let resp = app()
+        .oneshot(Request::get("/api/v1/regions").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let v = body_json(resp).await;
+    // In-memory store has no region catalog; the contract is a `regions` array.
+    assert_eq!(v["regions"].as_array().unwrap().len(), 0);
+}
+
+#[tokio::test]
 async fn create_then_get_then_delete_target() {
     let app = app();
     let payload = json!({

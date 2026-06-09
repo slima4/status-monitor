@@ -70,7 +70,7 @@ Once results carry a region, the operator surfaces let you slice by it:
 
 - **Dashboard** — a `region:` filter in the subhead (shown only when the org spans more than one region) scopes every fleet metric to one region. `?region=` is reflected in the URL.
 - **Monitor detail** — a region selector scopes the KPI cards, latency and breakdown charts, and recent results. In the all-regions view the latency chart overlays one p95 line per region, and a **by region** table summarises uptime, p50, p95, and last status per region. Pick a region to drill into a single line.
-- **REST API** — `/api/v1/targets/{id}/results`, `/latency`, and `/uptime` accept an optional `region=` query parameter; `/api/v1/targets/{id}/latency/by-region` returns one series per region. See [REST API](api.md#latency-series).
+- **REST API** — `/api/v1/targets/{id}/results`, `/latency`, and `/uptime` accept an optional `region=` query parameter; `/api/v1/targets/{id}/latency/by-region` returns one series per region. `GET /api/v1/regions` lists the enabled region catalog and `GET`/`PUT /api/v1/targets/{id}/regions` read and set a monitor's assignment — all under `targets:read`/`targets:write`. See [REST API](api.md#latency-series).
 
 What deliberately **blends** across regions: the public status page's component status (the public "is it up" answer is region-agnostic by design), the monitors list, and incident timelines. Those aggregate every region so a viewer sees one verdict.
 
