@@ -102,9 +102,11 @@ async fn ensure_partitions_is_idempotent() {
 #[tokio::test]
 #[ignore]
 async fn provisions_partitions_routes_inserts_and_drops_aged() {
-    let Some(pool) = common::pg_pool_from_env().await else {
+    let Some((db_url, db_name)) = common::fresh_test_db("partmaint").await else {
         return;
     };
+    let pool = common::open_test_pool(&db_url).await;
+    MIGRATOR.run(&pool).await.unwrap();
 
     partitions::ensure_partitions(&pool).await.expect("ensure");
 
@@ -164,7 +166,6 @@ async fn provisions_partitions_routes_inserts_and_drops_aged() {
         "current-month row must survive a drop of aged partitions"
     );
 
-    let _ = sqlx::query("DELETE FROM login_attempts WHERE method = 'parttest'")
-        .execute(&pool)
-        .await;
+    pool.close().await;
+    common::drop_test_db(&db_name).await;
 }
