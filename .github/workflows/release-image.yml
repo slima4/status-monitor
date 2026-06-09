@@ -4,6 +4,21 @@ name: release-image
 # Container Registry. Production pulls an immutable tag (sha-… or v…) and
 # never compiles Rust on the box — the build toolchain stays off prod.
 #
+# Arch: automatic builds (push to main, v* tags) publish linux/amd64 only —
+# the live prod hosts are x86, so the critical auto-deploy path never waits on
+# (or is blocked by) a second architecture. To also publish linux/arm64 — for
+# ARM agent hosts (Oracle Ampere, Vultr-arm, Hetzner CAX) — run this workflow
+# manually (Actions → release-image → Run workflow) with "include_arm64". That
+# produces a multi-arch manifest list under the same tags; amd64 hosts keep
+# resolving the amd64 entry, ARM hosts get arm64. Each arch builds NATIVELY on
+# its own runner (public-repo arm64 runners are free) — no QEMU, which would
+# make the Rust compile multiple times slower.
+#
+# Publish flow (same for 1 or 2 arches): each arch builds and pushes its image
+# by DIGEST only (untagged); a final `merge` job stitches the digests into the
+# real tags. With one arch this is a single-entry manifest list, which pulls
+# identically to a plain image on that arch.
+#
 # Tags produced (docker/metadata-action):
 #   - main                       (default-branch builds, mutable)
 #   - sha-<full-sha>             (immutable; pin prod to this)
@@ -28,6 +43,11 @@ on:
       - ".github/workflows/issue-template-guard.yml"
       - ".github/ISSUE_TEMPLATE/**"
   workflow_dispatch:
+    inputs:
+      include_arm64:
+        description: "Also build linux/arm64 (multi-arch). Leave off for amd64-only."
+        type: boolean
+        default: false
 
 # A fast follow-up push to main supersedes the in-flight image build for
 # that ref. main itself is not cancelled — every main commit yields its
@@ -43,13 +63,42 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  image:
+  # Pick the architectures to build: amd64 always; arm64 only on a manual run
+  # that opts in. Emitted as a matrix the build job consumes via fromJSON.
+  setup:
     runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.pick.outputs.matrix }}
+    steps:
+      - name: pick architectures
+        id: pick
+        run: |
+          amd64='{"platform":"linux/amd64","runner":"ubuntu-latest"}'
+          arm64='{"platform":"linux/arm64","runner":"ubuntu-24.04-arm"}'
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.include_arm64 }}" = "true" ]; then
+            echo "matrix={\"include\":[$amd64,$arm64]}" >> "$GITHUB_OUTPUT"
+          else
+            echo "matrix={\"include\":[$amd64]}" >> "$GITHUB_OUTPUT"
+          fi
+
+  # One job per selected architecture, each on a native runner. Builds and
+  # pushes an untagged image by digest only; the merge job assembles the tags.
+  build:
+    needs: setup
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.setup.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
       packages: write # push to GHCR via the job's GITHUB_TOKEN
     steps:
       - uses: actions/checkout@v5
+
+      - name: derive a filesystem-safe arch tag
+        run: echo "PLATFORM_PAIR=${platform//\//-}" >> "$GITHUB_ENV"
+        env:
+          platform: ${{ matrix.platform }}
 
       - uses: docker/setup-buildx-action@v4
 
@@ -60,7 +109,76 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: derive image tags + labels
+      - name: image labels
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+
+      - name: build & push by digest
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: ${{ matrix.platform }}
+          # AGPL-3.0 §13 source-offer identity baked into the binary.
+          build-args: |
+            SM_SOURCE_COMMIT=${{ github.sha }}
+            SM_SOURCE_URL=${{ github.server_url }}/${{ github.repository }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Push the arch image with no tag; the merge job references it by
+          # digest. name-canonical keeps the digest tied to the final repo name.
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
+          # cargo-chef splits the slow dependency layer from the app layer; the
+          # gha layer cache makes unchanged-deps rebuilds cheap. Scope per arch
+          # so the two matrix legs don't clobber each other's cache.
+          cache-from: type=gha,scope=${{ env.PLATFORM_PAIR }}
+          cache-to: type=gha,mode=max,scope=${{ env.PLATFORM_PAIR }}
+          # No SLSA provenance attestation: it injects extra manifests that
+          # complicate the imagetools merge below for no benefit here.
+          provenance: false
+
+      - name: export digest
+        run: |
+          mkdir -p "${{ runner.temp }}/digests"
+          digest="${{ steps.build.outputs.digest }}"
+          touch "${{ runner.temp }}/digests/${digest#sha256:}"
+
+      - name: upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ env.PLATFORM_PAIR }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # Stitch the per-arch digests into one manifest list and apply the real tags.
+  # This is the only job that publishes a pullable tag.
+  merge:
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: derive image tags
         id: meta
         uses: docker/metadata-action@v6
         with:
@@ -72,27 +190,14 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest,enable={{is_default_branch}}
 
-      # linux/amd64 only — the deploy host is x86_64. A single platform keeps
-      # the build a plain image manifest (no index) so `docker pull` on prod
-      # is unambiguous, and halves build time vs adding arm64.
-      - name: build & push
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: ./Dockerfile
-          platforms: linux/amd64
-          push: true
-          # AGPL-3.0 §13 source-offer identity baked into the binary.
-          build-args: |
-            SM_SOURCE_COMMIT=${{ github.sha }}
-            SM_SOURCE_URL=${{ github.server_url }}/${{ github.repository }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          # cargo-chef splits the slow dependency layer from the app layer;
-          # the gha layer cache then makes unchanged-deps rebuilds cheap.
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          # Skip the SLSA provenance attestation: it turns the push into a
-          # multi-manifest index, which complicates a single-arch prod pull
-          # for no benefit here.
-          provenance: false
+      - name: create manifest list and push
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@sha256:%s ' *)
+
+      - name: inspect published image
+        run: |
+          docker buildx imagetools inspect \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }}
