@@ -23,15 +23,15 @@
 #   BASE            control-plane URL the SCRIPT calls (default: http://app.lvh.me:8080)
 #   OPERATOR_TOKEN  operator secret                    (default: dev-operator-token)
 #   AGENT_CONTROL_PLANE_URL  URL the AGENT CONTAINERS use to reach the control
-#                   plane. Default http://uptimepage:8080 (containerized CP via
-#                   `just up-app`). For a native CP (`just run`) set this to
-#                   http://host.docker.internal:8080.
+#                   plane. Auto-detected when unset: http://uptimepage:8080 if
+#                   the containerized CP (`just up-app`) is up, else
+#                   http://host.docker.internal:8080 for a native CP (`just
+#                   run`). Set explicitly to override the detection.
 set -euo pipefail
 
 ACTION="${1:-up}"
 BASE="${BASE:-http://app.lvh.me:8080}"
 TOKEN="${OPERATOR_TOKEN:-dev-operator-token}"
-AGENT_CP_URL="${AGENT_CONTROL_PLANE_URL:-http://uptimepage:8080}"
 ENV_FILE=".dev-agents.env"
 COMPOSE=(docker compose -f compose.dev.yml -f compose.dev.agents.yml)
 AUTH=(-H "Authorization: Bearer ${TOKEN}")
@@ -42,20 +42,121 @@ REGIONS=(
   "apac-sg:dev-harness-apac-sg:AGENT_APAC_TOKEN"
 )
 
-command -v jq >/dev/null || { echo "error: jq is required" >&2; exit 2; }
+# Control-plane host:port the SCRIPT dials — used to inspect who is actually
+# bound to the port when the operator handshake fails.
+CP_HOSTPORT=${BASE#*://}; CP_HOSTPORT=${CP_HOSTPORT%%/*}
+CP_PORT=${CP_HOSTPORT##*:}
+[[ $CP_PORT == "$CP_HOSTPORT" ]] && CP_PORT=80
 
-echo "control plane: $BASE"
-echo -n "waiting for /readyz "
+ts()   { date +%H:%M:%S; }
+log()  { printf '%s  %s\n'        "$(ts)" "$*"; }
+warn() { printf '%s  warn: %s\n'  "$(ts)" "$*" >&2; }
+die()  { printf '%s  error: %s\n' "$(ts)" "$*" >&2; exit 1; }
+
+# Non-secret fingerprint of the operator token: length + a short sha so two
+# tokens can be compared in logs without ever printing the secret.
+token_fp() {
+  local h; h=$(printf '%s' "$1" | shasum -a 256 2>/dev/null | cut -c1-8)
+  printf 'len=%s sha256=%s…' "${#1}" "${h:-unavailable}"
+}
+
+# Where the script's token came from — pinpoints a stray exported override,
+# the usual cause of a same-server 401.
+token_origin() {
+  [[ -n ${OPERATOR_TOKEN:-} ]] && { echo "OPERATOR_TOKEN env"; return; }
+  echo "script default"
+}
+
+# URL the AGENT CONTAINERS use to reach the control plane. An explicit
+# AGENT_CONTROL_PLANE_URL always wins. Otherwise auto-detect: if the
+# containerized control plane (`just up-app`, compose service `uptimepage`)
+# exists in this project, agents reach it by that service name over the shared
+# docker network; for a NATIVE control plane (`just run` on the host) there is
+# no such container, so agents must dial the host. (host.docker.internal is a
+# Docker Desktop / macOS convenience; native-Linux docker needs an
+# extra_hosts: host-gateway mapping.)
+resolve_agent_cp_url() {
+  if [[ -n ${AGENT_CONTROL_PLANE_URL:-} ]]; then
+    echo "$AGENT_CONTROL_PLANE_URL"
+  elif "${COMPOSE[@]}" ps -a --services 2>/dev/null | grep -qx uptimepage; then
+    echo "http://uptimepage:8080"
+  else
+    echo "http://host.docker.internal:8080"
+  fi
+}
+
+# Processes LISTENing on the control-plane port, one "pid <n> (<cmd>)" per line.
+# Empty when lsof is missing or nothing is bound.
+port_listeners() {
+  command -v lsof >/dev/null || return 0
+  # `|| true`: lsof exits non-zero when nothing is bound, which would trip
+  # `set -e` at the caller's `x=$(port_listeners)` assignment (no listener is a
+  # normal preflight state, not an error).
+  lsof -nP -iTCP:"$CP_PORT" -sTCP:LISTEN 2>/dev/null \
+    | awk 'NR>1 {printf "pid %s (%s)\n", $2, $1}' | sort -u || true
+}
+
+# Dump listeners to stderr with a hint. A second listener is the classic
+# culprit: a stale dev server shadows the intended one for localhost connects.
+report_listeners() {
+  local ls; ls=$(port_listeners)
+  if [[ -n $ls ]]; then
+    local n; n=$(printf '%s\n' "$ls" | grep -c .)
+    warn "$n listener(s) on port $CP_PORT:"
+    while IFS= read -r l; do warn "  $l"; done <<<"$ls"
+    if (( n > 1 )); then
+      warn "more than one listener — a stale process is shadowing the intended server"
+    fi
+  else
+    warn "no listener found on port $CP_PORT (lsof unavailable, or nothing bound)"
+  fi
+  return 0
+}
+
+command -v jq >/dev/null || die "jq is required"
+
+log "control plane: $BASE (port $CP_PORT)"
+
+# Preflight: surface every listener up front so a shadowing process is visible
+# before the handshake even runs.
+listeners=$(port_listeners)
+if [[ -n $listeners ]] && (( $(printf '%s\n' "$listeners" | grep -c .) > 1 )); then
+  report_listeners
+fi
+
+printf '%s  waiting for /readyz ' "$(ts)"
 for _ in $(seq 1 60); do
   if curl -fsS -o /dev/null "$BASE/readyz" 2>/dev/null; then break; fi
-  echo -n .; sleep 1
+  printf .; sleep 1
 done
-echo
-curl -fsS -o /dev/null "$BASE/readyz" || { echo "error: control plane not ready at $BASE" >&2; exit 1; }
+printf '\n'
+curl -fsS -o /dev/null "$BASE/readyz" || die "control plane not ready at $BASE"
 
-# Verify the operator surface is reachable (401/404 => token wrong or surface off).
-code=$(curl -sS -o /dev/null -w '%{http_code}' "${AUTH[@]}" "$BASE/operator/regions")
-[[ $code == 200 ]] || { echo "error: /operator/regions returned $code (check OPERATOR_TOKEN / admin_token)" >&2; exit 1; }
+# The operator surface must accept our token. A 401/403 here almost always means
+# a DIFFERENT server is answering this port — a stale dev process started without
+# UPTIMEPAGE_OPERATOR__ADMIN_TOKEN. Map each outcome to an actionable message.
+code=$(curl -sS -o /dev/null -w '%{http_code}' "${AUTH[@]}" "$BASE/operator/regions" || true)
+case $code in
+  200) log "operator surface ok (token accepted)" ;;
+  401|403)
+    warn "operator surface rejected the token (HTTP $code)"
+    warn "token used: $(token_fp "$TOKEN") (from $(token_origin))"
+    report_listeners
+    # One listener => same server, so the token is the mismatch. >1 (or zero
+    # under lsof) => a stale process is likely shadowing the intended server.
+    if [[ $(port_listeners | grep -c .) == 1 ]]; then
+      die "token mismatch: the server is up but does not accept this token. \
+unset a stray OPERATOR_TOKEN (currently from $(token_origin)) so the default is \
+used, or restart the control plane with a matching UPTIMEPAGE_OPERATOR__ADMIN_TOKEN"
+    else
+      die "stale/foreign server on port $CP_PORT. stop it (e.g. \
+'pkill -f debug/uptimepage') and restart the control plane with \
+UPTIMEPAGE_OPERATOR__ADMIN_TOKEN set"
+    fi ;;
+  404) die "operator surface is off (HTTP 404) — restart the control plane with UPTIMEPAGE_OPERATOR__ADMIN_TOKEN set" ;;
+  000) die "no HTTP response from $BASE — is the control plane bound to port $CP_PORT?" ;;
+  *)   die "operator surface returned unexpected HTTP $code" ;;
+esac
 
 # Delete every harness agent (any region) so the row's FK no longer pins its
 # region — lets re-runs start clean and lets seed-fixtures wipe its regions.
@@ -86,6 +187,15 @@ fi
 echo "removing any prior harness agents…"
 purge_agents
 
+AGENT_CP_URL=$(resolve_agent_cp_url)
+if [[ -n ${AGENT_CONTROL_PLANE_URL:-} ]]; then
+  log "agents -> control plane: $AGENT_CP_URL (explicit AGENT_CONTROL_PLANE_URL)"
+elif [[ $AGENT_CP_URL == *uptimepage:8080* ]]; then
+  log "agents -> control plane: $AGENT_CP_URL (detected containerized CP)"
+else
+  log "agents -> control plane: $AGENT_CP_URL (detected native CP on host)"
+fi
+
 : > "$ENV_FILE"
 echo "# Generated by scripts/dev-regions.sh — agent tokens for the local harness." >> "$ENV_FILE"
 echo "AGENT_CONTROL_PLANE_URL=$AGENT_CP_URL" >> "$ENV_FILE"
@@ -108,9 +218,22 @@ for entry in "${REGIONS[@]}"; do
   echo "  region $region -> agent $name minted"
 done
 
-echo "tokens written to $ENV_FILE"
-echo "starting agents (first run builds the agent image — slow)…"
-"${COMPOSE[@]}" --env-file "$ENV_FILE" --profile agents up -d --build agent-eu agent-apac
+log "tokens written to $ENV_FILE"
+
+# Both agents run the SAME image (uptimepage:dev-agent). Build it ONCE — building
+# per-service would compile the identical tag twice in parallel and the two
+# builds would contend on the shared cargo target cache mount. After the first
+# build the image persists (down only removes containers), so re-ups skip the
+# multi-minute release compile entirely. REBUILD=1 forces a fresh build.
+AGENT_IMAGE=uptimepage:dev-agent
+if [[ -n ${REBUILD:-} ]] || ! docker image inspect "$AGENT_IMAGE" >/dev/null 2>&1; then
+  log "building agent image $AGENT_IMAGE (first build is slow — release compile)…"
+  "${COMPOSE[@]}" --env-file "$ENV_FILE" build agent-eu
+else
+  log "reusing existing agent image $AGENT_IMAGE (REBUILD=1 to force a rebuild)"
+fi
+log "starting agents…"
+"${COMPOSE[@]}" --env-file "$ENV_FILE" --profile agents up -d --no-build agent-eu agent-apac
 
 cat <<EOF
 
