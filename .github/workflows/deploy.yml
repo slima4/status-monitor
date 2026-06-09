@@ -172,6 +172,8 @@ jobs:
           UPTIMEPAGE_MCP_OAUTH_ENABLED: ${{ vars.MCP_OAUTH_ENABLED }}
           # Secret, not a variable — the URL carries a capability token.
           HEARTBEAT_URL: ${{ secrets.HEARTBEAT_URL }}
+          # Operator admin bearer — enables the cross-tenant /operator surface.
+          OPERATOR_ADMIN_TOKEN: ${{ secrets.OPERATOR_ADMIN_TOKEN }}
         run: |
           set -euo pipefail
           # Lowercase only the repo (GHCR requires it); OCI tags are
@@ -201,6 +203,7 @@ jobs:
                UPTIMEPAGE_MCP_ENABLED='${UPTIMEPAGE_MCP_ENABLED}' \
                UPTIMEPAGE_MCP_OAUTH_ENABLED='${UPTIMEPAGE_MCP_OAUTH_ENABLED}' \
                HEARTBEAT_URL='${HEARTBEAT_URL}' \
+               OPERATOR_ADMIN_TOKEN='${OPERATOR_ADMIN_TOKEN}' \
                bash -s" <<'REMOTE'
           # This script is delivered to `bash -s` over the ssh heredoc — i.e. on
           # stdin (fd 0). A `docker compose exec -T` / `docker exec -i` / nested
@@ -516,6 +519,31 @@ jobs:
             [ "$n" = 1 ] || { echo "::error::HEARTBEAT_URL not written exactly once to .env (count=${n})"; exit 1; }
             n=$(grep -cxF "HEARTBEAT_ENABLED=true" .env || true)
             [ "$n" = 1 ] || { echo "::error::HEARTBEAT_ENABLED not written exactly once to .env (count=${n})"; exit 1; }
+          fi
+
+          # --- managed operator admin token (optional) ----------------------
+          # Same write contract as the heartbeat block. Empty only SKIPS this;
+          # to disable, clear the key in .env (the surface then 404s).
+          if [ -n "${OPERATOR_ADMIN_TOKEN:-}" ]; then
+            cp .env ".env.bak.$(date +%s).operator"
+            before=$(awk 'END { print NR }' .env)
+            awk '
+              BEGIN { m["UPTIMEPAGE_OPERATOR_ADMIN_TOKEN"] = ENVIRON["OPERATOR_ADMIN_TOKEN"] }
+              {
+                for (k in m) if ($0 ~ ("^" k "=")) { print k "=" m[k]; seen[k] = 1; next }
+                print
+              }
+              END { for (k in m) if (!seen[k]) print k "=" m[k] }
+            ' .env > .env.next
+            mv .env.next .env
+            after=$(awk 'END { print NR }' .env)
+            # 0..+1: appended only if the key was absent before.
+            if [ "$after" -lt "$before" ] || [ "$after" -gt "$((before + 1))" ]; then
+              echo "::error::.env line count out of range after operator upsert (${before} -> ${after})"
+              exit 1
+            fi
+            n=$(grep -cxF "UPTIMEPAGE_OPERATOR_ADMIN_TOKEN=$(printenv OPERATOR_ADMIN_TOKEN)" .env || true)
+            [ "$n" = 1 ] || { echo "::error::UPTIMEPAGE_OPERATOR_ADMIN_TOKEN not written exactly once to .env (count=${n})"; exit 1; }
           fi
 
           # --- managed RUST_LOG (optional) ----------------------------------

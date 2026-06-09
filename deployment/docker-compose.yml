@@ -84,6 +84,8 @@ services:
       UPTIMEPAGE_STORAGE__CLICKHOUSE__DATABASE: monitor
       UPTIMEPAGE_SECURITY__CREDENTIALS_KEK_BASE64: ${UPTIMEPAGE_CREDENTIALS_KEK_BASE64}
       UPTIMEPAGE_SECURITY__TRUSTED_PROXIES: ${UPTIMEPAGE_SECURITY__TRUSTED_PROXIES:-172.16.0.0/12,127.0.0.0/8,::1/128}
+      # Empty disables the /operator/* surface (routes 404).
+      UPTIMEPAGE_OPERATOR__ADMIN_TOKEN: ${UPTIMEPAGE_OPERATOR_ADMIN_TOKEN:-}
       UPTIMEPAGE_OBSERVABILITY__LOG_FORMAT: json
       # Bind metrics on all interfaces *inside* the container so the
       # optional Alloy sidecar (a separate container) can scrape it over
