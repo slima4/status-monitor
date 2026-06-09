@@ -47,9 +47,8 @@ ALTER TABLE incidents ADD COLUMN region TEXT;
 ALTER TABLE incidents ADD COLUMN regions_down TEXT[];
 ALTER TABLE incidents ADD COLUMN regions_up TEXT[];
 
--- Per-plan region cap (each region multiplies a target's check volume).
-ALTER TABLE plans ADD COLUMN max_regions INTEGER NOT NULL DEFAULT 1;
-UPDATE plans SET max_regions = 6 WHERE id = 'pro';
+-- Per-plan cap on regions a monitor can be assigned to (i32::MAX = no limit).
+ALTER TABLE plans ADD COLUMN max_regions INTEGER NOT NULL DEFAULT 2147483647;
 
 -- Per-monitor detection threshold: "any" | "majority" | "all" | {"count": n}.
 ALTER TABLE targets ADD COLUMN region_policy JSONB NOT NULL DEFAULT '"majority"'::jsonb;
