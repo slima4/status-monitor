@@ -94,6 +94,11 @@ services:
       # static org-bound token (Settings → API tokens) via Claude Desktop /
       # mcp-remote pointed at http://app.lvh.me:8080/mcp.
       UPTIMEPAGE_MCP__ENABLED: "true"
+      # Operator surface (/operator/*) for the local multi-region harness:
+      # mint regions + agent tokens. Off in prod unless a token is set; this
+      # fixed dev value is never used outside the local stack. Drives
+      # `just dev-regions` (scripts/dev-regions.sh).
+      UPTIMEPAGE_OPERATOR__ADMIN_TOKEN: "dev-operator-token"
       UPTIMEPAGE_OBSERVABILITY__LOG_FORMAT: json
       UPTIMEPAGE_OBSERVABILITY__LOG_LEVEL: "uptimepage=debug,sqlx=warn,hyper=warn,tower_http=info,info"
       UPTIMEPAGE_SERVER__API_BIND: "0.0.0.0:8080"

@@ -1,0 +1,55 @@
+# LOCAL multi-region test overlay. Adds two regional agents next to the dev
+# control plane so the full pull/execute/push topology can be exercised before
+# pushing changes.
+#
+# The agents run the REAL prod image (Dockerfile) in agent mode — a
+# self-contained linux binary, so this works whether the control plane runs
+# natively (`just run`) or in a container (`just up-app`). The first build is
+# slow (~release compile); after that it's cached. This also exercises the
+# actual agent deploy artifact (deployment/docker-compose.agent.yml).
+#
+# Driven by `just dev-regions` (scripts/dev-regions.sh), which mints the tokens
+# and starts these with the right --env-file/--profile.
+name: uptimepage
+
+x-dev-agent: &dev-agent
+  profiles: ["agents"]
+  build:
+    context: .
+    dockerfile: Dockerfile
+  image: uptimepage:dev-agent
+  restart: unless-stopped
+  stop_grace_period: 30s
+  # No published ports — like a real agent box, nothing is exposed to the host.
+  # (The agent serves metrics on :9090 inside the container; not needed here.)
+
+services:
+  agent-eu:
+    <<: *dev-agent
+    environment: &dev-agent-env
+      UPTIMEPAGE_AGENT__ENABLED: "true"
+      # Reach the dev control plane. Default = the dev-app container over the
+      # internal docker network (`just up-app`). For a NATIVE control plane
+      # (`just run` on the host) the harness passes
+      # AGENT_CONTROL_PLANE_URL=http://host.docker.internal:8080.
+      # Either way it's a private address, so the agent's control-plane client
+      # needs the allow_private_targets opt-in below (default-strict in prod).
+      UPTIMEPAGE_AGENT__CONTROL_PLANE_URL: ${AGENT_CONTROL_PLANE_URL:-http://uptimepage:8080}
+      UPTIMEPAGE_AGENT__PULL_INTERVAL_SECS: "10"
+      UPTIMEPAGE_AGENT__FLUSH_INTERVAL_SECS: "5"
+      # Allow probing private/loopback fixtures AND the private control plane.
+      UPTIMEPAGE_SECURITY__ALLOW_PRIVATE_TARGETS: "true"
+      # validate_runtime still runs before the agent branch; satisfy the
+      # mandatory fingerprint salt with a throwaway dev value.
+      UPTIMEPAGE_AUTH__FINGERPRINT_SALT: "dev-only-fingerprint-salt-not-for-prod"
+      UPTIMEPAGE_OBSERVABILITY__LOG_FORMAT: json
+      RUST_LOG: "uptimepage=debug,info"
+      UPTIMEPAGE_AGENT__REGION: "eu-helsinki"
+      UPTIMEPAGE_AGENT__TOKEN: ${AGENT_EU_TOKEN:-}
+
+  agent-apac:
+    <<: *dev-agent
+    environment:
+      <<: *dev-agent-env
+      UPTIMEPAGE_AGENT__REGION: "apac-sg"
+      UPTIMEPAGE_AGENT__TOKEN: ${AGENT_APAC_TOKEN:-}

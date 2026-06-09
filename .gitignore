@@ -36,6 +36,8 @@ skills-lock.json
 
 # Secrets and local-only test overrides (never commit)
 .env
+# Minted agent tokens for the local multi-region harness (scripts/dev-regions.sh)
+.dev-agents.env
 *.local
 *.local.yml
 

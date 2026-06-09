@@ -76,10 +76,11 @@ DELETE FROM incidents
 DELETE FROM targets
  WHERE org_id = (SELECT id FROM organizations WHERE slug='${SLUG}')
    AND tags @> ARRAY['seed-fixtures'];
--- target_regions cascade with their targets above; drop the fixture agents and
--- the fixture-only regions ('default' is owned by the app). Agents first — they
--- FK-reference regions.
-DELETE FROM agents WHERE name LIKE 'Fixture %';
+-- target_regions cascade with their targets above; drop every agent in the
+-- fixture regions (not just 'Fixture %'-named ones) before the regions, so a
+-- stray agent left by another tool can't FK-block the region delete. These
+-- regions are seed-owned; 'default' is owned by the app and left intact.
+DELETE FROM agents WHERE region IN ('eu-west', 'us-east', 'ap-south');
 DELETE FROM regions WHERE id IN ('eu-west', 'us-east', 'ap-south');
 DELETE FROM notification_channels
  WHERE org_id = (SELECT id FROM organizations WHERE slug='${SLUG}')
@@ -225,11 +226,6 @@ INSERT INTO regions (id, name, location) VALUES
   ('us-east', 'US East', 'Virginia'),
   ('ap-south', 'AP South', 'Singapore')
 ON CONFLICT (id) DO NOTHING;
-
--- Lift the fixture org's region cap so multi-region assignment + quorum can be
--- exercised through the API/UI (the default free cap is 1).
-UPDATE plans SET max_regions = GREATEST(max_regions, 10)
- WHERE id = (SELECT plan_id FROM organizations WHERE id = '${ORG}');
 
 INSERT INTO target_regions (target_id, region)
 SELECT id, 'default' FROM targets
