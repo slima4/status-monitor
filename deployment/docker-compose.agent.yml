@@ -1,0 +1,48 @@
+# Regional probe agent — a SEPARATE box from the control plane.
+#
+# The agent is the same uptimepage image run in agent mode: a stateless probe
+# that pulls its region's monitor config from the control plane over HTTPS,
+# executes the checks locally, and ships results back. It runs NO web server,
+# Postgres, ClickHouse, or alerting — so it has no inbound ports and no
+# database. The only thing it needs is outbound HTTPS to the control plane.
+#
+# Bring-up (full runbook in AGENT.md):
+#   1. On the control plane: mint a region + agent token via the operator API.
+#   2. On this box: copy .env.agent.example -> .env, fill in the token + region.
+#   3. docker compose -f docker-compose.agent.yml up -d
+#
+# Required env vars in .env (see .env.agent.example):
+#   UPTIMEPAGE_IMAGE        — the exact image the control plane runs
+#   AGENT_CONTROL_PLANE_URL — https origin of the control plane
+#   AGENT_TOKEN             — the sm_agent_ token minted for this box
+#   AGENT_REGION            — the region id this agent serves
+
+name: uptimepage-agent
+
+services:
+  agent:
+    image: ${UPTIMEPAGE_IMAGE}
+    restart: unless-stopped
+    # Let an in-flight batch flush on SIGTERM before SIGKILL.
+    stop_grace_period: 30s
+    # The agent makes no inbound API connections, but it does serve its own
+    # Prometheus metrics on 9090 (buffer depth, push outcomes). Exposed on the
+    # internal network only — never published to the host — so an optional
+    # metrics sidecar can scrape it. No metrics endpoint is required for the
+    # agent to function.
+    expose:
+      - "9090"
+    environment:
+      UPTIMEPAGE_AGENT__ENABLED: "true"
+      UPTIMEPAGE_AGENT__CONTROL_PLANE_URL: ${AGENT_CONTROL_PLANE_URL}
+      UPTIMEPAGE_AGENT__TOKEN: ${AGENT_TOKEN}
+      UPTIMEPAGE_AGENT__REGION: ${AGENT_REGION}
+      UPTIMEPAGE_AGENT__PULL_INTERVAL_SECS: ${AGENT_PULL_INTERVAL_SECS:-30}
+      UPTIMEPAGE_AGENT__FLUSH_INTERVAL_SECS: ${AGENT_FLUSH_INTERVAL_SECS:-5}
+      UPTIMEPAGE_AGENT__BUFFER_CAPACITY: ${AGENT_BUFFER_CAPACITY:-10000}
+      UPTIMEPAGE_OBSERVABILITY__LOG_FORMAT: json
+      RUST_LOG: ${RUST_LOG:-info,uptimepage=info}
+    # No container healthcheck: the runtime image is distroless (no shell to
+    # run a probe with). Liveness is observed on the control plane via the
+    # agent_up / agent_last_seen_age gauges (a stale agent fires the
+    # region-silence alert) — see AGENT.md.

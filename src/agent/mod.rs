@@ -228,8 +228,12 @@ pub async fn run(cfg: AppConfig) -> Result<()> {
         "starting regional agent"
     );
 
-    // Control plane is a public host → strict SSRF guard is correct.
-    let outbound = http_outbound::build_outbound_client(SsrfGuard::strict());
+    // The control-plane URL is operator-supplied (trusted), not attacker
+    // input, so it honors the same `allow_private_targets` knob as the probe
+    // client. Default (knob off) keeps the strict guard; a local/integration
+    // control plane on a private address opts in via the flag.
+    let outbound =
+        http_outbound::build_outbound_client(SsrfGuard::new(cfg.security.allow_private_targets));
 
     let source: Arc<dyn EnabledTargetSource> =
         Arc::new(AgentPullSource::new(outbound.clone(), &base, token.clone()));
