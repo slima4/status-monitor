@@ -322,24 +322,6 @@ pub struct RegionChoice {
     pub selected: bool,
 }
 
-/// Picker label: the region's name (falling back to its id when unset or equal
-/// to the id, as for the auto-seeded control-plane region), plus its location
-/// in parentheses when set.
-fn region_label(r: &crate::storage::RegionOption) -> String {
-    let name = r.name.trim();
-    let base = if name.is_empty() || name == r.id {
-        r.id.as_str()
-    } else {
-        name
-    };
-    let loc = r.location.trim();
-    if loc.is_empty() {
-        base.to_string()
-    } else {
-        format!("{base} ({loc})")
-    }
-}
-
 #[derive(Template, WebTemplate)]
 #[template(path = "targets/form.html")]
 pub struct FormPage {
@@ -490,7 +472,7 @@ pub async fn new_form(
             .into_iter()
             .map(|r| RegionChoice {
                 selected: chosen.contains(&r.id),
-                label: region_label(&r),
+                label: crate::web::views::region_display::region_label(&r.name, &r.id, &r.location),
                 id: r.id,
             })
             .collect();
@@ -541,7 +523,7 @@ pub async fn edit_form(
             .into_iter()
             .map(|r| RegionChoice {
                 selected: assigned.contains(&r.id),
-                label: region_label(&r),
+                label: crate::web::views::region_display::region_label(&r.name, &r.id, &r.location),
                 id: r.id,
             })
             .collect();

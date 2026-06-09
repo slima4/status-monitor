@@ -18,7 +18,7 @@
             aria-label="Region">
       <option value=""{% if selected_region.is_none() %} selected{% endif %}>all</option>
       {% for r in regions %}
-      <option value="{{ r }}"{% if let Some(sel) = selected_region %}{% if sel == r %} selected{% endif %}{% endif %}>{{ r }}</option>
+      <option value="{{ r.id }}"{% if let Some(sel) = selected_region %}{% if sel.as_str() == r.id.as_str() %} selected{% endif %}{% endif %}>{{ r.label }}</option>
       {% endfor %}
     </select><span class="dashboard-subhead__caret" aria-hidden="true">▾</span></span>
   </p>
@@ -68,7 +68,7 @@
       <tbody>
         {% for row in region_breakdown %}
         <tr{% if row.selected %} class="font-medium text-body"{% endif %}>
-          <td class="py-1.5 pr-4 font-mono">{{ row.region }}</td>
+          <td class="py-1.5 pr-4 font-mono">{{ row.region_label }}</td>
           <td class="py-1.5 pr-4">{{ row.uptime_label }}</td>
           <td class="py-1.5 pr-4 text-right font-mono">{{ row.p50_label }}</td>
           <td class="py-1.5 pr-4 text-right font-mono">{{ row.p95_label }}</td>

@@ -7,6 +7,7 @@ pub mod notification_channels;
 pub mod on_call;
 pub mod pages;
 pub mod public_status;
+pub mod region_display;
 pub mod share;
 pub mod targets_detail;
 pub mod targets_form;

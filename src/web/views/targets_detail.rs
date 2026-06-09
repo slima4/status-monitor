@@ -19,6 +19,7 @@ use crate::web::filters;
 use crate::web::views::{
     RangeOption, build_range_options, describe_check, fmt_human, fmt_ts, resolve_range_key,
 };
+use crate::web::views::region_display::{labeled_regions, LabeledRegion};
 use crate::web::{AuthedBrowser, CurrentOrg};
 
 // A raw row per check floods the page; the latency/breakdown charts above
@@ -180,7 +181,7 @@ pub struct DetailPage {
     pub to_human: String,
     /// Distinct regions this org's targets run in; drives the region selector,
     /// rendered only when there is more than one.
-    pub regions: Vec<String>,
+    pub regions: Vec<LabeledRegion>,
     pub selected_region: Option<String>,
     /// Per-region rollup rows; empty for single-region orgs (table hidden).
     pub region_breakdown: Vec<RegionBreakdownRow>,
@@ -189,6 +190,7 @@ pub struct DetailPage {
 /// One row of the per-region breakdown table on the monitor detail page.
 pub struct RegionBreakdownRow {
     pub region: String,
+    pub region_label: String,
     pub uptime_label: String,
     pub p50_label: String,
     pub p95_label: String,
@@ -199,15 +201,25 @@ pub struct RegionBreakdownRow {
 }
 
 impl RegionBreakdownRow {
-    fn from_rollup(r: crate::api::types::RegionRollup, selected_region: Option<&str>) -> Self {
+    fn from_rollup(
+        r: crate::api::types::RegionRollup,
+        selected_region: Option<&str>,
+        catalog: &[crate::storage::RegionOption],
+    ) -> Self {
         let uptime_label = super::dashboard::pct_label(r.samples, r.up);
         let selected = selected_region == Some(r.region.as_str());
+        let region_label = catalog
+            .iter()
+            .find(|c| c.id == r.region)
+            .map(|c| crate::web::views::region_display::region_label(&c.name, &c.id, &c.location))
+            .unwrap_or_else(|| r.region.clone());
         Self {
             selected,
             uptime_label,
             p50_label: format!("{} ms", r.p50_ms),
             p95_label: format!("{} ms", r.p95_ms),
             last_status: r.last_status,
+            region_label,
             region: r.region,
         }
     }
@@ -427,8 +439,9 @@ pub async fn index(
     let range_key = resolve_range_key(params.range.as_deref(), &RANGE_KEYS, DEFAULT_RANGE);
     let (from, to) = resolve_window(range_key, params.from, params.to);
     let labels = WindowLabels::new(from, to);
-    let regions = state.target_store.regions_for_org(org).await?;
-    let selected_region = super::dashboard::resolve_region(params.region, &regions);
+    let region_ids = state.target_store.regions_for_org(org).await?;
+    let selected_region = super::dashboard::resolve_region(params.region, &region_ids);
+    let catalog = state.target_store.available_regions_detailed().await?;
     let live = load_live_data_cached(
         &state,
         org,
@@ -439,13 +452,13 @@ pub async fn index(
         selected_region.as_deref(),
     )
     .await?;
-    let region_breakdown = if regions.len() > 1 {
+    let region_breakdown = if region_ids.len() > 1 {
         state
             .results_store
             .region_breakdown(org, target.id, TimeRange { from, to })
             .await?
             .into_iter()
-            .map(|r| RegionBreakdownRow::from_rollup(r, selected_region.as_deref()))
+            .map(|r| RegionBreakdownRow::from_rollup(r, selected_region.as_deref(), &catalog))
             .collect()
     } else {
         Vec::new()
@@ -458,6 +471,7 @@ pub async fn index(
         .monitor_share_store
         .count_active_for_target(org, target.id)
         .await? as usize;
+    let regions = labeled_regions(&catalog, region_ids);
 
     Ok(DetailPage {
         active_tab: "targets",

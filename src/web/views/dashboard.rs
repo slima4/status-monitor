@@ -34,6 +34,7 @@ use crate::web::error::WebResult;
 use crate::web::filters;
 use crate::web::host::is_subdomain_public_request;
 use crate::web::views::public_status::{self, StatusParams};
+use crate::web::views::region_display::{labeled_regions, LabeledRegion};
 use crate::web::views::{
     HumanDur, RangeOption, build_range_options, describe_check, resolve_range_key,
 };
@@ -221,7 +222,7 @@ pub struct DashboardPage {
     pub status_counts: StatusCounts,
     pub type_counts: Arc<[TypeCount]>,
     pub ribbon: FleetRibbon,
-    pub regions: Vec<String>,
+    pub regions: Vec<LabeledRegion>,
     pub selected_region: Option<String>,
 }
 
@@ -239,7 +240,7 @@ pub struct DashboardTablePartial {
     pub status_counts: StatusCounts,
     pub type_counts: Arc<[TypeCount]>,
     pub ribbon: FleetRibbon,
-    pub regions: Vec<String>,
+    pub regions: Vec<LabeledRegion>,
     pub selected_region: Option<String>,
 }
 
@@ -284,9 +285,11 @@ pub async fn index(
     Query(params): Query<DashboardParams>,
 ) -> WebResult<DashboardPage> {
     let range = resolve_range_key(params.range.as_deref(), &RANGE_KEYS, DEFAULT_RANGE);
-    let regions = state.target_store.regions_for_org(org.0).await?;
-    let selected_region = resolve_region(params.region, &regions);
+    let region_ids = state.target_store.regions_for_org(org.0).await?;
+    let selected_region = resolve_region(params.region, &region_ids);
     let snapshot = snapshot_for(&state, org.0, range, selected_region.as_deref()).await?;
+    let catalog = state.target_store.available_regions_detailed().await?;
+    let regions = labeled_regions(&catalog, region_ids);
     let onboarding = snapshot.matches == 0;
     Ok(DashboardPage {
         active_tab: "dashboard",
@@ -336,9 +339,11 @@ pub async fn table_partial(
     Query(params): Query<DashboardParams>,
 ) -> WebResult<Response> {
     let range = resolve_range_key(params.range.as_deref(), &RANGE_KEYS, DEFAULT_RANGE);
-    let regions = state.target_store.regions_for_org(org.0).await?;
-    let selected_region = resolve_region(params.region, &regions);
+    let region_ids = state.target_store.regions_for_org(org.0).await?;
+    let selected_region = resolve_region(params.region, &region_ids);
     let snapshot = snapshot_for(&state, org.0, range, selected_region.as_deref()).await?;
+    let catalog = state.target_store.available_regions_detailed().await?;
+    let regions = labeled_regions(&catalog, region_ids);
     let partial = DashboardTablePartial {
         range,
         range_options: build_range_options(range, &RANGE_KEYS),
