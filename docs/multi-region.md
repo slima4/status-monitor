@@ -76,8 +76,15 @@ What deliberately **blends** across regions: the public status page's component 
 
 ## Incident detection across regions
 
-Detection evaluates each region's recent run **independently** and then combines the verdicts, so one region's transient network blip can't corrupt the picture for a target probed from several places. The current rule is **any-region-down**: a target opens one (whole-target) incident as soon as any region is sustained-unhealthy, and clears it once the regions have recovered. There is still exactly one incident per target — its `region` is unset.
+Detection evaluates each region's recent run **independently** and then combines the verdicts, so one region's transient network blip can't corrupt the picture for a target probed from several places. There is always exactly one incident per target — its `region` is unset.
 
-The combine step is a pluggable policy. Two more shapes are built and tested but not yet selectable: **quorum** (open only once *N* regions agree it's down — the standard defence against single-location false positives) and **per-region** (a separate incident per region). A per-monitor selector for these is planned; until then every monitor uses any-region-down.
+How the per-region verdicts combine is a **per-monitor policy**, set on the monitor form (default **majority**):
+
+- **any** — open as soon as a single region is sustained-unhealthy.
+- **majority** — open once more than half the regions agree it's down (the standard defence against a single-location false positive).
+- **all** — open only when every region is down.
+- **count: N** — open once at least *N* regions are down.
+
+A monitor probed from a single region behaves the same under every policy.
 
 See [Configuration](configuration.md) for the `[scheduler]`, `[agent]`, and `[operator]` keys, and [Architecture](architecture.md) for where the pieces sit.
