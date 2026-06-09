@@ -16,7 +16,7 @@ use crate::error::{AppError, Result};
 use crate::security::Cipher;
 use crate::storage::locks::{advisory_xact_lock, org_lock_key};
 use crate::storage::postgres_secrets::{decrypt_in_place, encrypt_in_place};
-use crate::storage::traits::{TargetFilter, TargetSort, TargetStore};
+use crate::storage::traits::{RegionOption, TargetFilter, TargetSort, TargetStore};
 
 /// Org-scoped Postgres-backed target store. Every query binds the `org`
 /// passed by the caller (resolved from the request's `CurrentOrg`) so reads,
@@ -793,6 +793,22 @@ impl TargetStore for PostgresTargetStore {
                 .await
                 .context("postgres available_regions")?;
         Ok(rows.into_iter().map(|(r,)| r).collect())
+    }
+
+    async fn available_regions_detailed(&self) -> Result<Vec<RegionOption>> {
+        let rows: Vec<(String, String, Option<String>)> =
+            sqlx::query_as("SELECT id, name, location FROM regions WHERE enabled ORDER BY id")
+                .fetch_all(&self.pool)
+                .await
+                .context("postgres available_regions_detailed")?;
+        Ok(rows
+            .into_iter()
+            .map(|(id, name, location)| RegionOption {
+                id,
+                name,
+                location: location.unwrap_or_default(),
+            })
+            .collect())
     }
 
     async fn regions_for_target(&self, org: OrgId, target_id: Uuid) -> Result<Option<Vec<String>>> {

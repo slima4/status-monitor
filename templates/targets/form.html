@@ -580,7 +580,7 @@
           {% for r in form.region_choices %}
           <label class="inline-flex items-center gap-1.5 text-sm">
             <input type="checkbox" data-region-checkbox value="{{ r.id }}"{% if r.selected %} checked{% endif %}>
-            <span>{{ r.id }}</span>
+            <span>{{ r.label }}</span>
           </label>
           {% endfor %}
         </div>

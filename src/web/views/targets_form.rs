@@ -318,7 +318,26 @@ pub struct OwnerChoice {
 /// One region in the monitor form's assignment checkboxes.
 pub struct RegionChoice {
     pub id: String,
+    pub label: String,
     pub selected: bool,
+}
+
+/// Picker label: the region's name (falling back to its id when unset or equal
+/// to the id, as for the auto-seeded control-plane region), plus its location
+/// in parentheses when set.
+fn region_label(r: &crate::storage::RegionOption) -> String {
+    let name = r.name.trim();
+    let base = if name.is_empty() || name == r.id {
+        r.id.as_str()
+    } else {
+        name
+    };
+    let loc = r.location.trim();
+    if loc.is_empty() {
+        base.to_string()
+    } else {
+        format!("{base} ({loc})")
+    }
 }
 
 #[derive(Template, WebTemplate)]
@@ -458,22 +477,21 @@ pub async fn new_form(
     // higher so the default the user sees would actually be accepted.
     form.interval_s = form.interval_s.max(form.min_interval_s);
     // Prefill the default coverage (all regions capped at the plan, checked).
-    let available = state.target_store.available_regions().await?;
+    let available = state.target_store.available_regions_detailed().await?;
     let max_regions = state.quotas.limit_for_org(org).await?.max_regions;
     if available.len() > 1 && max_regions > 1 {
         let default_region = state.cfg.scheduler.effective_default_region().to_string();
-        let default_set = crate::api::handlers::targets::default_region_set(
-            available.clone(),
-            max_regions,
-            &default_region,
-        );
-        let chosen: std::collections::HashSet<String> = default_set.iter().cloned().collect();
+        let ids: Vec<String> = available.iter().map(|r| r.id.clone()).collect();
+        let default_set =
+            crate::api::handlers::targets::default_region_set(ids, max_regions, &default_region);
+        let chosen: std::collections::HashSet<String> = default_set.into_iter().collect();
         let cap = available.len().min(max_regions.max(1) as usize);
         form.region_choices = available
             .into_iter()
             .map(|r| RegionChoice {
-                selected: chosen.contains(&r),
-                id: r,
+                selected: chosen.contains(&r.id),
+                label: region_label(&r),
+                id: r.id,
             })
             .collect();
         form.region_threshold_options =
@@ -508,7 +526,7 @@ pub async fn edit_form(
             crate::web::views::escalation::monitor_binding(&state, org, id).await?;
     }
     // Meaningless unless the deployment has >1 region and the plan allows >1.
-    let available = state.target_store.available_regions().await?;
+    let available = state.target_store.available_regions_detailed().await?;
     let max_regions = state.quotas.limit_for_org(org).await?.max_regions;
     if available.len() > 1 && max_regions > 1 {
         let assigned: std::collections::HashSet<String> = state
@@ -522,8 +540,9 @@ pub async fn edit_form(
         form.region_choices = available
             .into_iter()
             .map(|r| RegionChoice {
-                selected: assigned.contains(&r),
-                id: r,
+                selected: assigned.contains(&r.id),
+                label: region_label(&r),
+                id: r.id,
             })
             .collect();
         form.region_threshold_options = region_threshold_choices(region_policy, cap);

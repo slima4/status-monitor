@@ -13,8 +13,8 @@ use crate::domain::{
 };
 use crate::error::Result;
 use crate::storage::traits::{
-    ClampedRange, IncidentListQuery, ResultSink, ResultsStore, TargetFilter, TargetStore,
-    TimeRange, UptimeStats,
+    ClampedRange, IncidentListQuery, RegionOption, ResultSink, ResultsStore, TargetFilter,
+    TargetStore, TimeRange, UptimeStats,
 };
 
 #[derive(Default)]
@@ -841,6 +841,10 @@ impl TargetStore for InMemoryTargetStore {
     }
 
     async fn available_regions(&self) -> Result<Vec<String>> {
+        Ok(Vec::new())
+    }
+
+    async fn available_regions_detailed(&self) -> Result<Vec<RegionOption>> {
         Ok(Vec::new())
     }
 

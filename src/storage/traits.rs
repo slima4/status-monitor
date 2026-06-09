@@ -133,6 +133,9 @@ pub trait TargetStore: Send + Sync {
     /// Region catalog: ids of every enabled region, sorted. The set a monitor
     /// may be assigned to. Global (regions are operator-defined), so no `org`.
     async fn available_regions(&self) -> Result<Vec<String>>;
+    /// Same catalog with display fields for the assignment picker, so the UI
+    /// can show a human name + location instead of the bare id.
+    async fn available_regions_detailed(&self) -> Result<Vec<RegionOption>>;
     /// Regions one target is assigned to, sorted. `None` if the target is not in
     /// the org (so a guessed id from another tenant reads as not-found).
     async fn regions_for_target(&self, org: OrgId, target_id: Uuid) -> Result<Option<Vec<String>>>;
@@ -145,6 +148,16 @@ pub trait TargetStore: Send + Sync {
         target_id: Uuid,
         regions: &[String],
     ) -> Result<bool>;
+}
+
+/// A region for the monitor assignment picker: id plus display fields.
+/// `name`/`location` are empty when unset; the UI shows `name` (falling back to
+/// `id`) and appends `location` when present.
+#[derive(Debug, Clone)]
+pub struct RegionOption {
+    pub id: String,
+    pub name: String,
+    pub location: String,
 }
 
 #[derive(Debug, Clone, Copy)]
