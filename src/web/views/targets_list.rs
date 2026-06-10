@@ -128,7 +128,6 @@ pub struct GroupOption {
     pub selected: bool,
 }
 
-
 #[derive(Template, WebTemplate)]
 #[template(path = "targets/list.html")]
 pub struct ListPage {

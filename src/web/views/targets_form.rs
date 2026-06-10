@@ -276,7 +276,6 @@ pub struct IntervalChoice {
     pub selected: bool,
 }
 
-
 impl FormModel {
     /// Confirmation-count presets; an off-preset stored value is preserved as its own option.
     pub fn confirmation_options(&self) -> Vec<ConfirmationChoice> {
@@ -323,7 +322,10 @@ impl FormModel {
 
     /// Check-interval presets for http/tcp/dns, filtered by the plan floor.
     pub fn interval_options_fast(&self) -> Vec<IntervalChoice> {
-        self.interval_group(&[30, 60, 120, 300, 600, 900, 1_800, 3_600], !self.slow_kind())
+        self.interval_group(
+            &[30, 60, 120, 300, 600, 900, 1_800, 3_600],
+            !self.slow_kind(),
+        )
     }
 
     /// Check-interval presets for tls_cert/domain_expiry.

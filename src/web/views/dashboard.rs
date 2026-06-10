@@ -1449,8 +1449,7 @@ mod tests {
 
     #[test]
     fn type_chip_counts_follow_status_filter() {
-        let snapshot =
-            sample_snapshot(vec![sample_row("api", "up"), sample_row("worker", "down")]);
+        let snapshot = sample_snapshot(vec![sample_row("api", "up"), sample_row("worker", "down")]);
         let chips = type_chips(&snapshot, Some("down"), None);
         assert_eq!(chips[0].count, 1, "All narrows to status matches");
         assert_eq!(chips[1].count, 1);

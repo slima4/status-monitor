@@ -72,7 +72,6 @@ pub struct SeverityChip {
     pub active: bool,
 }
 
-
 /// An incident owner rendered as a deterministic initials avatar.
 pub struct OwnerAvatar {
     pub initials: String,

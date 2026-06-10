@@ -22,8 +22,8 @@ pub mod write_source;
 
 pub use alert::{AlertBinding, TargetAlerts};
 pub use check::{
-    min_interval_secs_for_kind, CheckSpec, DnsCheck, DnsRecordType, DomainExpiryCheck,
-    ExpectedStatus, HttpCheck, HttpMethod, TcpCheck, TlsCertCheck,
+    CheckSpec, DnsCheck, DnsRecordType, DomainExpiryCheck, ExpectedStatus, HttpCheck, HttpMethod,
+    TcpCheck, TlsCertCheck, min_interval_secs_for_kind,
 };
 pub use escalation_policy::{
     EscalationDecision, EscalationPolicy, EscalationPolicySummary, EscalationStep,

@@ -19,8 +19,8 @@ use crate::api::types::{
 use crate::app::AppState;
 use crate::auth::scope::Scope;
 use crate::domain::{
-    min_interval_secs_for_kind, CheckResult, NewTarget, OrgId, RegionIncidentPolicy, Target,
-    TargetAlerts, TargetUpdate,
+    CheckResult, NewTarget, OrgId, RegionIncidentPolicy, Target, TargetAlerts, TargetUpdate,
+    min_interval_secs_for_kind,
 };
 use crate::error::{AppError, Result};
 use crate::security::SsrfGuard;
