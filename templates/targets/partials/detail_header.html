@@ -13,8 +13,8 @@
   {% if share_count > 0 %}
   <button type="button"
           data-share-open data-target-id="{{ id }}" data-target-name="{{ name }}"
-          class="status-badge status-badge--tag hover:bg-[color:var(--theme-surface-sunk)]"
-          aria-label="{{ share_count }} active share link{% if share_count != 1 %}s{% endif %} — manage sharing">shared · {{ share_count }}</button>
+          class="btn-ghost px-1.5 py-0.5 font-mono text-xs text-muted"
+          aria-label="{{ share_count }} active share link{% if share_count != 1 %}s{% endif %} — manage sharing">[ shared:{{ share_count }} ]</button>
   {% endif %}
   <span class="ml-auto flex flex-wrap gap-2">
     <button type="button"
@@ -60,9 +60,9 @@
   {% else %}
     <span class="font-mono">{{ address }}</span>
   {% endif %}
-  <span class="ml-2" data-last-check
+  <span class="cli-brackets ml-2" data-last-check
         data-last-at="{{ last_at_iso }}"
-        data-enabled="{{ enabled }}">interval {{ interval_s }}s</span>
+        data-enabled="{{ enabled }}">interval:{{ interval_s|exact_dur }}</span>
 </p>
 <div>
   {% for tag in tags %}

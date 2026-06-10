@@ -194,6 +194,8 @@ pub struct LatencySeries {
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct RegionLatencySeries {
     pub region: String,
+    /// Display name from the region catalog (the id when unnamed).
+    pub label: String,
     pub buckets: Vec<LatencyBucket>,
 }
 

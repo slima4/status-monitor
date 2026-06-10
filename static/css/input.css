@@ -1534,6 +1534,14 @@
         color: var(--theme-text-muted);
     }
 
+    /* Mono-tracked column header — the register head for data tables.
+       Sunk fill stays a per-table utility (flush tables add it, padded
+       tables don't). */
+    .table-head {
+        @apply text-left font-mono text-[0.6875rem] font-semibold uppercase tracking-[0.08em];
+        color: var(--theme-text-muted);
+    }
+
     /* Big single-number KPI value (Monitors, Uptime, …). Plex Serif 500
        with tabular + lining figures — editorial weight, columns stay
        aligned. tnum locks digit width, lnum forces baseline numerals

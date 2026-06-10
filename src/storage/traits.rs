@@ -160,6 +160,19 @@ pub struct RegionOption {
     pub location: String,
 }
 
+impl RegionOption {
+    /// Catalog display name: `name`, falling back to the id when unset or
+    /// auto-seeded equal to the id (the control-plane region).
+    pub fn display_name(&self) -> &str {
+        let name = self.name.trim();
+        if name.is_empty() || name == self.id {
+            &self.id
+        } else {
+            name
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct TimeRange {
     pub from: DateTime<Utc>,

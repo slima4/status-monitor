@@ -12,7 +12,7 @@ export function initChart(el) {
 export function renderEmptyChart(el, msg) {
     el.innerHTML = "";
     const wrap = document.createElement("div");
-    wrap.className = "flex h-full items-center justify-center text-sm text-slate-500";
+    wrap.className = "flex h-full items-center justify-center font-mono text-xs text-quiet";
     wrap.textContent = msg;
     el.appendChild(wrap);
 }
@@ -68,13 +68,27 @@ export function timeXAxis(from, to) {
     };
 }
 
+// The page's mono stack, resolved once — axis/legend/tooltip text renders in
+// the same face as the rest of the console UI instead of the ECharts default.
+let monoStack = null;
+function chartFont() {
+    if (monoStack === null) monoStack = resolveToken("--font-mono", "font-family");
+    return monoStack;
+}
+
 // Shared config for the two ms-valued detail-page charts: unit-suffixed
 // tooltip/y-axis and grid padding sized for the "{value} ms" labels. Callers
 // spread this and add their own xAxis/series.
 export function msChartBase() {
+    const fontFamily = chartFont();
     return {
-        tooltip: { trigger: "axis", valueFormatter: v => v == null ? "—" : `${v} ms` },
-        legend: { bottom: 0 },
+        textStyle: { fontFamily },
+        tooltip: {
+            trigger: "axis",
+            valueFormatter: v => v == null ? "—" : `${v} ms`,
+            textStyle: { fontFamily },
+        },
+        legend: { bottom: 0, textStyle: { fontFamily } },
         grid: { left: 60, right: 20, top: 20, bottom: 40 },
         yAxis: { type: "value", axisLabel: { formatter: "{value} ms" } },
     };

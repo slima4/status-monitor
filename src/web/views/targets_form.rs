@@ -276,17 +276,6 @@ pub struct IntervalChoice {
     pub selected: bool,
 }
 
-/// Exact single-unit label (`90s`, `5m`, `24h`) — rail tokens must round-trip
-/// the stored value, so the lossy two-unit `HumanDur` is the wrong tool here.
-fn interval_label(secs: u64) -> String {
-    if secs % 3_600 == 0 {
-        format!("{}h", secs / 3_600)
-    } else if secs % 60 == 0 {
-        format!("{}m", secs / 60)
-    } else {
-        format!("{secs}s")
-    }
-}
 
 impl FormModel {
     /// Confirmation-count presets; an off-preset stored value is preserved as its own option.
@@ -358,7 +347,7 @@ impl FormModel {
             .into_iter()
             .map(|secs| IntervalChoice {
                 secs,
-                label: interval_label(secs),
+                label: super::exact_duration(secs),
                 selected: active && secs == self.interval_s,
             })
             .collect()
@@ -379,7 +368,7 @@ impl FormModel {
                 label: if secs == 0 {
                     "off".to_string()
                 } else {
-                    interval_label(u64::from(secs))
+                    super::exact_duration(u64::from(secs))
                 },
                 selected: secs == self.renotify_interval_secs,
             })
@@ -551,7 +540,7 @@ pub async fn new_form(
             .into_iter()
             .map(|r| RegionChoice {
                 selected: chosen.contains(&r.id),
-                label: crate::web::views::region_display::region_label(&r.name, &r.id, &r.location),
+                label: crate::web::views::region_display::region_label(&r),
                 id: r.id,
             })
             .collect();
@@ -602,7 +591,7 @@ pub async fn edit_form(
             .into_iter()
             .map(|r| RegionChoice {
                 selected: assigned.contains(&r.id),
-                label: crate::web::views::region_display::region_label(&r.name, &r.id, &r.location),
+                label: crate::web::views::region_display::region_label(&r),
                 id: r.id,
             })
             .collect();

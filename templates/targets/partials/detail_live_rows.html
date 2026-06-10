@@ -2,7 +2,7 @@
    both the initial render and the htmx OOB swap, so this is the single
    source of truth for the table body. #}
 {% if results.is_empty() %}
-<tr><td colspan="5" class="px-3 py-6 text-center text-muted">No results in this window.</td></tr>
+<tr><td colspan="5" class="px-3 py-6 text-center font-mono text-xs text-quiet"># no results in this window</td></tr>
 {% else %}
 {% for r in results %}
 {% let bad = r.status == "down" || r.status == "error" %}

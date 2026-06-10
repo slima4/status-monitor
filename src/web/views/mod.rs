@@ -116,6 +116,18 @@ pub(crate) fn fmt_human(t: DateTime<Utc>) -> String {
     t.format("%Y-%m-%d %H:%M UTC").to_string()
 }
 
+/// Exact single-unit duration (`45s`, `5m`, `24h`) for config values that
+/// must round-trip — the lossy two-unit display lives in [`HumanDur`].
+pub(crate) fn exact_duration(secs: u64) -> String {
+    if secs % 3_600 == 0 {
+        format!("{}h", secs / 3_600)
+    } else if secs % 60 == 0 {
+        format!("{}m", secs / 60)
+    } else {
+        format!("{secs}s")
+    }
+}
+
 /// Two-unit duration string, e.g. `"45s"`, `"17m"`, `"2h 14m"`, `"1d 1h"`.
 /// Negative durations clamp to zero.
 pub(crate) fn humanize_duration(d: ChronoDuration) -> String {

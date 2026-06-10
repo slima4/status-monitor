@@ -9,7 +9,7 @@ import { buildLatencyOption, buildLatencyOverlayOption } from "./_latency_core.j
 import { buildBreakdownOption } from "./_breakdown_core.js";
 
 const LIVE_REGION = "detail-live-kpi";
-const EMPTY = "No data in this range yet.";
+const EMPTY = "# no data in this range yet";
 
 // One self-contained chart: its own sliding-window query + option builder, so
 // the latency overlay and the merged breakdown can read different endpoints.

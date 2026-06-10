@@ -1305,6 +1305,7 @@ impl ResultsStore for ClickhouseResultsStore {
                 Some(s) if s.region == r.region => s.buckets.push(bucket),
                 _ => out.push(RegionLatencySeries {
                     region: r.region,
+                    label: String::new(),
                     buckets: vec![bucket],
                 }),
             }

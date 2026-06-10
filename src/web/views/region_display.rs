@@ -10,17 +10,11 @@ pub struct LabeledRegion {
     pub label: String,
 }
 
-/// Human label for a region: its name (falling back to the id when unset or
-/// equal to the id, as for the auto-seeded control-plane region), with the
-/// location appended in parentheses when set.
-pub fn region_label(name: &str, id: &str, location: &str) -> String {
-    let name = name.trim();
-    let base = if name.is_empty() || name == id {
-        id
-    } else {
-        name
-    };
-    let location = location.trim();
+/// Human label for a region: its display name ([`RegionOption::display_name`])
+/// with the location appended in parentheses when set.
+pub fn region_label(region: &RegionOption) -> String {
+    let base = region.display_name();
+    let location = region.location.trim();
     if location.is_empty() {
         base.to_string()
     } else {
@@ -37,7 +31,7 @@ pub fn labeled_regions(catalog: &[RegionOption], ids: Vec<String>) -> Vec<Labele
         .map(|id| {
             let label = by_id
                 .get(id.as_str())
-                .map(|r| region_label(&r.name, &r.id, &r.location))
+                .map(|r| region_label(r))
                 .unwrap_or_else(|| id.clone());
             LabeledRegion { id, label }
         })

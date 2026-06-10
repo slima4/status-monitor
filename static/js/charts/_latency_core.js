@@ -30,13 +30,13 @@ const REGION_COLORS = [
 ];
 
 // Multi-region overlay: one p95 line per region so regions compare directly.
-// `regions` is `[{ region, buckets }]`; p50/p99 are dropped — comparing one
+// `regions` is `[{ region, label, buckets }]`; p50/p99 are dropped — comparing one
 // metric across regions is the whole point, three quantiles × N regions is noise.
 export function buildLatencyOverlayOption(regions, from, to) {
     const series = regions.map((r, i) => {
         const color = REGION_COLORS[i % REGION_COLORS.length];
         return {
-            name: r.region,
+            name: r.label || r.region,
             type: "line",
             smooth: true,
             showSymbol: false,

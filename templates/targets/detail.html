@@ -58,7 +58,7 @@
   <section class="sticker-card p-5">
     <h2 class="panel-label">by region · {{ range }}</h2>
     <table class="mt-4 min-w-full text-sm">
-      <thead class="text-left text-xs uppercase tracking-wide text-muted">
+      <thead class="table-head">
         <tr>
           <th scope="col" class="py-2 pr-4">region</th>
           <th scope="col" class="py-2 pr-4">uptime</th>
@@ -87,11 +87,11 @@
   <section class="sticker-card">
     <header class="flex items-center justify-between border-b border-[color:var(--theme-line)] px-5 py-3">
       <h2 class="panel-label">recent results</h2>
-      <span id="detail-recent-count" class="text-xs text-muted">latest {{ results.len() }}{% if results_has_more %}+{% endif %}</span>
+      <span id="detail-recent-count" class="font-mono text-xs text-muted">latest:{{ results.len() }}{% if results_has_more %}+{% endif %}</span>
     </header>
     <table class="min-w-full text-sm font-mono">
       <caption class="sr-only">Recent check results for {{ name }}</caption>
-      <thead class="bg-[color:var(--theme-surface-sunk)] text-left text-xs uppercase tracking-wide text-muted">
+      <thead class="table-head bg-[color:var(--theme-surface-sunk)]">
         <tr>
           <th scope="col" class="px-3 py-2">timestamp</th>
           <th scope="col" class="px-3 py-2">status</th>
@@ -110,17 +110,19 @@
   <script defer src="{{ "js/echarts.min.js"|asset }}"></script>
   <script type="module" src="{{ "js/charts/detail_charts.js"|asset }}"></script>
 
-  <section class="space-y-2 sticker-card px-5 py-3" data-collapsible>
-    <button type="button" data-collapse-toggle aria-expanded="false"
-            aria-controls="configuration-body"
-            class="group flex w-full cursor-pointer items-center gap-1.5 border-0 bg-transparent p-0 text-left text-sm font-medium text-body">
-      configuration
-      <span data-collapse-chevron aria-hidden="true"
-            class="text-base text-muted transition-transform group-hover:text-body motion-reduce:transition-none">▾</span>
-      <span data-collapse-hint class="ml-auto text-xs font-normal text-muted group-hover:text-body">raw JSON this monitor runs with</span>
-    </button>
-    <div id="configuration-body" class="hidden">
-      <pre class="sticker-card overflow-auto p-4 text-xs text-body">{{ config_json }}</pre>
+  <section class="sticker-card overflow-hidden" data-collapsible>
+    <header class="bg-[color:var(--theme-surface-sunk)] px-5 py-2.5">
+      <button type="button" data-collapse-toggle aria-expanded="false"
+              aria-controls="configuration-body"
+              class="group flex w-full cursor-pointer items-center gap-1.5 border-0 bg-transparent p-0 text-left">
+        <span class="panel-label">configuration</span>
+        <span data-collapse-chevron aria-hidden="true"
+              class="text-base text-muted transition-transform group-hover:text-body motion-reduce:transition-none">▾</span>
+        <span data-collapse-hint class="ml-auto text-xs text-muted group-hover:text-body">raw JSON this monitor runs with</span>
+      </button>
+    </header>
+    <div id="configuration-body" class="hidden border-t border-[color:var(--theme-line)] p-5">
+      <pre class="overflow-auto rounded-sm bg-[color:var(--theme-surface-sunk)] p-4 text-xs text-body">{{ config_json }}</pre>
     </div>
   </section>
 

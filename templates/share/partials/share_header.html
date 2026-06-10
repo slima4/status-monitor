@@ -18,7 +18,7 @@
   {% endif %}
   <span class="ml-2" data-last-check
         data-last-at="{{ last_at_iso }}"
-        data-enabled="{{ enabled }}">interval {{ interval_s }}s</span>
+        data-enabled="{{ enabled }}">interval {{ interval_s|exact_dur }}</span>
 </p>
 <div>
   {% for tag in tags %}

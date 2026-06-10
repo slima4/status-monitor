@@ -45,9 +45,9 @@
             ? `HTTP ${ev.response_code}`
             : (ev.error ? ev.error : `${ev.duration_ms}ms`);
         return `<div class="grid grid-cols-[8rem_8rem_1fr] gap-3 py-0.5">
-          <span class="text-slate-500">${window.smEscapeHtml(label)}</span>
+          <span class="font-mono text-xs text-quiet">${window.smEscapeHtml(label)}</span>
           <time datetime="${window.smEscapeHtml(ev.timestamp)}" class="font-mono text-xs">${window.smEscapeHtml(fmtTime(ev.timestamp))}</time>
-          <span class="text-slate-700"><span class="status-badge status-badge--${window.smEscapeHtml(ev.status)} mr-2">${window.smEscapeHtml(ev.status)}</span>${window.smEscapeHtml(meta)}</span>
+          <span class="text-body"><span class="status-badge status-badge--${window.smEscapeHtml(ev.status)} mr-2">${window.smEscapeHtml(ev.status)}</span>${window.smEscapeHtml(meta)}</span>
         </div>`;
     }
 
@@ -63,7 +63,7 @@
         const fromRaw = new Date(fromIso).getTime();
         const toRaw = toIso ? new Date(toIso).getTime() : Date.now();
         if (Number.isNaN(fromRaw) || Number.isNaN(toRaw)) {
-            body.innerHTML = `<span class="flash-text flash-text--bad">Could not load timeline: invalid timestamp on incident row.</span>`;
+            body.innerHTML = `<span class="flash-text flash-text--bad">could not load timeline: invalid timestamp on incident row</span>`;
             return;
         }
         const url = `${base}/results`
@@ -71,26 +71,26 @@
             + `&to=${encodeURIComponent(new Date(toRaw + TAIL_PAD_MS).toISOString())}`
             + `&limit=${TIMELINE_FETCH_LIMIT}`;
 
-        body.innerHTML = `<span class="text-slate-500">Loading timeline…</span>`;
+        body.innerHTML = `<span class="font-mono text-xs text-quiet"># loading timeline…</span>`;
         try {
             const r = await fetch(url, { headers: { "Accept": "application/json" } });
             if (!r.ok) throw new Error(`HTTP ${r.status}`);
             const json = await r.json();
             const items = Array.isArray(json.items) ? json.items : [];
             if (items.length === 0) {
-                body.innerHTML = `<span class="text-slate-500">No checks recorded in this window.</span>`;
+                body.innerHTML = `<span class="font-mono text-xs text-quiet"># no checks recorded in this window</span>`;
                 return;
             }
             const tl = pickTimeline(items, ongoing);
             const parts = [
-                rowHtml("First failure", tl.firstFailure),
-                rowHtml("Last failure", tl.lastFailure),
-                rowHtml("Recovered", tl.recovered),
+                rowHtml("first failure", tl.firstFailure),
+                rowHtml("last failure", tl.lastFailure),
+                rowHtml("recovered", tl.recovered),
             ].filter(Boolean);
             body.innerHTML = parts.join("")
-                || `<span class="text-slate-500">No failures matched in this window.</span>`;
+                || `<span class="font-mono text-xs text-quiet"># no failures matched in this window</span>`;
         } catch (err) {
-            body.innerHTML = `<span class="flash-text flash-text--bad">Could not load timeline: ${window.smEscapeHtml(String(err.message || err))}</span>`;
+            body.innerHTML = `<span class="flash-text flash-text--bad">could not load timeline: ${window.smEscapeHtml(String(err.message || err))}</span>`;
         }
     }
 

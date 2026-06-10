@@ -210,7 +210,7 @@ impl RegionBreakdownRow {
         let region_label = catalog
             .iter()
             .find(|c| c.id == r.region)
-            .map(|c| crate::web::views::region_display::region_label(&c.name, &c.id, &c.location))
+            .map(|c| crate::web::views::region_display::region_label(c))
             .unwrap_or_else(|| r.region.clone());
         Self {
             selected,
@@ -1012,12 +1012,12 @@ mod tests {
     #[test]
     fn detail_header_shows_shared_chip_only_when_links_exist() {
         // No links → no chip.
-        assert!(!sample_page().render().unwrap().contains("shared ·"));
+        assert!(!sample_page().render().unwrap().contains("[ shared:"));
         // Live links → a chip that opens the share modal.
         let mut p = sample_page();
         p.share_count = 2;
         let html = p.render().unwrap();
-        assert!(html.contains("shared · 2"));
+        assert!(html.contains("[ shared:2 ]"));
         assert!(html.contains("data-share-open"));
     }
 
@@ -1223,7 +1223,7 @@ mod tests {
     fn incidents_page_renders_empty_state_when_no_incidents() {
         let html = sample_incidents_page(vec![], 0).render().unwrap();
         assert!(html.starts_with("<!doctype html>"));
-        assert!(html.contains("No incidents in the last 30d"));
+        assert!(html.contains("no incidents in the last 30d"));
         assert!(!html.contains("<table"));
         assert!(html.contains("aria-current=\"page\""));
     }
@@ -1237,7 +1237,7 @@ mod tests {
         // Ongoing emphasis: themed left border + pulsing badge + severity-tagged label.
         assert!(html.contains("sm-incident-ongoing"));
         assert!(html.contains("animate-pulse"));
-        assert!(html.contains("Ongoing · down"));
+        assert!(html.contains("ongoing · down"));
         // Resolved row uses the regular severity badge.
         assert!(html.contains(r#"status-badge status-badge--down">down<"#));
         // Each row has a hidden detail row + the chevron for expand.

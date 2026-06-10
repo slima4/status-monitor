@@ -256,14 +256,22 @@ pub async fn latency_by_region(
         .clamp_history(org, q.resolve_uncapped()?)
         .await?;
     let bucket_seconds = latency_bucket_seconds(range.inner());
-    let (target, regions) = tokio::try_join!(
+    let (target, mut regions, catalog) = tokio::try_join!(
         state.target_store.get(org, id),
         state
             .results_store
             .latency_buckets_by_region(org, id, range, bucket_seconds),
+        state.target_store.available_regions_detailed(),
     )?;
     if target.is_none() {
         return Err(target_not_found());
+    }
+    for series in &mut regions {
+        series.label = catalog
+            .iter()
+            .find(|r| r.id == series.region)
+            .map(|r| r.display_name().to_string())
+            .unwrap_or_else(|| series.region.clone());
     }
     Ok(Json(LatencySeriesByRegion {
         regions,

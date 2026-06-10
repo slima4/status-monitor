@@ -107,6 +107,13 @@ mod display {
         Ok(crate::web::views::HumanDur(*value))
     }
 
+    /// `{{ secs|exact_dur }}` → exact single-unit (`45s`, `5m`, `24h`).
+    /// Unlike `humanize_dur` it never rounds, so config values round-trip.
+    #[askama::filter_fn]
+    pub fn exact_dur(value: &u64, _: &dyn askama::Values) -> askama::Result<String> {
+        Ok(crate::web::views::exact_duration(*value))
+    }
+
     /// `{{ bytes|human_bytes }}` → `"512 KB"` / `"2 MB"`. Floors to the
     /// largest whole binary unit.
     #[askama::filter_fn]
