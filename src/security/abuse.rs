@@ -244,6 +244,23 @@ impl AbuseGuard {
         };
         s.domain_hit(host).or_else(|| s.reputation_hit(host))
     }
+
+    /// Same rules applied to an arbitrary outbound delivery URL (e.g. a
+    /// notification webhook): URL patterns against the full URL, then the
+    /// domain deny-list / reputation feed against its host. An unparseable
+    /// URL is no hit — transport validation rejects it separately.
+    pub fn inspect_url(&self, url: &str) -> Option<AbuseHit> {
+        let s = self.state.load();
+        if let Some(i) = s.url_patterns.matches(url).iter().next() {
+            return Some(AbuseHit {
+                kind: AbuseKind::UrlPattern,
+                detail: format!("pattern #{i}"),
+            });
+        }
+        let parsed = url::Url::parse(url).ok()?;
+        let host = parsed.host_str()?;
+        s.domain_hit(host).or_else(|| s.reputation_hit(host))
+    }
 }
 
 impl AbuseState {

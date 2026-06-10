@@ -146,6 +146,10 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
                 .delete(handlers::notification_channels::delete),
         )
         .route(
+            "/notification-channels/test",
+            post(handlers::notification_channels::test_config),
+        )
+        .route(
             "/notification-channels/{id}/test",
             post(handlers::notification_channels::test_send),
         )

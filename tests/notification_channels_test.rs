@@ -232,6 +232,34 @@ async fn delete_then_get_is_404() {
 }
 
 #[tokio::test]
+async fn test_config_rejects_invalid_transport() {
+    let app = app();
+    let (st, body) = send(
+        &app,
+        "POST",
+        "/api/v1/notification-channels/test",
+        json!({ "config": { "type": "slack", "webhook_url": "not a url" } }),
+    )
+    .await;
+    assert_eq!(st, StatusCode::BAD_REQUEST);
+    assert_eq!(body["error"]["code"], "INVALID_CHANNEL_CONFIG");
+}
+
+#[tokio::test]
+async fn test_config_rejects_redaction_sentinel() {
+    let app = app();
+    let (st, body) = send(
+        &app,
+        "POST",
+        "/api/v1/notification-channels/test",
+        json!({ "config": { "type": "slack", "webhook_url": "***" } }),
+    )
+    .await;
+    assert_eq!(st, StatusCode::BAD_REQUEST);
+    assert_eq!(body["error"]["code"], "REDACTION_SENTINEL");
+}
+
+#[tokio::test]
 async fn test_send_unknown_channel_is_404() {
     let app = app();
     let (st, body) = send_empty(

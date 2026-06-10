@@ -94,6 +94,9 @@ window.smRenderCheckResult = function (el, result, extra) {
 
 window.smRenderCheckRunning = function (el) {
     if (!el) return;
+    // Live-region backstop: the templates set role="status" so the first
+    // update is announced; self-heal any container that forgot it.
+    if (!el.hasAttribute("role")) el.setAttribute("role", "status");
     el.className = "test-result";
     el.textContent = "Running…";
     el.classList.remove("hidden");

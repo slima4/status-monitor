@@ -12,7 +12,7 @@ use axum::extract::{Path, State};
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::AppendHeaders;
 use chrono::Utc;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
@@ -21,7 +21,7 @@ use crate::api::error::codes;
 use crate::api::redaction::Redacted;
 use crate::app::AppState;
 use crate::domain::{
-    IncidentSeverity, IncidentUrgency, NewNotificationChannel, NotificationChannel,
+    ChannelConfig, IncidentSeverity, IncidentUrgency, NewNotificationChannel, NotificationChannel,
     NotificationChannelUpdate, NotificationReason, validate_channel_name,
 };
 use crate::error::{AppError, Result};
@@ -75,6 +75,7 @@ pub async fn create(
 )> {
     validate_name(&new.name)?;
     validate_config(&new.config)?;
+    check_channel_abuse(&state, org, &new.config)?;
     // Friendly pre-check; the store INSERT enforces the same cap atomically
     // under a per-org advisory lock.
     state
@@ -172,6 +173,7 @@ pub async fn update(
     }
     if let Some(cfg) = &update.config {
         validate_config(cfg)?;
+        check_channel_abuse(&state, org, cfg)?;
     }
     let updated = state
         .notification_channel_store
@@ -232,7 +234,56 @@ pub async fn test_send(
         .get(org, id)
         .await?
         .ok_or_else(channel_not_found)?;
-    let notifier = build_notifier(&channel.config, &state.outbound_http)?;
+    // A stored config can predate a deny-list entry — gate the test too.
+    check_channel_abuse(&state, org, &channel.config)?;
+    deliver_test(&state, &channel.config).await?;
+    Ok(Json(TestNotificationResponse { delivered: true }))
+}
+
+/// Body of `POST /test`: a full transport config to exercise without saving.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub struct TestChannelConfigRequest {
+    pub config: ChannelConfig,
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/notification-channels/test",
+    tag = "notification-channels",
+    summary = "Send a test alert through an unsaved transport config",
+    description = "Delivers one clearly-labelled test alert through the config \
+                   in the request body without persisting anything, so the \
+                   operator can verify a webhook/token before creating or \
+                   saving a channel. The config is validated exactly as on \
+                   create.",
+    request_body(content = TestChannelConfigRequest, example = json!({
+        "config": {
+            "type": "slack",
+            "webhook_url": "https://hooks.slack.com/services/T000/B000/XXXX"
+        }
+    })),
+    responses(
+        (status = 200, body = TestNotificationResponse),
+        (status = 400, body = ApiError, description = "Invalid transport config or a redaction sentinel in place of a real secret"),
+        (status = 422, body = ApiError, description = "The transport rejected the test delivery"),
+    ),
+)]
+pub async fn test_config(
+    State(state): State<AppState>,
+    Authorized(org, _): Authorized<ChannelsExecute>,
+    Json(req): Json<TestChannelConfigRequest>,
+) -> Result<Json<TestNotificationResponse>> {
+    validate_config(&req.config)?;
+    check_channel_abuse(&state, org, &req.config)?;
+    deliver_test(&state, &req.config).await?;
+    Ok(Json(TestNotificationResponse { delivered: true }))
+}
+
+/// One synthetic, clearly-labelled delivery through `config`'s transport.
+/// Shared by the saved-channel and ad-hoc test endpoints so both exercise
+/// the exact notifier path real incidents use.
+async fn deliver_test(state: &AppState, config: &ChannelConfig) -> Result<()> {
+    let notifier = build_notifier(config, &state.outbound_http)?;
     let notice = IncidentNotice {
         incident_id: Uuid::nil(),
         reason: NotificationReason::Opened,
@@ -255,8 +306,7 @@ pub async fn test_send(
             codes::CHANNEL_TEST_FAILED,
             format!("test delivery failed: {e}"),
         )
-    })?;
-    Ok(Json(TestNotificationResponse { delivered: true }))
+    })
 }
 
 // ── Validation ──────────────────────────────────────────────────────────
@@ -286,4 +336,33 @@ fn validate_config(cfg: &crate::domain::ChannelConfig) -> Result<()> {
     cfg.validate()
         .map_err(|m| AppError::bad_request_field(codes::INVALID_CHANNEL_CONFIG, m, "config"))?;
     Ok(())
+}
+
+/// Deny-list gate for the config's outbound URL, mirroring the targets
+/// test path: a hit is recorded as an `abuse_blocked` quota event and
+/// rejected. Telegram goes to the fixed Bot API host, so only the
+/// webhook-bearing transports are inspected.
+fn check_channel_abuse(
+    state: &AppState,
+    org: crate::domain::OrgId,
+    config: &ChannelConfig,
+) -> Result<()> {
+    let url = match config {
+        ChannelConfig::Slack { webhook_url } => webhook_url,
+        ChannelConfig::Webhook { url, .. } => url,
+        ChannelConfig::Telegram { .. } => return Ok(()),
+    };
+    let Some(hit) = state.abuse.inspect_url(url) else {
+        return Ok(());
+    };
+    crate::quotas::service::record_quota_event(
+        state.db.clone(),
+        Some(org),
+        None,
+        "abuse_blocked",
+        Some(hit.quota_name()),
+        serde_json::json!({ "detail": hit.detail }),
+        None,
+    );
+    Err(hit.into_app_error())
 }

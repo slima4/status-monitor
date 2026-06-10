@@ -10,6 +10,11 @@
     <p class="text-sm text-muted">
       Submits JSON to <code class="font-mono">{{ form.submit_method }} {{ form.action }}</code>. Validation runs on the API.
     </p>
+    {% if form.mode != "create" %}
+    <p class="font-mono text-xs text-quiet">
+      {% if form.used_by.is_empty() %}# not bound to any monitor{% else %}# bound to <a href="#used-by" class="underline decoration-dotted hover:text-body">{{ form.used_by_label() }}</a>{% endif %}
+    </p>
+    {% endif %}
   </header>
 
   <form id="channel-form"
@@ -22,7 +27,7 @@
     <div id="form-errors" role="alert" aria-live="polite"
          class="hidden alert-card alert-card--error"></div>
 
-    <fieldset class="space-y-3">
+    <fieldset class="space-y-3" data-kind-chooser>
       <legend class="panel-label">channel type</legend>
       <div class="check-type-cards">
         <label class="check-type-card" data-kind-card>
@@ -41,6 +46,9 @@
           <span class="check-type-card__desc">bot message to a chat</span>
         </label>
       </div>
+      {% if form.mode != "create" %}
+      <p data-kind-locked-hint class="hidden font-mono text-xs text-quiet"># type locked — tick "Replace transport config" below to change it</p>
+      {% endif %}
     </fieldset>
 
     <fieldset class="sticker-card form-card">
@@ -49,6 +57,7 @@
       <label class="field-outline">
         <span class="field-outline__label">Name</span>
         <input name="name" type="text" required maxlength="100" value="{{ form.name }}"
+               placeholder="ops-{{ form.kind }}" data-name-input
                autocomplete="off" class="w-full field">
       </label>
       <div>
@@ -72,8 +81,9 @@
           <span class="text-sm">Replace transport config</span>
         </label>
         <p class="mt-1 text-xs text-muted">
-          Secrets are never shown. Leave unchecked to edit only the name/type/status
-          and keep the stored secret. Check it to re-enter the full config.
+          Secrets are never shown. Leave unchecked to edit only the name/status
+          and keep the stored secret. Check it to switch the type or re-enter
+          the config.
         </p>
       </div>
       {% endif %}
@@ -84,6 +94,11 @@
           <input name="slack_webhook_url" type="url" value="{{ form.config.slack_webhook_url }}"
                  placeholder="https://hooks.slack.com/services/T000/B000/XXXX"
                  autocomplete="off" spellcheck="false" class="w-full field font-mono">
+          <span class="mt-1 block text-xs text-muted">
+            Create an incoming webhook in your workspace —
+            <a href="https://api.slack.com/messaging/webhooks" target="_blank" rel="noopener"
+               class="underline decoration-dotted hover:text-body">api.slack.com/messaging/webhooks</a>.
+          </span>
         </label>
       </div>
 
@@ -93,6 +108,9 @@
           <input name="webhook_url" type="url" value="{{ form.config.webhook_url }}"
                  placeholder="https://example.com/hooks/alerts"
                  autocomplete="off" spellcheck="false" class="w-full field font-mono">
+          <span class="mt-1 block text-xs text-muted">
+            Your endpoint receives one JSON POST per alert (down / recovered / test).
+          </span>
         </label>
         <label class="field-outline">
           <span class="field-outline__label">Headers (JSON object)</span>
@@ -118,16 +136,56 @@
           <input name="telegram_bot_token" type="text" value="{{ form.config.telegram_bot_token }}"
                  placeholder="123456:ABC-DEF…"
                  autocomplete="off" spellcheck="false" class="w-full field font-mono">
+          <span class="mt-1 block text-xs text-muted">
+            Create a bot with <span class="font-mono">@BotFather</span> and paste its token.
+          </span>
         </label>
         <label class="field-outline">
           <span class="field-outline__label">Chat ID</span>
           <input name="telegram_chat_id" type="text" value="{{ form.config.telegram_chat_id }}"
                  placeholder="-1001234567890"
                  autocomplete="off" spellcheck="false" class="w-full field font-mono">
+          <span class="mt-1 block text-xs text-muted">
+            Your numeric id from <span class="font-mono">@userinfobot</span>; group chats use the
+            <span class="font-mono">-100…</span> id. The bot must be a member of the chat.
+          </span>
         </label>
       </div>
+
+      <div class="flex flex-wrap items-center gap-3 pt-1">
+        <button type="button" data-send-test aria-describedby="test-hint-channel"
+                class="sticker-btn sticker-btn--accent px-4 py-2 text-sm font-medium inline-flex items-center gap-1.5">
+          <span aria-hidden="true">▶</span> test now
+        </button>
+        <span id="test-hint-channel" data-test-hint
+              data-hint-form="Delivers one test alert with the config above — nothing is saved."
+              data-hint-stored="Delivers one test alert through the stored config."
+              class="text-xs text-muted">Delivers one test alert with the config above — nothing is saved.</span>
+      </div>
+      <p data-test-result role="status" class="hidden font-mono text-xs"></p>
       </div>
     </fieldset>
+
+    {% if form.mode != "create" %}
+    <fieldset id="used-by" class="sticker-card form-card">
+      <legend>used by</legend>
+      <div class="clear-both space-y-3 p-5">
+        {% if form.used_by.is_empty() %}
+        <p class="font-mono text-xs text-quiet"># not bound to any monitor yet — pick this channel in a monitor's notifications section</p>
+        {% else %}
+        <p class="text-xs text-muted">Monitors that notify through this channel. Disabling or deleting it silences alerts for all of them.</p>
+        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {% for m in form.used_by %}
+          <a href="/targets/{{ m.id }}/edit" class="check-type-card min-w-0{% if !m.enabled %} opacity-50{% endif %}">
+            <span class="check-type-card__name w-full truncate">{{ m.name }}{% if !m.enabled %} <span class="cli-brackets font-normal">disabled</span>{% endif %}</span>
+            <span class="check-type-card__desc w-full truncate">{{ m.kind|lower }} · {{ m.addr }}</span>
+          </a>
+          {% endfor %}
+        </div>
+        {% endif %}
+      </div>
+    </fieldset>
+    {% endif %}
 
     <div class="flex gap-3">
       <button type="submit"
@@ -138,6 +196,24 @@
          class="btn-ghost px-4 py-2 text-sm">cancel</a>
     </div>
   </form>
+
+  {% if form.mode != "create" %}
+  <div class="flex flex-wrap items-center justify-between gap-3 border-t border-[color:var(--theme-line)] pt-4">
+    <p class="text-xs text-muted">
+      Deleting removes the channel{% if !form.used_by.is_empty() %} and silences alerts for {{ form.used_by_label() }}{% endif %}. Bindings must be re-applied if it's re-added.
+    </p>
+    <button type="button"
+            hx-delete="{{ form.action }}"
+            hx-headers='{"X-Requested-With":"uptimepage"}'
+            hx-on::after-request="if(event.detail.successful){window.location='/settings/notifications'}else{window.smRenderClientError(document.getElementById('form-errors'),'Delete failed — the channel may already be gone. Refresh and try again.')}"
+            data-confirm-modal
+            data-confirm-title="Delete notification channel?"
+            data-confirm-body="Monitors bound to {{ form.name }} stop alerting through it. Channel can be re-added later but bindings must be re-applied."
+            data-confirm-label="delete channel"
+            data-confirm-danger
+            class="btn-ghost btn-ghost--danger px-3 py-1.5 text-sm font-medium">delete channel</button>
+  </div>
+  {% endif %}
 </section>
 
 <script defer src="{{ "js/ui/api_form.js"|asset }}"></script>

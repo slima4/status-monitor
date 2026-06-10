@@ -30,11 +30,20 @@ fn html_ct(resp: &axum::http::Response<Body>) -> &str {
 }
 
 async fn create_http_target(router: &axum::Router, name: &str) -> String {
+    create_http_target_with_alerts(router, name, json!([])).await
+}
+
+async fn create_http_target_with_alerts(
+    router: &axum::Router,
+    name: &str,
+    alerts: Value,
+) -> String {
     let body = json!({
         "name": name,
         "interval": 60,
         "enabled": true,
         "tags": ["e2e"],
+        "alerts": alerts,
         "check": {
             "type": "http",
             "url": "https://example.com/",
@@ -380,6 +389,64 @@ async fn legal_pages_render_public_without_auth_nav() {
             "{path} should carry the legal footer links"
         );
     }
+}
+
+/// The channel edit page lists exactly the monitors whose alert bindings
+/// carry the channel — bound ones linked, unbound ones absent.
+#[tokio::test]
+async fn channel_edit_page_lists_bound_monitors() {
+    let router = app();
+
+    let resp = router
+        .clone()
+        .oneshot(
+            Request::post("/api/v1/notification-channels")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "name": "ops-slack",
+                        "config": {
+                            "type": "slack",
+                            "webhook_url": "https://hooks.slack.com/services/T/B/x"
+                        }
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED, "create channel");
+    let bytes = to_bytes(resp.into_body(), 1 << 20).await.unwrap();
+    let v: Value = serde_json::from_slice(&bytes).unwrap();
+    let ch_id = v["id"].as_str().expect("id").to_string();
+
+    let bound_id =
+        create_http_target_with_alerts(&router, "bound-api", json!([{ "channel_id": ch_id }]))
+            .await;
+    create_http_target(&router, "unbound-api").await;
+
+    let resp = router
+        .clone()
+        .oneshot(
+            Request::get(format!("/settings/notifications/{ch_id}/edit").as_str())
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let html = body_text(resp).await;
+    assert!(html.contains("bound-api"), "bound monitor must be listed");
+    assert!(
+        html.contains(format!(r#"href="/targets/{bound_id}/edit""#).as_str()),
+        "bound monitor must link to its edit form"
+    );
+    assert!(
+        !html.contains("unbound-api"),
+        "unbound monitor must not appear"
+    );
+    assert!(html.contains("# bound to"), "header shows the bound count");
 }
 
 /// The Privacy Policy uses Markdown tables; table rendering must be on.

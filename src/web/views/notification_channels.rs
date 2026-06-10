@@ -22,10 +22,11 @@ use uuid::Uuid;
 use crate::app::AppState;
 use crate::domain::{ChannelConfig, NotificationChannel};
 use crate::error::AppError;
+use crate::storage::traits::TargetFilter;
 use crate::web::CurrentOrg;
 use crate::web::error::WebResult;
 use crate::web::filters;
-use crate::web::views::{json_pretty, resolve_org};
+use crate::web::views::{describe_check, json_pretty, resolve_org};
 
 const TAB_NOTIFICATIONS: &str = "notifications";
 
@@ -76,6 +77,15 @@ impl Default for ConfigFields {
     }
 }
 
+/// A monitor whose alert bindings include the channel being edited.
+pub struct UsedByMonitor {
+    pub id: String,
+    pub name: String,
+    pub kind: &'static str,
+    pub addr: String,
+    pub enabled: bool,
+}
+
 pub struct ChannelFormModel {
     /// `"create"` or `"edit"`. Drives the heading, submit verb, and (when not
     /// `"create"`) the "Replace transport config" toggle.
@@ -86,6 +96,21 @@ pub struct ChannelFormModel {
     pub enabled: bool,
     pub kind: &'static str,
     pub config: ConfigFields,
+    /// Monitors bound to this channel; always empty on create.
+    pub used_by: Vec<UsedByMonitor>,
+}
+
+impl ChannelFormModel {
+    /// `"1 monitor"` / `"3 monitors"` — one pluralization for the header
+    /// count and the delete warning.
+    pub fn used_by_label(&self) -> String {
+        let n = self.used_by.len();
+        if n == 1 {
+            "1 monitor".into()
+        } else {
+            format!("{n} monitors")
+        }
+    }
 }
 
 #[derive(Template, WebTemplate)]
@@ -157,9 +182,37 @@ pub async fn edit_form(
         .ok_or_else(|| {
             AppError::not_found("CHANNEL_NOT_FOUND", "notification channel not found")
         })?;
+    // The default filter caps at 100, which would silently hide bound
+    // monitors past that on large orgs — fetch the full set.
+    let targets = state
+        .target_store
+        .list(
+            org,
+            TargetFilter {
+                limit: Some(10_000),
+                ..Default::default()
+            },
+        )
+        .await?;
+    let used_by = targets
+        .into_iter()
+        .filter(|t| t.alerts.iter().any(|b| b.channel_id == id))
+        .map(|t| {
+            let (kind, addr) = describe_check(&t.check);
+            UsedByMonitor {
+                id: t.id.to_string(),
+                name: t.name,
+                kind,
+                addr,
+                enabled: t.enabled,
+            }
+        })
+        .collect();
+    let mut form = form_from_channel(channel);
+    form.used_by = used_by;
     Ok(ChannelFormPage {
         active_tab: TAB_NOTIFICATIONS,
-        form: form_from_channel(channel),
+        form,
     }
     .into_response())
 }
@@ -173,6 +226,7 @@ fn empty_create_form() -> ChannelFormModel {
         enabled: true,
         kind: "slack",
         config: ConfigFields::default(),
+        used_by: Vec::new(),
     }
 }
 
@@ -206,6 +260,7 @@ fn form_from_channel(c: NotificationChannel) -> ChannelFormModel {
         enabled: c.enabled,
         kind: c.kind.as_db_str(),
         config,
+        used_by: Vec::new(),
     }
 }
 
@@ -228,24 +283,32 @@ mod tests {
         assert!(html.contains(r#"data-mode="create""#));
         // Create has no "replace config" toggle — config is always sent.
         assert!(!html.contains("Replace transport config"));
+        // "Test now" works pre-save (ad-hoc config test); delete needs a
+        // saved channel and stays edit-only.
+        assert!(html.contains("data-send-test"));
+        assert!(html.contains("test now"));
+        assert!(!html.contains("delete channel"));
     }
 
-    #[test]
-    fn edit_form_prefills_redacted_config_and_replace_toggle() {
-        use crate::domain::ChannelKind;
+    fn slack_channel(webhook_url: &str) -> NotificationChannel {
         use chrono::Utc;
-        let ch = NotificationChannel {
+        NotificationChannel {
             id: Uuid::nil(),
             name: "Ops".into(),
-            kind: ChannelKind::Slack,
+            kind: crate::domain::ChannelKind::Slack,
             config: ChannelConfig::Slack {
-                webhook_url: "https://hooks.slack.com/services/T/B/zzUNIQUESECRETzz".into(),
+                webhook_url: webhook_url.into(),
             },
             enabled: true,
             write_source: crate::domain::WriteSource::Ui,
             created_at: Utc::now(),
             updated_at: Utc::now(),
-        };
+        }
+    }
+
+    #[test]
+    fn edit_form_prefills_redacted_config_and_replace_toggle() {
+        let ch = slack_channel("https://hooks.slack.com/services/T/B/zzUNIQUESECRETzz");
         let form = form_from_channel(ch);
         assert_eq!(form.submit_method, "PATCH");
         assert_eq!(form.mode, "edit");
@@ -259,9 +322,50 @@ mod tests {
         .unwrap();
         assert!(html.contains("Replace transport config"));
         assert!(html.contains(r#"data-method="PATCH""#));
+        assert!(html.contains("data-send-test"));
+        assert!(html.contains(
+            r#"hx-delete="/api/v1/notification-channels/00000000-0000-0000-0000-000000000000""#
+        ));
+        // Empty used_by: quiet placeholders in the header and the card.
+        assert!(html.contains("# not bound to any monitor"));
+        assert!(html.contains("# not bound to any monitor yet"));
         // The real webhook never reaches the browser — only the `***` mask.
         assert!(!html.contains("zzUNIQUESECRETzz"));
         assert!(html.contains(r#"value="***""#));
+    }
+
+    #[test]
+    fn edit_form_lists_bound_monitors() {
+        let mut form = form_from_channel(slack_channel("https://hooks.slack.com/services/T/B/x"));
+        form.used_by = vec![
+            UsedByMonitor {
+                id: "t1".into(),
+                name: "api-prod".into(),
+                kind: "HTTP",
+                addr: "https://api.example.com/health".into(),
+                enabled: true,
+            },
+            UsedByMonitor {
+                id: "t2".into(),
+                name: "old-worker".into(),
+                kind: "TCP",
+                addr: "10.0.0.5:9000".into(),
+                enabled: false,
+            },
+        ];
+        let html = ChannelFormPage {
+            active_tab: TAB_NOTIFICATIONS,
+            form,
+        }
+        .render()
+        .unwrap();
+        assert!(html.contains(r#"href="/targets/t1/edit""#));
+        assert!(html.contains("api-prod"));
+        assert!(html.contains("http · https://api.example.com/health"));
+        assert!(html.contains("old-worker"));
+        assert!(html.contains("tcp · 10.0.0.5:9000"));
+        assert!(html.contains(r#"<span class="cli-brackets font-normal">disabled</span>"#));
+        assert!(!html.contains("# not bound to any monitor yet"));
     }
 
     #[test]

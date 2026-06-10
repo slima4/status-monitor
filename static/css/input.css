@@ -2123,9 +2123,18 @@
         border-color: var(--theme-line);
         font-family: var(--font-mono);
     }
-    .check-type-card:hover {
+    .check-type-card:not(:has(input:disabled)):not(:has(input:checked)):hover {
         background: var(--theme-surface-sunk);
         border-color: var(--theme-ink);
+    }
+    /* Locked chooser (channel edit before "Replace transport config"):
+       the checked card keeps its ink fill so the stored type stays
+       legible; the rest dim out. */
+    .check-type-card:has(input:disabled) {
+        cursor: default;
+    }
+    .check-type-card:has(input:disabled):not(:has(input:checked)) {
+        opacity: 0.5;
     }
     .check-type-card:has(input:checked) {
         background: var(--theme-ink);
