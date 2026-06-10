@@ -156,6 +156,18 @@ mod tests {
             categorize(&parts("POST", "/api/v1/targets/abc/test")),
             TestNow
         );
+        // The registered outbound-send primitives (ad-hoc target probe +
+        // both channel tests) must stay in the test_now bucket, not the
+        // api_writes one.
+        assert_eq!(categorize(&parts("POST", "/api/v1/targets/test")), TestNow);
+        assert_eq!(
+            categorize(&parts("POST", "/api/v1/notification-channels/abc/test")),
+            TestNow
+        );
+        assert_eq!(
+            categorize(&parts("POST", "/api/v1/notification-channels/test")),
+            TestNow
+        );
         assert_eq!(
             categorize(&parts("POST", "/api/v1/targets/abc/check-now")),
             CheckNow
