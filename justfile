@@ -38,6 +38,8 @@ setup:
     else
       echo "install 'mold' via your package manager (.cargo/config.toml needs it on Linux)"
     fi
+    git config core.hooksPath .githooks
+    echo "pre-commit installed → .githooks/pre-commit (bypass with --no-verify)"
     echo "setup done — RUSTC_WRAPPER=${RUSTC_WRAPPER:-<none>}; linker via .cargo/config.toml"
 
 # ── Local stack ─────────────────────────────────────────────────────────────
