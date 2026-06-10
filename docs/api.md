@@ -250,30 +250,46 @@ the most recent author.
 
 ### Alert config
 
-`alerts` is an optional array of channel bindings. Each binding references a
-notification channel by `channel_id` (see [Notification channels](#notification-channels)).
-An empty/omitted array disables alerting for that target.
+`alerts` is an optional array of channel bindings. Each binding is just a
+reference to a notification channel (see
+[Notification channels](#notification-channels)); the firing policy lives on
+the monitor itself. An empty/omitted array disables channel alerting for that
+target (incidents still open and show on status pages).
 
 ```jsonc
 "alerts": [
-  { "channel_id": "0192a1ce-0000-7000-8000-000000000001", "after_failures": 3, "notify_recovery": true },
-  { "channel_id": "0192a1ce-0000-7000-8000-000000000002", "after_failures": 6, "notify_recovery": false }
-]
+  { "channel_id": "0192a1ce-0000-7000-8000-000000000001" },
+  { "channel_id": "0192a1ce-0000-7000-8000-000000000002" }
+],
+"alert_confirmations": 3,
+"notify_recovery": true,
+"renotify_interval_secs": 3600,
+"region_policy": "majority"
 ```
 
 - `channel_id` — id of a notification channel owned by the **same org**. A binding to an unknown or another tenant's channel is rejected.
-- `after_failures` — consecutive non-`up` results before the binding fires a `down` notification. Reset to zero on the next `up`. Must be `>= 1`.
-- `notify_recovery` — when `true` (default), an `up` result following a fired `down` emits a `recovered` notification. When `false`, recovery is silent.
+- `alert_confirmations` — consecutive failing checks before an incident opens (and the same number of passing checks before it closes, which damps flapping). Default `2`, must be `>= 1`.
+- `notify_recovery` — when `true` (default), the recovery is announced to the monitor's channels. When `false`, recovery is silent.
+- `renotify_interval_secs` — seconds between reminder notifications while an outage stays unacknowledged. `0` disables reminders; otherwise must be `>= 60`. Default `3600`. Acknowledging or resolving the incident stops the reminders.
+- `region_policy` — how many probe regions must agree the target is down before an incident opens: `"any"`, `"majority"` (default), `"all"`, or `{ "count": N }`.
 
-The state machine is fire-once + recovery, tracked per `(target, channel)`: while in the `alerting` state, repeat failures do not re-fire. Counters are kept in memory and reset on process restart — after a restart, a target that was already alerting will re-fire when its threshold is next reached.
+Notifications are driven by the incident engine: one notification per
+incident open (then reminders per `renotify_interval_secs`), one on recovery.
+Failed deliveries retry on exponential backoff and dead-letter after the
+attempt cap; per-incident delivery state is visible at
+`GET /api/v1/incidents/{id}/notifications`.
 
 ### Alert validation errors
 
 `POST` and `PATCH` return `400 Bad Request` (`INVALID_ALERT_CONFIG`) for:
 
-- `after_failures must be >= 1`
 - a duplicate `channel_id` in the array
 - `notification channel <id> does not exist` — unknown id, or one owned by another org
+- `alert_confirmations must be >= 1`
+- `renotify_interval_secs must be 0 (off) or at least 60`
+
+A `region_policy` of `{ "count": N }` where `N` is `0` or exceeds the
+available regions is `422 INVALID_REGION_POLICY`.
 
 ### Validation errors
 
@@ -301,7 +317,8 @@ never read, mutate, or test another's channels.
 | `GET` | `/api/v1/notification-channels/{id}` | Get one |
 | `PATCH` | `/api/v1/notification-channels/{id}` | Partial update |
 | `DELETE` | `/api/v1/notification-channels/{id}` | Delete (204) |
-| `POST` | `/api/v1/notification-channels/{id}/test` | Send a synthetic test alert |
+| `POST` | `/api/v1/notification-channels/test` | Test an **unsaved** transport config |
+| `POST` | `/api/v1/notification-channels/{id}/test` | Send a synthetic test alert through a saved channel |
 
 ```jsonc
 {
@@ -314,16 +331,26 @@ never read, mutate, or test another's channels.
 `config` is `type`-tagged. Supported transports:
 
 - `slack` — `{ "type": "slack", "webhook_url": "https://…" }` (incoming webhook; posts `{ "text": "…" }`)
-- `webhook` — `{ "type": "webhook", "url": "https://…", "headers": { … } }` (POSTs the raw `AlertEvent` JSON; optional custom headers)
+- `webhook` — `{ "type": "webhook", "url": "https://…", "headers": { … }, "secret": "…" }` (POSTs the alert JSON; optional custom headers; optional signing secret, see below)
 - `telegram` — `{ "type": "telegram", "bot_token": "…", "chat_id": "…" }`
+
+**Webhook signing.** When a `webhook` channel carries a `secret` (≥ 16
+characters), every delivery is signed: the request includes
+`X-Uptimepage-Timestamp` (unix seconds) and
+`X-Uptimepage-Signature: sha256=<hex>`, where the hex is
+HMAC-SHA256(`secret`, `"{timestamp}.{body}"`) over the exact bytes sent.
+Receivers should recompute the digest and reject stale timestamps (e.g.
+older than 5 minutes) to block replays. Channels without a secret deliver
+unsigned.
 
 Behaviour:
 
 - **Secrets sealed at rest** with the credentials KEK; **never echoed back**. Every read path masks secret-bearing fields with `***` (the webhook URL is masked whole — it can carry a token; header *names* and `chat_id` are kept so the UI stays useful).
 - **Redaction-sentinel guard**: submitting a `config` that still contains `***` returns `400 REDACTION_SENTINEL`. Omit `config` on `PATCH` to keep the stored secret unchanged.
 - **Validation** (`400`): `webhook`/`slack` URLs must be `https`; `telegram` requires non-empty `bot_token` and `chat_id`; channel `name` is required and ≤ 100 chars.
+- **Destination deny-list**: the outbound URL is checked against the platform's abuse deny-list on create, update, and both test endpoints — a match is rejected (`ABUSE_BLOCKED` / `DOMAIN_DENYLISTED`).
 - **Quota**: capped per org by the plan's `max_notification_channels` (atomic, advisory-locked). A duplicate name within the org is `422 CHANNEL_NAME_TAKEN`; the cap is `422 CHANNEL_QUOTA_EXCEEDED`.
-- **Test send** delivers one clearly-labelled synthetic alert through the channel's transport (works on a disabled channel). A transport failure is `422 CHANNEL_TEST_FAILED`.
+- **Test sends** deliver one clearly-labelled synthetic alert. The per-channel form tests the stored config (works on a disabled channel too); the collection-level `POST …/test` takes `{ "config": { … } }` in the body, validates it exactly as create would, and persists nothing — the UI uses it for "test now" before a channel is saved. A transport failure is `422 CHANNEL_TEST_FAILED`. Both count against the `test_now` rate-limit bucket.
 
 ## Rate limiting
 

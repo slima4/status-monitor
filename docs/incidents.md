@@ -56,9 +56,11 @@ A policy's targets can be:
 - **a user** — pages the channels that member has chosen to be reached on (see on-call below);
 - **a schedule** — resolves who is on call right now and pages them.
 
-Policies are owner-managed at `/settings/escalation`: build the ladder, set per-level targets, and pick an org-default policy. Bind a specific policy to a monitor from the monitor's edit form. Resolution at page time is: the monitor's own policy, else the org default, else no paging (the incident still opens and shows in the console). A `low`-urgency or policy-less monitor opens quietly.
+Policies are owner-managed at `/settings/escalation`: build the ladder, set per-level targets, and pick an org-default policy. Bind a specific policy to a monitor from the monitor's edit form. Resolution at page time is: the monitor's own policy, else the org default, else **simple mode** — the monitor's bound notification channels are paged directly, with no laddered re-paging.
 
-> **Coexistence with the legacy alert path.** The incident paging engine and the older per-monitor alert dispatch are reconciled by the `escalation.enabled` switch: when on (the default), an open incident is the single source of down/up notification and the legacy path is suppressed, so a monitor never double-pages. Turning it off falls back to the legacy alerts. This is the kill switch if paging ever misbehaves.
+> **One notification source.** Every down/up notification flows through the incident engine — there is no separate per-monitor alert dispatch, so a monitor can never double-page. The `escalation.enabled` switch gates only the policy machinery (ladder walk, policy UI); with it off, monitors still page their bound channels in simple mode.
+
+While an incident stays **unacknowledged**, the engine re-sends a reminder on the monitor's `renotify_interval_secs` cadence (default hourly, `0` disables); acknowledging or resolving stops both the reminders and any escalation walk. Failed deliveries retry on exponential backoff and are dead-lettered after the attempt cap. Every attempt is auditable: the incident detail page has a **Delivery** section, and `GET /api/v1/incidents/{id}/notifications` returns the same log.
 
 ## On-call schedules
 
@@ -123,7 +125,7 @@ The `[escalation]` block (env prefix `UPTIMEPAGE_ESCALATION__*`) controls the en
 
 | Key | Default | Purpose |
 |---|---|---|
-| `enabled` | `true` | Run incident-driven paging and suppress the legacy alert path. Off falls back to legacy alerts. |
+| `enabled` | `false` | Enable escalation policies (ladder walk + policy/on-call UI). Off, incidents still page the monitor's bound channels directly (simple mode). |
 | `tick_interval_secs` | `15` | How often the engine sweeps for due escalations and failed-page retries. |
 | `max_pages_per_tick` | `500` | Backpressure cap on pages re-sent per sweep. |
 | `max_attempts` | `5` | Give up paging a channel after this many failed attempts. |

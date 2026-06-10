@@ -30,7 +30,7 @@ enough to keep abuse on a small VM cheap.
 | `api_writes_per_minute` | 600 | POST/PATCH/DELETE on `/api/v1/*` |
 | `api_reads_per_minute` | 6000 | GET/HEAD/OPTIONS on `/api/v1/*` |
 | `bulk_ops_per_minute` | 30 | `/api/v1/targets/bulk*` |
-| `test_now_per_minute` | 60 | `POST /api/v1/targets/test` |
+| `test_now_per_minute` | 60 | `POST /api/v1/targets/test` + the notification-channel test endpoints |
 | `check_now_per_minute` | 60 | `POST /api/v1/targets/{id}/check-now` |
 
 ## How quotas are enforced

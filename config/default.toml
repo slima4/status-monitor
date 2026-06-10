@@ -364,10 +364,10 @@ oauth_enabled = false
 access_token_ttl_secs = 3600
 
 [escalation]
-# Incident paging. When on, an open incident pages the monitor's bound channels
-# and the legacy direct alert dispatch is suppressed (the incident is the single
-# source of down/up notification). When off, incidents still open + show in the
-# console but page no one, and the legacy alert path keeps firing.
+# Escalation policies. The incident notifier always runs — incidents page the
+# monitor's bound channels on open/resolve regardless of this flag. Enabling it
+# adds the policy machinery on top: escalation ladders, on-call schedules, and
+# their settings UI.
 enabled = false
 
 # How often failed pages are re-attempted.
