@@ -21,6 +21,7 @@ use crate::storage::orgs::list_members;
 use crate::storage::{IncidentOpsFilter, IncidentSort, TargetFilter};
 use crate::web::error::WebResult;
 use crate::web::filters;
+use crate::web::views::{PageSizeLink, PagerLink};
 use crate::web::{AuthedBrowser, CurrentOrg, CurrentUser};
 
 const STATE_FILTERS: &[&str] = &["all", "triggered", "acknowledged", "resolved"];
@@ -71,11 +72,6 @@ pub struct SeverityChip {
     pub active: bool,
 }
 
-pub struct PageSize {
-    pub n: usize,
-    pub href: String,
-    pub active: bool,
-}
 
 /// An incident owner rendered as a deterministic initials avatar.
 pub struct OwnerAvatar {
@@ -120,9 +116,9 @@ pub struct ConsoleData {
     pub total_pages: usize,
     pub range_lo: usize,
     pub range_hi: usize,
-    pub prev_href: Option<String>,
-    pub next_href: Option<String>,
-    pub page_sizes: Vec<PageSize>,
+    pub pager_prev: Option<PagerLink>,
+    pub pager_next: Option<PagerLink>,
+    pub page_sizes: Vec<PageSizeLink>,
     /// Query string (sans host) the table fragment re-polls itself with.
     pub partial_query: String,
 }
@@ -445,17 +441,26 @@ async fn console_data(
         total_pages,
         range_lo: if total == 0 { 0 } else { offset + 1 },
         range_hi: offset + shown,
-        prev_href: (offset > 0).then(|| nav(offset.saturating_sub(r.limit))),
-        next_href: (offset + r.limit < total).then(|| nav(offset + r.limit)),
+        pager_prev: (offset > 0).then(|| PagerLink {
+            label: "prev",
+            href: nav(offset.saturating_sub(r.limit)),
+            hx_get: None,
+        }),
+        pager_next: (offset + r.limit < total).then(|| PagerLink {
+            label: "next",
+            href: nav(offset + r.limit),
+            hx_get: None,
+        }),
         page_sizes: PAGE_SIZES
             .iter()
             .copied()
-            .map(|n| PageSize {
+            .map(|n| PageSizeLink {
                 n,
                 href: format!(
                     "/incidents?{}",
                     build_query(&r, r.active, r.severity_key, n, 0)
                 ),
+                hx_get: None,
                 active: n == r.limit,
             })
             .collect(),
@@ -1180,14 +1185,15 @@ mod tests {
             total_pages: 1,
             range_lo: 0,
             range_hi: 0,
-            prev_href: None,
-            next_href: None,
+            pager_prev: None,
+            pager_next: None,
             page_sizes: PAGE_SIZES
                 .iter()
                 .copied()
-                .map(|n| PageSize {
+                .map(|n| PageSizeLink {
                     n,
                     href: format!("/incidents?limit={n}"),
+                    hx_get: None,
                     active: n == 50,
                 })
                 .collect(),

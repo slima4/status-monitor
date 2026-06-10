@@ -19,7 +19,7 @@ use crate::storage::traits::{TargetFilter, TargetSort};
 use crate::web::avatar::{avatar_color, initials_from};
 use crate::web::error::WebResult;
 use crate::web::filters;
-use crate::web::views::{describe_check, humanize_duration};
+use crate::web::views::{PageSizeLink, PagerLink, describe_check, humanize_duration};
 use crate::web::{AuthedBrowser, CurrentOrg};
 
 const DEFAULT_LIMIT: usize = 50;
@@ -128,10 +128,6 @@ pub struct GroupOption {
     pub selected: bool,
 }
 
-pub struct PageSizeChip {
-    pub n: usize,
-    pub active: bool,
-}
 
 #[derive(Template, WebTemplate)]
 #[template(path = "targets/list.html")]
@@ -143,15 +139,15 @@ pub struct ListPage {
     pub type_chips: Vec<TypeChip>,
     pub owner_options: Vec<OwnerOption>,
     pub group_options: Vec<GroupOption>,
-    pub page_sizes: Vec<PageSizeChip>,
+    pub page_sizes: Vec<PageSizeLink>,
     /// Shared filter query (everything but `limit`/`offset`), URL-encoded, for
     /// the footer pagination links' real hrefs + htmx swap targets.
     pub query_suffix: String,
     pub has_more: bool,
     pub limit: usize,
     pub offset: usize,
-    pub prev_offset: Option<usize>,
-    pub next_offset: Option<usize>,
+    pub pager_prev: Option<PagerLink>,
+    pub pager_next: Option<PagerLink>,
     pub q: String,
     pub tag: String,
     pub enabled: Option<bool>,
@@ -174,15 +170,15 @@ pub struct ListBodyPartial {
     /// drift away from the URL state.
     pub owner_options: Vec<OwnerOption>,
     pub group_options: Vec<GroupOption>,
-    pub page_sizes: Vec<PageSizeChip>,
+    pub page_sizes: Vec<PageSizeLink>,
     /// Shared filter query (everything but `limit`/`offset`), URL-encoded, for
     /// the footer pagination links' real hrefs + htmx swap targets.
     pub query_suffix: String,
     pub has_more: bool,
     pub limit: usize,
     pub offset: usize,
-    pub prev_offset: Option<usize>,
-    pub next_offset: Option<usize>,
+    pub pager_prev: Option<PagerLink>,
+    pub pager_next: Option<PagerLink>,
     pub q: String,
     pub tag: String,
     pub enabled: Option<bool>,
@@ -221,8 +217,8 @@ pub async fn list_partial(
         has_more: page.has_more,
         limit: page.limit,
         offset: page.offset,
-        prev_offset: page.prev_offset,
-        next_offset: page.next_offset,
+        pager_prev: page.pager_prev,
+        pager_next: page.pager_next,
         q: page.q,
         tag: page.tag,
         enabled: page.enabled,
@@ -366,18 +362,36 @@ async fn build_page(state: &AppState, org: OrgId, params: &ListParams) -> WebRes
 
     let group_options = collect_group_options(&groups, &group);
 
-    let page_sizes = PAGE_SIZES
-        .iter()
-        .map(|&n| PageSizeChip {
-            n,
-            active: n == limit,
-        })
-        .collect();
-
     let query_suffix = build_query_suffix(&q, &tag, &group, &kind, params, sort_key(sort));
 
-    let prev_offset = (offset > 0).then(|| offset.saturating_sub(limit));
-    let next_offset = has_more.then_some(offset + limit);
+    let page_link = |limit: usize, offset: usize| {
+        (
+            format!("/targets?limit={limit}&offset={offset}&{query_suffix}"),
+            format!("/web/targets/list?limit={limit}&offset={offset}&{query_suffix}"),
+        )
+    };
+    let page_sizes = PAGE_SIZES
+        .iter()
+        .map(|&n| {
+            let (href, hx) = page_link(n, 0);
+            PageSizeLink {
+                n,
+                href,
+                hx_get: Some(hx),
+                active: n == limit,
+            }
+        })
+        .collect();
+    let pager = |label: &'static str, offset: usize| {
+        let (href, hx) = page_link(limit, offset);
+        PagerLink {
+            label,
+            href,
+            hx_get: Some(hx),
+        }
+    };
+    let pager_prev = (offset > 0).then(|| pager("prev", offset.saturating_sub(limit)));
+    let pager_next = has_more.then(|| pager("next", offset + limit));
 
     let onboarding = groups.is_empty()
         && q.is_empty()
@@ -401,8 +415,8 @@ async fn build_page(state: &AppState, org: OrgId, params: &ListParams) -> WebRes
         has_more,
         limit,
         offset,
-        prev_offset,
-        next_offset,
+        pager_prev,
+        pager_next,
         q,
         tag,
         enabled: params.enabled,
@@ -695,8 +709,8 @@ mod tests {
             has_more: false,
             limit: 50,
             offset: 0,
-            prev_offset: None,
-            next_offset: None,
+            pager_prev: None,
+            pager_next: None,
             q: String::new(),
             tag: String::new(),
             enabled: None,
@@ -739,8 +753,8 @@ mod tests {
             has_more: false,
             limit: 50,
             offset: 0,
-            prev_offset: None,
-            next_offset: None,
+            pager_prev: None,
+            pager_next: None,
             q: String::new(),
             tag: String::new(),
             enabled: None,

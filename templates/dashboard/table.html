@@ -61,7 +61,7 @@
 
   <div class="flex flex-wrap items-center justify-between gap-2">
     <div class="flex flex-wrap items-center gap-2">
-      <div class="dashboard-chips" role="tablist" aria-label="Monitor type">
+      <div class="sm-rail" role="tablist" aria-label="Monitor type">
         {% for chip in type_counts.iter() %}
         <button type="button"
                 role="tab"
@@ -71,9 +71,9 @@
                 hx-select="#dashboard-table"
                 hx-swap="outerHTML"
                 hx-push-url="true"
-                class="dashboard-chip{% if chip.active %} dashboard-chip--active{% endif %}">
+                class="sm-rail__seg{% if chip.active %} sm-rail__seg--active{% endif %}">
           {{ chip.label }}
-          <span class="dashboard-chip__count">{{ chip.count }}</span>
+          <span class="sm-rail__count">{{ chip.count }}</span>
         </button>
         {% endfor %}
       </div>

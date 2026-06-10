@@ -1,0 +1,24 @@
+{# Shared list-footer navigation: page-size rail + prev/next. Links with
+   an hx_get swap `hx_target`; plain links navigate. #}
+{% macro foot_nav(page_sizes, prev, next, hx_target) %}
+<span class="flex flex-wrap items-center gap-3">
+  <span class="flex items-center gap-1.5 text-xs text-muted">
+    rows
+    <span class="range-tabs">
+      {% for ps in page_sizes %}
+      <a class="range-tabs__btn{% if ps.active %} range-tabs__btn--active{% endif %}"
+         href="{{ ps.href }}"{% if let Some(hx) = ps.hx_get %}
+         hx-get="{{ hx }}" hx-target="{{ hx_target }}" hx-swap="outerHTML" hx-push-url="{{ ps.href }}"{% endif %}>{{ ps.n }}</a>
+      {% endfor %}
+    </span>
+  </span>
+  {% if let Some(p) = prev %}
+  <a class="btn-ghost px-2.5 py-1 text-xs" href="{{ p.href }}"{% if let Some(hx) = p.hx_get %}
+     hx-get="{{ hx }}" hx-target="{{ hx_target }}" hx-swap="outerHTML" hx-push-url="{{ p.href }}"{% endif %}><span aria-hidden="true">←</span> {{ p.label }}</a>
+  {% endif %}
+  {% if let Some(n) = next %}
+  <a class="btn-ghost px-2.5 py-1 text-xs" href="{{ n.href }}"{% if let Some(hx) = n.hx_get %}
+     hx-get="{{ hx }}" hx-target="{{ hx_target }}" hx-swap="outerHTML" hx-push-url="{{ n.href }}"{% endif %}>{{ n.label }} <span aria-hidden="true">→</span></a>
+  {% endif %}
+</span>
+{% endmacro %}

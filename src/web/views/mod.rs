@@ -33,6 +33,22 @@ pub struct RangeOption {
     pub selected: bool,
 }
 
+/// Page-size option in a list footer. `hx_get` switches the link from a
+/// full navigation to an htmx swap of the list region.
+pub struct PageSizeLink {
+    pub n: usize,
+    pub href: String,
+    pub hx_get: Option<String>,
+    pub active: bool,
+}
+
+/// Prev/next link in a list footer.
+pub struct PagerLink {
+    pub label: &'static str,
+    pub href: String,
+    pub hx_get: Option<String>,
+}
+
 pub(crate) fn build_range_options(active: &'static str, keys: &[&'static str]) -> Vec<RangeOption> {
     keys.iter()
         .map(|k| RangeOption {

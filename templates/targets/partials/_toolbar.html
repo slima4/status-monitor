@@ -21,18 +21,18 @@
     <span class="monitors-search__keyhint" aria-hidden="true">/</span>
   </label>
 
-  <div class="monitors-chips" role="tablist" aria-label="Type filter">
+  <div class="sm-rail" role="tablist" aria-label="Type filter">
     {% for chip in type_chips %}
     <a href="/targets?{{ chip.query }}"
        hx-get="/web/targets/list?{{ chip.query }}"
        hx-target="#target-rows"
        hx-swap="outerHTML"
        hx-push-url="/targets?{{ chip.query }}"
-       class="monitors-chip{% if chip.active %} monitors-chip--active{% endif %}"
+       class="sm-rail__seg{% if chip.active %} sm-rail__seg--active{% endif %}"
        role="tab"
        aria-selected="{% if chip.active %}true{% else %}false{% endif %}">
       {{ chip.label }}
-      <span class="monitors-chip__count">{{ chip.count }}</span>
+      <span class="sm-rail__count">{{ chip.count }}</span>
     </a>
     {% endfor %}
   </div>

@@ -1,3 +1,4 @@
+{%- import "_pager.html" as pager -%}
 {% if data.rows.is_empty() %}
 <div class="sticker-card flex items-center gap-3 p-6 text-sm text-muted" data-self-user-id="{{ data.self_id }}">
   <span aria-hidden="true" class="text-lg text-state-ok">✓</span>
@@ -105,22 +106,7 @@
       of <span class="monitors-foot__mono">{{ data.total }}</span>
       · page <span class="monitors-foot__mono">{{ data.page }}</span>/<span class="monitors-foot__mono">{{ data.total_pages }}</span>
     </span>
-    <span class="flex flex-wrap items-center gap-3">
-      <span class="flex items-center gap-1.5 text-xs text-muted">
-        rows
-        <span class="range-tabs">
-          {% for ps in data.page_sizes %}
-          <a class="range-tabs__btn{% if ps.active %} range-tabs__btn--active{% endif %}" href="{{ ps.href }}">{{ ps.n }}</a>
-          {% endfor %}
-        </span>
-      </span>
-      {% match data.prev_href %}{% when Some with (href) %}
-      <a class="btn-ghost px-2.5 py-1 text-xs" href="{{ href }}"><span aria-hidden="true">←</span> prev</a>
-      {% when None %}{% endmatch %}
-      {% match data.next_href %}{% when Some with (href) %}
-      <a class="btn-ghost px-2.5 py-1 text-xs" href="{{ href }}">next <span aria-hidden="true">→</span></a>
-      {% when None %}{% endmatch %}
-    </span>
+    {% call pager::foot_nav(data.page_sizes, data.pager_prev, data.pager_next, "#incident-table") %}{% endcall %}
   </div>
 </section>
 {% endif %}

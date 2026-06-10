@@ -2463,8 +2463,8 @@
     }
 
     /* Segmented rail — the canonical chip-strip register (hairline
-       container, borderless segments, ink active). dashboard-chips /
-       monitors-chips predate it and mirror it with per-page classes. */
+       container, borderless segments, ink active): dashboard type strip,
+       monitors type strip, incidents state/severity tabs. */
     .sm-rail {
         @apply inline-flex flex-wrap items-center gap-1 rounded-sm border p-1;
         background: var(--theme-surface-elev);
@@ -2475,6 +2475,7 @@
         color: var(--theme-text-muted);
         font-family: var(--font-mono);
         text-decoration: none;
+        cursor: pointer;
         transition: background-color 120ms ease, color 120ms ease;
     }
     .sm-rail__seg:not(.sm-rail__seg--active):hover {
@@ -2510,34 +2511,6 @@
         color: var(--theme-ink);
     }
     .dashboard-chip--active .dashboard-chip__count { color: inherit; }
-    /* Type-chip strip — same segmented rail as `.range-tabs`: one hairline
-       container, segments go borderless, active segment = ink rectangle.
-       Scoped overrides so the standalone `.dashboard-chip` (incidents,
-       detail pages, refresh badge) keeps its bordered look. */
-    .dashboard-chips {
-        @apply inline-flex flex-wrap items-center gap-1 rounded-sm border p-1;
-        background: var(--theme-surface-elev);
-        border-color: var(--theme-line);
-    }
-    .dashboard-chips .dashboard-chip {
-        @apply rounded-sm px-2.5 py-1 border-0;
-        background: transparent;
-        color: var(--theme-text-muted);
-        cursor: pointer;
-        transition: background-color 120ms ease, color 120ms ease;
-    }
-    .dashboard-chips .dashboard-chip:not(.dashboard-chip--active):hover {
-        background: var(--theme-surface-sunk);
-        color: var(--theme-accent);
-    }
-    .dashboard-chips .dashboard-chip--active {
-        background: var(--theme-ink);
-        color: var(--theme-surface);
-    }
-    .dashboard-chips .dashboard-chip__count {
-        color: inherit;
-        opacity: 0.7;
-    }
 
     /* ── V2 ─ BigMetric KPI cards ─────────────────────────────────── */
     .dashboard-kpis {
@@ -2933,33 +2906,6 @@
         color: var(--theme-accent);
     }
 
-    /* Type strip — same segmented rail as the dashboard's chip strip:
-       one hairline container, borderless segments, ink active. */
-    .monitors-chips {
-        @apply inline-flex flex-wrap items-center gap-1 rounded-sm border p-1;
-        background: var(--theme-surface-elev);
-        border-color: var(--theme-line);
-    }
-    .monitors-chip {
-        @apply inline-flex items-center gap-1.5 rounded-sm px-2.5 py-1 text-xs font-medium;
-        color: var(--theme-text-muted);
-        font-family: var(--font-mono);
-        text-decoration: none;
-        transition: background-color 120ms ease, color 120ms ease;
-    }
-    .monitors-chip:not(.monitors-chip--active):hover {
-        background: var(--theme-surface-sunk);
-        color: var(--theme-accent);
-    }
-    .monitors-chip--active,
-    .monitors-chip--active:hover {
-        background: var(--theme-ink);
-        color: var(--theme-surface);
-    }
-    .monitors-chip__count {
-        color: inherit;
-        opacity: 0.7;
-    }
 
     /* Bulk-action bar — terminal status line. Light CLI register
        (no dark island), hairline border with a 3px green prompt
