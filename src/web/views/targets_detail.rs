@@ -210,7 +210,7 @@ impl RegionBreakdownRow {
         let region_label = catalog
             .iter()
             .find(|c| c.id == r.region)
-            .map(|c| crate::web::views::region_display::region_label(c))
+            .map(crate::web::views::region_display::region_label)
             .unwrap_or_else(|| r.region.clone());
         Self {
             selected,

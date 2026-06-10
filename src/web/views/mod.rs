@@ -119,9 +119,9 @@ pub(crate) fn fmt_human(t: DateTime<Utc>) -> String {
 /// Exact single-unit duration (`45s`, `5m`, `24h`) for config values that
 /// must round-trip — the lossy two-unit display lives in [`HumanDur`].
 pub(crate) fn exact_duration(secs: u64) -> String {
-    if secs % 3_600 == 0 {
+    if secs.is_multiple_of(3_600) {
         format!("{}h", secs / 3_600)
-    } else if secs % 60 == 0 {
+    } else if secs.is_multiple_of(60) {
         format!("{}m", secs / 60)
     } else {
         format!("{secs}s")
