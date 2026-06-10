@@ -1,19 +1,32 @@
-{# Self-rearming swap zone; range tabs replace it via ?range=…. #}
+{# Self-rearming swap zone; range tabs replace it via ?range=….
+   Poll vs filter-click race guards: the tick skips while any request from
+   inside the zone is in flight, and hx-sync lets a user action abort an
+   in-flight poll — otherwise a stale poll response (built from pre-click
+   params) can land last and silently reset the selection. #}
 <div id="dashboard-table"
-     hx-get="/web/partials/dashboard?range={{ range }}{% if let Some(r) = selected_region %}&region={{ r }}{% endif %}"
-     hx-trigger="every 5s"
+     hx-get="/web/partials/dashboard?range={{ range }}{% if let Some(r) = selected_region %}&region={{ r }}{% endif %}{% if let Some(s) = selected_status %}&status={{ s }}{% endif %}{% if let Some(k) = selected_kind %}&type={{ k }}{% endif %}"
+     hx-trigger="every 5s [!document.querySelector('#dashboard-table .htmx-request')]"
+     hx-sync="this:replace"
      hx-swap="outerHTML"
      class="space-y-4">
 
+  {# Volatile params for the preserved filter selects. hx-preserve keeps
+     the select nodes (and any URL baked into them) from first render, so
+     range/type must ride along as fresh inputs swapped with the zone. #}
+  <span id="dashboard-filter-state" hidden>
+    <input type="hidden" name="range" value="{{ range }}">
+    {% if let Some(k) = selected_kind %}<input type="hidden" name="type" value="{{ k }}">{% endif %}
+  </span>
+
   <p class="dashboard-subhead">
-    filter <span class="dashboard-subhead__mono">status:any</span>
+    region
     {% if regions.len() > 1 %}
-    <span class="dashboard-subhead__mono">region:<select class="dashboard-subhead__select"
-            id="dashboard-region-filter"
-            hx-preserve="true"
+    <span id="dashboard-region-filter" class="dashboard-filter dashboard-filter--inline" hx-preserve="true"><select
             name="region"
+            data-sm-combobox
             aria-label="Region"
-            hx-get="/?range={{ range }}"
+            hx-get="/"
+            hx-include="#dashboard-filter-state, #dashboard-status-filter"
             hx-target="#dashboard-table"
             hx-select="#dashboard-table"
             hx-swap="outerHTML"
@@ -23,12 +36,12 @@
       {% for r in regions %}
       <option value="{{ r.id }}"{% if let Some(sel) = selected_region %}{% if sel.as_str() == r.id.as_str() %} selected{% endif %}{% endif %}>{{ r.label }}</option>
       {% endfor %}
-    </select><span class="dashboard-subhead__caret" aria-hidden="true">▾</span></span>
+    </select></span>
     {% else %}
-    <span class="dashboard-subhead__mono">region:any</span>
+    <span class="cli-brackets font-mono">any</span>
     {% endif %}
     <span class="mx-1">·</span>
-    <span class="dashboard-subhead__mono">{{ matches }}</span> matches
+    <span class="dashboard-subhead__count">{{ matches }}</span> matches
     {% if active_incidents.len() > 0 %}
     <span class="mx-1">·</span>
     <span class="dashboard-subhead__active">
@@ -47,20 +60,45 @@
   {% include "dashboard/_health_rail.html" %}
 
   <div class="flex flex-wrap items-center justify-between gap-2">
-    <div class="dashboard-chips" role="tablist" aria-label="Monitor type">
-      {% for chip in type_counts.iter() %}
-      <span class="dashboard-chip{% if chip.active %} dashboard-chip--active{% endif %}">
-        {{ chip.label }}
-        <span class="dashboard-chip__count">{{ chip.count }}</span>
-      </span>
-      {% endfor %}
+    <div class="flex flex-wrap items-center gap-2">
+      <div class="dashboard-chips" role="tablist" aria-label="Monitor type">
+        {% for chip in type_counts.iter() %}
+        <button type="button"
+                role="tab"
+                aria-selected="{% if chip.active %}true{% else %}false{% endif %}"
+                hx-get="/?range={{ range }}{% if let Some(r) = selected_region %}&region={{ r }}{% endif %}{% if let Some(s) = selected_status %}&status={{ s }}{% endif %}{% if chip.label != "All" %}&type={{ chip.label|lower }}{% endif %}"
+                hx-target="#dashboard-table"
+                hx-select="#dashboard-table"
+                hx-swap="outerHTML"
+                hx-push-url="true"
+                class="dashboard-chip{% if chip.active %} dashboard-chip--active{% endif %}">
+          {{ chip.label }}
+          <span class="dashboard-chip__count">{{ chip.count }}</span>
+        </button>
+        {% endfor %}
+      </div>
+      <span id="dashboard-status-filter" class="dashboard-filter" hx-preserve="true"><select
+              name="status"
+              data-sm-combobox
+              aria-label="Status"
+              hx-get="/"
+              hx-include="#dashboard-filter-state, #dashboard-region-filter"
+              hx-target="#dashboard-table"
+              hx-select="#dashboard-table"
+              hx-swap="outerHTML"
+              hx-push-url="true"
+              hx-trigger="change">
+        {% for opt in status_options %}
+        <option value="{% if opt.key != "any" %}{{ opt.key }}{% endif %}"{% if opt.selected %} selected{% endif %}>status:{{ opt.key }}</option>
+        {% endfor %}
+      </select></span>
     </div>
     <div class="range-tabs" role="tablist" aria-label="Time range">
       {% for opt in range_options %}
       <button type="button"
               role="tab"
               aria-selected="{% if opt.selected %}true{% else %}false{% endif %}"
-              hx-get="/?range={{ opt.key }}{% if let Some(r) = selected_region %}&region={{ r }}{% endif %}"
+              hx-get="/?range={{ opt.key }}{% if let Some(r) = selected_region %}&region={{ r }}{% endif %}{% if let Some(s) = selected_status %}&status={{ s }}{% endif %}{% if let Some(k) = selected_kind %}&type={{ k }}{% endif %}"
               hx-target="#dashboard-table"
               hx-select="#dashboard-table"
               hx-swap="outerHTML"

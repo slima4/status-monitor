@@ -2372,6 +2372,15 @@
         padding: 0 0.4em;
         border-radius: 2px;
     }
+    /* Bare count — sunk wash, no hairline; mirrors .monitors-subhead__mono
+       so the two list pages read the same. */
+    .dashboard-subhead__count {
+        @apply font-mono;
+        color: var(--theme-text);
+        background: var(--theme-surface-sunk);
+        padding: 1px 6px;
+        border-radius: 4px;
+    }
     .dashboard-subhead__active {
         @apply inline-flex items-center gap-1.5 font-medium;
         color: var(--theme-state-bad-fg);
@@ -2397,6 +2406,51 @@
         opacity: 0.6;
         margin-left: 0.15em;
     }
+    /* Dashboard filter combobox — compact bracket-wrapped token on the
+       light rail surface, matching the range-tabs/chip strip register:
+       `[ status:any ▾ ]`. */
+    /* 2rem + 1px border each side = 34px, the chip rail's outer height
+       (1px border + 0.25rem padding + 1.5rem chip row). */
+    .dashboard-filter .sm-combobox__trigger {
+        height: 2rem;
+        padding: 0 0.5rem;
+        gap: 0.35rem;
+        font-size: 0.8125rem;
+        color: var(--theme-text-muted);
+    }
+    .dashboard-filter .sm-combobox__trigger::before { content: "["; opacity: 0.7; }
+    .dashboard-filter .sm-combobox__trigger::after  { content: "]"; opacity: 0.7; }
+    .dashboard-filter .sm-combobox__trigger:hover,
+    .dashboard-filter .sm-combobox__trigger:focus-visible,
+    .dashboard-filter .sm-combobox__trigger[aria-expanded="true"] {
+        background: var(--theme-surface-sunk);
+        color: var(--theme-accent);
+    }
+    /* Inline variant — borderless, text-height, font of the surrounding
+       subhead, so the filter line reads as one run of prose. */
+    .dashboard-filter--inline .sm-combobox__trigger {
+        height: auto;
+        padding: 0;
+        gap: 0.25rem;
+        border: 0;
+        background: transparent;
+        font-size: inherit;
+        /* Base trigger is line-height:1 — with the label's overflow:hidden
+           that clips g/y descenders; ride the subhead's line box instead. */
+        line-height: inherit;
+        color: var(--theme-text);
+    }
+    .dashboard-filter--inline .sm-combobox__trigger:hover,
+    .dashboard-filter--inline .sm-combobox__trigger[aria-expanded="true"] {
+        background: transparent;
+        color: var(--theme-accent);
+    }
+    .dashboard-filter--inline .sm-combobox__trigger:focus-visible {
+        background: transparent;
+        color: var(--theme-accent);
+        outline: 1px dotted currentColor;
+        outline-offset: 2px;
+    }
 
     .dashboard-chip {
         @apply inline-flex items-center gap-1.5 rounded-sm border px-2.5 py-0.5 text-xs font-medium;
@@ -2417,8 +2471,33 @@
         color: var(--theme-ink);
     }
     .dashboard-chip--active .dashboard-chip__count { color: inherit; }
+    /* Type-chip strip — same segmented rail as `.range-tabs`: one hairline
+       container, segments go borderless, active segment = ink rectangle.
+       Scoped overrides so the standalone `.dashboard-chip` (incidents,
+       detail pages, refresh badge) keeps its bordered look. */
     .dashboard-chips {
-        @apply flex flex-wrap items-center gap-1.5;
+        @apply inline-flex flex-wrap items-center gap-1 rounded-sm border p-1;
+        background: var(--theme-surface-elev);
+        border-color: var(--theme-line);
+    }
+    .dashboard-chips .dashboard-chip {
+        @apply rounded-sm px-2.5 py-1 border-0;
+        background: transparent;
+        color: var(--theme-text-muted);
+        cursor: pointer;
+        transition: background-color 120ms ease, color 120ms ease;
+    }
+    .dashboard-chips .dashboard-chip:not(.dashboard-chip--active):hover {
+        background: var(--theme-surface-sunk);
+        color: var(--theme-accent);
+    }
+    .dashboard-chips .dashboard-chip--active {
+        background: var(--theme-ink);
+        color: var(--theme-surface);
+    }
+    .dashboard-chips .dashboard-chip__count {
+        color: inherit;
+        opacity: 0.7;
     }
 
     /* ── V2 ─ BigMetric KPI cards ─────────────────────────────────── */

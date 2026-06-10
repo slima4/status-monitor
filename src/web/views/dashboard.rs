@@ -42,6 +42,9 @@ use crate::web::{AuthedBrowser, CurrentOrg};
 
 pub(crate) const RANGE_KEYS: [&str; 4] = ["24h", "7d", "30d", "90d"];
 pub(crate) const DEFAULT_RANGE: &str = "24h";
+pub(crate) const STATUS_FILTERS: [&str; 5] = ["any", "up", "degraded", "down", "paused"];
+pub(crate) const TYPE_FILTERS: [&str; 6] = ["any", "http", "tcp", "dns", "tls", "domain"];
+pub(crate) const FILTER_ANY: &str = "any";
 /// Fixed sparkline window — "right-now" trend, decoupled from the
 /// selected rollup range so an operator browsing 90 d still sees a
 /// fresh 1 h trace per monitor.
@@ -68,6 +71,10 @@ pub struct DashboardParams {
     pub range: Option<String>,
     #[serde(default)]
     pub region: Option<String>,
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default, rename = "type")]
+    pub kind: Option<String>,
 }
 
 /// One row in the dashboard table — every cell the template renders.
@@ -224,6 +231,9 @@ pub struct DashboardPage {
     pub ribbon: FleetRibbon,
     pub regions: Vec<LabeledRegion>,
     pub selected_region: Option<String>,
+    pub status_options: Vec<RangeOption>,
+    pub selected_status: Option<&'static str>,
+    pub selected_kind: Option<&'static str>,
 }
 
 #[derive(Template, WebTemplate)]
@@ -242,6 +252,9 @@ pub struct DashboardTablePartial {
     pub ribbon: FleetRibbon,
     pub regions: Vec<LabeledRegion>,
     pub selected_region: Option<String>,
+    pub status_options: Vec<RangeOption>,
+    pub selected_status: Option<&'static str>,
+    pub selected_kind: Option<&'static str>,
 }
 
 pub async fn root(state: State<AppState>, mut parts: Parts) -> Response {
@@ -285,34 +298,113 @@ pub async fn index(
     Query(params): Query<DashboardParams>,
 ) -> WebResult<DashboardPage> {
     let range = resolve_range_key(params.range.as_deref(), &RANGE_KEYS, DEFAULT_RANGE);
+    let status = resolve_range_key(params.status.as_deref(), &STATUS_FILTERS, FILTER_ANY);
+    let selected_status = (status != FILTER_ANY).then_some(status);
+    let kind = resolve_range_key(params.kind.as_deref(), &TYPE_FILTERS, FILTER_ANY);
+    let selected_kind = (kind != FILTER_ANY).then_some(kind);
     let region_ids = state.target_store.regions_for_org(org.0).await?;
     let selected_region = resolve_region(params.region, &region_ids);
     let snapshot = snapshot_for(&state, org.0, range, selected_region.as_deref()).await?;
     let catalog = state.target_store.available_regions_detailed().await?;
     let regions = labeled_regions(&catalog, region_ids);
     let onboarding = snapshot.matches == 0;
+    let (rows, matches) = filter_rows(&snapshot, selected_status, selected_kind);
     Ok(DashboardPage {
         active_tab: "dashboard",
         range,
         range_options: build_range_options(range, &RANGE_KEYS),
         kpis: snapshot.kpis.clone(),
         kpi_cards: Arc::clone(&snapshot.kpi_cards),
-        rows: Arc::clone(&snapshot.rows),
-        matches: snapshot.matches,
+        rows,
+        matches,
         truncated: snapshot.truncated,
         onboarding,
         active_incidents: Arc::clone(&snapshot.active_incidents),
         status_counts: snapshot.status_counts,
-        type_counts: Arc::clone(&snapshot.type_counts),
+        type_counts: type_chips(&snapshot, selected_status, selected_kind),
         ribbon: snapshot.ribbon.clone(),
         regions,
         selected_region,
+        status_options: build_range_options(status, &STATUS_FILTERS),
+        selected_status,
+        selected_kind,
     })
 }
 
 /// An unknown region collapses to the all-regions view, not an empty dashboard.
 pub(crate) fn resolve_region(requested: Option<String>, regions: &[String]) -> Option<String> {
     requested.filter(|r| regions.iter().any(|x| x == r))
+}
+
+/// Status and type are post-filters over the (cached) snapshot: the table
+/// and its match count narrow while the KPI cards, health rail, ribbon and
+/// chip counts stay fleet-wide, so the breakdown remains visible.
+fn filter_rows(
+    snapshot: &DashboardSnapshot,
+    status: Option<&'static str>,
+    kind: Option<&'static str>,
+) -> (Arc<[DashboardRow]>, usize) {
+    if status.is_none() && kind.is_none() {
+        return (Arc::clone(&snapshot.rows), snapshot.matches);
+    }
+    let rows: Vec<DashboardRow> = snapshot
+        .rows
+        .iter()
+        .filter(|r| status.is_none_or(|s| row_matches_status(r, s)))
+        .filter(|r| kind.is_none_or(|k| r.kind.eq_ignore_ascii_case(k)))
+        .cloned()
+        .collect();
+    let matches = rows.len();
+    (Arc::from(rows.into_boxed_slice()), matches)
+}
+
+/// Chip strip for this request — the snapshot is cached across requests,
+/// so neither `active` nor status-filtered counts can live there. Kinds
+/// come from the fleet snapshot so the strip stays stable (a chip drops
+/// to 0 under a status filter instead of vanishing while selected).
+fn type_chips(
+    snapshot: &DashboardSnapshot,
+    status: Option<&'static str>,
+    kind: Option<&'static str>,
+) -> Arc<[TypeCount]> {
+    if status.is_none() && kind.is_none() {
+        // Unfiltered poll is the hot path — snapshot counts and the
+        // "All" active flag are already correct, keep it a pointer bump.
+        return Arc::clone(&snapshot.type_counts);
+    }
+    let count_for = |label: &'static str| {
+        snapshot
+            .rows
+            .iter()
+            .filter(|r| status.is_none_or(|s| row_matches_status(r, s)))
+            .filter(|r| label == "All" || r.kind.eq_ignore_ascii_case(label))
+            .count() as u32
+    };
+    let chips: Vec<TypeCount> = snapshot
+        .type_counts
+        .iter()
+        .map(|c| TypeCount {
+            label: c.label,
+            count: match status {
+                None => c.count,
+                Some(_) => count_for(c.label),
+            },
+            active: match kind {
+                None => c.label == "All",
+                Some(k) => c.label.eq_ignore_ascii_case(k),
+            },
+        })
+        .collect();
+    Arc::from(chips.into_boxed_slice())
+}
+
+/// Mirrors `tally_status` bucketing so the filter agrees with the rail.
+fn row_matches_status(row: &DashboardRow, status: &str) -> bool {
+    match status {
+        "paused" => !row.enabled,
+        "down" => row.enabled && matches!(row.last_status, "down" | "error"),
+        _ => row.enabled && row.last_status == status,
+    }
 }
 
 /// All-regions is cached; a region-filtered view is built directly (selection is
@@ -339,25 +431,33 @@ pub async fn table_partial(
     Query(params): Query<DashboardParams>,
 ) -> WebResult<Response> {
     let range = resolve_range_key(params.range.as_deref(), &RANGE_KEYS, DEFAULT_RANGE);
+    let status = resolve_range_key(params.status.as_deref(), &STATUS_FILTERS, FILTER_ANY);
+    let selected_status = (status != FILTER_ANY).then_some(status);
+    let kind = resolve_range_key(params.kind.as_deref(), &TYPE_FILTERS, FILTER_ANY);
+    let selected_kind = (kind != FILTER_ANY).then_some(kind);
     let region_ids = state.target_store.regions_for_org(org.0).await?;
     let selected_region = resolve_region(params.region, &region_ids);
     let snapshot = snapshot_for(&state, org.0, range, selected_region.as_deref()).await?;
     let catalog = state.target_store.available_regions_detailed().await?;
     let regions = labeled_regions(&catalog, region_ids);
+    let (rows, matches) = filter_rows(&snapshot, selected_status, selected_kind);
     let partial = DashboardTablePartial {
         range,
         range_options: build_range_options(range, &RANGE_KEYS),
         kpis: snapshot.kpis.clone(),
         kpi_cards: Arc::clone(&snapshot.kpi_cards),
-        rows: Arc::clone(&snapshot.rows),
-        matches: snapshot.matches,
+        rows,
+        matches,
         truncated: snapshot.truncated,
         active_incidents: Arc::clone(&snapshot.active_incidents),
         status_counts: snapshot.status_counts,
-        type_counts: Arc::clone(&snapshot.type_counts),
+        type_counts: type_chips(&snapshot, selected_status, selected_kind),
         ribbon: snapshot.ribbon.clone(),
         regions,
         selected_region,
+        status_options: build_range_options(status, &STATUS_FILTERS),
+        selected_status,
+        selected_kind,
     };
     let rendered = partial.render().map_err(|e| {
         crate::web::error::WebError::from(crate::error::AppError::Other(anyhow::anyhow!(e)))
@@ -1082,6 +1182,9 @@ mod tests {
             ribbon: sample_ribbon(),
             regions: Vec::new(),
             selected_region: None,
+            status_options: build_range_options(FILTER_ANY, &STATUS_FILTERS),
+            selected_status: None,
+            selected_kind: None,
         }
     }
 
@@ -1131,6 +1234,9 @@ mod tests {
             ribbon: sample_ribbon(),
             regions: Vec::new(),
             selected_region: None,
+            status_options: build_range_options(FILTER_ANY, &STATUS_FILTERS),
+            selected_status: None,
+            selected_kind: None,
         };
         let html = partial.render().unwrap();
         assert!(!html.contains("<!doctype html>"));
@@ -1170,6 +1276,9 @@ mod tests {
             ribbon: sample_ribbon(),
             regions: Vec::new(),
             selected_region: None,
+            status_options: build_range_options(FILTER_ANY, &STATUS_FILTERS),
+            selected_status: None,
+            selected_kind: None,
         };
         let html = page.render().unwrap();
         assert!(html.contains("nothing to watch yet."));
@@ -1290,6 +1399,94 @@ mod tests {
             spark_fill: String::new(),
             spark_baseline_y: 0,
         }
+    }
+
+    fn sample_snapshot(rows: Vec<DashboardRow>) -> DashboardSnapshot {
+        let n = rows.len();
+        DashboardSnapshot {
+            rows: Arc::from(rows.into_boxed_slice()),
+            kpis: sample_kpis(),
+            kpi_cards: Arc::from(sample_kpi_cards().into_boxed_slice()),
+            matches: n,
+            truncated: false,
+            active_incidents: Arc::from(Vec::<DashboardActiveIncident>::new().into_boxed_slice()),
+            status_counts: StatusCounts::default(),
+            type_counts: Arc::from(
+                vec![
+                    TypeCount {
+                        label: "All",
+                        count: n as u32,
+                        active: true,
+                    },
+                    TypeCount {
+                        label: "HTTP",
+                        count: n as u32,
+                        active: false,
+                    },
+                ]
+                .into_boxed_slice(),
+            ),
+            ribbon: sample_ribbon(),
+        }
+    }
+
+    #[test]
+    fn type_filter_matches_kind_case_insensitively() {
+        let snapshot = sample_snapshot(vec![sample_row("api", "up"), sample_row("worker", "up")]);
+        let (rows, matches) = filter_rows(&snapshot, None, Some("http"));
+        assert_eq!(matches, 2);
+        assert_eq!(rows.len(), 2);
+        let (_, matches) = filter_rows(&snapshot, None, Some("tcp"));
+        assert_eq!(matches, 0);
+
+        let chips = type_chips(&snapshot, None, Some("http"));
+        assert!(!chips[0].active, "All must drop active under a type filter");
+        assert!(chips[1].active);
+        let chips = type_chips(&snapshot, None, None);
+        assert!(chips[0].active);
+        assert!(!chips[1].active);
+    }
+
+    #[test]
+    fn type_chip_counts_follow_status_filter() {
+        let snapshot =
+            sample_snapshot(vec![sample_row("api", "up"), sample_row("worker", "down")]);
+        let chips = type_chips(&snapshot, Some("down"), None);
+        assert_eq!(chips[0].count, 1, "All narrows to status matches");
+        assert_eq!(chips[1].count, 1);
+        let chips = type_chips(&snapshot, Some("paused"), None);
+        assert_eq!(chips[0].count, 0, "chip stays visible at 0, not dropped");
+        let chips = type_chips(&snapshot, None, None);
+        assert_eq!(chips[0].count, 2, "no status filter keeps snapshot counts");
+    }
+
+    #[test]
+    fn type_filters_mirror_chip_order() {
+        assert_eq!(TYPE_FILTERS[0], FILTER_ANY);
+        assert_eq!(TYPE_FILTERS.len(), TYPE_CHIP_ORDER.len() + 1);
+        for (key, label) in TYPE_FILTERS[1..].iter().zip(TYPE_CHIP_ORDER) {
+            assert_eq!(*key, label.to_ascii_lowercase());
+        }
+    }
+
+    #[test]
+    fn status_filter_paused_matches_disabled_only() {
+        assert!(row_matches_status(&row_with(false, "up"), "paused"));
+        assert!(!row_matches_status(&row_with(true, "up"), "paused"));
+        assert!(!row_matches_status(&row_with(false, "down"), "down"));
+    }
+
+    #[test]
+    fn status_filter_down_includes_error() {
+        assert!(row_matches_status(&row_with(true, "down"), "down"));
+        assert!(row_matches_status(&row_with(true, "error"), "down"));
+        assert!(!row_matches_status(&row_with(true, "up"), "down"));
+    }
+
+    #[test]
+    fn status_filter_up_excludes_never_reported() {
+        assert!(row_matches_status(&row_with(true, "up"), "up"));
+        assert!(!row_matches_status(&row_with(true, ""), "up"));
     }
 
     #[test]
