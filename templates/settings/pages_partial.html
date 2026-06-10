@@ -32,7 +32,7 @@
 </div>
 {% else %}
 <table class="w-full text-left text-sm">
-  <thead class="bg-[color:var(--theme-surface-sunk)] text-xs uppercase text-muted">
+  <thead class="table-head bg-[color:var(--theme-surface-sunk)]">
     <tr>
       <th scope="col" class="px-4 py-2">Name</th>
       <th scope="col" class="px-4 py-2">URL</th>
@@ -62,7 +62,7 @@
                   data-confirm-modal
                   data-confirm-title="Delete status page?"
                   data-confirm-body="Deletes the page {{ r.name }} and its component selection. Monitors and their data are untouched."
-                  data-confirm-label="Delete page"
+                  data-confirm-label="delete page"
                   data-confirm-danger
                   class="row-link row-link--danger">delete</button>
         </div>

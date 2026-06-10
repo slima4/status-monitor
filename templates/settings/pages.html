@@ -20,7 +20,7 @@
        hx-trigger="load"
        hx-swap="innerHTML"
        class="sticker-card overflow-hidden">
-    <p class="px-4 py-3 text-sm text-muted">Loading…</p>
+    <p class="px-4 py-3 font-mono text-xs text-quiet"># loading…</p>
   </div>
 
   {% if at_limit && !rows.is_empty() %}
@@ -69,7 +69,7 @@
             });
             data = await res.json().catch(() => null);
           } catch (_) {
-            showErr('Network error — try again.');
+            showErr('network error — try again.');
             if (btn) btn.disabled = false;
             return;
           }
@@ -78,11 +78,11 @@
             return;
           }
           if (data && data.error && data.error.code === 'SLUG_TAKEN') continue; // rare temp-slug collision — retry
-          showErr((data && data.error && data.error.message) || 'Could not create page.');
+          showErr((data && data.error && data.error.message) || 'could not create page.');
           if (btn) btn.disabled = false;
           return;
         }
-        showErr('Could not allocate a unique URL — try again.');
+        showErr('could not allocate a unique URL — try again.');
         if (btn) btn.disabled = false;
       };
     })();
