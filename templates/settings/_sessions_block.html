@@ -1,20 +1,26 @@
-<div id="sessions-list" data-hx-loader
-     hx-get="/web/partials/settings/sessions"
-     hx-trigger="load, every 60s, sessions:refresh from:body"
-     hx-swap="innerHTML"
-     class="sticker-card overflow-hidden">
-  <p class="px-4 py-3 text-sm text-muted">Loading…</p>
+{# Banded sessions card shared by settings/account and the standalone
+   sessions page: header band carries the title + log-out-everywhere
+   action, the list below self-loads and refreshes via htmx. #}
+<div class="sticker-card overflow-hidden">
+  <header class="card-band flex flex-wrap items-center justify-between gap-2">
+    <h2 id="sessions-heading" class="panel-label">sessions</h2>
+    <button type="button"
+            hx-post="/auth/logout-all"
+            hx-headers='{"X-Requested-With":"uptimepage"}'
+            hx-on::after-request="window.location.href='/login'"
+            data-confirm-modal
+            data-confirm-title="Log out everywhere?"
+            data-confirm-body="Every active session for this account is signed out, including this one. You will need to sign in again."
+            data-confirm-label="log out everywhere"
+            data-confirm-danger
+            class="btn-ghost btn-ghost--danger px-2 py-1 text-xs font-medium">
+    log out everywhere
+    </button>
+  </header>
+  <div id="sessions-list" data-hx-loader
+       hx-get="/web/partials/settings/sessions"
+       hx-trigger="load, every 60s, sessions:refresh from:body"
+       hx-swap="innerHTML">
+    <p class="px-4 py-3 font-mono text-xs text-quiet"># loading…</p>
+  </div>
 </div>
-
-<button type="button"
-        hx-post="/auth/logout-all"
-        hx-headers='{"X-Requested-With":"uptimepage"}'
-        hx-on::after-request="window.location.href='/login'"
-        data-confirm-modal
-        data-confirm-title="Log out everywhere?"
-        data-confirm-body="Every active session for this account is signed out, including this one. You will need to sign in again."
-        data-confirm-label="Log out everywhere"
-        data-confirm-danger
-        class="btn-ghost btn-ghost--danger px-3 py-1.5 text-sm font-medium">
-  Log out everywhere
-</button>

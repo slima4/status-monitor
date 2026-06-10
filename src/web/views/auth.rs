@@ -736,7 +736,7 @@ pub mod settings {
         #[test]
         fn sessions_partial_renders_empty_state() {
             let html = SessionsPartial { sessions: vec![] }.render().unwrap();
-            assert!(html.contains("No active sessions"));
+            assert!(html.contains("# no active sessions"));
             // Partial must not include the page chrome — it's swapped in via HTMX.
             assert!(!html.contains("<!doctype html>"));
         }
@@ -755,7 +755,7 @@ pub mod settings {
             }
             .render()
             .unwrap();
-            assert!(html.contains("This device"));
+            assert!(html.contains("this device"));
             assert!(!html.contains("hx-delete"));
         }
 

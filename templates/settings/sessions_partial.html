@@ -1,11 +1,8 @@
 {% if sessions.is_empty() %}
-<div class="flex items-center gap-3 px-4 py-6 text-sm text-muted">
-  <span aria-hidden="true" class="text-base text-quiet">○</span>
-  <span>No active sessions.</span>
-</div>
+<p class="px-4 py-6 font-mono text-xs text-quiet"># no active sessions</p>
 {% else %}
 <table class="w-full text-left text-sm">
-  <thead class="bg-[color:var(--theme-surface-sunk)] text-xs uppercase text-muted">
+  <thead class="table-head bg-[color:var(--theme-surface-sunk)]">
     <tr>
       <th class="px-4 py-2">Created</th>
       <th class="px-4 py-2">Last used</th>
@@ -23,7 +20,7 @@
       <td class="px-4 py-2 align-top font-mono text-xs text-muted">{{ s.ip_short }}</td>
       <td class="px-4 py-2 text-right">
         {% if s.is_current %}
-        <span class="status-badge status-badge--up">This device</span>
+        <span class="status-badge status-badge--up">this device</span>
         {% else %}
         <button type="button"
                 hx-delete="/api/v1/me/sessions/{{ s.id_hash }}"
@@ -34,9 +31,9 @@
                 data-confirm-modal
                 data-confirm-title="Revoke this session?"
                 data-confirm-body="The device using this session is signed out immediately."
-                data-confirm-label="Revoke session"
+                data-confirm-label="revoke session"
                 data-confirm-danger
-                class="row-link row-link--danger">Revoke</button>
+                class="row-link row-link--danger">revoke</button>
         {% endif %}
       </td>
     </tr>

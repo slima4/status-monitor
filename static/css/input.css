@@ -1534,6 +1534,14 @@
         color: var(--theme-text-muted);
     }
 
+    /* Sunk header band atop a sticker-card section (settings cards,
+       form sections, drawers). */
+    .card-band {
+        @apply border-b px-5 py-2.5;
+        border-color: var(--theme-line);
+        background: var(--theme-surface-sunk);
+    }
+
     /* Mono-tracked column header — the register head for data tables.
        Sunk fill stays a per-table utility (flush tables add it, padded
        tables don't). */

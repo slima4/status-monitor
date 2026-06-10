@@ -15,15 +15,15 @@
         const card = document.createElement("p");
         card.className = "sticker-card px-4 py-3 text-sm text-muted";
         card.setAttribute("role", "alert");
-        card.append("Couldn't load this list. ");
+        card.append("couldn't load this list. ");
         const retry = document.createElement("button");
         retry.type = "button";
         retry.className = "row-link text-sm";
         retry.textContent = "retry";
         retry.addEventListener("click", () => {
             box.replaceChildren(Object.assign(document.createElement("p"), {
-                className: "px-4 py-3 text-sm text-muted",
-                textContent: "Loading…",
+                className: "px-4 py-3 font-mono text-xs text-quiet",
+                textContent: "# loading…",
             }));
             window.htmx.ajax("GET", url, { target: box, swap: "innerHTML" });
         });

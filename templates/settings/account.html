@@ -8,16 +8,18 @@
       Signed in as <span class="font-medium text-body">{{ email }}</span>
       (via {{ provider }})
     </p>
-    <dl class="flex flex-wrap gap-x-8 gap-y-1 pt-1 text-sm text-muted">
-      <div><dt class="inline">Joined:</dt> <dd class="inline text-body">{% if let Some(ts) = joined %}<time datetime="{{ ts|iso_ts }}" data-tz="exact">{{ ts|human_ts }}</time>{% else %}—{% endif %}</dd></div>
-      <div><dt class="inline">Last sign-in:</dt> <dd class="inline text-body">{% if let Some(ts) = last_seen %}<time datetime="{{ ts|iso_ts }}" data-tz="exact">{{ ts|human_ts }}</time>{% else %}—{% endif %}</dd></div>
+    <dl class="flex flex-wrap gap-x-8 gap-y-1 pt-1 text-sm">
+      <div><dt class="flag-label inline">joined</dt> <dd class="inline text-body">{% if let Some(ts) = joined %}<time datetime="{{ ts|iso_ts }}" data-tz="exact">{{ ts|human_ts }}</time>{% else %}—{% endif %}</dd></div>
+      <div><dt class="flag-label inline">last-sign-in</dt> <dd class="inline text-body">{% if let Some(ts) = last_seen %}<time datetime="{{ ts|iso_ts }}" data-tz="exact">{{ ts|human_ts }}</time>{% else %}—{% endif %}</dd></div>
     </dl>
   </header>
 
-  <section class="space-y-4" aria-labelledby="appearance-heading">
-    <h2 id="appearance-heading" class="panel-label">Appearance</h2>
-
-    <div class="sticker-card space-y-2 p-5">
+  <section class="sticker-card overflow-hidden" aria-labelledby="appearance-heading">
+    <header class="card-band">
+      <h2 id="appearance-heading" class="panel-label">appearance</h2>
+    </header>
+    <div class="space-y-5 p-5">
+    <div class="space-y-2">
       <div class="field-outline">
         <span class="field-outline__label">Theme</span>
         <select id="app-theme" data-sm-combobox aria-label="Theme" class="w-full field">
@@ -41,7 +43,7 @@
       </p>
     </div>
 
-    <div class="sticker-card space-y-2 p-5">
+    <div class="space-y-2">
       <div class="field-outline">
         <span class="field-outline__label">Time format</span>
         <select id="time-format" data-sm-combobox aria-label="Time format" class="w-full field">
@@ -54,6 +56,7 @@
         Controls how timestamps render. Auto uses your browser's locale, which
         may not match your system's 24-hour setting.
       </p>
+    </div>
     </div>
   </section>
 
@@ -87,9 +90,9 @@
             .filter(function (c) { return c.indexOf("theme-") === 0; })
             .forEach(function (c) { html.classList.remove(c); });
           if (v !== "default") html.classList.add("theme-" + v);
-          themeOut.textContent = "Saved.";
+          themeOut.textContent = "saved";
         } catch (err) {
-          themeOut.textContent = "Could not save theme: " + err.message;
+          themeOut.textContent = "could not save theme: " + err.message;
         }
       });
 
@@ -100,50 +103,52 @@
           await savePref("/api/v1/me/time-format", { time_format: tfSel.value });
           // The handler set the sm_time_format cookie; reload so every <time>
           // element re-renders with the chosen hour cycle.
-          tfOut.textContent = "Saved — reloading…";
+          tfOut.textContent = "saved — reloading…";
           window.location.reload();
         } catch (err) {
-          tfOut.textContent = "Could not save time format: " + err.message;
+          tfOut.textContent = "could not save time format: " + err.message;
         }
       });
     })();
   </script>
 
-  <section class="space-y-4" aria-labelledby="privacy-heading">
-    <h2 id="privacy-heading" class="panel-label">Privacy</h2>
+  <section class="sticker-card overflow-hidden" aria-labelledby="privacy-heading">
+    <header class="card-band">
+      <h2 id="privacy-heading" class="panel-label">privacy</h2>
+    </header>
+    <div class="divide-y divide-[color:var(--theme-line)]">
+      <div class="space-y-2 p-5">
+        <a href="/api/v1/me/data-export" download rel="nofollow"
+           data-confirm-modal
+           data-confirm-title="Export your data?"
+           data-confirm-body="Downloads a JSON file with your profile, sign-in identities, owned organisations, targets (credentials redacted), incidents, memberships and recent activity."
+           data-confirm-label="download"
+           class="btn-ghost inline-block px-3 py-1.5 text-sm font-medium text-body">
+          export my data
+        </a>
+        <p class="text-sm text-muted">
+          Download everything associated with your account as a JSON file:
+          profile, sign-in identities, owned organisations, targets (credentials
+          redacted), incidents, memberships and recent activity.
+        </p>
+      </div>
 
-    <div class="sticker-card space-y-2 p-5">
-      <a href="/api/v1/me/data-export" download rel="nofollow"
-         data-confirm-modal
-         data-confirm-title="Export your data?"
-         data-confirm-body="Downloads a JSON file with your profile, sign-in identities, owned organisations, targets (credentials redacted), incidents, memberships and recent activity."
-         data-confirm-label="download"
-         class="btn-ghost inline-block px-3 py-1.5 text-sm font-medium text-body">
-        Export my data
-      </a>
-      <p class="text-sm text-muted">
-        Download everything associated with your account as a JSON file:
-        profile, sign-in identities, owned organisations, targets (credentials
-        redacted), incidents, memberships and recent activity.
-      </p>
-    </div>
-
-    <div class="sticker-card space-y-2 p-5">
-      <button type="button"
-              hx-on:click="document.getElementById('delete-modal').showModal()"
-              class="btn-ghost btn-ghost--danger inline-block px-3 py-1.5 text-sm font-medium">
-        Delete my account
-      </button>
-      <p class="text-sm text-muted">
-        Permanently delete your account and every organisation you solely own.
-        Recoverable for a grace period by signing in again — permanent after
-        that.
-      </p>
+      <div class="space-y-2 p-5">
+        <button type="button"
+                hx-on:click="document.getElementById('delete-modal').showModal()"
+                class="btn-ghost btn-ghost--danger inline-block px-3 py-1.5 text-sm font-medium">
+          delete my account
+        </button>
+        <p class="text-sm text-muted">
+          Permanently delete your account and every organisation you solely own.
+          Recoverable for a grace period by signing in again — permanent after
+          that.
+        </p>
+      </div>
     </div>
   </section>
 
-  <section class="space-y-4" aria-labelledby="sessions-heading">
-    <h2 id="sessions-heading" class="panel-label">Sessions</h2>
+  <section aria-labelledby="sessions-heading">
     {% include "settings/_sessions_block.html" %}
   </section>
 </section>
@@ -218,7 +223,7 @@
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'org-delete btn-ghost btn-ghost--danger px-2 py-1 text-xs font-medium';
-        btn.textContent = 'Delete organisation';
+        btn.textContent = 'delete organisation';
         btn.setAttribute('hx-delete', '/api/v1/orgs/' + org.id);
         btn.setAttribute('hx-swap', 'none');
         btn.setAttribute('data-confirm-modal', '');
@@ -226,7 +231,7 @@
         btn.setAttribute('data-confirm-body',
           'Permanently deletes ' + (org.slug || 'this organisation')
           + ', its monitors, history, and incidents. Cannot be undone.');
-        btn.setAttribute('data-confirm-label', 'Delete organisation');
+        btn.setAttribute('data-confirm-label', 'delete organisation');
         btn.setAttribute('data-confirm-danger', '');
         li.appendChild(btn);
 
