@@ -12,15 +12,17 @@
 
   {% if regions.len() > 1 %}
   <p class="dashboard-subhead">
-    filter <span class="dashboard-subhead__mono">region:<select class="dashboard-subhead__select"
+    region
+    <span class="dashboard-filter dashboard-filter--inline"><select
             data-region-filter
+            data-sm-combobox
             name="region"
             aria-label="Region">
-      <option value=""{% if selected_region.is_none() %} selected{% endif %}>all</option>
+      <option value=""{% if selected_region.is_none() %} selected{% endif %}>any</option>
       {% for r in regions %}
       <option value="{{ r.id }}"{% if let Some(sel) = selected_region %}{% if sel.as_str() == r.id.as_str() %} selected{% endif %}{% endif %}>{{ r.label }}</option>
       {% endfor %}
-    </select><span class="dashboard-subhead__caret" aria-hidden="true">▾</span></span>
+    </select></span>
   </p>
   {% endif %}
 
