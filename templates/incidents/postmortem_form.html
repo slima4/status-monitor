@@ -23,7 +23,9 @@
   <form id="postmortem-form" novalidate class="space-y-6">
     <div id="form-errors" role="alert" aria-live="polite" class="hidden alert-card alert-card--error"></div>
 
-    <fieldset class="sticker-card space-y-5 p-5">
+    <fieldset class="sticker-card form-card">
+      <legend>write-up</legend>
+      <div class="clear-both space-y-5 p-5">
       <label class="field-outline block">
         <span class="field-outline__label">Summary</span>
         <textarea name="summary" rows="3" maxlength="5000" class="w-full field"
@@ -39,10 +41,12 @@
         <textarea name="impact" rows="3" maxlength="5000" class="w-full field"
                   placeholder="Who was affected and for how long.">{{ impact }}</textarea>
       </label>
+      </div>
     </fieldset>
 
-    <fieldset class="space-y-3">
-      <legend class="px-1 text-sm font-medium">Action items</legend>
+    <fieldset class="sticker-card form-card">
+      <legend>action items</legend>
+      <div class="clear-both space-y-3 p-5">
       <div id="action-items" class="space-y-2">
         {% for a in action_items %}
         <div data-action-item class="flex flex-wrap items-center gap-2">
@@ -63,6 +67,7 @@
         {% endfor %}
       </div>
       <button type="button" id="add-action-item" class="sticker-btn px-3 py-1.5 text-sm font-medium">add action item</button>
+      </div>
     </fieldset>
 
     <div class="flex justify-end gap-2">

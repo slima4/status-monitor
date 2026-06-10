@@ -148,9 +148,9 @@ pub struct IncidentsConsoleTable {
 
 fn state_label(s: IncidentState) -> &'static str {
     match s {
-        IncidentState::Triggered => "Triggered",
-        IncidentState::Acknowledged => "Acknowledged",
-        IncidentState::Resolved => "Resolved",
+        IncidentState::Triggered => "triggered",
+        IncidentState::Acknowledged => "acknowledged",
+        IncidentState::Resolved => "resolved",
     }
 }
 
@@ -709,10 +709,10 @@ pub struct NotificationRow {
 fn notification_status_label(s: crate::domain::NotificationStatus) -> &'static str {
     use crate::domain::NotificationStatus::*;
     match s {
-        Queued => "Queued",
-        Sent => "Sent",
-        Failed => "Failed",
-        Suppressed => "Suppressed",
+        Queued => "queued",
+        Sent => "sent",
+        Failed => "failed",
+        Suppressed => "suppressed",
     }
 }
 
@@ -747,21 +747,21 @@ fn notification_row(
 fn event_kind_label(e: &IncidentEvent) -> &'static str {
     use crate::domain::IncidentEventKind::*;
     match e.kind {
-        Triggered => "Triggered",
-        Acknowledged => "Acknowledged",
-        Assigned => "Assigned",
-        Unassigned => "Unassigned",
-        Escalated => "Escalated",
-        Notified => "Notified",
-        Note => "Note",
-        SeverityChanged => "Severity changed",
-        StateChanged => "State changed",
-        Resolved => "Resolved",
-        Reopened => "Reopened",
-        Published => "Published",
-        Unpublished => "Unpublished",
-        PostmortemPublished => "Postmortem published",
-        PostmortemUnpublished => "Postmortem unpublished",
+        Triggered => "triggered",
+        Acknowledged => "acknowledged",
+        Assigned => "assigned",
+        Unassigned => "unassigned",
+        Escalated => "escalated",
+        Notified => "notified",
+        Note => "note",
+        SeverityChanged => "severity changed",
+        StateChanged => "state changed",
+        Resolved => "resolved",
+        Reopened => "reopened",
+        Published => "published",
+        Unpublished => "unpublished",
+        PostmortemPublished => "postmortem published",
+        PostmortemUnpublished => "postmortem unpublished",
     }
 }
 
@@ -1393,14 +1393,14 @@ mod tests {
         let html = page.render().unwrap();
         assert!(html.contains("Payments degraded"));
         assert!(html.contains(r#"data-incident-note"#));
-        assert!(html.contains("Activity"));
+        assert!(html.contains("activity"));
         assert!(html.contains("alice@example.com"));
         // Public-update timeline + post form both present, with the author.
         assert!(html.contains(r#"data-incident-update-form"#));
-        assert!(html.contains("Status updates"));
+        assert!(html.contains("status updates"));
         assert!(html.contains("Root cause found."));
         assert!(html.contains("bob@example.com"));
-        assert!(html.contains("Owner"));
+        assert!(html.contains("owner"));
         assert!(html.contains(r#"data-incident-assign-select"#));
     }
 
@@ -1421,7 +1421,7 @@ mod tests {
                 transport: "slack".into(),
                 reason: "opened",
                 status: "sent",
-                status_label: "Sent",
+                status_label: "sent",
                 attempt: 1,
                 error: None,
                 sent_at: Some(Utc::now()),
@@ -1433,7 +1433,7 @@ mod tests {
                 transport: "webhook".into(),
                 reason: "opened",
                 status: "failed",
-                status_label: "Failed",
+                status_label: "failed",
                 attempt: 5,
                 error: Some("connection refused".into()),
                 sent_at: None,
@@ -1442,7 +1442,7 @@ mod tests {
             },
         ];
         let html = page.render().unwrap();
-        assert!(html.contains("Delivery"));
+        assert!(html.contains("delivery"));
         assert!(html.contains("Ops Slack"));
         assert!(html.contains("Pager webhook"));
         assert!(html.contains("dead-letter"));

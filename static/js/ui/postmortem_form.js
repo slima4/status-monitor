@@ -63,7 +63,7 @@
     window.smClearFormErrors(banner);
     const label = submitBtn.textContent;
     submitBtn.disabled = true;
-    submitBtn.textContent = "Saving…";
+    submitBtn.textContent = "saving…";
     let navigating = false;
     try {
       const res = await send("/api/v1/incidents/" + encodeURIComponent(incidentId) + "/postmortem", "PUT", buildBody());

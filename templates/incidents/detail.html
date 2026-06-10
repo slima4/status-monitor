@@ -45,7 +45,7 @@
   <div data-incident-error role="alert" aria-live="polite" class="hidden rounded-sm border border-state-bad px-3 py-2 text-sm text-state-bad"></div>
 
   <div class="flex flex-wrap items-center gap-2 text-sm" data-incident-id="{{ id }}">
-    <span class="text-xs uppercase tracking-wide text-muted">Owner</span>
+    <span class="flag-label">owner</span>
     {% match owner %}{% when Some with (o) %}
     <span class="monitors-avatar monitors-avatar--sm" title="{{ o.label }}" style="background: {{ o.color }}">{{ o.initials }}</span>
     <span class="text-body">{{ o.label }}</span>
@@ -61,28 +61,30 @@
   </div>
 
   <section class="sticker-card grid grid-cols-2 gap-4 p-4 text-sm sm:grid-cols-4">
-    <div><div class="text-xs uppercase tracking-wide text-muted">Started</div>
+    <div><div class="flag-label">started</div>
       <time datetime="{{ started_at|iso_ts }}" data-tz="exact">{{ started_at|human_ts }}</time></div>
-    <div><div class="text-xs uppercase tracking-wide text-muted">Ended</div>
+    <div><div class="flag-label">ended</div>
       {% match ended_at %}{% when Some with (ts) %}<time datetime="{{ ts|iso_ts }}" data-tz="exact">{{ ts|human_ts }}</time>{% when None %}<span class="text-state-bad">ongoing</span>{% endmatch %}</div>
-    <div><div class="text-xs uppercase tracking-wide text-muted">Acknowledged</div>
+    <div><div class="flag-label">acknowledged</div>
       {% match acknowledged_at %}{% when Some with (ts) %}<time datetime="{{ ts|iso_ts }}" data-tz="exact">{{ ts|human_ts }}</time>{% match acknowledged_by %}{% when Some with (who) %}<div class="text-xs text-muted">by <span class="dashboard-subhead__mono">{{ who }}</span></div>{% when None %}{% endmatch %}{% when None %}—{% endmatch %}</div>
-    <div><div class="text-xs uppercase tracking-wide text-muted">Visibility</div>{{ visibility }}</div>
+    <div><div class="flag-label">visibility</div>{{ visibility }}</div>
   </section>
 
   {% match error_sample %}{% when Some with (e) %}
   <section class="sticker-card p-4">
-    <div class="text-xs uppercase tracking-wide text-muted">Trigger</div>
+    <div class="flag-label">trigger</div>
     <pre class="mt-1 overflow-x-auto whitespace-pre-wrap break-words font-mono text-xs text-body">{{ e }}</pre>
   </section>
   {% when None %}{% endmatch %}
 
-  <section class="space-y-2">
-    <h2 class="text-sm font-semibold uppercase tracking-wide text-muted">Activity</h2>
+  <section class="sticker-card overflow-hidden">
+    <header class="card-band">
+      <h2 class="panel-label">activity</h2>
+    </header>
     {% if timeline.is_empty() %}
-    <div class="sticker-card p-4 text-sm text-muted">No activity recorded yet. Add a note to capture context.</div>
+    <p class="px-4 py-4 font-mono text-xs text-quiet"># no activity recorded yet — add a note to capture context</p>
     {% else %}
-    <ol class="sticker-card divide-y divide-[color:var(--theme-line)]">
+    <ol class="divide-y divide-[color:var(--theme-line)]">
       {% for ev in timeline %}
       <li class="flex flex-wrap items-baseline gap-2 px-4 py-2 text-sm">
         <span class="dashboard-chip">{{ ev.kind }}</span>
@@ -97,12 +99,14 @@
     {% endif %}
   </section>
 
-  <section class="space-y-2">
-    <h2 class="text-sm font-semibold uppercase tracking-wide text-muted">Delivery</h2>
+  <section class="sticker-card overflow-hidden">
+    <header class="card-band">
+      <h2 class="panel-label">delivery</h2>
+    </header>
     {% if notifications.is_empty() %}
-    <div class="sticker-card p-4 text-sm text-muted">No pages sent for this incident.</div>
+    <p class="px-4 py-4 font-mono text-xs text-quiet"># no pages sent for this incident</p>
     {% else %}
-    <ol class="sticker-card divide-y divide-[color:var(--theme-line)]">
+    <ol class="divide-y divide-[color:var(--theme-line)]">
       {% for n in notifications %}
       <li class="flex flex-wrap items-baseline gap-2 px-4 py-2 text-sm">
         <span class="dashboard-subhead__mono text-xs">{{ n.channel }}</span>
@@ -126,31 +130,32 @@
   </section>
 
   <section class="space-y-3" data-incident-id="{{ id }}">
-    <div class="flex items-center justify-between gap-2">
-      <h2 class="text-sm font-semibold uppercase tracking-wide text-muted">Status updates</h2>
-      <span class="text-xs text-quiet">public timeline{% if visibility != "public" %} · draft{% endif %}</span>
+    <div class="sticker-card overflow-hidden">
+      <header class="card-band flex items-center justify-between gap-2">
+        <h2 class="panel-label">status updates</h2>
+        <span class="text-xs text-quiet">public timeline{% if visibility != "public" %} · draft{% endif %}</span>
+      </header>
+      {% if public_updates.is_empty() %}
+      <p class="px-4 py-4 font-mono text-xs text-quiet"># no updates posted yet</p>
+      {% else %}
+      <ol class="divide-y divide-[color:var(--theme-line)]">
+        {% for u in public_updates %}
+        <li class="flex flex-wrap items-baseline gap-2 px-4 py-3 text-sm">
+          <span class="public-chip public-phase--{{ u.phase }}">{{ u.phase }}</span>
+          <span class="text-xs text-quiet">by</span>
+          <span class="dashboard-subhead__mono text-xs">{{ u.author }}</span>
+          <time class="ml-auto text-xs text-muted tabular-nums" datetime="{{ u.posted_at|iso_ts }}" data-tz="exact">{{ u.posted_at|human_ts }}</time>
+          <p class="w-full whitespace-pre-line text-body">{{ u.message }}</p>
+        </li>
+        {% endfor %}
+      </ol>
+      {% endif %}
     </div>
-
-    {% if public_updates.is_empty() %}
-    <p class="text-sm text-muted">No updates posted yet.</p>
-    {% else %}
-    <ol class="sticker-card divide-y divide-[color:var(--theme-line)]">
-      {% for u in public_updates %}
-      <li class="flex flex-wrap items-baseline gap-2 px-4 py-3 text-sm">
-        <span class="public-chip public-phase--{{ u.phase }}">{{ u.phase }}</span>
-        <span class="text-xs text-quiet">by</span>
-        <span class="dashboard-subhead__mono text-xs">{{ u.author }}</span>
-        <time class="ml-auto text-xs text-muted tabular-nums" datetime="{{ u.posted_at|iso_ts }}" data-tz="exact">{{ u.posted_at|human_ts }}</time>
-        <p class="w-full whitespace-pre-line text-body">{{ u.message }}</p>
-      </li>
-      {% endfor %}
-    </ol>
-    {% endif %}
 
     <details class="sticker-card">
       <summary class="sm-help-summary flex cursor-pointer select-none items-center gap-2 p-4 text-sm text-body">
         <span class="sm-help-tri" aria-hidden="true">▸</span>
-        <span>Post an update</span>
+        <span>post an update</span>
         {% if visibility != "public" %}
         <span class="ml-auto text-xs text-quiet">won't show until published</span>
         {% endif %}
@@ -180,7 +185,7 @@
 
   <section class="flex flex-wrap items-center justify-between gap-2">
     <div class="flex items-center gap-2">
-      <h2 class="text-sm font-semibold uppercase tracking-wide text-muted">Postmortem</h2>
+      <h2 class="panel-label">postmortem</h2>
       {% if has_postmortem %}
         {% if postmortem_published %}
         <span class="dashboard-chip dashboard-chip--active">published</span>
