@@ -26,9 +26,9 @@ use crate::web::{AuthedBrowser, CurrentOrg, CurrentUser};
 const STATE_FILTERS: &[&str] = &["all", "triggered", "acknowledged", "resolved"];
 const SEVERITIES: &[&str] = &["minor", "major", "critical"];
 const SORTS: &[(&str, &str)] = &[
-    ("recent", "Recent"),
-    ("oldest", "Oldest"),
-    ("severity", "Severity"),
+    ("recent", "sort:recent"),
+    ("oldest", "sort:oldest"),
+    ("severity", "sort:severity"),
 ];
 const PAGE_SIZES: &[usize] = &[25, 50, 100, 200];
 const DEFAULT_PAGE_SIZE: usize = 50;
@@ -525,12 +525,12 @@ pub async fn list(
     let mut owner_options = vec![
         OwnerOption {
             value: String::new(),
-            label: "Owner: any".into(),
+            label: "owner:any".into(),
             selected: r.assignee.is_none(),
         },
         OwnerOption {
             value: "me".into(),
-            label: "Assigned to me".into(),
+            label: "owner:me".into(),
             selected: r.mine(),
         },
     ];
@@ -540,7 +540,7 @@ pub async fn list(
     owner_options.extend(members.into_iter().map(|(uid, email)| OwnerOption {
         selected: owner_id == Some(uid.0),
         value: uid.0.to_string(),
-        label: email,
+        label: format!("owner:{email}"),
     }));
 
     Ok(IncidentsConsolePage {

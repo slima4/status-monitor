@@ -2462,6 +2462,35 @@
         outline-offset: -3px;
     }
 
+    /* Segmented rail — the canonical chip-strip register (hairline
+       container, borderless segments, ink active). dashboard-chips /
+       monitors-chips predate it and mirror it with per-page classes. */
+    .sm-rail {
+        @apply inline-flex flex-wrap items-center gap-1 rounded-sm border p-1;
+        background: var(--theme-surface-elev);
+        border-color: var(--theme-line);
+    }
+    .sm-rail__seg {
+        @apply inline-flex items-center gap-1.5 rounded-sm px-2.5 py-1 text-xs font-medium;
+        color: var(--theme-text-muted);
+        font-family: var(--font-mono);
+        text-decoration: none;
+        transition: background-color 120ms ease, color 120ms ease;
+    }
+    .sm-rail__seg:not(.sm-rail__seg--active):hover {
+        background: var(--theme-surface-sunk);
+        color: var(--theme-accent);
+    }
+    .sm-rail__seg--active,
+    .sm-rail__seg--active:hover {
+        background: var(--theme-ink);
+        color: var(--theme-surface);
+    }
+    .sm-rail__count {
+        color: inherit;
+        opacity: 0.7;
+    }
+
     .dashboard-chip {
         @apply inline-flex items-center gap-1.5 rounded-sm border px-2.5 py-0.5 text-xs font-medium;
         background: var(--sm-dashboard-chip-bg);

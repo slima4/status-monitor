@@ -67,11 +67,11 @@
             <span class="monitors-avatar{% if row.assigned_to_me %} monitors-avatar--me{% endif %}" title="{{ o.label }}" style="background: {{ o.color }}">{{ o.initials }}</span>
             {% if !row.assigned_to_me %}
             <button type="button" data-incident-assign-self data-incident-id="{{ row.id }}"
-                    class="cli-brackets cursor-pointer font-mono text-xs text-muted hover:text-body">take</button>
+                    class="btn-ghost px-1.5 py-0.5 text-xs text-muted">take</button>
             {% endif %}
             {% when None %}
             <button type="button" data-incident-assign-self data-incident-id="{{ row.id }}"
-                    class="cli-brackets cursor-pointer font-mono text-xs text-muted hover:text-body">assign to me</button>
+                    class="btn-ghost px-1.5 py-0.5 text-xs text-muted">assign to me</button>
             {% endmatch %}
           </div>
         </td>
@@ -106,17 +106,19 @@
       · page <span class="monitors-foot__mono">{{ data.page }}</span>/<span class="monitors-foot__mono">{{ data.total_pages }}</span>
     </span>
     <span class="flex flex-wrap items-center gap-3">
-      <span class="flex items-center gap-1 text-xs text-muted">
+      <span class="flex items-center gap-1.5 text-xs text-muted">
         rows
-        {% for ps in data.page_sizes %}
-        <a class="dashboard-chip{% if ps.active %} dashboard-chip--active{% endif %}" href="{{ ps.href }}">{{ ps.n }}</a>
-        {% endfor %}
+        <span class="range-tabs">
+          {% for ps in data.page_sizes %}
+          <a class="range-tabs__btn{% if ps.active %} range-tabs__btn--active{% endif %}" href="{{ ps.href }}">{{ ps.n }}</a>
+          {% endfor %}
+        </span>
       </span>
       {% match data.prev_href %}{% when Some with (href) %}
-      <a class="row-link" href="{{ href }}"><span aria-hidden="true">←</span> prev</a>
+      <a class="btn-ghost px-2.5 py-1 text-xs" href="{{ href }}"><span aria-hidden="true">←</span> prev</a>
       {% when None %}{% endmatch %}
       {% match data.next_href %}{% when Some with (href) %}
-      <a class="row-link" href="{{ href }}">next <span aria-hidden="true">→</span></a>
+      <a class="btn-ghost px-2.5 py-1 text-xs" href="{{ href }}">next <span aria-hidden="true">→</span></a>
       {% when None %}{% endmatch %}
     </span>
   </div>

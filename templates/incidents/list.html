@@ -25,6 +25,7 @@
         hx-select="#incidents-results"
         hx-swap="outerHTML"
         hx-push-url="true"
+        hx-sync="#incident-table:replace"
         hx-trigger="change, keyup changed delay:300ms from:input[name='q']"
         class="monitors-toolbar">
     <label class="monitors-search" for="incidents-search">
@@ -40,17 +41,17 @@
     </label>
 
     <div class="monitors-toolbar__right">
-      <select name="assignee" data-sm-combobox class="monitors-toolbar__select" aria-label="Owner">
+      <span class="sm-filter sm-filter--seg"><select name="assignee" data-sm-combobox class="monitors-toolbar__select" aria-label="Owner">
         {% for o in owner_options %}
         <option value="{{ o.value }}"{% if o.selected %} selected{% endif %}>{{ o.label }}</option>
         {% endfor %}
-      </select>
+      </select></span>
 
-      <select name="sort" data-sm-combobox class="monitors-toolbar__select" aria-label="Sort">
+      <span class="sm-filter sm-filter--seg"><select name="sort" data-sm-combobox class="monitors-toolbar__select" aria-label="Sort">
         {% for s in sort_options %}
         <option value="{{ s.key }}"{% if s.selected %} selected{% endif %}>{{ s.label }}</option>
         {% endfor %}
-      </select>
+      </select></span>
     </div>
 
     <input type="hidden" name="state" value="{{ state_value }}">
@@ -62,24 +63,31 @@
 
   <div id="incidents-results" class="space-y-4">
     <div class="flex flex-wrap items-center justify-between gap-3">
-      <nav aria-label="Filter by state" class="flex flex-wrap items-center gap-2">
+      <nav aria-label="Filter by state" class="sm-rail">
         {% for tab in state_tabs %}
         <a href="{{ tab.href }}"
-           class="dashboard-chip{% if tab.active %} dashboard-chip--active{% endif %}">{{ tab.label }} <span class="cli-brackets">{{ tab.count }}</span></a>
+           class="sm-rail__seg{% if tab.active %} sm-rail__seg--active{% endif %}">{{ tab.label }} <span class="sm-rail__count">{{ tab.count }}</span></a>
         {% endfor %}
       </nav>
-      <nav aria-label="Filter by severity" class="flex flex-wrap items-center gap-1 text-xs text-muted">
+      <nav aria-label="Filter by severity" class="flex flex-wrap items-center gap-1.5 text-xs text-muted">
         sev
-        {% for chip in severity_chips %}
-        <a href="{{ chip.href }}"
-           class="dashboard-chip{% if chip.active %} dashboard-chip--active{% endif %}">{{ chip.label }}</a>
-        {% endfor %}
+        <span class="sm-rail">
+          {% for chip in severity_chips %}
+          <a href="{{ chip.href }}"
+             class="sm-rail__seg{% if chip.active %} sm-rail__seg--active{% endif %}">{{ chip.label }}</a>
+          {% endfor %}
+        </span>
       </nav>
     </div>
 
+    {# Poll race guards (mirrors the dashboard zone): the tick skips while
+       the filter form's request is in flight, and the form aborts an
+       in-flight poll via hx-sync — else a stale poll response lands after
+       the filtered swap and shows the wrong rows for up to 10s. #}
     <div id="incident-table"
          hx-get="/web/partials/incidents?{{ data.partial_query }}"
-         hx-trigger="every 10s"
+         hx-trigger="every 10s [!document.querySelector('#incidents-filter.htmx-request')]"
+         hx-sync="this:replace"
          hx-swap="innerHTML"
          data-hx-loader>
       {% include "incidents/_console_table.html" %}
