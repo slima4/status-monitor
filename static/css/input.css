@@ -2430,6 +2430,37 @@
         outline: 1px dotted currentColor;
         outline-offset: 2px;
     }
+    /* Segmented variant — the ink rectangle of the chip strip's active
+       segment at the rail's outer height: black box, surface text +
+       chevron reading as one control. No brackets; the box is the chrome. */
+    .dashboard-filter--seg .sm-combobox__trigger {
+        height: 2rem;
+        padding: 0 0.625rem;
+        gap: 0.35rem;
+        /* Mono needs the bigger size + tracking to stay readable on ink. */
+        font-family: var(--font-mono);
+        letter-spacing: 0.02em;
+        font-size: 0.875rem;
+        font-weight: 500;
+        line-height: 1.25rem;
+        background: var(--theme-ink);
+        border-color: var(--theme-ink);
+        color: var(--theme-surface);
+    }
+    .dashboard-filter--seg .sm-combobox__trigger::before,
+    .dashboard-filter--seg .sm-combobox__trigger::after { content: none; }
+    .dashboard-filter--seg .sm-combobox__chevron { color: currentColor; }
+    .dashboard-filter--seg .sm-combobox__trigger:hover,
+    .dashboard-filter--seg .sm-combobox__trigger:focus-visible,
+    .dashboard-filter--seg .sm-combobox__trigger[aria-expanded="true"] {
+        background: var(--theme-action-accent-hover);
+        border-color: var(--theme-action-accent-hover);
+        color: var(--theme-surface);
+    }
+    .dashboard-filter--seg .sm-combobox__trigger:focus-visible {
+        outline: 1px dotted var(--theme-surface);
+        outline-offset: -3px;
+    }
 
     .dashboard-chip {
         @apply inline-flex items-center gap-1.5 rounded-sm border px-2.5 py-0.5 text-xs font-medium;
