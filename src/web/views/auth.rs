@@ -650,9 +650,8 @@ pub mod settings {
             .render()
             .unwrap();
             assert!(html.starts_with("<!doctype html>"));
-            // Plan rendered as a pill chip.
-            assert!(html.contains("sticker-pill--neutral"));
-            assert!(html.contains("Free"));
+            // Plan rendered as an ink token in the header.
+            assert!(html.contains(r#"class="usage-plan">plan:free"#));
             // Bounded quota: the figures, the progressbar value, and at
             // least one filled cell in the segmented meter.
             assert!(html.contains(r#"usage-grid__fig">7</span>"#));

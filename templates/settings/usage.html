@@ -4,15 +4,14 @@
 <section class="space-y-6">
   <header class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
     <h1 class="page-title"><span class="page-title__prefix" aria-hidden="true">$</span>usage &amp; quotas</h1>
-    <p class="flex items-center gap-2 text-sm text-muted">
-      plan
-      <span class="sticker-pill sticker-pill--neutral"><span class="font-mono">{{ plan_name }}</span></span>
-    </p>
+    <span class="usage-plan">plan:{{ plan_name|lower }}</span>
   </header>
 
-  <div class="sticker-card p-5">
-    <h2 class="panel-label mb-4">Resources</h2>
-    <div class="usage-grid">
+  <div class="sticker-card overflow-hidden">
+    <header class="border-b border-[color:var(--theme-line)] bg-[color:var(--theme-surface-sunk)] px-5 py-2.5">
+      <h2 class="panel-label">resources</h2>
+    </header>
+    <div class="usage-grid p-5">
       {% for b in bars %}
       <span class="usage-row__label usage-grid__label">{{ b.label }}</span>
       {% if b.unlimited %}
@@ -31,24 +30,28 @@
   </div>
 
   <div class="grid gap-4 sm:grid-cols-2">
-    <div class="sticker-card p-5">
-      <h2 class="panel-label mb-3">Policy</h2>
-      <dl class="text-sm">
-        <div class="usage-def"><dt>Minimum check interval</dt><dd>{{ min_check_interval_secs }}s</dd></div>
-        <div class="usage-def"><dt>Result retention</dt><dd>{{ retention_days }} days</dd></div>
-        <div class="usage-def"><dt>Maximum logo size</dt><dd>{{ max_logo_size_label }}</dd></div>
-        <div class="usage-def"><dt>API tokens per user</dt><dd>{{ max_api_tokens_per_user }}</dd></div>
+    <div class="sticker-card overflow-hidden">
+      <header class="border-b border-[color:var(--theme-line)] bg-[color:var(--theme-surface-sunk)] px-5 py-2.5">
+        <h2 class="panel-label">policy</h2>
+      </header>
+      <dl class="px-5 py-3 text-sm">
+        <div class="usage-def"><dt>min-check-interval</dt><dd>{{ min_check_interval_secs }}s</dd></div>
+        <div class="usage-def"><dt>retention</dt><dd>{{ retention_days }} days</dd></div>
+        <div class="usage-def"><dt>max-logo-size</dt><dd>{{ max_logo_size_label }}</dd></div>
+        <div class="usage-def"><dt>api-tokens-per-user</dt><dd>{{ max_api_tokens_per_user }}</dd></div>
       </dl>
     </div>
 
-    <div class="sticker-card p-5">
-      <h2 class="panel-label mb-3">Rate limits <span class="font-normal normal-case text-quiet">(per minute)</span></h2>
-      <dl class="text-sm">
-        <div class="usage-def"><dt>API writes</dt><dd>{{ api_writes_per_minute }}</dd></div>
-        <div class="usage-def"><dt>API reads</dt><dd>{{ api_reads_per_minute }}</dd></div>
-        <div class="usage-def"><dt>Bulk ops</dt><dd>{{ bulk_ops_per_minute }}</dd></div>
-        <div class="usage-def"><dt>Test now</dt><dd>{{ test_now_per_minute }}</dd></div>
-        <div class="usage-def"><dt>Check now</dt><dd>{{ check_now_per_minute }}</dd></div>
+    <div class="sticker-card overflow-hidden">
+      <header class="border-b border-[color:var(--theme-line)] bg-[color:var(--theme-surface-sunk)] px-5 py-2.5">
+        <h2 class="panel-label">rate limits <span class="font-normal normal-case text-quiet">(per minute)</span></h2>
+      </header>
+      <dl class="px-5 py-3 text-sm">
+        <div class="usage-def"><dt>api-writes</dt><dd>{{ api_writes_per_minute }}</dd></div>
+        <div class="usage-def"><dt>api-reads</dt><dd>{{ api_reads_per_minute }}</dd></div>
+        <div class="usage-def"><dt>bulk-ops</dt><dd>{{ bulk_ops_per_minute }}</dd></div>
+        <div class="usage-def"><dt>test-now</dt><dd>{{ test_now_per_minute }}</dd></div>
+        <div class="usage-def"><dt>check-now</dt><dd>{{ check_now_per_minute }}</dd></div>
       </dl>
     </div>
   </div>

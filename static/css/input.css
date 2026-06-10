@@ -2000,7 +2000,18 @@
         border-bottom: 1px solid var(--sm-dashboard-hairline);
     }
     .usage-def:last-child { border-bottom: 0; }
-    .usage-def dt { color: var(--theme-text-muted); }
+    /* Keys speak the flag dialect, matching the resource meter labels. */
+    .usage-def dt {
+        font-family: var(--font-mono);
+        color: var(--theme-text-muted);
+    }
+    .usage-def dt::before { content: "--"; color: var(--theme-text-quiet); }
+    /* Plan badge — static ink token in the page header. */
+    .usage-plan {
+        @apply rounded-sm px-2 py-0.5 font-mono text-xs font-medium;
+        background: var(--theme-ink);
+        color: var(--theme-surface);
+    }
     .usage-def dd {
         color: var(--theme-text);
         font-family: var(--font-mono);
