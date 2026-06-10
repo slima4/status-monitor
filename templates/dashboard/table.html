@@ -13,7 +13,7 @@
   {# Volatile params for the preserved filter selects. hx-preserve keeps
      the select nodes (and any URL baked into them) from first render, so
      range/type must ride along as fresh inputs swapped with the zone. #}
-  <span id="dashboard-filter-state" hidden>
+  <span id="sm-filter-state" hidden>
     <input type="hidden" name="range" value="{{ range }}">
     {% if let Some(k) = selected_kind %}<input type="hidden" name="type" value="{{ k }}">{% endif %}
   </span>
@@ -21,12 +21,12 @@
   <p class="dashboard-subhead">
     region
     {% if regions.len() > 1 %}
-    <span id="dashboard-region-filter" class="dashboard-filter dashboard-filter--inline" hx-preserve="true"><select
+    <span id="dashboard-region-filter" class="sm-filter sm-filter--inline" hx-preserve="true"><select
             name="region"
             data-sm-combobox
             aria-label="Region"
             hx-get="/"
-            hx-include="#dashboard-filter-state, #dashboard-status-filter"
+            hx-include="#sm-filter-state, #dashboard-status-filter"
             hx-target="#dashboard-table"
             hx-select="#dashboard-table"
             hx-swap="outerHTML"
@@ -77,12 +77,12 @@
         </button>
         {% endfor %}
       </div>
-      <span id="dashboard-status-filter" class="dashboard-filter dashboard-filter--seg" hx-preserve="true"><select
+      <span id="dashboard-status-filter" class="sm-filter sm-filter--seg" hx-preserve="true"><select
               name="status"
               data-sm-combobox
               aria-label="Status"
               hx-get="/"
-              hx-include="#dashboard-filter-state, #dashboard-region-filter"
+              hx-include="#sm-filter-state, #dashboard-region-filter"
               hx-target="#dashboard-table"
               hx-select="#dashboard-table"
               hx-swap="outerHTML"

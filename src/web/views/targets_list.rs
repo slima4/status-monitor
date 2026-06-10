@@ -109,6 +109,10 @@ pub struct TypeChip {
     pub label: &'static str,
     pub count: usize,
     pub active: bool,
+    /// Full filter query for this chip (current filters with `kind`
+    /// swapped to the chip's), so the template renders one string into
+    /// both `href` and `hx-get` instead of re-spelling every param.
+    pub query: String,
 }
 
 pub struct OwnerOption {
@@ -326,17 +330,21 @@ async fn build_page(state: &AppState, org: OrgId, params: &ListParams) -> WebRes
     let total = rows.len();
     let groups = bucket_by_group(rows);
 
+    let chip_query =
+        |chip_kind: &str| build_query_suffix(&q, &tag, &group, chip_kind, params, sort_key(sort));
     let mut type_chips: Vec<TypeChip> = Vec::with_capacity(TYPE_CHIPS.len() + 1);
     type_chips.push(TypeChip {
         label: "All",
         count: all_count,
         active: kind.is_empty(),
+        query: chip_query(""),
     });
     for label in TYPE_CHIPS {
         type_chips.push(TypeChip {
             label,
             count: chip_counts.get(label).copied().unwrap_or(0),
             active: kind.eq_ignore_ascii_case(label),
+            query: chip_query(label),
         });
     }
 
@@ -722,6 +730,7 @@ mod tests {
                 label: "All",
                 count: 1,
                 active: true,
+                query: String::new(),
             }],
             owner_options: vec![],
             group_options: vec![],

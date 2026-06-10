@@ -2390,24 +2390,24 @@
        `[ status:any ▾ ]`. */
     /* 2rem + 1px border each side = 34px, the chip rail's outer height
        (1px border + 0.25rem padding + 1.5rem chip row). */
-    .dashboard-filter .sm-combobox__trigger {
+    .sm-filter .sm-combobox__trigger {
         height: 2rem;
         padding: 0 0.5rem;
         gap: 0.35rem;
         font-size: 0.8125rem;
         color: var(--theme-text-muted);
     }
-    .dashboard-filter .sm-combobox__trigger::before { content: "["; opacity: 0.7; }
-    .dashboard-filter .sm-combobox__trigger::after  { content: "]"; opacity: 0.7; }
-    .dashboard-filter .sm-combobox__trigger:hover,
-    .dashboard-filter .sm-combobox__trigger:focus-visible,
-    .dashboard-filter .sm-combobox__trigger[aria-expanded="true"] {
+    .sm-filter .sm-combobox__trigger::before { content: "["; opacity: 0.7; }
+    .sm-filter .sm-combobox__trigger::after  { content: "]"; opacity: 0.7; }
+    .sm-filter .sm-combobox__trigger:hover,
+    .sm-filter .sm-combobox__trigger:focus-visible,
+    .sm-filter .sm-combobox__trigger[aria-expanded="true"] {
         background: var(--theme-surface-sunk);
         color: var(--theme-accent);
     }
     /* Inline variant — borderless, text-height, font of the surrounding
        subhead, so the filter line reads as one run of prose. */
-    .dashboard-filter--inline .sm-combobox__trigger {
+    .sm-filter--inline .sm-combobox__trigger {
         height: auto;
         padding: 0;
         gap: 0.25rem;
@@ -2419,12 +2419,12 @@
         line-height: inherit;
         color: var(--theme-text);
     }
-    .dashboard-filter--inline .sm-combobox__trigger:hover,
-    .dashboard-filter--inline .sm-combobox__trigger[aria-expanded="true"] {
+    .sm-filter--inline .sm-combobox__trigger:hover,
+    .sm-filter--inline .sm-combobox__trigger[aria-expanded="true"] {
         background: transparent;
         color: var(--theme-accent);
     }
-    .dashboard-filter--inline .sm-combobox__trigger:focus-visible {
+    .sm-filter--inline .sm-combobox__trigger:focus-visible {
         background: transparent;
         color: var(--theme-accent);
         outline: 1px dotted currentColor;
@@ -2433,7 +2433,7 @@
     /* Segmented variant — the ink rectangle of the chip strip's active
        segment at the rail's outer height: black box, surface text +
        chevron reading as one control. No brackets; the box is the chrome. */
-    .dashboard-filter--seg .sm-combobox__trigger {
+    .sm-filter--seg .sm-combobox__trigger {
         height: 2rem;
         padding: 0 0.625rem;
         gap: 0.35rem;
@@ -2447,17 +2447,17 @@
         border-color: var(--theme-ink);
         color: var(--theme-surface);
     }
-    .dashboard-filter--seg .sm-combobox__trigger::before,
-    .dashboard-filter--seg .sm-combobox__trigger::after { content: none; }
-    .dashboard-filter--seg .sm-combobox__chevron { color: currentColor; }
-    .dashboard-filter--seg .sm-combobox__trigger:hover,
-    .dashboard-filter--seg .sm-combobox__trigger:focus-visible,
-    .dashboard-filter--seg .sm-combobox__trigger[aria-expanded="true"] {
+    .sm-filter--seg .sm-combobox__trigger::before,
+    .sm-filter--seg .sm-combobox__trigger::after { content: none; }
+    .sm-filter--seg .sm-combobox__chevron { color: currentColor; }
+    .sm-filter--seg .sm-combobox__trigger:hover,
+    .sm-filter--seg .sm-combobox__trigger:focus-visible,
+    .sm-filter--seg .sm-combobox__trigger[aria-expanded="true"] {
         background: var(--theme-action-accent-hover);
         border-color: var(--theme-action-accent-hover);
         color: var(--theme-surface);
     }
-    .dashboard-filter--seg .sm-combobox__trigger:focus-visible {
+    .sm-filter--seg .sm-combobox__trigger:focus-visible {
         outline: 1px dotted var(--theme-surface);
         outline-offset: -3px;
     }
@@ -2904,30 +2904,33 @@
         color: var(--theme-accent);
     }
 
+    /* Type strip — same segmented rail as the dashboard's chip strip:
+       one hairline container, borderless segments, ink active. */
     .monitors-chips {
-        @apply flex flex-wrap items-center gap-1.5;
+        @apply inline-flex flex-wrap items-center gap-1 rounded-sm border p-1;
+        background: var(--theme-surface-elev);
+        border-color: var(--theme-line);
     }
     .monitors-chip {
-        @apply inline-flex items-center gap-1.5 rounded-sm border px-2.5 py-0.5 text-xs font-medium;
-        background: var(--sm-dashboard-chip-bg);
-        color: var(--sm-dashboard-chip-fg);
-        border-color: var(--theme-line);
+        @apply inline-flex items-center gap-1.5 rounded-sm px-2.5 py-1 text-xs font-medium;
+        color: var(--theme-text-muted);
         font-family: var(--font-mono);
         text-decoration: none;
-        transition: border-color 120ms ease, color 120ms ease;
+        transition: background-color 120ms ease, color 120ms ease;
     }
-    .monitors-chip:hover { border-color: var(--theme-ink); color: var(--theme-text); }
+    .monitors-chip:not(.monitors-chip--active):hover {
+        background: var(--theme-surface-sunk);
+        color: var(--theme-accent);
+    }
     .monitors-chip--active,
     .monitors-chip--active:hover {
-        background: var(--sm-dashboard-chip-active-bg);
-        color: var(--sm-dashboard-chip-active-fg);
-        border-color: var(--theme-ink);
+        background: var(--theme-ink);
+        color: var(--theme-surface);
     }
     .monitors-chip__count {
-        @apply font-mono;
-        color: var(--theme-ink);
+        color: inherit;
+        opacity: 0.7;
     }
-    .monitors-chip--active .monitors-chip__count { color: inherit; }
 
     /* Bulk-action bar — terminal status line. Light CLI register
        (no dark island), hairline border with a 3px green prompt

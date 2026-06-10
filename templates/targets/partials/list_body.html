@@ -19,25 +19,27 @@
       of <span class="monitors-foot__mono">{{ total }}{% if has_more %}+{% endif %}</span>
     </span>
     <span class="flex flex-wrap items-center gap-3">
-      <span class="flex items-center gap-1 text-xs text-muted">
+      <span class="flex items-center gap-1.5 text-xs text-muted">
         rows
-        {% for ps in page_sizes %}
-        <a class="dashboard-chip{% if ps.active %} dashboard-chip--active{% endif %}"
-           href="/targets?limit={{ ps.n }}&amp;offset=0&amp;{{ query_suffix }}"
-           hx-get="/web/targets/list?limit={{ ps.n }}&amp;offset=0&amp;{{ query_suffix }}"
-           hx-target="#target-rows" hx-swap="outerHTML"
-           hx-push-url="/targets?limit={{ ps.n }}&amp;offset=0&amp;{{ query_suffix }}">{{ ps.n }}</a>
-        {% endfor %}
+        <span class="range-tabs">
+          {% for ps in page_sizes %}
+          <a class="range-tabs__btn{% if ps.active %} range-tabs__btn--active{% endif %}"
+             href="/targets?limit={{ ps.n }}&amp;offset=0&amp;{{ query_suffix }}"
+             hx-get="/web/targets/list?limit={{ ps.n }}&amp;offset=0&amp;{{ query_suffix }}"
+             hx-target="#target-rows" hx-swap="outerHTML"
+             hx-push-url="/targets?limit={{ ps.n }}&amp;offset=0&amp;{{ query_suffix }}">{{ ps.n }}</a>
+          {% endfor %}
+        </span>
       </span>
       {% if let Some(prev) = prev_offset %}
-      <a class="row-link"
+      <a class="btn-ghost px-2.5 py-1 text-xs"
          href="/targets?limit={{ limit }}&amp;offset={{ prev }}&amp;{{ query_suffix }}"
          hx-get="/web/targets/list?limit={{ limit }}&amp;offset={{ prev }}&amp;{{ query_suffix }}"
          hx-target="#target-rows" hx-swap="outerHTML"
          hx-push-url="/targets?limit={{ limit }}&amp;offset={{ prev }}&amp;{{ query_suffix }}">← prev</a>
       {% endif %}
       {% if let Some(next) = next_offset %}
-      <a class="row-link ml-3"
+      <a class="btn-ghost px-2.5 py-1 text-xs"
          href="/targets?limit={{ limit }}&amp;offset={{ next }}&amp;{{ query_suffix }}"
          hx-get="/web/targets/list?limit={{ limit }}&amp;offset={{ next }}&amp;{{ query_suffix }}"
          hx-target="#target-rows" hx-swap="outerHTML"
