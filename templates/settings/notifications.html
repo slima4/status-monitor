@@ -12,9 +12,7 @@
       </p>
     </div>
     <a href="/settings/notifications/new"
-       class="sticker-btn sticker-btn--primary px-3 py-1.5 text-sm font-medium">
-      add channel
-    </a>
+       class="sticker-btn sticker-btn--primary px-3 py-1.5 text-sm font-medium">+ channel</a>
   </header>
 
   <div id="channels-list" data-hx-loader
@@ -22,7 +20,7 @@
        hx-trigger="load, every 60s, channels:refresh from:body"
        hx-swap="innerHTML"
        class="sticker-card overflow-hidden">
-    <p class="px-4 py-3 text-sm text-muted">Loading…</p>
+    <p class="px-4 py-3 font-mono text-xs text-quiet"># loading…</p>
   </div>
 
   <script>

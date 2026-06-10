@@ -3,9 +3,12 @@
     if (!form) return;
 
     const isEdit = form.dataset.mode === "edit";
-    const kindSel = form.querySelector("[data-kind]");
     const replaceCb = form.querySelector("[data-replace-config]");
     const configFs = form.querySelector("[data-config]");
+
+    function currentKind() {
+        return form.querySelector("input[name='kind']:checked")?.value || "slack";
+    }
 
     // On edit the secret is never shown; the config inputs stay disabled
     // until the operator opts to replace the whole transport config.
@@ -24,10 +27,12 @@
         });
     }
 
-    showVariant(kindSel.value);
+    showVariant(currentKind());
     syncConfigEnabled();
 
-    kindSel.addEventListener("change", () => showVariant(kindSel.value));
+    form.addEventListener("change", (evt) => {
+        if (evt.target.name === "kind") showVariant(currentKind());
+    });
     if (replaceCb) replaceCb.addEventListener("change", syncConfigEnabled);
 
     const submitBtn = form.querySelector("button[type=submit]");
@@ -44,7 +49,7 @@
 
         const label = submitBtn.textContent;
         submitBtn.disabled = true;
-        submitBtn.textContent = "Saving…";
+        submitBtn.textContent = "saving…";
         let navigating = false;
         try {
             let res;
@@ -85,7 +90,7 @@
         // secret is preserved (the API rejects a re-submitted "***").
         const sendConfig = !isEdit || (replaceCb && replaceCb.checked);
         if (sendConfig) {
-            const kind = kindSel.value;
+            const kind = currentKind();
             if (kind === "slack") {
                 payload.config = {
                     type: "slack",

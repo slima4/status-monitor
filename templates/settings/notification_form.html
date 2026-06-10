@@ -22,21 +22,35 @@
     <div id="form-errors" role="alert" aria-live="polite"
          class="hidden alert-card alert-card--error"></div>
 
-    <fieldset class="sticker-card space-y-5 p-5">
-      <legend class="px-1 text-sm font-medium">Basic</legend>
+    <fieldset class="space-y-3">
+      <legend class="panel-label">channel type</legend>
+      <div class="check-type-cards">
+        <label class="check-type-card" data-kind-card>
+          <input type="radio" name="kind" value="slack"{% if form.kind == "slack" %} checked{% endif %} class="sr-only">
+          <span class="check-type-card__name">slack</span>
+          <span class="check-type-card__desc">incoming webhook</span>
+        </label>
+        <label class="check-type-card" data-kind-card>
+          <input type="radio" name="kind" value="webhook"{% if form.kind == "webhook" %} checked{% endif %} class="sr-only">
+          <span class="check-type-card__name">webhook</span>
+          <span class="check-type-card__desc">POST to your endpoint</span>
+        </label>
+        <label class="check-type-card" data-kind-card>
+          <input type="radio" name="kind" value="telegram"{% if form.kind == "telegram" %} checked{% endif %} class="sr-only">
+          <span class="check-type-card__name">telegram</span>
+          <span class="check-type-card__desc">bot message to a chat</span>
+        </label>
+      </div>
+    </fieldset>
+
+    <fieldset class="sticker-card form-card">
+      <legend>channel</legend>
+      <div class="clear-both space-y-5 p-5">
       <label class="field-outline">
         <span class="field-outline__label">Name</span>
         <input name="name" type="text" required maxlength="100" value="{{ form.name }}"
                autocomplete="off" class="w-full field">
       </label>
-      <div class="field-outline">
-        <span class="field-outline__label">Type</span>
-        <select name="kind" data-kind data-sm-combobox aria-label="Type" class="w-full field">
-          <option value="slack"{% if form.kind == "slack" %} selected{% endif %}>Slack</option>
-          <option value="webhook"{% if form.kind == "webhook" %} selected{% endif %}>Webhook</option>
-          <option value="telegram"{% if form.kind == "telegram" %} selected{% endif %}>Telegram</option>
-        </select>
-      </div>
       <div>
         <label class="inline-flex items-center gap-2">
           <input name="enabled" type="checkbox"{% if form.enabled %} checked{% endif %}>
@@ -44,10 +58,12 @@
         </label>
         <p class="mt-1 text-xs text-muted">When off, the channel is saved but bound monitors don't notify through it.</p>
       </div>
+      </div>
     </fieldset>
 
-    <fieldset class="sticker-card space-y-5 p-5" data-config>
-      <legend class="px-1 text-sm font-medium">Transport</legend>
+    <fieldset class="sticker-card form-card" data-config>
+      <legend>transport</legend>
+      <div class="clear-both space-y-5 p-5">
 
       {% if form.mode != "create" %}
       <div>
@@ -110,15 +126,16 @@
                  autocomplete="off" spellcheck="false" class="w-full field font-mono">
         </label>
       </div>
+      </div>
     </fieldset>
 
     <div class="flex gap-3">
       <button type="submit"
               class="sticker-btn sticker-btn--primary px-4 py-2 text-sm font-medium">
-        {% if form.mode == "create" %}Create{% else %}Save changes{% endif %}
+        {% if form.mode == "create" %}create{% else %}save changes{% endif %}
       </button>
       <a href="/settings/notifications"
-         class="btn-ghost px-4 py-2 text-sm">Cancel</a>
+         class="btn-ghost px-4 py-2 text-sm">cancel</a>
     </div>
   </form>
 </section>

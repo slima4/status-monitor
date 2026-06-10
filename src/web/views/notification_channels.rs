@@ -267,7 +267,7 @@ mod tests {
     #[test]
     fn channels_partial_renders_rows_and_empty_state() {
         let empty = ChannelsPartial { channels: vec![] }.render().unwrap();
-        assert!(empty.contains("No notification channels yet"));
+        assert!(empty.contains("# no channels configured"));
         assert!(!empty.contains("<!doctype html>"));
 
         let html = ChannelsPartial {

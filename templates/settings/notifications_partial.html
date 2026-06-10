@@ -1,11 +1,8 @@
 {% if channels.is_empty() %}
-<div class="flex items-center gap-3 px-4 py-6 text-sm text-muted">
-  <span aria-hidden="true" class="text-base text-quiet">✉</span>
-  <span>No notification channels yet — add one above to start receiving alerts.</span>
-</div>
+<p class="px-4 py-6 font-mono text-xs text-quiet"># no channels configured — add one above to start receiving alerts</p>
 {% else %}
 <table class="w-full text-left text-sm">
-  <thead class="bg-[color:var(--theme-surface-sunk)] text-xs uppercase text-muted">
+  <thead class="table-head bg-[color:var(--theme-surface-sunk)]">
     <tr>
       <th class="px-4 py-2">Name</th>
       <th class="px-4 py-2">Type</th>
@@ -25,9 +22,9 @@
       </td>
       <td class="px-4 py-2 align-top">
         {% if c.enabled %}
-        <span class="status-badge status-badge--up">Enabled</span>
+        <span class="status-badge status-badge--up">enabled</span>
         {% else %}
-        <span class="status-badge status-badge--disabled">Disabled</span>
+        <span class="status-badge status-badge--disabled">disabled</span>
         {% endif %}
       </td>
       <td class="px-4 py-2 align-top text-body tabular-nums"><time datetime="{{ c.created|iso_ts }}" data-tz="exact">{{ c.created|human_ts }}</time></td>
@@ -39,9 +36,9 @@
                   hx-headers='{"X-Requested-With":"uptimepage"}'
                   hx-swap="none"
                   hx-on::after-request="window.smChannelTestResult(this, event)"
-                  class="row-link">Send test</button>
+                  class="row-link">send test</button>
           <a href="/settings/notifications/{{ c.id }}/edit"
-             class="row-link">Edit</a>
+             class="row-link">edit</a>
           <button type="button"
                   hx-delete="/api/v1/notification-channels/{{ c.id }}"
                   hx-headers='{"X-Requested-With":"uptimepage"}'
@@ -49,9 +46,9 @@
                   data-confirm-modal
                   data-confirm-title="Delete notification channel?"
                   data-confirm-body="Monitors bound to {{ c.name }} stop alerting through it. Channel can be re-added later but bindings must be re-applied."
-                  data-confirm-label="Delete channel"
+                  data-confirm-label="delete channel"
                   data-confirm-danger
-                  class="row-link row-link--danger">Delete</button>
+                  class="row-link row-link--danger">delete</button>
         </div>
       </td>
     </tr>
