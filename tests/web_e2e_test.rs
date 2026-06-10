@@ -142,8 +142,8 @@ async fn new_target_form_renders_create_mode() {
     assert!(html.contains(r#"data-mode="create""#));
     assert!(html.contains(r#"data-auth-field="basic""#));
     assert!(html.contains(r#"data-initial-mode="create""#));
-    assert!(html.contains("Set credentials"));
-    assert!(html.contains("Set token"));
+    assert!(html.contains("set credentials"));
+    assert!(html.contains("set token"));
 }
 
 #[tokio::test]
@@ -166,8 +166,8 @@ async fn edit_form_shows_redacted_auth_state_for_existing_target() {
     assert!(html.contains(r#"data-method="PATCH""#));
     assert!(html.contains(r#"data-mode="edit""#));
     assert!(html.contains(r#"data-initial-mode="redacted""#));
-    assert!(html.contains("Replace credentials"));
-    assert!(html.contains("Replace token"));
+    assert!(html.contains("replace credentials"));
+    assert!(html.contains("replace token"));
     // Real values must NEVER appear in the HTML; only the sentinel does.
     assert!(!html.contains("s3cret"));
     assert!(!html.contains("tok-abc"));

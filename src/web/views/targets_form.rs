@@ -269,6 +269,25 @@ pub struct ConfirmationChoice {
     pub selected: bool,
 }
 
+/// One preset in the check-interval rail. `secs` is submitted verbatim.
+pub struct IntervalChoice {
+    pub secs: u64,
+    pub label: String,
+    pub selected: bool,
+}
+
+/// Exact single-unit label (`90s`, `5m`, `24h`) — rail tokens must round-trip
+/// the stored value, so the lossy two-unit `HumanDur` is the wrong tool here.
+fn interval_label(secs: u64) -> String {
+    if secs % 3_600 == 0 {
+        format!("{}h", secs / 3_600)
+    } else if secs % 60 == 0 {
+        format!("{}m", secs / 60)
+    } else {
+        format!("{secs}s")
+    }
+}
+
 impl FormModel {
     /// Confirmation-count presets; an off-preset stored value is preserved as its own option.
     pub fn confirmation_options(&self) -> Vec<ConfirmationChoice> {
@@ -281,28 +300,88 @@ impl FormModel {
             .into_iter()
             .map(|value| ConfirmationChoice {
                 value,
-                label: value.to_string(),
+                label: if value == 1 {
+                    "1 fail".to_string()
+                } else {
+                    format!("{value} fails")
+                },
                 selected: value == self.alert_confirmations,
             })
             .collect()
     }
 
-    /// Reminder-cadence presets with the monitor's current interval selected.
-    pub fn renotify_options(&self) -> Vec<RenotifyChoice> {
-        const PRESETS: [(u32, &str); 6] = [
-            (0, "Off"),
-            (900, "Every 15 minutes"),
-            (1800, "Every 30 minutes"),
-            (3600, "Every hour"),
-            (7200, "Every 2 hours"),
-            (21600, "Every 6 hours"),
-        ];
-        PRESETS
+    /// Whether the selected kind sits on the slow cadence group (the API
+    /// enforces an hourly floor for certificate / registration expiry).
+    pub fn slow_kind(&self) -> bool {
+        crate::domain::min_interval_secs_for_kind(self.check_type) >= 3_600
+    }
+
+    /// Per-kind interval floors as a JSON object, mirrored to the client so
+    /// the form validates against the same numbers the API enforces.
+    pub fn kind_floors_json(&self) -> String {
+        let floors: serde_json::Map<String, serde_json::Value> =
+            ["http", "tcp", "dns", "tls_cert", "domain_expiry"]
+                .iter()
+                .map(|k| {
+                    (
+                        (*k).to_string(),
+                        crate::domain::min_interval_secs_for_kind(k).into(),
+                    )
+                })
+                .collect();
+        serde_json::Value::Object(floors).to_string()
+    }
+
+    /// Check-interval presets for http/tcp/dns, filtered by the plan floor.
+    pub fn interval_options_fast(&self) -> Vec<IntervalChoice> {
+        self.interval_group(&[30, 60, 120, 300, 600, 900, 1_800, 3_600], !self.slow_kind())
+    }
+
+    /// Check-interval presets for tls_cert/domain_expiry.
+    pub fn interval_options_slow(&self) -> Vec<IntervalChoice> {
+        self.interval_group(&[3_600, 21_600, 43_200, 86_400], self.slow_kind())
+    }
+
+    /// An off-preset stored value is preserved as its own option in the
+    /// active group, so editing an API-created monitor keeps its cadence.
+    fn interval_group(&self, presets: &[u64], active: bool) -> Vec<IntervalChoice> {
+        let mut values: Vec<u64> = presets
             .iter()
-            .map(|(secs, label)| RenotifyChoice {
-                secs: *secs,
-                label: (*label).to_string(),
-                selected: *secs == self.renotify_interval_secs,
+            .copied()
+            .filter(|s| *s >= self.min_interval_s)
+            .collect();
+        if active && !values.contains(&self.interval_s) {
+            values.push(self.interval_s);
+            values.sort_unstable();
+        }
+        values
+            .into_iter()
+            .map(|secs| IntervalChoice {
+                secs,
+                label: interval_label(secs),
+                selected: active && secs == self.interval_s,
+            })
+            .collect()
+    }
+
+    /// Reminder-cadence presets with the monitor's current interval selected;
+    /// an off-preset stored value is preserved as its own option.
+    pub fn renotify_options(&self) -> Vec<RenotifyChoice> {
+        let mut values: Vec<u32> = vec![0, 900, 1_800, 3_600, 7_200, 21_600];
+        if !values.contains(&self.renotify_interval_secs) {
+            values.push(self.renotify_interval_secs);
+            values.sort_unstable();
+        }
+        values
+            .into_iter()
+            .map(|secs| RenotifyChoice {
+                secs,
+                label: if secs == 0 {
+                    "off".to_string()
+                } else {
+                    interval_label(u64::from(secs))
+                },
+                selected: secs == self.renotify_interval_secs,
             })
             .collect()
     }
@@ -856,10 +935,27 @@ mod tests {
         .unwrap();
         // Client mirror of the API floor (no hardcoded 60 in the markup).
         assert!(html.contains(r#"data-min-interval="60""#));
-        assert!(html.contains(r#"min="60""#));
-        // Expanded preset range, smallest to largest.
-        assert!(html.contains(r#"data-interval-preset="60""#));
-        assert!(html.contains(r#"data-interval-preset="3600""#));
+        // The plan floor drops the 30s preset from the fast rail.
+        assert!(!html.contains(r#"name="interval_s" value="30""#));
+        assert!(html.contains(r#"name="interval_s" value="60" class="sr-only" checked"#));
+        // Both cadence rails render; the slow one starts hidden on http.
+        assert!(html.contains(r#"data-interval-rail="fast""#));
+        assert!(html.contains(r#"data-interval-rail="slow" hidden"#));
+        assert!(html.contains(r#"name="interval_s" value="86400""#));
+    }
+
+    #[test]
+    fn off_preset_interval_is_preserved_as_an_option() {
+        let mut form = empty_create_form();
+        form.interval_s = 90;
+        let html = FormPage {
+            active_tab: "targets",
+            form,
+        }
+        .render()
+        .unwrap();
+        assert!(html.contains(r#"name="interval_s" value="90" class="sr-only" checked"#));
+        assert!(html.contains("90s"));
     }
 
     #[test]
@@ -910,8 +1006,8 @@ mod tests {
         };
         let html = page.render().unwrap();
         assert!(html.contains(r#"data-initial-mode="redacted""#));
-        assert!(html.contains("Replace credentials"));
-        assert!(html.contains("Replace token"));
+        assert!(html.contains("replace credentials"));
+        assert!(html.contains("replace token"));
     }
 
     #[test]
@@ -1105,7 +1201,7 @@ mod tests {
         .unwrap();
         assert!(html.contains("data-monitor-policy-select"));
         assert!(html.contains(r#"data-target-id="00000000-0000-0000-0000-000000000001""#));
-        assert!(html.contains("— inherit org default —"));
+        assert!(html.contains("inherit org default"));
         assert!(html.contains(r#"value="p1" selected"#));
     }
 

@@ -28,6 +28,16 @@ impl CheckSpec {
     }
 }
 
+/// Per-kind check-interval floor: expiry state (tls_cert / domain_expiry)
+/// moves slowly, so those probes are hourly at minimum. The API validates
+/// against it and the monitor form surfaces it to the client.
+pub fn min_interval_secs_for_kind(kind: &str) -> u64 {
+    match kind {
+        "tls_cert" | "domain_expiry" => 3_600,
+        _ => 10,
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum HttpMethod {

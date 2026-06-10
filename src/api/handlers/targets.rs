@@ -19,7 +19,8 @@ use crate::api::types::{
 use crate::app::AppState;
 use crate::auth::scope::Scope;
 use crate::domain::{
-    CheckResult, NewTarget, OrgId, RegionIncidentPolicy, Target, TargetAlerts, TargetUpdate,
+    min_interval_secs_for_kind, CheckResult, NewTarget, OrgId, RegionIncidentPolicy, Target,
+    TargetAlerts, TargetUpdate,
 };
 use crate::error::{AppError, Result};
 use crate::security::SsrfGuard;
@@ -847,13 +848,6 @@ fn check_abuse(state: &AppState, org: OrgId, check: &crate::domain::CheckSpec) -
 /// requested interval at or above this is guaranteed to clear every kind
 /// floor and lets the PATCH path skip the existing-target read.
 const MAX_KIND_FLOOR_SECS: i64 = 3_600;
-
-fn min_interval_secs_for_kind(kind: &str) -> u64 {
-    match kind {
-        "tls_cert" | "domain_expiry" => 3_600,
-        _ => 10,
-    }
-}
 
 /// Per-resource validation, including the plan's check-interval floor. Both
 /// `create` and `bulk_create` run this per item, so the floor is enforced by

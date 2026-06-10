@@ -1301,6 +1301,14 @@
         outline: 1px dotted currentColor;
         outline-offset: 2px;
     }
+    /* `--key:` flag label for console sub-group headings. */
+    .flag-label {
+        @apply font-mono text-xs;
+        color: var(--theme-text-muted);
+    }
+    .flag-label::before { content: "--"; color: var(--theme-text-quiet); }
+    .flag-label::after { content: ":"; color: var(--theme-text-quiet); }
+
     .scope-grid__note {
         grid-column: 1 / -1;
         margin-top: 0.25rem;
@@ -2077,6 +2085,19 @@
     /* Status dot on the mascot — a calm breathing pulse, not a flash. */
     .sm-pulse { animation: sm-pulse 2.4s ease-in-out infinite; transform-origin: center; }
 
+    /* Form section card: a sticker-card fieldset (stack the classes) whose
+       legend renders as the sunk header band (float pulls the legend out of
+       the border gap; the body div clears it). */
+    .form-card {
+        @apply overflow-hidden;
+    }
+    .form-card > legend {
+        @apply float-left w-full border-b px-5 py-2.5 text-xs font-semibold uppercase tracking-wide;
+        border-color: var(--theme-line);
+        background: var(--theme-surface-sunk);
+        color: var(--theme-text-muted);
+    }
+
     /* Check-type chooser: 5 cards at the top of /targets/new and edit.
        Hides the radio (visual selection comes from :has(input:checked)). */
     .check-type-cards { @apply grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5; }
@@ -2091,10 +2112,21 @@
         border-color: var(--theme-ink);
     }
     .check-type-card:has(input:checked) {
-        background: var(--theme-surface-sunk);
-        border-color: var(--theme-accent);
+        background: var(--theme-ink);
+        border-color: var(--theme-ink);
+        color: var(--theme-surface);
     }
-    .check-type-card:focus-within { @apply outline-none ring-2 ring-offset-2; --tw-ring-color: var(--theme-accent); }
+    .check-type-card:has(input:checked) .check-type-card__name {
+        color: var(--theme-surface);
+    }
+    .check-type-card:has(input:checked) .check-type-card__desc {
+        color: var(--theme-surface);
+        opacity: 0.7;
+    }
+    .check-type-card:has(input:focus-visible) {
+        outline: 1px dotted currentColor;
+        outline-offset: -3px;
+    }
     .check-type-card__name {
         @apply text-sm font-semibold;
         color: var(--theme-text);
@@ -2103,18 +2135,6 @@
         @apply text-xs;
         color: var(--theme-text-muted);
     }
-
-    /* Compact single-select segmented control (sr-only radio + label). */
-    .seg { @apply inline-flex flex-wrap gap-1; }
-    .seg-option {
-        @apply cursor-pointer rounded-sm border px-3 py-1.5 text-sm transition;
-        background: var(--theme-surface-elev);
-        border-color: var(--theme-line);
-        font-family: var(--font-mono);
-    }
-    .seg-option:hover { background: var(--theme-surface-sunk); border-color: var(--theme-ink); }
-    .seg-option:has(input:checked) { background: var(--theme-surface-sunk); border-color: var(--theme-accent); }
-    .seg-option:focus-within { @apply outline-none ring-2 ring-offset-2; --tw-ring-color: var(--theme-accent); }
 
     /* Tag chip input. Container is a flex-wrap; the input grows to fill the
        trailing free space so typing always lands inside the same row. */
@@ -2126,13 +2146,14 @@
     }
     .tag-chips:focus-within { border-color: var(--theme-text-quiet); }
     .tag-chip {
-        @apply inline-flex items-center gap-1 rounded-full border-2 px-2 py-0.5 text-xs;
+        @apply inline-flex items-center gap-1 rounded-sm border px-2 py-0.5 text-xs;
         background: var(--theme-surface-sunk);
         border-color: var(--theme-line);
         color: var(--theme-text);
+        font-family: var(--font-mono);
     }
     .tag-chip__remove {
-        @apply inline-flex h-4 w-4 items-center justify-center rounded-full;
+        @apply inline-flex h-4 w-4 items-center justify-center rounded-sm;
         color: var(--theme-text-muted);
     }
     .tag-chip__remove:hover {
@@ -2143,17 +2164,28 @@
         @apply min-w-[8rem] flex-1 border-0 bg-transparent px-1 text-sm outline-none;
         color: var(--theme-text);
     }
+    /* Mirrors the sm-combobox panel/option register. */
     .tag-suggestions {
-        @apply absolute left-0 top-full z-10 mt-1 max-h-56 w-full overflow-auto rounded-sm border p-1 text-sm shadow;
+        @apply absolute left-0 top-full z-10 mt-1 max-h-56 w-full overflow-auto;
+        padding: 0.25rem;
         background: var(--theme-surface-elev);
-        border-color: var(--theme-line);
+        border: 1px solid var(--theme-line);
+        border-radius: 2px;
+        font-family: var(--font-mono);
+        font-size: 0.8125rem;
     }
     .tag-suggestions li {
-        @apply cursor-pointer rounded px-2 py-1;
         color: var(--theme-text);
+        padding: 0.4rem 0.6rem;
+        border-radius: 2px;
+        cursor: pointer;
+        transition: background-color 120ms ease, color 120ms ease;
     }
     .tag-suggestions li:hover,
-    .tag-suggestions li[aria-selected="true"] { background: var(--theme-surface-sunk); }
+    .tag-suggestions li[aria-selected="true"] {
+        background: var(--theme-surface-sunk);
+        color: var(--theme-accent);
+    }
 
     /* Verbose test-check inline result. Same alert-card depth but with
        slots for status pill, latency, headers, body snippet. */
@@ -2515,7 +2547,7 @@
         cursor: pointer;
         transition: background-color 120ms ease, color 120ms ease;
     }
-    .sm-rail__seg:not(.sm-rail__seg--active):hover {
+    .sm-rail__seg:not(.sm-rail__seg--active):not(:has(input:checked)):hover {
         background: var(--theme-surface-sunk);
         color: var(--theme-accent);
     }

@@ -13,34 +13,44 @@
 
     const PROTOCOL_VARIANTS = ["http", "tcp", "dns", "tls_cert", "domain_expiry"];
 
-    const DEFAULT_INTERVAL = {
-        http: 60, tcp: 60, dns: 60, tls_cert: 86400, domain_expiry: 86400,
-    };
-    const KIND_MIN_INTERVAL = {
-        http: 10, tcp: 10, dns: 10, tls_cert: 3600, domain_expiry: 3600,
-    };
+    // Per-kind interval floors, mirrored from the API via data-kind-floors —
+    // the slow/fast rail split and defaults all derive from them.
+    let KIND_MIN_INTERVAL = {};
+    try {
+        KIND_MIN_INTERVAL = JSON.parse(form.dataset.kindFloors || "{}");
+    } catch { /* validation falls back to the plan floor */ }
+    const kindFloor = (kind) => KIND_MIN_INTERVAL[kind] || 10;
+    const isSlowKind = (kind) => kindFloor(kind) >= 3600;
 
-    const intervalInput = document.getElementById("interval_s");
-    if (intervalInput) {
-        if (form.dataset.mode !== "create") {
-            intervalInput.dataset.userTouched = "1";
-        }
-        intervalInput.addEventListener("input", () => {
-            intervalInput.dataset.userTouched = "1";
-        });
-    }
+    // Remember each rail's last cadence so switching kinds back restores it
+    // (checking a radio in one rail auto-unchecks the other's — shared name).
+    form.querySelectorAll("[data-interval-rail]").forEach((rail) => {
+        const cur = rail.querySelector("input[name='interval_s']:checked");
+        if (cur) rail.dataset.last = cur.value;
+    });
 
     function applyKindIntervalDefaults(kind) {
-        if (!intervalInput) return;
-        const planMin = Number(form.dataset.minInterval) || 60;
-        const effectiveMin = Math.max(planMin, KIND_MIN_INTERVAL[kind] || 10);
-        intervalInput.min = String(effectiveMin);
-        if (intervalInput.dataset.userTouched !== "1") {
-            intervalInput.value = String(Math.max(effectiveMin, DEFAULT_INTERVAL[kind] || 60));
-        }
+        const want = isSlowKind(kind) ? "slow" : "fast";
+        let active = null;
+        form.querySelectorAll("[data-interval-rail]").forEach((rail) => {
+            const on = rail.dataset.intervalRail === want;
+            rail.hidden = !on;
+            if (on) active = rail;
+        });
+        if (!active || active.querySelector("input[name='interval_s']:checked")) return;
+        const pick = (v) => active.querySelector(`input[name='interval_s'][value='${v}']`);
+        const def = pick(active.dataset.last)
+            || pick(isSlowKind(kind) ? 86400 : 60)
+            || active.querySelector("input[name='interval_s']");
+        if (def) def.checked = true;
     }
 
     form.addEventListener("change", (evt) => {
+        if (evt.target.name === "interval_s") {
+            const rail = evt.target.closest("[data-interval-rail]");
+            if (rail) rail.dataset.last = evt.target.value;
+            return;
+        }
         if (evt.target.name !== "check_type") return;
         const want = evt.target.value;
         document.querySelectorAll("[data-variant]").forEach(el => {
@@ -58,16 +68,6 @@
     applyKindIntervalDefaults(initialKind);
 
     form.addEventListener("click", (evt) => {
-        const preset = evt.target.closest("[data-interval-preset]");
-        if (preset) {
-            const input = document.getElementById("interval_s");
-            if (input) {
-                input.value = preset.dataset.intervalPreset;
-                input.dataset.userTouched = "1";
-                input.focus({ preventScroll: true });
-            }
-            return;
-        }
         const testBtn = evt.target.closest("[data-test-now]");
         if (testBtn) {
             handleTestNow(testBtn);
@@ -369,14 +369,14 @@
         const confEl = form.querySelector("input[name='alert_confirmations']:checked");
         const confirmations = confEl ? parseInt(confEl.value, 10) : 2;
         if (!Number.isInteger(confirmations) || confirmations < 1) {
-            return { error: "Confirmations before alerting must be a whole number ≥ 1." };
+            return { error: "Open incident after must be a whole number of failed checks (≥ 1)." };
         }
         const recoveryEl = form.querySelector("[data-notify-recovery]");
-        const renotifyEl = form.querySelector("[data-renotify-secs]");
+        const renotifyEl = form.querySelector("[data-renotify-secs] input:checked");
 
         const planMin = Number(form.dataset.minInterval) || 60;
         const kind = data.get("check_type") || "http";
-        const minInterval = Math.max(planMin, KIND_MIN_INTERVAL[kind] || 10);
+        const minInterval = Math.max(planMin, kindFloor(kind));
         const interval = parseInt(data.get("interval_s"), 10);
         if (!Number.isInteger(interval) || interval < minInterval) {
             return { error: `Check interval must be at least ${minInterval} seconds.` };
@@ -392,9 +392,11 @@
             check,
             alerts,
             alert_confirmations: confirmations,
-            notify_recovery: recoveryEl ? recoveryEl.checked : true,
-            renotify_interval_secs: renotifyEl ? parseInt(renotifyEl.value, 10) || 0 : 3600,
         };
+        // Absent with zero channels: create takes the server defaults,
+        // edit (partial PATCH) keeps the stored values.
+        if (recoveryEl) payload.notify_recovery = recoveryEl.checked;
+        if (renotifyEl) payload.renotify_interval_secs = parseInt(renotifyEl.value, 10) || 0;
         payload.group_name = groupRaw === "" ? null : groupRaw;
         payload.owner_user_id = ownerRaw === "" ? null : ownerRaw;
         return { payload };

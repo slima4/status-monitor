@@ -17,6 +17,7 @@
         data-method="{{ form.submit_method }}"
         data-mode="{{ form.mode }}"
         data-min-interval="{{ form.min_interval_s }}"
+        data-kind-floors="{{ form.kind_floors_json() }}"
         novalidate
         class="space-y-6">
 
@@ -24,39 +25,40 @@
          class="hidden alert-card alert-card--error"></div>
 
     <fieldset class="space-y-3">
-      <legend class="px-1 text-sm font-medium">What do you want to check?</legend>
+      <legend class="panel-label">check type</legend>
       <div class="check-type-cards">
         <label class="check-type-card" data-check-card>
           <input type="radio" name="check_type" value="http"{% if form.check_type == "http" %} checked{% endif %} class="sr-only">
-          <span class="check-type-card__name">HTTP</span>
+          <span class="check-type-card__name">http</span>
           <span class="check-type-card__desc">URL / API endpoint</span>
         </label>
         <label class="check-type-card" data-check-card>
           <input type="radio" name="check_type" value="tcp"{% if form.check_type == "tcp" %} checked{% endif %} class="sr-only">
-          <span class="check-type-card__name">TCP</span>
+          <span class="check-type-card__name">tcp</span>
           <span class="check-type-card__desc">host : port reachable</span>
         </label>
         <label class="check-type-card" data-check-card>
           <input type="radio" name="check_type" value="dns"{% if form.check_type == "dns" %} checked{% endif %} class="sr-only">
-          <span class="check-type-card__name">DNS</span>
+          <span class="check-type-card__name">dns</span>
           <span class="check-type-card__desc">record resolves</span>
         </label>
         <label class="check-type-card" data-check-card>
           <input type="radio" name="check_type" value="tls_cert"{% if form.check_type == "tls_cert" %} checked{% endif %} class="sr-only">
-          <span class="check-type-card__name">TLS cert</span>
+          <span class="check-type-card__name">tls cert</span>
           <span class="check-type-card__desc">expiry + chain</span>
         </label>
         <label class="check-type-card" data-check-card>
           <input type="radio" name="check_type" value="domain_expiry"{% if form.check_type == "domain_expiry" %} checked{% endif %} class="sr-only">
-          <span class="check-type-card__name">Domain</span>
+          <span class="check-type-card__name">domain</span>
           <span class="check-type-card__desc">registration expiry</span>
         </label>
       </div>
     </fieldset>
 
     <fieldset data-variant="http"
-              class="space-y-5 sticker-card p-5{% if form.check_type != "http" %} hidden{% endif %}">
-      <legend class="px-1 text-sm font-medium">HTTP check</legend>
+              class="sticker-card form-card{% if form.check_type != "http" %} hidden{% endif %}">
+      <legend>http check</legend>
+      <div class="clear-both space-y-5 p-5">
       <p class="mb-5 text-xs text-muted">
         Some third-party APIs rate-limit by source IP (GitHub: 60 req/h unauthenticated, 5&nbsp;000 with a token).
         For those, poll every 5+ min and supply the credential via the Bearer-token field in Advanced HTTP.
@@ -80,16 +82,18 @@
       <div class="flex flex-wrap items-center gap-3 pt-1">
         <button type="button" data-test-now aria-describedby="test-hint-http"
                 class="sticker-btn sticker-btn--accent px-4 py-2 text-sm font-medium inline-flex items-center gap-1.5">
-          <span aria-hidden="true">▶</span> Test now
+          <span aria-hidden="true">▶</span> test now
         </button>
         <span id="test-hint-http" class="text-xs text-muted">Runs the check once without saving.</span>
       </div>
       <div data-test-result class="hidden"></div>
+      </div>
     </fieldset>
 
     <fieldset data-variant="tcp"
-              class="space-y-5 sticker-card p-5{% if form.check_type != "tcp" %} hidden{% endif %}">
-      <legend class="px-1 text-sm font-medium">TCP check</legend>
+              class="sticker-card form-card{% if form.check_type != "tcp" %} hidden{% endif %}">
+      <legend>tcp check</legend>
+      <div class="clear-both space-y-5 p-5">
       <p class="mb-5 text-xs text-muted">
         Opens a TCP connection to host:port; a refused or timed-out connection fails the check.
       </p>
@@ -114,16 +118,18 @@
       <div class="flex flex-wrap items-center gap-3 pt-1">
         <button type="button" data-test-now aria-describedby="test-hint-tcp"
                 class="sticker-btn sticker-btn--accent px-4 py-2 text-sm font-medium inline-flex items-center gap-1.5">
-          <span aria-hidden="true">▶</span> Test now
+          <span aria-hidden="true">▶</span> test now
         </button>
         <span id="test-hint-tcp" class="text-xs text-muted">Runs the check once without saving.</span>
       </div>
       <div data-test-result class="hidden"></div>
+      </div>
     </fieldset>
 
     <fieldset data-variant="dns"
-              class="space-y-5 sticker-card p-5{% if form.check_type != "dns" %} hidden{% endif %}">
-      <legend class="px-1 text-sm font-medium">DNS check</legend>
+              class="sticker-card form-card{% if form.check_type != "dns" %} hidden{% endif %}">
+      <legend>dns check</legend>
+      <div class="clear-both space-y-5 p-5">
       <p class="mb-5 text-xs text-muted">
         Resolves a record and (optionally) asserts a substring appears in
         the answer. NXDOMAIN or an empty answer set fails the check.
@@ -174,16 +180,18 @@
       <div class="flex flex-wrap items-center gap-3 pt-1">
         <button type="button" data-test-now aria-describedby="test-hint-dns"
                 class="sticker-btn sticker-btn--accent px-4 py-2 text-sm font-medium inline-flex items-center gap-1.5">
-          <span aria-hidden="true">▶</span> Test now
+          <span aria-hidden="true">▶</span> test now
         </button>
         <span id="test-hint-dns" class="text-xs text-muted">Runs the check once without saving.</span>
       </div>
       <div data-test-result class="hidden"></div>
+      </div>
     </fieldset>
 
     <fieldset data-variant="tls_cert"
-              class="space-y-5 sticker-card p-5{% if form.check_type != "tls_cert" %} hidden{% endif %}">
-      <legend class="px-1 text-sm font-medium">TLS certificate check</legend>
+              class="sticker-card form-card{% if form.check_type != "tls_cert" %} hidden{% endif %}">
+      <legend>tls certificate check</legend>
+      <div class="clear-both space-y-5 p-5">
       <p class="mb-5 text-xs text-muted">
         Connects to host:port, fetches the served certificate, and warns
         before expiry. Degraded under <code>warn_days</code>, Down under
@@ -207,7 +215,7 @@
                placeholder="vhost.example.com" autocomplete="off" spellcheck="false" class="w-full field font-mono">
       </label>
       <fieldset class="space-y-2 rounded-sm border border-[color:var(--theme-line)] p-3">
-        <legend class="px-1 text-xs text-muted">Expiry thresholds</legend>
+        <legend class="px-1 text-xs text-muted">expiry thresholds</legend>
         <div class="grid grid-cols-3 gap-3">
           <label class="field-outline">
             <span class="field-outline__label">Warn after (days &lt;)</span>
@@ -229,16 +237,18 @@
       <div class="flex flex-wrap items-center gap-3 pt-1">
         <button type="button" data-test-now aria-describedby="test-hint-tls"
                 class="sticker-btn sticker-btn--accent px-4 py-2 text-sm font-medium inline-flex items-center gap-1.5">
-          <span aria-hidden="true">▶</span> Test now
+          <span aria-hidden="true">▶</span> test now
         </button>
         <span id="test-hint-tls" class="text-xs text-muted">Runs the check once without saving.</span>
       </div>
       <div data-test-result class="hidden"></div>
+      </div>
     </fieldset>
 
     <fieldset data-variant="domain_expiry"
-              class="space-y-5 sticker-card p-5{% if form.check_type != "domain_expiry" %} hidden{% endif %}">
-      <legend class="px-1 text-sm font-medium">Domain expiry check</legend>
+              class="sticker-card form-card{% if form.check_type != "domain_expiry" %} hidden{% endif %}">
+      <legend>domain expiry check</legend>
+      <div class="clear-both space-y-5 p-5">
       <p class="mb-5 text-xs text-muted">
         Queries the WHOIS / RDAP record for the apex domain and warns
         ahead of registration expiry.
@@ -249,7 +259,7 @@
                placeholder="example.com" autocomplete="off" spellcheck="false" class="w-full field font-mono">
       </label>
       <fieldset class="space-y-2 rounded-sm border border-[color:var(--theme-line)] p-3">
-        <legend class="px-1 text-xs text-muted">Expiry thresholds</legend>
+        <legend class="px-1 text-xs text-muted">expiry thresholds</legend>
         <div class="grid grid-cols-3 gap-3">
           <label class="field-outline">
             <span class="field-outline__label">Warn after (days &lt;)</span>
@@ -271,57 +281,59 @@
       <div class="flex flex-wrap items-center gap-3 pt-1">
         <button type="button" data-test-now aria-describedby="test-hint-domain"
                 class="sticker-btn sticker-btn--accent px-4 py-2 text-sm font-medium inline-flex items-center gap-1.5">
-          <span aria-hidden="true">▶</span> Test now
+          <span aria-hidden="true">▶</span> test now
         </button>
         <span id="test-hint-domain" class="text-xs text-muted">Runs the check once without saving.</span>
       </div>
       <div data-test-result class="hidden"></div>
+      </div>
     </fieldset>
 
-    <fieldset class="space-y-5 sticker-card p-5">
-      <legend class="px-1 text-sm font-medium">Name &amp; schedule</legend>
+    <fieldset class="sticker-card form-card">
+      <legend>name &amp; schedule</legend>
+      <div class="clear-both space-y-5 p-5">
       <label class="field-outline">
         <span class="field-outline__label">Name</span>
         <input name="name" type="text" required value="{{ form.name }}"
                autocomplete="off" class="w-full field">
       </label>
       <div class="block">
-        <div class="flex flex-wrap items-center gap-1.5">
-          <label class="field-outline">
-            <span class="field-outline__label">Check interval</span>
-            <input id="interval_s" name="interval_s" type="number"
-                   min="{{ form.min_interval_s }}" step="10" required
-                   value="{{ form.interval_s }}"
-                   class="w-32 field">
-          </label>
-          <span class="text-xs text-muted">sec</span>
-          <span class="ml-2 flex flex-wrap gap-1" role="group" aria-label="Interval presets">
-            <button type="button" data-interval-preset="60" aria-label="Every 1 minute"
-                    class="rounded border px-2 py-1 text-xs hover:bg-[color:var(--theme-surface-sunk)]">1m</button>
-            <button type="button" data-interval-preset="120" aria-label="Every 2 minutes"
-                    class="rounded border px-2 py-1 text-xs hover:bg-[color:var(--theme-surface-sunk)]">2m</button>
-            <button type="button" data-interval-preset="300" aria-label="Every 5 minutes"
-                    class="rounded border px-2 py-1 text-xs hover:bg-[color:var(--theme-surface-sunk)]">5m</button>
-            <button type="button" data-interval-preset="600" aria-label="Every 10 minutes"
-                    class="rounded border px-2 py-1 text-xs hover:bg-[color:var(--theme-surface-sunk)]">10m</button>
-            <button type="button" data-interval-preset="900" aria-label="Every 15 minutes"
-                    class="rounded border px-2 py-1 text-xs hover:bg-[color:var(--theme-surface-sunk)]">15m</button>
-            <button type="button" data-interval-preset="1800" aria-label="Every 30 minutes"
-                    class="rounded border px-2 py-1 text-xs hover:bg-[color:var(--theme-surface-sunk)]">30m</button>
-            <button type="button" data-interval-preset="3600" aria-label="Every hour"
-                    class="rounded border px-2 py-1 text-xs hover:bg-[color:var(--theme-surface-sunk)]">1h</button>
-          </span>
+        <span class="mb-1.5 block text-xs text-muted">Check interval</span>
+        <div data-interval-rail="fast"{% if form.slow_kind() %} hidden{% endif %}>
+          <div class="sm-rail" role="radiogroup" aria-label="Check interval">
+            {% for o in form.interval_options_fast() %}
+            <label class="sm-rail__seg">
+              <input type="radio" name="interval_s" value="{{ o.secs }}" class="sr-only"{% if o.selected %} checked{% endif %}>
+              {{ o.label }}
+            </label>
+            {% endfor %}
+          </div>
+          <p class="mt-1 text-xs text-muted">
+            1–5&nbsp;min for critical production, 10–15&nbsp;min for internal
+            services, 30&nbsp;min–1&nbsp;h for low-priority or many monitors.
+          </p>
         </div>
-        <p class="mt-1 text-xs text-muted">
-          Minimum {{ form.min_interval_s }}s — faster checks are rejected.
-          1–5&nbsp;min for critical production, 10–15&nbsp;min for internal
-          services, 30&nbsp;min–1&nbsp;h for low-priority or many monitors.
-        </p>
+        <div data-interval-rail="slow"{% if !form.slow_kind() %} hidden{% endif %}>
+          <div class="sm-rail" role="radiogroup" aria-label="Check interval">
+            {% for o in form.interval_options_slow() %}
+            <label class="sm-rail__seg">
+              <input type="radio" name="interval_s" value="{{ o.secs }}" class="sr-only"{% if o.selected %} checked{% endif %}>
+              {{ o.label }}
+            </label>
+            {% endfor %}
+          </div>
+          <p class="mt-1 text-xs text-muted">
+            Certificate and registration expiry move slowly — daily is plenty
+            for most; hourly when an expiry is close.
+          </p>
+        </div>
+      </div>
       </div>
     </fieldset>
 
-    <fieldset class="space-y-5 sticker-card p-5">
-      <legend class="px-1 text-sm font-medium">Organize</legend>
+    <fieldset class="sticker-card form-card">
+      <legend>organize</legend>
+      <div class="clear-both space-y-5 p-5">
       <div>
         <label class="inline-flex items-center gap-2">
           <input name="enabled" type="checkbox"{% if form.enabled %} checked{% endif %}>
@@ -363,75 +375,86 @@
           <p class="mt-1 text-xs text-muted">Team member who owns this monitor.</p>
         </div>
       </div>
+      </div>
     </fieldset>
 
-    <fieldset class="space-y-2 sticker-card px-5 py-3{% if form.check_type != "http" %} hidden{% endif %}"
+    <fieldset class="sticker-card form-card{% if form.check_type != "http" %} hidden{% endif %}"
               data-variant="http-advanced" data-collapsible>
-      <legend class="px-1">
+      <legend>
         <button type="button" data-collapse-toggle aria-expanded="false"
                 aria-controls="advanced-http-body" aria-describedby="advanced-http-hint"
-                class="group inline-flex cursor-pointer items-center gap-1.5 border-0 bg-transparent p-0 text-sm font-medium text-body">
-          Advanced HTTP
+                class="group inline-flex cursor-pointer items-center gap-1.5 border-0 bg-transparent p-0">
+          advanced http
           <span data-collapse-chevron aria-hidden="true"
-                class="text-base text-muted transition-transform group-hover:text-body motion-reduce:transition-none">▾</span>
+                class="text-base transition-transform group-hover:text-body motion-reduce:transition-none">▾</span>
         </button>
       </legend>
+      <div class="clear-both space-y-2 px-5 py-3">
       <button type="button" data-collapse-toggle tabindex="-1" aria-hidden="true"
               class="group block w-full cursor-pointer border-0 bg-transparent p-0 text-left">
-        <span id="advanced-http-hint" data-collapse-hint class="text-xs text-muted group-hover:text-body">Method, headers, body, auth, TLS</span>
+        <span id="advanced-http-hint" data-collapse-hint class="text-xs text-muted group-hover:text-body">method, headers, body, auth, tls</span>
       </button>
-      <div id="advanced-http-body" class="hidden space-y-4">
-        <fieldset class="space-y-3 rounded-sm border border-[color:var(--theme-line)] p-3">
-          <legend class="px-1 text-xs text-muted">Request</legend>
-          <div class="grid grid-cols-2 gap-4 sm:grid-cols-3">
-            <div class="field-outline">
-              <span class="field-outline__label">Method</span>
-              <select name="http_method" data-sm-combobox aria-label="HTTP method" class="w-full field">
-                <option value="GET"{% if form.http.method == "GET" %} selected{% endif %}>GET</option>
-                <option value="HEAD"{% if form.http.method == "HEAD" %} selected{% endif %}>HEAD</option>
-                <option value="POST"{% if form.http.method == "POST" %} selected{% endif %}>POST</option>
-                <option value="PUT"{% if form.http.method == "PUT" %} selected{% endif %}>PUT</option>
-                <option value="PATCH"{% if form.http.method == "PATCH" %} selected{% endif %}>PATCH</option>
-                <option value="DELETE"{% if form.http.method == "DELETE" %} selected{% endif %}>DELETE</option>
-                <option value="OPTIONS"{% if form.http.method == "OPTIONS" %} selected{% endif %}>OPTIONS</option>
-              </select>
+      <div id="advanced-http-body" class="hidden space-y-5">
+        <div class="space-y-3">
+          <span class="flag-label block">request</span>
+          <div>
+            <div class="sm-rail" role="radiogroup" aria-label="HTTP method">
+              <label class="sm-rail__seg"><input type="radio" name="http_method" value="GET" class="sr-only"{% if form.http.method == "GET" %} checked{% endif %}>GET</label>
+              <label class="sm-rail__seg"><input type="radio" name="http_method" value="HEAD" class="sr-only"{% if form.http.method == "HEAD" %} checked{% endif %}>HEAD</label>
+              <label class="sm-rail__seg"><input type="radio" name="http_method" value="POST" class="sr-only"{% if form.http.method == "POST" %} checked{% endif %}>POST</label>
+              <label class="sm-rail__seg"><input type="radio" name="http_method" value="PUT" class="sr-only"{% if form.http.method == "PUT" %} checked{% endif %}>PUT</label>
+              <label class="sm-rail__seg"><input type="radio" name="http_method" value="PATCH" class="sr-only"{% if form.http.method == "PATCH" %} checked{% endif %}>PATCH</label>
+              <label class="sm-rail__seg"><input type="radio" name="http_method" value="DELETE" class="sr-only"{% if form.http.method == "DELETE" %} checked{% endif %}>DELETE</label>
+              <label class="sm-rail__seg"><input type="radio" name="http_method" value="OPTIONS" class="sr-only"{% if form.http.method == "OPTIONS" %} checked{% endif %}>OPTIONS</label>
             </div>
-            <label class="field-outline">
-              <span class="field-outline__label">Timeout (ms)</span>
-              <input name="http_timeout_ms" type="number" min="100" max="60000" value="{{ form.http.timeout_ms }}"
-                     class="w-full field">
-            </label>
-            <label class="field-outline">
-              <span class="field-outline__label">Max redirects</span>
-              <input name="http_max_redirects" type="number" min="0" max="10" value="{{ form.http.max_redirects }}"
-                     class="w-full field">
-            </label>
+            <span class="mt-1 block text-xs text-muted">HEAD is the cheapest reachability probe; use GET when the response body matters.</span>
           </div>
-          <div class="flex flex-wrap items-center gap-x-6 gap-y-2">
-            <label class="inline-flex items-center gap-2">
-              <input name="http_follow_redirects" type="checkbox"{% if form.http.follow_redirects %} checked{% endif %}>
-              <span class="text-sm">Follow redirects</span>
-            </label>
-            <label class="inline-flex items-center gap-2">
-              <input name="http_verify_tls" type="checkbox"{% if form.http.verify_tls %} checked{% endif %}>
-              <span class="text-sm">Verify TLS</span>
-            </label>
+          <div>
+            <div class="flex flex-wrap gap-3">
+              <label class="field-outline w-36">
+                <span class="field-outline__label">Timeout (ms)</span>
+                <input name="http_timeout_ms" type="number" min="100" max="60000" value="{{ form.http.timeout_ms }}"
+                       class="w-full field">
+              </label>
+              <label class="field-outline w-36">
+                <span class="field-outline__label">Max redirects</span>
+                <input name="http_max_redirects" type="number" min="0" max="10" value="{{ form.http.max_redirects }}"
+                       class="w-full field">
+              </label>
+            </div>
+            <span class="mt-1 block text-xs text-muted">Timeout caps how long a check waits before it counts as failed; redirects caps the hops followed — 0 treats any redirect as the final answer.</span>
           </div>
-        </fieldset>
+          <div>
+            <div class="flex flex-wrap gap-1.5">
+              <label class="scope-token">
+                <input name="http_follow_redirects" type="checkbox" class="sr-only"{% if form.http.follow_redirects %} checked{% endif %}>
+                follow-redirects
+              </label>
+              <label class="scope-token">
+                <input name="http_verify_tls" type="checkbox" class="sr-only"{% if form.http.verify_tls %} checked{% endif %}>
+                verify-tls
+              </label>
+            </div>
+            <span class="mt-1 block text-xs text-muted">follow-redirects chases 3xx to the final page; verify-tls fails the check on invalid or self-signed certificates — switch it off only for internal endpoints.</span>
+          </div>
+        </div>
 
         <label class="field-outline">
           <span class="field-outline__label">Expected body contains</span>
           <input name="http_expected_body_contains" type="text" value="{{ form.http.expected_body_contains }}"
-                 autocomplete="off" spellcheck="false" class="w-full field">
+                 autocomplete="off" spellcheck="false" class="w-full field font-mono">
+          <span class="mt-1 block text-xs text-muted">Substring the response body must include, e.g. <code>"status":"ok"</code> — fails the check when missing.</span>
         </label>
 
         <label class="field-outline">
           <span class="field-outline__label">Request body</span>
           <textarea name="http_body" rows="3" autocomplete="off" spellcheck="false" class="w-full field font-mono">{{ form.http.body }}</textarea>
+          <span class="mt-1 block text-xs text-muted">Sent with POST / PUT / PATCH — pair it with a <code>Content-Type</code> header below.</span>
         </label>
 
-        <fieldset class="space-y-2 rounded-sm border border-[color:var(--theme-line)] p-3">
-          <legend class="px-1 text-xs text-muted">Headers</legend>
+        <div class="space-y-2">
+          <span class="flag-label block">headers</span>
+          <span class="block text-xs text-muted">Extra request headers, e.g. <code>Accept: application/json</code> or an API key.</span>
           <div data-header-rows class="space-y-2">
             {% for h in form.http.headers %}
             <div data-header-row class="flex flex-wrap items-center gap-2">
@@ -447,17 +470,18 @@
             {% endfor %}
           </div>
           <button type="button" data-header-add
-                  class="btn-ghost px-3 text-sm">+ Add header</button>
-        </fieldset>
+                  class="btn-ghost px-3 text-sm">+ add header</button>
+        </div>
 
-        <fieldset class="space-y-2 rounded-sm border border-[color:var(--theme-line)] p-3"
-                  data-auth-field="basic"
-                  data-initial-mode="{{ form.http.auth.basic_initial_mode() }}"
-                  data-mode="{{ form.http.auth.basic_initial_mode() }}">
-          <legend class="px-1 text-xs text-muted">Basic auth</legend>
+        <div class="space-y-2"
+             data-auth-field="basic"
+             data-initial-mode="{{ form.http.auth.basic_initial_mode() }}"
+             data-mode="{{ form.http.auth.basic_initial_mode() }}">
+          <span class="flag-label block">basic-auth</span>
+          <span class="block text-xs text-muted">Username + password for endpoints behind HTTP basic auth. Saved once, shown as <code>***</code> afterwards — tick to replace.</span>
           <label class="inline-flex items-center gap-2">
             <input type="checkbox" data-auth-toggle>
-            <span class="text-sm">{% if form.http.auth.has_basic %}Replace credentials{% else %}Set credentials{% endif %}</span>
+            <span class="text-sm">{% if form.http.auth.has_basic %}replace credentials{% else %}set credentials{% endif %}</span>
           </label>
           <div class="grid grid-cols-2 gap-2">
             <input type="text" name="http_basic_user" placeholder="username"
@@ -469,122 +493,57 @@
                    value="{% if form.http.auth.has_basic %}***{% endif %}" disabled
                    class="field">
           </div>
-        </fieldset>
+        </div>
 
-        <fieldset class="space-y-2 rounded-sm border border-[color:var(--theme-line)] p-3"
-                  data-auth-field="bearer"
-                  data-initial-mode="{{ form.http.auth.bearer_initial_mode() }}"
-                  data-mode="{{ form.http.auth.bearer_initial_mode() }}">
-          <legend class="px-1 text-xs text-muted">Bearer token</legend>
+        <div class="space-y-2"
+             data-auth-field="bearer"
+             data-initial-mode="{{ form.http.auth.bearer_initial_mode() }}"
+             data-mode="{{ form.http.auth.bearer_initial_mode() }}">
+          <span class="flag-label block">bearer</span>
+          <span class="block text-xs text-muted">Sent as <code>Authorization: Bearer …</code> — for token-protected APIs and rate-limit headroom. Saved once, shown as <code>***</code> afterwards — tick to replace.</span>
           <label class="inline-flex items-center gap-2">
             <input type="checkbox" data-auth-toggle>
-            <span class="text-sm">{% if form.http.auth.has_bearer %}Replace token{% else %}Set token{% endif %}</span>
+            <span class="text-sm">{% if form.http.auth.has_bearer %}replace token{% else %}set token{% endif %}</span>
           </label>
           <input type="password" name="http_bearer_token" placeholder="token"
                  aria-label="Bearer token" autocomplete="off"
                  value="{% if form.http.auth.has_bearer %}***{% endif %}" disabled
                  class="w-full field">
-        </fieldset>
+        </div>
+      </div>
       </div>
     </fieldset>
 
-    <fieldset class="space-y-5 sticker-card p-5">
-      <legend class="px-1 text-sm font-medium">Notifications</legend>
-      {% if form.channels.is_empty() %}
-      <p class="text-sm text-muted">
-        No notification channels yet.
-        <a href="/settings/notifications/new" class="underline">Add one</a>
-        to get Down / Recovered alerts for this monitor.
-      </p>
-      {% else %}
-      <p class="mb-3 text-xs text-muted">
-        Pick channels to notify when this monitor opens or resolves an incident.
-      </p>
-      <div class="divide-y divide-[color:var(--theme-line)]">
-        {% for c in form.channels %}
-        <label data-channel-row class="flex cursor-pointer items-center gap-3 py-2.5">
-          <input type="checkbox" data-channel-select value="{{ c.id }}"{% if c.selected %} checked{% endif %}>
-          <span class="min-w-0 truncate text-sm">{{ c.name }}</span>
-          <span class="status-badge status-badge--tag ml-auto shrink-0">{{ c.kind }}</span>
-        </label>
-        {% endfor %}
-      </div>
-      {% endif %}
-
-      <div class="space-y-4 border-t border-[color:var(--theme-line)] pt-4">
-        <div class="space-y-1">
-          <span class="text-sm font-medium">Alerting</span>
-          <p class="text-xs text-muted">When this monitor pages you, and how often.</p>
-        </div>
-        <div class="grid gap-4 sm:grid-cols-2 sm:items-start">
-          <div>
-            <span class="mb-1.5 block text-xs text-muted">Confirmations before alerting</span>
-            <div class="seg" role="radiogroup" aria-label="Confirmations before alerting">
-              {% for o in form.confirmation_options() %}
-              <label class="seg-option">
-                <input type="radio" name="alert_confirmations" value="{{ o.value }}" class="sr-only"{% if o.selected %} checked{% endif %}>
-                {{ o.label }}
-              </label>
-              {% endfor %}
-            </div>
-            <span class="mt-1 block text-xs text-muted">Consecutive failed checks before an incident opens.</span>
-          </div>
-          <div class="field-outline block">
-            <span class="mb-1.5 block text-xs text-muted">Remind while down</span>
-            <select data-renotify-secs data-sm-combobox aria-label="Reminder cadence" class="w-full field">
-              {% for o in form.renotify_options() %}
-              <option value="{{ o.secs }}"{% if o.selected %} selected{% endif %}>{{ o.label }}</option>
-              {% endfor %}
-            </select>
-            <span class="mt-1 block text-xs text-muted">Re-page on this cadence until acknowledged.</span>
-          </div>
-        </div>
-        <label class="inline-flex items-center gap-2 text-sm">
-          <input type="checkbox" data-notify-recovery{% if form.notify_recovery %} checked{% endif %}>
-          Notify on recovery
-        </label>
-      </div>
-
-      {% if form.show_escalation %}
-      <div class="mt-5 space-y-2 border-t border-[color:var(--theme-line)] pt-4">
-        <div class="space-y-1">
-          <span class="text-sm font-medium">Escalation policy</span>
-          <p class="text-xs text-muted">A multi-level paging ladder for this monitor's incidents. Manage policies under <a href="/settings/escalation" class="underline">escalation</a>.</p>
-        </div>
-        {% if form.mode == "edit" %}
-        <div class="flex flex-wrap items-center gap-3">
-          <select data-monitor-policy-select data-target-id="{{ form.id }}"
-                  aria-label="Escalation policy" class="field max-w-xs">
-            <option value="">— inherit org default —</option>
-            {% for c in form.escalation_choices %}
-            <option value="{{ c.id }}"{% if c.selected %} selected{% endif %}>{{ c.name }}</option>
-            {% endfor %}
-          </select>
-          <span data-monitor-policy-result role="status" aria-live="polite" class="flash-text text-xs"></span>
-        </div>
-        {% if !form.escalation_hint.is_empty() %}<p class="text-xs text-muted">{{ form.escalation_hint }}</p>{% endif %}
-        {% else %}
-        <p class="text-xs text-muted">Save the monitor first, then pick its escalation policy here.</p>
-        {% endif %}
-      </div>
-      {% endif %}
-
-      {% if form.show_regions %}
-      <div class="mt-5 space-y-3 border-t border-[color:var(--theme-line)] pt-4"
-           data-monitor-regions data-target-id="{{ form.id }}">
-        <div class="space-y-1">
-          <span class="text-sm font-medium">Regions &amp; detection</span>
-          <p class="text-xs text-muted">Which locations probe this monitor, and how their results combine into an incident.</p>
-        </div>
-        <div class="flex flex-wrap gap-3">
-          {% for r in form.region_choices %}
-          <label class="inline-flex items-center gap-1.5 text-sm">
-            <input type="checkbox" data-region-checkbox value="{{ r.id }}"{% if r.selected %} checked{% endif %}>
-            <span>{{ r.label }}</span>
+    <fieldset class="sticker-card form-card"{% if form.show_regions %} data-monitor-regions data-target-id="{{ form.id }}"{% endif %}>
+      <legend>detection</legend>
+      <div class="clear-both space-y-5 p-5">
+      <div>
+        <span class="mb-1.5 block text-xs text-muted">Open incident after</span>
+        <div class="sm-rail" role="radiogroup" aria-label="Open incident after">
+          {% for o in form.confirmation_options() %}
+          <label class="sm-rail__seg">
+            <input type="radio" name="alert_confirmations" value="{{ o.value }}" class="sr-only"{% if o.selected %} checked{% endif %}>
+            {{ o.label }}
           </label>
           {% endfor %}
         </div>
-        <div class="flex flex-wrap items-end gap-3">
+        <span class="mt-1 block text-xs text-muted">Consecutive failed checks before the monitor counts as down — 1 fail reacts instantly but a single network blip can page you; 2 fails is the usual default.</span>
+      </div>
+      {% if form.show_regions %}
+      <div class="space-y-3">
+        <div>
+          <span class="mb-1.5 block text-xs text-muted">Regions</span>
+          <div class="flex flex-wrap gap-1.5">
+            {% for r in form.region_choices %}
+            <label class="scope-token">
+              <input type="checkbox" data-region-checkbox value="{{ r.id }}" class="sr-only"{% if r.selected %} checked{% endif %}>
+              {{ r.label }}
+            </label>
+            {% endfor %}
+          </div>
+          <span class="mt-1 block text-xs text-muted">Which locations probe this monitor.</span>
+        </div>
+        <div class="flex flex-wrap items-end gap-3 pt-1">
           <div class="field-outline w-64">
             <span class="field-outline__label">Alert when</span>
             <select data-region-policy data-sm-combobox aria-label="Detection threshold" class="w-full field">
@@ -594,25 +553,96 @@
             </select>
           </div>
         </div>
-        <p class="text-xs text-muted">Opens one incident when this many regions agree the monitor is down. Majority suppresses a single location's network blip.{% if form.mode == "create" %} Saved with the monitor.{% endif %}</p>
+        <p class="text-xs text-muted">Opens one incident when this many regions agree the monitor is down. Majority suppresses a single location's network blip.</p>
       </div>
       {% endif %}
+      </div>
     </fieldset>
+
+    <fieldset class="sticker-card form-card">
+      <legend>notifications</legend>
+      <div class="clear-both space-y-5 p-5">
+      {% if form.channels.is_empty() %}
+      <p class="font-mono text-xs text-quiet">
+        # no channels configured —
+        <a href="/settings/notifications/new" class="underline decoration-dotted hover:text-body">add one</a>
+        to get down / recovered alerts for this monitor.
+      </p>
+      {% else %}
+      <div>
+        <span class="mb-1.5 block text-xs text-muted">Channels to notify</span>
+        <div class="flex flex-wrap gap-1.5">
+          {% for c in form.channels %}
+          <label data-channel-row class="scope-token">
+            <input type="checkbox" data-channel-select value="{{ c.id }}" class="sr-only"{% if c.selected %} checked{% endif %}>
+            {{ c.kind }}:{{ c.name }}
+          </label>
+          {% endfor %}
+        </div>
+        <span class="mt-1 block text-xs text-muted">Notified when this monitor opens or resolves an incident.</span>
+      </div>
+      <div data-renotify-secs>
+        <span class="mb-1.5 block text-xs text-muted">Remind while down</span>
+        <div class="sm-rail" role="radiogroup" aria-label="Remind while down">
+          {% for o in form.renotify_options() %}
+          <label class="sm-rail__seg">
+            <input type="radio" name="renotify_secs" value="{{ o.secs }}" class="sr-only"{% if o.selected %} checked{% endif %}>
+            {{ o.label }}
+          </label>
+          {% endfor %}
+        </div>
+        <span class="mt-1 block text-xs text-muted">Re-page on this cadence until acknowledged.</span>
+      </div>
+      <label class="inline-flex items-center gap-2 text-sm">
+        <input type="checkbox" data-notify-recovery{% if form.notify_recovery %} checked{% endif %}>
+        Notify on recovery
+      </label>
+      {% endif %}
+      </div>
+    </fieldset>
+
+    {% if form.show_escalation %}
+    <fieldset class="sticker-card form-card">
+      <legend>escalation</legend>
+      <div class="clear-both space-y-3 p-5">
+      <p class="text-xs text-muted">A multi-level paging ladder for this monitor's incidents. Manage policies under <a href="/settings/escalation" class="underline">escalation</a>.</p>
+      {% if form.mode == "edit" %}
+      <div class="flex flex-wrap items-center gap-3 pt-1">
+        <div class="field-outline w-64">
+          <span class="field-outline__label">Policy</span>
+          <select data-monitor-policy-select data-target-id="{{ form.id }}" data-sm-combobox
+                  aria-label="Escalation policy" class="w-full field">
+            <option value="">inherit org default</option>
+            {% for c in form.escalation_choices %}
+            <option value="{{ c.id }}"{% if c.selected %} selected{% endif %}>{{ c.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <span data-monitor-policy-result role="status" aria-live="polite" class="flash-text text-xs"></span>
+      </div>
+      {% if !form.escalation_hint.is_empty() %}<p class="text-xs text-muted">{{ form.escalation_hint }}</p>{% endif %}
+      {% else %}
+      <p class="text-xs text-muted">Save the monitor first, then pick its escalation policy here.</p>
+      {% endif %}
+      </div>
+    </fieldset>
+    {% endif %}
+
 
     <div class="flex flex-wrap gap-3">
       <button type="submit"
               class="sticker-btn sticker-btn--primary px-4 py-2 text-sm font-medium transition-transform hover:-translate-y-0.5">
-        {% if form.mode == "create" %}Create{% else %}Save changes{% endif %}
+        {% if form.mode == "create" %}create{% else %}save changes{% endif %}
       </button>
       <button type="submit" data-save-and-test
               class="sticker-btn sticker-btn--accent px-4 py-2 text-sm font-medium inline-flex items-center gap-1.5">
         <span aria-hidden="true">▶</span>
-        {% if form.mode == "create" %}Create &amp; run first check{% else %}Save &amp; run check{% endif %}
+        {% if form.mode == "create" %}create &amp; run first check{% else %}save &amp; run check{% endif %}
       </button>
       <a href="{% if form.mode == "edit" %}/targets/{{ form.id }}{% else %}/targets{% endif %}"
-         class="btn-ghost px-4 py-2 text-sm">Cancel</a>
+         class="btn-ghost px-4 py-2 text-sm">cancel</a>
       <span class="ml-auto self-center text-xs text-quiet">
-        Tip: <kbd class="rounded border px-1.5 py-0.5">⌘/Ctrl</kbd> +
+        tip: <kbd class="rounded border px-1.5 py-0.5">⌘/Ctrl</kbd> +
              <kbd class="rounded border px-1.5 py-0.5">Enter</kbd> to save
       </span>
     </div>
