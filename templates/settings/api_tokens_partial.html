@@ -5,7 +5,7 @@
 </div>
 {% else %}
 <table class="w-full text-left text-sm">
-  <thead class="bg-[color:var(--theme-surface-sunk)] text-xs uppercase text-muted">
+  <thead class="bg-[color:var(--theme-surface-sunk)] text-left font-mono text-[0.6875rem] font-semibold uppercase tracking-[0.08em] text-muted">
     <tr>
       <th scope="col" class="px-4 py-2">Name</th>
       <th scope="col" class="px-4 py-2">Access</th>
@@ -37,7 +37,7 @@
                 data-confirm-body="Token {{ t.name }} can no longer be used. Existing callers receive 401 on the next request. Cannot be undone."
                 data-confirm-label="Revoke token"
                 data-confirm-danger
-                class="row-link row-link--danger">Revoke</button>
+                class="btn-ghost btn-ghost--danger px-2 py-1 text-xs">revoke</button>
       </td>
     </tr>
     {% endfor %}

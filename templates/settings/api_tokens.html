@@ -31,68 +31,71 @@
           {% for o in orgs %}
           <option value="{{ o.slug }}"{% if o.selected %} selected{% endif %}>{{ o.name }}</option>
           {% endfor %}
-          <option value="">All my organizations</option>
+          <option value="">all my organizations</option>
         </select>
       </label>
       <label class="field-outline">
         <span class="field-outline__label">Expires</span>
         <select id="token-expiry" data-sm-combobox aria-label="Expires" class="w-full field font-mono">
-          <option value="30">30 days</option>
-          <option value="60">60 days</option>
-          <option value="90" selected>90 days</option>
-          <option value="365">365 days</option>
-          <option value="">No expiry</option>
+          <option value="30">30d</option>
+          <option value="60">60d</option>
+          <option value="90" selected>90d</option>
+          <option value="365">365d</option>
+          <option value="">never</option>
         </select>
       </label>
     </div>
 
     <fieldset class="space-y-2">
       <legend class="text-xs text-muted">Access</legend>
-      <div class="flex flex-wrap gap-4 text-sm">
-        <label class="flex items-center gap-2"><input type="radio" name="access" value="read" checked> Read-only</label>
-        <label class="flex items-center gap-2"><input type="radio" name="access" value="write"> Read &amp; write</label>
-        <label class="flex items-center gap-2"><input type="radio" name="access" value="advanced"> Advanced</label>
+      <div class="sm-rail">
+        <label class="sm-rail__seg"><input type="radio" name="access" value="read" checked class="sr-only">read-only</label>
+        <label class="sm-rail__seg"><input type="radio" name="access" value="write" class="sr-only">read &amp; write</label>
+        <label class="sm-rail__seg"><input type="radio" name="access" value="advanced" class="sr-only">advanced</label>
       </div>
     </fieldset>
 
-    <div id="advanced-scopes" hidden
-         class="scope-grid border-t border-[color:var(--theme-line)] pt-3 text-sm">
-      <span class="scope-grid__head">resource</span>
-      <span class="scope-grid__head">read</span>
-      <span class="scope-grid__head">write</span>
-      <span class="scope-grid__head">delete</span>
-      <span class="scope-grid__head">run</span>
+    <div id="access-hint"
+         class="border-t border-[color:var(--theme-line)] pt-3 font-mono text-xs text-muted">
+      <p data-access-hint="read">› grants <span class="cli-brackets">targets channels incidents maintenance status_page</span> :read — inspect everything, change nothing.</p>
+      <p data-access-hint="write" hidden>› grants <span class="cli-brackets">targets channels incidents maintenance status_page</span> :write — create &amp; update (write implies read); no delete, no run.</p>
+    </div>
 
+    <div id="advanced-scopes" hidden
+         class="space-y-2 border-t border-[color:var(--theme-line)] pt-3">
+      <div class="scope-grid text-sm">
       <span class="scope-grid__res">targets</span>
-      <label><input type="checkbox" class="scope-box" value="targets:read" aria-label="targets read"></label>
-      <label><input type="checkbox" class="scope-box" value="targets:write" aria-label="targets write"></label>
-      <label><input type="checkbox" class="scope-box" value="targets:delete" aria-label="targets delete"></label>
-      <label><input type="checkbox" class="scope-box" value="targets:execute" aria-label="targets run checks" title="run checks"></label>
+      <label class="scope-token"><input type="checkbox" class="scope-box sr-only" value="targets:read" aria-label="targets read">read</label>
+      <label class="scope-token"><input type="checkbox" class="scope-box sr-only" value="targets:write" aria-label="targets write">write</label>
+      <label class="scope-token"><input type="checkbox" class="scope-box sr-only" value="targets:delete" aria-label="targets delete">delete</label>
+      <label class="scope-token" title="run checks"><input type="checkbox" class="scope-box sr-only" value="targets:execute" aria-label="targets run checks">run</label>
 
       <span class="scope-grid__res">channels</span>
-      <label><input type="checkbox" class="scope-box" value="channels:read" aria-label="channels read"></label>
-      <label><input type="checkbox" class="scope-box" value="channels:write" aria-label="channels write"></label>
-      <label><input type="checkbox" class="scope-box" value="channels:delete" aria-label="channels delete"></label>
-      <label><input type="checkbox" class="scope-box" value="channels:execute" aria-label="channels send test" title="send test"></label>
+      <label class="scope-token"><input type="checkbox" class="scope-box sr-only" value="channels:read" aria-label="channels read">read</label>
+      <label class="scope-token"><input type="checkbox" class="scope-box sr-only" value="channels:write" aria-label="channels write">write</label>
+      <label class="scope-token"><input type="checkbox" class="scope-box sr-only" value="channels:delete" aria-label="channels delete">delete</label>
+      <label class="scope-token" title="send test"><input type="checkbox" class="scope-box sr-only" value="channels:execute" aria-label="channels send test">run</label>
 
       <span class="scope-grid__res">incidents</span>
-      <label><input type="checkbox" class="scope-box" value="incidents:read" aria-label="incidents read"></label>
-      <label><input type="checkbox" class="scope-box" value="incidents:write" aria-label="incidents write"></label>
+      <label class="scope-token"><input type="checkbox" class="scope-box sr-only" value="incidents:read" aria-label="incidents read">read</label>
+      <label class="scope-token"><input type="checkbox" class="scope-box sr-only" value="incidents:write" aria-label="incidents write">write</label>
       <span></span>
       <span></span>
 
       <span class="scope-grid__res">maintenance</span>
-      <label><input type="checkbox" class="scope-box" value="maintenance:read" aria-label="maintenance read"></label>
-      <label><input type="checkbox" class="scope-box" value="maintenance:write" aria-label="maintenance write"></label>
-      <label><input type="checkbox" class="scope-box" value="maintenance:delete" aria-label="maintenance delete"></label>
+      <label class="scope-token"><input type="checkbox" class="scope-box sr-only" value="maintenance:read" aria-label="maintenance read">read</label>
+      <label class="scope-token"><input type="checkbox" class="scope-box sr-only" value="maintenance:write" aria-label="maintenance write">write</label>
+      <label class="scope-token"><input type="checkbox" class="scope-box sr-only" value="maintenance:delete" aria-label="maintenance delete">delete</label>
       <span></span>
 
-      <span class="scope-grid__res">status page</span>
-      <label><input type="checkbox" class="scope-box" value="status_page:read" aria-label="status page read"></label>
-      <label><input type="checkbox" class="scope-box" value="status_page:write" aria-label="status page write"></label>
-      <label><input type="checkbox" class="scope-box" value="status_page:delete" aria-label="status page delete"></label>
+      <span class="scope-grid__res">status_page</span>
+      <label class="scope-token"><input type="checkbox" class="scope-box sr-only" value="status_page:read" aria-label="status page read">read</label>
+      <label class="scope-token"><input type="checkbox" class="scope-box sr-only" value="status_page:write" aria-label="status page write">write</label>
+      <label class="scope-token"><input type="checkbox" class="scope-box sr-only" value="status_page:delete" aria-label="status page delete">delete</label>
       <span></span>
+      </div>
 
+      <p id="scope-preview" class="scope-grid__note break-words" aria-live="polite"></p>
       <p class="scope-grid__note">run = run checks (targets) · send test (channels)</p>
     </div>
 
@@ -104,6 +107,7 @@
     </div>
   </form>
 
+  <div id="token-error" role="alert" aria-live="polite" class="hidden alert-card alert-card--error"></div>
   <div id="token-result" aria-live="polite"></div>
 
   <div id="tokens-list" data-hx-loader
@@ -114,19 +118,40 @@
     <p class="px-4 py-3 text-sm text-muted">Loading…</p>
   </div>
 
+  <script defer src="{{ "js/ui/api_form.js"|asset }}"></script>
   <script>
     (() => {
       const RESOURCES = ['targets', 'channels', 'incidents', 'maintenance', 'status_page'];
       const form = document.getElementById('new-token-form');
       const adv = document.getElementById('advanced-scopes');
       const result = document.getElementById('token-result');
+      const banner = document.getElementById('token-error');
       const submitBtn = form.querySelector('button[type=submit]');
 
-      form.querySelectorAll('input[name=access]').forEach((r) => {
-        r.addEventListener('change', () => {
-          adv.hidden = form.querySelector('input[name=access]:checked').value !== 'advanced';
-        });
+      const hint = document.getElementById('access-hint');
+      const preview = document.getElementById('scope-preview');
+      function syncScopePreview() {
+        const scopes = Array.from(form.querySelectorAll('.scope-box:checked')).map((b) => b.value);
+        preview.textContent = scopes.length
+          ? '› scopes: ' + scopes.join(' ')
+          : '› scopes: none — pick at least one';
+      }
+      form.addEventListener('change', (e) => {
+        if (e.target.classList && e.target.classList.contains('scope-box')) syncScopePreview();
       });
+      syncScopePreview();
+      function syncAccessUi() {
+        const v = form.querySelector('input[name=access]:checked').value;
+        adv.hidden = v !== 'advanced';
+        hint.hidden = v === 'advanced';
+        hint.querySelectorAll('[data-access-hint]').forEach((p) => {
+          p.hidden = p.dataset.accessHint !== v;
+        });
+      }
+      form.querySelectorAll('input[name=access]').forEach((r) => {
+        r.addEventListener('change', syncAccessUi);
+      });
+      syncAccessUi();
 
       function chosenScopes() {
         const access = form.querySelector('input[name=access]:checked').value;
@@ -135,24 +160,21 @@
         return Array.from(form.querySelectorAll('.scope-box:checked')).map((b) => b.value);
       }
 
-      function showError(msg) {
-        result.innerHTML = '<div class="alert-card alert-card--error" role="alert"></div>';
-        result.querySelector('.alert-card').textContent = msg;
-      }
-
       form.addEventListener('submit', async (e) => {
         e.preventDefault();
         if (submitBtn.disabled) return;
+        window.smClearFormErrors(banner);
+        result.innerHTML = '';
         const nameInput = document.getElementById('token-name');
         const name = nameInput.value.trim();
         if (!name) {
-          showError('Name is required — label this token so you can find it later.');
+          window.smRenderClientError(banner, 'Name is required — label this token so you can find it later.');
           nameInput.focus();
           return;
         }
         const scopes = chosenScopes();
         if (scopes.length === 0) {
-          showError('Pick at least one scope.');
+          window.smRenderClientError(banner, 'Pick at least one scope.');
           const firstBox = form.querySelector('.scope-box');
           if (firstBox) firstBox.focus();
           return;
@@ -177,7 +199,7 @@
           });
           data = await res.json();
         } catch (_) {
-          showError('Network error — try again.');
+          window.smRenderClientError(banner, 'Network error — try again.');
           return;
         } finally {
           submitBtn.disabled = false;
@@ -219,7 +241,7 @@
           document.getElementById('token-name').value = '';
           htmx.trigger('body', 'tokens:refresh');
         } else {
-          showError((data && data.error && data.error.message) || 'Could not create token.');
+          window.smRenderApiError(banner, data, res.status);
         }
       });
     })();
