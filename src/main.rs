@@ -371,28 +371,30 @@ async fn main() -> Result<()> {
     let escalation_engine_handle: JoinHandle<()> = {
         let engine = uptimepage::escalation::EscalationEngine::new(
             incident_signal_rx,
-            Arc::new(uptimepage::storage::PgIncidentOpsStore::new(
-                pg_pool_for_stores.clone(),
-            )),
-            escalation_policy_store.clone(),
-            on_call_store.clone(),
-            contact_store.clone(),
-            target_store.clone(),
-            notification_channel_store.clone(),
-            outbound_http.clone(),
-            cfg.escalation.clone(),
-            cfg.auth.public_base_url.clone(),
-            cfg.telegram
-                .enabled()
-                .then(|| uptimepage::notifier::CentralBotDelivery {
-                    token: cfg.telegram.bot_token.clone(),
-                    budget: telegram_send_budget.clone(),
+            uptimepage::escalation::EngineDeps {
+                ops: Arc::new(uptimepage::storage::PgIncidentOpsStore::new(
+                    pg_pool_for_stores.clone(),
+                )),
+                policies: escalation_policy_store.clone(),
+                on_call: on_call_store.clone(),
+                contacts: contact_store.clone(),
+                targets: target_store.clone(),
+                channels: notification_channel_store.clone(),
+                http: outbound_http.clone(),
+                cfg: cfg.escalation.clone(),
+                base_url: cfg.auth.public_base_url.clone(),
+                central_bot: cfg.telegram.enabled().then(|| {
+                    uptimepage::notifier::CentralBotDelivery {
+                        token: cfg.telegram.bot_token.clone(),
+                        budget: telegram_send_budget.clone(),
+                    }
                 }),
-            Some(uptimepage::notifier::EmailDelivery {
-                sender: email_sender.clone(),
-                from_address: cfg.email.from_address.clone(),
-                from_name: cfg.email.from_name.clone(),
-            }),
+                email: Some(uptimepage::notifier::EmailDelivery {
+                    sender: email_sender.clone(),
+                    from_address: cfg.email.from_address.clone(),
+                    from_name: cfg.email.from_name.clone(),
+                }),
+            },
         );
         let token = root.clone();
         tokio::spawn(async move { engine.run(token).await })

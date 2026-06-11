@@ -6,4 +6,4 @@
 
 pub mod engine;
 
-pub use engine::{EscalationEngine, IncidentSignal};
+pub use engine::{EngineDeps, EscalationEngine, IncidentSignal};

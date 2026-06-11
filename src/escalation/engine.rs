@@ -71,6 +71,25 @@ pub struct EscalationEngine {
     w: Arc<Worker>,
 }
 
+/// Everything the engine pages with, gathered so the constructor stays
+/// readable at the call site.
+pub struct EngineDeps {
+    pub ops: Arc<dyn IncidentOpsStore>,
+    pub policies: Arc<dyn EscalationPolicyStore>,
+    pub on_call: Arc<dyn OnCallStore>,
+    pub contacts: Arc<dyn ContactStore>,
+    pub targets: Arc<dyn TargetStore>,
+    pub channels: Arc<dyn NotificationChannelStore>,
+    pub http: OutboundHttpClient,
+    pub cfg: EscalationConfig,
+    /// Operator base URL for incident deep links; empty omits the link.
+    pub base_url: String,
+    /// Operator token + shared send budget for `telegram_app` delivery.
+    pub central_bot: Option<crate::notifier::CentralBotDelivery>,
+    /// Transactional sender + From identity for `email` delivery.
+    pub email: Option<crate::notifier::EmailDelivery>,
+}
+
 /// The shared paging core. Every field is cheap to clone/share; methods take
 /// `&self` so they run from any task holding the `Arc`.
 struct Worker {
@@ -82,11 +101,8 @@ struct Worker {
     channels: Arc<dyn NotificationChannelStore>,
     http: OutboundHttpClient,
     cfg: EscalationConfig,
-    /// Operator base URL for incident deep links; empty omits the link.
     base_url: String,
-    /// Operator token + shared send budget for `telegram_app` delivery.
     central_bot: Option<crate::notifier::CentralBotDelivery>,
-    /// Transactional sender + From identity for `email` delivery.
     email: Option<crate::notifier::EmailDelivery>,
     /// True while a sweep task is in flight, so overlapping ticks skip rather
     /// than stack a second sweep on top of a slow one.
@@ -102,21 +118,20 @@ struct Worker {
 }
 
 impl EscalationEngine {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        rx: mpsc::Receiver<IncidentSignal>,
-        ops: Arc<dyn IncidentOpsStore>,
-        policies: Arc<dyn EscalationPolicyStore>,
-        on_call: Arc<dyn OnCallStore>,
-        contacts: Arc<dyn ContactStore>,
-        targets: Arc<dyn TargetStore>,
-        channels: Arc<dyn NotificationChannelStore>,
-        http: OutboundHttpClient,
-        cfg: EscalationConfig,
-        base_url: String,
-        central_bot: Option<crate::notifier::CentralBotDelivery>,
-        email: Option<crate::notifier::EmailDelivery>,
-    ) -> Self {
+    pub fn new(rx: mpsc::Receiver<IncidentSignal>, deps: EngineDeps) -> Self {
+        let EngineDeps {
+            ops,
+            policies,
+            on_call,
+            contacts,
+            targets,
+            channels,
+            http,
+            cfg,
+            base_url,
+            central_bot,
+            email,
+        } = deps;
         Self {
             rx,
             w: Arc::new(Worker {
@@ -680,7 +695,7 @@ impl Worker {
                     Some("email address not verified".to_string()),
                 )
             } else {
-                self.deliver(&channel.config, notice).await
+                self.deliver(org, &channel, notice, id, 1).await
             };
             if status == NotificationStatus::Sent {
                 paged += 1;
@@ -848,7 +863,8 @@ impl Worker {
                 Some("email address not verified".to_string()),
             )
         } else {
-            self.deliver(&channel.config, &notice).await
+            self.deliver(p.org, &channel, &notice, p.id, next_attempt)
+                .await
         };
         let next_attempt_at = (status == NotificationStatus::Failed)
             .then(|| self.retry_backoff_hinted(next_attempt, error.as_deref()))
@@ -906,23 +922,54 @@ impl Worker {
 
     async fn deliver(
         &self,
-        cfg: &crate::domain::ChannelConfig,
+        org: OrgId,
+        channel: &crate::domain::NotificationChannel,
         notice: &IncidentNotice,
+        notification_id: Uuid,
+        attempt: i32,
     ) -> (NotificationStatus, Option<String>) {
         let central = self.central_bot.as_ref().map(|c| c.as_central());
-        match build_notifier(cfg, &self.http, central, self.email.as_ref()) {
+        let error = match build_notifier(&channel.config, &self.http, central, self.email.as_ref())
+        {
             Ok(n) => match n.notify_incident(notice).await {
-                Ok(()) => (NotificationStatus::Sent, None),
-                Err(err) => (
-                    NotificationStatus::Failed,
-                    Some(redact_secrets(&err.to_string())),
-                ),
+                Ok(()) => return (NotificationStatus::Sent, None),
+                Err(err) => redact_secrets(&err.to_string()),
             },
-            Err(err) => (
-                NotificationStatus::Failed,
-                Some(redact_secrets(&err.to_string())),
-            ),
+            Err(err) => redact_secrets(&err.to_string()),
+        };
+        let snippet = log_error_snippet(&error);
+        // A telegram throttle hint means the send was deferred, not broken —
+        // info keeps the warn stream meaningful during a paging burst. Only
+        // telegram transports get the downgrade: a webhook body echoing
+        // "retry_after" is tenant-controlled and must not mute the warn.
+        let deferred = matches!(
+            channel.kind,
+            crate::domain::ChannelKind::Telegram | crate::domain::ChannelKind::TelegramApp
+        ) && retry_after_hint(Some(&error)).is_some();
+        if deferred {
+            tracing::info!(
+                org_id = %org.0,
+                incident_id = %notice.incident_id,
+                channel_id = %channel.id,
+                notification_id = %notification_id,
+                transport = channel.kind.as_db_str(),
+                attempt,
+                error = %snippet,
+                "incident notification deferred by transport"
+            );
+        } else {
+            tracing::warn!(
+                org_id = %org.0,
+                incident_id = %notice.incident_id,
+                channel_id = %channel.id,
+                notification_id = %notification_id,
+                transport = channel.kind.as_db_str(),
+                attempt,
+                error = %snippet,
+                "incident notification delivery failed"
+            );
         }
+        (NotificationStatus::Failed, Some(error))
     }
 
     fn notice(
@@ -1064,6 +1111,28 @@ fn redact_secrets(msg: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// Delivery errors echo transport response bodies (up to the outbound read
+/// cap). The DB error column stays org-scoped, but the shared log stream must
+/// not carry tenant-endpoint-controlled bulk or recipient addresses, so the
+/// logged copy is address-masked and clipped.
+fn log_error_snippet(error: &str) -> String {
+    const MAX_CHARS: usize = 256;
+    let masked = error
+        .split_whitespace()
+        .map(|tok| match tok.find('@') {
+            Some(at) if at > 0 && tok[at + 1..].contains('.') => "[redacted-address]",
+            _ => tok,
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    if masked.chars().count() > MAX_CHARS {
+        let clipped: String = masked.chars().take(MAX_CHARS).collect();
+        format!("{clipped}…")
+    } else {
+        masked
+    }
 }
 
 /// Exponential retry backoff in seconds after `attempt` just failed:
@@ -1362,19 +1431,21 @@ mod tests {
         let (_tx, rx) = mpsc::channel(4);
         EscalationEngine::new(
             rx,
-            ops,
-            policies,
-            on_call,
-            contacts,
-            targets,
-            channels,
-            crate::http_outbound::build_outbound_client(
-                crate::security::SsrfGuard::relaxed_for_tests(),
-            ),
-            EscalationConfig::default(),
-            String::new(),
-            None,
-            None,
+            EngineDeps {
+                ops,
+                policies,
+                on_call,
+                contacts,
+                targets,
+                channels,
+                http: crate::http_outbound::build_outbound_client(
+                    crate::security::SsrfGuard::relaxed_for_tests(),
+                ),
+                cfg: EscalationConfig::default(),
+                base_url: String::new(),
+                central_bot: None,
+                email: None,
+            },
         )
     }
 
@@ -1899,6 +1970,28 @@ mod tests {
             "an unparseable url token must not survive"
         );
         assert!(bad.contains("[redacted-url]"));
+    }
+
+    #[test]
+    fn log_error_snippet_masks_addresses_and_clips() {
+        let out = log_error_snippet("delivery rejected for <oncall@example.com>: mailbox full");
+        assert!(!out.contains("oncall@example.com"));
+        assert!(out.contains("[redacted-address]"));
+        assert!(out.contains("mailbox full"));
+
+        // A telegram-style @handle has no local part and stays readable.
+        assert_eq!(
+            log_error_snippet("chat @ops_team not found"),
+            "chat @ops_team not found"
+        );
+
+        let big = format!("endpoint returned 503: {}", "x".repeat(10_000));
+        let out = log_error_snippet(&big);
+        assert!(
+            out.chars().count() <= 257,
+            "clipped to the cap plus ellipsis"
+        );
+        assert!(out.ends_with('…'));
     }
 
     #[tokio::test]
