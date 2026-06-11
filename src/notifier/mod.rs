@@ -21,10 +21,11 @@ pub trait Notifier: Send + Sync {
     async fn notify_incident(&self, notice: &IncidentNotice) -> Result<()>;
 }
 
-/// The single extensibility seam: map a stored [`ChannelConfig`] to its
-/// transport. Adding a channel type is one new arm here plus one `Notifier`
-/// impl. URLs were validated `https` on channel create; re-parsing here is a
-/// defence-in-depth guard, not the primary check.
+/// Delivery-side factory: map a stored [`ChannelConfig`] to its transport.
+/// The full add-a-transport checklist lives on
+/// `crate::domain::notification_channel`. URLs were validated `https` on
+/// channel create; re-parsing here is a defence-in-depth guard, not the
+/// primary check.
 pub fn build_notifier(cfg: &ChannelConfig, http: &OutboundHttpClient) -> Result<Arc<dyn Notifier>> {
     let parse = |s: &str| -> Result<url::Url> {
         s.parse::<url::Url>().map_err(|e| {
@@ -35,23 +36,19 @@ pub fn build_notifier(cfg: &ChannelConfig, http: &OutboundHttpClient) -> Result<
         })
     };
     Ok(match cfg {
-        ChannelConfig::Webhook {
-            url,
-            headers,
-            secret,
-        } => Arc::new(WebhookNotifier::new(
+        ChannelConfig::Webhook(c) => Arc::new(WebhookNotifier::new(
             http.clone(),
-            parse(url)?,
-            headers.clone(),
-            secret.clone(),
+            parse(&c.url)?,
+            c.headers.clone(),
+            c.secret.clone(),
         )) as Arc<dyn Notifier>,
-        ChannelConfig::Slack { webhook_url } => {
-            Arc::new(SlackNotifier::new(http.clone(), parse(webhook_url)?)) as Arc<dyn Notifier>
+        ChannelConfig::Slack(c) => {
+            Arc::new(SlackNotifier::new(http.clone(), parse(&c.webhook_url)?)) as Arc<dyn Notifier>
         }
-        ChannelConfig::Telegram { bot_token, chat_id } => Arc::new(TelegramNotifier::new(
+        ChannelConfig::Telegram(c) => Arc::new(TelegramNotifier::new(
             http.clone(),
-            bot_token,
-            chat_id.clone(),
+            &c.bot_token,
+            c.chat_id.clone(),
         )?) as Arc<dyn Notifier>,
     })
 }

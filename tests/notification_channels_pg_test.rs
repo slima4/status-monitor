@@ -18,7 +18,7 @@ use uptimepage::api::error::codes;
 use uptimepage::domain::{
     AlertBinding, ChannelConfig, CheckSpec, ExpectedStatus, NewIncidentNotification,
     NewNotificationChannel, NewTarget, NotificationChannelUpdate, NotificationReason,
-    NotificationStatus, TargetAlerts, WriteSource,
+    NotificationStatus, SlackConfig, TargetAlerts, WriteSource,
 };
 use uptimepage::error::AppError;
 use uptimepage::storage::{
@@ -31,9 +31,9 @@ use common::{default_http_check, make_user, pg_pool_from_env, test_cipher, uniqu
 fn slack(name: &str, secret: &str) -> NewNotificationChannel {
     NewNotificationChannel {
         name: name.into(),
-        config: ChannelConfig::Slack {
+        config: ChannelConfig::Slack(SlackConfig {
             webhook_url: format!("https://hooks.slack.com/services/{secret}"),
-        },
+        }),
         enabled: true,
     }
 }
@@ -213,7 +213,7 @@ async fn channel_config_sealed_at_rest_live_pg() {
     // Opened back through the store the caller sees plaintext again.
     let opened = store.get(org_a, ch.id).await.unwrap().unwrap();
     match opened.config {
-        ChannelConfig::Slack { webhook_url } => {
+        ChannelConfig::Slack(SlackConfig { webhook_url }) => {
             assert!(webhook_url.ends_with(secret))
         }
         other => panic!("unexpected variant: {other:?}"),

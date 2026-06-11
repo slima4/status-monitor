@@ -1150,7 +1150,7 @@ mod tests {
         AlertBinding, ChannelConfig, CheckSpec, EscalationTargetType, ExpectedStatus, HttpCheck,
         HttpMethod, IncidentOrigin, IncidentSeverity, IncidentState, IncidentUrgency,
         IncidentVisibility, NewEscalationPolicy, NewEscalationStep, NewEscalationTarget,
-        NewNotificationChannel, OpsIncident, Target, TargetAlerts, WriteSource,
+        NewNotificationChannel, OpsIncident, Target, TargetAlerts, WebhookConfig, WriteSource,
     };
     use crate::storage::{
         Actor, InMemoryContactStore, InMemoryEscalationPolicyStore, InMemoryIncidentOpsStore,
@@ -1169,11 +1169,11 @@ mod tests {
                 org(),
                 NewNotificationChannel {
                     name: format!("ops-{}", Uuid::now_v7()),
-                    config: ChannelConfig::Webhook {
+                    config: ChannelConfig::Webhook(WebhookConfig {
                         url: "http://127.0.0.1:1/notify".into(),
                         headers: Default::default(),
                         secret: None,
-                    },
+                    }),
                     enabled: true,
                 },
                 WriteSource::Ui,

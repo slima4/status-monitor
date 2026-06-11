@@ -455,6 +455,7 @@ impl NotificationChannelStore for InMemoryNotificationChannelStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::{SlackConfig, WebhookConfig};
     use std::collections::BTreeMap;
 
     fn org() -> OrgId {
@@ -468,9 +469,9 @@ mod tests {
     fn slack(name: &str) -> NewNotificationChannel {
         NewNotificationChannel {
             name: name.into(),
-            config: ChannelConfig::Slack {
+            config: ChannelConfig::Slack(SlackConfig {
                 webhook_url: "https://hooks.slack.com/x".into(),
-            },
+            }),
             enabled: true,
         }
     }
@@ -568,11 +569,11 @@ mod tests {
     fn seal_open_round_trips_with_and_without_cipher() {
         use base64::Engine;
         use base64::engine::general_purpose::STANDARD;
-        let cfg = ChannelConfig::Webhook {
+        let cfg = ChannelConfig::Webhook(WebhookConfig {
             url: "https://x.test/h".into(),
             headers: BTreeMap::from([("X-Tok".into(), "s3cret".into())]),
             secret: None,
-        };
+        });
 
         // No KEK: plaintext JSON, still opens.
         let v = seal(&cfg, None).unwrap();
@@ -600,9 +601,9 @@ mod tests {
         use base64::engine::general_purpose::STANDARD;
         let c = Cipher::from_base64(&STANDARD.encode([6u8; 32])).unwrap();
         let sealed = seal(
-            &ChannelConfig::Slack {
+            &ChannelConfig::Slack(SlackConfig {
                 webhook_url: "https://hooks.slack.com/x".into(),
-            },
+            }),
             Some(&c),
         )
         .unwrap();
@@ -617,9 +618,9 @@ mod tests {
         // Simulates a manual-INSERT path (test helper, ad-hoc SQL, demo seam)
         // that wrote a plaintext config into a KEK-mode deployment.
         let plaintext = seal(
-            &ChannelConfig::Slack {
+            &ChannelConfig::Slack(SlackConfig {
                 webhook_url: "https://hooks.slack.com/x".into(),
-            },
+            }),
             None,
         )
         .unwrap();

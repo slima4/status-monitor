@@ -10,7 +10,10 @@ use axum::routing::post;
 use chrono::Utc;
 use parking_lot::Mutex;
 use serde_json::Value;
-use uptimepage::domain::{ChannelConfig, IncidentSeverity, IncidentUrgency, NotificationReason};
+use uptimepage::domain::{
+    ChannelConfig, IncidentSeverity, IncidentUrgency, NotificationReason, SlackConfig,
+    TelegramConfig, WebhookConfig,
+};
 use uptimepage::http_outbound::build_outbound_client;
 use uptimepage::notifier::build_notifier;
 use uptimepage::notifier::event::IncidentNotice;
@@ -71,9 +74,9 @@ fn make_notice() -> IncidentNotice {
 #[tokio::test]
 async fn slack_channel_posts_text_payload() {
     let (addr, store) = spawn_capture_server().await;
-    let cfg = ChannelConfig::Slack {
+    let cfg = ChannelConfig::Slack(SlackConfig {
         webhook_url: format!("http://{addr}/hook"),
-    };
+    });
     let notifier = build_notifier(
         &cfg,
         &build_outbound_client(uptimepage::security::SsrfGuard::relaxed_for_tests()),
@@ -98,9 +101,9 @@ async fn slack_channel_posts_text_payload() {
 #[tokio::test]
 async fn slack_multi_region_includes_breakdown() {
     let (addr, store) = spawn_capture_server().await;
-    let cfg = ChannelConfig::Slack {
+    let cfg = ChannelConfig::Slack(SlackConfig {
         webhook_url: format!("http://{addr}/hook"),
-    };
+    });
     let notifier = build_notifier(
         &cfg,
         &build_outbound_client(uptimepage::security::SsrfGuard::relaxed_for_tests()),
@@ -120,9 +123,9 @@ async fn slack_multi_region_includes_breakdown() {
 #[tokio::test]
 async fn slack_single_region_omits_breakdown() {
     let (addr, store) = spawn_capture_server().await;
-    let cfg = ChannelConfig::Slack {
+    let cfg = ChannelConfig::Slack(SlackConfig {
         webhook_url: format!("http://{addr}/hook"),
-    };
+    });
     let notifier = build_notifier(
         &cfg,
         &build_outbound_client(uptimepage::security::SsrfGuard::relaxed_for_tests()),
@@ -143,11 +146,11 @@ async fn slack_single_region_omits_breakdown() {
 #[tokio::test]
 async fn webhook_channel_posts_incident_payload_with_custom_header() {
     let (addr, store) = spawn_capture_server().await;
-    let cfg = ChannelConfig::Webhook {
+    let cfg = ChannelConfig::Webhook(WebhookConfig {
         url: format!("http://{addr}/hook"),
         headers: std::collections::BTreeMap::from([("X-Test-Token".into(), "secret".into())]),
         secret: None,
-    };
+    });
     let notifier = build_notifier(
         &cfg,
         &build_outbound_client(uptimepage::security::SsrfGuard::relaxed_for_tests()),
@@ -175,11 +178,11 @@ async fn webhook_signed_delivery_carries_a_verifiable_signature() {
 
     let (addr, store) = spawn_capture_server().await;
     let secret = "0123456789abcdef-signing-key";
-    let cfg = ChannelConfig::Webhook {
+    let cfg = ChannelConfig::Webhook(WebhookConfig {
         url: format!("http://{addr}/hook"),
         headers: std::collections::BTreeMap::new(),
         secret: Some(secret.into()),
-    };
+    });
     let notifier = build_notifier(
         &cfg,
         &build_outbound_client(uptimepage::security::SsrfGuard::relaxed_for_tests()),
@@ -218,19 +221,19 @@ async fn build_notifier_constructs_each_kind() {
     let http = build_outbound_client(uptimepage::security::SsrfGuard::relaxed_for_tests());
     assert!(
         build_notifier(
-            &ChannelConfig::Telegram {
+            &ChannelConfig::Telegram(TelegramConfig {
                 bot_token: "123:abc".into(),
                 chat_id: "-100".into(),
-            },
+            }),
             &http,
         )
         .is_ok()
     );
     assert!(
         build_notifier(
-            &ChannelConfig::Slack {
+            &ChannelConfig::Slack(SlackConfig {
                 webhook_url: "https://hooks.slack.com/x".into(),
-            },
+            }),
             &http,
         )
         .is_ok()
@@ -241,9 +244,9 @@ async fn build_notifier_constructs_each_kind() {
 async fn build_notifier_rejects_unparseable_url() {
     let http = build_outbound_client(uptimepage::security::SsrfGuard::relaxed_for_tests());
     let err = build_notifier(
-        &ChannelConfig::Slack {
+        &ChannelConfig::Slack(SlackConfig {
             webhook_url: "not a url".into(),
-        },
+        }),
         &http,
     );
     assert!(err.is_err());

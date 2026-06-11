@@ -348,17 +348,15 @@ fn validate_config(cfg: &crate::domain::ChannelConfig) -> Result<()> {
 
 /// Deny-list gate for the config's outbound URL, mirroring the targets
 /// test path: a hit is recorded as an `abuse_blocked` quota event and
-/// rejected. Telegram goes to the fixed Bot API host, so only the
-/// webhook-bearing transports are inspected.
+/// rejected. Transports with a fixed vendor endpoint expose no URL and
+/// pass through.
 fn check_channel_abuse(
     state: &AppState,
     org: crate::domain::OrgId,
     config: &ChannelConfig,
 ) -> Result<()> {
-    let url = match config {
-        ChannelConfig::Slack { webhook_url } => webhook_url,
-        ChannelConfig::Webhook { url, .. } => url,
-        ChannelConfig::Telegram { .. } => return Ok(()),
+    let Some(url) = config.abuse_url() else {
+        return Ok(());
     };
     let Some(hit) = state.abuse.inspect_url(url) else {
         return Ok(());

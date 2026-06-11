@@ -2,12 +2,32 @@
 //! destination (Slack hook, generic webhook, Telegram bot, …) that targets
 //! bind to for Down/Recovered alerts.
 //!
-//! Extensibility seam: adding a transport is one [`ChannelConfig`] variant
-//! here, one `Notifier` impl, and one registry arm (Phase 2). The whole
-//! config blob is sealed at rest by the credentials KEK at the storage edge,
-//! and secrets are never echoed back by the API — see [`ChannelConfig::redacted`].
+//! Each transport is a self-contained module implementing
+//! [`TransportConfig`]; [`ChannelConfig`] only delegates. The full
+//! add-a-transport checklist:
+//!
+//! 1. config module here + [`TransportConfig`] impl;
+//! 2. [`ChannelKind`] variant, [`ChannelKind::ALL`], `as_db_str`, and the
+//!    Postgres `kind` CHECK constraint (the enum-drift test compares them);
+//! 3. [`ChannelConfig`] variant + `with_transport!` arm — the compiler then
+//!    points at the remaining match sites (`build_notifier`, the form
+//!    prefill);
+//! 4. a `Notifier` impl in `crate::notifier` and its factory arm;
+//! 5. the form UI: template variant panel + type card + JS config builder.
+//!
+//! The whole config blob is sealed at rest by the credentials KEK at the
+//! storage edge, and secrets are never echoed back by the API — see
+//! [`ChannelConfig::redacted`].
 
-use std::collections::BTreeMap;
+mod slack;
+mod telegram;
+mod transport;
+mod webhook;
+
+pub use slack::SlackConfig;
+pub use telegram::TelegramConfig;
+pub use transport::TransportConfig;
+pub use webhook::WebhookConfig;
 
 use super::WriteSource;
 use chrono::{DateTime, Utc};
@@ -40,67 +60,39 @@ impl ChannelKind {
     }
 }
 
-/// Transport config, `type`-tagged. Stored sealed at rest; the in-memory
-/// domain value is always plaintext.
+/// Transport config, `type`-tagged on the wire (newtype variants flatten the
+/// inner struct's fields into the same JSON object). Stored sealed at rest;
+/// the in-memory domain value is always plaintext.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ChannelConfig {
-    Webhook {
-        url: String,
-        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-        headers: BTreeMap<String, String>,
-        /// Optional HMAC-SHA256 signing key. When set, each delivery carries an
-        /// `X-Uptimepage-Signature` + `X-Uptimepage-Timestamp` the receiver can
-        /// verify; absent leaves the POST unsigned.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        secret: Option<String>,
-    },
-    Slack {
-        webhook_url: String,
-    },
-    Telegram {
-        bot_token: String,
-        chat_id: String,
-    },
+    Webhook(WebhookConfig),
+    Slack(SlackConfig),
+    Telegram(TelegramConfig),
 }
 
-const MASK: &str = "***";
+/// Apply `$body` to the inner [`TransportConfig`] of any variant. The one
+/// place that has to enumerate the variants for delegation.
+macro_rules! with_transport {
+    ($self:expr, |$c:ident| $body:expr) => {
+        match $self {
+            ChannelConfig::Webhook($c) => $body,
+            ChannelConfig::Slack($c) => $body,
+            ChannelConfig::Telegram($c) => $body,
+        }
+    };
+}
 
 impl ChannelConfig {
     pub fn kind(&self) -> ChannelKind {
-        match self {
-            Self::Webhook { .. } => ChannelKind::Webhook,
-            Self::Slack { .. } => ChannelKind::Slack,
-            Self::Telegram { .. } => ChannelKind::Telegram,
-        }
+        with_transport!(self, |c| c.kind())
     }
 
-    /// Overwrite every secret-bearing field with [`MASK`] in place. Non-secret
-    /// routing shape (kind, header *names*, chat id) is kept so the UI can
-    /// still show which channel this is. The webhook URL itself can carry a
-    /// token (…/hooks/T/B/secret), so the whole value is masked.
-    ///
-    /// Single source of the masking policy: [`Self::redacted`] and the API
-    /// `RedactInPlace` impl both route through here, so a new secret field on
-    /// a variant is masked everywhere by editing one match arm.
+    /// Overwrite every secret-bearing field with the redaction mask in
+    /// place. Single source of the masking policy: [`Self::redacted`] and
+    /// the API `RedactInPlace` impl both route through here.
     pub fn redact_in_place(&mut self) {
-        match self {
-            Self::Webhook {
-                url,
-                headers,
-                secret,
-            } => {
-                *url = MASK.to_string();
-                for v in headers.values_mut() {
-                    *v = MASK.to_string();
-                }
-                if secret.is_some() {
-                    *secret = Some(MASK.to_string());
-                }
-            }
-            Self::Slack { webhook_url } => *webhook_url = MASK.to_string(),
-            Self::Telegram { bot_token, .. } => *bot_token = MASK.to_string(),
-        }
+        with_transport!(self, |c| c.redact_in_place())
     }
 
     /// JSON copy with every secret-bearing field masked, for API responses
@@ -111,59 +103,18 @@ impl ChannelConfig {
         serde_json::to_value(&c).unwrap_or(serde_json::Value::Null)
     }
 
-    /// True if any secret-bearing field still carries the redaction sentinel.
-    /// A `GET → PATCH` round-trip that re-submits a masked config must be
-    /// rejected, never written back as the literal `***`.
     pub fn has_redaction_sentinel(&self) -> bool {
-        match self {
-            Self::Webhook {
-                url,
-                headers,
-                secret,
-            } => {
-                url == MASK
-                    || headers.values().any(|v| v == MASK)
-                    || secret.as_deref() == Some(MASK)
-            }
-            Self::Slack { webhook_url } => webhook_url == MASK,
-            Self::Telegram { bot_token, .. } => bot_token == MASK,
-        }
+        with_transport!(self, |c| c.has_redaction_sentinel())
     }
 
-    /// Cheap structural validation (no network). Returns a human message on
-    /// the first problem. Reachability / SSRF checks belong to the notifier
-    /// transport (Phase 2), not here.
     pub fn validate(&self) -> Result<(), String> {
-        fn https(u: &str, field: &str) -> Result<(), String> {
-            let parsed = url::Url::parse(u).map_err(|_| format!("{field} is not a valid URL"))?;
-            if parsed.scheme() != "https" {
-                return Err(format!("{field} must be an https:// URL"));
-            }
-            Ok(())
-        }
-        match self {
-            Self::Webhook { url, secret, .. } => {
-                https(url, "url")?;
-                // A short signing key undermines the HMAC; require a meaningful
-                // length when one is set (empty/absent stays unsigned).
-                if let Some(s) = secret
-                    && s.len() < 16
-                {
-                    return Err("secret must be at least 16 characters".into());
-                }
-                Ok(())
-            }
-            Self::Slack { webhook_url } => https(webhook_url, "webhook_url"),
-            Self::Telegram { bot_token, chat_id } => {
-                if bot_token.trim().is_empty() {
-                    return Err("bot_token is required".into());
-                }
-                if chat_id.trim().is_empty() {
-                    return Err("chat_id is required".into());
-                }
-                Ok(())
-            }
-        }
+        with_transport!(self, |c| c.validate())
+    }
+
+    /// The customer-controlled destination URL for the abuse deny-list;
+    /// `None` for transports with a fixed vendor endpoint.
+    pub fn abuse_url(&self) -> Option<&str> {
+        with_transport!(self, |c| c.abuse_url())
     }
 }
 
@@ -222,6 +173,9 @@ pub struct NotificationChannelUpdate {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
+    use super::transport::MASK;
     use super::*;
 
     #[test]
@@ -240,30 +194,52 @@ mod tests {
     }
 
     #[test]
-    fn kind_matches_variant() {
-        let c: ChannelConfig =
-            serde_json::from_str(r#"{"type":"telegram","bot_token":"t","chat_id":"1"}"#).unwrap();
-        assert_eq!(c.kind(), ChannelKind::Telegram);
-        assert_eq!(c.kind().as_db_str(), "telegram");
+    fn kind_matches_wire_tag_for_every_variant() {
+        // KIND is a per-struct constant, no longer tied to the enum variant
+        // by a match — this pins each one to its serde `type` tag so a
+        // copy-pasted transport can't desync the DB `kind` column from the
+        // stored config.
+        let configs = [
+            ChannelConfig::Webhook(WebhookConfig {
+                url: "https://x.test".into(),
+                headers: BTreeMap::new(),
+                secret: None,
+            }),
+            ChannelConfig::Slack(SlackConfig {
+                webhook_url: "https://hooks.slack.com/x".into(),
+            }),
+            ChannelConfig::Telegram(TelegramConfig {
+                bot_token: "t".into(),
+                chat_id: "1".into(),
+            }),
+        ];
+        assert_eq!(configs.len(), ChannelKind::ALL.len());
+        for c in configs {
+            let tag = serde_json::to_value(&c).unwrap()["type"]
+                .as_str()
+                .unwrap()
+                .to_string();
+            assert_eq!(c.kind().as_db_str(), tag);
+        }
     }
 
     #[test]
     fn redacted_masks_every_secret() {
-        let c = ChannelConfig::Telegram {
+        let c = ChannelConfig::Telegram(TelegramConfig {
             bot_token: "123:supersecret".into(),
             chat_id: "-100".into(),
-        };
+        });
         let r = c.redacted();
         assert_eq!(r["bot_token"], "***");
         // Non-secret routing info is preserved so the UI stays useful.
         assert_eq!(r["chat_id"], "-100");
         assert!(!serde_json::to_string(&r).unwrap().contains("supersecret"));
 
-        let w = ChannelConfig::Webhook {
+        let w = ChannelConfig::Webhook(WebhookConfig {
             url: "https://x.test/hooks/abc/secret".into(),
             headers: BTreeMap::from([("Authorization".into(), "Bearer tkn".into())]),
             secret: Some("0123456789abcdef".into()),
-        };
+        });
         let rw = w.redacted();
         assert_eq!(rw["url"], "***");
         assert_eq!(rw["headers"]["Authorization"], "***");
@@ -278,46 +254,59 @@ mod tests {
     #[test]
     fn validate_rejects_non_https_and_empty() {
         assert!(
-            ChannelConfig::Slack {
+            ChannelConfig::Slack(SlackConfig {
                 webhook_url: "http://insecure".into()
-            }
+            })
             .validate()
             .is_err()
         );
         assert!(
-            ChannelConfig::Telegram {
+            ChannelConfig::Telegram(TelegramConfig {
                 bot_token: "  ".into(),
                 chat_id: "1".into()
-            }
+            })
             .validate()
             .is_err()
         );
         assert!(
-            ChannelConfig::Webhook {
+            ChannelConfig::Webhook(WebhookConfig {
                 url: "https://ok.test".into(),
                 headers: BTreeMap::new(),
                 secret: None,
-            }
+            })
             .validate()
             .is_ok()
         );
         // A too-short signing secret is rejected.
         assert!(
-            ChannelConfig::Webhook {
+            ChannelConfig::Webhook(WebhookConfig {
                 url: "https://ok.test".into(),
                 headers: BTreeMap::new(),
                 secret: Some("short".into()),
-            }
+            })
             .validate()
             .is_err()
         );
     }
 
     #[test]
+    fn abuse_url_only_for_customer_destinations() {
+        let slack = ChannelConfig::Slack(SlackConfig {
+            webhook_url: "https://hooks.slack.com/x".into(),
+        });
+        assert_eq!(slack.abuse_url(), Some("https://hooks.slack.com/x"));
+        let tg = ChannelConfig::Telegram(TelegramConfig {
+            bot_token: "t".into(),
+            chat_id: "1".into(),
+        });
+        assert_eq!(tg.abuse_url(), None);
+    }
+
+    #[test]
     fn mask_matches_canonical_redaction_sentinel() {
         // A redacted config round-tripped through the API must be detectable
-        // as the sentinel (Phase 3 rejects re-submitted "***"). That only
-        // holds if this mask stays byte-equal to the canonical one.
+        // as the sentinel (re-submitted "***" is rejected). That only holds
+        // if this mask stays byte-equal to the canonical one.
         assert_eq!(MASK, crate::api::redaction::REDACTED);
     }
 

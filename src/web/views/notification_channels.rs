@@ -284,19 +284,15 @@ fn form_from_channel(c: NotificationChannel) -> ChannelFormModel {
     redacted.redact_in_place();
     let mut config = ConfigFields::default();
     match redacted {
-        ChannelConfig::Slack { webhook_url } => config.slack_webhook_url = webhook_url,
-        ChannelConfig::Webhook {
-            url,
-            headers,
-            secret,
-        } => {
-            config.webhook_url = url;
-            config.webhook_headers_json = json_pretty(&headers);
-            config.webhook_secret = secret.unwrap_or_default();
+        ChannelConfig::Slack(c) => config.slack_webhook_url = c.webhook_url,
+        ChannelConfig::Webhook(c) => {
+            config.webhook_url = c.url;
+            config.webhook_headers_json = json_pretty(&c.headers);
+            config.webhook_secret = c.secret.unwrap_or_default();
         }
-        ChannelConfig::Telegram { bot_token, chat_id } => {
-            config.telegram_bot_token = bot_token;
-            config.telegram_chat_id = chat_id;
+        ChannelConfig::Telegram(c) => {
+            config.telegram_bot_token = c.bot_token;
+            config.telegram_chat_id = c.chat_id;
         }
     }
     ChannelFormModel {
@@ -316,6 +312,7 @@ fn form_from_channel(c: NotificationChannel) -> ChannelFormModel {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::SlackConfig;
 
     #[test]
     fn new_form_renders_empty_create() {
@@ -376,9 +373,9 @@ mod tests {
             id: Uuid::nil(),
             name: "Ops".into(),
             kind: crate::domain::ChannelKind::Slack,
-            config: ChannelConfig::Slack {
+            config: ChannelConfig::Slack(SlackConfig {
                 webhook_url: webhook_url.into(),
-            },
+            }),
             enabled: true,
             write_source: crate::domain::WriteSource::Ui,
             created_at: Utc::now(),
