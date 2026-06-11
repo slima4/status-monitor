@@ -2148,7 +2148,10 @@
         color: var(--theme-surface);
         opacity: 0.7;
     }
-    .check-type-card:has(input:focus-visible) {
+    /* Buttons (bind picker, + card) carry no inner input, so they get the
+       same focus treatment directly. */
+    .check-type-card:has(input:focus-visible),
+    button.check-type-card:focus-visible {
         outline: 1px dotted currentColor;
         outline-offset: -3px;
     }
@@ -2159,6 +2162,33 @@
     .check-type-card__desc {
         @apply text-xs;
         color: var(--theme-text-muted);
+    }
+    /* "+ add monitor" invitation card in a channel's used-by grid. Hover
+       reuses the base card treatment (buttons have no inner input, so the
+       :has() guards on the base rules don't interfere). */
+    .check-type-card--add {
+        @apply items-center justify-center;
+        border-style: dashed;
+        background: transparent;
+    }
+    .check-type-card__plus {
+        @apply text-2xl font-semibold leading-none;
+        color: var(--theme-action-accent);
+    }
+    /* × unbind affordance on a bound monitor card (sibling of the link, so
+       the card body stays a plain navigable <a>). */
+    .unbind-btn {
+        @apply absolute right-1 top-1 h-6 w-6 rounded-sm text-sm leading-none;
+        font-family: var(--font-mono);
+        color: var(--theme-text-muted);
+    }
+    .unbind-btn:hover {
+        color: var(--theme-state-bad-fg);
+        background: var(--theme-surface-sunk);
+    }
+    .unbind-btn:focus-visible {
+        outline: 1px dotted currentColor;
+        outline-offset: -2px;
     }
 
     /* Tag chip input. Container is a flex-wrap; the input grows to fill the
@@ -2856,6 +2886,9 @@
         transition: border-color 120ms ease;
     }
     .monitors-search:focus-within { border-color: var(--theme-accent); }
+    /* Embedded contexts (channel-form picker): shrink with the card instead
+       of forcing the toolbar's 16rem floor. */
+    .monitors-search--fluid { min-width: 0; }
     .monitors-search__input {
         @apply min-w-0 flex-1 border-0 bg-transparent text-sm outline-none;
         color: var(--sm-monitors-search-fg);

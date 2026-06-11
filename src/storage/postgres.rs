@@ -454,6 +454,28 @@ impl TargetStore for PostgresTargetStore {
         Ok(res.rows_affected() > 0)
     }
 
+    async fn unbind_channel(&self, org: OrgId, channel_id: Uuid) -> Result<u64> {
+        // No write_source stamp: this is system cleanup, not an operator edit.
+        let res = sqlx::query(
+            r#"UPDATE targets
+               SET alerts = COALESCE(
+                       (SELECT jsonb_agg(e)
+                          FROM jsonb_array_elements(alerts) e
+                         WHERE e->>'channel_id' IS DISTINCT FROM $2::text),
+                       '[]'::jsonb),
+                   updated_at = now()
+               WHERE org_id = $1
+                 AND alerts @> jsonb_build_array(
+                         jsonb_build_object('channel_id', $2::text))"#,
+        )
+        .bind(org.0)
+        .bind(channel_id)
+        .execute(&self.pool)
+        .await
+        .context("unbind channel bindings")?;
+        Ok(res.rows_affected())
+    }
+
     async fn bulk_create(
         &self,
         org: OrgId,

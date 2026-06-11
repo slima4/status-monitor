@@ -32,6 +32,42 @@
         resultEl?.classList.add("hidden");
     }
 
+    function showStatus(el, text, cls) {
+        el.textContent = text;
+        el.className = `font-mono text-xs ${cls}`;
+        el.classList.remove("hidden");
+    }
+
+    // First text node only — the name span may carry disabled/managed chips.
+    function cardName(el) {
+        return el.querySelector(".check-type-card__name")?.childNodes[0]?.textContent.trim() || "monitor";
+    }
+
+    // Make `channelId`'s presence in the monitor's alert bindings match
+    // `bound`. GET-then-PATCH replaces the whole alerts array from a fresh
+    // snapshot — last write wins, same as the monitor form's own save.
+    async function setBinding(channelId, targetId, bound) {
+        const headers = {
+            "Accept": "application/json",
+            "X-Requested-With": "uptimepage",
+        };
+        const res = await fetch(`/api/v1/targets/${targetId}`, { headers });
+        if (!res.ok) throw new Error(`monitor fetch failed (${res.status})`);
+        let alerts = (await res.json()).alerts || [];
+        const present = alerts.some((b) => b.channel_id === channelId);
+        if (bound === present) return;
+        if (bound) alerts.push({ channel_id: channelId });
+        else alerts = alerts.filter((b) => b.channel_id !== channelId);
+        const patch = await fetch(`/api/v1/targets/${targetId}`, {
+            method: "PATCH",
+            headers: { ...headers, "Content-Type": "application/json" },
+            body: JSON.stringify({ alerts }),
+        });
+        if (!patch.ok) {
+            throw new Error(await window.smApiErrorMessage(patch, `update failed (${patch.status})`));
+        }
+    }
+
     function showVariant(kind) {
         form.querySelectorAll("[data-variant]").forEach(el => {
             el.classList.toggle("hidden", el.dataset.variant !== kind);
@@ -97,11 +133,7 @@
     // locked edit: tests the stored config by id.
     const testBtn = form.querySelector("[data-send-test]");
     if (testBtn) {
-        const showResult = (text, cls) => {
-            resultEl.textContent = text;
-            resultEl.className = `font-mono text-xs ${cls}`;
-            resultEl.classList.remove("hidden");
-        };
+        const showResult = (text, cls) => showStatus(resultEl, text, cls);
         testBtn.addEventListener("click", async () => {
             clearErrors();
             let url = `${form.dataset.action}/test`;
@@ -149,11 +181,7 @@
                         "flash-text flash-text--ok font-medium",
                     );
                 } else {
-                    let msg = `delivery failed (${res.status})`;
-                    try {
-                        const json = await res.json();
-                        if (json?.error?.message) msg = json.error.message;
-                    } catch { /* keep the status fallback */ }
+                    const msg = await window.smApiErrorMessage(res, `delivery failed (${res.status})`);
                     showResult(`✗ ${msg}`, "flash-text flash-text--bad font-medium");
                 }
             } catch (err) {
@@ -196,7 +224,29 @@
                 renderClientError(`Network error: ${err.message || err}`);
                 return;
             }
-            if (res.ok) { navigating = true; window.location = "/settings/notifications"; return; }
+            if (res.ok) {
+                if (!isEdit) {
+                    const bound = await bindSelected(res);
+                    if (bound.failed.length) {
+                        // The channel exists now — a re-submit would dead-end
+                        // on CHANNEL_NAME_TAKEN (or duplicate the channel
+                        // under a tweaked name) and re-bind the already-bound
+                        // picks. The edit page shows the true state.
+                        if (bound.channelId) {
+                            navigating = true;
+                            window.location = `/settings/notifications/${bound.channelId}/edit`;
+                            return;
+                        }
+                        renderClientError(
+                            `Channel created, but binding failed for ${bound.failed.join(", ")} — open the channel from the list to finish.`,
+                        );
+                        return;
+                    }
+                }
+                navigating = true;
+                window.location = "/settings/notifications";
+                return;
+            }
             let body;
             try { body = await res.json(); }
             catch { renderClientError(`Request failed (${res.status})`); return; }
@@ -205,6 +255,29 @@
             if (!navigating) { submitBtn.disabled = false; submitBtn.textContent = label; }
         }
     });
+
+    // Create-mode "bind to monitors": bind each picked monitor to the
+    // channel just created. Returns the new channel id and descriptions of
+    // the bindings that failed (empty = all good).
+    async function bindSelected(res) {
+        const picked = [...form.querySelectorAll("[data-used-by-grid] [data-bound-card]")];
+        if (!picked.length) return { channelId: null, failed: [] };
+        let channelId = null;
+        try { channelId = (await res.json())?.id; } catch { /* handled below */ }
+        if (!channelId) {
+            return { channelId, failed: ["every monitor (the create response carried no channel id)"] };
+        }
+        const failed = [];
+        for (const [i, card] of picked.entries()) {
+            if (picked.length > 3) submitBtn.textContent = `binding ${i + 1}/${picked.length}…`;
+            try {
+                await setBinding(channelId, card.dataset.targetId, true);
+            } catch (err) {
+                failed.push(`${cardName(card)} (${err.message || err})`);
+            }
+        }
+        return { channelId, failed };
+    }
 
     function buildBody() {
         const data = new FormData(form);
@@ -267,6 +340,210 @@
                 chat_id: (data.get("telegram_chat_id") || "").trim(),
             },
         };
+    }
+
+    // Monitor binding picker, both modes. Edit: each pick/unpick PATCHes
+    // immediately. Create: picks are local until the submit handler binds
+    // them. Cards move between the grids in place — no reload, so unsaved
+    // form edits survive.
+    const bindRoot = form.querySelector("[data-bind-root]");
+    if (bindRoot) {
+        const channelId = bindRoot.dataset.channelId; // empty on create
+        const addBtn = bindRoot.querySelector("[data-add-monitor]");
+        const picker = bindRoot.querySelector("#bind-picker");
+        const bindResult = bindRoot.querySelector("[data-bind-result]");
+        const usedByGrid = bindRoot.querySelector("[data-used-by-grid]");
+        const bindGrid = bindRoot.querySelector("[data-bind-grid]");
+        const searchInput = bindRoot.querySelector("[data-picker-search]");
+        const showDisabledCb = bindRoot.querySelector("[data-picker-show-disabled]");
+        const pagerEl = bindRoot.querySelector("[data-picker-pager]");
+        const pagerInfo = bindRoot.querySelector("[data-pager-info]");
+        const pagerPrev = bindRoot.querySelector("[data-pager-prev]");
+        const pagerNext = bindRoot.querySelector("[data-pager-next]");
+        const PAGE_SIZE = 20;
+        let page = 0;
+        const showBindResult = (text, cls) => showStatus(bindResult, text, cls);
+        const setPickerOpen = (open) => {
+            picker.classList.toggle("hidden", !open);
+            addBtn.setAttribute("aria-expanded", String(open));
+        };
+        addBtn.addEventListener("click", () => {
+            setPickerOpen(picker.classList.contains("hidden"));
+        });
+
+        // One derive-everything-from-DOM render: counts, empty-state notes,
+        // and the search/show-disabled/pagination window.
+        function applyPicker() {
+            const bound = usedByGrid.querySelectorAll("[data-bound-card]").length;
+            const all = [...bindGrid.querySelectorAll("[data-bind-monitor]")];
+            const avail = all.length;
+
+            const someEl = document.querySelector("[data-bound-some]");
+            if (someEl) {
+                someEl.classList.toggle("hidden", bound === 0);
+                document.querySelector("[data-bound-none]")?.classList.toggle("hidden", bound > 0);
+                const count = someEl.querySelector("[data-bound-count]");
+                if (count) count.textContent = `${bound} monitor${bound === 1 ? "" : "s"}`;
+            }
+            bindRoot.querySelector("[data-used-by-note]")?.classList.toggle("hidden", bound > 0);
+            bindRoot.querySelector("[data-picker-none]")?.classList.toggle("hidden", bound + avail > 0);
+            bindRoot.querySelector("[data-picker-allbound]")?.classList.toggle("hidden", avail > 0 || bound === 0);
+            bindRoot.querySelector("[data-picker-desc]")?.classList.toggle("hidden", avail === 0);
+            bindRoot.querySelector("[data-picker-controls]")?.classList.toggle("hidden", avail === 0);
+            bindGrid.classList.toggle("hidden", avail === 0);
+
+            const q = (searchInput?.value || "").trim().toLowerCase();
+            const showDisabled = !!showDisabledCb?.checked;
+            const matched = all.filter((b) =>
+                (showDisabled || b.dataset.enabled !== "false")
+                && (!q || `${b.textContent} ${b.dataset.tags || ""}`.toLowerCase().includes(q)));
+            const pages = Math.max(1, Math.ceil(matched.length / PAGE_SIZE));
+            page = Math.min(page, pages - 1);
+            const visible = new Set(matched.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE));
+            all.forEach((b) => b.classList.toggle("hidden", !visible.has(b)));
+            pagerEl.classList.toggle("hidden", matched.length <= PAGE_SIZE);
+            pagerInfo.textContent = `page ${page + 1}/${pages} · ${matched.length} match${matched.length === 1 ? "" : "es"}`;
+            pagerPrev.disabled = page === 0;
+            pagerNext.disabled = page >= pages - 1;
+            bindRoot.querySelector("[data-picker-nomatch]")?.classList
+                .toggle("hidden", matched.length > 0 || avail === 0);
+        }
+
+        // Enter in the picker search must not submit the form.
+        searchInput?.addEventListener("keydown", (evt) => {
+            if (evt.key === "Enter") evt.preventDefault();
+        });
+        // `/` jumps to the picker search (opening the picker if needed) —
+        // same hotkey as the monitors list toolbar.
+        document.addEventListener("keydown", (evt) => {
+            if (evt.key !== "/" || evt.metaKey || evt.ctrlKey || evt.altKey) return;
+            if (document.querySelector("dialog[open]")) return;
+            const t = evt.target;
+            if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+            if (!searchInput) return;
+            evt.preventDefault();
+            setPickerOpen(true);
+            searchInput.focus();
+            searchInput.select();
+        });
+        searchInput?.addEventListener("input", () => { page = 0; applyPicker(); });
+        showDisabledCb?.addEventListener("change", () => { page = 0; applyPicker(); });
+        pagerPrev?.addEventListener("click", () => { page -= 1; applyPicker(); });
+        pagerNext?.addEventListener("click", () => { page += 1; applyPicker(); });
+        applyPicker();
+
+        function moveToUsedBy(btn) {
+            const id = btn.dataset.targetId;
+            const wrap = document.createElement("div");
+            wrap.className = "relative min-w-0";
+            wrap.dataset.boundCard = "";
+            wrap.dataset.targetId = id;
+            wrap.dataset.enabled = btn.dataset.enabled;
+            wrap.dataset.tags = btn.dataset.tags || "";
+            // On create the card must not navigate away mid-form; once the
+            // binding is live (edit) it links to the monitor.
+            let card;
+            if (channelId) {
+                card = document.createElement("a");
+                card.href = `/targets/${id}/edit`;
+            } else {
+                card = document.createElement("div");
+            }
+            card.className = btn.className;
+            card.classList.remove("text-left", "hidden");
+            card.classList.add("h-full");
+            card.innerHTML = btn.innerHTML;
+            const unbind = document.createElement("button");
+            unbind.type = "button";
+            unbind.dataset.unbindMonitor = "";
+            unbind.dataset.targetId = id;
+            unbind.setAttribute("aria-label", `unbind ${cardName(btn)}`);
+            unbind.title = channelId
+                ? "unbind — stop alerting through this channel"
+                : "remove — won't be bound when the channel is created";
+            unbind.className = "unbind-btn";
+            unbind.textContent = "×";
+            wrap.append(card, unbind);
+            usedByGrid.insertBefore(wrap, addBtn);
+            btn.remove();
+        }
+
+        function moveToPicker(wrap) {
+            const card = wrap.querySelector(".check-type-card");
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.dataset.bindMonitor = "";
+            btn.dataset.targetId = wrap.dataset.targetId;
+            btn.dataset.enabled = wrap.dataset.enabled;
+            btn.dataset.tags = wrap.dataset.tags || "";
+            btn.className = card.className;
+            btn.classList.remove("h-full");
+            btn.classList.add("text-left");
+            btn.innerHTML = card.innerHTML;
+            const name = cardName(btn).toLowerCase();
+            const after = [...bindGrid.querySelectorAll("[data-bind-monitor]")]
+                .find((b) => cardName(b).toLowerCase() > name);
+            bindGrid.insertBefore(btn, after || null);
+            wrap.remove();
+        }
+
+        bindRoot.addEventListener("click", async (evt) => {
+            const bindBtn = evt.target.closest("[data-bind-monitor]");
+            const unbindBtn = evt.target.closest("[data-unbind-monitor]");
+            if (!bindBtn && !unbindBtn) return;
+            const name = cardName(bindBtn || unbindBtn.closest("[data-bound-card]"));
+
+            // Create mode: local selection only — the submit handler binds.
+            if (!channelId) {
+                if (bindBtn) moveToUsedBy(bindBtn);
+                else moveToPicker(unbindBtn.closest("[data-bound-card]"));
+                bindResult.classList.add("hidden");
+                applyPicker();
+                return;
+            }
+
+            if (unbindBtn) {
+                let body = `${name} stops alerting through this channel. You can re-add it any time.`;
+                try {
+                    const r = await fetch(`/api/v1/targets/${unbindBtn.dataset.targetId}`, {
+                        headers: { "Accept": "application/json", "X-Requested-With": "uptimepage" },
+                    });
+                    if (r.ok && ((await r.json()).alerts || []).length === 1) {
+                        body = `This is the only channel ${name} alerts through — unbinding silences it entirely. You can re-add it any time.`;
+                    }
+                } catch { /* default copy */ }
+                const ok = await window.smConfirm({
+                    title: "Unbind monitor?",
+                    body,
+                    confirmLabel: "unbind",
+                    danger: true,
+                });
+                if (!ok) return;
+            }
+            bindRoot.querySelectorAll("[data-bind-monitor], [data-unbind-monitor]")
+                .forEach((b) => { b.disabled = true; });
+            showBindResult(bindBtn ? "# binding…" : "# unbinding…", "text-quiet");
+            try {
+                if (bindBtn) {
+                    await setBinding(channelId, bindBtn.dataset.targetId, true);
+                    moveToUsedBy(bindBtn);
+                    showBindResult(`✓ ${name} now alerts through this channel`, "flash-text flash-text--ok font-medium");
+                } else {
+                    await setBinding(channelId, unbindBtn.dataset.targetId, false);
+                    moveToPicker(unbindBtn.closest("[data-bound-card]"));
+                    showBindResult(`✓ ${name} unbound — it no longer alerts through this channel`, "flash-text flash-text--ok font-medium");
+                }
+                applyPicker();
+            } catch (err) {
+                // Surface the failure even if the picker was collapsed
+                // while the request was in flight.
+                setPickerOpen(true);
+                showBindResult(`✗ ${err.message || err}`, "flash-text flash-text--bad font-medium");
+            } finally {
+                bindRoot.querySelectorAll("[data-bind-monitor], [data-unbind-monitor]")
+                    .forEach((b) => { b.disabled = false; });
+            }
+        });
     }
 
     function clearErrors() {

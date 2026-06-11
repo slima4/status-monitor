@@ -25,6 +25,16 @@ window.smRenderClientError = function (banner, msg) {
     banner.classList.remove("hidden");
 };
 
+// The server's error message from a failed fetch Response, or `fallback`
+// when the body isn't the standard error envelope.
+window.smApiErrorMessage = async function (res, fallback) {
+    try {
+        const json = await res.json();
+        if (json?.error?.message) return json.error.message;
+    } catch { /* not JSON */ }
+    return fallback;
+};
+
 // POST /api/v1/targets/{id}/check-now (best-effort). Returns the parsed
 // body on success or null on any failure — callers handle null themselves.
 window.smRunCheckNow = async function (id) {

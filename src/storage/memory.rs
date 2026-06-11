@@ -689,6 +689,20 @@ impl TargetStore for InMemoryTargetStore {
         Ok(guard.len() != before)
     }
 
+    async fn unbind_channel(&self, _org: OrgId, channel_id: Uuid) -> Result<u64> {
+        let mut guard = self.targets.lock();
+        let mut touched = 0;
+        for t in guard.iter_mut() {
+            let before = t.alerts.0.len();
+            t.alerts.0.retain(|b| b.channel_id != channel_id);
+            if t.alerts.0.len() != before {
+                t.updated_at = Utc::now();
+                touched += 1;
+            }
+        }
+        Ok(touched)
+    }
+
     async fn bulk_create(
         &self,
         _org: OrgId,

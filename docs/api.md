@@ -316,7 +316,7 @@ never read, mutate, or test another's channels.
 | `GET` | `/api/v1/notification-channels` | List the org's channels |
 | `GET` | `/api/v1/notification-channels/{id}` | Get one |
 | `PATCH` | `/api/v1/notification-channels/{id}` | Partial update |
-| `DELETE` | `/api/v1/notification-channels/{id}` | Delete (204) |
+| `DELETE` | `/api/v1/notification-channels/{id}` | Delete (204); also removes the channel's alert bindings from every monitor |
 | `POST` | `/api/v1/notification-channels/test` | Test an **unsaved** transport config |
 | `POST` | `/api/v1/notification-channels/{id}/test` | Send a synthetic test alert through a saved channel |
 

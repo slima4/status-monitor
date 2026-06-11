@@ -20,7 +20,7 @@ use axum::response::{IntoResponse, Response};
 use uuid::Uuid;
 
 use crate::app::AppState;
-use crate::domain::{ChannelConfig, NotificationChannel};
+use crate::domain::{ChannelConfig, NotificationChannel, Target};
 use crate::error::AppError;
 use crate::storage::traits::TargetFilter;
 use crate::web::CurrentOrg;
@@ -77,19 +77,28 @@ impl Default for ConfigFields {
     }
 }
 
-/// A monitor whose alert bindings include the channel being edited.
-pub struct UsedByMonitor {
+/// A monitor card on the channel edit page — either already bound to the
+/// channel (used-by grid) or offered by the "+ add monitor" picker.
+pub struct MonitorCard {
     pub id: String,
     pub name: String,
     pub kind: &'static str,
     pub addr: String,
     pub enabled: bool,
+    /// `terraform`/`api` chip — a UI bind may be overwritten on the next
+    /// apply, so the card says who manages the monitor.
+    pub managed_by: Option<&'static str>,
+    /// Space-joined tags, feeding the picker's client-side search.
+    pub tags: String,
 }
 
 pub struct ChannelFormModel {
     /// `"create"` or `"edit"`. Drives the heading, submit verb, and (when not
     /// `"create"`) the "Replace transport config" toggle.
     pub mode: &'static str,
+    /// Channel id; empty on create. The bind picker PATCHes it into a
+    /// monitor's alert bindings.
+    pub channel_id: String,
     pub action: String,
     pub submit_method: &'static str,
     pub name: String,
@@ -97,7 +106,9 @@ pub struct ChannelFormModel {
     pub kind: &'static str,
     pub config: ConfigFields,
     /// Monitors bound to this channel; always empty on create.
-    pub used_by: Vec<UsedByMonitor>,
+    pub used_by: Vec<MonitorCard>,
+    /// Monitors NOT bound to this channel, offered by the bind picker.
+    pub bindable: Vec<MonitorCard>,
 }
 
 impl ChannelFormModel {
@@ -110,6 +121,17 @@ impl ChannelFormModel {
         } else {
             format!("{n} monitors")
         }
+    }
+
+    /// The org has no monitors at all — the picker can only offer creating
+    /// one.
+    pub fn has_no_monitors(&self) -> bool {
+        self.used_by.is_empty() && self.bindable.is_empty()
+    }
+
+    /// Every monitor is already bound to this channel.
+    pub fn all_bound(&self) -> bool {
+        self.bindable.is_empty() && !self.used_by.is_empty()
     }
 }
 
@@ -155,15 +177,64 @@ pub async fn list_partial(
     Ok(ChannelsPartial { channels }.into_response())
 }
 
-pub async fn new_form(org: Result<CurrentOrg, AppError>) -> Response {
-    match resolve_org(org, "/settings/notifications/new") {
-        Ok(_) => ChannelFormPage {
-            active_tab: TAB_NOTIFICATIONS,
-            form: empty_create_form(),
-        }
-        .into_response(),
-        Err(resp) => *resp,
+pub async fn new_form(
+    State(state): State<AppState>,
+    org: Result<CurrentOrg, AppError>,
+) -> WebResult<Response> {
+    let org = match resolve_org(org, "/settings/notifications/new") {
+        Ok(o) => o,
+        Err(resp) => return Ok(*resp),
+    };
+    let mut form = empty_create_form();
+    (_, form.bindable) = org_monitor_cards(&state, org, None).await?;
+    Ok(ChannelFormPage {
+        active_tab: TAB_NOTIFICATIONS,
+        form,
     }
+    .into_response())
+}
+
+/// All org monitors as cards, split by alert binding to `channel`:
+/// `(used_by, bindable)`. With no channel everything is bindable.
+async fn org_monitor_cards(
+    state: &AppState,
+    org: crate::domain::OrgId,
+    channel: Option<Uuid>,
+) -> Result<(Vec<MonitorCard>, Vec<MonitorCard>), AppError> {
+    // The default filter caps at 100, which would silently hide monitors
+    // past that on large orgs — fetch the full set.
+    let targets = state
+        .target_store
+        .list(
+            org,
+            TargetFilter {
+                limit: Some(10_000),
+                ..Default::default()
+            },
+        )
+        .await?;
+    let card = |t: Target| {
+        let (kind, addr) = describe_check(&t.check);
+        MonitorCard {
+            id: t.id.to_string(),
+            name: t.name,
+            kind,
+            addr,
+            enabled: t.enabled,
+            managed_by: t.write_source.managed_label(),
+            tags: t.tags.join(" "),
+        }
+    };
+    let (used_by, bindable): (Vec<_>, Vec<_>) = targets
+        .into_iter()
+        .partition(|t| channel.is_some_and(|id| t.alerts.iter().any(|b| b.channel_id == id)));
+    let cards = |v: Vec<Target>| {
+        let mut cards: Vec<MonitorCard> = v.into_iter().map(&card).collect();
+        // Alphabetical keeps the picker's search + pagination predictable.
+        cards.sort_by_cached_key(|c| c.name.to_lowercase());
+        cards
+    };
+    Ok((cards(used_by), cards(bindable)))
 }
 
 pub async fn edit_form(
@@ -182,34 +253,8 @@ pub async fn edit_form(
         .ok_or_else(|| {
             AppError::not_found("CHANNEL_NOT_FOUND", "notification channel not found")
         })?;
-    // The default filter caps at 100, which would silently hide bound
-    // monitors past that on large orgs — fetch the full set.
-    let targets = state
-        .target_store
-        .list(
-            org,
-            TargetFilter {
-                limit: Some(10_000),
-                ..Default::default()
-            },
-        )
-        .await?;
-    let used_by = targets
-        .into_iter()
-        .filter(|t| t.alerts.iter().any(|b| b.channel_id == id))
-        .map(|t| {
-            let (kind, addr) = describe_check(&t.check);
-            UsedByMonitor {
-                id: t.id.to_string(),
-                name: t.name,
-                kind,
-                addr,
-                enabled: t.enabled,
-            }
-        })
-        .collect();
     let mut form = form_from_channel(channel);
-    form.used_by = used_by;
+    (form.used_by, form.bindable) = org_monitor_cards(&state, org, Some(id)).await?;
     Ok(ChannelFormPage {
         active_tab: TAB_NOTIFICATIONS,
         form,
@@ -220,6 +265,7 @@ pub async fn edit_form(
 fn empty_create_form() -> ChannelFormModel {
     ChannelFormModel {
         mode: "create",
+        channel_id: String::new(),
         action: "/api/v1/notification-channels".into(),
         submit_method: "POST",
         name: String::new(),
@@ -227,6 +273,7 @@ fn empty_create_form() -> ChannelFormModel {
         kind: "slack",
         config: ConfigFields::default(),
         used_by: Vec::new(),
+        bindable: Vec::new(),
     }
 }
 
@@ -254,6 +301,7 @@ fn form_from_channel(c: NotificationChannel) -> ChannelFormModel {
     }
     ChannelFormModel {
         mode: "edit",
+        channel_id: c.id.to_string(),
         action: format!("/api/v1/notification-channels/{}", c.id),
         submit_method: "PATCH",
         name: c.name,
@@ -261,6 +309,7 @@ fn form_from_channel(c: NotificationChannel) -> ChannelFormModel {
         kind: c.kind.as_db_str(),
         config,
         used_by: Vec::new(),
+        bindable: Vec::new(),
     }
 }
 
@@ -288,6 +337,37 @@ mod tests {
         assert!(html.contains("data-send-test"));
         assert!(html.contains("test now"));
         assert!(!html.contains("delete channel"));
+        // Create offers the same + card picker; picks are bound after create.
+        assert!(html.contains("data-add-monitor"));
+        assert!(html.contains("# none picked yet"));
+        assert!(html.contains("# no monitors yet"));
+    }
+
+    #[test]
+    fn create_form_offers_monitor_binding() {
+        let mut form = empty_create_form();
+        form.bindable = vec![MonitorCard {
+            id: "t1".into(),
+            name: "api-prod".into(),
+            kind: "HTTP",
+            addr: "https://api.example.com/health".into(),
+            enabled: true,
+            managed_by: None,
+            tags: String::new(),
+        }];
+        let html = ChannelFormPage {
+            active_tab: TAB_NOTIFICATIONS,
+            form,
+        }
+        .render()
+        .unwrap();
+        assert!(html.contains("data-add-monitor"));
+        assert!(html.contains(r#"data-bind-monitor data-target-id="t1""#));
+        assert!(html.contains("api-prod"));
+        // Search + show-disabled + pager controls ride along for big orgs.
+        assert!(html.contains("data-picker-search"));
+        assert!(html.contains("data-picker-show-disabled"));
+        assert!(html.contains("data-picker-pager"));
     }
 
     fn slack_channel(webhook_url: &str) -> NotificationChannel {
@@ -338,19 +418,23 @@ mod tests {
     fn edit_form_lists_bound_monitors() {
         let mut form = form_from_channel(slack_channel("https://hooks.slack.com/services/T/B/x"));
         form.used_by = vec![
-            UsedByMonitor {
+            MonitorCard {
                 id: "t1".into(),
                 name: "api-prod".into(),
                 kind: "HTTP",
                 addr: "https://api.example.com/health".into(),
                 enabled: true,
+                managed_by: None,
+                tags: String::new(),
             },
-            UsedByMonitor {
+            MonitorCard {
                 id: "t2".into(),
                 name: "old-worker".into(),
                 kind: "TCP",
                 addr: "10.0.0.5:9000".into(),
                 enabled: false,
+                managed_by: None,
+                tags: String::new(),
             },
         ];
         let html = ChannelFormPage {
@@ -365,7 +449,99 @@ mod tests {
         assert!(html.contains("old-worker"));
         assert!(html.contains("tcp · 10.0.0.5:9000"));
         assert!(html.contains(r#"<span class="cli-brackets font-normal">disabled</span>"#));
-        assert!(!html.contains("# not bound to any monitor yet"));
+        // Each bound card carries its × unbind affordance.
+        assert!(html.contains(r#"data-unbind-monitor data-target-id="t1""#));
+        assert!(html.contains(r#"aria-label="unbind api-prod""#));
+        // The empty-state note renders hidden so the JS can re-show it after
+        // the last unbind.
+        assert!(html.contains(r#"data-used-by-note class="font-mono text-xs text-quiet hidden""#));
+    }
+
+    #[test]
+    fn edit_form_renders_bind_picker() {
+        let mut form = form_from_channel(slack_channel("https://hooks.slack.com/services/T/B/x"));
+        form.bindable = vec![
+            MonitorCard {
+                id: "t3".into(),
+                name: "staging-api".into(),
+                kind: "HTTP",
+                addr: "https://staging.example.com".into(),
+                enabled: true,
+                managed_by: None,
+                tags: String::new(),
+            },
+            MonitorCard {
+                id: "t4".into(),
+                name: "tf-api".into(),
+                kind: "HTTP",
+                addr: "https://tf.example.com".into(),
+                enabled: true,
+                managed_by: Some("terraform"),
+                tags: String::new(),
+            },
+        ];
+        let html = ChannelFormPage {
+            active_tab: TAB_NOTIFICATIONS,
+            form,
+        }
+        .render()
+        .unwrap();
+        assert!(html.contains("data-add-monitor"));
+        assert!(html.contains(r#"data-channel-id="00000000-0000-0000-0000-000000000000""#));
+        assert!(html.contains(r#"data-bind-monitor data-target-id="t3""#));
+        assert!(html.contains("staging-api"));
+        // Externally-managed monitors carry their chip — a UI bind may be
+        // overwritten on the next apply.
+        assert!(html.contains(r#"<span class="cli-brackets font-normal" title="managed externally — changes made here may be overwritten on the next apply">terraform</span>"#));
+        // Monitors are available, so the all-bound note starts hidden.
+        assert!(
+            html.contains(r#"data-picker-allbound class="font-mono text-xs text-quiet hidden""#)
+        );
+    }
+
+    #[test]
+    fn edit_form_bind_picker_empty_states() {
+        // Every state renders (the JS toggles them after in-place moves);
+        // the server decides which starts visible.
+        const NONE_VISIBLE: &str = r#"data-picker-none class="font-mono text-xs text-quiet""#;
+        const NONE_HIDDEN: &str = r#"data-picker-none class="font-mono text-xs text-quiet hidden""#;
+        const ALLBOUND_VISIBLE: &str =
+            r#"data-picker-allbound class="font-mono text-xs text-quiet""#;
+        const ALLBOUND_HIDDEN: &str =
+            r#"data-picker-allbound class="font-mono text-xs text-quiet hidden""#;
+
+        // No monitors at all → invite to create one.
+        let form = form_from_channel(slack_channel("https://hooks.slack.com/services/T/B/x"));
+        let html = ChannelFormPage {
+            active_tab: TAB_NOTIFICATIONS,
+            form,
+        }
+        .render()
+        .unwrap();
+        assert!(html.contains("data-add-monitor"));
+        assert!(html.contains(NONE_VISIBLE));
+        assert!(html.contains(ALLBOUND_HIDDEN));
+        assert!(html.contains(r#"href="/targets/new""#));
+
+        // Every monitor already bound → say so instead of an empty grid.
+        let mut form = form_from_channel(slack_channel("https://hooks.slack.com/services/T/B/x"));
+        form.used_by = vec![MonitorCard {
+            id: "t1".into(),
+            name: "api-prod".into(),
+            kind: "HTTP",
+            addr: "https://api.example.com/health".into(),
+            enabled: true,
+            managed_by: None,
+            tags: String::new(),
+        }];
+        let html = ChannelFormPage {
+            active_tab: TAB_NOTIFICATIONS,
+            form,
+        }
+        .render()
+        .unwrap();
+        assert!(html.contains(ALLBOUND_VISIBLE));
+        assert!(html.contains(NONE_HIDDEN));
     }
 
     #[test]

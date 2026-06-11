@@ -391,8 +391,9 @@ async fn legal_pages_render_public_without_auth_nav() {
     }
 }
 
-/// The channel edit page lists exactly the monitors whose alert bindings
-/// carry the channel — bound ones linked, unbound ones absent.
+/// The channel edit page splits monitors by alert binding: bound ones are
+/// linked in the used-by grid, unbound ones appear only as bind-picker
+/// buttons.
 #[tokio::test]
 async fn channel_edit_page_lists_bound_monitors() {
     let router = app();
@@ -424,7 +425,7 @@ async fn channel_edit_page_lists_bound_monitors() {
     let bound_id =
         create_http_target_with_alerts(&router, "bound-api", json!([{ "channel_id": ch_id }]))
             .await;
-    create_http_target(&router, "unbound-api").await;
+    let unbound_id = create_http_target(&router, "unbound-api").await;
 
     let resp = router
         .clone()
@@ -443,8 +444,16 @@ async fn channel_edit_page_lists_bound_monitors() {
         "bound monitor must link to its edit form"
     );
     assert!(
-        !html.contains("unbound-api"),
-        "unbound monitor must not appear"
+        html.contains(format!(r#"data-bind-monitor data-target-id="{unbound_id}""#).as_str()),
+        "unbound monitor must be offered by the bind picker"
+    );
+    assert!(
+        html.contains("unbound-api"),
+        "picker cards must show the monitor name"
+    );
+    assert!(
+        !html.contains(format!(r#"href="/targets/{unbound_id}/edit""#).as_str()),
+        "unbound monitor must not appear in the used-by grid"
     );
     assert!(html.contains("# bound to"), "header shows the bound count");
 }

@@ -284,6 +284,113 @@ async fn target_alert_binding_channel_lookup_is_org_scoped_live_pg() {
 
 #[tokio::test]
 #[ignore = "requires DATABASE_URL — run via DATABASE_URL=... cargo test -- --ignored"]
+async fn unbind_channel_scrubs_only_that_binding_in_org_live_pg() {
+    let Some(pool) = pg_pool_from_env().await else {
+        return;
+    };
+    let (org_a, org_b, user_a, user_b) = two_orgs(&pool, "nc-unbind").await;
+    let channels = PgNotificationChannelStore::new(pool.clone(), None);
+    let targets = PostgresTargetStore::from_pool(pool.clone(), None);
+
+    let ch_a = channels
+        .create(org_a, slack("A", "T/B/ua"), WriteSource::Ui, i64::MAX)
+        .await
+        .unwrap();
+    let ch_b = channels
+        .create(org_a, slack("B", "T/B/ub"), WriteSource::Ui, i64::MAX)
+        .await
+        .unwrap();
+
+    let mk_target = |name: &str, alerts: Vec<AlertBinding>| {
+        let url = url::Url::parse("https://example.com/").unwrap();
+        NewTarget {
+            name: name.into(),
+            check: CheckSpec::Http(default_http_check(url, ExpectedStatus::Exact(200))),
+            interval: Duration::from_secs(30),
+            enabled: true,
+            tags: vec![],
+            alerts: TargetAlerts(alerts),
+            region_policy: Default::default(),
+            alert_confirmations: 2,
+            notify_recovery: true,
+            renotify_interval_secs: 3600,
+            group_name: None,
+            owner_user_id: None,
+        }
+    };
+    let both = targets
+        .create(
+            org_a,
+            mk_target(
+                "both",
+                vec![
+                    AlertBinding {
+                        channel_id: ch_a.id,
+                    },
+                    AlertBinding {
+                        channel_id: ch_b.id,
+                    },
+                ],
+            ),
+            WriteSource::Ui,
+            i64::MAX,
+        )
+        .await
+        .unwrap();
+    let only_a = targets
+        .create(
+            org_a,
+            mk_target(
+                "only-a",
+                vec![AlertBinding {
+                    channel_id: ch_a.id,
+                }],
+            ),
+            WriteSource::Ui,
+            i64::MAX,
+        )
+        .await
+        .unwrap();
+    // Store-level write: another org carrying the same channel id must be
+    // untouched by org_a's scrub (handler validation would never allow this
+    // binding, which is exactly why the SQL needs its own org guard).
+    let foreign = targets
+        .create(
+            org_b,
+            mk_target(
+                "foreign",
+                vec![AlertBinding {
+                    channel_id: ch_a.id,
+                }],
+            ),
+            WriteSource::Ui,
+            i64::MAX,
+        )
+        .await
+        .unwrap();
+
+    let touched = targets.unbind_channel(org_a, ch_a.id).await.unwrap();
+    assert_eq!(touched, 2);
+
+    let both = targets.get(org_a, both.id).await.unwrap().unwrap();
+    let bound: Vec<_> = both.alerts.iter().map(|b| b.channel_id).collect();
+    assert_eq!(bound, vec![ch_b.id], "sibling binding must survive");
+
+    let only_a = targets.get(org_a, only_a.id).await.unwrap().unwrap();
+    assert!(only_a.alerts.is_empty(), "binding must be scrubbed");
+
+    let foreign = targets.get(org_b, foreign.id).await.unwrap().unwrap();
+    assert_eq!(
+        foreign.alerts.iter().count(),
+        1,
+        "foreign org's bindings must be untouched"
+    );
+
+    cleanup(&pool, &[org_a, org_b], &[user_a, user_b]).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL — run via DATABASE_URL=... cargo test -- --ignored"]
 async fn due_for_renotify_selects_overdue_open_unacked_live_pg() {
     let Some(pool) = pg_pool_from_env().await else {
         return;

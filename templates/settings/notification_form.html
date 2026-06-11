@@ -1,5 +1,9 @@
 {% extends "base.html" %}
 {% block title %}{% if form.mode == "create" %}New notification channel{% else %}Edit notification channel{% endif %} · Uptimepage{% endblock %}
+{% macro monitor_card_body(m) %}
+<span class="check-type-card__name w-full truncate">{{ m.name }}{% if !m.enabled %} <span class="cli-brackets font-normal">disabled</span>{% endif %}{% if let Some(managed) = m.managed_by %} <span class="cli-brackets font-normal" title="managed externally — changes made here may be overwritten on the next apply">{{ managed }}</span>{% endif %}</span>
+<span class="check-type-card__desc w-full truncate">{{ m.kind|lower }} · {{ m.addr }}</span>
+{% endmacro %}
 {% block content %}
 <section class="space-y-6">
   <header class="space-y-1">
@@ -12,7 +16,8 @@
     </p>
     {% if form.mode != "create" %}
     <p class="font-mono text-xs text-quiet">
-      {% if form.used_by.is_empty() %}# not bound to any monitor{% else %}# bound to <a href="#used-by" class="underline decoration-dotted hover:text-body">{{ form.used_by_label() }}</a>{% endif %}
+      <span data-bound-none{% if !form.used_by.is_empty() %} class="hidden"{% endif %}># not bound to any monitor</span>
+      <span data-bound-some{% if form.used_by.is_empty() %} class="hidden"{% endif %}># bound to <a href="#used-by" class="underline decoration-dotted hover:text-body" data-bound-count>{{ form.used_by_label() }}</a></span>
     </p>
     {% endif %}
   </header>
@@ -166,26 +171,75 @@
       </div>
     </fieldset>
 
-    {% if form.mode != "create" %}
     <fieldset id="used-by" class="sticker-card form-card">
-      <legend>used by</legend>
-      <div class="clear-both space-y-3 p-5">
-        {% if form.used_by.is_empty() %}
-        <p class="font-mono text-xs text-quiet"># not bound to any monitor yet — pick this channel in a monitor's notifications section</p>
-        {% else %}
+      <legend>{% if form.mode == "create" %}bind to monitors{% else %}used by{% endif %}</legend>
+      <div class="clear-both space-y-3 p-5" data-bind-root data-channel-id="{{ form.channel_id }}" data-bind-mode="{{ form.mode }}">
+        <noscript><p class="font-mono text-xs text-quiet"># scripts are off — bind this channel from a monitor's own edit form instead</p></noscript>
+        <p data-used-by-note class="font-mono text-xs text-quiet{% if !form.used_by.is_empty() %} hidden{% endif %}">
+          {% if form.mode == "create" %}# none picked yet — monitors picked below are bound right after create{% else %}# not bound to any monitor yet — add one below{% endif %}
+        </p>
+        {% if !form.used_by.is_empty() %}
         <p class="text-xs text-muted">Monitors that notify through this channel. Disabling or deleting it silences alerts for all of them.</p>
-        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          {% for m in form.used_by %}
-          <a href="/targets/{{ m.id }}/edit" class="check-type-card min-w-0{% if !m.enabled %} opacity-50{% endif %}">
-            <span class="check-type-card__name w-full truncate">{{ m.name }}{% if !m.enabled %} <span class="cli-brackets font-normal">disabled</span>{% endif %}</span>
-            <span class="check-type-card__desc w-full truncate">{{ m.kind|lower }} · {{ m.addr }}</span>
-          </a>
-          {% endfor %}
-        </div>
         {% endif %}
+        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2" data-used-by-grid>
+          {% for m in form.used_by %}
+          <div class="relative min-w-0" data-bound-card data-target-id="{{ m.id }}" data-enabled="{{ m.enabled }}" data-tags="{{ m.tags }}">
+            <a href="/targets/{{ m.id }}/edit" class="check-type-card h-full min-w-0{% if !m.enabled %} opacity-50{% endif %}">
+              {% call monitor_card_body(m) %}{% endcall %}
+            </a>
+            <button type="button" data-unbind-monitor data-target-id="{{ m.id }}"
+                    aria-label="unbind {{ m.name }}" title="unbind — stop alerting through this channel"
+                    class="unbind-btn">×</button>
+          </div>
+          {% endfor %}
+          <button type="button" data-add-monitor aria-expanded="false" aria-controls="bind-picker"
+                  class="check-type-card check-type-card--add min-w-0">
+            <span class="check-type-card__plus" aria-hidden="true">+</span>
+            <span class="check-type-card__desc">add monitor</span>
+          </button>
+        </div>
+        <div id="bind-picker" class="hidden space-y-3">
+          <p data-picker-none class="font-mono text-xs text-quiet{% if !form.has_no_monitors() %} hidden{% endif %}"># no monitors yet — <a href="/targets/new" class="underline decoration-dotted hover:text-body">create one</a></p>
+          <p data-picker-allbound class="font-mono text-xs text-quiet{% if !form.all_bound() %} hidden{% endif %}">{% if form.mode == "create" %}# every monitor picked{% else %}# every monitor already uses this channel{% endif %}</p>
+          <p data-picker-desc class="text-xs text-muted{% if form.bindable.is_empty() %} hidden{% endif %}">
+            {% if form.mode == "create" %}Pick the monitors that should alert through this channel — they're bound right after it's created.{% else %}Pick a monitor — it starts alerting through this channel right away.{% endif %}
+          </p>
+          <div data-picker-controls class="flex flex-wrap items-center gap-3{% if form.bindable.is_empty() %} hidden{% endif %}">
+            <label class="monitors-search monitors-search--fluid" for="picker-search">
+              <svg class="monitors-search__icon" viewBox="0 0 24 24" fill="none"
+                   stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <circle cx="11" cy="11" r="7"/>
+                <path d="M20 20l-3.5-3.5" stroke-linecap="round"/>
+              </svg>
+              <input id="picker-search" type="search" data-picker-search
+                     placeholder="Search by name, host, tag…"
+                     autocomplete="off" class="monitors-search__input">
+              <span class="monitors-search__keyhint" aria-hidden="true">/</span>
+            </label>
+            <label class="inline-flex items-center gap-2 text-xs text-muted">
+              <input type="checkbox" data-picker-show-disabled>
+              show disabled monitors
+            </label>
+          </div>
+          <div class="grid grid-cols-1 gap-3 sm:grid-cols-2{% if form.bindable.is_empty() %} hidden{% endif %}" data-bind-grid>
+            {% for m in form.bindable %}
+            <button type="button" data-bind-monitor data-target-id="{{ m.id }}" data-enabled="{{ m.enabled }}"
+                    data-tags="{{ m.tags }}"
+                    class="check-type-card min-w-0 text-left{% if !m.enabled %} opacity-50{% endif %}">
+              {% call monitor_card_body(m) %}{% endcall %}
+            </button>
+            {% endfor %}
+          </div>
+          <p data-picker-nomatch class="hidden font-mono text-xs text-quiet"># no monitors match</p>
+          <div data-picker-pager class="hidden flex flex-wrap items-center gap-3">
+            <button type="button" data-pager-prev class="btn-ghost px-2.5 py-1 text-xs"><span aria-hidden="true">←</span> prev</button>
+            <span data-pager-info class="font-mono text-xs text-quiet" aria-live="polite"></span>
+            <button type="button" data-pager-next class="btn-ghost px-2.5 py-1 text-xs">next <span aria-hidden="true">→</span></button>
+          </div>
+          <p data-bind-result role="status" class="hidden font-mono text-xs"></p>
+        </div>
       </div>
     </fieldset>
-    {% endif %}
 
     <div class="flex gap-3">
       <button type="submit"
