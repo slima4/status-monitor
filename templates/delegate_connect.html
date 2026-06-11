@@ -1,0 +1,131 @@
+{# Chrome-less public connect page for /c/<code>: the invitee attaches ONE
+   notification channel to the inviting org. No nav, no auth surface,
+   noindex; dead codes render the same generic invalid state. #}
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="robots" content="noindex, nofollow">
+    <title>{% if ok %}Connect an alert channel · Uptimepage{% else %}Link invalid · Uptimepage{% endif %}</title>
+    <link rel="icon" type="image/svg+xml" href="{{ "img/favicon.svg"|asset }}">
+    <link rel="stylesheet" href="{{ "css/app.css"|asset }}">
+    {% if ok %}
+    <script defer src="{{ "js/qrcode.min.js"|asset }}"></script>
+    <script defer src="{{ "js/ui/popover_pos.js"|asset }}"></script>
+    <script defer src="{{ "js/ui/combobox.js"|asset }}"></script>
+    <script defer src="{{ "js/ui/delegate_connect.js"|asset }}"></script>
+    {% endif %}
+</head>
+<body class="app-shell antialiased">
+    <main class="mx-auto flex min-h-screen max-w-lg flex-col justify-center gap-6 px-6 py-10">
+        {% if !ok %}
+        <div class="space-y-3 text-center">
+            <h1 class="page-title justify-center"><span class="page-title__prefix" aria-hidden="true">$</span>link invalid</h1>
+            <p class="text-sm text-muted">
+                This connect link is invalid, expired, revoked, or already used.
+                Ask the person who sent it for a fresh one.
+            </p>
+        </div>
+        {% else %}
+        <div id="connect-root" data-code="{{ code }}" class="space-y-6">
+            <header class="space-y-1 text-center">
+                <h1 class="page-title justify-center"><span class="page-title__prefix" aria-hidden="true">$</span>connect an alert channel</h1>
+                <p class="text-sm text-muted">
+                    {% if !org_name.is_empty() %}<span class="font-mono text-body">{{ org_name }}</span> uses Uptimepage and{% else %}This team{% endif %}
+                    invited you to connect where its alerts should land. This link
+                    creates one channel and can read nothing.
+                </p>
+            </header>
+
+            <div data-connect-success class="hidden space-y-2 text-center">
+                <p class="flash-text flash-text--ok font-medium">✓ channel connected — alerts will arrive there</p>
+                <p class="text-sm text-muted">You can close this page.</p>
+            </div>
+
+            <div data-connect-options class="space-y-6">
+            {% if offers_telegram %}
+            <fieldset class="sticker-card form-card">
+                <legend>telegram</legend>
+                <div class="clear-both space-y-3 p-5">
+                    <p class="text-sm text-muted">
+                        Open the link (or scan the QR), press
+                        <span class="font-mono">Start</span>, and the chat is
+                        connected — no typing.
+                    </p>
+                    <label class="inline-flex items-center gap-2 text-xs text-muted">
+                        <input type="checkbox" data-tg-group>
+                        connect a group chat instead of a private chat
+                    </label>
+                    <div data-tg-qr class="inline-block rounded-sm border border-[color:var(--theme-line)] bg-white p-2"></div>
+                    <p class="font-mono text-xs text-muted">
+                        <a data-tg-link href="{{ telegram_deep_link }}"
+                           data-private-link="{{ telegram_deep_link }}"
+                           data-group-link="{{ telegram_group_deep_link }}"
+                           target="_blank" rel="noopener"
+                           class="underline decoration-dotted hover:text-body">{{ telegram_deep_link }}</a>
+                    </p>
+                </div>
+            </fieldset>
+            {% endif %}
+
+            {% if offers_slack_oauth || offers_discord_oauth %}
+            <fieldset class="sticker-card form-card">
+                <legend>one-click connect</legend>
+                <div class="clear-both flex flex-wrap items-center gap-3 p-5">
+                    {% if offers_slack_oauth %}
+                    <a href="/c/{{ code }}/slack/start"
+                       class="sticker-btn sticker-btn--accent px-4 py-2 text-sm font-medium">add to Slack</a>
+                    {% endif %}
+                    {% if offers_discord_oauth %}
+                    <a href="/c/{{ code }}/discord/start"
+                       class="sticker-btn sticker-btn--accent px-4 py-2 text-sm font-medium">add to Discord</a>
+                    {% endif %}
+                    <span class="text-xs text-muted">The consent screen picks the destination channel.</span>
+                </div>
+            </fieldset>
+            {% endif %}
+
+            {% if !manual_kinds.is_empty() %}
+            <fieldset class="sticker-card form-card">
+                <legend>{% if manual_kinds.len() == 1 %}connect{% else %}or paste a webhook / address{% endif %}</legend>
+                <div class="clear-both space-y-4 p-5">
+                    <form data-connect-form class="space-y-4" novalidate>
+                        <div data-form-error role="alert" aria-live="polite" class="hidden alert-card alert-card--error"></div>
+                        {% if manual_kinds.len() > 1 %}
+                        <label class="field-outline">
+                            <span class="field-outline__label">Channel type</span>
+                            <select name="kind" data-kind-select data-sm-combobox
+                                    class="w-full field font-mono">
+                                {% for k in manual_kinds %}
+                                <option value="{{ k.0 }}">{{ k.1 }}</option>
+                                {% endfor %}
+                            </select>
+                        </label>
+                        {% else %}
+                        <input type="hidden" name="kind" data-kind-select value="{{ manual_kinds[0].0 }}">
+                        {% endif %}
+                        <label class="field-outline">
+                            <span class="field-outline__label">Name <span class="text-quiet">(optional)</span></span>
+                            <input name="name" type="text" maxlength="100" value="{{ name_hint }}"
+                                   autocomplete="off" class="w-full field">
+                        </label>
+                        <label class="field-outline" data-value-field>
+                            <span class="field-outline__label" data-value-label>Webhook URL</span>
+                            <input name="value" type="url" placeholder=""
+                                   autocomplete="off" spellcheck="false" class="w-full field font-mono">
+                            <span data-value-hint class="mt-1 block text-xs text-muted"></span>
+                        </label>
+                        <button type="submit" class="sticker-btn sticker-btn--accent px-4 py-2 text-sm font-medium">connect channel</button>
+                    </form>
+                </div>
+            </fieldset>
+            {% endif %}
+            </div>
+
+            <p class="text-center font-mono text-xs text-quiet"># this invite link is single-use and expires on its own</p>
+        </div>
+        {% endif %}
+    </main>
+</body>
+</html>

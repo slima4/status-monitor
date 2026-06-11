@@ -15,6 +15,7 @@ use crate::app::AppState;
 use crate::auth::sha256_hex;
 use crate::domain::{ChannelConfig, ChannelKind, TelegramAppConfig};
 use crate::error::{AppError, Result};
+use crate::storage::LinkPurpose;
 use crate::telegram::{
     ChatRef, TelegramClient, Update, WebhookAction, classify_update, webhook_secret_matches,
 };
@@ -114,16 +115,30 @@ async fn handle_link(state: &AppState, code: &str, chat: ChatRef) {
 }
 
 async fn link_chat(state: &AppState, code: &str, chat: ChatRef) -> Result<String> {
-    let Some(link) = state
-        .telegram_link_code_store
-        .consume(&sha256_hex(code))
+    let hash = sha256_hex(code);
+    // A delegation code doubles as a t.me start payload, so the /c/ page
+    // needs no second code: a successful link spends the delegate's
+    // one-channel budget.
+    let (link, delegated) = match state
+        .channel_link_code_store
+        .consume(LinkPurpose::Telegram, &hash)
         .await?
-    else {
-        return Ok(
-            "This link is invalid, expired, or already used. Mint a fresh link from the \
-             notification settings and try again."
-                .to_string(),
-        );
+    {
+        Some(l) => (l, false),
+        None => match state
+            .channel_link_code_store
+            .consume(LinkPurpose::Delegate, &hash)
+            .await?
+        {
+            Some(l) => (l, true),
+            None => {
+                return Ok(
+                    "This link is invalid, expired, or already used. Mint a fresh link from \
+                     the notification settings and try again."
+                        .to_string(),
+                );
+            }
+        },
     };
     let org = link.org_id;
 
@@ -156,22 +171,34 @@ async fn link_chat(state: &AppState, code: &str, chat: ChatRef) -> Result<String
     .await
     {
         Ok(ch) => ch,
-        Err(AppError::Unprocessable { code, .. }) if code == codes::CHANNEL_QUOTA_EXCEEDED => {
-            return Ok(
-                "Couldn't link: this workspace is at its notification-channel limit. \
-                 Remove an unused channel and mint a fresh link."
-                    .to_string(),
-            );
+        Err(err) => {
+            // A failed create must not burn a 7-day delegate invite; the
+            // 15-minute telegram codes keep their burn-on-failure shape.
+            if delegated {
+                state.channel_link_code_store.restore(link.id).await?;
+            }
+            if let AppError::Unprocessable { code, .. } = &err
+                && *code == codes::CHANNEL_QUOTA_EXCEEDED
+            {
+                return Ok(
+                    "Couldn't link: this workspace is at its notification-channel limit. \
+                     Remove an unused channel and mint a fresh link."
+                        .to_string(),
+                );
+            }
+            return Err(err);
         }
-        Err(err) => return Err(err),
     };
     if let Err(err) = state
-        .telegram_link_code_store
+        .channel_link_code_store
         .attach_channel(link.id, channel.id)
         .await
     {
         // Channel exists and works; only the form's poll misses out.
         tracing::warn!(?err, channel_id = %channel.id, "telegram link attach failed");
+    }
+    if delegated {
+        crate::web::views::delegate_connect::audit_delegated_create(state, org, &channel, "").await;
     }
 
     let org_name = match &state.db {

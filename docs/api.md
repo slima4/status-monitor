@@ -378,6 +378,14 @@ Deployments running the central bot expose a link-code flow (absent — `404 TEL
 - `GET /api/v1/notification-channels/telegram-link/{id}` (`channels:read`) polls the code: `pending`, `consumed` (with `channel_id`), or `expired`.
 - Unlink = delete the channel; deleting the last channel linked to a group also walks the bot out of that group. From the chat side, `/stop` or removing the bot disables the channel (see platform disables above).
 
+### Delegation links
+
+The person who owns the Slack workspace / Telegram group / inbox often isn't the person configuring monitors — a delegation link hands off just the connect step.
+
+- `POST /api/v1/notification-channels/delegate` (`channels:write`) with optional `{ "name": "…", "kind": "…" }` hints mints a single-use `/c/<code>` URL (7-day expiry, capped outstanding links per org → `422 DELEGATE_LINK_LIMIT`; unknown `kind` → `400 DELEGATE_KIND_INVALID`). Only the code's hash is stored.
+- `GET /c/<code>` is public and chrome-less: it offers exactly the connect-capable transports of the deployment — the telegram one-tap link + QR (the delegation code doubles as the `t.me` start payload), "add to Slack" / "add to Discord" when the operator OAuth apps are configured, and a manual webhook/address form. The link can create **one** channel in the inviting org and read nothing; expired, revoked, and spent codes all render the same 404 page. Every delegated create lands in the org audit log.
+- `GET /api/v1/notification-channels/delegate` (`channels:read`) lists the org's links (`pending` / `consumed` / `expired`); `DELETE /api/v1/notification-channels/delegate/{id}` (`channels:write`) revokes an unconsumed one (revoked links read as expired).
+
 ## Rate limiting
 
 `/api/v1/*` is rate-limited per authenticated subject — by `(org, category)` and by `(user, category)`, whichever trips first — with the per-minute budgets taken from the org's plan. Categories: `api_writes` (POST/PATCH/DELETE), `api_reads` (GET/HEAD/OPTIONS), `bulk_ops` (`/bulk*`), `test_now` (`/test`), `check_now` (`/check-now`). Exceeding a budget returns `429 Too Many Requests` with a `Retry-After` header (seconds until the next token) and `code: RATE_LIMITED`. `/healthz` and `/readyz` are never throttled. Unauthenticated and per-IP limiting is the reverse proxy's job (see [Deployment](deployment.md)). Full model: [Quotas & rate limits](quotas.md).

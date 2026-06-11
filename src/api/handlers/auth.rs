@@ -72,6 +72,7 @@ pub async fn github_login(
         redirect_after,
         invitation_id,
         None,
+        None,
     )
     .await?;
     let url = github::authorize_url(cfg, &s);

@@ -142,6 +142,9 @@ pub mod codes {
     pub const CHANNEL_VERIFICATION_LIMIT: &str = "CHANNEL_VERIFICATION_LIMIT";
     pub const TELEGRAM_LINK_LIMIT: &str = "TELEGRAM_LINK_LIMIT";
     pub const TELEGRAM_LINK_NOT_FOUND: &str = "TELEGRAM_LINK_NOT_FOUND";
+    pub const DELEGATE_LINK_LIMIT: &str = "DELEGATE_LINK_LIMIT";
+    pub const DELEGATE_LINK_NOT_FOUND: &str = "DELEGATE_LINK_NOT_FOUND";
+    pub const DELEGATE_KIND_INVALID: &str = "DELEGATE_KIND_INVALID";
     // Org management.
     pub const ORG_NOT_FOUND: &str = "ORG_NOT_FOUND";
     pub const ORG_DELETED: &str = "ORG_DELETED";

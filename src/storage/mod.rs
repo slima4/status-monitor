@@ -1,4 +1,5 @@
 pub mod admin;
+pub mod channel_link_codes;
 pub mod channel_verification;
 pub mod channel_verification_cleanup;
 pub mod clickhouse;
@@ -22,11 +23,14 @@ pub mod postgres;
 pub mod postgres_secrets;
 pub mod postmortems;
 pub mod status_pages;
-pub mod telegram_link_codes;
 pub mod traits;
 pub mod users;
 
 pub use admin::AdminRepo;
+pub use channel_link_codes::{
+    ChannelLinkCodeStore, ConsumedLink, DelegateRow, InMemoryChannelLinkCodeStore, LinkCode,
+    LinkCodeStatus, LinkPurpose, MintOutcome, PgChannelLinkCodeStore,
+};
 pub use clickhouse::{ClickhouseResultSink, ClickhouseResultsStore, build_client, migrate};
 pub use contacts::{ContactStore, InMemoryContactStore, PgContactStore};
 pub use domain_expiry_state::{
@@ -73,10 +77,6 @@ pub use postgres::PostgresTargetStore;
 pub use postmortems::{InMemoryPostmortemStore, PgPostmortemStore, PostmortemStore};
 pub use status_pages::{
     AddComponentOutcome, InMemoryStatusPageStore, PgStatusPageStore, StatusPageStore,
-};
-pub use telegram_link_codes::{
-    ConsumedLink, InMemoryTelegramLinkCodeStore, LinkCode, LinkCodeStatus, MintOutcome,
-    PgTelegramLinkCodeStore, TelegramLinkCodeStore,
 };
 pub use traits::{
     ClampedRange, IncidentListQuery, RegionOption, ResultSink, ResultsStore, TargetFilter,

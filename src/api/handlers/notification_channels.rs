@@ -32,7 +32,7 @@ use crate::error::{AppError, Result};
 use crate::notifier::build_notifier;
 use crate::notifier::event::IncidentNotice;
 use crate::storage::channel_verification;
-use crate::storage::{LinkCodeStatus, MintOutcome};
+use crate::storage::{LinkCodeStatus, LinkPurpose, MintOutcome};
 use crate::web::{
     Authorized, ChannelsDelete, ChannelsExecute, ChannelsRead, ChannelsWrite, CurrentUser,
     RequestSource,
@@ -407,7 +407,11 @@ async fn mint_and_send_verification(
 /// Best-effort hook on create / config replace. Cap breaches and failures
 /// only log — the channel stays unverified and the operator has the resend
 /// action.
-fn spawn_send_verification(state: &AppState, org: crate::domain::OrgId, ch: &NotificationChannel) {
+pub(crate) fn spawn_send_verification(
+    state: &AppState,
+    org: crate::domain::OrgId,
+    ch: &NotificationChannel,
+) {
     if !ch.awaiting_verification() {
         return;
     }
@@ -558,12 +562,14 @@ pub async fn telegram_link_mint(
     let code = generate_raw_token();
     let expires_at = Utc::now() + chrono::Duration::minutes(TELEGRAM_LINK_TTL_MINUTES);
     let outcome = state
-        .telegram_link_code_store
+        .channel_link_code_store
         .mint(
             org,
+            LinkPurpose::Telegram,
             Some(user),
             &sha256_hex(&code),
             name.as_deref(),
+            None,
             expires_at,
             TELEGRAM_LINK_MAX_OUTSTANDING,
         )
@@ -608,7 +614,7 @@ pub async fn telegram_link_status(
 ) -> Result<Json<TelegramLinkStatusResponse>> {
     require_central_bot(&state)?;
     let status = state
-        .telegram_link_code_store
+        .channel_link_code_store
         .status(org, id)
         .await?
         .ok_or_else(|| {
@@ -628,6 +634,189 @@ pub async fn telegram_link_status(
             channel_id: None,
         },
     }))
+}
+
+// ── Delegation links (/c/<code>) ─────────────────────────────────────────
+
+const DELEGATE_LINK_TTL_DAYS: i64 = 7;
+/// Outstanding delegate links per org — bounds drive-by minting.
+const DELEGATE_LINK_MAX_OUTSTANDING: i64 = 5;
+
+#[derive(Debug, Clone, Default, Deserialize, ToSchema)]
+pub struct DelegateLinkRequest {
+    /// Optional name for the channel the invitee creates.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Optional pinned channel kind; the connect page then offers only
+    /// that transport.
+    #[serde(default)]
+    pub kind: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct DelegateLinkResponse {
+    pub id: Uuid,
+    /// Shareable connect-page URL.
+    pub url: String,
+    pub expires_at: chrono::DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct DelegateLinkRow {
+    pub id: Uuid,
+    pub name: Option<String>,
+    pub kind: Option<String>,
+    pub created_at: chrono::DateTime<Utc>,
+    pub expires_at: chrono::DateTime<Utc>,
+    /// `pending` | `consumed` | `expired` (revoked reads as expired).
+    pub status: &'static str,
+    pub channel_id: Option<Uuid>,
+}
+
+pub(crate) fn delegate_status_parts(status: LinkCodeStatus) -> (&'static str, Option<Uuid>) {
+    match status {
+        LinkCodeStatus::Pending => ("pending", None),
+        LinkCodeStatus::Consumed { channel_id } => ("consumed", Some(channel_id)),
+        LinkCodeStatus::Expired => ("expired", None),
+    }
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/notification-channels/delegate",
+    tag = "notification-channels",
+    summary = "Mint a delegation link for connecting one channel",
+    description = "Returns a single-use `/c/<code>` URL to hand to the person \
+                   who owns the Slack workspace / Telegram group / inbox. The \
+                   link can create exactly one channel in this org and nothing \
+                   else; it expires after seven days and is revocable.",
+    request_body(content = DelegateLinkRequest, example = json!({ "name": "Ops Slack", "kind": "slack" })),
+    responses(
+        (status = 201, body = DelegateLinkResponse),
+        (status = 400, body = ApiError, description = "Invalid name or unknown kind"),
+        (status = 422, body = ApiError, description = "Too many outstanding delegation links"),
+    ),
+)]
+pub async fn delegate_link_mint(
+    State(state): State<AppState>,
+    Authorized(org, _): Authorized<ChannelsWrite>,
+    CurrentUser(user): CurrentUser,
+    Json(req): Json<DelegateLinkRequest>,
+) -> Result<(StatusCode, Json<DelegateLinkResponse>)> {
+    let name = match req.name.as_deref().map(str::trim) {
+        Some("") | None => None,
+        Some(n) => {
+            validate_name(n)?;
+            Some(n.to_string())
+        }
+    };
+    let kind = match req.kind.as_deref().map(str::trim) {
+        Some("") | None => None,
+        Some(k) => {
+            if !crate::domain::ChannelKind::ALL
+                .iter()
+                .any(|c| c.as_db_str() == k)
+            {
+                return Err(AppError::bad_request_field(
+                    codes::DELEGATE_KIND_INVALID,
+                    "unknown channel kind",
+                    "kind",
+                ));
+            }
+            Some(k.to_string())
+        }
+    };
+    let code = generate_raw_token();
+    let expires_at = Utc::now() + chrono::Duration::days(DELEGATE_LINK_TTL_DAYS);
+    let outcome = state
+        .channel_link_code_store
+        .mint(
+            org,
+            LinkPurpose::Delegate,
+            Some(user),
+            &sha256_hex(&code),
+            name.as_deref(),
+            kind.as_deref(),
+            expires_at,
+            DELEGATE_LINK_MAX_OUTSTANDING,
+        )
+        .await?;
+    let minted = match outcome {
+        MintOutcome::Created(c) => c,
+        MintOutcome::LimitReached => {
+            return Err(AppError::unprocessable(
+                codes::DELEGATE_LINK_LIMIT,
+                "too many outstanding delegation links; revoke one or wait for one to expire",
+            ));
+        }
+    };
+    Ok((
+        StatusCode::CREATED,
+        Json(DelegateLinkResponse {
+            id: minted.id,
+            url: format!(
+                "{}/c/{code}",
+                state.cfg.auth.public_base_url.trim_end_matches('/')
+            ),
+            expires_at: minted.expires_at,
+        }),
+    ))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/notification-channels/delegate",
+    tag = "notification-channels",
+    summary = "List delegation links",
+    responses((status = 200, body = [DelegateLinkRow])),
+)]
+pub async fn delegate_link_list(
+    State(state): State<AppState>,
+    Authorized(org, _): Authorized<ChannelsRead>,
+) -> Result<Json<Vec<DelegateLinkRow>>> {
+    let rows = state.channel_link_code_store.list_delegates(org).await?;
+    Ok(Json(
+        rows.into_iter()
+            .map(|r| {
+                let (status, channel_id) = delegate_status_parts(r.status);
+                DelegateLinkRow {
+                    id: r.id,
+                    name: r.channel_name,
+                    kind: r.kind_hint,
+                    created_at: r.created_at,
+                    expires_at: r.expires_at,
+                    status,
+                    channel_id,
+                }
+            })
+            .collect(),
+    ))
+}
+
+#[utoipa::path(
+    delete,
+    path = "/api/v1/notification-channels/delegate/{id}",
+    tag = "notification-channels",
+    summary = "Revoke a delegation link",
+    params(("id" = Uuid, Path)),
+    responses(
+        (status = 204, description = "Revoked"),
+        (status = 404, body = ApiError, description = "Unknown, already used, or already revoked"),
+    ),
+)]
+pub async fn delegate_link_revoke(
+    State(state): State<AppState>,
+    Authorized(org, _): Authorized<ChannelsWrite>,
+    Path(id): Path<Uuid>,
+) -> Result<StatusCode> {
+    if state.channel_link_code_store.revoke(org, id).await? {
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err(AppError::not_found(
+            codes::DELEGATE_LINK_NOT_FOUND,
+            "delegation link not found",
+        ))
+    }
 }
 
 /// One synthetic, clearly-labelled delivery through `config`'s transport.
@@ -691,7 +880,7 @@ fn require_central_bot(state: &AppState) -> Result<()> {
 /// A caller-supplied operator-managed config (`telegram_app` chat id) would
 /// let anyone alert-spam an arbitrary destination with our credentials —
 /// only the transport's own flow may mint one.
-fn reject_managed_kind(cfg: &ChannelConfig) -> Result<()> {
+pub(crate) fn reject_managed_kind(cfg: &ChannelConfig) -> Result<()> {
     if cfg.operator_managed() {
         return Err(AppError::unprocessable(
             codes::CHANNEL_KIND_MANAGED,
@@ -702,7 +891,7 @@ fn reject_managed_kind(cfg: &ChannelConfig) -> Result<()> {
     Ok(())
 }
 
-fn validate_name(name: &str) -> Result<()> {
+pub(crate) fn validate_name(name: &str) -> Result<()> {
     validate_channel_name(name)
         .map_err(|m| AppError::bad_request_field(codes::CHANNEL_NAME_INVALID, m, "name"))
 }
@@ -711,7 +900,7 @@ fn validate_name(name: &str) -> Result<()> {
 /// copy-pasted redacted create reports `REDACTION_SENTINEL`, not a generic
 /// invalid-URL — `***` does not parse as a URL), then the structural
 /// transport check.
-fn validate_config(cfg: &crate::domain::ChannelConfig) -> Result<()> {
+pub(crate) fn validate_config(cfg: &crate::domain::ChannelConfig) -> Result<()> {
     if cfg.has_redaction_sentinel() {
         return Err(AppError::bad_request_field(
             codes::REDACTION_SENTINEL,
@@ -729,7 +918,7 @@ fn validate_config(cfg: &crate::domain::ChannelConfig) -> Result<()> {
 /// test path: a hit is recorded as an `abuse_blocked` quota event and
 /// rejected. Transports with a fixed vendor endpoint expose no URL and
 /// pass through.
-fn check_channel_abuse(
+pub(crate) fn check_channel_abuse(
     state: &AppState,
     org: crate::domain::OrgId,
     config: &ChannelConfig,

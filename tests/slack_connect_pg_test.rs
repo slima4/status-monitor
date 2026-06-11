@@ -123,9 +123,17 @@ async fn callback_cancel_bounces_to_form_and_burns_state() {
     let (app, org) = member_app(&pool).await;
 
     let s = oauth_state::generate_state();
-    oauth_state::insert(&pool, &s, SLACK_CONNECT_PROVIDER, None, None, Some(org.0))
-        .await
-        .unwrap();
+    oauth_state::insert(
+        &pool,
+        &s,
+        SLACK_CONNECT_PROVIDER,
+        None,
+        None,
+        Some(org.0),
+        None,
+    )
+    .await
+    .unwrap();
 
     let path = format!("/auth/slack/callback?error=access_denied&state={s}");
     let (status, location, _) = get(&app, &path).await;
@@ -164,6 +172,7 @@ async fn callback_rejects_state_minted_for_a_foreign_org() {
         None,
         None,
         Some(foreign_org),
+        None,
     )
     .await
     .unwrap();
@@ -177,5 +186,68 @@ async fn callback_rejects_state_minted_for_a_foreign_org() {
         status,
         StatusCode::FORBIDDEN,
         "not a member of the state org"
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn delegate_state_callback_needs_no_session_and_cancel_keeps_the_link() {
+    use uptimepage::storage::{ChannelLinkCodeStore, LinkPurpose, PgChannelLinkCodeStore};
+
+    let Some(pool) = pg_pool_from_env().await else {
+        return;
+    };
+    // No session layer at all: the delegate state is the whole authority.
+    let (app, org) = common::build_test_app_with_pg(pool.clone(), slack_cfg).await;
+
+    let links = PgChannelLinkCodeStore::new(pool.clone());
+    let code_hash = uptimepage::auth::sha256_hex(&unique_slug("slack-delegate"));
+    let minted = match links
+        .mint(
+            org,
+            LinkPurpose::Delegate,
+            None,
+            &code_hash,
+            None,
+            None,
+            chrono::Utc::now() + chrono::Duration::days(7),
+            5,
+        )
+        .await
+        .unwrap()
+    {
+        uptimepage::storage::MintOutcome::Created(c) => c,
+        uptimepage::storage::MintOutcome::LimitReached => panic!("unexpected limit"),
+    };
+
+    let s = oauth_state::generate_state();
+    oauth_state::insert(
+        &pool,
+        &s,
+        SLACK_CONNECT_PROVIDER,
+        None,
+        None,
+        Some(org.0),
+        Some(minted.id),
+    )
+    .await
+    .unwrap();
+
+    let (status, location, _) = get(
+        &app,
+        &format!("/auth/slack/callback?error=access_denied&state={s}"),
+    )
+    .await;
+    assert!(status.is_redirection(), "{status}");
+    assert_eq!(location.as_deref(), Some("/c/done?slack=cancelled"));
+
+    // The cancelled dance must not spend the delegate link.
+    assert!(
+        links
+            .peek(LinkPurpose::Delegate, &code_hash)
+            .await
+            .unwrap()
+            .is_some(),
+        "cancel must keep the delegate link alive"
     );
 }

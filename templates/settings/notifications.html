@@ -23,6 +23,30 @@
     <p class="px-4 py-3 font-mono text-xs text-quiet"># loading…</p>
   </div>
 
+  <fieldset class="sticker-card form-card" data-delegate-box>
+    <legend>delegate the connect step</legend>
+    <div class="clear-both space-y-3 p-5">
+      <p class="text-sm text-muted">
+        The person who owns the Slack workspace, Telegram group, or inbox
+        doesn't need an account here: hand them a single-use link that can
+        connect exactly one channel to this workspace and nothing else.
+      </p>
+      <div class="flex flex-wrap items-center gap-3">
+        <button type="button" data-delegate-mint
+                class="sticker-btn px-3 py-1.5 text-sm font-medium">invite someone to connect a channel</button>
+        <span data-delegate-result role="status" class="font-mono text-xs"></span>
+      </div>
+      <div data-delegate-url-box class="hidden flex flex-wrap items-center gap-3">
+        <input data-delegate-url type="text" readonly
+               class="w-full max-w-md field font-mono text-xs" value="">
+        <button type="button" data-delegate-copy
+                class="sticker-btn px-3 py-1.5 text-sm font-medium">copy</button>
+      </div>
+      <div data-delegate-list class="space-y-1"></div>
+    </div>
+  </fieldset>
+
+  <script defer src="{{ "js/ui/delegate_links.js"|asset }}"></script>
   <script>
     // Send-test result: the API returns 200 {delivered:true} or a 4xx error
     // envelope. Render the outcome into the row's result cell instead of

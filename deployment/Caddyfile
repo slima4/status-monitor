@@ -217,6 +217,21 @@ app.{$UPTIMEPAGE_DOMAIN} {
 		import app_upstream
 	}
 
+	# ─── Delegation connect pages — anonymous single-use codes ──────────
+	# Possession of the code is the authority; the per-IP cap bounds brute
+	# probing while leaving room for the page's 5 s status poll.
+	@delegate_connect path /c/*
+	handle @delegate_connect {
+		rate_limit {
+			zone delegate_connect {
+				key {remote_host}
+				events 60
+				window 1m
+			}
+		}
+		import app_upstream
+	}
+
 	# ─── Telegram bot webhook — anonymous, per-IP edge cap ──────────────
 	# Authenticated in-app by the secret-token header (constant-time); the
 	# edge caps junk floods and bounds the body (real updates are < 4 KB).

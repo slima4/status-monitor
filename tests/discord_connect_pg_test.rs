@@ -96,9 +96,17 @@ async fn callback_cancel_bounces_to_form_and_burns_state() {
     let (app, org) = member_app(&pool).await;
 
     let s = oauth_state::generate_state();
-    oauth_state::insert(&pool, &s, DISCORD_CONNECT_PROVIDER, None, None, Some(org.0))
-        .await
-        .unwrap();
+    oauth_state::insert(
+        &pool,
+        &s,
+        DISCORD_CONNECT_PROVIDER,
+        None,
+        None,
+        Some(org.0),
+        None,
+    )
+    .await
+    .unwrap();
 
     let path = format!("/auth/discord/callback?error=access_denied&state={s}");
     let (status, location, _) = get(&app, &path).await;
@@ -131,6 +139,7 @@ async fn callback_rejects_cross_provider_and_foreign_org_states() {
         None,
         None,
         Some(org.0),
+        None,
     )
     .await
     .unwrap();
@@ -156,6 +165,7 @@ async fn callback_rejects_cross_provider_and_foreign_org_states() {
         None,
         None,
         Some(foreign_org),
+        None,
     )
     .await
     .unwrap();

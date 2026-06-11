@@ -1,6 +1,6 @@
 -- Single-use email-verification tokens for `email` notification channels.
 -- Only the token's SHA-256 is stored (same discipline as
--- telegram_link_codes.code_hash); presenting the raw token at the public
+-- channel_link_codes.code_hash); presenting the raw token at the public
 -- verify endpoint is what proves inbox ownership.
 CREATE TABLE channel_verification_tokens (
     id         UUID PRIMARY KEY DEFAULT uuidv7(),

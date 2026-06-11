@@ -221,7 +221,7 @@ pub struct AppState {
     pub monitor_share_store: Arc<dyn crate::storage::MonitorShareStore>,
     /// Single-use Telegram link codes. Built from `db` so `AppState::new`'s
     /// signature stays unchanged.
-    pub telegram_link_code_store: Arc<dyn crate::storage::TelegramLinkCodeStore>,
+    pub channel_link_code_store: Arc<dyn crate::storage::ChannelLinkCodeStore>,
     /// Process-wide central-bot send budget. `new()` builds a fresh one for
     /// fixtures; main replaces it with the instance the escalation engine
     /// shares — two instances would double the bot's rate budget.
@@ -395,10 +395,10 @@ impl AppState {
             Some(pool) => Arc::new(crate::storage::PgPageAssetStore::new(pool)),
             None => Arc::new(crate::storage::InMemoryPageAssetStore::new()),
         };
-        let telegram_link_code_store: Arc<dyn crate::storage::TelegramLinkCodeStore> =
+        let channel_link_code_store: Arc<dyn crate::storage::ChannelLinkCodeStore> =
             match db.clone() {
-                Some(pool) => Arc::new(crate::storage::PgTelegramLinkCodeStore::new(pool)),
-                None => Arc::new(crate::storage::InMemoryTelegramLinkCodeStore::new()),
+                Some(pool) => Arc::new(crate::storage::PgChannelLinkCodeStore::new(pool)),
+                None => Arc::new(crate::storage::InMemoryChannelLinkCodeStore::new()),
             };
         let incident_ops_store: Arc<dyn crate::storage::IncidentOpsStore> = match db.clone() {
             Some(pool) => Arc::new(crate::storage::PgIncidentOpsStore::new(pool)),
@@ -442,7 +442,7 @@ impl AppState {
             status_page_store,
             page_asset_store,
             monitor_share_store,
-            telegram_link_code_store,
+            channel_link_code_store,
             telegram_send_budget: Arc::new(crate::telegram::TelegramSendBudget::new()),
             incident_narration_store,
             incident_ops_store,

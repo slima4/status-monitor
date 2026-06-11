@@ -27,6 +27,9 @@ pub struct ConsumedState {
     pub invitation_id: Option<Uuid>,
     /// Target org of a connect-purpose dance; `None` for login providers.
     pub org_id: Option<Uuid>,
+    /// Delegate link a connect dance was started from; possession of that
+    /// link replaces the session-membership check on the callback.
+    pub link_code_id: Option<Uuid>,
 }
 
 /// 32 random bytes, base64url-no-pad. Caller stores via [`insert`].
@@ -38,6 +41,7 @@ pub fn generate_state() -> String {
     base64url_no_pad(&bytes)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn insert(
     pool: &PgPool,
     state: &str,
@@ -45,17 +49,20 @@ pub async fn insert(
     redirect_after: Option<&str>,
     invitation_id: Option<Uuid>,
     org_id: Option<Uuid>,
+    link_code_id: Option<Uuid>,
 ) -> Result<DateTime<Utc>> {
     let expires_at = Utc::now() + Duration::minutes(STATE_EXPIRY_MINUTES);
     sqlx::query(
-        "INSERT INTO oauth_states (state_hash, provider, redirect_after, invitation_id, org_id, expires_at) \
-         VALUES ($1, $2, $3, $4, $5, $6)",
+        "INSERT INTO oauth_states \
+             (state_hash, provider, redirect_after, invitation_id, org_id, link_code_id, expires_at) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7)",
     )
     .bind(hash_state(state))
     .bind(provider)
     .bind(redirect_after)
     .bind(invitation_id)
     .bind(org_id)
+    .bind(link_code_id)
     .bind(expires_at)
     .execute(pool)
     .await
@@ -70,7 +77,7 @@ pub async fn consume(pool: &PgPool, state: &str) -> Result<Option<ConsumedState>
     sqlx::query_as(
         "DELETE FROM oauth_states \
          WHERE state_hash = $1 AND expires_at > now() \
-         RETURNING provider, redirect_after, invitation_id, org_id",
+         RETURNING provider, redirect_after, invitation_id, org_id, link_code_id",
     )
     .bind(hash_state(state))
     .fetch_optional(pool)

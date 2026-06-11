@@ -1,4 +1,4 @@
-//! Live-Postgres contract for `telegram_link_codes`: the single-use consume
+//! Live-Postgres contract for `channel_link_codes`: the single-use consume
 //! race, expiry, org scoping of the status poll, the outstanding-codes cap,
 //! and the consume-path channel create (name-collision suffix + the
 //! `telegram_app` kind passing the CHECK constraint).
@@ -16,8 +16,8 @@ use uptimepage::domain::{
 };
 use uptimepage::error::AppError;
 use uptimepage::storage::{
-    LinkCodeStatus, MintOutcome, NotificationChannelStore, PgNotificationChannelStore,
-    PgTelegramLinkCodeStore, TelegramLinkCodeStore, create_org_with_owner,
+    ChannelLinkCodeStore, LinkCodeStatus, LinkPurpose, MintOutcome, NotificationChannelStore,
+    PgChannelLinkCodeStore, PgNotificationChannelStore, create_org_with_owner,
 };
 use uptimepage::web::views::notification_channels::create_channel_deduped;
 
@@ -45,7 +45,7 @@ async fn cleanup(pool: &sqlx::PgPool, orgs: &[OrgId], users: &[UserId]) {
 }
 
 async fn mint(
-    store: &PgTelegramLinkCodeStore,
+    store: &PgChannelLinkCodeStore,
     org: OrgId,
     user: UserId,
     hash: &str,
@@ -54,9 +54,11 @@ async fn mint(
     match store
         .mint(
             org,
+            LinkPurpose::Telegram,
             Some(user),
             hash,
             name,
+            None,
             Utc::now() + Duration::minutes(15),
             5,
         )
@@ -82,7 +84,7 @@ async fn consume_is_single_use_under_race() {
         return;
     };
     let (org, user) = one_org(&pool, "tg-race").await;
-    let store = std::sync::Arc::new(PgTelegramLinkCodeStore::new(pool.clone()));
+    let store = std::sync::Arc::new(PgChannelLinkCodeStore::new(pool.clone()));
     let hash = unique_slug("tg-race-hash");
     mint(&store, org, user, &hash, None).await;
 
@@ -90,7 +92,7 @@ async fn consume_is_single_use_under_race() {
         .map(|_| {
             let store = store.clone();
             let hash = hash.clone();
-            tokio::spawn(async move { store.consume(&hash).await.unwrap() })
+            tokio::spawn(async move { store.consume(LinkPurpose::Telegram, &hash).await.unwrap() })
         })
         .collect();
     let mut winners = 0;
@@ -112,13 +114,15 @@ async fn expired_code_neither_consumes_nor_polls_pending() {
         return;
     };
     let (org, user) = one_org(&pool, "tg-exp").await;
-    let store = PgTelegramLinkCodeStore::new(pool.clone());
+    let store = PgChannelLinkCodeStore::new(pool.clone());
     let hash = unique_slug("tg-exp-hash");
     let code = match store
         .mint(
             org,
+            LinkPurpose::Telegram,
             Some(user),
             &hash,
+            None,
             None,
             Utc::now() - Duration::minutes(1),
             5,
@@ -130,7 +134,13 @@ async fn expired_code_neither_consumes_nor_polls_pending() {
         MintOutcome::LimitReached => panic!("unexpected limit"),
     };
 
-    assert!(store.consume(&hash).await.unwrap().is_none());
+    assert!(
+        store
+            .consume(LinkPurpose::Telegram, &hash)
+            .await
+            .unwrap()
+            .is_none()
+    );
     assert_eq!(
         store.status(org, code.id).await.unwrap(),
         Some(LinkCodeStatus::Expired)
@@ -147,7 +157,7 @@ async fn status_poll_is_org_scoped_and_transitions() {
     };
     let (org_a, user_a) = one_org(&pool, "tg-scope-a").await;
     let (org_b, user_b) = one_org(&pool, "tg-scope-b").await;
-    let store = PgTelegramLinkCodeStore::new(pool.clone());
+    let store = PgChannelLinkCodeStore::new(pool.clone());
     let channels = PgNotificationChannelStore::new(pool.clone(), None);
     let hash = unique_slug("tg-scope-hash");
     let code = mint(&store, org_a, user_a, &hash, Some("Ops Telegram")).await;
@@ -159,7 +169,11 @@ async fn status_poll_is_org_scoped_and_transitions() {
     // The other org cannot observe the code at all.
     assert_eq!(store.status(org_b, code.id).await.unwrap(), None);
 
-    let link = store.consume(&hash).await.unwrap().expect("claim");
+    let link = store
+        .consume(LinkPurpose::Telegram, &hash)
+        .await
+        .unwrap()
+        .expect("claim");
     assert_eq!(link.org_id, org_a);
     assert_eq!(link.channel_name.as_deref(), Some("Ops Telegram"));
     // Claimed but no channel attached yet → dead from the poll's view.
@@ -200,7 +214,7 @@ async fn mint_caps_outstanding_codes_per_org() {
         return;
     };
     let (org, user) = one_org(&pool, "tg-cap").await;
-    let store = PgTelegramLinkCodeStore::new(pool.clone());
+    let store = PgChannelLinkCodeStore::new(pool.clone());
     let hashes: Vec<String> = (0..5)
         .map(|i| unique_slug(&format!("tg-cap-{i}")))
         .collect();
@@ -211,8 +225,10 @@ async fn mint_caps_outstanding_codes_per_org() {
         store
             .mint(
                 org,
+                LinkPurpose::Telegram,
                 Some(user),
                 &unique_slug("tg-cap-over"),
+                None,
                 None,
                 Utc::now() + Duration::minutes(15),
                 5,
@@ -222,7 +238,11 @@ async fn mint_caps_outstanding_codes_per_org() {
         MintOutcome::LimitReached
     ));
     // Consuming one frees a slot.
-    store.consume(&hashes[0]).await.unwrap().unwrap();
+    store
+        .consume(LinkPurpose::Telegram, &hashes[0])
+        .await
+        .unwrap()
+        .unwrap();
     mint(&store, org, user, &unique_slug("tg-cap-freed"), None).await;
 
     cleanup(&pool, &[org], &[user]).await;

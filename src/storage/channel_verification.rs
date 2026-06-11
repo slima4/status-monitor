@@ -1,7 +1,7 @@
 //! Single-use verification tokens for `email` notification channels.
 //!
 //! Tokens are 32 random bytes (43-char base64url); only the SHA-256 is
-//! stored, mirroring `telegram_link_codes.code_hash`. Presenting the raw
+//! stored, mirroring `channel_link_codes.code_hash`. Presenting the raw
 //! token at the public verify endpoint proves inbox ownership.
 
 use anyhow::Context;

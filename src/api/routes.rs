@@ -169,6 +169,15 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
             get(handlers::notification_channels::telegram_link_status),
         )
         .route(
+            "/notification-channels/delegate",
+            get(handlers::notification_channels::delegate_link_list)
+                .post(handlers::notification_channels::delegate_link_mint),
+        )
+        .route(
+            "/notification-channels/delegate/{id}",
+            axum::routing::delete(handlers::notification_channels::delegate_link_revoke),
+        )
+        .route(
             "/incidents",
             get(handlers::incidents::list_incidents).post(handlers::incidents::declare_incident),
         )

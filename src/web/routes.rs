@@ -56,6 +56,21 @@ pub fn routes(state: AppState) -> Router {
         // Public email-channel verification: possession of the mailed token
         // is the proof; same always-mounted reasoning as the share links.
         .route("/verify-channel", get(views::verify_channel::verify))
+        // Public delegation connect page: a single-use code attaches one
+        // notification channel to the inviting org; same always-mounted
+        // reasoning as the share links.
+        .route("/c/done", get(views::delegate_connect::done))
+        .route("/c/{code}", get(views::delegate_connect::page))
+        .route("/c/{code}/status", get(views::delegate_connect::status))
+        .route("/c/{code}/create", post(views::delegate_connect::create))
+        .route(
+            "/c/{code}/slack/start",
+            get(views::delegate_connect::slack_start),
+        )
+        .route(
+            "/c/{code}/discord/start",
+            get(views::delegate_connect::discord_start),
+        )
         .route(
             "/web/partials/dashboard",
             get(views::dashboard::table_partial),

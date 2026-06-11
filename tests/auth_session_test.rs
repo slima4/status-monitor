@@ -44,9 +44,17 @@ async fn oauth_state_insert_consume_round_trip() {
 
     let s = oauth_state::generate_state();
     let inv_id = uuid::Uuid::new_v4();
-    oauth_state::insert(&pool, &s, "github", Some("/after"), Some(inv_id), None)
-        .await
-        .expect("insert");
+    oauth_state::insert(
+        &pool,
+        &s,
+        "github",
+        Some("/after"),
+        Some(inv_id),
+        None,
+        None,
+    )
+    .await
+    .expect("insert");
     let consumed = oauth_state::consume(&pool, &s)
         .await
         .expect("consume")

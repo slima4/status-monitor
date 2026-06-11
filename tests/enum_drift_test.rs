@@ -131,6 +131,28 @@ async fn oauth_identities_provider_check_matches_rust_enum() {
     );
 }
 
+#[tokio::test]
+#[ignore]
+async fn channel_link_codes_purpose_check_matches_rust_enum() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let def = constraint_def(&pool, "channel_link_codes_purpose_check")
+        .await
+        .expect("channel_link_codes_purpose_check missing");
+    let db = sorted(quoted_tokens(&def));
+    let rust = sorted(
+        uptimepage::storage::LinkPurpose::ALL
+            .iter()
+            .map(|p| p.as_db_str().to_string())
+            .collect(),
+    );
+    assert_eq!(
+        db, rust,
+        "channel_link_codes.purpose CHECK list ({db:?}) drifted from LinkPurpose ({rust:?})"
+    );
+}
+
 /// `oauth_states.provider` must accept every login provider (the dance
 /// writes a state row before the callback ever inserts an identity row)
 /// plus the connect-purpose providers, which never reach

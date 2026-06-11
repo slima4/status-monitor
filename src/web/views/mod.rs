@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod dashboard;
+pub mod delegate_connect;
 pub mod discord_connect;
 pub mod escalation;
 pub mod incidents;
