@@ -41,9 +41,19 @@
           <span class="check-type-card__desc">incoming webhook</span>
         </label>
         <label class="check-type-card" data-kind-card>
-          <input type="radio" name="kind" value="webhook"{% if form.kind == "webhook" %} checked{% endif %} class="sr-only">
-          <span class="check-type-card__name">webhook</span>
-          <span class="check-type-card__desc">POST to your endpoint</span>
+          <input type="radio" name="kind" value="discord"{% if form.kind == "discord" %} checked{% endif %} class="sr-only">
+          <span class="check-type-card__name">discord</span>
+          <span class="check-type-card__desc">channel webhook</span>
+        </label>
+        <label class="check-type-card" data-kind-card>
+          <input type="radio" name="kind" value="msteams"{% if form.kind == "msteams" %} checked{% endif %} class="sr-only">
+          <span class="check-type-card__name">teams</span>
+          <span class="check-type-card__desc">Workflows webhook</span>
+        </label>
+        <label class="check-type-card" data-kind-card>
+          <input type="radio" name="kind" value="google_chat"{% if form.kind == "google_chat" %} checked{% endif %} class="sr-only">
+          <span class="check-type-card__name">google chat</span>
+          <span class="check-type-card__desc">space webhook</span>
         </label>
         {% if form.offers_telegram_app() %}
         <label class="check-type-card" data-kind-card>
@@ -61,6 +71,11 @@
           <input type="radio" name="kind" value="whatsapp"{% if form.kind == "whatsapp" %} checked{% endif %} class="sr-only">
           <span class="check-type-card__name">whatsapp</span>
           <span class="check-type-card__desc">Cloud API message</span>
+        </label>
+        <label class="check-type-card" data-kind-card>
+          <input type="radio" name="kind" value="webhook"{% if form.kind == "webhook" %} checked{% endif %} class="sr-only">
+          <span class="check-type-card__name">webhook</span>
+          <span class="check-type-card__desc">POST to your endpoint</span>
         </label>
       </div>
       {% if form.mode != "create" && form.kind != "telegram_app" %}
@@ -119,6 +134,51 @@
             Create an incoming webhook in your workspace —
             <a href="https://api.slack.com/messaging/webhooks" target="_blank" rel="noopener"
                class="underline decoration-dotted hover:text-body">api.slack.com/messaging/webhooks</a>.
+          </span>
+        </label>
+      </div>
+
+      <div data-variant="discord"{% if form.kind != "discord" %} class="hidden"{% endif %}>
+        <label class="field-outline">
+          <span class="field-outline__label">Discord webhook URL</span>
+          <input name="discord_webhook_url" type="url" value="{{ form.config.discord_webhook_url }}"
+                 placeholder="https://discord.com/api/webhooks/0000/XXXX"
+                 autocomplete="off" spellcheck="false" class="w-full field font-mono">
+          <span class="mt-1 block text-xs text-muted">
+            Server Settings → Integrations → Webhooks → New Webhook, pick the
+            channel, copy its URL —
+            <a href="https://support.discord.com/hc/en-us/articles/228383668" target="_blank" rel="noopener"
+               class="underline decoration-dotted hover:text-body">intro to webhooks</a>.
+          </span>
+        </label>
+      </div>
+
+      <div data-variant="msteams"{% if form.kind != "msteams" %} class="hidden"{% endif %}>
+        <label class="field-outline">
+          <span class="field-outline__label">Teams Workflows webhook URL</span>
+          <input name="msteams_webhook_url" type="url" value="{{ form.config.msteams_webhook_url }}"
+                 placeholder="https://prod-00.westus.logic.azure.com/workflows/…"
+                 autocomplete="off" spellcheck="false" class="w-full field font-mono">
+          <span class="mt-1 block text-xs text-muted">
+            In Teams, open the Workflows app → "Post to a channel when a
+            webhook request is received" template → copy the request URL —
+            <a href="https://support.microsoft.com/en-us/office/create-incoming-webhooks-with-workflows-for-microsoft-teams-8ae491c7-0394-4861-ba59-055e33f75498" target="_blank" rel="noopener"
+               class="underline decoration-dotted hover:text-body">incoming webhooks with Workflows</a>.
+          </span>
+        </label>
+      </div>
+
+      <div data-variant="google_chat"{% if form.kind != "google_chat" %} class="hidden"{% endif %}>
+        <label class="field-outline">
+          <span class="field-outline__label">Google Chat webhook URL</span>
+          <input name="google_chat_webhook_url" type="url" value="{{ form.config.google_chat_webhook_url }}"
+                 placeholder="https://chat.googleapis.com/v1/spaces/XXXX/messages?key=…&token=…"
+                 autocomplete="off" spellcheck="false" class="w-full field font-mono">
+          <span class="mt-1 block text-xs text-muted">
+            In the space: Apps &amp; integrations → Webhooks → Add webhook,
+            copy its URL —
+            <a href="https://developers.google.com/workspace/chat/quickstart/webhooks" target="_blank" rel="noopener"
+               class="underline decoration-dotted hover:text-body">Chat webhook quickstart</a>.
           </span>
         </label>
       </div>

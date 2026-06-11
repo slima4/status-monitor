@@ -1,4 +1,7 @@
+pub mod discord;
 pub mod event;
+pub mod google_chat;
+pub mod msteams;
 pub mod slack;
 pub mod telegram;
 pub mod webhook;
@@ -11,7 +14,10 @@ use async_trait::async_trait;
 use crate::domain::ChannelConfig;
 use crate::error::Result;
 use crate::http_outbound::OutboundHttpClient;
+use crate::notifier::discord::DiscordNotifier;
 use crate::notifier::event::IncidentNotice;
+use crate::notifier::google_chat::GoogleChatNotifier;
+use crate::notifier::msteams::MsTeamsNotifier;
 use crate::notifier::slack::SlackNotifier;
 use crate::notifier::telegram::TelegramNotifier;
 use crate::notifier::webhook::WebhookNotifier;
@@ -104,5 +110,44 @@ pub fn build_notifier(
         ChannelConfig::WhatsApp(c) => {
             Arc::new(WhatsAppNotifier::new(http.clone(), c)?) as Arc<dyn Notifier>
         }
+        ChannelConfig::Discord(c) => {
+            Arc::new(DiscordNotifier::new(http.clone(), parse(&c.webhook_url)?))
+                as Arc<dyn Notifier>
+        }
+        ChannelConfig::MsTeams(c) => {
+            Arc::new(MsTeamsNotifier::new(http.clone(), parse(&c.webhook_url)?))
+                as Arc<dyn Notifier>
+        }
+        ChannelConfig::GoogleChat(c) => Arc::new(GoogleChatNotifier::new(
+            http.clone(),
+            parse(&c.webhook_url)?,
+        )) as Arc<dyn Notifier>,
     })
+}
+
+/// Char-boundary-safe cap for transports with a hard message-length limit;
+/// over-limit text ends in `…` within the cap.
+pub(crate) fn truncate_chars(s: &str, max_chars: usize) -> String {
+    if s.chars().count() <= max_chars {
+        return s.to_string();
+    }
+    let mut out: String = s.chars().take(max_chars.saturating_sub(1)).collect();
+    out.push('…');
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::truncate_chars;
+
+    #[test]
+    fn truncate_chars_caps_with_ellipsis() {
+        assert_eq!(truncate_chars("short", 10), "short");
+        assert_eq!(truncate_chars("exactly", 7), "exactly");
+        assert_eq!(truncate_chars("overflowing", 5), "over…");
+        // Multi-byte chars count as one; no byte-boundary panic.
+        let s = "é".repeat(10);
+        assert_eq!(truncate_chars(&s, 4).chars().count(), 4);
+        assert!(truncate_chars(&s, 4).ends_with('…'));
+    }
 }

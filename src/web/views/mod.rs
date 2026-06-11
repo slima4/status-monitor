@@ -114,6 +114,8 @@ pub(crate) fn channel_kind_label(kind: crate::domain::ChannelKind) -> &'static s
     match kind {
         ChannelKind::Telegram => "telegram bot",
         ChannelKind::TelegramApp => "telegram",
+        ChannelKind::MsTeams => "teams",
+        ChannelKind::GoogleChat => "google chat",
         other => other.as_db_str(),
     }
 }

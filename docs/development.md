@@ -173,10 +173,10 @@ What it seeds (under the `seed-fixtures` tag, idempotent):
   `cityHash64(tid)` (each component has a distinct uptime% and outage
   pattern), an explicit 87-89d "ancient outage" cluster on the first three
   targets, and a 6-day NoData gap on fix-email.
-- **3 notification channels** — one per `ChannelConfig` variant (slack,
-  webhook enabled; telegram disabled), with alert bindings on fix-api /
-  fix-db / fix-auth mixing `notify_recovery` on/off and single/multi-channel
-  bindings.
+- **8 notification channels** — one per `ChannelConfig` variant (slack,
+  webhook, whatsapp, discord, msteams, google_chat enabled; telegram and
+  telegram_app disabled), with alert bindings on fix-api / fix-db / fix-auth
+  mixing `notify_recovery` on/off and single/multi-channel bindings.
 - **4 maintenance windows** — 1 active (bound to fix-db), 2 upcoming, 1 past.
 
 The script ends with a post-seed verification block that prints Postgres row

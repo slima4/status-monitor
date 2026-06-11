@@ -57,6 +57,9 @@ pub struct ChannelsPartial {
 /// the `***` sentinel until the operator opts to replace the config.
 pub struct ConfigFields {
     pub slack_webhook_url: String,
+    pub discord_webhook_url: String,
+    pub msteams_webhook_url: String,
+    pub google_chat_webhook_url: String,
     pub webhook_url: String,
     pub webhook_headers_json: String,
     pub webhook_secret: String,
@@ -75,6 +78,9 @@ impl Default for ConfigFields {
     fn default() -> Self {
         Self {
             slack_webhook_url: String::new(),
+            discord_webhook_url: String::new(),
+            msteams_webhook_url: String::new(),
+            google_chat_webhook_url: String::new(),
             webhook_url: String::new(),
             webhook_headers_json: "{}".into(),
             webhook_secret: String::new(),
@@ -315,6 +321,9 @@ fn form_from_channel(c: NotificationChannel) -> ChannelFormModel {
     let mut config = ConfigFields::default();
     match redacted {
         ChannelConfig::Slack(c) => config.slack_webhook_url = c.webhook_url,
+        ChannelConfig::Discord(c) => config.discord_webhook_url = c.webhook_url,
+        ChannelConfig::MsTeams(c) => config.msteams_webhook_url = c.webhook_url,
+        ChannelConfig::GoogleChat(c) => config.google_chat_webhook_url = c.webhook_url,
         ChannelConfig::Webhook(c) => {
             config.webhook_url = c.url;
             config.webhook_headers_json = json_pretty(&c.headers);
@@ -372,7 +381,15 @@ mod tests {
         assert!(html.contains(r#"data-method="POST""#));
         assert!(html.contains(r#"data-mode="create""#));
         // Every transport offers a type card + config panel.
-        for kind in ["slack", "webhook", "telegram", "whatsapp"] {
+        for kind in [
+            "slack",
+            "discord",
+            "msteams",
+            "google_chat",
+            "webhook",
+            "telegram",
+            "whatsapp",
+        ] {
             assert!(html.contains(&format!(r#"value="{kind}""#)), "{kind} card");
             assert!(
                 html.contains(&format!(r#"data-variant="{kind}""#)),

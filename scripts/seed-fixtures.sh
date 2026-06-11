@@ -507,7 +507,7 @@ CROSS JOIN LATERAL (
 ) AS e(occurred_at, kind, actor_type, message);
 SQL
 
-echo "==> Postgres: 5 notification channels (one per transport) and alert bindings"
+echo "==> Postgres: 8 notification channels (one per transport) and alert bindings"
 # Channel kinds match ChannelConfig — one per variant. The BYO Telegram row is
 # disabled so the operator UI renders both the enabled and disabled states;
 # the linked telegram_app row carries the platform-disable note.
@@ -529,6 +529,15 @@ INSERT INTO notification_channels (org_id, name, kind, config, external_ref, ena
    '-1009876543210', false, 'unlinked from the Telegram side'),
   ('${ORG}'::uuid, 'Fixture WhatsApp', 'whatsapp',
    '{"type":"whatsapp","access_token":"EAAG-fixture-token","phone_number_id":"106540352242922","to":"15551234567","template_name":"uptime_alert"}'::jsonb,
+   NULL, true, NULL),
+  ('${ORG}'::uuid, 'Fixture Discord', 'discord',
+   '{"type":"discord","webhook_url":"https://discord.com/api/webhooks/000000000000000000/fixture-discord-token"}'::jsonb,
+   NULL, true, NULL),
+  ('${ORG}'::uuid, 'Fixture Teams', 'msteams',
+   '{"type":"msteams","webhook_url":"https://prod-00.westus.logic.azure.com/workflows/fixture/triggers/manual/paths/invoke"}'::jsonb,
+   NULL, true, NULL),
+  ('${ORG}'::uuid, 'Fixture GChat', 'google_chat',
+   '{"type":"google_chat","webhook_url":"https://chat.googleapis.com/v1/spaces/AAAA0000/messages?key=fixture-key&token=fixture-token"}'::jsonb,
    NULL, true, NULL);
 
 -- Managed-by badge on the channels list too: webhook as Terraform, Slack as
@@ -1111,7 +1120,7 @@ echo "  incidents : 158 (150 resolved across 87d + 4 active (one per frozen publ
               + 1 adversarial-title + 2 internal-only on non-public monitors + 1 manually declared)
   ops state : active public incidents split triggered/acknowledged; internal + manual
               incidents carry activity timelines for the operator console"
-echo "  channels  : 5 (slack + webhook + whatsapp enabled; telegram disabled; telegram_app disabled with unlink note)"
+echo "  channels  : 8 (slack + webhook + whatsapp + discord + msteams + google_chat enabled; telegram disabled; telegram_app disabled with unlink note)"
 echo "  managed   : fix-payment/fix-admin + Fixture Webhook → terraform chip; fix-tcp + Fixture Slack → api chip"
 echo "  alerts    : bound on fix-api / fix-db / fix-auth"
 echo "  maintenance: 4 windows (1 active bound to fix-db) → drives Maintenance state"

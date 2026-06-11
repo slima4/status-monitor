@@ -12,7 +12,7 @@ CREATE TABLE notification_channels (
     -- Closed enum; keep in lockstep with `domain::ChannelKind::ALL`. The
     -- live drift test (`tests/enum_drift_test.rs`) introspects this CHECK
     -- and fails if the lists disagree.
-    kind        TEXT NOT NULL CHECK (kind IN ('webhook', 'slack', 'telegram', 'telegram_app', 'whatsapp')),
+    kind        TEXT NOT NULL CHECK (kind IN ('webhook', 'slack', 'telegram', 'telegram_app', 'whatsapp', 'discord', 'msteams', 'google_chat')),
     config      JSONB NOT NULL,
     -- Routing id (e.g. telegram chat id) queryable without opening the
     -- sealed config; set only by the transport's own flow.

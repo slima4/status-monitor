@@ -19,6 +19,9 @@
 //! storage edge, and secrets are never echoed back by the API — see
 //! [`ChannelConfig::redacted`].
 
+mod discord;
+mod google_chat;
+mod msteams;
 mod slack;
 mod telegram;
 mod telegram_app;
@@ -26,6 +29,9 @@ mod transport;
 mod webhook;
 mod whatsapp;
 
+pub use discord::DiscordConfig;
+pub use google_chat::GoogleChatConfig;
+pub use msteams::MsTeamsConfig;
 pub use slack::SlackConfig;
 pub use telegram::TelegramConfig;
 pub use telegram_app::TelegramAppConfig;
@@ -49,6 +55,10 @@ pub enum ChannelKind {
     TelegramApp,
     #[serde(rename = "whatsapp")]
     WhatsApp,
+    Discord,
+    #[serde(rename = "msteams")]
+    MsTeams,
+    GoogleChat,
 }
 
 impl ChannelKind {
@@ -61,6 +71,9 @@ impl ChannelKind {
         Self::Telegram,
         Self::TelegramApp,
         Self::WhatsApp,
+        Self::Discord,
+        Self::MsTeams,
+        Self::GoogleChat,
     ];
 
     /// Stable string used in the Postgres `kind` CHECK constraint and the
@@ -72,6 +85,9 @@ impl ChannelKind {
             Self::Telegram => "telegram",
             Self::TelegramApp => "telegram_app",
             Self::WhatsApp => "whatsapp",
+            Self::Discord => "discord",
+            Self::MsTeams => "msteams",
+            Self::GoogleChat => "google_chat",
         }
     }
 }
@@ -89,6 +105,10 @@ pub enum ChannelConfig {
     TelegramApp(TelegramAppConfig),
     #[serde(rename = "whatsapp")]
     WhatsApp(WhatsAppConfig),
+    Discord(DiscordConfig),
+    #[serde(rename = "msteams")]
+    MsTeams(MsTeamsConfig),
+    GoogleChat(GoogleChatConfig),
 }
 
 /// Apply `$body` to the inner [`TransportConfig`] of any variant. The one
@@ -101,6 +121,9 @@ macro_rules! with_transport {
             ChannelConfig::Telegram($c) => $body,
             ChannelConfig::TelegramApp($c) => $body,
             ChannelConfig::WhatsApp($c) => $body,
+            ChannelConfig::Discord($c) => $body,
+            ChannelConfig::MsTeams($c) => $body,
+            ChannelConfig::GoogleChat($c) => $body,
         }
     };
 }
@@ -226,6 +249,9 @@ mod tests {
             r#"{"type":"telegram_app","chat_id":"42","chat_title":"Ops"}"#,
             r#"{"type":"whatsapp","access_token":"tok","phone_number_id":"123","to":"15551234567","template_name":"uptime_alert"}"#,
             r#"{"type":"whatsapp","access_token":"tok","phone_number_id":"123","to":"15551234567","template_name":"uptime_alert","language_code":"en"}"#,
+            r#"{"type":"discord","webhook_url":"https://discord.com/api/webhooks/1/x"}"#,
+            r#"{"type":"msteams","webhook_url":"https://prod-77.westus.logic.azure.com/workflows/x"}"#,
+            r#"{"type":"google_chat","webhook_url":"https://chat.googleapis.com/v1/spaces/A/messages?key=k&token=t"}"#,
         ] {
             let c: ChannelConfig = serde_json::from_str(json).unwrap();
             let back = serde_json::to_string(&c).unwrap();
@@ -263,6 +289,15 @@ mod tests {
                 to: "15551234567".into(),
                 template_name: "uptime_alert".into(),
                 language_code: None,
+            }),
+            ChannelConfig::Discord(DiscordConfig {
+                webhook_url: "https://discord.com/api/webhooks/1/x".into(),
+            }),
+            ChannelConfig::MsTeams(MsTeamsConfig {
+                webhook_url: "https://prod-77.westus.logic.azure.com/workflows/x".into(),
+            }),
+            ChannelConfig::GoogleChat(GoogleChatConfig {
+                webhook_url: "https://chat.googleapis.com/v1/spaces/A/messages".into(),
             }),
         ];
         assert_eq!(configs.len(), ChannelKind::ALL.len());
@@ -427,6 +462,63 @@ mod tests {
         assert!(bad("").is_err());
         assert!(bad("not-a-number").is_err());
         assert!(bad("@channelname").is_err());
+    }
+
+    #[test]
+    fn provider_webhooks_pin_their_hosts() {
+        let discord = |url: &str| {
+            ChannelConfig::Discord(DiscordConfig {
+                webhook_url: url.into(),
+            })
+            .validate()
+        };
+        assert!(discord("https://discord.com/api/webhooks/123/tok").is_ok());
+        assert!(discord("https://ptb.discord.com/api/webhooks/123/tok").is_ok());
+        assert!(discord("https://discordapp.com/api/webhooks/123/tok").is_ok());
+        // Wrong provider, lookalike suffix, wrong path, plain http.
+        assert!(discord("https://hooks.slack.com/services/T/B/x").is_err());
+        assert!(discord("https://evildiscord.com/api/webhooks/1/x").is_err());
+        assert!(discord("https://discord.com.evil.test/api/webhooks/1/x").is_err());
+        assert!(discord("https://discord.com/webhooks/1/x").is_err());
+        assert!(discord("http://discord.com/api/webhooks/1/x").is_err());
+
+        let teams = |url: &str| {
+            ChannelConfig::MsTeams(MsTeamsConfig {
+                webhook_url: url.into(),
+            })
+            .validate()
+        };
+        assert!(teams("https://prod-77.westus.logic.azure.com/workflows/x/triggers/y").is_ok());
+        assert!(teams("https://acme.api.powerplatform.com/workflows/x").is_ok());
+        assert!(teams("https://logic.azure.com.evil.test/workflows/x").is_err());
+        assert!(teams("https://example.com/workflows/x").is_err());
+
+        let gchat = |url: &str| {
+            ChannelConfig::GoogleChat(GoogleChatConfig {
+                webhook_url: url.into(),
+            })
+            .validate()
+        };
+        assert!(gchat("https://chat.googleapis.com/v1/spaces/A/messages?key=k&token=t").is_ok());
+        assert!(gchat("https://chat.googleapis.com./v1/spaces/A/messages").is_ok());
+        assert!(gchat("https://googleapis.com/v1/spaces/A/messages").is_err());
+        assert!(gchat("https://chat.example.com/v1/spaces/A/messages").is_err());
+
+        // The mismatch message points at the escape hatch.
+        let err = discord("https://example.com/hook").unwrap_err();
+        assert!(err.contains("use the webhook type"), "{err}");
+
+        // Whole-URL masking, same policy as slack.
+        let mut c = ChannelConfig::Discord(DiscordConfig {
+            webhook_url: "https://discord.com/api/webhooks/123/tok".into(),
+        });
+        assert_eq!(
+            c.abuse_url(),
+            Some("https://discord.com/api/webhooks/123/tok")
+        );
+        c.redact_in_place();
+        assert!(c.has_redaction_sentinel());
+        assert_eq!(c.redacted()["webhook_url"], MASK);
     }
 
     #[test]

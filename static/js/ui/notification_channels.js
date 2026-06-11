@@ -544,11 +544,11 @@
     function buildConfig() {
         const data = new FormData(form);
         const kind = currentKind();
-        if (kind === "slack") {
+        if (kind === "slack" || kind === "discord" || kind === "msteams" || kind === "google_chat") {
             return {
                 config: {
-                    type: "slack",
-                    webhook_url: (data.get("slack_webhook_url") || "").trim(),
+                    type: kind,
+                    webhook_url: (data.get(`${kind}_webhook_url`) || "").trim(),
                 },
             };
         }

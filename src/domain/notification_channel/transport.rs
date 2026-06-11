@@ -50,3 +50,40 @@ pub(super) fn require_https(u: &str, field: &str) -> Result<(), String> {
     }
     Ok(())
 }
+
+/// Host-pinned https rule for provider-branded webhook kinds: exact host or
+/// dot-suffix match (root dot normalized so it can't widen the suffix).
+pub(super) fn require_provider_webhook(
+    u: &str,
+    provider: &str,
+    domains: &[&str],
+    path_prefix: Option<&str>,
+) -> Result<(), String> {
+    let mismatch = || {
+        format!(
+            "this doesn't look like a {provider} webhook URL — use the webhook type for \
+             nonstandard endpoints"
+        )
+    };
+    let parsed = url::Url::parse(u).map_err(|_| "webhook_url is not a valid URL".to_string())?;
+    if parsed.scheme() != "https" {
+        return Err("webhook_url must be an https:// URL".into());
+    }
+    let host = parsed
+        .host_str()
+        .unwrap_or("")
+        .trim_end_matches('.')
+        .to_ascii_lowercase();
+    let pinned = domains
+        .iter()
+        .any(|d| host == *d || host.ends_with(&format!(".{d}")));
+    if !pinned {
+        return Err(mismatch());
+    }
+    if let Some(prefix) = path_prefix
+        && !parsed.path().starts_with(prefix)
+    {
+        return Err(mismatch());
+    }
+    Ok(())
+}

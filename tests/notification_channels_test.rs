@@ -234,6 +234,69 @@ async fn whatsapp_channel_round_trips_with_token_masked() {
     assert!(!created.to_string().contains("supersecret"));
 }
 
+#[tokio::test]
+async fn provider_webhook_kinds_round_trip_with_url_masked() {
+    let app = app();
+    for (kind, url) in [
+        (
+            "discord",
+            "https://discord.com/api/webhooks/123456/zzPROVIDERSECRETzz",
+        ),
+        (
+            "msteams",
+            "https://prod-77.westus.logic.azure.com/workflows/zzPROVIDERSECRETzz/triggers/manual",
+        ),
+        (
+            "google_chat",
+            "https://chat.googleapis.com/v1/spaces/AAAA/messages?key=k&token=zzPROVIDERSECRETzz",
+        ),
+    ] {
+        let (st, created) = send(
+            &app,
+            "POST",
+            "/api/v1/notification-channels",
+            json!({
+                "name": format!("ops-{kind}"),
+                "config": { "type": kind, "webhook_url": url }
+            }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::CREATED, "{kind}: {created}");
+        assert_eq!(created["kind"], kind);
+        assert_eq!(created["config"]["type"], kind);
+        assert_eq!(created["config"]["webhook_url"], "***", "{kind}");
+        assert!(
+            !created.to_string().contains("zzPROVIDERSECRETzz"),
+            "{kind}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn provider_webhook_kinds_reject_offsite_urls() {
+    let app = app();
+    for (kind, url) in [
+        ("discord", "https://example.com/api/webhooks/1/x"),
+        ("msteams", "https://example.com/workflows/x"),
+        ("google_chat", "https://example.com/v1/spaces/A/messages"),
+    ] {
+        let (st, body) = send(
+            &app,
+            "POST",
+            "/api/v1/notification-channels",
+            json!({
+                "name": format!("bad-{kind}"),
+                "config": { "type": kind, "webhook_url": url }
+            }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "{kind}: {body}");
+        assert_eq!(body["error"]["code"], "INVALID_CHANNEL_CONFIG", "{kind}");
+        let msg = body["error"]["message"].as_str().unwrap_or_default();
+        assert!(msg.contains("use the webhook type"), "{kind}: {body}");
+    }
+}
+
 /// Deleting a channel must scrub its bindings from `targets.alerts` — a
 /// dangling `{channel_id}` fails channel-existence validation on the next
 /// whole-array alerts update of that monitor.
