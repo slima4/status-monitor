@@ -153,6 +153,10 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
             "/notification-channels/{id}/test",
             post(handlers::notification_channels::test_send),
         )
+        .route(
+            "/notification-channels/{id}/resend-verification",
+            post(handlers::notification_channels::resend_verification),
+        )
         // Mounted unconditionally: conditional mounting would let the path
         // fall into `/notification-channels/{id}` (405/400 noise) on
         // bot-less deployments. The handlers 404 when no bot is configured.

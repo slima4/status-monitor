@@ -46,7 +46,7 @@ pub use monitor_share::{
     CreatedShare, MonitorShare, MonitorShareId, NewMonitorShare, ResolvedShare,
 };
 pub use notification_channel::{
-    ChannelConfig, ChannelKind, DiscordConfig, GoogleChatConfig, MAX_CHANNEL_NAME_LEN,
+    ChannelConfig, ChannelKind, DiscordConfig, EmailConfig, GoogleChatConfig, MAX_CHANNEL_NAME_LEN,
     MsTeamsConfig, NewNotificationChannel, NotificationChannel, NotificationChannelUpdate,
     SlackConfig, TelegramAppConfig, TelegramConfig, TransportConfig, WebhookConfig, WhatsAppConfig,
     validate_channel_name,

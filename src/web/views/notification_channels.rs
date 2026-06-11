@@ -35,6 +35,8 @@ pub struct ChannelRow {
     pub name: String,
     pub kind: &'static str,
     pub enabled: bool,
+    /// Email channel still awaiting address verification.
+    pub unverified: bool,
     pub created: chrono::DateTime<chrono::Utc>,
     /// `terraform`/`api` chip for externally-managed channels; `None` (UI) hides it.
     pub managed_by: Option<&'static str>,
@@ -60,6 +62,7 @@ pub struct ConfigFields {
     pub discord_webhook_url: String,
     pub msteams_webhook_url: String,
     pub google_chat_webhook_url: String,
+    pub email_to: String,
     pub webhook_url: String,
     pub webhook_headers_json: String,
     pub webhook_secret: String,
@@ -81,6 +84,7 @@ impl Default for ConfigFields {
             discord_webhook_url: String::new(),
             msteams_webhook_url: String::new(),
             google_chat_webhook_url: String::new(),
+            email_to: String::new(),
             webhook_url: String::new(),
             webhook_headers_json: "{}".into(),
             webhook_secret: String::new(),
@@ -133,6 +137,8 @@ pub struct ChannelFormModel {
     pub bindable: Vec<MonitorCard>,
     /// Gates the one-tap "telegram" card; the BYO card is always offered.
     pub central_telegram: bool,
+    /// Email channel still awaiting address verification (edit mode).
+    pub email_unverified: bool,
 }
 
 impl ChannelFormModel {
@@ -199,11 +205,12 @@ pub async fn list_partial(
         .into_iter()
         .map(|c| ChannelRow {
             id: c.id.to_string(),
-            name: c.name,
             kind: super::channel_kind_label(c.kind),
             enabled: c.enabled,
+            unverified: c.awaiting_verification(),
             created: c.created_at,
             managed_by: c.write_source.managed_label(),
+            name: c.name,
         })
         .collect();
     Ok(ChannelsPartial { channels }.into_response())
@@ -310,10 +317,12 @@ fn empty_create_form() -> ChannelFormModel {
         used_by: Vec::new(),
         bindable: Vec::new(),
         central_telegram: false,
+        email_unverified: false,
     }
 }
 
 fn form_from_channel(c: NotificationChannel) -> ChannelFormModel {
+    let email_unverified = c.awaiting_verification();
     // Prefill from the *redacted* config so non-secret routing (header names,
     // chat id) survives the edit while secrets stay masked.
     let mut redacted = c.config.clone();
@@ -324,6 +333,7 @@ fn form_from_channel(c: NotificationChannel) -> ChannelFormModel {
         ChannelConfig::Discord(c) => config.discord_webhook_url = c.webhook_url,
         ChannelConfig::MsTeams(c) => config.msteams_webhook_url = c.webhook_url,
         ChannelConfig::GoogleChat(c) => config.google_chat_webhook_url = c.webhook_url,
+        ChannelConfig::Email(c) => config.email_to = c.to,
         ChannelConfig::Webhook(c) => {
             config.webhook_url = c.url;
             config.webhook_headers_json = json_pretty(&c.headers);
@@ -359,6 +369,7 @@ fn form_from_channel(c: NotificationChannel) -> ChannelFormModel {
         used_by: Vec::new(),
         bindable: Vec::new(),
         central_telegram: false,
+        email_unverified,
     }
 }
 
@@ -386,6 +397,7 @@ mod tests {
             "discord",
             "msteams",
             "google_chat",
+            "email",
             "webhook",
             "telegram",
             "whatsapp",
@@ -458,6 +470,7 @@ mod tests {
             }),
             enabled: true,
             disabled_reason: None,
+            verified_at: None,
             write_source: crate::domain::WriteSource::Ui,
             created_at: Utc::now(),
             updated_at: Utc::now(),
@@ -519,6 +532,7 @@ mod tests {
             }),
             enabled: true,
             disabled_reason: None,
+            verified_at: None,
             write_source: crate::domain::WriteSource::Ui,
             created_at: Utc::now(),
             updated_at: Utc::now(),
@@ -718,6 +732,7 @@ mod tests {
                 name: "Ops Slack".into(),
                 kind: "slack",
                 enabled: true,
+                unverified: false,
                 created: "2026-05-18T12:00:00Z".parse().unwrap(),
                 managed_by: None,
             }],

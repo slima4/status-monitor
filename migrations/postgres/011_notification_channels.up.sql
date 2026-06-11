@@ -12,7 +12,7 @@ CREATE TABLE notification_channels (
     -- Closed enum; keep in lockstep with `domain::ChannelKind::ALL`. The
     -- live drift test (`tests/enum_drift_test.rs`) introspects this CHECK
     -- and fails if the lists disagree.
-    kind        TEXT NOT NULL CHECK (kind IN ('webhook', 'slack', 'telegram', 'telegram_app', 'whatsapp', 'discord', 'msteams', 'google_chat')),
+    kind        TEXT NOT NULL CHECK (kind IN ('webhook', 'slack', 'telegram', 'telegram_app', 'whatsapp', 'discord', 'msteams', 'google_chat', 'email')),
     config      JSONB NOT NULL,
     -- Routing id (e.g. telegram chat id) queryable without opening the
     -- sealed config; set only by the transport's own flow.
@@ -20,6 +20,9 @@ CREATE TABLE notification_channels (
     enabled     BOOLEAN NOT NULL DEFAULT true,
     -- Platform-disable note shown in the UI; cleared on re-enable.
     disabled_reason TEXT,
+    -- Email delivery gate: set when the address confirms its verification
+    -- link, reset on config change; NULL for every other kind.
+    verified_at TIMESTAMPTZ,
     write_source TEXT NOT NULL DEFAULT 'ui'
                 CHECK (write_source IN ('ui', 'api', 'terraform')),
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),

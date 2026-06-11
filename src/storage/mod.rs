@@ -1,4 +1,6 @@
 pub mod admin;
+pub mod channel_verification;
+pub mod channel_verification_cleanup;
 pub mod clickhouse;
 pub mod contacts;
 pub mod domain_expiry_state;

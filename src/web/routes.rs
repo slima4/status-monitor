@@ -53,6 +53,9 @@ pub fn routes(state: AppState) -> Router {
         .route("/m/{token}/live", get(views::share::live_partial))
         .route("/m/{token}/latency", get(views::share::latency))
         .route("/m/{token}/results", get(views::share::results))
+        // Public email-channel verification: possession of the mailed token
+        // is the proof; same always-mounted reasoning as the share links.
+        .route("/verify-channel", get(views::verify_channel::verify))
         .route(
             "/web/partials/dashboard",
             get(views::dashboard::table_partial),

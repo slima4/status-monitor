@@ -110,6 +110,15 @@ pub trait NotificationChannelStore: Send + Sync {
     /// target alert bindings in one query instead of N point lookups, and to
     /// close the cross-tenant IDOR where a target binds another org's channel.
     async fn existing_channel_ids(&self, org: OrgId, ids: &[Uuid]) -> Result<Vec<Uuid>>;
+    /// Stamp `verified_at` on an email channel; `false` when the channel is
+    /// gone, not an email kind, or was modified after `expected_updated_at`
+    /// (a config swap racing the verify click must not transfer the proof).
+    async fn set_verified(
+        &self,
+        org: OrgId,
+        id: Uuid,
+        expected_updated_at: DateTime<Utc>,
+    ) -> Result<bool>;
 }
 
 // ── Postgres impl ────────────────────────────────────────────────────────
@@ -134,6 +143,7 @@ struct ChannelRow {
     config: Value,
     enabled: bool,
     disabled_reason: Option<String>,
+    verified_at: Option<DateTime<Utc>>,
     write_source: String,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
@@ -151,6 +161,7 @@ impl ChannelRow {
             config,
             enabled: self.enabled,
             disabled_reason: self.disabled_reason,
+            verified_at: self.verified_at,
             write_source: WriteSource::from_db(&self.write_source),
             created_at: self.created_at,
             updated_at: self.updated_at,
@@ -190,7 +201,7 @@ impl NotificationChannelStore for PgNotificationChannelStore {
             r#"INSERT INTO notification_channels (org_id, name, kind, config, external_ref, enabled, write_source)
                SELECT $1, $2, $3, $4, $5, $6, $8
                WHERE (SELECT count(*) FROM notification_channels WHERE org_id = $1) < $7
-               RETURNING id, name, config, enabled, disabled_reason, write_source, created_at, updated_at"#,
+               RETURNING id, name, config, enabled, disabled_reason, verified_at, write_source, created_at, updated_at"#,
         )
         .bind(org.0)
         .bind(&new.name)
@@ -227,7 +238,7 @@ impl NotificationChannelStore for PgNotificationChannelStore {
 
     async fn list(&self, org: OrgId) -> Result<Vec<NotificationChannel>> {
         let rows: Vec<ChannelRow> = sqlx::query_as(
-            r#"SELECT id, name, config, enabled, disabled_reason, write_source, created_at, updated_at
+            r#"SELECT id, name, config, enabled, disabled_reason, verified_at, write_source, created_at, updated_at
                FROM notification_channels
                WHERE org_id = $1
                ORDER BY name"#,
@@ -243,7 +254,7 @@ impl NotificationChannelStore for PgNotificationChannelStore {
 
     async fn get(&self, org: OrgId, id: Uuid) -> Result<Option<NotificationChannel>> {
         let row: Option<ChannelRow> = sqlx::query_as(
-            r#"SELECT id, name, config, enabled, disabled_reason, write_source, created_at, updated_at
+            r#"SELECT id, name, config, enabled, disabled_reason, verified_at, write_source, created_at, updated_at
                FROM notification_channels WHERE id = $1 AND org_id = $2"#,
         )
         .bind(id)
@@ -278,10 +289,12 @@ impl NotificationChannelStore for PgNotificationChannelStore {
                    enabled     = COALESCE($5, enabled),
                    -- Re-enabling clears the platform's disable note.
                    disabled_reason = CASE WHEN $5 THEN NULL ELSE disabled_reason END,
+                   -- A replaced config must re-verify its address.
+                   verified_at = CASE WHEN $4::jsonb IS NOT NULL THEN NULL ELSE verified_at END,
                    write_source = $7,
                    updated_at  = now()
                WHERE id = $1 AND org_id = $6
-               RETURNING id, name, config, enabled, disabled_reason, write_source, created_at, updated_at"#,
+               RETURNING id, name, config, enabled, disabled_reason, verified_at, write_source, created_at, updated_at"#,
         )
         .bind(id)
         .bind(update.name.as_ref())
@@ -365,6 +378,27 @@ impl NotificationChannelStore for PgNotificationChannelStore {
         .map_err(|e| AppError::Other(anyhow!("existing_channel_ids: {e}")))?;
         Ok(rows.into_iter().map(|r| r.0).collect())
     }
+
+    async fn set_verified(
+        &self,
+        org: OrgId,
+        id: Uuid,
+        expected_updated_at: DateTime<Utc>,
+    ) -> Result<bool> {
+        let result = sqlx::query(
+            r#"UPDATE notification_channels
+               SET verified_at = now(), updated_at = now()
+               WHERE id = $1 AND org_id = $2 AND kind = 'email'
+                 AND updated_at = $3"#,
+        )
+        .bind(id)
+        .bind(org.0)
+        .bind(expected_updated_at)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| AppError::Other(anyhow!("set verified: {e}")))?;
+        Ok(result.rows_affected() > 0)
+    }
 }
 
 // ── In-memory impl (tests) ──────────────────────────────────────────────
@@ -428,6 +462,7 @@ impl NotificationChannelStore for InMemoryNotificationChannelStore {
             config: new.config,
             enabled: new.enabled,
             disabled_reason: None,
+            verified_at: None,
             write_source: source,
             created_at: now,
             updated_at: now,
@@ -488,6 +523,7 @@ impl NotificationChannelStore for InMemoryNotificationChannelStore {
         if let Some(cfg) = update.config {
             ch.kind = cfg.kind();
             ch.config = cfg;
+            ch.verified_at = None;
         }
         if let Some(enabled) = update.enabled {
             ch.enabled = enabled;
@@ -542,6 +578,26 @@ impl NotificationChannelStore for InMemoryNotificationChannelStore {
             .copied()
             .filter(|id| g.iter().any(|e| e.org == org && e.ch.id == *id))
             .collect())
+    }
+
+    async fn set_verified(
+        &self,
+        org: OrgId,
+        id: Uuid,
+        expected_updated_at: DateTime<Utc>,
+    ) -> Result<bool> {
+        let mut g = self.inner.lock();
+        let Some(e) = g.iter_mut().find(|e| {
+            e.org == org
+                && e.ch.id == id
+                && e.ch.kind == ChannelKind::Email
+                && e.ch.updated_at == expected_updated_at
+        }) else {
+            return Ok(false);
+        };
+        e.ch.verified_at = Some(Utc::now());
+        e.ch.updated_at = Utc::now();
+        Ok(true)
     }
 }
 

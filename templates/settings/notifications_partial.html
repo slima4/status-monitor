@@ -26,6 +26,9 @@
         {% else %}
         <span class="status-badge status-badge--disabled">disabled</span>
         {% endif %}
+        {% if c.unverified %}
+        <span class="cli-brackets font-normal" title="alerts are held until the address confirms its verification link">unverified</span>
+        {% endif %}
       </td>
       <td class="px-4 py-2 align-top text-body tabular-nums"><time datetime="{{ c.created|iso_ts }}" data-tz="exact">{{ c.created|human_ts }}</time></td>
       <td class="px-4 py-2">

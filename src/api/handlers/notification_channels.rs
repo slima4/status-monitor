@@ -22,13 +22,16 @@ use crate::api::redaction::Redacted;
 use crate::app::AppState;
 use crate::auth::sha256_hex;
 use crate::auth::token_hash::generate_raw_token;
+use crate::auth::url::token_link;
 use crate::domain::{
     ChannelConfig, IncidentSeverity, IncidentUrgency, NewNotificationChannel, NotificationChannel,
     NotificationChannelUpdate, NotificationReason, validate_channel_name,
 };
+use crate::email::{EmailAddress, EmailTemplate, TransactionalEmail};
 use crate::error::{AppError, Result};
 use crate::notifier::build_notifier;
 use crate::notifier::event::IncidentNotice;
+use crate::storage::channel_verification;
 use crate::storage::{LinkCodeStatus, MintOutcome};
 use crate::web::{
     Authorized, ChannelsDelete, ChannelsExecute, ChannelsRead, ChannelsWrite, CurrentUser,
@@ -98,6 +101,7 @@ pub async fn create(
         .notification_channel_store
         .create(org, new, source, limit)
         .await?;
+    spawn_send_verification(&state, org, &ch);
     let location = HeaderValue::from_str(&format!("/api/v1/notification-channels/{}", ch.id))
         .expect("uuid produces ascii-only path");
     Ok((
@@ -176,6 +180,7 @@ pub async fn update(
     if let Some(name) = &update.name {
         validate_name(name)?;
     }
+    let config_replaced = update.config.is_some();
     if let Some(cfg) = &update.config {
         reject_managed_kind(cfg)?;
         validate_config(cfg)?;
@@ -186,6 +191,10 @@ pub async fn update(
         .update(org, id, update, source)
         .await?
         .ok_or_else(channel_not_found)?;
+    // A replaced config resets the verification gate; re-prove the address.
+    if config_replaced {
+        spawn_send_verification(&state, org, &updated);
+    }
     Ok(Redacted::new(updated))
 }
 
@@ -291,6 +300,12 @@ pub async fn test_send(
         .ok_or_else(channel_not_found)?;
     // A stored config can predate a deny-list entry — gate the test too.
     check_channel_abuse(&state, org, &channel.config)?;
+    if channel.awaiting_verification() {
+        return Err(AppError::unprocessable(
+            codes::CHANNEL_UNVERIFIED,
+            "email address not verified — confirm the verification link first",
+        ));
+    }
     deliver_test(&state, &channel.config).await?;
     Ok(Json(TestNotificationResponse { delivered: true }))
 }
@@ -333,8 +348,143 @@ pub async fn test_config(
     reject_managed_kind(&req.config)?;
     validate_config(&req.config)?;
     check_channel_abuse(&state, org, &req.config)?;
+    // An unsaved email config can never have proven its inbox — testing it
+    // would mail an arbitrary caller-supplied address.
+    if matches!(req.config, ChannelConfig::Email(_)) {
+        return Err(AppError::unprocessable(
+            codes::CHANNEL_UNVERIFIED,
+            "email channels must be saved and verified before a test send",
+        ));
+    }
     deliver_test(&state, &req.config).await?;
     Ok(Json(TestNotificationResponse { delivered: true }))
+}
+
+// ── Email verification ───────────────────────────────────────────────────
+
+/// Sender + From identity for alert email; built per call from app state.
+fn email_delivery(state: &AppState) -> crate::notifier::EmailDelivery {
+    crate::notifier::EmailDelivery {
+        sender: state.email_sender.clone(),
+        from_address: state.cfg.email.from_address.clone(),
+        from_name: state.cfg.email.from_name.clone(),
+    }
+}
+
+/// One verification mail, composed identically for the create/update hook
+/// and the resend endpoint: mint a token (all daily caps enforced in the
+/// mint) and send the link off the response path.
+async fn mint_and_send_verification(
+    state: &AppState,
+    org: crate::domain::OrgId,
+    channel_id: Uuid,
+    channel_name: String,
+    to: String,
+) -> Result<channel_verification::MintOutcome> {
+    let pool = state.require_db()?;
+    let outcome = channel_verification::mint(pool, org, channel_id, &to).await?;
+    if let channel_verification::MintOutcome::Created { token } = &outcome {
+        let delivery = email_delivery(state);
+        let outgoing = TransactionalEmail {
+            from: EmailAddress::new(delivery.from_address, delivery.from_name),
+            to: EmailAddress::new(to.clone(), to),
+            template: EmailTemplate::ChannelVerification {
+                channel_name,
+                verify_url: token_link(&state.cfg.auth.public_base_url, "/verify-channel", token),
+                expires_hours: channel_verification::VERIFICATION_TTL_HOURS,
+            },
+        };
+        let sender = delivery.sender;
+        tokio::spawn(async move {
+            if let Err(err) = sender.send(outgoing).await {
+                tracing::warn!(%channel_id, error = %err, "channel verification mail failed");
+            }
+        });
+    }
+    Ok(outcome)
+}
+
+/// Best-effort hook on create / config replace. Cap breaches and failures
+/// only log — the channel stays unverified and the operator has the resend
+/// action.
+fn spawn_send_verification(state: &AppState, org: crate::domain::OrgId, ch: &NotificationChannel) {
+    if !ch.awaiting_verification() {
+        return;
+    }
+    let ChannelConfig::Email(cfg) = &ch.config else {
+        return;
+    };
+    if state.db.is_none() {
+        return;
+    }
+    let state = state.clone();
+    let (channel_id, channel_name, to) = (ch.id, ch.name.clone(), cfg.to.clone());
+    tokio::spawn(async move {
+        match mint_and_send_verification(&state, org, channel_id, channel_name, to).await {
+            Ok(channel_verification::MintOutcome::Created { .. }) => {}
+            Ok(channel_verification::MintOutcome::LimitReached) => {
+                tracing::warn!(%channel_id, "channel verification mint rate-limited");
+            }
+            Err(err) => {
+                tracing::warn!(%channel_id, error = %err, "channel verification mint failed");
+            }
+        }
+    });
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/notification-channels/{id}/resend-verification",
+    tag = "notification-channels",
+    summary = "Resend the verification mail for an email channel",
+    params(("id" = Uuid, Path)),
+    responses(
+        (status = 202, description = "Verification mail queued"),
+        (status = 404, body = ApiError),
+        (status = 422, body = ApiError,
+            description = "Not an unverified email channel, or the daily \
+                           verification-mail cap is reached"),
+    ),
+)]
+pub async fn resend_verification(
+    State(state): State<AppState>,
+    Authorized(org, _): Authorized<ChannelsWrite>,
+    Path(id): Path<Uuid>,
+) -> Result<StatusCode> {
+    let channel = state
+        .notification_channel_store
+        .get(org, id)
+        .await?
+        .ok_or_else(channel_not_found)?;
+    let ChannelConfig::Email(cfg) = &channel.config else {
+        return Err(AppError::unprocessable(
+            codes::CHANNEL_NOT_VERIFIABLE,
+            "only email channels need verification",
+        ));
+    };
+    if !channel.awaiting_verification() {
+        return Err(AppError::unprocessable(
+            codes::CHANNEL_ALREADY_VERIFIED,
+            "this address is already verified",
+        ));
+    }
+    // Mint synchronously so a cap breach surfaces to the caller; the send
+    // itself stays off the response path.
+    match mint_and_send_verification(
+        &state,
+        org,
+        channel.id,
+        channel.name.clone(),
+        cfg.to.clone(),
+    )
+    .await?
+    {
+        channel_verification::MintOutcome::LimitReached => Err(AppError::unprocessable(
+            codes::CHANNEL_VERIFICATION_LIMIT,
+            "verification mail limit reached — try again tomorrow",
+        )),
+        channel_verification::MintOutcome::Created { .. } => Ok(StatusCode::ACCEPTED),
+    }
 }
 
 // ── Central-bot Telegram linking ─────────────────────────────────────────
@@ -493,7 +643,8 @@ async fn deliver_test(state: &AppState, config: &ChannelConfig) -> Result<()> {
                 bot_token,
                 budget: &state.telegram_send_budget,
             });
-    let notifier = build_notifier(config, &state.outbound_http, central)?;
+    let email = email_delivery(state);
+    let notifier = build_notifier(config, &state.outbound_http, central, Some(&email))?;
     let notice = IncidentNotice {
         incident_id: Uuid::nil(),
         reason: NotificationReason::Opened,

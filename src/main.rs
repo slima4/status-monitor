@@ -363,6 +363,11 @@ async fn main() -> Result<()> {
     // One process-wide central-bot send budget, shared by the engine and the
     // web side (test-now, webhook replies) via AppState.
     let telegram_send_budget = std::sync::Arc::new(uptimepage::telegram::TelegramSendBudget::new());
+    let outbound_http = uptimepage::http_outbound::build_outbound_client(
+        uptimepage::security::SsrfGuard::from_security_config(&cfg.security),
+    );
+    let email_sender = uptimepage::email::build_email_sender(&cfg.email, &outbound_http)
+        .map_err(|e| AppError::Other(anyhow::anyhow!("build_email_sender: {e}")))?;
     let escalation_engine_handle: JoinHandle<()> = {
         let engine = uptimepage::escalation::EscalationEngine::new(
             incident_signal_rx,
@@ -374,9 +379,7 @@ async fn main() -> Result<()> {
             contact_store.clone(),
             target_store.clone(),
             notification_channel_store.clone(),
-            uptimepage::http_outbound::build_outbound_client(
-                uptimepage::security::SsrfGuard::from_security_config(&cfg.security),
-            ),
+            outbound_http.clone(),
             cfg.escalation.clone(),
             cfg.auth.public_base_url.clone(),
             cfg.telegram
@@ -385,6 +388,11 @@ async fn main() -> Result<()> {
                     token: cfg.telegram.bot_token.clone(),
                     budget: telegram_send_budget.clone(),
                 }),
+            Some(uptimepage::notifier::EmailDelivery {
+                sender: email_sender.clone(),
+                from_address: cfg.email.from_address.clone(),
+                from_name: cfg.email.from_name.clone(),
+            }),
         );
         let token = root.clone();
         tokio::spawn(async move { engine.run(token).await })
@@ -413,12 +421,6 @@ async fn main() -> Result<()> {
     let incident_narration_store: Arc<dyn IncidentNarrationStore> =
         Arc::new(PgIncidentNarrationStore::new(pg_pool_for_stores.clone()));
 
-    let outbound_http = uptimepage::http_outbound::build_outbound_client(
-        uptimepage::security::SsrfGuard::from_security_config(&cfg.security),
-    );
-    let email_sender = uptimepage::email::build_email_sender(&cfg.email, &outbound_http)
-        .map_err(|e| AppError::Other(anyhow::anyhow!("build_email_sender: {e}")))?;
-
     uptimepage::auth::ensure_fingerprint_salt(&pg_pool_for_stores, &cfg.auth.fingerprint_salt)
         .await
         .map_err(|e| AppError::Other(anyhow::anyhow!("auth salt guard: {e}")))?;
@@ -442,6 +444,14 @@ async fn main() -> Result<()> {
 
     let oauth_state_cleanup_handle: JoinHandle<()> =
         uptimepage::auth::oauth_state_cleanup::spawn(pg_pool_for_stores.clone(), root.clone());
+
+    let channel_verification_cleanup_handle: JoinHandle<()> = {
+        let pool = pg_pool_for_stores.clone();
+        let token = root.clone();
+        tokio::spawn(uptimepage::storage::channel_verification_cleanup::run(
+            pool, token,
+        ))
+    };
 
     // Magic-link sweep only runs when the method is wired into the router.
     // When disabled the routes 404, no rows are ever inserted, and the ticker
@@ -603,6 +613,7 @@ async fn main() -> Result<()> {
             purge_handle,
             invitation_purge_handle,
             oauth_state_cleanup_handle,
+            channel_verification_cleanup_handle,
         );
         if let Some(h) = magic_link_cleanup_handle {
             let _ = h.await;

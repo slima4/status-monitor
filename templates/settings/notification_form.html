@@ -55,6 +55,11 @@
           <span class="check-type-card__name">google chat</span>
           <span class="check-type-card__desc">space webhook</span>
         </label>
+        <label class="check-type-card" data-kind-card>
+          <input type="radio" name="kind" value="email"{% if form.kind == "email" %} checked{% endif %} class="sr-only">
+          <span class="check-type-card__name">email</span>
+          <span class="check-type-card__desc">verified address</span>
+        </label>
         {% if form.offers_telegram_app() %}
         <label class="check-type-card" data-kind-card>
           <input type="radio" name="kind" value="telegram_app"{% if form.kind == "telegram_app" %} checked{% endif %} class="sr-only">
@@ -181,6 +186,33 @@
                class="underline decoration-dotted hover:text-body">Chat webhook quickstart</a>.
           </span>
         </label>
+      </div>
+
+      <div data-variant="email" class="space-y-3{% if form.kind != "email" %} hidden{% endif %}">
+        <label class="field-outline">
+          <span class="field-outline__label">Recipient address</span>
+          <input name="email_to" type="email" value="{{ form.config.email_to }}"
+                 placeholder="oncall@example.com"
+                 autocomplete="off" spellcheck="false" class="w-full field font-mono">
+          <span class="mt-1 block text-xs text-muted">
+            One address per channel. A verification mail is sent on save —
+            alerts are delivered only after the link in it is confirmed.
+          </span>
+        </label>
+        {% if form.mode != "create" && form.kind == "email" %}
+        {% if form.email_unverified %}
+        <div class="flex flex-wrap items-center gap-3">
+          <span class="cli-brackets font-normal">unverified</span>
+          <button type="button" data-resend-verification
+                  data-channel-id="{{ form.channel_id }}"
+                  class="sticker-btn px-3 py-1.5 text-sm font-medium">resend verification</button>
+          <span data-resend-result role="status" class="font-mono text-xs"></span>
+        </div>
+        <p class="font-mono text-xs text-quiet"># alerts to this address are held until it confirms the verification link</p>
+        {% else %}
+        <p class="font-mono text-xs text-quiet"># address verified</p>
+        {% endif %}
+        {% endif %}
       </div>
 
       <div data-variant="webhook" class="space-y-5{% if form.kind != "webhook" %} hidden{% endif %}">

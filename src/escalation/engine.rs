@@ -86,6 +86,8 @@ struct Worker {
     base_url: String,
     /// Operator token + shared send budget for `telegram_app` delivery.
     central_bot: Option<crate::notifier::CentralBotDelivery>,
+    /// Transactional sender + From identity for `email` delivery.
+    email: Option<crate::notifier::EmailDelivery>,
     /// True while a sweep task is in flight, so overlapping ticks skip rather
     /// than stack a second sweep on top of a slow one.
     sweeping: AtomicBool,
@@ -113,6 +115,7 @@ impl EscalationEngine {
         cfg: EscalationConfig,
         base_url: String,
         central_bot: Option<crate::notifier::CentralBotDelivery>,
+        email: Option<crate::notifier::EmailDelivery>,
     ) -> Self {
         Self {
             rx,
@@ -127,6 +130,7 @@ impl EscalationEngine {
                 cfg,
                 base_url,
                 central_bot,
+                email,
                 sweeping: AtomicBool::new(false),
                 page_locks: (0..PAGE_LOCK_SHARDS).map(|_| Mutex::new(())).collect(),
                 on_call_cache: Cache::builder()
@@ -668,7 +672,16 @@ impl Worker {
                     sent_at: None,
                 })
                 .await?;
-            let (status, error) = self.deliver(&channel.config, notice).await;
+            // Unverified email: no send is attempted, but the row records a
+            // failure so the gap is visible on the incident, not silent.
+            let (status, error) = if channel.awaiting_verification() {
+                (
+                    NotificationStatus::Failed,
+                    Some("email address not verified".to_string()),
+                )
+            } else {
+                self.deliver(&channel.config, notice).await
+            };
             if status == NotificationStatus::Sent {
                 paged += 1;
             }
@@ -792,7 +805,7 @@ impl Worker {
             }
             None => None,
         };
-        let Some((notice, channel_cfg, state)) = rebuilt else {
+        let Some((notice, channel, state)) = rebuilt else {
             // Channel/incident gone: back off so a dead target doesn't churn
             // every tick, and let the attempt cap retire the row.
             let next_attempt_at = self.retry_backoff(next_attempt);
@@ -829,7 +842,14 @@ impl Worker {
                 .await?;
             return Ok(());
         }
-        let (status, error) = self.deliver(&channel_cfg, &notice).await;
+        let (status, error) = if channel.awaiting_verification() {
+            (
+                NotificationStatus::Failed,
+                Some("email address not verified".to_string()),
+            )
+        } else {
+            self.deliver(&channel.config, &notice).await
+        };
         let next_attempt_at = (status == NotificationStatus::Failed)
             .then(|| self.retry_backoff_hinted(next_attempt, error.as_deref()))
             .flatten();
@@ -861,7 +881,13 @@ impl Worker {
         incident_id: Uuid,
         channel_id: Uuid,
         reason: NotificationReason,
-    ) -> Result<Option<(IncidentNotice, crate::domain::ChannelConfig, IncidentState)>> {
+    ) -> Result<
+        Option<(
+            IncidentNotice,
+            crate::domain::NotificationChannel,
+            IncidentState,
+        )>,
+    > {
         let Some(incident) = self.ops.get(org, incident_id).await? else {
             return Ok(None);
         };
@@ -875,7 +901,7 @@ impl Worker {
             return Ok(None);
         };
         let notice = self.notice(&incident, &target, reason);
-        Ok(Some((notice, channel.config.clone(), incident.state)))
+        Ok(Some((notice, channel, incident.state)))
     }
 
     async fn deliver(
@@ -884,7 +910,7 @@ impl Worker {
         notice: &IncidentNotice,
     ) -> (NotificationStatus, Option<String>) {
         let central = self.central_bot.as_ref().map(|c| c.as_central());
-        match build_notifier(cfg, &self.http, central) {
+        match build_notifier(cfg, &self.http, central, self.email.as_ref()) {
             Ok(n) => match n.notify_incident(notice).await {
                 Ok(()) => (NotificationStatus::Sent, None),
                 Err(err) => (
@@ -1348,6 +1374,7 @@ mod tests {
             EscalationConfig::default(),
             String::new(),
             None,
+            None,
         )
     }
 
@@ -1372,6 +1399,56 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(ops.notifications_for(org(), id).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn unverified_email_channel_records_failure_without_sending() {
+        let channels = Arc::new(InMemoryNotificationChannelStore::new());
+        let cid = channels
+            .create(
+                org(),
+                NewNotificationChannel {
+                    name: "oncall-mail".into(),
+                    config: ChannelConfig::Email(crate::domain::EmailConfig {
+                        to: "oncall@example.com".into(),
+                    }),
+                    enabled: true,
+                    external_ref: None,
+                },
+                WriteSource::Ui,
+                100,
+            )
+            .await
+            .unwrap()
+            .id;
+        let target = target_with_channel(cid);
+        let tid = target.id;
+        let ops = Arc::new(InMemoryIncidentOpsStore::new());
+        let id = seed_incident(&ops, Some(tid));
+        let targets = Arc::new(InMemoryTargetStore::from_vec(vec![target]));
+        let policies = Arc::new(InMemoryEscalationPolicyStore::new());
+
+        let eng = engine(ops.clone(), policies, targets, channels.clone());
+        eng.page(org(), id, NotificationReason::Opened)
+            .await
+            .unwrap();
+        let rows = ops.notifications_for(org(), id).await.unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].status, NotificationStatus::Failed);
+        assert_eq!(rows[0].error.as_deref(), Some("email address not verified"));
+
+        // Once verified, delivery is attempted for real (and fails on the
+        // missing email sender — a different error than the gate's).
+        let upd = channels.get(org(), cid).await.unwrap().unwrap().updated_at;
+        assert!(channels.set_verified(org(), cid, upd).await.unwrap());
+        let id2 = seed_incident(&ops, Some(tid));
+        eng.page(org(), id2, NotificationReason::Opened)
+            .await
+            .unwrap();
+        let rows = ops.notifications_for(org(), id2).await.unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].status, NotificationStatus::Failed);
+        assert_ne!(rows[0].error.as_deref(), Some("email address not verified"));
     }
 
     #[tokio::test]

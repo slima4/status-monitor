@@ -20,6 +20,7 @@
 //! [`ChannelConfig::redacted`].
 
 mod discord;
+mod email;
 mod google_chat;
 mod msteams;
 mod slack;
@@ -30,6 +31,7 @@ mod webhook;
 mod whatsapp;
 
 pub use discord::DiscordConfig;
+pub use email::EmailConfig;
 pub use google_chat::GoogleChatConfig;
 pub use msteams::MsTeamsConfig;
 pub use slack::SlackConfig;
@@ -59,6 +61,7 @@ pub enum ChannelKind {
     #[serde(rename = "msteams")]
     MsTeams,
     GoogleChat,
+    Email,
 }
 
 impl ChannelKind {
@@ -74,6 +77,7 @@ impl ChannelKind {
         Self::Discord,
         Self::MsTeams,
         Self::GoogleChat,
+        Self::Email,
     ];
 
     /// Stable string used in the Postgres `kind` CHECK constraint and the
@@ -88,6 +92,7 @@ impl ChannelKind {
             Self::Discord => "discord",
             Self::MsTeams => "msteams",
             Self::GoogleChat => "google_chat",
+            Self::Email => "email",
         }
     }
 }
@@ -109,6 +114,7 @@ pub enum ChannelConfig {
     #[serde(rename = "msteams")]
     MsTeams(MsTeamsConfig),
     GoogleChat(GoogleChatConfig),
+    Email(EmailConfig),
 }
 
 /// Apply `$body` to the inner [`TransportConfig`] of any variant. The one
@@ -124,6 +130,7 @@ macro_rules! with_transport {
             ChannelConfig::Discord($c) => $body,
             ChannelConfig::MsTeams($c) => $body,
             ChannelConfig::GoogleChat($c) => $body,
+            ChannelConfig::Email($c) => $body,
         }
     };
 }
@@ -199,10 +206,22 @@ pub struct NotificationChannel {
     /// for operator-initiated disables, cleared on re-enable.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub disabled_reason: Option<String>,
+    /// When the email address confirmed its verification link; reset on
+    /// config change. Only consulted for `kind = email` — `None` elsewhere.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verified_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     /// Where this channel was last changed from (UI, API, or Terraform).
     pub write_source: WriteSource,
+}
+
+impl NotificationChannel {
+    /// Email channels deliver only after the address confirms its
+    /// verification link; every other kind is unaffected.
+    pub fn awaiting_verification(&self) -> bool {
+        self.kind == ChannelKind::Email && self.verified_at.is_none()
+    }
 }
 
 fn default_true() -> bool {
@@ -252,6 +271,7 @@ mod tests {
             r#"{"type":"discord","webhook_url":"https://discord.com/api/webhooks/1/x"}"#,
             r#"{"type":"msteams","webhook_url":"https://prod-77.westus.logic.azure.com/workflows/x"}"#,
             r#"{"type":"google_chat","webhook_url":"https://chat.googleapis.com/v1/spaces/A/messages?key=k&token=t"}"#,
+            r#"{"type":"email","to":"ops@example.com"}"#,
         ] {
             let c: ChannelConfig = serde_json::from_str(json).unwrap();
             let back = serde_json::to_string(&c).unwrap();
@@ -298,6 +318,9 @@ mod tests {
             }),
             ChannelConfig::GoogleChat(GoogleChatConfig {
                 webhook_url: "https://chat.googleapis.com/v1/spaces/A/messages".into(),
+            }),
+            ChannelConfig::Email(EmailConfig {
+                to: "ops@example.com".into(),
             }),
         ];
         assert_eq!(configs.len(), ChannelKind::ALL.len());
@@ -519,6 +542,69 @@ mod tests {
         c.redact_in_place();
         assert!(c.has_redaction_sentinel());
         assert_eq!(c.redacted()["webhook_url"], MASK);
+    }
+
+    #[test]
+    fn email_is_secretless_and_validates_address_shape() {
+        let mut c = ChannelConfig::Email(EmailConfig {
+            to: "ops+alerts@example.com".into(),
+        });
+        assert!(c.validate().is_ok());
+        assert_eq!(c.abuse_url(), None);
+        assert!(!c.operator_managed());
+        // Nothing to mask: the address survives redaction and a round-trip
+        // never reads as the sentinel.
+        assert_eq!(c.redacted()["to"], "ops+alerts@example.com");
+        c.redact_in_place();
+        assert!(!c.has_redaction_sentinel());
+
+        let bad = |to: &str| ChannelConfig::Email(EmailConfig { to: to.into() }).validate();
+        assert!(bad("").is_err());
+        assert!(bad("not-an-email").is_err());
+        assert!(bad("a@b").is_err());
+        assert!(bad("@example.com").is_err());
+        assert!(bad("a b@example.com").is_err());
+        assert!(bad("Ops@example.com").is_err());
+        assert!(bad("a@.example.com").is_err());
+        assert!(bad("a@example.com.").is_err());
+        assert!(bad("a@example..com").is_err());
+        assert!(bad(&format!("{}@example.com", "x".repeat(65))).is_err());
+        assert!(bad(&format!("a@{}.com", "x".repeat(260))).is_err());
+        // Role and tagged addresses are deliberately allowed.
+        assert!(bad("ops@example.com").is_ok());
+        assert!(bad("a+tag@sub.example.co").is_ok());
+    }
+
+    #[test]
+    fn awaiting_verification_only_for_unverified_email() {
+        use chrono::Utc;
+        let ch = |kind_email: bool, verified: bool| NotificationChannel {
+            id: Uuid::nil(),
+            name: "n".into(),
+            kind: if kind_email {
+                ChannelKind::Email
+            } else {
+                ChannelKind::Slack
+            },
+            config: if kind_email {
+                ChannelConfig::Email(EmailConfig {
+                    to: "ops@example.com".into(),
+                })
+            } else {
+                ChannelConfig::Slack(SlackConfig {
+                    webhook_url: "https://hooks.slack.com/x".into(),
+                })
+            },
+            enabled: true,
+            disabled_reason: None,
+            verified_at: verified.then(Utc::now),
+            write_source: WriteSource::Ui,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        assert!(ch(true, false).awaiting_verification());
+        assert!(!ch(true, true).awaiting_verification());
+        assert!(!ch(false, false).awaiting_verification());
     }
 
     #[test]

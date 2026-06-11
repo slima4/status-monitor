@@ -215,6 +215,39 @@
         });
     }
 
+    // Resend the verification mail for an unverified email channel (edit only).
+    const resendBtn = form.querySelector("[data-resend-verification]");
+    if (resendBtn) {
+        const resendResult = form.querySelector("[data-resend-result]");
+        const showResend = (text, cls) => showStatus(resendResult, text, cls);
+        resendBtn.addEventListener("click", async () => {
+            resendBtn.disabled = true;
+            showResend("# sending…", "text-quiet");
+            try {
+                const res = await fetch(
+                    `/api/v1/notification-channels/${resendBtn.dataset.channelId}/resend-verification`,
+                    {
+                        method: "POST",
+                        headers: {
+                            "Accept": "application/json",
+                            "X-Requested-With": "uptimepage",
+                        },
+                    },
+                );
+                if (res.ok) {
+                    showResend("✓ verification mail sent — check the inbox", "flash-text flash-text--ok font-medium");
+                } else {
+                    const msg = await window.smApiErrorMessage(res, `resend failed (${res.status})`);
+                    showResend(`✗ ${msg}`, "flash-text flash-text--bad font-medium");
+                }
+            } catch (err) {
+                showResend(`✗ network error: ${err.message || err}`, "flash-text flash-text--bad font-medium");
+            } finally {
+                resendBtn.disabled = false;
+            }
+        });
+    }
+
     // Telegram setup helper: a t.me QR so the phone reaches the bot without
     // typing (the bot can't message anyone until they press Start), then a
     // chat-id probe over getUpdates. Both talk to the Bot API straight from
@@ -592,6 +625,14 @@
             const language = (data.get("whatsapp_language_code") || "").trim();
             if (language) config.language_code = language;
             return { config };
+        }
+        if (kind === "email") {
+            return {
+                config: {
+                    type: "email",
+                    to: (data.get("email_to") || "").trim().toLowerCase(),
+                },
+            };
         }
         if (kind === "telegram_app") {
             // The API rejects this kind in request bodies.

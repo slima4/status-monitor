@@ -202,6 +202,21 @@ app.{$UPTIMEPAGE_DOMAIN} {
 		import app_upstream
 	}
 
+	# ─── Email-channel verification — anonymous token link ──────────────
+	# Single-use sha256-at-rest tokens; the per-IP cap bounds brute probing
+	# of the public endpoint.
+	@verify_channel path /verify-channel*
+	handle @verify_channel {
+		rate_limit {
+			zone verify_channel {
+				key {remote_host}
+				events 30
+				window 1m
+			}
+		}
+		import app_upstream
+	}
+
 	# ─── Telegram bot webhook — anonymous, per-IP edge cap ──────────────
 	# Authenticated in-app by the secret-token header (constant-time); the
 	# edge caps junk floods and bounds the body (real updates are < 4 KB).

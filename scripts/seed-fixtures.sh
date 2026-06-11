@@ -507,7 +507,7 @@ CROSS JOIN LATERAL (
 ) AS e(occurred_at, kind, actor_type, message);
 SQL
 
-echo "==> Postgres: 8 notification channels (one per transport) and alert bindings"
+echo "==> Postgres: 9 notification channels (one per transport) and alert bindings"
 # Channel kinds match ChannelConfig — one per variant. The BYO Telegram row is
 # disabled so the operator UI renders both the enabled and disabled states;
 # the linked telegram_app row carries the platform-disable note.
@@ -538,7 +538,14 @@ INSERT INTO notification_channels (org_id, name, kind, config, external_ref, ena
    NULL, true, NULL),
   ('${ORG}'::uuid, 'Fixture GChat', 'google_chat',
    '{"type":"google_chat","webhook_url":"https://chat.googleapis.com/v1/spaces/AAAA0000/messages?key=fixture-key&token=fixture-token"}'::jsonb,
+   NULL, true, NULL),
+  ('${ORG}'::uuid, 'Fixture Email', 'email',
+   '{"type":"email","to":"oncall@example.com"}'::jsonb,
    NULL, true, NULL);
+
+-- The email fixture renders the unverified chip; engine deliveries to it
+-- record failures, which is the state worth eyeballing.
+
 
 -- Managed-by badge on the channels list too: webhook as Terraform, Slack as
 -- a raw API token; Telegram stays UI-authored (no chip).
@@ -1120,7 +1127,7 @@ echo "  incidents : 158 (150 resolved across 87d + 4 active (one per frozen publ
               + 1 adversarial-title + 2 internal-only on non-public monitors + 1 manually declared)
   ops state : active public incidents split triggered/acknowledged; internal + manual
               incidents carry activity timelines for the operator console"
-echo "  channels  : 8 (slack + webhook + whatsapp + discord + msteams + google_chat enabled; telegram disabled; telegram_app disabled with unlink note)"
+echo "  channels  : 9 (slack + webhook + whatsapp + discord + msteams + google_chat enabled; email enabled but unverified; telegram disabled; telegram_app disabled with unlink note)"
 echo "  managed   : fix-payment/fix-admin + Fixture Webhook → terraform chip; fix-tcp + Fixture Slack → api chip"
 echo "  alerts    : bound on fix-api / fix-db / fix-auth"
 echo "  maintenance: 4 windows (1 active bound to fix-db) → drives Maintenance state"

@@ -1,4 +1,5 @@
 pub mod discord;
+pub mod email;
 pub mod event;
 pub mod google_chat;
 pub mod msteams;
@@ -15,6 +16,7 @@ use crate::domain::ChannelConfig;
 use crate::error::Result;
 use crate::http_outbound::OutboundHttpClient;
 use crate::notifier::discord::DiscordNotifier;
+use crate::notifier::email::EmailNotifier;
 use crate::notifier::event::IncidentNotice;
 use crate::notifier::google_chat::GoogleChatNotifier;
 use crate::notifier::msteams::MsTeamsNotifier;
@@ -22,6 +24,8 @@ use crate::notifier::slack::SlackNotifier;
 use crate::notifier::telegram::TelegramNotifier;
 use crate::notifier::webhook::WebhookNotifier;
 use crate::notifier::whatsapp::WhatsAppNotifier;
+
+pub use crate::notifier::email::EmailDelivery;
 
 #[async_trait]
 pub trait Notifier: Send + Sync {
@@ -68,6 +72,7 @@ pub fn build_notifier(
     cfg: &ChannelConfig,
     http: &OutboundHttpClient,
     central: Option<CentralTelegram<'_>>,
+    email: Option<&EmailDelivery>,
 ) -> Result<Arc<dyn Notifier>> {
     let parse = |s: &str| -> Result<url::Url> {
         s.parse::<url::Url>().map_err(|e| {
@@ -122,6 +127,15 @@ pub fn build_notifier(
             http.clone(),
             parse(&c.webhook_url)?,
         )) as Arc<dyn Notifier>,
+        ChannelConfig::Email(c) => {
+            let email = email.ok_or_else(|| {
+                crate::error::AppError::bad_request(
+                    crate::api::codes::INVALID_CONFIG,
+                    "email delivery is not configured on this deployment",
+                )
+            })?;
+            Arc::new(EmailNotifier::new(email, &c.to)) as Arc<dyn Notifier>
+        }
     })
 }
 

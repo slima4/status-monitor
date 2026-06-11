@@ -1,0 +1,1 @@
+DROP TABLE channel_verification_tokens;

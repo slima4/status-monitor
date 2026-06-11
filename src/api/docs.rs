@@ -84,6 +84,7 @@ use crate::storage::UptimeStats;
         handlers::notification_channels::delete,
         handlers::notification_channels::test_send,
         handlers::notification_channels::test_config,
+        handlers::notification_channels::resend_verification,
         handlers::notification_channels::telegram_link_mint,
         handlers::notification_channels::telegram_link_status,
         handlers::incidents::update_incident_narration,

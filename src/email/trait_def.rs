@@ -64,6 +64,16 @@ pub enum EmailTemplate {
     /// Account-deletion notification. Restoring is done by signing in again
     /// before the data is permanently purged on `scheduled_purge_at`.
     AccountDeletion { scheduled_purge_at: DateTime<Utc> },
+    /// Confirms an `email` notification channel's address before any alert
+    /// is delivered to it.
+    ChannelVerification {
+        channel_name: String,
+        verify_url: String,
+        expires_hours: u32,
+    },
+    /// An incident page delivered over email; `body` is the same plain text
+    /// the chat transports send.
+    IncidentAlert { body: String },
 }
 
 impl EmailTemplate {
@@ -96,6 +106,19 @@ impl EmailTemplate {
             EmailTemplate::AccountDeletion { scheduled_purge_at } => {
                 templates::account_deletion::render(site_name, *scheduled_purge_at)
             }
+            EmailTemplate::ChannelVerification {
+                channel_name,
+                verify_url,
+                expires_hours,
+            } => templates::channel_verification::render(
+                site_name,
+                channel_name,
+                verify_url,
+                *expires_hours,
+            ),
+            EmailTemplate::IncidentAlert { body } => {
+                templates::incident_alert::render(site_name, body)
+            }
         }
     }
 
@@ -105,6 +128,8 @@ impl EmailTemplate {
             EmailTemplate::Invitation { accept_url, .. } => Some(accept_url),
             EmailTemplate::MagicLink { url, .. } => Some(url),
             EmailTemplate::AccountDeletion { .. } => None,
+            EmailTemplate::ChannelVerification { verify_url, .. } => Some(verify_url),
+            EmailTemplate::IncidentAlert { .. } => None,
         }
     }
 }

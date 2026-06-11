@@ -297,6 +297,77 @@ async fn provider_webhook_kinds_reject_offsite_urls() {
     }
 }
 
+#[tokio::test]
+async fn email_channel_starts_unverified_and_blocks_tests() {
+    let app = app();
+    let (st, created) = send(
+        &app,
+        "POST",
+        "/api/v1/notification-channels",
+        json!({ "name": "oncall-mail", "config": { "type": "email", "to": "oncall@example.com" } }),
+    )
+    .await;
+    assert_eq!(st, StatusCode::CREATED, "{created}");
+    assert_eq!(created["kind"], "email");
+    assert_eq!(created["config"]["to"], "oncall@example.com");
+    assert!(created.get("verified_at").is_none(), "starts unverified");
+    let id = created["id"].as_str().unwrap();
+
+    // Stored-channel test refuses until the address is verified.
+    let (st, body) = send_empty(
+        &app,
+        "POST",
+        &format!("/api/v1/notification-channels/{id}/test"),
+    )
+    .await;
+    assert_eq!(st, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["error"]["code"], "CHANNEL_UNVERIFIED");
+
+    // Ad-hoc config test can never be verified — refused outright.
+    let (st, body) = send(
+        &app,
+        "POST",
+        "/api/v1/notification-channels/test",
+        json!({ "config": { "type": "email", "to": "anyone@example.com" } }),
+    )
+    .await;
+    assert_eq!(st, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["error"]["code"], "CHANNEL_UNVERIFIED");
+
+    // Address-shape validation runs like every transport's.
+    let (st, body) = send(
+        &app,
+        "POST",
+        "/api/v1/notification-channels",
+        json!({ "name": "bad-mail", "config": { "type": "email", "to": "Not-Lower@example.com" } }),
+    )
+    .await;
+    assert_eq!(st, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["error"]["code"], "INVALID_CHANNEL_CONFIG");
+}
+
+#[tokio::test]
+async fn resend_verification_rejects_non_email_channels() {
+    let app = app();
+    let (st, created) = send(
+        &app,
+        "POST",
+        "/api/v1/notification-channels",
+        slack_body("Ops"),
+    )
+    .await;
+    assert_eq!(st, StatusCode::CREATED);
+    let id = created["id"].as_str().unwrap();
+    let (st, body) = send_empty(
+        &app,
+        "POST",
+        &format!("/api/v1/notification-channels/{id}/resend-verification"),
+    )
+    .await;
+    assert_eq!(st, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["error"]["code"], "CHANNEL_NOT_VERIFIABLE");
+}
+
 /// Deleting a channel must scrub its bindings from `targets.alerts` — a
 /// dangling `{channel_id}` fails channel-existence validation on the next
 /// whole-array alerts update of that monitor.
