@@ -352,6 +352,15 @@ mod tests {
                 "{kind} panel"
             );
         }
+        // Telegram setup helper: bot QR + chat-id probe.
+        assert!(html.contains("data-tg-qr"));
+        assert!(html.contains("data-tg-detect"));
+        // Fingerprinted URL proves the vendored lib is actually embedded —
+        // a missing file silently falls back to the bare path and 404s.
+        assert!(
+            crate::web::assets::url("js/qrcode.min.js").contains("?v="),
+            "qrcode.min.js must be embedded"
+        );
         // Create has no "replace config" toggle — config is always sent.
         assert!(!html.contains("Replace transport config"));
         // "Test now" works pre-save (ad-hoc config test); delete needs a

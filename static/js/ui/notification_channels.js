@@ -192,6 +192,122 @@
         });
     }
 
+    // Telegram setup helper: a t.me QR so the phone reaches the bot without
+    // typing (the bot can't message anyone until they press Start), then a
+    // chat-id probe over getUpdates. Both talk to the Bot API straight from
+    // the browser with the token already sitting in the form.
+    const tgQrBtn = form.querySelector("[data-tg-qr]");
+    const tgDetectBtn = form.querySelector("[data-tg-detect]");
+    if (tgQrBtn && tgDetectBtn) {
+        const tgResult = form.querySelector("[data-tg-result]");
+        const qrBox = form.querySelector("[data-tg-qr-box]");
+        const qrImg = form.querySelector("[data-tg-qr-img]");
+        const qrLink = form.querySelector("[data-tg-qr-link]");
+        const tokenInput = form.querySelector("[name='telegram_bot_token']");
+        const chatInput = form.querySelector("[name='telegram_chat_id']");
+        const showTg = (text, cls) => showStatus(tgResult, text, cls);
+
+        function tgToken() {
+            const tok = (tokenInput?.value || "").trim();
+            if (tok.includes("***")) {
+                showTg("✗ the stored token is masked — tick \"Replace transport config\" and paste the real token first", "flash-text flash-text--bad");
+                return null;
+            }
+            if (!/^\d+:[\w-]+$/.test(tok)) {
+                showTg("✗ enter the bot token first (looks like 123456:ABC-DEF…)", "flash-text flash-text--bad");
+                tokenInput?.focus();
+                return null;
+            }
+            return tok;
+        }
+
+        function hideTgHelper() {
+            tgResult?.classList.add("hidden");
+            qrBox?.classList.add("hidden");
+        }
+        tokenInput?.addEventListener("input", hideTgHelper);
+        form.addEventListener("change", (evt) => {
+            if (evt.target.name === "kind") hideTgHelper();
+        });
+
+        async function tgApi(token, method) {
+            const res = await fetch(`https://api.telegram.org/bot${token}/${method}`);
+            const json = await res.json().catch(() => null);
+            if (!json?.ok) {
+                const desc = json?.description || `telegram api error (${res.status})`;
+                if (/webhook/i.test(desc)) {
+                    throw new Error("this bot has a webhook configured, which blocks the chat-id probe — use @userinfobot for the id, or delete the webhook if the bot is dedicated to alerts");
+                }
+                throw new Error(desc);
+            }
+            return json.result;
+        }
+
+        tgQrBtn.addEventListener("click", async () => {
+            const token = tgToken();
+            if (!token) return;
+            tgQrBtn.disabled = true;
+            showTg("# asking the bot api…", "text-quiet");
+            try {
+                const me = await tgApi(token, "getMe");
+                if (!me.username) throw new Error("the bot has no username");
+                if (typeof qrcode !== "function") throw new Error("QR library failed to load — refresh and try again");
+                const url = `https://t.me/${me.username}`;
+                const qr = qrcode(0, "M");
+                qr.addData(url);
+                qr.make();
+                // margin 4 = the spec's full quiet zone, needed against the
+                // dark page for picky scanners.
+                qrImg.innerHTML = qr.createSvgTag({ cellSize: 4, margin: 4 });
+                qrLink.textContent = url;
+                qrLink.href = url;
+                qrBox.classList.remove("hidden");
+                showTg(`✓ @${me.username} — scan, press Start, then detect the chat ID`, "flash-text flash-text--ok font-medium");
+            } catch (err) {
+                showTg(`✗ ${err.message || err}`, "flash-text flash-text--bad font-medium");
+            } finally {
+                tgQrBtn.disabled = false;
+            }
+        });
+
+        tgDetectBtn.addEventListener("click", async () => {
+            const token = tgToken();
+            if (!token) return;
+            tgDetectBtn.disabled = true;
+            showTg("# checking the bot's recent messages…", "text-quiet");
+            try {
+                // offset=-100 biases the window toward the newest pending
+                // updates on busy bots.
+                const updates = await tgApi(token, "getUpdates?offset=-100");
+                const chats = new Map();
+                for (const u of updates) {
+                    // A my_chat_member update only counts when the bot was
+                    // added — a kick/leave must not nominate that chat.
+                    const joined = ["member", "administrator", "creator"]
+                        .includes(u.my_chat_member?.new_chat_member?.status);
+                    const c = u.message?.chat || u.channel_post?.chat
+                        || (joined ? u.my_chat_member?.chat : null);
+                    if (!c) continue;
+                    // Re-insert so Map order is "last seen", not "first seen".
+                    chats.delete(c.id);
+                    chats.set(c.id, c);
+                }
+                if (!chats.size) {
+                    throw new Error("no messages yet — press Start in the bot chat (or write anything in the group), then try again");
+                }
+                const chat = [...chats.values()].pop();
+                chatInput.value = String(chat.id);
+                chatInput.dispatchEvent(new Event("input", { bubbles: true }));
+                const who = chat.title || (chat.username && `@${chat.username}`) || [chat.first_name, chat.last_name].filter(Boolean).join(" ");
+                showTg(`✓ chat ID ${chat.id}${who ? ` (${who})` : ""} filled in`, "flash-text flash-text--ok font-medium");
+            } catch (err) {
+                showTg(`✗ ${err.message || err}`, "flash-text flash-text--bad font-medium");
+            } finally {
+                tgDetectBtn.disabled = false;
+            }
+        });
+    }
+
     const submitBtn = form.querySelector("button[type=submit]");
     form.addEventListener("submit", async (evt) => {
         evt.preventDefault();

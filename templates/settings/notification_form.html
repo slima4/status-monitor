@@ -156,10 +156,28 @@
                  placeholder="-1001234567890"
                  autocomplete="off" spellcheck="false" class="w-full field font-mono">
           <span class="mt-1 block text-xs text-muted">
-            Your numeric id from <span class="font-mono">@userinfobot</span>; group chats use the
+            Use the helper below, or your numeric id from
+            <span class="font-mono">@userinfobot</span>; group chats use the
             <span class="font-mono">-100…</span> id. The bot must be a member of the chat.
           </span>
         </label>
+        <div class="space-y-3">
+          <div class="flex flex-wrap items-center gap-3">
+            <button type="button" data-tg-qr
+                    class="sticker-btn px-3 py-1.5 text-sm font-medium">show bot QR</button>
+            <button type="button" data-tg-detect
+                    class="sticker-btn px-3 py-1.5 text-sm font-medium">detect chat ID</button>
+            <span class="text-xs text-muted">
+              Scan the QR with your phone, press <span class="font-mono">Start</span>
+              in the bot chat, then detect the chat ID — no typing on either side.
+            </span>
+          </div>
+          <p data-tg-result role="status" class="hidden font-mono text-xs"></p>
+          <div data-tg-qr-box class="hidden space-y-2">
+            <div data-tg-qr-img class="inline-block rounded-sm border border-[color:var(--theme-line)] bg-white p-2"></div>
+            <p class="font-mono text-xs text-muted"><a data-tg-qr-link href="#" target="_blank" rel="noopener" class="underline decoration-dotted hover:text-body"></a></p>
+          </div>
+        </div>
       </div>
 
       <div data-variant="whatsapp" class="space-y-5{% if form.kind != "whatsapp" %} hidden{% endif %}">
@@ -333,6 +351,7 @@
   {% endif %}
 </section>
 
+<script defer src="{{ "js/qrcode.min.js"|asset }}"></script>
 <script defer src="{{ "js/ui/api_form.js"|asset }}"></script>
 <script defer src="{{ "js/ui/notification_channels.js"|asset }}"></script>
 {% endblock %}
