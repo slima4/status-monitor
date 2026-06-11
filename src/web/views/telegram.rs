@@ -13,15 +13,12 @@ use secrecy::ExposeSecret;
 use crate::api::error::codes;
 use crate::app::AppState;
 use crate::auth::sha256_hex;
-use crate::domain::{
-    ChannelConfig, ChannelKind, MAX_CHANNEL_NAME_LEN, NewNotificationChannel, NotificationChannel,
-    OrgId, TelegramAppConfig, WriteSource,
-};
+use crate::domain::{ChannelConfig, ChannelKind, TelegramAppConfig};
 use crate::error::{AppError, Result};
-use crate::storage::NotificationChannelStore;
 use crate::telegram::{
     ChatRef, TelegramClient, Update, WebhookAction, classify_update, webhook_secret_matches,
 };
+use crate::web::views::notification_channels::create_channel_deduped;
 
 const SECRET_HEADER: &str = "x-telegram-bot-api-secret-token";
 
@@ -148,12 +145,12 @@ async fn link_chat(state: &AppState, code: &str, chat: ChatRef) -> Result<String
         chat_id: chat.id.to_string(),
         chat_title: chat.title.clone(),
     });
-    let channel = match create_linked_channel(
+    let channel = match create_channel_deduped(
         state.notification_channel_store.as_ref(),
         org,
         base_name,
         config,
-        chat.id,
+        Some(chat.id.to_string()),
         limit,
     )
     .await
@@ -191,46 +188,6 @@ async fn link_chat(state: &AppState, code: &str, chat: ChatRef) -> Result<String
     })
 }
 
-/// Create the consume-path channel, deduping the name by suffixing
-/// (`Ops`, `Ops 2`, …); any non-name-collision error propagates unchanged.
-pub async fn create_linked_channel(
-    store: &dyn NotificationChannelStore,
-    org: OrgId,
-    base_name: &str,
-    config: ChannelConfig,
-    chat_id: i64,
-    max_channels: i64,
-) -> Result<NotificationChannel> {
-    const MAX_SUFFIX: u32 = 50;
-    let mut attempt = 1;
-    loop {
-        let suffix = (attempt > 1).then_some(attempt);
-        let new = NewNotificationChannel {
-            name: linked_channel_name(base_name, suffix),
-            config: config.clone(),
-            enabled: true,
-            external_ref: Some(chat_id.to_string()),
-        };
-        match store.create(org, new, WriteSource::Ui, max_channels).await {
-            Err(AppError::Unprocessable { code, .. })
-                if code == codes::CHANNEL_NAME_TAKEN && attempt < MAX_SUFFIX =>
-            {
-                attempt += 1;
-            }
-            other => return other,
-        }
-    }
-}
-
-/// `base` (optionally `base N`), trimmed so a long chat title still leaves
-/// room for the dedupe suffix.
-pub fn linked_channel_name(base: &str, suffix: Option<u32>) -> String {
-    let suffix = suffix.map(|n| format!(" {n}")).unwrap_or_default();
-    let budget = MAX_CHANNEL_NAME_LEN - suffix.chars().count();
-    let base: String = base.trim().chars().take(budget).collect();
-    format!("{}{suffix}", base.trim_end())
-}
-
 fn spawn_reply(state: &AppState, chat_id: i64, text: String) {
     let client = TelegramClient::new(
         state.outbound_http.clone(),
@@ -248,61 +205,4 @@ fn spawn_reply(state: &AppState, chat_id: i64, text: String) {
             tracing::warn!(?err, chat_id, "telegram link reply failed");
         }
     });
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::domain::ChannelKind;
-    use crate::storage::InMemoryNotificationChannelStore;
-    use uuid::Uuid;
-
-    fn org() -> OrgId {
-        OrgId(Uuid::from_u128(0xC3))
-    }
-
-    fn app_config(chat_id: &str) -> ChannelConfig {
-        ChannelConfig::TelegramApp(TelegramAppConfig {
-            chat_id: chat_id.into(),
-            chat_title: Some("Ops".into()),
-        })
-    }
-
-    #[tokio::test]
-    async fn linked_channel_dedupes_name_with_suffix() {
-        let store = InMemoryNotificationChannelStore::new();
-        for expected in ["Ops", "Ops 2", "Ops 3"] {
-            let ch = create_linked_channel(&store, org(), "Ops", app_config("-1"), -1, 10)
-                .await
-                .unwrap();
-            assert_eq!(ch.name, expected);
-            assert_eq!(ch.kind, ChannelKind::TelegramApp);
-            assert!(ch.enabled);
-        }
-    }
-
-    #[tokio::test]
-    async fn linked_channel_quota_error_passes_through() {
-        let store = InMemoryNotificationChannelStore::new();
-        create_linked_channel(&store, org(), "Ops", app_config("-1"), -1, 1)
-            .await
-            .unwrap();
-        let err = create_linked_channel(&store, org(), "Other", app_config("-2"), -2, 1)
-            .await
-            .unwrap_err();
-        assert!(
-            matches!(err, AppError::Unprocessable { code, .. } if code == codes::CHANNEL_QUOTA_EXCEEDED)
-        );
-    }
-
-    #[test]
-    fn name_budget_keeps_room_for_suffix() {
-        let long = "x".repeat(MAX_CHANNEL_NAME_LEN + 20);
-        let plain = linked_channel_name(&long, None);
-        assert_eq!(plain.chars().count(), MAX_CHANNEL_NAME_LEN);
-        let suffixed = linked_channel_name(&long, Some(12));
-        assert_eq!(suffixed.chars().count(), MAX_CHANNEL_NAME_LEN);
-        assert!(suffixed.ends_with(" 12"));
-        assert_eq!(linked_channel_name("  Ops  ", Some(2)), "Ops 2");
-    }
 }

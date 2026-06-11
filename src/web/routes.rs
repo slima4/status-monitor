@@ -151,6 +151,14 @@ pub fn routes(state: AppState) -> Router {
         );
     }
 
+    // "Add to Slack" connect dance. Mounted only when the operator Slack app
+    // is configured; the manual webhook-paste slack kind works either way.
+    if cfg.slack_oauth.enabled() {
+        r = r
+            .route("/auth/slack/start", get(views::slack_connect::start))
+            .route("/auth/slack/callback", get(views::slack_connect::callback));
+    }
+
     if public_routes_active(cfg) {
         r = r
             .route("/status", get(views::public_status::index))

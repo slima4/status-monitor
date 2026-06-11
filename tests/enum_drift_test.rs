@@ -131,11 +131,10 @@ async fn oauth_identities_provider_check_matches_rust_enum() {
     );
 }
 
-/// `oauth_states.provider` must accept the same provider set as
-/// `oauth_identities.provider` — the OAuth dance writes a state row keyed
-/// on a provider before the callback ever inserts an identity row, so a
-/// CHECK on one but not the other would let a new provider's first request
-/// 500 at callback time instead of being rejected up-front by the schema.
+/// `oauth_states.provider` must accept every login provider (the dance
+/// writes a state row before the callback ever inserts an identity row)
+/// plus the connect-purpose providers, which never reach
+/// `oauth_identities`.
 #[tokio::test]
 #[ignore]
 async fn oauth_states_provider_check_matches_rust_enum() {
@@ -150,11 +149,16 @@ async fn oauth_states_provider_check_matches_rust_enum() {
         OauthProvider::ALL
             .iter()
             .map(|p| p.as_db_str().to_string())
+            .chain(
+                uptimepage::auth::provider::CONNECT_PROVIDERS
+                    .iter()
+                    .map(|p| p.to_string()),
+            )
             .collect(),
     );
     assert_eq!(
         db, rust,
-        "oauth_states.provider CHECK list ({db:?}) drifted from OauthProvider ({rust:?})"
+        "oauth_states.provider CHECK list ({db:?}) drifted from OauthProvider + CONNECT_PROVIDERS ({rust:?})"
     );
 }
 

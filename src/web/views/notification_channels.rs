@@ -19,9 +19,14 @@ use axum::extract::{Path, State};
 use axum::response::{IntoResponse, Response};
 use uuid::Uuid;
 
+use crate::api::error::codes;
 use crate::app::AppState;
-use crate::domain::{ChannelConfig, NotificationChannel, Target};
+use crate::domain::{
+    ChannelConfig, MAX_CHANNEL_NAME_LEN, NewNotificationChannel, NotificationChannel, OrgId,
+    Target, WriteSource,
+};
 use crate::error::AppError;
+use crate::storage::NotificationChannelStore;
 use crate::storage::traits::TargetFilter;
 use crate::web::CurrentOrg;
 use crate::web::error::WebResult;
@@ -137,6 +142,8 @@ pub struct ChannelFormModel {
     pub bindable: Vec<MonitorCard>,
     /// Gates the one-tap "telegram" card; the BYO card is always offered.
     pub central_telegram: bool,
+    /// Gates the "add to Slack" button on the slack panel (create mode).
+    pub slack_oauth: bool,
     /// Email channel still awaiting address verification (edit mode).
     pub email_unverified: bool,
 }
@@ -226,6 +233,7 @@ pub async fn new_form(
     };
     let mut form = empty_create_form();
     form.central_telegram = state.cfg.telegram.enabled();
+    form.slack_oauth = state.cfg.slack_oauth.enabled();
     (_, form.bindable) = org_monitor_cards(&state, org, None).await?;
     Ok(ChannelFormPage {
         active_tab: TAB_NOTIFICATIONS,
@@ -317,6 +325,7 @@ fn empty_create_form() -> ChannelFormModel {
         used_by: Vec::new(),
         bindable: Vec::new(),
         central_telegram: false,
+        slack_oauth: false,
         email_unverified: false,
     }
 }
@@ -369,8 +378,50 @@ fn form_from_channel(c: NotificationChannel) -> ChannelFormModel {
         used_by: Vec::new(),
         bindable: Vec::new(),
         central_telegram: false,
+        slack_oauth: false,
         email_unverified,
     }
+}
+
+/// Create a connect-flow channel (telegram link, Slack OAuth, …), deduping
+/// the name by suffixing (`Ops`, `Ops 2`, …); any non-name-collision error
+/// propagates unchanged.
+pub async fn create_channel_deduped(
+    store: &dyn NotificationChannelStore,
+    org: OrgId,
+    base_name: &str,
+    config: ChannelConfig,
+    external_ref: Option<String>,
+    max_channels: i64,
+) -> Result<NotificationChannel, AppError> {
+    const MAX_SUFFIX: u32 = 50;
+    let mut attempt = 1;
+    loop {
+        let suffix = (attempt > 1).then_some(attempt);
+        let new = NewNotificationChannel {
+            name: channel_name_with_suffix(base_name, suffix),
+            config: config.clone(),
+            enabled: true,
+            external_ref: external_ref.clone(),
+        };
+        match store.create(org, new, WriteSource::Ui, max_channels).await {
+            Err(AppError::Unprocessable { code, .. })
+                if code == codes::CHANNEL_NAME_TAKEN && attempt < MAX_SUFFIX =>
+            {
+                attempt += 1;
+            }
+            other => return other,
+        }
+    }
+}
+
+/// `base` (optionally `base N`), trimmed so a long provider-supplied name
+/// still leaves room for the dedupe suffix.
+pub fn channel_name_with_suffix(base: &str, suffix: Option<u32>) -> String {
+    let suffix = suffix.map(|n| format!(" {n}")).unwrap_or_default();
+    let budget = MAX_CHANNEL_NAME_LEN - suffix.chars().count();
+    let base: String = base.trim().chars().take(budget).collect();
+    format!("{}{suffix}", base.trim_end())
 }
 
 #[cfg(test)]
@@ -455,6 +506,32 @@ mod tests {
         assert!(on.contains("one-tap chat link"));
         assert!(on.contains("data-tga-connect"));
         assert!(on.contains("data-tga-qr-box"));
+    }
+
+    #[test]
+    fn create_form_add_to_slack_gated_on_oauth_config() {
+        let off = ChannelFormPage {
+            active_tab: TAB_NOTIFICATIONS,
+            form: empty_create_form(),
+        }
+        .render()
+        .unwrap();
+        assert!(!off.contains("data-slack-add"));
+        // Manual paste survives without the operator app.
+        assert!(off.contains("slack_webhook_url"));
+
+        let mut form = empty_create_form();
+        form.slack_oauth = true;
+        let on = ChannelFormPage {
+            active_tab: TAB_NOTIFICATIONS,
+            form,
+        }
+        .render()
+        .unwrap();
+        assert!(on.contains(r#"href="/auth/slack/start""#));
+        assert!(on.contains("data-slack-add"));
+        assert!(on.contains("data-slack-qr-box"));
+        assert!(on.contains("slack_webhook_url"));
     }
 
     #[test]
@@ -743,5 +820,69 @@ mod tests {
         assert!(html.contains(r#"href="/settings/notifications/abc/edit""#));
         assert!(html.contains(r#"hx-post="/api/v1/notification-channels/abc/test""#));
         assert!(html.contains(r#"hx-delete="/api/v1/notification-channels/abc""#));
+    }
+
+    mod deduped_create {
+        use super::*;
+        use crate::api::error::codes;
+        use crate::domain::{ChannelKind, MAX_CHANNEL_NAME_LEN, OrgId, TelegramAppConfig};
+        use crate::storage::InMemoryNotificationChannelStore;
+        use uuid::Uuid;
+
+        fn org() -> OrgId {
+            OrgId(Uuid::from_u128(0xC3))
+        }
+
+        fn app_config(chat_id: &str) -> ChannelConfig {
+            ChannelConfig::TelegramApp(TelegramAppConfig {
+                chat_id: chat_id.into(),
+                chat_title: Some("Ops".into()),
+            })
+        }
+
+        #[tokio::test]
+        async fn dedupes_name_with_suffix() {
+            let store = InMemoryNotificationChannelStore::new();
+            for expected in ["Ops", "Ops 2", "Ops 3"] {
+                let ch = create_channel_deduped(
+                    &store,
+                    org(),
+                    "Ops",
+                    app_config("-1"),
+                    Some("-1".into()),
+                    10,
+                )
+                .await
+                .unwrap();
+                assert_eq!(ch.name, expected);
+                assert_eq!(ch.kind, ChannelKind::TelegramApp);
+                assert!(ch.enabled);
+            }
+        }
+
+        #[tokio::test]
+        async fn quota_error_passes_through() {
+            let store = InMemoryNotificationChannelStore::new();
+            create_channel_deduped(&store, org(), "Ops", app_config("-1"), Some("-1".into()), 1)
+                .await
+                .unwrap();
+            let err = create_channel_deduped(&store, org(), "Other", app_config("-2"), None, 1)
+                .await
+                .unwrap_err();
+            assert!(
+                matches!(err, AppError::Unprocessable { code, .. } if code == codes::CHANNEL_QUOTA_EXCEEDED)
+            );
+        }
+
+        #[test]
+        fn name_budget_keeps_room_for_suffix() {
+            let long = "x".repeat(MAX_CHANNEL_NAME_LEN + 20);
+            let plain = channel_name_with_suffix(&long, None);
+            assert_eq!(plain.chars().count(), MAX_CHANNEL_NAME_LEN);
+            let suffixed = channel_name_with_suffix(&long, Some(12));
+            assert_eq!(suffixed.chars().count(), MAX_CHANNEL_NAME_LEN);
+            assert!(suffixed.ends_with(" 12"));
+            assert_eq!(channel_name_with_suffix("  Ops  ", Some(2)), "Ops 2");
+        }
     }
 }

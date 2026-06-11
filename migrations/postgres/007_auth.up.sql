@@ -48,9 +48,13 @@ CREATE INDEX idx_oauth_identities_user ON oauth_identities(user_id);
 -- replayable tokens.
 CREATE TABLE oauth_states (
     state_hash        TEXT PRIMARY KEY,
-    -- Same closed-enum invariant as `oauth_identities.provider`.
-    provider          TEXT NOT NULL CHECK (provider IN ('github', 'google')),
+    -- Login providers (same closed enum as `oauth_identities.provider`)
+    -- plus connect-purpose dances that never produce an identity row.
+    provider          TEXT NOT NULL CHECK (provider IN ('github', 'google', 'slack_connect')),
     redirect_after    TEXT,
+    -- Org a connect-purpose dance attaches its channel to; minted by a
+    -- membership-checked session, NULL for login providers.
+    org_id            UUID REFERENCES organizations(id) ON DELETE CASCADE,
     -- Bare invitation id, not the raw token. The token would be a
     -- replayable credential at rest (backup, slow-query log, pg_dump);
     -- the id alone isn't — the accept handler still requires the

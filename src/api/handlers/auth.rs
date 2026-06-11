@@ -71,6 +71,7 @@ pub async fn github_login(
         crate::auth::OauthProvider::Github.as_db_str(),
         redirect_after,
         invitation_id,
+        None,
     )
     .await?;
     let url = github::authorize_url(cfg, &s);
@@ -102,20 +103,24 @@ pub async fn github_callback(
         .unwrap_or_default();
     let ua_hash = fingerprint::hash_fingerprint(salt, ua_value);
 
-    // Phase A: consume state. Single-use; expired or unknown → 400.
-    let Some(consumed) = oauth_state::consume(pool, &q.state).await? else {
-        login_audit::record_failure_anon(
-            pool,
-            LoginMethod::GithubOauth,
-            ip_hash.as_deref(),
-            ua_hash.as_deref(),
-            "invalid_state",
-        )
-        .await;
-        return Err(AppError::bad_request(
-            "INVALID_STATE",
-            "OAuth state is invalid or has expired",
-        ));
+    // Phase A: consume state. Single-use; expired, unknown, or minted for a
+    // different dance (e.g. a connect-purpose provider) → 400.
+    let consumed = match oauth_state::consume(pool, &q.state).await? {
+        Some(c) if c.provider == crate::auth::OauthProvider::Github.as_db_str() => c,
+        _ => {
+            login_audit::record_failure_anon(
+                pool,
+                LoginMethod::GithubOauth,
+                ip_hash.as_deref(),
+                ua_hash.as_deref(),
+                "invalid_state",
+            )
+            .await;
+            return Err(AppError::bad_request(
+                "INVALID_STATE",
+                "OAuth state is invalid or has expired",
+            ));
+        }
     };
 
     // Phase B: GitHub HTTP. NO DB connection held here.

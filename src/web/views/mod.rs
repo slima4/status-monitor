@@ -9,6 +9,7 @@ pub mod pages;
 pub mod public_status;
 pub mod region_display;
 pub mod share;
+pub mod slack_connect;
 pub mod targets_detail;
 pub mod targets_form;
 pub mod targets_list;

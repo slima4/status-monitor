@@ -129,7 +129,25 @@
       </div>
       {% endif %}
 
-      <div data-variant="slack"{% if form.kind != "slack" %} class="hidden"{% endif %}>
+      <div data-variant="slack" class="space-y-4{% if form.kind != "slack" %} hidden{% endif %}">
+        {% if form.mode == "create" && form.slack_oauth %}
+        <div class="space-y-3">
+          <div class="flex flex-wrap items-center gap-3">
+            <a href="/auth/slack/start" data-slack-add
+               class="sticker-btn sticker-btn--accent px-4 py-2 text-sm font-medium">add to Slack</a>
+            <button type="button" data-slack-qr
+                    class="sticker-btn px-3 py-1.5 text-sm font-medium">show QR</button>
+            <span class="text-xs text-muted">
+              Slack asks where alerts should land and hands the webhook back —
+              no copy-paste. Or paste a webhook URL below.
+            </span>
+          </div>
+          <p data-slack-note role="status" class="hidden font-mono text-xs"></p>
+          <div data-slack-qr-box class="hidden space-y-2">
+            <div data-slack-qr-img class="inline-block rounded-sm border border-[color:var(--theme-line)] bg-white p-2"></div>
+          </div>
+        </div>
+        {% endif %}
         <label class="field-outline">
           <span class="field-outline__label">Slack incoming webhook URL</span>
           <input name="slack_webhook_url" type="url" value="{{ form.config.slack_webhook_url }}"

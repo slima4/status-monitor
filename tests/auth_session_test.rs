@@ -44,7 +44,7 @@ async fn oauth_state_insert_consume_round_trip() {
 
     let s = oauth_state::generate_state();
     let inv_id = uuid::Uuid::new_v4();
-    oauth_state::insert(&pool, &s, "github", Some("/after"), Some(inv_id))
+    oauth_state::insert(&pool, &s, "github", Some("/after"), Some(inv_id), None)
         .await
         .expect("insert");
     let consumed = oauth_state::consume(&pool, &s)
@@ -54,6 +54,7 @@ async fn oauth_state_insert_consume_round_trip() {
     assert_eq!(consumed.provider, "github");
     assert_eq!(consumed.redirect_after.as_deref(), Some("/after"));
     assert_eq!(consumed.invitation_id, Some(inv_id));
+    assert_eq!(consumed.org_id, None);
 
     // Second consume must return None — state is single-use.
     let again = oauth_state::consume(&pool, &s).await.expect("re-consume");

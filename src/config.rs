@@ -77,6 +77,36 @@ pub struct AppConfig {
     pub operator: OperatorConfig,
     #[serde(default)]
     pub telegram: TelegramBotConfig,
+    #[serde(default)]
+    pub slack_oauth: SlackOauthConfig,
+}
+
+/// `[slack_oauth]`. Operator-owned Slack app behind the "Add to Slack"
+/// button: the OAuth dance hands back a ready-made incoming-webhook URL so
+/// the user never copies one by hand. Empty credentials hide the button;
+/// the manual-paste slack kind works either way. Env only, never a config
+/// file.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct SlackOauthConfig {
+    pub client_id: String,
+    #[serde(default = "empty_secret", with = "secret_str")]
+    pub client_secret: SecretString,
+}
+
+impl Default for SlackOauthConfig {
+    fn default() -> Self {
+        Self {
+            client_id: String::new(),
+            client_secret: empty_secret(),
+        }
+    }
+}
+
+impl SlackOauthConfig {
+    pub fn enabled(&self) -> bool {
+        !self.client_id.trim().is_empty() && !self.client_secret.expose_secret().trim().is_empty()
+    }
 }
 
 /// `[telegram]`. Operator-owned central bot shared by every org: customers

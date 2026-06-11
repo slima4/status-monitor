@@ -19,7 +19,7 @@ use uptimepage::storage::{
     LinkCodeStatus, MintOutcome, NotificationChannelStore, PgNotificationChannelStore,
     PgTelegramLinkCodeStore, TelegramLinkCodeStore, create_org_with_owner,
 };
-use uptimepage::web::views::telegram::create_linked_channel;
+use uptimepage::web::views::notification_channels::create_channel_deduped;
 
 use common::{make_user, pg_pool_from_env, unique_slug};
 
@@ -237,21 +237,42 @@ async fn consume_path_channel_create_suffixes_taken_names() {
     let (org, user) = one_org(&pool, "tg-name").await;
     let channels = PgNotificationChannelStore::new(pool.clone(), None);
 
-    let first = create_linked_channel(&channels, org, "Ops", app_config("-1"), -1, 10)
-        .await
-        .unwrap();
+    let first = create_channel_deduped(
+        &channels,
+        org,
+        "Ops",
+        app_config("-1"),
+        Some("-1".into()),
+        10,
+    )
+    .await
+    .unwrap();
     assert_eq!(first.name, "Ops");
     assert_eq!(first.config, app_config("-1"));
 
-    let second = create_linked_channel(&channels, org, "Ops", app_config("-2"), -2, 10)
-        .await
-        .unwrap();
+    let second = create_channel_deduped(
+        &channels,
+        org,
+        "Ops",
+        app_config("-2"),
+        Some("-2".into()),
+        10,
+    )
+    .await
+    .unwrap();
     assert_eq!(second.name, "Ops 2");
 
     // The quota error is not swallowed by the suffix loop.
-    let err = create_linked_channel(&channels, org, "Other", app_config("-3"), -3, 2)
-        .await
-        .unwrap_err();
+    let err = create_channel_deduped(
+        &channels,
+        org,
+        "Other",
+        app_config("-3"),
+        Some("-3".into()),
+        2,
+    )
+    .await
+    .unwrap_err();
     assert!(
         matches!(err, AppError::Unprocessable { code, .. } if code == codes::CHANNEL_QUOTA_EXCEEDED)
     );

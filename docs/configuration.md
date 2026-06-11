@@ -154,6 +154,23 @@ deploy.
 All three values are operator secrets: env-only in production, never
 in a committed config file.
 
+## Slack OAuth ("Add to Slack")
+
+```toml
+[slack_oauth]
+client_id = ""            # env UPTIMEPAGE_SLACK_OAUTH__CLIENT_ID
+client_secret = ""        # env UPTIMEPAGE_SLACK_OAUTH__CLIENT_SECRET
+```
+
+Credentials of an operator-owned Slack app with the `incoming-webhook`
+scope. When both are set, the slack panel in the channel form grows an
+"add to Slack" button (plus a QR variant): Slack's consent screen picks
+the destination channel and the callback stores the returned webhook as
+a regular `slack` channel — the access token is discarded. The app's
+redirect URL must be `<auth.public_base_url>/auth/slack/callback`.
+Empty credentials (the default) hide the button; manual webhook paste
+always works. Env-only in production, never in a committed config file.
+
 ## Public status page
 
 The `[public_status]` block configures the per-org public surface. It is

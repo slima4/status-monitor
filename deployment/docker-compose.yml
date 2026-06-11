@@ -91,6 +91,10 @@ services:
       UPTIMEPAGE_TELEGRAM__BOT_TOKEN: ${UPTIMEPAGE_TELEGRAM_BOT_TOKEN:-}
       UPTIMEPAGE_TELEGRAM__BOT_USERNAME: ${UPTIMEPAGE_TELEGRAM_BOT_USERNAME:-}
       UPTIMEPAGE_TELEGRAM__WEBHOOK_SECRET: ${UPTIMEPAGE_TELEGRAM_WEBHOOK_SECRET:-}
+      # Operator Slack app ("Add to Slack"). Empty = button hidden; the
+      # manual webhook-paste slack kind works either way.
+      UPTIMEPAGE_SLACK_OAUTH__CLIENT_ID: ${UPTIMEPAGE_SLACK_OAUTH_CLIENT_ID:-}
+      UPTIMEPAGE_SLACK_OAUTH__CLIENT_SECRET: ${UPTIMEPAGE_SLACK_OAUTH_CLIENT_SECRET:-}
       UPTIMEPAGE_OBSERVABILITY__LOG_FORMAT: json
       # Bind metrics on all interfaces *inside* the container so the
       # optional Alloy sidecar (a separate container) can scrape it over

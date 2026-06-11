@@ -1,7 +1,8 @@
 //! OAuth providers wired through the auth flow. The variant set is the
 //! single source of truth: the Postgres CHECK on `oauth_identities.provider`
-//! and `oauth_states.provider` is the closed list of [`OauthProvider::ALL`],
-//! validated by `tests/enum_drift_test.rs`.
+//! is the closed list of [`OauthProvider::ALL`]; `oauth_states.provider`
+//! additionally accepts [`CONNECT_PROVIDERS`]. Both validated by
+//! `tests/enum_drift_test.rs`.
 
 use serde::{Deserialize, Serialize};
 
@@ -29,3 +30,10 @@ impl OauthProvider {
         }
     }
 }
+
+/// Connect-purpose OAuth dances (channel attach, not login): allowed in
+/// `oauth_states.provider` on top of [`OauthProvider::ALL`], never in
+/// `oauth_identities.provider` — they produce no identity row.
+pub const SLACK_CONNECT_PROVIDER: &str = "slack_connect";
+
+pub const CONNECT_PROVIDERS: &[&str] = &[SLACK_CONNECT_PROVIDER];

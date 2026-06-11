@@ -466,6 +466,43 @@
         });
     }
 
+    // "Add to Slack": the button is a full-page OAuth redirect; the QR
+    // variant fetches the same single-use authorize URL for a phone that is
+    // signed in here. Callback bounces land back with ?slack=<outcome>.
+    const slackAdd = form.querySelector("[data-slack-add]");
+    if (slackAdd) {
+        const slackNote = form.querySelector("[data-slack-note]");
+        const slackQrBox = form.querySelector("[data-slack-qr-box]");
+        const slackQrImg = form.querySelector("[data-slack-qr-img]");
+        const slackQrBtn = form.querySelector("[data-slack-qr]");
+        const showSlack = (text, cls) => showStatus(slackNote, text, cls);
+        const outcome = new URLSearchParams(window.location.search).get("slack");
+        if (outcome === "cancelled") {
+            showSlack("# slack connect cancelled — nothing was created", "text-quiet");
+        } else if (outcome === "quota") {
+            showSlack("✗ notification-channel limit reached for this plan", "flash-text flash-text--bad font-medium");
+        } else if (outcome === "failed") {
+            showSlack("✗ slack connect failed — try again, or paste a webhook URL below", "flash-text flash-text--bad font-medium");
+        }
+        slackQrBtn?.addEventListener("click", async () => {
+            slackQrBtn.disabled = true;
+            try {
+                const res = await fetch("/auth/slack/start?format=json", {
+                    headers: { "Accept": "application/json", "X-Requested-With": "uptimepage" },
+                });
+                if (!res.ok) throw new Error(`slack start failed (${res.status})`);
+                const body = await res.json();
+                renderQr(slackQrImg, body.url);
+                slackQrBox.classList.remove("hidden");
+                showSlack("# scan with a phone that's signed in here and finish on Slack — single-use, expires in 10 minutes", "text-quiet");
+            } catch (err) {
+                showSlack(`✗ ${err.message || err}`, "flash-text flash-text--bad font-medium");
+            } finally {
+                slackQrBtn.disabled = false;
+            }
+        });
+    }
+
     const submitBtn = form.querySelector("button[type=submit]");
     form.addEventListener("submit", async (evt) => {
         evt.preventDefault();

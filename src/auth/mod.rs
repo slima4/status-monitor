@@ -23,6 +23,7 @@ pub mod oauth_state_cleanup;
 pub mod provider;
 pub mod scope;
 pub mod session;
+pub mod slack;
 pub mod token_hash;
 pub mod url;
 
