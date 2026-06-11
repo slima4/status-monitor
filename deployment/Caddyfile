@@ -202,6 +202,28 @@ app.{$UPTIMEPAGE_DOMAIN} {
 		import app_upstream
 	}
 
+	# ─── Telegram bot webhook — anonymous, per-IP edge cap ──────────────
+	# Authenticated in-app by the secret-token header (constant-time); the
+	# edge caps junk floods and bounds the body (real updates are < 4 KB).
+	# Telegram delivers from a handful of egress IPs and retries non-2xx
+	# with backoff, so a 429 defers an update, never loses it — keep the
+	# cap generous enough for legitimate bursts. Terminal handle: keeps
+	# the path off the unlimited catch-all.
+	@telegram_hook path /hooks/telegram
+	handle @telegram_hook {
+		request_body {
+			max_size 64KB
+		}
+		rate_limit {
+			zone telegram_hook {
+				key {remote_host}
+				events 120
+				window 1m
+			}
+		}
+		import app_upstream
+	}
+
 	# ─── Operator surface: app-enforced session auth (SaaS) ─────────────
 	# No edge basic_auth. The health/metrics/public handle blocks above
 	# are terminal; every other (operator) request falls through to the

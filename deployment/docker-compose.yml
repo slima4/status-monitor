@@ -86,6 +86,11 @@ services:
       UPTIMEPAGE_SECURITY__TRUSTED_PROXIES: ${UPTIMEPAGE_SECURITY__TRUSTED_PROXIES:-172.16.0.0/12,127.0.0.0/8,::1/128}
       # Empty disables the /operator/* surface (routes 404).
       UPTIMEPAGE_OPERATOR__ADMIN_TOKEN: ${UPTIMEPAGE_OPERATOR_ADMIN_TOKEN:-}
+      # Central Telegram bot (one-tap channel linking). Empty token = the
+      # whole surface is absent; BYO telegram channels are unaffected.
+      UPTIMEPAGE_TELEGRAM__BOT_TOKEN: ${UPTIMEPAGE_TELEGRAM_BOT_TOKEN:-}
+      UPTIMEPAGE_TELEGRAM__BOT_USERNAME: ${UPTIMEPAGE_TELEGRAM_BOT_USERNAME:-}
+      UPTIMEPAGE_TELEGRAM__WEBHOOK_SECRET: ${UPTIMEPAGE_TELEGRAM_WEBHOOK_SECRET:-}
       UPTIMEPAGE_OBSERVABILITY__LOG_FORMAT: json
       # Bind metrics on all interfaces *inside* the container so the
       # optional Alloy sidecar (a separate container) can scrape it over
