@@ -332,7 +332,8 @@ never read, mutate, or test another's channels.
 
 - `slack` — `{ "type": "slack", "webhook_url": "https://…" }` (incoming webhook; posts `{ "text": "…" }`)
 - `webhook` — `{ "type": "webhook", "url": "https://…", "headers": { … }, "secret": "…" }` (POSTs the alert JSON; optional custom headers; optional signing secret, see below)
-- `telegram` — `{ "type": "telegram", "bot_token": "…", "chat_id": "…" }`
+- `telegram` — `{ "type": "telegram", "bot_token": "…", "chat_id": "…" }` (bring-your-own bot)
+- `telegram_app` — `{ "type": "telegram_app", "chat_id": "…", "chat_title": "…" }` — linked through the platform's central bot. **Not creatable from request bodies**: a `POST`/`PATCH`/test carrying this kind returns `422 CHANNEL_KIND_MANAGED` (the chat id rides the operator bot's credentials, so accepting one would let any caller page an arbitrary chat). Channels of this kind are created only by the link-code flow below.
 - `whatsapp` — `{ "type": "whatsapp", "access_token": "…", "phone_number_id": "…", "to": "…", "template_name": "…", "language_code": "en" }` (Business Cloud API; `language_code` optional, default `en`)
 
 **Webhook signing.** When a `webhook` channel carries a `secret` (≥ 16
@@ -361,6 +362,16 @@ Behaviour:
 - **Destination deny-list**: the customer-controlled outbound URL (`slack`/`webhook`) is checked against the platform's abuse deny-list on create, update, and both test endpoints — a match is rejected (`ABUSE_BLOCKED` / `DOMAIN_DENYLISTED`). `telegram`/`whatsapp` deliver to fixed vendor endpoints.
 - **Quota**: capped per org by the plan's `max_notification_channels` (atomic, advisory-locked). A duplicate name within the org is `422 CHANNEL_NAME_TAKEN`; the cap is `422 CHANNEL_QUOTA_EXCEEDED`.
 - **Test sends** deliver one clearly-labelled synthetic alert. The per-channel form tests the stored config (works on a disabled channel too); the collection-level `POST …/test` takes `{ "config": { … } }` in the body, validates it exactly as create would, and persists nothing — the UI uses it for "test now" before a channel is saved. A transport failure is `422 CHANNEL_TEST_FAILED`. Both count against the `test_now` rate-limit bucket.
+- **Platform disables**: when a linked Telegram chat unlinks from its side (the bot is removed, or the chat sends `/stop`), every channel linked to that chat is disabled with a `disabled_reason` the UI shows. Re-enabling the channel clears the note.
+
+### Telegram one-tap linking
+
+Deployments running the central bot expose a link-code flow (absent — `404 TELEGRAM_LINK_NOT_FOUND` — otherwise):
+
+- `POST /api/v1/notification-channels/telegram-link` (`channels:write`) with an optional `{ "name": "…" }` hint mints a single-use code (15-minute expiry, capped outstanding codes per org → `422 TELEGRAM_LINK_LIMIT`). The response carries the raw `code` (shown once, only its hash is stored), a `deep_link` (`t.me/<bot>?start=<code>`, private chat) and a `group_deep_link` (`?startgroup=<code>`, picks a group). The same code works for either destination.
+- Sending the code to the bot (tap **Start**, or `/link <code>` in a group) creates the `telegram_app` channel for the minting org. The org is resolved only from the code — never from the Telegram payload.
+- `GET /api/v1/notification-channels/telegram-link/{id}` (`channels:read`) polls the code: `pending`, `consumed` (with `channel_id`), or `expired`.
+- Unlink = delete the channel; deleting the last channel linked to a group also walks the bot out of that group. From the chat side, `/stop` or removing the bot disables the channel (see platform disables above).
 
 ## Rate limiting
 

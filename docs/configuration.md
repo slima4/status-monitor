@@ -128,6 +128,32 @@ Rotating the value mid-deployment refuses to boot unless the override
 env var documented in `docs/troubleshooting.md` is set — this is
 deliberate so audit-trail breakage is loud.
 
+## Central Telegram bot
+
+```toml
+[telegram]
+bot_token = ""            # env UPTIMEPAGE_TELEGRAM__BOT_TOKEN; presence enables the feature
+bot_username = ""         # verified against the Bot API at boot; used for t.me deep links
+webhook_secret = ""       # random, 32+ chars; Telegram echoes it on every webhook delivery
+```
+
+Setting `bot_token` switches on one-tap Telegram channel linking: the
+type card in the channel form, the link-code API, and the
+`/hooks/telegram` receiver. Empty token (the default) leaves the
+feature absent entirely — self-host deployments keep the
+bring-your-own `telegram` transport, which needs no operator config.
+
+When enabled, boot validates the trio: non-empty `bot_username`,
+`webhook_secret` of 32+ characters, and an `https://`
+`auth.public_base_url` (Telegram only delivers webhooks to public
+https endpoints). The app then verifies the token against the Bot API
+and registers the webhook on every boot; a Telegram outage logs a
+warning and disables the bot for that boot instead of failing the
+deploy.
+
+All three values are operator secrets: env-only in production, never
+in a committed config file.
+
 ## Public status page
 
 The `[public_status]` block configures the per-org public surface. It is

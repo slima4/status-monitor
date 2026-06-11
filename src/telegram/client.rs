@@ -73,8 +73,7 @@ impl TelegramClient {
         Self::unwrap_envelope(resp, "getMe")
     }
 
-    /// Plain-text message to a chat. Like [`Self::set_webhook`], the HTTP
-    /// status surfaced by [`post_json`] is the success signal.
+    /// Plain-text message to a chat.
     pub async fn send_message(&self, chat_id: i64, text: &str) -> Result<()> {
         let url = self.endpoint("sendMessage")?;
         post_json(
@@ -84,6 +83,14 @@ impl TelegramClient {
         )
         .await
         .map_err(|e| self.scrub(e))
+    }
+
+    /// Leave a group after its last linked channel is deleted.
+    pub async fn leave_chat(&self, chat_id: i64) -> Result<()> {
+        let url = self.endpoint("leaveChat")?;
+        post_json(&self.http, &url, &json!({ "chat_id": chat_id }))
+            .await
+            .map_err(|e| self.scrub(e))
     }
 
     /// Telegram returns a non-2xx on any setWebhook error, so the HTTP status

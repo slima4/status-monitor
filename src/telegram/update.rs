@@ -37,9 +37,8 @@ impl Chat {
         matches!(self.chat_type.as_deref(), Some("group" | "supergroup"))
     }
 
-    /// Display name for the linked destination: group title, else the
-    /// private chat's person (first name, then @username). Private chats
-    /// carry no `title`, so without this the UI shows only a bare chat id.
+    /// Group title, else the private chat's person — private chats carry no
+    /// `title`, and a bare chat id makes an anonymous channel.
     fn display_name(&self) -> Option<String> {
         self.title
             .clone()
@@ -83,6 +82,9 @@ pub enum WebhookAction {
     LinkPrivate { code: String, chat: ChatRef },
     /// `/start <code>` or `/link <code>` in a group the bot was added to.
     LinkGroup { code: String, chat: ChatRef },
+    /// `/stop` — the chat asked for alerts to end. Unlike [`Self::Removed`]
+    /// the bot can still reply with a confirmation.
+    Stop { chat_id: i64 },
     /// The bot was removed (`left`/`kicked`) from a chat.
     Removed { chat_id: i64 },
     /// Anything we don't act on — acknowledged and dropped.
@@ -107,18 +109,24 @@ pub fn classify_update(update: &Update) -> WebhookAction {
     if let Some(msg) = &update.message
         && let Some(text) = &msg.text
         && let Some((cmd, code)) = parse_command(text)
-        && !code.is_empty()
-        && (cmd == "/start" || cmd == "/link")
     {
-        let code = code.to_string();
-        let chat = ChatRef::from(&msg.chat);
-        // The chat the message arrived in decides the variant, not which
-        // command was typed — `/link` in a private chat is still a private link.
-        return if msg.chat.is_group() {
-            WebhookAction::LinkGroup { code, chat }
-        } else {
-            WebhookAction::LinkPrivate { code, chat }
-        };
+        if cmd == "/stop" {
+            return WebhookAction::Stop {
+                chat_id: msg.chat.id,
+            };
+        }
+        if !code.is_empty() && (cmd == "/start" || cmd == "/link") {
+            let code = code.to_string();
+            let chat = ChatRef::from(&msg.chat);
+            // The chat the message arrived in decides the variant, not which
+            // command was typed — `/link` in a private chat is still a
+            // private link.
+            return if msg.chat.is_group() {
+                WebhookAction::LinkGroup { code, chat }
+            } else {
+                WebhookAction::LinkPrivate { code, chat }
+            };
+        }
     }
     if let Some(mcm) = &update.my_chat_member
         && matches!(mcm.new_chat_member.status.as_str(), "left" | "kicked")
@@ -242,6 +250,20 @@ mod tests {
         assert_eq!(
             classify(r#"{"message":{"text":"hello","chat":{"id":1,"type":"private"}}}"#),
             WebhookAction::Ignore
+        );
+    }
+
+    #[test]
+    fn stop_command_in_any_chat_stops() {
+        assert_eq!(
+            classify(r#"{"message":{"text":"/stop","chat":{"id":7,"type":"private"}}}"#),
+            WebhookAction::Stop { chat_id: 7 }
+        );
+        assert_eq!(
+            classify(
+                r#"{"message":{"text":"/stop@uptimepagebot","chat":{"id":-9,"type":"supergroup","title":"Ops"}}}"#
+            ),
+            WebhookAction::Stop { chat_id: -9 }
         );
     }
 

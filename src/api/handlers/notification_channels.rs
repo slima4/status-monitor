@@ -207,6 +207,9 @@ pub async fn delete(
     Authorized(org, _): Authorized<ChannelsDelete>,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode> {
+    // The bot-leave decision below needs the transport + chat id, gone once
+    // the row is.
+    let channel = state.notification_channel_store.get(org, id).await?;
     // Scrub before delete: a stale {channel_id} left in targets.alerts
     // fails channel-existence validation on the next whole-array alerts
     // update of that monitor. This order keeps the operation retryable —
@@ -216,10 +219,48 @@ pub async fn delete(
     // channels at resolve time.
     state.target_store.unbind_channel(org, id).await?;
     if state.notification_channel_store.delete(org, id).await? {
+        if let Some(ch) = channel {
+            maybe_leave_telegram_group(&state, &ch);
+        }
         Ok(StatusCode::NO_CONTENT)
     } else {
         Err(channel_not_found())
     }
+}
+
+/// Best-effort: deleting the last channel linked to a Telegram group walks
+/// the bot out; it stays while another org's channel still points there.
+/// A re-link racing the count can lose the bot — the chat just re-invites it.
+fn maybe_leave_telegram_group(state: &AppState, ch: &NotificationChannel) {
+    let ChannelConfig::TelegramApp(cfg) = &ch.config else {
+        return;
+    };
+    let Ok(chat_id) = cfg.chat_id.parse::<i64>() else {
+        return;
+    };
+    let Some(token) = state.cfg.telegram.delivery_token() else {
+        return;
+    };
+    if chat_id >= 0 {
+        return;
+    }
+    let client = crate::telegram::TelegramClient::new(state.outbound_http.clone(), token);
+    let store = state.notification_channel_store.clone();
+    let external_ref = cfg.chat_id.clone();
+    tokio::spawn(async move {
+        match store
+            .count_by_external_ref(crate::domain::ChannelKind::TelegramApp, &external_ref)
+            .await
+        {
+            Ok(0) => {
+                if let Err(err) = client.leave_chat(chat_id).await {
+                    tracing::warn!(?err, chat_id, "telegram leaveChat failed");
+                }
+            }
+            Ok(_) => {}
+            Err(err) => tracing::warn!(?err, chat_id, "telegram leave check failed"),
+        }
+    });
 }
 
 #[utoipa::path(
@@ -287,8 +328,8 @@ pub async fn test_config(
     Authorized(org, _): Authorized<ChannelsExecute>,
     Json(req): Json<TestChannelConfigRequest>,
 ) -> Result<Json<TestNotificationResponse>> {
-    // An unsaved managed-kind config here would message a caller-supplied
-    // chat id with the operator bot — same spam vector as create.
+    // Same spam vector as create: the test would message a caller-supplied
+    // chat id with the operator bot.
     reject_managed_kind(&req.config)?;
     validate_config(&req.config)?;
     check_channel_abuse(&state, org, &req.config)?;
@@ -298,10 +339,8 @@ pub async fn test_config(
 
 // ── Central-bot Telegram linking ─────────────────────────────────────────
 
-/// How long a minted link code stays claimable.
 const TELEGRAM_LINK_TTL_MINUTES: i64 = 15;
-
-/// Outstanding unconsumed codes per org — bounds drive-by minting.
+/// Outstanding codes per org — bounds drive-by minting.
 const TELEGRAM_LINK_MAX_OUTSTANDING: i64 = 5;
 
 #[derive(Debug, Clone, Default, Deserialize, ToSchema)]
@@ -481,8 +520,7 @@ fn channel_not_found() -> AppError {
     AppError::not_found(codes::CHANNEL_NOT_FOUND, "notification channel not found")
 }
 
-/// The linking surface only exists on deployments with a central bot;
-/// without one the endpoints answer as absent.
+/// Without a central bot the linking surface answers as absent.
 fn require_central_bot(state: &AppState) -> Result<()> {
     if state.cfg.telegram.enabled() {
         Ok(())
@@ -494,10 +532,9 @@ fn require_central_bot(state: &AppState) -> Result<()> {
     }
 }
 
-/// Operator-managed configs carry a destination our credentials will message
-/// (a `telegram_app` chat id); accepting one from a request body would let
-/// any caller alert-spam an arbitrary destination. They are only ever
-/// created by their own flow (the webhook consuming a link code).
+/// A caller-supplied operator-managed config (`telegram_app` chat id) would
+/// let anyone alert-spam an arbitrary destination with our credentials —
+/// only the transport's own flow may mint one.
 fn reject_managed_kind(cfg: &ChannelConfig) -> Result<()> {
     if cfg.operator_managed() {
         return Err(AppError::unprocessable(

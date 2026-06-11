@@ -4,11 +4,10 @@ use utoipa::ToSchema;
 use super::ChannelKind;
 use super::transport::TransportConfig;
 
-/// Destination linked through the central operator-owned Telegram bot. Holds
-/// no secret — delivery uses the operator token — so redaction is a no-op.
-/// Created exclusively by the webhook consume path: a caller-supplied chat_id
-/// would let anyone alert-spam an arbitrary chat through our bot, so the API
-/// rejects this config kind in create/update bodies.
+/// Destination linked through the central operator-owned Telegram bot.
+/// Secretless (delivery uses the operator token) and created exclusively by
+/// the webhook consume path — a caller-supplied chat_id would let anyone
+/// alert-spam an arbitrary chat through our bot.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct TelegramAppConfig {
     pub chat_id: String,
@@ -41,7 +40,6 @@ impl TransportConfig for TelegramAppConfig {
         None
     }
 
-    /// Only the webhook consume path may mint this config.
     fn operator_managed(&self) -> bool {
         true
     }

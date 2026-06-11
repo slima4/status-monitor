@@ -115,8 +115,7 @@ impl TelegramBotConfig {
         !self.bot_token.expose_secret().trim().is_empty()
     }
 
-    /// Bot token for linked-channel delivery; `None` when the central bot is
-    /// not configured. The one place the enabled-gate and the expose meet.
+    /// Bot token for linked-channel delivery; `None` when not configured.
     pub fn delivery_token(&self) -> Option<&str> {
         self.enabled().then(|| self.bot_token.expose_secret())
     }

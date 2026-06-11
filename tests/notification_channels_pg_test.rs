@@ -35,6 +35,7 @@ fn slack(name: &str, secret: &str) -> NewNotificationChannel {
             webhook_url: format!("https://hooks.slack.com/services/{secret}"),
         }),
         enabled: true,
+        external_ref: None,
     }
 }
 
@@ -523,4 +524,108 @@ async fn due_for_renotify_selects_overdue_open_unacked_live_pg() {
     );
 
     cleanup(&pool, &[org], &[user]).await;
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL"]
+async fn telegram_lifecycle_disable_by_external_ref() {
+    let Some(pool) = pg_pool_from_env().await else {
+        return;
+    };
+    let (org_a, org_b, user_a, user_b) = two_orgs(&pool, "tg-life").await;
+    let store = PgNotificationChannelStore::new(pool.clone(), None);
+
+    let chat = format!("-100{}", uuid::Uuid::now_v7().simple());
+    let linked = |name: &str, chat: &str| uptimepage::domain::NewNotificationChannel {
+        name: name.into(),
+        config: uptimepage::domain::ChannelConfig::TelegramApp(
+            uptimepage::domain::TelegramAppConfig {
+                chat_id: chat.into(),
+                chat_title: Some("Ops".into()),
+            },
+        ),
+        enabled: true,
+        external_ref: Some(chat.into()),
+    };
+    // Two orgs share the kicked chat; org A has a second, unrelated link.
+    let a = store
+        .create(org_a, linked("prod", &chat), WriteSource::Ui, 10)
+        .await
+        .unwrap();
+    store
+        .create(org_b, linked("ops", &chat), WriteSource::Ui, 10)
+        .await
+        .unwrap();
+    let other_chat = format!("-200{}", uuid::Uuid::now_v7().simple());
+    store
+        .create(org_a, linked("other", &other_chat), WriteSource::Ui, 10)
+        .await
+        .unwrap();
+
+    let kind = uptimepage::domain::ChannelKind::TelegramApp;
+    assert_eq!(store.count_by_external_ref(kind, &chat).await.unwrap(), 2);
+    assert_eq!(
+        store
+            .disable_by_external_ref(kind, &chat, "unlinked from the Telegram side")
+            .await
+            .unwrap(),
+        2
+    );
+    // Idempotent on already-disabled rows.
+    assert_eq!(
+        store
+            .disable_by_external_ref(kind, &chat, "unlinked from the Telegram side")
+            .await
+            .unwrap(),
+        0
+    );
+    let got = store.get(org_a, a.id).await.unwrap().unwrap();
+    assert!(!got.enabled);
+    assert_eq!(
+        got.disabled_reason.as_deref(),
+        Some("unlinked from the Telegram side")
+    );
+    // The unrelated chat is untouched and still counted by its own ref.
+    assert_eq!(
+        store
+            .count_by_external_ref(kind, &other_chat)
+            .await
+            .unwrap(),
+        1
+    );
+
+    // A name-only PATCH while disabled keeps the note…
+    let renamed = store
+        .update(
+            org_a,
+            a.id,
+            NotificationChannelUpdate {
+                name: Some("prod-tg".into()),
+                ..Default::default()
+            },
+            WriteSource::Ui,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(!renamed.enabled);
+    assert!(renamed.disabled_reason.is_some());
+
+    // …and re-enabling clears it.
+    let re = store
+        .update(
+            org_a,
+            a.id,
+            NotificationChannelUpdate {
+                enabled: Some(true),
+                ..Default::default()
+            },
+            WriteSource::Ui,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(re.enabled && re.disabled_reason.is_none());
+
+    cleanup(&pool, &[org_a, org_b], &[user_a, user_b]).await;
 }

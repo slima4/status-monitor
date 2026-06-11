@@ -29,10 +29,9 @@ pub trait Notifier: Send + Sync {
 /// channel create; re-parsing here is a defence-in-depth guard, not the
 /// primary check.
 ///
-/// `central_bot_token` is the operator-owned Telegram bot token; linked
-/// (`telegram_app`) channels deliver with it instead of a per-channel
-/// secret. `None` on deployments without the bot — building such a channel
-/// then fails with a clear error instead of a broken send.
+/// Linked (`telegram_app`) channels deliver with `central_bot_token`
+/// instead of a per-channel secret; `None` (no bot) fails their build with
+/// a clear error instead of a broken send.
 pub fn build_notifier(
     cfg: &ChannelConfig,
     http: &OutboundHttpClient,
@@ -61,7 +60,6 @@ pub fn build_notifier(
             &c.bot_token,
             c.chat_id.clone(),
         )?) as Arc<dyn Notifier>,
-        // Same Bot API send as the BYO transport, with the operator token.
         ChannelConfig::TelegramApp(c) => {
             let token = central_bot_token
                 .map(str::trim)

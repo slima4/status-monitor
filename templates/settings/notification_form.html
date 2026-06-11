@@ -83,6 +83,9 @@
           <span class="text-sm">Enabled</span>
         </label>
         <p class="mt-1 text-xs text-muted">When off, the channel is saved but bound monitors don't notify through it.</p>
+        {% if !form.disabled_reason.is_empty() %}
+        <p class="mt-1 font-mono text-xs text-quiet"># disabled by the platform: {{ form.disabled_reason }} — saving with Enabled on clears this</p>
+        {% endif %}
       </div>
       </div>
     </fieldset>
@@ -91,8 +94,7 @@
       <legend>transport</legend>
       <div class="clear-both space-y-5 p-5">
 
-      {# A linked telegram channel has no secrets and its config is never
-         caller-supplied — no replace toggle; unlink = delete. #}
+      {# Linked telegram channels have no secrets to replace; unlink = delete. #}
       {% if form.mode != "create" && form.kind != "telegram_app" %}
       <div>
         <label class="inline-flex items-center gap-2">

@@ -1,12 +1,9 @@
-//! Storage for `telegram_link_codes` — single-use codes that bind a Telegram
+//! Storage for `telegram_link_codes` — single-use codes binding a Telegram
 //! chat to an org through the central bot.
 //!
-//! The raw code travels only inside the t.me deep link; this store sees its
-//! SHA-256 (same discipline as `monitor_shares.token_hash`). Mint is
-//! org-scoped and capped; consume is deliberately *not* org-scoped — the
-//! webhook has no tenant context, the code row IS the org authority — and is
-//! race-safe via a guarded `UPDATE … RETURNING`, so two chats sending the
-//! same code link exactly once.
+//! Mint is org-scoped and capped. Consume is deliberately *not* org-scoped:
+//! the webhook has no tenant context — the code row IS the org authority —
+//! and the guarded `UPDATE … RETURNING` makes it race-safe single-use.
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -18,7 +15,6 @@ use crate::domain::{OrgId, UserId};
 use crate::error::{AppError, Result};
 use crate::storage::locks::{advisory_xact_lock, org_lock_key};
 
-/// A minted code as returned to the form: id for polling, expiry for the UI.
 #[derive(Debug, Clone)]
 pub struct LinkCode {
     pub id: Uuid,
@@ -53,8 +49,8 @@ pub struct ConsumedLink {
 
 #[async_trait]
 pub trait TelegramLinkCodeStore: Send + Sync {
-    /// Insert a new code for `org`, capped at `max_outstanding` unconsumed,
-    /// unexpired codes per org (race-safe under the per-org advisory lock).
+    /// Capped at `max_outstanding` live codes per org, race-safe under the
+    /// per-org advisory lock.
     async fn mint(
         &self,
         org: OrgId,
@@ -65,17 +61,14 @@ pub trait TelegramLinkCodeStore: Send + Sync {
         max_outstanding: i64,
     ) -> Result<MintOutcome>;
 
-    /// Org-scoped status lookup for the form's poll. `None` = no such code in
-    /// this org.
+    /// `None` = no such code in this org.
     async fn status(&self, org: OrgId, id: Uuid) -> Result<Option<LinkCodeStatus>>;
 
-    /// Atomically claim an unconsumed, unexpired code by hash. `None` when the
-    /// code is unknown, expired, or already claimed — the caller replies with
-    /// a polite in-chat error and must not create anything.
+    /// Atomically claim a live code by hash; `None` = unknown, expired, or
+    /// already claimed.
     async fn consume(&self, code_hash: &str) -> Result<Option<ConsumedLink>>;
 
-    /// Record the channel a consumed code produced, flipping the poll status
-    /// to `Consumed`.
+    /// Record the channel a consume produced; flips the poll to `Consumed`.
     async fn attach_channel(&self, id: Uuid, channel_id: Uuid) -> Result<()>;
 }
 
@@ -107,15 +100,12 @@ impl TelegramLinkCodeStore for PgTelegramLinkCodeStore {
             .begin()
             .await
             .map_err(|e| AppError::Other(anyhow::anyhow!("begin: {e}")))?;
-        // Same serialisation as every other org-cap writer: the count
-        // subquery + INSERT alone would let two mints at cap-1 both pass.
+        // Serialises the count-subquery + INSERT cap check, like every
+        // other org-cap writer.
         advisory_xact_lock(&mut *tx, &org_lock_key(org))
             .await
             .map_err(|e| AppError::Other(anyhow::anyhow!("advisory lock: {e}")))?;
-        // Opportunistic purge instead of a janitor: dead codes (expired or
-        // claimed without producing a channel) are useless once past expiry,
-        // and sweeping them on the org's next mint bounds the table at
-        // ~max_outstanding live rows + one consumed row per linked channel.
+        // Opportunistic purge of dead codes instead of a janitor.
         sqlx::query(
             r#"DELETE FROM telegram_link_codes
                WHERE org_id = $1 AND expires_at <= now() AND channel_id IS NULL"#,
@@ -194,7 +184,7 @@ impl TelegramLinkCodeStore for PgTelegramLinkCodeStore {
     }
 }
 
-/// Shared poll-status decision so the Pg and in-memory stores can't drift.
+/// Shared by the Pg and in-memory stores so they can't drift.
 fn link_status(
     consumed_at: Option<DateTime<Utc>>,
     expires_at: DateTime<Utc>,
@@ -203,8 +193,7 @@ fn link_status(
 ) -> LinkCodeStatus {
     match (consumed_at, channel_id) {
         (Some(_), Some(channel_id)) => LinkCodeStatus::Consumed { channel_id },
-        // Claimed but no channel materialised (create failed or the channel
-        // was deleted): dead either way.
+        // Claimed but no channel materialised: dead either way.
         (Some(_), None) => LinkCodeStatus::Expired,
         (None, _) if expires_at <= now => LinkCodeStatus::Expired,
         (None, _) => LinkCodeStatus::Pending,

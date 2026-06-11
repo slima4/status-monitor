@@ -38,9 +38,8 @@
         el.classList.remove("hidden");
     }
 
-    // Render `url` as an SVG QR into `el`. margin 4 = the spec's full quiet
-    // zone, needed against the dark page for picky scanners. Throws when the
-    // vendored lib didn't load.
+    // margin 4 = the QR spec's full quiet zone, needed against the dark
+    // page for picky scanners.
     function renderQr(el, url) {
         if (typeof qrcode !== "function") throw new Error("QR library failed to load — refresh and try again");
         const qr = qrcode(0, "M");
@@ -86,10 +85,8 @@
         syncCentralTelegram(kind);
     }
 
-    // The one-tap kind has no submittable config: the channel is created by
-    // the webhook when the chat presses Start, so create-mode hides the
-    // submit/test/bind affordances and the connect button takes over. On
-    // edit everything stays — "test now" exercises the stored config by id.
+    // One-tap create has no submittable config — the webhook creates the
+    // channel — so the submit/test/bind affordances yield to connect.
     function syncCentralTelegram(kind) {
         const hide = kind === "telegram_app" && !isEdit;
         form.querySelector("button[type=submit]")?.classList.toggle("hidden", hide);
@@ -328,10 +325,8 @@
         });
     }
 
-    // One-tap Telegram: mint a single-use link code, show it as a t.me link
-    // + QR, and poll until the chat presses Start — then jump to the channel
-    // the webhook created. No Bot API traffic from the browser, unlike the
-    // BYO helper above.
+    // One-tap Telegram: mint a code, show t.me link + QR, poll until the
+    // chat presses Start, then jump to the channel the webhook created.
     const tgaBtn = form.querySelector("[data-tga-connect]");
     if (tgaBtn) {
         const tgaStatus = form.querySelector("[data-tga-status]");
@@ -353,9 +348,8 @@
             tgaBtn.disabled = false;
         }
 
-        // One code serves both destinations — the toggle only swaps which
-        // t.me deep link (start vs startgroup) is shown; whichever chat
-        // sends the code back gets linked.
+        // One code serves both destinations; the toggle only swaps which
+        // deep link (start vs startgroup) is shown.
         function renderTgaDest() {
             if (!mintedLinks) return;
             const url = tgaGroupCb?.checked ? mintedLinks.group_deep_link : mintedLinks.deep_link;
@@ -380,8 +374,7 @@
         form.addEventListener("change", (evt) => {
             if (evt.target.name === "kind") resetTga();
         });
-        // A stale code from before back/forward navigation can't be trusted
-        // — the poll handle is gone anyway.
+        // bfcache restore: the poll handle is gone, the code may be stale.
         window.addEventListener("pageshow", (evt) => {
             if (evt.persisted) resetTga();
         });
@@ -391,7 +384,7 @@
                 let body;
                 try {
                     const res = await fetch(`/api/v1/notification-channels/telegram-link/${id}`, { headers });
-                    if (!res.ok) return; // transient — keep polling until expiry resolves it
+                    if (!res.ok) return; // transient; expiry resolves it
                     body = await res.json();
                 } catch { return; }
                 if (body.status === "consumed" && body.channel_id) {
@@ -601,8 +594,7 @@
             return { config };
         }
         if (kind === "telegram_app") {
-            // Created only by the bot's webhook; the API rejects this kind in
-            // request bodies, so never build it client-side either.
+            // The API rejects this kind in request bodies.
             return { error: "Linked telegram channels have no config to submit — use \"connect telegram\", or untick \"Replace transport config\" to keep the stored link." };
         }
         return {

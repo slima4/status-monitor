@@ -117,22 +117,21 @@ pub struct ChannelFormModel {
     pub submit_method: &'static str,
     pub name: String,
     pub enabled: bool,
+    /// Platform-disable note; empty when none.
+    pub disabled_reason: String,
     pub kind: &'static str,
     pub config: ConfigFields,
     /// Monitors bound to this channel; always empty on create.
     pub used_by: Vec<MonitorCard>,
     /// Monitors NOT bound to this channel, offered by the bind picker.
     pub bindable: Vec<MonitorCard>,
-    /// Whether this deployment runs the central Telegram bot. Gates the
-    /// one-tap "telegram" type card; the BYO "telegram bot" card is always
-    /// offered.
+    /// Gates the one-tap "telegram" card; the BYO card is always offered.
     pub central_telegram: bool,
 }
 
 impl ChannelFormModel {
-    /// The one-tap card shows on create when the bot is configured, and on
-    /// edit only for an already-linked channel (informational — a linked
-    /// channel stays viewable even if the operator later removes the bot).
+    /// On create when the bot is configured; on edit only for an
+    /// already-linked channel (stays viewable if the bot is later removed).
     pub fn offers_telegram_app(&self) -> bool {
         (self.central_telegram && self.mode == "create") || self.kind == "telegram_app"
     }
@@ -299,6 +298,7 @@ fn empty_create_form() -> ChannelFormModel {
         submit_method: "POST",
         name: String::new(),
         enabled: true,
+        disabled_reason: String::new(),
         kind: "slack",
         config: ConfigFields::default(),
         used_by: Vec::new(),
@@ -324,8 +324,7 @@ fn form_from_channel(c: NotificationChannel) -> ChannelFormModel {
             config.telegram_bot_token = c.bot_token;
             config.telegram_chat_id = c.chat_id;
         }
-        // Linked via the central bot; display-only — the API rejects this
-        // kind in request bodies, so the panel renders info, not inputs.
+        // Display-only: the API rejects this kind in request bodies.
         ChannelConfig::TelegramApp(c) => {
             config.telegram_app_chat_id = c.chat_id;
             config.telegram_app_chat_title = c.chat_title.unwrap_or_default();
@@ -345,6 +344,7 @@ fn form_from_channel(c: NotificationChannel) -> ChannelFormModel {
         submit_method: "PATCH",
         name: c.name,
         enabled: c.enabled,
+        disabled_reason: c.disabled_reason.unwrap_or_default(),
         kind: c.kind.as_db_str(),
         config,
         used_by: Vec::new(),
@@ -440,6 +440,7 @@ mod tests {
                 chat_title: Some("Ops".into()),
             }),
             enabled: true,
+            disabled_reason: None,
             write_source: crate::domain::WriteSource::Ui,
             created_at: Utc::now(),
             updated_at: Utc::now(),
@@ -500,6 +501,7 @@ mod tests {
                 webhook_url: webhook_url.into(),
             }),
             enabled: true,
+            disabled_reason: None,
             write_source: crate::domain::WriteSource::Ui,
             created_at: Utc::now(),
             updated_at: Utc::now(),
@@ -532,6 +534,29 @@ mod tests {
         // The real webhook never reaches the browser — only the `***` mask.
         assert!(!html.contains("zzUNIQUESECRETzz"));
         assert!(html.contains(r#"value="***""#));
+    }
+
+    #[test]
+    fn edit_form_shows_platform_disable_note() {
+        let mut form = form_from_channel(slack_channel("https://hooks.slack.com/services/T/B/x"));
+        form.enabled = false;
+        form.disabled_reason = "unlinked from the Telegram side".into();
+        let html = ChannelFormPage {
+            active_tab: TAB_NOTIFICATIONS,
+            form,
+        }
+        .render()
+        .unwrap();
+        assert!(html.contains("# disabled by the platform: unlinked from the Telegram side"));
+
+        // No note → no platform line.
+        let clean = ChannelFormPage {
+            active_tab: TAB_NOTIFICATIONS,
+            form: form_from_channel(slack_channel("https://hooks.slack.com/services/T/B/x")),
+        }
+        .render()
+        .unwrap();
+        assert!(!clean.contains("# disabled by the platform"));
     }
 
     #[test]

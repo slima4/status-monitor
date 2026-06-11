@@ -19,8 +19,8 @@ use uuid::Uuid;
 
 use crate::api::error::codes;
 use crate::domain::{
-    ChannelConfig, NewNotificationChannel, NotificationChannel, NotificationChannelUpdate, OrgId,
-    WriteSource,
+    ChannelConfig, ChannelKind, NewNotificationChannel, NotificationChannel,
+    NotificationChannelUpdate, OrgId, WriteSource,
 };
 use crate::error::{AppError, Result};
 use crate::security::{Cipher, envelope_str, wrap_envelope};
@@ -92,6 +92,18 @@ pub trait NotificationChannelStore: Send + Sync {
         source: WriteSource,
     ) -> Result<Option<NotificationChannel>>;
     async fn delete(&self, org: OrgId, id: Uuid) -> Result<bool>;
+    /// Disable every channel of `kind` carrying `external_ref`; returns how
+    /// many flipped. Deliberately NOT org-scoped — operator-side lifecycle
+    /// (a bot kick severs every org that linked the chat), keyed by a ref
+    /// only the transport's own flow ever wrote.
+    async fn disable_by_external_ref(
+        &self,
+        kind: ChannelKind,
+        external_ref: &str,
+        reason: &str,
+    ) -> Result<u64>;
+    /// Channels of `kind` (any org) still carrying `external_ref`.
+    async fn count_by_external_ref(&self, kind: ChannelKind, external_ref: &str) -> Result<i64>;
     /// Subset of `ids` that exist in `org`. Mirrors
     /// [`crate::storage::MaintenanceStore::existing_target_ids`] so the
     /// "ids belong to the caller's org" idiom is uniform — used to validate
@@ -121,6 +133,7 @@ struct ChannelRow {
     name: String,
     config: Value,
     enabled: bool,
+    disabled_reason: Option<String>,
     write_source: String,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
@@ -137,6 +150,7 @@ impl ChannelRow {
             kind: config.kind(),
             config,
             enabled: self.enabled,
+            disabled_reason: self.disabled_reason,
             write_source: WriteSource::from_db(&self.write_source),
             created_at: self.created_at,
             updated_at: self.updated_at,
@@ -173,15 +187,16 @@ impl NotificationChannelStore for PgNotificationChannelStore {
             .await
             .map_err(|e| AppError::Other(anyhow!("advisory lock: {e}")))?;
         let row: Option<ChannelRow> = sqlx::query_as(
-            r#"INSERT INTO notification_channels (org_id, name, kind, config, enabled, write_source)
-               SELECT $1, $2, $3, $4, $5, $7
-               WHERE (SELECT count(*) FROM notification_channels WHERE org_id = $1) < $6
-               RETURNING id, name, config, enabled, write_source, created_at, updated_at"#,
+            r#"INSERT INTO notification_channels (org_id, name, kind, config, external_ref, enabled, write_source)
+               SELECT $1, $2, $3, $4, $5, $6, $8
+               WHERE (SELECT count(*) FROM notification_channels WHERE org_id = $1) < $7
+               RETURNING id, name, config, enabled, disabled_reason, write_source, created_at, updated_at"#,
         )
         .bind(org.0)
         .bind(&new.name)
         .bind(new.config.kind().as_db_str())
         .bind(&sealed)
+        .bind(new.external_ref.as_deref())
         .bind(new.enabled)
         .bind(max_channels)
         .bind(source.as_str())
@@ -212,7 +227,7 @@ impl NotificationChannelStore for PgNotificationChannelStore {
 
     async fn list(&self, org: OrgId) -> Result<Vec<NotificationChannel>> {
         let rows: Vec<ChannelRow> = sqlx::query_as(
-            r#"SELECT id, name, config, enabled, write_source, created_at, updated_at
+            r#"SELECT id, name, config, enabled, disabled_reason, write_source, created_at, updated_at
                FROM notification_channels
                WHERE org_id = $1
                ORDER BY name"#,
@@ -228,7 +243,7 @@ impl NotificationChannelStore for PgNotificationChannelStore {
 
     async fn get(&self, org: OrgId, id: Uuid) -> Result<Option<NotificationChannel>> {
         let row: Option<ChannelRow> = sqlx::query_as(
-            r#"SELECT id, name, config, enabled, write_source, created_at, updated_at
+            r#"SELECT id, name, config, enabled, disabled_reason, write_source, created_at, updated_at
                FROM notification_channels WHERE id = $1 AND org_id = $2"#,
         )
         .bind(id)
@@ -261,10 +276,12 @@ impl NotificationChannelStore for PgNotificationChannelStore {
                    kind        = COALESCE($3, kind),
                    config      = COALESCE($4, config),
                    enabled     = COALESCE($5, enabled),
+                   -- Re-enabling clears the platform's disable note.
+                   disabled_reason = CASE WHEN $5 THEN NULL ELSE disabled_reason END,
                    write_source = $7,
                    updated_at  = now()
                WHERE id = $1 AND org_id = $6
-               RETURNING id, name, config, enabled, write_source, created_at, updated_at"#,
+               RETURNING id, name, config, enabled, disabled_reason, write_source, created_at, updated_at"#,
         )
         .bind(id)
         .bind(update.name.as_ref())
@@ -300,6 +317,39 @@ impl NotificationChannelStore for PgNotificationChannelStore {
         Ok(result.rows_affected() > 0)
     }
 
+    async fn disable_by_external_ref(
+        &self,
+        kind: ChannelKind,
+        external_ref: &str,
+        reason: &str,
+    ) -> Result<u64> {
+        let result = sqlx::query(
+            r#"UPDATE notification_channels /* SAFE: operator lifecycle — a bot kick severs every org linked to the chat; external_ref is written only by the transport's own flow */
+               SET enabled = false, disabled_reason = $3, updated_at = now()
+               WHERE kind = $1 AND external_ref = $2 AND enabled"#,
+        )
+        .bind(kind.as_db_str())
+        .bind(external_ref)
+        .bind(reason)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| AppError::Other(anyhow!("disable by external ref: {e}")))?;
+        Ok(result.rows_affected())
+    }
+
+    async fn count_by_external_ref(&self, kind: ChannelKind, external_ref: &str) -> Result<i64> {
+        let (n,): (i64,) = sqlx::query_as(
+            r#"SELECT count(*) FROM notification_channels /* SAFE: operator lifecycle — counts any org's links to a chat before the bot leaves it */
+               WHERE kind = $1 AND external_ref = $2"#,
+        )
+        .bind(kind.as_db_str())
+        .bind(external_ref)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| AppError::Other(anyhow!("count by external ref: {e}")))?;
+        Ok(n)
+    }
+
     async fn existing_channel_ids(&self, org: OrgId, ids: &[Uuid]) -> Result<Vec<Uuid>> {
         if ids.is_empty() {
             return Ok(Vec::new());
@@ -322,9 +372,15 @@ impl NotificationChannelStore for PgNotificationChannelStore {
 /// Org-aware in-memory store: entries are tagged with their `OrgId` and every
 /// method filters on it, so cross-tenant isolation can be asserted without a
 /// Postgres backend.
+struct MemEntry {
+    org: OrgId,
+    external_ref: Option<String>,
+    ch: NotificationChannel,
+}
+
 #[derive(Default)]
 pub struct InMemoryNotificationChannelStore {
-    inner: Mutex<Vec<(OrgId, NotificationChannel)>>,
+    inner: Mutex<Vec<MemEntry>>,
 }
 
 impl InMemoryNotificationChannelStore {
@@ -352,13 +408,13 @@ impl NotificationChannelStore for InMemoryNotificationChannelStore {
         max_channels: i64,
     ) -> Result<NotificationChannel> {
         let mut g = self.inner.lock();
-        if g.iter().any(|(o, c)| *o == org && c.name == new.name) {
+        if g.iter().any(|e| e.org == org && e.ch.name == new.name) {
             return Err(AppError::unprocessable(
                 codes::CHANNEL_NAME_TAKEN,
                 "a notification channel with this name already exists",
             ));
         }
-        if g.iter().filter(|(o, _)| *o == org).count() as i64 >= max_channels {
+        if g.iter().filter(|e| e.org == org).count() as i64 >= max_channels {
             return Err(AppError::unprocessable(
                 codes::CHANNEL_QUOTA_EXCEEDED,
                 "notification channel limit reached for this plan",
@@ -371,11 +427,16 @@ impl NotificationChannelStore for InMemoryNotificationChannelStore {
             kind: new.config.kind(),
             config: new.config,
             enabled: new.enabled,
+            disabled_reason: None,
             write_source: source,
             created_at: now,
             updated_at: now,
         };
-        g.push((org, ch.clone()));
+        g.push(MemEntry {
+            org,
+            external_ref: new.external_ref,
+            ch: ch.clone(),
+        });
         Ok(ch)
     }
 
@@ -384,8 +445,8 @@ impl NotificationChannelStore for InMemoryNotificationChannelStore {
             .inner
             .lock()
             .iter()
-            .filter(|(o, _)| *o == org)
-            .map(|(_, c)| c.clone())
+            .filter(|e| e.org == org)
+            .map(|e| e.ch.clone())
             .collect();
         v.sort_by(|a, b| a.name.cmp(&b.name));
         Ok(v)
@@ -396,8 +457,8 @@ impl NotificationChannelStore for InMemoryNotificationChannelStore {
             .inner
             .lock()
             .iter()
-            .find(|(o, c)| *o == org && c.id == id)
-            .map(|(_, c)| c.clone()))
+            .find(|e| e.org == org && e.ch.id == id)
+            .map(|e| e.ch.clone()))
     }
 
     async fn update(
@@ -410,16 +471,17 @@ impl NotificationChannelStore for InMemoryNotificationChannelStore {
         let mut g = self.inner.lock();
         if let Some(name) = &update.name
             && g.iter()
-                .any(|(o, c)| *o == org && c.id != id && &c.name == name)
+                .any(|e| e.org == org && e.ch.id != id && &e.ch.name == name)
         {
             return Err(AppError::unprocessable(
                 codes::CHANNEL_NAME_TAKEN,
                 "a notification channel with this name already exists",
             ));
         }
-        let Some((_, ch)) = g.iter_mut().find(|(o, c)| *o == org && c.id == id) else {
+        let Some(entry) = g.iter_mut().find(|e| e.org == org && e.ch.id == id) else {
             return Ok(None);
         };
+        let ch = &mut entry.ch;
         if let Some(name) = update.name {
             ch.name = name;
         }
@@ -429,6 +491,9 @@ impl NotificationChannelStore for InMemoryNotificationChannelStore {
         }
         if let Some(enabled) = update.enabled {
             ch.enabled = enabled;
+            if enabled {
+                ch.disabled_reason = None;
+            }
         }
         ch.write_source = source;
         ch.updated_at = Utc::now();
@@ -438,8 +503,36 @@ impl NotificationChannelStore for InMemoryNotificationChannelStore {
     async fn delete(&self, org: OrgId, id: Uuid) -> Result<bool> {
         let mut g = self.inner.lock();
         let before = g.len();
-        g.retain(|(o, c)| !(*o == org && c.id == id));
+        g.retain(|e| !(e.org == org && e.ch.id == id));
         Ok(g.len() < before)
+    }
+
+    async fn disable_by_external_ref(
+        &self,
+        kind: ChannelKind,
+        external_ref: &str,
+        reason: &str,
+    ) -> Result<u64> {
+        let mut flipped = 0;
+        for e in self.inner.lock().iter_mut() {
+            if e.ch.kind == kind && e.external_ref.as_deref() == Some(external_ref) && e.ch.enabled
+            {
+                e.ch.enabled = false;
+                e.ch.disabled_reason = Some(reason.to_string());
+                e.ch.updated_at = Utc::now();
+                flipped += 1;
+            }
+        }
+        Ok(flipped)
+    }
+
+    async fn count_by_external_ref(&self, kind: ChannelKind, external_ref: &str) -> Result<i64> {
+        Ok(self
+            .inner
+            .lock()
+            .iter()
+            .filter(|e| e.ch.kind == kind && e.external_ref.as_deref() == Some(external_ref))
+            .count() as i64)
     }
 
     async fn existing_channel_ids(&self, org: OrgId, ids: &[Uuid]) -> Result<Vec<Uuid>> {
@@ -447,7 +540,7 @@ impl NotificationChannelStore for InMemoryNotificationChannelStore {
         Ok(ids
             .iter()
             .copied()
-            .filter(|id| g.iter().any(|(o, c)| *o == org && c.id == *id))
+            .filter(|id| g.iter().any(|e| e.org == org && e.ch.id == *id))
             .collect())
     }
 }
@@ -473,6 +566,7 @@ mod tests {
                 webhook_url: "https://hooks.slack.com/x".into(),
             }),
             enabled: true,
+            external_ref: None,
         }
     }
 
@@ -563,6 +657,88 @@ mod tests {
         );
         // Still intact for the owning org.
         assert!(store.get(org(), a.id).await.unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn lifecycle_disable_by_external_ref_spans_orgs_and_reenable_clears_note() {
+        let store = InMemoryNotificationChannelStore::new();
+        let linked = |name: &str| NewNotificationChannel {
+            name: name.into(),
+            config: ChannelConfig::TelegramApp(crate::domain::TelegramAppConfig {
+                chat_id: "-100".into(),
+                chat_title: None,
+            }),
+            enabled: true,
+            external_ref: Some("-100".into()),
+        };
+        // Two orgs linked the same chat; a third channel points elsewhere.
+        let a = store
+            .create(org(), linked("prod"), WriteSource::Ui, 10)
+            .await
+            .unwrap();
+        store
+            .create(other_org(), linked("ops"), WriteSource::Ui, 10)
+            .await
+            .unwrap();
+        let mut other = linked("other-chat");
+        other.external_ref = Some("-200".into());
+        store
+            .create(org(), other, WriteSource::Ui, 10)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            store
+                .count_by_external_ref(ChannelKind::TelegramApp, "-100")
+                .await
+                .unwrap(),
+            2
+        );
+        let flipped = store
+            .disable_by_external_ref(ChannelKind::TelegramApp, "-100", "unlinked")
+            .await
+            .unwrap();
+        assert_eq!(flipped, 2, "both orgs' channels for the kicked chat");
+        // Idempotent: already-disabled rows don't flip again.
+        assert_eq!(
+            store
+                .disable_by_external_ref(ChannelKind::TelegramApp, "-100", "unlinked")
+                .await
+                .unwrap(),
+            0
+        );
+        let got = store.get(org(), a.id).await.unwrap().unwrap();
+        assert!(!got.enabled);
+        assert_eq!(got.disabled_reason.as_deref(), Some("unlinked"));
+        // The unrelated chat's channel is untouched.
+        assert_eq!(
+            store
+                .list(org())
+                .await
+                .unwrap()
+                .iter()
+                .filter(|c| c.enabled)
+                .count(),
+            1
+        );
+
+        // Re-enabling clears the platform note; disabling again does not
+        // resurrect it.
+        let re = store
+            .update(
+                org(),
+                a.id,
+                NotificationChannelUpdate {
+                    enabled: Some(true),
+                    ..Default::default()
+                },
+                WriteSource::Ui,
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(re.enabled);
+        assert_eq!(re.disabled_reason, None);
     }
 
     #[test]

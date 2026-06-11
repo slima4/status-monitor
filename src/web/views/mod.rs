@@ -107,10 +107,8 @@ pub(crate) fn describe_check(spec: &CheckSpec) -> (&'static str, String) {
     }
 }
 
-/// UI chip/card label for a channel transport. The two Telegram transports
-/// swap names on purpose: the one-tap central-bot kind is the plain
-/// "telegram" customers expect, the BYO-token kind is the advanced
-/// "telegram bot".
+/// UI label for a transport. The Telegram pair swap names on purpose: the
+/// one-tap kind is the plain "telegram" customers expect.
 pub(crate) fn channel_kind_label(kind: crate::domain::ChannelKind) -> &'static str {
     use crate::domain::ChannelKind;
     match kind {

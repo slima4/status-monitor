@@ -1,16 +1,9 @@
 //! Inbound webhook receiver for the central Telegram bot (`/hooks/telegram`).
 //!
-//! Telegram has no signature scheme, so the only auth is the
-//! `X-Telegram-Bot-Api-Secret-Token` header echoing the configured secret,
-//! compared in constant time. Every accepted update is answered 200 fast:
-//! Telegram retries non-2xx aggressively, so a malformed or unhandled update
-//! is still acknowledged.
-//!
-//! A `/start <code>` (or `/link <code>`) message claims the link code and
-//! creates the org's `telegram_app` channel. The org is taken exclusively
-//! from the consumed code row — never from the update body. The in-chat
-//! reply goes out on a background task so a slow Telegram API can't delay
-//! the acknowledgement.
+//! Telegram has no signature scheme — the secret-token header, compared in
+//! constant time, is the only auth. Every accepted update is answered 200
+//! fast (Telegram retries non-2xx aggressively), and the org a code links
+//! to comes exclusively from the consumed code row, never the update body.
 
 use axum::body::Bytes;
 use axum::extract::State;
@@ -21,8 +14,8 @@ use crate::api::error::codes;
 use crate::app::AppState;
 use crate::auth::sha256_hex;
 use crate::domain::{
-    ChannelConfig, MAX_CHANNEL_NAME_LEN, NewNotificationChannel, NotificationChannel, OrgId,
-    TelegramAppConfig, WriteSource,
+    ChannelConfig, ChannelKind, MAX_CHANNEL_NAME_LEN, NewNotificationChannel, NotificationChannel,
+    OrgId, TelegramAppConfig, WriteSource,
 };
 use crate::error::{AppError, Result};
 use crate::storage::NotificationChannelStore;
@@ -52,22 +45,64 @@ pub async fn webhook(State(state): State<AppState>, headers: HeaderMap, body: By
     };
     match classify_update(&update) {
         WebhookAction::LinkPrivate { code, chat } | WebhookAction::LinkGroup { code, chat } => {
-            // All the work happens off the request: the ack must not wait on
-            // the store or the advisory lock, or Telegram re-delivers and the
-            // retry races the first attempt's consume.
+            // Off the request: a slow ack makes Telegram re-deliver, racing
+            // the first attempt's consume.
             tokio::spawn(async move { handle_link(&state, &code, chat).await });
         }
+        WebhookAction::Stop { chat_id } => {
+            tokio::spawn(async move { handle_stop(&state, chat_id).await });
+        }
         WebhookAction::Removed { chat_id } => {
-            tracing::debug!(chat_id, "telegram bot removed from chat");
+            tokio::spawn(async move { handle_removed(&state, chat_id).await });
         }
         WebhookAction::Ignore => {}
     }
     StatusCode::OK
 }
 
-/// Claim the code and create the channel, then answer in-chat. Failures are
-/// logged and answered politely; the webhook still acknowledges 200 either
-/// way, so Telegram never retries a consumed code at us.
+const UNLINKED_NOTE: &str = "unlinked from the Telegram side";
+
+/// Cross-org on purpose: several orgs can link one chat and a kick severs
+/// all of them.
+async fn unlink_chat(state: &AppState, chat_id: i64) -> u64 {
+    match state
+        .notification_channel_store
+        .disable_by_external_ref(
+            ChannelKind::TelegramApp,
+            &chat_id.to_string(),
+            UNLINKED_NOTE,
+        )
+        .await
+    {
+        Ok(n) => {
+            if n > 0 {
+                tracing::info!(chat_id, channels = n, "telegram chat unlinked");
+            }
+            n
+        }
+        Err(err) => {
+            tracing::warn!(?err, chat_id, "telegram unlink failed");
+            0
+        }
+    }
+}
+
+/// Unlike a kick, the bot can still confirm in-chat after `/stop`.
+async fn handle_stop(state: &AppState, chat_id: i64) {
+    let n = unlink_chat(state, chat_id).await;
+    let text = if n > 0 {
+        "Alerts stopped — this chat is unlinked. Link it again any time from the dashboard."
+    } else {
+        "Nothing is linked to this chat."
+    };
+    spawn_reply(state, chat_id, text.to_string());
+}
+
+/// Kicked/left/blocked: nobody left to reply to.
+async fn handle_removed(state: &AppState, chat_id: i64) {
+    unlink_chat(state, chat_id).await;
+}
+
 async fn handle_link(state: &AppState, code: &str, chat: ChatRef) {
     let chat_id = chat.id;
     let text = match link_chat(state, code, chat).await {
@@ -118,6 +153,7 @@ async fn link_chat(state: &AppState, code: &str, chat: ChatRef) -> Result<String
         org,
         base_name,
         config,
+        chat.id,
         limit,
     )
     .await
@@ -137,7 +173,7 @@ async fn link_chat(state: &AppState, code: &str, chat: ChatRef) -> Result<String
         .attach_channel(link.id, channel.id)
         .await
     {
-        // The channel exists and works; only the form's poll misses out.
+        // Channel exists and works; only the form's poll misses out.
         tracing::warn!(?err, channel_id = %channel.id, "telegram link attach failed");
     }
 
@@ -155,14 +191,14 @@ async fn link_chat(state: &AppState, code: &str, chat: ChatRef) -> Result<String
     })
 }
 
-/// Create the consume-path channel, deduping the name against
-/// `CHANNEL_NAME_TAKEN` by suffixing (`Ops`, `Ops 2`, `Ops 3`, …). Any other
-/// error propagates unchanged.
+/// Create the consume-path channel, deduping the name by suffixing
+/// (`Ops`, `Ops 2`, …); any non-name-collision error propagates unchanged.
 pub async fn create_linked_channel(
     store: &dyn NotificationChannelStore,
     org: OrgId,
     base_name: &str,
     config: ChannelConfig,
+    chat_id: i64,
     max_channels: i64,
 ) -> Result<NotificationChannel> {
     const MAX_SUFFIX: u32 = 50;
@@ -173,6 +209,7 @@ pub async fn create_linked_channel(
             name: linked_channel_name(base_name, suffix),
             config: config.clone(),
             enabled: true,
+            external_ref: Some(chat_id.to_string()),
         };
         match store.create(org, new, WriteSource::Ui, max_channels).await {
             Err(AppError::Unprocessable { code, .. })
@@ -185,8 +222,8 @@ pub async fn create_linked_channel(
     }
 }
 
-/// `base` (optionally `base N`), trimmed to the channel-name length budget so
-/// a long group title still leaves room for the dedupe suffix.
+/// `base` (optionally `base N`), trimmed so a long chat title still leaves
+/// room for the dedupe suffix.
 pub fn linked_channel_name(base: &str, suffix: Option<u32>) -> String {
     let suffix = suffix.map(|n| format!(" {n}")).unwrap_or_default();
     let budget = MAX_CHANNEL_NAME_LEN - suffix.chars().count();
@@ -228,7 +265,7 @@ mod tests {
     async fn linked_channel_dedupes_name_with_suffix() {
         let store = InMemoryNotificationChannelStore::new();
         for expected in ["Ops", "Ops 2", "Ops 3"] {
-            let ch = create_linked_channel(&store, org(), "Ops", app_config("-1"), 10)
+            let ch = create_linked_channel(&store, org(), "Ops", app_config("-1"), -1, 10)
                 .await
                 .unwrap();
             assert_eq!(ch.name, expected);
@@ -240,10 +277,10 @@ mod tests {
     #[tokio::test]
     async fn linked_channel_quota_error_passes_through() {
         let store = InMemoryNotificationChannelStore::new();
-        create_linked_channel(&store, org(), "Ops", app_config("-1"), 1)
+        create_linked_channel(&store, org(), "Ops", app_config("-1"), -1, 1)
             .await
             .unwrap();
-        let err = create_linked_channel(&store, org(), "Other", app_config("-2"), 1)
+        let err = create_linked_channel(&store, org(), "Other", app_config("-2"), -2, 1)
             .await
             .unwrap_err();
         assert!(

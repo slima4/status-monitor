@@ -219,8 +219,8 @@ pub struct AppState {
     /// `AppState::new`'s signature stays unchanged: a Pg store when tenancy is
     /// live, an in-memory one for no-DB fixtures.
     pub monitor_share_store: Arc<dyn crate::storage::MonitorShareStore>,
-    /// Single-use codes binding a Telegram chat to an org via the central
-    /// bot. Built from `db` so `AppState::new`'s signature stays unchanged.
+    /// Single-use Telegram link codes. Built from `db` so `AppState::new`'s
+    /// signature stays unchanged.
     pub telegram_link_code_store: Arc<dyn crate::storage::TelegramLinkCodeStore>,
     pub incident_narration_store: Arc<dyn IncidentNarrationStore>,
     /// Operational incident lifecycle (acknowledge/assign/resolve/reopen +

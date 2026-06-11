@@ -14,7 +14,12 @@ CREATE TABLE notification_channels (
     -- and fails if the lists disagree.
     kind        TEXT NOT NULL CHECK (kind IN ('webhook', 'slack', 'telegram', 'telegram_app', 'whatsapp')),
     config      JSONB NOT NULL,
+    -- Routing id (e.g. telegram chat id) queryable without opening the
+    -- sealed config; set only by the transport's own flow.
+    external_ref TEXT,
     enabled     BOOLEAN NOT NULL DEFAULT true,
+    -- Platform-disable note shown in the UI; cleared on re-enable.
+    disabled_reason TEXT,
     write_source TEXT NOT NULL DEFAULT 'ui'
                 CHECK (write_source IN ('ui', 'api', 'terraform')),
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -24,3 +29,7 @@ CREATE TABLE notification_channels (
 );
 
 CREATE INDEX idx_notification_channels_org ON notification_channels(org_id);
+
+CREATE INDEX idx_notification_channels_external_ref
+    ON notification_channels (kind, external_ref)
+    WHERE external_ref IS NOT NULL;

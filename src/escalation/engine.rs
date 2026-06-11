@@ -84,8 +84,8 @@ struct Worker {
     cfg: EscalationConfig,
     /// Operator base URL for incident deep links; empty omits the link.
     base_url: String,
-    /// Operator bot token for linked (`telegram_app`) channel delivery.
-    /// Stays wrapped so an engine-layer debug/log can't print it.
+    /// Operator bot token for `telegram_app` delivery; stays wrapped so an
+    /// engine-layer log can't print it.
     central_bot_token: Option<secrecy::SecretString>,
     /// True while a sweep task is in flight, so overlapping ticks skip rather
     /// than stack a second sweep on top of a slow one.
@@ -230,6 +230,20 @@ impl Worker {
         .map(|secs| {
             let jitter = fastrand::u64(0..=secs / 2 + 1);
             Utc::now() + chrono::Duration::seconds((secs + jitter) as i64)
+        })
+    }
+
+    /// Backoff raised to the transport's own retry hint when the error
+    /// carries one; exhausted attempts stay dead-lettered regardless.
+    fn retry_backoff_hinted(
+        &self,
+        attempt: i32,
+        error: Option<&str>,
+    ) -> Option<chrono::DateTime<Utc>> {
+        let at = self.retry_backoff(attempt)?;
+        Some(match retry_after_hint(error) {
+            Some(wait) => at.max(Utc::now() + wait),
+            None => at,
         })
     }
 
@@ -662,7 +676,7 @@ impl Worker {
             // A first-attempt failure schedules the backoff so the retry sweep
             // waits instead of re-firing next tick.
             let next_attempt_at = (status == NotificationStatus::Failed)
-                .then(|| self.retry_backoff(1))
+                .then(|| self.retry_backoff_hinted(1, error.as_deref()))
                 .flatten();
             if status == NotificationStatus::Failed {
                 self.note_dead_letter(channel.kind.as_db_str(), next_attempt_at);
@@ -818,7 +832,7 @@ impl Worker {
         }
         let (status, error) = self.deliver(&channel_cfg, &notice).await;
         let next_attempt_at = (status == NotificationStatus::Failed)
-            .then(|| self.retry_backoff(next_attempt))
+            .then(|| self.retry_backoff_hinted(next_attempt, error.as_deref()))
             .flatten();
         if status == NotificationStatus::Failed {
             self.note_dead_letter(&p.transport, next_attempt_at);
@@ -1042,6 +1056,22 @@ fn retry_delay_secs(attempt: i32, base_secs: u64, cap_secs: u64, max_attempts: u
     Some(base.saturating_mul(1u64 << shift).min(cap_secs.max(base)))
 }
 
+/// `"retry_after":N` seconds from a delivery error (Telegram 429 bodies);
+/// string-scanned because the error is already flattened, capped so a
+/// hostile body can't park a retry for days.
+fn retry_after_hint(error: Option<&str>) -> Option<chrono::Duration> {
+    const MAX_HINT_SECS: i64 = 3600;
+    let err = error?;
+    let rest = &err[err.find("\"retry_after\":")? + "\"retry_after\":".len()..];
+    let digits: String = rest
+        .trim_start()
+        .chars()
+        .take_while(char::is_ascii_digit)
+        .collect();
+    let secs: i64 = digits.parse().ok()?;
+    Some(chrono::Duration::seconds(secs.min(MAX_HINT_SECS)))
+}
+
 /// Wrap bare channel ids (the no-policy fallback + resolution paths) as page
 /// targets with no attributed responder.
 fn channel_targets(channels: Vec<Uuid>) -> Vec<PageTarget> {
@@ -1184,6 +1214,7 @@ mod tests {
                         secret: None,
                     }),
                     enabled: true,
+                    external_ref: None,
                 },
                 WriteSource::Ui,
                 100,
@@ -1734,6 +1765,35 @@ mod tests {
         // The doubling is bounded by the configured cap.
         assert_eq!(retry_delay_secs(10, 30, 3600, 100), Some(3600));
         assert_eq!(retry_delay_secs(4, 30, 90, 100), Some(90), "cap bites");
+    }
+
+    #[test]
+    fn retry_after_hint_reads_telegram_429_body() {
+        let body = r#"sending request failed: 429 Too Many Requests: {"ok":false,"error_code":429,"description":"Too Many Requests: retry after 31","parameters":{"retry_after":31}}"#;
+        assert_eq!(
+            retry_after_hint(Some(body)),
+            Some(chrono::Duration::seconds(31))
+        );
+        assert_eq!(retry_after_hint(Some("connection refused")), None);
+        assert_eq!(retry_after_hint(None), None);
+        // A hostile/buggy body can't park the retry for days.
+        assert_eq!(
+            retry_after_hint(Some(r#"{"retry_after":9999999}"#)),
+            Some(chrono::Duration::seconds(3600))
+        );
+        assert_eq!(retry_after_hint(Some(r#"{"retry_after":"x"}"#)), None);
+    }
+
+    #[test]
+    fn retry_after_hint_survives_redaction() {
+        // The hint is parsed AFTER redact_secrets; this pins that the
+        // URL-token redaction never eats the JSON fragment.
+        let raw = r#"https://api.telegram.org/bot123:SECRET/sendMessage returned 429 Too Many Requests: {"ok":false,"error_code":429,"parameters":{"retry_after":31}}"#;
+        let redacted = redact_secrets(raw);
+        assert_eq!(
+            retry_after_hint(Some(&redacted)),
+            Some(chrono::Duration::seconds(31))
+        );
     }
 
     #[test]

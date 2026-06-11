@@ -139,9 +139,7 @@ impl ChannelConfig {
         with_transport!(self, |c| c.abuse_url())
     }
 
-    /// True when only the operator's own flow may produce this config; the
-    /// API rejects it in request bodies. See
-    /// [`TransportConfig::operator_managed`].
+    /// See [`TransportConfig::operator_managed`].
     pub fn operator_managed(&self) -> bool {
         with_transport!(self, |c| c.operator_managed())
     }
@@ -174,6 +172,10 @@ pub struct NotificationChannel {
     /// Always plaintext in memory; the store seals/opens it at the DB edge.
     pub config: ChannelConfig,
     pub enabled: bool,
+    /// Platform-disable note (e.g. the bot left the linked chat); `None`
+    /// for operator-initiated disables, cleared on re-enable.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disabled_reason: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     /// Where this channel was last changed from (UI, API, or Terraform).
@@ -191,6 +193,12 @@ pub struct NewNotificationChannel {
     pub config: ChannelConfig,
     #[serde(default = "default_true")]
     pub enabled: bool,
+    /// Routing id queryable without opening the sealed config.
+    /// `serde(skip)`: only a transport's own flow may set it, never a
+    /// request body.
+    #[serde(skip)]
+    #[schema(ignore)]
+    pub external_ref: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, ToSchema)]
