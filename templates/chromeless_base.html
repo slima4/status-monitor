@@ -1,0 +1,18 @@
+{# Shared shell for chrome-less public capability pages (email verification,
+   delegated channel connect): no nav, no auth surface, noindex — a
+   possession-based link must never reach operator chrome. #}
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="robots" content="noindex, nofollow">
+    <title>{% block title %}{% endblock %} · Uptimepage</title>
+    <link rel="icon" type="image/svg+xml" href="{{ "img/favicon.svg"|asset }}">
+    <link rel="stylesheet" href="{{ "css/app.css"|asset }}">
+    {% block head_scripts %}{% endblock %}
+</head>
+<body class="app-shell antialiased">
+    {% block main %}{% endblock %}
+</body>
+</html>

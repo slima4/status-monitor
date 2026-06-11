@@ -1,23 +1,16 @@
-{# Chrome-less public connect page for /c/<code>: the invitee attaches ONE
-   notification channel to the inviting org. No nav, no auth surface,
-   noindex; dead codes render the same generic invalid state. #}
-<!doctype html>
-<html lang="en">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="robots" content="noindex, nofollow">
-    <title>{% if ok %}Connect an alert channel · Uptimepage{% else %}Link invalid · Uptimepage{% endif %}</title>
-    <link rel="icon" type="image/svg+xml" href="{{ "img/favicon.svg"|asset }}">
-    <link rel="stylesheet" href="{{ "css/app.css"|asset }}">
+{% extends "chromeless_base.html" %}
+{# /c/<code>: the invitee attaches ONE notification channel to the inviting
+   org. Dead codes render the same generic invalid state. #}
+{% block title %}{% if ok %}Connect an alert channel{% else %}Link invalid{% endif %}{% endblock %}
+{% block head_scripts %}
     {% if ok %}
     <script defer src="{{ "js/qrcode.min.js"|asset }}"></script>
     <script defer src="{{ "js/ui/popover_pos.js"|asset }}"></script>
     <script defer src="{{ "js/ui/combobox.js"|asset }}"></script>
     <script defer src="{{ "js/ui/delegate_connect.js"|asset }}"></script>
     {% endif %}
-</head>
-<body class="app-shell antialiased">
+{% endblock %}
+{% block main %}
     <main class="mx-auto flex min-h-screen max-w-lg flex-col justify-center gap-6 px-6 py-10">
         {% if !ok %}
         <div class="space-y-3 text-center">
@@ -127,5 +120,4 @@
         </div>
         {% endif %}
     </main>
-</body>
-</html>
+{% endblock %}

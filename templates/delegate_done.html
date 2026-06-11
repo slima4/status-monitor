@@ -1,15 +1,7 @@
-{# Chrome-less landing after a delegated OAuth connect succeeds. #}
-<!doctype html>
-<html lang="en">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="robots" content="noindex, nofollow">
-    <title>{% if connected %}Channel connected{% else %}Nothing connected{% endif %} · Uptimepage</title>
-    <link rel="icon" type="image/svg+xml" href="{{ "img/favicon.svg"|asset }}">
-    <link rel="stylesheet" href="{{ "css/app.css"|asset }}">
-</head>
-<body class="app-shell antialiased">
+{% extends "chromeless_base.html" %}
+{# Landing after a delegated OAuth connect finishes (or is cancelled). #}
+{% block title %}{% if connected %}Channel connected{% else %}Nothing connected{% endif %}{% endblock %}
+{% block main %}
     <main class="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-4 px-6 text-center">
         {% if connected %}
         <h1 class="page-title justify-center"><span class="page-title__prefix" aria-hidden="true">$</span>channel connected</h1>
@@ -25,5 +17,4 @@
         </p>
         {% endif %}
     </main>
-</body>
-</html>
+{% endblock %}
