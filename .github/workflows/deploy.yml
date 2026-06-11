@@ -48,9 +48,11 @@ name: deploy
 #     TELEGRAM_BOT_TOKEN        BotFather token (sensitive)
 #     TELEGRAM_WEBHOOK_SECRET   random 32+ chars, echoed back by Telegram
 #                               on every webhook delivery (sensitive)
-#   Slack OAuth ("Add to Slack"; pair is all-or-nothing):
-#     SLACK_OAUTH_CLIENT_ID     operator Slack app client id
-#     SLACK_OAUTH_CLIENT_SECRET operator Slack app client secret (sensitive)
+#   Provider OAuth connect buttons (each pair all-or-nothing):
+#     SLACK_OAUTH_CLIENT_ID       operator Slack app client id
+#     SLACK_OAUTH_CLIENT_SECRET   operator Slack app client secret (sensitive)
+#     DISCORD_OAUTH_CLIENT_ID     operator Discord app client id
+#     DISCORD_OAUTH_CLIENT_SECRET operator Discord app client secret (sensitive)
 # Non-secret repo variables: RUST_LOG (log/trace verbosity),
 # TELEGRAM_BOT_USERNAME (the bot's public @handle, no leading @) —
 # redeploy applies them with no rebuild.
@@ -186,9 +188,11 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
           TELEGRAM_BOT_USERNAME: ${{ vars.TELEGRAM_BOT_USERNAME }}
-          # Operator Slack app — presence enables the "Add to Slack" button.
+          # Operator OAuth apps — presence enables the connect buttons.
           SLACK_OAUTH_CLIENT_ID: ${{ secrets.SLACK_OAUTH_CLIENT_ID }}
           SLACK_OAUTH_CLIENT_SECRET: ${{ secrets.SLACK_OAUTH_CLIENT_SECRET }}
+          DISCORD_OAUTH_CLIENT_ID: ${{ secrets.DISCORD_OAUTH_CLIENT_ID }}
+          DISCORD_OAUTH_CLIENT_SECRET: ${{ secrets.DISCORD_OAUTH_CLIENT_SECRET }}
         run: |
           set -euo pipefail
           # Lowercase only the repo (GHCR requires it); OCI tags are
@@ -224,6 +228,8 @@ jobs:
                TELEGRAM_BOT_USERNAME='${TELEGRAM_BOT_USERNAME}' \
                SLACK_OAUTH_CLIENT_ID='${SLACK_OAUTH_CLIENT_ID}' \
                SLACK_OAUTH_CLIENT_SECRET='${SLACK_OAUTH_CLIENT_SECRET}' \
+               DISCORD_OAUTH_CLIENT_ID='${DISCORD_OAUTH_CLIENT_ID}' \
+               DISCORD_OAUTH_CLIENT_SECRET='${DISCORD_OAUTH_CLIENT_SECRET}' \
                bash -s" <<'REMOTE'
           # This script is delivered to `bash -s` over the ssh heredoc — i.e. on
           # stdin (fd 0). A `docker compose exec -T` / `docker exec -i` / nested
@@ -636,6 +642,41 @@ jobs:
             for pair in \
               "UPTIMEPAGE_SLACK_OAUTH_CLIENT_ID=$(printenv SLACK_OAUTH_CLIENT_ID)" \
               "UPTIMEPAGE_SLACK_OAUTH_CLIENT_SECRET=$(printenv SLACK_OAUTH_CLIENT_SECRET)"; do
+              n=$(grep -cxF "$pair" .env || true)
+              [ "$n" = 1 ] || { echo "::error::${pair%%=*} not written exactly once to .env (count=${n})"; exit 1; }
+            done
+          fi
+
+          # --- Discord OAuth app (optional) ----------------------------------
+          # Same write contract and all-or-nothing rule as the Slack block.
+          if [ -n "${DISCORD_OAUTH_CLIENT_ID:-}" ]; then
+            if [ -z "${DISCORD_OAUTH_CLIENT_SECRET:-}" ]; then
+              echo "::error::DISCORD_OAUTH_CLIENT_ID is set but DISCORD_OAUTH_CLIENT_SECRET is empty"
+              exit 1
+            fi
+            cp .env ".env.bak.$(date +%s).discord"
+            before=$(awk 'END { print NR }' .env)
+            awk '
+              BEGIN {
+                m["UPTIMEPAGE_DISCORD_OAUTH_CLIENT_ID"]     = ENVIRON["DISCORD_OAUTH_CLIENT_ID"]
+                m["UPTIMEPAGE_DISCORD_OAUTH_CLIENT_SECRET"] = ENVIRON["DISCORD_OAUTH_CLIENT_SECRET"]
+              }
+              {
+                for (k in m) if ($0 ~ ("^" k "=")) { print k "=" m[k]; seen[k] = 1; next }
+                print
+              }
+              END { for (k in m) if (!seen[k]) print k "=" m[k] }
+            ' .env > .env.next
+            mv .env.next .env
+            after=$(awk 'END { print NR }' .env)
+            # 0..+2: appended only for keys absent before.
+            if [ "$after" -lt "$before" ] || [ "$after" -gt "$((before + 2))" ]; then
+              echo "::error::.env line count out of range after discord upsert (${before} -> ${after})"
+              exit 1
+            fi
+            for pair in \
+              "UPTIMEPAGE_DISCORD_OAUTH_CLIENT_ID=$(printenv DISCORD_OAUTH_CLIENT_ID)" \
+              "UPTIMEPAGE_DISCORD_OAUTH_CLIENT_SECRET=$(printenv DISCORD_OAUTH_CLIENT_SECRET)"; do
               n=$(grep -cxF "$pair" .env || true)
               [ "$n" = 1 ] || { echo "::error::${pair%%=*} not written exactly once to .env (count=${n})"; exit 1; }
             done

@@ -78,23 +78,25 @@ pub struct AppConfig {
     #[serde(default)]
     pub telegram: TelegramBotConfig,
     #[serde(default)]
-    pub slack_oauth: SlackOauthConfig,
+    pub slack_oauth: ConnectOauthConfig,
+    #[serde(default)]
+    pub discord_oauth: ConnectOauthConfig,
 }
 
-/// `[slack_oauth]`. Operator-owned Slack app behind the "Add to Slack"
-/// button: the OAuth dance hands back a ready-made incoming-webhook URL so
-/// the user never copies one by hand. Empty credentials hide the button;
-/// the manual-paste slack kind works either way. Env only, never a config
-/// file.
+/// `[slack_oauth]` / `[discord_oauth]`. Credentials of an operator-owned
+/// OAuth app behind a one-click connect button: the dance hands back a
+/// ready-made webhook URL so the user never copies one by hand. Empty
+/// credentials hide the button; the manual-paste kind works either way.
+/// Env only, never a config file.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
-pub struct SlackOauthConfig {
+pub struct ConnectOauthConfig {
     pub client_id: String,
     #[serde(default = "empty_secret", with = "secret_str")]
     pub client_secret: SecretString,
 }
 
-impl Default for SlackOauthConfig {
+impl Default for ConnectOauthConfig {
     fn default() -> Self {
         Self {
             client_id: String::new(),
@@ -103,7 +105,7 @@ impl Default for SlackOauthConfig {
     }
 }
 
-impl SlackOauthConfig {
+impl ConnectOauthConfig {
     pub fn enabled(&self) -> bool {
         !self.client_id.trim().is_empty() && !self.client_secret.expose_secret().trim().is_empty()
     }

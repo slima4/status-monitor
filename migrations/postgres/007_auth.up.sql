@@ -50,7 +50,7 @@ CREATE TABLE oauth_states (
     state_hash        TEXT PRIMARY KEY,
     -- Login providers (same closed enum as `oauth_identities.provider`)
     -- plus connect-purpose dances that never produce an identity row.
-    provider          TEXT NOT NULL CHECK (provider IN ('github', 'google', 'slack_connect')),
+    provider          TEXT NOT NULL CHECK (provider IN ('github', 'google', 'slack_connect', 'discord_connect')),
     redirect_after    TEXT,
     -- Org a connect-purpose dance attaches its channel to; minted by a
     -- membership-checked session, NULL for login providers.

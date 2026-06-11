@@ -151,12 +151,20 @@ pub fn routes(state: AppState) -> Router {
         );
     }
 
-    // "Add to Slack" connect dance. Mounted only when the operator Slack app
-    // is configured; the manual webhook-paste slack kind works either way.
+    // "Add to Slack" / "Add to Discord" connect dances. Mounted only when
+    // the operator app is configured; manual webhook paste works either way.
     if cfg.slack_oauth.enabled() {
         r = r
             .route("/auth/slack/start", get(views::slack_connect::start))
             .route("/auth/slack/callback", get(views::slack_connect::callback));
+    }
+    if cfg.discord_oauth.enabled() {
+        r = r
+            .route("/auth/discord/start", get(views::discord_connect::start))
+            .route(
+                "/auth/discord/callback",
+                get(views::discord_connect::callback),
+            );
     }
 
     if public_routes_active(cfg) {

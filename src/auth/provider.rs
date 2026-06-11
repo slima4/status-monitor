@@ -36,4 +36,6 @@ impl OauthProvider {
 /// `oauth_identities.provider` — they produce no identity row.
 pub const SLACK_CONNECT_PROVIDER: &str = "slack_connect";
 
-pub const CONNECT_PROVIDERS: &[&str] = &[SLACK_CONNECT_PROVIDER];
+pub const DISCORD_CONNECT_PROVIDER: &str = "discord_connect";
+
+pub const CONNECT_PROVIDERS: &[&str] = &[SLACK_CONNECT_PROVIDER, DISCORD_CONNECT_PROVIDER];

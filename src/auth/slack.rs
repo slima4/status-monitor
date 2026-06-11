@@ -11,7 +11,7 @@ use secrecy::ExposeSecret;
 use serde::Deserialize;
 
 use crate::auth::url::url_encode;
-use crate::config::SlackOauthConfig;
+use crate::config::ConnectOauthConfig;
 use crate::error::{AppError, Result};
 use crate::http_outbound::OutboundHttpClient;
 
@@ -39,7 +39,7 @@ struct TokenResponse {
 
 /// The state must already be persisted to `oauth_states` before this URL is
 /// handed to the user.
-pub fn authorize_url(cfg: &SlackOauthConfig, redirect_uri: &str, state: &str) -> String {
+pub fn authorize_url(cfg: &ConnectOauthConfig, redirect_uri: &str, state: &str) -> String {
     format!(
         "{SLACK_AUTHORIZE_URL}?client_id={cid}&scope={sc}&state={st}&redirect_uri={ru}",
         cid = url_encode(&cfg.client_id),
@@ -53,7 +53,7 @@ pub fn authorize_url(cfg: &SlackOauthConfig, redirect_uri: &str, state: &str) ->
 /// incoming webhook.
 pub async fn exchange_code(
     http: &OutboundHttpClient,
-    cfg: &SlackOauthConfig,
+    cfg: &ConnectOauthConfig,
     redirect_uri: &str,
     code: &str,
 ) -> Result<IncomingWebhook> {
@@ -104,8 +104,8 @@ pub async fn exchange_code(
 mod tests {
     use super::*;
 
-    fn cfg() -> SlackOauthConfig {
-        SlackOauthConfig {
+    fn cfg() -> ConnectOauthConfig {
+        ConnectOauthConfig {
             client_id: "123.456".into(),
             ..Default::default()
         }

@@ -466,42 +466,44 @@
         });
     }
 
-    // "Add to Slack": the button is a full-page OAuth redirect; the QR
-    // variant fetches the same single-use authorize URL for a phone that is
-    // signed in here. Callback bounces land back with ?slack=<outcome>.
-    const slackAdd = form.querySelector("[data-slack-add]");
-    if (slackAdd) {
-        const slackNote = form.querySelector("[data-slack-note]");
-        const slackQrBox = form.querySelector("[data-slack-qr-box]");
-        const slackQrImg = form.querySelector("[data-slack-qr-img]");
-        const slackQrBtn = form.querySelector("[data-slack-qr]");
-        const showSlack = (text, cls) => showStatus(slackNote, text, cls);
-        const outcome = new URLSearchParams(window.location.search).get("slack");
+    // Provider OAuth connect ("add to Slack" / "add to Discord"): the
+    // button is a full-page OAuth redirect; the QR variant fetches the same
+    // single-use authorize URL for a phone that is signed in here. Callback
+    // bounces land back with ?<provider>=<outcome>.
+    form.querySelectorAll("[data-oauth-connect]").forEach((box) => {
+        const provider = box.dataset.oauthConnect;
+        const startUrl = box.dataset.oauthStart;
+        const note = box.querySelector("[data-oauth-note]");
+        const qrBox = box.querySelector("[data-oauth-qr-box]");
+        const qrEl = box.querySelector("[data-oauth-qr-img]");
+        const qrBtn = box.querySelector("[data-oauth-qr]");
+        const showNote = (text, cls) => showStatus(note, text, cls);
+        const outcome = new URLSearchParams(window.location.search).get(provider);
         if (outcome === "cancelled") {
-            showSlack("# slack connect cancelled — nothing was created", "text-quiet");
+            showNote(`# ${provider} connect cancelled — nothing was created`, "text-quiet");
         } else if (outcome === "quota") {
-            showSlack("✗ notification-channel limit reached for this plan", "flash-text flash-text--bad font-medium");
+            showNote("✗ notification-channel limit reached for this plan", "flash-text flash-text--bad font-medium");
         } else if (outcome === "failed") {
-            showSlack("✗ slack connect failed — try again, or paste a webhook URL below", "flash-text flash-text--bad font-medium");
+            showNote(`✗ ${provider} connect failed — try again, or paste a webhook URL below`, "flash-text flash-text--bad font-medium");
         }
-        slackQrBtn?.addEventListener("click", async () => {
-            slackQrBtn.disabled = true;
+        qrBtn?.addEventListener("click", async () => {
+            qrBtn.disabled = true;
             try {
-                const res = await fetch("/auth/slack/start?format=json", {
+                const res = await fetch(`${startUrl}?format=json`, {
                     headers: { "Accept": "application/json", "X-Requested-With": "uptimepage" },
                 });
-                if (!res.ok) throw new Error(`slack start failed (${res.status})`);
+                if (!res.ok) throw new Error(`${provider} start failed (${res.status})`);
                 const body = await res.json();
-                renderQr(slackQrImg, body.url);
-                slackQrBox.classList.remove("hidden");
-                showSlack("# scan with a phone that's signed in here and finish on Slack — single-use, expires in 10 minutes", "text-quiet");
+                renderQr(qrEl, body.url);
+                qrBox.classList.remove("hidden");
+                showNote("# scan with a phone that's signed in here and finish the consent screen — single-use, expires in 10 minutes", "text-quiet");
             } catch (err) {
-                showSlack(`✗ ${err.message || err}`, "flash-text flash-text--bad font-medium");
+                showNote(`✗ ${err.message || err}`, "flash-text flash-text--bad font-medium");
             } finally {
-                slackQrBtn.disabled = false;
+                qrBtn.disabled = false;
             }
         });
-    }
+    });
 
     const submitBtn = form.querySelector("button[type=submit]");
     form.addEventListener("submit", async (evt) => {

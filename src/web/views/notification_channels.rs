@@ -144,6 +144,8 @@ pub struct ChannelFormModel {
     pub central_telegram: bool,
     /// Gates the "add to Slack" button on the slack panel (create mode).
     pub slack_oauth: bool,
+    /// Gates the "add to Discord" button on the discord panel (create mode).
+    pub discord_oauth: bool,
     /// Email channel still awaiting address verification (edit mode).
     pub email_unverified: bool,
 }
@@ -234,6 +236,7 @@ pub async fn new_form(
     let mut form = empty_create_form();
     form.central_telegram = state.cfg.telegram.enabled();
     form.slack_oauth = state.cfg.slack_oauth.enabled();
+    form.discord_oauth = state.cfg.discord_oauth.enabled();
     (_, form.bindable) = org_monitor_cards(&state, org, None).await?;
     Ok(ChannelFormPage {
         active_tab: TAB_NOTIFICATIONS,
@@ -326,6 +329,7 @@ fn empty_create_form() -> ChannelFormModel {
         bindable: Vec::new(),
         central_telegram: false,
         slack_oauth: false,
+        discord_oauth: false,
         email_unverified: false,
     }
 }
@@ -379,6 +383,7 @@ fn form_from_channel(c: NotificationChannel) -> ChannelFormModel {
         bindable: Vec::new(),
         central_telegram: false,
         slack_oauth: false,
+        discord_oauth: false,
         email_unverified,
     }
 }
@@ -509,19 +514,21 @@ mod tests {
     }
 
     #[test]
-    fn create_form_add_to_slack_gated_on_oauth_config() {
+    fn create_form_oauth_connect_buttons_gated_on_config() {
         let off = ChannelFormPage {
             active_tab: TAB_NOTIFICATIONS,
             form: empty_create_form(),
         }
         .render()
         .unwrap();
-        assert!(!off.contains("data-slack-add"));
-        // Manual paste survives without the operator app.
+        assert!(!off.contains("data-oauth-connect"));
+        // Manual paste survives without the operator apps.
         assert!(off.contains("slack_webhook_url"));
+        assert!(off.contains("discord_webhook_url"));
 
         let mut form = empty_create_form();
         form.slack_oauth = true;
+        form.discord_oauth = true;
         let on = ChannelFormPage {
             active_tab: TAB_NOTIFICATIONS,
             form,
@@ -529,9 +536,12 @@ mod tests {
         .render()
         .unwrap();
         assert!(on.contains(r#"href="/auth/slack/start""#));
-        assert!(on.contains("data-slack-add"));
-        assert!(on.contains("data-slack-qr-box"));
+        assert!(on.contains(r#"data-oauth-connect="slack""#));
+        assert!(on.contains(r#"href="/auth/discord/start""#));
+        assert!(on.contains(r#"data-oauth-connect="discord""#));
+        assert!(on.contains("data-oauth-qr-box"));
         assert!(on.contains("slack_webhook_url"));
+        assert!(on.contains("discord_webhook_url"));
     }
 
     #[test]
