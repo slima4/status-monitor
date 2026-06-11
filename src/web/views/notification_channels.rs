@@ -62,6 +62,11 @@ pub struct ConfigFields {
     pub webhook_secret: String,
     pub telegram_bot_token: String,
     pub telegram_chat_id: String,
+    pub whatsapp_access_token: String,
+    pub whatsapp_phone_number_id: String,
+    pub whatsapp_to: String,
+    pub whatsapp_template_name: String,
+    pub whatsapp_language_code: String,
 }
 
 impl Default for ConfigFields {
@@ -73,6 +78,11 @@ impl Default for ConfigFields {
             webhook_secret: String::new(),
             telegram_bot_token: String::new(),
             telegram_chat_id: String::new(),
+            whatsapp_access_token: String::new(),
+            whatsapp_phone_number_id: String::new(),
+            whatsapp_to: String::new(),
+            whatsapp_template_name: String::new(),
+            whatsapp_language_code: String::new(),
         }
     }
 }
@@ -294,6 +304,13 @@ fn form_from_channel(c: NotificationChannel) -> ChannelFormModel {
             config.telegram_bot_token = c.bot_token;
             config.telegram_chat_id = c.chat_id;
         }
+        ChannelConfig::WhatsApp(c) => {
+            config.whatsapp_access_token = c.access_token;
+            config.whatsapp_phone_number_id = c.phone_number_id;
+            config.whatsapp_to = c.to;
+            config.whatsapp_template_name = c.template_name;
+            config.whatsapp_language_code = c.language_code.unwrap_or_default();
+        }
     }
     ChannelFormModel {
         mode: "edit",
@@ -327,6 +344,14 @@ mod tests {
         assert!(html.contains(r#"data-action="/api/v1/notification-channels""#));
         assert!(html.contains(r#"data-method="POST""#));
         assert!(html.contains(r#"data-mode="create""#));
+        // Every transport offers a type card + config panel.
+        for kind in ["slack", "webhook", "telegram", "whatsapp"] {
+            assert!(html.contains(&format!(r#"value="{kind}""#)), "{kind} card");
+            assert!(
+                html.contains(&format!(r#"data-variant="{kind}""#)),
+                "{kind} panel"
+            );
+        }
         // Create has no "replace config" toggle — config is always sent.
         assert!(!html.contains("Replace transport config"));
         // "Test now" works pre-save (ad-hoc config test); delete needs a

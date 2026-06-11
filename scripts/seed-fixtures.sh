@@ -507,7 +507,7 @@ CROSS JOIN LATERAL (
 ) AS e(occurred_at, kind, actor_type, message);
 SQL
 
-echo "==> Postgres: 3 notification channels (webhook + slack + telegram) and alert bindings"
+echo "==> Postgres: 4 notification channels (webhook + slack + telegram + whatsapp) and alert bindings"
 # Channel kinds match ChannelConfig — one per variant. The Telegram row is
 # disabled so the operator UI renders both the enabled and disabled states.
 # Bindings are pure delivery targets ({channel_id}); the firing policy
@@ -522,7 +522,10 @@ INSERT INTO notification_channels (org_id, name, kind, config, enabled) VALUES
    true),
   ('${ORG}'::uuid, 'Fixture Telegram', 'telegram',
    '{"type":"telegram","bot_token":"1234567890:AAH-fixture-bot-token","chat_id":"-1001234567890"}'::jsonb,
-   false);
+   false),
+  ('${ORG}'::uuid, 'Fixture WhatsApp', 'whatsapp',
+   '{"type":"whatsapp","access_token":"EAAG-fixture-token","phone_number_id":"106540352242922","to":"15551234567","template_name":"uptime_alert"}'::jsonb,
+   true);
 
 -- Managed-by badge on the channels list too: webhook as Terraform, Slack as
 -- a raw API token; Telegram stays UI-authored (no chip).
@@ -1104,7 +1107,7 @@ echo "  incidents : 158 (150 resolved across 87d + 4 active (one per frozen publ
               + 1 adversarial-title + 2 internal-only on non-public monitors + 1 manually declared)
   ops state : active public incidents split triggered/acknowledged; internal + manual
               incidents carry activity timelines for the operator console"
-echo "  channels  : 3 (slack + webhook enabled, telegram disabled)"
+echo "  channels  : 4 (slack + webhook + whatsapp enabled, telegram disabled)"
 echo "  managed   : fix-payment/fix-admin + Fixture Webhook → terraform chip; fix-tcp + Fixture Slack → api chip"
 echo "  alerts    : bound on fix-api / fix-db / fix-auth"
 echo "  maintenance: 4 windows (1 active bound to fix-db) → drives Maintenance state"

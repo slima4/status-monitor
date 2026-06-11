@@ -50,6 +50,11 @@
           <span class="check-type-card__name">telegram</span>
           <span class="check-type-card__desc">bot message to a chat</span>
         </label>
+        <label class="check-type-card" data-kind-card>
+          <input type="radio" name="kind" value="whatsapp"{% if form.kind == "whatsapp" %} checked{% endif %} class="sr-only">
+          <span class="check-type-card__name">whatsapp</span>
+          <span class="check-type-card__desc">Cloud API message</span>
+        </label>
       </div>
       {% if form.mode != "create" %}
       <p data-kind-locked-hint class="hidden font-mono text-xs text-quiet"># type locked — tick "Replace transport config" below to change it</p>
@@ -155,6 +160,64 @@
             <span class="font-mono">-100…</span> id. The bot must be a member of the chat.
           </span>
         </label>
+      </div>
+
+      <div data-variant="whatsapp" class="space-y-5{% if form.kind != "whatsapp" %} hidden{% endif %}">
+        <label class="field-outline">
+          <span class="field-outline__label">Access token</span>
+          <input name="whatsapp_access_token" type="text" value="{{ form.config.whatsapp_access_token }}"
+                 placeholder="EAAG…"
+                 autocomplete="off" spellcheck="false" class="w-full field font-mono">
+          <span class="mt-1 block text-xs text-muted">
+            A WhatsApp Business Cloud API token —
+            <a href="https://developers.facebook.com/docs/whatsapp/cloud-api/get-started" target="_blank" rel="noopener"
+               class="underline decoration-dotted hover:text-body">developers.facebook.com/docs/whatsapp/cloud-api</a>.
+          </span>
+        </label>
+        <label class="field-outline">
+          <span class="field-outline__label">Phone number ID</span>
+          <input name="whatsapp_phone_number_id" type="text" value="{{ form.config.whatsapp_phone_number_id }}"
+                 placeholder="106540352242922"
+                 autocomplete="off" spellcheck="false" class="w-full field font-mono">
+          <span class="mt-1 block text-xs text-muted">
+            The numeric id of the business phone number that sends the alerts
+            (API Setup page) — not the phone number itself.
+          </span>
+        </label>
+        <label class="field-outline">
+          <span class="field-outline__label">Recipient</span>
+          <input name="whatsapp_to" type="text" value="{{ form.config.whatsapp_to }}"
+                 placeholder="15551234567"
+                 autocomplete="off" spellcheck="false" class="w-full field font-mono">
+          <span class="mt-1 block text-xs text-muted">
+            Phone number in international format that receives the alerts.
+          </span>
+        </label>
+        <div class="grid grid-cols-1 gap-5 sm:grid-cols-2">
+          <label class="field-outline">
+            <span class="field-outline__label">Template name</span>
+            <input name="whatsapp_template_name" type="text" value="{{ form.config.whatsapp_template_name }}"
+                   placeholder="uptime_alert"
+                   autocomplete="off" spellcheck="false" class="w-full field font-mono">
+          </label>
+          <label class="field-outline">
+            <span class="field-outline__label">Template language</span>
+            <input name="whatsapp_language_code" type="text" value="{{ form.config.whatsapp_language_code }}"
+                   placeholder="en"
+                   autocomplete="off" spellcheck="false" class="w-full field font-mono">
+            <span class="mt-1 block text-xs text-muted">
+              Must match the template's exact language — <span class="font-mono">en</span>
+              and <span class="font-mono">en_US</span> are different templates. Blank = en.
+            </span>
+          </label>
+        </div>
+        <p class="text-xs text-muted">
+          Create a one-parameter utility template (body <code>{{ "{{1}}" }}</code>)
+          in the WhatsApp Business Manager — the alert text is sent as that
+          parameter. A template is required because WhatsApp accepts plain
+          messages only within 24 hours of the recipient's last reply and
+          silently drops them otherwise.
+        </p>
       </div>
 
       <div class="flex flex-wrap items-center gap-3 pt-1">

@@ -333,6 +333,25 @@
             }
             return { config };
         }
+        if (kind === "whatsapp") {
+            const template = (data.get("whatsapp_template_name") || "").trim();
+            if (!template) {
+                return {
+                    error: "Template name is required — WhatsApp silently drops template-less alerts outside the 24-hour service window.",
+                    field: "whatsapp_template_name",
+                };
+            }
+            const config = {
+                type: "whatsapp",
+                access_token: (data.get("whatsapp_access_token") || "").trim(),
+                phone_number_id: (data.get("whatsapp_phone_number_id") || "").trim(),
+                to: (data.get("whatsapp_to") || "").trim(),
+                template_name: template,
+            };
+            const language = (data.get("whatsapp_language_code") || "").trim();
+            if (language) config.language_code = language;
+            return { config };
+        }
         return {
             config: {
                 type: "telegram",

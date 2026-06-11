@@ -333,6 +333,7 @@ never read, mutate, or test another's channels.
 - `slack` — `{ "type": "slack", "webhook_url": "https://…" }` (incoming webhook; posts `{ "text": "…" }`)
 - `webhook` — `{ "type": "webhook", "url": "https://…", "headers": { … }, "secret": "…" }` (POSTs the alert JSON; optional custom headers; optional signing secret, see below)
 - `telegram` — `{ "type": "telegram", "bot_token": "…", "chat_id": "…" }`
+- `whatsapp` — `{ "type": "whatsapp", "access_token": "…", "phone_number_id": "…", "to": "…", "template_name": "…", "language_code": "en" }` (Business Cloud API; `language_code` optional, default `en`)
 
 **Webhook signing.** When a `webhook` channel carries a `secret` (≥ 16
 characters), every delivery is signed: the request includes
@@ -343,12 +344,21 @@ Receivers should recompute the digest and reject stale timestamps (e.g.
 older than 5 minutes) to block replays. Channels without a secret deliver
 unsigned.
 
+**WhatsApp templates.** Create a one-parameter utility template (body
+`{{1}}`) in the WhatsApp Business Manager and set `template_name` (plus
+`language_code`, which must match the template's exact language — `en`
+and `en_US` are distinct). The alert text is sent as that single
+parameter, collapsed to one line. A template is required: WhatsApp
+accepts free-form text only within 24 hours of the recipient's last
+message, and out-of-window sends are accepted by the API yet dropped
+asynchronously — a silent-loss mode an alerting channel must not have.
+
 Behaviour:
 
 - **Secrets sealed at rest** with the credentials KEK; **never echoed back**. Every read path masks secret-bearing fields with `***` (the webhook URL is masked whole — it can carry a token; header *names* and `chat_id` are kept so the UI stays useful).
 - **Redaction-sentinel guard**: submitting a `config` that still contains `***` returns `400 REDACTION_SENTINEL`. Omit `config` on `PATCH` to keep the stored secret unchanged.
-- **Validation** (`400`): `webhook`/`slack` URLs must be `https`; `telegram` requires non-empty `bot_token` and `chat_id`; channel `name` is required and ≤ 100 chars.
-- **Destination deny-list**: the outbound URL is checked against the platform's abuse deny-list on create, update, and both test endpoints — a match is rejected (`ABUSE_BLOCKED` / `DOMAIN_DENYLISTED`).
+- **Validation** (`400`): `webhook`/`slack` URLs must be `https`; `telegram` requires non-empty `bot_token` and `chat_id`; `whatsapp` requires `access_token`, a numeric `phone_number_id`, an international-format `to`, and a `template_name` (lowercase/digits/underscore); channel `name` is required and ≤ 100 chars.
+- **Destination deny-list**: the customer-controlled outbound URL (`slack`/`webhook`) is checked against the platform's abuse deny-list on create, update, and both test endpoints — a match is rejected (`ABUSE_BLOCKED` / `DOMAIN_DENYLISTED`). `telegram`/`whatsapp` deliver to fixed vendor endpoints.
 - **Quota**: capped per org by the plan's `max_notification_channels` (atomic, advisory-locked). A duplicate name within the org is `422 CHANNEL_NAME_TAKEN`; the cap is `422 CHANNEL_QUOTA_EXCEEDED`.
 - **Test sends** deliver one clearly-labelled synthetic alert. The per-channel form tests the stored config (works on a disabled channel too); the collection-level `POST …/test` takes `{ "config": { … } }` in the body, validates it exactly as create would, and persists nothing — the UI uses it for "test now" before a channel is saved. A transport failure is `422 CHANNEL_TEST_FAILED`. Both count against the `test_now` rate-limit bucket.
 

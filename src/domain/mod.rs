@@ -48,7 +48,7 @@ pub use monitor_share::{
 pub use notification_channel::{
     ChannelConfig, ChannelKind, NewNotificationChannel, NotificationChannel,
     NotificationChannelUpdate, SlackConfig, TelegramConfig, TransportConfig, WebhookConfig,
-    validate_channel_name,
+    WhatsAppConfig, validate_channel_name,
 };
 pub use on_call::{
     NewOnCallLayer, NewOnCallOverride, NewOnCallParticipant, NewOnCallSchedule, OnCallLayer,

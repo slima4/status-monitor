@@ -2,7 +2,6 @@ use async_trait::async_trait;
 use serde::Serialize;
 use url::Url;
 
-use crate::domain::NotificationReason;
 use crate::error::{AppError, Result};
 use crate::http_outbound::{OutboundHttpClient, post_json};
 use crate::notifier::Notifier;
@@ -41,50 +40,12 @@ impl TelegramNotifier {
             chat_id,
         })
     }
-
-    fn render_incident(n: &IncidentNotice) -> String {
-        let link = n
-            .url
-            .as_deref()
-            .map(|u| format!("\n{u}"))
-            .unwrap_or_default();
-        match n.reason {
-            NotificationReason::Opened | NotificationReason::Escalated => format!(
-                "{label} — {sev} incident OPEN{err}{regions}{link}",
-                label = n.label(),
-                sev = n.severity.as_db_str(),
-                err = n
-                    .error_sample
-                    .as_deref()
-                    .map(|e| format!(": {e}"))
-                    .unwrap_or_default(),
-                regions = region_line(n),
-            ),
-            NotificationReason::Reopened => {
-                format!("{label} — incident REOPENED{link}", label = n.label())
-            }
-            NotificationReason::Resolved => {
-                let dur = n
-                    .duration_minutes()
-                    .map(|m| format!(" after {m}m"))
-                    .unwrap_or_default();
-                format!("{label} — incident RESOLVED{dur}{link}", label = n.label())
-            }
-        }
-    }
-}
-
-/// Per-region breakdown line (plain text); empty for single-region.
-fn region_line(n: &IncidentNotice) -> String {
-    n.region_summary(|r| r.to_string(), " · ")
-        .map(|s| format!("\n{s}"))
-        .unwrap_or_default()
 }
 
 #[async_trait]
 impl Notifier for TelegramNotifier {
     async fn notify_incident(&self, notice: &IncidentNotice) -> Result<()> {
-        let text = Self::render_incident(notice);
+        let text = notice.plain_text();
         post_json(
             &self.client,
             &self.send_url,

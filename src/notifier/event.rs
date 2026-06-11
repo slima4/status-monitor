@@ -62,4 +62,44 @@ impl IncidentNotice {
         }
         Some(parts.join(sep))
     }
+
+    /// Plain-text one-liner for chat-style transports (Telegram, WhatsApp):
+    /// no markup, optional error sample, region breakdown and link on their
+    /// own lines.
+    pub fn plain_text(&self) -> String {
+        let link = self
+            .url
+            .as_deref()
+            .map(|u| format!("\n{u}"))
+            .unwrap_or_default();
+        let regions = self
+            .region_summary(|r| r.to_string(), " · ")
+            .map(|s| format!("\n{s}"))
+            .unwrap_or_default();
+        match self.reason {
+            NotificationReason::Opened | NotificationReason::Escalated => format!(
+                "{label} — {sev} incident OPEN{err}{regions}{link}",
+                label = self.label(),
+                sev = self.severity.as_db_str(),
+                err = self
+                    .error_sample
+                    .as_deref()
+                    .map(|e| format!(": {e}"))
+                    .unwrap_or_default(),
+            ),
+            NotificationReason::Reopened => {
+                format!("{label} — incident REOPENED{link}", label = self.label())
+            }
+            NotificationReason::Resolved => {
+                let dur = self
+                    .duration_minutes()
+                    .map(|m| format!(" after {m}m"))
+                    .unwrap_or_default();
+                format!(
+                    "{label} — incident RESOLVED{dur}{link}",
+                    label = self.label()
+                )
+            }
+        }
+    }
 }

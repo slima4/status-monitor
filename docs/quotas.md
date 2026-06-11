@@ -22,7 +22,7 @@ enough to keep abuse on a small VM cheap.
 | `max_status_pages` | 1 | Public status pages the org can run |
 | `max_public_components` | 10 | Distinct monitors published across all of the org's pages (a monitor on several pages counts once) |
 | `max_maintenance_windows` | 20 | Scheduled maintenance windows |
-| `max_notification_channels` | 20 | Notification channels (Slack/webhook/Telegram) in the org |
+| `max_notification_channels` | 20 | Notification channels (Slack/webhook/Telegram/WhatsApp) in the org |
 | `max_logo_size_bytes` | 1048576 | Status-page logo upload ceiling (1 MiB) |
 
 | Rate budget (per minute) | Free | Category |

@@ -62,7 +62,7 @@ resource "uptimepage_target" "api" {
 | Name | Kind | Manages |
 |---|---|---|
 | `uptimepage_target` | resource | Monitors — `http`, `tcp`, `tls_cert`, `domain_expiry`, `dns` checks |
-| `uptimepage_notification_channel` | resource | Alert destinations — `webhook`, `slack`, `telegram` |
+| `uptimepage_notification_channel` | resource | Alert destinations — `webhook`, `slack`, `telegram`, `whatsapp` |
 | `uptimepage_target` | data source | Look up an existing target by id |
 
 For the full attribute reference and an example per check type, see the

@@ -23,11 +23,13 @@ mod slack;
 mod telegram;
 mod transport;
 mod webhook;
+mod whatsapp;
 
 pub use slack::SlackConfig;
 pub use telegram::TelegramConfig;
 pub use transport::TransportConfig;
 pub use webhook::WebhookConfig;
+pub use whatsapp::WhatsAppConfig;
 
 use super::WriteSource;
 use chrono::{DateTime, Utc};
@@ -41,13 +43,15 @@ pub enum ChannelKind {
     Webhook,
     Slack,
     Telegram,
+    #[serde(rename = "whatsapp")]
+    WhatsApp,
 }
 
 impl ChannelKind {
     /// Every variant in declaration order. Used by the enum-drift integration
     /// test to compare against the live Postgres CHECK constraint on
     /// `notification_channels.kind`; keep in lockstep with the enum body.
-    pub const ALL: &'static [Self] = &[Self::Webhook, Self::Slack, Self::Telegram];
+    pub const ALL: &'static [Self] = &[Self::Webhook, Self::Slack, Self::Telegram, Self::WhatsApp];
 
     /// Stable string used in the Postgres `kind` CHECK constraint and the
     /// JSON wire form.
@@ -56,6 +60,7 @@ impl ChannelKind {
             Self::Webhook => "webhook",
             Self::Slack => "slack",
             Self::Telegram => "telegram",
+            Self::WhatsApp => "whatsapp",
         }
     }
 }
@@ -69,6 +74,8 @@ pub enum ChannelConfig {
     Webhook(WebhookConfig),
     Slack(SlackConfig),
     Telegram(TelegramConfig),
+    #[serde(rename = "whatsapp")]
+    WhatsApp(WhatsAppConfig),
 }
 
 /// Apply `$body` to the inner [`TransportConfig`] of any variant. The one
@@ -79,6 +86,7 @@ macro_rules! with_transport {
             ChannelConfig::Webhook($c) => $body,
             ChannelConfig::Slack($c) => $body,
             ChannelConfig::Telegram($c) => $body,
+            ChannelConfig::WhatsApp($c) => $body,
         }
     };
 }
@@ -185,6 +193,8 @@ mod tests {
             r#"{"type":"webhook","url":"https://x.test/h","secret":"0123456789abcdef"}"#,
             r#"{"type":"slack","webhook_url":"https://hooks.slack.com/x"}"#,
             r#"{"type":"telegram","bot_token":"123:abc","chat_id":"-100"}"#,
+            r#"{"type":"whatsapp","access_token":"tok","phone_number_id":"123","to":"15551234567","template_name":"uptime_alert"}"#,
+            r#"{"type":"whatsapp","access_token":"tok","phone_number_id":"123","to":"15551234567","template_name":"uptime_alert","language_code":"en"}"#,
         ] {
             let c: ChannelConfig = serde_json::from_str(json).unwrap();
             let back = serde_json::to_string(&c).unwrap();
@@ -211,6 +221,13 @@ mod tests {
             ChannelConfig::Telegram(TelegramConfig {
                 bot_token: "t".into(),
                 chat_id: "1".into(),
+            }),
+            ChannelConfig::WhatsApp(WhatsAppConfig {
+                access_token: "tok".into(),
+                phone_number_id: "123".into(),
+                to: "15551234567".into(),
+                template_name: "uptime_alert".into(),
+                language_code: None,
             }),
         ];
         assert_eq!(configs.len(), ChannelKind::ALL.len());
@@ -300,6 +317,46 @@ mod tests {
             chat_id: "1".into(),
         });
         assert_eq!(tg.abuse_url(), None);
+    }
+
+    #[test]
+    fn whatsapp_redacts_token_and_validates_phone_shape() {
+        let mut c = ChannelConfig::WhatsApp(WhatsAppConfig {
+            access_token: "EAAGsecret".into(),
+            phone_number_id: "106540352242922".into(),
+            to: "+15551234567".into(),
+            template_name: "uptime_alert".into(),
+            language_code: None,
+        });
+        assert!(c.validate().is_ok());
+        let r = c.redacted();
+        assert_eq!(r["access_token"], "***");
+        // Routing shape survives so the UI stays useful.
+        assert_eq!(r["to"], "+15551234567");
+        assert_eq!(r["template_name"], "uptime_alert");
+        c.redact_in_place();
+        assert!(c.has_redaction_sentinel());
+
+        let bad = |f: fn(&mut WhatsAppConfig)| {
+            let mut w = WhatsAppConfig {
+                access_token: "tok".into(),
+                phone_number_id: "123".into(),
+                to: "15551234567".into(),
+                template_name: "uptime_alert".into(),
+                language_code: None,
+            };
+            f(&mut w);
+            ChannelConfig::WhatsApp(w).validate()
+        };
+        assert!(bad(|w| w.access_token = "to k".into()).is_err());
+        assert!(bad(|w| w.access_token = "tok\n".into()).is_err());
+        assert!(bad(|w| w.phone_number_id = "not-numeric".into()).is_err());
+        assert!(bad(|w| w.to = "abc".into()).is_err());
+        assert!(bad(|w| w.to = "12345".into()).is_err());
+        assert!(bad(|w| w.to = " 15551234567".into()).is_err());
+        assert!(bad(|w| w.template_name = "Uptime Alert".into()).is_err());
+        assert!(bad(|w| w.template_name = "".into()).is_err());
+        assert!(bad(|w| w.language_code = Some("en US".into())).is_err());
     }
 
     #[test]

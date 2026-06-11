@@ -12,7 +12,7 @@ CREATE TABLE notification_channels (
     -- Closed enum; keep in lockstep with `domain::ChannelKind::ALL`. The
     -- live drift test (`tests/enum_drift_test.rs`) introspects this CHECK
     -- and fails if the lists disagree.
-    kind        TEXT NOT NULL CHECK (kind IN ('webhook', 'slack', 'telegram')),
+    kind        TEXT NOT NULL CHECK (kind IN ('webhook', 'slack', 'telegram', 'whatsapp')),
     config      JSONB NOT NULL,
     enabled     BOOLEAN NOT NULL DEFAULT true,
     write_source TEXT NOT NULL DEFAULT 'ui'

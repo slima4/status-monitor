@@ -2,6 +2,7 @@ pub mod event;
 pub mod slack;
 pub mod telegram;
 pub mod webhook;
+pub mod whatsapp;
 
 use std::sync::Arc;
 
@@ -14,6 +15,7 @@ use crate::notifier::event::IncidentNotice;
 use crate::notifier::slack::SlackNotifier;
 use crate::notifier::telegram::TelegramNotifier;
 use crate::notifier::webhook::WebhookNotifier;
+use crate::notifier::whatsapp::WhatsAppNotifier;
 
 #[async_trait]
 pub trait Notifier: Send + Sync {
@@ -50,5 +52,8 @@ pub fn build_notifier(cfg: &ChannelConfig, http: &OutboundHttpClient) -> Result<
             &c.bot_token,
             c.chat_id.clone(),
         )?) as Arc<dyn Notifier>,
+        ChannelConfig::WhatsApp(c) => {
+            Arc::new(WhatsAppNotifier::new(http.clone(), c)?) as Arc<dyn Notifier>
+        }
     })
 }

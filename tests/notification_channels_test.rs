@@ -206,6 +206,34 @@ async fn duplicate_name_is_unprocessable() {
     assert_eq!(body["error"]["code"], "CHANNEL_NAME_TAKEN");
 }
 
+#[tokio::test]
+async fn whatsapp_channel_round_trips_with_token_masked() {
+    let app = app();
+    let (st, created) = send(
+        &app,
+        "POST",
+        "/api/v1/notification-channels",
+        json!({
+            "name": "oncall-whatsapp",
+            "config": {
+                "type": "whatsapp",
+                "access_token": "EAAGsupersecret",
+                "phone_number_id": "106540352242922",
+                "to": "15551234567",
+                "template_name": "uptime_alert"
+            }
+        }),
+    )
+    .await;
+    assert_eq!(st, StatusCode::CREATED, "{created}");
+    assert_eq!(created["kind"], "whatsapp");
+    assert_eq!(created["config"]["type"], "whatsapp");
+    assert_eq!(created["config"]["access_token"], "***");
+    assert_eq!(created["config"]["to"], "15551234567");
+    assert_eq!(created["config"]["template_name"], "uptime_alert");
+    assert!(!created.to_string().contains("supersecret"));
+}
+
 /// Deleting a channel must scrub its bindings from `targets.alerts` — a
 /// dangling `{channel_id}` fails channel-existence validation on the next
 /// whole-array alerts update of that monitor.
