@@ -75,6 +75,45 @@ pub struct AppConfig {
     pub agent: AgentConfig,
     #[serde(default)]
     pub operator: OperatorConfig,
+    #[serde(default)]
+    pub telegram: TelegramBotConfig,
+}
+
+/// `[telegram]`. Operator-owned central bot shared by every org: customers
+/// link a chat by tapping a deep link instead of running their own BotFather
+/// bot. A non-empty `bot_token` enables the whole surface — the connect
+/// button, the `/hooks/telegram` receiver, and the boot webhook handshake.
+/// Empty leaves it absent; the bring-your-own `telegram` channel is
+/// unaffected either way. All three values are capabilities — env only,
+/// never a config file.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct TelegramBotConfig {
+    #[serde(default = "empty_secret", with = "secret_str")]
+    pub bot_token: SecretString,
+    /// Verified against `getMe` at boot so a mismatched deep link can't be
+    /// minted against the wrong bot.
+    pub bot_username: String,
+    /// Echoed back by Telegram in `X-Telegram-Bot-Api-Secret-Token` on every
+    /// update; the only thing authenticating the receiver.
+    #[serde(default = "empty_secret", with = "secret_str")]
+    pub webhook_secret: SecretString,
+}
+
+impl Default for TelegramBotConfig {
+    fn default() -> Self {
+        Self {
+            bot_token: empty_secret(),
+            bot_username: String::new(),
+            webhook_secret: empty_secret(),
+        }
+    }
+}
+
+impl TelegramBotConfig {
+    pub fn enabled(&self) -> bool {
+        !self.bot_token.expose_secret().trim().is_empty()
+    }
 }
 
 /// `[operator]`. Instance-admin surface (`/operator/*`) for managing regions
@@ -1135,6 +1174,39 @@ impl AppConfig {
             if hb.interval_seconds == 0 {
                 return Err(err(
                     "observability.heartbeat.interval_seconds must be > 0".into()
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// Central-bot invariants, enforced only when `telegram.bot_token` is set.
+    /// A misconfigured bot here is a clean startup error rather than a half-up
+    /// feature that mints dead deep links.
+    pub fn validate_telegram(&self) -> Result<()> {
+        fn err(msg: &str) -> crate::error::AppError {
+            crate::error::AppError::Other(anyhow::anyhow!(msg.to_string()))
+        }
+        let t = &self.telegram;
+        if !t.enabled() {
+            return Ok(());
+        }
+        if t.bot_username.trim().is_empty() {
+            return Err(err(
+                "telegram.bot_username is required when telegram.bot_token is set",
+            ));
+        }
+        if t.webhook_secret.expose_secret().trim().len() < 32 {
+            return Err(err(
+                "UPTIMEPAGE_TELEGRAM__WEBHOOK_SECRET must be at least 32 chars when telegram.bot_token is set",
+            ));
+        }
+        let base = self.auth.public_base_url.trim();
+        match url::Url::parse(base) {
+            Ok(u) if u.scheme() == "https" && u.host_str().is_some() => {}
+            _ => {
+                return Err(err(
+                    "auth.public_base_url must be an https:// URL with a host for the telegram webhook",
                 ));
             }
         }

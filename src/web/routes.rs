@@ -1,5 +1,5 @@
 use axum::Router;
-use axum::routing::get;
+use axum::routing::{get, post};
 use tower_cookies::CookieManagerLayer;
 
 use crate::api::public_routes_active;
@@ -136,6 +136,16 @@ pub fn routes(state: AppState) -> Router {
                 "/web/partials/settings/on-call",
                 get(views::on_call::list_partial),
             );
+    }
+
+    // Central Telegram bot receiver. Mounted only when an operator bot token
+    // is configured; otherwise the feature is absent. Lives on the app host
+    // alongside the share links, authenticated by the per-update secret token.
+    if cfg.telegram.enabled() {
+        r = r.route(
+            crate::telegram::WEBHOOK_PATH,
+            post(views::telegram::webhook),
+        );
     }
 
     if public_routes_active(cfg) {

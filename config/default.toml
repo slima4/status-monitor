@@ -396,3 +396,14 @@ buffer_capacity = 10000
 # never here. Empty disables the surface (it 404s).
 [operator]
 admin_token = ""
+
+# Operator-owned central Telegram bot: customers link a chat by tapping a deep
+# link instead of running their own bot. A non-empty bot_token turns on the
+# connect button, the /hooks/telegram receiver, and the boot webhook handshake.
+# All three values are capabilities — set them via UPTIMEPAGE_TELEGRAM__* env,
+# never here. Empty leaves the feature absent; bring-your-own telegram channels
+# are unaffected.
+[telegram]
+bot_token = ""
+bot_username = ""
+webhook_secret = ""

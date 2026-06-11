@@ -128,6 +128,9 @@ async fn main() -> Result<()> {
     // Marketing host/URL/cookie invariants. Skipped wholesale when
     // marketing.enabled = false (the default).
     cfg.validate_marketing()?;
+    // Central Telegram bot: a set bot_token without a username / strong
+    // webhook secret / https base is a clean startup error, not a half-up bot.
+    cfg.validate_telegram()?;
 
     let metrics_handle = if cfg.observability.metrics_enabled {
         Some(observability::metrics::init(&cfg.server.metrics_bind)?)
@@ -473,6 +476,14 @@ async fn main() -> Result<()> {
 
     let heartbeat_handle: Option<JoinHandle<()>> =
         observability::heartbeat::spawn(&state, root.clone());
+
+    // Register the central-bot webhook in the background so a Telegram outage
+    // never stalls the boot; the next boot re-asserts it idempotently.
+    if state.cfg.telegram.enabled() {
+        let cfg = state.cfg.clone();
+        let http = state.outbound_http.clone();
+        tokio::spawn(async move { uptimepage::telegram::ensure_webhook(&cfg, http).await });
+    }
 
     // One span per HTTP request — the unit the OTLP layer exports; with
     // no instrumented span there is nothing to trace. DEBUG level so the

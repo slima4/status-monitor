@@ -23,6 +23,7 @@ pub mod router;
 pub mod scheduler;
 pub mod security;
 pub mod storage;
+pub mod telegram;
 pub mod web;
 pub mod worker;
 
