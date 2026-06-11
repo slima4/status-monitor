@@ -360,6 +360,9 @@ async fn main() -> Result<()> {
     let contact_store: Arc<dyn uptimepage::storage::ContactStore> = Arc::new(
         uptimepage::storage::PgContactStore::new(pg_pool_for_stores.clone()),
     );
+    // One process-wide central-bot send budget, shared by the engine and the
+    // web side (test-now, webhook replies) via AppState.
+    let telegram_send_budget = std::sync::Arc::new(uptimepage::telegram::TelegramSendBudget::new());
     let escalation_engine_handle: JoinHandle<()> = {
         let engine = uptimepage::escalation::EscalationEngine::new(
             incident_signal_rx,
@@ -378,7 +381,10 @@ async fn main() -> Result<()> {
             cfg.auth.public_base_url.clone(),
             cfg.telegram
                 .enabled()
-                .then(|| cfg.telegram.bot_token.clone()),
+                .then(|| uptimepage::notifier::CentralBotDelivery {
+                    token: cfg.telegram.bot_token.clone(),
+                    budget: telegram_send_budget.clone(),
+                }),
         );
         let token = root.clone();
         tokio::spawn(async move { engine.run(token).await })
@@ -468,7 +474,9 @@ async fn main() -> Result<()> {
         email_sender,
         cipher,
     );
-    let state = state.with_incident_signals(incident_signal_tx);
+    let state = state
+        .with_telegram_send_budget(telegram_send_budget)
+        .with_incident_signals(incident_signal_tx);
     // Hot-reload the abuse deny-lists on SIGHUP when enabled (validate then
     // atomic swap; a bad edit is rejected and the running rules stay).
     let abuse_reload_handle: Option<JoinHandle<()>> = uptimepage::security::abuse_reload::spawn(

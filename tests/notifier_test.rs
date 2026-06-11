@@ -263,12 +263,20 @@ async fn build_notifier_rejects_unparseable_url() {
 #[tokio::test]
 async fn build_notifier_telegram_app_needs_central_token() {
     use uptimepage::domain::TelegramAppConfig;
+    use uptimepage::notifier::CentralTelegram;
+    use uptimepage::telegram::TelegramSendBudget;
+
     let http = build_outbound_client(uptimepage::security::SsrfGuard::relaxed_for_tests());
     let cfg = ChannelConfig::TelegramApp(TelegramAppConfig {
         chat_id: "-100123".into(),
         chat_title: None,
     });
-    assert!(build_notifier(&cfg, &http, Some("123:abc")).is_ok());
+    let budget = std::sync::Arc::new(TelegramSendBudget::new());
+    let central = |tok: &'static str| CentralTelegram {
+        bot_token: tok,
+        budget: &budget,
+    };
+    assert!(build_notifier(&cfg, &http, Some(central("123:abc"))).is_ok());
     // No operator bot → clear error, not a broken send.
     let err = match build_notifier(&cfg, &http, None) {
         Err(e) => e,
@@ -276,5 +284,38 @@ async fn build_notifier_telegram_app_needs_central_token() {
     };
     assert!(err.to_string().contains("central bot"));
     // Blank token (misconfig) is treated as absent.
-    assert!(build_notifier(&cfg, &http, Some("  ")).is_err());
+    assert!(build_notifier(&cfg, &http, Some(central("  "))).is_err());
+}
+
+#[tokio::test(start_paused = true)]
+async fn telegram_app_deferred_send_carries_retry_hint() {
+    use uptimepage::notifier::Notifier;
+    use uptimepage::telegram::TelegramSendBudget;
+
+    let budget = std::sync::Arc::new(TelegramSendBudget::new());
+    // Book the group chat solid: four concurrent acquires reserve slots at
+    // 0/3/6/9 s before any of them finishes sleeping.
+    let mut held = Vec::new();
+    for _ in 0..4 {
+        let b = budget.clone();
+        held.push(tokio::spawn(async move { b.acquire(-5).await }));
+    }
+    tokio::task::yield_now().await;
+
+    let http = build_outbound_client(uptimepage::security::SsrfGuard::relaxed_for_tests());
+    let notifier =
+        uptimepage::notifier::telegram::TelegramNotifier::new(http, "123:abc", "-5".into())
+            .unwrap()
+            .with_budget(budget);
+    let notice = make_notice();
+    // The next slot is 12 s out — past the wait ceiling, so the send is
+    // deferred before any network I/O, with the vendor-hint fragment the
+    // escalation engine schedules from.
+    let err = notifier
+        .notify_incident(&notice)
+        .await
+        .expect_err("must defer");
+    let msg = err.to_string();
+    assert!(msg.contains(r#""retry_after":"#), "{msg}");
+    assert!(msg.contains("send deferred"), "{msg}");
 }

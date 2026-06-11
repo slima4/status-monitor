@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use serde::Serialize;
 use url::Url;
@@ -6,13 +8,17 @@ use crate::error::{AppError, Result};
 use crate::http_outbound::{OutboundHttpClient, post_json};
 use crate::notifier::Notifier;
 use crate::notifier::event::IncidentNotice;
+use crate::telegram::TelegramSendBudget;
 
 /// Telegram Bot API sender. The bot token is embedded in the fixed
 /// `api.telegram.org` endpoint path; `chat_id` is sent in the body.
+/// `budget` is set only for the central bot (shared across orgs); BYO bots
+/// have their own per-customer budget and go unmetered.
 pub struct TelegramNotifier {
     client: OutboundHttpClient,
     send_url: Url,
     chat_id: String,
+    budget: Option<Arc<TelegramSendBudget>>,
 }
 
 #[derive(Serialize)]
@@ -38,13 +44,31 @@ impl TelegramNotifier {
             client,
             send_url,
             chat_id,
+            budget: None,
         })
+    }
+
+    pub fn with_budget(mut self, budget: Arc<TelegramSendBudget>) -> Self {
+        self.budget = Some(budget);
+        self
     }
 }
 
 #[async_trait]
 impl Notifier for TelegramNotifier {
     async fn notify_incident(&self, notice: &IncidentNotice) -> Result<()> {
+        if let Some(budget) = &self.budget {
+            let chat = self.chat_id.parse::<i64>().unwrap_or_default();
+            // The `"retry_after":N` fragment rides the same engine path as a
+            // vendor 429 hint, scheduling the retry instead of burning the
+            // ceiling — the send never reached Telegram.
+            budget.acquire(chat).await.map_err(|d| {
+                AppError::Other(anyhow::anyhow!(
+                    "telegram send deferred by the local bot budget: {{\"retry_after\":{}}}",
+                    d.retry_after_secs
+                ))
+            })?;
+        }
         let text = notice.plain_text();
         post_json(
             &self.client,

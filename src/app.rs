@@ -222,6 +222,10 @@ pub struct AppState {
     /// Single-use Telegram link codes. Built from `db` so `AppState::new`'s
     /// signature stays unchanged.
     pub telegram_link_code_store: Arc<dyn crate::storage::TelegramLinkCodeStore>,
+    /// Process-wide central-bot send budget. `new()` builds a fresh one for
+    /// fixtures; main replaces it with the instance the escalation engine
+    /// shares — two instances would double the bot's rate budget.
+    pub telegram_send_budget: Arc<crate::telegram::TelegramSendBudget>,
     pub incident_narration_store: Arc<dyn IncidentNarrationStore>,
     /// Operational incident lifecycle (acknowledge/assign/resolve/reopen +
     /// internal timeline). Built from `db` so `AppState::new`'s signature stays
@@ -439,6 +443,7 @@ impl AppState {
             page_asset_store,
             monitor_share_store,
             telegram_link_code_store,
+            telegram_send_budget: Arc::new(crate::telegram::TelegramSendBudget::new()),
             incident_narration_store,
             incident_ops_store,
             escalation_policy_store,
@@ -457,6 +462,16 @@ impl AppState {
             agent_ingest_dedup: build_agent_ingest_dedup(),
             agent_seen_debounce: build_agent_seen_debounce(),
         }
+    }
+
+    /// Share the central-bot send budget with the escalation engine — both
+    /// sides must meter against the same instance.
+    pub fn with_telegram_send_budget(
+        mut self,
+        budget: Arc<crate::telegram::TelegramSendBudget>,
+    ) -> Self {
+        self.telegram_send_budget = budget;
+        self
     }
 
     /// Attach the escalation-engine signal channel so lifecycle handlers can

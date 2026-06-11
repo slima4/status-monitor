@@ -156,6 +156,8 @@ rmcp = { version = "1.7", default-features = false, features = [
 schemars = "1"
 
 [dev-dependencies]
+# test-util unlocks tokio::time pause for the send-budget timing tests.
+tokio = { version = "1.52", features = ["full", "test-util"] }
 criterion = { version = "0.8", features = ["async_tokio"] }
 axum-server = { version = "0.8", features = ["tls-rustls-no-provider"] }
 rcgen = "0.14"

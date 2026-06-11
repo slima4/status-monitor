@@ -2,9 +2,11 @@
 //! a deep link. The bring-your-own `telegram` channel transport is separate
 //! and unaffected.
 
+mod budget;
 mod client;
 mod update;
 
+pub use budget::{RateDeferred, TelegramSendBudget};
 pub use client::{BotIdentity, TelegramClient};
 pub use update::{ChatRef, Update, WebhookAction, classify_update};
 

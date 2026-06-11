@@ -84,9 +84,8 @@ struct Worker {
     cfg: EscalationConfig,
     /// Operator base URL for incident deep links; empty omits the link.
     base_url: String,
-    /// Operator bot token for `telegram_app` delivery; stays wrapped so an
-    /// engine-layer log can't print it.
-    central_bot_token: Option<secrecy::SecretString>,
+    /// Operator token + shared send budget for `telegram_app` delivery.
+    central_bot: Option<crate::notifier::CentralBotDelivery>,
     /// True while a sweep task is in flight, so overlapping ticks skip rather
     /// than stack a second sweep on top of a slow one.
     sweeping: AtomicBool,
@@ -113,7 +112,7 @@ impl EscalationEngine {
         http: OutboundHttpClient,
         cfg: EscalationConfig,
         base_url: String,
-        central_bot_token: Option<secrecy::SecretString>,
+        central_bot: Option<crate::notifier::CentralBotDelivery>,
     ) -> Self {
         Self {
             rx,
@@ -127,7 +126,7 @@ impl EscalationEngine {
                 http,
                 cfg,
                 base_url,
-                central_bot_token,
+                central_bot,
                 sweeping: AtomicBool::new(false),
                 page_locks: (0..PAGE_LOCK_SHARDS).map(|_| Mutex::new(())).collect(),
                 on_call_cache: Cache::builder()
@@ -884,11 +883,8 @@ impl Worker {
         cfg: &crate::domain::ChannelConfig,
         notice: &IncidentNotice,
     ) -> (NotificationStatus, Option<String>) {
-        let central_token = {
-            use secrecy::ExposeSecret;
-            self.central_bot_token.as_ref().map(|t| t.expose_secret())
-        };
-        match build_notifier(cfg, &self.http, central_token) {
+        let central = self.central_bot.as_ref().map(|c| c.as_central());
+        match build_notifier(cfg, &self.http, central) {
             Ok(n) => match n.notify_incident(notice).await {
                 Ok(()) => (NotificationStatus::Sent, None),
                 Err(err) => (

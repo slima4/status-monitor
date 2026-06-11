@@ -484,11 +484,16 @@ pub async fn telegram_link_status(
 /// Shared by the saved-channel and ad-hoc test endpoints so both exercise
 /// the exact notifier path real incidents use.
 async fn deliver_test(state: &AppState, config: &ChannelConfig) -> Result<()> {
-    let notifier = build_notifier(
-        config,
-        &state.outbound_http,
-        state.cfg.telegram.delivery_token(),
-    )?;
+    let central =
+        state
+            .cfg
+            .telegram
+            .delivery_token()
+            .map(|bot_token| crate::notifier::CentralTelegram {
+                bot_token,
+                budget: &state.telegram_send_budget,
+            });
+    let notifier = build_notifier(config, &state.outbound_http, central)?;
     let notice = IncidentNotice {
         incident_id: Uuid::nil(),
         reason: NotificationReason::Opened,

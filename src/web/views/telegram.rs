@@ -236,7 +236,14 @@ fn spawn_reply(state: &AppState, chat_id: i64, text: String) {
         state.outbound_http.clone(),
         state.cfg.telegram.bot_token.expose_secret(),
     );
+    let budget = state.telegram_send_budget.clone();
     tokio::spawn(async move {
+        // A reply deferred past the budget's wait ceiling is dropped — a
+        // late link confirmation is noise, and alerts keep their slots.
+        if let Err(deferred) = budget.acquire(chat_id).await {
+            tracing::warn!(chat_id, ?deferred, "telegram reply dropped by send budget");
+            return;
+        }
         if let Err(err) = client.send_message(chat_id, &text).await {
             tracing::warn!(?err, chat_id, "telegram link reply failed");
         }
