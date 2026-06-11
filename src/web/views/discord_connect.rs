@@ -19,7 +19,7 @@ use crate::error::{AppError, Result};
 use crate::storage::orgs::is_active_member;
 use crate::web::client_ip::ClientIp;
 use crate::web::views::delegate_connect::{audit_delegated_create, finish_create};
-use crate::web::views::notification_channels::create_channel_deduped;
+use crate::web::views::notification_channels::{QuotaBlockLog, create_channel_deduped};
 use crate::web::{Authorized, ChannelsWrite, CurrentUser};
 
 const FORM_URL: &str = "/settings/notifications/new?kind=discord";
@@ -112,13 +112,16 @@ pub async fn callback(
     // Authority: a delegate-minted state rides the link's one-channel
     // budget; a dashboard-minted state needs the session user to still be
     // an active member of the state org.
-    if consumed.link_code_id.is_none() {
+    let session_user = if consumed.link_code_id.is_none() {
         let CurrentUser(user_id) = user?;
         if !is_active_member(pool, user_id, org).await? {
             tracing::info!(org_id = %org.0, reason = "membership_lost", "discord connect rejected");
             return Err(AppError::Forbidden);
         }
-    }
+        Some(user_id)
+    } else {
+        None
+    };
     let bounce_base =
         consumed
             .redirect_after
@@ -223,6 +226,11 @@ pub async fn callback(
         config,
         None,
         limit,
+        QuotaBlockLog {
+            db: state.db.clone(),
+            user: session_user,
+            flow: "discord_oauth",
+        },
     )
     .await
     {

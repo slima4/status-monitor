@@ -19,7 +19,7 @@ use uptimepage::storage::{
     ChannelLinkCodeStore, LinkCodeStatus, LinkPurpose, MintOutcome, NotificationChannelStore,
     PgChannelLinkCodeStore, PgNotificationChannelStore, create_org_with_owner,
 };
-use uptimepage::web::views::notification_channels::create_channel_deduped;
+use uptimepage::web::views::notification_channels::{QuotaBlockLog, create_channel_deduped};
 
 use common::{make_user, pg_pool_from_env, unique_slug};
 
@@ -264,6 +264,7 @@ async fn consume_path_channel_create_suffixes_taken_names() {
         app_config("-1"),
         Some("-1".into()),
         10,
+        no_block_log(),
     )
     .await
     .unwrap();
@@ -277,12 +278,14 @@ async fn consume_path_channel_create_suffixes_taken_names() {
         app_config("-2"),
         Some("-2".into()),
         10,
+        no_block_log(),
     )
     .await
     .unwrap();
     assert_eq!(second.name, "Ops 2");
 
-    // The quota error is not swallowed by the suffix loop.
+    // The quota error is not swallowed by the suffix loop, and the breach
+    // lands in the quota_events sample stream.
     let err = create_channel_deduped(
         &channels,
         org,
@@ -290,12 +293,44 @@ async fn consume_path_channel_create_suffixes_taken_names() {
         app_config("-3"),
         Some("-3".into()),
         2,
+        QuotaBlockLog {
+            db: Some(pool.clone()),
+            user: None,
+            flow: "telegram_link",
+        },
     )
     .await
     .unwrap_err();
     assert!(
         matches!(err, AppError::Unprocessable { code, .. } if code == codes::CHANNEL_QUOTA_EXCEEDED)
     );
+    let mut event_rows = 0i64;
+    for _ in 0..50 {
+        let (n,): (i64,) = sqlx::query_as(
+            "SELECT count(*) FROM quota_events \
+             WHERE org_id = $1 AND event = 'quota_exceeded' \
+               AND quota_name = 'max_notification_channels' \
+               AND details->>'flow' = 'telegram_link'",
+        )
+        .bind(org.0)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        event_rows = n;
+        if n > 0 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert_eq!(event_rows, 1, "the blocked create writes one sample row");
 
     cleanup(&pool, &[org], &[user]).await;
+}
+
+fn no_block_log() -> QuotaBlockLog {
+    QuotaBlockLog {
+        db: None,
+        user: None,
+        flow: "test",
+    }
 }

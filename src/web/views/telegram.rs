@@ -19,7 +19,7 @@ use crate::storage::LinkPurpose;
 use crate::telegram::{
     ChatRef, TelegramClient, Update, WebhookAction, classify_update, webhook_secret_matches,
 };
-use crate::web::views::notification_channels::create_channel_deduped;
+use crate::web::views::notification_channels::{QuotaBlockLog, create_channel_deduped};
 
 const SECRET_HEADER: &str = "x-telegram-bot-api-secret-token";
 
@@ -167,6 +167,15 @@ async fn link_chat(state: &AppState, code: &str, chat: ChatRef) -> Result<String
         config,
         Some(chat.id.to_string()),
         limit,
+        QuotaBlockLog {
+            db: state.db.clone(),
+            user: None,
+            flow: if delegated {
+                "telegram_delegate"
+            } else {
+                "telegram_link"
+            },
+        },
     )
     .await
     {

@@ -30,7 +30,7 @@ use crate::storage::orgs::record_audit_tx;
 use crate::web::client_ip::ClientIp;
 use crate::web::filters;
 use crate::web::views::channel_kind_label;
-use crate::web::views::notification_channels::create_channel_deduped;
+use crate::web::views::notification_channels::{QuotaBlockLog, create_channel_deduped};
 
 /// Manual-form kinds the page offers. Multi-secret transports (BYO
 /// telegram bot, WhatsApp) stay dashboard-only.
@@ -236,7 +236,7 @@ pub(crate) async fn finish_create(
     link: &ConsumedLink,
     base_name: &str,
     config: ChannelConfig,
-    via: &str,
+    via: &'static str,
 ) -> Result<NotificationChannel> {
     let limit = i64::from(
         state
@@ -252,6 +252,11 @@ pub(crate) async fn finish_create(
         config,
         None,
         limit,
+        QuotaBlockLog {
+            db: state.db.clone(),
+            user: None,
+            flow: via,
+        },
     )
     .await?;
     // Best-effort: the channel exists and works either way, and never

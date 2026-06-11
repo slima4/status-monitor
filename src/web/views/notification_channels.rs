@@ -388,6 +388,16 @@ fn form_from_channel(c: NotificationChannel) -> ChannelFormModel {
     }
 }
 
+/// Quota-block telemetry for a connect-flow create. The dashboard/API path
+/// samples cap hits through the quota pre-check (uncontended path only);
+/// link/OAuth flows go straight to the store cap, so
+/// [`create_channel_deduped`] writes the sample itself.
+pub struct QuotaBlockLog {
+    pub db: Option<sqlx::PgPool>,
+    pub user: Option<crate::domain::UserId>,
+    pub flow: &'static str,
+}
+
 /// Create a connect-flow channel (telegram link, Slack OAuth, …), deduping
 /// the name by suffixing (`Ops`, `Ops 2`, …); any non-name-collision error
 /// propagates unchanged.
@@ -398,6 +408,7 @@ pub async fn create_channel_deduped(
     config: ChannelConfig,
     external_ref: Option<String>,
     max_channels: i64,
+    block_log: QuotaBlockLog,
 ) -> Result<NotificationChannel, AppError> {
     const MAX_SUFFIX: u32 = 50;
     let mut attempt = 1;
@@ -415,7 +426,30 @@ pub async fn create_channel_deduped(
             {
                 attempt += 1;
             }
-            other => return other,
+            Err(err) => {
+                if matches!(&err, AppError::Unprocessable { code, .. }
+                    if *code == codes::CHANNEL_QUOTA_EXCEEDED)
+                {
+                    // current == limit by construction: the store cap refuses
+                    // the INSERT at count >= limit. Keeping the {current,
+                    // limit} shape of every other quota_exceeded row.
+                    crate::quotas::service::record_quota_event(
+                        block_log.db,
+                        Some(org),
+                        block_log.user,
+                        "quota_exceeded",
+                        Some("max_notification_channels"),
+                        serde_json::json!({
+                            "current": max_channels,
+                            "limit": max_channels,
+                            "flow": block_log.flow,
+                        }),
+                        None,
+                    );
+                }
+                return Err(err);
+            }
+            ok => return ok,
         }
     }
 }
@@ -850,6 +884,14 @@ mod tests {
             })
         }
 
+        fn no_block_log() -> QuotaBlockLog {
+            QuotaBlockLog {
+                db: None,
+                user: None,
+                flow: "test",
+            }
+        }
+
         #[tokio::test]
         async fn dedupes_name_with_suffix() {
             let store = InMemoryNotificationChannelStore::new();
@@ -861,6 +903,7 @@ mod tests {
                     app_config("-1"),
                     Some("-1".into()),
                     10,
+                    no_block_log(),
                 )
                 .await
                 .unwrap();
@@ -873,12 +916,28 @@ mod tests {
         #[tokio::test]
         async fn quota_error_passes_through() {
             let store = InMemoryNotificationChannelStore::new();
-            create_channel_deduped(&store, org(), "Ops", app_config("-1"), Some("-1".into()), 1)
-                .await
-                .unwrap();
-            let err = create_channel_deduped(&store, org(), "Other", app_config("-2"), None, 1)
-                .await
-                .unwrap_err();
+            create_channel_deduped(
+                &store,
+                org(),
+                "Ops",
+                app_config("-1"),
+                Some("-1".into()),
+                1,
+                no_block_log(),
+            )
+            .await
+            .unwrap();
+            let err = create_channel_deduped(
+                &store,
+                org(),
+                "Other",
+                app_config("-2"),
+                None,
+                1,
+                no_block_log(),
+            )
+            .await
+            .unwrap_err();
             assert!(
                 matches!(err, AppError::Unprocessable { code, .. } if code == codes::CHANNEL_QUOTA_EXCEEDED)
             );
