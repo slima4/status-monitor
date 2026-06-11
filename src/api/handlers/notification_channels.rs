@@ -319,8 +319,11 @@ pub struct TelegramLinkResponse {
     pub id: Uuid,
     /// The raw single-use code — shown once, never stored.
     pub code: String,
-    /// `https://t.me/<bot>?start=<code>` — open or render as a QR.
+    /// `https://t.me/<bot>?start=<code>` — links a private chat.
     pub deep_link: String,
+    /// `https://t.me/<bot>?startgroup=<code>` — adds the bot to a group the
+    /// user picks and links it. Same code; whichever chat consumes it wins.
+    pub group_deep_link: String,
     pub expires_at: chrono::DateTime<Utc>,
 }
 
@@ -391,6 +394,7 @@ pub async fn telegram_link_mint(
         Json(TelegramLinkResponse {
             id: minted.id,
             deep_link: format!("https://t.me/{bot}?start={code}"),
+            group_deep_link: format!("https://t.me/{bot}?startgroup={code}"),
             code,
             expires_at: minted.expires_at,
         }),
@@ -441,16 +445,11 @@ pub async fn telegram_link_status(
 /// Shared by the saved-channel and ad-hoc test endpoints so both exercise
 /// the exact notifier path real incidents use.
 async fn deliver_test(state: &AppState, config: &ChannelConfig) -> Result<()> {
-    // The factory can't build operator-managed transports (operator-token
-    // delivery isn't wired); fail as a clean 422 instead of its internal
-    // error.
-    if config.operator_managed() {
-        return Err(AppError::unprocessable(
-            codes::CHANNEL_TEST_FAILED,
-            "test delivery for linked telegram channels is not available",
-        ));
-    }
-    let notifier = build_notifier(config, &state.outbound_http)?;
+    let notifier = build_notifier(
+        config,
+        &state.outbound_http,
+        state.cfg.telegram.delivery_token(),
+    )?;
     let notice = IncidentNotice {
         incident_id: Uuid::nil(),
         reason: NotificationReason::Opened,

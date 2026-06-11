@@ -442,6 +442,9 @@ async fn telegram_link_mint_and_poll_round_trip() {
     let deep_link = body["deep_link"].as_str().unwrap();
     assert!(deep_link.starts_with("https://t.me/uptimepagebot?start="));
     assert!(deep_link.ends_with(code));
+    let group_link = body["group_deep_link"].as_str().unwrap();
+    assert!(group_link.starts_with("https://t.me/uptimepagebot?startgroup="));
+    assert!(group_link.ends_with(code));
     let id = body["id"].as_str().unwrap();
 
     let (st, body) = send_empty(

@@ -462,7 +462,7 @@ async fn channel_choices(
             selected: bound.contains(&c.id),
             id: c.id.to_string(),
             name: c.name,
-            kind: c.kind.as_db_str(),
+            kind: super::channel_kind_label(c.kind),
         })
         .collect())
 }

@@ -24,6 +24,10 @@ pub struct Chat {
     pub id: i64,
     #[serde(default)]
     pub title: Option<String>,
+    #[serde(default)]
+    pub first_name: Option<String>,
+    #[serde(default)]
+    pub username: Option<String>,
     #[serde(default, rename = "type")]
     pub chat_type: Option<String>,
 }
@@ -31,6 +35,16 @@ pub struct Chat {
 impl Chat {
     fn is_group(&self) -> bool {
         matches!(self.chat_type.as_deref(), Some("group" | "supergroup"))
+    }
+
+    /// Display name for the linked destination: group title, else the
+    /// private chat's person (first name, then @username). Private chats
+    /// carry no `title`, so without this the UI shows only a bare chat id.
+    fn display_name(&self) -> Option<String> {
+        self.title
+            .clone()
+            .or_else(|| self.first_name.clone())
+            .or_else(|| self.username.clone())
     }
 }
 
@@ -56,7 +70,7 @@ impl ChatRef {
     fn from(chat: &Chat) -> Self {
         Self {
             id: chat.id,
-            title: chat.title.clone(),
+            title: chat.display_name(),
         }
     }
 }
@@ -135,8 +149,35 @@ mod tests {
                 code: "abc123".into(),
                 chat: ChatRef {
                     id: 42,
-                    title: None
+                    // Private chats have no title — the person's name stands
+                    // in so the linked channel isn't anonymous.
+                    title: Some("A".into())
                 },
+            }
+        );
+    }
+
+    #[test]
+    fn private_chat_falls_back_to_username_then_nothing() {
+        let action = classify(
+            r#"{"message":{"text":"/start c","chat":{"id":1,"type":"private","username":"slim"}}}"#,
+        );
+        assert_eq!(
+            action,
+            WebhookAction::LinkPrivate {
+                code: "c".into(),
+                chat: ChatRef {
+                    id: 1,
+                    title: Some("slim".into())
+                },
+            }
+        );
+        let bare = classify(r#"{"message":{"text":"/start c","chat":{"id":2,"type":"private"}}}"#);
+        assert_eq!(
+            bare,
+            WebhookAction::LinkPrivate {
+                code: "c".into(),
+                chat: ChatRef { id: 2, title: None },
             }
         );
     }

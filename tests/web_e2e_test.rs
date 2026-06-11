@@ -504,3 +504,40 @@ async fn security_txt_served_per_rfc9116() {
         "security.txt needs an Expires field"
     );
 }
+
+#[tokio::test]
+async fn channel_form_gates_one_tap_telegram_on_central_bot() {
+    // Default config has no bot token: only the BYO "telegram bot" card.
+    let resp = app()
+        .oneshot(
+            Request::get("/settings/notifications/new")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let html = body_text(resp).await;
+    assert!(!html.contains(r#"value="telegram_app""#));
+    assert!(html.contains("telegram bot"));
+
+    let with_bot = build_test_app_with_web_and_owner(|cfg| {
+        cfg.telegram.bot_token = "123:abc".to_string().into();
+        cfg.telegram.bot_username = "uptimepagebot".into();
+        cfg.telegram.webhook_secret = "0123456789abcdef0123456789abcdef".to_string().into();
+    });
+    let resp = with_bot
+        .oneshot(
+            Request::get("/settings/notifications/new")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let html = body_text(resp).await;
+    assert!(html.contains(r#"value="telegram_app""#), "one-tap card");
+    assert!(html.contains("data-tga-connect"), "connect button");
+    assert!(html.contains("data-tga-group"), "group destination toggle");
+    assert!(html.contains("one-tap chat link"));
+}

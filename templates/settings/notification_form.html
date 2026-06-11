@@ -45,10 +45,17 @@
           <span class="check-type-card__name">webhook</span>
           <span class="check-type-card__desc">POST to your endpoint</span>
         </label>
+        {% if form.offers_telegram_app() %}
+        <label class="check-type-card" data-kind-card>
+          <input type="radio" name="kind" value="telegram_app"{% if form.kind == "telegram_app" %} checked{% endif %} class="sr-only">
+          <span class="check-type-card__name">telegram</span>
+          <span class="check-type-card__desc">one-tap chat link</span>
+        </label>
+        {% endif %}
         <label class="check-type-card" data-kind-card>
           <input type="radio" name="kind" value="telegram"{% if form.kind == "telegram" %} checked{% endif %} class="sr-only">
-          <span class="check-type-card__name">telegram</span>
-          <span class="check-type-card__desc">bot message to a chat</span>
+          <span class="check-type-card__name">telegram bot</span>
+          <span class="check-type-card__desc">your own bot token</span>
         </label>
         <label class="check-type-card" data-kind-card>
           <input type="radio" name="kind" value="whatsapp"{% if form.kind == "whatsapp" %} checked{% endif %} class="sr-only">
@@ -56,7 +63,7 @@
           <span class="check-type-card__desc">Cloud API message</span>
         </label>
       </div>
-      {% if form.mode != "create" %}
+      {% if form.mode != "create" && form.kind != "telegram_app" %}
       <p data-kind-locked-hint class="hidden font-mono text-xs text-quiet"># type locked — tick "Replace transport config" below to change it</p>
       {% endif %}
     </fieldset>
@@ -84,7 +91,9 @@
       <legend>transport</legend>
       <div class="clear-both space-y-5 p-5">
 
-      {% if form.mode != "create" %}
+      {# A linked telegram channel has no secrets and its config is never
+         caller-supplied — no replace toggle; unlink = delete. #}
+      {% if form.mode != "create" && form.kind != "telegram_app" %}
       <div>
         <label class="inline-flex items-center gap-2">
           <input type="checkbox" data-replace-config>
@@ -178,6 +187,40 @@
             <p class="font-mono text-xs text-muted"><a data-tg-qr-link href="#" target="_blank" rel="noopener" class="underline decoration-dotted hover:text-body"></a></p>
           </div>
         </div>
+      </div>
+
+      <div data-variant="telegram_app" class="space-y-4{% if form.kind != "telegram_app" %} hidden{% endif %}">
+        {% if form.mode == "create" %}
+        <p class="text-sm text-muted">
+          No tokens, no ids: tap the link (or scan the QR on your phone),
+          press <span class="font-mono">Start</span>, and the chat is linked
+          as this channel. The name above is used for the new channel.
+        </p>
+        <div class="flex flex-wrap items-center gap-3">
+          <button type="button" data-tga-connect
+                  class="sticker-btn sticker-btn--accent px-4 py-2 text-sm font-medium">connect telegram</button>
+          <span class="text-xs text-muted">Creates a single-use link — it expires after 15 minutes.</span>
+        </div>
+        <p data-tga-status role="status" class="hidden font-mono text-xs"></p>
+        <div data-tga-qr-box class="hidden space-y-2">
+          <label class="inline-flex items-center gap-2 text-xs text-muted">
+            <input type="checkbox" data-tga-group>
+            link a group chat instead of a private chat
+          </label>
+          <div data-tga-qr-img class="inline-block rounded-sm border border-[color:var(--theme-line)] bg-white p-2"></div>
+          <p class="font-mono text-xs text-muted"><a data-tga-link href="#" target="_blank" rel="noopener" class="underline decoration-dotted hover:text-body"></a></p>
+        </div>
+        {% else %}
+        <p class="font-mono text-xs text-quiet">
+          # linked via the bot{% if !form.config.telegram_app_chat_title.is_empty() %} to <span class="text-body">{{ form.config.telegram_app_chat_title }}</span>{% endif %}
+          · chat id <span class="text-body">{{ form.config.telegram_app_chat_id }}</span>
+        </p>
+        <p class="text-xs text-muted">
+          Alerts are sent to this chat by our bot — there is no config to edit.
+          To unlink, delete the channel below; to move it, delete and connect
+          again from the new chat.
+        </p>
+        {% endif %}
       </div>
 
       <div data-variant="whatsapp" class="space-y-5{% if form.kind != "whatsapp" %} hidden{% endif %}">

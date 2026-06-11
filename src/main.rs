@@ -376,6 +376,9 @@ async fn main() -> Result<()> {
             ),
             cfg.escalation.clone(),
             cfg.auth.public_base_url.clone(),
+            cfg.telegram
+                .enabled()
+                .then(|| cfg.telegram.bot_token.clone()),
         );
         let token = root.clone();
         tokio::spawn(async move { engine.run(token).await })

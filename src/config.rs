@@ -114,6 +114,12 @@ impl TelegramBotConfig {
     pub fn enabled(&self) -> bool {
         !self.bot_token.expose_secret().trim().is_empty()
     }
+
+    /// Bot token for linked-channel delivery; `None` when the central bot is
+    /// not configured. The one place the enabled-gate and the expose meet.
+    pub fn delivery_token(&self) -> Option<&str> {
+        self.enabled().then(|| self.bot_token.expose_secret())
+    }
 }
 
 /// `[operator]`. Instance-admin surface (`/operator/*`) for managing regions

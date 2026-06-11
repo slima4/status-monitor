@@ -28,7 +28,16 @@ pub trait Notifier: Send + Sync {
 /// `crate::domain::notification_channel`. URLs were validated `https` on
 /// channel create; re-parsing here is a defence-in-depth guard, not the
 /// primary check.
-pub fn build_notifier(cfg: &ChannelConfig, http: &OutboundHttpClient) -> Result<Arc<dyn Notifier>> {
+///
+/// `central_bot_token` is the operator-owned Telegram bot token; linked
+/// (`telegram_app`) channels deliver with it instead of a per-channel
+/// secret. `None` on deployments without the bot — building such a channel
+/// then fails with a clear error instead of a broken send.
+pub fn build_notifier(
+    cfg: &ChannelConfig,
+    http: &OutboundHttpClient,
+    central_bot_token: Option<&str>,
+) -> Result<Arc<dyn Notifier>> {
     let parse = |s: &str| -> Result<url::Url> {
         s.parse::<url::Url>().map_err(|e| {
             crate::error::AppError::bad_request(
@@ -52,12 +61,23 @@ pub fn build_notifier(cfg: &ChannelConfig, http: &OutboundHttpClient) -> Result<
             &c.bot_token,
             c.chat_id.clone(),
         )?) as Arc<dyn Notifier>,
-        // Sends with the operator bot token, which this factory does not
-        // carry — delivery wiring lands with the central-bot transport.
-        ChannelConfig::TelegramApp(_) => {
-            return Err(crate::error::AppError::Other(anyhow::anyhow!(
-                "central-bot telegram delivery is not available"
-            )));
+        // Same Bot API send as the BYO transport, with the operator token.
+        ChannelConfig::TelegramApp(c) => {
+            let token = central_bot_token
+                .map(str::trim)
+                .filter(|t| !t.is_empty())
+                .ok_or_else(|| {
+                    crate::error::AppError::bad_request(
+                        crate::api::codes::INVALID_CONFIG,
+                        "linked telegram channels need the central bot, which is not configured \
+                         on this deployment",
+                    )
+                })?;
+            Arc::new(TelegramNotifier::new(
+                http.clone(),
+                token,
+                c.chat_id.clone(),
+            )?) as Arc<dyn Notifier>
         }
         ChannelConfig::WhatsApp(c) => {
             Arc::new(WhatsAppNotifier::new(http.clone(), c)?) as Arc<dyn Notifier>

@@ -62,6 +62,8 @@ pub struct ConfigFields {
     pub webhook_secret: String,
     pub telegram_bot_token: String,
     pub telegram_chat_id: String,
+    pub telegram_app_chat_id: String,
+    pub telegram_app_chat_title: String,
     pub whatsapp_access_token: String,
     pub whatsapp_phone_number_id: String,
     pub whatsapp_to: String,
@@ -78,6 +80,8 @@ impl Default for ConfigFields {
             webhook_secret: String::new(),
             telegram_bot_token: String::new(),
             telegram_chat_id: String::new(),
+            telegram_app_chat_id: String::new(),
+            telegram_app_chat_title: String::new(),
             whatsapp_access_token: String::new(),
             whatsapp_phone_number_id: String::new(),
             whatsapp_to: String::new(),
@@ -119,6 +123,19 @@ pub struct ChannelFormModel {
     pub used_by: Vec<MonitorCard>,
     /// Monitors NOT bound to this channel, offered by the bind picker.
     pub bindable: Vec<MonitorCard>,
+    /// Whether this deployment runs the central Telegram bot. Gates the
+    /// one-tap "telegram" type card; the BYO "telegram bot" card is always
+    /// offered.
+    pub central_telegram: bool,
+}
+
+impl ChannelFormModel {
+    /// The one-tap card shows on create when the bot is configured, and on
+    /// edit only for an already-linked channel (informational — a linked
+    /// channel stays viewable even if the operator later removes the bot).
+    pub fn offers_telegram_app(&self) -> bool {
+        (self.central_telegram && self.mode == "create") || self.kind == "telegram_app"
+    }
 }
 
 impl ChannelFormModel {
@@ -178,7 +195,7 @@ pub async fn list_partial(
         .map(|c| ChannelRow {
             id: c.id.to_string(),
             name: c.name,
-            kind: c.kind.as_db_str(),
+            kind: super::channel_kind_label(c.kind),
             enabled: c.enabled,
             created: c.created_at,
             managed_by: c.write_source.managed_label(),
@@ -196,6 +213,7 @@ pub async fn new_form(
         Err(resp) => return Ok(*resp),
     };
     let mut form = empty_create_form();
+    form.central_telegram = state.cfg.telegram.enabled();
     (_, form.bindable) = org_monitor_cards(&state, org, None).await?;
     Ok(ChannelFormPage {
         active_tab: TAB_NOTIFICATIONS,
@@ -264,6 +282,7 @@ pub async fn edit_form(
             AppError::not_found("CHANNEL_NOT_FOUND", "notification channel not found")
         })?;
     let mut form = form_from_channel(channel);
+    form.central_telegram = state.cfg.telegram.enabled();
     (form.used_by, form.bindable) = org_monitor_cards(&state, org, Some(id)).await?;
     Ok(ChannelFormPage {
         active_tab: TAB_NOTIFICATIONS,
@@ -284,6 +303,7 @@ fn empty_create_form() -> ChannelFormModel {
         config: ConfigFields::default(),
         used_by: Vec::new(),
         bindable: Vec::new(),
+        central_telegram: false,
     }
 }
 
@@ -304,8 +324,12 @@ fn form_from_channel(c: NotificationChannel) -> ChannelFormModel {
             config.telegram_bot_token = c.bot_token;
             config.telegram_chat_id = c.chat_id;
         }
-        // Linked via the central bot; nothing user-editable to prefill.
-        ChannelConfig::TelegramApp(_) => {}
+        // Linked via the central bot; display-only — the API rejects this
+        // kind in request bodies, so the panel renders info, not inputs.
+        ChannelConfig::TelegramApp(c) => {
+            config.telegram_app_chat_id = c.chat_id;
+            config.telegram_app_chat_title = c.chat_title.unwrap_or_default();
+        }
         ChannelConfig::WhatsApp(c) => {
             config.whatsapp_access_token = c.access_token;
             config.whatsapp_phone_number_id = c.phone_number_id;
@@ -325,6 +349,7 @@ fn form_from_channel(c: NotificationChannel) -> ChannelFormModel {
         config,
         used_by: Vec::new(),
         bindable: Vec::new(),
+        central_telegram: false,
     }
 }
 
@@ -374,6 +399,68 @@ mod tests {
         assert!(html.contains("data-add-monitor"));
         assert!(html.contains("# none picked yet"));
         assert!(html.contains("# no monitors yet"));
+    }
+
+    #[test]
+    fn create_form_one_tap_telegram_gated_on_central_bot() {
+        // Without the central bot (self-host) the one-tap card is absent and
+        // only the BYO "telegram bot" card is offered.
+        let off = ChannelFormPage {
+            active_tab: TAB_NOTIFICATIONS,
+            form: empty_create_form(),
+        }
+        .render()
+        .unwrap();
+        assert!(!off.contains(r#"value="telegram_app""#));
+        assert!(off.contains("telegram bot"));
+
+        let mut form = empty_create_form();
+        form.central_telegram = true;
+        let on = ChannelFormPage {
+            active_tab: TAB_NOTIFICATIONS,
+            form,
+        }
+        .render()
+        .unwrap();
+        assert!(on.contains(r#"value="telegram_app""#));
+        assert!(on.contains("one-tap chat link"));
+        assert!(on.contains("data-tga-connect"));
+        assert!(on.contains("data-tga-qr-box"));
+    }
+
+    #[test]
+    fn edit_form_linked_telegram_shows_chat_info_not_inputs() {
+        use chrono::Utc;
+        let ch = NotificationChannel {
+            id: Uuid::nil(),
+            name: "Ops Telegram".into(),
+            kind: crate::domain::ChannelKind::TelegramApp,
+            config: ChannelConfig::TelegramApp(crate::domain::TelegramAppConfig {
+                chat_id: "-100123".into(),
+                chat_title: Some("Ops".into()),
+            }),
+            enabled: true,
+            write_source: crate::domain::WriteSource::Ui,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        let form = form_from_channel(ch);
+        assert_eq!(form.kind, "telegram_app");
+        assert_eq!(form.config.telegram_app_chat_id, "-100123");
+        let html = ChannelFormPage {
+            active_tab: TAB_NOTIFICATIONS,
+            form,
+        }
+        .render()
+        .unwrap();
+        // The one-tap card stays visible for an already-linked channel even
+        // with central_telegram=false, so the edit page renders coherently.
+        assert!(html.contains(r#"value="telegram_app""#));
+        assert!(html.contains("# linked via the bot"));
+        assert!(html.contains("-100123"));
+        assert!(html.contains("Ops"));
+        // Display-only: no connect button on edit.
+        assert!(!html.contains("data-tga-connect"));
     }
 
     #[test]

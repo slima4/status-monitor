@@ -38,6 +38,17 @@
         el.classList.remove("hidden");
     }
 
+    // Render `url` as an SVG QR into `el`. margin 4 = the spec's full quiet
+    // zone, needed against the dark page for picky scanners. Throws when the
+    // vendored lib didn't load.
+    function renderQr(el, url) {
+        if (typeof qrcode !== "function") throw new Error("QR library failed to load — refresh and try again");
+        const qr = qrcode(0, "M");
+        qr.addData(url);
+        qr.make();
+        el.innerHTML = qr.createSvgTag({ cellSize: 4, margin: 4 });
+    }
+
     // First text node only — the name span may carry disabled/managed chips.
     function cardName(el) {
         return el.querySelector(".check-type-card__name")?.childNodes[0]?.textContent.trim() || "monitor";
@@ -72,10 +83,25 @@
         form.querySelectorAll("[data-variant]").forEach(el => {
             el.classList.toggle("hidden", el.dataset.variant !== kind);
         });
+        syncCentralTelegram(kind);
+    }
+
+    // The one-tap kind has no submittable config: the channel is created by
+    // the webhook when the chat presses Start, so create-mode hides the
+    // submit/test/bind affordances and the connect button takes over. On
+    // edit everything stays — "test now" exercises the stored config by id.
+    function syncCentralTelegram(kind) {
+        const hide = kind === "telegram_app" && !isEdit;
+        form.querySelector("button[type=submit]")?.classList.toggle("hidden", hide);
+        const testRow = form.querySelector("[data-send-test]")?.parentElement;
+        testRow?.classList.toggle("hidden", hide);
+        if (hide) hideTestResult();
+        form.querySelector("#used-by")?.classList.toggle("hidden", hide);
     }
 
     function syncNamePlaceholder() {
-        if (nameInput) nameInput.placeholder = `ops-${currentKind()}`;
+        const kind = currentKind();
+        if (nameInput) nameInput.placeholder = `ops-${kind === "telegram_app" ? "telegram" : kind}`;
     }
 
     // On edit the secret is never shown; the config inputs stay disabled
@@ -251,14 +277,8 @@
             try {
                 const me = await tgApi(token, "getMe");
                 if (!me.username) throw new Error("the bot has no username");
-                if (typeof qrcode !== "function") throw new Error("QR library failed to load — refresh and try again");
                 const url = `https://t.me/${me.username}`;
-                const qr = qrcode(0, "M");
-                qr.addData(url);
-                qr.make();
-                // margin 4 = the spec's full quiet zone, needed against the
-                // dark page for picky scanners.
-                qrImg.innerHTML = qr.createSvgTag({ cellSize: 4, margin: 4 });
+                renderQr(qrImg, url);
                 qrLink.textContent = url;
                 qrLink.href = url;
                 qrBox.classList.remove("hidden");
@@ -305,6 +325,118 @@
             } finally {
                 tgDetectBtn.disabled = false;
             }
+        });
+    }
+
+    // One-tap Telegram: mint a single-use link code, show it as a t.me link
+    // + QR, and poll until the chat presses Start — then jump to the channel
+    // the webhook created. No Bot API traffic from the browser, unlike the
+    // BYO helper above.
+    const tgaBtn = form.querySelector("[data-tga-connect]");
+    if (tgaBtn) {
+        const tgaStatus = form.querySelector("[data-tga-status]");
+        const tgaQrBox = form.querySelector("[data-tga-qr-box]");
+        const tgaQrImg = form.querySelector("[data-tga-qr-img]");
+        const tgaLink = form.querySelector("[data-tga-link]");
+        const tgaGroupCb = form.querySelector("[data-tga-group]");
+        const showTga = (text, cls) => showStatus(tgaStatus, text, cls);
+        const headers = { "Accept": "application/json", "X-Requested-With": "uptimepage" };
+        let pollTimer = null;
+        let mintedLinks = null;
+
+        function resetTga() {
+            if (pollTimer) clearInterval(pollTimer);
+            pollTimer = null;
+            mintedLinks = null;
+            tgaQrBox.classList.add("hidden");
+            tgaStatus.classList.add("hidden");
+            tgaBtn.disabled = false;
+        }
+
+        // One code serves both destinations — the toggle only swaps which
+        // t.me deep link (start vs startgroup) is shown; whichever chat
+        // sends the code back gets linked.
+        function renderTgaDest() {
+            if (!mintedLinks) return;
+            const url = tgaGroupCb?.checked ? mintedLinks.group_deep_link : mintedLinks.deep_link;
+            tgaLink.textContent = url;
+            tgaLink.href = url;
+            // The t.me link works without the QR — degrade, don't dead-end.
+            try {
+                renderQr(tgaQrImg, url);
+                tgaQrImg.classList.remove("hidden");
+            } catch {
+                tgaQrImg.classList.add("hidden");
+            }
+            tgaQrBox.classList.remove("hidden");
+            showTga(
+                tgaGroupCb?.checked
+                    ? "# waiting — open the link (or scan), pick the group, and confirm…"
+                    : "# waiting — open the link (or scan) and press Start…",
+                "text-quiet",
+            );
+        }
+        tgaGroupCb?.addEventListener("change", renderTgaDest);
+        form.addEventListener("change", (evt) => {
+            if (evt.target.name === "kind") resetTga();
+        });
+        // A stale code from before back/forward navigation can't be trusted
+        // — the poll handle is gone anyway.
+        window.addEventListener("pageshow", (evt) => {
+            if (evt.persisted) resetTga();
+        });
+
+        function pollLink(id) {
+            pollTimer = setInterval(async () => {
+                let body;
+                try {
+                    const res = await fetch(`/api/v1/notification-channels/telegram-link/${id}`, { headers });
+                    if (!res.ok) return; // transient — keep polling until expiry resolves it
+                    body = await res.json();
+                } catch { return; }
+                if (body.status === "consumed" && body.channel_id) {
+                    clearInterval(pollTimer);
+                    pollTimer = null;
+                    showTga("✓ linked — opening the new channel…", "flash-text flash-text--ok font-medium");
+                    window.location = `/settings/notifications/${body.channel_id}/edit`;
+                } else if (body.status !== "pending") {
+                    clearInterval(pollTimer);
+                    pollTimer = null;
+                    tgaQrBox.classList.add("hidden");
+                    tgaBtn.disabled = false;
+                    showTga("✗ the link expired before it was used — connect again for a fresh one", "flash-text flash-text--bad font-medium");
+                }
+            }, 2000);
+        }
+
+        tgaBtn.addEventListener("click", async () => {
+            clearErrors();
+            resetTga();
+            tgaBtn.disabled = true;
+            showTga("# creating a single-use link…", "text-quiet");
+            const name = (nameInput?.value || "").trim();
+            let body;
+            try {
+                const res = await fetch("/api/v1/notification-channels/telegram-link", {
+                    method: "POST",
+                    headers: { ...headers, "Content-Type": "application/json" },
+                    body: JSON.stringify(name ? { name } : {}),
+                });
+                if (!res.ok) {
+                    const msg = await window.smApiErrorMessage(res, `link failed (${res.status})`);
+                    showTga(`✗ ${msg}`, "flash-text flash-text--bad font-medium");
+                    tgaBtn.disabled = false;
+                    return;
+                }
+                body = await res.json();
+            } catch (err) {
+                showTga(`✗ network error: ${err.message || err}`, "flash-text flash-text--bad font-medium");
+                tgaBtn.disabled = false;
+                return;
+            }
+            mintedLinks = body;
+            renderTgaDest();
+            pollLink(body.id);
         });
     }
 
@@ -467,6 +599,11 @@
             const language = (data.get("whatsapp_language_code") || "").trim();
             if (language) config.language_code = language;
             return { config };
+        }
+        if (kind === "telegram_app") {
+            // Created only by the bot's webhook; the API rejects this kind in
+            // request bodies, so never build it client-side either.
+            return { error: "Linked telegram channels have no config to submit — use \"connect telegram\", or untick \"Replace transport config\" to keep the stored link." };
         }
         return {
             config: {

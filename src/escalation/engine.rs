@@ -84,6 +84,9 @@ struct Worker {
     cfg: EscalationConfig,
     /// Operator base URL for incident deep links; empty omits the link.
     base_url: String,
+    /// Operator bot token for linked (`telegram_app`) channel delivery.
+    /// Stays wrapped so an engine-layer debug/log can't print it.
+    central_bot_token: Option<secrecy::SecretString>,
     /// True while a sweep task is in flight, so overlapping ticks skip rather
     /// than stack a second sweep on top of a slow one.
     sweeping: AtomicBool,
@@ -110,6 +113,7 @@ impl EscalationEngine {
         http: OutboundHttpClient,
         cfg: EscalationConfig,
         base_url: String,
+        central_bot_token: Option<secrecy::SecretString>,
     ) -> Self {
         Self {
             rx,
@@ -123,6 +127,7 @@ impl EscalationEngine {
                 http,
                 cfg,
                 base_url,
+                central_bot_token,
                 sweeping: AtomicBool::new(false),
                 page_locks: (0..PAGE_LOCK_SHARDS).map(|_| Mutex::new(())).collect(),
                 on_call_cache: Cache::builder()
@@ -865,7 +870,11 @@ impl Worker {
         cfg: &crate::domain::ChannelConfig,
         notice: &IncidentNotice,
     ) -> (NotificationStatus, Option<String>) {
-        match build_notifier(cfg, &self.http) {
+        let central_token = {
+            use secrecy::ExposeSecret;
+            self.central_bot_token.as_ref().map(|t| t.expose_secret())
+        };
+        match build_notifier(cfg, &self.http, central_token) {
             Ok(n) => match n.notify_incident(notice).await {
                 Ok(()) => (NotificationStatus::Sent, None),
                 Err(err) => (
@@ -1311,6 +1320,7 @@ mod tests {
             ),
             EscalationConfig::default(),
             String::new(),
+            None,
         )
     }
 
