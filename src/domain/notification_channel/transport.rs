@@ -35,6 +35,13 @@ pub trait TransportConfig {
     /// abuse gate must be an explicit per-transport decision, not an
     /// omission.
     fn abuse_url(&self) -> Option<&str>;
+
+    /// True when only the operator's own flow may produce this config —
+    /// the API rejects it in create/update/test bodies (a caller-supplied
+    /// destination would ride the operator's credentials). No default on
+    /// purpose, like [`Self::abuse_url`]: accepting caller config must be an
+    /// explicit per-transport decision.
+    fn operator_managed(&self) -> bool;
 }
 
 /// `https://`-only URL rule shared by the URL-bearing transports.

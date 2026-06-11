@@ -20,6 +20,8 @@ use crate::api::ApiError;
 use crate::api::error::codes;
 use crate::api::redaction::Redacted;
 use crate::app::AppState;
+use crate::auth::sha256_hex;
+use crate::auth::token_hash::generate_raw_token;
 use crate::domain::{
     ChannelConfig, IncidentSeverity, IncidentUrgency, NewNotificationChannel, NotificationChannel,
     NotificationChannelUpdate, NotificationReason, validate_channel_name,
@@ -27,8 +29,10 @@ use crate::domain::{
 use crate::error::{AppError, Result};
 use crate::notifier::build_notifier;
 use crate::notifier::event::IncidentNotice;
+use crate::storage::{LinkCodeStatus, MintOutcome};
 use crate::web::{
-    Authorized, ChannelsDelete, ChannelsExecute, ChannelsRead, ChannelsWrite, RequestSource,
+    Authorized, ChannelsDelete, ChannelsExecute, ChannelsRead, ChannelsWrite, CurrentUser,
+    RequestSource,
 };
 
 /// Result of `POST /{id}/test`. A `false` never reaches the client — a failed
@@ -74,6 +78,7 @@ pub async fn create(
     Redacted<NotificationChannel>,
 )> {
     validate_name(&new.name)?;
+    reject_managed_kind(&new.config)?;
     validate_config(&new.config)?;
     check_channel_abuse(&state, org, &new.config)?;
     // Friendly pre-check; the store INSERT enforces the same cap atomically
@@ -172,6 +177,7 @@ pub async fn update(
         validate_name(name)?;
     }
     if let Some(cfg) = &update.config {
+        reject_managed_kind(cfg)?;
         validate_config(cfg)?;
         check_channel_abuse(&state, org, cfg)?;
     }
@@ -281,16 +287,169 @@ pub async fn test_config(
     Authorized(org, _): Authorized<ChannelsExecute>,
     Json(req): Json<TestChannelConfigRequest>,
 ) -> Result<Json<TestNotificationResponse>> {
+    // An unsaved managed-kind config here would message a caller-supplied
+    // chat id with the operator bot — same spam vector as create.
+    reject_managed_kind(&req.config)?;
     validate_config(&req.config)?;
     check_channel_abuse(&state, org, &req.config)?;
     deliver_test(&state, &req.config).await?;
     Ok(Json(TestNotificationResponse { delivered: true }))
 }
 
+// ── Central-bot Telegram linking ─────────────────────────────────────────
+
+/// How long a minted link code stays claimable.
+const TELEGRAM_LINK_TTL_MINUTES: i64 = 15;
+
+/// Outstanding unconsumed codes per org — bounds drive-by minting.
+const TELEGRAM_LINK_MAX_OUTSTANDING: i64 = 5;
+
+#[derive(Debug, Clone, Default, Deserialize, ToSchema)]
+pub struct TelegramLinkRequest {
+    /// Optional name for the channel created when the code is consumed;
+    /// defaults to the linked chat's title.
+    #[serde(default)]
+    #[schema(example = "Ops Telegram", max_length = 100)]
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct TelegramLinkResponse {
+    /// Poll handle for `GET /telegram-link/{id}`.
+    pub id: Uuid,
+    /// The raw single-use code — shown once, never stored.
+    pub code: String,
+    /// `https://t.me/<bot>?start=<code>` — open or render as a QR.
+    pub deep_link: String,
+    pub expires_at: chrono::DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct TelegramLinkStatusResponse {
+    /// `pending`, `consumed`, or `expired`.
+    pub status: &'static str,
+    /// The created channel, present once `status` is `consumed`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub channel_id: Option<Uuid>,
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/notification-channels/telegram-link",
+    tag = "notification-channels",
+    summary = "Mint a single-use Telegram link code",
+    description = "Returns a short-lived code wrapped in a t.me deep link. \
+                   Sending it to the bot (tap Start) creates a `telegram_app` \
+                   channel for the chat. 404 on deployments without a central \
+                   bot configured.",
+    request_body(content = TelegramLinkRequest, example = json!({ "name": "Ops Telegram" })),
+    responses(
+        (status = 201, body = TelegramLinkResponse),
+        (status = 400, body = ApiError, description = "Invalid channel-name hint"),
+        (status = 422, body = ApiError, description = "Too many outstanding link codes"),
+    ),
+)]
+pub async fn telegram_link_mint(
+    State(state): State<AppState>,
+    Authorized(org, _): Authorized<ChannelsWrite>,
+    CurrentUser(user): CurrentUser,
+    Json(req): Json<TelegramLinkRequest>,
+) -> Result<(StatusCode, Json<TelegramLinkResponse>)> {
+    require_central_bot(&state)?;
+    let name = match req.name.as_deref().map(str::trim) {
+        Some("") | None => None,
+        Some(n) => {
+            validate_name(n)?;
+            Some(n.to_string())
+        }
+    };
+    let code = generate_raw_token();
+    let expires_at = Utc::now() + chrono::Duration::minutes(TELEGRAM_LINK_TTL_MINUTES);
+    let outcome = state
+        .telegram_link_code_store
+        .mint(
+            org,
+            Some(user),
+            &sha256_hex(&code),
+            name.as_deref(),
+            expires_at,
+            TELEGRAM_LINK_MAX_OUTSTANDING,
+        )
+        .await?;
+    let minted = match outcome {
+        MintOutcome::Created(c) => c,
+        MintOutcome::LimitReached => {
+            return Err(AppError::unprocessable(
+                codes::TELEGRAM_LINK_LIMIT,
+                "too many outstanding link codes; wait for one to expire or complete a pending link",
+            ));
+        }
+    };
+    let bot = state.cfg.telegram.bot_username.trim_start_matches('@');
+    Ok((
+        StatusCode::CREATED,
+        Json(TelegramLinkResponse {
+            id: minted.id,
+            deep_link: format!("https://t.me/{bot}?start={code}"),
+            code,
+            expires_at: minted.expires_at,
+        }),
+    ))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/notification-channels/telegram-link/{id}",
+    tag = "notification-channels",
+    summary = "Poll a Telegram link code",
+    params(("id" = Uuid, Path)),
+    responses(
+        (status = 200, body = TelegramLinkStatusResponse),
+        (status = 404, body = ApiError),
+    ),
+)]
+pub async fn telegram_link_status(
+    State(state): State<AppState>,
+    Authorized(org, _): Authorized<ChannelsRead>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<TelegramLinkStatusResponse>> {
+    require_central_bot(&state)?;
+    let status = state
+        .telegram_link_code_store
+        .status(org, id)
+        .await?
+        .ok_or_else(|| {
+            AppError::not_found(codes::TELEGRAM_LINK_NOT_FOUND, "link code not found")
+        })?;
+    Ok(Json(match status {
+        LinkCodeStatus::Pending => TelegramLinkStatusResponse {
+            status: "pending",
+            channel_id: None,
+        },
+        LinkCodeStatus::Consumed { channel_id } => TelegramLinkStatusResponse {
+            status: "consumed",
+            channel_id: Some(channel_id),
+        },
+        LinkCodeStatus::Expired => TelegramLinkStatusResponse {
+            status: "expired",
+            channel_id: None,
+        },
+    }))
+}
+
 /// One synthetic, clearly-labelled delivery through `config`'s transport.
 /// Shared by the saved-channel and ad-hoc test endpoints so both exercise
 /// the exact notifier path real incidents use.
 async fn deliver_test(state: &AppState, config: &ChannelConfig) -> Result<()> {
+    // The factory can't build operator-managed transports (operator-token
+    // delivery isn't wired); fail as a clean 422 instead of its internal
+    // error.
+    if config.operator_managed() {
+        return Err(AppError::unprocessable(
+            codes::CHANNEL_TEST_FAILED,
+            "test delivery for linked telegram channels is not available",
+        ));
+    }
     let notifier = build_notifier(config, &state.outbound_http)?;
     let notice = IncidentNotice {
         incident_id: Uuid::nil(),
@@ -321,6 +480,34 @@ async fn deliver_test(state: &AppState, config: &ChannelConfig) -> Result<()> {
 
 fn channel_not_found() -> AppError {
     AppError::not_found(codes::CHANNEL_NOT_FOUND, "notification channel not found")
+}
+
+/// The linking surface only exists on deployments with a central bot;
+/// without one the endpoints answer as absent.
+fn require_central_bot(state: &AppState) -> Result<()> {
+    if state.cfg.telegram.enabled() {
+        Ok(())
+    } else {
+        Err(AppError::not_found(
+            codes::TELEGRAM_LINK_NOT_FOUND,
+            "telegram linking is not available on this deployment",
+        ))
+    }
+}
+
+/// Operator-managed configs carry a destination our credentials will message
+/// (a `telegram_app` chat id); accepting one from a request body would let
+/// any caller alert-spam an arbitrary destination. They are only ever
+/// created by their own flow (the webhook consuming a link code).
+fn reject_managed_kind(cfg: &ChannelConfig) -> Result<()> {
+    if cfg.operator_managed() {
+        return Err(AppError::unprocessable(
+            codes::CHANNEL_KIND_MANAGED,
+            "telegram channels are created by linking a chat through the bot; \
+             mint a link code instead of supplying config",
+        ));
+    }
+    Ok(())
 }
 
 fn validate_name(name: &str) -> Result<()> {

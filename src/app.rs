@@ -219,6 +219,9 @@ pub struct AppState {
     /// `AppState::new`'s signature stays unchanged: a Pg store when tenancy is
     /// live, an in-memory one for no-DB fixtures.
     pub monitor_share_store: Arc<dyn crate::storage::MonitorShareStore>,
+    /// Single-use codes binding a Telegram chat to an org via the central
+    /// bot. Built from `db` so `AppState::new`'s signature stays unchanged.
+    pub telegram_link_code_store: Arc<dyn crate::storage::TelegramLinkCodeStore>,
     pub incident_narration_store: Arc<dyn IncidentNarrationStore>,
     /// Operational incident lifecycle (acknowledge/assign/resolve/reopen +
     /// internal timeline). Built from `db` so `AppState::new`'s signature stays
@@ -388,6 +391,11 @@ impl AppState {
             Some(pool) => Arc::new(crate::storage::PgPageAssetStore::new(pool)),
             None => Arc::new(crate::storage::InMemoryPageAssetStore::new()),
         };
+        let telegram_link_code_store: Arc<dyn crate::storage::TelegramLinkCodeStore> =
+            match db.clone() {
+                Some(pool) => Arc::new(crate::storage::PgTelegramLinkCodeStore::new(pool)),
+                None => Arc::new(crate::storage::InMemoryTelegramLinkCodeStore::new()),
+            };
         let incident_ops_store: Arc<dyn crate::storage::IncidentOpsStore> = match db.clone() {
             Some(pool) => Arc::new(crate::storage::PgIncidentOpsStore::new(pool)),
             None => Arc::new(crate::storage::InMemoryIncidentOpsStore::new()),
@@ -430,6 +438,7 @@ impl AppState {
             status_page_store,
             page_asset_store,
             monitor_share_store,
+            telegram_link_code_store,
             incident_narration_store,
             incident_ops_store,
             escalation_policy_store,

@@ -21,12 +21,14 @@
 
 mod slack;
 mod telegram;
+mod telegram_app;
 mod transport;
 mod webhook;
 mod whatsapp;
 
 pub use slack::SlackConfig;
 pub use telegram::TelegramConfig;
+pub use telegram_app::TelegramAppConfig;
 pub use transport::TransportConfig;
 pub use webhook::WebhookConfig;
 pub use whatsapp::WhatsAppConfig;
@@ -43,6 +45,8 @@ pub enum ChannelKind {
     Webhook,
     Slack,
     Telegram,
+    #[serde(rename = "telegram_app")]
+    TelegramApp,
     #[serde(rename = "whatsapp")]
     WhatsApp,
 }
@@ -51,7 +55,13 @@ impl ChannelKind {
     /// Every variant in declaration order. Used by the enum-drift integration
     /// test to compare against the live Postgres CHECK constraint on
     /// `notification_channels.kind`; keep in lockstep with the enum body.
-    pub const ALL: &'static [Self] = &[Self::Webhook, Self::Slack, Self::Telegram, Self::WhatsApp];
+    pub const ALL: &'static [Self] = &[
+        Self::Webhook,
+        Self::Slack,
+        Self::Telegram,
+        Self::TelegramApp,
+        Self::WhatsApp,
+    ];
 
     /// Stable string used in the Postgres `kind` CHECK constraint and the
     /// JSON wire form.
@@ -60,6 +70,7 @@ impl ChannelKind {
             Self::Webhook => "webhook",
             Self::Slack => "slack",
             Self::Telegram => "telegram",
+            Self::TelegramApp => "telegram_app",
             Self::WhatsApp => "whatsapp",
         }
     }
@@ -74,6 +85,8 @@ pub enum ChannelConfig {
     Webhook(WebhookConfig),
     Slack(SlackConfig),
     Telegram(TelegramConfig),
+    #[serde(rename = "telegram_app")]
+    TelegramApp(TelegramAppConfig),
     #[serde(rename = "whatsapp")]
     WhatsApp(WhatsAppConfig),
 }
@@ -86,6 +99,7 @@ macro_rules! with_transport {
             ChannelConfig::Webhook($c) => $body,
             ChannelConfig::Slack($c) => $body,
             ChannelConfig::Telegram($c) => $body,
+            ChannelConfig::TelegramApp($c) => $body,
             ChannelConfig::WhatsApp($c) => $body,
         }
     };
@@ -123,6 +137,13 @@ impl ChannelConfig {
     /// `None` for transports with a fixed vendor endpoint.
     pub fn abuse_url(&self) -> Option<&str> {
         with_transport!(self, |c| c.abuse_url())
+    }
+
+    /// True when only the operator's own flow may produce this config; the
+    /// API rejects it in request bodies. See
+    /// [`TransportConfig::operator_managed`].
+    pub fn operator_managed(&self) -> bool {
+        with_transport!(self, |c| c.operator_managed())
     }
 }
 
@@ -193,6 +214,8 @@ mod tests {
             r#"{"type":"webhook","url":"https://x.test/h","secret":"0123456789abcdef"}"#,
             r#"{"type":"slack","webhook_url":"https://hooks.slack.com/x"}"#,
             r#"{"type":"telegram","bot_token":"123:abc","chat_id":"-100"}"#,
+            r#"{"type":"telegram_app","chat_id":"-100123"}"#,
+            r#"{"type":"telegram_app","chat_id":"42","chat_title":"Ops"}"#,
             r#"{"type":"whatsapp","access_token":"tok","phone_number_id":"123","to":"15551234567","template_name":"uptime_alert"}"#,
             r#"{"type":"whatsapp","access_token":"tok","phone_number_id":"123","to":"15551234567","template_name":"uptime_alert","language_code":"en"}"#,
         ] {
@@ -222,6 +245,10 @@ mod tests {
                 bot_token: "t".into(),
                 chat_id: "1".into(),
             }),
+            ChannelConfig::TelegramApp(TelegramAppConfig {
+                chat_id: "1".into(),
+                chat_title: None,
+            }),
             ChannelConfig::WhatsApp(WhatsAppConfig {
                 access_token: "tok".into(),
                 phone_number_id: "123".into(),
@@ -237,6 +264,12 @@ mod tests {
                 .unwrap()
                 .to_string();
             assert_eq!(c.kind().as_db_str(), tag);
+            // Exactly one transport is mintable only by the operator's flow.
+            assert_eq!(
+                c.operator_managed(),
+                c.kind() == ChannelKind::TelegramApp,
+                "operator_managed drifted for {tag}"
+            );
         }
     }
 
@@ -357,6 +390,35 @@ mod tests {
         assert!(bad(|w| w.template_name = "Uptime Alert".into()).is_err());
         assert!(bad(|w| w.template_name = "".into()).is_err());
         assert!(bad(|w| w.language_code = Some("en US".into())).is_err());
+    }
+
+    #[test]
+    fn telegram_app_is_secretless_and_validates_chat_id() {
+        let mut c = ChannelConfig::TelegramApp(TelegramAppConfig {
+            chat_id: "-100123".into(),
+            chat_title: Some("Ops".into()),
+        });
+        assert!(c.validate().is_ok());
+        assert_eq!(c.abuse_url(), None);
+        assert!(c.operator_managed());
+        // Nothing to mask: the redacted copy is byte-identical and a
+        // round-tripped config never reads as the sentinel.
+        let r = c.redacted();
+        assert_eq!(r["chat_id"], "-100123");
+        assert_eq!(r["chat_title"], "Ops");
+        c.redact_in_place();
+        assert!(!c.has_redaction_sentinel());
+
+        let bad = |chat_id: &str| {
+            ChannelConfig::TelegramApp(TelegramAppConfig {
+                chat_id: chat_id.into(),
+                chat_title: None,
+            })
+            .validate()
+        };
+        assert!(bad("").is_err());
+        assert!(bad("not-a-number").is_err());
+        assert!(bad("@channelname").is_err());
     }
 
     #[test]

@@ -52,6 +52,13 @@ pub fn build_notifier(cfg: &ChannelConfig, http: &OutboundHttpClient) -> Result<
             &c.bot_token,
             c.chat_id.clone(),
         )?) as Arc<dyn Notifier>,
+        // Sends with the operator bot token, which this factory does not
+        // carry — delivery wiring lands with the central-bot transport.
+        ChannelConfig::TelegramApp(_) => {
+            return Err(crate::error::AppError::Other(anyhow::anyhow!(
+                "central-bot telegram delivery is not available"
+            )));
+        }
         ChannelConfig::WhatsApp(c) => {
             Arc::new(WhatsAppNotifier::new(http.clone(), c)?) as Arc<dyn Notifier>
         }

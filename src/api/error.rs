@@ -135,6 +135,9 @@ pub mod codes {
     pub const CHANNEL_QUOTA_EXCEEDED: &str = "CHANNEL_QUOTA_EXCEEDED";
     pub const INVALID_CHANNEL_CONFIG: &str = "INVALID_CHANNEL_CONFIG";
     pub const CHANNEL_TEST_FAILED: &str = "CHANNEL_TEST_FAILED";
+    pub const CHANNEL_KIND_MANAGED: &str = "CHANNEL_KIND_MANAGED";
+    pub const TELEGRAM_LINK_LIMIT: &str = "TELEGRAM_LINK_LIMIT";
+    pub const TELEGRAM_LINK_NOT_FOUND: &str = "TELEGRAM_LINK_NOT_FOUND";
     // Org management.
     pub const ORG_NOT_FOUND: &str = "ORG_NOT_FOUND";
     pub const ORG_DELETED: &str = "ORG_DELETED";

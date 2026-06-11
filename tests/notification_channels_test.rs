@@ -360,3 +360,160 @@ async fn test_send_unknown_channel_is_404() {
     assert_eq!(st, StatusCode::NOT_FOUND);
     assert_eq!(body["error"]["code"], "CHANNEL_NOT_FOUND");
 }
+
+fn with_bot() -> Router {
+    build_test_app_with_owner(|cfg| {
+        cfg.telegram.bot_token = "123:abc".to_string().into();
+        cfg.telegram.bot_username = "uptimepagebot".into();
+        cfg.telegram.webhook_secret = "0123456789abcdef0123456789abcdef".to_string().into();
+    })
+}
+
+#[tokio::test]
+async fn telegram_app_config_is_rejected_from_request_bodies() {
+    let app = app();
+    let tg = json!({ "type": "telegram_app", "chat_id": "-100123" });
+    let (st, body) = send(
+        &app,
+        "POST",
+        "/api/v1/notification-channels",
+        json!({ "name": "tg", "config": tg }),
+    )
+    .await;
+    assert_eq!(st, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body["error"]["code"], "CHANNEL_KIND_MANAGED");
+
+    // Swapping an existing channel's config to the managed kind is the same
+    // alert-spam vector; PATCH must refuse it too.
+    let (_, created) = send(
+        &app,
+        "POST",
+        "/api/v1/notification-channels",
+        slack_body("ops"),
+    )
+    .await;
+    let id = created["id"].as_str().unwrap();
+    let (st, body) = send(
+        &app,
+        "PATCH",
+        &format!("/api/v1/notification-channels/{id}"),
+        json!({ "config": tg }),
+    )
+    .await;
+    assert_eq!(st, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body["error"]["code"], "CHANNEL_KIND_MANAGED");
+}
+
+#[tokio::test]
+async fn telegram_link_is_absent_without_bot() {
+    let app = app();
+    let (st, body) = send(
+        &app,
+        "POST",
+        "/api/v1/notification-channels/telegram-link",
+        json!({}),
+    )
+    .await;
+    assert_eq!(st, StatusCode::NOT_FOUND);
+    assert_eq!(body["error"]["code"], "TELEGRAM_LINK_NOT_FOUND");
+
+    let (st, body) = send_empty(
+        &app,
+        "GET",
+        "/api/v1/notification-channels/telegram-link/01919b9e-0000-7000-8000-000000000000",
+    )
+    .await;
+    assert_eq!(st, StatusCode::NOT_FOUND);
+    assert_eq!(body["error"]["code"], "TELEGRAM_LINK_NOT_FOUND");
+}
+
+#[tokio::test]
+async fn telegram_link_mint_and_poll_round_trip() {
+    let app = with_bot();
+    let (st, body) = send(
+        &app,
+        "POST",
+        "/api/v1/notification-channels/telegram-link",
+        json!({ "name": "Ops Telegram" }),
+    )
+    .await;
+    assert_eq!(st, StatusCode::CREATED);
+    let code = body["code"].as_str().unwrap();
+    let deep_link = body["deep_link"].as_str().unwrap();
+    assert!(deep_link.starts_with("https://t.me/uptimepagebot?start="));
+    assert!(deep_link.ends_with(code));
+    let id = body["id"].as_str().unwrap();
+
+    let (st, body) = send_empty(
+        &app,
+        "GET",
+        &format!("/api/v1/notification-channels/telegram-link/{id}"),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(body["status"], "pending");
+    assert!(body.get("channel_id").is_none());
+
+    let (st, body) = send_empty(
+        &app,
+        "GET",
+        "/api/v1/notification-channels/telegram-link/01919b9e-0000-7000-8000-000000000000",
+    )
+    .await;
+    assert_eq!(st, StatusCode::NOT_FOUND);
+    assert_eq!(body["error"]["code"], "TELEGRAM_LINK_NOT_FOUND");
+}
+
+#[tokio::test]
+async fn telegram_link_mint_caps_outstanding_codes() {
+    let app = with_bot();
+    for _ in 0..5 {
+        let (st, _) = send(
+            &app,
+            "POST",
+            "/api/v1/notification-channels/telegram-link",
+            json!({}),
+        )
+        .await;
+        assert_eq!(st, StatusCode::CREATED);
+    }
+    let (st, body) = send(
+        &app,
+        "POST",
+        "/api/v1/notification-channels/telegram-link",
+        json!({}),
+    )
+    .await;
+    assert_eq!(st, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body["error"]["code"], "TELEGRAM_LINK_LIMIT");
+}
+
+#[tokio::test]
+async fn telegram_link_mint_validates_name_hint() {
+    let app = with_bot();
+    let (st, body) = send(
+        &app,
+        "POST",
+        "/api/v1/notification-channels/telegram-link",
+        json!({ "name": "x".repeat(101) }),
+    )
+    .await;
+    assert_eq!(st, StatusCode::BAD_REQUEST);
+    assert_eq!(body["error"]["code"], "CHANNEL_NAME_INVALID");
+}
+
+#[tokio::test]
+async fn test_config_rejects_telegram_app_kind() {
+    // The ad-hoc test endpoint would message a caller-supplied chat id with
+    // the operator bot — the exact spam vector the managed-kind guard closes.
+    let app = app();
+    let (st, body) = send(
+        &app,
+        "POST",
+        "/api/v1/notification-channels/test",
+        json!({ "config": { "type": "telegram_app", "chat_id": "-100123" } }),
+    )
+    .await;
+    assert_eq!(st, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body["error"]["code"], "CHANNEL_KIND_MANAGED");
+}

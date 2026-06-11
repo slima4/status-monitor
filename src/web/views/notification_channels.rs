@@ -304,6 +304,8 @@ fn form_from_channel(c: NotificationChannel) -> ChannelFormModel {
             config.telegram_bot_token = c.bot_token;
             config.telegram_chat_id = c.chat_id;
         }
+        // Linked via the central bot; nothing user-editable to prefill.
+        ChannelConfig::TelegramApp(_) => {}
         ChannelConfig::WhatsApp(c) => {
             config.whatsapp_access_token = c.access_token;
             config.whatsapp_phone_number_id = c.phone_number_id;

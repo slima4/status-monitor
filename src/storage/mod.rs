@@ -20,6 +20,7 @@ pub mod postgres;
 pub mod postgres_secrets;
 pub mod postmortems;
 pub mod status_pages;
+pub mod telegram_link_codes;
 pub mod traits;
 pub mod users;
 
@@ -70,6 +71,10 @@ pub use postgres::PostgresTargetStore;
 pub use postmortems::{InMemoryPostmortemStore, PgPostmortemStore, PostmortemStore};
 pub use status_pages::{
     AddComponentOutcome, InMemoryStatusPageStore, PgStatusPageStore, StatusPageStore,
+};
+pub use telegram_link_codes::{
+    ConsumedLink, InMemoryTelegramLinkCodeStore, LinkCode, LinkCodeStatus, MintOutcome,
+    PgTelegramLinkCodeStore, TelegramLinkCodeStore,
 };
 pub use traits::{
     ClampedRange, IncidentListQuery, RegionOption, ResultSink, ResultsStore, TargetFilter,

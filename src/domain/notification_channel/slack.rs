@@ -29,4 +29,8 @@ impl TransportConfig for SlackConfig {
     fn abuse_url(&self) -> Option<&str> {
         Some(&self.webhook_url)
     }
+
+    fn operator_managed(&self) -> bool {
+        false
+    }
 }

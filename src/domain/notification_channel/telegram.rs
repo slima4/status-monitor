@@ -36,4 +36,8 @@ impl TransportConfig for TelegramConfig {
     fn abuse_url(&self) -> Option<&str> {
         None
     }
+
+    fn operator_managed(&self) -> bool {
+        false
+    }
 }

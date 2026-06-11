@@ -54,4 +54,8 @@ impl TransportConfig for WebhookConfig {
     fn abuse_url(&self) -> Option<&str> {
         Some(&self.url)
     }
+
+    fn operator_managed(&self) -> bool {
+        false
+    }
 }

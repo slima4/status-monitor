@@ -1,0 +1,48 @@
+use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
+
+use super::ChannelKind;
+use super::transport::TransportConfig;
+
+/// Destination linked through the central operator-owned Telegram bot. Holds
+/// no secret — delivery uses the operator token — so redaction is a no-op.
+/// Created exclusively by the webhook consume path: a caller-supplied chat_id
+/// would let anyone alert-spam an arbitrary chat through our bot, so the API
+/// rejects this config kind in create/update bodies.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct TelegramAppConfig {
+    pub chat_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chat_title: Option<String>,
+}
+
+impl TransportConfig for TelegramAppConfig {
+    const KIND: ChannelKind = ChannelKind::TelegramApp;
+
+    fn redact_in_place(&mut self) {}
+
+    fn has_redaction_sentinel(&self) -> bool {
+        false
+    }
+
+    fn validate(&self) -> Result<(), String> {
+        if self.chat_id.trim().is_empty() {
+            return Err("chat_id is required".into());
+        }
+        if self.chat_id.parse::<i64>().is_err() {
+            return Err("chat_id must be a Telegram numeric chat id".into());
+        }
+        Ok(())
+    }
+
+    /// Deliveries go to the fixed api.telegram.org endpoint — no
+    /// customer-controlled URL to inspect.
+    fn abuse_url(&self) -> Option<&str> {
+        None
+    }
+
+    /// Only the webhook consume path may mint this config.
+    fn operator_managed(&self) -> bool {
+        true
+    }
+}

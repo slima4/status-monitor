@@ -153,6 +153,17 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
             "/notification-channels/{id}/test",
             post(handlers::notification_channels::test_send),
         )
+        // Mounted unconditionally: conditional mounting would let the path
+        // fall into `/notification-channels/{id}` (405/400 noise) on
+        // bot-less deployments. The handlers 404 when no bot is configured.
+        .route(
+            "/notification-channels/telegram-link",
+            post(handlers::notification_channels::telegram_link_mint),
+        )
+        .route(
+            "/notification-channels/telegram-link/{id}",
+            get(handlers::notification_channels::telegram_link_status),
+        )
         .route(
             "/incidents",
             get(handlers::incidents::list_incidents).post(handlers::incidents::declare_incident),
