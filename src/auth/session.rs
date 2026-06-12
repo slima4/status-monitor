@@ -224,12 +224,14 @@ pub async fn set_active_org_by_hash(
     id_hash: &str,
     org: crate::domain::OrgId,
 ) -> Result<bool> {
-    let res = sqlx::query("UPDATE sessions SET active_org_id = $2 WHERE id_hash = $1")
-        .bind(id_hash)
-        .bind(org.0)
-        .execute(pool)
-        .await
-        .context("session::set_active_org_by_hash")?;
+    let res = sqlx::query(
+        "UPDATE sessions SET active_org_id = $2 WHERE id_hash = $1 AND expires_at > now()",
+    )
+    .bind(id_hash)
+    .bind(org.0)
+    .execute(pool)
+    .await
+    .context("session::set_active_org_by_hash")?;
     Ok(res.rows_affected() > 0)
 }
 

@@ -549,10 +549,7 @@ pub async fn update_org_member_role(
     tag = "orgs",
     summary = "Switch the caller's active organisation",
     description = "Verifies active membership in the requested org and \
-                   updates the session-side `active_org_id`. The real \
-                   session-mutation path lands with the auth spec; today this \
-                   route validates the request and lets the auth layer wire \
-                   the persistence.",
+                   updates the session's `active_org_id`.",
     request_body = SwitchActiveOrgRequest,
     responses(
         (status = 204, description = "Active org switched"),
@@ -564,16 +561,22 @@ pub async fn update_org_member_role(
 pub async fn switch_active_org(
     State(state): State<AppState>,
     BrowserUser(CurrentUser(user)): BrowserUser,
+    session: crate::web::Session,
     Json(req): Json<SwitchActiveOrgRequest>,
 ) -> Result<StatusCode> {
     let pool = require_db(&state)?;
     if !orgs_store::is_active_member(pool, user, req.org_id).await? {
         return Err(AppError::Forbidden);
     }
-    // Session mutation belongs to the auth spec — once sessions are
-    // persisted, this handler will rotate `active_org_id` on the stored
-    // session. Until then the membership check is the meaningful work and
-    // a 204 communicates "your request was valid".
+    let Some(hash) = session.session_id_hash.as_deref() else {
+        // BrowserUser guarantees a cookie session, so the hash is always
+        // present; guard anyway rather than silently 204 on a no-op.
+        return Err(AppError::Unauthorized);
+    };
+    if !crate::auth::session::set_active_org_by_hash(pool, hash, req.org_id).await? {
+        // Session revoked/expired between extraction and the UPDATE.
+        return Err(AppError::Unauthorized);
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 

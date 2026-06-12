@@ -296,6 +296,78 @@ async fn storage_set_member_role_outcomes() {
 
 #[tokio::test]
 #[ignore = "requires DATABASE_URL"]
+async fn switch_active_org_persists_and_gates_membership() {
+    let Some((db, name)) = fresh_pg().await else {
+        return;
+    };
+    let pool = open_pool(&db).await;
+    MIGRATOR.run(&pool).await.unwrap();
+    let user = seed_user(&pool, "switch@team.test").await;
+    let org_a = seed_org(&pool, user).await;
+    let other_owner = seed_user(&pool, "other@team.test").await;
+    let org_b = seed_org(&pool, other_owner).await;
+    add_member(&pool, org_b, user, "member").await;
+
+    let hash = "sess-switch-hash";
+    sqlx::query(
+        "INSERT INTO sessions (id_hash, user_id, active_org_id, expires_at) \
+         VALUES ($1, $2, $3, now() + interval '1 day')",
+    )
+    .bind(hash)
+    .bind(user.0)
+    .bind(org_a.0)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (app, _d) = common::build_test_app_with_pg(pool.clone(), |_| {}).await;
+    let app = common::with_session(app, user, Some(org_a), Some(hash));
+
+    let switch = |org: OrgId| {
+        Request::builder()
+            .method("POST")
+            .uri("/api/v1/me/active-org")
+            .header(header::CONTENT_TYPE, "application/json")
+            .header("x-requested-with", "uptimepage")
+            .body(Body::from(format!(r#"{{"org_id":"{}"}}"#, org.0)))
+            .unwrap()
+    };
+    let stored_org = || async {
+        sqlx::query_scalar::<_, Option<Uuid>>(
+            "SELECT active_org_id FROM sessions WHERE id_hash = $1",
+        )
+        .bind(hash)
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+    };
+
+    assert_eq!(send(&app, switch(org_b)).await, StatusCode::NO_CONTENT);
+    assert_eq!(stored_org().await, Some(org_b.0));
+
+    // Non-member org: rejected, stored org untouched.
+    assert_eq!(
+        send(&app, switch(OrgId(Uuid::new_v4()))).await,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(stored_org().await, Some(org_b.0));
+
+    assert_eq!(send(&app, switch(org_a)).await, StatusCode::NO_CONTENT);
+    assert_eq!(stored_org().await, Some(org_a.0));
+
+    // Session revoked between extraction and UPDATE: no silent 204.
+    sqlx::query("DELETE FROM sessions WHERE id_hash = $1")
+        .bind(hash)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(send(&app, switch(org_b)).await, StatusCode::UNAUTHORIZED);
+
+    common::drop_test_db(&name).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
 async fn team_page_and_partial_render_by_role() {
     let Some((db, name)) = fresh_pg().await else {
         return;
