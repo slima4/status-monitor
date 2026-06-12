@@ -20,20 +20,11 @@
     const tgLink = root.querySelector("[data-tg-link]");
     const tgGroup = root.querySelector("[data-tg-group]");
     function renderQr(el, url) {
-        if (typeof qrcode !== "function") {
+        if (typeof qrcode !== "function" || typeof smRenderQr !== "function") {
             el.classList.add("hidden");
             return;
         }
-        const qr = qrcode(0, "M");
-        qr.addData(url);
-        qr.make();
-        el.innerHTML = qr.createSvgTag({ cellSize: 4, margin: 0, scalable: true });
-        const svg = el.querySelector("svg");
-        if (svg) {
-            svg.style.width = "164px";
-            svg.style.height = "164px";
-            svg.style.display = "block";
-        }
+        smRenderQr(el, url, { margin: 0, scalable: true, size: 164 });
         el.classList.remove("hidden");
     }
     function renderTgDest() {

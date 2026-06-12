@@ -42,10 +42,7 @@
     // page for picky scanners.
     function renderQr(el, url) {
         if (typeof qrcode !== "function") throw new Error("QR library failed to load — refresh and try again");
-        const qr = qrcode(0, "M");
-        qr.addData(url);
-        qr.make();
-        el.innerHTML = qr.createSvgTag({ cellSize: 4, margin: 4 });
+        smRenderQr(el, url, { margin: 4 });
     }
 
     // First text node only — the name span may carry disabled/managed chips.
