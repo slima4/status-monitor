@@ -85,6 +85,17 @@ pub async fn consume(pool: &PgPool, state: &str) -> Result<Option<ConsumedState>
     .map_err(|e| AppError::Other(anyhow::anyhow!("oauth_state::consume: {e}")))
 }
 
+/// `expires_at` is 10 minutes from insert and the callback's atomic
+/// DELETE-and-RETURN purges consumed rows, so a row only outlives its TTL
+/// when the user abandons the dance — without the periodic sweep the table
+/// leaks slowly forever.
+pub async fn purge_expired(pool: &PgPool) -> sqlx::Result<u64> {
+    let res = sqlx::query("DELETE FROM oauth_states WHERE expires_at < now()")
+        .execute(pool)
+        .await?;
+    Ok(res.rows_affected())
+}
+
 fn base64url_no_pad(bytes: &[u8]) -> String {
     use base64::Engine;
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)

@@ -13,7 +13,7 @@ use chrono::{Duration as ChronoDuration, Utc};
 use uptimepage::auth::{
     fingerprint, github,
     login_audit::{self, LoginAttempt, LoginMethod},
-    oauth_state, oauth_state_cleanup, session as session_store,
+    oauth_state, session as session_store,
 };
 use uptimepage::config::SessionConfig;
 use uptimepage::domain::UserId;
@@ -548,7 +548,7 @@ async fn oauth_state_cleanup_purges_only_expired_rows() {
     .await
     .unwrap();
 
-    let removed = oauth_state_cleanup::purge_expired(&pool).await.unwrap();
+    let removed = oauth_state::purge_expired(&pool).await.unwrap();
     assert_eq!(removed, 2, "exactly the two expired rows should be purged");
 
     let (still,): (i64,) =

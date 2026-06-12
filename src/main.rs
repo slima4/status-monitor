@@ -20,7 +20,7 @@ use uptimepage::{
     config::AppConfig,
     error::{AppError, Result},
     http_client::client::build_clients,
-    jobs::retention,
+    jobs::{periodic::run_purge_loop, retention},
     marketing, observability,
     pipeline::{BatcherConfig, ResultBatcher},
     public_status::{
@@ -436,24 +436,35 @@ async fn main() -> Result<()> {
     }
 
     let invitation_purge_handle: JoinHandle<()> = {
-        let pool = pg_pool_for_stores.clone();
-        let token = root.clone();
         let keep_days = i64::from(cfg.auth.invitations.expiry_hours / 24).max(1);
-        tokio::spawn(uptimepage::auth::invitations_cleanup::run(
-            pool, keep_days, token,
+        tokio::spawn(run_purge_loop(
+            pg_pool_for_stores.clone(),
+            root.clone(),
+            Duration::from_secs(6 * 60 * 60),
+            "invitations_cleanup",
+            async move |pool: &sqlx::PgPool| {
+                uptimepage::auth::invitations::purge_old(pool, keep_days).await
+            },
         ))
     };
 
-    let oauth_state_cleanup_handle: JoinHandle<()> =
-        uptimepage::auth::oauth_state_cleanup::spawn(pg_pool_for_stores.clone(), root.clone());
+    // 10 min: oauth_states rows carry a 10-minute TTL, so abandoned dances
+    // are swept roughly as fast as they expire.
+    let oauth_state_cleanup_handle: JoinHandle<()> = tokio::spawn(run_purge_loop(
+        pg_pool_for_stores.clone(),
+        root.clone(),
+        Duration::from_secs(10 * 60),
+        "oauth_state_cleanup",
+        uptimepage::auth::oauth_state::purge_expired,
+    ));
 
-    let channel_verification_cleanup_handle: JoinHandle<()> = {
-        let pool = pg_pool_for_stores.clone();
-        let token = root.clone();
-        tokio::spawn(uptimepage::storage::channel_verification_cleanup::run(
-            pool, token,
-        ))
-    };
+    let channel_verification_cleanup_handle: JoinHandle<()> = tokio::spawn(run_purge_loop(
+        pg_pool_for_stores.clone(),
+        root.clone(),
+        Duration::from_secs(6 * 60 * 60),
+        "channel_verification_cleanup",
+        uptimepage::storage::channel_verification::purge_old,
+    ));
 
     // Magic-link sweep only runs when the method is wired into the router.
     // When disabled the routes 404, no rows are ever inserted, and the ticker
@@ -464,9 +475,13 @@ async fn main() -> Result<()> {
         .iter()
         .any(|m| m == "magic_link")
         .then(|| {
-            let pool = pg_pool_for_stores.clone();
-            let token = root.clone();
-            tokio::spawn(uptimepage::auth::magic_link_cleanup::run(pool, token))
+            tokio::spawn(run_purge_loop(
+                pg_pool_for_stores.clone(),
+                root.clone(),
+                Duration::from_secs(6 * 60 * 60),
+                "magic_link_cleanup",
+                uptimepage::auth::magic_link::purge_old,
+            ))
         });
 
     let state = AppState::new(

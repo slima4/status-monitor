@@ -1,7 +1,7 @@
 //! Daily long-horizon data retention. Wakes once a day at 03:00 UTC.
 //!
 //! This job owns only the *long* windows. The short-cadence security sweeps
-//! (`oauth_state_cleanup`, `magic_link_cleanup`) keep their own loops on
+//! (oauth-state, magic-link) keep their own `jobs::periodic` loops on
 //! purpose: their *frequency* is the security property, so folding a 10-minute
 //! window into a 24-hour tick would silently widen it.
 //!
