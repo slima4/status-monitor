@@ -188,7 +188,6 @@ pub async fn callback(
         org,
         &base_name,
         config,
-        None,
         limit,
         QuotaBlockLog {
             db: state.db.clone(),

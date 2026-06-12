@@ -360,12 +360,24 @@ impl Default for TransactionalEmailConfig {
 pub struct ResendConfig {
     #[serde(default = "empty_secret", with = "secret_str")]
     pub api_key: SecretString,
+    /// Svix signing secret (`whsec_…`) of the Resend webhook endpoint.
+    /// Empty = the `/hooks/resend` receiver is absent and bounce events
+    /// are not consumed.
+    #[serde(default = "empty_secret", with = "secret_str")]
+    pub webhook_secret: SecretString,
+}
+
+impl ResendConfig {
+    pub fn webhook_enabled(&self) -> bool {
+        !self.webhook_secret.expose_secret().trim().is_empty()
+    }
 }
 
 impl Default for ResendConfig {
     fn default() -> Self {
         Self {
             api_key: empty_secret(),
+            webhook_secret: empty_secret(),
         }
     }
 }
@@ -1246,6 +1258,30 @@ impl AppConfig {
                     "auth.public_base_url must be an https:// URL with a host for the telegram webhook",
                 ));
             }
+        }
+        Ok(())
+    }
+
+    /// A half-configured Resend sender is a clean startup error, not a
+    /// per-send failure after cutover. The webhook secret alone is fine —
+    /// the bounce receiver works regardless of the sending provider.
+    pub fn validate_email(&self) -> Result<()> {
+        fn err(msg: &str) -> crate::error::AppError {
+            crate::error::AppError::Other(anyhow::anyhow!(msg.to_string()))
+        }
+        let e = &self.email;
+        if e.provider != "resend" {
+            return Ok(());
+        }
+        if e.resend.api_key.expose_secret().trim().is_empty() {
+            return Err(err(
+                "email.resend.api_key is required when email.provider = \"resend\"",
+            ));
+        }
+        if e.from_address.trim().is_empty() {
+            return Err(err(
+                "email.from_address is required when email.provider = \"resend\"",
+            ));
         }
         Ok(())
     }

@@ -35,7 +35,6 @@ fn slack(name: &str, secret: &str) -> NewNotificationChannel {
             webhook_url: format!("https://hooks.slack.com/services/{secret}"),
         }),
         enabled: true,
-        external_ref: None,
     }
 }
 
@@ -545,7 +544,6 @@ async fn telegram_lifecycle_disable_by_external_ref() {
             },
         ),
         enabled: true,
-        external_ref: Some(chat.into()),
     };
     // Two orgs share the kicked chat; org A has a second, unrelated link.
     let a = store
@@ -627,5 +625,85 @@ async fn telegram_lifecycle_disable_by_external_ref() {
         .unwrap();
     assert!(re.enabled && re.disabled_reason.is_none());
 
+    cleanup(&pool, &[org_a, org_b], &[user_a, user_b]).await;
+}
+
+#[tokio::test]
+#[ignore = "needs live Postgres (DATABASE_URL)"]
+async fn email_lifecycle_ref_is_derived_and_follows_the_address() {
+    let Some(pool) = pg_pool_from_env().await else {
+        return;
+    };
+    let (org_a, org_b, user_a, user_b) = two_orgs(&pool, "em-life").await;
+    // Sealed config + plaintext lifecycle ref must coexist: the bounce path
+    // matches the address without opening the sealed blob.
+    let store = PgNotificationChannelStore::new(pool.clone(), Some(test_cipher()));
+    let kind = uptimepage::domain::ChannelKind::Email;
+
+    let addr_a = format!("{}@example.com", unique_slug("em-life"));
+    let addr_b = format!("{}@example.com", unique_slug("em-life"));
+    let email = |name: &str, to: &str| NewNotificationChannel {
+        name: name.into(),
+        config: ChannelConfig::Email(uptimepage::domain::EmailConfig { to: to.into() }),
+        enabled: true,
+    };
+    let ch = store
+        .create(org_a, email("mail", &addr_a), WriteSource::Ui, 10)
+        .await
+        .unwrap();
+
+    // The derived ref finds the channel; the bounce disable lands and the
+    // dead address must re-prove itself before it can page again.
+    let upd = store.get(org_a, ch.id).await.unwrap().unwrap().updated_at;
+    assert!(store.set_verified(org_a, ch.id, upd).await.unwrap());
+    assert_eq!(store.count_by_external_ref(kind, &addr_a).await.unwrap(), 1);
+    assert_eq!(
+        store
+            .disable_by_external_ref(kind, &addr_a, "the email address hard-bounced")
+            .await
+            .unwrap(),
+        1
+    );
+    let got = store.get(org_a, ch.id).await.unwrap().unwrap();
+    assert!(!got.enabled);
+    assert_eq!(
+        got.disabled_reason.as_deref(),
+        Some("the email address hard-bounced")
+    );
+    assert!(got.verified_at.is_none(), "bounce re-arms verification");
+
+    // Replacing the address re-points the ref: the old address no longer
+    // matches, the new one does.
+    store
+        .update(
+            org_a,
+            ch.id,
+            NotificationChannelUpdate {
+                config: Some(ChannelConfig::Email(uptimepage::domain::EmailConfig {
+                    to: addr_b.clone(),
+                })),
+                enabled: Some(true),
+                ..Default::default()
+            },
+            WriteSource::Ui,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(store.count_by_external_ref(kind, &addr_a).await.unwrap(), 0);
+    assert_eq!(
+        store
+            .disable_by_external_ref(kind, &addr_a, "stale ref must not match")
+            .await
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        store
+            .disable_by_external_ref(kind, &addr_b, "the email address hard-bounced")
+            .await
+            .unwrap(),
+        1
+    );
     cleanup(&pool, &[org_a, org_b], &[user_a, user_b]).await;
 }

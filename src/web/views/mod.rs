@@ -11,6 +11,7 @@ pub mod on_call;
 pub mod pages;
 pub mod public_status;
 pub mod region_display;
+pub mod resend_hook;
 pub mod share;
 pub mod slack_connect;
 pub mod targets_detail;

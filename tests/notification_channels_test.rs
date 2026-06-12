@@ -654,3 +654,151 @@ async fn test_config_rejects_telegram_app_kind() {
     assert_eq!(st, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(body["error"]["code"], "CHANNEL_KIND_MANAGED");
 }
+
+// ── resend bounce/complaint webhook ─────────────────────────────────────
+
+const RESEND_SECRET: &str = "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw";
+
+fn with_resend_hook() -> Router {
+    common::build_test_app_with_web_and_owner(|cfg| {
+        cfg.email.resend.webhook_secret = RESEND_SECRET.to_string().into();
+    })
+}
+
+async fn post_resend_hook(app: &Router, body: &str, signed: bool) -> StatusCode {
+    use base64::Engine as _;
+    use hmac::{KeyInit, Mac};
+    let ts = chrono::Utc::now().timestamp().to_string();
+    let sig = if signed {
+        let key = base64::engine::general_purpose::STANDARD
+            .decode(RESEND_SECRET.strip_prefix("whsec_").unwrap())
+            .unwrap();
+        let mut mac = hmac::Hmac::<sha2::Sha256>::new_from_slice(&key).unwrap();
+        mac.update(format!("msg_1.{ts}.").as_bytes());
+        mac.update(body.as_bytes());
+        format!(
+            "v1,{}",
+            base64::engine::general_purpose::STANDARD.encode(mac.finalize().into_bytes())
+        )
+    } else {
+        "v1,bm90LXRoZS1zaWduYXR1cmU=".to_string()
+    };
+    let req = axum::http::Request::builder()
+        .method("POST")
+        .uri("/hooks/resend")
+        .header("svix-id", "msg_1")
+        .header("svix-timestamp", &ts)
+        .header("svix-signature", sig)
+        .header("content-type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    app.clone().oneshot(req).await.unwrap().status()
+}
+
+#[tokio::test]
+async fn resend_hard_bounce_and_complaint_disable_matching_email_channels() {
+    let app = with_resend_hook();
+    let (st, bounced) = send(
+        &app,
+        "POST",
+        "/api/v1/notification-channels",
+        json!({ "name": "Mail", "config": { "type": "email", "to": "oncall@example.com" } }),
+    )
+    .await;
+    assert_eq!(st, StatusCode::CREATED);
+    let bounced_id = bounced["id"].as_str().unwrap().to_string();
+    let (st, other) = send(
+        &app,
+        "POST",
+        "/api/v1/notification-channels",
+        json!({ "name": "Backup", "config": { "type": "email", "to": "backup@example.com" } }),
+    )
+    .await;
+    assert_eq!(st, StatusCode::CREATED);
+    let other_id = other["id"].as_str().unwrap().to_string();
+
+    // Unsigned delivery: rejected, nothing disabled.
+    let permanent = json!({
+        "type": "email.bounced",
+        "data": { "to": ["Oncall@Example.COM"], "bounce": { "type": "Permanent" } }
+    })
+    .to_string();
+    assert_eq!(
+        post_resend_hook(&app, &permanent, false).await,
+        StatusCode::FORBIDDEN
+    );
+    // Transient bounce: acknowledged untouched.
+    let transient = json!({
+        "type": "email.bounced",
+        "data": { "to": ["oncall@example.com"], "bounce": { "type": "Transient" } }
+    })
+    .to_string();
+    assert_eq!(
+        post_resend_hook(&app, &transient, true).await,
+        StatusCode::OK
+    );
+    let (_, got) = send_empty(
+        &app,
+        "GET",
+        &format!("/api/v1/notification-channels/{bounced_id}"),
+    )
+    .await;
+    assert_eq!(got["enabled"], true);
+
+    // Permanent bounce (provider may echo any case) disables only the match.
+    assert_eq!(
+        post_resend_hook(&app, &permanent, true).await,
+        StatusCode::OK
+    );
+    let (_, got) = send_empty(
+        &app,
+        "GET",
+        &format!("/api/v1/notification-channels/{bounced_id}"),
+    )
+    .await;
+    assert_eq!(got["enabled"], false);
+    assert_eq!(got["disabled_reason"], "the email address hard-bounced");
+    let (_, untouched) = send_empty(
+        &app,
+        "GET",
+        &format!("/api/v1/notification-channels/{other_id}"),
+    )
+    .await;
+    assert_eq!(untouched["enabled"], true);
+
+    // A spam complaint disables too, with its own note.
+    let complaint = json!({
+        "type": "email.complained",
+        "data": { "to": ["backup@example.com"] }
+    })
+    .to_string();
+    assert_eq!(
+        post_resend_hook(&app, &complaint, true).await,
+        StatusCode::OK
+    );
+    let (_, got) = send_empty(
+        &app,
+        "GET",
+        &format!("/api/v1/notification-channels/{other_id}"),
+    )
+    .await;
+    assert_eq!(got["enabled"], false);
+    assert_eq!(
+        got["disabled_reason"],
+        "the recipient reported our mail as spam"
+    );
+
+    // Unknown event types are acknowledged without effect.
+    let delivered = json!({ "type": "email.delivered", "data": { "to": ["x@example.com"] } });
+    assert_eq!(
+        post_resend_hook(&app, &delivered.to_string(), true).await,
+        StatusCode::OK
+    );
+}
+
+#[tokio::test]
+async fn resend_hook_is_absent_without_a_secret() {
+    let app = common::build_test_app_with_web_and_owner(|_| {});
+    let st = post_resend_hook(&app, "{}", true).await;
+    assert_eq!(st, StatusCode::NOT_FOUND);
+}

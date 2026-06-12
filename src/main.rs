@@ -131,6 +131,9 @@ async fn main() -> Result<()> {
     // Central Telegram bot: a set bot_token without a username / strong
     // webhook secret / https base is a clean startup error, not a half-up bot.
     cfg.validate_telegram()?;
+    // Transactional mail: provider = "resend" without key/sender fails here,
+    // not on the first verification mail.
+    cfg.validate_email()?;
 
     let metrics_handle = if cfg.observability.metrics_enabled {
         Some(observability::metrics::init(&cfg.server.metrics_bind)?)

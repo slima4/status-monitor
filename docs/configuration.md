@@ -45,7 +45,7 @@ Override `UPTIMEPAGE_CONFIG_PATH` to point at an alternate base config file.
 | `auth.magic_link` | `expiry_minutes`, `rate_limit_seconds` | Magic-link token lifetime. Routes only mount when `enabled_methods` includes `"magic_link"` |
 | `mcp` | `enabled`, `oauth_enabled`, `resource_uri`, `allowed_origins`, `access_token_ttl_secs` | LLM connector (MCP) server at `/mcp`. Off by default; OAuth requires real HTTPS `resource_uri` + `auth.public_base_url`. See [MCP server](mcp.md) |
 | `email` | `provider`, `from_name`, `from_address` | Transactional email backend. `provider` ∈ `"resend" \| "log" \| "memory"` |
-| `email.resend` | `api_key` | Required when `email.provider = "resend"` |
+| `email.resend` | `api_key`, `webhook_secret` | `api_key` required when `email.provider = "resend"`. A set `webhook_secret` (the endpoint's Svix `whsec_…` signing secret) mounts `POST /hooks/resend`: a permanently bounced or spam-complaining address gets every email channel pointed at it disabled, with the reason shown on the channel form |
 
 ## Public status routing
 
@@ -116,6 +116,7 @@ from_address = "no-reply@example.test"
 
 [email.resend]
 api_key = ""                         # required when provider = "resend"
+webhook_secret = ""                  # whsec_… of the Resend webhook endpoint
 ```
 
 The GitHub button on `/login` only renders when `auth.github.client_id`

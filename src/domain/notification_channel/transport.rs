@@ -40,6 +40,14 @@ pub trait TransportConfig {
     /// caller-supplied destination would ride the operator's credentials).
     /// No default on purpose, like [`Self::abuse_url`].
     fn operator_managed(&self) -> bool;
+
+    /// Non-secret destination id mirrored into the plaintext `external_ref`
+    /// column so provider lifecycle events (bot kicked, address bounced)
+    /// can find channels without opening sealed configs. `None` = this
+    /// transport has no provider-side lifecycle.
+    fn lifecycle_ref(&self) -> Option<&str> {
+        None
+    }
 }
 
 /// `https://`-only URL rule shared by the URL-bearing transports.

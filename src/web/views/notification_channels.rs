@@ -406,7 +406,6 @@ pub async fn create_channel_deduped(
     org: OrgId,
     base_name: &str,
     config: ChannelConfig,
-    external_ref: Option<String>,
     max_channels: i64,
     block_log: QuotaBlockLog,
 ) -> Result<NotificationChannel, AppError> {
@@ -418,7 +417,6 @@ pub async fn create_channel_deduped(
             name: channel_name_with_suffix(base_name, suffix),
             config: config.clone(),
             enabled: true,
-            external_ref: external_ref.clone(),
         };
         match store.create(org, new, WriteSource::Ui, max_channels).await {
             Err(AppError::Unprocessable { code, .. })
@@ -901,7 +899,6 @@ mod tests {
                     org(),
                     "Ops",
                     app_config("-1"),
-                    Some("-1".into()),
                     10,
                     no_block_log(),
                 )
@@ -916,28 +913,13 @@ mod tests {
         #[tokio::test]
         async fn quota_error_passes_through() {
             let store = InMemoryNotificationChannelStore::new();
-            create_channel_deduped(
-                &store,
-                org(),
-                "Ops",
-                app_config("-1"),
-                Some("-1".into()),
-                1,
-                no_block_log(),
-            )
-            .await
-            .unwrap();
-            let err = create_channel_deduped(
-                &store,
-                org(),
-                "Other",
-                app_config("-2"),
-                None,
-                1,
-                no_block_log(),
-            )
-            .await
-            .unwrap_err();
+            create_channel_deduped(&store, org(), "Ops", app_config("-1"), 1, no_block_log())
+                .await
+                .unwrap();
+            let err =
+                create_channel_deduped(&store, org(), "Other", app_config("-2"), 1, no_block_log())
+                    .await
+                    .unwrap_err();
             assert!(
                 matches!(err, AppError::Unprocessable { code, .. } if code == codes::CHANNEL_QUOTA_EXCEEDED)
             );

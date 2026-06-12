@@ -91,6 +91,13 @@ services:
       UPTIMEPAGE_TELEGRAM__BOT_TOKEN: ${UPTIMEPAGE_TELEGRAM_BOT_TOKEN:-}
       UPTIMEPAGE_TELEGRAM__BOT_USERNAME: ${UPTIMEPAGE_TELEGRAM_BOT_USERNAME:-}
       UPTIMEPAGE_TELEGRAM__WEBHOOK_SECRET: ${UPTIMEPAGE_TELEGRAM_WEBHOOK_SECRET:-}
+      # Transactional mail (Resend). Empty api key = the "log" provider;
+      # empty webhook secret = the /hooks/resend bounce receiver is absent.
+      UPTIMEPAGE_EMAIL__PROVIDER: ${UPTIMEPAGE_EMAIL_PROVIDER:-log}
+      UPTIMEPAGE_EMAIL__FROM_NAME: ${UPTIMEPAGE_EMAIL_FROM_NAME:-Uptimepage}
+      UPTIMEPAGE_EMAIL__FROM_ADDRESS: ${UPTIMEPAGE_EMAIL_FROM_ADDRESS:-}
+      UPTIMEPAGE_EMAIL__RESEND__API_KEY: ${UPTIMEPAGE_EMAIL_RESEND_API_KEY:-}
+      UPTIMEPAGE_EMAIL__RESEND__WEBHOOK_SECRET: ${UPTIMEPAGE_EMAIL_RESEND_WEBHOOK_SECRET:-}
       # Operator OAuth apps ("Add to Slack" / "Add to Discord"). Empty =
       # button hidden; the manual webhook-paste kinds work either way.
       UPTIMEPAGE_SLACK_OAUTH__CLIENT_ID: ${UPTIMEPAGE_SLACK_OAUTH_CLIENT_ID:-}

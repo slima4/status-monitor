@@ -44,7 +44,6 @@ fn email_channel(name: &str, to: &str) -> NewNotificationChannel {
         name: name.into(),
         config: ChannelConfig::Email(EmailConfig { to: to.into() }),
         enabled: true,
-        external_ref: None,
     }
 }
 
@@ -200,7 +199,6 @@ async fn mint_cap_and_config_replace_resets_gate() {
                     webhook_url: "https://hooks.slack.com/x".into(),
                 }),
                 enabled: true,
-                external_ref: None,
             },
             WriteSource::Ui,
             10,

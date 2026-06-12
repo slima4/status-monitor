@@ -43,4 +43,10 @@ impl TransportConfig for TelegramAppConfig {
     fn operator_managed(&self) -> bool {
         true
     }
+
+    /// The chat id: a kick/stop on the Telegram side severs every org
+    /// linked to the chat.
+    fn lifecycle_ref(&self) -> Option<&str> {
+        Some(&self.chat_id)
+    }
 }

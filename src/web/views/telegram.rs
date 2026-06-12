@@ -165,7 +165,6 @@ async fn link_chat(state: &AppState, code: &str, chat: ChatRef) -> Result<String
         org,
         base_name,
         config,
-        Some(chat.id.to_string()),
         limit,
         QuotaBlockLog {
             db: state.db.clone(),

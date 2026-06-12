@@ -8,6 +8,7 @@
 pub mod log_only;
 pub mod memory;
 pub mod resend;
+pub mod svix;
 pub mod templates;
 pub mod trait_def;
 
@@ -19,6 +20,7 @@ use crate::config::TransactionalEmailConfig;
 use crate::http_outbound::OutboundHttpClient;
 
 pub use log_only::LogOnlyEmailSender;
+pub(crate) use log_only::mask_email;
 pub use memory::InMemoryEmailSender;
 pub use resend::ResendEmailSender;
 pub use trait_def::{
@@ -211,6 +213,7 @@ mod tests {
             provider: "resend".into(),
             resend: crate::config::ResendConfig {
                 api_key: secrecy::SecretString::from("re_test_key".to_string()),
+                ..Default::default()
             },
             ..Default::default()
         };

@@ -60,7 +60,7 @@ fn redact_sensitive_params(url: &str) -> String {
 
 /// `jane@example.com` → `j***@example.com`. Keeps the domain (operationally
 /// useful) but not the identity.
-fn mask_email(addr: &str) -> String {
+pub(crate) fn mask_email(addr: &str) -> String {
     match addr.split_once('@') {
         Some((local, domain)) => {
             let first = local.chars().next().unwrap_or('*');

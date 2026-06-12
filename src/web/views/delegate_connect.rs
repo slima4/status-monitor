@@ -250,7 +250,6 @@ pub(crate) async fn finish_create(
         link.org_id,
         base_name,
         config,
-        None,
         limit,
         QuotaBlockLog {
             db: state.db.clone(),

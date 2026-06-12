@@ -254,6 +254,25 @@ app.{$UPTIMEPAGE_DOMAIN} {
 		import app_upstream
 	}
 
+	# ─── Resend bounce webhook — anonymous, per-IP edge cap ─────────────
+	# Authenticated in-app by the Svix signature (HMAC, constant-time);
+	# Svix retries non-2xx with backoff, so a 429 defers a delivery,
+	# never loses it. Same body bound as the Telegram hook.
+	@resend_hook path /hooks/resend
+	handle @resend_hook {
+		request_body {
+			max_size 64KB
+		}
+		rate_limit {
+			zone resend_hook {
+				key {remote_host}
+				events 120
+				window 1m
+			}
+		}
+		import app_upstream
+	}
+
 	# ─── Operator surface: app-enforced session auth (SaaS) ─────────────
 	# No edge basic_auth. The health/metrics/public handle blocks above
 	# are terminal; every other (operator) request falls through to the

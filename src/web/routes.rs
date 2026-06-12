@@ -166,6 +166,12 @@ pub fn routes(state: AppState) -> Router {
         );
     }
 
+    // Resend bounce/complaint receiver. Mounted only when the endpoint's
+    // Svix signing secret is configured; the signature is the only auth.
+    if cfg.email.resend.webhook_enabled() {
+        r = r.route("/hooks/resend", post(views::resend_hook::webhook));
+    }
+
     // "Add to Slack" / "Add to Discord" connect dances. Mounted only when
     // the operator app is configured; manual webhook paste works either way.
     if cfg.slack_oauth.enabled() {

@@ -92,10 +92,12 @@ pub trait NotificationChannelStore: Send + Sync {
         source: WriteSource,
     ) -> Result<Option<NotificationChannel>>;
     async fn delete(&self, org: OrgId, id: Uuid) -> Result<bool>;
-    /// Disable every channel of `kind` carrying `external_ref`; returns how
-    /// many flipped. Deliberately NOT org-scoped — operator-side lifecycle
-    /// (a bot kick severs every org that linked the chat), keyed by a ref
-    /// only the transport's own flow ever wrote.
+    /// Disable every channel of `kind` carrying `external_ref` and clear its
+    /// verification stamp; returns how many flipped. Deliberately NOT
+    /// org-scoped — the triggering event comes from the transport's provider
+    /// (a bot kick, a hard bounce) and means the destination is dead for
+    /// every org pointed at it; `kind` partitions the ref namespace, so an
+    /// email address can never collide with a chat id.
     async fn disable_by_external_ref(
         &self,
         kind: ChannelKind,
@@ -207,7 +209,7 @@ impl NotificationChannelStore for PgNotificationChannelStore {
         .bind(&new.name)
         .bind(new.config.kind().as_db_str())
         .bind(&sealed)
-        .bind(new.external_ref.as_deref())
+        .bind(new.config.lifecycle_ref())
         .bind(new.enabled)
         .bind(max_channels)
         .bind(source.as_str())
@@ -283,7 +285,8 @@ impl NotificationChannelStore for PgNotificationChannelStore {
             },
             None => None,
         };
-        // Re-seal only when the config is being changed; `kind` follows it.
+        // Re-seal only when the config is being changed; `kind` and the
+        // lifecycle ref follow it.
         let (sealed, kind) = match &config {
             Some(c) => (
                 Some(seal(c, self.cipher.as_deref())?),
@@ -301,6 +304,7 @@ impl NotificationChannelStore for PgNotificationChannelStore {
                    disabled_reason = CASE WHEN $5 THEN NULL ELSE disabled_reason END,
                    -- A replaced config must re-verify its address.
                    verified_at = CASE WHEN $4::jsonb IS NOT NULL THEN NULL ELSE verified_at END,
+                   external_ref = CASE WHEN $4::jsonb IS NOT NULL THEN $8 ELSE external_ref END,
                    write_source = $7,
                    updated_at  = now()
                WHERE id = $1 AND org_id = $6
@@ -313,6 +317,7 @@ impl NotificationChannelStore for PgNotificationChannelStore {
         .bind(update.enabled)
         .bind(org.0)
         .bind(source.as_str())
+        .bind(config.as_ref().and_then(|c| c.lifecycle_ref()))
         .fetch_optional(&self.pool)
         .await
         .map_err(|e| {
@@ -347,8 +352,8 @@ impl NotificationChannelStore for PgNotificationChannelStore {
         reason: &str,
     ) -> Result<u64> {
         let result = sqlx::query(
-            r#"UPDATE notification_channels /* SAFE: operator lifecycle — a bot kick severs every org linked to the chat; external_ref is written only by the transport's own flow */
-               SET enabled = false, disabled_reason = $3, updated_at = now()
+            r#"UPDATE notification_channels /* SAFE: provider lifecycle — the event (bot kick, address bounce) comes from the transport's provider and means the destination is dead for every org pointed at it; kind partitions the ref namespace */
+               SET enabled = false, disabled_reason = $3, verified_at = NULL, updated_at = now()
                WHERE kind = $1 AND external_ref = $2 AND enabled"#,
         )
         .bind(kind.as_db_str())
@@ -479,7 +484,7 @@ impl NotificationChannelStore for InMemoryNotificationChannelStore {
         };
         g.push(MemEntry {
             org,
-            external_ref: new.external_ref,
+            external_ref: ch.config.lifecycle_ref().map(str::to_owned),
             ch: ch.clone(),
         });
         Ok(ch)
@@ -526,17 +531,18 @@ impl NotificationChannelStore for InMemoryNotificationChannelStore {
         let Some(entry) = g.iter_mut().find(|e| e.org == org && e.ch.id == id) else {
             return Ok(None);
         };
-        let ch = &mut entry.ch;
         if let Some(name) = update.name {
-            ch.name = name;
+            entry.ch.name = name;
         }
         if let Some(cfg) = update.config
-            && cfg != ch.config
+            && cfg != entry.ch.config
         {
-            ch.kind = cfg.kind();
-            ch.config = cfg;
-            ch.verified_at = None;
+            entry.external_ref = cfg.lifecycle_ref().map(str::to_owned);
+            entry.ch.kind = cfg.kind();
+            entry.ch.config = cfg;
+            entry.ch.verified_at = None;
         }
+        let ch = &mut entry.ch;
         if let Some(enabled) = update.enabled {
             ch.enabled = enabled;
             if enabled {
@@ -567,6 +573,7 @@ impl NotificationChannelStore for InMemoryNotificationChannelStore {
             {
                 e.ch.enabled = false;
                 e.ch.disabled_reason = Some(reason.to_string());
+                e.ch.verified_at = None;
                 e.ch.updated_at = Utc::now();
                 flipped += 1;
             }
@@ -634,7 +641,6 @@ mod tests {
                 webhook_url: "https://hooks.slack.com/x".into(),
             }),
             enabled: true,
-            external_ref: None,
         }
     }
 
@@ -730,28 +736,25 @@ mod tests {
     #[tokio::test]
     async fn lifecycle_disable_by_external_ref_spans_orgs_and_reenable_clears_note() {
         let store = InMemoryNotificationChannelStore::new();
-        let linked = |name: &str| NewNotificationChannel {
+        let linked = |name: &str, chat: &str| NewNotificationChannel {
             name: name.into(),
             config: ChannelConfig::TelegramApp(crate::domain::TelegramAppConfig {
-                chat_id: "-100".into(),
+                chat_id: chat.into(),
                 chat_title: None,
             }),
             enabled: true,
-            external_ref: Some("-100".into()),
         };
         // Two orgs linked the same chat; a third channel points elsewhere.
         let a = store
-            .create(org(), linked("prod"), WriteSource::Ui, 10)
+            .create(org(), linked("prod", "-100"), WriteSource::Ui, 10)
             .await
             .unwrap();
         store
-            .create(other_org(), linked("ops"), WriteSource::Ui, 10)
+            .create(other_org(), linked("ops", "-100"), WriteSource::Ui, 10)
             .await
             .unwrap();
-        let mut other = linked("other-chat");
-        other.external_ref = Some("-200".into());
         store
-            .create(org(), other, WriteSource::Ui, 10)
+            .create(org(), linked("other-chat", "-200"), WriteSource::Ui, 10)
             .await
             .unwrap();
 

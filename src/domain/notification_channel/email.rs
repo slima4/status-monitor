@@ -62,4 +62,10 @@ impl TransportConfig for EmailConfig {
     fn operator_managed(&self) -> bool {
         false
     }
+
+    /// The address itself: a provider bounce/complaint must find and
+    /// disable every channel pointed at it.
+    fn lifecycle_ref(&self) -> Option<&str> {
+        Some(&self.to)
+    }
 }

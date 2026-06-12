@@ -173,6 +173,11 @@ impl ChannelConfig {
     pub fn operator_managed(&self) -> bool {
         with_transport!(self, |c| c.operator_managed())
     }
+
+    /// See [`TransportConfig::lifecycle_ref`].
+    pub fn lifecycle_ref(&self) -> Option<&str> {
+        with_transport!(self, |c| c.lifecycle_ref())
+    }
 }
 
 pub const MAX_CHANNEL_NAME_LEN: usize = 100;
@@ -235,12 +240,6 @@ pub struct NewNotificationChannel {
     pub config: ChannelConfig,
     #[serde(default = "default_true")]
     pub enabled: bool,
-    /// Routing id queryable without opening the sealed config.
-    /// `serde(skip)`: only a transport's own flow may set it, never a
-    /// request body.
-    #[serde(skip)]
-    #[schema(ignore)]
-    pub external_ref: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, ToSchema)]

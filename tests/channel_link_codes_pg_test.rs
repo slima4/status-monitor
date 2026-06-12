@@ -189,7 +189,6 @@ async fn status_poll_is_org_scoped_and_transitions() {
                 name: "Ops Telegram".into(),
                 config: app_config("-100123"),
                 enabled: true,
-                external_ref: None,
             },
             WriteSource::Ui,
             10,
@@ -257,31 +256,16 @@ async fn consume_path_channel_create_suffixes_taken_names() {
     let (org, user) = one_org(&pool, "tg-name").await;
     let channels = PgNotificationChannelStore::new(pool.clone(), None);
 
-    let first = create_channel_deduped(
-        &channels,
-        org,
-        "Ops",
-        app_config("-1"),
-        Some("-1".into()),
-        10,
-        no_block_log(),
-    )
-    .await
-    .unwrap();
+    let first = create_channel_deduped(&channels, org, "Ops", app_config("-1"), 10, no_block_log())
+        .await
+        .unwrap();
     assert_eq!(first.name, "Ops");
     assert_eq!(first.config, app_config("-1"));
 
-    let second = create_channel_deduped(
-        &channels,
-        org,
-        "Ops",
-        app_config("-2"),
-        Some("-2".into()),
-        10,
-        no_block_log(),
-    )
-    .await
-    .unwrap();
+    let second =
+        create_channel_deduped(&channels, org, "Ops", app_config("-2"), 10, no_block_log())
+            .await
+            .unwrap();
     assert_eq!(second.name, "Ops 2");
 
     // The quota error is not swallowed by the suffix loop, and the breach
@@ -291,7 +275,6 @@ async fn consume_path_channel_create_suffixes_taken_names() {
         org,
         "Other",
         app_config("-3"),
-        Some("-3".into()),
         2,
         QuotaBlockLog {
             db: Some(pool.clone()),
