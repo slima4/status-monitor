@@ -98,6 +98,8 @@ pub fn routes(state: AppState) -> Router {
             get(views::auth::settings::api_tokens_page),
         )
         .route("/settings/usage", get(views::auth::settings::usage_page))
+        .route("/settings/team", get(views::team::page))
+        .route("/web/partials/settings/team", get(views::team::partial))
         .route("/settings/pages", get(views::pages::pages_list))
         .route("/settings/pages/{id}", get(views::pages::page_editor))
         .route(

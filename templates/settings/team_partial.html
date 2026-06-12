@@ -1,0 +1,100 @@
+{# data-org-id re-pins the mutation target on every refresh — the active org
+   can change mid-session (org switch / invitation accept in another tab) and
+   actions must always hit the org whose rows are on screen. #}
+<p data-org-id="{{ org_id }}" class="border-b border-[color:var(--theme-line)] px-4 py-2 font-mono text-xs text-muted">
+  › members <span class="cli-brackets">{{ members_used }}/{{ members_limit }}</span>
+  · invites pending <span class="cli-brackets">{{ invitations.len() }}/{{ invites_limit }}</span>
+</p>
+<table class="w-full text-left text-sm">
+  <thead class="table-head bg-[color:var(--theme-surface-sunk)]">
+    <tr>
+      <th class="px-4 py-2">Member</th>
+      <th class="px-4 py-2">Role</th>
+      <th class="px-4 py-2">Joined</th>
+      <th class="px-4 py-2"></th>
+    </tr>
+  </thead>
+  <tbody class="divide-y divide-[color:var(--theme-line)]">
+    {% for m in members %}
+    <tr>
+      <td class="px-4 py-2 align-top text-body">
+        <span class="inline-flex items-center gap-2 font-mono">{{ m.email }}{% if m.is_self %}<span class="cli-brackets font-normal">you</span>{% endif %}</span>
+      </td>
+      <td class="px-4 py-2 align-top">
+        <span class="status-badge status-badge--tag">{{ m.role }}</span>
+      </td>
+      <td class="px-4 py-2 align-top text-body tabular-nums"><time datetime="{{ m.joined|iso_ts }}" data-tz="exact">{{ m.joined|human_ts }}</time></td>
+      <td class="px-4 py-2">
+        <div class="flex items-center justify-end gap-3">
+          {% if !m.is_self %}
+          {% if m.is_owner %}
+          <button type="button"
+                  data-team-role data-user-id="{{ m.user_id }}" data-new-role="member"
+                  data-confirm-modal
+                  data-confirm-title="Demote to member?"
+                  data-confirm-body="{{ m.email }} keeps access but can no longer manage the team, billing-grade settings, or delete the organization."
+                  data-confirm-label="demote to member"
+                  class="row-link">make member</button>
+          {% else %}
+          <button type="button"
+                  data-team-role data-user-id="{{ m.user_id }}" data-new-role="owner"
+                  data-confirm-modal
+                  data-confirm-title="Promote to owner?"
+                  data-confirm-body="{{ m.email }} gains full control of this organization, including managing members and deleting it."
+                  data-confirm-label="promote to owner"
+                  class="row-link">make owner</button>
+          {% endif %}
+          {% endif %}
+          <button type="button"
+                  data-team-remove data-user-id="{{ m.user_id }}"{% if m.is_self %} data-self{% endif %}
+                  data-confirm-modal
+                  data-confirm-title="{% if m.is_self %}Leave this organization?{% else %}Remove member?{% endif %}"
+                  data-confirm-body="{% if m.is_self %}You lose access to its monitors and settings. An owner can re-invite you later.{% else %}{{ m.email }} loses access immediately. They can be re-invited later.{% endif %}"
+                  data-confirm-label="{% if m.is_self %}leave organization{% else %}remove member{% endif %}"
+                  data-confirm-danger
+                  class="row-link row-link--danger">{% if m.is_self %}leave{% else %}remove{% endif %}</button>
+        </div>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<p class="border-t border-[color:var(--theme-line)] bg-[color:var(--theme-surface-sunk)] px-4 py-2 font-mono text-xs text-muted">› pending invitations</p>
+{% if invitations.is_empty() %}
+<p class="px-4 py-6 font-mono text-xs text-quiet"># no pending invitations</p>
+{% else %}
+<table class="w-full text-left text-sm">
+  <thead class="table-head bg-[color:var(--theme-surface-sunk)]">
+    <tr>
+      <th class="px-4 py-2">Email</th>
+      <th class="px-4 py-2">Role</th>
+      <th class="px-4 py-2">Expires</th>
+      <th class="px-4 py-2"></th>
+    </tr>
+  </thead>
+  <tbody class="divide-y divide-[color:var(--theme-line)]">
+    {% for i in invitations %}
+    <tr>
+      <td class="px-4 py-2 align-top font-mono text-body">{{ i.email }}</td>
+      <td class="px-4 py-2 align-top">
+        <span class="status-badge status-badge--tag">{{ i.role }}</span>
+      </td>
+      <td class="px-4 py-2 align-top text-body tabular-nums"><time datetime="{{ i.expires|iso_ts }}" data-tz="exact">{{ i.expires|human_ts }}</time></td>
+      <td class="px-4 py-2">
+        <div class="flex items-center justify-end">
+          <button type="button"
+                  data-team-revoke data-invitation-id="{{ i.id }}"
+                  data-confirm-modal
+                  data-confirm-title="Revoke invitation?"
+                  data-confirm-body="The emailed link for {{ i.email }} stops working. You can invite the address again."
+                  data-confirm-label="revoke invitation"
+                  data-confirm-danger
+                  class="row-link row-link--danger">revoke</button>
+        </div>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}

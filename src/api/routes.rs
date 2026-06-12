@@ -328,7 +328,8 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
         .route("/orgs/{id}/members", get(handlers::orgs::list_org_members))
         .route(
             "/orgs/{id}/members/{user_id}",
-            axum::routing::delete(handlers::orgs::remove_org_member),
+            axum::routing::delete(handlers::orgs::remove_org_member)
+                .patch(handlers::orgs::update_org_member_role),
         )
         .route(
             "/me",

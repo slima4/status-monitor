@@ -699,15 +699,19 @@ pub async fn remove_member(
         return Ok(RemoveOutcome::NotFound);
     };
     if role == "owner" {
-        let (owner_count,): (i64,) = sqlx::query_as(
-            r#"SELECT count(*) FROM memberships
-               WHERE org_id = $1 AND role = 'owner'"#,
+        // Lock ALL owner rows, not just the target: two concurrent
+        // demote/remove calls against different owners would otherwise each
+        // count 2 and leave the org ownerless. (Aggregate + FOR UPDATE is
+        // invalid SQL — lock the rows, count what came back.)
+        let owners: Vec<(Uuid,)> = sqlx::query_as(
+            r#"SELECT user_id FROM memberships
+               WHERE org_id = $1 AND role = 'owner' FOR UPDATE"#,
         )
         .bind(org.0)
-        .fetch_one(&mut *tx)
+        .fetch_all(&mut *tx)
         .await
-        .context("remove_member: owner_count")?;
-        if owner_count <= 1 {
+        .context("remove_member: lock owners")?;
+        if owners.len() <= 1 {
             tx.rollback().await.ok();
             return Ok(RemoveOutcome::LastOwner);
         }
@@ -736,6 +740,81 @@ pub enum RemoveOutcome {
     Removed,
     NotFound,
     LastOwner,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SetRoleOutcome {
+    Updated,
+    Unchanged,
+    NotFound,
+    LastOwner,
+}
+
+/// Change a member's role. Mirrors [`remove_member`]'s tx + FOR-UPDATE shape:
+/// the in-tx owner count keeps a demotion from leaving the org ownerless.
+/// A no-op (same role) commits nothing and writes no audit row.
+pub async fn set_member_role(
+    pool: &PgPool,
+    org: OrgId,
+    actor: UserId,
+    target: UserId,
+    new_role: Role,
+) -> Result<SetRoleOutcome> {
+    let mut tx = pool.begin().await.context("set_member_role: begin")?;
+    let row: Option<(String,)> = sqlx::query_as(
+        r#"SELECT role FROM memberships
+           WHERE org_id = $1 AND user_id = $2 FOR UPDATE"#,
+    )
+    .bind(org.0)
+    .bind(target.0)
+    .fetch_optional(&mut *tx)
+    .await
+    .context("set_member_role: select")?;
+    let Some((current_role,)) = row else {
+        tx.rollback().await.ok();
+        return Ok(SetRoleOutcome::NotFound);
+    };
+    if current_role == new_role.as_db_str() {
+        tx.rollback().await.ok();
+        return Ok(SetRoleOutcome::Unchanged);
+    }
+    if current_role == "owner" && new_role != Role::Owner {
+        // Same all-owner-rows lock as remove_member — see the comment there.
+        let owners: Vec<(Uuid,)> = sqlx::query_as(
+            r#"SELECT user_id FROM memberships
+               WHERE org_id = $1 AND role = 'owner' FOR UPDATE"#,
+        )
+        .bind(org.0)
+        .fetch_all(&mut *tx)
+        .await
+        .context("set_member_role: lock owners")?;
+        if owners.len() <= 1 {
+            tx.rollback().await.ok();
+            return Ok(SetRoleOutcome::LastOwner);
+        }
+    }
+    sqlx::query(r#"UPDATE memberships SET role = $3 WHERE org_id = $1 AND user_id = $2"#)
+        .bind(org.0)
+        .bind(target.0)
+        .bind(new_role.as_db_str())
+        .execute(&mut *tx)
+        .await
+        .context("set_member_role: update")?;
+    record_audit_tx(
+        &mut tx,
+        org,
+        Some(actor),
+        "member.role_changed",
+        serde_json::json!({
+            "user_id": target.0,
+            "from": current_role,
+            "to": new_role.as_db_str(),
+        }),
+    )
+    .await
+    .context("set_member_role: audit")?;
+    tx.commit().await.context("set_member_role: commit")?;
+    Ok(SetRoleOutcome::Updated)
 }
 
 /// Outcome of [`add_member`]. The invitation accept flow distinguishes

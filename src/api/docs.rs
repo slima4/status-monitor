@@ -4,7 +4,7 @@ use crate::api::error::{ApiError, ApiErrorBody};
 use crate::api::handlers;
 use crate::api::handlers::orgs::{
     CheckSlugResponse, CreateOrgRequest, MemberView as OrgMemberView, OrgView,
-    SwitchActiveOrgRequest, UpdateOrgRequest,
+    SwitchActiveOrgRequest, UpdateMemberRoleRequest, UpdateOrgRequest,
 };
 use crate::api::page::PageEnvelope;
 use crate::api::public_error::{PublicApiError, PublicApiErrorBody};
@@ -139,6 +139,7 @@ use crate::storage::UptimeStats;
         handlers::orgs::check_slug,
         handlers::orgs::list_org_members,
         handlers::orgs::remove_org_member,
+        handlers::orgs::update_org_member_role,
         handlers::orgs::switch_active_org,
         handlers::usage::get_org_usage,
         handlers::usage::get_me_usage,
@@ -301,6 +302,7 @@ use crate::storage::UptimeStats;
             OrgMemberView,
             CheckSlugResponse,
             SwitchActiveOrgRequest,
+            UpdateMemberRoleRequest,
             handlers::usage::QuotaUsage,
             handlers::usage::PlanSummary,
             handlers::usage::OrgQuotas,

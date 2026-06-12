@@ -74,6 +74,8 @@
                  class="nav-link{% if active_tab == "pages" %} nav-link--active{% endif %}">pages</a>
               <a href="/settings/notifications"{% if active_tab == "notifications" %} aria-current="page"{% endif %}
                  class="nav-link{% if active_tab == "notifications" %} nav-link--active{% endif %}">notifications</a>
+              <a href="/settings/team"{% if active_tab == "team" %} aria-current="page"{% endif %}
+                 class="nav-link{% if active_tab == "team" %} nav-link--active{% endif %}">team</a>
               {% if ""|escalation_ui %}
               <a href="/settings/escalation"{% if active_tab == "escalation" %} aria-current="page"{% endif %}
                  class="nav-link{% if active_tab == "escalation" %} nav-link--active{% endif %}">escalation</a>

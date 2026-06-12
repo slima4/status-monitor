@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Team · Uptimepage{% endblock %}
+{% block content %}
+<section class="space-y-6">
+  <header class="space-y-1">
+    <h1 class="page-title"><span class="page-title__prefix" aria-hidden="true">$</span>team</h1>
+    <p class="text-sm text-muted">
+      People with access to this organization. Invited addresses get an email
+      link; the invitation also lets someone without an account sign up by
+      email.
+    </p>
+  </header>
+
+  {% if is_owner %}
+  <form id="invite-form" data-org-id="{{ org_id }}" novalidate class="sticker-card space-y-4 p-4">
+    <div class="grid gap-4 sm:grid-cols-[1fr_auto_auto] sm:items-end">
+      <label class="field-outline">
+        <span class="field-outline__label">Email</span>
+        <input id="invite-email" name="email" type="email" required maxlength="254"
+               placeholder="teammate@company.com"
+               autocomplete="off" spellcheck="false" class="w-full field font-mono">
+      </label>
+      <label class="field-outline">
+        <span class="field-outline__label">Role</span>
+        <select id="invite-role" data-sm-combobox aria-label="Role" class="w-full field font-mono">
+          <option value="member" selected>member</option>
+          <option value="owner">owner</option>
+        </select>
+      </label>
+      <button type="submit"
+              class="sticker-btn sticker-btn--primary px-4 py-2 text-sm font-medium">
+        send invite
+      </button>
+    </div>
+    <div id="form-errors" role="alert" aria-live="polite"
+         class="hidden alert-card alert-card--error"></div>
+  </form>
+
+  <div id="team-list"
+       hx-get="/web/partials/settings/team"
+       hx-trigger="load, team:refresh from:body"
+       hx-swap="innerHTML"
+       hx-on::response-error="window.smToast({message:'team list failed to load — refresh the page'})"
+       class="sticker-card overflow-hidden">
+    <p class="px-4 py-6 font-mono text-xs text-quiet"># loading…</p>
+  </div>
+
+  <script defer src="{{ "js/ui/api_form.js"|asset }}"></script>
+  <script defer src="{{ "js/ui/team.js"|asset }}"></script>
+  {% else %}
+  <div class="sticker-card p-4">
+    <p class="font-mono text-xs text-quiet"># owners manage the team — ask one to invite or remove people</p>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}

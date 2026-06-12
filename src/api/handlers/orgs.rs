@@ -461,6 +461,7 @@ pub async fn list_org_members(
 pub async fn remove_org_member(
     State(state): State<AppState>,
     BrowserUser(CurrentUser(user)): BrowserUser,
+    session: crate::web::Session,
     Path((id, target_user_id)): Path<(Uuid, Uuid)>,
 ) -> Result<StatusCode> {
     let pool = require_db(&state)?;
@@ -468,7 +469,22 @@ pub async fn remove_org_member(
     let target = UserId(target_user_id);
     require_owner(pool, user, org_id).await?;
     match orgs_store::remove_member(pool, org_id, user, target).await? {
-        orgs_store::RemoveOutcome::Removed => Ok(StatusCode::NO_CONTENT),
+        orgs_store::RemoveOutcome::Removed => {
+            // Leaving yourself: the session's active org just vanished and
+            // CurrentOrg rejects it everywhere — rotate to a surviving org
+            // so the next page load works. Best-effort; no org left = the
+            // org-less account state, nothing to rotate to.
+            if target == user
+                && session.active_org_id == Some(org_id)
+                && let Some(hash) = session.session_id_hash.as_deref()
+                && let Some(next) = orgs_store::oldest_membership_for_user(pool, user).await?
+                && let Err(err) =
+                    crate::auth::session::set_active_org_by_hash(pool, hash, next).await
+            {
+                tracing::warn!(error = %err, "active-org rotation after self-removal failed");
+            }
+            Ok(StatusCode::NO_CONTENT)
+        }
         orgs_store::RemoveOutcome::NotFound => Err(AppError::not_found(
             codes::MEMBER_NOT_FOUND,
             "member not found",
@@ -476,6 +492,53 @@ pub async fn remove_org_member(
         orgs_store::RemoveOutcome::LastOwner => Err(AppError::conflict(
             codes::LAST_OWNER,
             "cannot remove the last owner of an organisation",
+        )),
+    }
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct UpdateMemberRoleRequest {
+    pub role: Role,
+}
+
+#[utoipa::path(
+    patch,
+    path = "/api/v1/orgs/{id}/members/{user_id}",
+    tag = "orgs",
+    summary = "Change a member's role (owner-only)",
+    description = "Promote a member to owner or demote an owner to member. \
+                   Refuses to demote the org's only owner.",
+    params(("id" = Uuid, Path), ("user_id" = Uuid, Path)),
+    request_body = UpdateMemberRoleRequest,
+    responses(
+        (status = 204, description = "Role updated (or already that role)"),
+        (status = 401, body = ApiError),
+        (status = 403, body = ApiError),
+        (status = 404, body = ApiError),
+        (status = 409, body = ApiError, description = "Cannot demote the last owner"),
+    ),
+)]
+pub async fn update_org_member_role(
+    State(state): State<AppState>,
+    BrowserUser(CurrentUser(user)): BrowserUser,
+    Path((id, target_user_id)): Path<(Uuid, Uuid)>,
+    Json(req): Json<UpdateMemberRoleRequest>,
+) -> Result<StatusCode> {
+    let pool = require_db(&state)?;
+    let org_id = OrgId(id);
+    let target = UserId(target_user_id);
+    require_owner(pool, user, org_id).await?;
+    match orgs_store::set_member_role(pool, org_id, user, target, req.role).await? {
+        orgs_store::SetRoleOutcome::Updated | orgs_store::SetRoleOutcome::Unchanged => {
+            Ok(StatusCode::NO_CONTENT)
+        }
+        orgs_store::SetRoleOutcome::NotFound => Err(AppError::not_found(
+            codes::MEMBER_NOT_FOUND,
+            "member not found",
+        )),
+        orgs_store::SetRoleOutcome::LastOwner => Err(AppError::conflict(
+            codes::LAST_OWNER,
+            "cannot demote the last owner of an organisation",
         )),
     }
 }
