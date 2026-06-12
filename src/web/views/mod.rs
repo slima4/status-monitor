@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod connect_oauth;
 pub mod dashboard;
 pub mod delegate_connect;
 pub mod discord_connect;

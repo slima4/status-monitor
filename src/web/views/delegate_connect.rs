@@ -10,7 +10,7 @@ use askama_web::WebTemplate;
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
-use axum::response::{IntoResponse, Redirect, Response};
+use axum::response::{IntoResponse, Response};
 use serde::Deserialize;
 use serde_json::json;
 
@@ -20,8 +20,7 @@ use crate::api::handlers::notification_channels::{
     validate_config, validate_name,
 };
 use crate::app::AppState;
-use crate::auth::provider::{DISCORD_CONNECT_PROVIDER, SLACK_CONNECT_PROVIDER};
-use crate::auth::{discord, oauth_state, sha256_hex, slack};
+use crate::auth::sha256_hex;
 use crate::domain::{ChannelConfig, ChannelKind, NotificationChannel, OrgId};
 use crate::error::{AppError, Result};
 use crate::storage::LinkPurpose;
@@ -30,6 +29,7 @@ use crate::storage::orgs::record_audit_tx;
 use crate::web::client_ip::ClientIp;
 use crate::web::filters;
 use crate::web::views::channel_kind_label;
+use crate::web::views::connect_oauth::{self, ConnectProvider, StartQuery, mint_start_response};
 use crate::web::views::notification_channels::{QuotaBlockLog, create_channel_deduped};
 
 /// Manual-form kinds the page offers. Multi-secret transports (BYO
@@ -310,9 +310,26 @@ pub(crate) async fn audit_delegated_create(
     }
 }
 
-#[derive(Debug, Deserialize)]
-pub struct StartQuery {
-    pub format: Option<String>,
+/// One delegate OAuth start for every provider: link liveness + kind-hint
+/// gate, then the shared state mint. No redirect_after — it would store the
+/// raw delegate code at rest while the link table keeps only its hash; the
+/// callback bounces delegate outcomes to /c/done instead.
+async fn oauth_start(
+    state: &AppState,
+    code: &str,
+    q: &StartQuery,
+    p: &ConnectProvider,
+) -> Result<Response> {
+    if !(p.cfg)(&state.cfg).enabled() {
+        return Ok(not_found_page());
+    }
+    let Some(link) = live_link(state, code).await? else {
+        return Ok(not_found_page());
+    };
+    if link.kind_hint.as_deref().is_some_and(|h| h != p.kind) {
+        return Ok(not_found_page());
+    }
+    mint_start_response(state, p, q.wants_json(), link.org_id, Some(link.id)).await
 }
 
 pub async fn slack_start(
@@ -320,40 +337,7 @@ pub async fn slack_start(
     Path(code): Path<String>,
     Query(q): Query<StartQuery>,
 ) -> Result<Response> {
-    if !state.cfg.slack_oauth.enabled() {
-        return Ok(not_found_page());
-    }
-    let Some(link) = live_link(&state, &code).await? else {
-        return Ok(not_found_page());
-    };
-    if link.kind_hint.as_deref().is_some_and(|h| h != "slack") {
-        return Ok(not_found_page());
-    }
-    let pool = state.require_db()?;
-    let s = oauth_state::generate_state();
-    // No redirect_after: it would store the raw delegate code at rest while
-    // the link table keeps only its hash. The callback bounces delegate
-    // outcomes to /c/done instead.
-    oauth_state::insert(
-        pool,
-        &s,
-        SLACK_CONNECT_PROVIDER,
-        None,
-        None,
-        Some(link.org_id.0),
-        Some(link.id),
-    )
-    .await?;
-    let redirect_uri = format!(
-        "{}/auth/slack/callback",
-        state.cfg.auth.public_base_url.trim_end_matches('/')
-    );
-    let url = slack::authorize_url(&state.cfg.slack_oauth, &redirect_uri, &s);
-    Ok(if q.format.as_deref() == Some("json") {
-        Json(json!({ "url": url })).into_response()
-    } else {
-        Redirect::to(&url).into_response()
-    })
+    oauth_start(&state, &code, &q, &connect_oauth::SLACK).await
 }
 
 pub async fn discord_start(
@@ -361,36 +345,5 @@ pub async fn discord_start(
     Path(code): Path<String>,
     Query(q): Query<StartQuery>,
 ) -> Result<Response> {
-    if !state.cfg.discord_oauth.enabled() {
-        return Ok(not_found_page());
-    }
-    let Some(link) = live_link(&state, &code).await? else {
-        return Ok(not_found_page());
-    };
-    if link.kind_hint.as_deref().is_some_and(|h| h != "discord") {
-        return Ok(not_found_page());
-    }
-    let pool = state.require_db()?;
-    let s = oauth_state::generate_state();
-    // Same no-redirect_after rule as the slack start above.
-    oauth_state::insert(
-        pool,
-        &s,
-        DISCORD_CONNECT_PROVIDER,
-        None,
-        None,
-        Some(link.org_id.0),
-        Some(link.id),
-    )
-    .await?;
-    let redirect_uri = format!(
-        "{}/auth/discord/callback",
-        state.cfg.auth.public_base_url.trim_end_matches('/')
-    );
-    let url = discord::authorize_url(&state.cfg.discord_oauth, &redirect_uri, &s);
-    Ok(if q.format.as_deref() == Some("json") {
-        Json(json!({ "url": url })).into_response()
-    } else {
-        Redirect::to(&url).into_response()
-    })
+    oauth_start(&state, &code, &q, &connect_oauth::DISCORD).await
 }

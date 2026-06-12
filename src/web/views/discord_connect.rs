@@ -6,7 +6,6 @@
 //! successful create. Only the webhook survives the token exchange, stored
 //! as a regular `discord` channel.
 
-use axum::Json;
 use axum::extract::{Query, State};
 use axum::response::{IntoResponse, Redirect, Response};
 use serde::Deserialize;
@@ -18,35 +17,17 @@ use crate::domain::{ChannelConfig, DiscordConfig, OrgId};
 use crate::error::{AppError, Result};
 use crate::storage::orgs::is_active_member;
 use crate::web::client_ip::ClientIp;
+use crate::web::views::connect_oauth::{
+    self, StartQuery, callback_uri, invalid_state, mint_start_response,
+};
 use crate::web::views::delegate_connect::{audit_delegated_create, finish_create};
 use crate::web::views::notification_channels::{QuotaBlockLog, create_channel_deduped};
 use crate::web::{Authorized, ChannelsWrite, CurrentUser};
 
 const FORM_URL: &str = "/settings/notifications/new?kind=discord";
 
-/// `?discord=<outcome>` appended to the bounce target, which already
-/// carries a query string on the dashboard form but not on a `/c/<code>`
-/// page.
 fn bounce(base: &str, outcome: &str) -> Response {
-    let sep = if base.contains('?') { '&' } else { '?' };
-    Redirect::to(&format!("{base}{sep}discord={outcome}")).into_response()
-}
-
-fn redirect_uri(state: &AppState) -> String {
-    format!(
-        "{}/auth/discord/callback",
-        state.cfg.auth.public_base_url.trim_end_matches('/')
-    )
-}
-
-fn invalid_state() -> AppError {
-    AppError::forbidden_code("INVALID_STATE", "OAuth state is invalid or has expired")
-}
-
-#[derive(Debug, Deserialize)]
-pub struct StartQuery {
-    /// `json` returns `{ "url": … }` for the QR variant instead of a 302.
-    pub format: Option<String>,
+    connect_oauth::bounce(&connect_oauth::DISCORD, base, outcome)
 }
 
 pub async fn start(
@@ -54,24 +35,7 @@ pub async fn start(
     Authorized(org, _): Authorized<ChannelsWrite>,
     Query(q): Query<StartQuery>,
 ) -> Result<Response> {
-    let pool = state.require_db()?;
-    let s = oauth_state::generate_state();
-    oauth_state::insert(
-        pool,
-        &s,
-        DISCORD_CONNECT_PROVIDER,
-        None,
-        None,
-        Some(org.0),
-        None,
-    )
-    .await?;
-    let url = discord::authorize_url(&state.cfg.discord_oauth, &redirect_uri(&state), &s);
-    Ok(if q.format.as_deref() == Some("json") {
-        Json(serde_json::json!({ "url": url })).into_response()
-    } else {
-        Redirect::to(&url).into_response()
-    })
+    mint_start_response(&state, &connect_oauth::DISCORD, q.wants_json(), org, None).await
 }
 
 #[derive(Debug, Deserialize)]
@@ -157,7 +121,7 @@ pub async fn callback(
     let webhook = match discord::exchange_code(
         &state.outbound_http,
         &state.cfg.discord_oauth,
-        &redirect_uri(&state),
+        &callback_uri(&state, &connect_oauth::DISCORD),
         code,
     )
     .await
