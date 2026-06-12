@@ -1,0 +1,28 @@
+{% extends "chromeless_base.html" %}
+{# Render-only on GET — mail scanners prefetch links; the button POSTs. #}
+{% block title %}Decline invitation{% endblock %}
+{% block main %}
+    <main class="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-4 px-6 text-center">
+        <div id="decline-confirm" data-token="{{ token }}" class="space-y-4">
+            <h1 class="page-title justify-center"><span class="page-title__prefix" aria-hidden="true">$</span>decline invitation</h1>
+            <p class="text-sm text-muted">
+                You were invited to join <span class="font-mono text-body">{{ org_name }}</span>.
+                Declining tells the inviter you're not joining; the link stops working.
+            </p>
+            <p>
+                <button id="decline-btn" type="button"
+                        class="sticker-btn sticker-btn--danger inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium">
+                    decline invitation
+                </button>
+            </p>
+            <div id="decline-error" role="alert" aria-live="polite"
+                 class="hidden alert-card alert-card--error"></div>
+        </div>
+        <div id="decline-done" class="hidden space-y-4">
+            <h1 class="page-title justify-center"><span class="page-title__prefix" aria-hidden="true">$</span>invitation declined</h1>
+            <p class="text-sm text-muted">Done. You can close this page.</p>
+        </div>
+    </main>
+    <script defer src="{{ "js/ui/api_form.js"|asset }}"></script>
+    <script defer src="{{ "js/ui/invitation_decline.js"|asset }}"></script>
+{% endblock %}

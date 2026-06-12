@@ -2,6 +2,17 @@
 {% block title %}Dashboard · Uptimepage{% endblock %}
 {% block content %}
 <section class="space-y-5">
+  {% if let Some(org) = joined_notice %}
+  <p class="alert-card alert-card--muted text-sm" role="status">
+    you're in &mdash; welcome to <span class="font-mono text-body">{{ org }}</span>.
+  </p>
+  {% endif %}
+  {% if invite_missed_notice %}
+  <p class="alert-card alert-card--warn text-sm" role="status">
+    your invitation couldn't be applied &mdash; open the link in your
+    invitation email to see why, or ask the inviter for a new one.
+  </p>
+  {% endif %}
   {% if restored_notice %}
   <p class="alert-card alert-card--muted text-sm" role="status">
     welcome back &mdash; this sign-in restored your deleted account, along

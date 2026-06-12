@@ -74,6 +74,36 @@ pub async fn set_theme(pool: &PgPool, user: UserId, theme: AppTheme) -> Result<b
     Ok(res.rows_affected() == 1)
 }
 
+/// Invited-bootstrap user (magic-link + invitation): verified email, consent
+/// stamped, NO personal signup org — their only org is the one they join,
+/// resolved via oldest membership. `created == false` means a concurrent
+/// bootstrap won the partial-unique-index race; the caller must NOT
+/// compensate-delete a row it didn't create.
+pub async fn create_invited_user(pool: &PgPool, email: &str) -> Result<(UserId, bool)> {
+    let inserted: Option<(Uuid,)> = sqlx::query_as(
+        "INSERT INTO users (email, email_verified_at, terms_version, privacy_version) \
+         VALUES ($1, now(), $2, $3) \
+         ON CONFLICT (email) WHERE deleted_at IS NULL DO NOTHING \
+         RETURNING id",
+    )
+    .bind(email)
+    .bind(crate::auth::consent::TERMS_VERSION)
+    .bind(crate::auth::consent::PRIVACY_VERSION)
+    .fetch_optional(pool)
+    .await
+    .context("users::create_invited_user")?;
+    if let Some((id,)) = inserted {
+        return Ok((UserId(id), true));
+    }
+    let (id,): (Uuid,) =
+        sqlx::query_as("SELECT id FROM users WHERE email = $1::citext AND deleted_at IS NULL")
+            .bind(email)
+            .fetch_one(pool)
+            .await
+            .context("users::create_invited_user: race-winner lookup")?;
+    Ok((UserId(id), false))
+}
+
 /// Returns the signup org only when it (a) is set and (b) still exists.
 /// A user who soft-deleted their signup org keeps the stale column value;
 /// the join filters it out so callers don't anchor pages on a tombstone.

@@ -76,6 +76,14 @@ pub fn routes(state: AppState) -> Router {
             get(views::dashboard::table_partial),
         )
         .route("/login", get(views::auth::login))
+        .route(
+            "/invitations/accept",
+            get(views::invitations::accept_landing),
+        )
+        .route(
+            "/invitations/decline",
+            get(views::invitations::decline_landing),
+        )
         .route("/onboarding/org", get(views::auth::onboarding_org))
         .route(
             "/settings/account",

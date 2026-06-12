@@ -118,21 +118,42 @@ Available only when `auth.enabled_methods` contains `"magic_link"`:
 2. `GET /auth/magic-link/verify?token=…` — atomically marks the row
    `used_at = now()`, destroys any pre-login session, mints a new
    session (restoring a soft-deleted account — email ownership is the
-   re-auth proof), and redirects by priority: invitation accept →
-   `/?restored=1` (welcome-back banner) → carried `redirect_after` →
-   `/`. An invalid, used, or expired token renders an HTML "link
-   expired" page with status 410 — one indistinguishable state, no JSON
-   error envelope.
+   re-auth proof), auto-accepts a carried invitation, and redirects by
+   priority: `/?joined=<slug>` → `/?invite=missed` (carried invitation
+   failed to redeem) → `/?restored=1` (welcome-back banner) → carried
+   `redirect_after` → `/`. An invalid, used, or expired token renders
+   an HTML "link expired" page with status 410 — one indistinguishable
+   state, no JSON error envelope.
 
 The schema and email template ship in v1 even when the flow is gated, so
 flipping the config doesn't require a migration.
 
 ### Invitations
 
-Owners issue invitations to email addresses. The recipient gets a link
-embedding the raw token. Accepting requires a sign-in (GitHub or, when
-enabled, magic-link). The token is single-use, hashed at rest with the
-same argon2id parameters as API tokens.
+Owners issue invitations to email addresses. The recipient gets emailed
+accept/decline links embedding the raw token (single-use, hashed at rest
+with the same argon2id parameters as API tokens).
+
+- `GET /invitations/accept?token=…` — with a session, redeems right
+  there (clicking the emailed link is the consent; email must match);
+  without one, bounces to `/login?invitation=…` and every sign-in
+  method carries the invitation through and auto-accepts after login.
+  The session's active org rotates to the joined org and the dashboard
+  shows a "welcome to <org>" banner (`/?joined=<slug>`). A carried
+  invitation that can't be redeemed (mismatched email, seat race,
+  revoked) never breaks the login — the dashboard shows a generic
+  "invitation couldn't be applied" banner instead.
+- `GET /invitations/decline?token=…` — render-only confirm page (mail
+  scanners prefetch links, so the GET never mutates); its button POSTs
+  the decline.
+- A magic link requested for an **unknown** email that carries a valid
+  invitation for that same address bootstraps the account at verify
+  time: user created (verified, consent stamped, no personal org) and
+  joined directly into the inviter's org. Without a matching
+  invitation, unknown emails still get the indistinguishable
+  invalid-link page.
+- A seat-race loser's invitation is un-consumed (`accepted_at`
+  reverted), so "try again once a seat frees up" stays true.
 
 ## Endpoints
 
@@ -145,6 +166,10 @@ same argon2id parameters as API tokens.
 | `POST` | `/auth/logout-all`             | session | Destroy all sessions for current user |
 | `POST` | `/auth/magic-link/request`     | none    | Request magic link (gated) |
 | `GET`  | `/auth/magic-link/verify`      | none    | Verify magic-link token (gated) |
+| `GET`  | `/auth/google/login`           | none    | Initiate Google OAuth |
+| `GET`  | `/auth/google/callback`        | none    | Handle Google OAuth callback |
+| `GET`  | `/invitations/accept`          | optional session | Emailed accept link (HTML; redeems with session, else login bounce) |
+| `GET`  | `/invitations/decline`         | none    | Emailed decline link (HTML confirm page; POST does the decline) |
 | `GET`  | `/api/v1/me`                   | session/token | Current user info |
 | `GET`  | `/api/v1/me/sessions`          | session | List active sessions |
 | `DELETE` | `/api/v1/me/sessions/{id}`   | session | Revoke a session |

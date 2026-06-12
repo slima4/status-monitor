@@ -7,10 +7,11 @@
 //! - `POST   /api/v1/invitations/accept`        accept (token in body)
 //! - `POST   /api/v1/invitations/decline`       decline (token in body)
 //!
-//! The unauthenticated landing page `GET /invitations/accept?token=...` is a
-//! separate (HTML) flow added by the onboarding UI phase; for v1 we expose only
-//! the JSON endpoints. Email-sending uses [`AppState::email_sender`] so the
-//! provider stays config-driven.
+//! The emailed-link HTML landing pages live in `web::views::invitations`
+//! (GET accept redeems via [`accept_for_user`]; GET decline renders a
+//! confirm page that POSTs here). The login flows redeem carried invitation
+//! ids through [`try_auto_accept`]. Email-sending uses
+//! [`AppState::email_sender`] so the provider stays config-driven.
 
 use axum::Json;
 use axum::extract::{Path, State};
@@ -25,7 +26,7 @@ use crate::app::AppState;
 use crate::auth::email_norm;
 use crate::auth::invitations as inv;
 use crate::auth::url::token_link;
-use crate::domain::{OrgId, Role};
+use crate::domain::{OrgId, Organization, Role, UserId};
 use crate::email::{EmailAddress, EmailTemplate, TransactionalEmail};
 use crate::error::{AppError, Result};
 use crate::storage::orgs as orgs_store;
@@ -203,6 +204,26 @@ pub async fn accept(
             "invitation is invalid or has expired",
         ));
     };
+    accept_for_user(&state, user_id, row).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Outcome of a successful accept — enough for the `/?joined=<slug>` bounce.
+#[derive(Debug, Clone)]
+pub(crate) struct AcceptedInvitation {
+    pub org_id: OrgId,
+    pub org_slug: String,
+}
+
+/// Org liveness + member-cap pre-flight, shared by every accept path and by
+/// the magic-link bootstrap (which must fail BEFORE creating a user row —
+/// `user` is None there). Returns the org + plan for the accept tail.
+pub(crate) async fn validate_acceptable(
+    state: &AppState,
+    row: &inv::InvitationRow,
+    user: Option<UserId>,
+) -> Result<(Organization, std::sync::Arc<crate::domain::Plan>)> {
+    let pool = state.require_db()?;
     // Refuse on soft-deleted org. The owner could have soft-deleted the org
     // after the invite was sent; silently adding a membership to a tombstoned
     // org would mask itself in `list_orgs_for_user`.
@@ -212,6 +233,24 @@ pub async fn accept(
     if org_row.deleted_at.is_some() {
         return Err(AppError::not_found(codes::ORG_DELETED, "org is deleted"));
     }
+    // Member cap, friendly pre-check: reject an over-cap accept *before*
+    // marking the invitation consumed (and before the bootstrap path creates
+    // a user row), so on the common path the recipient keeps their token.
+    let plan = state.quotas.limit_for_org(row.org_id).await?;
+    state.quotas.check_can_add_member(row.org_id, user).await?;
+    Ok((org_row, plan))
+}
+
+/// Single owner of "user X redeems pending invitation row": liveness +
+/// email match + quota pre-check + mark_accepted + add_member. Used by the
+/// POST endpoint, the GET landing page, and both post-login auto-accepts.
+pub(crate) async fn accept_for_user(
+    state: &AppState,
+    user_id: UserId,
+    row: inv::InvitationRow,
+) -> Result<AcceptedInvitation> {
+    let pool = state.require_db()?;
+    let (org_row, plan) = validate_acceptable(state, &row, Some(user_id)).await?;
 
     // Caller's email must match the invitation. CITEXT compared in SQL.
     let caller_email: Option<(String,)> =
@@ -230,20 +269,6 @@ pub async fn accept(
         ));
     }
 
-    // Member cap, friendly pre-check: reject an over-cap accept *before*
-    // marking the invitation consumed, so on the common (uncontended) path
-    // the recipient keeps their token and can be let in once a seat frees
-    // up. This cannot be a hard guarantee: `mark_accepted` must run before
-    // `add_member` (see the next comment), so a concurrent accept that
-    // slips past this lockless check and only trips the advisory-locked
-    // backstop below will still have consumed its token — a rare,
-    // boundary-only race, not the steady state.
-    let plan = state.quotas.limit_for_org(row.org_id).await?;
-    state
-        .quotas
-        .check_can_add_member(row.org_id, Some(user_id))
-        .await?;
-
     // State transition first so the race-loser sees `INVITATION_INVALID`
     // BEFORE a membership row is inserted. Otherwise two parallel accepts
     // both pass find_pending_by_token, both call add_member (idempotent
@@ -258,11 +283,17 @@ pub async fn accept(
     // actor = the redeeming user (self-onboard via invitation token). The
     // advisory-locked count in add_member is the race-safe backstop on the
     // same plan number; it only fires if a concurrent accept slipped past
-    // the pre-check above.
+    // the lockless pre-check in validate_acceptable.
     let max_members = u32::try_from(plan.max_members).unwrap_or(u32::MAX);
     if let orgs_store::AddMemberOutcome::LimitReached { current, limit } =
         orgs_store::add_member(pool, row.org_id, user_id, user_id, row.role, max_members).await?
     {
+        // The token must stay redeemable — the landing page promises "try
+        // again once a seat frees up". Best-effort: a failure here only
+        // costs that retry, not correctness.
+        if let Err(err) = inv::unmark_accepted(pool, row.org_id, row.id).await {
+            tracing::warn!(error = %err, invitation = %row.id, "unmark after seat race failed");
+        }
         // Same audit shape every quota block uses — go through the one place
         // that owns it rather than re-assembling the event by hand.
         state
@@ -275,7 +306,34 @@ pub async fn accept(
             plan.id.clone(),
         ));
     }
-    Ok(StatusCode::NO_CONTENT)
+    Ok(AcceptedInvitation {
+        org_id: row.org_id,
+        org_slug: org_row.slug,
+    })
+}
+
+/// Login-flow wrapper: a stale/raced/over-quota invitation must never break
+/// the sign-in itself.
+pub(crate) async fn try_auto_accept(
+    state: &AppState,
+    user_id: UserId,
+    invitation_id: uuid::Uuid,
+) -> Option<AcceptedInvitation> {
+    let pool = state.require_db().ok()?;
+    match inv::find_pending_by_id(pool, invitation_id).await {
+        Ok(Some(row)) => match accept_for_user(state, user_id, row).await {
+            Ok(accepted) => Some(accepted),
+            Err(err) => {
+                tracing::warn!(error = %err, %invitation_id, "post-login invitation accept failed");
+                None
+            }
+        },
+        Ok(None) => None,
+        Err(err) => {
+            tracing::warn!(error = %err, %invitation_id, "post-login invitation lookup failed");
+            None
+        }
+    }
 }
 
 /// Decline doesn't require auth — anyone holding the token (the recipient

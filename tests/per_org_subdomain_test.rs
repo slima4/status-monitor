@@ -282,6 +282,7 @@ async fn tenant_host_isolates_operator_surface() {
         "/login",
         "/onboarding/org",
         "/auth/github/login",
+        "/invitations/accept?token=x",
         "/targets",
         "/settings/account",
         "/settings/sessions",

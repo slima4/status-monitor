@@ -253,6 +253,16 @@ async fn finish_login(
         tracing::info!(user_id = %resolved.user_id.0, "re-auth restored a soft-deleted account");
     }
 
+    // The dance carried an invitation — redeem it now, server-side; the
+    // session then opens directly in the joined org.
+    let joined = match consumed.invitation_id {
+        Some(id) => {
+            crate::api::handlers::invitations::try_auto_accept(&state, resolved.user_id, id).await
+        }
+        None => None,
+    };
+    let active_org = joined.as_ref().map(|j| j.org_id).or(resolved.signup_org_id);
+
     // Session fixation: drop any pre-login session bound to this browser
     // before minting the new one. Without this an attacker who pre-seeded a
     // cookie inherits the just-authenticated session.
@@ -268,7 +278,7 @@ async fn finish_login(
         pool,
         &state.cfg.auth.session,
         resolved.user_id,
-        resolved.signup_org_id,
+        active_org,
         ip_hash.as_deref(),
         ua_hash.as_deref(),
     )
@@ -301,10 +311,21 @@ async fn finish_login(
         tracing::warn!(error = %err, "display-preference cookie issue failed (non-fatal)");
     }
 
-    let redirect = if resolved.is_new_user {
+    // Joined org outranks onboarding — the invitation is why they came; the
+    // personal signup org keeps its default name, renameable in settings.
+    let redirect = if let Some(j) = joined {
+        let mut url = format!("/?joined={}", crate::auth::url::url_encode(&j.org_slug));
+        if resolved.restored {
+            url.push_str("&restored=1");
+        }
+        url
+    } else if consumed.invitation_id.is_some() {
+        // Carried an invitation but the redeem soft-failed (mismatched email,
+        // seat race, revoked). The dashboard banner says so generically; the
+        // emailed landing link still explains the specific reason.
+        "/?invite=missed".to_string()
+    } else if resolved.is_new_user {
         "/onboarding/org".to_string()
-    } else if let Some(invitation_id) = consumed.invitation_id {
-        format!("/invitations/accept?invitation={invitation_id}")
     } else if resolved.restored {
         // Banner outranks redirect_after — the user must learn the account
         // came back.

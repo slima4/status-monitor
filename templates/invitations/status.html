@@ -1,0 +1,14 @@
+{% extends "chromeless_base.html" %}
+{% block title %}{{ title }}{% endblock %}
+{% block main %}
+    <main class="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-4 px-6 text-center">
+        <h1 class="page-title justify-center"><span class="page-title__prefix" aria-hidden="true">$</span>{{ title }}</h1>
+        <p class="text-sm text-muted">{{ message }}</p>
+        <p>
+            <a href="/login"
+               class="sticker-btn inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium">
+                go to sign in
+            </a>
+        </p>
+    </main>
+{% endblock %}

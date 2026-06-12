@@ -216,6 +216,23 @@ pub async fn touch_last_used_debounced(
     Ok(())
 }
 
+/// Rotate the session's active org in place (invitation accept while signed
+/// in). Keyed by the stored hash the extractor already holds — never the raw
+/// cookie.
+pub async fn set_active_org_by_hash(
+    pool: &PgPool,
+    id_hash: &str,
+    org: crate::domain::OrgId,
+) -> Result<bool> {
+    let res = sqlx::query("UPDATE sessions SET active_org_id = $2 WHERE id_hash = $1")
+        .bind(id_hash)
+        .bind(org.0)
+        .execute(pool)
+        .await
+        .context("session::set_active_org_by_hash")?;
+    Ok(res.rows_affected() > 0)
+}
+
 /// Logout / pre-login destroy. Takes the raw cookie value the caller already
 /// holds (from the inbound request) and hashes it before the DELETE.
 pub async fn destroy(pool: &PgPool, cookie_token: &str) -> Result<u64> {

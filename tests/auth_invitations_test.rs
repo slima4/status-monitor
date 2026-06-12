@@ -358,3 +358,73 @@ async fn mark_accepted_and_declined_require_matching_org() {
     pool.close().await;
     drop_pg(&name).await;
 }
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn find_pending_by_id_honors_pending_guards() {
+    let Some((db, name)) = fresh_pg().await else {
+        return;
+    };
+    let pool = open_pool(&db).await;
+    MIGRATOR.run(&pool).await.unwrap();
+
+    let owner = seed_user(&pool, "owner-byid@example.test").await;
+    let org = seed_org(&pool, owner).await;
+    let created = invitations::create(
+        &pool,
+        org,
+        owner,
+        "byid@example.test",
+        Role::Member,
+        168,
+        50,
+    )
+    .await
+    .unwrap();
+
+    let found = invitations::find_pending_by_id(&pool, created.row.id)
+        .await
+        .unwrap()
+        .expect("pending row visible by id");
+    assert_eq!(found.email, "byid@example.test");
+    assert_eq!(found.org_id, org);
+
+    // Declined → invisible.
+    assert!(
+        invitations::mark_declined(&pool, org, created.row.id)
+            .await
+            .unwrap()
+    );
+    assert!(
+        invitations::find_pending_by_id(&pool, created.row.id)
+            .await
+            .unwrap()
+            .is_none()
+    );
+
+    // Expired → invisible.
+    let expired = invitations::create(
+        &pool,
+        org,
+        owner,
+        "byid2@example.test",
+        Role::Member,
+        168,
+        50,
+    )
+    .await
+    .unwrap();
+    sqlx::query("UPDATE invitations SET expires_at = now() - INTERVAL '1 minute' WHERE id = $1")
+        .bind(expired.row.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(
+        invitations::find_pending_by_id(&pool, expired.row.id)
+            .await
+            .unwrap()
+            .is_none()
+    );
+
+    drop_pg(&name).await;
+}

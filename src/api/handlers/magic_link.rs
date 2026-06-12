@@ -209,29 +209,72 @@ pub async fn verify(
 
     // Tombstone-inclusive: a verified link proves email ownership, so
     // re-auth restores a soft-deleted account like the OAuth callbacks do.
-    let Some((user_id, deleted_at)) =
-        orgs_store::find_user_by_email_including_deleted(pool, &row.email).await?
-    else {
-        // No user owns the email — the anti-enum INSERT for an unknown
-        // address. Token already burnt.
+    let (user_id, restored, bootstrapped) = match orgs_store::find_user_by_email_including_deleted(
+        pool, &row.email,
+    )
+    .await?
+    {
+        Some((user_id, deleted_at)) => {
+            let restored = deleted_at.is_some();
+            if restored {
+                let mut tx = pool.begin().await.context("magic-link restore: begin tx")?;
+                crate::auth::account::undelete_in_tx(&mut tx, user_id).await?;
+                tx.commit().await.context("magic-link restore: commit")?;
+                tracing::info!(user_id = %user_id.0, "magic-link re-auth restored a soft-deleted account");
+            }
+            (user_id, restored, false)
+        }
+        // Unknown email: bootstrap an account ONLY for a valid carried
+        // invitation whose address matches — the inviter's explicit
+        // allowlist. Everything else stays the indistinguishable page.
+        None => match bootstrap_invited_user(&state, &row).await? {
+            Some((user_id, created)) => (user_id, false, created),
+            None => {
+                login_audit::record_failure_anon(
+                    pool,
+                    LoginMethod::MagicLink,
+                    ip_hash.as_deref(),
+                    ua_hash.as_deref(),
+                    "no_user_for_email",
+                )
+                .await;
+                return Ok(invalid_page(&state));
+            }
+        },
+    };
+
+    // Redeem a carried invitation before the session is minted so the
+    // session opens in the joined org. Soft-fails — login never breaks.
+    let joined = match row.invitation_id {
+        Some(id) => crate::api::handlers::invitations::try_auto_accept(&state, user_id, id).await,
+        None => None,
+    };
+    if bootstrapped && joined.is_none() {
+        // The freshly minted user exists ONLY to redeem this invitation; a
+        // raced revoke between pre-flight and accept must not leave an
+        // org-less orphan account. No FK children yet — plain DELETE.
+        sqlx::query("DELETE FROM users WHERE id = $1")
+            .bind(user_id.0)
+            .execute(pool)
+            .await
+            .context("magic-link bootstrap: compensating user delete")?;
+        tracing::warn!(user_id = %user_id.0, "invited bootstrap raced a revoke/seat; user row compensated");
         login_audit::record_failure_anon(
             pool,
             LoginMethod::MagicLink,
             ip_hash.as_deref(),
             ua_hash.as_deref(),
-            "no_user_for_email",
+            "invited_bootstrap_raced",
         )
         .await;
-        // Same page as invalid_token — indistinguishable to a probe.
         return Ok(invalid_page(&state));
-    };
-    let restored = deleted_at.is_some();
-    if restored {
-        let mut tx = pool.begin().await.context("magic-link restore: begin tx")?;
-        crate::auth::account::undelete_in_tx(&mut tx, user_id).await?;
-        tx.commit().await.context("magic-link restore: commit")?;
-        tracing::info!(user_id = %user_id.0, "magic-link re-auth restored a soft-deleted account");
     }
+    let active_org = match joined.as_ref().map(|j| j.org_id) {
+        Some(org) => Some(org),
+        // Resolving here also un-breaks plain magic logins: CurrentOrg
+        // rejects a session whose active_org_id is NULL.
+        None => crate::storage::users::resolve_signup_org(pool, user_id).await?,
+    };
 
     let cookie_name = state.cfg.auth.session.cookie_name.as_str();
     if let Some(prev) = cookies.get(cookie_name).map(|c| c.value().to_string())
@@ -245,7 +288,7 @@ pub async fn verify(
         pool,
         &state.cfg.auth.session,
         user_id,
-        None,
+        active_org,
         ip_hash.as_deref(),
         ua_hash.as_deref(),
     )
@@ -275,8 +318,16 @@ pub async fn verify(
         tracing::warn!(error = %err, "display-preference cookie issue failed (non-fatal)");
     }
     // Same priority as the OAuth callback.
-    let redirect = if let Some(invitation_id) = row.invitation_id {
-        format!("/invitations/accept?invitation={invitation_id}")
+    let redirect = if let Some(j) = joined {
+        let mut url = format!("/?joined={}", crate::auth::url::url_encode(&j.org_slug));
+        if restored {
+            url.push_str("&restored=1");
+        }
+        url
+    } else if row.invitation_id.is_some() {
+        // Carried an invitation but the redeem soft-failed — generic banner;
+        // the emailed landing link explains the specific reason.
+        "/?invite=missed".to_string()
     } else if restored {
         "/?restored=1".to_string()
     } else {
@@ -287,4 +338,37 @@ pub async fn verify(
             .unwrap_or_else(|| "/".to_string())
     };
     Ok(Redirect::to(&redirect).into_response())
+}
+
+/// B2 bootstrap gate. Returns the new user id only when the token row carries
+/// a pending invitation whose address equals the token's email and whose org
+/// can still take a member — checked BEFORE the user INSERT so failures
+/// leave no orphan row. Every refusal collapses to `None` (anti-enum).
+async fn bootstrap_invited_user(
+    state: &AppState,
+    row: &magic_link::MagicLinkRow,
+) -> Result<Option<(crate::domain::UserId, bool)>> {
+    let pool = state.require_db()?;
+    let Some(invitation_id) = row.invitation_id else {
+        return Ok(None);
+    };
+    let Some(invitation) =
+        crate::auth::invitations::find_pending_by_id(pool, invitation_id).await?
+    else {
+        return Ok(None);
+    };
+    if !invitation.email.eq_ignore_ascii_case(&row.email) {
+        return Ok(None);
+    }
+    if let Err(err) =
+        crate::api::handlers::invitations::validate_acceptable(state, &invitation, None).await
+    {
+        tracing::warn!(error = %err, %invitation_id, "invited bootstrap pre-flight failed");
+        return Ok(None);
+    }
+    let (user_id, created) = crate::storage::users::create_invited_user(pool, &row.email).await?;
+    if created {
+        tracing::info!(user_id = %user_id.0, via = "invitation", "magic-link bootstrap created account");
+    }
+    Ok(Some((user_id, created)))
 }

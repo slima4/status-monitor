@@ -222,6 +222,25 @@ pub async fn resolve_pending_invitation_id(
     }
 }
 
+/// Pending-row lookup by id — for login flows whose `oauth_states` /
+/// `magic_link_tokens` row carries a resolved invitation id (possession was
+/// proven at login start, so no argon2 here).
+pub async fn find_pending_by_id(pool: &PgPool, id: Uuid) -> Result<Option<InvitationRow>> {
+    let row: Option<RawRow> = sqlx::query_as(
+        "SELECT id, org_id, inviter_id, email::text AS email, role, token_hash, \
+                created_at, expires_at, accepted_at, declined_at \
+         FROM invitations \
+         WHERE id = $1 \
+         AND accepted_at IS NULL AND declined_at IS NULL \
+         AND expires_at > now()",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await
+    .context("invitations::find_pending_by_id")?;
+    row.map(InvitationRow::try_from).transpose()
+}
+
 pub async fn find_pending_by_token(
     pool: &PgPool,
     raw_token: &str,
@@ -242,26 +261,34 @@ pub async fn find_pending_by_token(
 
     for r in rows {
         if token_hash::verify(raw_token, &r.token_hash) {
-            return Ok(Some(InvitationRow {
-                id: r.id,
-                org_id: OrgId(r.org_id),
-                inviter_id: UserId(r.inviter_id),
-                email: r.email,
-                role: Role::from_db_str(&r.role).ok_or_else(|| {
-                    AppError::Other(anyhow::anyhow!(
-                        "invitation row {} has unknown role {}",
-                        r.id,
-                        r.role
-                    ))
-                })?,
-                created_at: r.created_at,
-                expires_at: r.expires_at,
-                accepted_at: r.accepted_at,
-                declined_at: r.declined_at,
-            }));
+            return Ok(Some(InvitationRow::try_from(r)?));
         }
     }
     Ok(None)
+}
+
+impl TryFrom<RawRow> for InvitationRow {
+    type Error = AppError;
+
+    fn try_from(r: RawRow) -> Result<Self> {
+        Ok(Self {
+            id: r.id,
+            org_id: OrgId(r.org_id),
+            inviter_id: UserId(r.inviter_id),
+            email: r.email,
+            role: Role::from_db_str(&r.role).ok_or_else(|| {
+                AppError::Other(anyhow::anyhow!(
+                    "invitation row {} has unknown role {}",
+                    r.id,
+                    r.role
+                ))
+            })?,
+            created_at: r.created_at,
+            expires_at: r.expires_at,
+            accepted_at: r.accepted_at,
+            declined_at: r.declined_at,
+        })
+    }
 }
 
 #[derive(Debug, sqlx::FromRow)]
@@ -338,6 +365,22 @@ pub async fn mark_accepted(pool: &PgPool, org: OrgId, id: Uuid) -> Result<bool> 
     .execute(pool)
     .await
     .context("invitations::mark_accepted")?;
+    Ok(res.rows_affected() > 0)
+}
+
+/// Revert a just-stamped accept whose membership insert lost the advisory-
+/// locked seat race — the recipient keeps a redeemable token, matching the
+/// "your invitation stays valid" contract on the landing page.
+pub async fn unmark_accepted(pool: &PgPool, org: OrgId, id: Uuid) -> Result<bool> {
+    let res = sqlx::query(
+        "UPDATE invitations SET accepted_at = NULL \
+         WHERE id = $1 AND org_id = $2 AND accepted_at IS NOT NULL",
+    )
+    .bind(id)
+    .bind(org.0)
+    .execute(pool)
+    .await
+    .context("invitations::unmark_accepted")?;
     Ok(res.rows_affected() > 0)
 }
 

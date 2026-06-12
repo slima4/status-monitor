@@ -5,6 +5,7 @@ pub mod delegate_connect;
 pub mod discord_connect;
 pub mod escalation;
 pub mod incidents;
+pub mod invitations;
 pub mod legal;
 pub mod notification_channels;
 pub mod on_call;

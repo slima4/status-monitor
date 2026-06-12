@@ -78,6 +78,13 @@ pub struct DashboardParams {
     /// Login flows set `restored=1` after un-deleting the account.
     #[serde(default)]
     pub restored: Option<String>,
+    /// Login flows set `joined=<slug>` after auto-accepting an invitation.
+    #[serde(default)]
+    pub joined: Option<String>,
+    /// Login flows set `invite=missed` when a carried invitation could not
+    /// be redeemed (mismatch / seat race / revoked).
+    #[serde(default)]
+    pub invite: Option<String>,
 }
 
 /// One row in the dashboard table — every cell the template renders.
@@ -238,6 +245,8 @@ pub struct DashboardPage {
     pub selected_status: Option<&'static str>,
     pub selected_kind: Option<&'static str>,
     pub restored_notice: bool,
+    pub joined_notice: Option<String>,
+    pub invite_missed_notice: bool,
 }
 
 #[derive(Template, WebTemplate)]
@@ -313,6 +322,15 @@ pub async fn index(
     let regions = labeled_regions(&catalog, region_ids);
     let onboarding = snapshot.matches == 0;
     let (rows, matches) = filter_rows(&snapshot, selected_status, selected_kind);
+    // Banner only when the slug matches the ACTIVE org — a pasted/crafted
+    // ?joined= for some other org renders nothing.
+    let joined_notice = match (params.joined.as_deref(), state.db.as_ref()) {
+        (Some(slug), Some(pool)) => crate::storage::orgs::get_org(pool, org.0)
+            .await?
+            .filter(|o| o.slug == slug)
+            .map(|o| o.name),
+        _ => None,
+    };
     Ok(DashboardPage {
         active_tab: "dashboard",
         range,
@@ -333,6 +351,8 @@ pub async fn index(
         selected_status,
         selected_kind,
         restored_notice: params.restored.as_deref() == Some("1"),
+        joined_notice,
+        invite_missed_notice: params.invite.as_deref() == Some("missed"),
     })
 }
 
@@ -1191,6 +1211,8 @@ mod tests {
             selected_status: None,
             selected_kind: None,
             restored_notice: false,
+            joined_notice: None,
+            invite_missed_notice: false,
         }
     }
 
@@ -1286,6 +1308,8 @@ mod tests {
             selected_status: None,
             selected_kind: None,
             restored_notice: false,
+            joined_notice: None,
+            invite_missed_notice: false,
         };
         let html = page.render().unwrap();
         assert!(html.contains("nothing to watch yet."));
