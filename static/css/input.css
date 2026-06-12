@@ -3436,6 +3436,8 @@
         border: 0;
         font: inherit;
     }
+    /* .monitors-menu/.monitors-popover also chrome the nav org picker. */
+    .monitors-popover__item[aria-current="true"] { color: var(--theme-accent); }
     .monitors-popover__item--danger { color: var(--theme-state-bad-fg); }
     .monitors-popover__item--danger:hover,
     .monitors-popover__item--danger:focus-visible {

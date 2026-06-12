@@ -9,6 +9,7 @@ pub mod invitations;
 pub mod legal;
 pub mod notification_channels;
 pub mod on_call;
+pub mod org_picker;
 pub mod pages;
 pub mod public_status;
 pub mod region_display;

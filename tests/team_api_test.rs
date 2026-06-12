@@ -368,6 +368,67 @@ async fn switch_active_org_persists_and_gates_membership() {
 
 #[tokio::test]
 #[ignore = "requires DATABASE_URL"]
+async fn org_picker_partial_renders_only_for_multi_org() {
+    let Some((db, name)) = fresh_pg().await else {
+        return;
+    };
+    let pool = open_pool(&db).await;
+    MIGRATOR.run(&pool).await.unwrap();
+    let user = seed_user(&pool, "picker@team.test").await;
+    let org_a = seed_org(&pool, user).await;
+
+    let (app, _d) = common::build_test_app_with_pg(pool.clone(), |_| {}).await;
+    let get = |app: &axum::Router| {
+        let app = app.clone();
+        async move {
+            let resp = app
+                .oneshot(
+                    Request::builder()
+                        .uri("/web/partials/org-picker")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let status = resp.status();
+            let bytes = axum::body::to_bytes(resp.into_body(), 1024 * 1024)
+                .await
+                .unwrap();
+            (status, String::from_utf8_lossy(&bytes).to_string())
+        }
+    };
+
+    // Single org: 200 with empty body, picker absent.
+    let single = common::with_session(app.clone(), user, Some(org_a), None);
+    let (status, body) = get(&single).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.is_empty());
+
+    // Second membership: picker lists both orgs, marks the active one.
+    let other_owner = seed_user(&pool, "picker-other@team.test").await;
+    let org_b = seed_org(&pool, other_owner).await;
+    add_member(&pool, org_b, user, "member").await;
+    let multi = common::with_session(app.clone(), user, Some(org_a), None);
+    let (status, body) = get(&multi).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.contains("data-org-picker"));
+    assert!(body.contains(&format!(r#"data-org-switch="{}""#, org_a.0)));
+    assert!(body.contains(&format!(r#"data-org-switch="{}""#, org_b.0)));
+    assert_eq!(body.matches(r#"aria-current="true""#).count(), 1);
+
+    // Active org vanished mid-session: picker still renders as the escape
+    // hatch, with no active marker.
+    let wedged = common::with_session(app, user, Some(OrgId(Uuid::new_v4())), None);
+    let (status, body) = get(&wedged).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.contains("data-org-picker"));
+    assert_eq!(body.matches(r#"aria-current="true""#).count(), 0);
+
+    common::drop_test_db(&name).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
 async fn team_page_and_partial_render_by_role() {
     let Some((db, name)) = fresh_pg().await else {
         return;

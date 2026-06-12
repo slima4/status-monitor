@@ -75,6 +75,7 @@ pub fn routes(state: AppState) -> Router {
             "/web/partials/dashboard",
             get(views::dashboard::table_partial),
         )
+        .route("/web/partials/org-picker", get(views::org_picker::partial))
         .route("/login", get(views::auth::login))
         .route(
             "/invitations/accept",

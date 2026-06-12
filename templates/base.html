@@ -30,6 +30,7 @@
     <script defer src="{{ "js/ui/popover_pos.js"|asset }}"></script>
     <script defer src="{{ "js/ui/combobox.js"|asset }}"></script>
     <script defer src="{{ "js/ui/localtime.js"|asset }}"></script>
+    <script defer src="{{ "js/ui/org_picker.js"|asset }}"></script>
     <script>
       // Shared API-response readers for inline page scripts. Defined here
       // (not deferred) so they exist before any per-page content script
@@ -58,6 +59,10 @@
                 <span>uptime<span class="nav-brand__em">page</span></span>
             </a>
             {% if active_tab != "login" && active_tab != "onboarding" && active_tab != "recover" %}
+            {# Error/consent pages pass active_tab="" — no picker fetch there. #}
+            {% if active_tab != "" %}
+            <span hx-get="/web/partials/org-picker" hx-trigger="load" hx-swap="outerHTML"></span>
+            {% endif %}
             <a href="/"{% if active_tab == "dashboard" %} aria-current="page"{% endif %}
                class="nav-link{% if active_tab == "dashboard" %} nav-link--active{% endif %}">dashboard</a>
             <a href="/targets"{% if active_tab == "targets" %} aria-current="page"{% endif %}

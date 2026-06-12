@@ -285,6 +285,7 @@ async fn tenant_host_isolates_operator_surface() {
         "/invitations/accept?token=x",
         "/settings/team",
         "/web/partials/settings/team",
+        "/web/partials/org-picker",
         "/targets",
         "/settings/account",
         "/settings/sessions",
