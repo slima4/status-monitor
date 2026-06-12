@@ -46,6 +46,7 @@ Override `UPTIMEPAGE_CONFIG_PATH` to point at an alternate base config file.
 | `mcp` | `enabled`, `oauth_enabled`, `resource_uri`, `allowed_origins`, `access_token_ttl_secs` | LLM connector (MCP) server at `/mcp`. Off by default; OAuth requires real HTTPS `resource_uri` + `auth.public_base_url`. See [MCP server](mcp.md) |
 | `email` | `provider`, `from_name`, `from_address` | Transactional email backend. `provider` ∈ `"resend" \| "log" \| "memory"` |
 | `email.resend` | `api_key`, `webhook_secret` | `api_key` required when `email.provider = "resend"`. A set `webhook_secret` (the endpoint's Svix `whsec_…` signing secret) mounts `POST /hooks/resend`: a permanently bounced or spam-complaining address gets every email channel pointed at it disabled, with the reason shown on the channel form |
+| `whatsapp_app` | `enabled`, `access_token`, `phone_number_id`, `public_number`, `app_secret`, `verify_token`, `template_name`, `language_code` | Operator WhatsApp number behind one-tap `whatsapp_app` channels (`wa.me` deep link + `/hooks/whatsapp` Meta webhook). `enabled = true` AND complete creds mount the surface — the flag is a deliberate spend gate, since alert sends are operator-paid Meta template messages. Inbound `stop` disables the sender's channels |
 
 ## Public status routing
 
@@ -117,6 +118,16 @@ from_address = "no-reply@example.test"
 [email.resend]
 api_key = ""                         # required when provider = "resend"
 webhook_secret = ""                  # whsec_… of the Resend webhook endpoint
+
+[whatsapp_app]                       # operator WhatsApp number (one-tap linking)
+enabled = false                      # deliberate spend gate — creds alone stay off
+access_token = ""                    # Meta Cloud API token (env-only)
+phone_number_id = ""                 # Cloud API sender id
+public_number = ""                   # display number digits — the wa.me target
+app_secret = ""                      # signs webhook deliveries (env-only)
+verify_token = ""                    # echoed by Meta's GET subscribe handshake
+template_name = ""                   # approved alert template, single body param
+language_code = "en"
 ```
 
 The GitHub button on `/login` only renders when `auth.github.client_id`

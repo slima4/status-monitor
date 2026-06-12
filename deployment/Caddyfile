@@ -273,6 +273,25 @@ app.{$UPTIMEPAGE_DOMAIN} {
 		import app_upstream
 	}
 
+	# ─── WhatsApp (Meta) webhook — anonymous, per-IP edge cap ───────────
+	# Authenticated in-app by X-Hub-Signature-256 (HMAC, constant-time);
+	# the GET is Meta's one-time subscribe handshake. Meta retries non-2xx
+	# with backoff. Same body bound as the other hooks.
+	@whatsapp_hook path /hooks/whatsapp
+	handle @whatsapp_hook {
+		request_body {
+			max_size 64KB
+		}
+		rate_limit {
+			zone whatsapp_hook {
+				key {remote_host}
+				events 120
+				window 1m
+			}
+		}
+		import app_upstream
+	}
+
 	# ─── Operator surface: app-enforced session auth (SaaS) ─────────────
 	# No edge basic_auth. The health/metrics/public handle blocks above
 	# are terminal; every other (operator) request falls through to the

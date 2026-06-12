@@ -19,6 +19,7 @@ pub mod targets_form;
 pub mod targets_list;
 pub mod telegram;
 pub mod verify_channel;
+pub mod whatsapp;
 
 use std::fmt;
 
@@ -120,6 +121,8 @@ pub(crate) fn channel_kind_label(kind: crate::domain::ChannelKind) -> &'static s
     match kind {
         ChannelKind::Telegram => "telegram bot",
         ChannelKind::TelegramApp => "telegram",
+        ChannelKind::WhatsApp => "whatsapp api",
+        ChannelKind::WhatsAppApp => "whatsapp",
         ChannelKind::MsTeams => "teams",
         ChannelKind::GoogleChat => "google chat",
         other => other.as_db_str(),

@@ -78,6 +78,8 @@ pub struct AppConfig {
     #[serde(default)]
     pub telegram: TelegramBotConfig,
     #[serde(default)]
+    pub whatsapp_app: WhatsAppAppBotConfig,
+    #[serde(default)]
     pub slack_oauth: ConnectOauthConfig,
     #[serde(default)]
     pub discord_oauth: ConnectOauthConfig,
@@ -150,6 +152,58 @@ impl TelegramBotConfig {
     /// Bot token for linked-channel delivery; `None` when not configured.
     pub fn delivery_token(&self) -> Option<&str> {
         self.enabled().then(|| self.bot_token.expose_secret())
+    }
+}
+
+/// Operator-owned WhatsApp business number (Meta Cloud API) behind the
+/// one-tap `whatsapp_app` channels. `enabled` is a deliberate spend gate:
+/// template sends ride the operator's WABA at per-message Meta pricing, so
+/// creds alone never switch the surface on.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct WhatsAppAppBotConfig {
+    pub enabled: bool,
+    #[serde(default = "empty_secret", with = "secret_str")]
+    pub access_token: SecretString,
+    /// Cloud API id messages are sent from.
+    pub phone_number_id: String,
+    /// Display number in international digits — the `wa.me` deep-link
+    /// target (NOT the phone_number_id).
+    pub public_number: String,
+    /// Meta app secret; signs every webhook delivery
+    /// (`X-Hub-Signature-256`).
+    #[serde(default = "empty_secret", with = "secret_str")]
+    pub app_secret: SecretString,
+    /// Echoed by Meta's one-time GET subscribe handshake.
+    #[serde(default = "empty_secret", with = "secret_str")]
+    pub verify_token: SecretString,
+    /// Approved alert template with a single body parameter.
+    pub template_name: String,
+    pub language_code: String,
+}
+
+impl Default for WhatsAppAppBotConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            access_token: empty_secret(),
+            phone_number_id: String::new(),
+            public_number: String::new(),
+            app_secret: empty_secret(),
+            verify_token: empty_secret(),
+            template_name: String::new(),
+            language_code: "en".into(),
+        }
+    }
+}
+
+impl WhatsAppAppBotConfig {
+    pub fn enabled(&self) -> bool {
+        self.enabled
+            && !self.access_token.expose_secret().trim().is_empty()
+            && !self.phone_number_id.trim().is_empty()
+            && !self.app_secret.expose_secret().trim().is_empty()
+            && !self.verify_token.expose_secret().trim().is_empty()
     }
 }
 
@@ -1283,6 +1337,65 @@ impl AppConfig {
                 "email.from_address is required when email.provider = \"resend\"",
             ));
         }
+        Ok(())
+    }
+
+    /// A half-configured operator WhatsApp number is a clean startup error,
+    /// not a dead webhook or a failing send after the flag flip.
+    pub fn validate_whatsapp_app(&self) -> Result<()> {
+        fn err(msg: &str) -> crate::error::AppError {
+            crate::error::AppError::Other(anyhow::anyhow!(msg.to_string()))
+        }
+        let w = &self.whatsapp_app;
+        if !w.enabled {
+            return Ok(());
+        }
+        if w.access_token.expose_secret().trim().is_empty()
+            || w.phone_number_id.trim().is_empty()
+            || w.app_secret.expose_secret().trim().is_empty()
+            || w.verify_token.expose_secret().trim().is_empty()
+        {
+            return Err(err(
+                "whatsapp_app.enabled needs access_token, phone_number_id, app_secret and verify_token set",
+            ));
+        }
+        if w.verify_token.expose_secret().trim().len() < 32 {
+            return Err(err(
+                "UPTIMEPAGE_WHATSAPP_APP__VERIFY_TOKEN must be at least 32 chars",
+            ));
+        }
+        let n = w.public_number.trim();
+        if !(5..=20).contains(&n.len()) || !n.bytes().all(|b| b.is_ascii_digit()) {
+            return Err(err(
+                "whatsapp_app.public_number must be the display number as international digits",
+            ));
+        }
+        if w.template_name.is_empty()
+            || !w
+                .template_name
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+        {
+            return Err(err(
+                "whatsapp_app.template_name is required (lowercase letters, digits, and _ only)",
+            ));
+        }
+        if w.language_code.is_empty()
+            || !w
+                .language_code
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_')
+        {
+            return Err(err(
+                "whatsapp_app.language_code must be a code like en or en_US",
+            ));
+        }
+        // Deliberate: sends are operator-paid Meta template messages with no
+        // per-org cap yet — the flag flip is the only spend control.
+        tracing::warn!(
+            "whatsapp_app.enabled — operator-paid template sends are UNCAPPED; \
+             monitor spend until per-org send caps land"
+        );
         Ok(())
     }
 

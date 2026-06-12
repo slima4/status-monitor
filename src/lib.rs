@@ -25,6 +25,7 @@ pub mod security;
 pub mod storage;
 pub mod telegram;
 pub mod web;
+pub mod whatsapp;
 pub mod worker;
 
 pub use router::{build_app_router, build_app_router_api_only};

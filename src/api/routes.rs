@@ -169,6 +169,14 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
             get(handlers::notification_channels::telegram_link_status),
         )
         .route(
+            "/notification-channels/whatsapp-link",
+            post(handlers::notification_channels::whatsapp_link_mint),
+        )
+        .route(
+            "/notification-channels/whatsapp-link/{id}",
+            get(handlers::notification_channels::whatsapp_link_status),
+        )
+        .route(
             "/notification-channels/delegate",
             get(handlers::notification_channels::delegate_link_list)
                 .post(handlers::notification_channels::delegate_link_mint),

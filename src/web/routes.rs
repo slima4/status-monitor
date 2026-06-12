@@ -172,6 +172,16 @@ pub fn routes(state: AppState) -> Router {
         r = r.route("/hooks/resend", post(views::resend_hook::webhook));
     }
 
+    // Operator WhatsApp number receiver: Meta's GET subscribe handshake +
+    // signed message deliveries. Mounted only when the operator number is
+    // configured AND the spend flag is on.
+    if cfg.whatsapp_app.enabled() {
+        r = r.route(
+            crate::whatsapp::WEBHOOK_PATH,
+            get(views::whatsapp::verify).post(views::whatsapp::webhook),
+        );
+    }
+
     // "Add to Slack" / "Add to Discord" connect dances. Mounted only when
     // the operator app is configured; manual webhook paste works either way.
     if cfg.slack_oauth.enabled() {

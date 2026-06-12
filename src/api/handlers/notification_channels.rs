@@ -494,14 +494,15 @@ pub async fn resend_verification(
 
 // ── Central-bot Telegram linking ─────────────────────────────────────────
 
-const TELEGRAM_LINK_TTL_MINUTES: i64 = 15;
+const ONE_TAP_LINK_TTL_MINUTES: i64 = 15;
 /// Outstanding codes per org — bounds drive-by minting.
-const TELEGRAM_LINK_MAX_OUTSTANDING: i64 = 5;
+const ONE_TAP_LINK_MAX_OUTSTANDING: i64 = 5;
 
+/// Shared by the telegram-link and whatsapp-link mints.
 #[derive(Debug, Clone, Default, Deserialize, ToSchema)]
-pub struct TelegramLinkRequest {
+pub struct OneTapLinkRequest {
     /// Optional name for the channel created when the code is consumed;
-    /// defaults to the linked chat's title.
+    /// defaults to the linked chat title / WhatsApp profile name.
     #[serde(default)]
     #[schema(example = "Ops Telegram", max_length = 100)]
     pub name: Option<String>,
@@ -522,7 +523,7 @@ pub struct TelegramLinkResponse {
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
-pub struct TelegramLinkStatusResponse {
+pub struct OneTapLinkStatusResponse {
     /// `pending`, `consumed`, or `expired`.
     pub status: &'static str,
     /// The created channel, present once `status` is `consumed`.
@@ -539,7 +540,7 @@ pub struct TelegramLinkStatusResponse {
                    Sending it to the bot (tap Start) creates a `telegram_app` \
                    channel for the chat. 404 on deployments without a central \
                    bot configured.",
-    request_body(content = TelegramLinkRequest, example = json!({ "name": "Ops Telegram" })),
+    request_body(content = OneTapLinkRequest, example = json!({ "name": "Ops Telegram" })),
     responses(
         (status = 201, body = TelegramLinkResponse),
         (status = 400, body = ApiError, description = "Invalid channel-name hint"),
@@ -550,7 +551,7 @@ pub async fn telegram_link_mint(
     State(state): State<AppState>,
     Authorized(org, _): Authorized<ChannelsWrite>,
     CurrentUser(user): CurrentUser,
-    Json(req): Json<TelegramLinkRequest>,
+    Json(req): Json<OneTapLinkRequest>,
 ) -> Result<(StatusCode, Json<TelegramLinkResponse>)> {
     require_central_bot(&state)?;
     let name = match req.name.as_deref().map(str::trim) {
@@ -561,7 +562,7 @@ pub async fn telegram_link_mint(
         }
     };
     let code = generate_raw_token();
-    let expires_at = Utc::now() + chrono::Duration::minutes(TELEGRAM_LINK_TTL_MINUTES);
+    let expires_at = Utc::now() + chrono::Duration::minutes(ONE_TAP_LINK_TTL_MINUTES);
     let outcome = state
         .channel_link_code_store
         .mint(
@@ -572,7 +573,7 @@ pub async fn telegram_link_mint(
             name.as_deref(),
             None,
             expires_at,
-            TELEGRAM_LINK_MAX_OUTSTANDING,
+            ONE_TAP_LINK_MAX_OUTSTANDING,
         )
         .await?;
     let minted = match outcome {
@@ -604,7 +605,7 @@ pub async fn telegram_link_mint(
     summary = "Poll a Telegram link code",
     params(("id" = Uuid, Path)),
     responses(
-        (status = 200, body = TelegramLinkStatusResponse),
+        (status = 200, body = OneTapLinkStatusResponse),
         (status = 404, body = ApiError),
     ),
 )]
@@ -612,7 +613,7 @@ pub async fn telegram_link_status(
     State(state): State<AppState>,
     Authorized(org, _): Authorized<ChannelsRead>,
     Path(id): Path<Uuid>,
-) -> Result<Json<TelegramLinkStatusResponse>> {
+) -> Result<Json<OneTapLinkStatusResponse>> {
     require_central_bot(&state)?;
     let status = state
         .channel_link_code_store
@@ -622,15 +623,135 @@ pub async fn telegram_link_status(
             AppError::not_found(codes::TELEGRAM_LINK_NOT_FOUND, "link code not found")
         })?;
     Ok(Json(match status {
-        LinkCodeStatus::Pending => TelegramLinkStatusResponse {
+        LinkCodeStatus::Pending => OneTapLinkStatusResponse {
             status: "pending",
             channel_id: None,
         },
-        LinkCodeStatus::Consumed { channel_id } => TelegramLinkStatusResponse {
+        LinkCodeStatus::Consumed { channel_id } => OneTapLinkStatusResponse {
             status: "consumed",
             channel_id: Some(channel_id),
         },
-        LinkCodeStatus::Expired => TelegramLinkStatusResponse {
+        LinkCodeStatus::Expired => OneTapLinkStatusResponse {
+            status: "expired",
+            channel_id: None,
+        },
+    }))
+}
+
+// ── WhatsApp one-tap linking ─────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct WhatsAppLinkResponse {
+    /// Poll handle for `GET /whatsapp-link/{id}`.
+    pub id: Uuid,
+    /// The raw single-use code — shown once, never stored.
+    pub code: String,
+    /// `https://wa.me/<number>?text=<code>` — opens WhatsApp with the code
+    /// prefilled; sending it links the sender's number.
+    pub deep_link: String,
+    pub expires_at: chrono::DateTime<Utc>,
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/notification-channels/whatsapp-link",
+    tag = "notification-channels",
+    summary = "Mint a single-use WhatsApp link code",
+    description = "Returns a short-lived code wrapped in a wa.me deep link. \
+                   Sending the prefilled message creates a `whatsapp_app` \
+                   channel for the sender's number. 404 on deployments \
+                   without the operator WhatsApp number enabled.",
+    request_body(content = OneTapLinkRequest, example = json!({ "name": "Ops WhatsApp" })),
+    responses(
+        (status = 201, body = WhatsAppLinkResponse),
+        (status = 400, body = ApiError, description = "Invalid channel-name hint"),
+        (status = 422, body = ApiError, description = "Too many outstanding link codes"),
+    ),
+)]
+pub async fn whatsapp_link_mint(
+    State(state): State<AppState>,
+    Authorized(org, _): Authorized<ChannelsWrite>,
+    CurrentUser(user): CurrentUser,
+    Json(req): Json<OneTapLinkRequest>,
+) -> Result<(StatusCode, Json<WhatsAppLinkResponse>)> {
+    require_central_whatsapp(&state)?;
+    let name = match req.name.as_deref().map(str::trim) {
+        Some("") | None => None,
+        Some(n) => {
+            validate_name(n)?;
+            Some(n.to_string())
+        }
+    };
+    let code = generate_raw_token();
+    let expires_at = Utc::now() + chrono::Duration::minutes(ONE_TAP_LINK_TTL_MINUTES);
+    let outcome = state
+        .channel_link_code_store
+        .mint(
+            org,
+            LinkPurpose::Whatsapp,
+            Some(user),
+            &sha256_hex(&code),
+            name.as_deref(),
+            None,
+            expires_at,
+            ONE_TAP_LINK_MAX_OUTSTANDING,
+        )
+        .await?;
+    let minted = match outcome {
+        MintOutcome::Created(c) => c,
+        MintOutcome::LimitReached => {
+            return Err(AppError::unprocessable(
+                codes::WHATSAPP_LINK_LIMIT,
+                "too many outstanding link codes; wait for one to expire or complete a pending link",
+            ));
+        }
+    };
+    let number = state.cfg.whatsapp_app.public_number.trim();
+    Ok((
+        StatusCode::CREATED,
+        Json(WhatsAppLinkResponse {
+            id: minted.id,
+            deep_link: format!("https://wa.me/{number}?text={code}"),
+            code,
+            expires_at: minted.expires_at,
+        }),
+    ))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/notification-channels/whatsapp-link/{id}",
+    tag = "notification-channels",
+    summary = "Poll a WhatsApp link code",
+    params(("id" = Uuid, Path)),
+    responses(
+        (status = 200, body = OneTapLinkStatusResponse),
+        (status = 404, body = ApiError),
+    ),
+)]
+pub async fn whatsapp_link_status(
+    State(state): State<AppState>,
+    Authorized(org, _): Authorized<ChannelsRead>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<OneTapLinkStatusResponse>> {
+    require_central_whatsapp(&state)?;
+    let status = state
+        .channel_link_code_store
+        .status(org, id)
+        .await?
+        .ok_or_else(|| {
+            AppError::not_found(codes::WHATSAPP_LINK_NOT_FOUND, "link code not found")
+        })?;
+    Ok(Json(match status {
+        LinkCodeStatus::Pending => OneTapLinkStatusResponse {
+            status: "pending",
+            channel_id: None,
+        },
+        LinkCodeStatus::Consumed { channel_id } => OneTapLinkStatusResponse {
+            status: "consumed",
+            channel_id: Some(channel_id),
+        },
+        LinkCodeStatus::Expired => OneTapLinkStatusResponse {
             status: "expired",
             channel_id: None,
         },
@@ -834,7 +955,18 @@ async fn deliver_test(state: &AppState, config: &ChannelConfig) -> Result<()> {
                 budget: &state.telegram_send_budget,
             });
     let email = email_delivery(state);
-    let notifier = build_notifier(config, &state.outbound_http, central, Some(&email))?;
+    let whatsapp = state
+        .cfg
+        .whatsapp_app
+        .enabled()
+        .then_some(&state.cfg.whatsapp_app);
+    let notifier = build_notifier(
+        config,
+        &state.outbound_http,
+        central,
+        whatsapp,
+        Some(&email),
+    )?;
     let notice = IncidentNotice {
         incident_id: Uuid::nil(),
         reason: NotificationReason::Opened,
@@ -874,6 +1006,17 @@ fn require_central_bot(state: &AppState) -> Result<()> {
         Err(AppError::not_found(
             codes::TELEGRAM_LINK_NOT_FOUND,
             "telegram linking is not available on this deployment",
+        ))
+    }
+}
+
+fn require_central_whatsapp(state: &AppState) -> Result<()> {
+    if state.cfg.whatsapp_app.enabled() {
+        Ok(())
+    } else {
+        Err(AppError::not_found(
+            codes::WHATSAPP_LINK_NOT_FOUND,
+            "whatsapp linking is not available on this deployment",
         ))
     }
 }

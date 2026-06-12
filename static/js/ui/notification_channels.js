@@ -85,7 +85,7 @@
     // One-tap create has no submittable config — the webhook creates the
     // channel — so the submit/test/bind affordances yield to connect.
     function syncCentralTelegram(kind) {
-        const hide = kind === "telegram_app" && !isEdit;
+        const hide = (kind === "telegram_app" || kind === "whatsapp_app") && !isEdit;
         form.querySelector("button[type=submit]")?.classList.toggle("hidden", hide);
         const testRow = form.querySelector("[data-send-test]")?.parentElement;
         testRow?.classList.toggle("hidden", hide);
@@ -95,7 +95,8 @@
 
     function syncNamePlaceholder() {
         const kind = currentKind();
-        if (nameInput) nameInput.placeholder = `ops-${kind === "telegram_app" ? "telegram" : kind}`;
+        const slug = { telegram_app: "telegram", whatsapp_app: "whatsapp" }[kind] || kind;
+        if (nameInput) nameInput.placeholder = `ops-${slug}`;
     }
 
     // On edit the secret is never shown; the config inputs stay disabled
@@ -355,113 +356,131 @@
         });
     }
 
-    // One-tap Telegram: mint a code, show t.me link + QR, poll until the
-    // chat presses Start, then jump to the channel the webhook created.
-    const tgaBtn = form.querySelector("[data-tga-connect]");
-    if (tgaBtn) {
-        const tgaStatus = form.querySelector("[data-tga-status]");
-        const tgaQrBox = form.querySelector("[data-tga-qr-box]");
-        const tgaQrImg = form.querySelector("[data-tga-qr-img]");
-        const tgaLink = form.querySelector("[data-tga-link]");
-        const tgaGroupCb = form.querySelector("[data-tga-group]");
-        const showTga = (text, cls) => showStatus(tgaStatus, text, cls);
+    // One-tap connect (telegram, whatsapp): mint a code, show the deep
+    // link + QR, poll until the provider webhook creates the channel, then
+    // jump to it. `group` selectors are telegram-only.
+    function initOneTapConnect(o) {
+        const btn = form.querySelector(o.btn);
+        if (!btn) return;
+        const statusEl = form.querySelector(o.status);
+        const qrBox = form.querySelector(o.qrBox);
+        const qrImg = form.querySelector(o.qrImg);
+        const linkEl = form.querySelector(o.link);
+        const groupCb = o.group ? form.querySelector(o.group) : null;
+        const show = (text, cls) => showStatus(statusEl, text, cls);
         const headers = { "Accept": "application/json", "X-Requested-With": "uptimepage" };
         let pollTimer = null;
         let mintedLinks = null;
 
-        function resetTga() {
+        function reset() {
             if (pollTimer) clearInterval(pollTimer);
             pollTimer = null;
             mintedLinks = null;
-            tgaQrBox.classList.add("hidden");
-            tgaStatus.classList.add("hidden");
-            tgaBtn.disabled = false;
+            qrBox.classList.add("hidden");
+            statusEl.classList.add("hidden");
+            btn.disabled = false;
         }
 
         // One code serves both destinations; the toggle only swaps which
         // deep link (start vs startgroup) is shown.
-        function renderTgaDest() {
+        function renderDest() {
             if (!mintedLinks) return;
-            const url = tgaGroupCb?.checked ? mintedLinks.group_deep_link : mintedLinks.deep_link;
-            tgaLink.textContent = url;
-            tgaLink.href = url;
-            // The t.me link works without the QR — degrade, don't dead-end.
+            const url = groupCb?.checked ? mintedLinks.group_deep_link : mintedLinks.deep_link;
+            linkEl.textContent = url;
+            linkEl.href = url;
+            // The deep link works without the QR — degrade, don't dead-end.
             try {
-                renderQr(tgaQrImg, url);
-                tgaQrImg.classList.remove("hidden");
+                renderQr(qrImg, url);
+                qrImg.classList.remove("hidden");
             } catch {
-                tgaQrImg.classList.add("hidden");
+                qrImg.classList.add("hidden");
             }
-            tgaQrBox.classList.remove("hidden");
-            showTga(
-                tgaGroupCb?.checked
-                    ? "# waiting — open the link (or scan), pick the group, and confirm…"
-                    : "# waiting — open the link (or scan) and press Start…",
-                "text-quiet",
-            );
+            qrBox.classList.remove("hidden");
+            show(groupCb?.checked ? o.waitGroupText : o.waitText, "text-quiet");
         }
-        tgaGroupCb?.addEventListener("change", renderTgaDest);
+        groupCb?.addEventListener("change", renderDest);
         form.addEventListener("change", (evt) => {
-            if (evt.target.name === "kind") resetTga();
+            if (evt.target.name === "kind") reset();
         });
         // bfcache restore: the poll handle is gone, the code may be stale.
         window.addEventListener("pageshow", (evt) => {
-            if (evt.persisted) resetTga();
+            if (evt.persisted) reset();
         });
 
         function pollLink(id) {
             pollTimer = setInterval(async () => {
                 let body;
                 try {
-                    const res = await fetch(`/api/v1/notification-channels/telegram-link/${id}`, { headers });
+                    const res = await fetch(`${o.endpoint}/${id}`, { headers });
                     if (!res.ok) return; // transient; expiry resolves it
                     body = await res.json();
                 } catch { return; }
                 if (body.status === "consumed" && body.channel_id) {
                     clearInterval(pollTimer);
                     pollTimer = null;
-                    showTga("✓ linked — opening the new channel…", "flash-text flash-text--ok font-medium");
+                    show("✓ linked — opening the new channel…", "flash-text flash-text--ok font-medium");
                     window.location = `/settings/notifications/${body.channel_id}/edit`;
                 } else if (body.status !== "pending") {
                     clearInterval(pollTimer);
                     pollTimer = null;
-                    tgaQrBox.classList.add("hidden");
-                    tgaBtn.disabled = false;
-                    showTga("✗ the link expired before it was used — connect again for a fresh one", "flash-text flash-text--bad font-medium");
+                    qrBox.classList.add("hidden");
+                    btn.disabled = false;
+                    show("✗ the link expired before it was used — connect again for a fresh one", "flash-text flash-text--bad font-medium");
                 }
             }, 2000);
         }
 
-        tgaBtn.addEventListener("click", async () => {
+        btn.addEventListener("click", async () => {
             clearErrors();
-            resetTga();
-            tgaBtn.disabled = true;
-            showTga("# creating a single-use link…", "text-quiet");
+            reset();
+            btn.disabled = true;
+            show("# creating a single-use link…", "text-quiet");
             const name = (nameInput?.value || "").trim();
             let body;
             try {
-                const res = await fetch("/api/v1/notification-channels/telegram-link", {
+                const res = await fetch(o.endpoint, {
                     method: "POST",
                     headers: { ...headers, "Content-Type": "application/json" },
                     body: JSON.stringify(name ? { name } : {}),
                 });
                 if (!res.ok) {
                     const msg = await window.smApiErrorMessage(res, `link failed (${res.status})`);
-                    showTga(`✗ ${msg}`, "flash-text flash-text--bad font-medium");
-                    tgaBtn.disabled = false;
+                    show(`✗ ${msg}`, "flash-text flash-text--bad font-medium");
+                    btn.disabled = false;
                     return;
                 }
                 body = await res.json();
             } catch (err) {
-                showTga(`✗ network error: ${err.message || err}`, "flash-text flash-text--bad font-medium");
-                tgaBtn.disabled = false;
+                show(`✗ network error: ${err.message || err}`, "flash-text flash-text--bad font-medium");
+                btn.disabled = false;
                 return;
             }
             mintedLinks = body;
-            renderTgaDest();
+            renderDest();
             pollLink(body.id);
         });
     }
+
+    initOneTapConnect({
+        btn: "[data-tga-connect]",
+        status: "[data-tga-status]",
+        qrBox: "[data-tga-qr-box]",
+        qrImg: "[data-tga-qr-img]",
+        link: "[data-tga-link]",
+        group: "[data-tga-group]",
+        endpoint: "/api/v1/notification-channels/telegram-link",
+        waitText: "# waiting — open the link (or scan) and press Start…",
+        waitGroupText: "# waiting — open the link (or scan), pick the group, and confirm…",
+    });
+    initOneTapConnect({
+        btn: "[data-waa-connect]",
+        status: "[data-waa-status]",
+        qrBox: "[data-waa-qr-box]",
+        qrImg: "[data-waa-qr-img]",
+        link: "[data-waa-link]",
+        endpoint: "/api/v1/notification-channels/whatsapp-link",
+        waitText: "# waiting — open the link (or scan) and send the prefilled message…",
+    });
 
     // Provider OAuth connect ("add to Slack" / "add to Discord"): the
     // button is a full-page OAuth redirect; the QR variant fetches the same
@@ -673,6 +692,10 @@
         if (kind === "telegram_app") {
             // The API rejects this kind in request bodies.
             return { error: "Linked telegram channels have no config to submit — use \"connect telegram\", or untick \"Replace transport config\" to keep the stored link." };
+        }
+        if (kind === "whatsapp_app") {
+            // The API rejects this kind in request bodies.
+            return { error: "Linked whatsapp channels have no config to submit — use \"connect whatsapp\", or untick \"Replace transport config\" to keep the stored link." };
         }
         return {
             config: {

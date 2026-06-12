@@ -29,6 +29,7 @@ mod telegram_app;
 mod transport;
 mod webhook;
 mod whatsapp;
+mod whatsapp_app;
 
 pub use discord::DiscordConfig;
 pub use email::EmailConfig;
@@ -40,6 +41,7 @@ pub use telegram_app::TelegramAppConfig;
 pub use transport::TransportConfig;
 pub use webhook::WebhookConfig;
 pub use whatsapp::WhatsAppConfig;
+pub use whatsapp_app::WhatsAppAppConfig;
 
 use super::WriteSource;
 use chrono::{DateTime, Utc};
@@ -57,6 +59,8 @@ pub enum ChannelKind {
     TelegramApp,
     #[serde(rename = "whatsapp")]
     WhatsApp,
+    #[serde(rename = "whatsapp_app")]
+    WhatsAppApp,
     Discord,
     #[serde(rename = "msteams")]
     MsTeams,
@@ -74,6 +78,7 @@ impl ChannelKind {
         Self::Telegram,
         Self::TelegramApp,
         Self::WhatsApp,
+        Self::WhatsAppApp,
         Self::Discord,
         Self::MsTeams,
         Self::GoogleChat,
@@ -89,6 +94,7 @@ impl ChannelKind {
             Self::Telegram => "telegram",
             Self::TelegramApp => "telegram_app",
             Self::WhatsApp => "whatsapp",
+            Self::WhatsAppApp => "whatsapp_app",
             Self::Discord => "discord",
             Self::MsTeams => "msteams",
             Self::GoogleChat => "google_chat",
@@ -110,6 +116,8 @@ pub enum ChannelConfig {
     TelegramApp(TelegramAppConfig),
     #[serde(rename = "whatsapp")]
     WhatsApp(WhatsAppConfig),
+    #[serde(rename = "whatsapp_app")]
+    WhatsAppApp(WhatsAppAppConfig),
     Discord(DiscordConfig),
     #[serde(rename = "msteams")]
     MsTeams(MsTeamsConfig),
@@ -127,6 +135,7 @@ macro_rules! with_transport {
             ChannelConfig::Telegram($c) => $body,
             ChannelConfig::TelegramApp($c) => $body,
             ChannelConfig::WhatsApp($c) => $body,
+            ChannelConfig::WhatsAppApp($c) => $body,
             ChannelConfig::Discord($c) => $body,
             ChannelConfig::MsTeams($c) => $body,
             ChannelConfig::GoogleChat($c) => $body,

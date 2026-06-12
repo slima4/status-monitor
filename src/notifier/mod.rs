@@ -66,12 +66,15 @@ impl CentralBotDelivery {
 /// primary check.
 ///
 /// Linked (`telegram_app`) channels deliver with the operator token and the
-/// shared send budget in `central`; `None` (no bot) fails their build with
-/// a clear error instead of a broken send.
+/// shared send budget in `central`; linked (`whatsapp_app`) channels with
+/// the operator Cloud API credentials in `whatsapp`. `None` (operator
+/// surface absent) fails their build with a clear error instead of a
+/// broken send.
 pub fn build_notifier(
     cfg: &ChannelConfig,
     http: &OutboundHttpClient,
     central: Option<CentralTelegram<'_>>,
+    whatsapp: Option<&crate::config::WhatsAppAppBotConfig>,
     email: Option<&EmailDelivery>,
 ) -> Result<Arc<dyn Notifier>> {
     let parse = |s: &str| -> Result<url::Url> {
@@ -114,6 +117,24 @@ pub fn build_notifier(
         }
         ChannelConfig::WhatsApp(c) => {
             Arc::new(WhatsAppNotifier::new(http.clone(), c)?) as Arc<dyn Notifier>
+        }
+        ChannelConfig::WhatsAppApp(c) => {
+            let wa = whatsapp.filter(|w| w.enabled()).ok_or_else(|| {
+                crate::error::AppError::bad_request(
+                    crate::api::codes::INVALID_CONFIG,
+                    "linked whatsapp channels need the operator whatsapp number, which is not \
+                     configured on this deployment",
+                )
+            })?;
+            use secrecy::ExposeSecret;
+            let synthesized = crate::domain::WhatsAppConfig {
+                access_token: wa.access_token.expose_secret().trim().to_string(),
+                phone_number_id: wa.phone_number_id.clone(),
+                to: c.phone.clone(),
+                template_name: wa.template_name.clone(),
+                language_code: (!wa.language_code.is_empty()).then(|| wa.language_code.clone()),
+            };
+            Arc::new(WhatsAppNotifier::new(http.clone(), &synthesized)?) as Arc<dyn Notifier>
         }
         ChannelConfig::Discord(c) => {
             Arc::new(DiscordNotifier::new(http.clone(), parse(&c.webhook_url)?))

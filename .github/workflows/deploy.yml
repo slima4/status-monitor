@@ -53,6 +53,16 @@ name: deploy
 #     SLACK_OAUTH_CLIENT_SECRET   operator Slack app client secret (sensitive)
 #     DISCORD_OAUTH_CLIENT_ID     operator Discord app client id
 #     DISCORD_OAUTH_CLIENT_SECRET operator Discord app client secret (sensitive)
+#   Operator WhatsApp number (one-tap linking; sextet all-or-nothing,
+#   enable flag separate — sends are operator-paid):
+#     WHATSAPP_APP_ACCESS_TOKEN    Meta Cloud API token (sensitive)
+#     WHATSAPP_APP_PHONE_NUMBER_ID Cloud API phone-number id
+#     WHATSAPP_APP_PUBLIC_NUMBER   display number, international digits
+#     WHATSAPP_APP_SECRET          Meta app secret, signs webhooks (sensitive)
+#     WHATSAPP_APP_VERIFY_TOKEN    random 32+ chars for the GET handshake (sensitive)
+#     WHATSAPP_APP_TEMPLATE_NAME   approved alert template name
+#   Repo var WHATSAPP_APP_ENABLED ("true") flips the spend gate — creds
+#   alone keep the surface off.
 #   Transactional mail (Resend; key+from all-or-nothing, secret optional):
 #     RESEND_API_KEY            re_… API key — presence flips the provider
 #                               from "log" to "resend" (sensitive)
@@ -200,6 +210,14 @@ jobs:
           SLACK_OAUTH_CLIENT_SECRET: ${{ secrets.SLACK_OAUTH_CLIENT_SECRET }}
           DISCORD_OAUTH_CLIENT_ID: ${{ secrets.DISCORD_OAUTH_CLIENT_ID }}
           DISCORD_OAUTH_CLIENT_SECRET: ${{ secrets.DISCORD_OAUTH_CLIENT_SECRET }}
+          # Operator WhatsApp number — creds via secrets, spend gate via var.
+          WHATSAPP_APP_ACCESS_TOKEN: ${{ secrets.WHATSAPP_APP_ACCESS_TOKEN }}
+          WHATSAPP_APP_PHONE_NUMBER_ID: ${{ secrets.WHATSAPP_APP_PHONE_NUMBER_ID }}
+          WHATSAPP_APP_PUBLIC_NUMBER: ${{ secrets.WHATSAPP_APP_PUBLIC_NUMBER }}
+          WHATSAPP_APP_SECRET: ${{ secrets.WHATSAPP_APP_SECRET }}
+          WHATSAPP_APP_VERIFY_TOKEN: ${{ secrets.WHATSAPP_APP_VERIFY_TOKEN }}
+          WHATSAPP_APP_TEMPLATE_NAME: ${{ secrets.WHATSAPP_APP_TEMPLATE_NAME }}
+          WHATSAPP_APP_ENABLED: ${{ vars.WHATSAPP_APP_ENABLED }}
           # Transactional mail — key presence flips provider log → resend.
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           RESEND_WEBHOOK_SECRET: ${{ secrets.RESEND_WEBHOOK_SECRET }}
@@ -241,6 +259,13 @@ jobs:
                SLACK_OAUTH_CLIENT_SECRET='${SLACK_OAUTH_CLIENT_SECRET}' \
                DISCORD_OAUTH_CLIENT_ID='${DISCORD_OAUTH_CLIENT_ID}' \
                DISCORD_OAUTH_CLIENT_SECRET='${DISCORD_OAUTH_CLIENT_SECRET}' \
+               WHATSAPP_APP_ACCESS_TOKEN='${WHATSAPP_APP_ACCESS_TOKEN}' \
+               WHATSAPP_APP_PHONE_NUMBER_ID='${WHATSAPP_APP_PHONE_NUMBER_ID}' \
+               WHATSAPP_APP_PUBLIC_NUMBER='${WHATSAPP_APP_PUBLIC_NUMBER}' \
+               WHATSAPP_APP_SECRET='${WHATSAPP_APP_SECRET}' \
+               WHATSAPP_APP_VERIFY_TOKEN='${WHATSAPP_APP_VERIFY_TOKEN}' \
+               WHATSAPP_APP_TEMPLATE_NAME='${WHATSAPP_APP_TEMPLATE_NAME}' \
+               WHATSAPP_APP_ENABLED='${WHATSAPP_APP_ENABLED}' \
                RESEND_API_KEY='${RESEND_API_KEY}' \
                RESEND_WEBHOOK_SECRET='${RESEND_WEBHOOK_SECRET}' \
                EMAIL_FROM_ADDRESS='${EMAIL_FROM_ADDRESS}' \
@@ -694,6 +719,74 @@ jobs:
               n=$(grep -cxF "$pair" .env || true)
               [ "$n" = 1 ] || { echo "::error::${pair%%=*} not written exactly once to .env (count=${n})"; exit 1; }
             done
+          fi
+
+          # --- operator WhatsApp number (optional) ---------------------------
+          # Same write contract as the blocks above. All-or-nothing on the
+          # cred sextet: any partial set would fail the app's boot validation
+          # AFTER the cutover started — fail here instead. The enable flag is
+          # written only when the repo var is set, so creds can land dark.
+          if [ -n "${WHATSAPP_APP_ACCESS_TOKEN:-}" ]; then
+            if [ -z "${WHATSAPP_APP_PHONE_NUMBER_ID:-}" ] || [ -z "${WHATSAPP_APP_PUBLIC_NUMBER:-}" ] \
+               || [ -z "${WHATSAPP_APP_SECRET:-}" ] || [ "${#WHATSAPP_APP_VERIFY_TOKEN}" -lt 32 ] \
+               || [ -z "${WHATSAPP_APP_TEMPLATE_NAME:-}" ]; then
+              echo "::error::WHATSAPP_APP_ACCESS_TOKEN is set but the rest of the sextet is incomplete (verify token must be 32+ chars)"
+              exit 1
+            fi
+            cp .env ".env.bak.$(date +%s).whatsapp"
+            before=$(awk 'END { print NR }' .env)
+            awk '
+              BEGIN {
+                m["UPTIMEPAGE_WHATSAPP_APP_ACCESS_TOKEN"]    = ENVIRON["WHATSAPP_APP_ACCESS_TOKEN"]
+                m["UPTIMEPAGE_WHATSAPP_APP_PHONE_NUMBER_ID"] = ENVIRON["WHATSAPP_APP_PHONE_NUMBER_ID"]
+                m["UPTIMEPAGE_WHATSAPP_APP_PUBLIC_NUMBER"]   = ENVIRON["WHATSAPP_APP_PUBLIC_NUMBER"]
+                m["UPTIMEPAGE_WHATSAPP_APP_APP_SECRET"]      = ENVIRON["WHATSAPP_APP_SECRET"]
+                m["UPTIMEPAGE_WHATSAPP_APP_VERIFY_TOKEN"]    = ENVIRON["WHATSAPP_APP_VERIFY_TOKEN"]
+                m["UPTIMEPAGE_WHATSAPP_APP_TEMPLATE_NAME"]   = ENVIRON["WHATSAPP_APP_TEMPLATE_NAME"]
+              }
+              {
+                for (k in m) if ($0 ~ ("^" k "=")) { print k "=" m[k]; seen[k] = 1; next }
+                print
+              }
+              END { for (k in m) if (!seen[k]) print k "=" m[k] }
+            ' .env > .env.next
+            mv .env.next .env
+            after=$(awk 'END { print NR }' .env)
+            # 0..+6: appended only for keys absent before.
+            if [ "$after" -lt "$before" ] || [ "$after" -gt "$((before + 6))" ]; then
+              echo "::error::.env line count out of range after whatsapp upsert (${before} -> ${after})"
+              exit 1
+            fi
+            for pair in \
+              "UPTIMEPAGE_WHATSAPP_APP_ACCESS_TOKEN=$(printenv WHATSAPP_APP_ACCESS_TOKEN)" \
+              "UPTIMEPAGE_WHATSAPP_APP_PHONE_NUMBER_ID=$(printenv WHATSAPP_APP_PHONE_NUMBER_ID)" \
+              "UPTIMEPAGE_WHATSAPP_APP_PUBLIC_NUMBER=$(printenv WHATSAPP_APP_PUBLIC_NUMBER)" \
+              "UPTIMEPAGE_WHATSAPP_APP_APP_SECRET=$(printenv WHATSAPP_APP_SECRET)" \
+              "UPTIMEPAGE_WHATSAPP_APP_VERIFY_TOKEN=$(printenv WHATSAPP_APP_VERIFY_TOKEN)" \
+              "UPTIMEPAGE_WHATSAPP_APP_TEMPLATE_NAME=$(printenv WHATSAPP_APP_TEMPLATE_NAME)"; do
+              n=$(grep -cxF "$pair" .env || true)
+              [ "$n" = 1 ] || { echo "::error::${pair%%=*} not written exactly once to .env (count=${n})"; exit 1; }
+            done
+            if [ -n "${WHATSAPP_APP_ENABLED:-}" ]; then
+              cp .env ".env.bak.$(date +%s).whatsapp-flag"
+              before=$(awk 'END { print NR }' .env)
+              awk '
+                BEGIN { m["UPTIMEPAGE_WHATSAPP_APP_ENABLED"] = ENVIRON["WHATSAPP_APP_ENABLED"] }
+                {
+                  for (k in m) if ($0 ~ ("^" k "=")) { print k "=" m[k]; seen[k] = 1; next }
+                  print
+                }
+                END { for (k in m) if (!seen[k]) print k "=" m[k] }
+              ' .env > .env.next
+              mv .env.next .env
+              after=$(awk 'END { print NR }' .env)
+              if [ "$after" -lt "$before" ] || [ "$after" -gt "$((before + 1))" ]; then
+                echo "::error::.env line count out of range after whatsapp-flag upsert (${before} -> ${after})"
+                exit 1
+              fi
+              n=$(grep -cxF "UPTIMEPAGE_WHATSAPP_APP_ENABLED=$(printenv WHATSAPP_APP_ENABLED)" .env || true)
+              [ "$n" = 1 ] || { echo "::error::UPTIMEPAGE_WHATSAPP_APP_ENABLED not written exactly once to .env (count=${n})"; exit 1; }
+            fi
           fi
 
           # --- transactional mail via Resend (optional) ----------------------

@@ -802,3 +802,234 @@ async fn resend_hook_is_absent_without_a_secret() {
     let st = post_resend_hook(&app, "{}", true).await;
     assert_eq!(st, StatusCode::NOT_FOUND);
 }
+
+// ── whatsapp one-tap linking ────────────────────────────────────────────
+
+const WA_APP_SECRET: &str = "wa-app-secret";
+const WA_PHONE_NUMBER_ID: &str = "424242424242";
+
+fn with_whatsapp(web: bool) -> Router {
+    let mutate = |cfg: &mut uptimepage::config::AppConfig| {
+        cfg.whatsapp_app.enabled = true;
+        cfg.whatsapp_app.access_token = "EAAG-test".to_string().into();
+        cfg.whatsapp_app.phone_number_id = WA_PHONE_NUMBER_ID.into();
+        cfg.whatsapp_app.public_number = "15550001111".into();
+        cfg.whatsapp_app.app_secret = WA_APP_SECRET.to_string().into();
+        cfg.whatsapp_app.verify_token = "0123456789abcdef0123456789abcdef".to_string().into();
+        cfg.whatsapp_app.template_name = "uptime_alert".into();
+    };
+    if web {
+        common::build_test_app_with_web_and_owner(mutate)
+    } else {
+        build_test_app_with_owner(mutate)
+    }
+}
+
+fn wa_signed_post(body: &str) -> axum::http::Request<Body> {
+    use hmac::{KeyInit, Mac};
+    let mut mac = hmac::Hmac::<sha2::Sha256>::new_from_slice(WA_APP_SECRET.as_bytes()).unwrap();
+    mac.update(body.as_bytes());
+    let sig = format!("sha256={}", hex::encode(mac.finalize().into_bytes()));
+    axum::http::Request::builder()
+        .method("POST")
+        .uri("/hooks/whatsapp")
+        .header("x-hub-signature-256", sig)
+        .header("content-type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap()
+}
+
+fn wa_inbound(from: &str, text: &str) -> String {
+    json!({
+        "object": "whatsapp_business_account",
+        "entry": [{ "id": "1", "changes": [{ "field": "messages", "value": {
+            "messaging_product": "whatsapp",
+            "metadata": { "display_phone_number": "15550001111",
+                          "phone_number_id": WA_PHONE_NUMBER_ID },
+            "contacts": [{ "wa_id": from, "profile": { "name": "Jane" } }],
+            "messages": [{ "from": from, "id": "wamid.X", "timestamp": "0",
+                           "type": "text", "text": { "body": text } }]
+        }}]}]
+    })
+    .to_string()
+}
+
+#[tokio::test]
+async fn whatsapp_app_config_is_rejected_from_request_bodies() {
+    let app = app();
+    let wa = json!({ "type": "whatsapp_app", "phone": "15551234567" });
+    let (st, body) = send(
+        &app,
+        "POST",
+        "/api/v1/notification-channels",
+        json!({ "name": "wa", "config": wa }),
+    )
+    .await;
+    assert_eq!(st, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body["error"]["code"], "CHANNEL_KIND_MANAGED");
+}
+
+#[tokio::test]
+async fn whatsapp_link_is_absent_without_operator_number() {
+    let app = app();
+    let (st, body) = send(
+        &app,
+        "POST",
+        "/api/v1/notification-channels/whatsapp-link",
+        json!({}),
+    )
+    .await;
+    assert_eq!(st, StatusCode::NOT_FOUND);
+    assert_eq!(body["error"]["code"], "WHATSAPP_LINK_NOT_FOUND");
+}
+
+#[tokio::test]
+async fn whatsapp_link_mint_and_poll_round_trip() {
+    let app = with_whatsapp(false);
+    let (st, body) = send(
+        &app,
+        "POST",
+        "/api/v1/notification-channels/whatsapp-link",
+        json!({ "name": "Ops WhatsApp" }),
+    )
+    .await;
+    assert_eq!(st, StatusCode::CREATED);
+    let code = body["code"].as_str().unwrap();
+    let deep_link = body["deep_link"].as_str().unwrap();
+    assert!(deep_link.starts_with("https://wa.me/15550001111?text="));
+    assert!(deep_link.ends_with(code));
+    let id = body["id"].as_str().unwrap();
+
+    let (st, body) = send_empty(
+        &app,
+        "GET",
+        &format!("/api/v1/notification-channels/whatsapp-link/{id}"),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(body["status"], "pending");
+}
+
+#[tokio::test]
+async fn whatsapp_webhook_links_then_stop_severs() {
+    let app = with_whatsapp(true);
+
+    // Subscribe handshake echoes the challenge only for the right token.
+    let ok = app
+        .clone()
+        .oneshot(
+            axum::http::Request::builder()
+                .uri("/hooks/whatsapp?hub.mode=subscribe&hub.verify_token=0123456789abcdef0123456789abcdef&hub.challenge=echo-me")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(ok.status(), StatusCode::OK);
+    let challenge = axum::body::to_bytes(ok.into_body(), 1024).await.unwrap();
+    assert_eq!(&challenge[..], b"echo-me");
+    let bad = app
+        .clone()
+        .oneshot(
+            axum::http::Request::builder()
+                .uri("/hooks/whatsapp?hub.mode=subscribe&hub.verify_token=wrong&hub.challenge=echo-me")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(bad.status(), StatusCode::FORBIDDEN);
+
+    // Mint a code, deliver it from a phone, and the channel appears.
+    let (st, minted) = send(
+        &app,
+        "POST",
+        "/api/v1/notification-channels/whatsapp-link",
+        json!({ "name": "Oncall WA" }),
+    )
+    .await;
+    assert_eq!(st, StatusCode::CREATED);
+    let code = minted["code"].as_str().unwrap().to_string();
+    let link_id = minted["id"].as_str().unwrap().to_string();
+
+    // Tampered signature first: rejected, nothing created.
+    let tampered = wa_signed_post(&wa_inbound("15551234567", "not-the-code"));
+    let (parts, _) = tampered.into_parts();
+    let forged =
+        axum::http::Request::from_parts(parts, Body::from(wa_inbound("15551234567", &code)));
+    let st = app.clone().oneshot(forged).await.unwrap().status();
+    assert_eq!(st, StatusCode::FORBIDDEN);
+
+    let st = app
+        .clone()
+        .oneshot(wa_signed_post(&wa_inbound(
+            "15551234567",
+            &format!("  {code}  "),
+        )))
+        .await
+        .unwrap()
+        .status();
+    assert_eq!(st, StatusCode::OK);
+
+    // The consume runs off the request task; poll the link until it flips.
+    let mut channel_id = None;
+    for _ in 0..50 {
+        let (_, body) = send_empty(
+            &app,
+            "GET",
+            &format!("/api/v1/notification-channels/whatsapp-link/{link_id}"),
+        )
+        .await;
+        if body["status"] == "consumed" {
+            channel_id = Some(body["channel_id"].as_str().unwrap().to_string());
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    let channel_id = channel_id.expect("link consumed");
+    let (st, ch) = send_empty(
+        &app,
+        "GET",
+        &format!("/api/v1/notification-channels/{channel_id}"),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(ch["name"], "Oncall WA");
+    assert_eq!(ch["kind"], "whatsapp_app");
+    assert_eq!(ch["config"]["phone"], "15551234567");
+    assert_eq!(ch["enabled"], true);
+
+    // A second consume of the same code is a no-op (single use).
+    let st = app
+        .clone()
+        .oneshot(wa_signed_post(&wa_inbound("15559999999", &code)))
+        .await
+        .unwrap()
+        .status();
+    assert_eq!(st, StatusCode::OK);
+
+    // `stop` from the linked number severs the channel.
+    let st = app
+        .clone()
+        .oneshot(wa_signed_post(&wa_inbound("15551234567", "STOP")))
+        .await
+        .unwrap()
+        .status();
+    assert_eq!(st, StatusCode::OK);
+    let mut disabled = false;
+    for _ in 0..50 {
+        let (_, ch) = send_empty(
+            &app,
+            "GET",
+            &format!("/api/v1/notification-channels/{channel_id}"),
+        )
+        .await;
+        if ch["enabled"] == false {
+            assert_eq!(ch["disabled_reason"], "the recipient sent stop on WhatsApp");
+            disabled = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert!(disabled, "stop must disable the linked channel");
+}

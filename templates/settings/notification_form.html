@@ -67,6 +67,13 @@
           <span class="check-type-card__desc">one-tap chat link</span>
         </label>
         {% endif %}
+        {% if form.offers_whatsapp_app() %}
+        <label class="check-type-card" data-kind-card>
+          <input type="radio" name="kind" value="whatsapp_app"{% if form.kind == "whatsapp_app" %} checked{% endif %} class="sr-only">
+          <span class="check-type-card__name">whatsapp</span>
+          <span class="check-type-card__desc">one-tap number link</span>
+        </label>
+        {% endif %}
         <label class="check-type-card" data-kind-card>
           <input type="radio" name="kind" value="telegram"{% if form.kind == "telegram" %} checked{% endif %} class="sr-only">
           <span class="check-type-card__name">telegram bot</span>
@@ -83,7 +90,7 @@
           <span class="check-type-card__desc">POST to your endpoint</span>
         </label>
       </div>
-      {% if form.mode != "create" && form.kind != "telegram_app" %}
+      {% if form.mode != "create" && form.kind != "telegram_app" && form.kind != "whatsapp_app" %}
       <p data-kind-locked-hint class="hidden font-mono text-xs text-quiet"># type locked — tick "Replace transport config" below to change it</p>
       {% endif %}
     </fieldset>
@@ -115,7 +122,7 @@
       <div class="clear-both space-y-5 p-5">
 
       {# Linked telegram channels have no secrets to replace; unlink = delete. #}
-      {% if form.mode != "create" && form.kind != "telegram_app" %}
+      {% if form.mode != "create" && form.kind != "telegram_app" && form.kind != "whatsapp_app" %}
       <div>
         <label class="inline-flex items-center gap-2">
           <input type="checkbox" data-replace-config>
@@ -349,6 +356,36 @@
           Alerts are sent to this chat by our bot — there is no config to edit.
           To unlink, delete the channel below; to move it, delete and connect
           again from the new chat.
+        </p>
+        {% endif %}
+      </div>
+
+      <div data-variant="whatsapp_app" class="space-y-4{% if form.kind != "whatsapp_app" %} hidden{% endif %}">
+        {% if form.mode == "create" %}
+        <p class="text-sm text-muted">
+          No numbers, no tokens: tap the link (or scan the QR on your phone),
+          send the prefilled message, and your WhatsApp number is linked as
+          this channel. The name above is used for the new channel.
+        </p>
+        <div class="flex flex-wrap items-center gap-3">
+          <button type="button" data-waa-connect
+                  class="sticker-btn sticker-btn--accent px-4 py-2 text-sm font-medium">connect whatsapp</button>
+          <span class="text-xs text-muted">Creates a single-use link — it expires after 15 minutes.</span>
+        </div>
+        <p data-waa-status role="status" class="hidden font-mono text-xs"></p>
+        <div data-waa-qr-box class="hidden space-y-2">
+          <div data-waa-qr-img class="inline-block rounded-sm border border-[color:var(--theme-line)] bg-white p-2"></div>
+          <p class="font-mono text-xs text-muted"><a data-waa-link href="#" target="_blank" rel="noopener" class="underline decoration-dotted hover:text-body"></a></p>
+        </div>
+        {% else %}
+        <p class="font-mono text-xs text-quiet">
+          # linked via WhatsApp{% if !form.config.whatsapp_app_profile_name.is_empty() %} to <span class="text-body">{{ form.config.whatsapp_app_profile_name }}</span>{% endif %}
+          · number <span class="text-body">{{ form.config.whatsapp_app_phone }}</span>
+        </p>
+        <p class="text-xs text-muted">
+          Alerts are sent to this number from our WhatsApp line — there is no
+          config to edit. To unlink, delete the channel below (or send
+          <span class="font-mono">stop</span> from the linked number).
         </p>
         {% endif %}
       </div>

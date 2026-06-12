@@ -7,7 +7,7 @@
 CREATE TABLE channel_link_codes (
     id           UUID PRIMARY KEY DEFAULT uuidv7(),
     org_id       UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
-    purpose      TEXT NOT NULL CHECK (purpose IN ('telegram', 'delegate')),
+    purpose      TEXT NOT NULL CHECK (purpose IN ('telegram', 'delegate', 'whatsapp')),
     code_hash    TEXT NOT NULL UNIQUE,
     created_by   UUID REFERENCES users(id) ON DELETE SET NULL,
     -- Name hint for the channel created on consume.

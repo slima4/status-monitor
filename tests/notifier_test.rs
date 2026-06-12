@@ -82,6 +82,7 @@ async fn slack_channel_posts_text_payload() {
         &build_outbound_client(uptimepage::security::SsrfGuard::relaxed_for_tests()),
         None,
         None,
+        None,
     )
     .expect("notifier");
     notifier
@@ -111,6 +112,7 @@ async fn slack_multi_region_includes_breakdown() {
         &build_outbound_client(uptimepage::security::SsrfGuard::relaxed_for_tests()),
         None,
         None,
+        None,
     )
     .expect("notifier");
     let mut notice = make_notice();
@@ -133,6 +135,7 @@ async fn slack_single_region_omits_breakdown() {
     let notifier = build_notifier(
         &cfg,
         &build_outbound_client(uptimepage::security::SsrfGuard::relaxed_for_tests()),
+        None,
         None,
         None,
     )
@@ -160,6 +163,7 @@ async fn webhook_channel_posts_incident_payload_with_custom_header() {
     let notifier = build_notifier(
         &cfg,
         &build_outbound_client(uptimepage::security::SsrfGuard::relaxed_for_tests()),
+        None,
         None,
         None,
     )
@@ -194,6 +198,7 @@ async fn webhook_signed_delivery_carries_a_verifiable_signature() {
     let notifier = build_notifier(
         &cfg,
         &build_outbound_client(uptimepage::security::SsrfGuard::relaxed_for_tests()),
+        None,
         None,
         None,
     )
@@ -238,6 +243,7 @@ async fn build_notifier_constructs_each_kind() {
             &http,
             None,
             None,
+            None,
         )
         .is_ok()
     );
@@ -247,6 +253,7 @@ async fn build_notifier_constructs_each_kind() {
                 webhook_url: "https://hooks.slack.com/x".into(),
             }),
             &http,
+            None,
             None,
             None,
         )
@@ -262,6 +269,7 @@ async fn build_notifier_rejects_unparseable_url() {
             webhook_url: "not a url".into(),
         }),
         &http,
+        None,
         None,
         None,
     );
@@ -284,15 +292,15 @@ async fn build_notifier_telegram_app_needs_central_token() {
         bot_token: tok,
         budget: &budget,
     };
-    assert!(build_notifier(&cfg, &http, Some(central("123:abc")), None).is_ok());
+    assert!(build_notifier(&cfg, &http, Some(central("123:abc")), None, None).is_ok());
     // No operator bot → clear error, not a broken send.
-    let err = match build_notifier(&cfg, &http, None, None) {
+    let err = match build_notifier(&cfg, &http, None, None, None) {
         Err(e) => e,
         Ok(_) => panic!("token-less telegram_app build must fail"),
     };
     assert!(err.to_string().contains("central bot"));
     // Blank token (misconfig) is treated as absent.
-    assert!(build_notifier(&cfg, &http, Some(central("  ")), None).is_err());
+    assert!(build_notifier(&cfg, &http, Some(central("  ")), None, None).is_err());
 }
 
 #[tokio::test(start_paused = true)]

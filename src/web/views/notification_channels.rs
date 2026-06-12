@@ -75,6 +75,8 @@ pub struct ConfigFields {
     pub telegram_chat_id: String,
     pub telegram_app_chat_id: String,
     pub telegram_app_chat_title: String,
+    pub whatsapp_app_phone: String,
+    pub whatsapp_app_profile_name: String,
     pub whatsapp_access_token: String,
     pub whatsapp_phone_number_id: String,
     pub whatsapp_to: String,
@@ -97,6 +99,8 @@ impl Default for ConfigFields {
             telegram_chat_id: String::new(),
             telegram_app_chat_id: String::new(),
             telegram_app_chat_title: String::new(),
+            whatsapp_app_phone: String::new(),
+            whatsapp_app_profile_name: String::new(),
             whatsapp_access_token: String::new(),
             whatsapp_phone_number_id: String::new(),
             whatsapp_to: String::new(),
@@ -142,6 +146,8 @@ pub struct ChannelFormModel {
     pub bindable: Vec<MonitorCard>,
     /// Gates the one-tap "telegram" card; the BYO card is always offered.
     pub central_telegram: bool,
+    /// Gates the one-tap "whatsapp" card; the BYO card is always offered.
+    pub central_whatsapp: bool,
     /// Gates the "add to Slack" button on the slack panel (create mode).
     pub slack_oauth: bool,
     /// Gates the "add to Discord" button on the discord panel (create mode).
@@ -155,6 +161,12 @@ impl ChannelFormModel {
     /// already-linked channel (stays viewable if the bot is later removed).
     pub fn offers_telegram_app(&self) -> bool {
         (self.central_telegram && self.mode == "create") || self.kind == "telegram_app"
+    }
+
+    /// Same shape as [`Self::offers_telegram_app`], for the operator
+    /// WhatsApp number.
+    pub fn offers_whatsapp_app(&self) -> bool {
+        (self.central_whatsapp && self.mode == "create") || self.kind == "whatsapp_app"
     }
 }
 
@@ -235,6 +247,7 @@ pub async fn new_form(
     };
     let mut form = empty_create_form();
     form.central_telegram = state.cfg.telegram.enabled();
+    form.central_whatsapp = state.cfg.whatsapp_app.enabled();
     form.slack_oauth = state.cfg.slack_oauth.enabled();
     form.discord_oauth = state.cfg.discord_oauth.enabled();
     (_, form.bindable) = org_monitor_cards(&state, org, None).await?;
@@ -306,6 +319,7 @@ pub async fn edit_form(
         })?;
     let mut form = form_from_channel(channel);
     form.central_telegram = state.cfg.telegram.enabled();
+    form.central_whatsapp = state.cfg.whatsapp_app.enabled();
     (form.used_by, form.bindable) = org_monitor_cards(&state, org, Some(id)).await?;
     Ok(ChannelFormPage {
         active_tab: TAB_NOTIFICATIONS,
@@ -328,6 +342,7 @@ fn empty_create_form() -> ChannelFormModel {
         used_by: Vec::new(),
         bindable: Vec::new(),
         central_telegram: false,
+        central_whatsapp: false,
         slack_oauth: false,
         discord_oauth: false,
         email_unverified: false,
@@ -361,6 +376,11 @@ fn form_from_channel(c: NotificationChannel) -> ChannelFormModel {
             config.telegram_app_chat_id = c.chat_id;
             config.telegram_app_chat_title = c.chat_title.unwrap_or_default();
         }
+        // Display-only, same contract as telegram_app.
+        ChannelConfig::WhatsAppApp(c) => {
+            config.whatsapp_app_phone = c.phone;
+            config.whatsapp_app_profile_name = c.profile_name.unwrap_or_default();
+        }
         ChannelConfig::WhatsApp(c) => {
             config.whatsapp_access_token = c.access_token;
             config.whatsapp_phone_number_id = c.phone_number_id;
@@ -382,6 +402,7 @@ fn form_from_channel(c: NotificationChannel) -> ChannelFormModel {
         used_by: Vec::new(),
         bindable: Vec::new(),
         central_telegram: false,
+        central_whatsapp: false,
         slack_oauth: false,
         discord_oauth: false,
         email_unverified,

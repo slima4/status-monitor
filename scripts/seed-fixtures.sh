@@ -541,7 +541,10 @@ INSERT INTO notification_channels (org_id, name, kind, config, external_ref, ena
    NULL, true, NULL),
   ('${ORG}'::uuid, 'Fixture Email', 'email',
    '{"type":"email","to":"oncall@example.com"}'::jsonb,
-   'oncall@example.com', true, NULL);
+   'oncall@example.com', true, NULL),
+  ('${ORG}'::uuid, 'Fixture WA Linked', 'whatsapp_app',
+   '{"type":"whatsapp_app","phone":"15551234567","profile_name":"Fixture Jane"}'::jsonb,
+   '15551234567', true, NULL);
 
 -- The email fixture renders the unverified chip; engine deliveries to it
 -- record failures, which is the state worth eyeballing.

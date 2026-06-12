@@ -24,15 +24,17 @@ use crate::storage::locks::{advisory_xact_lock, org_lock_key};
 pub enum LinkPurpose {
     Telegram,
     Delegate,
+    Whatsapp,
 }
 
 impl LinkPurpose {
-    pub const ALL: &'static [Self] = &[Self::Telegram, Self::Delegate];
+    pub const ALL: &'static [Self] = &[Self::Telegram, Self::Delegate, Self::Whatsapp];
 
     pub const fn as_db_str(self) -> &'static str {
         match self {
             Self::Telegram => "telegram",
             Self::Delegate => "delegate",
+            Self::Whatsapp => "whatsapp",
         }
     }
 }

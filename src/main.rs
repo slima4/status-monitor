@@ -134,6 +134,9 @@ async fn main() -> Result<()> {
     // Transactional mail: provider = "resend" without key/sender fails here,
     // not on the first verification mail.
     cfg.validate_email()?;
+    // Operator WhatsApp number: a flipped flag with missing creds fails
+    // here, not as a dead webhook or a broken first send.
+    cfg.validate_whatsapp_app()?;
 
     let metrics_handle = if cfg.observability.metrics_enabled {
         Some(observability::metrics::init(&cfg.server.metrics_bind)?)
@@ -392,6 +395,7 @@ async fn main() -> Result<()> {
                         budget: telegram_send_budget.clone(),
                     }
                 }),
+                central_whatsapp: cfg.whatsapp_app.enabled().then(|| cfg.whatsapp_app.clone()),
                 email: Some(uptimepage::notifier::EmailDelivery {
                     sender: email_sender.clone(),
                     from_address: cfg.email.from_address.clone(),

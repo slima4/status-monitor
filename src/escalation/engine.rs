@@ -86,6 +86,8 @@ pub struct EngineDeps {
     pub base_url: String,
     /// Operator token + shared send budget for `telegram_app` delivery.
     pub central_bot: Option<crate::notifier::CentralBotDelivery>,
+    /// Operator Cloud API credentials for `whatsapp_app` delivery.
+    pub central_whatsapp: Option<crate::config::WhatsAppAppBotConfig>,
     /// Transactional sender + From identity for `email` delivery.
     pub email: Option<crate::notifier::EmailDelivery>,
 }
@@ -103,6 +105,7 @@ struct Worker {
     cfg: EscalationConfig,
     base_url: String,
     central_bot: Option<crate::notifier::CentralBotDelivery>,
+    central_whatsapp: Option<crate::config::WhatsAppAppBotConfig>,
     email: Option<crate::notifier::EmailDelivery>,
     /// True while a sweep task is in flight, so overlapping ticks skip rather
     /// than stack a second sweep on top of a slow one.
@@ -130,6 +133,7 @@ impl EscalationEngine {
             cfg,
             base_url,
             central_bot,
+            central_whatsapp,
             email,
         } = deps;
         Self {
@@ -145,6 +149,7 @@ impl EscalationEngine {
                 cfg,
                 base_url,
                 central_bot,
+                central_whatsapp,
                 email,
                 sweeping: AtomicBool::new(false),
                 page_locks: (0..PAGE_LOCK_SHARDS).map(|_| Mutex::new(())).collect(),
@@ -929,8 +934,13 @@ impl Worker {
         attempt: i32,
     ) -> (NotificationStatus, Option<String>) {
         let central = self.central_bot.as_ref().map(|c| c.as_central());
-        let error = match build_notifier(&channel.config, &self.http, central, self.email.as_ref())
-        {
+        let error = match build_notifier(
+            &channel.config,
+            &self.http,
+            central,
+            self.central_whatsapp.as_ref(),
+            self.email.as_ref(),
+        ) {
             Ok(n) => match n.notify_incident(notice).await {
                 Ok(()) => return (NotificationStatus::Sent, None),
                 Err(err) => redact_secrets(&err.to_string()),
@@ -1443,6 +1453,7 @@ mod tests {
                 cfg: EscalationConfig::default(),
                 base_url: String::new(),
                 central_bot: None,
+                central_whatsapp: None,
                 email: None,
             },
         )

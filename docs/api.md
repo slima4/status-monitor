@@ -339,6 +339,7 @@ never read, mutate, or test another's channels.
 - `telegram` — `{ "type": "telegram", "bot_token": "…", "chat_id": "…" }` (bring-your-own bot)
 - `telegram_app` — `{ "type": "telegram_app", "chat_id": "…", "chat_title": "…" }` — linked through the platform's central bot. **Not creatable from request bodies**: a `POST`/`PATCH`/test carrying this kind returns `422 CHANNEL_KIND_MANAGED` (the chat id rides the operator bot's credentials, so accepting one would let any caller page an arbitrary chat). Channels of this kind are created only by the link-code flow below.
 - `whatsapp` — `{ "type": "whatsapp", "access_token": "…", "phone_number_id": "…", "to": "…", "template_name": "…", "language_code": "en" }` (Business Cloud API; `language_code` optional, default `en`)
+- `whatsapp_app` — `{ "type": "whatsapp_app", "phone": "…", "profile_name": "…" }` — linked through the platform's WhatsApp number. **Not creatable from request bodies** (`422 CHANNEL_KIND_MANAGED`, same rationale as `telegram_app`); created only by the WhatsApp link-code flow below.
 - `email` — `{ "type": "email", "to": "oncall@example.com" }` — one lowercase address per channel, delivered through the platform's transactional sender. **Verification-gated**: the channel is created unverified and a mail with a single-use 24 h link is sent to the address; until the link is confirmed every delivery (incident page or test send) fails with `email address not verified`. Replacing the config resets the gate and re-sends the mail. `POST /api/v1/notification-channels/{id}/resend-verification` re-sends it (capped per channel and per org per day — `422 CHANNEL_VERIFICATION_LIMIT`; on a non-email channel — `422 CHANNEL_NOT_VERIFIABLE`); a test against an unverified or unsaved email config is `422 CHANNEL_UNVERIFIED`.
 
 **Webhook signing.** When a `webhook` channel carries a `secret` (≥ 16
@@ -377,6 +378,15 @@ Deployments running the central bot expose a link-code flow (absent — `404 TEL
 - Sending the code to the bot (tap **Start**, or `/link <code>` in a group) creates the `telegram_app` channel for the minting org. The org is resolved only from the code — never from the Telegram payload.
 - `GET /api/v1/notification-channels/telegram-link/{id}` (`channels:read`) polls the code: `pending`, `consumed` (with `channel_id`), or `expired`.
 - Unlink = delete the channel; deleting the last channel linked to a group also walks the bot out of that group. From the chat side, `/stop` or removing the bot disables the channel (see platform disables above).
+
+### WhatsApp one-tap linking
+
+Deployments with the operator WhatsApp number enabled expose the same flow (absent — `404 WHATSAPP_LINK_NOT_FOUND` — otherwise):
+
+- `POST /api/v1/notification-channels/whatsapp-link` (`channels:write`) with an optional `{ "name": "…" }` hint mints a single-use code (15-minute expiry, capped per org → `422 WHATSAPP_LINK_LIMIT`). The response carries the raw `code` and a `deep_link` (`wa.me/<number>?text=<code>`) that opens WhatsApp with the code prefilled.
+- Sending the prefilled message creates the `whatsapp_app` channel for the minting org, bound to the sender's number. The org is resolved only from the code — never from the webhook payload.
+- `GET /api/v1/notification-channels/whatsapp-link/{id}` (`channels:read`) polls the code: `pending`, `consumed` (with `channel_id`), or `expired`.
+- Unlink = delete the channel; from the phone side, sending `stop` disables every channel bound to the number (platform disable, reason shown in the UI).
 
 ### Delegation links
 
