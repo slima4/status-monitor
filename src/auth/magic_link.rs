@@ -17,7 +17,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::auth::token_hash::{self, slice_prefix};
-use crate::error::{AppError, Result};
+use crate::error::Result;
 
 #[derive(Debug, Clone)]
 pub struct MagicLinkRow {
@@ -25,6 +25,8 @@ pub struct MagicLinkRow {
     pub email: String,
     pub created_at: DateTime<Utc>,
     pub expires_at: DateTime<Utc>,
+    pub redirect_after: Option<String>,
+    pub invitation_id: Option<Uuid>,
 }
 
 #[derive(Debug, Clone)]
@@ -43,14 +45,17 @@ pub async fn create(
     email: &str,
     ip_hash: Option<&str>,
     expiry_minutes: u32,
+    redirect_after: Option<&str>,
+    invitation_id: Option<Uuid>,
 ) -> Result<CreatedMagicLink> {
     let raw = token_hash::generate_raw_token();
     let prefix = slice_prefix(&raw).to_string();
     let hash = token_hash::hash(&raw)?;
     let expires_at = Utc::now() + Duration::minutes(i64::from(expiry_minutes));
     let row: (Uuid, DateTime<Utc>, DateTime<Utc>) = sqlx::query_as(
-        "INSERT INTO magic_link_tokens (email, token_hash, token_prefix, expires_at, ip_hash) \
-         VALUES ($1::citext, $2, $3, $4, $5) \
+        "INSERT INTO magic_link_tokens \
+             (email, token_hash, token_prefix, expires_at, ip_hash, redirect_after, invitation_id) \
+         VALUES ($1::citext, $2, $3, $4, $5, $6, $7) \
          RETURNING id, created_at, expires_at",
     )
     .bind(email)
@@ -58,6 +63,8 @@ pub async fn create(
     .bind(&prefix)
     .bind(expires_at)
     .bind(ip_hash)
+    .bind(redirect_after)
+    .bind(invitation_id)
     .fetch_one(pool)
     .await
     .context("magic_link::create")?;
@@ -68,6 +75,8 @@ pub async fn create(
             email: email.to_string(),
             created_at: row.1,
             expires_at: row.2,
+            redirect_after: redirect_after.map(str::to_string),
+            invitation_id,
         },
         token: raw,
     })
@@ -76,7 +85,7 @@ pub async fn create(
 /// Find and atomically mark-used the row matching `raw_token`. Returns the
 /// row's email on success; `None` for any of: nothing matched, expired,
 /// already used, deleted. Callers must not distinguish — surface a single
-/// `MAGIC_LINK_INVALID` error.
+/// indistinguishable invalid-link page.
 ///
 /// Lookup is bounded by the indexed `token_prefix` (96-bit prefix entropy).
 /// Mark-used happens in a follow-up UPDATE keyed by `id` with a `used_at IS
@@ -84,7 +93,8 @@ pub async fn create(
 pub async fn consume(pool: &PgPool, raw_token: &str) -> Result<Option<MagicLinkRow>> {
     let prefix = slice_prefix(raw_token);
     let candidates: Vec<RawRow> = sqlx::query_as(
-        "SELECT id, email::text AS email, token_hash, created_at, expires_at \
+        "SELECT id, email::text AS email, token_hash, created_at, expires_at, \
+                redirect_after, invitation_id \
          FROM magic_link_tokens \
          WHERE token_prefix = $1 AND used_at IS NULL AND expires_at > now()",
     )
@@ -112,6 +122,8 @@ pub async fn consume(pool: &PgPool, raw_token: &str) -> Result<Option<MagicLinkR
                 email: r.email,
                 created_at: r.created_at,
                 expires_at: r.expires_at,
+                redirect_after: r.redirect_after,
+                invitation_id: r.invitation_id,
             }));
         }
     }
@@ -170,14 +182,6 @@ struct RawRow {
     token_hash: String,
     created_at: DateTime<Utc>,
     expires_at: DateTime<Utc>,
-}
-
-/// Wraps `AppError` for the request/verify handlers. The opaque variant is
-/// what the API surface returns: callers never learn whether the token didn't
-/// exist, expired, or was already used.
-pub fn invalid_token_error() -> AppError {
-    AppError::not_found(
-        crate::api::error::codes::MAGIC_LINK_INVALID,
-        "magic link is invalid or has expired",
-    )
+    redirect_after: Option<String>,
+    invitation_id: Option<Uuid>,
 }

@@ -1,0 +1,19 @@
+{% extends "chromeless_base.html" %}
+{# One indistinguishable state — never reveal wrong vs used vs no-account. #}
+{% block title %}Link expired{% endblock %}
+{% block main %}
+    <main class="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-4 px-6 text-center">
+        <h1 class="page-title justify-center"><span class="page-title__prefix" aria-hidden="true">$</span>link expired</h1>
+        <p class="text-sm text-muted">
+            This sign-in link is invalid, already used, or has expired.
+            Links work once and expire {{ expiry_minutes }} minutes after
+            they are requested.
+        </p>
+        <p>
+            <a href="/login"
+               class="sticker-btn sticker-btn--accent inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium">
+                request a new link
+            </a>
+        </p>
+    </main>
+{% endblock %}

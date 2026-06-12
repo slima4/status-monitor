@@ -16,10 +16,12 @@
 //!   mints a fresh session cookie, and redirects to `/`.
 
 use anyhow::Context;
+use askama::Template;
+use askama_web::WebTemplate;
 use axum::Json;
 use axum::extract::{Query, State};
-use axum::http::HeaderMap;
 use axum::http::header::USER_AGENT;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Redirect, Response};
 use serde::Deserialize;
 use tower_cookies::Cookies;
@@ -32,10 +34,16 @@ use crate::auth::{fingerprint, magic_link, session as session_store};
 use crate::email::{EmailAddress, EmailTemplate, TransactionalEmail};
 use crate::error::Result;
 use crate::storage::orgs as orgs_store;
+use crate::web::filters;
 
 #[derive(Debug, Deserialize)]
 pub struct RequestBody {
     pub email: String,
+    #[serde(default)]
+    pub redirect_after: Option<String>,
+    /// Raw invitation token; resolved to its row id like the OAuth starts.
+    #[serde(default)]
+    pub invitation: Option<String>,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -60,13 +68,26 @@ pub async fn request(
 
     if let Some(email) = email_norm::normalize(&body.email) {
         let cfg = &state.cfg.auth.magic_link;
-        // Always insert a row — including for emails with no user — so an
-        // attacker cannot distinguish known vs unknown emails by timing. A
-        // no-user row never redeems at /verify (a soft-deleted user's row
-        // redeems and restores — email ownership was just proven). Expires
-        // in 15 minutes (default); cleanup task drops the residue.
-        let created =
-            magic_link::create(pool, email, ip_hash.as_deref(), cfg.expiry_minutes).await?;
+        let redirect_after = body
+            .redirect_after
+            .as_deref()
+            .and_then(crate::auth::url::safe_redirect_target);
+        let invitation_id = crate::auth::invitations::resolve_pending_invitation_id(
+            pool,
+            body.invitation.as_deref(),
+        )
+        .await?;
+        // Always insert — even for unknown emails — so timing can't
+        // distinguish them; a no-user row never redeems at /verify.
+        let created = magic_link::create(
+            pool,
+            email,
+            ip_hash.as_deref(),
+            cfg.expiry_minutes,
+            redirect_after,
+            invitation_id,
+        )
+        .await?;
         let verify_url = token_link(
             &state.cfg.auth.public_base_url,
             "/auth/magic-link/verify",
@@ -134,6 +155,25 @@ pub struct VerifyQuery {
     pub token: String,
 }
 
+/// /verify is a clicked-from-mail GET — failures get a page, not JSON.
+#[derive(Template, WebTemplate)]
+#[template(path = "auth/magic_link_invalid.html")]
+struct MagicLinkInvalidPage {
+    expiry_minutes: u32,
+}
+
+/// 410, not 200 — failed redemptions must stay visible in status-code
+/// dashboards and never be cacheable as success.
+fn invalid_page(state: &AppState) -> Response {
+    (
+        StatusCode::GONE,
+        MagicLinkInvalidPage {
+            expiry_minutes: state.cfg.auth.magic_link.expiry_minutes,
+        },
+    )
+        .into_response()
+}
+
 /// `GET /auth/magic-link/verify`. Atomically consumes the token, destroys any
 /// pre-login session bound to the browser (fixation defence), creates a fresh
 /// session, and redirects to `/`.
@@ -164,19 +204,16 @@ pub async fn verify(
             "invalid_token",
         )
         .await;
-        return Err(magic_link::invalid_token_error());
+        return Ok(invalid_page(&state));
     };
 
-    // Tombstone-inclusive lookup: a verified magic link proves email
-    // ownership, so re-auth restores a soft-deleted account here exactly like
-    // the OAuth callbacks do (`oauth_login::upsert_identity_and_signup_org`).
+    // Tombstone-inclusive: a verified link proves email ownership, so
+    // re-auth restores a soft-deleted account like the OAuth callbacks do.
     let Some((user_id, deleted_at)) =
         orgs_store::find_user_by_email_including_deleted(pool, &row.email).await?
     else {
-        // Token was consumed (marked used) but no user owns the email — the
-        // anti-enum INSERT for an unknown address. The token is burnt;
-        // surface the opaque error so an account probe can't tell the
-        // difference from an invalid token.
+        // No user owns the email — the anti-enum INSERT for an unknown
+        // address. Token already burnt.
         login_audit::record_failure_anon(
             pool,
             LoginMethod::MagicLink,
@@ -185,9 +222,11 @@ pub async fn verify(
             "no_user_for_email",
         )
         .await;
-        return Err(magic_link::invalid_token_error());
+        // Same page as invalid_token — indistinguishable to a probe.
+        return Ok(invalid_page(&state));
     };
-    if deleted_at.is_some() {
+    let restored = deleted_at.is_some();
+    if restored {
         let mut tx = pool.begin().await.context("magic-link restore: begin tx")?;
         crate::auth::account::undelete_in_tx(&mut tx, user_id).await?;
         tx.commit().await.context("magic-link restore: commit")?;
@@ -235,5 +274,17 @@ pub async fn verify(
     if let Err(err) = crate::web::display_prefs::issue_cookies(&state, &cookies, user_id).await {
         tracing::warn!(error = %err, "display-preference cookie issue failed (non-fatal)");
     }
-    Ok(Redirect::to("/").into_response())
+    // Same priority as the OAuth callback.
+    let redirect = if let Some(invitation_id) = row.invitation_id {
+        format!("/invitations/accept?invitation={invitation_id}")
+    } else if restored {
+        "/?restored=1".to_string()
+    } else {
+        row.redirect_after
+            .as_deref()
+            .and_then(crate::auth::url::safe_redirect_target)
+            .map(str::to_string)
+            .unwrap_or_else(|| "/".to_string())
+    };
+    Ok(Redirect::to(&redirect).into_response())
 }

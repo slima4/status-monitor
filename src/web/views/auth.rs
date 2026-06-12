@@ -51,6 +51,7 @@ pub struct LoginPage {
     pub google_enabled: bool,
     pub google_url: String,
     pub magic_link_enabled: bool,
+    pub magic_link_expiry_minutes: u32,
     pub invitation_hint: Option<String>,
     /// Cached, timeout-bounded `target_store.ping()` — same dependency check
     /// as `/readyz`, non-sensitive (no tenant scope). See [`login_ready`].
@@ -81,13 +82,14 @@ pub async fn login(State(state): State<AppState>, Query(q): Query<LoginQuery>) -
 
     LoginPage {
         active_tab: TAB_LOGIN,
-        github_enabled: state.cfg.auth.github.is_configured(),
+        github_enabled: state.cfg.auth.github_login_enabled(),
         github_url: login_url("/auth/github/login", &params),
-        google_enabled: state.cfg.auth.google.is_configured(),
+        google_enabled: state.cfg.auth.google_login_enabled(),
         google_url: login_url("/auth/google/login", &params),
         // DB-gated too: without Postgres the request handler can only 500,
         // so a self-host/in-mem deployment must not render the form.
         magic_link_enabled: state.cfg.auth.magic_link_enabled() && state.db.is_some(),
+        magic_link_expiry_minutes: state.cfg.auth.magic_link.expiry_minutes,
         invitation_hint: q.invitation,
         ready: login_ready(&state).await,
     }
@@ -805,6 +807,7 @@ mod tests {
             google_enabled: google,
             google_url: "/auth/google/login".into(),
             magic_link_enabled: magic,
+            magic_link_expiry_minutes: 15,
             invitation_hint: None,
             ready: true,
         }

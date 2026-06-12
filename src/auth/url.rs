@@ -23,6 +23,16 @@ pub fn push_param(buf: &mut String, key: &str, value: &str) {
     buf.push_str(&url_encode(value));
 }
 
+/// Assemble an `application/x-www-form-urlencoded` body (or query tail)
+/// from key/value pairs — one owner for the OAuth token-exchange payloads.
+pub fn form_body(pairs: &[(&str, &str)]) -> String {
+    let mut buf = String::new();
+    for (k, v) in pairs {
+        push_param(&mut buf, k, v);
+    }
+    buf
+}
+
 /// Same-origin path predicate for `?redirect_after=` style query params.
 /// Accepts `/foo`, `/foo/bar`, `/`; rejects `//evil.test`, `/\evil.test`,
 /// `https://evil.test`, the empty string. Centralised so the login page link,

@@ -35,10 +35,8 @@ struct UserInfo {
     name: Option<String>,
 }
 
-/// Some legacy Google surfaces emit `email_verified` as the string "true".
-/// A strict bool here would fail the WHOLE userinfo parse and lock out even
-/// returning users whose login needs only the sub match — tolerate the
-/// string, keep anything unrecognised as None (fails closed on email-link).
+/// Legacy Google surfaces emit `email_verified` as the string "true"; a
+/// strict bool would fail the whole parse and lock out sub-match logins.
 fn de_bool_loose<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
     #[derive(Deserialize)]
     #[serde(untagged)]
@@ -100,13 +98,13 @@ async fn exchange_code(
     code: &str,
 ) -> Result<String> {
     // Google's token endpoint rejects JSON bodies — form-urlencoded only.
-    let payload = format!(
-        "grant_type=authorization_code&code={code}&client_id={cid}&client_secret={cs}&redirect_uri={ru}",
-        code = url_encode(code),
-        cid = url_encode(&cfg.client_id),
-        cs = url_encode(cfg.client_secret.expose_secret()),
-        ru = url_encode(&cfg.redirect_url),
-    );
+    let payload = crate::auth::url::form_body(&[
+        ("grant_type", "authorization_code"),
+        ("code", code),
+        ("client_id", &cfg.client_id),
+        ("client_secret", cfg.client_secret.expose_secret()),
+        ("redirect_uri", &cfg.redirect_url),
+    ]);
     let req = Request::post(GOOGLE_TOKEN_URL)
         .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
         .header(ACCEPT, "application/json")

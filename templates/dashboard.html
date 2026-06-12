@@ -2,6 +2,12 @@
 {% block title %}Dashboard · Uptimepage{% endblock %}
 {% block content %}
 <section class="space-y-5">
+  {% if restored_notice %}
+  <p class="alert-card alert-card--muted text-sm" role="status">
+    welcome back &mdash; this sign-in restored your deleted account, along
+    with its monitors and status pages.
+  </p>
+  {% endif %}
   <header class="flex flex-wrap items-end justify-between gap-3">
     <div class="flex items-center gap-3">
       <h1 class="page-title"><span class="page-title__prefix" aria-hidden="true">$</span>dashboard</h1>

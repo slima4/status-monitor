@@ -457,13 +457,15 @@ pub struct AuthConfig {
 impl Default for AuthConfig {
     fn default() -> Self {
         Self {
-            enabled_methods: vec!["github_oauth".into(), "magic_link".into()],
+            enabled_methods: vec![
+                "github_oauth".into(),
+                "google_oauth".into(),
+                "magic_link".into(),
+            ],
             fingerprint_salt: String::new(),
             public_base_url: "http://localhost:8080".into(),
             session: SessionConfig::default(),
-            // Scopes deliberately left empty: config/default.toml carries the
-            // shipped lists, and each provider module falls back to its own
-            // DEFAULT_SCOPES — a third copy here would just drift.
+            // Scopes empty: default.toml + provider DEFAULT_SCOPES own them.
             github: OauthClientConfig::default(),
             google: OauthClientConfig::default(),
             invitations: InvitationsConfig::default(),
@@ -474,10 +476,23 @@ impl Default for AuthConfig {
 }
 
 impl AuthConfig {
+    /// List = policy switch; OAuth additionally needs creds (capability).
+    pub fn method_enabled(&self, name: &str) -> bool {
+        self.enabled_methods.iter().any(|m| m == name)
+    }
+
     /// Single predicate for the magic-link surface — route mounting, the
     /// login-page form, and the token-purge ticker must agree.
     pub fn magic_link_enabled(&self) -> bool {
-        self.enabled_methods.iter().any(|m| m == "magic_link")
+        self.method_enabled("magic_link")
+    }
+
+    pub fn github_login_enabled(&self) -> bool {
+        self.method_enabled("github_oauth") && self.github.is_configured()
+    }
+
+    pub fn google_login_enabled(&self) -> bool {
+        self.method_enabled("google_oauth") && self.google.is_configured()
     }
 }
 
@@ -530,9 +545,7 @@ impl Default for OauthClientConfig {
 }
 
 impl OauthClientConfig {
-    /// Login button / handler guard: the dance needs all three — Google
-    /// hard-rejects an authorize redirect with an empty redirect_uri, so a
-    /// creds-only check would render a button into a guaranteed 400.
+    /// All three required — Google hard-rejects an empty redirect_uri.
     pub fn is_configured(&self) -> bool {
         !self.client_id.is_empty()
             && !self.client_secret.expose_secret().is_empty()

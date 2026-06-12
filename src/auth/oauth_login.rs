@@ -168,14 +168,11 @@ pub async fn upsert_identity_and_signup_org(
         )));
     };
 
-    // CITEXT cast is load-bearing: sqlx binds `&str` as TEXT, which selects
-    // the case-sensitive `text = text` operator. The `::citext` cast forces
-    // the case-insensitive CITEXT operator so "Bob@Example.test" matches
-    // "bob@example.test" (the cross-flow email-consistency property).
-    // Tombstones are included — a verified email proves ownership, so a
-    // soft-deleted account reached via a NEW provider restores instead of
-    // spawning a duplicate user row (the email unique index is partial,
-    // active rows only). Prefer the active row, then the newest tombstone.
+    // ::citext cast is load-bearing — sqlx binds &str as TEXT, which would
+    // select the case-sensitive operator. Tombstones included: a verified
+    // email proves ownership, so a soft-deleted account reached via a new
+    // provider restores instead of spawning a duplicate row (email unique
+    // index is partial). Active row first, then newest tombstone.
     let by_email: Option<(Uuid, Option<DateTime<Utc>>)> = sqlx::query_as(
         "SELECT id, deleted_at FROM users WHERE email = $1::citext \
          ORDER BY (deleted_at IS NULL) DESC, created_at DESC LIMIT 1",

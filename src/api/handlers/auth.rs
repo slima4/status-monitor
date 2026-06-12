@@ -32,11 +32,43 @@ pub struct LoginQuery {
 }
 
 /// Per-provider plumbing the shared runners dispatch on.
-fn provider_parts(state: &AppState, provider: OauthProvider) -> (&OauthClientConfig, LoginMethod) {
+struct ProviderParts<'a> {
+    cfg: &'a OauthClientConfig,
+    method: LoginMethod,
+    enabled: bool,
+}
+
+fn provider_parts(state: &AppState, provider: OauthProvider) -> ProviderParts<'_> {
+    let auth = &state.cfg.auth;
     match provider {
-        OauthProvider::Github => (&state.cfg.auth.github, LoginMethod::GithubOauth),
-        OauthProvider::Google => (&state.cfg.auth.google, LoginMethod::GoogleOauth),
+        OauthProvider::Github => ProviderParts {
+            cfg: &auth.github,
+            method: LoginMethod::GithubOauth,
+            enabled: auth.github_login_enabled(),
+        },
+        OauthProvider::Google => ProviderParts {
+            cfg: &auth.google,
+            method: LoginMethod::GoogleOauth,
+            enabled: auth.google_login_enabled(),
+        },
     }
+}
+
+/// 404, not 500 — scanner probes must not pollute the 5xx rate. Logs the
+/// listed-but-misconfigured case so a half-set provider doesn't silently
+/// look like deliberate policy.
+fn unavailable(state: &AppState, provider: OauthProvider) -> AppError {
+    let p = provider_parts(state, provider);
+    if !p.cfg.is_configured() && state.cfg.auth.method_enabled(p.method.as_db_str()) {
+        tracing::warn!(
+            provider = provider.as_db_str(),
+            "oauth login listed in enabled_methods but client_id/client_secret/redirect_url incomplete"
+        );
+    }
+    AppError::not_found(
+        "AUTH_METHOD_UNAVAILABLE",
+        "this sign-in method is not enabled",
+    )
 }
 
 pub async fn github_login(state: State<AppState>, q: Query<LoginQuery>) -> Result<Redirect> {
@@ -57,30 +89,22 @@ async fn start_login(
             "oauth login: no Postgres pool — auth requires tenancy mode"
         ))
     })?;
-    let (cfg, _) = provider_parts(&state, provider);
-    if !cfg.is_configured() {
-        return Err(AppError::Other(anyhow::anyhow!(
-            "oauth login: auth.{provider}.client_id/client_secret not configured",
-            provider = provider.as_db_str()
-        )));
+    let parts = provider_parts(&state, provider);
+    if !parts.enabled {
+        return Err(unavailable(&state, provider));
     }
+    let cfg = parts.cfg;
     // Only same-origin paths survive: anything else gets dropped to None so
     // the callback redirects to `/`. Without this, `?redirect_after=https://evil.test`
     // turns a legit OAuth dance into an open-redirect into attacker territory.
     let redirect_after = q.redirect_after.as_deref().and_then(safe_redirect_target);
 
-    // Resolve the raw invitation token (if present) to its row id at this
-    // edge instead of storing the token at rest in `oauth_states`. The id
-    // alone isn't replayable — the accept handler still requires the
-    // caller's session-bound email to match the invitation row.
-    // Unknown / expired tokens fall through silently: the post-OAuth
-    // redirect lands at `/`, the operator can re-issue the invite.
-    let invitation_id = match q.invitation.as_deref() {
-        Some(raw) if !raw.is_empty() => crate::auth::invitations::find_pending_by_token(pool, raw)
-            .await?
-            .map(|r| r.id),
-        _ => None,
-    };
+    // Resolve token → row id at this edge so the raw token is never at rest
+    // in `oauth_states`; the id alone isn't replayable (accept still
+    // requires the session-bound email to match).
+    let invitation_id =
+        crate::auth::invitations::resolve_pending_invitation_id(pool, q.invitation.as_deref())
+            .await?;
 
     let s = oauth_state::generate_state();
     oauth_state::insert(
@@ -102,8 +126,7 @@ async fn start_login(
 
 #[derive(Debug, Deserialize)]
 pub struct CallbackQuery {
-    /// Absent when the user denies consent — the provider sends `error=`
-    /// instead (Google's cancel button makes this a routine path).
+    /// Absent when the user denies consent (provider sends `error=` instead).
     pub code: Option<String>,
     pub state: String,
     pub error: Option<String>,
@@ -141,7 +164,13 @@ async fn finish_login(
         .db
         .as_ref()
         .ok_or_else(|| AppError::Other(anyhow::anyhow!("oauth callback: no Postgres pool")))?;
-    let (cfg, method) = provider_parts(&state, provider);
+    let parts = provider_parts(&state, provider);
+    // Policy-gated like start_login — a state minted before the method was
+    // switched off must not complete a sign-in for the rest of its TTL.
+    if !parts.enabled {
+        return Err(unavailable(&state, provider));
+    }
+    let (cfg, method) = (parts.cfg, parts.method);
     let salt = state.cfg.auth.fingerprint_salt.as_str();
     let ip_hash = fingerprint::hash_fingerprint(salt, &client_ip.to_string());
     let ua_value = headers
@@ -170,8 +199,7 @@ async fn finish_login(
         }
     };
 
-    // Denied consent / provider error: the state is already burnt above, so
-    // the dance can't be resumed — send the user back to /login quietly.
+    // Denied consent / provider error — state already burnt, back to /login.
     let Some(code) = q.code.as_deref().filter(|c| !c.is_empty()) else {
         let reason = if q.error.is_some() {
             "oauth_denied"
@@ -277,6 +305,10 @@ async fn finish_login(
         "/onboarding/org".to_string()
     } else if let Some(invitation_id) = consumed.invitation_id {
         format!("/invitations/accept?invitation={invitation_id}")
+    } else if resolved.restored {
+        // Banner outranks redirect_after — the user must learn the account
+        // came back.
+        "/?restored=1".to_string()
     } else {
         consumed
             .redirect_after

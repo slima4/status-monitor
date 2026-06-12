@@ -75,6 +75,9 @@ pub struct DashboardParams {
     pub status: Option<String>,
     #[serde(default, rename = "type")]
     pub kind: Option<String>,
+    /// Login flows set `restored=1` after un-deleting the account.
+    #[serde(default)]
+    pub restored: Option<String>,
 }
 
 /// One row in the dashboard table — every cell the template renders.
@@ -234,6 +237,7 @@ pub struct DashboardPage {
     pub status_options: Vec<RangeOption>,
     pub selected_status: Option<&'static str>,
     pub selected_kind: Option<&'static str>,
+    pub restored_notice: bool,
 }
 
 #[derive(Template, WebTemplate)]
@@ -328,6 +332,7 @@ pub async fn index(
         status_options: build_range_options(status, &STATUS_FILTERS),
         selected_status,
         selected_kind,
+        restored_notice: params.restored.as_deref() == Some("1"),
     })
 }
 
@@ -1185,6 +1190,7 @@ mod tests {
             status_options: build_range_options(FILTER_ANY, &STATUS_FILTERS),
             selected_status: None,
             selected_kind: None,
+            restored_notice: false,
         }
     }
 
@@ -1279,6 +1285,7 @@ mod tests {
             status_options: build_range_options(FILTER_ANY, &STATUS_FILTERS),
             selected_status: None,
             selected_kind: None,
+            restored_notice: false,
         };
         let html = page.render().unwrap();
         assert!(html.contains("nothing to watch yet."));

@@ -106,6 +106,11 @@ fn saas_subdomain(cfg: &mut uptimepage::config::AppConfig) {
     cfg.tenancy.path_based_public_routes = false;
     cfg.public_status.base_domain = BASE_DOMAIN.into();
     cfg.auth.session.cookie_domain = String::new();
+    // Configured provider so /auth/github/login would NOT 404 by itself —
+    // the operator-surface leak assertions must measure the host gate only.
+    cfg.auth.github.client_id = "test-client".into();
+    cfg.auth.github.client_secret = String::from("test-secret").into();
+    cfg.auth.github.redirect_url = format!("https://app.{BASE_DOMAIN}/auth/github/callback");
 }
 
 #[tokio::test]

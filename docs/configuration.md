@@ -79,7 +79,7 @@ See [Multi-tenancy](multi-tenancy.md) for the full model, slug rules, and the st
 
 ```toml
 [auth]
-enabled_methods = ["github_oauth"]   # add "magic_link" to mount /auth/magic-link/*
+enabled_methods = ["github_oauth", "google_oauth", "magic_link"]
 fingerprint_salt = ""                # HMAC salt for IP/UA hashes; rotate-aware
 public_base_url = "https://status.example.test"
 
@@ -135,10 +135,12 @@ template_name = ""                   # approved alert template, single body para
 language_code = "en"
 ```
 
-The GitHub button on `/login` only renders when `auth.github.client_id`
-is set. `auth.enabled_methods` is additive: the GitHub path is always
-active in v1 (it's listed as `"github_oauth"` by default); adding
-`"magic_link"` mounts the magic-link request/verify endpoints.
+`auth.enabled_methods` is the policy switch per sign-in method: removing
+an entry disables that method's login start/callback (404) and hides its
+button. OAuth providers additionally need client_id + client_secret +
+redirect_url set — a listed but incompletely configured provider stays
+hidden and logs a warning on probe. `"magic_link"` mounts the magic-link
+request/verify endpoints and the login-page email form.
 
 `auth.fingerprint_salt` is paired with the `auth_salt_history` table.
 Rotating the value mid-deployment refuses to boot unless the override

@@ -208,6 +208,20 @@ pub async fn create(
 /// Returns `None` for any of: nothing matched, expired, accepted/declined,
 /// row deleted. The handler must not distinguish these to the caller —
 /// "INVITATION_INVALID" covers them all (anti-enumeration).
+/// Login-flow edge resolver: raw invitation token (login page query param) →
+/// pending row id, trimmed. Unknown/expired tokens fall through to None
+/// silently — the post-login redirect just lands at `/` and the operator can
+/// re-issue. Single owner of that policy for the OAuth and magic-link starts.
+pub async fn resolve_pending_invitation_id(
+    pool: &PgPool,
+    raw: Option<&str>,
+) -> Result<Option<Uuid>> {
+    match raw.map(str::trim) {
+        Some(t) if !t.is_empty() => Ok(find_pending_by_token(pool, t).await?.map(|r| r.id)),
+        _ => Ok(None),
+    }
+}
+
 pub async fn find_pending_by_token(
     pool: &PgPool,
     raw_token: &str,

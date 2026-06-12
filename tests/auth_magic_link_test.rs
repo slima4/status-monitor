@@ -34,7 +34,7 @@ async fn create_then_consume_roundtrip() {
     let pool = open_pool(&db).await;
     MIGRATOR.run(&pool).await.unwrap();
 
-    let created = magic_link::create(&pool, "alice@example.test", None, 15)
+    let created = magic_link::create(&pool, "alice@example.test", None, 15, None, None)
         .await
         .expect("create");
 
@@ -69,7 +69,7 @@ async fn consume_with_unknown_token_returns_none() {
     // Seed a real row so the prefix-narrowed SELECT has something to compare
     // against — otherwise an empty table never enters the argon2-verify loop
     // and the test couldn't catch a verify-mismatch regression.
-    let _real = magic_link::create(&pool, "real@example.test", None, 15)
+    let _real = magic_link::create(&pool, "real@example.test", None, 15, None, None)
         .await
         .expect("seed");
 
@@ -90,7 +90,7 @@ async fn consume_skips_expired_rows() {
     let pool = open_pool(&db).await;
     MIGRATOR.run(&pool).await.unwrap();
 
-    let created = magic_link::create(&pool, "bob@example.test", None, 15)
+    let created = magic_link::create(&pool, "bob@example.test", None, 15, None, None)
         .await
         .expect("create");
 
@@ -124,7 +124,7 @@ async fn purge_old_removes_expired_and_old_used() {
     MIGRATOR.run(&pool).await.unwrap();
 
     // Row 1: expired, unused.
-    let r1 = magic_link::create(&pool, "x1@example.test", None, 15)
+    let r1 = magic_link::create(&pool, "x1@example.test", None, 15, None, None)
         .await
         .expect("create");
     sqlx::query(
@@ -136,7 +136,7 @@ async fn purge_old_removes_expired_and_old_used() {
     .unwrap();
 
     // Row 2: used 8 days ago.
-    let r2 = magic_link::create(&pool, "x2@example.test", None, 15)
+    let r2 = magic_link::create(&pool, "x2@example.test", None, 15, None, None)
         .await
         .expect("create");
     sqlx::query("UPDATE magic_link_tokens SET used_at = now() - INTERVAL '8 days' WHERE id = $1")
@@ -146,7 +146,7 @@ async fn purge_old_removes_expired_and_old_used() {
         .unwrap();
 
     // Row 3: fresh, unused — must survive.
-    let r3 = magic_link::create(&pool, "x3@example.test", None, 15)
+    let r3 = magic_link::create(&pool, "x3@example.test", None, 15, None, None)
         .await
         .expect("create");
 
@@ -178,10 +178,10 @@ async fn earliest_in_window_picks_first_row_and_excludes_others() {
     MIGRATOR.run(&pool).await.unwrap();
 
     // Two requests for the same email back-to-back.
-    let first = magic_link::create(&pool, "throttle@example.test", None, 15)
+    let first = magic_link::create(&pool, "throttle@example.test", None, 15, None, None)
         .await
         .expect("first create");
-    let second = magic_link::create(&pool, "throttle@example.test", None, 15)
+    let second = magic_link::create(&pool, "throttle@example.test", None, 15, None, None)
         .await
         .expect("second create");
     assert_ne!(first.row.id, second.row.id);
@@ -193,7 +193,7 @@ async fn earliest_in_window_picks_first_row_and_excludes_others() {
     assert_eq!(winner, Some(first.row.id));
 
     // A different email is not throttled.
-    let other = magic_link::create(&pool, "other@example.test", None, 15)
+    let other = magic_link::create(&pool, "other@example.test", None, 15, None, None)
         .await
         .expect("other create");
     let other_winner = magic_link::earliest_in_window(&pool, "other@example.test", 60)
@@ -249,8 +249,8 @@ async fn earliest_in_window_under_concurrent_inserts_picks_one_winner() {
     MIGRATOR.run(&pool).await.unwrap();
 
     let (a, b) = tokio::join!(
-        magic_link::create(&pool, "race@example.test", None, 15),
-        magic_link::create(&pool, "race@example.test", None, 15),
+        magic_link::create(&pool, "race@example.test", None, 15, None, None),
+        magic_link::create(&pool, "race@example.test", None, 15, None, None),
     );
     let a = a.expect("a create");
     let b = b.expect("b create");
@@ -365,6 +365,35 @@ async fn tombstone_lookup_prefers_active_row_over_tombstone() {
             .expect("row");
     assert_eq!(found.0, active_id, "active row must win over tombstone");
     assert!(deleted_at.is_none());
+
+    drop_pg(&name).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn redirect_and_invitation_round_trip_through_create_and_consume() {
+    let Some((db, name)) = fresh_pg().await else {
+        return;
+    };
+    let pool = open_pool(&db).await;
+    MIGRATOR.run(&pool).await.unwrap();
+
+    let created = magic_link::create(
+        &pool,
+        "hop@example.test",
+        None,
+        15,
+        Some("/targets/abc"),
+        None,
+    )
+    .await
+    .expect("create");
+    let row = magic_link::consume(&pool, &created.token)
+        .await
+        .expect("consume")
+        .expect("row");
+    assert_eq!(row.redirect_after.as_deref(), Some("/targets/abc"));
+    assert_eq!(row.invitation_id, None);
 
     drop_pg(&name).await;
 }

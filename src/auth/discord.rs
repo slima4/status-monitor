@@ -59,13 +59,13 @@ pub async fn exchange_code(
     redirect_uri: &str,
     code: &str,
 ) -> Result<IncomingWebhook> {
-    let payload = format!(
-        "grant_type=authorization_code&client_id={cid}&client_secret={cs}&code={code}&redirect_uri={ru}",
-        cid = url_encode(&cfg.client_id),
-        cs = url_encode(cfg.client_secret.expose_secret()),
-        code = url_encode(code),
-        ru = url_encode(redirect_uri),
-    );
+    let payload = crate::auth::url::form_body(&[
+        ("grant_type", "authorization_code"),
+        ("client_id", &cfg.client_id),
+        ("client_secret", cfg.client_secret.expose_secret()),
+        ("code", code),
+        ("redirect_uri", redirect_uri),
+    ]);
     let req = Request::post(DISCORD_TOKEN_URL)
         .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
         .header(ACCEPT, "application/json")

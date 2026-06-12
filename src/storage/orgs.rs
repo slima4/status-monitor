@@ -991,12 +991,9 @@ pub async fn find_user_by_email(pool: &PgPool, email: &str) -> Result<Option<Use
     Ok(row.map(|(u,)| UserId(u)))
 }
 
-/// Tombstone-inclusive variant for re-auth restore paths (magic-link login).
-/// The invitation flow must keep using [`find_user_by_email`] — its
-/// active-only semantics gate membership checks. The email unique index is
-/// partial (active rows only), so an active row and tombstones can coexist:
-/// prefer the active row, then the newest tombstone — never resurrect an old
-/// account over a live one.
+/// Tombstone-inclusive variant for re-auth restore; invitations keep the
+/// active-only [`find_user_by_email`]. The email unique index is partial, so
+/// active + tombstoned rows can coexist — prefer active, then newest.
 pub async fn find_user_by_email_including_deleted(
     pool: &PgPool,
     email: &str,

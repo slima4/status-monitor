@@ -1,7 +1,5 @@
-// Magic-link request form on /login. POSTs the email, swaps the form for the
-// "check your inbox" panel — the response shape is identical for known and
-// unknown addresses (anti-enumeration), so success is the only end state a
-// visitor can observe.
+// Magic-link form on /login. Response shape is identical for known and
+// unknown addresses, so the sent panel is the only observable end state.
 (function () {
     const form = document.getElementById("magic-link-form");
     if (!form) return;
@@ -20,6 +18,8 @@
         const btn = form.querySelector("button[type=submit]");
         btn.disabled = true;
         try {
+            // Email login lands where an OAuth login would.
+            const page = new URLSearchParams(window.location.search);
             const res = await fetch("/auth/magic-link/request", {
                 method: "POST",
                 headers: {
@@ -27,7 +27,11 @@
                     "Accept": "application/json",
                     "X-Requested-With": "uptimepage",
                 },
-                body: JSON.stringify({ email: email.value.trim() }),
+                body: JSON.stringify({
+                    email: email.value.trim(),
+                    redirect_after: page.get("redirect_after") || null,
+                    invitation: page.get("invitation") || null,
+                }),
             });
             if (!res.ok) {
                 const msg = await window.smApiErrorMessage(res, `request failed (${res.status})`);

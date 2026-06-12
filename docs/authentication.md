@@ -22,9 +22,9 @@ for the full model.
   maintenance, …). Memberships carry a role: `Owner`, `Member`.
 - **Invitation.** A pending row in `invitations` carrying an argon2id
   hash of a single-use token sent to a prospective member's email.
-- **Magic-link token.** A single-use, 15-minute, single-token row in
-  `magic_link_tokens`. Disabled by default; gated by
-  `auth.enabled_methods`.
+- **Magic-link token.** A single-use row in `magic_link_tokens`
+  (`auth.magic_link.expiry_minutes`, default 15). Enabled by default;
+  gated by `auth.enabled_methods`.
 
 ## Flows
 
@@ -60,6 +60,9 @@ set, and the user is redirected. Failure modes:
 - Upstream failure → 500, logged with
   `failure_reason = "oauth_upstream_failed"` (rows from before 2026-06
   carry the old `"github_upstream_failed"`).
+- Disabled (`enabled_methods`) or incompletely configured provider →
+  404 `AUTH_METHOD_UNAVAILABLE` on both start and callback; the
+  listed-but-misconfigured case logs a warning.
 
 ### API token auth
 
@@ -114,7 +117,12 @@ Available only when `auth.enabled_methods` contains `"magic_link"`:
    malformed emails — `{"sent": true}`.
 2. `GET /auth/magic-link/verify?token=…` — atomically marks the row
    `used_at = now()`, destroys any pre-login session, mints a new
-   session, and redirects to `/`.
+   session (restoring a soft-deleted account — email ownership is the
+   re-auth proof), and redirects by priority: invitation accept →
+   `/?restored=1` (welcome-back banner) → carried `redirect_after` →
+   `/`. An invalid, used, or expired token renders an HTML "link
+   expired" page with status 410 — one indistinguishable state, no JSON
+   error envelope.
 
 The schema and email template ship in v1 even when the flow is gated, so
 flipping the config doesn't require a migration.

@@ -128,7 +128,9 @@ CREATE TABLE magic_link_tokens (
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
     expires_at   TIMESTAMPTZ NOT NULL,
     used_at      TIMESTAMPTZ,
-    ip_hash      TEXT
+    ip_hash      TEXT,
+    redirect_after TEXT,
+    invitation_id  UUID REFERENCES invitations(id) ON DELETE SET NULL
 );
 CREATE INDEX idx_magic_link_tokens_unused
     ON magic_link_tokens(email)
