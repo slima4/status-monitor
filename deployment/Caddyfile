@@ -130,7 +130,7 @@ app.{$UPTIMEPAGE_DOMAIN} {
 	# Caddy owns the per-IP tier (it sees the real peer; the app keys on
 	# org/user, never the TCP peer). The app-side per-org/user limits live
 	# in the plans table. Distinct zone names — zones are process-global.
-	@auth path /auth/* /api/v1/me /api/v1/orgs/*/invitations/accept
+	@auth path /auth/* /api/v1/me
 	handle @auth {
 		rate_limit {
 			zone auth_endpoints {
@@ -209,6 +209,21 @@ app.{$UPTIMEPAGE_DOMAIN} {
 	handle @verify_channel {
 		rate_limit {
 			zone verify_channel {
+				key {remote_host}
+				events 30
+				window 1m
+			}
+		}
+		import app_upstream
+	}
+
+	# ─── Invitation token surface — anonymous token links ───────────────
+	# The GET landings and their JSON twins argon2-verify the emailed token
+	# (decline is fully anonymous); the per-IP cap bounds brute probing.
+	@invitations path /invitations/* /api/v1/invitations/*
+	handle @invitations {
+		rate_limit {
+			zone invitation_links {
 				key {remote_host}
 				events 30
 				window 1m
