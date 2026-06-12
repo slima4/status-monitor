@@ -399,10 +399,15 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
             "/auth/github/callback",
             get(handlers::auth::github_callback),
         )
+        .route("/auth/google/login", get(handlers::auth::google_login))
+        .route(
+            "/auth/google/callback",
+            get(handlers::auth::google_callback),
+        )
         .route("/auth/logout", post(handlers::auth::logout))
         .route("/auth/logout-all", post(handlers::auth::logout_all));
 
-    if magic_link_enabled(&state.cfg) {
+    if state.cfg.auth.magic_link_enabled() {
         auth_routes = auth_routes
             .route(
                 "/auth/magic-link/request",
@@ -492,14 +497,6 @@ pub fn subdomain_public_routes_enabled(cfg: &crate::config::AppConfig) -> bool {
 /// surface is ever live per deployment.
 pub fn public_routes_active(cfg: &crate::config::AppConfig) -> bool {
     path_based_public_routes_enabled(cfg) || subdomain_public_routes_enabled(cfg)
-}
-
-/// Whether the `auth.enabled_methods` config includes `"magic_link"`. Wires
-/// the request/verify endpoints when true; otherwise the routes are absent
-/// and the surface 404s. The schema/templates exist either way — the
-/// `magic_link_tokens` table simply stays empty.
-pub fn magic_link_enabled(cfg: &crate::config::AppConfig) -> bool {
-    cfg.auth.enabled_methods.iter().any(|m| m == "magic_link")
 }
 
 /// Builds the public, unauthenticated `/api/public/v1/*` router. Lives in its

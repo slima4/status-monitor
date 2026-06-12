@@ -13,6 +13,7 @@ use crate::error::Result;
 #[derive(Debug, Clone, Copy)]
 pub enum LoginMethod {
     GithubOauth,
+    GoogleOauth,
     ApiToken,
     MagicLink,
 }
@@ -21,6 +22,7 @@ impl LoginMethod {
     pub fn as_db_str(self) -> &'static str {
         match self {
             Self::GithubOauth => "github_oauth",
+            Self::GoogleOauth => "google_oauth",
             Self::ApiToken => "api_token",
             Self::MagicLink => "magic_link",
         }

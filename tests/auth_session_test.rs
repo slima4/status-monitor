@@ -11,8 +11,9 @@ mod common;
 
 use chrono::{Duration as ChronoDuration, Utc};
 use uptimepage::auth::{
-    fingerprint, github,
+    OauthProvider, fingerprint,
     login_audit::{self, LoginAttempt, LoginMethod},
+    oauth_login::{self, RemoteIdentity},
     oauth_state, session as session_store,
 };
 use uptimepage::config::SessionConfig;
@@ -105,15 +106,16 @@ async fn upsert_creates_user_and_signup_org_for_new_identity() {
     let pool = open_pool(&db_url).await;
     MIGRATOR.run(&pool).await.expect("migrate");
 
-    let identity = github::GithubIdentity {
+    let identity = RemoteIdentity {
         provider_user_id: "12345".into(),
-        provider_username: "octocat".into(),
-        primary_verified_email: Some("Alice@Example.test".into()),
+        provider_username: Some("octocat".into()),
+        verified_email: Some("Alice@Example.test".into()),
         display_name: Some("Alice".into()),
     };
-    let resolved = github::upsert_identity_and_signup_org(&pool, &identity)
-        .await
-        .expect("upsert");
+    let resolved =
+        oauth_login::upsert_identity_and_signup_org(&pool, OauthProvider::Github, &identity)
+            .await
+            .expect("upsert");
     assert!(resolved.is_new_user);
     assert!(resolved.signup_org_id.is_some());
 
@@ -128,9 +130,10 @@ async fn upsert_creates_user_and_signup_org_for_new_identity() {
     // Idempotent re-callback with same identity must NOT create a second
     // user. Returns is_new_user=false; signup_org_id resolves to the org
     // the first call created.
-    let again = github::upsert_identity_and_signup_org(&pool, &identity)
-        .await
-        .expect("re-upsert");
+    let again =
+        oauth_login::upsert_identity_and_signup_org(&pool, OauthProvider::Github, &identity)
+            .await
+            .expect("re-upsert");
     assert!(!again.is_new_user);
     assert_eq!(again.signup_org_id, resolved.signup_org_id);
     assert_eq!(again.user_id.0, resolved.user_id.0);
@@ -156,15 +159,16 @@ async fn upsert_links_existing_user_on_email_match() {
     .await
     .expect("seed user");
 
-    let identity = github::GithubIdentity {
+    let identity = RemoteIdentity {
         provider_user_id: "99".into(),
-        provider_username: "bob".into(),
-        primary_verified_email: Some("bob@example.test".into()),
+        provider_username: Some("bob".into()),
+        verified_email: Some("bob@example.test".into()),
         display_name: None,
     };
-    let resolved = github::upsert_identity_and_signup_org(&pool, &identity)
-        .await
-        .expect("upsert");
+    let resolved =
+        oauth_login::upsert_identity_and_signup_org(&pool, OauthProvider::Github, &identity)
+            .await
+            .expect("upsert");
     assert!(!resolved.is_new_user);
     // Bob existed with no memberships → signup_org_id is None.
     assert!(resolved.signup_org_id.is_none());
@@ -216,15 +220,16 @@ async fn upsert_restores_soft_deleted_user_on_reauth() {
         .await
         .expect("soft-delete user");
 
-    let identity = github::GithubIdentity {
+    let identity = RemoteIdentity {
         provider_user_id: "777".into(),
-        provider_username: "carol".into(),
-        primary_verified_email: Some("carol@example.test".into()),
+        provider_username: Some("carol".into()),
+        verified_email: Some("carol@example.test".into()),
         display_name: Some("Carol".into()),
     };
-    let resolved = github::upsert_identity_and_signup_org(&pool, &identity)
-        .await
-        .expect("soft-deleted identity is restored on re-auth");
+    let resolved =
+        oauth_login::upsert_identity_and_signup_org(&pool, OauthProvider::Github, &identity)
+            .await
+            .expect("soft-deleted identity is restored on re-auth");
     assert_eq!(resolved.user_id.0, user_id);
     assert!(
         resolved.restored,
@@ -247,6 +252,156 @@ async fn upsert_restores_soft_deleted_user_on_reauth() {
             .await
             .unwrap();
     assert_eq!(user_count, 1, "must not have created a parallel user");
+
+    pool.close().await;
+    drop_pg(&name).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn upsert_links_google_identity_to_github_user_on_same_email() {
+    let Some((db_url, name)) = fresh_pg().await else {
+        return;
+    };
+    let pool = open_pool(&db_url).await;
+    MIGRATOR.run(&pool).await.expect("migrate");
+
+    let github_id = RemoteIdentity {
+        provider_user_id: "555".into(),
+        provider_username: Some("dora".into()),
+        verified_email: Some("Dora@Example.test".into()),
+        display_name: Some("Dora".into()),
+    };
+    let first =
+        oauth_login::upsert_identity_and_signup_org(&pool, OauthProvider::Github, &github_id)
+            .await
+            .expect("github signup");
+    assert!(first.is_new_user);
+
+    // Same verified email arriving via Google must land on the SAME user —
+    // one account, two identity rows.
+    let google_id = RemoteIdentity {
+        provider_user_id: "g-sub-1".into(),
+        provider_username: Some("dora@example.test".into()),
+        verified_email: Some("dora@example.test".into()),
+        display_name: Some("Dora".into()),
+    };
+    let second =
+        oauth_login::upsert_identity_and_signup_org(&pool, OauthProvider::Google, &google_id)
+            .await
+            .expect("google link");
+    assert!(!second.is_new_user);
+    assert_eq!(second.user_id.0, first.user_id.0);
+    assert_eq!(second.signup_org_id, first.signup_org_id);
+
+    let (identities,): (i64,) =
+        sqlx::query_as("SELECT count(*) FROM oauth_identities WHERE user_id = $1")
+            .bind(first.user_id.0)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(identities, 2);
+
+    pool.close().await;
+    drop_pg(&name).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn upsert_restores_tombstoned_user_via_email_match_on_new_provider() {
+    let Some((db_url, name)) = fresh_pg().await else {
+        return;
+    };
+    let pool = open_pool(&db_url).await;
+    MIGRATOR.run(&pool).await.expect("migrate");
+
+    // GitHub signup, then account deletion. A first-ever Google sign-in with
+    // the same verified email must restore this account, not mint a duplicate
+    // user row (the email unique index is partial — active rows only).
+    let github_id = RemoteIdentity {
+        provider_user_id: "888".into(),
+        provider_username: Some("gail".into()),
+        verified_email: Some("gail@example.test".into()),
+        display_name: None,
+    };
+    let first =
+        oauth_login::upsert_identity_and_signup_org(&pool, OauthProvider::Github, &github_id)
+            .await
+            .expect("github signup");
+    sqlx::query("UPDATE users SET deleted_at = now() WHERE id = $1")
+        .bind(first.user_id.0)
+        .execute(&pool)
+        .await
+        .expect("soft-delete");
+
+    let google_id = RemoteIdentity {
+        provider_user_id: "g-sub-3".into(),
+        provider_username: Some("gail@example.test".into()),
+        verified_email: Some("gail@example.test".into()),
+        display_name: None,
+    };
+    let resolved =
+        oauth_login::upsert_identity_and_signup_org(&pool, OauthProvider::Google, &google_id)
+            .await
+            .expect("google email-match restore");
+    assert_eq!(resolved.user_id.0, first.user_id.0);
+    assert!(resolved.restored);
+    assert!(!resolved.is_new_user);
+
+    let (user_count,): (i64,) =
+        sqlx::query_as("SELECT count(*) FROM users WHERE email = $1::citext")
+            .bind("gail@example.test")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(user_count, 1, "no duplicate user row");
+
+    pool.close().await;
+    drop_pg(&name).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn upsert_restores_soft_deleted_user_on_google_reauth() {
+    let Some((db_url, name)) = fresh_pg().await else {
+        return;
+    };
+    let pool = open_pool(&db_url).await;
+    MIGRATOR.run(&pool).await.expect("migrate");
+
+    let (user_id,): (Uuid,) = sqlx::query_as(
+        "INSERT INTO users (email, terms_version, privacy_version) \
+         VALUES ('Erin@Example.test', 'v1', 'v1') RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("seed user");
+    sqlx::query(
+        "INSERT INTO oauth_identities (user_id, provider, provider_user_id, provider_username) \
+         VALUES ($1, 'google', 'g-sub-2', 'erin@example.test')",
+    )
+    .bind(user_id)
+    .execute(&pool)
+    .await
+    .expect("seed identity");
+    sqlx::query("UPDATE users SET deleted_at = now() WHERE id = $1")
+        .bind(user_id)
+        .execute(&pool)
+        .await
+        .expect("soft-delete user");
+
+    let identity = RemoteIdentity {
+        provider_user_id: "g-sub-2".into(),
+        provider_username: Some("erin@example.test".into()),
+        verified_email: Some("erin@example.test".into()),
+        display_name: None,
+    };
+    let resolved =
+        oauth_login::upsert_identity_and_signup_org(&pool, OauthProvider::Google, &identity)
+            .await
+            .expect("google re-auth restores");
+    assert_eq!(resolved.user_id.0, user_id);
+    assert!(resolved.restored);
 
     pool.close().await;
     drop_pg(&name).await;

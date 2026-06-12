@@ -991,6 +991,27 @@ pub async fn find_user_by_email(pool: &PgPool, email: &str) -> Result<Option<Use
     Ok(row.map(|(u,)| UserId(u)))
 }
 
+/// Tombstone-inclusive variant for re-auth restore paths (magic-link login).
+/// The invitation flow must keep using [`find_user_by_email`] — its
+/// active-only semantics gate membership checks. The email unique index is
+/// partial (active rows only), so an active row and tombstones can coexist:
+/// prefer the active row, then the newest tombstone — never resurrect an old
+/// account over a live one.
+pub async fn find_user_by_email_including_deleted(
+    pool: &PgPool,
+    email: &str,
+) -> Result<Option<(UserId, Option<DateTime<Utc>>)>> {
+    let row: Option<(Uuid, Option<DateTime<Utc>>)> = sqlx::query_as(
+        "SELECT id, deleted_at FROM users WHERE email = $1::citext \
+         ORDER BY (deleted_at IS NULL) DESC, created_at DESC LIMIT 1",
+    )
+    .bind(email)
+    .fetch_optional(pool)
+    .await
+    .context("find_user_by_email_including_deleted")?;
+    Ok(row.map(|(u, d)| (UserId(u), d)))
+}
+
 #[derive(Debug, Clone)]
 pub struct OrgWithRole {
     pub org: Organization,

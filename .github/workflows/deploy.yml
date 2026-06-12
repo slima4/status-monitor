@@ -53,6 +53,10 @@ name: deploy
 #     SLACK_OAUTH_CLIENT_SECRET   operator Slack app client secret (sensitive)
 #     DISCORD_OAUTH_CLIENT_ID     operator Discord app client id
 #     DISCORD_OAUTH_CLIENT_SECRET operator Discord app client secret (sensitive)
+#   Google OAuth login (pair all-or-nothing; the redirect URL is managed
+#   manually in the server .env like the GitHub login trio):
+#     GOOGLE_OAUTH_CLIENT_ID      Google Cloud OAuth web client id
+#     GOOGLE_OAUTH_CLIENT_SECRET  Google Cloud OAuth client secret (sensitive)
 #   Operator WhatsApp number (one-tap linking; sextet all-or-nothing,
 #   enable flag separate — sends are operator-paid):
 #     WHATSAPP_APP_ACCESS_TOKEN    Meta Cloud API token (sensitive)
@@ -210,6 +214,9 @@ jobs:
           SLACK_OAUTH_CLIENT_SECRET: ${{ secrets.SLACK_OAUTH_CLIENT_SECRET }}
           DISCORD_OAUTH_CLIENT_ID: ${{ secrets.DISCORD_OAUTH_CLIENT_ID }}
           DISCORD_OAUTH_CLIENT_SECRET: ${{ secrets.DISCORD_OAUTH_CLIENT_SECRET }}
+          # Google OAuth login — presence enables the login button.
+          GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+          GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
           # Operator WhatsApp number — creds via secrets, spend gate via var.
           WHATSAPP_APP_ACCESS_TOKEN: ${{ secrets.WHATSAPP_APP_ACCESS_TOKEN }}
           WHATSAPP_APP_PHONE_NUMBER_ID: ${{ secrets.WHATSAPP_APP_PHONE_NUMBER_ID }}
@@ -259,6 +266,8 @@ jobs:
                SLACK_OAUTH_CLIENT_SECRET='${SLACK_OAUTH_CLIENT_SECRET}' \
                DISCORD_OAUTH_CLIENT_ID='${DISCORD_OAUTH_CLIENT_ID}' \
                DISCORD_OAUTH_CLIENT_SECRET='${DISCORD_OAUTH_CLIENT_SECRET}' \
+               GOOGLE_OAUTH_CLIENT_ID='${GOOGLE_OAUTH_CLIENT_ID}' \
+               GOOGLE_OAUTH_CLIENT_SECRET='${GOOGLE_OAUTH_CLIENT_SECRET}' \
                WHATSAPP_APP_ACCESS_TOKEN='${WHATSAPP_APP_ACCESS_TOKEN}' \
                WHATSAPP_APP_PHONE_NUMBER_ID='${WHATSAPP_APP_PHONE_NUMBER_ID}' \
                WHATSAPP_APP_PUBLIC_NUMBER='${WHATSAPP_APP_PUBLIC_NUMBER}' \
@@ -716,6 +725,43 @@ jobs:
             for pair in \
               "UPTIMEPAGE_DISCORD_OAUTH_CLIENT_ID=$(printenv DISCORD_OAUTH_CLIENT_ID)" \
               "UPTIMEPAGE_DISCORD_OAUTH_CLIENT_SECRET=$(printenv DISCORD_OAUTH_CLIENT_SECRET)"; do
+              n=$(grep -cxF "$pair" .env || true)
+              [ "$n" = 1 ] || { echo "::error::${pair%%=*} not written exactly once to .env (count=${n})"; exit 1; }
+            done
+          fi
+
+          # --- Google OAuth login (optional) ----------------------------------
+          # Same write contract and all-or-nothing rule as the Slack block.
+          # UPTIMEPAGE_AUTH_GOOGLE_REDIRECT_URL stays manually managed in the
+          # server .env, same as the GitHub login trio.
+          if [ -n "${GOOGLE_OAUTH_CLIENT_ID:-}" ]; then
+            if [ -z "${GOOGLE_OAUTH_CLIENT_SECRET:-}" ]; then
+              echo "::error::GOOGLE_OAUTH_CLIENT_ID is set but GOOGLE_OAUTH_CLIENT_SECRET is empty"
+              exit 1
+            fi
+            cp .env ".env.bak.$(date +%s).google"
+            before=$(awk 'END { print NR }' .env)
+            awk '
+              BEGIN {
+                m["UPTIMEPAGE_AUTH_GOOGLE_CLIENT_ID"]     = ENVIRON["GOOGLE_OAUTH_CLIENT_ID"]
+                m["UPTIMEPAGE_AUTH_GOOGLE_CLIENT_SECRET"] = ENVIRON["GOOGLE_OAUTH_CLIENT_SECRET"]
+              }
+              {
+                for (k in m) if ($0 ~ ("^" k "=")) { print k "=" m[k]; seen[k] = 1; next }
+                print
+              }
+              END { for (k in m) if (!seen[k]) print k "=" m[k] }
+            ' .env > .env.next
+            mv .env.next .env
+            after=$(awk 'END { print NR }' .env)
+            # 0..+2: appended only for keys absent before.
+            if [ "$after" -lt "$before" ] || [ "$after" -gt "$((before + 2))" ]; then
+              echo "::error::.env line count out of range after google upsert (${before} -> ${after})"
+              exit 1
+            fi
+            for pair in \
+              "UPTIMEPAGE_AUTH_GOOGLE_CLIENT_ID=$(printenv GOOGLE_OAUTH_CLIENT_ID)" \
+              "UPTIMEPAGE_AUTH_GOOGLE_CLIENT_SECRET=$(printenv GOOGLE_OAUTH_CLIENT_SECRET)"; do
               n=$(grep -cxF "$pair" .env || true)
               [ "$n" = 1 ] || { echo "::error::${pair%%=*} not written exactly once to .env (count=${n})"; exit 1; }
             done

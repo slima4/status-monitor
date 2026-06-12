@@ -28,20 +28,25 @@ for the full model.
 
 ## Flows
 
-### GitHub OAuth sign-in
+### OAuth sign-in (GitHub, Google)
 
-The callback is split into three strict phases:
+Both providers share one callback runner; only the upstream identity
+fetch differs. The callback is split into three strict phases:
 
 1. **Phase A** — `DELETE … RETURNING` consumes the `oauth_states` row in
-   one statement. No GitHub call has happened yet, so the DB connection
-   is released before any HTTP.
-2. **Phase B** — exchange `code` for an access token, fetch `/user` and
-   `/user/emails`. No DB connection is held. Per-call timeouts come from
-   `auth.github.http_connect_timeout_ms` and
-   `auth.github.http_request_timeout_ms`.
+   one statement (provider-bound: a state minted for one provider cannot
+   complete another's callback). No upstream call has happened yet, so
+   the DB connection is released before any HTTP.
+2. **Phase B** — exchange `code` for an access token, then fetch the
+   profile: GitHub `/user` + `/user/emails` (verified primary only),
+   Google OIDC userinfo (email accepted only with `email_verified`).
+   No DB connection is held.
 3. **Phase C** — a fresh transaction materialises the user + identity,
-   auto-creates a signup org if this is a new sign-up, resolves the user's
-   default org (oldest active membership) for the session row, and commits.
+   links a new provider to an existing account on verified-email match
+   (restoring a soft-deleted account if needed), auto-creates a signup
+   org if this is a new sign-up, and commits. The user's default org
+   (oldest active membership) is resolved after commit for the session
+   row.
 
 After commit, the previous session cookie (if any) is destroyed for
 session-fixation defence, a fresh session row is INSERTed, the cookie is
@@ -49,8 +54,12 @@ set, and the user is redirected. Failure modes:
 
 - Invalid or expired state → 400 `INVALID_STATE`, logged to
   `login_attempts`.
-- GitHub upstream failure → 500, logged with
-  `failure_reason = "github_upstream_failed"`.
+- User denied consent / provider sent no code → redirect back to
+  `/login`, logged with `failure_reason = "oauth_denied"` (or
+  `"missing_code"`).
+- Upstream failure → 500, logged with
+  `failure_reason = "oauth_upstream_failed"` (rows from before 2026-06
+  carry the old `"github_upstream_failed"`).
 
 ### API token auth
 

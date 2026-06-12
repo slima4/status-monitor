@@ -15,6 +15,7 @@
 //!   destroys any pre-login session bound to the browser (fixation defence),
 //!   mints a fresh session cookie, and redirects to `/`.
 
+use anyhow::Context;
 use axum::Json;
 use axum::extract::{Query, State};
 use axum::http::HeaderMap;
@@ -60,9 +61,10 @@ pub async fn request(
     if let Some(email) = email_norm::normalize(&body.email) {
         let cfg = &state.cfg.auth.magic_link;
         // Always insert a row — including for emails with no user — so an
-        // attacker cannot distinguish known vs unknown emails by timing. The
-        // row simply never redeems because no user matches at /verify time.
-        // Expires in 15 minutes (default); cleanup task drops the residue.
+        // attacker cannot distinguish known vs unknown emails by timing. A
+        // no-user row never redeems at /verify (a soft-deleted user's row
+        // redeems and restores — email ownership was just proven). Expires
+        // in 15 minutes (default); cleanup task drops the residue.
         let created =
             magic_link::create(pool, email, ip_hash.as_deref(), cfg.expiry_minutes).await?;
         let verify_url = token_link(
@@ -165,16 +167,16 @@ pub async fn verify(
         return Err(magic_link::invalid_token_error());
     };
 
-    // NB: `find_user_by_email` filters `deleted_at IS NULL`, so a soft-deleted
-    // user can NOT restore via magic-link — re-auth restore is GitHub-OAuth only
-    // (see `github::upsert_identity_and_signup_org`). Magic-link is off by
-    // default; if it's ever enabled, add the same un-delete-on-reauth here.
-    let Some(user_id) = orgs_store::find_user_by_email(pool, &row.email).await? else {
-        // Token was consumed (marked used) but no user owns the email — either
-        // the email never matched a user (anti-enum INSERT for an unknown
-        // address) or the user was deleted between request and verify. The
-        // token is burnt; surface the opaque error so a deleted-account probe
-        // can't tell the difference from an invalid token.
+    // Tombstone-inclusive lookup: a verified magic link proves email
+    // ownership, so re-auth restores a soft-deleted account here exactly like
+    // the OAuth callbacks do (`oauth_login::upsert_identity_and_signup_org`).
+    let Some((user_id, deleted_at)) =
+        orgs_store::find_user_by_email_including_deleted(pool, &row.email).await?
+    else {
+        // Token was consumed (marked used) but no user owns the email — the
+        // anti-enum INSERT for an unknown address. The token is burnt;
+        // surface the opaque error so an account probe can't tell the
+        // difference from an invalid token.
         login_audit::record_failure_anon(
             pool,
             LoginMethod::MagicLink,
@@ -185,6 +187,12 @@ pub async fn verify(
         .await;
         return Err(magic_link::invalid_token_error());
     };
+    if deleted_at.is_some() {
+        let mut tx = pool.begin().await.context("magic-link restore: begin tx")?;
+        crate::auth::account::undelete_in_tx(&mut tx, user_id).await?;
+        tx.commit().await.context("magic-link restore: commit")?;
+        tracing::info!(user_id = %user_id.0, "magic-link re-auth restored a soft-deleted account");
+    }
 
     let cookie_name = state.cfg.auth.session.cookie_name.as_str();
     if let Some(prev) = cookies.get(cookie_name).map(|c| c.value().to_string())

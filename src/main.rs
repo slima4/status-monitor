@@ -476,12 +476,8 @@ async fn main() -> Result<()> {
     // Magic-link sweep only runs when the method is wired into the router.
     // When disabled the routes 404, no rows are ever inserted, and the ticker
     // would be dead weight.
-    let magic_link_cleanup_handle: Option<JoinHandle<()>> = cfg
-        .auth
-        .enabled_methods
-        .iter()
-        .any(|m| m == "magic_link")
-        .then(|| {
+    let magic_link_cleanup_handle: Option<JoinHandle<()>> =
+        cfg.auth.magic_link_enabled().then(|| {
             tokio::spawn(run_purge_loop(
                 pg_pool_for_stores.clone(),
                 root.clone(),

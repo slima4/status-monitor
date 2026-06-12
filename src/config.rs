@@ -447,7 +447,8 @@ pub struct AuthConfig {
     /// `http://localhost:8080`.
     pub public_base_url: String,
     pub session: SessionConfig,
-    pub github: GithubOauthConfig,
+    pub github: OauthClientConfig,
+    pub google: OauthClientConfig,
     pub invitations: InvitationsConfig,
     pub api_tokens: ApiTokensConfig,
     pub magic_link: MagicLinkConfig,
@@ -456,15 +457,27 @@ pub struct AuthConfig {
 impl Default for AuthConfig {
     fn default() -> Self {
         Self {
-            enabled_methods: vec!["github_oauth".into()],
+            enabled_methods: vec!["github_oauth".into(), "magic_link".into()],
             fingerprint_salt: String::new(),
             public_base_url: "http://localhost:8080".into(),
             session: SessionConfig::default(),
-            github: GithubOauthConfig::default(),
+            // Scopes deliberately left empty: config/default.toml carries the
+            // shipped lists, and each provider module falls back to its own
+            // DEFAULT_SCOPES — a third copy here would just drift.
+            github: OauthClientConfig::default(),
+            google: OauthClientConfig::default(),
             invitations: InvitationsConfig::default(),
             api_tokens: ApiTokensConfig::default(),
             magic_link: MagicLinkConfig::default(),
         }
+    }
+}
+
+impl AuthConfig {
+    /// Single predicate for the magic-link surface — route mounting, the
+    /// login-page form, and the token-purge ticker must agree.
+    pub fn magic_link_enabled(&self) -> bool {
+        self.enabled_methods.iter().any(|m| m == "magic_link")
     }
 }
 
@@ -492,28 +505,38 @@ impl Default for SessionConfig {
     }
 }
 
+/// One OAuth login provider's client credentials. A partially-written TOML
+/// section resets `scopes` to `[]` via the nested `#[serde(default)]`; each
+/// provider module falls back to its own default scopes for that case.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
-pub struct GithubOauthConfig {
+pub struct OauthClientConfig {
     pub client_id: String,
     #[serde(default = "empty_secret", with = "secret_str")]
     pub client_secret: SecretString,
     pub redirect_url: String,
     pub scopes: Vec<String>,
-    pub http_connect_timeout_ms: u64,
-    pub http_request_timeout_ms: u64,
 }
 
-impl Default for GithubOauthConfig {
+impl Default for OauthClientConfig {
     fn default() -> Self {
         Self {
             client_id: String::new(),
             client_secret: empty_secret(),
             redirect_url: String::new(),
-            scopes: vec!["user:email".into(), "read:user".into()],
-            http_connect_timeout_ms: 5000,
-            http_request_timeout_ms: 10000,
+            scopes: Vec::new(),
         }
+    }
+}
+
+impl OauthClientConfig {
+    /// Login button / handler guard: the dance needs all three — Google
+    /// hard-rejects an authorize redirect with an empty redirect_uri, so a
+    /// creds-only check would render a button into a guaranteed 400.
+    pub fn is_configured(&self) -> bool {
+        !self.client_id.is_empty()
+            && !self.client_secret.expose_secret().is_empty()
+            && !self.redirect_url.is_empty()
     }
 }
 

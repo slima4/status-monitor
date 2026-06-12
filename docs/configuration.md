@@ -39,7 +39,8 @@ Override `UPTIMEPAGE_CONFIG_PATH` to point at an alternate base config file.
 | `public_status` | `base_domain`, `cache_max_orgs`, `cache_ttl_secs`, `last_good_ttl_secs`, `logo_dir`, `max_logo_size_bytes`, `allowed_logo_mime_types`, `max_logo_dimension_px`, `default_brand_color`, `default_show_powered_by`, `public_per_ip_rate_limit_per_min` | Per-org public status pages at `{slug}.{base_domain}`. See [Public status page](#public-status-page) below and [Per-org status pages](per-org-status.md) |
 | `auth` | `enabled_methods`, `fingerprint_salt`, `public_base_url` | Sign-in methods, HMAC salt for IP/UA hashes, base URL embedded in invitation + magic-link emails. See [Auth configuration](#auth-configuration) below |
 | `auth.session` | `idle_timeout_days`, `absolute_timeout_days`, `cookie_name`, `cookie_secure`, `cookie_domain`, `renew_on_use` | Session cookie shape + lifetime. `cookie_secure = true` in production |
-| `auth.github` | `client_id`, `client_secret`, `redirect_url`, `scopes`, `http_connect_timeout_ms`, `http_request_timeout_ms` | GitHub OAuth client. Empty client_id disables the GitHub button on `/login` |
+| `auth.github` | `client_id`, `client_secret`, `redirect_url`, `scopes` | GitHub OAuth client. The button renders on `/login` only when client_id, client_secret, and redirect_url are all set |
+| `auth.google` | `client_id`, `client_secret`, `redirect_url`, `scopes` | Google OAuth client, same gating as `auth.github`. Email is trusted only with Google's `email_verified` attestation |
 | `auth.api_tokens` | `max_per_user`, `prefix_visible_chars` | Cap per user, indexed prefix length for token lookup |
 | `auth.invitations` | `expiry_hours`, `max_pending_per_org` | Invitation lifetime and per-org pending cap |
 | `auth.magic_link` | `expiry_minutes`, `rate_limit_seconds` | Magic-link token lifetime. Routes only mount when `enabled_methods` includes `"magic_link"` |
@@ -95,8 +96,12 @@ client_id = ""                       # from https://github.com/settings/develope
 client_secret = ""
 redirect_url = "https://status.example.test/auth/github/callback"
 scopes = ["user:email", "read:user"]
-http_connect_timeout_ms = 5000
-http_request_timeout_ms = 10000
+
+[auth.google]
+client_id = ""                       # Google Cloud Console OAuth web client
+client_secret = ""
+redirect_url = "https://status.example.test/auth/google/callback"
+scopes = ["openid", "email", "profile"]
 
 [auth.invitations]
 expiry_hours = 168                   # 7 days

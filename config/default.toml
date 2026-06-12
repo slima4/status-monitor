@@ -203,9 +203,10 @@ from_address = "no-reply@example.invalid"
 api_key = ""
 
 [auth]
-# Currently shipped sign-in methods. Add "magic_link" to enable magic-link
-# email login once the request/verify endpoints are wired.
-enabled_methods = ["github_oauth"]
+# Gates the magic-link request/verify routes + purge ticker only. OAuth
+# providers ignore this list — github/google are live iff their client
+# credentials + redirect_url are set below.
+enabled_methods = ["github_oauth", "magic_link"]
 # Salt for hashing IPs / user-agents in login_attempts + sessions.
 # GENERATE WITH: openssl rand -base64 32
 # LOAD-BEARING: rotating this re-fragments anomaly-detection windows. The
@@ -226,8 +227,12 @@ client_id = ""
 client_secret = ""
 redirect_url = ""
 scopes = ["user:email", "read:user"]
-http_connect_timeout_ms = 5000
-http_request_timeout_ms = 10000
+
+[auth.google]
+client_id = ""
+client_secret = ""
+redirect_url = ""
+scopes = ["openid", "email", "profile"]
 
 [auth.invitations]
 expiry_hours = 168

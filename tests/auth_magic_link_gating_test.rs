@@ -12,7 +12,9 @@ use tower::ServiceExt;
 
 #[tokio::test]
 async fn magic_link_request_is_404_when_disabled() {
-    let app = build_test_app(|_| {});
+    let app = build_test_app(|cfg| {
+        cfg.auth.enabled_methods = vec!["github_oauth".into()];
+    });
     let resp = app
         .oneshot(
             Request::builder()
@@ -30,7 +32,9 @@ async fn magic_link_request_is_404_when_disabled() {
 
 #[tokio::test]
 async fn magic_link_verify_is_404_when_disabled() {
-    let app = build_test_app(|_| {});
+    let app = build_test_app(|cfg| {
+        cfg.auth.enabled_methods = vec!["github_oauth".into()];
+    });
     let resp = app
         .oneshot(
             Request::builder()
@@ -70,4 +74,21 @@ async fn magic_link_request_is_mounted_when_enabled() {
         StatusCode::NOT_FOUND,
         "route must be mounted when magic_link is enabled"
     );
+}
+
+#[tokio::test]
+async fn magic_link_is_mounted_by_default() {
+    // Default config ships magic_link in enabled_methods.
+    let app = build_test_app(|_| {});
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/auth/magic-link/verify?token=anything")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_ne!(resp.status(), StatusCode::NOT_FOUND);
 }

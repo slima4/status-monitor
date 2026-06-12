@@ -8,6 +8,7 @@
 mod common;
 
 use uptimepage::auth::magic_link;
+use uptimepage::storage::orgs as orgs_store;
 use uuid::Uuid;
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations/postgres");
@@ -270,6 +271,100 @@ async fn earliest_in_window_under_concurrent_inserts_picks_one_winner() {
         .expect("earliest again")
         .expect("still a winner");
     assert_eq!(winner, again, "winner must be stable across reads");
+
+    drop_pg(&name).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn tombstone_lookup_and_undelete_restore_for_magic_link_verify() {
+    let Some((db, name)) = fresh_pg().await else {
+        return;
+    };
+    let pool = open_pool(&db).await;
+    MIGRATOR.run(&pool).await.unwrap();
+
+    let (user_id,): (Uuid,) = sqlx::query_as(
+        "INSERT INTO users (email, terms_version, privacy_version) \
+         VALUES ('Frank@Example.test', 'v1', 'v1') RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("seed user");
+    sqlx::query("UPDATE users SET deleted_at = now() WHERE id = $1")
+        .bind(user_id)
+        .execute(&pool)
+        .await
+        .expect("soft-delete");
+
+    // Invitation semantics stay active-only: tombstoned user is invisible.
+    assert!(
+        orgs_store::find_user_by_email(&pool, "frank@example.test")
+            .await
+            .expect("active lookup")
+            .is_none()
+    );
+
+    // The verify path's lookup sees the tombstone and restores it.
+    let (found, deleted_at) =
+        orgs_store::find_user_by_email_including_deleted(&pool, "frank@example.test")
+            .await
+            .expect("tombstone lookup")
+            .expect("row");
+    assert_eq!(found.0, user_id);
+    assert!(deleted_at.is_some());
+
+    let mut tx = pool.begin().await.unwrap();
+    uptimepage::auth::account::undelete_in_tx(&mut tx, found)
+        .await
+        .expect("undelete");
+    tx.commit().await.unwrap();
+
+    assert_eq!(
+        orgs_store::find_user_by_email(&pool, "frank@example.test")
+            .await
+            .expect("post-restore lookup")
+            .map(|u| u.0),
+        Some(user_id)
+    );
+
+    drop_pg(&name).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn tombstone_lookup_prefers_active_row_over_tombstone() {
+    let Some((db, name)) = fresh_pg().await else {
+        return;
+    };
+    let pool = open_pool(&db).await;
+    MIGRATOR.run(&pool).await.unwrap();
+
+    // Same email twice: a tombstoned row (older) and an active row — the
+    // partial unique index permits this pair. The lookup must never pick
+    // the tombstone when an active account exists.
+    sqlx::query(
+        "INSERT INTO users (email, terms_version, privacy_version, deleted_at, created_at) \
+         VALUES ('Gus@Example.test', 'v1', 'v1', now(), now() - INTERVAL '1 day')",
+    )
+    .execute(&pool)
+    .await
+    .expect("seed tombstone");
+    let (active_id,): (Uuid,) = sqlx::query_as(
+        "INSERT INTO users (email, terms_version, privacy_version) \
+         VALUES ('gus@example.test', 'v1', 'v1') RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("seed active");
+
+    let (found, deleted_at) =
+        orgs_store::find_user_by_email_including_deleted(&pool, "gus@example.test")
+            .await
+            .expect("lookup")
+            .expect("row");
+    assert_eq!(found.0, active_id, "active row must win over tombstone");
+    assert!(deleted_at.is_none());
 
     drop_pg(&name).await;
 }

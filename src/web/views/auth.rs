@@ -17,11 +17,10 @@ use askama::Template;
 use askama_web::WebTemplate;
 use axum::extract::{Query, State};
 use axum::response::{IntoResponse, Redirect, Response};
-use secrecy::ExposeSecret;
 use serde::Deserialize;
 
 use crate::app::AppState;
-use crate::auth::url::{safe_redirect_target, url_encode};
+use crate::auth::url::safe_redirect_target;
 use crate::error::AppError;
 use crate::storage::orgs::get_org;
 use crate::storage::users as users_store;
@@ -49,16 +48,29 @@ pub struct LoginPage {
     pub active_tab: &'static str,
     pub github_enabled: bool,
     pub github_url: String,
+    pub google_enabled: bool,
+    pub google_url: String,
+    pub magic_link_enabled: bool,
     pub invitation_hint: Option<String>,
     /// Cached, timeout-bounded `target_store.ping()` — same dependency check
     /// as `/readyz`, non-sensitive (no tenant scope). See [`login_ready`].
     pub ready: bool,
 }
 
-pub async fn login(State(state): State<AppState>, Query(q): Query<LoginQuery>) -> LoginPage {
-    let cfg = &state.cfg.auth.github;
-    let github_enabled = !cfg.client_id.is_empty() && !cfg.client_secret.expose_secret().is_empty();
+/// Start-URL with the carried-through login params (redirect_after, invitation).
+fn login_url(base: &str, params: &[(&str, String)]) -> String {
+    let mut qs = String::new();
+    for (k, v) in params {
+        crate::auth::url::push_param(&mut qs, k, v);
+    }
+    if qs.is_empty() {
+        base.to_string()
+    } else {
+        format!("{base}?{qs}")
+    }
+}
 
+pub async fn login(State(state): State<AppState>, Query(q): Query<LoginQuery>) -> LoginPage {
     let mut params: Vec<(&str, String)> = Vec::new();
     if let Some(r) = q.redirect_after.as_deref().and_then(safe_redirect_target) {
         params.push(("redirect_after", r.to_string()));
@@ -66,21 +78,16 @@ pub async fn login(State(state): State<AppState>, Query(q): Query<LoginQuery>) -
     if let Some(inv) = q.invitation.as_deref() {
         params.push(("invitation", inv.to_string()));
     }
-    let github_url = if params.is_empty() {
-        "/auth/github/login".to_string()
-    } else {
-        let qs: String = params
-            .iter()
-            .map(|(k, v)| format!("{k}={}", url_encode(v)))
-            .collect::<Vec<_>>()
-            .join("&");
-        format!("/auth/github/login?{qs}")
-    };
 
     LoginPage {
         active_tab: TAB_LOGIN,
-        github_enabled,
-        github_url,
+        github_enabled: state.cfg.auth.github.is_configured(),
+        github_url: login_url("/auth/github/login", &params),
+        google_enabled: state.cfg.auth.google.is_configured(),
+        google_url: login_url("/auth/google/login", &params),
+        // DB-gated too: without Postgres the request handler can only 500,
+        // so a self-host/in-mem deployment must not render the form.
+        magic_link_enabled: state.cfg.auth.magic_link_enabled() && state.db.is_some(),
         invitation_hint: q.invitation,
         ready: login_ready(&state).await,
     }
@@ -790,51 +797,62 @@ pub mod settings {
 mod tests {
     use super::*;
 
-    #[test]
-    fn login_page_renders_github_button_when_enabled() {
-        let html = LoginPage {
+    fn login_page(github: bool, google: bool, magic: bool) -> LoginPage {
+        LoginPage {
             active_tab: TAB_LOGIN,
-            github_enabled: true,
+            github_enabled: github,
             github_url: "/auth/github/login".into(),
+            google_enabled: google,
+            google_url: "/auth/google/login".into(),
+            magic_link_enabled: magic,
             invitation_hint: None,
             ready: true,
         }
-        .render()
-        .unwrap();
+    }
+
+    #[test]
+    fn login_page_renders_all_methods_when_enabled() {
+        let html = login_page(true, true, true).render().unwrap();
         assert!(html.contains("continue with github"));
         assert!(html.contains(r#"href="/auth/github/login""#));
-        assert!(!html.contains("not configured"));
+        assert!(html.contains("continue with google"));
+        assert!(html.contains(r#"href="/auth/google/login""#));
+        assert!(html.contains(r#"id="magic-link-form""#));
+        assert!(html.contains("login_magic_link.js"));
+        assert!(!html.contains("No sign-in method is configured"));
         // Login page suppresses the user-area nav so a not-yet-authenticated
         // visitor doesn't see broken "Settings"/"Log out" controls.
         assert!(!html.contains("Log out"));
     }
 
     #[test]
-    fn login_page_shows_warning_when_oauth_not_configured() {
-        let html = LoginPage {
-            active_tab: TAB_LOGIN,
-            github_enabled: false,
-            github_url: "/auth/github/login".into(),
-            invitation_hint: None,
-            ready: true,
-        }
-        .render()
-        .unwrap();
-        assert!(html.contains("not configured"));
+    fn login_page_hides_disabled_methods() {
+        let html = login_page(true, false, false).render().unwrap();
+        assert!(html.contains("continue with github"));
+        assert!(!html.contains("continue with google"));
+        assert!(!html.contains(r#"id="magic-link-form""#));
+    }
+
+    #[test]
+    fn login_page_warns_only_when_no_method_available() {
+        let html = login_page(false, false, false).render().unwrap();
+        assert!(html.contains("No sign-in method is configured"));
         assert!(!html.contains("continue with github"));
+        assert!(!html.contains("continue with google"));
+
+        let html = login_page(false, false, true).render().unwrap();
+        assert!(!html.contains("No sign-in method is configured"));
+        assert!(html.contains(r#"id="magic-link-form""#));
+        // No oauth button → no "or" divider above the form.
+        assert!(!html.contains(">or<"));
     }
 
     #[test]
     fn login_page_shows_invitation_hint() {
-        let html = LoginPage {
-            active_tab: TAB_LOGIN,
-            github_enabled: true,
-            github_url: "/auth/github/login?invitation=abc".into(),
-            invitation_hint: Some("abc".into()),
-            ready: true,
-        }
-        .render()
-        .unwrap();
+        let mut page = login_page(true, false, false);
+        page.github_url = "/auth/github/login?invitation=abc".into();
+        page.invitation_hint = Some("abc".into());
+        let html = page.render().unwrap();
         assert!(html.contains("After signing in"));
         assert!(html.contains("abc"));
     }

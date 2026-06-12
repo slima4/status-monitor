@@ -1,27 +1,27 @@
-//! `/auth/*` endpoints: GitHub OAuth login + callback, logout.
+//! `/auth/*` endpoints: GitHub/Google OAuth login + callback, logout.
 //!
-//! The callback follows a strict three-phase rule — no DB transaction held
-//! across GitHub HTTP calls. New users get a signup org auto-created in the
-//! same Phase C transaction that links their identity; the resolved default
-//! org id is stamped onto the new session row so the next request lands on
-//! a real org.
+//! Both providers share one start/finish runner; only Phase B (the upstream
+//! identity fetch) dispatches per provider. The callback follows a strict
+//! three-phase rule — no DB transaction held across upstream HTTP calls. New
+//! users get a signup org auto-created in the same Phase C transaction that
+//! links their identity; the resolved default org id is stamped onto the new
+//! session row so the next request lands on a real org.
 
 use axum::extract::{Query, State};
 use axum::http::HeaderMap;
 use axum::http::header::USER_AGENT;
 use axum::response::{IntoResponse, Redirect};
-use secrecy::ExposeSecret;
 use serde::Deserialize;
 use tower_cookies::Cookies;
 
-use crate::api::error::codes;
 use crate::app::AppState;
 use crate::auth::{
-    fingerprint, github,
+    OauthProvider, fingerprint, github, google,
     login_audit::{self, LoginAttempt, LoginMethod},
-    oauth_state, session as session_store,
+    oauth_login, oauth_state, session as session_store,
     url::safe_redirect_target,
 };
+use crate::config::OauthClientConfig;
 use crate::error::{AppError, Result};
 use crate::web::CurrentUser;
 
@@ -31,19 +31,37 @@ pub struct LoginQuery {
     pub invitation: Option<String>,
 }
 
-pub async fn github_login(
+/// Per-provider plumbing the shared runners dispatch on.
+fn provider_parts(state: &AppState, provider: OauthProvider) -> (&OauthClientConfig, LoginMethod) {
+    match provider {
+        OauthProvider::Github => (&state.cfg.auth.github, LoginMethod::GithubOauth),
+        OauthProvider::Google => (&state.cfg.auth.google, LoginMethod::GoogleOauth),
+    }
+}
+
+pub async fn github_login(state: State<AppState>, q: Query<LoginQuery>) -> Result<Redirect> {
+    start_login(state, q, OauthProvider::Github).await
+}
+
+pub async fn google_login(state: State<AppState>, q: Query<LoginQuery>) -> Result<Redirect> {
+    start_login(state, q, OauthProvider::Google).await
+}
+
+async fn start_login(
     State(state): State<AppState>,
     Query(q): Query<LoginQuery>,
+    provider: OauthProvider,
 ) -> Result<Redirect> {
     let pool = state.db.as_ref().ok_or_else(|| {
         AppError::Other(anyhow::anyhow!(
-            "github_login: no Postgres pool — auth requires tenancy mode"
+            "oauth login: no Postgres pool — auth requires tenancy mode"
         ))
     })?;
-    let cfg = &state.cfg.auth.github;
-    if cfg.client_id.is_empty() || cfg.client_secret.expose_secret().is_empty() {
+    let (cfg, _) = provider_parts(&state, provider);
+    if !cfg.is_configured() {
         return Err(AppError::Other(anyhow::anyhow!(
-            "github_login: auth.github.client_id/client_secret not configured"
+            "oauth login: auth.{provider}.client_id/client_secret not configured",
+            provider = provider.as_db_str()
         )));
     }
     // Only same-origin paths survive: anything else gets dropped to None so
@@ -68,34 +86,62 @@ pub async fn github_login(
     oauth_state::insert(
         pool,
         &s,
-        crate::auth::OauthProvider::Github.as_db_str(),
+        provider.as_db_str(),
         redirect_after,
         invitation_id,
         None,
         None,
     )
     .await?;
-    let url = github::authorize_url(cfg, &s);
+    let url = match provider {
+        OauthProvider::Github => github::authorize_url(cfg, &s),
+        OauthProvider::Google => google::authorize_url(cfg, &s),
+    };
     Ok(Redirect::to(&url))
 }
 
 #[derive(Debug, Deserialize)]
 pub struct CallbackQuery {
-    pub code: String,
+    /// Absent when the user denies consent — the provider sends `error=`
+    /// instead (Google's cancel button makes this a routine path).
+    pub code: Option<String>,
     pub state: String,
+    pub error: Option<String>,
 }
 
 pub async fn github_callback(
+    state: State<AppState>,
+    q: Query<CallbackQuery>,
+    ip: crate::web::client_ip::ClientIp,
+    headers: HeaderMap,
+    cookies: Cookies,
+) -> Result<axum::response::Response> {
+    finish_login(state, q, ip, headers, cookies, OauthProvider::Github).await
+}
+
+pub async fn google_callback(
+    state: State<AppState>,
+    q: Query<CallbackQuery>,
+    ip: crate::web::client_ip::ClientIp,
+    headers: HeaderMap,
+    cookies: Cookies,
+) -> Result<axum::response::Response> {
+    finish_login(state, q, ip, headers, cookies, OauthProvider::Google).await
+}
+
+async fn finish_login(
     State(state): State<AppState>,
     Query(q): Query<CallbackQuery>,
     crate::web::client_ip::ClientIp(client_ip): crate::web::client_ip::ClientIp,
     headers: HeaderMap,
     cookies: Cookies,
+    provider: OauthProvider,
 ) -> Result<axum::response::Response> {
     let pool = state
         .db
         .as_ref()
-        .ok_or_else(|| AppError::Other(anyhow::anyhow!("github_callback: no Postgres pool")))?;
+        .ok_or_else(|| AppError::Other(anyhow::anyhow!("oauth callback: no Postgres pool")))?;
+    let (cfg, method) = provider_parts(&state, provider);
     let salt = state.cfg.auth.fingerprint_salt.as_str();
     let ip_hash = fingerprint::hash_fingerprint(salt, &client_ip.to_string());
     let ua_value = headers
@@ -107,11 +153,11 @@ pub async fn github_callback(
     // Phase A: consume state. Single-use; expired, unknown, or minted for a
     // different dance (e.g. a connect-purpose provider) → 400.
     let consumed = match oauth_state::consume(pool, &q.state).await? {
-        Some(c) if c.provider == crate::auth::OauthProvider::Github.as_db_str() => c,
+        Some(c) if c.provider == provider.as_db_str() => c,
         _ => {
             login_audit::record_failure_anon(
                 pool,
-                LoginMethod::GithubOauth,
+                method,
                 ip_hash.as_deref(),
                 ua_hash.as_deref(),
                 "invalid_state",
@@ -124,33 +170,55 @@ pub async fn github_callback(
         }
     };
 
-    // Phase B: GitHub HTTP. NO DB connection held here.
-    let identity =
-        match github::fetch_identity(&state.outbound_http, &state.cfg.auth.github, &q.code).await {
-            Ok(id) => id,
-            Err(err) => {
-                tracing::warn!(error = %err, "github_callback: phase B failed");
-                login_audit::record_failure_anon(
-                    pool,
-                    LoginMethod::GithubOauth,
-                    ip_hash.as_deref(),
-                    ua_hash.as_deref(),
-                    "github_upstream_failed",
-                )
-                .await;
-                return Err(AppError::Other(anyhow::anyhow!(
-                    "github_callback: phase B: {err}"
-                )));
-            }
+    // Denied consent / provider error: the state is already burnt above, so
+    // the dance can't be resumed — send the user back to /login quietly.
+    let Some(code) = q.code.as_deref().filter(|c| !c.is_empty()) else {
+        let reason = if q.error.is_some() {
+            "oauth_denied"
+        } else {
+            "missing_code"
         };
+        login_audit::record_failure_anon(
+            pool,
+            method,
+            ip_hash.as_deref(),
+            ua_hash.as_deref(),
+            reason,
+        )
+        .await;
+        return Ok(Redirect::to("/login").into_response());
+    };
+
+    // Phase B: upstream HTTP. NO DB connection held here.
+    let fetched = match provider {
+        OauthProvider::Github => github::fetch_identity(&state.outbound_http, cfg, code).await,
+        OauthProvider::Google => google::fetch_identity(&state.outbound_http, cfg, code).await,
+    };
+    let identity = match fetched {
+        Ok(id) => id,
+        Err(err) => {
+            tracing::warn!(error = %err, provider = provider.as_db_str(), "oauth callback: phase B failed");
+            login_audit::record_failure_anon(
+                pool,
+                method,
+                ip_hash.as_deref(),
+                ua_hash.as_deref(),
+                "oauth_upstream_failed",
+            )
+            .await;
+            return Err(AppError::Other(anyhow::anyhow!(
+                "oauth callback: phase B: {err}"
+            )));
+        }
+    };
 
     // Phase C: materialise user + identity, auto-create signup org for new
     // users, and resolve their default-org id for the session row. Fresh
     // transaction; no upstream calls.
-    let resolved = github::upsert_identity_and_signup_org(pool, &identity)
+    let resolved = oauth_login::upsert_identity_and_signup_org(pool, provider, &identity)
         .await
         .map_err(|e| {
-            tracing::warn!(error = %e, "github_callback: phase C failed");
+            tracing::warn!(error = %e, provider = provider.as_db_str(), "oauth callback: phase C failed");
             e
         })?;
     if resolved.restored {
@@ -181,7 +249,7 @@ pub async fn github_callback(
     // Audit post-commit: a failure here logs but the session is already valid.
     if let Err(err) = login_audit::record(
         pool,
-        LoginMethod::GithubOauth,
+        method,
         LoginAttempt {
             user_id: Some(resolved.user_id),
             success: true,
@@ -252,9 +320,3 @@ pub async fn logout_all(
     cookies.add(session_store::clear_cookie(&state.cfg.auth.session));
     Ok(Redirect::to("/login").into_response())
 }
-
-// Silence dead-code on the imported error codes for the placeholder
-// callbacks above — they reference the same `codes` module other handlers use
-// for stable error codes.
-#[allow(dead_code)]
-const _: &str = codes::UNAUTHORIZED;
