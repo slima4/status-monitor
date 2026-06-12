@@ -26,7 +26,7 @@ We consider the following abusive use of the uptimepage service:
 
 ## How to Report
 
-Email **slima4.u8@gmail.com** with subject line `[ABUSE]` and include:
+Email **hello@uptimepage.dev** with subject line `[ABUSE]` and include:
 
 1. The URL of the offending content or organisation slug
 2. The nature of the abuse (categories above)
@@ -69,7 +69,7 @@ to the notification email. Appeals are reviewed within 14 days.
 If you believe an organisation slug or public name infringes your
 trademark:
 
-1. Email slima4.u8@gmail.com with subject `[TRADEMARK]`
+1. Email hello@uptimepage.dev with subject `[TRADEMARK]`
 2. Include proof of trademark registration (registration number, country)
 3. Identify the offending slug or organisation
 4. State your relationship to the trademark holder
@@ -87,4 +87,4 @@ the reporter to the reported account holder unless legally required.
 
 ## Contact
 
-slima4.u8@gmail.com
+hello@uptimepage.dev

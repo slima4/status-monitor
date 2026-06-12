@@ -32,7 +32,7 @@ The Service is not intended for use by minors under 16.
 You sign in via GitHub OAuth (and other methods we may add). You are
 responsible for maintaining the security of your authentication provider
 and any API tokens you create within the Service. Notify us at
-slima4.u8@gmail.com immediately if you suspect a compromise.
+security@uptimepage.dev immediately if you suspect a compromise.
 
 ## 5. Acceptable Use
 
@@ -129,7 +129,7 @@ these Terms, after notice where reasonable.
 These Terms are governed by the laws of Germany, without regard to
 conflict-of-laws principles.
 
-We prefer to resolve disputes informally. Email slima4.u8@gmail.com first;
+We prefer to resolve disputes informally. Email hello@uptimepage.dev first;
 we will respond within 30 days. If we cannot resolve a dispute that way,
 exclusive jurisdiction lies with the courts of Germany.
 
@@ -143,4 +143,4 @@ days in advance via the email address on your account.
 
 ## 15. Contact
 
-For questions about these Terms: slima4.u8@gmail.com.
+For questions about these Terms: hello@uptimepage.dev.

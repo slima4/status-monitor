@@ -84,4 +84,4 @@ Please discuss before working on:
 
 ## Questions?
 
-Email slima4.u8@gmail.com or open a GitHub Discussion.
+Email hello@uptimepage.dev or open a GitHub Discussion.

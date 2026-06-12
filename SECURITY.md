@@ -2,7 +2,7 @@
 
 ## Reporting a vulnerability
 
-Email **slima4.u8@gmail.com** with subject `[SECURITY]`.
+Email **security@uptimepage.dev** with subject `[SECURITY]`.
 
 **Please do not** open a public GitHub issue for security 
 vulnerabilities.

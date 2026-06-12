@@ -2,7 +2,7 @@ blank_issues_enabled: false
 contact_links:
   - name: Security vulnerability
     url: https://github.com/uptimepage/uptimepage/security/advisories/new
-    about: "Do NOT file a public issue. Email slima4.u8@gmail.com with subject [SECURITY], or open a private advisory. See SECURITY.md."
+    about: "Do NOT file a public issue. Email security@uptimepage.dev with subject [SECURITY], or open a private advisory. See SECURITY.md."
   - name: Question / discussion
     url: https://github.com/uptimepage/uptimepage/discussions
     about: Usage questions and open-ended discussion belong in Discussions.

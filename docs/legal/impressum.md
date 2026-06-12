@@ -9,7 +9,7 @@ Nicosia, Cyprus
 
 ## Contact
 
-Email: slima4.u8@gmail.com
+Email: hello@uptimepage.dev
 
 ## Responsible Editor
 

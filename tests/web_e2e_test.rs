@@ -496,7 +496,7 @@ async fn security_txt_served_per_rfc9116() {
     );
     let body = body_text(resp).await;
     assert!(
-        body.contains("Contact: mailto:slima4.u8@gmail.com"),
+        body.contains("Contact: mailto:security@uptimepage.dev"),
         "security.txt needs a Contact field"
     );
     assert!(

@@ -41,7 +41,7 @@ to an AGPL-compatible license allow-list enforced in CI.
 
 If AGPL-3.0 doesn't fit your use case — for example, you want to 
 embed uptimepage in a proprietary product without sharing your 
-modifications — email slima4.u8@gmail.com to discuss alternative 
+modifications — email hello@uptimepage.dev to discuss alternative 
 licensing.
 
 ## Per-version conversion

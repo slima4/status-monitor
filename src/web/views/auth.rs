@@ -662,7 +662,7 @@ pub mod settings {
             assert!(html.contains(r#"usage-grid__fig">∞</span>"#));
             assert!(html.contains(r#"aria-label="unlimited""#));
             assert!(html.contains("60s"));
-            assert!(html.contains(r#"href="mailto:slima4.u8@gmail.com""#));
+            assert!(html.contains(r#"href="mailto:support@uptimepage.dev""#));
         }
 
         #[test]

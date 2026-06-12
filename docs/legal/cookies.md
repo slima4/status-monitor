@@ -40,4 +40,4 @@ do **not** set any cookies. They are fully anonymous.
 
 ## Contact
 
-slima4.u8@gmail.com
+hello@uptimepage.dev

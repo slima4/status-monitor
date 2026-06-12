@@ -56,7 +56,7 @@ Subject: `Important security notice about your uptimepage account`
 >
 > We sincerely apologise. We're committed to protecting your data.
 >
-> For questions: slima4.u8@gmail.com
+> For questions: security@uptimepage.dev
 
 ## D. Account suspension notice
 

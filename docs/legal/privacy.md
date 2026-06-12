@@ -12,8 +12,8 @@ similar laws.
 uptimepage-inc is the data controller for personal data processed via
 the Service.
 
-**Contact:** slima4.u8@gmail.com
-**For data-subject requests:** slima4.u8@gmail.com (see §10)
+**Contact:** hello@uptimepage.dev
+**For data-subject requests:** hello@uptimepage.dev (see §10)
 
 We do not have a designated Data Protection Officer as we do not meet
 the thresholds under GDPR Article 37.
@@ -149,7 +149,7 @@ Two channels — use whichever is convenient:
 - **Deletion:** Visit /settings/account → "Delete My Account". The account
   is immediately suspended and permanently purged after 30 days.
 
-**Email:** Send a request to slima4.u8@gmail.com. We will:
+**Email:** Send a request to hello@uptimepage.dev. We will:
 
 - Acknowledge receipt within 7 days
 - Verify your identity (typically: email match with account email)
@@ -173,4 +173,4 @@ We may update this Policy. Material changes will be announced via email
 
 ## 13. Contact
 
-slima4.u8@gmail.com
+hello@uptimepage.dev

@@ -4,7 +4,7 @@ Before publishing **any** legal document under `docs/legal/`, work
 through this checklist:
 
 - [x] Project name finalised as `uptimepage` (brand, crate/binary); legal entity `uptimepage-inc`
-- [ ] Replace every `slima4.u8@gmail.com` with your real contact email(s)
+- [x] Contact emails live on product domain: `hello@` (general/legal), `security@` (vulns/compromise), `support@` (in-app)
 - [ ] Verify the data inventory matches what your deployment actually
       stores (don't claim you don't store something that you do)
 - [ ] Verify the third-party processor list matches your actual
@@ -24,8 +24,8 @@ through this checklist:
       Hetzner-hosted; or your home country if you prefer)
 - [ ] Have at least one friend who is not technical read the entire
       Privacy Policy — clarity matters
-- [ ] Confirm the abuse contact and security contact are monitored
-      (auto-forward to a mailbox you read)
+- [x] Confirm the abuse contact and security contact are monitored
+      (hello@/security@/support@ are aliases of the primary mailbox)
 - [ ] Set up calendar reminder to re-review docs annually
 - [ ] Set up calendar reminder to update the `Expires` date in
       `static/.well-known/security.txt` (currently 2027-12-31)
@@ -44,7 +44,7 @@ docs go live:
 | Item | Status |
 |---|---|
 | Project name | `uptimepage` (brand + Rust crate/binary); legal entity stays `uptimepage-inc` until incorporation |
-| Contact / abuse / security email | `slima4.u8@gmail.com` — **ACTION:** confirm this mailbox is actively monitored (consider role aliases `abuse@`, `security@` that forward to it) |
+| Contact / abuse / security email | `hello@uptimepage.dev` (general + abuse), `security@uptimepage.dev` (vulns), `support@uptimepage.dev` (in-app) — all aliases of one monitored mailbox |
 | Operator (legal entity) | `uptimepage-inc`, Nicosia, Cyprus — **ACTION:** add registered company number / VAT ID if the entity is incorporated |
 | Hosting location | Hetzner, Nürnberg, Germany — stated in Privacy Policy §6 and Impressum |
 | Governing law | Germany (Hetzner-hosted). **ACTION:** confirm — the operating entity is in Cyprus; decide whether German or Cypriot law should govern |

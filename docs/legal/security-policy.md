@@ -5,7 +5,7 @@
 ## Reporting Vulnerabilities
 
 Found a security issue in uptimepage? Email us at
-**slima4.u8@gmail.com** with subject `[SECURITY]`.
+**security@uptimepage.dev** with subject `[SECURITY]`.
 
 Please **do not** publicly disclose vulnerabilities until we have
 acknowledged and addressed them.
@@ -75,4 +75,4 @@ research that:
 
 ## Contact
 
-slima4.u8@gmail.com
+security@uptimepage.dev

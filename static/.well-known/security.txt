@@ -1,4 +1,4 @@
-Contact: mailto:slima4.u8@gmail.com
+Contact: mailto:security@uptimepage.dev
 Expires: 2027-12-31T23:59:59.000Z
 Preferred-Languages: en
 Canonical: https://uptimepage.dev/.well-known/security.txt
