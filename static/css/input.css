@@ -485,6 +485,9 @@
     .app-shell > *,
     .public-shell > *,
     .marketing-shell > * { position: relative; z-index: 1; }
+    /* Header above main: its dropdowns (org picker) would otherwise be
+       trapped under main's later-in-DOM sibling stacking context. */
+    .app-shell > header { z-index: 2; }
 
     /* Sticky footer: main grows so footer sits at viewport bottom on short
        pages; flex-shrink:0 guards against basis collapse from inner overflow. */

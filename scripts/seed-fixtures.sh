@@ -108,6 +108,55 @@ if [[ -z "$OWNER_USER_ID" ]]; then
   echo "    (no membership found — every monitor will render unowned)"
 fi
 
+echo "==> Postgres: team fixtures (teammate member + pending invite + second org for the nav picker)"
+# Whole section needs an existing owner: the invite needs an inviter FK, the
+# second org needs its owner, and seeding the teammate into a member-less org
+# would make it the earliest membership — flipping the OWNER_USER_ID pick
+# (ORDER BY created_at) to the teammate on the next run.
+if [[ -n "$OWNER_USER_ID" ]]; then
+pg <<SQL
+-- Teammate: second member so /settings/team shows a real roster row with
+-- role-toggle/remove actions. Create-if-absent keeps reruns idempotent.
+INSERT INTO users (email, terms_version, privacy_version, email_verified_at, display_name)
+SELECT 'teammate@fixture.test', 'v1', 'v1', now(), 'Fixture Teammate'
+ WHERE NOT EXISTS (
+   SELECT 1 FROM users WHERE email = 'teammate@fixture.test' AND deleted_at IS NULL);
+INSERT INTO memberships (org_id, user_id, role)
+SELECT o.id, u.id, 'member'
+  FROM organizations o, users u
+ WHERE o.slug = '${SLUG}' AND o.deleted_at IS NULL
+   AND u.email = 'teammate@fixture.test' AND u.deleted_at IS NULL
+ON CONFLICT DO NOTHING;
+
+-- Pending invitation: renders the invitations table + revoke action.
+-- Unredeemable because the dummy token_hash never parses as a PHC string,
+-- so token verification always returns false — the prefix itself is a
+-- perfectly valid lookup key.
+DELETE FROM invitations
+ WHERE org_id IN (SELECT id FROM organizations WHERE slug = '${SLUG}')
+   AND email = 'pending@fixture.test';
+INSERT INTO invitations
+  (org_id, inviter_id, email, role, token_hash, token_prefix, expires_at)
+SELECT id, '${OWNER_USER_ID}'::uuid, 'pending@fixture.test', 'member',
+       'fixture-unredeemable', 'fixture-unredeem', now() + interval '7 days'
+  FROM organizations WHERE slug = '${SLUG}' AND deleted_at IS NULL;
+
+-- Second org owned by the dev user: makes the nav org picker render
+-- (it only appears for multi-org sessions).
+INSERT INTO organizations (slug, name)
+SELECT 'fixture-second', 'Fixture Second Org'
+ WHERE NOT EXISTS (
+   SELECT 1 FROM organizations WHERE slug = 'fixture-second' AND deleted_at IS NULL);
+INSERT INTO memberships (org_id, user_id, role)
+SELECT o.id, '${OWNER_USER_ID}'::uuid, 'owner'
+  FROM organizations o
+ WHERE o.slug = 'fixture-second' AND o.deleted_at IS NULL
+ON CONFLICT DO NOTHING;
+SQL
+else
+  echo "    (skipping team fixtures — need an org member as inviter/owner)"
+fi
+
 echo "==> Postgres: insert 14 monitors (8 public/visible + 6 internal/varied-spec)"
 # Most flags here exist to keep the seed counters from being clobbered by
 # the live scheduler — a single real 'down' would flip Operational →
@@ -1144,11 +1193,14 @@ echo "  managed   : fix-payment/fix-admin + Fixture Webhook → terraform chip; 
 echo "  alerts    : bound on fix-api / fix-db / fix-auth"
 echo "  maintenance: 4 windows (1 active bound to fix-db) → drives Maintenance state"
 echo "  history   : 6-day NoData gap on fix-email; per-target last-5-min divergence"
+echo "  team      : +1 member (teammate@fixture.test) + 1 pending invite + second org"
+echo "              'fixture-second' (renders the nav org picker)"
 echo
 echo "Public status page : http://${SLUG}.${BASE_DOMAIN}:8080/"
 echo "Operator dashboard : http://app.${BASE_DOMAIN}:8080/"
 echo "Operator monitors  : http://app.${BASE_DOMAIN}:8080/targets"
 echo "Operator incidents : http://app.${BASE_DOMAIN}:8080/incidents"
+echo "Operator team      : http://app.${BASE_DOMAIN}:8080/settings/team"
 echo "(public page cache TTL ~10s; wait a moment before first load)"
 
 exit $(( ${#FAILED[@]} > 0 ))
