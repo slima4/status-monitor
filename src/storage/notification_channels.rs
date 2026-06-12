@@ -273,8 +273,18 @@ impl NotificationChannelStore for PgNotificationChannelStore {
         update: NotificationChannelUpdate,
         source: WriteSource,
     ) -> Result<Option<NotificationChannel>> {
+        // A config identical to the stored one is treated as omitted, so the
+        // verification stamp survives a no-op replace. Best-effort: a stored
+        // config that won't unseal (cipher mismatch) is replaced, not blocking.
+        let config = match update.config {
+            Some(c) => match self.get(org, id).await {
+                Ok(Some(current)) if current.config == c => None,
+                _ => Some(c),
+            },
+            None => None,
+        };
         // Re-seal only when the config is being changed; `kind` follows it.
-        let (sealed, kind) = match &update.config {
+        let (sealed, kind) = match &config {
             Some(c) => (
                 Some(seal(c, self.cipher.as_deref())?),
                 Some(c.kind().as_db_str()),
@@ -520,7 +530,9 @@ impl NotificationChannelStore for InMemoryNotificationChannelStore {
         if let Some(name) = update.name {
             ch.name = name;
         }
-        if let Some(cfg) = update.config {
+        if let Some(cfg) = update.config
+            && cfg != ch.config
+        {
             ch.kind = cfg.kind();
             ch.config = cfg;
             ch.verified_at = None;

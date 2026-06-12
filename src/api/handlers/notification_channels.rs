@@ -160,7 +160,8 @@ pub async fn get(
     summary = "Edit a notification channel",
     description = "Omit fields you don't want to change. A `config` that still \
                    carries the `***` sentinel returns 400 — omit `config` to \
-                   keep the stored secret unchanged.",
+                   keep the stored secret unchanged. A `config` identical to \
+                   the stored one keeps the verification state.",
     params(("id" = Uuid, Path)),
     request_body(content = NotificationChannelUpdate),
     responses(

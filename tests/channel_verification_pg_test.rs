@@ -169,6 +169,26 @@ async fn mint_cap_and_config_replace_resets_gate() {
         .unwrap()
         .unwrap();
     assert!(renamed.verified_at.is_some());
+    // Re-submitting the identical config keeps the stamp too.
+    let resubmitted = store
+        .update(
+            org,
+            ch.id,
+            NotificationChannelUpdate {
+                config: Some(ChannelConfig::Email(EmailConfig {
+                    to: "b@example.com".into(),
+                })),
+                ..Default::default()
+            },
+            WriteSource::Ui,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        resubmitted.verified_at.is_some(),
+        "identical config keeps gate"
+    );
 
     // set_verified is email-only.
     let slack = store
