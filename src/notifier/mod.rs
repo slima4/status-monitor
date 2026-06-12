@@ -3,6 +3,9 @@ pub mod email;
 pub mod event;
 pub mod google_chat;
 pub mod msteams;
+pub mod ntfy;
+pub mod pagerduty;
+pub mod pushover;
 pub mod slack;
 pub mod telegram;
 pub mod webhook;
@@ -20,6 +23,9 @@ use crate::notifier::email::EmailNotifier;
 use crate::notifier::event::IncidentNotice;
 use crate::notifier::google_chat::GoogleChatNotifier;
 use crate::notifier::msteams::MsTeamsNotifier;
+use crate::notifier::ntfy::NtfyNotifier;
+use crate::notifier::pagerduty::PagerDutyNotifier;
+use crate::notifier::pushover::PushoverNotifier;
 use crate::notifier::slack::SlackNotifier;
 use crate::notifier::telegram::TelegramNotifier;
 use crate::notifier::webhook::WebhookNotifier;
@@ -157,7 +163,42 @@ pub fn build_notifier(
             })?;
             Arc::new(EmailNotifier::new(email, &c.to)) as Arc<dyn Notifier>
         }
+        ChannelConfig::PagerDuty(c) => {
+            Arc::new(PagerDutyNotifier::new(http.clone(), c.routing_key.clone()))
+                as Arc<dyn Notifier>
+        }
+        ChannelConfig::Ntfy(c) => Arc::new(NtfyNotifier::new(
+            http.clone(),
+            parse(&c.server_url)?,
+            c.topic.clone(),
+            c.access_token.clone(),
+        )) as Arc<dyn Notifier>,
+        ChannelConfig::Pushover(c) => Arc::new(PushoverNotifier::new(
+            http.clone(),
+            c.token.clone(),
+            c.user.clone(),
+            c.device.clone(),
+        )) as Arc<dyn Notifier>,
     })
+}
+
+/// Like [`truncate_chars`] but for vendors that cap by BYTES (ntfy's 4096);
+/// cuts on a char boundary, over-limit text ends in `…` within the cap.
+pub(crate) fn truncate_bytes(s: &str, max_bytes: usize) -> String {
+    if s.len() <= max_bytes {
+        return s.to_string();
+    }
+    let budget = max_bytes.saturating_sub('…'.len_utf8());
+    let mut end = 0;
+    for (i, c) in s.char_indices() {
+        if i + c.len_utf8() > budget {
+            break;
+        }
+        end = i + c.len_utf8();
+    }
+    let mut out = s[..end].to_string();
+    out.push('…');
+    out
 }
 
 /// Char-boundary-safe cap for transports with a hard message-length limit;
@@ -173,7 +214,21 @@ pub(crate) fn truncate_chars(s: &str, max_chars: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::truncate_chars;
+    use super::{truncate_bytes, truncate_chars};
+
+    #[test]
+    fn truncate_bytes_caps_on_char_boundary() {
+        assert_eq!(truncate_bytes("short", 10), "short");
+        assert_eq!(truncate_bytes("exact!", 6), "exact!");
+        let t = truncate_bytes("overflowing", 8);
+        assert!(t.len() <= 8, "{t}");
+        assert!(t.ends_with('…'));
+        // Multibyte content is capped by BYTES without splitting a char.
+        let s = "é".repeat(100); // 200 bytes
+        let t = truncate_bytes(&s, 16);
+        assert!(t.len() <= 16, "{}", t.len());
+        assert!(t.ends_with('…'));
+    }
 
     #[test]
     fn truncate_chars_caps_with_ellipsis() {

@@ -23,6 +23,9 @@ mod discord;
 mod email;
 mod google_chat;
 mod msteams;
+mod ntfy;
+mod pagerduty;
+mod pushover;
 mod slack;
 mod telegram;
 mod telegram_app;
@@ -35,6 +38,9 @@ pub use discord::DiscordConfig;
 pub use email::EmailConfig;
 pub use google_chat::GoogleChatConfig;
 pub use msteams::MsTeamsConfig;
+pub use ntfy::NtfyConfig;
+pub use pagerduty::PagerDutyConfig;
+pub use pushover::PushoverConfig;
 pub use slack::SlackConfig;
 pub use telegram::TelegramConfig;
 pub use telegram_app::TelegramAppConfig;
@@ -66,6 +72,10 @@ pub enum ChannelKind {
     MsTeams,
     GoogleChat,
     Email,
+    #[serde(rename = "pagerduty")]
+    PagerDuty,
+    Ntfy,
+    Pushover,
 }
 
 impl ChannelKind {
@@ -83,6 +93,9 @@ impl ChannelKind {
         Self::MsTeams,
         Self::GoogleChat,
         Self::Email,
+        Self::PagerDuty,
+        Self::Ntfy,
+        Self::Pushover,
     ];
 
     /// Stable string used in the Postgres `kind` CHECK constraint and the
@@ -99,6 +112,9 @@ impl ChannelKind {
             Self::MsTeams => "msteams",
             Self::GoogleChat => "google_chat",
             Self::Email => "email",
+            Self::PagerDuty => "pagerduty",
+            Self::Ntfy => "ntfy",
+            Self::Pushover => "pushover",
         }
     }
 }
@@ -123,6 +139,10 @@ pub enum ChannelConfig {
     MsTeams(MsTeamsConfig),
     GoogleChat(GoogleChatConfig),
     Email(EmailConfig),
+    #[serde(rename = "pagerduty")]
+    PagerDuty(PagerDutyConfig),
+    Ntfy(NtfyConfig),
+    Pushover(PushoverConfig),
 }
 
 /// Apply `$body` to the inner [`TransportConfig`] of any variant. The one
@@ -140,6 +160,9 @@ macro_rules! with_transport {
             ChannelConfig::MsTeams($c) => $body,
             ChannelConfig::GoogleChat($c) => $body,
             ChannelConfig::Email($c) => $body,
+            ChannelConfig::PagerDuty($c) => $body,
+            ChannelConfig::Ntfy($c) => $body,
+            ChannelConfig::Pushover($c) => $body,
         }
     };
 }
@@ -280,6 +303,11 @@ mod tests {
             r#"{"type":"msteams","webhook_url":"https://prod-77.westus.logic.azure.com/workflows/x"}"#,
             r#"{"type":"google_chat","webhook_url":"https://chat.googleapis.com/v1/spaces/A/messages?key=k&token=t"}"#,
             r#"{"type":"email","to":"ops@example.com"}"#,
+            r#"{"type":"pagerduty","routing_key":"R0123456789abcdef0123456789abcde"}"#,
+            r#"{"type":"ntfy","server_url":"https://ntfy.sh","topic":"uptime-alerts"}"#,
+            r#"{"type":"ntfy","server_url":"https://ntfy.example.com","topic":"ops","access_token":"tk_x"}"#,
+            r#"{"type":"pushover","token":"azGDORePK8gMaC0QOYAMyEEuzJnyUi","user":"uQiRzpo4DXghDmr9QzzfQu27cmVRsG"}"#,
+            r#"{"type":"pushover","token":"azGDORePK8gMaC0QOYAMyEEuzJnyUi","user":"uQiRzpo4DXghDmr9QzzfQu27cmVRsG","device":"droid2"}"#,
         ] {
             let c: ChannelConfig = serde_json::from_str(json).unwrap();
             let back = serde_json::to_string(&c).unwrap();
@@ -318,6 +346,10 @@ mod tests {
                 template_name: "uptime_alert".into(),
                 language_code: None,
             }),
+            ChannelConfig::WhatsAppApp(WhatsAppAppConfig {
+                phone: "15551234567".into(),
+                profile_name: None,
+            }),
             ChannelConfig::Discord(DiscordConfig {
                 webhook_url: "https://discord.com/api/webhooks/1/x".into(),
             }),
@@ -330,6 +362,19 @@ mod tests {
             ChannelConfig::Email(EmailConfig {
                 to: "ops@example.com".into(),
             }),
+            ChannelConfig::PagerDuty(PagerDutyConfig {
+                routing_key: "R0123456789abcdef0123456789abcde".into(),
+            }),
+            ChannelConfig::Ntfy(NtfyConfig {
+                server_url: "https://ntfy.sh".into(),
+                topic: "uptime-alerts".into(),
+                access_token: None,
+            }),
+            ChannelConfig::Pushover(PushoverConfig {
+                token: "azGDORePK8gMaC0QOYAMyEEuzJnyUi".into(),
+                user: "uQiRzpo4DXghDmr9QzzfQu27cmVRsG".into(),
+                device: None,
+            }),
         ];
         assert_eq!(configs.len(), ChannelKind::ALL.len());
         for c in configs {
@@ -338,10 +383,13 @@ mod tests {
                 .unwrap()
                 .to_string();
             assert_eq!(c.kind().as_db_str(), tag);
-            // Exactly one transport is mintable only by the operator's flow.
+            // Only the linked kinds are mintable solely by the operator's flow.
             assert_eq!(
                 c.operator_managed(),
-                c.kind() == ChannelKind::TelegramApp,
+                matches!(
+                    c.kind(),
+                    ChannelKind::TelegramApp | ChannelKind::WhatsAppApp
+                ),
                 "operator_managed drifted for {tag}"
             );
         }
@@ -613,6 +661,123 @@ mod tests {
         assert!(ch(true, false).awaiting_verification());
         assert!(!ch(true, true).awaiting_verification());
         assert!(!ch(false, false).awaiting_verification());
+    }
+
+    #[test]
+    fn pagerduty_masks_key_and_validates_shape() {
+        let mut c = ChannelConfig::PagerDuty(PagerDutyConfig {
+            routing_key: "R0123456789abcdef0123456789abcde".into(),
+        });
+        assert!(c.validate().is_ok());
+        assert_eq!(c.abuse_url(), None);
+        assert!(!c.operator_managed());
+        assert_eq!(c.redacted()["routing_key"], MASK);
+        c.redact_in_place();
+        assert!(c.has_redaction_sentinel());
+
+        let bad = |key: &str| {
+            ChannelConfig::PagerDuty(PagerDutyConfig {
+                routing_key: key.into(),
+            })
+            .validate()
+        };
+        assert!(bad("").is_err());
+        assert!(bad("short").is_err());
+        assert!(bad(&"x".repeat(33)).is_err());
+        assert!(bad("R0123456789abcdef0123456789abcd!").is_err());
+        assert!(bad(&"a".repeat(32)).is_ok());
+    }
+
+    #[test]
+    fn ntfy_masks_token_and_pins_server_root() {
+        let mut c = ChannelConfig::Ntfy(NtfyConfig {
+            server_url: "https://ntfy.example.com".into(),
+            topic: "uptime_alerts-1".into(),
+            access_token: Some("tk_secret".into()),
+        });
+        assert!(c.validate().is_ok());
+        assert_eq!(c.abuse_url(), Some("https://ntfy.example.com"));
+        let r = c.redacted();
+        // Server + topic are routing, the token is the only secret.
+        assert_eq!(r["server_url"], "https://ntfy.example.com");
+        assert_eq!(r["topic"], "uptime_alerts-1");
+        assert_eq!(r["access_token"], MASK);
+        c.redact_in_place();
+        assert!(c.has_redaction_sentinel());
+
+        // Token-less config has nothing to mask and never reads as sentinel.
+        let mut open = ChannelConfig::Ntfy(NtfyConfig {
+            server_url: "https://ntfy.sh".into(),
+            topic: "t".into(),
+            access_token: None,
+        });
+        assert!(open.validate().is_ok());
+        open.redact_in_place();
+        assert!(!open.has_redaction_sentinel());
+
+        let bad = |f: fn(&mut NtfyConfig)| {
+            let mut n = NtfyConfig {
+                server_url: "https://ntfy.sh".into(),
+                topic: "ops".into(),
+                access_token: None,
+            };
+            f(&mut n);
+            ChannelConfig::Ntfy(n).validate()
+        };
+        assert!(bad(|n| n.server_url = "http://ntfy.sh".into()).is_err());
+        assert!(bad(|n| n.server_url = "https://ntfy.sh/mytopic".into()).is_err());
+        assert!(bad(|n| n.server_url = "https://ntfy.sh/?x=1".into()).is_err());
+        assert!(bad(|n| n.server_url = "https://tk:secret@ntfy.sh".into()).is_err());
+        assert!(bad(|n| n.server_url = "https://tk@ntfy.sh".into()).is_err());
+        assert!(bad(|n| n.topic = "".into()).is_err());
+        assert!(bad(|n| n.topic = "has space".into()).is_err());
+        assert!(bad(|n| n.topic = "x".repeat(65)).is_err());
+        assert!(bad(|n| n.access_token = Some("".into())).is_err());
+        assert!(bad(|n| n.access_token = Some("tk x".into())).is_err());
+        // Bare server_url keeps the root path after parsing.
+        assert!(bad(|n| n.server_url = "https://ntfy.sh".into()).is_ok());
+
+        // Omitted server_url defaults to ntfy.sh on the wire.
+        let parsed: ChannelConfig =
+            serde_json::from_str(r#"{"type":"ntfy","topic":"ops"}"#).unwrap();
+        let ChannelConfig::Ntfy(n) = &parsed else {
+            panic!()
+        };
+        assert_eq!(n.server_url, "https://ntfy.sh");
+    }
+
+    #[test]
+    fn pushover_masks_both_keys_and_validates_shape() {
+        let mut c = ChannelConfig::Pushover(PushoverConfig {
+            token: "azGDORePK8gMaC0QOYAMyEEuzJnyUi".into(),
+            user: "uQiRzpo4DXghDmr9QzzfQu27cmVRsG".into(),
+            device: Some("droid2".into()),
+        });
+        assert!(c.validate().is_ok());
+        assert_eq!(c.abuse_url(), None);
+        let r = c.redacted();
+        assert_eq!(r["token"], MASK);
+        assert_eq!(r["user"], MASK);
+        assert_eq!(r["device"], "droid2");
+        c.redact_in_place();
+        assert!(c.has_redaction_sentinel());
+
+        let bad = |f: fn(&mut PushoverConfig)| {
+            let mut p = PushoverConfig {
+                token: "azGDORePK8gMaC0QOYAMyEEuzJnyUi".into(),
+                user: "uQiRzpo4DXghDmr9QzzfQu27cmVRsG".into(),
+                device: None,
+            };
+            f(&mut p);
+            ChannelConfig::Pushover(p).validate()
+        };
+        assert!(bad(|p| p.token = "short".into()).is_err());
+        assert!(bad(|p| p.token = format!("{}!", "x".repeat(29))).is_err());
+        assert!(bad(|p| p.user = "".into()).is_err());
+        assert!(bad(|p| p.device = Some("".into())).is_err());
+        assert!(bad(|p| p.device = Some("x".repeat(26))).is_err());
+        assert!(bad(|p| p.device = Some("bad device".into())).is_err());
+        assert!(bad(|p| p.device = Some("ok_device-1".into())).is_ok());
     }
 
     #[test]

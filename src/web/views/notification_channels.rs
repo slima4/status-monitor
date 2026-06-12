@@ -82,6 +82,13 @@ pub struct ConfigFields {
     pub whatsapp_to: String,
     pub whatsapp_template_name: String,
     pub whatsapp_language_code: String,
+    pub pagerduty_routing_key: String,
+    pub ntfy_server_url: String,
+    pub ntfy_topic: String,
+    pub ntfy_access_token: String,
+    pub pushover_token: String,
+    pub pushover_user: String,
+    pub pushover_device: String,
 }
 
 impl Default for ConfigFields {
@@ -106,6 +113,13 @@ impl Default for ConfigFields {
             whatsapp_to: String::new(),
             whatsapp_template_name: String::new(),
             whatsapp_language_code: String::new(),
+            pagerduty_routing_key: String::new(),
+            ntfy_server_url: "https://ntfy.sh".into(),
+            ntfy_topic: String::new(),
+            ntfy_access_token: String::new(),
+            pushover_token: String::new(),
+            pushover_user: String::new(),
+            pushover_device: String::new(),
         }
     }
 }
@@ -387,6 +401,17 @@ fn form_from_channel(c: NotificationChannel) -> ChannelFormModel {
             config.whatsapp_to = c.to;
             config.whatsapp_template_name = c.template_name;
             config.whatsapp_language_code = c.language_code.unwrap_or_default();
+        }
+        ChannelConfig::PagerDuty(c) => config.pagerduty_routing_key = c.routing_key,
+        ChannelConfig::Ntfy(c) => {
+            config.ntfy_server_url = c.server_url;
+            config.ntfy_topic = c.topic;
+            config.ntfy_access_token = c.access_token.unwrap_or_default();
+        }
+        ChannelConfig::Pushover(c) => {
+            config.pushover_token = c.token;
+            config.pushover_user = c.user;
+            config.pushover_device = c.device.unwrap_or_default();
         }
     }
     ChannelFormModel {

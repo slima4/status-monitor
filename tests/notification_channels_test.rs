@@ -273,6 +273,126 @@ async fn provider_webhook_kinds_round_trip_with_url_masked() {
 }
 
 #[tokio::test]
+async fn pagerduty_round_trips_with_routing_key_masked() {
+    let app = app();
+    let (st, created) = send(
+        &app,
+        "POST",
+        "/api/v1/notification-channels",
+        json!({
+            "name": "oncall-pagerduty",
+            "config": { "type": "pagerduty", "routing_key": "zzPDSECRETzz0123456789abcdef0123" }
+        }),
+    )
+    .await;
+    assert_eq!(st, StatusCode::CREATED, "{created}");
+    assert_eq!(created["kind"], "pagerduty");
+    assert_eq!(created["config"]["routing_key"], "***");
+    assert!(!created.to_string().contains("zzPDSECRETzz"));
+}
+
+#[tokio::test]
+async fn ntfy_round_trips_with_token_masked_and_topic_visible() {
+    let app = app();
+    let (st, created) = send(
+        &app,
+        "POST",
+        "/api/v1/notification-channels",
+        json!({
+            "name": "oncall-ntfy",
+            "config": {
+                "type": "ntfy",
+                "server_url": "https://ntfy.example.com",
+                "topic": "uptime-alerts",
+                "access_token": "tk_zzNTFYSECRETzz"
+            }
+        }),
+    )
+    .await;
+    assert_eq!(st, StatusCode::CREATED, "{created}");
+    assert_eq!(created["kind"], "ntfy");
+    assert_eq!(created["config"]["server_url"], "https://ntfy.example.com");
+    assert_eq!(created["config"]["topic"], "uptime-alerts");
+    assert_eq!(created["config"]["access_token"], "***");
+    assert!(!created.to_string().contains("zzNTFYSECRETzz"));
+
+    // server_url defaults to ntfy.sh and a token-less config stays open.
+    let (st, created) = send(
+        &app,
+        "POST",
+        "/api/v1/notification-channels",
+        json!({
+            "name": "oncall-ntfy-default",
+            "config": { "type": "ntfy", "topic": "ops" }
+        }),
+    )
+    .await;
+    assert_eq!(st, StatusCode::CREATED, "{created}");
+    assert_eq!(created["config"]["server_url"], "https://ntfy.sh");
+    assert!(created["config"].get("access_token").is_none());
+}
+
+#[tokio::test]
+async fn pushover_round_trips_with_both_keys_masked() {
+    let app = app();
+    let (st, created) = send(
+        &app,
+        "POST",
+        "/api/v1/notification-channels",
+        json!({
+            "name": "oncall-pushover",
+            "config": {
+                "type": "pushover",
+                "token": "zzPOTOKENzz8gMaC0QOYAMyEEuzJny",
+                "user": "zzPOUSERzzDXghDmr9QzzfQu27cmVR",
+                "device": "droid2"
+            }
+        }),
+    )
+    .await;
+    assert_eq!(st, StatusCode::CREATED, "{created}");
+    assert_eq!(created["kind"], "pushover");
+    assert_eq!(created["config"]["token"], "***");
+    assert_eq!(created["config"]["user"], "***");
+    assert_eq!(created["config"]["device"], "droid2");
+    assert!(!created.to_string().contains("zzPOTOKENzz"));
+    assert!(!created.to_string().contains("zzPOUSERzz"));
+}
+
+#[tokio::test]
+async fn paging_kinds_reject_malformed_configs() {
+    let app = app();
+    for (name, config) in [
+        (
+            "pd-short-key",
+            json!({ "type": "pagerduty", "routing_key": "short" }),
+        ),
+        (
+            "ntfy-topic-url",
+            json!({ "type": "ntfy", "server_url": "https://ntfy.sh/mytopic", "topic": "ops" }),
+        ),
+        (
+            "ntfy-plain-http",
+            json!({ "type": "ntfy", "server_url": "http://ntfy.internal", "topic": "ops" }),
+        ),
+        (
+            "po-bad-user",
+            json!({ "type": "pushover", "token": "azGDORePK8gMaC0QOYAMyEEuzJnyUi", "user": "nope" }),
+        ),
+    ] {
+        let (st, body) = send(
+            &app,
+            "POST",
+            "/api/v1/notification-channels",
+            json!({ "name": name, "config": config }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "{name}: {body}");
+        assert_eq!(body["error"]["code"], "INVALID_CHANNEL_CONFIG", "{name}");
+    }
+}
+
+#[tokio::test]
 async fn provider_webhook_kinds_reject_offsite_urls() {
     let app = app();
     for (kind, url) in [

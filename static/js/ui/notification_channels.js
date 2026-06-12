@@ -689,6 +689,34 @@
                 },
             };
         }
+        if (kind === "pagerduty") {
+            return {
+                config: {
+                    type: "pagerduty",
+                    routing_key: (data.get("pagerduty_routing_key") || "").trim(),
+                },
+            };
+        }
+        if (kind === "ntfy") {
+            const config = {
+                type: "ntfy",
+                server_url: (data.get("ntfy_server_url") || "").trim().replace(/\/+$/, ""),
+                topic: (data.get("ntfy_topic") || "").trim(),
+            };
+            const token = (data.get("ntfy_access_token") || "").trim();
+            if (token) config.access_token = token;
+            return { config };
+        }
+        if (kind === "pushover") {
+            const config = {
+                type: "pushover",
+                token: (data.get("pushover_token") || "").trim(),
+                user: (data.get("pushover_user") || "").trim(),
+            };
+            const device = (data.get("pushover_device") || "").trim();
+            if (device) config.device = device;
+            return { config };
+        }
         if (kind === "telegram_app") {
             // The API rejects this kind in request bodies.
             return { error: "Linked telegram channels have no config to submit — use \"connect telegram\", or untick \"Replace transport config\" to keep the stored link." };

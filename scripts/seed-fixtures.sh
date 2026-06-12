@@ -507,7 +507,7 @@ CROSS JOIN LATERAL (
 ) AS e(occurred_at, kind, actor_type, message);
 SQL
 
-echo "==> Postgres: 9 notification channels (one per transport) and alert bindings"
+echo "==> Postgres: 13 notification channels (one per transport) and alert bindings"
 # Channel kinds match ChannelConfig — one per variant. The BYO Telegram row is
 # disabled so the operator UI renders both the enabled and disabled states;
 # the linked telegram_app row carries the platform-disable note.
@@ -544,7 +544,16 @@ INSERT INTO notification_channels (org_id, name, kind, config, external_ref, ena
    'oncall@example.com', true, NULL),
   ('${ORG}'::uuid, 'Fixture WA Linked', 'whatsapp_app',
    '{"type":"whatsapp_app","phone":"15551234567","profile_name":"Fixture Jane"}'::jsonb,
-   '15551234567', true, NULL);
+   '15551234567', true, NULL),
+  ('${ORG}'::uuid, 'Fixture PagerDuty', 'pagerduty',
+   '{"type":"pagerduty","routing_key":"fixturefixturefixturefixture0000"}'::jsonb,
+   NULL, true, NULL),
+  ('${ORG}'::uuid, 'Fixture Ntfy', 'ntfy',
+   '{"type":"ntfy","server_url":"https://ntfy.sh","topic":"fixture-alerts","access_token":"tk_fixturetoken"}'::jsonb,
+   NULL, true, NULL),
+  ('${ORG}'::uuid, 'Fixture Pushover', 'pushover',
+   '{"type":"pushover","token":"azGDORePK8gMaC0QOYAMyEEuzJnyUi","user":"uQiRzpo4DXghDmr9QzzfQu27cmVRsG","device":"fixture-phone"}'::jsonb,
+   NULL, true, NULL);
 
 -- The email fixture renders the unverified chip; engine deliveries to it
 -- record failures, which is the state worth eyeballing.

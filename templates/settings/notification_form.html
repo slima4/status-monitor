@@ -60,6 +60,21 @@
           <span class="check-type-card__name">email</span>
           <span class="check-type-card__desc">verified address</span>
         </label>
+        <label class="check-type-card" data-kind-card>
+          <input type="radio" name="kind" value="pagerduty"{% if form.kind == "pagerduty" %} checked{% endif %} class="sr-only">
+          <span class="check-type-card__name">pagerduty</span>
+          <span class="check-type-card__desc">Events API v2</span>
+        </label>
+        <label class="check-type-card" data-kind-card>
+          <input type="radio" name="kind" value="pushover"{% if form.kind == "pushover" %} checked{% endif %} class="sr-only">
+          <span class="check-type-card__name">pushover</span>
+          <span class="check-type-card__desc">phone push</span>
+        </label>
+        <label class="check-type-card" data-kind-card>
+          <input type="radio" name="kind" value="ntfy"{% if form.kind == "ntfy" %} checked{% endif %} class="sr-only">
+          <span class="check-type-card__name">ntfy</span>
+          <span class="check-type-card__desc">topic push</span>
+        </label>
         {% if form.offers_telegram_app() %}
         <label class="check-type-card" data-kind-card>
           <input type="radio" name="kind" value="telegram_app"{% if form.kind == "telegram_app" %} checked{% endif %} class="sr-only">
@@ -256,6 +271,85 @@
         <p class="font-mono text-xs text-quiet"># address verified</p>
         {% endif %}
         {% endif %}
+      </div>
+
+      <div data-variant="pagerduty"{% if form.kind != "pagerduty" %} class="hidden"{% endif %}>
+        <label class="field-outline">
+          <span class="field-outline__label">Integration key (routing key)</span>
+          <input name="pagerduty_routing_key" type="text" value="{{ form.config.pagerduty_routing_key }}"
+                 placeholder="32-character Events API v2 key"
+                 autocomplete="off" spellcheck="false" class="w-full field font-mono">
+          <span class="mt-1 block text-xs text-muted">
+            On the PagerDuty service: Integrations → add an
+            <span class="font-mono">Events API v2</span> integration, copy its
+            Integration Key. Incidents are triggered and auto-resolved there —
+            <a href="https://support.pagerduty.com/docs/services-and-integrations" target="_blank" rel="noopener"
+               class="underline decoration-dotted hover:text-body">services and integrations</a>.
+          </span>
+        </label>
+      </div>
+
+      <div data-variant="pushover" class="space-y-5{% if form.kind != "pushover" %} hidden{% endif %}">
+        <div class="grid grid-cols-1 gap-5 sm:grid-cols-2">
+          <label class="field-outline">
+            <span class="field-outline__label">Application token</span>
+            <input name="pushover_token" type="text" value="{{ form.config.pushover_token }}"
+                   placeholder="30-character app token"
+                   autocomplete="off" spellcheck="false" class="w-full field font-mono">
+          </label>
+          <label class="field-outline">
+            <span class="field-outline__label">User key</span>
+            <input name="pushover_user" type="text" value="{{ form.config.pushover_user }}"
+                   placeholder="30-character user or group key"
+                   autocomplete="off" spellcheck="false" class="w-full field font-mono">
+          </label>
+        </div>
+        <label class="field-outline">
+          <span class="field-outline__label">Device (optional)</span>
+          <input name="pushover_device" type="text" value="{{ form.config.pushover_device }}"
+                 placeholder="blank = all devices"
+                 autocomplete="off" spellcheck="false" class="w-full field font-mono">
+          <span class="mt-1 block text-xs text-muted">
+            Register an application at
+            <a href="https://pushover.net/apps/build" target="_blank" rel="noopener"
+               class="underline decoration-dotted hover:text-body">pushover.net/apps/build</a>;
+            your user key is on the dashboard. High-urgency alerts bypass quiet
+            hours, resolves arrive silently.
+          </span>
+        </label>
+      </div>
+
+      <div data-variant="ntfy" class="space-y-5{% if form.kind != "ntfy" %} hidden{% endif %}">
+        <div class="grid grid-cols-1 gap-5 sm:grid-cols-2">
+          <label class="field-outline">
+            <span class="field-outline__label">Server URL</span>
+            <input name="ntfy_server_url" type="url" value="{{ form.config.ntfy_server_url }}"
+                   placeholder="https://ntfy.sh"
+                   autocomplete="off" spellcheck="false" class="w-full field font-mono">
+            <span class="mt-1 block text-xs text-muted">
+              Server root only — ntfy.sh or your self-hosted instance.
+            </span>
+          </label>
+          <label class="field-outline">
+            <span class="field-outline__label">Topic</span>
+            <input name="ntfy_topic" type="text" value="{{ form.config.ntfy_topic }}"
+                   placeholder="my-uptime-alerts"
+                   autocomplete="off" spellcheck="false" class="w-full field font-mono">
+          </label>
+        </div>
+        <label class="field-outline">
+          <span class="field-outline__label">Access token (optional)</span>
+          <input name="ntfy_access_token" type="text" value="{{ form.config.ntfy_access_token }}"
+                 placeholder="tk_…"
+                 autocomplete="off" spellcheck="false" class="w-full field font-mono">
+          <span class="mt-1 block text-xs text-muted">
+            Sent as a Bearer token for protected topics. On ntfy.sh an open
+            topic's name is its only access control — pick something
+            unguessable or protect it with a token —
+            <a href="https://docs.ntfy.sh/publish/" target="_blank" rel="noopener"
+               class="underline decoration-dotted hover:text-body">docs.ntfy.sh/publish</a>.
+          </span>
+        </label>
       </div>
 
       <div data-variant="webhook" class="space-y-5{% if form.kind != "webhook" %} hidden{% endif %}">
