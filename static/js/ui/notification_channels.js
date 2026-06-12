@@ -250,6 +250,86 @@
     // typing (the bot can't message anyone until they press Start), then a
     // chat-id probe over getUpdates. Both talk to the Bot API straight from
     // the browser with the token already sitting in the form.
+    // ntfy: our side only publishes — the phone still has to SUBSCRIBE to
+    // the topic. QR-first: the panel opens with a minted unguessable topic
+    // (on ntfy.sh the name is the access control) and a live QR/link the
+    // phone scans; the fields sit behind the advanced disclosure and the QR
+    // follows them as they're edited.
+    const ntfyBox = form.querySelector("[data-ntfy-qr-box]");
+    if (ntfyBox) {
+        const ntfyResult = form.querySelector("[data-ntfy-result]");
+        const qrImg = form.querySelector("[data-ntfy-qr-img]");
+        const qrLink = form.querySelector("[data-ntfy-qr-link]");
+        const serverInput = form.querySelector("[name='ntfy_server_url']");
+        const topicInput = form.querySelector("[name='ntfy_topic']");
+        const suggestBtn = form.querySelector("[data-ntfy-suggest]");
+
+        function suggestTopic() {
+            const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
+            const bytes = new Uint8Array(12);
+            crypto.getRandomValues(bytes);
+            const suffix = Array.from(bytes, (b) => alphabet[b % alphabet.length]).join("");
+            const base = (nameInput?.value || "")
+                .toLowerCase()
+                .replace(/[^a-z0-9]+/g, "-")
+                .replace(/^-+|-+$/g, "")
+                .slice(0, 24)
+                .replace(/-+$/g, "");
+            return `${base || "alerts"}-${suffix}`;
+        }
+
+        // Mint a topic when the panel opens empty, then keep the QR in sync
+        // with whatever the fields hold.
+        function syncNtfy() {
+            if (currentKind() !== "ntfy") return;
+            if (topicInput && !topicInput.disabled && usesFormConfig() && !topicInput.value.trim()) {
+                topicInput.value = suggestTopic();
+            }
+            const topic = (topicInput?.value || "").trim();
+            const server = ((serverInput?.value || "").trim() || "https://ntfy.sh").replace(/\/+$/, "");
+            const url = `${server}/${topic}`;
+            // Mirrors the server's https-only rule; also keeps a typo'd
+            // scheme out of the link href.
+            let parsed = null;
+            try { parsed = new URL(url); } catch { /* shown below */ }
+            if (!topic || !parsed || parsed.protocol !== "https:") {
+                ntfyBox.classList.add("hidden");
+                showStatus(
+                    ntfyResult,
+                    !topic ? "✗ enter a topic under advanced to get the QR" : "✗ the server URL must be a valid https:// URL",
+                    "flash-text flash-text--bad",
+                );
+                return;
+            }
+            try {
+                renderQr(qrImg, url);
+            } catch (err) {
+                ntfyBox.classList.add("hidden");
+                showStatus(ntfyResult, `✗ ${err.message || err}`, "flash-text flash-text--bad");
+                return;
+            }
+            qrLink.textContent = url;
+            qrLink.href = url;
+            ntfyResult?.classList.add("hidden");
+            ntfyBox.classList.remove("hidden");
+        }
+
+        syncNtfy();
+        window.addEventListener("pageshow", syncNtfy);
+        form.addEventListener("change", (evt) => {
+            if (evt.target.name === "kind" || evt.target === replaceCb) syncNtfy();
+        });
+        [serverInput, topicInput].forEach((el) => el?.addEventListener("input", syncNtfy));
+
+        suggestBtn?.addEventListener("click", () => {
+            // Locked edit: the input is disabled — writing into it anyway
+            // would show a value that won't submit.
+            if (!topicInput || topicInput.disabled) return;
+            topicInput.value = suggestTopic();
+            topicInput.dispatchEvent(new Event("input", { bubbles: true }));
+        });
+    }
+
     const tgQrBtn = form.querySelector("[data-tg-qr]");
     const tgDetectBtn = form.querySelector("[data-tg-detect]");
     if (tgQrBtn && tgDetectBtn) {

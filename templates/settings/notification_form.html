@@ -319,37 +319,67 @@
         </label>
       </div>
 
-      <div data-variant="ntfy" class="space-y-5{% if form.kind != "ntfy" %} hidden{% endif %}">
-        <div class="grid grid-cols-1 gap-5 sm:grid-cols-2">
-          <label class="field-outline">
-            <span class="field-outline__label">Server URL</span>
-            <input name="ntfy_server_url" type="url" value="{{ form.config.ntfy_server_url }}"
-                   placeholder="https://ntfy.sh"
-                   autocomplete="off" spellcheck="false" class="w-full field font-mono">
-            <span class="mt-1 block text-xs text-muted">
-              Server root only — ntfy.sh or your self-hosted instance.
-            </span>
-          </label>
-          <label class="field-outline">
-            <span class="field-outline__label">Topic</span>
-            <input name="ntfy_topic" type="text" value="{{ form.config.ntfy_topic }}"
-                   placeholder="my-uptime-alerts"
-                   autocomplete="off" spellcheck="false" class="w-full field font-mono">
-          </label>
+      <div data-variant="ntfy" class="space-y-4{% if form.kind != "ntfy" %} hidden{% endif %}">
+        <p class="text-sm text-muted">
+          Scan the QR with your phone — the
+          <a href="https://ntfy.sh/" target="_blank" rel="noopener"
+             class="underline decoration-dotted hover:text-body">ntfy app</a>
+          opens the topic; tap subscribe and alerts arrive as push
+          notifications. The topic is generated unguessable — its name is the
+          only access control on ntfy.sh.
+        </p>
+        <div data-ntfy-qr-box class="hidden flex flex-wrap items-start gap-4">
+          <div data-ntfy-qr-img class="inline-block shrink-0 rounded-sm border border-[color:var(--theme-line)] bg-white p-2"></div>
+          <div class="min-w-0 flex-1 space-y-3" style="min-width: 14rem">
+            <p class="break-all font-mono text-xs text-muted"><a data-ntfy-qr-link href="#" target="_blank" rel="noopener" class="underline decoration-dotted hover:text-body"></a></p>
+            <div>
+              <button type="button" data-ntfy-suggest
+                      class="sticker-btn px-3 py-1.5 text-sm font-medium">↻ new topic</button>
+              <p class="mt-2 text-xs text-muted">Re-rolls the topic — phones subscribed to the old one stop receiving alerts.</p>
+            </div>
+          </div>
         </div>
-        <label class="field-outline">
-          <span class="field-outline__label">Access token (optional)</span>
-          <input name="ntfy_access_token" type="text" value="{{ form.config.ntfy_access_token }}"
-                 placeholder="tk_…"
-                 autocomplete="off" spellcheck="false" class="w-full field font-mono">
-          <span class="mt-1 block text-xs text-muted">
-            Sent as a Bearer token for protected topics. On ntfy.sh an open
-            topic's name is its only access control — pick something
-            unguessable or protect it with a token —
-            <a href="https://docs.ntfy.sh/publish/" target="_blank" rel="noopener"
-               class="underline decoration-dotted hover:text-body">docs.ntfy.sh/publish</a>.
-          </span>
-        </label>
+        <p data-ntfy-result role="status" class="hidden font-mono text-xs"></p>
+        <details{% if form.mode != "create" %} open{% endif %}>
+          <summary class="sm-help-summary flex cursor-pointer select-none items-center gap-2 font-mono text-xs text-quiet">
+            <span class="sm-help-tri" aria-hidden="true">▸</span>
+            <span># advanced — self-hosted server · custom topic · access token</span>
+          </summary>
+          <div class="space-y-5 pt-4">
+            <div class="grid grid-cols-1 gap-5 sm:grid-cols-2">
+              <label class="field-outline">
+                <span class="field-outline__label">Server URL</span>
+                <input name="ntfy_server_url" type="url" value="{{ form.config.ntfy_server_url }}"
+                       placeholder="https://ntfy.sh"
+                       autocomplete="off" spellcheck="false" class="w-full field font-mono">
+                <span class="mt-1 block text-xs text-muted">
+                  Server root only — ntfy.sh or your self-hosted instance.
+                </span>
+              </label>
+              <label class="field-outline">
+                <span class="field-outline__label">Topic</span>
+                <input name="ntfy_topic" type="text" value="{{ form.config.ntfy_topic }}"
+                       placeholder="my-uptime-alerts"
+                       autocomplete="off" spellcheck="false" class="w-full field font-mono">
+                <span class="mt-1 block text-xs text-muted">
+                  The QR above follows what you type here.
+                </span>
+              </label>
+            </div>
+            <label class="field-outline">
+              <span class="field-outline__label">Access token (optional)</span>
+              <input name="ntfy_access_token" type="text" value="{{ form.config.ntfy_access_token }}"
+                     placeholder="tk_…"
+                     autocomplete="off" spellcheck="false" class="w-full field font-mono">
+              <span class="mt-1 block text-xs text-muted">
+                Sent as a Bearer token for protected topics on self-hosted
+                servers —
+                <a href="https://docs.ntfy.sh/publish/" target="_blank" rel="noopener"
+                   class="underline decoration-dotted hover:text-body">docs.ntfy.sh/publish</a>.
+              </span>
+            </label>
+          </div>
+        </details>
       </div>
 
       <div data-variant="webhook" class="space-y-5{% if form.kind != "webhook" %} hidden{% endif %}">
