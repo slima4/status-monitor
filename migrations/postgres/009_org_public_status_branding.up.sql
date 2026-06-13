@@ -24,6 +24,12 @@ CREATE TABLE status_pages (
     custom_css               TEXT,
     custom_css_compiled      TEXT,
     custom_css_enabled       BOOLEAN NOT NULL DEFAULT false,
+    -- Pro custom domain: the apex/CNAME a page is served on. Globally unique
+    -- (it routes), CITEXT to match host case-folding; verified_at gates serving
+    -- until DNS+token check passes.
+    custom_domain            CITEXT UNIQUE,
+    custom_domain_verified_at TIMESTAMPTZ,
+    custom_domain_token      TEXT,
     write_source             TEXT NOT NULL DEFAULT 'ui'
                              CHECK (write_source IN ('ui', 'api', 'terraform')),
     created_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -53,6 +59,8 @@ CREATE TABLE status_pages (
 CREATE INDEX idx_status_pages_slug_enabled
     ON status_pages (slug) WHERE enabled = true;
 CREATE INDEX idx_status_pages_org ON status_pages (org_id);
+CREATE INDEX idx_status_pages_custom_domain
+    ON status_pages (custom_domain) WHERE custom_domain IS NOT NULL;
 
 -- A page's monitors + per-page curation. PK = one binding per (page, target).
 -- org_id is denormalised so the org-match triggers and the per-org
