@@ -272,6 +272,7 @@ async fn two_tenants_never_see_each_others_data() {
             },
             WriteSource::Ui,
             i64::MAX,
+            None,
         )
         .await
         .expect("a page")
@@ -286,6 +287,7 @@ async fn two_tenants_never_see_each_others_data() {
             },
             WriteSource::Ui,
             i64::MAX,
+            None,
         )
         .await
         .expect("b page")

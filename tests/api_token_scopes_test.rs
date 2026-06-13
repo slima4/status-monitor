@@ -412,6 +412,7 @@ async fn status_page_settings_require_status_page_scope() {
             },
             WriteSource::Ui,
             i64::MAX,
+            None,
         )
         .await
         .expect("create page")

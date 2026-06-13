@@ -57,6 +57,7 @@ async fn seed_page_with_target(pool: &PgPool, org: OrgId, target_id: Uuid) -> St
             },
             WriteSource::Ui,
             i64::MAX,
+            None,
         )
         .await
         .expect("create page")

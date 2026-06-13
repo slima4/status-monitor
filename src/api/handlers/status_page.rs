@@ -31,7 +31,8 @@ use crate::web::views::public_status::{
     LOGO_ROUTE, public_base, public_logo_url, public_status_url,
 };
 use crate::web::{
-    Authorized, OwnerAuthorized, RequestSource, StatusPageDelete, StatusPageRead, StatusPageWrite,
+    Authorized, CurrentUser, OwnerAuthorized, RequestSource, StatusPageDelete, StatusPageRead,
+    StatusPageWrite,
 };
 
 // ── DTOs ────────────────────────────────────────────────────────────────────
@@ -137,6 +138,7 @@ pub async fn list_pages(
 pub async fn create_page(
     State(state): State<AppState>,
     OwnerAuthorized(org, _): OwnerAuthorized<StatusPageWrite>,
+    CurrentUser(user): CurrentUser,
     RequestSource(source): RequestSource,
     Json(req): Json<CreatePageRequest>,
 ) -> Result<(StatusCode, Json<StatusPageView>)> {
@@ -160,6 +162,7 @@ pub async fn create_page(
             },
             source,
             max,
+            Some(user),
         )
         .await?
         .ok_or_else(|| AppError::quota_exceeded("max_status_pages", max, max, plan.id.clone()))?;
@@ -256,11 +259,12 @@ pub async fn update_page(
 pub async fn delete_page(
     State(state): State<AppState>,
     OwnerAuthorized(org, _): OwnerAuthorized<StatusPageDelete>,
+    CurrentUser(user): CurrentUser,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode> {
     if !state
         .status_page_store
-        .delete(org, StatusPageId(id))
+        .delete(org, StatusPageId(id), Some(user))
         .await?
     {
         return Err(page_not_found());

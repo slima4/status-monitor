@@ -48,6 +48,7 @@ async fn page_asset_roundtrip_live_pg() {
             },
             WriteSource::Ui,
             i64::MAX,
+            None,
         )
         .await
         .unwrap()

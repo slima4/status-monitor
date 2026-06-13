@@ -109,7 +109,13 @@ async fn pages_and_components_isolated_across_orgs_live_pg() {
     let store = PgStatusPageStore::new(pool.clone());
 
     let p = store
-        .create(org_a, page(&unique_slug("aiso")), WriteSource::Ui, i64::MAX)
+        .create(
+            org_a,
+            page(&unique_slug("aiso")),
+            WriteSource::Ui,
+            i64::MAX,
+            None,
+        )
         .await
         .expect("A creates its page")
         .expect("within page cap");
@@ -141,7 +147,7 @@ async fn pages_and_components_isolated_across_orgs_live_pg() {
             .unwrap()
             .is_none()
     );
-    assert!(!store.delete(org_b, p.id).await.unwrap());
+    assert!(!store.delete(org_b, p.id, None).await.unwrap());
     assert!(
         !store
             .update_component(org_b, p.id, target, StatusPageComponentUpdate::default())
@@ -177,21 +183,39 @@ async fn page_cap_is_per_org_live_pg() {
 
     // The first user page is within the cap of 1.
     store
-        .create(org_a, page(&unique_slug("acap")), WriteSource::Ui, cap)
+        .create(
+            org_a,
+            page(&unique_slug("acap")),
+            WriteSource::Ui,
+            cap,
+            None,
+        )
         .await
         .expect("A create call ok")
         .expect("A's first page is allowed");
 
     // A second page hits the cap.
     let at_cap = store
-        .create(org_a, page(&unique_slug("acap")), WriteSource::Ui, cap)
+        .create(
+            org_a,
+            page(&unique_slug("acap")),
+            WriteSource::Ui,
+            cap,
+            None,
+        )
         .await
         .expect("create call ok");
     assert!(at_cap.is_none(), "second page must hit the per-org cap");
 
     // The cap is per-org: B is unaffected by A being full.
     store
-        .create(org_b, page(&unique_slug("bcap")), WriteSource::Ui, cap)
+        .create(
+            org_b,
+            page(&unique_slug("bcap")),
+            WriteSource::Ui,
+            cap,
+            None,
+        )
         .await
         .expect("B create ok")
         .expect("B unaffected by A's cap");
@@ -208,12 +232,24 @@ async fn public_component_cap_counts_distinct_targets_live_pg() {
     let (org_a, _org_b, user_a, user_b) = two_orgs(&pool, "sp-pcap").await;
     let store = PgStatusPageStore::new(pool.clone());
     let p1 = store
-        .create(org_a, page(&unique_slug("pc1")), WriteSource::Ui, i64::MAX)
+        .create(
+            org_a,
+            page(&unique_slug("pc1")),
+            WriteSource::Ui,
+            i64::MAX,
+            None,
+        )
         .await
         .unwrap()
         .unwrap();
     let p2 = store
-        .create(org_a, page(&unique_slug("pc2")), WriteSource::Ui, i64::MAX)
+        .create(
+            org_a,
+            page(&unique_slug("pc2")),
+            WriteSource::Ui,
+            i64::MAX,
+            None,
+        )
         .await
         .unwrap()
         .unwrap();
@@ -258,7 +294,13 @@ async fn add_component_outcome_taxonomy_live_pg() {
     let (org_a, org_b, user_a, user_b) = two_orgs(&pool, "sp-tax").await;
     let store = PgStatusPageStore::new(pool.clone());
     let p = store
-        .create(org_a, page(&unique_slug("tax")), WriteSource::Ui, i64::MAX)
+        .create(
+            org_a,
+            page(&unique_slug("tax")),
+            WriteSource::Ui,
+            i64::MAX,
+            None,
+        )
         .await
         .unwrap()
         .unwrap();
@@ -297,7 +339,13 @@ async fn add_component_outcome_taxonomy_live_pg() {
     }
     // Cross-org: B's page can't adopt A's target (target not in B's org).
     let pb = store
-        .create(org_b, page(&unique_slug("taxb")), WriteSource::Ui, i64::MAX)
+        .create(
+            org_b,
+            page(&unique_slug("taxb")),
+            WriteSource::Ui,
+            i64::MAX,
+            None,
+        )
         .await
         .unwrap()
         .unwrap();
@@ -321,7 +369,13 @@ async fn component_curation_crud_and_reorder_live_pg() {
     let (org_a, _org_b, user_a, user_b) = two_orgs(&pool, "sp-crud").await;
     let store = PgStatusPageStore::new(pool.clone());
     let p = store
-        .create(org_a, page(&unique_slug("crud")), WriteSource::Ui, i64::MAX)
+        .create(
+            org_a,
+            page(&unique_slug("crud")),
+            WriteSource::Ui,
+            i64::MAX,
+            None,
+        )
         .await
         .unwrap()
         .unwrap();
@@ -425,14 +479,14 @@ async fn slug_is_globally_unique_across_orgs_live_pg() {
     let shared = unique_slug("shared");
 
     store
-        .create(org_a, page(&shared), WriteSource::Ui, i64::MAX)
+        .create(org_a, page(&shared), WriteSource::Ui, i64::MAX, None)
         .await
         .expect("A claims the slug call ok")
         .expect("A claims the slug");
     // The slug routes a subdomain, so it's unique across the whole table, not
     // per-org: B cannot reuse it.
     match store
-        .create(org_b, page(&shared), WriteSource::Ui, i64::MAX)
+        .create(org_b, page(&shared), WriteSource::Ui, i64::MAX, None)
         .await
     {
         Err(AppError::Unprocessable { code, .. }) => assert_eq!(code, codes::SLUG_TAKEN),
@@ -453,12 +507,24 @@ async fn pages_for_targets_resolves_curated_pages_live_pg() {
     let store = PgStatusPageStore::new(pool.clone());
 
     let p1 = store
-        .create(org_a, page(&unique_slug("rev1")), WriteSource::Ui, i64::MAX)
+        .create(
+            org_a,
+            page(&unique_slug("rev1")),
+            WriteSource::Ui,
+            i64::MAX,
+            None,
+        )
         .await
         .unwrap()
         .unwrap();
     let p2 = store
-        .create(org_a, page(&unique_slug("rev2")), WriteSource::Ui, i64::MAX)
+        .create(
+            org_a,
+            page(&unique_slug("rev2")),
+            WriteSource::Ui,
+            i64::MAX,
+            None,
+        )
         .await
         .unwrap()
         .unwrap();

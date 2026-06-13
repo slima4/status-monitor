@@ -55,6 +55,7 @@ async fn seed_org(pool: &sqlx::PgPool, slug: &str, enabled: bool) -> (OrgId, Use
             },
             WriteSource::Ui,
             i64::MAX,
+            None,
         )
         .await
         .expect("create page")

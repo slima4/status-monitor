@@ -695,6 +695,7 @@ async fn status_page_cap_blocks_create_live_pg() {
             },
             WriteSource::Ui,
             1,
+            None,
         )
         .await
         .expect("create call ok")

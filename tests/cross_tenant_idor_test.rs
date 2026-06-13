@@ -217,6 +217,7 @@ async fn logged_in_operator_cannot_touch_another_orgs_status_page() {
             },
             WriteSource::Ui,
             i64::MAX,
+            None,
         )
         .await
         .expect("create A's page")
@@ -323,6 +324,7 @@ async fn non_owner_member_cannot_mutate_status_pages() {
             },
             WriteSource::Ui,
             i64::MAX,
+            None,
         )
         .await
         .expect("create page")

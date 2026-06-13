@@ -15,7 +15,8 @@ use uuid::Uuid;
 use crate::api::error::codes;
 use crate::domain::{
     NewStatusPage, NewStatusPageComponent, OrgId, PublicOrgBranding, PublicStyle, StatusPage,
-    StatusPageComponent, StatusPageComponentUpdate, StatusPageId, StatusPageUpdate, WriteSource,
+    StatusPageComponent, StatusPageComponentUpdate, StatusPageId, StatusPageUpdate, UserId,
+    WriteSource,
 };
 use crate::error::{AppError, Result};
 use crate::storage::locks::{advisory_xact_lock, org_lock_key};
@@ -54,6 +55,7 @@ pub trait StatusPageStore: Send + Sync {
         new: NewStatusPage,
         source: WriteSource,
         max_pages: i64,
+        actor: Option<UserId>,
     ) -> Result<Option<StatusPage>>;
     async fn list(&self, org: OrgId) -> Result<Vec<StatusPage>>;
     async fn get(&self, org: OrgId, id: StatusPageId) -> Result<Option<StatusPage>>;
@@ -68,7 +70,7 @@ pub trait StatusPageStore: Send + Sync {
         upd: StatusPageUpdate,
         source: WriteSource,
     ) -> Result<Option<StatusPage>>;
-    async fn delete(&self, org: OrgId, id: StatusPageId) -> Result<bool>;
+    async fn delete(&self, org: OrgId, id: StatusPageId, actor: Option<UserId>) -> Result<bool>;
 
     async fn list_components(
         &self,
@@ -198,6 +200,7 @@ impl StatusPageStore for PgStatusPageStore {
         new: NewStatusPage,
         source: WriteSource,
         max_pages: i64,
+        actor: Option<UserId>,
     ) -> Result<Option<StatusPage>> {
         let mut tx = self.pool.begin().await.map_err(db_err)?;
         advisory_xact_lock(&mut *tx, &org_lock_key(org))
@@ -228,6 +231,14 @@ impl StatusPageStore for PgStatusPageStore {
             tx.rollback().await.ok();
             return Ok(None); // cap hit — caller maps to a plan-named quota error
         };
+        crate::storage::orgs::record_audit_tx(
+            &mut tx,
+            org,
+            actor,
+            "status_page.created",
+            serde_json::json!({ "page_id": row.id, "slug": row.slug, "name": row.name }),
+        )
+        .await?;
         tx.commit().await.map_err(db_err)?;
         Ok(Some(row.into_page()))
     }
@@ -298,14 +309,27 @@ impl StatusPageStore for PgStatusPageStore {
         Ok(row.map(PageRow::into_page))
     }
 
-    async fn delete(&self, org: OrgId, id: StatusPageId) -> Result<bool> {
-        let res = sqlx::query("DELETE FROM status_pages WHERE id = $1 AND org_id = $2")
-            .bind(id.0)
-            .bind(org.0)
-            .execute(&self.pool)
-            .await
-            .map_err(db_err)?;
-        Ok(res.rows_affected() > 0)
+    async fn delete(&self, org: OrgId, id: StatusPageId, actor: Option<UserId>) -> Result<bool> {
+        let mut tx = self.pool.begin().await.map_err(db_err)?;
+        let removed: Option<(String,)> =
+            sqlx::query_as("DELETE FROM status_pages WHERE id = $1 AND org_id = $2 RETURNING slug")
+                .bind(id.0)
+                .bind(org.0)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(db_err)?;
+        if let Some((slug,)) = &removed {
+            crate::storage::orgs::record_audit_tx(
+                &mut tx,
+                org,
+                actor,
+                "status_page.deleted",
+                serde_json::json!({ "page_id": id.0, "slug": slug }),
+            )
+            .await?;
+        }
+        tx.commit().await.map_err(db_err)?;
+        Ok(removed.is_some())
     }
 
     async fn list_components(
@@ -558,6 +582,7 @@ impl StatusPageStore for InMemoryStatusPageStore {
         new: NewStatusPage,
         source: WriteSource,
         max_pages: i64,
+        _actor: Option<UserId>,
     ) -> Result<Option<StatusPage>> {
         let mut st = self.inner.lock().unwrap();
         if st.pages.iter().filter(|p| p.org_id == org).count() as i64 >= max_pages {
@@ -648,7 +673,7 @@ impl StatusPageStore for InMemoryStatusPageStore {
         Ok(Some(p.clone()))
     }
 
-    async fn delete(&self, org: OrgId, id: StatusPageId) -> Result<bool> {
+    async fn delete(&self, org: OrgId, id: StatusPageId, _actor: Option<UserId>) -> Result<bool> {
         let mut st = self.inner.lock().unwrap();
         let before = st.pages.len();
         st.pages.retain(|p| !(p.id == id && p.org_id == org));

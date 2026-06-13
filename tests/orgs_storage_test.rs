@@ -609,6 +609,7 @@ async fn update_org_slug_does_not_touch_status_page_slug() {
             },
             WriteSource::Ui,
             i64::MAX,
+            None,
         )
         .await
         .unwrap()
