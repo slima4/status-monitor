@@ -846,24 +846,30 @@ async fn malformed_plan_override_is_ignored() {
     );
 }
 
-// ── a typo'd override key is rejected, not silently no-op'd ─────────
+// ── an unknown override key is ignored; known caps still apply ──────
 #[tokio::test]
-async fn unknown_override_key_is_rejected_not_silently_ignored() {
+async fn unknown_override_key_is_ignored_and_known_caps_apply() {
     let Some(pool) = pg_pool_from_env().await else {
         return;
     };
     let (_pid, org) = seed_org_on_plan(&pool, 5, 5, 10, 10).await;
-    // `max_target` (missing the plural) must not parse to "no caps set"
-    // and silently swallow an admin's intent — the whole row is rejected
-    // (logged) and the plan default stands.
-    seed_override(&pool, org, r#"{"max_target": 50}"#, false).await;
+    // An unknown/typo'd key (`max_target`), or a plan cap not yet in the
+    // override struct, must NOT reject the whole row and silently revert the
+    // org to defaults: the unknown key is ignored, the known cap applies.
+    seed_override(
+        &pool,
+        org,
+        r#"{"max_targets": 50, "max_target": 999}"#,
+        false,
+    )
+    .await;
 
     let cfg = AppConfig::load().expect("config");
     let svc = QuotaService::new(&cfg, Some(pool.clone()));
     assert_eq!(
         svc.limit_for_org(org).await.unwrap().max_targets,
-        5,
-        "an unknown override key must not apply as a partial override"
+        50,
+        "the known cap must apply even alongside an unknown key"
     );
 }
 

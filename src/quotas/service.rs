@@ -640,13 +640,14 @@ pub fn record_quota_event(
 /// The cap fields a limit override may set. Deserialized from a
 /// `plan_overrides.override_json` row; also the merge input for the
 /// self-host config knob (via `From`), so `apply_overrides` is the one
-/// merge for both. `deny_unknown_fields` so a typo'd admin key (`max_target`)
-/// is a loud parse error the caller logs and ignores, not a silent no-op.
-/// Deliberately has no `enabled` flag — whether an override applies is the
-/// caller's decision (a present unexpired row; or the self-host gate), never
-/// a property of the cap bag itself.
+/// merge for both. Unknown keys are ignored (not `deny_unknown_fields`): a
+/// future cap added to `Plan` but not yet here, or a typo, must only fail to
+/// apply that one key — never reject the whole row and silently revert the org
+/// to plan defaults. Deliberately has no `enabled` flag — whether an override
+/// applies is the caller's decision (a present unexpired row; or the self-host
+/// gate), never a property of the cap bag itself.
 #[derive(Debug, Default, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 struct PlanOverrides {
     max_targets: Option<u32>,
     min_check_interval_secs: Option<u32>,
@@ -660,6 +661,9 @@ struct PlanOverrides {
     max_shared_monitors: Option<u32>,
     max_maintenance_windows: Option<u32>,
     max_notification_channels: Option<u32>,
+    max_escalation_policies: Option<u32>,
+    max_on_call_schedules: Option<u32>,
+    max_regions: Option<u32>,
     max_logo_size_bytes: Option<u32>,
 }
 
@@ -684,6 +688,9 @@ fn apply_overrides(base: &Plan, ov: &PlanOverrides) -> Plan {
     p.max_shared_monitors = take(ov.max_shared_monitors, p.max_shared_monitors);
     p.max_maintenance_windows = take(ov.max_maintenance_windows, p.max_maintenance_windows);
     p.max_notification_channels = take(ov.max_notification_channels, p.max_notification_channels);
+    p.max_escalation_policies = take(ov.max_escalation_policies, p.max_escalation_policies);
+    p.max_on_call_schedules = take(ov.max_on_call_schedules, p.max_on_call_schedules);
+    p.max_regions = take(ov.max_regions, p.max_regions);
     p.max_logo_size_bytes = take(ov.max_logo_size_bytes, p.max_logo_size_bytes);
     p
 }
@@ -802,5 +809,35 @@ fn unlimited_plan() -> Plan {
         is_listed: false,
         created_at: now,
         updated_at: now,
+    }
+}
+
+#[cfg(test)]
+mod override_tests {
+    use super::*;
+
+    #[test]
+    fn unknown_keys_are_ignored_and_new_caps_apply() {
+        // Regression: deny_unknown_fields made any override naming a not-yet-
+        // listed cap (max_regions/...) fail to parse, dropping the WHOLE
+        // override and silently reverting the org to plan defaults.
+        let json = serde_json::json!({
+            "max_regions": 7,
+            "max_escalation_policies": 3,
+            "totally_unknown_future_key": 99,
+        });
+        let ov: PlanOverrides =
+            serde_json::from_value(json).expect("unknown keys must be ignored, not rejected");
+        assert_eq!(ov.max_regions, Some(7));
+        assert_eq!(ov.max_escalation_policies, Some(3));
+
+        let base = unlimited_plan();
+        let merged = apply_overrides(&base, &ov);
+        assert_eq!(merged.max_regions, 7);
+        assert_eq!(merged.max_escalation_policies, 3);
+        assert_eq!(
+            merged.max_targets, base.max_targets,
+            "untouched cap unchanged"
+        );
     }
 }
