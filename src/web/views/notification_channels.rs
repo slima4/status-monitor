@@ -464,7 +464,10 @@ pub async fn create_channel_deduped(
             config: config.clone(),
             enabled: true,
         };
-        match store.create(org, new, WriteSource::Ui, max_channels).await {
+        match store
+            .create(org, new, WriteSource::Ui, max_channels, block_log.user)
+            .await
+        {
             Err(AppError::Unprocessable { code, .. })
                 if code == codes::CHANNEL_NAME_TAKEN && attempt < MAX_SUFFIX =>
             {

@@ -88,7 +88,13 @@ async fn channels_isolated_across_orgs_live_pg() {
     let store = PgNotificationChannelStore::new(pool.clone(), None);
 
     let ch = store
-        .create(org_a, slack("A Ops", "T/B/aaa"), WriteSource::Ui, i64::MAX)
+        .create(
+            org_a,
+            slack("A Ops", "T/B/aaa"),
+            WriteSource::Ui,
+            i64::MAX,
+            None,
+        )
         .await
         .expect("A creates its channel");
 
@@ -109,13 +115,14 @@ async fn channels_isolated_across_orgs_live_pg() {
                 org_b,
                 ch.id,
                 NotificationChannelUpdate::default(),
-                WriteSource::Ui
+                WriteSource::Ui,
+                None,
             )
             .await
             .unwrap()
             .is_none()
     );
-    assert!(!store.delete(org_b, ch.id).await.unwrap());
+    assert!(!store.delete(org_b, ch.id, None).await.unwrap());
 
     // A still owns it after B's failed attempts.
     let a_view = store.get(org_a, ch.id).await.unwrap().expect("A sees it");
@@ -125,7 +132,7 @@ async fn channels_isolated_across_orgs_live_pg() {
         store.existing_channel_ids(org_a, &[ch.id]).await.unwrap(),
         vec![ch.id]
     );
-    assert!(store.delete(org_a, ch.id).await.unwrap());
+    assert!(store.delete(org_a, ch.id, None).await.unwrap());
 
     cleanup(&pool, &[org_a, org_b], &[user_a, user_b]).await;
 }
@@ -144,16 +151,16 @@ async fn quota_cap_is_per_org_live_pg() {
     // race-safe is covered by the storage-locks unit suite, not here.
 
     let a1 = store
-        .create(org_a, slack("A1", "T/B/a1"), WriteSource::Ui, cap)
+        .create(org_a, slack("A1", "T/B/a1"), WriteSource::Ui, cap, None)
         .await
         .expect("A #1");
     store
-        .create(org_a, slack("A2", "T/B/a2"), WriteSource::Ui, cap)
+        .create(org_a, slack("A2", "T/B/a2"), WriteSource::Ui, cap, None)
         .await
         .expect("A #2");
     // A is at its cap: the next create is rejected.
     match store
-        .create(org_a, slack("A3", "T/B/a3"), WriteSource::Ui, cap)
+        .create(org_a, slack("A3", "T/B/a3"), WriteSource::Ui, cap, None)
         .await
     {
         Err(AppError::Unprocessable { code, .. }) => {
@@ -164,18 +171,18 @@ async fn quota_cap_is_per_org_live_pg() {
 
     // The cap is per-org: B is unaffected by A's count.
     store
-        .create(org_b, slack("B1", "T/B/b1"), WriteSource::Ui, cap)
+        .create(org_b, slack("B1", "T/B/b1"), WriteSource::Ui, cap, None)
         .await
         .expect("B #1 (A's count must not affect B)");
     store
-        .create(org_b, slack("B2", "T/B/b2"), WriteSource::Ui, cap)
+        .create(org_b, slack("B2", "T/B/b2"), WriteSource::Ui, cap, None)
         .await
         .expect("B #2");
 
     // Cap tracks the live count: freeing a slot lets A create again.
-    assert!(store.delete(org_a, a1.id).await.unwrap());
+    assert!(store.delete(org_a, a1.id, None).await.unwrap());
     store
-        .create(org_a, slack("A4", "T/B/a4"), WriteSource::Ui, cap)
+        .create(org_a, slack("A4", "T/B/a4"), WriteSource::Ui, cap, None)
         .await
         .expect("A can create again after deleting one");
 
@@ -193,7 +200,13 @@ async fn channel_config_sealed_at_rest_live_pg() {
 
     let secret = "T/B/zzSEKRETzz";
     let ch = store
-        .create(org_a, slack("Sealed", secret), WriteSource::Ui, i64::MAX)
+        .create(
+            org_a,
+            slack("Sealed", secret),
+            WriteSource::Ui,
+            i64::MAX,
+            None,
+        )
         .await
         .expect("create sealed channel");
 
@@ -233,7 +246,13 @@ async fn target_alert_binding_channel_lookup_is_org_scoped_live_pg() {
     let targets = PostgresTargetStore::from_pool(pool.clone(), None);
 
     let ch = channels
-        .create(org_a, slack("Bound", "T/B/bind"), WriteSource::Ui, i64::MAX)
+        .create(
+            org_a,
+            slack("Bound", "T/B/bind"),
+            WriteSource::Ui,
+            i64::MAX,
+            None,
+        )
         .await
         .expect("A's channel");
 
@@ -293,11 +312,11 @@ async fn unbind_channel_scrubs_only_that_binding_in_org_live_pg() {
     let targets = PostgresTargetStore::from_pool(pool.clone(), None);
 
     let ch_a = channels
-        .create(org_a, slack("A", "T/B/ua"), WriteSource::Ui, i64::MAX)
+        .create(org_a, slack("A", "T/B/ua"), WriteSource::Ui, i64::MAX, None)
         .await
         .unwrap();
     let ch_b = channels
-        .create(org_a, slack("B", "T/B/ub"), WriteSource::Ui, i64::MAX)
+        .create(org_a, slack("B", "T/B/ub"), WriteSource::Ui, i64::MAX, None)
         .await
         .unwrap();
 
@@ -547,16 +566,22 @@ async fn telegram_lifecycle_disable_by_external_ref() {
     };
     // Two orgs share the kicked chat; org A has a second, unrelated link.
     let a = store
-        .create(org_a, linked("prod", &chat), WriteSource::Ui, 10)
+        .create(org_a, linked("prod", &chat), WriteSource::Ui, 10, None)
         .await
         .unwrap();
     store
-        .create(org_b, linked("ops", &chat), WriteSource::Ui, 10)
+        .create(org_b, linked("ops", &chat), WriteSource::Ui, 10, None)
         .await
         .unwrap();
     let other_chat = format!("-200{}", uuid::Uuid::now_v7().simple());
     store
-        .create(org_a, linked("other", &other_chat), WriteSource::Ui, 10)
+        .create(
+            org_a,
+            linked("other", &other_chat),
+            WriteSource::Ui,
+            10,
+            None,
+        )
         .await
         .unwrap();
 
@@ -602,6 +627,7 @@ async fn telegram_lifecycle_disable_by_external_ref() {
                 ..Default::default()
             },
             WriteSource::Ui,
+            None,
         )
         .await
         .unwrap()
@@ -619,6 +645,7 @@ async fn telegram_lifecycle_disable_by_external_ref() {
                 ..Default::default()
             },
             WriteSource::Ui,
+            None,
         )
         .await
         .unwrap()
@@ -648,7 +675,7 @@ async fn email_lifecycle_ref_is_derived_and_follows_the_address() {
         enabled: true,
     };
     let ch = store
-        .create(org_a, email("mail", &addr_a), WriteSource::Ui, 10)
+        .create(org_a, email("mail", &addr_a), WriteSource::Ui, 10, None)
         .await
         .unwrap();
 
@@ -686,6 +713,7 @@ async fn email_lifecycle_ref_is_derived_and_follows_the_address() {
                 ..Default::default()
             },
             WriteSource::Ui,
+            None,
         )
         .await
         .unwrap()

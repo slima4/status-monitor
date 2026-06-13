@@ -59,7 +59,7 @@ async fn token_is_single_use_and_checks_address() {
     let addr = format!("{}@example.com", unique_slug("cv-consume"));
     let store = PgNotificationChannelStore::new(pool.clone(), None);
     let ch = store
-        .create(org, email_channel("mail", &addr), WriteSource::Ui, 10)
+        .create(org, email_channel("mail", &addr), WriteSource::Ui, 10, None)
         .await
         .unwrap();
     assert!(ch.verified_at.is_none());
@@ -113,7 +113,7 @@ async fn mint_cap_and_config_replace_resets_gate() {
     let addr = format!("{}@example.com", unique_slug("cv-cap"));
     let store = PgNotificationChannelStore::new(pool.clone(), None);
     let ch = store
-        .create(org, email_channel("mail", &addr), WriteSource::Ui, 10)
+        .create(org, email_channel("mail", &addr), WriteSource::Ui, 10, None)
         .await
         .unwrap();
 
@@ -146,6 +146,7 @@ async fn mint_cap_and_config_replace_resets_gate() {
                 ..Default::default()
             },
             WriteSource::Ui,
+            None,
         )
         .await
         .unwrap()
@@ -163,6 +164,7 @@ async fn mint_cap_and_config_replace_resets_gate() {
                 ..Default::default()
             },
             WriteSource::Ui,
+            None,
         )
         .await
         .unwrap()
@@ -180,6 +182,7 @@ async fn mint_cap_and_config_replace_resets_gate() {
                 ..Default::default()
             },
             WriteSource::Ui,
+            None,
         )
         .await
         .unwrap()
@@ -202,6 +205,7 @@ async fn mint_cap_and_config_replace_resets_gate() {
             },
             WriteSource::Ui,
             10,
+            None,
         )
         .await
         .unwrap();

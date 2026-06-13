@@ -1318,6 +1318,7 @@ mod tests {
                 },
                 WriteSource::Ui,
                 100,
+                None,
             )
             .await
             .unwrap()
@@ -1497,6 +1498,7 @@ mod tests {
                 },
                 WriteSource::Ui,
                 100,
+                None,
             )
             .await
             .unwrap()

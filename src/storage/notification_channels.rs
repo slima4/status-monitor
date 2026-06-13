@@ -20,7 +20,7 @@ use uuid::Uuid;
 use crate::api::error::codes;
 use crate::domain::{
     ChannelConfig, ChannelKind, NewNotificationChannel, NotificationChannel,
-    NotificationChannelUpdate, OrgId, WriteSource,
+    NotificationChannelUpdate, OrgId, UserId, WriteSource,
 };
 use crate::error::{AppError, Result};
 use crate::security::{Cipher, envelope_str, wrap_envelope};
@@ -81,6 +81,7 @@ pub trait NotificationChannelStore: Send + Sync {
         new: NewNotificationChannel,
         source: WriteSource,
         max_channels: i64,
+        actor: Option<UserId>,
     ) -> Result<NotificationChannel>;
     async fn list(&self, org: OrgId) -> Result<Vec<NotificationChannel>>;
     async fn get(&self, org: OrgId, id: Uuid) -> Result<Option<NotificationChannel>>;
@@ -90,8 +91,9 @@ pub trait NotificationChannelStore: Send + Sync {
         id: Uuid,
         update: NotificationChannelUpdate,
         source: WriteSource,
+        actor: Option<UserId>,
     ) -> Result<Option<NotificationChannel>>;
-    async fn delete(&self, org: OrgId, id: Uuid) -> Result<bool>;
+    async fn delete(&self, org: OrgId, id: Uuid, actor: Option<UserId>) -> Result<bool>;
     /// Disable every channel of `kind` carrying `external_ref` and clear its
     /// verification stamp; returns how many flipped. Deliberately NOT
     /// org-scoped — the triggering event comes from the transport's provider
@@ -184,6 +186,7 @@ impl NotificationChannelStore for PgNotificationChannelStore {
         new: NewNotificationChannel,
         source: WriteSource,
         max_channels: i64,
+        actor: Option<UserId>,
     ) -> Result<NotificationChannel> {
         let sealed = seal(&new.config, self.cipher.as_deref())?;
         let mut tx = self
@@ -232,6 +235,14 @@ impl NotificationChannelStore for PgNotificationChannelStore {
                 "notification channel limit reached for this plan",
             ));
         };
+        crate::storage::orgs::record_audit_tx(
+            &mut tx,
+            org,
+            actor,
+            "channel.created",
+            serde_json::json!({ "channel_id": row.id, "kind": new.config.kind().as_db_str() }),
+        )
+        .await?;
         tx.commit()
             .await
             .map_err(|e| AppError::Other(anyhow!("commit: {e}")))?;
@@ -274,6 +285,7 @@ impl NotificationChannelStore for PgNotificationChannelStore {
         id: Uuid,
         update: NotificationChannelUpdate,
         source: WriteSource,
+        actor: Option<UserId>,
     ) -> Result<Option<NotificationChannel>> {
         // A config identical to the stored one is treated as omitted, so the
         // verification stamp survives a no-op replace. Best-effort: a stored
@@ -294,6 +306,11 @@ impl NotificationChannelStore for PgNotificationChannelStore {
             ),
             None => (None, None),
         };
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| AppError::Other(anyhow!("begin: {e}")))?;
         let row: Option<ChannelRow> = sqlx::query_as(
             r#"UPDATE notification_channels
                SET name        = COALESCE($2, name),
@@ -318,7 +335,7 @@ impl NotificationChannelStore for PgNotificationChannelStore {
         .bind(org.0)
         .bind(source.as_str())
         .bind(config.as_ref().and_then(|c| c.lifecycle_ref()))
-        .fetch_optional(&self.pool)
+        .fetch_optional(&mut *tx)
         .await
         .map_err(|e| {
             if is_unique_violation(&e) {
@@ -330,19 +347,53 @@ impl NotificationChannelStore for PgNotificationChannelStore {
                 AppError::Other(anyhow!("update notification channel: {e}"))
             }
         })?;
-        row.map(|r| r.into_channel(self.cipher.as_deref()))
-            .transpose()
+        let channel = row
+            .map(|r| r.into_channel(self.cipher.as_deref()))
+            .transpose()?;
+        if let Some(ch) = &channel {
+            crate::storage::orgs::record_audit_tx(
+                &mut tx,
+                org,
+                actor,
+                "channel.updated",
+                serde_json::json!({ "channel_id": ch.id, "kind": ch.kind.as_db_str() }),
+            )
+            .await?;
+        }
+        tx.commit()
+            .await
+            .map_err(|e| AppError::Other(anyhow!("commit: {e}")))?;
+        Ok(channel)
     }
 
-    async fn delete(&self, org: OrgId, id: Uuid) -> Result<bool> {
-        let result =
-            sqlx::query(r#"DELETE FROM notification_channels WHERE id = $1 AND org_id = $2"#)
-                .bind(id)
-                .bind(org.0)
-                .execute(&self.pool)
-                .await
-                .map_err(|e| AppError::Other(anyhow!("delete notification channel: {e}")))?;
-        Ok(result.rows_affected() > 0)
+    async fn delete(&self, org: OrgId, id: Uuid, actor: Option<UserId>) -> Result<bool> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| AppError::Other(anyhow!("begin: {e}")))?;
+        let removed: Option<(Uuid, String)> = sqlx::query_as(
+            r#"DELETE FROM notification_channels WHERE id = $1 AND org_id = $2 RETURNING id, kind"#,
+        )
+        .bind(id)
+        .bind(org.0)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|e| AppError::Other(anyhow!("delete notification channel: {e}")))?;
+        if let Some((channel_id, kind)) = &removed {
+            crate::storage::orgs::record_audit_tx(
+                &mut tx,
+                org,
+                actor,
+                "channel.deleted",
+                serde_json::json!({ "channel_id": channel_id, "kind": kind }),
+            )
+            .await?;
+        }
+        tx.commit()
+            .await
+            .map_err(|e| AppError::Other(anyhow!("commit: {e}")))?;
+        Ok(removed.is_some())
     }
 
     async fn disable_by_external_ref(
@@ -455,6 +506,7 @@ impl NotificationChannelStore for InMemoryNotificationChannelStore {
         new: NewNotificationChannel,
         source: WriteSource,
         max_channels: i64,
+        _actor: Option<UserId>,
     ) -> Result<NotificationChannel> {
         let mut g = self.inner.lock();
         if g.iter().any(|e| e.org == org && e.ch.name == new.name) {
@@ -517,6 +569,7 @@ impl NotificationChannelStore for InMemoryNotificationChannelStore {
         id: Uuid,
         update: NotificationChannelUpdate,
         source: WriteSource,
+        _actor: Option<UserId>,
     ) -> Result<Option<NotificationChannel>> {
         let mut g = self.inner.lock();
         if let Some(name) = &update.name
@@ -554,7 +607,7 @@ impl NotificationChannelStore for InMemoryNotificationChannelStore {
         Ok(Some(ch.clone()))
     }
 
-    async fn delete(&self, org: OrgId, id: Uuid) -> Result<bool> {
+    async fn delete(&self, org: OrgId, id: Uuid, _actor: Option<UserId>) -> Result<bool> {
         let mut g = self.inner.lock();
         let before = g.len();
         g.retain(|e| !(e.org == org && e.ch.id == id));
@@ -648,7 +701,7 @@ mod tests {
     async fn create_list_get_update_delete_roundtrip() {
         let store = InMemoryNotificationChannelStore::new();
         let ch = store
-            .create(org(), slack("ops"), WriteSource::Ui, 10)
+            .create(org(), slack("ops"), WriteSource::Ui, 10, None)
             .await
             .unwrap();
         assert_eq!(store.list(org()).await.unwrap().len(), 1);
@@ -663,13 +716,14 @@ mod tests {
                     ..Default::default()
                 },
                 WriteSource::Ui,
+                None,
             )
             .await
             .unwrap()
             .unwrap();
         assert!(!patched.enabled);
 
-        assert!(store.delete(org(), ch.id).await.unwrap());
+        assert!(store.delete(org(), ch.id, None).await.unwrap());
         assert!(store.is_empty());
     }
 
@@ -677,16 +731,16 @@ mod tests {
     async fn create_enforces_cap_and_unique_name() {
         let store = InMemoryNotificationChannelStore::new();
         store
-            .create(org(), slack("a"), WriteSource::Ui, 1)
+            .create(org(), slack("a"), WriteSource::Ui, 1, None)
             .await
             .unwrap();
         let over = store
-            .create(org(), slack("b"), WriteSource::Ui, 1)
+            .create(org(), slack("b"), WriteSource::Ui, 1, None)
             .await
             .unwrap_err();
         assert!(matches!(over, AppError::Unprocessable { .. }));
         let dup = store
-            .create(org(), slack("a"), WriteSource::Ui, 10)
+            .create(org(), slack("a"), WriteSource::Ui, 10, None)
             .await
             .unwrap_err();
         assert!(matches!(dup, AppError::Unprocessable { .. }));
@@ -696,12 +750,12 @@ mod tests {
     async fn channels_are_isolated_per_org() {
         let store = InMemoryNotificationChannelStore::new();
         let a = store
-            .create(org(), slack("ops"), WriteSource::Ui, 10)
+            .create(org(), slack("ops"), WriteSource::Ui, 10, None)
             .await
             .unwrap();
         // Same name in a different org is allowed and invisible to org A.
         store
-            .create(other_org(), slack("ops"), WriteSource::Ui, 10)
+            .create(other_org(), slack("ops"), WriteSource::Ui, 10, None)
             .await
             .unwrap();
 
@@ -715,13 +769,14 @@ mod tests {
                     other_org(),
                     a.id,
                     NotificationChannelUpdate::default(),
-                    WriteSource::Ui
+                    WriteSource::Ui,
+                    None,
                 )
                 .await
                 .unwrap()
                 .is_none()
         );
-        assert!(!store.delete(other_org(), a.id).await.unwrap());
+        assert!(!store.delete(other_org(), a.id, None).await.unwrap());
         assert!(
             store
                 .existing_channel_ids(other_org(), &[a.id])
@@ -746,15 +801,27 @@ mod tests {
         };
         // Two orgs linked the same chat; a third channel points elsewhere.
         let a = store
-            .create(org(), linked("prod", "-100"), WriteSource::Ui, 10)
+            .create(org(), linked("prod", "-100"), WriteSource::Ui, 10, None)
             .await
             .unwrap();
         store
-            .create(other_org(), linked("ops", "-100"), WriteSource::Ui, 10)
+            .create(
+                other_org(),
+                linked("ops", "-100"),
+                WriteSource::Ui,
+                10,
+                None,
+            )
             .await
             .unwrap();
         store
-            .create(org(), linked("other-chat", "-200"), WriteSource::Ui, 10)
+            .create(
+                org(),
+                linked("other-chat", "-200"),
+                WriteSource::Ui,
+                10,
+                None,
+            )
             .await
             .unwrap();
 
@@ -804,6 +871,7 @@ mod tests {
                     ..Default::default()
                 },
                 WriteSource::Ui,
+                None,
             )
             .await
             .unwrap()

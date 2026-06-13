@@ -73,6 +73,7 @@ pub struct TestNotificationResponse {
 pub async fn create(
     State(state): State<AppState>,
     Authorized(org, _): Authorized<ChannelsWrite>,
+    CurrentUser(user): CurrentUser,
     RequestSource(source): RequestSource,
     Json(new): Json<NewNotificationChannel>,
 ) -> Result<(
@@ -99,7 +100,7 @@ pub async fn create(
     );
     let ch = state
         .notification_channel_store
-        .create(org, new, source, limit)
+        .create(org, new, source, limit, Some(user))
         .await?;
     spawn_send_verification(&state, org, &ch);
     let location = HeaderValue::from_str(&format!("/api/v1/notification-channels/{}", ch.id))
@@ -174,6 +175,7 @@ pub async fn get(
 pub async fn update(
     State(state): State<AppState>,
     Authorized(org, _): Authorized<ChannelsWrite>,
+    CurrentUser(user): CurrentUser,
     RequestSource(source): RequestSource,
     Path(id): Path<Uuid>,
     Json(update): Json<NotificationChannelUpdate>,
@@ -189,7 +191,7 @@ pub async fn update(
     }
     let updated = state
         .notification_channel_store
-        .update(org, id, update, source)
+        .update(org, id, update, source, Some(user))
         .await?
         .ok_or_else(channel_not_found)?;
     // A replaced config resets the verification gate; re-prove the address.
@@ -215,6 +217,7 @@ pub async fn update(
 pub async fn delete(
     State(state): State<AppState>,
     Authorized(org, _): Authorized<ChannelsDelete>,
+    CurrentUser(user): CurrentUser,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode> {
     // The bot-leave decision below needs the transport + chat id, gone once
@@ -228,7 +231,11 @@ pub async fn delete(
     // re-introduce a binding; the escalation engine tolerates missing
     // channels at resolve time.
     state.target_store.unbind_channel(org, id).await?;
-    if state.notification_channel_store.delete(org, id).await? {
+    if state
+        .notification_channel_store
+        .delete(org, id, Some(user))
+        .await?
+    {
         if let Some(ch) = channel {
             maybe_leave_telegram_group(&state, &ch);
         }
