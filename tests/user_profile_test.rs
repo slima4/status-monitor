@@ -231,14 +231,7 @@ async fn session_touch_bumps_users_last_seen_at() {
     let (user, _) = seed_user_with_org(&pool, "ls@example.test", "ls-org").await;
     let token = "raw-cookie-value-test";
     let id_hash = hash_session_id(token);
-    sqlx::query(
-        "INSERT INTO sessions (id_hash, user_id, expires_at) VALUES ($1, $2, now() + interval '1 day')",
-    )
-    .bind(&id_hash)
-    .bind(user)
-    .execute(&pool)
-    .await
-    .unwrap();
+    common::seed_session(&pool, &id_hash, uptimepage::domain::UserId(user), None).await;
 
     let cache = build_debounce_cache();
     touch_last_used_debounced(&pool, &cache, &id_hash)

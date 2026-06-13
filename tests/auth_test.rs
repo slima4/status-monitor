@@ -188,17 +188,13 @@ async fn auth_tables_accept_representative_inserts() {
     .expect("insert user")
     .get(0);
 
-    sqlx::query(
-        "INSERT INTO sessions (id_hash, user_id, active_org_id, expires_at) \
-         VALUES ($1, $2, $3, $4)",
+    common::seed_session(
+        &pool,
+        "sess-fake-id-hash",
+        uptimepage::domain::UserId(user_id),
+        Some(uptimepage::domain::OrgId(org_id)),
     )
-    .bind("sess-fake-id-hash")
-    .bind(user_id)
-    .bind(org_id)
-    .bind(Utc::now() + chrono::Duration::days(90))
-    .execute(&pool)
-    .await
-    .expect("insert session");
+    .await;
 
     sqlx::query(
         "INSERT INTO oauth_identities (user_id, provider, provider_user_id, provider_username) \

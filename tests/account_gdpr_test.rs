@@ -145,14 +145,7 @@ async fn deletion_then_restore_round_trip() {
     let user = seed_user(&pool, "solo@example.test", "Solo").await;
     let uid = uptimepage::domain::UserId(user);
     let org = seed_org(&pool, "solo-org", user).await;
-    sqlx::query(
-        "INSERT INTO sessions (id_hash, user_id, expires_at) VALUES ($1, $2, now() + interval '1 day')",
-    )
-    .bind("sess-1-hash")
-    .bind(user)
-    .execute(&pool)
-    .await
-    .unwrap();
+    common::seed_session(&pool, "sess-1-hash", uid, None).await;
     sqlx::query(
         "INSERT INTO api_tokens (user_id, name, token_hash, token_prefix) \
          VALUES ($1, 't', 'h', 'p')",

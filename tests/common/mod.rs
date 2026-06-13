@@ -88,6 +88,28 @@ pub fn test_user_id() -> uptimepage::domain::UserId {
     uptimepage::domain::UserId(Uuid::from_u128(0x0000_0000_0000_0000_0000_0000_0000_0002))
 }
 
+/// Insert a live session row (expires in 1 day) for `user`, returning its
+/// `id_hash`. `active_org` stamps `active_org_id` when `Some`. Tests that
+/// assert on custom expiry/idle windows build the row directly instead.
+pub async fn seed_session(
+    pool: &PgPool,
+    id_hash: &str,
+    user: uptimepage::domain::UserId,
+    active_org: Option<OrgId>,
+) -> String {
+    sqlx::query(
+        "INSERT INTO sessions (id_hash, user_id, active_org_id, expires_at) \
+         VALUES ($1, $2, $3, now() + interval '1 day')",
+    )
+    .bind(id_hash)
+    .bind(user.0)
+    .bind(active_org.map(|o| o.0))
+    .execute(pool)
+    .await
+    .expect("seed session");
+    id_hash.to_string()
+}
+
 /// One-line helper that wraps [`build_test_app`] with an owner session bound
 /// to [`test_user_id`] + [`test_org_id`]. Use this for tests that hit
 /// authenticated operator endpoints; for tests that probe the unauthenticated

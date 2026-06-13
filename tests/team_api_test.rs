@@ -309,16 +309,7 @@ async fn switch_active_org_persists_and_gates_membership() {
     add_member(&pool, org_b, user, "member").await;
 
     let hash = "sess-switch-hash";
-    sqlx::query(
-        "INSERT INTO sessions (id_hash, user_id, active_org_id, expires_at) \
-         VALUES ($1, $2, $3, now() + interval '1 day')",
-    )
-    .bind(hash)
-    .bind(user.0)
-    .bind(org_a.0)
-    .execute(&pool)
-    .await
-    .unwrap();
+    common::seed_session(&pool, hash, user, Some(org_a)).await;
 
     let (app, _d) = common::build_test_app_with_pg(pool.clone(), |_| {}).await;
     let app = common::with_session(app, user, Some(org_a), Some(hash));
