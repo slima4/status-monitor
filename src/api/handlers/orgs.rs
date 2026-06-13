@@ -460,11 +460,15 @@ pub async fn list_org_members(
 )]
 pub async fn remove_org_member(
     State(state): State<AppState>,
-    BrowserUser(CurrentUser(user)): BrowserUser,
     session: crate::web::Session,
     Path((id, target_user_id)): Path<(Uuid, Uuid)>,
 ) -> Result<StatusCode> {
     let pool = require_db(&state)?;
+    // Cookie-session only (no Bearer): member management is a browser action,
+    // and the self-leave path below rotates the active org on this session.
+    let Some(user) = session.user_id() else {
+        return Err(AppError::Unauthorized);
+    };
     let org_id = OrgId(id);
     let target = UserId(target_user_id);
     require_owner(pool, user, org_id).await?;
@@ -560,19 +564,19 @@ pub async fn update_org_member_role(
 )]
 pub async fn switch_active_org(
     State(state): State<AppState>,
-    BrowserUser(CurrentUser(user)): BrowserUser,
     session: crate::web::Session,
     Json(req): Json<SwitchActiveOrgRequest>,
 ) -> Result<StatusCode> {
     let pool = require_db(&state)?;
+    // Cookie-session only: a Bearer request carries no cookie, so `user_id`
+    // and the hash are both absent and it 401s — an API token can't repoint a
+    // browser's active org.
+    let (Some(user), Some(hash)) = (session.user_id(), session.session_id_hash.as_deref()) else {
+        return Err(AppError::Unauthorized);
+    };
     if !orgs_store::is_active_member(pool, user, req.org_id).await? {
         return Err(AppError::Forbidden);
     }
-    let Some(hash) = session.session_id_hash.as_deref() else {
-        // BrowserUser guarantees a cookie session, so the hash is always
-        // present; guard anyway rather than silently 204 on a no-op.
-        return Err(AppError::Unauthorized);
-    };
     if !crate::auth::session::set_active_org_by_hash(pool, hash, req.org_id).await? {
         // Session revoked/expired between extraction and the UPDATE.
         return Err(AppError::Unauthorized);
