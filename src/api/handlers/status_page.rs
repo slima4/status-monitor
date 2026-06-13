@@ -435,6 +435,7 @@ pub async fn reorder_components(
 pub async fn upload_logo(
     State(state): State<AppState>,
     OwnerAuthorized(org, _): OwnerAuthorized<StatusPageWrite>,
+    CurrentUser(user): CurrentUser,
     Path(id): Path<Uuid>,
     mut multipart: Multipart,
 ) -> Result<Json<LogoResponse>> {
@@ -467,6 +468,7 @@ pub async fn upload_logo(
             mime.as_content_type(),
             &bytes,
             serde_json::json!({ "width": w, "height": h }),
+            Some(user),
         )
         .await?;
     state.public_source.invalidate(StatusPageId(id)).await;
@@ -486,14 +488,14 @@ pub async fn upload_logo(
 pub async fn delete_logo(
     State(state): State<AppState>,
     OwnerAuthorized(org, _): OwnerAuthorized<StatusPageDelete>,
+    CurrentUser(user): CurrentUser,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode> {
-    // Page id is already org-scoped by the owner extractor; the delete is
-    // page-keyed and idempotent (no row → 204).
+    // Idempotent: no row → 204.
     let _ = load(&state, org, id).await?;
     if state
         .page_asset_store
-        .delete(StatusPageId(id), AssetSlot::Logo)
+        .delete(org, StatusPageId(id), AssetSlot::Logo, Some(user))
         .await?
     {
         state.public_source.invalidate(StatusPageId(id)).await;

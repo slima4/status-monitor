@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 
-use crate::domain::{AssetSlot, OrgId, StatusPageId};
+use crate::domain::{AssetSlot, OrgId, StatusPageId, UserId};
 use crate::error::{AppError, Result};
 
 /// Stored asset bytes + how to serve them.
@@ -36,6 +36,7 @@ pub trait PageAssetStore: Send + Sync {
     /// UPSERT the slot's bytes (one row per `(page, slot)`). `content_hash` is
     /// `hex(sha256(bytes))`; `byte_size` is `bytes.len()`. Always writes the
     /// `db` storage path. Returns the stored metadata.
+    #[allow(clippy::too_many_arguments)]
     async fn put(
         &self,
         org: OrgId,
@@ -44,13 +45,21 @@ pub trait PageAssetStore: Send + Sync {
         content_type: &str,
         bytes: &[u8],
         metadata: serde_json::Value,
+        actor: Option<UserId>,
     ) -> Result<AssetMeta>;
     /// Read the bytes for serving. Only the `db` storage path is read; a future
     /// `s3` row returns `None` (the bytes live elsewhere, not yet wired).
     async fn get(&self, page: StatusPageId, slot: AssetSlot) -> Result<Option<AssetContent>>;
     /// Metadata only (no bytes) for the `db` storage path.
     async fn get_meta(&self, page: StatusPageId, slot: AssetSlot) -> Result<Option<AssetMeta>>;
-    async fn delete(&self, page: StatusPageId, slot: AssetSlot) -> Result<bool>;
+    /// Org-scoped so a request-supplied page id can't delete another tenant's asset.
+    async fn delete(
+        &self,
+        org: OrgId,
+        page: StatusPageId,
+        slot: AssetSlot,
+        actor: Option<UserId>,
+    ) -> Result<bool>;
 }
 
 pub struct PgPageAssetStore {
@@ -74,6 +83,7 @@ fn db_err(e: sqlx::Error) -> AppError {
 
 #[async_trait]
 impl PageAssetStore for PgPageAssetStore {
+    #[allow(clippy::too_many_arguments)]
     async fn put(
         &self,
         org: OrgId,
@@ -82,9 +92,11 @@ impl PageAssetStore for PgPageAssetStore {
         content_type: &str,
         bytes: &[u8],
         metadata: serde_json::Value,
+        actor: Option<UserId>,
     ) -> Result<AssetMeta> {
         let hash = content_hash(bytes);
         let byte_size = bytes.len() as i64;
+        let mut tx = self.pool.begin().await.map_err(db_err)?;
         sqlx::query(
             r#"INSERT INTO page_assets
                    (org_id, status_page_id, slot, content_type, content_hash,
@@ -109,9 +121,18 @@ impl PageAssetStore for PgPageAssetStore {
         .bind(byte_size)
         .bind(bytes)
         .bind(metadata.clone())
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await
         .map_err(db_err)?;
+        crate::storage::orgs::record_audit_tx(
+            &mut tx,
+            org,
+            actor,
+            "page_asset.set",
+            serde_json::json!({ "page_id": page.0, "slot": slot.as_str() }),
+        )
+        .await?;
+        tx.commit().await.map_err(db_err)?;
         Ok(AssetMeta {
             content_hash: hash,
             content_type: content_type.to_owned(),
@@ -157,14 +178,36 @@ impl PageAssetStore for PgPageAssetStore {
         ))
     }
 
-    async fn delete(&self, page: StatusPageId, slot: AssetSlot) -> Result<bool> {
-        let res = sqlx::query("DELETE FROM page_assets WHERE status_page_id = $1 AND slot = $2")
-            .bind(page.0)
-            .bind(slot.as_str())
-            .execute(&self.pool)
-            .await
-            .map_err(db_err)?;
-        Ok(res.rows_affected() > 0)
+    async fn delete(
+        &self,
+        org: OrgId,
+        page: StatusPageId,
+        slot: AssetSlot,
+        actor: Option<UserId>,
+    ) -> Result<bool> {
+        let mut tx = self.pool.begin().await.map_err(db_err)?;
+        let removed: Option<(uuid::Uuid,)> = sqlx::query_as(
+            "DELETE FROM page_assets WHERE status_page_id = $1 AND slot = $2 AND org_id = $3 \
+             RETURNING status_page_id",
+        )
+        .bind(page.0)
+        .bind(slot.as_str())
+        .bind(org.0)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(db_err)?;
+        if removed.is_some() {
+            crate::storage::orgs::record_audit_tx(
+                &mut tx,
+                org,
+                actor,
+                "page_asset.deleted",
+                serde_json::json!({ "page_id": page.0, "slot": slot.as_str() }),
+            )
+            .await?;
+        }
+        tx.commit().await.map_err(db_err)?;
+        Ok(removed.is_some())
     }
 }
 
@@ -188,6 +231,7 @@ impl InMemoryPageAssetStore {
 
 #[async_trait]
 impl PageAssetStore for InMemoryPageAssetStore {
+    #[allow(clippy::too_many_arguments)]
     async fn put(
         &self,
         _org: OrgId,
@@ -196,6 +240,7 @@ impl PageAssetStore for InMemoryPageAssetStore {
         content_type: &str,
         bytes: &[u8],
         metadata: serde_json::Value,
+        _actor: Option<UserId>,
     ) -> Result<AssetMeta> {
         let hash = content_hash(bytes);
         let byte_size = bytes.len() as i64;
@@ -241,7 +286,13 @@ impl PageAssetStore for InMemoryPageAssetStore {
             }))
     }
 
-    async fn delete(&self, page: StatusPageId, slot: AssetSlot) -> Result<bool> {
+    async fn delete(
+        &self,
+        _org: OrgId,
+        page: StatusPageId,
+        slot: AssetSlot,
+        _actor: Option<UserId>,
+    ) -> Result<bool> {
         Ok(self
             .inner
             .lock()

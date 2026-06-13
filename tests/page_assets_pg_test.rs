@@ -65,7 +65,12 @@ async fn page_asset_roundtrip_live_pg() {
             .unwrap()
             .is_none()
     );
-    assert!(!store.delete(page.id, AssetSlot::Logo).await.unwrap());
+    assert!(
+        !store
+            .delete(org, page.id, AssetSlot::Logo, None)
+            .await
+            .unwrap()
+    );
 
     let bytes = b"\x89PNG\r\n\x1a\nfake-logo-bytes";
     let meta = store
@@ -76,6 +81,7 @@ async fn page_asset_roundtrip_live_pg() {
             "image/png",
             bytes,
             serde_json::json!({ "width": 10, "height": 5 }),
+            None,
         )
         .await
         .unwrap();
@@ -109,6 +115,7 @@ async fn page_asset_roundtrip_live_pg() {
             "image/webp",
             bytes2,
             serde_json::json!({}),
+            None,
         )
         .await
         .unwrap();
@@ -117,7 +124,12 @@ async fn page_asset_roundtrip_live_pg() {
     assert_eq!(got2.bytes, bytes2);
     assert_eq!(got2.content_type, "image/webp");
 
-    assert!(store.delete(page.id, AssetSlot::Logo).await.unwrap());
+    assert!(
+        store
+            .delete(org, page.id, AssetSlot::Logo, None)
+            .await
+            .unwrap()
+    );
     assert!(store.get(page.id, AssetSlot::Logo).await.unwrap().is_none());
 
     cleanup(&pool, org, user).await;
