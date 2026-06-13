@@ -247,14 +247,46 @@ async fn build_page(state: &AppState, org: OrgId, params: &ListParams) -> WebRes
         .filter(|s| !s.is_empty())
         .unwrap_or_default();
 
+    let q_filter = (!q.is_empty()).then(|| q.clone());
+    let tag_filter = (!tag.is_empty()).then(|| tag.clone());
+    let group_filter = (!group.is_empty()).then(|| group.clone());
+
+    // Chip tallies are org-wide and ignore the active kind, so they stay
+    // invariant as the user switches chips — counted in SQL, not over the page.
+    let kind_counts = state
+        .target_store
+        .count_by_kind(
+            org,
+            TargetFilter {
+                q: q_filter.clone(),
+                tag: tag_filter.clone(),
+                enabled: params.enabled,
+                group: group_filter.clone(),
+                owner: params.owner,
+                sort,
+                ..TargetFilter::default()
+            },
+        )
+        .await?;
+    let mut chip_counts: HashMap<&'static str, usize> = HashMap::new();
+    for (db_kind, n) in &kind_counts {
+        if let Some(label) = db_kind_to_chip(db_kind) {
+            chip_counts.insert(label, *n as usize);
+        }
+    }
+    let all_count: usize = kind_counts.values().map(|n| *n as usize).sum();
+
     let filter = TargetFilter {
         limit: Some(limit + 1),
         offset,
-        q: (!q.is_empty()).then(|| q.clone()),
-        tag: (!tag.is_empty()).then(|| tag.clone()),
+        q: q_filter,
+        tag: tag_filter,
         enabled: params.enabled,
-        group: (!group.is_empty()).then(|| group.clone()),
+        group: group_filter,
         owner: params.owner,
+        // Empty = no filter; an unrecognised label maps to "" so the filter is
+        // still honored as "matches nothing" rather than silently dropped.
+        kind: (!kind.is_empty()).then(|| chip_to_db_kind(&kind).unwrap_or_default()),
         sort,
     };
 
@@ -262,19 +294,6 @@ async fn build_page(state: &AppState, org: OrgId, params: &ListParams) -> WebRes
     let has_more = targets.len() > limit;
     if has_more {
         targets.truncate(limit);
-    }
-
-    // Tally BEFORE the kind retain so chip counts stay invariant when
-    // the user clicks between chips.
-    let mut chip_counts: HashMap<&'static str, usize> = HashMap::new();
-    for t in &targets {
-        let (k, _) = describe_check(&t.check);
-        *chip_counts.entry(k).or_default() += 1;
-    }
-    let all_count = targets.len();
-
-    if !kind.is_empty() {
-        targets.retain(|t| describe_check(&t.check).0.eq_ignore_ascii_case(&kind));
     }
 
     let metrics_by_target: HashMap<Uuid, DashboardMetrics> = if targets.is_empty() {
@@ -430,6 +449,31 @@ async fn build_page(state: &AppState, org: OrgId, params: &ListParams) -> WebRes
 struct MemberLite {
     id: Uuid,
     label: String,
+}
+
+/// Type-chip label (URL param) → `check_spec` type tag for the SQL filter.
+fn chip_to_db_kind(label: &str) -> Option<String> {
+    match label.to_ascii_uppercase().as_str() {
+        "HTTP" => Some("http"),
+        "TCP" => Some("tcp"),
+        "DNS" => Some("dns"),
+        "TLS" => Some("tls_cert"),
+        "DOMAIN" => Some("domain_expiry"),
+        _ => None,
+    }
+    .map(str::to_owned)
+}
+
+/// Inverse of [`chip_to_db_kind`]: type tag → chip label.
+fn db_kind_to_chip(kind: &str) -> Option<&'static str> {
+    match kind {
+        "http" => Some("HTTP"),
+        "tcp" => Some("TCP"),
+        "dns" => Some("DNS"),
+        "tls_cert" => Some("TLS"),
+        "domain_expiry" => Some("DOMAIN"),
+        _ => None,
+    }
 }
 
 fn build_row(

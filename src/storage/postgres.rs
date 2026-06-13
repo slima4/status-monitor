@@ -241,6 +241,7 @@ impl TargetStore for PostgresTargetStore {
                  AND ($4::text IS NULL OR name ILIKE $4)
                  AND ($5::text IS NULL OR group_name = $5)
                  AND ($6::uuid IS NULL OR owner_user_id = $6)
+                 AND ($9::text IS NULL OR kind = $9)
                {order_clause}
                LIMIT $7 OFFSET $8"#,
         );
@@ -253,10 +254,54 @@ impl TargetStore for PostgresTargetStore {
             .bind(filter.owner)
             .bind(limit)
             .bind(offset)
+            .bind(filter.kind)
             .fetch_all(&self.pool)
             .await
             .context("query targets")?;
         self.rows_to_targets(rows)
+    }
+
+    async fn count_by_kind(
+        &self,
+        org: OrgId,
+        filter: TargetFilter,
+    ) -> Result<std::collections::HashMap<String, i64>> {
+        let q_like = filter
+            .q
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| format!("%{s}%"));
+        let group = filter
+            .group
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned);
+        let rows: Vec<(Option<String>, i64)> = sqlx::query_as(
+            r#"SELECT kind, count(*)
+               FROM targets
+               WHERE org_id = $1
+                 AND ($2::bool IS NULL OR enabled = $2)
+                 AND ($3::text IS NULL OR $3 = ANY(tags))
+                 AND ($4::text IS NULL OR name ILIKE $4)
+                 AND ($5::text IS NULL OR group_name = $5)
+                 AND ($6::uuid IS NULL OR owner_user_id = $6)
+               GROUP BY kind"#,
+        )
+        .bind(org.0)
+        .bind(filter.enabled)
+        .bind(filter.tag)
+        .bind(q_like)
+        .bind(group)
+        .bind(filter.owner)
+        .fetch_all(&self.pool)
+        .await
+        .context("count targets by kind")?;
+        Ok(rows
+            .into_iter()
+            .filter_map(|(kind, n)| kind.map(|k| (k, n)))
+            .collect())
     }
 
     async fn names(&self, org: OrgId) -> Result<std::collections::HashMap<Uuid, String>> {

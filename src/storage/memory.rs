@@ -562,6 +562,10 @@ impl TargetStore for InMemoryTargetStore {
                 Some(u) => t.owner_user_id == Some(u),
                 None => true,
             })
+            .filter(|t| match &filter.kind {
+                Some(k) => t.check.kind() == k,
+                None => true,
+            })
             .cloned()
             .collect();
         match filter.sort {
@@ -584,6 +588,52 @@ impl TargetStore for InMemoryTargetStore {
 
     async fn get(&self, _org: OrgId, id: Uuid) -> Result<Option<Target>> {
         Ok(self.targets.lock().iter().find(|t| t.id == id).cloned())
+    }
+
+    async fn count_by_kind(
+        &self,
+        _org: OrgId,
+        filter: TargetFilter,
+    ) -> Result<std::collections::HashMap<String, i64>> {
+        let q_lower = filter
+            .q
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_lowercase);
+        let group = filter
+            .group
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        let mut counts: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+        for t in self.targets.lock().iter() {
+            if !filter.enabled.map(|e| t.enabled == e).unwrap_or(true) {
+                continue;
+            }
+            if let Some(tag) = &filter.tag
+                && !t.tags.iter().any(|x| x == tag)
+            {
+                continue;
+            }
+            if let Some(q) = &q_lower
+                && !t.name.to_lowercase().contains(q)
+            {
+                continue;
+            }
+            if let Some(g) = group
+                && t.group_name.as_deref() != Some(g)
+            {
+                continue;
+            }
+            if let Some(u) = filter.owner
+                && t.owner_user_id != Some(u)
+            {
+                continue;
+            }
+            *counts.entry(t.check.kind().to_string()).or_default() += 1;
+        }
+        Ok(counts)
     }
 
     async fn names(&self, _org: OrgId) -> Result<std::collections::HashMap<Uuid, String>> {

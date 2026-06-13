@@ -39,6 +39,8 @@ pub struct TargetFilter {
     pub enabled: Option<bool>,
     pub group: Option<String>,
     pub owner: Option<Uuid>,
+    /// `check_spec` type tag (`http`/`tcp`/`dns`/`tls_cert`/`domain_expiry`).
+    pub kind: Option<String>,
     #[allow(dead_code)]
     pub sort: TargetSort,
 }
@@ -61,6 +63,14 @@ pub enum TargetSort {
 pub trait TargetStore: Send + Sync {
     async fn list(&self, org: OrgId, filter: TargetFilter) -> Result<Vec<Target>>;
     async fn get(&self, org: OrgId, id: Uuid) -> Result<Option<Target>>;
+    /// `check kind → count` across the whole org for the given filter, with the
+    /// filter's own `kind` ignored. Powers the type-chip tallies so they stay
+    /// org-wide and invariant when switching chips (not page-scoped).
+    async fn count_by_kind(
+        &self,
+        org: OrgId,
+        filter: TargetFilter,
+    ) -> Result<std::collections::HashMap<String, i64>>;
     /// `id → name` for every live target in the org. A projection: it skips the
     /// `check_spec` decode + secret decrypt that `list` pays, for callers that
     /// only need labels (incident console, reports).
