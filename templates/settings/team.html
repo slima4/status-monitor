@@ -35,6 +35,9 @@
     <div id="form-errors" role="alert" aria-live="polite"
          class="hidden alert-card alert-card--error"></div>
   </form>
+  {% else %}
+  <p class="font-mono text-xs text-quiet"># read-only — owners invite or remove people</p>
+  {% endif %}
 
   <div id="team-list"
        hx-get="/web/partials/settings/team"
@@ -45,12 +48,9 @@
     <p class="px-4 py-6 font-mono text-xs text-quiet"># loading…</p>
   </div>
 
+  {% if is_owner %}
   <script defer src="{{ "js/ui/api_form.js"|asset }}"></script>
   <script defer src="{{ "js/ui/team.js"|asset }}"></script>
-  {% else %}
-  <div class="sticker-card p-4">
-    <p class="font-mono text-xs text-quiet"># owners manage the team — ask one to invite or remove people</p>
-  </div>
   {% endif %}
 </section>
 {% endblock %}

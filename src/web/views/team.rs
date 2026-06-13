@@ -29,6 +29,7 @@ pub struct TeamPage {
 #[template(path = "settings/team_partial.html")]
 pub struct TeamPartial {
     pub org_id: String,
+    pub is_owner: bool,
     pub members: Vec<MemberRow>,
     pub invitations: Vec<InviteRow>,
     pub members_used: usize,
@@ -90,12 +91,18 @@ pub async fn partial(
         return Err(AppError::Unauthorized.into());
     };
     let pool = state.require_db()?;
-    if !matches!(
-        orgs_store::membership_status(pool, user.id, org).await?,
-        MembershipStatus::Owner
-    ) {
-        return Err(AppError::Forbidden.into());
-    }
+    // Any active member may read the roster; non-members are cloaked as 404.
+    let is_owner = match orgs_store::membership_status(pool, user.id, org).await? {
+        MembershipStatus::Owner => true,
+        MembershipStatus::Member => false,
+        MembershipStatus::None => {
+            return Err(AppError::not_found(
+                crate::api::error::codes::ORG_NOT_FOUND,
+                "organisation not found",
+            )
+            .into());
+        }
+    };
 
     let plan = state.quotas.limit_for_org(org).await?;
     let members: Vec<MemberRow> = orgs_store::list_members(pool, org)
@@ -110,19 +117,25 @@ pub async fn partial(
             joined: m.membership.created_at,
         })
         .collect();
-    let invitations: Vec<InviteRow> = invitations::list_pending_for_org(pool, org)
-        .await?
-        .into_iter()
-        .map(|i| InviteRow {
-            id: i.id.to_string(),
-            email: i.email,
-            role: i.role,
-            expires: i.expires_at,
-        })
-        .collect();
+    // Pending invitations are owner-management detail; members see only the roster.
+    let invitations: Vec<InviteRow> = if is_owner {
+        invitations::list_pending_for_org(pool, org)
+            .await?
+            .into_iter()
+            .map(|i| InviteRow {
+                id: i.id.to_string(),
+                email: i.email,
+                role: i.role,
+                expires: i.expires_at,
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
 
     Ok(TeamPartial {
         org_id: org.0.to_string(),
+        is_owner,
         members_used: members.len(),
         members_limit: i64::from(plan.max_members),
         invites_limit: i64::from(plan.max_pending_invitations),
@@ -161,13 +174,18 @@ mod tests {
         .render()
         .unwrap();
         assert!(!html.contains(r#"id="invite-form""#));
-        assert!(html.contains("owners manage the team"));
+        // Non-owners still get the read-only roster (the hx-get hook), just no
+        // invite form or mutation script.
+        assert!(html.contains(r#"hx-get="/web/partials/settings/team""#));
+        assert!(!html.contains("team.js"));
+        assert!(html.contains("read-only"));
     }
 
     #[test]
     fn team_partial_renders_rows_self_marker_and_empty_invites() {
         let html = TeamPartial {
             org_id: "00000000-0000-0000-0000-000000000001".into(),
+            is_owner: true,
             members: vec![
                 MemberRow {
                     user_id: "00000000-0000-0000-0000-0000000000aa".into(),
@@ -203,5 +221,47 @@ mod tests {
         assert!(html.contains("# no pending invitations"));
         assert!(html.contains("2/5"));
         assert!(html.contains(r#"data-org-id="00000000-0000-0000-0000-000000000001""#));
+    }
+
+    #[test]
+    fn team_partial_for_member_is_read_only() {
+        let html = TeamPartial {
+            org_id: "00000000-0000-0000-0000-000000000001".into(),
+            is_owner: false,
+            members: vec![
+                MemberRow {
+                    user_id: "00000000-0000-0000-0000-0000000000aa".into(),
+                    email: "owner@example.test".into(),
+                    role: "owner",
+                    is_owner: true,
+                    is_self: false,
+                    joined: "2026-01-01T00:00:00Z".parse().unwrap(),
+                },
+                MemberRow {
+                    user_id: "00000000-0000-0000-0000-0000000000bb".into(),
+                    email: "me@example.test".into(),
+                    role: "member",
+                    is_owner: false,
+                    is_self: true,
+                    joined: "2026-02-01T00:00:00Z".parse().unwrap(),
+                },
+            ],
+            invitations: vec![],
+            members_used: 2,
+            members_limit: 5,
+            invites_limit: 10,
+        }
+        .render()
+        .unwrap();
+        // Roster is visible...
+        assert!(html.contains("owner@example.test"));
+        assert!(html.contains(r#"<span class="cli-brackets font-normal">you</span>"#));
+        // ...but no mutation controls, and pending invitations stay owner-only.
+        assert!(!html.contains("make owner"));
+        assert!(!html.contains("make member"));
+        assert!(!html.contains("data-team-remove"));
+        assert!(!html.contains("leave"));
+        assert!(!html.contains("pending invitations"));
+        assert!(!html.contains("invites pending"));
     }
 }

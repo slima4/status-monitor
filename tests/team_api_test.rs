@@ -463,9 +463,13 @@ async fn team_page_and_partial_render_by_role() {
     let (status, body) = get(&as_member, "/settings/team").await;
     assert_eq!(status, StatusCode::OK);
     assert!(!body.contains(r#"id="invite-form""#));
-    assert!(body.contains("owners manage the team"));
-    let (status, _) = get(&as_member, "/web/partials/settings/team").await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert!(body.contains("read-only"));
+    // Member reads the roster but gets no mutation controls and no invitations.
+    let (status, body) = get(&as_member, "/web/partials/settings/team").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.contains("own7@team.test"));
+    assert!(!body.contains("data-team-remove"));
+    assert!(!body.contains("pending invitations"));
 
     common::drop_test_db(&name).await;
 }

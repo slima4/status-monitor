@@ -3,7 +3,7 @@
    actions must always hit the org whose rows are on screen. #}
 <p data-org-id="{{ org_id }}" class="border-b border-[color:var(--theme-line)] px-4 py-2 font-mono text-xs text-muted">
   › members <span class="cli-brackets">{{ members_used }}/{{ members_limit }}</span>
-  · invites pending <span class="cli-brackets">{{ invitations.len() }}/{{ invites_limit }}</span>
+  {% if is_owner %}· invites pending <span class="cli-brackets">{{ invitations.len() }}/{{ invites_limit }}</span>{% endif %}
 </p>
 <table class="w-full text-left text-sm">
   <thead class="table-head bg-[color:var(--theme-surface-sunk)]">
@@ -11,7 +11,7 @@
       <th class="px-4 py-2">Member</th>
       <th class="px-4 py-2">Role</th>
       <th class="px-4 py-2">Joined</th>
-      <th class="px-4 py-2"></th>
+      {% if is_owner %}<th class="px-4 py-2"></th>{% endif %}
     </tr>
   </thead>
   <tbody class="divide-y divide-[color:var(--theme-line)]">
@@ -24,6 +24,7 @@
         <span class="status-badge status-badge--tag">{{ m.role }}</span>
       </td>
       <td class="px-4 py-2 align-top text-body tabular-nums"><time datetime="{{ m.joined|iso_ts }}" data-tz="exact">{{ m.joined|human_ts }}</time></td>
+      {% if is_owner %}
       <td class="px-4 py-2">
         <div class="flex items-center justify-end gap-3">
           {% if !m.is_self %}
@@ -55,11 +56,13 @@
                   class="row-link row-link--danger">{% if m.is_self %}leave{% else %}remove{% endif %}</button>
         </div>
       </td>
+      {% endif %}
     </tr>
     {% endfor %}
   </tbody>
 </table>
 
+{% if is_owner %}
 <p class="border-t border-[color:var(--theme-line)] bg-[color:var(--theme-surface-sunk)] px-4 py-2 font-mono text-xs text-muted">› pending invitations</p>
 {% if invitations.is_empty() %}
 <p class="px-4 py-6 font-mono text-xs text-quiet"># no pending invitations</p>
@@ -104,4 +107,5 @@
     {% endfor %}
   </tbody>
 </table>
+{% endif %}
 {% endif %}
