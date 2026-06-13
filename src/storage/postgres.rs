@@ -242,6 +242,9 @@ impl TargetStore for PostgresTargetStore {
                  AND ($5::text IS NULL OR group_name = $5)
                  AND ($6::uuid IS NULL OR owner_user_id = $6)
                  AND ($9::text IS NULL OR kind = $9)
+                 AND ($10::text IS NULL OR EXISTS (
+                     SELECT 1 FROM target_regions tr
+                     WHERE tr.target_id = targets.id AND tr.region = $10))
                {order_clause}
                LIMIT $7 OFFSET $8"#,
         );
@@ -255,10 +258,24 @@ impl TargetStore for PostgresTargetStore {
             .bind(limit)
             .bind(offset)
             .bind(filter.kind)
+            .bind(filter.region)
             .fetch_all(&self.pool)
             .await
             .context("query targets")?;
         self.rows_to_targets(rows)
+    }
+
+    async fn distinct_groups(&self, org: OrgId) -> Result<Vec<String>> {
+        let rows: Vec<(String,)> = sqlx::query_as(
+            "SELECT DISTINCT group_name FROM targets \
+             WHERE org_id = $1 AND group_name IS NOT NULL AND group_name <> '' \
+             ORDER BY group_name",
+        )
+        .bind(org.0)
+        .fetch_all(&self.pool)
+        .await
+        .context("distinct target groups")?;
+        Ok(rows.into_iter().map(|(g,)| g).collect())
     }
 
     async fn count_by_kind(

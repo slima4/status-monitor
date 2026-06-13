@@ -287,6 +287,7 @@ async fn build_page(state: &AppState, org: OrgId, params: &ListParams) -> WebRes
         // Empty = no filter; an unrecognised label maps to "" so the filter is
         // still honored as "matches nothing" rather than silently dropped.
         kind: (!kind.is_empty()).then(|| chip_to_db_kind(&kind).unwrap_or_default()),
+        region: None,
         sort,
     };
 
@@ -378,7 +379,8 @@ async fn build_page(state: &AppState, org: OrgId, params: &ListParams) -> WebRes
         .collect();
     owner_options.sort_by(|a, b| a.label.cmp(&b.label));
 
-    let group_options = collect_group_options(&groups, &group);
+    let group_options =
+        collect_group_options(&state.target_store.distinct_groups(org).await?, &group);
 
     let query_suffix = build_query_suffix(&q, &tag, &group, &kind, params, sort_key(sort));
 
@@ -593,12 +595,8 @@ fn worst_of(acc: &'static str, next: &'static str) -> &'static str {
     if rank(next) > rank(acc) { next } else { acc }
 }
 
-fn collect_group_options(groups: &[GroupBlock], selected: &str) -> Vec<GroupOption> {
-    let mut names: Vec<String> = groups
-        .iter()
-        .filter(|g| g.has_name)
-        .map(|g| g.name.clone())
-        .collect();
+fn collect_group_options(group_names: &[String], selected: &str) -> Vec<GroupOption> {
+    let mut names: Vec<String> = group_names.to_vec();
     names.sort();
     names.dedup();
     if !selected.is_empty() && !names.iter().any(|n| n == selected) {

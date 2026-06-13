@@ -590,6 +590,19 @@ impl TargetStore for InMemoryTargetStore {
         Ok(self.targets.lock().iter().find(|t| t.id == id).cloned())
     }
 
+    async fn distinct_groups(&self, _org: OrgId) -> Result<Vec<String>> {
+        let mut groups: Vec<String> = self
+            .targets
+            .lock()
+            .iter()
+            .filter_map(|t| t.group_name.clone())
+            .filter(|g| !g.is_empty())
+            .collect();
+        groups.sort();
+        groups.dedup();
+        Ok(groups)
+    }
+
     async fn count_by_kind(
         &self,
         _org: OrgId,

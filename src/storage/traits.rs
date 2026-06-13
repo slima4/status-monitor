@@ -41,6 +41,8 @@ pub struct TargetFilter {
     pub owner: Option<Uuid>,
     /// `check_spec` type tag (`http`/`tcp`/`dns`/`tls_cert`/`domain_expiry`).
     pub kind: Option<String>,
+    /// Restrict to targets that run in this region (via `target_regions`).
+    pub region: Option<String>,
     #[allow(dead_code)]
     pub sort: TargetSort,
 }
@@ -71,6 +73,9 @@ pub trait TargetStore: Send + Sync {
         org: OrgId,
         filter: TargetFilter,
     ) -> Result<std::collections::HashMap<String, i64>>;
+    /// Distinct non-null `group_name`s across the org, sorted. Powers the
+    /// group filter dropdown so its options are org-wide, not page-scoped.
+    async fn distinct_groups(&self, org: OrgId) -> Result<Vec<String>>;
     /// `id → name` for every live target in the org. A projection: it skips the
     /// `check_spec` decode + secret decrypt that `list` pays, for callers that
     /// only need labels (incident console, reports).

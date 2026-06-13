@@ -534,9 +534,13 @@ async fn build_snapshot(
     // 24h` is mid-bucket and the tooltips drift by up to 29 minutes.
     let ribbon_from = snap_to_bucket(to - Duration::hours(RIBBON_HOURS), RIBBON_BUCKET_SECONDS);
 
+    // Region view lists only targets that run there — otherwise off-region
+    // monitors fill the page (showing "—") and the ROW_LIMIT truncates the
+    // wrong set. All-regions (region None) keeps the full list.
     let target_filter = TargetFilter {
         limit: Some(ROW_LIMIT + 1),
         offset: 0,
+        region: region.map(str::to_owned),
         ..Default::default()
     };
 
