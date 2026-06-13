@@ -146,7 +146,12 @@ async fn create_resolve_revoke_roundtrip_live_pg() {
     assert!(viewed[0].last_viewed_at.is_some());
 
     // A foreign org cannot revoke it…
-    assert!(!store.revoke(org_b, target, created.share.id).await.unwrap());
+    assert!(
+        !store
+            .revoke(org_b, target, created.share.id, None)
+            .await
+            .unwrap()
+    );
     assert!(
         store
             .resolve_active(&created.token)
@@ -156,7 +161,12 @@ async fn create_resolve_revoke_roundtrip_live_pg() {
     );
     // …nor can a revoke addressed at the wrong monitor in the right org.
     let other = make_target(&pool, org_a, "other svc").await;
-    assert!(!store.revoke(org_a, other, created.share.id).await.unwrap());
+    assert!(
+        !store
+            .revoke(org_a, other, created.share.id, None)
+            .await
+            .unwrap()
+    );
     assert!(
         store
             .resolve_active(&created.token)
@@ -166,7 +176,12 @@ async fn create_resolve_revoke_roundtrip_live_pg() {
     );
 
     // …the owner can; after which it resolves to nothing and drops off the list.
-    assert!(store.revoke(org_a, target, created.share.id).await.unwrap());
+    assert!(
+        store
+            .revoke(org_a, target, created.share.id, None)
+            .await
+            .unwrap()
+    );
     assert!(
         store
             .resolve_active(&created.token)
@@ -182,7 +197,12 @@ async fn create_resolve_revoke_roundtrip_live_pg() {
             .is_empty()
     );
     // Double-revoke is a clean miss.
-    assert!(!store.revoke(org_a, target, created.share.id).await.unwrap());
+    assert!(
+        !store
+            .revoke(org_a, target, created.share.id, None)
+            .await
+            .unwrap()
+    );
 
     cleanup(&pool, &[org_a, org_b], &[user_a, user_b]).await;
 }
@@ -228,7 +248,7 @@ async fn create_enforces_per_monitor_and_per_org_caps_live_pg() {
         CreateShareOutcome::OrgMonitorLimit
     ));
     // Revoking A's only link drops A as a shared monitor, freeing the org slot.
-    assert!(store.revoke(org, a, first_a.share.id).await.unwrap());
+    assert!(store.revoke(org, a, first_a.share.id, None).await.unwrap());
     assert!(matches!(
         mk(c).await.unwrap(),
         CreateShareOutcome::Created(_)

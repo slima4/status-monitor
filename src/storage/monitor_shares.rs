@@ -88,7 +88,13 @@ pub trait MonitorShareStore: Send + Sync {
     /// that monitor in this org, or already revoked. Scoping to `target_id`
     /// keeps the REST path honest: a share is only revocable via its own
     /// monitor's URL.
-    async fn revoke(&self, org: OrgId, target_id: Uuid, id: MonitorShareId) -> Result<bool>;
+    async fn revoke(
+        &self,
+        org: OrgId,
+        target_id: Uuid,
+        id: MonitorShareId,
+        actor: Option<UserId>,
+    ) -> Result<bool>;
     /// Bump the view counter + `last_viewed_at` for a resolved share. Called
     /// fire-and-forget on a page view; a failure must never break the render.
     async fn record_view(&self, id: MonitorShareId) -> Result<()>;
@@ -207,6 +213,14 @@ impl MonitorShareStore for PgMonitorShareStore {
         .fetch_one(&mut *tx)
         .await
         .map_err(db_err)?;
+        crate::storage::orgs::record_audit_tx(
+            &mut tx,
+            org,
+            created_by,
+            "monitor_share.created",
+            serde_json::json!({ "share_id": row.id, "target_id": target_id }),
+        )
+        .await?;
         tx.commit().await.map_err(db_err)?;
         let mut share = row.into_share();
         share.token = Some(raw.clone());
@@ -252,18 +266,37 @@ impl MonitorShareStore for PgMonitorShareStore {
         Ok(n)
     }
 
-    async fn revoke(&self, org: OrgId, target_id: Uuid, id: MonitorShareId) -> Result<bool> {
-        let res = sqlx::query(
+    async fn revoke(
+        &self,
+        org: OrgId,
+        target_id: Uuid,
+        id: MonitorShareId,
+        actor: Option<UserId>,
+    ) -> Result<bool> {
+        let mut tx = self.pool.begin().await.map_err(db_err)?;
+        let revoked: Option<(Uuid,)> = sqlx::query_as(
             "UPDATE monitor_shares SET revoked_at = now() \
-             WHERE id = $1 AND org_id = $2 AND target_id = $3 AND revoked_at IS NULL",
+             WHERE id = $1 AND org_id = $2 AND target_id = $3 AND revoked_at IS NULL \
+             RETURNING id",
         )
         .bind(id.0)
         .bind(org.0)
         .bind(target_id)
-        .execute(&self.pool)
+        .fetch_optional(&mut *tx)
         .await
         .map_err(db_err)?;
-        Ok(res.rows_affected() > 0)
+        if revoked.is_some() {
+            crate::storage::orgs::record_audit_tx(
+                &mut tx,
+                org,
+                actor,
+                "monitor_share.revoked",
+                serde_json::json!({ "share_id": id.0, "target_id": target_id }),
+            )
+            .await?;
+        }
+        tx.commit().await.map_err(db_err)?;
+        Ok(revoked.is_some())
     }
 
     async fn record_view(&self, id: MonitorShareId) -> Result<()> {
@@ -401,7 +434,13 @@ impl MonitorShareStore for InMemoryMonitorShareStore {
             .count() as i64)
     }
 
-    async fn revoke(&self, org: OrgId, target_id: Uuid, id: MonitorShareId) -> Result<bool> {
+    async fn revoke(
+        &self,
+        org: OrgId,
+        target_id: Uuid,
+        id: MonitorShareId,
+        _actor: Option<UserId>,
+    ) -> Result<bool> {
         let mut st = self.inner.lock().unwrap();
         match st.iter_mut().find(|m| {
             m.share.id == id

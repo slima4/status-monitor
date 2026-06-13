@@ -180,7 +180,7 @@ async fn unknown_revoked_and_expired_tokens_all_404() {
     let created = mk_share(&*shares, org(), target, NewMonitorShare::default()).await;
     assert!(
         shares
-            .revoke(org(), target, created.share.id)
+            .revoke(org(), target, created.share.id, None)
             .await
             .unwrap()
     );

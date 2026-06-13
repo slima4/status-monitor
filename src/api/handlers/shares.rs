@@ -173,11 +173,12 @@ pub async fn list_shares(
 pub async fn revoke_share(
     State(state): State<AppState>,
     Authorized(org, _): Authorized<TargetsWrite>,
+    CurrentUser(user): CurrentUser,
     Path((target_id, share_id)): Path<(Uuid, MonitorShareId)>,
 ) -> Result<StatusCode> {
     if state
         .monitor_share_store
-        .revoke(org, target_id, share_id)
+        .revoke(org, target_id, share_id, Some(user))
         .await?
     {
         Ok(StatusCode::NO_CONTENT)
