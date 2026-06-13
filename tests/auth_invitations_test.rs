@@ -118,6 +118,114 @@ async fn create_lookup_accept_flow() {
 
 #[tokio::test]
 #[ignore = "requires DATABASE_URL"]
+async fn resend_reissues_link_and_revives_expired() {
+    let Some((db, name)) = fresh_pg().await else {
+        return;
+    };
+    let pool = open_pool(&db).await;
+    MIGRATOR.run(&pool).await.unwrap();
+
+    let owner = seed_user(&pool, "rot@example.test").await;
+    let org = seed_org(&pool, owner).await;
+    let created = invitations::create(
+        &pool,
+        org,
+        owner,
+        "z@example.test",
+        Role::Member,
+        168,
+        u32::MAX,
+    )
+    .await
+    .unwrap();
+
+    // Expire the link: it no longer matches a token lookup.
+    sqlx::query("UPDATE invitations SET expires_at = now() - INTERVAL '1 hour' WHERE id = $1")
+        .bind(created.row.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(
+        invitations::find_pending_by_token(&pool, &created.token)
+            .await
+            .unwrap()
+            .is_none()
+    );
+
+    // Pre-check resolves the expired-but-unconsumed row + original inviter.
+    let target = invitations::pending_for_resend(&pool, org, created.row.id)
+        .await
+        .unwrap()
+        .expect("resendable");
+    assert_eq!(target.email, "z@example.test");
+    assert_eq!(target.inviter_id, owner);
+
+    // Persisting a freshly minted token revives the row: old link stays dead,
+    // new link resolves the same row.
+    let fresh = invitations::generate_raw_token();
+    let new_expiry = chrono::Utc::now() + chrono::Duration::hours(168);
+    assert!(
+        invitations::persist_resend(&pool, org, created.row.id, &fresh, new_expiry)
+            .await
+            .unwrap()
+    );
+    assert!(
+        invitations::find_pending_by_token(&pool, &created.token)
+            .await
+            .unwrap()
+            .is_none(),
+        "old link stays dead after rotation"
+    );
+    let found = invitations::find_pending_by_token(&pool, &fresh)
+        .await
+        .unwrap()
+        .expect("new token resolves");
+    assert_eq!(found.id, created.row.id);
+
+    // A consumed (declined) invitation is neither resendable nor persistable.
+    let declined = invitations::create(
+        &pool,
+        org,
+        owner,
+        "d@example.test",
+        Role::Member,
+        168,
+        u32::MAX,
+    )
+    .await
+    .unwrap();
+    invitations::mark_declined(&pool, org, declined.row.id)
+        .await
+        .unwrap();
+    assert!(
+        invitations::pending_for_resend(&pool, org, declined.row.id)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    let dead = invitations::generate_raw_token();
+    assert!(
+        !invitations::persist_resend(&pool, org, declined.row.id, &dead, new_expiry)
+            .await
+            .unwrap()
+    );
+
+    // A sibling org can't resend another tenant's invitation.
+    let other_owner = seed_user(&pool, "rot-other@example.test").await;
+    let other_org = seed_org(&pool, other_owner).await;
+    assert!(
+        invitations::pending_for_resend(&pool, other_org, created.row.id)
+            .await
+            .unwrap()
+            .is_none()
+    );
+
+    pool.close().await;
+    drop_pg(&name).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
 async fn decline_flow() {
     let Some((db, name)) = fresh_pg().await else {
         return;

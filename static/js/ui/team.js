@@ -66,9 +66,10 @@
         const roleBtn = ev.target.closest("[data-team-role]");
         const removeBtn = ev.target.closest("[data-team-remove]");
         const revokeBtn = ev.target.closest("[data-team-revoke]");
+        const resendBtn = ev.target.closest("[data-team-resend]");
         // Unconfirmed clicks never reach here — confirm_modal.js capture
         // listener swallows them and re-dispatches after the user confirms.
-        const btn = roleBtn || removeBtn || revokeBtn;
+        const btn = roleBtn || removeBtn || revokeBtn || resendBtn;
         if (!btn) return;
 
         window.smClearFormErrors(banner);
@@ -86,6 +87,11 @@
                     method: "DELETE",
                     headers,
                 });
+            } else if (resendBtn) {
+                res = await fetch(
+                    `/api/v1/orgs/${orgId()}/invitations/${btn.dataset.invitationId}/resend`,
+                    { method: "POST", headers },
+                );
             } else {
                 res = await fetch(
                     `/api/v1/orgs/${orgId()}/invitations/${btn.dataset.invitationId}`,

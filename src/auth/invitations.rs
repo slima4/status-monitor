@@ -332,6 +332,69 @@ pub async fn list_pending_for_org(pool: &PgPool, org: OrgId) -> Result<Vec<Invit
     Ok(rows)
 }
 
+/// Who/what to re-mail for a resend, fetched cheaply before any token mint.
+pub struct ResendTarget {
+    pub email: String,
+    /// Original inviter — the "invited by" attribution stays stable on resend.
+    pub inviter_id: UserId,
+}
+
+/// Cheap pre-check for a resend: returns the recipient + original inviter when
+/// a non-consumed invite with that (id, org) exists, else `None`. Reads no
+/// hash, so the caller can reject a bogus id before paying the argon2 cost.
+/// Expired-but-unconsumed rows qualify — resend revives them.
+pub async fn pending_for_resend(
+    pool: &PgPool,
+    org: OrgId,
+    id: Uuid,
+) -> Result<Option<ResendTarget>> {
+    let row: Option<(String, Uuid)> = sqlx::query_as(
+        "SELECT email::text, inviter_id FROM invitations \
+         WHERE id = $1 AND org_id = $2 \
+         AND accepted_at IS NULL AND declined_at IS NULL",
+    )
+    .bind(id)
+    .bind(org.0)
+    .fetch_optional(pool)
+    .await
+    .context("invitations::pending_for_resend")?;
+    Ok(row.map(|(email, inviter_id)| ResendTarget {
+        email,
+        inviter_id: UserId(inviter_id),
+    }))
+}
+
+/// Persist a re-issued token + refreshed expiry onto a still-pending invite.
+/// The caller mints `raw_token` and **emails it first**, calling this only on
+/// send success — so a failed send never overwrites the hash and the prior
+/// link stays valid. `created_at` is untouched. Returns false if the row was
+/// consumed/deleted in the race window between [`pending_for_resend`] and here.
+pub async fn persist_resend(
+    pool: &PgPool,
+    org: OrgId,
+    id: Uuid,
+    raw_token: &str,
+    expires_at: DateTime<Utc>,
+) -> Result<bool> {
+    let prefix = slice_prefix(raw_token).to_string();
+    let hash = token_hash::hash(raw_token)?;
+    let res = sqlx::query(
+        "UPDATE invitations \
+            SET token_hash = $3, token_prefix = $4, expires_at = $5 \
+         WHERE id = $1 AND org_id = $2 \
+           AND accepted_at IS NULL AND declined_at IS NULL",
+    )
+    .bind(id)
+    .bind(org.0)
+    .bind(&hash)
+    .bind(&prefix)
+    .bind(expires_at)
+    .execute(pool)
+    .await
+    .context("invitations::persist_resend")?;
+    Ok(res.rows_affected() > 0)
+}
+
 /// Hard-delete a still-pending invitation by id. The (id, org_id) tuple is
 /// required so a sibling-org owner can't revoke another org's invitation.
 pub async fn revoke(pool: &PgPool, org: OrgId, id: Uuid) -> Result<bool> {

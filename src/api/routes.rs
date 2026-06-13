@@ -376,6 +376,10 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
             "/orgs/{id}/invitations/{invitation_id}",
             axum::routing::delete(handlers::invitations::revoke),
         )
+        .route(
+            "/orgs/{id}/invitations/{invitation_id}/resend",
+            post(handlers::invitations::resend),
+        )
         .route("/invitations/accept", post(handlers::invitations::accept))
         .route("/invitations/decline", post(handlers::invitations::decline))
         // Added before the auth layer so it ends up *inner*: auth runs

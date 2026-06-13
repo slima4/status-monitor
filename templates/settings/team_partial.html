@@ -82,7 +82,14 @@
       </td>
       <td class="px-4 py-2 align-top text-body tabular-nums"><time datetime="{{ i.expires|iso_ts }}" data-tz="exact">{{ i.expires|human_ts }}</time></td>
       <td class="px-4 py-2">
-        <div class="flex items-center justify-end">
+        <div class="flex items-center justify-end gap-3">
+          <button type="button"
+                  data-team-resend data-invitation-id="{{ i.id }}"
+                  data-confirm-modal
+                  data-confirm-title="Resend invitation?"
+                  data-confirm-body="A fresh link is emailed to {{ i.email }}. The previously sent link stops working."
+                  data-confirm-label="resend invitation"
+                  class="row-link">resend</button>
           <button type="button"
                   data-team-revoke data-invitation-id="{{ i.id }}"
                   data-confirm-modal

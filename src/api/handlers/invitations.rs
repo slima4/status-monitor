@@ -97,27 +97,17 @@ pub async fn create(
     let expiry_hours = state.cfg.auth.invitations.expiry_hours;
     let created = inv::create(pool, org, user_id, email, role, expiry_hours, max).await?;
 
-    // Resolve inviter display + email for the outgoing message.
-    let inviter = inviter_display(pool, user_id).await?;
-    let accept_url = action_url(&state, "accept", &created.token);
-    let decline_url = action_url(&state, "decline", &created.token);
-    let from = EmailAddress::new(
-        state.cfg.email.from_address.clone(),
-        state.cfg.email.from_name.clone(),
-    );
-    let to = EmailAddress::new(email.to_string(), email.to_string());
-    let outgoing = TransactionalEmail {
-        from,
-        to,
-        template: EmailTemplate::Invitation {
-            org_name: org_row.name,
-            inviter_display: inviter,
-            accept_url,
-            decline_url,
-            expires_at: created.row.expires_at,
-        },
-    };
-    if let Err(err) = state.email_sender.send(outgoing).await {
+    if let Err(err) = send_invitation_email(
+        &state,
+        pool,
+        &org_row,
+        user_id,
+        email,
+        &created.token,
+        created.row.expires_at,
+    )
+    .await
+    {
         // Roll back so the recipient isn't left with a row they can never
         // redeem (no email = no token in their inbox). The DB row is the
         // only place the token-hash lives, so deleting it removes the only
@@ -125,10 +115,7 @@ pub async fn create(
         if let Err(rev_err) = inv::revoke(pool, org, created.row.id).await {
             tracing::warn!(error = %rev_err, "invitation rollback failed after send error");
         }
-        tracing::warn!(error = %err, org = %org.0, "invitation send failed");
-        return Err(AppError::Other(anyhow::anyhow!(
-            "invitation send failed: {err}"
-        )));
+        return Err(err);
     }
 
     Ok((
@@ -184,6 +171,75 @@ pub async fn revoke(
             "invitation not found",
         ));
     }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Re-send a still-pending invitation: mails a fresh link and rotates the
+/// token so the previous link stops working. Saves the owner the
+/// revoke-then-re-invite two-step and revives an invite whose link expired.
+/// Verified-owner gated like `create` (the email goes out under the org's
+/// name); the pending cap isn't re-checked because this reissues an existing
+/// invite, not a new address.
+pub async fn resend(
+    State(state): State<AppState>,
+    VerifiedBrowserUser(CurrentUser(user_id)): VerifiedBrowserUser,
+    Path((org_id, invitation_id)): Path<(Uuid, Uuid)>,
+) -> Result<StatusCode> {
+    let pool = state.require_db()?;
+    let org = OrgId(org_id);
+    if !orgs_store::is_owner(pool, user_id, org).await? {
+        return Err(AppError::Forbidden);
+    }
+    let Some(org_row) = orgs_store::get_org(pool, org).await? else {
+        return Err(AppError::not_found(codes::ORG_NOT_FOUND, "org not found"));
+    };
+    if org_row.deleted_at.is_some() {
+        return Err(AppError::not_found(codes::ORG_DELETED, "org is deleted"));
+    }
+    // Cheap existence check before the token mint's argon2 cost.
+    let Some(target) = inv::pending_for_resend(pool, org, invitation_id).await? else {
+        return Err(AppError::not_found(
+            codes::INVITATION_INVALID,
+            "invitation not found",
+        ));
+    };
+    // Joined via another path since the invite was created — nothing to resend.
+    if let Some(uid) = orgs_store::find_user_by_email(pool, &target.email).await?
+        && orgs_store::is_active_member(pool, uid, org).await?
+    {
+        return Err(AppError::conflict(
+            codes::ALREADY_MEMBER,
+            "user is already a member of this org",
+        ));
+    }
+
+    // Mint + email FIRST, persist the rotation only on send success: a transient
+    // mail error then leaves the existing link untouched instead of bricking it
+    // (old hash kept, no new link delivered). The original inviter is preserved
+    // so the "invited by" attribution stays stable across resends.
+    let raw = inv::generate_raw_token();
+    let expires_at =
+        Utc::now() + chrono::Duration::hours(i64::from(state.cfg.auth.invitations.expiry_hours));
+    send_invitation_email(
+        &state,
+        pool,
+        &org_row,
+        target.inviter_id,
+        &target.email,
+        &raw,
+        expires_at,
+    )
+    .await?;
+    if !inv::persist_resend(pool, org, invitation_id, &raw, expires_at).await? {
+        // Raced to consumed/deleted between the check and here. The fresh email
+        // is out but its token was never stored, so the new link simply won't
+        // verify — no membership or data effect.
+        return Err(AppError::not_found(
+            codes::INVITATION_INVALID,
+            "invitation not found",
+        ));
+    }
+
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -376,6 +432,44 @@ fn validate_email(raw: &str) -> Result<&str> {
             "email",
         )
     })
+}
+
+/// Build + send the invitation email. Shared by create and resend; the
+/// caller owns the failure policy (create rolls the new row back, resend
+/// leaves the pre-existing row pending).
+async fn send_invitation_email(
+    state: &AppState,
+    pool: &sqlx::PgPool,
+    org_row: &Organization,
+    inviter_id: UserId,
+    email: &str,
+    token: &str,
+    expires_at: DateTime<Utc>,
+) -> Result<()> {
+    let inviter = inviter_display(pool, inviter_id).await?;
+    let accept_url = action_url(state, "accept", token);
+    let decline_url = action_url(state, "decline", token);
+    let from = EmailAddress::new(
+        state.cfg.email.from_address.clone(),
+        state.cfg.email.from_name.clone(),
+    );
+    let to = EmailAddress::new(email.to_string(), email.to_string());
+    let outgoing = TransactionalEmail {
+        from,
+        to,
+        template: EmailTemplate::Invitation {
+            org_name: org_row.name.clone(),
+            inviter_display: inviter,
+            accept_url,
+            decline_url,
+            expires_at,
+        },
+    };
+    state.email_sender.send(outgoing).await.map_err(|err| {
+        tracing::warn!(error = %err, org = %org_row.id.0, "invitation send failed");
+        AppError::Other(anyhow::anyhow!("invitation send failed: {err}"))
+    })?;
+    Ok(())
 }
 
 async fn inviter_display(pool: &sqlx::PgPool, user: crate::domain::UserId) -> Result<String> {
