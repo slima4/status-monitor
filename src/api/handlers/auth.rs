@@ -311,25 +311,30 @@ async fn finish_login(
         tracing::warn!(error = %err, "display-preference cookie issue failed (non-fatal)");
     }
 
+    // One-shot banners ride a flash cookie (unspoofable, fires once); only the
+    // slug-validated `joined` stays a query param.
+    let invite_missed = joined.is_none() && consumed.invitation_id.is_some();
+    crate::web::flash::set(
+        &cookies,
+        crate::web::flash::Flash {
+            restored: resolved.restored,
+            invite_missed,
+        },
+        state.cfg.auth.session.cookie_secure,
+        &state.cfg.auth.session.cookie_domain,
+    );
     // Joined org outranks onboarding — the invitation is why they came; the
     // personal signup org keeps its default name, renameable in settings.
     let redirect = if let Some(j) = joined {
-        let mut url = format!("/?joined={}", crate::auth::url::url_encode(&j.org_slug));
-        if resolved.restored {
-            url.push_str("&restored=1");
-        }
-        url
-    } else if consumed.invitation_id.is_some() {
-        // Carried an invitation but the redeem soft-failed (mismatched email,
-        // seat race, revoked). The dashboard banner says so generically; the
-        // emailed landing link still explains the specific reason.
-        "/?invite=missed".to_string()
+        format!("/?joined={}", crate::auth::url::url_encode(&j.org_slug))
+    } else if invite_missed {
+        "/".to_string()
     } else if resolved.is_new_user {
         "/onboarding/org".to_string()
     } else if resolved.restored {
         // Banner outranks redirect_after — the user must learn the account
         // came back.
-        "/?restored=1".to_string()
+        "/".to_string()
     } else {
         consumed
             .redirect_after

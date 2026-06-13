@@ -317,19 +317,23 @@ pub async fn verify(
     if let Err(err) = crate::web::display_prefs::issue_cookies(&state, &cookies, user_id).await {
         tracing::warn!(error = %err, "display-preference cookie issue failed (non-fatal)");
     }
-    // Same priority as the OAuth callback.
+    // One-shot banners ride a flash cookie (unspoofable, fires once); only the
+    // slug-validated `joined` stays a query param. Same priority as the OAuth
+    // callback.
+    let invite_missed = joined.is_none() && row.invitation_id.is_some();
+    crate::web::flash::set(
+        &cookies,
+        crate::web::flash::Flash {
+            restored,
+            invite_missed,
+        },
+        state.cfg.auth.session.cookie_secure,
+        &state.cfg.auth.session.cookie_domain,
+    );
     let redirect = if let Some(j) = joined {
-        let mut url = format!("/?joined={}", crate::auth::url::url_encode(&j.org_slug));
-        if restored {
-            url.push_str("&restored=1");
-        }
-        url
-    } else if row.invitation_id.is_some() {
-        // Carried an invitation but the redeem soft-failed — generic banner;
-        // the emailed landing link explains the specific reason.
-        "/?invite=missed".to_string()
-    } else if restored {
-        "/?restored=1".to_string()
+        format!("/?joined={}", crate::auth::url::url_encode(&j.org_slug))
+    } else if restored || invite_missed {
+        "/".to_string()
     } else {
         row.redirect_after
             .as_deref()

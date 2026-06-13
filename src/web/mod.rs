@@ -11,6 +11,7 @@ pub mod client_ip;
 pub mod display_prefs;
 pub mod error;
 pub mod filters;
+pub mod flash;
 pub mod host;
 pub mod routes;
 pub mod theme;

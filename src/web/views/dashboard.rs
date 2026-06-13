@@ -22,6 +22,7 @@ use axum::http::request::Parts;
 use axum::response::{IntoResponse, Response};
 use chrono::{DateTime, Duration, Utc};
 use serde::Deserialize;
+use tower_cookies::Cookies;
 use uuid::Uuid;
 
 use crate::api::types::{
@@ -75,16 +76,11 @@ pub struct DashboardParams {
     pub status: Option<String>,
     #[serde(default, rename = "type")]
     pub kind: Option<String>,
-    /// Login flows set `restored=1` after un-deleting the account.
-    #[serde(default)]
-    pub restored: Option<String>,
-    /// Login flows set `joined=<slug>` after auto-accepting an invitation.
+    /// Login flows set `joined=<slug>` after auto-accepting an invitation. The
+    /// slug is validated against the active org before the banner renders, so
+    /// unlike the one-shot flash signals it stays a (harmless) query param.
     #[serde(default)]
     pub joined: Option<String>,
-    /// Login flows set `invite=missed` when a carried invitation could not
-    /// be redeemed (mismatch / seat race / revoked).
-    #[serde(default)]
-    pub invite: Option<String>,
 }
 
 /// One row in the dashboard table — every cell the template renders.
@@ -298,7 +294,11 @@ pub async fn root(state: State<AppState>, mut parts: Parts) -> Response {
         Ok(q) => q,
         Err(rej) => return rej.into_response(),
     };
-    match index(auth, state, org, params).await {
+    let cookies = match Cookies::from_request_parts(&mut parts, app_state).await {
+        Ok(c) => c,
+        Err(rej) => return rej.into_response(),
+    };
+    match index(auth, state, org, cookies, params).await {
         Ok(page) => page.into_response(),
         Err(e) => e.into_response(),
     }
@@ -308,8 +308,12 @@ pub async fn index(
     _auth: AuthedBrowser,
     State(state): State<AppState>,
     org: CurrentOrg,
+    cookies: Cookies,
     Query(params): Query<DashboardParams>,
 ) -> WebResult<DashboardPage> {
+    // One-shot post-login banners ride a flash cookie (consumed here) rather
+    // than spoofable query params.
+    let flash = crate::web::flash::take(&cookies, &state.cfg.auth.session.cookie_domain);
     let range = resolve_range_key(params.range.as_deref(), &RANGE_KEYS, DEFAULT_RANGE);
     let status = resolve_range_key(params.status.as_deref(), &STATUS_FILTERS, FILTER_ANY);
     let selected_status = (status != FILTER_ANY).then_some(status);
@@ -350,9 +354,9 @@ pub async fn index(
         status_options: build_range_options(status, &STATUS_FILTERS),
         selected_status,
         selected_kind,
-        restored_notice: params.restored.as_deref() == Some("1"),
+        restored_notice: flash.restored,
         joined_notice,
-        invite_missed_notice: params.invite.as_deref() == Some("missed"),
+        invite_missed_notice: flash.invite_missed,
     })
 }
 
