@@ -1,4 +1,8 @@
 CREATE EXTENSION IF NOT EXISTS citext;
+-- Trigram GIN indexes back the console's substring search (`name ILIKE
+-- '%q%'` on targets, `title ILIKE` on incidents) — a leading wildcard can't
+-- use a btree, so without this every keystroke is a per-org seq scan.
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 CREATE TABLE organizations (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),

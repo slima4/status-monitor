@@ -58,6 +58,8 @@ CREATE INDEX idx_incidents_org_state_started
 CREATE INDEX idx_incidents_org_target_ended
     ON incidents (org_id, target_id, ended_at DESC) WHERE ended_at IS NOT NULL;
 
+CREATE INDEX idx_incidents_title_trgm ON incidents USING GIN (title gin_trgm_ops);
+
 -- ── incident_events: internal append-only activity log ───────────────────
 -- Distinct from incident_updates (the PUBLIC, customer-facing timeline). This
 -- is the responder-facing record of every lifecycle action.

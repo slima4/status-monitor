@@ -82,6 +82,10 @@ CREATE TRIGGER trg_on_call_overrides_org_match
 ALTER TABLE escalation_targets
     ADD CONSTRAINT fk_escalation_targets_schedule
     FOREIGN KEY (schedule_id) REFERENCES on_call_schedules(id) ON DELETE CASCADE;
+-- Cover the cascade (019 indexed channel_id/user_id for the same reason but
+-- schedule_id arrived here in 020): deleting a schedule must not seq-scan.
+CREATE INDEX idx_escalation_targets_schedule
+    ON escalation_targets (schedule_id) WHERE schedule_id IS NOT NULL;
 
 -- Second-axis org-match backstop for escalation_targets: the step_id chain is
 -- covered by 020's trigger, but the denormalised user/schedule/channel ids have

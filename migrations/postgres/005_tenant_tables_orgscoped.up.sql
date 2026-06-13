@@ -13,6 +13,7 @@ CREATE TABLE targets (
     org_id                UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     name                  TEXT NOT NULL,
     check_spec            JSONB NOT NULL,
+    kind                  TEXT GENERATED ALWAYS AS (check_spec->>'type') STORED,
     -- `>= 10` is an ingest-rate backstop, not an arbitrary minimum: lowering it
     -- can push sustained ingest past what the batcher buffer absorbs (silent
     -- buffer_overflow drops). Plans tighten it via `plans.min_check_interval_secs`.
@@ -36,6 +37,13 @@ CREATE INDEX idx_targets_org_group
     ON targets(org_id, group_name) WHERE group_name IS NOT NULL;
 CREATE INDEX idx_targets_org_owner
     ON targets(org_id, owner_user_id) WHERE owner_user_id IS NOT NULL;
+-- Cross-tenant keyset walk for the scheduler/incident-writer fleet sweep
+-- (`WHERE enabled AND (org_id, id) > ($1,$2) ORDER BY org_id, id`). The
+-- (org_id, enabled) index can't serve the (org_id, id) cursor + sort.
+CREATE INDEX idx_targets_enabled_org_id
+    ON targets(org_id, id) WHERE enabled = true;
+CREATE INDEX idx_targets_name_trgm ON targets USING GIN (name gin_trgm_ops);
+CREATE INDEX idx_targets_org_kind ON targets(org_id, kind);
 
 CREATE TABLE incidents (
     id                    UUID PRIMARY KEY DEFAULT uuidv7(),

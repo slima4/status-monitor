@@ -28,7 +28,8 @@ CREATE TABLE channel_link_codes (
         CHECK (channel_name IS NULL OR char_length(channel_name) BETWEEN 1 AND 100)
 );
 
-CREATE INDEX idx_channel_link_codes_org ON channel_link_codes (org_id);
+-- Delegate list + mint-cap both filter (org_id, purpose) and sort by created_at.
+CREATE INDEX idx_channel_link_codes_org ON channel_link_codes (org_id, purpose, created_at DESC);
 
 -- A connect-OAuth state minted from a delegate link carries the link's id
 -- through the dance; the callback's authority is then the link, not a

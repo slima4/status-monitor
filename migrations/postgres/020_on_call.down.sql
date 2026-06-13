@@ -7,6 +7,7 @@ DROP TABLE IF EXISTS user_contact_channels;
 -- on_call_schedules); remove it before the schedule FK + table go.
 DROP TRIGGER IF EXISTS trg_escalation_targets_refs_org ON escalation_targets;
 DROP FUNCTION IF EXISTS assert_escalation_target_refs_org();
+DROP INDEX IF EXISTS idx_escalation_targets_schedule;
 ALTER TABLE escalation_targets DROP CONSTRAINT IF EXISTS fk_escalation_targets_schedule;
 
 DROP TABLE IF EXISTS on_call_overrides;
