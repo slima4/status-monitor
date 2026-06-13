@@ -217,6 +217,7 @@ async fn build_fixture() -> Option<Fixture> {
                         sort_order: j as i32,
                     },
                     i64::MAX,
+                    None,
                 )
                 .await
                 .expect("add component");

@@ -326,6 +326,7 @@ async fn two_tenants_never_see_each_others_data() {
                 sort_order: 0,
             },
             i64::MAX,
+            None,
         )
         .await
         .expect("add a's component");

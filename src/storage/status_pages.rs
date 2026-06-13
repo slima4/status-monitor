@@ -86,6 +86,7 @@ pub trait StatusPageStore: Send + Sync {
         page: StatusPageId,
         new: NewStatusPageComponent,
         max_public_components: i64,
+        actor: Option<UserId>,
     ) -> Result<AddComponentOutcome>;
     async fn update_component(
         &self,
@@ -99,6 +100,7 @@ pub trait StatusPageStore: Send + Sync {
         org: OrgId,
         page: StatusPageId,
         target_id: Uuid,
+        actor: Option<UserId>,
     ) -> Result<bool>;
     /// Rewrite `sort_order` to match the given target_id order (0-based).
     async fn reorder_components(
@@ -369,6 +371,7 @@ impl StatusPageStore for PgStatusPageStore {
         page: StatusPageId,
         new: NewStatusPageComponent,
         max_public_components: i64,
+        actor: Option<UserId>,
     ) -> Result<AddComponentOutcome> {
         let mut tx = self.pool.begin().await.map_err(db_err)?;
         advisory_xact_lock(&mut *tx, &org_lock_key(org))
@@ -433,6 +436,14 @@ impl StatusPageStore for PgStatusPageStore {
         .execute(&mut *tx)
         .await
         .map_err(db_err)?;
+        crate::storage::orgs::record_audit_tx(
+            &mut tx,
+            org,
+            actor,
+            "status_page.component_added",
+            serde_json::json!({ "page_id": page.0, "target_id": new.target_id }),
+        )
+        .await?;
         tx.commit().await.map_err(db_err)?;
         Ok(AddComponentOutcome::Added)
     }
@@ -474,18 +485,32 @@ impl StatusPageStore for PgStatusPageStore {
         org: OrgId,
         page: StatusPageId,
         target_id: Uuid,
+        actor: Option<UserId>,
     ) -> Result<bool> {
-        let res = sqlx::query(
+        let mut tx = self.pool.begin().await.map_err(db_err)?;
+        let removed: Option<(Uuid,)> = sqlx::query_as(
             "DELETE FROM status_page_components \
-             WHERE status_page_id = $1 AND target_id = $2 AND org_id = $3",
+             WHERE status_page_id = $1 AND target_id = $2 AND org_id = $3 \
+             RETURNING target_id",
         )
         .bind(page.0)
         .bind(target_id)
         .bind(org.0)
-        .execute(&self.pool)
+        .fetch_optional(&mut *tx)
         .await
         .map_err(db_err)?;
-        Ok(res.rows_affected() > 0)
+        if removed.is_some() {
+            crate::storage::orgs::record_audit_tx(
+                &mut tx,
+                org,
+                actor,
+                "status_page.component_removed",
+                serde_json::json!({ "page_id": page.0, "target_id": target_id }),
+            )
+            .await?;
+        }
+        tx.commit().await.map_err(db_err)?;
+        Ok(removed.is_some())
     }
 
     async fn reorder_components(
@@ -729,6 +754,7 @@ impl StatusPageStore for InMemoryStatusPageStore {
         page: StatusPageId,
         new: NewStatusPageComponent,
         max_public_components: i64,
+        _actor: Option<UserId>,
     ) -> Result<AddComponentOutcome> {
         // Unlike the Pg store, this has no target table, so it can't verify the
         // target belongs to `org` (no `TARGET_NOT_FOUND` path). Harnesses that
@@ -809,6 +835,7 @@ impl StatusPageStore for InMemoryStatusPageStore {
         org: OrgId,
         page: StatusPageId,
         target_id: Uuid,
+        _actor: Option<UserId>,
     ) -> Result<bool> {
         let mut st = self.inner.lock().unwrap();
         let before = st.components.len();

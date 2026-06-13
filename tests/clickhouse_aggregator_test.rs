@@ -74,6 +74,7 @@ async fn seed_page_with_target(pool: &PgPool, org: OrgId, target_id: Uuid) -> St
                 sort_order: 0,
             },
             i64::MAX,
+            None,
         )
         .await
         .expect("add component");

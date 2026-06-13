@@ -310,6 +310,7 @@ pub async fn list_components(
 pub async fn add_component(
     State(state): State<AppState>,
     OwnerAuthorized(org, _): OwnerAuthorized<StatusPageWrite>,
+    CurrentUser(user): CurrentUser,
     Path(id): Path<Uuid>,
     Json(mut new): Json<NewStatusPageComponent>,
 ) -> Result<StatusCode> {
@@ -320,7 +321,7 @@ pub async fn add_component(
     let max = i64::from(plan.max_public_components);
     match state
         .status_page_store
-        .add_component(org, StatusPageId(id), new, max)
+        .add_component(org, StatusPageId(id), new, max, Some(user))
         .await?
     {
         AddComponentOutcome::Added => {
@@ -381,11 +382,12 @@ pub async fn update_component(
 pub async fn remove_component(
     State(state): State<AppState>,
     OwnerAuthorized(org, _): OwnerAuthorized<StatusPageDelete>,
+    CurrentUser(user): CurrentUser,
     Path((id, target_id)): Path<(Uuid, Uuid)>,
 ) -> Result<StatusCode> {
     if !state
         .status_page_store
-        .remove_component(org, StatusPageId(id), target_id)
+        .remove_component(org, StatusPageId(id), target_id, Some(user))
         .await?
     {
         return Err(component_not_found());

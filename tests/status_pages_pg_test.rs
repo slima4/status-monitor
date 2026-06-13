@@ -122,7 +122,7 @@ async fn pages_and_components_isolated_across_orgs_live_pg() {
     let target = make_target(&pool, org_a, "A svc").await;
     assert_eq!(
         store
-            .add_component(org_a, p.id, component(target), i64::MAX)
+            .add_component(org_a, p.id, component(target), i64::MAX, None)
             .await
             .unwrap(),
         AddComponentOutcome::Added
@@ -154,7 +154,12 @@ async fn pages_and_components_isolated_across_orgs_live_pg() {
             .await
             .unwrap()
     );
-    assert!(!store.remove_component(org_b, p.id, target).await.unwrap());
+    assert!(
+        !store
+            .remove_component(org_b, p.id, target, None)
+            .await
+            .unwrap()
+    );
 
     // A still owns page + component after B's failed attempts.
     assert!(store.get(org_a, p.id).await.unwrap().is_some());
@@ -260,7 +265,7 @@ async fn public_component_cap_counts_distinct_targets_live_pg() {
     // t1 on p1 → 1 distinct target, at cap.
     assert_eq!(
         store
-            .add_component(org_a, p1.id, component(t1), cap)
+            .add_component(org_a, p1.id, component(t1), cap, None)
             .await
             .unwrap(),
         AddComponentOutcome::Added
@@ -268,7 +273,7 @@ async fn public_component_cap_counts_distinct_targets_live_pg() {
     // t1 also on p2 → already-counted target costs 0, still within cap.
     assert_eq!(
         store
-            .add_component(org_a, p2.id, component(t1), cap)
+            .add_component(org_a, p2.id, component(t1), cap, None)
             .await
             .unwrap(),
         AddComponentOutcome::Added
@@ -276,7 +281,7 @@ async fn public_component_cap_counts_distinct_targets_live_pg() {
     // t2 is a new distinct target → would exceed the cap.
     assert_eq!(
         store
-            .add_component(org_a, p1.id, component(t2), cap)
+            .add_component(org_a, p1.id, component(t2), cap, None)
             .await
             .unwrap(),
         AddComponentOutcome::OverCap { used: 1 }
@@ -308,7 +313,7 @@ async fn add_component_outcome_taxonomy_live_pg() {
 
     assert_eq!(
         store
-            .add_component(org_a, p.id, component(t), i64::MAX)
+            .add_component(org_a, p.id, component(t), i64::MAX, None)
             .await
             .unwrap(),
         AddComponentOutcome::Added
@@ -316,14 +321,20 @@ async fn add_component_outcome_taxonomy_live_pg() {
     // Re-adding the same target is an idempotent no-op, not a cap error.
     assert_eq!(
         store
-            .add_component(org_a, p.id, component(t), i64::MAX)
+            .add_component(org_a, p.id, component(t), i64::MAX, None)
             .await
             .unwrap(),
         AddComponentOutcome::AlreadyOnPage
     );
     // A page that isn't in this org → 404, not a quota error.
     match store
-        .add_component(org_a, StatusPageId(Uuid::new_v4()), component(t), i64::MAX)
+        .add_component(
+            org_a,
+            StatusPageId(Uuid::new_v4()),
+            component(t),
+            i64::MAX,
+            None,
+        )
         .await
     {
         Err(AppError::NotFound { code, .. }) => assert_eq!(code, codes::STATUS_PAGE_NOT_FOUND),
@@ -331,7 +342,7 @@ async fn add_component_outcome_taxonomy_live_pg() {
     }
     // A target that isn't in this org → 404.
     match store
-        .add_component(org_a, p.id, component(Uuid::new_v4()), i64::MAX)
+        .add_component(org_a, p.id, component(Uuid::new_v4()), i64::MAX, None)
         .await
     {
         Err(AppError::NotFound { code, .. }) => assert_eq!(code, codes::TARGET_NOT_FOUND),
@@ -350,7 +361,7 @@ async fn add_component_outcome_taxonomy_live_pg() {
         .unwrap()
         .unwrap();
     match store
-        .add_component(org_b, pb.id, component(t), i64::MAX)
+        .add_component(org_b, pb.id, component(t), i64::MAX, None)
         .await
     {
         Err(AppError::NotFound { code, .. }) => assert_eq!(code, codes::TARGET_NOT_FOUND),
@@ -384,7 +395,7 @@ async fn component_curation_crud_and_reorder_live_pg() {
     let t3 = make_target(&pool, org_a, "t3").await;
     for t in [t1, t2, t3] {
         store
-            .add_component(org_a, p.id, component(t), i64::MAX)
+            .add_component(org_a, p.id, component(t), i64::MAX, None)
             .await
             .unwrap();
     }
@@ -462,7 +473,7 @@ async fn component_curation_crud_and_reorder_live_pg() {
         .collect();
     assert_eq!(ordered, vec![t3, t1, t2]);
 
-    assert!(store.remove_component(org_a, p.id, t2).await.unwrap());
+    assert!(store.remove_component(org_a, p.id, t2, None).await.unwrap());
     assert_eq!(store.list_components(org_a, p.id).await.unwrap().len(), 2);
 
     cleanup(&pool, &[org_a, _org_b], &[user_a, user_b]).await;
@@ -532,11 +543,11 @@ async fn pages_for_targets_resolves_curated_pages_live_pg() {
     let lonely = make_target(&pool, org_a, "lonely").await;
     // Same target on two pages → both come back, deduped to two ids.
     store
-        .add_component(org_a, p1.id, component(curated), i64::MAX)
+        .add_component(org_a, p1.id, component(curated), i64::MAX, None)
         .await
         .unwrap();
     store
-        .add_component(org_a, p2.id, component(curated), i64::MAX)
+        .add_component(org_a, p2.id, component(curated), i64::MAX, None)
         .await
         .unwrap();
 
