@@ -8,7 +8,9 @@ CREATE TABLE channel_verification_tokens (
     channel_id UUID NOT NULL REFERENCES notification_channels(id) ON DELETE CASCADE,
     -- Address the token verifies; consume re-checks it against the
     -- channel's current config so an address change burns older tokens.
-    email      TEXT NOT NULL,
+    -- CITEXT matches the rest of the email columns so a case difference
+    -- between the mailed address and the channel config doesn't fail verify.
+    email      CITEXT NOT NULL,
     token_hash TEXT NOT NULL UNIQUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     expires_at TIMESTAMPTZ NOT NULL,

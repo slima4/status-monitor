@@ -55,8 +55,10 @@ ALTER TABLE targets ADD COLUMN region_policy JSONB NOT NULL DEFAULT '"majority"'
 
 -- Per-monitor alerting: consecutive failures before alerting, and whether a
 -- recovery is announced. Channels bound to a monitor are pure delivery targets.
-ALTER TABLE targets ADD COLUMN alert_confirmations INTEGER NOT NULL DEFAULT 2;
+ALTER TABLE targets ADD COLUMN alert_confirmations INTEGER NOT NULL DEFAULT 2
+    CHECK (alert_confirmations >= 1);
 ALTER TABLE targets ADD COLUMN notify_recovery BOOLEAN NOT NULL DEFAULT true;
 -- Reminder cadence for an unacknowledged outage: re-page bound channels every
 -- N seconds while down. 0 disables the reminder; one page only.
-ALTER TABLE targets ADD COLUMN renotify_interval_secs INTEGER NOT NULL DEFAULT 3600;
+ALTER TABLE targets ADD COLUMN renotify_interval_secs INTEGER NOT NULL DEFAULT 3600
+    CHECK (renotify_interval_secs >= 0);

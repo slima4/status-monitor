@@ -19,7 +19,7 @@
 -- with no successful probe must never satisfy the staleness branch.
 CREATE TABLE IF NOT EXISTS domain_expiry_state (
     target_id        UUID PRIMARY KEY REFERENCES targets(id) ON DELETE CASCADE,
-    org_id           UUID NOT NULL,
+    org_id           UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     domain           TEXT NOT NULL,
     expiry_at        TIMESTAMPTZ NOT NULL,
     registrar        TEXT,
@@ -28,3 +28,9 @@ CREATE TABLE IF NOT EXISTS domain_expiry_state (
     last_error       TEXT,
     attempts         INT NOT NULL DEFAULT 0
 );
+
+-- Row's org_id must match the target's, blocking a cross-tenant read/write via
+-- a request-supplied target_id.
+CREATE TRIGGER trg_domain_expiry_state_target_org
+    BEFORE INSERT OR UPDATE OF target_id, org_id ON domain_expiry_state
+    FOR EACH ROW EXECUTE FUNCTION assert_target_in_same_org();

@@ -115,11 +115,13 @@ pub async fn create(
         .await
         .context("invitations::create: advisory lock")?;
 
+    // No expires_at filter: matches idx_invitations_one_pending's predicate so
+    // an expired-unredeemed row is a clean ALREADY_INVITED, not a unique-
+    // violation 500 (the owner resends to revive it).
     let duplicate: Option<(Uuid,)> = sqlx::query_as(
         "SELECT id FROM invitations \
          WHERE org_id = $1 AND email = $2::citext \
          AND accepted_at IS NULL AND declined_at IS NULL \
-         AND expires_at > now() \
          LIMIT 1",
     )
     .bind(org.0)

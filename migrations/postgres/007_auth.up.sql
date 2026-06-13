@@ -115,6 +115,12 @@ CREATE INDEX idx_invitations_email_pending
     WHERE accepted_at IS NULL AND declined_at IS NULL;
 CREATE INDEX idx_invitations_token_prefix
     ON invitations(token_prefix);
+-- One pending invite per (org, email), beyond the advisory-lock guard. now()
+-- isn't IMMUTABLE so expiry can't be in the predicate; create() therefore
+-- treats any non-consumed row as a duplicate to match.
+CREATE UNIQUE INDEX idx_invitations_one_pending
+    ON invitations(org_id, email)
+    WHERE accepted_at IS NULL AND declined_at IS NULL;
 
 -- Magic-link token rows. The request/verify endpoints are gated by
 -- `auth.enabled_methods`; until "magic_link" is listed the routes 404 and no

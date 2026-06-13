@@ -84,7 +84,7 @@ pub async fn verify(
         );
         return Ok(invalid());
     };
-    if cfg.to != consumed.email {
+    if !cfg.to.eq_ignore_ascii_case(&consumed.email) {
         tracing::info!(
             channel_id = %channel.id,
             reason = "address_changed_since_mint",
