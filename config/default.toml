@@ -65,6 +65,9 @@ buffer_size = 100000
 async_insert = true
 
 [scheduler]
+# Off = no in-process probing (pure dashboard); a separate agent covers this
+# region. On = this process probes its own region.
+enabled = true
 target_refresh_interval_secs = 30
 # This control plane's region id (override per deployment, e.g. "eu-helsinki").
 # A normal region row, not a sentinel — operator renames it to a real location.

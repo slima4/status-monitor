@@ -1001,6 +1001,10 @@ fn default_async_insert() -> bool {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SchedulerConfig {
+    /// Off = this process probes nothing in-process (pure dashboard/brain);
+    /// agents do all probing. On = the in-process scheduler probes `region`.
+    #[serde(default = "default_scheduler_enabled")]
+    pub enabled: bool,
     pub target_refresh_interval_secs: u64,
     /// This control plane's own region id. Its scheduler runs the targets
     /// assigned to this region and stamps results with it — the same query an
@@ -1014,6 +1018,10 @@ pub struct SchedulerConfig {
 
 fn default_region_id() -> String {
     "default".to_string()
+}
+
+fn default_scheduler_enabled() -> bool {
+    true
 }
 
 impl SchedulerConfig {
@@ -1464,5 +1472,26 @@ impl AppConfig {
             return Err(err("agent.buffer_capacity must be > 0"));
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use config::FileFormat;
+
+    fn scheduler_from(toml: &str) -> SchedulerConfig {
+        Config::builder()
+            .add_source(File::from_str(toml, FileFormat::Toml))
+            .build()
+            .unwrap()
+            .try_deserialize()
+            .unwrap()
+    }
+
+    #[test]
+    fn scheduler_enabled_defaults_true_and_parses_false() {
+        assert!(scheduler_from("target_refresh_interval_secs = 30").enabled);
+        assert!(!scheduler_from("enabled = false\ntarget_refresh_interval_secs = 30").enabled);
     }
 }

@@ -748,6 +748,7 @@ pub fn breaker_cfg() -> CircuitBreakerConfig {
 
 pub fn scheduler_cfg(refresh_secs: u64) -> SchedulerConfig {
     SchedulerConfig {
+        enabled: true,
         target_refresh_interval_secs: refresh_secs,
         region: "default".to_string(),
         default_region: String::new(),

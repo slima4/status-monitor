@@ -265,11 +265,6 @@ async fn main() -> Result<()> {
             cfg.scheduler.region.clone(),
         ));
     let registry = Arc::new(TargetRegistry::new(scheduler_source));
-    let scheduler = Arc::new(Scheduler::new(
-        registry.clone(),
-        pool.clone(),
-        cfg.scheduler.clone(),
-    ));
 
     let batcher_cfg = BatcherConfig {
         batch_size: cfg.storage.clickhouse.batch_size.max(1),
@@ -278,14 +273,23 @@ async fn main() -> Result<()> {
     let batcher = ResultBatcher::new(result_rx, result_sink, batcher_cfg);
 
     let root = CancellationToken::new();
-    let scheduler_handle: JoinHandle<()> = {
-        let scheduler = scheduler.clone();
+    // Off = pure dashboard/brain; agents do all probing. Ingest, detection,
+    // alerting and the silence sweep run regardless.
+    let scheduler_handle: JoinHandle<()> = if cfg.scheduler.enabled {
+        let scheduler = Arc::new(Scheduler::new(
+            registry.clone(),
+            pool.clone(),
+            cfg.scheduler.clone(),
+        ));
         let token = root.clone();
         tokio::spawn(async move {
             if let Err(err) = scheduler.run(token).await {
                 tracing::error!(?err, "scheduler exited with error");
             }
         })
+    } else {
+        tracing::info!("in-process scheduler disabled — agent-only probing");
+        tokio::spawn(async {})
     };
     let batcher_handle: JoinHandle<()> = {
         let token = root.clone();
