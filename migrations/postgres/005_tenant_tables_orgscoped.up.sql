@@ -66,7 +66,8 @@ CREATE TABLE incidents (
 
 CREATE INDEX idx_incidents_org_target_started
     ON incidents(org_id, target_id, started_at DESC);
-CREATE INDEX idx_incidents_org_open
+-- UNIQUE + this exact predicate is the ON CONFLICT arbiter in insert_open; one open incident per target.
+CREATE UNIQUE INDEX idx_incidents_org_open
     ON incidents(org_id, target_id) WHERE ended_at IS NULL;
 
 CREATE TABLE incident_updates (

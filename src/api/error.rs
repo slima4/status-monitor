@@ -76,6 +76,7 @@ pub mod codes {
     pub const INVALID_CURSOR: &str = "INVALID_CURSOR";
     pub const TARGET_NOT_FOUND: &str = "TARGET_NOT_FOUND";
     pub const TARGET_DUPLICATE: &str = "TARGET_DUPLICATE";
+    pub const INCIDENT_ALREADY_OPEN: &str = "INCIDENT_ALREADY_OPEN";
     pub const CIRCUIT_OPEN: &str = "CIRCUIT_OPEN";
     pub const DEPENDENCY_DOWN: &str = "DEPENDENCY_DOWN";
     pub const RATE_LIMITED: &str = "RATE_LIMITED";

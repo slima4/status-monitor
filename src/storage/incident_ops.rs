@@ -556,13 +556,27 @@ impl PgIncidentOpsStore {
             return Ok(LifecycleOutcome::IllegalTransition(err));
         }
 
-        let row: OpsIncidentRow = sqlx::query_as(update_sql)
+        let row: OpsIncidentRow = match sqlx::query_as(update_sql)
             .bind(id)
             .bind(org.0)
             .bind(actor.user_id())
             .fetch_one(&mut *tx)
             .await
-            .map_err(|e| anyhow::anyhow!("apply transition: {e}"))?;
+        {
+            Ok(row) => row,
+            // Reopen clears ended_at; if another incident is already open for the
+            // target, the unique open-incident index rejects it — surface 409.
+            Err(e)
+                if e.as_database_error().and_then(|d| d.constraint())
+                    == Some("idx_incidents_org_open") =>
+            {
+                return Err(crate::error::AppError::conflict(
+                    crate::api::error::codes::INCIDENT_ALREADY_OPEN,
+                    "another incident is already open for this monitor",
+                ));
+            }
+            Err(e) => return Err(anyhow::anyhow!("apply transition: {e}").into()),
+        };
 
         insert_event_tx(&mut tx, org, id, event_kind, actor, note.as_deref()).await?;
         if let Some(message) = public_resolution
@@ -810,22 +824,31 @@ impl IncidentOpsStore for PgIncidentOpsStore {
         // status_at_start is a non-null column shared with monitor-opened
         // incidents; a declared incident has no check status, so it records the
         // declared problem as 'down'.
+        // A target-bound declare conflicts with the unique open-incident index
+        // when one is already open; DO NOTHING yields no row → 409, not a 500.
         let sql = format!(
             "INSERT INTO incidents \
                 (org_id, target_id, started_at, status_at_start, origin, state, \
                  severity, urgency, title, visibility) \
              VALUES ($1, $2, now(), 'down', 'manual', 'triggered', $3, $4, $5, 'internal') \
+             ON CONFLICT (org_id, target_id) WHERE ended_at IS NULL DO NOTHING \
              RETURNING {OPS_COLS}"
         );
-        let row: OpsIncidentRow = sqlx::query_as(&sql)
+        let row: Option<OpsIncidentRow> = sqlx::query_as(&sql)
             .bind(org.0)
             .bind(new.target_id)
             .bind(new.severity.as_db_str())
             .bind(new.urgency.as_db_str())
             .bind(new.title)
-            .fetch_one(&mut *tx)
+            .fetch_optional(&mut *tx)
             .await
             .map_err(|e| anyhow::anyhow!("declare incident: {e}"))?;
+        let row = row.ok_or_else(|| {
+            crate::error::AppError::conflict(
+                crate::api::error::codes::INCIDENT_ALREADY_OPEN,
+                "this monitor already has an open incident",
+            )
+        })?;
         let id = row.id;
         insert_event_tx(&mut tx, org, id, IncidentEventKind::Triggered, actor, None).await?;
         tx.commit()

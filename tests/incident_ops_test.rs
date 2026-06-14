@@ -664,3 +664,106 @@ async fn assign_rejects_non_member_assignee_pg() {
         .unwrap();
     assert!(inc.assigned_to.is_none());
 }
+
+#[tokio::test]
+#[ignore]
+async fn declare_conflicts_when_target_already_has_open_incident_pg() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let user = make_user(&pool, "incdup").await;
+    let org = create_org_with_owner(&pool, user, &unique_slug("incdup"), "svc", 3)
+        .await
+        .unwrap()
+        .unwrap();
+    let target_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO targets (org_id, name, check_spec, interval_secs) \
+         VALUES ($1, 'svc', '{}'::jsonb, 30) RETURNING id",
+    )
+    .bind(org.id.0)
+    .fetch_one(&pool)
+    .await
+    .expect("insert target");
+    let store = PgIncidentOpsStore::new(pool.clone());
+    let bound = |t| NewManualIncident {
+        target_id: Some(t),
+        ..Default::default()
+    };
+
+    store
+        .declare(org.id, bound(target_id), Actor::User(user))
+        .await
+        .expect("first declare opens");
+
+    let err = store
+        .declare(org.id, bound(target_id), Actor::User(user))
+        .await
+        .expect_err("second declare for the same target must conflict");
+    match err {
+        uptimepage::error::AppError::Conflict { code, .. } => {
+            assert_eq!(code, uptimepage::api::error::codes::INCIDENT_ALREADY_OPEN)
+        }
+        other => panic!("expected Conflict, got {other:?}"),
+    }
+
+    // Stand-alone (NULL target) declares never collide.
+    store
+        .declare(org.id, NewManualIncident::default(), Actor::User(user))
+        .await
+        .expect("null-target declare ok");
+    store
+        .declare(org.id, NewManualIncident::default(), Actor::User(user))
+        .await
+        .expect("second null-target declare ok");
+}
+
+#[tokio::test]
+#[ignore]
+async fn reopen_conflicts_when_target_has_a_newer_open_incident_pg() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let user = make_user(&pool, "increopen").await;
+    let org = create_org_with_owner(&pool, user, &unique_slug("increopen"), "svc", 3)
+        .await
+        .unwrap()
+        .unwrap();
+    let target_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO targets (org_id, name, check_spec, interval_secs) \
+         VALUES ($1, 'svc', '{}'::jsonb, 30) RETURNING id",
+    )
+    .bind(org.id.0)
+    .fetch_one(&pool)
+    .await
+    .expect("insert target");
+    let store = PgIncidentOpsStore::new(pool.clone());
+    let bound = || NewManualIncident {
+        target_id: Some(target_id),
+        ..Default::default()
+    };
+
+    let old = store
+        .declare(org.id, bound(), Actor::User(user))
+        .await
+        .unwrap();
+    store
+        .resolve(org.id, old.id, Actor::User(user), None)
+        .await
+        .unwrap();
+    // The target goes down again: a newer incident now holds the open slot.
+    store
+        .declare(org.id, bound(), Actor::User(user))
+        .await
+        .unwrap();
+
+    let err = store
+        .reopen(org.id, old.id, Actor::User(user), None)
+        .await
+        .expect_err("reopening the old incident must conflict with the newer open one");
+    match err {
+        uptimepage::error::AppError::Conflict { code, .. } => {
+            assert_eq!(code, uptimepage::api::error::codes::INCIDENT_ALREADY_OPEN)
+        }
+        other => panic!("expected Conflict, got {other:?}"),
+    }
+}

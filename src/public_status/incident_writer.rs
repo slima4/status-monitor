@@ -43,16 +43,20 @@ use crate::storage::traits::{ClampedRange, TimeRange};
 #[async_trait]
 pub trait IncidentStore: Send + Sync {
     async fn open_for_target(&self, org: OrgId, target_id: Uuid) -> Result<Option<OpenIncident>>;
-    /// Batched cross-tenant lookup: one SQL round-trip resolves every open
-    /// `OpenIncident` for every `(org, target)` pair in the page. A pair maps to
-    /// a list because the per-region policy can hold more than one open incident
-    /// per target; the combined policies yield at most one (region `None`).
+    /// Batched cross-tenant lookup: one SQL round-trip resolves the open
+    /// `OpenIncident` for every `(org, target)` pair in the page. The list is
+    /// 0-or-1 under the unique open-incident index; it stays a `Vec` so a future
+    /// region-scoped grain needs no signature change.
     async fn open_for_pairs(
         &self,
         pairs: &[(OrgId, Uuid)],
     ) -> Result<std::collections::HashMap<(OrgId, Uuid), Vec<OpenIncident>>>;
-    async fn insert_open(&self, org: OrgId, new: NewOpenIncident) -> Result<Uuid>;
-    async fn close(&self, org: OrgId, incident_id: Uuid, ended_at: DateTime<Utc>) -> Result<()>;
+    /// `None` = a concurrent writer already holds the open incident for this
+    /// target (the DB unique index won the race); the caller must not page.
+    async fn insert_open(&self, org: OrgId, new: NewOpenIncident) -> Result<Option<Uuid>>;
+    /// `true` = this call flipped the incident to resolved; `false` = it was
+    /// already closed (lost the race), so the caller must not page.
+    async fn close(&self, org: OrgId, incident_id: Uuid, ended_at: DateTime<Utc>) -> Result<bool>;
 }
 
 #[derive(Debug, Clone)]
@@ -79,10 +83,11 @@ pub struct NewOpenIncident {
 
 #[derive(Debug, Clone)]
 pub struct IncidentWriterConfig {
-    /// How often the writer wakes up and scans every enabled target.
+    /// Scan cadence. Must stay below `lookback` or consecutive scans leave a
+    /// blind gap; set at the fastest check interval so detection isn't tick-bound.
     pub tick_interval: Duration,
-    /// How far back the writer looks at recent check results when deciding
-    /// transitions.
+    /// Floor for the per-target lookback window (it grows with each target's
+    /// interval; see `lookback_for`) so fast monitors still carry enough history.
     pub lookback: ChronoDuration,
     /// Minimum consecutive checks needed to confirm a transition. Default 2
     /// absorbs single-result flaps.
@@ -103,7 +108,7 @@ pub struct IncidentWriterConfig {
 impl Default for IncidentWriterConfig {
     fn default() -> Self {
         Self {
-            tick_interval: Duration::from_secs(15),
+            tick_interval: Duration::from_secs(30),
             lookback: ChronoDuration::minutes(10),
             flap_threshold: 2,
             max_results_per_tick: 1_000,
@@ -134,6 +139,11 @@ impl IncidentWriter {
         incident_store: Arc<dyn IncidentStore>,
         cfg: IncidentWriterConfig,
     ) -> Self {
+        debug_assert!(
+            cfg.lookback
+                > ChronoDuration::from_std(cfg.tick_interval).unwrap_or(ChronoDuration::MAX),
+            "lookback must exceed tick_interval or scans leave a blind gap"
+        );
         Self {
             targets,
             results_store,
@@ -198,8 +208,6 @@ impl IncidentWriter {
     /// tenant's failure must not stall every other tenant.
     pub async fn tick_once(&self) -> Result<()> {
         let now = Utc::now();
-        let from = now - self.cfg.lookback;
-        let range = TimeRange { from, to: now };
         let concurrency = self.cfg.max_concurrency.max(1);
 
         let mut cursor: Option<PublicTargetCursor> = None;
@@ -221,7 +229,7 @@ impl IncidentWriter {
                 let open_map = open_map.clone();
                 async move {
                     let open = open_map.get(&(org, target.id)).cloned().unwrap_or_default();
-                    if let Err(err) = self.process_target(org, &target, open, range).await {
+                    if let Err(err) = self.process_target(org, &target, open, now).await {
                         tracing::warn!(
                             %org,
                             target_id = %target.id,
@@ -237,13 +245,27 @@ impl IncidentWriter {
         }
     }
 
+    /// Window sized to the target's cadence: confirming a transition needs
+    /// `confirmations` results spaced one `interval` apart, which a fixed window
+    /// can't hold for a slow monitor. `cfg.lookback` floors it for fast ones.
+    fn lookback_for(&self, target: &Target) -> ChronoDuration {
+        let confirmations = u64::from(target.alert_confirmations.max(1));
+        let needed =
+            ChronoDuration::seconds((target.interval.as_secs() * 2 * confirmations) as i64);
+        self.cfg.lookback.max(needed)
+    }
+
     async fn process_target(
         &self,
         org: OrgId,
         target: &Target,
         open: Vec<OpenIncident>,
-        range: TimeRange,
+        now: DateTime<Utc>,
     ) -> Result<()> {
+        let range = TimeRange {
+            from: now - self.lookback_for(target),
+            to: now,
+        };
         let tagged = self
             .results_store
             .list_results_by_region(
@@ -272,19 +294,23 @@ impl IncidentWriter {
             match action {
                 Action::None => {}
                 Action::Open(new) => {
-                    let id = self.incident_store.insert_open(org, new).await?;
-                    tracing::info!(%org, target_id = %target.id, incident_id = %id, "incident opened");
-                    self.signal(org, id, NotificationReason::Opened);
+                    if let Some(id) = self.incident_store.insert_open(org, new).await? {
+                        tracing::info!(%org, target_id = %target.id, incident_id = %id, "incident opened");
+                        self.signal(org, id, NotificationReason::Opened);
+                    }
                 }
                 Action::Close {
                     incident_id,
                     ended_at,
                 } => {
-                    self.incident_store
+                    if self
+                        .incident_store
                         .close(org, incident_id, ended_at)
-                        .await?;
-                    tracing::info!(%org, target_id = %target.id, incident_id = %incident_id, "incident closed");
-                    self.signal(org, incident_id, NotificationReason::Resolved);
+                        .await?
+                    {
+                        tracing::info!(%org, target_id = %target.id, incident_id = %incident_id, "incident closed");
+                        self.signal(org, incident_id, NotificationReason::Resolved);
+                    }
                 }
             }
         }
@@ -430,12 +456,14 @@ pub fn decide_multi(
 /// Anything that is not a clean `Up` is unhealthy: `Down`/`Error` are outages
 /// and `Degraded` is a service not meeting its check (slow, partial, rate
 /// limited). All three open an incident and none counts as recovery — an
-/// incident clears only on a sustained run of genuine `Up`.
+/// incident clears only on a sustained run of genuine `Up`. Exhaustive on
+/// purpose: a new `CheckStatus` variant must classify here, never default to
+/// healthy and silently auto-close incidents.
 fn is_bad(status: CheckStatus) -> bool {
-    matches!(
-        status,
-        CheckStatus::Down | CheckStatus::Error | CheckStatus::Degraded
-    )
+    match status {
+        CheckStatus::Down | CheckStatus::Error | CheckStatus::Degraded => true,
+        CheckStatus::Up => false,
+    }
 }
 
 fn trailing_bad_run(results: &[CheckResult]) -> &[CheckResult] {
@@ -545,15 +573,14 @@ impl IncidentStore for PgIncidentStore {
         Ok(out)
     }
 
-    async fn insert_open(&self, org: OrgId, new: NewOpenIncident) -> Result<Uuid> {
+    async fn insert_open(&self, org: OrgId, new: NewOpenIncident) -> Result<Option<Uuid>> {
         let status_at_start = status_to_db(new.status_at_start)
             .ok_or_else(|| anyhow::anyhow!("cannot open incident from status=up"))?;
-        // Defensive: avoid two open incidents per target if a competing
-        // writer raced us (single-process today, but cheap).
+        // ON CONFLICT on the partial unique index is the race-safe single-open
+        // guarantee: a concurrent writer yields no row → None → no page.
         // Visibility is derived here, not by the caller: an incident is public
         // only while its monitor is a component of an enabled status page.
-        // Monitors that aren't on any page open internal-only incidents.
-        let row: (Uuid,) = sqlx::query_as(
+        let row: Option<(Uuid,)> = sqlx::query_as(
             r#"INSERT INTO incidents (org_id, target_id, started_at, status_at_start, check_count, error_sample, region, regions_down, regions_up, visibility)
                SELECT $6, $1, $2, $3, $4, $5, $7, $8, $9,
                       CASE WHEN EXISTS (
@@ -561,11 +588,7 @@ impl IncidentStore for PgIncidentStore {
                           JOIN status_pages sp ON sp.id = spc.status_page_id
                           WHERE spc.target_id = $1 AND spc.org_id = $6 AND sp.enabled = true
                       ) THEN 'public' ELSE 'internal' END
-               WHERE NOT EXISTS (
-                   SELECT 1 FROM incidents
-                   WHERE target_id = $1 AND org_id = $6 AND ended_at IS NULL
-                     AND region IS NOT DISTINCT FROM $7
-               )
+               ON CONFLICT (org_id, target_id) WHERE ended_at IS NULL DO NOTHING
                RETURNING id"#,
         )
         .bind(new.target_id)
@@ -577,18 +600,19 @@ impl IncidentStore for PgIncidentStore {
         .bind(new.region)
         .bind(&new.regions_down)
         .bind(&new.regions_up)
-        .fetch_one(&self.pool)
+        .fetch_optional(&self.pool)
         .await
         .context("incident insert_open")?;
-        Ok(row.0)
+        Ok(row.map(|r| r.0))
     }
 
-    async fn close(&self, org: OrgId, incident_id: Uuid, ended_at: DateTime<Utc>) -> Result<()> {
+    async fn close(&self, org: OrgId, incident_id: Uuid, ended_at: DateTime<Utc>) -> Result<bool> {
         // Recovery: close the row, resolve with no human resolver. For a public
-        // incident, append a `resolved` update for the timeline — the CTE
-        // RETURNING yields a row only while ended_at was NULL, so a re-run over
-        // an already-closed incident never duplicates it.
-        sqlx::query(
+        // incident, append a `resolved` update for the timeline. The UPDATE
+        // matches only while ended_at was NULL, so the final SELECT returns a
+        // row only for the call that actually closed it — a re-run or the race
+        // loser returns None and never re-pages.
+        let row: Option<(Uuid,)> = sqlx::query_as(
             r#"WITH closed AS (
                    UPDATE incidents
                       SET ended_at = $2,
@@ -599,19 +623,22 @@ impl IncidentStore for PgIncidentStore {
                           updated_at = now()
                     WHERE id = $1 AND org_id = $3 AND ended_at IS NULL
                    RETURNING id, org_id, visibility
+               ),
+               ins AS (
+                   INSERT INTO incident_updates (org_id, incident_id, phase, message, author)
+                   SELECT org_id, id, 'resolved', $4, 'system'
+                   FROM closed WHERE visibility = 'public'
                )
-               INSERT INTO incident_updates (org_id, incident_id, phase, message, author)
-               SELECT org_id, id, 'resolved', $4, 'system'
-               FROM closed WHERE visibility = 'public'"#,
+               SELECT id FROM closed"#,
         )
         .bind(incident_id)
         .bind(ended_at)
         .bind(org.0)
         .bind(crate::storage::incident_ops::AUTO_RESOLVED_MESSAGE)
-        .execute(&self.pool)
+        .fetch_optional(&self.pool)
         .await
         .context("incident close")?;
-        Ok(())
+        Ok(row.is_some())
     }
 }
 
@@ -722,16 +749,13 @@ impl IncidentStore for InMemoryIncidentStore {
         Ok(open)
     }
 
-    async fn insert_open(&self, _org: OrgId, new: NewOpenIncident) -> Result<Uuid> {
+    async fn insert_open(&self, _org: OrgId, new: NewOpenIncident) -> Result<Option<Uuid>> {
         let mut g = self.inner.lock();
         let bucket = g.by_target.entry(new.target_id).or_default();
-        // Idempotent guard, region-aware: don't double-open for the same
-        // (target, region) key (region `None` = the combined incident).
-        if let Some(existing) = bucket
-            .iter()
-            .find(|i| i.ended_at.is_none() && i.region == new.region)
-        {
-            return Ok(existing.id);
+        // Mirrors the DB unique index: a target already holding an open
+        // incident yields None so the racer never pages.
+        if bucket.iter().any(|i| i.ended_at.is_none()) {
+            return Ok(None);
         }
         let id = Uuid::now_v7();
         bucket.push(MemIncident {
@@ -747,20 +771,24 @@ impl IncidentStore for InMemoryIncidentStore {
             regions_up: new.regions_up,
         });
         g.inserts += 1;
-        Ok(id)
+        Ok(Some(id))
     }
 
-    async fn close(&self, _org: OrgId, incident_id: Uuid, ended_at: DateTime<Utc>) -> Result<()> {
+    async fn close(&self, _org: OrgId, incident_id: Uuid, ended_at: DateTime<Utc>) -> Result<bool> {
         let mut g = self.inner.lock();
+        let mut closed = false;
         for bucket in g.by_target.values_mut() {
             for inc in bucket.iter_mut() {
                 if inc.id == incident_id && inc.ended_at.is_none() {
                     inc.ended_at = Some(ended_at);
+                    closed = true;
                 }
             }
         }
-        g.closes += 1;
-        Ok(())
+        if closed {
+            g.closes += 1;
+        }
+        Ok(closed)
     }
 }
 
@@ -1355,6 +1383,155 @@ mod tests {
             incidents as Arc<dyn IncidentStore>,
             cfg,
         )
+    }
+
+    fn writer_with_lookback(
+        targets: Arc<InMemoryTargetStore>,
+        sink: Arc<InMemorySink>,
+        incidents: Arc<InMemoryIncidentStore>,
+        lookback: ChronoDuration,
+    ) -> IncidentWriter {
+        let cfg = IncidentWriterConfig {
+            tick_interval: StdDuration::from_secs(1),
+            lookback,
+            flap_threshold: 2,
+            max_results_per_tick: 10_000,
+            page_size: 256,
+            max_concurrency: 4,
+        };
+        IncidentWriter::new(
+            targets as Arc<dyn EnabledTargetStream>,
+            sink as Arc<dyn crate::storage::ResultsStore>,
+            incidents as Arc<dyn IncidentStore>,
+            cfg,
+        )
+    }
+
+    #[test]
+    fn lookback_grows_with_target_interval() {
+        let w = writer_with_lookback(
+            Arc::new(InMemoryTargetStore::new()),
+            Arc::new(InMemorySink::new()),
+            Arc::new(InMemoryIncidentStore::new()),
+            ChronoDuration::minutes(10),
+        );
+        let mut fast = make_public_target("fast");
+        fast.interval = StdDuration::from_secs(30);
+        fast.alert_confirmations = 2;
+        assert_eq!(
+            w.lookback_for(&fast),
+            ChronoDuration::minutes(10),
+            "fast monitor is bounded by the floor"
+        );
+        let mut hourly = make_public_target("cert");
+        hourly.interval = StdDuration::from_secs(3600);
+        hourly.alert_confirmations = 2;
+        assert_eq!(
+            w.lookback_for(&hourly),
+            ChronoDuration::hours(4),
+            "2 * confirmations * interval beats the floor for an hourly monitor"
+        );
+    }
+
+    #[tokio::test]
+    async fn hourly_monitor_opens_despite_small_floor() {
+        // tls_cert / domain_expiry are forced to 3600s. Two hourly failures sit
+        // far outside a 10-min floor; the per-target 4h window catches both.
+        let mut target = make_public_target("cert");
+        target.interval = StdDuration::from_secs(3600);
+        target.alert_confirmations = 2;
+        let target_id = target.id;
+        let now = Utc::now();
+        let targets = Arc::new(InMemoryTargetStore::from_vec(vec![target]));
+        let sink = Arc::new(InMemorySink::new());
+        let incidents = Arc::new(InMemoryIncidentStore::new());
+        seed_results(
+            &sink,
+            vec![
+                result(target_id, now - ChronoDuration::hours(2), CheckStatus::Down),
+                result(target_id, now - ChronoDuration::hours(1), CheckStatus::Down),
+            ],
+        )
+        .await;
+        let w = writer_with_lookback(
+            targets,
+            sink,
+            incidents.clone(),
+            ChronoDuration::minutes(10),
+        );
+        w.tick_once().await.expect("tick");
+        assert_eq!(incidents.insert_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn slow_user_set_interval_opens_despite_small_floor() {
+        // A user can set an interval well above the per-kind floor; the window
+        // must follow the configured interval, not a fixed constant.
+        let mut target = make_public_target("http-slow");
+        target.interval = StdDuration::from_secs(600);
+        target.alert_confirmations = 2;
+        let target_id = target.id;
+        let now = Utc::now();
+        let targets = Arc::new(InMemoryTargetStore::from_vec(vec![target]));
+        let sink = Arc::new(InMemorySink::new());
+        let incidents = Arc::new(InMemoryIncidentStore::new());
+        // 600s interval → 40-min window; samples at 25 and 15 min are inside it
+        // but outside the 10-min floor.
+        seed_results(
+            &sink,
+            vec![
+                result(
+                    target_id,
+                    now - ChronoDuration::minutes(25),
+                    CheckStatus::Down,
+                ),
+                result(
+                    target_id,
+                    now - ChronoDuration::minutes(15),
+                    CheckStatus::Down,
+                ),
+            ],
+        )
+        .await;
+        let w = writer_with_lookback(
+            targets,
+            sink,
+            incidents.clone(),
+            ChronoDuration::minutes(10),
+        );
+        w.tick_once().await.expect("tick");
+        assert_eq!(incidents.insert_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn fast_monitor_ignores_results_older_than_its_window() {
+        // Negative control: a 30s monitor's window is the 10-min floor, so two
+        // failures spaced an hour apart fall outside it and must not open —
+        // proving the window is interval-scoped, not unbounded.
+        let mut target = make_public_target("fast");
+        target.interval = StdDuration::from_secs(30);
+        target.alert_confirmations = 2;
+        let target_id = target.id;
+        let now = Utc::now();
+        let targets = Arc::new(InMemoryTargetStore::from_vec(vec![target]));
+        let sink = Arc::new(InMemorySink::new());
+        let incidents = Arc::new(InMemoryIncidentStore::new());
+        seed_results(
+            &sink,
+            vec![
+                result(target_id, now - ChronoDuration::hours(2), CheckStatus::Down),
+                result(target_id, now - ChronoDuration::hours(1), CheckStatus::Down),
+            ],
+        )
+        .await;
+        let w = writer_with_lookback(
+            targets,
+            sink,
+            incidents.clone(),
+            ChronoDuration::minutes(10),
+        );
+        w.tick_once().await.expect("tick");
+        assert_eq!(incidents.insert_count(), 0);
     }
 
     #[tokio::test]
