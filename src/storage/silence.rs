@@ -40,6 +40,9 @@ pub trait SilenceStore: Send + Sync {
     /// Target ids currently silent for one org — for the grey "no data" overlay
     /// on the dashboard and status page.
     async fn open_target_ids(&self, org: OrgId) -> Result<Vec<Uuid>>;
+    /// Region ids with a fresh, enabled agent (probe alive). Powers the
+    /// per-region "no data" mark on the monitor detail breakdown table.
+    async fn live_regions(&self, stale_after_secs: u64) -> Result<Vec<String>>;
     /// Total enabled targets in live orgs — denominator for mass-outage damping.
     async fn enabled_target_count(&self) -> Result<i64>;
     /// Record a target as silent. Idempotent: an already-open silence keeps its
@@ -122,6 +125,21 @@ impl SilenceStore for PgSilenceStore {
         .await
         .map_err(|e| anyhow::anyhow!("silence open_target_ids: {e}"))?;
         Ok(rows.into_iter().map(|(t,)| t).collect())
+    }
+
+    async fn live_regions(&self, stale_after_secs: u64) -> Result<Vec<String>> {
+        let rows: Vec<(String,)> = sqlx::query_as(
+            r#"SELECT DISTINCT a.region
+               FROM agents a
+               JOIN regions rg ON rg.id = a.region AND rg.enabled
+               WHERE a.enabled
+                 AND a.last_seen_at > now() - ($1::bigint * interval '1 second')"#,
+        )
+        .bind(stale_after_secs as i64)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| anyhow::anyhow!("silence live_regions: {e}"))?;
+        Ok(rows.into_iter().map(|(r,)| r).collect())
     }
 
     async fn enabled_target_count(&self) -> Result<i64> {
@@ -260,6 +278,10 @@ impl SilenceStore for InMemorySilenceStore {
             .filter(|(_, (o, _))| *o == org)
             .map(|(t, _)| *t)
             .collect())
+    }
+
+    async fn live_regions(&self, _stale_after_secs: u64) -> Result<Vec<String>> {
+        Ok(Vec::new())
     }
 
     async fn enabled_target_count(&self) -> Result<i64> {

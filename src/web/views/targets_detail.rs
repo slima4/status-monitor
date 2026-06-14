@@ -204,6 +204,7 @@ impl RegionBreakdownRow {
         r: crate::api::types::RegionRollup,
         selected_region: Option<&str>,
         catalog: &[crate::storage::RegionOption],
+        live_regions: Option<&std::collections::HashSet<String>>,
     ) -> Self {
         let uptime_label = super::dashboard::pct_label(r.samples, r.up);
         let selected = selected_region == Some(r.region.as_str());
@@ -212,12 +213,19 @@ impl RegionBreakdownRow {
             .find(|c| c.id == r.region)
             .map(crate::web::views::region_display::region_label)
             .unwrap_or_else(|| r.region.clone());
+        // No live probe overrides the stale last status with grey "no data".
+        // `None` = liveness unknown (query failed); leave the status untouched
+        // rather than greying every region on a transient blip.
+        let last_status = match live_regions {
+            Some(live) if !live.contains(&r.region) => "no_data".to_string(),
+            _ => r.last_status,
+        };
         Self {
             selected,
             uptime_label,
             p50_label: format!("{} ms", r.p50_ms),
             p95_label: format!("{} ms", r.p95_ms),
-            last_status: r.last_status,
+            last_status,
             region_label,
         }
     }
@@ -451,12 +459,25 @@ pub async fn index(
     )
     .await?;
     let region_breakdown = if region_ids.len() > 1 {
+        let live: Option<std::collections::HashSet<String>> = state
+            .silence_store
+            .live_regions(state.cfg.operator.agent_stale_after_secs)
+            .await
+            .ok()
+            .map(|v| v.into_iter().collect());
         state
             .results_store
             .region_breakdown(org, target.id, TimeRange { from, to })
             .await?
             .into_iter()
-            .map(|r| RegionBreakdownRow::from_rollup(r, selected_region.as_deref(), &catalog))
+            .map(|r| {
+                RegionBreakdownRow::from_rollup(
+                    r,
+                    selected_region.as_deref(),
+                    &catalog,
+                    live.as_ref(),
+                )
+            })
             .collect()
     } else {
         Vec::new()
@@ -831,6 +852,30 @@ pub(crate) fn resolve_incident_window(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn region_breakdown_greys_dead_region_keeps_live() {
+        let rollup = |region: &str, last: &str| crate::api::types::RegionRollup {
+            region: region.into(),
+            samples: 10,
+            up: 10,
+            p50_ms: 100,
+            p95_ms: 200,
+            last_status: last.into(),
+        };
+        let live: std::collections::HashSet<String> = ["eu-west".to_string()].into_iter().collect();
+
+        let alive =
+            RegionBreakdownRow::from_rollup(rollup("eu-west", "up"), None, &[], Some(&live));
+        assert_eq!(alive.last_status, "up");
+
+        let dead = RegionBreakdownRow::from_rollup(rollup("apac-sg", "up"), None, &[], Some(&live));
+        assert_eq!(dead.last_status, "no_data");
+
+        // Liveness unknown (query failed) leaves the status untouched.
+        let unknown = RegionBreakdownRow::from_rollup(rollup("apac-sg", "up"), None, &[], None);
+        assert_eq!(unknown.last_status, "up");
+    }
 
     fn sample_page() -> DetailPage {
         DetailPage {
