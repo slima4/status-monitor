@@ -580,6 +580,14 @@ async fn build_snapshot(
     let metrics_by_target: HashMap<Uuid, DashboardMetrics> =
         rollup.into_iter().map(|m| (m.target_id, m)).collect();
     let spark_by_target = group_sparks(&spark_rows, spark_from);
+    // Cosmetic overlay — a silence-query hiccup must not fail the dashboard.
+    let silenced: std::collections::HashSet<Uuid> = state
+        .silence_store
+        .open_target_ids(org)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
 
     let mut status_counts = StatusCounts::default();
     let mut type_acc: [u32; TYPE_CHIP_ORDER.len()] = [0; TYPE_CHIP_ORDER.len()];
@@ -599,7 +607,12 @@ async fn build_snapshot(
                     spark_agg[i].1 += 1;
                 }
             }
-            let row = DashboardRow::build(t.id, t.name, kind, address, t.enabled, metrics, spark);
+            let mut row =
+                DashboardRow::build(t.id, t.name, kind, address, t.enabled, metrics, spark);
+            // No live probe overrides the stale last status with grey "no data".
+            if silenced.contains(&t.id) {
+                row.last_status = "no_data";
+            }
             tally_status(&mut status_counts, &row);
             if let Some(idx) = TYPE_CHIP_ORDER.iter().position(|k| *k == kind) {
                 type_acc[idx] += 1;

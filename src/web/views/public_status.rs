@@ -116,7 +116,14 @@ pub async fn index(
         Ok(pair) => pair,
         Err(err) => return render_public_error(err),
     };
-    let view = build_view(&page, &markers);
+    let silenced: std::collections::HashSet<Uuid> = state
+        .silence_store
+        .open_target_ids(page_ref.org)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
+    let view = build_view(&page, &markers, &silenced);
     if params.fragment.unwrap_or(0) != 0 {
         // Chrome-free auto-refresh fragment: no header/footer/style, so the
         // branding lookup is skipped on the 30s poll.
@@ -725,10 +732,18 @@ pub fn render_about(markdown: &str) -> String {
 
 // --- Builders ------------------------------------------------------------
 
-fn build_view(page: &PublicStatusPage, history_markers: &[HistoryIncidentMarker]) -> StatusView {
+fn build_view(
+    page: &PublicStatusPage,
+    history_markers: &[HistoryIncidentMarker],
+    silenced: &std::collections::HashSet<Uuid>,
+) -> StatusView {
     let now = page.generated_at;
 
-    let groups = page.groups.iter().map(build_group).collect::<Vec<_>>();
+    let groups = page
+        .groups
+        .iter()
+        .map(|g| build_group(g, silenced))
+        .collect::<Vec<_>>();
     let has_components = groups.iter().any(|g| !g.components.is_empty());
 
     let day_strip_json = build_day_strip_json(page, history_markers, now);
@@ -782,15 +797,28 @@ fn build_view(page: &PublicStatusPage, history_markers: &[HistoryIncidentMarker]
     }
 }
 
-fn build_group(g: &PublicComponentGroup) -> GroupView {
+fn build_group(g: &PublicComponentGroup, silenced: &std::collections::HashSet<Uuid>) -> GroupView {
     GroupView {
         heading: g.name.clone().unwrap_or_else(|| "Other".to_string()),
-        components: g.components.iter().map(build_component).collect(),
+        components: g
+            .components
+            .iter()
+            .map(|c| build_component(c, silenced))
+            .collect(),
     }
 }
 
-fn build_component(c: &PublicComponent) -> ComponentView {
-    let (status_label, status_class, status_icon) = component_classes(c.current_status);
+fn build_component(
+    c: &PublicComponent,
+    silenced: &std::collections::HashSet<Uuid>,
+) -> ComponentView {
+    // No live probe overrides the rolled-up status with a grey "no data" badge,
+    // consistent with the history strip's NoData days.
+    let (status_label, status_class, status_icon) = if silenced.contains(&c.id) {
+        ("No data", "public-cmp--none", "\u{25CB}")
+    } else {
+        component_classes(c.current_status)
+    };
     let history = build_history(c, &c.history);
     let (uptime_pct, summary) = history_stats(&c.history);
     ComponentView {
@@ -1160,7 +1188,7 @@ mod tests {
 
     #[test]
     fn full_page_renders_chrome_and_components() {
-        let view = build_view(&sample_page(), &[]);
+        let view = build_view(&sample_page(), &[], &Default::default());
         let html = StatusFullPage {
             view,
             branding: sample_branding(),
@@ -1183,7 +1211,7 @@ mod tests {
 
     #[test]
     fn day_strip_renders_trigger_buttons_and_blob() {
-        let view = build_view(&sample_page(), &[]);
+        let view = build_view(&sample_page(), &[], &Default::default());
         let html = StatusRegion { view }.render().unwrap();
         assert!(html.contains("data-day-trigger"));
         assert!(html.contains(r#"data-comp="#));
@@ -1213,7 +1241,7 @@ mod tests {
             started_at: p.generated_at - ChronoDuration::minutes(45),
             ended_at: Some(p.generated_at - ChronoDuration::minutes(5)),
         };
-        let view = build_view(&p, &[marker]);
+        let view = build_view(&p, &[marker], &Default::default());
         // The JSON blob is the data source — assert against it, not the
         // rendered <li> markup (the JS builds those at runtime).
         assert!(view.day_strip_json.contains("Edge nodes returning 502"));
@@ -1236,7 +1264,7 @@ mod tests {
             started_at: p.generated_at - ChronoDuration::minutes(30),
             ended_at: Some(p.generated_at - ChronoDuration::minutes(5)),
         };
-        let view = build_view(&p, &[marker]);
+        let view = build_view(&p, &[marker], &Default::default());
         assert!(!view.day_strip_json.contains('<'));
         assert!(!view.day_strip_json.contains('>'));
         // `&` appears only as `&` — never raw.
@@ -1287,7 +1315,7 @@ mod tests {
 
     #[test]
     fn fragment_renders_region_without_doctype() {
-        let view = build_view(&sample_page(), &[]);
+        let view = build_view(&sample_page(), &[], &Default::default());
         let html = StatusRegion { view }.render().unwrap();
         assert!(!html.contains("<!doctype html>"));
         assert!(!html.contains("<nav"));
@@ -1300,7 +1328,7 @@ mod tests {
     fn empty_page_renders_with_zero_components() {
         let mut p = sample_page();
         p.groups.clear();
-        let view = build_view(&p, &[]);
+        let view = build_view(&p, &[], &Default::default());
         let html = StatusFullPage {
             view,
             branding: sample_branding(),
@@ -1334,7 +1362,7 @@ mod tests {
             }],
             postmortem: None,
         });
-        let view = build_view(&p, &[]);
+        let view = build_view(&p, &[], &Default::default());
         let html = StatusFullPage {
             view,
             branding: sample_branding(),
@@ -1359,7 +1387,7 @@ mod tests {
             ends_at: Utc::now() + ChronoDuration::hours(1),
             affected_component_names: vec!["Gateway".into()],
         });
-        let view = build_view(&p, &[]);
+        let view = build_view(&p, &[], &Default::default());
         let html = StatusFullPage {
             view,
             branding: sample_branding(),
@@ -1566,7 +1594,7 @@ mod tests {
 
     #[test]
     fn branding_renders_logo_about_and_color() {
-        let view = build_view(&sample_page(), &[]);
+        let view = build_view(&sample_page(), &[], &Default::default());
         let branding = branding_with(PublicOrgBranding {
             public_display_name: Some("Acme Public".into()),
             public_about: Some("**hi** there".into()),
@@ -1591,7 +1619,7 @@ mod tests {
 
     #[test]
     fn og_tags_render_with_image_when_marketing_origin_set() {
-        let view = build_view(&sample_page(), &[]);
+        let view = build_view(&sample_page(), &[], &Default::default());
         let html = StatusFullPage {
             view,
             branding: sample_branding(),
@@ -1622,7 +1650,7 @@ mod tests {
 
     #[test]
     fn og_tags_fall_back_to_summary_when_image_empty() {
-        let view = build_view(&sample_page(), &[]);
+        let view = build_view(&sample_page(), &[], &Default::default());
         let html = StatusFullPage {
             view,
             branding: sample_branding(),
@@ -1644,7 +1672,7 @@ mod tests {
 
     #[test]
     fn powered_by_shown_by_default() {
-        let view = build_view(&sample_page(), &[]);
+        let view = build_view(&sample_page(), &[], &Default::default());
         let html = StatusFullPage {
             view,
             branding: sample_branding(),
@@ -1660,7 +1688,7 @@ mod tests {
     // sanitiser is the independent layer that holds even then.
     #[test]
     fn malicious_brand_color_cannot_escape_style_rule() {
-        let view = build_view(&sample_page(), &[]);
+        let view = build_view(&sample_page(), &[], &Default::default());
         let branding = branding_with(PublicOrgBranding {
             public_brand_color: Some("red; } body { display: none } /*".into()),
             ..PublicOrgBranding::default()
@@ -1767,7 +1795,7 @@ mod tests {
         // name and no logo image is emitted (the header shows text). The
         // default colour and powered-by footer are covered by their own
         // tests above; this one pins the resolved-name + no-logo path.
-        let view = build_view(&sample_page(), &[]);
+        let view = build_view(&sample_page(), &[], &Default::default());
         let branding = branding_with(PublicOrgBranding::default());
         let html = StatusFullPage {
             view,

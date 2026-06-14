@@ -1910,6 +1910,7 @@
     .public-cmp--part { color: var(--theme-state-warn-fg-strong); }
     .public-cmp--maj  { color: var(--theme-state-bad-fg); }
     .public-cmp--mnt  { color: var(--theme-text-muted); }
+    .public-cmp--none { color: var(--sm-state-none-soft-fg); }
 
     /* Incident severity + phase chips (used by public/_incident_chips.html).
        Sharp corners + hairline edge to match the CLI register. */
@@ -2389,6 +2390,7 @@
     .dashboard-dot--degraded  { background: var(--sm-dashboard-dot-degraded); }
     .dashboard-dot--down      { background: var(--sm-dashboard-dot-down); }
     .dashboard-dot--error     { background: var(--sm-dashboard-dot-error); }
+    .dashboard-dot--no_data   { background: var(--sm-dashboard-dot-unknown); }
     .dashboard-dot--muted     { background: var(--sm-dashboard-dot-muted); }
     .dashboard-dot--pulse {
         position: relative;

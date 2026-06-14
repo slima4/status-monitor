@@ -37,6 +37,9 @@ pub trait SilenceStore: Send + Sync {
     async fn unmonitored(&self, stale_after_secs: u64) -> Result<Vec<(OrgId, Uuid)>>;
     /// Open silences (`resolved_at IS NULL`), with whether each was notified.
     async fn list_open(&self) -> Result<Vec<OpenSilence>>;
+    /// Target ids currently silent for one org — for the grey "no data" overlay
+    /// on the dashboard and status page.
+    async fn open_target_ids(&self, org: OrgId) -> Result<Vec<Uuid>>;
     /// Total enabled targets in live orgs — denominator for mass-outage damping.
     async fn enabled_target_count(&self) -> Result<i64>;
     /// Record a target as silent. Idempotent: an already-open silence keeps its
@@ -107,6 +110,18 @@ impl SilenceStore for PgSilenceStore {
                 notified,
             })
             .collect())
+    }
+
+    async fn open_target_ids(&self, org: OrgId) -> Result<Vec<Uuid>> {
+        let rows: Vec<(Uuid,)> = sqlx::query_as(
+            "SELECT target_id FROM monitor_silence_state \
+             WHERE org_id = $1 AND resolved_at IS NULL",
+        )
+        .bind(org.0)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| anyhow::anyhow!("silence open_target_ids: {e}"))?;
+        Ok(rows.into_iter().map(|(t,)| t).collect())
     }
 
     async fn enabled_target_count(&self) -> Result<i64> {
@@ -233,6 +248,17 @@ impl SilenceStore for InMemorySilenceStore {
                 target_id: *t,
                 notified: *notified,
             })
+            .collect())
+    }
+
+    async fn open_target_ids(&self, org: OrgId) -> Result<Vec<Uuid>> {
+        Ok(self
+            .inner
+            .lock()
+            .open
+            .iter()
+            .filter(|(_, (o, _))| *o == org)
+            .map(|(t, _)| *t)
             .collect())
     }
 
