@@ -100,6 +100,14 @@ impl IncidentNotice {
                     label = self.label()
                 )
             }
+            NotificationReason::NoData => format!(
+                "{label} — NO DATA: monitoring interrupted, no check results received{link}",
+                label = self.label()
+            ),
+            NotificationReason::DataResumed => format!(
+                "{label} — monitoring RESUMED, receiving check results again{link}",
+                label = self.label()
+            ),
         }
     }
 }

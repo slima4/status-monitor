@@ -75,7 +75,7 @@ pub use page_assets::{
 };
 pub use postgres::PostgresTargetStore;
 pub use postmortems::{InMemoryPostmortemStore, PgPostmortemStore, PostmortemStore};
-pub use silence::{InMemorySilenceStore, PgSilenceStore, SilenceStore};
+pub use silence::{InMemorySilenceStore, OpenSilence, PgSilenceStore, SilenceStore};
 pub use status_pages::{
     AddComponentOutcome, InMemoryStatusPageStore, PgStatusPageStore, StatusPageStore,
 };

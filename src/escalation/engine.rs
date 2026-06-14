@@ -367,6 +367,8 @@ impl Worker {
             NotificationReason::Resolved => self.notify_resolution(org, &incident, &target).await,
             // Escalation pages originate from the sweep, never an inbound signal.
             NotificationReason::Escalated => Ok(()),
+            // Silence has no incident row; the silence sweep delivers it.
+            NotificationReason::NoData | NotificationReason::DataResumed => Ok(()),
         }
     }
 
@@ -1277,6 +1279,7 @@ fn reason_is_stale(reason: NotificationReason, state: IncidentState) -> bool {
         | NotificationReason::Reopened
         | NotificationReason::Escalated => state == IncidentState::Resolved,
         NotificationReason::Resolved => state != IncidentState::Resolved,
+        NotificationReason::NoData | NotificationReason::DataResumed => false,
     }
 }
 

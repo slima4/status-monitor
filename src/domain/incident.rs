@@ -530,6 +530,11 @@ pub enum NotificationReason {
     Escalated,
     Resolved,
     Reopened,
+    /// Monitoring stopped: the probes covering this monitor all went silent
+    /// (no incident — orthogonal to up/down). Distinct wording: "no data".
+    NoData,
+    /// Monitoring resumed after a `NoData` notice.
+    DataResumed,
 }
 
 impl NotificationReason {
@@ -538,6 +543,8 @@ impl NotificationReason {
         Self::Escalated,
         Self::Resolved,
         Self::Reopened,
+        Self::NoData,
+        Self::DataResumed,
     ];
     pub fn as_db_str(self) -> &'static str {
         match self {
@@ -545,6 +552,8 @@ impl NotificationReason {
             Self::Escalated => "escalated",
             Self::Resolved => "resolved",
             Self::Reopened => "reopened",
+            Self::NoData => "no_data",
+            Self::DataResumed => "data_resumed",
         }
     }
     pub fn from_db_str(s: &str) -> Self {
@@ -552,6 +561,8 @@ impl NotificationReason {
             "escalated" => Self::Escalated,
             "resolved" => Self::Resolved,
             "reopened" => Self::Reopened,
+            "no_data" => Self::NoData,
+            "data_resumed" => Self::DataResumed,
             _ => Self::Opened,
         }
     }

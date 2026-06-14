@@ -57,6 +57,10 @@ impl SlackNotifier {
                     .unwrap_or_default();
                 format!("*{label}* — incident RESOLVED{dur}{link}")
             }
+            NotificationReason::NoData => {
+                format!("*{label}* — NO DATA: monitoring interrupted{link}")
+            }
+            NotificationReason::DataResumed => format!("*{label}* — monitoring RESUMED{link}"),
         }
     }
 }

@@ -21,21 +21,33 @@ use uuid::Uuid;
 use crate::domain::OrgId;
 use crate::error::Result;
 
+/// An open (unresolved) silence row. `notified` = the customer was already told.
+#[derive(Debug, Clone, Copy)]
+pub struct OpenSilence {
+    pub org: OrgId,
+    pub target_id: Uuid,
+    pub notified: bool,
+}
+
 #[async_trait]
 pub trait SilenceStore: Send + Sync {
     /// Enabled, assigned targets whose every region lacks a fresh, enabled agent
-    /// (`last_seen_at` within `stale_after_secs`). The unmonitored set.
+    /// (`last_seen_at` within `stale_after_secs`) and that are not in an active
+    /// maintenance window. The unmonitored set.
     async fn unmonitored(&self, stale_after_secs: u64) -> Result<Vec<(OrgId, Uuid)>>;
-    /// Targets currently recorded silent (`resolved_at IS NULL`).
-    async fn list_open(&self) -> Result<Vec<(OrgId, Uuid)>>;
+    /// Open silences (`resolved_at IS NULL`), with whether each was notified.
+    async fn list_open(&self) -> Result<Vec<OpenSilence>>;
     /// Total enabled targets in live orgs — denominator for mass-outage damping.
     async fn enabled_target_count(&self) -> Result<i64>;
     /// Record a target as silent. Idempotent: an already-open silence keeps its
     /// `silent_since`; re-entering a previously-resolved one starts a fresh
     /// episode (new `silent_since`, cleared `notified_at`/`resolved_at`).
     async fn enter(&self, org: OrgId, target_id: Uuid, at: DateTime<Utc>) -> Result<()>;
-    /// Mark an open silence resolved (monitoring resumed). Idempotent.
-    async fn resolve(&self, org: OrgId, target_id: Uuid, at: DateTime<Utc>) -> Result<()>;
+    /// Stamp the customer-notified time on an open silence. Idempotent.
+    async fn mark_notified(&self, org: OrgId, target_id: Uuid, at: DateTime<Utc>) -> Result<()>;
+    /// Mark an open silence resolved (monitoring resumed). Returns whether this
+    /// call flipped it — so only the winner of a 2-instance race notifies.
+    async fn resolve(&self, org: OrgId, target_id: Uuid, at: DateTime<Utc>) -> Result<bool>;
 }
 
 // ── PostgreSQL implementation ────────────────────────────────────────────────
@@ -65,6 +77,11 @@ impl SilenceStore for PgSilenceStore {
                      JOIN agents a   ON a.region = tr.region AND a.enabled
                                     AND a.last_seen_at > now() - ($1::bigint * interval '1 second')
                      WHERE tr.target_id = t.id
+                 )
+                 AND NOT EXISTS (
+                     SELECT 1 FROM maintenance_window_components mwc
+                     JOIN maintenance_windows mw ON mw.id = mwc.maintenance_id
+                     WHERE mwc.target_id = t.id AND now() BETWEEN mw.starts_at AND mw.ends_at
                  )"#,
         )
         .bind(stale_after_secs as i64)
@@ -74,14 +91,22 @@ impl SilenceStore for PgSilenceStore {
         Ok(rows.into_iter().map(|(o, t)| (OrgId(o), t)).collect())
     }
 
-    async fn list_open(&self) -> Result<Vec<(OrgId, Uuid)>> {
-        let rows: Vec<(Uuid, Uuid)> = sqlx::query_as(
-            "SELECT org_id, target_id FROM monitor_silence_state WHERE resolved_at IS NULL",
+    async fn list_open(&self) -> Result<Vec<OpenSilence>> {
+        let rows: Vec<(Uuid, Uuid, bool)> = sqlx::query_as(
+            "SELECT org_id, target_id, notified_at IS NOT NULL \
+             FROM monitor_silence_state WHERE resolved_at IS NULL",
         )
         .fetch_all(&self.pool)
         .await
         .map_err(|e| anyhow::anyhow!("silence list_open: {e}"))?;
-        Ok(rows.into_iter().map(|(o, t)| (OrgId(o), t)).collect())
+        Ok(rows
+            .into_iter()
+            .map(|(o, t, notified)| OpenSilence {
+                org: OrgId(o),
+                target_id: t,
+                notified,
+            })
+            .collect())
     }
 
     async fn enabled_target_count(&self) -> Result<i64> {
@@ -118,18 +143,33 @@ impl SilenceStore for PgSilenceStore {
         Ok(())
     }
 
-    async fn resolve(&self, org: OrgId, target_id: Uuid, at: DateTime<Utc>) -> Result<()> {
+    async fn mark_notified(&self, org: OrgId, target_id: Uuid, at: DateTime<Utc>) -> Result<()> {
         sqlx::query(
-            "UPDATE monitor_silence_state SET resolved_at = $3 \
-             WHERE target_id = $1 AND org_id = $2 AND resolved_at IS NULL",
+            "UPDATE monitor_silence_state SET notified_at = $3 \
+             WHERE target_id = $1 AND org_id = $2 AND resolved_at IS NULL AND notified_at IS NULL",
         )
         .bind(target_id)
         .bind(org.0)
         .bind(at)
         .execute(&self.pool)
         .await
-        .map_err(|e| anyhow::anyhow!("silence resolve: {e}"))?;
+        .map_err(|e| anyhow::anyhow!("silence mark_notified: {e}"))?;
         Ok(())
+    }
+
+    async fn resolve(&self, org: OrgId, target_id: Uuid, at: DateTime<Utc>) -> Result<bool> {
+        let row: Option<(Uuid,)> = sqlx::query_as(
+            "UPDATE monitor_silence_state SET resolved_at = $3 \
+             WHERE target_id = $1 AND org_id = $2 AND resolved_at IS NULL \
+             RETURNING target_id",
+        )
+        .bind(target_id)
+        .bind(org.0)
+        .bind(at)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| anyhow::anyhow!("silence resolve: {e}"))?;
+        Ok(row.is_some())
     }
 }
 
@@ -146,7 +186,7 @@ pub struct InMemorySilenceStore {
 struct InMemorySilenceState {
     unmonitored: Vec<(OrgId, Uuid)>,
     total: i64,
-    open: std::collections::HashMap<Uuid, (OrgId, DateTime<Utc>)>,
+    open: std::collections::HashMap<Uuid, (OrgId, bool)>,
     resolved: Vec<(OrgId, Uuid)>,
 }
 
@@ -182,13 +222,17 @@ impl SilenceStore for InMemorySilenceStore {
         Ok(self.inner.lock().unmonitored.clone())
     }
 
-    async fn list_open(&self) -> Result<Vec<(OrgId, Uuid)>> {
+    async fn list_open(&self) -> Result<Vec<OpenSilence>> {
         Ok(self
             .inner
             .lock()
             .open
             .iter()
-            .map(|(t, (o, _))| (*o, *t))
+            .map(|(t, (o, notified))| OpenSilence {
+                org: *o,
+                target_id: *t,
+                notified: *notified,
+            })
             .collect())
     }
 
@@ -196,16 +240,28 @@ impl SilenceStore for InMemorySilenceStore {
         Ok(self.inner.lock().total)
     }
 
-    async fn enter(&self, org: OrgId, target_id: Uuid, at: DateTime<Utc>) -> Result<()> {
-        self.inner.lock().open.entry(target_id).or_insert((org, at));
+    async fn enter(&self, org: OrgId, target_id: Uuid, _at: DateTime<Utc>) -> Result<()> {
+        self.inner
+            .lock()
+            .open
+            .entry(target_id)
+            .or_insert((org, false));
         Ok(())
     }
 
-    async fn resolve(&self, org: OrgId, target_id: Uuid, _at: DateTime<Utc>) -> Result<()> {
+    async fn mark_notified(&self, _org: OrgId, target_id: Uuid, _at: DateTime<Utc>) -> Result<()> {
+        if let Some(v) = self.inner.lock().open.get_mut(&target_id) {
+            v.1 = true;
+        }
+        Ok(())
+    }
+
+    async fn resolve(&self, org: OrgId, target_id: Uuid, _at: DateTime<Utc>) -> Result<bool> {
         let mut g = self.inner.lock();
         if g.open.remove(&target_id).is_some() {
             g.resolved.push((org, target_id));
+            return Ok(true);
         }
-        Ok(())
+        Ok(false)
     }
 }

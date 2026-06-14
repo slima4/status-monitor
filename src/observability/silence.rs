@@ -1,43 +1,121 @@
-//! Per-monitor silence (no-data) detection. A control-plane task that, every
-//! tick, derives the set of *unmonitored* monitors — enabled targets whose every
-//! assigned region has lost its probe (no fresh agent) — and records the
-//! open/resolved boundary in `monitor_silence_state`, so a silence is announced
-//! once and a recovery once.
+//! Per-monitor silence (no-data) detection + customer notification.
 //!
-//! Slice 1 (this module): detect + record state + emit an operator gauge/log.
-//! Customer notification rides the state transitions in a later slice.
+//! A monitor goes truly silent only when the agents covering all its regions
+//! stop running — a failing or timing-out check still reports an Error and opens
+//! a normal incident. Each tick, the sweep derives the unmonitored set (one SQL
+//! query over agent liveness + region assignment, excluding maintenance), records
+//! the open/resolved boundary in `monitor_silence_state`, exposes an operator
+//! gauge, and notifies the customer's bound channels once per episode.
 //!
 //! Sibling to `agent_health`: that one alarms a dead *agent* (operator-facing);
-//! this rolls agent liveness up to the *monitor* so the customer whose monitor
-//! is now blind can be told.
+//! this rolls liveness up to the *monitor* so the customer whose monitor is now
+//! blind is told. Delivery reuses the public notifier transports; it does not
+//! touch the incident/escalation path (silence has no incident row).
 
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
+use async_trait::async_trait;
 use chrono::Utc;
 use tokio::time::{MissedTickBehavior, interval};
 use tokio_util::sync::CancellationToken;
+use uuid::Uuid;
 
+use crate::config::WhatsAppAppBotConfig;
+use crate::domain::{IncidentSeverity, IncidentUrgency, NotificationReason, OrgId};
 use crate::error::Result;
+use crate::http_outbound::OutboundHttpClient;
+use crate::notifier::event::IncidentNotice;
+use crate::notifier::{CentralBotDelivery, EmailDelivery, build_notifier};
 use crate::observability::metrics::names;
-use crate::storage::SilenceStore;
+use crate::storage::{NotificationChannelStore, SilenceStore, TargetStore};
 
 const TICK: Duration = Duration::from_secs(30);
 /// Above this fraction of all enabled monitors silent at once, treat it as one
-/// infra/probe outage (a region died), not thousands of independent silences:
-/// state is still recorded, but a later slice damps customer delivery so our own
-/// outage never storms every customer.
+/// probe/infra outage (a region died): state is still recorded and the operator
+/// alarmed, but per-customer notices are suppressed so our own outage never
+/// storms every customer.
 const MAX_SILENCE_FRACTION: f64 = 0.25;
 
-pub async fn run(store: Arc<dyn SilenceStore>, stale_after: Duration, shutdown: CancellationToken) {
+/// Delivers a silence notice to a monitor's bound channels. Trait so the sweep's
+/// delivery decisions are testable without live transports.
+#[async_trait]
+pub trait SilenceDelivery: Send + Sync {
+    /// Returns whether the notice reached at least one channel.
+    async fn notify(&self, org: OrgId, target_id: Uuid, reason: NotificationReason) -> bool;
+}
+
+/// Production delivery over the public notifier transports. Holds the same
+/// shared deps the escalation engine uses; builds no incident notification rows
+/// (silence dedup lives in `monitor_silence_state`).
+pub struct SilenceNotifier {
+    pub channels: Arc<dyn NotificationChannelStore>,
+    pub targets: Arc<dyn TargetStore>,
+    pub http: OutboundHttpClient,
+    pub central_bot: Option<CentralBotDelivery>,
+    pub central_whatsapp: Option<WhatsAppAppBotConfig>,
+    pub email: Option<EmailDelivery>,
+}
+
+#[async_trait]
+impl SilenceDelivery for SilenceNotifier {
+    async fn notify(&self, org: OrgId, target_id: Uuid, reason: NotificationReason) -> bool {
+        let Ok(Some(target)) = self.targets.get(org, target_id).await else {
+            return false;
+        };
+        let notice = IncidentNotice {
+            incident_id: target_id,
+            reason,
+            monitor_name: Some(target.name.clone()),
+            title: None,
+            severity: IncidentSeverity::default(),
+            urgency: IncidentUrgency::default(),
+            started_at: Utc::now(),
+            ended_at: None,
+            error_sample: None,
+            regions_down: Vec::new(),
+            regions_up: Vec::new(),
+            url: None,
+        };
+        let central = self.central_bot.as_ref().map(|c| c.as_central());
+        let mut delivered = false;
+        for binding in target.alerts.iter() {
+            let Ok(Some(channel)) = self.channels.get(org, binding.channel_id).await else {
+                continue;
+            };
+            if !channel.enabled || channel.awaiting_verification() {
+                continue;
+            }
+            let sent = match build_notifier(
+                &channel.config,
+                &self.http,
+                central,
+                self.central_whatsapp.as_ref(),
+                self.email.as_ref(),
+            ) {
+                Ok(n) => n.notify_incident(&notice).await.is_ok(),
+                Err(_) => false,
+            };
+            delivered |= sent;
+        }
+        delivered
+    }
+}
+
+pub async fn run(
+    store: Arc<dyn SilenceStore>,
+    delivery: Arc<dyn SilenceDelivery>,
+    stale_after: Duration,
+    shutdown: CancellationToken,
+) {
     let mut ticker = interval(TICK);
     ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
     loop {
         tokio::select! {
             _ = shutdown.cancelled() => return,
             _ = ticker.tick() => {
-                if let Err(err) = sweep(store.as_ref(), stale_after).await {
+                if let Err(err) = sweep(store.as_ref(), Some(delivery.as_ref()), stale_after).await {
                     tracing::warn!(error = %err, "silence sweep failed");
                 }
             }
@@ -46,44 +124,73 @@ pub async fn run(store: Arc<dyn SilenceStore>, stale_after: Duration, shutdown: 
 }
 
 /// One sweep: diff the live unmonitored set against recorded-open silences,
-/// entering the newly silent and resolving the recovered. Returns nothing —
-/// errors are logged by `run`. Visible for tests.
-pub async fn sweep(store: &dyn SilenceStore, stale_after: Duration) -> Result<()> {
+/// entering the newly silent and resolving the recovered, then notify customers
+/// once per episode. `delivery` is `None` in tests that exercise only the state
+/// diff. Visible for tests.
+pub async fn sweep(
+    store: &dyn SilenceStore,
+    delivery: Option<&dyn SilenceDelivery>,
+    stale_after: Duration,
+) -> Result<()> {
     let now = Utc::now();
-    // Maintenance-window suppression is a Slice-2 concern (it gates customer
-    // delivery): during maintenance the agent stays alive, so a maintained
-    // monitor doesn't enter the unmonitored set here anyway.
     let unmonitored: HashSet<_> = store
         .unmonitored(stale_after.as_secs())
         .await?
         .into_iter()
         .collect();
-    let open: HashSet<_> = store.list_open().await?.into_iter().collect();
+    let open = store.list_open().await?;
+    let open_ids: HashSet<_> = open.iter().map(|s| (s.org, s.target_id)).collect();
 
-    for &(org, target_id) in unmonitored.difference(&open) {
+    for &(org, target_id) in unmonitored.difference(&open_ids) {
         store.enter(org, target_id, now).await?;
-    }
-    for &(org, target_id) in open.difference(&unmonitored) {
-        store.resolve(org, target_id, now).await?;
     }
 
     metrics::gauge!(names::MONITORS_UNMONITORED).set(unmonitored.len() as f64);
 
-    if !unmonitored.is_empty() {
+    // A whole-region death is one infra event, not thousands of customer pages.
+    let mass = if unmonitored.is_empty() {
+        false
+    } else {
         let total = store.enabled_target_count().await?.max(0);
-        let mass = total > 0 && (unmonitored.len() as f64) > MAX_SILENCE_FRACTION * total as f64;
-        if mass {
-            tracing::warn!(
-                unmonitored = unmonitored.len(),
-                total,
-                "many monitors unmonitored at once — likely a regional probe outage, not per-monitor"
-            );
-        } else {
-            tracing::warn!(
-                unmonitored = unmonitored.len(),
-                "monitors have no live probe (silent)"
-            );
+        total > 0 && (unmonitored.len() as f64) > MAX_SILENCE_FRACTION * total as f64
+    };
+
+    for s in &open {
+        if !unmonitored.contains(&(s.org, s.target_id)) {
+            // Only the instance that flips the row notifies — no duplicate resume.
+            let flipped = store.resolve(s.org, s.target_id, now).await?;
+            if flipped
+                && s.notified
+                && !mass
+                && let Some(d) = delivery
+            {
+                d.notify(s.org, s.target_id, NotificationReason::DataResumed)
+                    .await;
+            }
         }
+    }
+
+    if mass {
+        tracing::warn!(
+            unmonitored = unmonitored.len(),
+            "many monitors unmonitored at once — likely a regional probe outage; customer notices suppressed"
+        );
+    } else if let Some(d) = delivery {
+        // Send-then-mark keeps retrying a transient transport failure; a 2-instance
+        // deploy overlap may double-send a no-data notice, which is benign.
+        for s in store.list_open().await? {
+            if !s.notified
+                && d.notify(s.org, s.target_id, NotificationReason::NoData)
+                    .await
+            {
+                store.mark_notified(s.org, s.target_id, now).await?;
+            }
+        }
+    } else if !unmonitored.is_empty() {
+        tracing::warn!(
+            unmonitored = unmonitored.len(),
+            "monitors have no live probe (silent)"
+        );
     }
     Ok(())
 }
@@ -91,9 +198,28 @@ pub async fn sweep(store: &dyn SilenceStore, stale_after: Duration) -> Result<()
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::OrgId;
     use crate::storage::InMemorySilenceStore;
-    use uuid::Uuid;
+    use parking_lot::Mutex;
+
+    #[derive(Default)]
+    struct RecordingDelivery {
+        sent: Mutex<Vec<(Uuid, NotificationReason)>>,
+    }
+    #[async_trait]
+    impl SilenceDelivery for RecordingDelivery {
+        async fn notify(&self, _org: OrgId, target_id: Uuid, reason: NotificationReason) -> bool {
+            self.sent.lock().push((target_id, reason));
+            true
+        }
+    }
+
+    fn count(d: &RecordingDelivery, reason: NotificationReason) -> usize {
+        d.sent
+            .lock()
+            .iter()
+            .filter(|(_, r)| std::mem::discriminant(r) == std::mem::discriminant(&reason))
+            .count()
+    }
 
     #[tokio::test]
     async fn enters_new_and_resolves_recovered() {
@@ -102,30 +228,56 @@ mod tests {
         let b = Uuid::now_v7();
         let store = InMemorySilenceStore::new();
 
-        // First sweep: a and b are unmonitored → both entered.
         store.set_unmonitored(vec![(org, a), (org, b)]);
-        sweep(&store, Duration::from_secs(120)).await.unwrap();
+        sweep(&store, None, Duration::from_secs(120)).await.unwrap();
         assert_eq!(store.open_target_ids(), sorted(vec![a, b]));
-        assert!(store.resolved_target_ids().is_empty());
 
-        // Second sweep: a recovered (only b still silent) → a resolved, b stays.
         store.set_unmonitored(vec![(org, b)]);
-        sweep(&store, Duration::from_secs(120)).await.unwrap();
+        sweep(&store, None, Duration::from_secs(120)).await.unwrap();
         assert_eq!(store.open_target_ids(), vec![b]);
         assert_eq!(store.resolved_target_ids(), vec![a]);
     }
 
     #[tokio::test]
-    async fn re_sweep_with_same_set_is_noop() {
+    async fn notifies_once_then_resumes() {
         let org = OrgId(Uuid::now_v7());
         let a = Uuid::now_v7();
         let store = InMemorySilenceStore::new();
+        store.set_total(10);
+        let d = RecordingDelivery::default();
+
+        // Silent across two sweeps → exactly one NoData notice.
         store.set_unmonitored(vec![(org, a)]);
-        for _ in 0..3 {
-            sweep(&store, Duration::from_secs(120)).await.unwrap();
-        }
-        assert_eq!(store.open_target_ids(), vec![a]);
-        assert!(store.resolved_target_ids().is_empty());
+        sweep(&store, Some(&d), Duration::from_secs(120))
+            .await
+            .unwrap();
+        sweep(&store, Some(&d), Duration::from_secs(120))
+            .await
+            .unwrap();
+        assert_eq!(count(&d, NotificationReason::NoData), 1);
+
+        // Recovery → one DataResumed (it had been notified).
+        store.set_unmonitored(vec![]);
+        sweep(&store, Some(&d), Duration::from_secs(120))
+            .await
+            .unwrap();
+        assert_eq!(count(&d, NotificationReason::DataResumed), 1);
+    }
+
+    #[tokio::test]
+    async fn mass_outage_suppresses_customer_notices() {
+        let org = OrgId(Uuid::now_v7());
+        let store = InMemorySilenceStore::new();
+        store.set_total(10);
+        let d = RecordingDelivery::default();
+        // 6 of 10 silent (>25%) → no customer notices, state still recorded.
+        let silent: Vec<_> = (0..6).map(|_| (org, Uuid::now_v7())).collect();
+        store.set_unmonitored(silent.clone());
+        sweep(&store, Some(&d), Duration::from_secs(120))
+            .await
+            .unwrap();
+        assert_eq!(count(&d, NotificationReason::NoData), 0);
+        assert_eq!(store.open_target_ids().len(), 6);
     }
 
     fn sorted(mut v: Vec<Uuid>) -> Vec<Uuid> {

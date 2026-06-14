@@ -103,6 +103,32 @@ async fn unmonitored_reflects_agent_liveness_pg() {
         !has(&store.unmonitored(STALE_AFTER).await.unwrap(), unassigned),
         "an unassigned target is not flagged silent"
     );
+
+    // Stale agent but inside an active maintenance window → suppressed.
+    let (mw_org, maint) = seed_target(&pool, "silmaint").await;
+    region_with_agent(&pool, maint, 10_000).await; // stale
+    let mw_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO maintenance_windows (org_id, title, starts_at, ends_at) \
+         VALUES ($1, 'mw', now() - interval '1 hour', now() + interval '1 hour') RETURNING id",
+    )
+    .bind(mw_org.0)
+    .fetch_one(&pool)
+    .await
+    .expect("insert maintenance window");
+    sqlx::query(
+        "INSERT INTO maintenance_window_components (org_id, maintenance_id, target_id) \
+         VALUES ($1, $2, $3)",
+    )
+    .bind(mw_org.0)
+    .bind(mw_id)
+    .bind(maint)
+    .execute(&pool)
+    .await
+    .expect("assign maintenance component");
+    assert!(
+        !has(&store.unmonitored(STALE_AFTER).await.unwrap(), maint),
+        "a target in an active maintenance window is not flagged silent"
+    );
 }
 
 #[tokio::test]
@@ -115,24 +141,48 @@ async fn enter_resolve_round_trip_pg() {
     let (org, target_id) = seed_target(&pool, "silstate").await;
     let now = chrono::Utc::now();
 
+    let open_has = |v: &[uptimepage::storage::silence::OpenSilence], t: Uuid| {
+        v.iter().any(|s| s.target_id == t)
+    };
+
     store.enter(org, target_id, now).await.unwrap();
     assert!(
-        has(&store.list_open().await.unwrap(), target_id),
+        open_has(&store.list_open().await.unwrap(), target_id),
         "entered silence is open"
     );
 
     // Idempotent re-enter keeps it open exactly once.
     store.enter(org, target_id, now).await.unwrap();
     let open = store.list_open().await.unwrap();
-    assert_eq!(open.iter().filter(|(_, t)| *t == target_id).count(), 1);
+    assert_eq!(open.iter().filter(|s| s.target_id == target_id).count(), 1);
+
+    // mark_notified flips the flag; a re-enter while open keeps it notified.
+    store.mark_notified(org, target_id, now).await.unwrap();
+    assert!(
+        store
+            .list_open()
+            .await
+            .unwrap()
+            .iter()
+            .any(|s| s.target_id == target_id && s.notified),
+        "notified flag set"
+    );
 
     store.resolve(org, target_id, now).await.unwrap();
     assert!(
-        !has(&store.list_open().await.unwrap(), target_id),
+        !open_has(&store.list_open().await.unwrap(), target_id),
         "resolved silence is no longer open"
     );
 
-    // Re-entering after resolve reopens a fresh episode.
+    // Re-entering after resolve reopens a fresh episode with notified cleared.
     store.enter(org, target_id, now).await.unwrap();
-    assert!(has(&store.list_open().await.unwrap(), target_id));
+    assert!(
+        store
+            .list_open()
+            .await
+            .unwrap()
+            .iter()
+            .any(|s| s.target_id == target_id && !s.notified),
+        "fresh episode is unnotified"
+    );
 }

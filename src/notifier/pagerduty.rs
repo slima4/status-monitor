@@ -144,7 +144,8 @@ impl Notifier for PagerDutyNotifier {
         match notice.reason {
             NotificationReason::Opened
             | NotificationReason::Reopened
-            | NotificationReason::Escalated => {
+            | NotificationReason::Escalated
+            | NotificationReason::NoData => {
                 self.send(&Self::trigger(
                     &self.routing_key,
                     notice,
@@ -153,7 +154,7 @@ impl Notifier for PagerDutyNotifier {
                 ))
                 .await
             }
-            NotificationReason::Resolved => {
+            NotificationReason::Resolved | NotificationReason::DataResumed => {
                 self.send(&Self::resolve(&self.routing_key, dedup)).await
             }
         }

@@ -353,20 +353,6 @@ async fn main() -> Result<()> {
         })
     };
 
-    // Per-monitor silence: rolls agent liveness up to the customer's monitors so
-    // a dead probe surfaces as "this monitor is unmonitored", not just a stale
-    // agent gauge. Same stale threshold as agent_health.
-    let silence_sweep_handle: JoinHandle<()> = {
-        let store: Arc<dyn uptimepage::storage::SilenceStore> = Arc::new(
-            uptimepage::storage::PgSilenceStore::new(pg_pool_for_stores.clone()),
-        );
-        let stale_after = std::time::Duration::from_secs(cfg.operator.agent_stale_after_secs);
-        let token = root.clone();
-        tokio::spawn(async move {
-            uptimepage::observability::silence::run(store, stale_after, token).await
-        })
-    };
-
     // Incident paging worker: the single notification path. Always running — it
     // pages a monitor's bound channels on open/resolve (region-aware) and walks
     // an escalation policy when one is bound. The `escalation.enabled` flag only
@@ -419,6 +405,37 @@ async fn main() -> Result<()> {
         );
         let token = root.clone();
         tokio::spawn(async move { engine.run(token).await })
+    };
+
+    // Per-monitor silence: rolls agent liveness up to the customer's monitors so
+    // a dead probe is told to the customer, not just shown as a stale agent gauge.
+    let silence_sweep_handle: JoinHandle<()> = {
+        let store: Arc<dyn uptimepage::storage::SilenceStore> = Arc::new(
+            uptimepage::storage::PgSilenceStore::new(pg_pool_for_stores.clone()),
+        );
+        let delivery: Arc<dyn uptimepage::observability::silence::SilenceDelivery> =
+            Arc::new(uptimepage::observability::silence::SilenceNotifier {
+                channels: notification_channel_store.clone(),
+                targets: target_store.clone(),
+                http: outbound_http.clone(),
+                central_bot: cfg.telegram.enabled().then(|| {
+                    uptimepage::notifier::CentralBotDelivery {
+                        token: cfg.telegram.bot_token.clone(),
+                        budget: telegram_send_budget.clone(),
+                    }
+                }),
+                central_whatsapp: cfg.whatsapp_app.enabled().then(|| cfg.whatsapp_app.clone()),
+                email: Some(uptimepage::notifier::EmailDelivery {
+                    sender: email_sender.clone(),
+                    from_address: cfg.email.from_address.clone(),
+                    from_name: cfg.email.from_name.clone(),
+                }),
+            });
+        let stale_after = std::time::Duration::from_secs(cfg.operator.agent_stale_after_secs);
+        let token = root.clone();
+        tokio::spawn(async move {
+            uptimepage::observability::silence::run(store, delivery, stale_after, token).await
+        })
     };
 
     let purge_handle: JoinHandle<()> = {
