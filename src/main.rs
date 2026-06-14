@@ -353,6 +353,20 @@ async fn main() -> Result<()> {
         })
     };
 
+    // Per-monitor silence: rolls agent liveness up to the customer's monitors so
+    // a dead probe surfaces as "this monitor is unmonitored", not just a stale
+    // agent gauge. Same stale threshold as agent_health.
+    let silence_sweep_handle: JoinHandle<()> = {
+        let store: Arc<dyn uptimepage::storage::SilenceStore> = Arc::new(
+            uptimepage::storage::PgSilenceStore::new(pg_pool_for_stores.clone()),
+        );
+        let stale_after = std::time::Duration::from_secs(cfg.operator.agent_stale_after_secs);
+        let token = root.clone();
+        tokio::spawn(async move {
+            uptimepage::observability::silence::run(store, stale_after, token).await
+        })
+    };
+
     // Incident paging worker: the single notification path. Always running — it
     // pages a monitor's bound channels on open/resolve (region-aware) and walks
     // an escalation policy when one is bound. The `escalation.enabled` flag only
@@ -629,6 +643,7 @@ async fn main() -> Result<()> {
             sampler_handle,
             incident_writer_handle,
             agent_health_handle,
+            silence_sweep_handle,
             escalation_engine_handle,
             purge_handle,
             invitation_purge_handle,

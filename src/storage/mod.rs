@@ -21,6 +21,7 @@ pub mod partitions;
 pub mod postgres;
 pub mod postgres_secrets;
 pub mod postmortems;
+pub mod silence;
 pub mod status_pages;
 pub mod traits;
 pub mod users;
@@ -74,6 +75,7 @@ pub use page_assets::{
 };
 pub use postgres::PostgresTargetStore;
 pub use postmortems::{InMemoryPostmortemStore, PgPostmortemStore, PostmortemStore};
+pub use silence::{InMemorySilenceStore, PgSilenceStore, SilenceStore};
 pub use status_pages::{
     AddComponentOutcome, InMemoryStatusPageStore, PgStatusPageStore, StatusPageStore,
 };
