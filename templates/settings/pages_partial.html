@@ -1,18 +1,21 @@
 {% if rows.is_empty() %}
-<div class="flex flex-col items-center gap-4 px-6 py-12 text-center">
+<div class="empty-hero">
   {% include "_ekg_pulse.html" %}
-  <h2 class="empty-hero__title">no status pages yet.</h2>
-  <p class="empty-hero__lede">
-    A status page is a public uptime dashboard &mdash; give it a URL and pick
-    the monitors to show on it. Share it, or keep it internal.
-  </p>
-  <button type="button"
-          class="empty-hero__cta sticker-btn sticker-btn--primary"
-          onclick="smCreateDraftPage(this)">
-    create your first page
-  </button>
+  <div class="empty-hero__body">
+    <h2 class="empty-hero__title">no status pages yet.</h2>
+    <p class="empty-hero__lede">
+      A status page is a public uptime dashboard &mdash; give it a URL and pick
+      the monitors to show on it. Share it, or keep it internal.
+    </p>
+    <button type="button"
+            class="empty-hero__cta sticker-btn sticker-btn--primary"
+            onclick="smCreateDraftPage(this)">
+      create your first page
+    </button>
+  </div>
 </div>
 {% else %}
+<div class="sticker-card overflow-hidden">
 <table class="w-full text-left text-sm">
   <thead class="table-head bg-[color:var(--theme-surface-sunk)]">
     <tr>
@@ -53,4 +56,5 @@
     {% endfor %}
   </tbody>
 </table>
+</div>
 {% endif %}

@@ -1452,8 +1452,7 @@
        (templates/_empty_monitors_hero.html) renders this on both pages so
        wording and motion stay in lockstep. */
     .empty-hero {
-        @apply mx-auto flex flex-col items-center gap-6 rounded-sm border px-8 py-12 text-center;
-        max-width: 38rem;
+        @apply flex w-full flex-col items-center gap-6 rounded-sm border px-8 py-12 text-center;
         background: var(--theme-surface-elev);
         border-color: var(--theme-line);
     }
