@@ -487,18 +487,24 @@ async fn queue_depth_counts_pending_not_completed() {
         .unwrap()
         .unwrap();
 
-    // Backdated 3h and still pending → it must be the oldest entry (other
-    // tests enqueue at now()), so oldest_age tracks it.
+    // Run inside an uncommitted transaction: the backdated row stays invisible
+    // to the concurrent drain in parallel tick tests (which picks the global
+    // oldest pending row first and would complete it mid-assert), so the depth
+    // it produces is deterministic.
+    let mut tx = pool.begin().await.unwrap();
+
+    // Backdated 3h and still pending → within this tx it is the oldest entry,
+    // so oldest_age tracks it.
     sqlx::query(
         "INSERT INTO clickhouse_purge_queue (org_id, queued_at) \
          VALUES ($1, now() - INTERVAL '3 hours')",
     )
     .bind(org.id.0)
-    .execute(&pool)
+    .execute(&mut *tx)
     .await
     .unwrap();
 
-    let d = purge_queue_depth(&pool).await.unwrap();
+    let d = purge_queue_depth(&mut *tx).await.unwrap();
     assert!(d.pending >= 1, "pending row must be counted");
     assert!(
         d.oldest_age_secs >= 3 * 3600 - 60,
@@ -508,17 +514,15 @@ async fn queue_depth_counts_pending_not_completed() {
 
     sqlx::query("UPDATE clickhouse_purge_queue SET completed_at = now() WHERE org_id = $1")
         .bind(org.id.0)
-        .execute(&pool)
+        .execute(&mut *tx)
         .await
         .unwrap();
-    // Parallel tests perturb the global count, so assert on this org: a
-    // completed row must no longer be pending.
     let (still_pending,): (bool,) = sqlx::query_as(
         "SELECT EXISTS (SELECT 1 FROM clickhouse_purge_queue \
          WHERE org_id = $1 AND completed_at IS NULL)",
     )
     .bind(org.id.0)
-    .fetch_one(&pool)
+    .fetch_one(&mut *tx)
     .await
     .unwrap();
     assert!(
@@ -526,11 +530,8 @@ async fn queue_depth_counts_pending_not_completed() {
         "completing the row drops it from the pending depth"
     );
 
-    sqlx::query("DELETE FROM clickhouse_purge_queue WHERE org_id = $1")
-        .bind(org.id.0)
-        .execute(&pool)
-        .await
-        .unwrap();
+    // Rollback discards the queue row; the user row was committed outside the tx.
+    tx.rollback().await.unwrap();
     sqlx::query("DELETE FROM users WHERE id = $1")
         .bind(user.0)
         .execute(&pool)

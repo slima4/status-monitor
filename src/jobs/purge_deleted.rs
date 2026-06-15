@@ -327,14 +327,14 @@ pub struct QueueDepth {
     pub oldest_age_secs: i64,
 }
 
-pub async fn purge_queue_depth(pool: &PgPool) -> Result<QueueDepth> {
+pub async fn purge_queue_depth<'e>(executor: impl sqlx::PgExecutor<'e>) -> Result<QueueDepth> {
     let (pending, oldest_age): (i64, Option<f64>) = sqlx::query_as(
         r#"SELECT count(*)::bigint,
                   EXTRACT(EPOCH FROM (now() - min(queued_at)))::float8
            FROM clickhouse_purge_queue
            WHERE completed_at IS NULL"#,
     )
-    .fetch_one(pool)
+    .fetch_one(executor)
     .await
     .context("purge: queue depth")?;
     Ok(QueueDepth {
