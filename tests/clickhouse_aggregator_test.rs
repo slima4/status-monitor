@@ -356,11 +356,23 @@ async fn build_excludes_internal_incidents() {
         let (page, markers, _names) = agg.build(page_id, org_id).await.expect("aggregator build");
 
         let active: Vec<Uuid> = page.active_incidents.iter().map(|i| i.id).collect();
-        assert_eq!(active, vec![public_id], "only the public incident is active");
+        assert_eq!(
+            active,
+            vec![public_id],
+            "only the public incident is active"
+        );
         let recent: Vec<Uuid> = page.recent_incidents.iter().map(|i| i.id).collect();
-        assert_eq!(recent, vec![public_id], "only the public incident is recent");
+        assert_eq!(
+            recent,
+            vec![public_id],
+            "only the public incident is recent"
+        );
         let marked: Vec<Uuid> = markers.iter().map(|m| m.id).collect();
-        assert_eq!(marked, vec![public_id], "only the public incident is marked");
+        assert_eq!(
+            marked,
+            vec![public_id],
+            "only the public incident is marked"
+        );
     };
 
     let result = AssertUnwindSafe(body).catch_unwind().await;
