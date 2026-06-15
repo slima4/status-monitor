@@ -1,8 +1,9 @@
-{# Shared ambient EKG strip for empty-state heroes. A fixed-width trace tiled
-   every 300 user-units inside a narrower, edge-faded window; the group drifts
-   left -> right with a seamless wrap (see .sm-ekg-flow), frozen under
-   prefers-reduced-motion. Decorative — colour tracks --theme-accent. #}
-<div class="empty-hero__pulse" aria-hidden="true">
+{# Reusable live-EKG widget. Include this partial on any surface for an
+   ambient heartbeat. A fixed-width trace tiled every 300 user-units inside a
+   narrower, edge-faded window; the group drifts left -> right with a seamless
+   wrap (see .sm-ekg-flow), frozen under prefers-reduced-motion. Decorative —
+   colour tracks --theme-accent. #}
+<div class="ekg-pulse" aria-hidden="true">
   <svg width="1200" height="72" viewBox="0 0 1200 72" fill="none"
        preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg">
     <g class="sm-ekg-flow">

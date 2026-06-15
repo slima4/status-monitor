@@ -1456,34 +1456,13 @@
         max-width: 38rem;
         background: var(--theme-surface-elev);
         border-color: var(--theme-line);
-        position: relative;
-        overflow: hidden;
     }
-    /* Warm halo behind the antenna icon — pulls focus to the motif without
-       another layout element. Sits at z:0 so the SVG + copy + button stay
-       on top (siblings get position:relative below). */
-    .empty-hero::before {
-        content: "";
-        position: absolute;
-        top: -2rem;
-        left: 50%;
-        transform: translateX(-50%);
-        width: 24rem;
-        height: 14rem;
-        background: radial-gradient(
-            20rem 10rem at 50% 50%,
-            oklch(0.92 0.08 158 / 0.30),
-            transparent 70%
-        );
-        pointer-events: none;
-        z-index: 0;
-    }
-    .empty-hero > * { position: relative; z-index: 1; }
 
-    /* Live EKG sweep replacing the static motif: a fixed-width SVG that
-       overflows a narrower window and scrolls (see .sm-ekg-flow), edge-faded
-       so the trace eases in and out rather than hard-cutting. */
-    .empty-hero__pulse {
+    /* Reusable live-EKG widget (markup in templates/_ekg_pulse.html): a
+       fixed-width SVG that overflows a narrower window and scrolls (see
+       .sm-ekg-flow), edge-faded so the trace eases in and out rather than
+       hard-cutting. Standalone — drop the partial onto any surface. */
+    .ekg-pulse {
         width: 100%;
         max-width: 22rem;
         height: 4.5rem;
