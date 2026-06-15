@@ -97,7 +97,7 @@ CREATE TABLE incident_notifications (
     target_user_id   UUID REFERENCES users(id) ON DELETE SET NULL,
     channel_id       UUID REFERENCES notification_channels(id) ON DELETE SET NULL,
     transport        TEXT NOT NULL,
-    reason           TEXT NOT NULL CHECK (reason IN ('opened','escalated','resolved','reopened')),
+    reason           TEXT NOT NULL CHECK (reason IN ('opened','escalated','resolved','reopened','no_data','data_resumed')),
     status           TEXT NOT NULL CHECK (status IN ('queued','sent','failed','suppressed')),
     attempt          INTEGER NOT NULL DEFAULT 1,
     error            TEXT,

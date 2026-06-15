@@ -296,31 +296,62 @@ async fn build_excludes_internal_incidents() {
     purge_prefix(&pool, "agg-vis-").await;
 
     let org_id = seed_org(&pool, "agg-vis").await;
-    let unique = format!("agg-vis-{}", Uuid::now_v7());
     let store = Arc::new(PostgresTargetStore::from_pool(pool.clone(), None));
-    let target = store
-        .create(org_id, public_target(&unique), WriteSource::Ui, i64::MAX)
+    let mk_target = |role: &str| public_target(&format!("agg-vis-{role}-{}", Uuid::now_v7()));
+    // The unique open-incident index forbids two open incidents on one target,
+    // so the public and internal incidents live on separate page components;
+    // the aggregator must still drop the internal one by visibility alone.
+    let pub_target = store
+        .create(org_id, mk_target("pub"), WriteSource::Ui, i64::MAX)
         .await
         .expect("create public target");
-    let target_id = target.id;
+    let int_target = store
+        .create(org_id, mk_target("int"), WriteSource::Ui, i64::MAX)
+        .await
+        .expect("create internal target");
+    let pub_target_id = pub_target.id;
+    let int_target_id = int_target.id;
     let pool_for_cleanup = pool.clone();
 
-    with_cleanup(&pool_for_cleanup, target_id, async move {
+    let body = async move {
         let now = Utc::now();
-        let mk = |vis: &str| {
+        let mk = |tid: Uuid, vis: &str| {
             sqlx::query_scalar::<_, Uuid>(
                 "INSERT INTO incidents (org_id, target_id, started_at, status_at_start, visibility) \
                  VALUES ($1, $2, $3, 'down', $4) RETURNING id",
             )
             .bind(org_id.0)
-            .bind(target_id)
+            .bind(tid)
             .bind(now - chrono::Duration::minutes(5))
             .bind(vis.to_string())
         };
-        let public_id = mk("public").fetch_one(&pool).await.expect("insert public incident");
-        let _internal_id = mk("internal").fetch_one(&pool).await.expect("insert internal incident");
+        let public_id = mk(pub_target_id, "public")
+            .fetch_one(&pool)
+            .await
+            .expect("insert public incident");
+        let _internal_id = mk(int_target_id, "internal")
+            .fetch_one(&pool)
+            .await
+            .expect("insert internal incident");
 
-        let page_id = seed_page_with_target(&pool, org_id, target_id).await;
+        let page_id = seed_page_with_target(&pool, org_id, pub_target_id).await;
+        PgStatusPageStore::new(pool.clone())
+            .add_component(
+                org_id,
+                page_id,
+                NewStatusPageComponent {
+                    target_id: int_target_id,
+                    public_name: None,
+                    public_description: None,
+                    public_group: None,
+                    sort_order: 1,
+                },
+                i64::MAX,
+                None,
+            )
+            .await
+            .expect("add internal component");
+
         let agg = OrgAggregator::new(pool, ch, AggregatorConfig::default());
         let (page, markers, _names) = agg.build(page_id, org_id).await.expect("aggregator build");
 
@@ -330,8 +361,14 @@ async fn build_excludes_internal_incidents() {
         assert_eq!(recent, vec![public_id], "only the public incident is recent");
         let marked: Vec<Uuid> = markers.iter().map(|m| m.id).collect();
         assert_eq!(marked, vec![public_id], "only the public incident is marked");
-    })
-    .await;
+    };
+
+    let result = AssertUnwindSafe(body).catch_unwind().await;
+    delete_target(&pool_for_cleanup, pub_target_id).await;
+    delete_target(&pool_for_cleanup, int_target_id).await;
+    if let Err(p) = result {
+        std::panic::resume_unwind(p);
+    }
 }
 
 /// End-to-end: a PUBLISHED postmortem surfaces on the public incident detail via
