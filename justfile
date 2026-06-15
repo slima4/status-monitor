@@ -90,6 +90,16 @@ run:
     RUST_LOG="${RUST_LOG:-uptimepage=debug,sqlx=warn,hyper=warn,tower_http=info,info}" \
         cargo run --bin uptimepage
 
+# Native run in dashboard mode (brain-only, no in-process probing) — mirrors
+# prod. Pair with `just dev-regions` so a real agent covers eu-helsinki;
+# otherwise nothing probes. (The dev-app container already runs this mode.)
+run-dashboard:
+    UPTIMEPAGE_SCHEDULER__ENABLED=false \
+    UPTIMEPAGE_SCHEDULER__REGION=eu-helsinki \
+    UPTIMEPAGE_SCHEDULER__DEFAULT_REGION=eu-helsinki \
+    RUST_LOG="${RUST_LOG:-uptimepage=debug,sqlx=warn,hyper=warn,tower_http=info,info}" \
+        cargo run --bin uptimepage
+
 build:
     cargo build --release --bins
 
@@ -99,6 +109,19 @@ build:
 # build, forcing a full recompile on the next `cargo test`.
 check:
     cargo nextest run --workspace --no-run
+
+# Pre-push DB gate: the #[ignore] PG+CH integration tests against a FRESH
+# ci_verify database, so edited-in-place migrations are validated like prod's
+# remigrate (a stale dev DB hides fresh-schema breaks). Needs the dev stack up
+# (`just up`). Classic runner — streams output and skips nextest's build-all
+# enumeration stall. ClickHouse defaults to the dev monitor db (tests scope by
+# org/target uuids, so the shared volume is fine).
+check-db:
+    docker exec -i uptimepage-postgres-1 psql -U monitor -d postgres -c "DROP DATABASE IF EXISTS ci_verify WITH (FORCE)"
+    docker exec -i uptimepage-postgres-1 psql -U monitor -d postgres -c "CREATE DATABASE ci_verify"
+    DATABASE_URL='postgres://monitor:monitor@127.0.0.1:5432/ci_verify' \
+    CLICKHOUSE_URL='http://127.0.0.1:8123' \
+        cargo test --workspace -- --ignored
 
 # Seed an authenticated owner session (SaaS-mode dev). Prints the cookie +
 # a curl snippet. Idempotent; needs the stack up.
