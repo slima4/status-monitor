@@ -229,6 +229,14 @@ jobs:
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           RESEND_WEBHOOK_SECRET: ${{ secrets.RESEND_WEBHOOK_SECRET }}
           EMAIL_FROM_ADDRESS: ${{ vars.EMAIL_FROM_ADDRESS }}
+          # Dashboard/agent split. Token is a secret (agent credential); the
+          # three knobs are plain config (Actions variables). Set all three vars
+          # + the token to switch prod to brain-only + a co-located agent (see
+          # deployment/AGENT.md). All absent = unchanged all-in-one.
+          HOME_AGENT_TOKEN: ${{ secrets.HOME_AGENT_TOKEN }}
+          UPTIMEPAGE_SCHEDULER_ENABLED: ${{ vars.UPTIMEPAGE_SCHEDULER_ENABLED }}
+          UPTIMEPAGE_SCHEDULER_REGION: ${{ vars.UPTIMEPAGE_SCHEDULER_REGION }}
+          UPTIMEPAGE_SCHEDULER_DEFAULT_REGION: ${{ vars.UPTIMEPAGE_SCHEDULER_DEFAULT_REGION }}
         run: |
           set -euo pipefail
           # Lowercase only the repo (GHCR requires it); OCI tags are
@@ -278,6 +286,10 @@ jobs:
                RESEND_API_KEY='${RESEND_API_KEY}' \
                RESEND_WEBHOOK_SECRET='${RESEND_WEBHOOK_SECRET}' \
                EMAIL_FROM_ADDRESS='${EMAIL_FROM_ADDRESS}' \
+               HOME_AGENT_TOKEN='${HOME_AGENT_TOKEN}' \
+               UPTIMEPAGE_SCHEDULER_ENABLED='${UPTIMEPAGE_SCHEDULER_ENABLED}' \
+               UPTIMEPAGE_SCHEDULER_REGION='${UPTIMEPAGE_SCHEDULER_REGION}' \
+               UPTIMEPAGE_SCHEDULER_DEFAULT_REGION='${UPTIMEPAGE_SCHEDULER_DEFAULT_REGION}' \
                bash -s" <<'REMOTE'
           # This script is delivered to `bash -s` over the ssh heredoc — i.e. on
           # stdin (fd 0). A `docker compose exec -T` / `docker exec -i` / nested
@@ -619,6 +631,34 @@ jobs:
             n=$(grep -cxF "UPTIMEPAGE_OPERATOR_ADMIN_TOKEN=$(printenv OPERATOR_ADMIN_TOKEN)" .env || true)
             [ "$n" = 1 ] || { echo "::error::UPTIMEPAGE_OPERATOR_ADMIN_TOKEN not written exactly once to .env (count=${n})"; exit 1; }
           fi
+
+          # --- dashboard / agent split (optional) ----------------------------
+          # HOME_AGENT_TOKEN is the co-located agent credential (secret); the
+          # three SCHEDULER knobs select brain-only + home region (Actions vars,
+          # plain config). Each key is upserted only when set; an absent one
+          # leaves the prior .env value (compose defaults = all-in-one). To
+          # revert, clear the key in .env. Same per-key write-once contract as
+          # the blocks above.
+          for k in HOME_AGENT_TOKEN UPTIMEPAGE_SCHEDULER_ENABLED \
+                   UPTIMEPAGE_SCHEDULER_REGION UPTIMEPAGE_SCHEDULER_DEFAULT_REGION; do
+            v=$(printenv "$k" || true)
+            [ -n "$v" ] || continue
+            cp .env ".env.bak.$(date +%s).split.${k}"
+            before=$(awk 'END { print NR }' .env)
+            K="$k" V="$v" awk '
+              BEGIN { key = ENVIRON["K"]; val = ENVIRON["V"] }
+              { if ($0 ~ ("^" key "=")) { print key "=" val; seen = 1; next } print }
+              END { if (!seen) print key "=" val }
+            ' .env > .env.next
+            mv .env.next .env
+            after=$(awk 'END { print NR }' .env)
+            if [ "$after" -lt "$before" ] || [ "$after" -gt "$((before + 1))" ]; then
+              echo "::error::.env line count out of range after ${k} upsert (${before} -> ${after})"
+              exit 1
+            fi
+            n=$(grep -cxF "${k}=${v}" .env || true)
+            [ "$n" = 1 ] || { echo "::error::${k} not written exactly once to .env (count=${n})"; exit 1; }
+          done
 
           # --- managed central Telegram bot (optional) ----------------------
           # Same write contract as the operator block. All-or-nothing: a set
