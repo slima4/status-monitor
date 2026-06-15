@@ -101,3 +101,50 @@ history and excludes it from the region-silence alert.
 Reassign or remove the region from every monitor first, then delete the agents,
 then the region. `DELETE /operator/regions/{id}` reports the region as in-use
 (FK) rather than cascading, so nothing is silently orphaned.
+
+## Co-located agent (interim: agent on the control-plane box)
+
+The end state is one agent per region, each on its own box — the control plane
+runs no probes of its own. A clean split, but it leaves the control plane's own
+region unmonitored until a separate box exists for it.
+
+This is the interim bridge: run that region's agent on the control-plane box
+itself, as a normal agent. It is a real agent like any other — its own `agents`
+row, its own token, liveness reported on every pull/push — so silence detection
+treats the home region exactly like the remote ones. The only thing "co-located"
+about it is the box it happens to share today; nothing in the design assumes it.
+When the region moves to its own box, delete `HOME_AGENT_TOKEN` from `.env`,
+provision the agent there, and the control plane is left as a pure brain with no
+change to it.
+
+The agent is the `agent` service in the main `docker-compose.yml`, behind the
+`agent` compose profile (off unless explicitly enabled). It runs the same image
+as the dashboard (bumped atomically on every deploy) and reaches the control
+plane over its public origin, identical to a remote agent — no shared network,
+no localhost shortcut.
+
+Bring-up (order matters — start the agent BEFORE turning the in-process probe
+off, or the region goes dark in the gap):
+
+```bash
+# 1. On the control plane: create the home region + mint its token (as in §1).
+#    Reuse the region id you will set as UPTIMEPAGE_SCHEDULER_REGION.
+
+# 2. In the deployment .env (same dir as docker-compose.yml), set:
+#    HOME_AGENT_TOKEN=sm_agent_...           # the minted token
+#    AGENT_CONTROL_PLANE_URL=https://app.<domain>
+#    UPTIMEPAGE_SCHEDULER_REGION=eu-helsinki # home region; the agent inherits it
+
+# 3. Start the agent and confirm it reports in (agents.last_seen_at goes fresh):
+docker compose --profile agent up -d agent
+docker compose logs -f agent          # "starting regional agent"
+
+# 4. ONLY now turn the in-process probe off and redeploy:
+#    UPTIMEPAGE_SCHEDULER_ENABLED=false
+#    UPTIMEPAGE_SCHEDULER_DEFAULT_REGION=eu-helsinki
+```
+
+While `HOME_AGENT_TOKEN` is present in `.env`, every deploy recreates this agent
+with the new image; scoped to the `agent` service only, so the dashboard, DB, and
+proxy are never touched as a side effect. Remove the token to retire it — the
+natural step when the region graduates to its own box.

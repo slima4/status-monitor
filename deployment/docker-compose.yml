@@ -82,6 +82,14 @@ services:
       UPTIMEPAGE_STORAGE__CLICKHOUSE__USER: default
       UPTIMEPAGE_STORAGE__CLICKHOUSE__PASSWORD: ${CLICKHOUSE_PASSWORD}
       UPTIMEPAGE_STORAGE__CLICKHOUSE__DATABASE: monitor
+      # Probing topology. Default = all-in-one (this process probes its own
+      # region). Set UPTIMEPAGE_SCHEDULER_ENABLED=false in .env to run as a pure
+      # dashboard/brain and let a co-located `agent` service (profile below) probe
+      # the region — then SCHEDULER_REGION is just the home region id new monitors
+      # assign to. One knob: SCHEDULER_REGION feeds the agent's region too.
+      UPTIMEPAGE_SCHEDULER__ENABLED: ${UPTIMEPAGE_SCHEDULER_ENABLED:-true}
+      UPTIMEPAGE_SCHEDULER__REGION: ${UPTIMEPAGE_SCHEDULER_REGION:-default}
+      UPTIMEPAGE_SCHEDULER__DEFAULT_REGION: ${UPTIMEPAGE_SCHEDULER_DEFAULT_REGION:-}
       UPTIMEPAGE_SECURITY__CREDENTIALS_KEK_BASE64: ${UPTIMEPAGE_CREDENTIALS_KEK_BASE64}
       UPTIMEPAGE_SECURITY__TRUSTED_PROXIES: ${UPTIMEPAGE_SECURITY__TRUSTED_PROXIES:-172.16.0.0/12,127.0.0.0/8,::1/128}
       # Empty disables the /operator/* surface (routes 404).
@@ -194,6 +202,28 @@ services:
 
   uptimepage_green:
     <<: *uptimepage_app
+
+  # Co-located regional probe for the control plane's own region (the dashboard
+  # itself probes nothing when UPTIMEPAGE_SCHEDULER_ENABLED=false). Same image as
+  # blue/green so a deploy updates it atomically — no version drift. Profile-gated
+  # (`--profile agent`) so local/dev/self-host never start it; it runs only when
+  # HOME_AGENT_TOKEN is provisioned in .env. Reaches the control plane over the
+  # public origin, identical to a remote agent — no special internal networking.
+  # Region defaults to SCHEDULER_REGION so the home region has one source of truth.
+  agent:
+    profiles: ["agent"]
+    image: ${UPTIMEPAGE_IMAGE:-uptimepage:latest}
+    restart: unless-stopped
+    stop_grace_period: 30s
+    expose:
+      - "9090"
+    environment:
+      UPTIMEPAGE_AGENT__ENABLED: "true"
+      UPTIMEPAGE_AGENT__CONTROL_PLANE_URL: ${AGENT_CONTROL_PLANE_URL:-https://app.uptimepage.dev}
+      UPTIMEPAGE_AGENT__TOKEN: ${HOME_AGENT_TOKEN}
+      UPTIMEPAGE_AGENT__REGION: ${UPTIMEPAGE_SCHEDULER_REGION:-default}
+      UPTIMEPAGE_OBSERVABILITY__LOG_FORMAT: json
+      RUST_LOG: ${RUST_LOG:-info,uptimepage=info}
 
   postgres:
     image: postgres:18-alpine
