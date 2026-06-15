@@ -12,6 +12,10 @@ DECLARE
     child text;
     i     int;
 BEGIN
+    -- Partition DDL takes ACCESS EXCLUSIVE on the parent; serialize all
+    -- maintenance (boot + daily tick across app instances) so concurrent runs
+    -- queue instead of deadlocking on lock ordering.
+    PERFORM pg_advisory_xact_lock(hashtextextended('partition_maintenance', 0));
     SELECT n.nspname, c.relname INTO nsp, base
     FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
     WHERE c.oid = parent;
@@ -45,6 +49,7 @@ DECLARE
     upper_b timestamptz;
     dropped int := 0;
 BEGIN
+    PERFORM pg_advisory_xact_lock(hashtextextended('partition_maintenance', 0));
     FOR child, bound IN
         SELECT c.oid::regclass, pg_get_expr(c.relpartbound, c.oid)
         FROM pg_inherits inh
