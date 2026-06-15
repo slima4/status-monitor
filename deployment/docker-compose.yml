@@ -219,7 +219,11 @@ services:
       - "9090"
     environment:
       UPTIMEPAGE_AGENT__ENABLED: "true"
-      UPTIMEPAGE_AGENT__CONTROL_PLANE_URL: ${AGENT_CONTROL_PLANE_URL:-https://app.uptimepage.dev}
+      # Defaults to this deployment's own dashboard origin (derived from
+      # UPTIMEPAGE_DOMAIN, like MCP_RESOURCE_URI above) so a self-host never
+      # silently probes someone else's control plane. Override only for a
+      # non-standard origin (e.g. an internal address to skip the public hop).
+      UPTIMEPAGE_AGENT__CONTROL_PLANE_URL: ${AGENT_CONTROL_PLANE_URL:-https://app.${UPTIMEPAGE_DOMAIN}}
       UPTIMEPAGE_AGENT__TOKEN: ${HOME_AGENT_TOKEN}
       UPTIMEPAGE_AGENT__REGION: ${UPTIMEPAGE_SCHEDULER_REGION:-default}
       UPTIMEPAGE_OBSERVABILITY__LOG_FORMAT: json
