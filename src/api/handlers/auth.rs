@@ -305,6 +305,7 @@ async fn finish_login(
         &state.cfg.auth.session,
         created.cookie_token,
     ));
+    crate::web::login_hint::set(&cookies, &state.cfg.auth.session, method.as_db_str());
     if let Err(err) =
         crate::web::display_prefs::issue_cookies(&state, &cookies, resolved.user_id).await
     {

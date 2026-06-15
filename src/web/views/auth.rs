@@ -52,6 +52,11 @@ pub struct LoginPage {
     pub google_url: String,
     pub magic_link_enabled: bool,
     pub magic_link_expiry_minutes: u32,
+    /// Marks the provider this browser used last (a returning-visitor cue, not
+    /// an auth signal). At most one is true; the cookie carries the method.
+    pub last_github: bool,
+    pub last_google: bool,
+    pub last_magic: bool,
     pub invitation_hint: Option<String>,
     /// Cached, timeout-bounded `target_store.ping()` — same dependency check
     /// as `/readyz`, non-sensitive (no tenant scope). See [`login_ready`].
@@ -71,7 +76,11 @@ fn login_url(base: &str, params: &[(&str, String)]) -> String {
     }
 }
 
-pub async fn login(State(state): State<AppState>, Query(q): Query<LoginQuery>) -> LoginPage {
+pub async fn login(
+    State(state): State<AppState>,
+    Query(q): Query<LoginQuery>,
+    cookies: tower_cookies::Cookies,
+) -> LoginPage {
     let mut params: Vec<(&str, String)> = Vec::new();
     if let Some(r) = q.redirect_after.as_deref().and_then(safe_redirect_target) {
         params.push(("redirect_after", r.to_string()));
@@ -79,6 +88,10 @@ pub async fn login(State(state): State<AppState>, Query(q): Query<LoginQuery>) -
     if let Some(inv) = q.invitation.as_deref() {
         params.push(("invitation", inv.to_string()));
     }
+
+    use crate::auth::login_audit::LoginMethod;
+    let last = crate::web::login_hint::get(&cookies);
+    let last = last.as_deref();
 
     LoginPage {
         active_tab: TAB_LOGIN,
@@ -90,6 +103,9 @@ pub async fn login(State(state): State<AppState>, Query(q): Query<LoginQuery>) -
         // so a self-host/in-mem deployment must not render the form.
         magic_link_enabled: state.cfg.auth.magic_link_enabled() && state.db.is_some(),
         magic_link_expiry_minutes: state.cfg.auth.magic_link.expiry_minutes,
+        last_github: last == Some(LoginMethod::GithubOauth.as_db_str()),
+        last_google: last == Some(LoginMethod::GoogleOauth.as_db_str()),
+        last_magic: last == Some(LoginMethod::MagicLink.as_db_str()),
         invitation_hint: q.invitation,
         ready: login_ready(&state).await,
     }
@@ -808,6 +824,9 @@ mod tests {
             google_url: "/auth/google/login".into(),
             magic_link_enabled: magic,
             magic_link_expiry_minutes: 15,
+            last_github: false,
+            last_google: false,
+            last_magic: false,
             invitation_hint: None,
             ready: true,
         }
@@ -826,6 +845,25 @@ mod tests {
         // Login page suppresses the user-area nav so a not-yet-authenticated
         // visitor doesn't see broken "Settings"/"Log out" controls.
         assert!(!html.contains("Log out"));
+    }
+
+    #[test]
+    fn login_page_marks_last_used_method_only() {
+        let mut page = login_page(true, true, true);
+        page.last_google = true;
+        let html = page.render().unwrap();
+        assert_eq!(html.matches("last used").count(), 1);
+        let google_at = html.find("continue with google").unwrap();
+        let badge_at = html.find("last used").unwrap();
+        let github_at = html.find("continue with github").unwrap();
+        // Badge sits in the google button block, after github's.
+        assert!(badge_at > github_at && badge_at > google_at);
+    }
+
+    #[test]
+    fn login_page_shows_no_badge_for_first_visit() {
+        let html = login_page(true, true, true).render().unwrap();
+        assert!(!html.contains("last used"));
     }
 
     #[test]

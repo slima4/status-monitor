@@ -314,6 +314,11 @@ pub async fn verify(
         &state.cfg.auth.session,
         created.cookie_token,
     ));
+    crate::web::login_hint::set(
+        &cookies,
+        &state.cfg.auth.session,
+        LoginMethod::MagicLink.as_db_str(),
+    );
     if let Err(err) = crate::web::display_prefs::issue_cookies(&state, &cookies, user_id).await {
         tracing::warn!(error = %err, "display-preference cookie issue failed (non-fatal)");
     }
