@@ -1435,7 +1435,7 @@ fn every_quota_create_path_is_gated() {
         ),
         (
             "src/api/handlers/invitations.rs",
-            "pub async fn accept(",
+            "pub(crate) async fn validate_acceptable(",
             "check_can_add_member",
         ),
         (
