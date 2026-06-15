@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # Stand up (or tear down) the local multi-region topology: the dev control
-# plane plus two real regional agents running in docker.
+# plane plus three real regional agents running in docker.
 #
 #   scripts/dev-regions.sh         # up: mint regions + agents, start containers
 #   scripts/dev-regions.sh down    # delete the harness agents/regions + stop
 #
-# The harness uses its OWN region ids (eu-helsinki, apac-sg) so it never
-# collides with scripts/seed-fixtures.sh, which owns eu-west/us-east/ap-south
-# for its fake multi-region UI fixtures. The two are independent: seed for
-# fixture data, this for real agents you can assign monitors to.
+# The harness owns the region ids (eu-helsinki, apac-sg, us-east). eu-helsinki
+# doubles as the control plane's co-located home region (dashboard mode probes
+# nothing in-process). scripts/seed-fixtures.sh seeds fixture data onto whatever
+# regions exist here — it no longer invents its own.
 #
 # Up mints a fresh agent token per region via the operator API, writes the
 # tokens to .dev-agents.env (gitignored), then starts the agent containers from
@@ -40,6 +40,7 @@ AUTH=(-H "Authorization: Bearer ${TOKEN}")
 REGIONS=(
   "eu-helsinki:dev-harness-eu-helsinki:AGENT_EU_TOKEN"
   "apac-sg:dev-harness-apac-sg:AGENT_APAC_TOKEN"
+  "us-east:dev-harness-us-east:AGENT_US_TOKEN"
 )
 
 # Control-plane host:port the SCRIPT dials — used to inspect who is actually
@@ -171,7 +172,7 @@ purge_agents() {
 
 if [[ $ACTION == down ]]; then
   echo "stopping agent containers…"
-  "${COMPOSE[@]}" --profile agents rm -sf agent-eu agent-apac >/dev/null 2>&1 || true
+  "${COMPOSE[@]}" --profile agents rm -sf agent-eu agent-apac agent-us >/dev/null 2>&1 || true
   echo "deleting harness agents…"
   purge_agents
   echo "deleting harness regions…"
@@ -233,11 +234,11 @@ else
   log "reusing existing agent image $AGENT_IMAGE (REBUILD=1 to force a rebuild)"
 fi
 log "starting agents…"
-"${COMPOSE[@]}" --env-file "$ENV_FILE" --profile agents up -d --no-build agent-eu agent-apac
+"${COMPOSE[@]}" --env-file "$ENV_FILE" --profile agents up -d --no-build agent-eu agent-apac agent-us
 
 cat <<EOF
 
-agents up (regions: eu-helsinki, apac-sg). next:
+agents up (regions: eu-helsinki, apac-sg, us-east). next:
   - assign a monitor to a region: monitor form -> Regions, or
       PUT /api/v1/targets/{id}/regions  (needs an owner session — 'just dev-login')
   - watch agents:   just dev-regions-logs

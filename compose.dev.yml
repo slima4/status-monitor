@@ -103,6 +103,15 @@ services:
       UPTIMEPAGE_OBSERVABILITY__LOG_LEVEL: "uptimepage=debug,sqlx=warn,hyper=warn,tower_http=info,info"
       UPTIMEPAGE_SERVER__API_BIND: "0.0.0.0:8080"
       UPTIMEPAGE_SERVER__METRICS_BIND: "0.0.0.0:9090"
+      # Dashboard mode: the control plane is a pure brain — it ingests, detects,
+      # and alerts but does NOT probe in-process. Every region is covered by a
+      # real agent (`just dev-regions`), so region liveness is uniform and
+      # silence detection works without a phantom in-process region. The home
+      # region is co-located: the dev-regions agent for `eu-helsinki` plays the
+      # same role the Hetzner-box agent plays in prod.
+      UPTIMEPAGE_SCHEDULER__ENABLED: "false"
+      UPTIMEPAGE_SCHEDULER__REGION: "eu-helsinki"
+      UPTIMEPAGE_SCHEDULER__DEFAULT_REGION: "eu-helsinki"
       # Faster cargo-watch rebuilds: mold (via the bind-mounted
       # .cargo/config.toml musl target) + a persistent sccache volume.
       # Dockerfile.dev apk-installs both.

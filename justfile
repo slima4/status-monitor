@@ -65,9 +65,10 @@ down-clean:
 logs:
     docker compose -f compose.dev.yml logs -f uptimepage
 
-# Stand up two real regional agents (regions eu-helsinki, apac-sg — distinct
-# from seed-fixtures' fixture regions) against the running control plane: mints
-# region + agent tokens via the operator API, then starts the agent containers.
+# Stand up three real regional agents (regions eu-helsinki, apac-sg, us-east;
+# eu-helsinki doubles as the control plane's co-located home region) against the
+# running control plane: mints region + agent tokens via the operator API, then
+# starts the agent containers.
 # Needs the dev stack up (`just up-app` or native `just run`). Idempotent.
 dev-regions:
     bash scripts/dev-regions.sh up
@@ -78,7 +79,7 @@ dev-regions-down:
 
 # Tail the regional agent logs.
 dev-regions-logs:
-    docker compose -f compose.dev.yml -f compose.dev.agents.yml logs -f agent-eu agent-apac
+    docker compose -f compose.dev.yml -f compose.dev.agents.yml logs -f agent-eu agent-apac agent-us
 
 # ── Build / run ─────────────────────────────────────────────────────────────
 

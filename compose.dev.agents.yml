@@ -53,3 +53,10 @@ services:
       <<: *dev-agent-env
       UPTIMEPAGE_AGENT__REGION: "apac-sg"
       UPTIMEPAGE_AGENT__TOKEN: ${AGENT_APAC_TOKEN:-}
+
+  agent-us:
+    <<: *dev-agent
+    environment:
+      <<: *dev-agent-env
+      UPTIMEPAGE_AGENT__REGION: "us-east"
+      UPTIMEPAGE_AGENT__TOKEN: ${AGENT_US_TOKEN:-}

@@ -91,8 +91,8 @@ else
   note_fail "agent token missing from create response"
 fi
 
-http DELETE /operator/regions/eu-west
-expect "delete in-use region (eu-west)" 409
+http DELETE /operator/regions/eu-helsinki
+expect "delete in-use region (eu-helsinki)" 409
 
 http DELETE /operator/regions/smoke-test
 expect "delete region holding agent" 409
