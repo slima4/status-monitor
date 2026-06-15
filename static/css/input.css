@@ -1480,9 +1480,16 @@
     }
     .empty-hero > * { position: relative; z-index: 1; }
 
-    .empty-hero__icon {
-        width: 8rem;
-        height: auto;
+    /* Live EKG sweep replacing the static motif: a fixed-width SVG that
+       overflows a narrower window and scrolls (see .sm-ekg-flow), edge-faded
+       so the trace eases in and out rather than hard-cutting. */
+    .empty-hero__pulse {
+        width: 100%;
+        max-width: 22rem;
+        height: 4.5rem;
+        overflow: hidden;
+        -webkit-mask-image: linear-gradient(to right, transparent, #000 18%, #000 82%, transparent);
+        mask-image: linear-gradient(to right, transparent, #000 18%, #000 82%, transparent);
     }
     .empty-hero__body {
         @apply flex flex-col items-center gap-4;

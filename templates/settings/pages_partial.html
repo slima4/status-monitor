@@ -1,24 +1,6 @@
 {% if rows.is_empty() %}
 <div class="flex flex-col items-center gap-4 px-6 py-12 text-center">
-  <svg viewBox="0 0 140 100" class="empty-hero__icon" aria-hidden="true">
-    {# A public status page: a browser window with a live pulse — echoes the
-       monitors empty-state motif so the two empty surfaces feel related. #}
-    <rect x="20" y="22" width="100" height="60" rx="8"
-          fill="var(--theme-surface-elev)" stroke="var(--theme-ink)" stroke-width="2.5"/>
-    <line x1="20" y1="38" x2="120" y2="38" stroke="var(--theme-ink)" stroke-width="2.5"/>
-    <circle cx="30" cy="30" r="2.5" fill="var(--theme-ink)"/>
-    <circle cx="38" cy="30" r="2.5" fill="var(--theme-ink)"/>
-    <circle cx="46" cy="30" r="2.5" fill="var(--theme-ink)"/>
-    <clipPath id="empty-pages-ekg-clip">
-      <rect x="28" y="46" width="84" height="30" rx="4"/>
-    </clipPath>
-    <g clip-path="url(#empty-pages-ekg-clip)">
-      <polyline class="sm-ekg-line"
-        points="18,62 50,62 58,50 66,74 76,56 82,62 150,62"/>
-    </g>
-    <circle class="sm-pulse" cx="108" cy="50" r="4"
-            fill="var(--theme-accent)" stroke="var(--theme-ink)" stroke-width="2"/>
-  </svg>
+  {% include "_ekg_pulse.html" %}
   <h2 class="empty-hero__title">no status pages yet.</h2>
   <p class="empty-hero__lede">
     A status page is a public uptime dashboard &mdash; give it a URL and pick

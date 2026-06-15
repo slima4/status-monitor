@@ -1,0 +1,14 @@
+{# Shared ambient EKG strip for empty-state heroes. A fixed-width trace tiled
+   every 300 user-units inside a narrower, edge-faded window; the group drifts
+   left -> right with a seamless wrap (see .sm-ekg-flow), frozen under
+   prefers-reduced-motion. Decorative — colour tracks --theme-accent. #}
+<div class="empty-hero__pulse" aria-hidden="true">
+  <svg width="1200" height="72" viewBox="0 0 1200 72" fill="none"
+       preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg">
+    <g class="sm-ekg-flow">
+      <polyline fill="none" stroke="var(--theme-accent)" stroke-width="2.5"
+        stroke-linecap="round" stroke-linejoin="round"
+        points="0,36 132,36 146,14 160,58 178,22 192,36 300,36 432,36 446,14 460,58 478,22 492,36 600,36 732,36 746,14 760,58 778,22 792,36 900,36 1032,36 1046,14 1060,58 1078,22 1092,36 1200,36 1332,36 1346,14 1360,58 1378,22 1392,36 1500,36 1632,36 1646,14 1660,58 1678,22 1692,36 1800,36"/>
+    </g>
+  </svg>
+</div>

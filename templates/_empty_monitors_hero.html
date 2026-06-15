@@ -1,26 +1,11 @@
 {# Empty-state hero shared by the dashboard + the monitors list when an
-   org has no monitors yet. Wider stage than a normal card, Fraunces hero
-   title, antenna+EKG motif that echoes the login mascot. Every visible
-   colour resolves through --theme-* so it tracks the active theme. #}
+   org has no monitors yet. Wider stage than a normal card, mono hero title,
+   and a live EKG sweep that echoes the login backdrop. The trace is tiled
+   every 300 user-units and drifts left -> right with a seamless wrap; motion
+   freezes under prefers-reduced-motion. Every colour resolves through
+   --theme-* so it tracks the active theme. #}
 <div class="empty-hero">
-  <svg viewBox="0 0 140 100" class="empty-hero__icon" aria-hidden="true">
-    <line x1="70" y1="36" x2="70" y2="12"
-          stroke="var(--theme-ink)" stroke-width="3" stroke-linecap="round"/>
-    <circle class="sm-pulse" cx="70" cy="8" r="5"
-            fill="var(--theme-accent)" stroke="var(--theme-ink)" stroke-width="2.5"/>
-    <path d="M40 50 Q70 30 100 50"
-          fill="none" stroke="var(--theme-ink)" stroke-width="3"
-          stroke-linecap="round"/>
-    <clipPath id="empty-hero-ekg-clip">
-      <rect x="10" y="64" width="120" height="24" rx="6"/>
-    </clipPath>
-    <rect x="10" y="64" width="120" height="24" rx="6"
-          fill="var(--theme-surface-elev)" stroke="var(--theme-ink)" stroke-width="2.5"/>
-    <g clip-path="url(#empty-hero-ekg-clip)">
-      <polyline class="sm-ekg-line"
-        points="2,76 30,76 38,68 46,84 56,70 62,76 90,76 98,68 106,84 116,70 122,76 150,76"/>
-    </g>
-  </svg>
+  {% include "_ekg_pulse.html" %}
 
   <div class="empty-hero__body">
     <h2 class="empty-hero__title">nothing to watch yet.</h2>
