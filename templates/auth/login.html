@@ -1,22 +1,38 @@
 {% extends "base.html" %}
 {% block title %}Sign in · Uptimepage{% endblock %}
 {% block content %}
+{# Ambient heartbeat: a faint, slow EKG sweep behind the page content — the
+   "always checking" signal as background texture. Decorative, pointer-events
+   off, edge-faded, and frozen under prefers-reduced-motion. The trace is
+   tiled every 300 user-units and the group translates -300 -> 0, so it drifts
+   left -> right with a seamless wrap; the fixed 6000-unit width covers ultra-
+   wide viewports without a bare gap at the right edge. #}
+<div class="pointer-events-none fixed inset-x-0 top-1/2 -z-10 -translate-y-1/2 overflow-hidden"
+     aria-hidden="true" style="height: 220px;
+     mask-image: linear-gradient(to right, transparent, #000 14%, #000 86%, transparent);
+     -webkit-mask-image: linear-gradient(to right, transparent, #000 14%, #000 86%, transparent);">
+  <svg width="6000" height="220" viewBox="0 0 6000 220" fill="none" preserveAspectRatio="xMinYMid slice"
+       class="opacity-[0.14]" xmlns="http://www.w3.org/2000/svg">
+    <g class="sm-ekg-flow">
+      <polyline fill="none" stroke="var(--theme-accent)" stroke-width="2.5"
+        stroke-linecap="round" stroke-linejoin="round"
+        points="0,110 132,110 146,68 160,160 178,84 192,110 300,110 432,110 446,68 460,160 478,84 492,110 600,110 732,110 746,68 760,160 778,84 792,110 900,110 1032,110 1046,68 1060,160 1078,84 1092,110 1200,110 1332,110 1346,68 1360,160 1378,84 1392,110 1500,110 1632,110 1646,68 1660,160 1678,84 1692,110 1800,110 1932,110 1946,68 1960,160 1978,84 1992,110 2100,110 2232,110 2246,68 2260,160 2278,84 2292,110 2400,110 2532,110 2546,68 2560,160 2578,84 2592,110 2700,110 2832,110 2846,68 2860,160 2878,84 2892,110 3000,110 3132,110 3146,68 3160,160 3178,84 3192,110 3300,110 3432,110 3446,68 3460,160 3478,84 3492,110 3600,110 3732,110 3746,68 3760,160 3778,84 3792,110 3900,110 4032,110 4046,68 4060,160 4078,84 4092,110 4200,110 4332,110 4346,68 4360,160 4378,84 4392,110 4500,110 4632,110 4646,68 4660,160 4678,84 4692,110 4800,110 4932,110 4946,68 4960,160 4978,84 4992,110 5100,110 5232,110 5246,68 5260,160 5278,84 5292,110 5400,110 5532,110 5546,68 5560,160 5578,84 5592,110 5700,110 5832,110 5846,68 5860,160 5878,84 5892,110 6000,110 6132,110 6146,68 6160,160 6178,84 6192,110 6300,110 6432,110 6446,68 6460,160 6478,84 6492,110 6600,110"/>
+    </g>
+  </svg>
+</div>
 <section class="mx-auto grid max-w-5xl items-center gap-10 py-4 lg:grid-cols-2 lg:gap-16">
 
   {# ── Left: the landing pitch. First impression is "fast + production",
        backed by a real live signal (the readiness pill), not a slogan. ── #}
   <div class="order-2 space-y-8 text-center lg:order-1 lg:text-left">
-    <div class="mx-auto w-56 lg:mx-0">
-      {% include "auth/_login_mascot.html" %}
-    </div>
-
     <div class="space-y-4">
       <h1 class="page-title page-title--hero">
         Status monitoring that doesn&rsquo;t blink.
       </h1>
       <p class="text-base text-muted max-w-md mx-auto lg:mx-0" style="line-height: 1.55;">
-        A Rust core with asynchronous probe workers and a Postgres&nbsp;+&nbsp;ClickHouse
-        pipeline &mdash; built to keep checking while everything else is on fire.
+        Know the second your site, API, or SSL&nbsp;cert goes down &mdash; and tell
+        your users before they tell you. Uptime checks, instant alerts, and
+        public status pages.
       </p>
     </div>
 

@@ -2104,6 +2104,9 @@
     }
     /* Status dot on the mascot — a calm breathing pulse, not a flash. */
     .sm-pulse { animation: sm-pulse 2.4s ease-in-out infinite; transform-origin: center; }
+    /* Ambient background heartbeat on the login page: a tiled EKG that drifts
+       one tile-width (300) left -> right forever, seamlessly. */
+    .sm-ekg-flow { animation: sm-ekg-flow 4s linear infinite; }
 
     /* Form section card: a sticker-card fieldset (stack the classes) whose
        legend renders as the sunk header band (float pulls the legend out of
@@ -3470,6 +3473,7 @@
 }
 
 @keyframes sm-ekg   { to { stroke-dashoffset: -236; } }
+@keyframes sm-ekg-flow { from { transform: translateX(-300px); } to { transform: translateX(0); } }
 @keyframes sm-pulse {
     0%, 100% { opacity: 1;   transform: scale(1);    }
     50%      { opacity: .55; transform: scale(.78);  }
@@ -3478,6 +3482,7 @@
    still sees the full static EKG trace and a solid dot. WCAG 2.3.3. */
 @media (prefers-reduced-motion: reduce) {
     .sm-ekg-line { animation: none; stroke-dasharray: none; }
+    .sm-ekg-flow { animation: none; }
     .sm-pulse    { animation: none; }
     input[type="checkbox"],
     input[type="radio"] { transition: none; }
