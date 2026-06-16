@@ -64,8 +64,87 @@
         applyKindIntervalDefaults(want);
     });
 
+    // Short protocol labels for the live summary.
+    const NAV_KIND_LABEL = { http: "http", tcp: "tcp", dns: "dns", tls_cert: "tls", domain_expiry: "domain" };
+
     const initialKind = form.querySelector("input[name='check_type']:checked")?.value || "http";
     applyKindIntervalDefaults(initialKind);
+
+    // Expected-status quick presets: a segmented rail that fills the text
+    // field (the source of truth). A class preset writes its range; "custom"
+    // jumps to the field. Typing anything off-preset lights "custom".
+    const statusInput = form.querySelector("[data-status-input]");
+    const statusPresets = form.querySelector("[data-status-presets]");
+    if (statusInput && statusPresets) {
+        const presetRadios = [...statusPresets.querySelectorAll("[data-status-preset]")];
+        const norm = (v) => (v || "").replace(/\s+/g, "");
+        const syncRailFromField = () => {
+            const val = norm(statusInput.value);
+            const match = presetRadios.find(r => r.value !== "custom" && norm(r.value) === val)
+                || presetRadios.find(r => r.value === "custom");
+            presetRadios.forEach(r => { r.checked = r === match; });
+        };
+        statusPresets.addEventListener("change", (evt) => {
+            const r = evt.target.closest("[data-status-preset]");
+            if (!r) return;
+            if (r.value === "custom") {
+                statusInput.focus();
+                statusInput.select();
+            } else {
+                statusInput.value = r.value;
+            }
+        });
+        statusInput.addEventListener("input", syncRailFromField);
+        syncRailFromField();
+    }
+
+    // Live summary aside — echoes the build as the user types.
+    const summaryRoot = form.querySelector("[data-monitor-summary]");
+    if (summaryRoot) {
+        const sumEl = (k) => summaryRoot.querySelector(`[data-sum='${k}']`);
+        const set = (k, v) => { const el = sumEl(k); if (el) el.textContent = v && v.length ? v : "—"; };
+        const val = (n) => (form.querySelector(`[name='${n}']`)?.value || "").trim();
+        const summaryTarget = (kind) => {
+            if (kind === "http") return urlToName(val("http_url")) || val("http_url");
+            if (kind === "tcp") {
+                const h = val("tcp_host"), p = val("tcp_port");
+                return h ? (p ? `${h}:${p}` : h) : "";
+            }
+            if (kind === "dns") return val("dns_domain");
+            if (kind === "tls_cert") return val("tls_host");
+            if (kind === "domain_expiry") return val("domain_expiry_domain");
+            return "";
+        };
+        const segLabel = (el) => el ? el.closest(".sm-rail__seg")?.textContent.trim() : "";
+        const updateSummary = () => {
+            const kind = currentCheckType();
+            const isHttp = kind === "http";
+            set("type", NAV_KIND_LABEL[kind] || kind);
+            set("target", summaryTarget(kind));
+            set("name", val("name"));
+            const methodRow = summaryRoot.querySelector("[data-sum-row='method']");
+            const statusRow = summaryRoot.querySelector("[data-sum-row='status']");
+            if (methodRow) methodRow.hidden = !isHttp;
+            if (statusRow) statusRow.hidden = !isHttp;
+            if (isHttp) {
+                set("method", val("http_method"));
+                set("status", val("expected_status_input"));
+            }
+            set("every", segLabel(form.querySelector("[data-interval-rail]:not([hidden]) input[name='interval_s']:checked")));
+            set("confirm", segLabel(form.querySelector("input[name='alert_confirmations']:checked")));
+            if (sumEl("regions")) {
+                const boxes = [...form.querySelectorAll("[data-region-checkbox]")];
+                set("regions", boxes.length ? `${boxes.filter(b => b.checked).length} of ${boxes.length}` : "");
+            }
+            const chans = [...form.querySelectorAll("[data-channel-select]")];
+            set("channels", chans.length ? `${chans.filter(c => c.checked).length} of ${chans.length}` : "none");
+            const rec = form.querySelector("[data-notify-recovery]");
+            set("recovery", rec ? (rec.checked ? "on" : "off") : "—");
+        };
+        form.addEventListener("input", updateSummary);
+        form.addEventListener("change", updateSummary);
+        updateSummary();
+    }
 
     form.addEventListener("click", (evt) => {
         const testBtn = evt.target.closest("[data-test-now]");
@@ -562,7 +641,7 @@
             return form.querySelector("[name='http_header_key']");
         }
         if (path === "tags") {
-            return form.querySelector("[data-tag-input]");
+            return form.querySelector("[data-tag-add]");
         }
         const name = API_PATH_TO_FORM[path];
         if (!name) return null;

@@ -1239,8 +1239,14 @@
        only: width / margin / font / mono stay call-site utilities (the
        .sticker-card convention). Focus ring is the global outline rule
        (a box-shadow ring here would be eaten by this shadow). */
+    /* Control sizing — keep padding/font/line-height in sync with the
+       combobox trigger and .sm-rail--fill seg so input/select/combobox/rail
+       stay equal height. */
     .field {
-        @apply rounded-sm border px-3 py-2;
+        @apply rounded-sm border;
+        padding: 0.375rem 0.625rem;
+        font-size: 0.8125rem;
+        line-height: 1.4;
         background: var(--theme-surface-elev);
         color: var(--theme-text);
         border-color: var(--theme-line);
@@ -1341,9 +1347,9 @@
     .field-outline .sm-combobox__trigger {
         width: 100%;
         height: auto;
-        padding: 0.5rem 0.75rem;
-        font-size: inherit;
-        line-height: 1.5;
+        padding: 0.375rem 0.625rem;
+        font-size: 0.8125rem;
+        line-height: 1.4;
     }
     /* A native <select> uses the browser's own widget metrics and ignores
        part of .field's padding, so it renders shorter than a sibling
@@ -2106,6 +2112,43 @@
         color: var(--theme-text-muted);
     }
 
+    /* 3-column monitor form (types | body | summary) only at ≥1280px. Below
+       that it stacks: types row on top, body, summary at the bottom. */
+    .monitor-form-grid { @apply grid gap-6; }
+    @media (min-width: 1280px) {
+        .monitor-form-grid { grid-template-columns: 13rem minmax(0, 1fr) 15rem; }
+        /* Type chooser (left) and summary (right) ride along on scroll. */
+        .monitor-form-types,
+        .monitor-form-summary {
+            @apply self-start;
+            position: sticky;
+            top: 1.5rem;
+        }
+        /* Type cards become a vertical rail only at the 3-column width; below
+           that they stay a horizontal grid at the top of the stack. */
+        .check-type-cards.check-type-cards--stack { grid-template-columns: 1fr; }
+    }
+    /* Live summary — echoes the build as a terminal-style key/value block. */
+    .monitor-form-summary {
+        @apply rounded-sm border p-3 text-xs;
+        background: var(--theme-surface-sunk);
+        border-color: var(--theme-line);
+        font-family: var(--font-mono);
+    }
+    .monitor-form-summary__title {
+        @apply mb-2;
+        color: var(--theme-text-quiet, var(--theme-text-muted));
+    }
+    .monitor-form-summary dl { @apply space-y-1; }
+    .monitor-form-summary dl > div { @apply flex gap-2; }
+    .monitor-form-summary dt {
+        @apply w-16 shrink-0;
+        color: var(--theme-text-muted);
+    }
+    .monitor-form-summary dd {
+        @apply min-w-0 flex-1 truncate;
+        color: var(--theme-text);
+    }
     /* Check-type chooser: 5 cards at the top of /targets/new and edit.
        Hides the radio (visual selection comes from :has(input:checked)). */
     .check-type-cards { @apply grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5; }
@@ -2183,57 +2226,12 @@
         outline-offset: -2px;
     }
 
-    /* Tag chip input. Container is a flex-wrap; the input grows to fill the
-       trailing free space so typing always lands inside the same row. */
-    .tag-chips {
-        @apply flex flex-wrap items-center gap-1.5 rounded-sm border p-2;
-        background: var(--theme-surface-elev);
+    /* Inline "+ new" reveal input for the tag/group chip pickers. The `hidden`
+       utility stays on the element (JS toggles it), not baked in here. */
+    .chip-new-input {
+        @apply w-32 rounded-sm border bg-transparent px-2 py-0.5 font-mono text-xs;
         border-color: var(--theme-line);
-        position: relative;
     }
-    .tag-chips:focus-within { border-color: var(--theme-text-quiet); }
-    .tag-chip {
-        @apply inline-flex items-center gap-1 rounded-sm border px-2 py-0.5 text-xs;
-        background: var(--theme-surface-sunk);
-        border-color: var(--theme-line);
-        color: var(--theme-text);
-        font-family: var(--font-mono);
-    }
-    .tag-chip__remove {
-        @apply inline-flex h-4 w-4 items-center justify-center rounded-sm;
-        color: var(--theme-text-muted);
-    }
-    .tag-chip__remove:hover {
-        background: var(--theme-surface-sunk);
-        color: var(--theme-text);
-    }
-    .tag-chip-input {
-        @apply min-w-[8rem] flex-1 border-0 bg-transparent px-1 text-sm outline-none;
-        color: var(--theme-text);
-    }
-    /* Mirrors the sm-combobox panel/option register. */
-    .tag-suggestions {
-        @apply absolute left-0 top-full z-10 mt-1 max-h-56 w-full overflow-auto;
-        padding: 0.25rem;
-        background: var(--theme-surface-elev);
-        border: 1px solid var(--theme-line);
-        border-radius: 2px;
-        font-family: var(--font-mono);
-        font-size: 0.8125rem;
-    }
-    .tag-suggestions li {
-        color: var(--theme-text);
-        padding: 0.4rem 0.6rem;
-        border-radius: 2px;
-        cursor: pointer;
-        transition: background-color 120ms ease, color 120ms ease;
-    }
-    .tag-suggestions li:hover,
-    .tag-suggestions li[aria-selected="true"] {
-        background: var(--theme-surface-sunk);
-        color: var(--theme-accent);
-    }
-
     /* Verbose test-check inline result. Same alert-card depth but with
        slots for status pill, latency, headers, body snippet. */
     /* `min-w-0` + `overflow-wrap: anywhere` on the pre stop unbreakable
@@ -2617,6 +2615,23 @@
     .sm-rail__seg:has(input:focus-visible) {
         outline: 1px dotted currentColor;
         outline-offset: -3px;
+    }
+    /* Stretch the rail across its row; segments share the width equally but
+       keep the segmented pill look. */
+    .sm-rail--wide { @apply flex; width: 100%; }
+    .sm-rail--wide .sm-rail__seg { @apply flex-1 justify-center; }
+    /* Flush rail: segments stretch evenly and stand as tall as a .field input
+       so the rail reads as a control of equal stature (sits beside one). */
+    .sm-rail--fill {
+        @apply flex flex-nowrap overflow-hidden;
+        padding: 0;
+        gap: 0;
+    }
+    .sm-rail--fill .sm-rail__seg {
+        @apply flex-1 justify-center rounded-none;
+        padding: 0.375rem 0.625rem;
+        font-size: 0.8125rem;
+        line-height: 1.4;
     }
 
     .dashboard-chip {

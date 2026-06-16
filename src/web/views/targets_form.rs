@@ -11,7 +11,7 @@ use crate::domain::{
 use crate::error::AppError;
 use crate::web::error::WebResult;
 use crate::web::filters;
-use crate::web::{AuthedBrowser, CurrentOrg};
+use crate::web::{AuthedBrowser, CurrentOrg, CurrentUser};
 
 /// One HTTP header in the form's key/value row repeater.
 pub struct HeaderPair {
@@ -65,7 +65,7 @@ impl Default for HttpFields {
             // should report Up, not Down on the redirect.
             follow_redirects: true,
             max_redirects: 5,
-            expected_status_input: "200".into(),
+            expected_status_input: "200-299".into(),
             expected_body_contains: String::new(),
             headers: Vec::new(),
             body: String::new(),
@@ -178,6 +178,10 @@ pub struct FormModel {
     pub tags: Vec<String>,
     /// Free-text operator group label (drives Monitors-page bucketing).
     pub group_name: String,
+    /// Existing org group names, offered in the group dropdown.
+    pub group_options: Vec<String>,
+    /// Existing org tag names, rendered as selectable chips.
+    pub tag_options: Vec<String>,
     /// Selected owner user-id (or empty string for "unowned"); the form
     /// renders a `<select>` populated from `owner_options`.
     pub owner_user_id: String,
@@ -426,6 +430,8 @@ fn empty_create_form() -> FormModel {
         enabled: true,
         tags: Vec::new(),
         group_name: String::new(),
+        group_options: Vec::new(),
+        tag_options: Vec::new(),
         owner_user_id: String::new(),
         owner_options: Vec::new(),
         check_type: "http",
@@ -470,11 +476,61 @@ async fn channel_choices(
 /// The org plan's check-interval floor, as the form needs it (u64 seconds).
 /// Same value the API enforces via `min_check_interval`, so the client
 /// `min=`/guard never disagree with the server.
-async fn plan_min_interval(state: &AppState, org: OrgId) -> Result<u64, AppError> {
-    let plan = state.quotas.limit_for_org(org).await?;
-    Ok(u64::try_from(plan.min_check_interval_secs)
+fn plan_min_interval(plan: &crate::domain::quota::Plan) -> u64 {
+    u64::try_from(plan.min_check_interval_secs)
         .unwrap_or(60)
-        .max(1))
+        .max(1)
+}
+
+/// Ensure the monitor's own tags appear in the option list so they always
+/// render (checked) — `list_tags` is capped, so a tag outside the cap would
+/// otherwise show no chip and be dropped on save.
+fn ensure_tags_listed(form: &mut FormModel) {
+    let missing: Vec<String> = form
+        .tags
+        .iter()
+        .filter(|t| !form.tag_options.contains(t))
+        .cloned()
+        .collect();
+    form.tag_options.extend(missing);
+}
+
+/// Option lists + plan + region catalog shared by the create and edit forms.
+type FormOptions = (
+    Vec<ChannelChoice>,
+    Vec<OwnerChoice>,
+    Vec<String>,
+    Vec<String>,
+    std::sync::Arc<crate::domain::quota::Plan>,
+    Vec<crate::storage::RegionOption>,
+);
+
+/// Fetch every independent render-time input in one `try_join!` round so their
+/// latencies overlap instead of stacking. Returns channels, owner options,
+/// group names, tag names, the plan, and the region catalog.
+async fn form_options(
+    state: &AppState,
+    org: OrgId,
+    alerts: &TargetAlerts,
+    owner_id: &str,
+) -> Result<FormOptions, AppError> {
+    let (channels, owner_options, group_options, tags, plan, regions) = tokio::try_join!(
+        channel_choices(state, org, alerts),
+        owner_choices(state, org, owner_id),
+        state.target_store.distinct_groups(org),
+        state.target_store.list_tags(org, None, 200),
+        state.quotas.limit_for_org(org),
+        state.target_store.available_regions_detailed(),
+    )?;
+    let tag_options = tags.into_iter().map(|t| t.name).collect();
+    Ok((
+        channels,
+        owner_options,
+        group_options,
+        tag_options,
+        plan,
+        regions,
+    ))
 }
 
 /// Org members rendered as `<select>` options for the owner field.
@@ -505,6 +561,7 @@ async fn owner_choices(
 
 pub async fn new_form(
     _auth: AuthedBrowser,
+    CurrentUser(user_id): CurrentUser,
     CurrentOrg(org): CurrentOrg,
     State(state): State<AppState>,
     Query(params): Query<NewParams>,
@@ -519,18 +576,27 @@ pub async fn new_form(
             let alerts = target.alerts.clone();
             (form_from_target(target, FormKind::Copy)?, alerts)
         }
-        None => (empty_create_form(), TargetAlerts::default()),
+        None => {
+            let mut form = empty_create_form();
+            form.owner_user_id = user_id.0.to_string();
+            (form, TargetAlerts::default())
+        }
     };
-    form.channels = channel_choices(&state, org, &alerts).await?;
-    form.owner_options = owner_choices(&state, org, &form.owner_user_id).await?;
+    let owner_id = form.owner_user_id.clone();
+    let (channels, owner_options, group_options, tag_options, plan, available) =
+        form_options(&state, org, &alerts, &owner_id).await?;
+    form.channels = channels;
+    form.owner_options = owner_options;
+    form.group_options = group_options;
+    form.tag_options = tag_options;
+    ensure_tags_listed(&mut form);
     form.show_escalation = state.cfg.escalation.enabled;
-    form.min_interval_s = plan_min_interval(&state, org).await?;
+    form.min_interval_s = plan_min_interval(&plan);
     // A new monitor is prefilled with 60s; raise it if the plan floor is
     // higher so the default the user sees would actually be accepted.
     form.interval_s = form.interval_s.max(form.min_interval_s);
     // Prefill the default coverage (all regions capped at the plan, checked).
-    let available = state.target_store.available_regions_detailed().await?;
-    let max_regions = state.quotas.limit_for_org(org).await?.max_regions;
+    let max_regions = plan.max_regions;
     if available.len() > 1 && max_regions > 1 {
         let default_region = state.cfg.scheduler.effective_default_region().to_string();
         let ids: Vec<String> = available.iter().map(|r| r.id.clone()).collect();
@@ -570,16 +636,21 @@ pub async fn edit_form(
     let alerts = target.alerts.clone();
     let region_policy = target.region_policy;
     let mut form = form_from_target(target, FormKind::Edit)?;
-    form.channels = channel_choices(&state, org, &alerts).await?;
-    form.owner_options = owner_choices(&state, org, &form.owner_user_id).await?;
+    let owner_id = form.owner_user_id.clone();
+    let (channels, owner_options, group_options, tag_options, plan, available) =
+        form_options(&state, org, &alerts, &owner_id).await?;
+    form.channels = channels;
+    form.owner_options = owner_options;
+    form.group_options = group_options;
+    form.tag_options = tag_options;
+    ensure_tags_listed(&mut form);
     form.show_escalation = state.cfg.escalation.enabled;
     if form.show_escalation {
         (form.escalation_choices, form.escalation_hint) =
             crate::web::views::escalation::monitor_binding(&state, org, id).await?;
     }
     // Meaningless unless the deployment has >1 region and the plan allows >1.
-    let available = state.target_store.available_regions_detailed().await?;
-    let max_regions = state.quotas.limit_for_org(org).await?.max_regions;
+    let max_regions = plan.max_regions;
     if available.len() > 1 && max_regions > 1 {
         let assigned: std::collections::HashSet<String> = state
             .target_store
@@ -602,7 +673,7 @@ pub async fn edit_form(
     }
     // Edit keeps the saved interval as-is; if a plan floor rose past it the
     // save will surface the API error rather than silently rewriting it.
-    form.min_interval_s = plan_min_interval(&state, org).await?;
+    form.min_interval_s = plan_min_interval(&plan);
     Ok(FormPage {
         active_tab: "targets",
         form,
@@ -697,6 +768,9 @@ fn form_from_target(t: Target, kind: FormKind) -> Result<FormModel, AppError> {
         enabled: t.enabled,
         tags,
         group_name,
+        // Populated by the handler from `distinct_groups` / `list_tags`.
+        group_options: Vec::new(),
+        tag_options: Vec::new(),
         owner_user_id,
         // Populated by the handler from `orgs::list_members`.
         owner_options: Vec::new(),
@@ -902,16 +976,20 @@ mod tests {
     fn tags_render_as_chips() {
         let mut form = empty_create_form();
         form.tags = vec!["prod".into(), "api".into()];
+        // The monitor's tags must be in the option list to render (the handler
+        // guarantees this via `ensure_tags_listed`); here we set it directly.
+        form.tag_options = vec!["prod".into(), "api".into(), "staging".into()];
         let html = FormPage {
             active_tab: "targets",
             form,
         }
         .render()
         .unwrap();
-        assert_eq!(html.matches(r#"class="tag-chip""#).count(), 2);
-        assert!(html.contains(r#"data-tag-value="prod""#));
-        assert!(html.contains(r#"data-tag-value="api""#));
-        assert!(html.contains(r#"data-tag-input"#));
+        // One pick chip per option; the assigned two are pre-checked.
+        assert_eq!(html.matches("data-tag-pick").count(), 3);
+        assert!(html.contains(r#"value="prod" class="sr-only" checked"#));
+        assert!(html.contains(r#"value="api" class="sr-only" checked"#));
+        assert!(html.contains(r#"value="staging" class="sr-only">"#));
     }
 
     #[test]
