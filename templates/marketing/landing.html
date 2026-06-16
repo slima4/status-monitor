@@ -1,6 +1,6 @@
 {% extends "marketing/base.html" %}
 {% block title %}Uptimepage — uptime monitoring & public status pages{% endblock %}
-{% block description %}Monitor your services every 30 seconds, get notified the moment something breaks, and share a public status page with your customers. Free to start, no credit card.{% endblock %}
+{% block description %}Monitor your services every minute, get notified the moment something breaks, and share a public status page with your customers. Free to start, no credit card.{% endblock %}
 {% block head %}
 <script type="application/ld+json">{{ org_json_ld.as_str()|safe }}</script>
 <script type="application/ld+json">{{ website_json_ld.as_str()|safe }}</script>
@@ -24,11 +24,11 @@
 
                 <h1 class="mk-display">
                     Status pages and uptime monitoring.
-                    <span class="mk-display-em">1 POST, public in 30 seconds.</span>
+                    <span class="mk-display-em">1 POST, public in 60 seconds.</span>
                 </h1>
 
                 <p class="mk-lede">
-                    HTTP · TCP · DNS · TLS. Check every 30 seconds. Alert
+                    HTTP · TCP · DNS · TLS. Check every minute. Alert
                     on Slack, webhook, email. Public page on a subdomain,
                     your data on a JSON endpoint, history as RSS or SVG.
                 </p>
@@ -165,7 +165,7 @@
     <section aria-label="At-a-glance">
         <div class="mk-stats">
             <div class="mk-stat">
-                <span class="mk-stat__num"><em class="mk-stat__num--em">30</em>s</span>
+                <span class="mk-stat__num"><em class="mk-stat__num--em">60</em>s</span>
                 <span class="mk-stat__unit">min check interval</span>
             </div>
             <div class="mk-stat">
