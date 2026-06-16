@@ -3,7 +3,8 @@
 //! and the open/resolve state transitions.
 //!
 //! `#[ignore]`d by default; runs under `--run-ignored all` once `DATABASE_URL`
-//! is set. The harness auto-applies all migrations on first connect.
+//! is set. Each test provisions its own throwaway database so concurrent runs
+//! can't contend on shared rows.
 
 mod common;
 
@@ -12,6 +13,8 @@ use sqlx::PgPool;
 use uptimepage::domain::OrgId;
 use uptimepage::storage::{PgSilenceStore, SilenceStore};
 use uuid::Uuid;
+
+static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations/postgres");
 
 const STALE_AFTER: u64 = 120;
 
@@ -67,9 +70,11 @@ fn has(set: &[(OrgId, Uuid)], target_id: Uuid) -> bool {
 #[tokio::test]
 #[ignore]
 async fn unmonitored_reflects_agent_liveness_pg() {
-    let Some(pool) = common::pg_pool_from_env().await else {
+    let Some((db, name)) = common::fresh_test_db("silence").await else {
         return;
     };
+    let pool = common::open_test_pool(&db).await;
+    MIGRATOR.run(&pool).await.unwrap();
     let store = PgSilenceStore::new(pool.clone());
 
     // Fresh agent in the only region → not unmonitored.
@@ -129,14 +134,19 @@ async fn unmonitored_reflects_agent_liveness_pg() {
         !has(&store.unmonitored(STALE_AFTER).await.unwrap(), maint),
         "a target in an active maintenance window is not flagged silent"
     );
+
+    drop(pool);
+    common::drop_test_db(&name).await;
 }
 
 #[tokio::test]
 #[ignore]
 async fn enter_resolve_round_trip_pg() {
-    let Some(pool) = common::pg_pool_from_env().await else {
+    let Some((db, name)) = common::fresh_test_db("silence").await else {
         return;
     };
+    let pool = common::open_test_pool(&db).await;
+    MIGRATOR.run(&pool).await.unwrap();
     let store = PgSilenceStore::new(pool.clone());
     let (org, target_id) = seed_target(&pool, "silstate").await;
     let now = chrono::Utc::now();
@@ -185,4 +195,7 @@ async fn enter_resolve_round_trip_pg() {
             .any(|s| s.target_id == target_id && !s.notified),
         "fresh episode is unnotified"
     );
+
+    drop(pool);
+    common::drop_test_db(&name).await;
 }
