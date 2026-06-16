@@ -221,7 +221,7 @@ pub async fn page_editor(
     let (logo_w, logo_h) = if b.logo_hash.is_some() {
         match state
             .page_asset_store
-            .get_meta(page_id, crate::domain::AssetSlot::Logo)
+            .get_meta(org, page_id, crate::domain::AssetSlot::Logo)
             .await?
         {
             Some(m) => (

@@ -26,6 +26,7 @@ use crate::domain::public::IncidentStatusPhase;
 use crate::domain::result::CheckResult;
 use crate::domain::target::{Target, TargetUpdate};
 use crate::domain::{WriteSource, strip_served_stale};
+use crate::quotas::ratelimit::{RateLimitCategory, RateLimitKey};
 use crate::storage::incidents::ActiveIncident;
 use crate::storage::{ClampedRange, IncidentListQuery, TargetFilter, TimeRange};
 use crate::web::views::describe_check;
@@ -185,7 +186,7 @@ impl McpServer {
                 };
                 WorstMonitor {
                     id: t.id.to_string(),
-                    name: t.name,
+                    name: sanitize_data(&t.name),
                     r#type: t.check.kind().to_string(),
                     state: state.to_string(),
                     since,
@@ -249,10 +250,10 @@ impl McpServer {
                 let m = metrics.get(&t.id);
                 MonitorListItem {
                     id: t.id.to_string(),
-                    name: t.name,
+                    name: sanitize_data(&t.name),
                     r#type: t.check.kind().to_string(),
                     state: current_state(m).to_string(),
-                    group_name: t.group_name,
+                    group_name: t.group_name.as_deref().map(sanitize_data),
                     interval_secs: t.interval.as_secs(),
                     enabled: t.enabled,
                     last_checked_at: m.and_then(|m| ts_to_rfc3339(m.last_minute_ts)),
@@ -313,13 +314,13 @@ impl McpServer {
         let (_, address) = describe_check(&target.check);
         Ok(Json(MonitorDetail {
             id: target.id.to_string(),
-            name: target.name,
+            name: sanitize_data(&target.name),
             r#type: target.check.kind().to_string(),
-            address,
+            address: sanitize_data(&address),
             enabled: target.enabled,
             interval_secs: target.interval.as_secs(),
-            group_name: target.group_name,
-            tags: target.tags,
+            group_name: target.group_name.as_deref().map(sanitize_data),
+            tags: target.tags.iter().map(|t| sanitize_data(t)).collect(),
             state: last
                 .map(|r| r.status.as_str())
                 .unwrap_or("no_data")
@@ -328,7 +329,7 @@ impl McpServer {
             last_error: last
                 .and_then(|r| r.error.as_deref())
                 .and_then(strip_served_stale)
-                .map(str::to_owned),
+                .map(sanitize_data),
             last_http_status: last.and_then(|r| r.response_code),
             last_timing: last.map(check_timing).unwrap_or_default(),
             last_response_size: last.and_then(|r| r.response_size),
@@ -458,7 +459,7 @@ impl McpServer {
         let (items, next_cursor) =
             cursor::paginate(&pages, offset, PAGE_SIZE, |p| StatusPageSummary {
                 slug: p.slug.clone(),
-                name: p.name.clone(),
+                name: sanitize_data(&p.name),
                 public_url: self.page_public_url(&p.slug),
                 enabled: p.enabled,
             });
@@ -506,8 +507,8 @@ impl McpServer {
         let components = components
             .into_iter()
             .map(|c| McpComponent {
-                public_name: c.public_name.unwrap_or(c.monitor_name),
-                group: c.public_group,
+                public_name: sanitize_data(&c.public_name.unwrap_or(c.monitor_name)),
+                group: c.public_group.as_deref().map(sanitize_data),
                 linked_monitor: c.target_id.to_string(),
                 state: current_state(metrics.get(&c.target_id)).to_string(),
             })
@@ -515,7 +516,7 @@ impl McpServer {
 
         Ok(Json(StatusPageDetail {
             slug: page.slug.clone(),
-            name: page.name,
+            name: sanitize_data(&page.name),
             public_url: self.page_public_url(&page.slug),
             enabled: page.enabled,
             components,
@@ -811,6 +812,25 @@ impl McpServer {
             .ok_or_else(|| McpToolError::internal("db unavailable"))
     }
 
+    /// Enforce the org's rate limit for `category` at the tool layer. The `/mcp`
+    /// middleware buckets every JSON-RPC call as a read (the tool name isn't in
+    /// the URL); probe-spawning and write tools pass the stricter category here.
+    /// A plan-resolution error degrades to "no app-side limit" — the reads
+    /// budget and Caddy's per-IP tier still hold the line.
+    async fn enforce_rate_limit(
+        &self,
+        org: crate::domain::OrgId,
+        category: RateLimitCategory,
+    ) -> Result<(), McpToolError> {
+        let Ok(plan) = self.state.quotas.limit_for_org(org).await else {
+            return Ok(());
+        };
+        self.state
+            .rate_limits
+            .check(RateLimitKey::Org(org, category), "per_org", &plan)
+            .map_err(|d| McpToolError::rate_limited(d.retry_after_secs))
+    }
+
     /// Load a target in the org, or a tool not-found error.
     async fn load_target(
         &self,
@@ -852,6 +872,8 @@ impl McpServer {
         args: &MonitorIdArg,
     ) -> Result<Json<CheckRunResult>, McpToolError> {
         auth.require(Scope::TargetsExecute)?;
+        self.enforce_rate_limit(auth.org, RateLimitCategory::CheckNow)
+            .await?;
         let id = parse_uuid(&args.id, "monitor id")?;
         let target = self.load_target(auth.org, id).await?;
         require_confirmation(
@@ -916,6 +938,8 @@ impl McpServer {
         enabled: bool,
     ) -> Result<Json<MonitorStateResult>, McpToolError> {
         auth.require(Scope::TargetsWrite)?;
+        self.enforce_rate_limit(auth.org, RateLimitCategory::ApiWrites)
+            .await?;
         let id = parse_uuid(&args.id, "monitor id")?;
         let target = self.load_target(auth.org, id).await?;
 
@@ -963,6 +987,8 @@ impl McpServer {
         args: &IncidentActionArgs,
     ) -> Result<Json<IncidentActionResult>, McpToolError> {
         auth.require(Scope::IncidentsWrite)?;
+        self.enforce_rate_limit(auth.org, RateLimitCategory::ApiWrites)
+            .await?;
         let id = parse_uuid(&args.id, "incident id")?;
         let note = clean_incident_note(args.note.as_deref())?;
         require_confirmation(
@@ -987,6 +1013,8 @@ impl McpServer {
         args: &IncidentActionArgs,
     ) -> Result<Json<IncidentActionResult>, McpToolError> {
         auth.require(Scope::IncidentsWrite)?;
+        self.enforce_rate_limit(auth.org, RateLimitCategory::ApiWrites)
+            .await?;
         let id = parse_uuid(&args.id, "incident id")?;
         let note = clean_incident_note(args.note.as_deref())?;
         require_confirmation(ctx, "Resolve this incident?".to_string()).await?;
@@ -1014,6 +1042,8 @@ impl McpServer {
         args: &PostIncidentUpdateArgs,
     ) -> Result<Json<IncidentUpdatePosted>, McpToolError> {
         auth.require(Scope::IncidentsWrite)?;
+        self.enforce_rate_limit(auth.org, RateLimitCategory::ApiWrites)
+            .await?;
         let id = parse_uuid(&args.id, "incident id")?;
         let phase = match args.phase.as_deref() {
             Some(p) => parse_phase(p)?,

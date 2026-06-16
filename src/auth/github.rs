@@ -28,7 +28,6 @@ const DEFAULT_SCOPES: &[&str] = &["user:email", "read:user"];
 struct GithubUser {
     id: u64,
     login: String,
-    email: Option<String>,
     name: Option<String>,
 }
 
@@ -59,7 +58,9 @@ pub fn authorize_url(cfg: &OauthClientConfig, state: &str) -> String {
 
 /// Phase B of the callback — exchange code, fetch profile + verified email.
 /// Holds NO database connection across these three calls. `verified_email`
-/// carries only addresses GitHub attests (profile email or verified primary).
+/// carries only the verified primary; the `GET /user` profile email is not
+/// API-attested, so trusting it would let the email-link account-takeover
+/// guard accept an unverified address.
 pub async fn fetch_identity(
     http: &OutboundHttpClient,
     cfg: &OauthClientConfig,
@@ -71,11 +72,10 @@ pub async fn fetch_identity(
         .await
         .ok()
         .flatten();
-    let email = user.email.or(primary);
     Ok(RemoteIdentity {
         provider_user_id: user.id.to_string(),
         provider_username: Some(user.login),
-        verified_email: email,
+        verified_email: primary,
         display_name: user.name,
     })
 }

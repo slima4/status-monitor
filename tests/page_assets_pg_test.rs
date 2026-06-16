@@ -60,7 +60,7 @@ async fn page_asset_roundtrip_live_pg() {
     assert!(store.get(page.id, AssetSlot::Logo).await.unwrap().is_none());
     assert!(
         store
-            .get_meta(page.id, AssetSlot::Logo)
+            .get_meta(org, page.id, AssetSlot::Logo)
             .await
             .unwrap()
             .is_none()
@@ -98,12 +98,21 @@ async fn page_asset_roundtrip_live_pg() {
     assert_eq!(got.content_hash, meta.content_hash);
 
     let got_meta = store
-        .get_meta(page.id, AssetSlot::Logo)
+        .get_meta(org, page.id, AssetSlot::Logo)
         .await
         .unwrap()
         .expect("meta present");
     assert_eq!(got_meta.content_hash, meta.content_hash);
     assert_eq!(got_meta.byte_size, bytes.len() as i64);
+
+    // A foreign org reading the same page id sees nothing — org scoping holds.
+    assert!(
+        store
+            .get_meta(OrgId(uuid::Uuid::new_v4()), page.id, AssetSlot::Logo)
+            .await
+            .unwrap()
+            .is_none()
+    );
 
     // Re-put new bytes UPSERTs the same (page, slot) row and rolls the hash.
     let bytes2 = b"\x89PNG\r\n\x1a\ndifferent-bytes";

@@ -21,6 +21,8 @@ pub mod codes {
     /// A write tool's elicitation was declined, cancelled, or unavailable.
     pub const NOT_CONFIRMED: &str = "not_confirmed";
     pub const UNAUTHENTICATED: &str = "unauthenticated";
+    /// The org's per-category rate limit was exhausted; retry after a delay.
+    pub const RATE_LIMITED: &str = "rate_limited";
     pub const INTERNAL: &str = "internal";
 }
 
@@ -60,6 +62,16 @@ impl McpToolError {
 
     pub fn unauthenticated(message: impl Into<String>) -> Self {
         Self::new(codes::UNAUTHENTICATED, message, false)
+    }
+
+    /// The org's rate limit for this tool's category is exhausted. Retryable
+    /// once the window refills.
+    pub fn rate_limited(retry_after_secs: u32) -> Self {
+        Self::new(
+            codes::RATE_LIMITED,
+            format!("rate limit exceeded; retry in {retry_after_secs}s"),
+            true,
+        )
     }
 
     /// A server-side fault (DB down, serialization). Retryable — the caller's

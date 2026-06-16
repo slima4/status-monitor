@@ -49,9 +49,18 @@ pub trait PageAssetStore: Send + Sync {
     ) -> Result<AssetMeta>;
     /// Read the bytes for serving. Only the `db` storage path is read; a future
     /// `s3` row returns `None` (the bytes live elsewhere, not yet wired).
+    /// Deliberately not org-scoped: the only caller is the public status-page
+    /// logo route, which resolves the page id from a public slug with no tenant
+    /// context. An authenticated caller must use an org-scoped lookup instead.
     async fn get(&self, page: StatusPageId, slot: AssetSlot) -> Result<Option<AssetContent>>;
-    /// Metadata only (no bytes) for the `db` storage path.
-    async fn get_meta(&self, page: StatusPageId, slot: AssetSlot) -> Result<Option<AssetMeta>>;
+    /// Metadata only (no bytes) for the `db` storage path. Org-scoped so a
+    /// request-supplied page id can't read another tenant's asset metadata.
+    async fn get_meta(
+        &self,
+        org: OrgId,
+        page: StatusPageId,
+        slot: AssetSlot,
+    ) -> Result<Option<AssetMeta>>;
     /// Org-scoped so a request-supplied page id can't delete another tenant's asset.
     async fn delete(
         &self,
@@ -158,13 +167,19 @@ impl PageAssetStore for PgPageAssetStore {
         }))
     }
 
-    async fn get_meta(&self, page: StatusPageId, slot: AssetSlot) -> Result<Option<AssetMeta>> {
+    async fn get_meta(
+        &self,
+        org: OrgId,
+        page: StatusPageId,
+        slot: AssetSlot,
+    ) -> Result<Option<AssetMeta>> {
         let row: Option<(String, String, i64, serde_json::Value)> = sqlx::query_as(
             "SELECT content_hash, content_type, byte_size, metadata FROM page_assets \
-             WHERE status_page_id = $1 AND slot = $2 AND storage = 'db'",
+             WHERE status_page_id = $1 AND slot = $2 AND org_id = $3 AND storage = 'db'",
         )
         .bind(page.0)
         .bind(slot.as_str())
+        .bind(org.0)
         .fetch_optional(&self.pool)
         .await
         .map_err(db_err)?;
@@ -272,7 +287,12 @@ impl PageAssetStore for InMemoryPageAssetStore {
             .map(|(c, _)| c.clone()))
     }
 
-    async fn get_meta(&self, page: StatusPageId, slot: AssetSlot) -> Result<Option<AssetMeta>> {
+    async fn get_meta(
+        &self,
+        _org: OrgId,
+        page: StatusPageId,
+        slot: AssetSlot,
+    ) -> Result<Option<AssetMeta>> {
         Ok(self
             .inner
             .lock()
