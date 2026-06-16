@@ -34,6 +34,7 @@
 
     <fieldset class="space-y-3" data-kind-chooser>
       <legend class="panel-label">channel type</legend>
+      {# Most-popular channels first; the rest sit below a divider. #}
       <div class="check-type-cards">
         <label class="check-type-card" data-kind-card>
           <input type="radio" name="kind" value="slack"{% if form.kind == "slack" %} checked{% endif %} class="sr-only">
@@ -46,6 +47,29 @@
           <span class="check-type-card__desc">channel webhook</span>
         </label>
         <label class="check-type-card" data-kind-card>
+          <input type="radio" name="kind" value="email"{% if form.kind == "email" %} checked{% endif %} class="sr-only">
+          <span class="check-type-card__name">email</span>
+          <span class="check-type-card__desc">verified address</span>
+        </label>
+        {% if form.offers_telegram_app() %}
+        <label class="check-type-card" data-kind-card>
+          <input type="radio" name="kind" value="telegram_app"{% if form.kind == "telegram_app" %} checked{% endif %} class="sr-only">
+          <span class="check-type-card__name">telegram</span>
+          <span class="check-type-card__desc">one-tap chat link</span>
+        </label>
+        {% else %}
+        <label class="check-type-card" data-kind-card>
+          <input type="radio" name="kind" value="telegram"{% if form.kind == "telegram" %} checked{% endif %} class="sr-only">
+          <span class="check-type-card__name">telegram bot</span>
+          <span class="check-type-card__desc">your own bot token</span>
+        </label>
+        {% endif %}
+      </div>
+
+      <div class="kind-divider" aria-hidden="true"></div>
+
+      <div class="check-type-cards">
+        <label class="check-type-card" data-kind-card>
           <input type="radio" name="kind" value="msteams"{% if form.kind == "msteams" %} checked{% endif %} class="sr-only">
           <span class="check-type-card__name">teams</span>
           <span class="check-type-card__desc">Workflows webhook</span>
@@ -54,11 +78,6 @@
           <input type="radio" name="kind" value="google_chat"{% if form.kind == "google_chat" %} checked{% endif %} class="sr-only">
           <span class="check-type-card__name">google chat</span>
           <span class="check-type-card__desc">space webhook</span>
-        </label>
-        <label class="check-type-card" data-kind-card>
-          <input type="radio" name="kind" value="email"{% if form.kind == "email" %} checked{% endif %} class="sr-only">
-          <span class="check-type-card__name">email</span>
-          <span class="check-type-card__desc">verified address</span>
         </label>
         <label class="check-type-card" data-kind-card>
           <input type="radio" name="kind" value="pagerduty"{% if form.kind == "pagerduty" %} checked{% endif %} class="sr-only">
@@ -75,13 +94,6 @@
           <span class="check-type-card__name">ntfy</span>
           <span class="check-type-card__desc">topic push</span>
         </label>
-        {% if form.offers_telegram_app() %}
-        <label class="check-type-card" data-kind-card>
-          <input type="radio" name="kind" value="telegram_app"{% if form.kind == "telegram_app" %} checked{% endif %} class="sr-only">
-          <span class="check-type-card__name">telegram</span>
-          <span class="check-type-card__desc">one-tap chat link</span>
-        </label>
-        {% endif %}
         {% if form.offers_whatsapp_app() %}
         <label class="check-type-card" data-kind-card>
           <input type="radio" name="kind" value="whatsapp_app"{% if form.kind == "whatsapp_app" %} checked{% endif %} class="sr-only">
@@ -89,11 +101,13 @@
           <span class="check-type-card__desc">one-tap number link</span>
         </label>
         {% endif %}
+        {% if form.offers_telegram_app() %}
         <label class="check-type-card" data-kind-card>
           <input type="radio" name="kind" value="telegram"{% if form.kind == "telegram" %} checked{% endif %} class="sr-only">
           <span class="check-type-card__name">telegram bot</span>
           <span class="check-type-card__desc">your own bot token</span>
         </label>
+        {% endif %}
         <label class="check-type-card" data-kind-card>
           <input type="radio" name="kind" value="whatsapp"{% if form.kind == "whatsapp" %} checked{% endif %} class="sr-only">
           <span class="check-type-card__name">whatsapp</span>
