@@ -14,7 +14,11 @@ use crate::error::Result;
 pub struct RegionRow {
     pub id: String,
     pub name: String,
-    pub location: Option<String>,
+    pub city: Option<String>,
+    pub country_code: Option<String>,
+    pub continent: Option<String>,
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
     pub enabled: bool,
     pub created_at: DateTime<Utc>,
 }
@@ -56,7 +60,8 @@ impl OperatorRepo {
 
     pub async fn list_regions(&self) -> Result<Vec<RegionRow>> {
         let rows = sqlx::query_as::<_, RegionRow>(
-            "SELECT id, name, location, enabled, created_at FROM regions ORDER BY id",
+            "SELECT id, name, city, country_code, continent, latitude, longitude, \
+             enabled, created_at FROM regions ORDER BY id",
         )
         .fetch_all(&self.pool)
         .await
@@ -65,19 +70,28 @@ impl OperatorRepo {
     }
 
     /// Create a region. `false` if the id already exists.
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_region(
         &self,
         id: &str,
         name: &str,
-        location: Option<&str>,
+        city: Option<&str>,
+        country_code: Option<&str>,
+        continent: Option<&str>,
+        latitude: Option<f64>,
+        longitude: Option<f64>,
     ) -> Result<bool> {
         let res = sqlx::query(
-            "INSERT INTO regions (id, name, location) VALUES ($1, $2, $3) \
-             ON CONFLICT (id) DO NOTHING",
+            "INSERT INTO regions (id, name, city, country_code, continent, latitude, longitude) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (id) DO NOTHING",
         )
         .bind(id)
         .bind(name)
-        .bind(location)
+        .bind(city)
+        .bind(country_code)
+        .bind(continent)
+        .bind(latitude)
+        .bind(longitude)
         .execute(&self.pool)
         .await
         .context("operator: create region")?;
@@ -85,20 +99,33 @@ impl OperatorRepo {
     }
 
     /// Patch a region's display fields. Each `None` leaves that field as-is, so
-    /// a name-only update never wipes the location. `false` if no such region.
+    /// a name-only update never wipes the city. `false` if no such region.
+    #[allow(clippy::too_many_arguments)]
     pub async fn update_region(
         &self,
         id: &str,
         name: Option<&str>,
-        location: Option<&str>,
+        city: Option<&str>,
+        country_code: Option<&str>,
+        continent: Option<&str>,
+        latitude: Option<f64>,
+        longitude: Option<f64>,
     ) -> Result<bool> {
         let res = sqlx::query(
             "UPDATE regions SET name = COALESCE($2, name), \
-             location = COALESCE($3, location) WHERE id = $1",
+             city = COALESCE($3, city), \
+             country_code = COALESCE($4, country_code), \
+             continent = COALESCE($5, continent), \
+             latitude = COALESCE($6, latitude), \
+             longitude = COALESCE($7, longitude) WHERE id = $1",
         )
         .bind(id)
         .bind(name)
-        .bind(location)
+        .bind(city)
+        .bind(country_code)
+        .bind(continent)
+        .bind(latitude)
+        .bind(longitude)
         .execute(&self.pool)
         .await
         .context("operator: update region")?;

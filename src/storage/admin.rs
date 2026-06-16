@@ -242,7 +242,7 @@ impl AdminRepo {
     ) -> Result<()> {
         for id in [scheduler_region, default_region] {
             sqlx::query(
-                "INSERT INTO regions (id, name, location) VALUES ($1, $1, '') \
+                "INSERT INTO regions (id, name, city) VALUES ($1, $1, '') \
                  ON CONFLICT (id) DO NOTHING",
             )
             .bind(id)

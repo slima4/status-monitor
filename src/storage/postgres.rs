@@ -109,7 +109,7 @@ impl PostgresTargetStore {
     ) -> Result<()> {
         let region: &str = &self.default_region;
         sqlx::query(
-            "INSERT INTO regions (id, name, location) VALUES ($1, $1, '') \
+            "INSERT INTO regions (id, name, city) VALUES ($1, $1, '') \
              ON CONFLICT (id) DO NOTHING",
         )
         .bind(region)
@@ -880,18 +880,34 @@ impl TargetStore for PostgresTargetStore {
     }
 
     async fn available_regions_detailed(&self) -> Result<Vec<RegionOption>> {
-        let rows: Vec<(String, String, Option<String>)> =
-            sqlx::query_as("SELECT id, name, location FROM regions WHERE enabled ORDER BY id")
-                .fetch_all(&self.pool)
-                .await
-                .context("postgres available_regions_detailed")?;
+        let rows: Vec<(
+            String,
+            String,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<f64>,
+            Option<f64>,
+        )> = sqlx::query_as(
+            "SELECT id, name, city, country_code, continent, latitude, longitude FROM regions \
+             WHERE enabled ORDER BY id",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .context("postgres available_regions_detailed")?;
         Ok(rows
             .into_iter()
-            .map(|(id, name, location)| RegionOption {
-                id,
-                name,
-                location: location.unwrap_or_default(),
-            })
+            .map(
+                |(id, name, city, country_code, continent, latitude, longitude)| RegionOption {
+                    id,
+                    name,
+                    city: city.unwrap_or_default(),
+                    country_code,
+                    continent,
+                    latitude,
+                    longitude,
+                },
+            )
             .collect())
     }
 

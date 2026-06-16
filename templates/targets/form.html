@@ -566,15 +566,26 @@
       </div>
       <div class="sm:col-span-2">
         <span class="mb-1.5 block text-xs text-muted">Regions</span>
-        <div class="flex flex-wrap gap-1.5">
-          {% for r in form.region_choices %}
-          <label class="scope-token">
-            <input type="checkbox" data-region-checkbox value="{{ r.id }}" class="sr-only"{% if r.selected %} checked{% endif %}>
-            {{ r.label }}
-          </label>
+        <div class="space-y-2">
+          {% for g in form.region_groups %}
+          <div>
+            <span class="mb-1 block text-[0.7rem] uppercase tracking-wide text-quiet">{{ g.label }}</span>
+            <div class="flex flex-wrap gap-1.5">
+              {% for r in g.regions %}
+              <label class="scope-token">
+                <input type="checkbox" data-region-checkbox value="{{ r.id }}" class="sr-only"{% if r.selected %} checked{% endif %}>
+                {{ r.label }}
+              </label>
+              {% endfor %}
+            </div>
+          </div>
           {% endfor %}
         </div>
-        <span class="mt-1 block text-xs text-muted">Which locations probe this monitor.</span>
+        <span class="mt-1 block text-xs text-muted">
+          Which locations probe this monitor. Need more regions?
+          <a href="mailto:support@uptimepage.dev?subject=More%20monitoring%20regions"
+             class="underline decoration-dotted hover:text-body">Send a message</a>
+        </span>
       </div>
       {% endif %}
       </div>

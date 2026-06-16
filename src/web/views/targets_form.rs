@@ -209,9 +209,9 @@ pub struct FormModel {
     /// Whether the escalation-policy section renders at all (off when the
     /// team-paging feature is disabled for the deployment).
     pub show_escalation: bool,
-    /// The enabled region catalog with this monitor's assignments prefilled
-    /// (edit only). Empty / single-region deployments still render one row.
-    pub region_choices: Vec<RegionChoice>,
+    /// The enabled region catalog grouped by continent, with this monitor's
+    /// assignments prefilled (edit only). Empty when single-region.
+    pub region_groups: Vec<RegionGroup>,
     /// Detection-threshold dropdown options with the monitor's current one
     /// selected: `any` / `majority` / `all` plus a fixed count up to the catalog.
     pub region_threshold_options: Vec<ThresholdChoice>,
@@ -396,6 +396,50 @@ pub struct RegionChoice {
     pub selected: bool,
 }
 
+/// Regions bucketed under a continent heading for the assignment picker.
+pub struct RegionGroup {
+    pub label: String,
+    pub regions: Vec<RegionChoice>,
+}
+
+/// Bucket the region catalog by continent (in `Continent::ALL` order, unknown
+/// last as "Other"), marking each as `selected`. Empty buckets are dropped.
+fn region_groups(
+    available: Vec<crate::storage::RegionOption>,
+    selected: impl Fn(&str) -> bool,
+) -> Vec<RegionGroup> {
+    use crate::domain::region::Continent;
+    use crate::web::views::region_display::region_label;
+    use std::collections::HashMap;
+
+    let mut by_cont: HashMap<Option<Continent>, Vec<RegionChoice>> = HashMap::new();
+    for r in available {
+        let cont = r.continent.as_deref().and_then(Continent::parse);
+        let choice = RegionChoice {
+            selected: selected(&r.id),
+            label: region_label(&r),
+            id: r.id,
+        };
+        by_cont.entry(cont).or_default().push(choice);
+    }
+    let mut groups = Vec::new();
+    for c in Continent::ALL {
+        if let Some(regions) = by_cont.remove(&Some(c)) {
+            groups.push(RegionGroup {
+                label: c.label().to_string(),
+                regions,
+            });
+        }
+    }
+    if let Some(regions) = by_cont.remove(&None) {
+        groups.push(RegionGroup {
+            label: "Other".to_string(),
+            regions,
+        });
+    }
+    groups
+}
+
 #[derive(Template, WebTemplate)]
 #[template(path = "targets/form.html")]
 pub struct FormPage {
@@ -447,7 +491,7 @@ fn empty_create_form() -> FormModel {
         escalation_choices: Vec::new(),
         escalation_hint: String::new(),
         show_escalation: false,
-        region_choices: Vec::new(),
+        region_groups: Vec::new(),
         region_threshold_options: Vec::new(),
         show_regions: false,
     }
@@ -604,14 +648,7 @@ pub async fn new_form(
             crate::api::handlers::targets::default_region_set(ids, max_regions, &default_region);
         let chosen: std::collections::HashSet<String> = default_set.into_iter().collect();
         let cap = available.len().min(max_regions.max(1) as usize);
-        form.region_choices = available
-            .into_iter()
-            .map(|r| RegionChoice {
-                selected: chosen.contains(&r.id),
-                label: crate::web::views::region_display::region_label(&r),
-                id: r.id,
-            })
-            .collect();
+        form.region_groups = region_groups(available, |id| chosen.contains(id));
         form.region_threshold_options =
             region_threshold_choices(RegionIncidentPolicy::default(), cap);
         form.show_regions = true;
@@ -660,14 +697,7 @@ pub async fn edit_form(
             .into_iter()
             .collect();
         let cap = available.len().min(max_regions.max(1) as usize);
-        form.region_choices = available
-            .into_iter()
-            .map(|r| RegionChoice {
-                selected: assigned.contains(&r.id),
-                label: crate::web::views::region_display::region_label(&r),
-                id: r.id,
-            })
-            .collect();
+        form.region_groups = region_groups(available, |id| assigned.contains(id));
         form.region_threshold_options = region_threshold_choices(region_policy, cap);
         form.show_regions = true;
     }
@@ -787,7 +817,7 @@ fn form_from_target(t: Target, kind: FormKind) -> Result<FormModel, AppError> {
         escalation_choices: Vec::new(),
         escalation_hint: String::new(),
         show_escalation: false,
-        region_choices: Vec::new(),
+        region_groups: Vec::new(),
         region_threshold_options: Vec::new(),
         show_regions: false,
     })
@@ -990,6 +1020,32 @@ mod tests {
         assert!(html.contains(r#"value="prod" class="sr-only" checked"#));
         assert!(html.contains(r#"value="api" class="sr-only" checked"#));
         assert!(html.contains(r#"value="staging" class="sr-only">"#));
+    }
+
+    #[test]
+    fn region_groups_bucket_by_continent_other_last() {
+        let region = |id: &str, cont: Option<&str>| crate::storage::RegionOption {
+            id: id.into(),
+            name: id.into(),
+            city: String::new(),
+            country_code: None,
+            continent: cont.map(str::to_string),
+            latitude: None,
+            longitude: None,
+        };
+        let available = vec![
+            region("us", Some("north_america")),
+            region("eu", Some("europe")),
+            region("mystery", None),
+        ];
+        let groups = region_groups(available, |id| id == "eu");
+        let labels: Vec<&str> = groups.iter().map(|g| g.label.as_str()).collect();
+        // Continent::ALL order (Europe before North America), unknown → Other last.
+        assert_eq!(labels, vec!["Europe", "North America", "Other"]);
+        let eu = &groups[0].regions[0];
+        assert_eq!(eu.id, "eu");
+        assert!(eu.selected);
+        assert!(!groups[2].regions[0].selected);
     }
 
     #[test]

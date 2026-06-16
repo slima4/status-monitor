@@ -253,16 +253,16 @@ async fn available_regions_detailed_carries_labels_and_excludes_disabled() {
         return;
     };
     sqlx::query(
-        "INSERT INTO regions (id, name, location, enabled) \
+        "INSERT INTO regions (id, name, city, enabled) \
          VALUES ('eu-detail', 'EU Detail', 'Helsinki', true) \
          ON CONFLICT (id) DO UPDATE SET name = excluded.name, \
-         location = excluded.location, enabled = true",
+         city = excluded.city, enabled = true",
     )
     .execute(&pool)
     .await
     .unwrap();
     sqlx::query(
-        "INSERT INTO regions (id, name, location, enabled) \
+        "INSERT INTO regions (id, name, city, enabled) \
          VALUES ('us-detail-off', 'US Off', 'Ashburn', false) \
          ON CONFLICT (id) DO UPDATE SET enabled = false",
     )
@@ -277,7 +277,7 @@ async fn available_regions_detailed_carries_labels_and_excludes_disabled() {
         .find(|r| r.id == "eu-detail")
         .expect("enabled region present in the catalog");
     assert_eq!(eu.name, "EU Detail");
-    assert_eq!(eu.location, "Helsinki");
+    assert_eq!(eu.city, "Helsinki");
     assert!(
         !detailed.iter().any(|r| r.id == "us-detail-off"),
         "a disabled region must not appear in the catalog"

@@ -12,6 +12,7 @@ pub mod page_asset;
 pub mod preferences;
 pub mod public;
 pub mod quota;
+pub mod region;
 pub mod reserved_slugs;
 pub mod result;
 pub mod status_page;

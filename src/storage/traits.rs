@@ -170,13 +170,20 @@ pub trait TargetStore: Send + Sync {
 }
 
 /// A region for the monitor assignment picker: id plus display fields.
-/// `name`/`location` are empty when unset; the UI shows `name` (falling back to
-/// `id`) and appends `location` when present.
+/// `name`/`city` are empty when unset; the UI shows `name` (falling back to
+/// `id`) and appends `city` when present.
 #[derive(Debug, Clone)]
 pub struct RegionOption {
     pub id: String,
     pub name: String,
-    pub location: String,
+    pub city: String,
+    /// ISO 3166-1 alpha-2 country, when set — drives the flag emoji.
+    pub country_code: Option<String>,
+    /// Continent slug (see `domain::region::Continent`) for picker grouping.
+    pub continent: Option<String>,
+    /// Coordinates for a future map; both set or both `None`.
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
 }
 
 impl RegionOption {
@@ -189,6 +196,11 @@ impl RegionOption {
         } else {
             name
         }
+    }
+
+    /// Unicode flag emoji for `country_code`, or `None` when unset/invalid.
+    pub fn flag(&self) -> Option<String> {
+        crate::domain::region::country_flag(self.country_code.as_deref()?)
     }
 }
 

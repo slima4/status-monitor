@@ -325,7 +325,11 @@ pub struct TargetRegions {
 pub struct RegionInfo {
     pub id: String,
     pub name: String,
-    pub location: String,
+    pub city: String,
+    pub country_code: Option<String>,
+    pub continent: Option<String>,
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
 }
 
 /// The enabled region catalog a monitor may be assigned to.
@@ -351,7 +355,11 @@ pub async fn list_regions(
         .map(|r| RegionInfo {
             id: r.id,
             name: r.name,
-            location: r.location,
+            city: r.city,
+            country_code: r.country_code,
+            continent: r.continent,
+            latitude: r.latitude,
+            longitude: r.longitude,
         })
         .collect();
     Ok(Json(RegionCatalog { regions }))

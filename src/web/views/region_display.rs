@@ -11,14 +11,18 @@ pub struct LabeledRegion {
 }
 
 /// Human label for a region: its display name ([`RegionOption::display_name`])
-/// with the location appended in parentheses when set.
+/// with the city appended in parentheses when set.
 pub fn region_label(region: &RegionOption) -> String {
     let base = region.display_name();
-    let location = region.location.trim();
-    if location.is_empty() {
+    let city = region.city.trim();
+    let text = if city.is_empty() {
         base.to_string()
     } else {
-        format!("{base} ({location})")
+        format!("{base} ({city})")
+    };
+    match region.flag() {
+        Some(flag) => format!("{flag} {text}"),
+        None => text,
     }
 }
 
@@ -36,4 +40,35 @@ pub fn labeled_regions(catalog: &[RegionOption], ids: Vec<String>) -> Vec<Labele
             LabeledRegion { id, label }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn region(name: &str, city: &str, country: Option<&str>) -> RegionOption {
+        RegionOption {
+            id: "r".into(),
+            name: name.into(),
+            city: city.into(),
+            country_code: country.map(str::to_string),
+            continent: None,
+            latitude: None,
+            longitude: None,
+        }
+    }
+
+    #[test]
+    fn label_prepends_flag_and_appends_city() {
+        assert_eq!(
+            region_label(&region("EU", "Helsinki", Some("FI"))),
+            "🇫🇮 EU (Helsinki)"
+        );
+        assert_eq!(
+            region_label(&region("EU", "Helsinki", None)),
+            "EU (Helsinki)"
+        );
+        assert_eq!(region_label(&region("EU", "", Some("FI"))), "🇫🇮 EU");
+        assert_eq!(region_label(&region("EU", "", None)), "EU");
+    }
 }

@@ -5,7 +5,13 @@
 CREATE TABLE regions (
     id          TEXT PRIMARY KEY,
     name        TEXT NOT NULL,
-    location    TEXT,
+    city        TEXT,
+    country_code TEXT CHECK (country_code IS NULL OR country_code ~ '^[A-Za-z]{2}$'),
+    continent   TEXT CHECK (continent IS NULL OR continent IN (
+        'africa', 'asia', 'europe', 'north_america', 'south_america', 'oceania', 'antarctica')),
+    latitude    DOUBLE PRECISION CHECK (latitude IS NULL OR latitude BETWEEN -90 AND 90),
+    longitude   DOUBLE PRECISION CHECK (longitude IS NULL OR longitude BETWEEN -180 AND 180),
+    CHECK ((latitude IS NULL) = (longitude IS NULL)),
     -- Retire a region without dropping it (FK blocks drop; drop loses history).
     enabled     BOOLEAN NOT NULL DEFAULT true,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()

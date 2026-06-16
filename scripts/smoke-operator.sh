@@ -73,7 +73,7 @@ CODE=${no_tok##*$'\n'}
 BODY=${no_tok%$'\n'*}
 expect "no-token rejected" 401
 
-http POST /operator/regions '{"id":"smoke-test","name":"Smoke","location":"nowhere"}'
+http POST /operator/regions '{"id":"smoke-test","name":"Smoke","city":"nowhere"}'
 expect "create region" 201
 
 http POST /operator/regions '{"id":"smoke-test","name":"Smoke"}'

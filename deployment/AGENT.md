@@ -29,7 +29,7 @@ OP=<UPTIMEPAGE_OPERATOR__ADMIN_TOKEN>
 # Create the region (id is the slug agents bind to).
 curl -fsS -X POST "$CP/operator/regions" \
   -H "Authorization: Bearer $OP" -H 'Content-Type: application/json' \
-  -d '{"id":"eu-helsinki","name":"EU (Helsinki)","location":"Helsinki, FI"}'
+  -d '{"id":"eu-helsinki","name":"EU (Helsinki)","city":"Helsinki","country_code":"FI","continent":"europe","latitude":60.17,"longitude":24.94}'
 
 # Mint an agent in that region. The token is returned ONCE — copy it now.
 curl -fsS -X POST "$CP/operator/agents" \

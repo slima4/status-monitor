@@ -18,7 +18,7 @@ use crate::web::OperatorAuth;
 
 const MAX_NAME: usize = 80;
 const MAX_REGION_ID: usize = 40;
-const MAX_LOCATION: usize = 120;
+const MAX_CITY: usize = 120;
 
 fn repo(state: &AppState) -> Result<OperatorRepo> {
     Ok(OperatorRepo::new(state.require_db()?.clone()))
@@ -56,16 +56,62 @@ fn validate_region_id(id: &str) -> Result<&str> {
     Ok(id)
 }
 
-fn validate_location(location: Option<&str>) -> Result<Option<&str>> {
-    if let Some(l) = location
-        && l.len() > MAX_LOCATION
+/// Optional continent slug — must be one of `domain::region::Continent`.
+fn validate_continent(continent: Option<&str>) -> Result<Option<String>> {
+    use crate::domain::region::Continent;
+    match continent.map(str::trim).filter(|s| !s.is_empty()) {
+        None => Ok(None),
+        Some(c) if Continent::parse(c).is_some() => Ok(Some(c.to_string())),
+        Some(_) => Err(AppError::bad_request(
+            codes::REGION_INVALID,
+            format!("continent must be one of: {}", Continent::slug_list()),
+        )),
+    }
+}
+
+/// Optional ISO 3166-1 alpha-2 country, normalized to uppercase.
+fn validate_country_code(code: Option<&str>) -> Result<Option<String>> {
+    match code.map(str::trim).filter(|s| !s.is_empty()) {
+        None => Ok(None),
+        Some(c) => crate::domain::region::normalize_country_code(c)
+            .map(Some)
+            .ok_or_else(|| {
+                AppError::bad_request(
+                    codes::REGION_INVALID,
+                    "country_code must be a 2-letter ISO 3166-1 alpha-2 code",
+                )
+            }),
+    }
+}
+
+fn validate_city(city: Option<&str>) -> Result<Option<&str>> {
+    if let Some(c) = city
+        && c.len() > MAX_CITY
     {
         return Err(AppError::bad_request(
             codes::REGION_INVALID,
-            format!("location must be at most {MAX_LOCATION} characters"),
+            format!("city must be at most {MAX_CITY} characters"),
         ));
     }
-    Ok(location)
+    Ok(city)
+}
+
+/// Coordinates are optional but all-or-nothing, and within valid ranges.
+fn validate_coords(lat: Option<f64>, lon: Option<f64>) -> Result<(Option<f64>, Option<f64>)> {
+    match (lat, lon) {
+        (None, None) => Ok((None, None)),
+        (Some(la), Some(lo)) if (-90.0..=90.0).contains(&la) && (-180.0..=180.0).contains(&lo) => {
+            Ok((Some(la), Some(lo)))
+        }
+        (Some(_), Some(_)) => Err(AppError::bad_request(
+            codes::REGION_INVALID,
+            "latitude must be -90..=90 and longitude -180..=180",
+        )),
+        _ => Err(AppError::bad_request(
+            codes::REGION_INVALID,
+            "latitude and longitude must be set together",
+        )),
+    }
 }
 
 // ── regions ────────────────────────────────────────────────────────────────
@@ -74,7 +120,11 @@ fn validate_location(location: Option<&str>) -> Result<Option<&str>> {
 pub struct RegionView {
     pub id: String,
     pub name: String,
-    pub location: Option<String>,
+    pub city: Option<String>,
+    pub country_code: Option<String>,
+    pub continent: Option<String>,
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
     pub enabled: bool,
     pub created_at: DateTime<Utc>,
 }
@@ -84,7 +134,15 @@ pub struct NewRegion {
     pub id: String,
     pub name: String,
     #[serde(default)]
-    pub location: Option<String>,
+    pub city: Option<String>,
+    #[serde(default)]
+    pub country_code: Option<String>,
+    #[serde(default)]
+    pub continent: Option<String>,
+    #[serde(default)]
+    pub latitude: Option<f64>,
+    #[serde(default)]
+    pub longitude: Option<f64>,
 }
 
 #[derive(Deserialize)]
@@ -92,7 +150,15 @@ pub struct UpdateRegion {
     #[serde(default)]
     pub name: Option<String>,
     #[serde(default)]
-    pub location: Option<String>,
+    pub city: Option<String>,
+    #[serde(default)]
+    pub country_code: Option<String>,
+    #[serde(default)]
+    pub continent: Option<String>,
+    #[serde(default)]
+    pub latitude: Option<f64>,
+    #[serde(default)]
+    pub longitude: Option<f64>,
     #[serde(default)]
     pub enabled: Option<bool>,
 }
@@ -108,7 +174,11 @@ pub async fn list_regions(
             .map(|r| RegionView {
                 id: r.id,
                 name: r.name,
-                location: r.location,
+                city: r.city,
+                country_code: r.country_code,
+                continent: r.continent,
+                latitude: r.latitude,
+                longitude: r.longitude,
                 enabled: r.enabled,
                 created_at: r.created_at,
             })
@@ -123,8 +193,22 @@ pub async fn create_region(
 ) -> Result<StatusCode> {
     let id = validate_region_id(&req.id)?;
     let name = validate_name(&req.name)?;
-    let location = validate_location(req.location.as_deref())?;
-    if repo(&state)?.create_region(id, name, location).await? {
+    let city = validate_city(req.city.as_deref())?;
+    let country = validate_country_code(req.country_code.as_deref())?;
+    let continent = validate_continent(req.continent.as_deref())?;
+    let (lat, lon) = validate_coords(req.latitude, req.longitude)?;
+    if repo(&state)?
+        .create_region(
+            id,
+            name,
+            city,
+            country.as_deref(),
+            continent.as_deref(),
+            lat,
+            lon,
+        )
+        .await?
+    {
         Ok(StatusCode::CREATED)
     } else {
         Err(AppError::conflict(
@@ -140,18 +224,44 @@ pub async fn update_region(
     Path(id): Path<String>,
     Json(req): Json<UpdateRegion>,
 ) -> Result<StatusCode> {
-    if req.name.is_none() && req.location.is_none() && req.enabled.is_none() {
+    if req.name.is_none()
+        && req.city.is_none()
+        && req.country_code.is_none()
+        && req.continent.is_none()
+        && req.latitude.is_none()
+        && req.longitude.is_none()
+        && req.enabled.is_none()
+    {
         return Err(AppError::bad_request(
             codes::EMPTY_PATCH,
-            "set at least one of name, location, enabled",
+            "set at least one of name, city, country_code, continent, latitude, longitude, enabled",
         ));
     }
     let r = repo(&state)?;
     let mut found = false;
-    if req.name.is_some() || req.location.is_some() {
+    if req.name.is_some()
+        || req.city.is_some()
+        || req.country_code.is_some()
+        || req.continent.is_some()
+        || req.latitude.is_some()
+        || req.longitude.is_some()
+    {
         let name = req.name.as_deref().map(validate_name).transpose()?;
-        let location = validate_location(req.location.as_deref())?;
-        found |= r.update_region(&id, name, location).await?;
+        let city = validate_city(req.city.as_deref())?;
+        let country = validate_country_code(req.country_code.as_deref())?;
+        let continent = validate_continent(req.continent.as_deref())?;
+        let (lat, lon) = validate_coords(req.latitude, req.longitude)?;
+        found |= r
+            .update_region(
+                &id,
+                name,
+                city,
+                country.as_deref(),
+                continent.as_deref(),
+                lat,
+                lon,
+            )
+            .await?;
     }
     if let Some(enabled) = req.enabled {
         found |= r.set_region_enabled(&id, enabled).await?;
