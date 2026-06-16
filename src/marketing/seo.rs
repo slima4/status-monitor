@@ -19,10 +19,14 @@ use serde::Serialize;
 
 use super::blog::list_published;
 use super::config::{BRAND, META_DESCRIPTION, MarketingCfg, TAGLINE};
+use super::landings;
 use super::legal;
 use super::pages::{APPLICATION_XML, TEXT_PLAIN};
 
 const STATIC_CACHE_CONTROL: HeaderValue = HeaderValue::from_static("public, max-age=86400");
+
+/// Public profiles that establish the brand entity for search engines.
+const ORG_SAME_AS: &[&str] = &["https://github.com/uptimepage"];
 
 #[derive(Debug, Clone, Serialize)]
 pub struct OpenGraph {
@@ -74,6 +78,21 @@ pub fn json_ld_organization(canonical_origin: &str) -> JsonLd {
         "name": BRAND,
         "url": canonical_origin,
         "logo": absolute_asset(canonical_origin, "/static/img/favicon.svg"),
+        "sameAs": ORG_SAME_AS,
+    });
+    JsonLd(payload.to_string())
+}
+
+/// `BreadcrumbList` for a second-level marketing page (Home › page). Gives
+/// search engines an explicit Home → page trail for the listing.
+pub fn json_ld_breadcrumb(canonical_origin: &str, name: &str, path: &str) -> JsonLd {
+    let payload = serde_json::json!({
+        "@context": "https://schema.org",
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+            { "@type": "ListItem", "position": 1, "name": "Home", "item": canonical_origin },
+            { "@type": "ListItem", "position": 2, "name": name, "item": format!("{canonical_origin}{path}") },
+        ],
     });
     JsonLd(payload.to_string())
 }
@@ -168,6 +187,9 @@ fn build_sitemap(cfg: &MarketingCfg) -> String {
                 Some(post.date.clone()),
             ));
         }
+    }
+    for landing in landings::LANDINGS {
+        urls.push((format!("{origin}{}", landing.path), None));
     }
     for route in legal::ROUTES {
         urls.push((format!("{origin}{}", route.path), None));

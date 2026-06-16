@@ -57,7 +57,7 @@
             {% for _ in 0..2 %}
             <span class="mk-ticker__item"><span class="mk-ticker__num">99.97%</span> uptime · 90d</span>
             <span class="mk-ticker__sep">·</span>
-            <span class="mk-ticker__item"><span class="mk-ticker__num">30s</span> min interval</span>
+            <span class="mk-ticker__item"><span class="mk-ticker__num">60s</span> min interval</span>
             <span class="mk-ticker__sep">·</span>
             <span class="mk-ticker__item"><span class="mk-ticker__num">HTTP · TCP · DNS · TLS</span></span>
             <span class="mk-ticker__sep">·</span>
@@ -73,7 +73,7 @@
 
     <footer class="mk-footer">
         <div class="container mx-auto grid gap-10 px-4 py-12 sm:grid-cols-12">
-            <div class="space-y-4 sm:col-span-5">
+            <div class="space-y-4 sm:col-span-4">
                 {% include "marketing/_brand_lockup.html" %}
                 <p class="max-w-sm text-sm" style="color: var(--mk-ink-soft);">
                     Uptime monitoring and public status pages. For indie
@@ -94,7 +94,14 @@
                 <a href="{{ app_url }}/login" class="mk-footer-link">sign in</a>
             </div>
 
-            <div class="sm:col-span-4">
+            <div class="sm:col-span-2">
+                <p class="mk-footer__heading">use cases</p>
+                <a href="/status-page-for-saas" class="mk-footer-link">for saas</a>
+                <a href="/status-page-for-agencies" class="mk-footer-link">for agencies</a>
+                <a href="/vs/uptimerobot" class="mk-footer-link">vs uptimerobot</a>
+            </div>
+
+            <div class="sm:col-span-3">
                 <p class="mk-footer__heading">company</p>
                 <a href="/privacy" class="mk-footer-link">privacy</a>
                 <a href="/terms" class="mk-footer-link">terms</a>

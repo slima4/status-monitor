@@ -1,0 +1,63 @@
+{% extends "marketing/base.html" %}
+{% block title %}{{ title }}{% endblock %}
+{% block description %}{{ og.description }}{% endblock %}
+{% block head %}
+<script type="application/ld+json">{{ breadcrumb_json_ld.as_str()|safe }}</script>
+{% endblock %}
+{% block content %}
+<div class="space-y-20 sm:space-y-24">
+
+    <section class="mx-auto max-w-3xl text-center space-y-5">
+        <p class="mk-eyebrow mk-eyebrow--ok">{{ eyebrow }}</p>
+        <h1 class="mk-display">{{ h1 }}</h1>
+        <p class="mk-lede mx-auto">{{ lede }}</p>
+        <div class="pt-1">
+            <a href="{{ app_url }}/login" class="mk-cta mk-cta--primary">
+                {{ cta }}
+                <svg class="mk-cta__arrow h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M13 5l7 7-7 7M5 12h15"/>
+                </svg>
+            </a>
+        </div>
+    </section>
+
+    {% if !features.is_empty() %}
+    <section class="mx-auto max-w-2xl space-y-4">
+        <h2 class="mk-h2 text-center">what you get</h2>
+        <ul class="overflow-hidden rounded-sm" style="border: 1px solid var(--mk-rule); background: var(--mk-surface);">
+            {% for f in features %}
+            <li class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 p-3 {% if !loop.first %}mk-rule-top{% endif %}">
+                <span class="mk-mono" style="font-size: 0.8125rem; color: var(--mk-ink); font-weight: 600;">{{ f.label }}</span>
+                <span class="mk-mono mk-quiet" style="font-size: 0.75rem;">{{ f.value }}</span>
+            </li>
+            {% endfor %}
+        </ul>
+    </section>
+    {% endif %}
+
+    {% for s in sections %}
+    <section class="mx-auto max-w-2xl space-y-3">
+        <h2 class="mk-h3">{{ s.heading }}</h2>
+        <p class="mk-body">{{ s.body }}</p>
+    </section>
+    {% endfor %}
+
+    <section class="mx-auto max-w-3xl text-center space-y-5">
+        <h2 class="mk-h2">Start in <em class="mk-h2-em">under 5 minutes</em>.</h2>
+        <div>
+            <a href="{{ app_url }}/login" class="mk-cta mk-cta--primary">
+                {{ cta }}
+                <svg class="mk-cta__arrow h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M13 5l7 7-7 7M5 12h15"/>
+                </svg>
+            </a>
+        </div>
+        <p class="mk-mono text-xs mk-quiet" style="letter-spacing: 0.08em;">
+            <a href="/#features" class="mk-footer-link" style="display: inline;">features</a> ·
+            <a href="/#pricing" class="mk-footer-link" style="display: inline;">pricing</a> ·
+            <a href="/blog" class="mk-footer-link" style="display: inline;">notes</a>
+        </p>
+    </section>
+
+</div>
+{% endblock %}

@@ -19,6 +19,7 @@
 pub mod blog;
 pub mod config;
 pub mod dispatch;
+pub mod landings;
 pub mod legal;
 pub mod pages;
 pub mod seo;
@@ -48,6 +49,7 @@ pub fn router(cfg: MarketingCfg) -> Router {
         .route("/sitemap.xml", get(seo::sitemap_xml))
         .route("/llms.txt", get(seo::llms_txt));
     r = legal::mount(r);
+    r = landings::mount(r);
     if state.blog_enabled {
         r = r
             .route("/blog", get(blog::index))
@@ -71,6 +73,7 @@ pub fn router(cfg: MarketingCfg) -> Router {
 fn warm_caches(state: &Arc<MarketingCfg>) {
     pages::warm(state);
     legal::warm(state);
+    landings::warm(state);
     if state.blog_enabled {
         blog::warm(state);
     }

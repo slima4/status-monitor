@@ -113,4 +113,8 @@ update.
 
 Keep it boring. Keep it cheap. Keep it out of the way.
 
+It's the bet behind [how we built Uptimepage](/status-page-for-saas), and
+the reason even [an AI interface to it](/blog/mcp-server) changes nothing in
+production.
+
 Your future self, at 2:47 a.m. on some Tuesday, will thank you.
