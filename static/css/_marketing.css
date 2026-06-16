@@ -12,6 +12,19 @@
    keeps the var() chain overridable by a future shell variant without
    bleeding into the org-app's --theme-/--sm-* surface.
    ──────────────────────────────────────────────────────────────────── */
+
+/* Root-scope concerns the body-scoped tokens can't carry: UA control theming
+   and anchor-jump offset under the sticky header. */
+html:has(.marketing-shell) {
+    color-scheme: light;
+    scroll-padding-top: 5rem;
+}
+
+.marketing-shell :where(a, button, summary, [role="button"]) {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+}
+
 .marketing-shell {
     /* Surfaces */
     --mk-bg:        oklch(0.985 0.003 240);
