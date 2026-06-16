@@ -42,6 +42,26 @@
     </section>
     {% endfor %}
 
+    {% if let Some(c) = code %}
+    <section class="mx-auto max-w-2xl space-y-3">
+        <h2 class="mk-h3">{{ c.caption }}</h2>
+        <pre class="mk-mono overflow-x-auto rounded-sm p-4" style="border: 1px solid var(--mk-rule); background: var(--mk-surface); color: var(--mk-ink); font-size: 0.75rem; line-height: 1.6;"><code>{{ c.body }}</code></pre>
+    </section>
+    {% endif %}
+
+    {% if !resources.is_empty() %}
+    <section class="mx-auto max-w-2xl space-y-3">
+        <h2 class="mk-h3">links</h2>
+        <ul class="space-y-2">
+            {% for r in resources %}
+            <li>
+                <a href="{{ r.href }}" class="mk-footer-link" style="display: inline;">{{ r.label }}</a>
+            </li>
+            {% endfor %}
+        </ul>
+    </section>
+    {% endif %}
+
     <section class="mx-auto max-w-3xl text-center space-y-5">
         <h2 class="mk-h2">Start in <em class="mk-h2-em">under 5 minutes</em>.</h2>
         <div>

@@ -18,7 +18,7 @@ use bytes::Bytes;
 use serde::Serialize;
 
 use super::blog::list_published;
-use super::config::{BRAND, META_DESCRIPTION, MarketingCfg, TAGLINE};
+use super::config::{BRAND, MCP_URL, META_DESCRIPTION, MarketingCfg, TAGLINE, TERRAFORM_URL};
 use super::landings;
 use super::legal;
 use super::pages::{APPLICATION_XML, TEXT_PLAIN};
@@ -27,12 +27,6 @@ const STATIC_CACHE_CONTROL: HeaderValue = HeaderValue::from_static("public, max-
 
 /// Public profiles that establish the brand entity for search engines.
 const ORG_SAME_AS: &[&str] = &["https://github.com/uptimepage"];
-
-/// Stable product surfaces on their own prod hosts — not derived from
-/// `canonical_origin` (separate hostnames), so authored absolute like
-/// `ORG_SAME_AS`.
-const MCP_URL: &str = "https://mcp.uptimepage.dev/mcp";
-const TERRAFORM_URL: &str = "https://registry.terraform.io/providers/uptimepage/uptimepage";
 
 /// Prose overview for `llms.txt` / `llms-full.txt` — what the product is,
 /// in the words an assistant should reach for when asked about it.

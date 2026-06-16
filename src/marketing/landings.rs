@@ -20,7 +20,7 @@ use axum::http::HeaderValue;
 use axum::response::Response;
 use axum::routing::get;
 
-use super::config::{BRAND, MarketingCfg};
+use super::config::{BRAND, MarketingCfg, TERRAFORM_URL};
 use super::pages::{CachedRender, cached_render, serve_cached};
 use super::seo::{JsonLd, OpenGraph, json_ld_breadcrumb};
 use crate::web::filters;
@@ -40,6 +40,16 @@ pub struct Section {
     pub body: &'static str,
 }
 
+pub struct ResourceLink {
+    pub label: &'static str,
+    pub href: &'static str,
+}
+
+pub struct CodeSample {
+    pub caption: &'static str,
+    pub body: &'static str,
+}
+
 /// A use-case or comparison landing page. Comparison and use-case pages
 /// share one shape — the only difference is copy — so there is no kind
 /// discriminant to keep in lockstep.
@@ -53,6 +63,8 @@ pub struct Landing {
     pub lede: &'static str,
     pub features: &'static [Feature],
     pub sections: &'static [Section],
+    pub code: Option<CodeSample>,
+    pub resources: &'static [ResourceLink],
     pub cta: &'static str,
 }
 
@@ -102,6 +114,8 @@ pub const LANDINGS: &[Landing] = &[
                 body: "Per-monitor channels, dedupe and flap-suppression mean a 60-second blip never pages on-call at 3 a.m. The signal stays honest.",
             },
         ],
+        code: None,
+        resources: &[],
         cta: "Start free with GitHub",
     },
     Landing {
@@ -147,6 +161,8 @@ pub const LANDINGS: &[Landing] = &[
                 body: "One account covers many pages, so there is no metered per-monitor pricing to pass through to clients while you are getting started.",
             },
         ],
+        code: None,
+        resources: &[],
         cta: "Start free with GitHub",
     },
     Landing {
@@ -196,6 +212,93 @@ pub const LANDINGS: &[Landing] = &[
                 body: "Per-monitor Slack, email and webhook channels with dedupe and flap-suppression, so a brief blip doesn’t page anyone.",
             },
         ],
+        code: None,
+        resources: &[],
+        cta: "Start free with GitHub",
+    },
+    Landing {
+        path: "/automation",
+        title: "Monitoring as Code: Terraform & MCP",
+        eyebrow: "for developers & devops",
+        h1: "Run your monitoring from code, not clicks",
+        meta_description: "Manage Uptimepage monitors, status pages and alerts as code with the Terraform provider, and connect any LLM over MCP. Free to start, no card.",
+        lede: "Everything you can click in Uptimepage you can declare in code. Provision monitors and status pages with the Terraform provider, and let an AI assistant read your monitoring over MCP — same tenant isolation, scopes and rate limits as the dashboard.",
+        features: &[
+            Feature {
+                label: "Terraform provider",
+                value: "uptimepage/uptimepage",
+            },
+            Feature {
+                label: "Terraform resources",
+                value: "monitors, status pages, channels",
+            },
+            Feature {
+                label: "MCP endpoint",
+                value: "mcp.uptimepage.dev/mcp",
+            },
+            Feature {
+                label: "MCP access",
+                value: "OAuth one-click, read + fenced writes",
+            },
+            Feature {
+                label: "API tokens",
+                value: "scoped, least-privilege, expiring",
+            },
+            Feature {
+                label: "Price to start",
+                value: "free, no card",
+            },
+        ],
+        sections: &[
+            Section {
+                heading: "config-as-code with Terraform",
+                body: "Declare monitors, status pages, components and notification channels in HCL with the official provider (source uptimepage/uptimepage). Review changes in a pull request, roll them out across orgs, and keep your monitoring reproducible instead of hand-clicked.",
+            },
+            Section {
+                heading: "ask an assistant what’s broken",
+                body: "The MCP server lets an LLM client — Claude, an IDE, anything that speaks MCP — read your monitors and incidents and take tightly-fenced actions. It runs inside the same app, so the scope checks and rate limits that guard your data guard the assistant’s access too.",
+            },
+            Section {
+                heading: "tokens that do one job",
+                body: "Automation authenticates with scoped API tokens: resource-and-action permissions, bound to one org, with an enforced expiry. Mint a read-only token for a dashboard or a write-scoped one for Terraform — never an all-or-nothing key.",
+            },
+        ],
+        code: Some(CodeSample {
+            caption: "Declare a monitor in Terraform",
+            body: r#"terraform {
+  required_providers {
+    uptimepage = {
+      source = "uptimepage/uptimepage"
+    }
+  }
+}
+
+resource "uptimepage_target" "api" {
+  name     = "api prod"
+  interval = 60
+
+  check = {
+    type = "http"
+    http = {
+      url = "https://example.com/healthz"
+      expected_status = {
+        kind  = "exact"
+        exact = 200
+      }
+    }
+  }
+}"#,
+        }),
+        resources: &[
+            ResourceLink {
+                label: "Terraform Registry",
+                href: TERRAFORM_URL,
+            },
+            ResourceLink {
+                label: "How the MCP server works",
+                href: "/blog/mcp-server",
+            },
+        ],
         cta: "Start free with GitHub",
     },
 ];
@@ -209,6 +312,8 @@ struct LandingDoc {
     lede: &'static str,
     features: &'static [Feature],
     sections: &'static [Section],
+    code: Option<&'static CodeSample>,
+    resources: &'static [ResourceLink],
     cta: &'static str,
     canonical_url: String,
     og: OpenGraph,
@@ -234,6 +339,8 @@ fn render_all(cfg: &MarketingCfg) -> HashMap<&'static str, CachedRender> {
                 lede: l.lede,
                 features: l.features,
                 sections: l.sections,
+                code: l.code.as_ref(),
+                resources: l.resources,
                 cta: l.cta,
                 canonical_url,
                 og,

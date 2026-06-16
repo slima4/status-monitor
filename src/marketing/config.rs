@@ -17,6 +17,11 @@ pub const TAGLINE: &str = "Uptime monitoring and public status pages that just w
 /// 110–160 char sweet spot so search snippets don't truncate mid-sentence.
 pub const META_DESCRIPTION: &str = "Uptime monitoring and public status pages that just work. HTTP, TCP, DNS, TLS checks. Slack, email, webhook alerts. Start free, no card.";
 
+/// Automation surfaces on their own prod hosts — not derived from
+/// `canonical_origin` (separate hostnames), so authored absolute.
+pub const MCP_URL: &str = "https://mcp.uptimepage.dev/mcp";
+pub const TERRAFORM_URL: &str = "https://registry.terraform.io/providers/uptimepage/uptimepage";
+
 /// What the marketing handlers read. Mirrors the relevant fields of
 /// `crate::config::MarketingConfig` so this struct compiles untouched
 /// in the extracted service.

@@ -151,6 +151,29 @@ async fn llms_txt_renders() {
 }
 
 #[tokio::test]
+async fn automation_landing_renders() {
+    let (status, body, _) = get("/automation").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.contains("Run your monitoring from code"));
+    assert!(
+        body.contains("uptimepage/uptimepage"),
+        "must name the provider"
+    );
+    assert!(
+        body.contains("mcp.uptimepage.dev/mcp"),
+        "must name the MCP endpoint"
+    );
+    assert!(
+        body.contains("uptimepage_target") && body.contains("expected_status"),
+        "must show the HCL snippet"
+    );
+    assert!(
+        body.contains("href=\"https://registry.terraform.io/providers/uptimepage/uptimepage\""),
+        "must link the Terraform Registry"
+    );
+}
+
+#[tokio::test]
 async fn llms_full_txt_renders() {
     let (status, body, _) = get("/llms-full.txt").await;
     assert_eq!(status, StatusCode::OK);
