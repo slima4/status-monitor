@@ -131,6 +131,39 @@ async fn llms_txt_renders() {
     let (status, body, _) = get("/llms.txt").await;
     assert_eq!(status, StatusCode::OK);
     assert!(body.starts_with("# Uptimepage"));
+    assert!(body.contains("## Use cases"), "must list landing pages");
+    assert!(
+        body.contains("https://uptimepage.dev/status-page-for-saas"),
+        "must link a landing page"
+    );
+    assert!(
+        body.contains("https://uptimepage.dev/llms-full.txt"),
+        "must point to the full-text companion"
+    );
+    assert!(
+        body.contains("https://mcp.uptimepage.dev/mcp"),
+        "must surface the MCP server"
+    );
+    assert!(
+        body.contains("registry.terraform.io/providers/uptimepage/uptimepage"),
+        "must surface the Terraform provider"
+    );
+}
+
+#[tokio::test]
+async fn llms_full_txt_renders() {
+    let (status, body, _) = get("/llms-full.txt").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.starts_with("# Uptimepage"));
+    assert!(body.contains("## Facts"), "must include the facts table");
+    assert!(
+        body.contains("## Blog: "),
+        "must inline published blog posts"
+    );
+    assert!(
+        body.contains("A status page your SaaS customers actually trust"),
+        "must inline landing-page copy"
+    );
 }
 
 #[tokio::test]

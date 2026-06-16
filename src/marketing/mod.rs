@@ -47,7 +47,8 @@ pub fn router(cfg: MarketingCfg) -> Router {
         .route("/", get(pages::landing))
         .route("/robots.txt", get(seo::robots_txt))
         .route("/sitemap.xml", get(seo::sitemap_xml))
-        .route("/llms.txt", get(seo::llms_txt));
+        .route("/llms.txt", get(seo::llms_txt))
+        .route("/llms-full.txt", get(seo::llms_full_txt));
     r = legal::mount(r);
     r = landings::mount(r);
     if state.blog_enabled {

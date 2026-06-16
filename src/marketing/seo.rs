@@ -28,6 +28,53 @@ const STATIC_CACHE_CONTROL: HeaderValue = HeaderValue::from_static("public, max-
 /// Public profiles that establish the brand entity for search engines.
 const ORG_SAME_AS: &[&str] = &["https://github.com/uptimepage"];
 
+/// Stable product surfaces on their own prod hosts — not derived from
+/// `canonical_origin` (separate hostnames), so authored absolute like
+/// `ORG_SAME_AS`.
+const MCP_URL: &str = "https://mcp.uptimepage.dev/mcp";
+const TERRAFORM_URL: &str = "https://registry.terraform.io/providers/uptimepage/uptimepage";
+
+/// Prose overview for `llms.txt` / `llms-full.txt` — what the product is,
+/// in the words an assistant should reach for when asked about it.
+const LLMS_OVERVIEW: &str = "Uptimepage pairs uptime monitoring with a public status page in one product. \
+Checks run every minute; a failing check opens an incident automatically and posts it to a branded status page \
+on your own subdomain. Alerts carry dedupe and flap-suppression so brief blips never page on-call. \
+Public data is available as JSON, an RSS feed and an embeddable SVG badge. One free plan covers the full \
+feature set — sign in with GitHub, no card.";
+
+/// Machine-readable product facts. Authored single source for the
+/// llms files — keep terse, factual, and current.
+const LLMS_FACTS: &[(&str, &str)] = &[
+    ("Check types", "HTTP/HTTPS, TCP, DNS, TLS certificate"),
+    ("Check interval", "every 60 seconds"),
+    (
+        "Alert channels",
+        "Slack, Discord, Telegram, Microsoft Teams, email, webhook, PagerDuty, ntfy, Pushover, WhatsApp",
+    ),
+    (
+        "Status page",
+        "branded (logo + colour) on your own subdomain",
+    ),
+    ("Public history", "90 days"),
+    (
+        "Incidents",
+        "auto-opened on down, auto-closed on recovery, with public notes",
+    ),
+    (
+        "Scheduled maintenance",
+        "windows that silence the page engine",
+    ),
+    ("Data export", "JSON API, RSS feed, embeddable SVG badge"),
+    ("MCP server", MCP_URL),
+    ("Terraform provider", TERRAFORM_URL),
+    (
+        "Team",
+        "role-based members, GitHub or email invites, audit log",
+    ),
+    ("Pricing", "one free plan, full feature set, no credit card"),
+    ("Sign-in", "GitHub, Google or magic link"),
+];
+
 #[derive(Debug, Clone, Serialize)]
 pub struct OpenGraph {
     pub title: String,
@@ -134,6 +181,7 @@ pub fn json_ld_blog_posting(
 static ROBOTS_CACHED: OnceLock<Bytes> = OnceLock::new();
 static SITEMAP_CACHED: OnceLock<Bytes> = OnceLock::new();
 static LLMS_CACHED: OnceLock<Bytes> = OnceLock::new();
+static LLMS_FULL_CACHED: OnceLock<Bytes> = OnceLock::new();
 
 pub async fn robots_txt(State(cfg): State<Arc<MarketingCfg>>) -> Response {
     let body = ROBOTS_CACHED.get_or_init(|| build_robots(&cfg));
@@ -150,6 +198,11 @@ pub async fn llms_txt(State(cfg): State<Arc<MarketingCfg>>) -> Response {
     plain_text(body.clone(), TEXT_PLAIN)
 }
 
+pub async fn llms_full_txt(State(cfg): State<Arc<MarketingCfg>>) -> Response {
+    let body = LLMS_FULL_CACHED.get_or_init(|| build_llms_full(&cfg));
+    plain_text(body.clone(), TEXT_PLAIN)
+}
+
 /// Warm the static text caches at boot. Sitemap is the only non-trivial
 /// one (iterates published posts + legal routes); robots/llms are cheap
 /// but kept here so every marketing cache lives behind one warmup call.
@@ -157,6 +210,7 @@ pub(crate) fn warm(cfg: &MarketingCfg) {
     ROBOTS_CACHED.get_or_init(|| build_robots(cfg));
     SITEMAP_CACHED.get_or_init(|| Bytes::from(build_sitemap(cfg)));
     LLMS_CACHED.get_or_init(|| build_llms(cfg));
+    LLMS_FULL_CACHED.get_or_init(|| build_llms_full(cfg));
 }
 
 fn build_robots(cfg: &MarketingCfg) -> Bytes {
@@ -166,14 +220,114 @@ fn build_robots(cfg: &MarketingCfg) -> Bytes {
     ))
 }
 
+/// Curated index for assistants — the `llms.txt` convention: title,
+/// one-line summary, prose overview, then link sections. Built from the
+/// same tables that drive the router and sitemap, so it never drifts.
 fn build_llms(cfg: &MarketingCfg) -> Bytes {
-    Bytes::from(format!(
-        "# {brand}\n\n> {tagline}\n\nHomepage: {origin}\nBlog: {origin}/blog\nApp: {app}\n",
-        brand = BRAND,
-        tagline = TAGLINE,
-        origin = cfg.canonical_origin,
+    let origin = &cfg.canonical_origin;
+    let mut s = String::new();
+    s.push_str(&format!("# {BRAND}\n\n> {TAGLINE}\n\n{LLMS_OVERVIEW}\n\n"));
+
+    s.push_str("## Product\n");
+    s.push_str(&format!(
+        "- [Homepage]({origin}): Product overview, features and pricing.\n"
+    ));
+    s.push_str(&format!(
+        "- [Start free]({app}): Sign in with GitHub and add your first monitor.\n\n",
         app = cfg.app_url,
-    ))
+    ));
+
+    s.push_str("## Use cases\n");
+    for l in landings::LANDINGS {
+        s.push_str(&format!(
+            "- [{title}]({origin}{path}): {desc}\n",
+            title = l.title,
+            path = l.path,
+            desc = l.meta_description,
+        ));
+    }
+    s.push('\n');
+
+    if cfg.blog_enabled {
+        let posts = list_published();
+        if !posts.is_empty() {
+            s.push_str("## Blog\n");
+            for p in posts {
+                s.push_str(&format!(
+                    "- [{title}]({origin}/blog/{slug}): {excerpt}\n",
+                    title = p.title,
+                    slug = p.slug,
+                    excerpt = p.excerpt,
+                ));
+            }
+            s.push('\n');
+        }
+    }
+
+    s.push_str("## Developers & automation\n");
+    s.push_str(&format!(
+        "- [MCP server]({MCP_URL}): Connect an LLM client (Claude, IDEs) to read monitors and incidents and take fenced actions. OAuth one-click.\n"
+    ));
+    s.push_str(&format!(
+        "- [Terraform provider]({TERRAFORM_URL}): Manage monitors, status pages and notification channels as config-as-code.\n\n"
+    ));
+
+    s.push_str("## Optional\n");
+    s.push_str(&format!(
+        "- [Full text]({origin}/llms-full.txt): Every marketing page and blog post inlined.\n"
+    ));
+    for route in legal::ROUTES {
+        s.push_str(&format!(
+            "- [{name}]({origin}{path})\n",
+            name = route.title,
+            path = route.path,
+        ));
+    }
+
+    Bytes::from(s)
+}
+
+/// Long-form companion to [`build_llms`]: the overview, a machine-readable
+/// facts table, and the full body of every landing page and blog post in
+/// one document, so an assistant can answer without fetching each URL.
+fn build_llms_full(cfg: &MarketingCfg) -> Bytes {
+    let origin = &cfg.canonical_origin;
+    let mut s = String::new();
+    s.push_str(&format!("# {BRAND}\n\n> {TAGLINE}\n\n{LLMS_OVERVIEW}\n\n"));
+
+    s.push_str("## Facts\n");
+    for (k, v) in LLMS_FACTS {
+        s.push_str(&format!("- {k}: {v}\n"));
+    }
+    s.push('\n');
+
+    for l in landings::LANDINGS {
+        s.push_str(&format!("---\n\n## {}\n", l.title));
+        s.push_str(&format!("URL: {origin}{}\n\n", l.path));
+        s.push_str(&format!("{}\n\n{}\n\n", l.h1, l.lede));
+        s.push_str("What you get:\n");
+        for f in l.features {
+            s.push_str(&format!("- {}: {}\n", f.label, f.value));
+        }
+        s.push('\n');
+        for sec in l.sections {
+            s.push_str(&format!("### {}\n{}\n\n", sec.heading, sec.body));
+        }
+    }
+
+    if cfg.blog_enabled {
+        for p in list_published() {
+            s.push_str(&format!("---\n\n## Blog: {}\n", p.title));
+            s.push_str(&format!("URL: {origin}/blog/{}\n", p.slug));
+            s.push_str(&format!("Date: {}\n", p.date));
+            if !p.tags.is_empty() {
+                s.push_str(&format!("Tags: {}\n", p.tags.join(", ")));
+            }
+            s.push_str(&format!("\n{}\n\n", p.body_md));
+        }
+    }
+
+    Bytes::from(s)
 }
 
 fn build_sitemap(cfg: &MarketingCfg) -> String {

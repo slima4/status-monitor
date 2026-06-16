@@ -42,6 +42,8 @@ pub struct Post {
     pub tags: Vec<String>,
     pub draft: bool,
     pub body_html: String,
+    /// Source markdown, pre-render — inlined verbatim into `llms-full.txt`.
+    pub body_md: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -134,6 +136,7 @@ fn parse_post(raw: &str, stem: &str) -> anyhow::Result<Post> {
         tags: fm.tags,
         draft: fm.draft,
         body_html: render(body),
+        body_md: body.trim().to_string(),
     })
 }
 
