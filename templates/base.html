@@ -69,7 +69,6 @@
                class="nav-link{% if active_tab == "targets" %} nav-link--active{% endif %}">monitors</a>
             <a href="/incidents"{% if active_tab == "incidents" %} aria-current="page"{% endif %}
                class="nav-link{% if active_tab == "incidents" %} nav-link--active{% endif %}">incidents</a>
-            <a href="/docs" class="nav-link">api docs</a>
             <div class="ml-auto flex items-center gap-4">
               <a href="/settings/account"{% if active_tab == "account" %} aria-current="page"{% endif %}
                  class="nav-link{% if active_tab == "account" %} nav-link--active{% endif %}">account</a>
@@ -97,8 +96,6 @@
                 log out
               </button>
             </div>
-            {% else %}
-            <a href="/docs" class="nav-link ml-auto">api docs</a>
             {% endif %}
         </nav>
     </header>
