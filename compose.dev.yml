@@ -112,21 +112,17 @@ services:
       UPTIMEPAGE_SCHEDULER__ENABLED: "false"
       UPTIMEPAGE_SCHEDULER__REGION: "eu-helsinki"
       UPTIMEPAGE_SCHEDULER__DEFAULT_REGION: "eu-helsinki"
-      # Faster cargo-watch rebuilds: mold (via the bind-mounted
-      # .cargo/config.toml musl target) + a persistent sccache volume.
-      # Dockerfile.dev apk-installs both.
-      RUSTC_WRAPPER: sccache
-      SCCACHE_DIR: /sccache
-      # sccache refuses incremental compilation ("incremental compilation
-      # is prohibited"); cargo's dev profile defaults CARGO_INCREMENTAL=1,
-      # which aborts even `cargo metadata` -> cargo-watch never builds.
-      # sccache's cross-build cache replaces the incremental win anyway.
-      CARGO_INCREMENTAL: "0"
+      # Incremental compilation keeps cargo-watch rebuilds fast: a template or
+      # code edit recompiles only the changed codegen units, not the whole
+      # crate. mold (via the bind-mounted .cargo/config.toml musl target) links
+      # it. Incremental is mutually exclusive with sccache, and only deps —
+      # never the local crate — were cacheable, so incremental wins for the
+      # edit-recompile loop.
+      CARGO_INCREMENTAL: "1"
     volumes:
       - .:/usr/src/uptimepage
       - cargo_registry_dev:/usr/local/cargo/registry
       - target_cache_dev:/usr/src/uptimepage/target
-      - sccache_dev:/sccache
       # Mask host bin/ so build.rs fetches the linux/alpine tailwindcss.
       - tailwind_bin_dev:/usr/src/uptimepage/bin
     ports:
@@ -138,5 +134,4 @@ volumes:
   ch_data_dev:
   cargo_registry_dev:
   target_cache_dev:
-  sccache_dev:
   tailwind_bin_dev:

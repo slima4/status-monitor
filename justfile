@@ -42,6 +42,11 @@ setup:
     echo "pre-commit installed → .githooks/pre-commit (bypass with --no-verify)"
     echo "setup done — RUSTC_WRAPPER=${RUSTC_WRAPPER:-<none>}; linker via .cargo/config.toml"
 
+# Reclaim disk: sweep build artifacts not accessed today (cargo-sweep).
+clean:
+    command -v cargo-sweep >/dev/null 2>&1 || cargo install --locked cargo-sweep
+    cargo sweep --time 0
+
 # ── Local stack ─────────────────────────────────────────────────────────────
 
 # Bring up postgres + clickhouse only. `cargo run` natively against them.
