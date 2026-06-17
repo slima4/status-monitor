@@ -564,7 +564,7 @@ async fn form_options(
         state.target_store.distinct_groups(org),
         state.target_store.list_tags(org, None, 200),
         state.quotas.limit_for_org(org),
-        state.target_store.available_regions_detailed(),
+        state.regions_detailed(),
     )?;
     let tag_options = tags.into_iter().map(|t| t.name).collect();
     Ok((

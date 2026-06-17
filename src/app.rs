@@ -101,6 +101,16 @@ fn build_incident_metrics_cache() -> IncidentMetricsCache {
         .build()
 }
 
+/// Process-wide enabled-regions catalog: global, re-read on every chart poll.
+pub type RegionCatalogCache = Cache<(), Arc<Vec<crate::storage::RegionOption>>>;
+
+fn build_region_catalog_cache() -> RegionCatalogCache {
+    Cache::builder()
+        .time_to_live(Duration::from_secs(60))
+        .max_capacity(1)
+        .build()
+}
+
 /// Per-process fast-path for recently-ingested agent `batch_id`s. NOT the
 /// source of truth: it is per-replica, so during a blue/green cutover a retry
 /// can land on the other color and miss here. The authoritative cross-process
@@ -207,6 +217,7 @@ pub struct AppState {
     pub live_data_cache: LiveDataCache,
     pub dashboard_page_cache: DashboardPageCache,
     pub incident_metrics_cache: IncidentMetricsCache,
+    pub region_catalog_cache: RegionCatalogCache,
     pub idempotency: Arc<IdempotencyCache>,
     pub public_source: Arc<dyn PublicSource>,
     pub maintenance_store: Arc<dyn MaintenanceStore>,
@@ -375,6 +386,19 @@ impl AppState {
         })
     }
 
+    /// Enabled-regions catalog, cached so polled readers skip the `regions` query.
+    pub async fn regions_detailed(
+        &self,
+    ) -> crate::error::Result<Vec<crate::storage::RegionOption>> {
+        if let Some(regions) = self.region_catalog_cache.get(&()) {
+            return Ok((*regions).clone());
+        }
+        let regions = self.target_store.available_regions_detailed().await?;
+        self.region_catalog_cache
+            .insert((), Arc::new(regions.clone()));
+        Ok(regions)
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         cfg: AppConfig,
@@ -449,6 +473,7 @@ impl AppState {
             live_data_cache: build_live_data_cache(),
             dashboard_page_cache: build_dashboard_page_cache(),
             incident_metrics_cache: build_incident_metrics_cache(),
+            region_catalog_cache: build_region_catalog_cache(),
             idempotency: Arc::new(IdempotencyCache::new()),
             public_source,
             maintenance_store,

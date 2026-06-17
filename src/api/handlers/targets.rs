@@ -349,8 +349,7 @@ pub async fn list_regions(
     Authorized(_org, _): Authorized<TargetsRead>,
 ) -> Result<Json<RegionCatalog>> {
     let regions = state
-        .target_store
-        .available_regions_detailed()
+        .regions_detailed()
         .await?
         .into_iter()
         .map(|r| RegionInfo {

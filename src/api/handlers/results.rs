@@ -261,7 +261,7 @@ pub async fn latency_by_region(
         state
             .results_store
             .latency_buckets_by_region(org, id, range, bucket_seconds),
-        state.target_store.available_regions_detailed(),
+        state.regions_detailed(),
     )?;
     if target.is_none() {
         return Err(target_not_found());

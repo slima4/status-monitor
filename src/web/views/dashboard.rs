@@ -322,7 +322,7 @@ pub async fn index(
     let region_ids = state.target_store.regions_for_org(org.0).await?;
     let selected_region = resolve_region(params.region, &region_ids);
     let snapshot = snapshot_for(&state, org.0, range, selected_region.as_deref()).await?;
-    let catalog = state.target_store.available_regions_detailed().await?;
+    let catalog = state.regions_detailed().await?;
     let regions = labeled_regions(&catalog, region_ids);
     let onboarding = snapshot.matches == 0;
     let (rows, matches) = filter_rows(&snapshot, selected_status, selected_kind);
@@ -467,7 +467,7 @@ pub async fn table_partial(
     let region_ids = state.target_store.regions_for_org(org.0).await?;
     let selected_region = resolve_region(params.region, &region_ids);
     let snapshot = snapshot_for(&state, org.0, range, selected_region.as_deref()).await?;
-    let catalog = state.target_store.available_regions_detailed().await?;
+    let catalog = state.regions_detailed().await?;
     let regions = labeled_regions(&catalog, region_ids);
     let (rows, matches) = filter_rows(&snapshot, selected_status, selected_kind);
     let partial = DashboardTablePartial {

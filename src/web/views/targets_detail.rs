@@ -447,7 +447,7 @@ pub async fn index(
     let labels = WindowLabels::new(from, to);
     let region_ids = state.target_store.regions_for_org(org).await?;
     let selected_region = super::dashboard::resolve_region(params.region, &region_ids);
-    let catalog = state.target_store.available_regions_detailed().await?;
+    let catalog = state.regions_detailed().await?;
     let live = load_live_data_cached(
         &state,
         org,
