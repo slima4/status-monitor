@@ -44,7 +44,7 @@
                 <article class="space-y-1.5">
                     <div class="flex flex-wrap items-center gap-2">
                         <a href="{{ inc.permalink }}"
-                           class="font-medium hover:underline text-state-warn-strong">{{ inc.header.title }}</a>
+                           class="min-w-0 break-words font-medium hover:underline text-state-warn-strong">{{ inc.header.title }}</a>
                         {% call chips::sevphase(inc.header) %}{% endcall %}
                     </div>
                     <p class="text-sm text-muted">
@@ -78,7 +78,7 @@
         <ul class="mt-1.5 space-y-2">
             {% for m in view.active_maintenance %}
             <li class="text-sm">
-                <p class="font-medium text-body">{{ m.title }}</p>
+                <p class="break-words font-medium text-body">{{ m.title }}</p>
                 <p class="text-muted">
                     <time datetime="{{ m.starts_at|iso_ts }}" data-tz="exact">{{ m.starts_at|human_ts }}</time>
                     –
@@ -97,7 +97,7 @@
         <ul class="mt-1.5 space-y-2">
             {% for m in view.upcoming_maintenance %}
             <li class="text-sm">
-                <p class="font-medium text-body">{{ m.title }}</p>
+                <p class="break-words font-medium text-body">{{ m.title }}</p>
                 <p class="text-muted">
                     Starts
                     <time datetime="{{ m.starts_at|iso_ts }}" data-tz="exact">{{ m.starts_at|human_ts }}</time>
@@ -140,11 +140,11 @@
                 {% for c in group.components %}
                 <li class="p-5">
                     <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-                        <p class="flex items-center gap-2">
-                            <span aria-hidden="true" class="{{ c.status_class }}">{{ c.status_icon }}</span>
-                            <span class="font-medium text-body">{{ c.name }}</span>
+                        <p class="flex min-w-0 items-center gap-2">
+                            <span aria-hidden="true" class="shrink-0 {{ c.status_class }}">{{ c.status_icon }}</span>
+                            <span class="min-w-0 break-words font-medium text-body">{{ c.name }}</span>
                         </p>
-                        <span class="text-sm font-medium {{ c.status_class }}">{{ c.status_label }}</span>
+                        <span class="shrink-0 whitespace-nowrap text-sm font-medium {{ c.status_class }}">{{ c.status_label }}</span>
                     </div>
                     {% match c.description %}
                         {% when Some with (d) %}<p class="mt-0.5 text-xs text-quiet">{{ d }}</p>{% when None %}

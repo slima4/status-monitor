@@ -7,7 +7,7 @@
 <article class="space-y-1.5">
     <div class="flex flex-wrap items-center gap-2">
         <a href="{{ inc.permalink }}"
-           class="font-medium text-body hover:underline">{{ inc.header.title }}</a>
+           class="min-w-0 break-words font-medium text-body hover:underline">{{ inc.header.title }}</a>
         {% call chips::sevphase(inc.header) %}{% endcall %}
         {% if inc.header.ongoing %}
             <span class="status-badge status-badge--down">Ongoing</span>
