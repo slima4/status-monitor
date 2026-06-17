@@ -324,14 +324,11 @@ async fn finish_login(
         state.cfg.auth.session.cookie_secure,
         &state.cfg.auth.session.cookie_domain,
     );
-    // Joined org outranks onboarding — the invitation is why they came; the
-    // personal signup org keeps its default name, renameable in settings.
+    // Joined org outranks redirect_after — the invitation is why they came.
     let redirect = if let Some(j) = joined {
         format!("/?joined={}", crate::auth::url::url_encode(&j.org_slug))
     } else if invite_missed {
         "/".to_string()
-    } else if resolved.is_new_user {
-        "/onboarding/org".to_string()
     } else if resolved.restored {
         // Banner outranks redirect_after — the user must learn the account
         // came back.

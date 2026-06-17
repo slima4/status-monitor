@@ -345,10 +345,6 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
             "/me/time-format",
             get(handlers::me::get_time_format).patch(handlers::me::update_time_format),
         )
-        .route(
-            "/me/onboarding/complete",
-            post(handlers::me::complete_onboarding),
-        )
         .route("/me/sessions", get(handlers::me::list_sessions))
         .route(
             "/me/sessions/{id}",

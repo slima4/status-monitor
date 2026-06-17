@@ -254,8 +254,8 @@ async fn subdomain_root_serves_public_page() {
 #[ignore]
 async fn tenant_host_isolates_operator_surface() {
     // Default-deny: a tenant subdomain (`{slug}.{base}`) must only
-    // serve the public-status allow-list. Operator UI (`/login`,
-    // `/onboarding/org`), auth flows
+    // serve the public-status allow-list. Operator UI (`/login`),
+    // auth flows
     // (`/auth/github/*`), settings, targets, and the private API must
     // 404 — not 302 to /login, not 401, not render the operator form
     // (a phishing-friendly clone). The session cookie is host-scoped
@@ -281,7 +281,6 @@ async fn tenant_host_isolates_operator_surface() {
     // All of these expose operator surface and MUST 404 on tenant hosts.
     for path in [
         "/login",
-        "/onboarding/org",
         "/auth/github/login",
         "/invitations/accept?token=x",
         "/settings/team",

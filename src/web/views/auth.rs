@@ -1,37 +1,21 @@
-//! Server-rendered authentication pages: `/login` and `/onboarding/org`.
+//! Server-rendered authentication page: `/login`.
 //!
-//! These pages do not perform any auth themselves — the login button hands
-//! off to `/auth/github/login`, and onboarding requires the user already to be
-//! logged in (otherwise we redirect them to /login).
-//!
-//! `/login`: shown when an operator needs to authenticate. The GitHub button
-//! preserves `redirect_after` and `invitation` query params so a bookmarked
-//! invitation link survives the OAuth dance.
-//!
-//! `/onboarding/org`: brand-new users land here after their first OAuth login.
-//! The signup org row already exists (created in Phase C of the callback);
-//! all this page does is invite them to rename it from the auto-generated
-//! `{adj}-{noun}-{suffix}` slug to something they'll recognize.
+//! The page does not perform any auth itself — the login button hands off to
+//! `/auth/github/login`. It preserves `redirect_after` and `invitation` query
+//! params so a bookmarked invitation link survives the OAuth dance.
 
 use askama::Template;
 use askama_web::WebTemplate;
 use axum::extract::{Query, State};
-use axum::response::{IntoResponse, Redirect, Response};
 use serde::Deserialize;
 
 use crate::app::AppState;
 use crate::auth::url::safe_redirect_target;
-use crate::error::AppError;
-use crate::storage::orgs::get_org;
-use crate::storage::users as users_store;
-use crate::web::auth::Session;
-use crate::web::error::WebResult;
 use crate::web::filters;
 
 /// Sentinel matched against `nav` in base.html so the header doesn't render
 /// "Dashboard" / "Targets" links on the bare login page.
 const TAB_LOGIN: &str = "login";
-const TAB_ONBOARD: &str = "onboarding";
 const TAB_SETTINGS: &str = "settings";
 const TAB_USAGE: &str = "usage";
 const TAB_ACCOUNT: &str = "account";
@@ -153,65 +137,12 @@ async fn login_ready(state: &AppState) -> bool {
     ready
 }
 
-#[derive(Template, WebTemplate)]
-#[template(path = "auth/onboarding.html")]
-pub struct OnboardingPage {
-    pub active_tab: &'static str,
-    pub display_name: String,
-    pub org_id: String,
-    pub current_name: String,
-}
-
-pub async fn onboarding_org(
-    State(state): State<AppState>,
-    session: Session,
-) -> WebResult<Response> {
-    let Some(user) = session.user.clone() else {
-        return Ok(crate::web::auth::login_redirect("/onboarding/org").into_response());
-    };
-    let pool = state.require_db()?;
-    if users_store::is_onboarding_complete(pool, user.id).await? {
-        return Ok(Redirect::to("/").into_response());
-    }
-    let Some(org_id) = users_store::resolve_signup_org(pool, user.id).await? else {
-        return Ok(Redirect::to("/").into_response());
-    };
-    let org = get_org(pool, org_id).await?.ok_or_else(|| {
-        AppError::Other(anyhow::anyhow!("default org row missing for {org_id:?}"))
-    })?;
-
-    let display_name = display_name_for(&user.email);
-    Ok(OnboardingPage {
-        active_tab: TAB_ONBOARD,
-        display_name,
-        org_id: org.id.0.to_string(),
-        current_name: org.name,
-    }
-    .into_response())
-}
-
 /// First char upper-cased, the rest unchanged. Empty input → empty string.
 fn capitalize_first(s: &str) -> String {
     let mut c = s.chars();
     match c.next() {
         Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
         None => String::new(),
-    }
-}
-
-/// Crude "Alice" from "alice@example.com" — fine for the welcome screen;
-/// we'll let the user pick their real display name in /settings later.
-fn display_name_for(email: &str) -> String {
-    let local = email.split('@').next().unwrap_or("there");
-    let first = local
-        .split(&['.', '_', '-', '+'][..])
-        .next()
-        .unwrap_or(local);
-    let capitalized = capitalize_first(first);
-    if capitalized.is_empty() {
-        "There".to_string()
-    } else {
-        capitalized
     }
 }
 
@@ -896,29 +827,5 @@ mod tests {
         let html = page.render().unwrap();
         assert!(html.contains("After signing in"));
         assert!(html.contains("abc"));
-    }
-
-    #[test]
-    fn onboarding_page_renders_form_with_org_name() {
-        let html = OnboardingPage {
-            active_tab: TAB_ONBOARD,
-            display_name: "Alice".into(),
-            org_id: "00000000-0000-0000-0000-000000000001".into(),
-            current_name: "quiet-koala-7m0tt1".into(),
-        }
-        .render()
-        .unwrap();
-        assert!(html.contains("welcome, Alice"));
-        assert!(html.contains(r#"value="quiet-koala-7m0tt1""#));
-        assert!(html.contains(r#"hx-patch="/api/v1/orgs/00000000-0000-0000-0000-000000000001""#));
-        assert!(html.contains(r#""X-Requested-With":"uptimepage""#));
-    }
-
-    #[test]
-    fn display_name_from_email() {
-        assert_eq!(display_name_for("alice@example.com"), "Alice");
-        assert_eq!(display_name_for("alice.smith@example.com"), "Alice");
-        assert_eq!(display_name_for("bob_jones@example.com"), "Bob");
-        assert_eq!(display_name_for("@example.com"), "There");
     }
 }

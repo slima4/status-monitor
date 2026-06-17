@@ -58,7 +58,7 @@
                 <span class="nav-brand__mark" aria-hidden="true">↑</span>
                 <span>uptime<span class="nav-brand__em">page</span></span>
             </a>
-            {% if active_tab != "login" && active_tab != "onboarding" && active_tab != "recover" %}
+            {% if active_tab != "login" && active_tab != "recover" %}
             {# Error/consent pages pass active_tab="" — no picker fetch there. #}
             {% if active_tab != "" %}
             <span hx-get="/web/partials/org-picker" hx-trigger="load" hx-swap="outerHTML"></span>

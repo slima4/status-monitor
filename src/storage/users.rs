@@ -129,27 +129,3 @@ pub async fn resolve_signup_org(pool: &PgPool, user: UserId) -> Result<Option<Or
     }
     crate::storage::orgs::oldest_membership_for_user(pool, user).await
 }
-
-pub async fn mark_onboarding_complete(pool: &PgPool, user: UserId) -> Result<()> {
-    sqlx::query(
-        "UPDATE users SET onboarding_completed_at = now(), updated_at = now() \
-         WHERE id = $1 AND deleted_at IS NULL AND onboarding_completed_at IS NULL",
-    )
-    .bind(user.0)
-    .execute(pool)
-    .await
-    .context("mark_onboarding_complete")?;
-    Ok(())
-}
-
-pub async fn is_onboarding_complete(pool: &PgPool, user: UserId) -> Result<bool> {
-    let row: Option<(bool,)> = sqlx::query_as(
-        "SELECT onboarding_completed_at IS NOT NULL FROM users \
-         WHERE id = $1 AND deleted_at IS NULL",
-    )
-    .bind(user.0)
-    .fetch_optional(pool)
-    .await
-    .context("is_onboarding_complete")?;
-    Ok(row.map(|(b,)| b).unwrap_or(false))
-}

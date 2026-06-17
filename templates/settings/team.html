@@ -12,6 +12,23 @@
   </header>
 
   {% if is_owner %}
+  <form id="org-name-form" data-org-id="{{ org_id }}" novalidate class="sticker-card space-y-3 p-4">
+    <div class="grid gap-4 sm:grid-cols-[1fr_auto] sm:items-end">
+      <label class="field-outline">
+        <span class="field-outline__label">Organization name</span>
+        <input id="org-name" name="name" type="text" required minlength="1" maxlength="80"
+               value="{{ org_name }}" autocomplete="off" class="w-full field">
+      </label>
+      <button type="submit"
+              class="sticker-btn sticker-btn--primary px-4 py-2 text-sm font-medium">
+        save name
+      </button>
+    </div>
+    <p id="org-name-status" aria-live="polite" class="flash-text"></p>
+    <div id="org-name-errors" role="alert" aria-live="polite"
+         class="hidden alert-card alert-card--error"></div>
+  </form>
+
   <form id="invite-form" data-org-id="{{ org_id }}" novalidate class="sticker-card space-y-4 p-4">
     <div class="grid gap-4 sm:grid-cols-[1fr_auto_auto] sm:items-end">
       <label class="field-outline">

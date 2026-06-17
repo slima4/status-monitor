@@ -62,6 +62,45 @@
         }
     });
 
+    const orgNameForm = document.getElementById("org-name-form");
+    if (orgNameForm) {
+        const nameInput = document.getElementById("org-name");
+        const nameStatus = document.getElementById("org-name-status");
+        const nameErrors = document.getElementById("org-name-errors");
+        orgNameForm.addEventListener("submit", async (ev) => {
+            ev.preventDefault();
+            window.smClearFormErrors(nameErrors);
+            nameStatus.textContent = "";
+            const name = nameInput.value.trim();
+            if (!name) {
+                nameInput.setAttribute("aria-invalid", "true");
+                window.smRenderClientError(nameErrors, "Enter an organization name.");
+                return;
+            }
+            const btn = orgNameForm.querySelector("button[type=submit]");
+            btn.disabled = true;
+            try {
+                const res = await fetch(`/api/v1/orgs/${orgId()}`, {
+                    method: "PATCH",
+                    headers,
+                    body: JSON.stringify({ name }),
+                });
+                if (res.ok) {
+                    nameStatus.className = "flash-text flash-text--ok";
+                    nameStatus.textContent = "Saved.";
+                } else {
+                    let data = null;
+                    try { data = await res.json(); } catch { /* not JSON */ }
+                    window.smRenderApiError(nameErrors, data, res.status);
+                }
+            } catch {
+                window.smRenderClientError(nameErrors, "Network error — try again.");
+            } finally {
+                btn.disabled = false;
+            }
+        });
+    }
+
     list.addEventListener("click", async (ev) => {
         const roleBtn = ev.target.closest("[data-team-role]");
         const removeBtn = ev.target.closest("[data-team-remove]");

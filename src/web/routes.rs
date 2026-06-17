@@ -85,7 +85,6 @@ pub fn routes(state: AppState) -> Router {
             "/invitations/decline",
             get(views::invitations::decline_landing),
         )
-        .route("/onboarding/org", get(views::auth::onboarding_org))
         .route(
             "/settings/account",
             get(views::auth::settings::account_page),
