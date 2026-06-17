@@ -171,7 +171,7 @@ async fn edit_form_shows_redacted_auth_state_for_existing_target() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     let html = body_text(resp).await;
-    assert!(html.contains("edit redacted-edit-target"));
+    assert!(html.contains(r#"value="redacted-edit-target""#));
     assert!(html.contains(r#"data-method="PATCH""#));
     assert!(html.contains(r#"data-mode="edit""#));
     assert!(html.contains(r#"data-initial-mode="redacted""#));
