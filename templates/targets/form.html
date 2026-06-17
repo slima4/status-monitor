@@ -1,17 +1,14 @@
 {% extends "base.html" %}
 {% block title %}{% if form.mode == "create" %}New monitor{% else %}Edit monitor{% endif %} · Uptimepage{% endblock %}
+{% macro test_now(kind) %}
+          <button type="button" data-test-now aria-describedby="test-hint-{{ kind }}"
+                  class="sticker-btn sticker-btn--accent px-4 py-2 text-sm font-medium inline-flex items-center gap-1.5">
+            <span aria-hidden="true">▶</span> test now
+          </button>
+          <span id="test-hint-{{ kind }}" class="text-xs text-muted">Runs the check once without saving.</span>
+{% endmacro %}
 {% block content %}
 <section class="space-y-6">
-  <header class="space-y-1">
-    <a href="/targets" class="inline-block text-sm text-muted hover:text-body">← monitors</a>
-    <h1 class="page-title truncate">
-      <span class="page-title__prefix" aria-hidden="true">$</span>{% if form.mode == "create" %}new monitor{% else %}edit {{ form.name }}{% endif %}
-    </h1>
-    <p class="text-sm text-muted">
-      Pick what you want to watch and we’ll check it on your schedule.
-    </p>
-  </header>
-
   <form id="check-form"
         data-action="{{ form.action }}"
         data-method="{{ form.submit_method }}"
@@ -20,6 +17,19 @@
         data-kind-floors="{{ form.kind_floors_json() }}"
         novalidate
         class="space-y-6">
+
+    <header class="space-y-1">
+      <a href="/targets" class="inline-block text-sm text-muted hover:text-body">← monitors</a>
+      <h1 class="page-title">
+        <span class="page-title__prefix" aria-hidden="true">$</span><input
+          name="name" type="text" required value="{{ form.name }}"
+          autocomplete="off" spellcheck="false" placeholder="new monitor"
+          aria-label="Monitor name" class="page-title__input">
+      </h1>
+      <p class="text-sm text-muted">
+        Pick what you want to watch and we’ll check it on your schedule.
+      </p>
+    </header>
 
     <div id="form-errors" role="alert" aria-live="polite"
          class="hidden alert-card alert-card--error"></div>
@@ -60,47 +70,6 @@
     <div class="monitor-form-body space-y-6">
 
     <div class="space-y-6">
-    <fieldset class="sticker-card form-card">
-      <legend>monitor</legend>
-      <div class="clear-both grid items-start gap-x-4 gap-y-5 p-5 sm:grid-cols-2">
-      <div>
-        <label class="field-outline">
-          <span class="field-outline__label">Name</span>
-          <input name="name" type="text" required value="{{ form.name }}"
-                 autocomplete="off" class="w-full field">
-        </label>
-        <label class="mt-3 inline-flex items-center gap-2">
-          <input name="enabled" type="checkbox"{% if form.enabled %} checked{% endif %}>
-          <span class="text-sm">Enabled</span>
-        </label>
-      </div>
-      <div>
-        <div data-interval-rail="fast"{% if form.slow_kind() %} hidden{% endif %}>
-          <div class="sm-rail sm-rail--wide" role="radiogroup" aria-label="Check interval">
-            {% for o in form.interval_options_fast() %}
-            <label class="sm-rail__seg">
-              <input type="radio" name="interval_s" value="{{ o.secs }}" class="sr-only"{% if o.selected %} checked{% endif %}>
-              {{ o.label }}
-            </label>
-            {% endfor %}
-          </div>
-          <p class="mt-1 text-xs text-muted">1–5&nbsp;min for production, 10–30&nbsp;min for low-priority or many monitors.</p>
-        </div>
-        <div data-interval-rail="slow"{% if !form.slow_kind() %} hidden{% endif %}>
-          <div class="sm-rail sm-rail--wide" role="radiogroup" aria-label="Check interval">
-            {% for o in form.interval_options_slow() %}
-            <label class="sm-rail__seg">
-              <input type="radio" name="interval_s" value="{{ o.secs }}" class="sr-only"{% if o.selected %} checked{% endif %}>
-              {{ o.label }}
-            </label>
-            {% endfor %}
-          </div>
-          <p class="mt-1 text-xs text-muted">Expiry moves slowly — daily is plenty; hourly when one is close.</p>
-        </div>
-      </div>
-      </div>
-    </fieldset>
-
     <fieldset data-variant="http"
               class="sticker-card form-card{% if form.check_type != "http" %} hidden{% endif %}">
       <legend>http check</legend>
@@ -110,7 +79,7 @@
           <label class="field-outline flex-1 min-w-[16rem]">
             <span class="field-outline__label">URL</span>
             <input name="http_url" type="url" value="{{ form.http.url }}"
-                   placeholder="https://example.com/healthz"
+                   placeholder="https://example.com/healthz"{% if form.mode == "create" %} autofocus{% endif %}
                    autocomplete="off" spellcheck="false" class="w-full field font-mono">
           </label>
           <div class="field-outline w-36">
@@ -149,11 +118,7 @@
           One code (<code>200</code>), a range (<code>200-299</code>), or a list (<code>200, 201, 204</code>).
         </span>
         <div class="mt-3 flex flex-wrap items-center gap-3">
-          <button type="button" data-test-now aria-describedby="test-hint-http"
-                  class="sticker-btn sticker-btn--accent px-4 py-2 text-sm font-medium inline-flex items-center gap-1.5">
-            <span aria-hidden="true">▶</span> test now
-          </button>
-          <span id="test-hint-http" class="text-xs text-muted">Runs the check once without saving.</span>
+          {% call test_now("http") %}{% endcall %}
         </div>
       </div>
       <div data-test-result role="status" class="hidden sm:col-span-2"></div>
@@ -186,11 +151,7 @@
         </label>
       </div>
       <div class="flex flex-wrap items-center gap-3 pt-1">
-        <button type="button" data-test-now aria-describedby="test-hint-tcp"
-                class="sticker-btn sticker-btn--accent px-4 py-2 text-sm font-medium inline-flex items-center gap-1.5">
-          <span aria-hidden="true">▶</span> test now
-        </button>
-        <span id="test-hint-tcp" class="text-xs text-muted">Runs the check once without saving.</span>
+        {% call test_now("tcp") %}{% endcall %}
       </div>
       <div data-test-result role="status" class="hidden"></div>
       </div>
@@ -248,11 +209,7 @@
         </label>
       </div>
       <div class="flex flex-wrap items-center gap-3 pt-1">
-        <button type="button" data-test-now aria-describedby="test-hint-dns"
-                class="sticker-btn sticker-btn--accent px-4 py-2 text-sm font-medium inline-flex items-center gap-1.5">
-          <span aria-hidden="true">▶</span> test now
-        </button>
-        <span id="test-hint-dns" class="text-xs text-muted">Runs the check once without saving.</span>
+        {% call test_now("dns") %}{% endcall %}
       </div>
       <div data-test-result role="status" class="hidden"></div>
       </div>
@@ -305,11 +262,7 @@
         </div>
       </fieldset>
       <div class="flex flex-wrap items-center gap-3 pt-1">
-        <button type="button" data-test-now aria-describedby="test-hint-tls"
-                class="sticker-btn sticker-btn--accent px-4 py-2 text-sm font-medium inline-flex items-center gap-1.5">
-          <span aria-hidden="true">▶</span> test now
-        </button>
-        <span id="test-hint-tls" class="text-xs text-muted">Runs the check once without saving.</span>
+        {% call test_now("tls") %}{% endcall %}
       </div>
       <div data-test-result role="status" class="hidden"></div>
       </div>
@@ -349,11 +302,7 @@
         </div>
       </fieldset>
       <div class="flex flex-wrap items-center gap-3 pt-1">
-        <button type="button" data-test-now aria-describedby="test-hint-domain"
-                class="sticker-btn sticker-btn--accent px-4 py-2 text-sm font-medium inline-flex items-center gap-1.5">
-          <span aria-hidden="true">▶</span> test now
-        </button>
-        <span id="test-hint-domain" class="text-xs text-muted">Runs the check once without saving.</span>
+        {% call test_now("domain") %}{% endcall %}
       </div>
       <div data-test-result role="status" class="hidden"></div>
       </div>
@@ -524,6 +473,13 @@
         </div>
       </div>
       <div class="grid gap-3 sm:grid-cols-2">
+        <div>
+          <label class="inline-flex items-center gap-2">
+            <input name="enabled" type="checkbox"{% if form.enabled %} checked{% endif %}>
+            <span class="text-sm">Enabled</span>
+          </label>
+          <p class="mt-1 text-xs text-muted">Paused monitors keep their config but stop running checks.</p>
+        </div>
         <div class="field-outline">
           <span class="field-outline__label">Owner</span>
           <select id="owner_user_id" name="owner_user_id" data-sm-combobox aria-label="Owner" class="w-full field">
@@ -541,6 +497,31 @@
     <fieldset class="sticker-card form-card"{% if form.show_regions %} data-monitor-regions data-target-id="{{ form.id }}"{% endif %}>
       <legend>detection</legend>
       <div class="clear-both grid items-start gap-x-4 gap-y-5 p-5 sm:grid-cols-2">
+      <div class="sm:col-span-2">
+        <span class="mb-1.5 block text-xs text-muted">Check every</span>
+        <div data-interval-rail="fast"{% if form.slow_kind() %} hidden{% endif %}>
+          <div class="sm-rail sm-rail--wide" role="radiogroup" aria-label="Check interval">
+            {% for o in form.interval_options_fast() %}
+            <label class="sm-rail__seg">
+              <input type="radio" name="interval_s" value="{{ o.secs }}" class="sr-only"{% if o.selected %} checked{% endif %}>
+              {{ o.label }}
+            </label>
+            {% endfor %}
+          </div>
+          <p class="mt-1 text-xs text-muted">1–5&nbsp;min for production, 10–30&nbsp;min for low-priority or many monitors.</p>
+        </div>
+        <div data-interval-rail="slow"{% if !form.slow_kind() %} hidden{% endif %}>
+          <div class="sm-rail sm-rail--wide" role="radiogroup" aria-label="Check interval">
+            {% for o in form.interval_options_slow() %}
+            <label class="sm-rail__seg">
+              <input type="radio" name="interval_s" value="{{ o.secs }}" class="sr-only"{% if o.selected %} checked{% endif %}>
+              {{ o.label }}
+            </label>
+            {% endfor %}
+          </div>
+          <p class="mt-1 text-xs text-muted">Expiry moves slowly — daily is plenty; hourly when one is close.</p>
+        </div>
+      </div>
       <div{% if !form.show_regions %} class="sm:col-span-2"{% endif %}>
         <div class="sm-rail sm-rail--wide" role="radiogroup" aria-label="Open incident after">
           {% for o in form.confirmation_options() %}

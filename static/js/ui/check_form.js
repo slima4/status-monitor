@@ -224,16 +224,71 @@
         }
     }
 
+    // Treat a bare host as https:// — one definition shared by URL validation and name autofill.
+    const SCHEME_RE = /^[a-z][a-z0-9+.-]*:\/\//i;
+    const ensureScheme = (raw) => (SCHEME_RE.test(raw) ? raw : `https://${raw}`);
+
+    // Fail a malformed URL locally; the server stays authoritative for scheme allow-listing and SSRF.
+    function normalizeHttpUrl(raw) {
+        const trimmed = (raw || "").trim();
+        if (!trimmed) {
+            return { error: "URL is required — enter the endpoint to monitor.", field: "check.url" };
+        }
+        const candidate = ensureScheme(trimmed);
+        let u;
+        try { u = new URL(candidate); }
+        catch { return { error: "That doesn’t look like a valid URL.", field: "check.url" }; }
+        if (u.protocol !== "http:" && u.protocol !== "https:") {
+            return { error: "URL must start with http:// or https://.", field: "check.url" };
+        }
+        return { url: candidate, prepended: candidate !== trimmed };
+    }
+
     function urlToName(raw) {
         if (!raw) return "";
         try {
-            // Accept a bare host like `example.com` by adding a scheme.
-            const u = new URL(/^[a-z]+:\/\//i.test(raw) ? raw : `https://${raw}`);
+            const u = new URL(ensureScheme(raw));
             return u.hostname.replace(/^www\./i, "");
         } catch {
             return "";
         }
     }
+
+    // The title input auto-grows with field-sizing where available; mirror its
+    // width manually for engines that lack it so the name never sits in a wide box.
+    if (nameInput && !(window.CSS && CSS.supports && CSS.supports("field-sizing", "content"))) {
+        const cs = getComputedStyle(nameInput);
+        const mirror = document.createElement("span");
+        mirror.setAttribute("aria-hidden", "true");
+        mirror.style.cssText = "position:absolute;visibility:hidden;white-space:pre;";
+        for (const p of ["fontFamily", "fontSize", "fontWeight", "letterSpacing"]) mirror.style[p] = cs[p];
+        nameInput.insertAdjacentElement("afterend", mirror);
+        const autosize = () => {
+            mirror.textContent = nameInput.value || nameInput.placeholder || "";
+            const cap = nameInput.parentElement.clientWidth || 9999;
+            nameInput.style.width = `${Math.min(mirror.offsetWidth + 6, cap)}px`;
+        };
+        nameInput.addEventListener("input", autosize);
+        autosize();
+    }
+
+    // Unsaved-changes guard: warn before leaving a dirtied form, but not while
+    // the save itself is navigating away.
+    let formDirty = false;
+    let submitting = false;
+    form.addEventListener("input", () => {
+        formDirty = true;
+        // Drop a shown validation error once the user starts correcting it.
+        if (errorsShown()) clearErrors();
+    });
+    form.addEventListener("change", () => { formDirty = true; });
+    // In-form links (cancel, back) are intentional exits — don't guard them.
+    form.querySelectorAll("a[href]").forEach((a) => {
+        a.addEventListener("click", () => { formDirty = false; });
+    });
+    window.addEventListener("beforeunload", (evt) => {
+        if (formDirty && !submitting) { evt.preventDefault(); evt.returnValue = ""; }
+    });
 
     form.addEventListener("submit", async (evt) => {
         evt.preventDefault();
@@ -241,13 +296,7 @@
         const built = buildBody();
         if (built.error) {
             renderClientError(built.error);
-            if (built.field) {
-                const el = fieldForApiPath(built.field);
-                if (el) {
-                    el.setAttribute("aria-invalid", "true");
-                    el.focus({ preventScroll: true });
-                }
-            }
+            if (built.field) markFieldInvalid(built.field);
             return;
         }
         // Detection threshold rides the payload when the region fieldset is present.
@@ -266,6 +315,22 @@
         const submitter = evt.submitter;
         const saveAndTest = submitter && submitter.hasAttribute("data-save-and-test");
 
+        const submitBtns = [...form.querySelectorAll("button[type='submit']")];
+        const restoreLabel = submitter ? submitter.innerHTML : null;
+        const setSubmitting = (on) => {
+            submitting = on;
+            submitBtns.forEach((b) => { b.disabled = on; });
+            if (!submitter) return;
+            if (on) {
+                submitter.setAttribute("aria-busy", "true");
+                submitter.innerHTML = form.dataset.mode === "create" ? "creating…" : "saving…";
+            } else {
+                submitter.removeAttribute("aria-busy");
+                if (restoreLabel != null) submitter.innerHTML = restoreLabel;
+            }
+        };
+        setSubmitting(true);
+
         let res;
         try {
             res = await fetch(form.dataset.action, {
@@ -274,6 +339,7 @@
                 body: JSON.stringify(built.payload),
             });
         } catch (err) {
+            setSubmitting(false);
             renderClientError(`Network error: ${err.message || err}`);
             return;
         }
@@ -311,6 +377,7 @@
             return;
         }
 
+        setSubmitting(false);
         let body;
         try { body = await res.json(); }
         catch { renderClientError(`Request failed (${res.status})`); return; }
@@ -335,6 +402,15 @@
         const checkType = currentCheckType();
 
         if (checkType === "http") {
+            const norm = normalizeHttpUrl(data.get("http_url"));
+            if (norm.error) return { error: norm.error, field: norm.field };
+            if (norm.prepended) {
+                const urlInput = form.querySelector("[name='http_url']");
+                if (urlInput) {
+                    urlInput.value = norm.url;
+                    urlInput.dispatchEvent(new Event("input", { bubbles: true }));
+                }
+            }
             const headers = (window.smCollectHeaders && window.smCollectHeaders()) || {};
             const expectedRaw = (data.get("expected_status_input") || "").trim();
             const expected = parseExpectedStatus(expectedRaw);
@@ -342,7 +418,7 @@
 
             const check = {
                 type: "http",
-                url: data.get("http_url"),
+                url: norm.url,
                 method: data.get("http_method") || "GET",
                 timeout: parseInt(data.get("http_timeout_ms"), 10) || 5000,
                 follow_redirects: data.get("http_follow_redirects") === "on",
@@ -433,7 +509,7 @@
             return { error: "Name is required — label this monitor so you can find it later.", field: "name" };
         }
         const built = buildCheck();
-        if (built.error) return { error: built.error };
+        if (built.error) return { error: built.error, field: built.field };
         const check = built.check;
 
         const tags = (window.smCollectTags && window.smCollectTags()) || [];
@@ -568,9 +644,11 @@
     async function handleTestNow(btn) {
         const panel = btn.closest("[data-variant]");
         const resultEl = panel ? panel.querySelector("[data-test-result]") : null;
+        clearErrors();
         const built = buildCheck();
         if (built.error) {
             renderClientError(built.error);
+            if (built.field) markFieldInvalid(built.field);
             return;
         }
         // Fan out to every region selected on the form; the agent in each region
@@ -586,6 +664,9 @@
             return;
         }
         btn.disabled = true;
+        btn.setAttribute("aria-busy", "true");
+        const btnLabel = btn.innerHTML;
+        btn.innerHTML = "testing…";
         try {
             if (regions.length === 0) {
                 // No region selector (single-region plan) → test the default region.
@@ -597,10 +678,27 @@
             await Promise.all(regions.map((r) => runTest(rows[r.id], built.check, r.id)));
         } finally {
             btn.disabled = false;
+            btn.removeAttribute("aria-busy");
+            btn.innerHTML = btnLabel;
         }
     }
 
     function blankToNull(v) { return v && v.length > 0 ? v : null; }
+
+    function errorsShown() {
+        const banner = document.getElementById("form-errors");
+        return (banner && !banner.classList.contains("hidden")) || !!form.querySelector("[aria-invalid]");
+    }
+
+    // Flag a field as invalid and focus it; scroll into view only when the
+    // error came from the server (the field may be far from the action).
+    function markFieldInvalid(field, scroll) {
+        const el = fieldForApiPath(field);
+        if (!el) return;
+        el.setAttribute("aria-invalid", "true");
+        el.focus({ preventScroll: true });
+        if (scroll) el.scrollIntoView({ block: "center", behavior: "smooth" });
+    }
 
     function clearErrors() {
         window.smClearFormErrors(document.getElementById("form-errors"));
@@ -616,14 +714,7 @@
                 ? "This URL points to a private/internal range and is blocked. " +
                   "If you need to monitor internal services, deploy a monitor instance inside that network."
                 : null,
-            onField: (field) => {
-                const target = fieldForApiPath(field);
-                if (target) {
-                    target.setAttribute("aria-invalid", "true");
-                    target.focus({ preventScroll: true });
-                    target.scrollIntoView({ block: "center", behavior: "smooth" });
-                }
-            },
+            onField: (field) => markFieldInvalid(field, true),
         });
     }
 

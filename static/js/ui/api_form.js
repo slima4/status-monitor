@@ -93,7 +93,7 @@ window.smRenderCheckResult = function (el, result, extra) {
         html += `<details class="mt-2"><summary class="cursor-pointer text-xs">Response headers (${headers.length})</summary><pre class="test-result__body">${rows}</pre></details>`;
     }
     if (extra.body) {
-        html += `<details class="mt-2" open><summary class="cursor-pointer text-xs">Response body (first 1 KiB)</summary><pre class="test-result__body">${window.smEscapeHtml(extra.body)}</pre></details>`;
+        html += `<details class="mt-2"><summary class="cursor-pointer text-xs">Response body (first 1 KiB)</summary><pre class="test-result__body">${window.smEscapeHtml(extra.body)}</pre></details>`;
     }
     if (extra.footnote) {
         html += `<div class="test-result__meta mt-1 italic">${window.smEscapeHtml(extra.footnote)}</div>`;
