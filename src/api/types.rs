@@ -93,13 +93,13 @@ pub struct BulkActionFailure {
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct TestRequest {
     pub check: CheckSpec,
+    /// Region to run the test in. Omitted → the control plane's default
+    /// region. The UI fans out one request per selected region.
+    #[serde(default)]
+    pub region: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, ToSchema)]
-pub struct HeaderPreview {
-    pub name: String,
-    pub value: String,
-}
+pub use crate::domain::agent_wire::HeaderPreview;
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct TestResponse {
@@ -115,6 +115,9 @@ pub struct TestResponse {
     /// First 1 KiB of decoded body, HTTP only. UTF-8 lossy.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub response_body_snippet: Option<String>,
+    /// Region the test ran in, echoed so a fan-out caller can correlate rows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub region: Option<String>,
 }
 
 /// Per-monitor rollup for the operator dashboard table. One row per target

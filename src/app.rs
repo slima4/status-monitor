@@ -4,6 +4,7 @@ use std::time::Duration;
 use moka::sync::Cache;
 use sqlx::PgPool;
 
+use crate::ad_hoc_dispatch::AdHocDispatch;
 use crate::api::IdempotencyCache;
 use crate::api::types::DashboardSummary;
 use crate::auth::api_tokens::{
@@ -275,6 +276,14 @@ pub struct AppState {
     /// Debounce for agent `last_seen_at` writes — at most one UPDATE per agent
     /// per TTL, mirroring the api-token last-used debounce.
     pub agent_seen_debounce: AgentSeenDebounce,
+    /// In-memory dispatch for interactive checks (test / check-now): hands a
+    /// check to an agent currently holding a long-poll and routes the result
+    /// back to the waiting request.
+    pub ad_hoc: Arc<AdHocDispatch>,
+    /// Process shutdown signal. `Some` in `main`; lets the agent long-poll
+    /// (`/api/agent/dispatch`) return immediately on shutdown instead of
+    /// blocking graceful drain for the full hold window.
+    pub shutdown: Option<tokio_util::sync::CancellationToken>,
 }
 
 /// Run unconditionally at boot after config parse. Encodes the per-org
@@ -467,7 +476,16 @@ impl AppState {
             cipher,
             agent_ingest_dedup: build_agent_ingest_dedup(),
             agent_seen_debounce: build_agent_seen_debounce(),
+            ad_hoc: Arc::new(AdHocDispatch::new()),
+            shutdown: None,
         }
+    }
+
+    /// Wire the process shutdown token so held agent long-polls unblock on
+    /// shutdown instead of stalling graceful drain for the hold window.
+    pub fn with_shutdown(mut self, token: tokio_util::sync::CancellationToken) -> Self {
+        self.shutdown = Some(token);
+        self
     }
 
     /// Share the central-bot send budget with the escalation engine — both

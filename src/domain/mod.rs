@@ -1,3 +1,4 @@
+pub mod agent_wire;
 pub mod alert;
 pub mod check;
 pub mod escalation_policy;

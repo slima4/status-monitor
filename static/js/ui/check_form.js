@@ -517,6 +517,54 @@
         };
     }
 
+    // Run one test (optionally pinned to `region`) and render the outcome into
+    // `resultEl` via the shared .test-result renderers.
+    async function runTest(resultEl, check, region) {
+        let res;
+        try {
+            res = await fetch("/api/v1/targets/test", {
+                method: "POST",
+                headers: jsonHeaders(),
+                body: JSON.stringify(region ? { check, region } : { check }),
+            });
+        } catch (err) {
+            window.smRenderCheckError(resultEl, `Network error: ${err.message || err}`);
+            return;
+        }
+        if (res.status === 429) {
+            const retry = res.headers.get("retry-after");
+            window.smRenderCheckError(resultEl, retry
+                ? `Rate limited — retry in ${retry}s`
+                : "Rate limited — slow down");
+            return;
+        }
+        // Read once as text, then try to parse: error responses are not always
+        // our JSON envelope. A body-deserialize rejection (e.g. a missing
+        // required field) comes back as axum's plain-text 422 — surface that
+        // reason instead of a generic "rejected".
+        const raw = await res.text();
+        let body = null;
+        try { body = raw ? JSON.parse(raw) : null; } catch { body = null; }
+        if (!res.ok) {
+            const code = (body && body.error && body.error.code) || `HTTP ${res.status}`;
+            const detail = (body && body.error && body.error.message)
+                || (raw && raw.trim())
+                || "Test rejected.";
+            const message = detail.length > 300 ? `${detail.slice(0, 300)}…` : detail;
+            window.smRenderCheckError(resultEl, `${code}: ${message}`);
+            return;
+        }
+        if (!body) {
+            window.smRenderCheckError(resultEl, "Bad JSON in test response.");
+            return;
+        }
+        window.smRenderCheckResult(resultEl, body.result || {}, {
+            matched: body.matched_expectations,
+            headers: body.response_headers_preview || [],
+            body: body.response_body_snippet || null,
+        });
+    }
+
     async function handleTestNow(btn) {
         const panel = btn.closest("[data-variant]");
         const resultEl = panel ? panel.querySelector("[data-test-result]") : null;
@@ -525,37 +573,28 @@
             renderClientError(built.error);
             return;
         }
+        // Fan out to every region selected on the form; the agent in each region
+        // runs the probe.
+        const allBoxes = [...form.querySelectorAll("[data-region-checkbox]")];
+        const regions = allBoxes
+            .filter((c) => c.checked)
+            .map((c) => ({ id: c.value, label: (c.closest("label")?.textContent || c.value).trim() }));
+        // Selector shown but every region deselected → an explicit "no regions"
+        // choice; don't silently probe the default region.
+        if (allBoxes.length > 0 && regions.length === 0) {
+            window.smRenderCheckError(resultEl, "Select at least one region to test.");
+            return;
+        }
         btn.disabled = true;
-        window.smRenderCheckRunning(resultEl);
         try {
-            let res;
-            try {
-                res = await fetch("/api/v1/targets/test", {
-                    method: "POST",
-                    headers: jsonHeaders(),
-                    body: JSON.stringify({ check: built.check }),
-                });
-            } catch (err) {
-                window.smRenderCheckError(resultEl, `Network error: ${err.message || err}`);
+            if (regions.length === 0) {
+                // No region selector (single-region plan) → test the default region.
+                window.smRenderCheckRunning(resultEl);
+                await runTest(resultEl, built.check, null);
                 return;
             }
-            let body;
-            try { body = await res.json(); } catch { body = null; }
-            if (!res.ok) {
-                const code = (body && body.error && body.error.code) || `HTTP ${res.status}`;
-                const message = (body && body.error && body.error.message) || "Test rejected.";
-                window.smRenderCheckError(resultEl, `${code}: ${message}`);
-                return;
-            }
-            if (!body) {
-                window.smRenderCheckError(resultEl, "Bad JSON in test response.");
-                return;
-            }
-            window.smRenderCheckResult(resultEl, body.result || {}, {
-                matched: body.matched_expectations,
-                headers: body.response_headers_preview || [],
-                body: body.response_body_snippet || null,
-            });
+            const rows = window.smRenderRegionTestRunning(resultEl, regions);
+            await Promise.all(regions.map((r) => runTest(rows[r.id], built.check, r.id)));
         } finally {
             btn.disabled = false;
         }

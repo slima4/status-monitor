@@ -31,7 +31,6 @@ use crate::storage::incidents::ActiveIncident;
 use crate::storage::{ClampedRange, IncidentListQuery, TargetFilter, TimeRange};
 use crate::web::views::describe_check;
 use crate::web::views::public_status::{public_base, public_status_url};
-use crate::worker::pool::host_for_spec;
 
 use super::audit::{self, Outcome};
 use super::auth::McpAuth;
@@ -886,32 +885,13 @@ impl McpServer {
         )
         .await?;
 
-        let host = host_for_spec(&target.check);
-        let Some(result) = self
-            .state
-            .worker_pool
-            .run_once(target.id, auth.org.0, &target.check, &host, true)
-            .await
-        else {
-            return Err(McpToolError::new(
-                "probe_failed",
-                "the probe did not run; try again",
-                true,
-            ));
-        };
-
-        // Persist like REST check-now so the monitor's state updates and the
-        // normal alert path applies. Best-effort: the probe already ran, so a
-        // persist failure is logged, not fatal — the observation is still
-        // returned.
-        if let Err(e) = self
-            .state
-            .result_sink
-            .write_batch(std::slice::from_ref(&result))
-            .await
-        {
-            tracing::warn!(target: "mcp", error = %e, "run_check_now persist failed");
-        }
+        // Same region-aware agent dispatch as REST check-now; the agent runs
+        // the probe and persists the result. 503 (no live agent) maps to a
+        // retryable tool error.
+        let result =
+            crate::api::handlers::targets::check_now_via_dispatch(&self.state, auth.org, &target)
+                .await
+                .map_err(|e| McpToolError::new("probe_unavailable", e.to_string(), true))?;
 
         Ok(Json(CheckRunResult {
             id: target.id.to_string(),

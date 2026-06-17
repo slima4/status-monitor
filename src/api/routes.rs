@@ -429,6 +429,11 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
     let agent = Router::new()
         .route("/targets", get(handlers::agents::pull_targets))
         .route("/results", post(handlers::agents::ingest_results))
+        .route("/dispatch", get(handlers::agents::claim_dispatch))
+        .route(
+            "/dispatch/results",
+            post(handlers::agents::submit_dispatch_result),
+        )
         .layer(DefaultBodyLimit::max(BULK_BODY_LIMIT));
 
     // Operator (instance-admin) surface. Each handler is gated by the

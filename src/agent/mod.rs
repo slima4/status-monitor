@@ -14,15 +14,18 @@ use hyper::body::Bytes;
 use hyper::header::{self, AUTHORIZATION, IF_NONE_MATCH};
 use hyper::{Request, StatusCode};
 use secrecy::ExposeSecret;
-use serde::Deserialize;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 use url::Url;
 use uuid::Uuid;
 
 use crate::config::AppConfig;
+use crate::domain::agent_wire::{
+    AgentTargetsResponse, DispatchBatch, DispatchReport, DispatchedCheck, IngestRequestRef,
+};
 use crate::domain::{CheckResult, OrgId, Target};
 use crate::error::{AppError, Result};
+use crate::http_client::HttpClients;
 use crate::http_client::client::build_clients;
 use crate::http_outbound::{self, OutboundHttpClient};
 use crate::pipeline::{BatcherConfig, ResultBatcher};
@@ -34,23 +37,10 @@ use crate::worker::domain_expiry::{DEFAULT_MAX_STALENESS, DomainExpiryRuntime};
 use crate::worker::host_throttle::HostThrottle;
 use crate::worker::rdap::RdapClient;
 use crate::worker::rdap_singleflight::RdapSingleflight;
-use crate::worker::{ResultFanout, WorkerPool};
+use crate::worker::{ResultFanout, WorkerDeps, WorkerPool};
 
 const MAX_PULL_BYTES: usize = 32 << 20;
 const HTTP_TIMEOUT: Duration = Duration::from_secs(30);
-
-#[derive(Deserialize)]
-struct AgentTargetDto {
-    org_id: Uuid,
-    target: Target,
-}
-
-#[derive(Deserialize)]
-struct AgentTargetsResponse {
-    #[allow(dead_code)]
-    region: String,
-    targets: Vec<AgentTargetDto>,
-}
 
 struct PullCache {
     etag: Option<String>,
@@ -165,12 +155,6 @@ impl EnabledTargetSource for AgentPullSource {
     }
 }
 
-#[derive(serde::Serialize)]
-struct IngestBody<'a> {
-    batch_id: Uuid,
-    results: &'a [CheckResult],
-}
-
 /// [`ResultSink`] that POSTs batches to the control-plane ingest API. Region
 /// and agent id are not sent — the control plane derives them from the bearer
 /// token, so they can't be spoofed. A fresh `batch_id` per call, reused across
@@ -204,12 +188,119 @@ impl ResultSink for AgentResultSink {
             .with_max_elapsed_time(Some(Duration::from_secs(30)))
             .build();
         let op = || async {
-            let body = IngestBody { batch_id, results };
+            let body = IngestRequestRef { batch_id, results };
             http_outbound::post_json_with_headers(&self.client, &self.url, &body, &headers)
                 .await
                 .map_err(backoff::Error::transient)
         };
         backoff::future::retry(backoff, op).await
+    }
+}
+
+/// Long-polls the control plane for interactive check checks (test / check-now),
+/// runs each with the same executor as scheduled checks, and posts the result
+/// back. The claim request is held open by the brain until a check arrives (or
+/// the hold window elapses), so a check runs within ~ms of a button press with no
+/// busy polling. Kept separate from the scheduled-result pipeline: results
+/// carry a probe preview and are correlated by `check_id`, not batched.
+struct AgentDispatchClient {
+    client: OutboundHttpClient,
+    claim_url: String,
+    results_url: Url,
+    token: String,
+    http_clients: Arc<HttpClients>,
+    domain_runtime: Arc<DomainExpiryRuntime>,
+}
+
+/// Backoff before reconnecting a long-poll that errored (control plane down).
+const DISPATCH_RECONNECT_BACKOFF: Duration = Duration::from_secs(3);
+
+impl AgentDispatchClient {
+    async fn run(self, cancel: CancellationToken) {
+        loop {
+            tokio::select! {
+                _ = cancel.cancelled() => return,
+                r = self.poll_once() => {
+                    if let Err(err) = r {
+                        tracing::warn!(error = %err, "agent dispatch long-poll failed; backing off");
+                        tokio::select! {
+                            _ = cancel.cancelled() => return,
+                            _ = tokio::time::sleep(DISPATCH_RECONNECT_BACKOFF) => {}
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    async fn poll_once(&self) -> Result<()> {
+        for check in self.claim().await? {
+            let deps = WorkerDeps {
+                http: self.http_clients.as_ref(),
+                domain_expiry: self.domain_runtime.as_ref(),
+            };
+            let target_id = check.target_id.unwrap_or_else(Uuid::nil);
+            let (result, probe) =
+                crate::worker::execute_with_probe(target_id, check.org_id, &check.spec, &deps)
+                    .await;
+            let (response_headers_preview, response_body_snippet) = match probe {
+                Some(p) => (p.response_headers_preview, p.response_body_snippet),
+                None => (Vec::new(), None),
+            };
+            let payload = DispatchReport {
+                check_id: check.id,
+                result,
+                response_headers_preview,
+                response_body_snippet,
+            };
+            self.post_result(&payload).await?;
+        }
+        Ok(())
+    }
+
+    async fn claim(&self) -> Result<Vec<DispatchedCheck>> {
+        let req = Request::get(&self.claim_url)
+            .header(AUTHORIZATION, format!("Bearer {}", self.token))
+            .body(Full::new(Bytes::new()))
+            .context("building dispatch-claim request")?;
+        let resp = match tokio::time::timeout(HTTP_TIMEOUT, self.client.request(req)).await {
+            Ok(Ok(r)) => r,
+            Ok(Err(e)) => {
+                return Err(AppError::Other(anyhow::anyhow!(
+                    "dispatch claim failed: {e}"
+                )));
+            }
+            Err(_) => return Err(AppError::Other(anyhow::anyhow!("dispatch claim timed out"))),
+        };
+        let status = resp.status();
+        // Terminal credential rejection is handled (and logged) by the config
+        // pull loop; here just back off quietly.
+        if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
+            return Ok(Vec::new());
+        }
+        if !status.is_success() {
+            return Err(AppError::Other(anyhow::anyhow!(
+                "control plane returned {status} on dispatch claim"
+            )));
+        }
+        let bytes = Limited::new(resp.into_body(), MAX_PULL_BYTES)
+            .collect()
+            .await
+            .map_err(|e| AppError::Other(anyhow::anyhow!("reading dispatch-claim body: {e}")))?
+            .to_bytes();
+        let parsed: DispatchBatch =
+            serde_json::from_slice(&bytes).context("decoding dispatch-claim response")?;
+        Ok(parsed.checks)
+    }
+
+    async fn post_result(&self, payload: &DispatchReport) -> Result<()> {
+        let mut headers = std::collections::BTreeMap::new();
+        headers.insert(
+            "Authorization".to_string(),
+            format!("Bearer {}", self.token),
+        );
+        http_outbound::post_json_with_headers(&self.client, &self.results_url, payload, &headers)
+            .await
     }
 }
 
@@ -242,7 +333,7 @@ pub async fn run(cfg: AppConfig) -> Result<()> {
     let sink: Arc<dyn ResultSink> = Arc::new(AgentResultSink {
         client: outbound,
         url: results_url,
-        token,
+        token: token.clone(),
     });
 
     let http_clients = Arc::new(build_clients(
@@ -275,7 +366,7 @@ pub async fn run(cfg: AppConfig) -> Result<()> {
         cfg.circuit_breaker,
         fanout,
         host_throttle,
-        domain_runtime,
+        domain_runtime.clone(),
     ));
     let registry = Arc::new(TargetRegistry::new(source));
     let mut sched_cfg = cfg.scheduler.clone();
@@ -304,12 +395,28 @@ pub async fn run(cfg: AppConfig) -> Result<()> {
         let token = root.clone();
         tokio::spawn(async move { batcher.run(token).await })
     };
+    let job_client = AgentDispatchClient {
+        client: http_outbound::build_outbound_client(SsrfGuard::new(
+            cfg.security.allow_private_targets,
+        )),
+        claim_url: format!("{base}/api/agent/dispatch"),
+        results_url: Url::parse(&format!("{base}/api/agent/dispatch/results"))
+            .context("agent.control_plane_url is not a valid URL")?,
+        token,
+        http_clients: http_clients.clone(),
+        domain_runtime,
+    };
+    let job_handle = {
+        let token = root.clone();
+        tokio::spawn(async move { job_client.run(token).await })
+    };
 
     wait_for_signal().await;
     tracing::info!("agent shutting down");
     root.cancel();
     let _ = scheduler_handle.await;
     let _ = batcher_handle.await;
+    let _ = job_handle.await;
     Ok(())
 }
 

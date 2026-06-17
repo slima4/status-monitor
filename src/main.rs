@@ -541,7 +541,8 @@ async fn main() -> Result<()> {
     );
     let state = state
         .with_telegram_send_budget(telegram_send_budget)
-        .with_incident_signals(incident_signal_tx);
+        .with_incident_signals(incident_signal_tx)
+        .with_shutdown(root.clone());
     // Hot-reload the abuse deny-lists on SIGHUP when enabled (validate then
     // atomic swap; a bad edit is rejected and the running rules stay).
     let abuse_reload_handle: Option<JoinHandle<()>> = uptimepage::security::abuse_reload::spawn(
@@ -552,6 +553,25 @@ async fn main() -> Result<()> {
 
     let heartbeat_handle: Option<JoinHandle<()>> =
         observability::heartbeat::spawn(&state, root.clone());
+
+    // All-in-one mode: when this process probes its own region in-process
+    // (scheduler enabled), also serve interactive test/check-now locally so a
+    // self-hosted single process needs no separate agent. A pure control plane
+    // (scheduler disabled) leaves this to its regional agents.
+    let local_dispatch_handle: Option<JoinHandle<()>> = if state.cfg.scheduler.enabled {
+        Some(tokio::spawn(
+            uptimepage::ad_hoc_dispatch::run_local_executor(
+                state.ad_hoc.clone(),
+                state.cfg.scheduler.region.clone(),
+                state.worker_pool.clone(),
+                state.http_clients.clone(),
+                state.result_sink.clone(),
+                root.clone(),
+            ),
+        ))
+    } else {
+        None
+    };
 
     // Register the central-bot webhook in the background so a Telegram outage
     // never stalls the boot; the next boot re-asserts it idempotently.
@@ -678,6 +698,9 @@ async fn main() -> Result<()> {
             let _ = h.await;
         }
         if let Some(h) = heartbeat_handle {
+            let _ = h.await;
+        }
+        if let Some(h) = local_dispatch_handle {
             let _ = h.await;
         }
     };

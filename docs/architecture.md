@@ -86,10 +86,10 @@ The web layer is a thin server-rendered surface on top of the existing JSON API:
                 └────────────────┘
 ```
 
-On-demand checks (`POST /targets/{id}/check-now` and `POST /targets/test`) take a side
-path: the handler calls `WorkerPool::run_once` directly. Check-now persists the result
-via `ResultSink::write_batch`; test discards it. Both honor the same per-host circuit
-breaker as scheduled checks, with `?force=true` available to bypass.
+On-demand checks (`POST /targets/{id}/check-now` and `POST /targets/test`) are dispatched
+to an agent in the target's region over the agent's held long-poll, and the request waits
+for the result. The agent persists check-now results (test results are returned but not
+stored). If no agent is currently serving the region the request returns `503 PROBE_UNAVAILABLE`.
 
 ## Key design choices
 

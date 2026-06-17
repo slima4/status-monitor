@@ -6,15 +6,20 @@ use axum::Json;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
+use crate::ad_hoc_dispatch::DeliveredResult;
 use crate::api::error::codes;
 use crate::app::AppState;
-use crate::domain::{CheckResult, Target};
+use crate::domain::agent_wire::{
+    AgentTargetDto, AgentTargetsResponse, DispatchBatch, DispatchKind, DispatchReport,
+    IngestRequest, IngestResponse,
+};
 use crate::error::{AppError, Result};
 use crate::storage::admin::AdminRepo;
 use crate::web::AgentIdentity;
+
+/// Max interactive checks handed to one agent per long-poll return.
+const DISPATCH_CLAIM_LIMIT: usize = 32;
 
 const INGEST_MAX_BATCH: usize = 10_000;
 /// Reject results timestamped further ahead than this. Past timestamps are
@@ -22,18 +27,6 @@ const INGEST_MAX_BATCH: usize = 10_000;
 /// drains older results — but a future timestamp would land in the wrong CH
 /// partition and skew the TTL window.
 const MAX_FUTURE_SKEW_SECS: i64 = 300;
-
-#[derive(Serialize)]
-pub struct AgentTargetDto {
-    pub org_id: Uuid,
-    pub target: Target,
-}
-
-#[derive(Serialize)]
-pub struct AgentTargetsResponse {
-    pub region: String,
-    pub targets: Vec<AgentTargetDto>,
-}
 
 pub async fn pull_targets(
     State(state): State<AppState>,
@@ -67,22 +60,6 @@ pub async fn pull_targets(
             .collect(),
     };
     Ok((StatusCode::OK, [(header::ETAG, etag)], Json(body)).into_response())
-}
-
-#[derive(Deserialize)]
-pub struct IngestRequest {
-    pub batch_id: Uuid,
-    pub results: Vec<CheckResult>,
-}
-
-#[derive(Serialize)]
-pub struct IngestResponse {
-    pub accepted: usize,
-    /// Rows silently dropped (future-skewed clock or not assigned to this
-    /// region). Reported so a bad clock or stale assignment is visible rather
-    /// than poisoning the whole batch.
-    pub dropped: usize,
-    pub duplicate: bool,
 }
 
 pub async fn ingest_results(
@@ -177,4 +154,57 @@ fn accepted(n: usize, dropped: usize, duplicate: bool) -> Response {
         }),
     )
         .into_response()
+}
+
+/// Long-poll for interactive checks in this agent's region: held open until a
+/// check is dispatched or the hold window elapses (then returns empty and the
+/// agent reconnects). Region + identity come from the bearer token.
+pub async fn claim_dispatch(
+    State(state): State<AppState>,
+    agent: AgentIdentity,
+) -> Result<Json<DispatchBatch>> {
+    let claim = state.ad_hoc.claim(&agent.region, DISPATCH_CLAIM_LIMIT);
+    // Return empty immediately on shutdown so a held long-poll doesn't stall
+    // graceful drain for the full hold window; the agent reconnects on restart.
+    let checks = match &state.shutdown {
+        Some(token) => tokio::select! {
+            c = claim => c,
+            _ = token.cancelled() => Vec::new(),
+        },
+        None => claim.await,
+    };
+    Ok(Json(DispatchBatch { checks }))
+}
+
+/// Report the result of one check. Routes it to the waiting request; for
+/// `check_now` also persists to ClickHouse under the check's authoritative org +
+/// target (never the agent-supplied fields). No-op if no waiter is registered.
+pub async fn submit_dispatch_result(
+    State(state): State<AppState>,
+    agent: AgentIdentity,
+    Json(req): Json<DispatchReport>,
+) -> Result<Response> {
+    let result_for_ch = req.result.clone();
+    let delivered = DeliveredResult {
+        result: req.result,
+        response_headers_preview: req.response_headers_preview,
+        response_body_snippet: req.response_body_snippet,
+    };
+    if let Some(meta) = state.ad_hoc.complete(req.check_id, delivered)
+        && meta.kind == DispatchKind::CheckNow
+        && let Some(target_id) = meta.target_id
+    {
+        let mut result = result_for_ch;
+        result.target_id = target_id;
+        result.org_id = meta.org_id;
+        state
+            .result_sink
+            .write_batch_tagged(
+                std::slice::from_ref(&result),
+                &agent.region,
+                &agent.agent_id,
+            )
+            .await?;
+    }
+    Ok(StatusCode::ACCEPTED.into_response())
 }

@@ -9,6 +9,7 @@ use url::Host;
 use utoipa::IntoParams;
 use uuid::Uuid;
 
+use crate::ad_hoc_dispatch::DeliveredResult;
 use crate::api::ApiError;
 use crate::api::error::codes;
 use crate::api::page::{PageEnvelope, PageOfTarget};
@@ -18,9 +19,10 @@ use crate::api::types::{
 };
 use crate::app::AppState;
 use crate::auth::scope::Scope;
+use crate::domain::agent_wire::{DispatchKind, DispatchedCheck};
 use crate::domain::{
-    CheckResult, NewTarget, OrgId, RegionIncidentPolicy, Target, TargetAlerts, TargetUpdate,
-    min_interval_secs_for_kind,
+    CheckResult, CheckSpec, NewTarget, OrgId, RegionIncidentPolicy, Target, TargetAlerts,
+    TargetUpdate, min_interval_secs_for_kind,
 };
 use crate::error::{AppError, Result};
 use crate::security::SsrfGuard;
@@ -29,7 +31,6 @@ use crate::web::{
     Authorized, CurrentOrg, RequestSource, TargetsDelete, TargetsExecute, TargetsRead,
     TargetsWrite, TokenScopes,
 };
-use crate::worker::{CheckTask, host_for_spec};
 
 const BULK_MAX: usize = 10_000;
 const LIST_LIMIT_DEFAULT: usize = 50;
@@ -212,7 +213,7 @@ pub async fn create(
             .set_target_regions(org, t.id, &regions)
             .await?;
     }
-    dispatch_first_check(&state, org, &t);
+    dispatch_first_check(&state, org, &t, &regions);
     // UUID hex is always ASCII-safe → infallible.
     let location = HeaderValue::from_str(&format!("/api/v1/targets/{}", t.id))
         .expect("uuid produces ascii-only path");
@@ -725,34 +726,20 @@ pub async fn test_check(
     canonicalize_check(&mut req.check)?;
     validate_check(&req.check, &guard)?;
     check_abuse(&state, org, &req.check)?;
-    require_in_process_probe(&state)?;
-    let domain_expiry_rt = state.worker_pool.domain_expiry_runtime();
-    let deps = crate::worker::WorkerDeps {
-        http: &state.http_clients,
-        domain_expiry: &domain_expiry_rt,
-    };
-    let (result, probe) =
-        crate::worker::execute_with_probe(Uuid::nil(), org.0, &req.check, &deps).await;
-    let matched_expectations = matches!(result.status, crate::domain::CheckStatus::Up);
-    let (response_headers_preview, response_body_snippet) = match probe {
-        Some(p) => (p.response_headers_preview, p.response_body_snippet),
-        None => (Vec::new(), None),
-    };
+    let region = req
+        .region
+        .filter(|r| !r.trim().is_empty())
+        .unwrap_or_else(|| state.cfg.scheduler.effective_default_region().to_string());
+    let view = run_ad_hoc(&state, org, &region, DispatchKind::Test, None, req.check).await?;
+    let matched_expectations = matches!(view.result.status, crate::domain::CheckStatus::Up);
     Ok(Json(TestResponse {
         matched_expectations,
-        result,
+        result: view.result,
         warnings: Vec::new(),
-        response_headers_preview,
-        response_body_snippet,
+        response_headers_preview: view.response_headers_preview,
+        response_body_snippet: view.response_body_snippet,
+        region: Some(region),
     }))
-}
-
-#[derive(Debug, Deserialize, utoipa::IntoParams)]
-#[into_params(parameter_in = Query)]
-pub struct CheckNowQuery {
-    /// Bypass circuit breaker.
-    #[serde(default)]
-    pub force: bool,
 }
 
 #[utoipa::path(
@@ -760,10 +747,9 @@ pub struct CheckNowQuery {
     path = "/api/v1/targets/{id}/check-now",
     tag = "targets",
     summary = "Run an immediate check against an existing target",
-    description = "Uses the target's stored (un-redacted) credentials. Result IS persisted, same as a scheduled check. Returns 422 if the target's circuit breaker is currently open (use ?force=true to bypass).",
+    description = "Dispatches a one-off check to an agent in the target's region and waits for the result. Uses the target's stored (un-redacted) credentials; the result IS persisted, same as a scheduled check. Returns 503 if no agent is available to run it.",
     params(
         ("id" = Uuid, Path),
-        CheckNowQuery,
     ),
     responses(
         (status = 200, body = CheckResult, example = json!({
@@ -774,9 +760,6 @@ pub struct CheckNowQuery {
             "response_code": 200
         })),
         (status = 404, body = ApiError),
-        (status = 422, description = "Circuit breaker open", body = ApiError, example = json!({
-            "error": {"code": "CIRCUIT_OPEN", "message": "circuit breaker is open for host 'example.com'; retry with ?force=true to bypass", "field": null, "details": null, "trace_id": null}
-        })),
         (status = 503, description = "No probe available; probing runs on agents", body = ApiError),
     ),
 )]
@@ -784,69 +767,124 @@ pub async fn check_now(
     State(state): State<AppState>,
     Authorized(org, _): Authorized<TargetsExecute>,
     Path(id): Path<Uuid>,
-    Query(q): Query<CheckNowQuery>,
 ) -> Result<Json<CheckResult>> {
     let target = state
         .target_store
         .get(org, id)
         .await?
         .ok_or_else(|| AppError::not_found(codes::TARGET_NOT_FOUND, "target not found"))?;
-    require_in_process_probe(&state)?;
-    let host = host_for_spec(&target.check);
-    let result = state
-        .worker_pool
-        .run_once(target.id, org.0, &target.check, &host, q.force)
-        .await
-        .ok_or_else(|| {
-            AppError::unprocessable(
-                codes::CIRCUIT_OPEN,
-                format!(
-                    "circuit breaker is open for host '{host}'; retry with ?force=true to bypass"
-                ),
-            )
-        })?;
-    state
-        .result_sink
-        .write_batch(std::slice::from_ref(&result))
-        .await?;
-    Ok(Json(result))
+    Ok(Json(check_now_via_dispatch(&state, org, &target).await?))
 }
 
-/// Immediate check on create so the UI shows status within seconds instead of
-/// waiting for the scheduler's next pickup. No-op on a pure control plane — the
-/// agent owning the target's region picks it up on its next poll.
-fn dispatch_first_check(state: &AppState, org: OrgId, target: &Target) {
-    if !target.enabled || !probes_in_process(state) {
+/// Run an immediate check on `target` via an agent in its region and return the
+/// result. Shared by the REST check-now handler and the MCP tool so both go
+/// through the same region-aware dispatch (the agent persists the result).
+pub(crate) async fn check_now_via_dispatch(
+    state: &AppState,
+    org: OrgId,
+    target: &Target,
+) -> Result<CheckResult> {
+    let region = resolve_check_now_region(state, org, target.id).await?;
+    let view = run_ad_hoc(
+        state,
+        org,
+        &region,
+        DispatchKind::CheckNow,
+        Some(target.id),
+        target.check.clone(),
+    )
+    .await?;
+    Ok(view.result)
+}
+
+/// Dispatch a target's first check in every assigned region so its status
+/// appears within a second of creation instead of waiting up to a full
+/// config-pull cycle. Fire-and-forget per region, and only where an agent is
+/// already holding the long-poll — regions without a live agent are covered by
+/// their next scheduled pull. The agent's result POST persists each result.
+fn dispatch_first_check(state: &AppState, org: OrgId, target: &Target, regions: &[String]) {
+    if !target.enabled {
         return;
     }
-    let st = crate::scheduler::registry::ScheduledTarget::build(org, target.clone());
-    state.worker_pool.dispatch(CheckTask {
-        target: st.target,
-        org_id: st.org_id,
-        host_key: st.host_key,
-        breaker_key: st.breaker_key,
-        rdap_tld: st.rdap_tld,
-    });
+    for region in regions {
+        if !state.ad_hoc.region_live(region) {
+            continue;
+        }
+        // Fire-and-forget: the dropped receiver is fine — the agent's result
+        // POST still persists the check-now result; we just don't wait for it.
+        let _rx = state.ad_hoc.dispatch(
+            region,
+            DispatchedCheck {
+                id: Uuid::now_v7(),
+                kind: DispatchKind::CheckNow,
+                org_id: org.0,
+                target_id: Some(target.id),
+                spec: target.check.clone(),
+            },
+        );
+    }
+}
+
+/// Dispatch an interactive check to an agent holding `region` and wait for the
+/// result. 503 when no agent is holding the region (fast) or none answers in
+/// time.
+async fn run_ad_hoc(
+    state: &AppState,
+    org: OrgId,
+    region: &str,
+    kind: DispatchKind,
+    target_id: Option<Uuid>,
+    check: CheckSpec,
+) -> Result<DeliveredResult> {
+    if !state.ad_hoc.region_live(region) {
+        return Err(AppError::service_unavailable(
+            codes::PROBE_UNAVAILABLE,
+            format!("no probe available in region '{region}'; probing runs on agents"),
+        ));
+    }
+    let check_id = Uuid::now_v7();
+    let rx = state.ad_hoc.dispatch(
+        region,
+        DispatchedCheck {
+            id: check_id,
+            kind,
+            org_id: org.0,
+            target_id,
+            spec: check,
+        },
+    );
+    match tokio::time::timeout(crate::ad_hoc_dispatch::RESULT_WAIT, rx).await {
+        Ok(Ok(delivered)) => Ok(delivered),
+        _ => {
+            state.ad_hoc.abandon(check_id);
+            Err(AppError::service_unavailable(
+                codes::PROBE_UNAVAILABLE,
+                "no probe completed this check in time; the region's agent may be offline",
+            ))
+        }
+    }
+}
+
+/// Region to run a check-now in: the target's assigned region with a live
+/// agent, else its first region (run_ad_hoc then 503s), else the default
+/// region for an unassigned target.
+async fn resolve_check_now_region(state: &AppState, org: OrgId, id: Uuid) -> Result<String> {
+    let regions = state
+        .target_store
+        .regions_for_target(org, id)
+        .await?
+        .unwrap_or_default();
+    if regions.is_empty() {
+        return Ok(state.cfg.scheduler.effective_default_region().to_string());
+    }
+    if let Some(r) = regions.iter().find(|r| state.ad_hoc.region_live(r)) {
+        return Ok(r.clone());
+    }
+    Ok(regions[0].clone())
 }
 
 fn ssrf_guard(state: &AppState) -> SsrfGuard {
     SsrfGuard::new(state.cfg.security.allow_private_targets)
-}
-
-/// In-process probe paths (test, check-now, first-check) work only when this
-/// process is itself a probe; a pure control plane leaves probing to agents.
-fn probes_in_process(state: &AppState) -> bool {
-    state.cfg.scheduler.enabled
-}
-
-fn require_in_process_probe(state: &AppState) -> Result<()> {
-    if probes_in_process(state) {
-        return Ok(());
-    }
-    Err(AppError::service_unavailable(
-        codes::PROBE_UNAVAILABLE,
-        "no probe available to run this check directly; probing runs on agents",
-    ))
 }
 
 /// Abuse admission control for one user-supplied check. Every handler that

@@ -232,6 +232,23 @@ app.{$UPTIMEPAGE_DOMAIN} {
 		import app_upstream
 	}
 
+	# ─── On-demand checks — per-IP edge cap ahead of the org limiter ─────
+	# A multi-region Test costs one event per region (one request each).
+	@on_demand_checks {
+		method POST
+		path /api/v1/targets/test /api/v1/targets/*/check-now
+	}
+	handle @on_demand_checks {
+		rate_limit {
+			zone on_demand_checks {
+				key {remote_host}
+				events 60
+				window 1m
+			}
+		}
+		import app_upstream
+	}
+
 	# ─── Delegation connect pages — anonymous single-use codes ──────────
 	# Possession of the code is the authority; the per-IP cap bounds brute
 	# probing while leaving room for the page's 5 s status poll.

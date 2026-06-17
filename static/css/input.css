@@ -2239,6 +2239,13 @@
     /* `min-w-0` + `overflow-wrap: anywhere` on the pre stop unbreakable
        tokens from overflowing the fieldset. */
     .test-result        { @apply min-w-0 rounded-sm border p-3 text-sm; }
+    /* Per-region test fan-out: a stack of region-labelled result cards. */
+    .test-region-list   { @apply min-w-0 space-y-2; }
+    .test-region        { @apply min-w-0; }
+    .test-region__name  {
+        @apply mb-1 text-xs font-medium;
+        color: var(--theme-text-muted);
+    }
     .test-result--ok {
         background: var(--theme-state-ok-bg);
         border-color: var(--theme-state-ok-line);

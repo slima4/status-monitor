@@ -1,3 +1,4 @@
+pub mod ad_hoc_dispatch;
 pub mod agent;
 pub mod api;
 pub mod app;

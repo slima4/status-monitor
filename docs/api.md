@@ -565,7 +565,7 @@ Returns every tag currently in use across the caller's targets (enabled or disab
 ## On-demand operations
 
 - **`POST /api/v1/targets/test`** — runs one check against a raw `CheckSpec`, no persistence. Same SSRF / URL-scheme / port validation as `POST /targets`. Returns `TestResponse { result, matched_expectations, warnings }`.
-- **`POST /api/v1/targets/{id}/check-now`** — runs one check against an existing target using its stored credentials. Result is persisted. Honors the per-host circuit breaker; returns `422 CIRCUIT_OPEN` when the breaker is open. Pass `?force=true` to bypass.
+- **`POST /api/v1/targets/{id}/check-now`** — runs one check against an existing target using its stored credentials, dispatched to an agent in the target's region. Result is persisted. Returns `503 PROBE_UNAVAILABLE` if no agent is currently serving the region.
 - **`POST /api/v1/targets/bulk-action`** — apply one action atomically to up to 10,000 ids. Partial failure allowed; the response lists `succeeded` and `failed` separately, with per-id `code` + `message`.
 
 ```jsonc

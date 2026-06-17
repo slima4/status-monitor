@@ -241,7 +241,7 @@ async fn test_endpoint_rejects_ssrf_target() {
 }
 
 #[tokio::test]
-async fn test_endpoint_unavailable_without_in_process_probe() {
+async fn test_endpoint_unavailable_without_live_agent() {
     let payload = json!({
         "check": {
             "type": "http",
@@ -255,10 +255,36 @@ async fn test_endpoint_unavailable_without_in_process_probe() {
             "verify_tls": true
         }
     });
-    let app = build_test_app_with_owner(|cfg| {
-        cfg.scheduler.enabled = false;
+    let resp = app()
+        .oneshot(
+            Request::post("/api/v1/targets/test")
+                .header("content-type", "application/json")
+                .body(Body::from(payload.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(body_json(resp).await["error"]["code"], "PROBE_UNAVAILABLE");
+}
+
+#[tokio::test]
+async fn test_endpoint_with_explicit_region_unavailable_without_live_agent() {
+    let payload = json!({
+        "region": "apac-sg",
+        "check": {
+            "type": "http",
+            "url": "http://example.com",
+            "method": "GET",
+            "timeout": 5000,
+            "follow_redirects": false,
+            "max_redirects": 0,
+            "expected_status": { "kind": "exact", "value": 200 },
+            "headers": {},
+            "verify_tls": true
+        }
     });
-    let resp = app
+    let resp = app()
         .oneshot(
             Request::post("/api/v1/targets/test")
                 .header("content-type", "application/json")
@@ -270,26 +296,26 @@ async fn test_endpoint_unavailable_without_in_process_probe() {
     assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
     let v = body_json(resp).await;
     assert_eq!(v["error"]["code"], "PROBE_UNAVAILABLE");
+    assert!(
+        v["error"]["message"].as_str().unwrap().contains("apac-sg"),
+        "503 names the requested region: {v}"
+    );
 }
 
 #[tokio::test]
-async fn check_now_unavailable_without_in_process_probe() {
-    let app = build_test_app_with_owner(|cfg| {
-        cfg.scheduler.enabled = false;
-    });
-    let id = create_target(&app, "a").await;
+async fn check_now_unavailable_without_live_agent() {
+    let app = app();
+    let id = create_target(&app, "cn").await;
     let resp = app
         .oneshot(
             Request::post(format!("/api/v1/targets/{id}/check-now"))
-                .header("content-type", "application/json")
                 .body(Body::empty())
                 .unwrap(),
         )
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
-    let v = body_json(resp).await;
-    assert_eq!(v["error"]["code"], "PROBE_UNAVAILABLE");
+    assert_eq!(body_json(resp).await["error"]["code"], "PROBE_UNAVAILABLE");
 }
 
 #[tokio::test]

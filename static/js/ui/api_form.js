@@ -102,6 +102,34 @@ window.smRenderCheckResult = function (el, result, extra) {
     el.classList.remove("hidden");
 };
 
+// Build a per-region test widget inside `el`: one row per region (label +
+// "Running…" body). Returns { [regionId]: bodyEl } so the caller renders each
+// region's outcome into its row with smRenderCheckResult / smRenderCheckError
+// as the fan-out requests resolve. `regions` = [{ id, label }].
+window.smRenderRegionTestRunning = function (el, regions) {
+    if (!el) return {};
+    if (!el.hasAttribute("role")) el.setAttribute("role", "status");
+    el.className = "test-region-list sm:col-span-2";
+    el.innerHTML = "";
+    const rows = {};
+    regions.forEach((r) => {
+        const row = document.createElement("div");
+        row.className = "test-region";
+        const name = document.createElement("div");
+        name.className = "test-region__name";
+        name.textContent = r.label;
+        const body = document.createElement("div");
+        body.className = "test-result";
+        body.textContent = "Running…";
+        row.appendChild(name);
+        row.appendChild(body);
+        el.appendChild(row);
+        rows[r.id] = body;
+    });
+    el.classList.remove("hidden");
+    return rows;
+};
+
 window.smRenderCheckRunning = function (el) {
     if (!el) return;
     // Live-region backstop: the templates set role="status" so the first
