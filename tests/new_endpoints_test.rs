@@ -241,6 +241,58 @@ async fn test_endpoint_rejects_ssrf_target() {
 }
 
 #[tokio::test]
+async fn test_endpoint_unavailable_without_in_process_probe() {
+    let payload = json!({
+        "check": {
+            "type": "http",
+            "url": "http://example.com",
+            "method": "GET",
+            "timeout": 5000,
+            "follow_redirects": false,
+            "max_redirects": 0,
+            "expected_status": { "kind": "exact", "value": 200 },
+            "headers": {},
+            "verify_tls": true
+        }
+    });
+    let app = build_test_app_with_owner(|cfg| {
+        cfg.scheduler.enabled = false;
+    });
+    let resp = app
+        .oneshot(
+            Request::post("/api/v1/targets/test")
+                .header("content-type", "application/json")
+                .body(Body::from(payload.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let v = body_json(resp).await;
+    assert_eq!(v["error"]["code"], "PROBE_UNAVAILABLE");
+}
+
+#[tokio::test]
+async fn check_now_unavailable_without_in_process_probe() {
+    let app = build_test_app_with_owner(|cfg| {
+        cfg.scheduler.enabled = false;
+    });
+    let id = create_target(&app, "a").await;
+    let resp = app
+        .oneshot(
+            Request::post(format!("/api/v1/targets/{id}/check-now"))
+                .header("content-type", "application/json")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let v = body_json(resp).await;
+    assert_eq!(v["error"]["code"], "PROBE_UNAVAILABLE");
+}
+
+#[tokio::test]
 async fn dashboard_summary_returns_zero_filled_for_empty_fleet() {
     let resp = app()
         .oneshot(

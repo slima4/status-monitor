@@ -713,6 +713,7 @@ pub async fn bulk_action(
             "warnings": []
         })),
         (status = 400, body = ApiError),
+        (status = 503, description = "No probe available; probing runs on agents", body = ApiError),
     ),
 )]
 pub async fn test_check(
@@ -724,6 +725,7 @@ pub async fn test_check(
     canonicalize_check(&mut req.check)?;
     validate_check(&req.check, &guard)?;
     check_abuse(&state, org, &req.check)?;
+    require_in_process_probe(&state)?;
     let domain_expiry_rt = state.worker_pool.domain_expiry_runtime();
     let deps = crate::worker::WorkerDeps {
         http: &state.http_clients,
@@ -775,6 +777,7 @@ pub struct CheckNowQuery {
         (status = 422, description = "Circuit breaker open", body = ApiError, example = json!({
             "error": {"code": "CIRCUIT_OPEN", "message": "circuit breaker is open for host 'example.com'; retry with ?force=true to bypass", "field": null, "details": null, "trace_id": null}
         })),
+        (status = 503, description = "No probe available; probing runs on agents", body = ApiError),
     ),
 )]
 pub async fn check_now(
@@ -788,6 +791,7 @@ pub async fn check_now(
         .get(org, id)
         .await?
         .ok_or_else(|| AppError::not_found(codes::TARGET_NOT_FOUND, "target not found"))?;
+    require_in_process_probe(&state)?;
     let host = host_for_spec(&target.check);
     let result = state
         .worker_pool
@@ -808,14 +812,11 @@ pub async fn check_now(
     Ok(Json(result))
 }
 
-/// Dispatch one immediate check for a just-created target so the UI shows a
-/// status within seconds instead of waiting up to a full registry-refresh
-/// interval for the scheduler to pick the target up. Runs through the normal
-/// worker pool — semaphore-bounded and persisted via the same fan-out as
-/// scheduled checks — so if the pool is saturated the check is dropped and
-/// the scheduler's own pickup covers it.
+/// Immediate check on create so the UI shows status within seconds instead of
+/// waiting for the scheduler's next pickup. No-op on a pure control plane — the
+/// agent owning the target's region picks it up on its next poll.
 fn dispatch_first_check(state: &AppState, org: OrgId, target: &Target) {
-    if !target.enabled {
+    if !target.enabled || !probes_in_process(state) {
         return;
     }
     let st = crate::scheduler::registry::ScheduledTarget::build(org, target.clone());
@@ -830,6 +831,22 @@ fn dispatch_first_check(state: &AppState, org: OrgId, target: &Target) {
 
 fn ssrf_guard(state: &AppState) -> SsrfGuard {
     SsrfGuard::new(state.cfg.security.allow_private_targets)
+}
+
+/// In-process probe paths (test, check-now, first-check) work only when this
+/// process is itself a probe; a pure control plane leaves probing to agents.
+fn probes_in_process(state: &AppState) -> bool {
+    state.cfg.scheduler.enabled
+}
+
+fn require_in_process_probe(state: &AppState) -> Result<()> {
+    if probes_in_process(state) {
+        return Ok(());
+    }
+    Err(AppError::service_unavailable(
+        codes::PROBE_UNAVAILABLE,
+        "no probe available to run this check directly; probing runs on agents",
+    ))
 }
 
 /// Abuse admission control for one user-supplied check. Every handler that

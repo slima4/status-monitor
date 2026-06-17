@@ -70,6 +70,14 @@ impl IntoResponse for WebError {
             AppError::Forbidden | AppError::ForbiddenCoded { .. } => {
                 (StatusCode::FORBIDDEN, NotFoundPage { active_tab: "" }).into_response()
             }
+            AppError::ServiceUnavailable { .. } => {
+                tracing::warn!(error = %self.0, "web handler unavailable");
+                (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    InternalErrorPage { active_tab: "" },
+                )
+                    .into_response()
+            }
             AppError::Internal { code, log } => {
                 tracing::error!(error_code = code, detail = %log, "web handler failed");
                 (

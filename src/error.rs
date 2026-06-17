@@ -57,6 +57,11 @@ pub enum AppError {
     #[error("{message}")]
     Gone { code: &'static str, message: String },
 
+    /// 503 — no probe available to serve the request; a pure control plane
+    /// leaves probing to agents.
+    #[error("{message}")]
+    ServiceUnavailable { code: &'static str, message: String },
+
     /// A resource quota would be exceeded. Renders 422 with the stable
     /// machine-readable `details` block (`quota`, `current`, `limit`,
     /// `plan`) UI clients branch on. `code` is `QUOTA_EXCEEDED` or the
@@ -174,6 +179,13 @@ impl AppError {
 
     pub fn gone(code: &'static str, message: impl Into<String>) -> Self {
         Self::Gone {
+            code,
+            message: message.into(),
+        }
+    }
+
+    pub fn service_unavailable(code: &'static str, message: impl Into<String>) -> Self {
+        Self::ServiceUnavailable {
             code,
             message: message.into(),
         }
@@ -306,6 +318,10 @@ impl IntoResponse for AppError {
             AppError::Gone { code, message } => {
                 (StatusCode::GONE, ApiErrorBody::new(code, message))
             }
+            AppError::ServiceUnavailable { code, message } => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                ApiErrorBody::new(code, message),
+            ),
             AppError::QuotaExceeded {
                 code,
                 message,

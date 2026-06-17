@@ -78,6 +78,8 @@ pub mod codes {
     pub const TARGET_DUPLICATE: &str = "TARGET_DUPLICATE";
     pub const INCIDENT_ALREADY_OPEN: &str = "INCIDENT_ALREADY_OPEN";
     pub const CIRCUIT_OPEN: &str = "CIRCUIT_OPEN";
+    /// No probe available to run the check; probing runs on agents (503).
+    pub const PROBE_UNAVAILABLE: &str = "PROBE_UNAVAILABLE";
     pub const DEPENDENCY_DOWN: &str = "DEPENDENCY_DOWN";
     pub const RATE_LIMITED: &str = "RATE_LIMITED";
     /// A resource quota would be exceeded; `details.quota` names which.
