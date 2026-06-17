@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_register.html" as reg %}
 {% block title %}{% if form.mode == "create" %}New notification channel{% else %}Edit notification channel{% endif %} · Uptimepage{% endblock %}
 {% macro monitor_card_body(m) %}
 <span class="check-type-card__name w-full truncate">{{ m.name }}{% if !m.enabled %} <span class="cli-brackets font-normal">disabled</span>{% endif %}{% if let Some(managed) = m.managed_by %} <span class="cli-brackets font-normal" title="managed externally — changes made here may be overwritten on the next apply">{{ managed }}</span>{% endif %}</span>
@@ -36,88 +37,32 @@
       <legend class="panel-label">channel type</legend>
       {# Most-popular channels first; the rest sit below a divider. #}
       <div class="check-type-cards">
-        <label class="check-type-card" data-kind-card>
-          <input type="radio" name="kind" value="slack"{% if form.kind == "slack" %} checked{% endif %} class="sr-only">
-          <span class="check-type-card__name">slack</span>
-          <span class="check-type-card__desc">incoming webhook</span>
-        </label>
-        <label class="check-type-card" data-kind-card>
-          <input type="radio" name="kind" value="discord"{% if form.kind == "discord" %} checked{% endif %} class="sr-only">
-          <span class="check-type-card__name">discord</span>
-          <span class="check-type-card__desc">channel webhook</span>
-        </label>
-        <label class="check-type-card" data-kind-card>
-          <input type="radio" name="kind" value="email"{% if form.kind == "email" %} checked{% endif %} class="sr-only">
-          <span class="check-type-card__name">email</span>
-          <span class="check-type-card__desc">verified address</span>
-        </label>
+        {% call reg::chooser_card("data-kind-card", "kind", "slack", form.kind == "slack", "slack", "incoming webhook") %}{% endcall %}
+        {% call reg::chooser_card("data-kind-card", "kind", "discord", form.kind == "discord", "discord", "channel webhook") %}{% endcall %}
+        {% call reg::chooser_card("data-kind-card", "kind", "email", form.kind == "email", "email", "verified address") %}{% endcall %}
         {% if form.offers_telegram_app() %}
-        <label class="check-type-card" data-kind-card>
-          <input type="radio" name="kind" value="telegram_app"{% if form.kind == "telegram_app" %} checked{% endif %} class="sr-only">
-          <span class="check-type-card__name">telegram</span>
-          <span class="check-type-card__desc">one-tap chat link</span>
-        </label>
+        {% call reg::chooser_card("data-kind-card", "kind", "telegram_app", form.kind == "telegram_app", "telegram", "one-tap chat link") %}{% endcall %}
         {% else %}
-        <label class="check-type-card" data-kind-card>
-          <input type="radio" name="kind" value="telegram"{% if form.kind == "telegram" %} checked{% endif %} class="sr-only">
-          <span class="check-type-card__name">telegram bot</span>
-          <span class="check-type-card__desc">your own bot token</span>
-        </label>
+        {% call reg::chooser_card("data-kind-card", "kind", "telegram", form.kind == "telegram", "telegram bot", "your own bot token") %}{% endcall %}
         {% endif %}
       </div>
 
       <div class="kind-divider" aria-hidden="true"></div>
 
       <div class="check-type-cards">
-        <label class="check-type-card" data-kind-card>
-          <input type="radio" name="kind" value="msteams"{% if form.kind == "msteams" %} checked{% endif %} class="sr-only">
-          <span class="check-type-card__name">teams</span>
-          <span class="check-type-card__desc">Workflows webhook</span>
-        </label>
-        <label class="check-type-card" data-kind-card>
-          <input type="radio" name="kind" value="google_chat"{% if form.kind == "google_chat" %} checked{% endif %} class="sr-only">
-          <span class="check-type-card__name">google chat</span>
-          <span class="check-type-card__desc">space webhook</span>
-        </label>
-        <label class="check-type-card" data-kind-card>
-          <input type="radio" name="kind" value="pagerduty"{% if form.kind == "pagerduty" %} checked{% endif %} class="sr-only">
-          <span class="check-type-card__name">pagerduty</span>
-          <span class="check-type-card__desc">Events API v2</span>
-        </label>
-        <label class="check-type-card" data-kind-card>
-          <input type="radio" name="kind" value="pushover"{% if form.kind == "pushover" %} checked{% endif %} class="sr-only">
-          <span class="check-type-card__name">pushover</span>
-          <span class="check-type-card__desc">phone push</span>
-        </label>
-        <label class="check-type-card" data-kind-card>
-          <input type="radio" name="kind" value="ntfy"{% if form.kind == "ntfy" %} checked{% endif %} class="sr-only">
-          <span class="check-type-card__name">ntfy</span>
-          <span class="check-type-card__desc">topic push</span>
-        </label>
+        {% call reg::chooser_card("data-kind-card", "kind", "msteams", form.kind == "msteams", "teams", "Workflows webhook") %}{% endcall %}
+        {% call reg::chooser_card("data-kind-card", "kind", "google_chat", form.kind == "google_chat", "google chat", "space webhook") %}{% endcall %}
+        {% call reg::chooser_card("data-kind-card", "kind", "pagerduty", form.kind == "pagerduty", "pagerduty", "Events API v2") %}{% endcall %}
+        {% call reg::chooser_card("data-kind-card", "kind", "pushover", form.kind == "pushover", "pushover", "phone push") %}{% endcall %}
+        {% call reg::chooser_card("data-kind-card", "kind", "ntfy", form.kind == "ntfy", "ntfy", "topic push") %}{% endcall %}
         {% if form.offers_whatsapp_app() %}
-        <label class="check-type-card" data-kind-card>
-          <input type="radio" name="kind" value="whatsapp_app"{% if form.kind == "whatsapp_app" %} checked{% endif %} class="sr-only">
-          <span class="check-type-card__name">whatsapp</span>
-          <span class="check-type-card__desc">one-tap number link</span>
-        </label>
+        {% call reg::chooser_card("data-kind-card", "kind", "whatsapp_app", form.kind == "whatsapp_app", "whatsapp", "one-tap number link") %}{% endcall %}
         {% endif %}
         {% if form.offers_telegram_app() %}
-        <label class="check-type-card" data-kind-card>
-          <input type="radio" name="kind" value="telegram"{% if form.kind == "telegram" %} checked{% endif %} class="sr-only">
-          <span class="check-type-card__name">telegram bot</span>
-          <span class="check-type-card__desc">your own bot token</span>
-        </label>
+        {% call reg::chooser_card("data-kind-card", "kind", "telegram", form.kind == "telegram", "telegram bot", "your own bot token") %}{% endcall %}
         {% endif %}
-        <label class="check-type-card" data-kind-card>
-          <input type="radio" name="kind" value="whatsapp"{% if form.kind == "whatsapp" %} checked{% endif %} class="sr-only">
-          <span class="check-type-card__name">whatsapp</span>
-          <span class="check-type-card__desc">Cloud API message</span>
-        </label>
-        <label class="check-type-card" data-kind-card>
-          <input type="radio" name="kind" value="webhook"{% if form.kind == "webhook" %} checked{% endif %} class="sr-only">
-          <span class="check-type-card__name">webhook</span>
-          <span class="check-type-card__desc">POST to your endpoint</span>
-        </label>
+        {% call reg::chooser_card("data-kind-card", "kind", "whatsapp", form.kind == "whatsapp", "whatsapp", "Cloud API message") %}{% endcall %}
+        {% call reg::chooser_card("data-kind-card", "kind", "webhook", form.kind == "webhook", "webhook", "POST to your endpoint") %}{% endcall %}
       </div>
       {% if form.mode != "create" && form.kind != "telegram_app" && form.kind != "whatsapp_app" %}
       <p data-kind-locked-hint class="hidden font-mono text-xs text-quiet"># type locked — tick "Replace transport config" below to change it</p>

@@ -9,6 +9,14 @@
         return elt && elt.matches && elt.matches("[data-hx-loader]") ? elt : null;
     }
 
+    // Mirrors the `reg::loading` Askama macro — keep both in step.
+    function loadingPlaceholder() {
+        return Object.assign(document.createElement("p"), {
+            className: "px-4 py-3 font-mono text-xs text-quiet",
+            textContent: "# loading…",
+        });
+    }
+
     function showError(box) {
         const url = box.getAttribute("hx-get");
         box.replaceChildren();
@@ -21,10 +29,7 @@
         retry.className = "row-link text-sm";
         retry.textContent = "retry";
         retry.addEventListener("click", () => {
-            box.replaceChildren(Object.assign(document.createElement("p"), {
-                className: "px-4 py-3 font-mono text-xs text-quiet",
-                textContent: "# loading…",
-            }));
+            box.replaceChildren(loadingPlaceholder());
             window.htmx.ajax("GET", url, { target: box, swap: "innerHTML" });
         });
         card.appendChild(retry);

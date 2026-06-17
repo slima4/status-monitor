@@ -1,0 +1,14 @@
+{# Shared console-register macros. #}
+
+{% macro chooser_card(data_attr, name, value, checked, label, desc) %}
+<label class="check-type-card" {{ data_attr }}>
+  <input type="radio" name="{{ name }}" value="{{ value }}"{% if checked %} checked{% endif %} class="sr-only">
+  <span class="check-type-card__name">{{ label }}</span>
+  <span class="check-type-card__desc">{{ desc }}</span>
+</label>
+{% endmacro %}
+
+{% macro loading(text) %}
+{# Mirror of loadingPlaceholder() in htmx_loader.js — keep in step. #}
+<p class="px-4 py-3 font-mono text-xs text-quiet"># {{ text }}</p>
+{% endmacro %}

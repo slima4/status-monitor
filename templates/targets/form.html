@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_register.html" as reg %}
 {% block title %}{% if form.mode == "create" %}New monitor{% else %}Edit monitor{% endif %} · Uptimepage{% endblock %}
 {% macro test_now(kind) %}
           <button type="button" data-test-now aria-describedby="test-hint-{{ kind }}"
@@ -38,31 +39,11 @@
     <aside class="monitor-form-types" aria-label="Check type">
       <fieldset class="space-y-2">
         <div class="check-type-cards check-type-cards--stack">
-          <label class="check-type-card" data-check-card>
-            <input type="radio" name="check_type" value="http"{% if form.check_type == "http" %} checked{% endif %} class="sr-only">
-            <span class="check-type-card__name">http</span>
-            <span class="check-type-card__desc">URL / API endpoint</span>
-          </label>
-          <label class="check-type-card" data-check-card>
-            <input type="radio" name="check_type" value="tcp"{% if form.check_type == "tcp" %} checked{% endif %} class="sr-only">
-            <span class="check-type-card__name">tcp</span>
-            <span class="check-type-card__desc">host : port reachable</span>
-          </label>
-          <label class="check-type-card" data-check-card>
-            <input type="radio" name="check_type" value="dns"{% if form.check_type == "dns" %} checked{% endif %} class="sr-only">
-            <span class="check-type-card__name">dns</span>
-            <span class="check-type-card__desc">record resolves</span>
-          </label>
-          <label class="check-type-card" data-check-card>
-            <input type="radio" name="check_type" value="tls_cert"{% if form.check_type == "tls_cert" %} checked{% endif %} class="sr-only">
-            <span class="check-type-card__name">tls cert</span>
-            <span class="check-type-card__desc">expiry + chain</span>
-          </label>
-          <label class="check-type-card" data-check-card>
-            <input type="radio" name="check_type" value="domain_expiry"{% if form.check_type == "domain_expiry" %} checked{% endif %} class="sr-only">
-            <span class="check-type-card__name">domain</span>
-            <span class="check-type-card__desc">registration expiry</span>
-          </label>
+          {% call reg::chooser_card("data-check-card", "check_type", "http", form.check_type == "http", "http", "URL / API endpoint") %}{% endcall %}
+          {% call reg::chooser_card("data-check-card", "check_type", "tcp", form.check_type == "tcp", "tcp", "host : port reachable") %}{% endcall %}
+          {% call reg::chooser_card("data-check-card", "check_type", "dns", form.check_type == "dns", "dns", "record resolves") %}{% endcall %}
+          {% call reg::chooser_card("data-check-card", "check_type", "tls_cert", form.check_type == "tls_cert", "tls cert", "expiry + chain") %}{% endcall %}
+          {% call reg::chooser_card("data-check-card", "check_type", "domain_expiry", form.check_type == "domain_expiry", "domain", "registration expiry") %}{% endcall %}
         </div>
       </fieldset>
     </aside>

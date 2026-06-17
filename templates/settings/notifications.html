@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_register.html" as reg %}
 {% block title %}Notification channels · Uptimepage{% endblock %}
 {% block content %}
 <section class="space-y-6">
@@ -20,7 +21,7 @@
        hx-trigger="load, every 60s, channels:refresh from:body"
        hx-swap="innerHTML"
        class="sticker-card overflow-hidden">
-    <p class="px-4 py-3 font-mono text-xs text-quiet"># loading…</p>
+    {% call reg::loading("loading…") %}{% endcall %}
   </div>
 
   <fieldset class="sticker-card form-card" data-delegate-box>

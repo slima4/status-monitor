@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_register.html" as reg %}
 {% block title %}Status pages · Uptimepage{% endblock %}
 {% block content %}
 <section class="space-y-6">
@@ -19,7 +20,7 @@
        hx-get="/web/partials/settings/pages"
        hx-trigger="load"
        hx-swap="innerHTML">
-    <p class="px-4 py-3 font-mono text-xs text-quiet"># loading…</p>
+    {% call reg::loading("loading…") %}{% endcall %}
   </div>
 
   {% if at_limit && !rows.is_empty() %}

@@ -1,6 +1,7 @@
 {# Banded sessions card shared by settings/account and the standalone
    sessions page: header band carries the title + log-out-everywhere
    action, the list below self-loads and refreshes via htmx. #}
+{% import "_register.html" as reg %}
 <div class="sticker-card overflow-hidden">
   <header class="card-band flex flex-wrap items-center justify-between gap-2">
     <h2 id="sessions-heading" class="panel-label">sessions</h2>
@@ -21,6 +22,6 @@
        hx-get="/web/partials/settings/sessions"
        hx-trigger="load, every 60s, sessions:refresh from:body"
        hx-swap="innerHTML">
-    <p class="px-4 py-3 font-mono text-xs text-quiet"># loading…</p>
+    {% call reg::loading("loading…") %}{% endcall %}
   </div>
 </div>
