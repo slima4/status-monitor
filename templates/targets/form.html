@@ -650,11 +650,13 @@
               class="sticker-btn sticker-btn--primary px-4 py-2 text-sm font-medium transition-transform hover:-translate-y-0.5">
         {% if form.mode == "create" %}create{% else %}save changes{% endif %}
       </button>
+      {% if form.mode == "edit" %}
       <button type="submit" data-save-and-test
               class="sticker-btn sticker-btn--accent px-4 py-2 text-sm font-medium inline-flex items-center gap-1.5">
         <span aria-hidden="true">▶</span>
-        {% if form.mode == "create" %}create &amp; run first check{% else %}save &amp; run check{% endif %}
+        save &amp; run check
       </button>
+      {% endif %}
       <a href="{% if form.mode == "edit" %}/targets/{{ form.id }}{% else %}/targets{% endif %}"
          class="btn-ghost px-4 py-2 text-sm">cancel</a>
       <span class="ml-auto self-center text-xs text-quiet">
