@@ -736,6 +736,7 @@
         "check.warn_days": null,
         "check.critical_days": null,
         "interval": "interval_s",
+        "renotify_interval_secs": "renotify_secs",
         "name": "name",
         "tags": null,
     };

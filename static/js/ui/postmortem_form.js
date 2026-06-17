@@ -13,6 +13,7 @@
 
   document.getElementById("add-action-item").addEventListener("click", () => {
     items.appendChild(tmpl.content.cloneNode(true));
+    if (window.smInitComboboxes) window.smInitComboboxes();
   });
 
   items.addEventListener("click", (ev) => {

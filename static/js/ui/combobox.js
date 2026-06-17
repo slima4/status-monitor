@@ -253,6 +253,7 @@
             }
         }
     }
+    window.smInitComboboxes = scan;
     document.addEventListener("DOMContentLoaded", scan);
     document.body.addEventListener("htmx:afterSwap", scan);
     document.body.addEventListener("htmx:afterSettle", scan);
