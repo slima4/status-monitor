@@ -7,28 +7,31 @@
 {% endmacro %}
 {% block content %}
 <section class="space-y-6">
-  <header class="space-y-1">
-    <a href="/settings/notifications" class="inline-block text-sm text-muted hover:text-body">← notification channels</a>
-    <h1 class="page-title truncate">
-      <span class="page-title__prefix" aria-hidden="true">$</span>{% if form.mode == "create" %}new notification channel{% else %}edit {{ form.name }}{% endif %}
-    </h1>
-    <p class="text-sm text-muted">
-      Submits JSON to <code class="font-mono">{{ form.submit_method }} {{ form.action }}</code>. Validation runs on the API.
-    </p>
-    {% if form.mode != "create" %}
-    <p class="font-mono text-xs text-quiet">
-      <span data-bound-none{% if !form.used_by.is_empty() %} class="hidden"{% endif %}># not bound to any monitor</span>
-      <span data-bound-some{% if form.used_by.is_empty() %} class="hidden"{% endif %}># bound to <a href="#used-by" class="underline decoration-dotted hover:text-body" data-bound-count>{{ form.used_by_label() }}</a></span>
-    </p>
-    {% endif %}
-  </header>
-
   <form id="channel-form"
         data-action="{{ form.action }}"
         data-method="{{ form.submit_method }}"
         data-mode="{{ form.mode }}"
         novalidate
         class="space-y-6">
+
+    <header class="space-y-1">
+      <a href="/settings/notifications" class="inline-block text-sm text-muted hover:text-body">← notification channels</a>
+      <h1 class="page-title">
+        <span class="page-title__prefix" aria-hidden="true">$</span><input
+          name="name" type="text" required maxlength="100" value="{{ form.name }}"
+          autocomplete="off" spellcheck="false" placeholder="new notification channel"
+          data-name-input aria-label="Channel name" class="page-title__input">
+      </h1>
+      <p class="text-sm text-muted">
+        Submits JSON to <code class="font-mono">{{ form.submit_method }} {{ form.action }}</code>. Validation runs on the API.
+      </p>
+      {% if form.mode != "create" %}
+      <p class="font-mono text-xs text-quiet">
+        <span data-bound-none{% if !form.used_by.is_empty() %} class="hidden"{% endif %}># not bound to any monitor</span>
+        <span data-bound-some{% if form.used_by.is_empty() %} class="hidden"{% endif %}># bound to <a href="#used-by" class="underline decoration-dotted hover:text-body" data-bound-count>{{ form.used_by_label() }}</a></span>
+      </p>
+      {% endif %}
+    </header>
 
     <div id="form-errors" role="alert" aria-live="polite"
          class="hidden alert-card alert-card--error"></div>
@@ -68,28 +71,6 @@
       {% if form.mode != "create" && form.kind != "telegram_app" && form.kind != "whatsapp_app" %}
       <p data-kind-locked-hint class="hidden font-mono text-xs text-quiet"># type locked — tick "Replace transport config" below to change it</p>
       {% endif %}
-    </fieldset>
-
-    <fieldset class="sticker-card form-card">
-      <legend>channel</legend>
-      <div class="clear-both space-y-5 p-5">
-      <label class="field-outline">
-        <span class="field-outline__label">Name</span>
-        <input name="name" type="text" required maxlength="100" value="{{ form.name }}"
-               placeholder="ops-{{ form.kind }}" data-name-input
-               autocomplete="off" class="w-full field">
-      </label>
-      <div>
-        <label class="inline-flex items-center gap-2">
-          <input name="enabled" type="checkbox"{% if form.enabled %} checked{% endif %}>
-          <span class="text-sm">Enabled</span>
-        </label>
-        <p class="mt-1 text-xs text-muted">When off, the channel is saved but bound monitors don't notify through it.</p>
-        {% if !form.disabled_reason.is_empty() %}
-        <p class="mt-1 font-mono text-xs text-quiet"># disabled by the platform: {{ form.disabled_reason }} — saving with Enabled on clears this</p>
-        {% endif %}
-      </div>
-      </div>
     </fieldset>
 
     <fieldset class="sticker-card form-card" data-config>
@@ -806,13 +787,23 @@
       </div>
     </fieldset>
 
-    <div class="flex gap-3">
-      <button type="submit"
-              class="sticker-btn sticker-btn--primary px-4 py-2 text-sm font-medium">
-        {% if form.mode == "create" %}create{% else %}save changes{% endif %}
-      </button>
-      <a href="/settings/notifications"
-         class="btn-ghost px-4 py-2 text-sm">cancel</a>
+    <div class="space-y-2">
+      <div class="flex flex-wrap items-center gap-x-4 gap-y-3">
+        <button type="submit"
+                class="sticker-btn sticker-btn--primary px-4 py-2 text-sm font-medium">
+          {% if form.mode == "create" %}create{% else %}save changes{% endif %}
+        </button>
+        <a href="/settings/notifications"
+           class="btn-ghost px-4 py-2 text-sm">cancel</a>
+        <label class="inline-flex items-center gap-2">
+          <input name="enabled" type="checkbox"{% if form.enabled %} checked{% endif %}>
+          <span class="text-sm">Enabled</span>
+        </label>
+      </div>
+      <p class="text-xs text-muted">When off, the channel is saved but bound monitors don't notify through it.</p>
+      {% if !form.disabled_reason.is_empty() %}
+      <p class="font-mono text-xs text-quiet"># disabled by the platform: {{ form.disabled_reason }} — saving with Enabled on clears this</p>
+      {% endif %}
     </div>
   </form>
 

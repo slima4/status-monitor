@@ -165,6 +165,70 @@
     });
     if (replaceCb) replaceCb.addEventListener("change", syncConfigEnabled);
 
+    // Auto-fill the channel name from the destination until the user types one
+    // of their own; a prefilled (edit) name counts as already set.
+    if (nameInput) {
+        nameInput.dataset.userTouched = nameInput.value.trim() ? "1" : "";
+
+        // The name input auto-grows via field-sizing where supported; mirror
+        // its width manually otherwise so it never sits in a wide box.
+        let autosizeName = () => {};
+        if (!(window.CSS && CSS.supports && CSS.supports("field-sizing", "content"))) {
+            const cs = getComputedStyle(nameInput);
+            const mirror = document.createElement("span");
+            mirror.setAttribute("aria-hidden", "true");
+            mirror.style.cssText = "position:absolute;visibility:hidden;white-space:pre;";
+            for (const p of ["fontFamily", "fontSize", "fontWeight", "letterSpacing"]) mirror.style[p] = cs[p];
+            nameInput.insertAdjacentElement("afterend", mirror);
+            autosizeName = () => {
+                mirror.textContent = nameInput.value || nameInput.placeholder || "";
+                const cap = nameInput.parentElement.clientWidth || 9999;
+                nameInput.style.width = `${Math.min(mirror.offsetWidth + 6, cap)}px`;
+            };
+            nameInput.addEventListener("input", autosizeName);
+            autosizeName();
+        }
+
+        nameInput.addEventListener("input", () => {
+            nameInput.dataset.userTouched = nameInput.value.trim() ? "1" : "";
+        });
+
+        const SCHEME_RE = /^[a-z][a-z0-9+.-]*:\/\//i;
+        const hostName = (raw) => {
+            const v = (raw || "").trim();
+            if (!v) return "";
+            try {
+                return new URL(SCHEME_RE.test(v) ? v : `https://${v}`).hostname.replace(/^www\./i, "");
+            } catch {
+                return "";
+            }
+        };
+        const trimmed = (v) => (v || "").trim();
+        // Each kind's most identifying destination field → a human name.
+        const SOURCES = [
+            ["slack_webhook_url", hostName],
+            ["discord_webhook_url", hostName],
+            ["msteams_webhook_url", hostName],
+            ["google_chat_webhook_url", hostName],
+            ["webhook_url", hostName],
+            ["email_to", trimmed],
+            ["ntfy_topic", trimmed],
+            ["whatsapp_to", trimmed],
+            ["sms_to", trimmed],
+        ];
+        for (const [field, derive] of SOURCES) {
+            const src = form.querySelector(`[name='${field}']`);
+            src?.addEventListener("input", () => {
+                if (nameInput.dataset.userTouched) return;
+                const derived = derive(src.value);
+                if (derived) {
+                    nameInput.value = derived;
+                    autosizeName();
+                }
+            });
+        }
+    }
+
     // "Test now": exercises the same notifier path a real incident uses.
     // Create / replace-config: POSTs the form's config without saving;
     // locked edit: tests the stored config by id.

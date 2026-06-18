@@ -15,7 +15,7 @@
     {% for c in channels %}
     <tr>
       <td class="px-4 py-2 align-top text-body">
-        <span class="inline-flex items-center gap-2">{{ c.name }}{% if let Some(m) = c.managed_by %}<span class="managed-chip" title="Managed by {{ m }} — changes made here may be overwritten on the next apply">{{ m }}</span>{% endif %}</span>
+        <span class="inline-flex items-center gap-2"><a href="/settings/notifications/{{ c.id }}/edit" class="font-medium hover:underline decoration-dotted underline-offset-2">{{ c.name }}</a>{% if let Some(m) = c.managed_by %}<span class="managed-chip" title="Managed by {{ m }} — changes made here may be overwritten on the next apply">{{ m }}</span>{% endif %}</span>
       </td>
       <td class="px-4 py-2 align-top">
         <span class="status-badge status-badge--tag">{{ c.kind }}</span>
@@ -39,9 +39,8 @@
                   hx-headers='{"X-Requested-With":"uptimepage"}'
                   hx-swap="none"
                   hx-on::after-request="window.smChannelTestResult(this, event)"
-                  class="row-link">send test</button>
-          <a href="/settings/notifications/{{ c.id }}/edit"
-             class="row-link">edit</a>
+                  class="row-link font-mono" title="send a test alert"
+                  aria-label="send a test alert to {{ c.name }}"><span class="cli-brackets">▶</span></button>
           <button type="button"
                   hx-delete="/api/v1/notification-channels/{{ c.id }}"
                   hx-headers='{"X-Requested-With":"uptimepage"}'
