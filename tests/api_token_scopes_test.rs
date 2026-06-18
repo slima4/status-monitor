@@ -893,3 +893,34 @@ async fn targets_delete_and_execute_are_separate_from_write() {
         "channels:delete must delete, got {st}: {b}"
     );
 }
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL — run via DATABASE_URL=... cargo test -- --ignored"]
+async fn token_on_org_mutation_gets_session_required() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+
+    let user = make_user(&pool, "session-req").await;
+    let slug = unique_slug("sreq");
+    let org = create_org_with_owner(&pool, user, &slug, "SReq", 3)
+        .await
+        .unwrap()
+        .expect("org");
+    let token = token_with_scopes(&pool, user, "fa", r#"["full_access"]"#).await;
+
+    let router = build_saas_router_with_pg_targets(pool.clone()).await;
+    let path = format!("/api/v1/orgs/{}", org.id.0);
+    let (status, body) = send(
+        &router,
+        "PATCH",
+        &path,
+        &token,
+        &slug,
+        Some(json!({ "name": "Renamed" }).to_string()),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "{body}");
+    assert!(body.contains("SESSION_REQUIRED"), "{body}");
+}

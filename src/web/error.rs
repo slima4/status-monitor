@@ -62,7 +62,7 @@ impl IntoResponse for WebError {
                 )
                     .into_response()
             }
-            AppError::Unauthorized => (
+            AppError::Unauthorized | AppError::SessionRequired => (
                 StatusCode::UNAUTHORIZED,
                 InternalErrorPage { active_tab: "" },
             )

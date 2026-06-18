@@ -9,7 +9,9 @@
 //! [`storage::orgs`] to decide whether they are a member / owner / deleter of
 //! the path-id org. Reads use [`CurrentUser`]; mutations use [`BrowserUser`],
 //! so an API token cannot create, rename, delete, or change membership of an
-//! org — those are browser-session operations.
+//! org — those are browser-session operations. A token that reaches a mutation
+//! gets a `SESSION_REQUIRED` 401 (distinct from `UNAUTHORIZED`) so it reads as
+//! "use a browser session", not "your token is bad".
 
 use axum::Json;
 use axum::extract::{Path, Query, State};

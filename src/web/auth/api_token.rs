@@ -129,7 +129,16 @@ where
         session
             .user_id()
             .map(|id| BrowserUser(CurrentUser(id)))
-            .ok_or(AppError::Unauthorized)
+            .ok_or_else(|| {
+                if matches!(
+                    parts.extensions.get::<AuthContext>(),
+                    Some(AuthContext::ApiToken { .. })
+                ) {
+                    AppError::SessionRequired
+                } else {
+                    AppError::Unauthorized
+                }
+            })
     }
 }
 

@@ -87,6 +87,12 @@ pub enum AppError {
     #[error("authentication required")]
     Unauthorized,
 
+    /// 401 — a valid API token hit a browser-session-only endpoint. Same status
+    /// as [`Self::Unauthorized`] but a distinct `SESSION_REQUIRED` code so token
+    /// users aren't told their token is invalid.
+    #[error("browser session required")]
+    SessionRequired,
+
     #[error("access denied")]
     Forbidden,
 
@@ -350,6 +356,13 @@ impl IntoResponse for AppError {
             AppError::Unauthorized => (
                 StatusCode::UNAUTHORIZED,
                 ApiErrorBody::new(codes::UNAUTHORIZED, "authentication required"),
+            ),
+            AppError::SessionRequired => (
+                StatusCode::UNAUTHORIZED,
+                ApiErrorBody::new(
+                    codes::SESSION_REQUIRED,
+                    "this endpoint requires a browser session, not an API token",
+                ),
             ),
             AppError::Forbidden => (
                 StatusCode::FORBIDDEN,

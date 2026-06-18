@@ -94,6 +94,10 @@ pub mod codes {
     pub const DOMAIN_DENYLISTED: &str = "DOMAIN_DENYLISTED";
     pub const INTERNAL: &str = "INTERNAL";
     pub const UNAUTHORIZED: &str = "UNAUTHORIZED";
+    /// A valid API token reached an endpoint gated to browser sessions (org
+    /// lifecycle). Distinct from `UNAUTHORIZED` so token users aren't misled
+    /// into thinking their token is invalid (401).
+    pub const SESSION_REQUIRED: &str = "SESSION_REQUIRED";
     pub const FORBIDDEN: &str = "FORBIDDEN";
     /// API token lacks the scope its target endpoint requires (403).
     pub const INSUFFICIENT_SCOPE: &str = "INSUFFICIENT_SCOPE";
