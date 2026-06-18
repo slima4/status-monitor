@@ -105,6 +105,17 @@ app.{$UPTIMEPAGE_DOMAIN} {
 		respond "Not Found" 404
 	}
 
+	# ─── Static assets — fingerprinted, immutable, no per-IP throttle ────
+	# Bundled JS/CSS carry a content hash (?v=<fp>) so a changed file is a new
+	# URL; safe to cache forever. One operator page pulls a dozen at once, which
+	# the abuse-tier status cap (60/min) would 429 — keep them out of that zone.
+	# Terminal handle, matched before @public; the app serves them unauthenticated.
+	@static path /static/*
+	handle @static {
+		header Cache-Control "public, max-age=31536000, immutable"
+		import app_upstream
+	}
+
 	# ─── Public status surface (self-host, no auth) ─────────────────────
 	# Self-host serves its single org's status page, public JSON API, and
 	# bundled assets here. `handle` short-circuits the basic_auth directive
@@ -113,7 +124,7 @@ app.{$UPTIMEPAGE_DOMAIN} {
 	# the wildcard site is the real public surface — keeping this block is
 	# harmless there. Distinct rate-limit zone from the wildcard site (zone
 	# names are global to the Caddy process).
-	@public path /status /status/* /api/public/* /robots.txt /favicon.ico /static/*
+	@public path /status /status/* /api/public/* /robots.txt /favicon.ico
 	handle @public {
 		rate_limit {
 			zone status_path {
