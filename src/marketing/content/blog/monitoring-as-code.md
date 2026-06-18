@@ -110,6 +110,8 @@ The shape that holds up: remote state with locking (so two people can't apply at
 
 Monitors and status pages and notification channels are all just resources here (`uptimepage_status_page`, `uptimepage_notification_channel`, and friends), so the whole public face of your monitoring — which page shows what, who gets paged on which channel — ends up reviewable in the same PR as the checks themselves.
 
+And the same monitors you declare in code, an AI assistant can [read back over MCP](/blog/mcp-server): "what's broken right now, and since when?" answered in plain language, from the exact config that's sitting in your repo. Declared in a pull request on one side, queried by an assistant on the other — same data, same scopes.
+
 ## Boring, in code too
 
 We've [argued before](/blog/boring-uptime) that your monitor should be the dullest, most trustworthy thing you own. Configuration is part of that. A monitor whose definition you can read, review, diff, and roll back is a more boring monitor than one assembled from clicks that nobody remembers — and boring, here, is the entire compliment.

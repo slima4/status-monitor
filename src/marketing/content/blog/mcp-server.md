@@ -67,4 +67,6 @@ We've [written before](/blog/boring-uptime) about why a monitor should be the du
 
 The MCP server adds a new way to *ask questions* and a tightly-fenced way to *take actions*. It does not add a new way for your monitoring to surprise you, lie to you, or fall over. The model can read everything it's allowed to and change nothing without your say-so. When it's wrong, it's wrong in a chat window, not in production.
 
+It's the same monitoring you can [manage entirely as code](/blog/monitoring-as-code): queried by an assistant over MCP on one side, declared in a pull request with Terraform on the other. Two front doors, one tenant-isolated data layer behind both.
+
 Point your assistant at it and ask it what's broken. Worst case, it tells you everything's fine — and you didn't have to open a single dashboard to find out.

@@ -301,6 +301,79 @@ resource "uptimepage_target" "api" {
         ],
         cta: "Start free with GitHub",
     },
+    Landing {
+        path: "/mcp-server",
+        title: "MCP Server for Uptime Monitoring",
+        eyebrow: "for ai & llm workflows",
+        h1: "Ask an AI what’s broken — over MCP",
+        meta_description: "Connect any LLM to your uptime monitoring over MCP. Read monitors and incidents, take fenced actions, one-click OAuth. Free to start, no card.",
+        lede: "Point a Model Context Protocol client — Claude, an IDE, anything that speaks MCP — at your monitoring and ask it what’s down in plain language. Read tools answer from your real monitors; write tools take action only behind your explicit approval. Same tenant isolation, scopes and rate limits as the dashboard.",
+        features: &[
+            Feature {
+                label: "MCP endpoint",
+                value: "mcp.uptimepage.dev/mcp",
+            },
+            Feature {
+                label: "Connect",
+                value: "OAuth one-click, or scoped token",
+            },
+            Feature {
+                label: "Tools",
+                value: "13 — read + fenced writes",
+            },
+            Feature {
+                label: "Every write",
+                value: "your approval + an audit row",
+            },
+            Feature {
+                label: "Clients",
+                value: "Claude, IDEs, any MCP client",
+            },
+            Feature {
+                label: "Price to start",
+                value: "free, no card",
+            },
+        ],
+        sections: &[
+            Section {
+                heading: "ask your monitoring in plain language",
+                body: "Read tools hand the model the same forensics a good engineer reaches for: which monitor is down and since when, an incident’s full timeline, and why a check is slow — DNS, connect, TLS handshake and time-to-first-byte reported separately, so “slow because TLS” and “slow because DNS” come back as different answers.",
+            },
+            Section {
+                heading: "actions stay behind a human",
+                body: "Most tools can only look. The few that act — run a check, pause or resume a monitor, post to an incident — can’t fire without a scoped token, your in-the-moment approval naming the exact effect, and an audit row for every outcome. There is no “remember my choice.”",
+            },
+            Section {
+                heading: "your data can’t hijack the assistant",
+                body: "A monitor name or scraped error text is written by someone else, and now an LLM is reading it. Every piece of customer-supplied text reaches the model labelled as data to report, never instructions to act on — and even a fooled model still can’t act without your out-of-band approval.",
+            },
+            Section {
+                heading: "one-click OAuth, no copy-paste",
+                body: "Your client discovers the server, you log in with the session you already have, approve a consent screen, and a scoped, org-bound, expiring token is minted behind the scenes. The one lifetime the consent screen won’t offer is “never expires.”",
+            },
+        ],
+        code: Some(CodeSample {
+            caption: "Point an MCP client at the server",
+            body: r#"{
+  "mcpServers": {
+    "uptimepage": {
+      "url": "https://mcp.uptimepage.dev/mcp"
+    }
+  }
+}"#,
+        }),
+        resources: &[
+            ResourceLink {
+                label: "How the MCP server works",
+                href: "/blog/mcp-server",
+            },
+            ResourceLink {
+                label: "Monitoring as code",
+                href: "/automation",
+            },
+        ],
+        cta: "Start free with GitHub",
+    },
 ];
 
 #[derive(Template, WebTemplate)]
