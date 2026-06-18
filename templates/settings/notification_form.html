@@ -62,7 +62,7 @@
         {% call reg::chooser_card("data-kind-card", "kind", "telegram", form.kind == "telegram", "telegram bot", "your own bot token") %}{% endcall %}
         {% endif %}
         {% call reg::chooser_card("data-kind-card", "kind", "whatsapp", form.kind == "whatsapp", "whatsapp", "Cloud API message") %}{% endcall %}
-        {% call reg::chooser_card("data-kind-card", "kind", "sms", form.kind == "sms", "sms", "Twilio · Telnyx · Vonage") %}{% endcall %}
+        {% call reg::chooser_card("data-kind-card", "kind", "sms", form.kind == "sms", "sms", "Twilio · Vonage · Telnyx · Plivo · Sinch") %}{% endcall %}
         {% call reg::chooser_card("data-kind-card", "kind", "webhook", form.kind == "webhook", "webhook", "POST to your endpoint") %}{% endcall %}
       </div>
       {% if form.mode != "create" && form.kind != "telegram_app" && form.kind != "whatsapp_app" %}
@@ -555,8 +555,8 @@
           <legend class="field-outline__label">Gateway</legend>
           <div class="check-type-cards">
             {% call reg::chooser_card("data-sms-provider-card", "sms_provider", "twilio", form.config.sms_provider == "twilio", "twilio", "account SID + token") %}{% endcall %}
-            {% call reg::chooser_card("data-sms-provider-card", "sms_provider", "telnyx", form.config.sms_provider == "telnyx", "telnyx", "API key") %}{% endcall %}
             {% call reg::chooser_card("data-sms-provider-card", "sms_provider", "vonage", form.config.sms_provider == "vonage", "vonage", "key + secret") %}{% endcall %}
+            {% call reg::chooser_card("data-sms-provider-card", "sms_provider", "telnyx", form.config.sms_provider == "telnyx", "telnyx", "API key") %}{% endcall %}
             {% call reg::chooser_card("data-sms-provider-card", "sms_provider", "plivo", form.config.sms_provider == "plivo", "plivo", "auth id + token") %}{% endcall %}
             {% call reg::chooser_card("data-sms-provider-card", "sms_provider", "sinch", form.config.sms_provider == "sinch", "sinch", "service plan + token") %}{% endcall %}
           </div>
