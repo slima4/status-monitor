@@ -24,6 +24,7 @@ pub struct TeamPage {
     pub is_owner: bool,
     pub org_id: String,
     pub org_name: String,
+    pub org_slug: String,
 }
 
 #[derive(Template, WebTemplate)]
@@ -71,15 +72,14 @@ pub async fn page(
         orgs_store::membership_status(pool, user.id, org).await?,
         MembershipStatus::Owner
     );
-    let org_name = orgs_store::get_org(pool, org)
-        .await?
-        .map(|o| o.name)
-        .unwrap_or_default();
+    let org_row = orgs_store::get_org(pool, org).await?;
+    let (org_name, org_slug) = org_row.map(|o| (o.name, o.slug)).unwrap_or_default();
     Ok(TeamPage {
         active_tab: TAB_TEAM,
         is_owner,
         org_id: org.0.to_string(),
         org_name,
+        org_slug,
     }
     .into_response())
 }
@@ -162,12 +162,15 @@ mod tests {
             is_owner: true,
             org_id: "00000000-0000-0000-0000-000000000001".into(),
             org_name: "Acme".into(),
+            org_slug: "brave-river-x7k2p9".into(),
         }
         .render()
         .unwrap();
         assert!(html.contains(r#"id="invite-form""#));
         assert!(html.contains(r#"id="org-name-form""#));
         assert!(html.contains(r#"value="Acme""#));
+        assert!(html.contains(r#"id="org-slug-form""#));
+        assert!(html.contains(r#"value="brave-river-x7k2p9""#));
         assert!(html.contains(r#"hx-get="/web/partials/settings/team""#));
         assert!(html.contains("send invite"));
         assert!(html.contains("team.js"));
@@ -180,11 +183,13 @@ mod tests {
             is_owner: false,
             org_id: "00000000-0000-0000-0000-000000000001".into(),
             org_name: "Acme".into(),
+            org_slug: "brave-river-x7k2p9".into(),
         }
         .render()
         .unwrap();
         assert!(!html.contains(r#"id="invite-form""#));
         assert!(!html.contains(r#"id="org-name-form""#));
+        assert!(!html.contains(r#"id="org-slug-form""#));
         // Non-owners still get the read-only roster (the hx-get hook), just no
         // invite form or mutation script.
         assert!(html.contains(r#"hx-get="/web/partials/settings/team""#));

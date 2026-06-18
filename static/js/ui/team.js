@@ -101,6 +101,109 @@
         });
     }
 
+    const slugForm = document.getElementById("org-slug-form");
+    if (slugForm) {
+        const slugInput = document.getElementById("org-slug");
+        const slugAvail = document.getElementById("org-slug-avail");
+        const slugStatus = document.getElementById("org-slug-status");
+        const slugErrors = document.getElementById("org-slug-errors");
+
+        const slugify = (raw) =>
+            raw.toLowerCase()
+                .replace(/[^a-z0-9]+/g, "-")
+                .replace(/^[0-9-]+/, "")
+                .slice(0, 30)
+                .replace(/-+$/, "");
+
+        const showAvail = (text, ok) => {
+            slugAvail.textContent = text;
+            slugAvail.className = "font-mono text-xs " + (ok ? "flash-text--ok" : "flash-text--bad");
+        };
+
+        // check-slug runs the real validator, so the client never mirrors it.
+        const fetchAvail = async (slug) => {
+            const res = await fetch(
+                `/api/v1/orgs/check-slug?slug=${encodeURIComponent(slug)}`,
+                { headers: { Accept: "application/json" } },
+            );
+            return res.json();
+        };
+
+        let checkTimer;
+        slugInput.addEventListener("input", () => {
+            slugStatus.textContent = "";
+            clearTimeout(checkTimer);
+            const slug = slugInput.value.trim();
+            if (!slug || slug === slugForm.dataset.currentSlug) { slugAvail.textContent = ""; return; }
+            checkTimer = setTimeout(async () => {
+                try {
+                    const data = await fetchAvail(slug);
+                    if (data.available) showAvail("✓ available", true);
+                    else showAvail(`✗ ${data.reason || "unavailable"}`, false);
+                } catch { slugAvail.textContent = ""; }
+            }, 300);
+        });
+
+        document.getElementById("slug-from-name").addEventListener("click", () => {
+            const derived = slugify(document.getElementById("org-name").value);
+            slugInput.value = derived;
+            slugInput.focus();
+            if (derived) slugInput.dispatchEvent(new Event("input"));
+            else showAvail("✗ your name has no letters to build a slug from — type one", false);
+        });
+
+        slugForm.addEventListener("submit", async (ev) => {
+            ev.preventDefault();
+            window.smClearFormErrors(slugErrors);
+            slugStatus.textContent = "";
+            const slug = slugInput.value.trim();
+            if (slug === slugForm.dataset.currentSlug) {
+                slugStatus.className = "flash-text flash-text--muted";
+                slugStatus.textContent = "That's already your slug.";
+                return;
+            }
+            const avail = await fetchAvail(slug).catch(() => null);
+            if (!avail) {
+                window.smRenderClientError(slugErrors, "Network error — try again.");
+                return;
+            }
+            if (!avail.available) {
+                slugInput.setAttribute("aria-invalid", "true");
+                window.smRenderClientError(slugErrors, avail.reason || "That slug is unavailable.");
+                return;
+            }
+            const ok = await window.smConfirm({
+                title: "Change the org slug?",
+                body: `Tooling that uses "${slugForm.dataset.currentSlug}" as X-Uptimepage-Org and the current status-page URL will break. The old slug is freed with no redirect.`,
+                confirmLabel: "change slug",
+            });
+            if (!ok) return;
+            const btn = slugForm.querySelector("button[type=submit]");
+            btn.disabled = true;
+            try {
+                const res = await fetch(`/api/v1/orgs/${orgId()}`, {
+                    method: "PATCH",
+                    headers,
+                    body: JSON.stringify({ slug }),
+                });
+                if (res.ok) {
+                    slugForm.dataset.currentSlug = slug;
+                    slugAvail.textContent = "";
+                    slugStatus.className = "flash-text flash-text--ok";
+                    slugStatus.textContent = "Saved.";
+                } else {
+                    let data = null;
+                    try { data = await res.json(); } catch { /* not JSON */ }
+                    window.smRenderApiError(slugErrors, data, res.status);
+                }
+            } catch {
+                window.smRenderClientError(slugErrors, "Network error — try again.");
+            } finally {
+                btn.disabled = false;
+            }
+        });
+    }
+
     list.addEventListener("click", async (ev) => {
         const roleBtn = ev.target.closest("[data-team-role]");
         const removeBtn = ev.target.closest("[data-team-remove]");

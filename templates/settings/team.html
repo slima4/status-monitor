@@ -30,6 +30,34 @@
          class="hidden alert-card alert-card--error"></div>
   </form>
 
+  <form id="org-slug-form" data-org-id="{{ org_id }}" data-current-slug="{{ org_slug }}"
+        novalidate class="sticker-card space-y-3 p-4">
+    <div class="grid gap-4 sm:grid-cols-[1fr_auto_auto] sm:items-end">
+      <label class="field-outline">
+        <span class="field-outline__label">URL slug</span>
+        <input id="org-slug" name="slug" type="text" required minlength="3" maxlength="30"
+               value="{{ org_slug }}" autocomplete="off" spellcheck="false"
+               pattern="[a-z][a-z0-9-]*[a-z0-9]" class="w-full field font-mono">
+      </label>
+      <button type="button" id="slug-from-name"
+              class="sticker-btn px-3 py-2 text-sm font-medium">
+        use my name
+      </button>
+      <button type="submit"
+              class="sticker-btn sticker-btn--primary px-4 py-2 text-sm font-medium">
+        save slug
+      </button>
+    </div>
+    <p class="font-mono text-xs text-quiet">
+      # the org id sent as X-Uptimepage-Org and your public status-page URL.
+      changing it is a hard cutover — old slug is freed, no redirect kept.
+    </p>
+    <p id="org-slug-avail" aria-live="polite" class="font-mono text-xs"></p>
+    <p id="org-slug-status" aria-live="polite" class="flash-text"></p>
+    <div id="org-slug-errors" role="alert" aria-live="polite"
+         class="hidden alert-card alert-card--error"></div>
+  </form>
+
   <form id="invite-form" data-org-id="{{ org_id }}" novalidate class="sticker-card space-y-4 p-4">
     <div class="grid gap-4 sm:grid-cols-[1fr_auto_auto] sm:items-end">
       <label class="field-outline">
