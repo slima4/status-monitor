@@ -62,7 +62,7 @@ resource "uptimepage_target" "api" {
 | Name | Kind | Manages |
 |---|---|---|
 | `uptimepage_target` | resource | Monitors — `http`, `tcp`, `tls_cert`, `domain_expiry`, `dns` checks |
-| `uptimepage_notification_channel` | resource | Alert destinations — `webhook`, `slack`, `telegram`, `whatsapp`. The `pagerduty`/`ntfy`/`pushover` kinds land in a provider release after the API ships them. The one-tap `telegram_app` and `whatsapp_app` kinds are not manageable: their configs are minted by the link flows and the API rejects them in request bodies (`CHANNEL_KIND_MANAGED`) |
+| `uptimepage_notification_channel` | resource | Alert destinations — `webhook`, `slack`, `telegram`, `whatsapp`. The `pagerduty`/`ntfy`/`pushover`/`sms` kinds land in a provider release after the API ships them. The one-tap `telegram_app` and `whatsapp_app` kinds are not manageable: their configs are minted by the link flows and the API rejects them in request bodies (`CHANNEL_KIND_MANAGED`) |
 | `uptimepage_target` | data source | Look up an existing target by id |
 
 For the full attribute reference and an example per check type, see the

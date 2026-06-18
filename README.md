@@ -29,7 +29,7 @@ A customer-facing `/status` page (HTML + JSON + RSS 2.0) is built into the binar
 ## Alerting
 
 Notification channels are per-org resources (Slack incoming webhook, generic
-HTTP webhook, Telegram bot) created via `/api/v1/notification-channels`.
+HTTP webhook, Telegram bot, SMS gateway, …) created via `/api/v1/notification-channels`.
 Transport secrets are sealed at rest and never echoed back. A target opts in
 by binding one or more channels in its `alerts` array:
 
