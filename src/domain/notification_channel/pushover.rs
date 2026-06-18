@@ -14,6 +14,10 @@ pub struct PushoverConfig {
     /// Optional device name; empty/absent delivers to all devices.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub device: Option<String>,
+    /// Send high-urgency opens at emergency priority (2): Pushover repeats the
+    /// alert until the recipient acknowledges it. Resolves cancel the repeat.
+    #[serde(default)]
+    pub emergency: bool,
 }
 
 fn is_pushover_key(s: &str) -> bool {

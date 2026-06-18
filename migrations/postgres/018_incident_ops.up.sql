@@ -105,8 +105,18 @@ CREATE TABLE incident_notifications (
     sent_at          TIMESTAMPTZ,
     -- Earliest time the retry sweep may re-attempt a failed page (exponential
     -- backoff). NULL = eligible now (never tried, or first failure pre-schedule).
-    next_attempt_at  TIMESTAMPTZ
+    next_attempt_at  TIMESTAMPTZ,
+    -- Pushover emergency-priority receipt: polled for acknowledgement, cancelled
+    -- on resolve. NULL for ordinary deliveries.
+    provider_receipt TEXT,
+    acked_at         TIMESTAMPTZ
 );
+
+-- Ack poll sweep: sent emergency pages awaiting acknowledgement.
+CREATE INDEX idx_incident_notifications_ack_poll
+    ON incident_notifications (sent_at)
+    WHERE provider_receipt IS NOT NULL AND acked_at IS NULL
+      AND status = 'sent' AND channel_id IS NOT NULL;
 
 CREATE INDEX idx_incident_notifications_incident
     ON incident_notifications (org_id, incident_id, created_at);

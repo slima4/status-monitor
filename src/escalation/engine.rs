@@ -30,16 +30,17 @@ use metrics::counter;
 
 use crate::config::EscalationConfig;
 use crate::domain::{
-    EscalationDecision, EscalationPolicy, EscalationTargetType, IncidentEventKind, IncidentState,
-    NewIncidentNotification, NotificationOutcome, NotificationReason, NotificationStatus,
-    OpsIncident, OrgId, Target, UserId, next_step,
+    ChannelConfig, EscalationDecision, EscalationPolicy, EscalationTargetType, IncidentEventKind,
+    IncidentState, NewIncidentNotification, NotificationOutcome, NotificationReason,
+    NotificationStatus, OpsIncident, OrgId, Target, UserId, next_step,
 };
 use crate::error::Result;
 use crate::http_outbound::OutboundHttpClient;
 use crate::notifier::build_notifier;
 use crate::notifier::event::IncidentNotice;
+use crate::notifier::pushover::PushoverReceipts;
 use crate::storage::{
-    Actor, ContactStore, DueIncident, EscalationPolicyStore, IncidentOpsStore,
+    Actor, ContactStore, DueIncident, EmergencyAck, EscalationPolicyStore, IncidentOpsStore,
     NotificationChannelStore, OnCallStore, PendingNotification, TargetStore,
 };
 
@@ -295,6 +296,7 @@ impl Worker {
         self.escalate_due().await;
         self.renotify_due().await;
         self.retry_pending().await;
+        self.poll_acks().await;
     }
 
     /// Catch incidents whose `Opened` signal was lost (e.g. the bounded signal
@@ -441,6 +443,10 @@ impl Worker {
         incident: &OpsIncident,
         target: &Target,
     ) -> Result<()> {
+        // Stop any still-repeating emergency page before the recovery-notice
+        // gate — a resolved incident must go quiet even when the recovery push
+        // itself is disabled.
+        self.cancel_emergency(org, incident.id).await;
         if !target.notify_recovery {
             return Ok(());
         }
@@ -462,6 +468,103 @@ impl Worker {
             .await?;
         self.log_paged(org, incident.id, NotificationReason::Resolved, paged)
             .await
+    }
+
+    /// Build a Pushover receipt client from the channel's stored application
+    /// token. `None` if the channel is gone or not a Pushover channel.
+    async fn pushover_receipts(&self, org: OrgId, channel_id: Uuid) -> Option<PushoverReceipts> {
+        let channel = self.channels.get(org, channel_id).await.ok()??;
+        match &channel.config {
+            ChannelConfig::Pushover(c) => {
+                Some(PushoverReceipts::new(self.http.clone(), c.token.clone()))
+            }
+            _ => None,
+        }
+    }
+
+    /// Cancel every outstanding emergency page for a resolved incident so it
+    /// stops repeating. Best-effort: a failed cancel still clears the receipt so
+    /// the poll sweep doesn't keep chasing it; Pushover's `expire` is the
+    /// backstop.
+    async fn cancel_emergency(&self, org: OrgId, incident_id: Uuid) {
+        let acks = match self.ops.emergency_acks_for_incident(org, incident_id).await {
+            Ok(a) => a,
+            Err(err) => {
+                tracing::warn!(error = %err, "emergency ack lookup failed");
+                return;
+            }
+        };
+        for ack in acks {
+            if let Some(client) = self.pushover_receipts(org, ack.channel_id).await
+                && let Err(err) = client.cancel(&ack.receipt).await
+            {
+                tracing::warn!(incident_id = %incident_id, error = %err, "pushover emergency cancel failed");
+            }
+            if let Err(err) = self.ops.clear_receipt(org, ack.id).await {
+                tracing::warn!(error = %err, "clearing emergency receipt failed");
+            }
+        }
+    }
+
+    /// Poll outstanding emergency receipts: record acknowledgement on the
+    /// timeline, drop the receipt once acked or expired so it leaves the poll
+    /// set.
+    async fn poll_acks(&self) {
+        let limit = self.cfg.max_pages_per_tick.max(1) as usize;
+        let due = match self.ops.due_emergency_acks(limit).await {
+            Ok(d) => d,
+            Err(err) => {
+                tracing::warn!(error = %err, "emergency ack poll scan failed");
+                return;
+            }
+        };
+        let budget = self.sweep_budget();
+        let start = Instant::now();
+        let mut it = due.into_iter();
+        let mut futs = FuturesUnordered::new();
+        for a in it.by_ref().take(SWEEP_CONCURRENCY) {
+            futs.push(self.poll_one_ack(a));
+        }
+        while futs.next().await.is_some() {
+            if start.elapsed() < budget
+                && let Some(a) = it.next()
+            {
+                futs.push(self.poll_one_ack(a));
+            }
+        }
+    }
+
+    async fn poll_one_ack(&self, ack: EmergencyAck) {
+        let Some(client) = self.pushover_receipts(ack.org, ack.channel_id).await else {
+            // Channel gone: nothing can cancel or read it — retire the receipt.
+            let _ = self.ops.clear_receipt(ack.org, ack.id).await;
+            return;
+        };
+        let state = match client.poll(&ack.receipt).await {
+            Ok(s) => s,
+            Err(err) => {
+                tracing::warn!(error = %err, "pushover receipt poll failed");
+                return;
+            }
+        };
+        if state.acknowledged {
+            if let Err(err) = self
+                .ops
+                .append_event(
+                    ack.org,
+                    ack.incident_id,
+                    IncidentEventKind::Note,
+                    Actor::System,
+                    Some("emergency page acknowledged in Pushover".to_string()),
+                )
+                .await
+            {
+                tracing::warn!(error = %err, "recording emergency ack failed");
+            }
+            let _ = self.ops.mark_acked(ack.org, ack.id, Utc::now()).await;
+        } else if state.expired {
+            let _ = self.ops.clear_receipt(ack.org, ack.id).await;
+        }
     }
 
     /// Walk the next rung of every due incident's policy, bounded-concurrent so
@@ -696,10 +799,11 @@ impl Worker {
                 .await?;
             // Unverified email: no send is attempted, but the row records a
             // failure so the gap is visible on the incident, not silent.
-            let (status, error) = if channel.awaiting_verification() {
+            let (status, error, receipt) = if channel.awaiting_verification() {
                 (
                     NotificationStatus::Failed,
                     Some("email address not verified".to_string()),
+                    None,
                 )
             } else {
                 self.deliver(org, &channel, notice, id, 1).await
@@ -725,6 +829,7 @@ impl Worker {
                         error,
                         sent_at: (status == NotificationStatus::Sent).then(Utc::now),
                         next_attempt_at,
+                        provider_receipt: receipt,
                     },
                 )
                 .await?;
@@ -842,6 +947,7 @@ impl Worker {
                         error: None,
                         sent_at: None,
                         next_attempt_at,
+                        provider_receipt: None,
                     },
                 )
                 .await?;
@@ -859,15 +965,17 @@ impl Worker {
                         error: None,
                         sent_at: None,
                         next_attempt_at: None,
+                        provider_receipt: None,
                     },
                 )
                 .await?;
             return Ok(());
         }
-        let (status, error) = if channel.awaiting_verification() {
+        let (status, error, receipt) = if channel.awaiting_verification() {
             (
                 NotificationStatus::Failed,
                 Some("email address not verified".to_string()),
+                None,
             )
         } else {
             self.deliver(p.org, &channel, &notice, p.id, next_attempt)
@@ -889,6 +997,7 @@ impl Worker {
                     error,
                     sent_at: (status == NotificationStatus::Sent).then(Utc::now),
                     next_attempt_at,
+                    provider_receipt: receipt,
                 },
             )
             .await?;
@@ -934,7 +1043,7 @@ impl Worker {
         notice: &IncidentNotice,
         notification_id: Uuid,
         attempt: i32,
-    ) -> (NotificationStatus, Option<String>) {
+    ) -> (NotificationStatus, Option<String>, Option<String>) {
         let central = self.central_bot.as_ref().map(|c| c.as_central());
         let error = match build_notifier(
             &channel.config,
@@ -944,7 +1053,7 @@ impl Worker {
             self.email.as_ref(),
         ) {
             Ok(n) => match n.notify_incident(notice).await {
-                Ok(()) => return (NotificationStatus::Sent, None),
+                Ok(()) => return (NotificationStatus::Sent, None, n.taken_receipt()),
                 Err(err) => redact_secrets(&err.to_string()),
             },
             Err(err) => redact_secrets(&err.to_string()),
@@ -981,7 +1090,7 @@ impl Worker {
                 "incident notification delivery failed"
             );
         }
-        (NotificationStatus::Failed, Some(error))
+        (NotificationStatus::Failed, Some(error), None)
     }
 
     fn notice(

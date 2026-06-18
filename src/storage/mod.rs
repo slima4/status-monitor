@@ -41,8 +41,8 @@ pub use escalation_policies::{
     EscalationPolicyStore, InMemoryEscalationPolicyStore, PgEscalationPolicyStore,
 };
 pub use incident_ops::{
-    Actor, DueIncident, InMemoryIncidentOpsStore, IncidentOpsFilter, IncidentOpsStore,
-    IncidentSort, LifecycleOutcome, PendingNotification, PgIncidentOpsStore,
+    Actor, DueIncident, EmergencyAck, InMemoryIncidentOpsStore, IncidentOpsFilter,
+    IncidentOpsStore, IncidentSort, LifecycleOutcome, PendingNotification, PgIncidentOpsStore,
 };
 pub use incidents::{
     ActiveIncident, InMemoryIncidentNarrationStore, IncidentNarrationStore,

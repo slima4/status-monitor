@@ -155,6 +155,17 @@ pub struct PendingNotification {
     pub attempt: i32,
 }
 
+/// A sent emergency page still awaiting acknowledgement, carrying the channel
+/// whose application token polls/cancels its Pushover receipt.
+#[derive(Debug, Clone)]
+pub struct EmergencyAck {
+    pub id: Uuid,
+    pub org: OrgId,
+    pub incident_id: Uuid,
+    pub channel_id: Uuid,
+    pub receipt: String,
+}
+
 /// A triggered incident whose escalation timer is due. Carries the owning
 /// `org` (cross-org scan) plus the bookkeeping the engine needs to re-resolve
 /// the policy and compute the next rung.
@@ -278,6 +289,20 @@ pub trait IncidentOpsStore: Send + Sync {
         id: Uuid,
         outcome: NotificationOutcome,
     ) -> Result<()>;
+    /// Cross-org sent emergency pages awaiting acknowledgement — the ack-poll
+    /// sweep. Only rows with a receipt and a still-present channel.
+    async fn due_emergency_acks(&self, limit: usize) -> Result<Vec<EmergencyAck>>;
+    /// Outstanding emergency pages for one incident — the resolve path cancels
+    /// these so a resolved incident stops repeating.
+    async fn emergency_acks_for_incident(
+        &self,
+        org: OrgId,
+        incident_id: Uuid,
+    ) -> Result<Vec<EmergencyAck>>;
+    /// Stamp the acknowledgement time and stop polling the row.
+    async fn mark_acked(&self, org: OrgId, id: Uuid, acked_at: DateTime<Utc>) -> Result<()>;
+    /// Drop the receipt so the row leaves the poll set (cancelled or expired).
+    async fn clear_receipt(&self, org: OrgId, id: Uuid) -> Result<()>;
     /// Start escalation on a freshly-opened incident: stamp the resolved
     /// policy, set the first level + round 0, and arm `next_escalation_at`.
     /// Guarded on `state = 'triggered'` so a concurrent ack/resolve (which
@@ -451,7 +476,8 @@ fn row_to_event(r: EventRow) -> IncidentEvent {
 }
 
 const NOTIF_COLS: &str = "id, incident_id, escalation_level, target_user_id, channel_id, \
-     transport, reason, status, attempt, error, created_at, sent_at, next_attempt_at";
+     transport, reason, status, attempt, error, created_at, sent_at, next_attempt_at, \
+     provider_receipt, acked_at";
 
 #[derive(sqlx::FromRow)]
 struct NotifRow {
@@ -468,6 +494,8 @@ struct NotifRow {
     created_at: DateTime<Utc>,
     sent_at: Option<DateTime<Utc>>,
     next_attempt_at: Option<DateTime<Utc>>,
+    provider_receipt: Option<String>,
+    acked_at: Option<DateTime<Utc>>,
 }
 
 fn row_to_notif(r: NotifRow) -> IncidentNotification {
@@ -485,6 +513,8 @@ fn row_to_notif(r: NotifRow) -> IncidentNotification {
         created_at: r.created_at,
         sent_at: r.sent_at,
         next_attempt_at: r.next_attempt_at,
+        provider_receipt: r.provider_receipt,
+        acked_at: r.acked_at,
     }
 }
 
@@ -1263,7 +1293,8 @@ impl IncidentOpsStore for PgIncidentOpsStore {
     ) -> Result<()> {
         sqlx::query(
             r#"UPDATE incident_notifications
-               SET status = $3, attempt = $4, error = $5, sent_at = $6, next_attempt_at = $7
+               SET status = $3, attempt = $4, error = $5, sent_at = $6, next_attempt_at = $7,
+                   provider_receipt = COALESCE($8, provider_receipt)
                WHERE id = $1 AND org_id = $2"#,
         )
         .bind(id)
@@ -1273,9 +1304,105 @@ impl IncidentOpsStore for PgIncidentOpsStore {
         .bind(outcome.error)
         .bind(outcome.sent_at)
         .bind(outcome.next_attempt_at)
+        .bind(outcome.provider_receipt)
         .execute(&self.pool)
         .await
         .map_err(|e| anyhow::anyhow!("mark_notification: {e}"))?;
+        Ok(())
+    }
+
+    async fn due_emergency_acks(&self, limit: usize) -> Result<Vec<EmergencyAck>> {
+        let cap = (limit as i64).clamp(1, 1000);
+        #[derive(sqlx::FromRow)]
+        struct Row {
+            id: Uuid,
+            org_id: Uuid,
+            incident_id: Uuid,
+            channel_id: Uuid,
+            provider_receipt: String,
+        }
+        let rows: Vec<Row> = sqlx::query_as(
+            r#"SELECT id, org_id, incident_id, channel_id, provider_receipt
+               FROM incident_notifications
+               WHERE provider_receipt IS NOT NULL AND acked_at IS NULL
+                 AND status = 'sent' AND channel_id IS NOT NULL
+               ORDER BY sent_at ASC LIMIT $1"#,
+        )
+        .bind(cap)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| anyhow::anyhow!("due_emergency_acks: {e}"))?;
+        Ok(rows
+            .into_iter()
+            .map(|r| EmergencyAck {
+                id: r.id,
+                org: OrgId(r.org_id),
+                incident_id: r.incident_id,
+                channel_id: r.channel_id,
+                receipt: r.provider_receipt,
+            })
+            .collect())
+    }
+
+    async fn emergency_acks_for_incident(
+        &self,
+        org: OrgId,
+        incident_id: Uuid,
+    ) -> Result<Vec<EmergencyAck>> {
+        #[derive(sqlx::FromRow)]
+        struct Row {
+            id: Uuid,
+            org_id: Uuid,
+            incident_id: Uuid,
+            channel_id: Uuid,
+            provider_receipt: String,
+        }
+        let rows: Vec<Row> = sqlx::query_as(
+            r#"SELECT id, org_id, incident_id, channel_id, provider_receipt
+               FROM incident_notifications
+               WHERE org_id = $1 AND incident_id = $2
+                 AND provider_receipt IS NOT NULL AND acked_at IS NULL
+                 AND status = 'sent' AND channel_id IS NOT NULL"#,
+        )
+        .bind(org.0)
+        .bind(incident_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| anyhow::anyhow!("emergency_acks_for_incident: {e}"))?;
+        Ok(rows
+            .into_iter()
+            .map(|r| EmergencyAck {
+                id: r.id,
+                org: OrgId(r.org_id),
+                incident_id: r.incident_id,
+                channel_id: r.channel_id,
+                receipt: r.provider_receipt,
+            })
+            .collect())
+    }
+
+    async fn mark_acked(&self, org: OrgId, id: Uuid, acked_at: DateTime<Utc>) -> Result<()> {
+        sqlx::query(
+            "UPDATE incident_notifications SET acked_at = $3 WHERE id = $1 AND org_id = $2",
+        )
+        .bind(id)
+        .bind(org.0)
+        .bind(acked_at)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| anyhow::anyhow!("mark_acked: {e}"))?;
+        Ok(())
+    }
+
+    async fn clear_receipt(&self, org: OrgId, id: Uuid) -> Result<()> {
+        sqlx::query(
+            "UPDATE incident_notifications SET provider_receipt = NULL WHERE id = $1 AND org_id = $2",
+        )
+        .bind(id)
+        .bind(org.0)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| anyhow::anyhow!("clear_receipt: {e}"))?;
         Ok(())
     }
 
@@ -1975,6 +2102,8 @@ impl IncidentOpsStore for InMemoryIncidentOpsStore {
             created_at: Utc::now(),
             sent_at: n.sent_at,
             next_attempt_at: None,
+            provider_receipt: None,
+            acked_at: None,
         };
         self.inner.lock().notifications.push((n.org, row));
         Ok(id)
@@ -2028,6 +2157,84 @@ impl IncidentOpsStore for InMemoryIncidentOpsStore {
             n.error = outcome.error;
             n.sent_at = outcome.sent_at;
             n.next_attempt_at = outcome.next_attempt_at;
+            if outcome.provider_receipt.is_some() {
+                n.provider_receipt = outcome.provider_receipt;
+            }
+        }
+        Ok(())
+    }
+
+    async fn due_emergency_acks(&self, limit: usize) -> Result<Vec<EmergencyAck>> {
+        Ok(self
+            .inner
+            .lock()
+            .notifications
+            .iter()
+            .filter(|(_, n)| {
+                n.status == NotificationStatus::Sent
+                    && n.acked_at.is_none()
+                    && n.provider_receipt.is_some()
+                    && n.channel_id.is_some()
+            })
+            .take(limit)
+            .map(|(org, n)| EmergencyAck {
+                id: n.id,
+                org: *org,
+                incident_id: n.incident_id,
+                channel_id: n.channel_id.expect("filtered some"),
+                receipt: n.provider_receipt.clone().expect("filtered some"),
+            })
+            .collect())
+    }
+
+    async fn emergency_acks_for_incident(
+        &self,
+        org: OrgId,
+        incident_id: Uuid,
+    ) -> Result<Vec<EmergencyAck>> {
+        Ok(self
+            .inner
+            .lock()
+            .notifications
+            .iter()
+            .filter(|(o, n)| {
+                *o == org
+                    && n.incident_id == incident_id
+                    && n.status == NotificationStatus::Sent
+                    && n.acked_at.is_none()
+                    && n.provider_receipt.is_some()
+                    && n.channel_id.is_some()
+            })
+            .map(|(o, n)| EmergencyAck {
+                id: n.id,
+                org: *o,
+                incident_id: n.incident_id,
+                channel_id: n.channel_id.expect("filtered some"),
+                receipt: n.provider_receipt.clone().expect("filtered some"),
+            })
+            .collect())
+    }
+
+    async fn mark_acked(&self, org: OrgId, id: Uuid, acked_at: DateTime<Utc>) -> Result<()> {
+        let mut g = self.inner.lock();
+        if let Some((_, n)) = g
+            .notifications
+            .iter_mut()
+            .find(|(o, n)| *o == org && n.id == id)
+        {
+            n.acked_at = Some(acked_at);
+        }
+        Ok(())
+    }
+
+    async fn clear_receipt(&self, org: OrgId, id: Uuid) -> Result<()> {
+        let mut g = self.inner.lock();
+        if let Some((_, n)) = g
+            .notifications
+            .iter_mut()
+            .find(|(o, n)| *o == org && n.id == id)
+        {
+            n.provider_receipt = None;
         }
         Ok(())
     }

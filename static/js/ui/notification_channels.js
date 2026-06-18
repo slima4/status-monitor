@@ -795,6 +795,7 @@
             };
             const device = (data.get("pushover_device") || "").trim();
             if (device) config.device = device;
+            config.emergency = data.get("pushover_emergency") === "on";
             return { config };
         }
         if (kind === "telegram_app") {

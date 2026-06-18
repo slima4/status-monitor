@@ -16,7 +16,8 @@ use uptimepage::domain::{
     NotificationOutcome, NotificationReason, NotificationStatus, OrgId,
 };
 use uptimepage::storage::{
-    Actor, IncidentOpsStore, LifecycleOutcome, PgIncidentOpsStore, create_org_with_owner,
+    Actor, InMemoryIncidentOpsStore, IncidentOpsStore, LifecycleOutcome, PgIncidentOpsStore,
+    create_org_with_owner,
 };
 use uuid::Uuid;
 
@@ -297,6 +298,7 @@ async fn notification_log_record_retry_and_scope_pg() {
                 error: Some("still down".into()),
                 sent_at: None,
                 next_attempt_at: Some(now + chrono::Duration::hours(1)),
+                provider_receipt: None,
             },
         )
         .await
@@ -331,6 +333,7 @@ async fn notification_log_record_retry_and_scope_pg() {
                 error: None,
                 sent_at: Some(chrono::Utc::now()),
                 next_attempt_at: None,
+                provider_receipt: None,
             },
         )
         .await
@@ -766,4 +769,90 @@ async fn reopen_conflicts_when_target_has_a_newer_open_incident_pg() {
         }
         other => panic!("expected Conflict, got {other:?}"),
     }
+}
+
+// Emergency-receipt lifecycle on the in-memory store (no DB): a sent page with
+// a receipt is pollable until acknowledged or its receipt is cleared.
+#[tokio::test]
+async fn emergency_ack_lifecycle_in_memory() {
+    let store = InMemoryIncidentOpsStore::new();
+    let org = OrgId(Uuid::from_u128(1));
+    let incident = Uuid::from_u128(2);
+    let channel = Uuid::from_u128(3);
+
+    let record = || async {
+        let id = store
+            .record_notification(NewIncidentNotification {
+                org,
+                incident_id: incident,
+                escalation_level: Some(0),
+                target_user_id: None,
+                channel_id: Some(channel),
+                transport: "pushover".into(),
+                reason: NotificationReason::Opened,
+                status: NotificationStatus::Queued,
+                attempt: 1,
+                error: None,
+                sent_at: None,
+            })
+            .await
+            .unwrap();
+        store
+            .mark_notification(
+                org,
+                id,
+                NotificationOutcome {
+                    status: NotificationStatus::Sent,
+                    attempt: 1,
+                    error: None,
+                    sent_at: Some(chrono::Utc::now()),
+                    next_attempt_at: None,
+                    provider_receipt: Some("rcpt-abc".into()),
+                },
+            )
+            .await
+            .unwrap();
+        id
+    };
+
+    let acked_id = record().await;
+    let due = store.due_emergency_acks(10).await.unwrap();
+    assert!(
+        due.iter()
+            .any(|a| a.id == acked_id && a.receipt == "rcpt-abc" && a.channel_id == channel)
+    );
+    assert!(
+        store
+            .emergency_acks_for_incident(org, incident)
+            .await
+            .unwrap()
+            .iter()
+            .any(|a| a.id == acked_id)
+    );
+
+    // Acknowledged rows drop out of the poll set.
+    store
+        .mark_acked(org, acked_id, chrono::Utc::now())
+        .await
+        .unwrap();
+    assert!(
+        store
+            .due_emergency_acks(10)
+            .await
+            .unwrap()
+            .iter()
+            .all(|a| a.id != acked_id)
+    );
+
+    // A cleared receipt (cancelled/expired) also leaves the set.
+    let cleared_id = record().await;
+    store.clear_receipt(org, cleared_id).await.unwrap();
+    assert!(
+        store
+            .due_emergency_acks(10)
+            .await
+            .unwrap()
+            .iter()
+            .all(|a| a.id != cleared_id)
+    );
 }

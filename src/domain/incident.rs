@@ -666,6 +666,14 @@ pub struct IncidentNotification {
     /// it has been sent, suppressed, or dead-lettered (attempts exhausted).
     #[schema(nullable = true)]
     pub next_attempt_at: Option<DateTime<Utc>>,
+    /// Pushover emergency receipt id, polled for acknowledgement and cancelled
+    /// when the incident resolves. `None` for ordinary deliveries.
+    #[schema(nullable = true)]
+    pub provider_receipt: Option<String>,
+    /// When the recipient acknowledged an emergency page (Pushover). `None`
+    /// until acknowledged, or for non-emergency deliveries.
+    #[schema(nullable = true)]
+    pub acked_at: Option<DateTime<Utc>>,
 }
 
 /// A paging delivery-log row to persist. The store stamps `id`/`created_at`.
@@ -695,6 +703,9 @@ pub struct NotificationOutcome {
     /// Schedules the next retry (backoff), or clears it once the row is sent,
     /// suppressed, or dead-lettered (attempts exhausted).
     pub next_attempt_at: Option<DateTime<Utc>>,
+    /// Pushover emergency receipt id captured on a successful send; persisted so
+    /// the poll/cancel steps can find it. `None` for ordinary deliveries.
+    pub provider_receipt: Option<String>,
 }
 
 // ───────────────────────── Lifecycle state machine ────────────────────────

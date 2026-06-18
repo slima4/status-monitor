@@ -126,6 +126,36 @@ pub async fn post_bytes_with_headers(
     Ok(())
 }
 
+/// POST JSON and parse a `2xx` response body into `R`. Like [`post_json`] but
+/// keeps the reply — transports that return an id to track later (Pushover's
+/// emergency `receipt`) need it. Same bounded-body and error shape.
+pub async fn post_json_capture<T: Serialize, R: DeserializeOwned>(
+    client: &OutboundHttpClient,
+    url: &Url,
+    body: &T,
+) -> Result<R> {
+    let payload = serde_json::to_vec(body).context("serializing request payload")?;
+    let req = Request::post(url.as_str())
+        .header(CONTENT_TYPE, "application/json")
+        .header(ACCEPT, "application/json")
+        .body(Full::new(Bytes::from(payload)))
+        .context("building request")?;
+    let resp = with_request_timeout(url, client.request(req)).await?;
+    let status = resp.status();
+    let bytes = Limited::new(resp.into_body(), MAX_RESPONSE_BYTES)
+        .collect()
+        .await
+        .map(|c| c.to_bytes())
+        .unwrap_or_default();
+    if !status.is_success() {
+        let snippet = String::from_utf8_lossy(&bytes);
+        return Err(AppError::Other(anyhow::anyhow!(
+            "endpoint returned {status}: {snippet}"
+        )));
+    }
+    serde_json::from_slice(&bytes).map_err(|e| AppError::Other(anyhow::anyhow!("{url}: {e}")))
+}
+
 /// Wrap an outbound request future in [`REQUEST_TIMEOUT`]. Returns the same
 /// `Result<Response, AppError>` shape callers already match on; on timeout we
 /// surface a context that identifies the URL so the notifier audit log shows

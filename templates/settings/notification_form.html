@@ -276,6 +276,13 @@
             hours, resolves arrive silently.
           </span>
         </label>
+        <div>
+          <label class="inline-flex items-center gap-2">
+            <input name="pushover_emergency" type="checkbox"{% if form.config.pushover_emergency %} checked{% endif %}>
+            <span class="text-sm">Emergency priority for critical alerts</span>
+          </label>
+          <p class="mt-1 text-xs text-muted">High-urgency opens repeat until you acknowledge them in the Pushover app. Resolving the incident stops the repeat.</p>
+        </div>
       </div>
 
       <div data-variant="ntfy" class="space-y-4{% if form.kind != "ntfy" %} hidden{% endif %}">

@@ -578,7 +578,7 @@ INSERT INTO notification_channels (org_id, name, kind, config, external_ref, ena
    '{"type":"ntfy","server_url":"https://ntfy.sh","topic":"fixture-alerts","access_token":"tk_fixturetoken"}'::jsonb,
    NULL, true, NULL),
   ('${ORG}'::uuid, 'Fixture Pushover', 'pushover',
-   '{"type":"pushover","token":"azGDORePK8gMaC0QOYAMyEEuzJnyUi","user":"uQiRzpo4DXghDmr9QzzfQu27cmVRsG","device":"fixture-phone"}'::jsonb,
+   '{"type":"pushover","token":"azGDORePK8gMaC0QOYAMyEEuzJnyUi","user":"uQiRzpo4DXghDmr9QzzfQu27cmVRsG","device":"fixture-phone","emergency":true}'::jsonb,
    NULL, true, NULL);
 
 -- The email fixture renders the unverified chip; engine deliveries to it
@@ -625,6 +625,19 @@ UPDATE targets SET
   ), '[]'::jsonb),
   alert_confirmations = 2, notify_recovery = true, renotify_interval_secs = 900
 WHERE id='${T_AUTH}'::uuid;
+
+-- fix-tcp pages the Pushover channel (emergency priority on). It stays down in
+-- the fixture, so its incident remains triggered and acknowledgeable — the
+-- repeat-until-ack delivery + timeline are eyeball-able. Reminders off so the
+-- renotify sweep doesn't re-page a fixture box.
+UPDATE targets SET
+  alerts = COALESCE((
+    SELECT jsonb_agg(jsonb_build_object('channel_id', id))
+      FROM notification_channels
+     WHERE org_id='${ORG}'::uuid AND name = 'Fixture Pushover'
+  ), '[]'::jsonb),
+  alert_confirmations = 2, notify_recovery = true, renotify_interval_secs = 0
+WHERE id='${T_TCP}'::uuid;
 SQL
 
 echo "==> Postgres: 1 adversarial-title incident (XSS / day-popover JSON-escape smoke)"
@@ -686,6 +699,29 @@ CROSS JOIN (VALUES
   ('failed'::text, 5, 'connection refused',   NULL::timestamptz)
 ) AS v(status, attempt, error, next_attempt_at)
 WHERE i.org_id = '${ORG}'::uuid AND i.target_id = '${T_PAY}'::uuid AND i.state = 'triggered';
+
+-- Pushover emergency (priority 2, repeat-until-acknowledged): one page still
+-- awaiting acknowledgement (receipt set, acked_at NULL) and one already
+-- acknowledged (acked_at set). Renders both states in the fix-tcp incident's
+-- Delivery section. sent_at is minutes old so neither looks freshly fired.
+INSERT INTO incident_notifications
+  (org_id, incident_id, channel_id, escalation_level, transport, reason, status, attempt, sent_at, provider_receipt, acked_at)
+SELECT i.org_id, i.id,
+       (SELECT id FROM notification_channels WHERE org_id = i.org_id AND kind = 'pushover' LIMIT 1),
+       v.level, 'pushover', 'opened', 'sent', 1, v.sent_at, v.receipt, v.acked_at
+FROM incidents i
+CROSS JOIN (VALUES
+  (0, now() - interval '8 minutes', 'rcpt-fixture-pending'::text, NULL::timestamptz),
+  (1, now() - interval '6 minutes', 'rcpt-fixture-acked'::text,   now() - interval '4 minutes')
+) AS v(level, sent_at, receipt, acked_at)
+WHERE i.org_id = '${ORG}'::uuid AND i.target_id = '${T_TCP}'::uuid AND i.state = 'triggered';
+
+-- The note the poll sweep writes when Pushover reports the page acknowledged.
+INSERT INTO incident_events (org_id, incident_id, occurred_at, kind, actor_type, message)
+SELECT i.org_id, i.id, now() - interval '4 minutes', 'note', 'system',
+       'emergency page acknowledged in Pushover'
+FROM incidents i
+WHERE i.org_id = '${ORG}'::uuid AND i.target_id = '${T_TCP}'::uuid AND i.state = 'triggered';
 SQL
 
 if [ "$RESET_CH" = "1" ]; then

@@ -89,6 +89,7 @@ pub struct ConfigFields {
     pub pushover_token: String,
     pub pushover_user: String,
     pub pushover_device: String,
+    pub pushover_emergency: bool,
 }
 
 impl Default for ConfigFields {
@@ -120,6 +121,7 @@ impl Default for ConfigFields {
             pushover_token: String::new(),
             pushover_user: String::new(),
             pushover_device: String::new(),
+            pushover_emergency: false,
         }
     }
 }
@@ -412,6 +414,7 @@ fn form_from_channel(c: NotificationChannel) -> ChannelFormModel {
             config.pushover_token = c.token;
             config.pushover_user = c.user;
             config.pushover_device = c.device.unwrap_or_default();
+            config.pushover_emergency = c.emergency;
         }
     }
     ChannelFormModel {

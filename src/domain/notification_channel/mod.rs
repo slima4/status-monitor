@@ -374,6 +374,7 @@ mod tests {
                 token: "azGDORePK8gMaC0QOYAMyEEuzJnyUi".into(),
                 user: "uQiRzpo4DXghDmr9QzzfQu27cmVRsG".into(),
                 device: None,
+                emergency: false,
             }),
         ];
         assert_eq!(configs.len(), ChannelKind::ALL.len());
@@ -752,6 +753,7 @@ mod tests {
             token: "azGDORePK8gMaC0QOYAMyEEuzJnyUi".into(),
             user: "uQiRzpo4DXghDmr9QzzfQu27cmVRsG".into(),
             device: Some("droid2".into()),
+            emergency: false,
         });
         assert!(c.validate().is_ok());
         assert_eq!(c.abuse_url(), None);
@@ -767,6 +769,7 @@ mod tests {
                 token: "azGDORePK8gMaC0QOYAMyEEuzJnyUi".into(),
                 user: "uQiRzpo4DXghDmr9QzzfQu27cmVRsG".into(),
                 device: None,
+                emergency: false,
             };
             f(&mut p);
             ChannelConfig::Pushover(p).validate()

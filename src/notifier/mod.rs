@@ -37,6 +37,14 @@ pub use crate::notifier::email::EmailDelivery;
 pub trait Notifier: Send + Sync {
     /// Page an incident lifecycle event (opened/resolved/reopened/escalated).
     async fn notify_incident(&self, notice: &IncidentNotice) -> Result<()>;
+
+    /// Provider receipt captured by the preceding successful send, when the
+    /// transport returns one to track for acknowledgement/cancel (Pushover
+    /// emergency). `None` for every other transport. A notifier instance
+    /// serves a single send, so the receipt belongs to that send.
+    fn taken_receipt(&self) -> Option<String> {
+        None
+    }
 }
 
 /// Central-bot delivery context for one factory call: operator token plus
@@ -178,6 +186,7 @@ pub fn build_notifier(
             c.token.clone(),
             c.user.clone(),
             c.device.clone(),
+            c.emergency,
         )) as Arc<dyn Notifier>,
     })
 }
