@@ -45,9 +45,16 @@ struct LandingPage {
 
 const PRICING_FEATURES: &[&str] = &[
     "Up to 20 monitors",
+    "Checks every 60 seconds",
+    "HTTP, TCP, DNS & TLS checks",
     "Public status page",
-    "Slack, email & webhook alerts",
+    "Custom branding",
+    "10+ alert channels",
+    "Automatic incident tracking",
+    "90-day history",
     "Team members",
+    "API & Terraform provider",
+    "MCP server for AI assistants",
     "No credit card",
 ];
 
