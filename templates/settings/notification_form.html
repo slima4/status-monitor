@@ -236,7 +236,7 @@
       <div data-variant="pagerduty"{% if form.kind != "pagerduty" %} class="hidden"{% endif %}>
         <label class="field-outline">
           <span class="field-outline__label">Integration key (routing key)</span>
-          <input name="pagerduty_routing_key" type="text" value="{{ form.config.pagerduty_routing_key }}"
+          <input name="pagerduty_routing_key" type="password" value="{{ form.config.pagerduty_routing_key }}"
                  placeholder="32-character Events API v2 key"
                  autocomplete="off" spellcheck="false" class="w-full field font-mono">
           <span class="mt-1 block text-xs text-muted">
@@ -253,13 +253,13 @@
         <div class="grid grid-cols-1 gap-5 sm:grid-cols-2">
           <label class="field-outline">
             <span class="field-outline__label">Application token</span>
-            <input name="pushover_token" type="text" value="{{ form.config.pushover_token }}"
+            <input name="pushover_token" type="password" value="{{ form.config.pushover_token }}"
                    placeholder="30-character app token"
                    autocomplete="off" spellcheck="false" class="w-full field font-mono">
           </label>
           <label class="field-outline">
             <span class="field-outline__label">User key</span>
-            <input name="pushover_user" type="text" value="{{ form.config.pushover_user }}"
+            <input name="pushover_user" type="password" value="{{ form.config.pushover_user }}"
                    placeholder="30-character user or group key"
                    autocomplete="off" spellcheck="false" class="w-full field font-mono">
           </label>
@@ -335,7 +335,7 @@
             </div>
             <label class="field-outline">
               <span class="field-outline__label">Access token (optional)</span>
-              <input name="ntfy_access_token" type="text" value="{{ form.config.ntfy_access_token }}"
+              <input name="ntfy_access_token" type="password" value="{{ form.config.ntfy_access_token }}"
                      placeholder="tk_…"
                      autocomplete="off" spellcheck="false" class="w-full field font-mono">
               <span class="mt-1 block text-xs text-muted">
@@ -366,7 +366,7 @@
         </label>
         <label class="field-outline">
           <span class="field-outline__label">Signing secret (optional)</span>
-          <input name="webhook_secret" type="text" value="{{ form.config.webhook_secret }}"
+          <input name="webhook_secret" type="password" value="{{ form.config.webhook_secret }}"
                  placeholder="leave blank to send unsigned"
                  autocomplete="off" spellcheck="false" class="w-full field font-mono">
           <span class="mt-1 block text-xs text-muted">
@@ -380,7 +380,7 @@
       <div data-variant="telegram" class="space-y-5{% if form.kind != "telegram" %} hidden{% endif %}">
         <label class="field-outline">
           <span class="field-outline__label">Bot token</span>
-          <input name="telegram_bot_token" type="text" value="{{ form.config.telegram_bot_token }}"
+          <input name="telegram_bot_token" type="password" value="{{ form.config.telegram_bot_token }}"
                  placeholder="123456:ABC-DEF…"
                  autocomplete="off" spellcheck="false" class="w-full field font-mono">
           <span class="mt-1 block text-xs text-muted">
@@ -484,7 +484,7 @@
       <div data-variant="whatsapp" class="space-y-5{% if form.kind != "whatsapp" %} hidden{% endif %}">
         <label class="field-outline">
           <span class="field-outline__label">Access token</span>
-          <input name="whatsapp_access_token" type="text" value="{{ form.config.whatsapp_access_token }}"
+          <input name="whatsapp_access_token" type="password" value="{{ form.config.whatsapp_access_token }}"
                  placeholder="EAAG…"
                  autocomplete="off" spellcheck="false" class="w-full field font-mono">
           <span class="mt-1 block text-xs text-muted">
@@ -578,7 +578,7 @@
             </label>
             <label class="field-outline">
               <span class="field-outline__label">Auth token</span>
-              <input name="sms_twilio_auth_token" type="text" value="{{ form.config.sms_twilio_auth_token }}"
+              <input name="sms_twilio_auth_token" type="password" value="{{ form.config.sms_twilio_auth_token }}"
                      placeholder="32-character auth token"
                      autocomplete="off" spellcheck="false" class="w-full field font-mono">
             </label>
@@ -601,7 +601,7 @@
           </label>
           <label class="field-outline">
             <span class="field-outline__label">API key</span>
-            <input name="sms_telnyx_api_key" type="text" value="{{ form.config.sms_telnyx_api_key }}"
+            <input name="sms_telnyx_api_key" type="password" value="{{ form.config.sms_telnyx_api_key }}"
                    placeholder="KEY…"
                    autocomplete="off" spellcheck="false" class="w-full field font-mono">
           </label>
@@ -635,7 +635,7 @@
             </label>
             <label class="field-outline">
               <span class="field-outline__label">API secret</span>
-              <input name="sms_vonage_api_secret" type="text" value="{{ form.config.sms_vonage_api_secret }}"
+              <input name="sms_vonage_api_secret" type="password" value="{{ form.config.sms_vonage_api_secret }}"
                      placeholder="API secret"
                      autocomplete="off" spellcheck="false" class="w-full field font-mono">
             </label>
@@ -664,7 +664,7 @@
             </label>
             <label class="field-outline">
               <span class="field-outline__label">Auth token</span>
-              <input name="sms_plivo_auth_token" type="text" value="{{ form.config.sms_plivo_auth_token }}"
+              <input name="sms_plivo_auth_token" type="password" value="{{ form.config.sms_plivo_auth_token }}"
                      placeholder="auth token"
                      autocomplete="off" spellcheck="false" class="w-full field font-mono">
             </label>
@@ -693,7 +693,7 @@
             </label>
             <label class="field-outline">
               <span class="field-outline__label">API token</span>
-              <input name="sms_sinch_api_token" type="text" value="{{ form.config.sms_sinch_api_token }}"
+              <input name="sms_sinch_api_token" type="password" value="{{ form.config.sms_sinch_api_token }}"
                      placeholder="API token"
                      autocomplete="off" spellcheck="false" class="w-full field font-mono">
             </label>
