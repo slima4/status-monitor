@@ -7,6 +7,7 @@ pub mod ntfy;
 pub mod pagerduty;
 pub mod pushover;
 pub mod slack;
+pub mod sms;
 pub mod telegram;
 pub mod webhook;
 pub mod whatsapp;
@@ -27,6 +28,7 @@ use crate::notifier::ntfy::NtfyNotifier;
 use crate::notifier::pagerduty::PagerDutyNotifier;
 use crate::notifier::pushover::PushoverNotifier;
 use crate::notifier::slack::SlackNotifier;
+use crate::notifier::sms::SmsNotifier;
 use crate::notifier::telegram::TelegramNotifier;
 use crate::notifier::webhook::WebhookNotifier;
 use crate::notifier::whatsapp::WhatsAppNotifier;
@@ -188,6 +190,7 @@ pub fn build_notifier(
             c.device.clone(),
             c.emergency,
         )) as Arc<dyn Notifier>,
+        ChannelConfig::Sms(c) => Arc::new(SmsNotifier::new(http.clone(), c)?) as Arc<dyn Notifier>,
     })
 }
 

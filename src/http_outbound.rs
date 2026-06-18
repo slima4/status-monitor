@@ -91,8 +91,37 @@ pub async fn post_bytes_with_headers(
     payload: Vec<u8>,
     headers: &std::collections::BTreeMap<String, String>,
 ) -> Result<()> {
+    post_bytes_ct(client, url, "application/json", payload, headers).await
+}
+
+/// POST a `application/x-www-form-urlencoded` body with caller-supplied
+/// headers — for gateways whose send API is form-encoded (Twilio). Same
+/// header-skip and bounded-error-body behaviour as [`post_bytes_with_headers`].
+pub async fn post_form_with_headers(
+    client: &OutboundHttpClient,
+    url: &Url,
+    payload: Vec<u8>,
+    headers: &std::collections::BTreeMap<String, String>,
+) -> Result<()> {
+    post_bytes_ct(
+        client,
+        url,
+        "application/x-www-form-urlencoded",
+        payload,
+        headers,
+    )
+    .await
+}
+
+async fn post_bytes_ct(
+    client: &OutboundHttpClient,
+    url: &Url,
+    content_type: &str,
+    payload: Vec<u8>,
+    headers: &std::collections::BTreeMap<String, String>,
+) -> Result<()> {
     use hyper::header::{HeaderName, HeaderValue};
-    let mut builder = Request::post(url.as_str()).header(CONTENT_TYPE, "application/json");
+    let mut builder = Request::post(url.as_str()).header(CONTENT_TYPE, content_type);
     for (k, v) in headers {
         match (
             HeaderName::from_bytes(k.as_bytes()),

@@ -90,6 +90,24 @@ pub struct ConfigFields {
     pub pushover_user: String,
     pub pushover_device: String,
     pub pushover_emergency: bool,
+    pub sms_provider: String,
+    pub sms_to: String,
+    pub sms_twilio_from: String,
+    pub sms_twilio_account_sid: String,
+    pub sms_twilio_auth_token: String,
+    pub sms_telnyx_from: String,
+    pub sms_telnyx_api_key: String,
+    pub sms_telnyx_messaging_profile_id: String,
+    pub sms_vonage_from: String,
+    pub sms_vonage_api_key: String,
+    pub sms_vonage_api_secret: String,
+    pub sms_plivo_from: String,
+    pub sms_plivo_auth_id: String,
+    pub sms_plivo_auth_token: String,
+    pub sms_sinch_from: String,
+    pub sms_sinch_service_plan_id: String,
+    pub sms_sinch_api_token: String,
+    pub sms_sinch_region: String,
 }
 
 impl Default for ConfigFields {
@@ -122,6 +140,24 @@ impl Default for ConfigFields {
             pushover_user: String::new(),
             pushover_device: String::new(),
             pushover_emergency: false,
+            sms_provider: "twilio".into(),
+            sms_to: String::new(),
+            sms_twilio_from: String::new(),
+            sms_twilio_account_sid: String::new(),
+            sms_twilio_auth_token: String::new(),
+            sms_telnyx_from: String::new(),
+            sms_telnyx_api_key: String::new(),
+            sms_telnyx_messaging_profile_id: String::new(),
+            sms_vonage_from: String::new(),
+            sms_vonage_api_key: String::new(),
+            sms_vonage_api_secret: String::new(),
+            sms_plivo_from: String::new(),
+            sms_plivo_auth_id: String::new(),
+            sms_plivo_auth_token: String::new(),
+            sms_sinch_from: String::new(),
+            sms_sinch_service_plan_id: String::new(),
+            sms_sinch_api_token: String::new(),
+            sms_sinch_region: "us".into(),
         }
     }
 }
@@ -416,6 +452,69 @@ fn form_from_channel(c: NotificationChannel) -> ChannelFormModel {
             config.pushover_device = c.device.unwrap_or_default();
             config.pushover_emergency = c.emergency;
         }
+        ChannelConfig::Sms(c) => {
+            config.sms_to = c.to().to_string();
+            match c {
+                crate::domain::SmsConfig::Twilio {
+                    from,
+                    account_sid,
+                    auth_token,
+                    ..
+                } => {
+                    config.sms_provider = "twilio".into();
+                    config.sms_twilio_from = from;
+                    config.sms_twilio_account_sid = account_sid;
+                    config.sms_twilio_auth_token = auth_token;
+                }
+                crate::domain::SmsConfig::Telnyx {
+                    from,
+                    api_key,
+                    messaging_profile_id,
+                    ..
+                } => {
+                    config.sms_provider = "telnyx".into();
+                    config.sms_telnyx_from = from;
+                    config.sms_telnyx_api_key = api_key;
+                    config.sms_telnyx_messaging_profile_id =
+                        messaging_profile_id.unwrap_or_default();
+                }
+                crate::domain::SmsConfig::Vonage {
+                    from,
+                    api_key,
+                    api_secret,
+                    ..
+                } => {
+                    config.sms_provider = "vonage".into();
+                    config.sms_vonage_from = from;
+                    config.sms_vonage_api_key = api_key;
+                    config.sms_vonage_api_secret = api_secret;
+                }
+                crate::domain::SmsConfig::Plivo {
+                    from,
+                    auth_id,
+                    auth_token,
+                    ..
+                } => {
+                    config.sms_provider = "plivo".into();
+                    config.sms_plivo_from = from;
+                    config.sms_plivo_auth_id = auth_id;
+                    config.sms_plivo_auth_token = auth_token;
+                }
+                crate::domain::SmsConfig::Sinch {
+                    from,
+                    service_plan_id,
+                    api_token,
+                    region,
+                    ..
+                } => {
+                    config.sms_provider = "sinch".into();
+                    config.sms_sinch_from = from;
+                    config.sms_sinch_service_plan_id = service_plan_id;
+                    config.sms_sinch_api_token = api_token;
+                    config.sms_sinch_region = region;
+                }
+            }
+        }
     }
     ChannelFormModel {
         mode: "edit",
@@ -541,6 +640,7 @@ mod tests {
             "webhook",
             "telegram",
             "whatsapp",
+            "sms",
         ] {
             assert!(html.contains(&format!(r#"value="{kind}""#)), "{kind} card");
             assert!(

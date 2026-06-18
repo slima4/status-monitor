@@ -62,6 +62,7 @@
         {% call reg::chooser_card("data-kind-card", "kind", "telegram", form.kind == "telegram", "telegram bot", "your own bot token") %}{% endcall %}
         {% endif %}
         {% call reg::chooser_card("data-kind-card", "kind", "whatsapp", form.kind == "whatsapp", "whatsapp", "Cloud API message") %}{% endcall %}
+        {% call reg::chooser_card("data-kind-card", "kind", "sms", form.kind == "sms", "sms", "Twilio · Telnyx · Vonage") %}{% endcall %}
         {% call reg::chooser_card("data-kind-card", "kind", "webhook", form.kind == "webhook", "webhook", "POST to your endpoint") %}{% endcall %}
       </div>
       {% if form.mode != "create" && form.kind != "telegram_app" && form.kind != "whatsapp_app" %}
@@ -535,6 +536,189 @@
           parameter. A template is required because WhatsApp accepts plain
           messages only within 24 hours of the recipient's last reply and
           silently drops them otherwise.
+        </p>
+      </div>
+
+      <div data-variant="sms" class="space-y-5{% if form.kind != "sms" %} hidden{% endif %}">
+        <label class="field-outline">
+          <span class="field-outline__label">Recipient</span>
+          <input name="sms_to" type="text" value="{{ form.config.sms_to }}"
+                 placeholder="+15551234567"
+                 autocomplete="off" spellcheck="false" class="w-full field font-mono">
+          <span class="mt-1 block text-xs text-muted">
+            Phone number in E.164 format (leading <span class="font-mono">+</span>
+            and country code) that receives the alerts.
+          </span>
+        </label>
+
+        <fieldset class="space-y-2" data-sms-provider-select>
+          <legend class="field-outline__label">Gateway</legend>
+          <div class="check-type-cards">
+            {% call reg::chooser_card("data-sms-provider-card", "sms_provider", "twilio", form.config.sms_provider == "twilio", "twilio", "account SID + token") %}{% endcall %}
+            {% call reg::chooser_card("data-sms-provider-card", "sms_provider", "telnyx", form.config.sms_provider == "telnyx", "telnyx", "API key") %}{% endcall %}
+            {% call reg::chooser_card("data-sms-provider-card", "sms_provider", "vonage", form.config.sms_provider == "vonage", "vonage", "key + secret") %}{% endcall %}
+            {% call reg::chooser_card("data-sms-provider-card", "sms_provider", "plivo", form.config.sms_provider == "plivo", "plivo", "auth id + token") %}{% endcall %}
+            {% call reg::chooser_card("data-sms-provider-card", "sms_provider", "sinch", form.config.sms_provider == "sinch", "sinch", "service plan + token") %}{% endcall %}
+          </div>
+        </fieldset>
+
+        <div data-sms-provider="twilio" class="space-y-5{% if form.config.sms_provider != "twilio" %} hidden{% endif %}">
+          <label class="field-outline">
+            <span class="field-outline__label">Sender (From)</span>
+            <input name="sms_twilio_from" type="text" value="{{ form.config.sms_twilio_from }}"
+                   placeholder="+15557654321 or a Messaging Service SID"
+                   autocomplete="off" spellcheck="false" class="w-full field font-mono">
+          </label>
+          <div class="grid grid-cols-1 gap-5 sm:grid-cols-2">
+            <label class="field-outline">
+              <span class="field-outline__label">Account SID</span>
+              <input name="sms_twilio_account_sid" type="text" value="{{ form.config.sms_twilio_account_sid }}"
+                     placeholder="AC…"
+                     autocomplete="off" spellcheck="false" class="w-full field font-mono">
+            </label>
+            <label class="field-outline">
+              <span class="field-outline__label">Auth token</span>
+              <input name="sms_twilio_auth_token" type="text" value="{{ form.config.sms_twilio_auth_token }}"
+                     placeholder="32-character auth token"
+                     autocomplete="off" spellcheck="false" class="w-full field font-mono">
+            </label>
+          </div>
+          <span class="block text-xs text-muted">
+            Account SID and auth token are on the
+            <a href="https://console.twilio.com/" target="_blank" rel="noopener"
+               class="underline decoration-dotted hover:text-body">Twilio console</a>
+            dashboard; the sender must be a Twilio number or Messaging Service
+            you own.
+          </span>
+        </div>
+
+        <div data-sms-provider="telnyx" class="space-y-5{% if form.config.sms_provider != "telnyx" %} hidden{% endif %}">
+          <label class="field-outline">
+            <span class="field-outline__label">Sender (From)</span>
+            <input name="sms_telnyx_from" type="text" value="{{ form.config.sms_telnyx_from }}"
+                   placeholder="+15557654321 or alphanumeric sender id"
+                   autocomplete="off" spellcheck="false" class="w-full field font-mono">
+          </label>
+          <label class="field-outline">
+            <span class="field-outline__label">API key</span>
+            <input name="sms_telnyx_api_key" type="text" value="{{ form.config.sms_telnyx_api_key }}"
+                   placeholder="KEY…"
+                   autocomplete="off" spellcheck="false" class="w-full field font-mono">
+          </label>
+          <label class="field-outline">
+            <span class="field-outline__label">Messaging profile ID (optional)</span>
+            <input name="sms_telnyx_messaging_profile_id" type="text" value="{{ form.config.sms_telnyx_messaging_profile_id }}"
+                   placeholder="blank = account default"
+                   autocomplete="off" spellcheck="false" class="w-full field font-mono">
+            <span class="mt-1 block text-xs text-muted">
+              Create an API key in the
+              <a href="https://portal.telnyx.com/" target="_blank" rel="noopener"
+                 class="underline decoration-dotted hover:text-body">Telnyx portal</a>;
+              the messaging profile binds the sender number.
+            </span>
+          </label>
+        </div>
+
+        <div data-sms-provider="vonage" class="space-y-5{% if form.config.sms_provider != "vonage" %} hidden{% endif %}">
+          <label class="field-outline">
+            <span class="field-outline__label">Sender (From)</span>
+            <input name="sms_vonage_from" type="text" value="{{ form.config.sms_vonage_from }}"
+                   placeholder="+15557654321 or alphanumeric sender id"
+                   autocomplete="off" spellcheck="false" class="w-full field font-mono">
+          </label>
+          <div class="grid grid-cols-1 gap-5 sm:grid-cols-2">
+            <label class="field-outline">
+              <span class="field-outline__label">API key</span>
+              <input name="sms_vonage_api_key" type="text" value="{{ form.config.sms_vonage_api_key }}"
+                     placeholder="8-character key"
+                     autocomplete="off" spellcheck="false" class="w-full field font-mono">
+            </label>
+            <label class="field-outline">
+              <span class="field-outline__label">API secret</span>
+              <input name="sms_vonage_api_secret" type="text" value="{{ form.config.sms_vonage_api_secret }}"
+                     placeholder="API secret"
+                     autocomplete="off" spellcheck="false" class="w-full field font-mono">
+            </label>
+          </div>
+          <span class="block text-xs text-muted">
+            Key and secret are on the
+            <a href="https://dashboard.nexmo.com/" target="_blank" rel="noopener"
+               class="underline decoration-dotted hover:text-body">Vonage dashboard</a>.
+            Alphanumeric sender ids aren't deliverable in every country (e.g. the US).
+          </span>
+        </div>
+
+        <div data-sms-provider="plivo" class="space-y-5{% if form.config.sms_provider != "plivo" %} hidden{% endif %}">
+          <label class="field-outline">
+            <span class="field-outline__label">Sender (From)</span>
+            <input name="sms_plivo_from" type="text" value="{{ form.config.sms_plivo_from }}"
+                   placeholder="+15557654321 or alphanumeric sender id"
+                   autocomplete="off" spellcheck="false" class="w-full field font-mono">
+          </label>
+          <div class="grid grid-cols-1 gap-5 sm:grid-cols-2">
+            <label class="field-outline">
+              <span class="field-outline__label">Auth ID</span>
+              <input name="sms_plivo_auth_id" type="text" value="{{ form.config.sms_plivo_auth_id }}"
+                     placeholder="MA…"
+                     autocomplete="off" spellcheck="false" class="w-full field font-mono">
+            </label>
+            <label class="field-outline">
+              <span class="field-outline__label">Auth token</span>
+              <input name="sms_plivo_auth_token" type="text" value="{{ form.config.sms_plivo_auth_token }}"
+                     placeholder="auth token"
+                     autocomplete="off" spellcheck="false" class="w-full field font-mono">
+            </label>
+          </div>
+          <span class="block text-xs text-muted">
+            Auth ID and token are on the
+            <a href="https://console.plivo.com/" target="_blank" rel="noopener"
+               class="underline decoration-dotted hover:text-body">Plivo console</a>
+            overview.
+          </span>
+        </div>
+
+        <div data-sms-provider="sinch" class="space-y-5{% if form.config.sms_provider != "sinch" %} hidden{% endif %}">
+          <label class="field-outline">
+            <span class="field-outline__label">Sender (From)</span>
+            <input name="sms_sinch_from" type="text" value="{{ form.config.sms_sinch_from }}"
+                   placeholder="+15557654321 or alphanumeric sender id"
+                   autocomplete="off" spellcheck="false" class="w-full field font-mono">
+          </label>
+          <div class="grid grid-cols-1 gap-5 sm:grid-cols-2">
+            <label class="field-outline">
+              <span class="field-outline__label">Service plan ID</span>
+              <input name="sms_sinch_service_plan_id" type="text" value="{{ form.config.sms_sinch_service_plan_id }}"
+                     placeholder="service plan id"
+                     autocomplete="off" spellcheck="false" class="w-full field font-mono">
+            </label>
+            <label class="field-outline">
+              <span class="field-outline__label">API token</span>
+              <input name="sms_sinch_api_token" type="text" value="{{ form.config.sms_sinch_api_token }}"
+                     placeholder="API token"
+                     autocomplete="off" spellcheck="false" class="w-full field font-mono">
+            </label>
+          </div>
+          <label class="field-outline">
+            <span class="field-outline__label">Region</span>
+            <select name="sms_sinch_region" class="w-full field font-mono">
+              <option value="us"{% if form.config.sms_sinch_region == "us" %} selected{% endif %}>us</option>
+              <option value="eu"{% if form.config.sms_sinch_region == "eu" %} selected{% endif %}>eu</option>
+              <option value="au"{% if form.config.sms_sinch_region == "au" %} selected{% endif %}>au</option>
+              <option value="br"{% if form.config.sms_sinch_region == "br" %} selected{% endif %}>br</option>
+              <option value="ca"{% if form.config.sms_sinch_region == "ca" %} selected{% endif %}>ca</option>
+            </select>
+            <span class="mt-1 block text-xs text-muted">
+              Must match your account's cluster — service plan and token are on the
+              <a href="https://dashboard.sinch.com/" target="_blank" rel="noopener"
+                 class="underline decoration-dotted hover:text-body">Sinch dashboard</a>
+              (SMS → APIs → REST).
+            </span>
+          </label>
+        </div>
+
+        <p class="text-xs text-muted">
+          Each alert is one text message to the recipient. Long messages are
+          trimmed to keep them to a few segments — carriers bill per segment.
         </p>
       </div>
 

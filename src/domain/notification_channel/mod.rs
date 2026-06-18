@@ -27,6 +27,7 @@ mod ntfy;
 mod pagerduty;
 mod pushover;
 mod slack;
+mod sms;
 mod telegram;
 mod telegram_app;
 mod transport;
@@ -42,6 +43,7 @@ pub use ntfy::NtfyConfig;
 pub use pagerduty::PagerDutyConfig;
 pub use pushover::PushoverConfig;
 pub use slack::SlackConfig;
+pub use sms::SmsConfig;
 pub use telegram::TelegramConfig;
 pub use telegram_app::TelegramAppConfig;
 pub use transport::TransportConfig;
@@ -76,6 +78,7 @@ pub enum ChannelKind {
     PagerDuty,
     Ntfy,
     Pushover,
+    Sms,
 }
 
 impl ChannelKind {
@@ -96,6 +99,7 @@ impl ChannelKind {
         Self::PagerDuty,
         Self::Ntfy,
         Self::Pushover,
+        Self::Sms,
     ];
 
     /// Stable string used in the Postgres `kind` CHECK constraint and the
@@ -115,6 +119,7 @@ impl ChannelKind {
             Self::PagerDuty => "pagerduty",
             Self::Ntfy => "ntfy",
             Self::Pushover => "pushover",
+            Self::Sms => "sms",
         }
     }
 }
@@ -143,6 +148,7 @@ pub enum ChannelConfig {
     PagerDuty(PagerDutyConfig),
     Ntfy(NtfyConfig),
     Pushover(PushoverConfig),
+    Sms(SmsConfig),
 }
 
 /// Apply `$body` to the inner [`TransportConfig`] of any variant. The one
@@ -163,6 +169,7 @@ macro_rules! with_transport {
             ChannelConfig::PagerDuty($c) => $body,
             ChannelConfig::Ntfy($c) => $body,
             ChannelConfig::Pushover($c) => $body,
+            ChannelConfig::Sms($c) => $body,
         }
     };
 }
@@ -308,6 +315,13 @@ mod tests {
             r#"{"type":"ntfy","server_url":"https://ntfy.example.com","topic":"ops","access_token":"tk_x"}"#,
             r#"{"type":"pushover","token":"azGDORePK8gMaC0QOYAMyEEuzJnyUi","user":"uQiRzpo4DXghDmr9QzzfQu27cmVRsG"}"#,
             r#"{"type":"pushover","token":"azGDORePK8gMaC0QOYAMyEEuzJnyUi","user":"uQiRzpo4DXghDmr9QzzfQu27cmVRsG","device":"droid2"}"#,
+            r#"{"type":"sms","provider":"twilio","to":"+15551234567","from":"+15557654321","account_sid":"AC0123456789ABCDEF0123456789ABCDEF","auth_token":"tok"}"#,
+            r#"{"type":"sms","provider":"telnyx","to":"+15551234567","from":"alerts","api_key":"KEY123"}"#,
+            r#"{"type":"sms","provider":"telnyx","to":"+15551234567","from":"alerts","api_key":"KEY123","messaging_profile_id":"40000000-0000-0000-0000-000000000000"}"#,
+            r#"{"type":"sms","provider":"vonage","to":"+15551234567","from":"Acme","api_key":"a1b2c3d4","api_secret":"sekret"}"#,
+            r#"{"type":"sms","provider":"plivo","to":"+15551234567","from":"+15557654321","auth_id":"MAXXXXXXXXXXXXXXXXXX","auth_token":"tok"}"#,
+            r#"{"type":"sms","provider":"sinch","to":"+15551234567","from":"Acme","service_plan_id":"abc123","api_token":"tok"}"#,
+            r#"{"type":"sms","provider":"sinch","to":"+15551234567","from":"Acme","service_plan_id":"abc123","api_token":"tok","region":"eu"}"#,
         ] {
             let c: ChannelConfig = serde_json::from_str(json).unwrap();
             let back = serde_json::to_string(&c).unwrap();
@@ -375,6 +389,12 @@ mod tests {
                 user: "uQiRzpo4DXghDmr9QzzfQu27cmVRsG".into(),
                 device: None,
                 emergency: false,
+            }),
+            ChannelConfig::Sms(SmsConfig::Twilio {
+                to: "+15551234567".into(),
+                from: "+15557654321".into(),
+                account_sid: "AC0123456789ABCDEF0123456789ABCDEF".into(),
+                auth_token: "tok".into(),
             }),
         ];
         assert_eq!(configs.len(), ChannelKind::ALL.len());
@@ -781,6 +801,111 @@ mod tests {
         assert!(bad(|p| p.device = Some("x".repeat(26))).is_err());
         assert!(bad(|p| p.device = Some("bad device".into())).is_err());
         assert!(bad(|p| p.device = Some("ok_device-1".into())).is_ok());
+    }
+
+    #[test]
+    fn sms_masks_only_the_secret_per_provider_and_validates() {
+        // Twilio: account_sid is an identifier and survives; auth_token masks.
+        let mut twilio = ChannelConfig::Sms(SmsConfig::Twilio {
+            to: "+15551234567".into(),
+            from: "+15557654321".into(),
+            account_sid: "AC0123456789ABCDEF0123456789ABCDEF".into(),
+            auth_token: "supersecret".into(),
+        });
+        assert!(twilio.validate().is_ok());
+        assert_eq!(twilio.abuse_url(), None);
+        assert!(!twilio.operator_managed());
+        let r = twilio.redacted();
+        assert_eq!(r["account_sid"], "AC0123456789ABCDEF0123456789ABCDEF");
+        assert_eq!(r["to"], "+15551234567");
+        assert_eq!(r["auth_token"], MASK);
+        assert!(!serde_json::to_string(&r).unwrap().contains("supersecret"));
+        twilio.redact_in_place();
+        assert!(twilio.has_redaction_sentinel());
+
+        // Telnyx: api_key is the secret; Vonage: api_secret is, api_key isn't.
+        let mut telnyx = ChannelConfig::Sms(SmsConfig::Telnyx {
+            to: "+15551234567".into(),
+            from: "alerts".into(),
+            api_key: "KEY_secret".into(),
+            messaging_profile_id: None,
+        });
+        assert!(telnyx.validate().is_ok());
+        assert_eq!(telnyx.redacted()["api_key"], MASK);
+        telnyx.redact_in_place();
+        assert!(telnyx.has_redaction_sentinel());
+
+        let vonage = ChannelConfig::Sms(SmsConfig::Vonage {
+            to: "+15551234567".into(),
+            from: "Acme".into(),
+            api_key: "a1b2c3d4".into(),
+            api_secret: "vsecret".into(),
+        });
+        let rv = vonage.redacted();
+        assert_eq!(rv["api_key"], "a1b2c3d4");
+        assert_eq!(rv["api_secret"], MASK);
+
+        // Plivo: auth_id is an identifier and survives; auth_token masks.
+        let plivo = ChannelConfig::Sms(SmsConfig::Plivo {
+            to: "+15551234567".into(),
+            from: "+15557654321".into(),
+            auth_id: "MAXXXXXXXXXXXXXXXXXX".into(),
+            auth_token: "psecret".into(),
+        });
+        assert!(plivo.validate().is_ok());
+        let rp = plivo.redacted();
+        assert_eq!(rp["auth_id"], "MAXXXXXXXXXXXXXXXXXX");
+        assert_eq!(rp["auth_token"], MASK);
+
+        // Sinch: service_plan_id survives, api_token masks; region defaults to us.
+        let parsed: ChannelConfig = serde_json::from_str(
+            r#"{"type":"sms","provider":"sinch","to":"+15551234567","from":"Acme","service_plan_id":"abc123","api_token":"ssecret"}"#,
+        )
+        .unwrap();
+        assert!(parsed.validate().is_ok());
+        let ChannelConfig::Sms(SmsConfig::Sinch { region, .. }) = &parsed else {
+            panic!("expected sinch");
+        };
+        assert_eq!(region, "us");
+        let rs = parsed.redacted();
+        assert_eq!(rs["service_plan_id"], "abc123");
+        assert_eq!(rs["api_token"], MASK);
+        // Unknown region is rejected.
+        assert!(
+            ChannelConfig::Sms(SmsConfig::Sinch {
+                to: "+15551234567".into(),
+                from: "Acme".into(),
+                service_plan_id: "abc123".into(),
+                api_token: "tok".into(),
+                region: "moon".into(),
+            })
+            .validate()
+            .is_err()
+        );
+
+        let twilio = |f: fn(&mut (String, String, String, String))| {
+            let mut t = (
+                "+15551234567".to_string(),
+                "+15557654321".to_string(),
+                "AC0123456789ABCDEF0123456789ABCDEF".to_string(),
+                "tok".to_string(),
+            );
+            f(&mut t);
+            ChannelConfig::Sms(SmsConfig::Twilio {
+                to: t.0,
+                from: t.1,
+                account_sid: t.2,
+                auth_token: t.3,
+            })
+            .validate()
+        };
+        assert!(twilio(|t| t.0 = "15551234567".into()).is_err()); // no +
+        assert!(twilio(|t| t.0 = "+12".into()).is_err()); // too short
+        assert!(twilio(|t| t.0 = "+1555 123".into()).is_err()); // space
+        assert!(twilio(|t| t.1 = "has space".into()).is_err());
+        assert!(twilio(|t| t.2 = "AC123".into()).is_err()); // bad sid
+        assert!(twilio(|t| t.3 = "".into()).is_err());
+        assert!(twilio(|t| t.3 = "tok en".into()).is_err());
     }
 
     #[test]

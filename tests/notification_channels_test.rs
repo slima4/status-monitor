@@ -360,6 +360,39 @@ async fn pushover_round_trips_with_both_keys_masked() {
 }
 
 #[tokio::test]
+async fn sms_round_trips_with_only_the_gateway_secret_masked() {
+    let app = app();
+    let (st, created) = send(
+        &app,
+        "POST",
+        "/api/v1/notification-channels",
+        json!({
+            "name": "oncall-sms",
+            "config": {
+                "type": "sms",
+                "provider": "twilio",
+                "to": "+15551234567",
+                "from": "+15557654321",
+                "account_sid": "AC0123456789ABCDEF0123456789ABCDEF",
+                "auth_token": "zzTWILIOSECRETzz"
+            }
+        }),
+    )
+    .await;
+    assert_eq!(st, StatusCode::CREATED, "{created}");
+    assert_eq!(created["kind"], "sms");
+    assert_eq!(created["config"]["provider"], "twilio");
+    // Identifiers and routing survive; only the auth token is masked.
+    assert_eq!(created["config"]["to"], "+15551234567");
+    assert_eq!(
+        created["config"]["account_sid"],
+        "AC0123456789ABCDEF0123456789ABCDEF"
+    );
+    assert_eq!(created["config"]["auth_token"], "***");
+    assert!(!created.to_string().contains("zzTWILIOSECRETzz"));
+}
+
+#[tokio::test]
 async fn paging_kinds_reject_malformed_configs() {
     let app = app();
     for (name, config) in [
@@ -378,6 +411,14 @@ async fn paging_kinds_reject_malformed_configs() {
         (
             "po-bad-user",
             json!({ "type": "pushover", "token": "azGDORePK8gMaC0QOYAMyEEuzJnyUi", "user": "nope" }),
+        ),
+        (
+            "sms-not-e164",
+            json!({ "type": "sms", "provider": "twilio", "to": "5551234567", "from": "+15557654321", "account_sid": "AC0123456789ABCDEF0123456789ABCDEF", "auth_token": "tok" }),
+        ),
+        (
+            "sms-bad-sid",
+            json!({ "type": "sms", "provider": "twilio", "to": "+15551234567", "from": "+15557654321", "account_sid": "AC123", "auth_token": "tok" }),
         ),
     ] {
         let (st, body) = send(

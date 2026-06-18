@@ -50,8 +50,9 @@ pub use monitor_share::{
 pub use notification_channel::{
     ChannelConfig, ChannelKind, DiscordConfig, EmailConfig, GoogleChatConfig, MAX_CHANNEL_NAME_LEN,
     MsTeamsConfig, NewNotificationChannel, NotificationChannel, NotificationChannelUpdate,
-    NtfyConfig, PagerDutyConfig, PushoverConfig, SlackConfig, TelegramAppConfig, TelegramConfig,
-    TransportConfig, WebhookConfig, WhatsAppAppConfig, WhatsAppConfig, validate_channel_name,
+    NtfyConfig, PagerDutyConfig, PushoverConfig, SlackConfig, SmsConfig, TelegramAppConfig,
+    TelegramConfig, TransportConfig, WebhookConfig, WhatsAppAppConfig, WhatsAppConfig,
+    validate_channel_name,
 };
 pub use on_call::{
     NewOnCallLayer, NewOnCallOverride, NewOnCallParticipant, NewOnCallSchedule, OnCallLayer,

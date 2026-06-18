@@ -82,6 +82,17 @@
         syncCentralTelegram(kind);
     }
 
+    // SMS is one kind with a per-gateway sub-form; show only the picked one.
+    function currentSmsProvider() {
+        return form.querySelector("input[name='sms_provider']:checked")?.value || "twilio";
+    }
+
+    function showSmsProvider(provider) {
+        form.querySelectorAll("[data-sms-provider]").forEach(el => {
+            el.classList.toggle("hidden", el.dataset.smsProvider !== provider);
+        });
+    }
+
     // One-tap create has no submittable config — the webhook creates the
     // channel — so the submit/test/bind affordances yield to connect.
     function syncCentralTelegram(kind) {
@@ -125,6 +136,7 @@
 
     function syncAll() {
         showVariant(currentKind());
+        showSmsProvider(currentSmsProvider());
         syncNamePlaceholder();
         syncConfigEnabled();
         syncTestHint();
@@ -139,6 +151,10 @@
         if (evt.target.name === "kind") {
             showVariant(currentKind());
             syncNamePlaceholder();
+            hideTestResult();
+        }
+        if (evt.target.name === "sms_provider") {
+            showSmsProvider(currentSmsProvider());
             hideTestResult();
         }
     });
@@ -786,6 +802,69 @@
             const token = (data.get("ntfy_access_token") || "").trim();
             if (token) config.access_token = token;
             return { config };
+        }
+        if (kind === "sms") {
+            const provider = currentSmsProvider();
+            const to = (data.get("sms_to") || "").trim();
+            if (provider === "telnyx") {
+                const config = {
+                    type: "sms",
+                    provider: "telnyx",
+                    to,
+                    from: (data.get("sms_telnyx_from") || "").trim(),
+                    api_key: (data.get("sms_telnyx_api_key") || "").trim(),
+                };
+                const mp = (data.get("sms_telnyx_messaging_profile_id") || "").trim();
+                if (mp) config.messaging_profile_id = mp;
+                return { config };
+            }
+            if (provider === "vonage") {
+                return {
+                    config: {
+                        type: "sms",
+                        provider: "vonage",
+                        to,
+                        from: (data.get("sms_vonage_from") || "").trim(),
+                        api_key: (data.get("sms_vonage_api_key") || "").trim(),
+                        api_secret: (data.get("sms_vonage_api_secret") || "").trim(),
+                    },
+                };
+            }
+            if (provider === "plivo") {
+                return {
+                    config: {
+                        type: "sms",
+                        provider: "plivo",
+                        to,
+                        from: (data.get("sms_plivo_from") || "").trim(),
+                        auth_id: (data.get("sms_plivo_auth_id") || "").trim(),
+                        auth_token: (data.get("sms_plivo_auth_token") || "").trim(),
+                    },
+                };
+            }
+            if (provider === "sinch") {
+                return {
+                    config: {
+                        type: "sms",
+                        provider: "sinch",
+                        to,
+                        from: (data.get("sms_sinch_from") || "").trim(),
+                        service_plan_id: (data.get("sms_sinch_service_plan_id") || "").trim(),
+                        api_token: (data.get("sms_sinch_api_token") || "").trim(),
+                        region: (data.get("sms_sinch_region") || "us").trim(),
+                    },
+                };
+            }
+            return {
+                config: {
+                    type: "sms",
+                    provider: "twilio",
+                    to,
+                    from: (data.get("sms_twilio_from") || "").trim(),
+                    account_sid: (data.get("sms_twilio_account_sid") || "").trim(),
+                    auth_token: (data.get("sms_twilio_auth_token") || "").trim(),
+                },
+            };
         }
         if (kind === "pushover") {
             const config = {

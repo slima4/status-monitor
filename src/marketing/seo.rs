@@ -43,7 +43,7 @@ const LLMS_FACTS: &[(&str, &str)] = &[
     ("Check interval", "every 60 seconds"),
     (
         "Alert channels",
-        "Slack, Discord, Telegram, Microsoft Teams, email, webhook, PagerDuty, ntfy, Pushover, WhatsApp",
+        "Slack, Discord, Telegram, Microsoft Teams, email, SMS, webhook, PagerDuty, ntfy, Pushover, WhatsApp",
     ),
     (
         "Status page",
