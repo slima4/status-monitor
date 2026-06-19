@@ -56,6 +56,11 @@ pub fn routes(state: AppState) -> Router {
         // Public email-channel verification: possession of the mailed token
         // is the proof; same always-mounted reasoning as the share links.
         .route("/verify-channel", get(views::verify_channel::verify))
+        // Public status-page subscriptions: confirm/unsubscribe carry their own
+        // token/HMAC proof, so they're always mounted like the verify link.
+        .route("/subscribe", post(views::subscribe::subscribe))
+        .route("/subscribe/confirm", get(views::subscribe::confirm))
+        .route("/subscribe/unsubscribe", get(views::subscribe::unsubscribe))
         // Public delegation connect page: a single-use code attaches one
         // notification channel to the inviting org; same always-mounted
         // reasoning as the share links.

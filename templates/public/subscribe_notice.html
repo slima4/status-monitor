@@ -1,0 +1,8 @@
+{% extends "chromeless_base.html" %}
+{% block title %}{{ heading }}{% endblock %}
+{% block main %}
+    <main class="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-4 px-6 text-center">
+        <h1 class="page-title justify-center"><span class="page-title__prefix" aria-hidden="true">$</span>{{ heading|lower }}</h1>
+        <p class="text-sm text-muted">{{ message }}</p>
+    </main>
+{% endblock %}

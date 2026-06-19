@@ -1,0 +1,15 @@
+<dialog id="subscribe-dialog" class="sticker-card m-auto w-full max-w-sm p-0 backdrop:bg-black/40">
+    <form method="post" action="/subscribe" class="flex flex-col gap-3 p-5">
+        <div class="flex items-center justify-between">
+            <h2 class="text-sm font-semibold text-body">Subscribe to updates</h2>
+            <button type="button" data-subscribe-close aria-label="Close" class="text-quiet hover:text-body">&times;</button>
+        </div>
+        <p class="text-xs text-muted">Get an email whenever this page posts an incident update.</p>
+        <label class="sr-only" for="subscribe-email">Email address</label>
+        <input id="subscribe-email" class="field w-full" type="email" name="email" required
+               placeholder="you@example.com" autocomplete="email">
+        <button type="submit" class="sticker-btn sticker-btn--primary justify-center">Subscribe</button>
+        <p class="text-[0.7rem] text-quiet">Prefer a feed? <a class="underline hover:text-body" href="{{ rss_url }}">RSS</a></p>
+    </form>
+</dialog>
+<script defer src="{{ "js/public/subscribe_dialog.js"|asset }}"></script>

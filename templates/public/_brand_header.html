@@ -7,7 +7,14 @@
                 {{ branding.display_name }}
             {% endif %}
         </a>
-        <a href="{{ rss_url }}" class="text-sm text-brand-soft hover:text-brand"
-           aria-label="Subscribe to incident updates via RSS">RSS</a>
+        <div class="flex items-center gap-3">
+            <button type="button" data-subscribe-open
+                    class="rounded-full border border-brand-soft px-3 py-1 text-sm text-brand hover:border-brand">
+                Subscribe to updates
+            </button>
+            <a href="{{ rss_url }}" class="text-sm text-brand-soft hover:text-brand"
+               aria-label="Subscribe to incident updates via RSS">RSS</a>
+        </div>
     </div>
 </header>
+{% include "public/_subscribe_dialog.html" %}

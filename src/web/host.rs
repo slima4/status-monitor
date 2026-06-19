@@ -322,14 +322,14 @@ pub fn is_subdomain_public_request(state: &AppState, headers: &HeaderMap) -> boo
 /// the complete allow-list — every grep-able place a tenant-host route
 /// is whitelisted, so adding a new public-tenant route forces a visit
 /// here too. Mirrors the `HEALTH_PATHS` pattern in `api::handlers::health`.
-const PUBLIC_TENANT_EXACT: &[&str] = &["/", "/status", "/.well-known/security.txt"];
+const PUBLIC_TENANT_EXACT: &[&str] = &["/", "/status", "/subscribe", "/.well-known/security.txt"];
 
 /// Path prefixes the public tenant surface is allowed to expose. No
 /// `/robots.txt` or `/sitemap.xml` by design — tenant pages aren't
 /// crawl targets, and the public-status template emits its own meta.
 /// No general `/.well-known/*` — only `security.txt` is allow-listed,
 /// ACME challenges run on the apex/`app.{base}` host.
-const PUBLIC_TENANT_PREFIXES: &[&str] = &["/status/", "/api/public/v1/", "/static/"];
+const PUBLIC_TENANT_PREFIXES: &[&str] = &["/status/", "/subscribe/", "/api/public/v1/", "/static/"];
 
 fn is_public_tenant_path(path: &str) -> bool {
     PUBLIC_TENANT_EXACT.contains(&path)

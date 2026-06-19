@@ -16,6 +16,7 @@ pub mod region_display;
 pub mod resend_hook;
 pub mod share;
 pub mod slack_connect;
+pub mod subscribe;
 pub mod targets_detail;
 pub mod targets_form;
 pub mod targets_list;
