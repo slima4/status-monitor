@@ -508,6 +508,40 @@ async fn main() -> Result<()> {
         uptimepage::storage::channel_verification::purge_old,
     ));
 
+    let subscriber_dispatch_handle: JoinHandle<()> = {
+        let dispatcher = uptimepage::public_status::subscriber_dispatch::SubscriberDispatcher::new(
+            pg_pool_for_stores.clone(),
+            email_sender.clone(),
+            uptimepage::public_status::subscriber_dispatch::SubscriberDispatchConfig {
+                tick_interval: Duration::from_secs(20),
+                batch_limit: 200,
+                base_domain: cfg.public_status.base_domain.clone(),
+                public_base_url: cfg.auth.public_base_url.clone(),
+                unsubscribe_secret: cfg.auth.fingerprint_salt.clone(),
+                from_address: cfg.email.from_address.clone(),
+                from_name: cfg.email.from_name.clone(),
+            },
+        );
+        let token = root.clone();
+        tokio::spawn(async move { dispatcher.run(token).await })
+    };
+
+    let subscriber_token_cleanup_handle: JoinHandle<()> = tokio::spawn(run_purge_loop(
+        pg_pool_for_stores.clone(),
+        root.clone(),
+        Duration::from_secs(6 * 60 * 60),
+        "subscriber_token_cleanup",
+        uptimepage::storage::subscribers::purge_old_tokens,
+    ));
+
+    let subscriber_notification_cleanup_handle: JoinHandle<()> = tokio::spawn(run_purge_loop(
+        pg_pool_for_stores.clone(),
+        root.clone(),
+        Duration::from_secs(6 * 60 * 60),
+        "subscriber_notification_cleanup",
+        uptimepage::storage::subscribers::purge_old_notifications,
+    ));
+
     // Magic-link sweep only runs when the method is wired into the router.
     // When disabled the routes 404, no rows are ever inserted, and the ticker
     // would be dead weight.
@@ -690,6 +724,9 @@ async fn main() -> Result<()> {
             invitation_purge_handle,
             oauth_state_cleanup_handle,
             channel_verification_cleanup_handle,
+            subscriber_dispatch_handle,
+            subscriber_token_cleanup_handle,
+            subscriber_notification_cleanup_handle,
         );
         if let Some(h) = magic_link_cleanup_handle {
             let _ = h.await;

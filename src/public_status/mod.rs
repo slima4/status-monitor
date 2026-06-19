@@ -10,6 +10,7 @@ pub mod incident_writer;
 pub mod logo_storage;
 pub mod overall_status;
 pub mod source;
+pub mod subscriber_dispatch;
 pub mod xml;
 
 pub use aggregator::{AggregatorConfig, OrgAggregator};
