@@ -217,6 +217,165 @@ pub const LANDINGS: &[Landing] = &[
         cta: "Start free with GitHub",
     },
     Landing {
+        path: "/vs/statuspage",
+        title: "A Statuspage Alternative with Monitoring Built In",
+        eyebrow: "switching status pages",
+        h1: "Looking for a Statuspage alternative?",
+        meta_description: "Uptimepage pairs a branded public status page with uptime monitoring in one product: 60s checks, email and webhook subscribers, incidents. Free to start.",
+        lede: "Here the status page and the monitoring behind it are the same product. Flip any monitor public and customers get a branded page on your own subdomain. Everything below is on the free tier, no card.",
+        features: &[
+            Feature {
+                label: "Status page",
+                value: "built in, branded subdomain",
+            },
+            Feature {
+                label: "Monitoring",
+                value: "included, every 60s",
+            },
+            Feature {
+                label: "Subscribers",
+                value: "email + webhook",
+            },
+            Feature {
+                label: "Incidents",
+                value: "auto-open + scheduled maintenance",
+            },
+            Feature {
+                label: "Public history",
+                value: "90 days",
+            },
+            Feature {
+                label: "Price to start",
+                value: "free, no card",
+            },
+        ],
+        sections: &[
+            Section {
+                heading: "the page and the monitoring are one product",
+                body: "You don’t wire a separate monitor up to the page. A down check opens an incident and posts it to your public status page automatically, with a 90-day history and per-component status.",
+            },
+            Section {
+                heading: "keep customers in the loop",
+                body: "Visitors subscribe for email or webhook updates and hear the moment an incident opens, updates, or resolves. Schedule maintenance windows ahead of time so planned work never reads as an outage.",
+            },
+            Section {
+                heading: "branded, on your own subdomain",
+                body: "Logo, colour, and a status URL on your subdomain. The page serves HTML for people and JSON plus RSS for machines, and stays up even when the backend behind it has a bad moment.",
+            },
+        ],
+        code: None,
+        resources: &[],
+        cta: "Start free with GitHub",
+    },
+    Landing {
+        path: "/vs/better-stack",
+        title: "A Better Stack Alternative You Can Self-Host",
+        eyebrow: "comparing platforms",
+        h1: "Looking for a Better Stack alternative?",
+        meta_description: "Want monitoring and status pages you can self-host and drive as code? Uptimepage is one binary, AGPL, with a Terraform provider and MCP. Free to start.",
+        lede: "Uptimepage is a focused monitor and status page you can run yourself. One binary, open source under AGPL, and everything you can click you can also declare in code. Start free on the hosted tier, no card.",
+        features: &[
+            Feature {
+                label: "Run it",
+                value: "hosted free, or self-host AGPL",
+            },
+            Feature {
+                label: "Deploy",
+                value: "one binary + docker compose up",
+            },
+            Feature {
+                label: "As code",
+                value: "Terraform provider + MCP",
+            },
+            Feature {
+                label: "Probes",
+                value: "multi-region, run your own",
+            },
+            Feature {
+                label: "Checks",
+                value: "HTTP, TCP, DNS, TLS",
+            },
+            Feature {
+                label: "Price to start",
+                value: "free, no card",
+            },
+        ],
+        sections: &[
+            Section {
+                heading: "yours to run",
+                body: "The whole thing ships as one self-contained binary. `docker compose up` brings up the monitor with Postgres and ClickHouse, migrations run on boot, and the source is AGPL if you’d rather host it on your own boxes.",
+            },
+            Section {
+                heading: "everything as code",
+                body: "Declare monitors, status pages and notification channels in HCL with the official Terraform provider, and point an LLM client at the MCP server to read your monitoring and take fenced, audited actions. No click-ops required.",
+            },
+            Section {
+                heading: "probes where your users are",
+                body: "Run region agents on your own machines and check from where your customers actually are. Each agent authenticates with a scoped, org-bound token.",
+            },
+        ],
+        code: None,
+        resources: &[ResourceLink {
+            label: "Monitoring as code",
+            href: "/automation",
+        }],
+        cta: "Start free with GitHub",
+    },
+    Landing {
+        path: "/vs/oneuptime",
+        title: "A OneUptime Alternative That’s Quick to Run",
+        eyebrow: "comparing open source",
+        h1: "Looking for a OneUptime alternative?",
+        meta_description: "An open-source monitor and status page that’s quick to run: one binary plus Postgres and ClickHouse, Terraform and MCP, AGPL. Free on the hosted tier.",
+        lede: "Uptimepage is open source and focused on two jobs done well: uptime monitoring and a public status page. One binary plus two databases, up with a single command, or skip hosting it and use the free tier. No card.",
+        features: &[
+            Feature {
+                label: "License",
+                value: "AGPL, self-host",
+            },
+            Feature {
+                label: "Stack",
+                value: "one binary + Postgres + ClickHouse",
+            },
+            Feature {
+                label: "Deploy",
+                value: "docker compose up",
+            },
+            Feature {
+                label: "As code",
+                value: "Terraform provider + MCP",
+            },
+            Feature {
+                label: "Status pages",
+                value: "built in, branded",
+            },
+            Feature {
+                label: "Price to start",
+                value: "free, no card",
+            },
+        ],
+        sections: &[
+            Section {
+                heading: "up in minutes",
+                body: "One self-contained binary, Postgres for config and ClickHouse for the time-series. `docker compose up` and the whole stack is running with migrations applied. Nothing else to stand up first.",
+            },
+            Section {
+                heading: "everything as code",
+                body: "An official Terraform provider for monitors, status pages and channels, plus an MCP server so an LLM client can read your monitoring and take fenced, audited actions. Review your monitoring in a pull request.",
+            },
+            Section {
+                heading: "hosted or self-hosted, your call",
+                body: "Start on the free hosted tier with no card, or run the AGPL source yourself. The data model, API and Terraform provider are the same either way, so moving between them is just an endpoint change.",
+            },
+        ],
+        code: None,
+        resources: &[ResourceLink {
+            label: "Monitoring as code",
+            href: "/automation",
+        }],
+        cta: "Start free with GitHub",
+    },
+    Landing {
         path: "/automation",
         title: "Monitoring as Code: Terraform & MCP",
         eyebrow: "for developers & devops",
