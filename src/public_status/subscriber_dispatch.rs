@@ -63,6 +63,13 @@ impl SubscriberDispatcher {
         }
     }
 
+    /// One incident + maintenance sweep. Exposed for tests and manual triggers.
+    pub async fn run_once(&self) -> anyhow::Result<()> {
+        self.tick_incidents().await?;
+        self.tick_maintenance().await?;
+        Ok(())
+    }
+
     async fn tick_incidents(&self) -> anyhow::Result<()> {
         let pending = subscribers::list_pending_email(&self.pool, self.cfg.batch_limit).await?;
         let mut claimed = Vec::new();

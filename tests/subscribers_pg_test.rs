@@ -14,7 +14,9 @@ use uptimepage::domain::{NewSubscriber, SubscriberChannel};
 use uptimepage::storage::subscriber_maintenance;
 use uptimepage::storage::subscribers::{self, ConfirmMint};
 
-use common::{pg_pool_from_env, unique_slug};
+use common::{drop_test_db, fresh_test_db, open_test_pool, pg_pool_from_env, unique_slug};
+
+static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations/postgres");
 
 async fn seed_org(pool: &PgPool) -> Uuid {
     let slug = unique_slug("sub-org");
@@ -358,4 +360,76 @@ async fn maintenance_fanout_scheduled_and_completed() {
             .all(|m| !(m.subscriber_id == sub_id && m.maintenance_id == future)),
         "sent scheduled drops out"
     );
+}
+
+fn dispatcher(
+    pool: PgPool,
+    email: std::sync::Arc<dyn uptimepage::email::EmailSender>,
+) -> uptimepage::public_status::subscriber_dispatch::SubscriberDispatcher {
+    use uptimepage::public_status::subscriber_dispatch::{
+        SubscriberDispatchConfig, SubscriberDispatcher,
+    };
+    SubscriberDispatcher::new(
+        pool,
+        email,
+        SubscriberDispatchConfig {
+            tick_interval: std::time::Duration::from_secs(60),
+            batch_limit: 100,
+            base_domain: "example.com".into(),
+            public_base_url: "https://app.example.com".into(),
+            unsubscribe_secret: "dispatch-secret".into(),
+            from_address: "status@example.com".into(),
+            from_name: "Status".into(),
+        },
+    )
+}
+
+#[tokio::test]
+#[ignore = "needs live Postgres (DATABASE_URL)"]
+async fn dispatcher_sends_incident_email_end_to_end() {
+    // Isolated DB: run_once sweeps globally, so a shared DB would let it claim
+    // other parallel tests' pending rows (and vice versa).
+    let Some((db_url, db_name)) = fresh_test_db("subdisp").await else {
+        return;
+    };
+    let pool = open_test_pool(&db_url).await;
+    MIGRATOR.run(&pool).await.unwrap();
+
+    let org = seed_org(&pool).await;
+    let target = seed_target(&pool, org).await;
+    let page = seed_page(&pool, org).await;
+    add_component(&pool, org, page, target).await;
+    confirmed_subscriber(&pool, org, page, "e2e@example.com").await;
+    let incident = seed_public_incident(&pool, org, target).await;
+    add_update(&pool, org, incident, 0).await;
+
+    let mem = std::sync::Arc::new(uptimepage::email::InMemoryEmailSender::new());
+    let disp = dispatcher(pool.clone(), mem.clone());
+    disp.run_once().await.unwrap();
+
+    let sent = mem.sent();
+    let mine: Vec<_> = sent
+        .iter()
+        .filter(|e| e.to.address == "e2e@example.com")
+        .collect();
+    assert_eq!(mine.len(), 1, "one incident email sent");
+    assert!(
+        mine[0].template.list_unsubscribe_url().is_some(),
+        "carries a one-click unsubscribe url"
+    );
+
+    // Idempotent: a second sweep sends nothing new (delivery logged 'sent').
+    disp.run_once().await.unwrap();
+    let after = mem.sent();
+    assert_eq!(
+        after
+            .iter()
+            .filter(|e| e.to.address == "e2e@example.com")
+            .count(),
+        1,
+        "no duplicate send"
+    );
+
+    drop(pool);
+    drop_test_db(&db_name).await;
 }
