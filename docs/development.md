@@ -288,12 +288,12 @@ The single binary serves both the `/api/v1/*` JSON surface and a
 server-rendered HTML UI at `/`. Stack:
 
 - **askama 0.16 + askama_web 0.16** — compile-time HTML templates under
-  [`templates/`](../templates/). Type mismatches fail `cargo build`.
-- **HTMX 2.0.9 + json-enc** — bundled under [`static/js/`](../static/js/).
+  `templates/`. Type mismatches fail `cargo build`.
+- **HTMX 2.0.9 + json-enc** — bundled under `static/js/`.
   Powers partial swaps (filter, paginate, delete) and JSON form submission.
   No SPA framework.
 - **Tailwind CSS 4** — CSS-first config in
-  [`static/css/input.css`](../static/css/input.css) (`@source`, `@theme`,
+  `static/css/input.css` (`@source`, `@theme`,
   `@layer components`). No `tailwind.config.js`.
 - **ECharts 6** — lazy-loaded from page-level `<script>` tags, only where
   charts exist (dashboard, target detail).
@@ -335,7 +335,7 @@ makes a future SvelteKit port a templates-only rewrite.
 - **Unit (render):** every view in `src/web/views/` ships a `#[test]` that
   renders the template with a fixtures struct and asserts on the output
   (presence of the HTMX hooks, redaction sentinels, table scaffolding).
-- **End-to-end:** [`tests/web_e2e_test.rs`](../tests/web_e2e_test.rs) drives
+- **End-to-end:** `tests/web_e2e_test.rs` drives
   the merged API+web router via `tower::ServiceExt::oneshot`, covering
   dashboard / list / detail / forms / 404 paths and verifying credential
   redaction never leaks real values into HTML.
