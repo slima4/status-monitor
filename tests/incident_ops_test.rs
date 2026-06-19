@@ -856,3 +856,70 @@ async fn emergency_ack_lifecycle_in_memory() {
             .all(|a| a.id != cleared_id)
     );
 }
+
+#[tokio::test]
+#[ignore]
+async fn publish_posts_opening_update_pg() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let (org, user, id) = seed(&pool, "incopen").await;
+    let store = PgIncidentOpsStore::new(pool.clone());
+
+    // First publish of an internal incident posts one opening update.
+    store
+        .publish(
+            org,
+            id,
+            Some("API errors".into()),
+            Some("Looking into it".into()),
+            Actor::User(user),
+        )
+        .await
+        .unwrap()
+        .expect("published");
+    let (phase, message): (String, String) =
+        sqlx::query_as("SELECT phase, message FROM incident_updates WHERE incident_id = $1")
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(phase, "investigating");
+    assert_eq!(message, "Looking into it");
+
+    // Re-publishing does not post a second opening update.
+    store
+        .publish(org, id, None, None, Actor::User(user))
+        .await
+        .unwrap();
+    let count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM incident_updates WHERE incident_id = $1")
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(count, 1, "re-publish posts no new update");
+
+    // An incident already narrated before publish gets no synthesized opener.
+    let (org2, user2, id2) = seed(&pool, "incnarr").await;
+    sqlx::query(
+        "INSERT INTO incident_updates (org_id, incident_id, phase, message, author) \
+         VALUES ($1, $2, 'identified', 'root cause found', 'op')",
+    )
+    .bind(org2.0)
+    .bind(id2)
+    .execute(&pool)
+    .await
+    .unwrap();
+    store
+        .publish(org2, id2, None, None, Actor::User(user2))
+        .await
+        .unwrap();
+    let count2: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM incident_updates WHERE incident_id = $1")
+            .bind(id2)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(count2, 1, "pre-narrated incident gets no opener");
+}

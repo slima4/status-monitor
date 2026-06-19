@@ -1073,6 +1073,25 @@ impl IncidentOpsStore for PgIncidentOpsStore {
             .begin()
             .await
             .map_err(|e| anyhow::anyhow!("begin: {e}"))?;
+        // Lock the row and read the pre-publish visibility so the opening
+        // update below only fires on an internal->public transition, not on a
+        // re-publish.
+        let prior_visibility: Option<String> = sqlx::query_scalar(
+            "SELECT visibility FROM incidents WHERE id = $1 AND org_id = $2 FOR UPDATE",
+        )
+        .bind(id)
+        .bind(org.0)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|e| anyhow::anyhow!("publish lock: {e}"))?;
+        // The opening update's body (subscribers are notified per update, so
+        // publishing without one would be silent): the operator's description,
+        // else the title, else a generic line.
+        let opening_message = public_description
+            .clone()
+            .filter(|s| !s.trim().is_empty())
+            .or_else(|| public_title.clone().filter(|s| !s.trim().is_empty()))
+            .unwrap_or_else(|| "We are investigating this incident.".to_string());
         // A provided narration field overwrites; an omitted one keeps the stored
         // copy (clearing is the narration patch endpoint's job, not publish's).
         let sql = format!(
@@ -1095,6 +1114,35 @@ impl IncidentOpsStore for PgIncidentOpsStore {
             .map_err(|e| anyhow::anyhow!("publish incident: {e}"))?;
         let Some(row) = row else { return Ok(None) };
         insert_event_tx(&mut tx, org, id, IncidentEventKind::Published, actor, None).await?;
+        // On the first publish, post an opening update unless the operator
+        // already narrated one, so subscriber fan-out has a row to send.
+        if prior_visibility.as_deref() == Some("internal") {
+            let has_update: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM incident_updates WHERE incident_id = $1 AND org_id = $2)",
+            )
+            .bind(id)
+            .bind(org.0)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|e| anyhow::anyhow!("publish update check: {e}"))?;
+            if !has_update {
+                let author = actor
+                    .user_id()
+                    .map(|u| u.0.to_string())
+                    .unwrap_or_else(|| "system".to_string());
+                sqlx::query(
+                    "INSERT INTO incident_updates (org_id, incident_id, phase, message, author) \
+                     VALUES ($1, $2, 'investigating', $3, $4)",
+                )
+                .bind(org.0)
+                .bind(id)
+                .bind(opening_message)
+                .bind(author)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| anyhow::anyhow!("publish opening update: {e}"))?;
+            }
+        }
         tx.commit()
             .await
             .map_err(|e| anyhow::anyhow!("commit: {e}"))?;
