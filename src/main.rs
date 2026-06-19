@@ -471,6 +471,7 @@ async fn main() -> Result<()> {
 
     let unsubscribe_secret = uptimepage::storage::app_secrets::ensure_secret(
         &pg_pool_for_stores,
+        cipher.as_deref(),
         "subscription_unsubscribe",
     )
     .await
