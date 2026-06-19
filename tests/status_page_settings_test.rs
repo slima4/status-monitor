@@ -158,8 +158,10 @@ async fn valid_save_persists_and_round_trips() {
     assert_eq!(body["enabled"], true);
     assert_eq!(body["public_display_name"], "Acme Public");
     assert_eq!(body["public_brand_color"], "#1a2b3c"); // lower-cased on write
-    assert_eq!(body["show_powered_by"], false);
-    assert_eq!(body["public_show_powered_by"], false); // raw override, not just resolved
+    // The powered-by toggle is pinned on: a false override is ignored and the
+    // raw value clears to inherit the default.
+    assert_eq!(body["show_powered_by"], true);
+    assert!(body["public_show_powered_by"].is_null());
 }
 
 /// The form's default state (no display name / about set) must not read as a

@@ -221,7 +221,9 @@ pub async fn update_page(
                 public_brand_color: normalise_opt(b.public_brand_color)
                     .map(|c| c.to_ascii_lowercase()),
                 logo_hash: None,
-                public_show_powered_by: b.public_show_powered_by,
+                // Temporarily pinned: ignore the client toggle so the badge
+                // can't be turned off while the product ships free.
+                public_show_powered_by: None,
                 public_style: b.public_style.unwrap_or_default(),
             };
             pob.validate().map_err(|e| {

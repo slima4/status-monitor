@@ -99,10 +99,6 @@
           <span class="text-xs text-muted">Brand color</span>
           <input id="f-color" type="color" value="{{ brand_color_value }}" class="h-8 w-12 cursor-pointer align-middle">
         </label>
-        <label class="inline-flex items-center gap-2 text-sm">
-          <input id="f-powered" type="checkbox"{% if show_powered_by %} checked{% endif %}>
-          <span class="text-sm">Show “powered by”</span>
-        </label>
       </div>
       </div>
     </fieldset>
@@ -287,7 +283,6 @@
             public_about: document.getElementById('f-about').value || null,
             public_brand_color: document.getElementById('f-color').value || null,
             public_style: document.getElementById('f-style').value,
-            public_show_powered_by: document.getElementById('f-powered').checked,
           },
         };
         const btnLabel = btn.textContent;
