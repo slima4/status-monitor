@@ -189,7 +189,7 @@ pub async fn unsubscribe(
     let Ok(id) = Uuid::parse_str(q.s.trim()) else {
         return Ok(invalid());
     };
-    if !subscribers::verify_unsubscribe(&state.cfg.auth.fingerprint_salt, id, q.t.trim()) {
+    if !subscribers::verify_unsubscribe(&state.subscription_unsubscribe_secret, id, q.t.trim()) {
         return Ok(invalid());
     }
     let Some(pool) = state.db.as_ref() else {

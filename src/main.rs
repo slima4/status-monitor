@@ -469,6 +469,13 @@ async fn main() -> Result<()> {
         .await
         .map_err(|e| AppError::Other(anyhow::anyhow!("auth salt guard: {e}")))?;
 
+    let unsubscribe_secret = uptimepage::storage::app_secrets::ensure_secret(
+        &pg_pool_for_stores,
+        "subscription_unsubscribe",
+    )
+    .await
+    .map_err(|e| AppError::Other(anyhow::anyhow!("unsubscribe secret: {e}")))?;
+
     let prefix_len = cfg.auth.api_tokens.prefix_visible_chars as usize;
     if prefix_len < uptimepage::auth::api_tokens::MIN_PREFIX_VISIBLE_CHARS {
         return Err(AppError::Other(anyhow::anyhow!(
@@ -517,7 +524,7 @@ async fn main() -> Result<()> {
                 batch_limit: 200,
                 base_domain: cfg.public_status.base_domain.clone(),
                 public_base_url: cfg.auth.public_base_url.clone(),
-                unsubscribe_secret: cfg.auth.fingerprint_salt.clone(),
+                unsubscribe_secret: unsubscribe_secret.clone(),
                 from_address: cfg.email.from_address.clone(),
                 from_name: cfg.email.from_name.clone(),
             },
@@ -576,6 +583,7 @@ async fn main() -> Result<()> {
     let state = state
         .with_telegram_send_budget(telegram_send_budget)
         .with_incident_signals(incident_signal_tx)
+        .with_subscription_unsubscribe_secret(unsubscribe_secret)
         .with_shutdown(root.clone());
     // Hot-reload the abuse deny-lists on SIGHUP when enabled (validate then
     // atomic swap; a bad edit is rejected and the running rules stay).

@@ -295,6 +295,9 @@ pub struct AppState {
     /// (`/api/agent/dispatch`) return immediately on shutdown instead of
     /// blocking graceful drain for the full hold window.
     pub shutdown: Option<tokio_util::sync::CancellationToken>,
+    /// Keys the public unsubscribe HMAC. Persisted and independent of
+    /// `fingerprint_salt` so rotating that salt can't void mailed links.
+    pub subscription_unsubscribe_secret: String,
 }
 
 /// Run unconditionally at boot after config parse. Encodes the per-org
@@ -503,7 +506,14 @@ impl AppState {
             agent_seen_debounce: build_agent_seen_debounce(),
             ad_hoc: Arc::new(AdHocDispatch::new()),
             shutdown: None,
+            subscription_unsubscribe_secret: String::new(),
         }
+    }
+
+    /// Set the persisted secret that keys public unsubscribe links.
+    pub fn with_subscription_unsubscribe_secret(mut self, secret: String) -> Self {
+        self.subscription_unsubscribe_secret = secret;
+        self
     }
 
     /// Wire the process shutdown token so held agent long-polls unblock on
