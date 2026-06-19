@@ -90,6 +90,18 @@ pub enum EmailTemplate {
         incident_url: String,
         unsubscribe_url: String,
     },
+    /// A maintenance-window announcement or completion for a confirmed
+    /// subscriber. `phase` is `scheduled` or `completed`.
+    SubscriberMaintenance {
+        page_name: String,
+        title: String,
+        description: Option<String>,
+        phase: String,
+        starts_at: DateTime<Utc>,
+        ends_at: DateTime<Utc>,
+        page_url: String,
+        unsubscribe_url: String,
+    },
 }
 
 impl EmailTemplate {
@@ -160,6 +172,25 @@ impl EmailTemplate {
                 incident_url,
                 unsubscribe_url,
             ),
+            EmailTemplate::SubscriberMaintenance {
+                page_name,
+                title,
+                description,
+                phase,
+                starts_at,
+                ends_at,
+                page_url,
+                unsubscribe_url,
+            } => templates::subscriber_maintenance::render(
+                page_name,
+                title,
+                description.as_deref(),
+                phase,
+                *starts_at,
+                *ends_at,
+                page_url,
+                unsubscribe_url,
+            ),
         }
     }
 
@@ -173,6 +204,7 @@ impl EmailTemplate {
             EmailTemplate::IncidentAlert { .. } => None,
             EmailTemplate::SubscriberConfirm { confirm_url, .. } => Some(confirm_url),
             EmailTemplate::SubscriberIncident { incident_url, .. } => Some(incident_url),
+            EmailTemplate::SubscriberMaintenance { page_url, .. } => Some(page_url),
         }
     }
 
@@ -181,6 +213,9 @@ impl EmailTemplate {
     pub fn list_unsubscribe_url(&self) -> Option<&str> {
         match self {
             EmailTemplate::SubscriberIncident {
+                unsubscribe_url, ..
+            }
+            | EmailTemplate::SubscriberMaintenance {
                 unsubscribe_url, ..
             } => Some(unsubscribe_url),
             _ => None,

@@ -11,6 +11,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use uptimepage::domain::{NewSubscriber, SubscriberChannel};
+use uptimepage::storage::subscriber_maintenance;
 use uptimepage::storage::subscribers::{self, ConfirmMint};
 
 use common::{pg_pool_from_env, unique_slug};
@@ -262,4 +263,99 @@ async fn fanout_lists_verified_recent_public_updates_only() {
     assert!(after.iter().all(|q| q.subscriber_id != sub_id));
 
     cleanup(&pool, org).await;
+}
+
+async fn seed_maintenance(pool: &PgPool, org: Uuid, start_h: i64, end_h: i64) -> Uuid {
+    let row: (Uuid,) = sqlx::query_as(
+        "INSERT INTO maintenance_windows (org_id, title, description, starts_at, ends_at)
+         VALUES ($1, 'DB upgrade', 'brief blip', now() + make_interval(hours => $2),
+                 now() + make_interval(hours => $3))
+         RETURNING id",
+    )
+    .bind(org)
+    .bind(start_h as i32)
+    .bind(end_h as i32)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    row.0
+}
+
+async fn add_maintenance_component(pool: &PgPool, org: Uuid, mid: Uuid, target: Uuid) {
+    sqlx::query(
+        "INSERT INTO maintenance_window_components (org_id, maintenance_id, target_id)
+         VALUES ($1, $2, $3)",
+    )
+    .bind(org)
+    .bind(mid)
+    .bind(target)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+#[ignore = "needs live Postgres (DATABASE_URL)"]
+async fn maintenance_fanout_scheduled_and_completed() {
+    let Some(pool) = pg_pool_from_env().await else {
+        return;
+    };
+    let org = seed_org(&pool).await;
+    let target = seed_target(&pool, org).await;
+    let page = seed_page(&pool, org).await;
+    add_component(&pool, org, page, target).await;
+
+    let sub_id = confirmed_subscriber(&pool, org, page, "m@example.com").await;
+    // Backdate the subscription so a window that already ended still counts as
+    // "after they subscribed".
+    sqlx::query(
+        "UPDATE status_page_subscribers SET verified_at = now() - interval '3 hours' WHERE id = $1",
+    )
+    .bind(sub_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let future = seed_maintenance(&pool, org, 24, 25).await;
+    add_maintenance_component(&pool, org, future, target).await;
+    let past = seed_maintenance(&pool, org, -2, -1).await;
+    add_maintenance_component(&pool, org, past, target).await;
+
+    let pending = subscriber_maintenance::list_pending(&pool, 100)
+        .await
+        .unwrap();
+    let mine: Vec<_> = pending
+        .iter()
+        .filter(|m| m.subscriber_id == sub_id)
+        .collect();
+    assert_eq!(mine.len(), 2, "one scheduled + one completed");
+    let scheduled = mine.iter().find(|m| m.maintenance_id == future).unwrap();
+    assert_eq!(scheduled.phase, "scheduled");
+    let completed = mine.iter().find(|m| m.maintenance_id == past).unwrap();
+    assert_eq!(completed.phase, "completed");
+
+    // Claim is exclusive per (subscriber, window, phase).
+    assert!(
+        subscriber_maintenance::claim(&pool, sub_id, future, "scheduled", org)
+            .await
+            .unwrap()
+    );
+    assert!(
+        !subscriber_maintenance::claim(&pool, sub_id, future, "scheduled", org)
+            .await
+            .unwrap()
+    );
+
+    subscriber_maintenance::mark(&pool, sub_id, future, "scheduled", None)
+        .await
+        .unwrap();
+    let after = subscriber_maintenance::list_pending(&pool, 100)
+        .await
+        .unwrap();
+    assert!(
+        after
+            .iter()
+            .all(|m| !(m.subscriber_id == sub_id && m.maintenance_id == future)),
+        "sent scheduled drops out"
+    );
 }

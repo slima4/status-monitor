@@ -549,6 +549,14 @@ async fn main() -> Result<()> {
         uptimepage::storage::subscribers::purge_old_notifications,
     ));
 
+    let subscriber_maintenance_cleanup_handle: JoinHandle<()> = tokio::spawn(run_purge_loop(
+        pg_pool_for_stores.clone(),
+        root.clone(),
+        Duration::from_secs(6 * 60 * 60),
+        "subscriber_maintenance_cleanup",
+        uptimepage::storage::subscriber_maintenance::purge_old,
+    ));
+
     // Magic-link sweep only runs when the method is wired into the router.
     // When disabled the routes 404, no rows are ever inserted, and the ticker
     // would be dead weight.
@@ -735,6 +743,7 @@ async fn main() -> Result<()> {
             subscriber_dispatch_handle,
             subscriber_token_cleanup_handle,
             subscriber_notification_cleanup_handle,
+            subscriber_maintenance_cleanup_handle,
         );
         if let Some(h) = magic_link_cleanup_handle {
             let _ = h.await;

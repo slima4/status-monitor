@@ -212,7 +212,7 @@ pub const FANOUT_LOOKBACK_HOURS: i64 = 24;
 pub const FANOUT_MAX_ATTEMPTS: i32 = 3;
 /// A `queued` claim older than this is treated as an orphan (worker crashed
 /// mid-send) and may be re-claimed.
-const CLAIM_ORPHAN_MINUTES: i64 = 10;
+pub(crate) const CLAIM_ORPHAN_MINUTES: i64 = 10;
 
 #[derive(Debug, sqlx::FromRow)]
 pub struct PendingUpdate {

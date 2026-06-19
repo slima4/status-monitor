@@ -11,7 +11,10 @@ use sqlx::PgPool;
 use tokio::time::{MissedTickBehavior, interval};
 use tokio_util::sync::CancellationToken;
 
+use uuid::Uuid;
+
 use crate::email::{EmailAddress, EmailSender, EmailTemplate, TransactionalEmail};
+use crate::storage::subscriber_maintenance::{self, PendingMaintenance};
 use crate::storage::subscribers::{self, PendingUpdate};
 
 const SEND_CONCURRENCY: usize = 8;
@@ -49,15 +52,18 @@ impl SubscriberDispatcher {
                     return;
                 }
                 _ = ticker.tick() => {
-                    if let Err(err) = self.tick_once().await {
-                        tracing::warn!(error = %err, "subscriber_dispatch tick failed");
+                    if let Err(err) = self.tick_incidents().await {
+                        tracing::warn!(error = %err, "subscriber_dispatch incident tick failed");
+                    }
+                    if let Err(err) = self.tick_maintenance().await {
+                        tracing::warn!(error = %err, "subscriber_dispatch maintenance tick failed");
                     }
                 }
             }
         }
     }
 
-    async fn tick_once(&self) -> anyhow::Result<()> {
+    async fn tick_incidents(&self) -> anyhow::Result<()> {
         let pending = subscribers::list_pending_email(&self.pool, self.cfg.batch_limit).await?;
         let mut claimed = Vec::new();
         for p in pending {
@@ -71,7 +77,7 @@ impl SubscriberDispatcher {
         // can't stall the batch past the tick. Each marks its own outcome.
         stream::iter(claimed)
             .for_each_concurrent(SEND_CONCURRENCY, |p| async move {
-                let error = self.deliver(&p).await.err().map(|e| e.to_string());
+                let error = self.deliver_incident(&p).await.err().map(|e| e.to_string());
                 if let Some(err) = &error {
                     tracing::warn!(error = %err, subscriber = %p.subscriber_id, "subscriber delivery failed");
                 }
@@ -86,7 +92,51 @@ impl SubscriberDispatcher {
         Ok(())
     }
 
-    async fn deliver(&self, p: &PendingUpdate) -> anyhow::Result<()> {
+    async fn tick_maintenance(&self) -> anyhow::Result<()> {
+        let pending =
+            subscriber_maintenance::list_pending(&self.pool, self.cfg.batch_limit).await?;
+        let mut claimed = Vec::new();
+        for m in pending {
+            if subscriber_maintenance::claim(
+                &self.pool,
+                m.subscriber_id,
+                m.maintenance_id,
+                &m.phase,
+                m.org_id,
+            )
+            .await?
+            {
+                claimed.push(m);
+            }
+        }
+        stream::iter(claimed)
+            .for_each_concurrent(SEND_CONCURRENCY, |m| async move {
+                let error = self.deliver_maintenance(&m).await.err().map(|e| e.to_string());
+                if let Some(err) = &error {
+                    tracing::warn!(error = %err, subscriber = %m.subscriber_id, "maintenance delivery failed");
+                }
+                if let Err(err) = subscriber_maintenance::mark(
+                    &self.pool,
+                    m.subscriber_id,
+                    m.maintenance_id,
+                    &m.phase,
+                    error.as_deref(),
+                )
+                .await
+                {
+                    tracing::warn!(error = %err, "maintenance mark failed");
+                }
+            })
+            .await;
+        Ok(())
+    }
+
+    async fn deliver_incident(&self, p: &PendingUpdate) -> anyhow::Result<()> {
+        let origin = self.origin(
+            &p.slug,
+            p.custom_domain.as_deref(),
+            p.custom_domain_verified,
+        );
         let outgoing = TransactionalEmail {
             from: EmailAddress::new(self.cfg.from_address.clone(), self.cfg.from_name.clone()),
             to: EmailAddress::new(p.target.clone(), p.target.clone()),
@@ -95,10 +145,37 @@ impl SubscriberDispatcher {
                 incident_title: p.incident_title.clone(),
                 phase: p.phase.clone(),
                 message: p.message.clone(),
-                incident_url: self.incident_url(p),
-                unsubscribe_url: self.unsubscribe_url(p),
+                incident_url: format!("{origin}/status/incidents/{}", p.incident_id),
+                unsubscribe_url: self.unsubscribe_url(&origin, p.subscriber_id),
             },
         };
+        self.send(outgoing).await
+    }
+
+    async fn deliver_maintenance(&self, m: &PendingMaintenance) -> anyhow::Result<()> {
+        let origin = self.origin(
+            &m.slug,
+            m.custom_domain.as_deref(),
+            m.custom_domain_verified,
+        );
+        let outgoing = TransactionalEmail {
+            from: EmailAddress::new(self.cfg.from_address.clone(), self.cfg.from_name.clone()),
+            to: EmailAddress::new(m.target.clone(), m.target.clone()),
+            template: EmailTemplate::SubscriberMaintenance {
+                page_name: m.page_name.clone(),
+                title: m.title.clone(),
+                description: m.description.clone(),
+                phase: m.phase.clone(),
+                starts_at: m.starts_at,
+                ends_at: m.ends_at,
+                page_url: format!("{origin}/status"),
+                unsubscribe_url: self.unsubscribe_url(&origin, m.subscriber_id),
+            },
+        };
+        self.send(outgoing).await
+    }
+
+    async fn send(&self, outgoing: TransactionalEmail) -> anyhow::Result<()> {
         self.email
             .send(outgoing)
             .await
@@ -106,26 +183,18 @@ impl SubscriberDispatcher {
         Ok(())
     }
 
-    fn page_origin(&self, p: &PendingUpdate) -> String {
+    fn origin(&self, slug: &str, custom_domain: Option<&str>, verified: bool) -> String {
         crate::web::host::page_origin(
             &self.cfg.base_domain,
             &self.cfg.public_base_url,
-            &p.slug,
-            p.custom_domain.as_deref(),
-            p.custom_domain_verified,
+            slug,
+            custom_domain,
+            verified,
         )
     }
 
-    fn incident_url(&self, p: &PendingUpdate) -> String {
-        format!("{}/status/incidents/{}", self.page_origin(p), p.incident_id)
-    }
-
-    fn unsubscribe_url(&self, p: &PendingUpdate) -> String {
-        let mac = subscribers::unsubscribe_token(&self.cfg.unsubscribe_secret, p.subscriber_id);
-        format!(
-            "{}/subscribe/unsubscribe?s={}&t={mac}",
-            self.page_origin(p),
-            p.subscriber_id
-        )
+    fn unsubscribe_url(&self, origin: &str, subscriber_id: Uuid) -> String {
+        let mac = subscribers::unsubscribe_token(&self.cfg.unsubscribe_secret, subscriber_id);
+        format!("{origin}/subscribe/unsubscribe?s={subscriber_id}&t={mac}")
     }
 }
