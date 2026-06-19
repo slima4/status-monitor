@@ -922,4 +922,23 @@ async fn publish_posts_opening_update_pg() {
             .await
             .unwrap();
     assert_eq!(count2, 1, "pre-narrated incident gets no opener");
+
+    // A retro-published, already-resolved incident gets no "investigating" opener.
+    let (org3, user3, id3) = seed(&pool, "incresolved").await;
+    sqlx::query("UPDATE incidents SET state = 'resolved', ended_at = now() WHERE id = $1")
+        .bind(id3)
+        .execute(&pool)
+        .await
+        .unwrap();
+    store
+        .publish(org3, id3, None, None, Actor::User(user3))
+        .await
+        .unwrap();
+    let count3: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM incident_updates WHERE incident_id = $1")
+            .bind(id3)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(count3, 0, "resolved incident gets no opener");
 }

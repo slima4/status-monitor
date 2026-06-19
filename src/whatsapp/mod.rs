@@ -21,8 +21,10 @@ pub fn signature_matches(app_secret: &str, header: &str, body: &[u8]) -> bool {
     let Some(hex_sig) = header.strip_prefix("sha256=") else {
         return false;
     };
+    // Compare lowercased: providers may send upper/mixed-case hex.
+    let provided = hex_sig.to_ascii_lowercase();
     let expected = crate::auth::mac::hmac_sha256_hex(app_secret.as_bytes(), &[body]);
-    hex_sig.as_bytes().ct_eq(expected.as_bytes()).into()
+    provided.as_bytes().ct_eq(expected.as_bytes()).into()
 }
 
 // ── webhook payload (the slice of it we consume) ────────────────────────
@@ -210,8 +212,15 @@ mod tests {
         let body = br#"{"object":"whatsapp_business_account"}"#;
         let mut mac = Hmac::<Sha256>::new_from_slice(b"app-secret").unwrap();
         mac.update(body);
-        let header = format!("sha256={}", hex::encode(mac.finalize().into_bytes()));
+        let hex_sig = hex::encode(mac.finalize().into_bytes());
+        let header = format!("sha256={hex_sig}");
         assert!(signature_matches("app-secret", &header, body));
+        // Hex case is not significant — a provider may send upper/mixed case.
+        assert!(signature_matches(
+            "app-secret",
+            &format!("sha256={}", hex_sig.to_uppercase()),
+            body
+        ));
         assert!(!signature_matches("app-secret", &header, b"tampered"));
         assert!(!signature_matches("other-secret", &header, body));
         assert!(!signature_matches("app-secret", "sha256=zz", body));

@@ -1114,9 +1114,11 @@ impl IncidentOpsStore for PgIncidentOpsStore {
             .map_err(|e| anyhow::anyhow!("publish incident: {e}"))?;
         let Some(row) = row else { return Ok(None) };
         insert_event_tx(&mut tx, org, id, IncidentEventKind::Published, actor, None).await?;
-        // On the first publish, post an opening update unless the operator
-        // already narrated one, so subscriber fan-out has a row to send.
-        if prior_visibility.as_deref() == Some("internal") {
+        // On the first publish of a still-active incident, post an opening
+        // update unless the operator already narrated one, so subscriber
+        // fan-out has a row to send. A retro-published, already-resolved
+        // incident gets no "investigating" blast.
+        if prior_visibility.as_deref() == Some("internal") && row.state != "resolved" {
             let has_update: bool = sqlx::query_scalar(
                 "SELECT EXISTS(SELECT 1 FROM incident_updates WHERE incident_id = $1 AND org_id = $2)",
             )
