@@ -78,6 +78,21 @@ pub async fn subscribe(pool: &PgPool, new: &NewSubscriber) -> Result<Subscriber>
     Subscriber::try_from(row).map_err(Into::into)
 }
 
+/// Mark a subscriber verified. Used by the webhook confirmation-ping path,
+/// which proves URL ownership by a live 2xx rather than a mailed token.
+pub async fn mark_verified(pool: &PgPool, subscriber_id: Uuid) -> Result<()> {
+    sqlx::query(
+        "UPDATE status_page_subscribers
+         SET verified_at = COALESCE(verified_at, now()), updated_at = now()
+         WHERE id = $1",
+    )
+    .bind(subscriber_id)
+    .execute(pool)
+    .await
+    .context("subscribers::mark_verified")?;
+    Ok(())
+}
+
 pub enum ConfirmMint {
     /// Raw token — embedded in the confirm URL, never persisted.
     Created {
@@ -219,6 +234,7 @@ pub struct PendingUpdate {
     pub subscriber_id: Uuid,
     pub update_id: Uuid,
     pub org_id: Uuid,
+    pub channel: String,
     pub target: String,
     pub phase: String,
     pub message: String,
@@ -230,15 +246,15 @@ pub struct PendingUpdate {
     pub custom_domain_verified: bool,
 }
 
-/// Verified email subscribers with a public incident update posted since they
-/// subscribed (and within the lookback) that hasn't been claimed yet. The
-/// incident→page link is `incident.target_id` ∈ the page's curated components.
+/// Verified subscribers (email or webhook) with a public incident update posted
+/// since they subscribed (and within the lookback) that hasn't been claimed yet.
+/// The incident→page link is `incident.target_id` ∈ the page's curated components.
 ///
 /// Fan-out is per posted update, so an operator must post an update to notify:
 /// publish/resolve that write no update stay silent (issue #75).
-pub async fn list_pending_email(pool: &PgPool, limit: i64) -> Result<Vec<PendingUpdate>> {
+pub async fn list_pending(pool: &PgPool, limit: i64) -> Result<Vec<PendingUpdate>> {
     let rows = sqlx::query_as::<_, PendingUpdate>(
-        "SELECT s.id AS subscriber_id, u.id AS update_id, s.org_id, s.target,
+        "SELECT s.id AS subscriber_id, u.id AS update_id, s.org_id, s.channel, s.target,
                 u.phase, u.message,
                 i.id AS incident_id,
                 COALESCE(NULLIF(i.public_title, ''), 'Status update') AS incident_title,
@@ -253,7 +269,7 @@ pub async fn list_pending_email(pool: &PgPool, limit: i64) -> Result<Vec<Pending
          JOIN incidents i
               ON i.target_id = c.target_id AND i.org_id = c.org_id AND i.visibility = 'public'
          JOIN incident_updates u ON u.incident_id = i.id AND u.org_id = i.org_id
-         WHERE s.channel = 'email' AND s.verified_at IS NOT NULL
+         WHERE s.channel IN ('email', 'webhook') AND s.verified_at IS NOT NULL
            AND u.posted_at >= s.verified_at
            AND u.posted_at >= now() - make_interval(hours => $2)
            AND NOT EXISTS (
@@ -271,7 +287,7 @@ pub async fn list_pending_email(pool: &PgPool, limit: i64) -> Result<Vec<Pending
     .bind(FANOUT_MAX_ATTEMPTS)
     .fetch_all(pool)
     .await
-    .context("subscribers::list_pending_email")?;
+    .context("subscribers::list_pending")?;
     Ok(rows)
 }
 

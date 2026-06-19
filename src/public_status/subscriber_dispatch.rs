@@ -14,6 +14,7 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::email::{EmailAddress, EmailSender, EmailTemplate, TransactionalEmail};
+use crate::http_outbound::{OutboundHttpClient, post_bytes_with_headers};
 use crate::storage::subscriber_maintenance::{self, PendingMaintenance};
 use crate::storage::subscribers::{self, PendingUpdate};
 
@@ -34,12 +35,23 @@ pub struct SubscriberDispatchConfig {
 pub struct SubscriberDispatcher {
     pool: PgPool,
     email: Arc<dyn EmailSender>,
+    http: OutboundHttpClient,
     cfg: SubscriberDispatchConfig,
 }
 
 impl SubscriberDispatcher {
-    pub fn new(pool: PgPool, email: Arc<dyn EmailSender>, cfg: SubscriberDispatchConfig) -> Self {
-        Self { pool, email, cfg }
+    pub fn new(
+        pool: PgPool,
+        email: Arc<dyn EmailSender>,
+        http: OutboundHttpClient,
+        cfg: SubscriberDispatchConfig,
+    ) -> Self {
+        Self {
+            pool,
+            email,
+            http,
+            cfg,
+        }
     }
 
     pub async fn run(&self, shutdown: CancellationToken) {
@@ -71,7 +83,7 @@ impl SubscriberDispatcher {
     }
 
     async fn tick_incidents(&self) -> anyhow::Result<()> {
-        let pending = subscribers::list_pending_email(&self.pool, self.cfg.batch_limit).await?;
+        let pending = subscribers::list_pending(&self.pool, self.cfg.batch_limit).await?;
         let mut claimed = Vec::new();
         for p in pending {
             if subscribers::claim_notification(&self.pool, p.subscriber_id, p.update_id, p.org_id)
@@ -144,6 +156,18 @@ impl SubscriberDispatcher {
             p.custom_domain.as_deref(),
             p.custom_domain_verified,
         );
+        let unsubscribe_url = self.unsubscribe_url(&origin, p.subscriber_id);
+        if p.channel == "webhook" {
+            let payload = serde_json::json!({
+                "type": "incident_update",
+                "incident": { "id": p.incident_id, "title": p.incident_title },
+                "update": { "id": p.update_id, "phase": p.phase, "message": p.message },
+                "page": { "name": p.page_name, "url": format!("{origin}/status") },
+                "incident_url": format!("{origin}/status/incidents/{}", p.incident_id),
+                "unsubscribe_url": unsubscribe_url,
+            });
+            return self.post_webhook(&p.target, &payload).await;
+        }
         let outgoing = TransactionalEmail {
             from: EmailAddress::new(self.cfg.from_address.clone(), self.cfg.from_name.clone()),
             to: EmailAddress::new(p.target.clone(), p.target.clone()),
@@ -153,7 +177,7 @@ impl SubscriberDispatcher {
                 phase: p.phase.clone(),
                 message: p.message.clone(),
                 incident_url: format!("{origin}/status/incidents/{}", p.incident_id),
-                unsubscribe_url: self.unsubscribe_url(&origin, p.subscriber_id),
+                unsubscribe_url,
             },
         };
         self.send(outgoing).await
@@ -165,6 +189,23 @@ impl SubscriberDispatcher {
             m.custom_domain.as_deref(),
             m.custom_domain_verified,
         );
+        let unsubscribe_url = self.unsubscribe_url(&origin, m.subscriber_id);
+        if m.channel == "webhook" {
+            let payload = serde_json::json!({
+                "type": "maintenance",
+                "maintenance": {
+                    "id": m.maintenance_id,
+                    "title": m.title,
+                    "description": m.description,
+                    "phase": m.phase,
+                    "starts_at": m.starts_at,
+                    "ends_at": m.ends_at,
+                },
+                "page": { "name": m.page_name, "url": format!("{origin}/status") },
+                "unsubscribe_url": unsubscribe_url,
+            });
+            return self.post_webhook(&m.target, &payload).await;
+        }
         let outgoing = TransactionalEmail {
             from: EmailAddress::new(self.cfg.from_address.clone(), self.cfg.from_name.clone()),
             to: EmailAddress::new(m.target.clone(), m.target.clone()),
@@ -176,7 +217,7 @@ impl SubscriberDispatcher {
                 starts_at: m.starts_at,
                 ends_at: m.ends_at,
                 page_url: format!("{origin}/status"),
-                unsubscribe_url: self.unsubscribe_url(&origin, m.subscriber_id),
+                unsubscribe_url,
             },
         };
         self.send(outgoing).await
@@ -188,6 +229,23 @@ impl SubscriberDispatcher {
             .await
             .map_err(|e| anyhow::anyhow!("subscriber send: {e}"))?;
         Ok(())
+    }
+
+    /// POST a JSON payload to a subscriber webhook URL through the SSRF-guarded
+    /// outbound client (the connector blocks internal/loopback targets even for
+    /// a verified URL). A non-2xx or unreachable endpoint surfaces as an error,
+    /// so the delivery retries up to the attempts cap like email.
+    async fn post_webhook(&self, url: &str, payload: &serde_json::Value) -> anyhow::Result<()> {
+        let parsed = url::Url::parse(url).map_err(|e| anyhow::anyhow!("bad webhook url: {e}"))?;
+        let body = serde_json::to_vec(payload)?;
+        post_bytes_with_headers(
+            &self.http,
+            &parsed,
+            body,
+            &std::collections::BTreeMap::new(),
+        )
+        .await
+        .map_err(|e| anyhow::anyhow!("webhook post: {e}"))
     }
 
     fn origin(&self, slug: &str, custom_domain: Option<&str>, verified: bool) -> String {

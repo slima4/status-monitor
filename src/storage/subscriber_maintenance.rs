@@ -18,6 +18,7 @@ pub struct PendingMaintenance {
     pub subscriber_id: Uuid,
     pub maintenance_id: Uuid,
     pub org_id: Uuid,
+    pub channel: String,
     pub target: String,
     pub phase: String,
     pub title: String,
@@ -36,11 +37,11 @@ pub struct PendingMaintenance {
 /// lookback and the subscribed-since check so neither phase resurrects history.
 pub async fn list_pending(pool: &PgPool, limit: i64) -> Result<Vec<PendingMaintenance>> {
     let rows = sqlx::query_as::<_, PendingMaintenance>(
-        "SELECT DISTINCT subscriber_id, maintenance_id, org_id, target, phase, title,
+        "SELECT DISTINCT subscriber_id, maintenance_id, org_id, channel, target, phase, title,
                 description, starts_at, ends_at, page_name, slug, custom_domain,
                 custom_domain_verified
          FROM (
-             SELECT s.id AS subscriber_id, mw.id AS maintenance_id, s.org_id, s.target,
+             SELECT s.id AS subscriber_id, mw.id AS maintenance_id, s.org_id, s.channel, s.target,
                     s.verified_at,
                     mw.title, mw.description, mw.starts_at, mw.ends_at, mw.created_at,
                     COALESCE(NULLIF(sp.public_display_name, ''), sp.name) AS page_name,
@@ -56,7 +57,7 @@ pub async fn list_pending(pool: &PgPool, limit: i64) -> Result<Vec<PendingMainte
              JOIN maintenance_window_components mwc
                   ON mwc.target_id = c.target_id AND mwc.org_id = c.org_id
              JOIN maintenance_windows mw ON mw.id = mwc.maintenance_id AND mw.org_id = mwc.org_id
-             WHERE s.channel = 'email' AND s.verified_at IS NOT NULL
+             WHERE s.channel IN ('email', 'webhook') AND s.verified_at IS NOT NULL
          ) cand
          WHERE event_at >= verified_at
            AND event_at >= now() - make_interval(hours => $2)

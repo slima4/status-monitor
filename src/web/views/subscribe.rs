@@ -18,6 +18,7 @@ use crate::auth::email_norm;
 use crate::auth::url::token_link;
 use crate::domain::{NewSubscriber, SubscriberChannel};
 use crate::email::{EmailAddress, EmailTemplate, TransactionalEmail};
+use crate::http_outbound::post_json_with_headers;
 use crate::storage::subscribers::{self, CONFIRM_TTL_HOURS};
 use crate::web::error::WebResult;
 use crate::web::filters;
@@ -57,7 +58,11 @@ impl SubscribeNotice {
 #[derive(Debug, Deserialize)]
 pub struct SubscribeForm {
     #[serde(default)]
+    pub channel: String,
+    #[serde(default)]
     pub email: String,
+    #[serde(default)]
+    pub url: String,
 }
 
 pub async fn subscribe(
@@ -80,6 +85,11 @@ pub async fn subscribe(
     let Some(pool) = state.db.as_ref() else {
         return Ok(invalid_page());
     };
+
+    if form.channel == "webhook" {
+        return subscribe_webhook(&state, pool, page, form.url.trim()).await;
+    }
+
     let Some(email) = email_norm::normalize(&form.email) else {
         return Ok(SubscribeNotice::bad(
             StatusCode::BAD_REQUEST,
@@ -211,6 +221,65 @@ pub async fn unsubscribe(
     Ok(SubscribeNotice::ok(
         "Unsubscribed",
         "You won't receive any more updates from this status page.",
+    ))
+}
+
+/// Webhook subscription: no inbox to mail a token to, so a live verification
+/// POST (through the SSRF-guarded outbound client) proves the endpoint is
+/// reachable and the subscriber controls it, and the row is verified at once.
+async fn subscribe_webhook(
+    state: &AppState,
+    pool: &sqlx::PgPool,
+    page: crate::domain::status_page::PageRef,
+    url: &str,
+) -> WebResult<Response> {
+    let bad_url = || {
+        SubscribeNotice::bad(
+            StatusCode::BAD_REQUEST,
+            "Check the URL",
+            "Enter a valid https:// webhook URL.",
+        )
+    };
+    let Ok(parsed) = url::Url::parse(url) else {
+        return Ok(bad_url());
+    };
+    if parsed.scheme() != "https" {
+        return Ok(bad_url());
+    }
+    let ping = serde_json::json!({
+        "type": "subscription_verification",
+        "message": "Confirm your subscription to status updates.",
+    });
+    if post_json_with_headers(
+        &state.outbound_http,
+        &parsed,
+        &ping,
+        &std::collections::BTreeMap::new(),
+    )
+    .await
+    .is_err()
+    {
+        return Ok(SubscribeNotice::bad(
+            StatusCode::BAD_REQUEST,
+            "Couldn't reach your endpoint",
+            "We couldn't deliver a verification POST to that URL. Make sure it accepts HTTPS POST and returns 2xx, then try again.",
+        ));
+    }
+    let sub = subscribers::subscribe(
+        pool,
+        &NewSubscriber {
+            status_page_id: page.page.0,
+            org_id: page.org.0,
+            channel: SubscriberChannel::Webhook,
+            target: url.to_string(),
+            config: serde_json::json!({}),
+        },
+    )
+    .await?;
+    subscribers::mark_verified(pool, sub.id).await?;
+    Ok(SubscribeNotice::ok(
+        "Subscribed",
+        "Your endpoint is verified and will receive status updates.",
     ))
 }
 

@@ -228,7 +228,7 @@ async fn fanout_lists_verified_recent_public_updates_only() {
     let fresh = add_update(&pool, org, incident, 0).await;
     let stale = add_update(&pool, org, incident, 48).await; // outside 24h lookback
 
-    let pending = subscribers::list_pending_email(&pool, 100).await.unwrap();
+    let pending = subscribers::list_pending(&pool, 100).await.unwrap();
     let mine: Vec<_> = pending
         .iter()
         .filter(|p| p.subscriber_id == sub_id)
@@ -261,7 +261,7 @@ async fn fanout_lists_verified_recent_public_updates_only() {
     subscribers::mark_notification(&pool, p.subscriber_id, p.update_id, None)
         .await
         .unwrap();
-    let after = subscribers::list_pending_email(&pool, 100).await.unwrap();
+    let after = subscribers::list_pending(&pool, 100).await.unwrap();
     assert!(after.iter().all(|q| q.subscriber_id != sub_id));
 
     cleanup(&pool, org).await;
@@ -369,9 +369,11 @@ fn dispatcher(
     use uptimepage::public_status::subscriber_dispatch::{
         SubscriberDispatchConfig, SubscriberDispatcher,
     };
+    let (http, _) = common::build_test_outbound_and_email();
     SubscriberDispatcher::new(
         pool,
         email,
+        http,
         SubscriberDispatchConfig {
             tick_interval: std::time::Duration::from_secs(60),
             batch_limit: 100,
@@ -432,4 +434,45 @@ async fn dispatcher_sends_incident_email_end_to_end() {
 
     drop(pool);
     drop_test_db(&db_name).await;
+}
+
+#[tokio::test]
+#[ignore = "needs live Postgres (DATABASE_URL)"]
+async fn webhook_subscriber_appears_in_pending() {
+    let Some(pool) = pg_pool_from_env().await else {
+        return;
+    };
+    let org = seed_org(&pool).await;
+    let target = seed_target(&pool, org).await;
+    let page = seed_page(&pool, org).await;
+    add_component(&pool, org, page, target).await;
+
+    // Webhook subscriber, verified directly (what the confirmation ping does).
+    let sub = subscribers::subscribe(
+        &pool,
+        &NewSubscriber {
+            status_page_id: page,
+            org_id: org,
+            channel: SubscriberChannel::Webhook,
+            target: "https://hook.example.com/x".into(),
+            config: serde_json::json!({}),
+        },
+    )
+    .await
+    .unwrap();
+    assert!(sub.verified_at.is_none(), "starts pending");
+    subscribers::mark_verified(&pool, sub.id).await.unwrap();
+
+    let incident = seed_public_incident(&pool, org, target).await;
+    add_update(&pool, org, incident, 0).await;
+
+    let pending = subscribers::list_pending(&pool, 100).await.unwrap();
+    let mine = pending
+        .iter()
+        .find(|p| p.subscriber_id == sub.id)
+        .expect("webhook subscriber pending");
+    assert_eq!(mine.channel, "webhook");
+    assert_eq!(mine.target, "https://hook.example.com/x");
+
+    cleanup(&pool, org).await;
 }

@@ -519,6 +519,7 @@ async fn main() -> Result<()> {
         let dispatcher = uptimepage::public_status::subscriber_dispatch::SubscriberDispatcher::new(
             pg_pool_for_stores.clone(),
             email_sender.clone(),
+            outbound_http.clone(),
             uptimepage::public_status::subscriber_dispatch::SubscriberDispatchConfig {
                 tick_interval: Duration::from_secs(20),
                 batch_limit: 200,
