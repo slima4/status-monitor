@@ -104,6 +104,23 @@ pub async fn webhook(State(state): State<AppState>, headers: HeaderMap, body: By
                 return StatusCode::INTERNAL_SERVER_ERROR;
             }
         }
+        // Public status-page subscriptions to the same address: a hard bounce or
+        // complaint means stop sending, so drop the subscription outright.
+        if let Some(pool) = state.db.as_ref() {
+            match crate::storage::subscribers::remove_by_email(pool, &addr).await {
+                Ok(0) => {}
+                Ok(n) => tracing::info!(
+                    removed = n,
+                    to = %mask_email(&addr),
+                    event = %event.kind,
+                    "subscriptions removed by provider event"
+                ),
+                Err(err) => {
+                    tracing::warn!(error = %err, "resend webhook: subscriber remove failed");
+                    return StatusCode::INTERNAL_SERVER_ERROR;
+                }
+            }
+        }
     }
     StatusCode::OK
 }

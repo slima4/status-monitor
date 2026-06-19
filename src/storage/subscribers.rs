@@ -330,6 +330,19 @@ pub async fn mark_notification(
     Ok(())
 }
 
+/// Remove every email subscription for `email` (already lowercased) across all
+/// pages — called on a hard bounce or spam complaint so a dead or hostile
+/// address stops receiving mail. Cascades its tokens and delivery-log rows.
+pub async fn remove_by_email(pool: &PgPool, email: &str) -> Result<u64> {
+    let res =
+        sqlx::query("DELETE FROM status_page_subscribers WHERE channel = 'email' AND target = $1")
+            .bind(email)
+            .execute(pool)
+            .await
+            .context("subscribers::remove_by_email")?;
+    Ok(res.rows_affected())
+}
+
 /// Periodic cleanup: delivery-log rows older than 30 days. Recent rows stay so
 /// the dispatcher's dedup window (24 h lookback) always sees a prior 'sent'.
 pub async fn purge_old_notifications(pool: &PgPool) -> sqlx::Result<u64> {
