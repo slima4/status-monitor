@@ -282,13 +282,68 @@ docker compose exec clickhouse clickhouse-client -u monitor --password monitor -
 
 Same commands work against `compose.dev.yml`; the service names are identical.
 
-## Tailwind / web UI
+## Web UI
+
+The single binary serves both the `/api/v1/*` JSON surface and a
+server-rendered HTML UI at `/`. Stack:
+
+- **askama 0.16 + askama_web 0.16** — compile-time HTML templates under
+  [`templates/`](../templates/). Type mismatches fail `cargo build`.
+- **HTMX 2.0.9 + json-enc** — bundled under [`static/js/`](../static/js/).
+  Powers partial swaps (filter, paginate, delete) and JSON form submission.
+  No SPA framework.
+- **Tailwind CSS 4** — CSS-first config in
+  [`static/css/input.css`](../static/css/input.css) (`@source`, `@theme`,
+  `@layer components`). No `tailwind.config.js`.
+- **ECharts 6** — lazy-loaded from page-level `<script>` tags, only where
+  charts exist (dashboard, target detail).
 
 `build.rs` runs `./bin/tailwindcss --minify` before each `cargo build`. First
 build fetches the standalone CLI (~30 MB) via `scripts/fetch-tailwind.sh`;
-subsequent builds reuse it. Add a new utility class anywhere under
-`templates/` and the next
-build picks it up via the `@source` directive in `static/css/input.css`.
+subsequent builds reuse it. After `cargo build --release` you have one
+self-contained executable with every template, CSS byte, and vendored JS file
+embedded via `rust-embed`.
+
+### Routes
+
+| Path | Owner |
+|---|---|
+| `GET /` | dashboard (auto-refreshes via HTMX every 5 s) |
+| `GET /targets` | targets list + filters |
+| `GET /targets/{id}` | target detail with charts and time-range nav |
+| `GET /targets/new`, `/targets/{id}/edit` | forms posting JSON to `/api/v1/targets` |
+| `GET /web/targets/list` | tbody fragment for filter/paginate swaps |
+| `GET /web/partials/dashboard` | chrome-free fragment for the 5 s refresh region |
+| `GET /docs` | Swagger UI generated from `/api/openapi.json` |
+| `GET /static/*` | embedded assets (`css/`, `js/`, `img/`) |
+
+Every UI mutation hits an existing `/api/v1/*` endpoint — there are no
+`/web/*` write routes, which keeps the API the single source of truth and
+makes a future SvelteKit port a templates-only rewrite.
+
+### Adding a new page
+
+1. Add a template under `templates/` (extend `base.html`).
+2. Add a `#[derive(Template, WebTemplate)]` struct and handler in
+   `src/web/views/`.
+3. Register the route in `src/web/routes.rs`.
+4. Tailwind picks up new utility classes automatically via the
+   `@source "../../templates/**/*.html"` directive.
+
+### UI tests
+
+- **Unit (render):** every view in `src/web/views/` ships a `#[test]` that
+  renders the template with a fixtures struct and asserts on the output
+  (presence of the HTMX hooks, redaction sentinels, table scaffolding).
+- **End-to-end:** [`tests/web_e2e_test.rs`](../tests/web_e2e_test.rs) drives
+  the merged API+web router via `tower::ServiceExt::oneshot`, covering
+  dashboard / list / detail / forms / 404 paths and verifying credential
+  redaction never leaks real values into HTML.
+
+```bash
+cargo test --lib web::          # unit render tests
+cargo test --test web_e2e_test  # e2e
+```
 
 ## Troubleshooting
 

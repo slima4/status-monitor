@@ -1,14 +1,64 @@
+<div align="center">
+
+<img src="static/marketing/og.png" alt="uptimepage" width="640">
+
 # uptimepage
 
+**Status pages + uptime monitoring. Free forever. Live in 5 minutes.**
+
+Monitor HTTP, TCP, DNS, TLS-certificate and domain expiry from multiple
+regions — then turn green and red into a polished public status page your
+customers can subscribe to. Drive it by click, REST API, or Terraform.
+Self-host the single binary or use the hosted service.
+
 [![docs](https://github.com/uptimepage/uptimepage/actions/workflows/docs.yml/badge.svg)](https://github.com/uptimepage/uptimepage/actions/workflows/docs.yml)
+[![Terraform Registry](https://img.shields.io/badge/terraform-registry-7B42BC?logo=terraform&logoColor=white)](https://registry.terraform.io/providers/uptimepage/uptimepage)
+[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 
-Async Rust service that runs HTTP, TCP, TLS-certificate-expiry, and domain-expiry health checks against a configurable set of targets, applies per-host circuit breaking, batches results, and ships them to durable storage. Targets persist in PostgreSQL; check results land in ClickHouse for high-cardinality time-series queries. Exposes a REST API for target CRUD and result queries plus Prometheus metrics on a separate port.
+[**Try it free →**](https://uptimepage.dev)&nbsp;&nbsp;·&nbsp;&nbsp;[Docs](https://uptimepage.github.io/uptimepage/)&nbsp;&nbsp;·&nbsp;&nbsp;[Self-host](#self-host)&nbsp;&nbsp;·&nbsp;&nbsp;[Terraform](#terraform)&nbsp;&nbsp;·&nbsp;&nbsp;[MCP](#mcp-server)
 
-Built on Rust 1.95 (edition 2024), Tokio, Axum, hyper-util (custom phase-timing connector + tokio-rustls), sqlx, and the official `clickhouse` crate. Designed for low-overhead checks at ~50k concurrent in-flight.
+<img src="docs/img/screenshot-dashboard.png" alt="uptimepage dashboard — uptime, response time, and per-monitor status" width="900">
+
+</div>
+
+## Why uptimepage
+
+Most teams glue together a monitor (Pingdom), a status page (Statuspage.io),
+and a pile of Slack webhooks. uptimepage is one system:
+
+- **Monitoring + status page in one** — checks feed the public page directly, no sync.
+- **Free forever** — no card, no trial clock, no per-seat tax.
+- **Yours to run** — one self-contained binary, AGPL, self-host or hosted.
+- **Config-as-code first** — REST API, scoped tokens, an official Terraform provider, and an MCP server your LLM can query.
+- **Multi-region probes** — check from where your users are, not from one box.
+- **Incidents + escalation built in** — narrate outages, route alerts, walk on-call, without a second tool.
+
+### Who it's for
+
+- **Founders / small SaaS** — a professional status page in minutes, free, no self-host headache.
+- **Platform / SRE leads** — monitors as code, multi-region, escalation and incidents, without vendor sprawl.
+- **Self-hosters** — one binary plus two databases, no SaaS lock-in.
+
+## Features
+
+| | |
+|---|---|
+| **Checks** | HTTP, TCP, DNS, TLS-cert expiry, domain expiry — per-host circuit breaking, designed for ~50k concurrent in-flight |
+| **Public status page** | HTML + JSON + RSS, per-component opt-in, incident narration, maintenance windows, email + webhook subscribers |
+| **Alerting** | Slack, generic webhook, Telegram, SMS, … — per-org channels, sealed secrets, fire-once + recovery |
+| **Incidents** | Internal incident state ⊥ public phase, escalation policies, on-call schedules |
+| **Multi-region** | Regional probe agents, per-region views, run your own agent anywhere |
+| **Automation** | REST API, scoped API tokens, Terraform provider, MCP server for LLM clients |
+| **Built on** | Rust 1.95 / Tokio / Axum, Postgres + ClickHouse, one ~23 MB self-contained binary |
 
 **Live service: <https://uptimepage.dev>** — hosted, free, sign in with GitHub.
-
 **Full docs: <https://uptimepage.github.io/uptimepage/>**
+
+<div align="center">
+
+<img src="docs/img/screenshot-monitors.png" alt="uptimepage monitors list — grouped, Terraform-managed checks" width="900">
+
+</div>
 
 ## Check types
 
@@ -24,7 +74,7 @@ Built on Rust 1.95 (edition 2024), Tokio, Axum, hyper-util (custom phase-timing 
 
 ## Public status page
 
-A customer-facing `/status` page (HTML + JSON + RSS 2.0) is built into the binary. Per-target opt-in via `public_status`; the page bypasses basic auth at the Caddy layer with a per-IP rate limit, caches for 10 s in-process, and degrades gracefully if ClickHouse is unreachable. Operators narrate incidents (`PATCH /api/v1/incidents/{id}`, `POST /api/v1/incidents/{id}/updates`) and schedule maintenance windows (`POST /api/v1/maintenance`). See [docs/public-status.md](docs/public-status.md).
+A customer-facing `/status` page (HTML + JSON + RSS 2.0) is built into the binary. Per-target opt-in via `public_status`; the page bypasses basic auth at the Caddy layer with a per-IP rate limit, caches for 10 s in-process, and degrades gracefully if ClickHouse is unreachable. Operators narrate incidents (`PATCH /api/v1/incidents/{id}`, `POST /api/v1/incidents/{id}/updates`) and schedule maintenance windows (`POST /api/v1/maintenance`). Visitors subscribe for email or webhook updates. See [docs/public-status.md](docs/public-status.md).
 
 ## Alerting
 
@@ -43,6 +93,13 @@ by binding one or more channels in its `alerts` array:
 Fire-once + recovery semantics. Channels are tenant-isolated — a target can
 only bind a channel its own org owns. See [docs/api.md](docs/api.md) for the
 full contract.
+
+## Multi-region
+
+Run probe agents in the regions your users live in; the control plane assigns
+checks per region and the dashboard and status page can be viewed per-region.
+Bring your own agent anywhere — a single binary with an org-scoped token. See
+[docs/multi-region.md](docs/multi-region.md).
 
 ## Terraform
 
@@ -82,7 +139,7 @@ resource "uptimepage_target" "api" {
 
 An [MCP](https://modelcontextprotocol.io) server lets an LLM client (the claude.ai connector, Claude Desktop, an IDE) answer questions about one org's monitors and take a few guarded actions, over Streamable HTTP at `/mcp`. Seven read-only tools plus four write tools (each scope-gated, confirmed per action, and audited). Auth is an org-bound scoped token — paste one by hand, or use the one-click OAuth 2.1 connector. Off by default; enable with `UPTIMEPAGE_MCP_ENABLED=true` (`+ MCP_OAUTH_ENABLED` for the connector). See [docs/mcp.md](docs/mcp.md).
 
-## Quick start
+## Self-host
 
 ### Docker (recommended)
 
@@ -116,21 +173,16 @@ curl -X POST http://127.0.0.1:8080/api/v1/targets \
   }'
 ```
 
-Read uptime:
+Read uptime, scrape metrics:
 
 ```bash
 curl http://127.0.0.1:8080/api/v1/targets/<id>/uptime
-```
-
-Scrape metrics:
-
-```bash
 curl http://127.0.0.1:9090/metrics
 ```
 
 ### Production deployment
 
-For a production deployment with TLS, basic auth, and proper hardening (Caddy edge, Postgres + ClickHouse internal-only, ClickHouse memory cap), see [`deployment/README.md`](deployment/README.md) or [`docs/deployment.md`](docs/deployment.md). Local dev (above) is fine for evaluation; do not expose it to the internet.
+For a production deployment with TLS, basic auth, and proper hardening (Caddy edge, Postgres + ClickHouse internal-only, ClickHouse memory cap), see [`deployment/README.md`](deployment/README.md) or [docs/deployment.md](docs/deployment.md). The local dev stack above is fine for evaluation; do not expose it to the internet.
 
 ### Local build
 
@@ -156,17 +208,21 @@ Sources under [`docs/`](docs/) — readable directly on GitHub too:
 |---|---|
 | [docs/architecture.md](docs/architecture.md) | goals, module layout, data flow, key design choices, concurrency model |
 | [docs/api.md](docs/api.md) | REST endpoints, check-spec payload shapes, result + uptime queries |
-| [docs/public-status.md](docs/public-status.md) | operator guide to the public `/status` page: enable components, narrate incidents, schedule maintenance |
+| [docs/public-status.md](docs/public-status.md) | operator guide to the public `/status` page: components, incidents, maintenance |
 | [docs/authentication.md](docs/authentication.md) | sign-in, sessions, scoped API tokens, org binding |
 | [docs/multi-region.md](docs/multi-region.md) | regional probe agents, the operator surface, running an agent, per-region views |
 | [docs/mcp.md](docs/mcp.md) | MCP server for LLM clients: tools, scopes, OAuth connector, enabling, examples |
 | [docs/configuration.md](docs/configuration.md) | `default.toml` reference, env override scheme, tuning notes |
 | [docs/metrics.md](docs/metrics.md) | Prometheus series (incl. connect / TLS / pool gauges), OpenTelemetry tracing |
 | [docs/deployment.md](docs/deployment.md) | Docker, bind addresses, migrations, sizing, graceful shutdown |
-| [docs/development.md](docs/development.md) | local dev: host vs. docker workflow, cargo-chef rebuilds, log level, seed target |
+| [docs/development.md](docs/development.md) | local dev workflow, the web UI (stack, routes, adding a page, tests), faster builds |
 | [docs/loadtest.md](docs/loadtest.md) | `bin/loadtest` envs, macOS gotchas, HTTP/1 vs h2c trade-off, Linux container path |
 | [docs/benchmarks.md](docs/benchmarks.md) | Criterion micro-benchmarks, single-core throughput, profile breakdown |
 | [docs/troubleshooting.md](docs/troubleshooting.md) | common failures and how to read them off metrics |
+
+## Web UI
+
+The single binary serves both the `/api/v1/*` JSON surface and a server-rendered HTML UI at `/` — askama compile-time templates, HTMX for partial swaps and JSON forms (no SPA framework), Tailwind CSS 4, and lazy-loaded ECharts. Every UI mutation hits an existing `/api/v1/*` endpoint, so the API stays the single source of truth. Stack, routes, the add-a-page recipe, and UI tests are in [docs/development.md](docs/development.md#web-ui).
 
 ## Legal
 
@@ -176,90 +232,12 @@ A running instance serves its policies at `/terms`, `/privacy`, `/cookies`,
 [`docs/legal/`](docs/legal/). GDPR self-service (data export, account
 deletion, recovery) lives under `/settings/account`.
 
-## Web UI
-
-The single binary serves both the `/api/v1/*` JSON surface and a
-server-rendered HTML UI at `/`. The UI is built from:
-
-- **askama 0.16 + askama_web 0.16** — compile-time HTML templates under
-  [`templates/`](templates/). Type mismatches fail `cargo build`.
-- **HTMX 2.0.9 + json-enc** — bundled under
-  [`static/js/`](static/js/). Powers partial swaps (filter, paginate,
-  delete) and JSON form submission. No SPA framework.
-- **Tailwind CSS 4** — CSS-first config in
-  [`static/css/input.css`](static/css/input.css) (`@source`, `@theme`,
-  `@layer components`). No `tailwind.config.js`.
-- **ECharts 6** — lazy-loaded from page-level `<script>` tags, only
-  where charts exist (dashboard, target detail).
-
-### How the build runs
-
-[`build.rs`](build.rs) shells out to `./bin/tailwindcss --minify` before
-each `cargo build`. The Tailwind standalone CLI is fetched on first
-build by [`scripts/fetch-tailwind.sh`](scripts/fetch-tailwind.sh) (~30
-MB; not committed). After `cargo build --release` you have one
-~23 MB executable with every template, every CSS byte, and every
-vendored JS file embedded via `rust-embed`.
-
-### Routes
-
-| Path | Owner |
-|---|---|
-| `GET /` | dashboard (auto-refreshes via HTMX every 5 s) |
-| `GET /targets` | targets list + filters |
-| `GET /targets/{id}` | target detail with charts and time-range nav |
-| `GET /targets/new`, `/targets/{id}/edit` | forms posting JSON to `/api/v1/targets` |
-| `GET /web/targets/list` | tbody fragment for filter/paginate swaps |
-| `GET /web/partials/dashboard` | chrome-free fragment for the 5 s refresh region |
-| `GET /docs` | Swagger UI generated from `/api/openapi.json` |
-| `GET /static/*` | embedded assets (`css/`, `js/`, `img/`) |
-
-Every UI mutation hits an existing `/api/v1/*` endpoint — there are no
-`/web/*` write routes, which keeps the API the single source of truth
-and makes a future SvelteKit port a templates-only rewrite.
-
-### Adding a new page
-
-1. Add a template under `templates/` (extend `base.html`).
-2. Add a `#[derive(Template, WebTemplate)]` struct and handler in
-   `src/web/views/`.
-3. Register the route in `src/web/routes.rs`.
-4. Tailwind picks up new utility classes automatically via the
-   `@source "../../templates/**/*.html"` directive.
-
-### UI tests
-
-- **Unit (render):** every view in `src/web/views/` ships a `#[test]`
-  that renders the template with a fixtures struct and asserts on the
-  output (presence of the HTMX hooks, redaction sentinels, table
-  scaffolding).
-- **End-to-end:** [`tests/web_e2e_test.rs`](tests/web_e2e_test.rs)
-  drives the merged API+web router via `tower::ServiceExt::oneshot`,
-  covering dashboard / list / detail / forms / 404 paths and
-  verifying credential redaction never leaks real values into HTML.
-
-```bash
-cargo test --lib web::          # unit render tests
-cargo test --test web_e2e_test  # e2e
-```
-
-## Development
-
-Requires Rust 1.95+ (edition 2024). Install via `rustup`. Fast dev loop runs the binary natively against Dockerised Postgres + ClickHouse:
-
-```bash
-docker compose -f compose.dev.yml up -d
-cargo run --bin uptimepage
-```
-
-See [docs/development.md](docs/development.md) for the host vs. docker workflow, log level overrides, seeding a target, and tests.
-
 ## License
 
-uptimepage is licensed under [AGPL-3.0](LICENSE).
-
-See [LICENSING.md](LICENSING.md) for what this means in practice.
+uptimepage is licensed under [AGPL-3.0](LICENSE). See [LICENSING.md](LICENSING.md)
+for what this means in practice.
 
 If you'd like to contribute, see [CONTRIBUTING.md](CONTRIBUTING.md).
-
 For security disclosures, see [SECURITY.md](SECURITY.md).
+</content>
+</invoke>
