@@ -23,15 +23,15 @@ Self-host the single binary or use the hosted service.
 
 ## Why uptimepage
 
-Most teams glue together a monitor (Pingdom), a status page (Statuspage.io),
-and a pile of Slack webhooks. uptimepage is one system:
+Monitoring with a built-in status page isn't new — the bet here is doing it
+free, self-hostable, and fully as code:
 
-- **Monitoring + status page in one** — checks feed the public page directly, no sync.
-- **Free forever** — no card, no trial clock, no per-seat tax.
-- **Yours to run** — one self-contained binary, AGPL, self-host or hosted.
-- **Config-as-code first** — REST API, scoped tokens, an official Terraform provider, and an MCP server your LLM can query.
-- **Multi-region probes** — check from where your users are, not from one box.
-- **Incidents + escalation built in** — narrate outages, route alerts, walk on-call, without a second tool.
+- **Free hosted tier, no card** — and AGPL if you'd rather run it yourself.
+- **One self-contained binary** — `docker compose up` and you're live, not a Kubernetes platform to operate.
+- **Everything as code** — REST API, scoped tokens, an official Terraform provider, and an MCP server your LLM can query.
+- **Probes you own** — run multi-region agents wherever your users are, on your own boxes.
+- **Status page + incidents + escalation in one** — components, subscribers, on-call, no second tool.
+- **No per-seat or feature-gated tiers** — checks, status pages, and subscribers aren't paywalled.
 
 ### Who it's for
 
