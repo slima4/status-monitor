@@ -96,7 +96,7 @@ impl SubscriberDispatcher {
                 phase: p.phase.clone(),
                 message: p.message.clone(),
                 incident_url: self.incident_url(p),
-                unsubscribe_url: self.unsubscribe_url(p.subscriber_id),
+                unsubscribe_url: self.unsubscribe_url(p),
             },
         };
         self.email
@@ -106,27 +106,26 @@ impl SubscriberDispatcher {
         Ok(())
     }
 
-    fn incident_url(&self, p: &PendingUpdate) -> String {
-        let path = format!("/status/incidents/{}", p.incident_id);
-        if let Some(domain) = p
-            .custom_domain
-            .as_deref()
-            .filter(|_| p.custom_domain_verified)
-        {
-            return format!("https://{domain}{path}");
-        }
-        let base = self.cfg.base_domain.trim();
-        if !base.is_empty() {
-            return format!("https://{}.{}{}", p.slug, base, path);
-        }
-        format!("{}{}", self.cfg.public_base_url.trim_end_matches('/'), path)
+    fn page_origin(&self, p: &PendingUpdate) -> String {
+        crate::web::host::page_origin(
+            &self.cfg.base_domain,
+            &self.cfg.public_base_url,
+            &p.slug,
+            p.custom_domain.as_deref(),
+            p.custom_domain_verified,
+        )
     }
 
-    fn unsubscribe_url(&self, subscriber_id: uuid::Uuid) -> String {
-        let mac = subscribers::unsubscribe_token(&self.cfg.unsubscribe_secret, subscriber_id);
+    fn incident_url(&self, p: &PendingUpdate) -> String {
+        format!("{}/status/incidents/{}", self.page_origin(p), p.incident_id)
+    }
+
+    fn unsubscribe_url(&self, p: &PendingUpdate) -> String {
+        let mac = subscribers::unsubscribe_token(&self.cfg.unsubscribe_secret, p.subscriber_id);
         format!(
-            "{}/subscribe/unsubscribe?s={subscriber_id}&t={mac}",
-            self.cfg.public_base_url.trim_end_matches('/')
+            "{}/subscribe/unsubscribe?s={}&t={mac}",
+            self.page_origin(p),
+            p.subscriber_id
         )
     }
 }

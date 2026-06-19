@@ -105,12 +105,24 @@ pub async fn subscribe(
     if let subscribers::ConfirmMint::Created { token } =
         subscribers::mint_confirm_token(pool, sub.id, page.org.0, page.page.0, &sub.target).await?
     {
-        let page_name = page_display_name(pool, page.page.0).await;
-        let confirm_url = token_link(
-            &state.cfg.auth.public_base_url,
-            "/subscribe/confirm",
-            &token,
-        );
+        let meta = page_meta(pool, page.page.0).await;
+        let origin = match &meta {
+            Some(m) => crate::web::host::page_origin(
+                &state.cfg.public_status.base_domain,
+                &state.cfg.auth.public_base_url,
+                &m.slug,
+                m.custom_domain.as_deref(),
+                m.custom_domain_verified,
+            ),
+            None => state
+                .cfg
+                .auth
+                .public_base_url
+                .trim_end_matches('/')
+                .to_string(),
+        };
+        let page_name = meta.map_or_else(|| "status page".to_string(), |m| m.name);
+        let confirm_url = token_link(&origin, "/subscribe/confirm", &token);
         let outgoing = TransactionalEmail {
             from: EmailAddress::new(
                 state.cfg.email.from_address.clone(),
@@ -202,14 +214,28 @@ pub async fn unsubscribe(
     ))
 }
 
-async fn page_display_name(pool: &sqlx::PgPool, page_id: Uuid) -> String {
-    sqlx::query_scalar::<_, String>(
-        "SELECT COALESCE(NULLIF(public_display_name, ''), name) FROM status_pages WHERE id = $1",
+struct PageMeta {
+    name: String,
+    slug: String,
+    custom_domain: Option<String>,
+    custom_domain_verified: bool,
+}
+
+async fn page_meta(pool: &sqlx::PgPool, page_id: Uuid) -> Option<PageMeta> {
+    let row: (String, String, Option<String>, bool) = sqlx::query_as(
+        "SELECT COALESCE(NULLIF(public_display_name, ''), name), slug::text,
+                custom_domain::text, custom_domain_verified_at IS NOT NULL
+         FROM status_pages WHERE id = $1",
     )
     .bind(page_id)
     .fetch_optional(pool)
     .await
     .ok()
-    .flatten()
-    .unwrap_or_else(|| "status page".to_string())
+    .flatten()?;
+    Some(PageMeta {
+        name: row.0,
+        slug: row.1,
+        custom_domain: row.2,
+        custom_domain_verified: row.3,
+    })
 }
