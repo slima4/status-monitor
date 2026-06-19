@@ -23,6 +23,7 @@ pub mod postgres_secrets;
 pub mod postmortems;
 pub mod silence;
 pub mod status_pages;
+pub mod subscribers;
 pub mod traits;
 pub mod users;
 

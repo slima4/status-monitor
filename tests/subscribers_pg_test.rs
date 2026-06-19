@@ -1,0 +1,265 @@
+//! Live-Postgres contract for public status-page subscribers: subscribe →
+//! confirm → unsubscribe round-trip, the stateless unsubscribe HMAC, and the
+//! fan-out candidate query (verified-only, lookback, per-pair claim).
+//!
+//! Live-PG ignored: needs `DATABASE_URL`. Migrations are auto-applied by
+//! `pg_pool_from_env` on first connect.
+
+mod common;
+
+use sqlx::PgPool;
+use uuid::Uuid;
+
+use uptimepage::domain::{NewSubscriber, SubscriberChannel};
+use uptimepage::storage::subscribers::{self, ConfirmMint};
+
+use common::{pg_pool_from_env, unique_slug};
+
+async fn seed_org(pool: &PgPool) -> Uuid {
+    let slug = unique_slug("sub-org");
+    let row: (Uuid,) =
+        sqlx::query_as("INSERT INTO organizations (slug, name) VALUES ($1, 'sub') RETURNING id")
+            .bind(slug)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    row.0
+}
+
+async fn seed_target(pool: &PgPool, org: Uuid) -> Uuid {
+    let row: (Uuid,) = sqlx::query_as(
+        r#"INSERT INTO targets (org_id, name, check_spec, interval_secs)
+           VALUES ($1, 'mon', '{"type":"http","url":"https://example.com/"}'::jsonb, 60)
+           RETURNING id"#,
+    )
+    .bind(org)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    row.0
+}
+
+async fn seed_page(pool: &PgPool, org: Uuid) -> Uuid {
+    let row: (Uuid,) = sqlx::query_as(
+        "INSERT INTO status_pages (org_id, slug, name, enabled) VALUES ($1, $2, 'Acme', true) RETURNING id",
+    )
+    .bind(org)
+    .bind(unique_slug("subpage"))
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    row.0
+}
+
+async fn add_component(pool: &PgPool, org: Uuid, page: Uuid, target: Uuid) {
+    sqlx::query(
+        "INSERT INTO status_page_components (org_id, status_page_id, target_id) VALUES ($1, $2, $3)",
+    )
+    .bind(org)
+    .bind(page)
+    .bind(target)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+async fn seed_public_incident(pool: &PgPool, org: Uuid, target: Uuid) -> Uuid {
+    let row: (Uuid,) = sqlx::query_as(
+        "INSERT INTO incidents (org_id, target_id, started_at, status_at_start, visibility, public_title)
+         VALUES ($1, $2, now(), 'down', 'public', 'Elevated errors')
+         RETURNING id",
+    )
+    .bind(org)
+    .bind(target)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    row.0
+}
+
+async fn add_update(pool: &PgPool, org: Uuid, incident: Uuid, age_hours: i64) -> Uuid {
+    let row: (Uuid,) = sqlx::query_as(
+        "INSERT INTO incident_updates (org_id, incident_id, phase, message, posted_at)
+         VALUES ($1, $2, 'investigating', 'looking into it', now() - make_interval(hours => $3))
+         RETURNING id",
+    )
+    .bind(org)
+    .bind(incident)
+    .bind(age_hours as i32)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    row.0
+}
+
+async fn confirmed_subscriber(pool: &PgPool, org: Uuid, page: Uuid, email: &str) -> Uuid {
+    let sub = subscribers::subscribe(
+        pool,
+        &NewSubscriber {
+            status_page_id: page,
+            org_id: org,
+            channel: SubscriberChannel::Email,
+            target: email.into(),
+            config: serde_json::json!({}),
+        },
+    )
+    .await
+    .unwrap();
+    let ConfirmMint::Created { token } =
+        subscribers::mint_confirm_token(pool, sub.id, org, page, &sub.target)
+            .await
+            .unwrap()
+    else {
+        panic!("confirm mint capped");
+    };
+    subscribers::confirm(pool, &token)
+        .await
+        .unwrap()
+        .expect("confirm");
+    sub.id
+}
+
+async fn cleanup(pool: &PgPool, org: Uuid) {
+    let _ = sqlx::query("DELETE FROM organizations WHERE id = $1")
+        .bind(org)
+        .execute(pool)
+        .await;
+}
+
+#[tokio::test]
+#[ignore = "needs live Postgres (DATABASE_URL)"]
+async fn subscribe_confirm_unsubscribe_roundtrip() {
+    let Some(pool) = pg_pool_from_env().await else {
+        return;
+    };
+    let org = seed_org(&pool).await;
+    let page = seed_page(&pool, org).await;
+    let email = format!("{}@example.com", unique_slug("rt"));
+
+    let sub = subscribers::subscribe(
+        &pool,
+        &NewSubscriber {
+            status_page_id: page,
+            org_id: org,
+            channel: SubscriberChannel::Email,
+            target: email.clone(),
+            config: serde_json::json!({}),
+        },
+    )
+    .await
+    .unwrap();
+    assert!(sub.verified_at.is_none(), "starts pending");
+
+    // Re-subscribe is idempotent: same row, still pending.
+    let again = subscribers::subscribe(
+        &pool,
+        &NewSubscriber {
+            status_page_id: page,
+            org_id: org,
+            channel: SubscriberChannel::Email,
+            target: email.clone(),
+            config: serde_json::json!({}),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(again.id, sub.id, "re-subscribe folds onto one row");
+
+    let ConfirmMint::Created { token } =
+        subscribers::mint_confirm_token(&pool, sub.id, org, page, &sub.target)
+            .await
+            .unwrap()
+    else {
+        panic!("mint capped");
+    };
+    let confirmed = subscribers::confirm(&pool, &token)
+        .await
+        .unwrap()
+        .expect("confirm");
+    assert!(confirmed.is_verified());
+    // Single-use: a second confirm of the same token loses.
+    assert!(subscribers::confirm(&pool, &token).await.unwrap().is_none());
+
+    // Unsubscribe HMAC: right token verifies, a wrong one does not.
+    let secret = "test-salt";
+    let mac = subscribers::unsubscribe_token(secret, sub.id);
+    assert!(subscribers::verify_unsubscribe(secret, sub.id, &mac));
+    assert!(!subscribers::verify_unsubscribe(secret, sub.id, "nope"));
+
+    assert!(subscribers::unsubscribe(&pool, sub.id).await.unwrap());
+    // Idempotent: a second unsubscribe is a no-op, not an error.
+    assert!(!subscribers::unsubscribe(&pool, sub.id).await.unwrap());
+
+    cleanup(&pool, org).await;
+}
+
+#[tokio::test]
+#[ignore = "needs live Postgres (DATABASE_URL)"]
+async fn fanout_lists_verified_recent_public_updates_only() {
+    let Some(pool) = pg_pool_from_env().await else {
+        return;
+    };
+    let org = seed_org(&pool).await;
+    let target = seed_target(&pool, org).await;
+    let page = seed_page(&pool, org).await;
+    add_component(&pool, org, page, target).await;
+
+    // Verified subscriber, then a fresh public update — verified_at precedes
+    // posted_at so the update is eligible.
+    let sub_id = confirmed_subscriber(&pool, org, page, "v@example.com").await;
+    // An unverified subscriber on the same page must never be a candidate.
+    subscribers::subscribe(
+        &pool,
+        &NewSubscriber {
+            status_page_id: page,
+            org_id: org,
+            channel: SubscriberChannel::Email,
+            target: "pending@example.com".into(),
+            config: serde_json::json!({}),
+        },
+    )
+    .await
+    .unwrap();
+
+    let incident = seed_public_incident(&pool, org, target).await;
+    let fresh = add_update(&pool, org, incident, 0).await;
+    let stale = add_update(&pool, org, incident, 48).await; // outside 24h lookback
+
+    let pending = subscribers::list_pending_email(&pool, 100).await.unwrap();
+    let mine: Vec<_> = pending
+        .iter()
+        .filter(|p| p.subscriber_id == sub_id)
+        .collect();
+    assert_eq!(
+        mine.len(),
+        1,
+        "only the fresh update, only the verified sub"
+    );
+    let p = mine[0];
+    assert_eq!(p.update_id, fresh);
+    assert_ne!(p.update_id, stale);
+    assert_eq!(p.incident_title, "Elevated errors");
+    assert_eq!(p.page_name, "Acme");
+    assert_eq!(p.phase, "investigating");
+
+    // Claiming is exclusive: the first wins, an immediate re-claim loses.
+    assert!(
+        subscribers::claim_notification(&pool, p.subscriber_id, p.update_id, p.org_id)
+            .await
+            .unwrap()
+    );
+    assert!(
+        !subscribers::claim_notification(&pool, p.subscriber_id, p.update_id, p.org_id)
+            .await
+            .unwrap()
+    );
+
+    // Once marked sent it drops out of the candidate set.
+    subscribers::mark_notification(&pool, p.subscriber_id, p.update_id, None)
+        .await
+        .unwrap();
+    let after = subscribers::list_pending_email(&pool, 100).await.unwrap();
+    assert!(after.iter().all(|q| q.subscriber_id != sub_id));
+
+    cleanup(&pool, org).await;
+}

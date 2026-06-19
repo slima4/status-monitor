@@ -17,6 +17,7 @@ pub mod region;
 pub mod reserved_slugs;
 pub mod result;
 pub mod status_page;
+pub mod subscriber;
 pub mod target;
 pub mod user;
 pub mod word_lists;
@@ -77,6 +78,7 @@ pub use status_page::{
     NewStatusPage, NewStatusPageComponent, PageRef, StatusPage, StatusPageComponent,
     StatusPageComponentUpdate, StatusPageId, StatusPageUpdate,
 };
+pub use subscriber::{NewSubscriber, Subscriber, SubscriberChannel};
 pub use target::{NewTarget, RegionIncidentPolicy, Target, TargetUpdate};
 pub use user::{AppTheme, User, UserId};
 pub use word_lists::generate_signup_slug;

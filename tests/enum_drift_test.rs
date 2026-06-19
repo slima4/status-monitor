@@ -15,7 +15,7 @@ use uptimepage::auth::OauthProvider;
 use uptimepage::domain::{
     ActorType, AppTheme, ChannelKind, IncidentEventKind, IncidentOrigin, IncidentSeverity,
     IncidentState, IncidentStatusPhase, IncidentUrgency, IncidentVisibility, NotificationReason,
-    NotificationStatus, PublicStyle,
+    NotificationStatus, PublicStyle, SubscriberChannel,
 };
 
 /// Pull the parenthesised list from a constraint def like
@@ -371,4 +371,14 @@ async fn incidents_status_at_start_check_is_pinned() {
         db, expected,
         "incidents.status_at_start CHECK list ({db:?}) drifted from the pinned set ({expected:?})"
     );
+}
+
+#[tokio::test]
+#[ignore]
+async fn status_page_subscribers_channel_check_matches_rust_enum() {
+    assert_check_matches(
+        "status_page_subscribers_channel_check",
+        db_strs(SubscriberChannel::ALL, SubscriberChannel::as_db_str),
+    )
+    .await;
 }
