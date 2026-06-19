@@ -11,6 +11,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use uptimepage::domain::{NewSubscriber, SubscriberChannel};
+use uptimepage::storage::subscriber_deliveries::{self, INCIDENT_UPDATE, MAINTENANCE};
 use uptimepage::storage::subscriber_maintenance;
 use uptimepage::storage::subscribers::{self, ConfirmMint};
 
@@ -247,20 +248,41 @@ async fn fanout_lists_verified_recent_public_updates_only() {
 
     // Claiming is exclusive: the first wins, an immediate re-claim loses.
     assert!(
-        subscribers::claim_notification(&pool, p.subscriber_id, p.update_id, p.org_id)
-            .await
-            .unwrap()
+        subscriber_deliveries::claim(
+            &pool,
+            p.subscriber_id,
+            p.org_id,
+            INCIDENT_UPDATE,
+            p.update_id,
+            ""
+        )
+        .await
+        .unwrap()
     );
     assert!(
-        !subscribers::claim_notification(&pool, p.subscriber_id, p.update_id, p.org_id)
-            .await
-            .unwrap()
+        !subscriber_deliveries::claim(
+            &pool,
+            p.subscriber_id,
+            p.org_id,
+            INCIDENT_UPDATE,
+            p.update_id,
+            ""
+        )
+        .await
+        .unwrap()
     );
 
     // Once marked sent it drops out of the candidate set.
-    subscribers::mark_notification(&pool, p.subscriber_id, p.update_id, None)
-        .await
-        .unwrap();
+    subscriber_deliveries::mark(
+        &pool,
+        p.subscriber_id,
+        INCIDENT_UPDATE,
+        p.update_id,
+        "",
+        None,
+    )
+    .await
+    .unwrap();
     let after = subscribers::list_pending(&pool, 100).await.unwrap();
     assert!(after.iter().all(|q| q.subscriber_id != sub_id));
 
@@ -338,17 +360,17 @@ async fn maintenance_fanout_scheduled_and_completed() {
 
     // Claim is exclusive per (subscriber, window, phase).
     assert!(
-        subscriber_maintenance::claim(&pool, sub_id, future, "scheduled", org)
+        subscriber_deliveries::claim(&pool, sub_id, org, MAINTENANCE, future, "scheduled")
             .await
             .unwrap()
     );
     assert!(
-        !subscriber_maintenance::claim(&pool, sub_id, future, "scheduled", org)
+        !subscriber_deliveries::claim(&pool, sub_id, org, MAINTENANCE, future, "scheduled")
             .await
             .unwrap()
     );
 
-    subscriber_maintenance::mark(&pool, sub_id, future, "scheduled", None)
+    subscriber_deliveries::mark(&pool, sub_id, MAINTENANCE, future, "scheduled", None)
         .await
         .unwrap();
     let after = subscriber_maintenance::list_pending(&pool, 100)

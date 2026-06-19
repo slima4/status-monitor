@@ -24,6 +24,7 @@ pub mod postgres_secrets;
 pub mod postmortems;
 pub mod silence;
 pub mod status_pages;
+pub mod subscriber_deliveries;
 pub mod subscriber_maintenance;
 pub mod subscribers;
 pub mod traits;

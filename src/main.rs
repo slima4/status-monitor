@@ -542,20 +542,12 @@ async fn main() -> Result<()> {
         uptimepage::storage::subscribers::purge_old_tokens,
     ));
 
-    let subscriber_notification_cleanup_handle: JoinHandle<()> = tokio::spawn(run_purge_loop(
+    let subscriber_delivery_cleanup_handle: JoinHandle<()> = tokio::spawn(run_purge_loop(
         pg_pool_for_stores.clone(),
         root.clone(),
         Duration::from_secs(6 * 60 * 60),
-        "subscriber_notification_cleanup",
-        uptimepage::storage::subscribers::purge_old_notifications,
-    ));
-
-    let subscriber_maintenance_cleanup_handle: JoinHandle<()> = tokio::spawn(run_purge_loop(
-        pg_pool_for_stores.clone(),
-        root.clone(),
-        Duration::from_secs(6 * 60 * 60),
-        "subscriber_maintenance_cleanup",
-        uptimepage::storage::subscriber_maintenance::purge_old,
+        "subscriber_delivery_cleanup",
+        uptimepage::storage::subscriber_deliveries::purge_old,
     ));
 
     // Magic-link sweep only runs when the method is wired into the router.
@@ -743,8 +735,7 @@ async fn main() -> Result<()> {
             channel_verification_cleanup_handle,
             subscriber_dispatch_handle,
             subscriber_token_cleanup_handle,
-            subscriber_notification_cleanup_handle,
-            subscriber_maintenance_cleanup_handle,
+            subscriber_delivery_cleanup_handle,
         );
         if let Some(h) = magic_link_cleanup_handle {
             let _ = h.await;

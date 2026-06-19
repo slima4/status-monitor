@@ -64,9 +64,10 @@ pub async fn list_pending(pool: &PgPool, limit: i64) -> Result<Vec<PendingMainte
          WHERE event_at >= verified_at
            AND event_at >= now() - make_interval(hours => $2)
            AND NOT EXISTS (
-               SELECT 1 FROM status_page_subscriber_maintenance n
+               SELECT 1 FROM status_page_subscriber_deliveries n
                WHERE n.subscriber_id = cand.subscriber_id
-                 AND n.maintenance_id = cand.maintenance_id
+                 AND n.event_kind = 'maintenance'
+                 AND n.event_ref = cand.maintenance_id
                  AND n.phase = cand.phase
                  AND (n.status = 'sent'
                    OR (n.status = 'queued' AND n.created_at > now() - make_interval(mins => $3))
@@ -82,71 +83,4 @@ pub async fn list_pending(pool: &PgPool, limit: i64) -> Result<Vec<PendingMainte
     .await
     .context("subscriber_maintenance::list_pending")?;
     Ok(rows)
-}
-
-pub async fn claim(
-    pool: &PgPool,
-    subscriber_id: Uuid,
-    maintenance_id: Uuid,
-    phase: &str,
-    org_id: Uuid,
-) -> Result<bool> {
-    let claimed: Option<(Uuid,)> = sqlx::query_as(
-        "INSERT INTO status_page_subscriber_maintenance
-             (subscriber_id, maintenance_id, org_id, phase, status)
-         VALUES ($1, $2, $3, $4, 'queued')
-         ON CONFLICT (subscriber_id, maintenance_id, phase) DO UPDATE
-             SET status = 'queued', error = NULL, created_at = now()
-             WHERE (status_page_subscriber_maintenance.status = 'failed'
-                    AND status_page_subscriber_maintenance.attempts < $6)
-                OR (status_page_subscriber_maintenance.status = 'queued'
-                    AND status_page_subscriber_maintenance.created_at
-                        < now() - make_interval(mins => $5))
-         RETURNING id",
-    )
-    .bind(subscriber_id)
-    .bind(maintenance_id)
-    .bind(org_id)
-    .bind(phase)
-    .bind(CLAIM_ORPHAN_MINUTES as i32)
-    .bind(FANOUT_MAX_ATTEMPTS)
-    .fetch_optional(pool)
-    .await
-    .context("subscriber_maintenance::claim")?;
-    Ok(claimed.is_some())
-}
-
-pub async fn mark(
-    pool: &PgPool,
-    subscriber_id: Uuid,
-    maintenance_id: Uuid,
-    phase: &str,
-    error: Option<&str>,
-) -> Result<()> {
-    sqlx::query(
-        "UPDATE status_page_subscriber_maintenance
-         SET status = CASE WHEN $4::text IS NULL THEN 'sent' ELSE 'failed' END,
-             error = $4,
-             attempts = attempts + CASE WHEN $4::text IS NULL THEN 0 ELSE 1 END,
-             sent_at = CASE WHEN $4::text IS NULL THEN now() ELSE sent_at END
-         WHERE subscriber_id = $1 AND maintenance_id = $2 AND phase = $3",
-    )
-    .bind(subscriber_id)
-    .bind(maintenance_id)
-    .bind(phase)
-    .bind(error)
-    .execute(pool)
-    .await
-    .context("subscriber_maintenance::mark")?;
-    Ok(())
-}
-
-pub async fn purge_old(pool: &PgPool) -> sqlx::Result<u64> {
-    let res = sqlx::query(
-        "DELETE FROM status_page_subscriber_maintenance
-         WHERE created_at < now() - INTERVAL '30 days'",
-    )
-    .execute(pool)
-    .await?;
-    Ok(res.rows_affected())
 }

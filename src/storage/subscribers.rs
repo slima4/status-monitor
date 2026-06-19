@@ -275,8 +275,9 @@ pub async fn list_pending(pool: &PgPool, limit: i64) -> Result<Vec<PendingUpdate
            AND u.posted_at >= s.verified_at
            AND u.posted_at >= now() - make_interval(hours => $2)
            AND NOT EXISTS (
-               SELECT 1 FROM status_page_subscriber_notifications n
-               WHERE n.subscriber_id = s.id AND n.incident_update_id = u.id
+               SELECT 1 FROM status_page_subscriber_deliveries n
+               WHERE n.subscriber_id = s.id AND n.event_kind = 'incident_update'
+                 AND n.event_ref = u.id AND n.phase = ''
                  AND (n.status = 'sent'
                    OR (n.status = 'queued' AND n.created_at > now() - make_interval(mins => $3))
                    OR (n.status = 'failed' AND n.attempts >= $4)))
@@ -291,61 +292,6 @@ pub async fn list_pending(pool: &PgPool, limit: i64) -> Result<Vec<PendingUpdate
     .await
     .context("subscribers::list_pending")?;
     Ok(rows)
-}
-
-/// Claim a (subscriber, update) pair for delivery; `true` if this caller won
-/// the claim, `false` if another tick/replica already holds it.
-pub async fn claim_notification(
-    pool: &PgPool,
-    subscriber_id: Uuid,
-    update_id: Uuid,
-    org_id: Uuid,
-) -> Result<bool> {
-    let claimed: Option<(Uuid,)> = sqlx::query_as(
-        "INSERT INTO status_page_subscriber_notifications
-             (subscriber_id, incident_update_id, org_id, status)
-         VALUES ($1, $2, $3, 'queued')
-         ON CONFLICT (subscriber_id, incident_update_id) DO UPDATE
-             SET status = 'queued', error = NULL, created_at = now()
-             WHERE (status_page_subscriber_notifications.status = 'failed'
-                    AND status_page_subscriber_notifications.attempts < $5)
-                OR (status_page_subscriber_notifications.status = 'queued'
-                    AND status_page_subscriber_notifications.created_at
-                        < now() - make_interval(mins => $4))
-         RETURNING id",
-    )
-    .bind(subscriber_id)
-    .bind(update_id)
-    .bind(org_id)
-    .bind(CLAIM_ORPHAN_MINUTES as i32)
-    .bind(FANOUT_MAX_ATTEMPTS)
-    .fetch_optional(pool)
-    .await
-    .context("subscribers::claim_notification")?;
-    Ok(claimed.is_some())
-}
-
-pub async fn mark_notification(
-    pool: &PgPool,
-    subscriber_id: Uuid,
-    update_id: Uuid,
-    error: Option<&str>,
-) -> Result<()> {
-    sqlx::query(
-        "UPDATE status_page_subscriber_notifications
-         SET status = CASE WHEN $3::text IS NULL THEN 'sent' ELSE 'failed' END,
-             error = $3,
-             attempts = attempts + CASE WHEN $3::text IS NULL THEN 0 ELSE 1 END,
-             sent_at = CASE WHEN $3::text IS NULL THEN now() ELSE sent_at END
-         WHERE subscriber_id = $1 AND incident_update_id = $2",
-    )
-    .bind(subscriber_id)
-    .bind(update_id)
-    .bind(error)
-    .execute(pool)
-    .await
-    .context("subscribers::mark_notification")?;
-    Ok(())
 }
 
 #[derive(Debug, sqlx::FromRow)]
@@ -424,18 +370,6 @@ pub async fn remove_by_email(pool: &PgPool, email: &str) -> Result<u64> {
             .execute(pool)
             .await
             .context("subscribers::remove_by_email")?;
-    Ok(res.rows_affected())
-}
-
-/// Periodic cleanup: delivery-log rows older than 30 days. Recent rows stay so
-/// the dispatcher's dedup window (24 h lookback) always sees a prior 'sent'.
-pub async fn purge_old_notifications(pool: &PgPool) -> sqlx::Result<u64> {
-    let res = sqlx::query(
-        "DELETE FROM status_page_subscriber_notifications
-         WHERE created_at < now() - INTERVAL '30 days'",
-    )
-    .execute(pool)
-    .await?;
     Ok(res.rows_affected())
 }
 

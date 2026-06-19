@@ -15,6 +15,7 @@ use uuid::Uuid;
 
 use crate::email::{EmailAddress, EmailSender, EmailTemplate, TransactionalEmail};
 use crate::http_outbound::{OutboundHttpClient, post_bytes_with_headers};
+use crate::storage::subscriber_deliveries::{self, INCIDENT_UPDATE, MAINTENANCE};
 use crate::storage::subscriber_maintenance::{self, PendingMaintenance};
 use crate::storage::subscribers::{self, PendingUpdate};
 
@@ -86,8 +87,15 @@ impl SubscriberDispatcher {
         let pending = subscribers::list_pending(&self.pool, self.cfg.batch_limit).await?;
         let mut claimed = Vec::new();
         for p in pending {
-            if subscribers::claim_notification(&self.pool, p.subscriber_id, p.update_id, p.org_id)
-                .await?
+            if subscriber_deliveries::claim(
+                &self.pool,
+                p.subscriber_id,
+                p.org_id,
+                INCIDENT_UPDATE,
+                p.update_id,
+                "",
+            )
+            .await?
             {
                 claimed.push(p);
             }
@@ -100,9 +108,15 @@ impl SubscriberDispatcher {
                 if let Some(err) = &error {
                     tracing::warn!(error = %err, subscriber = %p.subscriber_id, "subscriber delivery failed");
                 }
-                if let Err(err) =
-                    subscribers::mark_notification(&self.pool, p.subscriber_id, p.update_id, error.as_deref())
-                        .await
+                if let Err(err) = subscriber_deliveries::mark(
+                    &self.pool,
+                    p.subscriber_id,
+                    INCIDENT_UPDATE,
+                    p.update_id,
+                    "",
+                    error.as_deref(),
+                )
+                .await
                 {
                     tracing::warn!(error = %err, "subscriber mark failed");
                 }
@@ -116,12 +130,13 @@ impl SubscriberDispatcher {
             subscriber_maintenance::list_pending(&self.pool, self.cfg.batch_limit).await?;
         let mut claimed = Vec::new();
         for m in pending {
-            if subscriber_maintenance::claim(
+            if subscriber_deliveries::claim(
                 &self.pool,
                 m.subscriber_id,
+                m.org_id,
+                MAINTENANCE,
                 m.maintenance_id,
                 &m.phase,
-                m.org_id,
             )
             .await?
             {
@@ -134,9 +149,10 @@ impl SubscriberDispatcher {
                 if let Some(err) = &error {
                     tracing::warn!(error = %err, subscriber = %m.subscriber_id, "maintenance delivery failed");
                 }
-                if let Err(err) = subscriber_maintenance::mark(
+                if let Err(err) = subscriber_deliveries::mark(
                     &self.pool,
                     m.subscriber_id,
+                    MAINTENANCE,
                     m.maintenance_id,
                     &m.phase,
                     error.as_deref(),
