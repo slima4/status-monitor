@@ -48,14 +48,23 @@ impl EmailSender for ResendEmailSender {
             format!("{} <{}>", email.from.name, email.from.address)
         };
 
-        let payload = serde_json::to_vec(&json!({
+        let mut body = json!({
             "from": from_value,
             "to": [email.to.address],
             "subject": rendered.subject,
             "text": rendered.text_body,
             "html": rendered.html_body,
-        }))
-        .map_err(|e| EmailError::Transport(format!("serialize: {e}")))?;
+        });
+        // RFC 8058 one-click unsubscribe for public-subscriber mail: a stable
+        // header link plus the One-Click marker so Gmail/Outlook render it.
+        if let Some(url) = email.template.list_unsubscribe_url() {
+            body["headers"] = json!({
+                "List-Unsubscribe": format!("<{url}>"),
+                "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+            });
+        }
+        let payload = serde_json::to_vec(&body)
+            .map_err(|e| EmailError::Transport(format!("serialize: {e}")))?;
 
         let req = Request::post(RESEND_API_URL)
             .header(CONTENT_TYPE, "application/json")

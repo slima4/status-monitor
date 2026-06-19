@@ -175,6 +175,17 @@ impl EmailTemplate {
             EmailTemplate::SubscriberIncident { incident_url, .. } => Some(incident_url),
         }
     }
+
+    /// One-click unsubscribe URL for templates sent to public subscribers,
+    /// surfaced as RFC 8058 List-Unsubscribe headers by the transport.
+    pub fn list_unsubscribe_url(&self) -> Option<&str> {
+        match self {
+            EmailTemplate::SubscriberIncident {
+                unsubscribe_url, ..
+            } => Some(unsubscribe_url),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
