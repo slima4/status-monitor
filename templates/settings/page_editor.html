@@ -165,6 +165,56 @@
     </div>
   </section>
 
+  <section aria-labelledby="subscribers-heading">
+    <div class="sticker-card overflow-hidden">
+      <div class="flex items-center justify-between px-4 py-3">
+        <h2 id="subscribers-heading" class="panel-label">subscribers</h2>
+        <span class="font-mono text-xs text-muted">{{ subscribers.len() }} total</span>
+      </div>
+      {% if subscribers.is_empty() %}
+      <p class="px-4 pb-4 text-sm text-muted">No subscribers yet. The Subscribe button on the public page collects email opt-ins.</p>
+      {% else %}
+      <table class="w-full text-left text-sm">
+        <thead class="table-head bg-[color:var(--theme-surface-sunk)]">
+          <tr>
+            <th scope="col" class="px-4 py-2">Contact</th>
+            <th scope="col" class="px-4 py-2">Status</th>
+            <th scope="col" class="px-4 py-2">Since</th>
+            <th scope="col" class="px-4 py-2"><span class="sr-only">Actions</span></th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-[color:var(--theme-line)]">
+          {% for s in subscribers %}
+          <tr>
+            <td class="px-4 py-2 align-top font-mono text-xs break-words">{{ s.contact }}</td>
+            <td class="px-4 py-2 align-top">
+              {% if s.confirmed %}<span class="status-badge status-badge--up">confirmed</span>{% else %}<span class="status-badge status-badge--disabled">pending</span>{% endif %}
+            </td>
+            <td class="px-4 py-2 align-top font-mono text-xs text-muted">
+              <time datetime="{{ s.created_at|iso_ts }}" data-tz>{{ s.created_at|human_ts }}</time>
+            </td>
+            <td class="px-4 py-2">
+              <div class="flex items-center justify-end">
+                <button type="button"
+                        hx-delete="/api/v1/status-pages/{{ id }}/subscribers/{{ s.id }}"
+                        hx-headers='{"X-Requested-With":"uptimepage"}'
+                        hx-on::after-request="if(event.detail.successful){this.closest('tr').remove()}"
+                        data-confirm-modal
+                        data-confirm-title="Remove subscriber?"
+                        data-confirm-body="Stops sending updates to {{ s.contact }}. They can re-subscribe from the public page."
+                        data-confirm-label="remove"
+                        data-confirm-danger
+                        class="row-link row-link--danger">remove</button>
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+    </div>
+  </section>
+
   <script>
     (() => {
       const root = document.querySelector('[data-page-id]');

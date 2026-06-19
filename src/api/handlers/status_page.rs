@@ -397,6 +397,28 @@ pub async fn remove_component(
 }
 
 #[utoipa::path(
+    delete,
+    path = "/api/v1/status-pages/{id}/subscribers/{subscriber_id}",
+    tag = "status-pages",
+    summary = "Remove a subscriber from a page",
+    params(("id" = Uuid, Path), ("subscriber_id" = Uuid, Path)),
+    responses((status = 204, description = "Removed"), (status = 404, body = ApiError)),
+)]
+pub async fn remove_subscriber(
+    State(state): State<AppState>,
+    OwnerAuthorized(org, _): OwnerAuthorized<StatusPageWrite>,
+    Path((id, subscriber_id)): Path<(Uuid, Uuid)>,
+) -> Result<StatusCode> {
+    let Some(pool) = state.db.as_ref() else {
+        return Err(component_not_found());
+    };
+    if !crate::storage::subscribers::remove_for_page(pool, org.0, id, subscriber_id).await? {
+        return Err(component_not_found());
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(
     post, path = "/api/v1/status-pages/{id}/components/reorder", tag = "status-pages",
     summary = "Reorder a page's components",
     params(("id" = Uuid, Path)),

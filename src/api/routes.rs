@@ -324,6 +324,10 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
             axum::routing::patch(handlers::status_page::update_component)
                 .delete(handlers::status_page::remove_component),
         )
+        .route(
+            "/status-pages/{id}/subscribers/{subscriber_id}",
+            axum::routing::delete(handlers::status_page::remove_subscriber),
+        )
         .route("/orgs/{id}/usage", get(handlers::usage::get_org_usage))
         .route("/orgs/{id}/members", get(handlers::orgs::list_org_members))
         .route(

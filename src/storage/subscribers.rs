@@ -330,6 +330,72 @@ pub async fn mark_notification(
     Ok(())
 }
 
+#[derive(Debug, sqlx::FromRow)]
+pub struct OperatorSubscriber {
+    pub id: Uuid,
+    pub target: String,
+    pub channel: String,
+    pub verified: bool,
+    pub created_at: chrono::DateTime<Utc>,
+}
+
+/// Subscribers of one page for the operator roster (newest first), verified and
+/// pending. Org- and page-scoped so it can't read another tenant's list.
+pub async fn list_for_page(
+    pool: &PgPool,
+    org_id: Uuid,
+    status_page_id: Uuid,
+) -> Result<Vec<OperatorSubscriber>> {
+    let rows = sqlx::query_as::<_, OperatorSubscriber>(
+        "SELECT id, target, channel, (verified_at IS NOT NULL) AS verified, created_at
+         FROM status_page_subscribers
+         WHERE org_id = $1 AND status_page_id = $2
+         ORDER BY created_at DESC",
+    )
+    .bind(org_id)
+    .bind(status_page_id)
+    .fetch_all(pool)
+    .await
+    .context("subscribers::list_for_page")?;
+    Ok(rows)
+}
+
+/// Operator removal of one subscriber, scoped to its org and page so a crafted
+/// id can't delete across tenants. `true` if a row was removed.
+pub async fn remove_for_page(
+    pool: &PgPool,
+    org_id: Uuid,
+    status_page_id: Uuid,
+    subscriber_id: Uuid,
+) -> Result<bool> {
+    let res = sqlx::query(
+        "DELETE FROM status_page_subscribers
+         WHERE id = $1 AND org_id = $2 AND status_page_id = $3",
+    )
+    .bind(subscriber_id)
+    .bind(org_id)
+    .bind(status_page_id)
+    .execute(pool)
+    .await
+    .context("subscribers::remove_for_page")?;
+    Ok(res.rows_affected() > 0)
+}
+
+/// Verified subscriber count per page for an org, for the operator pages list.
+/// Pages with no verified subscribers are absent (caller defaults them to 0).
+pub async fn verified_counts(pool: &PgPool, org_id: Uuid) -> Result<Vec<(Uuid, i64)>> {
+    let rows: Vec<(Uuid, i64)> = sqlx::query_as(
+        "SELECT status_page_id, count(*) FROM status_page_subscribers
+         WHERE org_id = $1 AND verified_at IS NOT NULL
+         GROUP BY status_page_id",
+    )
+    .bind(org_id)
+    .fetch_all(pool)
+    .await
+    .context("subscribers::verified_counts")?;
+    Ok(rows)
+}
+
 /// Remove every email subscription for `email` (already lowercased) across all
 /// pages — called on a hard bounce or spam complaint so a dead or hostile
 /// address stops receiving mail. Cascades its tokens and delivery-log rows.

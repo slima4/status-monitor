@@ -152,6 +152,7 @@ use crate::storage::UptimeStats;
         handlers::status_page::add_component,
         handlers::status_page::update_component,
         handlers::status_page::remove_component,
+        handlers::status_page::remove_subscriber,
         handlers::status_page::reorder_components,
         handlers::status_page::upload_logo,
         handlers::status_page::delete_logo,

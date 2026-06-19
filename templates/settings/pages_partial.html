@@ -21,6 +21,7 @@
     <tr>
       <th scope="col" class="px-4 py-2">Name</th>
       <th scope="col" class="px-4 py-2">URL</th>
+      <th scope="col" class="px-4 py-2">Subscribers</th>
       <th scope="col" class="px-4 py-2">Status</th>
       <th scope="col" class="px-4 py-2"><span class="sr-only">Actions</span></th>
     </tr>
@@ -34,6 +35,7 @@
       <td class="px-4 py-2 align-top font-mono text-xs">
         {% if r.url != "" %}<a href="{{ r.url }}" target="_blank" rel="noopener" class="underline decoration-dotted">{{ r.slug }}</a>{% else %}{{ r.slug }}{% endif %}
       </td>
+      <td class="px-4 py-2 align-top font-mono text-xs text-muted">{{ r.subscriber_count }}</td>
       <td class="px-4 py-2 align-top">
         {% if r.enabled %}<span class="status-badge status-badge--up">published</span>{% else %}<span class="status-badge status-badge--disabled">draft</span>{% endif %}
       </td>

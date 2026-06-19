@@ -36,6 +36,7 @@ pub struct PageRow {
     pub enabled: bool,
     /// Absolute live URL, or empty in path mode.
     pub url: String,
+    pub subscriber_count: i64,
 }
 
 #[derive(Template, WebTemplate)]
@@ -56,18 +57,27 @@ pub struct PagesPartial {
 
 async fn build_rows(state: &AppState, org: OrgId) -> WebResult<Vec<PageRow>> {
     let pages = state.status_page_store.list(org).await?;
+    let counts: std::collections::HashMap<Uuid, i64> = match state.db.as_ref() {
+        Some(pool) => crate::storage::subscribers::verified_counts(pool, org.0)
+            .await?
+            .into_iter()
+            .collect(),
+        None => std::collections::HashMap::new(),
+    };
     Ok(pages
         .into_iter()
         .map(|p| {
             let url = public_base(&state.cfg, &p.slug)
                 .map(|o| public_status_url(&state.cfg, &o))
                 .unwrap_or_default();
+            let subscriber_count = counts.get(&p.id.0).copied().unwrap_or(0);
             PageRow {
                 id: p.id.to_string(),
                 name: p.name,
                 slug: p.slug,
                 enabled: p.enabled,
                 url,
+                subscriber_count,
             }
         })
         .collect())
@@ -121,6 +131,15 @@ pub struct StyleOption {
     pub selected: bool,
 }
 
+/// One subscriber row in the editor's roster. `contact` is masked for email.
+pub struct SubscriberView {
+    pub id: String,
+    pub contact: String,
+    pub channel: String,
+    pub confirmed: bool,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
 #[derive(Template, WebTemplate)]
 #[template(path = "settings/page_editor.html")]
 pub struct PageEditorPage {
@@ -144,6 +163,8 @@ pub struct PageEditorPage {
     pub max_logo_dim_px: u32,
     /// Monitors on this page first (in order), then the rest by name.
     pub components: Vec<ComponentRow>,
+    /// Confirmed + pending subscribers, newest first.
+    pub subscribers: Vec<SubscriberView>,
 }
 
 pub async fn page_editor(
@@ -247,6 +268,28 @@ pub async fn page_editor(
         })
         .collect();
 
+    let subscribers = match state.db.as_ref() {
+        Some(pool) => crate::storage::subscribers::list_for_page(pool, org.0, page_id.0)
+            .await?
+            .into_iter()
+            .map(|s| {
+                let contact = if s.channel == "email" {
+                    crate::email::mask_email(&s.target)
+                } else {
+                    s.target
+                };
+                SubscriberView {
+                    id: s.id.to_string(),
+                    contact,
+                    channel: s.channel,
+                    confirmed: s.verified,
+                    created_at: s.created_at,
+                }
+            })
+            .collect(),
+        None => Vec::new(),
+    };
+
     Ok(PageEditorPage {
         active_tab: TAB_PAGES,
         id: page.id.to_string(),
@@ -269,6 +312,7 @@ pub async fn page_editor(
         max_logo_bytes: u64::from(cfg.max_logo_size_bytes),
         max_logo_dim_px: cfg.max_logo_dimension_px,
         components: rows,
+        subscribers,
     }
     .into_response())
 }
