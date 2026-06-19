@@ -3,6 +3,8 @@ pub mod channel_verification;
 pub mod incident_alert;
 pub mod invitation;
 pub mod magic_link;
+pub mod subscriber_confirm;
+pub mod subscriber_incident;
 
 /// HTML-escape the five entities that matter in element text and double- or
 /// single-quoted attribute values. Single owner for every transactional

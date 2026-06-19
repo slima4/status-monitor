@@ -74,6 +74,22 @@ pub enum EmailTemplate {
     /// An incident page delivered over email; `body` is the same plain text
     /// the chat transports send.
     IncidentAlert { body: String },
+    /// Confirms a public status-page subscription (double opt-in) before any
+    /// update is delivered to the address.
+    SubscriberConfirm {
+        page_name: String,
+        confirm_url: String,
+        expires_hours: u32,
+    },
+    /// A public incident update delivered to a confirmed subscriber.
+    SubscriberIncident {
+        page_name: String,
+        incident_title: String,
+        phase: String,
+        message: String,
+        incident_url: String,
+        unsubscribe_url: String,
+    },
 }
 
 impl EmailTemplate {
@@ -119,6 +135,31 @@ impl EmailTemplate {
             EmailTemplate::IncidentAlert { body } => {
                 templates::incident_alert::render(site_name, body)
             }
+            EmailTemplate::SubscriberConfirm {
+                page_name,
+                confirm_url,
+                expires_hours,
+            } => templates::subscriber_confirm::render(
+                site_name,
+                page_name,
+                confirm_url,
+                *expires_hours,
+            ),
+            EmailTemplate::SubscriberIncident {
+                page_name,
+                incident_title,
+                phase,
+                message,
+                incident_url,
+                unsubscribe_url,
+            } => templates::subscriber_incident::render(
+                page_name,
+                incident_title,
+                phase,
+                message,
+                incident_url,
+                unsubscribe_url,
+            ),
         }
     }
 
@@ -130,6 +171,8 @@ impl EmailTemplate {
             EmailTemplate::AccountDeletion { .. } => None,
             EmailTemplate::ChannelVerification { verify_url, .. } => Some(verify_url),
             EmailTemplate::IncidentAlert { .. } => None,
+            EmailTemplate::SubscriberConfirm { confirm_url, .. } => Some(confirm_url),
+            EmailTemplate::SubscriberIncident { incident_url, .. } => Some(incident_url),
         }
     }
 }
