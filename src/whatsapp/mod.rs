@@ -5,10 +5,8 @@
 
 use std::collections::BTreeMap;
 
-use hmac::{Hmac, KeyInit, Mac};
 use serde::Deserialize;
 use serde::Serialize;
-use sha2::Sha256;
 use subtle::ConstantTimeEq;
 use url::Url;
 
@@ -23,15 +21,8 @@ pub fn signature_matches(app_secret: &str, header: &str, body: &[u8]) -> bool {
     let Some(hex_sig) = header.strip_prefix("sha256=") else {
         return false;
     };
-    let Ok(provided) = hex::decode(hex_sig) else {
-        return false;
-    };
-    let Ok(mut mac) = Hmac::<Sha256>::new_from_slice(app_secret.as_bytes()) else {
-        return false;
-    };
-    mac.update(body);
-    let expected = mac.finalize().into_bytes();
-    provided.ct_eq(&expected).into()
+    let expected = crate::auth::mac::hmac_sha256_hex(app_secret.as_bytes(), &[body]);
+    hex_sig.as_bytes().ct_eq(expected.as_bytes()).into()
 }
 
 // ── webhook payload (the slice of it we consume) ────────────────────────
@@ -209,6 +200,9 @@ pub async fn send_text(
 
 #[cfg(test)]
 mod tests {
+    use hmac::{Hmac, KeyInit, Mac};
+    use sha2::Sha256;
+
     use super::*;
 
     #[test]

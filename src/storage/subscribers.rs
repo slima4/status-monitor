@@ -4,8 +4,6 @@
 
 use anyhow::Context;
 use chrono::{Duration, Utc};
-use hmac::{Hmac, KeyInit, Mac};
-use sha2::Sha256;
 use sqlx::PgPool;
 use subtle::ConstantTimeEq;
 use uuid::Uuid;
@@ -349,10 +347,7 @@ pub async fn purge_old_notifications(pool: &PgPool) -> sqlx::Result<u64> {
 /// unsubscribe link alongside the id; reproducible at send time without
 /// storing anything.
 pub fn unsubscribe_token(secret: &str, subscriber_id: Uuid) -> String {
-    let mut mac = Hmac::<Sha256>::new_from_slice(secret.as_bytes())
-        .expect("HMAC accepts a key of any length");
-    mac.update(subscriber_id.as_bytes());
-    hex::encode(mac.finalize().into_bytes())
+    crate::auth::mac::hmac_sha256_hex(secret.as_bytes(), &[subscriber_id.as_bytes()])
 }
 
 /// Constant-time check of a presented unsubscribe token.

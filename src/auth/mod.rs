@@ -17,6 +17,7 @@ pub mod github;
 pub mod google;
 pub mod invitations;
 pub mod login_audit;
+pub mod mac;
 pub mod magic_link;
 pub mod oauth_login;
 pub mod oauth_state;

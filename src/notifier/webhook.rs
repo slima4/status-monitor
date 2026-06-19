@@ -2,8 +2,6 @@ use std::collections::BTreeMap;
 
 use async_trait::async_trait;
 use chrono::Utc;
-use hmac::{Hmac, KeyInit, Mac};
-use sha2::Sha256;
 use url::Url;
 
 use crate::error::{AppError, Result};
@@ -45,12 +43,10 @@ impl WebhookNotifier {
     /// for replay protection — the receiver must reject a timestamp outside a
     /// freshness window (e.g. ±5 min) or the binding buys nothing.
     fn sign(secret: &str, timestamp: i64, body: &[u8]) -> String {
-        let mut mac = Hmac::<Sha256>::new_from_slice(secret.as_bytes())
-            .expect("HMAC accepts a key of any length");
-        mac.update(timestamp.to_string().as_bytes());
-        mac.update(b".");
-        mac.update(body);
-        format!("sha256={}", hex::encode(mac.finalize().into_bytes()))
+        let ts = timestamp.to_string();
+        let digest =
+            crate::auth::mac::hmac_sha256_hex(secret.as_bytes(), &[ts.as_bytes(), b".", body]);
+        format!("sha256={digest}")
     }
 }
 
@@ -75,6 +71,9 @@ impl Notifier for WebhookNotifier {
 
 #[cfg(test)]
 mod tests {
+    use hmac::{Hmac, KeyInit, Mac};
+    use sha2::Sha256;
+
     use super::*;
 
     #[test]
