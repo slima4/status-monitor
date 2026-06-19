@@ -96,6 +96,46 @@ async fn add_update(pool: &PgPool, org: Uuid, incident: Uuid, age_hours: i64) ->
     row.0
 }
 
+async fn seed_internal_incident(pool: &PgPool, org: Uuid, target: Uuid) -> Uuid {
+    let row: (Uuid,) = sqlx::query_as(
+        "INSERT INTO incidents (org_id, target_id, started_at, status_at_start, visibility, public_title)
+         VALUES ($1, $2, now(), 'down', 'internal', 'Elevated errors')
+         RETURNING id",
+    )
+    .bind(org)
+    .bind(target)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    row.0
+}
+
+async fn mark_published(pool: &PgPool, org: Uuid, incident: Uuid) {
+    sqlx::query(
+        "INSERT INTO incident_events (org_id, incident_id, kind, actor_type)
+         VALUES ($1, $2, 'published', 'system')",
+    )
+    .bind(org)
+    .bind(incident)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+async fn add_resolved_update(pool: &PgPool, org: Uuid, incident: Uuid) -> Uuid {
+    let row: (Uuid,) = sqlx::query_as(
+        "INSERT INTO incident_updates (org_id, incident_id, phase, message)
+         VALUES ($1, $2, 'resolved', 'all clear')
+         RETURNING id",
+    )
+    .bind(org)
+    .bind(incident)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    row.0
+}
+
 async fn confirmed_subscriber(pool: &PgPool, org: Uuid, page: Uuid, email: &str) -> Uuid {
     let sub = subscribers::subscribe(
         pool,
@@ -285,6 +325,55 @@ async fn fanout_lists_verified_recent_public_updates_only() {
     .unwrap();
     let after = subscribers::list_pending(&pool, 100).await.unwrap();
     assert!(after.iter().all(|q| q.subscriber_id != sub_id));
+
+    cleanup(&pool, org).await;
+}
+
+#[tokio::test]
+#[ignore = "needs live Postgres (DATABASE_URL)"]
+async fn unpublished_incident_fans_out_only_the_resolved_closer() {
+    let Some(pool) = pg_pool_from_env().await else {
+        return;
+    };
+    let org = seed_org(&pool).await;
+    let target = seed_target(&pool, org).await;
+    let page = seed_page(&pool, org).await;
+    add_component(&pool, org, page, target).await;
+    let sub_id = confirmed_subscriber(&pool, org, page, "u@example.com").await;
+
+    // Published then unpublished: investigating update is suppressed while
+    // internal, the resolved closer still reaches subscribers who were notified.
+    let incident = seed_internal_incident(&pool, org, target).await;
+    mark_published(&pool, org, incident).await;
+    let investigating = add_update(&pool, org, incident, 0).await;
+    let resolved = add_resolved_update(&pool, org, incident).await;
+
+    // Never published, resolved while internal: subscribers never heard of it,
+    // so even the resolved update must not fan out. Its own target — the open
+    // incident index allows only one open incident per monitor.
+    let target2 = seed_target(&pool, org).await;
+    add_component(&pool, org, page, target2).await;
+    let silent = seed_internal_incident(&pool, org, target2).await;
+    let silent_resolved = add_resolved_update(&pool, org, silent).await;
+
+    let pending = subscribers::list_pending(&pool, 100).await.unwrap();
+    let mine: Vec<_> = pending
+        .iter()
+        .filter(|p| p.subscriber_id == sub_id)
+        .map(|p| p.update_id)
+        .collect();
+    assert!(
+        mine.contains(&resolved),
+        "resolved closer reaches subscriber"
+    );
+    assert!(
+        !mine.contains(&investigating),
+        "internal investigating update stays suppressed"
+    );
+    assert!(
+        !mine.contains(&silent_resolved),
+        "never-published incident stays fully silent"
+    );
 
     cleanup(&pool, org).await;
 }

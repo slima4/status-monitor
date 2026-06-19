@@ -545,11 +545,27 @@ async fn insert_event_tx(
     Ok(())
 }
 
+async fn incident_was_published(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    org: OrgId,
+    id: Uuid,
+) -> Result<bool> {
+    sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM incident_events \
+         WHERE incident_id = $1 AND org_id = $2 AND kind = 'published')",
+    )
+    .bind(id)
+    .bind(org.0)
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(|e| anyhow::anyhow!("published-event check: {e}").into())
+}
+
 impl PgIncidentOpsStore {
     /// Shared transition core: lock, read current state, apply the pure state
     /// machine, run `update` to mutate the row, then log `kind`.
-    /// `public_resolution`, when set, appends a `resolved` public update — only
-    /// when the incident is public.
+    /// `public_resolution`, when set, appends a `resolved` public update when
+    /// the incident is (or ever was) public.
     #[allow(clippy::too_many_arguments)]
     async fn transition(
         &self,
@@ -609,8 +625,11 @@ impl PgIncidentOpsStore {
         };
 
         insert_event_tx(&mut tx, org, id, event_kind, actor, note.as_deref()).await?;
+        // An incident unpublished before it resolves still has subscribers who
+        // were told it opened; write the closing update whenever it was ever
+        // public, not only while currently public.
         if let Some(message) = public_resolution
-            && row.visibility == "public"
+            && (row.visibility == "public" || incident_was_published(&mut tx, org, id).await?)
         {
             let author = actor
                 .user_id()

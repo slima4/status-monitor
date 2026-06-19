@@ -942,3 +942,53 @@ async fn publish_posts_opening_update_pg() {
             .unwrap();
     assert_eq!(count3, 0, "resolved incident gets no opener");
 }
+
+#[tokio::test]
+#[ignore]
+async fn resolve_after_unpublish_still_writes_closing_update_pg() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let store = PgIncidentOpsStore::new(pool.clone());
+
+    // Published then unpublished before resolve: subscribers were told it
+    // opened, so the closing update must still be written despite the row
+    // being internal at resolve time.
+    let (org, user, id) = seed(&pool, "increunpub").await;
+    store
+        .publish(org, id, Some("Outage".into()), None, Actor::User(user))
+        .await
+        .unwrap()
+        .unwrap();
+    store
+        .unpublish(org, id, Actor::User(user))
+        .await
+        .unwrap()
+        .unwrap();
+    store
+        .resolve(org, id, Actor::User(user), None)
+        .await
+        .unwrap();
+    let resolved: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM incident_updates WHERE incident_id = $1 AND phase = 'resolved'",
+    )
+    .bind(id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(resolved, 1, "ever-published incident gets a closing update");
+
+    // Never published: resolving writes no public update at all.
+    let (org2, user2, id2) = seed(&pool, "increnever").await;
+    store
+        .resolve(org2, id2, Actor::User(user2), None)
+        .await
+        .unwrap();
+    let none: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM incident_updates WHERE incident_id = $1")
+            .bind(id2)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(none, 0, "internal-only incident stays silent");
+}

@@ -247,12 +247,12 @@ pub struct PendingUpdate {
     pub signing_secret: Option<String>,
 }
 
-/// Verified subscribers (email or webhook) with a public incident update posted
-/// since they subscribed (and within the lookback) that hasn't been claimed yet.
-/// The incident→page link is `incident.target_id` ∈ the page's curated components.
-///
-/// Fan-out is per posted update, so an operator must post an update to notify:
-/// publish/resolve that write no update stay silent (issue #75).
+/// Verified subscribers (email or webhook) with an unclaimed update on an
+/// ever-published incident, posted since they subscribed and within the
+/// lookback. The incident→page link is `incident.target_id` ∈ the page's
+/// curated components. Updates flow while the incident is public; once
+/// unpublished, only the `resolved` closer still fans out, so an incident taken
+/// off the page before it ends doesn't strand subscribers on its last update.
 pub async fn list_pending(pool: &PgPool, limit: i64) -> Result<Vec<PendingUpdate>> {
     let rows = sqlx::query_as::<_, PendingUpdate>(
         "SELECT s.id AS subscriber_id, u.id AS update_id, s.org_id, s.channel, s.target,
@@ -269,8 +269,12 @@ pub async fn list_pending(pool: &PgPool, limit: i64) -> Result<Vec<PendingUpdate
          JOIN status_page_components c
               ON c.status_page_id = s.status_page_id AND c.org_id = s.org_id
          JOIN incidents i
-              ON i.target_id = c.target_id AND i.org_id = c.org_id AND i.visibility = 'public'
+              ON i.target_id = c.target_id AND i.org_id = c.org_id
          JOIN incident_updates u ON u.incident_id = i.id AND u.org_id = i.org_id
+              AND (i.visibility = 'public'
+                   OR (u.phase = 'resolved'
+                       AND EXISTS (SELECT 1 FROM incident_events e
+                                   WHERE e.incident_id = i.id AND e.kind = 'published')))
          WHERE s.channel IN ('email', 'webhook') AND s.verified_at IS NOT NULL
            AND u.posted_at >= s.verified_at
            AND u.posted_at >= now() - make_interval(hours => $2)
