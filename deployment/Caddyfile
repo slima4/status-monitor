@@ -228,6 +228,22 @@ app.{$UPTIMEPAGE_DOMAIN} {
 		import app_upstream
 	}
 
+	# ─── Public subscription surface — anonymous, per-IP edge cap ───────
+	# POST /subscribe mints a confirm mail; GET confirm/unsubscribe carry
+	# their own token/HMAC. Per-page and per-subscriber DB caps already bound
+	# mail volume; this caps one IP fanning across many addresses.
+	@subscribe path /subscribe /subscribe/*
+	handle @subscribe {
+		rate_limit {
+			zone subscribe {
+				key {remote_host}
+				events 20
+				window 1m
+			}
+		}
+		import app_upstream
+	}
+
 	# ─── Invitation token surface — anonymous token links ───────────────
 	# The GET landings and their JSON twins argon2-verify the emailed token
 	# (decline is fully anonymous); the per-IP cap bounds brute probing.
