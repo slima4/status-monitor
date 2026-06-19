@@ -244,6 +244,7 @@ pub struct PendingUpdate {
     pub slug: String,
     pub custom_domain: Option<String>,
     pub custom_domain_verified: bool,
+    pub signing_secret: Option<String>,
 }
 
 /// Verified subscribers (email or webhook) with a public incident update posted
@@ -261,7 +262,8 @@ pub async fn list_pending(pool: &PgPool, limit: i64) -> Result<Vec<PendingUpdate
                 COALESCE(NULLIF(sp.public_display_name, ''), sp.name) AS page_name,
                 sp.slug::text AS slug,
                 sp.custom_domain::text AS custom_domain,
-                (sp.custom_domain_verified_at IS NOT NULL) AS custom_domain_verified
+                (sp.custom_domain_verified_at IS NOT NULL) AS custom_domain_verified,
+                s.config ->> 'signing_secret' AS signing_secret
          FROM status_page_subscribers s
          JOIN status_pages sp ON sp.id = s.status_page_id
          JOIN status_page_components c

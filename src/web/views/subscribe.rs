@@ -18,7 +18,7 @@ use crate::auth::email_norm;
 use crate::auth::url::token_link;
 use crate::domain::{NewSubscriber, SubscriberChannel};
 use crate::email::{EmailAddress, EmailTemplate, TransactionalEmail};
-use crate::http_outbound::post_json_with_headers;
+use crate::http_outbound::post_bytes_with_headers;
 use crate::storage::subscribers::{self, CONFIRM_TTL_HOURS};
 use crate::web::error::WebResult;
 use crate::web::filters;
@@ -246,18 +246,26 @@ async fn subscribe_webhook(
     if parsed.scheme() != "https" {
         return Ok(bad_url());
     }
+    // Per-subscriber signing secret: the receiver verifies our
+    // X-Uptimepage-Signature with it. Shown once on success.
+    let secret = crate::auth::token_hash::generate_raw_token();
     let ping = serde_json::json!({
         "type": "subscription_verification",
         "message": "Confirm your subscription to status updates.",
     });
-    if post_json_with_headers(
-        &state.outbound_http,
-        &parsed,
-        &ping,
-        &std::collections::BTreeMap::new(),
-    )
-    .await
-    .is_err()
+    let Ok(body) = serde_json::to_vec(&ping) else {
+        return Ok(bad_url());
+    };
+    let ts = chrono::Utc::now().timestamp();
+    let mut headers = std::collections::BTreeMap::new();
+    headers.insert("X-Uptimepage-Timestamp".to_string(), ts.to_string());
+    headers.insert(
+        "X-Uptimepage-Signature".to_string(),
+        crate::auth::mac::webhook_signature(&secret, ts, &body),
+    );
+    if post_bytes_with_headers(&state.outbound_http, &parsed, body, &headers)
+        .await
+        .is_err()
     {
         return Ok(SubscribeNotice::bad(
             StatusCode::BAD_REQUEST,
@@ -272,14 +280,23 @@ async fn subscribe_webhook(
             org_id: page.org.0,
             channel: SubscriberChannel::Webhook,
             target: url.to_string(),
-            config: serde_json::json!({}),
+            config: serde_json::json!({ "signing_secret": secret }),
         },
     )
     .await?;
     subscribers::mark_verified(pool, sub.id).await?;
+    // Re-subscribe keeps the original secret (the upsert leaves config), so
+    // show whatever is actually stored.
+    let shown = sub
+        .config
+        .get("signing_secret")
+        .and_then(|v| v.as_str())
+        .unwrap_or(&secret);
     Ok(SubscribeNotice::ok(
         "Subscribed",
-        "Your endpoint is verified and will receive status updates.",
+        &format!(
+            "Your endpoint is verified. Save this signing secret to verify our requests: {shown}"
+        ),
     ))
 }
 

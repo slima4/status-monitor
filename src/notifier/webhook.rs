@@ -43,10 +43,7 @@ impl WebhookNotifier {
     /// for replay protection — the receiver must reject a timestamp outside a
     /// freshness window (e.g. ±5 min) or the binding buys nothing.
     fn sign(secret: &str, timestamp: i64, body: &[u8]) -> String {
-        let ts = timestamp.to_string();
-        let digest =
-            crate::auth::mac::hmac_sha256_hex(secret.as_bytes(), &[ts.as_bytes(), b".", body]);
-        format!("sha256={digest}")
+        crate::auth::mac::webhook_signature(secret, timestamp, body)
     }
 }
 

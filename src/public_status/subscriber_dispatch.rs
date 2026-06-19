@@ -166,7 +166,9 @@ impl SubscriberDispatcher {
                 "incident_url": format!("{origin}/status/incidents/{}", p.incident_id),
                 "unsubscribe_url": unsubscribe_url,
             });
-            return self.post_webhook(&p.target, &payload).await;
+            return self
+                .post_webhook(&p.target, &payload, p.signing_secret.as_deref())
+                .await;
         }
         let outgoing = TransactionalEmail {
             from: EmailAddress::new(self.cfg.from_address.clone(), self.cfg.from_name.clone()),
@@ -204,7 +206,9 @@ impl SubscriberDispatcher {
                 "page": { "name": m.page_name, "url": format!("{origin}/status") },
                 "unsubscribe_url": unsubscribe_url,
             });
-            return self.post_webhook(&m.target, &payload).await;
+            return self
+                .post_webhook(&m.target, &payload, m.signing_secret.as_deref())
+                .await;
         }
         let outgoing = TransactionalEmail {
             from: EmailAddress::new(self.cfg.from_address.clone(), self.cfg.from_name.clone()),
@@ -233,19 +237,29 @@ impl SubscriberDispatcher {
 
     /// POST a JSON payload to a subscriber webhook URL through the SSRF-guarded
     /// outbound client (the connector blocks internal/loopback targets even for
-    /// a verified URL). A non-2xx or unreachable endpoint surfaces as an error,
-    /// so the delivery retries up to the attempts cap like email.
-    async fn post_webhook(&self, url: &str, payload: &serde_json::Value) -> anyhow::Result<()> {
+    /// a verified URL). Signed with the subscriber's per-row secret so the
+    /// receiver can verify authenticity. A non-2xx or unreachable endpoint
+    /// surfaces as an error, so the delivery retries up to the attempts cap.
+    async fn post_webhook(
+        &self,
+        url: &str,
+        payload: &serde_json::Value,
+        signing_secret: Option<&str>,
+    ) -> anyhow::Result<()> {
         let parsed = url::Url::parse(url).map_err(|e| anyhow::anyhow!("bad webhook url: {e}"))?;
         let body = serde_json::to_vec(payload)?;
-        post_bytes_with_headers(
-            &self.http,
-            &parsed,
-            body,
-            &std::collections::BTreeMap::new(),
-        )
-        .await
-        .map_err(|e| anyhow::anyhow!("webhook post: {e}"))
+        let mut headers = std::collections::BTreeMap::new();
+        if let Some(secret) = signing_secret {
+            let ts = chrono::Utc::now().timestamp();
+            headers.insert("X-Uptimepage-Timestamp".to_string(), ts.to_string());
+            headers.insert(
+                "X-Uptimepage-Signature".to_string(),
+                crate::auth::mac::webhook_signature(secret, ts, &body),
+            );
+        }
+        post_bytes_with_headers(&self.http, &parsed, body, &headers)
+            .await
+            .map_err(|e| anyhow::anyhow!("webhook post: {e}"))
     }
 
     fn origin(&self, slug: &str, custom_domain: Option<&str>, verified: bool) -> String {

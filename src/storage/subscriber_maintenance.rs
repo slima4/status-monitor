@@ -29,6 +29,7 @@ pub struct PendingMaintenance {
     pub slug: String,
     pub custom_domain: Option<String>,
     pub custom_domain_verified: bool,
+    pub signing_secret: Option<String>,
 }
 
 /// Verified subscribers with a maintenance window (touching their page's
@@ -39,7 +40,7 @@ pub async fn list_pending(pool: &PgPool, limit: i64) -> Result<Vec<PendingMainte
     let rows = sqlx::query_as::<_, PendingMaintenance>(
         "SELECT DISTINCT subscriber_id, maintenance_id, org_id, channel, target, phase, title,
                 description, starts_at, ends_at, page_name, slug, custom_domain,
-                custom_domain_verified
+                custom_domain_verified, signing_secret
          FROM (
              SELECT s.id AS subscriber_id, mw.id AS maintenance_id, s.org_id, s.channel, s.target,
                     s.verified_at,
@@ -48,6 +49,7 @@ pub async fn list_pending(pool: &PgPool, limit: i64) -> Result<Vec<PendingMainte
                     sp.slug::text AS slug,
                     sp.custom_domain::text AS custom_domain,
                     (sp.custom_domain_verified_at IS NOT NULL) AS custom_domain_verified,
+                    s.config ->> 'signing_secret' AS signing_secret,
                     CASE WHEN mw.ends_at <= now() THEN 'completed' ELSE 'scheduled' END AS phase,
                     CASE WHEN mw.ends_at <= now() THEN mw.ends_at ELSE mw.created_at END AS event_at
              FROM status_page_subscribers s
