@@ -247,6 +247,16 @@ view inside the 10-second cache window. Unknown component ids return
 `404` with the public error envelope; only `style=flat` is recognised
 (others return `400`).
 
+The page editor renders ready-to-copy markdown for the overall badge and
+each on-page component. The copyable URL is built from the page's public
+origin, so on path-based/self-host deploys set `auth.public_base_url` to the
+externally reachable URL (the same value subscriber links need); otherwise the
+badge URL points at `localhost`.
+
+`?component=<uuid>` works for any public component regardless of check type —
+an HTTP, DNS, or TLS-certificate monitor each gets its own badge that reflects
+that component's current status.
+
 ## Common questions
 
 **Can I have a component that's public but doesn't trigger incidents?**

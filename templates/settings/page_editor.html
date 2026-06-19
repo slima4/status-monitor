@@ -211,6 +211,36 @@
     </div>
   </section>
 
+  {% if let Some(badge) = badge_url %}
+  <!-- ── Status badge ────────────────────────────────────────── -->
+  <div class="sticker-card overflow-hidden text-sm">
+    <header class="card-band">
+      <h2 class="panel-label">badge</h2>
+    </header>
+    <div class="space-y-3 p-4">
+      <p class="text-xs text-muted">
+        Embed a live status badge in a README or site. Markdown below;
+        the image updates on its own.{% if !enabled %} Goes live once the page is public.{% endif %}
+      </p>
+
+      <div class="flex items-center gap-3">
+        {% if enabled %}<img src="{{ badge }}" height="20" alt="overall status badge" class="block">{% endif %}
+        <code id="badge-md-overall" class="flex-1 overflow-x-auto whitespace-nowrap rounded bg-[color:var(--theme-surface-sunk)] px-2 py-1 font-mono text-xs text-body">![{% if public_display_name != "" %}{{ public_display_name }}{% else %}{{ name }}{% endif %} status]({{ badge }})</code>
+        <button type="button" data-copy="#badge-md-overall" class="sticker-btn shrink-0 px-2.5 py-1 text-xs"><span data-copy-label>copy</span></button>
+      </div>
+
+      {% for c in components %}{% if c.on_page %}
+      <div class="flex items-center gap-2 border-t border-[color:var(--theme-line)] pt-2">
+        <span class="w-28 shrink-0 truncate text-xs text-muted">{% if c.public_name != "" %}{{ c.public_name }}{% else %}{{ c.monitor_name }}{% endif %}</span>
+        <code id="badge-md-{{ loop.index }}" class="flex-1 overflow-x-auto whitespace-nowrap rounded bg-[color:var(--theme-surface-sunk)] px-2 py-1 font-mono text-xs text-body">![{% if c.public_name != "" %}{{ c.public_name }}{% else %}{{ c.monitor_name }}{% endif %}]({{ badge }}?component={{ c.target_id }})</code>
+        <button type="button" data-copy="#badge-md-{{ loop.index }}" class="sticker-btn shrink-0 px-2.5 py-1 text-xs"><span data-copy-label>copy</span></button>
+      </div>
+      {% endif %}{% endfor %}
+    </div>
+  </div>
+  <script defer src="{{ "js/public/copy.js"|asset }}"></script>
+  {% endif %}
+
   <script>
     (() => {
       const root = document.querySelector('[data-page-id]');

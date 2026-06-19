@@ -155,6 +155,9 @@ pub struct PageEditorPage {
     pub styles: Vec<StyleOption>,
     pub host_suffix: Option<String>,
     pub status_url: String,
+    /// Absolute base for the embeddable badge SVG. `None` only when no public
+    /// base URL is configured.
+    pub badge_url: Option<String>,
     pub logo_url: String,
     /// Intrinsic logo dims for CLS-safe `<img width height>`; 0 = no logo.
     pub logo_w: i64,
@@ -234,6 +237,22 @@ pub async fn page_editor(
         .as_deref()
         .map(|o| public_status_url(&state.cfg, o))
         .unwrap_or_default();
+    // Absolute origin for the badge: subdomain in SaaS mode, else the
+    // configured public base URL so path-based/self-host deploys still get a
+    // README-ready link.
+    let badge_origin = crate::web::host::page_origin(
+        &state.cfg.public_status.base_domain,
+        &state.cfg.auth.public_base_url,
+        &page.slug,
+        None,
+        false,
+    );
+    let badge_url = (!badge_origin.is_empty()).then(|| {
+        format!(
+            "{}/api/public/v1/badge.svg",
+            badge_origin.trim_end_matches('/')
+        )
+    });
     let logo_url = b
         .logo_hash
         .as_deref()
@@ -306,6 +325,7 @@ pub async fn page_editor(
         styles,
         host_suffix: public_host_suffix(&state.cfg),
         status_url,
+        badge_url,
         logo_url,
         logo_w,
         logo_h,
@@ -315,4 +335,59 @@ pub async fn page_editor(
         subscribers,
     }
     .into_response())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use askama::Template;
+
+    fn editor(badge_url: Option<String>) -> PageEditorPage {
+        PageEditorPage {
+            active_tab: TAB_PAGES,
+            id: "11111111-1111-1111-1111-111111111111".into(),
+            slug: "acme".into(),
+            name: "acme".into(),
+            enabled: true,
+            public_display_name: "Acme".into(),
+            public_about: String::new(),
+            brand_color_value: "#000000".into(),
+            show_powered_by: true,
+            styles: Vec::new(),
+            host_suffix: Some(".uptimepage.dev".into()),
+            status_url: "https://acme.uptimepage.dev".into(),
+            badge_url,
+            logo_url: String::new(),
+            logo_w: 0,
+            logo_h: 0,
+            max_logo_bytes: 1024,
+            max_logo_dim_px: 512,
+            components: vec![ComponentRow {
+                target_id: "22222222-2222-2222-2222-222222222222".into(),
+                monitor_name: "api".into(),
+                on_page: true,
+                public_name: "API".into(),
+                public_group: String::new(),
+            }],
+            subscribers: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn badge_panel_renders_overall_and_per_component_snippets() {
+        let html = editor(Some(
+            "https://acme.uptimepage.dev/api/public/v1/badge.svg".into(),
+        ))
+        .render()
+        .unwrap();
+        assert!(html.contains("https://acme.uptimepage.dev/api/public/v1/badge.svg"));
+        assert!(html.contains("?component=22222222-2222-2222-2222-222222222222"));
+        assert!(html.contains("data-copy=\"#badge-md-overall\""));
+    }
+
+    #[test]
+    fn badge_panel_absent_without_badge_url() {
+        let html = editor(None).render().unwrap();
+        assert!(!html.contains("/api/public/v1/badge.svg"));
+    }
 }
