@@ -30,6 +30,7 @@ pub struct SubscribeNotice {
     pub ok: bool,
     pub heading: String,
     pub message: String,
+    pub code: String,
 }
 
 impl SubscribeNotice {
@@ -38,6 +39,17 @@ impl SubscribeNotice {
             ok: true,
             heading: heading.into(),
             message: message.into(),
+            code: String::new(),
+        }
+        .into_response()
+    }
+
+    fn ok_with_code(heading: &str, message: &str, code: &str) -> Response {
+        SubscribeNotice {
+            ok: true,
+            heading: heading.into(),
+            message: message.into(),
+            code: code.into(),
         }
         .into_response()
     }
@@ -49,6 +61,7 @@ impl SubscribeNotice {
                 ok: false,
                 heading: heading.into(),
                 message: message.into(),
+                code: String::new(),
             },
         )
             .into_response()
@@ -292,11 +305,10 @@ async fn subscribe_webhook(
         .get("signing_secret")
         .and_then(|v| v.as_str())
         .unwrap_or(&secret);
-    Ok(SubscribeNotice::ok(
+    Ok(SubscribeNotice::ok_with_code(
         "Subscribed",
-        &format!(
-            "Your endpoint is verified. Save this signing secret to verify our requests: {shown}"
-        ),
+        "Your endpoint is verified. Save this signing secret — it signs our requests so you can verify them:",
+        shown,
     ))
 }
 
