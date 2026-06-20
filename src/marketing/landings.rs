@@ -376,6 +376,81 @@ pub const LANDINGS: &[Landing] = &[
         cta: "Start free with GitHub",
     },
     Landing {
+        path: "/vs/uptime-kuma",
+        title: "An Uptime Kuma Alternative You Run as Code",
+        eyebrow: "comparing open source",
+        h1: "Looking for an Uptime Kuma alternative?",
+        meta_description: "Open-source uptime monitoring and branded status pages, managed as code with Terraform, a REST API and MCP. Team roles and subscribers. Free to start, no card.",
+        lede: "Uptimepage is open source and does two jobs well: uptime monitoring and a public status page. Manage all of it as code, give your team roles, and let customers subscribe to status updates. Run the single binary yourself or use the free hosted tier. No card.",
+        features: &[
+            Feature {
+                label: "License",
+                value: "AGPL, self-host",
+            },
+            Feature {
+                label: "Manage as code",
+                value: "Terraform + REST API + MCP",
+            },
+            Feature {
+                label: "Teams",
+                value: "organizations, roles, invites",
+            },
+            Feature {
+                label: "Status pages",
+                value: "branded, with subscribers",
+            },
+            Feature {
+                label: "Stack",
+                value: "one binary + Postgres + ClickHouse",
+            },
+            Feature {
+                label: "Price to start",
+                value: "free, no card",
+            },
+        ],
+        sections: &[
+            Section {
+                heading: "everything as code",
+                body: "An official Terraform provider and a full REST API cover monitors, status pages and alert channels, and an MCP server lets an LLM client read your monitoring and take fenced, audited actions. Declare your monitoring in a repo and review changes in a pull request.",
+            },
+            Section {
+                heading: "status pages your customers subscribe to",
+                body: "Branded public pages on your own domain, with automatic incident detection, operator narration and maintenance windows. Visitors opt in with confirmed email or webhook and get notified on every change, with signed payloads they can verify.",
+            },
+            Section {
+                heading: "built for teams",
+                body: "Organizations with roles and invitations, isolated per tenant end to end. Run one instance for the whole team, or for every client, without sharing a single login.",
+            },
+            Section {
+                heading: "probes you own",
+                body: "Run regional probe agents on your own boxes, wherever your users are, and Uptimepage folds their results into each monitor's health per region. The data model, API and Terraform provider are identical hosted or self-hosted, so moving between them is just an endpoint change.",
+            },
+        ],
+        code: Some(CodeSample {
+            caption: "Declare a monitor in Terraform",
+            body: r#"resource "uptimepage_target" "api" {
+  name     = "api prod"
+  interval = 60
+
+  check = {
+    type = "http"
+    http = {
+      url = "https://example.com/healthz"
+      expected_status = {
+        kind  = "exact"
+        exact = 200
+      }
+    }
+  }
+}"#,
+        }),
+        resources: &[ResourceLink {
+            label: "Monitoring as code",
+            href: "/automation",
+        }],
+        cta: "Start free with GitHub",
+    },
+    Landing {
         path: "/automation",
         title: "Monitoring as Code: Terraform & MCP",
         eyebrow: "for developers & devops",
