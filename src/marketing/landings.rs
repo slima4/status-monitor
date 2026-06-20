@@ -22,7 +22,9 @@ use axum::routing::get;
 
 use super::config::{BRAND, MarketingCfg, TERRAFORM_URL};
 use super::pages::{CachedRender, cached_render, serve_cached};
-use super::seo::{JsonLd, OpenGraph, json_ld_breadcrumb};
+use super::seo::{
+    JsonLd, OpenGraph, json_ld_breadcrumb, json_ld_faqpage, json_ld_software_application,
+};
 use crate::web::filters;
 
 const LANDING_CACHE_CONTROL: HeaderValue =
@@ -625,8 +627,109 @@ struct LandingDoc {
     canonical_url: String,
     og: OpenGraph,
     breadcrumb_json_ld: JsonLd,
+    software_json_ld: JsonLd,
+    faq_json_ld: Option<JsonLd>,
+    faqs: &'static [(&'static str, &'static str)],
     app_url: String,
     version: &'static str,
+}
+
+/// Per-page FAQ for the comparison landings. Answers describe Uptimepage only,
+/// matching the neutral-comparison rule above; other pages render no FAQ.
+fn comparison_faqs(path: &str) -> &'static [(&'static str, &'static str)] {
+    match path {
+        "/vs/uptimerobot" => &[
+            (
+                "Is Uptimepage free?",
+                "Yes. The hosted tier is $0 a month with every feature and no credit card, and the AGPL source is free to self-host.",
+            ),
+            (
+                "Does it include a public status page?",
+                "It does: a branded status page on your own subdomain, with automatic incident detection, maintenance windows, and email or webhook subscribers.",
+            ),
+            (
+                "Can I manage monitors as code?",
+                "Yes. There is an official Terraform provider, a full REST API, and an MCP server, so you can declare monitors in a repo and review changes in a pull request.",
+            ),
+            (
+                "Can I self-host it?",
+                "Yes. `docker compose up` brings up the single binary with Postgres and ClickHouse, and migrations run on boot.",
+            ),
+        ],
+        "/vs/statuspage" => &[
+            (
+                "Does Uptimepage monitor as well as publish?",
+                "Yes. Uptime monitoring is built in, so incidents open automatically from real HTTP, TCP, DNS and TLS checks and flow straight onto the status page.",
+            ),
+            (
+                "Is a custom domain included?",
+                "Every org gets a branded subdomain out of the box, and a custom CNAME is on the way. Branding, logo and colours are included, not gated behind a higher tier.",
+            ),
+            (
+                "Is it free?",
+                "Yes: $0 a month, every feature, no credit card, and no per-page pricing. Self-hosting under AGPL is free as well.",
+            ),
+            (
+                "Can customers subscribe to updates?",
+                "They can. Visitors opt in with confirmed email or webhook and hear about every incident and maintenance change, with signed payloads they can verify.",
+            ),
+        ],
+        "/vs/better-stack" => &[
+            (
+                "Can I self-host Uptimepage?",
+                "Yes. It ships as one AGPL binary with Postgres and ClickHouse, so `docker compose up` puts it live with your data on your own boxes.",
+            ),
+            (
+                "Is there per-seat or per-monitor pricing?",
+                "No. One free plan covers every feature, with no credit card and no per-seat or per-monitor metering.",
+            ),
+            (
+                "Can I run it as code?",
+                "Yes. An official Terraform provider, a REST API, and an MCP server mean everything you can click, you can also declare.",
+            ),
+            (
+                "Does it do incident paging?",
+                "Yes. It pages your team on Slack, Telegram, WhatsApp, SMS, PagerDuty and more, and the reminders repeat until someone acknowledges.",
+            ),
+        ],
+        "/vs/oneuptime" => &[
+            (
+                "How heavy is Uptimepage to run?",
+                "It is one self-contained binary plus Postgres and ClickHouse. `docker compose up` brings the whole stack up, with no Kubernetes to operate.",
+            ),
+            (
+                "Is it open source?",
+                "Yes, AGPL. Run it yourself for free, or start on the free hosted tier with no card.",
+            ),
+            (
+                "Can I manage it as code?",
+                "Yes. An official Terraform provider, a REST API, and an MCP server share the same data model hosted or self-hosted.",
+            ),
+            (
+                "Does it include status pages and incidents?",
+                "It does: branded public status pages, automatic incident detection, maintenance windows, and email or webhook subscribers.",
+            ),
+        ],
+        "/vs/uptime-kuma" => &[
+            (
+                "Is Uptimepage a good Uptime Kuma alternative?",
+                "It covers the same self-hosted monitoring ground and adds config-as-code, organizations with roles, and subscriber status pages, as one binary or a free hosted tier.",
+            ),
+            (
+                "Can I manage monitors as code?",
+                "Yes. An official Terraform provider, a full REST API, and an MCP server let you declare monitors in a repo and review changes in a pull request.",
+            ),
+            (
+                "Does it support teams?",
+                "Yes. Organizations come with roles and invitations and are isolated per tenant, so nobody shares a single login.",
+            ),
+            (
+                "Is it free to self-host?",
+                "Yes. The AGPL source runs with `docker compose up` on Postgres and ClickHouse, and the hosted tier is $0 a month.",
+            ),
+        ],
+        _ => &[],
+    }
 }
 
 static RENDERED: OnceLock<HashMap<&'static str, CachedRender>> = OnceLock::new();
@@ -639,6 +742,7 @@ fn render_all(cfg: &MarketingCfg) -> HashMap<&'static str, CachedRender> {
             let title = format!("{} — {BRAND}", l.title);
             let mut og = OpenGraph::default_for(&title, &canonical_url);
             og.description = l.meta_description.to_string();
+            let faqs = comparison_faqs(l.path);
             let doc = LandingDoc {
                 title,
                 eyebrow: l.eyebrow,
@@ -652,6 +756,9 @@ fn render_all(cfg: &MarketingCfg) -> HashMap<&'static str, CachedRender> {
                 canonical_url,
                 og,
                 breadcrumb_json_ld: json_ld_breadcrumb(&cfg.canonical_origin, l.h1, l.path),
+                software_json_ld: json_ld_software_application(&cfg.canonical_origin),
+                faq_json_ld: (!faqs.is_empty()).then(|| json_ld_faqpage(faqs)),
+                faqs,
                 app_url: cfg.app_url.clone(),
                 version: env!("CARGO_PKG_VERSION"),
             };
@@ -702,6 +809,17 @@ mod tests {
         for l in LANDINGS {
             assert!(l.path.starts_with('/'), "{} must be absolute", l.path);
             assert!(seen.insert(l.path), "duplicate path {}", l.path);
+        }
+    }
+
+    #[test]
+    fn comparison_pages_carry_faqs() {
+        for l in LANDINGS.iter().filter(|l| l.path.starts_with("/vs/")) {
+            assert!(
+                !comparison_faqs(l.path).is_empty(),
+                "{} missing comparison FAQ",
+                l.path
+            );
         }
     }
 

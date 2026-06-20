@@ -3,6 +3,8 @@
 {% block description %}{{ og.description }}{% endblock %}
 {% block head %}
 <script type="application/ld+json">{{ breadcrumb_json_ld.as_str()|safe }}</script>
+<script type="application/ld+json">{{ software_json_ld.as_str()|safe }}</script>
+{% if let Some(faq) = faq_json_ld %}<script type="application/ld+json">{{ faq.as_str()|safe }}</script>{% endif %}
 {% endblock %}
 {% block content %}
 <div class="space-y-20 sm:space-y-24">
@@ -59,6 +61,20 @@
             </li>
             {% endfor %}
         </ul>
+    </section>
+    {% endif %}
+
+    {% if !faqs.is_empty() %}
+    <section class="mx-auto max-w-3xl space-y-6">
+        <h2 class="mk-h2 text-center">FAQ</h2>
+        <div>
+            {% for faq in faqs %}
+            <details class="mk-faq">
+                <summary>{{ faq.0 }}</summary>
+                <div class="mk-faq__body">{{ faq.1|safe }}</div>
+            </details>
+            {% endfor %}
+        </div>
     </section>
     {% endif %}
 
