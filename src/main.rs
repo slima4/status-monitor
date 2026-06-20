@@ -117,6 +117,16 @@ async fn main() -> Result<()> {
     // reaches the sampler/transport.
     cfg.validate_observability()?;
     let tracing_guard = observability::tracing::init(&cfg.observability);
+
+    // Operator subcommands run against Postgres only, then exit — before any
+    // server-only validation or the brain/agent split.
+    if std::env::args().nth(1).as_deref() == Some("bootstrap-owner") {
+        let args = uptimepage::bootstrap::parse_args(std::env::args().skip(2))?;
+        let result = uptimepage::bootstrap::run_owner(&cfg, &args).await;
+        drop(tracing_guard);
+        return result;
+    }
+
     uptimepage::app::assert_per_org_status_config(&cfg);
     uptimepage::app::assert_mcp_oauth_config(&cfg);
     // A bad quota/rate/interval number is a clean startup config error,

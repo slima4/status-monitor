@@ -1,0 +1,196 @@
+//! Operator CLI to seed the first owner on a fresh instance. Sign-in providers
+//! (OAuth, magic-link) all assume an account already exists or an inviter to
+//! carry a token; this creates that initial account + org out of band and mints
+//! a full-access API token so a self-hosted deployment is usable before any
+//! provider is wired up.
+
+use anyhow::Context;
+
+use crate::auth::scope::ScopeSet;
+use crate::auth::url::token_link;
+use crate::auth::{api_tokens, magic_link};
+use crate::config::AppConfig;
+use crate::domain::generate_signup_slug;
+use crate::error::{AppError, Result};
+use crate::storage::{PostgresTargetStore, orgs, users};
+
+const USAGE: &str = "usage: uptimepage bootstrap-owner --email <addr> [--org-name <name>]";
+
+/// Parsed `bootstrap-owner` arguments.
+pub struct BootstrapArgs {
+    pub email: String,
+    pub org_name: String,
+}
+
+/// Parses the flags following the `bootstrap-owner` subcommand. Accepts both
+/// `--flag value` and `--flag=value`.
+pub fn parse_args(raw: impl IntoIterator<Item = String>) -> Result<BootstrapArgs> {
+    let args: Vec<String> = raw.into_iter().collect();
+    let mut email = None;
+    let mut org_name = None;
+    let mut i = 0;
+    while i < args.len() {
+        let (key, inline) = match args[i].strip_prefix("--") {
+            Some(rest) => match rest.split_once('=') {
+                Some((k, v)) => (k.to_string(), Some(v.to_string())),
+                None => (rest.to_string(), None),
+            },
+            None => return Err(bad_usage(format!("unexpected argument {:?}", args[i]))),
+        };
+        let value = match inline {
+            Some(v) => v,
+            None => {
+                i += 1;
+                args.get(i)
+                    .cloned()
+                    .ok_or_else(|| bad_usage(format!("--{key} needs a value")))?
+            }
+        };
+        match key.as_str() {
+            "email" => email = Some(value),
+            "org-name" => org_name = Some(value),
+            other => return Err(bad_usage(format!("unknown flag --{other}"))),
+        }
+        i += 1;
+    }
+
+    let email = email.ok_or_else(|| bad_usage("--email is required"))?;
+    if !email.contains('@') {
+        return Err(bad_usage(format!("{email:?} is not an email address")));
+    }
+    Ok(BootstrapArgs {
+        email,
+        org_name: org_name.unwrap_or_else(|| "My Org".to_string()),
+    })
+}
+
+fn bad_usage(msg: impl std::fmt::Display) -> AppError {
+    AppError::Other(anyhow::anyhow!("{msg}\n{USAGE}"))
+}
+
+/// Creates (or reuses) the owner account named by `email`, ensures it owns an
+/// org, and prints a fresh full-access token. Idempotent on the account and
+/// org; each run mints a new token.
+pub async fn run_owner(cfg: &AppConfig, args: &BootstrapArgs) -> Result<()> {
+    let pool = PostgresTargetStore::connect_pool(&cfg.storage.postgres).await?;
+
+    let (user, _) = users::create_invited_user(&pool, &args.email).await?;
+
+    let org = match orgs::oldest_membership_for_user(&pool, user).await? {
+        Some(existing) => existing,
+        None => {
+            let mut created = None;
+            for _ in 0..8 {
+                let slug = generate_signup_slug();
+                if let Some(org) =
+                    orgs::create_org_with_owner(&pool, user, &slug, &args.org_name, u32::MAX)
+                        .await?
+                {
+                    created = Some(org.id);
+                    break;
+                }
+            }
+            created.context("bootstrap-owner: could not allocate a unique org slug")?
+        }
+    };
+
+    let token = api_tokens::create(
+        &pool,
+        user,
+        "bootstrap",
+        &ScopeSet::full_access(),
+        Some(org),
+        None,
+        cfg.auth.api_tokens.prefix_visible_chars as usize,
+        i64::MAX,
+    )
+    .await?;
+
+    let slug = orgs::get_org(&pool, org)
+        .await?
+        .map(|o| o.slug)
+        .unwrap_or_default();
+
+    // A fresh instance has no configured OAuth provider and the dev mailer
+    // redacts links, so mint a one-time sign-in URL the operator can open
+    // directly. The verify route logs the existing owner straight in.
+    let web_login = if cfg.auth.magic_link_enabled() {
+        let expiry = cfg.auth.magic_link.expiry_minutes;
+        let link = magic_link::create(&pool, &args.email, None, expiry, None, None).await?;
+        Some((
+            token_link(
+                &cfg.auth.public_base_url,
+                "/auth/magic-link/verify",
+                &link.token,
+            ),
+            expiry,
+        ))
+    } else {
+        None
+    };
+
+    // stdout, shown once: the credentials must stay copyable and out of the logs.
+    println!();
+    println!("Owner account ready.");
+    println!("  email: {}", args.email);
+    println!("  org:   {slug}");
+    println!();
+    match &web_login {
+        Some((url, expiry)) => {
+            println!("Web dashboard — open this link to sign in (expires in {expiry} min):");
+            println!("  {url}");
+        }
+        None => {
+            println!("Web dashboard — enable a sign-in provider (GitHub/Google OAuth or");
+            println!("  magic_link in auth.enabled_methods) to sign in.");
+        }
+    }
+    println!();
+    println!("API access — full-access token (shown once):");
+    println!("  {}", token.token);
+    println!();
+    println!("  curl -H 'authorization: Bearer {}' \\", token.token);
+    println!("       -H 'x-uptimepage-org: {slug}' \\");
+    println!("       http://127.0.0.1:8080/api/v1/targets");
+    println!();
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_args;
+
+    fn args(parts: &[&str]) -> Vec<String> {
+        parts.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn parses_space_and_equals_forms() {
+        let a = parse_args(args(&["--email", "a@b.com", "--org-name", "Acme"])).unwrap();
+        assert_eq!(a.email, "a@b.com");
+        assert_eq!(a.org_name, "Acme");
+
+        let b = parse_args(args(&["--email=a@b.com", "--org-name=Acme Inc"])).unwrap();
+        assert_eq!(b.email, "a@b.com");
+        assert_eq!(b.org_name, "Acme Inc");
+    }
+
+    #[test]
+    fn org_name_defaults() {
+        let a = parse_args(args(&["--email", "a@b.com"])).unwrap();
+        assert_eq!(a.org_name, "My Org");
+    }
+
+    #[test]
+    fn rejects_missing_or_malformed_email() {
+        assert!(parse_args(args(&["--org-name", "Acme"])).is_err());
+        assert!(parse_args(args(&["--email", "not-an-email"])).is_err());
+        assert!(parse_args(args(&["--email"])).is_err());
+    }
+
+    #[test]
+    fn rejects_unknown_flag_and_stray_arg() {
+        assert!(parse_args(args(&["--email", "a@b.com", "--bogus", "x"])).is_err());
+        assert!(parse_args(args(&["positional"])).is_err());
+    }
+}

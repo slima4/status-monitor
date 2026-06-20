@@ -34,6 +34,11 @@ services:
       nofile:
         soft: 262144
         hard: 262144
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--user", "monitor", "--password", "monitor", "--query", "SELECT 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
 
   uptimepage:
     build:
@@ -42,12 +47,14 @@ services:
       postgres:
         condition: service_healthy
       clickhouse:
-        condition: service_started
+        condition: service_healthy
     environment:
       UPTIMEPAGE_STORAGE__POSTGRES__URL: postgres://monitor:monitor@postgres:5432/monitor
       UPTIMEPAGE_STORAGE__CLICKHOUSE__URL: http://clickhouse:8123
       UPTIMEPAGE_STORAGE__CLICKHOUSE__USER: monitor
       UPTIMEPAGE_STORAGE__CLICKHOUSE__PASSWORD: monitor
+      UPTIMEPAGE_AUTH__FINGERPRINT_SALT: dev-only-fingerprint-salt-change-me
+      UPTIMEPAGE_AUTH__SESSION__COOKIE_SECURE: "false"
       UPTIMEPAGE_OBSERVABILITY__LOG_FORMAT: json
       UPTIMEPAGE_OBSERVABILITY__LOG_LEVEL: "uptimepage=debug,sqlx=warn,hyper=warn,tower_http=info,info"
     ports:

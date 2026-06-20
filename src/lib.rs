@@ -3,6 +3,7 @@ pub mod agent;
 pub mod api;
 pub mod app;
 pub mod auth;
+pub mod bootstrap;
 pub mod config;
 pub mod domain;
 pub mod email;

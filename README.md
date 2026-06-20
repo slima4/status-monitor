@@ -162,12 +162,20 @@ An [MCP](https://modelcontextprotocol.io) server lets an LLM client (the claude.
 docker compose up -d
 ```
 
-Brings up Postgres 17, ClickHouse 26.3, and the monitor. Migrations for both databases run at process startup — no init-script wiring, no external migrator.
+Brings up Postgres 18, ClickHouse 26.3, and the monitor. Migrations for both databases run at process startup — no init-script wiring, no external migrator.
 
-Create a target:
+Create the first owner account (the sign-in providers all assume an account already exists, so seed one out of band):
+
+```bash
+docker compose exec uptimepage uptimepage bootstrap-owner --email you@example.com
+```
+
+It prints, shown only once: a one-time link that signs you straight into the web dashboard, and a full-access API token plus the org slug. Open the link to reach the dashboard; use the token for the API. Create a target:
 
 ```bash
 curl -X POST http://127.0.0.1:8080/api/v1/targets \
+  -H 'authorization: Bearer <token>' \
+  -H 'x-uptimepage-org: <org-slug>' \
   -H 'content-type: application/json' \
   -d '{
     "name": "example",
@@ -191,9 +199,12 @@ curl -X POST http://127.0.0.1:8080/api/v1/targets \
 Read uptime, scrape metrics:
 
 ```bash
-curl http://127.0.0.1:8080/api/v1/targets/<id>/uptime
+curl -H 'authorization: Bearer <token>' -H 'x-uptimepage-org: <org-slug>' \
+  http://127.0.0.1:8080/api/v1/targets/<id>/uptime
 curl http://127.0.0.1:9090/metrics
 ```
+
+The bootstrap link signs you in once. For ongoing sign-in — and for inviting a team — configure a sign-in provider: GitHub or Google OAuth, or a real email provider for magic links (`[auth.github]` / `[auth.google]` / `[email]` in `config/default.toml`, or the matching env vars). See [docs/authentication.md](docs/authentication.md).
 
 ### Production deployment
 
@@ -206,7 +217,13 @@ cargo build --release
 ./target/release/uptimepage
 ```
 
-Requires Postgres and ClickHouse reachable at the URLs in `config/default.toml`. To run against the compose stack without rebuilding the container:
+Requires Postgres and ClickHouse reachable at the URLs in `config/default.toml`, plus a non-empty fingerprint salt (the app refuses to boot without one):
+
+```bash
+export UPTIMEPAGE_AUTH__FINGERPRINT_SALT=$(openssl rand -base64 32)
+```
+
+To run against the compose stack without rebuilding the container:
 
 ```bash
 docker compose up -d postgres clickhouse
