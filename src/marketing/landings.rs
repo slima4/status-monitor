@@ -168,6 +168,131 @@ pub const LANDINGS: &[Landing] = &[
         cta: "Start free with GitHub",
     },
     Landing {
+        path: "/open-source-status-page",
+        title: "Open-Source Status Page with Built-in Monitoring",
+        eyebrow: "open source",
+        h1: "An open-source status page",
+        meta_description: "An open-source status page with built-in uptime monitoring. Branded pages, subscribers, incidents and maintenance. AGPL, free, self-host or hosted.",
+        lede: "Uptimepage is an AGPL status page with the monitoring built in. Publish a branded page on your own subdomain, let customers subscribe, and run it yourself or on the free hosted tier.",
+        features: &[
+            Feature {
+                label: "License",
+                value: "AGPL, self-host",
+            },
+            Feature {
+                label: "Status page",
+                value: "branded, subscribers",
+            },
+            Feature {
+                label: "Monitoring",
+                value: "built in",
+            },
+            Feature {
+                label: "Subscribers",
+                value: "email + webhook",
+            },
+            Feature {
+                label: "Stack",
+                value: "one binary + Postgres + ClickHouse",
+            },
+            Feature {
+                label: "Price to start",
+                value: "free, no card",
+            },
+        ],
+        sections: &[
+            Section {
+                heading: "a status page, not a toy",
+                body: "Branded public pages on your own domain, a 90-day history strip, incident timelines and scheduled maintenance windows. Customers see the truth without you standing up a second tool.",
+            },
+            Section {
+                heading: "monitoring is built in",
+                body: "Incidents open automatically from real HTTP, TCP, DNS and TLS checks and flow straight onto the page. There is no separate monitor to wire up and keep in sync.",
+            },
+            Section {
+                heading: "open source, your way",
+                body: "The source is AGPL. Run docker compose up with Postgres and ClickHouse on your own boxes, or start on the free hosted tier. The API and Terraform provider are the same either way.",
+            },
+        ],
+        code: None,
+        resources: &[
+            ResourceLink {
+                label: "Status page for SaaS",
+                href: "/status-page-for-saas",
+            },
+            ResourceLink {
+                label: "vs Statuspage",
+                href: "/vs/statuspage",
+            },
+        ],
+        cta: "Start free with GitHub",
+    },
+    Landing {
+        path: "/self-hosted-status-page",
+        title: "Self-Hosted Status Page & Uptime Monitoring",
+        eyebrow: "run it yourself",
+        h1: "A self-hosted status page and uptime monitor",
+        meta_description: "Self-hosted uptime monitoring and status pages in one AGPL binary. docker compose up with Postgres and ClickHouse. Multi-region, free, your data on your boxes.",
+        lede: "Run the whole thing yourself: monitoring, incidents and a public status page in one self-contained binary. docker compose up and you are live, with your data on your own infrastructure.",
+        features: &[
+            Feature {
+                label: "License",
+                value: "AGPL, self-host",
+            },
+            Feature {
+                label: "Deploy",
+                value: "docker compose up",
+            },
+            Feature {
+                label: "Stack",
+                value: "one binary + Postgres + ClickHouse",
+            },
+            Feature {
+                label: "Probes",
+                value: "regional agents you run",
+            },
+            Feature {
+                label: "As code",
+                value: "Terraform + REST + MCP",
+            },
+            Feature {
+                label: "Price to start",
+                value: "free, AGPL",
+            },
+        ],
+        sections: &[
+            Section {
+                heading: "up with one command",
+                body: "One self-contained binary, Postgres for config and ClickHouse for the time-series. docker compose up brings the whole stack up with migrations applied on boot. Nothing else to operate, no Kubernetes.",
+            },
+            Section {
+                heading: "your data on your boxes",
+                body: "Run it on your own infrastructure, in your own region, behind your own network. Nothing leaves your environment, and the public status page serves straight from it.",
+            },
+            Section {
+                heading: "probes you own",
+                body: "Run regional probe agents wherever your users are and fold their results into each monitor per region. Hosted or self-hosted, the data model, API and Terraform provider are identical.",
+            },
+        ],
+        code: Some(CodeSample {
+            caption: "Bring the stack up",
+            body: r#"git clone https://github.com/uptimepage/uptimepage
+cd uptimepage
+docker compose up -d"#,
+        }),
+        resources: &[
+            ResourceLink {
+                label: "vs Uptime Kuma",
+                href: "/vs/uptime-kuma",
+            },
+            ResourceLink {
+                label: "Monitoring as code",
+                href: "/automation",
+            },
+        ],
+        cta: "Start free with GitHub",
+    },
+    Landing {
         path: "/vs/uptimerobot",
         title: "An UptimeRobot Alternative with Built-in Status Pages",
         eyebrow: "switching monitors",
@@ -638,10 +763,46 @@ struct LandingDoc {
     version: &'static str,
 }
 
-/// Per-page FAQ for the comparison landings. Answers describe Uptimepage only,
-/// matching the neutral-comparison rule above; other pages render no FAQ.
-fn comparison_faqs(path: &str) -> &'static [(&'static str, &'static str)] {
+/// Per-page FAQ for the landings that have one; others render no FAQ. Comparison
+/// answers describe Uptimepage only, matching the neutral-comparison rule above.
+fn page_faqs(path: &str) -> &'static [(&'static str, &'static str)] {
     match path {
+        "/open-source-status-page" => &[
+            (
+                "Is the status page really open source?",
+                "Yes. Uptimepage is AGPL, so you can read the source, run it, and modify it. The hosted tier is $0 a month if you would rather not host it.",
+            ),
+            (
+                "Does it monitor, or just publish?",
+                "Both. Uptime monitoring is built in, so incidents open automatically from real HTTP, TCP, DNS and TLS checks and appear on the page without a second tool.",
+            ),
+            (
+                "Can customers subscribe to updates?",
+                "Yes. Visitors opt in with confirmed email or webhook and hear about every incident and maintenance change, with signed payloads they can verify.",
+            ),
+            (
+                "Can I self-host it?",
+                "Yes. `docker compose up` brings up the binary with Postgres and ClickHouse on your own boxes, with migrations applied on boot.",
+            ),
+        ],
+        "/self-hosted-status-page" => &[
+            (
+                "How do I deploy it?",
+                "Clone the repo and run `docker compose up`. That starts the single binary with Postgres and ClickHouse, runs migrations on boot, and serves the dashboard and public status page.",
+            ),
+            (
+                "Where does my data live?",
+                "On your own infrastructure. Self-hosting keeps every check result, incident and subscriber in your environment, and the public page serves straight from it.",
+            ),
+            (
+                "Can I monitor from more than one region?",
+                "Yes. Run regional probe agents on your own boxes and Uptimepage folds their results into each monitor per region.",
+            ),
+            (
+                "Is it free?",
+                "Yes. The source is AGPL and free to self-host, and the hosted tier is $0 a month if you prefer not to run it.",
+            ),
+        ],
         "/vs/uptimerobot" => &[
             (
                 "Is Uptimepage free?",
@@ -746,7 +907,7 @@ fn render_all(cfg: &MarketingCfg) -> HashMap<&'static str, CachedRender> {
             let title = format!("{} — {BRAND}", l.title);
             let mut og = OpenGraph::default_for(&title, &canonical_url);
             og.description = l.meta_description.to_string();
-            let faqs = comparison_faqs(l.path);
+            let faqs = page_faqs(l.path);
             let doc = LandingDoc {
                 title,
                 eyebrow: l.eyebrow,
@@ -832,7 +993,7 @@ mod tests {
     fn comparison_pages_carry_faqs() {
         for l in LANDINGS.iter().filter(|l| l.path.starts_with("/vs/")) {
             assert!(
-                !comparison_faqs(l.path).is_empty(),
+                !page_faqs(l.path).is_empty(),
                 "{} missing comparison FAQ",
                 l.path
             );
