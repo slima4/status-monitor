@@ -53,7 +53,7 @@ struct LandingPage {
 const FAQS: &[(&str, &str)] = &[
     (
         "Is there really no charge?",
-        "Correct — $0 / month, every feature, no credit card. There is no paid \
+        "Correct: $0 / month, every feature, no credit card. There is no paid \
          tier today; if one ever arrives, anyone who signed up keeps the plan \
          they have.",
     ),
@@ -61,7 +61,7 @@ const FAQS: &[(&str, &str)] = &[
         "Can I use my own domain for the status page?",
         "Every org gets <code class=\"mk-chip\" translate=\"no\">your-org.uptimepage.dev</code> \
          out of the box. A custom CNAME (<code class=\"mk-chip\" translate=\"no\">status.yourcompany.com</code>) \
-         is coming — drop a line if you need it sooner.",
+         is coming. Drop a line if you need it sooner.",
     ),
     (
         "What kinds of monitors are supported?",
@@ -72,7 +72,7 @@ const FAQS: &[(&str, &str)] = &[
     (
         "Where do alerts come from?",
         "Slack, Discord, Teams, Telegram, email, PagerDuty, ntfy, Pushover, \
-         WhatsApp, or any HTTPS webhook. Each monitor binds its own channels — \
+         WhatsApp, or any HTTPS webhook. Each monitor binds its own channels, so \
          a marketing-site flap doesn’t page on-call.",
     ),
     (

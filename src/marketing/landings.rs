@@ -79,7 +79,7 @@ pub const LANDINGS: &[Landing] = &[
         eyebrow: "for saas teams",
         h1: "A status page your SaaS customers actually trust",
         meta_description: "Public status pages and 60-second uptime monitoring for SaaS teams. HTTP, TCP, DNS, TLS checks, Slack, email and webhook alerts, 90-day history. Free to start.",
-        lede: "Monitor every dependency, open incidents automatically, and show customers a branded status page on your own subdomain — without standing up a status tool of your own.",
+        lede: "Monitor every dependency, open incidents automatically, and show customers a branded status page on your own subdomain, without standing up a status tool of your own.",
         features: &[
             Feature {
                 label: "Check interval",
@@ -126,7 +126,7 @@ pub const LANDINGS: &[Landing] = &[
         eyebrow: "for agencies",
         h1: "One account. A branded status page for every client.",
         meta_description: "Monitor every client site and give each a branded status page from one account. 60s checks, Slack, email and webhook alerts. Free to start.",
-        lede: "Watch all your clients’ sites from a single dashboard and hand each one a status URL on its own subdomain — no per-client tool, no per-client invoice.",
+        lede: "Watch all your clients’ sites from a single dashboard and hand each one a status URL on its own subdomain, with no per-client tool and no per-client invoice.",
         features: &[
             Feature {
                 label: "Clients per account",
@@ -173,7 +173,7 @@ pub const LANDINGS: &[Landing] = &[
         eyebrow: "switching monitors",
         h1: "Looking for an UptimeRobot alternative?",
         meta_description: "Comparing uptime monitors? Uptimepage pairs 60s HTTP, TCP, DNS and TLS checks with branded status pages and Slack, email and webhook alerts. Free to start.",
-        lede: "If you are weighing your options, here is what Uptimepage gives you out of the box. Everything below is on the free tier — no card, sign in with GitHub.",
+        lede: "If you are weighing your options, here is what Uptimepage gives you out of the box. Everything below is on the free tier, no card, sign in with GitHub.",
         features: &[
             Feature {
                 label: "Check interval",
@@ -207,7 +207,7 @@ pub const LANDINGS: &[Landing] = &[
             },
             Section {
                 heading: "checks that explain themselves",
-                body: "HTTP, TCP, DNS and TLS, every minute. When something is slow, the timing is split across DNS, connect, TLS and time-to-first-byte — so you see why, not just that.",
+                body: "HTTP, TCP, DNS and TLS, every minute. When something is slow, the timing is split across DNS, connect, TLS and time-to-first-byte, so you see why, not just that.",
             },
             Section {
                 heading: "alerts tuned for humans",
@@ -458,7 +458,7 @@ pub const LANDINGS: &[Landing] = &[
         eyebrow: "for developers & devops",
         h1: "Run your monitoring from code, not clicks",
         meta_description: "Manage Uptimepage monitors, status pages and alerts as code with the Terraform provider, and connect any LLM over MCP. Free to start, no card.",
-        lede: "Everything you can click in Uptimepage you can declare in code. Provision monitors and status pages with the Terraform provider, and let an AI assistant read your monitoring over MCP — same tenant isolation, scopes and rate limits as the dashboard.",
+        lede: "Everything you can click in Uptimepage you can declare in code. Provision monitors and status pages with the Terraform provider, and let an AI assistant read your monitoring over MCP, with the same tenant isolation, scopes and rate limits as the dashboard.",
         features: &[
             Feature {
                 label: "Terraform provider",
@@ -492,11 +492,11 @@ pub const LANDINGS: &[Landing] = &[
             },
             Section {
                 heading: "ask an assistant what’s broken",
-                body: "The MCP server lets an LLM client — Claude, an IDE, anything that speaks MCP — read your monitors and incidents and take tightly-fenced actions. It runs inside the same app, so the scope checks and rate limits that guard your data guard the assistant’s access too.",
+                body: "The MCP server lets an LLM client (Claude, an IDE, anything that speaks MCP) read your monitors and incidents and take tightly-fenced actions. It runs inside the same app, so the scope checks and rate limits that guard your data guard the assistant’s access too.",
             },
             Section {
                 heading: "tokens that do one job",
-                body: "Automation authenticates with scoped API tokens: resource-and-action permissions, bound to one org, with an enforced expiry. Mint a read-only token for a dashboard or a write-scoped one for Terraform — never an all-or-nothing key.",
+                body: "Automation authenticates with scoped API tokens: resource-and-action permissions, bound to one org, with an enforced expiry. Mint a read-only token for a dashboard or a write-scoped one for Terraform, never an all-or-nothing key.",
             },
         ],
         code: Some(CodeSample {
@@ -541,9 +541,9 @@ resource "uptimepage_target" "api" {
         path: "/mcp-server",
         title: "MCP Server for Uptime Monitoring",
         eyebrow: "for ai & llm workflows",
-        h1: "Ask an AI what’s broken — over MCP",
+        h1: "Ask an AI what’s broken, over MCP",
         meta_description: "Connect any LLM to your uptime monitoring over MCP. Read monitors and incidents, take fenced actions, one-click OAuth. Free to start, no card.",
-        lede: "Point a Model Context Protocol client — Claude, an IDE, anything that speaks MCP — at your monitoring and ask it what’s down in plain language. Read tools answer from your real monitors; write tools take action only behind your explicit approval. Same tenant isolation, scopes and rate limits as the dashboard.",
+        lede: "Point a Model Context Protocol client (Claude, an IDE, anything that speaks MCP) at your monitoring and ask it what’s down in plain language. Read tools answer from your real monitors; write tools take action only behind your explicit approval. Same tenant isolation, scopes and rate limits as the dashboard.",
         features: &[
             Feature {
                 label: "MCP endpoint",
@@ -555,7 +555,7 @@ resource "uptimepage_target" "api" {
             },
             Feature {
                 label: "Tools",
-                value: "13 — read + fenced writes",
+                value: "13 (read + fenced writes)",
             },
             Feature {
                 label: "Every write",
@@ -573,15 +573,15 @@ resource "uptimepage_target" "api" {
         sections: &[
             Section {
                 heading: "ask your monitoring in plain language",
-                body: "Read tools hand the model the same forensics a good engineer reaches for: which monitor is down and since when, an incident’s full timeline, and why a check is slow — DNS, connect, TLS handshake and time-to-first-byte reported separately, so “slow because TLS” and “slow because DNS” come back as different answers.",
+                body: "Read tools hand the model the same forensics a good engineer reaches for: which monitor is down and since when, an incident’s full timeline, and why a check is slow: DNS, connect, TLS handshake and time-to-first-byte reported separately, so “slow because TLS” and “slow because DNS” come back as different answers.",
             },
             Section {
                 heading: "actions stay behind a human",
-                body: "Most tools can only look. The few that act — run a check, pause or resume a monitor, post to an incident — can’t fire without a scoped token, your in-the-moment approval naming the exact effect, and an audit row for every outcome. There is no “remember my choice.”",
+                body: "Most tools can only look. The few that act (run a check, pause or resume a monitor, post to an incident) can’t fire without a scoped token, your in-the-moment approval naming the exact effect, and an audit row for every outcome. There is no “remember my choice.”",
             },
             Section {
                 heading: "your data can’t hijack the assistant",
-                body: "A monitor name or scraped error text is written by someone else, and now an LLM is reading it. Every piece of customer-supplied text reaches the model labelled as data to report, never instructions to act on — and even a fooled model still can’t act without your out-of-band approval.",
+                body: "A monitor name or scraped error text is written by someone else, and now an LLM is reading it. Every piece of customer-supplied text reaches the model labelled as data to report, never instructions to act on. Even a fooled model still can’t act without your out-of-band approval.",
             },
             Section {
                 heading: "one-click OAuth, no copy-paste",
