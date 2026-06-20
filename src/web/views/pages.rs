@@ -121,9 +121,33 @@ pub async fn pages_partial(
 pub struct ComponentRow {
     pub target_id: String,
     pub monitor_name: String,
+    pub kind: &'static str,
+    pub name_hint: &'static str,
     pub on_page: bool,
     pub public_name: String,
     pub public_group: String,
+}
+
+fn kind_label(kind: &str) -> &'static str {
+    match kind {
+        "http" => "HTTP",
+        "tcp" => "TCP",
+        "dns" => "DNS",
+        "tls_cert" => "TLS",
+        "domain_expiry" => "Domain",
+        _ => "Check",
+    }
+}
+
+fn name_hint(kind: &str) -> &'static str {
+    match kind {
+        "http" => "e.g. Website",
+        "tcp" => "e.g. TCP port",
+        "dns" => "e.g. DNS",
+        "tls_cert" => "e.g. TLS certificate",
+        "domain_expiry" => "e.g. Domain expiry",
+        _ => "Public display name",
+    }
 }
 
 pub struct StyleOption {
@@ -197,20 +221,9 @@ pub async fn page_editor(
         .list_components(org, page_id)
         .await?;
     let on_page: std::collections::HashSet<Uuid> = curated.iter().map(|c| c.target_id).collect();
-    let mut rows: Vec<ComponentRow> = curated
-        .iter()
-        .map(|c| ComponentRow {
-            target_id: c.target_id.to_string(),
-            monitor_name: c.monitor_name.clone(),
-            on_page: true,
-            public_name: c.public_name.clone().unwrap_or_default(),
-            public_group: c.public_group.clone().unwrap_or_default(),
-        })
-        .collect();
-    // The editor curates from the org's full monitor set, so pull every
-    // target — the default filter caps at 100, which would silently hide
-    // monitors past that from large orgs.
-    let mut others = state
+    // Pull every target: the default filter caps at 100, which would silently
+    // hide monitors past that from large orgs.
+    let all_targets = state
         .target_store
         .list(
             org,
@@ -220,14 +233,39 @@ pub async fn page_editor(
             },
         )
         .await?;
-    others.retain(|t| !on_page.contains(&t.id));
+    let kind_by_id: std::collections::HashMap<Uuid, &'static str> =
+        all_targets.iter().map(|t| (t.id, t.check.kind())).collect();
+    let mut rows: Vec<ComponentRow> = curated
+        .iter()
+        .map(|c| {
+            let kind = kind_by_id.get(&c.target_id).copied().unwrap_or("");
+            ComponentRow {
+                target_id: c.target_id.to_string(),
+                monitor_name: c.monitor_name.clone(),
+                kind: kind_label(kind),
+                name_hint: name_hint(kind),
+                on_page: true,
+                public_name: c.public_name.clone().unwrap_or_default(),
+                public_group: c.public_group.clone().unwrap_or_default(),
+            }
+        })
+        .collect();
+    let mut others: Vec<_> = all_targets
+        .into_iter()
+        .filter(|t| !on_page.contains(&t.id))
+        .collect();
     others.sort_by_key(|t| t.name.to_lowercase());
-    rows.extend(others.into_iter().map(|t| ComponentRow {
-        target_id: t.id.to_string(),
-        monitor_name: t.name,
-        on_page: false,
-        public_name: String::new(),
-        public_group: String::new(),
+    rows.extend(others.into_iter().map(|t| {
+        let kind = t.check.kind();
+        ComponentRow {
+            kind: kind_label(kind),
+            name_hint: name_hint(kind),
+            target_id: t.id.to_string(),
+            monitor_name: t.name,
+            on_page: false,
+            public_name: String::new(),
+            public_group: String::new(),
+        }
     }));
 
     let cfg = &state.cfg.public_status;
@@ -365,6 +403,8 @@ mod tests {
             components: vec![ComponentRow {
                 target_id: "22222222-2222-2222-2222-222222222222".into(),
                 monitor_name: "api".into(),
+                kind: "HTTP",
+                name_hint: "e.g. Website",
                 on_page: true,
                 public_name: "API".into(),
                 public_group: String::new(),
@@ -383,6 +423,12 @@ mod tests {
         assert!(html.contains("https://acme.uptimepage.dev/api/public/v1/badge.svg"));
         assert!(html.contains("?component=22222222-2222-2222-2222-222222222222"));
         assert!(html.contains("data-copy=\"#badge-md-overall\""));
+    }
+
+    #[test]
+    fn component_row_shows_check_kind() {
+        let html = editor(None).render().unwrap();
+        assert!(html.contains("HTTP"));
     }
 
     #[test]

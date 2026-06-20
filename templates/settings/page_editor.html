@@ -148,10 +148,10 @@
           <tr><td colspan="4" class="px-4 py-6 text-center font-mono text-xs text-quiet"># no monitors yet — <a href="/targets/new" class="underline decoration-dotted underline-offset-2 hover:text-body">create a monitor</a> to show it on this page</td></tr>
           {% else %}
           {% for c in components %}
-          <tr data-target-id="{{ c.target_id }}">
+          <tr data-target-id="{{ c.target_id }}" data-kind="{{ c.kind }}" data-monitor-name="{{ c.monitor_name }}">
             <td class="px-4 py-2 align-middle"><input type="checkbox" data-on-page aria-label="Show {{ c.monitor_name }} on this page"{% if c.on_page %} checked{% endif %}></td>
-            <td class="px-4 py-2 align-middle text-body">{{ c.monitor_name }}</td>
-            <td class="px-4 py-2"><input type="text" data-field="public_name" value="{{ c.public_name }}" maxlength="80" placeholder="{{ c.monitor_name }}" aria-label="Public name for {{ c.monitor_name }}" autocomplete="off" class="w-full field text-xs"{% if !c.on_page %} disabled{% endif %}></td>
+            <td class="px-4 py-2 align-middle text-body">{{ c.monitor_name }} <span class="ml-1 rounded bg-[color:var(--theme-surface-sunk)] px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wide text-muted">{{ c.kind }}</span></td>
+            <td class="px-4 py-2"><input type="text" data-field="public_name" value="{{ c.public_name }}" maxlength="80" placeholder="{{ c.name_hint }}" aria-label="Public name for {{ c.monitor_name }}" autocomplete="off" class="w-full field text-xs"{% if !c.on_page %} disabled{% endif %}></td>
             <td class="px-4 py-2"><input type="text" data-field="public_group" value="{{ c.public_group }}" maxlength="50" aria-label="Group for {{ c.monitor_name }}" autocomplete="off" class="w-full field text-xs"{% if !c.on_page %} disabled{% endif %}></td>
           </tr>
           {% endfor %}
@@ -229,13 +229,15 @@
         <button type="button" data-copy="#badge-md-overall" class="sticker-btn shrink-0 px-2.5 py-1 text-xs"><span data-copy-label>copy</span></button>
       </div>
 
-      {% for c in components %}{% if c.on_page %}
-      <div class="flex items-center gap-2 border-t border-[color:var(--theme-line)] pt-2">
-        <span class="w-28 shrink-0 truncate text-xs text-muted">{% if c.public_name != "" %}{{ c.public_name }}{% else %}{{ c.monitor_name }}{% endif %}</span>
-        <code id="badge-md-{{ loop.index }}" class="flex-1 overflow-x-auto whitespace-nowrap rounded bg-[color:var(--theme-surface-sunk)] px-2 py-1 font-mono text-xs text-body">![{% if c.public_name != "" %}{{ c.public_name }}{% else %}{{ c.monitor_name }}{% endif %}]({{ badge }}?component={{ c.target_id }})</code>
-        <button type="button" data-copy="#badge-md-{{ loop.index }}" class="sticker-btn shrink-0 px-2.5 py-1 text-xs"><span data-copy-label>copy</span></button>
+      <div data-badge-list data-badge-base="{{ badge }}">
+        {% for c in components %}{% if c.on_page %}
+        <div class="flex items-center gap-2 border-t border-[color:var(--theme-line)] pt-2">
+          <span class="w-28 shrink-0 truncate text-xs text-muted">{% if c.public_name != "" %}{{ c.public_name }}{% else %}{{ c.monitor_name }}{% endif %} <span class="font-mono text-[10px] uppercase text-quiet">{{ c.kind }}</span></span>
+          <code id="badge-md-{{ loop.index }}" class="flex-1 overflow-x-auto whitespace-nowrap rounded bg-[color:var(--theme-surface-sunk)] px-2 py-1 font-mono text-xs text-body">![{% if c.public_name != "" %}{{ c.public_name }}{% else %}{{ c.monitor_name }}{% endif %}]({{ badge }}?component={{ c.target_id }})</code>
+          <button type="button" data-copy="#badge-md-{{ loop.index }}" class="sticker-btn shrink-0 px-2.5 py-1 text-xs"><span data-copy-label>copy</span></button>
+        </div>
+        {% endif %}{% endfor %}
       </div>
-      {% endif %}{% endfor %}
     </div>
   </div>
   <script defer src="{{ "js/public/copy.js"|asset }}"></script>
@@ -357,6 +359,50 @@
         catch (m) { err(m); }
       });
 
+      // Keep the embed snippets in sync with the table: toggling a monitor on
+      // or off the page, or renaming it, must add/drop/relabel its badge row.
+      const badgeList = document.querySelector('[data-badge-list]');
+      const badgeBase = badgeList && badgeList.dataset.badgeBase;
+      function renderBadgeList() {
+        if (!badgeList) return;
+        badgeList.textContent = '';
+        document.querySelectorAll('tr[data-target-id]').forEach((tr) => {
+          const toggle = tr.querySelector('[data-on-page]');
+          if (!toggle || !toggle.checked) return;
+          const tid = tr.dataset.targetId;
+          const nameEl = tr.querySelector('[data-field="public_name"]');
+          const label = (nameEl && nameEl.value.trim()) || tr.dataset.monitorName || '';
+          const url = badgeBase + '?component=' + tid;
+          const cid = 'badge-md-' + tid;
+
+          const row = document.createElement('div');
+          row.className = 'flex items-center gap-2 border-t border-[color:var(--theme-line)] pt-2';
+          const name = document.createElement('span');
+          name.className = 'w-28 shrink-0 truncate text-xs text-muted';
+          name.textContent = label + ' ';
+          const kind = document.createElement('span');
+          kind.className = 'font-mono text-[10px] uppercase text-quiet';
+          kind.textContent = tr.dataset.kind || '';
+          name.appendChild(kind);
+          const code = document.createElement('code');
+          code.id = cid;
+          code.className = 'flex-1 overflow-x-auto whitespace-nowrap rounded bg-[color:var(--theme-surface-sunk)] px-2 py-1 font-mono text-xs text-body';
+          code.textContent = '![' + label + '](' + url + ')';
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'sticker-btn shrink-0 px-2.5 py-1 text-xs';
+          btn.dataset.copy = '#' + cid;
+          const copyLabel = document.createElement('span');
+          copyLabel.dataset.copyLabel = '';
+          copyLabel.textContent = 'copy';
+          btn.appendChild(copyLabel);
+
+          row.append(name, code, btn);
+          badgeList.appendChild(row);
+        });
+      }
+      renderBadgeList();
+
       document.querySelectorAll('tr[data-target-id]').forEach((tr) => {
         const tid = tr.dataset.targetId;
         const toggle = tr.querySelector('[data-on-page]');
@@ -366,6 +412,7 @@
             if (toggle.checked) await api('POST', '/api/v1/status-pages/' + id + '/components', { target_id: tid });
             else await api('DELETE', '/api/v1/status-pages/' + id + '/components/' + tid);
             inputs.forEach((i) => { i.disabled = !toggle.checked; });
+            renderBadgeList();
             ok('updated');
           } catch (m) { toggle.checked = !toggle.checked; err(m); }
         });
@@ -373,7 +420,7 @@
           input.addEventListener('change', async () => {
             if (!toggle.checked) return;
             const body = {}; body[input.dataset.field] = input.value || null;
-            try { await api('PATCH', '/api/v1/status-pages/' + id + '/components/' + tid, body); } catch (m) { err(m); }
+            try { await api('PATCH', '/api/v1/status-pages/' + id + '/components/' + tid, body); renderBadgeList(); } catch (m) { err(m); }
           });
         });
       });
