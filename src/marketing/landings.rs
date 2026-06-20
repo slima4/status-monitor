@@ -172,8 +172,8 @@ pub const LANDINGS: &[Landing] = &[
         title: "Open-Source Status Page with Built-in Monitoring",
         eyebrow: "open source",
         h1: "An open-source status page",
-        meta_description: "An open-source status page with built-in uptime monitoring. Branded pages, subscribers, incidents and maintenance. AGPL, free, self-host or hosted.",
-        lede: "Uptimepage is an AGPL status page with the monitoring built in. Publish a branded page on your own subdomain, let customers subscribe, and run it yourself or on the free hosted tier.",
+        meta_description: "An open-source status page with built-in uptime and website monitoring. Branded pages, subscribers, incidents, maintenance. AGPL, free, self-host or hosted.",
+        lede: "Uptimepage is an AGPL status page with website and uptime monitoring built in. Publish a branded page on your own subdomain, let customers subscribe, and run it yourself or on the free hosted tier.",
         features: &[
             Feature {
                 label: "License",
