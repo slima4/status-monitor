@@ -39,6 +39,21 @@ free, self-hostable, and fully as code:
 - **Platform / SRE leads** — monitors as code, multi-region, escalation and incidents, without vendor sprawl.
 - **Self-hosters** — one binary plus two databases, no SaaS lock-in.
 
+## Live status
+
+uptimepage monitors itself. These badges are served by the running app from a
+public status page — no third-party service, no cron job updating a JSON file.
+
+[![uptimepage status](https://uptimepage.uptimepage.dev/api/public/v1/badge.svg)](https://uptimepage.uptimepage.dev)
+
+| Surface | HTTP | DNS | TLS cert |
+|---|---|---|---|
+| **uptimepage.dev** (website) | [![http](https://uptimepage.uptimepage.dev/api/public/v1/badge.svg?component=3b4a6104-c4a9-46cc-b2ee-aa1d67f01611)](https://uptimepage.uptimepage.dev) | [![dns](https://uptimepage.uptimepage.dev/api/public/v1/badge.svg?component=2aac0e66-d1da-4d03-9037-b1b8ccde21cd)](https://uptimepage.uptimepage.dev) | [![tls](https://uptimepage.uptimepage.dev/api/public/v1/badge.svg?component=d6a50c63-4d04-43cf-a70d-4ec8a68011ff)](https://uptimepage.uptimepage.dev) |
+| **app.uptimepage.dev** (dashboard) | [![http](https://uptimepage.uptimepage.dev/api/public/v1/badge.svg?component=d431b55f-6daf-4f64-87bb-a146f17bd3d0)](https://uptimepage.uptimepage.dev) | | |
+| **mcp.uptimepage.dev** (MCP) | [![http](https://uptimepage.uptimepage.dev/api/public/v1/badge.svg?component=f3cabf83-79a2-49a5-8e02-429b8205e930)](https://uptimepage.uptimepage.dev) | | |
+
+Embed your own with the snippet in **Settings → Pages → your page → Badge**.
+
 ## Features
 
 | | |
