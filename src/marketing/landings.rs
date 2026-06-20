@@ -531,6 +531,10 @@ resource "uptimepage_target" "api" {
                 href: TERRAFORM_URL,
             },
             ResourceLink {
+                label: "MCP server",
+                href: "/mcp-server",
+            },
+            ResourceLink {
                 label: "How the MCP server works",
                 href: "/blog/mcp-server",
             },
@@ -809,6 +813,18 @@ mod tests {
         for l in LANDINGS {
             assert!(l.path.starts_with('/'), "{} must be absolute", l.path);
             assert!(seen.insert(l.path), "duplicate path {}", l.path);
+        }
+    }
+
+    #[test]
+    fn every_landing_is_linked_in_footer() {
+        let footer = include_str!("../../templates/marketing/base.html");
+        for l in LANDINGS {
+            assert!(
+                footer.contains(&format!("href=\"{}\"", l.path)),
+                "{} is orphaned: add it to the marketing footer",
+                l.path
+            );
         }
     }
 
