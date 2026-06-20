@@ -120,10 +120,11 @@ pub(crate) struct CachedRender {
 
 fn render_landing(cfg: &MarketingCfg) -> CachedRender {
     let canonical_url = cfg.canonical_origin.clone();
-    let og = OpenGraph::default_for(
-        &format!("{BRAND} — uptime monitoring & public status pages"),
+    let mut og = OpenGraph::default_for(
+        &format!("{BRAND} — open-source uptime monitoring, dashboard & status pages"),
         &canonical_url,
     );
+    og.description = "Free, open-source uptime monitoring with a dashboard, multi-region checks, alerting, and a public status page. Manage it by API or Terraform.".to_string();
     let page = LandingPage {
         app_url: cfg.app_url.clone(),
         canonical_url,

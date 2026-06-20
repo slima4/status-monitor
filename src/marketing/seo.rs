@@ -365,8 +365,17 @@ fn build_llms_full(cfg: &MarketingCfg) -> Bytes {
 
 fn build_sitemap(cfg: &MarketingCfg) -> String {
     let origin = &cfg.canonical_origin;
-    let mut urls: Vec<(String, Option<String>)> =
-        vec![(origin.clone(), None), (format!("{origin}/blog"), None)];
+    // Latest content date stands in as the site's last-modified for the static
+    // pages, which have no per-page change tracking.
+    let site_lastmod: Option<String> = if cfg.blog_enabled {
+        list_published().iter().map(|p| p.date.clone()).max()
+    } else {
+        None
+    };
+    let mut urls: Vec<(String, Option<String>)> = vec![
+        (origin.clone(), site_lastmod.clone()),
+        (format!("{origin}/blog"), site_lastmod.clone()),
+    ];
     if cfg.blog_enabled {
         for post in list_published() {
             urls.push((
@@ -376,7 +385,7 @@ fn build_sitemap(cfg: &MarketingCfg) -> String {
         }
     }
     for landing in landings::LANDINGS {
-        urls.push((format!("{origin}{}", landing.path), None));
+        urls.push((format!("{origin}{}", landing.path), site_lastmod.clone()));
     }
     for route in legal::ROUTES {
         urls.push((format!("{origin}{}", route.path), None));
