@@ -30,13 +30,13 @@ free, self-hostable, and fully as code:
 - **One self-contained binary** — `docker compose up` and you're live, not a Kubernetes platform to operate.
 - **Everything as code** — REST API, scoped tokens, an official Terraform provider, and an MCP server your LLM can query.
 - **Probes you own** — run multi-region agents wherever your users are, on your own boxes.
-- **Status page + incidents + escalation in one** — components, subscribers, on-call, no second tool.
+- **Status page + incidents + alerting in one** — components, subscribers, and multi-channel paging that repeats until acknowledged, no second tool.
 - **No per-seat or feature-gated tiers** — checks, status pages, and subscribers aren't paywalled.
 
 ### Who it's for
 
 - **Founders / small SaaS** — a professional status page in minutes, free, no self-host headache.
-- **Platform / SRE leads** — monitors as code, multi-region, escalation and incidents, without vendor sprawl.
+- **Platform / SRE leads** — monitors as code, multi-region probes, incident paging to your on-call channels, without vendor sprawl.
 - **Self-hosters** — one binary plus two databases, no SaaS lock-in.
 
 ## Live status
@@ -60,8 +60,8 @@ Embed your own with the snippet in **Settings → Pages → your page → Badge*
 |---|---|
 | **Checks** | HTTP, TCP, DNS, TLS-cert expiry, domain expiry — per-host circuit breaking, designed for ~50k concurrent in-flight |
 | **Public status page** | HTML + JSON + RSS, per-component opt-in, incident narration, maintenance windows, email + webhook subscribers |
-| **Alerting** | Slack, generic webhook, Telegram, SMS, … — per-org channels, sealed secrets, fire-once + recovery |
-| **Incidents** | Internal incident state ⊥ public phase, escalation policies, on-call schedules |
+| **Alerting** | Slack, webhook, Telegram, WhatsApp, SMS, PagerDuty, ntfy, Pushover, Discord, … — per-org channels, sealed secrets, fire-once + recovery, repeat until acknowledged |
+| **Incidents** | Internal incident state ⊥ public phase, acknowledge to silence paging, per-monitor reminder cadence |
 | **Multi-region** | Regional probe agents, per-region views, run your own agent anywhere |
 | **Automation** | REST API, scoped API tokens, Terraform provider, MCP server for LLM clients |
 | **Built on** | Rust 1.95 / Tokio / Axum, Postgres + ClickHouse, one ~23 MB self-contained binary |
