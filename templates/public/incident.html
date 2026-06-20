@@ -105,7 +105,7 @@
     </main>
 
     <footer class="mx-auto max-w-3xl px-4 py-8 text-xs text-quiet">
-        {% if branding.show_powered_by %}Powered by uptimepage · {% endif %}
+        {% if branding.show_powered_by %}Powered by <a href="https://uptimepage.dev" class="hover:text-body">uptimepage</a> · {% endif %}
         <a href="{{ rss_url }}" class="hover:text-body">RSS</a> ·
         Updated <time datetime="{{ generated_at|iso_ts }}" data-tz>{{ generated_at|human_ts }}</time>
     </footer>

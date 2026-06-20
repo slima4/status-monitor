@@ -5,6 +5,7 @@
 <script type="application/ld+json">{{ org_json_ld.as_str()|safe }}</script>
 <script type="application/ld+json">{{ website_json_ld.as_str()|safe }}</script>
 <script type="application/ld+json">{{ software_json_ld.as_str()|safe }}</script>
+<script type="application/ld+json">{{ faq_json_ld.as_str()|safe }}</script>
 {% endblock %}
 {% block content %}
 <div class="space-y-24 sm:space-y-28">
@@ -409,45 +410,12 @@
             <h2 class="mk-h2">FAQ</h2>
         </header>
         <div>
+            {% for faq in faqs %}
             <details class="mk-faq">
-                <summary>Is there really no charge?</summary>
-                <div class="mk-faq__body">
-                    Correct — $0 / month, every feature, no credit card. There
-                    is no paid tier today; if one ever arrives, anyone who
-                    signed up keeps the plan they have.
-                </div>
+                <summary>{{ faq.0 }}</summary>
+                <div class="mk-faq__body">{{ faq.1|safe }}</div>
             </details>
-            <details class="mk-faq">
-                <summary>Can I use my own domain for the status page?</summary>
-                <div class="mk-faq__body">
-                    Every org gets <code class="mk-chip" translate="no">your-org.uptimepage.dev</code>
-                    out of the box. A custom CNAME (<code class="mk-chip" translate="no">status.yourcompany.com</code>)
-                    is coming — drop a line if you need it sooner.
-                </div>
-            </details>
-            <details class="mk-faq">
-                <summary>What kinds of monitors are supported?</summary>
-                <div class="mk-faq__body">
-                    HTTP/HTTPS, TCP port, DNS lookup. Per-monitor headers,
-                    basic-auth, bearer tokens, expected status code, content-match,
-                    TLS verification, follow-redirects rules.
-                </div>
-            </details>
-            <details class="mk-faq">
-                <summary>Where do alerts come from?</summary>
-                <div class="mk-faq__body">
-                    Slack, Discord, Teams, Telegram, email, PagerDuty, ntfy,
-                    Pushover, WhatsApp, or any HTTPS webhook. Each monitor binds its own
-                    channels — a marketing-site flap doesn’t page on-call.
-                </div>
-            </details>
-            <details class="mk-faq">
-                <summary>Can I export my data?</summary>
-                <div class="mk-faq__body">
-                    Always. JSON export per monitor and incident. RSS for public
-                    incidents. SVG badges you can drop in a README.
-                </div>
-            </details>
+            {% endfor %}
         </div>
     </section>
 

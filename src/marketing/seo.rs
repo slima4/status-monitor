@@ -143,6 +143,26 @@ pub fn json_ld_software_application(canonical_origin: &str) -> JsonLd {
     JsonLd(payload.to_string())
 }
 
+/// Schema text must match the visible FAQ, so this builds from the same pairs.
+pub fn json_ld_faqpage(faqs: &[(&str, &str)]) -> JsonLd {
+    let main_entity: Vec<_> = faqs
+        .iter()
+        .map(|(q, a)| {
+            serde_json::json!({
+                "@type": "Question",
+                "name": q,
+                "acceptedAnswer": { "@type": "Answer", "text": a },
+            })
+        })
+        .collect();
+    let payload = serde_json::json!({
+        "@context": "https://schema.org",
+        "@type": "FAQPage",
+        "mainEntity": main_entity,
+    });
+    JsonLd(payload.to_string())
+}
+
 /// `BreadcrumbList` for a second-level marketing page (Home › page). Gives
 /// search engines an explicit Home → page trail for the listing.
 pub fn json_ld_breadcrumb(canonical_origin: &str, name: &str, path: &str) -> JsonLd {
@@ -442,6 +462,15 @@ mod tests {
         assert_eq!(v["@type"], "SoftwareApplication");
         assert_eq!(v["offers"]["price"], "0");
         assert_eq!(v["offers"]["priceCurrency"], "USD");
+    }
+
+    #[test]
+    fn json_ld_faqpage_carries_questions() {
+        let jl = json_ld_faqpage(&[("Q1?", "A1"), ("Q2?", "A2")]);
+        let v: serde_json::Value = serde_json::from_str(jl.as_str()).unwrap();
+        assert_eq!(v["@type"], "FAQPage");
+        assert_eq!(v["mainEntity"].as_array().unwrap().len(), 2);
+        assert_eq!(v["mainEntity"][0]["acceptedAnswer"]["text"], "A1");
     }
 
     #[test]

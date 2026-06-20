@@ -17,7 +17,8 @@ use axum::response::{IntoResponse, Response};
 use bytes::Bytes;
 
 use crate::marketing::seo::{
-    JsonLd, OpenGraph, json_ld_organization, json_ld_software_application, json_ld_website,
+    JsonLd, OpenGraph, json_ld_faqpage, json_ld_organization, json_ld_software_application,
+    json_ld_website,
 };
 use crate::web::filters;
 
@@ -42,9 +43,44 @@ struct LandingPage {
     org_json_ld: JsonLd,
     website_json_ld: JsonLd,
     software_json_ld: JsonLd,
+    faq_json_ld: JsonLd,
     version: &'static str,
     pricing_features: &'static [&'static str],
+    faqs: &'static [(&'static str, &'static str)],
 }
+
+/// One source for the rendered FAQ and its `FAQPage` schema, so they can't drift.
+const FAQS: &[(&str, &str)] = &[
+    (
+        "Is there really no charge?",
+        "Correct — $0 / month, every feature, no credit card. There is no paid \
+         tier today; if one ever arrives, anyone who signed up keeps the plan \
+         they have.",
+    ),
+    (
+        "Can I use my own domain for the status page?",
+        "Every org gets <code class=\"mk-chip\" translate=\"no\">your-org.uptimepage.dev</code> \
+         out of the box. A custom CNAME (<code class=\"mk-chip\" translate=\"no\">status.yourcompany.com</code>) \
+         is coming — drop a line if you need it sooner.",
+    ),
+    (
+        "What kinds of monitors are supported?",
+        "HTTP/HTTPS, TCP port, DNS lookup. Per-monitor headers, basic-auth, \
+         bearer tokens, expected status code, content-match, TLS verification, \
+         follow-redirects rules.",
+    ),
+    (
+        "Where do alerts come from?",
+        "Slack, Discord, Teams, Telegram, email, PagerDuty, ntfy, Pushover, \
+         WhatsApp, or any HTTPS webhook. Each monitor binds its own channels — \
+         a marketing-site flap doesn’t page on-call.",
+    ),
+    (
+        "Can I export my data?",
+        "Always. JSON export per monitor and incident. RSS for public incidents. \
+         SVG badges you can drop in a README.",
+    ),
+];
 
 const PRICING_FEATURES: &[&str] = &[
     "Up to 20 monitors",
@@ -94,9 +130,11 @@ fn render_landing(cfg: &MarketingCfg) -> CachedRender {
         org_json_ld: json_ld_organization(&cfg.canonical_origin),
         website_json_ld: json_ld_website(&cfg.canonical_origin),
         software_json_ld: json_ld_software_application(&cfg.canonical_origin),
+        faq_json_ld: json_ld_faqpage(FAQS),
         og,
         version: env!("CARGO_PKG_VERSION"),
         pricing_features: PRICING_FEATURES,
+        faqs: FAQS,
     };
     let body = page
         .render()
