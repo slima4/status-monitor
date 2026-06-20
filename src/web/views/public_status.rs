@@ -1614,7 +1614,7 @@ mod tests {
         assert!(html.contains("--brand-color: #ff0000;"));
         assert!(html.contains(r#"src="/status/branding/logo?v=deadbeefcafef00d""#));
         assert!(html.contains("<strong>hi</strong> there"));
-        assert!(!html.contains("Powered by uptimepage"));
+        assert!(!html.contains("Powered by"));
     }
 
     #[test]
@@ -1680,7 +1680,10 @@ mod tests {
         }
         .render()
         .unwrap();
-        assert!(html.contains("Powered by uptimepage"));
+        assert!(html.contains("Powered by"));
+        assert!(html.contains(
+            r#"<a href="https://uptimepage.dev" class="hover:text-body">uptimepage</a>"#
+        ));
     }
 
     // PRE-MORTEM PM #6: a relaxed DB/app validator must not let a crafted
