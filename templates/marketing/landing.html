@@ -4,6 +4,7 @@
 {% block head %}
 <script type="application/ld+json">{{ org_json_ld.as_str()|safe }}</script>
 <script type="application/ld+json">{{ website_json_ld.as_str()|safe }}</script>
+<script type="application/ld+json">{{ software_json_ld.as_str()|safe }}</script>
 {% endblock %}
 {% block content %}
 <div class="space-y-24 sm:space-y-28">
@@ -28,8 +29,8 @@
                 </h1>
 
                 <p class="mk-lede">
-                    HTTP · TCP · DNS · TLS. Check every minute. Alert
-                    on Slack, Discord, Telegram, email, webhook — and more.
+                    HTTP · TCP · DNS · TLS. Check every minute. Page on-call
+                    on Slack, Telegram, WhatsApp, SMS, PagerDuty — and more.
                     Public page on a subdomain,
                     your data on a JSON endpoint, history as RSS or SVG.
                 </p>
@@ -228,12 +229,12 @@
                     <path d="M18 16v-5a6 6 0 0 0-12 0v5l-2 3h16l-2-3Z"/>
                     <path d="M10 19a2 2 0 0 0 4 0"/>
                 </svg>
-                <h3 class="mk-h3">alerts with flap-suppress</h3>
+                <h3 class="mk-h3">page on-call, not a chatroom</h3>
                 <p class="mk-body">
-                    Slack, Discord, Telegram, email, webhooks — and more.
-                    Per-monitor channels,
-                    dedupe, flap-suppress. A 60s blip doesn’t page anyone
-                    at 03:00.
+                    Slack, Discord, Telegram, WhatsApp, SMS, PagerDuty, email,
+                    webhook — and more. Per-monitor channels with dedupe and
+                    flap-suppress so a 60s blip stays quiet, and reminders that
+                    repeat until someone acknowledges.
                 </p>
             </article>
 
@@ -337,7 +338,15 @@
             <h2 class="mk-h2">Built for people who <em class="mk-h2-em">ship things</em>.</h2>
         </header>
 
-        <div class="grid gap-4 md:grid-cols-3">
+        <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            <article class="mk-card space-y-2">
+                <p class="mk-eyebrow">saas &amp; sre</p>
+                <h3 class="mk-h3">on-call without the sprawl</h3>
+                <p class="mk-body">
+                    Monitor production, page the on-call when it breaks, and
+                    give customers a status page — one tool, no second vendor.
+                </p>
+            </article>
             <article class="mk-card space-y-2">
                 <p class="mk-eyebrow">indie hackers</p>
                 <h3 class="mk-h3">look like a real shop</h3>
@@ -368,10 +377,11 @@
     {# ── Pricing ───────────────────────────────────────────────── #}
     <section id="pricing" class="mx-auto max-w-3xl">
         <article class="mk-price text-center space-y-5">
-            <h2 class="mk-h2">Free <em class="mk-h2-em">right now</em>.</h2>
+            <h2 class="mk-h2">Free. <em class="mk-h2-em">$0 / month</em>.</h2>
             <p class="mk-lede mx-auto">
-                1 plan, full feature set, no caps that matter. Paid
-                tiers come later — sign up today and keep what you have.
+                One plan, every feature, no credit card and no per-seat
+                or per-monitor metering. There is no paid tier today; if one
+                ever arrives, everyone here keeps this plan.
             </p>
             <ul class="mx-auto inline-flex flex-wrap items-center justify-center gap-x-5 gap-y-2 pt-1">
                 {% for label in pricing_features %}
@@ -402,9 +412,9 @@
             <details class="mk-faq">
                 <summary>Is there really no charge?</summary>
                 <div class="mk-faq__body">
-                    Right now, no. Everything is free while the product matures.
-                    Paid tiers come later — anyone who signs up today keeps what
-                    they have.
+                    Correct — $0 / month, every feature, no credit card. There
+                    is no paid tier today; if one ever arrives, anyone who
+                    signed up keeps the plan they have.
                 </div>
             </details>
             <details class="mk-faq">

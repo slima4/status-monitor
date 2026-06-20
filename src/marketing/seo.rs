@@ -124,6 +124,25 @@ pub fn json_ld_organization(canonical_origin: &str) -> JsonLd {
     JsonLd(payload.to_string())
 }
 
+/// `SoftwareApplication` with a free `Offer` so search and answer engines
+/// read a concrete `$0` price instead of guessing a tier from the category.
+pub fn json_ld_software_application(canonical_origin: &str) -> JsonLd {
+    let payload = serde_json::json!({
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": BRAND,
+        "applicationCategory": "DeveloperApplication",
+        "operatingSystem": "Web, Docker, Linux",
+        "url": canonical_origin,
+        "offers": {
+            "@type": "Offer",
+            "price": "0",
+            "priceCurrency": "USD",
+        },
+    });
+    JsonLd(payload.to_string())
+}
+
 /// `BreadcrumbList` for a second-level marketing page (Home › page). Gives
 /// search engines an explicit Home → page trail for the listing.
 pub fn json_ld_breadcrumb(canonical_origin: &str, name: &str, path: &str) -> JsonLd {
@@ -414,6 +433,15 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(jl.as_str()).unwrap();
         assert_eq!(v["@type"], "Organization");
         assert_eq!(v["url"], "https://uptimepage.dev");
+    }
+
+    #[test]
+    fn json_ld_software_application_is_free() {
+        let jl = json_ld_software_application("https://uptimepage.dev");
+        let v: serde_json::Value = serde_json::from_str(jl.as_str()).unwrap();
+        assert_eq!(v["@type"], "SoftwareApplication");
+        assert_eq!(v["offers"]["price"], "0");
+        assert_eq!(v["offers"]["priceCurrency"], "USD");
     }
 
     #[test]

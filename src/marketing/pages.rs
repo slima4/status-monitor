@@ -16,7 +16,9 @@ use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE, ETAG, IF_NONE_MATCH};
 use axum::response::{IntoResponse, Response};
 use bytes::Bytes;
 
-use crate::marketing::seo::{JsonLd, OpenGraph, json_ld_organization, json_ld_website};
+use crate::marketing::seo::{
+    JsonLd, OpenGraph, json_ld_organization, json_ld_software_application, json_ld_website,
+};
 use crate::web::filters;
 
 use super::config::{BRAND, MarketingCfg};
@@ -39,6 +41,7 @@ struct LandingPage {
     og: OpenGraph,
     org_json_ld: JsonLd,
     website_json_ld: JsonLd,
+    software_json_ld: JsonLd,
     version: &'static str,
     pricing_features: &'static [&'static str],
 }
@@ -90,6 +93,7 @@ fn render_landing(cfg: &MarketingCfg) -> CachedRender {
         canonical_url,
         org_json_ld: json_ld_organization(&cfg.canonical_origin),
         website_json_ld: json_ld_website(&cfg.canonical_origin),
+        software_json_ld: json_ld_software_application(&cfg.canonical_origin),
         og,
         version: env!("CARGO_PKG_VERSION"),
         pricing_features: PRICING_FEATURES,
