@@ -293,6 +293,86 @@ docker compose up -d"#,
         cta: "Start free with GitHub",
     },
     Landing {
+        path: "/pricing",
+        title: "Pricing: Free, Every Feature",
+        eyebrow: "pricing",
+        h1: "One plan. Free. Every feature.",
+        meta_description: "Uptimepage pricing: free. 20 monitors, 60-second checks, 90-day history, a branded status page and every alert channel, no credit card. Self-host AGPL too.",
+        lede: "There is one plan and it is free: every feature on, no credit card, no per-seat or per-monitor metering. Here are the exact limits, and the self-hosted option with none.",
+        features: &[
+            Feature {
+                label: "Price",
+                value: "$0, no credit card",
+            },
+            Feature {
+                label: "Monitors",
+                value: "20",
+            },
+            Feature {
+                label: "Check interval",
+                value: "as fast as 60s",
+            },
+            Feature {
+                label: "Check types",
+                value: "HTTP, TCP, DNS, TLS",
+            },
+            Feature {
+                label: "Public history",
+                value: "90 days",
+            },
+            Feature {
+                label: "Status page",
+                value: "1, branded",
+            },
+            Feature {
+                label: "Status components",
+                value: "15",
+            },
+            Feature {
+                label: "Team members",
+                value: "3",
+            },
+            Feature {
+                label: "Notification channels",
+                value: "20",
+            },
+            Feature {
+                label: "Alert channels",
+                value: "Slack, email, SMS, webhook + more",
+            },
+            Feature {
+                label: "Self-host",
+                value: "AGPL, unlimited",
+            },
+        ],
+        sections: &[
+            Section {
+                heading: "one free plan, the whole product",
+                body: "Every feature is on for everyone: branded status pages, subscribers, incidents, scheduled maintenance, the REST API, Terraform and MCP. Nothing is gated behind a higher tier, there is no per-seat or per-monitor metering, and no credit card.",
+            },
+            Section {
+                heading: "the limits, in plain numbers",
+                body: "Twenty monitors, checks as fast as every 60 seconds, a 90-day public history, one branded status page with up to 15 components, and three team members. Generous for a personal project or a small team, and the same feature set whatever your size.",
+            },
+            Section {
+                heading: "self-host for free, no limits",
+                body: "Prefer to run it yourself? The source is AGPL. `docker compose up` brings up the binary with Postgres and ClickHouse, and you run as many monitors as your own hardware allows, with the same API and Terraform provider as the hosted tier.",
+            },
+        ],
+        code: None,
+        resources: &[
+            ResourceLink {
+                label: "Self-hosted status page",
+                href: "/self-hosted-status-page",
+            },
+            ResourceLink {
+                label: "Open-source status page",
+                href: "/open-source-status-page",
+            },
+        ],
+        cta: "Start free with GitHub",
+    },
+    Landing {
         path: "/vs/uptimerobot",
         title: "An UptimeRobot Alternative with Built-in Status Pages",
         eyebrow: "switching monitors",
@@ -702,11 +782,11 @@ resource "uptimepage_target" "api" {
         sections: &[
             Section {
                 heading: "ask your monitoring in plain language",
-                body: "Read tools hand the model the same forensics a good engineer reaches for: which monitor is down and since when, an incident’s full timeline, and why a check is slow: DNS, connect, TLS handshake and time-to-first-byte reported separately, so “slow because TLS” and “slow because DNS” come back as different answers.",
+                body: "Read tools hand the model the same forensics a good engineer reaches for: which monitor is down and since when, an incident’s full timeline, and why a check is slow: DNS, connect, TLS handshake and time-to-first-byte reported separately, so \"slow because TLS\" and \"slow because DNS\" come back as different answers.",
             },
             Section {
                 heading: "actions stay behind a human",
-                body: "Most tools can only look. The few that act (run a check, pause or resume a monitor, post to an incident) can’t fire without a scoped token, your in-the-moment approval naming the exact effect, and an audit row for every outcome. There is no “remember my choice.”",
+                body: "Most tools can only look. The few that act (run a check, pause or resume a monitor, post to an incident) can’t fire without a scoped token, your in-the-moment approval naming the exact effect, and an audit row for every outcome. There is no \"remember my choice.\"",
             },
             Section {
                 heading: "your data can’t hijack the assistant",
@@ -714,7 +794,7 @@ resource "uptimepage_target" "api" {
             },
             Section {
                 heading: "one-click OAuth, no copy-paste",
-                body: "Your client discovers the server, you log in with the session you already have, approve a consent screen, and a scoped, org-bound, expiring token is minted behind the scenes. The one lifetime the consent screen won’t offer is “never expires.”",
+                body: "Your client discovers the server, you log in with the session you already have, approve a consent screen, and a scoped, org-bound, expiring token is minted behind the scenes. The one lifetime the consent screen won’t offer is \"never expires.\"",
             },
         ],
         code: Some(CodeSample {
@@ -767,6 +847,24 @@ struct LandingDoc {
 /// answers describe Uptimepage only, matching the neutral-comparison rule above.
 fn page_faqs(path: &str) -> &'static [(&'static str, &'static str)] {
     match path {
+        "/pricing" => &[
+            (
+                "Is Uptimepage really free?",
+                "Yes. The hosted tier is $0 a month with every feature and no credit card. The AGPL source is also free to self-host.",
+            ),
+            (
+                "What are the free-tier limits?",
+                "20 monitors, checks as fast as every 60 seconds, 90 days of public history, one branded status page with up to 15 components, and three team members.",
+            ),
+            (
+                "Is there a per-seat or per-monitor charge?",
+                "No. One plan covers every feature with no metering. Nothing is gated behind a higher tier.",
+            ),
+            (
+                "Is self-hosting free too?",
+                "Yes. `docker compose up` runs the AGPL binary with Postgres and ClickHouse on your own boxes, with as many monitors as your hardware allows.",
+            ),
+        ],
         "/open-source-status-page" => &[
             (
                 "Is the status page really open source?",
@@ -904,7 +1002,7 @@ fn render_all(cfg: &MarketingCfg) -> HashMap<&'static str, CachedRender> {
         .iter()
         .map(|l| {
             let canonical_url = format!("{}{}", cfg.canonical_origin, l.path);
-            let title = format!("{} — {BRAND}", l.title);
+            let title = format!("{} | {BRAND}", l.title);
             let mut og = OpenGraph::default_for(&title, &canonical_url);
             og.description = l.meta_description.to_string();
             let faqs = page_faqs(l.path);

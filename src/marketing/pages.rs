@@ -91,7 +91,7 @@ const PRICING_FEATURES: &[&str] = &[
     "10+ alert channels",
     "Automatic incident tracking",
     "90-day history",
-    "Team members",
+    "Up to 3 team members",
     "API & Terraform provider",
     "MCP server for AI assistants",
     "No credit card",
@@ -121,7 +121,7 @@ pub(crate) struct CachedRender {
 fn render_landing(cfg: &MarketingCfg) -> CachedRender {
     let canonical_url = cfg.canonical_origin.clone();
     let mut og = OpenGraph::default_for(
-        &format!("{BRAND} — open-source uptime monitoring, dashboard & status pages"),
+        &format!("{BRAND}: open-source uptime monitoring, dashboard & status pages"),
         &canonical_url,
     );
     og.description = "Free, open-source uptime and website monitoring with a dashboard, multi-region checks, alerting, and a public status page. Managed by API or Terraform.".to_string();

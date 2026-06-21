@@ -51,7 +51,7 @@ Not a product, a pattern, and worth naming because plenty of teams already live 
 
 ## Uptimepage
 
-Ours, so here is the honest pitch and the honest caveat in the same breath.
+Ours, so here is the pitch and the caveat together.
 
 Uptimepage is a single Rust binary that does uptime monitoring and a customer-facing status page together, with the parts Uptime Kuma users tend to ask for: a real REST API, a Terraform provider, organizations with roles, multi-region probe agents you run yourself, and status pages your customers can subscribe to over email or webhook. It is AGPL, so `docker compose up` and it is yours, or you can use the [hosted free tier](https://uptimepage.dev) and skip running it. The same data model, API, and Terraform provider work either way, so you are not locked into the choice. There is more on the [self-hosted setup](/self-hosted-status-page) and on [driving it from code](/automation).
 
@@ -59,6 +59,6 @@ The caveat: it is younger than Uptime Kuma and has a smaller community, so it ha
 
 ## How to choose without overthinking it
 
-For a homelab or a few personal projects, install Uptime Kuma and move on. For a team that wants config in Git and only needs internal alerts, use Gatus. If a polished customer status page with subscribers and an API is the point, look at [an open-source status page](/open-source-status-page) with monitoring built in, which is the slice we focus on. If you want to own the entire incident lifecycle and you already run Kubernetes, OneUptime is the broad option. And if you live in Prometheus already, the Blackbox exporter is a short walk from where you stand.
+For a homelab or a few personal projects, install Uptime Kuma and move on. For a team that wants config in Git and only needs internal alerts, use Gatus. If a polished customer status page with subscribers and an API is the point, look at [an open-source status page](/open-source-status-page) with monitoring built in, which is the slice we focus on. If you want to own the entire incident lifecycle and you already run Kubernetes, OneUptime is the broad option. And if you already live in Prometheus, the Blackbox exporter is a small addition.
 
 There is no single best tool here, only the one that matches your three answers. The good news is that all of them are free to try and free to leave, which is the whole point of staying open-source.

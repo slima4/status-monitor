@@ -200,7 +200,7 @@ struct BlogPostPage {
 
 fn render_index(cfg: &MarketingCfg) -> CachedRender {
     let canonical_url = format!("{}/blog", cfg.canonical_origin);
-    let og = OpenGraph::default_for(&format!("{BRAND} — Blog"), &canonical_url);
+    let og = OpenGraph::default_for(&format!("{BRAND} Blog"), &canonical_url);
     let posts: Vec<PostSummary> = list_published()
         .into_iter()
         .map(|p| PostSummary {

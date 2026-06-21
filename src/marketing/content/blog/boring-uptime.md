@@ -2,7 +2,7 @@
 title = "Why your uptime monitor should be boring"
 date = "2026-05-20"
 slug = "boring-uptime"
-excerpt = "A monitor that surprises you is doing the wrong job. Here's what changes when you treat the watchdog like a smoke detector — cheap, dumb, and unmissable when it matters."
+excerpt = "A monitor that surprises you is doing the wrong job. Here's what changes when you treat the watchdog like a smoke detector: cheap, dumb, and unmissable when it matters."
 tags = ["monitoring", "incidents", "status-pages", "on-call"]
 draft = false
 +++
@@ -16,24 +16,24 @@ mutter, set the phone back down.
 
 The fifth ping is the real one. Nobody hears it.
 
-This is how monitors fail. Not by missing the outage outright —
-although that happens too — but by being noisy enough that the humans
-on the other end learn to tune them out. Two months in, the Slack
-channel is muted. Six months in, the on-call rota's morale is sunk. A
-year in, somebody is writing a postmortem that opens "the alerting
-system was working as designed."
+This is how monitors fail. They miss the outage outright sometimes,
+but more often they just get noisy enough that the humans on the other
+end learn to tune them out. Two months in, the Slack channel is muted.
+Six months in, the on-call rota's morale is sunk. A year in, somebody
+is writing a postmortem that opens "the alerting system was working as
+designed."
 
 A monitor that surprises you is doing the wrong job. The interesting
-parts of your stack belong in your product. The watchdog should be
-the dullest thing you own.
+parts of your stack belong in your product. The watchdog should be the
+dullest thing you own.
 
 ## The seduction of cleverness
 
-There is a steady temptation, every quarter, to make the monitor
+Every quarter there is a steady temptation to make the monitor
 smarter. Add a second data source. Wire in latency percentiles. Build
 a dashboard that overlays deploys against error rates. Each of these
-features sounds like an improvement when it's proposed; each of them
-is a new way the monitor itself can break.
+sounds like an improvement when it's proposed, and each of them is a
+new way the monitor itself can break.
 
 The hard part isn't the database choice or the templating layer. The
 hard part is *not* shipping the next clever feature when the room is
@@ -48,25 +48,25 @@ Three things, every one of them invisible until you don't have them.
 
 **An honest signal.** A check that flakes for unrelated reasons is
 worse than no check at all. The on-call learns the failure mode is
-"noisy," and they stop reading the messages. By the time a real
-outage lands, it's tagged in the same mental bucket as the false
-positives — and quietly dismissed. Honest means one expectation per
-monitor, written down somewhere you can argue about, and a state
-machine that knows the difference between a sample and an incident.
+"noisy," and they stop reading the messages. By the time a real outage
+lands, it's tagged in the same mental bucket as the false positives and
+quietly dismissed. Honest means one expectation per monitor, written
+down somewhere you can argue about, and a state machine that knows the
+difference between a sample and an incident.
 
 **A cheap watchdog.** If the monitor is expensive, somebody will
-eventually switch it off under cost pressure. That decision will be
-made at exactly the wrong moment — usually three weeks before the
-worst outage of the year. A monitor that costs almost nothing to run
-is a monitor that survives the budget review.
+eventually switch it off under cost pressure. That decision gets made
+at exactly the wrong moment, usually three weeks before the worst
+outage of the year. A monitor that costs almost nothing to run is a
+monitor that survives the budget review.
 
-**A cacheable public surface.** When you go down, your status page
-gets hammered. Bots scrape it. Customers refresh it. Your support
-team links to it in every reply. If rendering that page touches the
-database that just fell over, congratulations — now you have two
-outages instead of one. The fix is unglamorous: cache the bytes, set
-a short `Cache-Control`, let the edge do the work. Ten seconds of
-caching turns a thundering herd into a polite trickle.
+**A cacheable public surface.** When you go down, your status page gets
+hammered. Bots scrape it. Customers refresh it. Your support team links
+to it in every reply. If rendering that page touches the database that
+just fell over, congratulations: now you have two outages instead of
+one. The fix is unglamorous. Cache the bytes, set a short
+`Cache-Control`, let the edge do the work. Ten seconds of caching turns
+a thundering herd into a polite trickle.
 
 ## The line nobody wants to draw
 
@@ -74,19 +74,19 @@ The trick is knowing when to say no.
 
 A teammate proposes pulling live revenue numbers into the status page
 so the team can see "real" impact during an incident. Sounds
-reasonable in the meeting. In production, it means the status page
-now depends on the billing service — and if billing is what broke,
-the page goes white at the worst possible moment.
+reasonable in the meeting. In production, it means the status page now
+depends on the billing service, and if billing is what broke, the page
+goes white at the worst possible moment.
 
-A vendor pitches an AI-powered alert classifier that promises to
-reduce noise by 40%. Sounds great, until you notice it adds a new
-vendor your watchdog now depends on. Your monitor now has an SLA
-that's worse than most of the things it's monitoring.
+A vendor pitches an AI-powered alert classifier that promises to reduce
+noise by 40%. Sounds great, until you notice it adds a new vendor your
+watchdog now depends on. Your monitor now has an SLA that's worse than
+most of the things it's monitoring.
 
-A founder asks if the monitor can also do log aggregation, because
-"we already have the pipeline." Now the watchdog has the same blast
-radius as the log stack — and the log stack is a notoriously
-crash-prone neighbour.
+A founder asks if the monitor can also do log aggregation, because "we
+already have the pipeline." Now the watchdog has the same blast radius
+as the log stack, and the log stack is a notoriously crash-prone
+neighbour.
 
 In every case, the right answer is the same. The monitor should do
 one thing. It should keep doing that one thing while everything else
@@ -106,10 +106,9 @@ The on-call trusts the ping because they haven't been lied to in
 months.
 
 The monitor isn't the hero. It isn't the product. It's the smoke
-detector you only think about when the kitchen catches fire — and
-then you're profoundly grateful you bought the cheap, dumb one with
-the loud beeper instead of the smart one that needed a firmware
-update.
+detector you only think about when the kitchen catches fire, and then
+you're profoundly grateful you bought the cheap, dumb one with the loud
+beeper instead of the smart one that needed a firmware update.
 
 Keep it boring. Keep it cheap. Keep it out of the way.
 

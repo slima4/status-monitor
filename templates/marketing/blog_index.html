@@ -1,5 +1,5 @@
 {% extends "marketing/base.html" %}
-{% block title %}Notes — Uptimepage{% endblock %}
+{% block title %}Notes | Uptimepage{% endblock %}
 {% block description %}Field notes on uptime monitoring, status pages, and keeping production boring.{% endblock %}
 {% block content %}
 <section class="mx-auto max-w-3xl space-y-10">
@@ -15,7 +15,7 @@
     </header>
 
     {% if posts.is_empty() %}
-    <p class="mk-card text-center mk-quiet">No posts yet — check back soon.</p>
+    <p class="mk-card text-center mk-quiet">No posts yet. Check back soon.</p>
     {% else %}
     <div>
         {% for p in posts %}

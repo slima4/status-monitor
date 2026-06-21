@@ -34,7 +34,7 @@ const LLMS_OVERVIEW: &str = "Uptimepage pairs uptime monitoring with a public st
 Checks run every minute; a failing check opens an incident automatically and posts it to a branded status page \
 on your own subdomain. Alerts carry dedupe and flap-suppression so brief blips never page on-call. \
 Public data is available as JSON, an RSS feed and an embeddable SVG badge. One free plan covers the full \
-feature set — sign in with GitHub, no card.";
+feature set. Sign in with GitHub, no card.";
 
 /// Machine-readable product facts. Authored single source for the
 /// llms files — keep terse, factual, and current.
@@ -65,7 +65,15 @@ const LLMS_FACTS: &[(&str, &str)] = &[
         "Team",
         "role-based members, GitHub or email invites, audit log",
     ),
-    ("Pricing", "one free plan, full feature set, no credit card"),
+    ("Pricing", "one free plan, every feature, no credit card"),
+    (
+        "Free tier limits",
+        "20 monitors, checks as fast as every 60s, 90-day public history, 1 status page, 15 status components, 3 team members, 20 notification channels",
+    ),
+    (
+        "Self-hosting",
+        "AGPL, run it yourself with docker compose (Postgres + ClickHouse), unlimited monitors on your own hardware",
+    ),
     ("Sign-in", "GitHub, Google or magic link"),
 ];
 
