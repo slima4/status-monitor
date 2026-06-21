@@ -24,6 +24,7 @@ use super::config::{BRAND, MarketingCfg, TERRAFORM_URL};
 use super::pages::{CachedRender, cached_render, serve_cached};
 use super::seo::{
     JsonLd, OpenGraph, json_ld_breadcrumb, json_ld_faqpage, json_ld_software_application,
+    json_ld_webpage,
 };
 use crate::web::filters;
 
@@ -57,6 +58,8 @@ pub struct CodeSample {
 /// discriminant to keep in lockstep.
 pub struct Landing {
     pub path: &'static str,
+    pub created: &'static str,
+    pub lastmod: &'static str,
     /// `<title>` and OpenGraph title (brand suffix added at render).
     pub title: &'static str,
     pub eyebrow: &'static str,
@@ -75,6 +78,8 @@ pub struct Landing {
 pub const LANDINGS: &[Landing] = &[
     Landing {
         path: "/status-page-for-saas",
+        created: "2026-06-16",
+        lastmod: "2026-06-21",
         title: "Status Page & Uptime Monitoring for SaaS",
         eyebrow: "for saas teams",
         h1: "A status page your SaaS customers actually trust",
@@ -131,6 +136,8 @@ pub const LANDINGS: &[Landing] = &[
     },
     Landing {
         path: "/status-page-for-agencies",
+        created: "2026-06-16",
+        lastmod: "2026-06-21",
         title: "Status Pages for Agencies & Client Sites",
         eyebrow: "for agencies",
         h1: "One account. A branded status page for every client.",
@@ -187,6 +194,8 @@ pub const LANDINGS: &[Landing] = &[
     },
     Landing {
         path: "/open-source-status-page",
+        created: "2026-06-20",
+        lastmod: "2026-06-20",
         title: "Open-Source Status Page with Built-in Monitoring",
         eyebrow: "open source",
         h1: "An open-source status page",
@@ -247,6 +256,8 @@ pub const LANDINGS: &[Landing] = &[
     },
     Landing {
         path: "/self-hosted-status-page",
+        created: "2026-06-20",
+        lastmod: "2026-06-20",
         title: "Self-Hosted Status Page & Uptime Monitoring",
         eyebrow: "run it yourself",
         h1: "A self-hosted status page and uptime monitor",
@@ -312,6 +323,8 @@ docker compose up -d"#,
     },
     Landing {
         path: "/pricing",
+        created: "2026-06-21",
+        lastmod: "2026-06-21",
         title: "Pricing: Free, Every Feature",
         eyebrow: "pricing",
         h1: "One plan. Free. Every feature.",
@@ -392,6 +405,8 @@ docker compose up -d"#,
     },
     Landing {
         path: "/vs/uptimerobot",
+        created: "2026-06-16",
+        lastmod: "2026-06-21",
         title: "An UptimeRobot Alternative with Built-in Status Pages",
         eyebrow: "switching monitors",
         h1: "Looking for an UptimeRobot alternative?",
@@ -452,6 +467,8 @@ docker compose up -d"#,
     },
     Landing {
         path: "/vs/statuspage",
+        created: "2026-06-19",
+        lastmod: "2026-06-21",
         title: "A Statuspage Alternative with Monitoring Built In",
         eyebrow: "switching status pages",
         h1: "Looking for a Statuspage alternative?",
@@ -512,6 +529,8 @@ docker compose up -d"#,
     },
     Landing {
         path: "/vs/better-stack",
+        created: "2026-06-19",
+        lastmod: "2026-06-20",
         title: "A Better Stack Alternative You Can Self-Host",
         eyebrow: "comparing platforms",
         h1: "Looking for a Better Stack alternative?",
@@ -566,6 +585,8 @@ docker compose up -d"#,
     },
     Landing {
         path: "/vs/oneuptime",
+        created: "2026-06-19",
+        lastmod: "2026-06-20",
         title: "A OneUptime Alternative That’s Quick to Run",
         eyebrow: "comparing open source",
         h1: "Looking for a OneUptime alternative?",
@@ -620,6 +641,8 @@ docker compose up -d"#,
     },
     Landing {
         path: "/vs/uptime-kuma",
+        created: "2026-06-20",
+        lastmod: "2026-06-20",
         title: "An Uptime Kuma Alternative You Run as Code",
         eyebrow: "comparing open source",
         h1: "Looking for an Uptime Kuma alternative?",
@@ -695,6 +718,8 @@ docker compose up -d"#,
     },
     Landing {
         path: "/automation",
+        created: "2026-06-16",
+        lastmod: "2026-06-21",
         title: "Monitoring as Code: Terraform & MCP",
         eyebrow: "for developers & devops",
         h1: "Run your monitoring from code, not clicks",
@@ -784,6 +809,8 @@ resource "uptimepage_target" "api" {
     },
     Landing {
         path: "/mcp-server",
+        created: "2026-06-18",
+        lastmod: "2026-06-21",
         title: "MCP Server for Uptime Monitoring",
         eyebrow: "for ai & llm workflows",
         h1: "Ask an AI what’s broken, over MCP",
@@ -873,6 +900,7 @@ struct LandingDoc {
     og: OpenGraph,
     breadcrumb_json_ld: JsonLd,
     software_json_ld: JsonLd,
+    webpage_json_ld: JsonLd,
     faq_json_ld: Option<JsonLd>,
     faqs: &'static [(&'static str, &'static str)],
     app_url: String,
@@ -1128,6 +1156,13 @@ fn render_all(cfg: &MarketingCfg) -> HashMap<&'static str, CachedRender> {
                 og,
                 breadcrumb_json_ld: json_ld_breadcrumb(&cfg.canonical_origin, l.h1, l.path),
                 software_json_ld: json_ld_software_application(&cfg.canonical_origin),
+                webpage_json_ld: json_ld_webpage(
+                    &cfg.canonical_origin,
+                    l.path,
+                    l.h1,
+                    l.created,
+                    l.lastmod,
+                ),
                 faq_json_ld: (!faqs.is_empty()).then(|| json_ld_faqpage(faqs)),
                 faqs,
                 app_url: cfg.app_url.clone(),

@@ -193,6 +193,24 @@ pub fn json_ld_breadcrumb(canonical_origin: &str, name: &str, path: &str) -> Jso
     JsonLd(payload.to_string())
 }
 
+pub fn json_ld_webpage(
+    canonical_origin: &str,
+    path: &str,
+    name: &str,
+    created: &str,
+    modified: &str,
+) -> JsonLd {
+    let payload = serde_json::json!({
+        "@context": "https://schema.org",
+        "@type": "WebPage",
+        "name": name,
+        "url": format!("{canonical_origin}{path}"),
+        "datePublished": created,
+        "dateModified": modified,
+    });
+    JsonLd(payload.to_string())
+}
+
 pub fn json_ld_website(canonical_origin: &str) -> JsonLd {
     let payload = serde_json::json!({
         "@context": "https://schema.org",
@@ -381,16 +399,17 @@ fn build_llms_full(cfg: &MarketingCfg) -> Bytes {
 
 fn build_sitemap(cfg: &MarketingCfg) -> String {
     let origin = &cfg.canonical_origin;
-    // Latest content date stands in as the site's last-modified for the static
-    // pages, which have no per-page change tracking.
-    let site_lastmod: Option<String> = if cfg.blog_enabled {
+    // Only the blog index borrows a date (it changes on publish); the home page
+    // and landings have no per-page change tracking, so they omit lastmod rather
+    // than borrow an unrelated blog date.
+    let blog_lastmod: Option<String> = if cfg.blog_enabled {
         list_published().iter().map(|p| p.date.clone()).max()
     } else {
         None
     };
     let mut urls: Vec<(String, Option<String>)> = vec![
-        (origin.clone(), site_lastmod.clone()),
-        (format!("{origin}/blog"), site_lastmod.clone()),
+        (origin.clone(), None),
+        (format!("{origin}/blog"), blog_lastmod),
     ];
     if cfg.blog_enabled {
         for post in list_published() {
@@ -401,7 +420,10 @@ fn build_sitemap(cfg: &MarketingCfg) -> String {
         }
     }
     for landing in landings::LANDINGS {
-        urls.push((format!("{origin}{}", landing.path), site_lastmod.clone()));
+        urls.push((
+            format!("{origin}{}", landing.path),
+            Some(landing.lastmod.to_string()),
+        ));
     }
     for route in legal::ROUTES {
         urls.push((format!("{origin}{}", route.path), None));
