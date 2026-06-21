@@ -127,6 +127,22 @@ fn register_descriptions() {
         "Alert notification dispatches that returned an error, labelled by channel"
     );
     describe_counter!(
+        "uptimepage_alerts_dropped_total",
+        "Incident paging signals dropped before reaching the escalation engine, labelled by reason. The incident row stays in Postgres for the reconcile sweep to retry"
+    );
+    describe_gauge!(
+        "uptimepage_monitors_unmonitored",
+        "Monitors whose covering probes have all gone silent (no fresh results), sampled by the silence sweep. Distinct from down: these have no data at all"
+    );
+    describe_counter!(
+        "uptimepage_telegram_send_deferred_total",
+        "Telegram sends deferred by the per-bot/per-chat send budget rather than sent immediately. Sustained growth means the central bot is rate-limit bound"
+    );
+    describe_histogram!(
+        "uptimepage_telegram_send_wait_ms",
+        "Wait imposed on a Telegram send by the send budget before the slot opened, in milliseconds"
+    );
+    describe_counter!(
         "uptimepage_rdap_singleflight_total",
         "RDAP singleflight outcomes per domain: hit (cached) or miss (fetched)"
     );
@@ -218,6 +234,7 @@ pub mod names {
     pub const BREAKERS_OPEN: &str = "uptimepage_circuit_breakers_open";
     pub const NOTIFICATIONS_TOTAL: &str = "uptimepage_notifications_total";
     pub const NOTIFICATIONS_FAILURES: &str = "uptimepage_notifications_failures_total";
+    pub const ALERTS_DROPPED: &str = "uptimepage_alerts_dropped_total";
     pub const HOST_THROTTLE_WAITS: &str = "uptimepage_host_throttle_waits_total";
     pub const HOST_THROTTLE_DROPS: &str = "uptimepage_host_throttle_drops_total";
     pub const RDAP_SINGLEFLIGHT: &str = "uptimepage_rdap_singleflight_total";

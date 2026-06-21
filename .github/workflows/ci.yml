@@ -76,6 +76,8 @@ jobs:
         run: scripts/check_tenant_isolation.sh
       - name: static lints
         run: scripts/check_static_lints.sh
+      - name: metric-name drift gate
+        run: bash dashboards/grafana/check-metric-names.sh
 
   # License + advisory + ban + source audit. Independent of the build,
   # uses its own cache, runs in parallel with `lint` and `test`. Pinned

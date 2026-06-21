@@ -240,9 +240,9 @@
       "id": 18,
       "options": { "legend": { "calcs": ["mean", "max", "lastNotNull"], "displayMode": "table", "placement": "right", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
       "targets": [
-        { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "editorMode": "code", "expr": "histogram_quantile(0.95, sum(rate(uptimepage_check_dns_ms_bucket[5m])) by (le))", "legendFormat": "dns p95", "range": true, "refId": "A" },
-        { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "editorMode": "code", "expr": "histogram_quantile(0.95, sum(rate(uptimepage_check_connect_ms_bucket[5m])) by (le))", "legendFormat": "connect p95", "range": true, "refId": "B" },
-        { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "editorMode": "code", "expr": "histogram_quantile(0.95, sum(rate(uptimepage_check_tls_ms_bucket[5m])) by (le))", "legendFormat": "tls p95", "range": true, "refId": "C" }
+        { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "editorMode": "code", "expr": "max(uptimepage_check_dns_ms{quantile=\"0.95\"})", "legendFormat": "dns p95", "range": true, "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "editorMode": "code", "expr": "max(uptimepage_check_connect_ms{quantile=\"0.95\"})", "legendFormat": "connect p95", "range": true, "refId": "B" },
+        { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "editorMode": "code", "expr": "max(uptimepage_check_tls_ms{quantile=\"0.95\"})", "legendFormat": "tls p95", "range": true, "refId": "C" }
       ],
       "title": "HTTP connection phase latency (p95)",
       "type": "timeseries"

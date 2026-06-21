@@ -169,6 +169,11 @@ impl IncidentWriter {
                 incident_id,
                 reason,
             }) {
+                metrics::counter!(
+                    crate::observability::metrics::names::ALERTS_DROPPED,
+                    "reason" => reason.as_db_str()
+                )
+                .increment(1);
                 tracing::warn!(%org, %incident_id, error = %err, "incident paging signal dropped");
             }
         }

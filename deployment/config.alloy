@@ -27,6 +27,18 @@ prometheus.scrape "uptimepage" {
   scrape_interval = "15s"
 }
 
+// Co-located home-region probe agent (present only under the `agent` compose
+// profile). It emits the probe-side latency/throughput the brain can't see;
+// an absent agent simply scrapes down, which doubles as a liveness signal.
+prometheus.scrape "uptimepage_agent" {
+  targets = [
+    { __address__ = "agent:9090", role = "home-agent" },
+  ]
+  forward_to      = [prometheus.remote_write.grafana_cloud.receiver]
+  job_name        = "uptimepage_agent"
+  scrape_interval = "15s"
+}
+
 // Remote-write to Grafana Cloud Prometheus. URL and credentials are
 // environment-specific and supplied via the container env:
 //   GRAFANA_CLOUD_PROM_URL   e.g. https://prometheus-prod-XX-<zone>.grafana.net/api/prom/push

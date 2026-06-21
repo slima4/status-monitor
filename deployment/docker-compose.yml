@@ -219,6 +219,9 @@ services:
       - "9090"
     environment:
       UPTIMEPAGE_AGENT__ENABLED: "true"
+      # Bind metrics on all interfaces (default is loopback) so the Alloy
+      # sidecar can scrape the agent's probe-side metrics over the network.
+      UPTIMEPAGE_SERVER__METRICS_BIND: 0.0.0.0:9090
       # Defaults to this deployment's own dashboard origin (derived from
       # UPTIMEPAGE_DOMAIN, like MCP_RESOURCE_URI above) so a self-host never
       # silently probes someone else's control plane. Override only for a

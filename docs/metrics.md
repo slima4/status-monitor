@@ -19,7 +19,9 @@ these names verbatim.
 | `uptimepage_storage_dropped_results_total{reason}` | counter | results dropped before reaching the sink (queue full, etc.) |
 | `uptimepage_notifications_total{channel,kind}` | counter | alert notifications dispatched |
 | `uptimepage_notifications_failures_total{channel}` | counter | notification dispatches that returned an error |
-| `uptimepage_alerts_dropped_total{reason}` | counter | alert signals dropped before reaching the engine |
+| `uptimepage_alerts_dropped_total{reason}` | counter | incident paging signals dropped before reaching the escalation engine, by `NotificationReason` (`opened`/`escalated`/`resolved`/`reopened`/`no_data`/`data_resumed`). A lifecycle change never blocks on paging throughput, so a saturated signal channel drops here; the incident row stays in Postgres for the reconcile sweep |
+| `uptimepage_notifications_dead_lettered_total{transport}` | counter | incident pages that exhausted all retries without delivering, by transport |
+| `uptimepage_telegram_send_deferred_total` | counter | Telegram sends held back by the per-bot/per-chat send budget rather than sent immediately. Sustained growth means the central bot is rate-limit bound |
 | `uptimepage_host_throttle_waits_total{kind}` | counter | per-(org,host,port) (`kind=host`) or per-TLD RDAP (`kind=rdap`) throttle acquire attempts |
 | `uptimepage_host_throttle_drops_total` | counter | host-bulkhead rejections — `kind=host` over-cap checks recorded as `degraded` without firing alerts. RDAP drops do NOT increment this counter; they fall through to the sticky last-good path (see `domain_expiry_stale_served_total`) |
 | `uptimepage_rdap_singleflight_total{outcome}` | counter | RDAP singleflight outcome per domain — `hit` (cached, no outbound request) or `miss` (fetcher invoked) |
@@ -37,12 +39,16 @@ these names verbatim.
 | `uptimepage_check_ttfb_ms` | histogram | time-to-first-byte: request sent to response headers |
 | `uptimepage_storage_batch_size` | histogram | flush batch sizes |
 | `uptimepage_storage_write_duration_ms` | histogram | flush durations |
+| `uptimepage_telegram_send_wait_ms` | histogram | wait imposed on a Telegram send by the send budget before its slot opened |
 | `uptimepage_targets_total` | gauge | targets in this process's scheduler registry (sampled). Non-zero only where in-process probing runs; a brain doing agent-only probing reports 0 by design — use `uptimepage_targets_enabled` for the configured-monitor count |
 | `uptimepage_targets_enabled{kind}` | gauge | configured enabled monitors counted from Postgres, by `kind`. Slow-cadence inventory gauge, scrape-cached so request load never reaches Postgres; correct on a brain regardless of where probing runs |
 | `uptimepage_users_active` | gauge | non-deleted user accounts counted from Postgres. Slow-cadence inventory gauge, scrape-cached |
 | `uptimepage_workers_in_flight` | gauge | current worker-pool semaphore depth (sampled) |
 | `uptimepage_result_queue_depth` | gauge | depth of the result channel buffer (sampled) |
 | `uptimepage_circuit_breakers_open` | gauge | currently-open breakers (sampled) |
+| `uptimepage_monitors_unmonitored` | gauge | monitors whose covering probes have all gone silent (no fresh results), from the silence sweep. Distinct from down: these have no data at all |
+| `uptimepage_agent_up{region,agent}` | gauge | 1 if a regional agent checked in within the staleness window, else 0. Emitted by the control plane from `agents.last_seen_at`, so it covers remote agents that Alloy can't scrape |
+| `uptimepage_agent_last_seen_age_seconds{region,agent}` | gauge | seconds since a regional agent last checked in. Climbs unbounded when an agent goes dark |
 | `uptimepage_pg_pool_size` | gauge | total connections held in the sqlx Postgres pool (idle + in-use). Bounded above by `storage.postgres.max_connections` |
 | `uptimepage_pg_pool_idle` | gauge | connections sitting idle in the Postgres pool. A persistent `idle = 0` alongside `in_use` at the max is the saturation signal |
 | `uptimepage_pg_pool_in_use` | gauge | connections checked out of the Postgres pool right now (`size − idle`). Alert on a sustained high `in_use / size` ratio |
