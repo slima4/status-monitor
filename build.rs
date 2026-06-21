@@ -66,26 +66,90 @@ fn watch_git_head() {
     }
 }
 
+/// Bundle the authored JS via the shared `scripts/build-js.sh`. Release hashes
+/// names + emits a manifest (immutable caching) and sets the `assets_manifest`
+/// cfg so `assets.rs` resolves through it; debug uses stable names served via
+/// the per-request fingerprint, letting `just watch-js` re-bundle into a running
+/// dev server with no rebuild. The single PROFILE check keeps the build output
+/// and the runtime resolver on the same side. (Both layouts share static/js, so
+/// a local `--release` build leaves it in release layout until the next debug.)
+fn build_js() {
+    println!("cargo::rustc-check-cfg=cfg(assets_manifest)");
+
+    let status = Command::new("scripts/build-js.sh")
+        .arg("build")
+        .status()
+        .expect("failed to invoke scripts/build-js.sh");
+    assert!(status.success(), "build-js.sh exited non-zero");
+
+    if std::env::var("PROFILE").as_deref() == Ok("release") {
+        write_js_manifest("static/js/.esbuild-meta.json", "static/js/manifest.json");
+        println!("cargo::rustc-cfg=assets_manifest");
+    }
+}
+
+/// Map esbuild's metafile to `logical → hashed` for the asset filter, e.g.
+/// `js/ui/api_form.js` → `js/ui/api_form-NBH4BHCR.js`.
+fn write_js_manifest(meta_path: &str, manifest_path: &str) {
+    let meta: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(meta_path).expect("read esbuild metafile"))
+            .expect("parse esbuild metafile");
+
+    let mut manifest = serde_json::Map::new();
+    for (output, info) in meta["outputs"].as_object().expect("metafile outputs") {
+        let Some(entry) = info["entryPoint"].as_str() else {
+            continue;
+        };
+        let logical = entry.strip_prefix("assets/").unwrap_or(entry);
+        let served = output.strip_prefix("static/").unwrap_or(output);
+        manifest.insert(
+            logical.to_string(),
+            serde_json::Value::String(served.to_string()),
+        );
+    }
+
+    std::fs::write(
+        manifest_path,
+        serde_json::to_vec_pretty(&serde_json::Value::Object(manifest))
+            .expect("serialize manifest"),
+    )
+    .expect("write JS manifest");
+}
+
 fn main() {
     emit_source_identity();
 
     // Tailwind v4 scans `templates/**/*.html`, `src/**/*.rs`, AND
-    // `static/js/**/*.js` for class names (see @source directives in
+    // `assets/js/**/*.js` for class names (see @source directives in
     // static/css/input.css), so the CSS must rebuild whenever any of those
     // trees changes — including Rust files and JS modals that emit class
     // strings. The ~40ms overhead is the cost of co-locating class names with
     // the code that uses them.
     println!("cargo::rerun-if-changed=templates");
     println!("cargo::rerun-if-changed=static/css/input.css");
-    println!("cargo::rerun-if-changed=static/js");
+    println!("cargo::rerun-if-changed=assets/js");
     println!("cargo::rerun-if-changed=src");
     println!("cargo::rerun-if-changed=scripts/fetch-tailwind.sh");
+    println!("cargo::rerun-if-changed=scripts/fetch-esbuild.sh");
+    println!("cargo::rerun-if-changed=scripts/build-js.sh");
+    // Vendored libs live committed under static/js (esbuild only writes
+    // subdirs), so watch them explicitly — they're outside the assets/js tree.
+    for lib in [
+        "echarts.min.js",
+        "htmx.min.js",
+        "qrcode.min.js",
+        "json-enc.js",
+    ] {
+        println!("cargo::rerun-if-changed=static/js/{lib}");
+    }
     // `include_dir!` does NOT emit a watcher of its own. Without this
     // an added blog post lands in main, a warm `cargo build` reuses the
     // cached binary, and the new post 404s on a route that was already
     // merged. Belt-and-braces — `src` above already covers it, but
     // pinning the content tree makes the dependency explicit.
     println!("cargo::rerun-if-changed=src/marketing/content");
+
+    build_js();
 
     if !Path::new("bin/tailwindcss").exists() {
         let fetch = Command::new("scripts/fetch-tailwind.sh")

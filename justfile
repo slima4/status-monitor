@@ -88,6 +88,13 @@ dev-regions-logs:
 
 # ── Build / run ─────────────────────────────────────────────────────────────
 
+# Re-bundle assets/js on every change into the running dev server. Debug uses
+# stable filenames + a per-request fingerprint, so a browser reload picks up JS
+# edits with no cargo rebuild or restart. Run in a second terminal next to
+# `just run`.
+watch-js:
+    bash scripts/build-js.sh watch
+
 # Native run against `just up`. Debug-level by default for local dev;
 # export RUST_LOG to override. Mirrors the dev-app container's filter so
 # native and in-container logs match.
