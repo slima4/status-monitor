@@ -36,7 +36,7 @@ const LLMS_OVERVIEW: &str = "Uptimepage pairs uptime monitoring with a public st
 Checks run every minute; a failing check opens an incident automatically and posts it to a branded status page \
 on your own subdomain. Alerts carry dedupe and flap-suppression so brief blips never page on-call. \
 Public data is available as JSON, an RSS feed and an embeddable SVG badge. One free plan covers the full \
-feature set. Sign in with GitHub, no card.";
+feature set. Start free, no card.";
 
 /// Machine-readable product facts. Authored single source for the
 /// llms files — keep terse, factual, and current.
@@ -282,7 +282,7 @@ fn build_llms(cfg: &MarketingCfg) -> Bytes {
         "- [Homepage]({origin}): Product overview, features and pricing.\n"
     ));
     s.push_str(&format!(
-        "- [Start free]({app}): Sign in with GitHub and add your first monitor.\n\n",
+        "- [Start free]({app}): Sign in and add your first monitor.\n\n",
         app = cfg.app_url,
     ));
 
