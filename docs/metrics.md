@@ -37,7 +37,9 @@ these names verbatim.
 | `uptimepage_check_ttfb_ms` | histogram | time-to-first-byte: request sent to response headers |
 | `uptimepage_storage_batch_size` | histogram | flush batch sizes |
 | `uptimepage_storage_write_duration_ms` | histogram | flush durations |
-| `uptimepage_targets_total` | gauge | enabled targets known to the registry (sampled) |
+| `uptimepage_targets_total` | gauge | targets in this process's scheduler registry (sampled). Non-zero only where in-process probing runs; a brain doing agent-only probing reports 0 by design — use `uptimepage_targets_enabled` for the configured-monitor count |
+| `uptimepage_targets_enabled{kind}` | gauge | configured enabled monitors counted from Postgres, by `kind`. Slow-cadence inventory gauge, scrape-cached so request load never reaches Postgres; correct on a brain regardless of where probing runs |
+| `uptimepage_users_active` | gauge | non-deleted user accounts counted from Postgres. Slow-cadence inventory gauge, scrape-cached |
 | `uptimepage_workers_in_flight` | gauge | current worker-pool semaphore depth (sampled) |
 | `uptimepage_result_queue_depth` | gauge | depth of the result channel buffer (sampled) |
 | `uptimepage_circuit_breakers_open` | gauge | currently-open breakers (sampled) |

@@ -367,6 +367,14 @@ async fn main() -> Result<()> {
         })
     };
 
+    // Inventory gauges from Postgres on a slow cadence — correct on a brain
+    // where the scheduler registry is empty because agents do the probing.
+    let inventory_handle: JoinHandle<()> = {
+        let pg = pg_pool_for_stores.clone();
+        let token = root.clone();
+        tokio::spawn(async move { uptimepage::observability::inventory::run(pg, token).await })
+    };
+
     // Incident paging worker: the single notification path. Always running — it
     // pages a monitor's bound channels on open/resolve (region-aware) and walks
     // an escalation policy when one is bound. The `escalation.enabled` flag only
@@ -738,6 +746,7 @@ async fn main() -> Result<()> {
             sampler_handle,
             incident_writer_handle,
             agent_health_handle,
+            inventory_handle,
             silence_sweep_handle,
             escalation_engine_handle,
             purge_handle,

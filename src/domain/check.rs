@@ -17,6 +17,10 @@ pub enum CheckSpec {
 }
 
 impl CheckSpec {
+    /// Every kind string `kind()` can return. Bounded set — safe as a metric
+    /// label and lets inventory emit a 0 for kinds with no enabled monitors.
+    pub const ALL_KINDS: [&'static str; 5] = ["http", "tcp", "dns", "tls_cert", "domain_expiry"];
+
     pub fn kind(&self) -> &'static str {
         match self {
             CheckSpec::Http(_) => "http",
@@ -197,5 +201,32 @@ mod duration_ms {
     pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Duration, D::Error> {
         let ms = u64::deserialize(d)?;
         Ok(Duration::from_millis(ms))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Adding a CheckSpec variant breaks this exhaustive match, forcing ALL_KINDS
+    // (and the count asserted below) to be updated in the same change.
+    #[allow(dead_code)]
+    fn variant_guard(spec: &CheckSpec) {
+        match spec {
+            CheckSpec::Http(_)
+            | CheckSpec::Tcp(_)
+            | CheckSpec::Dns(_)
+            | CheckSpec::TlsCert(_)
+            | CheckSpec::DomainExpiry(_) => {}
+        }
+    }
+
+    #[test]
+    fn all_kinds_unique_and_complete() {
+        let mut seen = std::collections::HashSet::new();
+        for k in CheckSpec::ALL_KINDS {
+            assert!(seen.insert(k), "duplicate kind in ALL_KINDS: {k}");
+        }
+        assert_eq!(CheckSpec::ALL_KINDS.len(), 5);
     }
 }

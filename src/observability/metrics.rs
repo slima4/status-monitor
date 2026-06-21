@@ -91,7 +91,15 @@ fn register_descriptions() {
 
     describe_gauge!(
         "uptimepage_targets_total",
-        "Total targets known to the registry"
+        "Targets in this process's scheduler registry. Non-zero only where in-process probing runs; a brain with agent-only probing reports 0 by design — use uptimepage_targets_enabled for the configured-monitor count"
+    );
+    describe_gauge!(
+        "uptimepage_targets_enabled",
+        "Configured enabled monitors counted from Postgres, labelled by kind. Inventory gauge refreshed on a slow cadence and scrape-cached, so request load never reaches Postgres. Source of truth for the dashboard monitor count regardless of where probing runs"
+    );
+    describe_gauge!(
+        "uptimepage_users_active",
+        "Non-deleted user accounts counted from Postgres. Slow-cadence inventory gauge, scrape-cached"
     );
     describe_gauge!("uptimepage_workers_in_flight", "Checks currently executing");
     describe_gauge!(
@@ -203,6 +211,8 @@ pub mod names {
     pub const STORAGE_BATCH_SIZE: &str = "uptimepage_storage_batch_size";
     pub const STORAGE_WRITE_DURATION_MS: &str = "uptimepage_storage_write_duration_ms";
     pub const TARGETS_TOTAL: &str = "uptimepage_targets_total";
+    pub const TARGETS_ENABLED: &str = "uptimepage_targets_enabled";
+    pub const USERS_ACTIVE: &str = "uptimepage_users_active";
     pub const WORKERS_IN_FLIGHT: &str = "uptimepage_workers_in_flight";
     pub const RESULT_QUEUE_DEPTH: &str = "uptimepage_result_queue_depth";
     pub const BREAKERS_OPEN: &str = "uptimepage_circuit_breakers_open";

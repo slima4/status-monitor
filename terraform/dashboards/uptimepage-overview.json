@@ -64,9 +64,9 @@
       "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
       "pluginVersion": "11.0.0",
       "targets": [
-        { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "editorMode": "code", "expr": "uptimepage_targets_total", "legendFormat": "targets", "instant": true, "range": false, "refId": "A" }
+        { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "editorMode": "code", "expr": "sum(max by (kind) (uptimepage_targets_enabled))", "legendFormat": "monitors", "instant": true, "range": false, "refId": "A" }
       ],
-      "title": "Active targets",
+      "title": "Configured monitors",
       "type": "stat"
     },
     {
