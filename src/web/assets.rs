@@ -1,9 +1,9 @@
 //! Static asset serving with content-addressed cache busting.
 //!
 //! One source of truth: [`url`] maps a logical path (`css/app.css`) to its
-//! cache-busting URL (`/static/css/app.css?v=<hash>`), where `<hash>` is a
-//! prefix of the file's SHA-256. The hash changes iff the bytes change —
-//! that is what makes the `immutable` response header *truthful* rather
+//! cache-busting URL (`/static/css/app.css?v=<hash>`). The hash changes iff
+//! the bytes change — and for a JS module, iff any module it imports changes
+//! — which is what makes the `immutable` response header *truthful* rather
 //! than a year-long promise the server can't keep.
 //!
 //! Templates must reference assets only through the `asset` askama filter
@@ -23,7 +23,9 @@ use std::sync::LazyLock;
 use axum::extract::{Path, RawQuery};
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
+use regex::Regex;
 use rust_embed::Embed;
+use sha2::{Digest, Sha256};
 
 /// Static assets embedded into the release binary. In debug builds
 /// rust-embed reads from the filesystem so edits show up without rebuilding.
@@ -31,17 +33,73 @@ use rust_embed::Embed;
 #[folder = "static/"]
 struct StaticAssets;
 
-/// Logical path → 8-hex content fingerprint, built once from the embedded
-/// (release) or on-disk (debug) bytes.
+/// Matches the specifier in `from "x"`, side-effect `import "x"`, and dynamic
+/// `import("x")`. `import {a} from "x"` is caught by the `from "x"` arm.
+static JS_IMPORT: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"(?:from|import)\s*\(?\s*["']([^"']+)["']"#).unwrap());
+
+/// Bundle-relative path a JS import resolves to (`js/a.js` + `../b/c.js` →
+/// `js/b/c.js`), or None if it climbs above the root.
+fn resolve_import(importer: &str, spec: &str) -> Option<String> {
+    let mut parts: Vec<&str> = importer.split('/').collect();
+    parts.pop();
+    for seg in spec.split('/') {
+        match seg {
+            "." | "" => {}
+            ".." => {
+                parts.pop()?;
+            }
+            s => parts.push(s),
+        }
+    }
+    Some(parts.join("/"))
+}
+
+/// Logical path → 8-hex fingerprint over the file's bytes and, for JS, every
+/// module it transitively imports — so editing a sub-import re-versions the
+/// entry that pulls it in. 4 bytes only has to change when the bytes do, not
+/// resist collision, for the handful of bundled assets.
 static FINGERPRINTS: LazyLock<HashMap<String, String>> = LazyLock::new(|| {
-    StaticAssets::iter()
-        .filter_map(|p| {
-            // rust-embed already SHA-256s every file (baked in release, read
-            // from disk in debug) — reuse that instead of a second hash
-            // pass. 4 bytes is plenty: it only has to change when the bytes
-            // do, not resist collision, for the handful of bundled assets.
-            let hash = StaticAssets::get(&p)?.metadata.sha256_hash();
-            Some((p.to_string(), hex::encode(&hash[..4])))
+    let files: HashMap<String, Vec<u8>> = StaticAssets::iter()
+        .filter_map(|p| Some((p.to_string(), StaticAssets::get(&p)?.data.into_owned())))
+        .collect();
+
+    let imports: HashMap<&str, Vec<String>> = files
+        .iter()
+        .map(|(path, bytes)| {
+            let deps = match path
+                .strip_suffix(".js")
+                .and(std::str::from_utf8(bytes).ok())
+            {
+                Some(src) => JS_IMPORT
+                    .captures_iter(src)
+                    .map(|c| c[1].to_string())
+                    .filter(|s| s.starts_with('.'))
+                    .filter_map(|s| resolve_import(path, &s))
+                    .filter(|r| files.contains_key(r))
+                    .collect(),
+                None => Vec::new(),
+            };
+            (path.as_str(), deps)
+        })
+        .collect();
+
+    files
+        .keys()
+        .map(|path| {
+            let mut closure = std::collections::BTreeSet::new();
+            let mut stack = vec![path.as_str()];
+            while let Some(p) = stack.pop() {
+                if closure.insert(p) {
+                    stack.extend(imports[p].iter().map(String::as_str));
+                }
+            }
+            let mut hasher = Sha256::new();
+            for member in &closure {
+                hasher.update(member.as_bytes());
+                hasher.update(&files[*member]);
+            }
+            (path.clone(), hex::encode(&hasher.finalize()[..4]))
         })
         .collect()
 });
@@ -120,6 +178,37 @@ mod tests {
     #[test]
     fn url_unknown_asset_falls_back_to_bare_path() {
         assert_eq!(url("does/not/exist.js"), "/static/does/not/exist.js");
+    }
+
+    #[test]
+    fn resolve_import_walks_relative_paths() {
+        assert_eq!(
+            resolve_import("js/charts/detail_charts.js", "./_init.js").as_deref(),
+            Some("js/charts/_init.js"),
+        );
+        assert_eq!(
+            resolve_import("js/charts/a.js", "../ui/b.js").as_deref(),
+            Some("js/ui/b.js"),
+        );
+        assert_eq!(resolve_import("js/a.js", "../../../escape.js"), None);
+    }
+
+    #[test]
+    fn fingerprint_covers_transitive_imports() {
+        let entry = url("js/charts/detail_charts.js");
+        let dep = StaticAssets::get("js/charts/_init.js").expect("dep exists");
+        let fp = entry.split("v=").nth(1).expect("versioned entry");
+        // Entry fingerprint must fold the dep's bytes, so it differs from a
+        // hash of the entry alone.
+        let mut entry_only = Sha256::new();
+        entry_only.update(b"js/charts/detail_charts.js");
+        entry_only.update(
+            &StaticAssets::get("js/charts/detail_charts.js")
+                .unwrap()
+                .data,
+        );
+        assert_ne!(fp, hex::encode(&entry_only.finalize()[..4]));
+        assert!(!dep.data.is_empty());
     }
 
     #[tokio::test]
