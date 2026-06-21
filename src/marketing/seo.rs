@@ -49,7 +49,7 @@ const LLMS_FACTS: &[(&str, &str)] = &[
     ),
     (
         "Alert channels",
-        "Slack, Discord, Telegram, Microsoft Teams, email, SMS, webhook, PagerDuty, ntfy, Pushover, WhatsApp",
+        "Slack, Discord, Telegram, Microsoft Teams, Google Chat, email, SMS, webhook, PagerDuty, ntfy, Pushover, WhatsApp",
     ),
     (
         "Status page",

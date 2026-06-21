@@ -117,7 +117,16 @@ pub const LANDINGS: &[Landing] = &[
             },
         ],
         code: None,
-        resources: &[],
+        resources: &[
+            ResourceLink {
+                label: "Free pricing",
+                href: "/pricing",
+            },
+            ResourceLink {
+                label: "Versus Statuspage",
+                href: "/vs/statuspage",
+            },
+        ],
         cta: "Start free",
     },
     Landing {
@@ -164,7 +173,16 @@ pub const LANDINGS: &[Landing] = &[
             },
         ],
         code: None,
-        resources: &[],
+        resources: &[
+            ResourceLink {
+                label: "Free pricing",
+                href: "/pricing",
+            },
+            ResourceLink {
+                label: "For SaaS teams",
+                href: "/status-page-for-saas",
+            },
+        ],
         cta: "Start free",
     },
     Landing {
@@ -420,7 +438,16 @@ docker compose up -d"#,
             },
         ],
         code: None,
-        resources: &[],
+        resources: &[
+            ResourceLink {
+                label: "Free pricing",
+                href: "/pricing",
+            },
+            ResourceLink {
+                label: "Status pages for SaaS",
+                href: "/status-page-for-saas",
+            },
+        ],
         cta: "Start free",
     },
     Landing {
@@ -471,7 +498,16 @@ docker compose up -d"#,
             },
         ],
         code: None,
-        resources: &[],
+        resources: &[
+            ResourceLink {
+                label: "Status pages for SaaS",
+                href: "/status-page-for-saas",
+            },
+            ResourceLink {
+                label: "Open-source status page",
+                href: "/open-source-status-page",
+            },
+        ],
         cta: "Start free",
     },
     Landing {
@@ -989,6 +1025,78 @@ fn page_faqs(path: &str) -> &'static [(&'static str, &'static str)] {
             (
                 "Is it free to self-host?",
                 "Yes. The AGPL source runs with `docker compose up` on Postgres and ClickHouse, and the hosted tier is $0 a month.",
+            ),
+        ],
+        "/status-page-for-saas" => &[
+            (
+                "Can I put the status page on my own domain?",
+                "Every org gets a branded status page on its own subdomain with your logo and colours, and a custom CNAME is on the way.",
+            ),
+            (
+                "How fast does it detect an outage?",
+                "Checks run as often as every 60 seconds from multiple regions, and a failing check opens an incident automatically and posts it to the page.",
+            ),
+            (
+                "Will the status page stay up when my app is down?",
+                "Yes. The public page is cached and served independently, so it keeps loading even when the service it reports on is struggling.",
+            ),
+            (
+                "Can customers subscribe to updates?",
+                "Yes. Visitors opt in with confirmed email or webhook and hear about every incident and maintenance change, with signed payloads they can verify.",
+            ),
+        ],
+        "/status-page-for-agencies" => &[
+            (
+                "Can I manage many clients from one account?",
+                "Yes. Watch every client site from a single dashboard and give each client its own branded status page.",
+            ),
+            (
+                "Does each client get a separate branded page?",
+                "Yes. Each status page carries that client’s own logo and colours on its own subdomain.",
+            ),
+            (
+                "Can I control who sees what?",
+                "Organizations come with roles and invitations and are isolated per tenant, so teammates and clients only see what you grant them.",
+            ),
+            (
+                "Is it free to start?",
+                "Yes. The hosted tier is $0 a month with every feature and no credit card, and the AGPL source is free to self-host.",
+            ),
+        ],
+        "/automation" => &[
+            (
+                "How do I manage monitors as code?",
+                "Use the official Terraform provider to declare monitors, status pages and notification channels in HCL, then review changes in a pull request.",
+            ),
+            (
+                "Is there a REST API?",
+                "Yes. A full REST API backs everything, with scoped, org-bound tokens you can set to expire.",
+            ),
+            (
+                "What can the MCP server do?",
+                "An LLM client can read monitors and incidents and take fenced, approval-gated actions over MCP, with one-click OAuth.",
+            ),
+            (
+                "Do hosted and self-hosted share the same API?",
+                "Yes. The data model, REST API and Terraform provider are identical whether you run the hosted tier or self-host.",
+            ),
+        ],
+        "/mcp-server" => &[
+            (
+                "Which LLM clients work with it?",
+                "Any Model Context Protocol client, including Claude, IDEs and the claude.ai connector. Connect with one-click OAuth or a scoped token.",
+            ),
+            (
+                "Can the AI change my monitors?",
+                "Only with your approval. Read tools cannot change anything, and each write action needs a scoped token plus your in-the-moment confirmation, and is audited.",
+            ),
+            (
+                "What can it read?",
+                "Org health, monitor lists and history, incident timelines, status pages and usage against your plan.",
+            ),
+            (
+                "Is it safe from prompt injection?",
+                "Customer-supplied text reaches the model labelled as data, never instructions, and no action runs without out-of-band human approval.",
             ),
         ],
         _ => &[],
