@@ -480,7 +480,8 @@ app.{$UPTIMEPAGE_DOMAIN} {
 		Referrer-Policy "strict-origin-when-cross-origin"
 		# CSP for the marketing surface: same-origin static + JSON-LD
 		# inline blob only (no third-party JS until analytics is wired).
-		Content-Security-Policy "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; base-uri 'self'; form-action 'self'"
+		# img-src also allows our own status badge served from the status host.
+		Content-Security-Policy "default-src 'self'; img-src 'self' data: https://uptimepage.{$UPTIMEPAGE_DOMAIN}; style-src 'self'; script-src 'self'; base-uri 'self'; form-action 'self'"
 		-Server
 	}
 
