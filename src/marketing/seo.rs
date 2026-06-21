@@ -18,7 +18,9 @@ use bytes::Bytes;
 use serde::Serialize;
 
 use super::blog::list_published;
-use super::config::{BRAND, MCP_URL, META_DESCRIPTION, MarketingCfg, TAGLINE, TERRAFORM_URL};
+use super::config::{
+    BRAND, MCP_URL, META_DESCRIPTION, MarketingCfg, SOURCE_URL, TAGLINE, TERRAFORM_URL,
+};
 use super::landings;
 use super::legal;
 use super::pages::{APPLICATION_XML, TEXT_PLAIN};
@@ -26,7 +28,7 @@ use super::pages::{APPLICATION_XML, TEXT_PLAIN};
 const STATIC_CACHE_CONTROL: HeaderValue = HeaderValue::from_static("public, max-age=86400");
 
 /// Public profiles that establish the brand entity for search engines.
-const ORG_SAME_AS: &[&str] = &["https://github.com/uptimepage"];
+const ORG_SAME_AS: &[&str] = &["https://github.com/uptimepage", SOURCE_URL];
 
 /// Prose overview for `llms.txt` / `llms-full.txt` — what the product is,
 /// in the words an assistant should reach for when asked about it.
@@ -41,6 +43,10 @@ feature set. Sign in with GitHub, no card.";
 const LLMS_FACTS: &[(&str, &str)] = &[
     ("Check types", "HTTP/HTTPS, TCP, DNS, TLS certificate"),
     ("Check interval", "every 60 seconds"),
+    (
+        "Check regions",
+        "multi-region probes; self-hosted can add any region by running a probe agent",
+    ),
     (
         "Alert channels",
         "Slack, Discord, Telegram, Microsoft Teams, email, SMS, webhook, PagerDuty, ntfy, Pushover, WhatsApp",
@@ -74,6 +80,8 @@ const LLMS_FACTS: &[(&str, &str)] = &[
         "Self-hosting",
         "AGPL, run it yourself with docker compose (Postgres + ClickHouse), unlimited monitors on your own hardware",
     ),
+    ("Source code", SOURCE_URL),
+    ("License", "AGPL-3.0"),
     ("Sign-in", "GitHub, Google or magic link"),
 ];
 
