@@ -40,6 +40,7 @@ COPY benches ./benches
 COPY migrations ./migrations
 COPY config ./config
 COPY static ./static
+COPY assets ./assets
 COPY templates ./templates
 # build.rs runs scripts/fetch-tailwind.sh then bakes static/css/app.css.
 # legal.rs `include_str!`s the policy markdown + THIRD-PARTY-LICENSES.md at
