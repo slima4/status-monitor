@@ -33,6 +33,28 @@ export function resolveToken(name, prop = "color") {
     return value;
 }
 
+// ECharts' hover emphasis parses colours numerically and only groks rgb/hex;
+// a token that resolves to oklch comes back from getComputedStyle as oklab(),
+// which it can't parse. Paint a pixel and read it back to flatten to sRGB.
+let colorCtx = null;
+function toRgb(value) {
+    if (!colorCtx) colorCtx = document.createElement("canvas").getContext("2d");
+    colorCtx.fillStyle = value;
+    colorCtx.fillRect(0, 0, 1, 1);
+    const [r, g, b] = colorCtx.getImageData(0, 0, 1, 1).data;
+    return `rgb(${r}, ${g}, ${b})`;
+}
+
+const tokenCache = new Map();
+export function resolveTokenCached(name, prop = "color") {
+    const key = `${prop} ${name}`;
+    if (!tokenCache.has(key)) {
+        const raw = resolveToken(name, prop);
+        tokenCache.set(key, prop === "color" ? toRgb(raw) : raw);
+    }
+    return tokenCache.get(key);
+}
+
 export async function fetchJson(url) {
     const res = await fetch(url, { headers: { Accept: "application/json" } });
     if (!res.ok) throw new Error(`${url} → ${res.status}`);

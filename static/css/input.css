@@ -176,6 +176,20 @@
     --theme-state-warn-fg-onsoft: oklch(0.40 0.12 80);
     --theme-state-warn-strong:    oklch(0.78 0.14 80);
 
+    /* p50/p95/p99 quantile lines; 1–8 cycle the per-region overlay. */
+    --color-chart-p50: #0ea5e9;
+    --color-chart-p95: #6366f1;
+    --color-chart-p99: #dc2626;
+
+    --color-chart-1: #0ea5e9;
+    --color-chart-2: #6366f1;
+    --color-chart-3: #dc2626;
+    --color-chart-4: #16a34a;
+    --color-chart-5: #d97706;
+    --color-chart-6: #7c3aed;
+    --color-chart-7: #0891b2;
+    --color-chart-8: #db2777;
+
     /* Public-status state palette. One source for the 6 day-states; the
        day strip, legend dots, and popover badge all derive from these.
        Retune a hue here — every surface follows in lockstep. */
