@@ -28,7 +28,7 @@
       }
     ]
   },
-  "description": "Operator metrics for uptimepage. Single-instance: no org_id label (operator-only). Histograms are exposed as Prometheus summaries by metrics-exporter-prometheus (quantile labels), so latency panels read {quantile=...} directly rather than histogram_quantile().",
+  "description": "Operator metrics for uptimepage. Single-instance: no org_id label (operator-only). The uptimepage_check_*_ms latency family is exposed as histograms, so its panels use histogram_quantile() over _bucket series; the other histograms keep summary quantile labels, read directly as {quantile=...}.",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -166,9 +166,9 @@
       "id": 12,
       "options": { "legend": { "calcs": ["mean", "lastNotNull"], "displayMode": "table", "placement": "right", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
       "targets": [
-        { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "editorMode": "code", "expr": "uptimepage_check_duration_ms{quantile=\"0.5\"}", "legendFormat": "p50", "range": true, "refId": "A" },
-        { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "editorMode": "code", "expr": "uptimepage_check_duration_ms{quantile=\"0.9\"}", "legendFormat": "p90", "range": true, "refId": "B" },
-        { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "editorMode": "code", "expr": "uptimepage_check_duration_ms{quantile=\"0.99\"}", "legendFormat": "p99", "range": true, "refId": "C" }
+        { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "editorMode": "code", "expr": "histogram_quantile(0.5, sum(rate(uptimepage_check_duration_ms_bucket[5m])) by (le))", "legendFormat": "p50", "range": true, "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "editorMode": "code", "expr": "histogram_quantile(0.9, sum(rate(uptimepage_check_duration_ms_bucket[5m])) by (le))", "legendFormat": "p90", "range": true, "refId": "B" },
+        { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "editorMode": "code", "expr": "histogram_quantile(0.99, sum(rate(uptimepage_check_duration_ms_bucket[5m])) by (le))", "legendFormat": "p99", "range": true, "refId": "C" }
       ],
       "title": "Check duration (p50 / p90 / p99)",
       "type": "timeseries"
@@ -180,10 +180,10 @@
       "id": 13,
       "options": { "legend": { "calcs": ["mean", "lastNotNull"], "displayMode": "table", "placement": "right", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
       "targets": [
-        { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "editorMode": "code", "expr": "uptimepage_check_dns_ms{quantile=\"0.99\"}", "legendFormat": "dns p99", "range": true, "refId": "A" },
-        { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "editorMode": "code", "expr": "uptimepage_check_connect_ms{quantile=\"0.99\"}", "legendFormat": "connect p99", "range": true, "refId": "B" },
-        { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "editorMode": "code", "expr": "uptimepage_check_tls_ms{quantile=\"0.99\"}", "legendFormat": "tls p99", "range": true, "refId": "C" },
-        { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "editorMode": "code", "expr": "uptimepage_check_ttfb_ms{quantile=\"0.99\"}", "legendFormat": "ttfb p99", "range": true, "refId": "D" }
+        { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "editorMode": "code", "expr": "histogram_quantile(0.99, sum(rate(uptimepage_check_dns_ms_bucket[5m])) by (le))", "legendFormat": "dns p99", "range": true, "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "editorMode": "code", "expr": "histogram_quantile(0.99, sum(rate(uptimepage_check_connect_ms_bucket[5m])) by (le))", "legendFormat": "connect p99", "range": true, "refId": "B" },
+        { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "editorMode": "code", "expr": "histogram_quantile(0.99, sum(rate(uptimepage_check_tls_ms_bucket[5m])) by (le))", "legendFormat": "tls p99", "range": true, "refId": "C" },
+        { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "editorMode": "code", "expr": "histogram_quantile(0.99, sum(rate(uptimepage_check_ttfb_ms_bucket[5m])) by (le))", "legendFormat": "ttfb p99", "range": true, "refId": "D" }
       ],
       "title": "Connection phase latency p99 (new-connection only)",
       "type": "timeseries"
@@ -240,9 +240,9 @@
       "id": 18,
       "options": { "legend": { "calcs": ["mean", "max", "lastNotNull"], "displayMode": "table", "placement": "right", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
       "targets": [
-        { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "editorMode": "code", "expr": "max(uptimepage_check_dns_ms{quantile=\"0.95\"})", "legendFormat": "dns p95", "range": true, "refId": "A" },
-        { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "editorMode": "code", "expr": "max(uptimepage_check_connect_ms{quantile=\"0.95\"})", "legendFormat": "connect p95", "range": true, "refId": "B" },
-        { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "editorMode": "code", "expr": "max(uptimepage_check_tls_ms{quantile=\"0.95\"})", "legendFormat": "tls p95", "range": true, "refId": "C" }
+        { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "editorMode": "code", "expr": "histogram_quantile(0.95, sum(rate(uptimepage_check_dns_ms_bucket[5m])) by (le))", "legendFormat": "dns p95", "range": true, "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "editorMode": "code", "expr": "histogram_quantile(0.95, sum(rate(uptimepage_check_connect_ms_bucket[5m])) by (le))", "legendFormat": "connect p95", "range": true, "refId": "B" },
+        { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "editorMode": "code", "expr": "histogram_quantile(0.95, sum(rate(uptimepage_check_tls_ms_bucket[5m])) by (le))", "legendFormat": "tls p95", "range": true, "refId": "C" }
       ],
       "title": "HTTP connection phase latency (p95)",
       "type": "timeseries"

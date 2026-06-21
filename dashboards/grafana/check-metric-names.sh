@@ -18,20 +18,30 @@ fail=0
 emit() { echo "DRIFT: $*" >&2; fail=1; }
 
 # Names the binary actually knows: quoted "uptimepage_*" literals in
-# metrics.rs (the `names` consts, describe_* calls, and build_info).
-mapfile -t code_names < <(grep -oE '"uptimepage_[a-z_]+"' "$metrics_rs" | tr -d '"' | sort -u)
+# metrics.rs (the `names` consts, describe_* calls, and build_info). Require a
+# trailing letter so a bucket-matcher prefix like "uptimepage_check_" is not
+# mistaken for a metric name.
+mapfile -t code_names < <(grep -oE '"uptimepage_[a-z_]*[a-z]"' "$metrics_rs" | tr -d '"' | sort -u)
 
 contains() { local n="$1"; shift; local x; for x in "$@"; do [[ "$x" == "$n" ]] && return 0; done; return 1; }
+
+# Histogram/summary exposition appends _bucket/_sum/_count to the base name;
+# strip those so a panel querying a _bucket series maps back to the registered
+# metric. No registered name ends in these, so the strip is unambiguous.
+strip_suffix='s/_(bucket|sum|count)$//'
+# Drop prefix/glob references (a real metric name never ends in `_`), e.g. a
+# `uptimepage_check_*_ms` family mention in prose or a bucket-matcher prefix.
+drop_globs='/_$/d'
 
 # 1. dashboard -> binary
 while read -r n; do
   contains "$n" "${code_names[@]}" || emit "panel uses '$n' — not registered in src/observability/metrics.rs"
-done < <(grep -oE 'uptimepage_[a-z_]+' "$dash" | sort -u)
+done < <(grep -oE 'uptimepage_[a-z_]+' "$dash" | sed -E -e "$strip_suffix" -e "$drop_globs" | sort -u)
 
 # 2. docs -> binary
 while read -r n; do
   contains "$n" "${code_names[@]}" || emit "docs/metrics.md lists '$n' — not registered in src/observability/metrics.rs"
-done < <(grep -oE 'uptimepage_[a-z_]+' "$metrics_md" | sort -u)
+done < <(grep -oE 'uptimepage_[a-z_]+' "$metrics_md" | sed -E -e "$strip_suffix" -e "$drop_globs" | sort -u)
 
 # 3. binary -> docs
 for n in "${code_names[@]}"; do

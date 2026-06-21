@@ -32,7 +32,7 @@ these names verbatim.
 | `uptimepage_scheduler_consecutive_refresh_failures` | gauge | consecutive registry refresh failures since the last success. Primary alarm signal for a stuck scheduler — page when the value stays above 5 for more than a few minutes. Resets to 0 on the first successful refresh |
 | `uptimepage_scheduler_refresh_duration_ms` | histogram | wall-clock duration of one registry refresh tick (Postgres query + decode + DashMap diff). p99 climbing into the hundreds of ms means the current full-scan refresh is starting to strain at scale — the trigger for the deferred incremental-sync work |
 | `uptimepage_build_info{version}` | counter | set to 1 once at startup so the endpoint is never empty |
-| `uptimepage_check_duration_ms` | histogram | per-check wall time |
+| `uptimepage_check_duration_ms` | histogram | per-check wall time. The `uptimepage_check_*_ms` family is exposed as histogram buckets (not summary quantiles) so percentiles aggregate correctly across regions; query with `histogram_quantile()` |
 | `uptimepage_check_dns_ms` | histogram | DNS resolution latency (recorded in the hickory wrapper) |
 | `uptimepage_check_connect_ms` | histogram | TCP connect latency (every HTTP check connects fresh) |
 | `uptimepage_check_tls_ms` | histogram | TLS handshake latency (per HTTPS check) |
@@ -56,20 +56,22 @@ these names verbatim.
 | `uptimepage_process_resident_bytes` | gauge | resident set size of the process (`VmRSS`) in bytes. Linux only — absent on non-Linux dev runs. Early-warning signal for slow leaks ahead of the OOM killer |
 | `uptimepage_clickhouse_max_part_count_for_partition` | gauge | ClickHouse `MaxPartCountForPartition` (sampled from `system.asynchronous_metrics`). Partition-explosion early warning — climbs toward `parts_to_throw_insert` (default 3000) if a high-cardinality column is added to `PARTITION BY` |
 | `uptimepage_http_requests_total{method,route,status}` | counter | inbound HTTP requests handled. `route` is `MatchedPath` (the path-pattern with placeholders) — cardinality bounded by the static router table, never by per-tenant ids. `status` is bucketed `2xx`/`3xx`/`4xx`/`5xx`/`other`; query `sum by (status) (rate(...[5m]))` for the SLO ratio |
-| `uptimepage_http_request_duration_ms{method,route}` | histogram | inbound HTTP request latency. Query `name{quantile="0.99"}` for tail latency per route — same summary-quantile exposition as the check histograms |
+| `uptimepage_http_request_duration_ms{method,route}` | histogram | inbound HTTP request latency, exposed as summary quantiles (single web instance, no cross-instance merge). Query `name{quantile="0.99"}` for tail latency per route |
 | `uptimepage_http_responses_inflight` | gauge | inbound HTTP requests currently being served. Climbing alongside flat throughput points at handler back-pressure on a downstream pool |
 | `uptimepage_ratelimit_drops_total{scope}` | counter | HTTP 429s from the per-org / per-user rate-limit middleware. `scope` is the same string carried in the error body (`per_org_api_writes`, `per_user_bulk_ops`, …) so dashboards can join with `record_quota_event` audit rows. Abuse signal — a tenant hammering the API spikes one scope before shared resources notice |
 
 Scrape interval of 15 s is plenty — counters are written from hot tokio tasks; histograms aggregate per bucket without lock contention.
 
-**Histogram exposition.** `metrics-exporter-prometheus` is installed
-without a bucket configuration, so every `*_ms` / `*_size` histogram is
-exported as a Prometheus **summary** — quantile time series
-(`name{quantile="0.5|0.9|0.95|0.99|0.999"}`) plus `name_sum` and
-`name_count`. Query latency as `name{quantile="0.99"}` directly; do
-**not** use `histogram_quantile()` / `name_bucket` (no buckets are
-emitted). Gauges carry no `org_id` label — these are single-instance
-operator metrics, not per-tenant.
+**Histogram exposition.** Two forms. The `uptimepage_check_*_ms` family is
+configured with explicit buckets and exported as a Prometheus **histogram**
+(`name_bucket{le="..."}` plus `name_sum` / `name_count`); query it with
+`histogram_quantile(0.99, sum(rate(name_bucket[5m])) by (le))` so percentiles
+pool correctly across regional agents. Every other `*_ms` / `*_size` histogram
+keeps the default exposition, a Prometheus **summary** with precomputed
+quantile series (`name{quantile="0.5|0.9|0.95|0.99|0.999"}`) plus `name_sum`
+and `name_count`; query those as `name{quantile="0.99"}` directly. Gauges
+carry no `org_id` label, these are single-instance operator metrics, not
+per-tenant.
 
 ## OpenTelemetry tracing
 

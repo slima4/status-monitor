@@ -1,11 +1,19 @@
 use std::net::SocketAddr;
 
 use anyhow::Context;
-use metrics_exporter_prometheus::PrometheusBuilder;
+use metrics_exporter_prometheus::{Matcher, PrometheusBuilder};
 
 use crate::error::Result;
 
 pub struct MetricsHandle;
+
+// Buckets (ms) for the per-check latency family. Resolution is concentrated
+// where probe latencies sit; the top bucket is above the check timeout (10s)
+// so a timed-out check stays distinguishable instead of collapsing into +Inf
+// and saturating the high percentiles.
+const CHECK_LATENCY_BUCKETS_MS: &[f64] = &[
+    5.0, 10.0, 25.0, 50.0, 100.0, 250.0, 500.0, 1000.0, 2500.0, 5000.0, 7500.0, 10000.0, 30000.0,
+];
 
 pub fn init(bind: &str) -> Result<MetricsHandle> {
     let addr: SocketAddr = bind
@@ -14,6 +22,16 @@ pub fn init(bind: &str) -> Result<MetricsHandle> {
 
     PrometheusBuilder::new()
         .with_http_listener(addr)
+        // Per-check latencies are emitted by every regional agent and merged
+        // across regions, where a quantile of quantiles is wrong. Expose them
+        // as histogram buckets so histogram_quantile() aggregates correctly.
+        // The other histograms stay summaries: single control-plane instance,
+        // no cross-instance merge to get wrong.
+        .set_buckets_for_metric(
+            Matcher::Prefix("uptimepage_check_".to_owned()),
+            CHECK_LATENCY_BUCKETS_MS,
+        )
+        .context("set check-latency histogram buckets")?
         .install()
         .context("install prometheus exporter")?;
 
