@@ -605,6 +605,103 @@ resource "grafana_rule_group" "pipeline" {
   }
 }
 
+# Availability / dead-man alerts. Every rule above assumes data is flowing
+# and goes quiet when it stops; these fire on the absence itself, so a dark
+# pipeline can't masquerade as "all healthy".
+resource "grafana_rule_group" "availability" {
+  name             = "uptimepage-availability"
+  folder_uid       = grafana_folder.obs.uid
+  interval_seconds = 60
+
+  # No metrics are reaching Grafana Cloud at all (control plane down, Alloy
+  # down, or remote_write broken). build_info is emitted by every process on
+  # each scrape, so its absence means the whole app -> Alloy -> remote_write
+  # path is dead. no_data = OK: when metrics flow, absent() returns nothing,
+  # which is the healthy state; for=10m rides a blue/green deploy (one color
+  # always keeps build_info present).
+  rule {
+    name           = "UptimepageMetricsPipelineDown"
+    condition      = "C"
+    for            = "10m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+    labels = {
+      severity = "critical"
+      service  = "uptimepage"
+    }
+    annotations = {
+      summary     = "uptimepage: metrics pipeline down"
+      description = "no uptimepage metrics have reached Grafana Cloud for 10m (control plane, Alloy, or remote_write down). Monitoring is blind. Runbook: runbooks/grafana-cloud.md."
+    }
+    data {
+      ref_id         = "A"
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "A"
+        instant = true
+        expr    = "absent(uptimepage_build_info)"
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = local.threshold_c
+    }
+  }
+
+  # One or more enabled probe agents stopped checking in, so their regions'
+  # monitors are no longer being probed. Sourced from agents.last_seen_at via
+  # the control plane, so it covers remote agents too. The gauge is recomputed
+  # every sweep (a recovered, disabled, or removed agent drops out), so it
+  # can't latch the way a frozen per-agent series would. no_data = OK: no
+  # agents, or the brain itself dark (the rule above owns that case).
+  rule {
+    name           = "UptimepageRegionalAgentDown"
+    condition      = "C"
+    for            = "10m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+    labels = {
+      severity = "critical"
+      service  = "uptimepage"
+    }
+    annotations = {
+      summary     = "uptimepage: probe agent down"
+      description = "one or more enabled probe agents have not checked in for over the staleness window, so their regions are unprobed. See /operator/agents for which. Runbook: runbooks/grafana-cloud.md."
+    }
+    data {
+      ref_id         = "A"
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "A"
+        instant = true
+        expr    = "uptimepage_agents_enabled_down"
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = local.threshold_c
+    }
+  }
+}
+
 resource "grafana_contact_point" "default" {
   name = "uptimepage-default"
 

@@ -116,7 +116,11 @@ fn register_descriptions() {
     );
     describe_gauge!(
         "uptimepage_agent_up",
-        "1 if a regional agent checked in within the staleness window, else 0"
+        "1 if a regional agent checked in within the staleness window, else 0, labelled by region and agent. Per-agent series can freeze on agent removal; alert on uptimepage_agents_enabled_down instead"
+    );
+    describe_gauge!(
+        "uptimepage_agents_enabled_down",
+        "Count of enabled regional agents currently past the staleness window. Recomputed every sweep so it never latches, the dead-man signal for a probe region going dark"
     );
     describe_counter!(
         "uptimepage_notifications_total",
@@ -244,6 +248,7 @@ pub mod names {
     pub const RDAP_SINGLEFLIGHT_SLOTS: &str = "uptimepage_rdap_singleflight_slots";
     pub const AGENT_LAST_SEEN_AGE: &str = "uptimepage_agent_last_seen_age_seconds";
     pub const AGENT_UP: &str = "uptimepage_agent_up";
+    pub const AGENTS_ENABLED_DOWN: &str = "uptimepage_agents_enabled_down";
     pub const SCHEDULER_REFRESH_FAILED: &str = "uptimepage_scheduler_refresh_failed_total";
     pub const SCHEDULER_CONSECUTIVE_REFRESH_FAILURES: &str =
         "uptimepage_scheduler_consecutive_refresh_failures";

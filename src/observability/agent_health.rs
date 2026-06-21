@@ -47,11 +47,10 @@ async fn sweep(
         let since = a.last_seen_at.unwrap_or(a.created_at);
         let age = (now - since).num_seconds().max(0);
         let is_stale = age as u64 > stale_after.as_secs();
-        // Emit for every agent (incl. disabled) so a disabled/dark agent's gauge
-        // ages to 0 rather than freezing at its last value. (A deleted agent's
-        // series can't be retracted via the metrics facade — its `agent_up`
-        // freezes; the live `stale` flag on GET /operator/agents is the source
-        // of truth there.)
+        // Emit for every agent (incl. disabled) so one that goes dark ages to 0.
+        // Per-agent series can freeze if an agent is removed (the metrics facade
+        // can't retract); that's fine for dashboards, and alerts page on the
+        // freeze-proof aggregate below instead.
         metrics::gauge!(names::AGENT_LAST_SEEN_AGE, "region" => a.region.clone(), "agent" => a.name.clone())
             .set(age as f64);
         metrics::gauge!(names::AGENT_UP, "region" => a.region.clone(), "agent" => a.name.clone())
@@ -68,5 +67,9 @@ async fn sweep(
     }
     // Forget vanished agents so the log-dedup set can't grow unbounded.
     stale.retain(|id| live.contains(id));
+    // Recomputed every sweep, so a recovered, disabled, or removed agent drops
+    // out and the gauge can't latch. The count of enabled agents currently
+    // dark, which the dead-man alert pages on.
+    metrics::gauge!(names::AGENTS_ENABLED_DOWN).set(stale.len() as f64);
     Ok(())
 }
