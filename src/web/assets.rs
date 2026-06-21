@@ -1,10 +1,12 @@
 //! Static asset serving with content-addressed cache busting.
 //!
-//! One source of truth: [`url`] maps a logical path (`css/app.css`) to its
-//! cache-busting URL (`/static/css/app.css?v=<hash>`). The hash changes iff
-//! the bytes change — and for a JS module, iff any module it imports changes
-//! — which is what makes the `immutable` response header *truthful* rather
-//! than a year-long promise the server can't keep.
+//! One source of truth: [`url`] maps a logical path to a cache-busting URL.
+//! JS is bundled and content-hashed by esbuild (build.rs); the manifest maps
+//! `js/ui/x.js` → `js/ui/x-<hash>.js`, so the served filename changes iff its
+//! bundle (entry + every module it imports) does. Everything else gets a
+//! `?v=<hash>` query off the file's SHA-256. Either way the `immutable`
+//! response header is *truthful* rather than a year-long promise the server
+//! can't keep.
 //!
 //! Templates must reference assets only through the `asset` askama filter
 //! (`{{ "css/app.css"|asset }}`, registered in `crate::web::filters`).
@@ -12,20 +14,16 @@
 //! `no_raw_static_refs_in_templates` test fails on, so cache-busting
 //! can never silently regress.
 //!
-//! In release builds `rust_embed` bakes the files into the binary, so the
-//! fingerprint is stable for that binary's lifetime. In debug builds it
-//! reads from disk; the fingerprint map is computed once per process, so an
-//! asset edit needs a restart to re-hash (cargo-watch already restarts).
+//! Release bakes the files into the binary; debug reads them from disk, so a
+//! `just watch-js` rebuild is served live.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
 
 use axum::extract::{Path, RawQuery};
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use regex::Regex;
 use rust_embed::Embed;
-use sha2::{Digest, Sha256};
 
 /// Static assets embedded into the release binary. In debug builds
 /// rust-embed reads from the filesystem so edits show up without rebuilding.
@@ -33,84 +31,53 @@ use sha2::{Digest, Sha256};
 #[folder = "static/"]
 struct StaticAssets;
 
-/// Matches the specifier in `from "x"`, side-effect `import "x"`, and dynamic
-/// `import("x")`. `import {a} from "x"` is caught by the `from "x"` arm.
-static JS_IMPORT: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"(?:from|import)\s*\(?\s*["']([^"']+)["']"#).unwrap());
-
-/// Bundle-relative path a JS import resolves to (`js/a.js` + `../b/c.js` →
-/// `js/b/c.js`), or None if it climbs above the root.
-fn resolve_import(importer: &str, spec: &str) -> Option<String> {
-    let mut parts: Vec<&str> = importer.split('/').collect();
-    parts.pop();
-    for seg in spec.split('/') {
-        match seg {
-            "." | "" => {}
-            ".." => {
-                parts.pop()?;
-            }
-            s => parts.push(s),
-        }
-    }
-    Some(parts.join("/"))
-}
-
-/// Logical path → 8-hex fingerprint over the file's bytes and, for JS, every
-/// module it transitively imports — so editing a sub-import re-versions the
-/// entry that pulls it in. 4 bytes only has to change when the bytes do, not
-/// resist collision, for the handful of bundled assets.
+/// Cache-bust fingerprint for non-JS assets (and JS when there's no manifest).
+/// 4 bytes only has to change when the bytes do, not resist collision. The
+/// hashed-asset build (`assets_manifest`, set by build.rs in release) caches the
+/// map; otherwise it recomputes per call so a `just watch-js` rebuild is picked
+/// up live. The cfg is PROFILE-driven, so it always matches the build layout.
+#[cfg(assets_manifest)]
 static FINGERPRINTS: LazyLock<HashMap<String, String>> = LazyLock::new(|| {
-    let files: HashMap<String, Vec<u8>> = StaticAssets::iter()
-        .filter_map(|p| Some((p.to_string(), StaticAssets::get(&p)?.data.into_owned())))
-        .collect();
-
-    let imports: HashMap<&str, Vec<String>> = files
-        .iter()
-        .map(|(path, bytes)| {
-            let deps = match path
-                .strip_suffix(".js")
-                .and(std::str::from_utf8(bytes).ok())
-            {
-                Some(src) => JS_IMPORT
-                    .captures_iter(src)
-                    .map(|c| c[1].to_string())
-                    .filter(|s| s.starts_with('.'))
-                    .filter_map(|s| resolve_import(path, &s))
-                    .filter(|r| files.contains_key(r))
-                    .collect(),
-                None => Vec::new(),
-            };
-            (path.as_str(), deps)
-        })
-        .collect();
-
-    files
-        .keys()
-        .map(|path| {
-            let mut closure = std::collections::BTreeSet::new();
-            let mut stack = vec![path.as_str()];
-            while let Some(p) = stack.pop() {
-                if closure.insert(p) {
-                    stack.extend(imports[p].iter().map(String::as_str));
-                }
-            }
-            let mut hasher = Sha256::new();
-            for member in &closure {
-                hasher.update(member.as_bytes());
-                hasher.update(&files[*member]);
-            }
-            (path.clone(), hex::encode(&hasher.finalize()[..4]))
-        })
+    StaticAssets::iter()
+        .filter_map(|p| Some((p.to_string(), fingerprint(&p)?)))
         .collect()
 });
 
-/// The canonical way to reference a static asset. Returns a version-pinned
-/// URL when the asset is known; otherwise the bare path (a newly added
-/// asset in debug before the map is built — still serves, just not
-/// cache-busted, and never reached for template-referenced assets thanks to
-/// the drift test).
+fn fingerprint(path: &str) -> Option<String> {
+    // Reuse rust-embed's baked SHA-256 instead of a second hash pass.
+    let hash = StaticAssets::get(path)?.metadata.sha256_hash();
+    Some(hex::encode(&hash[..4]))
+}
+
+#[cfg(assets_manifest)]
+fn fingerprint_cached(path: &str) -> Option<String> {
+    FINGERPRINTS.get(path).cloned()
+}
+
+#[cfg(not(assets_manifest))]
+fn fingerprint_cached(path: &str) -> Option<String> {
+    fingerprint(path)
+}
+
+/// Logical JS path → hashed served path (release only). Empty in debug, so
+/// [`url`] falls back to the fingerprint there.
+static MANIFEST: LazyLock<HashMap<String, String>> = LazyLock::new(|| {
+    StaticAssets::get("js/manifest.json")
+        .and_then(|f| serde_json::from_slice(&f.data).ok())
+        .unwrap_or_default()
+});
+
+/// Manifest values, so [`serve`] can mark hashed bundles `immutable`.
+static HASHED_PATHS: LazyLock<HashSet<String>> =
+    LazyLock::new(|| MANIFEST.values().cloned().collect());
+
+/// Cache-busting URL for a logical asset path. The only sanctioned way to
+/// reference a static asset (enforced by `no_raw_static_refs_in_templates`).
 pub fn url(path: &str) -> String {
-    match FINGERPRINTS.get(path) {
+    if let Some(hashed) = MANIFEST.get(path) {
+        return format!("/static/{hashed}");
+    }
+    match fingerprint_cached(path) {
         Some(fp) => format!("/static/{path}?v={fp}"),
         None => format!("/static/{path}"),
     }
@@ -123,14 +90,12 @@ pub async fn serve(Path(path): Path<String>, RawQuery(query): RawQuery) -> Respo
 
     let mime = mime_guess::from_path(&path).first_or_octet_stream();
 
-    // `immutable` is only honest when the URL is version-pinned: a pinned
-    // URL is requested again only if its bytes are unchanged. A bare URL
-    // (hand-typed, or an old bookmark) gets a short revalidating cache so a
-    // content change can't be hidden for a year.
+    // `immutable` is only honest for a content-addressed name (`?v=` query or a
+    // hashed bundle); a bare URL gets a short cache so a change can't hide.
     let versioned = query
         .as_deref()
         .is_some_and(|q| q.split('&').any(|kv| kv == "v" || kv.starts_with("v=")));
-    let cache_control = if versioned {
+    let cache_control = if versioned || HASHED_PATHS.contains(&path) {
         "public, max-age=31536000, immutable"
     } else {
         "public, max-age=300"
@@ -156,6 +121,13 @@ where
     S: Clone + Send + Sync + 'static,
 {
     use axum::routing::get;
+    // A hashed-asset build with an empty manifest means the esbuild step did not
+    // run — every JS asset would 404. Fail fast at startup instead.
+    #[cfg(assets_manifest)]
+    assert!(
+        !MANIFEST.is_empty(),
+        "JS asset manifest is empty — the esbuild build step did not run"
+    );
     router.route("/static/{*path}", get(serve))
 }
 
@@ -180,35 +152,65 @@ mod tests {
         assert_eq!(url("does/not/exist.js"), "/static/does/not/exist.js");
     }
 
-    #[test]
-    fn resolve_import_walks_relative_paths() {
-        assert_eq!(
-            resolve_import("js/charts/detail_charts.js", "./_init.js").as_deref(),
-            Some("js/charts/_init.js"),
-        );
-        assert_eq!(
-            resolve_import("js/charts/a.js", "../ui/b.js").as_deref(),
-            Some("js/ui/b.js"),
-        );
-        assert_eq!(resolve_import("js/a.js", "../../../escape.js"), None);
+    /// Split a `url()` result into the `serve` path and optional query.
+    fn split_served(u: &str) -> (String, Option<String>) {
+        let rest = u.strip_prefix("/static/").expect("static url");
+        match rest.split_once('?') {
+            Some((p, q)) => (p.to_string(), Some(q.to_string())),
+            None => (rest.to_string(), None),
+        }
     }
 
-    #[test]
-    fn fingerprint_covers_transitive_imports() {
-        let entry = url("js/charts/detail_charts.js");
-        let dep = StaticAssets::get("js/charts/_init.js").expect("dep exists");
-        let fp = entry.split("v=").nth(1).expect("versioned entry");
-        // Entry fingerprint must fold the dep's bytes, so it differs from a
-        // hash of the entry alone.
-        let mut entry_only = Sha256::new();
-        entry_only.update(b"js/charts/detail_charts.js");
-        entry_only.update(
-            &StaticAssets::get("js/charts/detail_charts.js")
-                .unwrap()
-                .data,
+    #[tokio::test]
+    async fn js_resolves_to_an_existing_immutable_asset() {
+        // Profile-agnostic: release serves a hashed name, debug a `?v=` query;
+        // either way it must point at a real file and cache as immutable.
+        let (path, query) = split_served(&url("js/ui/api_form.js"));
+        assert!(
+            StaticAssets::get(&path).is_some(),
+            "JS url points at missing asset {path}"
         );
-        assert_ne!(fp, hex::encode(&entry_only.finalize()[..4]));
-        assert!(!dep.data.is_empty());
+        let resp = serve(Path(path), RawQuery(query)).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            resp.headers().get(header::CACHE_CONTROL).unwrap(),
+            "public, max-age=31536000, immutable",
+        );
+    }
+
+    /// Every `{{ "js/…"|asset }}` reference in a template must resolve to a file
+    /// that actually exists — catches a missing manifest entry or an unbuilt
+    /// bundle before it 404s in the browser.
+    #[test]
+    fn every_template_js_ref_resolves() {
+        let root = concat!(env!("CARGO_MANIFEST_DIR"), "/templates");
+        let re = regex::Regex::new(r#""(js/[^"]+\.js)"\s*\|\s*asset"#).unwrap();
+        let mut missing = Vec::new();
+        let mut stack = vec![std::path::PathBuf::from(root)];
+        while let Some(dir) = stack.pop() {
+            for entry in std::fs::read_dir(&dir).expect("read templates dir") {
+                let path = entry.expect("dir entry").path();
+                if path.is_dir() {
+                    stack.push(path);
+                    continue;
+                }
+                if path.extension().and_then(|e| e.to_str()) != Some("html") {
+                    continue;
+                }
+                let body = std::fs::read_to_string(&path).expect("read template");
+                for cap in re.captures_iter(&body) {
+                    let logical = &cap[1];
+                    let (served, _) = split_served(&url(logical));
+                    if StaticAssets::get(&served).is_none() {
+                        missing.push(format!("{logical} (in {})", path.display()));
+                    }
+                }
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "unresolvable JS asset refs: {missing:?}"
+        );
     }
 
     #[tokio::test]

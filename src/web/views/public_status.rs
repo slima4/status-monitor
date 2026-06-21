@@ -1203,9 +1203,9 @@ mod tests {
         assert!(html.contains(r#"hx-get="/status?fragment=1""#));
         assert!(html.contains(r#"hx-trigger="every 30s""#));
         assert!(html.contains("data-tz"));
-        assert!(html.contains("/static/js/htmx.min.js"));
-        assert!(html.contains("/static/js/ui/localtime.js"));
-        assert!(html.contains("/static/js/public/day_popover.js"));
+        assert!(html.contains(&crate::web::assets::url("js/htmx.min.js")));
+        assert!(html.contains(&crate::web::assets::url("js/ui/localtime.js")));
+        assert!(html.contains(&crate::web::assets::url("js/public/day_popover.js")));
         assert!(html.contains("/api/public/v1/incidents.rss"));
     }
 
