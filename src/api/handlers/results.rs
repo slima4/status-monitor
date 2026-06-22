@@ -12,7 +12,7 @@ use crate::api::types::{LatencySeries, LatencySeriesByRegion};
 use crate::app::AppState;
 use crate::domain::humanize_check_error;
 use crate::error::{AppError, Result};
-use crate::storage::{IncidentListQuery, TimeRange, UptimeStats};
+use crate::storage::{TimeRange, UptimeStats};
 use crate::web::{Authorized, TargetsRead};
 
 /// 404 used when a target id is absent from the caller's org. Returned only
@@ -373,27 +373,15 @@ pub async fn list_incidents(
         .limit
         .unwrap_or(INCIDENTS_LIMIT_DEFAULT)
         .min(INCIDENTS_LIMIT_MAX);
-    // Fetch target first so we have `interval` for the storage call's
-    // gap-based recovery heuristic. The CH-side status filter that
-    // unlocks is worth the extra RTT.
-    let target = state
+    // Existence + tenant check; 404 separates an unknown monitor from empty history.
+    state
         .target_store
         .get(org, id)
         .await?
         .ok_or_else(target_not_found)?;
     let mut peek = state
-        .results_store
-        .list_incidents(
-            org,
-            id,
-            IncidentListQuery {
-                range,
-                monitor_interval: target.interval,
-                ongoing_only: q.ongoing_only,
-                limit: limit + 1,
-                offset: q.offset,
-            },
-        )
+        .incident_narration_store
+        .list_for_target(org, id, range.inner(), limit + 1, q.offset, q.ongoing_only)
         .await?;
     for inc in &mut peek {
         inc.error_sample = inc.error_sample.as_deref().map(humanize_check_error);

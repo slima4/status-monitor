@@ -13,7 +13,7 @@ use crate::api::error::codes;
 use crate::app::AppState;
 use crate::domain::{CheckResult, Incident, OrgId};
 use crate::error::AppError;
-use crate::storage::{ClampedRange, IncidentListQuery, TimeRange, UptimeStats};
+use crate::storage::{ClampedRange, TimeRange, UptimeStats};
 use crate::web::error::{WebError, WebResult};
 use crate::web::filters;
 use crate::web::views::region_display::{LabeledRegion, labeled_regions};
@@ -674,13 +674,12 @@ pub(crate) struct IncidentsData {
     pub ongoing_count: usize,
 }
 
-/// Load the incidents tab's dataset for `(org, target_id)` over `time_range`.
-/// `interval` is the monitor's check interval (drives incident coalescing).
+/// Load the incidents tab's dataset for `(org, target_id)` over `time_range`
+/// from the confirmed materialised incidents.
 pub(crate) async fn load_incidents_data(
     state: &AppState,
     org: OrgId,
     target_id: Uuid,
-    interval: std::time::Duration,
     time_range: TimeRange,
 ) -> WebResult<IncidentsData> {
     let range = state.quotas.clamp_raw(org, time_range).await?;
@@ -691,11 +690,14 @@ pub(crate) async fn load_incidents_data(
     let ((last_status, last_at_iso), mut incidents) =
         tokio::try_join!(latest_status_probe(state, org, target_id), async {
             state
-                .results_store
-                .list_incidents(
+                .incident_narration_store
+                .list_for_target(
                     org,
                     target_id,
-                    IncidentListQuery::page(range, interval, INCIDENTS_PAGE_LIMIT + 1),
+                    range.inner(),
+                    INCIDENTS_PAGE_LIMIT + 1,
+                    0,
+                    false,
                 )
                 .await
                 .map_err(WebError::from)
@@ -706,8 +708,8 @@ pub(crate) async fn load_incidents_data(
         incidents.truncate(INCIDENTS_PAGE_LIMIT);
     }
     // Tab badge: prefer the live-status signal so the count matches what the
-    // Monitor tab shows. Fall back to the list (e.g. user narrowed to a window
-    // where last_status is stale) by counting open runs the coalescer kept.
+    // Monitor tab shows. Fall back to counting open incidents in the list when
+    // the user narrowed to a window where last_status is stale.
     let ongoing_count = ongoing_from_status(last_status)
         .max(incidents.iter().filter(|i| i.ended_at.is_none()).count());
 
@@ -741,7 +743,7 @@ pub async fn incidents(
     let (from, to) = resolve_incident_window(range_key, params.from, params.to);
     let time_range = TimeRange { from, to };
     let labels = WindowLabels::new(from, to);
-    let data = load_incidents_data(&state, org, target.id, target.interval, time_range).await?;
+    let data = load_incidents_data(&state, org, target.id, time_range).await?;
     let (kind, address) = describe_check(&target.check);
     let share_count = state
         .monitor_share_store

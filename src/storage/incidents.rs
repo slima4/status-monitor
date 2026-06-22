@@ -16,6 +16,7 @@ use crate::domain::{
     NewIncidentUpdate, OrgId, PublicIncidentUpdate,
 };
 use crate::error::Result;
+use crate::storage::TimeRange;
 
 /// One open incident joined with its target name + latest update.
 /// Powers the operator dashboard banner.
@@ -54,6 +55,17 @@ pub trait IncidentNarrationStore: Send + Sync {
     /// (so the banner shows "first opened …" without re-sorting). Capped at
     /// `limit` for the dashboard banner.
     async fn list_active(&self, org: OrgId, limit: usize) -> Result<Vec<ActiveIncident>>;
+    /// Confirmed incidents for one target overlapping `range`, newest first. An
+    /// incident still open at `range.to` is included; `ongoing_only` keeps only those.
+    async fn list_for_target(
+        &self,
+        org: OrgId,
+        target_id: Uuid,
+        range: TimeRange,
+        limit: usize,
+        offset: usize,
+        ongoing_only: bool,
+    ) -> Result<Vec<Incident>>;
 }
 
 // ── Postgres impl ────────────────────────────────────────────────────────
@@ -295,6 +307,48 @@ impl IncidentNarrationStore for PgIncidentNarrationStore {
         .map_err(|e| anyhow::anyhow!("list_active incidents: {e}"))?;
         Ok(rows.into_iter().map(row_to_active).collect())
     }
+
+    async fn list_for_target(
+        &self,
+        org: OrgId,
+        target_id: Uuid,
+        range: TimeRange,
+        limit: usize,
+        offset: usize,
+        ongoing_only: bool,
+    ) -> Result<Vec<Incident>> {
+        // Backstop only; callers pass their own page size (the API peeks one past
+        // its limit, so the ceiling must clear the largest caller limit + 1).
+        let cap = limit.clamp(1, 5000) as i64;
+        let skip = offset as i64;
+        let rows: Vec<IncidentRow> = sqlx::query_as(
+            r#"SELECT id, target_id, started_at, ended_at, severity, status_at_start,
+                      check_count, error_sample, public_title, public_description,
+                      duration_secs, created_at, updated_at, regions_down, regions_up
+               FROM incidents
+               WHERE org_id = $1 AND target_id = $2
+                 AND started_at < $4
+                 AND (ended_at IS NULL OR ended_at >= $3)
+                 AND ($5 = false OR ended_at IS NULL)
+               ORDER BY started_at DESC, id DESC
+               LIMIT $6 OFFSET $7"#,
+        )
+        .bind(org.0)
+        .bind(target_id)
+        .bind(range.from)
+        .bind(range.to)
+        .bind(ongoing_only)
+        .bind(cap)
+        .bind(skip)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| anyhow::anyhow!("list_for_target incidents: {e}"))?;
+        // History rows don't render the update timeline; skip the per-row join.
+        Ok(rows
+            .into_iter()
+            .map(|r| row_to_incident(r, Vec::new()))
+            .collect())
+    }
 }
 
 #[derive(sqlx::FromRow)]
@@ -431,6 +485,29 @@ impl IncidentNarrationStore for InMemoryIncidentNarrationStore {
         out.truncate(limit);
         Ok(out)
     }
+
+    async fn list_for_target(
+        &self,
+        _org: OrgId,
+        target_id: Uuid,
+        range: TimeRange,
+        limit: usize,
+        offset: usize,
+        ongoing_only: bool,
+    ) -> Result<Vec<Incident>> {
+        let mut out: Vec<Incident> = self
+            .inner
+            .lock()
+            .incidents
+            .iter()
+            .filter(|i| i.target_id == target_id)
+            .filter(|i| i.started_at < range.to && i.ended_at.is_none_or(|e| e >= range.from))
+            .filter(|i| !ongoing_only || i.ended_at.is_none())
+            .cloned()
+            .collect();
+        out.sort_by_key(|i| (std::cmp::Reverse(i.started_at), std::cmp::Reverse(i.id)));
+        Ok(out.into_iter().skip(offset).take(limit).collect())
+    }
 }
 
 #[cfg(test)]
@@ -550,5 +627,50 @@ mod tests {
             .await
             .unwrap();
         assert!(res.is_none());
+    }
+
+    #[tokio::test]
+    async fn list_for_target_filters_by_window_ongoing_and_offset() {
+        let store = InMemoryIncidentNarrationStore::new();
+        let target = Uuid::now_v7();
+        let other = Uuid::now_v7();
+        let now = Utc::now();
+        let mk = |tid: Uuid, started_min_ago: i64, ended_min_ago: Option<i64>| {
+            let mut inc = sample();
+            inc.id = Uuid::now_v7();
+            inc.target_id = tid;
+            inc.started_at = now - ChronoDuration::minutes(started_min_ago);
+            inc.ended_at = ended_min_ago.map(|m| now - ChronoDuration::minutes(m));
+            inc
+        };
+        store.seed(mk(target, 30, Some(20))); // closed, inside window
+        store.seed(mk(target, 10, None)); // ongoing
+        store.seed(mk(target, 60 * 48, Some(60 * 47))); // fully before window
+        store.seed(mk(other, 5, None)); // different target
+
+        let window = TimeRange {
+            from: now - ChronoDuration::hours(24),
+            to: now,
+        };
+        let all = store
+            .list_for_target(org(), target, window, 50, 0, false)
+            .await
+            .unwrap();
+        assert_eq!(all.len(), 2); // the out-of-window and other-target rows excluded
+        assert!(all[0].started_at >= all[1].started_at); // newest first
+
+        let ongoing = store
+            .list_for_target(org(), target, window, 50, 0, true)
+            .await
+            .unwrap();
+        assert_eq!(ongoing.len(), 1);
+        assert!(ongoing[0].ended_at.is_none());
+
+        let page2 = store
+            .list_for_target(org(), target, window, 1, 1, false)
+            .await
+            .unwrap();
+        assert_eq!(page2.len(), 1);
+        assert_eq!(page2[0].started_at, all[1].started_at); // offset skipped the newest
     }
 }

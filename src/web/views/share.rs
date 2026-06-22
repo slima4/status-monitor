@@ -310,14 +310,7 @@ pub async fn incidents(
     let (from, to) = resolve_incident_window(range_key, params.from, params.to);
     let time_range = TimeRange { from, to };
     let labels = WindowLabels::new(from, to);
-    let data = load_incidents_data(
-        &state,
-        resolved.org,
-        resolved.target_id,
-        target.interval,
-        time_range,
-    )
-    .await?;
+    let data = load_incidents_data(&state, resolved.org, resolved.target_id, time_range).await?;
     let (kind, address) = describe_check(&target.check);
     let range_base_path = format!("/m/{token}/incidents");
     let results_base = format!("/m/{token}");

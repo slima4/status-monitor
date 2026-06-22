@@ -28,7 +28,7 @@ use crate::domain::target::{Target, TargetUpdate};
 use crate::domain::{WriteSource, humanize_check_error};
 use crate::quotas::ratelimit::{RateLimitCategory, RateLimitKey};
 use crate::storage::incidents::ActiveIncident;
-use crate::storage::{ClampedRange, IncidentListQuery, TargetFilter, TimeRange};
+use crate::storage::{ClampedRange, TargetFilter, TimeRange};
 use crate::web::views::describe_check;
 use crate::web::views::public_status::{public_base, public_status_url};
 
@@ -351,8 +351,8 @@ impl McpServer {
         let id = parse_uuid(&args.id, "monitor id")?;
         let (span, bucket_secs) = parse_window(&args.window)?;
 
-        let target = self
-            .state
+        // Existence + tenant check; the history reads come from the stores below.
+        self.state
             .target_store
             .get(org, id)
             .await
@@ -369,16 +369,13 @@ impl McpServer {
             self.state
                 .results_store
                 .latency_buckets(org, id, range, bucket_secs, None),
-            self.state.results_store.list_incidents(
+            self.state.incident_narration_store.list_for_target(
                 org,
                 id,
-                IncidentListQuery {
-                    range,
-                    monitor_interval: target.interval,
-                    ongoing_only: false,
-                    limit: HISTORY_INCIDENT_CAP,
-                    offset: 0,
-                },
+                range.inner(),
+                HISTORY_INCIDENT_CAP,
+                0,
+                false,
             ),
         )
         .map_err(|e| McpToolError::internal(format!("monitor history: {e}")))?;
@@ -1076,26 +1073,19 @@ impl McpServer {
             .unwrap_or_default()
     }
 
-    /// Start of the monitor's ongoing failure run, RFC 3339, from coalesced
-    /// check history — covers every monitor, not only those with a public
-    /// incident. Best-effort: a lookup error yields `None`.
+    /// Start of the monitor's ongoing failure run, RFC 3339, from the confirmed
+    /// incidents — covers every monitor, not only those with a public incident.
+    /// Best-effort: a lookup error yields `None`.
     async fn ongoing_since(&self, org: crate::domain::OrgId, t: &Target) -> Option<String> {
         let now = Utc::now();
-        let range = ClampedRange::unclamped(TimeRange {
+        let range = TimeRange {
             from: now - Duration::try_days(SINCE_LOOKBACK_DAYS).unwrap_or_default(),
             to: now,
-        });
-        let query = IncidentListQuery {
-            range,
-            monitor_interval: t.interval,
-            ongoing_only: true,
-            limit: 1,
-            offset: 0,
         };
         match self
             .state
-            .results_store
-            .list_incidents(org, t.id, query)
+            .incident_narration_store
+            .list_for_target(org, t.id, range, 1, 0, true)
             .await
         {
             Ok(incidents) => incidents.first().map(|i| i.started_at.to_rfc3339()),
