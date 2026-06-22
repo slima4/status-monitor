@@ -2554,6 +2554,13 @@
         @apply inline-flex items-center gap-1.5 font-medium;
         color: var(--theme-state-bad-fg);
     }
+    .dashboard-drill-chip {
+        @apply inline-flex items-center gap-1 font-medium;
+        cursor: pointer;
+        color: var(--theme-state-bad-fg);
+        border-bottom: 1px dotted currentColor;
+    }
+    .dashboard-drill-chip:hover { filter: brightness(1.1); }
     /* Dashboard filter combobox — compact bracket-wrapped token on the
        light rail surface, matching the range-tabs/chip strip register:
        `[ status:any ▾ ]`. */
@@ -2878,6 +2885,74 @@
         border-radius: 1px;
         transition: transform 140ms ease, filter 140ms ease;
         transform-origin: center;
+    }
+    /* A dipped cell renders as a <button>; strip native chrome so it sits
+       flush with the decorative <span> cells. */
+    button.dashboard-ribbon__seg {
+        appearance: none;
+        border: 0;
+        padding: 0;
+    }
+    .dashboard-ribbon__seg--drill { cursor: pointer; }
+    /* Active drill cell — ringed so the operator sees which window is filtered. */
+    .dashboard-ribbon__seg--active {
+        box-shadow: 0 0 0 2px var(--theme-surface-elev), 0 0 0 3px var(--theme-ink);
+        z-index: 3;
+    }
+    /* Ribbon-cell tooltip. Matches the console's floating panel
+       (.sm-combobox__panel): flat, hairline border, mono, no shadow. */
+    .sm-ribbon-tip {
+        position: fixed;
+        top: 0;
+        left: 0;
+        z-index: 60;
+        min-width: 9rem;
+        max-width: min(20rem, calc(100vw - 1.5rem));
+        padding: 0.55rem 0.7rem;
+        font-family: var(--font-mono);
+        font-size: 0.75rem;
+        line-height: 1.4;
+        letter-spacing: 0.01em;
+        color: var(--theme-text);
+        background: var(--theme-surface-elev);
+        border: 1px solid var(--theme-line);
+        border-radius: 2px;
+        pointer-events: none;
+    }
+    .sm-ribbon-tip[hidden] { display: none; }
+    .sm-ribbon-tip__head {
+        display: flex;
+        justify-content: space-between;
+        gap: 1.5rem;
+        font-variant-numeric: tabular-nums;
+    }
+    .sm-ribbon-tip__time { color: var(--theme-ink); font-weight: 600; }
+    .sm-ribbon-tip__stat { color: var(--theme-text-muted); }
+    .sm-ribbon-tip__count {
+        margin-top: 0.4rem;
+        color: var(--theme-state-bad-fg);
+    }
+    .sm-ribbon-tip__list {
+        margin: 0.3rem 0 0;
+        padding: 0;
+        list-style: none;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+    }
+    .sm-ribbon-tip__name {
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .sm-ribbon-tip__name::before {
+        content: "· ";
+        color: var(--theme-text-muted);
+    }
+    .sm-ribbon-tip__more {
+        margin-top: 0.3rem;
+        color: var(--theme-text-muted);
     }
     .dashboard-ribbon__seg:hover {
         transform: scaleY(1.18);

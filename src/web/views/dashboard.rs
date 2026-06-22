@@ -57,6 +57,8 @@ const SPARK_BUCKETS: usize = SPARK_MINUTES as usize;
 const RIBBON_HOURS: i64 = 24;
 const RIBBON_BUCKETS: usize = 48;
 const RIBBON_BUCKET_SECONDS: u32 = (RIBBON_HOURS as u32 * 3600) / RIBBON_BUCKETS as u32;
+/// Names shown in a cell tooltip before "+N more"; the drill has the full set.
+const DOWN_PREVIEW: usize = 6;
 const _: () = assert!(
     (RIBBON_HOURS as u32 * 3600).is_multiple_of(RIBBON_BUCKETS as u32),
     "RIBBON_BUCKETS must divide the 24h window evenly so every second maps to a slot",
@@ -76,6 +78,10 @@ pub struct DashboardParams {
     pub status: Option<String>,
     #[serde(default, rename = "type")]
     pub kind: Option<String>,
+    /// Bucket start (unix-seconds) of a clicked ribbon cell; filters the table
+    /// to the monitors that dipped in that window.
+    #[serde(default)]
+    pub down_at: Option<i64>,
     /// Login flows set `joined=<slug>` after auto-accepting an invitation. The
     /// slug is validated against the active org before the banner renders, so
     /// unlike the one-shot flash signals it stays a (harmless) query param.
@@ -179,12 +185,17 @@ pub struct StatusCounts {
     pub paused: u32,
 }
 
-/// One cell of the 48-seg fleet ribbon. `class` drives the CSS variant;
-/// `title` is the hover tooltip ("HH:MM · 99.7%" or "HH:MM · no data").
+/// One cell of the 48-seg fleet ribbon. A non-empty `down_targets` makes the
+/// cell a drill link (`bucket_ts` is its `down_at` value); `down_preview` caps
+/// the tooltip's names while the drill keeps the full set.
 #[derive(Clone)]
 pub struct FleetRibbonSeg {
     pub class: &'static str,
-    pub title: String,
+    pub time: String,
+    pub stat: String,
+    pub down_preview: Arc<[String]>,
+    pub bucket_ts: i64,
+    pub down_targets: Arc<[Uuid]>,
 }
 
 #[derive(Clone)]
@@ -240,6 +251,7 @@ pub struct DashboardPage {
     pub status_options: Vec<RangeOption>,
     pub selected_status: Option<&'static str>,
     pub selected_kind: Option<&'static str>,
+    pub drill: Option<DrillChip>,
     pub restored_notice: bool,
     pub joined_notice: Option<String>,
     pub invite_missed_notice: bool,
@@ -264,6 +276,7 @@ pub struct DashboardTablePartial {
     pub status_options: Vec<RangeOption>,
     pub selected_status: Option<&'static str>,
     pub selected_kind: Option<&'static str>,
+    pub drill: Option<DrillChip>,
 }
 
 pub async fn root(state: State<AppState>, mut parts: Parts) -> Response {
@@ -325,7 +338,8 @@ pub async fn index(
     let catalog = state.regions_detailed().await?;
     let regions = labeled_regions(&catalog, region_ids);
     let onboarding = snapshot.matches == 0;
-    let (rows, matches) = filter_rows(&snapshot, selected_status, selected_kind);
+    let drill = params.down_at.and_then(|ts| resolve_drill(&snapshot, ts));
+    let (rows, matches) = filter_rows(&snapshot, selected_status, selected_kind, drill.as_ref());
     // Banner only when the slug matches the ACTIVE org — a pasted/crafted
     // ?joined= for some other org renders nothing.
     let joined_notice = match (params.joined.as_deref(), state.db.as_ref()) {
@@ -354,6 +368,7 @@ pub async fn index(
         status_options: build_range_options(status, &STATUS_FILTERS),
         selected_status,
         selected_kind,
+        drill: drill.map(|d| d.chip),
         restored_notice: flash.restored,
         joined_notice,
         invite_missed_notice: flash.invite_missed,
@@ -365,15 +380,47 @@ pub(crate) fn resolve_region(requested: Option<String>, regions: &[String]) -> O
     requested.filter(|r| regions.iter().any(|x| x == r))
 }
 
-/// Status and type are post-filters over the (cached) snapshot: the table
-/// and its match count narrow while the KPI cards, health rail, ribbon and
-/// chip counts stay fleet-wide, so the breakdown remains visible.
+/// The active ribbon-cell drill, surfaced to the template for the poll URL and
+/// the clear chip. One field so the two can't drift out of lockstep.
+#[derive(Clone)]
+pub struct DrillChip {
+    pub down_at: i64,
+    pub label: String,
+}
+
+/// A ribbon-cell drill resolved against the cached snapshot: the chip plus the
+/// set of monitors that dipped in the clicked window. `None` when the bucket
+/// has aged out of the 24h ribbon or never had a dip.
+struct Drill {
+    chip: DrillChip,
+    down: std::collections::HashSet<String>,
+}
+
+fn resolve_drill(snapshot: &DashboardSnapshot, down_at: i64) -> Option<Drill> {
+    let seg = snapshot
+        .ribbon
+        .segs
+        .iter()
+        .find(|s| s.bucket_ts == down_at && !s.down_targets.is_empty())?;
+    let label = DateTime::<Utc>::from_timestamp(down_at, 0)?
+        .format("%H:%M")
+        .to_string();
+    Some(Drill {
+        chip: DrillChip { down_at, label },
+        down: seg.down_targets.iter().map(Uuid::to_string).collect(),
+    })
+}
+
+/// Status, type and the ribbon drill are post-filters over the (cached)
+/// snapshot: the table and its match count narrow while the KPI cards, health
+/// rail, ribbon and chip counts stay fleet-wide, so the breakdown stays visible.
 fn filter_rows(
     snapshot: &DashboardSnapshot,
     status: Option<&'static str>,
     kind: Option<&'static str>,
+    drill: Option<&Drill>,
 ) -> (Arc<[DashboardRow]>, usize) {
-    if status.is_none() && kind.is_none() {
+    if status.is_none() && kind.is_none() && drill.is_none() {
         return (Arc::clone(&snapshot.rows), snapshot.matches);
     }
     let rows: Vec<DashboardRow> = snapshot
@@ -381,6 +428,7 @@ fn filter_rows(
         .iter()
         .filter(|r| status.is_none_or(|s| row_matches_status(r, s)))
         .filter(|r| kind.is_none_or(|k| r.kind.eq_ignore_ascii_case(k)))
+        .filter(|r| drill.is_none_or(|d| d.down.contains(&r.id)))
         .cloned()
         .collect();
     let matches = rows.len();
@@ -469,7 +517,8 @@ pub async fn table_partial(
     let snapshot = snapshot_for(&state, org.0, range, selected_region.as_deref()).await?;
     let catalog = state.regions_detailed().await?;
     let regions = labeled_regions(&catalog, region_ids);
-    let (rows, matches) = filter_rows(&snapshot, selected_status, selected_kind);
+    let drill = params.down_at.and_then(|ts| resolve_drill(&snapshot, ts));
+    let (rows, matches) = filter_rows(&snapshot, selected_status, selected_kind, drill.as_ref());
     let partial = DashboardTablePartial {
         range,
         range_options: build_range_options(range, &RANGE_KEYS),
@@ -487,6 +536,7 @@ pub async fn table_partial(
         status_options: build_range_options(status, &STATUS_FILTERS),
         selected_status,
         selected_kind,
+        drill: drill.map(|d| d.chip),
     };
     let rendered = partial.render().map_err(|e| {
         crate::web::error::WebError::from(crate::error::AppError::Other(anyhow::anyhow!(e)))
@@ -585,6 +635,17 @@ async fn build_snapshot(
         targets.truncate(ROW_LIMIT);
     }
 
+    // Only dipped monitors are named in the ribbon tooltip, so clone names for
+    // those ids alone rather than the whole (healthy) fleet on every build.
+    let down_ids: std::collections::HashSet<Uuid> = ribbon_rows
+        .iter()
+        .flat_map(|r| r.down_targets.iter().copied())
+        .collect();
+    let target_names: HashMap<Uuid, String> = targets
+        .iter()
+        .filter(|t| down_ids.contains(&t.id))
+        .map(|t| (t.id, t.name.clone()))
+        .collect();
     let metrics_by_target: HashMap<Uuid, DashboardMetrics> =
         rollup.into_iter().map(|m| (m.target_id, m)).collect();
     let spark_by_target = group_sparks(&spark_rows, spark_from);
@@ -685,7 +746,7 @@ async fn build_snapshot(
         .collect();
 
     let matches = rows.len();
-    let ribbon = build_fleet_ribbon(&ribbon_rows, ribbon_from);
+    let ribbon = build_fleet_ribbon(&ribbon_rows, ribbon_from, &target_names);
     Ok(DashboardSnapshot {
         rows: Arc::from(rows.into_boxed_slice()),
         kpis,
@@ -874,10 +935,15 @@ fn checks_delta(cur: &PriorPeriodSummary, prior: &PriorPeriodSummary) -> Option<
 /// segs the operator sees. `from` must already be bucket-aligned (see
 /// `snap_to_bucket`) so labels line up with the CH `toStartOfInterval`
 /// grid.
-fn build_fleet_ribbon(rows: &[FleetRibbonBucket], from: DateTime<Utc>) -> FleetRibbon {
+fn build_fleet_ribbon(
+    rows: &[FleetRibbonBucket],
+    from: DateTime<Utc>,
+    names: &HashMap<Uuid, String>,
+) -> FleetRibbon {
     let from_ts = from.timestamp();
     let bucket = RIBBON_BUCKET_SECONDS as i64;
     let mut filled: [(u64, u64); RIBBON_BUCKETS] = [(0, 0); RIBBON_BUCKETS];
+    let mut down_by_slot: [Vec<Uuid>; RIBBON_BUCKETS] = std::array::from_fn(|_| Vec::new());
     let mut total_samples: u64 = 0;
     let mut total_up: u64 = 0;
     for r in rows {
@@ -892,25 +958,33 @@ fn build_fleet_ribbon(rows: &[FleetRibbonBucket], from: DateTime<Utc>) -> FleetR
         let slot = slot as usize;
         filled[slot].0 += r.samples;
         filled[slot].1 += r.up;
+        down_by_slot[slot].extend_from_slice(&r.down_targets);
         total_samples += r.samples;
         total_up += r.up;
     }
     let mut segs: Vec<FleetRibbonSeg> = Vec::with_capacity(RIBBON_BUCKETS);
     for (i, (samples, up)) in filled.iter().enumerate() {
         let slot_start = from + Duration::seconds(i as i64 * bucket);
-        // One pre-sized buffer per seg, no intermediate `time_label`
-        // String — chrono's `DelayedFormat` is a `Display` adapter we
-        // can write straight into the title buffer.
-        let mut title = String::with_capacity(24);
-        let class = if *samples == 0 {
-            write!(&mut title, "{} · no data", slot_start.format("%H:%M")).unwrap();
-            "none"
+        let down = std::mem::take(&mut down_by_slot[i]);
+        let (class, stat) = if *samples == 0 {
+            ("none", "no data".to_string())
         } else {
             let pct = (*up as f64 / *samples as f64) * 100.0;
-            write!(&mut title, "{} · {:.1}%", slot_start.format("%H:%M"), pct).unwrap();
-            ribbon_class(pct)
+            (ribbon_class(pct), format!("{pct:.1}%"))
         };
-        segs.push(FleetRibbonSeg { class, title });
+        let down_preview: Vec<String> = down
+            .iter()
+            .take(DOWN_PREVIEW)
+            .map(|id| names.get(id).cloned().unwrap_or_else(|| "unknown".into()))
+            .collect();
+        segs.push(FleetRibbonSeg {
+            class,
+            time: slot_start.format("%H:%M").to_string(),
+            stat,
+            down_preview: Arc::from(down_preview.into_boxed_slice()),
+            bucket_ts: from_ts + i as i64 * bucket,
+            down_targets: Arc::from(down.into_boxed_slice()),
+        });
     }
     FleetRibbon {
         segs: Arc::from(segs.into_boxed_slice()),
@@ -1241,7 +1315,7 @@ mod tests {
     }
 
     fn sample_ribbon() -> FleetRibbon {
-        build_fleet_ribbon(&[], snapped_from())
+        build_fleet_ribbon(&[], snapped_from(), &HashMap::new())
     }
 
     fn sample_page() -> DashboardPage {
@@ -1276,6 +1350,7 @@ mod tests {
             status_options: build_range_options(FILTER_ANY, &STATUS_FILTERS),
             selected_status: None,
             selected_kind: None,
+            drill: None,
             restored_notice: false,
             joined_notice: None,
             invite_missed_notice: false,
@@ -1331,6 +1406,7 @@ mod tests {
             status_options: build_range_options(FILTER_ANY, &STATUS_FILTERS),
             selected_status: None,
             selected_kind: None,
+            drill: None,
         };
         let html = partial.render().unwrap();
         assert!(!html.contains("<!doctype html>"));
@@ -1373,6 +1449,7 @@ mod tests {
             status_options: build_range_options(FILTER_ANY, &STATUS_FILTERS),
             selected_status: None,
             selected_kind: None,
+            drill: None,
             restored_notice: false,
             joined_notice: None,
             invite_missed_notice: false,
@@ -1530,10 +1607,10 @@ mod tests {
     #[test]
     fn type_filter_matches_kind_case_insensitively() {
         let snapshot = sample_snapshot(vec![sample_row("api", "up"), sample_row("worker", "up")]);
-        let (rows, matches) = filter_rows(&snapshot, None, Some("http"));
+        let (rows, matches) = filter_rows(&snapshot, None, Some("http"), None);
         assert_eq!(matches, 2);
         assert_eq!(rows.len(), 2);
-        let (_, matches) = filter_rows(&snapshot, None, Some("tcp"));
+        let (_, matches) = filter_rows(&snapshot, None, Some("tcp"), None);
         assert_eq!(matches, 0);
 
         let chips = type_chips(&snapshot, None, Some("http"));
@@ -1726,7 +1803,7 @@ mod tests {
     #[test]
     fn build_fleet_ribbon_emits_48_segs_when_empty() {
         let from = snapped_from();
-        let r = build_fleet_ribbon(&[], from);
+        let r = build_fleet_ribbon(&[], from, &HashMap::new());
         assert_eq!(r.segs.len(), RIBBON_BUCKETS);
         assert!(r.segs.iter().all(|s| s.class == "none"));
         assert_eq!(r.uptime_label, "—");
@@ -1742,23 +1819,28 @@ mod tests {
                 bucket_ts: from_ts,
                 samples: 100,
                 up: 100,
+                down_targets: vec![],
             },
             FleetRibbonBucket {
                 bucket_ts: from_ts + bucket,
                 samples: 100,
                 up: 97,
+                down_targets: vec![],
             },
             FleetRibbonBucket {
                 bucket_ts: from_ts + bucket * 2,
                 samples: 100,
                 up: 50,
+                down_targets: vec![],
             },
         ];
-        let r = build_fleet_ribbon(&rows, from);
+        let r = build_fleet_ribbon(&rows, from, &HashMap::new());
         assert_eq!(r.segs[0].class, "op");
         assert_eq!(r.segs[1].class, "deg");
         assert_eq!(r.segs[2].class, "maj");
         assert_eq!(r.segs[3].class, "none");
+        assert_eq!(r.segs[0].bucket_ts, from_ts);
+        assert_eq!(r.segs[1].bucket_ts, from_ts + bucket);
         assert!(r.uptime_label.starts_with("82.")); // 247/300
     }
 
@@ -1774,19 +1856,22 @@ mod tests {
                 bucket_ts: from_ts - 10_000,
                 samples: 10,
                 up: 10,
+                down_targets: vec![],
             },
             FleetRibbonBucket {
                 bucket_ts: from_ts + (RIBBON_HOURS * 3600),
                 samples: 10,
                 up: 0,
+                down_targets: vec![],
             },
             FleetRibbonBucket {
                 bucket_ts: from_ts + (RIBBON_HOURS * 3600) + 10_000,
                 samples: 10,
                 up: 0,
+                down_targets: vec![],
             },
         ];
-        let r = build_fleet_ribbon(&rows, from);
+        let r = build_fleet_ribbon(&rows, from, &HashMap::new());
         assert!(r.segs.iter().all(|s| s.class == "none"));
         assert_eq!(r.uptime_label, "—");
     }
@@ -1798,10 +1883,11 @@ mod tests {
             bucket_ts: from.timestamp(),
             samples: 50,
             up: 0,
+            down_targets: vec![],
         }];
-        let r = build_fleet_ribbon(&rows, from);
+        let r = build_fleet_ribbon(&rows, from, &HashMap::new());
         assert_eq!(r.segs[0].class, "maj");
-        assert!(r.segs[0].title.ends_with("0.0%"));
+        assert_eq!(r.segs[0].stat, "0.0%");
         assert_eq!(r.uptime_label, "0.00%");
     }
 
@@ -1816,16 +1902,111 @@ mod tests {
                 bucket_ts: from.timestamp(),
                 samples: 40,
                 up: 40,
+                down_targets: vec![],
             },
             FleetRibbonBucket {
                 bucket_ts: from.timestamp(),
                 samples: 60,
                 up: 56,
+                down_targets: vec![],
             },
         ];
-        let r = build_fleet_ribbon(&rows, from);
+        let r = build_fleet_ribbon(&rows, from, &HashMap::new());
         assert_eq!(r.segs[0].class, "deg"); // 96/100 → 96 % → deg
         assert_eq!(r.uptime_label, "96.00%");
+    }
+
+    #[test]
+    fn build_fleet_ribbon_previews_capped_down_names() {
+        let from = snapped_from();
+        let ids: Vec<Uuid> = (0..8).map(|_| Uuid::new_v4()).collect();
+        let names: HashMap<Uuid, String> = ids
+            .iter()
+            .enumerate()
+            .map(|(i, id)| (*id, format!("svc{i}")))
+            .collect();
+        let rows = vec![FleetRibbonBucket {
+            bucket_ts: from.timestamp(),
+            samples: 100,
+            up: 60,
+            down_targets: ids.clone(),
+        }];
+        let r = build_fleet_ribbon(&rows, from, &names);
+        let seg = &r.segs[0];
+        assert_eq!(
+            &*seg.down_targets,
+            ids.as_slice(),
+            "drill keeps the full set"
+        );
+        assert_eq!(seg.down_targets.len(), 8);
+        assert_eq!(seg.down_preview.len(), DOWN_PREVIEW, "preview capped");
+        assert_eq!(&seg.down_preview[0], "svc0");
+        assert_eq!(&seg.down_preview[5], "svc5");
+    }
+
+    fn ribbon_one_down() -> FleetRibbon {
+        let from = snapped_from();
+        let id = Uuid::new_v4();
+        let mut names = HashMap::new();
+        names.insert(id, "api".to_string());
+        let rows = vec![FleetRibbonBucket {
+            bucket_ts: from.timestamp(),
+            samples: 10,
+            up: 4,
+            down_targets: vec![id],
+        }];
+        build_fleet_ribbon(&rows, from, &names)
+    }
+
+    #[test]
+    fn ribbon_drill_cell_links_to_filter_when_inactive() {
+        let ribbon = ribbon_one_down();
+        let bucket = ribbon.segs[0].bucket_ts;
+        let mut page = sample_page();
+        page.ribbon = ribbon;
+        page.drill = None;
+        let html = page.render().unwrap();
+        assert!(
+            html.contains(&format!("down_at={bucket}")),
+            "links to set the filter"
+        );
+        assert!(!html.contains("dashboard-ribbon__seg--active"));
+    }
+
+    #[test]
+    fn ribbon_drill_cell_toggles_off_when_active() {
+        let ribbon = ribbon_one_down();
+        let bucket = ribbon.segs[0].bucket_ts;
+        let mut page = sample_page();
+        page.ribbon = ribbon;
+        page.drill = Some(DrillChip {
+            down_at: bucket,
+            label: "00:00".into(),
+        });
+        let html = page.render().unwrap();
+        assert!(
+            html.contains("dashboard-ribbon__seg--active"),
+            "active cell is ringed"
+        );
+        // The cell's own link drops down_at (toggle off)...
+        let active_btn = html
+            .split("dashboard-ribbon__seg--active")
+            .nth(1)
+            .unwrap()
+            .split("</button>")
+            .next()
+            .unwrap();
+        assert!(
+            !active_btn.contains("down_at"),
+            "active cell links to clear, not re-set"
+        );
+        // ...while the poll URL keeps it so the filter survives the 5s refresh.
+        assert!(
+            html.contains(&format!(
+                "/web/partials/dashboard?range=24h&down_at={bucket}"
+            )),
+            "poll persists the active filter"
+        );
     }
 
     #[test]

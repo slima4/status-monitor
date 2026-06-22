@@ -245,4 +245,7 @@ pub struct FleetRibbonBucket {
     pub samples: u64,
     /// Samples with `status = up`.
     pub up: u64,
+    /// Monitors with any non-up sample in the bucket — degraded/error too, not
+    /// just `down`.
+    pub down_targets: Vec<Uuid>,
 }

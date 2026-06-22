@@ -1238,20 +1238,29 @@ impl ResultsStore for ClickhouseResultsStore {
             bucket_ts: u32,
             samples: u64,
             up: u64,
+            // `Array(UUID)`: the crate's UUID adapter is single-value only, so
+            // read each element in its RowBinary `(hi, lo)` form and rebuild.
+            down_targets: Vec<(u64, u64)>,
         }
         // Source matview is per-minute; round up to a multiple of 60s
         // so every output bucket spans an integer number of source rows.
         let bucket = bucket_seconds.max(60).div_ceil(60) * 60;
-        // INTERVAL is a SQL keyword position — clickhouse-rs `bind()`
-        // produces a bare numeric literal, which is fine, but inlining
-        // here keeps `bind()` strictly to value-position arguments.
+        // Inner per-target pass so the outer can sum the fleet rate and also
+        // collect which monitors dipped. INTERVAL is a keyword position —
+        // inlined so `bind()` stays value-only.
         let query = format!(
-            "SELECT \
-               toUInt32(toStartOfInterval(minute, INTERVAL {bucket} SECOND)) AS bucket_ts, \
-               countMerge(total_checks) AS samples, \
-               countIfMerge(up_checks) AS up \
-             FROM check_results_1m \
-             WHERE org_id = ? {region_pred} AND {MINUTE_WINDOW} \
+            "SELECT bucket_ts, sum(t_samples) AS samples, sum(t_up) AS up, \
+                    groupUniqArrayIf(target_id, t_samples > t_up) AS down_targets \
+             FROM ( \
+               SELECT \
+                 toUInt32(toStartOfInterval(minute, INTERVAL {bucket} SECOND)) AS bucket_ts, \
+                 target_id, \
+                 countMerge(total_checks) AS t_samples, \
+                 countIfMerge(up_checks) AS t_up \
+               FROM check_results_1m \
+               WHERE org_id = ? {region_pred} AND {MINUTE_WINDOW} \
+               GROUP BY bucket_ts, target_id \
+             ) \
              GROUP BY bucket_ts \
              ORDER BY bucket_ts",
             region_pred = region.map(|_| "AND region = ?").unwrap_or("")
@@ -1270,6 +1279,11 @@ impl ResultsStore for ClickhouseResultsStore {
                 bucket_ts: r.bucket_ts as i64,
                 samples: r.samples,
                 up: r.up,
+                down_targets: r
+                    .down_targets
+                    .into_iter()
+                    .map(|(hi, lo)| Uuid::from_u64_pair(hi, lo))
+                    .collect(),
             })
             .collect())
     }

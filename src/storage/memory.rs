@@ -365,25 +365,30 @@ impl ResultsStore for InMemorySink {
     ) -> Result<Vec<FleetRibbonBucket>> {
         let guard = self.results.lock();
         let bucket = bucket_seconds.max(60) as i64;
-        let mut by_bucket: std::collections::BTreeMap<i64, (u64, u64)> =
-            std::collections::BTreeMap::new();
+        let mut by_bucket: std::collections::BTreeMap<
+            i64,
+            (u64, u64, std::collections::BTreeSet<Uuid>),
+        > = std::collections::BTreeMap::new();
         for r in guard.iter() {
             if r.timestamp < from || r.timestamp >= to {
                 continue;
             }
             let slot = (r.timestamp.timestamp() / bucket) * bucket;
-            let entry = by_bucket.entry(slot).or_insert((0, 0));
+            let entry = by_bucket.entry(slot).or_default();
             entry.0 += 1;
             if r.status == CheckStatus::Up {
                 entry.1 += 1;
+            } else {
+                entry.2.insert(r.target_id);
             }
         }
         Ok(by_bucket
             .into_iter()
-            .map(|(bucket_ts, (samples, up))| FleetRibbonBucket {
+            .map(|(bucket_ts, (samples, up, down))| FleetRibbonBucket {
                 bucket_ts,
                 samples,
                 up,
+                down_targets: down.into_iter().collect(),
             })
             .collect())
     }
