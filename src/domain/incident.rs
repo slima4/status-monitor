@@ -79,6 +79,33 @@ pub fn elapsed_at(
     (end - started_at).max(ChronoDuration::zero())
 }
 
+/// Confirmed downtime in seconds: each incident's overlap with `[from, to]`,
+/// summed; an ongoing incident is clamped to `now`.
+pub fn confirmed_downtime_secs(
+    incidents: &[Incident],
+    from: DateTime<Utc>,
+    to: DateTime<Utc>,
+    now: DateTime<Utc>,
+) -> i64 {
+    incidents
+        .iter()
+        .map(|i| {
+            let end = i.ended_at.unwrap_or(now).min(to);
+            let start = i.started_at.max(from);
+            (end - start).num_seconds().max(0)
+        })
+        .sum()
+}
+
+/// Uptime over a window as `100 * (1 - downtime/window)`, clamped to [0, 100].
+pub fn uptime_pct_from_downtime(downtime_secs: i64, window_secs: i64) -> f64 {
+    if window_secs <= 0 {
+        return 100.0;
+    }
+    let up = (window_secs - downtime_secs).max(0) as f64;
+    (up / window_secs as f64 * 100.0).clamp(0.0, 100.0)
+}
+
 /// Operator-narration patch.
 ///
 /// `public_title` and `public_description` use a "double-Option" pattern so
@@ -938,6 +965,32 @@ mod tests {
 
     fn bad(s: i64) -> (DateTime<Utc>, CheckStatus, Option<String>) {
         (ts(s), CheckStatus::Down, Some("boom".into()))
+    }
+
+    #[test]
+    fn confirmed_downtime_clamps_to_window_and_now() {
+        let (from, to, now) = (ts(1000), ts(2000), ts(2000));
+        let mk = |start: i64, end: Option<i64>| {
+            let mut i = new_incident(Uuid::nil(), ts(start), CheckStatus::Down, None);
+            i.ended_at = end.map(ts);
+            i
+        };
+        let incidents = vec![
+            mk(1200, Some(1300)), // inside: 100s
+            mk(900, Some(1100)),  // straddles start -> 100s
+            mk(1800, None),       // ongoing -> clamp to now: 200s
+            mk(100, Some(200)),   // before window: 0
+        ];
+        assert_eq!(confirmed_downtime_secs(&incidents, from, to, now), 400);
+        assert!((uptime_pct_from_downtime(400, 1000) - 60.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn uptime_pct_edge_cases() {
+        assert_eq!(uptime_pct_from_downtime(0, 1000), 100.0);
+        assert_eq!(uptime_pct_from_downtime(1000, 1000), 0.0);
+        assert_eq!(uptime_pct_from_downtime(5000, 1000), 0.0); // over-window clamps
+        assert_eq!(uptime_pct_from_downtime(0, 0), 100.0); // no window
     }
 
     const THRESHOLD: ChronoDuration = ChronoDuration::seconds(120);

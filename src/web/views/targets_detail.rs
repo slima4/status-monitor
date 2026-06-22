@@ -11,7 +11,9 @@ use uuid::Uuid;
 
 use crate::api::error::codes;
 use crate::app::AppState;
-use crate::domain::{CheckResult, Incident, OrgId};
+use crate::domain::{
+    CheckResult, Incident, OrgId, confirmed_downtime_secs, uptime_pct_from_downtime,
+};
 use crate::error::AppError;
 use crate::storage::{ClampedRange, TimeRange, UptimeStats};
 use crate::web::error::{WebError, WebResult};
@@ -26,6 +28,9 @@ use crate::web::{AuthedBrowser, CurrentOrg};
 // already carry the trend. 60 ≈ the last hour at a 1-minute interval —
 // enough to eyeball recent behaviour, full history is the JSON API.
 const RESULTS_PAGE_LIMIT: usize = 60;
+// Confirmed incidents over the longest window (90d) are few; this bounds the
+// downtime read without truncating a realistic count.
+const CONFIRMED_UPTIME_INCIDENT_CAP: usize = 2000;
 pub(crate) const RANGE_KEYS: [&str; 4] = ["1h", "24h", "7d", "30d"];
 pub(crate) const DEFAULT_RANGE: &str = "24h";
 // Decoupled from the user's chart range so the header badge reflects the
@@ -370,7 +375,7 @@ async fn load_live_data(
     region: Option<&str>,
 ) -> WebResult<LiveData> {
     let time_range = state.quotas.clamp_raw(org, TimeRange { from, to }).await?;
-    let (uptime, mut results) = tokio::try_join!(
+    let (mut uptime, mut results) = tokio::try_join!(
         state
             .results_store
             .uptime(org, target_id, time_range, region),
@@ -383,6 +388,24 @@ async fn load_live_data(
             region
         ),
     )?;
+    // All-regions uptime is reported as confirmed downtime over the window; a
+    // region filter keeps the raw per-region sample rate.
+    if region.is_none() && uptime.total > 0 {
+        let incidents = state
+            .incident_narration_store
+            .list_for_target(
+                org,
+                target_id,
+                time_range.inner(),
+                CONFIRMED_UPTIME_INCIDENT_CAP,
+                0,
+                false,
+            )
+            .await?;
+        let down = confirmed_downtime_secs(&incidents, time_range.from, time_range.to, Utc::now());
+        uptime.uptime_pct =
+            uptime_pct_from_downtime(down, (time_range.to - time_range.from).num_seconds());
+    }
     let results_has_more = results.len() > RESULTS_PAGE_LIMIT;
     if results_has_more {
         results.truncate(RESULTS_PAGE_LIMIT);

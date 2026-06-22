@@ -25,7 +25,9 @@ use crate::domain::incident::{Incident, NewIncidentUpdate};
 use crate::domain::public::IncidentStatusPhase;
 use crate::domain::result::CheckResult;
 use crate::domain::target::{Target, TargetUpdate};
-use crate::domain::{WriteSource, humanize_check_error};
+use crate::domain::{
+    WriteSource, confirmed_downtime_secs, humanize_check_error, uptime_pct_from_downtime,
+};
 use crate::quotas::ratelimit::{RateLimitCategory, RateLimitKey};
 use crate::storage::incidents::ActiveIncident;
 use crate::storage::{ClampedRange, TargetFilter, TimeRange};
@@ -70,6 +72,9 @@ const SINCE_LOOKBACK_DAYS: i64 = 30;
 /// Cap on incidents/failures returned by `get_monitor_history` — bound the
 /// response regardless of how flappy the monitor is.
 const HISTORY_INCIDENT_CAP: usize = 50;
+/// Confirmed incidents read to derive uptime over a window; far above any
+/// realistic confirmed-incident count, so it never truncates the downtime sum.
+const UPTIME_INCIDENT_CAP: usize = 2_000;
 
 #[derive(Clone)]
 pub struct McpServer {
@@ -300,14 +305,33 @@ impl McpServer {
             from: now - Duration::try_days(30).unwrap_or_default(),
             to: now,
         });
-        let (latest, up24, up30) = tokio::try_join!(
+        let (latest, mut up24, mut up30, incidents) = tokio::try_join!(
             self.state
                 .results_store
                 .list_results(org, id, r24, 1, 0, None),
             self.state.results_store.uptime(org, id, r24, None),
             self.state.results_store.uptime(org, id, r30, None),
+            self.state.incident_narration_store.list_for_target(
+                org,
+                id,
+                r30.inner(),
+                UPTIME_INCIDENT_CAP,
+                0,
+                false
+            ),
         )
         .map_err(|e| McpToolError::internal(format!("monitor history: {e}")))?;
+
+        // Report uptime as confirmed downtime over each window (30d incidents
+        // cover the 24h window too).
+        if up24.total > 0 {
+            let down = confirmed_downtime_secs(&incidents, r24.from, r24.to, now);
+            up24.uptime_pct = uptime_pct_from_downtime(down, (r24.to - r24.from).num_seconds());
+        }
+        if up30.total > 0 {
+            let down = confirmed_downtime_secs(&incidents, r30.from, r30.to, now);
+            up30.uptime_pct = uptime_pct_from_downtime(down, (r30.to - r30.from).num_seconds());
+        }
 
         let last = latest.first();
         let (_, address) = describe_check(&target.check);
@@ -373,7 +397,7 @@ impl McpServer {
                 org,
                 id,
                 range.inner(),
-                HISTORY_INCIDENT_CAP,
+                UPTIME_INCIDENT_CAP,
                 0,
                 false,
             ),
@@ -392,8 +416,20 @@ impl McpServer {
             })
             .collect();
 
+        // Uptime as confirmed downtime over the window, from the full incident
+        // set; keep the sample value when the window has no data.
+        let uptime_pct = if uptime.total > 0 {
+            let down = confirmed_downtime_secs(&incidents, range.from, range.to, now);
+            uptime_pct_from_downtime(down, (range.to - range.from).num_seconds())
+        } else {
+            uptime.uptime_pct
+        };
+
+        // The failures/windows lists stay bounded regardless of how flappy the
+        // monitor is; the uptime sum above already used the full set.
         let failures = incidents
             .iter()
+            .take(HISTORY_INCIDENT_CAP)
             .map(|inc| Failure {
                 at: inc.started_at.to_rfc3339(),
                 state: inc.status.as_str().to_string(),
@@ -403,6 +439,7 @@ impl McpServer {
 
         let incident_windows = incidents
             .into_iter()
+            .take(HISTORY_INCIDENT_CAP)
             .map(|inc| IncidentWindow {
                 opened_at: inc.started_at.to_rfc3339(),
                 resolved_at: inc.ended_at.map(|e| e.to_rfc3339()),
@@ -410,7 +447,7 @@ impl McpServer {
             .collect();
 
         Ok(Json(MonitorHistory {
-            uptime: uptime.uptime_pct,
+            uptime: uptime_pct,
             latency_series,
             failures,
             incidents: incident_windows,

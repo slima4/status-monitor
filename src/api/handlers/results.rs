@@ -10,7 +10,7 @@ use crate::api::error::codes;
 use crate::api::page::{PageEnvelope, PageOfCheckResult, PageOfIncident};
 use crate::api::types::{LatencySeries, LatencySeriesByRegion};
 use crate::app::AppState;
-use crate::domain::humanize_check_error;
+use crate::domain::{confirmed_downtime_secs, humanize_check_error, uptime_pct_from_downtime};
 use crate::error::{AppError, Result};
 use crate::storage::{TimeRange, UptimeStats};
 use crate::web::{Authorized, TargetsRead};
@@ -28,6 +28,8 @@ const RESULTS_LIMIT_DEFAULT: usize = 1_000;
 const RESULTS_LIMIT_MAX: usize = 10_000;
 const INCIDENTS_LIMIT_DEFAULT: usize = 100;
 const INCIDENTS_LIMIT_MAX: usize = 1_000;
+// Confirmed incidents over the longest window are few; bounds the downtime read.
+const UPTIME_INCIDENT_CAP: usize = 2_000;
 
 /// Hard cap on the requested `(to - from)` span. `fetch_bad_only_rows`
 /// materialises bad-status rows in the window into Rust memory for
@@ -306,7 +308,7 @@ pub async fn uptime(
     Query(q): Query<RangeQuery>,
 ) -> Result<Json<UptimeStats>> {
     let range = state.quotas.clamp_raw(org, q.resolve()?).await?;
-    let (target, stats) = tokio::try_join!(
+    let (target, mut stats) = tokio::try_join!(
         state.target_store.get(org, id),
         state
             .results_store
@@ -314,6 +316,16 @@ pub async fn uptime(
     )?;
     if target.is_none() {
         return Err(target_not_found());
+    }
+    // All-regions uptime is reported as confirmed downtime over the window; a
+    // region filter keeps the raw per-region sample rate.
+    if q.region.is_none() && stats.total > 0 {
+        let incidents = state
+            .incident_narration_store
+            .list_for_target(org, id, range.inner(), UPTIME_INCIDENT_CAP, 0, false)
+            .await?;
+        let down = confirmed_downtime_secs(&incidents, range.from, range.to, Utc::now());
+        stats.uptime_pct = uptime_pct_from_downtime(down, (range.to - range.from).num_seconds());
     }
     Ok(Json(stats))
 }
