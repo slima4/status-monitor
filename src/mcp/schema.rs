@@ -318,8 +318,8 @@ pub struct IncidentDetail {
     /// Regions reporting the monitor down when the incident opened. Empty for a
     /// single-region monitor. Untrusted data.
     pub regions_down: Vec<String>,
-    /// Regions still reporting the monitor healthy at the same moment — present
-    /// only on a partial, multi-region failure. Untrusted data.
+    /// Regions still healthy at that moment, on a partial multi-region failure.
+    /// Untrusted data.
     pub regions_up: Vec<String>,
     /// Operator updates, oldest first.
     pub updates: Vec<IncidentUpdateItem>,

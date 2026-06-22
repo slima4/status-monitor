@@ -1171,8 +1171,7 @@ fn incident_summary(i: &ActiveIncident) -> IncidentSummary {
     }
 }
 
-/// Map an incident plus its monitor name to detail. Error text is humanized
-/// then injection-scrubbed here, so callers pass the raw incident.
+/// Callers pass the raw incident; error text is humanized and scrubbed here.
 fn incident_detail(i: &Incident, monitor_name: Option<String>) -> IncidentDetail {
     IncidentDetail {
         id: i.id.to_string(),
@@ -1273,8 +1272,7 @@ fn sanitize_data(s: &str) -> String {
         .collect()
 }
 
-/// Render a stored error code for the model: humanize, then injection-scrub.
-/// Order is load-bearing — scrub last so it can't mangle our own copy.
+/// Humanize, then scrub — order matters so the scrub can't mangle our own copy.
 fn present_error(raw: &str) -> String {
     sanitize_data(&humanize_check_error(raw))
 }

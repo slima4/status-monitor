@@ -639,7 +639,6 @@ impl From<CheckResult> for ResultRow {
     }
 }
 
-// Error display text has one source in `domain`; the API and MCP surfaces share it.
 pub(crate) use crate::domain::humanize_check_error as fmt_error_display;
 
 impl From<Incident> for IncidentRow {

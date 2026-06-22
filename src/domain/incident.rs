@@ -43,9 +43,7 @@ pub struct Incident {
     pub updated_at: Option<DateTime<Utc>>,
     #[serde(default)]
     pub updates: Vec<PublicIncidentUpdate>,
-    /// Regions failing / still healthy when the incident opened. Empty for a
-    /// single-region monitor, or when the incident came from the coalesced
-    /// check stream (which has no per-region grouping).
+    /// Empty for a single-region monitor, or a coalesced-stream incident.
     #[serde(default)]
     pub regions_down: Vec<String>,
     #[serde(default)]

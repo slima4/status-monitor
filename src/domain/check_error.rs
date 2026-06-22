@@ -1,12 +1,8 @@
-//! Turns a probe's terse error code (`no response`, `tls`, a cert-expiry JSON
-//! blob) into one human sentence. Single source for every surface that shows a
-//! check failure to a person or an LLM: the web views, the JSON API, and MCP.
+//! Single source for turning a probe's terse error code into display text,
+//! shared by the web views, the JSON API, and MCP.
 
 use crate::domain::strip_served_stale;
 
-/// Map a stored `error_sample`/`last_error` to display text. Strips the
-/// internal served-stale annotation, decodes the TLS/domain-expiry payloads,
-/// and de-machines the terse transport codes. Unknown input passes through.
 pub fn humanize_check_error(raw: &str) -> String {
     let raw = match strip_served_stale(raw) {
         Some(r) => r,
