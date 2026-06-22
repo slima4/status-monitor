@@ -19,8 +19,8 @@
 // `color` label keeps their series distinct so they don't collide.
 prometheus.scrape "uptimepage" {
   targets = [
-    { __address__ = "uptimepage_blue:9090",  color = "blue"  },
-    { __address__ = "uptimepage_green:9090", color = "green" },
+    { __address__ = "uptimepage_blue:9090",  color = "blue",  role = "control-plane" },
+    { __address__ = "uptimepage_green:9090", color = "green", role = "control-plane" },
   ]
   forward_to      = [prometheus.remote_write.grafana_cloud.receiver]
   job_name        = "uptimepage"
@@ -32,7 +32,7 @@ prometheus.scrape "uptimepage" {
 // an absent agent simply scrapes down, which doubles as a liveness signal.
 prometheus.scrape "uptimepage_agent" {
   targets = [
-    { __address__ = "agent:9090", role = "home-agent" },
+    { __address__ = "agent:9090", role = "probe", region = coalesce(sys.env("UPTIMEPAGE_AGENT_REGION"), "default") },
   ]
   forward_to      = [prometheus.remote_write.grafana_cloud.receiver]
   job_name        = "uptimepage_agent"

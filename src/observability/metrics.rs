@@ -140,6 +140,26 @@ fn register_descriptions() {
         "uptimepage_agents_enabled_down",
         "Count of enabled regional agents currently past the staleness window. Recomputed every sweep so it never latches, the dead-man signal for a probe region going dark"
     );
+    describe_gauge!(
+        "uptimepage_region_agents_total",
+        "Enabled regional agents configured for a region, labelled by region. Denominator of the per-region quorum (how many agents should be checking in)"
+    );
+    describe_gauge!(
+        "uptimepage_region_agents_up",
+        "Enabled regional agents in a region that checked in within the staleness window, labelled by region. Numerator of the per-region quorum; 0 means the region's agents have all gone stale. Recomputed each sweep; like the per-agent gauges it can freeze if a region's last agent is removed"
+    );
+    describe_gauge!(
+        "uptimepage_region_checks_window",
+        "Checks completed in a region over the recent sampling window, labelled by region. Brain-side count from ClickHouse, so it covers remote agents Alloy can't scrape. Only regions with results in the window appear"
+    );
+    describe_gauge!(
+        "uptimepage_region_checks_up_window",
+        "Checks that returned up in a region over the recent sampling window, labelled by region. Divide by uptimepage_region_checks_window for the success ratio"
+    );
+    describe_gauge!(
+        "uptimepage_region_check_latency_p95_ms",
+        "Approximate p95 check latency in a region over the recent sampling window, in milliseconds, labelled by region. Goes stale for a dark region (no new rows), so gate dashboard panels on uptimepage_region_agents_up"
+    );
     describe_counter!(
         "uptimepage_notifications_total",
         "Alert notifications dispatched, labelled by channel and kind"
@@ -267,6 +287,11 @@ pub mod names {
     pub const AGENT_LAST_SEEN_AGE: &str = "uptimepage_agent_last_seen_age_seconds";
     pub const AGENT_UP: &str = "uptimepage_agent_up";
     pub const AGENTS_ENABLED_DOWN: &str = "uptimepage_agents_enabled_down";
+    pub const REGION_AGENTS_TOTAL: &str = "uptimepage_region_agents_total";
+    pub const REGION_AGENTS_UP: &str = "uptimepage_region_agents_up";
+    pub const REGION_CHECKS_WINDOW: &str = "uptimepage_region_checks_window";
+    pub const REGION_CHECKS_UP_WINDOW: &str = "uptimepage_region_checks_up_window";
+    pub const REGION_CHECK_LATENCY_P95_MS: &str = "uptimepage_region_check_latency_p95_ms";
     pub const SCHEDULER_REFRESH_FAILED: &str = "uptimepage_scheduler_refresh_failed_total";
     pub const SCHEDULER_CONSECUTIVE_REFRESH_FAILURES: &str =
         "uptimepage_scheduler_consecutive_refresh_failures";

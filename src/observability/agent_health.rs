@@ -3,17 +3,17 @@
 //! gauges (alertable in Grafana) plus a warn log on the fresh→stale transition.
 //! Agents are operator/cross-tenant, so there is no per-org incident here.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use tokio::time::{MissedTickBehavior, interval};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::error::Result;
 use crate::observability::metrics::names;
-use crate::storage::operator::OperatorRepo;
+use crate::storage::operator::{AgentRow, OperatorRepo};
 
 const TICK: Duration = Duration::from_secs(30);
 
@@ -71,5 +71,101 @@ async fn sweep(
     // out and the gauge can't latch. The count of enabled agents currently
     // dark, which the dead-man alert pages on.
     metrics::gauge!(names::AGENTS_ENABLED_DOWN).set(stale.len() as f64);
+    // Per-region quorum: fresh enabled agents out of the region's roster. Like
+    // the per-agent gauges this can freeze if a region's last agent is removed;
+    // dashboards read up-of-total and alert on up == 0 (region dark).
+    for (region, total, up) in region_quorum(&agents, now, stale_after) {
+        metrics::gauge!(names::REGION_AGENTS_TOTAL, "region" => region.to_string())
+            .set(total as f64);
+        metrics::gauge!(names::REGION_AGENTS_UP, "region" => region.to_string()).set(up as f64);
+    }
     Ok(())
+}
+
+/// Per-region quorum from a roster: `(region, enabled_total, fresh_up)`.
+/// Enabled agents only — a disabled agent is intentionally dark, not part of a
+/// region's expected roster. Pure, so the quorum logic is unit-testable without
+/// a metrics recorder.
+fn region_quorum(
+    agents: &[AgentRow],
+    now: DateTime<Utc>,
+    stale_after: Duration,
+) -> Vec<(&str, u32, u32)> {
+    let mut total: HashMap<&str, u32> = HashMap::new();
+    let mut up: HashMap<&str, u32> = HashMap::new();
+    for a in agents.iter().filter(|a| a.enabled) {
+        *total.entry(a.region.as_str()).or_insert(0) += 1;
+        let since = a.last_seen_at.unwrap_or(a.created_at);
+        let age = (now - since).num_seconds().max(0);
+        if age as u64 <= stale_after.as_secs() {
+            *up.entry(a.region.as_str()).or_insert(0) += 1;
+        }
+    }
+    total
+        .into_iter()
+        .map(|(region, t)| (region, t, up.get(region).copied().unwrap_or(0)))
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn agent(region: &str, enabled: bool, last_seen_secs_ago: i64) -> AgentRow {
+        let now = Utc::now();
+        AgentRow {
+            id: Uuid::now_v7(),
+            region: region.into(),
+            name: format!("{region}-agent"),
+            enabled,
+            token_prefix: "tok".into(),
+            last_seen_at: Some(now - chrono::Duration::seconds(last_seen_secs_ago)),
+            created_at: now,
+        }
+    }
+
+    fn quorum_for<'a>(out: &'a [(&'a str, u32, u32)], region: &str) -> Option<(u32, u32)> {
+        out.iter()
+            .find(|(r, _, _)| *r == region)
+            .map(|(_, t, u)| (*t, *u))
+    }
+
+    #[test]
+    fn counts_fresh_enabled_agents_per_region() {
+        let now = Utc::now();
+        let stale_after = Duration::from_secs(90);
+        let agents = vec![
+            agent("eu", true, 10),  // fresh
+            agent("eu", true, 30),  // fresh
+            agent("eu", true, 600), // stale
+            agent("us", true, 5),   // fresh
+        ];
+        let out = region_quorum(&agents, now, stale_after);
+        assert_eq!(quorum_for(&out, "eu"), Some((3, 2)), "eu: 2 of 3 fresh");
+        assert_eq!(quorum_for(&out, "us"), Some((1, 1)), "us: 1 of 1 fresh");
+    }
+
+    #[test]
+    fn disabled_agents_are_not_part_of_the_roster() {
+        let now = Utc::now();
+        let stale_after = Duration::from_secs(90);
+        let agents = vec![agent("eu", false, 5), agent("eu", true, 5)];
+        // Only the enabled agent counts toward total and up.
+        assert_eq!(
+            quorum_for(&region_quorum(&agents, now, stale_after), "eu"),
+            Some((1, 1))
+        );
+    }
+
+    #[test]
+    fn fully_stale_region_reports_zero_up() {
+        let now = Utc::now();
+        let stale_after = Duration::from_secs(90);
+        let agents = vec![agent("eu", true, 600), agent("eu", true, 1200)];
+        assert_eq!(
+            quorum_for(&region_quorum(&agents, now, stale_after), "eu"),
+            Some((2, 0)),
+            "region dark: 0 of 2 fresh"
+        );
+    }
 }

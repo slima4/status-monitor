@@ -43,13 +43,18 @@ these names verbatim.
 | `uptimepage_targets_total` | gauge | targets in this process's scheduler registry (sampled). Non-zero only where in-process probing runs; a brain doing agent-only probing reports 0 by design — use `uptimepage_targets_enabled` for the configured-monitor count |
 | `uptimepage_targets_enabled{kind}` | gauge | configured enabled monitors counted from Postgres, by `kind`. Slow-cadence inventory gauge, scrape-cached so request load never reaches Postgres; correct on a brain regardless of where probing runs |
 | `uptimepage_users_active` | gauge | non-deleted user accounts counted from Postgres. Slow-cadence inventory gauge, scrape-cached |
-| `uptimepage_workers_in_flight` | gauge | current worker-pool semaphore depth (sampled) |
-| `uptimepage_result_queue_depth` | gauge | depth of the result channel buffer (sampled) |
-| `uptimepage_circuit_breakers_open` | gauge | currently-open breakers (sampled) |
+| `uptimepage_workers_in_flight` | gauge | current worker-pool semaphore depth (sampled). Emitted by every probing process, so on a brain doing agent-only probing the real value is on the agent's `role=probe` series, not the brain's near-zero one |
+| `uptimepage_result_queue_depth` | gauge | depth of the result channel buffer (sampled). Present on both the agent (egress to the control plane) and the brain (ingest to storage); separate them by `role` |
+| `uptimepage_circuit_breakers_open` | gauge | currently-open breakers (sampled). Probe-side — read the `role=probe` series |
 | `uptimepage_monitors_unmonitored` | gauge | monitors whose covering probes have all gone silent (no fresh results), from the silence sweep. Distinct from down: these have no data at all |
 | `uptimepage_agent_up{region,agent}` | gauge | 1 if a regional agent checked in within the staleness window, else 0. Emitted by the control plane from `agents.last_seen_at`, so it covers remote agents that Alloy can't scrape. Per-agent series can freeze on agent removal, so alerts use `uptimepage_agents_enabled_down` |
 | `uptimepage_agent_last_seen_age_seconds{region,agent}` | gauge | seconds since a regional agent last checked in. Climbs unbounded when an agent goes dark |
 | `uptimepage_agents_enabled_down` | gauge | count of enabled regional agents currently past the staleness window. Recomputed every sweep so it never latches. The dead-man signal for a probe region going dark |
+| `uptimepage_region_agents_total{region}` | gauge | enabled agents configured for a region — the quorum denominator. Brain-side from the `agents` table |
+| `uptimepage_region_agents_up{region}` | gauge | enabled agents in a region fresh within the staleness window — the quorum numerator. `up / total` is the region's health fraction; `up == 0` means the region's agents have all gone stale. Recomputed each sweep; like the per-agent gauges it can freeze if a region's last agent is removed. Covers agents Alloy can't scrape |
+| `uptimepage_region_checks_window{region}` | gauge | checks completed in a region over the recent sampling window. Brain-side count from ClickHouse, so it covers remote agents Alloy can't scrape. Only regions with results in the window appear |
+| `uptimepage_region_checks_up_window{region}` | gauge | checks that returned up in a region over the recent window. Divide by `uptimepage_region_checks_window` for the success ratio |
+| `uptimepage_region_check_latency_p95_ms{region}` | gauge | approximate p95 check latency in a region over the recent window, in ms. Goes stale for a dark region (no new rows), so gate panels on `uptimepage_region_agents_up` |
 | `uptimepage_pg_pool_size` | gauge | total connections held in the sqlx Postgres pool (idle + in-use). Bounded above by `storage.postgres.max_connections` |
 | `uptimepage_pg_pool_idle` | gauge | connections sitting idle in the Postgres pool. A persistent `idle = 0` alongside `in_use` at the max is the saturation signal |
 | `uptimepage_pg_pool_in_use` | gauge | connections checked out of the Postgres pool right now (`size − idle`). Alert on a sustained high `in_use / size` ratio |
@@ -72,6 +77,10 @@ quantile series (`name{quantile="0.5|0.9|0.95|0.99|0.999"}`) plus `name_sum`
 and `name_count`; query those as `name{quantile="0.99"}` directly. Gauges
 carry no `org_id` label, these are single-instance operator metrics, not
 per-tenant.
+
+**Scrape labels.** The collector stamps two labels the app does not set: `role` (`control-plane` on the brain, `probe` on a regional agent) and, on probe series, `region`. The brain and a probe both emit the prober and pipeline metrics (`check_*`, `workers_in_flight`, `circuit_breakers_open`, `result_queue_depth`, `storage_*`, `process_resident_bytes`), so filter by `role` to read the one you mean rather than summing two processes. The Ops dashboard pins probe panels to `role=probe` and filters them by a `$region` variable; the Business dashboard reads the control-plane-only inventory gauges.
+
+The `uptimepage_region_*` gauges are different: the brain emits them with a `region` label it sets itself (from the `agents` table and from ClickHouse), not a collector-stamped scrape label. They are the per-region surface on a SaaS control plane, where the regional agents are not scraped at all: liveness and quorum from the `agents` table (`region_agents_up` / `_total`), throughput and latency from ClickHouse (`region_checks_window` / `_up_window` / `region_check_latency_p95_ms`). One scrape point, cost scales with regions, not tenants or fleet size.
 
 ## OpenTelemetry tracing
 

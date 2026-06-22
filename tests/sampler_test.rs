@@ -55,8 +55,45 @@ async fn sampler_runs_and_shuts_down() {
     let h = sampler::spawn(
         pool,
         registry,
-        pg_pool,
-        ch,
+        Some(sampler::DbSources { pg_pool, ch }),
+        &tx,
+        Duration::from_millis(20),
+        shutdown.clone(),
+    );
+    tokio::time::sleep(Duration::from_millis(80)).await;
+    shutdown.cancel();
+    tokio::time::timeout(Duration::from_secs(1), h)
+        .await
+        .expect("sampler did not shut down")
+        .unwrap();
+}
+
+// The probe-only agent runs the sampler with no database; it must sample the
+// worker/queue gauges and shut down cleanly without a Postgres or CH handle.
+#[tokio::test]
+async fn sampler_runs_without_database() {
+    let addr = "127.0.0.1:1".parse().unwrap();
+    let store = Arc::new(InMemoryTargetStore::from_vec(vec![http_target(
+        addr, "/", 60_000,
+    )]));
+    let registry = Arc::new(TargetRegistry::new(store.clone()));
+    registry.refresh().await.unwrap();
+
+    let (tx, _rx) = mpsc::channel(128);
+    let pool = Arc::new(WorkerPool::new(
+        16,
+        test_client(),
+        breaker_cfg(),
+        ResultFanout::new(tx.clone()),
+        uptimepage::worker::host_throttle::HostThrottle::permissive(),
+        common::test_domain_expiry_runtime(),
+    ));
+
+    let shutdown = CancellationToken::new();
+    let h = sampler::spawn(
+        pool,
+        registry,
+        None,
         &tx,
         Duration::from_millis(20),
         shutdown.clone(),

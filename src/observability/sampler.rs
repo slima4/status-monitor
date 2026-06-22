@@ -15,11 +15,18 @@ use crate::observability::metrics::names;
 use crate::scheduler::TargetRegistry;
 use crate::worker::WorkerPool;
 
+/// Postgres + ClickHouse telemetry sources. Present on the control plane,
+/// absent on a probe-only agent (no database connection), so the agent never
+/// registers the pool/parts gauges.
+pub struct DbSources {
+    pub pg_pool: PgPool,
+    pub ch: ChClient,
+}
+
 pub fn spawn(
     pool: Arc<WorkerPool>,
     registry: Arc<TargetRegistry>,
-    pg_pool: PgPool,
-    ch: ChClient,
+    db: Option<DbSources>,
     result_tx: &mpsc::Sender<CheckResult>,
     sample_interval: Duration,
     shutdown: CancellationToken,
@@ -32,8 +39,7 @@ pub fn spawn(
     tokio::spawn(run(
         pool,
         registry,
-        pg_pool,
-        ch,
+        db,
         tx,
         queue_capacity,
         sample_interval,
@@ -41,12 +47,10 @@ pub fn spawn(
     ))
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn run(
     pool: Arc<WorkerPool>,
     registry: Arc<TargetRegistry>,
-    pg_pool: PgPool,
-    ch: ChClient,
+    db: Option<DbSources>,
     result_tx: mpsc::WeakSender<CheckResult>,
     queue_capacity: usize,
     sample_interval: Duration,
@@ -60,11 +64,18 @@ async fn run(
     let g_targets = gauge!(names::TARGETS_TOTAL);
     let g_queue_depth = gauge!(names::RESULT_QUEUE_DEPTH);
     let g_singleflight_slots = gauge!(names::RDAP_SINGLEFLIGHT_SLOTS);
-    let g_pg_size = gauge!(names::PG_POOL_SIZE);
-    let g_pg_idle = gauge!(names::PG_POOL_IDLE);
-    let g_pg_in_use = gauge!(names::PG_POOL_IN_USE);
     let g_resident = gauge!(names::PROCESS_RESIDENT_BYTES);
-    let g_ch_parts = gauge!(names::CLICKHOUSE_MAX_PART_COUNT);
+
+    // Register the DB gauges only when a database is wired, so the probe-only
+    // agent's exposition stays free of pool/parts series it can't populate.
+    let db = db.map(|src| DbGauges {
+        pg_pool: src.pg_pool,
+        ch: src.ch,
+        size: gauge!(names::PG_POOL_SIZE),
+        idle: gauge!(names::PG_POOL_IDLE),
+        in_use: gauge!(names::PG_POOL_IN_USE),
+        parts: gauge!(names::CLICKHOUSE_MAX_PART_COUNT),
+    });
 
     let singleflight = pool.domain_expiry_runtime().singleflight.clone();
 
@@ -82,26 +93,44 @@ async fn run(
                 g_queue_depth.set(depth as f64);
                 g_singleflight_slots.set(singleflight.len() as f64);
 
-                let pg_size = pg_pool.size() as usize;
-                let pg_idle = pg_pool.num_idle();
-                g_pg_size.set(pg_size as f64);
-                g_pg_idle.set(pg_idle as f64);
-                g_pg_in_use.set(pg_size.saturating_sub(pg_idle) as f64);
-
                 if let Some(bytes) = resident_bytes() {
                     g_resident.set(bytes as f64);
                 }
 
-                // Best-effort + time-bounded: the CH client has no read timeout,
-                // so a hung (not refused) server could otherwise block this arm
-                // indefinitely. The 2s cap bounds how long one hung read delays
-                // the next tick (and thus shutdown); a failed/slow read skips it.
-                match tokio::time::timeout(Duration::from_secs(2), max_part_count(&ch)).await {
-                    Ok(Some(parts)) => g_ch_parts.set(parts),
-                    Ok(None) => {}
-                    Err(_) => tracing::debug!("clickhouse parts-count sample timed out"),
+                if let Some(db) = &db {
+                    db.sample().await;
                 }
             }
+        }
+    }
+}
+
+/// Pre-registered control-plane gauges plus the sources they read.
+struct DbGauges {
+    pg_pool: PgPool,
+    ch: ChClient,
+    size: metrics::Gauge,
+    idle: metrics::Gauge,
+    in_use: metrics::Gauge,
+    parts: metrics::Gauge,
+}
+
+impl DbGauges {
+    async fn sample(&self) {
+        let pg_size = self.pg_pool.size() as usize;
+        let pg_idle = self.pg_pool.num_idle();
+        self.size.set(pg_size as f64);
+        self.idle.set(pg_idle as f64);
+        self.in_use.set(pg_size.saturating_sub(pg_idle) as f64);
+
+        // Best-effort + time-bounded: the CH client has no read timeout, so a
+        // hung (not refused) server could otherwise block this arm
+        // indefinitely. The 2s cap bounds how long one hung read delays the
+        // next tick (and thus shutdown); a failed/slow read skips it.
+        match tokio::time::timeout(Duration::from_secs(2), max_part_count(&self.ch)).await {
+            Ok(Some(parts)) => self.parts.set(parts),
+            Ok(None) => {}
+            Err(_) => tracing::debug!("clickhouse parts-count sample timed out"),
         }
     }
 }

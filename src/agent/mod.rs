@@ -343,7 +343,7 @@ pub async fn run(cfg: AppConfig) -> Result<()> {
         &cfg.security,
     )?);
     let (result_tx, result_rx) = tokio::sync::mpsc::channel(cfg.agent.buffer_capacity.max(1024));
-    let fanout = ResultFanout::new(result_tx);
+    let fanout = ResultFanout::new(result_tx.clone());
     let host_throttle = Arc::new(HostThrottle::new(
         cfg.checker.per_host_max_inflight,
         cfg.checker.rdap_max_inflight,
@@ -371,7 +371,7 @@ pub async fn run(cfg: AppConfig) -> Result<()> {
     let registry = Arc::new(TargetRegistry::new(source));
     let mut sched_cfg = cfg.scheduler.clone();
     sched_cfg.target_refresh_interval_secs = cfg.agent.pull_interval_secs;
-    let scheduler = Arc::new(Scheduler::new(registry, pool, sched_cfg));
+    let scheduler = Arc::new(Scheduler::new(registry.clone(), pool.clone(), sched_cfg));
     let batcher = ResultBatcher::new(
         result_rx,
         sink,
@@ -395,6 +395,19 @@ pub async fn run(cfg: AppConfig) -> Result<()> {
         let token = root.clone();
         tokio::spawn(async move { batcher.run(token).await })
     };
+    // Probe-side gauges (workers in-flight, open breakers, queue depth, RSS).
+    // No DbSources: the agent holds no Postgres/ClickHouse pool to sample.
+    let sample_interval =
+        Duration::from_millis(cfg.observability.gauge_sample_interval_ms.max(100));
+    let sampler_handle = crate::observability::sampler::spawn(
+        pool,
+        registry,
+        None,
+        &result_tx,
+        sample_interval,
+        root.clone(),
+    );
+    drop(result_tx);
     let job_client = AgentDispatchClient {
         client: http_outbound::build_outbound_client(SsrfGuard::new(
             cfg.security.allow_private_targets,
@@ -416,6 +429,7 @@ pub async fn run(cfg: AppConfig) -> Result<()> {
     root.cancel();
     let _ = scheduler_handle.await;
     let _ = batcher_handle.await;
+    let _ = sampler_handle.await;
     let _ = job_handle.await;
     Ok(())
 }

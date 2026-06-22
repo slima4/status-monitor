@@ -3,6 +3,7 @@ pub mod heartbeat;
 pub mod http_metrics;
 pub mod inventory;
 pub mod metrics;
+pub mod region_health;
 pub mod sampler;
 pub mod silence;
 pub mod tracing;

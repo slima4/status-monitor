@@ -220,6 +220,7 @@ async fn main() -> Result<()> {
     let ch_client_for_public = clickhouse_client.clone();
     let ch_client_for_purge = clickhouse_client.clone();
     let ch_client_for_sampler = clickhouse_client.clone();
+    let ch_client_for_region = clickhouse_client.clone();
     let results_store: Arc<dyn ResultsStore> =
         Arc::new(ClickhouseResultsStore::from_client(clickhouse_client));
 
@@ -313,8 +314,10 @@ async fn main() -> Result<()> {
     let sampler_handle: JoinHandle<()> = uptimepage::observability::sampler::spawn(
         pool.clone(),
         registry.clone(),
-        pg_pool.clone(),
-        ch_client_for_sampler,
+        Some(uptimepage::observability::sampler::DbSources {
+            pg_pool: pg_pool.clone(),
+            ch: ch_client_for_sampler,
+        }),
         &result_tx,
         sample_interval,
         root.clone(),
@@ -373,6 +376,14 @@ async fn main() -> Result<()> {
         let pg = pg_pool_for_stores.clone();
         let token = root.clone();
         tokio::spawn(async move { uptimepage::observability::inventory::run(pg, token).await })
+    };
+
+    // Per-region probe quality from ClickHouse — brain-side, so it covers the
+    // remote agents Alloy can't scrape and scales with regions, not customers.
+    let region_health_handle: JoinHandle<()> = {
+        let ch = ch_client_for_region;
+        let token = root.clone();
+        tokio::spawn(async move { uptimepage::observability::region_health::run(ch, token).await })
     };
 
     // Incident paging worker: the single notification path. Always running — it
@@ -747,6 +758,7 @@ async fn main() -> Result<()> {
             incident_writer_handle,
             agent_health_handle,
             inventory_handle,
+            region_health_handle,
             silence_sweep_handle,
             escalation_engine_handle,
             purge_handle,
