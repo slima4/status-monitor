@@ -15,6 +15,8 @@ use crate::domain::{
     CheckStatus, Incident, IncidentNarrationUpdate, IncidentSeverity, IncidentStatusPhase,
     NewIncidentUpdate, OrgId, PublicIncidentUpdate,
 };
+use std::collections::HashMap;
+
 use crate::error::Result;
 use crate::storage::TimeRange;
 
@@ -66,6 +68,12 @@ pub trait IncidentNarrationStore: Send + Sync {
         offset: usize,
         ongoing_only: bool,
     ) -> Result<Vec<Incident>>;
+    /// Confirmed downtime per target over `range`; targets with no overlap absent.
+    async fn confirmed_downtime_by_target(
+        &self,
+        org: OrgId,
+        range: TimeRange,
+    ) -> Result<HashMap<Uuid, i64>>;
 }
 
 // ── Postgres impl ────────────────────────────────────────────────────────
@@ -349,6 +357,30 @@ impl IncidentNarrationStore for PgIncidentNarrationStore {
             .map(|r| row_to_incident(r, Vec::new()))
             .collect())
     }
+
+    async fn confirmed_downtime_by_target(
+        &self,
+        org: OrgId,
+        range: TimeRange,
+    ) -> Result<HashMap<Uuid, i64>> {
+        // FLOOR per incident to match the detail page's per-incident truncation.
+        let rows: Vec<(Uuid, i64)> = sqlx::query_as(
+            r#"SELECT target_id,
+                      SUM(GREATEST(0, FLOOR(EXTRACT(EPOCH FROM
+                          (LEAST(COALESCE(ended_at, $2), $2) - GREATEST(started_at, $1))))))::bigint
+               FROM incidents
+               WHERE org_id = $3 AND target_id IS NOT NULL AND started_at < $2
+                 AND (ended_at IS NULL OR ended_at >= $1)
+               GROUP BY target_id"#,
+        )
+        .bind(range.from)
+        .bind(range.to)
+        .bind(org.0)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| anyhow::anyhow!("confirmed_downtime_by_target: {e}"))?;
+        Ok(rows.into_iter().collect())
+    }
 }
 
 #[derive(sqlx::FromRow)]
@@ -507,6 +539,22 @@ impl IncidentNarrationStore for InMemoryIncidentNarrationStore {
             .collect();
         out.sort_by_key(|i| (std::cmp::Reverse(i.started_at), std::cmp::Reverse(i.id)));
         Ok(out.into_iter().skip(offset).take(limit).collect())
+    }
+
+    async fn confirmed_downtime_by_target(
+        &self,
+        _org: OrgId,
+        range: TimeRange,
+    ) -> Result<HashMap<Uuid, i64>> {
+        let mut out: HashMap<Uuid, i64> = HashMap::new();
+        for i in self.inner.lock().incidents.iter() {
+            if i.started_at < range.to && i.ended_at.is_none_or(|e| e >= range.from) {
+                let end = i.ended_at.unwrap_or(range.to).min(range.to);
+                let start = i.started_at.max(range.from);
+                *out.entry(i.target_id).or_default() += (end - start).num_seconds().max(0);
+            }
+        }
+        Ok(out)
     }
 }
 
@@ -672,5 +720,36 @@ mod tests {
             .unwrap();
         assert_eq!(page2.len(), 1);
         assert_eq!(page2[0].started_at, all[1].started_at); // offset skipped the newest
+    }
+
+    #[tokio::test]
+    async fn confirmed_downtime_by_target_sums_clamped_overlap() {
+        let store = InMemoryIncidentNarrationStore::new();
+        let (t1, t2, t3) = (Uuid::now_v7(), Uuid::now_v7(), Uuid::now_v7());
+        let now = Utc::now();
+        let mk = |tid: Uuid, start_min: i64, end_min: Option<i64>| {
+            let mut i = sample();
+            i.id = Uuid::now_v7();
+            i.target_id = tid;
+            i.started_at = now - ChronoDuration::minutes(start_min);
+            i.ended_at = end_min.map(|m| now - ChronoDuration::minutes(m));
+            i
+        };
+        store.seed(mk(t1, 50, Some(40))); // 600s
+        store.seed(mk(t1, 20, None)); // ongoing -> 1200s
+        store.seed(mk(t2, 90, Some(50))); // clamped to window -> 600s
+        store.seed(mk(t3, 120, Some(110))); // before window -> excluded
+
+        let window = TimeRange {
+            from: now - ChronoDuration::hours(1),
+            to: now,
+        };
+        let map = store
+            .confirmed_downtime_by_target(org(), window)
+            .await
+            .unwrap();
+        assert_eq!(map.get(&t1).copied(), Some(1800));
+        assert_eq!(map.get(&t2).copied(), Some(600));
+        assert_eq!(map.get(&t3), None);
     }
 }

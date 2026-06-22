@@ -29,7 +29,7 @@ use crate::api::types::{
     DashboardMetrics, DashboardSparkBucket, FleetRibbonBucket, PriorPeriodSummary,
 };
 use crate::app::AppState;
-use crate::domain::{IncidentSeverity, OrgId};
+use crate::domain::{IncidentSeverity, OrgId, uptime_pct_from_downtime};
 use crate::storage::{ActiveIncident, TargetFilter, TimeRange};
 use crate::web::error::WebResult;
 use crate::web::filters;
@@ -552,6 +552,7 @@ async fn build_snapshot(
         active_raw,
         ribbon_rows,
         prior,
+        downtime_by_target,
     ) = tokio::try_join!(
         state.target_store.list(org, target_filter),
         state
@@ -570,7 +571,14 @@ async fn build_snapshot(
         state
             .results_store
             .prior_period_summary(org, time_range, region),
+        state
+            .incident_narration_store
+            .confirmed_downtime_by_target(org, time_range),
     )?;
+
+    let window_secs = (time_range.to - time_range.from).num_seconds();
+    // A region filter keeps the raw per-region rate; only all-regions is confirmed.
+    let confirmed = region.is_none();
 
     let truncated = targets.len() > ROW_LIMIT;
     if truncated {
@@ -607,8 +615,18 @@ async fn build_snapshot(
                     spark_agg[i].1 += 1;
                 }
             }
-            let mut row =
-                DashboardRow::build(t.id, t.name, kind, address, t.enabled, metrics, spark);
+            let dt = confirmed.then(|| downtime_by_target.get(&t.id).copied().unwrap_or(0));
+            let mut row = DashboardRow::build(
+                t.id,
+                t.name,
+                kind,
+                address,
+                t.enabled,
+                metrics,
+                spark,
+                dt,
+                window_secs,
+            );
             // No live probe overrides the stale last status with grey "no data".
             if silenced.contains(&t.id) {
                 row.last_status = "no_data";
@@ -628,8 +646,29 @@ async fn build_snapshot(
         checks_up,
         avg_ms: avg_ms_current,
     };
+    // Time-weighted over sampled monitors so the fleet KPI matches the rows.
+    let fleet_uptime_label = if confirmed {
+        let mut total_down = 0i64;
+        let mut sampled = 0i64;
+        for (id, m) in &metrics_by_target {
+            if m.samples > 0 {
+                sampled += 1;
+                total_down += downtime_by_target.get(id).copied().unwrap_or(0);
+            }
+        }
+        if sampled > 0 {
+            format!(
+                "{:.2}%",
+                uptime_pct_from_downtime(total_down, window_secs * sampled)
+            )
+        } else {
+            pct_label(checks_total, checks_up)
+        }
+    } else {
+        pct_label(checks_total, checks_up)
+    };
     let kpis = DashboardKpis {
-        uptime_pct_label: pct_label(checks_total, checks_up),
+        uptime_pct_label: fleet_uptime_label,
         avg_response_ms_label: avg_response_label(avg_ms_current, checks_total),
         checks_label: format_count(checks_total),
         checks_successful_label: checks_successful_label.clone(),
@@ -971,6 +1010,7 @@ fn group_sparks(
 }
 
 impl DashboardRow {
+    #[allow(clippy::too_many_arguments)]
     fn build(
         id: Uuid,
         name: String,
@@ -979,12 +1019,17 @@ impl DashboardRow {
         enabled: bool,
         metrics: Option<&DashboardMetrics>,
         spark: Vec<Option<f32>>,
+        confirmed_downtime_secs: Option<i64>,
+        window_secs: i64,
     ) -> Self {
         let (p50_label, p95_label, err_pct_label, uptime_pct_label, last_status, samples) =
             match metrics {
                 Some(m) if m.samples > 0 => {
                     let err_pct = ((m.samples - m.up) as f64 / m.samples as f64) * 100.0;
-                    let uptime_pct = 100.0 - err_pct;
+                    let uptime_pct = match confirmed_downtime_secs {
+                        Some(d) => uptime_pct_from_downtime(d, window_secs),
+                        None => 100.0 - err_pct,
+                    };
                     (
                         format!("{} ms", m.p50_ms),
                         format!("{} ms", m.p95_ms),
