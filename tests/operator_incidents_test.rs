@@ -24,6 +24,8 @@ fn seed_incident() -> Incident {
         created_at: Some(Utc::now() - Duration::minutes(10)),
         updated_at: Some(Utc::now() - Duration::minutes(10)),
         updates: vec![],
+        regions_down: Vec::new(),
+        regions_up: Vec::new(),
     }
 }
 

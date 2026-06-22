@@ -1183,6 +1183,8 @@ fn incident_detail(i: &Incident, monitor_name: Option<String>) -> IncidentDetail
         opened_at: i.started_at.to_rfc3339(),
         resolved_at: i.ended_at.map(|e| e.to_rfc3339()),
         error_sample: i.error_sample.as_deref().map(present_error),
+        regions_down: i.regions_down.iter().map(|r| sanitize_data(r)).collect(),
+        regions_up: i.regions_up.iter().map(|r| sanitize_data(r)).collect(),
         updates: i
             .updates
             .iter()
@@ -1442,11 +1444,15 @@ mod tests {
             created_at: None,
             updated_at: None,
             updates: vec![update(IncidentStatusPhase::Investigating)],
+            regions_down: vec!["us-east".into()],
+            regions_up: vec!["eu-helsinki".into()],
         };
         let d = incident_detail(&inc, Some("api".into()));
         assert_eq!(d.state, "down");
         assert_eq!(d.severity, "major");
         assert_eq!(d.monitor_name.as_deref(), Some("api"));
+        assert_eq!(d.regions_down, vec!["us-east".to_string()]);
+        assert_eq!(d.regions_up, vec!["eu-helsinki".to_string()]);
         assert!(d.resolved_at.is_none());
         assert_eq!(d.error_sample.as_deref(), Some("boom"));
         assert_eq!(d.updates.len(), 1);

@@ -1039,6 +1039,8 @@ mod tests {
             created_at: None,
             updated_at: None,
             updates: Vec::new(),
+            regions_down: Vec::new(),
+            regions_up: Vec::new(),
         };
         let row = IncidentRow::from(inc);
         assert!(!row.ongoing);

@@ -43,6 +43,13 @@ pub struct Incident {
     pub updated_at: Option<DateTime<Utc>>,
     #[serde(default)]
     pub updates: Vec<PublicIncidentUpdate>,
+    /// Regions failing / still healthy when the incident opened. Empty for a
+    /// single-region monitor, or when the incident came from the coalesced
+    /// check stream (which has no per-region grouping).
+    #[serde(default)]
+    pub regions_down: Vec<String>,
+    #[serde(default)]
+    pub regions_up: Vec<String>,
 }
 
 impl Incident {
@@ -251,6 +258,8 @@ fn new_incident(
         created_at: None,
         updated_at: None,
         updates: Vec::new(),
+        regions_down: Vec::new(),
+        regions_up: Vec::new(),
     }
 }
 

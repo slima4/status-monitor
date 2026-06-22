@@ -83,6 +83,8 @@ struct IncidentRow {
     duration_secs: Option<i32>,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
+    regions_down: Option<Vec<String>>,
+    regions_up: Option<Vec<String>>,
 }
 
 #[derive(sqlx::FromRow)]
@@ -96,7 +98,7 @@ async fn load_with_updates(pool: &PgPool, id: Uuid, org_id: Uuid) -> Result<Opti
     let Some(row): Option<IncidentRow> = sqlx::query_as(
         r#"SELECT id, target_id, started_at, ended_at, severity, status_at_start,
                   check_count, error_sample, public_title, public_description,
-                  duration_secs, created_at, updated_at
+                  duration_secs, created_at, updated_at, regions_down, regions_up
            FROM incidents WHERE id = $1 AND org_id = $2"#,
     )
     .bind(id)
@@ -144,6 +146,8 @@ fn row_to_incident(row: IncidentRow, updates: Vec<UpdateRow>) -> Incident {
                 message: u.message,
             })
             .collect(),
+        regions_down: row.regions_down.unwrap_or_default(),
+        regions_up: row.regions_up.unwrap_or_default(),
     }
 }
 
@@ -178,7 +182,7 @@ impl IncidentNarrationStore for PgIncidentNarrationStore {
                WHERE id = $1 AND org_id = $7
                RETURNING id, target_id, started_at, ended_at, severity, status_at_start,
                          check_count, error_sample, public_title, public_description,
-                         duration_secs, created_at, updated_at"#,
+                         duration_secs, created_at, updated_at, regions_down, regions_up"#,
         )
         .bind(id)
         .bind(update.public_title.is_some())
@@ -450,6 +454,8 @@ mod tests {
             created_at: Some(Utc::now() - ChronoDuration::minutes(15)),
             updated_at: Some(Utc::now() - ChronoDuration::minutes(15)),
             updates: vec![],
+            regions_down: Vec::new(),
+            regions_up: Vec::new(),
         }
     }
 
