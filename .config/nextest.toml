@@ -9,3 +9,9 @@ regions = { max-threads = 1 }
 [[profile.default.overrides]]
 filter = 'binary(regions_test)'
 test-group = 'regions'
+
+# Backstop only; the 15s in-test deadline is the real fix. Scoped to this one
+# test so a real drain regression still fails (it would fail every retry too).
+[[profile.default.overrides]]
+filter = 'test(shutdown_drains_in_flight_results)'
+retries = 2

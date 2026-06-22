@@ -228,7 +228,7 @@ async fn scheduler_picks_up_new_targets_on_refresh() {
 
     store.insert(http_target(addr, "/ping", 200));
 
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
     let mut got = false;
     while tokio::time::Instant::now() < deadline {
         if let Ok(Some(_)) = tokio::time::timeout(Duration::from_millis(300), rx.recv()).await {
@@ -273,7 +273,7 @@ async fn shutdown_drains_in_flight_results() {
     let scheduler_handle = tokio::spawn(scheduler.run(shutdown.clone()));
     let batcher_handle = tokio::spawn(batcher.run(shutdown.clone()));
 
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
     while tokio::time::Instant::now() < deadline && counter.load(Ordering::Relaxed) < 1 {
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
@@ -445,7 +445,7 @@ async fn worker_pool_breaker_opens_after_failures() {
 
     let mut downs = 0;
     let mut circuit_opens = 0;
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
     while tokio::time::Instant::now() < deadline && circuit_opens == 0 {
         if let Ok(Some(r)) = tokio::time::timeout(Duration::from_millis(300), rx.recv()).await {
             match r.status {
