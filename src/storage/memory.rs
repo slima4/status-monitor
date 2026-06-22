@@ -8,13 +8,12 @@ use crate::api::types::{
     RegionLatencySeries, RegionRollup, StatusBreakdown, TagCount, TargetsSummary,
 };
 use crate::domain::{
-    CheckResult, CheckStatus, Incident, NewTarget, OrgId, Target, TargetUpdate, WriteSource,
-    coalesce_incidents,
+    CheckResult, CheckStatus, NewTarget, OrgId, Target, TargetUpdate, WriteSource,
 };
 use crate::error::Result;
 use crate::storage::traits::{
-    ClampedRange, IncidentListQuery, RegionOption, ResultSink, ResultsStore, TargetFilter,
-    TargetStore, TimeRange, UptimeStats,
+    ClampedRange, RegionOption, ResultSink, ResultsStore, TargetFilter, TargetStore, TimeRange,
+    UptimeStats,
 };
 
 #[derive(Default)]
@@ -119,25 +118,6 @@ impl ResultsStore for InMemorySink {
             .cloned()
             .collect();
         Ok(UptimeStats::from_results(&filtered))
-    }
-
-    async fn list_incidents(
-        &self,
-        _org: OrgId,
-        target_id: Uuid,
-        query: IncidentListQuery,
-    ) -> Result<Vec<Incident>> {
-        let mut incidents = coalesce_for_target(&self.snapshot(), target_id, query.range.inner());
-        if query.ongoing_only {
-            incidents.retain(|i| i.ended_at.is_none());
-        }
-        incidents.sort_by_key(|i| std::cmp::Reverse(i.started_at));
-        let paged: Vec<Incident> = incidents
-            .into_iter()
-            .skip(query.offset)
-            .take(query.limit)
-            .collect();
-        Ok(paged)
     }
 
     async fn current_status_breakdown(
@@ -465,20 +445,6 @@ fn percentile(sorted: &[u32], p: f64) -> u32 {
         .saturating_sub(1)
         .min(n - 1);
     sorted[idx]
-}
-
-fn coalesce_for_target(all: &[CheckResult], target_id: Uuid, range: TimeRange) -> Vec<Incident> {
-    let mut filtered: Vec<&CheckResult> = all
-        .iter()
-        .filter(|r| r.target_id == target_id && r.timestamp >= range.from && r.timestamp < range.to)
-        .collect();
-    filtered.sort_by_key(|r| r.timestamp);
-    coalesce_incidents(
-        target_id,
-        filtered
-            .into_iter()
-            .map(|r| (r.timestamp, r.status, r.error.clone())),
-    )
 }
 
 #[derive(Default)]

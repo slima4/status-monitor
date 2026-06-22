@@ -3,17 +3,11 @@
 
 mod common;
 
-use std::sync::Arc;
-
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use chrono::{Duration, Utc};
 use common::build_test_app_with_owner;
 use serde_json::{Value, json};
 use tower::ServiceExt;
-use uptimepage::domain::{CheckResult, CheckStatus};
-use uptimepage::storage::{ClampedRange, InMemorySink, IncidentListQuery, ResultSink, TimeRange};
-use uuid::Uuid;
 
 fn app() -> axum::Router {
     build_test_app_with_owner(|_| {})
@@ -130,66 +124,6 @@ async fn idempotency_key_replays_bulk_action() {
         .await
         .unwrap();
     assert_eq!(r3.status(), StatusCode::OK);
-}
-
-#[tokio::test]
-async fn coalescing_separates_runs_split_by_an_up_check() {
-    // Build a sink with results: down, down, up, down — should coalesce into
-    // TWO incidents (the `up` resets the run).
-    use uptimepage::storage::ResultsStore;
-    let sink = Arc::new(InMemorySink::new());
-    let target_id = Uuid::now_v7();
-    let base = Utc::now() - Duration::try_minutes(10).unwrap();
-    let mk = |i: i64, st: CheckStatus| CheckResult {
-        target_id,
-        org_id: uuid::Uuid::nil(),
-        timestamp: base + Duration::try_seconds(i * 60).unwrap(),
-        status: st,
-        duration_ms: 10,
-        dns_ms: None,
-        connect_ms: None,
-        tls_ms: None,
-        ttfb_ms: None,
-        response_code: None,
-        response_size: None,
-        error: Some("err".into()),
-    };
-    sink.write_batch(&[
-        mk(0, CheckStatus::Down),
-        mk(1, CheckStatus::Down),
-        mk(2, CheckStatus::Up),
-        mk(3, CheckStatus::Down),
-    ])
-    .await
-    .unwrap();
-    let range = TimeRange {
-        from: base - Duration::try_seconds(1).unwrap(),
-        to: base + Duration::try_minutes(5).unwrap(),
-    };
-    let store: Arc<dyn ResultsStore> = sink;
-    let incidents = store
-        .list_incidents(
-            common::test_org_id(),
-            target_id,
-            IncidentListQuery {
-                range: ClampedRange::unclamped(range),
-                monitor_interval: std::time::Duration::from_secs(60),
-                ongoing_only: false,
-                limit: 100,
-                offset: 0,
-            },
-        )
-        .await
-        .unwrap();
-    assert_eq!(
-        incidents.len(),
-        2,
-        "expected two incidents, got {incidents:?}"
-    );
-    assert!(
-        incidents.iter().any(|i| i.ended_at.is_none()),
-        "trailing run still ongoing"
-    );
 }
 
 #[tokio::test]

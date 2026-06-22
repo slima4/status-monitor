@@ -31,12 +31,9 @@ const INCIDENTS_LIMIT_MAX: usize = 1_000;
 // Confirmed incidents over the longest window are few; bounds the downtime read.
 const UPTIME_INCIDENT_CAP: usize = 2_000;
 
-/// Hard cap on the requested `(to - from)` span. `fetch_bad_only_rows`
-/// materialises bad-status rows in the window into Rust memory for
-/// in-process coalescing (no SQL LIMIT). On a chronically failing target
-/// a 365-day window still bloats memory; 90 days bounds the worst-case
-/// allocation per request to a few MB regardless of any plan's retention
-/// window. Callers needing deeper history page backwards via `to`.
+/// Hard cap on the requested `(to - from)` span, bounding the worst-case
+/// result read per request regardless of any plan's retention window.
+/// Callers needing deeper history page backwards via `to`.
 const MAX_RANGE_DAYS: i64 = 90;
 
 /// Resolves optional `from`/`to` query params to a validated `TimeRange`,

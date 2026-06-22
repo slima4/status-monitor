@@ -14,14 +14,10 @@ use crate::api::types::{
     RegionLatencySeries, RegionRollup, StatusBreakdown,
 };
 use crate::config::ClickhouseConfig;
-use crate::domain::{
-    CheckResult, CheckStatus, Incident, OrgId, coalesce_incidents, coalesce_incidents_bad_only,
-};
+use crate::domain::{CheckResult, CheckStatus, Incident, OrgId, coalesce_incidents};
 use crate::error::Result;
 use crate::storage::org_ttl::OrgTtlDays;
-use crate::storage::traits::{
-    ClampedRange, IncidentListQuery, ResultSink, ResultsStore, TimeRange, UptimeStats,
-};
+use crate::storage::traits::{ClampedRange, ResultSink, ResultsStore, TimeRange, UptimeStats};
 
 const TABLE: &str = "check_results";
 
@@ -564,42 +560,6 @@ impl ClickhouseResultsStore {
     pub fn from_client(client: Client) -> Self {
         Self { client }
     }
-
-    /// Pulls only `down`/`error` observations from CH so the wire and
-    /// decode cost stays proportional to *actual* incidents instead of
-    /// total check volume. On a healthy 1-min monitor over 30d that's
-    /// ~99% fewer rows. Pair with [`coalesce_incidents_bad_only`] — the
-    /// all-row coalescer needs `up`/`degraded` markers to detect recovery,
-    /// which we no longer pull.
-    async fn fetch_bad_only_rows(
-        &self,
-        org: OrgId,
-        target_id: Uuid,
-        range: TimeRange,
-    ) -> Result<Vec<IncidentRow>> {
-        let down = CheckStatus::Down.as_enum8();
-        let error = CheckStatus::Error.as_enum8();
-        let rows: Vec<IncidentRow> = self
-            .client
-            .query(&format!(
-                "SELECT target_id, timestamp, status, error FROM {TABLE} \
-                 WHERE org_id = ? AND target_id = ? \
-                 AND status IN (?, ?) \
-                 AND timestamp >= fromUnixTimestamp(?) \
-                 AND timestamp < fromUnixTimestamp(?) \
-                 ORDER BY timestamp ASC"
-            ))
-            .bind(org.0)
-            .bind(target_id)
-            .bind(down)
-            .bind(error)
-            .bind(range.from.timestamp())
-            .bind(range.to.timestamp())
-            .fetch_all::<IncidentRow>()
-            .await
-            .context("clickhouse fetch_bad_only_rows")?;
-        Ok(rows)
-    }
 }
 
 #[derive(Debug, Row, Deserialize)]
@@ -621,31 +581,6 @@ fn coalesce_from_incident_rows(target_id: Uuid, rows: Vec<IncidentRow>) -> Vec<I
                 r.error,
             )
         }),
-    )
-}
-
-fn coalesce_from_bad_only_rows(
-    target_id: Uuid,
-    rows: Vec<IncidentRow>,
-    range_end: DateTime<Utc>,
-    monitor_interval: std::time::Duration,
-) -> Vec<Incident> {
-    // 2× the configured interval gives the scheduler one missed tick of
-    // grace before we declare a recovery happened in the gap. Floored at
-    // 120s so a sub-minute interval still tolerates one missed tick.
-    let interval_secs = monitor_interval.as_secs().max(60);
-    let threshold = chrono::Duration::seconds((interval_secs * 2) as i64);
-    coalesce_incidents_bad_only(
-        target_id,
-        rows.into_iter().map(|r| {
-            (
-                from_unix_secs(r.timestamp),
-                CheckStatus::from_enum8(r.status),
-                r.error,
-            )
-        }),
-        range_end,
-        threshold,
     )
 }
 
@@ -797,29 +732,6 @@ impl ResultsStore for ClickhouseResultsStore {
             .await
             .context("clickhouse list_results_by_region")?;
         Ok(rows.into_iter().map(|r| r.split(org.0)).collect())
-    }
-
-    async fn list_incidents(
-        &self,
-        org: OrgId,
-        target_id: Uuid,
-        query: IncidentListQuery,
-    ) -> Result<Vec<Incident>> {
-        let range_end = query.range.to;
-        let rows = self
-            .fetch_bad_only_rows(org, target_id, query.range.inner())
-            .await?;
-        let mut incidents =
-            coalesce_from_bad_only_rows(target_id, rows, range_end, query.monitor_interval);
-        if query.ongoing_only {
-            incidents.retain(|i| i.ended_at.is_none());
-        }
-        incidents.sort_by_key(|i| std::cmp::Reverse(i.started_at));
-        Ok(incidents
-            .into_iter()
-            .skip(query.offset)
-            .take(query.limit)
-            .collect())
     }
 
     async fn current_status_breakdown(
