@@ -25,7 +25,7 @@ use crate::domain::incident::{Incident, NewIncidentUpdate};
 use crate::domain::public::IncidentStatusPhase;
 use crate::domain::result::CheckResult;
 use crate::domain::target::{Target, TargetUpdate};
-use crate::domain::{WriteSource, strip_served_stale};
+use crate::domain::{WriteSource, humanize_check_error};
 use crate::quotas::ratelimit::{RateLimitCategory, RateLimitKey};
 use crate::storage::incidents::ActiveIncident;
 use crate::storage::{ClampedRange, IncidentListQuery, TargetFilter, TimeRange};
@@ -325,10 +325,7 @@ impl McpServer {
                 .unwrap_or("no_data")
                 .to_string(),
             last_checked_at: last.map(|r| r.timestamp.to_rfc3339()),
-            last_error: last
-                .and_then(|r| r.error.as_deref())
-                .and_then(strip_served_stale)
-                .map(sanitize_data),
+            last_error: last.and_then(|r| r.error.as_deref()).map(present_error),
             last_http_status: last.and_then(|r| r.response_code),
             last_timing: last.map(check_timing).unwrap_or_default(),
             last_response_size: last.and_then(|r| r.response_size),
@@ -400,14 +397,10 @@ impl McpServer {
 
         let failures = incidents
             .iter()
-            .map(|inc| {
-                let mut inc = inc.clone();
-                inc.sanitize_error_sample();
-                Failure {
-                    at: inc.started_at.to_rfc3339(),
-                    state: inc.status.as_str().to_string(),
-                    error: inc.error_sample,
-                }
+            .map(|inc| Failure {
+                at: inc.started_at.to_rfc3339(),
+                state: inc.status.as_str().to_string(),
+                error: inc.error_sample.as_deref().map(present_error),
             })
             .collect();
 
@@ -574,14 +567,13 @@ impl McpServer {
         let org = auth.org;
         let id = parse_uuid(&args.id, "incident id")?;
 
-        let mut incident = self
+        let incident = self
             .state
             .incident_narration_store
             .get(org, id)
             .await
             .map_err(|e| McpToolError::internal(format!("get incident: {e}")))?
             .ok_or_else(|| McpToolError::not_found("incident not found"))?;
-        incident.sanitize_error_sample();
 
         let monitor_name = self
             .state
@@ -901,11 +893,7 @@ impl McpServer {
             http_status: result.response_code,
             timing: check_timing(&result),
             response_size: result.response_size,
-            error: result
-                .error
-                .as_deref()
-                .and_then(strip_served_stale)
-                .map(str::to_owned),
+            error: result.error.as_deref().map(present_error),
         }))
     }
 
@@ -1183,7 +1171,8 @@ fn incident_summary(i: &ActiveIncident) -> IncidentSummary {
     }
 }
 
-/// Map an incident (already error-sanitized) plus its monitor name to detail.
+/// Map an incident plus its monitor name to detail. Error text is humanized
+/// then injection-scrubbed here, so callers pass the raw incident.
 fn incident_detail(i: &Incident, monitor_name: Option<String>) -> IncidentDetail {
     IncidentDetail {
         id: i.id.to_string(),
@@ -1193,7 +1182,7 @@ fn incident_detail(i: &Incident, monitor_name: Option<String>) -> IncidentDetail
         severity: i.severity.as_db_str().to_string(),
         opened_at: i.started_at.to_rfc3339(),
         resolved_at: i.ended_at.map(|e| e.to_rfc3339()),
-        error_sample: i.error_sample.clone(),
+        error_sample: i.error_sample.as_deref().map(present_error),
         updates: i
             .updates
             .iter()
@@ -1280,6 +1269,12 @@ fn sanitize_data(s: &str) -> String {
         .filter(|c| !c.is_control() || *c == '\n' || *c == '\t')
         .take(4000)
         .collect()
+}
+
+/// Render a stored error code for the model: humanize, then injection-scrub.
+/// Order is load-bearing — scrub last so it can't mangle our own copy.
+fn present_error(raw: &str) -> String {
+    sanitize_data(&humanize_check_error(raw))
 }
 
 /// Accepted monitor states for the `list_monitors` filter.

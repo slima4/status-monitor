@@ -10,6 +10,7 @@ use crate::api::error::codes;
 use crate::api::page::{PageEnvelope, PageOfCheckResult, PageOfIncident};
 use crate::api::types::{LatencySeries, LatencySeriesByRegion};
 use crate::app::AppState;
+use crate::domain::humanize_check_error;
 use crate::error::{AppError, Result};
 use crate::storage::{IncidentListQuery, TimeRange, UptimeStats};
 use crate::web::{Authorized, TargetsRead};
@@ -395,7 +396,7 @@ pub async fn list_incidents(
         )
         .await?;
     for inc in &mut peek {
-        inc.sanitize_error_sample();
+        inc.error_sample = inc.error_sample.as_deref().map(humanize_check_error);
     }
     Ok(Json(PageEnvelope::from_peek(
         peek,

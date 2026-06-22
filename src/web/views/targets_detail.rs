@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use crate::api::error::codes;
 use crate::app::AppState;
-use crate::domain::{CheckResult, Incident, OrgId, strip_served_stale};
+use crate::domain::{CheckResult, Incident, OrgId};
 use crate::error::AppError;
 use crate::storage::{ClampedRange, IncidentListQuery, TimeRange, UptimeStats};
 use crate::web::error::{WebError, WebResult};
@@ -639,58 +639,8 @@ impl From<CheckResult> for ResultRow {
     }
 }
 
-/// Formats a raw `error` field for human display. Structured JSON payloads
-/// (TLS cert / domain expiry details) are rendered as readable sentences;
-/// terse check-engine codes are expanded to plain English.
-pub(crate) fn fmt_error_display(raw: &str) -> String {
-    let raw = match strip_served_stale(raw) {
-        Some(r) => r,
-        None => return "using last known result".into(),
-    };
-    if raw.starts_with('{') {
-        if let Ok(v) = serde_json::from_str::<serde_json::Value>(raw) {
-            let days = v.get("days_remaining").and_then(|d| d.as_i64());
-            if let Some(days) = days {
-                // TLS cert payload
-                if let Some(cn) = v.get("subject_common_name").and_then(|s| s.as_str()) {
-                    return fmt_days_label("cert", days, cn);
-                }
-                // Domain expiry payload
-                if let Some(domain) = v.get("domain").and_then(|s| s.as_str()) {
-                    return fmt_days_label("domain", days, domain);
-                }
-            }
-        }
-        // Never hand a raw JSON blob to the UI.
-        return "check failed".into();
-    }
-    match raw {
-        "timeout" => "timed out".into(),
-        "connect timeout" => "couldn't connect (timed out)".into(),
-        "no response" => "connected, but no response (timed out)".into(),
-        "body timeout" => "response body timed out".into(),
-        "tls" => "TLS handshake failed".into(),
-        "connect" => "connection failed".into(),
-        "transport" => "transport error".into(),
-        // DNS reasons carry a machine-ish `dns:` tag; the rest (connection
-        // refused, certificate expired, …) are already display-ready.
-        "dns: domain not found" => "domain not found (DNS)".into(),
-        "dns: no address records" => "no DNS address records".into(),
-        "dns: lookup timed out" => "DNS lookup timed out".into(),
-        "dns: lookup failed" => "DNS lookup failed".into(),
-        other => other.into(),
-    }
-}
-
-fn fmt_days_label(kind: &str, days: i64, name: &str) -> String {
-    if days < 0 {
-        format!("{kind} expired {} days ago · {name}", -days)
-    } else if days == 0 {
-        format!("{kind} expires today · {name}")
-    } else {
-        format!("{kind} expires in {days} days · {name}")
-    }
-}
+// Error display text has one source in `domain`; the API and MCP surfaces share it.
+pub(crate) use crate::domain::humanize_check_error as fmt_error_display;
 
 impl From<Incident> for IncidentRow {
     fn from(inc: Incident) -> Self {
@@ -755,12 +705,6 @@ pub(crate) async fn load_incidents_data(
     let has_more = incidents.len() > INCIDENTS_PAGE_LIMIT;
     if has_more {
         incidents.truncate(INCIDENTS_PAGE_LIMIT);
-    }
-    // Strip the served-stale annotation from error samples before they reach a
-    // template, matching the JSON incidents API. Both the operator HTML page and
-    // the public share view inherit it from this one loader.
-    for inc in &mut incidents {
-        inc.sanitize_error_sample();
     }
     // Tab badge: prefer the live-status signal so the count matches what the
     // Monitor tab shows. Fall back to the list (e.g. user narrowed to a window
@@ -925,111 +869,6 @@ mod tests {
             selected_region: None,
             region_breakdown: Vec::new(),
         }
-    }
-
-    #[test]
-    fn fmt_error_display_formats_tls_cert_json() {
-        let raw = r#"{"days_remaining":-4064,"not_after":"2015-04-12T23:59:59+00:00","subject_common_name":"example.com","issuer_common_name":"DigiCert"}"#;
-        assert_eq!(
-            fmt_error_display(raw),
-            "cert expired 4064 days ago · example.com"
-        );
-    }
-
-    #[test]
-    fn fmt_error_display_formats_domain_expiry_json() {
-        let raw = r#"{"domain":"example.com","days_remaining":5,"expiration_date":"2026-06-03T00:00:00+00:00","registrar":"GoDaddy"}"#;
-        assert_eq!(
-            fmt_error_display(raw),
-            "domain expires in 5 days · example.com"
-        );
-    }
-
-    #[test]
-    fn fmt_error_display_expands_terse_codes() {
-        assert_eq!(fmt_error_display("timeout"), "timed out");
-        assert_eq!(
-            fmt_error_display("connect timeout"),
-            "couldn't connect (timed out)"
-        );
-        assert_eq!(
-            fmt_error_display("no response"),
-            "connected, but no response (timed out)"
-        );
-        assert_eq!(fmt_error_display("body timeout"), "response body timed out");
-        assert_eq!(fmt_error_display("tls"), "TLS handshake failed");
-        assert_eq!(fmt_error_display("connect"), "connection failed");
-        assert_eq!(fmt_error_display("transport"), "transport error");
-    }
-
-    #[test]
-    fn fmt_error_display_de_machines_dns_reasons() {
-        assert_eq!(
-            fmt_error_display("dns: domain not found"),
-            "domain not found (DNS)"
-        );
-        assert_eq!(
-            fmt_error_display("dns: no address records"),
-            "no DNS address records"
-        );
-        assert_eq!(
-            fmt_error_display("dns: lookup timed out"),
-            "DNS lookup timed out"
-        );
-        assert_eq!(fmt_error_display("dns: lookup failed"), "DNS lookup failed");
-    }
-
-    #[test]
-    fn fmt_error_display_passes_through_clean_phase_reasons() {
-        // TCP + TLS reasons are stored display-ready; they pass straight through.
-        for r in [
-            "connection refused",
-            "host unreachable",
-            "network unreachable",
-            "connection reset",
-            "address not allowed",
-            "certificate expired",
-            "certificate not yet valid",
-            "certificate revoked",
-            "certificate not trusted",
-            "certificate hostname mismatch",
-            "certificate invalid",
-        ] {
-            assert_eq!(fmt_error_display(r), r);
-        }
-    }
-
-    #[test]
-    fn fmt_error_display_passes_through_unknown() {
-        assert_eq!(fmt_error_display("NXDOMAIN"), "NXDOMAIN");
-    }
-
-    #[test]
-    fn fmt_error_display_never_leaks_raw_json() {
-        // Brace-prefixed payload that isn't a recognized cert/domain shape, and
-        // a malformed one, must not surface as raw JSON to the UI.
-        assert_eq!(
-            fmt_error_display(r#"{"unexpected":"shape"}"#),
-            "check failed"
-        );
-        assert_eq!(fmt_error_display("{not valid json"), "check failed");
-    }
-
-    #[test]
-    fn fmt_error_display_strips_served_stale_annotation() {
-        let raw = r#"served_stale: last_verified_age_secs=3600; refresh_failed=whois_timeout; {"domain":"example.com","days_remaining":5,"expiration_date":"2026-06-03T00:00:00+00:00","registrar":"GoDaddy"}"#;
-        let out = fmt_error_display(raw);
-        assert_eq!(out, "domain expires in 5 days · example.com");
-        assert!(!out.contains("served_stale"));
-        assert!(!out.contains("refresh_failed"));
-    }
-
-    #[test]
-    fn fmt_error_display_served_stale_without_json_is_generic() {
-        assert_eq!(
-            fmt_error_display("served_stale: last_verified_age_secs=10"),
-            "using last known result"
-        );
     }
 
     #[test]

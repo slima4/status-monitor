@@ -1,6 +1,7 @@
 pub mod agent_wire;
 pub mod alert;
 pub mod check;
+pub mod check_error;
 pub mod escalation_policy;
 pub mod incident;
 pub mod maintenance;
@@ -28,6 +29,7 @@ pub use check::{
     CheckSpec, DnsCheck, DnsRecordType, DomainExpiryCheck, ExpectedStatus, HttpCheck, HttpMethod,
     TcpCheck, TlsCertCheck, min_interval_secs_for_kind,
 };
+pub use check_error::humanize_check_error;
 pub use escalation_policy::{
     EscalationDecision, EscalationPolicy, EscalationPolicySummary, EscalationStep,
     EscalationTarget, EscalationTargetType, NewEscalationPolicy, NewEscalationStep,
