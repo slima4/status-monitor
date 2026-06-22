@@ -10,7 +10,9 @@
 # agents from `just dev-regions`), and the ClickHouse history is written into
 # each of those regions. Bring the stack + regions up first, then seed; the
 # region selectors, per-region breakdown/overlay, and per-region history then
-# reflect the real topology.
+# reflect the real topology. Incidents also carry a regions_down/up breakdown —
+# "Partial regional outage" rows mark one region down with the rest up; the rest
+# read as full all-region outages.
 #
 # Coverage matrix on the public page:
 #   fix-api    Operational   (mostly-up recent + open incident churn)
@@ -277,6 +279,18 @@ echo "    regions: ${SEED_REGIONS[*]}"
 # ClickHouse array literal of the same regions for the per-region history writes.
 CH_REGIONS=$(printf "'%s'," "${SEED_REGIONS[@]}"); CH_REGIONS="${CH_REGIONS%,}"
 
+# Postgres text[] literals for the incident region breakdown: a partial outage
+# marks one region down + the rest still up; a full outage marks all regions
+# down. Single-region stacks get an empty "up" set (no breakdown rendered).
+REGS_ALL="ARRAY[${CH_REGIONS}]::text[]"
+REGS_DOWN_ONE="ARRAY['${SEED_REGIONS[0]}']::text[]"
+if (( ${#SEED_REGIONS[@]} > 1 )); then
+  _rest=$(printf "'%s'," "${SEED_REGIONS[@]:1}"); _rest="${_rest%,}"
+  REGS_UP_REST="ARRAY[${_rest}]::text[]"
+else
+  REGS_UP_REST="ARRAY[]::text[]"
+fi
+
 pg <<SQL
 INSERT INTO target_regions (target_id, region)
 SELECT t.id, r.id FROM targets t CROSS JOIN regions r
@@ -343,7 +357,7 @@ ins AS (
   INSERT INTO incidents
     (org_id, target_id, started_at, ended_at, severity, status_at_start,
      check_count, error_sample, public_title, public_description, duration_secs,
-     state, visibility, origin)
+     state, visibility, origin, regions_down, regions_up)
   SELECT '${ORG}'::uuid, s.target_id, s.started_at, s.started_at + s.dur,
          s.sev, s.sas, (s.n % 20) + 5, s.err,
          s.title || ' (fixture #' || s.n || ')',
@@ -352,7 +366,11 @@ ins AS (
            || ', duration ' || extract(epoch from s.dur)::int || 's.',
          extract(epoch from s.dur)::int,
          -- Closed, public, monitor-opened: operational state mirrors ended_at.
-         'resolved', 'public', 'monitor'
+         'resolved', 'public', 'monitor',
+         -- "Partial regional outage" rows carry a real breakdown (one region
+         -- down, the rest up); the others read as a full all-region outage.
+         CASE WHEN s.title = 'Partial regional outage' THEN ${REGS_DOWN_ONE} ELSE ${REGS_ALL} END,
+         CASE WHEN s.title = 'Partial regional outage' THEN ${REGS_UP_REST} ELSE ARRAY[]::text[] END
   FROM s
   RETURNING id, started_at, ended_at
 )
@@ -433,7 +451,8 @@ ins AS (
   INSERT INTO incidents
     (org_id, target_id, started_at, ended_at, severity, status_at_start,
      check_count, error_sample, public_title, public_description, duration_secs,
-     state, visibility, origin, acknowledged_at, acknowledged_by)
+     state, visibility, origin, acknowledged_at, acknowledged_by,
+     regions_down, regions_up)
   SELECT '${ORG}'::uuid, s.target_id, s.started_at, NULL,
          s.sev, 'down', 3, 'connection refused',
          'Ongoing — ' || initcap(s.phase) || ' (' || s.phase || ' phase)',
@@ -446,7 +465,11 @@ ins AS (
          CASE WHEN s.phase <> 'investigating'
               THEN s.started_at + interval '4 minute' ELSE NULL END,
          CASE WHEN s.phase <> 'investigating' AND '${OWNER_USER_ID}' <> ''
-              THEN '${OWNER_USER_ID}'::uuid ELSE NULL END
+              THEN '${OWNER_USER_ID}'::uuid ELSE NULL END,
+         -- fix-search is a live partial outage (one region down); the rest are
+         -- full all-region outages.
+         CASE WHEN s.target_id = '${T_SEARCH}'::uuid THEN ${REGS_DOWN_ONE} ELSE ${REGS_ALL} END,
+         CASE WHEN s.target_id = '${T_SEARCH}'::uuid THEN ${REGS_UP_REST} ELSE ARRAY[]::text[] END
   FROM s
   RETURNING id, started_at
 )
