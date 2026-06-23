@@ -373,7 +373,7 @@ pub async fn build_test_app_with_pg(
 
 /// Like [`build_test_app_with_pg`] but the target store is the real
 /// `PostgresTargetStore` bound to a **freshly inserted org** (unique slug,
-/// `plan_id` defaulting to `free`) with an owner user already attached as
+/// `plan_id` pinned to `free`) with an owner user already attached as
 /// a session on the returned router. Quota counts (`QuotaService`) and the
 /// store's atomic count-in-INSERT both read the same `targets` table, and
 /// the unique org isolates parallel quota tests from each other. Used by
@@ -409,7 +409,7 @@ pub async fn build_test_app_with_pg_store_anon(
     let slug = format!("qt{}", uuid::Uuid::now_v7().simple());
     let slug = &slug[..slug.len().min(30)];
     let (org_uuid,): (uuid::Uuid,) = sqlx::query_as(
-        "INSERT INTO organizations (slug, name) VALUES ($1, 'Quota Test') RETURNING id",
+        "INSERT INTO organizations (slug, name, plan_id) VALUES ($1, 'Quota Test', 'free') RETURNING id",
     )
     .bind(slug)
     .fetch_one(&pool)

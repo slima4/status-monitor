@@ -58,7 +58,7 @@ INSERT INTO plans (
     incident_narration_enabled
 ) VALUES (
     'free', 'Free', 'Free tier for small teams and personal projects',
-    20, 60, 90,  -- max_targets, min_check_interval_secs, retention_days
+    20, 180, 30,  -- max_targets, min_check_interval_secs, retention_days
     3, 10, 5,    -- max_members, max_pending_invitations, max_api_tokens_per_user
     15, 1,  -- max_public_components, max_status_pages
     1, 2,   -- max_share_links_per_monitor, max_shared_monitors
@@ -98,10 +98,39 @@ INSERT INTO plans (
     true, false        -- incident_narration, is_listed
 );
 
--- Every org references a plan. The FK + boot-check
--- `assert_default_plan_present` + the immutability trigger below keep the
--- literal 'free' default honest. The billing webhook flips this column in a
--- later phase.
+-- Founding tier: a more generous free plan, granted to the first N accounts at
+-- signup (cutoff in create_signup_org_with_owner_in_tx). Its escalation /
+-- on-call / regions columns are backfilled by later migrations' column defaults.
+INSERT INTO plans (
+    id, name, description,
+    max_targets, min_check_interval_secs, retention_days, raw_days,
+    max_members, max_pending_invitations, max_api_tokens_per_user,
+    max_public_components, max_status_pages,
+    max_share_links_per_monitor, max_shared_monitors,
+    max_maintenance_windows, max_notification_channels,
+    max_logo_size_bytes,
+    api_writes_per_minute, api_reads_per_minute,
+    bulk_ops_per_minute, test_now_per_minute, check_now_per_minute,
+    custom_domain_enabled, white_label_enabled, sms_alerts_enabled,
+    incident_narration_enabled, is_listed
+) VALUES (
+    'founding', 'Founding', 'Founding tier for early accounts, kept for life',
+    50, 60, 90, 30,
+    5, 15, 7,
+    30, 2,
+    3, 5,
+    30, 30,
+    1048576,
+    900, 9000,
+    45, 90, 90,
+    false, false, true,
+    true, false
+);
+
+-- Every org references a plan. The FK + boot-check `assert_default_plan_present`
+-- + the immutability trigger below keep the literal 'free' default honest. New
+-- signups are upgraded to 'founding' by the count-gated signup creator until the
+-- cutoff; the billing webhook flips this column for Pro later.
 ALTER TABLE organizations
     ADD COLUMN plan_id TEXT NOT NULL DEFAULT 'free' REFERENCES plans(id);
 CREATE INDEX idx_organizations_plan ON organizations(plan_id);

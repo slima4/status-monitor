@@ -225,14 +225,14 @@ async fn target_past_free_cap_returns_422_quota_exceeded() {
     let (app, _org) = build_test_app_with_pg_store(pool.clone(), |_| {}).await;
 
     for i in 0..20 {
-        let resp = post_target(&app, &format!("ok-{}-{i}", Uuid::now_v7()), 60).await;
+        let resp = post_target(&app, &format!("ok-{}-{i}", Uuid::now_v7()), 180).await;
         assert_eq!(
             resp.status(),
             StatusCode::CREATED,
             "target {i} should create"
         );
     }
-    let resp = post_target(&app, &format!("over-{}", Uuid::now_v7()), 60).await;
+    let resp = post_target(&app, &format!("over-{}", Uuid::now_v7()), 180).await;
     assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
     let b = body_json(resp).await;
     assert_eq!(b["error"]["code"], "QUOTA_EXCEEDED");
@@ -382,7 +382,7 @@ async fn bulk_over_cap_inserts_nothing() {
     let pre = cap - 2; // leave 2 free slots so a 5-item bulk overflows
     for i in 0..pre {
         assert_eq!(
-            post_target(&app, &format!("seed-{}-{i}", Uuid::now_v7()), 60)
+            post_target(&app, &format!("seed-{}-{i}", Uuid::now_v7()), 180)
                 .await
                 .status(),
             StatusCode::CREATED
@@ -390,7 +390,7 @@ async fn bulk_over_cap_inserts_nothing() {
     }
     // pre existing + 5 new > cap → all-or-nothing rejection.
     let items: Vec<Value> = (0..5)
-        .map(|i| target_payload(&format!("bulk-{}-{i}", Uuid::now_v7()), 60))
+        .map(|i| target_payload(&format!("bulk-{}-{i}", Uuid::now_v7()), 180))
         .collect();
     let resp = app
         .clone()
@@ -427,7 +427,7 @@ async fn concurrent_creates_never_overshoot_cap() {
     let cap = free_target_cap(&pool).await;
     for i in 0..(cap - 1) {
         assert_eq!(
-            post_target(&app, &format!("pre-{}-{i}", Uuid::now_v7()), 60)
+            post_target(&app, &format!("pre-{}-{i}", Uuid::now_v7()), 180)
                 .await
                 .status(),
             StatusCode::CREATED
@@ -438,7 +438,7 @@ async fn concurrent_creates_never_overshoot_cap() {
     for i in 0..(cap + 2) {
         let app = app.clone();
         handles.push(tokio::spawn(async move {
-            post_target(&app, &format!("race-{}-{i}", Uuid::now_v7()), 60)
+            post_target(&app, &format!("race-{}-{i}", Uuid::now_v7()), 180)
                 .await
                 .status()
         }));
@@ -1124,11 +1124,11 @@ async fn add_component_hits_public_component_cap() {
     let page_id = body_json(page).await["id"].as_str().unwrap().to_string();
 
     // Two distinct monitors.
-    let t1 = body_json(post_target(&app, &format!("t1-{}", Uuid::now_v7()), 60).await).await["id"]
+    let t1 = body_json(post_target(&app, &format!("t1-{}", Uuid::now_v7()), 180).await).await["id"]
         .as_str()
         .unwrap()
         .to_string();
-    let t2 = body_json(post_target(&app, &format!("t2-{}", Uuid::now_v7()), 60).await).await["id"]
+    let t2 = body_json(post_target(&app, &format!("t2-{}", Uuid::now_v7()), 180).await).await["id"]
         .as_str()
         .unwrap()
         .to_string();
@@ -1175,7 +1175,7 @@ async fn re_adding_an_existing_component_is_conflict() {
     assert_eq!(page.status(), StatusCode::CREATED);
     let page_id = body_json(page).await["id"].as_str().unwrap().to_string();
     let tid =
-        body_json(post_target(&app, &format!("dup-{}", Uuid::now_v7()), 60).await).await["id"]
+        body_json(post_target(&app, &format!("dup-{}", Uuid::now_v7()), 180).await).await["id"]
             .as_str()
             .unwrap()
             .to_string();
@@ -1322,14 +1322,14 @@ async fn plan_upgrade_lifts_the_cap_after_cache_ttl() {
     let cap = free_target_cap(&pool).await;
     for i in 0..cap {
         assert_eq!(
-            post_target(&app, &format!("u-{}-{i}", Uuid::now_v7()), 60)
+            post_target(&app, &format!("u-{}-{i}", Uuid::now_v7()), 180)
                 .await
                 .status(),
             StatusCode::CREATED
         );
     }
     assert_eq!(
-        post_target(&app, &format!("over-{}", Uuid::now_v7()), 60)
+        post_target(&app, &format!("over-{}", Uuid::now_v7()), 180)
             .await
             .status(),
         StatusCode::UNPROCESSABLE_ENTITY,
@@ -1345,14 +1345,14 @@ async fn plan_upgrade_lifts_the_cap_after_cache_ttl() {
         .unwrap();
     // The cached lower cap is still in force until the TTL lapses.
     assert_eq!(
-        post_target(&app, &format!("still-{}", Uuid::now_v7()), 60)
+        post_target(&app, &format!("still-{}", Uuid::now_v7()), 180)
             .await
             .status(),
         StatusCode::UNPROCESSABLE_ENTITY
     );
     tokio::time::sleep(Duration::from_millis(1200)).await;
     assert_eq!(
-        post_target(&app, &format!("now-{}", Uuid::now_v7()), 60)
+        post_target(&app, &format!("now-{}", Uuid::now_v7()), 180)
             .await
             .status(),
         StatusCode::CREATED,

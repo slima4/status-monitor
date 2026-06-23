@@ -14,7 +14,7 @@ use crate::domain::{
     UserId,
 };
 use crate::error::{AppError, Result};
-use crate::storage::locks::{advisory_xact_lock, org_lock_key, user_lock_key};
+use crate::storage::locks::{advisory_xact_lock, org_lock_key, signup_lock_key, user_lock_key};
 
 /// Returns the id of the single live (non-soft-deleted) organisation, or
 /// `None` if zero or more than one exist. Used by the path-based public
@@ -178,6 +178,11 @@ pub async fn create_org_with_owner(
     Ok(Some(org_row.into_org()))
 }
 
+/// First N accounts get the founding plan at signup; later signups fall back to
+/// free. A transaction-scoped advisory lock around the count keeps the cutoff
+/// exact under concurrent signups.
+const FOUNDING_CUTOFF: i64 = 1000;
+
 /// First-org-at-signup creator. Bypasses [`create_org_with_owner`]'s
 /// per-user owner-limit because a brand-new account needs at least one
 /// org to be usable; the limit only kicks in for additional, user-named
@@ -194,12 +199,24 @@ pub async fn create_signup_org_with_owner_in_tx(
     slug: &str,
     name: &str,
 ) -> Result<Option<OrgId>> {
+    // Serialise signups while granting the founding plan so a concurrent burst
+    // cannot read the same sub-cutoff count and overshoot the first-N promise.
+    advisory_xact_lock(&mut **tx, signup_lock_key())
+        .await
+        .context("create_signup_org_with_owner_in_tx: advisory lock")?;
+    // Count only live founding orgs: soft-deleted ones (deleted_at set) are
+    // freed by purge and must not hold a slot, matching every other org count.
     let row: Option<(Uuid,)> = sqlx::query_as(
-        "INSERT INTO organizations (slug, name) VALUES ($1, $2) \
+        "INSERT INTO organizations (slug, name, plan_id) \
+         VALUES ($1, $2, CASE WHEN \
+           (SELECT count(*) FROM organizations \
+            WHERE plan_id = 'founding' AND deleted_at IS NULL) < $3 \
+           THEN 'founding' ELSE 'free' END) \
          ON CONFLICT (slug) WHERE deleted_at IS NULL DO NOTHING RETURNING id",
     )
     .bind(slug)
     .bind(name)
+    .bind(FOUNDING_CUTOFF)
     .fetch_optional(&mut **tx)
     .await
     .context("create_signup_org_with_owner_in_tx: insert org")?;

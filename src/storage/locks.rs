@@ -22,6 +22,8 @@
 //! - [`user_delete_lock_key`] — one user, a deliberately distinct namespace
 //!   from [`user_lock_key`] so account deletion does not serialise against
 //!   unrelated per-user cap writes.
+//! - [`signup_lock_key`] — one global key for every signup, so the founding
+//!   first-N plan count cannot be raced past its cutoff by concurrent signups.
 //! - [`job_lock_key`] — one named background job. Used by [`try_job`] so two
 //!   ticks of the same periodic worker cannot run concurrently when the
 //!   previous tick is slow (network blip, CH mutation queue, etc).
@@ -50,6 +52,13 @@ pub fn user_lock_key(user: UserId) -> String {
 /// on purpose: deletion must not contend with unrelated per-user cap writes.
 pub fn user_delete_lock_key(user: UserId) -> String {
     format!("user_delete:{}", user.0)
+}
+
+/// Global lock key for the founding-plan signup cutoff. Every signup hashes
+/// the same string, so they serialise while counting toward the first-N
+/// founding cutoff and cannot overshoot it. Own namespace.
+pub fn signup_lock_key() -> &'static str {
+    "signup:founding"
 }
 
 /// Take a transaction-scoped advisory lock on `key`. Held until the
