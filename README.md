@@ -4,7 +4,7 @@
 
 # uptimepage
 
-**Status pages + uptime monitoring. Free forever. Live in 5 minutes.**
+**Status pages + uptime monitoring. Open source, free to start. Live in 5 minutes.**
 
 Monitor HTTP, TCP, DNS, TLS-certificate and domain expiry from multiple
 regions — then turn green and red into a polished public status page your
@@ -31,7 +31,7 @@ free, self-hostable, and fully as code:
 - **Everything as code** — REST API, scoped tokens, an official Terraform provider, and an MCP server your LLM can query.
 - **Probes you own** — run multi-region agents wherever your users are, on your own boxes.
 - **Status page + incidents + alerting in one** — components, subscribers, and multi-channel paging that repeats until acknowledged, no second tool.
-- **No per-seat or feature-gated tiers** — checks, status pages, and subscribers aren't paywalled.
+- **Core isn't paywalled** — checks, status pages, subscribers, the API and every alert channel are in the free tier.
 
 ### Who it's for
 
@@ -48,9 +48,9 @@ public status page — no third-party service, no cron job updating a JSON file.
 
 | Surface | HTTP | DNS | TLS cert |
 |---|---|---|---|
-| **uptimepage.dev** (website) | [![http](https://uptimepage.uptimepage.dev/api/public/v1/badge.svg?component=3b4a6104-c4a9-46cc-b2ee-aa1d67f01611)](https://uptimepage.uptimepage.dev) | [![dns](https://uptimepage.uptimepage.dev/api/public/v1/badge.svg?component=2aac0e66-d1da-4d03-9037-b1b8ccde21cd)](https://uptimepage.uptimepage.dev) | [![tls](https://uptimepage.uptimepage.dev/api/public/v1/badge.svg?component=d6a50c63-4d04-43cf-a70d-4ec8a68011ff)](https://uptimepage.uptimepage.dev) |
-| **app.uptimepage.dev** (dashboard) | [![http](https://uptimepage.uptimepage.dev/api/public/v1/badge.svg?component=d431b55f-6daf-4f64-87bb-a146f17bd3d0)](https://uptimepage.uptimepage.dev) | | |
-| **mcp.uptimepage.dev** (MCP) | [![http](https://uptimepage.uptimepage.dev/api/public/v1/badge.svg?component=f3cabf83-79a2-49a5-8e02-429b8205e930)](https://uptimepage.uptimepage.dev) | | |
+| **uptimepage.dev** (website) | [![http](https://uptimepage.uptimepage.dev/api/public/v1/badge.svg?component=9ffa993c-fc72-4a54-a7d7-259249cd30eb)](https://uptimepage.uptimepage.dev) | [![dns](https://uptimepage.uptimepage.dev/api/public/v1/badge.svg?component=480a9ed0-dc21-4042-9cc3-f67814bc75be)](https://uptimepage.uptimepage.dev) | [![tls](https://uptimepage.uptimepage.dev/api/public/v1/badge.svg?component=70083a5c-0463-4c1e-99e5-c780473a96cf)](https://uptimepage.uptimepage.dev) |
+| **app.uptimepage.dev** (dashboard) | [![http](https://uptimepage.uptimepage.dev/api/public/v1/badge.svg?component=c2510a68-d830-4e93-b8db-28d0ec5e05ff)](https://uptimepage.uptimepage.dev) | | |
+| **mcp.uptimepage.dev** (MCP) | [![http](https://uptimepage.uptimepage.dev/api/public/v1/badge.svg?component=49f2209c-d54e-49fd-a38a-bc5f03b9f77f)](https://uptimepage.uptimepage.dev) | | |
 
 Embed your own with the snippet in **Settings → Pages → your page → Badge**.
 
@@ -66,7 +66,7 @@ Embed your own with the snippet in **Settings → Pages → your page → Badge*
 | **Automation** | REST API, scoped API tokens, Terraform provider, MCP server for LLM clients |
 | **Built on** | Rust 1.95 / Tokio / Axum, Postgres + ClickHouse, one ~23 MB self-contained binary |
 
-**Live service: <https://uptimepage.dev>** — hosted, free, sign in with GitHub.
+**Live service: <https://uptimepage.dev>** — hosted, free, sign in with GitHub or Google.
 **Full docs: <https://uptimepage.github.io/uptimepage/>**
 
 <div align="center">
