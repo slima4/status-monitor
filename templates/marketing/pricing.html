@@ -25,10 +25,10 @@
         <div class="fnd">
             <div class="fnd__text">
                 <p class="mk-eyebrow mk-eyebrow--ok">founding access</p>
-                <p class="mk-body" style="margin-top: 0.5rem;">The first <strong class="mk-ink">{{ founding_total|thousands }}</strong> hosted accounts get the founding plan and keep it at these limits, even after we close it. No catch, no expiry.</p>
+                <p class="mk-body mt-2">The first <strong class="mk-ink">{{ founding_total|thousands }}</strong> hosted accounts get the founding plan and keep it at these limits, even after we close it. No catch, no expiry.</p>
             </div>
             <div class="fnd__meterwrap">
-                <div class="fnd-meter"><div class="fnd-meter__fill" style="width: {{ founding_pct }}%"></div></div>
+                <div class="fnd-meter"><div class="fnd-meter__fill fnd-meter__fill--w{{ founding_pct }}"></div></div>
                 <div class="fnd__count"><span><strong>{{ founding_claimed|thousands }}</strong> claimed</span><span>{{ founding_left|thousands }} left</span></div>
             </div>
         </div>
@@ -95,7 +95,7 @@
             </div>
 
         </div>
-        <p class="mk-price__note" style="text-align: center;">Prices are in USD. Founding accounts keep a lower Pro rate for life.</p>
+        <p class="mk-price__note text-center">Prices are in USD. Founding accounts keep a lower Pro rate for life.</p>
     </section>
 
     <section class="space-y-4">
@@ -135,7 +135,7 @@
             <p class="mk-lede">Same monitors, same status pages, same code. No plan, no seat count, no account with us. This is the part the hosted limits do not apply to.</p>
         </div>
         <div class="mk-terminal">
-            <div class="mk-terminal__chrome"><span class="mk-terminal__dot"></span><span class="mk-terminal__dot"></span><span class="mk-terminal__dot"></span><span style="margin-left: 0.4rem;">bash</span></div>
+            <div class="mk-terminal__chrome"><span class="mk-terminal__dot"></span><span class="mk-terminal__dot"></span><span class="mk-terminal__dot"></span><span class="mk-terminal__tag">bash</span></div>
             <div class="mk-terminal__body"><span class="mk-terminal__line mk-terminal__line--prompt">git clone https://github.com/uptimepage/uptimepage</span><span class="mk-terminal__line mk-terminal__line--prompt">cd uptimepage &amp;&amp; docker compose up -d</span><span class="mk-terminal__line mk-terminal__line--meta">  pulling images ... done</span><span class="mk-terminal__line mk-terminal__line--ok">  up on http://localhost:8080 · unlimited monitors · AGPL</span></div>
         </div>
     </section>

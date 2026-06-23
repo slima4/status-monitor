@@ -27,11 +27,11 @@
     {% if !features.is_empty() %}
     <section class="mx-auto max-w-2xl space-y-4">
         <h2 class="mk-h2 text-center">what you get</h2>
-        <ul class="overflow-hidden rounded-sm" style="border: 1px solid var(--mk-rule); background: var(--mk-surface);">
+        <ul class="overflow-hidden rounded-sm mk-panel">
             {% for f in features %}
             <li class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 p-3 {% if !loop.first %}mk-rule-top{% endif %}">
-                <span class="mk-mono" style="font-size: 0.8125rem; color: var(--mk-ink); font-weight: 600;">{{ f.label }}</span>
-                <span class="mk-mono mk-quiet" style="font-size: 0.75rem;">{{ f.value }}</span>
+                <span class="mk-mono mk-kv__key">{{ f.label }}</span>
+                <span class="mk-mono mk-quiet mk-kv__val">{{ f.value }}</span>
             </li>
             {% endfor %}
         </ul>
@@ -48,7 +48,7 @@
     {% if let Some(c) = code %}
     <section class="mx-auto max-w-2xl space-y-3">
         <h2 class="mk-h3">{{ c.caption }}</h2>
-        <pre class="mk-mono overflow-x-auto rounded-sm p-4" style="border: 1px solid var(--mk-rule); background: var(--mk-surface); color: var(--mk-ink); font-size: 0.75rem; line-height: 1.6;"><code>{{ c.body }}</code></pre>
+        <pre class="mk-mono overflow-x-auto rounded-sm p-4 mk-codeblock"><code>{{ c.body }}</code></pre>
     </section>
     {% endif %}
 
@@ -58,7 +58,7 @@
         <ul class="space-y-2">
             {% for r in resources %}
             <li>
-                <a href="{{ r.href }}" class="mk-footer-link" style="display: inline;">{{ r.label }}</a>
+                <a href="{{ r.href }}" class="mk-footer-link mk-footer-link--inline">{{ r.label }}</a>
             </li>
             {% endfor %}
         </ul>
@@ -89,10 +89,10 @@
                 </svg>
             </a>
         </div>
-        <p class="mk-mono text-xs mk-quiet" style="letter-spacing: 0.08em;">
-            <a href="/#features" class="mk-footer-link" style="display: inline;">features</a> ·
-            <a href="/pricing" class="mk-footer-link" style="display: inline;">pricing</a> ·
-            <a href="/blog" class="mk-footer-link" style="display: inline;">notes</a>
+        <p class="mk-mono text-xs mk-quiet mk-ls-08">
+            <a href="/#features" class="mk-footer-link mk-footer-link--inline">features</a> ·
+            <a href="/pricing" class="mk-footer-link mk-footer-link--inline">pricing</a> ·
+            <a href="/blog" class="mk-footer-link mk-footer-link--inline">notes</a>
         </p>
     </section>
 

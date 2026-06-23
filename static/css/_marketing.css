@@ -566,7 +566,28 @@ html:has(.marketing-shell) {
 .fnd__text { flex: 1 1 22rem; min-width: 0; }
 .fnd__meterwrap { flex: 1 1 16rem; min-width: 0; }
 .fnd-meter { height: 0.5rem; background: var(--mk-bg-2); border: 1px solid var(--mk-rule); border-radius: 2px; overflow: hidden; }
-.fnd-meter__fill { height: 100%; background: var(--mk-ok); }
+.fnd-meter__fill { width: 0; height: 100%; background: var(--mk-ok); }
+.fnd-meter__fill--w0 { width: 0; }
+.fnd-meter__fill--w5 { width: 5%; }
+.fnd-meter__fill--w10 { width: 10%; }
+.fnd-meter__fill--w15 { width: 15%; }
+.fnd-meter__fill--w20 { width: 20%; }
+.fnd-meter__fill--w25 { width: 25%; }
+.fnd-meter__fill--w30 { width: 30%; }
+.fnd-meter__fill--w35 { width: 35%; }
+.fnd-meter__fill--w40 { width: 40%; }
+.fnd-meter__fill--w45 { width: 45%; }
+.fnd-meter__fill--w50 { width: 50%; }
+.fnd-meter__fill--w55 { width: 55%; }
+.fnd-meter__fill--w60 { width: 60%; }
+.fnd-meter__fill--w65 { width: 65%; }
+.fnd-meter__fill--w70 { width: 70%; }
+.fnd-meter__fill--w75 { width: 75%; }
+.fnd-meter__fill--w80 { width: 80%; }
+.fnd-meter__fill--w85 { width: 85%; }
+.fnd-meter__fill--w90 { width: 90%; }
+.fnd-meter__fill--w95 { width: 95%; }
+.fnd-meter__fill--w100 { width: 100%; }
 .fnd__count { font-family: var(--mk-font-mono); font-size: 0.75rem; color: var(--mk-quiet); margin-top: 0.5rem; display: flex; justify-content: space-between; }
 .fnd__count strong { color: var(--mk-ink); font-weight: 600; }
 
@@ -581,6 +602,35 @@ html:has(.marketing-shell) {
 .cmp .yes { color: var(--mk-ok); }
 .cmp .no { color: var(--mk-quiet); }
 .cmp__note { font-family: var(--mk-font-mono); font-size: 0.6875rem; color: var(--mk-quiet); margin-top: 0.6rem; }
+
+/* ── Shared helpers (replace inline styles the marketing CSP blocks) ─ */
+.mk-panel { border: 1px solid var(--mk-rule); background: var(--mk-surface); }
+.mk-ink-soft { color: var(--mk-ink-soft); }
+.mk-footer-link--inline { display: inline; }
+.mk-ls-04 { letter-spacing: 0.04em; }
+.mk-ls-08 { letter-spacing: 0.08em; }
+.mk-terminal__tag { margin-left: 0.4rem; }
+.mk-display--xl { font-size: clamp(2.5rem, 7vw + 1rem, 4.5rem); }
+.mk-blog-title { font-size: clamp(2rem, 4.5vw + 1rem, 3.5rem); line-height: 1.08; }
+.mk-backlink { letter-spacing: 0.12em; text-decoration: none; }
+.mk-kv__key { font-size: 0.8125rem; color: var(--mk-ink); font-weight: 600; }
+.mk-kv__val { font-size: 0.75rem; }
+.mk-codeblock { border: 1px solid var(--mk-rule); background: var(--mk-surface); color: var(--mk-ink); font-size: 0.75rem; line-height: 1.6; }
+
+/* ── Hero status-page preview ─────────────────────────────────────── */
+.mk-preview__chrome { background: var(--mk-bg-2); }
+.mk-preview__dot--down { background: var(--mk-down); }
+.mk-preview__dot--warn { background: var(--mk-warn); }
+.mk-preview__dot--ok { background: var(--mk-ok); }
+.mk-preview__url { background: var(--mk-surface); border: 1px solid var(--mk-rule); font-size: 0.625rem; }
+.mk-preview__banner { background: color-mix(in oklch, var(--mk-ok-soft) 55%, var(--mk-surface)); border: 1px solid color-mix(in oklch, var(--mk-ok) 30%, var(--mk-rule)); }
+.mk-preview__check { background: var(--mk-ok); color: #fff; }
+.mk-preview__title { margin: 0; font-size: 0.875rem; }
+.mk-preview__meta { font-size: 0.6875rem; }
+.mk-preview__row { font-size: 0.75rem; }
+.mk-preview__bullet { color: var(--mk-ok); font-size: 0.5rem; }
+.mk-preview__name { color: var(--mk-ink); font-weight: 600; }
+.mk-preview__ok { font-size: 0.625rem; color: var(--mk-ok); letter-spacing: 0.1em; }
 
 /* ── Home pricing teaser band ─────────────────────────────────────── */
 .mk-tierband { border: 1px solid var(--mk-rule); border-radius: 2px; background: var(--mk-surface); overflow: hidden; text-align: left; }

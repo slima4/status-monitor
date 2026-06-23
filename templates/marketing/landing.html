@@ -71,35 +71,33 @@
                 </div>
 
                 <div class="mk-preview">
-                    <div class="flex items-center gap-1.5 px-3 py-2 mk-rule-bottom" style="background: var(--mk-bg-2);">
-                        <span class="h-2 w-2 rounded-full" style="background: var(--mk-down);" aria-hidden="true"></span>
-                        <span class="h-2 w-2 rounded-full" style="background: var(--mk-warn);" aria-hidden="true"></span>
-                        <span class="h-2 w-2 rounded-full" style="background: var(--mk-ok);" aria-hidden="true"></span>
-                        <span class="ml-3 truncate rounded-sm px-2 py-0.5 mk-mono mk-quiet" style="background: var(--mk-surface); font-size: 0.625rem; border: 1px solid var(--mk-rule);">acme.uptimepage.dev</span>
+                    <div class="flex items-center gap-1.5 px-3 py-2 mk-rule-bottom mk-preview__chrome">
+                        <span class="h-2 w-2 rounded-full mk-preview__dot--down" aria-hidden="true"></span>
+                        <span class="h-2 w-2 rounded-full mk-preview__dot--warn" aria-hidden="true"></span>
+                        <span class="h-2 w-2 rounded-full mk-preview__dot--ok" aria-hidden="true"></span>
+                        <span class="ml-3 truncate rounded-sm px-2 py-0.5 mk-mono mk-quiet mk-preview__url">acme.uptimepage.dev</span>
                     </div>
                     <div class="space-y-3 p-3">
-                        <section role="status" aria-live="polite" class="rounded-sm p-3"
-                                 style="background: color-mix(in oklch, var(--mk-ok-soft) 55%, var(--mk-surface)); border: 1px solid color-mix(in oklch, var(--mk-ok) 30%, var(--mk-rule));">
+                        <section role="status" aria-live="polite" class="rounded-sm p-3 mk-preview__banner">
                             <div class="flex items-center gap-3">
-                                <span aria-hidden="true" class="inline-grid h-8 w-8 place-items-center rounded-full"
-                                      style="background: var(--mk-ok); color: white;">
+                                <span aria-hidden="true" class="inline-grid h-8 w-8 place-items-center rounded-full mk-preview__check">
                                     <svg viewBox="0 0 24 24" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg>
                                 </span>
                                 <div class="min-w-0">
-                                    <p class="mk-h3" style="margin: 0; font-size: 0.875rem;">all systems operational</p>
-                                    <p class="mt-0.5 mk-mono mk-quiet" style="font-size: 0.6875rem;">last check <time>3s ago</time></p>
+                                    <p class="mk-h3 mk-preview__title">all systems operational</p>
+                                    <p class="mt-0.5 mk-mono mk-quiet mk-preview__meta">last check <time>3s ago</time></p>
                                 </div>
                             </div>
                         </section>
 
-                        <ul class="overflow-hidden rounded-sm" style="border: 1px solid var(--mk-rule); background: var(--mk-surface);">
+                        <ul class="overflow-hidden rounded-sm mk-panel">
                             <li class="p-3">
                                 <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-                                    <p class="flex items-center gap-2 mk-mono" style="font-size: 0.75rem;">
-                                        <span aria-hidden="true" style="color: var(--mk-ok); font-size: 0.5rem;">●</span>
-                                        <span style="color: var(--mk-ink); font-weight: 600;">marketing site</span>
+                                    <p class="flex items-center gap-2 mk-mono mk-preview__row">
+                                        <span aria-hidden="true" class="mk-preview__bullet">●</span>
+                                        <span class="mk-preview__name">marketing site</span>
                                     </p>
-                                    <span class="mk-mono" style="font-size: 0.625rem; color: var(--mk-ok); letter-spacing: 0.1em;">OK</span>
+                                    <span class="mk-mono mk-preview__ok">OK</span>
                                 </div>
                                 <div role="img" aria-label="Daily status history, last 60 days."
                                      class="mt-2 grid grid-flow-col auto-cols-fr gap-0.5">
@@ -108,11 +106,11 @@
                             </li>
                             <li class="mk-rule-top p-3">
                                 <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-                                    <p class="flex items-center gap-2 mk-mono" style="font-size: 0.75rem;">
-                                        <span aria-hidden="true" style="color: var(--mk-ok); font-size: 0.5rem;">●</span>
-                                        <span style="color: var(--mk-ink); font-weight: 600;">api</span>
+                                    <p class="flex items-center gap-2 mk-mono mk-preview__row">
+                                        <span aria-hidden="true" class="mk-preview__bullet">●</span>
+                                        <span class="mk-preview__name">api</span>
                                     </p>
-                                    <span class="mk-mono" style="font-size: 0.625rem; color: var(--mk-ok); letter-spacing: 0.1em;">OK</span>
+                                    <span class="mk-mono mk-preview__ok">OK</span>
                                 </div>
                                 <div role="img" aria-label="Daily status history, last 60 days, with 1 degraded day."
                                      class="mt-2 grid grid-flow-col auto-cols-fr gap-0.5">
@@ -121,11 +119,11 @@
                             </li>
                             <li class="mk-rule-top p-3">
                                 <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-                                    <p class="flex items-center gap-2 mk-mono" style="font-size: 0.75rem;">
-                                        <span aria-hidden="true" style="color: var(--mk-ok); font-size: 0.5rem;">●</span>
-                                        <span style="color: var(--mk-ink); font-weight: 600;">dashboard</span>
+                                    <p class="flex items-center gap-2 mk-mono mk-preview__row">
+                                        <span aria-hidden="true" class="mk-preview__bullet">●</span>
+                                        <span class="mk-preview__name">dashboard</span>
                                     </p>
-                                    <span class="mk-mono" style="font-size: 0.625rem; color: var(--mk-ok); letter-spacing: 0.1em;">OK</span>
+                                    <span class="mk-mono mk-preview__ok">OK</span>
                                 </div>
                                 <div role="img" aria-label="Daily status history, last 60 days."
                                      class="mt-2 grid grid-flow-col auto-cols-fr gap-0.5">
@@ -344,7 +342,7 @@
                 <h3 class="mk-h3">on-call without the sprawl</h3>
                 <p class="mk-body">
                     Monitor production, page the on-call when it breaks, and
-                    give customers a <a href="/status-page-for-saas" class="mk-footer-link" style="display: inline;">status page</a>, one tool, no second vendor.
+                    give customers a <a href="/status-page-for-saas" class="mk-footer-link mk-footer-link--inline">status page</a>, one tool, no second vendor.
                 </p>
             </article>
             <article class="mk-card space-y-2">
@@ -367,7 +365,7 @@
                 <p class="mk-eyebrow">agencies</p>
                 <h3 class="mk-h3">1 tab, many clients</h3>
                 <p class="mk-body">
-                    Give each client a <a href="/status-page-for-agencies" class="mk-footer-link" style="display: inline;">branded status URL</a>. 1 account,
+                    Give each client a <a href="/status-page-for-agencies" class="mk-footer-link mk-footer-link--inline">branded status URL</a>. 1 account,
                     many pages.
                 </p>
             </article>
@@ -408,7 +406,7 @@
             </a>
             <a href="/pricing" class="mk-cta mk-cta--ghost">see all plans</a>
         </div>
-        <p class="mk-mono mk-quiet text-xs text-center" style="letter-spacing: 0.04em;">AGPL · self-host with no limits · no credit card</p>
+        <p class="mk-mono mk-quiet text-xs text-center mk-ls-04">AGPL · self-host with no limits · no credit card</p>
     </section>
 
     {# ── FAQ ───────────────────────────────────────────────────── #}

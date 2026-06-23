@@ -242,9 +242,14 @@ fn render_pricing(cfg: &MarketingCfg) -> CachedRender {
         founding_claimed: FOUNDING_CLAIMED,
         founding_total: FOUNDING_TOTAL,
         founding_left: FOUNDING_TOTAL.saturating_sub(FOUNDING_CLAIMED),
-        founding_pct: (FOUNDING_CLAIMED * 100)
-            .checked_div(FOUNDING_TOTAL)
-            .unwrap_or(0),
+        // Nearest 5 so it maps to a `fnd-meter__fill--wN` class; the
+        // marketing CSP blocks the inline width style attribute.
+        founding_pct: {
+            let raw = (FOUNDING_CLAIMED * 100)
+                .checked_div(FOUNDING_TOTAL)
+                .unwrap_or(0);
+            ((raw + 2) / 5 * 5).min(100)
+        },
         version: env!("CARGO_PKG_VERSION"),
     };
     let body = page

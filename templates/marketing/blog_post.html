@@ -8,7 +8,7 @@
 <article class="mx-auto max-w-2xl space-y-10">
     <header class="space-y-4 text-center">
         <p class="mk-blog-row__date">{{ date }}</p>
-        <h1 class="mk-display" style="font-size: clamp(2rem, 4.5vw + 1rem, 3.5rem); line-height: 1.08;">{{ title }}</h1>
+        <h1 class="mk-display mk-blog-title">{{ title }}</h1>
         {% if !tags.is_empty() %}
         <ul class="flex flex-wrap justify-center gap-1.5">
             {% for t in tags %}
@@ -21,7 +21,7 @@
         {{ body_html|safe }}
     </div>
     <p class="mk-rule-top text-center pt-4">
-        <a href="/blog" class="mk-mono text-xs mk-quiet" style="letter-spacing: 0.12em; text-decoration: none;">← Back to all notes</a>
+        <a href="/blog" class="mk-mono text-xs mk-quiet mk-backlink">← Back to all notes</a>
     </p>
 </article>
 {% endblock %}
