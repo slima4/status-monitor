@@ -32,7 +32,7 @@ fn target_body() -> String {
             "headers": {},
             "verify_tls": true
         },
-        "interval": 60,
+        "interval": 180,
         "enabled": true,
         "tags": []
     })
