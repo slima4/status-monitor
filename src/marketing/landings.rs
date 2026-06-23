@@ -322,88 +322,6 @@ docker compose up -d"#,
         cta: "Start free",
     },
     Landing {
-        path: "/pricing",
-        created: "2026-06-21",
-        lastmod: "2026-06-21",
-        title: "Pricing: Free, Every Feature",
-        eyebrow: "pricing",
-        h1: "One plan. Free. Every feature.",
-        meta_description: "Uptimepage pricing: free. 20 monitors, 60-second checks, 90-day history, a branded status page and every alert channel, no credit card. Self-host AGPL too.",
-        lede: "There is one plan and it is free: every feature on, no credit card, no per-seat or per-monitor metering. Here are the exact limits, and the self-hosted option with none.",
-        features: &[
-            Feature {
-                label: "Price",
-                value: "$0, no credit card",
-            },
-            Feature {
-                label: "Monitors",
-                value: "20",
-            },
-            Feature {
-                label: "Check interval",
-                value: "as fast as 60s",
-            },
-            Feature {
-                label: "Check types",
-                value: "HTTP, TCP, DNS, TLS",
-            },
-            Feature {
-                label: "Public history",
-                value: "90 days",
-            },
-            Feature {
-                label: "Status page",
-                value: "1, branded",
-            },
-            Feature {
-                label: "Status components",
-                value: "15",
-            },
-            Feature {
-                label: "Team members",
-                value: "3",
-            },
-            Feature {
-                label: "Notification channels",
-                value: "20",
-            },
-            Feature {
-                label: "Alert channels",
-                value: "Slack, email, SMS, webhook + more",
-            },
-            Feature {
-                label: "Self-host",
-                value: "AGPL, unlimited",
-            },
-        ],
-        sections: &[
-            Section {
-                heading: "one free plan, the whole product",
-                body: "Every feature is on for everyone: branded status pages, subscribers, incidents, scheduled maintenance, the REST API, Terraform and MCP. Nothing is gated behind a higher tier, there is no per-seat or per-monitor metering, and no credit card.",
-            },
-            Section {
-                heading: "the limits, in plain numbers",
-                body: "Twenty monitors, checks as fast as every 60 seconds, a 90-day public history, one branded status page with up to 15 components, and three team members. Generous for a personal project or a small team, and the same feature set whatever your size.",
-            },
-            Section {
-                heading: "self-host for free, no limits",
-                body: "Prefer to run it yourself? The source is AGPL. `docker compose up` brings up the binary with Postgres and ClickHouse, and you run as many monitors as your own hardware allows, with the same API and Terraform provider as the hosted tier.",
-            },
-        ],
-        code: None,
-        resources: &[
-            ResourceLink {
-                label: "Self-hosted status page",
-                href: "/self-hosted-status-page",
-            },
-            ResourceLink {
-                label: "Open-source status page",
-                href: "/open-source-status-page",
-            },
-        ],
-        cta: "Start free",
-    },
-    Landing {
         path: "/vs/uptimerobot",
         created: "2026-06-16",
         lastmod: "2026-06-21",
@@ -911,24 +829,6 @@ struct LandingDoc {
 /// answers describe Uptimepage only, matching the neutral-comparison rule above.
 fn page_faqs(path: &str) -> &'static [(&'static str, &'static str)] {
     match path {
-        "/pricing" => &[
-            (
-                "Is Uptimepage really free?",
-                "Yes. The hosted tier is $0 a month with every feature and no credit card. The AGPL source is also free to self-host.",
-            ),
-            (
-                "What are the free-tier limits?",
-                "20 monitors, checks as fast as every 60 seconds, 90 days of public history, one branded status page with up to 15 components, and three team members.",
-            ),
-            (
-                "Is there a per-seat or per-monitor charge?",
-                "No. One plan covers every feature with no metering. Nothing is gated behind a higher tier.",
-            ),
-            (
-                "Is self-hosting free too?",
-                "Yes. `docker compose up` runs the AGPL binary with Postgres and ClickHouse on your own boxes, with as many monitors as your hardware allows.",
-            ),
-        ],
         "/open-source-status-page" => &[
             (
                 "Is the status page really open source?",
@@ -968,7 +868,7 @@ fn page_faqs(path: &str) -> &'static [(&'static str, &'static str)] {
         "/vs/uptimerobot" => &[
             (
                 "Is Uptimepage free?",
-                "Yes. The hosted tier is $0 a month with every feature and no credit card, and the AGPL source is free to self-host.",
+                "Yes. The hosted tier is $0 a month with no credit card, and the AGPL source is free to self-host.",
             ),
             (
                 "Does it include a public status page?",
@@ -994,7 +894,7 @@ fn page_faqs(path: &str) -> &'static [(&'static str, &'static str)] {
             ),
             (
                 "Is it free?",
-                "Yes: $0 a month, every feature, no credit card, and no per-page pricing. Self-hosting under AGPL is free as well.",
+                "Yes: $0 a month, no credit card, and no per-page pricing. Self-hosting under AGPL is free as well.",
             ),
             (
                 "Can customers subscribe to updates?",
@@ -1008,7 +908,7 @@ fn page_faqs(path: &str) -> &'static [(&'static str, &'static str)] {
             ),
             (
                 "Is there per-seat or per-monitor pricing?",
-                "No. One free plan covers every feature, with no credit card and no per-seat or per-monitor metering.",
+                "No. No per-seat or per-monitor metering. The hosted tier is free with no credit card, and paid Pro is a flat plan, not metered.",
             ),
             (
                 "Can I run it as code?",
@@ -1088,7 +988,7 @@ fn page_faqs(path: &str) -> &'static [(&'static str, &'static str)] {
             ),
             (
                 "Is it free to start?",
-                "Yes. The hosted tier is $0 a month with every feature and no credit card, and the AGPL source is free to self-host.",
+                "Yes. The hosted tier is $0 a month with no credit card, and the AGPL source is free to self-host.",
             ),
         ],
         "/automation" => &[

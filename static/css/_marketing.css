@@ -516,6 +516,27 @@ html:has(.marketing-shell) {
     overflow: hidden;
 }
 .mk-price > * { position: relative; }
+.mk-price--stack { display: flex; flex-direction: column; gap: 1rem; }
+.mk-price--feature { border-color: var(--mk-ink); }
+.mk-price--feature::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 3px; background: var(--mk-ok); }
+.mk-price--soon { opacity: 0.96; }
+.mk-price__badge {
+    position: absolute; top: 0.9rem; right: 1rem;
+    font-family: var(--mk-font-mono); font-size: 0.625rem;
+    letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--mk-ok); border: 1px solid var(--mk-ok);
+    border-radius: 2px; padding: 0.1rem 0.35rem;
+}
+.mk-price__badge--quiet { color: var(--mk-quiet); border-color: var(--mk-rule); }
+.mk-price__name { font-family: var(--mk-font-mono); font-weight: 600; font-size: 1.0625rem; color: var(--mk-ink); }
+.mk-price__name::before { content: "// "; color: var(--mk-faint); font-weight: 500; }
+.mk-price__tag { font-size: 0.8125rem; color: var(--mk-quiet); line-height: 1.5; min-height: 2.4em; }
+.mk-price__amt { font-family: var(--mk-font-mono); display: flex; align-items: baseline; gap: 0.4rem; }
+.mk-price__amt b { font-size: 2.25rem; font-weight: 600; color: var(--mk-ink); letter-spacing: -0.03em; line-height: 1; }
+.mk-price__amt span { font-size: 0.8125rem; color: var(--mk-quiet); }
+.mk-price__note { font-family: var(--mk-font-mono); font-size: 0.6875rem; line-height: 1.4; color: var(--mk-quiet); margin-top: -0.4rem; min-height: 1.95rem; }
+.mk-price__head { font-family: var(--mk-font-mono); font-size: 0.6875rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--mk-quiet); }
+.mk-price__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.55rem; }
 .mk-price__feature {
     display: inline-flex;
     align-items: center;
@@ -525,6 +546,52 @@ html:has(.marketing-shell) {
     font-family: var(--mk-font-mono);
 }
 .mk-price__feature svg { color: var(--mk-ok); width: 0.875rem; height: 0.875rem; flex: none; }
+.mk-price__line {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    font-size: 0.8125rem;
+    line-height: 1.45;
+    color: var(--mk-ink-soft);
+    font-family: var(--mk-font-mono);
+}
+.mk-price__line::before { content: "+"; color: var(--mk-ok); font-weight: 600; flex: none; }
+.mk-price__line b { color: var(--mk-ink); font-weight: 600; }
+
+.mk-cta--block { width: 100%; justify-content: center; }
+
+/* ── Founding cohort meter ────────────────────────────────────────── */
+.fnd { position: relative; border: 1px solid var(--mk-ok); border-radius: 2px; background: var(--mk-surface); padding: 1.125rem 1.25rem; display: flex; flex-wrap: wrap; align-items: center; gap: 1rem 1.5rem; overflow: hidden; }
+.fnd::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 2px; background: var(--mk-ok); }
+.fnd__text { flex: 1 1 22rem; min-width: 0; }
+.fnd__meterwrap { flex: 1 1 16rem; min-width: 0; }
+.fnd-meter { height: 0.5rem; background: var(--mk-bg-2); border: 1px solid var(--mk-rule); border-radius: 2px; overflow: hidden; }
+.fnd-meter__fill { height: 100%; background: var(--mk-ok); }
+.fnd__count { font-family: var(--mk-font-mono); font-size: 0.75rem; color: var(--mk-quiet); margin-top: 0.5rem; display: flex; justify-content: space-between; }
+.fnd__count strong { color: var(--mk-ink); font-weight: 600; }
+
+/* ── Free-plan comparison table ───────────────────────────────────── */
+.cmp { width: 100%; border-collapse: collapse; font-family: var(--mk-font-mono); font-size: 0.8125rem; border: 1px solid var(--mk-rule); border-radius: 2px; overflow: hidden; }
+.cmp th, .cmp td { text-align: left; padding: 0.75rem 0.9rem; border-top: 1px solid var(--mk-rule); border-left: 1px solid var(--mk-rule); }
+.cmp thead th { background: var(--mk-bg-2); color: var(--mk-quiet); font-weight: 500; font-size: 0.6875rem; text-transform: uppercase; letter-spacing: 0.08em; border-top: 0; }
+.cmp tbody th { color: var(--mk-ink-soft); font-weight: 500; }
+.cmp th:first-child, .cmp td:first-child { border-left: 0; }
+.cmp .us { color: var(--mk-ink); font-weight: 600; }
+.cmp .col-us { background: var(--mk-ok-soft); }
+.cmp .yes { color: var(--mk-ok); }
+.cmp .no { color: var(--mk-quiet); }
+.cmp__note { font-family: var(--mk-font-mono); font-size: 0.6875rem; color: var(--mk-quiet); margin-top: 0.6rem; }
+
+/* ── Home pricing teaser band ─────────────────────────────────────── */
+.mk-tierband { border: 1px solid var(--mk-rule); border-radius: 2px; background: var(--mk-surface); overflow: hidden; text-align: left; }
+.mk-tier { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.35rem 0.9rem; padding: 0.9rem 1.1rem; font-family: var(--mk-font-mono); }
+.mk-tier + .mk-tier { border-top: 1px solid var(--mk-rule); }
+.mk-tier--em { background: var(--mk-ok-soft); }
+.mk-tier__name { font-weight: 600; color: var(--mk-ink); font-size: 0.9375rem; min-width: 5rem; }
+.mk-tier__price { font-weight: 600; color: var(--mk-ink); font-size: 0.9375rem; min-width: 2.5rem; white-space: nowrap; }
+.mk-tier__spec { color: var(--mk-ink-soft); font-size: 0.8125rem; flex: 1 1 13rem; }
+.mk-tier__flag { color: var(--mk-ok); font-size: 0.6875rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; margin-left: auto; white-space: nowrap; }
+.mk-tier__flag--soon { color: var(--mk-quiet); }
 
 /* ── Footer ───────────────────────────────────────────────────────── */
 .mk-footer {

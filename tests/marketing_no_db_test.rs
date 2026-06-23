@@ -62,6 +62,30 @@ async fn landing_renders_without_db() {
 }
 
 #[tokio::test]
+async fn pricing_renders_without_db() {
+    let (status, body, headers) = get("/pricing").await;
+    assert_eq!(status, StatusCode::OK);
+    // Real content, not the render-failure comment fallback served as a 200.
+    assert!(body.contains("founding"), "pricing must render the tiers");
+    assert!(
+        body.contains("1,000"),
+        "founding total should render with a thousands separator"
+    );
+    assert!(
+        body.contains("https://app.uptimepage.dev/login"),
+        "pricing CTA should link to app_url"
+    );
+    assert!(
+        !body.contains("render failed"),
+        "pricing render must not fall back to the error comment"
+    );
+    assert!(
+        headers.contains_key(header::ETAG),
+        "pricing must set a strong ETag"
+    );
+}
+
+#[tokio::test]
 async fn blog_index_renders_without_db() {
     let (status, body, _) = get("/blog").await;
     assert_eq!(status, StatusCode::OK);
@@ -119,6 +143,10 @@ async fn sitemap_lists_blog_and_landing() {
     assert!(
         body.contains("<loc>https://uptimepage.dev/blog</loc>"),
         "blog index must be in sitemap"
+    );
+    assert!(
+        body.contains("<loc>https://uptimepage.dev/pricing</loc>"),
+        "pricing page must be in sitemap"
     );
     assert!(
         body.contains("<loc>https://uptimepage.dev/blog/boring-uptime</loc>"),

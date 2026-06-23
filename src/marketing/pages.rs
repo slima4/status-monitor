@@ -17,8 +17,8 @@ use axum::response::{IntoResponse, Response};
 use bytes::Bytes;
 
 use crate::marketing::seo::{
-    JsonLd, OpenGraph, json_ld_faqpage, json_ld_organization, json_ld_software_application,
-    json_ld_website,
+    JsonLd, OpenGraph, json_ld_breadcrumb, json_ld_faqpage, json_ld_organization,
+    json_ld_software_application, json_ld_webpage, json_ld_website,
 };
 use crate::web::filters;
 
@@ -45,17 +45,19 @@ struct LandingPage {
     software_json_ld: JsonLd,
     faq_json_ld: JsonLd,
     version: &'static str,
-    pricing_features: &'static [&'static str],
+    founding_total: u32,
+    founding_left: u32,
     faqs: &'static [(&'static str, &'static str)],
 }
 
 /// One source for the rendered FAQ and its `FAQPage` schema, so they can't drift.
 const FAQS: &[(&str, &str)] = &[
     (
-        "Is there really no charge?",
-        "Correct: $0 / month, every feature, no credit card. There is no paid \
-         tier today; if one ever arrives, anyone who signed up keeps the plan \
-         they have.",
+        "Is it really free?",
+        "The Standard plan is $0 a month with no credit card. The first 1,000 \
+         accounts get the more generous founding plan and keep it for life. Pro \
+         is paid and coming soon. Whatever plan you sign up on stays yours, and \
+         you can self-host the whole thing under AGPL for free.",
     ),
     (
         "Can I use my own domain for the status page?",
@@ -80,21 +82,6 @@ const FAQS: &[(&str, &str)] = &[
         "Always. JSON export per monitor and incident. RSS for public incidents. \
          SVG badges you can drop in a README.",
     ),
-];
-
-const PRICING_FEATURES: &[&str] = &[
-    "Up to 20 monitors",
-    "Checks every 60 seconds",
-    "HTTP, TCP, DNS & TLS checks",
-    "Public status page",
-    "Custom branding",
-    "10+ alert channels",
-    "Automatic incident tracking",
-    "90-day history",
-    "Up to 3 team members",
-    "API & Terraform provider",
-    "MCP server for AI assistants",
-    "No credit card",
 ];
 
 #[derive(Template, WebTemplate)]
@@ -134,7 +121,8 @@ fn render_landing(cfg: &MarketingCfg) -> CachedRender {
         faq_json_ld: json_ld_faqpage(FAQS),
         og,
         version: env!("CARGO_PKG_VERSION"),
-        pricing_features: PRICING_FEATURES,
+        founding_total: FOUNDING_TOTAL,
+        founding_left: FOUNDING_TOTAL.saturating_sub(FOUNDING_CLAIMED),
         faqs: FAQS,
     };
     let body = page
@@ -171,8 +159,108 @@ pub async fn not_found(State(cfg): State<Arc<MarketingCfg>>) -> Response {
         .into_response()
 }
 
+const PRICING_CREATED: &str = "2026-06-23";
+const PRICING_LASTMOD: &str = "2026-06-23";
+
+// Founding-claim figures shown on the pricing scarcity meter.
+const FOUNDING_TOTAL: u32 = 1000;
+const FOUNDING_CLAIMED: u32 = 153;
+
+const PRICING_FAQS: &[(&str, &str)] = &[
+    (
+        "Is the $0 plan actually free?",
+        "Yes. No card, no trial clock, no surprise bill. The product is open \
+         source, so we are not staking the company on locking you in. Standard \
+         stays at the limits you see here.",
+    ),
+    (
+        "What happens when the founding spots run out?",
+        "New accounts get Standard. If you claimed a founding spot you keep it at \
+         the founding limits for as long as the account is open. We do not quietly \
+         downgrade you.",
+    ),
+    (
+        "Can I self-host instead of using your servers?",
+        "Yes, fully. Clone the repo and run <code class=\"mk-chip\" translate=\"no\">docker compose up</code>, \
+         and you have the whole product with no plan limits. It is AGPL, and you do \
+         not need an account with us.",
+    ),
+    (
+        "Will you change the free limits later?",
+        "We may adjust Standard for new signups as costs change. Anything already on \
+         your account is grandfathered, and founding stays founding.",
+    ),
+    (
+        "Do you sell or train on my data?",
+        "No. Your monitors, incidents, and contacts are yours. We make money from Pro \
+         and hosting, not from your data.",
+    ),
+];
+
+#[derive(Template, WebTemplate)]
+#[template(path = "marketing/pricing.html")]
+struct PricingPage {
+    app_url: String,
+    canonical_url: String,
+    og: OpenGraph,
+    breadcrumb_json_ld: JsonLd,
+    software_json_ld: JsonLd,
+    webpage_json_ld: JsonLd,
+    faq_json_ld: JsonLd,
+    faqs: &'static [(&'static str, &'static str)],
+    founding_claimed: u32,
+    founding_total: u32,
+    founding_left: u32,
+    founding_pct: u32,
+    version: &'static str,
+}
+
+static PRICING_CACHED: OnceLock<CachedRender> = OnceLock::new();
+
+fn render_pricing(cfg: &MarketingCfg) -> CachedRender {
+    let canonical_url = format!("{}/pricing", cfg.canonical_origin);
+    let mut og = OpenGraph::default_for(&format!("Pricing | {BRAND}"), &canonical_url);
+    og.description = "Uptimepage pricing: a free Standard plan with no card, a founding \
+         plan free for the first 1,000 accounts, and Pro for teams in production. \
+         Self-host the AGPL source with no limits."
+        .to_string();
+    let page = PricingPage {
+        app_url: cfg.app_url.clone(),
+        breadcrumb_json_ld: json_ld_breadcrumb(&cfg.canonical_origin, "Pricing", "/pricing"),
+        software_json_ld: json_ld_software_application(&cfg.canonical_origin),
+        webpage_json_ld: json_ld_webpage(
+            &cfg.canonical_origin,
+            "/pricing",
+            "Pricing",
+            PRICING_CREATED,
+            PRICING_LASTMOD,
+        ),
+        faq_json_ld: json_ld_faqpage(PRICING_FAQS),
+        faqs: PRICING_FAQS,
+        canonical_url,
+        og,
+        founding_claimed: FOUNDING_CLAIMED,
+        founding_total: FOUNDING_TOTAL,
+        founding_left: FOUNDING_TOTAL.saturating_sub(FOUNDING_CLAIMED),
+        founding_pct: (FOUNDING_CLAIMED * 100)
+            .checked_div(FOUNDING_TOTAL)
+            .unwrap_or(0),
+        version: env!("CARGO_PKG_VERSION"),
+    };
+    let body = page
+        .render()
+        .unwrap_or_else(|e| format!("<!-- pricing render failed: {e} -->"));
+    cached_render(body)
+}
+
+pub async fn pricing(State(cfg): State<Arc<MarketingCfg>>, headers: HeaderMap) -> Response {
+    let cached = PRICING_CACHED.get_or_init(|| render_pricing(&cfg));
+    serve_cached(&headers, cached, &PAGE_CACHE_CONTROL)
+}
+
 pub(crate) fn warm(cfg: &MarketingCfg) {
     LANDING_CACHED.get_or_init(|| render_landing(cfg));
+    PRICING_CACHED.get_or_init(|| render_pricing(cfg));
     NF_CACHED.get_or_init(|| render_not_found(cfg));
 }
 

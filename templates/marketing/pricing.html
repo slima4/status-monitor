@@ -1,0 +1,191 @@
+{% extends "marketing/base.html" %}
+{% block title %}{{ og.title }}{% endblock %}
+{% block head %}
+<script type="application/ld+json">{{ breadcrumb_json_ld.as_str()|safe }}</script>
+<script type="application/ld+json">{{ software_json_ld.as_str()|safe }}</script>
+<script type="application/ld+json">{{ webpage_json_ld.as_str()|safe }}</script>
+<script type="application/ld+json">{{ faq_json_ld.as_str()|safe }}</script>
+{% endblock %}
+{% block content %}
+<div class="mx-auto max-w-5xl space-y-16 sm:space-y-20">
+
+    <section class="space-y-5 text-center">
+        <p class="mk-eyebrow mk-eyebrow--ok">pricing</p>
+        <h1 class="mk-display">Monitoring you can <em class="mk-display-em">self-host</em>, or leave to us.</h1>
+        <p class="mk-lede mx-auto">The whole codebase is on GitHub under AGPL. Run it on your own box with no limits and no account. Want to skip the ops? Our hosted plans start at zero.</p>
+        <div class="flex flex-wrap items-center justify-center gap-2 pt-1">
+            <span class="mk-livepill"><span class="mk-livepill__dot"></span> {{ founding_left|thousands }} founding spots open</span>
+            <span class="mk-chip" translate="no">AGPL</span>
+            <span class="mk-chip">no credit card</span>
+            <span class="mk-chip">commercial use ok</span>
+        </div>
+    </section>
+
+    <section>
+        <div class="fnd">
+            <div class="fnd__text">
+                <p class="mk-eyebrow mk-eyebrow--ok">founding access</p>
+                <p class="mk-body" style="margin-top: 0.5rem;">The first <strong class="mk-ink">{{ founding_total|thousands }}</strong> hosted accounts get the founding plan and keep it at these limits, even after we close it. No catch, no expiry.</p>
+            </div>
+            <div class="fnd__meterwrap">
+                <div class="fnd-meter"><div class="fnd-meter__fill" style="width: {{ founding_pct }}%"></div></div>
+                <div class="fnd__count"><span><strong>{{ founding_claimed|thousands }}</strong> claimed</span><span>{{ founding_left|thousands }} left</span></div>
+            </div>
+        </div>
+    </section>
+
+    <section class="space-y-4">
+        <div class="grid gap-4 md:grid-cols-3">
+
+            <div class="mk-price mk-price--stack">
+                <div class="mk-price__name">standard</div>
+                <p class="mk-price__tag">For a side project, or trying the thing out properly.</p>
+                <div class="mk-price__amt"><b>$0</b><span>/ month</span></div>
+                <p class="mk-price__note">no card · no expiry</p>
+                <a href="{{ app_url }}/login" class="mk-cta mk-cta--ghost mk-cta--block">start free</a>
+                <ul class="mk-price__list">
+                    <li class="mk-price__line"><span><b>20</b> monitors</span></li>
+                    <li class="mk-price__line"><span>checks every <b>3 min</b></span></li>
+                    <li class="mk-price__line"><span><b>3</b> global regions</span></li>
+                    <li class="mk-price__line"><span><b>30-day</b> history</span></li>
+                    <li class="mk-price__line"><span><b>3</b> teammates</span></li>
+                    <li class="mk-price__line"><span><b>1</b> status page, 15 components</span></li>
+                    <li class="mk-price__line"><span>every alert channel</span></li>
+                    <li class="mk-price__line"><span>API and MCP access</span></li>
+                    <li class="mk-price__line"><span>fine for business use</span></li>
+                </ul>
+            </div>
+
+            <div class="mk-price mk-price--feature mk-price--stack">
+                <span class="mk-price__badge">first {{ founding_total|thousands }}</span>
+                <div class="mk-price__name">founding</div>
+                <p class="mk-price__tag">For early users who back the project before it is obvious.</p>
+                <div class="mk-price__amt"><b>$0</b><span>/ while spots last</span></div>
+                <p class="mk-price__note">grandfathered · yours to keep</p>
+                <a href="{{ app_url }}/login" class="mk-cta mk-cta--primary mk-cta--block">claim a founding spot</a>
+                <p class="mk-price__head">everything in standard, plus</p>
+                <ul class="mk-price__list">
+                    <li class="mk-price__line"><span><b>50</b> monitors</span></li>
+                    <li class="mk-price__line"><span>checks every <b>60 sec</b></span></li>
+                    <li class="mk-price__line"><span>all regions</span></li>
+                    <li class="mk-price__line"><span><b>90-day</b> history</span></li>
+                    <li class="mk-price__line"><span><b>5</b> teammates, 2 status pages</span></li>
+                    <li class="mk-price__line"><span>bring your own SMS</span></li>
+                    <li class="mk-price__line"><span>lifetime discount on Pro</span></li>
+                </ul>
+            </div>
+
+            <div class="mk-price mk-price--soon mk-price--stack">
+                <span class="mk-price__badge mk-price__badge--quiet">soon</span>
+                <div class="mk-price__name">pro</div>
+                <p class="mk-price__tag">For teams running this in production at real scale.</p>
+                <div class="mk-price__amt"><span>from</span><b>$19</b><span>/ month</span></div>
+                <p class="mk-price__note">billed monthly or yearly · founders pay less</p>
+                <a href="{{ app_url }}/login" class="mk-cta mk-cta--ghost mk-cta--block">get notified</a>
+                <p class="mk-price__head">everything in founding, plus</p>
+                <ul class="mk-price__list">
+                    <li class="mk-price__line"><span><b>150</b> monitors</span></li>
+                    <li class="mk-price__line"><span>checks every <b>30 sec</b></span></li>
+                    <li class="mk-price__line"><span>all regions</span></li>
+                    <li class="mk-price__line"><span><b>13-month</b> history</span></li>
+                    <li class="mk-price__line"><span><b>15</b> teammates, 5 status pages</span></li>
+                    <li class="mk-price__line"><span>white-label, remove our badge</span></li>
+                    <li class="mk-price__line"><span>custom domain on your status page</span></li>
+                </ul>
+            </div>
+
+        </div>
+        <p class="mk-price__note" style="text-align: center;">Prices are in USD. Founding accounts keep a lower Pro rate for life.</p>
+    </section>
+
+    <section class="space-y-4">
+        <div class="space-y-2">
+            <p class="mk-eyebrow">every plan, side by side</p>
+            <h2 class="mk-h2">Each tier <em class="mk-h2-em">stacks</em> on the one before.</h2>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="cmp">
+                <thead>
+                    <tr><th>&nbsp;</th><th>Standard</th><th class="col-us us">Founding</th><th>Pro</th></tr>
+                </thead>
+                <tbody>
+                    <tr><th>monitors</th><td>20</td><td class="col-us">50</td><td>150</td></tr>
+                    <tr><th>check interval</th><td>3 min</td><td class="col-us">60 sec</td><td>30 sec</td></tr>
+                    <tr><th>history</th><td>30 days</td><td class="col-us">90 days</td><td>13 months</td></tr>
+                    <tr><th>probe regions</th><td>3</td><td class="col-us">all</td><td>all</td></tr>
+                    <tr><th>team seats</th><td>3</td><td class="col-us">5</td><td>15</td></tr>
+                    <tr><th>status pages</th><td>1</td><td class="col-us">2</td><td>5</td></tr>
+                    <tr><th>status components</th><td>15</td><td class="col-us">30</td><td>75</td></tr>
+                    <tr><th>notification channels</th><td>20</td><td class="col-us">30</td><td>50</td></tr>
+                    <tr><th>all alert channel types</th><td class="yes">yes</td><td class="col-us yes">yes</td><td class="yes">yes</td></tr>
+                    <tr><th>API + MCP</th><td class="yes">yes</td><td class="col-us yes">yes</td><td class="yes">yes</td></tr>
+                    <tr><th>bring your own SMS</th><td class="no">—</td><td class="col-us yes">yes</td><td class="yes">yes</td></tr>
+                    <tr><th>custom domain</th><td class="no">—</td><td class="col-us no">—</td><td class="yes">yes</td></tr>
+                    <tr><th>white-label</th><td class="no">—</td><td class="col-us no">—</td><td class="yes">yes</td></tr>
+                    <tr><th>self-host (AGPL)</th><td class="yes">unlimited</td><td class="col-us yes">unlimited</td><td class="yes">unlimited</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="space-y-4">
+        <div class="space-y-2">
+            <p class="mk-eyebrow">self-host</p>
+            <h2 class="mk-h2">Rather run it <em class="mk-h2-em">yourself</em>? Go ahead.</h2>
+            <p class="mk-lede">Same monitors, same status pages, same code. No plan, no seat count, no account with us. This is the part the hosted limits do not apply to.</p>
+        </div>
+        <div class="mk-terminal">
+            <div class="mk-terminal__chrome"><span class="mk-terminal__dot"></span><span class="mk-terminal__dot"></span><span class="mk-terminal__dot"></span><span style="margin-left: 0.4rem;">bash</span></div>
+            <div class="mk-terminal__body"><span class="mk-terminal__line mk-terminal__line--prompt">git clone https://github.com/uptimepage/uptimepage</span><span class="mk-terminal__line mk-terminal__line--prompt">cd uptimepage &amp;&amp; docker compose up -d</span><span class="mk-terminal__line mk-terminal__line--meta">  pulling images ... done</span><span class="mk-terminal__line mk-terminal__line--ok">  up on http://localhost:8080 · unlimited monitors · AGPL</span></div>
+        </div>
+    </section>
+
+    <section class="space-y-4">
+        <div class="space-y-2">
+            <p class="mk-eyebrow">free plans, side by side</p>
+            <h2 class="mk-h2">What the <em class="mk-h2-em">$0</em> tier gets you, vs the others.</h2>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="cmp">
+                <thead>
+                    <tr><th>&nbsp;</th><th class="col-us us">uptimepage</th><th>uptimerobot</th><th>better stack</th><th>oneuptime</th></tr>
+                </thead>
+                <tbody>
+                    <tr><th>monitors</th><td class="col-us us">20</td><td>50 *</td><td>10</td><td>10</td></tr>
+                    <tr><th>check interval</th><td class="col-us us">3 min</td><td>5 min</td><td>3 min</td><td>billed</td></tr>
+                    <tr><th>history</th><td class="col-us us">30 days</td><td>limited</td><td>limited</td><td>15 days</td></tr>
+                    <tr><th>teammates</th><td class="col-us us">3</td><td>1</td><td>limited</td><td>1</td></tr>
+                    <tr><th>commercial use</th><td class="col-us us yes">yes</td><td class="no">personal only</td><td class="yes">yes</td><td class="yes">yes</td></tr>
+                    <tr><th>API and MCP</th><td class="col-us us yes">yes</td><td class="no">limited</td><td class="no">paid</td><td class="no">no API</td></tr>
+                    <tr><th>self-host, no limits</th><td class="col-us us yes">yes</td><td class="no">no</td><td class="no">no</td><td class="yes">yes</td></tr>
+                </tbody>
+            </table>
+        </div>
+        <p class="cmp__note">* UptimeRobot allows 50 on free, but the free plan is personal, non-commercial use only. Competitor limits shift often, check theirs before you decide.</p>
+    </section>
+
+    <section class="space-y-6">
+        <div class="space-y-2">
+            <p class="mk-eyebrow">questions</p>
+            <h2 class="mk-h2">Before you ask.</h2>
+        </div>
+        <div>
+            {% for faq in faqs %}
+            <details class="mk-faq"{% if loop.first %} open{% endif %}>
+                <summary>{{ faq.0 }}</summary>
+                <div class="mk-faq__body">{{ faq.1|safe }}</div>
+            </details>
+            {% endfor %}
+        </div>
+    </section>
+
+    <section class="text-center space-y-5">
+        <h2 class="mk-h2">Point it at your first URL in <em class="mk-h2-em">two minutes</em>.</h2>
+        <div class="flex flex-wrap justify-center gap-2">
+            <a href="{{ app_url }}/login" class="mk-cta mk-cta--primary">claim a founding spot</a>
+            <a href="/self-hosted-status-page" class="mk-cta mk-cta--ghost">read the self-host guide</a>
+        </div>
+    </section>
+
+</div>
+{% endblock %}
