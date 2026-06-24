@@ -478,10 +478,10 @@ app.{$UPTIMEPAGE_DOMAIN} {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
 		X-Content-Type-Options "nosniff"
 		Referrer-Policy "strict-origin-when-cross-origin"
-		# CSP for the marketing surface: same-origin static + JSON-LD
-		# inline blob only (no third-party JS until analytics is wired).
+		# CSP for the marketing surface: same-origin static + JSON-LD inline
+		# blob, plus the self-hosted analytics script and its event beacon.
 		# img-src also allows our own status badge served from the status host.
-		Content-Security-Policy "default-src 'self'; img-src 'self' data: https://uptimepage.{$UPTIMEPAGE_DOMAIN}; style-src 'self'; script-src 'self'; base-uri 'self'; form-action 'self'"
+		Content-Security-Policy "default-src 'self'; img-src 'self' data: https://uptimepage.{$UPTIMEPAGE_DOMAIN}; style-src 'self'; script-src 'self' https://analytics.{$UPTIMEPAGE_DOMAIN}; connect-src 'self' https://analytics.{$UPTIMEPAGE_DOMAIN}; base-uri 'self'; form-action 'self'"
 		-Server
 	}
 

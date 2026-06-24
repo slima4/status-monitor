@@ -1,6 +1,6 @@
 # Privacy Policy
 
-**Last updated:** 2026-05-15
+**Last updated:** 2026-06-24
 
 This Privacy Policy explains how the uptimepage service ("we", "us")
 collects and processes personal data. It is intended to satisfy our
@@ -40,8 +40,9 @@ We collect data in three ways:
 - Session cookie (`_sm_session`) — necessary for authentication
 - IP address (hashed before storage; never stored raw)
 
-We do **not** use third-party analytics (no Google Analytics, no
-Plausible, no Mixpanel, no tracking pixels).
+**Analytics (public marketing pages only):** We run self-hosted, cookieless analytics (Umami) on our own EU infrastructure. It records aggregate page views, referrer, browser, operating system, device type, and coarse location (country and region) derived from a daily-rotating hash of your IP address and user agent. It sets no cookies, never stores your raw IP, and cannot identify you or follow you across sites or sessions. The data stays on our infrastructure and is never sent to a third party.
+
+We do **not** use third-party analytics services that export your data (no Google Analytics, no Mixpanel, no tracking pixels).
 
 ## 3. Why We Process This Data
 
@@ -52,6 +53,7 @@ Plausible, no Mixpanel, no tracking pixels).
 | Sessions, API tokens | Authenticate API requests | Contract |
 | Hashed IP, login attempts | Detect security threats | Legitimate interest |
 | Audit log | Compliance and accountability | Legitimate interest |
+| Aggregate analytics (marketing pages) | Understand site usage and improve content | Legitimate interest |
 
 We do not engage in automated decision-making with significant effects on
 you (no profiling, no scoring).
@@ -70,6 +72,7 @@ you (no profiling, no scoring).
 | Quota events | 90 days |
 | Server access logs | 30 days |
 | Application error logs | 30 days |
+| Aggregate analytics (marketing pages) | Indefinite (aggregate only; no identifiers that single you out) |
 
 Deleted accounts are recoverable for 30 days, after which data is
 permanently purged.

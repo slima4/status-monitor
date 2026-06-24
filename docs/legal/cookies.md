@@ -1,6 +1,6 @@
 # Cookie Policy
 
-**Last updated:** 2026-05-15
+**Last updated:** 2026-06-24
 
 ## What Cookies We Use
 
@@ -18,7 +18,7 @@ or facilitate advertising.
 
 We do not use:
 
-- Analytics cookies (no Google Analytics, no Plausible, no Mixpanel)
+- Analytics cookies (our analytics is self-hosted and cookieless, so it sets none; see the Privacy Policy)
 - Advertising cookies (no Google Ads, no Facebook Pixel, no DoubleClick)
 - Third-party tracking cookies of any kind
 - Fingerprinting techniques as cookie alternatives
