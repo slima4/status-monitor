@@ -493,3 +493,30 @@ app.{$UPTIMEPAGE_DOMAIN} {
 		format json
 	}
 }
+
+# ═══════════════════════════════════════════════════════════════════════
+# Analytics (Umami) — separate compose project, shared edge network
+# ═══════════════════════════════════════════════════════════════════════
+# Cookieless analytics dashboard + tracker. Own per-host HTTP-01 cert, kept
+# off the *.{domain} wildcard key like the operator and marketing hosts.
+# Reached by container name over the shared `uptimepage_default` network;
+# Umami publishes no host port. No edge CSP — Umami sets its own headers and
+# an imposed policy would break its dashboard.
+analytics.{$UPTIMEPAGE_DOMAIN} {
+	encode gzip zstd
+
+	reverse_proxy umami:3000
+
+	header {
+		-Server
+		-X-Powered-By
+	}
+
+	log {
+		output file /var/log/caddy/access-analytics.log {
+			roll_size 50mb
+			roll_keep 5
+		}
+		format json
+	}
+}
