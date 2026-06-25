@@ -475,10 +475,19 @@ www.{$UPTIMEPAGE_DOMAIN} {
 {$UPTIMEPAGE_DOMAIN} {
 	encode gzip zstd
 
+	# IndexNow ownership proof. Terminal handle, so the key file never
+	# reaches the proxy below. Key is public by protocol.
+	@indexnow path /{$UPTIMEPAGE_INDEXNOW_KEY}.txt
+	handle @indexnow {
+		respond "{$UPTIMEPAGE_INDEXNOW_KEY}" 200
+	}
+
 	# Send the canonical-host signal to the dispatcher. Marketing reads
 	# the Host header to decide between landing and a tenant fall-through;
 	# Caddy forwards Host + X-Forwarded-* upstream by default.
-	import app_upstream
+	handle {
+		import app_upstream
+	}
 
 	# Marketing surfaces are public, cacheable, JS-free; no edge auth.
 	header {
