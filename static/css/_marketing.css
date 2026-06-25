@@ -606,7 +606,7 @@ html:has(.marketing-shell) {
 /* ── Shared helpers (replace inline styles the marketing CSP blocks) ─ */
 .mk-panel { border: 1px solid var(--mk-rule); background: var(--mk-surface); }
 .mk-ink-soft { color: var(--mk-ink-soft); }
-.mk-footer-link--inline { display: inline; }
+.mk-footer-link.mk-footer-link--inline { display: inline; }
 .mk-ls-04 { letter-spacing: 0.04em; }
 .mk-ls-08 { letter-spacing: 0.08em; }
 .mk-terminal__tag { margin-left: 0.4rem; }

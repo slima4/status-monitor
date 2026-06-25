@@ -127,6 +127,7 @@ fn main() {
     // the code that uses them.
     println!("cargo::rerun-if-changed=templates");
     println!("cargo::rerun-if-changed=static/css/input.css");
+    println!("cargo::rerun-if-changed=static/css/_marketing.css");
     println!("cargo::rerun-if-changed=assets/js");
     println!("cargo::rerun-if-changed=src");
     println!("cargo::rerun-if-changed=scripts/fetch-tailwind.sh");
