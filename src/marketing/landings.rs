@@ -635,6 +635,72 @@ docker compose up -d"#,
         cta: "Start free",
     },
     Landing {
+        path: "/vs/pingdom",
+        created: "2026-06-25",
+        lastmod: "2026-06-25",
+        title: "A Pingdom Alternative with Status Pages Built In",
+        eyebrow: "switching monitors",
+        h1: "Looking for a Pingdom alternative?",
+        meta_description: "Uptimepage pairs 60s HTTP, TCP, DNS and TLS checks with branded status pages and Slack, email and webhook alerts. Open source, free to start.",
+        lede: "If you are pricing out monitors, here is what Uptimepage gives you out of the box: the checks and a public status page are the same product, the source is open, and you can start free with no card.",
+        features: &[
+            Feature {
+                label: "Check interval",
+                value: "every 60s",
+            },
+            Feature {
+                label: "Status pages",
+                value: "built in, branded",
+            },
+            Feature {
+                label: "Check types",
+                value: "HTTP, TCP, DNS, TLS",
+            },
+            Feature {
+                label: "Alerts",
+                value: "Slack, email, webhook",
+            },
+            Feature {
+                label: "Run it",
+                value: "hosted free, or self-host AGPL",
+            },
+            Feature {
+                label: "Price to start",
+                value: "free, no card",
+            },
+        ],
+        sections: &[
+            Section {
+                heading: "monitoring and status page in one",
+                body: "Checks and a public status page are the same product here, not a paid add-on. Flip any monitor public and it lands on your own subdomain with a 90-day history and per-component status.",
+            },
+            Section {
+                heading: "checks that explain themselves",
+                body: "HTTP, TCP, DNS and TLS, every minute from multiple regions. When something is slow the timing is split across DNS, connect, TLS and time-to-first-byte, so you see why, not just that.",
+            },
+            Section {
+                heading: "own it, hosted or self-hosted",
+                body: "Run it on the free hosted tier, or self-host the AGPL build as one binary with docker compose. Either way you drive it from the dashboard or as code with the Terraform provider and MCP.",
+            },
+        ],
+        code: None,
+        resources: &[
+            ResourceLink {
+                label: "Free pricing",
+                href: "/pricing",
+            },
+            ResourceLink {
+                label: "vs UptimeRobot",
+                href: "/vs/uptimerobot",
+            },
+            ResourceLink {
+                label: "Self-hosted status page",
+                href: "/self-hosted-status-page",
+            },
+        ],
+        cta: "Start free",
+    },
+    Landing {
         path: "/automation",
         created: "2026-06-16",
         lastmod: "2026-06-21",
@@ -721,6 +787,97 @@ resource "uptimepage_target" "api" {
             ResourceLink {
                 label: "How the MCP server works",
                 href: "/blog/mcp-server",
+            },
+        ],
+        cta: "Start free",
+    },
+    Landing {
+        path: "/terraform-uptime-monitoring",
+        created: "2026-06-25",
+        lastmod: "2026-06-25",
+        title: "Terraform Uptime Monitoring with Status Pages",
+        eyebrow: "infrastructure as code",
+        h1: "Uptime monitoring you declare in Terraform",
+        meta_description: "Declare uptime monitors, status pages and alerts in Terraform with the official Uptimepage provider. HTTP, TCP, DNS, TLS checks. Free to start.",
+        lede: "Provision a monitor the same way you provision the service it watches. The official Uptimepage provider manages monitors, status pages, components and notification channels in HCL, so every new service ships with monitoring instead of a follow-up ticket.",
+        features: &[
+            Feature {
+                label: "Terraform provider",
+                value: "uptimepage/uptimepage",
+            },
+            Feature {
+                label: "Resources",
+                value: "monitors, pages, channels",
+            },
+            Feature {
+                label: "Check types",
+                value: "HTTP, TCP, DNS, TLS",
+            },
+            Feature {
+                label: "Check interval",
+                value: "every 60s",
+            },
+            Feature {
+                label: "Auth",
+                value: "scoped, expiring API tokens",
+            },
+            Feature {
+                label: "Price to start",
+                value: "free, no card",
+            },
+        ],
+        sections: &[
+            Section {
+                heading: "monitoring ships with the service",
+                body: "Declare the monitor next to the resource it watches. Every service gets consistent monitoring from its first apply, with no gap between deploy and the first check.",
+            },
+            Section {
+                heading: "review it like any other change",
+                body: "Monitors, status pages and alert channels live in HCL, so a change is a pull request with a plan and an apply. Roll the same config across orgs and keep your monitoring reproducible instead of hand-clicked.",
+            },
+            Section {
+                heading: "more than Terraform",
+                body: "The same data model answers a full REST API and an MCP server, so an assistant can read your monitors while Terraform owns their shape. Everything you can click, you can declare.",
+            },
+        ],
+        code: Some(CodeSample {
+            caption: "Declare a monitor in Terraform",
+            body: r#"terraform {
+  required_providers {
+    uptimepage = {
+      source = "uptimepage/uptimepage"
+    }
+  }
+}
+
+resource "uptimepage_target" "api" {
+  name     = "api prod"
+  interval = 60
+
+  check = {
+    type = "http"
+    http = {
+      url = "https://example.com/healthz"
+      expected_status = {
+        kind  = "exact"
+        exact = 200
+      }
+    }
+  }
+}"#,
+        }),
+        resources: &[
+            ResourceLink {
+                label: "Terraform Registry",
+                href: TERRAFORM_URL,
+            },
+            ResourceLink {
+                label: "Monitoring as code",
+                href: "/automation",
+            },
+            ResourceLink {
+                label: "MCP server",
+                href: "/mcp-server",
             },
         ],
         cta: "Start free",
@@ -1025,6 +1182,42 @@ fn page_faqs(path: &str) -> &'static [(&'static str, &'static str)] {
             (
                 "Is it safe from prompt injection?",
                 "Customer-supplied text reaches the model labelled as data, never instructions, and no action runs without out-of-band human approval.",
+            ),
+        ],
+        "/vs/pingdom" => &[
+            (
+                "Is Uptimepage free?",
+                "Yes. The hosted tier is $0 a month with no credit card, and the AGPL source is free to self-host with unlimited monitors on your own hardware.",
+            ),
+            (
+                "Does it include a status page?",
+                "Yes. A branded status page on your own subdomain is part of the same product, with automatic incidents, maintenance windows, and email or webhook subscribers.",
+            ),
+            (
+                "How often does it check?",
+                "As often as every 60 seconds, across HTTP, TCP, DNS and TLS, with the timing split across DNS, connect, TLS and first byte so you can see why a check is slow.",
+            ),
+            (
+                "Can I manage it as code?",
+                "Yes. An official Terraform provider, a full REST API, and an MCP server let you declare monitors in a repo and review changes in a pull request.",
+            ),
+        ],
+        "/terraform-uptime-monitoring" => &[
+            (
+                "Which provider do I use?",
+                "The official provider, source uptimepage/uptimepage on the Terraform Registry. It manages monitors, status pages, components and notification channels.",
+            ),
+            (
+                "What can I declare in Terraform?",
+                "Monitors with HTTP, TCP, DNS or TLS checks, public status pages and their components, and notification channels: the same things you change in the dashboard.",
+            ),
+            (
+                "Do I need the hosted service?",
+                "No. Start free on the hosted tier with no card, or self-host under AGPL and point the provider at your own instance.",
+            ),
+            (
+                "How does the provider authenticate?",
+                "With a scoped API token: resource-and-action permissions bound to one org, with an enforced expiry. Mint a write-scoped token for Terraform rather than an all-or-nothing key.",
             ),
         ],
         _ => &[],
