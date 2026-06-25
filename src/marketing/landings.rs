@@ -377,6 +377,10 @@ docker compose up -d"#,
                 href: "/pricing",
             },
             ResourceLink {
+                label: "vs Pingdom",
+                href: "/vs/pingdom",
+            },
+            ResourceLink {
                 label: "Status pages for SaaS",
                 href: "/status-page-for-saas",
             },
@@ -779,6 +783,10 @@ resource "uptimepage_target" "api" {
             ResourceLink {
                 label: "Terraform Registry",
                 href: TERRAFORM_URL,
+            },
+            ResourceLink {
+                label: "Terraform uptime monitoring",
+                href: "/terraform-uptime-monitoring",
             },
             ResourceLink {
                 label: "MCP server",
