@@ -457,15 +457,22 @@ app.{$UPTIMEPAGE_DOMAIN} {
 }
 
 # ═══════════════════════════════════════════════════════════════════════
-# Marketing site (apex + www) — same upstream, host routing in-app.
+# Marketing site (apex) — www 301-redirects here for one canonical host.
 # ═══════════════════════════════════════════════════════════════════════
-# The bare {domain} and www.{domain} are served by the same uptimepage
-# container; the Rust dispatcher (web/host.rs::classify_host + the
-# RouteByHost service) hands marketing requests off inside the binary.
-# Two per-host HTTP-01 certs — kept off the *.{domain} wildcard so a
+# The bare {domain} is served by the uptimepage container; the Rust
+# dispatcher (web/host.rs::classify_host + the RouteByHost service) hands
+# marketing requests off inside the binary. Apex and www each carry their
+# own per-host HTTP-01 cert, kept off the *.{domain} wildcard so a
 # wildcard-key leak still doesn't touch the marketing surface or the
 # operator host.
-{$UPTIMEPAGE_DOMAIN}, www.{$UPTIMEPAGE_DOMAIN} {
+
+# www serves only a redirect, but still needs its own cert to complete the
+# TLS handshake first; {uri} preserves the path and query to apex.
+www.{$UPTIMEPAGE_DOMAIN} {
+	redir https://{$UPTIMEPAGE_DOMAIN}{uri} permanent
+}
+
+{$UPTIMEPAGE_DOMAIN} {
 	encode gzip zstd
 
 	# Send the canonical-host signal to the dispatcher. Marketing reads
