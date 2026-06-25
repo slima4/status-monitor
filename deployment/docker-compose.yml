@@ -35,8 +35,6 @@ services:
       UPTIMEPAGE_DOMAIN: ${UPTIMEPAGE_DOMAIN}
       UPTIMEPAGE_ACME_EMAIL: ${UPTIMEPAGE_ACME_EMAIL}
       HETZNER_DNS_API_TOKEN: ${HETZNER_DNS_API_TOKEN}
-      # IndexNow ownership-proof key, served at /<key>.txt (public by protocol).
-      UPTIMEPAGE_INDEXNOW_KEY: ${UPTIMEPAGE_INDEXNOW_KEY:-}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data           # certs + keys — back this up!
