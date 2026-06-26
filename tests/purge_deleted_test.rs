@@ -35,6 +35,16 @@ async fn backdate_delete(pool: &sqlx::PgPool, org: OrgId, days_ago: i32) {
     .expect("backdate delete");
 }
 
+/// `completed_at` of one org's purge-queue row, for assertions that must not
+/// depend on the tick-wide count a parallel drain can race.
+async fn completed_at(pool: &sqlx::PgPool, org: OrgId) -> Option<chrono::DateTime<chrono::Utc>> {
+    sqlx::query_scalar("SELECT completed_at FROM clickhouse_purge_queue WHERE org_id = $1")
+        .bind(org.0)
+        .fetch_one(pool)
+        .await
+        .expect("read queue row")
+}
+
 #[tokio::test]
 #[ignore]
 async fn grace_window_blocks_purge() {
@@ -314,20 +324,17 @@ async fn drain_is_idempotent_on_repeat() {
         .execute(&pool)
         .await
         .unwrap();
-    let drained = drain_clickhouse_purge_queue(&pool, &ch).await.unwrap();
-    assert!(drained >= 1, "second drain should mark the row complete");
-    // Third drain doesn't double-process THIS org. The tick-wide count can
-    // be non-zero if a parallel test enqueued in the meantime — check on the
-    // specific queue row.
-    let _ = drain_clickhouse_purge_queue(&pool, &ch).await.unwrap();
-    let (completed,): (Option<chrono::DateTime<chrono::Utc>>,) =
-        sqlx::query_as("SELECT completed_at FROM clickhouse_purge_queue WHERE org_id = $1")
-            .bind(org.id.0)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+    // Assert on THIS org's row, not the tick-wide drained count: a parallel
+    // test's drain can complete the row first, so the returned count is racy.
+    drain_clickhouse_purge_queue(&pool, &ch).await.unwrap();
     assert!(
-        completed.is_some(),
+        completed_at(&pool, org.id).await.is_some(),
+        "second drain marks this org's row complete"
+    );
+    // A repeat drain neither reopens nor double-processes the completed row.
+    drain_clickhouse_purge_queue(&pool, &ch).await.unwrap();
+    assert!(
+        completed_at(&pool, org.id).await.is_some(),
         "queue row stays completed across drains"
     );
 
