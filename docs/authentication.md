@@ -88,6 +88,7 @@ Every token carries a set of `resource:action` scopes. A request is rejected wit
 | `incidents` | — (target incident history is under `targets:read`; the public timeline needs no token) | narrate / post update | — | — |
 | `maintenance` | list / get | create / update | delete | — |
 | `status_page` | read settings | update settings, upload logo | remove logo | — |
+| `variables` | list / get (secret values redacted) | create / rotate | delete (blocked while referenced) | — |
 
 `write` implies `read` for the same resource. `delete` and `execute` are **independent** — they are *not* granted by `write`, so a config-management token (`*:write`) can change resources but cannot destroy them or trigger side effects. Grant `delete`/`execute` explicitly when you need them.
 

@@ -9,6 +9,7 @@
 - [Public status page](public-status.md)
 - [Per-org status pages](per-org-status.md)
 - [Share links](share-links.md)
+- [Variables and secrets](variables.md)
 - [Incident management](incidents.md)
 - [Multi-tenancy](multi-tenancy.md)
 - [Multi-region probes](multi-region.md)

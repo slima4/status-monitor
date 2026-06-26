@@ -131,6 +131,20 @@ A share link is a capability URL that renders one monitor's full read-only detai
 
 Both `POST` and `GET` return the `token`; build the link as `/m/{token}` (prepend your origin). The token stays re-copyable — it is stored encrypted at rest (the app KEK, same as `basic_auth`/`bearer_token`); the public resolve path matches on a separate hash, so a hot link never triggers a decrypt. `token` is `null` only when a row was sealed under a KEK that is no longer configured. Two plan caps apply (columns on `plans`, overridable per-org via `plan_overrides`): `max_share_links_per_monitor` (active links on one monitor) and `max_shared_monitors` (distinct monitors in the org that have any link). The free plan is **1** and **2**. Exceeding either is `422 QUOTA_EXCEEDED` (the body names the `quota`). A label longer than 80 characters is `400 SHARE_LABEL_INVALID`; an `expires_at` in the past is `400 INVALID_EXPIRY`.
 
+### Operator endpoints (variables)
+
+A variable is a reusable named value an org's monitors reference as `{{key}}` in their HTTP request fields; the reference resolves to the value before a check runs. A secret variable's value is sealed at rest and write-only: every read path returns `value: null` for it. Endpoints are gated on `variables:read` / `variables:write` and scoped to the caller's active org. The behaviour those references unlock is documented in [Variables and secrets](variables.md).
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/api/v1/variables` | list variables (each with `used_by`, the count of referencing monitors) |
+| `GET` | `/api/v1/variables/{id}` | get one variable with its `used_by` |
+| `POST` | `/api/v1/variables` | create; body `{ "key", "is_secret"?, "value" }`, returns the `Variable` plus `used_by` |
+| `PATCH` | `/api/v1/variables/{id}` | rotate the value; body `{ "value" }` |
+| `DELETE` | `/api/v1/variables/{id}` | delete; `409 VARIABLE_IN_USE` while a monitor still references it |
+
+A key must match `^[a-z][a-z0-9_]{0,62}$` or the create is `400 INVALID_VARIABLE_KEY`; a duplicate key in the org is `409 VARIABLE_KEY_EXISTS`. The `is_secret` flag is fixed at create. A plain variable returns its `value`; a secret returns `value: null` on every read, including the create and rotate responses. A monitor whose `{{key}}` references do not all resolve (unknown key, or a secret used in a field that forbids it) is rejected at save with `422 UNRESOLVED_VARIABLE`.
+
 ## Check specs
 
 Tagged enum, `type` discriminator.
@@ -154,6 +168,8 @@ Tagged enum, `type` discriminator.
   "bearer_token": null
 }
 ```
+
+The `url`, `headers`, `body`, and `expected_body_contains` fields may carry `{{key}}` references to org [variables](variables.md), resolved before the check runs. A secret variable is allowed only in a header value or the body.
 
 #### Credential redaction
 
