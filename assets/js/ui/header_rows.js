@@ -28,9 +28,27 @@
         row.innerHTML = rowHtml();
         container.appendChild(row);
         if (focus) row.querySelector("input").focus();
+        return row;
     }
 
     addBtn.addEventListener("click", () => addRow(true));
+
+    // Public adder: the variable auth picker calls this to drop a prefilled
+    // header row (e.g. `Authorization: Bearer {{key}}`) without duplicating the
+    // row markup.
+    window.smAddHeaderRow = function (name, value) {
+        const rows = Array.from(container.querySelectorAll("[data-header-row]"));
+        const keyEl = (r) => r.querySelector("[name='http_header_key']");
+        const valEl = (r) => r.querySelector("[name='http_header_value']");
+        // Reuse a row already targeting this header so the picker never adds a
+        // duplicate that smCollectHeaders would silently collapse to the last.
+        let row = rows.find((r) => keyEl(r).value.trim().toLowerCase() === name.toLowerCase());
+        if (!row) row = rows.find((r) => keyEl(r).value.trim() === "" && valEl(r).value.trim() === "");
+        if (!row) row = addRow(false);
+        keyEl(row).value = name;
+        valEl(row).value = value;
+        return row;
+    };
 
     container.addEventListener("click", (evt) => {
         const btn = evt.target.closest("[data-header-remove]");

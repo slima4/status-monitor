@@ -153,6 +153,16 @@ async fn new_target_form_renders_create_mode() {
     assert!(html.contains(r#"data-initial-mode="create""#));
     assert!(html.contains("set credentials"));
     assert!(html.contains("set token"));
+    // The variable affordances: additive secret-variable auth picker plus the
+    // insert-helper script (the inline auth fields are kept, not replaced).
+    assert!(
+        html.contains("data-var-auth-picker"),
+        "secret-variable auth picker present"
+    );
+    assert!(
+        html.contains("variable_helpers"),
+        "insert-variable helper script linked"
+    );
 }
 
 #[tokio::test]
@@ -456,6 +466,62 @@ async fn channel_edit_page_lists_bound_monitors() {
         "unbound monitor must not appear in the used-by grid"
     );
     assert!(html.contains("# bound to"), "header shows the bound count");
+}
+
+#[tokio::test]
+async fn variables_page_and_partial_render_with_secret_redacted() {
+    let router = app();
+
+    let resp = router
+        .clone()
+        .oneshot(
+            Request::get("/settings/variables")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let html = body_text(resp).await;
+    assert!(html.contains("add variable"), "create form must render");
+
+    for body in [
+        json!({ "key": "base_url", "is_secret": false, "value": "api.example.com" }),
+        json!({ "key": "api_key", "is_secret": true, "value": "sk-super-secret-9f3a" }),
+    ] {
+        let resp = router
+            .clone()
+            .oneshot(
+                Request::post("/api/v1/variables")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::CREATED, "create variable");
+    }
+
+    let resp = router
+        .clone()
+        .oneshot(
+            Request::get("/web/partials/settings/variables")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let html = body_text(resp).await;
+    assert!(
+        html.contains("base_url") && html.contains("api.example.com"),
+        "plain value visible"
+    );
+    assert!(html.contains("api_key"), "secret key listed");
+    assert!(
+        !html.contains("sk-super-secret-9f3a"),
+        "secret value must never reach the page"
+    );
 }
 
 /// The Privacy Policy uses Markdown tables; table rendering must be on.

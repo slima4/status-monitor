@@ -99,6 +99,28 @@ pub fn is_envelope(s: &str) -> bool {
     s.starts_with("v1:")
 }
 
+/// Seal a reversible string for an at-rest column: a Cipher envelope when a KEK
+/// is configured, plaintext otherwise (the documented self-host fallback, shared
+/// by target credentials, share tokens, and secret variables).
+pub fn seal_str(raw: &str, cipher: Option<&Cipher>) -> Result<String, CryptoError> {
+    match cipher {
+        Some(c) => c.encrypt(raw.as_bytes()),
+        None => Ok(raw.to_string()),
+    }
+}
+
+/// Recover a string sealed by [`seal_str`]. `None` when the value is an envelope
+/// but no KEK can open it (key rotated out), so callers treat it as unusable
+/// rather than handing back ciphertext.
+pub fn open_str(stored: &str, cipher: Option<&Cipher>) -> Option<String> {
+    if is_envelope(stored) {
+        let bytes = cipher?.decrypt(stored).ok()?;
+        String::from_utf8(bytes).ok()
+    } else {
+        Some(stored.to_string())
+    }
+}
+
 /// JSON key under which a sealed value is stored at rest. Single owner so the
 /// targets-credential path and the notification-channel path can never drift
 /// to different sentinels (a comment used to be the only thing keeping them

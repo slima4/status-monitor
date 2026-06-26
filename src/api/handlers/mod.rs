@@ -22,6 +22,7 @@ pub mod tags;
 pub mod targets;
 pub mod usage;
 pub mod validation;
+pub mod variables;
 
 use uuid::Uuid;
 

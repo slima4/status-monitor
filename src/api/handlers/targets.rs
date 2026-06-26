@@ -197,6 +197,7 @@ pub async fn create(
     verify_alert_channels(&state, org, &new.alerts).await?;
     validate_owner_is_member(&state, org, new.owner_user_id).await?;
     check_abuse(&state, org, &new.check)?;
+    validate_variable_refs(&state, org, &new.check).await?;
     // Friendly pre-check; the store INSERT enforces the same cap atomically.
     state.quotas.check_can_create_targets(org, None, 1).await?;
     let default_region = state.cfg.scheduler.effective_default_region().to_string();
@@ -254,6 +255,7 @@ pub async fn update(
         canonicalize_check(check)?;
         validate_check(check, &ssrf_guard(&state))?;
         check_abuse(&state, org, check)?;
+        validate_variable_refs(&state, org, check).await?;
     }
     if let Some(alerts) = &update.alerts {
         validate_alerts(alerts)?;
@@ -528,6 +530,7 @@ pub async fn bulk_create(
         validate_region_policy(new.region_policy, available.len())?;
         verify_alert_channels(&state, org, &new.alerts).await?;
         check_abuse(&state, org, &new.check)?;
+        validate_variable_refs(&state, org, &new.check).await?;
     }
     let owner_ids: std::collections::HashSet<Uuid> =
         items.iter().filter_map(|t| t.owner_user_id).collect();
@@ -841,6 +844,7 @@ async fn run_ad_hoc(
             format!("no probe available in region '{region}'; probing runs on agents"),
         ));
     }
+    let (check, secrets) = resolve_spec_variables(state, org, check).await?;
     let check_id = Uuid::now_v7();
     let rx = state.ad_hoc.dispatch(
         region,
@@ -853,7 +857,10 @@ async fn run_ad_hoc(
         },
     );
     match tokio::time::timeout(crate::ad_hoc_dispatch::RESULT_WAIT, rx).await {
-        Ok(Ok(delivered)) => Ok(delivered),
+        Ok(Ok(mut delivered)) => {
+            scrub_secrets(&mut delivered, &secrets);
+            Ok(delivered)
+        }
         _ => {
             state.ad_hoc.abandon(check_id);
             Err(AppError::service_unavailable(
@@ -880,6 +887,92 @@ async fn resolve_check_now_region(state: &AppState, org: OrgId, id: Uuid) -> Res
         return Ok(r.clone());
     }
     Ok(regions[0].clone())
+}
+
+/// Substitute `{{var}}` references in an interactive check (test / check-now)
+/// before it is dispatched, so the operator probes against the real resolved
+/// values. Returns the secret plaintexts substituted so the caller can scrub
+/// them from a captured response. A missing variable or a policy violation
+/// surfaces as a 422 here. Non-HTTP or no-variable specs pass through.
+async fn resolve_spec_variables(
+    state: &AppState,
+    org: OrgId,
+    spec: CheckSpec,
+) -> Result<(CheckSpec, Vec<String>)> {
+    use crate::worker::interpolate::{resolve_http_spec, uses_vars};
+
+    let CheckSpec::Http(http) = &spec else {
+        return Ok((spec, Vec::new()));
+    };
+    if !uses_vars(http) {
+        return Ok((spec, Vec::new()));
+    }
+    let vars = state.variable_store.resolve_map(org).await?;
+    let resolved = resolve_http_spec(http, &vars)
+        .map_err(|e| AppError::unprocessable(codes::UNRESOLVED_VARIABLE, e.to_string()))?;
+    let secrets = secret_values(&vars);
+    Ok((CheckSpec::Http(resolved), secrets))
+}
+
+/// Reject a monitor whose `{{var}}` references don't all resolve against the
+/// org's variables — an unknown key or a secret used in a field that forbids it.
+/// Fails fast at save instead of silently dropping the monitor at probe time.
+/// Non-HTTP or no-variable specs are a no-op.
+async fn validate_variable_refs(state: &AppState, org: OrgId, check: &CheckSpec) -> Result<()> {
+    use crate::worker::interpolate::{repoint_risk, resolve_http_spec, uses_vars};
+
+    let CheckSpec::Http(http) = check else {
+        return Ok(());
+    };
+    if !uses_vars(http) {
+        return Ok(());
+    }
+    let vars = state.variable_store.resolve_map(org).await?;
+    resolve_http_spec(http, &vars)
+        .map(drop)
+        .map_err(|e| AppError::unprocessable(codes::UNRESOLVED_VARIABLE, e.to_string()))?;
+    if let Some(risk) = repoint_risk(http, &vars) {
+        tracing::warn!(
+            org = %org.0,
+            url_variables = ?risk.url_keys,
+            secret_headers = ?risk.secret_header_keys,
+            "monitor combines a url variable with a secret header; repointing the \
+             url variable would send the secret to a different host"
+        );
+    }
+    Ok(())
+}
+
+/// Secret plaintexts in the org's map, used to scrub an interactive probe's
+/// captured response. Short values are skipped: scrubbing a one or two character
+/// string would mangle unrelated response text for no real protection.
+fn secret_values(vars: &crate::domain::VarMap) -> Vec<String> {
+    vars.values()
+        .filter(|v| v.is_secret && v.value.len() >= 4)
+        .map(|v| v.value.clone())
+        .collect()
+}
+
+/// Replace any resolved secret echoed back in an interactive probe's captured
+/// response (body snippet + header values) with `***`, so a value a secret
+/// variable supplied is never shown back through the test surface.
+fn scrub_secrets(delivered: &mut DeliveredResult, secrets: &[String]) {
+    fn redact(s: &mut String, secrets: &[String]) {
+        for secret in secrets {
+            if s.contains(secret.as_str()) {
+                *s = s.replace(secret.as_str(), "***");
+            }
+        }
+    }
+    if secrets.is_empty() {
+        return;
+    }
+    if let Some(snippet) = delivered.response_body_snippet.as_mut() {
+        redact(snippet, secrets);
+    }
+    for h in &mut delivered.response_headers_preview {
+        redact(&mut h.value, secrets);
+    }
 }
 
 fn ssrf_guard(state: &AppState) -> SsrfGuard {
@@ -1304,6 +1397,57 @@ fn check_ip(ip: IpAddr, guard: &SsrfGuard) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scrub_secrets_redacts_echoed_values_in_body_and_headers() {
+        use crate::ad_hoc_dispatch::DeliveredResult;
+        use crate::domain::CheckResult;
+        use crate::domain::agent_wire::HeaderPreview;
+
+        let mut delivered = DeliveredResult {
+            result: CheckResult::error(Uuid::nil(), Uuid::nil(), "x"),
+            response_body_snippet: Some("{\"echo\":\"sk-live-secret\"}".into()),
+            response_headers_preview: vec![HeaderPreview {
+                name: "x-echo".into(),
+                value: "sk-live-secret".into(),
+            }],
+        };
+        scrub_secrets(&mut delivered, &["sk-live-secret".to_string()]);
+        assert_eq!(
+            delivered.response_body_snippet.as_deref(),
+            Some("{\"echo\":\"***\"}")
+        );
+        assert_eq!(delivered.response_headers_preview[0].value, "***");
+    }
+
+    #[test]
+    fn secret_values_skips_short_and_plain() {
+        use crate::domain::ResolvedVar;
+        let mut vars = crate::domain::VarMap::new();
+        vars.insert(
+            "k".into(),
+            ResolvedVar {
+                value: "sk-live-secret".into(),
+                is_secret: true,
+            },
+        );
+        vars.insert(
+            "short".into(),
+            ResolvedVar {
+                value: "ab".into(),
+                is_secret: true,
+            },
+        );
+        vars.insert(
+            "plain".into(),
+            ResolvedVar {
+                value: "api.example.com".into(),
+                is_secret: false,
+            },
+        );
+        let secrets = secret_values(&vars);
+        assert_eq!(secrets, vec!["sk-live-secret".to_string()]);
+    }
 
     fn assert_bad_request_with_field(err: AppError, expected_field: &str) {
         match err {

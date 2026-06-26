@@ -1457,6 +1457,19 @@ impl AppConfig {
                 "agent.control_plane_url is required when agent.enabled",
             ));
         }
+        // Resolved secrets and decrypted credentials ride the config-pull
+        // response, so the control-plane transport must be encrypted. Cleartext
+        // is permitted only when private targets are explicitly opted in (a
+        // trusted private-network or localhost control plane for dev/integration).
+        let url = url::Url::parse(agent.control_plane_url.trim())
+            .map_err(|_| err("agent.control_plane_url is not a valid URL"))?;
+        if url.scheme() != "https" && !self.security.allow_private_targets {
+            return Err(err(
+                "agent.control_plane_url must use https; cleartext is permitted \
+                 only with security.allow_private_targets for a trusted \
+                 private-network or localhost control plane",
+            ));
+        }
         if agent.region.trim().is_empty() {
             return Err(err("agent.region is required when agent.enabled"));
         }
@@ -1493,5 +1506,37 @@ mod tests {
     fn scheduler_enabled_defaults_true_and_parses_false() {
         assert!(scheduler_from("target_refresh_interval_secs = 30").enabled);
         assert!(!scheduler_from("enabled = false\ntarget_refresh_interval_secs = 30").enabled);
+    }
+
+    fn agent_cfg(url: &str) -> AppConfig {
+        let mut cfg = AppConfig::load().expect("load");
+        cfg.agent.enabled = true;
+        cfg.agent.control_plane_url = url.to_string();
+        cfg.agent.region = "eu-helsinki".into();
+        cfg.agent.token = SecretString::from("agent-token".to_string());
+        cfg
+    }
+
+    #[test]
+    fn agent_https_control_plane_passes() {
+        agent_cfg("https://app.example.com")
+            .validate_runtime()
+            .expect("https passes");
+    }
+
+    #[test]
+    fn agent_cleartext_control_plane_rejected() {
+        let err = agent_cfg("http://app.example.com")
+            .validate_runtime()
+            .expect_err("cleartext rejected");
+        assert!(err.to_string().contains("https"), "{err}");
+    }
+
+    #[test]
+    fn agent_cleartext_allowed_with_private_targets_optin() {
+        let mut cfg = agent_cfg("http://127.0.0.1:8080");
+        cfg.security.allow_private_targets = true;
+        cfg.validate_runtime()
+            .expect("cleartext ok when private opted in");
     }
 }

@@ -1,0 +1,169 @@
+{% extends "base.html" %}
+{% import "_register.html" as reg %}
+{% block title %}Variables · Uptimepage{% endblock %}
+{% block content %}
+<section class="space-y-6">
+  <header class="space-y-1">
+    <h1 class="page-title"><span class="page-title__prefix" aria-hidden="true">$</span>variables</h1>
+    <p class="text-sm text-muted">
+      Reusable values for your monitors. Reference one from any HTTP request
+      field as <code>&lbrace;&lbrace;key&rbrace;&rbrace;</code>. Edit it once and
+      every monitor that uses it picks up the change on its next check.
+    </p>
+    <p class="text-sm text-muted">
+      Mark a value <strong>secret</strong> to store an API key or token: it is
+      hidden after saving, allowed only in request headers and bodies, and
+      encrypted at rest when an encryption key is configured.
+    </p>
+  </header>
+
+  <form id="new-variable-form" novalidate class="sticker-card space-y-4 p-4">
+    <div class="grid gap-4 sm:grid-cols-[1fr_2fr]">
+      <label class="field-outline">
+        <span class="field-outline__label">Key</span>
+        <input id="variable-key" name="key" type="text" required
+               maxlength="63" pattern="[a-z][a-z0-9_]*"
+               placeholder="api_key"
+               autocomplete="off" spellcheck="false" class="w-full field font-mono">
+      </label>
+      <label class="field-outline">
+        <span class="field-outline__label">Value</span>
+        <input id="variable-value" name="value" type="text" required
+               placeholder="value"
+               autocomplete="off" spellcheck="false" class="w-full field font-mono">
+      </label>
+    </div>
+
+    <label class="flex items-center gap-2 text-sm text-body">
+      <input id="variable-secret" type="checkbox" class="h-4 w-4">
+      <span>secret: hide the value after saving and allow it only in headers &amp; bodies</span>
+    </label>
+
+    <div class="flex justify-end">
+      <button type="submit"
+              class="sticker-btn sticker-btn--primary px-3 py-1.5 text-sm font-medium">
+        add variable
+      </button>
+    </div>
+  </form>
+
+  <div id="variable-error" role="alert" aria-live="polite" class="hidden alert-card alert-card--error"></div>
+
+  <div id="variables-list" data-hx-loader
+       hx-get="/web/partials/settings/variables"
+       hx-trigger="load, variables:refresh from:body"
+       hx-swap="innerHTML"
+       class="sticker-card overflow-hidden">
+    {% call reg::loading("loading…") %}{% endcall %}
+  </div>
+
+  <script defer src="{{ "js/ui/api_form.js"|asset }}"></script>
+  <script>
+    (() => {
+      const form = document.getElementById('new-variable-form');
+      const banner = document.getElementById('variable-error');
+      const submitBtn = form.querySelector('button[type=submit]');
+      const keyInput = document.getElementById('variable-key');
+      const valueInput = document.getElementById('variable-value');
+      const secretInput = document.getElementById('variable-secret');
+
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        if (submitBtn.disabled) return;
+        window.smClearFormErrors(banner);
+        const key = keyInput.value.trim();
+        if (!/^[a-z][a-z0-9_]*$/.test(key)) {
+          window.smRenderClientError(banner, 'Key must start with a lowercase letter and use only a-z, 0-9 and underscore.');
+          keyInput.focus();
+          return;
+        }
+        if (valueInput.value.length === 0) {
+          window.smRenderClientError(banner, 'Value is required.');
+          valueInput.focus();
+          return;
+        }
+        const body = { key, value: valueInput.value, is_secret: secretInput.checked };
+        const label = submitBtn.textContent;
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'saving…';
+        let res, data;
+        try {
+          res = await fetch('/api/v1/variables', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'uptimepage' },
+            body: JSON.stringify(body),
+          });
+          data = await res.json().catch(() => null);
+        } catch (_) {
+          window.smRenderClientError(banner, 'Network error. Try again.');
+          return;
+        } finally {
+          submitBtn.disabled = false;
+          submitBtn.textContent = label;
+        }
+        if (res.ok) {
+          keyInput.value = '';
+          valueInput.value = '';
+          secretInput.checked = false;
+          keyInput.focus();
+          htmx.trigger('body', 'variables:refresh');
+        } else {
+          window.smRenderApiError(banner, data, res.status);
+        }
+      });
+
+      // Inline edit / rotate, delegated because the list is swapped by htmx.
+      function row(el) { return el.closest('[data-var-row]'); }
+      function setEditing(tr, on) {
+        const display = tr.querySelector('[data-var-display]');
+        const edit = tr.querySelector('[data-var-edit]');
+        if (!display || !edit) return;
+        display.hidden = on;
+        edit.hidden = !on;
+        if (on) { const i = edit.querySelector('[data-var-input]'); if (i) { i.focus(); i.select(); } }
+      }
+
+      document.addEventListener('click', async (e) => {
+        const startBtn = e.target.closest('[data-var-edit-start]');
+        if (startBtn) { setEditing(row(startBtn), true); return; }
+        const cancelBtn = e.target.closest('[data-var-cancel]');
+        if (cancelBtn) { setEditing(row(cancelBtn), false); return; }
+        const saveBtn = e.target.closest('[data-var-save]');
+        if (!saveBtn) return;
+
+        const tr = row(saveBtn);
+        const id = tr.dataset.varId;
+        const input = tr.querySelector('[data-var-input]');
+        const result = tr.querySelector('[data-var-result]');
+        const value = input.value;
+        if (value.length === 0) { result.textContent = 'value required'; result.className = 'text-xs flash-text flash-text--bad'; return; }
+        saveBtn.disabled = true;
+        const prev = saveBtn.textContent;
+        saveBtn.textContent = 'saving…';
+        let res, data;
+        try {
+          res = await fetch('/api/v1/variables/' + encodeURIComponent(id), {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'uptimepage' },
+            body: JSON.stringify({ value }),
+          });
+          data = await res.json().catch(() => null);
+        } catch (_) {
+          result.textContent = 'network error'; result.className = 'text-xs flash-text flash-text--bad';
+          saveBtn.disabled = false; saveBtn.textContent = prev;
+          return;
+        }
+        saveBtn.disabled = false;
+        saveBtn.textContent = prev;
+        if (res.ok) {
+          htmx.trigger('body', 'variables:refresh');
+        } else {
+          const msg = (data && data.error && data.error.message) ? data.error.message : 'update failed';
+          result.textContent = msg;
+          result.className = 'text-xs flash-text flash-text--bad';
+        }
+      });
+    })();
+  </script>
+</section>
+{% endblock %}

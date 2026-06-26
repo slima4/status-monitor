@@ -18,7 +18,7 @@ use crate::domain::{
     CreatedShare, MonitorShare, MonitorShareId, NewMonitorShare, OrgId, ResolvedShare, UserId,
 };
 use crate::error::{AppError, Result};
-use crate::security::{Cipher, is_envelope};
+use crate::security::{Cipher, open_str, seal_str};
 use crate::storage::locks::{advisory_xact_lock, org_lock_key};
 
 /// Result of [`MonitorShareStore::create`]. The store stays free of HTTP/plan
@@ -44,24 +44,15 @@ fn hash_token(raw: &str) -> String {
 /// envelope when a KEK is configured, plaintext otherwise (same fallback as
 /// target credentials).
 fn seal_token(raw: &str, cipher: Option<&Cipher>) -> Result<String> {
-    match cipher {
-        Some(c) => c
-            .encrypt(raw.as_bytes())
-            .map_err(|e| AppError::Other(anyhow::anyhow!("share token encryption failed: {e}"))),
-        None => Ok(raw.to_string()),
-    }
+    seal_str(raw, cipher)
+        .map_err(|e| AppError::Other(anyhow::anyhow!("share token encryption failed: {e}")))
 }
 
 /// Recover the raw token from `token_enc`. `None` when it is an envelope but no
 /// KEK is available to open it (e.g. the key was rotated out) — the owner then
 /// sees the link as un-copyable rather than a broken string.
 fn open_token(stored: &str, cipher: Option<&Cipher>) -> Option<String> {
-    if is_envelope(stored) {
-        let bytes = cipher?.decrypt(stored).ok()?;
-        String::from_utf8(bytes).ok()
-    } else {
-        Some(stored.to_string())
-    }
+    open_str(stored, cipher)
 }
 
 #[async_trait]

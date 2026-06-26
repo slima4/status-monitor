@@ -35,6 +35,9 @@ pub enum Scope {
     StatusPageRead,
     StatusPageWrite,
     StatusPageDelete,
+    /// Reusable org variables + the secret credential store.
+    VariablesRead,
+    VariablesWrite,
     /// Superset of every other scope.
     FullAccess,
 }
@@ -61,6 +64,8 @@ impl Scope {
             Scope::StatusPageRead => "status_page:read",
             Scope::StatusPageWrite => "status_page:write",
             Scope::StatusPageDelete => "status_page:delete",
+            Scope::VariablesRead => "variables:read",
+            Scope::VariablesWrite => "variables:write",
             Scope::FullAccess => "full_access",
         }
     }
@@ -86,6 +91,8 @@ impl Scope {
             "status_page:read" => Scope::StatusPageRead,
             "status_page:write" => Scope::StatusPageWrite,
             "status_page:delete" => Scope::StatusPageDelete,
+            "variables:read" => Scope::VariablesRead,
+            "variables:write" => Scope::VariablesWrite,
             "full_access" => Scope::FullAccess,
             _ => return None,
         })
@@ -101,6 +108,7 @@ impl Scope {
             Scope::OnCallRead => Scope::OnCallWrite,
             Scope::MaintenanceRead => Scope::MaintenanceWrite,
             Scope::StatusPageRead => Scope::StatusPageWrite,
+            Scope::VariablesRead => Scope::VariablesWrite,
             _ => return None,
         })
     }
@@ -203,6 +211,8 @@ mod tests {
             "status_page:read",
             "status_page:write",
             "status_page:delete",
+            "variables:read",
+            "variables:write",
             "full_access",
         ] {
             assert_eq!(Scope::parse(raw).unwrap().as_str(), raw);

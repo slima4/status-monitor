@@ -135,6 +135,16 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
                 .delete(handlers::maintenance::delete_maintenance),
         )
         .route(
+            "/variables",
+            get(handlers::variables::list).post(handlers::variables::create),
+        )
+        .route(
+            "/variables/{id}",
+            get(handlers::variables::get)
+                .patch(handlers::variables::update)
+                .delete(handlers::variables::delete),
+        )
+        .route(
             "/notification-channels",
             get(handlers::notification_channels::list)
                 .post(handlers::notification_channels::create),

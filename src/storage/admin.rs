@@ -270,24 +270,43 @@ impl AdminRepo {
     /// leaves `updated_at` untouched — so an agent never serves stale config off
     /// a `304`. Still no decrypt: it hashes the stored (encrypted) ciphertext.
     pub async fn region_pull_etag(&self, region: &str) -> Result<String> {
-        let row: (i64, Option<chrono::DateTime<chrono::Utc>>, Option<String>) = sqlx::query_as(
+        // The fourth column digests each region org's variables, so a variable
+        // edit (which never touches targets.updated_at) still bumps the etag.
+        let row: (
+            i64,
+            Option<chrono::DateTime<chrono::Utc>>,
+            Option<String>,
+            Option<String>,
+        ) = sqlx::query_as(
             "SELECT count(*)::bigint, max(t.updated_at), \
-                    md5(coalesce(string_agg(t.id::text || ':' || md5(t.check_spec::text), \
-                                            ',' ORDER BY t.id), '')) \
-             FROM target_regions tr \
-             JOIN targets t ON t.id = tr.target_id \
-             JOIN organizations o ON o.id = t.org_id \
-             JOIN regions rg ON rg.id = tr.region \
-             WHERE tr.region = $1 AND t.enabled = true AND o.deleted_at IS NULL \
-               AND rg.enabled",
+                        md5(coalesce(string_agg(t.id::text || ':' || md5(t.check_spec::text), \
+                                                ',' ORDER BY t.id), '')), \
+                        (SELECT md5(coalesce(string_agg( \
+                                 v.id::text || ':' || extract(epoch from v.updated_at)::text, \
+                                 ',' ORDER BY v.id), '')) \
+                         FROM org_variables v \
+                         WHERE v.org_id IN ( \
+                            SELECT DISTINCT t2.org_id FROM target_regions tr2 \
+                            JOIN targets t2 ON t2.id = tr2.target_id \
+                            WHERE tr2.region = $1 AND t2.enabled = true)) \
+                 FROM target_regions tr \
+                 JOIN targets t ON t.id = tr.target_id \
+                 JOIN organizations o ON o.id = t.org_id \
+                 JOIN regions rg ON rg.id = tr.region \
+                 WHERE tr.region = $1 AND t.enabled = true AND o.deleted_at IS NULL \
+                   AND rg.enabled",
         )
         .bind(region)
         .fetch_one(&self.pool)
         .await
         .context("admin: region pull etag")?;
-        let (count, max_updated, digest) = row;
+        let (count, max_updated, digest, var_digest) = row;
         let ts = max_updated.map(|d| d.timestamp_millis()).unwrap_or(0);
-        Ok(format!("\"{count}-{ts}-{}\"", digest.unwrap_or_default()))
+        Ok(format!(
+            "\"{count}-{ts}-{}-{}\"",
+            digest.unwrap_or_default(),
+            var_digest.unwrap_or_default()
+        ))
     }
 
     /// Enabled targets assigned to one region (via `target_regions`), in live
@@ -311,7 +330,71 @@ impl AdminRepo {
             .fetch_all(&self.pool)
             .await
             .context("admin: list enabled targets for region")?;
-        decode_targets_or_err(rows, self.cipher.as_deref())
+        let decoded = decode_targets_or_err(rows, self.cipher.as_deref())?;
+        self.resolve_target_variables(decoded).await
+    }
+
+    /// Substitute each HTTP target's `{{var}}` references from its org's variables
+    /// so the agent receives a ready-to-probe spec and never needs the database.
+    /// A target whose variables can't resolve (missing/policy/un-openable secret)
+    /// is dropped, so one broken target never blinds the rest of the region.
+    async fn resolve_target_variables(
+        &self,
+        targets: Vec<(OrgId, Target)>,
+    ) -> Result<Vec<(OrgId, Target)>> {
+        use std::collections::{HashMap, HashSet};
+
+        use crate::domain::{CheckSpec, VarMap};
+        use crate::storage::variables::{PgVariableStore, VariableStore};
+        use crate::worker::interpolate::{resolve_http_spec, uses_vars};
+
+        fn http_uses_vars(spec: &CheckSpec) -> bool {
+            matches!(spec, CheckSpec::Http(h) if uses_vars(h))
+        }
+
+        let orgs: HashSet<OrgId> = targets
+            .iter()
+            .filter(|(_, t)| http_uses_vars(&t.check))
+            .map(|(o, _)| *o)
+            .collect();
+        if orgs.is_empty() {
+            return Ok(targets);
+        }
+
+        // One map error skips that org's var-using targets, not the whole pull.
+        let store = PgVariableStore::new(self.pool.clone(), self.cipher.clone());
+        let mut maps: HashMap<OrgId, VarMap> = HashMap::with_capacity(orgs.len());
+        for org in orgs {
+            match store.resolve_map(org).await {
+                Ok(map) => {
+                    maps.insert(org, map);
+                }
+                Err(err) => {
+                    tracing::warn!(org = %org.0, %err, "skipping org variables: resolve_map failed");
+                }
+            }
+        }
+
+        let mut out = Vec::with_capacity(targets.len());
+        for (org, mut target) in targets {
+            if let CheckSpec::Http(http) = &target.check
+                && uses_vars(http)
+            {
+                let Some(map) = maps.get(&org) else {
+                    tracing::warn!(target_id = %target.id, "dropping target: org variables unavailable");
+                    continue;
+                };
+                match resolve_http_spec(http, map) {
+                    Ok(resolved) => target.check = CheckSpec::Http(resolved),
+                    Err(err) => {
+                        tracing::warn!(target_id = %target.id, %err, "dropping target: variable resolution failed");
+                        continue;
+                    }
+                }
+            }
+            out.push((org, target));
+        }
+        Ok(out)
     }
 
     /// Map of enabled `target_id -> owning org` for one region. Ingest uses it

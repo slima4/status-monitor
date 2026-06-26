@@ -1,0 +1,64 @@
+{% if variables.is_empty() %}
+<p class="px-4 py-6 font-mono text-xs text-quiet"># no variables yet. add one above and reference it from a monitor as <code>&lbrace;&lbrace;key&rbrace;&rbrace;</code></p>
+{% else %}
+<table class="w-full text-left text-sm">
+  <thead class="table-head bg-[color:var(--theme-surface-sunk)]">
+    <tr>
+      <th class="px-4 py-2">Key</th>
+      <th class="px-4 py-2">Value</th>
+      <th class="px-4 py-2">Used by</th>
+      <th class="px-4 py-2">Updated</th>
+      <th class="px-4 py-2"></th>
+    </tr>
+  </thead>
+  <tbody class="divide-y divide-[color:var(--theme-line)]">
+    {% for v in variables %}
+    <tr data-var-row data-var-id="{{ v.id }}" data-var-key="{{ v.key }}">
+      <td class="px-4 py-2 align-top font-mono text-body">
+        <span class="inline-flex items-center gap-2">&lbrace;&lbrace;{{ v.key }}&rbrace;&rbrace;{% if v.is_secret %}<span class="status-badge status-badge--tag" title="hidden after saving and never shown again">secret</span>{% endif %}</span>
+      </td>
+      <td class="px-4 py-2 align-top">
+        <div data-var-display class="font-mono text-xs">
+          {% if v.is_secret %}<span class="text-quiet" aria-label="hidden secret value">••••••••</span>{% else %}<span class="text-body break-all">{{ v.value }}</span>{% endif %}
+        </div>
+        <div data-var-edit hidden class="flex items-center gap-2">
+          <input data-var-input type="text" autocomplete="off" spellcheck="false"
+                 {% if v.is_secret %}placeholder="enter a new secret value"{% endif %}
+                 value="{% if !v.is_secret %}{{ v.value }}{% endif %}"
+                 class="w-full max-w-xs field font-mono text-xs"
+                 aria-label="new value for {{ v.key }}">
+          <button type="button" data-var-save class="sticker-btn px-2.5 py-1 text-xs font-medium">save</button>
+          <button type="button" data-var-cancel class="row-link font-mono text-xs">cancel</button>
+        </div>
+      </td>
+      <td class="px-4 py-2 align-top text-body tabular-nums">
+        {% if v.used_by > 0 %}<span title="referenced by {{ v.used_by }} monitor(s)">{{ v.used_by }}</span>{% else %}<span class="text-quiet">—</span>{% endif %}
+      </td>
+      <td class="px-4 py-2 align-top text-body tabular-nums"><time datetime="{{ v.updated|iso_ts }}" data-tz="exact">{{ v.updated|human_ts }}</time></td>
+      <td class="px-4 py-2">
+        <div class="flex items-center justify-end gap-3">
+          <span data-var-result class="text-xs"></span>
+          <button type="button" data-var-edit-start
+                  class="row-link font-mono" title="{% if v.is_secret %}rotate the secret value{% else %}edit the value{% endif %}">{% if v.is_secret %}rotate{% else %}edit{% endif %}</button>
+          {% if v.used_by > 0 %}
+          <span class="font-mono text-xs text-quiet" aria-disabled="true"
+                title="referenced by {{ v.used_by }} monitor(s); remove the references first">delete</span>
+          {% else %}
+          <button type="button"
+                  hx-delete="/api/v1/variables/{{ v.id }}"
+                  hx-headers='{"X-Requested-With":"uptimepage"}'
+                  hx-on::after-request="if(event.detail.successful){htmx.trigger('body','variables:refresh')}"
+                  data-confirm-modal
+                  data-confirm-title="Delete variable?"
+                  data-confirm-body="&lbrace;&lbrace;{{ v.key }}&rbrace;&rbrace; is removed permanently. Monitors that later reference this key will fail to resolve until it is recreated."
+                  data-confirm-label="delete variable"
+                  data-confirm-danger
+                  class="row-link row-link--danger font-mono">delete</button>
+          {% endif %}
+        </div>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}

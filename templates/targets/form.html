@@ -374,6 +374,25 @@
           </div>
           <button type="button" data-header-add
                   class="btn-ghost px-3 text-sm">+ add header</button>
+
+          <div class="border-t border-[color:var(--theme-line)] pt-2" data-var-auth-picker hidden>
+            <span class="block text-xs text-muted">Or send a stored <a href="/settings/variables" target="_blank" rel="noopener" class="underline">secret variable</a> as an auth header. The monitor keeps only a <code>&lbrace;&lbrace;key&rbrace;&rbrace;</code> reference and resolves the value at probe time.</span>
+            <div class="mt-2 flex flex-wrap items-end gap-2">
+              <label class="field-outline">
+                <span class="field-outline__label">Variable</span>
+                <select data-var-auth-select aria-label="Secret variable" class="field font-mono"></select>
+              </label>
+              <label class="field-outline">
+                <span class="field-outline__label">Send as</span>
+                <select data-var-auth-scheme aria-label="Auth scheme" class="field font-mono">
+                  <option value="bearer">Authorization: Bearer</option>
+                  <option value="apikey">x-api-key</option>
+                </select>
+              </label>
+              <button type="button" data-var-auth-add
+                      class="sticker-btn px-3 py-1.5 text-sm font-medium">add header</button>
+            </div>
+          </div>
         </div>
 
         <div class="space-y-2"
@@ -670,6 +689,7 @@
 <script defer src="{{ "js/ui/api_form.js"|asset }}"></script>
 <script defer src="{{ "js/ui/auth_field.js"|asset }}"></script>
 <script defer src="{{ "js/ui/header_rows.js"|asset }}"></script>
+<script defer src="{{ "js/ui/variable_helpers.js"|asset }}"></script>
 <script defer src="{{ "js/ui/tag_chip_input.js"|asset }}"></script>
 <script defer src="{{ "js/ui/group_select.js"|asset }}"></script>
 <script defer src="{{ "js/ui/collapsible.js"|asset }}"></script>

@@ -131,6 +131,11 @@ pub fn routes(state: AppState) -> Router {
             "/web/partials/settings/notifications",
             get(views::notification_channels::list_partial),
         )
+        .route("/settings/variables", get(views::variables::index))
+        .route(
+            "/web/partials/settings/variables",
+            get(views::variables::list_partial),
+        )
         .route(
             "/web/partials/settings/sessions",
             get(views::auth::settings::sessions_partial),

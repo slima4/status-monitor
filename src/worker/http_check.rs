@@ -486,9 +486,14 @@ fn build_request(
 
     let bodyless = body.is_none();
     for (k, v) in &check.headers {
-        // Drop a caller-set Authorization header on a cross-origin hop for
-        // the same reason the configured credentials are dropped.
-        if !include_auth && k.eq_ignore_ascii_case("authorization") {
+        // On a cross-origin hop, drop the sensitive headers (auth, cookies, API
+        // keys) so a credential — configured or resolved from a secret variable —
+        // can't follow a hostile `Location` to a different origin.
+        if !include_auth
+            && PROBE_REDACT_HEADERS
+                .iter()
+                .any(|s| k.eq_ignore_ascii_case(s))
+        {
             continue;
         }
         // After a 301/302/303 degrades to a bodyless GET, a caller-set

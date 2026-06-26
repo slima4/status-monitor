@@ -66,6 +66,11 @@ pub mod codes {
     pub const INVALID_ALERT_CONFIG: &str = "INVALID_ALERT_CONFIG";
     pub const INVALID_REGION_POLICY: &str = "INVALID_REGION_POLICY";
     pub const INVALID_CONFIG: &str = "INVALID_CONFIG";
+    pub const UNRESOLVED_VARIABLE: &str = "UNRESOLVED_VARIABLE";
+    pub const INVALID_VARIABLE_KEY: &str = "INVALID_VARIABLE_KEY";
+    pub const VARIABLE_KEY_EXISTS: &str = "VARIABLE_KEY_EXISTS";
+    pub const VARIABLE_IN_USE: &str = "VARIABLE_IN_USE";
+    pub const VARIABLE_NOT_FOUND: &str = "VARIABLE_NOT_FOUND";
     pub const EMPTY_NAME: &str = "EMPTY_NAME";
     pub const INVALID_NAME: &str = "INVALID_NAME";
     pub const REDACTION_SENTINEL: &str = "REDACTION_SENTINEL";

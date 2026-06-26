@@ -21,6 +21,7 @@ pub mod status_page;
 pub mod subscriber;
 pub mod target;
 pub mod user;
+pub mod variable;
 pub mod word_lists;
 pub mod write_source;
 
@@ -84,5 +85,9 @@ pub use status_page::{
 pub use subscriber::{NewSubscriber, Subscriber, SubscriberChannel};
 pub use target::{NewTarget, RegionIncidentPolicy, Target, TargetUpdate};
 pub use user::{AppTheme, User, UserId};
+pub use variable::{
+    MAX_VAR_KEY_LEN, NewVariable, ResolvedVar, VarKeyError, VarMap, Variable, VariableId,
+    validate_var_key,
+};
 pub use word_lists::generate_signup_slug;
 pub use write_source::WriteSource;

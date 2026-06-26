@@ -25,7 +25,8 @@ pub use auth::authz::{
     Authorized, ChannelsDelete, ChannelsExecute, ChannelsRead, ChannelsWrite, IncidentsRead,
     IncidentsWrite, MaintenanceDelete, MaintenanceRead, MaintenanceWrite, OnCallRead, OnCallWrite,
     OwnerAuthorized, RequestSource, StatusPageDelete, StatusPageRead, StatusPageWrite,
-    TargetsDelete, TargetsExecute, TargetsRead, TargetsWrite, TokenScopes,
+    TargetsDelete, TargetsExecute, TargetsRead, TargetsWrite, TokenScopes, VariablesRead,
+    VariablesWrite,
 };
 pub use auth::operator::OperatorAuth;
 pub use auth::{AuthedBrowser, CurrentOrg, CurrentUser, Session, User};

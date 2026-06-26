@@ -231,6 +231,10 @@ pub struct AppState {
     /// `AppState::new`'s signature stays unchanged: a Pg store when tenancy is
     /// live, an in-memory one for no-DB fixtures.
     pub monitor_share_store: Arc<dyn crate::storage::MonitorShareStore>,
+    /// Reusable org variables + the secret credential store. Secret values are
+    /// sealed with the KEK and resolved into monitor request fields worker-side.
+    /// Built from `db` so `AppState::new`'s signature stays unchanged.
+    pub variable_store: Arc<dyn crate::storage::VariableStore>,
     /// Single-use Telegram link codes. Built from `db` so `AppState::new`'s
     /// signature stays unchanged.
     pub channel_link_code_store: Arc<dyn crate::storage::ChannelLinkCodeStore>,
@@ -428,6 +432,10 @@ impl AppState {
             )),
             None => Arc::new(crate::storage::InMemoryMonitorShareStore::new()),
         };
+        let variable_store: Arc<dyn crate::storage::VariableStore> = match db.clone() {
+            Some(pool) => Arc::new(crate::storage::PgVariableStore::new(pool, cipher.clone())),
+            None => Arc::new(crate::storage::InMemoryVariableStore::new()),
+        };
         let page_asset_store: Arc<dyn crate::storage::PageAssetStore> = match db.clone() {
             Some(pool) => Arc::new(crate::storage::PgPageAssetStore::new(pool)),
             None => Arc::new(crate::storage::InMemoryPageAssetStore::new()),
@@ -484,6 +492,7 @@ impl AppState {
             status_page_store,
             page_asset_store,
             monitor_share_store,
+            variable_store,
             channel_link_code_store,
             telegram_send_budget: Arc::new(crate::telegram::TelegramSendBudget::new()),
             incident_narration_store,

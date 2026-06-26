@@ -29,6 +29,7 @@ pub mod subscriber_maintenance;
 pub mod subscribers;
 pub mod traits;
 pub mod users;
+pub mod variables;
 
 pub use admin::AdminRepo;
 pub use channel_link_codes::{
@@ -87,3 +88,4 @@ pub use traits::{
     ClampedRange, RegionOption, ResultSink, ResultsStore, TargetFilter, TargetSort, TargetStore,
     TimeRange, UptimeStats,
 };
+pub use variables::{CreateVariableOutcome, InMemoryVariableStore, PgVariableStore, VariableStore};
