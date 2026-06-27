@@ -1167,8 +1167,9 @@
         border-color: var(--theme-line);
         font-family: var(--font-mono);
         box-shadow: var(--theme-shadow-btn);
-        transition: background-color 120ms ease, border-color 120ms ease;
+        transition: background-color 120ms ease, border-color 120ms ease, scale 90ms ease;
     }
+    .sticker-btn:not(:disabled):active { scale: 0.96; }
     .sticker-btn--primary::before,
     .sticker-btn--accent::before,
     .sticker-btn--danger::before  { content: "["; opacity: 0.7; margin-right: 0.3em; }
@@ -1207,11 +1208,15 @@
         @apply rounded-sm border;
         border-color: var(--theme-line);
         font-family: var(--font-mono);
-        transition: background-color 120ms ease, border-color 120ms ease;
+        transition: background-color 120ms ease, border-color 120ms ease, scale 90ms ease;
     }
     .btn-ghost:hover {
         background: var(--theme-surface-sunk);
         border-color: var(--theme-ink);
+    }
+    .btn-ghost:active { scale: 0.96; }
+    @media (prefers-reduced-motion: reduce) {
+        .sticker-btn:active, .btn-ghost:active { scale: 1; }
     }
     .btn-ghost--danger {
         border-color: var(--theme-state-bad-line-soft);
@@ -2193,7 +2198,11 @@
     .monitor-form-summary dd {
         @apply min-w-0 flex-1 truncate;
         color: var(--theme-text);
+        font-variant-numeric: tabular-nums;
+        font-feature-settings: "tnum" 1, "lnum" 1;
     }
+    /* Multi-line helper hints: drop last-line orphans without markup churn. */
+    #check-form .text-muted { text-wrap: pretty; }
     /* Check-type chooser: 5 cards at the top of /targets/new and edit.
        Hides the radio (visual selection comes from :has(input:checked)). */
     .check-type-cards { @apply grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5; }
