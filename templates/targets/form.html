@@ -1,13 +1,6 @@
 {% extends "base.html" %}
 {% import "_register.html" as reg %}
 {% block title %}{% if form.mode == "create" %}New monitor{% else %}Edit monitor{% endif %} · Uptimepage{% endblock %}
-{% macro test_now(kind) %}
-          <button type="button" data-test-now aria-describedby="test-hint-{{ kind }}"
-                  class="sticker-btn sticker-btn--accent px-4 py-2 text-sm font-medium inline-flex items-center gap-1.5">
-            <span aria-hidden="true">▶</span> test now
-          </button>
-          <span id="test-hint-{{ kind }}" class="text-xs text-muted">Runs the check once without saving.</span>
-{% endmacro %}
 {% block content %}
 <section class="space-y-6">
   <form id="check-form"
@@ -35,27 +28,32 @@
     <div id="form-errors" role="alert" aria-live="polite"
          class="hidden alert-card alert-card--error"></div>
 
-    <div class="monitor-form-grid">
-    <aside class="monitor-form-types" aria-label="Check type">
-      <fieldset class="space-y-2">
-        <div class="check-type-cards check-type-cards--stack">
-          {% call reg::chooser_card("data-check-card", "check_type", "http", form.check_type == "http", "http", "URL / API endpoint") %}{% endcall %}
-          {% call reg::chooser_card("data-check-card", "check_type", "tcp", form.check_type == "tcp", "tcp", "host : port reachable") %}{% endcall %}
-          {% call reg::chooser_card("data-check-card", "check_type", "dns", form.check_type == "dns", "dns", "record resolves") %}{% endcall %}
-          {% call reg::chooser_card("data-check-card", "check_type", "tls_cert", form.check_type == "tls_cert", "tls cert", "expiry + chain") %}{% endcall %}
-          {% call reg::chooser_card("data-check-card", "check_type", "domain_expiry", form.check_type == "domain_expiry", "domain", "registration expiry") %}{% endcall %}
-        </div>
-      </fieldset>
-    </aside>
-
-    <div class="monitor-form-body space-y-6">
-
     <div class="space-y-6">
+
+    {% if form.mode == "create" %}
+    <ol class="wizard-steps" data-wizard-stepper aria-label="Progress">
+      <li><button type="button" class="wizard-step" data-step-tab="1">target</button></li>
+      <li><button type="button" class="wizard-step" data-step-tab="2">schedule &amp; alerts</button></li>
+    </ol>
+    {% endif %}
+
+    <section data-step="1" class="space-y-6">
+    <fieldset class="space-y-3">
+      <legend class="panel-label">what to watch</legend>
+      <div class="check-type-cards">
+        {% call reg::chooser_card("data-check-card", "check_type", "http", form.check_type == "http", "http", "URL / API endpoint") %}{% endcall %}
+        {% call reg::chooser_card("data-check-card", "check_type", "tcp", form.check_type == "tcp", "tcp", "host : port reachable") %}{% endcall %}
+        {% call reg::chooser_card("data-check-card", "check_type", "dns", form.check_type == "dns", "dns", "record resolves") %}{% endcall %}
+        {% call reg::chooser_card("data-check-card", "check_type", "tls_cert", form.check_type == "tls_cert", "tls cert", "expiry + chain") %}{% endcall %}
+        {% call reg::chooser_card("data-check-card", "check_type", "domain_expiry", form.check_type == "domain_expiry", "domain", "registration expiry") %}{% endcall %}
+      </div>
+    </fieldset>
+
     <fieldset data-variant="http"
               class="sticker-card form-card{% if form.check_type != "http" %} hidden{% endif %}">
       <legend>http check</legend>
-      <div class="clear-both grid items-start gap-x-4 gap-y-5 p-5 sm:grid-cols-2">
-      <div class="sm:col-span-2">
+      <div class="clear-both space-y-5 p-5">
+      <div>
         <div class="flex flex-wrap gap-3">
           <label class="field-outline flex-1 min-w-[16rem]">
             <span class="field-outline__label">URL</span>
@@ -79,6 +77,7 @@
         <span class="mt-1 block text-xs text-muted">HEAD is the cheapest reachability probe; use GET when the response body matters.</span>
       </div>
       <div>
+        <span class="mb-1.5 block text-xs text-muted">Expected status</span>
         <div class="grid grid-cols-2 items-center gap-2">
           <div class="sm-rail sm-rail--fill" role="radiogroup" aria-label="Expected status preset" data-status-presets>
             <label class="sm-rail__seg">
@@ -98,11 +97,123 @@
         <span class="mt-1 block text-xs text-muted">
           One code (<code>200</code>), a range (<code>200-299</code>), or a list (<code>200, 201, 204</code>).
         </span>
-        <div class="mt-3 flex flex-wrap items-center gap-3">
-          {% call test_now("http") %}{% endcall %}
+      </div>
+
+      <div class="border-t border-[color:var(--theme-line)] pt-4" data-collapsible>
+        <button type="button" data-collapse-toggle aria-expanded="{% if form.mode == "edit" %}true{% else %}false{% endif %}"
+                aria-controls="advanced-http-body" aria-describedby="advanced-http-hint"
+                class="group panel-label inline-flex cursor-pointer items-center gap-1.5 border-0 bg-transparent p-0 hover:text-body">
+          request details
+          <span data-collapse-chevron aria-hidden="true"
+                class="transition-transform group-hover:text-body motion-reduce:transition-none{% if form.mode == "edit" %} rotate-180{% endif %}">▾</span>
+        </button>
+        <button type="button" data-collapse-toggle tabindex="-1" aria-hidden="true"
+                class="group mt-1 block w-full cursor-pointer border-0 bg-transparent p-0 text-left{% if form.mode == "edit" %} hidden{% endif %}">
+          <span id="advanced-http-hint" data-collapse-hint class="text-xs text-muted group-hover:text-body">headers, body, auth, tls</span>
+        </button>
+        <div id="advanced-http-body" class="mt-3 space-y-5{% if form.mode == "create" %} hidden{% endif %}">
+          <div class="space-y-3">
+            <span class="flag-label block">request</span>
+            <div class="grid items-start gap-x-4 gap-y-5 sm:grid-cols-2">
+              <div>
+                <div class="flex flex-wrap gap-3">
+                  <label class="field-outline w-36">
+                    <span class="field-outline__label">Timeout (ms)</span>
+                    <input name="http_timeout_ms" type="number" min="100" max="60000" value="{{ form.http.timeout_ms }}"
+                           class="w-full field">
+                  </label>
+                  <label class="field-outline w-36">
+                    <span class="field-outline__label">Max redirects</span>
+                    <input name="http_max_redirects" type="number" min="0" max="10" value="{{ form.http.max_redirects }}"
+                           class="w-full field">
+                  </label>
+                </div>
+                <span class="mt-1 block text-xs text-muted">Timeout caps how long a check waits before it counts as failed; redirects caps the hops followed — 0 treats any redirect as the final answer.</span>
+              </div>
+              <div>
+                <div class="flex flex-wrap gap-1.5">
+                  <label class="scope-token">
+                    <input name="http_follow_redirects" type="checkbox" class="sr-only"{% if form.http.follow_redirects %} checked{% endif %}>
+                    follow-redirects
+                  </label>
+                  <label class="scope-token">
+                    <input name="http_verify_tls" type="checkbox" class="sr-only"{% if form.http.verify_tls %} checked{% endif %}>
+                    verify-tls
+                  </label>
+                </div>
+                <span class="mt-1 block text-xs text-muted">follow-redirects chases 3xx to the final page; verify-tls fails the check on invalid or self-signed certificates — switch it off only for internal endpoints.</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="space-y-2">
+            <span class="flag-label block">headers</span>
+            <span class="block text-xs text-muted">Extra request headers, e.g. <code>Accept: application/json</code> or an API key.</span>
+            <div data-header-rows class="space-y-2">
+              {% for h in form.http.headers %}
+              <div data-header-row class="flex flex-wrap items-center gap-2">
+                <input type="text" name="http_header_key" value="{{ h.name }}"
+                       placeholder="Header name" aria-label="Header name"
+                       autocomplete="off" spellcheck="false" class="flex-1 min-w-[10rem] field font-mono">
+                <input type="text" name="http_header_value" value="{{ h.value }}"
+                       placeholder="Value" aria-label="Header value"
+                       autocomplete="off" spellcheck="false" class="flex-[2] min-w-[14rem] field font-mono">
+                <button type="button" data-header-remove
+                        class="btn-ghost px-2 text-sm" aria-label="Remove header">×</button>
+              </div>
+              {% endfor %}
+            </div>
+            <button type="button" data-header-add
+                    class="btn-ghost px-3 text-sm">+ add header</button>
+            <p data-header-secret-hint hidden class="mt-1 text-xs text-state-warn-strong"></p>
+
+            <div class="border-t border-[color:var(--theme-line)] pt-2" data-var-auth-picker hidden>
+              <span class="block text-xs text-muted">Reuse a <a href="/settings/variables" target="_blank" rel="noopener" class="underline">secret variable</a> saved in your org across monitors. Pick one to add an auth header; the monitor keeps only a <code>&lbrace;&lbrace;key&rbrace;&rbrace;</code> reference and resolves it at probe time.</span>
+              <div class="mt-2 flex flex-wrap items-end gap-2">
+                <label class="field-outline">
+                  <span class="field-outline__label">Variable</span>
+                  <select data-var-auth-select aria-label="Secret variable" class="field font-mono"></select>
+                </label>
+                <label class="field-outline">
+                  <span class="field-outline__label">Send as</span>
+                  <select data-var-auth-scheme aria-label="Auth scheme" class="field font-mono">
+                    <option value="bearer">Authorization: Bearer</option>
+                    <option value="apikey">x-api-key</option>
+                  </select>
+                </label>
+                <button type="button" data-var-auth-add
+                        class="sticker-btn px-3 py-1.5 text-sm font-medium">add header</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="space-y-3">
+            <span class="flag-label block">optional</span>
+            <div class="flex flex-wrap gap-1.5" role="group" aria-label="Optional request fields">
+              <button type="button" class="scope-token" data-optional-toggle="body-match"
+                      aria-controls="opt-body-match" aria-expanded="{% if !form.http.expected_body_contains.is_empty() %}true{% else %}false{% endif %}">body match</button>
+              <button type="button" class="scope-token" data-optional-toggle="request-body"
+                      aria-controls="opt-request-body" aria-expanded="{% if !form.http.body.is_empty() %}true{% else %}false{% endif %}">request body</button>
+            </div>
+
+            <label id="opt-body-match" data-optional-field="body-match"
+                   class="field-outline{% if form.http.expected_body_contains.is_empty() %} hidden{% endif %}">
+              <span class="field-outline__label">Expected body contains</span>
+              <input name="http_expected_body_contains" type="text" value="{{ form.http.expected_body_contains }}"
+                     placeholder='&quot;status&quot;:&quot;ok&quot;'
+                     autocomplete="off" spellcheck="false" class="w-full field font-mono">
+              <span class="mt-1 block text-xs text-muted">Substring the response body must include, e.g. <code>"status":"ok"</code> — fails the check when missing.</span>
+            </label>
+
+            <label id="opt-request-body" data-optional-field="request-body"
+                   class="field-outline{% if form.http.body.is_empty() %} hidden{% endif %}">
+              <span class="field-outline__label">Request body</span>
+              <textarea name="http_body" rows="3" placeholder='{&quot;ping&quot;:true}' autocomplete="off" spellcheck="false" class="w-full field font-mono">{{ form.http.body }}</textarea>
+              <span class="mt-1 block text-xs text-muted">Sent with POST / PUT / PATCH — pair it with a <code>Content-Type</code> header above.</span>
+            </label>
+          </div>
         </div>
       </div>
-      <div data-test-result role="status" class="hidden sm:col-span-2"></div>
       </div>
     </fieldset>
 
@@ -131,10 +242,6 @@
                  class="w-full field">
         </label>
       </div>
-      <div class="flex flex-wrap items-center gap-3 pt-1">
-        {% call test_now("tcp") %}{% endcall %}
-      </div>
-      <div data-test-result role="status" class="hidden"></div>
       </div>
     </fieldset>
 
@@ -189,10 +296,6 @@
                  class="w-full field">
         </label>
       </div>
-      <div class="flex flex-wrap items-center gap-3 pt-1">
-        {% call test_now("dns") %}{% endcall %}
-      </div>
-      <div data-test-result role="status" class="hidden"></div>
       </div>
     </fieldset>
 
@@ -242,10 +345,6 @@
           </label>
         </div>
       </fieldset>
-      <div class="flex flex-wrap items-center gap-3 pt-1">
-        {% call test_now("tls") %}{% endcall %}
-      </div>
-      <div data-test-result role="status" class="hidden"></div>
       </div>
     </fieldset>
 
@@ -282,222 +381,14 @@
           </label>
         </div>
       </fieldset>
-      <div class="flex flex-wrap items-center gap-3 pt-1">
-        {% call test_now("domain") %}{% endcall %}
-      </div>
-      <div data-test-result role="status" class="hidden"></div>
       </div>
     </fieldset>
-    </div>
+    </section>
 
-    <fieldset class="sticker-card form-card{% if form.check_type != "http" %} hidden{% endif %}"
-              data-variant="http-advanced" data-collapsible>
-      <legend>
-        <button type="button" data-collapse-toggle aria-expanded="false"
-                aria-controls="advanced-http-body" aria-describedby="advanced-http-hint"
-                class="group inline-flex cursor-pointer items-center gap-1.5 border-0 bg-transparent p-0">
-          ADVANCED HTTP
-          <span data-collapse-chevron aria-hidden="true"
-                class="text-base transition-transform group-hover:text-body motion-reduce:transition-none">▾</span>
-        </button>
-      </legend>
-      <div class="clear-both space-y-2 px-5 py-3">
-      <button type="button" data-collapse-toggle tabindex="-1" aria-hidden="true"
-              class="group block w-full cursor-pointer border-0 bg-transparent p-0 text-left">
-        <span id="advanced-http-hint" data-collapse-hint class="text-xs text-muted group-hover:text-body">headers, body, auth, tls</span>
-      </button>
-      <div id="advanced-http-body" class="hidden space-y-5">
-        <div class="space-y-3">
-          <span class="flag-label block">request</span>
-          <div class="grid items-start gap-x-4 gap-y-5 sm:grid-cols-2">
-            <div>
-              <div class="flex flex-wrap gap-3">
-                <label class="field-outline w-36">
-                  <span class="field-outline__label">Timeout (ms)</span>
-                  <input name="http_timeout_ms" type="number" min="100" max="60000" value="{{ form.http.timeout_ms }}"
-                         class="w-full field">
-                </label>
-                <label class="field-outline w-36">
-                  <span class="field-outline__label">Max redirects</span>
-                  <input name="http_max_redirects" type="number" min="0" max="10" value="{{ form.http.max_redirects }}"
-                         class="w-full field">
-                </label>
-              </div>
-              <span class="mt-1 block text-xs text-muted">Timeout caps how long a check waits before it counts as failed; redirects caps the hops followed — 0 treats any redirect as the final answer.</span>
-            </div>
-            <div>
-              <div class="flex flex-wrap gap-1.5">
-                <label class="scope-token">
-                  <input name="http_follow_redirects" type="checkbox" class="sr-only"{% if form.http.follow_redirects %} checked{% endif %}>
-                  follow-redirects
-                </label>
-                <label class="scope-token">
-                  <input name="http_verify_tls" type="checkbox" class="sr-only"{% if form.http.verify_tls %} checked{% endif %}>
-                  verify-tls
-                </label>
-              </div>
-              <span class="mt-1 block text-xs text-muted">follow-redirects chases 3xx to the final page; verify-tls fails the check on invalid or self-signed certificates — switch it off only for internal endpoints.</span>
-            </div>
-          </div>
-        </div>
-
-        <label class="field-outline">
-          <span class="field-outline__label">Expected body contains</span>
-          <input name="http_expected_body_contains" type="text" value="{{ form.http.expected_body_contains }}"
-                 placeholder='&quot;status&quot;:&quot;ok&quot;'
-                 autocomplete="off" spellcheck="false" class="w-full field font-mono">
-          <span class="mt-1 block text-xs text-muted">Substring the response body must include, e.g. <code>"status":"ok"</code> — fails the check when missing.</span>
-        </label>
-
-        <label class="field-outline">
-          <span class="field-outline__label">Request body</span>
-          <textarea name="http_body" rows="3" placeholder='{&quot;ping&quot;:true}' autocomplete="off" spellcheck="false" class="w-full field font-mono">{{ form.http.body }}</textarea>
-          <span class="mt-1 block text-xs text-muted">Sent with POST / PUT / PATCH — pair it with a <code>Content-Type</code> header below.</span>
-        </label>
-
-        <div class="space-y-2">
-          <span class="flag-label block">headers</span>
-          <span class="block text-xs text-muted">Extra request headers, e.g. <code>Accept: application/json</code> or an API key.</span>
-          <div data-header-rows class="space-y-2">
-            {% for h in form.http.headers %}
-            <div data-header-row class="flex flex-wrap items-center gap-2">
-              <input type="text" name="http_header_key" value="{{ h.name }}"
-                     placeholder="Header name" aria-label="Header name"
-                     autocomplete="off" spellcheck="false" class="flex-1 min-w-[10rem] field font-mono">
-              <input type="text" name="http_header_value" value="{{ h.value }}"
-                     placeholder="Value" aria-label="Header value"
-                     autocomplete="off" spellcheck="false" class="flex-[2] min-w-[14rem] field font-mono">
-              <button type="button" data-header-remove
-                      class="btn-ghost px-2 text-sm" aria-label="Remove header">×</button>
-            </div>
-            {% endfor %}
-          </div>
-          <button type="button" data-header-add
-                  class="btn-ghost px-3 text-sm">+ add header</button>
-
-          <div class="border-t border-[color:var(--theme-line)] pt-2" data-var-auth-picker hidden>
-            <span class="block text-xs text-muted">Or send a stored <a href="/settings/variables" target="_blank" rel="noopener" class="underline">secret variable</a> as an auth header. The monitor keeps only a <code>&lbrace;&lbrace;key&rbrace;&rbrace;</code> reference and resolves the value at probe time.</span>
-            <div class="mt-2 flex flex-wrap items-end gap-2">
-              <label class="field-outline">
-                <span class="field-outline__label">Variable</span>
-                <select data-var-auth-select aria-label="Secret variable" class="field font-mono"></select>
-              </label>
-              <label class="field-outline">
-                <span class="field-outline__label">Send as</span>
-                <select data-var-auth-scheme aria-label="Auth scheme" class="field font-mono">
-                  <option value="bearer">Authorization: Bearer</option>
-                  <option value="apikey">x-api-key</option>
-                </select>
-              </label>
-              <button type="button" data-var-auth-add
-                      class="sticker-btn px-3 py-1.5 text-sm font-medium">add header</button>
-            </div>
-          </div>
-        </div>
-
-        <div class="space-y-2"
-             data-auth-field="basic"
-             data-initial-mode="{{ form.http.auth.basic_initial_mode() }}"
-             data-mode="{{ form.http.auth.basic_initial_mode() }}">
-          <span class="flag-label block">basic-auth</span>
-          <span class="block text-xs text-muted">Username + password for endpoints behind HTTP basic auth. Saved once, shown as <code>***</code> afterwards — tick to replace.</span>
-          <label class="inline-flex items-center gap-2">
-            <input type="checkbox" data-auth-toggle>
-            <span class="text-sm">{% if form.http.auth.has_basic %}replace credentials{% else %}set credentials{% endif %}</span>
-          </label>
-          <div class="grid grid-cols-2 gap-2">
-            <input type="text" name="http_basic_user" placeholder="username"
-                   aria-label="Basic auth username" autocomplete="off" spellcheck="false"
-                   value="{% if form.http.auth.has_basic %}***{% endif %}" disabled
-                   class="field">
-            <input type="password" name="http_basic_pass" placeholder="password"
-                   aria-label="Basic auth password" autocomplete="off"
-                   value="{% if form.http.auth.has_basic %}***{% endif %}" disabled
-                   class="field">
-          </div>
-        </div>
-
-        <div class="space-y-2"
-             data-auth-field="bearer"
-             data-initial-mode="{{ form.http.auth.bearer_initial_mode() }}"
-             data-mode="{{ form.http.auth.bearer_initial_mode() }}">
-          <span class="flag-label block">bearer</span>
-          <span class="block text-xs text-muted">Sent as <code>Authorization: Bearer …</code> — for token-protected APIs and rate-limit headroom. Saved once, shown as <code>***</code> afterwards — tick to replace.</span>
-          <label class="inline-flex items-center gap-2">
-            <input type="checkbox" data-auth-toggle>
-            <span class="text-sm">{% if form.http.auth.has_bearer %}replace token{% else %}set token{% endif %}</span>
-          </label>
-          <input type="password" name="http_bearer_token" placeholder="token"
-                 aria-label="Bearer token" autocomplete="off"
-                 value="{% if form.http.auth.has_bearer %}***{% endif %}" disabled
-                 class="w-full field">
-        </div>
-      </div>
-      </div>
-    </fieldset>
-
+    <section data-step="2" class="space-y-6{% if form.mode == "create" %} hidden{% endif %}">
     <fieldset class="sticker-card form-card">
-      <legend>organize</legend>
-      <div class="clear-both space-y-5 p-5">
-      <div class="grid gap-3 sm:grid-cols-2">
-        <div class="field-outline">
-          <span class="field-outline__label">Tags</span>
-          <div class="mt-2 flex flex-wrap items-center gap-1.5" data-tag-chips role="group" aria-label="Tags">
-            {% for t in form.tag_options %}
-            <label class="scope-token">
-              <input type="checkbox" data-tag-pick value="{{ t }}" class="sr-only"{% if form.tags.contains(t) %} checked{% endif %}>
-              {{ t }}
-            </label>
-            {% endfor %}
-            <input type="text" data-tag-new aria-label="New tag" spellcheck="false" autocomplete="off"
-                   placeholder="new tag…" class="hidden chip-new-input">
-            <button type="button" class="scope-token" data-tag-add aria-label="Add tag">+</button>
-          </div>
-          <p class="mt-1 text-xs text-muted">Click chips to toggle; <kbd>+</kbd> adds a new tag.</p>
-        </div>
-        <div class="field-outline">
-          <span class="field-outline__label">Group</span>
-          <input type="hidden" name="group_name" value="{{ form.group_name }}" data-group-value>
-          <div class="mt-2 flex flex-wrap items-center gap-1.5" data-group-chips role="radiogroup" aria-label="Group">
-            {% for g in form.group_options %}
-            <label class="scope-token">
-              <input type="radio" name="__group_pick" value="{{ g }}" class="sr-only" data-group-pick{% if form.group_name == *g %} checked{% endif %}>
-              {{ g }}
-            </label>
-            {% endfor %}
-            <input type="text" data-group-new aria-label="New group" spellcheck="false" autocomplete="off"
-                   placeholder="new group…" class="hidden chip-new-input">
-            <button type="button" class="scope-token" data-group-add aria-label="Add group">+</button>
-          </div>
-          <p class="mt-1 text-xs text-muted">Pick one (click again to clear); <kbd>+</kbd> adds a new group.</p>
-        </div>
-      </div>
-      <div class="grid gap-3 sm:grid-cols-2">
-        <div>
-          <label class="inline-flex items-center gap-2">
-            <input name="enabled" type="checkbox"{% if form.enabled %} checked{% endif %}>
-            <span class="text-sm">Enabled</span>
-          </label>
-          <p class="mt-1 text-xs text-muted">Paused monitors keep their config but stop running checks.</p>
-        </div>
-        <div class="field-outline">
-          <span class="field-outline__label">Owner</span>
-          <select id="owner_user_id" name="owner_user_id" data-sm-combobox aria-label="Owner" class="w-full field">
-            <option value=""{% if form.owner_user_id == "" %} selected{% endif %}>— unowned —</option>
-            {% for opt in form.owner_options %}
-            <option value="{{ opt.id }}"{% if opt.selected %} selected{% endif %}>{{ opt.label }}</option>
-            {% endfor %}
-          </select>
-          <p class="mt-1 text-xs text-muted">Team member who owns this monitor.</p>
-        </div>
-      </div>
-      </div>
-    </fieldset>
-
-    <fieldset class="sticker-card form-card"{% if form.show_regions %} data-monitor-regions data-target-id="{{ form.id }}"{% endif %}>
-      <legend>detection</legend>
-      <div class="clear-both grid items-start gap-x-4 gap-y-5 p-5 sm:grid-cols-2">
-      <div class="sm:col-span-2">
+      <legend>schedule</legend>
+      <div class="clear-both p-5">
         <span class="mb-1.5 block text-xs text-muted">Check every</span>
         <div data-interval-rail="fast"{% if form.slow_kind() %} hidden{% endif %}>
           <div class="sm-rail sm-rail--wide" role="radiogroup" aria-label="Check interval">
@@ -522,134 +413,240 @@
           <p class="mt-1 text-xs text-muted">Expiry moves slowly — daily is plenty; hourly when one is close.</p>
         </div>
       </div>
-      <div{% if !form.show_regions %} class="sm:col-span-2"{% endif %}>
-        <div class="sm-rail sm-rail--wide" role="radiogroup" aria-label="Open incident after">
-          {% for o in form.confirmation_options() %}
-          <label class="sm-rail__seg">
-            <input type="radio" name="alert_confirmations" value="{{ o.value }}" class="sr-only"{% if o.selected %} checked{% endif %}>
-            {{ o.label }}
-          </label>
-          {% endfor %}
-        </div>
-        <span class="mt-1 block text-xs text-muted">Consecutive failed checks before the monitor counts as down — 1 fail reacts instantly but a single network blip can page you; 2 fails is the usual default.</span>
-      </div>
-      {% if form.show_regions %}
-      <div>
-        <div class="field-outline">
-          <span class="field-outline__label">Alert when</span>
-          <select data-region-policy data-sm-combobox aria-label="Detection threshold" class="w-full field">
-            {% for o in form.region_threshold_options %}
-            <option value="{{ o.value }}"{% if o.selected %} selected{% endif %}>{{ o.label }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        <span class="mt-1 block text-xs text-muted">Opens one incident when this many regions agree the monitor is down. Majority suppresses a single location's network blip.</span>
-      </div>
-      <div class="sm:col-span-2">
-        <span class="mb-1.5 block text-xs text-muted">Regions</span>
-        <div class="space-y-2">
-          {% for g in form.region_groups %}
-          <div>
-            <span class="mb-1 block text-[0.7rem] uppercase tracking-wide text-quiet">{{ g.label }}</span>
-            <div class="flex flex-wrap gap-1.5">
-              {% for r in g.regions %}
-              <label class="scope-token">
-                <input type="checkbox" data-region-checkbox value="{{ r.id }}" class="sr-only"{% if r.selected %} checked{% endif %}>
-                {{ r.label }}
-              </label>
-              {% endfor %}
-            </div>
-          </div>
-          {% endfor %}
-        </div>
-        <span class="mt-1 block text-xs text-muted">
-          Which locations probe this monitor. Need more regions?
-          <a href="mailto:support@uptimepage.dev?subject=More%20monitoring%20regions"
-             class="underline decoration-dotted hover:text-body">Send a message</a>
-        </span>
-      </div>
-      {% endif %}
-      </div>
     </fieldset>
 
     <fieldset class="sticker-card form-card">
       <legend>notifications</legend>
-      <div class="clear-both grid items-start gap-x-4 gap-y-5 p-5 sm:grid-cols-2">
+      <div class="clear-both p-5">
       {% if form.channels.is_empty() %}
-      <p class="font-mono text-xs text-quiet sm:col-span-2">
+      <p class="font-mono text-xs text-quiet">
         # no channels configured —
         <a href="/settings/notifications/new" class="underline decoration-dotted hover:text-body">add one</a>
         to get down / recovered alerts for this monitor.
       </p>
       {% else %}
-      <div class="sm:col-span-2">
-        <span class="mb-1.5 block text-xs text-muted">Channels to notify</span>
-        <div class="flex flex-wrap gap-1.5">
-          {% for c in form.channels %}
-          <label data-channel-row class="scope-token">
-            <input type="checkbox" data-channel-select value="{{ c.id }}" class="sr-only"{% if c.selected %} checked{% endif %}>
-            {{ c.kind }}:{{ c.name }}
-          </label>
-          {% endfor %}
-        </div>
-        <span class="mt-1 block text-xs text-muted">Notified when this monitor opens or resolves an incident.</span>
-      </div>
-      <div data-renotify-secs>
-        <span class="mb-1.5 block text-xs text-muted">Remind while down</span>
-        <div class="sm-rail sm-rail--wide" role="radiogroup" aria-label="Remind while down">
-          {% for o in form.renotify_options() %}
-          <label class="sm-rail__seg">
-            <input type="radio" name="renotify_secs" value="{{ o.secs }}" class="sr-only"{% if o.selected %} checked{% endif %}>
-            {{ o.label }}
-          </label>
-          {% endfor %}
-        </div>
-        <span class="mt-1 block text-xs text-muted">Re-page on this cadence until acknowledged.</span>
-      </div>
-      <div>
-        <span class="mb-1.5 block text-xs text-muted">On recovery</span>
-        <label class="inline-flex items-center gap-2 text-sm">
-          <input type="checkbox" data-notify-recovery{% if form.notify_recovery %} checked{% endif %}>
-          Notify on recovery
+      <span class="mb-1.5 block text-xs text-muted">Channels to notify</span>
+      <div class="flex flex-wrap gap-1.5">
+        {% for c in form.channels %}
+        <label data-channel-row class="scope-token">
+          <input type="checkbox" data-channel-select value="{{ c.id }}" class="sr-only"{% if c.selected %} checked{% endif %}>
+          {{ c.kind }}:{{ c.name }}
         </label>
-        <span class="mt-1 block text-xs text-muted">Send a recovered alert when the monitor comes back up.</span>
+        {% endfor %}
       </div>
+      <span class="mt-1 block text-xs text-muted">Notified when this monitor opens or resolves an incident.</span>
       {% endif %}
       </div>
     </fieldset>
 
-    {% if form.show_escalation %}
     <fieldset class="sticker-card form-card">
-      <legend>escalation</legend>
-      <div class="clear-both space-y-3 p-5">
-      <p class="text-xs text-muted">A multi-level paging ladder for this monitor's incidents. Manage policies under <a href="/settings/escalation" class="underline">escalation</a>.</p>
-      {% if form.mode == "edit" %}
-      <div class="flex flex-wrap items-center gap-3 pt-1">
-        <div class="field-outline w-64">
-          <span class="field-outline__label">Policy</span>
-          <select data-monitor-policy-select data-target-id="{{ form.id }}" data-sm-combobox
-                  aria-label="Escalation policy" class="w-full field">
-            <option value="">inherit org default</option>
-            {% for c in form.escalation_choices %}
-            <option value="{{ c.id }}"{% if c.selected %} selected{% endif %}>{{ c.name }}</option>
-            {% endfor %}
-          </select>
+      <legend>labels</legend>
+      <div class="clear-both p-5">
+        <div class="grid gap-3 sm:grid-cols-2">
+          <div class="field-outline">
+            <span class="field-outline__label">Tags</span>
+            <div class="mt-2 flex flex-wrap items-center gap-1.5" data-tag-chips role="group" aria-label="Tags">
+              {% for t in form.tag_options %}
+              <label class="scope-token">
+                <input type="checkbox" data-tag-pick value="{{ t }}" class="sr-only"{% if form.tags.contains(t) %} checked{% endif %}>
+                {{ t }}
+              </label>
+              {% endfor %}
+              <input type="text" data-tag-new aria-label="New tag" spellcheck="false" autocomplete="off"
+                     placeholder="new tag…" class="hidden chip-new-input">
+              <button type="button" class="scope-token" data-tag-add aria-label="Add tag">+</button>
+            </div>
+            <p class="mt-1 text-xs text-muted">Click chips to toggle; <kbd>+</kbd> adds a new tag.</p>
+          </div>
+          <div class="field-outline">
+            <span class="field-outline__label">Group</span>
+            <input type="hidden" name="group_name" value="{{ form.group_name }}" data-group-value>
+            <div class="mt-2 flex flex-wrap items-center gap-1.5" data-group-chips role="radiogroup" aria-label="Group">
+              {% for g in form.group_options %}
+              <label class="scope-token">
+                <input type="radio" name="__group_pick" value="{{ g }}" class="sr-only" data-group-pick{% if form.group_name == *g %} checked{% endif %}>
+                {{ g }}
+              </label>
+              {% endfor %}
+              <input type="text" data-group-new aria-label="New group" spellcheck="false" autocomplete="off"
+                     placeholder="new group…" class="hidden chip-new-input">
+              <button type="button" class="scope-token" data-group-add aria-label="Add group">+</button>
+            </div>
+            <p class="mt-1 text-xs text-muted">Pick one (click again to clear); <kbd>+</kbd> adds a new group.</p>
+          </div>
         </div>
-        <span data-monitor-policy-result role="status" aria-live="polite" class="flash-text text-xs"></span>
-      </div>
-      {% if !form.escalation_hint.is_empty() %}<p class="text-xs text-muted">{{ form.escalation_hint }}</p>{% endif %}
-      {% else %}
-      <p class="text-xs text-muted">Save the monitor first, then pick its escalation policy here.</p>
-      {% endif %}
       </div>
     </fieldset>
-    {% endif %}
 
-    <div class="flex flex-wrap gap-3 border-t border-[color:var(--theme-line)] pt-4">
+    <fieldset class="sticker-card form-card" data-collapsible>
+      <legend>
+        <button type="button" data-collapse-toggle aria-expanded="{% if form.mode == "edit" %}true{% else %}false{% endif %}"
+                aria-controls="advanced-settings-body" aria-describedby="advanced-settings-hint"
+                class="group inline-flex cursor-pointer items-center gap-1.5 border-0 bg-transparent p-0">
+          ADVANCED
+          <span data-collapse-chevron aria-hidden="true"
+                class="text-base transition-transform group-hover:text-body motion-reduce:transition-none{% if form.mode == "edit" %} rotate-180{% endif %}">▾</span>
+        </button>
+      </legend>
+      <div class="clear-both space-y-2 px-5 py-3">
+      <button type="button" data-collapse-toggle tabindex="-1" aria-hidden="true"
+              class="group block w-full cursor-pointer border-0 bg-transparent p-0 text-left{% if form.mode == "edit" %} hidden{% endif %}">
+        <span id="advanced-settings-hint" data-collapse-hint class="text-xs text-muted group-hover:text-body">confirmations, regions, reminders, owner</span>
+      </button>
+      <div id="advanced-settings-body" class="space-y-6{% if form.mode == "create" %} hidden{% endif %}">
+
+        <div class="space-y-3">
+          <span class="flag-label block">detection</span>
+          <div class="grid items-start gap-x-4 gap-y-5 sm:grid-cols-2">
+          <div{% if !form.show_regions %} class="sm:col-span-2"{% endif %}>
+            <span class="mb-1.5 block text-xs text-muted">Open incident after</span>
+            <div class="sm-rail sm-rail--wide" role="radiogroup" aria-label="Open incident after">
+              {% for o in form.confirmation_options() %}
+              <label class="sm-rail__seg">
+                <input type="radio" name="alert_confirmations" value="{{ o.value }}" class="sr-only"{% if o.selected %} checked{% endif %}>
+                {{ o.label }}
+              </label>
+              {% endfor %}
+            </div>
+            <span class="mt-1 block text-xs text-muted">Consecutive failed checks before the monitor counts as down — 1 fail reacts instantly but a single network blip can page you; 2 fails is the usual default.</span>
+          </div>
+          {% if form.show_regions %}
+          <div data-monitor-regions data-target-id="{{ form.id }}">
+            <div class="field-stack">
+              <span class="mb-1.5 block text-xs text-muted">Alert when</span>
+              <select data-region-policy data-sm-combobox aria-label="Detection threshold" class="w-full field">
+                {% for o in form.region_threshold_options %}
+                <option value="{{ o.value }}"{% if o.selected %} selected{% endif %}>{{ o.label }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <span class="mt-1 block text-xs text-muted">Opens one incident when this many regions agree the monitor is down. Majority suppresses a single location's network blip.</span>
+            <div class="mt-4">
+              <span class="mb-1.5 block text-xs text-muted">Regions</span>
+              <div class="space-y-2">
+                {% for g in form.region_groups %}
+                <div>
+                  <span class="mb-1 block text-[0.7rem] uppercase tracking-wide text-quiet">{{ g.label }}</span>
+                  <div class="flex flex-wrap gap-1.5">
+                    {% for r in g.regions %}
+                    <label class="scope-token">
+                      <input type="checkbox" data-region-checkbox value="{{ r.id }}" class="sr-only"{% if r.selected %} checked{% endif %}>
+                      {{ r.label }}
+                    </label>
+                    {% endfor %}
+                  </div>
+                </div>
+                {% endfor %}
+              </div>
+              <span class="mt-1 block text-xs text-muted">
+                Which locations probe this monitor. Need more regions?
+                <a href="mailto:support@uptimepage.dev?subject=More%20monitoring%20regions"
+                   class="underline decoration-dotted hover:text-body">Send a message</a>
+              </span>
+            </div>
+          </div>
+          {% endif %}
+          </div>
+        </div>
+
+        {% if !form.channels.is_empty() %}
+        <div class="space-y-3">
+          <span class="flag-label block">reminders</span>
+          <div class="grid items-start gap-x-4 gap-y-5 sm:grid-cols-2">
+          <div data-renotify-secs>
+            <span class="mb-1.5 block text-xs text-muted">Remind while down</span>
+            <div class="sm-rail sm-rail--wide" role="radiogroup" aria-label="Remind while down">
+              {% for o in form.renotify_options() %}
+              <label class="sm-rail__seg">
+                <input type="radio" name="renotify_secs" value="{{ o.secs }}" class="sr-only"{% if o.selected %} checked{% endif %}>
+                {{ o.label }}
+              </label>
+              {% endfor %}
+            </div>
+            <span class="mt-1 block text-xs text-muted">Re-page on this cadence until acknowledged.</span>
+          </div>
+          <div>
+            <span class="mb-1.5 block text-xs text-muted">On recovery</span>
+            <label class="inline-flex items-center gap-2 text-sm">
+              <input type="checkbox" data-notify-recovery{% if form.notify_recovery %} checked{% endif %}>
+              Notify on recovery
+            </label>
+            <span class="mt-1 block text-xs text-muted">Send a recovered alert when the monitor comes back up.</span>
+          </div>
+          </div>
+        </div>
+        {% endif %}
+
+        <div class="space-y-3">
+          <span class="flag-label block">organize</span>
+          <div class="grid gap-3 sm:grid-cols-2">
+            <div>
+              <label class="inline-flex items-center gap-2">
+                <input name="enabled" type="checkbox"{% if form.enabled %} checked{% endif %}>
+                <span class="text-sm">Enabled</span>
+              </label>
+              <p class="mt-1 text-xs text-muted">Paused monitors keep their config but stop running checks.</p>
+            </div>
+            <div class="field-outline">
+              <span class="field-outline__label">Owner</span>
+              <select id="owner_user_id" name="owner_user_id" data-sm-combobox aria-label="Owner" class="w-full field">
+                <option value=""{% if form.owner_user_id == "" %} selected{% endif %}>— unowned —</option>
+                {% for opt in form.owner_options %}
+                <option value="{{ opt.id }}"{% if opt.selected %} selected{% endif %}>{{ opt.label }}</option>
+                {% endfor %}
+              </select>
+              <p class="mt-1 text-xs text-muted">Team member who owns this monitor.</p>
+            </div>
+          </div>
+        </div>
+
+        {% if form.show_escalation %}
+        <div class="space-y-3">
+          <span class="flag-label block">escalation</span>
+          <p class="text-xs text-muted">A multi-level paging ladder for this monitor's incidents. Manage policies under <a href="/settings/escalation" class="underline">escalation</a>.</p>
+          {% if form.mode == "edit" %}
+          <div class="flex flex-wrap items-center gap-3 pt-1">
+            <div class="field-outline w-64">
+              <span class="field-outline__label">Policy</span>
+              <select data-monitor-policy-select data-target-id="{{ form.id }}" data-sm-combobox
+                      aria-label="Escalation policy" class="w-full field">
+                <option value="">inherit org default</option>
+                {% for c in form.escalation_choices %}
+                <option value="{{ c.id }}"{% if c.selected %} selected{% endif %}>{{ c.name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <span data-monitor-policy-result role="status" aria-live="polite" class="flash-text text-xs"></span>
+          </div>
+          {% if !form.escalation_hint.is_empty() %}<p class="text-xs text-muted">{{ form.escalation_hint }}</p>{% endif %}
+          {% else %}
+          <p class="text-xs text-muted">Save the monitor first, then pick its escalation policy here.</p>
+          {% endif %}
+        </div>
+        {% endif %}
+
+      </div>
+      </div>
+    </fieldset>
+    </section>
+
+    <div class="flex flex-wrap gap-3 border-t border-[color:var(--theme-line)] pt-4" data-wizard-nav>
       <button type="submit"
               class="sticker-btn sticker-btn--primary px-4 py-2 text-sm font-medium transition-transform hover:-translate-y-0.5">
         {% if form.mode == "create" %}create{% else %}save changes{% endif %}
       </button>
+      <button type="button" data-test-now title="Runs the check once without saving"
+              class="sticker-btn sticker-btn--accent px-4 py-2 text-sm font-medium inline-flex items-center gap-1.5">
+        <span aria-hidden="true">▶</span> test now
+      </button>
+      {% if form.mode == "create" %}
+      <button type="button" data-wizard-back hidden
+              class="btn-ghost px-4 py-2 text-sm">← back</button>
+      <button type="button" data-wizard-next
+              class="btn-ghost px-4 py-2 text-sm inline-flex items-center gap-1.5">
+        next <span aria-hidden="true">→</span>
+      </button>
+      {% endif %}
       {% if form.mode == "edit" %}
       <button type="submit" data-save-and-test
               class="sticker-btn sticker-btn--accent px-4 py-2 text-sm font-medium inline-flex items-center gap-1.5">
@@ -664,35 +661,20 @@
              <kbd class="rounded border px-1.5 py-0.5">Enter</kbd> to save
       </span>
     </div>
+    <div data-test-result role="status" class="hidden mt-4"></div>
 
-    </div>
-
-    <aside class="monitor-form-summary" data-monitor-summary>
-      <p class="monitor-form-summary__title"># monitor</p>
-      <dl>
-        <div><dt>type</dt><dd data-sum="type">—</dd></div>
-        <div><dt>target</dt><dd data-sum="target">—</dd></div>
-        <div><dt>name</dt><dd data-sum="name">—</dd></div>
-        <div data-sum-row="method"><dt>method</dt><dd data-sum="method">—</dd></div>
-        <div data-sum-row="status"><dt>status</dt><dd data-sum="status">—</dd></div>
-        <div><dt>every</dt><dd data-sum="every">—</dd></div>
-        <div><dt>confirm</dt><dd data-sum="confirm">—</dd></div>
-        {% if form.show_regions %}<div><dt>regions</dt><dd data-sum="regions">—</dd></div>{% endif %}
-        <div><dt>alerts</dt><dd data-sum="channels">—</dd></div>
-        <div><dt>recovery</dt><dd data-sum="recovery">—</dd></div>
-      </dl>
-    </aside>
     </div>
   </form>
 </section>
 
 <script defer src="{{ "js/ui/api_form.js"|asset }}"></script>
-<script defer src="{{ "js/ui/auth_field.js"|asset }}"></script>
 <script defer src="{{ "js/ui/header_rows.js"|asset }}"></script>
 <script defer src="{{ "js/ui/variable_helpers.js"|asset }}"></script>
 <script defer src="{{ "js/ui/tag_chip_input.js"|asset }}"></script>
 <script defer src="{{ "js/ui/group_select.js"|asset }}"></script>
 <script defer src="{{ "js/ui/collapsible.js"|asset }}"></script>
+<script defer src="{{ "js/ui/optional_fields.js"|asset }}"></script>
+<script defer src="{{ "js/ui/check_wizard.js"|asset }}"></script>
 <script defer src="{{ "js/ui/check_form.js"|asset }}"></script>
 <script defer src="{{ "js/ui/monitor_escalation.js"|asset }}"></script>
 {% endblock %}

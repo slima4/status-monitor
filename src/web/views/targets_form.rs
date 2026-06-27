@@ -19,25 +19,6 @@ pub struct HeaderPair {
     pub value: String,
 }
 
-pub struct AuthFieldState {
-    pub has_basic: bool,
-    pub has_bearer: bool,
-}
-
-impl AuthFieldState {
-    pub fn basic_initial_mode(&self) -> &'static str {
-        if self.has_basic { "redacted" } else { "create" }
-    }
-
-    pub fn bearer_initial_mode(&self) -> &'static str {
-        if self.has_bearer {
-            "redacted"
-        } else {
-            "create"
-        }
-    }
-}
-
 pub struct HttpFields {
     pub url: String,
     pub method: &'static str,
@@ -51,7 +32,6 @@ pub struct HttpFields {
     pub headers: Vec<HeaderPair>,
     pub body: String,
     pub verify_tls: bool,
-    pub auth: AuthFieldState,
 }
 
 impl Default for HttpFields {
@@ -70,10 +50,6 @@ impl Default for HttpFields {
             headers: Vec::new(),
             body: String::new(),
             verify_tls: true,
-            auth: AuthFieldState {
-                has_basic: false,
-                has_bearer: false,
-            },
         }
     }
 }
@@ -824,8 +800,6 @@ fn form_from_target(t: Target, kind: FormKind) -> Result<FormModel, AppError> {
 }
 
 fn http_fields_from(h: crate::domain::HttpCheck) -> HttpFields {
-    let has_basic = h.basic_auth.is_some();
-    let has_bearer = h.bearer_token.is_some();
     let expected_status_input = match h.expected_status {
         ExpectedStatus::Exact(c) => c.to_string(),
         ExpectedStatus::Range { min, max } => format!("{min}-{max}"),
@@ -848,10 +822,6 @@ fn http_fields_from(h: crate::domain::HttpCheck) -> HttpFields {
         headers,
         body: h.body.unwrap_or_default(),
         verify_tls: h.verify_tls,
-        auth: AuthFieldState {
-            has_basic,
-            has_bearer,
-        },
     }
 }
 
@@ -1084,7 +1054,7 @@ mod tests {
     }
 
     #[test]
-    fn edit_form_renders_redacted_state_for_existing_auth() {
+    fn edit_form_renders_target_with_sealed_auth() {
         use crate::domain::HttpCheck;
         use std::collections::HashMap;
         use std::time::Duration;
@@ -1122,17 +1092,13 @@ mod tests {
             updated_at: chrono::Utc::now(),
         };
         let form = form_from_target(t, FormKind::Edit).unwrap();
-        assert!(form.http.auth.has_basic);
-        assert!(form.http.auth.has_bearer);
         assert_eq!(form.submit_method, "PATCH");
         let page = FormPage {
             active_tab: "targets",
             form,
         };
         let html = page.render().unwrap();
-        assert!(html.contains(r#"data-initial-mode="redacted""#));
-        assert!(html.contains("replace credentials"));
-        assert!(html.contains("replace token"));
+        assert!(html.contains("https://example.com"));
     }
 
     #[test]

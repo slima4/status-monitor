@@ -17,4 +17,14 @@
         const scope = t.closest("[data-collapsible]");
         if (scope) toggle(scope);
     });
+
+    // Expand the collapsible enclosing `el` (no-op if already open) so a field
+    // focused by validation isn't left hidden inside a collapsed section.
+    window.smRevealCollapsibleFor = (el) => {
+        const scope = el?.closest("[data-collapsible]");
+        if (!scope) return;
+        const ctrl = scope.querySelector("[data-collapse-toggle][aria-controls]");
+        const body = ctrl && document.getElementById(ctrl.getAttribute("aria-controls"));
+        if (body && body.classList.contains("hidden")) toggle(scope);
+    };
 })();

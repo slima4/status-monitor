@@ -11,8 +11,6 @@
     const form = document.getElementById("check-form");
     if (!form) return;
 
-    const PROTOCOL_VARIANTS = ["http", "tcp", "dns", "tls_cert", "domain_expiry"];
-
     // Per-kind interval floors, mirrored from the API via data-kind-floors —
     // the slow/fast rail split and defaults all derive from them.
     let KIND_MIN_INTERVAL = {};
@@ -54,18 +52,10 @@
         if (evt.target.name !== "check_type") return;
         const want = evt.target.value;
         document.querySelectorAll("[data-variant]").forEach(el => {
-            const v = el.dataset.variant;
-            if (PROTOCOL_VARIANTS.includes(v)) {
-                el.classList.toggle("hidden", v !== want);
-            } else if (v === "http-advanced") {
-                el.classList.toggle("hidden", want !== "http");
-            }
+            el.classList.toggle("hidden", el.dataset.variant !== want);
         });
         applyKindIntervalDefaults(want);
     });
-
-    // Short protocol labels for the live summary.
-    const NAV_KIND_LABEL = { http: "http", tcp: "tcp", dns: "dns", tls_cert: "tls", domain_expiry: "domain" };
 
     const initialKind = form.querySelector("input[name='check_type']:checked")?.value || "http";
     applyKindIntervalDefaults(initialKind);
@@ -96,54 +86,6 @@
         });
         statusInput.addEventListener("input", syncRailFromField);
         syncRailFromField();
-    }
-
-    // Live summary aside — echoes the build as the user types.
-    const summaryRoot = form.querySelector("[data-monitor-summary]");
-    if (summaryRoot) {
-        const sumEl = (k) => summaryRoot.querySelector(`[data-sum='${k}']`);
-        const set = (k, v) => { const el = sumEl(k); if (el) el.textContent = v && v.length ? v : "—"; };
-        const val = (n) => (form.querySelector(`[name='${n}']`)?.value || "").trim();
-        const summaryTarget = (kind) => {
-            if (kind === "http") return urlToName(val("http_url")) || val("http_url");
-            if (kind === "tcp") {
-                const h = val("tcp_host"), p = val("tcp_port");
-                return h ? (p ? `${h}:${p}` : h) : "";
-            }
-            if (kind === "dns") return val("dns_domain");
-            if (kind === "tls_cert") return val("tls_host");
-            if (kind === "domain_expiry") return val("domain_expiry_domain");
-            return "";
-        };
-        const segLabel = (el) => el ? el.closest(".sm-rail__seg")?.textContent.trim() : "";
-        const updateSummary = () => {
-            const kind = currentCheckType();
-            const isHttp = kind === "http";
-            set("type", NAV_KIND_LABEL[kind] || kind);
-            set("target", summaryTarget(kind));
-            set("name", val("name"));
-            const methodRow = summaryRoot.querySelector("[data-sum-row='method']");
-            const statusRow = summaryRoot.querySelector("[data-sum-row='status']");
-            if (methodRow) methodRow.hidden = !isHttp;
-            if (statusRow) statusRow.hidden = !isHttp;
-            if (isHttp) {
-                set("method", val("http_method"));
-                set("status", val("expected_status_input"));
-            }
-            set("every", segLabel(form.querySelector("[data-interval-rail]:not([hidden]) input[name='interval_s']:checked")));
-            set("confirm", segLabel(form.querySelector("input[name='alert_confirmations']:checked")));
-            if (sumEl("regions")) {
-                const boxes = [...form.querySelectorAll("[data-region-checkbox]")];
-                set("regions", boxes.length ? `${boxes.filter(b => b.checked).length} of ${boxes.length}` : "");
-            }
-            const chans = [...form.querySelectorAll("[data-channel-select]")];
-            set("channels", chans.length ? `${chans.filter(c => c.checked).length} of ${chans.length}` : "none");
-            const rec = form.querySelector("[data-notify-recovery]");
-            set("recovery", rec ? (rec.checked ? "on" : "off") : "—");
-        };
-        form.addEventListener("input", updateSummary);
-        form.addEventListener("change", updateSummary);
-        updateSummary();
     }
 
     form.addEventListener("click", (evt) => {
@@ -429,18 +371,6 @@
                 body: blankToNull(data.get("http_body")),
                 verify_tls: data.get("http_verify_tls") === "on",
             };
-
-            const basicFs = document.querySelector("[data-auth-field='basic']");
-            const bearerFs = document.querySelector("[data-auth-field='bearer']");
-            if (basicFs && basicFs.dataset.mode === "replacing") {
-                check.basic_auth = [
-                    data.get("http_basic_user") || "",
-                    data.get("http_basic_pass") || "",
-                ];
-            }
-            if (bearerFs && bearerFs.dataset.mode === "replacing") {
-                check.bearer_token = data.get("http_bearer_token") || "";
-            }
             return { check };
         }
         if (checkType === "tcp") {
@@ -642,8 +572,7 @@
     }
 
     async function handleTestNow(btn) {
-        const panel = btn.closest("[data-variant]");
-        const resultEl = panel ? panel.querySelector("[data-test-result]") : null;
+        const resultEl = document.querySelector("[data-test-result]");
         clearErrors();
         const built = buildCheck();
         if (built.error) {
@@ -695,6 +624,9 @@
     function markFieldInvalid(field, scroll) {
         const el = fieldForApiPath(field);
         if (!el) return;
+        window.smRevealStepFor?.(el);
+        window.smRevealCollapsibleFor?.(el);
+        window.smRevealOptionalFor?.(el);
         el.setAttribute("aria-invalid", "true");
         el.focus({ preventScroll: true });
         if (scroll) el.scrollIntoView({ block: "center", behavior: "smooth" });
@@ -720,8 +652,6 @@
 
     const API_PATH_TO_FORM = {
         "check.url": "http_url",
-        "check.basic_auth": "http_basic_user",
-        "check.bearer_token": "http_bearer_token",
         "check.verify_tls": "http_verify_tls",
         "check.body": "http_body",
         "check.expected_status": "expected_status_input",

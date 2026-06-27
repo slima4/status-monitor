@@ -1314,18 +1314,25 @@
         cursor: pointer;
         user-select: none;
         text-align: center;
-        transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
+        transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease, scale 120ms ease;
     }
     .scope-token:hover {
         border-color: var(--theme-text-muted);
         color: var(--theme-accent);
     }
-    .scope-token:has(input:checked) {
+    .scope-token:active { scale: 0.96; }
+    @media (prefers-reduced-motion: reduce) {
+        .scope-token:active { scale: 1; }
+    }
+    /* Inner checkbox (label chips) or aria-expanded (button toggles) → ink box. */
+    .scope-token:has(input:checked),
+    .scope-token[aria-expanded="true"] {
         background: var(--theme-ink);
         border: 1px solid var(--theme-ink);
         color: var(--theme-surface);
     }
-    .scope-token:has(input:focus-visible) {
+    .scope-token:has(input:focus-visible),
+    .scope-token:focus-visible {
         outline: 1px dotted currentColor;
         outline-offset: 2px;
     }
@@ -1361,9 +1368,12 @@
         pointer-events: none;
         z-index: 1;
     }
-    /* Combobox fills the wrapper so its notch spans the full top border. */
-    .field-outline > .sm-combobox { width: 100%; }
-    .field-outline .sm-combobox__trigger {
+    /* Combobox fills the wrapper so its notch spans the full top border.
+       .field-stack is the block-label variant (label above, no notch). */
+    .field-outline > .sm-combobox,
+    .field-stack > .sm-combobox { width: 100%; }
+    .field-outline .sm-combobox__trigger,
+    .field-stack .sm-combobox__trigger {
         width: 100%;
         height: auto;
         padding: 0.375rem 0.625rem;
@@ -2162,44 +2172,59 @@
         color: var(--theme-text-muted);
     }
 
-    /* 3-column monitor form (types | body | summary) only at ≥1280px. Below
-       that it stacks: types row on top, body, summary at the bottom. */
-    .monitor-form-grid { @apply grid gap-6; }
-    @media (min-width: 1280px) {
-        .monitor-form-grid { grid-template-columns: 13rem minmax(0, 1fr) 15rem; }
-        /* Type chooser (left) and summary (right) ride along on scroll. */
-        .monitor-form-types,
-        .monitor-form-summary {
-            @apply self-start;
-            position: sticky;
-            top: 1.5rem;
-        }
-        /* Type cards become a vertical rail only at the 3-column width; below
-           that they stay a horizontal grid at the top of the stack. */
-        .check-type-cards.check-type-cards--stack { grid-template-columns: 1fr; }
-    }
-    /* Live summary — echoes the build as a terminal-style key/value block. */
-    .monitor-form-summary {
-        @apply rounded-sm border p-3 text-xs;
-        background: var(--theme-surface-sunk);
-        border-color: var(--theme-line);
+    /* Create-flow stepper; <button> nodes so each step is keyboard-reachable. */
+    .wizard-steps {
+        @apply flex flex-wrap items-center;
+        gap: 0.25rem 0;
+        list-style: none;
+        padding: 0;
+        margin: 0;
+        counter-reset: wstep;
         font-family: var(--font-mono);
     }
-    .monitor-form-summary__title {
-        @apply mb-2;
-        color: var(--theme-text-quiet, var(--theme-text-muted));
+    .wizard-steps > li { @apply flex items-center; }
+    .wizard-steps > li:not(:first-child)::before {
+        content: "";
+        width: 1.5rem;
+        height: 1px;
+        margin: 0 0.5rem;
+        background: var(--theme-line);
     }
-    .monitor-form-summary dl { @apply space-y-1; }
-    .monitor-form-summary dl > div { @apply flex gap-2; }
-    .monitor-form-summary dt {
-        @apply w-16 shrink-0;
-        color: var(--theme-text-muted);
+    .wizard-step {
+        @apply inline-flex items-center gap-2 rounded-sm;
+        counter-increment: wstep;
+        min-height: 2.5rem;
+        padding: 0.25rem 0.4rem;
+        border: 0;
+        background: transparent;
+        color: var(--theme-text-quiet);
+        font-size: 0.8125rem;
+        cursor: pointer;
+        transition: color 120ms ease;
     }
-    .monitor-form-summary dd {
-        @apply min-w-0 flex-1 truncate;
-        color: var(--theme-text);
-        font-variant-numeric: tabular-nums;
-        font-feature-settings: "tnum" 1, "lnum" 1;
+    .wizard-step::before {
+        content: counter(wstep);
+        @apply inline-flex items-center justify-center shrink-0;
+        width: 1.25rem;
+        height: 1.25rem;
+        border-radius: 9999px;
+        border: 1px solid var(--theme-line);
+        font-size: 0.7rem;
+        line-height: 1;
+        transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+    }
+    .wizard-step:hover { color: var(--theme-text-muted); }
+    .wizard-step--active { color: var(--theme-text); }
+    .wizard-step--active::before {
+        background: var(--theme-ink);
+        border-color: var(--theme-ink);
+        color: var(--theme-surface);
+    }
+    .wizard-step--done { color: var(--theme-text-muted); }
+    .wizard-step--done::before {
+        content: "✓";
+        border-color: var(--theme-accent);
+        color: var(--theme-accent);
     }
     /* Multi-line helper hints: drop last-line orphans without markup churn. */
     #check-form .text-muted { text-wrap: pretty; }

@@ -485,7 +485,28 @@ fn build_request(
         .header(ACCEPT_ENCODING, "gzip, br");
 
     let bodyless = body.is_none();
+    // The dedicated auth field is canonical: resolve one Authorization value
+    // (bearer over basic, basic if bearer is unusable) and drop a raw
+    // `Authorization` row so the probe never sends two. None falls through to a
+    // raw header.
+    let field_authz = include_auth
+        .then(|| {
+            check
+                .bearer_token
+                .as_ref()
+                .and_then(|t| HeaderValue::try_from(format!("Bearer {t}")).ok())
+                .or_else(|| {
+                    check.basic_auth.as_ref().and_then(|(user, pass)| {
+                        let encoded = BASE64_STANDARD.encode(format!("{user}:{pass}"));
+                        HeaderValue::try_from(format!("Basic {encoded}")).ok()
+                    })
+                })
+        })
+        .flatten();
     for (k, v) in &check.headers {
+        if field_authz.is_some() && k.eq_ignore_ascii_case("authorization") {
+            continue;
+        }
         // On a cross-origin hop, drop the sensitive headers (auth, cookies, API
         // keys) so a credential — configured or resolved from a secret variable —
         // can't follow a hostile `Location` to a different origin.
@@ -512,18 +533,8 @@ fn build_request(
             builder = builder.header(name, val);
         }
     }
-    if include_auth {
-        if let Some((user, pass)) = &check.basic_auth {
-            let encoded = BASE64_STANDARD.encode(format!("{user}:{pass}"));
-            if let Ok(val) = HeaderValue::try_from(format!("Basic {encoded}")) {
-                builder = builder.header(AUTHORIZATION, val);
-            }
-        }
-        if let Some(token) = &check.bearer_token
-            && let Ok(val) = HeaderValue::try_from(format!("Bearer {token}"))
-        {
-            builder = builder.header(AUTHORIZATION, val);
-        }
+    if let Some(val) = field_authz {
+        builder = builder.header(AUTHORIZATION, val);
     }
 
     builder.body(Full::new(body_bytes))
