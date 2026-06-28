@@ -220,20 +220,20 @@
       <h2 class="panel-label">badge</h2>
     </header>
     <div class="space-y-3 p-4">
-      <p class="text-xs text-muted">
+      <p class="text-pretty text-xs text-muted">
         Embed a live status badge in a README or site. Markdown below;
         the image updates on its own.{% if !enabled %} Goes live once the page is public.{% endif %}
       </p>
 
       <div class="flex items-center gap-3">
-        {% if enabled %}<img src="{{ badge }}" height="20" alt="overall status badge" class="block">{% endif %}
+        {% if enabled %}<img src="{{ badge }}" height="20" alt="overall status badge" loading="lazy" decoding="async" class="block">{% endif %}
         <code id="badge-md-overall" class="flex-1 overflow-x-auto whitespace-nowrap rounded bg-[color:var(--theme-surface-sunk)] px-2 py-1 font-mono text-xs text-body">![{% if public_display_name != "" %}{{ public_display_name }}{% else %}{{ name }}{% endif %} status]({{ badge }})</code>
         <button type="button" data-copy="#badge-md-overall" class="sticker-btn shrink-0 px-2.5 py-1 text-xs"><span data-copy-label>copy</span></button>
       </div>
 
-      <div data-badge-list data-badge-base="{{ badge }}">
+      <div data-badge-list data-badge-base="{{ badge }}" class="space-y-2 border-[color:var(--theme-line)] border-t pt-3">
         {% for c in components %}{% if c.on_page %}
-        <div class="flex items-center gap-2 border-t border-[color:var(--theme-line)] pt-2">
+        <div class="flex items-center gap-2">
           <span class="w-28 shrink-0 truncate text-xs text-muted">{% if c.public_name != "" %}{{ c.public_name }}{% else %}{{ c.monitor_name }}{% endif %} <span class="font-mono text-[10px] uppercase text-quiet">{{ c.kind }}</span></span>
           <code id="badge-md-{{ loop.index }}" class="flex-1 overflow-x-auto whitespace-nowrap rounded bg-[color:var(--theme-surface-sunk)] px-2 py-1 font-mono text-xs text-body">![{% if c.public_name != "" %}{{ c.public_name }}{% else %}{{ c.monitor_name }}{% endif %}]({{ badge }}?component={{ c.target_id }})</code>
           <button type="button" data-copy="#badge-md-{{ loop.index }}" class="sticker-btn shrink-0 px-2.5 py-1 text-xs"><span data-copy-label>copy</span></button>
@@ -378,7 +378,7 @@
           const cid = 'badge-md-' + tid;
 
           const row = document.createElement('div');
-          row.className = 'flex items-center gap-2 border-t border-[color:var(--theme-line)] pt-2';
+          row.className = 'flex items-center gap-2';
           const name = document.createElement('span');
           name.className = 'w-28 shrink-0 truncate text-xs text-muted';
           name.textContent = label + ' ';
@@ -402,6 +402,9 @@
           row.append(name, code, btn);
           badgeList.appendChild(row);
         });
+        // Drop the separator line when no components are on the page.
+        badgeList.classList.toggle('border-t', badgeList.children.length > 0);
+        badgeList.classList.toggle('pt-3', badgeList.children.length > 0);
       }
       renderBadgeList();
 
