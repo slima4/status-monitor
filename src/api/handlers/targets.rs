@@ -230,7 +230,7 @@ pub async fn create(
     path = "/api/v1/targets/{id}",
     tag = "targets",
     summary = "Partial update of a target",
-    description = "Omit fields you don't want to change. Submitting the redaction sentinels `[\"***\",\"***\"]` or `\"***\"` for credentials returns 400 — omit the field instead to leave it unchanged.",
+    description = "Omit fields you don't want to change. For HTTP credentials: omit `basic_auth`/`bearer_token` (or send null) to keep the stored value, send an empty sentinel (`[\"\",\"\"]` / `\"\"`) to clear it, or a real value to replace it. The redaction sentinels `[\"***\",\"***\"]` / `\"***\"` return 400, so never echo them back.",
     params(("id" = Uuid, Path)),
     request_body(content = TargetUpdate, example = json!({
         "enabled": false,
@@ -253,6 +253,16 @@ pub async fn update(
 ) -> Result<Redacted<Target>> {
     if let Some(check) = update.check.as_mut() {
         canonicalize_check(check)?;
+        if let crate::domain::CheckSpec::Http(http) = check {
+            let (cleared_basic, cleared_bearer) = take_cleared_credentials(http);
+            let (carry_basic, carry_bearer) = carry_flags(http, cleared_basic, cleared_bearer);
+            if (carry_basic || carry_bearer)
+                && let Some(existing) = state.target_store.get(org, id).await?
+                && let crate::domain::CheckSpec::Http(stored) = &existing.check
+            {
+                carry_credentials(http, stored, carry_basic, carry_bearer);
+            }
+        }
         validate_check(check, &ssrf_guard(&state))?;
         check_abuse(&state, org, check)?;
         validate_variable_refs(&state, org, check).await?;
@@ -1166,6 +1176,45 @@ async fn verify_alert_channels(state: &AppState, org: OrgId, alerts: &TargetAler
     Ok(())
 }
 
+/// An empty-string credential means "clear"; an omitted one is kept.
+fn take_cleared_credentials(http: &mut crate::domain::HttpCheck) -> (bool, bool) {
+    let cleared_basic = matches!(&http.basic_auth, Some((u, p)) if u.is_empty() && p.is_empty());
+    let cleared_bearer = matches!(http.bearer_token.as_deref(), Some(""));
+    if cleared_basic {
+        http.basic_auth = None;
+    }
+    if cleared_bearer {
+        http.bearer_token = None;
+    }
+    (cleared_basic, cleared_bearer)
+}
+
+/// A credential carries from the stored target only when omitted and not cleared.
+fn carry_flags(
+    http: &crate::domain::HttpCheck,
+    cleared_basic: bool,
+    cleared_bearer: bool,
+) -> (bool, bool) {
+    (
+        http.basic_auth.is_none() && !cleared_basic,
+        http.bearer_token.is_none() && !cleared_bearer,
+    )
+}
+
+fn carry_credentials(
+    http: &mut crate::domain::HttpCheck,
+    stored: &crate::domain::HttpCheck,
+    carry_basic: bool,
+    carry_bearer: bool,
+) {
+    if carry_basic {
+        http.basic_auth = stored.basic_auth.clone();
+    }
+    if carry_bearer {
+        http.bearer_token = stored.bearer_token.clone();
+    }
+}
+
 /// Normalises the host/domain of the check in place: IDN-encoded, ASCII
 /// lowercase, trailing dot stripped. After this runs, downstream stores the
 /// canonical form and every layer (circuit breaker, host throttle, RDAP
@@ -1488,6 +1537,65 @@ mod tests {
         use crate::security::ssrf::SsrfGuard;
         validate_check(&head_spec(None), &SsrfGuard::strict())
             .expect("HEAD without body match must pass");
+    }
+
+    fn http_auth(basic: Option<(&str, &str)>, bearer: Option<&str>) -> crate::domain::HttpCheck {
+        use crate::domain::{ExpectedStatus, HttpCheck, HttpMethod};
+        use std::time::Duration;
+        HttpCheck {
+            url: "https://example.com/".parse().unwrap(),
+            method: HttpMethod::Get,
+            timeout: Duration::from_secs(5),
+            follow_redirects: false,
+            max_redirects: 0,
+            expected_status: ExpectedStatus::Exact(200),
+            expected_body_contains: None,
+            headers: Default::default(),
+            body: None,
+            verify_tls: true,
+            basic_auth: basic.map(|(u, p)| (u.to_owned(), p.to_owned())),
+            bearer_token: bearer.map(str::to_owned),
+        }
+    }
+
+    #[test]
+    fn credentials_empty_sentinel_clears() {
+        let mut h = http_auth(Some(("", "")), Some(""));
+        let (cb, cbr) = take_cleared_credentials(&mut h);
+        assert!(cb && cbr);
+        assert!(h.basic_auth.is_none() && h.bearer_token.is_none());
+    }
+
+    #[test]
+    fn credentials_omitted_carry_from_stored() {
+        let stored = http_auth(Some(("u", "p")), Some("tok"));
+        let mut incoming = http_auth(None, None);
+        let (cb, cbr) = take_cleared_credentials(&mut incoming);
+        let (carry_basic, carry_bearer) = carry_flags(&incoming, cb, cbr);
+        carry_credentials(&mut incoming, &stored, carry_basic, carry_bearer);
+        assert_eq!(incoming.basic_auth, Some(("u".into(), "p".into())));
+        assert_eq!(incoming.bearer_token.as_deref(), Some("tok"));
+    }
+
+    #[test]
+    fn credentials_cleared_not_carried_back() {
+        let stored = http_auth(Some(("u", "p")), Some("tok"));
+        let mut incoming = http_auth(Some(("", "")), Some(""));
+        let (cb, cbr) = take_cleared_credentials(&mut incoming);
+        let (carry_basic, carry_bearer) = carry_flags(&incoming, cb, cbr);
+        carry_credentials(&mut incoming, &stored, carry_basic, carry_bearer);
+        assert!(incoming.basic_auth.is_none() && incoming.bearer_token.is_none());
+    }
+
+    #[test]
+    fn credentials_replacement_kept_over_stored() {
+        let stored = http_auth(Some(("u", "p")), Some("old"));
+        let mut incoming = http_auth(Some(("new", "pw")), Some("new"));
+        let (cb, cbr) = take_cleared_credentials(&mut incoming);
+        let (carry_basic, carry_bearer) = carry_flags(&incoming, cb, cbr);
+        carry_credentials(&mut incoming, &stored, carry_basic, carry_bearer);
+        assert_eq!(incoming.basic_auth, Some(("new".into(), "pw".into())));
+        assert_eq!(incoming.bearer_token.as_deref(), Some("new"));
     }
 
     #[test]
