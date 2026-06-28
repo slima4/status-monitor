@@ -22,7 +22,7 @@
         {% endmatch %}
     </p>
     {% match inc.latest_message %}
-        {% when Some with (msg) %}<p class="text-sm text-muted">{{ msg }}</p>{% when None %}
+        {% when Some with (msg) %}<p class="text-pretty text-sm text-muted">{{ msg }}</p>{% when None %}
     {% endmatch %}
 </article>
 {% endmacro %}

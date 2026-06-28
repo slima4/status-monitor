@@ -1839,6 +1839,30 @@
     .day-pop-status--mnt  { background: var(--sm-state-mnt-soft-bg);  color: var(--sm-state-mnt-soft-fg); }
     .day-pop-status--none { background: var(--sm-state-none-soft-bg); color: var(--sm-state-none-soft-fg); }
 
+    /* Public subscribe modal enter/exit. JS uses showModal()/close(), so
+       allow-discrete drives both directions (ESC inherits it). */
+    #subscribe-dialog {
+        opacity: 0;
+        translate: 0 8px;
+        transition: opacity 200ms cubic-bezier(0.2, 0, 0, 1),
+                    translate 200ms cubic-bezier(0.2, 0, 0, 1),
+                    overlay 200ms allow-discrete,
+                    display 200ms allow-discrete;
+    }
+    #subscribe-dialog[open] { opacity: 1; translate: 0 0; }
+    @starting-style { #subscribe-dialog[open] { opacity: 0; translate: 0 8px; } }
+    #subscribe-dialog::backdrop {
+        opacity: 0;
+        transition: opacity 200ms cubic-bezier(0.2, 0, 0, 1),
+                    overlay 200ms allow-discrete,
+                    display 200ms allow-discrete;
+    }
+    #subscribe-dialog[open]::backdrop { opacity: 1; }
+    @starting-style { #subscribe-dialog[open]::backdrop { opacity: 0; } }
+    @media (prefers-reduced-motion: reduce) {
+        #subscribe-dialog, #subscribe-dialog::backdrop { transition: none; translate: none; }
+    }
+
     /* Small colour swatch used in the public status-page legend. Fills are
        intentionally the same set the history strip uses (rendered via
        .day-cell--* from day_classes() in public_status.rs) — the legend

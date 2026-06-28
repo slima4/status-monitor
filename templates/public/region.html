@@ -20,7 +20,7 @@
         <div class="flex items-center gap-4">
             <span aria-hidden="true" class="text-4xl leading-none">{{ view.overall_icon }}</span>
             <div class="min-w-0">
-                <h1 id="overall-heading" class="text-2xl font-semibold tracking-tight sm:text-3xl">
+                <h1 id="overall-heading" class="text-balance text-2xl font-semibold tracking-tight sm:text-3xl">
                     {{ view.overall_label }}<span class="sr-only"> — {{ view.overall_aria }}</span>
                 </h1>
                 <p class="mt-1 text-sm opacity-80">
@@ -47,14 +47,14 @@
                            class="min-w-0 break-words font-medium hover:underline text-state-warn-strong">{{ inc.header.title }}</a>
                         {% call chips::sevphase(inc.header) %}{% endcall %}
                     </div>
-                    <p class="text-sm text-muted">
+                    <p class="text-pretty text-sm text-muted">
                         Started
                         <time datetime="{{ inc.header.started_at|iso_ts }}" data-tz="exact">{{ inc.header.started_at|human_ts }}</time>
                         — {{ inc.header.duration_secs|humanize_dur }} ago — {{ inc.header.component_name }}
                     </p>
                     {% match inc.latest_message %}
                         {% when Some with (msg) %}
-                            <p class="rounded-sm px-3 py-2 text-sm italic text-muted"
+                            <p class="text-pretty rounded-sm px-3 py-2 text-sm italic text-muted"
                                style="background: var(--theme-surface-elev);">“{{ msg }}”</p>
                         {% when None %}
                     {% endmatch %}
@@ -86,7 +86,7 @@
                     {% if !m.affects.is_empty() %} · affects {{ m.affects }}{% endif %}
                 </p>
                 {% match m.description %}
-                    {% when Some with (d) %}<p class="text-quiet">{{ d }}</p>{% when None %}
+                    {% when Some with (d) %}<p class="text-pretty text-quiet">{{ d }}</p>{% when None %}
                 {% endmatch %}
             </li>
             {% endfor %}
@@ -109,7 +109,7 @@
                     {% if !m.affects.is_empty() %} · affects {{ m.affects }}{% endif %}
                 </p>
                 {% match m.description %}
-                    {% when Some with (d) %}<p class="text-quiet">{{ d }}</p>{% when None %}
+                    {% when Some with (d) %}<p class="text-pretty text-quiet">{{ d }}</p>{% when None %}
                 {% endmatch %}
             </li>
             {% endfor %}
@@ -147,7 +147,7 @@
                         <span class="shrink-0 whitespace-nowrap text-sm font-medium {{ c.status_class }}">{{ c.status_label }}</span>
                     </div>
                     {% match c.description %}
-                        {% when Some with (d) %}<p class="mt-0.5 text-xs text-quiet">{{ d }}</p>{% when None %}
+                        {% when Some with (d) %}<p class="mt-0.5 text-pretty text-xs text-quiet">{{ d }}</p>{% when None %}
                     {% endmatch %}
                     <div class="day-strip mt-4"
                          role="group"
