@@ -133,22 +133,24 @@
       <header class="card-band">
         <h2 id="components-heading" class="panel-label">components</h2>
       </header>
-      <p class="px-4 pt-3 text-xs text-muted">Toggle which monitors appear on this page; set an optional public name / group.</p>
+      <p class="px-4 pt-3 text-xs text-muted">Toggle which monitors appear on this page; set an optional public name / group. Drag the <span aria-hidden="true">⠿</span> handle to reorder live components.</p>
       <table class="mt-3 w-full text-left text-sm">
         <thead class="table-head bg-[color:var(--theme-surface-sunk)]">
           <tr>
+            <th scope="col" class="w-10 px-2 py-2"><span class="sr-only">Reorder</span></th>
             <th scope="col" class="px-4 py-2">On page</th>
             <th scope="col" class="px-4 py-2">Monitor</th>
             <th scope="col" class="px-4 py-2">Public name</th>
             <th scope="col" class="px-4 py-2">Group</th>
           </tr>
         </thead>
-        <tbody class="divide-y divide-[color:var(--theme-line)]">
+        <tbody id="components-rows" class="divide-y divide-[color:var(--theme-line)]">
           {% if components.is_empty() %}
-          <tr><td colspan="4" class="px-4 py-6 text-center font-mono text-xs text-quiet"># no monitors yet — <a href="/targets/new" class="underline decoration-dotted underline-offset-2 hover:text-body">create a monitor</a> to show it on this page</td></tr>
+          <tr><td colspan="5" class="px-4 py-6 text-center font-mono text-xs text-quiet"># no monitors yet — <a href="/targets/new" class="underline decoration-dotted underline-offset-2 hover:text-body">create a monitor</a> to show it on this page</td></tr>
           {% else %}
           {% for c in components %}
-          <tr data-target-id="{{ c.target_id }}" data-kind="{{ c.kind }}" data-monitor-name="{{ c.monitor_name }}">
+          <tr data-target-id="{{ c.target_id }}" data-kind="{{ c.kind }}" data-monitor-name="{{ c.monitor_name }}" class="transition-opacity">
+            <td class="w-10 p-0 align-middle"><button type="button" data-drag-handle aria-label="Reorder {{ c.monitor_name }}" class="inline-flex h-10 w-10 items-center justify-center rounded select-none text-base leading-none text-quiet transition-transform cursor-grab hover:text-body focus-visible:text-body active:cursor-grabbing motion-safe:active:scale-[0.96] disabled:cursor-default disabled:opacity-0"{% if !c.on_page %} disabled tabindex="-1"{% endif %}>⠿</button></td>
             <td class="px-4 py-2 align-middle"><input type="checkbox" data-on-page aria-label="Show {{ c.monitor_name }} on this page"{% if c.on_page %} checked{% endif %}></td>
             <td class="px-4 py-2 align-middle text-body">{{ c.monitor_name }} <span class="ml-1 rounded bg-[color:var(--theme-surface-sunk)] px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wide text-muted">{{ c.kind }}</span></td>
             <td class="px-4 py-2"><input type="text" data-field="public_name" value="{{ c.public_name }}" maxlength="80" placeholder="{{ c.name_hint }}" aria-label="Public name for {{ c.monitor_name }}" autocomplete="off" class="w-full field text-xs"{% if !c.on_page %} disabled{% endif %}></td>
@@ -403,15 +405,78 @@
       }
       renderBadgeList();
 
-      document.querySelectorAll('tr[data-target-id]').forEach((tr) => {
+      // On-page rows are a contiguous reorderable block; off-page rows stay fixed below.
+      const rowsBody = document.getElementById('components-rows');
+      const ROW = 'tr[data-target-id]';
+      const isOn = (tr) => { const t = tr.querySelector('[data-on-page]'); return !!t && t.checked; };
+      const onPageIds = () => [...rowsBody.querySelectorAll(ROW)].filter(isOn).map((tr) => tr.dataset.targetId);
+      const firstOff = () => [...rowsBody.querySelectorAll(ROW)].find((tr) => !isOn(tr)) || null;
+      function setHandle(tr, on) {
+        const h = tr.querySelector('[data-drag-handle]');
+        if (h) { h.disabled = !on; h.tabIndex = on ? 0 : -1; }
+      }
+      let savedOrder = onPageIds().join(',');
+      let orderTimer = null;
+      async function persistOrder() {
+        const ids = onPageIds();
+        const key = ids.join(',');
+        if (key === savedOrder) return;
+        try { await api('POST', '/api/v1/status-pages/' + id + '/components/reorder', { target_ids: ids }); savedOrder = key; renderBadgeList(); ok('order saved'); }
+        catch (m) { err(m); }
+      }
+      function scheduleOrder() { clearTimeout(orderTimer); orderTimer = setTimeout(persistOrder, 400); }
+
+      let dragRow = null;
+      rowsBody.addEventListener('dragstart', (e) => {
+        const tr = e.target.closest(ROW);
+        if (!tr || !tr.draggable) return;
+        dragRow = tr; e.dataTransfer.effectAllowed = 'move'; tr.classList.add('opacity-50');
+      });
+      rowsBody.addEventListener('dragend', () => {
+        // dragend always fires; drop does not when released over a non-droppable row.
+        if (dragRow) { dragRow.classList.remove('opacity-50'); dragRow.draggable = false; scheduleOrder(); }
+        dragRow = null;
+      });
+      rowsBody.addEventListener('dragover', (e) => {
+        if (!dragRow) return;
+        const over = e.target.closest(ROW);
+        if (!over || over === dragRow || !isOn(over)) return;
+        e.preventDefault();
+        const rect = over.getBoundingClientRect();
+        const after = e.clientY > rect.top + rect.height / 2;
+        rowsBody.insertBefore(dragRow, after ? over.nextSibling : over);
+      });
+      rowsBody.addEventListener('drop', (e) => { if (dragRow) e.preventDefault(); });
+      rowsBody.addEventListener('keydown', (e) => {
+        const h = e.target.closest('[data-drag-handle]');
+        if (!h || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return;
+        const tr = h.closest(ROW);
+        if (!tr || !isOn(tr)) return;
+        const sib = e.key === 'ArrowUp' ? tr.previousElementSibling : tr.nextElementSibling;
+        if (!sib || !sib.matches(ROW) || !isOn(sib)) return;
+        e.preventDefault();
+        if (e.key === 'ArrowUp') rowsBody.insertBefore(tr, sib); else rowsBody.insertBefore(sib, tr);
+        h.focus(); scheduleOrder();
+      });
+
+      rowsBody.querySelectorAll(ROW).forEach((tr) => {
         const tid = tr.dataset.targetId;
         const toggle = tr.querySelector('[data-on-page]');
         const inputs = tr.querySelectorAll('[data-field]');
+        const handle = tr.querySelector('[data-drag-handle]');
+        // Gate drag on the handle so the row's text inputs stay selectable.
+        if (handle) {
+          handle.addEventListener('pointerdown', () => { if (!handle.disabled) tr.draggable = true; });
+          handle.addEventListener('pointerup', () => { tr.draggable = false; });
+        }
         toggle.addEventListener('change', async () => {
           try {
             if (toggle.checked) await api('POST', '/api/v1/status-pages/' + id + '/components', { target_id: tid });
             else await api('DELETE', '/api/v1/status-pages/' + id + '/components/' + tid);
             inputs.forEach((i) => { i.disabled = !toggle.checked; });
+            setHandle(tr, toggle.checked);
+            if (toggle.checked) { rowsBody.insertBefore(tr, firstOff()); await persistOrder(); }
+            else { rowsBody.appendChild(tr); savedOrder = onPageIds().join(','); }
             renderBadgeList();
             ok('updated');
           } catch (m) { toggle.checked = !toggle.checked; err(m); }
