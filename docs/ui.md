@@ -70,24 +70,18 @@ The dashboard splits into three regions:
 
 The `dashboard_summary` handler caches its result in `state.dashboard_cache` for 5 s, so the polling load on Postgres + ClickHouse is bounded to one query set per 5 s regardless of how many tabs are open.
 
-## Credential redaction
+## Credentials
 
-For `basic_auth` and `bearer_token` the form runs a three-state machine in `static/js/ui/auth_field.js`:
+The form has no inline credential inputs. HTTP `basic_auth` and `bearer_token` are set through request headers that reference org secret variables, chosen via the secret-variable auth picker (`data-var-auth-picker`) and the insert-variable helper.
 
-| `data-mode` | Inputs | Submit behaviour |
-|---|---|---|
-| `create` | enabled, empty | Field included in POST body if filled. |
-| `redacted` | disabled, sentinel `***` shown | Field **omitted** from PATCH body. |
-| `replacing` | enabled, empty | Field included with the real value. |
-
-The API rejects the `***` sentinel on write as defence-in-depth — but the state machine prevents the form from ever submitting it. End-to-end coverage in `tests/web_e2e_test.rs::edit_form_shows_redacted_auth_state_for_existing_target` asserts that real credentials never appear in the rendered edit form.
+Stored credentials never render into the edit form. The API rejects the `***` redaction sentinel on write; on PATCH an omitted credential keeps the stored value, an empty value clears it, and a real value replaces it. End-to-end coverage in `tests/web_e2e_test.rs::edit_form_renders_existing_target_without_leaking_credentials` asserts that real credentials never appear in the rendered edit form.
 
 ## Tests
 
 | Layer | What |
 |---|---|
 | Unit (template render) | Every view in `src/web/views/` ships a `#[test]` that renders the template with a fixtures struct and asserts on the output: HTMX hooks, redaction sentinels, chart `data-endpoint`s, table scaffolding. |
-| End-to-end | `tests/web_e2e_test.rs` drives the merged api+web router via `tower::ServiceExt::oneshot`, covering dashboard (full + partial), list (full + partial), forms (create + redacted-edit), target detail with chart anchors + time-range nav, 404 paths, and the immutable cache header on `/static/*`. |
+| End-to-end | `tests/web_e2e_test.rs` drives the merged api+web router via `tower::ServiceExt::oneshot`, covering dashboard (full + partial), list (full + partial), forms (create + edit), target detail with chart anchors + time-range nav, 404 paths, and the immutable cache header on `/static/*`. |
 | Build-time | `cargo build` rejects template type mismatches — askama checks templates against the corresponding Rust struct at compile time. |
 
 ```bash

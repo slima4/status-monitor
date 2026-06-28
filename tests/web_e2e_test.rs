@@ -149,12 +149,7 @@ async fn new_target_form_renders_create_mode() {
     assert!(html.contains(r#"data-action="/api/v1/targets""#));
     assert!(html.contains(r#"data-method="POST""#));
     assert!(html.contains(r#"data-mode="create""#));
-    assert!(html.contains(r#"data-auth-field="basic""#));
-    assert!(html.contains(r#"data-initial-mode="create""#));
-    assert!(html.contains("set credentials"));
-    assert!(html.contains("set token"));
-    // The variable affordances: additive secret-variable auth picker plus the
-    // insert-helper script (the inline auth fields are kept, not replaced).
+    // Credentials are supplied via headers with secret variables, not inline auth fields.
     assert!(
         html.contains("data-var-auth-picker"),
         "secret-variable auth picker present"
@@ -166,7 +161,7 @@ async fn new_target_form_renders_create_mode() {
 }
 
 #[tokio::test]
-async fn edit_form_shows_redacted_auth_state_for_existing_target() {
+async fn edit_form_renders_existing_target_without_leaking_credentials() {
     let router = app();
     let id = create_http_target(&router, "redacted-edit-target").await;
 
@@ -184,10 +179,7 @@ async fn edit_form_shows_redacted_auth_state_for_existing_target() {
     assert!(html.contains(r#"value="redacted-edit-target""#));
     assert!(html.contains(r#"data-method="PATCH""#));
     assert!(html.contains(r#"data-mode="edit""#));
-    assert!(html.contains(r#"data-initial-mode="redacted""#));
-    assert!(html.contains("replace credentials"));
-    assert!(html.contains("replace token"));
-    // Real values must NEVER appear in the HTML; only the sentinel does.
+    // Stored credentials must never reach the form HTML.
     assert!(!html.contains("s3cret"));
     assert!(!html.contains("tok-abc"));
 }
