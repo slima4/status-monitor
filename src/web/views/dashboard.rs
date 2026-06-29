@@ -332,7 +332,7 @@ pub async fn index(
     let selected_status = (status != FILTER_ANY).then_some(status);
     let kind = resolve_range_key(params.kind.as_deref(), &TYPE_FILTERS, FILTER_ANY);
     let selected_kind = (kind != FILTER_ANY).then_some(kind);
-    let region_ids = state.target_store.regions_for_org(org.0).await?;
+    let region_ids = state.regions_for_org(org.0).await?;
     let selected_region = resolve_region(params.region, &region_ids);
     let snapshot = snapshot_for(&state, org.0, range, selected_region.as_deref()).await?;
     let catalog = state.regions_detailed().await?;
@@ -512,7 +512,7 @@ pub async fn table_partial(
     let selected_status = (status != FILTER_ANY).then_some(status);
     let kind = resolve_range_key(params.kind.as_deref(), &TYPE_FILTERS, FILTER_ANY);
     let selected_kind = (kind != FILTER_ANY).then_some(kind);
-    let region_ids = state.target_store.regions_for_org(org.0).await?;
+    let region_ids = state.regions_for_org(org.0).await?;
     let selected_region = resolve_region(params.region, &region_ids);
     let snapshot = snapshot_for(&state, org.0, range, selected_region.as_deref()).await?;
     let catalog = state.regions_detailed().await?;

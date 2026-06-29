@@ -675,7 +675,7 @@ pub async fn index(
     let range_key = resolve_range_key(params.range.as_deref(), &RANGE_KEYS, DEFAULT_RANGE);
     let (from, to) = resolve_window(range_key, params.from, params.to);
     let labels = WindowLabels::new(from, to);
-    let region_ids = state.target_store.regions_for_org(org).await?;
+    let region_ids = state.regions_for_org(org).await?;
     let selected_region = super::dashboard::resolve_region(params.region, &region_ids);
     let catalog = state.regions_detailed().await?;
     let live = load_live_data_cached(

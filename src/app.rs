@@ -111,6 +111,17 @@ fn build_region_catalog_cache() -> RegionCatalogCache {
         .build()
 }
 
+/// Per-org region-id list, read on the 5s dashboard poll. Short TTL collapses
+/// the DISTINCT-join to one query per org per window.
+pub type RegionsForOrgCache = Cache<OrgId, Arc<Vec<String>>>;
+
+fn build_regions_for_org_cache() -> RegionsForOrgCache {
+    Cache::builder()
+        .time_to_live(Duration::from_secs(60))
+        .max_capacity(10_000)
+        .build()
+}
+
 /// Per-process fast-path for recently-ingested agent `batch_id`s. NOT the
 /// source of truth: it is per-replica, so during a blue/green cutover a retry
 /// can land on the other color and miss here. The authoritative cross-process
@@ -218,6 +229,7 @@ pub struct AppState {
     pub dashboard_page_cache: DashboardPageCache,
     pub incident_metrics_cache: IncidentMetricsCache,
     pub region_catalog_cache: RegionCatalogCache,
+    pub regions_for_org_cache: RegionsForOrgCache,
     pub idempotency: Arc<IdempotencyCache>,
     pub public_source: Arc<dyn PublicSource>,
     pub maintenance_store: Arc<dyn MaintenanceStore>,
@@ -406,6 +418,18 @@ impl AppState {
         Ok(regions)
     }
 
+    /// Per-org region-id list, cached so the polled dashboard skips the
+    /// DISTINCT-join on every tick.
+    pub async fn regions_for_org(&self, org: OrgId) -> crate::error::Result<Vec<String>> {
+        if let Some(regions) = self.regions_for_org_cache.get(&org) {
+            return Ok((*regions).clone());
+        }
+        let regions = self.target_store.regions_for_org(org).await?;
+        self.regions_for_org_cache
+            .insert(org, Arc::new(regions.clone()));
+        Ok(regions)
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         cfg: AppConfig,
@@ -485,6 +509,7 @@ impl AppState {
             dashboard_page_cache: build_dashboard_page_cache(),
             incident_metrics_cache: build_incident_metrics_cache(),
             region_catalog_cache: build_region_catalog_cache(),
+            regions_for_org_cache: build_regions_for_org_cache(),
             idempotency: Arc::new(IdempotencyCache::new()),
             public_source,
             maintenance_store,
