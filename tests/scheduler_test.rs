@@ -85,10 +85,10 @@ async fn scheduler_runs_target_periodically() {
 }
 
 // Coverage smoke for the stagger code path: confirms the deterministic
-// phase-offset branch of `run_target_loop` still produces results promptly.
-// Cadence-steadiness is locked structurally by the `stagger_offset` unit
-// tests (bounded, deterministic); this test asserts only that the loop
-// keeps ticking, not exact wall-clock timing.
+// phase-offset scheduling still produces results promptly. Cadence-steadiness
+// is locked structurally by the `stagger_offset` unit tests (bounded,
+// deterministic); this test asserts only that the driver keeps ticking, not
+// exact wall-clock timing.
 #[tokio::test]
 async fn scheduler_runs_staggered_target() {
     let (addr, counter) = spawn_counting_mock().await;
@@ -463,4 +463,90 @@ async fn worker_pool_breaker_opens_after_failures() {
     assert!(downs >= 2, "expected ≥2 downs, got {downs}");
     assert!(circuit_opens >= 1, "breaker never opened");
     assert!(pool.open_breakers() >= 1);
+}
+
+struct MutableSource {
+    targets: std::sync::Mutex<Vec<(OrgId, Target)>>,
+}
+
+impl MutableSource {
+    fn new(initial: Vec<(OrgId, Target)>) -> Self {
+        Self {
+            targets: std::sync::Mutex::new(initial),
+        }
+    }
+
+    fn set(&self, targets: Vec<(OrgId, Target)>) {
+        *self.targets.lock().unwrap() = targets;
+    }
+}
+
+#[async_trait]
+impl EnabledTargetSource for MutableSource {
+    async fn list_all_enabled_targets(&self) -> SmResult<Vec<(OrgId, Target)>> {
+        Ok(self.targets.lock().unwrap().clone())
+    }
+}
+
+#[tokio::test]
+async fn scheduler_applies_update_and_removal() {
+    let (addr, _counter) = spawn_counting_mock().await;
+    let org = OrgId(uuid::Uuid::from_u128(1));
+    let target = http_target(addr, "/ping", 200);
+    let source = Arc::new(MutableSource::new(vec![(org, target.clone())]));
+    let registry = Arc::new(TargetRegistry::new(source.clone()));
+    let (tx, mut rx) = mpsc::channel(64);
+
+    let pool = Arc::new(WorkerPool::new(
+        50,
+        test_client(),
+        breaker_cfg(),
+        ResultFanout::new(tx),
+        uptimepage::worker::host_throttle::HostThrottle::permissive(),
+        common::test_domain_expiry_runtime(),
+    ));
+    let scheduler = Arc::new(Scheduler::new(registry, pool, scheduler_cfg(1)));
+    let shutdown = CancellationToken::new();
+    let handle = tokio::spawn(scheduler.clone().run(shutdown.clone()));
+
+    let first = tokio::time::timeout(Duration::from_secs(2), rx.recv()).await;
+    assert!(matches!(first, Ok(Some(_))), "no probe after add");
+    assert_eq!(scheduler.active_tasks(), 1);
+
+    // An edit bumps updated_at → the registry reports it as `updated`. The
+    // superseded heap entry must not leave a second live schedule.
+    let mut updated = target.clone();
+    updated.updated_at = chrono::Utc::now();
+    source.set(vec![(org, updated)]);
+    tokio::time::sleep(Duration::from_millis(1300)).await;
+    assert_eq!(
+        scheduler.active_tasks(),
+        1,
+        "update must not double-schedule the target"
+    );
+    // Drain any probes buffered during the sleep, then confirm probing continues.
+    while rx.try_recv().is_ok() {}
+    let after_update = tokio::time::timeout(Duration::from_secs(2), rx.recv()).await;
+    assert!(
+        matches!(after_update, Ok(Some(_))),
+        "probing stopped after update"
+    );
+
+    source.set(vec![]);
+    let reaped = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if scheduler.active_tasks() == 0 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await;
+    assert!(
+        reaped.is_ok(),
+        "removed target never dropped from the count"
+    );
+
+    shutdown.cancel();
+    handle.await.unwrap().unwrap();
 }

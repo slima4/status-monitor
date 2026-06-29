@@ -65,7 +65,7 @@ The web layer is a thin server-rendered surface on top of the existing JSON API:
                          │ TargetRegistry.refresh() every N seconds
                          ▼
                 ┌────────────────┐
-                │ Scheduler      │  one task per target, jittered tick
+                │ Scheduler      │  single-driver timing heap, jittered tick
                 └────────┬───────┘
                          │ dispatch
                          ▼
@@ -109,7 +109,7 @@ stored). If no agent is currently serving the region the request returns `503 PR
 ## Concurrency model
 
 - One Tokio runtime, multi-threaded scheduler (default `worker_threads = num_cpus`)
-- One Tokio task per active target in the scheduler — sleeps `interval ± jitter`, dispatches, sleeps again
+- One scheduler driver task owns a min-heap of `(due, target)` keyed by next-due instant — sleeps until the earliest due, dispatches every due target, reschedules at `interval ± jitter`; memory stays flat in the fleet size instead of one task + timer per target
 - `WorkerPool::execute` spawns a new task per dispatch, gated by `Arc<Semaphore>` sized to `max_concurrent_checks`
 - Batcher is a single task with `tokio::select!` over channel-recv, timeout, and cancellation
 - Sampler is a single task that periodically reads gauge sources (pool semaphore counts, target count, breaker counts) and records into the metrics registry

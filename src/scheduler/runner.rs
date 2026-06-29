@@ -1,30 +1,27 @@
+use std::cmp::Reverse;
+use std::collections::BinaryHeap;
+use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
-use dashmap::DashMap;
 use metrics::{Counter, Gauge, counter, gauge, histogram};
-use tokio::task::JoinHandle;
-use tokio::time::{Instant, MissedTickBehavior, interval_at};
+use tokio::sync::mpsc;
+use tokio::time::{Instant, MissedTickBehavior};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::config::SchedulerConfig;
 use crate::error::Result;
 use crate::observability::metrics::names;
-use crate::scheduler::registry::{ScheduledTarget, TargetRegistry};
+use crate::scheduler::registry::{RegistryDiff, ScheduledTarget, TargetRegistry};
 use crate::worker::{CheckTask, WorkerPool};
 
 /// Fixed sweep cadence — decoupled from registry-refresh so a DB outage or
 /// an operator-tuned refresh interval doesn't delay memory reclamation.
 const SWEEP_INTERVAL: Duration = Duration::from_secs(30);
-
-/// Upper bound on shutdown drain. Target loops exit on the next select poll
-/// after their cancel token fires, so well-behaved tasks return in milliseconds.
-/// The budget exists to bound shutdown on a stuck task (e.g. one spinning in a
-/// non-cancel-aware sync block) rather than hanging the process indefinitely.
-const SHUTDOWN_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Backoff cap on consecutive refresh failures: next attempt waits at most
 /// `base × REFRESH_BACKOFF_CAP_MULTIPLIER` seconds. Bounds recovery latency
@@ -37,6 +34,9 @@ const REFRESH_BACKOFF_CAP_MULTIPLIER: u64 = 10;
 /// keeping a freshly-added target's first result within a few seconds.
 const INITIAL_PROBE_SPREAD: Duration = Duration::from_secs(5);
 
+/// Diff backlog tolerated before the refresher back-pressures.
+const REFRESH_CHANNEL_BOUND: usize = 8;
+
 static REFRESH_FAILED: LazyLock<Counter> =
     LazyLock::new(|| counter!(names::SCHEDULER_REFRESH_FAILED));
 static CONSECUTIVE_REFRESH_FAILURES: LazyLock<Gauge> =
@@ -46,12 +46,18 @@ pub struct Scheduler {
     registry: Arc<TargetRegistry>,
     pool: Arc<WorkerPool>,
     cfg: SchedulerConfig,
-    tasks: Arc<DashMap<Uuid, TargetTaskHandle>>,
+    scheduled: Arc<AtomicUsize>,
 }
 
-struct TargetTaskHandle {
-    cancel: CancellationToken,
-    handle: JoinHandle<()>,
+/// A pending fire. `first` marks the initial staggered probe; `seq` is the
+/// schedule generation — an entry is live only while it matches the id's
+/// current `seq`, so a re-scheduled id's older entries drop on pop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct Due {
+    at: Instant,
+    id: Uuid,
+    seq: u64,
+    first: bool,
 }
 
 impl Scheduler {
@@ -60,12 +66,12 @@ impl Scheduler {
             registry,
             pool,
             cfg,
-            tasks: Arc::new(DashMap::new()),
+            scheduled: Arc::new(AtomicUsize::new(0)),
         }
     }
 
     pub fn active_tasks(&self) -> usize {
-        self.tasks.len()
+        self.scheduled.load(Ordering::Relaxed)
     }
 
     pub async fn run(self: Arc<Self>, shutdown: CancellationToken) -> Result<()> {
@@ -73,61 +79,77 @@ impl Scheduler {
             self.cfg.target_refresh_interval_secs >= 1,
             "target_refresh_interval_secs must be validated >= 1 before Scheduler::run",
         );
-        let mut refresh =
-            tokio::time::interval(Duration::from_secs(self.cfg.target_refresh_interval_secs));
-        refresh.set_missed_tick_behavior(MissedTickBehavior::Skip);
+
+        // Refresh runs off the driver so a slow PG round-trip can never stall
+        // probe dispatch — the driver only ever does in-memory work.
+        let (diff_tx, mut diff_rx) = mpsc::channel::<RegistryDiff>(REFRESH_CHANNEL_BOUND);
+        let refresher = tokio::spawn(Arc::clone(&self).run_refresher(diff_tx, shutdown.clone()));
 
         let mut sweep = tokio::time::interval(SWEEP_INTERVAL);
         sweep.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
-        let mut consecutive_failures: u32 = 0;
+        let mut heap: BinaryHeap<Reverse<Due>> = BinaryHeap::new();
+        let mut live: HashMap<Uuid, u64> = HashMap::new();
+        let mut next_seq: u64 = 0;
 
-        // Initial tick made cancel-aware so an operator-triggered shutdown
-        // during a slow PG handshake doesn't block boot for the full pool
-        // timeout. If shutdown fires here, skip the loop entirely.
-        let initial = tokio::select! {
-            _ = shutdown.cancelled() => None,
-            r = self.tick_once() => Some(r),
-        };
-        match initial {
-            None => {
-                tracing::info!("scheduler shutting down before initial refresh");
-                self.cancel_all().await;
-                return Ok(());
+        loop {
+            let next_at = heap.peek().map(|Reverse(due)| due.at);
+            tokio::select! {
+                _ = shutdown.cancelled() => break,
+                maybe = diff_rx.recv() => match maybe {
+                    Some(diff) => self.apply_diff(&diff, &mut heap, &mut live, &mut next_seq),
+                    None => break,
+                },
+                _ = sweep.tick() => self.sweep_once(),
+                _ = sleep_until_opt(next_at) => self.drain_due(&mut heap, &mut live),
             }
-            Some(r) => self.handle_refresh_result(&mut consecutive_failures, &mut refresh, r),
         }
+
+        drop(diff_rx);
+        let _ = refresher.await;
+        Ok(())
+    }
+
+    async fn run_refresher(
+        self: Arc<Self>,
+        diff_tx: mpsc::Sender<RegistryDiff>,
+        shutdown: CancellationToken,
+    ) {
+        let mut refresh =
+            tokio::time::interval(Duration::from_secs(self.cfg.target_refresh_interval_secs));
+        refresh.set_missed_tick_behavior(MissedTickBehavior::Skip);
+        let mut consecutive_failures: u32 = 0;
 
         loop {
             tokio::select! {
-                _ = shutdown.cancelled() => {
-                    tracing::info!("scheduler shutting down");
-                    break;
-                }
+                _ = shutdown.cancelled() => return,
                 _ = refresh.tick() => {
-                    // tick_once awaits PG; wrap in a nested select so the
-                    // shutdown signal is observable during a slow handshake.
                     let outcome = tokio::select! {
-                        _ = shutdown.cancelled() => None,
-                        r = self.tick_once() => Some(r),
+                        _ = shutdown.cancelled() => return,
+                        r = self.refresh_registry() => r,
                     };
                     match outcome {
-                        None => break,
-                        Some(r) => self.handle_refresh_result(
-                            &mut consecutive_failures,
-                            &mut refresh,
-                            r,
-                        ),
+                        Ok(diff) => {
+                            self.handle_refresh_result(&mut consecutive_failures, &mut refresh, Ok(()));
+                            if diff_tx.send(diff).await.is_err() {
+                                return;
+                            }
+                        }
+                        Err(err) => {
+                            self.handle_refresh_result(&mut consecutive_failures, &mut refresh, Err(err));
+                        }
                     }
-                }
-                _ = sweep.tick() => {
-                    self.sweep_once();
                 }
             }
         }
+    }
 
-        self.cancel_all().await;
-        Ok(())
+    async fn refresh_registry(&self) -> Result<RegistryDiff> {
+        let started = std::time::Instant::now();
+        let result = self.registry.refresh().await;
+        histogram!(names::SCHEDULER_REFRESH_DURATION_MS)
+            .record(started.elapsed().as_millis() as f64);
+        result
     }
 
     fn handle_refresh_result(
@@ -164,30 +186,56 @@ impl Scheduler {
         }
     }
 
-    async fn tick_once(&self) -> Result<()> {
-        let started = std::time::Instant::now();
-        let result = self.registry.refresh().await;
-        // Record on both Ok and Err so Grafana can see "we got slow" AND
-        // "we got slow then timed out" — both inputs to the alerting signal
-        // that drives the future incremental-sync work.
-        histogram!(names::SCHEDULER_REFRESH_DURATION_MS)
-            .record(started.elapsed().as_millis() as f64);
-        let diff = result?;
-        for id in diff.removed {
-            if let Some((_, handle)) = self.tasks.remove(&id) {
-                handle.cancel.cancel();
+    /// Added and updated targets are (re)scheduled with a fresh generation, so
+    /// any prior entry for the same id is superseded; removed ids drop from the
+    /// live map, leaving their stale entries to reap on pop.
+    fn apply_diff(
+        &self,
+        diff: &RegistryDiff,
+        heap: &mut BinaryHeap<Reverse<Due>>,
+        live: &mut HashMap<Uuid, u64>,
+        next_seq: &mut u64,
+    ) {
+        let now = Instant::now();
+        for st in diff.added.iter().chain(diff.updated.iter()) {
+            schedule(st, heap, live, next_seq, now);
+        }
+        for id in &diff.removed {
+            live.remove(id);
+        }
+        self.scheduled.store(live.len(), Ordering::Relaxed);
+    }
+
+    fn drain_due(&self, heap: &mut BinaryHeap<Reverse<Due>>, live: &mut HashMap<Uuid, u64>) {
+        let now = Instant::now();
+        loop {
+            match heap.peek() {
+                Some(Reverse(due)) if due.at <= now => {}
+                _ => break,
             }
-        }
-        for st in diff.updated {
-            if let Some((_, handle)) = self.tasks.remove(&st.target.id) {
-                handle.cancel.cancel();
+            let Reverse(due) = heap.pop().expect("peeked a due entry");
+            if live.get(&due.id) != Some(&due.seq) {
+                continue;
             }
-            self.spawn_target(st);
+            let Some(st) = self.registry.get(&due.id) else {
+                live.remove(&due.id);
+                continue;
+            };
+            let base = st.target.interval;
+            let anchor = if due.first {
+                due.at + stagger_offset(due.id, base)
+            } else {
+                due.at
+            };
+            heap.push(Reverse(Due {
+                at: next_tick(anchor, base, now),
+                id: due.id,
+                seq: due.seq,
+                first: false,
+            }));
+            dispatch(&self.pool, st);
         }
-        for st in diff.added {
-            self.spawn_target(st);
-        }
-        Ok(())
+        self.scheduled.store(live.len(), Ordering::Relaxed);
     }
 
     fn sweep_once(&self) {
@@ -203,29 +251,49 @@ impl Scheduler {
             );
         }
     }
+}
 
-    fn spawn_target(&self, st: ScheduledTarget) {
-        let cancel = CancellationToken::new();
-        let token = cancel.clone();
-        let pool = self.pool.clone();
-        let id = st.target.id;
+/// Schedule a target's first probe within the initial-spread cap under a fresh
+/// monotonic generation, so any in-flight entry for the same id is superseded.
+fn schedule(
+    st: &ScheduledTarget,
+    heap: &mut BinaryHeap<Reverse<Due>>,
+    live: &mut HashMap<Uuid, u64>,
+    next_seq: &mut u64,
+    now: Instant,
+) {
+    let id = st.target.id;
+    let seq = *next_seq;
+    *next_seq = next_seq.wrapping_add(1);
+    live.insert(id, seq);
+    let base = st.target.interval;
+    debug_assert!(!base.is_zero(), "target interval must be non-zero");
+    let cap = INITIAL_PROBE_SPREAD.min(base / 2);
+    heap.push(Reverse(Due {
+        at: now + stagger_offset(id, cap),
+        id,
+        seq,
+        first: true,
+    }));
+}
 
-        let handle = tokio::spawn(async move {
-            run_target_loop(st, pool, token).await;
-        });
-        self.tasks.insert(id, TargetTaskHandle { cancel, handle });
+/// First phase-aligned grid point strictly after `now` — the heap form of
+/// `MissedTickBehavior::Skip`, dropping any backlog while preserving phase.
+fn next_tick(sched: Instant, base: Duration, now: Instant) -> Instant {
+    let next = sched + base;
+    if next > now {
+        return next;
     }
+    let base_ns = base.as_nanos().max(1);
+    let behind_ns = now.saturating_duration_since(next).as_nanos();
+    let skips = ((behind_ns / base_ns) + 1).min(u32::MAX as u128) as u32;
+    next + base * skips
+}
 
-    async fn cancel_all(&self) {
-        let ids: Vec<Uuid> = self.tasks.iter().map(|e| *e.key()).collect();
-        let mut handles: Vec<(Uuid, JoinHandle<()>)> = Vec::with_capacity(ids.len());
-        for id in ids {
-            if let Some((_, h)) = self.tasks.remove(&id) {
-                h.cancel.cancel();
-                handles.push((id, h.handle));
-            }
-        }
-        drain_handles(handles, SHUTDOWN_DRAIN_TIMEOUT).await;
+async fn sleep_until_opt(at: Option<Instant>) {
+    match at {
+        Some(at) => tokio::time::sleep_until(at).await,
+        None => std::future::pending::<()>().await,
     }
 }
 
@@ -239,88 +307,13 @@ fn backoff_delay_secs(base_secs: u64, consecutive_failures: u32) -> u64 {
     base_secs.saturating_mul(mult)
 }
 
-/// Awaits target-task handles after their cancel tokens have fired. Bounded
-/// by `timeout`: on expiry, remaining handles are dropped (detached), matching
-/// the pre-fix behaviour as a fallback — never blocks shutdown forever.
-async fn drain_handles(handles: Vec<(Uuid, JoinHandle<()>)>, timeout: Duration) {
-    let total = handles.len();
-    if total == 0 {
-        return;
-    }
-    tracing::info!(target_tasks = total, "draining target tasks on shutdown");
-    let started = std::time::Instant::now();
-
-    let drain = async {
-        for (id, h) in handles {
-            match h.await {
-                Ok(()) => {}
-                Err(err) if err.is_panic() => {
-                    tracing::error!(
-                        target_id = %id,
-                        error = %err,
-                        "target task panicked during shutdown",
-                    );
-                }
-                Err(_) => {}
-            }
-        }
-    };
-
-    match tokio::time::timeout(timeout, drain).await {
-        Ok(()) => tracing::info!(
-            target_tasks = total,
-            elapsed_ms = started.elapsed().as_millis() as u64,
-            "target tasks drained",
-        ),
-        Err(_) => tracing::warn!(
-            target_tasks = total,
-            timeout_secs = timeout.as_secs(),
-            "scheduler shutdown drain timed out — orphaning remaining tasks",
-        ),
-    }
-}
-
-async fn run_target_loop(st: ScheduledTarget, pool: Arc<WorkerPool>, shutdown: CancellationToken) {
-    let base = st.target.interval;
-
-    // Validation enforces a per-plan interval floor (>= 1s), so a zero
-    // interval — which would panic `interval_at` — is structurally impossible.
-    debug_assert!(!base.is_zero(), "target interval must be non-zero");
-
-    // Cap at base/2 so a short-cadence target's first→second-probe gap
-    // stays under 1.5× interval.
-    let initial_cap = INITIAL_PROBE_SPREAD.min(base / 2);
-    let initial_offset = stagger_offset(st.target.id, initial_cap);
-    tokio::select! {
-        _ = shutdown.cancelled() => return,
-        _ = tokio::time::sleep(initial_offset) => {}
-    }
-    dispatch(&pool, &st);
-
-    // Deterministic per-target phase offset across the full interval window.
-    // N targets sharing a host get spread over [0, interval) with expected
-    // gap interval/N — eliminates the random-collision starvation pattern
-    // a small random jitter window left on the per-host throttle.
-    let start = Instant::now() + base + stagger_offset(st.target.id, base);
-    let mut tick = interval_at(start, base);
-    tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
-
-    loop {
-        tokio::select! {
-            _ = shutdown.cancelled() => return,
-            _ = tick.tick() => {}
-        }
-        dispatch(&pool, &st);
-    }
-}
-
-fn dispatch(pool: &WorkerPool, st: &ScheduledTarget) {
+fn dispatch(pool: &WorkerPool, st: ScheduledTarget) {
     pool.dispatch(CheckTask {
-        target: st.target.clone(),
+        target: st.target,
         org_id: st.org_id,
-        host_key: st.host_key.clone(),
-        breaker_key: st.breaker_key.clone(),
-        rdap_tld: st.rdap_tld.clone(),
+        host_key: st.host_key,
+        breaker_key: st.breaker_key,
+        rdap_tld: st.rdap_tld,
     });
 }
 
@@ -337,10 +330,12 @@ fn stagger_offset(id: Uuid, interval: Duration) -> Duration {
 #[cfg(test)]
 mod tests {
     use super::{
-        REFRESH_BACKOFF_CAP_MULTIPLIER, backoff_delay_secs, drain_handles, stagger_offset,
+        Due, REFRESH_BACKOFF_CAP_MULTIPLIER, backoff_delay_secs, next_tick, stagger_offset,
     };
+    use std::cmp::Reverse;
+    use std::collections::BinaryHeap;
     use std::time::Duration;
-    use tokio_util::sync::CancellationToken;
+    use tokio::time::Instant;
     use uuid::Uuid;
 
     #[test]
@@ -369,10 +364,6 @@ mod tests {
 
     #[test]
     fn initial_offset_is_bounded_by_spread_cap() {
-        // INITIAL_PROBE_SPREAD.min(base/2) is what run_target_loop passes for
-        // the first probe — long-interval target gets its first result within
-        // the spread cap, short-interval target stays under base/2 so the
-        // first→second-probe gap stays under 1.5× interval.
         use super::INITIAL_PROBE_SPREAD;
         let long_base = Duration::from_secs(3600);
         for n in 0..1000u128 {
@@ -396,10 +387,6 @@ mod tests {
 
     #[test]
     fn stagger_offset_distributes_uniformly() {
-        // 1000 distinct UUIDs hashed into 10 buckets over a 60s interval.
-        // Each bucket should receive ~100 ± a generous tolerance — confirms
-        // the hash spreads the host-shared targets across the window instead
-        // of clumping them into the same throttle contention slot.
         let base = Duration::from_secs(60);
         let bucket_ms = base.as_millis() as u64 / 10;
         let mut buckets = [0u32; 10];
@@ -417,71 +404,48 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn drain_handles_returns_immediately_when_no_tasks() {
-        let started = std::time::Instant::now();
-        drain_handles(Vec::new(), Duration::from_secs(5)).await;
-        assert!(started.elapsed() < Duration::from_millis(50));
+    async fn next_tick_advances_one_interval_on_time() {
+        let base = Duration::from_secs(10);
+        let sched = Instant::now();
+        let now = sched + Duration::from_millis(1);
+        assert_eq!(next_tick(sched, base, now), sched + base);
     }
 
     #[tokio::test]
-    async fn drain_handles_awaits_well_behaved_tasks() {
-        // Three tasks that exit promptly on cancel. Drain must block until all
-        // have observably returned, not just detach their JoinHandles.
-        let mut handles = Vec::new();
-        let exited = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        for _ in 0..3 {
-            let tok = CancellationToken::new();
-            let tok_c = tok.clone();
-            let exited_c = exited.clone();
-            let h = tokio::spawn(async move {
-                tok_c.cancelled().await;
-                tokio::time::sleep(Duration::from_millis(20)).await;
-                exited_c.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            });
-            tok.cancel();
-            handles.push((Uuid::nil(), h));
+    async fn next_tick_skips_backlog_when_behind() {
+        let base = Duration::from_secs(10);
+        let sched = Instant::now();
+        let now = sched + base + base * 2 + base / 2;
+        let next = next_tick(sched, base, now);
+        assert!(next > now, "next {next:?} must be strictly future");
+        assert_eq!(next, sched + base * 4);
+    }
+
+    #[tokio::test]
+    async fn heap_pops_earliest_due_first() {
+        let base = Instant::now();
+        let mut heap: BinaryHeap<Reverse<Due>> = BinaryHeap::new();
+        for secs in [5u64, 1, 3] {
+            heap.push(Reverse(Due {
+                at: base + Duration::from_secs(secs),
+                id: Uuid::from_u128(secs as u128),
+                seq: 0,
+                first: false,
+            }));
         }
-        let started = std::time::Instant::now();
-        drain_handles(handles, Duration::from_secs(5)).await;
-        assert_eq!(
-            exited.load(std::sync::atomic::Ordering::SeqCst),
-            3,
-            "all tasks must have run to completion before drain returned",
-        );
-        assert!(
-            started.elapsed() < Duration::from_millis(500),
-            "drain hung: {:?}",
-            started.elapsed(),
-        );
-    }
-
-    #[tokio::test]
-    async fn drain_handles_times_out_on_stuck_task() {
-        // Task ignores its cancel and never exits. Drain must bound shutdown
-        // by the timeout, not block forever.
-        let h = tokio::spawn(async { std::future::pending::<()>().await });
-        let started = std::time::Instant::now();
-        drain_handles(vec![(Uuid::nil(), h)], Duration::from_millis(50)).await;
-        let elapsed = started.elapsed();
-        assert!(
-            elapsed >= Duration::from_millis(50),
-            "drain returned before timeout: {elapsed:?}",
-        );
-        assert!(
-            elapsed < Duration::from_millis(500),
-            "timeout not enforced: {elapsed:?}",
-        );
+        let order: Vec<u64> = std::iter::from_fn(|| heap.pop())
+            .map(|Reverse(d)| (d.at - base).as_secs())
+            .collect();
+        assert_eq!(order, vec![1, 3, 5]);
     }
 
     #[test]
     fn backoff_walks_the_expected_curve_with_default_base() {
-        // Base 30s, cap multiplier 10 → steady state at 300s.
         let base = 30u64;
         assert_eq!(backoff_delay_secs(base, 1), 30);
         assert_eq!(backoff_delay_secs(base, 2), 60);
         assert_eq!(backoff_delay_secs(base, 3), 120);
         assert_eq!(backoff_delay_secs(base, 4), 240);
-        // 2^4 = 16, capped at REFRESH_BACKOFF_CAP_MULTIPLIER = 10.
         assert_eq!(
             backoff_delay_secs(base, 5),
             base * REFRESH_BACKOFF_CAP_MULTIPLIER
@@ -494,32 +458,8 @@ mod tests {
 
     #[test]
     fn backoff_does_not_panic_at_extremes() {
-        // Saturating arithmetic guards both the shift and the multiply.
         assert!(backoff_delay_secs(u64::MAX, 1) >= 1);
         assert!(backoff_delay_secs(u64::MAX, u32::MAX) >= 1);
         assert_eq!(backoff_delay_secs(1, 0), 1);
-    }
-
-    #[tokio::test]
-    async fn drain_handles_continues_past_panicked_task() {
-        // A panicked task surfaces as a JoinError::Panic. Drain must log it
-        // and keep awaiting the rest — a single panicky target can't strand
-        // a well-behaved peer.
-        let h_panic = tokio::spawn(async { panic!("test panic") });
-        let tok = CancellationToken::new();
-        let tok_c = tok.clone();
-        let exited = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let exited_c = exited.clone();
-        let h_ok = tokio::spawn(async move {
-            tok_c.cancelled().await;
-            exited_c.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        });
-        tok.cancel();
-        drain_handles(
-            vec![(Uuid::nil(), h_panic), (Uuid::nil(), h_ok)],
-            Duration::from_secs(5),
-        )
-        .await;
-        assert_eq!(exited.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 }

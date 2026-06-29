@@ -73,6 +73,10 @@ impl TargetRegistry {
         self.targets.len()
     }
 
+    pub fn get(&self, id: &Uuid) -> Option<ScheduledTarget> {
+        self.targets.get(id).map(|e| e.clone())
+    }
+
     pub fn is_empty(&self) -> bool {
         self.targets.is_empty()
     }
