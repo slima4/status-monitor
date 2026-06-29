@@ -4,9 +4,9 @@ use std::time::Duration;
 use anyhow::Context;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::types::Json;
+use sqlx::{Executor, PgPool};
 use uuid::Uuid;
 
 use crate::api::types::{TagCount, TargetsSummary};
@@ -46,6 +46,15 @@ impl PostgresTargetStore {
             .max_connections(cfg.max_connections)
             .min_connections(cfg.min_connections)
             .acquire_timeout(Duration::from_secs(cfg.acquire_timeout_secs))
+            // Per-connection so self-host deploys without the tuned
+            // postgresql.conf still cap leaked-transaction connection pins.
+            .after_connect(|conn, _meta| {
+                Box::pin(async move {
+                    conn.execute("SET idle_in_transaction_session_timeout = '30s'")
+                        .await?;
+                    Ok(())
+                })
+            })
             .connect(&cfg.url)
             .await
             .context("failed to connect to postgres")?;
