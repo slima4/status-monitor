@@ -14,7 +14,7 @@ pub mod types;
 pub use cursor::IncidentCursor;
 pub use docs::ApiDoc;
 pub use error::{ApiError, ApiErrorBody, codes};
-pub use idempotency::{IdempotencyCache, spawn_pruner as spawn_idempotency_pruner};
+pub use idempotency::IdempotencyCache;
 pub use json_arc::JsonArc;
 pub use page::{
     CursorPage, PageEnvelope, PageOfCheckResult, PageOfIncident, PageOfPublicIncident,

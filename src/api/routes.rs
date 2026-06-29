@@ -20,8 +20,6 @@ const SINGLE_BODY_LIMIT: usize = 64 * 1024;
 const BULK_BODY_LIMIT: usize = 8 * 1024 * 1024;
 
 pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
-    idempotency::spawn_pruner(state.idempotency.clone(), shutdown.clone());
-
     // Idle-entry janitor for the per-org/user limiter map. Co-located with
     // the limiter it sweeps and bound to the same shutdown token, so a
     // refactor can't drop the sweep and leak the map.

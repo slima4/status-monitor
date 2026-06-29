@@ -155,8 +155,7 @@ impl RateLimitService {
     /// Spawn the idle-entry janitor. Co-located with the service so the
     /// "construct" and "sweep" responsibilities are not separable: the task
     /// exits when `shutdown` fires (same lifetime as every other background
-    /// worker), so a refactor cannot silently drop the sweep and leak the
-    /// map. Mirrors `idempotency::spawn_pruner`.
+    /// worker), so a refactor cannot silently drop the sweep and leak the map.
     pub fn spawn_janitor(
         self: Arc<Self>,
         cleanup_every: Duration,

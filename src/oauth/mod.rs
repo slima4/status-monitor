@@ -175,8 +175,8 @@ fn grant_scope(requested: Option<&str>) -> String {
 
 /// Periodic cleanup of dead OAuth rows: authorization codes past their (~60s)
 /// TTL and refresh tokens past their family deadline. Bounds table growth from
-/// abandoned consents + rotation churn. Mirrors the idempotency pruner / rate-
-/// limit janitor — bound to the shutdown token so it can't outlive the process.
+/// abandoned consents + rotation churn. Like the rate-limit janitor, it is
+/// bound to the shutdown token so it can't outlive the process.
 /// Expired refresh rows are safe to drop wholesale: once `expires_at` passes,
 /// the whole family is dead, so removing its (used + current) rows costs no
 /// replay-detection coverage.
