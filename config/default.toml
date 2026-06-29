@@ -9,7 +9,9 @@ worker_threads = 0              # 0 = auto (num_cpus)
 max_blocking_threads = 16
 
 [checker]
-max_concurrent_checks = 50000
+# In-flight probe cap; each permit is a socket + TLS buffers, so it bounds
+# probe memory. Raise per deployment on bigger hosts; overflow fails fast.
+max_concurrent_checks = 1024
 default_timeout_ms = 10000
 connect_timeout_ms = 5000
 default_check_interval_secs = 120
