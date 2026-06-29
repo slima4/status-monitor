@@ -86,6 +86,6 @@ pub use status_pages::{
 };
 pub use traits::{
     ClampedRange, RegionOption, ResultSink, ResultsStore, TargetFilter, TargetSort, TargetStore,
-    TimeRange, UptimeStats,
+    TimeRange, UptimeStats, rollup_bucket_secs,
 };
 pub use variables::{CreateVariableOutcome, InMemoryVariableStore, PgVariableStore, VariableStore};

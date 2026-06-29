@@ -14,7 +14,7 @@ use crate::domain::{
 use crate::error::Result;
 use crate::storage::traits::{
     ClampedRange, RegionOption, ResultSink, ResultsStore, TargetFilter, TargetStore, TimeRange,
-    UptimeStats,
+    UptimeStats, rollup_bucket_secs,
 };
 
 #[derive(Default)]
@@ -300,7 +300,7 @@ impl ResultsStore for InMemorySink {
         };
         // Round to a whole-minute grain exactly as the ClickHouse impl does,
         // so the in-memory test backend buckets identically to production.
-        let bucket = i64::from(bucket_seconds.max(60).div_ceil(60) * 60);
+        let bucket = i64::from(rollup_bucket_secs(bucket_seconds));
         let mut by_bucket: std::collections::BTreeMap<i64, Acc> = std::collections::BTreeMap::new();
         let guard = self.results.lock();
         for r in guard.iter() {
@@ -345,7 +345,7 @@ impl ResultsStore for InMemorySink {
         bucket_seconds: u32,
         _region: Option<&str>,
     ) -> Result<Vec<AvailabilityBucket>> {
-        let bucket = i64::from(bucket_seconds.max(60).div_ceil(60) * 60);
+        let bucket = i64::from(rollup_bucket_secs(bucket_seconds));
         let mut by_bucket: std::collections::BTreeMap<i64, (u64, u64)> =
             std::collections::BTreeMap::new();
         let guard = self.results.lock();

@@ -16,7 +16,7 @@ use crate::domain::{
     CheckResult, Incident, OrgId, confirmed_downtime_secs, uptime_pct_from_downtime,
 };
 use crate::error::AppError;
-use crate::storage::{ClampedRange, TimeRange, UptimeStats};
+use crate::storage::{ClampedRange, TimeRange, UptimeStats, rollup_bucket_secs};
 use crate::web::error::{WebError, WebResult};
 use crate::web::filters;
 use crate::web::views::dashboard::{
@@ -608,7 +608,7 @@ fn build_availability_spark(
     to: DateTime<Utc>,
     bucket_seconds: u32,
 ) -> (String, String) {
-    let bucket = i64::from(bucket_seconds.max(60).div_ceil(60) * 60);
+    let bucket = i64::from(rollup_bucket_secs(bucket_seconds));
     let from_grid = from.timestamp().div_euclid(bucket) * bucket;
     let n = (((to.timestamp() - from_grid) + bucket - 1) / bucket).max(1) as usize;
     let mut series = vec![None; n];

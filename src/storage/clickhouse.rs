@@ -17,7 +17,9 @@ use crate::config::ClickhouseConfig;
 use crate::domain::{CheckResult, CheckStatus, Incident, OrgId, coalesce_incidents};
 use crate::error::Result;
 use crate::storage::org_ttl::OrgTtlDays;
-use crate::storage::traits::{ClampedRange, ResultSink, ResultsStore, TimeRange, UptimeStats};
+use crate::storage::traits::{
+    ClampedRange, ResultSink, ResultsStore, TimeRange, UptimeStats, rollup_bucket_secs,
+};
 
 const TABLE: &str = "check_results";
 
@@ -869,47 +871,46 @@ impl ResultsStore for ClickhouseResultsStore {
     ) -> Result<UptimeStats> {
         #[derive(Row, Deserialize)]
         struct CountsRow {
+            total: u64,
             up: u64,
             down: u64,
             degraded: u64,
             error: u64,
         }
 
+        let (table, tcol) = rollup_source(range.from);
+        let window = format!("{tcol} >= fromUnixTimestamp(?) AND {tcol} < fromUnixTimestamp(?)");
         let region_pred = region.map(|_| "AND region = ?").unwrap_or("");
         let mut q = self
             .client
             .query(&format!(
                 "SELECT \
-                   countIf(status = 'up') AS up, \
-                   countIf(status = 'down') AS down, \
-                   countIf(status = 'degraded') AS degraded, \
-                   countIf(status = 'error') AS error \
-                 FROM {TABLE} \
-                 WHERE org_id = ? AND target_id = ? {region_pred} \
-                 AND timestamp >= fromUnixTimestamp(?) \
-                 AND timestamp < fromUnixTimestamp(?)"
+                   countMerge(total_checks) AS total, \
+                   countIfMerge(up_checks) AS up, \
+                   countIfMerge(down_checks) AS down, \
+                   countIfMerge(degraded_checks) AS degraded, \
+                   countIfMerge(error_checks) AS error \
+                 FROM {table} \
+                 WHERE org_id = ? AND target_id = ? {region_pred} AND {window}"
             ))
             .bind(org.0)
             .bind(target_id);
         if let Some(r) = region {
             q = q.bind(r);
         }
-        let row: CountsRow = q
-            .bind(range.from.timestamp())
-            .bind(range.to.timestamp())
+        let row: CountsRow = bind_minute_window(q, range.from, range.to)
             .fetch_one::<CountsRow>()
             .await
             .context("clickhouse uptime")?;
 
-        let total = row.up + row.down + row.degraded + row.error;
-        let uptime_pct = if total > 0 {
-            (row.up as f64 / total as f64) * 100.0
+        let uptime_pct = if row.total > 0 {
+            (row.up as f64 / row.total as f64) * 100.0
         } else {
             0.0
         };
 
         Ok(UptimeStats {
-            total,
+            total: row.total,
             up: row.up,
             down: row.down,
             degraded: row.degraded,
@@ -1047,9 +1048,7 @@ impl ResultsStore for ClickhouseResultsStore {
             ttfb: f64,
             samples: u64,
         }
-        // Round up to a whole number of source rows so every output bucket
-        // spans an integer count of minutes.
-        let bucket = bucket_seconds.max(60).div_ceil(60) * 60;
+        let bucket = rollup_bucket_secs(bucket_seconds);
         // `minute`/`hour` are both DateTime seconds, so `bind_minute_window`
         // binds either.
         let (table, tcol) = rollup_source(range.from);
@@ -1123,7 +1122,7 @@ impl ResultsStore for ClickhouseResultsStore {
             total: u64,
             up: u64,
         }
-        let bucket = bucket_seconds.max(60).div_ceil(60) * 60;
+        let bucket = rollup_bucket_secs(bucket_seconds);
         let (table, tcol) = rollup_source(range.from);
         let window = format!("{tcol} >= fromUnixTimestamp(?) AND {tcol} < fromUnixTimestamp(?)");
         let region_pred = region.map(|_| "AND region = ?").unwrap_or("");
@@ -1220,7 +1219,7 @@ impl ResultsStore for ClickhouseResultsStore {
             ttfb: f64,
             samples: u64,
         }
-        let bucket = bucket_seconds.max(60).div_ceil(60) * 60;
+        let bucket = rollup_bucket_secs(bucket_seconds);
         let (table, tcol) = rollup_source(range.from);
         let window = format!("{tcol} >= fromUnixTimestamp(?) AND {tcol} < fromUnixTimestamp(?)");
         let query = format!(
@@ -1288,9 +1287,7 @@ impl ResultsStore for ClickhouseResultsStore {
             // read each element in its RowBinary `(hi, lo)` form and rebuild.
             down_targets: Vec<(u64, u64)>,
         }
-        // Source matview is per-minute; round up to a multiple of 60s
-        // so every output bucket spans an integer number of source rows.
-        let bucket = bucket_seconds.max(60).div_ceil(60) * 60;
+        let bucket = rollup_bucket_secs(bucket_seconds);
         // Inner per-target pass so the outer can sum the fleet rate and also
         // collect which monitors dipped. INTERVAL is a keyword position —
         // inlined so `bind()` stays value-only.

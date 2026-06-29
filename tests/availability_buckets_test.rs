@@ -105,4 +105,15 @@ async fn availability_buckets_count_up_and_total_from_rollup() {
         .await
         .expect("other-region query");
     assert!(other.is_empty(), "no rows for an unused region");
+
+    // uptime() merges the same rollup counts over the window.
+    let up = store
+        .uptime(OrgId(org), target, ClampedRange::unclamped(range), None)
+        .await
+        .expect("uptime query");
+    assert_eq!(
+        (up.total, up.up, up.down, up.degraded, up.error),
+        (5, 3, 1, 1, 0)
+    );
+    assert!((up.uptime_pct - 60.0).abs() < 0.001, "3/5 = 60%");
 }

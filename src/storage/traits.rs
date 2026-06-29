@@ -246,6 +246,13 @@ impl std::ops::Deref for ClampedRange {
     }
 }
 
+/// Round a requested bucket width up to a whole number of 60s rollup rows, so
+/// every output bucket spans an integer count of minutes (grid alignment is the
+/// caller's `toStartOfInterval` / `div_euclid`).
+pub fn rollup_bucket_secs(bucket_seconds: u32) -> u32 {
+    bucket_seconds.max(60).div_ceil(60) * 60
+}
+
 #[derive(Debug, Default, Clone, Copy, serde::Serialize, utoipa::ToSchema)]
 pub struct UptimeStats {
     pub total: u64,
