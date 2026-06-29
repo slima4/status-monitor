@@ -458,16 +458,17 @@ async fn load_live_data(
     if confirmed && uptime.total > 0 {
         uptime.uptime_pct = confirmed_uptime_pct(&cur_incidents, time_range);
     }
-    let kpi = build_kpi_trend(
-        &uptime,
-        &prior,
-        &prior_incidents,
-        &avail,
-        time_range,
+    let kpi = build_kpi_trend(KpiInputs {
+        current: &uptime,
+        prior: &prior,
+        cur_incidents: &cur_incidents,
+        prior_incidents: &prior_incidents,
+        avail: &avail,
+        range: time_range,
         prior_range,
         spark_bucket_seconds,
         confirmed,
-    );
+    });
     let results_has_more = results.len() > RESULTS_PAGE_LIMIT;
     if results_has_more {
         results.truncate(RESULTS_PAGE_LIMIT);
@@ -546,29 +547,37 @@ fn confirmed_uptime_pct(incidents: &[Incident], range: ClampedRange) -> f64 {
     uptime_pct_from_downtime(down, (range.to - range.from).num_seconds())
 }
 
-/// Uptime sparkline plus Δ-vs-prior chips over prefetched reads. The prior
-/// window is the same span immediately before `range`; its uptime % mirrors the
-/// displayed figure's source (confirmed downtime, or raw rate when
-/// region-filtered) so the chip can't contradict it.
-#[allow(clippy::too_many_arguments)]
-fn build_kpi_trend(
-    current: &UptimeStats,
-    prior: &UptimeStats,
-    prior_incidents: &[Incident],
-    avail: &[AvailabilityBucket],
+/// Prefetched reads `build_kpi_trend` turns into the KPI strip's spark + deltas.
+struct KpiInputs<'a> {
+    current: &'a UptimeStats,
+    prior: &'a UptimeStats,
+    cur_incidents: &'a [Incident],
+    prior_incidents: &'a [Incident],
+    avail: &'a [AvailabilityBucket],
     range: ClampedRange,
     prior_range: ClampedRange,
     spark_bucket_seconds: u32,
     confirmed: bool,
-) -> KpiTrend {
-    let (spark_path, spark_fill) =
-        build_availability_spark(avail, range.from, range.to, spark_bucket_seconds);
+}
+
+/// Uptime sparkline plus Δ-vs-prior chips. Both mirror the displayed uptime %'s
+/// source — confirmed downtime for the all-regions view, raw rate when
+/// region-filtered — so neither the spark nor a chip can contradict the figure.
+/// The prior window is the same span immediately before `range`.
+fn build_kpi_trend(inp: KpiInputs) -> KpiTrend {
+    let (spark_path, spark_fill) = build_availability_spark(
+        inp.avail,
+        inp.cur_incidents,
+        inp.range,
+        inp.spark_bucket_seconds,
+        inp.confirmed,
+    );
     // Deltas need data in the current window and a full-length prior window: an
     // empty current window would read as a 100pp drop, and a prior truncated by
     // the retention floor would skew the raw counts against a shorter span.
-    let comparable = current.total > 0
-        && prior.total > 0
-        && (prior_range.to - prior_range.from) >= (range.to - range.from);
+    let comparable = inp.current.total > 0
+        && inp.prior.total > 0
+        && (inp.prior_range.to - inp.prior_range.from) >= (inp.range.to - inp.range.from);
     if !comparable {
         return KpiTrend {
             spark_path,
@@ -576,49 +585,74 @@ fn build_kpi_trend(
             ..Default::default()
         };
     }
-    let prior_pct = if confirmed {
-        confirmed_uptime_pct(prior_incidents, prior_range)
+    let prior_pct = if inp.confirmed {
+        confirmed_uptime_pct(inp.prior_incidents, inp.prior_range)
     } else {
-        prior.uptime_pct
+        inp.prior.uptime_pct
     };
     KpiTrend {
         spark_path,
         spark_fill,
-        uptime_delta: Some(uptime_pp_delta(current.uptime_pct, prior_pct)),
-        up_delta: Some(count_delta(current.up, prior.up, Polarity::HigherIsBetter)),
+        uptime_delta: Some(uptime_pp_delta(inp.current.uptime_pct, prior_pct)),
+        up_delta: Some(count_delta(
+            inp.current.up,
+            inp.prior.up,
+            Polarity::HigherIsBetter,
+        )),
         down_delta: Some(count_delta(
-            current.down,
-            prior.down,
+            inp.current.down,
+            inp.prior.down,
             Polarity::LowerIsBetter,
         )),
         error_delta: Some(count_delta(
-            current.error,
-            prior.error,
+            inp.current.error,
+            inp.prior.error,
             Polarity::LowerIsBetter,
         )),
     }
 }
 
-/// Bins buckets onto the same epoch grid the query used, then renders over a
-/// fixed 0–100 domain so a healthy line sits flat at the top and only notches
-/// down on dips. Empty buckets stay `None`; the renderer joins across them.
+/// Builds the uptime sparkline over a fixed 0–100 domain (healthy sits flat at
+/// the top, dips notch down). All-regions decomposes the confirmed headline:
+/// every bucket is `1 − confirmed-incident-overlap`, measured the same way as
+/// the figure beside it (whole window, trailing bucket up to `now`), so the line
+/// can't disagree with it. Region-filtered has no confirmed model — it falls
+/// back to the raw up-ratio, leaving sample gaps as `None`.
 fn build_availability_spark(
     avail: &[AvailabilityBucket],
-    from: DateTime<Utc>,
-    to: DateTime<Utc>,
+    incidents: &[Incident],
+    range: ClampedRange,
     bucket_seconds: u32,
+    confirmed: bool,
 ) -> (String, String) {
     let bucket = i64::from(rollup_bucket_secs(bucket_seconds));
-    let from_grid = from.timestamp().div_euclid(bucket) * bucket;
-    let n = (((to.timestamp() - from_grid) + bucket - 1) / bucket).max(1) as usize;
+    let from_grid = range.from.timestamp().div_euclid(bucket) * bucket;
+    let n = (((range.to.timestamp() - from_grid) + bucket - 1) / bucket).max(1) as usize;
     let mut series = vec![None; n];
-    for b in avail {
-        if b.total == 0 {
-            continue;
+    if confirmed {
+        let now = Utc::now();
+        let now_ts = now.timestamp();
+        for (i, slot) in series.iter_mut().enumerate() {
+            let start_ts = from_grid + i as i64 * bucket;
+            let end_ts = (start_ts + bucket).min(now_ts);
+            let window = end_ts - start_ts;
+            if window <= 0 {
+                continue;
+            }
+            let start = DateTime::from_timestamp(start_ts, 0).unwrap_or(range.from);
+            let end = DateTime::from_timestamp(end_ts, 0).unwrap_or(range.to);
+            let down = confirmed_downtime_secs(incidents, start, end, now);
+            *slot = Some(uptime_pct_from_downtime(down, window) as f32);
         }
-        let slot = (b.bucket_ts - from_grid).div_euclid(bucket);
-        if slot >= 0 && (slot as usize) < n {
-            series[slot as usize] = Some((b.up as f32 / b.total as f32) * 100.0);
+    } else {
+        for b in avail {
+            if b.total == 0 {
+                continue;
+            }
+            let slot = (b.bucket_ts - from_grid).div_euclid(bucket);
+            if slot >= 0 && (slot as usize) < n {
+                series[slot as usize] = Some((b.up as f32 / b.total as f32) * 100.0);
+            }
         }
     }
     let (path, fill, _) = render_spark_path_domain(&series, 0.0, 100.0);
@@ -1221,18 +1255,47 @@ mod tests {
         }
     }
 
+    fn trend(
+        current: &UptimeStats,
+        prior: &UptimeStats,
+        avail: &[AvailabilityBucket],
+        range: ClampedRange,
+        prior_range: ClampedRange,
+        confirmed: bool,
+    ) -> KpiTrend {
+        build_kpi_trend(KpiInputs {
+            current,
+            prior,
+            cur_incidents: &[],
+            prior_incidents: &[],
+            avail,
+            range,
+            prior_range,
+            spark_bucket_seconds: 60,
+            confirmed,
+        })
+    }
+
+    fn one_bucket(range: ClampedRange, total: u64, up: u64) -> [AvailabilityBucket; 1] {
+        [AvailabilityBucket {
+            bucket_ts: range.from.timestamp(),
+            total,
+            up,
+        }]
+    }
+
     #[test]
     fn build_kpi_trend_deltas_vs_prior() {
         let (range, prior_range) = kpi_ranges();
-        let current = stats(100, 99, 1, 0, 99.0);
-        let prior = stats(100, 95, 3, 2, 95.0);
-        let avail = [AvailabilityBucket {
-            bucket_ts: range.from.timestamp(),
-            total: 100,
-            up: 99,
-        }];
-        // Region-filtered (confirmed=false) compares raw prior %, no incidents.
-        let kpi = build_kpi_trend(&current, &prior, &[], &avail, range, prior_range, 60, false);
+        let avail = one_bucket(range, 100, 99);
+        let kpi = trend(
+            &stats(100, 99, 1, 0, 99.0),
+            &stats(100, 95, 3, 2, 95.0),
+            &avail,
+            range,
+            prior_range,
+            false,
+        );
         assert!(!kpi.spark_path.is_empty());
         assert_eq!(kpi.uptime_delta.unwrap().body, "+4.00 pp");
         assert_eq!(kpi.up_delta.unwrap().body, "+4");
@@ -1243,20 +1306,13 @@ mod tests {
     #[test]
     fn build_kpi_trend_no_prior_keeps_spark_drops_deltas() {
         let (range, prior_range) = kpi_ranges();
-        let current = stats(100, 99, 1, 0, 99.0);
-        let avail = [AvailabilityBucket {
-            bucket_ts: range.from.timestamp(),
-            total: 100,
-            up: 99,
-        }];
-        let kpi = build_kpi_trend(
-            &current,
+        let avail = one_bucket(range, 100, 99);
+        let kpi = trend(
+            &stats(100, 99, 1, 0, 99.0),
             &stats(0, 0, 0, 0, 0.0),
-            &[],
             &avail,
             range,
             prior_range,
-            60,
             false,
         );
         assert!(!kpi.spark_path.is_empty());
@@ -1267,20 +1323,14 @@ mod tests {
     #[test]
     fn build_kpi_trend_empty_current_drops_deltas() {
         let (range, prior_range) = kpi_ranges();
-        let avail = [AvailabilityBucket {
-            bucket_ts: range.from.timestamp(),
-            total: 0,
-            up: 0,
-        }];
+        let avail = one_bucket(range, 0, 0);
         // No samples this window: an empty current must not read as -100pp.
-        let kpi = build_kpi_trend(
+        let kpi = trend(
             &stats(0, 0, 0, 0, 0.0),
             &stats(100, 95, 3, 2, 95.0),
-            &[],
             &avail,
             range,
             prior_range,
-            60,
             false,
         );
         assert!(kpi.uptime_delta.is_none());
@@ -1299,25 +1349,42 @@ mod tests {
             from: base - Duration::minutes(30),
             to: base,
         });
-        let avail = [AvailabilityBucket {
-            bucket_ts: range.from.timestamp(),
-            total: 100,
-            up: 99,
-        }];
-        let kpi = build_kpi_trend(
+        let avail = one_bucket(range, 100, 99);
+        let kpi = trend(
             &stats(100, 99, 1, 0, 99.0),
             &stats(50, 48, 1, 1, 96.0),
-            &[],
             &avail,
             range,
             prior_range,
-            60,
             false,
         );
         assert!(!kpi.spark_path.is_empty());
         assert!(
             kpi.up_delta.is_none(),
             "skewed unequal-window counts dropped"
+        );
+    }
+
+    #[test]
+    fn confirmed_spark_decomposes_headline_not_raw_ratio() {
+        let (range, prior_range) = kpi_ranges();
+        // Raw bucket reads 50% up, but no confirmed incident overlaps it.
+        let avail = one_bucket(range, 100, 50);
+        let current = stats(100, 50, 50, 0, 50.0);
+        let prior = stats(100, 100, 0, 0, 100.0);
+        let confirmed = trend(&current, &prior, &avail, range, prior_range, true);
+        let raw = trend(&current, &prior, &avail, range, prior_range, false);
+        assert_ne!(confirmed.spark_path, raw.spark_path);
+        // Confirmed: flat at the top (no incident → 100%). Raw: mid (50%).
+        assert!(
+            confirmed.spark_path.ends_with(" 0.0"),
+            "confirmed flat-top: {}",
+            confirmed.spark_path
+        );
+        assert!(
+            raw.spark_path.ends_with(" 11.0"),
+            "raw 50% mid: {}",
+            raw.spark_path
         );
     }
 

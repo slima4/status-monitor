@@ -791,24 +791,23 @@ impl ResultsStore for ClickhouseResultsStore {
             up: u64,
             avg_ms: f64,
         }
+        let (table, tcol) = rollup_source(range.from);
+        let window = format!("{tcol} >= fromUnixTimestamp(?) AND {tcol} < fromUnixTimestamp(?)");
         let region_pred = region.map(|_| "AND region = ?").unwrap_or("");
         let mut cq = self
             .client
             .query(&format!(
-                "SELECT count() AS total, countIf(status = 'up') AS up, \
-                        avg(duration_ms) AS avg_ms \
-                 FROM {TABLE} \
-                 WHERE org_id = ? {region_pred} \
-                 AND timestamp >= fromUnixTimestamp(?) \
-                 AND timestamp < fromUnixTimestamp(?)"
+                "SELECT countMerge(total_checks) AS total, \
+                        countIfMerge(up_checks) AS up, \
+                        avgMerge(avg_duration_ms) AS avg_ms \
+                 FROM {table} \
+                 WHERE org_id = ? {region_pred} AND {window}"
             ))
             .bind(org.0);
         if let Some(r) = region {
             cq = cq.bind(r);
         }
-        let counts: Counts = cq
-            .bind(range.from.timestamp())
-            .bind(range.to.timestamp())
+        let counts: Counts = bind_minute_window(cq, range.from, range.to)
             .fetch_one::<Counts>()
             .await
             .context("clickhouse last_n_summary counts")?;
@@ -1337,40 +1336,36 @@ impl ResultsStore for ClickhouseResultsStore {
         range: TimeRange,
         region: Option<&str>,
     ) -> Result<PriorPeriodSummary> {
-        // Reads raw `check_results` (not the matview) so the totals come
-        // from the same source as `last_n_summary` — the dashboard
-        // compares current (from `last_n_summary`) against prior here,
-        // and a source mismatch would produce phantom deltas during
-        // ingest lag.
+        // Same rollup source as `last_n_summary`: the dashboard compares
+        // current (from `last_n_summary`) against prior here, so a source
+        // mismatch would produce phantom deltas during ingest lag.
         #[derive(Row, Deserialize)]
         struct PriorRow {
             samples: u64,
             up: u64,
             avg_ms: f64,
         }
-        let span_secs = (range.to - range.from).num_seconds().max(0);
-        let prior_to_secs = range.from.timestamp();
-        let prior_from_secs = prior_to_secs.saturating_sub(span_secs);
+        let span = range.to - range.from;
+        let prior_to = range.from;
+        let prior_from = prior_to - span;
+        let (table, tcol) = rollup_source(prior_from);
+        let window = format!("{tcol} >= fromUnixTimestamp(?) AND {tcol} < fromUnixTimestamp(?)");
         let region_pred = region.map(|_| "AND region = ?").unwrap_or("");
         let mut q = self
             .client
             .query(&format!(
                 "SELECT \
-                   count() AS samples, \
-                   countIf(status = 'up') AS up, \
-                   avg(duration_ms) AS avg_ms \
-                 FROM {TABLE} \
-                 WHERE org_id = ? {region_pred} \
-                 AND timestamp >= fromUnixTimestamp(?) \
-                 AND timestamp < fromUnixTimestamp(?)"
+                   countMerge(total_checks) AS samples, \
+                   countIfMerge(up_checks) AS up, \
+                   avgMerge(avg_duration_ms) AS avg_ms \
+                 FROM {table} \
+                 WHERE org_id = ? {region_pred} AND {window}"
             ))
             .bind(org.0);
         if let Some(r) = region {
             q = q.bind(r);
         }
-        let row: Option<PriorRow> = q
-            .bind(prior_from_secs)
-            .bind(prior_to_secs)
+        let row: Option<PriorRow> = bind_minute_window(q, prior_from, prior_to)
             .fetch_optional::<PriorRow>()
             .await
             .context("clickhouse prior_period_summary")?;
