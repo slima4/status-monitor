@@ -2801,6 +2801,14 @@
         @apply text-xs;
         color: var(--sm-dashboard-hint-fg);
     }
+    .dashboard-kpi-card__unit {
+        font-size: 0.55em;
+        font-weight: 400;
+        letter-spacing: 0;
+        color: var(--sm-dashboard-hint-fg);
+    }
+    .dashboard-kpi-card__value--bad   { color: var(--theme-state-bad-fg); }
+    .dashboard-kpi-card__value--quiet { color: var(--theme-text-quiet); }
     .dashboard-kpi-card__delta {
         @apply text-[11px] font-medium tabular-nums;
         margin-top: 0.125rem;

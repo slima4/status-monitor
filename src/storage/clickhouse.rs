@@ -10,8 +10,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::api::types::{
-    DashboardMetrics, DashboardSparkBucket, FleetRibbonBucket, LatencyBucket, PriorPeriodSummary,
-    RegionLatencySeries, RegionRollup, StatusBreakdown,
+    AvailabilityBucket, DashboardMetrics, DashboardSparkBucket, FleetRibbonBucket, LatencyBucket,
+    PriorPeriodSummary, RegionLatencySeries, RegionRollup, StatusBreakdown,
 };
 use crate::config::ClickhouseConfig;
 use crate::domain::{CheckResult, CheckStatus, Incident, OrgId, coalesce_incidents};
@@ -1107,6 +1107,52 @@ impl ResultsStore for ClickhouseResultsStore {
             "latency_buckets served from rollup"
         );
         Ok(buckets)
+    }
+
+    async fn availability_buckets(
+        &self,
+        org: OrgId,
+        target_id: Uuid,
+        range: ClampedRange,
+        bucket_seconds: u32,
+        region: Option<&str>,
+    ) -> Result<Vec<AvailabilityBucket>> {
+        #[derive(Row, Deserialize)]
+        struct AvailRow {
+            bucket_ts: u32,
+            total: u64,
+            up: u64,
+        }
+        let bucket = bucket_seconds.max(60).div_ceil(60) * 60;
+        let (table, tcol) = rollup_source(range.from);
+        let window = format!("{tcol} >= fromUnixTimestamp(?) AND {tcol} < fromUnixTimestamp(?)");
+        let region_pred = region.map(|_| "AND region = ?").unwrap_or("");
+        let query = format!(
+            "SELECT \
+               toUInt32(toStartOfInterval({tcol}, INTERVAL {bucket} SECOND)) AS bucket_ts, \
+               countMerge(total_checks) AS total, \
+               countIfMerge(up_checks) AS up \
+             FROM {table} \
+             WHERE org_id = ? AND target_id = ? {region_pred} AND {window} \
+             GROUP BY bucket_ts \
+             ORDER BY bucket_ts"
+        );
+        let mut q = self.client.query(&query).bind(org.0).bind(target_id);
+        if let Some(r) = region {
+            q = q.bind(r);
+        }
+        let rows: Vec<AvailRow> = bind_minute_window(q, range.from, range.to)
+            .fetch_all::<AvailRow>()
+            .await
+            .context("clickhouse availability_buckets")?;
+        Ok(rows
+            .into_iter()
+            .map(|r| AvailabilityBucket {
+                bucket_ts: i64::from(r.bucket_ts),
+                total: r.total,
+                up: r.up,
+            })
+            .collect())
     }
 
     async fn region_breakdown(

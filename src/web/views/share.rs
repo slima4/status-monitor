@@ -43,9 +43,9 @@ use crate::web::error::{WebError, WebResult};
 use crate::web::filters;
 use crate::web::views::targets_detail::{
     DEFAULT_RANGE, DetailParams, INCIDENT_DEFAULT_RANGE, INCIDENT_RANGE_KEYS, IncidentRow,
-    RANGE_KEYS, ResultRow, SUBTAB_INCIDENTS, SUBTAB_MONITOR, UptimeStatsView, WindowLabels,
-    fmt_error_display, load_incidents_data, load_live_data_cached, ongoing_from_status,
-    resolve_incident_window, resolve_window,
+    KpiTrend, RANGE_KEYS, ResultRow, SUBTAB_INCIDENTS, SUBTAB_MONITOR, UptimeStatsView,
+    WindowLabels, fmt_error_display, load_incidents_data, load_live_data_cached,
+    ongoing_from_status, resolve_incident_window, resolve_window,
 };
 use crate::web::views::{RangeOption, build_range_options, describe_check, resolve_range_key};
 
@@ -107,6 +107,7 @@ pub struct ShareDetailPage {
     pub last_status: &'static str,
     pub last_at_iso: Arc<str>,
     pub uptime: Arc<UptimeStatsView>,
+    pub kpi: Arc<KpiTrend>,
     pub results: Arc<[ResultRow]>,
     pub results_has_more: bool,
     /// Check config with credentials redacted to `***`.
@@ -131,6 +132,7 @@ pub struct ShareLive {
     pub enabled: bool,
     pub last_status: &'static str,
     pub uptime: Arc<UptimeStatsView>,
+    pub kpi: Arc<KpiTrend>,
     pub results: Arc<[ResultRow]>,
     pub results_has_more: bool,
     pub last_at_iso: Arc<str>,
@@ -214,6 +216,7 @@ pub async fn detail(
         last_status: live.last_status,
         last_at_iso: Arc::clone(&live.last_at_iso),
         uptime: Arc::clone(&live.uptime),
+        kpi: Arc::clone(&live.kpi),
         results: Arc::clone(&live.result_rows),
         results_has_more: live.results_has_more,
         config_json,
@@ -268,6 +271,7 @@ pub async fn live_partial(
         enabled,
         last_status: live.last_status,
         uptime: Arc::clone(&live.uptime),
+        kpi: Arc::clone(&live.kpi),
         results: Arc::clone(&live.result_rows),
         results_has_more: live.results_has_more,
         last_at_iso: Arc::clone(&live.last_at_iso),

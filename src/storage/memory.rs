@@ -4,8 +4,9 @@ use parking_lot::Mutex;
 use uuid::Uuid;
 
 use crate::api::types::{
-    DashboardMetrics, DashboardSparkBucket, FleetRibbonBucket, LatencyBucket, PriorPeriodSummary,
-    RegionLatencySeries, RegionRollup, StatusBreakdown, TagCount, TargetsSummary,
+    AvailabilityBucket, DashboardMetrics, DashboardSparkBucket, FleetRibbonBucket, LatencyBucket,
+    PriorPeriodSummary, RegionLatencySeries, RegionRollup, StatusBreakdown, TagCount,
+    TargetsSummary,
 };
 use crate::domain::{
     CheckResult, CheckStatus, NewTarget, OrgId, Target, TargetUpdate, WriteSource,
@@ -332,6 +333,39 @@ impl ResultsStore for InMemorySink {
                     ttfb: mean(acc.ttfb),
                     samples,
                 }
+            })
+            .collect())
+    }
+
+    async fn availability_buckets(
+        &self,
+        _org: OrgId,
+        target_id: Uuid,
+        range: ClampedRange,
+        bucket_seconds: u32,
+        _region: Option<&str>,
+    ) -> Result<Vec<AvailabilityBucket>> {
+        let bucket = i64::from(bucket_seconds.max(60).div_ceil(60) * 60);
+        let mut by_bucket: std::collections::BTreeMap<i64, (u64, u64)> =
+            std::collections::BTreeMap::new();
+        let guard = self.results.lock();
+        for r in guard.iter() {
+            if r.target_id != target_id || r.timestamp < range.from || r.timestamp >= range.to {
+                continue;
+            }
+            let slot = (r.timestamp.timestamp() / bucket) * bucket;
+            let acc = by_bucket.entry(slot).or_default();
+            acc.0 += 1;
+            if r.status == CheckStatus::Up {
+                acc.1 += 1;
+            }
+        }
+        Ok(by_bucket
+            .into_iter()
+            .map(|(bucket_ts, (total, up))| AvailabilityBucket {
+                bucket_ts,
+                total,
+                up,
             })
             .collect())
     }
@@ -1055,5 +1089,79 @@ mod tests {
             .unwrap();
         assert_eq!(buckets.len(), 1);
         assert_eq!(buckets[0].samples, 1);
+    }
+
+    #[tokio::test]
+    async fn availability_buckets_up_ratio_per_slice() {
+        let store = InMemorySink::new();
+        let t = Uuid::from_u128(1);
+        let base = Utc.with_ymd_and_hms(2026, 5, 1, 0, 0, 0).unwrap();
+        let down = |offset_s: i64| CheckResult {
+            status: CheckStatus::Down,
+            ..up_result(t, base, offset_s, 100, 10)
+        };
+        // Slice 0: 2 up + 1 down. Slice 1: 1 up.
+        store
+            .write_batch(&[
+                up_result(t, base, 0, 100, 10),
+                up_result(t, base, 30, 100, 10),
+                down(45),
+                up_result(t, base, 60, 100, 10),
+            ])
+            .await
+            .unwrap();
+        let range = TimeRange {
+            from: base,
+            to: base + chrono::Duration::seconds(120),
+        };
+        let buckets = store
+            .availability_buckets(
+                OrgId(Uuid::nil()),
+                t,
+                ClampedRange::unclamped(range),
+                60,
+                None,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(buckets.len(), 2);
+        assert_eq!(buckets[0].bucket_ts, base.timestamp());
+        assert_eq!(buckets[0].total, 3);
+        assert_eq!(buckets[0].up, 2);
+        assert_eq!(buckets[1].total, 1);
+        assert_eq!(buckets[1].up, 1);
+    }
+
+    #[tokio::test]
+    async fn availability_buckets_isolate_target_and_window() {
+        let store = InMemorySink::new();
+        let t = Uuid::from_u128(1);
+        let base = Utc.with_ymd_and_hms(2026, 5, 1, 0, 0, 0).unwrap();
+        store
+            .write_batch(&[
+                up_result(t, base, 0, 100, 10),
+                up_result(Uuid::from_u128(2), base, 0, 100, 10), // other target
+                up_result(t, base, -120, 100, 10),               // before window
+            ])
+            .await
+            .unwrap();
+        let range = TimeRange {
+            from: base,
+            to: base + chrono::Duration::seconds(60),
+        };
+        let buckets = store
+            .availability_buckets(
+                OrgId(Uuid::nil()),
+                t,
+                ClampedRange::unclamped(range),
+                60,
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(buckets.len(), 1);
+        assert_eq!(buckets[0].total, 1);
+        assert_eq!(buckets[0].up, 1);
     }
 }

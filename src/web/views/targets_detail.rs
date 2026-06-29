@@ -10,6 +10,7 @@ use serde::Deserialize;
 use uuid::Uuid;
 
 use crate::api::error::codes;
+use crate::api::types::AvailabilityBucket;
 use crate::app::AppState;
 use crate::domain::{
     CheckResult, Incident, OrgId, confirmed_downtime_secs, uptime_pct_from_downtime,
@@ -18,6 +19,9 @@ use crate::error::AppError;
 use crate::storage::{ClampedRange, TimeRange, UptimeStats};
 use crate::web::error::{WebError, WebResult};
 use crate::web::filters;
+use crate::web::views::dashboard::{
+    KpiDelta, Polarity, count_delta, render_spark_path_domain, uptime_pp_delta,
+};
 use crate::web::views::region_display::{LabeledRegion, labeled_regions};
 use crate::web::views::{
     RangeOption, build_range_options, describe_check, fmt_human, fmt_ts, resolve_range_key,
@@ -37,6 +41,8 @@ pub(crate) const DEFAULT_RANGE: &str = "24h";
 // monitor's actual current state, not "no data" when the user picked 1h
 // but the last check was 2h ago.
 const LAST_RESULT_WINDOW_DAYS: i64 = 7;
+// Target point count for the uptime sparkline; bucket width derives from it.
+const SPARK_SEGMENTS: i64 = 48;
 
 pub(crate) const SUBTAB_MONITOR: &str = "monitor";
 pub(crate) const SUBTAB_INCIDENTS: &str = "incidents";
@@ -106,6 +112,7 @@ pub struct DetailLive {
     pub enabled: bool,
     pub last_status: &'static str,
     pub uptime: Arc<UptimeStatsView>,
+    pub kpi: Arc<KpiTrend>,
     pub results: Arc<[ResultRow]>,
     pub results_has_more: bool,
     pub last_at_iso: Arc<str>,
@@ -174,6 +181,7 @@ pub struct DetailPage {
     /// the client-side "checked Ns ago · next in Ns" ticker.
     pub last_at_iso: Arc<str>,
     pub uptime: Arc<UptimeStatsView>,
+    pub kpi: Arc<KpiTrend>,
     pub results: Arc<[ResultRow]>,
     pub results_has_more: bool,
     pub config_json: String,
@@ -254,9 +262,28 @@ impl From<UptimeStats> for UptimeStatsView {
             down: s.down,
             degraded: s.degraded,
             error: s.error,
-            uptime_pct: format!("{:.2}", s.uptime_pct),
+            uptime_pct: fmt_uptime_pct(s.uptime_pct),
         }
     }
+}
+
+/// Two-decimal uptime with trailing zeros trimmed: `100`, `99.98`, `99.9`.
+fn fmt_uptime_pct(v: f64) -> String {
+    let s = format!("{v:.2}");
+    s.trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
+/// Sparkline + Δ-vs-prior chips for the KPI strip, shared by the owner detail
+/// and public share pages. `Default` renders no spark and no deltas — used
+/// when there is no prior window to compare against.
+#[derive(Default)]
+pub struct KpiTrend {
+    pub spark_path: String,
+    pub spark_fill: String,
+    pub uptime_delta: Option<KpiDelta>,
+    pub up_delta: Option<KpiDelta>,
+    pub down_delta: Option<KpiDelta>,
+    pub error_delta: Option<KpiDelta>,
 }
 
 /// ISO and human-readable strings for a `(from, to)` window. Both
@@ -289,6 +316,7 @@ impl WindowLabels {
 /// full row vector + uptime struct per request.
 pub struct LiveData {
     pub uptime: Arc<UptimeStatsView>,
+    pub kpi: Arc<KpiTrend>,
     pub result_rows: Arc<[ResultRow]>,
     pub results_has_more: bool,
     pub last_status: &'static str,
@@ -374,8 +402,35 @@ async fn load_live_data(
     to: DateTime<Utc>,
     region: Option<&str>,
 ) -> WebResult<LiveData> {
-    let time_range = state.quotas.clamp_raw(org, TimeRange { from, to }).await?;
-    let (mut uptime, mut results) = tokio::try_join!(
+    // Cap `to` at now: a monitor has no future samples, and an unbounded `to`
+    // would let the span (hence the spark series length) grow without limit.
+    let time_range = state
+        .quotas
+        .clamp_raw(
+            org,
+            TimeRange {
+                from,
+                to: to.min(Utc::now()),
+            },
+        )
+        .await?;
+    let span = time_range.to - time_range.from;
+    let prior_range = state
+        .quotas
+        .clamp_raw(
+            org,
+            TimeRange {
+                from: time_range.from - span,
+                to: time_range.from,
+            },
+        )
+        .await?;
+    let spark_bucket_seconds = (span.num_seconds() / SPARK_SEGMENTS).max(60) as u32;
+    // Confirmed downtime drives uptime only for the all-regions view; a region
+    // filter keeps the raw per-region sample rate and needs no incident reads.
+    let confirmed = region.is_none();
+
+    let (mut uptime, mut results, avail, prior, cur_incidents, prior_incidents) = tokio::try_join!(
         state
             .results_store
             .uptime(org, target_id, time_range, region),
@@ -387,25 +442,32 @@ async fn load_live_data(
             0,
             region
         ),
+        state.results_store.availability_buckets(
+            org,
+            target_id,
+            time_range,
+            spark_bucket_seconds,
+            region
+        ),
+        state
+            .results_store
+            .uptime(org, target_id, prior_range, region),
+        confirmed_incidents(state, org, target_id, time_range, confirmed),
+        confirmed_incidents(state, org, target_id, prior_range, confirmed),
     )?;
-    // All-regions uptime is reported as confirmed downtime over the window; a
-    // region filter keeps the raw per-region sample rate.
-    if region.is_none() && uptime.total > 0 {
-        let incidents = state
-            .incident_narration_store
-            .list_for_target(
-                org,
-                target_id,
-                time_range.inner(),
-                CONFIRMED_UPTIME_INCIDENT_CAP,
-                0,
-                false,
-            )
-            .await?;
-        let down = confirmed_downtime_secs(&incidents, time_range.from, time_range.to, Utc::now());
-        uptime.uptime_pct =
-            uptime_pct_from_downtime(down, (time_range.to - time_range.from).num_seconds());
+    if confirmed && uptime.total > 0 {
+        uptime.uptime_pct = confirmed_uptime_pct(&cur_incidents, time_range);
     }
+    let kpi = build_kpi_trend(
+        &uptime,
+        &prior,
+        &prior_incidents,
+        &avail,
+        time_range,
+        prior_range,
+        spark_bucket_seconds,
+        confirmed,
+    );
     let results_has_more = results.len() > RESULTS_PAGE_LIMIT;
     if results_has_more {
         results.truncate(RESULTS_PAGE_LIMIT);
@@ -445,11 +507,122 @@ async fn load_live_data(
 
     Ok(LiveData {
         uptime: Arc::new(uptime.into()),
+        kpi: Arc::new(kpi),
         result_rows,
         results_has_more,
         last_status,
         last_at_iso,
     })
+}
+
+/// Confirmed incidents for the downtime read, or an empty vec (no DB hit) when
+/// the view is region-filtered and uses the raw rate instead. Kept separate so
+/// `load_live_data` can fan out current + prior reads in one `try_join`.
+async fn confirmed_incidents(
+    state: &AppState,
+    org: OrgId,
+    target_id: Uuid,
+    range: ClampedRange,
+    confirmed: bool,
+) -> crate::error::Result<Vec<Incident>> {
+    if !confirmed {
+        return Ok(Vec::new());
+    }
+    state
+        .incident_narration_store
+        .list_for_target(
+            org,
+            target_id,
+            range.inner(),
+            CONFIRMED_UPTIME_INCIDENT_CAP,
+            0,
+            false,
+        )
+        .await
+}
+
+fn confirmed_uptime_pct(incidents: &[Incident], range: ClampedRange) -> f64 {
+    let down = confirmed_downtime_secs(incidents, range.from, range.to, Utc::now());
+    uptime_pct_from_downtime(down, (range.to - range.from).num_seconds())
+}
+
+/// Uptime sparkline plus Δ-vs-prior chips over prefetched reads. The prior
+/// window is the same span immediately before `range`; its uptime % mirrors the
+/// displayed figure's source (confirmed downtime, or raw rate when
+/// region-filtered) so the chip can't contradict it.
+#[allow(clippy::too_many_arguments)]
+fn build_kpi_trend(
+    current: &UptimeStats,
+    prior: &UptimeStats,
+    prior_incidents: &[Incident],
+    avail: &[AvailabilityBucket],
+    range: ClampedRange,
+    prior_range: ClampedRange,
+    spark_bucket_seconds: u32,
+    confirmed: bool,
+) -> KpiTrend {
+    let (spark_path, spark_fill) =
+        build_availability_spark(avail, range.from, range.to, spark_bucket_seconds);
+    // Deltas need data in the current window and a full-length prior window: an
+    // empty current window would read as a 100pp drop, and a prior truncated by
+    // the retention floor would skew the raw counts against a shorter span.
+    let comparable = current.total > 0
+        && prior.total > 0
+        && (prior_range.to - prior_range.from) >= (range.to - range.from);
+    if !comparable {
+        return KpiTrend {
+            spark_path,
+            spark_fill,
+            ..Default::default()
+        };
+    }
+    let prior_pct = if confirmed {
+        confirmed_uptime_pct(prior_incidents, prior_range)
+    } else {
+        prior.uptime_pct
+    };
+    KpiTrend {
+        spark_path,
+        spark_fill,
+        uptime_delta: Some(uptime_pp_delta(current.uptime_pct, prior_pct)),
+        up_delta: Some(count_delta(current.up, prior.up, Polarity::HigherIsBetter)),
+        down_delta: Some(count_delta(
+            current.down,
+            prior.down,
+            Polarity::LowerIsBetter,
+        )),
+        error_delta: Some(count_delta(
+            current.error,
+            prior.error,
+            Polarity::LowerIsBetter,
+        )),
+    }
+}
+
+/// Bins buckets onto the same epoch grid the query used, then renders over a
+/// fixed 0–100 domain so a healthy line sits flat at the top and only notches
+/// down on dips. Empty buckets stay `None`; the renderer joins across them.
+fn build_availability_spark(
+    avail: &[AvailabilityBucket],
+    from: DateTime<Utc>,
+    to: DateTime<Utc>,
+    bucket_seconds: u32,
+) -> (String, String) {
+    let bucket = i64::from(bucket_seconds.max(60).div_ceil(60) * 60);
+    let from_grid = from.timestamp().div_euclid(bucket) * bucket;
+    let n = (((to.timestamp() - from_grid) + bucket - 1) / bucket).max(1) as usize;
+    let mut series = vec![None; n];
+    for b in avail {
+        if b.total == 0 {
+            continue;
+        }
+        let slot = (b.bucket_ts - from_grid).div_euclid(bucket);
+        if slot >= 0 && (slot as usize) < n {
+            series[slot as usize] = Some((b.up as f32 / b.total as f32) * 100.0);
+        }
+    }
+    let (path, fill, _) = render_spark_path_domain(&series, 0.0, 100.0);
+    (path, fill)
 }
 
 pub async fn index(
@@ -531,6 +704,7 @@ pub async fn index(
         last_status: live.last_status,
         last_at_iso: Arc::clone(&live.last_at_iso),
         uptime: Arc::clone(&live.uptime),
+        kpi: Arc::clone(&live.kpi),
         results: Arc::clone(&live.result_rows),
         results_has_more: live.results_has_more,
         config_json,
@@ -589,6 +763,7 @@ pub async fn live_partial(
         enabled: target.enabled,
         last_status: live.last_status,
         uptime: Arc::clone(&live.uptime),
+        kpi: Arc::clone(&live.kpi),
         results: Arc::clone(&live.result_rows),
         results_has_more: live.results_has_more,
         last_at_iso: Arc::clone(&live.last_at_iso),
@@ -869,6 +1044,7 @@ mod tests {
                 error: 0,
                 uptime_pct: "99.00".into(),
             }),
+            kpi: Arc::new(KpiTrend::default()),
             results: Arc::from(vec![ResultRow {
                 timestamp: "2026-05-13T12:00:00Z".parse().unwrap(),
                 status: "up",
@@ -970,6 +1146,7 @@ mod tests {
                 error: 0,
                 uptime_pct: "99.00".into(),
             }),
+            kpi: Arc::new(KpiTrend::default()),
             results: Arc::from(Vec::<ResultRow>::new()),
             results_has_more: false,
             last_at_iso: Arc::from("2026-05-13T12:00:00Z"),
@@ -1017,6 +1194,130 @@ mod tests {
         assert!(
             chart_pos < recent_pos,
             "Charts must render before Recent results"
+        );
+    }
+
+    fn kpi_ranges() -> (ClampedRange, ClampedRange) {
+        let base = DateTime::from_timestamp(1_700_000_000, 0).unwrap();
+        let range = ClampedRange::unclamped(TimeRange {
+            from: base,
+            to: base + Duration::hours(1),
+        });
+        let prior = ClampedRange::unclamped(TimeRange {
+            from: base - Duration::hours(1),
+            to: base,
+        });
+        (range, prior)
+    }
+
+    fn stats(total: u64, up: u64, down: u64, error: u64, pct: f64) -> UptimeStats {
+        UptimeStats {
+            total,
+            up,
+            down,
+            degraded: 0,
+            error,
+            uptime_pct: pct,
+        }
+    }
+
+    #[test]
+    fn build_kpi_trend_deltas_vs_prior() {
+        let (range, prior_range) = kpi_ranges();
+        let current = stats(100, 99, 1, 0, 99.0);
+        let prior = stats(100, 95, 3, 2, 95.0);
+        let avail = [AvailabilityBucket {
+            bucket_ts: range.from.timestamp(),
+            total: 100,
+            up: 99,
+        }];
+        // Region-filtered (confirmed=false) compares raw prior %, no incidents.
+        let kpi = build_kpi_trend(&current, &prior, &[], &avail, range, prior_range, 60, false);
+        assert!(!kpi.spark_path.is_empty());
+        assert_eq!(kpi.uptime_delta.unwrap().body, "+4.00 pp");
+        assert_eq!(kpi.up_delta.unwrap().body, "+4");
+        assert_eq!(kpi.down_delta.unwrap().body, "-2");
+        assert_eq!(kpi.error_delta.unwrap().body, "-2");
+    }
+
+    #[test]
+    fn build_kpi_trend_no_prior_keeps_spark_drops_deltas() {
+        let (range, prior_range) = kpi_ranges();
+        let current = stats(100, 99, 1, 0, 99.0);
+        let avail = [AvailabilityBucket {
+            bucket_ts: range.from.timestamp(),
+            total: 100,
+            up: 99,
+        }];
+        let kpi = build_kpi_trend(
+            &current,
+            &stats(0, 0, 0, 0, 0.0),
+            &[],
+            &avail,
+            range,
+            prior_range,
+            60,
+            false,
+        );
+        assert!(!kpi.spark_path.is_empty());
+        assert!(kpi.uptime_delta.is_none());
+        assert!(kpi.up_delta.is_none());
+    }
+
+    #[test]
+    fn build_kpi_trend_empty_current_drops_deltas() {
+        let (range, prior_range) = kpi_ranges();
+        let avail = [AvailabilityBucket {
+            bucket_ts: range.from.timestamp(),
+            total: 0,
+            up: 0,
+        }];
+        // No samples this window: an empty current must not read as -100pp.
+        let kpi = build_kpi_trend(
+            &stats(0, 0, 0, 0, 0.0),
+            &stats(100, 95, 3, 2, 95.0),
+            &[],
+            &avail,
+            range,
+            prior_range,
+            60,
+            false,
+        );
+        assert!(kpi.uptime_delta.is_none());
+        assert!(kpi.up_delta.is_none());
+    }
+
+    #[test]
+    fn build_kpi_trend_truncated_prior_drops_deltas() {
+        let base = DateTime::from_timestamp(1_700_000_000, 0).unwrap();
+        let range = ClampedRange::unclamped(TimeRange {
+            from: base,
+            to: base + Duration::hours(1),
+        });
+        // Prior shortened by the retention floor (30m vs the 1h current).
+        let prior_range = ClampedRange::unclamped(TimeRange {
+            from: base - Duration::minutes(30),
+            to: base,
+        });
+        let avail = [AvailabilityBucket {
+            bucket_ts: range.from.timestamp(),
+            total: 100,
+            up: 99,
+        }];
+        let kpi = build_kpi_trend(
+            &stats(100, 99, 1, 0, 99.0),
+            &stats(50, 48, 1, 1, 96.0),
+            &[],
+            &avail,
+            range,
+            prior_range,
+            60,
+            false,
+        );
+        assert!(!kpi.spark_path.is_empty());
+        assert!(
+            kpi.up_delta.is_none(),
+            "skewed unequal-window counts dropped"
         );
     }
 

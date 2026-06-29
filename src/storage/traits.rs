@@ -3,8 +3,9 @@ use chrono::{DateTime, Duration, Utc};
 use uuid::Uuid;
 
 use crate::api::types::{
-    DashboardMetrics, DashboardSparkBucket, FleetRibbonBucket, LatencyBucket, PriorPeriodSummary,
-    RegionLatencySeries, RegionRollup, StatusBreakdown, TagCount, TargetsSummary,
+    AvailabilityBucket, DashboardMetrics, DashboardSparkBucket, FleetRibbonBucket, LatencyBucket,
+    PriorPeriodSummary, RegionLatencySeries, RegionRollup, StatusBreakdown, TagCount,
+    TargetsSummary,
 };
 use crate::domain::{
     CheckResult, CheckStatus, NewTarget, OrgId, Target, TargetUpdate, WriteSource,
@@ -366,6 +367,16 @@ pub trait ResultsStore: Send + Sync {
         bucket_seconds: u32,
         region: Option<&str>,
     ) -> Result<Vec<LatencyBucket>>;
+    /// Per-target up/total counts per bucket — drives the uptime-card
+    /// sparkline. Same rollup source and bucketing as [`latency_buckets`](Self::latency_buckets).
+    async fn availability_buckets(
+        &self,
+        org: OrgId,
+        target_id: Uuid,
+        range: ClampedRange,
+        bucket_seconds: u32,
+        region: Option<&str>,
+    ) -> Result<Vec<AvailabilityBucket>>;
     /// Per-region rollup for one target over `range` — drives the detail-page
     /// region breakdown table. One row per region; regions with no samples are
     /// omitted. Single-region orgs see one row.

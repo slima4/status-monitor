@@ -844,7 +844,7 @@ fn build_kpi_cards(
 /// just informational. Drives the `metric-delta--{up,down,flat}` class
 /// (a green ↑ on uptime is the same class as a green ↓ on latency).
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Polarity {
+pub(crate) enum Polarity {
     /// Bigger is better — uptime.
     HigherIsBetter,
     /// Smaller is better — response time.
@@ -855,7 +855,7 @@ enum Polarity {
 
 /// Standard chip for a non-zero Δ. `signed` carries the sign for the
 /// arrow; polarity decides which colour class wins.
-fn signed_delta(polarity: Polarity, signed: f64, body: String) -> KpiDelta {
+pub(crate) fn signed_delta(polarity: Polarity, signed: f64, body: String) -> KpiDelta {
     let arrow = if signed > 0.0 { "↑" } else { "↓" };
     let class = match polarity {
         Polarity::HigherIsBetter if signed > 0.0 => "metric-delta--up",
@@ -867,12 +867,31 @@ fn signed_delta(polarity: Polarity, signed: f64, body: String) -> KpiDelta {
     KpiDelta { class, arrow, body }
 }
 
-fn flat_delta() -> KpiDelta {
+pub(crate) fn flat_delta() -> KpiDelta {
     KpiDelta {
         class: "metric-delta--flat",
         arrow: "±",
         body: "unchanged".into(),
     }
+}
+
+/// Δ chip for a percentage-point change; collapses to "unchanged" below
+/// display precision so the chip never contradicts the shown value.
+pub(crate) fn uptime_pp_delta(cur_pct: f64, prior_pct: f64) -> KpiDelta {
+    let diff = ((cur_pct - prior_pct) * 100.0).round() / 100.0;
+    if diff.abs() < 0.01 {
+        return flat_delta();
+    }
+    signed_delta(Polarity::HigherIsBetter, diff, format!("{diff:+.2} pp"))
+}
+
+/// Δ chip for a raw count change (up / down / errors).
+pub(crate) fn count_delta(cur: u64, prior: u64, polarity: Polarity) -> KpiDelta {
+    let diff = cur as i64 - prior as i64;
+    if diff == 0 {
+        return flat_delta();
+    }
+    signed_delta(polarity, diff as f64, format!("{diff:+}"))
 }
 
 fn uptime_pct(s: &PriorPeriodSummary) -> Option<f64> {
@@ -884,18 +903,7 @@ fn uptime_pct(s: &PriorPeriodSummary) -> Option<f64> {
 }
 
 fn uptime_delta(cur: &PriorPeriodSummary, prior: &PriorPeriodSummary) -> Option<KpiDelta> {
-    let (c, p) = (uptime_pct(cur)?, uptime_pct(prior)?);
-    // Round to display precision (2 dp) BEFORE the threshold check so
-    // the displayed value and the "unchanged" decision never disagree.
-    let diff = ((c - p) * 100.0).round() / 100.0;
-    if diff.abs() < 0.01 {
-        return Some(flat_delta());
-    }
-    Some(signed_delta(
-        Polarity::HigherIsBetter,
-        diff,
-        format!("{diff:+.2} pp"),
-    ))
+    Some(uptime_pp_delta(uptime_pct(cur)?, uptime_pct(prior)?))
 }
 
 fn avg_delta(cur: &PriorPeriodSummary, prior: &PriorPeriodSummary) -> Option<KpiDelta> {
@@ -1213,20 +1221,36 @@ fn status_label(raw: &str) -> &'static str {
 /// the row's own min/max. A lone sample is a zero-length segment — a dot once
 /// the path's round linecap (CSS) renders it. Fill is the line closed to the
 /// baseline, empty below two samples. `baseline_y` carries the dashed no-data rule.
-fn render_spark_path(spark: &[Option<f32>]) -> (String, String, u32) {
+pub(crate) fn render_spark_path(spark: &[Option<f32>]) -> (String, String, u32) {
+    // Treat NaN/Inf as missing — CH `avgMerge` returns NaN for empty
+    // groups and a single non-finite poisons min/max, producing
+    // `"M NaN NaN"` paths that browsers silently drop. The empty case (min/max
+    // stay sentinels, unused) is handled inside the domain renderer.
+    let mut min = f32::INFINITY;
+    let mut max = f32::NEG_INFINITY;
+    for v in spark.iter().filter_map(|o| o.filter(|v| v.is_finite())) {
+        min = min.min(v);
+        max = max.max(v);
+    }
+    render_spark_path_domain(spark, min, max)
+}
+
+/// Like [`render_spark_path`] but maps values onto a fixed `[min, max]`
+/// domain instead of the series' own range — an availability line then sits
+/// flat at the top when healthy and only notches down on real dips.
+pub(crate) fn render_spark_path_domain(
+    spark: &[Option<f32>],
+    min: f32,
+    max: f32,
+) -> (String, String, u32) {
     const W: f32 = 160.0;
     const H: f32 = 22.0;
     let baseline_y = (H / 2.0).round() as u32;
-    // Treat NaN/Inf as missing — CH `avgMerge` returns NaN for empty
-    // groups and a single non-finite poisons min/max, producing
-    // `"M NaN NaN"` paths that browsers silently drop.
     let finite = |o: &Option<f32>| o.filter(|v| v.is_finite());
     let present: Vec<f32> = spark.iter().filter_map(finite).collect();
     if present.is_empty() {
         return (String::new(), String::new(), baseline_y);
     }
-    let min = present.iter().copied().fold(f32::INFINITY, f32::min);
-    let max = present.iter().copied().fold(f32::NEG_INFINITY, f32::max);
     let span = (max - min).max(1.0);
 
     let step = W / (spark.len().saturating_sub(1).max(1)) as f32;
@@ -1553,6 +1577,19 @@ mod tests {
     #[test]
     fn render_spark_path_empty_when_no_data() {
         assert_eq!(render_spark_path(&vec![None; 60]).0, "");
+    }
+
+    #[test]
+    fn render_spark_path_domain_fixed_scale_independent_of_series_range() {
+        let data = [Some(100.0_f32), Some(100.0), Some(50.0)];
+        let (fixed, _, _) = render_spark_path_domain(&data, 0.0, 100.0);
+        let (auto, _, _) = render_spark_path(&data);
+        // Healthy 100 sits at the top (y=0) on both.
+        assert!(fixed.starts_with("M0.0 0.0"), "fixed: {fixed}");
+        // The dip to 50 lands mid-height on the fixed 0–100 scale, but at the
+        // bottom when the line normalises to its own [50,100] range.
+        assert!(fixed.trim_end().ends_with("11.0"), "fixed dip: {fixed}");
+        assert!(auto.trim_end().ends_with("22.0"), "auto dip: {auto}");
     }
 
     fn row_with(enabled: bool, status: &'static str) -> DashboardRow {

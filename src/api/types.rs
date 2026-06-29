@@ -249,3 +249,14 @@ pub struct FleetRibbonBucket {
     /// just `down`.
     pub down_targets: Vec<Uuid>,
 }
+
+/// One time-bucket of a monitor's availability — up-ratio per bucket drives
+/// the uptime-card sparkline. Same bucket grid as [`LatencyBucket`].
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct AvailabilityBucket {
+    /// Unix-seconds at the bucket's start.
+    pub bucket_ts: i64,
+    /// Empty buckets are omitted by the query, leaving a gap in the line.
+    pub total: u64,
+    pub up: u64,
+}

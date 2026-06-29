@@ -1,20 +1,48 @@
-{# 4-up KPI cards. Rendered inside the #detail-live-kpi section on both
-   the initial page render and every htmx swap, so this fragment is the
-   single source of truth for the metric strip. #}
-<div class="sticker-card p-5">
-  <p class="panel-label">Uptime</p>
-  <p class="kpi-value">{{ uptime.uptime_pct }}%</p>
-  <p class="mt-1 text-xs text-muted">{{ uptime.total }} checks</p>
-</div>
-<div class="sticker-card p-5">
-  <p class="panel-label">Up</p>
-  <p class="kpi-value kpi-value--ok">{{ uptime.up }}</p>
-</div>
-<div class="sticker-card p-5">
-  <p class="panel-label">Down</p>
-  <p class="kpi-value kpi-value--bad">{{ uptime.down }}</p>
-</div>
-<div class="sticker-card p-5">
-  <p class="panel-label">Errors</p>
-  <p class="kpi-value kpi-value--bad">{{ uptime.error }}</p>
-</div>
+{# Shared KPI strip for the monitor detail + public share pages. #}
+<article class="sticker-card dashboard-kpi-card">
+  <p class="dashboard-kpi-card__label">Uptime</p>
+  <div class="dashboard-kpi-card__row">
+    <p class="dashboard-kpi-card__value">{{ uptime.uptime_pct }}<span class="dashboard-kpi-card__unit">%</span></p>
+    {% if kpi.spark_path != "" %}
+    <svg class="dashboard-kpi-card__spark dashboard-kpi-card__spark--ok"
+         viewBox="0 0 160 22" preserveAspectRatio="none" aria-hidden="true">
+      {% if kpi.spark_fill != "" %}<path class="dashboard-spark__fill" d="{{ kpi.spark_fill }}" />{% endif %}
+      <path class="dashboard-spark__line" d="{{ kpi.spark_path }}" />
+    </svg>
+    {% endif %}
+  </div>
+  {% if let Some(d) = kpi.uptime_delta %}
+  <p class="dashboard-kpi-card__delta"><span class="{{ d.class }}">{{ d.arrow }} {{ d.body }} vs prior</span></p>
+  {% endif %}
+  <p class="dashboard-kpi-card__hint">{{ uptime.total }} checks</p>
+</article>
+<article class="sticker-card dashboard-kpi-card">
+  <p class="dashboard-kpi-card__label">Up</p>
+  <div class="dashboard-kpi-card__row">
+    <p class="dashboard-kpi-card__value">{{ uptime.up }}</p>
+  </div>
+  {% if let Some(d) = kpi.up_delta %}
+  <p class="dashboard-kpi-card__delta"><span class="{{ d.class }}">{{ d.arrow }} {{ d.body }} vs prior</span></p>
+  {% endif %}
+  <p class="dashboard-kpi-card__hint">of {{ uptime.total }}</p>
+</article>
+<article class="sticker-card dashboard-kpi-card">
+  <p class="dashboard-kpi-card__label">Down</p>
+  <div class="dashboard-kpi-card__row">
+    <p class="dashboard-kpi-card__value {% if uptime.down > 0 %}dashboard-kpi-card__value--bad{% else %}dashboard-kpi-card__value--quiet{% endif %}">{{ uptime.down }}</p>
+  </div>
+  {% if let Some(d) = kpi.down_delta %}
+  <p class="dashboard-kpi-card__delta"><span class="{{ d.class }}">{{ d.arrow }} {{ d.body }} vs prior</span></p>
+  {% endif %}
+  <p class="dashboard-kpi-card__hint">of {{ uptime.total }}</p>
+</article>
+<article class="sticker-card dashboard-kpi-card">
+  <p class="dashboard-kpi-card__label">Errors</p>
+  <div class="dashboard-kpi-card__row">
+    <p class="dashboard-kpi-card__value {% if uptime.error > 0 %}dashboard-kpi-card__value--bad{% else %}dashboard-kpi-card__value--quiet{% endif %}">{{ uptime.error }}</p>
+  </div>
+  {% if let Some(d) = kpi.error_delta %}
+  <p class="dashboard-kpi-card__delta"><span class="{{ d.class }}">{{ d.arrow }} {{ d.body }} vs prior</span></p>
+  {% endif %}
+  <p class="dashboard-kpi-card__hint">of {{ uptime.total }}</p>
+</article>
