@@ -13,9 +13,11 @@ State + secrets live in **HCP Terraform Cloud** — never in this repo.
   `UptimepageHttp5xxRateHigh`, `UptimepageHttpLatencyHigh`,
   `UptimepageStorageWriteLatencyHigh`, `UptimepageClickHousePartsHigh`,
   `UptimepageIngestBufferOverflow`) and `uptimepage-availability`
-  (`UptimepageMetricsPipelineDown`, `UptimepageRegionalAgentDown`); the
-  default contact point; the root notification policy with severity
-  routing (critical pages fast, warning batches slow).
+  (`UptimepageMetricsPipelineDown`, `UptimepageRegionalAgentDown`); two
+  contact points (email-only `uptimepage-default` for warnings,
+  email+Telegram `uptimepage-critical` for criticals); the root
+  notification policy with severity routing (critical pages fast to both
+  channels, warning batches slow to email).
 - `dashboard.tf` — the operator overview dashboard, from
   `terraform/dashboards/uptimepage-overview.json`. The
   `${DS_PROMETHEUS}` template input is substituted with the real

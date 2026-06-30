@@ -26,3 +26,14 @@ variable "alert_email" {
   type        = string
   description = "Destination address for the default contact point"
 }
+
+variable "alert_telegram_token" {
+  type        = string
+  description = "Bot token for the critical-path Telegram contact point"
+  sensitive   = true
+}
+
+variable "alert_telegram_chat_id" {
+  type        = string
+  description = "Telegram chat id that receives critical alerts"
+}

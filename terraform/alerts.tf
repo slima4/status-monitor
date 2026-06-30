@@ -72,14 +72,15 @@ resource "grafana_rule_group" "pipeline" {
     }
   }
 
-  # Targets configured but zero checks executing for 10m. no_data =
-  # Alerting: a vanished metric means the app/scheduler is down, which
-  # is exactly the condition; for=10m rides through deploy restarts.
+  # App-up-but-stalled: targets configured but the check rate is 0 while
+  # the process is still serving metrics. Full app-down is owned by
+  # UptimepageMetricsPipelineDown (absent(build_info)), so no_data = OK
+  # here — a dark pipeline must not double-page off this rule too.
   rule {
     name           = "UptimepagePipelineStalled"
     condition      = "C"
     for            = "10m"
-    no_data_state  = "Alerting"
+    no_data_state  = "OK"
     exec_err_state = "Error"
     labels = {
       severity = "critical"
@@ -87,18 +88,17 @@ resource "grafana_rule_group" "pipeline" {
     }
     annotations = {
       summary     = "uptimepage: pipeline stalled"
-      description = "targets configured but no checks executing for 10m (scheduler/worker/app down). Runbook: runbooks/grafana-cloud.md."
+      description = "targets configured but no checks executing for 10m (scheduler/worker stalled). Runbook: runbooks/grafana-cloud.md."
     }
     data {
       ref_id         = "A"
       datasource_uid = data.grafana_data_source.prometheus.uid
-      # `bool` makes each comparison a present 0/1, so a healthy eval is a
-      # numeric 0 — not an empty vector that no_data_state=Alerting pages
-      # on. checks_total is lazily created on first increment, so `or
-      # vector(0)` reads "no checks yet" as 0 (idle-but-up must not page).
-      # targets_total stays un-coalesced: app down → it goes absent →
-      # product empty → no_data → Alerting dead-man. for=10m rides deploy
-      # restarts (/metrics down <2m); 20m window = 2x the [10m] selector.
+      # `bool` + `or vector(0)` keep both factors a present 0/1 while the
+      # app is up, so a healthy or idle process reports a clean 0 (Normal)
+      # instead of an empty/NoData flap. checks_total is lazily created on
+      # first increment; `or vector(0)` reads "no checks yet" as 0.
+      # 20m query window = 2x the [10m] rate selector; for=10m rides
+      # deploy restarts.
       relative_time_range {
         from = 1200
         to   = 0
@@ -391,7 +391,9 @@ resource "grafana_rule_group" "pipeline" {
   # through deploy restarts and brief blips. 1% is a deliberate
   # SLO-grade threshold: 99% success leaves headroom against the 99.9%
   # we want to advertise. Critical — server-side errors are the most
-  # direct signal that customers see broken pages.
+  # direct signal that customers see broken pages. The `> 0.1` volume
+  # gate stops a single 5xx in a near-idle minute from tripping the
+  # ratio; tune the floor as steady-state traffic grows.
   rule {
     name           = "UptimepageHttp5xxRateHigh"
     condition      = "C"
@@ -416,7 +418,7 @@ resource "grafana_rule_group" "pipeline" {
       model = jsonencode({
         refId   = "A"
         instant = true
-        expr    = "(sum(rate(uptimepage_http_requests_total{status=\"5xx\"}[5m])) / sum(rate(uptimepage_http_requests_total[5m]))) > 0.01"
+        expr    = "(sum(rate(uptimepage_http_requests_total{status=\"5xx\"}[5m])) / sum(rate(uptimepage_http_requests_total[5m]))) > 0.01 and sum(rate(uptimepage_http_requests_total[5m])) > 0.1"
       })
     }
     data {
@@ -720,18 +722,40 @@ resource "grafana_contact_point" "default" {
   }
 }
 
+# Critical path: email plus a Telegram push so a real outage reaches a
+# phone, not just an inbox that can sit unread overnight. Warnings stay
+# on the email-only default — degraded signals don't earn a push.
+resource "grafana_contact_point" "critical" {
+  name = "uptimepage-critical"
+
+  email {
+    addresses = [var.alert_email]
+    subject   = "[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}"
+  }
+
+  telegram {
+    token   = var.alert_telegram_token
+    chat_id = var.alert_telegram_chat_id
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
 # NOTE: grafana_notification_policy manages the SINGLE root policy for
 # the org — applying it REPLACES the stack's current root policy. This
 # stack has no prior alerting, so this establishes it; if other
 # alerting is ever added it must go through this resource too.
 #
-# Severity routing, one email contact, differentiated by timing:
-#   - root (critical falls through here): page fast, repeat often.
-#   - child severity=warning: batch longer, repeat daily — degraded
-#     signals shouldn't have paging cadence. continue = false: a
-#     matched warning stops here, never also hits the root cadence.
+# Severity routing by channel and timing:
+#   - root (critical falls through here): email + Telegram, page fast,
+#     repeat often.
+#   - child severity=warning: email-only default, batch longer, repeat
+#     daily — degraded signals shouldn't have paging cadence. continue =
+#     false: a matched warning stops here, never also hits the root path.
 resource "grafana_notification_policy" "root" {
-  contact_point   = grafana_contact_point.default.name
+  contact_point   = grafana_contact_point.critical.name
   group_by        = ["alertname"]
   group_wait      = "30s"
   group_interval  = "5m"
