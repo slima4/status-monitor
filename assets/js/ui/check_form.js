@@ -255,7 +255,6 @@
         // SubmitEvent.submitter is the actual clicked button (null for
         // form.requestSubmit() / Cmd+Enter, which we treat as primary save).
         const submitter = evt.submitter;
-        const saveAndTest = submitter && submitter.hasAttribute("data-save-and-test");
 
         const submitBtns = [...form.querySelectorAll("button[type='submit']")];
         const restoreLabel = submitter ? submitter.innerHTML : null;
@@ -310,10 +309,6 @@
                         });
                     } catch { /* server default coverage stands */ }
                 }
-            }
-            if (saveAndTest && id) {
-                // Best-effort: scheduler will run a check anyway on its own.
-                await window.smRunCheckNow(id);
             }
             window.location = id ? `/targets/${id}` : "/targets";
             return;
@@ -624,7 +619,6 @@
     function markFieldInvalid(field, scroll) {
         const el = fieldForApiPath(field);
         if (!el) return;
-        window.smRevealStepFor?.(el);
         window.smRevealCollapsibleFor?.(el);
         window.smRevealOptionalFor?.(el);
         el.setAttribute("aria-invalid", "true");

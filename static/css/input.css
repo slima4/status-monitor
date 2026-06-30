@@ -543,6 +543,20 @@
     @media (prefers-reduced-motion: reduce) {
         .sm-fresh-load .app-shell main > section > * { animation: none; }
     }
+    /* The monitor form is the section's only child, so the gate above would
+       rise it as one slab. Skip the container, stagger its parts instead. */
+    .sm-fresh-load .app-shell main > section > #check-form { animation: none; }
+    .sm-fresh-load #check-form > * {
+        animation: sm-rise 540ms cubic-bezier(0.2, 0.65, 0.3, 1) backwards;
+    }
+    .sm-fresh-load #check-form > *:nth-child(1) { animation-delay:  40ms; }
+    .sm-fresh-load #check-form > *:nth-child(2) { animation-delay: 110ms; }
+    .sm-fresh-load #check-form > *:nth-child(3) { animation-delay: 180ms; }
+    .sm-fresh-load #check-form > *:nth-child(4) { animation-delay: 250ms; }
+    .sm-fresh-load #check-form > *:nth-child(n+5) { animation-delay: 320ms; }
+    @media (prefers-reduced-motion: reduce) {
+        .sm-fresh-load #check-form > * { animation: none; }
+    }
 
     /* Visible focus ring on every interactive element. Must be a real
        `outline`, not Tailwind `ring` (a box-shadow): the cartoon controls
@@ -1227,6 +1241,41 @@
         border-color: var(--theme-state-bad-line);
     }
 
+    /* Remove a repeatable form row; square box matches .field height, × in CSS. */
+    .row-remove {
+        @apply relative shrink-0 rounded-sm border;
+        width: 2rem;
+        height: 2rem;
+        border-color: var(--theme-line);
+        color: var(--theme-text-quiet);
+        cursor: pointer;
+        transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease, scale 90ms ease;
+    }
+    .row-remove::before,
+    .row-remove::after {
+        content: "";
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 0.7rem;
+        height: 1.5px;
+        border-radius: 1px;
+        background: currentColor;
+    }
+    .row-remove::before { transform: translate(-50%, -50%) rotate(45deg); }
+    .row-remove::after  { transform: translate(-50%, -50%) rotate(-45deg); }
+    .row-remove:hover {
+        border-color: var(--theme-state-bad-line);
+        background: var(--theme-state-bad-bg);
+        color: var(--theme-state-bad-fg);
+    }
+    .row-remove:active { scale: 0.96; }
+    @media (prefers-reduced-motion: reduce) { .row-remove:active { scale: 1; } }
+    .row-remove:focus-visible {
+        outline: 1px dotted currentColor;
+        outline-offset: 2px;
+    }
+
     /* CLI file picker: native <input type=file> is sr-only; the label's
        bracket button is the visible control and a sibling span echoes the
        chosen filename (`> name` / `no file selected`). Mono throughout. */
@@ -1394,6 +1443,94 @@
         background-repeat: no-repeat;
         background-position: right 0.7rem center;
         background-size: 0.7rem;
+    }
+
+    /* Method/host segment + divider + filling value input as one control;
+       focus ring rides the wrapper so the pair lights as one unit. */
+    .field-join {
+        @apply flex items-stretch rounded-sm border;
+        border-color: var(--theme-line);
+        background: var(--theme-surface-elev);
+        transition: border-color 120ms ease;
+    }
+    .field-join:focus-within { border-color: var(--theme-accent); }
+    .field-join:has(:focus-visible) {
+        outline: 2px solid var(--color-brand-500);
+        outline-offset: 2px;
+    }
+    .field-join :focus-visible { outline: none; }
+    .field-join > .sm-combobox {
+        flex: none;
+        align-self: stretch;
+        align-items: stretch;
+    }
+    /* Trigger hugs the selected value (no reserved width) so the segment
+       shrinks for short options like GET / A and the chevron sits beside it. */
+    .field-join .sm-combobox__trigger { justify-content: flex-start; gap: 0.4rem; }
+    .field-join .sm-combobox__trigger,
+    .field-join .sm-combobox__trigger:hover,
+    .field-join .sm-combobox__trigger[aria-expanded="true"],
+    .field-join .sm-combobox__trigger:focus-visible {
+        height: auto;
+        align-self: stretch;
+        border: 0;
+        border-right: 1px solid var(--theme-line);
+        border-radius: 0;
+    }
+    .field-join .sm-combobox__trigger { background: transparent; }
+    .field-join .sm-combobox__trigger:hover,
+    .field-join .sm-combobox__trigger[aria-expanded="true"] {
+        background: var(--theme-surface-sunk);
+    }
+    /* Raw <select> shown before the combobox JS upgrades it. */
+    .field-join > select.field-join__method {
+        flex: none;
+        border: 0;
+        border-right: 1px solid var(--theme-line);
+        border-radius: 0;
+        background: transparent;
+    }
+    .field-join__url,
+    .field-join__port {
+        border: 0;
+        background: transparent;
+        padding: 0.375rem 0.625rem;
+        font-size: 0.8125rem;
+        line-height: 1.4;
+        color: var(--theme-text);
+    }
+    .field-join__url::placeholder,
+    .field-join__port::placeholder { color: var(--theme-text-quiet); }
+    .field-join__url { flex: 1 1 auto; min-width: 0; }
+    /* host:port join — ":" separator + narrow fixed port segment. */
+    .field-join__sep {
+        @apply flex shrink-0 items-center;
+        padding: 0 0.125rem;
+        color: var(--theme-text-quiet);
+        font-family: var(--font-mono);
+        user-select: none;
+    }
+    .field-join__port {
+        flex: none;
+        width: 7rem;
+        font-family: var(--font-mono);
+        appearance: textfield;
+    }
+    .field-join__port::-webkit-outer-spin-button,
+    .field-join__port::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
+    /* Unit adornment pinned to the right of a .field-outline number input; the
+       input gets right padding (pr-8 / pr-10) to clear it. */
+    .field-outline__unit {
+        position: absolute;
+        right: 0.625rem;
+        top: 50%;
+        transform: translateY(-50%);
+        font-family: var(--font-mono);
+        font-size: 0.75rem;
+        color: var(--theme-text-quiet);
+        pointer-events: none;
+        z-index: 1;
     }
 
     /* App-shell nav (base.html), the chrome on every authenticated page.
@@ -2196,59 +2333,29 @@
         color: var(--theme-text-muted);
     }
 
-    /* Create-flow stepper; <button> nodes so each step is keyboard-reachable. */
-    .wizard-steps {
-        @apply flex flex-wrap items-center;
-        gap: 0.25rem 0;
-        list-style: none;
-        padding: 0;
-        margin: 0;
-        counter-reset: wstep;
-        font-family: var(--font-mono);
-    }
-    .wizard-steps > li { @apply flex items-center; }
-    .wizard-steps > li:not(:first-child)::before {
-        content: "";
-        width: 1.5rem;
-        height: 1px;
-        margin: 0 0.5rem;
-        background: var(--theme-line);
-    }
-    .wizard-step {
-        @apply inline-flex items-center gap-2 rounded-sm;
-        counter-increment: wstep;
-        min-height: 2.5rem;
-        padding: 0.25rem 0.4rem;
-        border: 0;
-        background: transparent;
-        color: var(--theme-text-quiet);
+    /* Monitor-form section header: numbered disc + label + filling rule. */
+    #check-form { counter-reset: formsec; }
+    .form-legend {
+        @apply flex w-full items-center gap-2.5 font-mono;
+        counter-increment: formsec;
         font-size: 0.8125rem;
-        cursor: pointer;
-        transition: color 120ms ease;
+        color: var(--theme-text-muted);
     }
-    .wizard-step::before {
-        content: counter(wstep);
-        @apply inline-flex items-center justify-center shrink-0;
+    .form-legend::before {
+        content: counter(formsec);
+        @apply inline-flex shrink-0 items-center justify-center;
         width: 1.25rem;
         height: 1.25rem;
         border-radius: 9999px;
-        border: 1px solid var(--theme-line);
+        background: var(--theme-ink);
+        color: var(--theme-surface);
         font-size: 0.7rem;
         line-height: 1;
-        transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
     }
-    .wizard-step:hover { color: var(--theme-text-muted); }
-    .wizard-step--active { color: var(--theme-text); }
-    .wizard-step--active::before {
-        background: var(--theme-ink);
-        border-color: var(--theme-ink);
-        color: var(--theme-surface);
-    }
-    .wizard-step--done { color: var(--theme-text-muted); }
-    .wizard-step--done::before {
-        content: "✓";
-        border-color: var(--theme-accent);
-        color: var(--theme-accent);
+    .form-legend::after {
+        content: "";
+        @apply h-px flex-1;
+        background: var(--theme-line);
     }
     /* Multi-line helper hints: drop last-line orphans without markup churn. */
     #check-form .text-muted { text-wrap: pretty; }

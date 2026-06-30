@@ -17,7 +17,7 @@
                    placeholder="Value"
                    class="flex-[2] min-w-[14rem] field font-mono">
             <button type="button" data-header-remove
-                    class="btn-ghost px-2 text-sm" aria-label="Remove header">×</button>
+                    class="row-remove" aria-label="Remove header"></button>
         `;
     }
 
