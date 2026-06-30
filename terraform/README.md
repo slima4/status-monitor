@@ -13,7 +13,8 @@ State + secrets live in **HCP Terraform Cloud** — never in this repo.
   `UptimepageHttp5xxRateHigh`, `UptimepageHttpLatencyHigh`,
   `UptimepageStorageWriteLatencyHigh`, `UptimepageClickHousePartsHigh`,
   `UptimepageIngestBufferOverflow`) and `uptimepage-availability`
-  (`UptimepageMetricsPipelineDown`, `UptimepageRegionalAgentDown`); two
+  (`UptimepageMetricsPipelineDown`, `UptimepageControlPlaneDown`,
+  `UptimepageRegionalAgentDown`); two
   contact points (email-only `uptimepage-default` for warnings,
   email+Telegram `uptimepage-critical` for criticals); the root
   notification policy with severity routing (critical pages fast to both

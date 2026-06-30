@@ -661,6 +661,52 @@ resource "grafana_rule_group" "availability" {
     }
   }
 
+  # Control-plane process is gone — the binary hosting the web app and
+  # scheduler stopped reporting (host/container down), even if a probe agent
+  # still is. build_info is startup liveness, not subsystem health, so a
+  # scheduler stall with the process alive stays PipelineStalled's job.
+  # MetricsPipelineDown above keys on any build_info series, so a surviving
+  # agent masks a control-plane-only outage; the role label scopes this to
+  # blue/green. no_data = OK: build_info present means healthy; for=10m rides
+  # blue/green (one color stays up).
+  rule {
+    name           = "UptimepageControlPlaneDown"
+    condition      = "C"
+    for            = "10m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+    labels = {
+      severity = "critical"
+      service  = "uptimepage"
+    }
+    annotations = {
+      summary     = "uptimepage: control plane down"
+      description = "no control-plane metrics for 10m — the web app + scheduler process is not reporting (host or container down) even if a probe agent still is. Runbook: runbooks/grafana-cloud.md."
+    }
+    data {
+      ref_id         = "A"
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "A"
+        instant = true
+        expr    = "absent(uptimepage_build_info{role=\"control-plane\"})"
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = local.threshold_c
+    }
+  }
+
   # One or more enabled probe agents stopped checking in, so their regions'
   # monitors are no longer being probed. Sourced from agents.last_seen_at via
   # the control plane, so it covers remote agents too. The gauge is recomputed
