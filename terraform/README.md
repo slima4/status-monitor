@@ -5,13 +5,17 @@ State + secrets live in **HCP Terraform Cloud** — never in this repo.
 
 ## What this manages
 
-- `alerts.tf` — `uptimepage` folder; six alert rules in one
-  group: `UptimepageResultsLost`, `UptimepagePipelineStalled`,
-  `UptimepageNotificationDeliveryFailing` (critical),
+- `alerts.tf` — `uptimepage` folder; alert rules across two groups —
+  `uptimepage-pipeline` (data-path health: `UptimepageResultsLost`,
+  `UptimepagePipelineStalled`, `UptimepageNotificationDeliveryFailing`,
   `UptimepageCircuitBreakersOpen`, `UptimepageResultQueueBacklog`,
-  `UptimepageStorageWriteLatencyHigh` (warning); the default contact
-  point; the root notification policy with severity routing (critical
-  pages fast, warning batches slow).
+  `UptimepageRegistryRefreshStuck`/`Slow`, `UptimepagePgPoolSaturating`,
+  `UptimepageHttp5xxRateHigh`, `UptimepageHttpLatencyHigh`,
+  `UptimepageStorageWriteLatencyHigh`, `UptimepageClickHousePartsHigh`,
+  `UptimepageIngestBufferOverflow`) and `uptimepage-availability`
+  (`UptimepageMetricsPipelineDown`, `UptimepageRegionalAgentDown`); the
+  default contact point; the root notification policy with severity
+  routing (critical pages fast, warning batches slow).
 - `dashboard.tf` — the operator overview dashboard, from
   `terraform/dashboards/uptimepage-overview.json`. The
   `${DS_PROMETHEUS}` template input is substituted with the real

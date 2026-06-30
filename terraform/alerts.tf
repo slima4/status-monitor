@@ -92,11 +92,13 @@ resource "grafana_rule_group" "pipeline" {
     data {
       ref_id         = "A"
       datasource_uid = data.grafana_data_source.prometheus.uid
-      # 20m window vs the [10m] rate selector (2x headroom, parity
-      # with the 5m rule). Stalled-but-up → expr returns sum(targets)
-      # (>0) → C fires; app fully down → metrics vanish → no_data →
-      # no_data_state=Alerting (for=10m debounces deploy restarts,
-      # which keep /metrics down <2m).
+      # `bool` makes each comparison a present 0/1, so a healthy eval is a
+      # numeric 0 — not an empty vector that no_data_state=Alerting pages
+      # on. checks_total is lazily created on first increment, so `or
+      # vector(0)` reads "no checks yet" as 0 (idle-but-up must not page).
+      # targets_total stays un-coalesced: app down → it goes absent →
+      # product empty → no_data → Alerting dead-man. for=10m rides deploy
+      # restarts (/metrics down <2m); 20m window = 2x the [10m] selector.
       relative_time_range {
         from = 1200
         to   = 0
@@ -104,7 +106,7 @@ resource "grafana_rule_group" "pipeline" {
       model = jsonencode({
         refId   = "A"
         instant = true
-        expr    = "(sum(uptimepage_targets_total) > 0) and (sum(rate(uptimepage_checks_total[10m])) == 0)"
+        expr    = "(sum(uptimepage_targets_total) > bool 0) * (sum(rate(uptimepage_checks_total[10m]) or vector(0)) == bool 0)"
       })
     }
     data {
