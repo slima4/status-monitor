@@ -311,6 +311,17 @@ pub trait ResultsStore: Send + Sync {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<(String, CheckResult)>>;
+    /// Recent results for many targets in one query, each row tagged with its
+    /// region (the `CheckResult` carries `target_id` and `org_id`). Returns at
+    /// most `per_target_limit` newest rows per `(target, region)`. Rows are
+    /// filtered to the caller's `(org, target)` pairs, so a target id resolving
+    /// to another org yields nothing.
+    async fn recent_results_for_targets(
+        &self,
+        targets: &[(OrgId, Uuid)],
+        range: ClampedRange,
+        per_target_limit: usize,
+    ) -> Result<Vec<(String, CheckResult)>>;
     async fn uptime(
         &self,
         org: OrgId,

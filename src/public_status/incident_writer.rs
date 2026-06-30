@@ -206,11 +206,11 @@ impl IncidentWriter {
     /// sleeping.
     ///
     /// Walks the cross-tenant target set with keyset pagination so peak RAM
-    /// is `O(page_size)` regardless of org count. For each page, all open
-    /// incidents are resolved in a single batched SQL query (one round-trip,
-    /// not one per target), then per-target work runs concurrently up to
-    /// `max_concurrency`. A per-target error logs and continues — one
-    /// tenant's failure must not stall every other tenant.
+    /// is `O(page_size)` regardless of org count. Per page the open incidents
+    /// and recent results are both resolved in batched reads (one round-trip
+    /// for opens, one per lookback tier for results, not one per target), then
+    /// per-target work runs concurrently up to `max_concurrency`. A per-target
+    /// error logs and continues so one tenant's failure can't stall the rest.
     pub async fn tick_once(&self) -> Result<()> {
         let now = Utc::now();
         let concurrency = self.cfg.max_concurrency.max(1);
@@ -227,14 +227,16 @@ impl IncidentWriter {
             cursor = Some(PublicTargetCursor::after(last.0, last.1.id));
 
             let pairs: Vec<(OrgId, Uuid)> = page.iter().map(|(o, t)| (*o, t.id)).collect();
-            let open_map = self.incident_store.open_for_pairs(&pairs).await?;
-            let open_map = Arc::new(open_map);
+            let open_map = Arc::new(self.incident_store.open_for_pairs(&pairs).await?);
+            let results = Arc::new(self.load_page_results(&page, now).await?);
 
             stream::iter(page.into_iter().map(|(org, target)| {
                 let open_map = open_map.clone();
+                let results = results.clone();
                 async move {
                     let open = open_map.get(&(org, target.id)).cloned().unwrap_or_default();
-                    if let Err(err) = self.process_target(org, &target, open, now).await {
+                    let tagged = results.get(&target.id).cloned().unwrap_or_default();
+                    if let Err(err) = self.process_target(org, &target, open, tagged, now).await {
                         tracing::warn!(
                             %org,
                             target_id = %target.id,
@@ -248,6 +250,39 @@ impl IncidentWriter {
             .for_each(|_| async {})
             .await;
         }
+    }
+
+    /// One ClickHouse read per lookback tier instead of one per target, so a
+    /// slow monitor never widens a fast one's scan window. Each target is then
+    /// trimmed to its own window in [`process_target`](Self::process_target).
+    async fn load_page_results(
+        &self,
+        page: &[(OrgId, Target)],
+        now: DateTime<Utc>,
+    ) -> Result<std::collections::HashMap<Uuid, Vec<(String, CheckResult)>>> {
+        let mut tiers: std::collections::BTreeMap<i64, Vec<(OrgId, Uuid)>> =
+            std::collections::BTreeMap::new();
+        for (org, target) in page {
+            let tier = tier_seconds(self.lookback_for(target));
+            tiers.entry(tier).or_default().push((*org, target.id));
+        }
+
+        let mut out: std::collections::HashMap<Uuid, Vec<(String, CheckResult)>> =
+            std::collections::HashMap::new();
+        for (tier_secs, targets) in tiers {
+            let range = ClampedRange::unclamped(TimeRange {
+                from: now - ChronoDuration::seconds(tier_secs),
+                to: now,
+            });
+            let rows = self
+                .results_store
+                .recent_results_for_targets(&targets, range, self.cfg.max_results_per_tick)
+                .await?;
+            for (region, r) in rows {
+                out.entry(r.target_id).or_default().push((region, r));
+            }
+        }
+        Ok(out)
     }
 
     /// Window sized to the target's cadence: confirming a transition needs
@@ -265,27 +300,18 @@ impl IncidentWriter {
         org: OrgId,
         target: &Target,
         open: Vec<OpenIncident>,
+        tagged: Vec<(String, CheckResult)>,
         now: DateTime<Utc>,
     ) -> Result<()> {
-        let range = TimeRange {
-            from: now - self.lookback_for(target),
-            to: now,
-        };
-        let tagged = self
-            .results_store
-            .list_results_by_region(
-                org,
-                target.id,
-                ClampedRange::unclamped(range),
-                self.cfg.max_results_per_tick,
-                0,
-            )
-            .await?;
+        // The tier read can be wider than this target's window; trim to its own.
+        let cutoff = now - self.lookback_for(target);
         // Each region evaluated on its own ASC run, never interleaved.
         let mut by_region: std::collections::BTreeMap<String, Vec<CheckResult>> =
             std::collections::BTreeMap::new();
         for (region, r) in tagged {
-            by_region.entry(region).or_default().push(r);
+            if r.timestamp >= cutoff {
+                by_region.entry(region).or_default().push(r);
+            }
         }
         let mut by_region: Vec<(String, Vec<CheckResult>)> = by_region.into_iter().collect();
         for (_, results) in by_region.iter_mut() {
@@ -321,6 +347,22 @@ impl IncidentWriter {
         }
         Ok(())
     }
+}
+
+/// Round a per-target lookback window up to a coarse tier so similar-cadence
+/// targets share one batched read. Past the ladder the exact window is used
+/// (rare, very slow monitors).
+fn tier_seconds(window: ChronoDuration) -> i64 {
+    const LADDER: [i64; 6] = [
+        15 * 60,
+        60 * 60,
+        6 * 60 * 60,
+        24 * 60 * 60,
+        7 * 24 * 60 * 60,
+        30 * 24 * 60 * 60,
+    ];
+    let secs = window.num_seconds().max(1);
+    LADDER.into_iter().find(|&t| secs <= t).unwrap_or(secs)
 }
 
 /// Decision produced by [`decide`].

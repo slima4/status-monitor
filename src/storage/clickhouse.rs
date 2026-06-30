@@ -638,6 +638,45 @@ impl RegionResultRow {
     }
 }
 
+#[derive(Debug, Row, Deserialize)]
+struct MultiResultRow {
+    #[serde(with = "clickhouse::serde::uuid")]
+    org_id: Uuid,
+    region: String,
+    #[serde(with = "clickhouse::serde::uuid")]
+    target_id: Uuid,
+    timestamp: u32,
+    status: i8,
+    duration_ms: u32,
+    dns_ms: Option<u16>,
+    connect_ms: Option<u16>,
+    tls_ms: Option<u16>,
+    ttfb_ms: Option<u16>,
+    response_code: Option<u16>,
+    response_size: Option<u32>,
+    error: Option<String>,
+}
+
+impl MultiResultRow {
+    fn split(self) -> (String, CheckResult) {
+        let org_id = self.org_id;
+        let inner = OwnedResultRow {
+            target_id: self.target_id,
+            timestamp: self.timestamp,
+            status: self.status,
+            duration_ms: self.duration_ms,
+            dns_ms: self.dns_ms,
+            connect_ms: self.connect_ms,
+            tls_ms: self.tls_ms,
+            ttfb_ms: self.ttfb_ms,
+            response_code: self.response_code,
+            response_size: self.response_size,
+            error: self.error,
+        };
+        (self.region, row_to_result(inner, org_id))
+    }
+}
+
 fn row_to_result(row: OwnedResultRow, org_id: Uuid) -> CheckResult {
     CheckResult {
         target_id: row.target_id,
@@ -734,6 +773,43 @@ impl ResultsStore for ClickhouseResultsStore {
             .await
             .context("clickhouse list_results_by_region")?;
         Ok(rows.into_iter().map(|r| r.split(org.0)).collect())
+    }
+
+    async fn recent_results_for_targets(
+        &self,
+        targets: &[(OrgId, Uuid)],
+        range: ClampedRange,
+        per_target_limit: usize,
+    ) -> Result<Vec<(String, CheckResult)>> {
+        if targets.is_empty() {
+            return Ok(Vec::new());
+        }
+        let limit = per_target_limit.min(10_000) as u64;
+        // Pair IN over typed, unique ids (injection-safe): hits the
+        // (org_id, target_id, ...) sort-key prefix so CH prunes by org instead
+        // of scanning every tenant's granules.
+        let pair_list = targets
+            .iter()
+            .map(|(o, t)| format!("('{}','{}')", o.0, t))
+            .collect::<Vec<_>>()
+            .join(",");
+        let rows: Vec<MultiResultRow> = self
+            .client
+            .query(&format!(
+                "SELECT org_id, region, target_id, timestamp, status, duration_ms, dns_ms, \
+                 connect_ms, tls_ms, ttfb_ms, response_code, response_size, error FROM {TABLE} \
+                 WHERE (org_id, target_id) IN ({pair_list}) \
+                 AND timestamp >= fromUnixTimestamp(?) \
+                 AND timestamp < fromUnixTimestamp(?) \
+                 ORDER BY target_id, region, timestamp DESC \
+                 LIMIT {limit} BY target_id, region"
+            ))
+            .bind(range.from.timestamp())
+            .bind(range.to.timestamp())
+            .fetch_all::<MultiResultRow>()
+            .await
+            .context("clickhouse recent_results_for_targets")?;
+        Ok(rows.into_iter().map(MultiResultRow::split).collect())
     }
 
     async fn current_status_breakdown(

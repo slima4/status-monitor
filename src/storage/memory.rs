@@ -103,6 +103,31 @@ impl ResultsStore for InMemorySink {
             .collect())
     }
 
+    async fn recent_results_for_targets(
+        &self,
+        targets: &[(OrgId, Uuid)],
+        range: ClampedRange,
+        per_target_limit: usize,
+    ) -> Result<Vec<(String, CheckResult)>> {
+        let wanted: std::collections::HashSet<Uuid> = targets.iter().map(|(_, t)| *t).collect();
+        let guard = self.results.lock();
+        let mut by_target: std::collections::HashMap<Uuid, Vec<CheckResult>> =
+            std::collections::HashMap::new();
+        for r in guard.iter() {
+            if wanted.contains(&r.target_id) && r.timestamp >= range.from && r.timestamp < range.to
+            {
+                by_target.entry(r.target_id).or_default().push(r.clone());
+            }
+        }
+        let mut out = Vec::new();
+        for mut results in by_target.into_values() {
+            results.sort_by_key(|r| std::cmp::Reverse(r.timestamp));
+            results.truncate(per_target_limit);
+            out.extend(results.into_iter().map(|r| ("default".to_string(), r)));
+        }
+        Ok(out)
+    }
+
     async fn uptime(
         &self,
         _org: OrgId,
