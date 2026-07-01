@@ -123,6 +123,7 @@
        cues stay in lockstep with the CTA colour. */
     --theme-accent:        var(--theme-action-primary);
     --theme-accent-soft:   oklch(0.94 0.06 158);
+    --theme-mark:          oklch(0.78 0.135 62);
 
     /* CLI register is flat — terminal UIs don't have raised controls.
        Btn-hover keeps a subtle inset highlight for tactile feedback;
@@ -338,6 +339,17 @@
 @layer components {
     .status-badge {
         @apply inline-flex items-center px-2 py-0.5 rounded text-xs font-medium;
+    }
+
+    /* Marker bg is a fixed light orange across all themes, so its text is a
+       fixed dark ink, not var(--theme-ink) which flips light on dark themes. */
+    .hl {
+        background: var(--theme-mark);
+        color: oklch(0.18 0.015 240);
+        box-decoration-break: clone;
+        -webkit-box-decoration-break: clone;
+        padding: 0.04em 0.14em;
+        border-radius: 3px;
     }
 
     /* Trusted first-party legal/policy markdown rendered to HTML. Preflight

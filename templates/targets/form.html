@@ -130,7 +130,7 @@
                     verify-tls
                   </label>
                 </div>
-                <span class="mt-1 block text-xs text-muted">follow-redirects chases 3xx to the final page; verify-tls fails the check on invalid or self-signed certificates — switch it off only for internal endpoints.</span>
+                <span class="mt-1 block text-xs text-muted">follow-redirects chases 3xx to the final page; verify-tls fails the check on invalid or self-signed certificates — <span class="hl">switch it off only for internal endpoints</span>.</span>
               </div>
             </div>
           </div>
@@ -492,7 +492,7 @@
               </label>
               {% endfor %}
             </div>
-            <span class="mt-1 block text-xs text-muted">Consecutive failed checks before the monitor counts as down — 1 fail reacts instantly but a single network blip can page you; 2 fails is the usual default.</span>
+            <span class="mt-1 block text-xs text-muted">Consecutive failed checks before the monitor counts as down — 1 fail reacts instantly but a single network blip can page you; <span class="hl">2 fails is the usual default</span>.</span>
           </div>
           {% if form.show_regions %}
           <div data-monitor-regions data-target-id="{{ form.id }}">
@@ -504,7 +504,7 @@
                 {% endfor %}
               </select>
             </div>
-            <span class="mt-1 block text-xs text-muted">Opens one incident when this many regions agree the monitor is down. Majority suppresses a single location's network blip.</span>
+            <span class="mt-1 block text-xs text-muted">Opens one incident when this many regions agree the monitor is down. <span class="hl">Majority suppresses a single location's network blip</span>.</span>
             <div class="mt-4">
               <span class="mb-1.5 block text-xs text-muted">Regions</span>
               <div class="space-y-2">
