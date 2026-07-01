@@ -17,7 +17,7 @@ use axum::Router;
 use axum::extract::State;
 use axum::http::HeaderMap;
 use axum::http::HeaderValue;
-use axum::response::Response;
+use axum::response::{Redirect, Response};
 use axum::routing::get;
 
 use super::config::{BRAND, MarketingCfg, TERRAFORM_URL};
@@ -251,6 +251,10 @@ pub const LANDINGS: &[Landing] = &[
                 label: "vs Statuspage",
                 href: "/vs/statuspage",
             },
+            ResourceLink {
+                label: "Best self-hosted monitors",
+                href: "/blog/best-self-hosted-uptime-monitoring-tools",
+            },
         ],
         cta: "Start free",
     },
@@ -317,6 +321,159 @@ docker compose up -d"#,
             ResourceLink {
                 label: "Monitoring as code",
                 href: "/automation",
+            },
+            ResourceLink {
+                label: "Best self-hosted monitors",
+                href: "/blog/best-self-hosted-uptime-monitoring-tools",
+            },
+        ],
+        cta: "Start free",
+    },
+    Landing {
+        path: "/white-label-uptime-monitoring",
+        created: "2026-07-01",
+        lastmod: "2026-07-01",
+        title: "White-Label Uptime Monitoring & Status Pages",
+        eyebrow: "white label",
+        h1: "White-label uptime monitoring for your brand",
+        meta_description: "White-label uptime monitoring and branded status pages for agencies and resellers. Your logo, colours and subdomain per client. Free to start, no card.",
+        lede: "Put your own brand on the monitoring. Give every client a branded status page on your own subdomain with your logo and colours, all from one account. On Pro or a self-hosted instance the vendor badge comes off entirely, so your clients only ever see your name.",
+        features: &[
+            Feature {
+                label: "Branding",
+                value: "logo + colours per page",
+            },
+            Feature {
+                label: "Domain",
+                value: "branded subdomain per client",
+            },
+            Feature {
+                label: "Clients",
+                value: "unlimited pages",
+            },
+            Feature {
+                label: "Check interval",
+                value: "every 60s",
+            },
+            Feature {
+                label: "As code",
+                value: "Terraform + REST + MCP",
+            },
+            Feature {
+                label: "Price to start",
+                value: "free, no card",
+            },
+        ],
+        sections: &[
+            Section {
+                heading: "your brand, not ours",
+                body: "Each status page carries your logo and colours on your own subdomain, so it reads as yours from the first visit. On Pro or a self-hosted instance the powered-by badge comes off too, and the tool behind it disappears completely.",
+            },
+            Section {
+                heading: "a page per client, one account",
+                body: "Add every client as a monitor, group them, and hand each one a branded page. No per-client tool to stand up and no per-client invoice to pass on.",
+            },
+            Section {
+                heading: "own the whole thing",
+                body: "Self-host the AGPL binary and no outside name touches your stack, or start on the free hosted tier. The API and Terraform provider are identical either way.",
+            },
+        ],
+        code: None,
+        resources: &[
+            ResourceLink {
+                label: "Status pages for agencies",
+                href: "/status-page-for-agencies",
+            },
+            ResourceLink {
+                label: "Best self-hosted monitors",
+                href: "/blog/best-self-hosted-uptime-monitoring-tools",
+            },
+        ],
+        cta: "Start free",
+    },
+    Landing {
+        path: "/uptime-monitoring-for-developers",
+        created: "2026-07-01",
+        lastmod: "2026-07-01",
+        title: "Uptime Monitoring for Developers, as Code",
+        eyebrow: "for developers",
+        h1: "Uptime monitoring built for developers",
+        meta_description: "Uptime monitoring for developers: define monitors as code with a Terraform provider, REST API and MCP. HTTP, TCP, DNS, TLS checks. Free to start, no card.",
+        lede: "Define your monitors the way you define the rest of your infrastructure: in code, reviewed in a pull request. A Terraform provider, a full REST API and an MCP server, plus a status page your users can trust. Run the single binary yourself or start free on the hosted tier, no card.",
+        features: &[
+            Feature {
+                label: "As code",
+                value: "Terraform + REST + MCP",
+            },
+            Feature {
+                label: "Checks",
+                value: "HTTP, TCP, DNS, TLS",
+            },
+            Feature {
+                label: "Check interval",
+                value: "every 60s",
+            },
+            Feature {
+                label: "Self-host",
+                value: "one binary, AGPL",
+            },
+            Feature {
+                label: "Probes",
+                value: "multi-region, run your own",
+            },
+            Feature {
+                label: "Price to start",
+                value: "free, no card",
+            },
+        ],
+        sections: &[
+            Section {
+                heading: "monitors as code",
+                body: "Declare monitors, status pages and notification channels in HCL with the official Terraform provider. Run `terraform plan` on every pull request so a reviewer sees the diff before it ships, and roll back a bad check with a revert.",
+            },
+            Section {
+                heading: "an API that means it",
+                body: "A full REST API covers everything the dashboard does, authenticated with scoped, org-bound tokens you can narrow to exactly one job. Script onboarding, wire checks into CI, or build your own tooling on top.",
+            },
+            Section {
+                heading: "query it from your assistant",
+                body: "An MCP server lets an LLM client read your monitoring and take fenced, audited actions. Ask what is broken and since when in plain language, answered from the same config that lives in your repo.",
+            },
+            Section {
+                heading: "probes where your users are",
+                body: "Run regional probe agents on your own boxes and check from where your customers actually are. Each agent authenticates with a scoped, org-bound token.",
+            },
+        ],
+        code: Some(CodeSample {
+            caption: "Declare a monitor in Terraform",
+            body: r#"resource "uptimepage_target" "api" {
+  name     = "api prod"
+  interval = 60
+
+  check = {
+    type = "http"
+    http = {
+      url = "https://example.com/healthz"
+      expected_status = {
+        kind  = "exact"
+        exact = 200
+      }
+    }
+  }
+}"#,
+        }),
+        resources: &[
+            ResourceLink {
+                label: "Monitoring as code",
+                href: "/automation",
+            },
+            ResourceLink {
+                label: "Terraform provider",
+                href: "/terraform-uptime-monitoring",
+            },
+            ResourceLink {
+                label: "Best self-hosted monitors",
+                href: "/blog/best-self-hosted-uptime-monitoring-tools",
             },
         ],
         cta: "Start free",
@@ -452,12 +609,12 @@ docker compose up -d"#,
     Landing {
         path: "/vs/better-stack",
         created: "2026-06-19",
-        lastmod: "2026-06-20",
-        title: "A Better Stack Alternative You Can Self-Host",
+        lastmod: "2026-07-01",
+        title: "A Better Uptime (Better Stack) Alternative You Self-Host",
         eyebrow: "comparing platforms",
-        h1: "Looking for a Better Stack alternative?",
-        meta_description: "Want monitoring and status pages you can self-host and drive as code? Uptimepage is one binary, AGPL, with a Terraform provider and MCP. Free to start.",
-        lede: "Uptimepage is a focused monitor and status page you can run yourself. One binary, open source under AGPL, and everything you can click you can also declare in code. Start free on the hosted tier, no card.",
+        h1: "Looking for a Better Uptime (Better Stack) alternative?",
+        meta_description: "Better Uptime is now Better Stack. Want self-hosted monitoring and status pages you drive as code? Uptimepage is one AGPL binary with Terraform and MCP.",
+        lede: "Better Uptime rebranded to Better Stack, and if you outgrew its pricing or want your data on your own boxes, Uptimepage is a focused monitor and status page you run yourself. One binary, open source under AGPL, and everything you can click you can also declare in code. Start free on the hosted tier, no card.",
         features: &[
             Feature {
                 label: "Run it",
@@ -632,10 +789,16 @@ docker compose up -d"#,
   }
 }"#,
         }),
-        resources: &[ResourceLink {
-            label: "Monitoring as code",
-            href: "/automation",
-        }],
+        resources: &[
+            ResourceLink {
+                label: "Monitoring as code",
+                href: "/automation",
+            },
+            ResourceLink {
+                label: "Best self-hosted monitors",
+                href: "/blog/best-self-hosted-uptime-monitoring-tools",
+            },
+        ],
         cta: "Start free",
     },
     Landing {
@@ -1030,6 +1193,42 @@ fn page_faqs(path: &str) -> &'static [(&'static str, &'static str)] {
                 "Yes. The source is AGPL and free to self-host, and the hosted tier is $0 a month if you prefer not to run it.",
             ),
         ],
+        "/white-label-uptime-monitoring" => &[
+            (
+                "Can I put my own brand on the status page?",
+                "Yes. Every page carries your logo and colours on your own subdomain. To drop the powered-by badge entirely, use the Pro plan or a self-hosted instance.",
+            ),
+            (
+                "Can I manage many clients from one account?",
+                "Yes. Add every client as a monitor, group them, and give each a branded page. One account covers the whole roster, with no per-client tool or invoice.",
+            ),
+            (
+                "Is there per-client or per-seat pricing?",
+                "No. The hosted tier is free with no card, and paid Pro is a flat plan. Self-hosting under AGPL is free as well.",
+            ),
+            (
+                "Can I remove every trace of the vendor?",
+                "Self-host the AGPL binary and no outside brand appears anywhere in your stack, or upgrade to Pro to drop the badge on the hosted tier. Your brand is the only one your clients see.",
+            ),
+        ],
+        "/uptime-monitoring-for-developers" => &[
+            (
+                "Can I manage monitors as code?",
+                "Yes. An official Terraform provider covers monitors, status pages and channels, so you declare them in HCL and review changes in a pull request.",
+            ),
+            (
+                "Is there a REST API?",
+                "Yes, a full REST API mirroring the dashboard, authenticated with scoped, org-bound tokens you can narrow to a single job.",
+            ),
+            (
+                "Does it work with LLM tooling?",
+                "Yes. An MCP server lets an LLM client read your monitoring and take fenced, audited actions from the same config that lives in your repo.",
+            ),
+            (
+                "Can I self-host it?",
+                "Yes. `docker compose up` brings up the single AGPL binary with Postgres and ClickHouse, and migrations run on boot.",
+            ),
+        ],
         "/vs/uptimerobot" => &[
             (
                 "Is Uptimepage free?",
@@ -1067,6 +1266,10 @@ fn page_faqs(path: &str) -> &'static [(&'static str, &'static str)] {
             ),
         ],
         "/vs/better-stack" => &[
+            (
+                "Is Better Stack the same as Better Uptime?",
+                "Broadly, yes. Better Uptime was folded into Better Stack, where it is now the Uptime product, so this comparison applies whichever name you searched for.",
+            ),
             (
                 "Can I self-host Uptimepage?",
                 "Yes. It ships as one AGPL binary with Postgres and ClickHouse, so `docker compose up` puts it live with your data on your own boxes.",
@@ -1303,7 +1506,11 @@ pub fn mount(router: Router<Arc<MarketingCfg>>) -> Router<Arc<MarketingCfg>> {
             get(move |state, headers| serve(state, headers, landing)),
         );
     }
-    r
+    // Old name for Better Stack; searchers still use it, alias 301s to the one page.
+    r.route(
+        "/vs/better-uptime",
+        get(|| async { Redirect::permanent("/vs/better-stack") }),
+    )
 }
 
 #[cfg(test)]

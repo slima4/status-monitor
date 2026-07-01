@@ -114,6 +114,6 @@ And the same monitors you declare in code, an AI assistant can [read back over M
 
 ## Boring, in code too
 
-We've [argued before](/blog/boring-uptime) that your monitor should be the dullest, most trustworthy thing you own. Configuration is part of that. A monitor whose definition you can read, review, diff, and roll back is a more boring monitor than one assembled from clicks that nobody remembers, and boring, here, is the entire compliment.
+We've [argued before](/blog/boring-uptime) that your monitor should be the dullest, most trustworthy thing you own. Configuration is part of that, and it's worth weighing when you pick a tool: of [the open-source and self-hosted options](/blog/best-self-hosted-uptime-monitoring-tools), the ones that keep their config in a file you can commit age better than the ones that hide it behind clicks. A monitor whose definition you can read, review, diff, and roll back is a more boring monitor than one assembled from clicks that nobody remembers, and boring, here, is the entire compliment.
 
 Put the config in the repo. Let a second person read the diff. Your future self, squinting at a 47-second interval eighteen months from now, will at least be able to run `git blame` and find out it was you.
