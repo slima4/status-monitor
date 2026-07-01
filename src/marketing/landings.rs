@@ -3,9 +3,12 @@
 //! shape as [`super::legal`]: one `LANDINGS` table feeds the router mount,
 //! the render cache, and the sitemap, so a new page is one entry.
 //!
-//! Copy is authored factual about Uptimepage. Comparison pages state what
-//! Uptimepage offers and stay neutral about the named competitor — no
-//! third-party feature claims to keep current. Vet any competitor-specific
+//! Copy is authored factual about Uptimepage. Most comparison pages state
+//! what Uptimepage offers and stay neutral about the named competitor, with
+//! no third-party feature claims to keep current. The one exception is the
+//! head-to-head matrix page (`/vs/self-hosted-status-pages`), which carries
+//! dated, source-verified competitor facts via `page_matrix`; refresh those
+//! against each project's repo when they drift. Vet any competitor-specific
 //! copy before adding it.
 
 use std::collections::HashMap;
@@ -51,6 +54,24 @@ pub struct ResourceLink {
 pub struct CodeSample {
     pub caption: &'static str,
     pub body: &'static str,
+}
+
+/// One row of a head-to-head comparison matrix: a label plus one
+/// `(text, tone)` cell per column. `tone` is a `.cmp` cell class
+/// (`""`, `"yes"`, `"no"`, `"part"`) that colours the value.
+pub struct MatrixRow {
+    pub label: &'static str,
+    pub cells: &'static [(&'static str, &'static str)],
+}
+
+/// A factual, dated comparison matrix. Only the head-to-head page carries
+/// one, so it is looked up by path (like the FAQs) rather than stored on
+/// every `Landing`. Keep `notes` verifiable and the last one dated.
+pub struct Matrix {
+    pub heading: &'static str,
+    pub columns: &'static [&'static str],
+    pub rows: &'static [MatrixRow],
+    pub notes: &'static [&'static str],
 }
 
 /// A use-case or comparison landing page. Comparison and use-case pages
@@ -868,6 +889,158 @@ docker compose up -d"#,
         cta: "Start free",
     },
     Landing {
+        path: "/vs/self-hosted-status-pages",
+        created: "2026-07-01",
+        lastmod: "2026-07-01",
+        title: "Uptimepage vs Upptime, Cachet & Statping",
+        eyebrow: "comparing self-hosted",
+        h1: "Uptimepage vs Upptime, Cachet and Statping",
+        meta_description: "How Uptimepage compares to Upptime, Cachet and Statping in 2026: built-in monitoring, 60-second checks, status pages, subscribers and config-as-code.",
+        lede: "Three popular self-hosted status tools, one honest table. Upptime and Statping run their own checks; Cachet is a status page that has only recently, and partially, added checks of its own. Here is where each fits, and where Uptimepage does both jobs in one product. Start free on the hosted tier or self-host under AGPL, no card.",
+        features: &[
+            Feature {
+                label: "Built-in checks",
+                value: "HTTP, TCP, DNS, TLS",
+            },
+            Feature {
+                label: "Check interval",
+                value: "every 60s",
+            },
+            Feature {
+                label: "Status page",
+                value: "branded, subscribers",
+            },
+            Feature {
+                label: "As code",
+                value: "Terraform + REST + MCP",
+            },
+            Feature {
+                label: "Run it",
+                value: "hosted free, or self-host AGPL",
+            },
+            Feature {
+                label: "Price to start",
+                value: "free, no card",
+            },
+        ],
+        sections: &[
+            Section {
+                heading: "Upptime: monitoring inside your GitHub repo",
+                body: "Upptime is a neat idea. It runs checks as scheduled GitHub Actions, records history as commits in your repo, files incidents as GitHub Issues, and serves a static page from GitHub Pages. That design is also its ceiling. Actions cron will not run more than once every five minutes and can slip later under load, so detection is measured in minutes. There are no visitor subscriptions, checks run from a single region unless you add the third-party Globalping service, and there is no DNS-record or TLS-expiry check. Uptimepage runs its own checks every 60 seconds across HTTP, TCP, DNS and TLS from several regions, and lets visitors subscribe by email or webhook.",
+            },
+            Section {
+                heading: "Cachet: a status page catching up on monitoring",
+                body: "Cachet began as a pure communication tool: you set components up or down by hand or over its API. Its actively developed v3, in the cachethq/core repo, is moving fast and, as of mid-2026, added basic HTTP component checks and subscriber management. The checks are real but young: HTTP GET only, no TCP, DNS or TLS, and you schedule the check command yourself rather than getting a built-in interval. It is still 3.x-dev with no stable release, incident email to subscribers is not wired up yet, it is a PHP and Laravel app with a database, queue and cron to operate, and it ships under a custom source-available license rather than an OSI open-source one. Uptimepage runs HTTP, TCP, DNS and TLS checks every 60 seconds from multiple regions out of the box, opens incidents automatically, and is one binary to run.",
+            },
+            Section {
+                heading: "Statping: close in shape, thin on upkeep",
+                body: "Statping is the nearest match here. It is a single Go binary that runs its own HTTP, TCP, UDP, ICMP and gRPC checks, draws response-time graphs, and shows incidents and maintenance on a themeable page. The catch is upkeep. The original project stopped in 2020, and the community statping-ng fork carries it now at roughly one release a year, the most recent in mid-2025. It has no visitor subscriptions, no multi-region checks, and no Terraform provider. Uptimepage covers the same ground and adds config-as-code with Terraform, REST and MCP, team roles, subscriber pages and regional probes, hosted for free or self-hosted under AGPL.",
+            },
+            Section {
+                heading: "One product, hosted or self-hosted",
+                body: "The pattern is simple. Upptime and Statping monitor but leave out subscribers and multi-region; Cachet publishes but does not monitor. Uptimepage does both in one binary. Run docker compose up with Postgres and ClickHouse on your own boxes, or start free on the hosted tier with no card. The data model, REST API and Terraform provider are identical either way, so moving between them is just an endpoint change.",
+            },
+        ],
+        code: None,
+        resources: &[
+            ResourceLink {
+                label: "Open-source status page",
+                href: "/open-source-status-page",
+            },
+            ResourceLink {
+                label: "Self-hosted status page",
+                href: "/self-hosted-status-page",
+            },
+            ResourceLink {
+                label: "vs Uptime Kuma",
+                href: "/vs/uptime-kuma",
+            },
+            ResourceLink {
+                label: "Best self-hosted monitors",
+                href: "/blog/best-self-hosted-uptime-monitoring-tools",
+            },
+        ],
+        cta: "Start free",
+    },
+    Landing {
+        path: "/vs/self-hosted-monitoring",
+        created: "2026-07-01",
+        lastmod: "2026-07-01",
+        title: "Uptimepage vs Uptime Kuma, OpenStatus, OneUptime, Gatus, Kener",
+        eyebrow: "comparing self-hosted",
+        h1: "Uptimepage vs the self-hosted monitoring tools",
+        meta_description: "How Uptimepage compares to Uptime Kuma, OpenStatus, OneUptime, Gatus and Kener in 2026: checks, status pages, multi-region probes and config-as-code.",
+        lede: "The modern self-hosted crowd, compared honestly. Uptime Kuma and Gatus check the most protocols and run the lightest; OpenStatus and OneUptime match Uptimepage on config-as-code and multi-region; Kener has the prettiest status page. Uptimepage sits where monitoring, a real subscriber status page and Terraform, REST and MCP meet in one binary. Start free on the hosted tier or self-host under AGPL, no card.",
+        features: &[
+            Feature {
+                label: "Built-in checks",
+                value: "HTTP, TCP, DNS, TLS, domain",
+            },
+            Feature {
+                label: "Check interval",
+                value: "every 60s",
+            },
+            Feature {
+                label: "Status page",
+                value: "branded, subscribers",
+            },
+            Feature {
+                label: "Probes",
+                value: "multi-region, run your own",
+            },
+            Feature {
+                label: "As code",
+                value: "Terraform + REST + MCP",
+            },
+            Feature {
+                label: "Run it",
+                value: "one binary, hosted or AGPL",
+            },
+        ],
+        sections: &[
+            Section {
+                heading: "Uptime Kuma: the broadest checks, the lightest footprint",
+                body: "Uptime Kuma is the community favourite for good reason: around forty monitor types (databases, gRPC, MQTT, SNMP, Steam, real-browser, push heartbeats), roughly ninety-five alert integrations, one-second intervals, and a single container to run. Where it stops is the team and status-page side. It is single-user with no roles, it is driven entirely over a socket API with no REST or Terraform, its status pages take an RSS feed rather than email or webhook subscribers, and incidents are posted by hand, not opened from a failing check. Uptimepage trades some of that protocol breadth for a subscriber status page, organizations with roles, auto-opened incidents and config-as-code.",
+            },
+            Section {
+                heading: "OpenStatus and OneUptime: the dev-first platforms",
+                body: "These are the closest to Uptimepage in philosophy. OpenStatus is monitoring-as-code done well: a Terraform provider, a CLI, an MCP server, auto-resolving incidents, email and webhook subscribers, and probes across thirty-five regions with sub-minute checks. Its trade-offs are a heavier stack (Turso plus Tinybird plus hosted queues) and an open-source checker that implements only HTTP, TCP and DNS, with ICMP, UDP and SSL-certificate monitors declared in config but not built. OneUptime does everything Uptimepage does and then keeps going into on-call scheduling, escalation, logs, tracing and APM, but that reach costs you a Postgres, ClickHouse, Redis and many-service deployment to operate. Uptimepage aims at the same developer surface, Terraform, REST and MCP, but as one binary you can actually run. It matches those sub-minute checks too: 30 seconds on Pro and 10 seconds self-hosted, while the free founding plan already carries fifty monitors at sixty seconds.",
+            },
+            Section {
+                heading: "Gatus: the protocol-rich checker",
+                body: "Gatus is a joy if you want declarative checks in version control. Eleven endpoint protocols including gRPC, SSH, WebSocket, STARTTLS and UDP, a rich condition language with JSONPath body assertions and certificate-expiry checks, multi-step suites, and a tiny static binary with an optional zero-database mode. What it is not is a status page. It ships a health dashboard with badges, not a branded page with subscribers, it has no incident timeline, and it is single-tenant behind one basic-auth or OIDC boundary. Uptimepage covers the everyday HTTP, TCP, DNS and TLS checks and pairs them with the public status page, subscribers and multi-tenant teams Gatus leaves out.",
+            },
+            Section {
+                heading: "Kener: the polished status page",
+                body: "Kener is the best-looking status page of the group: separate light and dark palettes, custom CSS and footer HTML, twenty-four locales, embeddable widgets, four badge styles and custom RBAC roles. It checks real services too, including gRPC, SQL and heartbeats. The gaps are on the monitoring platform side: no multi-region probing, four alert channels (email, webhook, Slack, Discord), email-and-RSS subscribers only, a single tenant, and a hard Redis dependency. Uptimepage gives up a little status-page theming for multi-region probes, more alert channels and config-as-code.",
+            },
+            Section {
+                heading: "Where Uptimepage fits",
+                body: "Uptimepage is not the very fastest interval or the widest protocol list here, and it is honest about that. What it does is put the two halves together: real HTTP, TCP, DNS, TLS-certificate and domain-expiry monitoring, and a branded public status page with confirmed email and webhook subscribers, auto-opened incidents and scheduled maintenance. All of it is driven from code with a Terraform provider, a full REST API and an MCP server, isolated per organization with roles, and checked from probes you can run in any region. It runs as one binary with Postgres and ClickHouse, hosted for free or self-hosted under AGPL.",
+            },
+        ],
+        code: None,
+        resources: &[
+            ResourceLink {
+                label: "vs Upptime, Cachet, Statping",
+                href: "/vs/self-hosted-status-pages",
+            },
+            ResourceLink {
+                label: "vs Uptime Kuma",
+                href: "/vs/uptime-kuma",
+            },
+            ResourceLink {
+                label: "vs OneUptime",
+                href: "/vs/oneuptime",
+            },
+            ResourceLink {
+                label: "Best self-hosted monitors",
+                href: "/blog/best-self-hosted-uptime-monitoring-tools",
+            },
+        ],
+        cta: "Start free",
+    },
+    Landing {
         path: "/automation",
         created: "2026-06-16",
         lastmod: "2026-06-21",
@@ -1140,6 +1313,7 @@ struct LandingDoc {
     features: &'static [Feature],
     sections: &'static [Section],
     code: Option<&'static CodeSample>,
+    matrix: Option<&'static Matrix>,
     resources: &'static [ResourceLink],
     cta: &'static str,
     canonical_url: String,
@@ -1153,8 +1327,10 @@ struct LandingDoc {
     version: &'static str,
 }
 
-/// Per-page FAQ for the landings that have one; others render no FAQ. Comparison
-/// answers describe Uptimepage only, matching the neutral-comparison rule above.
+/// Per-page FAQ for the landings that have one; others render no FAQ. Most
+/// comparison answers describe Uptimepage only, matching the neutral-comparison
+/// rule above; the head-to-head page's answers also state verifiable, dated
+/// competitor facts, in step with its matrix.
 fn page_faqs(path: &str) -> &'static [(&'static str, &'static str)] {
     match path {
         "/open-source-status-page" => &[
@@ -1323,6 +1499,42 @@ fn page_faqs(path: &str) -> &'static [(&'static str, &'static str)] {
                 "Yes. The AGPL source runs with `docker compose up` on Postgres and ClickHouse, and the hosted tier is $0 a month.",
             ),
         ],
+        "/vs/self-hosted-status-pages" => &[
+            (
+                "Does Cachet do monitoring?",
+                "As of mid-2026, partly. Cachet v3 added basic HTTP checks you schedule yourself (GET only, no TCP, DNS or TLS), though it is still in development with no stable release. Uptimepage runs HTTP, TCP, DNS and TLS checks every 60 seconds from multiple regions and opens incidents automatically.",
+            ),
+            (
+                "How often can Upptime check?",
+                "Upptime runs on GitHub Actions cron, which cannot fire more than once every five minutes and can drift later under load. Uptimepage checks as often as every 60 seconds from multiple regions.",
+            ),
+            (
+                "Is Statping still maintained?",
+                "The original Statping stopped in 2020. A community fork, statping-ng, keeps it going at roughly one release a year. Uptimepage is actively developed, with config-as-code, subscriber pages and regional probes, hosted or self-hosted.",
+            ),
+            (
+                "Can I self-host Uptimepage?",
+                "Yes. `docker compose up` brings up the single AGPL binary with Postgres and ClickHouse, migrations run on boot, and the hosted tier is free if you would rather not run it.",
+            ),
+        ],
+        "/vs/self-hosted-monitoring" => &[
+            (
+                "Which of these is the most lightweight to run?",
+                "Gatus (a tiny static binary, optionally zero-database) and Uptime Kuma (one container) are the lightest. OneUptime is the heaviest, needing Postgres, ClickHouse, Redis and many services. Uptimepage sits in between: one binary with Postgres and ClickHouse.",
+            ),
+            (
+                "Which support monitoring as code?",
+                "Uptimepage, OpenStatus and OneUptime all offer a Terraform provider plus an MCP server. Gatus is declarative YAML by nature but has no Terraform provider, and Uptime Kuma is driven over a socket API with no REST or Terraform.",
+            ),
+            (
+                "Do they all have status-page subscribers?",
+                "Uptimepage, OpenStatus, OneUptime and Kener let visitors subscribe (email, and webhook or more). Uptime Kuma offers an RSS feed only, and Gatus is a health dashboard with no subscriber feature.",
+            ),
+            (
+                "Can I self-host Uptimepage?",
+                "Yes. `docker compose up` brings up the single AGPL binary with Postgres and ClickHouse, migrations run on boot, and the hosted tier is free if you would rather not run it.",
+            ),
+        ],
         "/status-page-for-saas" => &[
             (
                 "Can I put the status page on my own domain?",
@@ -1435,6 +1647,352 @@ fn page_faqs(path: &str) -> &'static [(&'static str, &'static str)] {
     }
 }
 
+/// Head-to-head facts for `/vs/self-hosted-status-pages`, verified in July
+/// 2026 against each project's repository and, for Cachet, its live v3 source
+/// (`cachethq/core`, whose docs lag the code). Cells are `(text, tone)`; the
+/// first column is always Uptimepage. Refresh when a project ships.
+static SELF_HOSTED_MATRIX: Matrix = Matrix {
+    heading: "how they compare",
+    columns: &["Uptimepage", "Upptime", "Cachet", "Statping"],
+    rows: &[
+        MatrixRow {
+            label: "uptime checks built in",
+            cells: &[
+                ("yes", "yes"),
+                ("yes", "yes"),
+                ("basic HTTP", "part"),
+                ("yes", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "check types",
+            cells: &[
+                ("HTTP · TCP · DNS · TLS", ""),
+                ("HTTP · TCP · ICMP", ""),
+                ("HTTP GET", ""),
+                ("HTTP · TCP · UDP · ICMP · gRPC", ""),
+            ],
+        },
+        MatrixRow {
+            label: "fastest check interval",
+            cells: &[
+                ("60s", "yes"),
+                ("5 min", "part"),
+                ("your cron", "part"),
+                ("~30s", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "multi-region probes",
+            cells: &[
+                ("yes", "yes"),
+                ("bolt-on", "part"),
+                ("no", "no"),
+                ("no", "no"),
+            ],
+        },
+        MatrixRow {
+            label: "status page",
+            cells: &[
+                ("branded", "yes"),
+                ("static", ""),
+                ("yes", "yes"),
+                ("yes", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "visitor subscribers",
+            cells: &[
+                ("email + webhook", "yes"),
+                ("no", "no"),
+                ("webhook, email wip", "part"),
+                ("no", "no"),
+            ],
+        },
+        MatrixRow {
+            label: "auto incidents from checks",
+            cells: &[
+                ("yes", "yes"),
+                ("GitHub issues", ""),
+                ("status only", "part"),
+                ("yes", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "config-as-code",
+            cells: &[
+                ("Terraform · API · MCP", "yes"),
+                ("YAML", ""),
+                ("API", ""),
+                ("YAML · API", ""),
+            ],
+        },
+        MatrixRow {
+            label: "official Terraform provider",
+            cells: &[
+                ("yes", "yes"),
+                ("no", "no"),
+                ("community", "part"),
+                ("no", "no"),
+            ],
+        },
+        MatrixRow {
+            label: "tech stack",
+            cells: &[
+                ("Rust", ""),
+                ("JavaScript", ""),
+                ("PHP / Laravel", ""),
+                ("Go", ""),
+            ],
+        },
+        MatrixRow {
+            label: "how you run it",
+            cells: &[
+                ("hosted or self-host", "yes"),
+                ("Actions + Pages", ""),
+                ("PHP/Laravel + DB", ""),
+                ("Go binary", ""),
+            ],
+        },
+        MatrixRow {
+            label: "license",
+            cells: &[
+                ("AGPL-3.0", ""),
+                ("MIT", ""),
+                ("source-available", "part"),
+                ("GPL-3.0", ""),
+            ],
+        },
+        MatrixRow {
+            label: "maintained in 2026",
+            cells: &[
+                ("active", "yes"),
+                ("low velocity", "part"),
+                ("active, v3 dev", "part"),
+                ("~yearly", "part"),
+            ],
+        },
+    ],
+    notes: &[
+        "Statping here is the maintained community fork, statping-ng; the original Statping has not shipped a release since 2020.",
+        "Upptime runs checks as GitHub Actions cron jobs, which cannot fire more than once every five minutes and can drift later under load. Reaching other regions needs the third-party Globalping add-on.",
+        "Cachet's actively developed v3 (the cachethq/core source) added basic HTTP component checks and subscriber management in mid-2026, but it is still 3.x-dev with no stable release: checks are HTTP GET only on a cron you add yourself, incident email to subscribers is not wired up yet, and the code ships under a custom source-available license.",
+        "Competitor facts were verified against each project's repository and docs in July 2026. Open-source projects move quickly, so check their current docs before you decide.",
+    ],
+};
+
+/// Head-to-head facts for `/vs/self-hosted-monitoring`, verified in July 2026
+/// against each project's local source: Uptime Kuma 2.4.0, OpenStatus (HEAD
+/// 2026-05), OneUptime 11.0.12, Gatus 5.36.0, Kener 4.1.1. Cells are
+/// `(text, tone)`; the first column is always Uptimepage.
+static MONITORING_MATRIX: Matrix = Matrix {
+    heading: "how they compare",
+    columns: &[
+        "Uptimepage",
+        "Uptime Kuma",
+        "OpenStatus",
+        "OneUptime",
+        "Gatus",
+        "Kener",
+    ],
+    rows: &[
+        MatrixRow {
+            label: "fastest check interval",
+            cells: &[
+                ("10s", "yes"),
+                ("1s", "yes"),
+                ("30s", ""),
+                ("60s", ""),
+                ("seconds", "yes"),
+                ("60s", ""),
+            ],
+        },
+        MatrixRow {
+            label: "check breadth",
+            cells: &[
+                ("HTTP·TCP·DNS·TLS", ""),
+                ("40+ types", "yes"),
+                ("HTTP·TCP·DNS", ""),
+                ("25+ types", "yes"),
+                ("11 protocols", "yes"),
+                ("9 types", ""),
+            ],
+        },
+        MatrixRow {
+            label: "ping / ICMP",
+            cells: &[
+                ("no", "no"),
+                ("yes", "yes"),
+                ("no", "no"),
+                ("yes", "yes"),
+                ("yes", "yes"),
+                ("yes", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "TLS + domain expiry",
+            cells: &[
+                ("yes", "yes"),
+                ("yes", ""),
+                ("stub", "no"),
+                ("yes", ""),
+                ("yes", ""),
+                ("SSL only", "part"),
+            ],
+        },
+        MatrixRow {
+            label: "push / heartbeat monitor",
+            cells: &[
+                ("no", "no"),
+                ("yes", "yes"),
+                ("no", "no"),
+                ("yes", "yes"),
+                ("yes", "yes"),
+                ("yes", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "branded status page",
+            cells: &[
+                ("yes", "yes"),
+                ("basic", "part"),
+                ("yes", ""),
+                ("yes", ""),
+                ("dashboard", "no"),
+                ("yes", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "status-page subscribers",
+            cells: &[
+                ("email + webhook", "yes"),
+                ("RSS only", "part"),
+                ("email + webhook", ""),
+                ("email·SMS·Slack", "yes"),
+                ("no", "no"),
+                ("email + RSS", ""),
+            ],
+        },
+        MatrixRow {
+            label: "alert channels",
+            cells: &[
+                ("14", ""),
+                ("~95", "yes"),
+                ("13", ""),
+                ("9", ""),
+                ("41", "yes"),
+                ("4", "no"),
+            ],
+        },
+        MatrixRow {
+            label: "auto-incidents from checks",
+            cells: &[
+                ("yes", "yes"),
+                ("no", "no"),
+                ("yes", ""),
+                ("yes", ""),
+                ("no", "no"),
+                ("yes", ""),
+            ],
+        },
+        MatrixRow {
+            label: "multi-region probes",
+            cells: &[
+                ("yes", "yes"),
+                ("add-on", "part"),
+                ("35 regions", "yes"),
+                ("yes", ""),
+                ("no", "no"),
+                ("no", "no"),
+            ],
+        },
+        MatrixRow {
+            label: "config-as-code",
+            cells: &[
+                ("Terraform · REST · MCP", "yes"),
+                ("socket API", "no"),
+                ("Terraform · CLI", ""),
+                ("Terraform · CLI", ""),
+                ("YAML", "part"),
+                ("REST API", "part"),
+            ],
+        },
+        MatrixRow {
+            label: "MCP server",
+            cells: &[
+                ("yes", "yes"),
+                ("no", "no"),
+                ("yes", ""),
+                ("yes", ""),
+                ("no", "no"),
+                ("no", "no"),
+            ],
+        },
+        MatrixRow {
+            label: "teams / RBAC",
+            cells: &[
+                ("orgs + roles", "yes"),
+                ("single user", "no"),
+                ("workspaces", ""),
+                ("projects + SSO", "yes"),
+                ("basic auth", "no"),
+                ("roles", ""),
+            ],
+        },
+        MatrixRow {
+            label: "tech stack",
+            cells: &[
+                ("Rust", ""),
+                ("Node.js", ""),
+                ("TypeScript + Go", ""),
+                ("TypeScript", ""),
+                ("Go", ""),
+                ("SvelteKit", ""),
+            ],
+        },
+        MatrixRow {
+            label: "deploy footprint",
+            cells: &[
+                ("1 binary + 2 DBs", ""),
+                ("1 container", "yes"),
+                ("multi-service", "part"),
+                ("6-14 services", "no"),
+                ("1 tiny binary", "yes"),
+                ("Node + Redis", ""),
+            ],
+        },
+        MatrixRow {
+            label: "license",
+            cells: &[
+                ("AGPL-3.0", ""),
+                ("MIT", ""),
+                ("AGPL-3.0", ""),
+                ("Apache-2.0", ""),
+                ("Apache-2.0", ""),
+                ("MIT", ""),
+            ],
+        },
+    ],
+    notes: &[
+        "Fastest interval each tool can reach; hosted free tiers are usually slower. Uptimepage's self-hosted floor is 10s, and hosted plans run at 60s on the free founding plan (with 50 monitors) or 30s on Pro.",
+        "OpenStatus lists ICMP, UDP and SSL-certificate monitors in its config, but its open-source Go checker implements only HTTP, TCP and DNS.",
+        "Uptime Kuma has around forty monitor types and about ninety-five alert integrations, but it is single-user, is configured over a socket API rather than REST or Terraform, and its status pages offer RSS, not email or webhook subscribers.",
+        "Gatus is a health dashboard with badges rather than a subscriber status page, and its multi-region support is an experimental status-federation feature, not distributed probes.",
+        "Alert-channel counts mix first-class and niche providers: Uptime Kuma's total includes the Apprise meta-provider and dozens of SMS gateways, and Gatus's includes automation bridges like Zapier, IFTTT and n8n. Uptimepage's fourteen are native integrations.",
+        "Facts verified against each project's source in July 2026 (Uptime Kuma 2.4.0, OpenStatus, OneUptime 11.0.12, Gatus 5.36.0, Kener 4.1.1). Open-source projects move quickly, so check their current source before you decide.",
+    ],
+};
+
+/// The comparison matrices, looked up by path so they stay off every other
+/// `Landing`. Mirrors [`page_faqs`].
+fn page_matrix(path: &str) -> Option<&'static Matrix> {
+    match path {
+        "/vs/self-hosted-status-pages" => Some(&SELF_HOSTED_MATRIX),
+        "/vs/self-hosted-monitoring" => Some(&MONITORING_MATRIX),
+        _ => None,
+    }
+}
+
 static RENDERED: OnceLock<HashMap<&'static str, CachedRender>> = OnceLock::new();
 
 fn render_all(cfg: &MarketingCfg) -> HashMap<&'static str, CachedRender> {
@@ -1454,6 +2012,7 @@ fn render_all(cfg: &MarketingCfg) -> HashMap<&'static str, CachedRender> {
                 features: l.features,
                 sections: l.sections,
                 code: l.code.as_ref(),
+                matrix: page_matrix(l.path),
                 resources: l.resources,
                 cta: l.cta,
                 canonical_url,
@@ -1535,6 +2094,26 @@ mod tests {
                 "{} is orphaned: add it to the marketing footer",
                 l.path
             );
+        }
+    }
+
+    #[test]
+    fn matrices_are_rectangular() {
+        for l in LANDINGS {
+            let Some(m) = page_matrix(l.path) else {
+                continue;
+            };
+            for row in m.rows {
+                assert_eq!(
+                    row.cells.len(),
+                    m.columns.len(),
+                    "{} row {:?}: {} cells but {} columns",
+                    l.path,
+                    row.label,
+                    row.cells.len(),
+                    m.columns.len(),
+                );
+            }
         }
     }
 

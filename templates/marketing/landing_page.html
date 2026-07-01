@@ -38,6 +38,33 @@
     </section>
     {% endif %}
 
+    {% if let Some(m) = matrix %}
+    <section class="mx-auto max-w-5xl space-y-4">
+        <h2 class="mk-h2 text-center">{{ m.heading }}</h2>
+        <div class="overflow-x-auto">
+            <table class="cmp">
+                <thead>
+                    <tr>
+                        <th>&nbsp;</th>
+                        {% for c in m.columns %}<th class="{% if loop.first %}col-us us{% endif %}">{{ c }}</th>{% endfor %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in m.rows %}
+                    <tr>
+                        <th>{{ row.label }}</th>
+                        {% for cell in row.cells %}<td class="{% if loop.first %}col-us us {% endif %}{{ cell.1 }}">{{ cell.0 }}</td>{% endfor %}
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <div class="mx-auto max-w-3xl space-y-2">
+            {% for note in m.notes %}<p class="cmp__note">{{ note }}</p>{% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
     {% for s in sections %}
     <section class="mx-auto max-w-2xl space-y-3">
         <h2 class="mk-h3">{{ s.heading }}</h2>

@@ -619,6 +619,7 @@ html:has(.marketing-shell) {
 .cmp .col-us { background: var(--mk-ok-soft); }
 .cmp .yes { color: var(--mk-ok); }
 .cmp .no { color: var(--mk-quiet); }
+.cmp .part { color: oklch(0.62 0.13 66); }
 .cmp__note { font-family: var(--mk-font-mono); font-size: 0.6875rem; color: var(--mk-quiet); margin-top: 0.6rem; }
 
 /* ── Shared helpers (replace inline styles the marketing CSP blocks) ─ */
