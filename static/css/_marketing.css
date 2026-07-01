@@ -41,6 +41,7 @@ html:has(.marketing-shell) {
     --mk-ok-soft:   oklch(0.94 0.06 158);
     --mk-warn:      oklch(0.78 0.14 80);
     --mk-down:      oklch(0.58 0.20 28);
+    --mk-mark:      oklch(0.78 0.135 62);
 
     --mk-font-mono: "IBM Plex Mono", ui-monospace, "Cascadia Code", "Fira Code", Menlo, Consolas, monospace;
     --mk-font-body: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
@@ -76,11 +77,22 @@ html:has(.marketing-shell) {
     font-weight: 600;
     color: var(--mk-ink);
     letter-spacing: -0.02em;
-    line-height: 1.1;
+    line-height: 1.2;
     font-size: clamp(1.875rem, 4vw + 0.6rem, 3.25rem);
     text-wrap: balance;
 }
 .mk-display-em { color: var(--mk-ok); font-style: normal; font-weight: 600; }
+.mk-h2-em { color: var(--mk-ok); font-style: normal; font-weight: 600; }
+
+/* Highlighter marker — wraps per line via box-decoration clone */
+.mk-mark {
+    background: var(--mk-mark);
+    color: var(--mk-ink);
+    box-decoration-break: clone;
+    -webkit-box-decoration-break: clone;
+    padding: 0.04em 0.14em;
+    border-radius: 3px;
+}
 
 .mk-h2 {
     font-family: var(--mk-font-mono);
@@ -91,7 +103,6 @@ html:has(.marketing-shell) {
     font-size: clamp(1.5rem, 2vw + 0.55rem, 2rem);
     text-wrap: balance;
 }
-.mk-h2-em { color: var(--mk-ok); font-style: normal; font-weight: 600; }
 
 .mk-h3 {
     font-family: var(--mk-font-mono);
@@ -107,9 +118,10 @@ html:has(.marketing-shell) {
     line-height: 1.6;
     color: var(--mk-ink-soft);
     max-width: 40rem;
+    text-wrap: pretty;
 }
 
-.mk-body  { color: var(--mk-ink-soft); font-size: 0.9375rem; line-height: 1.6; }
+.mk-body  { color: var(--mk-ink-soft); font-size: 0.9375rem; line-height: 1.6; text-wrap: pretty; }
 .mk-quiet { color: var(--mk-quiet); }
 .mk-mono  { font-family: var(--mk-font-mono); letter-spacing: 0; }
 .mk-ink   { color: var(--mk-ink); }
@@ -856,4 +868,243 @@ html:has(.marketing-shell) {
     outline: 2px solid var(--mk-ok);
     outline-offset: 2px;
     border-radius: 2px;
+}
+
+/* ── Product gallery — horizontal scroll strip, click to enlarge ───── */
+.mk-gallery {
+    display: flex;
+    gap: 1rem;
+    margin: 0;
+    padding: 0.25rem 0.25rem 1rem;
+    list-style: none;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+    scrollbar-color: var(--mk-rule) transparent;
+    scroll-padding-left: 0.25rem;
+}
+.mk-gallery__item {
+    flex: 0 0 auto;
+    scroll-snap-align: start;
+}
+.mk-gallery__card {
+    position: relative;
+    display: block;
+    width: min(84vw, 32rem);
+    border-radius: 2px;
+    border: 1px solid var(--mk-rule);
+    background: var(--mk-surface);
+    overflow: hidden;
+    box-shadow:
+        0 1px 0 oklch(1 0 0 / 0.6) inset,
+        0 18px 34px -26px oklch(0 0 0 / 0.20);
+    transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+}
+.mk-gallery__card:hover,
+.mk-gallery__card:focus-visible {
+    transform: translateY(-3px);
+    border-color: color-mix(in oklch, var(--mk-ok) 40%, var(--mk-rule));
+    box-shadow:
+        0 1px 0 oklch(1 0 0 / 0.6) inset,
+        0 26px 46px -24px oklch(0 0 0 / 0.28);
+}
+.mk-gallery__card:active { transform: translateY(-3px) scale(0.98); }
+.mk-gallery__chrome {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.875rem;
+    border-bottom: 1px solid var(--mk-rule);
+    background: var(--mk-bg-2);
+}
+.mk-gallery__dot {
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 50%;
+    background: var(--mk-faint);
+}
+.mk-gallery__url {
+    margin-left: 0.5rem;
+    padding: 0.1rem 0.55rem;
+    border-radius: 2px;
+    background: var(--mk-surface);
+    border: 1px solid var(--mk-rule);
+    color: var(--mk-quiet);
+    font-family: var(--mk-font-mono);
+    font-size: 0.625rem;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+.mk-gallery__img {
+    display: block;
+    width: 100%;
+    aspect-ratio: 1.7;
+    object-fit: cover;
+    object-position: top center;
+    background: var(--mk-bg-2);
+}
+.mk-gallery__zoom {
+    position: absolute;
+    right: 0.6rem;
+    bottom: 0.6rem;
+    display: grid;
+    place-items: center;
+    width: 1.85rem;
+    height: 1.85rem;
+    border-radius: 999px;
+    background: color-mix(in oklch, var(--mk-ink) 78%, transparent);
+    color: #fff;
+    opacity: 0;
+    transform: translateY(4px);
+    transition: opacity 0.18s ease, transform 0.18s ease;
+}
+.mk-gallery__zoom svg { width: 1rem; height: 1rem; }
+.mk-gallery__card:hover .mk-gallery__zoom,
+.mk-gallery__card:focus-visible .mk-gallery__zoom {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+/* Lightbox — pure CSS :target, no JS (marketing surface is JS-free) */
+.mk-lightbox { display: none; }
+.mk-lightbox:target {
+    display: grid;
+    place-items: center;
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    padding: clamp(1rem, 5vw, 4rem);
+    background: oklch(0.16 0.02 250 / 0.88);
+}
+.mk-lightbox__backdrop {
+    position: absolute;
+    inset: 0;
+    cursor: zoom-out;
+}
+.mk-lightbox__img {
+    position: relative;
+    max-width: min(1100px, 94vw);
+    max-height: 88vh;
+    width: auto;
+    height: auto;
+    border: 1px solid var(--mk-rule);
+    border-radius: 2px;
+    background: var(--mk-surface);
+    box-shadow: 0 40px 80px -30px oklch(0 0 0 / 0.55);
+}
+.mk-lightbox__close {
+    position: absolute;
+    top: clamp(0.75rem, 3vw, 1.5rem);
+    right: clamp(0.9rem, 3vw, 1.75rem);
+    z-index: 1;
+    display: grid;
+    place-items: center;
+    width: 2.75rem;
+    height: 2.75rem;
+    color: #fff;
+    font-size: 2rem;
+    line-height: 1;
+    text-decoration: none;
+}
+
+/* Hero region map — compact framing above the status-page preview */
+.mk-heromap {
+    border: 1px solid var(--mk-rule);
+    border-radius: 2px;
+    background: var(--mk-surface);
+    padding: 0.75rem 0.875rem 0.5rem;
+    box-shadow:
+        0 1px 0 oklch(1 0 0 / 0.6) inset,
+        0 18px 32px -24px oklch(0 0 0 / 0.18);
+}
+.mk-heromap__label {
+    margin: 0 0 0.5rem;
+    font-size: 0.625rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--mk-quiet);
+}
+.mk-heromap .mk-map {
+    border: 0;
+    border-radius: 0;
+    background: none;
+    padding: 0;
+    box-shadow: none;
+}
+.mk-heromap .mk-map__legend {
+    margin-top: 0.75rem;
+    gap: 0.4rem 1rem;
+    font-size: 0.6875rem;
+}
+
+/* ── Region map ───────────────────────────────────────────────────── */
+.mk-map {
+    margin: 0;
+    border: 1px solid var(--mk-rule);
+    border-radius: 2px;
+    background: var(--mk-surface);
+    padding: clamp(0.85rem, 3vw, 2rem);
+    box-shadow:
+        0 1px 0 oklch(1 0 0 / 0.6) inset,
+        0 24px 40px -28px oklch(0 0 0 / 0.18);
+}
+.mk-map__svg {
+    display: block;
+    width: 100%;
+    height: auto;
+}
+.mk-map__land {
+    fill: color-mix(in oklch, var(--mk-rule) 60%, var(--mk-surface));
+}
+.mk-map__dot--live { fill: var(--mk-ok); }
+.mk-map__dot--planned {
+    fill: none;
+    stroke: var(--mk-ok);
+    stroke-width: 0.6;
+    opacity: 0.5;
+}
+.mk-map__ping {
+    fill: var(--mk-ok);
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: mk-ping 2.8s ease-out infinite;
+}
+@keyframes mk-ping {
+    0%   { transform: scale(1);   opacity: 0.45; }
+    70%  { transform: scale(3.4); opacity: 0; }
+    100% { transform: scale(3.4); opacity: 0; }
+}
+.mk-map__legend {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.5rem 1.5rem;
+    margin-top: 1.1rem;
+    font-size: 0.75rem;
+    color: var(--mk-ink-soft);
+}
+.mk-map__region {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+}
+.mk-map__region-dot {
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 50%;
+    background: var(--mk-ok);
+}
+.mk-map__region--soon { color: var(--mk-quiet); }
+.mk-map__region--soon::before {
+    content: "+";
+    margin-right: 0.35rem;
+    color: var(--mk-ok);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .mk-map__ping { animation: none; opacity: 0; }
+    .mk-gallery__card,
+    .mk-gallery__zoom { transition: none; }
 }
