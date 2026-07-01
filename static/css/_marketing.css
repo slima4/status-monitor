@@ -18,6 +18,12 @@
 html:has(.marketing-shell) {
     color-scheme: light;
     scroll-padding-top: 5rem;
+    scroll-behavior: smooth;
+}
+
+/* Honour users who ask the OS to reduce motion. */
+@media (prefers-reduced-motion: reduce) {
+    html:has(.marketing-shell) { scroll-behavior: auto; }
 }
 
 .marketing-shell :where(a, button, summary, [role="button"]) {
