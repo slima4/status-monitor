@@ -7,7 +7,7 @@ tags = ["monitoring", "networking", "osi", "tls", "dns"]
 draft = false
 +++
 
-# The mystery of the "down" website
+## The mystery of the "down" website
 
 It was a typical Tuesday morning when Jamie, the diligent web admin,
 got the message every web admin dreads: *"The site is down!"*

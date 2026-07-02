@@ -7,7 +7,7 @@ tags = ["monitoring", "incidents", "status-pages", "on-call"]
 draft = false
 +++
 
-# Why your uptime monitor should be boring
+## Why your uptime monitor should be boring
 
 It's 2:47 a.m. on a Tuesday. The on-call's phone buzzes for the fourth
 time tonight. Same monitor, same flap, same 30-second blip that

@@ -7,7 +7,7 @@ tags = ["mcp", "ai", "monitoring", "on-call"]
 draft = false
 +++
 
-# The night Emma stopped opening dashboards
+## The night Emma stopped opening dashboards
 
 The alert woke Emma at 2 a.m. On-call again.
 
