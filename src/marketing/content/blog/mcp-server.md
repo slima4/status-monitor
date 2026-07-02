@@ -1,5 +1,5 @@
 +++
-title = "Your monitors can talk to an AI now, and we made it ask permission first"
+title = "Your monitors can talk to an AI, with your permission"
 date = "2026-06-03"
 slug = "mcp-server"
 excerpt = "Uptimepage now speaks MCP, so an LLM can answer \"what's broken and since when?\" in plain language. The interesting part isn't that it can read your monitoring. It's everything we did to stop it from quietly wrecking it."
