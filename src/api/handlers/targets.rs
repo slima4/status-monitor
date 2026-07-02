@@ -1249,6 +1249,7 @@ fn canonicalize_check(check: &mut crate::domain::CheckSpec) -> Result<()> {
     match check {
         CheckSpec::Http(_) => Ok(()),
         CheckSpec::Tcp(tcp) => canon_host(&mut tcp.host, "check.host", codes::INVALID_TCP_HOST),
+        CheckSpec::Ping(p) => canon_host(&mut p.host, "check.host", codes::INVALID_PING_HOST),
         CheckSpec::TlsCert(cert) => {
             canon_host(&mut cert.host, "check.host", codes::INVALID_TLS_CERT_PARAMS)
         }
@@ -1312,6 +1313,15 @@ fn validate_check(check: &crate::domain::CheckSpec, guard: &SsrfGuard) -> Result
                     "check.verify_tls",
                 ));
             }
+            // Port 0 is unroutable, and rejecting it everywhere keeps the
+            // ping throttle's pseudo-port 0 collision-free across kinds.
+            if http.url.port() == Some(0) {
+                return Err(AppError::bad_request_field(
+                    codes::INVALID_URL_FORMAT,
+                    "url port must be > 0",
+                    "check.url",
+                ));
+            }
             match http.url.host() {
                 Some(Host::Ipv4(v4)) => check_ip(IpAddr::V4(v4), guard)?,
                 Some(Host::Ipv6(v6)) => check_ip(IpAddr::V6(v6), guard)?,
@@ -1348,6 +1358,28 @@ fn validate_check(check: &crate::domain::CheckSpec, guard: &SsrfGuard) -> Result
                 ));
             }
             let host = crate::security::unbracket(&tcp.host);
+            if let Ok(ip) = host.parse::<IpAddr>() {
+                check_ip(ip, guard)?;
+            }
+        }
+        CheckSpec::Ping(p) => {
+            if p.host.is_empty() {
+                return Err(AppError::bad_request_field(
+                    codes::INVALID_PING_HOST,
+                    "ping host required",
+                    "check.host",
+                ));
+            }
+            // Zero would make every echo an instant Down; the ceiling stops a
+            // tenant pinning worker slots for minutes per check.
+            if !(100..=60_000).contains(&p.timeout.as_millis()) {
+                return Err(AppError::bad_request_field(
+                    codes::INVALID_TIMEOUT,
+                    "ping timeout must be between 100 and 60000 ms",
+                    "check.timeout",
+                ));
+            }
+            let host = crate::security::unbracket(&p.host);
             if let Ok(ip) = host.parse::<IpAddr>() {
                 check_ip(ip, guard)?;
             }

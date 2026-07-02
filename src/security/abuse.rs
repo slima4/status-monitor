@@ -238,6 +238,7 @@ impl AbuseGuard {
                 h.url.host_str()?
             }
             CheckSpec::Tcp(t) => crate::security::unbracket(&t.host),
+            CheckSpec::Ping(p) => crate::security::unbracket(&p.host),
             CheckSpec::TlsCert(c) => crate::security::unbracket(&c.host),
             CheckSpec::DomainExpiry(d) => d.domain.as_str(),
             CheckSpec::Dns(d) => d.domain.as_str(),

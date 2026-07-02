@@ -36,6 +36,7 @@
       <div class="check-type-cards">
         {% call reg::chooser_card("data-check-card", "check_type", "http", form.check_type == "http", "http", "URL / API endpoint") %}{% endcall %}
         {% call reg::chooser_card("data-check-card", "check_type", "tcp", form.check_type == "tcp", "tcp", "host : port reachable") %}{% endcall %}
+        {% call reg::chooser_card("data-check-card", "check_type", "ping", form.check_type == "ping", "ping", "icmp echo reply") %}{% endcall %}
         {% call reg::chooser_card("data-check-card", "check_type", "dns", form.check_type == "dns", "dns", "record resolves") %}{% endcall %}
         {% call reg::chooser_card("data-check-card", "check_type", "tls_cert", form.check_type == "tls_cert", "tls cert", "expiry + chain") %}{% endcall %}
         {% call reg::chooser_card("data-check-card", "check_type", "domain_expiry", form.check_type == "domain_expiry", "domain", "registration expiry") %}{% endcall %}
@@ -226,6 +227,30 @@
         <label class="field-outline w-40">
           <span class="field-outline__label">Timeout</span>
           <input name="tcp_timeout_ms" type="number" min="100" max="60000" value="{{ form.tcp.timeout_ms }}"
+                 class="w-full field pr-8">
+          <span class="field-outline__unit" aria-hidden="true">ms</span>
+        </label>
+      </div>
+      </div>
+    </fieldset>
+
+    <fieldset data-variant="ping"
+              class="{% if form.check_type != "ping" %}hidden{% endif %}">
+      <legend class="float-left mb-3 w-full"><span class="form-legend">ping check</span></legend>
+      <div class="clear-both space-y-5">
+      <p class="mb-5 text-xs text-muted">
+        Sends an ICMP echo request; a missing reply within the timeout fails
+        the check. Ideal for hosts that expose no open port.
+      </p>
+      <div class="flex flex-wrap gap-3">
+        <label class="field-outline flex-1 min-w-[14rem]">
+          <span class="field-outline__label">Host</span>
+          <input name="ping_host" type="text" value="{{ form.ping.host }}" placeholder="gateway.example.com"
+                 autocomplete="off" spellcheck="false" class="w-full field font-mono">
+        </label>
+        <label class="field-outline w-40">
+          <span class="field-outline__label">Timeout</span>
+          <input name="ping_timeout_ms" type="number" min="100" max="60000" value="{{ form.ping.timeout_ms }}"
                  class="w-full field pr-8">
           <span class="field-outline__unit" aria-hidden="true">ms</span>
         </label>

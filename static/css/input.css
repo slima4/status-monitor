@@ -2371,9 +2371,9 @@
     }
     /* Multi-line helper hints: drop last-line orphans without markup churn. */
     #check-form .text-muted { text-wrap: pretty; }
-    /* Check-type chooser: 5 cards at the top of /targets/new and edit.
+    /* Check-type chooser cards at the top of /targets/new and edit.
        Hides the radio (visual selection comes from :has(input:checked)). */
-    .check-type-cards { @apply grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5; }
+    .check-type-cards { @apply grid grid-cols-2 gap-3 sm:grid-cols-3; }
     /* Splits the popular channels from the rest in the type chooser. */
     .kind-divider { border-top: 1px solid var(--theme-line); }
     .check-type-card {

@@ -44,7 +44,7 @@ use crate::web::{AuthedBrowser, CurrentOrg};
 pub(crate) const RANGE_KEYS: [&str; 4] = ["24h", "7d", "30d", "90d"];
 pub(crate) const DEFAULT_RANGE: &str = "24h";
 pub(crate) const STATUS_FILTERS: [&str; 5] = ["any", "up", "degraded", "down", "paused"];
-pub(crate) const TYPE_FILTERS: [&str; 6] = ["any", "http", "tcp", "dns", "tls", "domain"];
+pub(crate) const TYPE_FILTERS: [&str; 7] = ["any", "http", "tcp", "ping", "dns", "tls", "domain"];
 pub(crate) const FILTER_ANY: &str = "any";
 /// Fixed sparkline window — "right-now" trend, decoupled from the
 /// selected rollup range so an operator browsing 90 d still sees a
@@ -761,7 +761,7 @@ async fn build_snapshot(
 }
 
 const ACTIVE_INCIDENTS_LIMIT: usize = 5;
-const TYPE_CHIP_ORDER: &[&str] = &["HTTP", "TCP", "DNS", "TLS", "DOMAIN"];
+const TYPE_CHIP_ORDER: &[&str] = &["HTTP", "TCP", "PING", "DNS", "TLS", "DOMAIN"];
 
 fn tally_status(counts: &mut StatusCounts, row: &DashboardRow) {
     if !row.enabled {
@@ -1677,6 +1677,11 @@ mod tests {
         for (key, label) in TYPE_FILTERS[1..].iter().zip(TYPE_CHIP_ORDER) {
             assert_eq!(*key, label.to_ascii_lowercase());
         }
+        // One chip per check kind — a new CheckSpec variant must add its chip.
+        assert_eq!(
+            TYPE_CHIP_ORDER.len(),
+            crate::domain::CheckSpec::ALL_KINDS.len()
+        );
     }
 
     #[test]
@@ -1729,9 +1734,10 @@ mod tests {
 
     #[test]
     fn build_type_counts_emits_all_plus_nonzero_kinds() {
+        let idx = |label| TYPE_CHIP_ORDER.iter().position(|k| *k == label).unwrap();
         let mut acc = [0; TYPE_CHIP_ORDER.len()];
-        acc[0] = 3; // HTTP
-        acc[2] = 1; // DNS
+        acc[idx("HTTP")] = 3;
+        acc[idx("DNS")] = 1;
         let counts = build_type_counts(acc);
         assert_eq!(counts.len(), 3);
         assert_eq!(counts[0].label, "All");

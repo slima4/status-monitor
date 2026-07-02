@@ -157,12 +157,14 @@ pub fn canonical_host_strict(host: &str) -> Result<String, idna::Errors> {
 /// Network endpoint of a CheckSpec for variants that target one host+port.
 /// HTTP returns its host with `Some(port)` only when `port_or_known_default`
 /// can infer one — the breaker is happy with host alone, but the throttle
-/// requires both. `None` for DNS (resolver is the resource) and
+/// requires both. Ping keys on pseudo-port 0, which validation rejects for
+/// every port-bearing kind. `None` for DNS (resolver is the resource) and
 /// DomainExpiry (per-TLD RDAP slot is the resource).
 pub fn host_port_raw(spec: &CheckSpec) -> Option<(&str, Option<u16>)> {
     match spec {
         CheckSpec::Http(http) => Some((http.url.host_str()?, http.url.port_or_known_default())),
         CheckSpec::Tcp(tcp) => Some((tcp.host.as_str(), Some(tcp.port))),
+        CheckSpec::Ping(p) => Some((p.host.as_str(), Some(0))),
         CheckSpec::TlsCert(cert) => Some((cert.host.as_str(), Some(cert.port))),
         CheckSpec::Dns(_) | CheckSpec::DomainExpiry(_) => None,
     }

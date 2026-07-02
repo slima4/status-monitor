@@ -35,6 +35,9 @@ tokio-rustls = "0.26"
 # DNS (custom caching resolver)
 hickory-resolver = { version = "0.26", features = ["tls-ring", "tokio"] }
 
+# ICMP echo probes (shared async socket, DGRAM-first for unprivileged runs)
+surge-ping = "0.9"
+
 # Storage
 sqlx = { version = "0.8", features = [
     "runtime-tokio-rustls",

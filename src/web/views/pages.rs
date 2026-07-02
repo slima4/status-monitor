@@ -132,6 +132,7 @@ fn kind_label(kind: &str) -> &'static str {
     match kind {
         "http" => "HTTP",
         "tcp" => "TCP",
+        "ping" => "Ping",
         "dns" => "DNS",
         "tls_cert" => "TLS",
         "domain_expiry" => "Domain",
@@ -143,6 +144,7 @@ fn name_hint(kind: &str) -> &'static str {
     match kind {
         "http" => "e.g. Website",
         "tcp" => "e.g. TCP port",
+        "ping" => "e.g. Gateway",
         "dns" => "e.g. DNS",
         "tls_cert" => "e.g. TLS certificate",
         "domain_expiry" => "e.g. Domain expiry",
@@ -379,6 +381,18 @@ pub async fn page_editor(
 mod tests {
     use super::*;
     use askama::Template;
+
+    #[test]
+    fn every_check_kind_has_label_and_hint() {
+        for kind in crate::domain::CheckSpec::ALL_KINDS {
+            assert_ne!(kind_label(kind), "Check", "fallback label for {kind}");
+            assert_ne!(
+                name_hint(kind),
+                "Public display name",
+                "fallback hint for {kind}"
+            );
+        }
+    }
 
     fn editor(badge_url: Option<String>) -> PageEditorPage {
         PageEditorPage {

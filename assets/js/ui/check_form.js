@@ -1,5 +1,5 @@
 // Monitor create/edit form. Handles:
-//   - 5-way protocol panel swap (http / tcp / dns / tls_cert / domain_expiry)
+//   - protocol panel swap (http / tcp / ping / dns / tls_cert / domain_expiry)
 //   - Smart expected-status input ("200" / "200-299" / "200, 201, 204")
 //   - JSON submission via fetch (no htmx for JSON-API forms)
 //   - "Test now" → POST /api/v1/targets/test, renders verbose response inline
@@ -102,7 +102,7 @@
         }
     });
 
-    // ARIA radiogroup keyboard nav on the 5 check-type cards. Labels are
+    // ARIA radiogroup keyboard nav on the check-type cards. Labels are
     // tabindex-0 as a fallback for browsers that won't focus sr-only radios.
     const checkTypeCards = form.querySelector(".check-type-cards");
     if (checkTypeCards) {
@@ -151,6 +151,7 @@
         const AUTOFILL_SOURCES = [
             ["http_url", urlToName],
             ["tcp_host", v => v.trim()],
+            ["ping_host", v => v.trim()],
             ["dns_domain", v => v.trim()],
             ["tls_host", v => v.trim()],
             ["domain_expiry_domain", v => v.trim()],
@@ -375,6 +376,15 @@
                     host: data.get("tcp_host"),
                     port: parseInt(data.get("tcp_port"), 10),
                     timeout: parseInt(data.get("tcp_timeout_ms"), 10),
+                },
+            };
+        }
+        if (checkType === "ping") {
+            return {
+                check: {
+                    type: "ping",
+                    host: data.get("ping_host"),
+                    timeout: parseInt(data.get("ping_timeout_ms"), 10),
                 },
             };
         }
@@ -649,48 +659,32 @@
         "check.verify_tls": "http_verify_tls",
         "check.body": "http_body",
         "check.expected_status": "expected_status_input",
-        "check.host": null, // protocol-dependent; resolved at runtime below
-        "check.port": null,
-        "check.timeout": null,
-        "check.domain": null,
         "check.record_type": "dns_record_type",
         "check.resolver": "dns_resolver",
         "check.expected_contains": "dns_expected_contains",
         "check.server_name": "tls_server_name",
-        "check.warn_days": null,
-        "check.critical_days": null,
         "interval": "interval_s",
         "renotify_interval_secs": "renotify_secs",
         "name": "name",
-        "tags": null,
+    };
+
+    // Protocol-dependent paths: inputs follow `<kind-ish prefix>_<suffix>` and
+    // live inside their `fieldset[data-variant]`, so resolving by suffix
+    // within the selected panel covers new kinds with no extra mapping.
+    const API_PATH_SUFFIX = {
+        "check.host": "_host",
+        "check.port": "_port",
+        "check.domain": "_domain",
+        "check.timeout": "_timeout_ms",
+        "check.warn_days": "_warn_days",
+        "check.critical_days": "_critical_days",
     };
 
     function fieldForApiPath(path) {
-        // Some API field paths map to a different form input depending on
-        // which protocol is selected (e.g. `check.host` is `tcp_host` or
-        // `tls_host`). Resolve those here.
-        const checkType = currentCheckType();
-        if (path === "check.host") {
-            return form.querySelector(`[name='${checkType === "tls_cert" ? "tls_host" : "tcp_host"}']`);
-        }
-        if (path === "check.port") {
-            return form.querySelector(`[name='${checkType === "tls_cert" ? "tls_port" : "tcp_port"}']`);
-        }
-        if (path === "check.domain") {
-            return form.querySelector(`[name='${checkType === "domain_expiry" ? "domain_expiry_domain" : "dns_domain"}']`);
-        }
-        if (path === "check.timeout") {
-            const prefix = checkType === "tls_cert"
-                ? "tls"
-                : checkType === "domain_expiry"
-                    ? "domain_expiry"
-                    : checkType;
-            return form.querySelector(`[name='${prefix}_timeout_ms']`);
-        }
-        if (path === "check.warn_days" || path === "check.critical_days") {
-            const prefix = checkType === "domain_expiry" ? "domain_expiry_" : "tls_";
-            const suffix = path === "check.warn_days" ? "warn_days" : "critical_days";
-            return form.querySelector(`[name='${prefix}${suffix}']`);
+        const suffix = API_PATH_SUFFIX[path];
+        if (suffix) {
+            return form.querySelector(
+                `fieldset[data-variant='${currentCheckType()}'] [name$='${suffix}']`);
         }
         if (path.startsWith("check.headers")) {
             return form.querySelector("[name='http_header_key']");

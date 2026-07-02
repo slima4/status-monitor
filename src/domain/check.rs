@@ -11,6 +11,7 @@ use utoipa::ToSchema;
 pub enum CheckSpec {
     Http(HttpCheck),
     Tcp(TcpCheck),
+    Ping(PingCheck),
     TlsCert(TlsCertCheck),
     DomainExpiry(DomainExpiryCheck),
     Dns(DnsCheck),
@@ -19,12 +20,14 @@ pub enum CheckSpec {
 impl CheckSpec {
     /// Every kind string `kind()` can return. Bounded set — safe as a metric
     /// label and lets inventory emit a 0 for kinds with no enabled monitors.
-    pub const ALL_KINDS: [&'static str; 5] = ["http", "tcp", "dns", "tls_cert", "domain_expiry"];
+    pub const ALL_KINDS: [&'static str; 6] =
+        ["http", "tcp", "ping", "dns", "tls_cert", "domain_expiry"];
 
     pub fn kind(&self) -> &'static str {
         match self {
             CheckSpec::Http(_) => "http",
             CheckSpec::Tcp(_) => "tcp",
+            CheckSpec::Ping(_) => "ping",
             CheckSpec::Dns(_) => "dns",
             CheckSpec::TlsCert(_) => "tls_cert",
             CheckSpec::DomainExpiry(_) => "domain_expiry",
@@ -101,6 +104,16 @@ pub struct TcpCheck {
     #[schema(minimum = 1, maximum = 65535, example = 5432)]
     pub port: u16,
     /// Connect timeout in milliseconds.
+    #[serde(with = "duration_ms")]
+    #[schema(value_type = u64, minimum = 100, maximum = 60000, example = 3000)]
+    pub timeout: Duration,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct PingCheck {
+    #[schema(example = "gateway.example.com")]
+    pub host: String,
+    /// Echo-reply timeout in milliseconds.
     #[serde(with = "duration_ms")]
     #[schema(value_type = u64, minimum = 100, maximum = 60000, example = 3000)]
     pub timeout: Duration,
@@ -215,6 +228,7 @@ mod tests {
         match spec {
             CheckSpec::Http(_)
             | CheckSpec::Tcp(_)
+            | CheckSpec::Ping(_)
             | CheckSpec::Dns(_)
             | CheckSpec::TlsCert(_)
             | CheckSpec::DomainExpiry(_) => {}
@@ -227,6 +241,6 @@ mod tests {
         for k in CheckSpec::ALL_KINDS {
             assert!(seen.insert(k), "duplicate kind in ALL_KINDS: {k}");
         }
-        assert_eq!(CheckSpec::ALL_KINDS.len(), 5);
+        assert_eq!(CheckSpec::ALL_KINDS.len(), 6);
     }
 }

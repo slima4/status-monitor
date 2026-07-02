@@ -4,6 +4,7 @@ pub mod domain_expiry;
 pub mod host_throttle;
 pub mod http_check;
 pub mod interpolate;
+pub mod ping;
 pub mod pool;
 pub mod rdap;
 pub mod rdap_singleflight;
@@ -83,35 +84,46 @@ pub(crate) fn classify_days(
     }
 }
 
-/// Resolves `host`, filters the addresses through the shared SSRF guard, and
-/// tries to open a TCP connection to `(ip, port)`. Used by TCP and TLS-cert
-/// checks — both want exactly the same resolve-and-connect dance.
+/// Resolves `host` and keeps only addresses the shared SSRF guard allows.
+/// Errors when resolution fails or nothing survives the filter, so callers
+/// always receive at least one address. Single chokepoint for the
+/// resolve-then-filter dance (TCP, TLS-cert, ping) — a guard-semantics fix
+/// lands once.
+pub(crate) async fn allowed_addrs(
+    host: &str,
+    clients: &HttpClients,
+) -> anyhow::Result<Vec<std::net::IpAddr>> {
+    let guard = clients.ssrf_guard();
+    let addrs: Vec<std::net::IpAddr> = clients
+        .resolver()
+        .resolve_addrs(host)
+        .await?
+        .into_iter()
+        .filter(|ip| guard.allow(*ip))
+        .collect();
+    if addrs.is_empty() {
+        anyhow::bail!("no allowed addresses for {host}");
+    }
+    Ok(addrs)
+}
+
+/// Tries to open a TCP connection to `(ip, port)` for each allowed address of
+/// `host`. Used by TCP and TLS-cert checks.
 pub(crate) async fn connect_via_guard(
     host: &str,
     port: u16,
     clients: &HttpClients,
 ) -> anyhow::Result<TcpStream> {
-    let guard = clients.ssrf_guard();
     let mut last_err: Option<std::io::Error> = None;
-    let mut tried = false;
-    for ip in clients.resolver().resolve_addrs(host).await? {
-        if !guard.allow(ip) {
-            continue;
-        }
-        tried = true;
+    for ip in allowed_addrs(host, clients).await? {
         match TcpStream::connect(SocketAddr::new(ip, port)).await {
             Ok(s) => return Ok(s),
             Err(e) => last_err = Some(e),
         }
     }
-    if let Some(e) = last_err {
-        return Err(e.into());
-    }
-    if tried {
-        Err(anyhow::anyhow!("no addresses for {host}"))
-    } else {
-        Err(anyhow::anyhow!("no allowed addresses for {host}"))
-    }
+    Err(last_err
+        .expect("allowed_addrs yields at least one address")
+        .into())
 }
 
 pub async fn execute(
@@ -125,6 +137,7 @@ pub async fn execute(
         CheckSpec::Tcp(tcp) => {
             tcp_check::execute_tcp_check(target_id, org_id, tcp, deps.http).await
         }
+        CheckSpec::Ping(p) => ping::execute_ping_check(target_id, org_id, p, deps.http).await,
         CheckSpec::TlsCert(cert) => {
             tls_cert::execute_tls_cert_check(target_id, org_id, cert, deps.http).await
         }

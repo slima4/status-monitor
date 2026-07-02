@@ -1364,18 +1364,18 @@ fn parse_phase(s: &str) -> Result<IncidentStatusPhase, McpToolError> {
     }
 }
 
-/// Accepted monitor kinds for the `list_monitors` filter.
+/// Accepted monitor kinds for the `list_monitors` filter — derived from
+/// `ALL_KINDS` so a new check kind is filterable without touching this file.
 fn parse_kind(s: &str) -> Result<&'static str, McpToolError> {
-    match s {
-        "http" => Ok("http"),
-        "tcp" => Ok("tcp"),
-        "dns" => Ok("dns"),
-        "tls_cert" => Ok("tls_cert"),
-        "domain_expiry" => Ok("domain_expiry"),
-        other => Err(McpToolError::invalid_argument(format!(
-            "unknown type `{other}`; expected one of http, tcp, dns, tls_cert, domain_expiry"
-        ))),
-    }
+    crate::domain::CheckSpec::ALL_KINDS
+        .into_iter()
+        .find(|k| *k == s)
+        .ok_or_else(|| {
+            McpToolError::invalid_argument(format!(
+                "unknown type `{s}`; expected one of {}",
+                crate::domain::CheckSpec::ALL_KINDS.join(", ")
+            ))
+        })
 }
 
 #[cfg(test)]
@@ -1522,7 +1522,7 @@ mod tests {
 
     #[test]
     fn parse_kind_accepts_known_rejects_unknown() {
-        for k in ["http", "tcp", "dns", "tls_cert", "domain_expiry"] {
+        for k in crate::domain::CheckSpec::ALL_KINDS {
             assert_eq!(parse_kind(k).unwrap(), k);
         }
         assert!(parse_kind("grpc").is_err());

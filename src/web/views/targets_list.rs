@@ -458,6 +458,7 @@ fn chip_to_db_kind(label: &str) -> Option<String> {
     match label.to_ascii_uppercase().as_str() {
         "HTTP" => Some("http"),
         "TCP" => Some("tcp"),
+        "PING" => Some("ping"),
         "DNS" => Some("dns"),
         "TLS" => Some("tls_cert"),
         "DOMAIN" => Some("domain_expiry"),
@@ -471,6 +472,7 @@ fn db_kind_to_chip(kind: &str) -> Option<&'static str> {
     match kind {
         "http" => Some("HTTP"),
         "tcp" => Some("TCP"),
+        "ping" => Some("PING"),
         "dns" => Some("DNS"),
         "tls_cert" => Some("TLS"),
         "domain_expiry" => Some("DOMAIN"),
@@ -672,6 +674,14 @@ fn sort_key(s: TargetSort) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_check_kind_round_trips_through_the_chip_maps() {
+        for kind in crate::domain::CheckSpec::ALL_KINDS {
+            let chip = db_kind_to_chip(kind).unwrap_or_else(|| panic!("no chip for {kind}"));
+            assert_eq!(chip_to_db_kind(chip).as_deref(), Some(kind));
+        }
+    }
 
     fn row(name: &str, group: Option<&str>, status: &'static str, enabled: bool) -> MonitorRow {
         MonitorRow {

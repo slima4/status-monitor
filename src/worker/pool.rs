@@ -74,7 +74,9 @@ pub fn host_for_spec(spec: &CheckSpec) -> String {
         // HTTP URL with no host_str. Listed explicitly so a future
         // CheckSpec variant is forced through the match and can't
         // silently collapse onto this catch-all.
-        CheckSpec::Http(_) | CheckSpec::Tcp(_) | CheckSpec::TlsCert(_) => "unknown".to_owned(),
+        CheckSpec::Http(_) | CheckSpec::Tcp(_) | CheckSpec::Ping(_) | CheckSpec::TlsCert(_) => {
+            "unknown".to_owned()
+        }
     }
 }
 

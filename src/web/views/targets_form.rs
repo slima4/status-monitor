@@ -70,6 +70,20 @@ impl Default for TcpFields {
     }
 }
 
+pub struct PingFields {
+    pub host: String,
+    pub timeout_ms: u64,
+}
+
+impl Default for PingFields {
+    fn default() -> Self {
+        Self {
+            host: String::new(),
+            timeout_ms: 3_000,
+        }
+    }
+}
+
 pub struct DnsFields {
     pub domain: String,
     pub record_type: &'static str,
@@ -166,6 +180,7 @@ pub struct FormModel {
     pub check_type: &'static str,
     pub http: HttpFields,
     pub tcp: TcpFields,
+    pub ping: PingFields,
     pub dns: DnsFields,
     pub tls_cert: TlsCertFields,
     pub domain_expiry: DomainExpiryFields,
@@ -287,16 +302,15 @@ impl FormModel {
     /// Per-kind interval floors as a JSON object, mirrored to the client so
     /// the form validates against the same numbers the API enforces.
     pub fn kind_floors_json(&self) -> String {
-        let floors: serde_json::Map<String, serde_json::Value> =
-            ["http", "tcp", "dns", "tls_cert", "domain_expiry"]
-                .iter()
-                .map(|k| {
-                    (
-                        (*k).to_string(),
-                        crate::domain::min_interval_secs_for_kind(k).into(),
-                    )
-                })
-                .collect();
+        let floors: serde_json::Map<String, serde_json::Value> = CheckSpec::ALL_KINDS
+            .iter()
+            .map(|k| {
+                (
+                    (*k).to_string(),
+                    crate::domain::min_interval_secs_for_kind(k).into(),
+                )
+            })
+            .collect();
         serde_json::Value::Object(floors).to_string()
     }
 
@@ -457,6 +471,7 @@ fn empty_create_form() -> FormModel {
         check_type: "http",
         http: HttpFields::default(),
         tcp: TcpFields::default(),
+        ping: PingFields::default(),
         dns: DnsFields::default(),
         tls_cert: TlsCertFields::default(),
         domain_expiry: DomainExpiryFields::default(),
@@ -693,6 +708,7 @@ fn form_from_target(t: Target, kind: FormKind) -> Result<FormModel, AppError> {
 
     let mut http = HttpFields::default();
     let mut tcp = TcpFields::default();
+    let mut ping = PingFields::default();
     let mut dns = DnsFields::default();
     let mut tls_cert = TlsCertFields::default();
     let mut domain_expiry = DomainExpiryFields::default();
@@ -708,6 +724,13 @@ fn form_from_target(t: Target, kind: FormKind) -> Result<FormModel, AppError> {
                 timeout_ms: c.timeout.as_millis() as u64,
             };
             "tcp"
+        }
+        CheckSpec::Ping(c) => {
+            ping = PingFields {
+                host: c.host,
+                timeout_ms: c.timeout.as_millis() as u64,
+            };
+            "ping"
         }
         CheckSpec::Dns(d) => {
             dns = DnsFields {
@@ -783,6 +806,7 @@ fn form_from_target(t: Target, kind: FormKind) -> Result<FormModel, AppError> {
         check_type,
         http,
         tcp,
+        ping,
         dns,
         tls_cert,
         domain_expiry,
@@ -858,29 +882,30 @@ mod tests {
     }
 
     #[test]
-    fn renders_all_five_check_type_cards() {
+    fn renders_a_card_and_panel_for_every_check_kind() {
         let html = FormPage {
             active_tab: "targets",
             form: empty_create_form(),
         }
         .render()
         .unwrap();
-        assert_eq!(html.matches("data-check-card").count(), 5);
-        for v in ["http", "tcp", "dns", "tls_cert", "domain_expiry"] {
+        assert_eq!(
+            html.matches("data-check-card").count(),
+            CheckSpec::ALL_KINDS.len()
+        );
+        for v in CheckSpec::ALL_KINDS {
             assert!(
                 html.contains(&format!(r#"value="{v}""#)),
                 "missing card for variant {v}"
             );
-        }
-        // Default selection lands on HTTP.
-        assert!(html.contains(r#"name="check_type" value="http" checked"#));
-        // Each protocol panel is rendered (non-active panels are .hidden).
-        for v in ["http", "tcp", "dns", "tls_cert", "domain_expiry"] {
+            // Each protocol panel is rendered (non-active panels are .hidden).
             assert!(
                 html.contains(&format!(r#"data-variant="{v}""#)),
                 "missing panel for variant {v}"
             );
         }
+        // Default selection lands on HTTP.
+        assert!(html.contains(r#"name="check_type" value="http" checked"#));
     }
 
     #[test]

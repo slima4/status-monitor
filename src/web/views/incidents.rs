@@ -224,6 +224,7 @@ async fn name_map(state: &AppState, org: OrgId) -> WebResult<HashMap<Uuid, Strin
 fn kind_label(kind: &str) -> &'static str {
     match kind {
         "tcp" => "tcp",
+        "ping" => "ping",
         "dns" => "dns",
         "tls_cert" => "tls",
         "domain_expiry" => "domain",
@@ -1144,6 +1145,16 @@ pub async fn postmortem_form(
 mod tests {
     use super::*;
     use askama::Template;
+
+    #[test]
+    fn every_check_kind_has_console_label() {
+        for kind in crate::domain::CheckSpec::ALL_KINDS {
+            assert!(
+                kind == "http" || kind_label(kind) != "http",
+                "kind {kind} falls through to the http label"
+            );
+        }
+    }
 
     fn ops(state: IncidentState) -> OpsIncident {
         OpsIncident {

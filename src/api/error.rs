@@ -56,6 +56,7 @@ pub mod codes {
     pub const INVALID_TIMEOUT: &str = "INVALID_TIMEOUT";
     pub const INVALID_TCP_PORT: &str = "INVALID_TCP_PORT";
     pub const INVALID_TCP_HOST: &str = "INVALID_TCP_HOST";
+    pub const INVALID_PING_HOST: &str = "INVALID_PING_HOST";
     pub const INVALID_STATUS_RANGE: &str = "INVALID_STATUS_RANGE";
     pub const INVALID_HTTP_METHOD: &str = "INVALID_HTTP_METHOD";
     pub const INVALID_HEAD_BODY_MATCH: &str = "INVALID_HEAD_BODY_MATCH";
