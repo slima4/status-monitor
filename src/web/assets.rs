@@ -83,6 +83,29 @@ pub fn url(path: &str) -> String {
     }
 }
 
+async fn favicon_ico() -> Response {
+    root_icon("img/favicon.ico")
+}
+
+async fn apple_touch_icon() -> Response {
+    root_icon("img/apple-touch-icon.png")
+}
+
+fn root_icon(asset: &str) -> Response {
+    let Some(content) = StaticAssets::get(asset) else {
+        return (StatusCode::NOT_FOUND, "not found").into_response();
+    };
+    let mime = mime_guess::from_path(asset).first_or_octet_stream();
+    (
+        [
+            (header::CONTENT_TYPE, mime.as_ref().to_owned()),
+            (header::CACHE_CONTROL, "public, max-age=86400".to_owned()),
+        ],
+        content.data,
+    )
+        .into_response()
+}
+
 pub async fn serve(Path(path): Path<String>, RawQuery(query): RawQuery) -> Response {
     let Some(content) = StaticAssets::get(&path) else {
         return (StatusCode::NOT_FOUND, "not found").into_response();
@@ -128,7 +151,10 @@ where
         !MANIFEST.is_empty(),
         "JS asset manifest is empty — the esbuild build step did not run"
     );
-    router.route("/static/{*path}", get(serve))
+    router
+        .route("/static/{*path}", get(serve))
+        .route("/favicon.ico", get(favicon_ico))
+        .route("/apple-touch-icon.png", get(apple_touch_icon))
 }
 
 #[cfg(test)]
@@ -254,6 +280,32 @@ mod tests {
             .to_str()
             .unwrap();
         assert!(mime.starts_with("text/javascript") || mime.starts_with("application/javascript"));
+    }
+
+    #[tokio::test]
+    async fn root_icons_serve_image_bytes() {
+        for asset in ["img/favicon.ico", "img/apple-touch-icon.png"] {
+            assert!(
+                StaticAssets::get(asset).is_some(),
+                "root icon {asset} not embedded — was it committed?"
+            );
+        }
+        let ico = favicon_ico().await;
+        assert_eq!(ico.status(), StatusCode::OK);
+        assert!(
+            ico.headers()
+                .get(header::CONTENT_TYPE)
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .starts_with("image/"),
+        );
+        let apple = apple_touch_icon().await;
+        assert_eq!(apple.status(), StatusCode::OK);
+        assert_eq!(
+            apple.headers().get(header::CONTENT_TYPE).unwrap(),
+            "image/png",
+        );
     }
 
     #[tokio::test]
