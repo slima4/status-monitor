@@ -216,7 +216,7 @@ pub const LANDINGS: &[Landing] = &[
     Landing {
         path: "/open-source-status-page",
         created: "2026-06-20",
-        lastmod: "2026-06-20",
+        lastmod: "2026-07-02",
         title: "Open-Source Status Page with Built-in Monitoring",
         eyebrow: "open source",
         h1: "An open-source status page",
@@ -282,7 +282,7 @@ pub const LANDINGS: &[Landing] = &[
     Landing {
         path: "/self-hosted-status-page",
         created: "2026-06-20",
-        lastmod: "2026-06-20",
+        lastmod: "2026-07-02",
         title: "Self-Hosted Status Page & Uptime Monitoring",
         eyebrow: "run it yourself",
         h1: "A self-hosted status page and uptime monitor",
@@ -325,7 +325,7 @@ pub const LANDINGS: &[Landing] = &[
             },
             Section {
                 heading: "probes you own",
-                body: "Run regional probe agents wherever your users are and fold their results into each monitor per region. Hosted or self-hosted, the data model, API and Terraform provider are identical.",
+                body: "Run regional probe agents wherever your users are and fold their results into each monitor per region. The same Terraform config and API calls run against hosted and self-hosted alike.",
             },
         ],
         code: Some(CodeSample {
@@ -415,7 +415,7 @@ docker compose up -d"#,
     Landing {
         path: "/uptime-monitoring-for-developers",
         created: "2026-07-01",
-        lastmod: "2026-07-01",
+        lastmod: "2026-07-02",
         title: "Uptime Monitoring for Developers, as Code",
         eyebrow: "for developers",
         h1: "Uptime monitoring built for developers",
@@ -502,7 +502,7 @@ docker compose up -d"#,
     Landing {
         path: "/vs/uptimerobot",
         created: "2026-06-16",
-        lastmod: "2026-06-21",
+        lastmod: "2026-07-02",
         title: "An UptimeRobot Alternative with Status Pages",
         eyebrow: "switching monitors",
         h1: "Looking for an UptimeRobot alternative?",
@@ -568,12 +568,12 @@ docker compose up -d"#,
     Landing {
         path: "/vs/statuspage",
         created: "2026-06-19",
-        lastmod: "2026-06-21",
+        lastmod: "2026-07-02",
         title: "A Statuspage Alternative with Monitoring Built In",
         eyebrow: "switching status pages",
-        h1: "Looking for a Statuspage alternative?",
+        h1: "A Statuspage alternative with monitoring built in",
         meta_description: "Uptimepage pairs a branded public status page with uptime monitoring in one product: 60s checks, email and webhook subscribers, incidents. Free to start.",
-        lede: "Here the status page and the monitoring behind it are the same product. Flip any monitor public and customers get a branded page on your own subdomain. Everything below is on the free tier, no card.",
+        lede: "Here the status page and the monitoring behind it are the same product. Flip any monitor public and customers get a branded page on your own subdomain, all of it on the free tier.",
         features: &[
             Feature {
                 label: "Status page",
@@ -630,10 +630,10 @@ docker compose up -d"#,
     Landing {
         path: "/vs/better-stack",
         created: "2026-06-19",
-        lastmod: "2026-07-01",
+        lastmod: "2026-07-02",
         title: "A Better Uptime (Better Stack) Alternative You Self-Host",
         eyebrow: "comparing platforms",
-        h1: "Looking for a Better Uptime (Better Stack) alternative?",
+        h1: "The Better Uptime (Better Stack) alternative you self-host",
         meta_description: "Better Uptime is now Better Stack. Want self-hosted monitoring and status pages you drive as code? Uptimepage is one AGPL binary with Terraform and MCP.",
         lede: "Better Uptime rebranded to Better Stack, and if you outgrew its pricing or want your data on your own boxes, Uptimepage is a focused monitor and status page you run yourself. One binary, open source under AGPL, and everything you can click you can also declare in code. Start free on the hosted tier, no card.",
         features: &[
@@ -668,12 +668,12 @@ docker compose up -d"#,
                 body: "The whole thing ships as one self-contained binary. `docker compose up` brings up the monitor with Postgres and ClickHouse, migrations run on boot, and the source is AGPL if you’d rather host it on your own boxes.",
             },
             Section {
-                heading: "everything as code",
-                body: "Declare monitors, status pages and notification channels in HCL with the official Terraform provider, and point an LLM client at the MCP server to read your monitoring and take fenced, audited actions. No click-ops required.",
+                heading: "no click-ops",
+                body: "Declare monitors, status pages and notification channels in HCL with the official Terraform provider, and point an LLM client at the MCP server to read your monitoring, with every write waiting on your approval.",
             },
             Section {
-                heading: "probes where your users are",
-                body: "Run region agents on your own machines and check from where your customers actually are. Each agent authenticates with a scoped, org-bound token.",
+                heading: "checks from your own regions",
+                body: "Run region agents on your own machines, wherever your customers actually are; each one authenticates with a scoped, org-bound token.",
             },
         ],
         code: None,
@@ -686,10 +686,10 @@ docker compose up -d"#,
     Landing {
         path: "/vs/oneuptime",
         created: "2026-06-19",
-        lastmod: "2026-06-20",
+        lastmod: "2026-07-02",
         title: "A OneUptime Alternative That’s Quick to Run",
         eyebrow: "comparing open source",
-        h1: "Looking for a OneUptime alternative?",
+        h1: "A OneUptime alternative that’s quick to run",
         meta_description: "An open-source monitor and status page that’s quick to run: one binary plus Postgres and ClickHouse, Terraform and MCP, AGPL. Free on the hosted tier.",
         lede: "Uptimepage is open source and focused on two jobs done well: uptime monitoring and a public status page. One binary plus two databases, up with a single command, or skip hosting it and use the free tier. No card.",
         features: &[
@@ -724,12 +724,12 @@ docker compose up -d"#,
                 body: "One self-contained binary, Postgres for config and ClickHouse for the time-series. `docker compose up` and the whole stack is running with migrations applied. Nothing else to stand up first.",
             },
             Section {
-                heading: "everything as code",
-                body: "An official Terraform provider for monitors, status pages and channels, plus an MCP server so an LLM client can read your monitoring and take fenced, audited actions. Review your monitoring in a pull request.",
+                heading: "drive it from a repo",
+                body: "An official Terraform provider for monitors, status pages and channels, plus an MCP server so an LLM client can read your monitoring, with writes gated behind your approval and audited. Review your monitoring in a pull request.",
             },
             Section {
                 heading: "hosted or self-hosted, your call",
-                body: "Start on the free hosted tier with no card, or run the AGPL source yourself. The data model, API and Terraform provider are the same either way, so moving between them is just an endpoint change.",
+                body: "Start on the free hosted tier with no card, or run the AGPL source yourself. Switching later is an endpoint change, not a migration.",
             },
         ],
         code: None,
@@ -742,10 +742,10 @@ docker compose up -d"#,
     Landing {
         path: "/vs/uptime-kuma",
         created: "2026-06-20",
-        lastmod: "2026-06-20",
+        lastmod: "2026-07-02",
         title: "An Uptime Kuma Alternative You Run as Code",
         eyebrow: "comparing open source",
-        h1: "Looking for an Uptime Kuma alternative?",
+        h1: "An Uptime Kuma alternative you run as code",
         meta_description: "Open-source uptime monitoring and branded status pages, managed as code with Terraform, a REST API and MCP. Team roles and subscribers. Free to start, no card.",
         lede: "Uptimepage is open source and does two jobs well: uptime monitoring and a public status page. Manage all of it as code, give your team roles, and let customers subscribe to status updates. Run the single binary yourself or use the free hosted tier. No card.",
         features: &[
@@ -777,7 +777,7 @@ docker compose up -d"#,
         sections: &[
             Section {
                 heading: "everything as code",
-                body: "An official Terraform provider and a full REST API cover monitors, status pages and alert channels, and an MCP server lets an LLM client read your monitoring and take fenced, audited actions. Declare your monitoring in a repo and review changes in a pull request.",
+                body: "An official Terraform provider and a full REST API cover monitors, status pages and alert channels, and an MCP server lets an LLM client read your monitoring and act only with your approval, every write audited. Declare your monitoring in a repo and review changes in a pull request.",
             },
             Section {
                 heading: "status pages your customers subscribe to",
@@ -789,7 +789,7 @@ docker compose up -d"#,
             },
             Section {
                 heading: "probes you own",
-                body: "Run regional probe agents on your own boxes, wherever your users are, and Uptimepage folds their results into each monitor's health per region. The data model, API and Terraform provider are identical hosted or self-hosted, so moving between them is just an endpoint change.",
+                body: "Run regional probe agents on your own boxes, wherever your users are, and Uptimepage folds their results into each monitor's health per region. Point the provider at the hosted tier or your own box; the config stays the same.",
             },
         ],
         code: Some(CodeSample {
@@ -825,10 +825,10 @@ docker compose up -d"#,
     Landing {
         path: "/vs/pingdom",
         created: "2026-06-25",
-        lastmod: "2026-06-25",
+        lastmod: "2026-07-02",
         title: "A Pingdom Alternative with Status Pages Built In",
         eyebrow: "switching monitors",
-        h1: "Looking for a Pingdom alternative?",
+        h1: "A Pingdom alternative with status pages built in",
         meta_description: "Uptimepage pairs 60s HTTP, TCP, DNS and TLS checks with branded status pages and Slack, email and webhook alerts. Open source, free to start.",
         lede: "If you are pricing out monitors, here is what Uptimepage gives you out of the box: the checks and a public status page are the same product, the source is open, and you can start free with no card.",
         features: &[
@@ -863,8 +863,8 @@ docker compose up -d"#,
                 body: "Checks and a public status page are the same product here, not a paid add-on. Flip any monitor public and it lands on your own subdomain with a 90-day history and per-component status.",
             },
             Section {
-                heading: "checks that explain themselves",
-                body: "HTTP, TCP, DNS and TLS, every minute from multiple regions. When something is slow the timing is split across DNS, connect, TLS and time-to-first-byte, so you see why, not just that.",
+                heading: "timings that name the culprit",
+                body: "HTTP, TCP, DNS and TLS, every minute from multiple regions. Every check’s timing is split across DNS, connect, TLS and time-to-first-byte, so a slow one comes back with its cause attached.",
             },
             Section {
                 heading: "own it, hosted or self-hosted",
@@ -891,7 +891,7 @@ docker compose up -d"#,
     Landing {
         path: "/vs/self-hosted-status-pages",
         created: "2026-07-01",
-        lastmod: "2026-07-01",
+        lastmod: "2026-07-02",
         title: "Uptimepage vs Upptime, Cachet & Statping",
         eyebrow: "comparing self-hosted",
         h1: "Uptimepage vs Upptime, Cachet and Statping",
@@ -938,7 +938,7 @@ docker compose up -d"#,
             },
             Section {
                 heading: "One product, hosted or self-hosted",
-                body: "The pattern is simple. Upptime and Statping monitor but leave out subscribers and multi-region; Cachet publishes but does not monitor. Uptimepage does both in one binary. Run docker compose up with Postgres and ClickHouse on your own boxes, or start free on the hosted tier with no card. The data model, REST API and Terraform provider are identical either way, so moving between them is just an endpoint change.",
+                body: "The pattern is simple. Upptime and Statping monitor but leave out subscribers and multi-region; Cachet publishes but does not monitor. Uptimepage does both in one binary. Run docker compose up with Postgres and ClickHouse on your own boxes, or start free on the hosted tier with no card. The REST API and Terraform provider work the same against both, so you can change your mind later.",
             },
         ],
         code: None,
@@ -965,7 +965,7 @@ docker compose up -d"#,
     Landing {
         path: "/vs/self-hosted-monitoring",
         created: "2026-07-01",
-        lastmod: "2026-07-01",
+        lastmod: "2026-07-02",
         title: "Uptimepage vs Uptime Kuma, OpenStatus, OneUptime, Gatus, Kener",
         eyebrow: "comparing self-hosted",
         h1: "Uptimepage vs the self-hosted monitoring tools",
@@ -1348,7 +1348,7 @@ fn page_faqs(path: &str) -> &'static [(&'static str, &'static str)] {
             ),
             (
                 "Can I self-host it?",
-                "Yes. `docker compose up` brings up the binary with Postgres and ClickHouse on your own boxes, with migrations applied on boot.",
+                "Yes. The AGPL source ships a compose file: one command brings up the binary with Postgres and ClickHouse, migrations applied on boot.",
             ),
         ],
         "/self-hosted-status-page" => &[
@@ -1398,11 +1398,11 @@ fn page_faqs(path: &str) -> &'static [(&'static str, &'static str)] {
             ),
             (
                 "Does it work with LLM tooling?",
-                "Yes. An MCP server lets an LLM client read your monitoring and take fenced, audited actions from the same config that lives in your repo.",
+                "Yes. An MCP server lets an LLM client read your monitoring and take approval-gated, audited actions from the same config that lives in your repo.",
             ),
             (
                 "Can I self-host it?",
-                "Yes. `docker compose up` brings up the single AGPL binary with Postgres and ClickHouse, and migrations run on boot.",
+                "Yes. The whole product is one AGPL binary; compose brings it up next to Postgres and ClickHouse in minutes.",
             ),
         ],
         "/vs/uptimerobot" => &[
@@ -1420,7 +1420,7 @@ fn page_faqs(path: &str) -> &'static [(&'static str, &'static str)] {
             ),
             (
                 "Can I self-host it?",
-                "Yes. `docker compose up` brings up the single binary with Postgres and ClickHouse, and migrations run on boot.",
+                "Yes. Everything compiles to a single AGPL binary you run with compose, so the whole stack sits on hardware you control.",
             ),
         ],
         "/vs/statuspage" => &[
@@ -1514,7 +1514,7 @@ fn page_faqs(path: &str) -> &'static [(&'static str, &'static str)] {
             ),
             (
                 "Can I self-host Uptimepage?",
-                "Yes. `docker compose up` brings up the single AGPL binary with Postgres and ClickHouse, migrations run on boot, and the hosted tier is free if you would rather not run it.",
+                "Yes, that is the point of it. One AGPL binary, Postgres, ClickHouse, one compose file. Or stay on the free hosted tier and let us run it.",
             ),
         ],
         "/vs/self-hosted-monitoring" => &[
@@ -1532,7 +1532,7 @@ fn page_faqs(path: &str) -> &'static [(&'static str, &'static str)] {
             ),
             (
                 "Can I self-host Uptimepage?",
-                "Yes. `docker compose up` brings up the single AGPL binary with Postgres and ClickHouse, migrations run on boot, and the hosted tier is free if you would rather not run it.",
+                "Yes. Same one-binary deploy the table describes: compose up, migrations on boot, AGPL. The hosted tier exists for when you would rather not run it.",
             ),
         ],
         "/status-page-for-saas" => &[
