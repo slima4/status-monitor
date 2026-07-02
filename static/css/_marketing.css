@@ -48,6 +48,12 @@ html:has(.marketing-shell) {
     --mk-warn:      oklch(0.78 0.14 80);
     --mk-down:      oklch(0.58 0.20 28);
     --mk-mark:      oklch(0.78 0.135 62);
+    /* Depth + hover accents — shared by every framed surface; no hand-rolled stacks. */
+    --mk-shadow-frame: 0 1px 0 oklch(1 0 0 / 0.6) inset, 0 18px 32px -24px oklch(0 0 0 / 0.18);
+    --mk-shadow-card: 0 1px 0 oklch(1 0 0 / 0.6) inset, 0 10px 20px -16px oklch(0 0 0 / 0.14);
+    --mk-shadow-card-hover: 0 1px 0 oklch(1 0 0 / 0.6) inset, 0 14px 26px -16px oklch(0 0 0 / 0.18);
+    --mk-rule-hover: color-mix(in oklch, var(--mk-ok) 40%, var(--mk-rule));
+    --mk-rule-soft: color-mix(in oklch, var(--mk-rule) 70%, transparent);
 
     --mk-font-mono: "IBM Plex Mono", ui-monospace, "Cascadia Code", "Fira Code", Menlo, Consolas, monospace;
     --mk-font-body: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
@@ -267,14 +273,16 @@ html:has(.marketing-shell) {
     background: var(--mk-surface);
     border: 1px solid var(--mk-rule);
     border-radius: 2px;
-    padding: 1.25rem;
-    transition: border-color 160ms ease, transform 160ms ease;
+    padding: 1.5rem 1.25rem;
+    transition: border-color 160ms ease, transform 160ms ease, box-shadow 160ms ease;
     position: relative;
     overflow: hidden;
+    box-shadow: var(--mk-shadow-card);
 }
 .mk-card:hover {
-    border-color: var(--mk-ink);
+    border-color: var(--mk-rule-hover);
     transform: translateY(-1px);
+    box-shadow: var(--mk-shadow-card-hover);
 }
 /* Mono numeral comment in the corner, e.g. `// 01`. */
 .mk-numeral {
@@ -304,39 +312,54 @@ html:has(.marketing-shell) {
     border-radius: 2px;
     background: var(--mk-surface);
     overflow: hidden;
+    box-shadow: var(--mk-shadow-frame);
 }
 @media (min-width: 640px) {
     .mk-stats { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }
 .mk-stat {
-    padding: 1.25rem 1.125rem;
-    border-top: 1px solid var(--mk-rule);
-    border-left: 1px solid var(--mk-rule);
+    padding: 1.5rem 1.25rem;
+    border-top: 1px solid var(--mk-rule-soft);
+    border-left: 1px solid var(--mk-rule-soft);
+    /* dt stays first in the DOM for SR term/value pairing; the number renders on top. */
+    display: flex;
+    flex-direction: column;
 }
 .mk-stat:nth-child(-n+2) { border-top: 0; }
 .mk-stat:nth-child(2n+1) { border-left: 0; }
 @media (min-width: 640px) {
     .mk-stat:nth-child(-n+4) { border-top: 0; }
-    .mk-stat:nth-child(2n+1) { border-left: 1px solid var(--mk-rule); }
+    .mk-stat:nth-child(2n+1) { border-left: 1px solid var(--mk-rule-soft); }
     .mk-stat:nth-child(4n+1) { border-left: 0; }
 }
 .mk-stat__num {
     font-family: var(--mk-font-mono);
     font-weight: 600;
-    color: var(--mk-ink);
-    font-size: clamp(1.5rem, 2.4vw + 0.4rem, 2rem);
+    color: var(--mk-ink-soft);
+    font-size: clamp(1.125rem, 1.6vw + 0.35rem, 1.375rem);
     line-height: 1;
     letter-spacing: -0.02em;
+    order: -1;
 }
-.mk-stat__num--em { color: var(--mk-ok); font-style: normal; font-weight: 600; }
+.mk-stat__num--em {
+    color: var(--mk-ok);
+    font-style: normal;
+    font-weight: 600;
+    font-size: clamp(1.875rem, 2.8vw + 0.5rem, 2.5rem);
+}
 .mk-stat__unit {
     font-family: var(--mk-font-mono);
     font-size: 0.6875rem;
     text-transform: uppercase;
     letter-spacing: 0.12em;
     color: var(--mk-quiet);
-    margin-top: 0.625rem;
-    display: block;
+    margin-top: 0.75rem;
+}
+.mk-stat__unit::before {
+    content: "// ";
+    content: "// " / "";
+    letter-spacing: 0;
+    color: var(--mk-faint);
 }
 
 /* ── Steps (how it works) ─────────────────────────────────────────── */
@@ -346,11 +369,13 @@ html:has(.marketing-shell) {
     background: var(--mk-surface);
     border: 1px solid var(--mk-rule);
     border-radius: 2px;
-    transition: border-color 160ms ease, transform 160ms ease;
+    transition: border-color 160ms ease, transform 160ms ease, box-shadow 160ms ease;
+    box-shadow: var(--mk-shadow-card);
 }
 .mk-step:hover {
-    border-color: var(--mk-ink);
+    border-color: var(--mk-rule-hover);
     transform: translateY(-1px);
+    box-shadow: var(--mk-shadow-card-hover);
 }
 .mk-step__index {
     font-family: var(--mk-font-mono);
@@ -449,9 +474,7 @@ html:has(.marketing-shell) {
     border-radius: 2px;
     font-family: var(--mk-font-mono);
     overflow: hidden;
-    box-shadow:
-        0 1px 0 oklch(1 0 0 / 0.6) inset,
-        0 18px 32px -22px oklch(0 0 0 / 0.18);
+    box-shadow: var(--mk-shadow-frame);
 }
 .mk-terminal__chrome {
     display: flex;
@@ -652,7 +675,7 @@ html:has(.marketing-shell) {
 .mk-preview__ok { font-size: 0.625rem; color: var(--mk-ok); letter-spacing: 0.1em; }
 
 /* ── Home pricing teaser band ─────────────────────────────────────── */
-.mk-tierband { border: 1px solid var(--mk-rule); border-radius: 2px; background: var(--mk-surface); overflow: hidden; text-align: left; }
+.mk-tierband { border: 1px solid var(--mk-rule); border-radius: 2px; background: var(--mk-surface); overflow: hidden; text-align: left; box-shadow: var(--mk-shadow-frame); }
 .mk-tier { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.35rem 0.9rem; padding: 0.9rem 1.1rem; font-family: var(--mk-font-mono); }
 .mk-tier + .mk-tier { border-top: 1px solid var(--mk-rule); }
 .mk-tier--em { background: var(--mk-ok-soft); }
@@ -911,7 +934,7 @@ html:has(.marketing-shell) {
 .mk-gallery__card:hover,
 .mk-gallery__card:focus-visible {
     transform: translateY(-3px);
-    border-color: color-mix(in oklch, var(--mk-ok) 40%, var(--mk-rule));
+    border-color: var(--mk-rule-hover);
     box-shadow:
         0 1px 0 oklch(1 0 0 / 0.6) inset,
         0 26px 46px -24px oklch(0 0 0 / 0.28);
@@ -1022,9 +1045,7 @@ html:has(.marketing-shell) {
     border-radius: 2px;
     background: var(--mk-surface);
     padding: 0.75rem 0.875rem 0.5rem;
-    box-shadow:
-        0 1px 0 oklch(1 0 0 / 0.6) inset,
-        0 18px 32px -24px oklch(0 0 0 / 0.18);
+    box-shadow: var(--mk-shadow-frame);
 }
 .mk-heromap__label {
     margin: 0 0 0.5rem;
