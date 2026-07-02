@@ -23,7 +23,7 @@ use serde::Deserialize;
 
 use super::config::{AUTHOR, Author, BRAND, MarketingCfg};
 use super::pages::{CachedRender, cached_render, not_found, serve_cached};
-use super::seo::{JsonLd, OpenGraph, json_ld_blog_posting};
+use super::seo::{JsonLd, OpenGraph, json_ld_blog, json_ld_blog_posting, json_ld_breadcrumb};
 use crate::web::filters;
 
 const POST_CACHE_CONTROL: HeaderValue =
@@ -174,6 +174,8 @@ struct BlogIndexPage {
     canonical_url: String,
     app_url: String,
     og: OpenGraph,
+    blog_ld: JsonLd,
+    breadcrumb_ld: JsonLd,
     posts: Vec<PostSummary>,
     version: &'static str,
 }
@@ -206,7 +208,14 @@ struct BlogPostPage {
 fn render_index(cfg: &MarketingCfg) -> CachedRender {
     let canonical_url = format!("{}/blog", cfg.canonical_origin);
     let og = OpenGraph::default_for(&format!("{BRAND} Blog"), &canonical_url);
-    let posts: Vec<PostSummary> = list_published()
+    let published = list_published();
+    let ld_posts: Vec<(&str, &str, &str)> = published
+        .iter()
+        .map(|p| (p.title.as_str(), p.slug.as_str(), p.date.as_str()))
+        .collect();
+    let blog_ld = json_ld_blog(&cfg.canonical_origin, &ld_posts);
+    let breadcrumb_ld = json_ld_breadcrumb(&cfg.canonical_origin, "Blog", "/blog");
+    let posts: Vec<PostSummary> = published
         .into_iter()
         .map(|p| PostSummary {
             slug: p.slug.clone(),
@@ -220,6 +229,8 @@ fn render_index(cfg: &MarketingCfg) -> CachedRender {
         canonical_url,
         app_url: cfg.app_url.clone(),
         og,
+        blog_ld,
+        breadcrumb_ld,
         posts,
         version: env!("CARGO_PKG_VERSION"),
     }

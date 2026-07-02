@@ -1,6 +1,10 @@
 {% extends "marketing/base.html" %}
 {% block title %}Uptime Monitoring & Status Page Blog | Uptimepage{% endblock %}
 {% block description %}Field notes on uptime monitoring, status pages, and keeping production boring.{% endblock %}
+{% block head %}
+<script type="application/ld+json">{{ blog_ld.as_str()|safe }}</script>
+<script type="application/ld+json">{{ breadcrumb_ld.as_str()|safe }}</script>
+{% endblock %}
 {% block content %}
 <section class="mx-auto max-w-3xl space-y-10">
     <header class="space-y-3 text-center">

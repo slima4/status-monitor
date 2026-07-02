@@ -124,9 +124,24 @@ impl OpenGraph {
 /// Stored as the serialised string so the template emits it verbatim
 /// through `|safe`.
 #[derive(Debug, Clone)]
-pub struct JsonLd(pub String);
+pub struct JsonLd(String);
 
 impl JsonLd {
+    /// Serialize for a `<script>` block, escaping the characters `serde_json`
+    /// leaves raw (`<`, `>`, `&`) that would otherwise let a string value
+    /// close the element early. Every emitter builds through here, so the
+    /// template's `|safe` can't emit an unescaped payload.
+    fn from_value(value: serde_json::Value) -> Self {
+        let escaped = value
+            .to_string()
+            .replace('<', "\\u003c")
+            .replace('>', "\\u003e")
+            .replace('&', "\\u0026")
+            .replace('\u{2028}', "\\u2028")
+            .replace('\u{2029}', "\\u2029");
+        JsonLd(escaped)
+    }
+
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -141,7 +156,7 @@ pub fn json_ld_organization(canonical_origin: &str) -> JsonLd {
         "logo": absolute_asset(canonical_origin, "/static/img/favicon-512.png"),
         "sameAs": ORG_SAME_AS,
     });
-    JsonLd(payload.to_string())
+    JsonLd::from_value(payload)
 }
 
 /// `SoftwareApplication` with a free `Offer` so search and answer engines
@@ -160,7 +175,7 @@ pub fn json_ld_software_application(canonical_origin: &str) -> JsonLd {
             "priceCurrency": "USD",
         },
     });
-    JsonLd(payload.to_string())
+    JsonLd::from_value(payload)
 }
 
 /// Schema text must match the visible FAQ, so this builds from the same pairs.
@@ -180,7 +195,7 @@ pub fn json_ld_faqpage(faqs: &[(&str, &str)]) -> JsonLd {
         "@type": "FAQPage",
         "mainEntity": main_entity,
     });
-    JsonLd(payload.to_string())
+    JsonLd::from_value(payload)
 }
 
 /// `BreadcrumbList` for a second-level marketing page (Home › page). Gives
@@ -194,7 +209,7 @@ pub fn json_ld_breadcrumb(canonical_origin: &str, name: &str, path: &str) -> Jso
             { "@type": "ListItem", "position": 2, "name": name, "item": format!("{canonical_origin}{path}") },
         ],
     });
-    JsonLd(payload.to_string())
+    JsonLd::from_value(payload)
 }
 
 pub fn json_ld_webpage(
@@ -212,7 +227,7 @@ pub fn json_ld_webpage(
         "datePublished": created,
         "dateModified": modified,
     });
-    JsonLd(payload.to_string())
+    JsonLd::from_value(payload)
 }
 
 pub fn json_ld_website(canonical_origin: &str) -> JsonLd {
@@ -222,7 +237,7 @@ pub fn json_ld_website(canonical_origin: &str) -> JsonLd {
         "name": BRAND,
         "url": canonical_origin,
     });
-    JsonLd(payload.to_string())
+    JsonLd::from_value(payload)
 }
 
 pub fn json_ld_blog_posting(
@@ -256,7 +271,33 @@ pub fn json_ld_blog_posting(
         },
         "publisher": publisher(canonical_origin),
     });
-    JsonLd(payload.to_string())
+    JsonLd::from_value(payload)
+}
+
+/// `Blog` listing with its posts as `blogPost` entries — the item list a
+/// crawler reads off `/blog`. Pair with `json_ld_breadcrumb` on the page.
+pub fn json_ld_blog(canonical_origin: &str, posts: &[(&str, &str, &str)]) -> JsonLd {
+    let entries: Vec<_> = posts
+        .iter()
+        .map(|(title, slug, date)| {
+            serde_json::json!({
+                "@type": "BlogPosting",
+                "headline": title,
+                "url": format!("{canonical_origin}/blog/{slug}"),
+                "datePublished": date,
+                "author": { "@type": "Person", "name": AUTHOR.name, "url": AUTHOR.url },
+            })
+        })
+        .collect();
+    let payload = serde_json::json!({
+        "@context": "https://schema.org",
+        "@type": "Blog",
+        "name": format!("{BRAND} Blog"),
+        "url": format!("{canonical_origin}/blog"),
+        "publisher": publisher(canonical_origin),
+        "blogPost": entries,
+    });
+    JsonLd::from_value(payload)
 }
 
 /// Logo is a raster: Google's logo guidance needs pixel dimensions an SVG lacks.
@@ -548,6 +589,23 @@ mod tests {
         assert_eq!(v["@type"], "FAQPage");
         assert_eq!(v["mainEntity"].as_array().unwrap().len(), 2);
         assert_eq!(v["mainEntity"][0]["acceptedAnswer"]["text"], "A1");
+    }
+
+    #[test]
+    fn json_ld_escapes_script_breakout() {
+        let ld = json_ld_blog(
+            "https://x.test",
+            &[("</script><script>alert(1)</script>", "s", "2026-01-01")],
+        );
+        let out = ld.as_str();
+        assert!(!out.contains("</script>"), "raw </script> leaked: {out}");
+        assert!(out.contains("\\u003c"), "expected escaped <, got: {out}");
+        let v: serde_json::Value = serde_json::from_str(out).expect("still valid JSON");
+        assert_eq!(v["@type"], "Blog");
+        assert_eq!(
+            v["blogPost"][0]["headline"],
+            "</script><script>alert(1)</script>"
+        );
     }
 
     #[test]
