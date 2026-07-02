@@ -113,7 +113,7 @@ pub const LANDINGS: &[Landing] = &[
             },
             Feature {
                 label: "Check types",
-                value: "HTTP, TCP, DNS, TLS",
+                value: "HTTP, TCP, DNS, TLS, ping",
             },
             Feature {
                 label: "Alert channels",
@@ -131,7 +131,7 @@ pub const LANDINGS: &[Landing] = &[
         sections: &[
             Section {
                 heading: "monitor the whole stack",
-                body: "Your API, your database, your payment provider, your mail sender. HTTP, TCP, DNS and TLS checks every minute, each with its own expectations and its own alert channels.",
+                body: "Your API, your database, your payment provider, your mail sender. HTTP, TCP, DNS, TLS and ping checks every minute, each with its own expectations and its own alert channels.",
             },
             Section {
                 heading: "tell customers before they tell you",
@@ -255,7 +255,7 @@ pub const LANDINGS: &[Landing] = &[
             },
             Section {
                 heading: "monitoring is built in",
-                body: "Incidents open automatically from real HTTP, TCP, DNS and TLS checks and flow straight onto the page. There is no separate monitor to wire up and keep in sync.",
+                body: "Incidents open automatically from real HTTP, TCP, DNS, TLS and ping checks and flow straight onto the page. There is no separate monitor to wire up and keep in sync.",
             },
             Section {
                 heading: "open source, your way",
@@ -428,7 +428,7 @@ docker compose up -d"#,
             },
             Feature {
                 label: "Checks",
-                value: "HTTP, TCP, DNS, TLS",
+                value: "HTTP, TCP, DNS, TLS, ping",
             },
             Feature {
                 label: "Check interval",
@@ -519,7 +519,7 @@ docker compose up -d"#,
             },
             Feature {
                 label: "Check types",
-                value: "HTTP, TCP, DNS, TLS",
+                value: "HTTP, TCP, DNS, TLS, ping",
             },
             Feature {
                 label: "Alerts",
@@ -541,7 +541,7 @@ docker compose up -d"#,
             },
             Section {
                 heading: "checks that explain themselves",
-                body: "HTTP, TCP, DNS and TLS, every minute. When something is slow, the timing is split across DNS, connect, TLS and time-to-first-byte, so you see why, not just that.",
+                body: "HTTP, TCP, DNS, TLS and ping, every minute. When something is slow, the timing is split across DNS, connect, TLS and time-to-first-byte, so you see why, not just that.",
             },
             Section {
                 heading: "alerts tuned for humans",
@@ -655,7 +655,7 @@ docker compose up -d"#,
             },
             Feature {
                 label: "Checks",
-                value: "HTTP, TCP, DNS, TLS",
+                value: "HTTP, TCP, DNS, TLS, ping",
             },
             Feature {
                 label: "Price to start",
@@ -842,7 +842,7 @@ docker compose up -d"#,
             },
             Feature {
                 label: "Check types",
-                value: "HTTP, TCP, DNS, TLS",
+                value: "HTTP, TCP, DNS, TLS, ping",
             },
             Feature {
                 label: "Alerts",
@@ -864,7 +864,7 @@ docker compose up -d"#,
             },
             Section {
                 heading: "timings that name the culprit",
-                body: "HTTP, TCP, DNS and TLS, every minute from multiple regions. Every check’s timing is split across DNS, connect, TLS and time-to-first-byte, so a slow one comes back with its cause attached.",
+                body: "HTTP, TCP, DNS, TLS and ping, every minute from multiple regions. Every HTTP check’s timing is split across DNS, connect, TLS and time-to-first-byte, so a slow one comes back with its cause attached.",
             },
             Section {
                 heading: "own it, hosted or self-hosted",
@@ -900,7 +900,7 @@ docker compose up -d"#,
         features: &[
             Feature {
                 label: "Built-in checks",
-                value: "HTTP, TCP, DNS, TLS",
+                value: "HTTP, TCP, DNS, TLS, ping",
             },
             Feature {
                 label: "Check interval",
@@ -926,11 +926,11 @@ docker compose up -d"#,
         sections: &[
             Section {
                 heading: "Upptime: monitoring inside your GitHub repo",
-                body: "Upptime is a neat idea. It runs checks as scheduled GitHub Actions, records history as commits in your repo, files incidents as GitHub Issues, and serves a static page from GitHub Pages. That design is also its ceiling. Actions cron will not run more than once every five minutes and can slip later under load, so detection is measured in minutes. There are no visitor subscriptions, checks run from a single region unless you add the third-party Globalping service, and there is no DNS-record or TLS-expiry check. Uptimepage runs its own checks every 60 seconds across HTTP, TCP, DNS and TLS from several regions, and lets visitors subscribe by email or webhook.",
+                body: "Upptime is a neat idea. It runs checks as scheduled GitHub Actions, records history as commits in your repo, files incidents as GitHub Issues, and serves a static page from GitHub Pages. That design is also its ceiling. Actions cron will not run more than once every five minutes and can slip later under load, so detection is measured in minutes. There are no visitor subscriptions, checks run from a single region unless you add the third-party Globalping service, and there is no DNS-record or TLS-expiry check. Uptimepage runs its own checks every 60 seconds across HTTP, TCP, DNS, TLS and ping from several regions, and lets visitors subscribe by email or webhook.",
             },
             Section {
                 heading: "Cachet: a status page catching up on monitoring",
-                body: "Cachet began as a pure communication tool: you set components up or down by hand or over its API. Its actively developed v3, in the cachethq/core repo, is moving fast and, as of mid-2026, added basic HTTP component checks and subscriber management. The checks are real but young: HTTP GET only, no TCP, DNS or TLS, and you schedule the check command yourself rather than getting a built-in interval. It is still 3.x-dev with no stable release, incident email to subscribers is not wired up yet, it is a PHP and Laravel app with a database, queue and cron to operate, and it ships under a custom source-available license rather than an OSI open-source one. Uptimepage runs HTTP, TCP, DNS and TLS checks every 60 seconds from multiple regions out of the box, opens incidents automatically, and is one binary to run.",
+                body: "Cachet began as a pure communication tool: you set components up or down by hand or over its API. Its actively developed v3, in the cachethq/core repo, is moving fast and, as of mid-2026, added basic HTTP component checks and subscriber management. The checks are real but young: HTTP GET only, no TCP, DNS or TLS, and you schedule the check command yourself rather than getting a built-in interval. It is still 3.x-dev with no stable release, incident email to subscribers is not wired up yet, it is a PHP and Laravel app with a database, queue and cron to operate, and it ships under a custom source-available license rather than an OSI open-source one. Uptimepage runs HTTP, TCP, DNS, TLS and ping checks every 60 seconds from multiple regions out of the box, opens incidents automatically, and is one binary to run.",
             },
             Section {
                 heading: "Statping: close in shape, thin on upkeep",
@@ -974,7 +974,7 @@ docker compose up -d"#,
         features: &[
             Feature {
                 label: "Built-in checks",
-                value: "HTTP, TCP, DNS, TLS, domain",
+                value: "HTTP, TCP, DNS, TLS, ping, domain",
             },
             Feature {
                 label: "Check interval",
@@ -1008,7 +1008,7 @@ docker compose up -d"#,
             },
             Section {
                 heading: "Gatus: the protocol-rich checker",
-                body: "Gatus is a joy if you want declarative checks in version control. Eleven endpoint protocols including gRPC, SSH, WebSocket, STARTTLS and UDP, a rich condition language with JSONPath body assertions and certificate-expiry checks, multi-step suites, and a tiny static binary with an optional zero-database mode. What it is not is a status page. It ships a health dashboard with badges, not a branded page with subscribers, it has no incident timeline, and it is single-tenant behind one basic-auth or OIDC boundary. Uptimepage covers the everyday HTTP, TCP, DNS and TLS checks and pairs them with the public status page, subscribers and multi-tenant teams Gatus leaves out.",
+                body: "Gatus is a joy if you want declarative checks in version control. Eleven endpoint protocols including gRPC, SSH, WebSocket, STARTTLS and UDP, a rich condition language with JSONPath body assertions and certificate-expiry checks, multi-step suites, and a tiny static binary with an optional zero-database mode. What it is not is a status page. It ships a health dashboard with badges, not a branded page with subscribers, it has no incident timeline, and it is single-tenant behind one basic-auth or OIDC boundary. Uptimepage covers the everyday HTTP, TCP, DNS, TLS and ping checks and pairs them with the public status page, subscribers and multi-tenant teams Gatus leaves out.",
             },
             Section {
                 heading: "Kener: the polished status page",
@@ -1016,7 +1016,7 @@ docker compose up -d"#,
             },
             Section {
                 heading: "Where Uptimepage fits",
-                body: "Uptimepage is not the very fastest interval or the widest protocol list here, and it is honest about that. What it does is put the two halves together: real HTTP, TCP, DNS, TLS-certificate and domain-expiry monitoring, and a branded public status page with confirmed email and webhook subscribers, auto-opened incidents and scheduled maintenance. All of it is driven from code with a Terraform provider, a full REST API and an MCP server, isolated per organization with roles, and checked from probes you can run in any region. It runs as one binary with Postgres and ClickHouse, hosted for free or self-hosted under AGPL.",
+                body: "Uptimepage is not the very fastest interval or the widest protocol list here, and it is honest about that. What it does is put the two halves together: real HTTP, TCP, DNS, TLS-certificate, ping and domain-expiry monitoring, and a branded public status page with confirmed email and webhook subscribers, auto-opened incidents and scheduled maintenance. All of it is driven from code with a Terraform provider, a full REST API and an MCP server, isolated per organization with roles, and checked from probes you can run in any region. It runs as one binary with Postgres and ClickHouse, hosted for free or self-hosted under AGPL.",
             },
         ],
         code: None,
@@ -1340,7 +1340,7 @@ fn page_faqs(path: &str) -> &'static [(&'static str, &'static str)] {
             ),
             (
                 "Does it monitor, or just publish?",
-                "Both. Uptime monitoring is built in, so incidents open automatically from real HTTP, TCP, DNS and TLS checks and appear on the page without a second tool.",
+                "Both. Uptime monitoring is built in, so incidents open automatically from real HTTP, TCP, DNS, TLS and ping checks and appear on the page without a second tool.",
             ),
             (
                 "Can customers subscribe to updates?",
@@ -1426,7 +1426,7 @@ fn page_faqs(path: &str) -> &'static [(&'static str, &'static str)] {
         "/vs/statuspage" => &[
             (
                 "Does Uptimepage monitor as well as publish?",
-                "Yes. Uptime monitoring is built in, so incidents open automatically from real HTTP, TCP, DNS and TLS checks and flow straight onto the status page.",
+                "Yes. Uptime monitoring is built in, so incidents open automatically from real HTTP, TCP, DNS, TLS and ping checks and flow straight onto the status page.",
             ),
             (
                 "Is a custom domain included?",
@@ -1502,7 +1502,7 @@ fn page_faqs(path: &str) -> &'static [(&'static str, &'static str)] {
         "/vs/self-hosted-status-pages" => &[
             (
                 "Does Cachet do monitoring?",
-                "As of mid-2026, partly. Cachet v3 added basic HTTP checks you schedule yourself (GET only, no TCP, DNS or TLS), though it is still in development with no stable release. Uptimepage runs HTTP, TCP, DNS and TLS checks every 60 seconds from multiple regions and opens incidents automatically.",
+                "As of mid-2026, partly. Cachet v3 added basic HTTP checks you schedule yourself (GET only, no TCP, DNS or TLS), though it is still in development with no stable release. Uptimepage runs HTTP, TCP, DNS, TLS and ping checks every 60 seconds from multiple regions and opens incidents automatically.",
             ),
             (
                 "How often can Upptime check?",
@@ -1618,7 +1618,7 @@ fn page_faqs(path: &str) -> &'static [(&'static str, &'static str)] {
             ),
             (
                 "How often does it check?",
-                "As often as every 60 seconds, across HTTP, TCP, DNS and TLS, with the timing split across DNS, connect, TLS and first byte so you can see why a check is slow.",
+                "As often as every 60 seconds, across HTTP, TCP, DNS, TLS and ping, with the timing split across DNS, connect, TLS and first byte so you can see why a check is slow.",
             ),
             (
                 "Can I manage it as code?",
@@ -1667,7 +1667,7 @@ static SELF_HOSTED_MATRIX: Matrix = Matrix {
         MatrixRow {
             label: "check types",
             cells: &[
-                ("HTTP · TCP · DNS · TLS", ""),
+                ("HTTP · TCP · DNS · TLS · ping", ""),
                 ("HTTP · TCP · ICMP", ""),
                 ("HTTP GET", ""),
                 ("HTTP · TCP · UDP · ICMP · gRPC", ""),
@@ -1810,7 +1810,7 @@ static MONITORING_MATRIX: Matrix = Matrix {
         MatrixRow {
             label: "check breadth",
             cells: &[
-                ("HTTP·TCP·DNS·TLS", ""),
+                ("HTTP·TCP·DNS·TLS·ping", ""),
                 ("40+ types", "yes"),
                 ("HTTP·TCP·DNS", ""),
                 ("25+ types", "yes"),
@@ -1821,7 +1821,7 @@ static MONITORING_MATRIX: Matrix = Matrix {
         MatrixRow {
             label: "ping / ICMP",
             cells: &[
-                ("no", "no"),
+                ("yes", "yes"),
                 ("yes", "yes"),
                 ("no", "no"),
                 ("yes", "yes"),
@@ -1995,11 +1995,11 @@ static UPTIME_KUMA_MATRIX: Matrix = Matrix {
         },
         MatrixRow {
             label: "check types",
-            cells: &[("HTTP · TCP · DNS · TLS", ""), ("40+ types", "yes")],
+            cells: &[("HTTP · TCP · DNS · TLS · ping", ""), ("40+ types", "yes")],
         },
         MatrixRow {
             label: "ping / ICMP",
-            cells: &[("no", "no"), ("yes", "yes")],
+            cells: &[("yes", "yes"), ("yes", "yes")],
         },
         MatrixRow {
             label: "push / heartbeat monitor",
@@ -2048,7 +2048,7 @@ static UPTIME_KUMA_MATRIX: Matrix = Matrix {
     ],
     notes: &[
         "Uptime Kuma is single-user with one shared login and is driven over an internal socket API rather than a REST or Terraform surface; its status pages offer an RSS feed, not email or webhook subscribers.",
-        "Its ~95 integrations include the Apprise meta-provider and many SMS gateways; Uptimepage's 14 are native. Uptimepage has no ping/ICMP or passive heartbeat monitor yet.",
+        "Its ~95 integrations include the Apprise meta-provider and many SMS gateways; Uptimepage's 14 are native. Uptimepage has no passive heartbeat monitor yet.",
         "Verified against Uptime Kuma 2.4.0 source in July 2026. Open-source projects move quickly, so check the current source before you decide.",
     ],
 };
@@ -2065,11 +2065,11 @@ static ONEUPTIME_MATRIX: Matrix = Matrix {
         },
         MatrixRow {
             label: "check types",
-            cells: &[("HTTP · TCP · DNS · TLS", ""), ("25+ types", "yes")],
+            cells: &[("HTTP · TCP · DNS · TLS · ping", ""), ("25+ types", "yes")],
         },
         MatrixRow {
             label: "ping / ICMP",
-            cells: &[("no", "no"), ("yes", "yes")],
+            cells: &[("yes", "yes"), ("yes", "yes")],
         },
         MatrixRow {
             label: "push / heartbeat monitor",
@@ -2118,7 +2118,7 @@ static ONEUPTIME_MATRIX: Matrix = Matrix {
     ],
     notes: &[
         "OneUptime is a broad incident platform (monitoring, status pages, on-call, logs and tracing) that runs as 6-14 services with Postgres, ClickHouse and Redis; Uptimepage is a single binary with Postgres and ClickHouse.",
-        "OneUptime adds ping/ICMP and heartbeat monitors and more check types, which Uptimepage does not have yet; Uptimepage runs a tighter footprint and a faster self-hosted interval.",
+        "OneUptime adds heartbeat monitors and more check types, which Uptimepage does not have yet; Uptimepage runs a tighter footprint and a faster self-hosted interval.",
         "Verified against OneUptime 11.0.12 source in July 2026. Fast-moving project, so check the current source before you decide.",
     ],
 };
@@ -2139,13 +2139,13 @@ static UPTIMEROBOT_MATRIX: Matrix = Matrix {
         MatrixRow {
             label: "check types",
             cells: &[
-                ("HTTP · TCP · DNS · TLS", ""),
+                ("HTTP · TCP · DNS · TLS · ping", ""),
                 ("HTTP · TCP · DNS · UDP · keyword", ""),
             ],
         },
         MatrixRow {
             label: "ping / ICMP",
-            cells: &[("no", "no"), ("yes", "yes")],
+            cells: &[("yes", "yes"), ("yes", "yes")],
         },
         MatrixRow {
             label: "push / heartbeat monitor",
@@ -2186,7 +2186,7 @@ static UPTIMEROBOT_MATRIX: Matrix = Matrix {
     ],
     notes: &[
         "UptimeRobot's free plan allows 50 monitors but at a 5-minute interval with no login seats for teammates; 60-second checks, more status pages and team seats start on paid plans.",
-        "UptimeRobot is a hosted service, not open-source or self-hostable, and exposes a REST API but no Terraform provider. Uptimepage adds a Terraform provider and MCP server but has no ping/ICMP or heartbeat monitor yet.",
+        "UptimeRobot is a hosted service, not open-source or self-hostable, and exposes a REST API but no Terraform provider. Uptimepage adds a Terraform provider and MCP server but has no heartbeat monitor yet.",
         "Verified against uptimerobot.com/pricing in July 2026. SaaS plans change, so check their current pricing before you decide.",
     ],
 };
@@ -2204,13 +2204,13 @@ static BETTER_STACK_MATRIX: Matrix = Matrix {
         MatrixRow {
             label: "check types",
             cells: &[
-                ("HTTP · TCP · DNS · TLS", ""),
+                ("HTTP · TCP · DNS · TLS · ping", ""),
                 ("HTTP · TCP · UDP · DNS · mail · ping", "yes"),
             ],
         },
         MatrixRow {
             label: "ping / ICMP",
-            cells: &[("no", "no"), ("yes", "yes")],
+            cells: &[("yes", "yes"), ("yes", "yes")],
         },
         MatrixRow {
             label: "push / heartbeat monitor",
@@ -2258,7 +2258,7 @@ static BETTER_STACK_MATRIX: Matrix = Matrix {
     ],
     notes: &[
         "Better Stack's free plan covers 10 monitors at 30-second checks with 1 status page; paid plans start around $29/month. It is a hosted service, not open-source or self-hostable.",
-        "Better Stack has ping/ICMP, 1-second heartbeat monitors and broader check types that Uptimepage does not have yet. Uptimepage is AGPL and self-hostable, adds an MCP server, and starts free with no card.",
+        "Better Stack has 1-second heartbeat monitors and broader check types that Uptimepage does not have yet. Uptimepage is AGPL and self-hostable, adds an MCP server, and starts free with no card.",
         "Verified against betterstack.com/pricing in July 2026. SaaS plans change, so check their current pricing before you decide.",
     ],
 };
@@ -2276,13 +2276,13 @@ static PINGDOM_MATRIX: Matrix = Matrix {
         MatrixRow {
             label: "check types",
             cells: &[
-                ("HTTP · TCP · DNS · TLS", ""),
+                ("HTTP · TCP · DNS · TLS · ping", ""),
                 ("HTTP · TCP · UDP · DNS · ping · mail", "yes"),
             ],
         },
         MatrixRow {
             label: "ping / ICMP",
-            cells: &[("no", "no"), ("yes", "yes")],
+            cells: &[("yes", "yes"), ("yes", "yes")],
         },
         MatrixRow {
             label: "transaction / real-user monitoring",
@@ -2337,7 +2337,7 @@ static STATUSPAGE_MATRIX: Matrix = Matrix {
         },
         MatrixRow {
             label: "check types",
-            cells: &[("HTTP · TCP · DNS · TLS", ""), ("none native", "no")],
+            cells: &[("HTTP · TCP · DNS · TLS · ping", ""), ("none native", "no")],
         },
         MatrixRow {
             label: "auto incidents from checks",

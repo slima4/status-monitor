@@ -86,7 +86,7 @@ const FAQS: &[(&str, &str)] = &[
     ),
     (
         "What kinds of monitors are supported?",
-        "HTTP/HTTPS, TCP port, DNS lookup. Per-monitor headers, basic-auth, \
+        "HTTP/HTTPS, TCP port, DNS lookup, ICMP ping. Per-monitor headers, basic-auth, \
          bearer tokens, expected status code, content-match, TLS verification, \
          follow-redirects rules.",
     ),

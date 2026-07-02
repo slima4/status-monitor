@@ -42,7 +42,10 @@ The source is AGPL to self-host with no limits.";
 /// Machine-readable product facts. Authored single source for the
 /// llms files — keep terse, factual, and current.
 const LLMS_FACTS: &[(&str, &str)] = &[
-    ("Check types", "HTTP/HTTPS, TCP, DNS, TLS certificate"),
+    (
+        "Check types",
+        "HTTP/HTTPS, TCP, DNS, TLS certificate, ICMP ping",
+    ),
     ("Check interval", "every 60 seconds"),
     (
         "Check regions",
