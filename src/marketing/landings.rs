@@ -1983,12 +1983,425 @@ static MONITORING_MATRIX: Matrix = Matrix {
     ],
 };
 
+/// Head-to-head facts for `/vs/uptime-kuma`, verified in July 2026 against
+/// Uptime Kuma 2.4.0 source. Cells are `(text, tone)`; column one is Uptimepage.
+static UPTIME_KUMA_MATRIX: Matrix = Matrix {
+    heading: "how they compare",
+    columns: &["Uptimepage", "Uptime Kuma"],
+    rows: &[
+        MatrixRow {
+            label: "fastest check interval",
+            cells: &[("60s hosted · 10s self", "yes"), ("1s", "yes")],
+        },
+        MatrixRow {
+            label: "check types",
+            cells: &[("HTTP · TCP · DNS · TLS", ""), ("40+ types", "yes")],
+        },
+        MatrixRow {
+            label: "ping / ICMP",
+            cells: &[("no", "no"), ("yes", "yes")],
+        },
+        MatrixRow {
+            label: "push / heartbeat monitor",
+            cells: &[("no", "no"), ("yes", "yes")],
+        },
+        MatrixRow {
+            label: "TLS + domain expiry",
+            cells: &[("yes", "yes"), ("yes", "")],
+        },
+        MatrixRow {
+            label: "branded status page",
+            cells: &[("yes", "yes"), ("basic", "part")],
+        },
+        MatrixRow {
+            label: "status-page subscribers",
+            cells: &[("email + webhook", "yes"), ("RSS only", "part")],
+        },
+        MatrixRow {
+            label: "auto incidents from checks",
+            cells: &[("yes", "yes"), ("manual", "no")],
+        },
+        MatrixRow {
+            label: "multi-region probes",
+            cells: &[("yes", "yes"), ("add-on", "part")],
+        },
+        MatrixRow {
+            label: "alert channels",
+            cells: &[("14 native", ""), ("~95", "yes")],
+        },
+        MatrixRow {
+            label: "config-as-code",
+            cells: &[("Terraform · REST · MCP", "yes"), ("socket API", "no")],
+        },
+        MatrixRow {
+            label: "teams / RBAC",
+            cells: &[("orgs + roles", "yes"), ("single user", "no")],
+        },
+        MatrixRow {
+            label: "how you run it",
+            cells: &[("hosted or self-host", "yes"), ("1 container", "yes")],
+        },
+        MatrixRow {
+            label: "license",
+            cells: &[("AGPL-3.0", ""), ("MIT", "")],
+        },
+    ],
+    notes: &[
+        "Uptime Kuma is single-user with one shared login and is driven over an internal socket API rather than a REST or Terraform surface; its status pages offer an RSS feed, not email or webhook subscribers.",
+        "Its ~95 integrations include the Apprise meta-provider and many SMS gateways; Uptimepage's 14 are native. Uptimepage has no ping/ICMP or passive heartbeat monitor yet.",
+        "Verified against Uptime Kuma 2.4.0 source in July 2026. Open-source projects move quickly, so check the current source before you decide.",
+    ],
+};
+
+/// Head-to-head facts for `/vs/oneuptime`, verified in July 2026 against
+/// OneUptime 11.0.12 source. Cells are `(text, tone)`; column one is Uptimepage.
+static ONEUPTIME_MATRIX: Matrix = Matrix {
+    heading: "how they compare",
+    columns: &["Uptimepage", "OneUptime"],
+    rows: &[
+        MatrixRow {
+            label: "fastest check interval",
+            cells: &[("60s hosted · 10s self", "yes"), ("60s", "")],
+        },
+        MatrixRow {
+            label: "check types",
+            cells: &[("HTTP · TCP · DNS · TLS", ""), ("25+ types", "yes")],
+        },
+        MatrixRow {
+            label: "ping / ICMP",
+            cells: &[("no", "no"), ("yes", "yes")],
+        },
+        MatrixRow {
+            label: "push / heartbeat monitor",
+            cells: &[("no", "no"), ("yes", "yes")],
+        },
+        MatrixRow {
+            label: "TLS + domain expiry",
+            cells: &[("yes", "yes"), ("yes", "")],
+        },
+        MatrixRow {
+            label: "branded status page",
+            cells: &[("yes", "yes"), ("yes", "")],
+        },
+        MatrixRow {
+            label: "status-page subscribers",
+            cells: &[("email + webhook", "yes"), ("email · SMS · Slack", "yes")],
+        },
+        MatrixRow {
+            label: "auto incidents from checks",
+            cells: &[("yes", "yes"), ("yes", "")],
+        },
+        MatrixRow {
+            label: "on-call & escalation",
+            cells: &[("yes", "yes"), ("yes", "yes")],
+        },
+        MatrixRow {
+            label: "multi-region probes",
+            cells: &[("yes", "yes"), ("yes", "")],
+        },
+        MatrixRow {
+            label: "config-as-code",
+            cells: &[("Terraform · REST · MCP", "yes"), ("Terraform · CLI", "")],
+        },
+        MatrixRow {
+            label: "tech stack",
+            cells: &[("Rust", ""), ("TypeScript", "")],
+        },
+        MatrixRow {
+            label: "deploy footprint",
+            cells: &[("1 binary + 2 DBs", "yes"), ("6-14 services", "no")],
+        },
+        MatrixRow {
+            label: "license",
+            cells: &[("AGPL-3.0", ""), ("Apache-2.0", "")],
+        },
+    ],
+    notes: &[
+        "OneUptime is a broad incident platform (monitoring, status pages, on-call, logs and tracing) that runs as 6-14 services with Postgres, ClickHouse and Redis; Uptimepage is a single binary with Postgres and ClickHouse.",
+        "OneUptime adds ping/ICMP and heartbeat monitors and more check types, which Uptimepage does not have yet; Uptimepage runs a tighter footprint and a faster self-hosted interval.",
+        "Verified against OneUptime 11.0.12 source in July 2026. Fast-moving project, so check the current source before you decide.",
+    ],
+};
+
+/// Head-to-head facts for `/vs/uptimerobot`, verified against
+/// uptimerobot.com/pricing in July 2026. Column one is Uptimepage.
+static UPTIMEROBOT_MATRIX: Matrix = Matrix {
+    heading: "how they compare",
+    columns: &["Uptimepage", "UptimeRobot"],
+    rows: &[
+        MatrixRow {
+            label: "fastest check interval",
+            cells: &[
+                ("60s hosted · 10s self", "yes"),
+                ("5 min free · 60s paid", "part"),
+            ],
+        },
+        MatrixRow {
+            label: "check types",
+            cells: &[
+                ("HTTP · TCP · DNS · TLS", ""),
+                ("HTTP · TCP · DNS · UDP · keyword", ""),
+            ],
+        },
+        MatrixRow {
+            label: "ping / ICMP",
+            cells: &[("no", "no"), ("yes", "yes")],
+        },
+        MatrixRow {
+            label: "push / heartbeat monitor",
+            cells: &[("no", "no"), ("yes", "yes")],
+        },
+        MatrixRow {
+            label: "TLS + domain expiry",
+            cells: &[("yes", "yes"), ("yes", "")],
+        },
+        MatrixRow {
+            label: "branded status page",
+            cells: &[("yes", "yes"), ("yes", "")],
+        },
+        MatrixRow {
+            label: "status-page subscribers",
+            cells: &[("email + webhook", "yes"), ("email", "part")],
+        },
+        MatrixRow {
+            label: "multi-region probes",
+            cells: &[("yes", "yes"), ("4 regions", "")],
+        },
+        MatrixRow {
+            label: "config-as-code",
+            cells: &[("Terraform · REST · MCP", "yes"), ("REST API", "part")],
+        },
+        MatrixRow {
+            label: "self-host (open source)",
+            cells: &[("yes · AGPL", "yes"), ("no", "no")],
+        },
+        MatrixRow {
+            label: "free tier",
+            cells: &[("free, no card", "yes"), ("50 monitors", "yes")],
+        },
+        MatrixRow {
+            label: "price to start",
+            cells: &[("$0", "yes"), ("paid from $7/mo", "")],
+        },
+    ],
+    notes: &[
+        "UptimeRobot's free plan allows 50 monitors but at a 5-minute interval with no login seats for teammates; 60-second checks, more status pages and team seats start on paid plans.",
+        "UptimeRobot is a hosted service, not open-source or self-hostable, and exposes a REST API but no Terraform provider. Uptimepage adds a Terraform provider and MCP server but has no ping/ICMP or heartbeat monitor yet.",
+        "Verified against uptimerobot.com/pricing in July 2026. SaaS plans change, so check their current pricing before you decide.",
+    ],
+};
+
+/// Head-to-head facts for `/vs/better-stack`, verified against
+/// betterstack.com/pricing in July 2026. Column one is Uptimepage.
+static BETTER_STACK_MATRIX: Matrix = Matrix {
+    heading: "how they compare",
+    columns: &["Uptimepage", "Better Stack"],
+    rows: &[
+        MatrixRow {
+            label: "fastest check interval",
+            cells: &[("60s hosted · 10s self", "yes"), ("30s", "yes")],
+        },
+        MatrixRow {
+            label: "check types",
+            cells: &[
+                ("HTTP · TCP · DNS · TLS", ""),
+                ("HTTP · TCP · UDP · DNS · mail · ping", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "ping / ICMP",
+            cells: &[("no", "no"), ("yes", "yes")],
+        },
+        MatrixRow {
+            label: "push / heartbeat monitor",
+            cells: &[("no", "no"), ("1s heartbeat", "yes")],
+        },
+        MatrixRow {
+            label: "TLS + domain expiry",
+            cells: &[("yes", "yes"), ("yes", "")],
+        },
+        MatrixRow {
+            label: "branded status page",
+            cells: &[("yes", "yes"), ("white-label", "yes")],
+        },
+        MatrixRow {
+            label: "status-page subscribers",
+            cells: &[("email + webhook", "yes"), ("1,000 included", "yes")],
+        },
+        MatrixRow {
+            label: "on-call & escalation",
+            cells: &[("yes", "yes"), ("yes", "yes")],
+        },
+        MatrixRow {
+            label: "multi-region probes",
+            cells: &[("yes", "yes"), ("4 regions", "")],
+        },
+        MatrixRow {
+            label: "config-as-code",
+            cells: &[
+                ("Terraform · REST · MCP", "yes"),
+                ("Terraform · REST", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "teams / RBAC + SSO",
+            cells: &[("orgs + roles", "yes"), ("RBAC + SSO", "yes")],
+        },
+        MatrixRow {
+            label: "self-host (open source)",
+            cells: &[("yes · AGPL", "yes"), ("no", "no")],
+        },
+        MatrixRow {
+            label: "price to start",
+            cells: &[("free, no card", "yes"), ("free 10 · paid $29/mo", "")],
+        },
+    ],
+    notes: &[
+        "Better Stack's free plan covers 10 monitors at 30-second checks with 1 status page; paid plans start around $29/month. It is a hosted service, not open-source or self-hostable.",
+        "Better Stack has ping/ICMP, 1-second heartbeat monitors and broader check types that Uptimepage does not have yet. Uptimepage is AGPL and self-hostable, adds an MCP server, and starts free with no card.",
+        "Verified against betterstack.com/pricing in July 2026. SaaS plans change, so check their current pricing before you decide.",
+    ],
+};
+
+/// Head-to-head facts for `/vs/pingdom`, verified against pingdom.com and its
+/// docs in July 2026. Column one is Uptimepage.
+static PINGDOM_MATRIX: Matrix = Matrix {
+    heading: "how they compare",
+    columns: &["Uptimepage", "Pingdom"],
+    rows: &[
+        MatrixRow {
+            label: "fastest check interval",
+            cells: &[("60s hosted · 10s self", "yes"), ("60s", "")],
+        },
+        MatrixRow {
+            label: "check types",
+            cells: &[
+                ("HTTP · TCP · DNS · TLS", ""),
+                ("HTTP · TCP · UDP · DNS · ping · mail", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "ping / ICMP",
+            cells: &[("no", "no"), ("yes", "yes")],
+        },
+        MatrixRow {
+            label: "transaction / real-user monitoring",
+            cells: &[("no", "no"), ("yes", "yes")],
+        },
+        MatrixRow {
+            label: "TLS + domain expiry",
+            cells: &[("yes", "yes"), ("yes", "")],
+        },
+        MatrixRow {
+            label: "branded status page",
+            cells: &[("yes", "yes"), ("yes", "")],
+        },
+        MatrixRow {
+            label: "auto incidents from checks",
+            cells: &[("yes", "yes"), ("alerts", "part")],
+        },
+        MatrixRow {
+            label: "check locations",
+            cells: &[("yes", "yes"), ("100+ locations", "yes")],
+        },
+        MatrixRow {
+            label: "config-as-code",
+            cells: &[("Terraform · REST · MCP", "yes"), ("REST API", "part")],
+        },
+        MatrixRow {
+            label: "self-host (open source)",
+            cells: &[("yes · AGPL", "yes"), ("no", "no")],
+        },
+        MatrixRow {
+            label: "free tier",
+            cells: &[("free, no card", "yes"), ("trial only", "no")],
+        },
+    ],
+    notes: &[
+        "Pingdom (by SolarWinds) has no free tier, only a 30-day trial; Uptimepage starts free with no card. Pingdom is a hosted service, not open-source or self-hostable.",
+        "Pingdom checks from 100+ locations at a 1-minute minimum interval and adds transaction and real-user monitoring that Uptimepage does not have. Uptimepage pairs uptime with a status page in one binary, is AGPL, and adds a Terraform provider and MCP server.",
+        "Verified against pingdom.com and its docs in July 2026. SaaS plans change, so check their current pricing before you decide.",
+    ],
+};
+
+/// Head-to-head facts for `/vs/statuspage`, verified against
+/// atlassian.com/software/statuspage/pricing in July 2026. Column one is
+/// Uptimepage. Statuspage does not monitor — it is a status page only.
+static STATUSPAGE_MATRIX: Matrix = Matrix {
+    heading: "how they compare",
+    columns: &["Uptimepage", "Statuspage"],
+    rows: &[
+        MatrixRow {
+            label: "built-in uptime monitoring",
+            cells: &[("yes", "yes"), ("no — needs 3rd-party", "no")],
+        },
+        MatrixRow {
+            label: "check types",
+            cells: &[("HTTP · TCP · DNS · TLS", ""), ("none native", "no")],
+        },
+        MatrixRow {
+            label: "auto incidents from checks",
+            cells: &[("yes", "yes"), ("manual / integration", "part")],
+        },
+        MatrixRow {
+            label: "branded status page",
+            cells: &[("yes", "yes"), ("yes", "yes")],
+        },
+        MatrixRow {
+            label: "custom domain",
+            cells: &[("yes", "yes"), ("paid tiers", "")],
+        },
+        MatrixRow {
+            label: "status-page subscribers",
+            cells: &[
+                ("email + webhook", "yes"),
+                ("email · SMS · Slack · webhook", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "subscribers on free",
+            cells: &[("included", "yes"), ("100", "part")],
+        },
+        MatrixRow {
+            label: "scheduled maintenance",
+            cells: &[("yes", "yes"), ("yes", "")],
+        },
+        MatrixRow {
+            label: "config-as-code",
+            cells: &[("Terraform · REST · MCP", "yes"), ("REST API", "part")],
+        },
+        MatrixRow {
+            label: "teams / RBAC",
+            cells: &[("orgs + roles", "yes"), ("RBAC on Business+", "")],
+        },
+        MatrixRow {
+            label: "self-host (open source)",
+            cells: &[("yes · AGPL", "yes"), ("no", "no")],
+        },
+        MatrixRow {
+            label: "price to start",
+            cells: &[("free, no card", "yes"), ("free · paid $29/mo", "")],
+        },
+    ],
+    notes: &[
+        "Atlassian Statuspage does not run its own checks — it is a status page only, fed by external monitors (Pingdom, Datadog, New Relic, Opsgenie). Uptimepage does the monitoring and the page in one.",
+        "Statuspage's free plan includes 100 subscribers; the cheapest paid plan (Hobby) is $29/month with 250 subscribers and 5 team members. It is a hosted Atlassian product, not open-source or self-hostable.",
+        "Verified against atlassian.com/software/statuspage/pricing in July 2026. Plans change, so check their current pricing before you decide.",
+    ],
+};
+
 /// The comparison matrices, looked up by path so they stay off every other
 /// `Landing`. Mirrors [`page_faqs`].
 fn page_matrix(path: &str) -> Option<&'static Matrix> {
     match path {
         "/vs/self-hosted-status-pages" => Some(&SELF_HOSTED_MATRIX),
         "/vs/self-hosted-monitoring" => Some(&MONITORING_MATRIX),
+        "/vs/uptime-kuma" => Some(&UPTIME_KUMA_MATRIX),
+        "/vs/oneuptime" => Some(&ONEUPTIME_MATRIX),
+        "/vs/uptimerobot" => Some(&UPTIMEROBOT_MATRIX),
+        "/vs/better-stack" => Some(&BETTER_STACK_MATRIX),
+        "/vs/pingdom" => Some(&PINGDOM_MATRIX),
+        "/vs/statuspage" => Some(&STATUSPAGE_MATRIX),
         _ => None,
     }
 }
