@@ -7,8 +7,9 @@
 {% block content %}
 <article class="mx-auto max-w-2xl space-y-10">
     <header class="space-y-4 text-center">
-        <p class="mk-blog-row__date">{{ date }}</p>
+        <p class="mk-blog-row__date">{{ date }}{% if let Some(u) = updated %} · Updated {{ u }}{% endif %}</p>
         <h1 class="mk-display mk-blog-title">{{ title }}</h1>
+        <p class="mk-byline">By <a href="{{ author.url }}" rel="author noopener" target="_blank">{{ author.name }}</a></p>
         {% if !tags.is_empty() %}
         <ul class="flex flex-wrap justify-center gap-1.5">
             {% for t in tags %}
@@ -20,6 +21,17 @@
     <div class="mk-article">
         {{ body_html|safe }}
     </div>
+    <footer class="mk-author">
+        <img class="mk-author__img" src="{{ author.image|asset }}" width="72" height="72" alt="{{ author.name }}" loading="lazy">
+        <div class="mk-author__body">
+            <p class="mk-author__name">{{ author.name }}</p>
+            <p class="mk-author__role">{{ author.role }}</p>
+            <p class="mk-author__bio">{{ author.bio }}</p>
+            <p class="mk-author__links">
+                {% for link in author.same_as %}<a href="{{ link.1 }}" rel="me noopener" target="_blank">{{ link.0 }}</a>{% endfor %}
+            </p>
+        </div>
+    </footer>
     <p class="mk-rule-top text-center pt-4">
         <a href="/blog" class="mk-mono text-xs mk-quiet mk-backlink">← Back to all notes</a>
     </p>

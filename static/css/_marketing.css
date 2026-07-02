@@ -780,6 +780,34 @@ html:has(.marketing-shell) {
     border-radius: 2px;
 }
 
+.mk-byline {
+    font-family: var(--mk-font-mono);
+    font-size: 0.75rem;
+    color: var(--mk-quiet);
+    letter-spacing: 0.04em;
+}
+.mk-byline a { color: var(--mk-ink-soft); text-decoration: none; border-bottom: 1px solid var(--mk-rule); }
+.mk-byline a:hover { color: var(--mk-ok); }
+
+/* Author bio card */
+.mk-author {
+    display: flex;
+    gap: 1rem;
+    align-items: flex-start;
+    padding: 1.25rem;
+    border: 1px solid var(--mk-rule);
+    border-radius: 2px;
+    background: var(--mk-surface);
+    text-align: left;
+}
+.mk-author__img { width: 4.5rem; height: 4.5rem; border-radius: 50%; object-fit: cover; flex-shrink: 0; }
+.mk-author__name { font-family: var(--mk-font-mono); font-weight: 600; color: var(--mk-ink); font-size: 0.9375rem; }
+.mk-author__role { font-family: var(--mk-font-mono); font-size: 0.6875rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--mk-quiet); margin-top: 0.1rem; }
+.mk-author__bio { color: var(--mk-ink-soft); font-size: 0.875rem; line-height: 1.55; margin-top: 0.6rem; }
+.mk-author__links { display: flex; gap: 0.9rem; margin-top: 0.7rem; font-family: var(--mk-font-mono); font-size: 0.75rem; }
+.mk-author__links a { color: var(--mk-ok); text-decoration: none; }
+.mk-author__links a:hover { text-decoration: underline; }
+
 /* Long-form article (blog post + legal) */
 .mk-article {
     font-family: var(--mk-font-body);

@@ -21,7 +21,7 @@ use axum::response::Response;
 use include_dir::{Dir, include_dir};
 use serde::Deserialize;
 
-use super::config::{BRAND, MarketingCfg};
+use super::config::{AUTHOR, Author, BRAND, MarketingCfg};
 use super::pages::{CachedRender, cached_render, not_found, serve_cached};
 use super::seo::{JsonLd, OpenGraph, json_ld_blog_posting};
 use crate::web::filters;
@@ -38,6 +38,7 @@ pub struct Post {
     pub slug: String,
     pub title: String,
     pub date: String,
+    pub updated: Option<String>,
     pub excerpt: String,
     pub tags: Vec<String>,
     pub draft: bool,
@@ -50,6 +51,7 @@ pub struct Post {
 struct FrontMatter {
     title: String,
     date: String,
+    updated: Option<String>,
     slug: Option<String>,
     #[serde(default)]
     excerpt: String,
@@ -132,6 +134,7 @@ fn parse_post(raw: &str, stem: &str) -> anyhow::Result<Post> {
         slug: fm.slug.unwrap_or_else(|| stem.to_string()),
         title: fm.title,
         date: fm.date,
+        updated: fm.updated,
         excerpt: fm.excerpt,
         tags: fm.tags,
         draft: fm.draft,
@@ -193,6 +196,8 @@ struct BlogPostPage {
     json_ld: JsonLd,
     title: String,
     date: String,
+    updated: Option<String>,
+    author: &'static Author,
     tags: Vec<String>,
     body_html: String,
     version: &'static str,
@@ -231,12 +236,15 @@ fn render_post(cfg: &MarketingCfg, post: &Post) -> CachedRender {
         &post.excerpt,
         &post.slug,
     );
+    let date_modified = post.updated.as_deref().unwrap_or(&post.date);
     let json_ld = json_ld_blog_posting(
         &cfg.canonical_origin,
         &post.title,
         &post.excerpt,
         &post.slug,
         &post.date,
+        date_modified,
+        &og.image,
     );
     let body = BlogPostPage {
         canonical_url,
@@ -245,6 +253,8 @@ fn render_post(cfg: &MarketingCfg, post: &Post) -> CachedRender {
         json_ld,
         title: post.title.clone(),
         date: post.date.clone(),
+        updated: post.updated.clone().filter(|u| u != &post.date),
+        author: &AUTHOR,
         tags: post.tags.clone(),
         body_html: post.body_html.clone(),
         version: env!("CARGO_PKG_VERSION"),

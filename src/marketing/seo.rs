@@ -19,7 +19,7 @@ use serde::Serialize;
 
 use super::blog::list_published;
 use super::config::{
-    BRAND, MCP_URL, META_DESCRIPTION, MarketingCfg, SOURCE_URL, TAGLINE, TERRAFORM_URL,
+    AUTHOR, BRAND, MCP_URL, META_DESCRIPTION, MarketingCfg, SOURCE_URL, TAGLINE, TERRAFORM_URL,
 };
 use super::landings;
 use super::legal;
@@ -138,7 +138,7 @@ pub fn json_ld_organization(canonical_origin: &str) -> JsonLd {
         "@type": "Organization",
         "name": BRAND,
         "url": canonical_origin,
-        "logo": absolute_asset(canonical_origin, "/static/img/favicon.svg"),
+        "logo": absolute_asset(canonical_origin, "/static/img/favicon-512.png"),
         "sameAs": ORG_SAME_AS,
     });
     JsonLd(payload.to_string())
@@ -230,23 +230,48 @@ pub fn json_ld_blog_posting(
     title: &str,
     excerpt: &str,
     slug: &str,
-    date_iso: &str,
+    date_published: &str,
+    date_modified: &str,
+    image: &str,
 ) -> JsonLd {
     let url = format!("{canonical_origin}/blog/{slug}");
+    let same_as: Vec<&str> = AUTHOR.same_as.iter().map(|(_, u)| *u).collect();
     let payload = serde_json::json!({
         "@context": "https://schema.org",
         "@type": "BlogPosting",
         "headline": title,
         "description": excerpt,
-        "datePublished": date_iso,
+        "image": image,
+        "datePublished": date_published,
+        "dateModified": date_modified,
         "mainEntityOfPage": url,
         "author": {
-            "@type": "Organization",
-            "name": BRAND,
-            "url": canonical_origin,
+            "@type": "Person",
+            "name": AUTHOR.name,
+            "url": AUTHOR.url,
+            "jobTitle": AUTHOR.role,
+            "description": AUTHOR.bio,
+            "image": absolute_asset(canonical_origin, &format!("/static/{}", AUTHOR.image)),
+            "sameAs": same_as,
         },
+        "publisher": publisher(canonical_origin),
     });
     JsonLd(payload.to_string())
+}
+
+/// Logo is a raster: Google's logo guidance needs pixel dimensions an SVG lacks.
+fn publisher(canonical_origin: &str) -> serde_json::Value {
+    serde_json::json!({
+        "@type": "Organization",
+        "name": BRAND,
+        "url": canonical_origin,
+        "logo": {
+            "@type": "ImageObject",
+            "url": absolute_asset(canonical_origin, "/static/img/favicon-512.png"),
+            "width": 512,
+            "height": 512,
+        },
+    })
 }
 
 static ROBOTS_CACHED: OnceLock<Bytes> = OnceLock::new();

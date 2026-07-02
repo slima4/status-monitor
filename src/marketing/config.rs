@@ -23,6 +23,36 @@ pub const MCP_URL: &str = "https://mcp.uptimepage.dev/mcp";
 pub const TERRAFORM_URL: &str = "https://registry.terraform.io/providers/uptimepage/uptimepage";
 pub const SOURCE_URL: &str = "https://github.com/uptimepage/uptimepage";
 
+/// Named blog author — a verifiable Person for search-engine E-E-A-T.
+#[derive(Debug, Clone)]
+pub struct Author {
+    pub name: &'static str,
+    pub role: &'static str,
+    pub bio: &'static str,
+    pub url: &'static str,
+    pub image: &'static str,
+    pub same_as: &'static [(&'static str, &'static str)],
+}
+
+pub const AUTHOR: Author = Author {
+    name: "Artem Senenko",
+    role: "Founder & Software Engineer, Uptimepage",
+    bio: "Software engineer with 20+ years building and running production \
+          systems: microservice architecture on Kubernetes, cloud \
+          infrastructure on AWS and Terraform, and security-critical SaaS in \
+          the fintech domain.",
+    url: "https://www.linkedin.com/in/artem-senenko-b3195927/",
+    image: "img/authors/artem-senenko.jpg",
+    same_as: &[
+        (
+            "LinkedIn",
+            "https://www.linkedin.com/in/artem-senenko-b3195927/",
+        ),
+        ("GitHub", "https://github.com/slima4"),
+        ("X", "https://x.com/sl1ma4"),
+    ],
+};
+
 /// What the marketing handlers read. Mirrors the relevant fields of
 /// `crate::config::MarketingConfig` so this struct compiles untouched
 /// in the extracted service.
