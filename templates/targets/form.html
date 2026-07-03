@@ -38,7 +38,10 @@
         {% call reg::chooser_card("data-check-card", "check_type", "http", form.check_type == "http", "http", "URL / API endpoint") %}{% endcall %}
         {% call reg::chooser_card("data-check-card", "check_type", "tcp", form.check_type == "tcp", "tcp", "host : port reachable") %}{% endcall %}
         {% call reg::chooser_card("data-check-card", "check_type", "ping", form.check_type == "ping", "ping", "icmp echo reply") %}{% endcall %}
+        {# Heartbeat temporarily hidden from the picker; still shown when editing an existing one. #}
+        {% if form.check_type == "heartbeat" %}
         {% call reg::chooser_card("data-check-card", "check_type", "heartbeat", form.check_type == "heartbeat", "heartbeat", "your job pings us") %}{% endcall %}
+        {% endif %}
         {% call reg::chooser_card("data-check-card", "check_type", "dns", form.check_type == "dns", "dns", "record resolves") %}{% endcall %}
         {% call reg::chooser_card("data-check-card", "check_type", "tls_cert", form.check_type == "tls_cert", "tls cert", "expiry + chain") %}{% endcall %}
         {% call reg::chooser_card("data-check-card", "check_type", "domain_expiry", form.check_type == "domain_expiry", "domain", "registration expiry") %}{% endcall %}

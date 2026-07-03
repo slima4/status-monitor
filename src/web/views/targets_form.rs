@@ -914,15 +914,24 @@ mod tests {
         }
         .render()
         .unwrap();
+        // Heartbeat is temporarily hidden from the create picker; every other
+        // kind gets a card, and every kind (heartbeat included) keeps its panel.
+        let picker_kinds = CheckSpec::ALL_KINDS.iter().filter(|k| **k != "heartbeat");
         assert_eq!(
             html.matches("data-check-card").count(),
-            CheckSpec::ALL_KINDS.len()
+            picker_kinds.clone().count()
         );
-        for v in CheckSpec::ALL_KINDS {
+        assert!(
+            !html.contains(r#"name="check_type" value="heartbeat""#),
+            "heartbeat card must be hidden on the create form"
+        );
+        for v in picker_kinds {
             assert!(
                 html.contains(&format!(r#"value="{v}""#)),
                 "missing card for variant {v}"
             );
+        }
+        for v in CheckSpec::ALL_KINDS {
             // Each protocol panel is rendered (non-active panels are .hidden).
             assert!(
                 html.contains(&format!(r#"data-variant="{v}""#)),
@@ -1300,6 +1309,8 @@ mod tests {
         // The schedule rail and test-now are hidden for the passive kind.
         assert!(html.contains("data-schedule-section hidden"));
         assert!(html.contains(r#"name="heartbeat_period_s" type="number" min="60""#));
+        // Editing an existing heartbeat still shows its picker card.
+        assert!(html.contains(r#"name="check_type" value="heartbeat""#));
     }
 
     #[test]
