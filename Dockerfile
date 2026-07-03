@@ -18,6 +18,13 @@ ENV CARGO_TERM_COLOR=never
 # inherits it (the build context doesn't COPY .cargo/).
 RUN apk add --no-cache musl-dev pkgconfig curl bash mold
 ENV RUSTFLAGS="-Clink-arg=-fuse-ld=mold"
+# In the base so the cook and build stages share one profile; dev overrides for speed.
+ARG CARGO_PROFILE_RELEASE_LTO=fat
+ARG CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1
+ARG CARGO_PROFILE_RELEASE_OPT_LEVEL=3
+ENV CARGO_PROFILE_RELEASE_LTO=${CARGO_PROFILE_RELEASE_LTO} \
+    CARGO_PROFILE_RELEASE_CODEGEN_UNITS=${CARGO_PROFILE_RELEASE_CODEGEN_UNITS} \
+    CARGO_PROFILE_RELEASE_OPT_LEVEL=${CARGO_PROFILE_RELEASE_OPT_LEVEL}
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo install cargo-chef --locked --version ^0.1
 
