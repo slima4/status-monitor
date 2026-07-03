@@ -2,7 +2,7 @@
 title = "The mystery of the \"down\" website"
 date = "2026-06-18"
 slug = "osi-layers"
-excerpt = "\"The site is down!\" Jamie stared at the screen. But what did \"down\" really mean? A detective story through the seven layers of the network, and the one quiet failure no alarm had caught."
+excerpt = "\"The site is down!\" But what does \"down\" really mean? A detective story through the seven network layers, and the one quiet failure no alarm caught."
 tags = ["monitoring", "networking", "osi", "tls", "dns"]
 draft = false
 +++

@@ -2,7 +2,7 @@
 title = "An uptime monitor in Rust: one binary, two databases"
 date = "2026-06-30"
 slug = "building-an-uptime-monitor-in-rust"
-excerpt = "The build story behind Uptimepage: a custom hyper client that does about 130K checks a second on one core, a single-heap scheduler that stays flat in fleet size, and ClickHouse rollups that keep dashboards off the raw rows."
+excerpt = "The Rust build behind Uptimepage: a custom hyper client doing ~130K checks a second on one core, a single-heap scheduler, and ClickHouse rollups."
 tags = ["rust", "clickhouse", "monitoring", "devops"]
 draft = false
 +++

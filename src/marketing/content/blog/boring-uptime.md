@@ -2,7 +2,7 @@
 title = "Why your uptime monitor should be boring"
 date = "2026-05-20"
 slug = "boring-uptime"
-excerpt = "A monitor that surprises you is doing the wrong job. Here's what changes when you treat the watchdog like a smoke detector: cheap, dumb, and unmissable when it matters."
+excerpt = "A monitor that surprises you is doing the wrong job. What changes when you treat the watchdog like a smoke detector: cheap, dumb, unmissable when it matters."
 tags = ["monitoring", "incidents", "status-pages", "on-call"]
 draft = false
 +++

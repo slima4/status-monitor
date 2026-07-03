@@ -2,7 +2,7 @@
 title = "The night Emma stopped opening dashboards"
 date = "2026-06-18"
 slug = "ask-dont-click"
-excerpt = "An alert at 2 a.m., and an on-call engineer who never opened a single tab. A short story about asking your monitoring questions instead of clicking through it, and why that changes the worst hour of the night."
+excerpt = "A 2 a.m. alert, and an on-call engineer who never opened a tab. A short story about asking your monitoring questions instead of clicking through it."
 tags = ["mcp", "ai", "monitoring", "on-call"]
 draft = false
 +++
