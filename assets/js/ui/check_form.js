@@ -43,6 +43,18 @@
         if (def) def.checked = true;
     }
 
+    // Heartbeat is passive: no test-now, no cadence to pick (fixed floor), no
+    // probe regions.
+    function applyPassiveKind(kind) {
+        const passive = kind === "heartbeat";
+        const schedule = form.querySelector("[data-schedule-section]");
+        if (schedule) schedule.hidden = passive;
+        const testBtn = form.querySelector("[data-test-now]");
+        if (testBtn) testBtn.hidden = passive;
+        const regions = document.querySelector("[data-monitor-regions]");
+        if (regions) regions.hidden = passive;
+    }
+
     form.addEventListener("change", (evt) => {
         if (evt.target.name === "interval_s") {
             const rail = evt.target.closest("[data-interval-rail]");
@@ -55,10 +67,12 @@
             el.classList.toggle("hidden", el.dataset.variant !== want);
         });
         applyKindIntervalDefaults(want);
+        applyPassiveKind(want);
     });
 
     const initialKind = form.querySelector("input[name='check_type']:checked")?.value || "http";
     applyKindIntervalDefaults(initialKind);
+    applyPassiveKind(initialKind);
 
     // Expected-status quick presets: a segmented rail that fills the text
     // field (the source of truth). A class preset writes its range; "custom"
@@ -296,9 +310,9 @@
                 const parts = form.dataset.action.split("/");
                 id = parts[parts.length - 1];
             }
-            // Apply the chosen regions (best-effort; on create the server
-            // already seeded default coverage if this fails).
-            if (regionRoot && id) {
+            // Apply the chosen regions (best-effort; the server seeded default
+            // coverage on create). Skipped for heartbeats, which the server rejects.
+            if (regionRoot && id && currentCheckType() !== "heartbeat") {
                 const regions = [...regionRoot.querySelectorAll("[data-region-checkbox]:checked")]
                     .map((c) => c.value);
                 if (regions.length) {
@@ -388,6 +402,23 @@
                 },
             };
         }
+        if (checkType === "heartbeat") {
+            const period = parseInt(data.get("heartbeat_period_s"), 10);
+            if (!Number.isInteger(period) || period < 60 || period > 2592000) {
+                return { error: "Heartbeat period must be between 60 seconds and 30 days.", field: "check.period" };
+            }
+            const grace = parseInt(data.get("heartbeat_grace_s"), 10) || 0;
+            if (grace < 0 || grace > 2592000) {
+                return { error: "Grace must be between 0 and 30 days.", field: "check.grace" };
+            }
+            return {
+                check: {
+                    type: "heartbeat",
+                    period: period * 1000,
+                    grace: grace * 1000,
+                },
+            };
+        }
         if (checkType === "dns") {
             return {
                 check: {
@@ -467,7 +498,12 @@
         const planMin = Number(form.dataset.minInterval) || 60;
         const kind = data.get("check_type") || "http";
         const minInterval = Math.max(planMin, kindFloor(kind));
-        const interval = parseInt(data.get("interval_s"), 10);
+        // Heartbeat hides the cadence rail: keep the stored interval rather
+        // than rewriting an API-set value; the floor still applies.
+        const stored = parseInt(form.dataset.interval, 10);
+        const interval = kind === "heartbeat"
+            ? Math.max(minInterval, Number.isInteger(stored) ? stored : minInterval)
+            : parseInt(data.get("interval_s"), 10);
         if (!Number.isInteger(interval) || interval < minInterval) {
             return { error: `Check interval must be at least ${minInterval} seconds.` };
         }
@@ -678,6 +714,8 @@
         "check.timeout": "_timeout_ms",
         "check.warn_days": "_warn_days",
         "check.critical_days": "_critical_days",
+        "check.period": "_period_s",
+        "check.grace": "_grace_s",
     };
 
     function fieldForApiPath(path) {

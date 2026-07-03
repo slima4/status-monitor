@@ -468,8 +468,21 @@ impl TargetStore for PostgresTargetStore {
             .map(|p| serde_json::to_value(p).context("encoding region_policy JSON"))
             .transpose()?;
 
-        let row: Option<TargetRow> = sqlx::query_as::<_, TargetRow>(
-            r#"UPDATE targets SET
+        // Same contract as `set_enabled`: an update that enables the target
+        // re-arms its heartbeat in the same statement.
+        let rearm_cte = if update.enabled == Some(true) {
+            r#"WITH rearmed AS (
+                   UPDATE heartbeat_monitors hm SET armed_at = now()
+                   FROM targets t
+                   WHERE hm.org_id = $12 AND hm.target_id = $1
+                     AND t.id = hm.target_id AND t.enabled = false
+               )
+            "#
+        } else {
+            ""
+        };
+        let row: Option<TargetRow> = sqlx::query_as::<_, TargetRow>(&format!(
+            r#"{rearm_cte}UPDATE targets SET
                  name = COALESCE($2, name),
                  check_spec = COALESCE($3, check_spec),
                  interval_secs = COALESCE($4, interval_secs),
@@ -490,7 +503,7 @@ impl TargetStore for PostgresTargetStore {
                       group_name, owner_user_id,
                       write_source,
                       created_at, updated_at"#,
-        )
+        ))
         .bind(id)
         .bind(update.name)
         .bind(check_json)
@@ -767,16 +780,29 @@ impl TargetStore for PostgresTargetStore {
         if ids.is_empty() {
             return Ok(Vec::new());
         }
-        let rows: Vec<(Uuid,)> = sqlx::query_as(
+        // Enabling re-arms heartbeat monitors in the same statement; the CTE
+        // reads the pre-update `enabled`, so only real disabled→enabled flips
+        // touch and every enable surface inherits it.
+        let sql = if enabled {
+            r#"WITH rearmed AS (
+                   UPDATE heartbeat_monitors hm SET armed_at = now()
+                   FROM targets t
+                   WHERE hm.org_id = $3 AND hm.target_id = ANY($1)
+                     AND t.id = hm.target_id AND t.enabled = false
+               )
+               UPDATE targets SET enabled = $2, updated_at = now()
+               WHERE id = ANY($1) AND org_id = $3 RETURNING id"#
+        } else {
             r#"UPDATE targets SET enabled = $2, updated_at = now()
-               WHERE id = ANY($1) AND org_id = $3 RETURNING id"#,
-        )
-        .bind(ids)
-        .bind(enabled)
-        .bind(org.0)
-        .fetch_all(&self.pool)
-        .await
-        .context("bulk set_enabled")?;
+               WHERE id = ANY($1) AND org_id = $3 RETURNING id"#
+        };
+        let rows: Vec<(Uuid,)> = sqlx::query_as(sql)
+            .bind(ids)
+            .bind(enabled)
+            .bind(org.0)
+            .fetch_all(&self.pool)
+            .await
+            .context("bulk set_enabled")?;
         Ok(rows.into_iter().map(|(id,)| id).collect())
     }
 

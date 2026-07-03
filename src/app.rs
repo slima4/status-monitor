@@ -243,6 +243,11 @@ pub struct AppState {
     /// `AppState::new`'s signature stays unchanged: a Pg store when tenancy is
     /// live, an in-memory one for no-DB fixtures.
     pub monitor_share_store: Arc<dyn crate::storage::MonitorShareStore>,
+    /// Heartbeat-monitor ping tokens + last-ping persistence (`/ping/{token}`).
+    pub heartbeat_store: Arc<dyn crate::storage::HeartbeatStore>,
+    /// In-memory heartbeat anchors + ping rate state, taken from the worker
+    /// pool's executor so the two can never diverge.
+    pub heartbeat_runtime: Arc<crate::worker::heartbeat::HeartbeatRuntime>,
     /// Reusable org variables + the secret credential store. Secret values are
     /// sealed with the KEK and resolved into monitor request fields worker-side.
     /// Built from `db` so `AppState::new`'s signature stays unchanged.
@@ -456,6 +461,11 @@ impl AppState {
             )),
             None => Arc::new(crate::storage::InMemoryMonitorShareStore::new()),
         };
+        let heartbeat_store: Arc<dyn crate::storage::HeartbeatStore> = match db.clone() {
+            Some(pool) => Arc::new(crate::storage::PgHeartbeatStore::new(pool, cipher.clone())),
+            None => Arc::new(crate::storage::InMemoryHeartbeatStore::new()),
+        };
+        let heartbeat_runtime = worker_pool.heartbeat_runtime();
         let variable_store: Arc<dyn crate::storage::VariableStore> = match db.clone() {
             Some(pool) => Arc::new(crate::storage::PgVariableStore::new(pool, cipher.clone())),
             None => Arc::new(crate::storage::InMemoryVariableStore::new()),
@@ -517,6 +527,8 @@ impl AppState {
             status_page_store,
             page_asset_store,
             monitor_share_store,
+            heartbeat_store,
+            heartbeat_runtime,
             variable_store,
             channel_link_code_store,
             telegram_send_budget: Arc::new(crate::telegram::TelegramSendBudget::new()),

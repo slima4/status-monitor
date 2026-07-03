@@ -1,3 +1,8 @@
+//! Outbound dead-man's-switch: pings an external watcher (config key
+//! `observability.heartbeat`) so a dead or dependency-blind control plane is
+//! noticed from outside. Distinct from the heartbeat *monitor kind*, which is
+//! customers' inbound pings, hence "snitch".
+
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -17,7 +22,7 @@ pub fn spawn(state: &AppState, cancel: CancellationToken) -> Option<JoinHandle<(
     let url = match Url::parse(&cfg.url) {
         Ok(u) => u,
         Err(e) => {
-            tracing::error!(error = %e, "heartbeat disabled: invalid heartbeat url");
+            tracing::error!(error = %e, "snitch disabled: invalid observability.heartbeat.url");
             return None;
         }
     };
@@ -55,12 +60,12 @@ async fn run(
                     tracing::warn!(
                         postgres = ready.postgres,
                         clickhouse = ready.clickhouse,
-                        "heartbeat: dependency down, withholding snitch ping"
+                        "snitch: dependency down, withholding ping"
                     );
                     continue;
                 }
                 if http_outbound::get_ok(&client, &url).await.is_err() {
-                    tracing::warn!(host = %host, "heartbeat: snitch ping failed");
+                    tracing::warn!(host = %host, "snitch: ping failed");
                 }
             }
         }

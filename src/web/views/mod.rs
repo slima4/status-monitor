@@ -4,6 +4,7 @@ pub mod dashboard;
 pub mod delegate_connect;
 pub mod discord_connect;
 pub mod escalation;
+pub mod heartbeat;
 pub mod incidents;
 pub mod invitations;
 pub mod legal;
@@ -114,6 +115,14 @@ pub(crate) fn describe_check(spec: &CheckSpec) -> (&'static str, String) {
         CheckSpec::Http(h) => ("HTTP", h.url.to_string()),
         CheckSpec::Tcp(c) => ("TCP", format!("{}:{}", c.host, c.port)),
         CheckSpec::Ping(c) => ("PING", c.host.clone()),
+        CheckSpec::Heartbeat(c) => (
+            "HEARTBEAT",
+            format!(
+                "ping every {} (+{} grace)",
+                exact_duration(c.period.as_secs()),
+                exact_duration(c.grace.as_secs())
+            ),
+        ),
         CheckSpec::TlsCert(c) => ("TLS", format!("{}:{}", c.host, c.port)),
         CheckSpec::DomainExpiry(c) => ("DOMAIN", c.domain.clone()),
         CheckSpec::Dns(c) => ("DNS", format!("{} {}", c.record_type.as_str(), c.domain)),

@@ -1,6 +1,7 @@
 pub mod circuit_breaker;
 pub mod dns;
 pub mod domain_expiry;
+pub mod heartbeat;
 pub mod host_throttle;
 pub mod http_check;
 pub mod interpolate;
@@ -138,6 +139,14 @@ pub async fn execute(
             tcp_check::execute_tcp_check(target_id, org_id, tcp, deps.http).await
         }
         CheckSpec::Ping(p) => ping::execute_ping_check(target_id, org_id, p, deps.http).await,
+        // Evaluated on the WorkerPool's passive fast path; the WorkerDeps
+        // paths (agents, ad-hoc) have no ping state and reject the kind
+        // upstream.
+        CheckSpec::Heartbeat(_) => CheckResult::error(
+            target_id,
+            org_id,
+            "heartbeat monitors are evaluated on the control plane, not probed",
+        ),
         CheckSpec::TlsCert(cert) => {
             tls_cert::execute_tls_cert_check(target_id, org_id, cert, deps.http).await
         }

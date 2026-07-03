@@ -207,6 +207,18 @@ The worker side caps the number of concurrent checks one tenant can fan at the s
 
 Sends one ICMP echo request per resolved (SSRF-filtered) address until a reply arrives; the round-trip time is recorded as `duration_ms`. Silence for the full timeout is `down` — ICMP has no refusal signal. Self-hosters: the probe opens an unprivileged `SOCK_DGRAM` ICMP socket, so the process needs `net.ipv4.ping_group_range` to cover its GID (Docker sets this by default) or `CAP_NET_RAW`; without either, ping checks report `error` with the reason.
 
+### Heartbeat (inbound dead-man's-switch)
+
+```jsonc
+{ "type": "heartbeat", "period": 300000, "grace": 60000 }
+```
+
+Reverses the direction: instead of the platform probing your system, your system pings the platform. Creating a heartbeat monitor mints a capability URL, returned by `GET /api/v1/targets/{id}/heartbeat` (member-level `targets:write`, since the ping URL is itself a write capability) as `{ "ping_url": "...", "last_ping_at": "..." }`; call it (GET or POST, no auth, e.g. `curl -fsS $URL` at the end of a cron job) on every run. The scheduled evaluation compares the age of the last ping against `period + grace` (both in milliseconds): inside that window the monitor is `up`, past it the monitor goes `down` through the normal incident pipeline. A fresh or newly re-enabled monitor gets a full `period + grace` before it can go down.
+
+Constraints: `period` runs from 60 s to 30 d, `grace` from 0 to 30 d, and the monitor's `interval` (evaluation cadence) has a 60 s kind floor. Heartbeats never run on regional probes and reject `test`/`check-now` (`HEARTBEAT_NOT_PROBEABLE`) and region assignment, since there is nothing to probe. Unknown ping tokens 404 uniformly; per-token ping ingest is rate-limited (429 with `Retry-After`) at 1/s sustained with a burst of 10.
+
+Provisioning: a single create mints the ping URL immediately; bulk-created heartbeat monitors get theirs within one scheduler refresh (~30 s). Pick `grace` with your deployment in mind: a ping sent while the control plane itself is unreachable is lost, so on single-node self-hosts keep `grace` comfortably above your restart window (the hosted service deploys blue/green, so ping ingest stays up).
+
 ### TLS certificate expiry
 
 ```jsonc
@@ -254,9 +266,9 @@ The bootstrap registry is fetched lazily on the first lookup and cached for the 
   "check": { /* check spec */ },
   "interval": 60,             // seconds between ticks; effective floor is
                               // max(plan.min_check_interval_secs, kind_min).
-                              // kind_min is 10 for http/tcp/ping/dns and 3600 for
-                              // tls_cert/domain_expiry. Plan-free min = 60.
-                              // 10 is the absolute DB CHECK hard floor.
+                              // kind_min is 10 for http/tcp/ping/dns, 60 for
+                              // heartbeat, and 3600 for tls_cert/domain_expiry.
+                              // Plan-free min = 60.
   "enabled": true,
   "tags": ["prod", "tier1"],
   "alerts": { /* optional, see below */ }
@@ -453,14 +465,14 @@ Every 4xx and 5xx response uses one wire shape:
 - `details` carries optional structured context (e.g., `{ "range": "127.0.0.0/8" }` for SSRF rejections).
 - `trace_id` is the W3C `traceparent` when tracing is enabled.
 
-Common codes: `INVALID_URL_SCHEME`, `INVALID_URL_FORMAT`, `SSRF_BLOCKED`, `INVALID_INTERVAL`, `INVALID_TIMEOUT`, `INVALID_TCP_PORT`, `INVALID_TCP_HOST`, `INVALID_PING_HOST`, `INVALID_STATUS_RANGE`, `INVALID_TLS_CERT_PARAMS`, `INVALID_DOMAIN_PARAMS`, `INVALID_TLS_CRED_COMBO`, `INVALID_ALERT_CONFIG`, `REDACTION_SENTINEL`, `BULK_EMPTY`, `BULK_TOO_LARGE`, `BAD_TIME_RANGE`, `TARGET_NOT_FOUND`, `CHANNEL_NOT_FOUND`, `CHANNEL_NAME_TAKEN`, `CHANNEL_NAME_INVALID`, `CHANNEL_QUOTA_EXCEEDED`, `INVALID_CHANNEL_CONFIG`, `CHANNEL_TEST_FAILED`, `CIRCUIT_OPEN`, `DEPENDENCY_DOWN`, `INTERNAL`.
+Common codes: `INVALID_URL_SCHEME`, `INVALID_URL_FORMAT`, `SSRF_BLOCKED`, `INVALID_INTERVAL`, `INVALID_TIMEOUT`, `INVALID_TCP_PORT`, `INVALID_TCP_HOST`, `INVALID_PING_HOST`, `INVALID_HEARTBEAT_PARAMS`, `HEARTBEAT_NOT_PROBEABLE`, `INVALID_STATUS_RANGE`, `INVALID_TLS_CERT_PARAMS`, `INVALID_DOMAIN_PARAMS`, `INVALID_TLS_CRED_COMBO`, `INVALID_ALERT_CONFIG`, `REDACTION_SENTINEL`, `BULK_EMPTY`, `BULK_TOO_LARGE`, `BAD_TIME_RANGE`, `TARGET_NOT_FOUND`, `CHANNEL_NOT_FOUND`, `CHANNEL_NAME_TAKEN`, `CHANNEL_NAME_INVALID`, `CHANNEL_QUOTA_EXCEEDED`, `INVALID_CHANNEL_CONFIG`, `CHANNEL_TEST_FAILED`, `CIRCUIT_OPEN`, `DEPENDENCY_DOWN`, `INTERNAL`.
 
 ### Quota, rate-limit and abuse codes
 
 | Code | HTTP | Meaning |
 |---|---|---|
 | `QUOTA_EXCEEDED` | 422 | A plan quota would be exceeded. `details` carries `quota` (e.g. `max_targets`, `max_members`, `max_public_components`), `current`, `limit`, `plan`. |
-| `MIN_CHECK_INTERVAL` | 422 | Requested check interval is below the effective floor (`max(plan.min_check_interval_secs, kind_min)`), where `kind_min` is 3600 for `tls_cert` / `domain_expiry` and 10 for `http` / `tcp` / `ping` / `dns`. Enforced on create, bulk, **and** PATCH. |
+| `MIN_CHECK_INTERVAL` | 422 | Requested check interval is below the effective floor (`max(plan.min_check_interval_secs, kind_min)`), where `kind_min` is 3600 for `tls_cert` / `domain_expiry`, 60 for `heartbeat`, and 10 for `http` / `tcp` / `ping` / `dns`. Enforced on create, bulk, **and** PATCH. |
 | `INVITATIONS_LIMIT` | 409 | The org is at its pending-invitation cap. |
 | `RATE_LIMITED` | 429 | A per-minute rate budget was exceeded. `Retry-After` (seconds) is set; `details.scope` names the tier, e.g. `per_org_api_writes`. |
 | `ABUSE_BLOCKED` | 400 | Target blocked by abuse protection. `details.reason` explains. |

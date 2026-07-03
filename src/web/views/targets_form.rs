@@ -84,6 +84,20 @@ impl Default for PingFields {
     }
 }
 
+pub struct HeartbeatFields {
+    pub period_s: u64,
+    pub grace_s: u64,
+}
+
+impl Default for HeartbeatFields {
+    fn default() -> Self {
+        Self {
+            period_s: 300,
+            grace_s: 60,
+        }
+    }
+}
+
 pub struct DnsFields {
     pub domain: String,
     pub record_type: &'static str,
@@ -181,6 +195,7 @@ pub struct FormModel {
     pub http: HttpFields,
     pub tcp: TcpFields,
     pub ping: PingFields,
+    pub heartbeat: HeartbeatFields,
     pub dns: DnsFields,
     pub tls_cert: TlsCertFields,
     pub domain_expiry: DomainExpiryFields,
@@ -472,6 +487,7 @@ fn empty_create_form() -> FormModel {
         http: HttpFields::default(),
         tcp: TcpFields::default(),
         ping: PingFields::default(),
+        heartbeat: HeartbeatFields::default(),
         dns: DnsFields::default(),
         tls_cert: TlsCertFields::default(),
         domain_expiry: DomainExpiryFields::default(),
@@ -709,6 +725,7 @@ fn form_from_target(t: Target, kind: FormKind) -> Result<FormModel, AppError> {
     let mut http = HttpFields::default();
     let mut tcp = TcpFields::default();
     let mut ping = PingFields::default();
+    let mut heartbeat = HeartbeatFields::default();
     let mut dns = DnsFields::default();
     let mut tls_cert = TlsCertFields::default();
     let mut domain_expiry = DomainExpiryFields::default();
@@ -731,6 +748,13 @@ fn form_from_target(t: Target, kind: FormKind) -> Result<FormModel, AppError> {
                 timeout_ms: c.timeout.as_millis() as u64,
             };
             "ping"
+        }
+        CheckSpec::Heartbeat(c) => {
+            heartbeat = HeartbeatFields {
+                period_s: c.period.as_secs(),
+                grace_s: c.grace.as_secs(),
+            };
+            "heartbeat"
         }
         CheckSpec::Dns(d) => {
             dns = DnsFields {
@@ -807,6 +831,7 @@ fn form_from_target(t: Target, kind: FormKind) -> Result<FormModel, AppError> {
         http,
         tcp,
         ping,
+        heartbeat,
         dns,
         tls_cert,
         domain_expiry,
@@ -1235,6 +1260,46 @@ mod tests {
         assert_eq!(form.domain_expiry.warn_days, 60);
         assert_eq!(form.domain_expiry.critical_days, 14);
         assert_eq!(form.domain_expiry.timeout_ms, 10_000);
+    }
+
+    #[test]
+    fn edit_form_maps_heartbeat_target_fields() {
+        use crate::domain::HeartbeatCheck;
+        use std::time::Duration;
+        let t = Target {
+            id: uuid::Uuid::nil(),
+            name: "nightly backup".into(),
+            check: CheckSpec::Heartbeat(HeartbeatCheck {
+                period: Duration::from_secs(300),
+                grace: Duration::from_secs(45),
+            }),
+            interval: Duration::from_secs(60),
+            enabled: true,
+            tags: vec![],
+            alerts: Default::default(),
+            region_policy: Default::default(),
+            alert_confirmations: 2,
+            notify_recovery: true,
+            renotify_interval_secs: 3600,
+            group_name: None,
+            owner_user_id: None,
+            write_source: crate::domain::WriteSource::Ui,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+        let form = form_from_target(t, FormKind::Edit).unwrap();
+        assert_eq!(form.check_type, "heartbeat");
+        assert_eq!(form.heartbeat.period_s, 300);
+        assert_eq!(form.heartbeat.grace_s, 45);
+        let html = FormPage {
+            active_tab: "targets",
+            form,
+        }
+        .render()
+        .unwrap();
+        // The schedule rail and test-now are hidden for the passive kind.
+        assert!(html.contains("data-schedule-section hidden"));
+        assert!(html.contains(r#"name="heartbeat_period_s" type="number" min="60""#));
     }
 
     #[test]

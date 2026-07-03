@@ -207,8 +207,12 @@ pub async fn create(
         .target_store
         .create(org, new, source, i64::from(plan.max_targets))
         .await?;
-    // The store seeds only the default region; widen to the full set.
-    if regions.len() > 1 {
+    if t.check.is_passive() {
+        ensure_heartbeat(&state, org, t.id).await?;
+    }
+    // The store seeds only the default region; widen to the full set. Passive
+    // kinds have no probe region, so skip the seed.
+    if regions.len() > 1 && !t.check.is_passive() {
         state
             .target_store
             .set_target_regions(org, t.id, &regions)
@@ -315,8 +319,14 @@ pub async fn update(
             ));
         }
     }
+    // The disabled→enabled re-arm is folded into the store's enable statement,
+    // so this path (and every other enable surface) inherits it.
+    let check_rewritten = update.check.is_some();
     match state.target_store.update(org, id, update, source).await? {
         Some(t) => {
+            if check_rewritten {
+                sync_heartbeat_kind(&state, org, &t).await?;
+            }
             invalidate_pages_for(&state, org, &[id]).await;
             Ok(Redacted::new(t))
         }
@@ -325,6 +335,30 @@ pub async fn update(
             "target not found",
         )),
     }
+}
+
+/// Mint (or keep) the ping-token row for a heartbeat-kind target. Its anchor
+/// becomes resident on the next scheduler refresh, the same refresh that
+/// admits the target into evaluation, so the ordering is safe.
+async fn ensure_heartbeat(state: &AppState, org: OrgId, target_id: Uuid) -> Result<()> {
+    state
+        .heartbeat_store
+        .ensure(org, target_id)
+        .await?
+        .ok_or_else(|| AppError::Other(anyhow::anyhow!("heartbeat row missing for {target_id}")))?;
+    Ok(())
+}
+
+/// Reconcile heartbeat state after a check rewrite: a heartbeat kind keeps the
+/// ping token, any other kind revokes it. Idempotent, so concurrent rewrites
+/// converge on the final kind.
+async fn sync_heartbeat_kind(state: &AppState, org: OrgId, t: &Target) -> Result<()> {
+    if t.check.is_passive() {
+        ensure_heartbeat(state, org, t.id).await?;
+    } else {
+        state.heartbeat_store.remove(org, t.id).await?;
+    }
+    Ok(())
 }
 
 /// The regions a monitor probes from. A single-region deployment is one entry.
@@ -413,6 +447,17 @@ pub async fn set_target_regions(
     Path(id): Path<Uuid>,
     Json(req): Json<TargetRegions>,
 ) -> Result<Json<TargetRegions>> {
+    let target = state
+        .target_store
+        .get(org, id)
+        .await?
+        .ok_or_else(|| AppError::not_found(codes::TARGET_NOT_FOUND, "target not found"))?;
+    if target.check.is_passive() {
+        return Err(AppError::unprocessable(
+            codes::REGION_INVALID,
+            "heartbeat monitors receive pings; they are not probed from regions",
+        ));
+    }
     let mut regions: Vec<String> = req
         .regions
         .iter()
@@ -454,6 +499,64 @@ pub async fn set_target_regions(
         ));
     }
     Ok(Json(TargetRegions { regions }))
+}
+
+/// Ping surface of a heartbeat monitor: the inbound URL the customer's system
+/// calls, and the last accepted ping.
+#[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct HeartbeatInfo {
+    /// Full ping URL. `null` when the stored token can't be decrypted (KEK
+    /// rotated out).
+    pub ping_url: Option<String>,
+    pub last_ping_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+/// Read-only projection of a heartbeat's ping surface, shared by the API
+/// handler and the detail page. Never mints: `ping_url` is `None` while the
+/// row is still provisioning or when the token can't be decrypted.
+pub(crate) async fn heartbeat_info(
+    state: &AppState,
+    org: OrgId,
+    target_id: Uuid,
+) -> Result<HeartbeatInfo> {
+    let hb = state.heartbeat_store.get(org, target_id).await?;
+    Ok(HeartbeatInfo {
+        ping_url: hb.as_ref().and_then(|h| h.token.as_deref()).map(|t| {
+            format!(
+                "{}/ping/{t}",
+                state.cfg.auth.public_base_url.trim_end_matches('/')
+            )
+        }),
+        last_ping_at: hb.and_then(|h| h.last_ping_at),
+    })
+}
+
+#[utoipa::path(
+    get, path = "/api/v1/targets/{id}/heartbeat", tag = "targets",
+    summary = "Get a heartbeat monitor's ping URL and last ping",
+    params(("id" = Uuid, Path)),
+    responses(
+        (status = 200, body = HeartbeatInfo),
+        (status = 404, body = ApiError),
+    ),
+)]
+pub async fn get_heartbeat(
+    State(state): State<AppState>,
+    Authorized(org, _): Authorized<TargetsWrite>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<HeartbeatInfo>> {
+    let target = state
+        .target_store
+        .get(org, id)
+        .await?
+        .ok_or_else(|| AppError::not_found(codes::TARGET_NOT_FOUND, "target not found"))?;
+    if !target.check.is_passive() {
+        return Err(AppError::not_found(
+            codes::HEARTBEAT_NOT_CONFIGURED,
+            "this monitor is not a heartbeat",
+        ));
+    }
+    Ok(Json(heartbeat_info(&state, org, id).await?))
 }
 
 #[utoipa::path(
@@ -573,6 +676,8 @@ pub async fn bulk_create(
         .target_store
         .bulk_create(org, items, source, i64::from(plan.max_targets))
         .await?;
+    // Heartbeat items get their ping-token rows from the next scheduler
+    // refresh (self-heal), not a per-item mint loop, so bulk stays one batch.
     if regions.len() > 1 {
         let derived = RegionIncidentPolicy::default();
         for (t, explicit) in out.iter().zip(item_policies) {
@@ -738,6 +843,7 @@ pub async fn test_check(
     canonicalize_check(&mut req.check)?;
     validate_check(&req.check, &guard)?;
     check_abuse(&state, org, &req.check)?;
+    reject_passive_probe(&req.check)?;
     let region = req
         .region
         .filter(|r| !r.trim().is_empty())
@@ -796,6 +902,7 @@ pub(crate) async fn check_now_via_dispatch(
     org: OrgId,
     target: &Target,
 ) -> Result<CheckResult> {
+    reject_passive_probe(&target.check)?;
     let region = resolve_check_now_region(state, org, target.id).await?;
     let view = run_ad_hoc(
         state,
@@ -815,7 +922,7 @@ pub(crate) async fn check_now_via_dispatch(
 /// already holding the long-poll — regions without a live agent are covered by
 /// their next scheduled pull. The agent's result POST persists each result.
 fn dispatch_first_check(state: &AppState, org: OrgId, target: &Target, regions: &[String]) {
-    if !target.enabled {
+    if !target.enabled || target.check.is_passive() {
         return;
     }
     for region in regions {
@@ -848,6 +955,9 @@ async fn run_ad_hoc(
     target_id: Option<Uuid>,
     check: CheckSpec,
 ) -> Result<DeliveredResult> {
+    // Chokepoint: every interactive dispatch funnels through here, so a future
+    // caller can't hand a passive check to an agent by omission.
+    reject_passive_probe(&check)?;
     if !state.ad_hoc.region_live(region) {
         return Err(AppError::service_unavailable(
             codes::PROBE_UNAVAILABLE,
@@ -987,6 +1097,18 @@ fn scrub_secrets(delivered: &mut DeliveredResult, secrets: &[String]) {
 
 fn ssrf_guard(state: &AppState) -> SsrfGuard {
     SsrfGuard::new(state.cfg.security.allow_private_targets)
+}
+
+/// Interactive probing (test-now / check-now) is meaningless for a passive
+/// check, since there is nothing to reach out to.
+fn reject_passive_probe(check: &CheckSpec) -> Result<()> {
+    if check.is_passive() {
+        return Err(AppError::bad_request(
+            codes::HEARTBEAT_NOT_PROBEABLE,
+            "heartbeat monitors receive pings from your systems; there is nothing to probe",
+        ));
+    }
+    Ok(())
 }
 
 /// Abuse admission control for one user-supplied check. Every handler that
@@ -1247,7 +1369,7 @@ fn canonicalize_check(check: &mut crate::domain::CheckSpec) -> Result<()> {
         }
     }
     match check {
-        CheckSpec::Http(_) => Ok(()),
+        CheckSpec::Http(_) | CheckSpec::Heartbeat(_) => Ok(()),
         CheckSpec::Tcp(tcp) => canon_host(&mut tcp.host, "check.host", codes::INVALID_TCP_HOST),
         CheckSpec::Ping(p) => canon_host(&mut p.host, "check.host", codes::INVALID_PING_HOST),
         CheckSpec::TlsCert(cert) => {
@@ -1382,6 +1504,25 @@ fn validate_check(check: &crate::domain::CheckSpec, guard: &SsrfGuard) -> Result
             let host = crate::security::unbracket(&p.host);
             if let Ok(ip) = host.parse::<IpAddr>() {
                 check_ip(ip, guard)?;
+            }
+        }
+        CheckSpec::Heartbeat(h) => {
+            // Sub-minute periods can't be judged by once-a-minute evaluation;
+            // the 30-day ceiling keeps the maths in range.
+            const MAX_MS: u128 = 30 * 24 * 3_600 * 1_000;
+            if !(60_000..=MAX_MS).contains(&h.period.as_millis()) {
+                return Err(AppError::bad_request_field(
+                    codes::INVALID_HEARTBEAT_PARAMS,
+                    "heartbeat period must be between 1 minute and 30 days",
+                    "check.period",
+                ));
+            }
+            if h.grace.as_millis() > MAX_MS {
+                return Err(AppError::bad_request_field(
+                    codes::INVALID_HEARTBEAT_PARAMS,
+                    "heartbeat grace must be at most 30 days",
+                    "check.grace",
+                ));
             }
         }
         CheckSpec::TlsCert(cert) => {

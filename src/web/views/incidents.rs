@@ -225,6 +225,7 @@ fn kind_label(kind: &str) -> &'static str {
     match kind {
         "tcp" => "tcp",
         "ping" => "ping",
+        "heartbeat" => "heartbeat",
         "dns" => "dns",
         "tls_cert" => "tls",
         "domain_expiry" => "domain",

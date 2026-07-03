@@ -66,7 +66,7 @@ async fn access_log(req: Request, next: Next) -> Response {
         // the path itself, so scrub that segment too.
         (
             req.method().clone(),
-            scrub_share_token(req.uri().path()).into_owned(),
+            scrub_capability_token(req.uri().path()).into_owned(),
         )
     });
     let start = Instant::now();
@@ -91,21 +91,21 @@ async fn access_log(req: Request, next: Next) -> Response {
     resp
 }
 
-/// Replace a `/m/{token}` share-link capability token with a placeholder so the
-/// secret never reaches stdout logs or the exported span. The token is a path
-/// segment (not the query), so the query-stripping the access path already does
-/// for `/auth/*` would miss it; scrub the segment explicitly.
-fn scrub_share_token(path: &str) -> std::borrow::Cow<'_, str> {
-    match path.strip_prefix("/m/") {
-        Some(rest) => {
+/// Replace a path-segment capability token (`/m/{token}` share links,
+/// `/ping/{token}` heartbeat pings) with a placeholder so the secret never
+/// reaches stdout logs or the exported span. It's a path segment, not a query
+/// param, so the access path's query-stripping would miss it.
+fn scrub_capability_token(path: &str) -> std::borrow::Cow<'_, str> {
+    for prefix in ["/m/", "/ping/"] {
+        if let Some(rest) = path.strip_prefix(prefix) {
             let tail = rest
                 .split_once('/')
                 .map(|(_, t)| format!("/{t}"))
                 .unwrap_or_default();
-            std::borrow::Cow::Owned(format!("/m/{{token}}{tail}"))
+            return std::borrow::Cow::Owned(format!("{prefix}{{token}}{tail}"));
         }
-        None => std::borrow::Cow::Borrowed(path),
     }
+    std::borrow::Cow::Borrowed(path)
 }
 
 #[tokio::main]
@@ -270,11 +270,21 @@ async fn main() -> Result<()> {
         host_throttle.clone(),
         domain_expiry_runtime,
     ));
-    let scheduler_source: Arc<dyn storage::admin::EnabledTargetSource> =
+    // With in-process probing disabled the scheduler still runs, fed only the
+    // passive heartbeat set (agents can't evaluate that state). Both sources
+    // reconcile the anchor cache on every refresh before dispatching.
+    let scheduler_source: Arc<dyn storage::admin::EnabledTargetSource> = if cfg.scheduler.enabled {
         Arc::new(storage::admin::RegionTargetSource::new(
             storage::admin::AdminRepo::new(pg_pool.clone(), cipher.clone(), "scheduler_refresh"),
             cfg.scheduler.region.clone(),
-        ));
+            pool.heartbeat_runtime(),
+        ))
+    } else {
+        Arc::new(storage::admin::HeartbeatTargetSource::new(
+            storage::admin::AdminRepo::new(pg_pool.clone(), cipher.clone(), "heartbeat_refresh"),
+            pool.heartbeat_runtime(),
+        ))
+    };
     let registry = Arc::new(TargetRegistry::new(scheduler_source));
 
     let batcher_cfg = BatcherConfig {
@@ -284,9 +294,12 @@ async fn main() -> Result<()> {
     let batcher = ResultBatcher::new(result_rx, result_sink, batcher_cfg);
 
     let root = CancellationToken::new();
-    // Off = pure dashboard/brain; agents do all probing. Ingest, detection,
-    // alerting and the silence sweep run regardless.
-    let scheduler_handle: JoinHandle<()> = if cfg.scheduler.enabled {
+    // Always spawned: with probing off the source above narrows the schedule
+    // to heartbeat evaluation only.
+    if !cfg.scheduler.enabled {
+        tracing::info!("in-process probing disabled; scheduler evaluates heartbeats only");
+    }
+    let scheduler_handle: JoinHandle<()> = {
         let scheduler = Arc::new(Scheduler::new(
             registry.clone(),
             pool.clone(),
@@ -298,9 +311,6 @@ async fn main() -> Result<()> {
                 tracing::error!(?err, "scheduler exited with error");
             }
         })
-    } else {
-        tracing::info!("in-process scheduler disabled — agent-only probing");
-        tokio::spawn(async {})
     };
     let batcher_handle: JoinHandle<()> = {
         let token = root.clone();
@@ -624,8 +634,7 @@ async fn main() -> Result<()> {
         root.clone(),
     );
 
-    let heartbeat_handle: Option<JoinHandle<()>> =
-        observability::heartbeat::spawn(&state, root.clone());
+    let snitch_handle: Option<JoinHandle<()>> = observability::snitch::spawn(&state, root.clone());
 
     // All-in-one mode: when this process probes its own region in-process
     // (scheduler enabled), also serve interactive test/check-now locally so a
@@ -716,7 +725,7 @@ async fn main() -> Result<()> {
                 // code/state, which must not reach stdout logs or the
                 // exported span. The /m/ share token is a path segment,
                 // scrubbed here so it never lands in an exported span.
-                let path = scrub_share_token(path);
+                let path = scrub_capability_token(path);
                 tracing::debug_span!(
                     "http.request",
                     method = %req.method(),
@@ -775,7 +784,7 @@ async fn main() -> Result<()> {
         if let Some(h) = abuse_reload_handle {
             let _ = h.await;
         }
-        if let Some(h) = heartbeat_handle {
+        if let Some(h) = snitch_handle {
             let _ = h.await;
         }
         if let Some(h) = local_dispatch_handle {
@@ -823,25 +832,31 @@ async fn wait_for_signal() {
 
 #[cfg(test)]
 mod tests {
-    use super::scrub_share_token;
+    use super::scrub_capability_token;
 
     #[test]
-    fn scrub_share_token_masks_the_capability_segment() {
+    fn scrub_capability_token_masks_the_capability_segment() {
         // The token is a path-segment secret; the placeholder must not echo it.
-        assert_eq!(scrub_share_token("/m/abc123secret"), "/m/{token}");
-        assert_eq!(scrub_share_token("/m/abc123secret/live"), "/m/{token}/live");
+        assert_eq!(scrub_capability_token("/m/abc123secret"), "/m/{token}");
         assert_eq!(
-            scrub_share_token("/m/abc123secret/incidents"),
+            scrub_capability_token("/m/abc123secret/live"),
+            "/m/{token}/live"
+        );
+        assert_eq!(
+            scrub_capability_token("/m/abc123secret/incidents"),
             "/m/{token}/incidents"
         );
-        assert_eq!(scrub_share_token("/m/abc/latency"), "/m/{token}/latency");
+        assert_eq!(
+            scrub_capability_token("/m/abc/latency"),
+            "/m/{token}/latency"
+        );
     }
 
     #[test]
-    fn scrub_share_token_leaves_other_paths_untouched() {
-        assert_eq!(scrub_share_token("/targets/123"), "/targets/123");
-        assert_eq!(scrub_share_token("/"), "/");
+    fn scrub_capability_token_leaves_other_paths_untouched() {
+        assert_eq!(scrub_capability_token("/targets/123"), "/targets/123");
+        assert_eq!(scrub_capability_token("/"), "/");
         // A path that merely starts with /m but isn't the share surface.
-        assert_eq!(scrub_share_token("/metrics"), "/metrics");
+        assert_eq!(scrub_capability_token("/metrics"), "/metrics");
     }
 }

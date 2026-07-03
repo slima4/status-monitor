@@ -166,7 +166,7 @@ pub fn host_port_raw(spec: &CheckSpec) -> Option<(&str, Option<u16>)> {
         CheckSpec::Tcp(tcp) => Some((tcp.host.as_str(), Some(tcp.port))),
         CheckSpec::Ping(p) => Some((p.host.as_str(), Some(0))),
         CheckSpec::TlsCert(cert) => Some((cert.host.as_str(), Some(cert.port))),
-        CheckSpec::Dns(_) | CheckSpec::DomainExpiry(_) => None,
+        CheckSpec::Heartbeat(_) | CheckSpec::Dns(_) | CheckSpec::DomainExpiry(_) => None,
     }
 }
 

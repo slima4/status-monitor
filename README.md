@@ -6,10 +6,10 @@
 
 **Status pages + uptime monitoring. Open source, free to start. Live in 5 minutes.**
 
-Monitor HTTP, TCP, ICMP ping, DNS, TLS-certificate and domain expiry from
-multiple regions — then turn green and red into a polished public status page
-your customers can subscribe to. Drive it by click, REST API, or Terraform.
-Self-host the single binary or use the hosted service.
+Monitor HTTP, TCP, ICMP ping, cron-job heartbeats, DNS, TLS-certificate and
+domain expiry from multiple regions — then turn green and red into a polished
+public status page your customers can subscribe to. Drive it by click, REST
+API, or Terraform. Self-host the single binary or use the hosted service.
 
 [![docs](https://github.com/uptimepage/uptimepage/actions/workflows/docs.yml/badge.svg)](https://github.com/uptimepage/uptimepage/actions/workflows/docs.yml)
 [![Terraform Registry](https://img.shields.io/badge/terraform-registry-7B42BC?logo=terraform&logoColor=white)](https://registry.terraform.io/providers/uptimepage/uptimepage)
@@ -58,7 +58,7 @@ Embed your own with the snippet in **Settings → Pages → your page → Badge*
 
 | | |
 |---|---|
-| **Checks** | HTTP, TCP, ICMP ping, DNS, TLS-cert expiry, domain expiry — per-host circuit breaking, designed for ~50k concurrent in-flight |
+| **Checks** | HTTP, TCP, ICMP ping, heartbeat (inbound dead-man's-switch), DNS, TLS-cert expiry, domain expiry — per-host circuit breaking, designed for ~50k concurrent in-flight |
 | **Public status page** | HTML + JSON + RSS, per-component opt-in, incident narration, maintenance windows, email + webhook subscribers |
 | **Alerting** | Slack, webhook, Telegram, WhatsApp, SMS, PagerDuty, ntfy, Pushover, Discord, … — per-org channels, sealed secrets, fire-once + recovery, repeat until acknowledged |
 | **Incidents** | Internal incident state ⊥ public phase, acknowledge to silence paging, per-monitor reminder cadence |
@@ -82,6 +82,7 @@ Embed your own with the snippet in **Settings → Pages → your page → Badge*
 | `http` | request a URL, match status / body / latency | 60 s | `max(plan_min, 10 s)` |
 | `tcp` | open a TCP socket within a timeout | 60 s | `max(plan_min, 10 s)` |
 | `ping` | ICMP echo request, fail on a missing reply | 60 s | `max(plan_min, 10 s)` |
+| `heartbeat` | your job pings a URL; a missing ping past period + grace opens an incident | 60 s | `max(plan_min, 60 s)` |
 | `dns` | resolve a record, optionally match a value | 60 s | `max(plan_min, 10 s)` |
 | `tls_cert` | open TLS, parse leaf cert, alert before `notAfter` | 86 400 s (daily) | `max(plan_min, 3600 s)` |
 | `domain_expiry` | query RDAP, alert before the domain's `expiration` event | 86 400 s (daily) | `max(plan_min, 3600 s)` |

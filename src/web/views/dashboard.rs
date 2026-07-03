@@ -44,7 +44,16 @@ use crate::web::{AuthedBrowser, CurrentOrg};
 pub(crate) const RANGE_KEYS: [&str; 4] = ["24h", "7d", "30d", "90d"];
 pub(crate) const DEFAULT_RANGE: &str = "24h";
 pub(crate) const STATUS_FILTERS: [&str; 5] = ["any", "up", "degraded", "down", "paused"];
-pub(crate) const TYPE_FILTERS: [&str; 7] = ["any", "http", "tcp", "ping", "dns", "tls", "domain"];
+pub(crate) const TYPE_FILTERS: [&str; 8] = [
+    "any",
+    "http",
+    "tcp",
+    "ping",
+    "heartbeat",
+    "dns",
+    "tls",
+    "domain",
+];
 pub(crate) const FILTER_ANY: &str = "any";
 /// Fixed sparkline window — "right-now" trend, decoupled from the
 /// selected rollup range so an operator browsing 90 d still sees a
@@ -761,7 +770,7 @@ async fn build_snapshot(
 }
 
 const ACTIVE_INCIDENTS_LIMIT: usize = 5;
-const TYPE_CHIP_ORDER: &[&str] = &["HTTP", "TCP", "PING", "DNS", "TLS", "DOMAIN"];
+const TYPE_CHIP_ORDER: &[&str] = &["HTTP", "TCP", "PING", "HEARTBEAT", "DNS", "TLS", "DOMAIN"];
 
 fn tally_status(counts: &mut StatusCounts, row: &DashboardRow) {
     if !row.enabled {

@@ -1,11 +1,13 @@
 pub mod admin;
 pub mod app_secrets;
+pub mod capability_token;
 pub mod channel_link_codes;
 pub mod channel_verification;
 pub mod clickhouse;
 pub mod contacts;
 pub mod domain_expiry_state;
 pub mod escalation_policies;
+pub mod heartbeats;
 pub mod incident_ops;
 pub mod incidents;
 pub mod locks;
@@ -45,6 +47,7 @@ pub use domain_expiry_state::{
 pub use escalation_policies::{
     EscalationPolicyStore, InMemoryEscalationPolicyStore, PgEscalationPolicyStore,
 };
+pub use heartbeats::{HeartbeatMonitor, HeartbeatStore, InMemoryHeartbeatStore, PgHeartbeatStore};
 pub use incident_ops::{
     Actor, DueIncident, EmergencyAck, InMemoryIncidentOpsStore, IncidentOpsFilter,
     IncidentOpsStore, IncidentSort, LifecycleOutcome, PendingNotification, PgIncidentOpsStore,

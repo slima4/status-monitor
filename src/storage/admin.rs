@@ -49,25 +49,77 @@ impl EnabledTargetSource for AdminRepo {
 /// Scheduler source scoped to the control plane's own region. Wraps
 /// [`AdminRepo`] so the local scheduler runs exactly the targets assigned to
 /// its region — the same query an agent pulls for its region. Remote regions
-/// are left to their agents.
+/// are left to their agents. Heartbeat monitors are appended: passive (no
+/// probing), so the control plane evaluates all of them regardless of region.
 pub struct RegionTargetSource {
     repo: AdminRepo,
     region: String,
+    heartbeat: Arc<crate::worker::heartbeat::HeartbeatRuntime>,
 }
 
 impl RegionTargetSource {
-    pub fn new(repo: AdminRepo, region: String) -> Self {
-        Self { repo, region }
+    pub fn new(
+        repo: AdminRepo,
+        region: String,
+        heartbeat: Arc<crate::worker::heartbeat::HeartbeatRuntime>,
+    ) -> Self {
+        Self {
+            repo,
+            region,
+            heartbeat,
+        }
     }
 }
 
 #[async_trait]
 impl EnabledTargetSource for RegionTargetSource {
     async fn list_all_enabled_targets(&self) -> Result<Vec<(OrgId, Target)>> {
-        self.repo
-            .list_enabled_targets_for_region(&self.region)
-            .await
+        let (mut targets, heartbeats) = tokio::try_join!(
+            self.repo.list_enabled_targets_for_region(&self.region),
+            enabled_heartbeats_synced(&self.repo, &self.heartbeat),
+        )?;
+        targets.extend(heartbeats);
+        Ok(targets)
     }
+}
+
+/// Scheduler source for a control plane with in-process probing disabled
+/// (agents cover every region): feeds the scheduler only the passive heartbeat
+/// set, which is control-plane state and must run here regardless.
+pub struct HeartbeatTargetSource {
+    repo: AdminRepo,
+    heartbeat: Arc<crate::worker::heartbeat::HeartbeatRuntime>,
+}
+
+impl HeartbeatTargetSource {
+    pub fn new(
+        repo: AdminRepo,
+        heartbeat: Arc<crate::worker::heartbeat::HeartbeatRuntime>,
+    ) -> Self {
+        Self { repo, heartbeat }
+    }
+}
+
+#[async_trait]
+impl EnabledTargetSource for HeartbeatTargetSource {
+    async fn list_all_enabled_targets(&self) -> Result<Vec<(OrgId, Target)>> {
+        enabled_heartbeats_synced(&self.repo, &self.heartbeat).await
+    }
+}
+
+/// One refresh tick's heartbeat work, shared by both sources: heal + list the
+/// rows, then reconcile the anchors before the registry dispatches, so a
+/// freshly added target is guaranteed a resident anchor by ordering.
+async fn enabled_heartbeats_synced(
+    repo: &AdminRepo,
+    runtime: &crate::worker::heartbeat::HeartbeatRuntime,
+) -> Result<Vec<(OrgId, Target)>> {
+    let (targets, anchors) = tokio::try_join!(
+        repo.list_enabled_heartbeat_targets(),
+        repo.sync_heartbeat_rows(),
+    )?;
+    runtime.sync_anchors(anchors.into_iter().collect());
+    Ok(targets)
 }
 
 /// Keyset cursor over `(org_id, target_id)` ascending. `None` means "start
@@ -263,6 +315,69 @@ impl AdminRepo {
         Ok(())
     }
 
+    /// Every enabled heartbeat-kind target in a live org. Passive checks run
+    /// only on the control plane (state is this process's memory), so this list
+    /// is region-independent and excluded from the agent-facing region queries.
+    pub async fn list_enabled_heartbeat_targets(&self) -> Result<Vec<(OrgId, Target)>> {
+        let sql = format!(
+            "SELECT {TARGET_COLUMNS} \
+             FROM targets t JOIN organizations o ON o.id = t.org_id \
+             WHERE t.enabled = true AND o.deleted_at IS NULL AND t.kind = 'heartbeat'"
+        );
+        let rows: Vec<OrgTargetRow> = sqlx::query_as::<_, OrgTargetRow>(&sql)
+            .fetch_all(&self.pool)
+            .await
+            .context("admin: list enabled heartbeat targets")?;
+        decode_targets_or_err(rows, self.cipher.as_deref())
+    }
+
+    /// Per-refresh reconciliation of heartbeat state. Heals rows lost to a
+    /// partial create or org restore (mints a fresh token), then returns every
+    /// live monitor's anchor, including disabled targets so a later enable
+    /// finds its anchor. Anchor rule: [`crate::storage::heartbeats::anchor_of`].
+    pub async fn sync_heartbeat_rows(&self) -> Result<Vec<(Uuid, chrono::DateTime<chrono::Utc>)>> {
+        let missing: Vec<(Uuid,)> = sqlx::query_as(
+            "SELECT t.id FROM targets t \
+             JOIN organizations o ON o.id = t.org_id AND o.deleted_at IS NULL \
+             WHERE t.kind = 'heartbeat' \
+               AND NOT EXISTS (SELECT 1 FROM heartbeat_monitors hm WHERE hm.target_id = t.id)",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .context("admin: heartbeat rows to heal")?;
+        for (target_id,) in missing {
+            let minted = crate::storage::capability_token::mint(self.cipher.as_deref())?;
+            sqlx::query(
+                "INSERT INTO heartbeat_monitors (target_id, org_id, token_hash, token_enc) \
+                 SELECT t.id, t.org_id, $2, $3 FROM targets t WHERE t.id = $1 \
+                 ON CONFLICT (target_id) DO NOTHING",
+            )
+            .bind(target_id)
+            .bind(&minted.hash)
+            .bind(&minted.sealed)
+            .execute(&self.pool)
+            .await
+            .context("admin: heal heartbeat row")?;
+            tracing::warn!(%target_id, "healed missing heartbeat_monitors row");
+        }
+        let rows: Vec<(
+            Uuid,
+            chrono::DateTime<chrono::Utc>,
+            Option<chrono::DateTime<chrono::Utc>>,
+        )> = sqlx::query_as(
+            "SELECT hm.target_id, hm.armed_at, hm.last_ping_at \
+                 FROM heartbeat_monitors hm \
+                 JOIN organizations o ON o.id = hm.org_id AND o.deleted_at IS NULL",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .context("admin: list heartbeat anchors")?;
+        Ok(rows
+            .into_iter()
+            .map(|(id, armed, ping)| (id, crate::storage::heartbeats::anchor_of(armed, ping)))
+            .collect())
+    }
+
     /// Cheap config-pull validator for one region: a digest over the assigned
     /// targets' ids and a hash of each `check_spec`, plus count + max
     /// `updated_at`. The per-row `check_spec` hash means the etag changes on any
@@ -294,7 +409,7 @@ impl AdminRepo {
                  JOIN organizations o ON o.id = t.org_id \
                  JOIN regions rg ON rg.id = tr.region \
                  WHERE tr.region = $1 AND t.enabled = true AND o.deleted_at IS NULL \
-                   AND rg.enabled",
+                   AND rg.enabled AND t.kind <> 'heartbeat'",
         )
         .bind(region)
         .fetch_one(&self.pool)
@@ -311,7 +426,9 @@ impl AdminRepo {
 
     /// Enabled targets assigned to one region (via `target_regions`), in live
     /// orgs. Backs the agent config-pull API. Same decrypted shape as
-    /// [`Self::list_all_enabled_targets`].
+    /// [`Self::list_all_enabled_targets`]. Heartbeat monitors are excluded:
+    /// their region rows are inert and an agent has no ping state to evaluate
+    /// them against.
     pub async fn list_enabled_targets_for_region(
         &self,
         region: &str,
@@ -323,7 +440,7 @@ impl AdminRepo {
              JOIN target_regions tr ON tr.target_id = t.id \
              JOIN regions rg ON rg.id = tr.region \
              WHERE t.enabled = true AND o.deleted_at IS NULL AND tr.region = $1 \
-               AND rg.enabled"
+               AND rg.enabled AND t.kind <> 'heartbeat'"
         );
         let rows: Vec<OrgTargetRow> = sqlx::query_as::<_, OrgTargetRow>(&sql)
             .bind(region)
@@ -411,7 +528,7 @@ impl AdminRepo {
              JOIN organizations o ON o.id = t.org_id \
              JOIN regions rg ON rg.id = tr.region \
              WHERE tr.region = $1 AND t.enabled = true AND o.deleted_at IS NULL \
-               AND rg.enabled",
+               AND rg.enabled AND t.kind <> 'heartbeat'",
         )
         .bind(region)
         .fetch_all(&self.pool)

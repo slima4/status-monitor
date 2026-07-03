@@ -12,13 +12,13 @@ use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::auth::sha256_hex;
 use crate::auth::token_hash::generate_raw_token;
 use crate::domain::{
     CreatedShare, MonitorShare, MonitorShareId, NewMonitorShare, OrgId, ResolvedShare, UserId,
 };
 use crate::error::{AppError, Result};
-use crate::security::{Cipher, open_str, seal_str};
+use crate::security::Cipher;
+use crate::storage::capability_token;
 use crate::storage::locks::{advisory_xact_lock, org_lock_key};
 
 /// Result of [`MonitorShareStore::create`]. The store stays free of HTTP/plan
@@ -33,26 +33,6 @@ pub enum CreateShareOutcome {
     PerMonitorLimit,
     /// This would be a new shared monitor and the org is at `max_shared_monitors`.
     OrgMonitorLimit,
-}
-
-/// Hash a raw share token into the value stored/looked-up in `token_hash`.
-fn hash_token(raw: &str) -> String {
-    sha256_hex(raw)
-}
-
-/// Encrypt the raw token for the reversible `token_enc` column: a Cipher
-/// envelope when a KEK is configured, plaintext otherwise (same fallback as
-/// target credentials).
-fn seal_token(raw: &str, cipher: Option<&Cipher>) -> Result<String> {
-    seal_str(raw, cipher)
-        .map_err(|e| AppError::Other(anyhow::anyhow!("share token encryption failed: {e}")))
-}
-
-/// Recover the raw token from `token_enc`. `None` when it is an envelope but no
-/// KEK is available to open it (e.g. the key was rotated out) — the owner then
-/// sees the link as un-copyable rather than a broken string.
-fn open_token(stored: &str, cipher: Option<&Cipher>) -> Option<String> {
-    open_str(stored, cipher)
 }
 
 #[async_trait]
@@ -153,9 +133,11 @@ impl MonitorShareStore for PgMonitorShareStore {
         max_links_per_monitor: i64,
         max_shared_monitors: i64,
     ) -> Result<CreateShareOutcome> {
-        let raw = generate_raw_token();
-        let token_hash = hash_token(&raw);
-        let token_enc = seal_token(&raw, self.cipher.as_deref())?;
+        let capability_token::Minted {
+            raw,
+            hash: token_hash,
+            sealed: token_enc,
+        } = capability_token::mint(self.cipher.as_deref())?;
         let mut tx = self.pool.begin().await.map_err(db_err)?;
         // Per-org lock serialises the count→insert so a burst can't race past
         // either cap (mirrors the status_pages create).
@@ -236,7 +218,7 @@ impl MonitorShareStore for PgMonitorShareStore {
         Ok(rows
             .into_iter()
             .map(|r| {
-                let token = open_token(&r.token_enc, cipher);
+                let token = capability_token::open(&r.token_enc, cipher);
                 let mut share = r.into_share();
                 share.token = token;
                 share
@@ -303,7 +285,7 @@ impl MonitorShareStore for PgMonitorShareStore {
     }
 
     async fn resolve_active(&self, raw_token: &str) -> Result<Option<ResolvedShare>> {
-        let token_hash = hash_token(raw_token);
+        let token_hash = capability_token::hash(raw_token);
         // All-or-nothing: live share, target still present, org not soft-deleted.
         let row: Option<(Uuid, Uuid, Uuid)> = sqlx::query_as(
             r#"SELECT ms.id, ms.target_id, ms.org_id
@@ -397,7 +379,7 @@ impl MonitorShareStore for InMemoryMonitorShareStore {
         };
         st.push(MemShare {
             share: share.clone(),
-            token_hash: hash_token(&raw),
+            token_hash: capability_token::hash(&raw),
             revoked: false,
         });
         Ok(CreateShareOutcome::Created(CreatedShare {
@@ -462,7 +444,7 @@ impl MonitorShareStore for InMemoryMonitorShareStore {
     }
 
     async fn resolve_active(&self, raw_token: &str) -> Result<Option<ResolvedShare>> {
-        let token_hash = hash_token(raw_token);
+        let token_hash = capability_token::hash(raw_token);
         let now = Utc::now();
         let st = self.inner.lock().unwrap();
         Ok(st

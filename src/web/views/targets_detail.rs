@@ -198,6 +198,9 @@ pub struct DetailPage {
     pub selected_region: Option<String>,
     /// Per-region rollup rows; empty for single-region orgs (table hidden).
     pub region_breakdown: Vec<RegionBreakdownRow>,
+    /// Ping-URL card for heartbeat monitors; `None` for every other kind.
+    /// Shares the API handler's projection so the two surfaces can't diverge.
+    pub heartbeat: Option<crate::api::handlers::targets::HeartbeatInfo>,
 }
 
 /// One row of the per-region breakdown table on the monitor detail page.
@@ -688,7 +691,7 @@ pub async fn index(
         selected_region.as_deref(),
     )
     .await?;
-    let region_breakdown = if region_ids.len() > 1 {
+    let region_breakdown = if region_ids.len() > 1 && !target.check.is_passive() {
         let live: Option<std::collections::HashSet<String>> = state
             .silence_store
             .live_regions(state.cfg.operator.agent_stale_after_secs)
@@ -720,7 +723,17 @@ pub async fn index(
         .monitor_share_store
         .count_active_for_target(org, target.id)
         .await? as usize;
-    let regions = labeled_regions(&catalog, region_ids);
+    let heartbeat = if target.check.is_passive() {
+        Some(crate::api::handlers::targets::heartbeat_info(&state, org, target.id).await?)
+    } else {
+        None
+    };
+    // Passive kinds have no probe region, so no region selector.
+    let regions = if target.check.is_passive() {
+        Vec::new()
+    } else {
+        labeled_regions(&catalog, region_ids)
+    };
 
     Ok(DetailPage {
         active_tab: "targets",
@@ -752,6 +765,7 @@ pub async fn index(
         regions,
         selected_region,
         region_breakdown,
+        heartbeat,
     })
 }
 
@@ -1102,7 +1116,26 @@ mod tests {
             regions: Vec::new(),
             selected_region: None,
             region_breakdown: Vec::new(),
+            heartbeat: None,
         }
+    }
+
+    #[test]
+    fn heartbeat_detail_renders_ping_card_without_probe_surfaces() {
+        let mut p = sample_page();
+        p.kind = "HEARTBEAT";
+        p.heartbeat = Some(crate::api::handlers::targets::HeartbeatInfo {
+            ping_url: Some("https://app.example.com/ping/tok123".into()),
+            last_ping_at: None,
+        });
+        let html = p.render().unwrap();
+        assert!(html.contains("https://app.example.com/ping/tok123"));
+        assert!(html.contains(r##"data-copy="#hb-ping-url""##));
+        assert!(html.contains("last ping:"));
+        assert!(html.contains("never"));
+        // No probe surfaces for a passive kind.
+        assert!(!html.contains("data-detail-test-now"));
+        assert!(!html.contains("latency (p50/p95/p99)"));
     }
 
     #[test]

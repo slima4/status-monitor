@@ -26,6 +26,34 @@
   </p>
   {% endif %}
 
+  {% if let Some(hb) = heartbeat %}
+  <section class="sticker-card space-y-2 p-5">
+    <h2 class="panel-label">ping url</h2>
+    {% if let Some(url) = hb.ping_url %}
+    <div class="flex flex-wrap items-center gap-2">
+      <code id="hb-ping-url"
+            class="min-w-0 flex-1 break-all rounded-sm bg-[color:var(--theme-surface-sunk)] px-2 py-1.5 font-mono text-xs">{{ url }}</code>
+      <button type="button" data-copy="#hb-ping-url" aria-label="Copy ping URL"
+              class="sticker-btn px-3 py-1.5 text-sm font-medium">copy</button>
+    </div>
+    <p class="text-xs text-muted">
+      Call it from the thing being watched, for example <code>curl -fsS</code>
+      this URL as the last step of the job. GET or POST both count as a ping.
+    </p>
+    {% else %}
+    <p class="text-xs text-muted">
+      Ping URL not available yet. It is provisioned within moments of
+      creation (refresh shortly). If this persists after an encryption-key
+      rotation, recreate the monitor to mint a new token.
+    </p>
+    {% endif %}
+    <p class="font-mono text-xs text-muted">last ping:
+      {% if let Some(ts) = hb.last_ping_at %}<time datetime="{{ ts|iso_ts }}" data-tz="exact">{{ ts|human_ts }}</time>{% else %}never{% endif %}
+    </p>
+  </section>
+  <script defer src="{{ "js/public/copy.js"|asset }}"></script>
+  {% endif %}
+
   <section id="detail-live-kpi"
            hx-get="/web/partials/targets/{{ id }}/live?range={{ range }}{% if let Some(r) = selected_region %}&region={{ r|urlencode }}{% endif %}"
            hx-trigger="every 60s, sm:refresh-live from:body"
@@ -36,6 +64,8 @@
     {% include "targets/partials/detail_live_kpi_cards.html" %}
   </section>
 
+  {# Heartbeat checks carry no latency, so the charts would just draw zero. #}
+  {% if kind != "HEARTBEAT" %}
   <section class="grid gap-4 lg:grid-cols-2">
     <div class="sticker-card p-5">
       <h2 class="panel-label">latency (p50/p95/p99)</h2>
@@ -53,6 +83,7 @@
            aria-label="Mean latency phase breakdown over time"></div>
     </div>
   </section>
+  {% endif %}
 
   {% if region_breakdown.len() > 1 %}
   <section class="sticker-card p-5">

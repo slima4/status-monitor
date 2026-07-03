@@ -103,6 +103,10 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
             "/targets/{id}/regions",
             get(handlers::targets::get_target_regions).put(handlers::targets::set_target_regions),
         )
+        .route(
+            "/targets/{id}/heartbeat",
+            get(handlers::targets::get_heartbeat),
+        )
         .route("/regions", get(handlers::targets::list_regions))
         .route(
             "/targets/{id}/incidents",

@@ -53,6 +53,12 @@ pub fn routes(state: AppState) -> Router {
         .route("/m/{token}/live", get(views::share::live_partial))
         .route("/m/{token}/latency", get(views::share::latency))
         .route("/m/{token}/results", get(views::share::results))
+        // Inbound heartbeat pings, token-authenticated like the share links.
+        // GET for curl/cron one-liners, POST for HTTP clients that default to it.
+        .route(
+            "/ping/{token}",
+            get(views::heartbeat::ping).post(views::heartbeat::ping),
+        )
         // Public email-channel verification: possession of the mailed token
         // is the proof; same always-mounted reasoning as the share links.
         .route("/verify-channel", get(views::verify_channel::verify))

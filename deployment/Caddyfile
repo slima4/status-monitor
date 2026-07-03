@@ -213,6 +213,23 @@ app.{$UPTIMEPAGE_DOMAIN} {
 		import app_upstream
 	}
 
+	# ─── Heartbeat pings, anonymous capability token, per-IP edge cap ───
+	# The per-token app limiter can't stop a token-enumeration flood (each
+	# random token is a fresh key), so Caddy caps per-IP. Generous ceiling: a
+	# throttled legit ping is a missed heartbeat that would open a false
+	# incident, so only a flood far above any real cron fleet trips it.
+	@heartbeat_ping path /ping/*
+	handle @heartbeat_ping {
+		rate_limit {
+			zone heartbeat_ping {
+				key {remote_host}
+				events 600
+				window 1m
+			}
+		}
+		import app_upstream
+	}
+
 	# ─── Email-channel verification — anonymous token link ──────────────
 	# Single-use sha256-at-rest tokens; the per-IP cap bounds brute probing
 	# of the public endpoint.

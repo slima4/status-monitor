@@ -70,6 +70,9 @@ pub fn host_for_spec(spec: &CheckSpec) -> String {
             Some(addr) => format!("dns:{addr}"),
             None => format!("dns:{}", d.domain.to_ascii_lowercase()),
         },
+        // Passive kind, dispatched on the fast path before any breaker
+        // lookup, so this key never gates.
+        CheckSpec::Heartbeat(_) => "heartbeat".to_owned(),
         // host_port_raw already covered these; reaching here means an
         // HTTP URL with no host_str. Listed explicitly so a future
         // CheckSpec variant is forced through the match and can't
@@ -128,6 +131,10 @@ pub struct WorkerPool {
     fanout: ResultFanout,
     host_throttle: Arc<HostThrottle>,
     domain_expiry: Arc<crate::worker::domain_expiry::DomainExpiryRuntime>,
+    /// Heartbeat ping state read by the passive executor. Owned here (not
+    /// injected) so the pool and web ingest path share one instance. A split
+    /// would silently evaluate stale anchors.
+    heartbeat: Arc<crate::worker::heartbeat::HeartbeatRuntime>,
     /// Target ids whose probe is mid-flight. Drop-guard backed (see
     /// `InFlightGuard`) so panics also release. Bounds duplicate probes when
     /// a slow check outlasts its cadence.
@@ -152,6 +159,7 @@ impl WorkerPool {
             fanout,
             host_throttle,
             domain_expiry,
+            heartbeat: Arc::new(crate::worker::heartbeat::HeartbeatRuntime::default()),
             in_flight: Arc::new(DashSet::new()),
         }
     }
@@ -162,6 +170,10 @@ impl WorkerPool {
 
     pub fn domain_expiry_runtime(&self) -> Arc<crate::worker::domain_expiry::DomainExpiryRuntime> {
         self.domain_expiry.clone()
+    }
+
+    pub fn heartbeat_runtime(&self) -> Arc<crate::worker::heartbeat::HeartbeatRuntime> {
+        self.heartbeat.clone()
     }
 
     pub fn max_concurrent(&self) -> usize {
@@ -233,6 +245,20 @@ impl WorkerPool {
     }
 
     pub fn dispatch(&self, task: CheckTask) {
+        // Passive fast path: a heartbeat evaluation is a synchronous map read
+        // with no spawn, permit, breaker, or throttle. Kept out of the probe
+        // pipeline so the machinery below needs no passive special case.
+        if let CheckSpec::Heartbeat(h) = &task.target.check {
+            let result = crate::worker::heartbeat::execute_heartbeat_check(
+                task.target.id,
+                task.org_id.0,
+                h,
+                &self.heartbeat,
+            );
+            record_metrics(&result);
+            self.fanout.dispatch(result);
+            return;
+        }
         // Skip-if-in-flight: scheduler ticks every `interval`, but a slow
         // check (or a user-configured timeout > interval) can outlast its
         // cadence. Without this guard, two probes for the same target race —

@@ -8,6 +8,7 @@
         data-method="{{ form.submit_method }}"
         data-mode="{{ form.mode }}"
         data-min-interval="{{ form.min_interval_s }}"
+        data-interval="{{ form.interval_s }}"
         data-kind-floors="{{ form.kind_floors_json() }}"
         novalidate
         class="space-y-6">
@@ -37,6 +38,7 @@
         {% call reg::chooser_card("data-check-card", "check_type", "http", form.check_type == "http", "http", "URL / API endpoint") %}{% endcall %}
         {% call reg::chooser_card("data-check-card", "check_type", "tcp", form.check_type == "tcp", "tcp", "host : port reachable") %}{% endcall %}
         {% call reg::chooser_card("data-check-card", "check_type", "ping", form.check_type == "ping", "ping", "icmp echo reply") %}{% endcall %}
+        {% call reg::chooser_card("data-check-card", "check_type", "heartbeat", form.check_type == "heartbeat", "heartbeat", "your job pings us") %}{% endcall %}
         {% call reg::chooser_card("data-check-card", "check_type", "dns", form.check_type == "dns", "dns", "record resolves") %}{% endcall %}
         {% call reg::chooser_card("data-check-card", "check_type", "tls_cert", form.check_type == "tls_cert", "tls cert", "expiry + chain") %}{% endcall %}
         {% call reg::chooser_card("data-check-card", "check_type", "domain_expiry", form.check_type == "domain_expiry", "domain", "registration expiry") %}{% endcall %}
@@ -258,6 +260,37 @@
       </div>
     </fieldset>
 
+    <fieldset data-variant="heartbeat"
+              class="{% if form.check_type != "heartbeat" %}hidden{% endif %}">
+      <legend class="float-left mb-3 w-full"><span class="form-legend">heartbeat check</span></legend>
+      <div class="clear-both space-y-5">
+      <p class="mb-5 text-xs text-muted">
+        Reverses the direction: your cron job, backup script, or worker pings
+        a unique URL on every run. <span class="hl">No ping within the period
+        (plus grace) opens an incident</span>: a dead-man's-switch for things
+        we can't reach.
+      </p>
+      <div class="flex flex-wrap gap-3">
+        <label class="field-outline w-48">
+          <span class="field-outline__label">Expect a ping every</span>
+          <input name="heartbeat_period_s" type="number" min="60" max="2592000"
+                 value="{{ form.heartbeat.period_s }}" class="w-full field pr-8">
+          <span class="field-outline__unit" aria-hidden="true">s</span>
+        </label>
+        <label class="field-outline w-40">
+          <span class="field-outline__label">Grace</span>
+          <input name="heartbeat_grace_s" type="number" min="0" max="2592000"
+                 value="{{ form.heartbeat.grace_s }}" class="w-full field pr-8">
+          <span class="field-outline__unit" aria-hidden="true">s</span>
+        </label>
+      </div>
+      <span class="mt-1 block text-xs text-muted">
+        Grace absorbs normal jitter (a slow backup, a queued cron). The ping
+        URL appears on the monitor page after you save.
+      </span>
+      </div>
+    </fieldset>
+
     <fieldset data-variant="dns"
               class="{% if form.check_type != "dns" %}hidden{% endif %}">
       <legend class="float-left mb-3 w-full"><span class="form-legend">dns check</span></legend>
@@ -395,7 +428,7 @@
     </div>
 
     <div class="space-y-6 lg:border-l lg:border-[color:var(--theme-line)] lg:pl-8">
-    <fieldset>
+    <fieldset data-schedule-section{% if form.check_type == "heartbeat" %} hidden{% endif %}>
       <legend class="float-left mb-3 w-full"><span class="form-legend">schedule</span></legend>
       <div class="clear-both">
         <span class="mb-1.5 block text-xs text-muted">Check every</span>
@@ -646,6 +679,7 @@
         {% if form.mode == "create" %}create{% else %}save changes{% endif %}
       </button>
       <button type="button" data-test-now title="Runs the check once without saving"
+              {% if form.check_type == "heartbeat" %}hidden{% endif %}
               class="sticker-btn sticker-btn--accent px-4 py-2 text-sm font-medium inline-flex items-center gap-1.5">
         <span aria-hidden="true">▶</span> test now
       </button>

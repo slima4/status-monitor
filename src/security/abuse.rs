@@ -239,6 +239,8 @@ impl AbuseGuard {
             }
             CheckSpec::Tcp(t) => crate::security::unbracket(&t.host),
             CheckSpec::Ping(p) => crate::security::unbracket(&p.host),
+            // Inbound-only: no outbound host to inspect.
+            CheckSpec::Heartbeat(_) => return None,
             CheckSpec::TlsCert(c) => crate::security::unbracket(&c.host),
             CheckSpec::DomainExpiry(d) => d.domain.as_str(),
             CheckSpec::Dns(d) => d.domain.as_str(),

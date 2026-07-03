@@ -621,6 +621,13 @@ pub async fn restore_org(
         record_audit_tx(&mut tx, org, Some(actor), "org.restored", Value::Null)
             .await
             .context("restore_org: audit")?;
+        // Re-arm heartbeats: their anchor froze at deletion, so the first
+        // post-restore evaluation would otherwise open a false incident.
+        sqlx::query("UPDATE heartbeat_monitors SET armed_at = now() WHERE org_id = $1")
+            .bind(org.0)
+            .execute(&mut *tx)
+            .await
+            .context("restore_org: re-arm heartbeats")?;
         tx.commit().await.context("restore_org: commit")?;
         return Ok(RestoreOutcome::Restored(row.into_org()));
     }
