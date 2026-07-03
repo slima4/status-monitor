@@ -409,7 +409,7 @@ impl AdminRepo {
                  JOIN organizations o ON o.id = t.org_id \
                  JOIN regions rg ON rg.id = tr.region \
                  WHERE tr.region = $1 AND t.enabled = true AND o.deleted_at IS NULL \
-                   AND rg.enabled AND t.kind <> 'heartbeat'",
+                   AND rg.enabled AND t.kind IS DISTINCT FROM 'heartbeat'",
         )
         .bind(region)
         .fetch_one(&self.pool)
@@ -440,7 +440,7 @@ impl AdminRepo {
              JOIN target_regions tr ON tr.target_id = t.id \
              JOIN regions rg ON rg.id = tr.region \
              WHERE t.enabled = true AND o.deleted_at IS NULL AND tr.region = $1 \
-               AND rg.enabled AND t.kind <> 'heartbeat'"
+               AND rg.enabled AND t.kind IS DISTINCT FROM 'heartbeat'"
         );
         let rows: Vec<OrgTargetRow> = sqlx::query_as::<_, OrgTargetRow>(&sql)
             .bind(region)
@@ -528,7 +528,7 @@ impl AdminRepo {
              JOIN organizations o ON o.id = t.org_id \
              JOIN regions rg ON rg.id = tr.region \
              WHERE tr.region = $1 AND t.enabled = true AND o.deleted_at IS NULL \
-               AND rg.enabled AND t.kind <> 'heartbeat'",
+               AND rg.enabled AND t.kind IS DISTINCT FROM 'heartbeat'",
         )
         .bind(region)
         .fetch_all(&self.pool)

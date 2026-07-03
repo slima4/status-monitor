@@ -77,7 +77,7 @@ impl SilenceStore for PgSilenceStore {
                JOIN organizations o ON o.id = t.org_id
                WHERE t.enabled AND o.deleted_at IS NULL
                  -- Heartbeats run on the control plane; agent liveness is moot.
-                 AND t.kind <> 'heartbeat'
+                 AND t.kind IS DISTINCT FROM 'heartbeat'
                  AND EXISTS (SELECT 1 FROM target_regions tr WHERE tr.target_id = t.id)
                  AND NOT EXISTS (
                      SELECT 1 FROM target_regions tr
