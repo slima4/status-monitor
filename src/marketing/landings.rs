@@ -152,6 +152,10 @@ pub const LANDINGS: &[Landing] = &[
                 label: "Versus Statuspage",
                 href: "/vs/statuspage",
             },
+            ResourceLink {
+                label: "White-label pages",
+                href: "/white-label-uptime-monitoring",
+            },
         ],
         cta: "Start free",
     },
@@ -209,6 +213,10 @@ pub const LANDINGS: &[Landing] = &[
             ResourceLink {
                 label: "For SaaS teams",
                 href: "/status-page-for-saas",
+            },
+            ResourceLink {
+                label: "White-label pages",
+                href: "/white-label-uptime-monitoring",
             },
         ],
         cta: "Start free",
@@ -275,6 +283,10 @@ pub const LANDINGS: &[Landing] = &[
             ResourceLink {
                 label: "Best self-hosted monitors",
                 href: "/blog/best-self-hosted-uptime-monitoring-tools",
+            },
+            ResourceLink {
+                label: "vs self-hosted monitors",
+                href: "/vs/self-hosted-monitoring",
             },
         ],
         cta: "Start free",
@@ -346,6 +358,10 @@ docker compose up -d"#,
             ResourceLink {
                 label: "Best self-hosted monitors",
                 href: "/blog/best-self-hosted-uptime-monitoring-tools",
+            },
+            ResourceLink {
+                label: "vs Upptime, Cachet, Statping",
+                href: "/vs/self-hosted-status-pages",
             },
         ],
         cta: "Start free",
@@ -495,6 +511,10 @@ docker compose up -d"#,
             ResourceLink {
                 label: "Best self-hosted monitors",
                 href: "/blog/best-self-hosted-uptime-monitoring-tools",
+            },
+            ResourceLink {
+                label: "Built in Rust",
+                href: "/blog/building-an-uptime-monitor-in-rust",
             },
         ],
         cta: "Start free",
@@ -677,10 +697,16 @@ docker compose up -d"#,
             },
         ],
         code: None,
-        resources: &[ResourceLink {
-            label: "Monitoring as code",
-            href: "/automation",
-        }],
+        resources: &[
+            ResourceLink {
+                label: "Monitoring as code",
+                href: "/automation",
+            },
+            ResourceLink {
+                label: "vs OneUptime",
+                href: "/vs/oneuptime",
+            },
+        ],
         cta: "Start free",
     },
     Landing {
@@ -819,6 +845,10 @@ docker compose up -d"#,
                 label: "Best self-hosted monitors",
                 href: "/blog/best-self-hosted-uptime-monitoring-tools",
             },
+            ResourceLink {
+                label: "vs self-hosted monitors",
+                href: "/vs/self-hosted-monitoring",
+            },
         ],
         cta: "Start free",
     },
@@ -884,6 +914,10 @@ docker compose up -d"#,
             ResourceLink {
                 label: "Self-hosted status page",
                 href: "/self-hosted-status-page",
+            },
+            ResourceLink {
+                label: "vs Better Stack",
+                href: "/vs/better-stack",
             },
         ],
         cta: "Start free",
@@ -1132,6 +1166,10 @@ resource "uptimepage_target" "api" {
                 label: "How the MCP server works",
                 href: "/blog/mcp-server",
             },
+            ResourceLink {
+                label: "For developers",
+                href: "/uptime-monitoring-for-developers",
+            },
         ],
         cta: "Start free",
     },
@@ -1223,6 +1261,10 @@ resource "uptimepage_target" "api" {
                 label: "MCP server",
                 href: "/mcp-server",
             },
+            ResourceLink {
+                label: "For developers",
+                href: "/uptime-monitoring-for-developers",
+            },
         ],
         cta: "Start free",
     },
@@ -1293,6 +1335,10 @@ resource "uptimepage_target" "api" {
             ResourceLink {
                 label: "How the MCP server works",
                 href: "/blog/mcp-server",
+            },
+            ResourceLink {
+                label: "For developers",
+                href: "/uptime-monitoring-for-developers",
             },
             ResourceLink {
                 label: "Monitoring as code",
