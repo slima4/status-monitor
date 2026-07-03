@@ -346,18 +346,34 @@ impl AdminRepo {
         .await
         .context("admin: heartbeat rows to heal")?;
         for (target_id,) in missing {
+            // Lock the target so a delete can't commit between this check and the
+            // insert — that race trips the FK or the same-org trigger and would
+            // abort every org's reconcile. A target already gone has nothing to heal.
+            let mut tx = self
+                .pool
+                .begin()
+                .await
+                .context("admin: heal heartbeat tx")?;
+            let owner: Option<(Uuid,)> =
+                sqlx::query_as("SELECT org_id FROM targets WHERE id = $1 FOR KEY SHARE")
+                    .bind(target_id)
+                    .fetch_optional(&mut *tx)
+                    .await
+                    .context("admin: lock heartbeat target")?;
+            let Some((org_id,)) = owner else { continue };
             let minted = crate::storage::capability_token::mint(self.cipher.as_deref())?;
             sqlx::query(
                 "INSERT INTO heartbeat_monitors (target_id, org_id, token_hash, token_enc) \
-                 SELECT t.id, t.org_id, $2, $3 FROM targets t WHERE t.id = $1 \
-                 ON CONFLICT (target_id) DO NOTHING",
+                 VALUES ($1, $2, $3, $4) ON CONFLICT (target_id) DO NOTHING",
             )
             .bind(target_id)
+            .bind(org_id)
             .bind(&minted.hash)
             .bind(&minted.sealed)
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await
             .context("admin: heal heartbeat row")?;
+            tx.commit().await.context("admin: commit heartbeat heal")?;
             tracing::warn!(%target_id, "healed missing heartbeat_monitors row");
         }
         let rows: Vec<(
