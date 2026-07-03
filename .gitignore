@@ -42,6 +42,7 @@ skills-lock.json
 /static/js/ui/
 /static/js/public/
 /static/js/charts/
+/static/js/marketing/
 /static/js/manifest.json
 /static/js/.esbuild-meta.json
 

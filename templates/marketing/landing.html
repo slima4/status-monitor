@@ -6,6 +6,7 @@
 <script type="application/ld+json">{{ software_json_ld.as_str()|safe }}</script>
 <script type="application/ld+json">{{ faq_json_ld.as_str()|safe }}</script>
 <script type="application/ld+json">{{ howto_json_ld.as_str()|safe }}</script>
+<script defer src="{{ "js/marketing/lightbox.js"|asset }}"></script>
 {% endblock %}
 {% block content %}
 <div class="space-y-24 sm:space-y-28">
@@ -48,73 +49,111 @@
                     <p class="mk-heromap__label mk-mono">checked from several regions</p>
                     {% include "marketing/_world_map.html" %}
                 </div>
-
-                <div class="mk-preview">
-                    <div class="flex items-center gap-1.5 px-3 py-2 mk-rule-bottom mk-preview__chrome">
-                        <span class="h-2 w-2 rounded-full mk-preview__dot--down" aria-hidden="true"></span>
-                        <span class="h-2 w-2 rounded-full mk-preview__dot--warn" aria-hidden="true"></span>
-                        <span class="h-2 w-2 rounded-full mk-preview__dot--ok" aria-hidden="true"></span>
-                        <span class="ml-3 truncate rounded-sm px-2 py-0.5 mk-mono mk-quiet mk-preview__url">acme.uptimepage.dev</span>
-                    </div>
-                    <div class="space-y-3 p-3">
-                        <div role="status" aria-live="polite" class="rounded-sm p-3 mk-preview__banner">
-                            <div class="flex items-center gap-3">
-                                <span aria-hidden="true" class="inline-grid h-8 w-8 place-items-center rounded-full mk-preview__check">
-                                    <svg viewBox="0 0 24 24" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg>
-                                </span>
-                                <div class="min-w-0">
-                                    <p class="mk-h3 mk-preview__title">all systems operational</p>
-                                    <p class="mt-0.5 mk-mono mk-quiet mk-preview__meta">last check 3s ago</p>
-                                </div>
-                            </div>
-                        </div>
-
-                        <ul class="overflow-hidden rounded-sm mk-panel">
-                            <li class="p-3">
-                                <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-                                    <p class="flex items-center gap-2 mk-mono mk-preview__row">
-                                        <span aria-hidden="true" class="mk-preview__bullet">●</span>
-                                        <span class="mk-preview__name">marketing site</span>
-                                    </p>
-                                    <span class="mk-mono mk-preview__ok">OK</span>
-                                </div>
-                                <div role="img" aria-label="Daily status history, last 60 days."
-                                     class="mt-2 grid grid-flow-col auto-cols-fr gap-0.5">
-                                    {% for _ in 0..60 %}<span class="mk-daystrip"></span>{% endfor %}
-                                </div>
-                            </li>
-                            <li class="mk-rule-top p-3">
-                                <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-                                    <p class="flex items-center gap-2 mk-mono mk-preview__row">
-                                        <span aria-hidden="true" class="mk-preview__bullet">●</span>
-                                        <span class="mk-preview__name">api</span>
-                                    </p>
-                                    <span class="mk-mono mk-preview__ok">OK</span>
-                                </div>
-                                <div role="img" aria-label="Daily status history, last 60 days, with 1 degraded day."
-                                     class="mt-2 grid grid-flow-col auto-cols-fr gap-0.5">
-                                    {% for i in 0..60 %}<span class="mk-daystrip{% if i == 38 %} mk-daystrip--warn{% endif %}"></span>{% endfor %}
-                                </div>
-                            </li>
-                            <li class="mk-rule-top p-3">
-                                <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-                                    <p class="flex items-center gap-2 mk-mono mk-preview__row">
-                                        <span aria-hidden="true" class="mk-preview__bullet">●</span>
-                                        <span class="mk-preview__name">dashboard</span>
-                                    </p>
-                                    <span class="mk-mono mk-preview__ok">OK</span>
-                                </div>
-                                <div role="img" aria-label="Daily status history, last 60 days."
-                                     class="mt-2 grid grid-flow-col auto-cols-fr gap-0.5">
-                                    {% for _ in 0..60 %}<span class="mk-daystrip"></span>{% endfor %}
-                                </div>
-                            </li>
-                        </ul>
-                    </div>
-                </div>
-                <p class="text-center mk-mono text-xs mk-quiet">↑ what your customers see</p>
             </div>
         </div>
+    </section>
+
+    {# Product gallery — add a shot: drop PNG in static/marketing/ + copy one .mk-gallery__item block with a unique #id. #}
+    <section id="see" aria-labelledby="mk-see-title" class="space-y-8">
+        <header class="mx-auto max-w-2xl space-y-3 text-center">
+            <h2 id="mk-see-title" class="mk-h2">Inside the app.</h2>
+            <p class="mk-body">
+                Your monitors, their live status, and the public page your
+                customers see. Scroll across, click any shot to enlarge.
+            </p>
+        </header>
+
+        <ul class="mk-gallery" role="list">
+            <li class="mk-gallery__item">
+                <a class="mk-gallery__card" href="#shot-dashboard" aria-label="Enlarge the dashboard screenshot">
+                    <img class="mk-gallery__img" src="{{ "marketing/shot-dashboard.png"|asset }}"
+                         loading="lazy" decoding="async"
+                         alt="The Uptimepage dashboard: monitors with live up or down status, response times, and uptime.">
+                    <span class="mk-gallery__zoom" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path stroke-linecap="round" d="M21 21l-4.3-4.3M11 8.5v5M8.5 11h5"/></svg>
+                    </span>
+                </a>
+                <div id="shot-dashboard" class="mk-lightbox">
+                    <a class="mk-lightbox__backdrop" href="#see" aria-label="Close" tabindex="-1"></a>
+                    <a class="mk-lightbox__close" href="#see" aria-label="Close">&times;</a>
+                    <a class="mk-lightbox__nav mk-lightbox__nav--prev" href="#shot-status" aria-label="Previous image">&#10094;</a>
+                    <a class="mk-lightbox__nav mk-lightbox__nav--next" href="#shot-monitors" aria-label="Next image">&#10095;</a>
+                    <img class="mk-lightbox__img" src="{{ "marketing/shot-dashboard.png"|asset }}" loading="lazy" decoding="async" alt="The Uptimepage dashboard, full size.">
+                </div>
+            </li>
+
+            <li class="mk-gallery__item">
+                <a class="mk-gallery__card" href="#shot-monitors" aria-label="Enlarge the monitors screenshot">
+                    <img class="mk-gallery__img" src="{{ "marketing/shot-monitor.png"|asset }}"
+                         loading="lazy" decoding="async"
+                         alt="The monitors list: grouped checks with live status, response time, and uptime.">
+                    <span class="mk-gallery__zoom" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path stroke-linecap="round" d="M21 21l-4.3-4.3M11 8.5v5M8.5 11h5"/></svg>
+                    </span>
+                </a>
+                <div id="shot-monitors" class="mk-lightbox">
+                    <a class="mk-lightbox__backdrop" href="#see" aria-label="Close" tabindex="-1"></a>
+                    <a class="mk-lightbox__close" href="#see" aria-label="Close">&times;</a>
+                    <a class="mk-lightbox__nav mk-lightbox__nav--prev" href="#shot-dashboard" aria-label="Previous image">&#10094;</a>
+                    <a class="mk-lightbox__nav mk-lightbox__nav--next" href="#shot-create-monitor" aria-label="Next image">&#10095;</a>
+                    <img class="mk-lightbox__img" src="{{ "marketing/shot-monitor.png"|asset }}" loading="lazy" decoding="async" alt="The monitors list, full size.">
+                </div>
+            </li>
+
+            <li class="mk-gallery__item">
+                <a class="mk-gallery__card" href="#shot-create-monitor" aria-label="Enlarge the new-monitor screenshot">
+                    <img class="mk-gallery__img" src="{{ "marketing/shot-create-monitor.png"|asset }}"
+                         loading="lazy" decoding="async"
+                         alt="The new-monitor form: choose a check type (HTTP, TCP, ping, DNS, TLS, domain), interval, notification channels, and tags.">
+                    <span class="mk-gallery__zoom" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path stroke-linecap="round" d="M21 21l-4.3-4.3M11 8.5v5M8.5 11h5"/></svg>
+                    </span>
+                </a>
+                <div id="shot-create-monitor" class="mk-lightbox">
+                    <a class="mk-lightbox__backdrop" href="#see" aria-label="Close" tabindex="-1"></a>
+                    <a class="mk-lightbox__close" href="#see" aria-label="Close">&times;</a>
+                    <a class="mk-lightbox__nav mk-lightbox__nav--prev" href="#shot-monitors" aria-label="Previous image">&#10094;</a>
+                    <a class="mk-lightbox__nav mk-lightbox__nav--next" href="#shot-create-channel" aria-label="Next image">&#10095;</a>
+                    <img class="mk-lightbox__img" src="{{ "marketing/shot-create-monitor.png"|asset }}" loading="lazy" decoding="async" alt="The new-monitor form, full size.">
+                </div>
+            </li>
+
+            <li class="mk-gallery__item">
+                <a class="mk-gallery__card" href="#shot-create-channel" aria-label="Enlarge the notification-channel screenshot">
+                    <img class="mk-gallery__img" src="{{ "marketing/shot-create-channel.png"|asset }}"
+                         loading="lazy" decoding="async"
+                         alt="The new notification-channel form: choose a channel type such as Slack, Discord, email, Telegram, PagerDuty, SMS, or webhook.">
+                    <span class="mk-gallery__zoom" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path stroke-linecap="round" d="M21 21l-4.3-4.3M11 8.5v5M8.5 11h5"/></svg>
+                    </span>
+                </a>
+                <div id="shot-create-channel" class="mk-lightbox">
+                    <a class="mk-lightbox__backdrop" href="#see" aria-label="Close" tabindex="-1"></a>
+                    <a class="mk-lightbox__close" href="#see" aria-label="Close">&times;</a>
+                    <a class="mk-lightbox__nav mk-lightbox__nav--prev" href="#shot-create-monitor" aria-label="Previous image">&#10094;</a>
+                    <a class="mk-lightbox__nav mk-lightbox__nav--next" href="#shot-status" aria-label="Next image">&#10095;</a>
+                    <img class="mk-lightbox__img" src="{{ "marketing/shot-create-channel.png"|asset }}" loading="lazy" decoding="async" alt="The new notification-channel form, full size.">
+                </div>
+            </li>
+
+            <li class="mk-gallery__item">
+                <a class="mk-gallery__card" href="#shot-status" aria-label="Enlarge the status page screenshot">
+                    <img class="mk-gallery__img" src="{{ "marketing/shot-status.png"|asset }}"
+                         loading="lazy" decoding="async"
+                         alt="A public status page reading All Systems Operational, with 90-day uptime history per component.">
+                    <span class="mk-gallery__zoom" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path stroke-linecap="round" d="M21 21l-4.3-4.3M11 8.5v5M8.5 11h5"/></svg>
+                    </span>
+                </a>
+                <div id="shot-status" class="mk-lightbox">
+                    <a class="mk-lightbox__backdrop" href="#see" aria-label="Close" tabindex="-1"></a>
+                    <a class="mk-lightbox__close" href="#see" aria-label="Close">&times;</a>
+                    <a class="mk-lightbox__nav mk-lightbox__nav--prev" href="#shot-create-channel" aria-label="Previous image">&#10094;</a>
+                    <a class="mk-lightbox__nav mk-lightbox__nav--next" href="#shot-dashboard" aria-label="Next image">&#10095;</a>
+                    <img class="mk-lightbox__img" src="{{ "marketing/shot-status.png"|asset }}" loading="lazy" decoding="async" alt="A public status page, full size.">
+                </div>
+            </li>
+        </ul>
     </section>
 
     {# ── Integrations ──────────────────────────────────────────── #}
@@ -156,113 +195,10 @@
         </ul>
     </section>
 
-    {# Product gallery — add a shot: drop PNG in static/marketing/ + copy one .mk-gallery__item block with a unique #id. #}
-    <section id="see" aria-labelledby="mk-see-title" class="space-y-8">
-        <header class="mx-auto max-w-2xl space-y-3 text-center">
-            <p class="mk-eyebrow mk-eyebrow--ok">see it</p>
-            <h2 id="mk-see-title" class="mk-h2">Inside the app.</h2>
-            <p class="mk-body">
-                Your monitors, their live status, and the public page your
-                customers see. Scroll across, click any shot to enlarge.
-            </p>
-        </header>
-
-        <ul class="mk-gallery" role="list">
-            <li class="mk-gallery__item">
-                <a class="mk-gallery__card" href="#shot-dashboard" aria-label="Enlarge the dashboard screenshot">
-                    <span class="mk-gallery__chrome">
-                        <span class="mk-gallery__dot" aria-hidden="true"></span>
-                        <span class="mk-gallery__dot" aria-hidden="true"></span>
-                        <span class="mk-gallery__dot" aria-hidden="true"></span>
-                        <span class="mk-gallery__url">app.uptimepage.dev/dashboard</span>
-                    </span>
-                    <img class="mk-gallery__img" src="{{ "marketing/shot-dashboard.png"|asset }}"
-                         loading="lazy" decoding="async"
-                         alt="The Uptimepage dashboard: monitors with live up or down status, response times, and uptime.">
-                    <span class="mk-gallery__zoom" aria-hidden="true">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path stroke-linecap="round" d="M21 21l-4.3-4.3M11 8.5v5M8.5 11h5"/></svg>
-                    </span>
-                </a>
-                <div id="shot-dashboard" class="mk-lightbox">
-                    <a class="mk-lightbox__backdrop" href="#see" aria-label="Close" tabindex="-1"></a>
-                    <a class="mk-lightbox__close" href="#see" aria-label="Close">&times;</a>
-                    <img class="mk-lightbox__img" src="{{ "marketing/shot-dashboard.png"|asset }}" loading="lazy" decoding="async" alt="The Uptimepage dashboard, full size.">
-                </div>
-            </li>
-
-            <li class="mk-gallery__item">
-                <a class="mk-gallery__card" href="#shot-monitors" aria-label="Enlarge the monitors screenshot">
-                    <span class="mk-gallery__chrome">
-                        <span class="mk-gallery__dot" aria-hidden="true"></span>
-                        <span class="mk-gallery__dot" aria-hidden="true"></span>
-                        <span class="mk-gallery__dot" aria-hidden="true"></span>
-                        <span class="mk-gallery__url">app.uptimepage.dev/monitors</span>
-                    </span>
-                    <img class="mk-gallery__img" src="{{ "marketing/shot-monitor.png"|asset }}"
-                         loading="lazy" decoding="async"
-                         alt="The monitors list: grouped checks with live status, response time, and uptime.">
-                    <span class="mk-gallery__zoom" aria-hidden="true">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path stroke-linecap="round" d="M21 21l-4.3-4.3M11 8.5v5M8.5 11h5"/></svg>
-                    </span>
-                </a>
-                <div id="shot-monitors" class="mk-lightbox">
-                    <a class="mk-lightbox__backdrop" href="#see" aria-label="Close" tabindex="-1"></a>
-                    <a class="mk-lightbox__close" href="#see" aria-label="Close">&times;</a>
-                    <img class="mk-lightbox__img" src="{{ "marketing/shot-monitor.png"|asset }}" loading="lazy" decoding="async" alt="The monitors list, full size.">
-                </div>
-            </li>
-
-            <li class="mk-gallery__item">
-                <a class="mk-gallery__card" href="#shot-status" aria-label="Enlarge the status page screenshot">
-                    <span class="mk-gallery__chrome">
-                        <span class="mk-gallery__dot" aria-hidden="true"></span>
-                        <span class="mk-gallery__dot" aria-hidden="true"></span>
-                        <span class="mk-gallery__dot" aria-hidden="true"></span>
-                        <span class="mk-gallery__url">acme.uptimepage.dev</span>
-                    </span>
-                    <img class="mk-gallery__img" src="{{ "marketing/shot-status.png"|asset }}"
-                         loading="lazy" decoding="async"
-                         alt="A public status page reading All Systems Operational, with 90-day uptime history per component.">
-                    <span class="mk-gallery__zoom" aria-hidden="true">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path stroke-linecap="round" d="M21 21l-4.3-4.3M11 8.5v5M8.5 11h5"/></svg>
-                    </span>
-                </a>
-                <div id="shot-status" class="mk-lightbox">
-                    <a class="mk-lightbox__backdrop" href="#see" aria-label="Close" tabindex="-1"></a>
-                    <a class="mk-lightbox__close" href="#see" aria-label="Close">&times;</a>
-                    <img class="mk-lightbox__img" src="{{ "marketing/shot-status.png"|asset }}" loading="lazy" decoding="async" alt="A public status page, full size.">
-                </div>
-            </li>
-        </ul>
-    </section>
-
-    {# ── Stats ─────────────────────────────────────────────────── #}
-    <section aria-label="At-a-glance">
-        <dl class="mk-stats">
-            <div class="mk-stat">
-                <dt class="mk-stat__unit">min check interval</dt>
-                <dd class="mk-stat__num"><em class="mk-stat__num--em">60</em>s</dd>
-            </div>
-            <div class="mk-stat">
-                <dt class="mk-stat__unit">public history</dt>
-                <dd class="mk-stat__num"><em class="mk-stat__num--em">90</em>d</dd>
-            </div>
-            <div class="mk-stat">
-                <dt class="mk-stat__unit">alert channels</dt>
-                <dd class="mk-stat__num"><em class="mk-stat__num--em">10</em>+</dd>
-            </div>
-            <div class="mk-stat">
-                <dt class="mk-stat__unit">to start</dt>
-                <dd class="mk-stat__num">$<em class="mk-stat__num--em">0</em></dd>
-            </div>
-        </dl>
-    </section>
-
     {# ── Features ──────────────────────────────────────────────── #}
     <section id="features" class="space-y-8">
         <header class="mx-auto max-w-2xl space-y-3 text-center">
-            <p class="mk-eyebrow mk-eyebrow--ok">capabilities</p>
-            <h2 class="mk-h2">Six jobs, done properly.</h2>
+            <h2 class="mk-h2">Monitoring, alerts, status page, incidents.</h2>
         </header>
 
         <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -286,7 +222,7 @@
                     <path d="M18 16v-5a6 6 0 0 0-12 0v5l-2 3h16l-2-3Z"/>
                     <path d="M10 19a2 2 0 0 0 4 0"/>
                 </svg>
-                <h3 class="mk-h3">page on-call, not a chatroom</h3>
+                <h3 class="mk-h3">page the person on-call</h3>
                 <p class="mk-body">
                     Slack, Discord, Telegram, WhatsApp, SMS, PagerDuty, email,
                     webhook, and more. Per-monitor channels with dedupe and
@@ -357,8 +293,7 @@
     {# ── How it works ──────────────────────────────────────────── #}
     <section id="how-it-works" class="space-y-8">
         <header class="mx-auto max-w-2xl space-y-3 text-center">
-            <p class="mk-eyebrow mk-eyebrow--ok">from zero to live</p>
-            <h2 class="mk-h2">3 steps. <em class="mk-h2-em">No setup wizard.</em></h2>
+            <h2 class="mk-h2">Live in <em class="mk-h2-em">three steps</em>.</h2>
         </header>
 
         <ol class="grid gap-4 md:grid-cols-3">
@@ -394,14 +329,13 @@
     {# ── Use cases ─────────────────────────────────────────────── #}
     <section class="space-y-8">
         <header class="mx-auto max-w-2xl space-y-3 text-center">
-            <p class="mk-eyebrow mk-eyebrow--ok">who it’s for</p>
             <h2 class="mk-h2">Where it fits.</h2>
         </header>
 
         <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
             <article class="mk-card space-y-2">
                 <p class="mk-eyebrow">saas &amp; sre</p>
-                <h3 class="mk-h3">on-call without the sprawl</h3>
+                <h3 class="mk-h3">page on-call, one tool</h3>
                 <p class="mk-body">
                     Monitor production, page the on-call when it breaks, and
                     give customers a <a href="/status-page-for-saas" class="mk-footer-link mk-footer-link--inline">status page</a>, <span class="mk-mark">one tool, no second vendor</span>.
@@ -409,7 +343,7 @@
             </article>
             <article class="mk-card space-y-2">
                 <p class="mk-eyebrow">indie hackers</p>
-                <h3 class="mk-h3">look like a real shop</h3>
+                <h3 class="mk-h3">a status page from day one</h3>
                 <p class="mk-body">
                     Ship a polished status page on day one, hosted free or
                     <a href="/self-hosted-status-page" class="mk-footer-link mk-footer-link--inline">self-hosted</a>.
@@ -426,7 +360,7 @@
             </article>
             <article class="mk-card space-y-2">
                 <p class="mk-eyebrow">agencies</p>
-                <h3 class="mk-h3">1 tab, many clients</h3>
+                <h3 class="mk-h3">many clients, one login</h3>
                 <p class="mk-body">
                     Give each client a <a href="/status-page-for-agencies" class="mk-footer-link mk-footer-link--inline">branded status URL</a>. 1 account,
                     many pages.
@@ -446,7 +380,6 @@
     {# ── Pricing ───────────────────────────────────────────────── #}
     <section id="pricing" class="mx-auto max-w-3xl space-y-5">
         <header class="space-y-2 text-center">
-            <p class="mk-eyebrow mk-eyebrow--ok">pricing</p>
             <h2 class="mk-h2">Free to start. <em class="mk-h2-em">Open source</em> to keep.</h2>
         </header>
         <div class="mk-tierband">
@@ -483,7 +416,6 @@
     {# ── FAQ ───────────────────────────────────────────────────── #}
     <section id="faq" class="mx-auto max-w-3xl space-y-6">
         <header class="space-y-2 text-center">
-            <p class="mk-eyebrow mk-eyebrow--ok">common questions</p>
             <h2 class="mk-h2">FAQ</h2>
         </header>
         <div>
