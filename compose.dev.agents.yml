@@ -24,9 +24,6 @@ x-dev-agent: &dev-agent
   image: uptimepage:dev-agent
   restart: unless-stopped
   stop_grace_period: 30s
-  # Unprivileged ICMP for the ping monitor: nonroot gid must sit in this range.
-  sysctls:
-    net.ipv4.ping_group_range: "0 2147483647"
   # No published ports — like a real agent box, nothing is exposed to the host.
   # (The agent serves metrics on :9090 inside the container; not needed here.)
 
