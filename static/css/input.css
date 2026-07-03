@@ -124,6 +124,9 @@
     --theme-accent:        var(--theme-action-primary);
     --theme-accent-soft:   oklch(0.94 0.06 158);
     --theme-mark:          oklch(0.78 0.135 62);
+    /* Focus border + ring share this one hue so they read as a single
+       indicator; tracks the brand accent. */
+    --theme-focus-ring:    var(--theme-accent);
 
     /* CLI register is flat — terminal UIs don't have raised controls.
        Btn-hover keeps a subtle inset highlight for tactile feedback;
@@ -577,8 +580,8 @@
        loses to theirs and the indicator vanishes. outline is an
        independent property — never eaten. WCAG 2.2 / 2.4.7 (≥3:1). */
     :where(button, [role="button"], a, input, select, textarea, summary):focus-visible {
-        outline: 2px solid var(--color-brand-500);
-        outline-offset: 2px;
+        outline: 2px solid var(--theme-focus-ring);
+        outline-offset: 0;
     }
 
     /* Tailwind preflight zeroes margin on every element including <dialog>,
@@ -1308,8 +1311,8 @@
         border-color: var(--theme-ink);
     }
     .file-cli:focus-within .file-cli__btn {
-        outline: 2px solid var(--color-brand-500);
-        outline-offset: 2px;
+        outline: 2px solid var(--theme-focus-ring);
+        outline-offset: 0;
     }
     .file-cli__name { color: var(--theme-text-quiet); }
 
@@ -1333,7 +1336,7 @@
         font-family: var(--font-mono);
         transition: border-color 120ms ease;
     }
-    .field:focus { border-color: var(--theme-accent); }
+    .field:focus { border-color: var(--theme-focus-ring); }
     .field:disabled {
         @apply cursor-not-allowed;
         background: var(--theme-surface-sunk);
@@ -1465,10 +1468,10 @@
         background: var(--theme-surface-elev);
         transition: border-color 120ms ease;
     }
-    .field-join:focus-within { border-color: var(--theme-accent); }
+    .field-join:focus-within { border-color: var(--theme-focus-ring); }
     .field-join:has(:focus-visible) {
-        outline: 2px solid var(--color-brand-500);
-        outline-offset: 2px;
+        outline: 2px solid var(--theme-focus-ring);
+        outline-offset: 0;
     }
     .field-join :focus-visible { outline: none; }
     .field-join > .sm-combobox {
@@ -3207,7 +3210,7 @@
         height: 2rem;
         transition: border-color 120ms ease;
     }
-    .monitors-search:focus-within { border-color: var(--theme-accent); }
+    .monitors-search:focus-within { border-color: var(--theme-focus-ring); }
     /* Embedded contexts (channel-form picker): shrink with the card instead
        of forcing the toolbar's 16rem floor. */
     .monitors-search--fluid { min-width: 0; }
@@ -3249,7 +3252,7 @@
         cursor: pointer;
     }
     .monitors-toolbar__select:hover { border-color: var(--theme-ink); }
-    .monitors-toolbar__select:focus { border-color: var(--theme-accent); outline: none; }
+    .monitors-toolbar__select:focus { border-color: var(--theme-focus-ring); outline: none; }
 
     /* ── Floating menu surface ───────────────────────────────────────
        Shared base for every fixed-position popover/listbox (row menus,
