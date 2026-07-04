@@ -62,6 +62,12 @@ pub fn routes(state: AppState) -> Router {
         // Public email-channel verification: possession of the mailed token
         // is the proof; same always-mounted reasoning as the share links.
         .route("/verify-channel", get(views::verify_channel::verify))
+        // GET confirms (so a link-scanner's prefetch can't disable a channel),
+        // POST performs the stop and serves the RFC 8058 one-click.
+        .route(
+            "/alert-channel/stop",
+            get(views::alert_channel_stop::confirm).post(views::alert_channel_stop::stop),
+        )
         // Public status-page subscriptions: confirm/unsubscribe carry their own
         // token/HMAC proof, so they're always mounted like the verify link.
         .route("/subscribe", post(views::subscribe::subscribe))

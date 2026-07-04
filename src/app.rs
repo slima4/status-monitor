@@ -319,6 +319,9 @@ pub struct AppState {
     /// Keys the public unsubscribe HMAC. Persisted and independent of
     /// `fingerprint_salt` so rotating that salt can't void mailed links.
     pub subscription_unsubscribe_secret: String,
+    /// Keys the one-click stop link mailed to alert-channel recipients.
+    /// Separate from the subscriber secret so the two authorities don't overlap.
+    pub alert_channel_stop_secret: String,
 }
 
 /// Run unconditionally at boot after config parse. Encodes the per-org
@@ -553,12 +556,19 @@ impl AppState {
             ad_hoc: Arc::new(AdHocDispatch::new()),
             shutdown: None,
             subscription_unsubscribe_secret: String::new(),
+            alert_channel_stop_secret: String::new(),
         }
     }
 
     /// Set the persisted secret that keys public unsubscribe links.
     pub fn with_subscription_unsubscribe_secret(mut self, secret: String) -> Self {
         self.subscription_unsubscribe_secret = secret;
+        self
+    }
+
+    /// Set the persisted secret that keys alert-channel one-click stop links.
+    pub fn with_alert_channel_stop_secret(mut self, secret: String) -> Self {
+        self.alert_channel_stop_secret = secret;
         self
     }
 

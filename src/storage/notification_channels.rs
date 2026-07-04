@@ -15,6 +15,7 @@ use chrono::{DateTime, Utc};
 use parking_lot::Mutex;
 use serde_json::Value;
 use sqlx::PgPool;
+use subtle::ConstantTimeEq;
 use uuid::Uuid;
 
 use crate::api::error::codes;
@@ -123,6 +124,34 @@ pub trait NotificationChannelStore: Send + Sync {
         id: Uuid,
         expected_updated_at: DateTime<Utc>,
     ) -> Result<bool>;
+    /// Disable one channel by id with no org scope: the signed one-click stop
+    /// link is the authority. Clears verification so it cannot silently resume.
+    /// Idempotent.
+    async fn disable_self_service(&self, channel_id: Uuid, reason: &str) -> Result<bool>;
+}
+
+/// One-click stop proof: HMAC of the channel id, scoped to that channel so a
+/// click can reach no other. Reproduced at send time, nothing persisted.
+pub fn channel_stop_token(secret: &str, channel_id: Uuid) -> String {
+    crate::auth::mac::hmac_sha256_hex(secret.as_bytes(), &[channel_id.as_bytes()])
+}
+
+pub fn verify_channel_stop(secret: &str, channel_id: Uuid, presented: &str) -> bool {
+    channel_stop_token(secret, channel_id)
+        .as_bytes()
+        .ct_eq(presented.as_bytes())
+        .into()
+}
+
+/// Absolute one-click stop/decline link for a channel; `None` when the base URL
+/// or stop secret is unset so no dead link is ever mailed.
+pub fn channel_stop_url(base_url: &str, secret: &str, channel_id: Uuid) -> Option<String> {
+    let base = base_url.trim_end_matches('/');
+    if base.is_empty() || secret.is_empty() {
+        return None;
+    }
+    let mac = channel_stop_token(secret, channel_id);
+    Some(format!("{base}/alert-channel/stop?c={channel_id}&t={mac}"))
 }
 
 // ── Postgres impl ────────────────────────────────────────────────────────
@@ -465,6 +494,20 @@ impl NotificationChannelStore for PgNotificationChannelStore {
         .map_err(|e| AppError::Other(anyhow!("set verified: {e}")))?;
         Ok(result.rows_affected() > 0)
     }
+
+    async fn disable_self_service(&self, channel_id: Uuid, reason: &str) -> Result<bool> {
+        let result = sqlx::query(
+            r#"UPDATE notification_channels /* SAFE: recipient self-service stop — the signed one-click link proves control of the destination inbox; scoped to this single channel by id */
+               SET enabled = false, verified_at = NULL, disabled_reason = $2, updated_at = now()
+               WHERE id = $1 AND enabled"#,
+        )
+        .bind(channel_id)
+        .bind(reason)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| AppError::Other(anyhow!("disable self-service: {e}")))?;
+        Ok(result.rows_affected() > 0)
+    }
 }
 
 // ── In-memory impl (tests) ──────────────────────────────────────────────
@@ -668,6 +711,18 @@ impl NotificationChannelStore for InMemoryNotificationChannelStore {
             return Ok(false);
         };
         e.ch.verified_at = Some(Utc::now());
+        e.ch.updated_at = Utc::now();
+        Ok(true)
+    }
+
+    async fn disable_self_service(&self, channel_id: Uuid, reason: &str) -> Result<bool> {
+        let mut g = self.inner.lock();
+        let Some(e) = g.iter_mut().find(|e| e.ch.id == channel_id && e.ch.enabled) else {
+            return Ok(false);
+        };
+        e.ch.enabled = false;
+        e.ch.verified_at = None;
+        e.ch.disabled_reason = Some(reason.to_string());
         e.ch.updated_at = Utc::now();
         Ok(true)
     }
@@ -878,6 +933,46 @@ mod tests {
             .unwrap();
         assert!(re.enabled);
         assert_eq!(re.disabled_reason, None);
+    }
+
+    #[tokio::test]
+    async fn disable_self_service_by_id_is_idempotent() {
+        let store = InMemoryNotificationChannelStore::new();
+        let ch = store
+            .create(org(), slack("ops"), WriteSource::Ui, 10, None)
+            .await
+            .unwrap();
+        assert!(
+            store
+                .disable_self_service(ch.id, "recipient stopped delivery")
+                .await
+                .unwrap()
+        );
+        let got = store.get(org(), ch.id).await.unwrap().unwrap();
+        assert!(!got.enabled);
+        assert_eq!(
+            got.disabled_reason.as_deref(),
+            Some("recipient stopped delivery")
+        );
+        // Already disabled, and unknown id, are both no-ops.
+        assert!(!store.disable_self_service(ch.id, "again").await.unwrap());
+        assert!(
+            !store
+                .disable_self_service(Uuid::now_v7(), "x")
+                .await
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn channel_stop_token_roundtrips_and_rejects_forgery() {
+        let id = Uuid::from_u128(0xC1);
+        let tok = channel_stop_token("secret", id);
+        assert!(verify_channel_stop("secret", id, &tok));
+        assert!(!verify_channel_stop("secret", id, "deadbeef"));
+        assert!(!verify_channel_stop("other-secret", id, &tok));
+        // A token for one channel cannot authorise another.
+        assert!(!verify_channel_stop("secret", Uuid::from_u128(0xC2), &tok));
     }
 
     #[test]

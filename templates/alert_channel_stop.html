@@ -1,0 +1,25 @@
+{% extends "chromeless_base.html" %}
+{% block title %}{% if phase == "done" %}Delivery stopped{% else if phase == "confirm" %}Stop alerts{% else %}Link invalid{% endif %}{% endblock %}
+{% block main %}
+    <main class="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-4 px-6 text-center">
+        {% if phase == "confirm" %}
+        <h1 class="page-title justify-center"><span class="page-title__prefix" aria-hidden="true">$</span>stop alerts</h1>
+        <p class="text-sm text-muted">
+            Stop sending alert emails to this address? The channel's owner can
+            re-add it later.
+        </p>
+        <form method="post" action="/alert-channel/stop?c={{ c }}&amp;t={{ t }}">
+            <button type="submit" class="sticker-btn sticker-btn--primary px-3 py-1.5 text-sm font-medium">stop delivery</button>
+        </form>
+        {% else if phase == "done" %}
+        <h1 class="page-title justify-center"><span class="page-title__prefix" aria-hidden="true">$</span>delivery stopped</h1>
+        <p class="text-sm text-muted">
+            This address will no longer receive alerts from this channel. You can
+            close this page.
+        </p>
+        {% else %}
+        <h1 class="page-title justify-center"><span class="page-title__prefix" aria-hidden="true">$</span>link invalid</h1>
+        <p class="text-sm text-muted">This link is invalid or has expired.</p>
+        {% endif %}
+    </main>
+{% endblock %}

@@ -33,7 +33,7 @@ use crate::notifier::telegram::TelegramNotifier;
 use crate::notifier::webhook::WebhookNotifier;
 use crate::notifier::whatsapp::WhatsAppNotifier;
 
-pub use crate::notifier::email::EmailDelivery;
+pub use crate::notifier::email::{EmailAlert, EmailDelivery, email_alert_for};
 
 #[async_trait]
 pub trait Notifier: Send + Sync {
@@ -92,6 +92,7 @@ pub fn build_notifier(
     central: Option<CentralTelegram<'_>>,
     whatsapp: Option<&crate::config::WhatsAppAppBotConfig>,
     email: Option<&EmailDelivery>,
+    email_alert: Option<EmailAlert>,
 ) -> Result<Arc<dyn Notifier>> {
     let parse = |s: &str| -> Result<url::Url> {
         s.parse::<url::Url>().map_err(|e| {
@@ -171,7 +172,11 @@ pub fn build_notifier(
                     "email delivery is not configured on this deployment",
                 )
             })?;
-            Arc::new(EmailNotifier::new(email, &c.to)) as Arc<dyn Notifier>
+            Arc::new(EmailNotifier::new(
+                email,
+                &c.to,
+                email_alert.unwrap_or_default(),
+            )) as Arc<dyn Notifier>
         }
         ChannelConfig::PagerDuty(c) => {
             Arc::new(PagerDutyNotifier::new(http.clone(), c.routing_key.clone()))

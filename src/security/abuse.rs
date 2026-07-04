@@ -291,7 +291,7 @@ impl AbuseState {
 /// `host` plus every parent domain down to (and including) the registrable
 /// two-label tail — never a bare TLD. `a.b.example.com` →
 /// `[a.b.example.com, b.example.com, example.com]`.
-fn domain_and_parents(host: &str) -> Vec<String> {
+pub(crate) fn domain_and_parents(host: &str) -> Vec<String> {
     let host = host.trim().trim_end_matches('.').to_lowercase();
     if host.is_empty() {
         return Vec::new();

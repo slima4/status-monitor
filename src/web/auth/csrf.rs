@@ -28,9 +28,18 @@ use crate::web::auth::bearer_from_headers;
 pub const CSRF_HEADER: HeaderName = HeaderName::from_static("x-requested-with");
 pub const CSRF_HEADER_VALUE: &str = "uptimepage";
 
+/// Public paths whose authority is a per-request HMAC token in the query, not
+/// the session cookie. A forged cross-site POST cannot carry a valid token, so
+/// the CSRF header check adds nothing and would only break the plain-HTML
+/// confirmation form these serve to a recipient who is also a signed-in user.
+const TOKEN_AUTHENTICATED_PATHS: &[&str] = &["/alert-channel/stop"];
+
 /// Tower middleware that enforces the rule documented at module level.
 pub async fn middleware(State(state): State<AppState>, req: Request<Body>, next: Next) -> Response {
     if !is_state_changing(req.method()) {
+        return next.run(req).await;
+    }
+    if TOKEN_AUTHENTICATED_PATHS.contains(&req.uri().path()) {
         return next.run(req).await;
     }
     if bearer_from_headers(req.headers()).is_some() {
@@ -111,6 +120,12 @@ mod tests {
         assert!(has_session_cookie(&req, "_sm_session"));
         assert!(!has_session_cookie(&req, "_sm_session_other"));
         assert!(!has_session_cookie(&req, "_sm"));
+    }
+
+    #[test]
+    fn token_authenticated_paths_are_exempt() {
+        assert!(TOKEN_AUTHENTICATED_PATHS.contains(&"/alert-channel/stop"));
+        assert!(!TOKEN_AUTHENTICATED_PATHS.contains(&"/api/v1/notification-channels"));
     }
 
     #[test]

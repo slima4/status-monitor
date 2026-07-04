@@ -36,9 +36,10 @@ use crate::domain::{
 };
 use crate::error::Result;
 use crate::http_outbound::OutboundHttpClient;
-use crate::notifier::build_notifier;
 use crate::notifier::event::IncidentNotice;
 use crate::notifier::pushover::PushoverReceipts;
+use crate::notifier::{EmailAlert, build_notifier};
+use crate::storage::orgs::OrgDirectory;
 use crate::storage::{
     Actor, ContactStore, DueIncident, EmergencyAck, EscalationPolicyStore, IncidentOpsStore,
     NotificationChannelStore, OnCallStore, PendingNotification, TargetStore,
@@ -81,10 +82,13 @@ pub struct EngineDeps {
     pub contacts: Arc<dyn ContactStore>,
     pub targets: Arc<dyn TargetStore>,
     pub channels: Arc<dyn NotificationChannelStore>,
+    pub orgs: Arc<dyn OrgDirectory>,
     pub http: OutboundHttpClient,
     pub cfg: EscalationConfig,
     /// Operator base URL for incident deep links; empty omits the link.
     pub base_url: String,
+    /// Keys the one-click stop link in alert mail; empty omits the link.
+    pub alert_channel_stop_secret: String,
     /// Operator token + shared send budget for `telegram_app` delivery.
     pub central_bot: Option<crate::notifier::CentralBotDelivery>,
     /// Operator Cloud API credentials for `whatsapp_app` delivery.
@@ -102,9 +106,11 @@ struct Worker {
     contacts: Arc<dyn ContactStore>,
     targets: Arc<dyn TargetStore>,
     channels: Arc<dyn NotificationChannelStore>,
+    orgs: Arc<dyn OrgDirectory>,
     http: OutboundHttpClient,
     cfg: EscalationConfig,
     base_url: String,
+    alert_channel_stop_secret: String,
     central_bot: Option<crate::notifier::CentralBotDelivery>,
     central_whatsapp: Option<crate::config::WhatsAppAppBotConfig>,
     email: Option<crate::notifier::EmailDelivery>,
@@ -130,9 +136,11 @@ impl EscalationEngine {
             contacts,
             targets,
             channels,
+            orgs,
             http,
             cfg,
             base_url,
+            alert_channel_stop_secret,
             central_bot,
             central_whatsapp,
             email,
@@ -146,9 +154,11 @@ impl EscalationEngine {
                 contacts,
                 targets,
                 channels,
+                orgs,
                 http,
                 cfg,
                 base_url,
+                alert_channel_stop_secret,
                 central_bot,
                 central_whatsapp,
                 email,
@@ -1045,12 +1055,14 @@ impl Worker {
         attempt: i32,
     ) -> (NotificationStatus, Option<String>, Option<String>) {
         let central = self.central_bot.as_ref().map(|c| c.as_central());
+        let email_alert = self.email_alert(org, channel).await;
         let error = match build_notifier(
             &channel.config,
             &self.http,
             central,
             self.central_whatsapp.as_ref(),
             self.email.as_ref(),
+            email_alert,
         ) {
             Ok(n) => match n.notify_incident(notice).await {
                 Ok(()) => return (NotificationStatus::Sent, None, n.taken_receipt()),
@@ -1119,6 +1131,21 @@ impl Worker {
     fn deep_link(&self, id: Uuid) -> Option<String> {
         let base = self.base_url.trim_end_matches('/');
         (!base.is_empty()).then(|| format!("{base}/incidents/{id}"))
+    }
+
+    async fn email_alert(
+        &self,
+        org: OrgId,
+        channel: &crate::domain::NotificationChannel,
+    ) -> Option<EmailAlert> {
+        crate::notifier::email_alert_for(
+            self.orgs.as_ref(),
+            &self.base_url,
+            &self.alert_channel_stop_secret,
+            org,
+            channel,
+        )
+        .await
     }
 
     /// Resolve a schedule's current on-call roster, served from a short-TTL
@@ -1560,11 +1587,13 @@ mod tests {
                 contacts,
                 targets,
                 channels,
+                orgs: Arc::new(crate::storage::orgs::InMemoryOrgDirectory::new()),
                 http: crate::http_outbound::build_outbound_client(
                     crate::security::SsrfGuard::relaxed_for_tests(),
                 ),
                 cfg: EscalationConfig::default(),
                 base_url: String::new(),
+                alert_channel_stop_secret: String::new(),
                 central_bot: None,
                 central_whatsapp: None,
                 email: None,

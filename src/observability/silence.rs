@@ -52,10 +52,13 @@ pub trait SilenceDelivery: Send + Sync {
 pub struct SilenceNotifier {
     pub channels: Arc<dyn NotificationChannelStore>,
     pub targets: Arc<dyn TargetStore>,
+    pub orgs: Arc<dyn crate::storage::orgs::OrgDirectory>,
     pub http: OutboundHttpClient,
     pub central_bot: Option<CentralBotDelivery>,
     pub central_whatsapp: Option<WhatsAppAppBotConfig>,
     pub email: Option<EmailDelivery>,
+    pub base_url: String,
+    pub alert_channel_stop_secret: String,
 }
 
 #[async_trait]
@@ -87,12 +90,21 @@ impl SilenceDelivery for SilenceNotifier {
             if !channel.enabled || channel.awaiting_verification() {
                 continue;
             }
+            let email_alert = crate::notifier::email_alert_for(
+                self.orgs.as_ref(),
+                &self.base_url,
+                &self.alert_channel_stop_secret,
+                org,
+                &channel,
+            )
+            .await;
             let sent = match build_notifier(
                 &channel.config,
                 &self.http,
                 central,
                 self.central_whatsapp.as_ref(),
                 self.email.as_ref(),
+                email_alert,
             ) {
                 Ok(n) => n.notify_incident(&notice).await.is_ok(),
                 Err(_) => false,

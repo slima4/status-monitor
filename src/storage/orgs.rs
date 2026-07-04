@@ -4,6 +4,7 @@
 //! exactly one owner.
 
 use anyhow::Context;
+use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 use sqlx::PgPool;
@@ -1231,4 +1232,64 @@ struct MemberRow {
     role: String,
     created_at: DateTime<Utc>,
     email: String,
+}
+
+/// Org display-name lookup for the alert-delivery path, so the engine can
+/// attribute mail without depending on the full org store.
+#[async_trait]
+pub trait OrgDirectory: Send + Sync {
+    async fn display_name(&self, org: OrgId) -> Result<Option<String>>;
+}
+
+pub struct PgOrgDirectory {
+    pool: PgPool,
+    /// Org names change ~never but are read once per alert send; a short TTL
+    /// collapses a paging burst's repeated lookups to one query per window.
+    names: moka::future::Cache<OrgId, Option<String>>,
+}
+
+impl PgOrgDirectory {
+    pub fn new(pool: PgPool) -> Self {
+        Self {
+            pool,
+            names: moka::future::Cache::builder()
+                .max_capacity(10_000)
+                .time_to_live(std::time::Duration::from_secs(60))
+                .build(),
+        }
+    }
+}
+
+#[async_trait]
+impl OrgDirectory for PgOrgDirectory {
+    async fn display_name(&self, org: OrgId) -> Result<Option<String>> {
+        if let Some(name) = self.names.get(&org).await {
+            return Ok(name);
+        }
+        let name = get_org(&self.pool, org).await?.map(|o| o.name);
+        self.names.insert(org, name.clone()).await;
+        Ok(name)
+    }
+}
+
+#[derive(Default)]
+pub struct InMemoryOrgDirectory {
+    names: parking_lot::Mutex<std::collections::HashMap<OrgId, String>>,
+}
+
+impl InMemoryOrgDirectory {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn insert(&self, org: OrgId, name: impl Into<String>) {
+        self.names.lock().insert(org, name.into());
+    }
+}
+
+#[async_trait]
+impl OrgDirectory for InMemoryOrgDirectory {
+    async fn display_name(&self, org: OrgId) -> Result<Option<String>> {
+        Ok(self.names.lock().get(&org).cloned())
+    }
 }

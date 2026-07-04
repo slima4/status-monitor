@@ -102,6 +102,7 @@ pub async fn create(
         .notification_channel_store
         .create(org, new, source, limit, Some(user))
         .await?;
+    let ch = fast_verify_member_email(&state, org, ch).await?;
     spawn_send_verification(&state, org, &ch);
     let location = HeaderValue::from_str(&format!("/api/v1/notification-channels/{}", ch.id))
         .expect("uuid produces ascii-only path");
@@ -194,9 +195,12 @@ pub async fn update(
         .update(org, id, update, source, Some(user))
         .await?
         .ok_or_else(channel_not_found)?;
-    // A replaced config resets the verification gate; re-prove the address.
+    // A replaced config resets the verification gate; re-prove the address,
+    // short-circuiting for an org member's own confirmed email as create does.
     if config_replaced {
+        let updated = fast_verify_member_email(&state, org, updated).await?;
         spawn_send_verification(&state, org, &updated);
+        return Ok(Redacted::new(updated));
     }
     Ok(Redacted::new(updated))
 }
@@ -379,6 +383,14 @@ fn email_delivery(state: &AppState) -> crate::notifier::EmailDelivery {
     }
 }
 
+fn stop_link(state: &AppState, channel_id: Uuid) -> Option<String> {
+    crate::storage::notification_channels::channel_stop_url(
+        &state.cfg.auth.public_base_url,
+        &state.alert_channel_stop_secret,
+        channel_id,
+    )
+}
+
 /// One verification mail, composed identically for the create/update hook
 /// and the resend endpoint: mint a token (all daily caps enforced in the
 /// mint) and send the link off the response path.
@@ -393,6 +405,12 @@ async fn mint_and_send_verification(
     let outcome = channel_verification::mint(pool, org, channel_id, &to).await?;
     if let channel_verification::MintOutcome::Created { token } = &outcome {
         let delivery = email_delivery(state);
+        let org_name = crate::storage::orgs::get_org(pool, org)
+            .await
+            .ok()
+            .flatten()
+            .map(|o| o.name);
+        let decline_url = stop_link(state, channel_id);
         let outgoing = TransactionalEmail {
             from: EmailAddress::new(delivery.from_address, delivery.from_name),
             to: EmailAddress::new(to.clone(), to),
@@ -400,6 +418,8 @@ async fn mint_and_send_verification(
                 channel_name,
                 verify_url: token_link(&state.cfg.auth.public_base_url, "/verify-channel", token),
                 expires_hours: channel_verification::VERIFICATION_TTL_HOURS,
+                org_name,
+                decline_url,
             },
         };
         let sender = delivery.sender;
@@ -410,6 +430,54 @@ async fn mint_and_send_verification(
         });
     }
     Ok(outcome)
+}
+
+/// Skip the verify round-trip when the destination is the confirmed login email
+/// of a member of this org: joining the org already proved control of that
+/// mailbox, so no separate opt-in click is needed. A third-party address still
+/// falls through to the mailed confirmation. Best-effort — a lookup failure
+/// leaves the channel unverified.
+async fn fast_verify_member_email(
+    state: &AppState,
+    org: crate::domain::OrgId,
+    ch: NotificationChannel,
+) -> Result<NotificationChannel> {
+    let ChannelConfig::Email(cfg) = &ch.config else {
+        return Ok(ch);
+    };
+    if !ch.awaiting_verification() {
+        return Ok(ch);
+    }
+    let Some(pool) = state.db.as_ref() else {
+        return Ok(ch);
+    };
+    let (is_member,): (bool,) = sqlx::query_as(
+        "SELECT EXISTS (
+            SELECT 1 FROM memberships m
+            JOIN users u ON u.id = m.user_id
+            WHERE m.org_id = $1
+              AND u.deleted_at IS NULL
+              AND u.email_verified_at IS NOT NULL
+              AND u.email = $2
+        )",
+    )
+    .bind(org.0)
+    .bind(&cfg.to)
+    .fetch_one(pool)
+    .await
+    .map_err(|e| AppError::Other(anyhow::anyhow!("fast-verify lookup: {e}")))?;
+    if !is_member {
+        return Ok(ch);
+    }
+    let mut ch = ch;
+    if state
+        .notification_channel_store
+        .set_verified(org, ch.id, ch.updated_at)
+        .await?
+    {
+        ch.verified_at = Some(Utc::now());
+    }
+    Ok(ch)
 }
 
 /// Best-effort hook on create / config replace. Cap breaches and failures
@@ -973,6 +1041,7 @@ async fn deliver_test(state: &AppState, config: &ChannelConfig) -> Result<()> {
         central,
         whatsapp,
         Some(&email),
+        None,
     )?;
     let notice = IncidentNotice {
         incident_id: Uuid::nil(),
@@ -1074,6 +1143,25 @@ pub(crate) fn check_channel_abuse(
     org: crate::domain::OrgId,
     config: &ChannelConfig,
 ) -> Result<()> {
+    if let ChannelConfig::Email(cfg) = config {
+        if let Some(detail) = blocked_email_destination(state, &cfg.to) {
+            crate::quotas::service::record_quota_event(
+                state.db.clone(),
+                Some(org),
+                None,
+                "abuse_blocked",
+                Some("email_destination"),
+                serde_json::json!({ "detail": detail }),
+                None,
+            );
+            return Err(AppError::bad_request_field(
+                codes::EMAIL_DESTINATION_BLOCKED,
+                detail,
+                "config.to",
+            ));
+        }
+        return Ok(());
+    }
     let Some(url) = config.abuse_url() else {
         return Ok(());
     };
@@ -1090,4 +1178,107 @@ pub(crate) fn check_channel_abuse(
         None,
     );
     Err(hit.into_app_error())
+}
+
+/// Auto-responder / infrastructure mailboxes that create loops or are never a
+/// consenting alert destination. Blocked as the full local-part on any domain.
+const RESERVED_EMAIL_LOCALPARTS: &[&str] = &[
+    "postmaster",
+    "mailer-daemon",
+    "abuse",
+    "bounce",
+    "bounces",
+    "no-reply",
+    "noreply",
+];
+
+/// Rejects a role mailbox or an operator-owned domain as an alert destination:
+/// the first is non-consenting infrastructure, the second would let a tenant
+/// loop mail through or impersonate the platform. `None` means the address is
+/// allowed.
+fn blocked_email_destination(state: &AppState, to: &str) -> Option<String> {
+    let mut operator_domains = Vec::new();
+    if let Some((_, d)) = state.cfg.email.from_address.rsplit_once('@') {
+        operator_domains.push(d.to_string());
+    }
+    if let Some(host) = url::Url::parse(&state.cfg.auth.public_base_url)
+        .ok()
+        .and_then(|u| u.host_str().map(str::to_string))
+    {
+        operator_domains.push(host);
+    }
+    blocked_email_destination_inner(to, &operator_domains)
+}
+
+/// `operator_domains` are the platform's own domains (mail sender + app host);
+/// a destination at one of them or any of its subdomains is rejected. Matching
+/// walks the destination's parent chain so a trailing FQDN dot or a `-suffix`
+/// lookalike can't slip past a naive string compare.
+fn blocked_email_destination_inner(to: &str, operator_domains: &[String]) -> Option<String> {
+    let (local, domain) = to.split_once('@')?;
+    let local = local.to_ascii_lowercase();
+    if RESERVED_EMAIL_LOCALPARTS.contains(&local.as_str()) {
+        return Some(format!(
+            "'{local}@' is a reserved role address and can't receive alerts"
+        ));
+    }
+    let ops: Vec<String> = operator_domains
+        .iter()
+        .map(|d| d.trim().trim_end_matches('.').to_ascii_lowercase())
+        .filter(|d| !d.is_empty())
+        .collect();
+    let parents = crate::security::abuse::domain_and_parents(domain);
+    if parents.iter().any(|p| ops.iter().any(|op| op == p)) {
+        let domain = domain.trim().trim_end_matches('.').to_ascii_lowercase();
+        return Some(format!(
+            "'{domain}' is an operator domain and can't be an alert destination"
+        ));
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::blocked_email_destination_inner as blocked;
+
+    fn ops() -> Vec<String> {
+        vec!["uptimepage.dev".to_string()]
+    }
+
+    #[test]
+    fn blocks_role_mailboxes_and_operator_domains() {
+        let op = ops();
+        assert!(blocked("postmaster@example.com", &op).is_some());
+        assert!(blocked("bounces@customer.io", &op).is_some());
+        assert!(blocked("alerts@uptimepage.dev", &op).is_some());
+        assert!(blocked("ops@app.uptimepage.dev", &op).is_some());
+        // Trailing FQDN dot no longer bypasses the domain match.
+        assert!(blocked("alerts@uptimepage.dev.", &op).is_some());
+    }
+
+    #[test]
+    fn allows_ordinary_destinations() {
+        let op = ops();
+        assert!(blocked("oncall@customer.com", &op).is_none());
+        assert!(blocked("alerts@customer.io", &op).is_none());
+        // Lookalike suffix without a label boundary is not our domain.
+        assert!(blocked("ops@notuptimepage.dev", &op).is_none());
+    }
+
+    #[test]
+    fn blocks_apex_even_when_mail_is_sent_from_a_subdomain() {
+        let op = vec![
+            "mail.uptimepage.dev".to_string(),
+            "uptimepage.dev".to_string(),
+        ];
+        assert!(blocked("security@uptimepage.dev", &op).is_some());
+        assert!(blocked("x@mail.uptimepage.dev", &op).is_some());
+    }
+
+    #[test]
+    fn empty_operator_list_still_blocks_role_addresses() {
+        let op: Vec<String> = vec![];
+        assert!(blocked("postmaster@uptimepage.dev", &op).is_some());
+        assert!(blocked("alerts@uptimepage.dev", &op).is_none());
+    }
 }

@@ -417,6 +417,16 @@ async fn main() -> Result<()> {
     );
     let email_sender = uptimepage::email::build_email_sender(&cfg.email, &outbound_http)
         .map_err(|e| AppError::Other(anyhow::anyhow!("build_email_sender: {e}")))?;
+    let alert_channel_stop_secret = uptimepage::storage::app_secrets::ensure_secret(
+        &pg_pool_for_stores,
+        cipher.as_deref(),
+        "alert_channel_stop",
+    )
+    .await
+    .map_err(|e| AppError::Other(anyhow::anyhow!("alert-channel stop secret: {e}")))?;
+    let org_directory: Arc<dyn uptimepage::storage::orgs::OrgDirectory> = Arc::new(
+        uptimepage::storage::orgs::PgOrgDirectory::new(pg_pool_for_stores.clone()),
+    );
     let escalation_engine_handle: JoinHandle<()> = {
         let engine = uptimepage::escalation::EscalationEngine::new(
             incident_signal_rx,
@@ -429,9 +439,11 @@ async fn main() -> Result<()> {
                 contacts: contact_store.clone(),
                 targets: target_store.clone(),
                 channels: notification_channel_store.clone(),
+                orgs: org_directory.clone(),
                 http: outbound_http.clone(),
                 cfg: cfg.escalation.clone(),
                 base_url: cfg.auth.public_base_url.clone(),
+                alert_channel_stop_secret: alert_channel_stop_secret.clone(),
                 central_bot: cfg.telegram.enabled().then(|| {
                     uptimepage::notifier::CentralBotDelivery {
                         token: cfg.telegram.bot_token.clone(),
@@ -460,6 +472,7 @@ async fn main() -> Result<()> {
             Arc::new(uptimepage::observability::silence::SilenceNotifier {
                 channels: notification_channel_store.clone(),
                 targets: target_store.clone(),
+                orgs: org_directory.clone(),
                 http: outbound_http.clone(),
                 central_bot: cfg.telegram.enabled().then(|| {
                     uptimepage::notifier::CentralBotDelivery {
@@ -473,6 +486,8 @@ async fn main() -> Result<()> {
                     from_address: cfg.email.from_address.clone(),
                     from_name: cfg.email.from_name.clone(),
                 }),
+                base_url: cfg.auth.public_base_url.clone(),
+                alert_channel_stop_secret: alert_channel_stop_secret.clone(),
             });
         let stale_after = std::time::Duration::from_secs(cfg.operator.agent_stale_after_secs);
         let token = root.clone();
@@ -625,6 +640,7 @@ async fn main() -> Result<()> {
         .with_telegram_send_budget(telegram_send_budget)
         .with_incident_signals(incident_signal_tx)
         .with_subscription_unsubscribe_secret(unsubscribe_secret)
+        .with_alert_channel_stop_secret(alert_channel_stop_secret)
         .with_shutdown(root.clone());
     // Hot-reload the abuse deny-lists on SIGHUP when enabled (validate then
     // atomic swap; a bad edit is rejected and the running rules stay).
