@@ -32,7 +32,7 @@ pub const CSRF_HEADER_VALUE: &str = "uptimepage";
 /// the session cookie. A forged cross-site POST cannot carry a valid token, so
 /// the CSRF header check adds nothing and would only break the plain-HTML
 /// confirmation form these serve to a recipient who is also a signed-in user.
-const TOKEN_AUTHENTICATED_PATHS: &[&str] = &["/alert-channel/stop"];
+const TOKEN_AUTHENTICATED_PATHS: &[&str] = &["/alert-channel/stop", "/subscribe/unsubscribe"];
 
 /// Tower middleware that enforces the rule documented at module level.
 pub async fn middleware(State(state): State<AppState>, req: Request<Body>, next: Next) -> Response {
@@ -125,6 +125,7 @@ mod tests {
     #[test]
     fn token_authenticated_paths_are_exempt() {
         assert!(TOKEN_AUTHENTICATED_PATHS.contains(&"/alert-channel/stop"));
+        assert!(TOKEN_AUTHENTICATED_PATHS.contains(&"/subscribe/unsubscribe"));
         assert!(!TOKEN_AUTHENTICATED_PATHS.contains(&"/api/v1/notification-channels"));
     }
 

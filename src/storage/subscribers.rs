@@ -390,3 +390,10 @@ pub fn verify_unsubscribe(secret: &str, subscriber_id: Uuid, presented: &str) ->
     let expected = unsubscribe_token(secret, subscriber_id);
     expected.as_bytes().ct_eq(presented.as_bytes()).into()
 }
+
+/// The one unsubscribe link every subscriber mail carries, so the confirm,
+/// incident, and maintenance senders can't drift on path or param names.
+pub fn unsubscribe_url(secret: &str, origin: &str, subscriber_id: Uuid) -> String {
+    let mac = unsubscribe_token(secret, subscriber_id);
+    format!("{origin}/subscribe/unsubscribe?s={subscriber_id}&t={mac}")
+}

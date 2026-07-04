@@ -1144,7 +1144,11 @@ pub(crate) fn check_channel_abuse(
     config: &ChannelConfig,
 ) -> Result<()> {
     if let ChannelConfig::Email(cfg) = config {
-        if let Some(detail) = blocked_email_destination(state, &cfg.to) {
+        let ops = crate::security::abuse::operator_domains(
+            &state.cfg.email.from_address,
+            &state.cfg.auth.public_base_url,
+        );
+        if let Some(detail) = crate::security::abuse::blocked_email_destination(&cfg.to, &ops) {
             crate::quotas::service::record_quota_event(
                 state.db.clone(),
                 Some(org),
@@ -1178,107 +1182,4 @@ pub(crate) fn check_channel_abuse(
         None,
     );
     Err(hit.into_app_error())
-}
-
-/// Auto-responder / infrastructure mailboxes that create loops or are never a
-/// consenting alert destination. Blocked as the full local-part on any domain.
-const RESERVED_EMAIL_LOCALPARTS: &[&str] = &[
-    "postmaster",
-    "mailer-daemon",
-    "abuse",
-    "bounce",
-    "bounces",
-    "no-reply",
-    "noreply",
-];
-
-/// Rejects a role mailbox or an operator-owned domain as an alert destination:
-/// the first is non-consenting infrastructure, the second would let a tenant
-/// loop mail through or impersonate the platform. `None` means the address is
-/// allowed.
-fn blocked_email_destination(state: &AppState, to: &str) -> Option<String> {
-    let mut operator_domains = Vec::new();
-    if let Some((_, d)) = state.cfg.email.from_address.rsplit_once('@') {
-        operator_domains.push(d.to_string());
-    }
-    if let Some(host) = url::Url::parse(&state.cfg.auth.public_base_url)
-        .ok()
-        .and_then(|u| u.host_str().map(str::to_string))
-    {
-        operator_domains.push(host);
-    }
-    blocked_email_destination_inner(to, &operator_domains)
-}
-
-/// `operator_domains` are the platform's own domains (mail sender + app host);
-/// a destination at one of them or any of its subdomains is rejected. Matching
-/// walks the destination's parent chain so a trailing FQDN dot or a `-suffix`
-/// lookalike can't slip past a naive string compare.
-fn blocked_email_destination_inner(to: &str, operator_domains: &[String]) -> Option<String> {
-    let (local, domain) = to.split_once('@')?;
-    let local = local.to_ascii_lowercase();
-    if RESERVED_EMAIL_LOCALPARTS.contains(&local.as_str()) {
-        return Some(format!(
-            "'{local}@' is a reserved role address and can't receive alerts"
-        ));
-    }
-    let ops: Vec<String> = operator_domains
-        .iter()
-        .map(|d| d.trim().trim_end_matches('.').to_ascii_lowercase())
-        .filter(|d| !d.is_empty())
-        .collect();
-    let parents = crate::security::abuse::domain_and_parents(domain);
-    if parents.iter().any(|p| ops.iter().any(|op| op == p)) {
-        let domain = domain.trim().trim_end_matches('.').to_ascii_lowercase();
-        return Some(format!(
-            "'{domain}' is an operator domain and can't be an alert destination"
-        ));
-    }
-    None
-}
-
-#[cfg(test)]
-mod tests {
-    use super::blocked_email_destination_inner as blocked;
-
-    fn ops() -> Vec<String> {
-        vec!["uptimepage.dev".to_string()]
-    }
-
-    #[test]
-    fn blocks_role_mailboxes_and_operator_domains() {
-        let op = ops();
-        assert!(blocked("postmaster@example.com", &op).is_some());
-        assert!(blocked("bounces@customer.io", &op).is_some());
-        assert!(blocked("alerts@uptimepage.dev", &op).is_some());
-        assert!(blocked("ops@app.uptimepage.dev", &op).is_some());
-        // Trailing FQDN dot no longer bypasses the domain match.
-        assert!(blocked("alerts@uptimepage.dev.", &op).is_some());
-    }
-
-    #[test]
-    fn allows_ordinary_destinations() {
-        let op = ops();
-        assert!(blocked("oncall@customer.com", &op).is_none());
-        assert!(blocked("alerts@customer.io", &op).is_none());
-        // Lookalike suffix without a label boundary is not our domain.
-        assert!(blocked("ops@notuptimepage.dev", &op).is_none());
-    }
-
-    #[test]
-    fn blocks_apex_even_when_mail_is_sent_from_a_subdomain() {
-        let op = vec![
-            "mail.uptimepage.dev".to_string(),
-            "uptimepage.dev".to_string(),
-        ];
-        assert!(blocked("security@uptimepage.dev", &op).is_some());
-        assert!(blocked("x@mail.uptimepage.dev", &op).is_some());
-    }
-
-    #[test]
-    fn empty_operator_list_still_blocks_role_addresses() {
-        let op: Vec<String> = vec![];
-        assert!(blocked("postmaster@uptimepage.dev", &op).is_some());
-        assert!(blocked("alerts@uptimepage.dev", &op).is_none());
-    }
 }

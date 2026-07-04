@@ -113,6 +113,18 @@ pub async fn subscribe(
     // Lowercase so the unique index folds case variants into one subscription.
     let email = email.to_ascii_lowercase();
 
+    let ops = crate::security::abuse::operator_domains(
+        &state.cfg.email.from_address,
+        &state.cfg.auth.public_base_url,
+    );
+    if crate::security::abuse::blocked_email_destination(&email, &ops).is_some() {
+        return Ok(SubscribeNotice::bad(
+            StatusCode::BAD_REQUEST,
+            "Check the address",
+            "That address can't be used to subscribe.",
+        ));
+    }
+
     let sub = subscribers::subscribe(
         pool,
         &NewSubscriber {
@@ -146,6 +158,8 @@ pub async fn subscribe(
         };
         let page_name = meta.map_or_else(|| "status page".to_string(), |m| m.name);
         let confirm_url = token_link(&origin, "/subscribe/confirm", &token);
+        let unsubscribe_url =
+            subscribers::unsubscribe_url(&state.subscription_unsubscribe_secret, &origin, sub.id);
         let outgoing = TransactionalEmail {
             from: EmailAddress::new(
                 state.cfg.email.from_address.clone(),
@@ -156,6 +170,7 @@ pub async fn subscribe(
                 page_name,
                 confirm_url,
                 expires_hours: CONFIRM_TTL_HOURS as u32,
+                unsubscribe_url,
             },
         };
         if let Err(err) = state.email_sender.send(outgoing).await {
@@ -210,31 +225,70 @@ pub struct UnsubscribeQuery {
     pub t: String,
 }
 
+#[derive(Template, WebTemplate)]
+#[template(path = "subscribe_unsubscribe.html")]
+pub struct UnsubscribePage {
+    pub phase: &'static str,
+    pub s: String,
+    pub t: String,
+}
+
+fn resolve_unsubscribe(state: &AppState, q: &UnsubscribeQuery) -> Option<Uuid> {
+    if state.subscription_unsubscribe_secret.is_empty() {
+        return None;
+    }
+    let id = Uuid::parse_str(q.s.trim()).ok()?;
+    subscribers::verify_unsubscribe(&state.subscription_unsubscribe_secret, id, q.t.trim())
+        .then_some(id)
+}
+
+fn unsubscribe_invalid() -> Response {
+    (
+        StatusCode::NOT_FOUND,
+        UnsubscribePage {
+            phase: "invalid",
+            s: String::new(),
+            t: String::new(),
+        },
+    )
+        .into_response()
+}
+
+/// GET renders a confirmation so a mailbox link-scanner's prefetch can't
+/// unsubscribe a subscriber; the delete runs only on POST, which also serves
+/// the RFC 8058 one-click.
+pub async fn unsubscribe_confirm(
+    State(state): State<AppState>,
+    Query(q): Query<UnsubscribeQuery>,
+) -> WebResult<Response> {
+    if resolve_unsubscribe(&state, &q).is_none() {
+        return Ok(unsubscribe_invalid());
+    }
+    Ok(UnsubscribePage {
+        phase: "confirm",
+        s: q.s.trim().to_string(),
+        t: q.t.trim().to_string(),
+    }
+    .into_response())
+}
+
 pub async fn unsubscribe(
     State(state): State<AppState>,
     Query(q): Query<UnsubscribeQuery>,
 ) -> WebResult<Response> {
-    let invalid = || {
-        SubscribeNotice::bad(
-            StatusCode::NOT_FOUND,
-            "Invalid link",
-            "This unsubscribe link is invalid.",
-        )
+    let Some(id) = resolve_unsubscribe(&state, &q) else {
+        return Ok(unsubscribe_invalid());
     };
-    let Ok(id) = Uuid::parse_str(q.s.trim()) else {
-        return Ok(invalid());
-    };
-    if !subscribers::verify_unsubscribe(&state.subscription_unsubscribe_secret, id, q.t.trim()) {
-        return Ok(invalid());
-    }
     let Some(pool) = state.db.as_ref() else {
-        return Ok(invalid());
+        return Ok(unsubscribe_invalid());
     };
     subscribers::unsubscribe(pool, id).await?;
-    Ok(SubscribeNotice::ok(
-        "Unsubscribed",
-        "You won't receive any more updates from this status page.",
-    ))
+    Ok(UnsubscribePage {
+        phase: "done",
+        s: String::new(),
+        t: String::new(),
+    }
+    .into_response())
 }
 
 /// Webhook subscription: no inbox to mail a token to, so a live verification

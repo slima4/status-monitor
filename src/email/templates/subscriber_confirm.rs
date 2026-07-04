@@ -6,6 +6,7 @@ pub fn render(
     page_name: &str,
     confirm_url: &str,
     expires_hours: u32,
+    unsubscribe_url: &str,
 ) -> RenderedEmail {
     let subject = format!("Confirm your subscription to {page_name}");
 
@@ -16,8 +17,8 @@ pub fn render(
          \n  {confirm_url}\n\
          \n\
          This link expires in {expires_hours} hours and can only be used once.\n\
-         If you didn't request this, ignore the message — no updates will be \
-         sent to this address.\n"
+         If you didn't request this, you can remove this address in one click:\n\
+         \n  {unsubscribe_url}\n"
     );
 
     let html_body = format!(
@@ -30,11 +31,12 @@ pub fn render(
            <a href=\"{url_attr}\" style=\"background:#0b66e4;color:#fff;padding:10px 16px;border-radius:6px;text-decoration:none;\">Confirm subscription</a>\n\
          </p>\n\
          <p style=\"font-size:0.9em;color:#555;\">This link expires in <strong>{expires_hours}</strong> hours and can only be used once.</p>\n\
-         <p style=\"font-size:0.8em;color:#888;border-top:1px solid #eee;padding-top:1rem;\">If you didn't request this, ignore the message — no updates will be sent to this address.</p>\n\
+         <p style=\"font-size:0.8em;color:#888;border-top:1px solid #eee;padding-top:1rem;\">If you didn't request this, <a href=\"{unsub_attr}\" style=\"color:#888;\">remove this address</a> and no updates will be sent to it.</p>\n\
          </body></html>\n",
         subject_esc = html_escape(&subject),
         page_esc = html_escape(page_name),
         url_attr = html_escape(confirm_url),
+        unsub_attr = html_escape(unsubscribe_url),
     );
 
     RenderedEmail {

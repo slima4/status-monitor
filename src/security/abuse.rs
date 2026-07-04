@@ -302,6 +302,60 @@ pub(crate) fn domain_and_parents(host: &str) -> Vec<String> {
         .collect()
 }
 
+/// Role/infrastructure mailboxes that loop mail or never consent to receive it.
+pub(crate) const RESERVED_EMAIL_LOCALPARTS: &[&str] = &[
+    "postmaster",
+    "mailer-daemon",
+    "abuse",
+    "bounce",
+    "bounces",
+    "no-reply",
+    "noreply",
+];
+
+/// The platform's own domains (mail `From` domain + app host); a destination
+/// here could loop mail through us or impersonate the platform.
+pub(crate) fn operator_domains(from_address: &str, public_base_url: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    if let Some((_, domain)) = from_address.rsplit_once('@') {
+        out.push(domain.to_string());
+    }
+    if let Some(host) = url::Url::parse(public_base_url)
+        .ok()
+        .and_then(|u| u.host_str().map(str::to_string))
+    {
+        out.push(host);
+    }
+    out
+}
+
+/// Walks the destination's parent chain so a trailing FQDN dot or a `-suffix`
+/// lookalike can't slip an operator domain past a naive compare.
+pub(crate) fn blocked_email_destination(to: &str, operator_domains: &[String]) -> Option<String> {
+    let (local, domain) = to.split_once('@')?;
+    let local = local.to_ascii_lowercase();
+    // Compare the base mailbox: most MTAs route `postmaster+x` to `postmaster`.
+    let base_local = local.split('+').next().unwrap_or(&local);
+    if RESERVED_EMAIL_LOCALPARTS.contains(&base_local) {
+        return Some(format!(
+            "'{base_local}@' is a reserved role address and can't be used"
+        ));
+    }
+    let ops: Vec<String> = operator_domains
+        .iter()
+        .map(|d| d.trim().trim_end_matches('.').to_ascii_lowercase())
+        .filter(|d| !d.is_empty())
+        .collect();
+    let parents = domain_and_parents(domain);
+    if parents.iter().any(|p| ops.iter().any(|op| op == p)) {
+        let domain = domain.trim().trim_end_matches('.').to_ascii_lowercase();
+        return Some(format!(
+            "'{domain}' is one of our own domains and can't be used"
+        ));
+    }
+    None
+}
+
 /// Reads an optional abuse input file (deny-list or reputation feed).
 /// `Ok(None)` = path empty or file absent (not an error — a deployment may
 /// legitimately omit it); `Err` = present but unreadable.
@@ -569,5 +623,55 @@ not_a_domain\n";
         g.reload(&cfg).expect("valid reload");
         assert!(g.inspect(&http("https://new.bad.example/")).is_some());
         assert!(g.inspect(&http("https://old.bad.example/")).is_none());
+    }
+
+    fn ops() -> Vec<String> {
+        vec!["uptimepage.dev".to_string()]
+    }
+
+    #[test]
+    fn blocks_role_mailboxes_and_operator_domains() {
+        let op = ops();
+        assert!(blocked_email_destination("postmaster@example.com", &op).is_some());
+        assert!(blocked_email_destination("bounces@customer.io", &op).is_some());
+        assert!(blocked_email_destination("alerts@uptimepage.dev", &op).is_some());
+        assert!(blocked_email_destination("ops@app.uptimepage.dev", &op).is_some());
+        // Trailing FQDN dot does not bypass the domain match.
+        assert!(blocked_email_destination("alerts@uptimepage.dev.", &op).is_some());
+        // Plus-tagging does not smuggle a role mailbox past the check.
+        assert!(blocked_email_destination("postmaster+x@example.com", &op).is_some());
+    }
+
+    #[test]
+    fn allows_ordinary_destinations() {
+        let op = ops();
+        assert!(blocked_email_destination("oncall@customer.com", &op).is_none());
+        assert!(blocked_email_destination("alerts@customer.io", &op).is_none());
+        // Lookalike suffix without a label boundary is not our domain.
+        assert!(blocked_email_destination("ops@notuptimepage.dev", &op).is_none());
+    }
+
+    #[test]
+    fn blocks_apex_even_when_mail_is_sent_from_a_subdomain() {
+        let op = vec![
+            "mail.uptimepage.dev".to_string(),
+            "uptimepage.dev".to_string(),
+        ];
+        assert!(blocked_email_destination("security@uptimepage.dev", &op).is_some());
+        assert!(blocked_email_destination("x@mail.uptimepage.dev", &op).is_some());
+    }
+
+    #[test]
+    fn empty_operator_list_still_blocks_role_addresses() {
+        let op: Vec<String> = vec![];
+        assert!(blocked_email_destination("postmaster@uptimepage.dev", &op).is_some());
+        assert!(blocked_email_destination("alerts@uptimepage.dev", &op).is_none());
+    }
+
+    #[test]
+    fn operator_domains_from_config() {
+        let d = operator_domains("alerts@uptimepage.dev", "https://app.uptimepage.dev/");
+        assert!(d.contains(&"uptimepage.dev".to_string()));
+        assert!(d.contains(&"app.uptimepage.dev".to_string()));
     }
 }

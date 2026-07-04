@@ -289,7 +289,6 @@ impl SubscriberDispatcher {
     }
 
     fn unsubscribe_url(&self, origin: &str, subscriber_id: Uuid) -> String {
-        let mac = subscribers::unsubscribe_token(&self.cfg.unsubscribe_secret, subscriber_id);
-        format!("{origin}/subscribe/unsubscribe?s={subscriber_id}&t={mac}")
+        subscribers::unsubscribe_url(&self.cfg.unsubscribe_secret, origin, subscriber_id)
     }
 }

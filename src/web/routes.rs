@@ -72,10 +72,11 @@ pub fn routes(state: AppState) -> Router {
         // token/HMAC proof, so they're always mounted like the verify link.
         .route("/subscribe", post(views::subscribe::subscribe))
         .route("/subscribe/confirm", get(views::subscribe::confirm))
-        // GET for the human link, POST for RFC 8058 one-click from mail clients.
+        // GET confirms (prefetch-safe); POST unsubscribes and serves the RFC
+        // 8058 one-click from mail clients.
         .route(
             "/subscribe/unsubscribe",
-            get(views::subscribe::unsubscribe).post(views::subscribe::unsubscribe),
+            get(views::subscribe::unsubscribe_confirm).post(views::subscribe::unsubscribe),
         )
         // Public delegation connect page: a single-use code attaches one
         // notification channel to the inviting org; same always-mounted

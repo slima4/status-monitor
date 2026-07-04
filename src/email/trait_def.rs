@@ -88,6 +88,7 @@ pub enum EmailTemplate {
         page_name: String,
         confirm_url: String,
         expires_hours: u32,
+        unsubscribe_url: String,
     },
     /// A public incident update delivered to a confirmed subscriber.
     SubscriberIncident {
@@ -170,11 +171,13 @@ impl EmailTemplate {
                 page_name,
                 confirm_url,
                 expires_hours,
+                unsubscribe_url,
             } => templates::subscriber_confirm::render(
                 site_name,
                 page_name,
                 confirm_url,
                 *expires_hours,
+                unsubscribe_url,
             ),
             EmailTemplate::SubscriberIncident {
                 page_name,
@@ -242,6 +245,9 @@ impl EmailTemplate {
             }
             | EmailTemplate::SubscriberMaintenance {
                 unsubscribe_url, ..
+            }
+            | EmailTemplate::SubscriberConfirm {
+                unsubscribe_url, ..
             } => Some(unsubscribe_url),
             EmailTemplate::ChannelVerification { decline_url, .. } => decline_url.as_deref(),
             _ => None,
@@ -288,6 +294,20 @@ mod tests {
         assert_eq!(
             verify.list_unsubscribe_url(),
             Some("https://app/alert-channel/stop?c=3&t=4")
+        );
+    }
+
+    #[test]
+    fn subscriber_confirm_offers_one_click_unsubscribe() {
+        let confirm = EmailTemplate::SubscriberConfirm {
+            page_name: "Acme".into(),
+            confirm_url: "https://acme/subscribe/confirm?token=x".into(),
+            expires_hours: 24,
+            unsubscribe_url: "https://acme/subscribe/unsubscribe?s=1&t=2".into(),
+        };
+        assert_eq!(
+            confirm.list_unsubscribe_url(),
+            Some("https://acme/subscribe/unsubscribe?s=1&t=2")
         );
     }
 }
