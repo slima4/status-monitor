@@ -5,7 +5,7 @@
 <script type="application/ld+json">{{ json_ld.as_str()|safe }}</script>
 {% endblock %}
 {% block content %}
-<article class="mx-auto max-w-2xl space-y-10">
+<article class="mx-auto max-w-3xl space-y-10">
     <header class="space-y-4 text-center">
         <p class="mk-blog-row__date">{{ date }}{% if let Some(u) = updated %} · Updated {{ u }}{% endif %}</p>
         <h1 class="mk-display mk-blog-title">{{ title }}</h1>
