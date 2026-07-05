@@ -243,9 +243,9 @@ fn render_pricing(cfg: &MarketingCfg) -> CachedRender {
         &format!("Uptime Monitoring Pricing: Free & Pro | {BRAND}"),
         &canonical_url,
     );
-    og.description = "Uptimepage pricing: a free Standard plan with no card, a founding \
-         plan free for the first 1,000 accounts, and Pro for teams in production. \
-         Self-host the AGPL source with no limits."
+    og.description = "Uptimepage pricing: a free Standard plan with no card, founding \
+         free for the first 1,000 accounts, and Pro for teams in production. \
+         Self-host AGPL, no limits."
         .to_string();
     let page = PricingPage {
         app_url: cfg.app_url.clone(),

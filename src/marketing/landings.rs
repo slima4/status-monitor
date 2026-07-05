@@ -225,7 +225,7 @@ pub const LANDINGS: &[Landing] = &[
         path: "/open-source-status-page",
         created: "2026-06-20",
         lastmod: "2026-07-02",
-        title: "Open-Source Status Page with Built-in Monitoring",
+        title: "Open-Source Status Page, Monitoring Built In",
         eyebrow: "open source",
         h1: "An open-source status page",
         meta_description: "An open-source status page with built-in uptime and website monitoring. Branded pages, subscribers, incidents, maintenance. AGPL, free, self-host or hosted.",
@@ -589,7 +589,7 @@ docker compose up -d"#,
         path: "/vs/statuspage",
         created: "2026-06-19",
         lastmod: "2026-07-02",
-        title: "A Statuspage Alternative with Monitoring Built In",
+        title: "Statuspage Alternative with Monitoring Built In",
         eyebrow: "switching status pages",
         h1: "A Statuspage alternative with monitoring built in",
         meta_description: "Uptimepage pairs a branded public status page with uptime monitoring in one product: 60s checks, email and webhook subscribers, incidents. Free to start.",
@@ -651,7 +651,7 @@ docker compose up -d"#,
         path: "/vs/better-stack",
         created: "2026-06-19",
         lastmod: "2026-07-02",
-        title: "A Better Uptime (Better Stack) Alternative You Self-Host",
+        title: "Better Uptime (Better Stack) Alternative",
         eyebrow: "comparing platforms",
         h1: "The Better Uptime (Better Stack) alternative you self-host",
         meta_description: "Better Uptime is now Better Stack. Want self-hosted monitoring and status pages you drive as code? Uptimepage is one AGPL binary with Terraform and MCP.",
@@ -856,7 +856,7 @@ docker compose up -d"#,
         path: "/vs/pingdom",
         created: "2026-06-25",
         lastmod: "2026-07-02",
-        title: "A Pingdom Alternative with Status Pages Built In",
+        title: "Pingdom Alternative with Status Pages Built In",
         eyebrow: "switching monitors",
         h1: "A Pingdom alternative with status pages built in",
         meta_description: "Uptimepage pairs 60s HTTP, TCP, DNS and TLS checks with branded status pages and Slack, email and webhook alerts. Open source, free to start.",
@@ -1000,7 +1000,7 @@ docker compose up -d"#,
         path: "/vs/self-hosted-monitoring",
         created: "2026-07-01",
         lastmod: "2026-07-02",
-        title: "Uptimepage vs Uptime Kuma, OpenStatus, OneUptime, Gatus, Kener",
+        title: "Uptime Kuma vs OpenStatus vs OneUptime vs Gatus",
         eyebrow: "comparing self-hosted",
         h1: "Uptimepage vs the self-hosted monitoring tools",
         meta_description: "How Uptimepage compares to Uptime Kuma, OpenStatus, OneUptime, Gatus and Kener in 2026: checks, status pages, multi-region probes and config-as-code.",
@@ -2591,6 +2591,13 @@ mod tests {
     fn every_landing_has_seo_essentials() {
         for l in LANDINGS {
             assert!(!l.title.is_empty(), "{} missing title", l.path);
+            let rendered_title = l.title.len() + " | ".len() + BRAND.len();
+            assert!(
+                rendered_title <= 60,
+                "{} rendered <title> {} chars > 60",
+                l.path,
+                rendered_title
+            );
             assert!(!l.h1.is_empty(), "{} missing h1", l.path);
             assert!(
                 l.meta_description.len() <= 160,
