@@ -3,6 +3,7 @@
 {% block description %}{{ og.description }}{% endblock %}
 {% block head %}
 <script type="application/ld+json">{{ json_ld.as_str()|safe }}</script>
+{% if let Some(il) = item_list_ld %}<script type="application/ld+json">{{ il.as_str()|safe }}</script>{% endif %}
 {% endblock %}
 {% block content %}
 <article class="mx-auto max-w-3xl space-y-10">

@@ -23,7 +23,9 @@ use serde::Deserialize;
 
 use super::config::{AUTHOR, Author, BRAND, MarketingCfg};
 use super::pages::{CachedRender, cached_render, not_found, serve_cached};
-use super::seo::{JsonLd, OpenGraph, json_ld_blog, json_ld_blog_posting, json_ld_breadcrumb};
+use super::seo::{
+    JsonLd, OpenGraph, json_ld_blog, json_ld_blog_posting, json_ld_breadcrumb, json_ld_item_list,
+};
 use crate::web::filters;
 
 const POST_CACHE_CONTROL: HeaderValue =
@@ -42,6 +44,8 @@ pub struct Post {
     pub excerpt: String,
     pub tags: Vec<String>,
     pub draft: bool,
+    /// Ranked item names for list-format posts; emits `ItemList` JSON-LD.
+    pub list_items: Vec<String>,
     pub body_html: String,
     /// Source markdown, pre-render — inlined verbatim into `llms-full.txt`.
     pub body_md: String,
@@ -59,6 +63,8 @@ struct FrontMatter {
     tags: Vec<String>,
     #[serde(default)]
     draft: bool,
+    #[serde(default)]
+    list_items: Vec<String>,
 }
 
 static POSTS: OnceLock<Vec<Post>> = OnceLock::new();
@@ -138,6 +144,7 @@ fn parse_post(raw: &str, stem: &str) -> anyhow::Result<Post> {
         excerpt: fm.excerpt,
         tags: fm.tags,
         draft: fm.draft,
+        list_items: fm.list_items,
         body_html: render(body),
         body_md: body.trim().to_string(),
     })
@@ -196,6 +203,7 @@ struct BlogPostPage {
     app_url: String,
     og: OpenGraph,
     json_ld: JsonLd,
+    item_list_ld: Option<JsonLd>,
     title: String,
     date: String,
     updated: Option<String>,
@@ -257,11 +265,20 @@ fn render_post(cfg: &MarketingCfg, post: &Post) -> CachedRender {
         date_modified,
         &og.image,
     );
+    let item_list_ld = (!post.list_items.is_empty()).then(|| {
+        json_ld_item_list(
+            &cfg.canonical_origin,
+            &post.slug,
+            &post.title,
+            &post.list_items,
+        )
+    });
     let body = BlogPostPage {
         canonical_url,
         app_url: cfg.app_url.clone(),
         og,
         json_ld,
+        item_list_ld,
         title: post.title.clone(),
         date: post.date.clone(),
         updated: post.updated.clone().filter(|u| u != &post.date),
@@ -295,6 +312,19 @@ pub async fn post(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn list_items_appear_in_post_body() {
+        for post in load_posts() {
+            for item in &post.list_items {
+                assert!(
+                    post.body_md.contains(item.as_str()),
+                    "{}: ItemList entry {item:?} not found in the article body",
+                    post.slug
+                );
+            }
+        }
+    }
 
     #[test]
     fn renderer_strips_script_tag() {

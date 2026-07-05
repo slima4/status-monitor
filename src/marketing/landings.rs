@@ -74,6 +74,17 @@ pub struct Matrix {
     pub notes: &'static [&'static str],
 }
 
+impl Matrix {
+    /// Index of the highlighted Uptimepage column, wherever it sits: first
+    /// on `/vs/` pages, last on `/compare/` face-offs.
+    pub fn us_col(&self) -> usize {
+        self.columns
+            .iter()
+            .position(|c| *c == BRAND)
+            .expect("matrix missing Uptimepage column")
+    }
+}
+
 /// A use-case or comparison landing page. Comparison and use-case pages
 /// share one shape — the only difference is copy — so there is no kind
 /// discriminant to keep in lockstep.
@@ -849,6 +860,14 @@ docker compose up -d"#,
                 label: "vs self-hosted monitors",
                 href: "/vs/self-hosted-monitoring",
             },
+            ResourceLink {
+                label: "OpenStatus vs Uptime Kuma",
+                href: "/compare/openstatus-vs-uptime-kuma",
+            },
+            ResourceLink {
+                label: "Uptime Kuma vs Gatus",
+                href: "/compare/uptime-kuma-vs-gatus",
+            },
         ],
         cta: "Start free",
     },
@@ -1034,11 +1053,11 @@ docker compose up -d"#,
         sections: &[
             Section {
                 heading: "Uptime Kuma: the broadest checks, the lightest footprint",
-                body: "Uptime Kuma is the community favourite for good reason: around forty monitor types (databases, gRPC, MQTT, SNMP, Steam, real-browser, push heartbeats), roughly ninety-five alert integrations, one-second intervals, and a single container to run. Where it stops is the team and status-page side. It is single-user with no roles, it is driven entirely over a socket API with no REST or Terraform, its status pages take an RSS feed rather than email or webhook subscribers, and incidents are posted by hand, not opened from a failing check. Uptimepage trades some of that protocol breadth for a subscriber status page, organizations with roles, auto-opened incidents and config-as-code.",
+                body: "Uptime Kuma is the community favourite for good reason: around forty monitor types (databases, gRPC, MQTT, SNMP, Steam, real-browser, push heartbeats), roughly ninety-five alert integrations, 20-second intervals, and a single container to run. Where it stops is the team and status-page side. It is single-user with no roles, it is driven entirely over a socket API with no REST or Terraform, its status pages take an RSS feed rather than email or webhook subscribers, and incidents are posted by hand, not opened from a failing check. Uptimepage trades some of that protocol breadth for a subscriber status page, organizations with roles, auto-opened incidents and config-as-code.",
             },
             Section {
                 heading: "OpenStatus and OneUptime: the dev-first platforms",
-                body: "These are the closest to Uptimepage in philosophy. OpenStatus is monitoring-as-code done well: a Terraform provider, a CLI, an MCP server, auto-resolving incidents, email and webhook subscribers, and probes across thirty-five regions with sub-minute checks. Its trade-offs are a heavier stack (Turso plus Tinybird plus hosted queues) and an open-source checker that implements only HTTP, TCP and DNS, with ICMP, UDP and SSL-certificate monitors declared in config but not built. OneUptime does everything Uptimepage does and then keeps going into on-call scheduling, escalation, logs, tracing and APM, but that reach costs you a Postgres, ClickHouse, Redis and many-service deployment to operate. Uptimepage aims at the same developer surface, Terraform, REST and MCP, but as one binary you can actually run. It matches those sub-minute checks too: 30 seconds on Pro and 10 seconds self-hosted, while the free founding plan already carries fifty monitors at sixty seconds.",
+                body: "These are the closest to Uptimepage in philosophy. OpenStatus is monitoring-as-code done well: a Terraform provider, a CLI, an MCP server, auto-resolving incidents, email and webhook subscribers, and probes across twenty-eight regions with sub-minute checks. Its trade-offs are a heavier stack (Turso plus Tinybird plus hosted queues) and an open-source checker that implements only HTTP, TCP and DNS, with ICMP, UDP and SSL-certificate monitors declared in config but not built. OneUptime does everything Uptimepage does and then keeps going into on-call scheduling, escalation, logs, tracing and APM, but that reach costs you a Postgres, ClickHouse, Redis and many-service deployment to operate. Uptimepage aims at the same developer surface, Terraform, REST and MCP, but as one binary you can actually run. It matches those sub-minute checks too: 30 seconds on Pro and 10 seconds self-hosted, while the free founding plan already carries fifty monitors at sixty seconds.",
             },
             Section {
                 heading: "Gatus: the protocol-rich checker",
@@ -1070,6 +1089,157 @@ docker compose up -d"#,
             ResourceLink {
                 label: "Best self-hosted monitors",
                 href: "/blog/best-self-hosted-uptime-monitoring-tools",
+            },
+            ResourceLink {
+                label: "OpenStatus vs Uptime Kuma",
+                href: "/compare/openstatus-vs-uptime-kuma",
+            },
+            ResourceLink {
+                label: "Uptime Kuma vs Gatus",
+                href: "/compare/uptime-kuma-vs-gatus",
+            },
+        ],
+        cta: "Start free",
+    },
+    Landing {
+        path: "/compare/openstatus-vs-uptime-kuma",
+        created: "2026-07-05",
+        lastmod: "2026-07-05",
+        title: "OpenStatus vs Uptime Kuma",
+        eyebrow: "comparing self-hosted",
+        h1: "OpenStatus vs Uptime Kuma: which fits how you work?",
+        meta_description: "OpenStatus and Uptime Kuma compared on facts: monitoring as code with hosted probes vs the click-driven self-hosted classic, and where each stops. July 2026.",
+        lede: "One is monitoring as code with a hosted multi-region fleet, the other is the most-starred self-hosted dashboard on GitHub. Both are open source and both are good; they assume very different teams. The facts first, then where Uptimepage sits between them.",
+        features: &[],
+        sections: &[
+            Section {
+                heading: "Two philosophies, not two feature lists",
+                body: "The real difference is who drives. Uptime Kuma is UI-first: you click monitors into a dashboard, and the configuration lives in its database. There is no official REST API for managing monitors and no Terraform provider, which is fine for one person and painful for a team with review habits. OpenStatus starts from the other end: monitors are YAML, CLI commands, GitHub Actions or Terraform, and the dashboard is one view of that config, with a full REST API underneath.",
+            },
+            Section {
+                heading: "Where Uptime Kuma is ahead",
+                body: "Breadth and community. Kuma speaks around forty monitor types out of the box, including databases, MQTT, SNMP and a real Chromium browser check, and it can notify roughly ninety-five services. It installs in one container in five minutes, checks as often as every 20 seconds, and has by far the largest community of any tool in this space, which means answers exist for almost any problem you hit.",
+            },
+            Section {
+                heading: "Where OpenStatus is ahead",
+                body: "Teams and vantage points. OpenStatus runs a hosted probe fleet across twenty-eight regions on three cloud providers, so you see your service the way users on other continents do, without running agents yourself. It has organizations with unlimited members on paid tiers, email and RSS subscribers on its status pages, and auto-resolving incident handling. Kuma is single-login with no roles, checks from wherever you installed it, and its status pages have no subscriber notifications.",
+            },
+            Section {
+                heading: "The honest caveats on both",
+                body: "OpenStatus self-hosted is a multi-service TypeScript stack with external database dependencies, a heavier operational lift than Kuma's single container, and its open-source checker covers fewer protocols than its API schema advertises. Kuma's limits are structural: multi-user support and a management API have been open feature requests for years because the architecture was built for one operator with a browser.",
+            },
+            Section {
+                heading: "Where Uptimepage fits",
+                body: "Uptimepage sits deliberately between them: one Rust binary like Kuma wishes it was for teams, with the as-code surface OpenStatus champions. You get HTTP, TCP, DNS, TLS and ping checks, organizations with roles, a Terraform provider, a REST API and an MCP server, plus a branded status page with confirmed email and webhook subscribers and auto-opened incidents. Probes are multi-region and you can run your own. Hosted free with no card, or self-host under AGPL with docker compose.",
+            },
+        ],
+        code: None,
+        resources: &[
+            ResourceLink {
+                label: "Uptimepage vs Uptime Kuma",
+                href: "/vs/uptime-kuma",
+            },
+            ResourceLink {
+                label: "The self-hosted field, compared",
+                href: "/vs/self-hosted-monitoring",
+            },
+            ResourceLink {
+                label: "Best self-hosted monitors",
+                href: "/blog/best-self-hosted-uptime-monitoring-tools",
+            },
+        ],
+        cta: "Start free",
+    },
+    Landing {
+        path: "/compare/uptime-kuma-vs-gatus",
+        created: "2026-07-05",
+        lastmod: "2026-07-05",
+        title: "Uptime Kuma vs Gatus",
+        eyebrow: "comparing self-hosted",
+        h1: "Uptime Kuma vs Gatus: clicks or YAML?",
+        meta_description: "Uptime Kuma configures in a UI, Gatus lives in YAML. Check types, status pages, alerting and team features compared honestly. July 2026.",
+        lede: "The two most-loved self-hosted monitors answer one question differently: should monitoring be clicked together in a dashboard, or declared in a file and reviewed in a pull request? Everything else follows from that split.",
+        features: &[],
+        sections: &[
+            Section {
+                heading: "The split that decides it",
+                body: "Uptime Kuma is a dashboard you click: add a monitor, pick a type, wire a notification, all stored in its database. Gatus refuses the mouse: every endpoint is YAML in version control, the web UI is read-only, and a change means a config redeploy. Neither is wrong. One fits a homelab and a person who thinks in browsers; the other fits an engineer who thinks in Git and wants monitoring reviewed like code.",
+            },
+            Section {
+                heading: "What each does well",
+                body: "Kuma wins on reach: around forty monitor types including databases, MQTT, SNMP and a real browser check, roughly ninety-five notification services, 20-second intervals, and the biggest community in the category. Gatus wins on discipline: eleven endpoint protocols including gRPC, SSH, WebSocket and UDP, a condition language that asserts on status, response time, JSON body paths and certificate expiry, multi-step suites, and a tiny static Go binary that can even run without a database.",
+            },
+            Section {
+                heading: "What neither gives you",
+                body: "A customer-facing status page with subscribers, and a team. Kuma's status pages are real but nobody can subscribe to them, and the whole app is one shared login. Gatus's dashboard doubles as its status page: fine for an ops wall, not something you point customers at, and its access control is one basic-auth or OIDC gate. Both check from a single vantage point unless you assemble more instances yourself.",
+            },
+            Section {
+                heading: "Where Uptimepage fits",
+                body: "If the YAML-versus-clicks debate ends with 'actually we need customers to see a status page and teammates to have accounts', that is the gap Uptimepage fills. Checks over HTTP, TCP, DNS, TLS and ping, configured in the UI or declared with the Terraform provider and REST API, organizations with roles, multi-region probes you can run yourself, and a branded status page with email and webhook subscribers where incidents open automatically. One binary, hosted free or AGPL self-hosted.",
+            },
+        ],
+        code: None,
+        resources: &[
+            ResourceLink {
+                label: "Uptimepage vs Uptime Kuma",
+                href: "/vs/uptime-kuma",
+            },
+            ResourceLink {
+                label: "The self-hosted field, compared",
+                href: "/vs/self-hosted-monitoring",
+            },
+            ResourceLink {
+                label: "OpenStatus vs Uptime Kuma",
+                href: "/compare/openstatus-vs-uptime-kuma",
+            },
+            ResourceLink {
+                label: "Best self-hosted monitors",
+                href: "/blog/best-self-hosted-uptime-monitoring-tools",
+            },
+        ],
+        cta: "Start free",
+    },
+    Landing {
+        path: "/compare/pingdom-vs-statuscake",
+        created: "2026-07-05",
+        lastmod: "2026-07-05",
+        title: "Pingdom vs StatusCake",
+        eyebrow: "comparing hosted monitors",
+        h1: "Pingdom vs StatusCake: what you actually get",
+        meta_description: "Pingdom and StatusCake compared on facts: pricing models, check types, intervals, probe locations and the status page catch. July 2026.",
+        lede: "Two of the oldest names in hosted uptime monitoring, built for different buyers. Pingdom is a digital-experience suite inside the SolarWinds portfolio; StatusCake is an independent UK product with a generous value ladder. The facts first, then where Uptimepage sits.",
+        features: &[],
+        sections: &[
+            Section {
+                heading: "The pricing split",
+                body: "StatusCake has a real free tier: ten uptime monitors at five-minute intervals, plus single allowances of its page speed, domain and SSL products. Pingdom has no free tier at all, only a 30-day trial, and then usage-based pricing where uptime checks, transaction checks and RUM pageviews each sit on their own ladder. Both geo-localize prices, so we describe shapes rather than numbers; check their pricing pages for your currency.",
+            },
+            Section {
+                heading: "What each does well",
+                body: "Pingdom is the fuller experience suite: scripted browser transactions, real user monitoring with 13-month retention, roughly a hundred probe locations, and unlimited users on every plan. StatusCake covers more protocols for the money: HTTP, HEAD, TCP, DNS, SMTP, SSH, ping and push heartbeats, with SSL, domain-expiry and basic Linux server monitoring bundled into the same plans, and one-minute checks arriving on its first paid tier.",
+            },
+            Section {
+                heading: "The status page catch",
+                body: "Read this before picking either for a customer-facing status page. Pingdom includes public status pages in its plans. StatusCake sells status pages as a separate product with its own tiers, capped by page count and subscriber count, billed on top of monitoring. If the status page is the point, that add-on can cost more than the monitoring beside it.",
+            },
+            Section {
+                heading: "Where Uptimepage fits",
+                body: "Uptimepage does not do browser transactions or RUM, and says so plainly. What it does is pair the monitoring with the status page in one product and one price: HTTP, TCP, DNS, TLS, ping and domain checks every 60 seconds on the free tier, a branded status page with confirmed email and webhook subscribers included, incidents that open automatically, and a Terraform provider, REST API and MCP server for teams who keep config in code. It is also open source under AGPL, so self-hosting is an exit, not a hostage negotiation.",
+            },
+        ],
+        code: None,
+        resources: &[
+            ResourceLink {
+                label: "Uptimepage vs Pingdom",
+                href: "/vs/pingdom",
+            },
+            ResourceLink {
+                label: "Uptimepage vs UptimeRobot",
+                href: "/vs/uptimerobot",
+            },
+            ResourceLink {
+                label: "The self-hosted field, compared",
+                href: "/vs/self-hosted-monitoring",
             },
         ],
         cta: "Start free",
@@ -1365,7 +1535,9 @@ struct LandingDoc {
     canonical_url: String,
     og: OpenGraph,
     breadcrumb_json_ld: JsonLd,
-    software_json_ld: JsonLd,
+    /// Absent on `/compare/` pages: their main entity is the rival pair,
+    /// and app markup there would misdescribe the page.
+    software_json_ld: Option<JsonLd>,
     webpage_json_ld: JsonLd,
     faq_json_ld: Option<JsonLd>,
     faqs: &'static [(&'static str, &'static str)],
@@ -1379,6 +1551,60 @@ struct LandingDoc {
 /// competitor facts, in step with its matrix.
 fn page_faqs(path: &str) -> &'static [(&'static str, &'static str)] {
     match path {
+        "/compare/openstatus-vs-uptime-kuma" => &[
+            (
+                "Is OpenStatus or Uptime Kuma easier to self-host?",
+                "Uptime Kuma, clearly. It is one Docker container. OpenStatus self-hosted is a multi-service TypeScript stack with external database dependencies; its hosted tier exists precisely because running it is work.",
+            ),
+            (
+                "Does Uptime Kuma have an API or Terraform provider?",
+                "No official REST API for managing monitors and no Terraform provider. Its API keys only expose metrics. OpenStatus and Uptimepage both offer Terraform, a REST API and CLI-style workflows.",
+            ),
+            (
+                "Which one can my customers subscribe to?",
+                "OpenStatus status pages take email and RSS subscribers. Uptime Kuma pages have no subscriber notifications. Uptimepage pages take confirmed email and webhook subscribers, and incidents open automatically from failing checks.",
+            ),
+            (
+                "Is Uptime Kuma still fine for a homelab?",
+                "Yes, and it is probably the best pick there. The comparison only gets interesting once a second person needs access, customers need a status page, or you want config in version control.",
+            ),
+        ],
+        "/compare/pingdom-vs-statuscake" => &[
+            (
+                "Does Pingdom have a free plan?",
+                "No. Pingdom offers a 30-day trial, then paid usage-based plans. StatusCake keeps a permanent free tier with ten monitors at five-minute intervals, and Uptimepage's free tier checks every 60 seconds with no card.",
+            ),
+            (
+                "Are StatusCake status pages included in its plans?",
+                "No. StatusCake Pages is a separately billed product with its own tiers, capped by pages and subscribers. Pingdom includes status pages in its plans, and Uptimepage includes a branded page with subscribers on every tier.",
+            ),
+            (
+                "Which one does synthetic browser monitoring?",
+                "Pingdom. Scripted browser transactions and real user monitoring are its core products. StatusCake offers page speed checks but no RUM. Uptimepage does neither; it focuses on uptime checks and status pages.",
+            ),
+            (
+                "Can I self-host either of them?",
+                "No, both are closed SaaS. If owning the stack matters, that is a different category; Uptimepage is AGPL open source, so the hosted tier has a self-hosted exit.",
+            ),
+        ],
+        "/compare/uptime-kuma-vs-gatus" => &[
+            (
+                "Should I pick Uptime Kuma or Gatus?",
+                "Pick by workflow. If you want to click monitors together in a dashboard, Kuma. If you want every check declared in YAML, reviewed in a pull request and deployed like code, Gatus. Feature lists matter less than that split.",
+            ),
+            (
+                "Can Gatus replace a status page?",
+                "For an internal ops wall, yes: its dashboard shows health, badges and announcements. For customers, no: there are no subscribers, no incident timeline and no branding beyond what you build around it.",
+            ),
+            (
+                "Which is lighter to run?",
+                "Gatus. It is a small static Go binary that can even run without a database. Kuma is a Node.js app in one container, still light, just not that light.",
+            ),
+            (
+                "What if I need teams or an API?",
+                "Neither has real multi-user support or a management API. That is the gap tools like Uptimepage and OpenStatus fill: organizations with roles, a REST API and a Terraform provider on top of the checks.",
+            ),
+        ],
         "/open-source-status-page" => &[
             (
                 "Is the status page really open source?",
@@ -1946,7 +2172,7 @@ static MONITORING_MATRIX: Matrix = Matrix {
             cells: &[
                 ("yes", "yes"),
                 ("add-on", "part"),
-                ("35 regions", "yes"),
+                ("28 regions", "yes"),
                 ("yes", ""),
                 ("no", "no"),
                 ("no", "no"),
@@ -2440,6 +2666,9 @@ static STATUSPAGE_MATRIX: Matrix = Matrix {
 /// `Landing`. Mirrors [`page_faqs`].
 fn page_matrix(path: &str) -> Option<&'static Matrix> {
     match path {
+        "/compare/openstatus-vs-uptime-kuma" => Some(&OPENSTATUS_KUMA_MATRIX),
+        "/compare/uptime-kuma-vs-gatus" => Some(&KUMA_GATUS_MATRIX),
+        "/compare/pingdom-vs-statuscake" => Some(&PINGDOM_STATUSCAKE_MATRIX),
         "/vs/self-hosted-status-pages" => Some(&SELF_HOSTED_MATRIX),
         "/vs/self-hosted-monitoring" => Some(&MONITORING_MATRIX),
         "/vs/uptime-kuma" => Some(&UPTIME_KUMA_MATRIX),
@@ -2451,6 +2680,282 @@ fn page_matrix(path: &str) -> Option<&'static Matrix> {
         _ => None,
     }
 }
+
+/// Third-party face-off for `/compare/openstatus-vs-uptime-kuma`, verified
+/// July 2026 against each project's repository, docs and plan pages. The
+/// Uptimepage column is last on purpose: the rivals are the subject.
+static OPENSTATUS_KUMA_MATRIX: Matrix = Matrix {
+    heading: "the facts, side by side",
+    columns: &["OpenStatus", "Uptime Kuma", "Uptimepage"],
+    rows: &[
+        MatrixRow {
+            label: "license",
+            cells: &[("AGPL-3.0", ""), ("MIT", ""), ("AGPL-3.0", "")],
+        },
+        MatrixRow {
+            label: "run it yourself",
+            cells: &[
+                ("multi-service TS stack", "part"),
+                ("one container", "yes"),
+                ("one binary + compose", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "hosted option",
+            cells: &[
+                ("yes, free tier", "yes"),
+                ("no", "no"),
+                ("yes, free tier", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "check types",
+            cells: &[
+                ("HTTP · TCP · DNS, more in schema", ""),
+                ("~40 incl. DBs · MQTT · browser", ""),
+                ("HTTP · TCP · DNS · TLS · ping · domain", ""),
+            ],
+        },
+        MatrixRow {
+            label: "fastest interval",
+            cells: &[
+                ("30s on hosted paid tiers", ""),
+                ("20s", ""),
+                ("60s free · 30s Pro · 10s self-hosted", ""),
+            ],
+        },
+        MatrixRow {
+            label: "multi-region probes",
+            cells: &[
+                ("28 hosted regions", "yes"),
+                ("single instance", "no"),
+                ("multi-region, run your own", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "status page subscribers",
+            cells: &[
+                ("email · RSS", "yes"),
+                ("none", "no"),
+                ("email · webhook", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "config as code",
+            cells: &[
+                ("Terraform · CLI · YAML · REST", "yes"),
+                ("UI only, no management API", "no"),
+                ("Terraform · REST · MCP", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "teams & roles",
+            cells: &[
+                ("members on paid tiers", "yes"),
+                ("single login", "no"),
+                ("orgs + roles", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "community (GitHub stars)",
+            cells: &[("~8.8k", ""), ("~89k", ""), ("young", "")],
+        },
+    ],
+    notes: &[
+        "OpenStatus's open-source checker implements HTTP, TCP and DNS; ICMP, UDP and TLS-certificate monitor types exist in its API schema.",
+        "Star counts rounded from GitHub, July 2026.",
+        "Verified July 2026 against each project's repository, documentation and plan pages. Refresh when a project ships.",
+    ],
+};
+
+/// Third-party face-off for `/compare/uptime-kuma-vs-gatus`, verified July
+/// 2026 against both repositories. Uptimepage column last: rivals first.
+static KUMA_GATUS_MATRIX: Matrix = Matrix {
+    heading: "the facts, side by side",
+    columns: &["Uptime Kuma", "Gatus", "Uptimepage"],
+    rows: &[
+        MatrixRow {
+            label: "license",
+            cells: &[("MIT", ""), ("Apache-2.0", ""), ("AGPL-3.0", "")],
+        },
+        MatrixRow {
+            label: "configuration",
+            cells: &[
+                ("UI only", ""),
+                ("YAML only, read-only UI", ""),
+                ("UI + Terraform + REST + MCP", ""),
+            ],
+        },
+        MatrixRow {
+            label: "run it yourself",
+            cells: &[
+                ("one container (Node)", "yes"),
+                ("tiny static binary", "yes"),
+                ("one binary + compose", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "hosted option",
+            cells: &[
+                ("no", "no"),
+                ("gatus.io, paid", "part"),
+                ("yes, free tier", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "check types",
+            cells: &[
+                ("~40 incl. DBs · MQTT · browser", ""),
+                ("11 protocols incl. gRPC · SSH · WebSocket", ""),
+                ("HTTP · TCP · DNS · TLS · ping · domain", ""),
+            ],
+        },
+        MatrixRow {
+            label: "fastest interval",
+            cells: &[
+                ("20s", ""),
+                ("no documented floor, default 60s", ""),
+                ("60s free · 30s Pro · 10s self-hosted", ""),
+            ],
+        },
+        MatrixRow {
+            label: "status page",
+            cells: &[
+                ("yes, custom domains", "yes"),
+                ("dashboard doubles as page", "part"),
+                ("branded, own subdomain", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "page subscribers",
+            cells: &[("none", "no"), ("none", "no"), ("email · webhook", "yes")],
+        },
+        MatrixRow {
+            label: "incidents",
+            cells: &[
+                ("posted by hand", "part"),
+                ("none", "no"),
+                ("auto-opened from checks", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "teams & roles",
+            cells: &[
+                ("single login", "no"),
+                ("one basic-auth or OIDC gate", "no"),
+                ("orgs + roles", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "alert channels",
+            cells: &[
+                ("~95 services", ""),
+                ("41 providers", ""),
+                ("Slack · Telegram · PagerDuty · SMS + more", ""),
+            ],
+        },
+        MatrixRow {
+            label: "community (GitHub stars)",
+            cells: &[("~89k", ""), ("~11.4k", ""), ("young", "")],
+        },
+    ],
+    notes: &[
+        "Kuma counts include the Apprise meta-provider and types implemented outside its monitor-types module; Gatus provider count from its README.",
+        "Star counts rounded from GitHub, July 2026.",
+        "Verified July 2026 against both repositories. Refresh when a project ships.",
+    ],
+};
+
+/// Third-party face-off for `/compare/pingdom-vs-statuscake`, verified July
+/// 2026 against both vendors' pricing/feature pages and Pingdom's API spec.
+/// Prices are geo-localized by both vendors, so rows describe shape only.
+static PINGDOM_STATUSCAKE_MATRIX: Matrix = Matrix {
+    heading: "the facts, side by side",
+    columns: &["Pingdom", "StatusCake", "Uptimepage"],
+    rows: &[
+        MatrixRow {
+            label: "free tier",
+            cells: &[
+                ("no, 30-day trial", "no"),
+                ("yes, 10 monitors @ 5 min", "yes"),
+                ("yes, no card", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "pricing model",
+            cells: &[
+                ("usage ladders per product", ""),
+                ("three tiers + add-ons", ""),
+                ("free · founding · Pro", ""),
+            ],
+        },
+        MatrixRow {
+            label: "check types",
+            cells: &[
+                ("HTTP · TCP · ping · DNS · UDP · mail", ""),
+                ("HTTP · TCP · DNS · SSH · SMTP · ping · push", ""),
+                ("HTTP · TCP · DNS · TLS · ping · domain", ""),
+            ],
+        },
+        MatrixRow {
+            label: "fastest uptime interval",
+            cells: &[
+                ("1 min", ""),
+                ("30s on top tier", ""),
+                ("60s free · 30s Pro · 10s self-hosted", ""),
+            ],
+        },
+        MatrixRow {
+            label: "browser transactions + RUM",
+            cells: &[
+                ("yes, core products", "yes"),
+                ("page speed only, no RUM", "part"),
+                ("no", "no"),
+            ],
+        },
+        MatrixRow {
+            label: "probe locations",
+            cells: &[
+                ("~100 locations", ""),
+                ("30+ countries", ""),
+                ("EU · US · Asia-Pacific + run your own", ""),
+            ],
+        },
+        MatrixRow {
+            label: "status page",
+            cells: &[
+                ("included", "yes"),
+                ("separate paid add-on", "part"),
+                ("included, branded", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "page subscribers",
+            cells: &[
+                ("not published", ""),
+                ("email · SMS, capped per add-on tier", "part"),
+                ("email · webhook", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "open source / self-host",
+            cells: &[("no", "no"), ("no", "no"), ("AGPL", "yes")],
+        },
+        MatrixRow {
+            label: "team members",
+            cells: &[
+                ("unlimited on all plans", "yes"),
+                ("capped per tier", "part"),
+                ("orgs + roles", "yes"),
+            ],
+        },
+    ],
+    notes: &[
+        "Pingdom check types from its public API spec; StatusCake types from its features pages.",
+        "Both vendors geo-localize prices, so tiers are described by shape rather than numbers.",
+        "Verified July 2026 against both vendors' public pages. Refresh when either changes plans.",
+    ],
+};
 
 static RENDERED: OnceLock<HashMap<&'static str, CachedRender>> = OnceLock::new();
 
@@ -2477,7 +2982,8 @@ fn render_all(cfg: &MarketingCfg) -> HashMap<&'static str, CachedRender> {
                 canonical_url,
                 og,
                 breadcrumb_json_ld: json_ld_breadcrumb(&cfg.canonical_origin, l.h1, l.path),
-                software_json_ld: json_ld_software_application(&cfg.canonical_origin),
+                software_json_ld: (!l.path.starts_with("/compare/"))
+                    .then(|| json_ld_software_application(&cfg.canonical_origin)),
                 webpage_json_ld: json_ld_webpage(
                     &cfg.canonical_origin,
                     l.path,
@@ -2562,6 +3068,11 @@ mod tests {
             let Some(m) = page_matrix(l.path) else {
                 continue;
             };
+            assert!(
+                m.us_col() < m.columns.len(),
+                "{} matrix missing an Uptimepage column",
+                l.path
+            );
             for row in m.rows {
                 assert_eq!(
                     row.cells.len(),
@@ -2578,7 +3089,10 @@ mod tests {
 
     #[test]
     fn comparison_pages_carry_faqs() {
-        for l in LANDINGS.iter().filter(|l| l.path.starts_with("/vs/")) {
+        for l in LANDINGS
+            .iter()
+            .filter(|l| l.path.starts_with("/vs/") || l.path.starts_with("/compare/"))
+        {
             assert!(
                 !page_faqs(l.path).is_empty(),
                 "{} missing comparison FAQ",
@@ -2605,7 +3119,11 @@ mod tests {
                 l.path,
                 l.meta_description.len()
             );
-            assert!(!l.features.is_empty(), "{} missing features", l.path);
+            assert!(
+                !l.features.is_empty() || page_matrix(l.path).is_some(),
+                "{} has neither features nor a matrix",
+                l.path
+            );
             assert!(!l.sections.is_empty(), "{} missing sections", l.path);
         }
     }

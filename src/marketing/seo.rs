@@ -243,6 +243,35 @@ pub fn json_ld_website(canonical_origin: &str) -> JsonLd {
     JsonLd::from_value(payload)
 }
 
+/// `ItemList` for list-format posts ("best X tools"): the ranked items a
+/// crawler reads off the article. Names only; the list lives on this URL.
+pub fn json_ld_item_list(
+    canonical_origin: &str,
+    slug: &str,
+    name: &str,
+    items: &[String],
+) -> JsonLd {
+    let entries: Vec<_> = items
+        .iter()
+        .enumerate()
+        .map(|(i, item)| {
+            serde_json::json!({
+                "@type": "ListItem",
+                "position": i + 1,
+                "name": item,
+            })
+        })
+        .collect();
+    let payload = serde_json::json!({
+        "@context": "https://schema.org",
+        "@type": "ItemList",
+        "name": name,
+        "url": format!("{canonical_origin}/blog/{slug}"),
+        "itemListElement": entries,
+    });
+    JsonLd::from_value(payload)
+}
+
 pub fn json_ld_blog_posting(
     canonical_origin: &str,
     title: &str,
@@ -401,7 +430,24 @@ fn build_llms(cfg: &MarketingCfg) -> Bytes {
     ));
 
     s.push_str("## Use cases\n");
-    for l in landings::LANDINGS {
+    for l in landings::LANDINGS
+        .iter()
+        .filter(|l| !l.path.starts_with("/compare/"))
+    {
+        s.push_str(&format!(
+            "- [{title}]({origin}{path}): {desc}\n",
+            title = l.title,
+            path = l.path,
+            desc = l.meta_description,
+        ));
+    }
+    s.push('\n');
+
+    s.push_str("## Comparisons\n");
+    for l in landings::LANDINGS
+        .iter()
+        .filter(|l| l.path.starts_with("/compare/"))
+    {
         s.push_str(&format!(
             "- [{title}]({origin}{path}): {desc}\n",
             title = l.title,
@@ -468,11 +514,13 @@ fn build_llms_full(cfg: &MarketingCfg) -> Bytes {
         s.push_str(&format!("---\n\n## {}\n", l.title));
         s.push_str(&format!("URL: {origin}{}\n\n", l.path));
         s.push_str(&format!("{}\n\n{}\n\n", l.h1, l.lede));
-        s.push_str("What you get:\n");
-        for f in l.features {
-            s.push_str(&format!("- {}: {}\n", f.label, f.value));
+        if !l.features.is_empty() {
+            s.push_str("What you get:\n");
+            for f in l.features {
+                s.push_str(&format!("- {}: {}\n", f.label, f.value));
+            }
+            s.push('\n');
         }
-        s.push('\n');
         for sec in l.sections {
             s.push_str(&format!("### {}\n{}\n\n", sec.heading, sec.body));
         }
@@ -499,7 +547,10 @@ fn build_sitemap(cfg: &MarketingCfg) -> String {
     // and landings have no per-page change tracking, so they omit lastmod rather
     // than borrow an unrelated blog date.
     let blog_lastmod: Option<String> = if cfg.blog_enabled {
-        list_published().iter().map(|p| p.date.clone()).max()
+        list_published()
+            .iter()
+            .map(|p| p.updated.clone().unwrap_or_else(|| p.date.clone()))
+            .max()
     } else {
         None
     };
@@ -512,7 +563,7 @@ fn build_sitemap(cfg: &MarketingCfg) -> String {
         for post in list_published() {
             urls.push((
                 format!("{origin}/blog/{}", post.slug),
-                Some(post.date.clone()),
+                Some(post.updated.clone().unwrap_or_else(|| post.date.clone())),
             ));
         }
     }
@@ -597,6 +648,17 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(jl.as_str()).unwrap();
         assert_eq!(v["@type"], "Organization");
         assert_eq!(v["url"], "https://uptimepage.dev");
+    }
+
+    #[test]
+    fn json_ld_item_list_orders_positions() {
+        let items = vec!["Uptime Kuma".to_string(), "Gatus".to_string()];
+        let jl = json_ld_item_list("https://uptimepage.dev", "best-tools", "Best tools", &items);
+        let v: serde_json::Value = serde_json::from_str(jl.as_str()).unwrap();
+        assert_eq!(v["@type"], "ItemList");
+        assert_eq!(v["url"], "https://uptimepage.dev/blog/best-tools");
+        assert_eq!(v["itemListElement"][0]["position"], 1);
+        assert_eq!(v["itemListElement"][1]["name"], "Gatus");
     }
 
     #[test]
