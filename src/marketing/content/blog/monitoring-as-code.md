@@ -1,6 +1,7 @@
 +++
 title = "Your monitoring config belongs in a pull request"
 date = "2026-06-16"
+updated = "2026-07-06"
 slug = "monitoring-as-code"
 excerpt = "Click-created monitors rot: nobody recalls why a threshold is set, and the reasoning leaves with its author. Terraform fixes that, and bites back in places."
 tags = ["terraform", "infrastructure-as-code", "monitoring", "devops"]
@@ -12,6 +13,10 @@ Open your monitoring dashboard and count the checks nobody can explain. The one 
 That's what clicking buttons does to monitoring. The config is real, it's load-bearing, and it lives nowhere you can read it. You can't diff it, can't review it, can't ask `git blame` who set that timeout and what they were thinking. The monitor is supposed to be the thing you trust when everything else is on fire, and you've built it on a pile of undocumented clicks.
 
 So put it in version control. Not because infrastructure-as-code is a virtue to collect, but because a monitor is exactly the kind of quiet, long-lived config that turns into a liability the moment it's invisible.
+
+> **TL;DR**
+>
+> A monitor clicked into a dashboard has no diff, no history, and no record of why. Move it into a repo and every change is a reviewed pull request you can `git blame`; a new region becomes one `apply` instead of an afternoon of clicking. The price is a state file to maintain. Uptimepage supports this through Terraform, a REST API and MCP.
 
 ## What "as code" actually buys you
 

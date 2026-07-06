@@ -776,15 +776,34 @@ html:has(.marketing-shell) {
     padding: 0;
     color: inherit;
 }
+/* Callout: blog posts use blockquote only for TL;DR / Key-takeaways boxes.
+   First paragraph is the label, rendered as a `// LABEL` mono eyebrow. */
 .mk-article blockquote {
     border-left: 3px solid var(--mk-ok);
-    padding-left: 1rem;
-    margin: 1.25rem 0;
+    border-radius: 2px;
+    padding: 0.85rem 1.1rem;
+    margin: 1.5rem 0;
+    background: color-mix(in oklch, var(--mk-ok) 5%, var(--mk-surface));
     color: var(--mk-ink-soft);
     font-style: normal;
     font-family: var(--mk-font-mono);
-    font-size: 0.9375rem;
+    font-size: 0.875rem;
+    line-height: 1.6;
 }
+.mk-article blockquote > p:first-child {
+    margin-bottom: 0.55rem;
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--mk-ok);
+}
+.mk-article blockquote > p:first-child::before {
+    content: "// ";
+    color: var(--mk-faint);
+}
+.mk-article blockquote > :last-child { margin-bottom: 0; }
+.mk-article blockquote ul { padding-left: 1.25rem; }
 .mk-article hr {
     border: 0;
     border-top: 1px solid var(--mk-rule);

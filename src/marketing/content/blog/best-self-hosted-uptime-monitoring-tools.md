@@ -1,7 +1,7 @@
 +++
 title = "Best self-hosted uptime monitoring tools in 2026"
 date = "2026-06-20"
-updated = "2026-07-05"
+updated = "2026-07-06"
 slug = "best-self-hosted-uptime-monitoring-tools"
 excerpt = "A fair look at the open-source, self-hostable tools for watching sites and APIs in 2026: what each is good at, where it stops, and how to pick one."
 tags = ["open-source", "self-hosted", "monitoring", "status-page"]
@@ -22,6 +22,15 @@ list_items = [
 If you searched for a self-hosted uptime monitor, or for an alternative to the tool you are outgrowing, you already made the important decision. You want the data on your own servers, no per-monitor invoice, and no vendor that can change the free plan whenever they want. The rest is picking the tool that fits how your team works.
 
 We build one of the tools on this list, Uptimepage, so keep that in mind. We have tried to keep the descriptions of everyone else to facts that stay true rather than feature claims that go out of date in a month, because this whole category moves fast. Check the current docs before you commit. With that said, here is an honest guide for 2026.
+
+> **Key takeaways**
+>
+> - Uptime Kuma is the homelab default: one container, around forty monitor types, roughly ninety-five alert integrations, but a single shared login, no real API, and basic status pages.
+> - Gatus is the pick when monitoring should live in Git as YAML for your own team.
+> - Checkmate is the freshest Kuma-style option, with a modern UI and themed status pages, if you can run a Node and MongoDB stack.
+> - OneUptime and Apache HertzBeat are full platforms for the whole incident lifecycle, or for databases and network gear, when you can carry the weight.
+> - Cachet and Statping are status-page-first; teams already on Prometheus can add the Blackbox exporter.
+> - Uptimepage (ours) pairs monitoring with a customer status page in one AGPL binary, with a REST API, Terraform, roles and subscribers, for when you outgrow a single shared login.
 
 ## What actually matters when you self-host
 

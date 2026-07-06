@@ -1,6 +1,7 @@
 +++
 title = "Your monitors can talk to an AI, with your permission"
 date = "2026-06-03"
+updated = "2026-07-06"
 slug = "mcp-server"
 excerpt = "Uptimepage now speaks MCP, so an LLM can answer \"what's broken and since when?\" in plain language, plus what we did to stop it from wrecking things."
 tags = ["mcp", "ai", "monitoring", "security", "api"]
@@ -12,6 +13,10 @@ Ask your assistant "what's down right now, and how long has it been bad?" and ha
 MCP, the Model Context Protocol, is the plumbing that lets a large language model call tools instead of hallucinating about them. Think of it as the difference between an assistant that *guesses* your uptime and one that *queries* it. We expose monitoring as a set of tools, and your LLM client (Claude, an IDE, whatever speaks MCP) discovers them, calls them, and reads back typed data.
 
 Most of what's interesting here is about restraint, not cleverness.
+
+> **TL;DR**
+>
+> Uptimepage speaks MCP, so an assistant like Claude reads your real monitors and tells you what is down and for how long, instead of guessing. There are thirteen tools: nine read-only, four that act. Every action needs a scoped token and your explicit approval in the moment, and each one writes an audit row. Nothing changes without you.
 
 ## Thirteen tools. Nine can only look.
 

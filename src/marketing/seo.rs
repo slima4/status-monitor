@@ -154,6 +154,7 @@ pub fn json_ld_organization(canonical_origin: &str) -> JsonLd {
     let payload = serde_json::json!({
         "@context": "https://schema.org",
         "@type": "Organization",
+        "@id": format!("{canonical_origin}/#organization"),
         "name": BRAND,
         "url": canonical_origin,
         "logo": absolute_asset(canonical_origin, "/static/img/favicon-512.png"),
@@ -237,8 +238,10 @@ pub fn json_ld_website(canonical_origin: &str) -> JsonLd {
     let payload = serde_json::json!({
         "@context": "https://schema.org",
         "@type": "WebSite",
+        "@id": format!("{canonical_origin}/#website"),
         "name": BRAND,
         "url": canonical_origin,
+        "publisher": { "@id": format!("{canonical_origin}/#organization") },
     });
     JsonLd::from_value(payload)
 }
@@ -359,6 +362,7 @@ pub fn json_ld_howto(name: &str, steps: &[(&str, &str)]) -> JsonLd {
 fn publisher(canonical_origin: &str) -> serde_json::Value {
     serde_json::json!({
         "@type": "Organization",
+        "@id": format!("{canonical_origin}/#organization"),
         "name": BRAND,
         "url": canonical_origin,
         "logo": {
