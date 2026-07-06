@@ -13,7 +13,7 @@ use crate::api::error::codes;
 use crate::api::types::AvailabilityBucket;
 use crate::app::AppState;
 use crate::domain::{
-    CheckResult, Incident, OrgId, confirmed_downtime_secs, uptime_pct_from_downtime,
+    CheckResult, CheckSpec, Incident, OrgId, confirmed_downtime_secs, uptime_pct_from_downtime,
 };
 use crate::error::AppError;
 use crate::storage::{ClampedRange, TimeRange, UptimeStats, rollup_bucket_secs};
@@ -184,6 +184,8 @@ pub struct DetailPage {
     pub kpi: Arc<KpiTrend>,
     pub results: Arc<[ResultRow]>,
     pub results_has_more: bool,
+    /// Registrable domain a `domain_expiry` monitor queries; `None` otherwise.
+    pub registered_domain: Option<String>,
     pub config_json: String,
     pub range: &'static str,
     pub range_options: Vec<RangeOption>,
@@ -716,8 +718,11 @@ pub async fn index(
         Vec::new()
     };
     let ongoing_count = ongoing_from_status(live.last_status);
-    let config_json = serde_json::to_string_pretty(&target.check)
-        .map_err(|e| AppError::Other(anyhow::anyhow!(e)))?;
+    let registered_domain = match &target.check {
+        CheckSpec::DomainExpiry(d) => d.reduced_domain_hint(),
+        _ => None,
+    };
+    let config_json = config_json_with_derived(&target.check, registered_domain.as_deref())?;
     let (kind, address) = describe_check(&target.check);
     let share_count = state
         .monitor_share_store
@@ -754,6 +759,7 @@ pub async fn index(
         kpi: Arc::clone(&live.kpi),
         results: Arc::clone(&live.result_rows),
         results_has_more: live.results_has_more,
+        registered_domain,
         config_json,
         range: range_key,
         range_options: build_range_options(range_key, &RANGE_KEYS),
@@ -767,6 +773,20 @@ pub async fn index(
         region_breakdown,
         heartbeat,
     })
+}
+
+/// Pretty check config for the panel, with a read-only `registered_domain`
+/// added when a `domain_expiry` input reduces, so the displayed input isn't
+/// rewritten.
+fn config_json_with_derived(
+    check: &CheckSpec,
+    registered_domain: Option<&str>,
+) -> Result<String, AppError> {
+    let mut value = serde_json::to_value(check).map_err(|e| AppError::Other(anyhow::anyhow!(e)))?;
+    if let (Some(rd), Some(object)) = (registered_domain, value.as_object_mut()) {
+        object.insert("registered_domain".into(), rd.into());
+    }
+    serde_json::to_string_pretty(&value).map_err(|e| AppError::Other(anyhow::anyhow!(e)))
 }
 
 /// htmx-polled fragment that re-renders the KPI cards + recent-results
@@ -1077,6 +1097,7 @@ mod tests {
             name: "api".into(),
             kind: "HTTP",
             address: "https://example.com".into(),
+            registered_domain: None,
             interval_s: 60,
             enabled: true,
             tags: vec!["prod".into()],

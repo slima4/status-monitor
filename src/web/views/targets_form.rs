@@ -158,6 +158,12 @@ impl Default for DomainExpiryFields {
     }
 }
 
+impl DomainExpiryFields {
+    pub fn registered_domain_hint(&self) -> Option<String> {
+        crate::domain::reduced_domain_hint(&self.domain)
+    }
+}
+
 /// One row in the monitor form's Alerts section: an org channel plus whether
 /// this monitor binds to it. Channels are pure delivery targets — the firing
 /// policy (confirmations, recovery) is monitor-level.

@@ -153,6 +153,9 @@
       </button>
     </header>
     <div id="configuration-body" class="hidden border-t border-[color:var(--theme-line)] p-5">
+      {% if let Some(rd) = registered_domain %}
+      <p class="mb-3 text-xs text-muted">Registration tracked for <span class="font-mono text-body">{{ rd }}</span> — the registered domain for <span class="font-mono">{{ address }}</span>.</p>
+      {% endif %}
       <pre class="overflow-auto rounded-sm bg-[color:var(--theme-surface-sunk)] p-4 text-xs text-body">{{ config_json }}</pre>
     </div>
   </section>
