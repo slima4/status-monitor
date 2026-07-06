@@ -8,7 +8,8 @@ use flate2::read::GzDecoder;
 use http_body_util::{BodyExt, Full, Limited};
 use hyper::body::Bytes as HBytes;
 use hyper::header::{
-    ACCEPT_ENCODING, AUTHORIZATION, HeaderName, HeaderValue, LOCATION, RETRY_AFTER, USER_AGENT,
+    ACCEPT_ENCODING, AUTHORIZATION, HOST, HeaderName, HeaderValue, LOCATION, RETRY_AFTER,
+    USER_AGENT,
 };
 use hyper::{Method, Request, Uri};
 use metrics::counter;
@@ -124,15 +125,6 @@ async fn do_http_check(
             Err(_) => return early("invalid url", None),
         };
 
-        // Strip credentials when a redirect leaves the original origin so a
-        // hostile or misconfigured `Location` can't harvest the configured
-        // basic-auth / bearer token.
-        let same_origin = current.origin() == origin;
-        let req = match build_request(method, &uri, check, &send_body, same_origin, clients) {
-            Ok(r) => r,
-            Err(err) => return early(&format!("request build failed: {err}"), None),
-        };
-
         let Some(host) = uri.host() else {
             return early("invalid url", None);
         };
@@ -164,6 +156,22 @@ async fn do_http_check(
                 return (r, None);
             }
             Ok(Ok(c)) => c,
+        };
+
+        // Request-target form depends on the negotiated protocol; `same_origin`
+        // gates credential-bearing headers on cross-origin redirects.
+        let same_origin = current.origin() == origin;
+        let req = match build_request(
+            method,
+            &uri,
+            check,
+            &send_body,
+            same_origin,
+            alpn_h2,
+            clients,
+        ) {
+            Ok(r) => r,
+            Err(err) => return early(&format!("request build failed: {err}"), None),
         };
 
         // Connection up — failures below carry the measured connect timings.
@@ -471,6 +479,7 @@ fn build_request(
     check: &HttpCheck,
     body: &Option<String>,
     include_auth: bool,
+    alpn_h2: bool,
     clients: &HttpClients,
 ) -> Result<Request<Full<HBytes>>, hyper::http::Error> {
     let body_bytes: HBytes = match body {
@@ -478,13 +487,19 @@ fn build_request(
         None => HBytes::new(),
     };
 
+    let (target, host_header) = request_target(uri, alpn_h2)?;
+
     let mut builder = Request::builder()
         .method(map_method(method))
-        .uri(uri)
+        .uri(target)
         .header(USER_AGENT, clients.user_agent())
         .header(ACCEPT_ENCODING, "gzip, br");
 
     let bodyless = body.is_none();
+    let user_set_host = check.headers.keys().any(|k| k.eq_ignore_ascii_case("host"));
+    if let Some(host) = host_header.filter(|_| !user_set_host) {
+        builder = builder.header(HOST, host);
+    }
     // The dedicated auth field is canonical: resolve one Authorization value
     // (bearer over basic, basic if bearer is unusable) and drop a raw
     // `Authorization` row so the probe never sends two. None falls through to a
@@ -538,6 +553,34 @@ fn build_request(
     }
 
     builder.body(Full::new(body_bytes))
+}
+
+/// Request-target and Host for the negotiated protocol. hyper's low-level
+/// http/1 client writes the request URI to the wire verbatim, so an absolute
+/// URI leaves as an absolute-form target (`GET https://host/path`) that strict
+/// origins and WAFs answer with 404. http/1 gets an origin-form target plus an
+/// explicit Host; h2 keeps the authority for its `:authority` pseudo-header.
+fn request_target(uri: &Uri, alpn_h2: bool) -> Result<(Uri, Option<String>), hyper::http::Error> {
+    if alpn_h2 {
+        return Ok((uri.clone(), None));
+    }
+    let path = uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/");
+    Ok((Uri::try_from(path)?, host_header_value(uri)))
+}
+
+/// Host header for an origin-form http/1 request: authority host plus a
+/// non-default port. Userinfo never belongs in `Host`, so it is excluded.
+fn host_header_value(uri: &Uri) -> Option<String> {
+    let host = uri.host()?;
+    let default_port = if uri.scheme_str() == Some("http") {
+        80
+    } else {
+        443
+    };
+    Some(match uri.port_u16() {
+        Some(port) if port != default_port => format!("{host}:{port}"),
+        _ => host.to_owned(),
+    })
 }
 
 /// Effective hop budget: `0` disables following entirely; an enabled check
@@ -766,6 +809,50 @@ mod tests {
         for c in [200, 204, 300, 304, 305, 400, 500] {
             assert!(!is_redirect(c));
         }
+    }
+
+    #[test]
+    fn request_target_http1_is_origin_form_with_host() {
+        let uri: Uri = "https://example.com/status?q=1".parse().unwrap();
+        let (target, host) = request_target(&uri, false).unwrap();
+        assert_eq!(target.to_string(), "/status?q=1");
+        assert_eq!(host.as_deref(), Some("example.com"));
+    }
+
+    #[test]
+    fn request_target_http1_root_path_defaults_to_slash() {
+        let uri: Uri = "https://example.com".parse().unwrap();
+        let (target, host) = request_target(&uri, false).unwrap();
+        assert_eq!(target.to_string(), "/");
+        assert_eq!(host.as_deref(), Some("example.com"));
+    }
+
+    #[test]
+    fn request_target_h2_keeps_absolute_uri_without_host() {
+        let uri: Uri = "https://example.com/status".parse().unwrap();
+        let (target, host) = request_target(&uri, true).unwrap();
+        assert_eq!(target, uri);
+        assert!(host.is_none());
+    }
+
+    #[test]
+    fn host_header_omits_default_port_and_keeps_custom() {
+        assert_eq!(
+            host_header_value(&"https://example.com/".parse().unwrap()).as_deref(),
+            Some("example.com")
+        );
+        assert_eq!(
+            host_header_value(&"http://example.com/".parse().unwrap()).as_deref(),
+            Some("example.com")
+        );
+        assert_eq!(
+            host_header_value(&"https://example.com:8443/".parse().unwrap()).as_deref(),
+            Some("example.com:8443")
+        );
+        assert_eq!(
+            host_header_value(&"http://example.com:8080/".parse().unwrap()).as_deref(),
+            Some("example.com:8080")
+        );
     }
 
     #[test]
