@@ -49,15 +49,18 @@ impl RdapClient {
 
     pub async fn lookup_expiration(&self, domain: &str) -> Result<RdapAnswer> {
         let map = self.bootstrap().await?;
-        let tld = domain
+        // Registration and expiry are properties of the registrable domain, not
+        // a subdomain: `app.example.co.uk` is reduced to `example.co.uk` before
+        // the query.
+        let registrable = crate::domain::registered_domain(domain);
+        let tld = registrable
             .rsplit('.')
             .next()
             .filter(|t| !t.is_empty())
-            .ok_or_else(|| anyhow!("domain '{domain}' missing TLD"))?
-            .to_ascii_lowercase();
+            .ok_or_else(|| anyhow!("domain '{domain}' missing TLD"))?;
         let base = map
             .by_tld
-            .get(&tld)
+            .get(tld)
             .ok_or_else(|| anyhow!("no RDAP server for TLD '.{tld}'"))?
             .clone();
         let mut url =
@@ -69,8 +72,8 @@ impl RdapClient {
             url.set_path(&new_path);
         }
         let url = url
-            .join(&format!("domain/{domain}"))
-            .with_context(|| format!("building RDAP request for '{domain}'"))?;
+            .join(&format!("domain/{registrable}"))
+            .with_context(|| format!("building RDAP request for '{registrable}'"))?;
 
         let resp: RdapDomainResponse = get_json(&self.http, &url).await?;
         parse_answer(&resp).ok_or_else(|| {

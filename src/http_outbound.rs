@@ -232,18 +232,101 @@ pub async fn get_json<T: DeserializeOwned>(client: &OutboundHttpClient, url: &Ur
         .context("building request")?;
     let resp = with_request_timeout(url, client.request(req)).await?;
     let status = resp.status();
-    let limited = Limited::new(resp.into_body(), MAX_RESPONSE_BYTES);
-    let bytes = limited.collect().await.map_err(|e| {
-        AppError::Other(anyhow::anyhow!(
-            "{url} body exceeded {MAX_RESPONSE_BYTES} bytes or read failed: {e}"
-        ))
-    })?;
-    let bytes = bytes.to_bytes();
+    let collected = Limited::new(resp.into_body(), MAX_RESPONSE_BYTES)
+        .collect()
+        .await;
+
+    // Report a non-2xx from the status alone: an unframed body (no
+    // Content-Length, closed mid-read) must not mask it with a read error.
     if !status.is_success() {
-        let body = String::from_utf8_lossy(&bytes);
+        let detail = collected
+            .ok()
+            .map(|c| error_body_summary(&c.to_bytes()))
+            .filter(|s| !s.is_empty())
+            .map(|s| format!(": {s}"))
+            .unwrap_or_default();
         return Err(AppError::Other(anyhow::anyhow!(
-            "{url} returned {status}: {body}"
+            "{url} returned {status}{detail}"
         )));
     }
+
+    let bytes = collected
+        .map_err(|e| {
+            AppError::Other(anyhow::anyhow!(
+                "{url} body exceeded {MAX_RESPONSE_BYTES} bytes or read failed: {e}"
+            ))
+        })?
+        .to_bytes();
     serde_json::from_slice(&bytes).map_err(|e| AppError::Other(anyhow::anyhow!("{url}: {e}")))
+}
+
+/// Bounded, operator-facing summary of an error body: prefers a JSON error
+/// field (RDAP `description`, or `title`/`message`/`error`) so ToS boilerplate
+/// doesn't drown the reason; else truncated raw text.
+fn error_body_summary(bytes: &[u8]) -> String {
+    const CAP: usize = 300;
+    if let Ok(value) = serde_json::from_slice::<serde_json::Value>(bytes) {
+        for key in [
+            "description",
+            "title",
+            "message",
+            "error",
+            "error_description",
+        ] {
+            let text = match value.get(key) {
+                Some(serde_json::Value::String(s)) => s.trim().to_owned(),
+                Some(serde_json::Value::Array(items)) => items
+                    .iter()
+                    .filter_map(|v| v.as_str())
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .collect::<Vec<_>>()
+                    .join("; "),
+                _ => continue,
+            };
+            if !text.is_empty() {
+                return crate::notifier::truncate_bytes(&text, CAP);
+            }
+        }
+    }
+    crate::notifier::truncate_bytes(String::from_utf8_lossy(bytes).trim(), CAP)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn error_summary_prefers_rdap_description_over_tos_notices() {
+        let body = br#"{
+            "errorCode": 400,
+            "title": "Bad Request",
+            "description": ["app.example.dev is not a valid domain name: Domain name must have exactly one part above the TLD"],
+            "notices": [{"description": ["By querying our Domain Database you agree to the terms ..."]}]
+        }"#;
+        let summary = error_body_summary(body);
+        assert!(summary.contains("not a valid domain name"));
+        assert!(!summary.contains("terms"));
+    }
+
+    #[test]
+    fn error_summary_reads_generic_message_fields() {
+        assert_eq!(error_body_summary(br#"{"message":"boom"}"#), "boom");
+        assert_eq!(error_body_summary(br#"{"error":"nope"}"#), "nope");
+    }
+
+    #[test]
+    fn error_summary_falls_back_to_raw_text() {
+        assert_eq!(
+            error_body_summary(b"plain text failure"),
+            "plain text failure"
+        );
+    }
+
+    #[test]
+    fn error_summary_caps_long_body() {
+        let out = error_body_summary(&vec![b'x'; 500]);
+        assert!(out.len() <= 300);
+        assert!(out.ends_with('…'));
+    }
 }

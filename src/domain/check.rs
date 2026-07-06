@@ -180,6 +180,40 @@ pub struct DomainExpiryCheck {
     pub timeout: Duration,
 }
 
+impl DomainExpiryCheck {
+    /// Registrable domain to surface in the UI, only when it actually reduces
+    /// the input (`app.example.co.uk` → `example.co.uk`); an apex yields `None`.
+    pub fn reduced_domain_hint(&self) -> Option<String> {
+        reduced_domain_hint(&self.domain)
+    }
+}
+
+/// Registrable domain (public suffix + one label) for the RDAP query. An
+/// unrecognised suffix falls through normalised so the registry returns a
+/// precise error instead of a silent wrong lookup.
+pub fn registered_domain(domain: &str) -> String {
+    resolve_registrable(&normalize_domain(domain))
+}
+
+/// Registrable domain only when it differs from the normalised input — the
+/// signal that a real subdomain was reduced, for UI hints (mixed-case or a
+/// trailing dot alone is not a reduction).
+pub fn reduced_domain_hint(domain: &str) -> Option<String> {
+    let normalized = normalize_domain(domain);
+    let registered = resolve_registrable(&normalized);
+    (registered != normalized).then_some(registered)
+}
+
+fn normalize_domain(domain: &str) -> String {
+    domain.trim().trim_end_matches('.').to_ascii_lowercase()
+}
+
+fn resolve_registrable(normalized: &str) -> String {
+    psl::domain_str(normalized)
+        .map(str::to_owned)
+        .unwrap_or_else(|| normalized.to_owned())
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum DnsRecordType {
@@ -275,5 +309,43 @@ mod tests {
             assert!(seen.insert(k), "duplicate kind in ALL_KINDS: {k}");
         }
         assert_eq!(CheckSpec::ALL_KINDS.len(), 7);
+    }
+
+    #[test]
+    fn registered_domain_reduces_subdomains() {
+        assert_eq!(registered_domain("app.example.dev"), "example.dev");
+        assert_eq!(registered_domain("example.dev"), "example.dev");
+        assert_eq!(registered_domain("fra.my-app.com"), "my-app.com");
+    }
+
+    #[test]
+    fn registered_domain_keeps_multi_level_suffixes_intact() {
+        assert_eq!(registered_domain("shop.com.ua"), "shop.com.ua");
+        assert_eq!(registered_domain("www.shop.com.ua"), "shop.com.ua");
+        assert_eq!(registered_domain("sub.example.co.uk"), "example.co.uk");
+    }
+
+    #[test]
+    fn registered_domain_normalises_case_and_trailing_dot() {
+        assert_eq!(registered_domain("APP.Uptimepage.DEV."), "uptimepage.dev");
+    }
+
+    #[test]
+    fn reduced_domain_hint_none_for_apex_or_normalisation_only() {
+        assert_eq!(reduced_domain_hint("example.com"), None);
+        assert_eq!(reduced_domain_hint("Example.com."), None);
+        assert_eq!(reduced_domain_hint("  example.co.uk  "), None);
+    }
+
+    #[test]
+    fn reduced_domain_hint_some_for_real_subdomain() {
+        assert_eq!(
+            reduced_domain_hint("app.example.com").as_deref(),
+            Some("example.com")
+        );
+        assert_eq!(
+            reduced_domain_hint("www.shop.com.ua").as_deref(),
+            Some("shop.com.ua")
+        );
     }
 }
