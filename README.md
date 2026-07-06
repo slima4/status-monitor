@@ -46,11 +46,11 @@ public status page — no third-party service, no cron job updating a JSON file.
 
 [![uptimepage status](https://uptimepage.uptimepage.dev/api/public/v1/badge.svg)](https://uptimepage.uptimepage.dev)
 
-| Surface | HTTP | DNS | TLS cert |
-|---|---|---|---|
-| **uptimepage.dev** (website) | [![http](https://uptimepage.uptimepage.dev/api/public/v1/badge.svg?component=9ffa993c-fc72-4a54-a7d7-259249cd30eb)](https://uptimepage.uptimepage.dev) | [![dns](https://uptimepage.uptimepage.dev/api/public/v1/badge.svg?component=480a9ed0-dc21-4042-9cc3-f67814bc75be)](https://uptimepage.uptimepage.dev) | [![tls](https://uptimepage.uptimepage.dev/api/public/v1/badge.svg?component=70083a5c-0463-4c1e-99e5-c780473a96cf)](https://uptimepage.uptimepage.dev) |
-| **app.uptimepage.dev** (dashboard) | [![http](https://uptimepage.uptimepage.dev/api/public/v1/badge.svg?component=c2510a68-d830-4e93-b8db-28d0ec5e05ff)](https://uptimepage.uptimepage.dev) | | |
-| **mcp.uptimepage.dev** (MCP) | [![http](https://uptimepage.uptimepage.dev/api/public/v1/badge.svg?component=49f2209c-d54e-49fd-a38a-bc5f03b9f77f)](https://uptimepage.uptimepage.dev) | | |
+| Surface | HTTP | DNS | TLS cert | Domain |
+|---|---|---|---|---|
+| **uptimepage.dev** (website) | [![http](https://uptimepage.uptimepage.dev/api/public/v1/badge.svg?component=9ffa993c-fc72-4a54-a7d7-259249cd30eb)](https://uptimepage.uptimepage.dev) | [![dns](https://uptimepage.uptimepage.dev/api/public/v1/badge.svg?component=480a9ed0-dc21-4042-9cc3-f67814bc75be)](https://uptimepage.uptimepage.dev) | [![tls](https://uptimepage.uptimepage.dev/api/public/v1/badge.svg?component=70083a5c-0463-4c1e-99e5-c780473a96cf)](https://uptimepage.uptimepage.dev) | [![domain](https://uptimepage.uptimepage.dev/api/public/v1/badge.svg?component=cc34930e-a1d8-41a3-a448-722fec4c28f4)](https://uptimepage.uptimepage.dev) |
+| **app.uptimepage.dev** (dashboard) | [![http](https://uptimepage.uptimepage.dev/api/public/v1/badge.svg?component=c2510a68-d830-4e93-b8db-28d0ec5e05ff)](https://uptimepage.uptimepage.dev) | | | |
+| **mcp.uptimepage.dev** (MCP) | [![http](https://uptimepage.uptimepage.dev/api/public/v1/badge.svg?component=49f2209c-d54e-49fd-a38a-bc5f03b9f77f)](https://uptimepage.uptimepage.dev) | | | |
 
 Embed your own with the snippet in **Settings → Pages → your page → Badge**.
 

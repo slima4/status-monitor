@@ -1,6 +1,7 @@
 +++
 title = "The mystery of the \"down\" website"
 date = "2026-06-18"
+updated = "2026-07-06"
 slug = "osi-layers"
 excerpt = "\"The site is down!\" But what does \"down\" really mean? A detective story through the seven network layers, and the one quiet failure no alarm caught."
 tags = ["monitoring", "networking", "osi", "tls", "dns"]
@@ -106,6 +107,10 @@ runs a dedicated probe per layer, per failure mode:
 - **TCP** (layer 4): a raw connect to any host and port. The check
   Jamie ran by hand, running automatically, for databases and SSH and
   mail servers that have no web page at all.
+- **Ping** (layer 3): a bare ICMP echo, the "are you even reachable?"
+  knock from the opening of the story. It answers below any port or
+  page, so a host that falls off the network shows up before an HTTP
+  check has even finished timing out.
 - **TLS certificate** (layer 6): inspects the cert itself: expiry,
   chain, issuer. The alarm that would have tapped Jamie on the shoulder
   *days* before midnight, while every HTTP check was still cheerfully
