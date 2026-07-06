@@ -128,7 +128,7 @@ pub const LANDINGS: &[Landing] = &[
             },
             Feature {
                 label: "Alert channels",
-                value: "Slack, email, webhook",
+                value: "Slack, Telegram, PagerDuty, SMS + more",
             },
             Feature {
                 label: "Public history",
@@ -554,7 +554,7 @@ docker compose up -d"#,
             },
             Feature {
                 label: "Alerts",
-                value: "Slack, email, webhook",
+                value: "Slack, Telegram, PagerDuty, SMS + more",
             },
             Feature {
                 label: "Data export",
@@ -576,7 +576,7 @@ docker compose up -d"#,
             },
             Section {
                 heading: "alerts tuned for humans",
-                body: "Per-monitor Slack, email and webhook channels with dedupe and flap-suppression, so a brief outage doesn’t page anyone.",
+                body: "Per-monitor Slack, Telegram, PagerDuty, SMS, email and webhook channels with dedupe and flap-suppression, so a brief outage doesn’t page anyone.",
             },
         ],
         code: None,
@@ -895,7 +895,7 @@ docker compose up -d"#,
             },
             Feature {
                 label: "Alerts",
-                value: "Slack, email, webhook",
+                value: "Slack, Telegram, PagerDuty, SMS + more",
             },
             Feature {
                 label: "Run it",
