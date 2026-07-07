@@ -1018,7 +1018,7 @@ fn snap_to_bucket(t: DateTime<Utc>, bucket_seconds: u32) -> DateTime<Utc> {
     DateTime::<Utc>::from_timestamp(snapped, 0).unwrap_or(t)
 }
 
-fn ribbon_class(pct: f64) -> &'static str {
+pub(crate) fn ribbon_class(pct: f64) -> &'static str {
     if pct >= 99.9 {
         "op"
     } else if pct >= 95.0 {

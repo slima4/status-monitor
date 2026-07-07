@@ -121,8 +121,8 @@
         });
     }
 
-    // Result-row timing expansion: delegated from document so it survives
-    // htmx OOB swaps of #detail-live-recent every 60s.
+    // Result-row timing expansion: delegated from document so it works for
+    // server-rendered rows in the ribbon drill drawer and the share table.
     document.addEventListener("click", (ev) => {
         const row = ev.target.closest("[data-result-row]");
         if (!row) return;
@@ -130,6 +130,20 @@
         if (!detail || !detail.hasAttribute("data-result-detail")) return;
         const open = detail.classList.toggle("hidden");
         row.setAttribute("aria-expanded", String(!open));
+    });
+
+    // Header ⋯ overflow menu: native <details> stays open on outside click, so
+    // dismiss it on any click outside or Escape.
+    const closeHdrMenus = (except) => {
+        document.querySelectorAll("details.hdr-menu[open]").forEach((d) => {
+            if (d !== except) d.removeAttribute("open");
+        });
+    };
+    document.addEventListener("click", (ev) => {
+        closeHdrMenus(ev.target.closest("details.hdr-menu"));
+    });
+    document.addEventListener("keydown", (ev) => {
+        if (ev.key === "Escape") closeHdrMenus(null);
     });
 
     // A just-created monitor has no result until its first check lands.

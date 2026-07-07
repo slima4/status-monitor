@@ -16,7 +16,7 @@
           class="btn-ghost px-1.5 py-0.5 font-mono text-xs text-muted"
           aria-label="{{ share_count }} active share link{% if share_count != 1 %}s{% endif %} — manage sharing">[ shared:{{ share_count }} ]</button>
   {% endif %}
-  <span class="ml-auto flex flex-wrap gap-2">
+  <span class="ml-auto flex flex-wrap items-center gap-2">
     {# Heartbeats are pinged from outside; there is nothing to run. #}
     {% if kind != "HEARTBEAT" %}
     <button type="button"
@@ -26,30 +26,34 @@
       <span aria-hidden="true">▶</span> run check now
     </button>
     {% endif %}
-    <a href="/targets/{{ id }}/edit"
-       class="btn-ghost px-3 py-1.5 text-sm">edit</a>
     <button type="button"
             data-share-open data-target-id="{{ id }}" data-target-name="{{ name }}"
             class="sticker-btn sticker-btn--highlight px-3 py-1.5 text-sm font-medium inline-flex items-center gap-1.5"><span aria-hidden="true">↗</span> share</button>
-    <button type="button"
-            data-target-id="{{ id }}"
-            data-action="toggle-enabled"
-            data-current="{{ enabled }}"
-            class="btn-ghost px-3 py-1.5 text-sm">
-      {% if enabled %}disable{% else %}enable{% endif %}
-    </button>
-    <button type="button"
-            hx-delete="/api/v1/targets/{{ id }}"
-            hx-on::after-request="if (event.detail.successful) window.location='/targets'"
-            data-confirm-modal
-            data-confirm-title="Delete monitor?"
-            data-confirm-body="Permanently deletes {{ name }}, its history, and any incidents bound to it. Notification channels are untouched. This cannot be undone."
-            data-confirm-label="Delete monitor"
-            data-confirm-danger
-            aria-label="Delete monitor {{ name }}"
-            class="btn-ghost btn-ghost--danger ml-2 border-l border-[color:var(--theme-state-bad-line-soft)] px-3 py-1.5 text-sm focus-visible:ring-red-500">
-      delete
-    </button>
+    <details class="hdr-menu">
+      <summary class="btn-ghost hdr-menu__summary px-3 py-1.5 text-sm" title="More actions" aria-label="More actions">⋯</summary>
+      <div class="hdr-menu__panel" role="menu">
+        <a href="/targets/{{ id }}/edit" class="hdr-menu__item" role="menuitem">edit</a>
+        <button type="button" role="menuitem"
+                data-target-id="{{ id }}"
+                data-action="toggle-enabled"
+                data-current="{{ enabled }}"
+                class="hdr-menu__item">
+          {% if enabled %}disable{% else %}enable{% endif %}
+        </button>
+        <button type="button" role="menuitem"
+                hx-delete="/api/v1/targets/{{ id }}"
+                hx-on::after-request="if (event.detail.successful) window.location='/targets'"
+                data-confirm-modal
+                data-confirm-title="Delete monitor?"
+                data-confirm-body="Permanently deletes {{ name }}, its history, and any incidents bound to it. Notification channels are untouched. This cannot be undone."
+                data-confirm-label="Delete monitor"
+                data-confirm-danger
+                aria-label="Delete monitor {{ name }}"
+                class="hdr-menu__item hdr-menu__item--danger">
+          delete
+        </button>
+      </div>
+    </details>
   </span>
 </div>
 <div data-detail-test-result class="hidden"></div>

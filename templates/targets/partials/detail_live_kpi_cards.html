@@ -1,5 +1,5 @@
 {# Shared KPI strip for the monitor detail + public share pages. #}
-<article class="sticker-card dashboard-kpi-card">
+<article class="sticker-card dashboard-kpi-card corner-frame">
   <p class="dashboard-kpi-card__label">Uptime</p>
   <div class="dashboard-kpi-card__row">
     <p class="dashboard-kpi-card__value">{{ uptime.uptime_pct }}<span class="dashboard-kpi-card__unit">%</span></p>
@@ -16,7 +16,7 @@
   {% endif %}
   <p class="dashboard-kpi-card__hint">{{ uptime.total }} checks</p>
 </article>
-<article class="sticker-card dashboard-kpi-card">
+<article class="sticker-card dashboard-kpi-card corner-frame">
   <p class="dashboard-kpi-card__label">Up</p>
   <div class="dashboard-kpi-card__row">
     <p class="dashboard-kpi-card__value">{{ uptime.up }}</p>
@@ -26,7 +26,7 @@
   {% endif %}
   <p class="dashboard-kpi-card__hint">of {{ uptime.total }}</p>
 </article>
-<article class="sticker-card dashboard-kpi-card">
+<article class="sticker-card dashboard-kpi-card corner-frame">
   <p class="dashboard-kpi-card__label">Down</p>
   <div class="dashboard-kpi-card__row">
     <p class="dashboard-kpi-card__value {% if uptime.down > 0 %}dashboard-kpi-card__value--bad{% else %}dashboard-kpi-card__value--quiet{% endif %}">{{ uptime.down }}</p>
@@ -36,7 +36,7 @@
   {% endif %}
   <p class="dashboard-kpi-card__hint">of {{ uptime.total }}</p>
 </article>
-<article class="sticker-card dashboard-kpi-card">
+<article class="sticker-card dashboard-kpi-card corner-frame">
   <p class="dashboard-kpi-card__label">Errors</p>
   <div class="dashboard-kpi-card__row">
     <p class="dashboard-kpi-card__value {% if uptime.error > 0 %}dashboard-kpi-card__value--bad{% else %}dashboard-kpi-card__value--quiet{% endif %}">{{ uptime.error }}</p>

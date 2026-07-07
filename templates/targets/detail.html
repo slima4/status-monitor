@@ -115,27 +115,39 @@
   </section>
   {% endif %}
 
-  <section class="sticker-card">
-    <header class="flex items-center justify-between border-b border-[color:var(--theme-line)] px-5 py-3">
-      <h2 class="panel-label">recent results</h2>
-      <span id="detail-recent-count" class="font-mono text-xs text-muted">latest:{{ results.len() }}{% if results_has_more %}+{% endif %}</span>
-    </header>
-    <table class="min-w-full text-sm font-mono">
-      <caption class="sr-only">Recent check results for {{ name }}</caption>
-      <thead class="table-head bg-[color:var(--theme-surface-sunk)]">
-        <tr>
-          <th scope="col" class="px-3 py-2">timestamp</th>
-          <th scope="col" class="px-3 py-2">status</th>
-          <th scope="col" class="px-3 py-2">duration</th>
-          <th scope="col" class="px-3 py-2">code</th>
-          <th scope="col" class="px-3 py-2">error</th>
-        </tr>
-      </thead>
-      <tbody id="detail-live-recent">
-        {% include "targets/partials/detail_live_rows.html" %}
-      </tbody>
-    </table>
-  </section>
+  {% include "targets/partials/detail_ribbon.html" %}
+  {% if !segments.is_empty() %}
+  <div id="ribbon-drawer" class="ribbon-drawer sticker-card" hidden data-checks-url="/web/partials/targets/{{ id }}/checks"{% if let Some(r) = selected_region %} data-region="{{ r }}"{% endif %}>
+    <div class="ribbon-drawer__head">
+      <span>
+        <span class="panel-label" data-ribbon-drawer-title></span>
+        <span class="ribbon-drawer__scale" data-ribbon-drawer-scale></span>
+      </span>
+      <button type="button" class="btn-ghost px-2 py-0.5 text-xs" data-ribbon-drawer-close aria-label="Close">✕</button>
+    </div>
+    <div class="ribbon-drawer__body">
+      <table class="min-w-full text-sm font-mono">
+        <thead class="table-head bg-[color:var(--theme-surface-sunk)]">
+          <tr>
+            <th scope="col" class="px-3 py-2">timestamp</th>
+            <th scope="col" class="px-3 py-2">region</th>
+            <th scope="col" class="px-3 py-2">status</th>
+            <th scope="col" class="px-3 py-2">duration</th>
+            <th scope="col" class="px-3 py-2">code</th>
+            <th scope="col" class="px-3 py-2">error</th>
+          </tr>
+        </thead>
+        <tbody data-ribbon-drawer-rows></tbody>
+      </table>
+    </div>
+    <div class="ribbon-drawer__foot" data-ribbon-drawer-foot hidden>
+      <button type="button" class="btn-ghost px-3 py-1 text-xs" data-ribbon-load-more>load more</button>
+      <span class="ribbon-drawer__shown" data-ribbon-drawer-shown></span>
+    </div>
+  </div>
+  <script defer src="{{ "js/ui/ribbon_tip.js"|asset }}"></script>
+  <script defer src="{{ "js/ui/ribbon_drill.js"|asset }}"></script>
+  {% endif %}
 
   {% include "targets/partials/detail_scripts.html" %}
   <script defer src="{{ "js/echarts.min.js"|asset }}"></script>

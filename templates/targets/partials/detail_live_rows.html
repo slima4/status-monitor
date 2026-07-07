@@ -1,8 +1,8 @@
-{# Recent-results rows. Lives inside <tbody id="detail-live-recent"> on
-   both the initial render and the htmx OOB swap, so this is the single
-   source of truth for the table body. #}
+{# Shared check-row markup: the share page's results table and the owner
+   ribbon drill drawer (DetailCheckRows, region column via show_region). One
+   source of truth for a row so expand/style stay in sync. #}
 {% if results.is_empty() %}
-<tr><td colspan="5" class="px-3 py-6 text-center font-mono text-xs text-quiet"># no results in this window</td></tr>
+<tr><td colspan="{% if show_region %}6{% else %}5{% endif %}" class="px-3 py-6 text-center font-mono text-xs text-quiet"># no results in this window</td></tr>
 {% else %}
 {% for r in results %}
 {% let bad = r.status == "down" || r.status == "error" %}
@@ -12,7 +12,8 @@
 {% let expandable = (bad || warn) && (has_timing || has_error) %}
 <tr class="{% if loop.index0 % 2 == 0 %}result-row--even{% else %}result-row--odd{% endif %}{% if bad %} result-row--bad{% else if warn %} result-row--warn{% endif %}{% if expandable %} cursor-pointer{% endif %}"
     {% if expandable %}data-result-row aria-expanded="false"{% endif %}>
-  <td class="px-3 py-2 font-mono text-xs text-muted"><time datetime="{{ r.timestamp|iso_ts }}" data-tz="exact">{{ r.timestamp|human_ts }}</time></td>
+  <td class="px-3 py-2 font-mono text-xs text-muted">{% if expandable %}<span class="result-row__chev" aria-hidden="true">▸</span>{% endif %}<time datetime="{{ r.timestamp|iso_ts }}" data-tz="exact">{{ r.timestamp|human_ts }}</time></td>
+  {% if show_region %}<td class="px-3 py-2 font-mono text-xs text-muted">{% if let Some(reg) = r.region %}{{ reg }}{% else %}—{% endif %}</td>{% endif %}
   <td class="px-3 py-2">
     {% if r.status == "up" %}<span class="status-badge status-badge--up">up</span>
     {% else if r.status == "down" %}<span class="status-badge status-badge--down">down</span>
@@ -25,7 +26,7 @@
 </tr>
 {% if expandable %}
 <tr class="result-row-detail hidden" data-result-detail>
-  <td colspan="5" class="px-4 py-2 text-xs result-row-detail__cell">
+  <td colspan="{% if show_region %}6{% else %}5{% endif %}" class="px-4 py-2 text-xs result-row-detail__cell">
     {% if has_timing %}
     <div>
       <span class="text-muted mr-2">timing breakdown:</span>

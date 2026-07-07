@@ -44,6 +44,10 @@ pub fn routes(state: AppState) -> Router {
             "/web/partials/targets/{id}/live",
             get(views::targets_detail::live_partial),
         )
+        .route(
+            "/web/partials/targets/{id}/checks",
+            get(views::targets_detail::check_rows),
+        )
         // Public capability links: a token grants read-only access to one
         // monitor's detail view. Unauthenticated by design; the token resolves
         // to its org. Always mounted (not gated on public_routes_active) — share

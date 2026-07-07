@@ -20,7 +20,7 @@ use crate::storage::{ClampedRange, TimeRange, UptimeStats, rollup_bucket_secs};
 use crate::web::error::{WebError, WebResult};
 use crate::web::filters;
 use crate::web::views::dashboard::{
-    KpiDelta, Polarity, count_delta, render_spark_path_domain, uptime_pp_delta,
+    KpiDelta, Polarity, count_delta, render_spark_path_domain, ribbon_class, uptime_pp_delta,
 };
 use crate::web::views::region_display::{LabeledRegion, labeled_regions};
 use crate::web::views::{
@@ -28,9 +28,8 @@ use crate::web::views::{
 };
 use crate::web::{AuthedBrowser, CurrentOrg};
 
-// A raw row per check floods the page; the latency/breakdown charts above
-// already carry the trend. 60 ≈ the last hour at a 1-minute interval —
-// enough to eyeball recent behaviour, full history is the JSON API.
+// Recent rows for the share page's results table (the owner view dropped its
+// table for the ribbon). 60 ≈ the last hour at a 1-minute interval.
 const RESULTS_PAGE_LIMIT: usize = 60;
 // Confirmed incidents over the longest window (90d) are few; this bounds the
 // downtime read without truncating a realistic count.
@@ -87,6 +86,19 @@ pub struct ResultRow {
     pub connect_ms: Option<u16>,
     pub tls_ms: Option<u16>,
     pub ttfb_ms: Option<u16>,
+    /// Probe region; `Some` only where the row is region-tagged (the drill
+    /// drawer). `None` on the region-agnostic recent-results table.
+    pub region: Option<String>,
+}
+
+impl ResultRow {
+    /// Row tagged with the region it ran in; an empty region label reads as `None`.
+    fn with_region(region: String, r: CheckResult) -> Self {
+        Self {
+            region: (!region.is_empty()).then_some(region),
+            ..Self::from(r)
+        }
+    }
 }
 
 pub struct IncidentRow {
@@ -113,11 +125,24 @@ pub struct DetailLive {
     pub last_status: &'static str,
     pub uptime: Arc<UptimeStatsView>,
     pub kpi: Arc<KpiTrend>,
-    pub results: Arc<[ResultRow]>,
-    pub results_has_more: bool,
     pub last_at_iso: Arc<str>,
     /// Carried so the self-rearming live poll keeps the active region filter.
     pub selected_region: Option<String>,
+    /// Per-bucket status ribbon, re-rendered here so the 60s poll keeps the
+    /// newest cell current.
+    pub segments: Arc<[StatusSeg]>,
+    /// Marks the ribbon include as an out-of-band swap on the live response.
+    pub ribbon_oob: bool,
+}
+
+/// Rows for the ribbon drill drawer: a page of raw checks over a bucket window,
+/// each tagged with its region. Renders the shared recent-results row partial
+/// with the region column shown.
+#[derive(Template, WebTemplate)]
+#[template(path = "targets/partials/detail_live_rows.html")]
+pub struct DetailCheckRows {
+    pub results: Arc<[ResultRow]>,
+    pub show_region: bool,
 }
 
 #[derive(Template, WebTemplate)]
@@ -182,8 +207,10 @@ pub struct DetailPage {
     pub last_at_iso: Arc<str>,
     pub uptime: Arc<UptimeStatsView>,
     pub kpi: Arc<KpiTrend>,
-    pub results: Arc<[ResultRow]>,
-    pub results_has_more: bool,
+    /// Per-bucket status strip over the selected range, rendered under the header.
+    pub segments: Arc<[StatusSeg]>,
+    /// Ribbon include renders in place (not an OOB swap) on the full page.
+    pub ribbon_oob: bool,
     /// Registrable domain a `domain_expiry` monitor queries; `None` otherwise.
     pub registered_domain: Option<String>,
     pub config_json: String,
@@ -322,10 +349,14 @@ impl WindowLabels {
 pub struct LiveData {
     pub uptime: Arc<UptimeStatsView>,
     pub kpi: Arc<KpiTrend>,
+    /// Recent rows for the public share page's results table. The owner detail
+    /// dropped its table for the ribbon, but both surfaces share this loader.
     pub result_rows: Arc<[ResultRow]>,
     pub results_has_more: bool,
     pub last_status: &'static str,
     pub last_at_iso: Arc<str>,
+    /// Per-bucket status strip over the window; drives the timeline under the header.
+    pub segments: Arc<[StatusSeg]>,
 }
 
 /// Cached front door for [`load_live_data`]. Returns a moka-shared
@@ -474,6 +505,16 @@ async fn load_live_data(
         spark_bucket_seconds,
         confirmed,
     });
+    // The strip shows raw per-bucket check outcomes so short error/degraded
+    // patches stay visible, even when they never breached the incident
+    // threshold the confirmed headline uptime is measured against. Empty
+    // buckets read as grey gaps, not green.
+    let segments: Arc<[StatusSeg]> = status_segments(
+        &bucket_counts(&avail, time_range, spark_bucket_seconds),
+        time_range,
+        spark_bucket_seconds,
+    )
+    .into();
     let results_has_more = results.len() > RESULTS_PAGE_LIMIT;
     if results_has_more {
         results.truncate(RESULTS_PAGE_LIMIT);
@@ -518,6 +559,7 @@ async fn load_live_data(
         results_has_more,
         last_status,
         last_at_iso,
+        segments,
     })
 }
 
@@ -630,6 +672,22 @@ fn build_availability_spark(
     bucket_seconds: u32,
     confirmed: bool,
 ) -> (String, String) {
+    let series = availability_series(avail, incidents, range, bucket_seconds, confirmed);
+    let (path, fill, _) = render_spark_path_domain(&series, 0.0, 100.0);
+    (path, fill)
+}
+
+/// Per-bucket availability over the window as a 0–100 series (`None` = no
+/// samples). Shared by the KPI sparkline and the status strip so both read the
+/// same model as the headline: confirmed-incident overlap for the all-regions
+/// view, raw up-ratio when region-filtered.
+fn availability_series(
+    avail: &[AvailabilityBucket],
+    incidents: &[Incident],
+    range: ClampedRange,
+    bucket_seconds: u32,
+    confirmed: bool,
+) -> Vec<Option<f32>> {
     let bucket = i64::from(rollup_bucket_secs(bucket_seconds));
     let from_grid = range.from.timestamp().div_euclid(bucket) * bucket;
     let n = (((range.to.timestamp() - from_grid) + bucket - 1) / bucket).max(1) as usize;
@@ -660,8 +718,101 @@ fn build_availability_spark(
             }
         }
     }
-    let (path, fill, _) = render_spark_path_domain(&series, 0.0, 100.0);
-    (path, fill)
+    series
+}
+
+/// One cell of the uptime ribbon under the header. Mirrors the dashboard's
+/// fleet ribbon so both reuse `.dashboard-ribbon__seg` and its tooltip JS.
+pub struct StatusSeg {
+    /// `op` | `deg` | `maj` | `none` — drives the `dashboard-ribbon__seg--*` class.
+    pub class: &'static str,
+    /// Bucket start (`%H:%M`) and uptime figure, shown in the hover tooltip.
+    pub time: String,
+    pub stat: String,
+    /// ISO bounds of the bucket; a failing cell drills the drawer to this window.
+    pub from_iso: String,
+    pub to_iso: String,
+    /// Check counts in the bucket; the drawer shows "{bad} of {total} failing"
+    /// so a wide window's scale is known without fetching every row.
+    pub total: u64,
+    pub bad: u64,
+}
+
+/// Fixed-length `(total, up)` per bucket from the raw availability rollup, on the
+/// same grid the ribbon draws. Feeds both the up-ratio tint and the drawer's
+/// scale count, so one pass over `avail` serves both.
+fn bucket_counts(
+    avail: &[AvailabilityBucket],
+    range: ClampedRange,
+    bucket_seconds: u32,
+) -> Vec<(u64, u64)> {
+    let bucket = i64::from(rollup_bucket_secs(bucket_seconds));
+    let from_grid = range.from.timestamp().div_euclid(bucket) * bucket;
+    let n = (((range.to.timestamp() - from_grid) + bucket - 1) / bucket).max(1) as usize;
+    let mut counts = vec![(0u64, 0u64); n];
+    for b in avail {
+        let slot = (b.bucket_ts - from_grid).div_euclid(bucket);
+        if slot >= 0 && (slot as usize) < n {
+            let c = &mut counts[slot as usize];
+            c.0 += b.total;
+            c.1 += b.up;
+        }
+    }
+    counts
+}
+
+/// Maps per-bucket `(total, up)` counts to ribbon cells, classified by the same
+/// `ribbon_class` thresholds the dashboard fleet ribbon uses. A bucket with no
+/// samples is `none` (hatched) so a paused or young monitor reads as a gap, not
+/// green. `time`/`stat` populate the tooltip; `total`/`bad` size the drawer.
+fn status_segments(
+    counts: &[(u64, u64)],
+    range: ClampedRange,
+    bucket_seconds: u32,
+) -> Vec<StatusSeg> {
+    let bucket = i64::from(rollup_bucket_secs(bucket_seconds));
+    let from_grid = range.from.timestamp().div_euclid(bucket) * bucket;
+    let to_ts = range.to.timestamp();
+    counts
+        .iter()
+        .enumerate()
+        .map(|(i, &(total, up))| {
+            let start_ts = from_grid + i as i64 * bucket;
+            let end_ts = (start_ts + bucket).min(to_ts).max(start_ts);
+            let start = DateTime::from_timestamp(start_ts, 0).unwrap_or(range.from);
+            let end = DateTime::from_timestamp(end_ts, 0).unwrap_or(range.to);
+            let time = start.format("%H:%M").to_string();
+            // The first cell's grid start precedes range.from; drill from range.from
+            // so the drawer never lists rows the cell's counts never included.
+            let drill_from = DateTime::from_timestamp(start_ts.max(range.from.timestamp()), 0)
+                .unwrap_or(range.from);
+            let from_iso = fmt_ts(drill_from);
+            let to_iso = fmt_ts(end);
+            let bad = total.saturating_sub(up);
+            if total == 0 {
+                StatusSeg {
+                    class: "none",
+                    time,
+                    stat: "no data".into(),
+                    from_iso,
+                    to_iso,
+                    total,
+                    bad,
+                }
+            } else {
+                let pct = (up as f64 / total as f64) * 100.0;
+                StatusSeg {
+                    class: ribbon_class(pct),
+                    time,
+                    stat: format!("{pct:.1}%"),
+                    from_iso,
+                    to_iso,
+                    total,
+                    bad,
+                }
+            }
+        })
+        .collect()
 }
 
 pub async fn index(
@@ -757,8 +908,8 @@ pub async fn index(
         last_at_iso: Arc::clone(&live.last_at_iso),
         uptime: Arc::clone(&live.uptime),
         kpi: Arc::clone(&live.kpi),
-        results: Arc::clone(&live.result_rows),
-        results_has_more: live.results_has_more,
+        segments: Arc::clone(&live.segments),
+        ribbon_oob: false,
         registered_domain,
         config_json,
         range: range_key,
@@ -773,6 +924,104 @@ pub async fn index(
         region_breakdown,
         heartbeat,
     })
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CheckRowsParams {
+    pub from: DateTime<Utc>,
+    pub to: DateTime<Utc>,
+    #[serde(default)]
+    pub offset: usize,
+    /// Mirrors the detail view's region filter so the drawer lists the same
+    /// region the ribbon cell's counts were measured over.
+    pub region: Option<String>,
+}
+
+// One 30-row page is plenty per drill; the drawer pages with `offset` for more.
+const CHECK_ROWS_PAGE: usize = 30;
+
+/// HTML rows for the ribbon drill drawer: raw checks over a bucket window, each
+/// tagged with its region, rendered with the shared recent-results row partial.
+/// Paginates by `offset`; `X-Sm-Has-More` tells the drawer whether to keep its
+/// "load more" control. A wide bucket can hold thousands of rows, so the caller
+/// only ever pulls one bounded page at a time.
+pub async fn check_rows(
+    _auth: AuthedBrowser,
+    CurrentOrg(org): CurrentOrg,
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    Query(params): Query<CheckRowsParams>,
+) -> WebResult<Response> {
+    // Cloak an unknown/foreign id behind the same 404 the other detail reads use.
+    let target = state
+        .target_store
+        .get(org, id)
+        .await?
+        .ok_or_else(|| AppError::not_found(codes::TARGET_NOT_FOUND, "monitor not found"))?;
+
+    let range = state
+        .quotas
+        .clamp_raw(
+            org,
+            TimeRange {
+                from: params.from,
+                to: params.to,
+            },
+        )
+        .await?;
+    // A region filter scopes the ribbon's counts, so scope the drawer to match;
+    // the region is known up front, so tag every row with it. Otherwise pull all
+    // regions, each carrying its own tag.
+    let mut rows: Vec<(String, CheckResult)> = match params.region.as_deref() {
+        Some(reg) => state
+            .results_store
+            .list_results(
+                org,
+                target.id,
+                range,
+                CHECK_ROWS_PAGE + 1,
+                params.offset,
+                Some(reg),
+            )
+            .await?
+            .into_iter()
+            .map(|r| (reg.to_string(), r))
+            .collect(),
+        None => {
+            state
+                .results_store
+                .list_results_by_region(org, target.id, range, CHECK_ROWS_PAGE + 1, params.offset)
+                .await?
+        }
+    };
+    let has_more = rows.len() > CHECK_ROWS_PAGE;
+    if has_more {
+        rows.truncate(CHECK_ROWS_PAGE);
+    }
+    let results: Arc<[ResultRow]> = rows
+        .into_iter()
+        .map(|(region, r)| ResultRow::with_region(region, r))
+        .collect::<Vec<_>>()
+        .into();
+
+    let rendered = DetailCheckRows {
+        results,
+        show_region: true,
+    }
+    .render()
+    .map_err(|e| AppError::Other(anyhow::anyhow!(e)))?;
+    Ok((
+        [
+            (header::CONTENT_TYPE, "text/html; charset=utf-8"),
+            (header::CACHE_CONTROL, "no-store"),
+            (
+                header::HeaderName::from_static("x-sm-has-more"),
+                if has_more { "true" } else { "false" },
+            ),
+        ],
+        rendered,
+    )
+        .into_response())
 }
 
 /// Pretty check config for the panel, with a read-only `registered_domain`
@@ -832,10 +1081,10 @@ pub async fn live_partial(
         last_status: live.last_status,
         uptime: Arc::clone(&live.uptime),
         kpi: Arc::clone(&live.kpi),
-        results: Arc::clone(&live.result_rows),
-        results_has_more: live.results_has_more,
         last_at_iso: Arc::clone(&live.last_at_iso),
         selected_region,
+        segments: Arc::clone(&live.segments),
+        ribbon_oob: true,
     };
     let rendered = page
         .render()
@@ -901,6 +1150,7 @@ impl From<CheckResult> for ResultRow {
             connect_ms: r.connect_ms,
             tls_ms: r.tls_ms,
             ttfb_ms: r.ttfb_ms,
+            region: None,
         }
     }
 }
@@ -1114,18 +1364,27 @@ mod tests {
                 uptime_pct: "99.00".into(),
             }),
             kpi: Arc::new(KpiTrend::default()),
-            results: Arc::from(vec![ResultRow {
-                timestamp: "2026-05-13T12:00:00Z".parse().unwrap(),
-                status: "up",
-                duration_ms: 42,
-                response_code: "200".into(),
-                error: String::new(),
-                dns_ms: None,
-                connect_ms: None,
-                tls_ms: None,
-                ttfb_ms: None,
-            }]),
-            results_has_more: false,
+            segments: Arc::from(vec![
+                StatusSeg {
+                    class: "op",
+                    time: "12:00".into(),
+                    stat: "100.0%".into(),
+                    from_iso: "2026-05-13T12:00:00Z".into(),
+                    to_iso: "2026-05-13T12:30:00Z".into(),
+                    total: 60,
+                    bad: 0,
+                },
+                StatusSeg {
+                    class: "maj",
+                    time: "12:30".into(),
+                    stat: "0.0%".into(),
+                    from_iso: "2026-05-13T12:30:00Z".into(),
+                    to_iso: "2026-05-13T13:00:00Z".into(),
+                    total: 60,
+                    bad: 60,
+                },
+            ]),
+            ribbon_oob: false,
             config_json: r#"{"type":"http"}"#.into(),
             range: "24h",
             range_options: build_range_options("24h", &RANGE_KEYS),
@@ -1160,6 +1419,82 @@ mod tests {
     }
 
     #[test]
+    fn status_segments_map_availability_to_ribbon_classes() {
+        let base = DateTime::from_timestamp(1_700_000_000, 0).unwrap();
+        let range = ClampedRange::unclamped(TimeRange {
+            from: base,
+            to: base + Duration::hours(1),
+        });
+        // 900s buckets → four cells; classes follow the dashboard thresholds.
+        let counts = [(100, 100), (100, 97), (100, 80), (0, 0)];
+        let segs = status_segments(&counts, range, 900);
+        let classes: Vec<&str> = segs.iter().map(|s| s.class).collect();
+        assert_eq!(classes, ["op", "deg", "maj", "none"]);
+        assert_eq!(segs[0].stat, "100.0%");
+        assert_eq!(segs[3].stat, "no data");
+        // Counts carry through for the drawer's scale line.
+        assert_eq!((segs[2].total, segs[2].bad), (100, 20));
+        assert_eq!((segs[3].total, segs[3].bad), (0, 0));
+        // Each cell carries a non-empty, contiguous window for the drill drawer.
+        assert!(!segs[0].from_iso.is_empty() && !segs[0].to_iso.is_empty());
+        assert!(segs[0].from_iso < segs[0].to_iso);
+        assert_eq!(segs[0].to_iso, segs[1].from_iso, "buckets are contiguous");
+    }
+
+    #[test]
+    fn drawer_check_rows_render_region_column_and_expand() {
+        let mut r = CheckResult {
+            target_id: Uuid::nil(),
+            org_id: Uuid::nil(),
+            timestamp: "2026-05-13T12:00:00Z".parse().unwrap(),
+            status: crate::domain::CheckStatus::Error,
+            duration_ms: 1204,
+            dns_ms: Some(12),
+            connect_ms: Some(40),
+            tls_ms: None,
+            ttfb_ms: None,
+            response_code: Some(503),
+            response_size: None,
+            error: Some("connection refused".into()),
+        };
+        let rows: Arc<[ResultRow]> =
+            Arc::from(vec![ResultRow::with_region("apac-sg".into(), r.clone())]);
+        let html = DetailCheckRows {
+            results: rows,
+            show_region: true,
+        }
+        .render()
+        .unwrap();
+        // Region cell present; failing row is expandable with a timing detail row.
+        assert!(html.contains("apac-sg"));
+        assert!(html.contains("data-result-row"));
+        assert!(html.contains("data-result-detail"));
+
+        // Region-agnostic table (recent results) hides the column.
+        r.error = None;
+        let plain: Arc<[ResultRow]> = Arc::from(vec![ResultRow::from(r)]);
+        let plain_html = DetailCheckRows {
+            results: plain,
+            show_region: false,
+        }
+        .render()
+        .unwrap();
+        assert!(!plain_html.contains("apac-sg"));
+    }
+
+    #[test]
+    fn detail_renders_status_ribbon() {
+        let html = sample_page().render().unwrap();
+        assert!(html.contains("dashboard-ribbon"));
+        assert!(html.contains("dashboard-ribbon__seg--op"));
+        assert!(html.contains("dashboard-ribbon__seg--maj"));
+        assert!(html.contains(r#"data-tip-stat="100.0%""#));
+        // Failing cell is a drill button carrying its window; healthy cell is not.
+        assert!(html.contains("data-ribbon-drill"));
+        assert!(html.contains(r#"data-from="2026-05-13T12:30:00Z""#));
+    }
+
+    #[test]
     fn detail_renders_header_and_widgets() {
         let html = sample_page().render().unwrap();
         assert!(html.starts_with("<!doctype html>"));
@@ -1170,6 +1505,18 @@ mod tests {
         // Charts read the server-bucketed latency endpoint; recent results are
         // a server-rendered table, not an API fetch.
         assert!(html.contains("/api/v1/targets/00000000-0000-0000-0000-000000000001/latency"));
+    }
+
+    #[test]
+    fn detail_header_folds_secondary_actions_into_overflow_menu() {
+        let html = sample_page().render().unwrap();
+        // Primary actions stay visible.
+        assert!(html.contains("run check now"));
+        assert!(html.contains("data-share-open"));
+        // Secondary actions live inside the ⋯ overflow menu.
+        assert!(html.contains("hdr-menu__panel"));
+        assert!(html.contains(r#"class="hdr-menu__item""#));
+        assert!(html.contains("hdr-menu__item--danger"));
     }
 
     #[test]
@@ -1235,15 +1582,15 @@ mod tests {
                 uptime_pct: "99.00".into(),
             }),
             kpi: Arc::new(KpiTrend::default()),
-            results: Arc::from(Vec::<ResultRow>::new()),
-            results_has_more: false,
             last_at_iso: Arc::from("2026-05-13T12:00:00Z"),
             selected_region: None,
+            segments: Arc::from(Vec::<StatusSeg>::new()),
+            ribbon_oob: true,
         }
     }
 
     #[test]
-    fn live_partial_renders_kpi_swap_target_plus_oob_tbody() {
+    fn live_partial_renders_kpi_swap_target_plus_oob_ribbon() {
         let html = sample_live().render().unwrap();
         assert!(!html.contains("<!doctype html>"));
         assert!(html.contains(r#"id="detail-live-kpi""#));
@@ -1253,36 +1600,28 @@ mod tests {
         assert!(html.contains(r#"hx-trigger="every 60s, sm:refresh-live from:body""#));
         assert!(html.contains(r#"hx-swap="outerHTML""#));
         assert!(html.contains(r#"data-newest-ts="2026-05-13T12:00:00Z""#));
-        // Tbody MUST be wrapped in <template> so browsers don't strip
-        // it as orphan-of-table during response parsing.
-        assert!(html.contains("<template>"));
-        let template_open = html.find("<template>").unwrap();
-        let recent_id = html.find(r#"id="detail-live-recent""#).unwrap();
-        let template_close = html.find("</template>").unwrap();
-        assert!(
-            template_open < recent_id && recent_id < template_close,
-            "OOB tbody must live inside the <template> wrapper"
-        );
+        // The ribbon rides along as an out-of-band swap so the newest cell stays
+        // current without a full-page reload; the recent-results table is gone.
+        assert!(html.contains(r#"id="detail-ribbon""#));
         assert!(html.contains(r#"hx-swap-oob="true""#));
+        assert!(!html.contains(r#"id="detail-live-recent""#));
         assert!(html.contains("99.00"));
     }
 
     #[test]
-    fn detail_page_wraps_kpi_and_recent_separately_with_charts_between() {
+    fn detail_page_orders_kpi_charts_ribbon() {
         let html = sample_page().render().unwrap();
+        assert!(html.contains(r#"id="detail-ribbon""#));
         assert!(html.contains(r#"id="detail-live-kpi""#));
-        assert!(html.contains(r#"id="detail-live-recent""#));
         assert!(html.contains(r#"id="latency-chart""#));
+        // Recent-results table replaced by the ribbon + drill drawer, which now
+        // sits below the charts (and the by-region table).
+        assert!(!html.contains(r#"id="detail-live-recent""#));
         let kpi_pos = html.find(r#"id="detail-live-kpi""#).expect("kpi present");
         let chart_pos = html.find(r#"id="latency-chart""#).expect("chart present");
-        let recent_pos = html
-            .find(r#"id="detail-live-recent""#)
-            .expect("recent present");
-        assert!(kpi_pos < chart_pos, "KPI must render before charts");
-        assert!(
-            chart_pos < recent_pos,
-            "Charts must render before Recent results"
-        );
+        let ribbon_pos = html.find(r#"id="detail-ribbon""#).expect("ribbon present");
+        assert!(kpi_pos < chart_pos, "KPI renders before charts");
+        assert!(chart_pos < ribbon_pos, "ribbon renders after charts");
     }
 
     fn kpi_ranges() -> (ClampedRange, ClampedRange) {

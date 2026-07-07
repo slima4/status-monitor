@@ -1,0 +1,31 @@
+{# Uptime ribbon strip + meta. Rendered on the full page (ribbon_oob=false) and
+   re-rendered by the 60s live poll (ribbon_oob=true) so the newest cell and the
+   uptime figure stay current. The drill drawer lives outside this element so an
+   open inspection survives the swap. #}
+<div id="detail-ribbon"{% if ribbon_oob %} hx-swap-oob="true"{% endif %}>
+  {% if !segments.is_empty() %}
+  <div class="dashboard-ribbon dashboard-ribbon--bare" role="group" aria-label="Uptime over the selected range">
+    {% for seg in segments %}
+    {% if seg.class == "deg" || seg.class == "maj" %}
+    <button type="button"
+            class="dashboard-ribbon__seg dashboard-ribbon__seg--{{ seg.class }} dashboard-ribbon__seg--drill"
+            data-ribbon-drill
+            data-from="{{ seg.from_iso }}"
+            data-to="{{ seg.to_iso }}"
+            data-total="{{ seg.total }}"
+            data-bad="{{ seg.bad }}"
+            data-tip-time="{{ seg.time }}"
+            data-tip-stat="{{ seg.stat }}"
+            aria-label="{{ seg.time }} · {{ seg.stat }} — show checks in this window"></button>
+    {% else %}
+    <span class="dashboard-ribbon__seg dashboard-ribbon__seg--{{ seg.class }}" data-tip-time="{{ seg.time }}" data-tip-stat="{{ seg.stat }}" aria-hidden="true"></span>
+    {% endif %}
+    {% endfor %}
+  </div>
+  <div class="dashboard-ribbon-meta">
+    <span class="cli-brackets">{{ range }} ago</span>
+    <span class="dashboard-ribbon-meta__value">{{ uptime.uptime_pct }}%</span>
+    <span class="cli-brackets">now</span>
+  </div>
+  {% endif %}
+</div>

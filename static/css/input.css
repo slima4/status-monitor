@@ -1188,6 +1188,32 @@
         box-shadow: var(--theme-shadow-card);
     }
 
+    /* Crop-mark corners: a rounded hairline border revealed only at the four
+       corners by a mask, so the marks round with the card radius and the two
+       arms meet on one continuous stroke (no darker elbow). No extra DOM. */
+    .corner-frame { position: relative; }
+    .corner-frame::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        --corner-size: 12px;
+        --corner-thick: 1px;
+        --corner-color: color-mix(in oklch, var(--theme-text-muted) 42%, var(--theme-surface-elev));
+        border: var(--corner-thick) solid var(--corner-color);
+        border-radius: inherit;
+        -webkit-mask:
+            linear-gradient(#000, #000) top left / var(--corner-size) var(--corner-size) no-repeat,
+            linear-gradient(#000, #000) top right / var(--corner-size) var(--corner-size) no-repeat,
+            linear-gradient(#000, #000) bottom left / var(--corner-size) var(--corner-size) no-repeat,
+            linear-gradient(#000, #000) bottom right / var(--corner-size) var(--corner-size) no-repeat;
+        mask:
+            linear-gradient(#000, #000) top left / var(--corner-size) var(--corner-size) no-repeat,
+            linear-gradient(#000, #000) top right / var(--corner-size) var(--corner-size) no-repeat,
+            linear-gradient(#000, #000) bottom left / var(--corner-size) var(--corner-size) no-repeat,
+            linear-gradient(#000, #000) bottom right / var(--corner-size) var(--corner-size) no-repeat;
+    }
+
     /* Filled control. Mono font, sharp corners, hairline edge. Bracket
        wrap via ::before/::after when the control is a CTA-class fill
        (--primary / --danger / --accent) so the chrome reads as CLI. */
@@ -2625,6 +2651,19 @@
     .dashboard-dot--down      { background: var(--sm-dashboard-dot-down); }
     .dashboard-dot--error     { background: var(--sm-dashboard-dot-error); }
     .dashboard-dot--no_data   { background: var(--sm-dashboard-dot-unknown); }
+
+    /* Expand affordance on failing recent-results rows: a chevron that turns
+       down when the row's detail is open (JS toggles aria-expanded). */
+    .result-row__chev {
+        display: inline-block;
+        margin-right: 0.4em;
+        color: var(--theme-text-muted);
+        transition: transform 120ms ease;
+    }
+    [data-result-row][aria-expanded="true"] .result-row__chev { transform: rotate(90deg); }
+    @media (prefers-reduced-motion: reduce) {
+        .result-row__chev { transition: none; }
+    }
     .dashboard-dot--muted     { background: var(--sm-dashboard-dot-muted); }
     .dashboard-dot--pulse {
         position: relative;
@@ -2913,9 +2952,12 @@
     .dashboard-kpis {
         @apply grid gap-3 sm:grid-cols-3;
     }
-    /* Layout only — composes with `.sticker-card` at the call site. */
+    /* Layout only — composes with `.sticker-card` at the call site. Side
+       border drops to transparent so the .corner-frame crop marks are the
+       only frame; the raised surface still reads against the page. */
     .dashboard-kpi-card {
         @apply flex flex-col gap-1.5 p-5;
+        border-color: transparent;
     }
     .dashboard-kpi-card__label {
         @apply text-xs uppercase tracking-wide;
@@ -2934,7 +2976,7 @@
         line-height: 1.05;
     }
     .dashboard-kpi-card__hint {
-        @apply text-xs;
+        @apply text-xs tabular-nums;
         color: var(--sm-dashboard-hint-fg);
     }
     .dashboard-kpi-card__unit {
@@ -3081,6 +3123,9 @@
         background-image: var(--sm-scale-ticks-3);
         opacity: 0.85;
     }
+    /* The tick overlay marks 6/12/18h on the dashboard's fixed 24h ribbon; the
+       monitor ribbon's range varies, so the guides align to nothing — drop them. */
+    .dashboard-ribbon--bare::before { display: none; }
     .dashboard-ribbon__seg {
         flex: 1 1 0;
         min-width: 0;
@@ -3196,6 +3241,68 @@
         font-feature-settings: "tnum" 1, "lnum" 1;
         font-weight: 600;
         letter-spacing: -0.01em;
+    }
+
+    /* Header overflow menu: secondary monitor actions folded behind ⋯. Native
+       <details> disclosure; target_detail.js closes it on outside-click/Esc. */
+    .hdr-menu { position: relative; }
+    .hdr-menu > summary { list-style: none; cursor: pointer; }
+    .hdr-menu > summary::-webkit-details-marker { display: none; }
+    .hdr-menu__panel {
+        position: absolute;
+        right: 0;
+        top: calc(100% + 4px);
+        z-index: 40;
+        min-width: 9rem;
+        display: flex;
+        flex-direction: column;
+        padding: 4px;
+        background: var(--theme-surface-elev);
+        border: 1px solid var(--theme-line);
+        border-radius: 2px;
+    }
+    .hdr-menu__item {
+        @apply px-2 py-1.5 text-left text-sm;
+        font-family: var(--font-mono);
+        color: var(--theme-text);
+        background: transparent;
+        border: 0;
+        border-radius: 2px;
+        cursor: pointer;
+    }
+    .hdr-menu__item:hover { background: var(--theme-surface-sunk); }
+    .hdr-menu__item--danger { color: var(--theme-state-bad-fg); }
+    .hdr-menu__item--danger:hover { background: var(--theme-state-bad-bg); }
+
+    /* Drawer that lists a ribbon bucket's raw checks when a failing cell is
+       clicked. Composes with `.sticker-card` at the call site. */
+    .ribbon-drawer {
+        @apply mt-3 p-4;
+    }
+    .ribbon-drawer[hidden] { display: none; }
+    .ribbon-drawer__head {
+        @apply mb-2 flex items-center justify-between gap-3;
+    }
+    .ribbon-drawer__scale {
+        @apply ml-2 text-xs;
+        font-family: var(--font-mono);
+        font-variant-numeric: tabular-nums;
+        color: var(--theme-text-muted);
+    }
+    /* Grows to fit the page (30 rows) rather than an inner scrollbox; only wide
+       rows scroll sideways. */
+    .ribbon-drawer__body {
+        overflow-x: auto;
+    }
+    .ribbon-drawer__foot {
+        @apply mt-2 flex items-center gap-3;
+    }
+    .ribbon-drawer__foot[hidden] { display: none; }
+    .ribbon-drawer__shown {
+        @apply text-xs;
+        font-family: var(--font-mono);
+        font-variant-numeric: tabular-nums;
+        color: var(--theme-text-muted);
     }
 
     /* ── Operator monitors page (/targets) ──────────────────────── */

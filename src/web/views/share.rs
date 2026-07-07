@@ -122,6 +122,8 @@ pub struct ShareDetailPage {
     /// Always `None` — the public share surface is not region-filtered; the
     /// field exists so the shared range-pills partial type-checks.
     pub selected_region: Option<String>,
+    /// The public results table hides the region column (matches the owner view).
+    pub show_region: bool,
 }
 
 #[derive(Template, WebTemplate)]
@@ -136,6 +138,7 @@ pub struct ShareLive {
     pub results: Arc<[ResultRow]>,
     pub results_has_more: bool,
     pub last_at_iso: Arc<str>,
+    pub show_region: bool,
 }
 
 #[derive(Template, WebTemplate)]
@@ -228,6 +231,7 @@ pub async fn detail(
         from_human: labels.from_human,
         to_human: labels.to_human,
         selected_region: None,
+        show_region: false,
     })
 }
 
@@ -275,6 +279,7 @@ pub async fn live_partial(
         results: Arc::clone(&live.result_rows),
         results_has_more: live.results_has_more,
         last_at_iso: Arc::clone(&live.last_at_iso),
+        show_region: false,
     };
     let rendered = page
         .render()
