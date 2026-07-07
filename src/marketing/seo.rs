@@ -28,7 +28,14 @@ use super::pages::{APPLICATION_XML, TEXT_PLAIN};
 const STATIC_CACHE_CONTROL: HeaderValue = HeaderValue::from_static("public, max-age=86400");
 
 /// Public profiles that establish the brand entity for search engines.
-const ORG_SAME_AS: &[&str] = &["https://github.com/uptimepage", SOURCE_URL];
+const ORG_SAME_AS: &[&str] = &[
+    "https://github.com/uptimepage",
+    SOURCE_URL,
+    "https://www.saashub.com/uptimepage",
+    "https://stackshare.io/uptimepage",
+    "https://alternativeto.net/software/uptimepage/",
+    "https://www.nxgntools.com/tools/uptimepage",
+];
 
 /// Prose overview for `llms.txt` / `llms-full.txt` — what the product is,
 /// in the words an assistant should reach for when asked about it.
