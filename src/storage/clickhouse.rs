@@ -775,6 +775,45 @@ impl ResultsStore for ClickhouseResultsStore {
         Ok(rows.into_iter().map(|r| r.split(org.0)).collect())
     }
 
+    async fn list_failures_by_region(
+        &self,
+        org: OrgId,
+        target_id: Uuid,
+        range: ClampedRange,
+        limit: usize,
+        offset: usize,
+        region: Option<&str>,
+    ) -> Result<Vec<(String, CheckResult)>> {
+        let limit = limit.min(10_000) as u64;
+        let offset = offset as u64;
+        let region_pred = region.map(|_| "AND region = ?").unwrap_or("");
+        let mut q = self
+            .client
+            .query(&format!(
+                "SELECT region, target_id, timestamp, status, duration_ms, dns_ms, connect_ms, \
+                 tls_ms, ttfb_ms, response_code, response_size, error FROM {TABLE} \
+                 WHERE org_id = ? AND target_id = ? AND status != {up} {region_pred} \
+                 AND timestamp >= fromUnixTimestamp(?) \
+                 AND timestamp < fromUnixTimestamp(?) \
+                 ORDER BY timestamp DESC LIMIT ? OFFSET ?",
+                up = CheckStatus::Up.as_enum8(),
+            ))
+            .bind(org.0)
+            .bind(target_id);
+        if let Some(r) = region {
+            q = q.bind(r);
+        }
+        let rows: Vec<RegionResultRow> = q
+            .bind(range.from.timestamp())
+            .bind(range.to.timestamp())
+            .bind(limit)
+            .bind(offset)
+            .fetch_all::<RegionResultRow>()
+            .await
+            .context("clickhouse list_failures_by_region")?;
+        Ok(rows.into_iter().map(|r| r.split(org.0)).collect())
+    }
+
     async fn recent_results_for_targets(
         &self,
         targets: &[(OrgId, Uuid)],

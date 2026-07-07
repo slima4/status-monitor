@@ -103,6 +103,36 @@ impl ResultsStore for InMemorySink {
             .collect())
     }
 
+    async fn list_failures_by_region(
+        &self,
+        _org: OrgId,
+        target_id: Uuid,
+        range: ClampedRange,
+        limit: usize,
+        offset: usize,
+        _region: Option<&str>,
+    ) -> Result<Vec<(String, CheckResult)>> {
+        // No region dimension in memory; drop success rows, tag one region.
+        let guard = self.results.lock();
+        let mut out: Vec<CheckResult> = guard
+            .iter()
+            .filter(|r| {
+                r.target_id == target_id
+                    && r.status != CheckStatus::Up
+                    && r.timestamp >= range.from
+                    && r.timestamp < range.to
+            })
+            .cloned()
+            .collect();
+        out.sort_by_key(|r| std::cmp::Reverse(r.timestamp));
+        Ok(out
+            .into_iter()
+            .skip(offset)
+            .take(limit)
+            .map(|r| ("default".to_string(), r))
+            .collect())
+    }
+
     async fn recent_results_for_targets(
         &self,
         targets: &[(OrgId, Uuid)],
@@ -1188,5 +1218,56 @@ mod tests {
         assert_eq!(buckets.len(), 1);
         assert_eq!(buckets[0].total, 1);
         assert_eq!(buckets[0].up, 1);
+    }
+
+    #[tokio::test]
+    async fn list_failures_by_region_excludes_up_and_paginates() {
+        let store = InMemorySink::new();
+        let t = Uuid::from_u128(1);
+        let base = Utc.with_ymd_and_hms(2026, 5, 1, 0, 0, 0).unwrap();
+        let fail = |offset_s: i64, status: CheckStatus| status_result(t, base, offset_s, status);
+        store
+            .write_batch(&[
+                up_result(t, base, 0, 100, 10),
+                fail(30, CheckStatus::Down),
+                up_result(t, base, 45, 100, 10),
+                fail(60, CheckStatus::Error),
+                fail(90, CheckStatus::Degraded),
+            ])
+            .await
+            .unwrap();
+        let range = ClampedRange::unclamped(TimeRange {
+            from: base,
+            to: base + chrono::Duration::seconds(120),
+        });
+
+        let page1 = store
+            .list_failures_by_region(OrgId(Uuid::nil()), t, range, 2, 0, None)
+            .await
+            .unwrap();
+        // Only the three non-Up checks, newest first, bounded to the page size.
+        assert_eq!(page1.len(), 2);
+        assert!(page1.iter().all(|(_, r)| r.status != CheckStatus::Up));
+        assert_eq!(page1[0].1.status, CheckStatus::Degraded); // 90s, newest
+        assert_eq!(page1[1].1.status, CheckStatus::Error); // 60s
+
+        let page2 = store
+            .list_failures_by_region(OrgId(Uuid::nil()), t, range, 2, 2, None)
+            .await
+            .unwrap();
+        assert_eq!(page2.len(), 1);
+        assert_eq!(page2[0].1.status, CheckStatus::Down); // 30s, oldest failure
+    }
+
+    fn status_result(
+        target: Uuid,
+        base: DateTime<Utc>,
+        offset_s: i64,
+        status: CheckStatus,
+    ) -> CheckResult {
+        CheckResult {
+            status,
+            ..up_result(target, base, offset_s, 100, 10)
+        }
     }
 }

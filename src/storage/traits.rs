@@ -311,6 +311,19 @@ pub trait ResultsStore: Send + Sync {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<(String, CheckResult)>>;
+    /// Failing results (status is not `Up`) for one target over a window, each
+    /// paired with its region, newest first. Backs the ribbon drill drawer,
+    /// which only opens on a failing bucket, so success rows would just bury the
+    /// failures the user came to see. `region` scopes to one region when set.
+    async fn list_failures_by_region(
+        &self,
+        org: OrgId,
+        target_id: Uuid,
+        range: ClampedRange,
+        limit: usize,
+        offset: usize,
+        region: Option<&str>,
+    ) -> Result<Vec<(String, CheckResult)>>;
     /// Recent results for many targets in one query, each row tagged with its
     /// region (the `CheckResult` carries `target_id` and `org_id`). Returns at
     /// most `per_target_limit` newest rows per `(target, region)`. Rows are

@@ -142,3 +142,98 @@ async fn batched_read_caps_per_target_region_and_filters_pairs() {
         .expect("empty read");
     assert!(empty.is_empty());
 }
+
+#[tokio::test]
+#[ignore = "requires ClickHouse (CLICKHOUSE_URL)"]
+async fn list_failures_by_region_drops_up_and_scopes_region() {
+    let Some(ch) = common::ch_client_from_env().await else {
+        eprintln!("skipped: CLICKHOUSE_URL not set");
+        return;
+    };
+    let sink_eu = ClickhouseResultSink::new(
+        ch.clone(),
+        "eu".into(),
+        "agent-eu".into(),
+        OrgTtlDays::new(),
+    );
+    let sink_us = ClickhouseResultSink::new(
+        ch.clone(),
+        "us".into(),
+        "agent-us".into(),
+        OrgTtlDays::new(),
+    );
+    let store = ClickhouseResultsStore::from_client(ch);
+
+    let org = Uuid::now_v7();
+    let t = Uuid::now_v7();
+    let now = Utc::now();
+    let ago = |s: i64| now - Duration::seconds(s);
+    let with = |ts, status| CheckResult {
+        status,
+        ..result(t, org, ts)
+    };
+
+    // eu: 2 up + 1 down + 1 error. us: 1 up + 1 degraded.
+    sink_eu
+        .write_batch(&[
+            with(ago(90), CheckStatus::Up),
+            with(ago(75), CheckStatus::Down),
+            with(ago(60), CheckStatus::Up),
+            with(ago(45), CheckStatus::Error),
+        ])
+        .await
+        .expect("seed eu");
+    sink_us
+        .write_batch(&[
+            with(ago(50), CheckStatus::Up),
+            with(ago(20), CheckStatus::Degraded),
+        ])
+        .await
+        .expect("seed us");
+
+    let range = ClampedRange::unclamped(TimeRange {
+        from: ago(3600),
+        to: now + Duration::seconds(60),
+    });
+
+    // All regions: only the three non-Up rows, region-tagged, newest first.
+    let all = store
+        .list_failures_by_region(OrgId(org), t, range, 100, 0, None)
+        .await
+        .expect("all failures");
+    assert_eq!(all.len(), 3, "2 eu failures + 1 us failure, no Up rows");
+    assert!(all.iter().all(|(_, r)| r.status != CheckStatus::Up));
+    assert_eq!(
+        all.first().map(|(_, r)| r.status),
+        Some(CheckStatus::Degraded),
+        "newest failure first (us, 20s ago)"
+    );
+    assert!(
+        all.iter().any(|(region, _)| region == "eu")
+            && all.iter().any(|(region, _)| region == "us"),
+        "failures carry their region tag"
+    );
+
+    // Region filter scopes to one region's failures.
+    let eu = store
+        .list_failures_by_region(OrgId(org), t, range, 100, 0, Some("eu"))
+        .await
+        .expect("eu failures");
+    assert_eq!(eu.len(), 2, "only eu's down + error");
+    assert!(
+        eu.iter()
+            .all(|(region, r)| region == "eu" && r.status != CheckStatus::Up)
+    );
+
+    // Pagination covers the set without duplicating across the boundary.
+    let p1 = store
+        .list_failures_by_region(OrgId(org), t, range, 2, 0, None)
+        .await
+        .expect("page 1");
+    let p2 = store
+        .list_failures_by_region(OrgId(org), t, range, 2, 2, None)
+        .await
+        .expect("page 2");
+    assert_eq!(p1.len(), 2);
+    assert_eq!(p2.len(), 1);
+}

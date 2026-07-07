@@ -940,11 +940,11 @@ pub struct CheckRowsParams {
 // One 30-row page is plenty per drill; the drawer pages with `offset` for more.
 const CHECK_ROWS_PAGE: usize = 30;
 
-/// HTML rows for the ribbon drill drawer: raw checks over a bucket window, each
-/// tagged with its region, rendered with the shared recent-results row partial.
-/// Paginates by `offset`; `X-Sm-Has-More` tells the drawer whether to keep its
-/// "load more" control. A wide bucket can hold thousands of rows, so the caller
-/// only ever pulls one bounded page at a time.
+/// HTML rows for the ribbon drill drawer: the failing checks over a bucket
+/// window, each tagged with its region, rendered with the shared recent-results
+/// row partial. Paginates by `offset`; `X-Sm-Has-More` tells the drawer whether
+/// to keep its "load more" control. A wide bucket can hold thousands of failures,
+/// so the caller only ever pulls one bounded page at a time.
 pub async fn check_rows(
     _auth: AuthedBrowser,
     CurrentOrg(org): CurrentOrg,
@@ -969,31 +969,21 @@ pub async fn check_rows(
             },
         )
         .await?;
-    // A region filter scopes the ribbon's counts, so scope the drawer to match;
-    // the region is known up front, so tag every row with it. Otherwise pull all
-    // regions, each carrying its own tag.
-    let mut rows: Vec<(String, CheckResult)> = match params.region.as_deref() {
-        Some(reg) => state
-            .results_store
-            .list_results(
-                org,
-                target.id,
-                range,
-                CHECK_ROWS_PAGE + 1,
-                params.offset,
-                Some(reg),
-            )
-            .await?
-            .into_iter()
-            .map(|r| (reg.to_string(), r))
-            .collect(),
-        None => {
-            state
-                .results_store
-                .list_results_by_region(org, target.id, range, CHECK_ROWS_PAGE + 1, params.offset)
-                .await?
-        }
-    };
+    // The drawer only opens on a failing cell, so list only the failing checks —
+    // success rows would bury them. `region` matches the ribbon's filter. Counts
+    // come from the rollup and these rows from raw, so they can diverge at a TTL
+    // or bucket edge; the count is the headline, not a row total.
+    let mut rows = state
+        .results_store
+        .list_failures_by_region(
+            org,
+            target.id,
+            range,
+            CHECK_ROWS_PAGE + 1,
+            params.offset,
+            params.region.as_deref(),
+        )
+        .await?;
     let has_more = rows.len() > CHECK_ROWS_PAGE;
     if has_more {
         rows.truncate(CHECK_ROWS_PAGE);
