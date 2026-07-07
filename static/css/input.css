@@ -1201,10 +1201,12 @@
     .sticker-btn:not(:disabled):active { scale: 0.96; }
     .sticker-btn--primary::before,
     .sticker-btn--accent::before,
-    .sticker-btn--danger::before  { content: "["; opacity: 0.7; margin-right: 0.3em; }
+    .sticker-btn--danger::before,
+    .sticker-btn--highlight::before  { content: "["; opacity: 0.7; margin-right: 0.3em; }
     .sticker-btn--primary::after,
     .sticker-btn--accent::after,
-    .sticker-btn--danger::after   { content: "]"; opacity: 0.7; margin-left: 0.3em; }
+    .sticker-btn--danger::after,
+    .sticker-btn--highlight::after   { content: "]"; opacity: 0.7; margin-left: 0.3em; }
     .sticker-btn:disabled {
         @apply cursor-not-allowed opacity-60;
         box-shadow: var(--theme-shadow-btn-disabled);
@@ -1228,6 +1230,12 @@
     /* Accent fill for try-before-save controls. */
     .sticker-btn--accent  { background: var(--theme-action-accent); color: white; }
     .sticker-btn--accent:not(:disabled):hover { background: var(--theme-action-accent-hover); }
+    /* Amber fill. warn-strong stays light in every theme, so a fixed dark ink
+       holds contrast, mirroring the white text used on the dark fills. */
+    .sticker-btn--highlight { background: var(--theme-state-warn-strong); color: #1c1917; }
+    .sticker-btn--highlight:not(:disabled):hover {
+        background: color-mix(in oklch, var(--theme-state-warn-strong), white 14%);
+    }
 
     /* Flat secondary control (Edit/Cancel/toggle…) — the quiet sibling of
        .sticker-btn: same chunky radius + 2px edge, no ink, no raised
