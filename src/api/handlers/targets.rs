@@ -1385,6 +1385,42 @@ fn canonicalize_check(check: &mut crate::domain::CheckSpec) -> Result<()> {
     }
 }
 
+// Zero = instant fail; the cap stops a tenant hogging a worker slot.
+fn validate_timeout(timeout: std::time::Duration) -> Result<()> {
+    if !(100..=60_000).contains(&timeout.as_millis()) {
+        return Err(AppError::bad_request_field(
+            codes::INVALID_TIMEOUT,
+            "timeout must be between 100 and 60000 ms",
+            "check.timeout",
+        ));
+    }
+    Ok(())
+}
+
+// Bound the alert lead-time window; warn must stay above critical.
+fn validate_cert_days(warn_days: u32, critical_days: u32, code: &'static str) -> Result<()> {
+    for (val, field) in [
+        (warn_days, "check.warn_days"),
+        (critical_days, "check.critical_days"),
+    ] {
+        if !(1..=365).contains(&val) {
+            return Err(AppError::bad_request_field(
+                code,
+                "warn_days and critical_days must be between 1 and 365",
+                field,
+            ));
+        }
+    }
+    if warn_days <= critical_days {
+        return Err(AppError::bad_request_field(
+            code,
+            "warn_days must be > critical_days",
+            "check.warn_days",
+        ));
+    }
+    Ok(())
+}
+
 fn validate_check(check: &crate::domain::CheckSpec, guard: &SsrfGuard) -> Result<()> {
     use crate::domain::CheckSpec;
     match check {
@@ -1395,6 +1431,17 @@ fn validate_check(check: &crate::domain::CheckSpec, guard: &SsrfGuard) -> Result
                     codes::INVALID_URL_SCHEME,
                     format!("url scheme '{scheme}' not allowed"),
                     "check.url",
+                ));
+            }
+            validate_timeout(http.timeout)?;
+            if http.max_redirects > crate::domain::HttpCheck::MAX_REDIRECTS {
+                return Err(AppError::bad_request_field(
+                    codes::INVALID_HTTP_PARAMS,
+                    format!(
+                        "max_redirects must be at most {}",
+                        crate::domain::HttpCheck::MAX_REDIRECTS
+                    ),
+                    "check.max_redirects",
                 ));
             }
             if let Some((u, p)) = &http.basic_auth
@@ -1479,6 +1526,7 @@ fn validate_check(check: &crate::domain::CheckSpec, guard: &SsrfGuard) -> Result
                     "check.port",
                 ));
             }
+            validate_timeout(tcp.timeout)?;
             let host = crate::security::unbracket(&tcp.host);
             if let Ok(ip) = host.parse::<IpAddr>() {
                 check_ip(ip, guard)?;
@@ -1492,15 +1540,7 @@ fn validate_check(check: &crate::domain::CheckSpec, guard: &SsrfGuard) -> Result
                     "check.host",
                 ));
             }
-            // Zero would make every echo an instant Down; the ceiling stops a
-            // tenant pinning worker slots for minutes per check.
-            if !(100..=60_000).contains(&p.timeout.as_millis()) {
-                return Err(AppError::bad_request_field(
-                    codes::INVALID_TIMEOUT,
-                    "ping timeout must be between 100 and 60000 ms",
-                    "check.timeout",
-                ));
-            }
+            validate_timeout(p.timeout)?;
             let host = crate::security::unbracket(&p.host);
             if let Ok(ip) = host.parse::<IpAddr>() {
                 check_ip(ip, guard)?;
@@ -1540,13 +1580,12 @@ fn validate_check(check: &crate::domain::CheckSpec, guard: &SsrfGuard) -> Result
                     "check.port",
                 ));
             }
-            if cert.warn_days <= cert.critical_days {
-                return Err(AppError::bad_request_field(
-                    codes::INVALID_TLS_CERT_PARAMS,
-                    "tls_cert warn_days must be > critical_days",
-                    "check.warn_days",
-                ));
-            }
+            validate_timeout(cert.timeout)?;
+            validate_cert_days(
+                cert.warn_days,
+                cert.critical_days,
+                codes::INVALID_TLS_CERT_PARAMS,
+            )?;
             let host = crate::security::unbracket(&cert.host);
             if let Ok(ip) = host.parse::<IpAddr>() {
                 check_ip(ip, guard)?;
@@ -1574,13 +1613,8 @@ fn validate_check(check: &crate::domain::CheckSpec, guard: &SsrfGuard) -> Result
                     "check.domain",
                 ));
             }
-            if d.warn_days <= d.critical_days {
-                return Err(AppError::bad_request_field(
-                    codes::INVALID_DOMAIN_PARAMS,
-                    "domain_expiry warn_days must be > critical_days",
-                    "check.warn_days",
-                ));
-            }
+            validate_timeout(d.timeout)?;
+            validate_cert_days(d.warn_days, d.critical_days, codes::INVALID_DOMAIN_PARAMS)?;
         }
         CheckSpec::Dns(d) => {
             if d.domain.is_empty() {
@@ -1590,6 +1624,7 @@ fn validate_check(check: &crate::domain::CheckSpec, guard: &SsrfGuard) -> Result
                     "check.domain",
                 ));
             }
+            validate_timeout(d.timeout)?;
             if let Some(resolver) = &d.resolver
                 && !resolver.is_empty()
             {
@@ -1710,6 +1745,110 @@ mod tests {
         use crate::security::ssrf::SsrfGuard;
         validate_check(&head_spec(None), &SsrfGuard::strict())
             .expect("HEAD without body match must pass");
+    }
+
+    #[test]
+    fn validate_check_rejects_tcp_empty_port() {
+        use crate::security::ssrf::SsrfGuard;
+        let spec: crate::domain::CheckSpec = serde_json::from_str(
+            r#"{"type":"tcp","host":"db.example.com","port":null,"timeout":3000}"#,
+        )
+        .expect("empty port must deserialize, not 422");
+        let err = validate_check(&spec, &SsrfGuard::strict())
+            .expect_err("tcp check with empty port must reject");
+        assert_bad_request_with_field(err, "check.port");
+    }
+
+    #[test]
+    fn validate_check_rejects_tls_cert_empty_port() {
+        use crate::security::ssrf::SsrfGuard;
+        let spec: crate::domain::CheckSpec = serde_json::from_str(
+            r#"{"type":"tls_cert","host":"example.com","port":null,"warn_days":14,"critical_days":3,"timeout":5000}"#,
+        )
+        .expect("empty port must deserialize, not 422");
+        let err = validate_check(&spec, &SsrfGuard::strict())
+            .expect_err("tls_cert check with empty port must reject");
+        assert_bad_request_with_field(err, "check.port");
+    }
+
+    #[test]
+    fn validate_check_rejects_http_timeout_over_max() {
+        use crate::domain::CheckSpec;
+        use crate::security::ssrf::SsrfGuard;
+        use std::time::Duration;
+        let mut h = http_auth(None, None);
+        h.timeout = Duration::from_millis(999_999);
+        let err = validate_check(&CheckSpec::Http(h), &SsrfGuard::strict())
+            .expect_err("http timeout above 60000 ms must reject");
+        assert_bad_request_with_field(err, "check.timeout");
+    }
+
+    #[test]
+    fn validate_check_rejects_http_zero_timeout() {
+        use crate::domain::CheckSpec;
+        use crate::security::ssrf::SsrfGuard;
+        use std::time::Duration;
+        let mut h = http_auth(None, None);
+        h.timeout = Duration::ZERO;
+        let err = validate_check(&CheckSpec::Http(h), &SsrfGuard::strict())
+            .expect_err("zero timeout must reject");
+        assert_bad_request_with_field(err, "check.timeout");
+    }
+
+    #[test]
+    fn validate_check_rejects_excess_redirects() {
+        use crate::domain::CheckSpec;
+        use crate::security::ssrf::SsrfGuard;
+        let mut h = http_auth(None, None);
+        h.max_redirects = crate::domain::HttpCheck::MAX_REDIRECTS + 1;
+        let err = validate_check(&CheckSpec::Http(h), &SsrfGuard::strict())
+            .expect_err("max_redirects above the ceiling must reject");
+        assert_bad_request_with_field(err, "check.max_redirects");
+    }
+
+    #[test]
+    fn validate_check_rejects_tcp_timeout_out_of_range() {
+        use crate::security::ssrf::SsrfGuard;
+        let spec: crate::domain::CheckSpec = serde_json::from_str(
+            r#"{"type":"tcp","host":"db.example.com","port":5432,"timeout":999999}"#,
+        )
+        .unwrap();
+        let err = validate_check(&spec, &SsrfGuard::strict())
+            .expect_err("tcp timeout above 60000 ms must reject");
+        assert_bad_request_with_field(err, "check.timeout");
+    }
+
+    #[test]
+    fn validate_check_rejects_tls_warn_days_over_max() {
+        use crate::security::ssrf::SsrfGuard;
+        let spec: crate::domain::CheckSpec = serde_json::from_str(
+            r#"{"type":"tls_cert","host":"example.com","port":443,"warn_days":999,"critical_days":3,"timeout":5000}"#,
+        )
+        .unwrap();
+        let err = validate_check(&spec, &SsrfGuard::strict())
+            .expect_err("warn_days above 365 must reject");
+        assert_bad_request_with_field(err, "check.warn_days");
+    }
+
+    #[test]
+    fn validate_check_accepts_tls_days_in_range() {
+        use crate::security::ssrf::SsrfGuard;
+        let spec: crate::domain::CheckSpec = serde_json::from_str(
+            r#"{"type":"tls_cert","host":"example.com","port":443,"warn_days":30,"critical_days":7,"timeout":5000}"#,
+        )
+        .unwrap();
+        validate_check(&spec, &SsrfGuard::strict()).expect("valid tls days must pass");
+    }
+
+    #[test]
+    fn validate_check_rejects_domain_expiry_zero_days() {
+        use crate::security::ssrf::SsrfGuard;
+        let spec: crate::domain::CheckSpec = serde_json::from_str(
+            r#"{"type":"domain_expiry","domain":"example.com","warn_days":0,"critical_days":0,"timeout":5000}"#,
+        )
+        .unwrap();
+        let err = validate_check(&spec, &SsrfGuard::strict()).expect_err("zero days must reject");
+        assert_bad_request_with_field(err, "check.warn_days");
     }
 
     fn http_auth(basic: Option<(&str, &str)>, bearer: Option<&str>) -> crate::domain::HttpCheck {

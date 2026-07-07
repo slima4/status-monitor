@@ -113,10 +113,16 @@ pub struct HttpCheck {
     pub bearer_token: Option<String>,
 }
 
+impl HttpCheck {
+    /// Redirect-hop ceiling: rejected above this on write, clamped to it on probe.
+    pub const MAX_REDIRECTS: u8 = 10;
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct TcpCheck {
     #[schema(example = "db.example.com")]
     pub host: String,
+    #[serde(default, deserialize_with = "deserialize_port")]
     #[schema(minimum = 1, maximum = 65535, example = 5432)]
     pub port: u16,
     /// Connect timeout in milliseconds.
@@ -154,6 +160,7 @@ pub struct HeartbeatCheck {
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct TlsCertCheck {
     pub host: String,
+    #[serde(default, deserialize_with = "deserialize_port")]
     #[schema(minimum = 1, maximum = 65535)]
     pub port: u16,
     /// SNI to send if different from `host` (e.g. when the cert is served
@@ -268,6 +275,11 @@ pub struct DnsCheck {
     pub timeout: Duration,
 }
 
+// Null or absent port becomes 0 so port validation flags it, not serde.
+fn deserialize_port<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u16, D::Error> {
+    Ok(Option::<u16>::deserialize(d)?.unwrap_or(0))
+}
+
 mod duration_ms {
     use std::time::Duration;
 
@@ -347,5 +359,32 @@ mod tests {
             reduced_domain_hint("www.shop.com.ua").as_deref(),
             Some("shop.com.ua")
         );
+    }
+
+    #[test]
+    fn tcp_port_null_or_missing_deserialises_to_zero() {
+        let null_port: CheckSpec = serde_json::from_str(
+            r#"{"type":"tcp","host":"db.example.com","port":null,"timeout":3000}"#,
+        )
+        .unwrap();
+        let missing_port: CheckSpec =
+            serde_json::from_str(r#"{"type":"tcp","host":"db.example.com","timeout":3000}"#)
+                .unwrap();
+        let real_port: CheckSpec = serde_json::from_str(
+            r#"{"type":"tcp","host":"db.example.com","port":5432,"timeout":3000}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            null_port,
+            CheckSpec::Tcp(TcpCheck { port: 0, .. })
+        ));
+        assert!(matches!(
+            missing_port,
+            CheckSpec::Tcp(TcpCheck { port: 0, .. })
+        ));
+        assert!(matches!(
+            real_port,
+            CheckSpec::Tcp(TcpCheck { port: 5432, .. })
+        ));
     }
 }

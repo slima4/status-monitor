@@ -1337,6 +1337,8 @@
         transition: border-color 120ms ease;
     }
     .field:focus { border-color: var(--theme-focus-ring); }
+    .field[aria-invalid="true"] { border-color: var(--theme-action-danger); }
+    .field[aria-invalid="true"]:focus-visible { outline-color: var(--theme-action-danger); }
     .field:disabled {
         @apply cursor-not-allowed;
         background: var(--theme-surface-sunk);
@@ -1469,9 +1471,13 @@
         transition: border-color 120ms ease;
     }
     .field-join:focus-within { border-color: var(--theme-focus-ring); }
+    .field-join:has([aria-invalid="true"]) { border-color: var(--theme-action-danger); }
     .field-join:has(:focus-visible) {
         outline: 2px solid var(--theme-focus-ring);
         outline-offset: 0;
+    }
+    .field-join:has([aria-invalid="true"]):has(:focus-visible) {
+        outline-color: var(--theme-action-danger);
     }
     .field-join :focus-visible { outline: none; }
     .field-join > .sm-combobox {

@@ -22,11 +22,8 @@ use crate::http_client::connector::{
 };
 use crate::observability::metrics::names;
 
-/// Hard ceiling on redirect hops, and the fallback when a check enables
-/// following but leaves `max_redirects` at 0. The API schema documents
-/// `maximum = 10`; that annotation is not validated server-side, so this
-/// runtime clamp is the actual enforcement of the bound.
-const MAX_REDIRECT_HOPS: u8 = 10;
+/// Redirect-hop ceiling, and the fallback when following is on but `max_redirects` is 0.
+const MAX_REDIRECT_HOPS: u8 = HttpCheck::MAX_REDIRECTS;
 
 /// Cap on the raw HTTP response body the check will collect. Status pages —
 /// the dominant target shape — are usually well under 100 KiB; 1 MiB is the

@@ -116,6 +116,26 @@
         }
     });
 
+    // Flag a bad numeric value on blur; only that field's own input clears it,
+    // so editing one field never wipes another's mark.
+    form.addEventListener("focusout", (evt) => {
+        const el = evt.target;
+        if (el.tagName !== "INPUT" || el.type !== "number") return;
+        const raw = el.value.trim();
+        if (raw === "") {
+            if (el.validity && el.validity.badInput) el.setAttribute("aria-invalid", "true");
+            return;
+        }
+        const n = parseInt(raw, 10);
+        const min = el.min === "" ? -Infinity : Number(el.min);
+        const max = el.max === "" ? Infinity : Number(el.max);
+        const ok = Number.isInteger(n) && String(n) === raw && n >= min && n <= max;
+        if (!ok) el.setAttribute("aria-invalid", "true");
+    });
+    form.addEventListener("input", (evt) => {
+        if (evt.target.type === "number") evt.target.removeAttribute("aria-invalid");
+    });
+
     // ARIA radiogroup keyboard nav on the check-type cards. Labels are
     // tabindex-0 as a fallback for browsers that won't focus sr-only radios.
     const checkTypeCards = form.querySelector(".check-type-cards");
@@ -352,6 +372,14 @@
     function buildCheck() {
         const data = new FormData(form);
         const checkType = currentCheckType();
+        const numField = (name, min, max, label, field) => {
+            const raw = (data.get(name) || "").trim();
+            const n = parseInt(raw, 10);
+            if (!Number.isInteger(n) || String(n) !== raw || n < min || n > max) {
+                return { error: `${label} must be a whole number between ${min} and ${max}.`, field };
+            }
+            return { value: n };
+        };
 
         if (checkType === "http") {
             const norm = normalizeHttpUrl(data.get("http_url"));
@@ -367,14 +395,23 @@
             const expectedRaw = (data.get("expected_status_input") || "").trim();
             const expected = parseExpectedStatus(expectedRaw);
             if (expected.error) return { error: expected.error };
+            const timeout = numField("http_timeout_ms", 100, 60000, "Timeout", "check.timeout");
+            if (timeout.error) return timeout;
+            // Optional: keep the default when blank, validate only an entered value.
+            let maxRedirects = 5;
+            if ((data.get("http_max_redirects") || "").trim() !== "") {
+                const parsed = numField("http_max_redirects", 0, 10, "Max redirects", "check.max_redirects");
+                if (parsed.error) return parsed;
+                maxRedirects = parsed.value;
+            }
 
             const check = {
                 type: "http",
                 url: norm.url,
                 method: data.get("http_method") || "GET",
-                timeout: parseInt(data.get("http_timeout_ms"), 10) || 5000,
+                timeout: timeout.value,
                 follow_redirects: data.get("http_follow_redirects") === "on",
-                max_redirects: parseInt(data.get("http_max_redirects"), 10) || 5,
+                max_redirects: maxRedirects,
                 expected_status: expected.value,
                 expected_body_contains: blankToNull(data.get("http_expected_body_contains")),
                 headers,
@@ -384,21 +421,27 @@
             return { check };
         }
         if (checkType === "tcp") {
+            const port = numField("tcp_port", 1, 65535, "Port", "check.port");
+            if (port.error) return port;
+            const timeout = numField("tcp_timeout_ms", 100, 60000, "Timeout", "check.timeout");
+            if (timeout.error) return timeout;
             return {
                 check: {
                     type: "tcp",
                     host: data.get("tcp_host"),
-                    port: parseInt(data.get("tcp_port"), 10),
-                    timeout: parseInt(data.get("tcp_timeout_ms"), 10),
+                    port: port.value,
+                    timeout: timeout.value,
                 },
             };
         }
         if (checkType === "ping") {
+            const timeout = numField("ping_timeout_ms", 100, 60000, "Timeout", "check.timeout");
+            if (timeout.error) return timeout;
             return {
                 check: {
                     type: "ping",
                     host: data.get("ping_host"),
-                    timeout: parseInt(data.get("ping_timeout_ms"), 10),
+                    timeout: timeout.value,
                 },
             };
         }
@@ -420,6 +463,8 @@
             };
         }
         if (checkType === "dns") {
+            const timeout = numField("dns_timeout_ms", 100, 60000, "Timeout", "check.timeout");
+            if (timeout.error) return timeout;
             return {
                 check: {
                     type: "dns",
@@ -427,41 +472,51 @@
                     record_type: data.get("dns_record_type"),
                     resolver: blankToNull(data.get("dns_resolver")),
                     expected_contains: blankToNull(data.get("dns_expected_contains")),
-                    timeout: parseInt(data.get("dns_timeout_ms"), 10),
+                    timeout: timeout.value,
                 },
             };
         }
         if (checkType === "tls_cert") {
-            const warn = parseInt(data.get("tls_warn_days"), 10);
-            const crit = parseInt(data.get("tls_critical_days"), 10);
-            if (Number.isInteger(warn) && Number.isInteger(crit) && crit >= warn) {
-                return { error: "Critical days must be less than warn days." };
+            const warn = numField("tls_warn_days", 1, 365, "Warn days", "check.warn_days");
+            if (warn.error) return warn;
+            const crit = numField("tls_critical_days", 1, 365, "Critical days", "check.critical_days");
+            if (crit.error) return crit;
+            if (crit.value >= warn.value) {
+                return { error: "Critical days must be less than warn days.", field: "check.warn_days" };
             }
+            const port = numField("tls_port", 1, 65535, "Port", "check.port");
+            if (port.error) return port;
+            const timeout = numField("tls_timeout_ms", 100, 60000, "Timeout", "check.timeout");
+            if (timeout.error) return timeout;
             return {
                 check: {
                     type: "tls_cert",
                     host: data.get("tls_host"),
-                    port: parseInt(data.get("tls_port"), 10),
+                    port: port.value,
                     server_name: blankToNull(data.get("tls_server_name")),
-                    warn_days: warn,
-                    critical_days: crit,
-                    timeout: parseInt(data.get("tls_timeout_ms"), 10),
+                    warn_days: warn.value,
+                    critical_days: crit.value,
+                    timeout: timeout.value,
                 },
             };
         }
         if (checkType === "domain_expiry") {
-            const warn = parseInt(data.get("domain_expiry_warn_days"), 10);
-            const crit = parseInt(data.get("domain_expiry_critical_days"), 10);
-            if (Number.isInteger(warn) && Number.isInteger(crit) && crit >= warn) {
-                return { error: "Critical days must be less than warn days." };
+            const warn = numField("domain_expiry_warn_days", 1, 365, "Warn days", "check.warn_days");
+            if (warn.error) return warn;
+            const crit = numField("domain_expiry_critical_days", 1, 365, "Critical days", "check.critical_days");
+            if (crit.error) return crit;
+            if (crit.value >= warn.value) {
+                return { error: "Critical days must be less than warn days.", field: "check.warn_days" };
             }
+            const timeout = numField("domain_expiry_timeout_ms", 100, 60000, "Timeout", "check.timeout");
+            if (timeout.error) return timeout;
             return {
                 check: {
                     type: "domain_expiry",
                     domain: data.get("domain_expiry_domain"),
-                    warn_days: warn,
-                    critical_days: crit,
-                    timeout: parseInt(data.get("domain_expiry_timeout_ms"), 10),
+                    warn_days: warn.value,
+                    critical_days: crit.value,
+                    timeout: timeout.value,
                 },
             };
         }
@@ -657,7 +712,7 @@
 
     function errorsShown() {
         const banner = document.getElementById("form-errors");
-        return (banner && !banner.classList.contains("hidden")) || !!form.querySelector("[aria-invalid]");
+        return !!banner && !banner.classList.contains("hidden");
     }
 
     // Flag a field as invalid and focus it; scroll into view only when the
@@ -712,6 +767,7 @@
         "check.port": "_port",
         "check.domain": "_domain",
         "check.timeout": "_timeout_ms",
+        "check.max_redirects": "_max_redirects",
         "check.warn_days": "_warn_days",
         "check.critical_days": "_critical_days",
         "check.period": "_period_s",
