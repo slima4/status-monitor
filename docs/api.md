@@ -258,6 +258,31 @@ Queries the [IANA RDAP bootstrap registry](https://data.iana.org/rdap/dns.json) 
 
 The bootstrap registry is fetched lazily on the first lookup and cached for the lifetime of the process. The SSRF guard does not apply — the check's network destination is an IANA-published RDAP server, not the user-supplied domain. Floor is `interval >= 3600` (enforced); default for a new monitor is `86400` (daily). RDAP servers rate-limit clients — keep this near daily, not hourly. `warn_days` must be strictly greater than `critical_days`.
 
+### Flow (browser login/transaction)
+
+```jsonc
+{
+  "type": "flow",
+  "start_url": "https://app.example.com/login",
+  "steps": [
+    { "op": "fill",        "selector": "#username", "value": "monitor@example.com" },
+    { "op": "fill",        "selector": "#password", "value": "{{login_password}}" },
+    { "op": "click",       "selector": "button[type=submit]" },
+    { "op": "assert_url",  "contains": "/dashboard" },
+    { "op": "assert_text", "selector": null, "contains": "Signed in" }
+  ],
+  "timeout": 30000,        // whole-run budget, 1000..=120000 ms
+  "step_timeout": 5000,    // per-step wait for a selector, 100..=60000 ms
+  "verify_tls": true
+}
+```
+
+Drives a real headless browser from `start_url` through each step in order, so it verifies a login *session* (form fill, submit, authenticated page) rather than just that an endpoint responds. Steps run top to bottom: `goto` navigates, `fill` types into a selector, `click` clicks, `wait_for` waits for a selector to appear, `assert_text` requires a substring (optionally scoped to a selector's text via `selector`, or page-wide with `selector: null`), and `assert_url` requires the current URL to contain a substring. At least one `assert_*` step is required so a broken login fails the check instead of passing silently. A flow holds up to 30 steps.
+
+Use a dedicated low-privilege test account, never a real or admin credential: the flow stores that credential and it runs on the probing agent. Put passwords in an org secret and reference it as `{{name}}` in a `fill` value (resolved at probe time, so only the token is stored); an inline literal is kept as typed. Every navigation URL is SSRF-filtered like other checks.
+
+`timeout` caps the whole run and `step_timeout` caps each selector wait. `verify_tls` is on by default; turn it off only for an internal endpoint with a self-signed certificate. Floor is `interval >= 300` (enforced). A flow runs only where a browser engine is available, so its regions are clamped to the flow-capable set rather than every region. The number of flow monitors an org may create is capped per plan.
+
 ## Target payload
 
 ```jsonc
@@ -267,8 +292,8 @@ The bootstrap registry is fetched lazily on the first lookup and cached for the 
   "interval": 60,             // seconds between ticks; effective floor is
                               // max(plan.min_check_interval_secs, kind_min).
                               // kind_min is 10 for http/tcp/ping/dns, 60 for
-                              // heartbeat, and 3600 for tls_cert/domain_expiry.
-                              // Plan-free min = 60.
+                              // heartbeat, 300 for flow, and 3600 for
+                              // tls_cert/domain_expiry. Plan-free min = 60.
   "enabled": true,
   "tags": ["prod", "tier1"],
   "alerts": { /* optional, see below */ }
@@ -465,14 +490,14 @@ Every 4xx and 5xx response uses one wire shape:
 - `details` carries optional structured context (e.g., `{ "range": "127.0.0.0/8" }` for SSRF rejections).
 - `trace_id` is the W3C `traceparent` when tracing is enabled.
 
-Common codes: `INVALID_URL_SCHEME`, `INVALID_URL_FORMAT`, `SSRF_BLOCKED`, `INVALID_INTERVAL`, `INVALID_TIMEOUT`, `INVALID_TCP_PORT`, `INVALID_TCP_HOST`, `INVALID_PING_HOST`, `INVALID_HEARTBEAT_PARAMS`, `HEARTBEAT_NOT_PROBEABLE`, `INVALID_STATUS_RANGE`, `INVALID_TLS_CERT_PARAMS`, `INVALID_DOMAIN_PARAMS`, `INVALID_TLS_CRED_COMBO`, `INVALID_ALERT_CONFIG`, `REDACTION_SENTINEL`, `BULK_EMPTY`, `BULK_TOO_LARGE`, `BAD_TIME_RANGE`, `TARGET_NOT_FOUND`, `CHANNEL_NOT_FOUND`, `CHANNEL_NAME_TAKEN`, `CHANNEL_NAME_INVALID`, `CHANNEL_QUOTA_EXCEEDED`, `INVALID_CHANNEL_CONFIG`, `CHANNEL_TEST_FAILED`, `CIRCUIT_OPEN`, `DEPENDENCY_DOWN`, `INTERNAL`.
+Common codes: `INVALID_URL_SCHEME`, `INVALID_URL_FORMAT`, `SSRF_BLOCKED`, `INVALID_INTERVAL`, `INVALID_TIMEOUT`, `INVALID_TCP_PORT`, `INVALID_TCP_HOST`, `INVALID_PING_HOST`, `INVALID_HEARTBEAT_PARAMS`, `HEARTBEAT_NOT_PROBEABLE`, `INVALID_STATUS_RANGE`, `INVALID_TLS_CERT_PARAMS`, `INVALID_DOMAIN_PARAMS`, `INVALID_FLOW_PARAMS`, `FLOW_CHECKS_DISABLED`, `NO_FLOW_CAPABLE_AGENT`, `INVALID_TLS_CRED_COMBO`, `INVALID_ALERT_CONFIG`, `REDACTION_SENTINEL`, `BULK_EMPTY`, `BULK_TOO_LARGE`, `BAD_TIME_RANGE`, `TARGET_NOT_FOUND`, `CHANNEL_NOT_FOUND`, `CHANNEL_NAME_TAKEN`, `CHANNEL_NAME_INVALID`, `CHANNEL_QUOTA_EXCEEDED`, `INVALID_CHANNEL_CONFIG`, `CHANNEL_TEST_FAILED`, `CIRCUIT_OPEN`, `DEPENDENCY_DOWN`, `INTERNAL`.
 
 ### Quota, rate-limit and abuse codes
 
 | Code | HTTP | Meaning |
 |---|---|---|
 | `QUOTA_EXCEEDED` | 422 | A plan quota would be exceeded. `details` carries `quota` (e.g. `max_targets`, `max_members`, `max_public_components`), `current`, `limit`, `plan`. |
-| `MIN_CHECK_INTERVAL` | 422 | Requested check interval is below the effective floor (`max(plan.min_check_interval_secs, kind_min)`), where `kind_min` is 3600 for `tls_cert` / `domain_expiry`, 60 for `heartbeat`, and 10 for `http` / `tcp` / `ping` / `dns`. Enforced on create, bulk, **and** PATCH. |
+| `MIN_CHECK_INTERVAL` | 422 | Requested check interval is below the effective floor (`max(plan.min_check_interval_secs, kind_min)`), where `kind_min` is 3600 for `tls_cert` / `domain_expiry`, 300 for `flow`, 60 for `heartbeat`, and 10 for `http` / `tcp` / `ping` / `dns`. Enforced on create, bulk, **and** PATCH. |
 | `INVITATIONS_LIMIT` | 409 | The org is at its pending-invitation cap. |
 | `RATE_LIMITED` | 429 | A per-minute rate budget was exceeded. `Retry-After` (seconds) is set; `details.scope` names the tier, e.g. `per_org_api_writes`. |
 | `ABUSE_BLOCKED` | 400 | Target blocked by abuse protection. `details.reason` explains. |

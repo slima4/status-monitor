@@ -7,7 +7,8 @@
 **Status pages + uptime monitoring. Open source, free to start. Live in 5 minutes.**
 
 Monitor HTTP, TCP, ICMP ping, cron-job heartbeats, DNS, TLS-certificate and
-domain expiry from multiple regions — then turn green and red into a polished
+domain expiry, plus scripted browser login flows, from multiple regions — then
+turn green and red into a polished
 public status page your customers can subscribe to. Drive it by click, REST
 API, or Terraform. Self-host the single binary or use the hosted service.
 
@@ -58,7 +59,7 @@ Embed your own with the snippet in **Settings → Pages → your page → Badge*
 
 | | |
 |---|---|
-| **Checks** | HTTP, TCP, ICMP ping, heartbeat (inbound dead-man's-switch), DNS, TLS-cert expiry, domain expiry — per-host circuit breaking, designed for ~50k concurrent in-flight |
+| **Checks** | HTTP, TCP, ICMP ping, heartbeat (inbound dead-man's-switch), DNS, TLS-cert expiry, domain expiry, browser login flow — per-host circuit breaking, designed for ~50k concurrent in-flight |
 | **Public status page** | HTML + JSON + RSS, per-component opt-in, incident narration, maintenance windows, email + webhook subscribers |
 | **Alerting** | Slack, webhook, Telegram, WhatsApp, SMS, PagerDuty, ntfy, Pushover, Discord, … — per-org channels, sealed secrets, fire-once + recovery, repeat until acknowledged |
 | **Incidents** | Internal incident state ⊥ public phase, acknowledge to silence paging, per-monitor reminder cadence |
@@ -86,8 +87,9 @@ Embed your own with the snippet in **Settings → Pages → your page → Badge*
 | `dns` | resolve a record, optionally match a value | 60 s | `max(plan_min, 10 s)` |
 | `tls_cert` | open TLS, parse leaf cert, alert before `notAfter` | 86 400 s (daily) | `max(plan_min, 3600 s)` |
 | `domain_expiry` | query RDAP, alert before the domain's `expiration` event | 86 400 s (daily) | `max(plan_min, 3600 s)` |
+| `flow` | drive a headless browser through login / transaction steps, assert the result | 300 s | `max(plan_min, 300 s)` |
 
-`tls_cert` and `domain_expiry` use `warn_days` / `critical_days` thresholds and surface `days_remaining` plus registrar / cert subject in the result payload. Their floor is 1 hour regardless of plan — these probes track values that change on a scale of days, not minutes. See [docs/api.md](docs/api.md) for the full payload shapes.
+`tls_cert` and `domain_expiry` use `warn_days` / `critical_days` thresholds and surface `days_remaining` plus registrar / cert subject in the result payload. Their floor is 1 hour regardless of plan — these probes track values that change on a scale of days, not minutes. `flow` runs a real browser, so it only executes where a browser engine is available (its regions clamp to the flow-capable set) and the number of flow monitors is capped per plan; put credentials in an org secret and reference them as `{{name}}`. See [docs/api.md](docs/api.md) for the full payload shapes.
 
 ## Public status page
 

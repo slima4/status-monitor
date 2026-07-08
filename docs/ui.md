@@ -76,6 +76,8 @@ The form has no inline credential inputs. HTTP `basic_auth` and `bearer_token` a
 
 Stored credentials never render into the edit form. The API rejects the `***` redaction sentinel on write; on PATCH an omitted credential keeps the stored value, an empty value clears it, and a real value replaces it. End-to-end coverage in `tests/web_e2e_test.rs::edit_form_renders_existing_target_without_leaking_credentials` asserts that real credentials never appear in the rendered edit form.
 
+Flow monitors are the exception. A `fill` step's value renders in the edit form (an authenticated, owner-only surface) so the login script can be adjusted without re-typing, and it is masked on every other surface: the detail config panel and API through `redact_check`, the public share view through `redact_check_for_public`. Reference an org secret as `{{name}}` in a fill value to keep the literal out of the stored config entirely.
+
 ## Tests
 
 | Layer | What |

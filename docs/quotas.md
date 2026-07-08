@@ -14,7 +14,8 @@ enough to keep abuse on a small VM cheap.
 | Quota | Free | Meaning |
 |---|---|---|
 | `max_targets` | 10 | Monitored targets in the org |
-| `min_check_interval_secs` | 60 | Plan-side floor on a target's check interval. The effective floor is `max(this, kind_min)` — `kind_min` is 3600 for `tls_cert` / `domain_expiry` and 10 for `http` / `tcp` / `dns`. |
+| `min_check_interval_secs` | 60 | Plan-side floor on a target's check interval. The effective floor is `max(this, kind_min)` — `kind_min` is 3600 for `tls_cert` / `domain_expiry`, 300 for `flow`, and 10 for `http` / `tcp` / `dns`. |
+| `max_flow_checks` | 1 | Browser flow monitors the org can create; runs only where a browser engine is available. Founding and Pro plans allow more. |
 | `retention_days` | 90 | Informational — actual check-result retention is the flat ClickHouse table TTL (90d for every org), not this column |
 | `max_members` | 5 | Active members in the org |
 | `max_pending_invitations` | 10 | Outstanding (unaccepted) invitations |

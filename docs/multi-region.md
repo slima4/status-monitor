@@ -34,6 +34,8 @@ Ping (ICMP) checks open an unprivileged `SOCK_DGRAM` ICMP socket on the agent. D
 
 Heartbeat monitors never reach agents: they are passive (customer systems ping the control plane, which evaluates the ping age in memory), so the config-pull and dispatch surfaces exclude the kind entirely.
 
+Flow monitors run a headless browser, so they execute only on agents that ship a browser engine (the flow-capable set that agents self-report). A flow monitor's assigned regions are clamped to that set when it is saved, and an agent without the engine never receives it in its config pull.
+
 The agent must reference a region and a token that already exist (see the operator surface below). Pull and ingest behaviour:
 
 - **Pull** (`GET /api/agent/targets`) — `401`/`403` is terminal: the agent clears its cached config and pauses, so revoking or disabling the agent stops the probe. `5xx`/timeout is transient: it keeps serving the last-known config. Responses are content-hashed with an ETag, so a credential re-encrypt invalidates the cache even without a config change.
